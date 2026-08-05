@@ -3,11 +3,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-const {
-  createWorkspaceNote,
-  createWorkspaceNoteWithContent,
-  noteTabsStateKey,
-} = await import('./note-page.js');
+const { createWorkspaceNote, createWorkspaceNoteWithContent, noteTabsStateKey } =
+  await import('./note-page.js');
 
 const {
   notePath,
@@ -16,7 +13,7 @@ const {
   readWorkspaceNotesRoute,
   workspaceNotePath,
   workspaceNotePathForNote,
-  workspaceNotesPath,
+  workspaceNotesPath
 } = await import('./note-routes.js');
 
 test('createWorkspaceNote posts an empty note to the workspace notes endpoint', async () => {
@@ -27,7 +24,7 @@ test('createWorkspaceNote posts an empty note to the workspace notes endpoint', 
       ok: true,
       async json() {
         return { note: { id: 'note-1', name: 'Untitled', content: '' } };
-      },
+      }
     };
   });
 
@@ -41,22 +38,40 @@ test('createWorkspaceNote posts an empty note to the workspace notes endpoint', 
 
 test('createWorkspaceNoteWithContent posts the given title and content', async () => {
   const calls = [];
-  const note = await createWorkspaceNoteWithContent('ws-1', 'Description', '## Description\ntesting', async (url, options) => {
-    calls.push({ url, options });
-    return { ok: true, async json() { return { note: { id: 'n2', name: 'Description' } }; } };
-  });
+  const note = await createWorkspaceNoteWithContent(
+    'ws-1',
+    'Description',
+    '## Description\ntesting',
+    async (url, options) => {
+      calls.push({ url, options });
+      return {
+        ok: true,
+        async json() {
+          return { note: { id: 'n2', name: 'Description' } };
+        }
+      };
+    }
+  );
 
   assert.deepEqual(note, { id: 'n2', name: 'Description' });
   assert.equal(calls[0].url, '/api/workspaces/ws-1/notes');
   assert.equal(calls[0].options.method, 'POST');
-  assert.deepEqual(JSON.parse(calls[0].options.body), { name: 'Description', content: '## Description\ntesting' });
+  assert.deepEqual(JSON.parse(calls[0].options.body), {
+    name: 'Description',
+    content: '## Description\ntesting'
+  });
 });
 
 test('createWorkspaceNoteWithContent defaults blank title/content', async () => {
   let body = null;
   await createWorkspaceNoteWithContent('ws-1', '', '', async (_url, options) => {
     body = JSON.parse(options.body);
-    return { ok: true, async json() { return { note: {} }; } };
+    return {
+      ok: true,
+      async json() {
+        return { note: {} };
+      }
+    };
   });
   assert.deepEqual(body, { name: 'Untitled', content: '' });
 });
@@ -81,21 +96,24 @@ test('noteTabsStateKey scopes persisted tab state by workspace', () => {
 });
 
 test('readWorkspaceNotesRoute parses workspace notes route without note id', () => {
-  assert.deepEqual(
-    readWorkspaceNotesRoute('/workspaces/ws%201/notes'),
-    { workspaceId: 'ws 1', noteId: '' },
-  );
+  assert.deepEqual(readWorkspaceNotesRoute('/workspaces/ws%201/notes'), {
+    workspaceId: 'ws 1',
+    noteId: ''
+  });
 });
 
 test('readWorkspaceNotesRoute parses workspace notes route with note id', () => {
-  assert.deepEqual(
-    readWorkspaceNotesRoute('/workspaces/ws%201/notes/note%2F1?tab=notes#Heading'),
-    { workspaceId: 'ws 1', noteId: 'note/1' },
-  );
+  assert.deepEqual(readWorkspaceNotesRoute('/workspaces/ws%201/notes/note%2F1?tab=notes#Heading'), {
+    workspaceId: 'ws 1',
+    noteId: 'note/1'
+  });
 });
 
 test('readWorkspaceNotesRoute ignores non-notes routes', () => {
-  assert.deepEqual(readWorkspaceNotesRoute('/workspaces/ws-1/canvas'), { workspaceId: '', noteId: '' });
+  assert.deepEqual(readWorkspaceNotesRoute('/workspaces/ws-1/canvas'), {
+    workspaceId: '',
+    noteId: ''
+  });
   assert.deepEqual(readWorkspaceNotesRoute('/notes/note-1'), { workspaceId: '', noteId: '' });
 });
 
@@ -119,11 +137,11 @@ test('workspace note path builders encode workspace and note ids', () => {
   assert.equal(workspaceNotePath('ws 1', 'note/1'), '/workspaces/ws%201/notes/note%2F1');
   assert.equal(
     workspaceNotePath('ws 1', 'note/1', 'Heading One'),
-    '/workspaces/ws%201/notes/note%2F1#Heading%20One',
+    '/workspaces/ws%201/notes/note%2F1#Heading%20One'
   );
   assert.equal(
     workspaceNotePath('ws 1', 'note/1', '#Already%20Encoded'),
-    '/workspaces/ws%201/notes/note%2F1#Already%20Encoded',
+    '/workspaces/ws%201/notes/note%2F1#Already%20Encoded'
   );
   assert.equal(workspaceNotePath('', 'note-1'), '/workspaces');
 });
@@ -131,11 +149,11 @@ test('workspace note path builders encode workspace and note ids', () => {
 test('workspaceNotePathForNote converts known notes to workspace-scoped URLs', () => {
   assert.equal(
     workspaceNotePathForNote({ id: 'note 1', workspace_id: 'ws 1' }),
-    '/workspaces/ws%201/notes/note%201',
+    '/workspaces/ws%201/notes/note%201'
   );
   assert.equal(
     workspaceNotePathForNote({ id: 'note-1', folder_id: 'folder-1' }, 'Intro'),
-    '/workspaces/folder-1/notes/note-1#Intro',
+    '/workspaces/folder-1/notes/note-1#Intro'
   );
   assert.equal(workspaceNotePathForNote({ id: 'note-1' }), '');
 });

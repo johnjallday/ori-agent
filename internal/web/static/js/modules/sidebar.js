@@ -11,7 +11,9 @@ function isEvolutionEnabled() {
 
 function normalizeAssistantProgress(progress) {
   const safe = progress || {};
-  const experience = Number.isFinite(Number(safe.experience)) ? Math.max(0, Number(safe.experience)) : 0;
+  const experience = Number.isFinite(Number(safe.experience))
+    ? Math.max(0, Number(safe.experience))
+    : 0;
   const level = Number.isFinite(Number(safe.level)) ? Math.max(0, Number(safe.level)) : 0;
   const rank = typeof safe.rank === 'string' && safe.rank.trim() ? safe.rank.trim() : 'novice';
   return { level, experience, rank };
@@ -34,7 +36,7 @@ function getAssistantProgressWidgets() {
 }
 
 function hideAssistantProgressWidgets() {
-  getAssistantProgressWidgets().forEach((widget) => {
+  getAssistantProgressWidgets().forEach(widget => {
     widget.classList.add('d-none');
   });
 }
@@ -49,9 +51,12 @@ function renderAssistantProgress(progress) {
   }
 
   const progressWithinLevel = normalized.experience % ASSISTANT_XP_PER_LEVEL;
-  const progressPercent = Math.min(100, Math.max(0, Math.round((progressWithinLevel / ASSISTANT_XP_PER_LEVEL) * 100)));
+  const progressPercent = Math.min(
+    100,
+    Math.max(0, Math.round((progressWithinLevel / ASSISTANT_XP_PER_LEVEL) * 100))
+  );
 
-  widgets.forEach((widget) => {
+  widgets.forEach(widget => {
     const rankBadge = widget.querySelector('[data-assistant-rank-badge]');
     const levelValue = widget.querySelector('[data-assistant-level-value]');
     const xpValue = widget.querySelector('[data-assistant-xp-value]');
@@ -100,15 +105,19 @@ async function loadAssistantProgressForSidebar() {
 }
 
 if (typeof EventBus !== 'undefined') {
-  EventBus.on('agents:rendered', () => {
-    if (!isEvolutionEnabled()) {
-      hideAssistantProgressWidgets();
-      return;
-    }
-    if (latestAssistantProgress) {
-      renderAssistantProgress(latestAssistantProgress);
-    }
-  }, 'sidebar');
+  EventBus.on(
+    'agents:rendered',
+    () => {
+      if (!isEvolutionEnabled()) {
+        hideAssistantProgressWidgets();
+        return;
+      }
+      if (latestAssistantProgress) {
+        renderAssistantProgress(latestAssistantProgress);
+      }
+    },
+    'sidebar'
+  );
 }
 
 // Main sidebar setup function that coordinates all modules
@@ -182,13 +191,18 @@ function setupSidebarToggle() {
   const preferVisible = defaultMode === 'visible';
   const preferHidden = defaultMode === 'hidden';
 
-  const isEditableTarget = (target) => {
+  const isEditableTarget = target => {
     if (!target) return false;
     const tagName = target.tagName;
-    return target.isContentEditable || tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT';
+    return (
+      target.isContentEditable ||
+      tagName === 'INPUT' ||
+      tagName === 'TEXTAREA' ||
+      tagName === 'SELECT'
+    );
   };
 
-  const setSidebarWidth = (hidden) => {
+  const setSidebarWidth = hidden => {
     if (hidden) {
       document.documentElement.style.setProperty('--sidebar-width', '0px');
       return;
@@ -197,7 +211,7 @@ function setupSidebarToggle() {
     document.documentElement.style.setProperty('--sidebar-width', `${savedWidth}px`);
   };
 
-  const showSidebar = (emitEvent) => {
+  const showSidebar = emitEvent => {
     if (window.innerWidth >= 992) {
       sidebar.classList.add('d-lg-block');
       sidebar.classList.remove('sidebar-mobile-show');
@@ -214,7 +228,7 @@ function setupSidebarToggle() {
     }
   };
 
-  const hideSidebar = (emitEvent) => {
+  const hideSidebar = emitEvent => {
     sidebar.classList.add('d-none');
     sidebar.classList.remove('d-lg-block');
     sidebar.classList.remove('sidebar-mobile-show');
@@ -226,7 +240,7 @@ function setupSidebarToggle() {
     }
   };
 
-  sidebarToggle.addEventListener('click', function(event) {
+  sidebarToggle.addEventListener('click', function (event) {
     event.preventDefault();
     event.stopPropagation();
 
@@ -238,8 +252,14 @@ function setupSidebarToggle() {
     }
   });
 
-  document.addEventListener('keydown', (event) => {
-    if (event.metaKey && event.code === 'Backquote' && !event.shiftKey && !event.ctrlKey && !event.altKey) {
+  document.addEventListener('keydown', event => {
+    if (
+      event.metaKey &&
+      event.code === 'Backquote' &&
+      !event.shiftKey &&
+      !event.ctrlKey &&
+      !event.altKey
+    ) {
       if (isEditableTarget(event.target)) {
         return;
       }
@@ -249,14 +269,19 @@ function setupSidebarToggle() {
   });
 
   // Close sidebar when clicking outside on mobile
-  document.addEventListener('click', function(event) {
+  document.addEventListener('click', function (event) {
     const isClickInSidebar = sidebar.contains(event.target);
     const isClickOnToggle = sidebarToggle.contains(event.target);
-    const isClickInModal = event.target.closest('.modal') || event.target.classList.contains('modal-backdrop');
+    const isClickInModal =
+      event.target.closest('.modal') || event.target.classList.contains('modal-backdrop');
 
-    if (!isClickInSidebar && !isClickOnToggle && !isClickInModal &&
-        !sidebar.classList.contains('d-none') &&
-        window.innerWidth < 992) {
+    if (
+      !isClickInSidebar &&
+      !isClickOnToggle &&
+      !isClickInModal &&
+      !sidebar.classList.contains('d-none') &&
+      window.innerWidth < 992
+    ) {
       hideSidebar(false);
     }
   });

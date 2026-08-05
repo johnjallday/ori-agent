@@ -21,7 +21,24 @@
     utility_direct: {
       key: 'utility_direct',
       label: 'daily utility',
-      keywords: ['time', 'timezone', 'clock', 'date', 'weather', 'forecast', 'temperature', 'convert', 'conversion', 'calculate', 'calculator', 'quick fact', 'fact', 'capital', 'define', 'definition'],
+      keywords: [
+        'time',
+        'timezone',
+        'clock',
+        'date',
+        'weather',
+        'forecast',
+        'temperature',
+        'convert',
+        'conversion',
+        'calculate',
+        'calculator',
+        'quick fact',
+        'fact',
+        'capital',
+        'define',
+        'definition'
+      ],
       preferredPlugins: ['time', 'weather', 'calculator', 'math', 'search', 'web'],
       preferredTypes: ['general', 'tool-calling', 'research'],
       defaultType: 'general',
@@ -31,7 +48,17 @@
     travel_planning: {
       key: 'travel_planning',
       label: 'travel planning',
-      keywords: ['trip', 'travel', 'itinerary', 'vacation', 'los angeles', 'la', 'weekend', 'hotel', 'flight'],
+      keywords: [
+        'trip',
+        'travel',
+        'itinerary',
+        'vacation',
+        'los angeles',
+        'la',
+        'weekend',
+        'hotel',
+        'flight'
+      ],
       preferredPlugins: ['web', 'weather', 'maps', 'search', 'travel'],
       preferredTypes: ['research', 'general', 'tool-calling'],
       defaultType: 'research',
@@ -51,7 +78,18 @@
     calendar_check: {
       key: 'calendar_check',
       label: 'calendar or schedule',
-      keywords: ['calendar', 'schedule', 'meeting', 'meetings', 'appointment', 'appointments', 'availability', 'free time', 'busy', 'events'],
+      keywords: [
+        'calendar',
+        'schedule',
+        'meeting',
+        'meetings',
+        'appointment',
+        'appointments',
+        'availability',
+        'free time',
+        'busy',
+        'events'
+      ],
       preferredPlugins: ['calendar', 'schedule', 'google-calendar'],
       preferredTypes: ['tool-calling', 'general'],
       defaultType: 'tool-calling',
@@ -61,7 +99,17 @@
     app_launch: {
       key: 'app_launch',
       label: 'app launch',
-      keywords: ['open', 'launch', 'start', 'run', 'application', 'app', 'obsidian', 'reaper', 'finder'],
+      keywords: [
+        'open',
+        'launch',
+        'start',
+        'run',
+        'application',
+        'app',
+        'obsidian',
+        'reaper',
+        'finder'
+      ],
       preferredPlugins: ['shell', 'executor', 'desktop', 'automation', 'os-shell', 'command'],
       preferredTypes: ['tool-calling', 'general'],
       defaultType: 'tool-calling',
@@ -108,11 +156,34 @@
       type: 'research',
       subtaskIndex: 1,
       taskTitle: 'Build the day-by-day itinerary',
-      scorePhrases: ['day by day', 'day-by-day', 'itinerary', 'trip plan', 'travel plan', 'restaurant', 'restaurants', 'food', 'museum', 'museums', 'nightlife', 'day trip', 'day trips', 'budget breakdown', 'budget', 'accommodation', 'accommodation areas', 'neighborhood', 'neighbourhood'],
+      scorePhrases: [
+        'day by day',
+        'day-by-day',
+        'itinerary',
+        'trip plan',
+        'travel plan',
+        'restaurant',
+        'restaurants',
+        'food',
+        'museum',
+        'museums',
+        'nightlife',
+        'day trip',
+        'day trips',
+        'budget breakdown',
+        'budget',
+        'accommodation',
+        'accommodation areas',
+        'neighborhood',
+        'neighbourhood'
+      ],
       tags: ['travel', 'itinerary', 'planning', 'workspace-specialist'],
-      description: 'Plans multi-city trips with day-by-day pacing, neighborhood suggestions, food highlights, local logistics, and route-aware recommendations.',
-      systemPrompt: 'You are a travel itinerary planner. Build practical, day-by-day trip plans with realistic pacing, local food and neighborhood recommendations, transit notes, and concise options. Ask clarifying questions when key details are missing and avoid inventing bookings or confirmed reservations.',
-      handoffInstruction: 'Use the reviewed intake to build a practical day-by-day itinerary. Keep the pacing realistic, include local logistics, and ask only the minimum follow-up needed if a critical detail is still missing.'
+      description:
+        'Plans multi-city trips with day-by-day pacing, neighborhood suggestions, food highlights, local logistics, and route-aware recommendations.',
+      systemPrompt:
+        'You are a travel itinerary planner. Build practical, day-by-day trip plans with realistic pacing, local food and neighborhood recommendations, transit notes, and concise options. Ask clarifying questions when key details are missing and avoid inventing bookings or confirmed reservations.',
+      handoffInstruction:
+        'Use the reviewed intake to build a practical day-by-day itinerary. Keep the pacing realistic, include local logistics, and ask only the minimum follow-up needed if a critical detail is still missing.'
     },
     hotel_booking: {
       key: 'hotel_booking',
@@ -121,11 +192,24 @@
       type: 'research',
       subtaskIndex: 2,
       taskTitle: 'Recommend hotels and neighborhoods',
-      scorePhrases: ['hotel', 'hotels', 'stay', 'stays', 'lodging', 'accommodation', 'where to stay', 'book hotel', 'book hotels'],
+      scorePhrases: [
+        'hotel',
+        'hotels',
+        'stay',
+        'stays',
+        'lodging',
+        'accommodation',
+        'where to stay',
+        'book hotel',
+        'book hotels'
+      ],
       tags: ['travel', 'hotels', 'lodging', 'workspace-specialist'],
-      description: 'Finds and compares hotels by neighborhood, budget, amenities, and travel constraints.',
-      systemPrompt: 'You are a hotel booking assistant. Help compare neighborhoods, lodging tradeoffs, budget fit, and stay logistics. Be explicit about assumptions, keep recommendations concise, and ask for missing constraints before making suggestions.',
-      handoffInstruction: 'Use the reviewed intake to compare lodging areas, hotel tradeoffs, and budget fit. Focus on neighborhoods, stay logistics, and the strongest shortlist.'
+      description:
+        'Finds and compares hotels by neighborhood, budget, amenities, and travel constraints.',
+      systemPrompt:
+        'You are a hotel booking assistant. Help compare neighborhoods, lodging tradeoffs, budget fit, and stay logistics. Be explicit about assumptions, keep recommendations concise, and ask for missing constraints before making suggestions.',
+      handoffInstruction:
+        'Use the reviewed intake to compare lodging areas, hotel tradeoffs, and budget fit. Focus on neighborhoods, stay logistics, and the strongest shortlist.'
     },
     flight_booking: {
       key: 'flight_booking',
@@ -134,11 +218,25 @@
       type: 'research',
       subtaskIndex: 3,
       taskTitle: 'Fill the booking gaps for flights and transfers',
-      scorePhrases: ['flight', 'flights', 'airfare', 'airport', 'route option', 'route options', 'connection', 'connections', 'transfer', 'transfer timing'],
+      scorePhrases: [
+        'flight',
+        'flights',
+        'airfare',
+        'airport',
+        'route option',
+        'route options',
+        'connection',
+        'connections',
+        'transfer',
+        'transfer timing'
+      ],
       tags: ['travel', 'flights', 'transport', 'workspace-specialist'],
-      description: 'Helps fill booking gaps for flights and longer-distance travel legs with schedule and transfer considerations.',
-      systemPrompt: 'You are a flight booking assistant. Help identify missing flight or long-distance travel legs, compare route options, call out tradeoffs, and confirm timing constraints before recommending bookings.',
-      handoffInstruction: 'Use the reviewed intake to identify missing flights or long-distance travel legs, compare route options, and call out timing or transfer tradeoffs.'
+      description:
+        'Helps fill booking gaps for flights and longer-distance travel legs with schedule and transfer considerations.',
+      systemPrompt:
+        'You are a flight booking assistant. Help identify missing flight or long-distance travel legs, compare route options, call out tradeoffs, and confirm timing constraints before recommending bookings.',
+      handoffInstruction:
+        'Use the reviewed intake to identify missing flights or long-distance travel legs, compare route options, and call out timing or transfer tradeoffs.'
     }
   };
 
@@ -147,7 +245,21 @@
       key: 'calendar_access',
       label: 'calendar access',
       intents: ['calendar_check'],
-      phrases: ['check my schedule', 'calendar', 'my calendar', 'schedule', 'meeting', 'meetings', 'appointment', 'appointments', 'availability', 'am i free', 'free time', 'busy', 'events'],
+      phrases: [
+        'check my schedule',
+        'calendar',
+        'my calendar',
+        'schedule',
+        'meeting',
+        'meetings',
+        'appointment',
+        'appointments',
+        'availability',
+        'am i free',
+        'free time',
+        'busy',
+        'events'
+      ],
       preferredSkillNames: ['calendar-assistant'],
       skillMarketplaceQueries: ['calendar assistant', 'calendar'],
       preferredServerNames: ['google-calendar'],
@@ -163,7 +275,17 @@
       key: 'github_ops',
       label: 'GitHub operations',
       intents: ['general_task'],
-      phrases: ['github', 'repository', 'repo', 'pull request', 'pull-request', 'issue', 'commit', 'branch', 'release'],
+      phrases: [
+        'github',
+        'repository',
+        'repo',
+        'pull request',
+        'pull-request',
+        'issue',
+        'commit',
+        'branch',
+        'release'
+      ],
       preferredSkillNames: [],
       skillMarketplaceQueries: ['github'],
       preferredServerNames: ['github'],
@@ -179,7 +301,15 @@
       key: 'web_research',
       label: 'web research',
       intents: ['general_task'],
-      phrases: ['search the web', 'web search', 'search online', 'look up', 'lookup', 'internet search', 'latest news'],
+      phrases: [
+        'search the web',
+        'web search',
+        'search online',
+        'look up',
+        'lookup',
+        'internet search',
+        'latest news'
+      ],
       preferredSkillNames: [],
       skillMarketplaceQueries: ['research'],
       preferredServerNames: ['brave-search'],
@@ -195,7 +325,18 @@
       key: 'email_inbox',
       label: 'email inbox access',
       intents: ['email_check'],
-      phrases: ['check my email', 'check email', 'email', 'inbox', 'mailbox', 'gmail', 'outlook', 'unread', 'reply to email', 'triage'],
+      phrases: [
+        'check my email',
+        'check email',
+        'email',
+        'inbox',
+        'mailbox',
+        'gmail',
+        'outlook',
+        'unread',
+        'reply to email',
+        'triage'
+      ],
       preferredSkillNames: [],
       skillMarketplaceQueries: ['email assistant', 'email'],
       preferredServerNames: ['gmail', 'outlook', 'imap', 'microsoft-graph'],
@@ -211,7 +352,16 @@
       key: 'browser_automation',
       label: 'browser automation',
       intents: ['general_task'],
-      phrases: ['browser automation', 'control browser', 'use browser', 'website automation', 'automate website', 'playwright', 'browserbase', 'puppeteer'],
+      phrases: [
+        'browser automation',
+        'control browser',
+        'use browser',
+        'website automation',
+        'automate website',
+        'playwright',
+        'browserbase',
+        'puppeteer'
+      ],
       preferredSkillNames: [],
       skillMarketplaceQueries: ['browser automation'],
       preferredServerNames: ['playwright', 'browserbase', 'puppeteer'],
@@ -243,7 +393,15 @@
       key: 'filesystem_ops',
       label: 'filesystem access',
       intents: ['general_task'],
-      phrases: ['filesystem', 'file system', 'local files', 'read file', 'write file', 'directory', 'folder on my computer'],
+      phrases: [
+        'filesystem',
+        'file system',
+        'local files',
+        'read file',
+        'write file',
+        'directory',
+        'folder on my computer'
+      ],
       preferredSkillNames: [],
       skillMarketplaceQueries: ['filesystem'],
       preferredServerNames: ['filesystem'],
@@ -291,17 +449,41 @@
   var homeAssistantThinkingCloseTimer = null;
   var providersCache = null;
   var HOME_ASSISTANT_COMMON_TOKENS = {
-    a: true, an: true, and: true, are: true, can: true, do: true, for: true, help: true,
-    i: true, in: true, is: true, it: true, my: true, of: true, on: true, open: true,
-    or: true, please: true, task: true, that: true, the: true, this: true, to: true,
-    want: true, with: true, you: true
+    a: true,
+    an: true,
+    and: true,
+    are: true,
+    can: true,
+    do: true,
+    for: true,
+    help: true,
+    i: true,
+    in: true,
+    is: true,
+    it: true,
+    my: true,
+    of: true,
+    on: true,
+    open: true,
+    or: true,
+    please: true,
+    task: true,
+    that: true,
+    the: true,
+    this: true,
+    to: true,
+    want: true,
+    with: true,
+    you: true
   };
 
   function toTitleCase(value) {
     return String(value || '')
       .split(/[\s_-]+/)
       .filter(Boolean)
-      .map(function (word) { return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase(); })
+      .map(function (word) {
+        return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+      })
       .join(' ');
   }
 
@@ -315,7 +497,9 @@
   }
 
   function normalizeToken(value) {
-    return String(value || '').trim().toLowerCase();
+    return String(value || '')
+      .trim()
+      .toLowerCase();
   }
 
   function uniqueValues(values) {
@@ -414,7 +598,9 @@
       var parsed = JSON.parse(raw);
       return normalizeRecentSessionList(parsed);
     } catch (error) {
-      dashLog.debug('Failed to load Ask Ori recent sessions', { error: error && error.message || error });
+      dashLog.debug('Failed to load Ask Ori recent sessions', {
+        error: (error && error.message) || error
+      });
       return [];
     }
   }
@@ -435,7 +621,9 @@
         );
       }
     } catch (error) {
-      dashLog.debug('Failed to persist Ask Ori recent sessions', { error: error && error.message || error });
+      dashLog.debug('Failed to persist Ask Ori recent sessions', {
+        error: (error && error.message) || error
+      });
     }
   }
 
@@ -448,7 +636,9 @@
       if (raw === 'semi_auto') return 'semi_auto';
       return 'semi_auto';
     } catch (error) {
-      dashLog.debug('Failed to load Ask Ori automation mode', { error: error && error.message || error });
+      dashLog.debug('Failed to load Ask Ori automation mode', {
+        error: (error && error.message) || error
+      });
       return 'semi_auto';
     }
   }
@@ -457,12 +647,20 @@
     try {
       var storage = getPersistentStorage();
       if (!storage) return;
-      storage.setItem(HOME_ASSISTANT_AUTOMATION_MODE_KEY, homeAssistantState.automationMode || 'semi_auto');
+      storage.setItem(
+        HOME_ASSISTANT_AUTOMATION_MODE_KEY,
+        homeAssistantState.automationMode || 'semi_auto'
+      );
       if (window.sessionStorage && storage !== window.sessionStorage) {
-        window.sessionStorage.setItem(HOME_ASSISTANT_AUTOMATION_MODE_KEY, homeAssistantState.automationMode || 'semi_auto');
+        window.sessionStorage.setItem(
+          HOME_ASSISTANT_AUTOMATION_MODE_KEY,
+          homeAssistantState.automationMode || 'semi_auto'
+        );
       }
     } catch (error) {
-      dashLog.debug('Failed to persist Ask Ori automation mode', { error: error && error.message || error });
+      dashLog.debug('Failed to persist Ask Ori automation mode', {
+        error: (error && error.message) || error
+      });
     }
   }
 
@@ -475,14 +673,19 @@
       if (!parsed || typeof parsed !== 'object') return null;
       return {
         prompt: String(parsed.prompt || '').trim(),
-        routeContext: parsed.routeContext && typeof parsed.routeContext === 'object' ? parsed.routeContext : null,
+        routeContext:
+          parsed.routeContext && typeof parsed.routeContext === 'object'
+            ? parsed.routeContext
+            : null,
         expectedWorkspaceId: String(parsed.expectedWorkspaceId || '').trim(),
         intentKey: String(parsed.intentKey || '').trim(),
         source: String(parsed.source || '').trim(),
         createdAt: normalizeTimestamp(parsed.createdAt)
       };
     } catch (error) {
-      dashLog.debug('Failed to load pending workspace prompt', { error: error && error.message || error });
+      dashLog.debug('Failed to load pending workspace prompt', {
+        error: (error && error.message) || error
+      });
       return null;
     }
   }
@@ -490,9 +693,14 @@
   function savePendingWorkspacePrompt(payload) {
     try {
       if (!window.sessionStorage) return;
-      window.sessionStorage.setItem(HOME_ASSISTANT_PENDING_WORKSPACE_PROMPT_KEY, JSON.stringify(payload));
+      window.sessionStorage.setItem(
+        HOME_ASSISTANT_PENDING_WORKSPACE_PROMPT_KEY,
+        JSON.stringify(payload)
+      );
     } catch (error) {
-      dashLog.debug('Failed to persist pending workspace prompt', { error: error && error.message || error });
+      dashLog.debug('Failed to persist pending workspace prompt', {
+        error: (error && error.message) || error
+      });
     }
   }
 
@@ -501,7 +709,9 @@
       if (!window.sessionStorage) return;
       window.sessionStorage.removeItem(HOME_ASSISTANT_PENDING_WORKSPACE_PROMPT_KEY);
     } catch (error) {
-      dashLog.debug('Failed to clear pending workspace prompt', { error: error && error.message || error });
+      dashLog.debug('Failed to clear pending workspace prompt', {
+        error: (error && error.message) || error
+      });
     }
   }
 
@@ -509,24 +719,32 @@
     var route = routeData && typeof routeData === 'object' ? routeData : {};
     var resolution = normalizeHomeAssistantWorkspaceResolution(route);
     var payload = {
-      prompt: String(options && options.prompt || homeAssistantState.pendingPrompt || '').trim(),
-      intent: String(route.intent || homeAssistantState.pendingIntent && homeAssistantState.pendingIntent.key || '').trim(),
-      intent_variant: String(route.intent_variant || homeAssistantState.pendingIntentVariant || '').trim(),
+      prompt: String((options && options.prompt) || homeAssistantState.pendingPrompt || '').trim(),
+      intent: String(
+        route.intent ||
+          (homeAssistantState.pendingIntent && homeAssistantState.pendingIntent.key) ||
+          ''
+      ).trim(),
+      intent_variant: String(
+        route.intent_variant || homeAssistantState.pendingIntentVariant || ''
+      ).trim(),
       routing_policy: String(route.routing_policy || '').trim(),
       context_mode: getHomeAssistantContextMode(route),
       handoff_policy: getHomeAssistantHandoffPolicy(route),
       route_mode: String(route.route_mode || '').trim(),
       target_surface: String(route.target_surface || '').trim(),
-      matched_agent: String(route.matched_agent || homeAssistantState.pendingAgentName || '').trim(),
-      workspace_state: resolution && resolution.state || '',
-      selected_workspace_id: resolution && resolution.selectedWorkspaceId || '',
-      selected_workspace_name: resolution && resolution.selectedWorkspaceName || '',
-      final_workspace_id: String(options && options.finalWorkspaceId || '').trim(),
-      confidence: resolution && resolution.confidence || 0,
-      reasons: resolution && resolution.reasons || [],
-      candidates: resolution && resolution.candidates || [],
+      matched_agent: String(
+        route.matched_agent || homeAssistantState.pendingAgentName || ''
+      ).trim(),
+      workspace_state: (resolution && resolution.state) || '',
+      selected_workspace_id: (resolution && resolution.selectedWorkspaceId) || '',
+      selected_workspace_name: (resolution && resolution.selectedWorkspaceName) || '',
+      final_workspace_id: String((options && options.finalWorkspaceId) || '').trim(),
+      confidence: (resolution && resolution.confidence) || 0,
+      reasons: (resolution && resolution.reasons) || [],
+      candidates: (resolution && resolution.candidates) || [],
       user_override: Boolean(options && options.userOverride),
-      final_handoff_target: String(options && options.finalHandoffTarget || '').trim(),
+      final_handoff_target: String((options && options.finalHandoffTarget) || '').trim(),
       route_context: normalizeHomeRouteContext(options && options.routeContext)
     };
     if (!payload.prompt || !payload.final_handoff_target) return;
@@ -539,7 +757,9 @@
         return;
       }
     } catch (error) {
-      dashLog.debug('Home assistant intake beacon failed', { error: error && error.message || error });
+      dashLog.debug('Home assistant intake beacon failed', {
+        error: (error && error.message) || error
+      });
     }
 
     if (typeof fetch === 'function') {
@@ -549,7 +769,9 @@
         body: body,
         keepalive: true
       }).catch(function (error) {
-        dashLog.debug('Home assistant intake trace failed', { error: error && error.message || error });
+        dashLog.debug('Home assistant intake trace failed', {
+          error: (error && error.message) || error
+        });
       });
     }
   }
@@ -560,9 +782,13 @@
     savePendingWorkspacePrompt({
       prompt: text,
       routeContext: normalizeHomeRouteContext(routeContext),
-      expectedWorkspaceId: String(options && options.expectedWorkspaceId || '').trim(),
-      intentKey: String(options && options.intentKey || homeAssistantState.pendingIntent && homeAssistantState.pendingIntent.key || '').trim(),
-      source: String(options && options.source || '').trim(),
+      expectedWorkspaceId: String((options && options.expectedWorkspaceId) || '').trim(),
+      intentKey: String(
+        (options && options.intentKey) ||
+          (homeAssistantState.pendingIntent && homeAssistantState.pendingIntent.key) ||
+          ''
+      ).trim(),
+      source: String((options && options.source) || '').trim(),
       createdAt: Date.now()
     });
   }
@@ -598,7 +824,9 @@
 
   async function fetchRecentSessionsFromBackend() {
     try {
-      var data = await API.get('/api/sessions?limit=' + HOME_ASSISTANT_BACKEND_LOOKUP_LIMIT + '&sort=updated_desc');
+      var data = await API.get(
+        '/api/sessions?limit=' + HOME_ASSISTANT_BACKEND_LOOKUP_LIMIT + '&sort=updated_desc'
+      );
       var sessions = Array.isArray(data && data.sessions) ? data.sessions : [];
       var recent = [];
       for (var i = 0; i < sessions.length; i++) {
@@ -614,7 +842,9 @@
       }
       return recent;
     } catch (error) {
-      dashLog.debug('Failed to fetch Ask Ori recent sessions from backend', { error: error && error.message || error });
+      dashLog.debug('Failed to fetch Ask Ori recent sessions from backend', {
+        error: (error && error.message) || error
+      });
       return [];
     }
   }
@@ -686,11 +916,17 @@
     for (var i = 0; i < patterns.length; i++) {
       var match = normalized.match(patterns[i]);
       if (!match) continue;
-      name = String((match[1] || match[2] || match[3] || '')).trim();
+      name = String(match[1] || match[2] || match[3] || '').trim();
       break;
     }
 
-    if (!name && normalized !== 'create workspace' && normalized !== 'create a workspace' && normalized !== 'create an workspace' && normalized !== 'new workspace') {
+    if (
+      !name &&
+      normalized !== 'create workspace' &&
+      normalized !== 'create a workspace' &&
+      normalized !== 'create an workspace' &&
+      normalized !== 'new workspace'
+    ) {
       return null;
     }
 
@@ -745,9 +981,11 @@
   function sanitizeWorkspaceCommandContent(content) {
     var text = String(content || '').trim();
     if (!text) return '';
-    if ((text.charAt(0) === '"' && text.charAt(text.length - 1) === '"') ||
-        (text.charAt(0) === '\'' && text.charAt(text.length - 1) === '\'') ||
-        (text.charAt(0) === '`' && text.charAt(text.length - 1) === '`')) {
+    if (
+      (text.charAt(0) === '"' && text.charAt(text.length - 1) === '"') ||
+      (text.charAt(0) === "'" && text.charAt(text.length - 1) === "'") ||
+      (text.charAt(0) === '`' && text.charAt(text.length - 1) === '`')
+    ) {
       text = text.slice(1, -1).trim();
     }
     text = text.replace(/^(?:about|for|to|at|from|path|called|named)\s+/i, '').trim();
@@ -796,7 +1034,12 @@
     target = target.trim();
     if (!target) return null;
 
-    if (target.indexOf('://') >= 0 || target.indexOf('/') >= 0 || target.indexOf('\\') >= 0 || looksLikeWebHostTarget(target)) {
+    if (
+      target.indexOf('://') >= 0 ||
+      target.indexOf('/') >= 0 ||
+      target.indexOf('\\') >= 0 ||
+      looksLikeWebHostTarget(target)
+    ) {
       return null;
     }
 
@@ -834,9 +1077,48 @@
     var normalizedPrompt = normalizeToken(prompt);
     if (!normalizedPrompt) return false;
 
-    var buildVerbs = ['build', 'create', 'develop', 'design', 'implement', 'make', 'ship', 'start', 'set up', 'setup'];
-    var projectTargets = ['website', 'web site', 'web app', 'app', 'application', 'landing page', 'dashboard', 'product', 'project', 'platform', 'system'];
-    var complexitySignals = ['from scratch', 'full stack', 'frontend', 'backend', 'database', 'authentication', 'auth', 'api', 'deploy', 'deployment', 'production', 'mvp', 'architecture', 'roadmap', 'requirements'];
+    var buildVerbs = [
+      'build',
+      'create',
+      'develop',
+      'design',
+      'implement',
+      'make',
+      'ship',
+      'start',
+      'set up',
+      'setup'
+    ];
+    var projectTargets = [
+      'website',
+      'web site',
+      'web app',
+      'app',
+      'application',
+      'landing page',
+      'dashboard',
+      'product',
+      'project',
+      'platform',
+      'system'
+    ];
+    var complexitySignals = [
+      'from scratch',
+      'full stack',
+      'frontend',
+      'backend',
+      'database',
+      'authentication',
+      'auth',
+      'api',
+      'deploy',
+      'deployment',
+      'production',
+      'mvp',
+      'architecture',
+      'roadmap',
+      'requirements'
+    ];
 
     var hasBuildVerb = promptContainsAnyPhrase(normalizedPrompt, buildVerbs);
     var hasProjectTarget = promptContainsAnyPhrase(normalizedPrompt, projectTargets);
@@ -899,7 +1181,7 @@
       '',
       'Execution requirements:',
       '- Use configured calendar skills and MCP connectors first.',
-      '- If the time range is omitted, default to today in the user\'s local timezone.',
+      "- If the time range is omitted, default to today in the user's local timezone.",
       '- Do not claim lack of access before attempting available calendar capabilities.',
       '- Keep operations read-only unless the user explicitly approves create/update/delete actions.'
     );
@@ -926,20 +1208,20 @@
   function isAffirmativeConfirmation(value) {
     var text = normalizeConfirmationText(value);
     var accepted = {
-      'yes': true,
-      'y': true,
-      'yeah': true,
-      'yep': true,
-      'sure': true,
-      'ok': true,
-      'okay': true,
+      yes: true,
+      y: true,
+      yeah: true,
+      yep: true,
+      sure: true,
+      ok: true,
+      okay: true,
       'yes please': true,
       'create one': true,
       'do it': true,
       'go ahead': true,
       'please do': true,
-      '1': true,
-      'iok': true
+      1: true,
+      iok: true
     };
     if (accepted[text]) return true;
     return text.indexOf('create') >= 0 && text.indexOf('agent') >= 0;
@@ -948,13 +1230,13 @@
   function isNegativeConfirmation(value) {
     var text = normalizeConfirmationText(value);
     var rejected = {
-      'no': true,
-      'n': true,
-      'nope': true,
+      no: true,
+      n: true,
+      nope: true,
       'not now': true,
-      'cancel': true,
-      'stop': true,
-      'later': true
+      cancel: true,
+      stop: true,
+      later: true
     };
     return Boolean(rejected[text]);
   }
@@ -1042,7 +1324,9 @@
 
   function isHomeAssistantEmbeddedPanel() {
     var els = getHomeAssistantElements();
-    return Boolean(els.thinkingModal && els.thinkingModal.getAttribute('data-home-assistant-surface') === 'panel');
+    return Boolean(
+      els.thinkingModal && els.thinkingModal.getAttribute('data-home-assistant-surface') === 'panel'
+    );
   }
 
   // Both the workspace hub's support chat and the Home cockpit's context rail
@@ -1052,28 +1336,40 @@
     var els = getHomeAssistantElements();
     return Boolean(
       els.thinkingModal &&
-        els.thinkingModal.getAttribute('data-home-assistant-panel-scope') !== 'home'
+      els.thinkingModal.getAttribute('data-home-assistant-panel-scope') !== 'home'
     );
   }
 
   function hasVisibleHomeAssistantActions() {
     var els = getHomeAssistantElements();
-    return Boolean(els.actions && !els.actions.classList.contains('d-none') && els.actions.children.length > 0);
+    return Boolean(
+      els.actions && !els.actions.classList.contains('d-none') && els.actions.children.length > 0
+    );
   }
 
   function hasVisibleHomeAssistantPlanning() {
     var els = getHomeAssistantElements();
-    return Boolean(els.planning && !els.planning.classList.contains('d-none') && els.planning.children.length > 0);
+    return Boolean(
+      els.planning && !els.planning.classList.contains('d-none') && els.planning.children.length > 0
+    );
   }
 
   function hasVisibleHomeAssistantInlineReply() {
     var els = getHomeAssistantElements();
-    return Boolean(els.inlineReply && !els.inlineReply.classList.contains('d-none') && els.inlineReply.children.length > 0);
+    return Boolean(
+      els.inlineReply &&
+      !els.inlineReply.classList.contains('d-none') &&
+      els.inlineReply.children.length > 0
+    );
   }
 
   function hasHomeAssistantConversation() {
     var els = getHomeAssistantElements();
-    return Boolean(els.conversation && els.conversation.dataset.initialized === 'true' && els.conversation.children.length > 0);
+    return Boolean(
+      els.conversation &&
+      els.conversation.dataset.initialized === 'true' &&
+      els.conversation.children.length > 0
+    );
   }
 
   function shouldKeepHomeAssistantThinkingModalOpen() {
@@ -1140,11 +1436,16 @@
       els.thinkingModalLabel.textContent = label + ' has a planning subtask ready';
       return;
     }
-    if (hasVisibleHomeAssistantActions() && hasHomeAssistantConversation() && !homeAssistantState.busy) {
+    if (
+      hasVisibleHomeAssistantActions() &&
+      hasHomeAssistantConversation() &&
+      !homeAssistantState.busy
+    ) {
       els.thinkingModalLabel.textContent = label + ' has an update ready';
       return;
     }
-    els.thinkingModalLabel.textContent = label + (homeAssistantState.busy ? ' is working' : ' is ready');
+    els.thinkingModalLabel.textContent =
+      label + (homeAssistantState.busy ? ' is working' : ' is ready');
   }
 
   function setHomeAssistantConversationCollapsed(collapsed) {
@@ -1169,7 +1470,8 @@
     if (!section) return;
 
     var hasConversation = hasHomeAssistantConversation();
-    var hasStructuredStep = hasVisibleHomeAssistantPlanning() || hasVisibleHomeAssistantInlineReply();
+    var hasStructuredStep =
+      hasVisibleHomeAssistantPlanning() || hasVisibleHomeAssistantInlineReply();
     var hasFailureState = hasHomeAssistantFailureState();
     var canCollapse = hasConversation && (hasStructuredStep || hasFailureState);
     var isCollapsed = canCollapse && homeAssistantState.conversationCollapsed;
@@ -1180,7 +1482,9 @@
 
     if (els.conversationToggleBtn) {
       els.conversationToggleBtn.hidden = !canCollapse;
-      els.conversationToggleBtn.textContent = isCollapsed ? 'Show Conversation' : 'Hide Conversation';
+      els.conversationToggleBtn.textContent = isCollapsed
+        ? 'Show Conversation'
+        : 'Hide Conversation';
       if (!els.conversationToggleBtn.dataset.bound) {
         els.conversationToggleBtn.dataset.bound = 'true';
         els.conversationToggleBtn.addEventListener('click', function () {
@@ -1191,15 +1495,19 @@
 
     if (els.conversationSummary) {
       if (hasFailureState && hasConversation) {
-        els.conversationSummary.textContent = homeAssistantState.routingSummary && homeAssistantState.routingSummary.conversationSummary
-          ? String(homeAssistantState.routingSummary.conversationSummary)
-          : 'Open this only if you want the original prompt, failing step, and error details.';
+        els.conversationSummary.textContent =
+          homeAssistantState.routingSummary && homeAssistantState.routingSummary.conversationSummary
+            ? String(homeAssistantState.routingSummary.conversationSummary)
+            : 'Open this only if you want the original prompt, failing step, and error details.';
       } else if (hasStructuredStep && hasConversation) {
-        els.conversationSummary.textContent = 'The active step is above. Open this only if you want the full transcript and manager notes.';
+        els.conversationSummary.textContent =
+          'The active step is above. Open this only if you want the full transcript and manager notes.';
       } else if (hasConversation) {
-        els.conversationSummary.textContent = 'Full transcript, progress notes, and manager replies appear here.';
+        els.conversationSummary.textContent =
+          'Full transcript, progress notes, and manager replies appear here.';
       } else {
-        els.conversationSummary.textContent = 'Progress updates will appear here after you send a task.';
+        els.conversationSummary.textContent =
+          'Progress updates will appear here after you send a task.';
       }
     }
   }
@@ -1222,7 +1530,10 @@
     }
     var modal = getHomeAssistantThinkingModalInstance();
     if (!modal) return;
-    var elapsed = homeAssistantThinkingOpenedAt > 0 ? (Date.now() - homeAssistantThinkingOpenedAt) : HOME_ASSISTANT_THINKING_MIN_VISIBLE_MS;
+    var elapsed =
+      homeAssistantThinkingOpenedAt > 0
+        ? Date.now() - homeAssistantThinkingOpenedAt
+        : HOME_ASSISTANT_THINKING_MIN_VISIBLE_MS;
     var remaining = force ? 0 : Math.max(0, HOME_ASSISTANT_THINKING_MIN_VISIBLE_MS - elapsed);
 
     function hideNow() {
@@ -1245,11 +1556,13 @@
 
     var statusText = '';
     if (getHomeAssistantSummaryState() === 'timeout') {
-      statusText = 'The manager may still be working. Retry here or open full chat to continue there.';
+      statusText =
+        'The manager may still be working. Retry here or open full chat to continue there.';
     } else if (getHomeAssistantSummaryState() === 'error') {
-      statusText = homeAssistantState.routingSummary && homeAssistantState.routingSummary.text
-        ? String(homeAssistantState.routingSummary.text)
-        : 'Review the failure details, retry here, or open full chat.';
+      statusText =
+        homeAssistantState.routingSummary && homeAssistantState.routingSummary.text
+          ? String(homeAssistantState.routingSummary.text)
+          : 'Review the failure details, retry here, or open full chat.';
     } else if (homeAssistantState.routingSummary && homeAssistantState.routingSummary.text) {
       statusText = homeAssistantState.routingSummary.text;
     } else if (homeAssistantState.busy) {
@@ -1337,9 +1650,14 @@
       // Activity / Live Activity labels the reopen control has always used
       // (PRD FR99).
       var homeScopedPanel = embeddedPanel && !isHomeAssistantWorkspaceScopedPanel();
-      label.textContent = (embeddedPanel && !homeScopedPanel)
-        ? (homeAssistantState.busy ? 'Assistant Working' : 'Workspace Assistant')
-        : (homeAssistantState.busy ? 'Live Activity' : 'Task Activity');
+      label.textContent =
+        embeddedPanel && !homeScopedPanel
+          ? homeAssistantState.busy
+            ? 'Assistant Working'
+            : 'Workspace Assistant'
+          : homeAssistantState.busy
+            ? 'Live Activity'
+            : 'Task Activity';
     }
 
     syncHomeAssistantModalHeading();
@@ -1399,7 +1717,8 @@
       state: options && options.state ? String(options.state) : '',
       detail: options && options.detail ? String(options.detail) : '',
       heading: options && options.heading ? String(options.heading) : '',
-      conversationSummary: options && options.conversationSummary ? String(options.conversationSummary) : ''
+      conversationSummary:
+        options && options.conversationSummary ? String(options.conversationSummary) : ''
     };
     renderHomeAssistantRoutingSummary();
     if (homeAssistantState.busy || hasVisibleHomeAssistantActions()) {
@@ -1453,7 +1772,9 @@
     if (els.workspaceModeButtons) {
       for (var i = 0; i < els.workspaceModeButtons.length; i++) {
         var button = els.workspaceModeButtons[i];
-        var buttonMode = normalizeWorkspacePromptMode(button.getAttribute('data-home-workspace-mode'));
+        var buttonMode = normalizeWorkspacePromptMode(
+          button.getAttribute('data-home-workspace-mode')
+        );
         var isActive = isWorkspaceContext && buttonMode === promptMode;
         button.classList.toggle('is-active', isActive);
         button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
@@ -1471,7 +1792,9 @@
 
   function buildHomeAssistantPlaceholder(routeContext) {
     if (!routeContext) {
-      return document.querySelector('#homeAssistantCard[data-first-run="true"]') ? 'Plan a product launch…' : 'Give Workspace Manager something to do…';
+      return document.querySelector('#homeAssistantCard[data-first-run="true"]')
+        ? 'Plan a product launch…'
+        : 'Give Workspace Manager something to do…';
     }
     var displayName = getWorkspaceHomeAssistantDisplayName();
     var workspaceMode = getWorkspacePromptMode();
@@ -1481,11 +1804,15 @@
       return 'Create a task for ' + displayName + ' from this canvas…';
     }
     if (hasWorkspaceRouteContext(routeContext)) {
-      if (workspaceMode === 'ask') return 'Ask ' + displayName + ' about this workspace… (/task creates a task)';
-      if (workspaceMode === 'note') return 'Save a workspace note… (/task creates a task, /ask asks)';
+      if (workspaceMode === 'ask')
+        return 'Ask ' + displayName + ' about this workspace… (/task creates a task)';
+      if (workspaceMode === 'note')
+        return 'Save a workspace note… (/task creates a task, /ask asks)';
       return 'Create a task for ' + displayName + '… (/ask asks, /note saves a note)';
     }
-    return document.querySelector('#homeAssistantCard[data-first-run="true"]') ? 'Plan a product launch…' : 'Give Workspace Manager something to do…';
+    return document.querySelector('#homeAssistantCard[data-first-run="true"]')
+      ? 'Plan a product launch…'
+      : 'Give Workspace Manager something to do…';
   }
 
   function renderHomeAssistantWorkspaceIdentity(routeContext) {
@@ -1608,9 +1935,11 @@
 
     if (nextMode === 'semi_auto') {
       setHomeAssistantRoutingSummary('Semi-auto', 'Step-by-step confirmations are enabled.');
-    } else if (homeAssistantState.routingSummary &&
+    } else if (
+      homeAssistantState.routingSummary &&
       homeAssistantState.routingSummary.title === 'Semi-auto' &&
-      homeAssistantState.routingSummary.text === 'Step-by-step confirmations are enabled.') {
+      homeAssistantState.routingSummary.text === 'Step-by-step confirmations are enabled.'
+    ) {
       setHomeAssistantRoutingSummary('', '');
     }
   }
@@ -1643,7 +1972,7 @@
       els.input.disabled = homeAssistantState.busy;
       setHomeAssistantSendButtonLabel(
         els.sendBtn,
-        homeAssistantState.busy ? (busyLabel || 'Working…') : els.sendBtn.dataset.defaultLabel
+        homeAssistantState.busy ? busyLabel || 'Working…' : els.sendBtn.dataset.defaultLabel
       );
     }
     for (var i = 0; i < els.quickButtons.length; i++) {
@@ -1708,7 +2037,8 @@
       pre.style.wordBreak = 'break-word';
       pre.style.fontSize = '0.8rem';
       pre.style.lineHeight = '1.45';
-      pre.style.fontFamily = 'var(--font-family-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace)';
+      pre.style.fontFamily =
+        'var(--font-family-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace)';
       pre.textContent = structuredText;
       bubble.appendChild(pre);
     } else {
@@ -1726,14 +2056,18 @@
     syncHomeAssistantLauncher();
     try {
       var routeContext = buildHomeRouteContext();
-      window.dispatchEvent(new CustomEvent('ori:workspace-assistant-message', {
-        detail: {
-          role: role,
-          text: messageText,
-          workspaceId: String(routeContext && routeContext.workspace_id || window.currentWorkspaceId || '').trim(),
-          surface: String(routeContext && routeContext.surface || '')
-        }
-      }));
+      window.dispatchEvent(
+        new CustomEvent('ori:workspace-assistant-message', {
+          detail: {
+            role: role,
+            text: messageText,
+            workspaceId: String(
+              (routeContext && routeContext.workspace_id) || window.currentWorkspaceId || ''
+            ).trim(),
+            surface: String((routeContext && routeContext.surface) || '')
+          }
+        })
+      );
     } catch (_) {
       // Message rendering must not depend on optional workspace listeners.
     }
@@ -1792,7 +2126,7 @@
     if (!target) return null;
     for (var i = 0; i < questions.length; i++) {
       var question = questions[i];
-      if (String(question && question.id || '').trim() === target) {
+      if (String((question && question.id) || '').trim() === target) {
         return question;
       }
     }
@@ -1892,7 +2226,10 @@
         attachments.push({
           id: question.id,
           label: question.label,
-          attachment_kind: question.file_config && question.file_config.attachment_kind ? question.file_config.attachment_kind : question.id,
+          attachment_kind:
+            question.file_config && question.file_config.attachment_kind
+              ? question.file_config.attachment_kind
+              : question.id,
           upload_modal_opened: Boolean(uploads[question.id])
         });
         continue;
@@ -1923,7 +2260,10 @@
       JSON.stringify(payload, null, 2),
       '',
       'Follow-up instructions:',
-      String(planningState.schema.submit_instructions || 'Use this structured planning intake to continue the conversation.').trim()
+      String(
+        planningState.schema.submit_instructions ||
+          'Use this structured planning intake to continue the conversation.'
+      ).trim()
     ].join('\n');
   }
 
@@ -1994,7 +2334,10 @@
         attachments.push({
           id: question.id,
           label: question.label,
-          attachment_kind: question.file_config && question.file_config.attachment_kind ? question.file_config.attachment_kind : question.id,
+          attachment_kind:
+            question.file_config && question.file_config.attachment_kind
+              ? question.file_config.attachment_kind
+              : question.id,
           upload_modal_opened: Boolean(uploads[question.id])
         });
         continue;
@@ -2033,10 +2376,12 @@
     clearHomeAssistantInlineReply();
     homeAssistantState.planningState = {
       kind: 'planning_form',
-      prompt: String(options && options.prompt || '').trim(),
+      prompt: String((options && options.prompt) || '').trim(),
       routeContext: normalizeHomeRouteContext(options && options.routeContext),
       intent: options && options.intent ? options.intent : HOME_INTENTS.general_task,
-      agentLabel: String(options && options.agentLabel || getWorkspaceHomeAssistantDisplayName()).trim() || getWorkspaceHomeAssistantDisplayName(),
+      agentLabel:
+        String((options && options.agentLabel) || getWorkspaceHomeAssistantDisplayName()).trim() ||
+        getWorkspaceHomeAssistantDisplayName(),
       workflowStep: options && options.workflowStep ? options.workflowStep : null,
       schema: normalizedSchema,
       formData: {},
@@ -2059,12 +2404,15 @@
   }
 
   function derivePlanningReviewNoteName(planningState) {
-    var prompt = String(planningState && planningState.prompt || '').trim();
+    var prompt = String((planningState && planningState.prompt) || '').trim();
     if (/\bspain\b/i.test(prompt)) return 'Spain Trip Intake';
     if (planningState && planningState.schema && planningState.schema.kind === 'travel_intake') {
       return 'Travel Intake Summary';
     }
-    return truncateText((planningState && planningState.schema && planningState.schema.title) || 'Planning Summary', 60);
+    return truncateText(
+      (planningState && planningState.schema && planningState.schema.title) || 'Planning Summary',
+      60
+    );
   }
 
   function buildPlanningReviewNoteContent(planningState) {
@@ -2072,7 +2420,7 @@
       '# ' + derivePlanningReviewNoteName(planningState),
       '',
       'Original request:',
-      String(planningState && planningState.prompt || '').trim(),
+      String((planningState && planningState.prompt) || '').trim(),
       '',
       buildPlanningFormAnswerSummary(planningState)
     ];
@@ -2080,7 +2428,8 @@
   }
 
   function buildPlanningTaskDescriptionFromPrompt(prompt, fallbackTitle) {
-    var normalized = String(prompt || '').trim()
+    var normalized = String(prompt || '')
+      .trim()
       .replace(/^(please\s+)?help me\s+/i, '')
       .replace(/^(can|could|would|will)\s+you\s+/i, '')
       .replace(/^i (want|need)\s+(you\s+)?to\s+/i, '')
@@ -2121,7 +2470,8 @@
     return lines.join('\n').trim();
   }
 
-  function buildPlanningReviewTaskDescription(planningState) { // eslint-disable-line no-unused-vars
+  // eslint-disable-next-line no-unused-vars
+  function buildPlanningReviewTaskDescription(planningState) {
     if (!planningState) return 'Planning task';
     return buildPlanningTaskDescriptionFromPrompt(
       planningState.prompt,
@@ -2152,10 +2502,13 @@
     if (!planningState) return {};
 
     var context = {
-      planning_review_kind: String(planningState.schema && planningState.schema.kind || '').trim() || null,
-      planning_review_title: String(planningState.schema && planningState.schema.title || '').trim() || null,
+      planning_review_kind:
+        String((planningState.schema && planningState.schema.kind) || '').trim() || null,
+      planning_review_title:
+        String((planningState.schema && planningState.schema.title) || '').trim() || null,
       planning_review_summary: String(planningState.summaryText || '').trim() || null,
-      planning_note_name: String(planningState.noteSaved && planningState.noteSaved.name || '').trim() || null,
+      planning_note_name:
+        String((planningState.noteSaved && planningState.noteSaved.name) || '').trim() || null,
       planning_review_completed_at: new Date().toISOString(),
       human_loop: null,
       planning_latest_reply: null,
@@ -2167,7 +2520,11 @@
 
     if (planningState.workflowResponse) {
       try {
-        context.planning_workflow_response = JSON.stringify(planningState.workflowResponse, null, 2);
+        context.planning_workflow_response = JSON.stringify(
+          planningState.workflowResponse,
+          null,
+          2
+        );
       } catch (_error) {
         context.planning_workflow_response = String(planningState.workflowResponse);
       }
@@ -2214,19 +2571,27 @@
   }
 
   function isTravelPlanningReviewState(planningState) {
-    if (!planningState || planningState.kind !== 'planning_review' || !planningState.schema) return false;
-    return String(planningState.schema.kind || '').trim() === 'travel_intake' ||
-      String(planningState.intent && planningState.intent.key || '').trim() === 'travel_planning';
+    if (!planningState || planningState.kind !== 'planning_review' || !planningState.schema)
+      return false;
+    return (
+      String(planningState.schema.kind || '').trim() === 'travel_intake' ||
+      String((planningState.intent && planningState.intent.key) || '').trim() === 'travel_planning'
+    );
   }
 
   function isWorkspaceManagerMetaActionPrompt(prompt) {
     var normalized = normalizeToken(prompt);
     if (!normalized) return false;
 
-    var actionMatch = /\b(save|create|add|attach|upload|import|export|move|rename|delete|remove|switch|assign|list|show|open|bind)\b/.test(normalized);
+    var actionMatch =
+      /\b(save|create|add|attach|upload|import|export|move|rename|delete|remove|switch|assign|list|show|open|bind)\b/.test(
+        normalized
+      );
     if (!actionMatch) return false;
 
-    return /\b(note|notes|task|tasks|subtask|subtasks|file|files|pdf|folder|folders|directory|directories|workspace|agent|agents|binding|bindings|canvas)\b/.test(normalized);
+    return /\b(note|notes|task|tasks|subtask|subtasks|file|files|pdf|folder|folders|directory|directories|workspace|agent|agents|binding|bindings|canvas)\b/.test(
+      normalized
+    );
   }
 
   function detectWorkspacePlanningSpecialist(prompt, intent) {
@@ -2235,11 +2600,30 @@
       return null;
     }
 
-    var travelSignals = ['travel', 'trip', 'itinerary', 'hotel', 'flight', 'vacation', 'restaurant', 'restaurants', 'museum', 'museums', 'nightlife', 'day trip', 'day trips', 'accommodation', 'lodging', 'neighborhood', 'neighbourhood', 'budget'];
+    var travelSignals = [
+      'travel',
+      'trip',
+      'itinerary',
+      'hotel',
+      'flight',
+      'vacation',
+      'restaurant',
+      'restaurants',
+      'museum',
+      'museums',
+      'nightlife',
+      'day trip',
+      'day trips',
+      'accommodation',
+      'lodging',
+      'neighborhood',
+      'neighbourhood',
+      'budget'
+    ];
     var looksLikeTravel = travelSignals.some(function (signal) {
       return normalized.indexOf(normalizeToken(signal)) >= 0;
     });
-    if (!looksLikeTravel && String(intent && intent.key || '').trim() !== 'travel_planning') {
+    if (!looksLikeTravel && String((intent && intent.key) || '').trim() !== 'travel_planning') {
       return null;
     }
 
@@ -2265,14 +2649,18 @@
   }
 
   function getActiveLinkedPlanningTask() {
-    if (homeAssistantState.inlineReplyState &&
-        homeAssistantState.inlineReplyState.linkedTask &&
-        homeAssistantState.inlineReplyState.linkedTask.id) {
+    if (
+      homeAssistantState.inlineReplyState &&
+      homeAssistantState.inlineReplyState.linkedTask &&
+      homeAssistantState.inlineReplyState.linkedTask.id
+    ) {
       return homeAssistantState.inlineReplyState.linkedTask;
     }
-    if (homeAssistantState.planningState &&
-        homeAssistantState.planningState.mainTask &&
-        homeAssistantState.planningState.mainTask.id) {
+    if (
+      homeAssistantState.planningState &&
+      homeAssistantState.planningState.mainTask &&
+      homeAssistantState.planningState.mainTask.id
+    ) {
       return homeAssistantState.planningState.mainTask;
     }
     return null;
@@ -2284,16 +2672,19 @@
       id: String(task.id || '').trim(),
       description: String(task.description || '').trim(),
       details: String(task.details || '').trim(),
-      to: String(task.to || '').trim() || String(task.assigned_node_id || '')
-        .replace(/-node-\d+$/, '')
-        .trim()
+      to:
+        String(task.to || '').trim() ||
+        String(task.assigned_node_id || '')
+          .replace(/-node-\d+$/, '')
+          .trim()
     };
   }
 
   async function ensureWorkspacePlanningTask(routeContext, prompt, agentLabel, options) {
-    var existingTask = options && options.existingTask && options.existingTask.id
-      ? normalizeCreatedPlanningTask(options.existingTask)
-      : null;
+    var existingTask =
+      options && options.existingTask && options.existingTask.id
+        ? normalizeCreatedPlanningTask(options.existingTask)
+        : null;
     if (existingTask) return existingTask;
 
     var workspaceId = hasWorkspaceRouteContext(routeContext)
@@ -2367,37 +2758,55 @@
       };
       var data = null;
       if (typeof API !== 'undefined' && typeof API.post === 'function') {
-        data = await API.post('/api/workspaces/' + encodeURIComponent(workspaceId) + '/notes', notePayload);
+        data = await API.post(
+          '/api/workspaces/' + encodeURIComponent(workspaceId) + '/notes',
+          notePayload
+        );
       } else {
-        var response = await fetch('/api/workspaces/' + encodeURIComponent(workspaceId) + '/notes', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(notePayload)
-        });
+        var response = await fetch(
+          '/api/workspaces/' + encodeURIComponent(workspaceId) + '/notes',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(notePayload)
+          }
+        );
         if (!response.ok) throw new Error('Failed to create note');
         data = await response.json();
       }
 
-      var savedName = data && data.note && data.note.name
-        ? String(data.note.name).trim()
-        : notePayload.name;
+      var savedName =
+        data && data.note && data.note.name ? String(data.note.name).trim() : notePayload.name;
       planningState.noteSaved = {
         id: data && data.note && data.note.id ? String(data.note.id).trim() : '',
         name: savedName
       };
 
-      if (window.workspaceDetail &&
-          String(window.workspaceDetail.workspaceId || '').trim() === workspaceId &&
-          typeof window.workspaceDetail.loadWorkspace === 'function') {
+      if (
+        window.workspaceDetail &&
+        String(window.workspaceDetail.workspaceId || '').trim() === workspaceId &&
+        typeof window.workspaceDetail.loadWorkspace === 'function'
+      ) {
         window.workspaceDetail.loadWorkspace();
       }
 
-      appendHomeAssistantMessage('assistant', 'Saved the intake summary to note "' + savedName + '".');
+      appendHomeAssistantMessage(
+        'assistant',
+        'Saved the intake summary to note "' + savedName + '".'
+      );
       setHomeAssistantRoutingSummary('Planning Review', 'Intake summary saved to this workspace.');
     } catch (error) {
-      dashLog.debug('Failed to save planning review note', { error: error && error.message || error });
-      appendHomeAssistantMessage('assistant', 'I could not save the intake summary to a note right now.');
-      setHomeAssistantRoutingSummary('Planning Review', 'Could not save the intake summary to a note.');
+      dashLog.debug('Failed to save planning review note', {
+        error: (error && error.message) || error
+      });
+      appendHomeAssistantMessage(
+        'assistant',
+        'I could not save the intake summary to a note right now.'
+      );
+      setHomeAssistantRoutingSummary(
+        'Planning Review',
+        'Could not save the intake summary to a note.'
+      );
       if (window.Toast) Toast.error('Failed to save note');
     } finally {
       planningState.noteSaving = false;
@@ -2418,7 +2827,11 @@
 
   async function createPlanningSpecialistAgent(config, planningState) {
     if (!config) throw new Error('Missing specialist configuration');
-    if (typeof API === 'undefined' || typeof API.post !== 'function' || typeof API.get !== 'function') {
+    if (
+      typeof API === 'undefined' ||
+      typeof API.post !== 'function' ||
+      typeof API.get !== 'function'
+    ) {
       throw new Error('Agent API unavailable');
     }
 
@@ -2435,7 +2848,11 @@
       name: agentName,
       type: config.type,
       system_prompt: config.systemPrompt,
-      description: config.description + ' Workspace context: "' + truncateText(String(planningState.summaryText || '').trim(), 180) + '".',
+      description:
+        config.description +
+        ' Workspace context: "' +
+        truncateText(String(planningState.summaryText || '').trim(), 180) +
+        '".',
       tags: uniqueValues((config.tags || []).concat(['workspace-specialist', 'planning-review']))
     };
 
@@ -2460,27 +2877,25 @@
   function buildWorkspaceSpecialistTaskDetails(prompt, managerLabel, config, agentName) {
     var sections = [];
     var normalizedPrompt = String(prompt || '').trim();
-    var normalizedManager = String(managerLabel || getWorkspaceHomeAssistantDisplayName()).trim() || getWorkspaceHomeAssistantDisplayName();
-    var normalizedAgent = String(agentName || config && config.label || '').trim();
-    var handoffInstruction = String(config && config.handoffInstruction || '').trim();
+    var normalizedManager =
+      String(managerLabel || getWorkspaceHomeAssistantDisplayName()).trim() ||
+      getWorkspaceHomeAssistantDisplayName();
+    var normalizedAgent = String(agentName || (config && config.label) || '').trim();
+    var handoffInstruction = String((config && config.handoffInstruction) || '').trim();
 
-    sections.push([
-      'Workspace manager handoff:',
-      normalizedManager + ' routed this workspace task to ' + normalizedAgent + '.'
-    ].join('\n'));
+    sections.push(
+      [
+        'Workspace manager handoff:',
+        normalizedManager + ' routed this workspace task to ' + normalizedAgent + '.'
+      ].join('\n')
+    );
 
     if (normalizedPrompt) {
-      sections.push([
-        'Original request:',
-        normalizedPrompt
-      ].join('\n'));
+      sections.push(['Original request:', normalizedPrompt].join('\n'));
     }
 
     if (handoffInstruction) {
-      sections.push([
-        'Specialist goal:',
-        handoffInstruction
-      ].join('\n'));
+      sections.push(['Specialist goal:', handoffInstruction].join('\n'));
     }
 
     return sections.join('\n\n').trim();
@@ -2488,9 +2903,9 @@
 
   function buildWorkspaceSpecialistTaskContext(config, managerLabel) {
     return {
-      planning_specialist_key: String(config && config.key || '').trim() || null,
-      planning_specialist_label: String(config && config.label || '').trim() || null,
-      planning_specialist_agent_name: String(config && config.agentName || '').trim() || null,
+      planning_specialist_key: String((config && config.key) || '').trim() || null,
+      planning_specialist_label: String((config && config.label) || '').trim() || null,
+      planning_specialist_agent_name: String((config && config.agentName) || '').trim() || null,
       planning_handoff_source: String(managerLabel || '').trim() || null,
       workspace_specialist_handoff: true,
       workspace_specialist_handoff_at: new Date().toISOString()
@@ -2498,7 +2913,7 @@
   }
 
   function buildPlanningSpecialistTaskDescription(planningState, config) {
-    var prefix = String(config && (config.taskTitle || config.label) || '').trim();
+    var prefix = String((config && (config.taskTitle || config.label)) || '').trim();
     var base = buildPlanningTaskDescriptionFromPrompt(
       planningState && planningState.prompt,
       prefix || (config && config.label) || 'Specialist task'
@@ -2512,21 +2927,22 @@
 
   function buildPlanningSpecialistTaskDetails(planningState, config, agentName) {
     var sections = [];
-    var assignee = String(agentName || config && config.label || '').trim();
-    var managerLabel = String(planningState && planningState.agentLabel || getWorkspaceHomeAssistantDisplayName()).trim();
-    var handoffInstruction = String(config && config.handoffInstruction || '').trim();
+    var assignee = String(agentName || (config && config.label) || '').trim();
+    var managerLabel = String(
+      (planningState && planningState.agentLabel) || getWorkspaceHomeAssistantDisplayName()
+    ).trim();
+    var handoffInstruction = String((config && config.handoffInstruction) || '').trim();
     var planningDetails = buildPlanningTaskExecutionDetails(planningState);
 
-    sections.push([
-      'Workspace manager handoff:',
-      managerLabel + ' handed this travel-planning task to ' + assignee + '.'
-    ].join('\n'));
+    sections.push(
+      [
+        'Workspace manager handoff:',
+        managerLabel + ' handed this travel-planning task to ' + assignee + '.'
+      ].join('\n')
+    );
 
     if (handoffInstruction) {
-      sections.push([
-        'Specialist goal:',
-        handoffInstruction
-      ].join('\n'));
+      sections.push(['Specialist goal:', handoffInstruction].join('\n'));
     }
 
     if (planningDetails) {
@@ -2536,19 +2952,30 @@
     return sections.join('\n\n').trim();
   }
 
-  function buildPlanningSpecialistTaskContext(planningState, specialistKey, config, agentName, parentTaskID) {
+  function buildPlanningSpecialistTaskContext(
+    planningState,
+    specialistKey,
+    config,
+    agentName,
+    parentTaskID
+  ) {
     var context = buildPlanningReviewTaskContext(planningState);
     context.planning_specialist_key = String(specialistKey || '').trim() || null;
-    context.planning_specialist_label = String(config && config.label || '').trim() || null;
+    context.planning_specialist_label = String((config && config.label) || '').trim() || null;
     context.planning_specialist_agent_name = String(agentName || '').trim() || null;
     context.planning_parent_task_id = String(parentTaskID || '').trim() || null;
-    context.planning_handoff_source = String(planningState && planningState.agentLabel || '').trim() || null;
+    context.planning_handoff_source =
+      String((planningState && planningState.agentLabel) || '').trim() || null;
     return context;
   }
 
   function findWorkspaceDetailTaskById(taskId) {
     var normalizedTaskId = String(taskId || '').trim();
-    if (!normalizedTaskId || !window.workspaceDetail || !Array.isArray(window.workspaceDetail.tasks)) {
+    if (
+      !normalizedTaskId ||
+      !window.workspaceDetail ||
+      !Array.isArray(window.workspaceDetail.tasks)
+    ) {
       return null;
     }
 
@@ -2571,7 +2998,9 @@
       return await API.get('/api/orchestration/tasks?id=' + encodeURIComponent(normalizedTaskId));
     }
 
-    var response = await fetch('/api/orchestration/tasks?id=' + encodeURIComponent(normalizedTaskId));
+    var response = await fetch(
+      '/api/orchestration/tasks?id=' + encodeURIComponent(normalizedTaskId)
+    );
     if (!response.ok) {
       var text = '';
       try {
@@ -2592,9 +3021,10 @@
   }
 
   function getPlanningSpecialistButtonLabel(planningState, specialistKey, config) {
-    var status = planningState && planningState.specialistStatuses
-      ? planningState.specialistStatuses[specialistKey] || null
-      : null;
+    var status =
+      planningState && planningState.specialistStatuses
+        ? planningState.specialistStatuses[specialistKey] || null
+        : null;
 
     if (planningState && planningState.specialistBusy === specialistKey) {
       if (status && status.taskId) {
@@ -2633,12 +3063,12 @@
       }
     }
 
-    var mainTaskId = String(planningState.mainTask && planningState.mainTask.id || '').trim();
+    var mainTaskId = String((planningState.mainTask && planningState.mainTask.id) || '').trim();
     if (!mainTaskId || !window.workspaceDetail || !Array.isArray(window.workspaceDetail.tasks)) {
       return null;
     }
 
-    var targetAgent = normalizeToken(agentName || status && status.agentName || '');
+    var targetAgent = normalizeToken(agentName || (status && status.agentName) || '');
     for (var i = 0; i < window.workspaceDetail.tasks.length; i++) {
       var task = window.workspaceDetail.tasks[i];
       if (!task || String(task.parent_task_id || '').trim() !== mainTaskId) continue;
@@ -2655,7 +3085,13 @@
     return null;
   }
 
-  async function ensurePlanningReviewSpecialistTask(planningState, mainTask, specialistKey, config, agentName) {
+  async function ensurePlanningReviewSpecialistTask(
+    planningState,
+    mainTask,
+    specialistKey,
+    config,
+    agentName
+  ) {
     if (!planningState || !mainTask || !mainTask.id || !config || !agentName) {
       throw new Error('Missing specialist task context');
     }
@@ -2685,9 +3121,12 @@
       description: buildPlanningSpecialistTaskDescription(planningState, config),
       details: buildPlanningSpecialistTaskDetails(planningState, config, agentName),
       parent_task_id: String(mainTask.id || '').trim(),
-      subtask_index: Number.isFinite(Number(config.subtaskIndex)) ? Number(config.subtaskIndex) : undefined
+      subtask_index: Number.isFinite(Number(config.subtaskIndex))
+        ? Number(config.subtaskIndex)
+        : undefined
     });
-    var createdTask = createdResponse && createdResponse.task ? createdResponse.task : createdResponse;
+    var createdTask =
+      createdResponse && createdResponse.task ? createdResponse.task : createdResponse;
     if (!createdTask || !createdTask.id) {
       throw new Error('Failed to create the specialist task');
     }
@@ -2695,7 +3134,13 @@
     syncCreatedTaskIntoWorkspaceDetail(createdTask);
 
     var updatedTask = await updateWorkspaceTaskRecord(createdTask.id, {
-      context: buildPlanningSpecialistTaskContext(planningState, specialistKey, config, agentName, mainTask.id)
+      context: buildPlanningSpecialistTaskContext(
+        planningState,
+        specialistKey,
+        config,
+        agentName,
+        mainTask.id
+      )
     });
     syncUpdatedTaskIntoWorkspaceDetail(updatedTask);
     await refreshWorkspaceDetailTaskPanels();
@@ -2729,12 +3174,14 @@
 
     var detail = window.workspaceDetail;
     var targetWorkspaceId = String(
-      routeContext && routeContext.workspace_id ||
-      latestTask.workspace_id ||
-      latestTask.folder_id ||
-      ''
+      (routeContext && routeContext.workspace_id) ||
+        latestTask.workspace_id ||
+        latestTask.folder_id ||
+        ''
     ).trim();
-    var detailWorkspaceId = String(detail && (detail.workspaceId || detail.workspace && detail.workspace.id) || '').trim();
+    var detailWorkspaceId = String(
+      (detail && (detail.workspaceId || (detail.workspace && detail.workspace.id))) || ''
+    ).trim();
     var canUseWorkspaceDetail = Boolean(
       detail &&
       (!targetWorkspaceId || !detailWorkspaceId || targetWorkspaceId === detailWorkspaceId)
@@ -2746,19 +3193,33 @@
       if (canUseWorkspaceDetail) {
         var detailTask = findWorkspaceDetailTaskById(latestTask.id) || latestTask;
         var humanLoop = detailTask.context && detailTask.context.human_loop;
-        var blocked = humanLoop && String(humanLoop.state || '').trim().toLowerCase() === 'blocked';
-        var normalizedStatus = String(detailTask.status || '').trim().toLowerCase();
+        var blocked =
+          humanLoop &&
+          String(humanLoop.state || '')
+            .trim()
+            .toLowerCase() === 'blocked';
+        var normalizedStatus = String(detailTask.status || '')
+          .trim()
+          .toLowerCase();
 
         if (blocked && typeof detail.openTaskAssistModal === 'function') {
           detail.openTaskAssistModal(detailTask.id);
           return detailTask;
         }
-        if ((normalizedStatus === 'completed' || normalizedStatus === 'failed' || normalizedStatus === 'cancelled' || normalizedStatus === 'timeout') &&
-            typeof detail.showTaskResult === 'function') {
+        if (
+          (normalizedStatus === 'completed' ||
+            normalizedStatus === 'failed' ||
+            normalizedStatus === 'cancelled' ||
+            normalizedStatus === 'timeout') &&
+          typeof detail.showTaskResult === 'function'
+        ) {
           detail.showTaskResult(detailTask.id);
           return detailTask;
         }
-        if (normalizedStatus === 'in_progress' && typeof detail.openTaskExecutionModal === 'function') {
+        if (
+          normalizedStatus === 'in_progress' &&
+          typeof detail.openTaskExecutionModal === 'function'
+        ) {
           detail.openTaskExecutionModal(detailTask);
           if (typeof detail.startExecutionMonitor === 'function') {
             detail.startExecutionMonitor(detailTask.id);
@@ -2771,7 +3232,9 @@
         }
       }
 
-      var fallbackStatus = String(latestTask.status || '').trim().toLowerCase();
+      var fallbackStatus = String(latestTask.status || '')
+        .trim()
+        .toLowerCase();
       if (!fallbackStatus || fallbackStatus === 'pending' || fallbackStatus === 'assigned') {
         await executeWorkspaceTaskRecord(latestTask.id);
       }
@@ -2795,7 +3258,11 @@
 
     try {
       if (existingStatus && existingStatus.taskId) {
-        var existingTask = await findPlanningSpecialistTask(planningState, specialistKey, existingStatus.agentName);
+        var existingTask = await findPlanningSpecialistTask(
+          planningState,
+          specialistKey,
+          existingStatus.agentName
+        );
         if (existingTask && existingTask.id) {
           await openPlanningSpecialistTask(existingTask, planningState.routeContext);
           clearHomeAssistantTaskLaunchState();
@@ -2806,10 +3273,15 @@
       var agents = await fetchAgentsForMatching();
       var existingAgent = findExactAgentByName(agents, config.agentName);
       var agentName = existingAgent
-        ? (typeof existingAgent === 'string' ? existingAgent : existingAgent.name)
+        ? typeof existingAgent === 'string'
+          ? existingAgent
+          : existingAgent.name
         : await createPlanningSpecialistAgent(config, planningState);
 
-      var addedToWorkspace = await addAgentToWorkspaceIfNeeded(agentName, planningState.routeContext);
+      var addedToWorkspace = await addAgentToWorkspaceIfNeeded(
+        agentName,
+        planningState.routeContext
+      );
       if (!addedToWorkspace) {
         throw new Error('Failed to attach specialist to workspace');
       }
@@ -2831,18 +3303,30 @@
 
       appendHomeAssistantMessage(
         'assistant',
-        (existingAgent ? 'Added ' : 'Created and added ') + '"' + agentName + '" to this workspace, then handed off a specialist task.'
+        (existingAgent ? 'Added ' : 'Created and added ') +
+          '"' +
+          agentName +
+          '" to this workspace, then handed off a specialist task.'
       );
-      setHomeAssistantRoutingSummary(config.label, '"' + agentName + '" is handling a workspace task now.');
+      setHomeAssistantRoutingSummary(
+        config.label,
+        '"' + agentName + '" is handling a workspace task now.'
+      );
       await openPlanningSpecialistTask(specialistTask, planningState.routeContext);
       clearHomeAssistantTaskLaunchState();
     } catch (error) {
       dashLog.debug('Failed to add planning specialist', {
         specialistKey: specialistKey,
-        error: error && error.message || error
+        error: (error && error.message) || error
       });
-      appendHomeAssistantMessage('assistant', 'I could not hand off to "' + config.label + '" right now.');
-      setHomeAssistantRoutingSummary(config.label, 'Could not create the specialist handoff task right now.');
+      appendHomeAssistantMessage(
+        'assistant',
+        'I could not hand off to "' + config.label + '" right now.'
+      );
+      setHomeAssistantRoutingSummary(
+        config.label,
+        'Could not create the specialist handoff task right now.'
+      );
     } finally {
       planningState.specialistBusy = '';
       renderHomeAssistantPlanning();
@@ -2869,7 +3353,10 @@
 
         var createdTask = await ensurePlanningReviewMainTask(planningState);
         if (createdTask && createdTask.description) {
-          appendHomeAssistantMessage('assistant', 'Added main workspace task "' + createdTask.description + '".');
+          appendHomeAssistantMessage(
+            'assistant',
+            'Added main workspace task "' + createdTask.description + '".'
+          );
         }
       }
 
@@ -2887,14 +3374,23 @@
       await launchWorkspaceTaskExecutionFromHomeAssistant(preparedTask, planningState.routeContext);
       clearHomeAssistantTaskLaunchState();
     } catch (error) {
-      dashLog.debug('Planning review handoff failed', { error: error && error.message || error });
+      dashLog.debug('Planning review handoff failed', { error: (error && error.message) || error });
       planningState.mainTaskCreating = false;
       if (planningState.mainTask && planningState.mainTask.id) {
         appendHomeAssistantMessage('assistant', 'I could not start the workspace task right now.');
-        setHomeAssistantRoutingSummary('Planning Review', 'Could not start the workspace task right now.');
+        setHomeAssistantRoutingSummary(
+          'Planning Review',
+          'Could not start the workspace task right now.'
+        );
       } else {
-        appendHomeAssistantMessage('assistant', 'I could not add the main workspace task right now.');
-        setHomeAssistantRoutingSummary('Planning Review', 'Could not add the main workspace task right now.');
+        appendHomeAssistantMessage(
+          'assistant',
+          'I could not add the main workspace task right now.'
+        );
+        setHomeAssistantRoutingSummary(
+          'Planning Review',
+          'Could not add the main workspace task right now.'
+        );
       }
     } finally {
       planningState.mainTaskCreating = false;
@@ -2928,7 +3424,7 @@
   }
 
   function getInlineReplyWorkspaceName(routeContext) {
-    var workspaceId = String(routeContext && routeContext.workspace_id || '').trim();
+    var workspaceId = String((routeContext && routeContext.workspace_id) || '').trim();
     var detailWorkspace = window.workspaceDetail && window.workspaceDetail.workspace;
     if (detailWorkspace && String(detailWorkspace.id || '').trim() === workspaceId) {
       return String(detailWorkspace.name || '').trim();
@@ -2957,7 +3453,9 @@
   }
 
   function buildInlineReplyChoiceId(number, label) {
-    var normalized = normalizeToken(label).replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+    var normalized = normalizeToken(label)
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '');
     if (!normalized) normalized = 'option';
     return 'choice_' + String(number || 'x').trim() + '_' + normalized.slice(0, 48);
   }
@@ -2985,7 +3483,13 @@
   function extractInlineReplyChoices(text) {
     var lines = String(text || '').split(/\r?\n/);
     var cueIndex = -1;
-    var cues = ['next steps', 'next step', 'reply with your preference', 'choose one', 'choose the next step'];
+    var cues = [
+      'next steps',
+      'next step',
+      'reply with your preference',
+      'choose one',
+      'choose the next step'
+    ];
 
     for (var i = 0; i < lines.length; i++) {
       var cleaned = normalizeToken(cleanInlineReplyChoiceText(lines[i]));
@@ -3032,7 +3536,8 @@
     if (!choices.length) return null;
 
     var normalizedContext = normalizeHomeRouteContext(routeContext);
-    var sessionId = String(normalizedContext && normalizedContext.session_id || '').trim() || 'inline';
+    var sessionId =
+      String((normalizedContext && normalizedContext.session_id) || '').trim() || 'inline';
     return {
       workflow_id: 'workflow:' + sessionId + ':inline-choice',
       step_id: 'step:inline-choice',
@@ -3062,13 +3567,22 @@
     };
   }
 
-  function enableHomeAssistantInlineReply(routeContext, intent, agentLabel, latestReplyText, workflowStep, linkedTask) {
+  function enableHomeAssistantInlineReply(
+    routeContext,
+    intent,
+    agentLabel,
+    latestReplyText,
+    workflowStep,
+    linkedTask
+  ) {
     var normalizedReply = String(latestReplyText || '').trim();
-    var resolvedWorkflowStep = workflowStep && String(workflowStep.step_type || '').trim() === 'ask_choice'
-      ? workflowStep
-      : buildSyntheticInlineReplyWorkflowStep(normalizedReply, routeContext);
+    var resolvedWorkflowStep =
+      workflowStep && String(workflowStep.step_type || '').trim() === 'ask_choice'
+        ? workflowStep
+        : buildSyntheticInlineReplyWorkflowStep(normalizedReply, routeContext);
     var questionPrompts = extractInlineReplyQuestions(normalizedReply);
-    var hasChoiceStep = resolvedWorkflowStep &&
+    var hasChoiceStep =
+      resolvedWorkflowStep &&
       String(resolvedWorkflowStep.step_type || '').trim() === 'ask_choice' &&
       Array.isArray(resolvedWorkflowStep.choices) &&
       resolvedWorkflowStep.choices.length > 0;
@@ -3085,7 +3599,9 @@
     homeAssistantState.inlineReplyState = {
       routeContext: normalizeHomeRouteContext(routeContext),
       intent: intent || HOME_INTENTS.general_task,
-      agentLabel: String(agentLabel || getWorkspaceHomeAssistantDisplayName()).trim() || getWorkspaceHomeAssistantDisplayName(),
+      agentLabel:
+        String(agentLabel || getWorkspaceHomeAssistantDisplayName()).trim() ||
+        getWorkspaceHomeAssistantDisplayName(),
       latestReplyText: normalizedReply,
       workflowStep: resolvedWorkflowStep,
       questionPrompts: questionPrompts,
@@ -3108,14 +3624,18 @@
     var question = findPlanningQuestionById(planningState, questionId);
     if (!question || question.type !== 'file') return;
 
-    var statusText = question.file_config && question.file_config.opened_status
-      ? String(question.file_config.opened_status).trim()
-      : 'Upload modal opened for this planning step.';
+    var statusText =
+      question.file_config && question.file_config.opened_status
+        ? String(question.file_config.opened_status).trim()
+        : 'Upload modal opened for this planning step.';
 
     try {
       if (window.workspaceDetail && typeof window.workspaceDetail.showFileModal === 'function') {
         window.workspaceDetail.showFileModal();
-      } else if (window.WorkspaceHubFiles && typeof window.WorkspaceHubFiles.openAddFileModal === 'function') {
+      } else if (
+        window.WorkspaceHubFiles &&
+        typeof window.WorkspaceHubFiles.openAddFileModal === 'function'
+      ) {
         window.WorkspaceHubFiles.openAddFileModal();
       } else {
         throw new Error('File upload modal unavailable');
@@ -3127,12 +3647,15 @@
     } catch (error) {
       dashLog.debug('Failed to open workspace planning upload modal', {
         questionId: questionId,
-        error: error && error.message || error
+        error: (error && error.message) || error
       });
       if (window.Toast) {
         Toast.error('File upload modal is unavailable right now.');
       }
-      setHomeAssistantRoutingSummary(planningState.schema.title || 'Planning Step', 'Could not open the upload modal right now.');
+      setHomeAssistantRoutingSummary(
+        planningState.schema.title || 'Planning Step',
+        'Could not open the upload modal right now.'
+      );
     }
   }
 
@@ -3142,7 +3665,8 @@
 
     for (var i = 0; i < questions.length; i++) {
       var question = questions[i];
-      if (!question || !question.required || !shouldShowPlanningQuestion(question, planningState)) continue;
+      if (!question || !question.required || !shouldShowPlanningQuestion(question, planningState))
+        continue;
       if (question.type === 'file') continue;
 
       var value = formData[question.id];
@@ -3161,7 +3685,11 @@
 
     var planningState = homeAssistantState.planningState;
     container.innerHTML = '';
-    if (!planningState || !planningState.schema || (planningState.kind !== 'planning_form' && planningState.kind !== 'planning_review')) {
+    if (
+      !planningState ||
+      !planningState.schema ||
+      (planningState.kind !== 'planning_form' && planningState.kind !== 'planning_review')
+    ) {
       container.classList.add('d-none');
       syncHomeAssistantLauncher();
       if (!homeAssistantState.busy) {
@@ -3196,13 +3724,15 @@
       var reviewSubtitle = document.createElement('p');
       reviewSubtitle.className = 'home-assistant-planning-subtitle';
       if (specialistFirstReview) {
-        reviewSubtitle.textContent = planningState.mainTask && planningState.mainTask.description
-          ? 'Review the intake summary, then add the right specialist to the workspace. Keep it with the workspace manager only if you want a lightweight follow-up.'
-          : 'Review the intake summary, then add the right specialist to the workspace. The main task will be added before specialist work begins.';
+        reviewSubtitle.textContent =
+          planningState.mainTask && planningState.mainTask.description
+            ? 'Review the intake summary, then add the right specialist to the workspace. Keep it with the workspace manager only if you want a lightweight follow-up.'
+            : 'Review the intake summary, then add the right specialist to the workspace. The main task will be added before specialist work begins.';
       } else {
-        reviewSubtitle.textContent = planningState.mainTask && planningState.mainTask.description
-          ? 'Review the summary, save it to a note if you want, and continue when you are ready. The main task is already in the workspace.'
-          : 'Review the summary, save it to a note if you want, and continue when you are ready. The main task will be added to the workspace before subtasks begin.';
+        reviewSubtitle.textContent =
+          planningState.mainTask && planningState.mainTask.description
+            ? 'Review the summary, save it to a note if you want, and continue when you are ready. The main task is already in the workspace.'
+            : 'Review the summary, save it to a note if you want, and continue when you are ready. The main task will be added to the workspace before subtasks begin.';
       }
       reviewCard.appendChild(reviewSubtitle);
 
@@ -3221,7 +3751,8 @@
       if (planningState.mainTask && planningState.mainTask.description) {
         var taskStatus = document.createElement('div');
         taskStatus.className = 'home-assistant-planning-help';
-        taskStatus.textContent = 'Added main workspace task "' + planningState.mainTask.description + '".';
+        taskStatus.textContent =
+          'Added main workspace task "' + planningState.mainTask.description + '".';
         reviewCard.appendChild(taskStatus);
       }
 
@@ -3234,9 +3765,9 @@
       saveNoteButton.disabled = isReviewBusy || Boolean(planningState.noteSaved);
       saveNoteButton.textContent = planningState.noteSaving
         ? 'Saving Note…'
-        : (planningState.noteSaved && planningState.noteSaved.name
-            ? 'Saved To "' + planningState.noteSaved.name + '"'
-            : 'Save Summary To Note');
+        : planningState.noteSaved && planningState.noteSaved.name
+          ? 'Saved To "' + planningState.noteSaved.name + '"'
+          : 'Save Summary To Note';
       saveNoteButton.addEventListener('click', function () {
         savePlanningReviewToNote();
       });
@@ -3251,10 +3782,10 @@
       continueButton.textContent = planningState.mainTaskCreating
         ? 'Adding Main Task…'
         : planningState.continuing
-        ? 'Continuing…'
-        : specialistFirstReview
-        ? ('Keep Task With ' + planningState.agentLabel)
-        : ('Start Task With ' + planningState.agentLabel);
+          ? 'Continuing…'
+          : specialistFirstReview
+            ? 'Keep Task With ' + planningState.agentLabel
+            : 'Start Task With ' + planningState.agentLabel;
       continueButton.addEventListener('click', function () {
         continuePlanningReviewWithManager();
       });
@@ -3276,14 +3807,19 @@
         var config = HOME_PLANNING_SPECIALISTS[specialistKey];
         var specialistButton = document.createElement('button');
         specialistButton.type = 'button';
-        specialistButton.className = specialistFirstReview && specialistKey === 'travel_itinerary'
-          ? 'modern-btn modern-btn-primary'
-          : 'modern-btn modern-btn-secondary';
+        specialistButton.className =
+          specialistFirstReview && specialistKey === 'travel_itinerary'
+            ? 'modern-btn modern-btn-primary'
+            : 'modern-btn modern-btn-secondary';
         specialistButton.disabled = isReviewBusy && planningState.specialistBusy !== specialistKey;
         if (planningState.specialistBusy === specialistKey) {
           specialistButton.disabled = true;
         }
-        specialistButton.textContent = getPlanningSpecialistButtonLabel(planningState, specialistKey, config);
+        specialistButton.textContent = getPlanningSpecialistButtonLabel(
+          planningState,
+          specialistKey,
+          config
+        );
         specialistButton.addEventListener('click', function () {
           addPlanningReviewSpecialist(specialistKey);
         });
@@ -3371,10 +3907,14 @@
         choice.className = 'home-assistant-planning-choice';
         choice.disabled = isSubmitting;
         choice.classList.toggle('is-selected', optionValue === String(selectedValue || ''));
-        choice.setAttribute('aria-pressed', optionValue === String(selectedValue || '') ? 'true' : 'false');
+        choice.setAttribute(
+          'aria-pressed',
+          optionValue === String(selectedValue || '') ? 'true' : 'false'
+        );
         choice.addEventListener('click', function (event) {
           if (!homeAssistantState.planningState) return;
-          homeAssistantState.planningState.formData[question.id] = event.currentTarget.dataset.value;
+          homeAssistantState.planningState.formData[question.id] =
+            event.currentTarget.dataset.value;
           renderHomeAssistantPlanning();
         });
         choice.dataset.value = optionValue;
@@ -3392,9 +3932,10 @@
 
     function buildQuestionField(question) {
       var field = document.createElement('div');
-      field.className = question.type === 'file'
-        ? 'home-assistant-planning-upload'
-        : 'home-assistant-planning-field';
+      field.className =
+        question.type === 'file'
+          ? 'home-assistant-planning-upload'
+          : 'home-assistant-planning-field';
 
       if (question.type === 'file') {
         var uploadText = document.createElement('p');
@@ -3403,9 +3944,10 @@
         if (uploads[question.id]) {
           var uploadStatus = document.createElement('span');
           uploadStatus.className = 'home-assistant-planning-upload-status';
-          uploadStatus.textContent = question.file_config && question.file_config.opened_status
-            ? question.file_config.opened_status
-            : 'Upload modal opened for this file.';
+          uploadStatus.textContent =
+            question.file_config && question.file_config.opened_status
+              ? question.file_config.opened_status
+              : 'Upload modal opened for this file.';
           uploadText.appendChild(document.createElement('br'));
           uploadText.appendChild(uploadStatus);
         }
@@ -3413,9 +3955,10 @@
         var uploadButton = document.createElement('button');
         uploadButton.type = 'button';
         uploadButton.className = 'modern-btn modern-btn-secondary';
-        uploadButton.textContent = question.file_config && question.file_config.button_label
-          ? question.file_config.button_label
-          : (question.label || 'Attach File');
+        uploadButton.textContent =
+          question.file_config && question.file_config.button_label
+            ? question.file_config.button_label
+            : question.label || 'Attach File';
         uploadButton.disabled = isSubmitting;
         uploadButton.addEventListener('click', function () {
           openWorkspacePlanningFileUpload(question.id);
@@ -3512,7 +4055,7 @@
     submitButton.className = 'modern-btn modern-btn-primary';
     submitButton.textContent = isSubmitting
       ? 'Sending…'
-      : (planningState.schema.submit_label || ('Continue With ' + planningState.agentLabel));
+      : planningState.schema.submit_label || 'Continue With ' + planningState.agentLabel;
     submitButton.disabled = isSubmitting;
     actions.appendChild(submitButton);
 
@@ -3544,7 +4087,11 @@
       window.setTimeout(function () {
         var field = container.querySelector('[name="' + focusName + '"]');
         if (!field) {
-          field = container.querySelector('[data-planning-focus="' + focusName + '"] .home-assistant-planning-choice:not([disabled])');
+          field = container.querySelector(
+            '[data-planning-focus="' +
+              focusName +
+              '"] .home-assistant-planning-choice:not([disabled])'
+          );
         }
         if (field && typeof field.focus === 'function') {
           field.focus();
@@ -3570,15 +4117,17 @@
     }
 
     var isSubmitting = Boolean(replyState.submitting || homeAssistantState.busy);
-    var workflowStep = replyState.workflowStep && typeof replyState.workflowStep === 'object'
-      ? replyState.workflowStep
-      : null;
-    var choiceStep = workflowStep &&
+    var workflowStep =
+      replyState.workflowStep && typeof replyState.workflowStep === 'object'
+        ? replyState.workflowStep
+        : null;
+    var choiceStep =
+      workflowStep &&
       String(workflowStep.step_type || '').trim() === 'ask_choice' &&
       Array.isArray(workflowStep.choices) &&
       workflowStep.choices.length > 0
-      ? workflowStep
-      : null;
+        ? workflowStep
+        : null;
     var choiceRequiresText = Boolean(choiceStep && choiceStep.free_text_allowed);
     var card = document.createElement('div');
     card.className = 'home-assistant-inline-reply-card';
@@ -3606,9 +4155,10 @@
 
     var planChip = document.createElement('span');
     planChip.className = 'home-assistant-inline-reply-chip';
-    planChip.textContent = replyState.linkedTask && replyState.linkedTask.id
-      ? 'Main task added'
-      : 'Linked to workspace plan';
+    planChip.textContent =
+      replyState.linkedTask && replyState.linkedTask.id
+        ? 'Main task added'
+        : 'Linked to workspace plan';
     meta.appendChild(planChip);
     card.appendChild(meta);
 
@@ -3621,9 +4171,10 @@
 
     var title = document.createElement('div');
     title.className = 'home-assistant-inline-reply-title';
-    title.textContent = choiceStep && String(choiceStep.title || '').trim()
-      ? String(choiceStep.title || '').trim()
-      : 'Review the current plan, then complete this subtask.';
+    title.textContent =
+      choiceStep && String(choiceStep.title || '').trim()
+        ? String(choiceStep.title || '').trim()
+        : 'Review the current plan, then complete this subtask.';
     card.appendChild(title);
 
     if (replyState.latestReplyText) {
@@ -3637,7 +4188,9 @@
 
       var previewMeta = document.createElement('div');
       previewMeta.className = 'home-assistant-inline-reply-preview-meta';
-      previewMeta.textContent = (replyState.agentLabel || getWorkspaceHomeAssistantDisplayName()) + ' is carrying this planning thread.';
+      previewMeta.textContent =
+        (replyState.agentLabel || getWorkspaceHomeAssistantDisplayName()) +
+        ' is carrying this planning thread.';
       preview.appendChild(previewMeta);
 
       var previewBody = document.createElement('div');
@@ -3659,7 +4212,9 @@
       var choicePromptsBody = document.createElement('div');
       choicePromptsBody.className = 'home-assistant-inline-reply-copy';
       choicePromptsBody.style.marginBottom = '0';
-      choicePromptsBody.textContent = String(choiceStep.summary || 'Choose one option below to continue this plan.').trim();
+      choicePromptsBody.textContent = String(
+        choiceStep.summary || 'Choose one option below to continue this plan.'
+      ).trim();
       choicePrompts.appendChild(choicePromptsBody);
 
       card.appendChild(choicePrompts);
@@ -3690,8 +4245,8 @@
     copy.textContent = choiceStep
       ? 'Choose one option to move the workspace plan forward. Open full chat instead if this subtask needs more explanation.'
       : replyState.questionPrompts && replyState.questionPrompts.length > 0
-      ? 'Answer the open planning questions below, or move this to full chat if you want a longer back-and-forth.'
-      : 'Complete this subtask below, or move this to full chat if the plan needs a longer back-and-forth.';
+        ? 'Answer the open planning questions below, or move this to full chat if you want a longer back-and-forth.'
+        : 'Complete this subtask below, or move this to full chat if the plan needs a longer back-and-forth.';
     card.appendChild(copy);
 
     var form = document.createElement('form');
@@ -3702,13 +4257,19 @@
       var choiceGroup = document.createElement('div');
       choiceGroup.className = 'home-assistant-planning-choice-group';
 
-      for (var i = 0; i < choiceStep.choices.length; i++) { // eslint-disable-line no-redeclare
+      // eslint-disable-next-line no-redeclare
+      for (var i = 0; i < choiceStep.choices.length; i++) {
         (function (choice) {
           var choiceButton = document.createElement('button');
           choiceButton.type = 'button';
-          choiceButton.className = 'home-assistant-planning-choice' + (replyState.selectedChoiceId === choice.id ? ' is-selected' : '');
+          choiceButton.className =
+            'home-assistant-planning-choice' +
+            (replyState.selectedChoiceId === choice.id ? ' is-selected' : '');
           choiceButton.disabled = isSubmitting;
-          choiceButton.setAttribute('aria-pressed', replyState.selectedChoiceId === choice.id ? 'true' : 'false');
+          choiceButton.setAttribute(
+            'aria-pressed',
+            replyState.selectedChoiceId === choice.id ? 'true' : 'false'
+          );
           choiceButton.addEventListener('click', function () {
             if (!homeAssistantState.inlineReplyState || isSubmitting) return;
             homeAssistantState.inlineReplyState.selectedChoiceId = choice.id;
@@ -3719,7 +4280,9 @@
 
           var choiceLabel = document.createElement('span');
           choiceLabel.className = 'home-assistant-planning-choice-label';
-          choiceLabel.textContent = choice.number ? choice.number + '. ' + choice.label : choice.label;
+          choiceLabel.textContent = choice.number
+            ? choice.number + '. ' + choice.label
+            : choice.label;
           choiceButton.appendChild(choiceLabel);
 
           if (choice.description) {
@@ -3769,8 +4332,8 @@
     sendButton.textContent = isSubmitting
       ? 'Sending…'
       : choiceStep
-      ? 'Complete Subtask'
-      : 'Submit Subtask';
+        ? 'Complete Subtask'
+        : 'Submit Subtask';
     actions.appendChild(sendButton);
 
     var openChatButton = document.createElement('button');
@@ -3801,7 +4364,8 @@
     if (!replyState || replyState.submitting) return;
 
     var workflowResponse = buildInlineReplyWorkflowResponse(replyState, replyState.draft || '');
-    var choiceStep = replyState.workflowStep &&
+    var choiceStep =
+      replyState.workflowStep &&
       String(replyState.workflowStep.step_type || '').trim() === 'ask_choice' &&
       Array.isArray(replyState.workflowStep.choices) &&
       replyState.workflowStep.choices.length > 0;
@@ -3815,7 +4379,9 @@
         renderHomeAssistantInlineReply();
         return;
       }
-      submittedText = String(replyState.selectedChoiceLabel || replyState.selectedChoiceId || '').trim();
+      submittedText = String(
+        replyState.selectedChoiceLabel || replyState.selectedChoiceId || ''
+      ).trim();
       if (text) {
         submittedText += ': ' + text;
       }
@@ -3833,21 +4399,35 @@
     renderHomeAssistantInlineReply();
     appendHomeAssistantMessage('user', submittedText);
     setHomeAssistantBusy(true, 'Sending Reply…');
-    setHomeAssistantRoutingSummary(replyState.agentLabel, 'Continuing inline with the workspace manager.');
+    setHomeAssistantRoutingSummary(
+      replyState.agentLabel,
+      'Continuing inline with the workspace manager.'
+    );
 
     try {
-      await openWorkspaceAssistantForPrompt(submittedText, replyState.routeContext, replyState.intent, {
-        reuseExistingSession: true,
-        workflowResponse: workflowResponse
-      });
+      await openWorkspaceAssistantForPrompt(
+        submittedText,
+        replyState.routeContext,
+        replyState.intent,
+        {
+          reuseExistingSession: true,
+          workflowResponse: workflowResponse
+        }
+      );
     } catch (error) {
-      dashLog.debug('Inline workspace reply failed', { error: error && error.message || error });
+      dashLog.debug('Inline workspace reply failed', { error: (error && error.message) || error });
       if (homeAssistantState.inlineReplyState === replyState) {
         replyState.submitting = false;
         renderHomeAssistantInlineReply();
       }
-      appendHomeAssistantMessage('assistant', 'I could not send that reply right now. Please try again or open chat.');
-      setHomeAssistantRoutingSummary('Inline Reply Failed', 'Could not continue with the workspace manager right now.');
+      appendHomeAssistantMessage(
+        'assistant',
+        'I could not send that reply right now. Please try again or open chat.'
+      );
+      setHomeAssistantRoutingSummary(
+        'Inline Reply Failed',
+        'Could not continue with the workspace manager right now.'
+      );
     } finally {
       if (homeAssistantState.inlineReplyState === replyState) {
         replyState.submitting = false;
@@ -3876,7 +4456,9 @@
       (function (action) {
         var button = document.createElement('button');
         button.type = 'button';
-        button.className = 'modern-btn ' + (action.variant === 'secondary' ? 'modern-btn-secondary' : 'modern-btn-primary');
+        button.className =
+          'modern-btn ' +
+          (action.variant === 'secondary' ? 'modern-btn-secondary' : 'modern-btn-primary');
         button.style.fontSize = '0.82rem';
         button.textContent = action.label;
         button.disabled = Boolean(action.disabled);
@@ -3918,15 +4500,23 @@
         deleted = await manager.deleteSession(sessionId);
       } else {
         if (!window.confirm('Are you sure you want to delete this session?')) return;
-        var response = await fetch('/api/sessions/' + encodeURIComponent(sessionId), { method: 'DELETE' });
+        var response = await fetch('/api/sessions/' + encodeURIComponent(sessionId), {
+          method: 'DELETE'
+        });
         deleted = Boolean(response && response.ok);
       }
 
       if (!deleted) return;
       removeTrackedSession(sessionId);
-      appendHomeAssistantMessage('assistant', 'Deleted session "' + (sessionTitle || 'Session') + '".');
+      appendHomeAssistantMessage(
+        'assistant',
+        'Deleted session "' + (sessionTitle || 'Session') + '".'
+      );
     } catch (error) {
-      dashLog.debug('Failed to delete tracked session', { error: error && error.message || error, sessionId: sessionId });
+      dashLog.debug('Failed to delete tracked session', {
+        error: (error && error.message) || error,
+        sessionId: sessionId
+      });
       appendHomeAssistantMessage('assistant', 'I could not delete that session right now.');
     } finally {
       setHomeAssistantBusy(false);
@@ -3942,7 +4532,10 @@
       setHomeAssistantRoutingSummary('Session Opened', 'Opened selected session in chat.');
       openChatPanel();
     } catch (error) {
-      dashLog.debug('Failed to open tracked session', { error: error && error.message || error, sessionId: sessionId });
+      dashLog.debug('Failed to open tracked session', {
+        error: (error && error.message) || error,
+        sessionId: sessionId
+      });
     }
   }
 
@@ -3966,7 +4559,12 @@
       return;
     }
 
-    for (var i = 0; i < homeAssistantState.recentSessions.length && i < HOME_ASSISTANT_RECENT_SESSION_RENDER_LIMIT; i++) {
+    for (
+      var i = 0;
+      i < homeAssistantState.recentSessions.length &&
+      i < HOME_ASSISTANT_RECENT_SESSION_RENDER_LIMIT;
+      i++
+    ) {
       (function (item) {
         var titleText = String(item.prompt || item.title || 'Session');
         var row = document.createElement('div');
@@ -3981,7 +4579,8 @@
 
         var meta = document.createElement('div');
         meta.className = 'home-assistant-session-meta';
-        meta.textContent = String(item.agent_name || 'Assistant') + ' • ' + formatRelativeTime(item.created_at);
+        meta.textContent =
+          String(item.agent_name || 'Assistant') + ' • ' + formatRelativeTime(item.created_at);
 
         main.appendChild(title);
         main.appendChild(meta);
@@ -4021,7 +4620,10 @@
     if (homeAssistantState.recentSessions.length > HOME_ASSISTANT_RECENT_SESSION_RENDER_LIMIT) {
       var more = document.createElement('div');
       more.className = 'home-assistant-empty-note';
-      more.textContent = (homeAssistantState.recentSessions.length - HOME_ASSISTANT_RECENT_SESSION_RENDER_LIMIT) + ' more session(s) available in chat history.';
+      more.textContent =
+        homeAssistantState.recentSessions.length -
+        HOME_ASSISTANT_RECENT_SESSION_RENDER_LIMIT +
+        ' more session(s) available in chat history.';
       container.appendChild(more);
     }
 
@@ -4095,14 +4697,27 @@
   // route response remains authoritative when present.
   function detectHomeAppIntentLocal(text) {
     if (!text) return null;
-    var navCue = /(\bwhere\b|how do i|how to|take me to|go to|navigate|\bopen\b|show me|which page|what page)/.test(text);
-    var navTarget = /(action center|workspaces?|agents?|vaults?|settings|profile|mcp|connectors?|usage|dashboard)/.test(text);
+    var navCue =
+      /(\bwhere\b|how do i|how to|take me to|go to|navigate|\bopen\b|show me|which page|what page)/.test(
+        text
+      );
+    var navTarget =
+      /(action center|workspaces?|agents?|vaults?|settings|profile|mcp|connectors?|usage|dashboard)/.test(
+        text
+      );
     if (navCue && navTarget) return HOME_INTENTS.app_navigation;
-    if (/(task activity|my tasks|my workspaces|my sessions|my activity|how many tasks|recap|what did i work on)/.test(text)) {
+    if (
+      /(task activity|my tasks|my workspaces|my sessions|my activity|how many tasks|recap|what did i work on)/.test(
+        text
+      )
+    ) {
       return HOME_INTENTS.app_introspection;
     }
     var hasVerb = /(summarize|summary|overview|recap|report|review|status)/.test(text);
-    var hasNoun = /(task|tasks|workspace|workspaces|session|sessions|activity|opportunit|usage|cost|spending)/.test(text);
+    var hasNoun =
+      /(task|tasks|workspace|workspaces|session|sessions|activity|opportunit|usage|cost|spending)/.test(
+        text
+      );
     if (hasVerb && hasNoun) return HOME_INTENTS.app_introspection;
     return null;
   }
@@ -4187,7 +4802,11 @@
   }
 
   function detectMCPRequirement(prompt) {
-    var requirement = detectCapabilityRequirement(prompt, homeAssistantState.pendingIntent, homeAssistantState.pendingIntentVariant);
+    var requirement = detectCapabilityRequirement(
+      prompt,
+      homeAssistantState.pendingIntent,
+      homeAssistantState.pendingIntentVariant
+    );
     return requirement && requirement.requiresMCP ? requirement : null;
   }
 
@@ -4197,7 +4816,8 @@
   }
 
   function findCapabilityRequirementSkill(requirement, skills, enabledOnly) {
-    if (!requirement || !Array.isArray(requirement.preferredSkillNames) || !Array.isArray(skills)) return null;
+    if (!requirement || !Array.isArray(requirement.preferredSkillNames) || !Array.isArray(skills))
+      return null;
     var preferred = requirement.preferredSkillNames.map(normalizeSkillName);
     for (var i = 0; i < skills.length; i++) {
       var skill = skills[i];
@@ -4260,7 +4880,11 @@
     if (/^(please\s+)?(implement|build|create|add|fix|update|make)\b/.test(text)) {
       return true;
     }
-    if (/^(can|could|would)\s+you\s+(please\s+)?(implement|build|create|add|fix|update|make)\b/.test(text)) {
+    if (
+      /^(can|could|would)\s+you\s+(please\s+)?(implement|build|create|add|fix|update|make)\b/.test(
+        text
+      )
+    ) {
       return true;
     }
     return false;
@@ -4304,7 +4928,8 @@
       score += 100;
       score += (preferredNames.length - preferredNameIndex) * 8;
     }
-    if (serverName && scoreMCPRequirement(serverName.replace(/-/g, ' '), requirement) > 0) score += 35;
+    if (serverName && scoreMCPRequirement(serverName.replace(/-/g, ' '), requirement) > 0)
+      score += 35;
     if (preferredCategories.indexOf(category) >= 0) score += 40;
     if (description && scoreMCPRequirement(description, requirement) > 0) score += 20;
     if (promptText && serverName && promptText.indexOf(serverName) >= 0) score += 10;
@@ -4331,9 +4956,10 @@
 
   function getMCPManualConfigReason(server) {
     if (!server) return '';
-    var envRequired = server.env_required && typeof server.env_required === 'object'
-      ? Object.keys(server.env_required)
-      : [];
+    var envRequired =
+      server.env_required && typeof server.env_required === 'object'
+        ? Object.keys(server.env_required)
+        : [];
     if (envRequired.length > 0) {
       return 'requires environment variables: ' + envRequired.join(', ');
     }
@@ -4351,11 +4977,11 @@
   function buildMCPServerInstallPayload(server) {
     var args = Array.isArray(server && server.args) ? server.args.slice() : [];
     return {
-      name: String(server && server.name || '').trim(),
-      command: String(server && server.command || '').trim(),
+      name: String((server && server.name) || '').trim(),
+      command: String((server && server.command) || '').trim(),
       args: args,
       env: {},
-      transport: String(server && server.transport || 'stdio').trim() || 'stdio',
+      transport: String((server && server.transport) || 'stdio').trim() || 'stdio',
       enabled: true
     };
   }
@@ -4370,7 +4996,10 @@
       var data = await API.get(path);
       return Array.isArray(data && data.skills) ? data.skills : [];
     } catch (error) {
-      dashLog.debug('Failed to fetch agent skills', { agent: agentName, error: error && error.message || error });
+      dashLog.debug('Failed to fetch agent skills', {
+        agent: agentName,
+        error: (error && error.message) || error
+      });
       return [];
     }
   }
@@ -4385,7 +5014,10 @@
       });
       return Array.isArray(data && data.results) ? data.results : [];
     } catch (error) {
-      dashLog.debug('Failed to search skills marketplace', { query: normalizedQuery, error: error && error.message || error });
+      dashLog.debug('Failed to search skills marketplace', {
+        query: normalizedQuery,
+        error: (error && error.message) || error
+      });
       return [];
     }
   }
@@ -4406,7 +5038,11 @@
       return {
         status: 'install_failed',
         package: normalizedPackage,
-        message: 'Failed to install skill package "' + normalizedPackage + '": ' + String(error && error.message || error || '')
+        message:
+          'Failed to install skill package "' +
+          normalizedPackage +
+          '": ' +
+          String((error && error.message) || error || '')
       };
     }
   }
@@ -4429,7 +5065,13 @@
       return {
         status: 'enable_failed',
         skillName: skillName,
-        message: 'Failed to enable skill "' + skillName + '" for "' + agentName + '": ' + String(error && error.message || error || '')
+        message:
+          'Failed to enable skill "' +
+          skillName +
+          '" for "' +
+          agentName +
+          '": ' +
+          String((error && error.message) || error || '')
       };
     }
   }
@@ -4480,7 +5122,9 @@
       var data = await API.get('/api/mcp/marketplace');
       return Array.isArray(data && data.servers) ? data.servers : [];
     } catch (error) {
-      dashLog.debug('Failed to fetch MCP marketplace', { error: error && error.message || error });
+      dashLog.debug('Failed to fetch MCP marketplace', {
+        error: (error && error.message) || error
+      });
       return [];
     }
   }
@@ -4496,7 +5140,9 @@
         stats: data && data.stats && typeof data.stats === 'object' ? data.stats : {}
       };
     } catch (error) {
-      dashLog.debug('Failed to fetch configured MCP servers', { error: error && error.message || error });
+      dashLog.debug('Failed to fetch configured MCP servers', {
+        error: (error && error.message) || error
+      });
       return { servers: [], stats: {} };
     }
   }
@@ -4511,7 +5157,10 @@
     try {
       return await API.get('/api/workspaces/' + encodeURIComponent(workspaceId));
     } catch (error) {
-      dashLog.debug('Failed to fetch workspace MCP state', { workspaceId: workspaceId, error: error && error.message || error });
+      dashLog.debug('Failed to fetch workspace MCP state', {
+        workspaceId: workspaceId,
+        error: (error && error.message) || error
+      });
       return null;
     }
   }
@@ -4527,7 +5176,10 @@
       var data = await API.get('/api/workspaces/' + encodeURIComponent(workspaceId));
       return inferWorkspaceEntryAgentNameFromData(data);
     } catch (error) {
-      dashLog.debug('Failed to fetch workspace entry agent', { workspaceId: workspaceId, error: error && error.message || error });
+      dashLog.debug('Failed to fetch workspace entry agent', {
+        workspaceId: workspaceId,
+        error: (error && error.message) || error
+      });
       return '';
     }
   }
@@ -4572,7 +5224,10 @@
     if (loadedAgent) {
       homeAssistantState.workspaceEntryWorkspaceId = targetWorkspace;
       homeAssistantState.workspaceEntryAgentName = loadedAgent;
-      renderHomeAssistantWorkspaceIdentity({ surface: 'workspace_detail', workspace_id: targetWorkspace });
+      renderHomeAssistantWorkspaceIdentity({
+        surface: 'workspace_detail',
+        workspace_id: targetWorkspace
+      });
       return loadedAgent;
     }
 
@@ -4580,7 +5235,10 @@
     if (fetchedAgent) {
       homeAssistantState.workspaceEntryWorkspaceId = targetWorkspace;
       homeAssistantState.workspaceEntryAgentName = fetchedAgent;
-      renderHomeAssistantWorkspaceIdentity({ surface: 'workspace_detail', workspace_id: targetWorkspace });
+      renderHomeAssistantWorkspaceIdentity({
+        surface: 'workspace_detail',
+        workspace_id: targetWorkspace
+      });
       return fetchedAgent;
     }
 
@@ -4590,7 +5248,9 @@
   function getWorkspaceAgentInstanceByName(workspaceData, agentName) {
     if (!workspaceData || !agentName) return null;
     var target = normalizeToken(agentName);
-    var instances = Array.isArray(workspaceData.agent_instances) ? workspaceData.agent_instances : [];
+    var instances = Array.isArray(workspaceData.agent_instances)
+      ? workspaceData.agent_instances
+      : [];
     for (var i = 0; i < instances.length; i++) {
       var instance = instances[i];
       if (normalizeToken(instance && instance.name) === target) {
@@ -4603,7 +5263,9 @@
   function getWorkspaceAgentMCPAccessEntry(workspaceData, agentInstanceId) {
     if (!workspaceData || !agentInstanceId) return null;
     var target = normalizeToken(agentInstanceId);
-    var entries = Array.isArray(workspaceData.agent_mcp_access) ? workspaceData.agent_mcp_access : [];
+    var entries = Array.isArray(workspaceData.agent_mcp_access)
+      ? workspaceData.agent_mcp_access
+      : [];
     for (var i = 0; i < entries.length; i++) {
       var entry = entries[i];
       if (normalizeToken(entry && entry.agent_instance_id) === target) {
@@ -4651,7 +5313,7 @@
       name: serverName,
       enabled: enabled,
       status: status,
-      tool_count: Number(stats && (stats.tool_count || stats.toolCount) || 0),
+      tool_count: Number((stats && (stats.tool_count || stats.toolCount)) || 0),
       globally_configured: Boolean(globalConfig),
       workspace_binding: true
     };
@@ -4697,7 +5359,9 @@
 
   async function fetchAgentMCPServers(agentName, routeContext) {
     var normalizedContext = normalizeHomeRouteContext(routeContext);
-    var workspaceId = hasWorkspaceRouteContext(normalizedContext) ? String(normalizedContext.workspace_id || '').trim() : '';
+    var workspaceId = hasWorkspaceRouteContext(normalizedContext)
+      ? String(normalizedContext.workspace_id || '').trim()
+      : '';
     if (!workspaceId) {
       return [];
     }
@@ -4714,7 +5378,7 @@
       dashLog.debug('Failed to fetch workspace MCP bindings for agent', {
         agent: agentName,
         workspaceId: workspaceId,
-        error: error && error.message || error
+        error: (error && error.message) || error
       });
       return [];
     }
@@ -4723,7 +5387,12 @@
   async function bindMCPServerForWorkspace(workspaceId, agentName, serverName) {
     var normalizedWorkspaceId = String(workspaceId || '').trim();
     var normalizedServerName = String(serverName || '').trim();
-    if (!normalizedWorkspaceId || !normalizedServerName || typeof API === 'undefined' || typeof API.post !== 'function') {
+    if (
+      !normalizedWorkspaceId ||
+      !normalizedServerName ||
+      typeof API === 'undefined' ||
+      typeof API.post !== 'function'
+    ) {
       return { status: 'bind_failed', message: 'Workspace and MCP server are required.' };
     }
 
@@ -4732,7 +5401,8 @@
       return {
         status: 'bind_failed',
         serverName: normalizedServerName,
-        message: 'Failed to load workspace MCP bindings before applying "' + normalizedServerName + '".'
+        message:
+          'Failed to load workspace MCP bindings before applying "' + normalizedServerName + '".'
       };
     }
 
@@ -4743,28 +5413,47 @@
 
     try {
       if (!binding) {
-        var createResult = await API.post('/api/workspaces/' + encodeURIComponent(normalizedWorkspaceId) + '/mcp-bindings', {
-          server_name: normalizedServerName,
-          enabled: true
-        });
-        binding = createResult && createResult.binding ? createResult.binding : {
-          id: '',
-          server_name: normalizedServerName,
-          enabled: true
-        };
+        var createResult = await API.post(
+          '/api/workspaces/' + encodeURIComponent(normalizedWorkspaceId) + '/mcp-bindings',
+          {
+            server_name: normalizedServerName,
+            enabled: true
+          }
+        );
+        binding =
+          createResult && createResult.binding
+            ? createResult.binding
+            : {
+                id: '',
+                server_name: normalizedServerName,
+                enabled: true
+              };
         createdBinding = true;
       } else if (binding.enabled === false) {
-        var updateResult = await API.put('/api/workspaces/' + encodeURIComponent(normalizedWorkspaceId) + '/mcp-bindings/' + encodeURIComponent(binding.id), {
-          enabled: true
-        });
-        binding = updateResult && updateResult.binding ? updateResult.binding : Object.assign({}, binding, { enabled: true });
+        var updateResult = await API.put(
+          '/api/workspaces/' +
+            encodeURIComponent(normalizedWorkspaceId) +
+            '/mcp-bindings/' +
+            encodeURIComponent(binding.id),
+          {
+            enabled: true
+          }
+        );
+        binding =
+          updateResult && updateResult.binding
+            ? updateResult.binding
+            : Object.assign({}, binding, { enabled: true });
         enabledBinding = true;
       }
     } catch (error) {
       return {
         status: 'bind_failed',
         serverName: normalizedServerName,
-        message: 'Failed to bind MCP connector "' + normalizedServerName + '" in this workspace: ' + String(error && error.message || error || '')
+        message:
+          'Failed to bind MCP connector "' +
+          normalizedServerName +
+          '" in this workspace: ' +
+          String((error && error.message) || error || '')
       };
     }
 
@@ -4773,22 +5462,39 @@
       if (instance && instance.id) {
         var access = getWorkspaceAgentMCPAccessEntry(workspaceData, instance.id);
         if (access) {
-          var nextIds = uniqueValues((Array.isArray(access.enabled_binding_ids) ? access.enabled_binding_ids : [])
-            .map(function (value) { return String(value || '').trim(); })
-            .filter(Boolean)
-            .concat([String(binding.id || '').trim()]));
-          if (nextIds.length !== (Array.isArray(access.enabled_binding_ids) ? access.enabled_binding_ids.length : 0)
-            || nextIds.indexOf(String(binding.id || '').trim()) < 0) {
+          var nextIds = uniqueValues(
+            (Array.isArray(access.enabled_binding_ids) ? access.enabled_binding_ids : [])
+              .map(function (value) {
+                return String(value || '').trim();
+              })
+              .filter(Boolean)
+              .concat([String(binding.id || '').trim()])
+          );
+          if (
+            nextIds.length !==
+              (Array.isArray(access.enabled_binding_ids) ? access.enabled_binding_ids.length : 0) ||
+            nextIds.indexOf(String(binding.id || '').trim()) < 0
+          ) {
             try {
-              await API.put('/api/workspaces/' + encodeURIComponent(normalizedWorkspaceId) + '/agent-mcp-access/' + encodeURIComponent(instance.id), {
-                enabled_binding_ids: nextIds
-              });
+              await API.put(
+                '/api/workspaces/' +
+                  encodeURIComponent(normalizedWorkspaceId) +
+                  '/agent-mcp-access/' +
+                  encodeURIComponent(instance.id),
+                {
+                  enabled_binding_ids: nextIds
+                }
+              );
               accessUpdated = true;
             } catch (error) {
               return {
                 status: 'bind_failed',
                 serverName: normalizedServerName,
-                message: 'Bound MCP connector "' + normalizedServerName + '" in the workspace, but failed to update agent access: ' + String(error && error.message || error || '')
+                message:
+                  'Bound MCP connector "' +
+                  normalizedServerName +
+                  '" in the workspace, but failed to update agent access: ' +
+                  String((error && error.message) || error || '')
               };
             }
           }
@@ -4796,7 +5502,8 @@
       }
     }
 
-    var message = 'MCP connector "' + normalizedServerName + '" is already bound in this workspace.';
+    var message =
+      'MCP connector "' + normalizedServerName + '" is already bound in this workspace.';
     var status = 'already_bound';
     if (createdBinding) {
       status = 'bound_existing';
@@ -4817,12 +5524,17 @@
 
   async function bindMCPServerForRouteContext(agentName, serverName, routeContext) {
     var normalizedContext = normalizeHomeRouteContext(routeContext);
-    var workspaceId = hasWorkspaceRouteContext(normalizedContext) ? String(normalizedContext.workspace_id || '').trim() : '';
+    var workspaceId = hasWorkspaceRouteContext(normalizedContext)
+      ? String(normalizedContext.workspace_id || '').trim()
+      : '';
     if (!workspaceId) {
       return {
         status: 'requires_workspace',
         serverName: String(serverName || '').trim(),
-        message: 'MCP connectors are workspace-scoped now. Open a workspace first so I can bind "' + String(serverName || '').trim() + '".'
+        message:
+          'MCP connectors are workspace-scoped now. Open a workspace first so I can bind "' +
+          String(serverName || '').trim() +
+          '".'
       };
     }
     return bindMCPServerForWorkspace(workspaceId, agentName, serverName);
@@ -4836,7 +5548,9 @@
       if (Array.isArray(data && data.servers)) return data.servers;
       return [];
     } catch (error) {
-      dashLog.debug('Failed to fetch MCP browse registry', { error: error && error.message || error });
+      dashLog.debug('Failed to fetch MCP browse registry', {
+        error: (error && error.message) || error
+      });
       return [];
     }
   }
@@ -4869,7 +5583,8 @@
       score += 100;
       score += (preferredNames.length - preferredNameIndex) * 8;
     }
-    if (serverName && scoreMCPRequirement(serverName.replace(/-/g, ' '), requirement) > 0) score += 35;
+    if (serverName && scoreMCPRequirement(serverName.replace(/-/g, ' '), requirement) > 0)
+      score += 35;
     if (preferredCategories.indexOf(category) >= 0) score += 30;
     if (description && scoreMCPRequirement(description, requirement) > 0) score += 20;
     if (promptText && serverName && promptText.indexOf(serverName) >= 0) score += 10;
@@ -4892,7 +5607,8 @@
       score += 100;
       score += (preferredNames.length - preferredNameIndex) * 8;
     }
-    if (serverName && scoreMCPRequirement(serverName.replace(/-/g, ' '), requirement) > 0) score += 35;
+    if (serverName && scoreMCPRequirement(serverName.replace(/-/g, ' '), requirement) > 0)
+      score += 35;
     if (preferredCategories.indexOf(category) >= 0) score += 30;
     if (description && scoreMCPRequirement(description, requirement) > 0) score += 20;
     if (tags && scoreMCPRequirement(tags, requirement) > 0) score += 15;
@@ -4902,7 +5618,8 @@
   }
 
   function chooseConfiguredMCPServers(requirement, prompt, configuredServers, limit) {
-    if (!requirement || !Array.isArray(configuredServers) || configuredServers.length === 0) return [];
+    if (!requirement || !Array.isArray(configuredServers) || configuredServers.length === 0)
+      return [];
     var promptText = normalizeToken(prompt);
     var ranked = [];
     for (var i = 0; i < configuredServers.length; i++) {
@@ -4950,22 +5667,24 @@
   }
 
   function buildEmailMCPCandidateFromConfigured(server, stat) {
-    var runtimeLabel = String(stat && stat.status || server && server.status || '').trim();
+    var runtimeLabel = String((stat && stat.status) || (server && server.status) || '').trim();
     var runtimeStatus = normalizeToken(runtimeLabel);
     var legacy = isLegacyMCPServerName(server && server.name);
     return {
-      name: String(server && server.name || '').trim(),
-      description: String(server && server.description || '').trim(),
-      category: String(server && server.category || '').trim(),
+      name: String((server && server.name) || '').trim(),
+      description: String((server && server.description) || '').trim(),
+      category: String((server && server.category) || '').trim(),
       source: 'configured',
       isInstalled: true,
       selectable: true,
-      enabled: Boolean(stat && stat.enabled || server && server.enabled),
+      enabled: Boolean((stat && stat.enabled) || (server && server.enabled)),
       runtimeLabel: runtimeLabel,
       runtimeStatus: runtimeStatus,
       manualReason: '',
       legacy: legacy,
-      legacyReason: legacy ? 'Puppeteer MCP is deprecated upstream. Playwright is recommended.' : '',
+      legacyReason: legacy
+        ? 'Puppeteer MCP is deprecated upstream. Playwright is recommended.'
+        : '',
       rawServer: server
     };
   }
@@ -4974,10 +5693,10 @@
     var manualReason = getMCPManualConfigReason(server);
     var legacy = isLegacyMCPServerName(server && server.name);
     return {
-      name: String(server && server.name || '').trim(),
-      description: String(server && server.description || '').trim(),
-      category: String(server && server.category || '').trim(),
-      source: String(server && server.source || 'registry').trim() || 'registry',
+      name: String((server && server.name) || '').trim(),
+      description: String((server && server.description) || '').trim(),
+      category: String((server && server.category) || '').trim(),
+      source: String((server && server.source) || 'registry').trim() || 'registry',
       isInstalled: false,
       selectable: !manualReason,
       enabled: false,
@@ -4985,7 +5704,9 @@
       runtimeStatus: '',
       manualReason: manualReason,
       legacy: legacy,
-      legacyReason: legacy ? 'Puppeteer MCP is deprecated upstream. Playwright is recommended.' : '',
+      legacyReason: legacy
+        ? 'Puppeteer MCP is deprecated upstream. Playwright is recommended.'
+        : '',
       rawServer: server
     };
   }
@@ -5025,13 +5746,19 @@
       registryServers = Array.isArray(loaded[1]) ? loaded[1] : [];
       marketplaceServers = Array.isArray(loaded[2]) ? loaded[2] : [];
     } catch (error) {
-      dashLog.debug('Failed to build MCP browse candidates', { error: error && error.message || error });
+      dashLog.debug('Failed to build MCP browse candidates', {
+        error: (error && error.message) || error
+      });
     }
 
     var configuredMatches = chooseConfiguredMCPServers(requirement, prompt, snapshot.servers, 6);
     var registryMatches = chooseRegistryMCPServers(requirement, prompt, registryServers, 12);
     if (registryMatches.length === 0) {
-      var marketplaceCandidate = chooseMarketplaceMCPServer(requirement, prompt, marketplaceServers);
+      var marketplaceCandidate = chooseMarketplaceMCPServer(
+        requirement,
+        prompt,
+        marketplaceServers
+      );
       if (marketplaceCandidate) {
         registryMatches = [marketplaceCandidate];
       }
@@ -5045,10 +5772,12 @@
       var configuredName = normalizeMCPServerName(configuredServer && configuredServer.name);
       if (!configuredName || seen[configuredName]) continue;
       seen[configuredName] = true;
-      candidates.push(buildEmailMCPCandidateFromConfigured(
-        configuredServer,
-        lookupMCPServerStats(snapshot.stats, configuredServer.name)
-      ));
+      candidates.push(
+        buildEmailMCPCandidateFromConfigured(
+          configuredServer,
+          lookupMCPServerStats(snapshot.stats, configuredServer.name)
+        )
+      );
     }
 
     for (var j = 0; j < registryMatches.length; j++) {
@@ -5071,13 +5800,23 @@
   }
 
   function resolveBrowserMCPRequirement() {
-    return findMCPRequirementByKey('browser_automation') || {
-      key: 'browser_automation',
-      label: 'browser automation',
-      phrases: ['browser automation', 'control browser', 'use browser', 'website automation', 'playwright', 'browserbase', 'puppeteer'],
-      preferredServerNames: ['playwright', 'browserbase', 'puppeteer'],
-      preferredCategories: ['automation', 'development', 'productivity']
-    };
+    return (
+      findMCPRequirementByKey('browser_automation') || {
+        key: 'browser_automation',
+        label: 'browser automation',
+        phrases: [
+          'browser automation',
+          'control browser',
+          'use browser',
+          'website automation',
+          'playwright',
+          'browserbase',
+          'puppeteer'
+        ],
+        preferredServerNames: ['playwright', 'browserbase', 'puppeteer'],
+        preferredCategories: ['automation', 'development', 'productivity']
+      }
+    );
   }
 
   async function buildEmailMCPBrowseCandidates(prompt) {
@@ -5099,7 +5838,12 @@
       return {
         status: 'manual_config_required',
         serverName: candidate.name,
-        message: 'The selected server "' + candidate.name + '" cannot be auto-installed because it ' + candidate.manualReason + '.'
+        message:
+          'The selected server "' +
+          candidate.name +
+          '" cannot be auto-installed because it ' +
+          candidate.manualReason +
+          '.'
       };
     }
 
@@ -5107,7 +5851,8 @@
     if (!payload.name || !payload.command) {
       return {
         status: 'invalid_candidate',
-        message: 'The selected MCP server has incomplete install details. Open MCP settings to configure it manually.'
+        message:
+          'The selected MCP server has incomplete install details. Open MCP settings to configure it manually.'
       };
     }
 
@@ -5118,7 +5863,7 @@
         serverName: payload.name
       };
     } catch (error) {
-      var installError = String(error && error.message || error || '');
+      var installError = String((error && error.message) || error || '');
       if (installError.toLowerCase().indexOf('already exists') >= 0) {
         return {
           status: 'already_installed',
@@ -5140,25 +5885,41 @@
       return installOutcome;
     }
 
-    var bindOutcome = await bindMCPServerForRouteContext(agentName, installOutcome.serverName || candidate && candidate.name, routeContext);
+    var bindOutcome = await bindMCPServerForRouteContext(
+      agentName,
+      installOutcome.serverName || (candidate && candidate.name),
+      routeContext
+    );
     var bindStatus = normalizeToken(bindOutcome && bindOutcome.status);
     if (bindStatus === 'requires_workspace') {
       return {
         status: status === 'installed' ? 'installed_only' : 'already_installed',
-        serverName: installOutcome.serverName || candidate && candidate.name,
-        message: status === 'installed'
-          ? 'Installed MCP connector "' + (installOutcome.serverName || candidate && candidate.name || 'selected server') + '". Open a workspace to bind it before continuing.'
-          : 'MCP connector "' + (installOutcome.serverName || candidate && candidate.name || 'selected server') + '" is already installed. Open a workspace to bind it before continuing.'
+        serverName: installOutcome.serverName || (candidate && candidate.name),
+        message:
+          status === 'installed'
+            ? 'Installed MCP connector "' +
+              (installOutcome.serverName || (candidate && candidate.name) || 'selected server') +
+              '". Open a workspace to bind it before continuing.'
+            : 'MCP connector "' +
+              (installOutcome.serverName || (candidate && candidate.name) || 'selected server') +
+              '" is already installed. Open a workspace to bind it before continuing.'
       };
     }
 
     if (bindStatus === 'bound_existing' || bindStatus === 'already_bound') {
       return {
         status: status === 'installed' ? 'installed_and_bound' : bindOutcome.status,
-        serverName: bindOutcome.serverName || installOutcome.serverName || candidate && candidate.name,
-        message: status === 'installed'
-          ? 'Installed and bound MCP connector "' + (bindOutcome.serverName || installOutcome.serverName || candidate && candidate.name || 'selected server') + '" in this workspace.'
-          : bindOutcome.message
+        serverName:
+          bindOutcome.serverName || installOutcome.serverName || (candidate && candidate.name),
+        message:
+          status === 'installed'
+            ? 'Installed and bound MCP connector "' +
+              (bindOutcome.serverName ||
+                installOutcome.serverName ||
+                (candidate && candidate.name) ||
+                'selected server') +
+              '" in this workspace.'
+            : bindOutcome.message
       };
     }
 
@@ -5167,14 +5928,14 @@
 
   async function openScopedMCPBrowseModal(agentName, prompt, routeContext, options) {
     var modalOptions = options || {};
-    var buildCandidates = typeof modalOptions.buildCandidates === 'function'
-      ? modalOptions.buildCandidates
-      : null;
+    var buildCandidates =
+      typeof modalOptions.buildCandidates === 'function' ? modalOptions.buildCandidates : null;
     if (!buildCandidates) return { status: 'invalid_config' };
 
     var bundle = await buildCandidates(prompt);
     var candidates = Array.isArray(bundle && bundle.candidates) ? bundle.candidates : [];
-    var modalPrefix = String(modalOptions.modalPrefix || 'homeMCPBrowseModal').trim() || 'homeMCPBrowseModal';
+    var modalPrefix =
+      String(modalOptions.modalPrefix || 'homeMCPBrowseModal').trim() || 'homeMCPBrowseModal';
     var modalId = modalPrefix + '-' + Date.now();
     var searchId = modalId + '-search';
     var countId = modalId + '-count';
@@ -5194,37 +5955,68 @@
     modalElement.id = modalId;
     modalElement.tabIndex = -1;
     modalElement.setAttribute('aria-hidden', 'true');
-    modalElement.innerHTML = ''
-      + '<div class="modal-dialog modal-lg modal-dialog-scrollable">'
-      + '  <div class="modal-content" style="background: var(--bg-secondary); border: 1px solid var(--border-color);">'
-      + '    <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">'
-      + '      <h5 class="modal-title" style="color: var(--text-primary);">' + String(modalOptions.title || 'Browse MCP Connectors') + '</h5>'
-      + '      <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>'
-      + '    </div>'
-      + '    <div class="modal-body">'
-      + '      <p class="small mb-3" style="color: var(--text-secondary);">' + String(modalOptions.description || 'Select an MCP connector and apply it with explicit approval.') + '</p>'
-      + '      <div class="input-group mb-2">'
-      + '        <span class="input-group-text" style="background: var(--bg-tertiary); border-color: var(--border-color); color: var(--text-secondary);">Search</span>'
-      + '        <input id="' + searchId + '" type="text" class="form-control" placeholder="' + String(modalOptions.searchPlaceholder || 'Search connectors…') + '" style="background: var(--bg-tertiary); border-color: var(--border-color); color: var(--text-primary);">'
-      + '      </div>'
-      + '      <div id="' + countId + '" class="small mb-2" style="color: var(--text-secondary);"></div>'
-      + '      <div id="' + listId + '" class="list-group" style="max-height: 360px; overflow-y: auto;"></div>'
-      + '      <div id="' + noteId + '" class="small mt-3" style="color: var(--text-secondary);"></div>'
-      + '    </div>'
-      + '    <div class="modal-footer" style="border-top: 1px solid var(--border-color);">'
-      + '      <button id="' + openPageId + '" type="button" class="modern-btn modern-btn-secondary">Open MCP Page</button>'
-      + (switchLabel
-        ? ('      <button id="' + switchId + '" type="button" class="modern-btn modern-btn-secondary">' + switchLabel + '</button>')
-        : '')
-      + '      <button id="' + skipId + '" type="button" class="modern-btn modern-btn-secondary">'
-      + (agentName ? String(modalOptions.skipWithAgentLabel || 'Continue Without MCP') : String(modalOptions.skipWithoutAgentLabel || 'Close'))
-      + '      </button>'
-      + '      <button id="' + confirmId + '" type="button" class="modern-btn modern-btn-primary" disabled>'
-      + (agentName ? String(modalOptions.confirmWithAgentLabel || 'Use Selected & Continue') : String(modalOptions.confirmWithoutAgentLabel || 'Install Selected'))
-      + '      </button>'
-      + '    </div>'
-      + '  </div>'
-      + '</div>';
+    modalElement.innerHTML =
+      '' +
+      '<div class="modal-dialog modal-lg modal-dialog-scrollable">' +
+      '  <div class="modal-content" style="background: var(--bg-secondary); border: 1px solid var(--border-color);">' +
+      '    <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">' +
+      '      <h5 class="modal-title" style="color: var(--text-primary);">' +
+      String(modalOptions.title || 'Browse MCP Connectors') +
+      '</h5>' +
+      '      <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>' +
+      '    </div>' +
+      '    <div class="modal-body">' +
+      '      <p class="small mb-3" style="color: var(--text-secondary);">' +
+      String(
+        modalOptions.description || 'Select an MCP connector and apply it with explicit approval.'
+      ) +
+      '</p>' +
+      '      <div class="input-group mb-2">' +
+      '        <span class="input-group-text" style="background: var(--bg-tertiary); border-color: var(--border-color); color: var(--text-secondary);">Search</span>' +
+      '        <input id="' +
+      searchId +
+      '" type="text" class="form-control" placeholder="' +
+      String(modalOptions.searchPlaceholder || 'Search connectors…') +
+      '" style="background: var(--bg-tertiary); border-color: var(--border-color); color: var(--text-primary);">' +
+      '      </div>' +
+      '      <div id="' +
+      countId +
+      '" class="small mb-2" style="color: var(--text-secondary);"></div>' +
+      '      <div id="' +
+      listId +
+      '" class="list-group" style="max-height: 360px; overflow-y: auto;"></div>' +
+      '      <div id="' +
+      noteId +
+      '" class="small mt-3" style="color: var(--text-secondary);"></div>' +
+      '    </div>' +
+      '    <div class="modal-footer" style="border-top: 1px solid var(--border-color);">' +
+      '      <button id="' +
+      openPageId +
+      '" type="button" class="modern-btn modern-btn-secondary">Open MCP Page</button>' +
+      (switchLabel
+        ? '      <button id="' +
+          switchId +
+          '" type="button" class="modern-btn modern-btn-secondary">' +
+          switchLabel +
+          '</button>'
+        : '') +
+      '      <button id="' +
+      skipId +
+      '" type="button" class="modern-btn modern-btn-secondary">' +
+      (agentName
+        ? String(modalOptions.skipWithAgentLabel || 'Continue Without MCP')
+        : String(modalOptions.skipWithoutAgentLabel || 'Close')) +
+      '      </button>' +
+      '      <button id="' +
+      confirmId +
+      '" type="button" class="modern-btn modern-btn-primary" disabled>' +
+      (agentName
+        ? String(modalOptions.confirmWithAgentLabel || 'Use Selected & Continue')
+        : String(modalOptions.confirmWithoutAgentLabel || 'Install Selected')) +
+      '      </button>' +
+      '    </div>' +
+      '  </div>' +
+      '</div>';
 
     document.body.appendChild(modalElement);
 
@@ -5255,7 +6047,7 @@
       if (!listElement) return;
       listElement.innerHTML = '';
 
-      var filtered = filterEmailMCPCandidates(candidates, searchInput && searchInput.value || '');
+      var filtered = filterEmailMCPCandidates(candidates, (searchInput && searchInput.value) || '');
       if (countElement) {
         countElement.textContent = filtered.length + ' connector(s) found';
       }
@@ -5264,7 +6056,9 @@
         var empty = document.createElement('div');
         empty.className = 'text-center py-4';
         empty.style.color = 'var(--text-secondary)';
-        empty.textContent = String(modalOptions.emptyStateText || 'No matching MCP connectors found.');
+        empty.textContent = String(
+          modalOptions.emptyStateText || 'No matching MCP connectors found.'
+        );
         listElement.appendChild(empty);
         selectedName = '';
         updateConfirmState();
@@ -5293,7 +6087,7 @@
           radio.addEventListener('change', function () {
             selectedName = candidate.name;
             updateConfirmState();
-            setNote(candidate.manualReason ? ('Note: ' + candidate.manualReason + '.') : '', false);
+            setNote(candidate.manualReason ? 'Note: ' + candidate.manualReason + '.' : '', false);
           });
 
           var content = document.createElement('div');
@@ -5321,9 +6115,14 @@
           if (candidate.category) addBadge(candidate.category, 'bg-secondary');
           if (candidate.source) addBadge(candidate.source, 'bg-dark');
           if (candidate.isInstalled) addBadge('installed', 'bg-primary');
-          if (candidate.runtimeLabel) addBadge(candidate.runtimeLabel, candidate.runtimeStatus === 'running' ? 'bg-success' : 'bg-warning text-dark');
+          if (candidate.runtimeLabel)
+            addBadge(
+              candidate.runtimeLabel,
+              candidate.runtimeStatus === 'running' ? 'bg-success' : 'bg-warning text-dark'
+            );
           if (candidate.legacy) addBadge('legacy', 'bg-warning text-dark');
-          if (!candidate.selectable && candidate.manualReason) addBadge('manual setup', 'bg-warning text-dark');
+          if (!candidate.selectable && candidate.manualReason)
+            addBadge('manual setup', 'bg-warning text-dark');
 
           top.appendChild(name);
           top.appendChild(badges);
@@ -5335,7 +6134,9 @@
 
           var note = document.createElement('div');
           note.className = 'small mt-1';
-          note.style.color = candidate.manualReason ? 'var(--warning-color, #ffc107)' : 'var(--text-secondary)';
+          note.style.color = candidate.manualReason
+            ? 'var(--warning-color, #ffc107)'
+            : 'var(--text-secondary)';
           if (candidate.manualReason) {
             note.textContent = 'Requires manual setup: ' + candidate.manualReason + '.';
           } else if (candidate.legacy && candidate.legacyReason) {
@@ -5345,7 +6146,10 @@
           } else if (candidate.isInstalled) {
             note.textContent = 'Installed. Selecting this will bind it from the active workspace.';
           } else {
-            note.textContent = String(modalOptions.pendingInstallText || 'Will be installed and then bound from the active workspace.');
+            note.textContent = String(
+              modalOptions.pendingInstallText ||
+                'Will be installed and then bound from the active workspace.'
+            );
           }
 
           content.appendChild(top);
@@ -5379,12 +6183,16 @@
         bsModal.hide();
       }
 
-      modalElement.addEventListener('hidden.bs.modal', function () {
-        if (done) return;
-        done = true;
-        modalElement.remove();
-        resolve(finalResult || { status: 'cancelled' });
-      }, { once: true });
+      modalElement.addEventListener(
+        'hidden.bs.modal',
+        function () {
+          if (done) return;
+          done = true;
+          modalElement.remove();
+          resolve(finalResult || { status: 'cancelled' });
+        },
+        { once: true }
+      );
 
       if (searchInput) {
         searchInput.addEventListener('input', function () {
@@ -5440,13 +6248,29 @@
           try {
             var outcome = await applyEmailMCPCandidate(agentName, selectedCandidate, routeContext);
             var outcomeStatus = normalizeToken(outcome && outcome.status);
-            if (['already_bound', 'bound_existing', 'installed_and_bound', 'installed_only', 'already_installed'].indexOf(outcomeStatus) >= 0) {
+            if (
+              [
+                'already_bound',
+                'bound_existing',
+                'installed_and_bound',
+                'installed_only',
+                'already_installed'
+              ].indexOf(outcomeStatus) >= 0
+            ) {
               closeWith(outcome);
               return;
             }
-            setNote(outcome && outcome.message ? outcome.message : 'Could not apply the selected MCP connector.', true);
+            setNote(
+              outcome && outcome.message
+                ? outcome.message
+                : 'Could not apply the selected MCP connector.',
+              true
+            );
           } catch (error) {
-            setNote(String(error && error.message || error || 'Unexpected MCP setup failure'), true);
+            setNote(
+              String((error && error.message) || error || 'Unexpected MCP setup failure'),
+              true
+            );
           } finally {
             if (confirmButton) {
               confirmButton.textContent = originalLabel;
@@ -5469,7 +6293,8 @@
     return openScopedMCPBrowseModal(agentName, prompt, routeContext, {
       modalPrefix: 'homeEmailMCPBrowseModal',
       title: 'Browse Email MCP Connectors',
-      description: 'Select an email connector for Gmail, Outlook, or IMAP. Installed connectors are bound from the active workspace when one is available.',
+      description:
+        'Select an email connector for Gmail, Outlook, or IMAP. Installed connectors are bound from the active workspace when one is available.',
       searchPlaceholder: 'gmail, outlook, imap…',
       emptyStateText: 'No matching email MCP connectors found.',
       pendingInstallText: 'Will be installed and then bound in the active workspace.',
@@ -5483,7 +6308,8 @@
     return openScopedMCPBrowseModal(agentName, prompt, routeContext, {
       modalPrefix: 'homeBrowserMCPBrowseModal',
       title: 'Browse Browser Control MCP',
-      description: 'Select a browser-control connector (Playwright, Browserbase, or Puppeteer). Installed connectors are bound from the active workspace when one is available.',
+      description:
+        'Select a browser-control connector (Playwright, Browserbase, or Puppeteer). Installed connectors are bound from the active workspace when one is available.',
       searchPlaceholder: 'playwright, browserbase, puppeteer…',
       emptyStateText: 'No matching browser-control MCP connectors found.',
       pendingInstallText: 'Will be installed and then bound in the active workspace.',
@@ -5496,9 +6322,10 @@
   async function runEmailAccessMCPSelection(agentName, prompt, startingMode, routeContext) {
     var mode = normalizeToken(startingMode) === 'browser' ? 'browser' : 'email';
     for (var i = 0; i < 4; i++) {
-      var result = mode === 'browser'
-        ? await openBrowserControlMCPBrowseModal(agentName, prompt, routeContext)
-        : await openEmailMCPBrowseModal(agentName, prompt, routeContext);
+      var result =
+        mode === 'browser'
+          ? await openBrowserControlMCPBrowseModal(agentName, prompt, routeContext)
+          : await openEmailMCPBrowseModal(agentName, prompt, routeContext);
       var status = normalizeToken(result && result.status);
       if (status === 'switch_browse') {
         var target = normalizeToken(result && result.target);
@@ -5513,7 +6340,9 @@
   function formatEmailMCPOptionSummary(emailAdvice) {
     if (!emailAdvice) return '';
     var lines = [];
-    var configured = Array.isArray(emailAdvice.configuredMatches) ? emailAdvice.configuredMatches : [];
+    var configured = Array.isArray(emailAdvice.configuredMatches)
+      ? emailAdvice.configuredMatches
+      : [];
     var marketplace = emailAdvice.marketplaceMatch;
 
     lines.push('Email setup options:');
@@ -5529,9 +6358,15 @@
     } else {
       lines.push('   If no connector is installed yet, browse and add Gmail, Outlook, or IMAP.');
     }
-    lines.push('2) Use Browser Control MCP (Playwright/Browserbase/Puppeteer) when mailbox APIs are unavailable.');
-    lines.push('3) Create a dedicated Email Assistant and bind MCP from the target workspace after setup.');
-    lines.push('Safety defaults: start read-only and require explicit approval before sending or deleting.');
+    lines.push(
+      '2) Use Browser Control MCP (Playwright/Browserbase/Puppeteer) when mailbox APIs are unavailable.'
+    );
+    lines.push(
+      '3) Create a dedicated Email Assistant and bind MCP from the target workspace after setup.'
+    );
+    lines.push(
+      'Safety defaults: start read-only and require explicit approval before sending or deleting.'
+    );
 
     return lines.join('\n');
   }
@@ -5546,14 +6381,13 @@
     var configuredServers = [];
     var marketplaceServers = [];
     try {
-      var loaded = await Promise.all([
-        fetchConfiguredMCPServers(),
-        fetchMarketplaceMCPServers()
-      ]);
+      var loaded = await Promise.all([fetchConfiguredMCPServers(), fetchMarketplaceMCPServers()]);
       configuredServers = Array.isArray(loaded[0]) ? loaded[0] : [];
       marketplaceServers = Array.isArray(loaded[1]) ? loaded[1] : [];
     } catch (error) {
-      dashLog.debug('Failed to prepare email MCP advice', { error: error && error.message || error });
+      dashLog.debug('Failed to prepare email MCP advice', {
+        error: (error && error.message) || error
+      });
     }
 
     return {
@@ -5572,41 +6406,68 @@
     }
 
     homeAssistantState.awaitingCreateConfirmation = true;
-    setHomeAssistantRoutingSummary('Email Setup Options', 'Choose email MCP, browser control MCP, or create a dedicated email agent.');
+    setHomeAssistantRoutingSummary(
+      'Email Setup Options',
+      'Choose email MCP, browser control MCP, or create a dedicated email agent.'
+    );
 
     function openSelection(mode) {
-      runEmailAccessMCPSelection('', prompt, mode, routeContext).then(function (result) {
-        var resultStatus = normalizeToken(result && result.status);
-        if (resultStatus === 'installed_only' || resultStatus === 'already_installed' || resultStatus === 'already_bound' || resultStatus === 'bound_existing' || resultStatus === 'installed_and_bound') {
-          appendHomeAssistantMessage('assistant', result.message || 'Selected MCP connector is ready.');
-        } else if (resultStatus === 'opened_mcp_page') {
-          appendHomeAssistantMessage('assistant', 'Opened MCP settings so you can review connector details.');
-        }
-      }).catch(function (error) {
-        dashLog.debug('Email MCP browse modal failed', { error: error && error.message || error });
-      });
+      runEmailAccessMCPSelection('', prompt, mode, routeContext)
+        .then(function (result) {
+          var resultStatus = normalizeToken(result && result.status);
+          if (
+            resultStatus === 'installed_only' ||
+            resultStatus === 'already_installed' ||
+            resultStatus === 'already_bound' ||
+            resultStatus === 'bound_existing' ||
+            resultStatus === 'installed_and_bound'
+          ) {
+            appendHomeAssistantMessage(
+              'assistant',
+              result.message || 'Selected MCP connector is ready.'
+            );
+          } else if (resultStatus === 'opened_mcp_page') {
+            appendHomeAssistantMessage(
+              'assistant',
+              'Opened MCP settings so you can review connector details.'
+            );
+          }
+        })
+        .catch(function (error) {
+          dashLog.debug('Email MCP browse modal failed', {
+            error: (error && error.message) || error
+          });
+        });
     }
 
     renderHomeAssistantActions([
       {
         label: 'Browse Email MCP',
         variant: 'primary',
-        onClick: function () { openSelection('email'); }
+        onClick: function () {
+          openSelection('email');
+        }
       },
       {
         label: 'Use Browser Control',
         variant: 'secondary',
-        onClick: function () { openSelection('browser'); }
+        onClick: function () {
+          openSelection('browser');
+        }
       },
       {
         label: 'Create Email Agent',
         variant: 'secondary',
-        onClick: function () { createAgentForPendingTask(); }
+        onClick: function () {
+          createAgentForPendingTask();
+        }
       },
       {
         label: 'Ask Another Task',
         variant: 'secondary',
-        onClick: function () { focusHomeAssistantInput(); }
+        onClick: function () {
+          focusHomeAssistantInput();
+        }
       }
     ]);
   }
@@ -5628,38 +6489,71 @@
       return { continueHandoff: true };
     }
 
-    appendHomeAssistantMessage('assistant', 'Before handoff, select an email connector or browser-control connector so this task can access your inbox.');
-    setHomeAssistantRoutingSummary('Email MCP Required', 'Select an email or browser-control connector before continuing.');
+    appendHomeAssistantMessage(
+      'assistant',
+      'Before handoff, select an email connector or browser-control connector so this task can access your inbox.'
+    );
+    setHomeAssistantRoutingSummary(
+      'Email MCP Required',
+      'Select an email or browser-control connector before continuing.'
+    );
 
     var selection = await runEmailAccessMCPSelection(agentName, prompt, 'email', routeContext);
     var selectionStatus = normalizeToken(selection && selection.status);
 
-    if (selectionStatus === 'already_bound' || selectionStatus === 'bound_existing' || selectionStatus === 'installed_and_bound') {
-      appendHomeAssistantMessage('assistant', selection.message || ('Bound MCP connector "' + (selection.serverName || 'selected server') + '" in this workspace.'));
+    if (
+      selectionStatus === 'already_bound' ||
+      selectionStatus === 'bound_existing' ||
+      selectionStatus === 'installed_and_bound'
+    ) {
+      appendHomeAssistantMessage(
+        'assistant',
+        selection.message ||
+          'Bound MCP connector "' +
+            (selection.serverName || 'selected server') +
+            '" in this workspace.'
+      );
       if (isLegacyMCPServerName(selection && selection.serverName)) {
-        appendHomeAssistantMessage('assistant', 'Note: Puppeteer MCP is legacy/deprecated. Playwright is recommended for browser control.');
+        appendHomeAssistantMessage(
+          'assistant',
+          'Note: Puppeteer MCP is legacy/deprecated. Playwright is recommended for browser control.'
+        );
       }
       return { continueHandoff: true };
     }
 
     if (selectionStatus === 'continue_without_mcp') {
-      appendHomeAssistantMessage('assistant', 'Continuing without an MCP connector. Email access may be unavailable.');
+      appendHomeAssistantMessage(
+        'assistant',
+        'Continuing without an MCP connector. Email access may be unavailable.'
+      );
       return { continueHandoff: true };
     }
 
     if (selectionStatus === 'requires_workspace') {
-      appendHomeAssistantMessage('assistant', selection.message || 'Selected MCP connector still needs a workspace binding before handoff.');
-      setHomeAssistantRoutingSummary('Workspace Required', 'Open a workspace before continuing with MCP-dependent email access.');
+      appendHomeAssistantMessage(
+        'assistant',
+        selection.message ||
+          'Selected MCP connector still needs a workspace binding before handoff.'
+      );
+      setHomeAssistantRoutingSummary(
+        'Workspace Required',
+        'Open a workspace before continuing with MCP-dependent email access.'
+      );
       renderHomeAssistantActions([
         {
           label: 'Open Workspaces',
           variant: 'primary',
-          onClick: function () { window.location.href = '/workspaces'; }
+          onClick: function () {
+            window.location.href = '/workspaces';
+          }
         },
         {
           label: 'Ask Another Task',
           variant: 'secondary',
-          onClick: function () { focusHomeAssistantInput(); }
+          onClick: function () {
+            focusHomeAssistantInput();
+          }
         }
       ]);
       return { continueHandoff: false };
@@ -5668,9 +6562,15 @@
     if (selection && selection.message) {
       appendHomeAssistantMessage('assistant', selection.message);
     } else {
-      appendHomeAssistantMessage('assistant', 'Email handoff paused. Select an MCP connector when you are ready.');
+      appendHomeAssistantMessage(
+        'assistant',
+        'Email handoff paused. Select an MCP connector when you are ready.'
+      );
     }
-    setHomeAssistantRoutingSummary('Waiting for MCP Selection', 'Email task is paused until MCP setup is completed.');
+    setHomeAssistantRoutingSummary(
+      'Waiting for MCP Selection',
+      'Email task is paused until MCP setup is completed.'
+    );
     return { continueHandoff: false };
   }
 
@@ -5678,12 +6578,18 @@
     var requirement = detectMCPRequirement(prompt);
     if (!requirement || !agentName) return null;
     var allowMutations = !(options && options.allowMutations === false);
-    var routeContext = options && options.routeContext ? options.routeContext : buildHomeRouteContext();
+    var routeContext =
+      options && options.routeContext ? options.routeContext : buildHomeRouteContext();
     var normalizedContext = normalizeHomeRouteContext(routeContext);
-    var workspaceId = hasWorkspaceRouteContext(normalizedContext) ? String(normalizedContext.workspace_id || '').trim() : '';
+    var workspaceId = hasWorkspaceRouteContext(normalizedContext)
+      ? String(normalizedContext.workspace_id || '').trim()
+      : '';
 
     if (!workspaceId) {
-      var missingWorkspaceMessage = 'MCP connectors are workspace-scoped now. Open a workspace before I bind the connector required for ' + requirement.label + '.';
+      var missingWorkspaceMessage =
+        'MCP connectors are workspace-scoped now. Open a workspace before I bind the connector required for ' +
+        requirement.label +
+        '.';
       return {
         status: 'requires_workspace',
         message: missingWorkspaceMessage
@@ -5704,7 +6610,10 @@
       return {
         status: 'existing_disabled',
         serverName: existing.name,
-        message: 'MCP connector "' + existing.name + '" matches this task but is not enabled in this workspace.'
+        message:
+          'MCP connector "' +
+          existing.name +
+          '" matches this task but is not enabled in this workspace.'
       };
     }
 
@@ -5722,7 +6631,10 @@
         if (!installCandidate) {
           return {
             status: 'not_found',
-            message: 'This task may need MCP (' + requirement.label + '), but no matching connector is currently configured.'
+            message:
+              'This task may need MCP (' +
+              requirement.label +
+              '), but no matching connector is currently configured.'
           };
         }
         targetServerName = installCandidate.name;
@@ -5732,7 +6644,12 @@
         return {
           status: 'candidate_available',
           serverName: targetServerName,
-          message: 'Found MCP connector "' + targetServerName + '" for ' + requirement.label + '. Select it to install and bind in this workspace.'
+          message:
+            'Found MCP connector "' +
+            targetServerName +
+            '" for ' +
+            requirement.label +
+            '. Select it to install and bind in this workspace.'
         };
       }
 
@@ -5742,7 +6659,14 @@
           return {
             status: 'needs_manual_config',
             serverName: targetServerName,
-            message: 'Found MCP server "' + targetServerName + '" for ' + requirement.label + ', but it ' + manualReason + '. Configure it in MCP settings first.'
+            message:
+              'Found MCP server "' +
+              targetServerName +
+              '" for ' +
+              requirement.label +
+              ', but it ' +
+              manualReason +
+              '. Configure it in MCP settings first.'
           };
         }
 
@@ -5750,19 +6674,28 @@
         if (!payload.name || !payload.command) {
           return {
             status: 'invalid_candidate',
-            message: 'Found an MCP candidate for ' + requirement.label + ', but its install configuration is incomplete.'
+            message:
+              'Found an MCP candidate for ' +
+              requirement.label +
+              ', but its install configuration is incomplete.'
           };
         }
 
         try {
           await API.post('/api/mcp/servers', payload);
         } catch (error) {
-          var installError = String(error && error.message || error || '');
+          var installError = String((error && error.message) || error || '');
           if (installError.toLowerCase().indexOf('already exists') < 0) {
             return {
               status: 'install_failed',
               serverName: payload.name,
-              message: 'I found MCP server "' + payload.name + '" for ' + requirement.label + ' but failed to install it: ' + installError
+              message:
+                'I found MCP server "' +
+                payload.name +
+                '" for ' +
+                requirement.label +
+                ' but failed to install it: ' +
+                installError
             };
           }
         }
@@ -5773,19 +6706,31 @@
       return {
         status: 'needs_bind',
         serverName: targetServerName,
-        message: 'MCP connector "' + targetServerName + '" is available. Select it to bind in this workspace before continuing.'
+        message:
+          'MCP connector "' +
+          targetServerName +
+          '" is available. Select it to bind in this workspace before continuing.'
       };
     }
 
-    var bindOutcome = await bindMCPServerForRouteContext(agentName, targetServerName, normalizedContext);
+    var bindOutcome = await bindMCPServerForRouteContext(
+      agentName,
+      targetServerName,
+      normalizedContext
+    );
     var bindStatus = normalizeToken(bindOutcome && bindOutcome.status);
     if (bindStatus !== 'already_bound' && bindStatus !== 'bound_existing') {
       return {
         status: bindOutcome && bindOutcome.status ? bindOutcome.status : 'bind_failed',
         serverName: targetServerName,
-        message: bindOutcome && bindOutcome.message
-          ? bindOutcome.message
-          : 'I found MCP server "' + targetServerName + '" for ' + requirement.label + ' but failed to bind it in this workspace.'
+        message:
+          bindOutcome && bindOutcome.message
+            ? bindOutcome.message
+            : 'I found MCP server "' +
+              targetServerName +
+              '" for ' +
+              requirement.label +
+              ' but failed to bind it in this workspace.'
       };
     }
 
@@ -5800,7 +6745,8 @@
     return {
       status: bindOutcome.status || 'bound_existing',
       serverName: targetServerName,
-      message: bindOutcome.message || ('Bound MCP connector "' + targetServerName + '" in this workspace.')
+      message:
+        bindOutcome.message || 'Bound MCP connector "' + targetServerName + '" in this workspace.'
     };
   }
 
@@ -5812,12 +6758,27 @@
     if (!normalized) return 'personal_calendar';
 
     var workspaceSignals = [
-      'workspace schedule', 'scheduled task', 'scheduled tasks', 'scheduler',
-      'next run', 'cron', 'run today in this workspace', 'workspace tasks'
+      'workspace schedule',
+      'scheduled task',
+      'scheduled tasks',
+      'scheduler',
+      'next run',
+      'cron',
+      'run today in this workspace',
+      'workspace tasks'
     ];
     var personalSignals = [
-      'my calendar', 'calendar', 'meeting', 'meetings', 'appointment', 'appointments',
-      'am i free', 'availability', 'free time', 'busy', 'events'
+      'my calendar',
+      'calendar',
+      'meeting',
+      'meetings',
+      'appointment',
+      'appointments',
+      'am i free',
+      'availability',
+      'free time',
+      'busy',
+      'events'
     ];
 
     for (var i = 0; i < workspaceSignals.length; i++) {
@@ -5833,7 +6794,11 @@
   }
 
   async function chooseCapabilitySkillPackage(requirement) {
-    if (!requirement || !Array.isArray(requirement.skillMarketplaceQueries) || requirement.skillMarketplaceQueries.length === 0) {
+    if (
+      !requirement ||
+      !Array.isArray(requirement.skillMarketplaceQueries) ||
+      requirement.skillMarketplaceQueries.length === 0
+    ) {
       return null;
     }
     var best = null;
@@ -5879,7 +6844,12 @@
     var actionLabels = [];
     for (var i = 0; i < plan.actions.length; i++) {
       var label = describeCapabilityAction(plan.actions[i]);
-      if (!label || plan.actions[i].type === 'handoff' || plan.actions[i].type === 'pause_for_user_choice') continue;
+      if (
+        !label ||
+        plan.actions[i].type === 'handoff' ||
+        plan.actions[i].type === 'pause_for_user_choice'
+      )
+        continue;
       actionLabels.push(label);
     }
 
@@ -5911,7 +6881,9 @@
 
     lines.push('Problem:');
     lines.push('- User request: "' + String(prompt || '').trim() + '"');
-    lines.push('- Ask Ori cannot satisfy this today using the currently available agents, skills, and workspace MCP bindings.');
+    lines.push(
+      '- Ask Ori cannot satisfy this today using the currently available agents, skills, and workspace MCP bindings.'
+    );
     lines.push('');
     lines.push('Observed gaps:');
     if (gaps.length === 0) {
@@ -5930,13 +6902,21 @@
         lines.push('- ' + label);
       }
     } else {
-      lines.push('- Add a capability requirement entry and the supporting skill/MCP flow for ' + requirementLabel + '.');
+      lines.push(
+        '- Add a capability requirement entry and the supporting skill/MCP flow for ' +
+          requirementLabel +
+          '.'
+      );
     }
     lines.push('');
     lines.push('Acceptance criteria:');
-    lines.push('- Ask Ori recognizes the request and produces a capability plan instead of refusing.');
+    lines.push(
+      '- Ask Ori recognizes the request and produces a capability plan instead of refusing.'
+    );
     lines.push('- Setup steps require explicit user confirmation before any mutation.');
-    lines.push('- Once the capability is bound in the workspace, Ask Ori can hand off or answer inline as appropriate.');
+    lines.push(
+      '- Once the capability is bound in the workspace, Ask Ori can hand off or answer inline as appropriate.'
+    );
     lines.push('');
     lines.push('Starter actions:');
     lines.push('1. Add or refine the capability requirement entry for this request.');
@@ -5963,12 +6943,17 @@
   }
 
   async function planCapabilityResolution(options) {
-    var prompt = String(options && options.prompt || '').trim();
+    var prompt = String((options && options.prompt) || '').trim();
     var intent = options && options.intent ? options.intent : homeAssistantState.pendingIntent;
-    var routeContext = options && options.routeContext ? options.routeContext : buildHomeRouteContext();
+    var routeContext =
+      options && options.routeContext ? options.routeContext : buildHomeRouteContext();
     var routeData = options && options.routeData ? options.routeData : null;
-    var matchedAgentName = String(options && options.matchedAgentName || '').trim();
-    var intentVariant = normalizeToken(options && options.intentVariant || homeAssistantState.pendingIntentVariant || routeData && routeData.intent_variant);
+    var matchedAgentName = String((options && options.matchedAgentName) || '').trim();
+    var intentVariant = normalizeToken(
+      (options && options.intentVariant) ||
+        homeAssistantState.pendingIntentVariant ||
+        (routeData && routeData.intent_variant)
+    );
 
     if (intent && intent.key === 'calendar_check') {
       intentVariant = intentVariant || inferCalendarIntentVariant(prompt, routeContext, routeData);
@@ -5977,7 +6962,8 @@
           classification: 'solvable_now',
           intentVariant: intentVariant,
           actions: [{ type: 'pause_for_user_choice' }],
-          summary: 'This could mean your personal calendar or the scheduled tasks in this workspace.',
+          summary:
+            'This could mean your personal calendar or the scheduled tasks in this workspace.',
           gaps: [],
           requirement: findCapabilityRequirementByKey('calendar_access')
         };
@@ -5986,14 +6972,18 @@
       }
       if (intentVariant === 'workspace_schedule') {
         var workspacePlan = {
-          classification: hasWorkspaceRouteContext(routeContext) ? 'solvable_now' : 'user_setup_only',
+          classification: hasWorkspaceRouteContext(routeContext)
+            ? 'solvable_now'
+            : 'user_setup_only',
           intentVariant: intentVariant,
           executionMode: hasWorkspaceRouteContext(routeContext) ? 'workspace_schedule' : '',
           actions: [],
           summary: hasWorkspaceRouteContext(routeContext)
             ? 'I can inspect the scheduled tasks in this workspace directly.'
             : 'I need you to choose or open a workspace before I can inspect scheduled tasks.',
-          gaps: hasWorkspaceRouteContext(routeContext) ? [] : ['No workspace context is available for the requested scheduled-task lookup.'],
+          gaps: hasWorkspaceRouteContext(routeContext)
+            ? []
+            : ['No workspace context is available for the requested scheduled-task lookup.'],
           requirement: null
         };
         workspacePlan.brief = buildCapabilityImplementationBrief(workspacePlan, prompt);
@@ -6028,46 +7018,82 @@
     };
 
     var visibleSkills = await fetchAgentSkills(matchedAgentName);
-    var enabledSkill = matchedAgentName ? findCapabilityRequirementSkill(requirement, visibleSkills, true) : null;
-    var availableSkill = matchedAgentName ? findCapabilityRequirementSkill(requirement, visibleSkills, false) : null;
-    var repoScopedSkill = !matchedAgentName ? findCapabilityRequirementSkill(requirement, visibleSkills, false) : null;
+    var enabledSkill = matchedAgentName
+      ? findCapabilityRequirementSkill(requirement, visibleSkills, true)
+      : null;
+    var availableSkill = matchedAgentName
+      ? findCapabilityRequirementSkill(requirement, visibleSkills, false)
+      : null;
+    var repoScopedSkill = !matchedAgentName
+      ? findCapabilityRequirementSkill(requirement, visibleSkills, false)
+      : null;
     var skillCandidate = null;
 
-    if (!enabledSkill && !availableSkill && !repoScopedSkill && Array.isArray(requirement.skillMarketplaceQueries) && requirement.skillMarketplaceQueries.length > 0) {
+    if (
+      !enabledSkill &&
+      !availableSkill &&
+      !repoScopedSkill &&
+      Array.isArray(requirement.skillMarketplaceQueries) &&
+      requirement.skillMarketplaceQueries.length > 0
+    ) {
       skillCandidate = await chooseCapabilitySkillPackage(requirement);
     }
 
     var workspaceContextAvailable = hasWorkspaceRouteContext(routeContext);
-    var agentServers = matchedAgentName && requirement.requiresMCP
-      ? await fetchAgentMCPServers(matchedAgentName, routeContext)
-      : [];
-    var existingServer = requirement.requiresMCP ? selectExistingMCPServer(requirement, agentServers) : null;
+    var agentServers =
+      matchedAgentName && requirement.requiresMCP
+        ? await fetchAgentMCPServers(matchedAgentName, routeContext)
+        : [];
+    var existingServer = requirement.requiresMCP
+      ? selectExistingMCPServer(requirement, agentServers)
+      : null;
     var existingServerStatus = normalizeToken(existingServer && existingServer.status);
 
     if (!matchedAgentName) {
       plan.classification = 'solvable_with_setup';
       plan.actions.push({
         type: 'create_agent',
-        desiredAgentName: requirement.defaultAgentName || (intent && intent.suggestedName) || 'Task Assistant',
-        desiredAgentType: requirement.preferredAgentType || (intent && intent.defaultType) || 'tool-calling'
+        desiredAgentName:
+          requirement.defaultAgentName || (intent && intent.suggestedName) || 'Task Assistant',
+        desiredAgentType:
+          requirement.preferredAgentType || (intent && intent.defaultType) || 'tool-calling'
       });
       plan.gaps.push('No existing agent is a strong match for ' + requirement.label + '.');
       if (repoScopedSkill) {
-        plan.evidence.push('Repo skill "' + repoScopedSkill.name + '" is already available for new agents.');
+        plan.evidence.push(
+          'Repo skill "' + repoScopedSkill.name + '" is already available for new agents.'
+        );
       }
     }
 
-    if (Array.isArray(requirement.preferredSkillNames) && requirement.preferredSkillNames.length > 0 && !enabledSkill) {
+    if (
+      Array.isArray(requirement.preferredSkillNames) &&
+      requirement.preferredSkillNames.length > 0 &&
+      !enabledSkill
+    ) {
       plan.classification = 'solvable_with_setup';
       if (availableSkill) {
         plan.actions.push({ type: 'enable_skill', skillName: availableSkill.name });
-        plan.gaps.push('Skill "' + availableSkill.name + '" is available but not enabled for this agent.');
+        plan.gaps.push(
+          'Skill "' + availableSkill.name + '" is available but not enabled for this agent.'
+        );
       } else if (skillCandidate && skillCandidate.package) {
-        plan.actions.push({ type: 'install_skill_package', packageSpec: skillCandidate.package, skillName: skillCandidate.skill || requirement.preferredSkillNames[0] });
-        plan.actions.push({ type: 'enable_skill', skillName: skillCandidate.skill || requirement.preferredSkillNames[0] });
+        plan.actions.push({
+          type: 'install_skill_package',
+          packageSpec: skillCandidate.package,
+          skillName: skillCandidate.skill || requirement.preferredSkillNames[0]
+        });
+        plan.actions.push({
+          type: 'enable_skill',
+          skillName: skillCandidate.skill || requirement.preferredSkillNames[0]
+        });
         plan.gaps.push('No matching skill is installed locally for ' + requirement.label + '.');
       } else {
-        plan.gaps.push('No matching skill is available locally or in the skills marketplace for ' + requirement.label + '.');
+        plan.gaps.push(
+          'No matching skill is available locally or in the skills marketplace for ' +
+            requirement.label +
+            '.'
+        );
       }
     }
 
@@ -6075,21 +7101,30 @@
       if (!workspaceContextAvailable) {
         plan.classification = 'user_setup_only';
         plan.actions = [];
-        plan.summary = 'MCP connectors are workspace-scoped. Open a workspace before I bind the connector required for ' + requirement.label + '.';
+        plan.summary =
+          'MCP connectors are workspace-scoped. Open a workspace before I bind the connector required for ' +
+          requirement.label +
+          '.';
         plan.gaps.push('No workspace context is available for the required MCP connector.');
       } else if (existingServer && existingServer.enabled && existingServerStatus !== 'missing') {
         plan.evidence.push('MCP "' + existingServer.name + '" is already bound in this workspace.');
       } else if (existingServer) {
         plan.classification = 'solvable_with_setup';
         plan.actions.push({ type: 'attach_mcp', serverName: existingServer.name });
-        plan.gaps.push('MCP "' + existingServer.name + '" exists but is not enabled for this workspace context.');
+        plan.gaps.push(
+          'MCP "' + existingServer.name + '" exists but is not enabled for this workspace context.'
+        );
       } else {
         var configuredServers = await fetchConfiguredMCPServers();
         var configuredCandidate = selectExistingMCPServer(requirement, configuredServers);
         if (configuredCandidate) {
           plan.classification = 'solvable_with_setup';
           plan.actions.push({ type: 'attach_mcp', serverName: configuredCandidate.name });
-          plan.gaps.push('MCP "' + configuredCandidate.name + '" is configured globally but not yet bound in this workspace.');
+          plan.gaps.push(
+            'MCP "' +
+              configuredCandidate.name +
+              '" is configured globally but not yet bound in this workspace.'
+          );
         } else {
           var marketplaceServers = await fetchMarketplaceMCPServers();
           var mcpCandidate = chooseMarketplaceMCPServer(requirement, prompt, marketplaceServers);
@@ -6097,8 +7132,17 @@
             var manualReason = getMCPManualConfigReason(mcpCandidate);
             if (manualReason) {
               plan.classification = 'user_setup_only';
-              plan.summary = 'I found "' + mcpCandidate.name + '" for ' + requirement.label + ', but it ' + manualReason + '.';
-              plan.gaps.push('Suggested MCP "' + mcpCandidate.name + '" needs manual configuration.');
+              plan.summary =
+                'I found "' +
+                mcpCandidate.name +
+                '" for ' +
+                requirement.label +
+                ', but it ' +
+                manualReason +
+                '.';
+              plan.gaps.push(
+                'Suggested MCP "' + mcpCandidate.name + '" needs manual configuration.'
+              );
             } else {
               plan.classification = 'solvable_with_setup';
               plan.actions.push({
@@ -6106,7 +7150,11 @@
                 serverName: mcpCandidate.name,
                 candidate: mcpCandidate
               });
-              plan.gaps.push('No matching MCP connector is currently bound in this workspace for ' + requirement.label + '.');
+              plan.gaps.push(
+                'No matching MCP connector is currently bound in this workspace for ' +
+                  requirement.label +
+                  '.'
+              );
             }
           } else {
             plan.gaps.push('No matching MCP connector is available for ' + requirement.label + '.');
@@ -6115,8 +7163,14 @@
       }
     }
 
-    if ((plan.classification === 'solvable_now' || plan.classification === 'solvable_with_setup') && (plan.gaps.length > 0 && plan.actions.length === 0)) {
-      plan.classification = looksLikeImplementationRequest(prompt) ? 'implementation_request' : 'reusable_feature_gap';
+    if (
+      (plan.classification === 'solvable_now' || plan.classification === 'solvable_with_setup') &&
+      plan.gaps.length > 0 &&
+      plan.actions.length === 0
+    ) {
+      plan.classification = looksLikeImplementationRequest(prompt)
+        ? 'implementation_request'
+        : 'reusable_feature_gap';
       plan.actions = [{ type: 'offer_workspace' }];
     }
 
@@ -6146,30 +7200,47 @@
     }
 
     var requirement = plan && plan.requirement ? plan.requirement : null;
-    var seedName = requirement && requirement.defaultAgentName
-      ? requirement.defaultAgentName
-      : (intent && intent.suggestedName) || 'Task Assistant';
+    var seedName =
+      requirement && requirement.defaultAgentName
+        ? requirement.defaultAgentName
+        : (intent && intent.suggestedName) || 'Task Assistant';
     var description = buildAutoConfigDescription(prompt, intent || HOME_INTENTS.general_task);
     var autoConfig = await maybeLoadAutoConfig(description);
     var agentName = buildUniqueAgentName(
       autoConfig && autoConfig.agent_name ? autoConfig.agent_name : seedName,
       existingNames
     );
-    var agentType = autoConfig && autoConfig.agent_type
-      ? autoConfig.agent_type
-      : (requirement && requirement.preferredAgentType) || (intent && intent.defaultType) || 'tool-calling';
+    var agentType =
+      autoConfig && autoConfig.agent_type
+        ? autoConfig.agent_type
+        : (requirement && requirement.preferredAgentType) ||
+          (intent && intent.defaultType) ||
+          'tool-calling';
 
     var payload = {
       name: agentName,
       type: agentType,
-      system_prompt: autoConfig && autoConfig.system_prompt ? autoConfig.system_prompt : buildDefaultSystemPrompt(intent || HOME_INTENTS.general_task),
+      system_prompt:
+        autoConfig && autoConfig.system_prompt
+          ? autoConfig.system_prompt
+          : buildDefaultSystemPrompt(intent || HOME_INTENTS.general_task),
       description: autoConfig && autoConfig.description ? autoConfig.description : description,
-      tags: uniqueValues(((intent && intent.tags) || []).concat(['auto-created', 'home-assistant', 'capability-plan']))
+      tags: uniqueValues(
+        ((intent && intent.tags) || []).concat([
+          'auto-created',
+          'home-assistant',
+          'capability-plan'
+        ])
+      )
     };
 
-    var selectedModel = await resolveAutoSelectedModel(payload.type, autoConfig && autoConfig.model);
+    var selectedModel = await resolveAutoSelectedModel(
+      payload.type,
+      autoConfig && autoConfig.model
+    );
     if (selectedModel) payload.model = selectedModel;
-    if (autoConfig && typeof autoConfig.temperature === 'number') payload.temperature = autoConfig.temperature;
+    if (autoConfig && typeof autoConfig.temperature === 'number')
+      payload.temperature = autoConfig.temperature;
 
     if (!payload.model) {
       throw new Error('I could not auto-select a model for the planned agent.');
@@ -6195,16 +7266,26 @@
         if (!action || !action.type || action.type === 'handoff') continue;
 
         if (action.type === 'create_agent') {
-          agentName = await createAgentFromCapabilityPlan(plan, prompt, homeAssistantState.pendingIntent);
+          agentName = await createAgentFromCapabilityPlan(
+            plan,
+            prompt,
+            homeAssistantState.pendingIntent
+          );
           homeAssistantState.pendingAgentName = agentName;
-          appendHomeAssistantMessage('assistant', 'Created "' + agentName + '" for this capability plan.');
+          appendHomeAssistantMessage(
+            'assistant',
+            'Created "' + agentName + '" for this capability plan.'
+          );
           continue;
         }
 
         if (action.type === 'install_skill_package') {
           var skillInstallOutcome = await installCapabilitySkillPackage(action.packageSpec);
           if (normalizeToken(skillInstallOutcome && skillInstallOutcome.status) !== 'installed') {
-            throw new Error(skillInstallOutcome && skillInstallOutcome.message || 'Failed to install skill package.');
+            throw new Error(
+              (skillInstallOutcome && skillInstallOutcome.message) ||
+                'Failed to install skill package.'
+            );
           }
           appendHomeAssistantMessage('assistant', skillInstallOutcome.message);
           continue;
@@ -6213,32 +7294,54 @@
         if (action.type === 'enable_skill') {
           var enableSkillOutcome = await enableSkillForAgent(agentName, action.skillName);
           if (normalizeToken(enableSkillOutcome && enableSkillOutcome.status) !== 'enabled') {
-            throw new Error(enableSkillOutcome && enableSkillOutcome.message || 'Failed to enable skill.');
+            throw new Error(
+              (enableSkillOutcome && enableSkillOutcome.message) || 'Failed to enable skill.'
+            );
           }
           appendHomeAssistantMessage('assistant', enableSkillOutcome.message);
           continue;
         }
 
         if (action.type === 'attach_mcp') {
-          var attachOutcome = await bindMCPServerForRouteContext(agentName, action.serverName, routeContext);
+          var attachOutcome = await bindMCPServerForRouteContext(
+            agentName,
+            action.serverName,
+            routeContext
+          );
           var attachStatus = normalizeToken(attachOutcome && attachOutcome.status);
           if (attachStatus !== 'already_bound' && attachStatus !== 'bound_existing') {
-            throw new Error(attachOutcome && attachOutcome.message || 'Failed to bind MCP connector in this workspace.');
+            throw new Error(
+              (attachOutcome && attachOutcome.message) ||
+                'Failed to bind MCP connector in this workspace.'
+            );
           }
           appendHomeAssistantMessage('assistant', attachOutcome.message);
           continue;
         }
 
         if (action.type === 'install_and_attach_mcp') {
-          var installOutcome = await installMCPServerCandidate(buildEmailMCPCandidateFromRegistry(action.candidate));
+          var installOutcome = await installMCPServerCandidate(
+            buildEmailMCPCandidateFromRegistry(action.candidate)
+          );
           var installStatus = normalizeToken(installOutcome && installOutcome.status);
           if (installStatus !== 'installed' && installStatus !== 'already_installed') {
-            throw new Error(installOutcome && installOutcome.message || 'Failed to install MCP server.');
+            throw new Error(
+              (installOutcome && installOutcome.message) || 'Failed to install MCP server.'
+            );
           }
-          var attachInstalledOutcome = await bindMCPServerForRouteContext(agentName, action.serverName, routeContext);
-          var installedBindStatus = normalizeToken(attachInstalledOutcome && attachInstalledOutcome.status);
+          var attachInstalledOutcome = await bindMCPServerForRouteContext(
+            agentName,
+            action.serverName,
+            routeContext
+          );
+          var installedBindStatus = normalizeToken(
+            attachInstalledOutcome && attachInstalledOutcome.status
+          );
           if (installedBindStatus !== 'already_bound' && installedBindStatus !== 'bound_existing') {
-            throw new Error(attachInstalledOutcome && attachInstalledOutcome.message || 'Failed to bind MCP connector in this workspace.');
+            throw new Error(
+              (attachInstalledOutcome && attachInstalledOutcome.message) ||
+                'Failed to bind MCP connector in this workspace.'
+            );
           }
           appendHomeAssistantMessage('assistant', attachInstalledOutcome.message);
         }
@@ -6257,22 +7360,41 @@
         return;
       }
 
-      appendHomeAssistantMessage('assistant', 'The capability plan is ready. Handing off to chat now.');
-      await runPendingTaskWithAgent(prompt, agentName, { appLaunchRequest: appLaunchRequest, routeContext: routeContext });
+      appendHomeAssistantMessage(
+        'assistant',
+        'The capability plan is ready. Handing off to chat now.'
+      );
+      await runPendingTaskWithAgent(prompt, agentName, {
+        appLaunchRequest: appLaunchRequest,
+        routeContext: routeContext
+      });
     } catch (error) {
-      dashLog.debug('Capability plan execution failed', { error: error && error.message || error, plan: plan });
-      appendHomeAssistantMessage('assistant', String(error && error.message || error || 'Capability plan failed.'));
-      setHomeAssistantRoutingSummary('Capability Plan Failed', 'The capability plan did not complete.');
+      dashLog.debug('Capability plan execution failed', {
+        error: (error && error.message) || error,
+        plan: plan
+      });
+      appendHomeAssistantMessage(
+        'assistant',
+        String((error && error.message) || error || 'Capability plan failed.')
+      );
+      setHomeAssistantRoutingSummary(
+        'Capability Plan Failed',
+        'The capability plan did not complete.'
+      );
       renderHomeAssistantActions([
         {
           label: 'Show Plan',
           variant: 'primary',
-          onClick: function () { appendHomeAssistantMessage('assistant', plan.brief); }
+          onClick: function () {
+            appendHomeAssistantMessage('assistant', plan.brief);
+          }
         },
         {
           label: 'Ask Another Task',
           variant: 'secondary',
-          onClick: function () { focusHomeAssistantInput(); }
+          onClick: function () {
+            focusHomeAssistantInput();
+          }
         }
       ]);
     } finally {
@@ -6286,7 +7408,10 @@
 
   function renderCapabilityWorkspaceActions(plan, prompt, routeContext, appLaunchRequest) {
     var seed = buildCapabilityWorkspaceSeed(plan, prompt);
-    setHomeAssistantRoutingSummary('Workspace Available', 'This looks like missing product capability. Create a workspace or review the plan.');
+    setHomeAssistantRoutingSummary(
+      'Workspace Available',
+      'This looks like missing product capability. Create a workspace or review the plan.'
+    );
     renderHomeAssistantActions([
       {
         label: 'Create Workspace',
@@ -6304,13 +7429,18 @@
       {
         label: 'Show Plan',
         variant: 'secondary',
-        onClick: function () { appendHomeAssistantMessage('assistant', plan.brief); }
+        onClick: function () {
+          appendHomeAssistantMessage('assistant', plan.brief);
+        }
       },
       {
         label: 'Not Now',
         variant: 'secondary',
         onClick: function () {
-          appendHomeAssistantMessage('assistant', 'No problem. The implementation brief is ready whenever you want to turn this into workspace work.');
+          appendHomeAssistantMessage(
+            'assistant',
+            'No problem. The implementation brief is ready whenever you want to turn this into workspace work.'
+          );
           focusHomeAssistantInput();
         }
       }
@@ -6318,29 +7448,44 @@
   }
 
   function renderCapabilitySetupActions(plan, prompt, routeContext, appLaunchRequest) {
-    setHomeAssistantRoutingSummary('Capability Plan', 'Review the proposed setup steps before continuing.');
+    setHomeAssistantRoutingSummary(
+      'Capability Plan',
+      'Review the proposed setup steps before continuing.'
+    );
     renderHomeAssistantActions([
       {
         label: 'Apply Plan',
         variant: 'primary',
-        onClick: function () { executeCapabilityPlan(plan, prompt, routeContext, appLaunchRequest); }
+        onClick: function () {
+          executeCapabilityPlan(plan, prompt, routeContext, appLaunchRequest);
+        }
       },
       {
         label: 'Show Plan',
         variant: 'secondary',
-        onClick: function () { appendHomeAssistantMessage('assistant', plan.brief); }
+        onClick: function () {
+          appendHomeAssistantMessage('assistant', plan.brief);
+        }
       },
       {
         label: 'Continue Without Setup',
         variant: 'secondary',
         disabled: !plan.targetAgentName,
-        onClick: function () { runPendingTaskWithAgent(prompt, plan.targetAgentName, { appLaunchRequest: appLaunchRequest, routeContext: routeContext }); }
+        onClick: function () {
+          runPendingTaskWithAgent(prompt, plan.targetAgentName, {
+            appLaunchRequest: appLaunchRequest,
+            routeContext: routeContext
+          });
+        }
       },
       {
         label: 'Not Now',
         variant: 'secondary',
         onClick: function () {
-          appendHomeAssistantMessage('assistant', 'Okay. I kept the capability plan visible above.');
+          appendHomeAssistantMessage(
+            'assistant',
+            'Okay. I kept the capability plan visible above.'
+          );
           focusHomeAssistantInput();
         }
       }
@@ -6348,14 +7493,26 @@
   }
 
   async function handleCapabilityResolutionFlow(options) {
-    var prompt = String(options && options.prompt || '').trim();
-    var routeContext = options && options.routeContext ? options.routeContext : buildHomeRouteContext();
+    var prompt = String((options && options.prompt) || '').trim();
+    var routeContext =
+      options && options.routeContext ? options.routeContext : buildHomeRouteContext();
     var routeData = options && options.routeData ? options.routeData : null;
-    var matchedAgentName = String(options && options.matchedAgentName || '').trim();
+    var matchedAgentName = String((options && options.matchedAgentName) || '').trim();
     var appLaunchRequest = options && options.appLaunchRequest ? options.appLaunchRequest : null;
-    var capabilityCandidate = detectCapabilityRequirement(prompt, homeAssistantState.pendingIntent, homeAssistantState.pendingIntentVariant);
-    if (homeAssistantState.pendingIntent.key === 'calendar_check' || capabilityCandidate || looksLikeImplementationRequest(prompt)) {
-      setHomeAssistantRoutingSummary('Capability Planning', 'Checking available agents, skills, and MCP connectors.');
+    var capabilityCandidate = detectCapabilityRequirement(
+      prompt,
+      homeAssistantState.pendingIntent,
+      homeAssistantState.pendingIntentVariant
+    );
+    if (
+      homeAssistantState.pendingIntent.key === 'calendar_check' ||
+      capabilityCandidate ||
+      looksLikeImplementationRequest(prompt)
+    ) {
+      setHomeAssistantRoutingSummary(
+        'Capability Planning',
+        'Checking available agents, skills, and MCP connectors.'
+      );
     }
 
     var plan = await planCapabilityResolution({
@@ -6372,8 +7529,14 @@
     homeAssistantState.pendingCapabilityBrief = plan.brief || '';
 
     if (plan.actions.length > 0 && plan.actions[0].type === 'pause_for_user_choice') {
-      appendHomeAssistantMessage('assistant', plan.summary || 'Do you mean your personal calendar or scheduled tasks in this workspace?');
-      setHomeAssistantRoutingSummary('Schedule Choice', 'Choose your calendar or this workspace schedule.');
+      appendHomeAssistantMessage(
+        'assistant',
+        plan.summary || 'Do you mean your personal calendar or scheduled tasks in this workspace?'
+      );
+      setHomeAssistantRoutingSummary(
+        'Schedule Choice',
+        'Choose your calendar or this workspace schedule.'
+      );
       renderHomeAssistantActions([
         {
           label: 'My Calendar',
@@ -6388,7 +7551,10 @@
               appLaunchRequest: appLaunchRequest
             });
             if (!followUpHandled && matchedAgentName) {
-              await runPendingTaskWithAgent(prompt, matchedAgentName, { appLaunchRequest: appLaunchRequest, routeContext: routeContext });
+              await runPendingTaskWithAgent(prompt, matchedAgentName, {
+                appLaunchRequest: appLaunchRequest,
+                routeContext: routeContext
+              });
             }
           }
         },
@@ -6403,7 +7569,9 @@
         {
           label: 'Ask Another Task',
           variant: 'secondary',
-          onClick: function () { focusHomeAssistantInput(); }
+          onClick: function () {
+            focusHomeAssistantInput();
+          }
         }
       ]);
       return true;
@@ -6414,7 +7582,12 @@
       return true;
     }
 
-    if (plan.classification === 'solvable_now' && matchedAgentName && plan.requirement && plan.requirement.canAnswerInline) {
+    if (
+      plan.classification === 'solvable_now' &&
+      matchedAgentName &&
+      plan.requirement &&
+      plan.requirement.canAnswerInline
+    ) {
       await runCapabilityTaskDirect(prompt, matchedAgentName, {
         routeContext: routeContext,
         intent: homeAssistantState.pendingIntent,
@@ -6431,46 +7604,74 @@
 
     if (plan.classification === 'user_setup_only') {
       if (plan.intentVariant === 'workspace_schedule' && !hasWorkspaceRouteContext(routeContext)) {
-        appendHomeAssistantMessage('assistant', plan.summary || 'I need a workspace before I can inspect scheduled tasks.');
-        setHomeAssistantRoutingSummary('Workspace Needed', 'Choose or open a workspace before continuing.');
+        appendHomeAssistantMessage(
+          'assistant',
+          plan.summary || 'I need a workspace before I can inspect scheduled tasks.'
+        );
+        setHomeAssistantRoutingSummary(
+          'Workspace Needed',
+          'Choose or open a workspace before continuing.'
+        );
         renderHomeAssistantActions([
           {
             label: 'Open Workspaces',
             variant: 'primary',
-            onClick: function () { window.location.href = '/workspaces'; }
+            onClick: function () {
+              window.location.href = '/workspaces';
+            }
           },
           {
             label: 'Ask Another Task',
             variant: 'secondary',
-            onClick: function () { focusHomeAssistantInput(); }
+            onClick: function () {
+              focusHomeAssistantInput();
+            }
           }
         ]);
         return true;
       }
-      appendHomeAssistantMessage('assistant', plan.summary || 'This needs manual setup before I can continue.');
-      setHomeAssistantRoutingSummary('Manual Setup Needed', 'Open MCP settings or review the implementation plan.');
+      appendHomeAssistantMessage(
+        'assistant',
+        plan.summary || 'This needs manual setup before I can continue.'
+      );
+      setHomeAssistantRoutingSummary(
+        'Manual Setup Needed',
+        'Open MCP settings or review the implementation plan.'
+      );
       renderHomeAssistantActions([
         {
           label: 'Open MCP Page',
           variant: 'primary',
-          onClick: function () { window.location.href = '/mcp'; }
+          onClick: function () {
+            window.location.href = '/mcp';
+          }
         },
         {
           label: 'Show Plan',
           variant: 'secondary',
-          onClick: function () { appendHomeAssistantMessage('assistant', plan.brief); }
+          onClick: function () {
+            appendHomeAssistantMessage('assistant', plan.brief);
+          }
         },
         {
           label: 'Continue Without Setup',
           variant: 'secondary',
           disabled: !matchedAgentName,
-          onClick: function () { runPendingTaskWithAgent(prompt, matchedAgentName, { appLaunchRequest: appLaunchRequest, routeContext: routeContext }); }
+          onClick: function () {
+            runPendingTaskWithAgent(prompt, matchedAgentName, {
+              appLaunchRequest: appLaunchRequest,
+              routeContext: routeContext
+            });
+          }
         }
       ]);
       return true;
     }
 
-    if (plan.classification === 'reusable_feature_gap' || plan.classification === 'implementation_request') {
+    if (
+      plan.classification === 'reusable_feature_gap' ||
+      plan.classification === 'implementation_request'
+    ) {
       appendHomeAssistantMessage('assistant', plan.summary || buildCapabilityPlanSummary(plan));
       renderCapabilityWorkspaceActions(plan, prompt, routeContext, appLaunchRequest);
       return true;
@@ -6582,7 +7783,9 @@
     for (var i = 0; i < agents.length; i++) {
       scored.push(scoreAgentForIntent(agents[i], intent, prompt));
     }
-    scored.sort(function (a, b) { return b.score - a.score; });
+    scored.sort(function (a, b) {
+      return b.score - a.score;
+    });
     var best = scored[0];
     if (!best) return null;
 
@@ -6599,17 +7802,23 @@
   function buildAutoConfigDescription(prompt, intent) {
     var base = '';
     if (intent.key === 'utility_direct') {
-      base = 'Create a utility assistant for quick everyday requests such as time lookups, weather checks, simple conversions, and short factual questions.';
+      base =
+        'Create a utility assistant for quick everyday requests such as time lookups, weather checks, simple conversions, and short factual questions.';
     } else if (intent.key === 'travel_planning') {
-      base = 'Create an agent that plans multi-day travel itineraries with day-by-day plans, transportation ideas, budget ranges, and local recommendations.';
+      base =
+        'Create an agent that plans multi-day travel itineraries with day-by-day plans, transportation ideas, budget ranges, and local recommendations.';
     } else if (intent.key === 'email_check') {
-      base = 'Create an email triage agent that summarizes unread mail, categorizes urgency, and drafts replies. It must default to read-only behavior and never send without explicit user confirmation.';
+      base =
+        'Create an email triage agent that summarizes unread mail, categorizes urgency, and drafts replies. It must default to read-only behavior and never send without explicit user confirmation.';
     } else if (intent.key === 'calendar_check') {
-      base = 'Create a calendar assistant that checks schedule availability, summarizes upcoming events, and answers calendar questions. It must default to read-only behavior and always use configured skills or MCP connectors before claiming lack of access.';
+      base =
+        'Create a calendar assistant that checks schedule availability, summarizes upcoming events, and answers calendar questions. It must default to read-only behavior and always use configured skills or MCP connectors before claiming lack of access.';
     } else if (intent.key === 'app_launch') {
-      base = 'Create a desktop launcher agent that can interpret app-launch requests, execute safe local launch commands, and confirm completion clearly.';
+      base =
+        'Create a desktop launcher agent that can interpret app-launch requests, execute safe local launch commands, and confirm completion clearly.';
     } else {
-      base = 'Create a practical task execution assistant that can route and complete user requests from the home dashboard.';
+      base =
+        'Create a practical task execution assistant that can route and complete user requests from the home dashboard.';
     }
     return base + ' User task: "' + String(prompt || '').trim() + '".';
   }
@@ -6634,7 +7843,9 @@
   }
 
   function buildUniqueAgentName(baseName, existingNames) {
-    var sanitized = String(baseName || 'Task Assistant').replace(/[^a-zA-Z0-9 _-]/g, '').trim();
+    var sanitized = String(baseName || 'Task Assistant')
+      .replace(/[^a-zA-Z0-9 _-]/g, '')
+      .trim();
     if (!sanitized) sanitized = 'Task Assistant';
     var lowerNames = Object.create(null);
     for (var i = 0; i < existingNames.length; i++) {
@@ -6728,10 +7939,15 @@
     }
 
     return {
-      surface: String(routeContext.surface || fallback.surface || inferHomeRouteSurface(pagePath)).trim() || inferHomeRouteSurface(pagePath),
+      surface:
+        String(
+          routeContext.surface || fallback.surface || inferHomeRouteSurface(pagePath)
+        ).trim() || inferHomeRouteSurface(pagePath),
       page_path: pagePath,
       workspace_id: String(routeContext.workspace_id || '').trim(),
-      task_id: String(routeContext.task_id || fallback.task_id || extractTaskIdFromPath(pagePath)).trim(),
+      task_id: String(
+        routeContext.task_id || fallback.task_id || extractTaskIdFromPath(pagePath)
+      ).trim(),
       session_id: String(sessionId || '').trim(),
       origin: String(routeContext.origin || fallback.origin || 'ask_ori').trim() || 'ask_ori'
     };
@@ -6752,16 +7968,20 @@
   function routeContextTargetsCurrentWorkspace(routeData, routeContext) {
     var mode = normalizeToken(routeData && routeData.route_mode);
     var target = normalizeToken(routeData && routeData.target_surface);
-    return mode === 'workspace_task' && target === 'workspace' && hasWorkspaceRouteContext(routeContext);
+    return (
+      mode === 'workspace_task' && target === 'workspace' && hasWorkspaceRouteContext(routeContext)
+    );
   }
 
   function promptRequestsWorkspaceSwitch(prompt) {
     var normalized = normalizeToken(prompt);
     if (!normalized) return false;
-    return normalized.indexOf('switch workspace') >= 0 ||
+    return (
+      normalized.indexOf('switch workspace') >= 0 ||
       normalized.indexOf('switch to workspace') >= 0 ||
       normalized.indexOf('use workspace') >= 0 ||
-      normalized.indexOf('open workspace') >= 0;
+      normalized.indexOf('open workspace') >= 0
+    );
   }
 
   function normalizeHomeAssistantWorkspaceResolution(routeData) {
@@ -6776,16 +7996,18 @@
       confidence: Number(raw.confidence || 0),
       reasons: Array.isArray(raw.reasons) ? raw.reasons : [],
       repairReason: String(raw.repair_reason || '').trim(),
-      candidates: candidates.map(function (candidate) {
-        return {
-          id: String(candidate && candidate.id || '').trim(),
-          name: String(candidate && candidate.name || '').trim(),
-          score: Number(candidate && candidate.score || 0),
-          reasons: Array.isArray(candidate && candidate.reasons) ? candidate.reasons : []
-        };
-      }).filter(function (candidate) {
-        return Boolean(candidate.id && candidate.name);
-      })
+      candidates: candidates
+        .map(function (candidate) {
+          return {
+            id: String((candidate && candidate.id) || '').trim(),
+            name: String((candidate && candidate.name) || '').trim(),
+            score: Number((candidate && candidate.score) || 0),
+            reasons: Array.isArray(candidate && candidate.reasons) ? candidate.reasons : []
+          };
+        })
+        .filter(function (candidate) {
+          return Boolean(candidate.id && candidate.name);
+        })
     };
   }
 
@@ -6871,7 +8093,11 @@
     if (getHomeAssistantHandoffPolicy(routeData) !== 'assistant') return false;
 
     var routingPolicy = normalizeToken(routeData && routeData.routing_policy);
-    return !routingPolicy || routingPolicy === 'assistant_preferred' || routingPolicy === 'assistant_only';
+    return (
+      !routingPolicy ||
+      routingPolicy === 'assistant_preferred' ||
+      routingPolicy === 'assistant_only'
+    );
   }
 
   function routeMatchesWorkspaceEntryAgent(routeData) {
@@ -6887,21 +8113,30 @@
     if (routeContextTargetsCurrentWorkspace(routeData, routeContext)) return true;
     if (isWorkspaceSpecialistIntent(routeData)) return false;
     if (routePolicyRequiresSpecialist(routeData)) return false;
-    if (shouldAcceptBackendRouteMatch(routeData) &&
-        !routeMatchesWorkspaceEntryAgent(routeData) &&
-        !routeMatchesSystemAssistant(routeData)) {
+    if (
+      shouldAcceptBackendRouteMatch(routeData) &&
+      !routeMatchesWorkspaceEntryAgent(routeData) &&
+      !routeMatchesSystemAssistant(routeData)
+    ) {
       return false;
     }
     return true;
   }
 
   async function openWorkspaceAssistantForPrompt(prompt, routeContext, intent, options) {
-    var assistantSessionResult = await runWorkspaceAssistantInline(prompt, routeContext, intent, options);
+    var assistantSessionResult = await runWorkspaceAssistantInline(
+      prompt,
+      routeContext,
+      intent,
+      options
+    );
     if (!assistantSessionResult || !assistantSessionResult.session) {
       throw new Error('Failed to run workspace manager');
     }
 
-    var entryLabel = assistantSessionResult.entryAgentName ? assistantSessionResult.entryAgentName : getWorkspaceHomeAssistantDisplayName();
+    var entryLabel = assistantSessionResult.entryAgentName
+      ? assistantSessionResult.entryAgentName
+      : getWorkspaceHomeAssistantDisplayName();
     var sessionRouteContext = normalizeHomeRouteContext({
       surface: routeContext && routeContext.surface,
       page_path: routeContext && routeContext.page_path,
@@ -6910,8 +8145,10 @@
       origin: routeContext && routeContext.origin
     });
     var responseData = assistantSessionResult.responseData || null;
-    var workflowStep = responseData && responseData.workflow_step ? responseData.workflow_step : null;
-    var planningForm = responseData && responseData.planning_form ? responseData.planning_form : null;
+    var workflowStep =
+      responseData && responseData.workflow_step ? responseData.workflow_step : null;
+    var planningForm =
+      responseData && responseData.planning_form ? responseData.planning_form : null;
     var taskAssistHandoffTask = null;
     if (assistantSessionResult.rawToolPayload) {
       clearHomeAssistantPlanning();
@@ -6921,7 +8158,11 @@
         entryLabel,
         'The workspace manager returned raw tool data instead of a reply. Retry or open chat.'
       );
-    } else if (workflowStep && String(workflowStep.step_type || '').trim() === 'ask_form' && workflowStep.form) {
+    } else if (
+      workflowStep &&
+      String(workflowStep.step_type || '').trim() === 'ask_form' &&
+      workflowStep.form
+    ) {
       activateHomeAssistantPlanningForm(convertWorkflowFormToPlanningSchema(workflowStep), {
         prompt: prompt,
         routeContext: sessionRouteContext,
@@ -6948,7 +8189,11 @@
       );
     } else {
       var keepPlanningReview = Boolean(options && options.preservePlanningReview);
-      if (!keepPlanningReview && homeAssistantState.planningState && homeAssistantState.planningState.kind === 'planning_review') {
+      if (
+        !keepPlanningReview &&
+        homeAssistantState.planningState &&
+        homeAssistantState.planningState.kind === 'planning_review'
+      ) {
         keepPlanningReview = true;
       }
       if (!keepPlanningReview) {
@@ -6959,7 +8204,9 @@
         intent,
         entryLabel,
         assistantSessionResult.responseText || '',
-        workflowStep && String(workflowStep.step_type || '').trim() === 'ask_choice' ? workflowStep : null,
+        workflowStep && String(workflowStep.step_type || '').trim() === 'ask_choice'
+          ? workflowStep
+          : null,
         options && options.linkedTask ? options.linkedTask : getActiveLinkedPlanningTask()
       );
       if (inlineReplyState && (!inlineReplyState.linkedTask || !inlineReplyState.linkedTask.id)) {
@@ -6971,9 +8218,10 @@
             {
               existingTask: inlineReplyState.linkedTask,
               summaryText: assistantSessionResult.responseText || '',
-              fallbackTitle: workflowStep && String(workflowStep.title || '').trim()
-                ? String(workflowStep.title || '').trim()
-                : 'Planning task'
+              fallbackTitle:
+                workflowStep && String(workflowStep.title || '').trim()
+                  ? String(workflowStep.title || '').trim()
+                  : 'Planning task'
             }
           );
           if (createdInlineTask && homeAssistantState.inlineReplyState === inlineReplyState) {
@@ -6982,7 +8230,7 @@
           }
         } catch (taskError) {
           dashLog.debug('Failed to create inline planning task', {
-            error: taskError && taskError.message || taskError
+            error: (taskError && taskError.message) || taskError
           });
         }
       }
@@ -6991,11 +8239,12 @@
           taskAssistHandoffTask = await persistPlanningSubtaskToTask(inlineReplyState);
         } catch (taskContextError) {
           dashLog.debug('Failed to persist planning subtask onto task', {
-            error: taskContextError && taskContextError.message || taskContextError
+            error: (taskContextError && taskContextError.message) || taskContextError
           });
         }
       }
-      var hasChoiceStep = inlineReplyState &&
+      var hasChoiceStep =
+        inlineReplyState &&
         inlineReplyState.workflowStep &&
         String(inlineReplyState.workflowStep.step_type || '').trim() === 'ask_choice' &&
         Array.isArray(inlineReplyState.workflowStep.choices) &&
@@ -7005,12 +8254,12 @@
         hasChoiceStep
           ? 'The workspace manager created a planning subtask for this workspace. Complete it below, or open full chat.'
           : inlineReplyState
-          ? assistantSessionResult.reused
-            ? 'The manager needs one more planning answer. Review the subtask below, or open full chat.'
-            : 'The workspace manager replied inline. Review the planning subtask below, or open full chat.'
-          : assistantSessionResult.reused
-          ? 'The workspace manager updated the workspace. Review the latest update below, or open full chat if you want to continue.'
-          : 'The workspace manager replied with an update. Review the latest result below, or open full chat if you want to continue.'
+            ? assistantSessionResult.reused
+              ? 'The manager needs one more planning answer. Review the subtask below, or open full chat.'
+              : 'The workspace manager replied inline. Review the planning subtask below, or open full chat.'
+            : assistantSessionResult.reused
+              ? 'The workspace manager updated the workspace. Review the latest update below, or open full chat if you want to continue.'
+              : 'The workspace manager replied with an update. Review the latest result below, or open full chat if you want to continue.'
       );
     }
     renderHomeAssistantDependencyResolution(
@@ -7024,7 +8273,9 @@
       {
         label: 'Open Chat',
         variant: 'primary',
-        onClick: function () { openChatPanel(); }
+        onClick: function () {
+          openChatPanel();
+        }
       }
     ];
     if (options && typeof options.onChooseAnotherWorkspace === 'function') {
@@ -7037,7 +8288,9 @@
     workspaceActions.push({
       label: 'Ask Another Task',
       variant: 'secondary',
-      onClick: function () { focusHomeAssistantInput(); }
+      onClick: function () {
+        focusHomeAssistantInput();
+      }
     });
     renderHomeAssistantActions(workspaceActions);
     if (taskAssistHandoffTask) {
@@ -7050,15 +8303,17 @@
     try {
       return normalizeDependencyResolution(data);
     } catch (error) {
-      dashLog.debug('Failed to normalize dependency resolution payload', { error: error && error.message || error });
+      dashLog.debug('Failed to normalize dependency resolution payload', {
+        error: (error && error.message) || error
+      });
       return null;
     }
   }
 
   function isLikelyHomeAssistantRequestTimeout(error) {
     if (!error) return false;
-    var message = String(error && error.message || '').toLowerCase();
-    var name = String(error && error.name || '').toLowerCase();
+    var message = String((error && error.message) || '').toLowerCase();
+    var name = String((error && error.name) || '').toLowerCase();
     if (name.indexOf('abort') !== -1) return true;
     if (message.indexOf('cancel') !== -1) return true;
     if (message.indexOf('abort') !== -1) return true;
@@ -7069,16 +8324,19 @@
 
   function normalizeWorkspaceManagerErrorMessage(error) {
     if (!error) return '';
-    var direct = String(error && error.message || '').trim();
+    var direct = String((error && error.message) || '').trim();
     if (direct) return direct;
-    var fallback = String(error && error.error || '').trim();
+    var fallback = String((error && error.error) || '').trim();
     return fallback;
   }
 
   function buildWorkspaceManagerError(error, metadata) {
-    var wrapped = error instanceof Error
-      ? error
-      : new Error(String(error || (metadata && metadata.message) || 'Workspace manager request failed'));
+    var wrapped =
+      error instanceof Error
+        ? error
+        : new Error(
+            String(error || (metadata && metadata.message) || 'Workspace manager request failed')
+          );
     if (metadata && metadata.stage) wrapped.homeAssistantStage = String(metadata.stage);
     if (metadata && metadata.message) wrapped.homeAssistantUserMessage = String(metadata.message);
     if (metadata && metadata.requestUrl && !wrapped.url) wrapped.url = String(metadata.requestUrl);
@@ -7093,8 +8351,8 @@
       detail = '';
     }
     var err = new Error(detail || response.statusText || message || 'Request failed');
-    err.status = Number(response && response.status || 0);
-    err.url = String(response && response.url || '').trim();
+    err.status = Number((response && response.status) || 0);
+    err.url = String((response && response.url) || '').trim();
     return buildWorkspaceManagerError(err, {
       stage: stage,
       message: message,
@@ -7104,13 +8362,14 @@
 
   function formatWorkspaceManagerFailure(error, workspaceManagerLabel) {
     var label = String(workspaceManagerLabel || 'Workspace Manager').trim() || 'Workspace Manager';
-    var stage = normalizeToken(error && error.homeAssistantStage || error && error.stage);
-    var status = Number(error && error.status || 0);
-    var url = String(error && error.url || '').trim();
+    var stage = normalizeToken((error && error.homeAssistantStage) || (error && error.stage));
+    var status = Number((error && error.status) || 0);
+    var url = String((error && error.url) || '').trim();
     var rawMessage = normalizeWorkspaceManagerErrorMessage(error);
     var lowerMessage = rawMessage.toLowerCase();
     var browserOffline = typeof navigator !== 'undefined' && navigator.onLine === false;
-    var networkFailure = browserOffline ||
+    var networkFailure =
+      browserOffline ||
       status === 0 ||
       lowerMessage.indexOf('network error') !== -1 ||
       lowerMessage.indexOf('failed to fetch') !== -1 ||
@@ -7132,18 +8391,23 @@
         title: 'Session UI Unavailable',
         text: 'This page could not open a workspace session in the browser.',
         detail: detail || 'Session manager was not initialized in this view.',
-        conversationSummary: 'Open this only if you want the original prompt and browser-side error details.',
+        conversationSummary:
+          'Open this only if you want the original prompt and browser-side error details.',
         state: 'error'
       };
     }
 
-    if (stage === 'workspace_entry_session_create_failed' || stage === 'workspace_session_missing') {
+    if (
+      stage === 'workspace_entry_session_create_failed' ||
+      stage === 'workspace_session_missing'
+    ) {
       return {
         heading: label + ' Session Failed',
         title: 'Workspace Session Failed',
         text: 'Could not create or reuse the workspace manager session for this workspace.',
         detail: detail || 'The browser did not get a usable workspace session back.',
-        conversationSummary: 'Open this only if you want the original prompt and session-creation error details.',
+        conversationSummary:
+          'Open this only if you want the original prompt and session-creation error details.',
         state: 'error'
       };
     }
@@ -7154,7 +8418,8 @@
         title: 'Assistant Session Failed',
         text: 'Could not create the fallback assistant session for this workspace request.',
         detail: detail || 'The browser did not get a usable assistant session back.',
-        conversationSummary: 'Open this only if you want the original prompt and assistant-session error details.',
+        conversationSummary:
+          'Open this only if you want the original prompt and assistant-session error details.',
         state: 'error'
       };
     }
@@ -7165,7 +8430,8 @@
         title: 'Inline API Unavailable',
         text: 'This browser view could not send the inline workspace request.',
         detail: detail || 'The shared API client was not available in this page context.',
-        conversationSummary: 'Open this only if you want the original prompt and client-side availability details.',
+        conversationSummary:
+          'Open this only if you want the original prompt and client-side availability details.',
         state: 'error'
       };
     }
@@ -7175,8 +8441,13 @@
         heading: 'Connection Failed',
         title: 'Connection Failed',
         text: 'Your browser could not reach the server while sending the workspace request.',
-        detail: detail || (browserOffline ? 'Browser appears to be offline.' : 'Network request failed before the server replied.'),
-        conversationSummary: 'Open this only if you want the original prompt and connection error details.',
+        detail:
+          detail ||
+          (browserOffline
+            ? 'Browser appears to be offline.'
+            : 'Network request failed before the server replied.'),
+        conversationSummary:
+          'Open this only if you want the original prompt and connection error details.',
         state: 'error'
       };
     }
@@ -7187,7 +8458,8 @@
         title: 'Server Error',
         text: 'The server returned an error while running the workspace agent inline.',
         detail: detail || 'The inline /api/chat request failed on the server.',
-        conversationSummary: 'Open this only if you want the original prompt and server error details.',
+        conversationSummary:
+          'Open this only if you want the original prompt and server error details.',
         state: 'error'
       };
     }
@@ -7198,7 +8470,8 @@
         title: 'Request Rejected',
         text: 'The server rejected the inline workspace request.',
         detail: detail || 'The inline /api/chat request returned a client error.',
-        conversationSummary: 'Open this only if you want the original prompt and request error details.',
+        conversationSummary:
+          'Open this only if you want the original prompt and request error details.',
         state: 'error'
       };
     }
@@ -7209,7 +8482,8 @@
         title: 'Inline Request Failed',
         text: 'The workspace session opened, but the inline manager request did not complete.',
         detail: detail || 'The inline /api/chat request failed before a usable reply arrived.',
-        conversationSummary: 'Open this only if you want the original prompt and inline-request error details.',
+        conversationSummary:
+          'Open this only if you want the original prompt and inline-request error details.',
         state: 'error'
       };
     }
@@ -7220,7 +8494,8 @@
         title: 'Server Error',
         text: 'The server returned an error before the workspace flow completed.',
         detail: detail || 'A server-side error interrupted the request.',
-        conversationSummary: 'Open this only if you want the original prompt and server error details.',
+        conversationSummary:
+          'Open this only if you want the original prompt and server error details.',
         state: 'error'
       };
     }
@@ -7231,7 +8506,8 @@
         title: 'Request Failed',
         text: 'The request was rejected before the workspace flow completed.',
         detail: detail || 'A client-side request error interrupted the flow.',
-        conversationSummary: 'Open this only if you want the original prompt and request error details.',
+        conversationSummary:
+          'Open this only if you want the original prompt and request error details.',
         state: 'error'
       };
     }
@@ -7270,18 +8546,30 @@
       if (!data || typeof data.intent !== 'string') return null;
       return data;
     } catch (error) {
-      dashLog.debug('Backend routing unavailable, falling back to local matching', { error: error && error.message || error });
+      dashLog.debug('Backend routing unavailable, falling back to local matching', {
+        error: (error && error.message) || error
+      });
       return null;
     }
   }
 
-  function renderWorkspaceCandidateSelection(prompt, routeContext, intent, routeData, resolution, options) {
-    var excludedWorkspaceId = String(options && options.excludeWorkspaceId || '').trim();
-    var candidates = resolution && Array.isArray(resolution.candidates)
-      ? resolution.candidates.filter(function (candidate) {
-        return !excludedWorkspaceId || candidate.id !== excludedWorkspaceId;
-      }).slice(0, 3)
-      : [];
+  function renderWorkspaceCandidateSelection(
+    prompt,
+    routeContext,
+    intent,
+    routeData,
+    resolution,
+    options
+  ) {
+    var excludedWorkspaceId = String((options && options.excludeWorkspaceId) || '').trim();
+    var candidates =
+      resolution && Array.isArray(resolution.candidates)
+        ? resolution.candidates
+            .filter(function (candidate) {
+              return !excludedWorkspaceId || candidate.id !== excludedWorkspaceId;
+            })
+            .slice(0, 3)
+        : [];
 
     appendHomeAssistantMessage(
       'assistant',
@@ -7301,9 +8589,17 @@
         label: candidate.name,
         variant: 'primary',
         onClick: function () {
-          continuePromptInResolvedWorkspace(prompt, routeContext, intent, routeData, resolution, candidate.id, {
-            userOverride: true
-          });
+          continuePromptInResolvedWorkspace(
+            prompt,
+            routeContext,
+            intent,
+            routeData,
+            resolution,
+            candidate.id,
+            {
+              userOverride: true
+            }
+          );
         }
       };
     });
@@ -7320,7 +8616,9 @@
     actions.push({
       label: 'Ask Another Task',
       variant: 'secondary',
-      onClick: function () { focusHomeAssistantInput(); }
+      onClick: function () {
+        focusHomeAssistantInput();
+      }
     });
     renderHomeAssistantActions(actions);
     return true;
@@ -7338,34 +8636,44 @@
 
     var actions = [
       {
-      label: 'Create Workspace',
-      variant: 'primary',
-      onClick: function () {
-        createWorkspaceFromPrompt(prompt, {
-          agentName: routeData && routeData.matched_agent,
+        label: 'Create Workspace',
+        variant: 'primary',
+        onClick: function () {
+          createWorkspaceFromPrompt(prompt, {
+            agentName: routeData && routeData.matched_agent,
             routeContext: routeContext
           });
         }
       }
     ];
-    if (routeData && typeof routeData.matched_agent === 'string' && routeData.matched_agent.trim()) {
+    if (
+      routeData &&
+      typeof routeData.matched_agent === 'string' &&
+      routeData.matched_agent.trim()
+    ) {
       actions.push({
         label: 'Continue in Chat',
         variant: 'secondary',
         onClick: function () {
-          runPendingTaskWithAgent(prompt, routeData.matched_agent.trim(), { routeContext: routeContext });
+          runPendingTaskWithAgent(prompt, routeData.matched_agent.trim(), {
+            routeContext: routeContext
+          });
         }
       });
     }
     actions.push({
       label: 'Open Workspaces',
       variant: 'secondary',
-      onClick: function () { window.location.href = '/workspaces'; }
+      onClick: function () {
+        window.location.href = '/workspaces';
+      }
     });
     actions.push({
       label: 'Ask Another Task',
       variant: 'secondary',
-      onClick: function () { focusHomeAssistantInput(); }
+      onClick: function () {
+        focusHomeAssistantInput();
+      }
     });
     renderHomeAssistantActions(actions);
   }
@@ -7375,11 +8683,15 @@
     var reason = resolution.repairReason || 'its Commander is unavailable';
     appendHomeAssistantMessage(
       'assistant',
-      '"' + workspaceName + '" looks like the right workspace, but its Commander needs attention before Ori can continue.'
+      '"' +
+        workspaceName +
+        '" looks like the right workspace, but its Commander needs attention before Ori can continue.'
     );
     setHomeAssistantRoutingSummary(
       'Commander Required',
-      '"' + workspaceName + '" matched this task but needs workspace setup before Ori can continue.',
+      '"' +
+        workspaceName +
+        '" matched this task but needs workspace setup before Ori can continue.',
       {
         detail: reason
       }
@@ -7400,7 +8712,8 @@
             intentKey: intent && intent.key,
             source: 'repair'
           });
-          window.location.href = '/workspaces/' + encodeURIComponent(resolution.selectedWorkspaceId);
+          window.location.href =
+            '/workspaces/' + encodeURIComponent(resolution.selectedWorkspaceId);
         }
       },
       {
@@ -7415,30 +8728,38 @@
       {
         label: 'Ask Another Task',
         variant: 'secondary',
-        onClick: function () { focusHomeAssistantInput(); }
+        onClick: function () {
+          focusHomeAssistantInput();
+        }
       }
     ]);
   }
 
-  async function continuePromptInResolvedWorkspace(prompt, routeContext, intent, routeData, resolution, workspaceId, options) {
-    var targetWorkspaceId = String(workspaceId || resolution && resolution.selectedWorkspaceId || '').trim();
+  async function continuePromptInResolvedWorkspace(
+    prompt,
+    routeContext,
+    intent,
+    routeData,
+    resolution,
+    workspaceId,
+    options
+  ) {
+    var targetWorkspaceId = String(
+      workspaceId || (resolution && resolution.selectedWorkspaceId) || ''
+    ).trim();
     if (!targetWorkspaceId) return false;
 
     var candidate = getWorkspaceResolutionCandidateById(resolution, targetWorkspaceId);
-    var workspaceName = candidate && candidate.name || resolution && resolution.selectedWorkspaceName || 'selected workspace';
-    var reasons = candidate && candidate.reasons || resolution && resolution.reasons || [];
+    var workspaceName =
+      (candidate && candidate.name) ||
+      (resolution && resolution.selectedWorkspaceName) ||
+      'selected workspace';
+    var reasons = (candidate && candidate.reasons) || (resolution && resolution.reasons) || [];
     var resolvedContext = buildResolvedWorkspaceRouteContext(routeContext, targetWorkspaceId);
-    appendHomeAssistantMessage(
-      'assistant',
-      'Continuing in "' + workspaceName + '".'
-    );
-    setHomeAssistantRoutingSummary(
-      'Workspace Selected',
-      'Continuing in "' + workspaceName + '".',
-      {
-        detail: formatWorkspaceResolutionReasons(reasons)
-      }
-    );
+    appendHomeAssistantMessage('assistant', 'Continuing in "' + workspaceName + '".');
+    setHomeAssistantRoutingSummary('Workspace Selected', 'Continuing in "' + workspaceName + '".', {
+      detail: formatWorkspaceResolutionReasons(reasons)
+    });
 
     if (await routeWorkspacePromptToPlanningSpecialist(prompt, resolvedContext, intent)) {
       emitHomeAssistantIntakeTrace(routeData, {
@@ -7494,7 +8815,8 @@
 
   function shouldAcceptBackendRouteMatch(routeData) {
     if (!routeData || routeData.requires_creation === true) return false;
-    var matchedName = typeof routeData.matched_agent === 'string' ? routeData.matched_agent.trim() : '';
+    var matchedName =
+      typeof routeData.matched_agent === 'string' ? routeData.matched_agent.trim() : '';
     if (!matchedName) return false;
 
     var score = Number(routeData.score || 0);
@@ -7512,10 +8834,12 @@
     if (typeof API === 'undefined' || typeof API.get !== 'function') return [];
     try {
       var data = await API.get('/api/providers');
-      providersCache = (data && Array.isArray(data.providers)) ? data.providers : [];
+      providersCache = data && Array.isArray(data.providers) ? data.providers : [];
       return providersCache;
     } catch (error) {
-      dashLog.debug('Failed to load providers catalog', { error: error && error.message || error });
+      dashLog.debug('Failed to load providers catalog', {
+        error: (error && error.message) || error
+      });
       return [];
     }
   }
@@ -7595,7 +8919,8 @@
         for (var j = 0; j < models.length; j++) {
           var model = models[j] || {};
           if (!model.value) continue;
-          if (onlyMatchingType && normalizedType && normalizeToken(model.type) !== normalizedType) continue;
+          if (onlyMatchingType && normalizedType && normalizeToken(model.type) !== normalizedType)
+            continue;
 
           var option = document.createElement('option');
           option.value = String(model.value);
@@ -7626,7 +8951,11 @@
       return '';
     }
 
-    var selected = findModelValueForType(buildModelRowsFromProviders(providers), agentType, preferredModel);
+    var selected = findModelValueForType(
+      buildModelRowsFromProviders(providers),
+      agentType,
+      preferredModel
+    );
     if (selected) modelSelect.value = selected;
     if (!modelSelect.value && modelSelect.options.length > 0) {
       modelSelect.selectedIndex = 0;
@@ -7638,7 +8967,13 @@
     var modalElement = document.getElementById('addAgentModal');
     var createButton = document.getElementById('createAgentBtn');
     var form = document.getElementById('addAgentForm');
-    if (!modalElement || !createButton || !form || typeof bootstrap === 'undefined' || !bootstrap.Modal) {
+    if (
+      !modalElement ||
+      !createButton ||
+      !form ||
+      typeof bootstrap === 'undefined' ||
+      !bootstrap.Modal
+    ) {
       return { status: 'unavailable', reason: 'modal_prerequisites_missing' };
     }
 
@@ -7659,13 +8994,15 @@
 
     nameInput.value = seedPayload.name || '';
     typeInput.value = seedPayload.type || 'tool-calling';
-    tempInput.value = typeof seedPayload.temperature === 'number'
-      ? String(seedPayload.temperature)
-      : String(tempInput.value || '1.0');
+    tempInput.value =
+      typeof seedPayload.temperature === 'number'
+        ? String(seedPayload.temperature)
+        : String(tempInput.value || '1.0');
     if (tempValue) tempValue.textContent = tempInput.value;
     promptInput.value = seedPayload.system_prompt || '';
     if (allowWebSearchInput) {
-      allowWebSearchInput.checked = typeof seedPayload.allow_web_search === 'boolean' ? seedPayload.allow_web_search : true;
+      allowWebSearchInput.checked =
+        typeof seedPayload.allow_web_search === 'boolean' ? seedPayload.allow_web_search : true;
     }
 
     var providers = await fetchProvidersCatalog();
@@ -7675,7 +9012,8 @@
       modelInput.value = seedPayload.model;
     }
 
-    var modalInstance = bootstrap.Modal.getInstance(modalElement) || new bootstrap.Modal(modalElement);
+    var modalInstance =
+      bootstrap.Modal.getInstance(modalElement) || new bootstrap.Modal(modalElement);
     closeHomeAssistantThinkingModal({ force: true });
     modalInstance.show();
 
@@ -7717,7 +9055,8 @@
 
         submitting = true;
         createButton.disabled = true;
-        createButton.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status"></span>Creating…';
+        createButton.innerHTML =
+          '<span class="spinner-border spinner-border-sm me-2" role="status"></span>Creating…';
 
         try {
           var requestBody = {
@@ -7736,8 +9075,13 @@
           modalInstance.hide();
           finalize({ status: 'created', agentName: name });
         } catch (error) {
-          dashLog.debug('Modal-confirmed agent creation failed', { error: error && error.message || error });
-          if (window.Toast) Toast.error('Failed to create agent: ' + (error && error.message ? error.message : error));
+          dashLog.debug('Modal-confirmed agent creation failed', {
+            error: (error && error.message) || error
+          });
+          if (window.Toast)
+            Toast.error(
+              'Failed to create agent: ' + (error && error.message ? error.message : error)
+            );
         } finally {
           submitting = false;
           if (!settled) {
@@ -7768,13 +9112,18 @@
   }
 
   async function maybeLoadAutoConfig(description) {
-    if (typeof API === 'undefined' || typeof API.get !== 'function' || typeof API.post !== 'function') return null;
+    if (
+      typeof API === 'undefined' ||
+      typeof API.get !== 'function' ||
+      typeof API.post !== 'function'
+    )
+      return null;
     try {
       var availability = await API.get('/api/agents/auto-config/availability');
       if (!availability || !availability.available) return null;
       return await API.post('/api/agents/auto-config', { description: description });
     } catch (err) {
-      dashLog.debug('Auto-config unavailable', { error: err && err.message || err });
+      dashLog.debug('Auto-config unavailable', { error: (err && err.message) || err });
       return null;
     }
   }
@@ -7788,10 +9137,12 @@
       return {
         available: Boolean(data && data.available),
         system_model_configured: Boolean(data && data.system_model_configured),
-        message: String(data && data.message || '')
+        message: String((data && data.message) || '')
       };
     } catch (error) {
-      dashLog.debug('Failed to check Ask Ori model availability', { error: error && error.message || error });
+      dashLog.debug('Failed to check Ask Ori model availability', {
+        error: (error && error.message) || error
+      });
       return { available: false, system_model_configured: false };
     }
   }
@@ -7820,12 +9171,16 @@
         {
           label: 'Go to Settings',
           variant: 'primary',
-          onClick: function () { window.location.href = '/settings'; }
+          onClick: function () {
+            window.location.href = '/settings';
+          }
         },
         {
           label: 'Ask Another Task',
           variant: 'secondary',
-          onClick: function () { focusHomeAssistantInput(); }
+          onClick: function () {
+            focusHomeAssistantInput();
+          }
         }
       ]);
       if (window.Toast) {
@@ -7850,53 +9205,82 @@
 
       var description = buildAutoConfigDescription(prompt, intent);
       var autoConfig = await maybeLoadAutoConfig(description);
-      var desiredBaseName = autoConfig && autoConfig.agent_name
-        ? autoConfig.agent_name
-        : (homeAssistantState.pendingSuggestedName || intent.suggestedName);
+      var desiredBaseName =
+        autoConfig && autoConfig.agent_name
+          ? autoConfig.agent_name
+          : homeAssistantState.pendingSuggestedName || intent.suggestedName;
       var agentName = buildUniqueAgentName(desiredBaseName, existingNames);
       var fallbackType = homeAssistantState.pendingSuggestedType || intent.defaultType;
 
       var payload = {
         name: agentName,
         type: autoConfig && autoConfig.agent_type ? autoConfig.agent_type : fallbackType,
-        system_prompt: autoConfig && autoConfig.system_prompt ? autoConfig.system_prompt : buildDefaultSystemPrompt(intent),
+        system_prompt:
+          autoConfig && autoConfig.system_prompt
+            ? autoConfig.system_prompt
+            : buildDefaultSystemPrompt(intent),
         description: autoConfig && autoConfig.description ? autoConfig.description : description,
         tags: uniqueValues((intent.tags || []).concat(['auto-created', 'home-assistant']))
       };
 
-      var selectedModel = await resolveAutoSelectedModel(payload.type, autoConfig && autoConfig.model);
+      var selectedModel = await resolveAutoSelectedModel(
+        payload.type,
+        autoConfig && autoConfig.model
+      );
       if (selectedModel) payload.model = selectedModel;
-      if (autoConfig && typeof autoConfig.temperature === 'number') payload.temperature = autoConfig.temperature;
+      if (autoConfig && typeof autoConfig.temperature === 'number')
+        payload.temperature = autoConfig.temperature;
 
       if (isSemiAutoMode()) {
         if (payload.model) {
-          appendHomeAssistantMessage('assistant',
-            'Drafted "' + agentName + '" with model "' + payload.model + '". Please confirm in the Create Agent modal.');
+          appendHomeAssistantMessage(
+            'assistant',
+            'Drafted "' +
+              agentName +
+              '" with model "' +
+              payload.model +
+              '". Please confirm in the Create Agent modal.'
+          );
         } else {
-          appendHomeAssistantMessage('assistant',
-            'I need your input to finalize model selection. Please confirm in the Create Agent modal.');
+          appendHomeAssistantMessage(
+            'assistant',
+            'I need your input to finalize model selection. Please confirm in the Create Agent modal.'
+          );
         }
-        setHomeAssistantRoutingSummary('Semi-auto', 'Review and confirm agent details in the modal.');
+        setHomeAssistantRoutingSummary(
+          'Semi-auto',
+          'Review and confirm agent details in the modal.'
+        );
         setHomeAssistantBusy(false);
         var semiAutoConfirmation = await confirmAgentCreationWithModal(payload);
         if (!semiAutoConfirmation || semiAutoConfirmation.status !== 'created') {
           if (semiAutoConfirmation && semiAutoConfirmation.status === 'unavailable') {
-            appendHomeAssistantMessage('assistant', 'I could not open the Create Agent modal. Please open Agents and create it manually.');
+            appendHomeAssistantMessage(
+              'assistant',
+              'I could not open the Create Agent modal. Please open Agents and create it manually.'
+            );
             setHomeAssistantRoutingSummary('Agent Creation', 'Create Agent modal was unavailable.');
           } else {
-            appendHomeAssistantMessage('assistant', 'Agent creation canceled. Ask again when you want to continue.');
+            appendHomeAssistantMessage(
+              'assistant',
+              'Agent creation canceled. Ask again when you want to continue.'
+            );
             setHomeAssistantRoutingSummary('Agent Creation', 'Agent creation canceled.');
           }
           renderHomeAssistantActions([
             {
               label: 'Create Agent',
               variant: 'primary',
-              onClick: function () { createAgentForPendingTask(); }
+              onClick: function () {
+                createAgentForPendingTask();
+              }
             },
             {
               label: 'Ask Another Task',
               variant: 'secondary',
-              onClick: function () { focusHomeAssistantInput(); }
+              onClick: function () {
+                focusHomeAssistantInput();
+              }
             }
           ]);
           return;
@@ -7904,29 +9288,44 @@
         agentName = semiAutoConfirmation.agentName;
         setHomeAssistantBusy(true, 'Finalizing…');
       } else if (!payload.model) {
-        appendHomeAssistantMessage('assistant',
-          'I could not auto-select a model. Please review and confirm in the Create Agent modal.');
-        setHomeAssistantRoutingSummary('Agent Creation', 'Model selection needs your confirmation.');
+        appendHomeAssistantMessage(
+          'assistant',
+          'I could not auto-select a model. Please review and confirm in the Create Agent modal.'
+        );
+        setHomeAssistantRoutingSummary(
+          'Agent Creation',
+          'Model selection needs your confirmation.'
+        );
         setHomeAssistantBusy(false);
         var confirmation = await confirmAgentCreationWithModal(payload);
         if (!confirmation || confirmation.status !== 'created') {
           if (confirmation && confirmation.status === 'unavailable') {
-            appendHomeAssistantMessage('assistant', 'I could not open the Create Agent modal. Please open Agents and create it manually.');
+            appendHomeAssistantMessage(
+              'assistant',
+              'I could not open the Create Agent modal. Please open Agents and create it manually.'
+            );
             setHomeAssistantRoutingSummary('Agent Creation', 'Create Agent modal was unavailable.');
           } else {
-            appendHomeAssistantMessage('assistant', 'Agent creation canceled. Ask again when you want to continue.');
+            appendHomeAssistantMessage(
+              'assistant',
+              'Agent creation canceled. Ask again when you want to continue.'
+            );
             setHomeAssistantRoutingSummary('Agent Creation', 'Agent creation canceled.');
           }
           renderHomeAssistantActions([
             {
               label: 'Create Agent',
               variant: 'primary',
-              onClick: function () { createAgentForPendingTask(); }
+              onClick: function () {
+                createAgentForPendingTask();
+              }
             },
             {
               label: 'Ask Another Task',
               variant: 'secondary',
-              onClick: function () { focusHomeAssistantInput(); }
+              onClick: function () {
+                focusHomeAssistantInput();
+              }
             }
           ]);
           return;
@@ -7934,17 +9333,25 @@
         agentName = confirmation.agentName;
         setHomeAssistantBusy(true, 'Finalizing…');
       } else {
-        appendHomeAssistantMessage('assistant', 'Auto-selected model "' + payload.model + '" for "' + agentName + '".');
+        appendHomeAssistantMessage(
+          'assistant',
+          'Auto-selected model "' + payload.model + '" for "' + agentName + '".'
+        );
         await API.post('/api/agents', payload);
       }
 
       homeAssistantState.pendingAgentName = agentName;
       appendHomeAssistantMessage('assistant', 'Created "' + agentName + '".');
-      setHomeAssistantRoutingSummary('Agent Ready', '"' + agentName + '" is ready. Handing off to chat.');
+      setHomeAssistantRoutingSummary(
+        'Agent Ready',
+        '"' + agentName + '" is ready. Handing off to chat.'
+      );
 
       if (intent.key === 'email_check') {
-        appendHomeAssistantMessage('assistant',
-          'Email idea: connect Gmail/Outlook via OAuth, start with read-only scopes, summarize unread first, and require explicit approval before sending replies.');
+        appendHomeAssistantMessage(
+          'assistant',
+          'Email idea: connect Gmail/Outlook via OAuth, start with read-only scopes, summarize unread first, and require explicit approval before sending replies.'
+        );
       }
       var routeContext = buildHomeRouteContext();
       var addedToWorkspace = await addAgentToWorkspaceIfNeeded(agentName, routeContext);
@@ -7963,30 +9370,54 @@
         appendHomeAssistantMessage('assistant', createdAgentMCP.message);
       }
       if (intent.key === 'email_check') {
-        var createdEmailMCPResolution = await maybeResolveEmailMCPBeforeHandoff(agentName, prompt, createdAgentMCP, routeContext);
+        var createdEmailMCPResolution = await maybeResolveEmailMCPBeforeHandoff(
+          agentName,
+          prompt,
+          createdAgentMCP,
+          routeContext
+        );
         if (!createdEmailMCPResolution || !createdEmailMCPResolution.continueHandoff) {
           return;
         }
       }
 
       if (isSemiAutoMode()) {
-        appendHomeAssistantMessage('assistant', 'Agent is ready. Handing off this task to chat now.');
-        setHomeAssistantRoutingSummary('Semi-auto', '"' + agentName + '" is ready. Handing off to chat.');
+        appendHomeAssistantMessage(
+          'assistant',
+          'Agent is ready. Handing off this task to chat now.'
+        );
+        setHomeAssistantRoutingSummary(
+          'Semi-auto',
+          '"' + agentName + '" is ready. Handing off to chat.'
+        );
       }
-      await runPendingTaskWithAgent(prompt, agentName, { appLaunchRequest: appLaunchRequest, routeContext: routeContext });
+      await runPendingTaskWithAgent(prompt, agentName, {
+        appLaunchRequest: appLaunchRequest,
+        routeContext: routeContext
+      });
 
-      API.get('/api/agents/dashboard/list').then(function (agentData) {
-        if (agentData) renderAgentList(agentData);
-      }).catch(function () {});
+      API.get('/api/agents/dashboard/list')
+        .then(function (agentData) {
+          if (agentData) renderAgentList(agentData);
+        })
+        .catch(function () {});
     } catch (error) {
-      dashLog.debug('Failed to create agent', { error: error && error.message || error });
-      appendHomeAssistantMessage('assistant', 'I could not create an agent right now. Please check model/provider settings and try again.');
-      setHomeAssistantRoutingSummary('Agent Creation Failed', 'Could not create an agent right now.');
+      dashLog.debug('Failed to create agent', { error: (error && error.message) || error });
+      appendHomeAssistantMessage(
+        'assistant',
+        'I could not create an agent right now. Please check model/provider settings and try again.'
+      );
+      setHomeAssistantRoutingSummary(
+        'Agent Creation Failed',
+        'Could not create an agent right now.'
+      );
       renderHomeAssistantActions([
         {
           label: 'Retry Create Agent',
           variant: 'primary',
-          onClick: function () { createAgentForPendingTask(); }
+          onClick: function () {
+            createAgentForPendingTask();
+          }
         }
       ]);
     } finally {
@@ -8028,7 +9459,7 @@
     for (var i = 0; i < manager.sessions.length; i++) {
       var session = manager.sessions[i];
       if (normalizeToken(session && session.agent_name) !== targetAgent) continue;
-      if (String(session && session.folder_id || '').trim() === targetWorkspace) {
+      if (String((session && session.folder_id) || '').trim() === targetWorkspace) {
         return session;
       }
     }
@@ -8047,7 +9478,8 @@
 
   async function submitHomeAssistantPlanningForm() {
     var planningState = homeAssistantState.planningState;
-    if (!planningState || planningState.kind !== 'planning_form' || planningState.submitting) return;
+    if (!planningState || planningState.kind !== 'planning_form' || planningState.submitting)
+      return;
 
     var missingQuestion = validatePlanningFormState(planningState);
     if (missingQuestion) {
@@ -8072,12 +9504,16 @@
       {
         label: 'Open Chat',
         variant: 'primary',
-        onClick: function () { openChatPanel(); }
+        onClick: function () {
+          openChatPanel();
+        }
       },
       {
         label: 'Ask Another Task',
         variant: 'secondary',
-        onClick: function () { focusHomeAssistantInput(); }
+        onClick: function () {
+          focusHomeAssistantInput();
+        }
       }
     ]);
   }
@@ -8086,7 +9522,8 @@
     var normalizedContext = normalizeHomeRouteContext(routeContext);
     if (normalizedContext.surface !== 'workspace_task') return '';
     var taskPage = window.workspaceTaskPage;
-    var task = taskPage && taskPage.task && typeof taskPage.task === 'object' ? taskPage.task : null;
+    var task =
+      taskPage && taskPage.task && typeof taskPage.task === 'object' ? taskPage.task : null;
     if (!task) return '';
     return String(task.assigned_to || task.assignedTo || '').trim();
   }
@@ -8101,19 +9538,24 @@
     }
 
     var normalizedContext = normalizeHomeRouteContext(routeContext);
-    var workspaceId = hasWorkspaceRouteContext(normalizedContext) ? String(normalizedContext.workspace_id).trim() : '';
+    var workspaceId = hasWorkspaceRouteContext(normalizedContext)
+      ? String(normalizedContext.workspace_id).trim()
+      : '';
     var reuseExistingSession = Boolean(options && options.reuseExistingSession);
     var requestedSessionId = reuseExistingSession
       ? String(normalizedContext.session_id || '').trim()
       : '';
     var taskAgentName = resolveWorkspaceTaskAssistantAgent(normalizedContext);
-    var entryAgentName = taskAgentName || (workspaceId ? await fetchWorkspaceEntryAgentName(workspaceId) : '');
+    var entryAgentName =
+      taskAgentName || (workspaceId ? await fetchWorkspaceEntryAgentName(workspaceId) : '');
     if (entryAgentName) {
       if (reuseExistingSession) {
         var currentEntrySession = findSessionById(requestedSessionId || getCurrentHomeSessionId());
-        if (currentEntrySession &&
-            normalizeToken(currentEntrySession.agent_name) === normalizeToken(entryAgentName) &&
-            String(currentEntrySession.folder_id || '').trim() === workspaceId) {
+        if (
+          currentEntrySession &&
+          normalizeToken(currentEntrySession.agent_name) === normalizeToken(entryAgentName) &&
+          String(currentEntrySession.folder_id || '').trim() === workspaceId
+        ) {
           return { session: currentEntrySession, reused: true, entryAgentName: entryAgentName };
         }
 
@@ -8129,7 +9571,11 @@
       var entrySession = null;
       if (typeof manager.createSessionWithAgentInFolder === 'function') {
         try {
-          entrySession = await manager.createSessionWithAgentInFolder(entryAgentName, workspaceId, false);
+          entrySession = await manager.createSessionWithAgentInFolder(
+            entryAgentName,
+            workspaceId,
+            false
+          );
         } catch (error) {
           throw buildWorkspaceManagerError(error, {
             stage: 'workspace_entry_session_create_failed',
@@ -8154,7 +9600,12 @@
           );
         }
         entrySession = await entryResponse.json();
-        if (entrySession && entrySession.id && manager && typeof manager.switchToSession === 'function') {
+        if (
+          entrySession &&
+          entrySession.id &&
+          manager &&
+          typeof manager.switchToSession === 'function'
+        ) {
           await manager.switchToSession(entrySession.id, false);
         }
       }
@@ -8168,7 +9619,11 @@
           }
         );
       }
-      return { session: entrySession.session || entrySession, reused: false, entryAgentName: entryAgentName };
+      return {
+        session: entrySession.session || entrySession,
+        reused: false,
+        entryAgentName: entryAgentName
+      };
     }
 
     var title = truncateText(String(prompt || '').trim(), 50) || 'Assistant';
@@ -8182,7 +9637,11 @@
           message: 'Could not create the fallback workspace assistant session.'
         });
       }
-    } else if (window.workspaceDetail && typeof window.workspaceDetail.createSimpleSession === 'function' && workspaceId) {
+    } else if (
+      window.workspaceDetail &&
+      typeof window.workspaceDetail.createSimpleSession === 'function' &&
+      workspaceId
+    ) {
       try {
         created = await window.workspaceDetail.createSimpleSession(false);
       } catch (error) {
@@ -8214,19 +9673,18 @@
     }
 
     if (!created) {
-      throw buildWorkspaceManagerError(
-        new Error('Assistant session returned no session object.'),
-        {
-          stage: 'assistant_session_create_failed',
-          message: 'Could not create the fallback workspace assistant session.'
-        }
-      );
+      throw buildWorkspaceManagerError(new Error('Assistant session returned no session object.'), {
+        stage: 'assistant_session_create_failed',
+        message: 'Could not create the fallback workspace assistant session.'
+      });
     }
     return { session: created.session || created, reused: false };
   }
 
   async function dispatchPromptToWorkspaceAssistantSession(prompt, routeContext) {
-    var result = await openOrCreateWorkspaceAssistantSession(routeContext, prompt, { reuseExistingSession: false });
+    var result = await openOrCreateWorkspaceAssistantSession(routeContext, prompt, {
+      reuseExistingSession: false
+    });
     if (!result || !result.session) return null;
 
     openChatPanel();
@@ -8262,10 +9720,13 @@
     }
 
     var session = result.session;
-    var entryLabel = result.entryAgentName ? result.entryAgentName : getWorkspaceHomeAssistantDisplayName();
-    var dispatchMessage = options && typeof options.dispatchPrompt === 'string'
-      ? String(options.dispatchPrompt || '').trim()
-      : buildWorkspaceManagerDispatchMessage(prompt, routeContext, intent);
+    var entryLabel = result.entryAgentName
+      ? result.entryAgentName
+      : getWorkspaceHomeAssistantDisplayName();
+    var dispatchMessage =
+      options && typeof options.dispatchPrompt === 'string'
+        ? String(options.dispatchPrompt || '').trim()
+        : buildWorkspaceManagerDispatchMessage(prompt, routeContext, intent);
     var requestContext = normalizeHomeRouteContext({
       surface: routeContext && routeContext.surface,
       page_path: routeContext && routeContext.page_path,
@@ -8300,10 +9761,12 @@
       });
     }
 
-    var responseText = String(data && data.response || '').trim();
+    var responseText = String((data && data.response) || '').trim();
     var rawToolPayload = isLikelyHomeAssistantRawToolPayload(responseText, data);
     if (rawToolPayload) {
-      responseText = entryLabel + ' checked the workspace context but returned raw tool data instead of a reply. Please retry or open chat.';
+      responseText =
+        entryLabel +
+        ' checked the workspace context but returned raw tool data instead of a reply. Please retry or open chat.';
     }
     if (!responseText) {
       responseText = entryLabel + ' is ready for your next answer in chat.';
@@ -8322,7 +9785,9 @@
   async function openOrCreateChatSession(agentName, routeContext) {
     var manager = window.sessionManager;
     if (!manager) return null;
-    var workspaceId = hasWorkspaceRouteContext(routeContext) ? String(routeContext.workspace_id).trim() : '';
+    var workspaceId = hasWorkspaceRouteContext(routeContext)
+      ? String(routeContext.workspace_id).trim()
+      : '';
 
     if (workspaceId && typeof manager.createSessionWithAgentInFolder === 'function') {
       await manager.createSessionWithAgentInFolder(agentName, workspaceId);
@@ -8350,8 +9815,15 @@
   }
 
   async function addAgentToWorkspaceIfNeeded(agentName, routeContext) {
-    var workspaceId = hasWorkspaceRouteContext(routeContext) ? String(routeContext.workspace_id).trim() : '';
-    if (!workspaceId || !agentName || typeof API === 'undefined' || typeof API.post !== 'function') {
+    var workspaceId = hasWorkspaceRouteContext(routeContext)
+      ? String(routeContext.workspace_id).trim()
+      : '';
+    if (
+      !workspaceId ||
+      !agentName ||
+      typeof API === 'undefined' ||
+      typeof API.post !== 'function'
+    ) {
       return false;
     }
 
@@ -8360,9 +9832,11 @@
         agent_name: agentName
       });
 
-      if (window.workspaceDetail &&
-          String(window.workspaceDetail.workspaceId || '').trim() === workspaceId &&
-          typeof window.workspaceDetail.loadWorkspace === 'function') {
+      if (
+        window.workspaceDetail &&
+        String(window.workspaceDetail.workspaceId || '').trim() === workspaceId &&
+        typeof window.workspaceDetail.loadWorkspace === 'function'
+      ) {
         window.workspaceDetail.loadWorkspace();
       }
 
@@ -8371,7 +9845,7 @@
       dashLog.debug('Failed to attach created agent to workspace', {
         workspaceId: workspaceId,
         agentName: agentName,
-        error: error && error.message || error
+        error: (error && error.message) || error
       });
       return false;
     }
@@ -8384,7 +9858,9 @@
     openChatPanel();
     if (typeof window.sendMessageToChat !== 'function') return null;
     await waitForDelay(120);
-    await window.sendMessageToChat(prompt, { routeContext: normalizeHomeRouteContext(routeContext) });
+    await window.sendMessageToChat(prompt, {
+      routeContext: normalizeHomeRouteContext(routeContext)
+    });
     return session;
   }
 
@@ -8404,7 +9880,9 @@
     if (!routeMeta || routeMeta.mode !== 'utility_direct') {
       return 'Completed in the current assistant session.';
     }
-    var text = routeMeta.toolName ? ('Executed "' + routeMeta.toolName + '" directly') : 'Executed utility tool directly';
+    var text = routeMeta.toolName
+      ? 'Executed "' + routeMeta.toolName + '" directly'
+      : 'Executed utility tool directly';
     if (routeMeta.provider) {
       text += ' using ' + routeMeta.provider;
     }
@@ -8413,17 +9891,27 @@
 
   async function runCapabilityTaskDirect(prompt, agentName, options) {
     if (!prompt || !agentName) return;
-    var routeContext = options && options.routeContext ? options.routeContext : buildHomeRouteContext();
-    var dispatchIntent = options && options.intent ? options.intent : homeAssistantState.pendingIntent;
+    var routeContext =
+      options && options.routeContext ? options.routeContext : buildHomeRouteContext();
+    var dispatchIntent =
+      options && options.intent ? options.intent : homeAssistantState.pendingIntent;
     var appLaunchRequest = options && options.appLaunchRequest ? options.appLaunchRequest : null;
-    var dispatchMessage = buildAskOriDispatchMessage(prompt, appLaunchRequest, dispatchIntent, routeContext);
+    var dispatchMessage = buildAskOriDispatchMessage(
+      prompt,
+      appLaunchRequest,
+      dispatchIntent,
+      routeContext
+    );
     var responseMode = normalizeToken(options && options.responseMode);
     var advisoryMode = responseMode === 'advisory';
 
     setHomeAssistantBusy(true, advisoryMode ? 'Thinking…' : 'Running Capability…');
     renderHomeAssistantActions([]);
     if (!advisoryMode) {
-      appendHomeAssistantMessage('assistant', 'Using the current capability setup to answer this directly.');
+      appendHomeAssistantMessage(
+        'assistant',
+        'Using the current capability setup to answer this directly.'
+      );
     }
     setHomeAssistantRoutingSummary(
       advisoryMode ? agentName : 'Capability Direct',
@@ -8438,7 +9926,7 @@
         agent_name: agentName,
         route_context: normalizeHomeRouteContext(routeContext)
       });
-      var responseText = String(data && data.response || '').trim();
+      var responseText = String((data && data.response) || '').trim();
       if (!responseText) {
         responseText = advisoryMode
           ? 'Ori completed the request, but no text response was returned.'
@@ -8456,20 +9944,27 @@
         {
           label: 'Continue in Chat',
           variant: 'primary',
-          onClick: function () { runPendingTaskWithAgent(prompt, agentName, options); }
+          onClick: function () {
+            runPendingTaskWithAgent(prompt, agentName, options);
+          }
         },
         {
           label: 'Ask Another Task',
           variant: 'secondary',
-          onClick: function () { focusHomeAssistantInput(); }
+          onClick: function () {
+            focusHomeAssistantInput();
+          }
         }
       ]);
     } catch (error) {
-      dashLog.debug('Direct capability execution failed', { error: error && error.message || error, agent: agentName });
+      dashLog.debug('Direct capability execution failed', {
+        error: (error && error.message) || error,
+        agent: agentName
+      });
       appendHomeAssistantMessage(
         'assistant',
         advisoryMode
-          ? 'I could not get Ori\'s recommendation right now.'
+          ? "I could not get Ori's recommendation right now."
           : 'I could not run that capability directly right now.'
       );
       setHomeAssistantRoutingSummary(
@@ -8480,12 +9975,16 @@
         {
           label: 'Retry',
           variant: 'primary',
-          onClick: function () { runCapabilityTaskDirect(prompt, agentName, options); }
+          onClick: function () {
+            runCapabilityTaskDirect(prompt, agentName, options);
+          }
         },
         {
           label: 'Continue in Chat',
           variant: 'secondary',
-          onClick: function () { runPendingTaskWithAgent(prompt, agentName, options); }
+          onClick: function () {
+            runPendingTaskWithAgent(prompt, agentName, options);
+          }
         }
       ]);
     } finally {
@@ -8523,20 +10022,30 @@
 
   async function runWorkspaceScheduleSummaryDirect(prompt, routeContext) {
     var activeContext = normalizeHomeRouteContext(routeContext);
-    var workspaceId = String(activeContext && activeContext.workspace_id || '').trim();
+    var workspaceId = String((activeContext && activeContext.workspace_id) || '').trim();
     if (!workspaceId) {
-      appendHomeAssistantMessage('assistant', 'I need a workspace before I can inspect scheduled tasks.');
-      setHomeAssistantRoutingSummary('Workspace Needed', 'Choose or open a workspace before continuing.');
+      appendHomeAssistantMessage(
+        'assistant',
+        'I need a workspace before I can inspect scheduled tasks.'
+      );
+      setHomeAssistantRoutingSummary(
+        'Workspace Needed',
+        'Choose or open a workspace before continuing.'
+      );
       renderHomeAssistantActions([
         {
           label: 'Open Workspaces',
           variant: 'primary',
-          onClick: function () { window.location.href = '/workspaces'; }
+          onClick: function () {
+            window.location.href = '/workspaces';
+          }
         },
         {
           label: 'Ask Another Task',
           variant: 'secondary',
-          onClick: function () { focusHomeAssistantInput(); }
+          onClick: function () {
+            focusHomeAssistantInput();
+          }
         }
       ]);
       return;
@@ -8545,18 +10054,30 @@
     setHomeAssistantBusy(true, 'Checking Workspace Schedule…');
     renderHomeAssistantActions([]);
     appendHomeAssistantMessage('assistant', 'Checking scheduled tasks in the current workspace.');
-    setHomeAssistantRoutingSummary('Workspace Schedule', 'Loading scheduled tasks for this workspace.');
+    setHomeAssistantRoutingSummary(
+      'Workspace Schedule',
+      'Loading scheduled tasks for this workspace.'
+    );
 
     try {
-      var data = await API.get('/api/orchestration/tasks?workspace_id=' + encodeURIComponent(workspaceId));
+      var data = await API.get(
+        '/api/orchestration/tasks?workspace_id=' + encodeURIComponent(workspaceId)
+      );
       var tasks = Array.isArray(data && data.tasks) ? data.tasks : [];
       var scheduledTasks = tasks.filter(function (task) {
-        return Boolean(task && (task.schedule_enabled || task.schedule || task.next_run || task.schedule_type || task.schedule_expression));
+        return Boolean(
+          task &&
+          (task.schedule_enabled ||
+            task.schedule ||
+            task.next_run ||
+            task.schedule_type ||
+            task.schedule_expression)
+        );
       });
 
       scheduledTasks.sort(function (a, b) {
-        var left = String(a && a.next_run || '').trim();
-        var right = String(b && b.next_run || '').trim();
+        var left = String((a && a.next_run) || '').trim();
+        var right = String((b && b.next_run) || '').trim();
         if (!left && !right) return 0;
         if (!left) return 1;
         if (!right) return -1;
@@ -8564,18 +10085,25 @@
       });
 
       if (scheduledTasks.length === 0) {
-        appendHomeAssistantMessage('assistant', 'This workspace does not have any scheduled tasks yet.');
+        appendHomeAssistantMessage(
+          'assistant',
+          'This workspace does not have any scheduled tasks yet.'
+        );
         setHomeAssistantRoutingSummary('Workspace Schedule', 'No scheduled tasks found.');
         renderHomeAssistantActions([
           {
             label: 'Open Workspace',
             variant: 'primary',
-            onClick: function () { window.location.href = '/workspaces/' + encodeURIComponent(workspaceId); }
+            onClick: function () {
+              window.location.href = '/workspaces/' + encodeURIComponent(workspaceId);
+            }
           },
           {
             label: 'Ask Another Task',
             variant: 'secondary',
-            onClick: function () { focusHomeAssistantInput(); }
+            onClick: function () {
+              focusHomeAssistantInput();
+            }
           }
         ]);
         return;
@@ -8591,16 +10119,25 @@
       ];
       for (var i = 0; i < scheduledTasks.length && i < 5; i++) {
         var task = scheduledTasks[i];
-        var description = String(task && (task.description || task.name || task.id) || 'Untitled task').trim();
+        var description = String(
+          (task && (task.description || task.name || task.id)) || 'Untitled task'
+        ).trim();
         lines.push(
-          (i + 1) + '. ' + description +
-          ' | ' + formatWorkspaceScheduleTask(task) +
-          ' | next run: ' + formatWorkspaceScheduleNextRun(task && task.next_run)
+          i +
+            1 +
+            '. ' +
+            description +
+            ' | ' +
+            formatWorkspaceScheduleTask(task) +
+            ' | next run: ' +
+            formatWorkspaceScheduleNextRun(task && task.next_run)
         );
       }
       if (scheduledTasks.length > 5) {
         lines.push('');
-        lines.push((scheduledTasks.length - 5) + ' more scheduled task(s) available in the workspace.');
+        lines.push(
+          scheduledTasks.length - 5 + ' more scheduled task(s) available in the workspace.'
+        );
       }
 
       appendHomeAssistantMessage('assistant', lines.join('\n'));
@@ -8609,7 +10146,9 @@
         {
           label: 'Open Workspace',
           variant: 'primary',
-          onClick: function () { window.location.href = '/workspaces/' + encodeURIComponent(workspaceId); }
+          onClick: function () {
+            window.location.href = '/workspaces/' + encodeURIComponent(workspaceId);
+          }
         },
         {
           label: 'Continue in Chat',
@@ -8617,29 +10156,46 @@
           disabled: !homeAssistantState.pendingAgentName,
           onClick: function () {
             if (!homeAssistantState.pendingAgentName) return;
-            runPendingTaskWithAgent(prompt, homeAssistantState.pendingAgentName, { routeContext: activeContext });
+            runPendingTaskWithAgent(prompt, homeAssistantState.pendingAgentName, {
+              routeContext: activeContext
+            });
           }
         },
         {
           label: 'Ask Another Task',
           variant: 'secondary',
-          onClick: function () { focusHomeAssistantInput(); }
+          onClick: function () {
+            focusHomeAssistantInput();
+          }
         }
       ]);
     } catch (error) {
-      dashLog.debug('Workspace schedule summary failed', { error: error && error.message || error, workspaceId: workspaceId });
-      appendHomeAssistantMessage('assistant', 'I could not load scheduled tasks for this workspace right now.');
-      setHomeAssistantRoutingSummary('Workspace Schedule Failed', 'Could not load scheduled tasks.');
+      dashLog.debug('Workspace schedule summary failed', {
+        error: (error && error.message) || error,
+        workspaceId: workspaceId
+      });
+      appendHomeAssistantMessage(
+        'assistant',
+        'I could not load scheduled tasks for this workspace right now.'
+      );
+      setHomeAssistantRoutingSummary(
+        'Workspace Schedule Failed',
+        'Could not load scheduled tasks.'
+      );
       renderHomeAssistantActions([
         {
           label: 'Retry',
           variant: 'primary',
-          onClick: function () { runWorkspaceScheduleSummaryDirect(prompt, activeContext); }
+          onClick: function () {
+            runWorkspaceScheduleSummaryDirect(prompt, activeContext);
+          }
         },
         {
           label: 'Open Workspace',
           variant: 'secondary',
-          onClick: function () { window.location.href = '/workspaces/' + encodeURIComponent(workspaceId); }
+          onClick: function () {
+            window.location.href = '/workspaces/' + encodeURIComponent(workspaceId);
+          }
         }
       ]);
     } finally {
@@ -8657,15 +10213,21 @@
     });
     setHomeAssistantBusy(true, 'Running Utility…');
     renderHomeAssistantActions([]);
-    appendHomeAssistantMessage('assistant', 'Running this as a direct utility request in the current assistant session.');
-    setHomeAssistantRoutingSummary('Utility Direct', 'Executing directly without creating or handing off to another agent.');
+    appendHomeAssistantMessage(
+      'assistant',
+      'Running this as a direct utility request in the current assistant session.'
+    );
+    setHomeAssistantRoutingSummary(
+      'Utility Direct',
+      'Executing directly without creating or handing off to another agent.'
+    );
 
     try {
       var data = await API.post('/api/chat', {
         question: prompt,
         agent_name: agentName
       });
-      var responseText = String(data && data.response || '').trim();
+      var responseText = String((data && data.response) || '').trim();
       if (!responseText) {
         responseText = 'Completed utility request, but no text response was returned.';
       }
@@ -8678,28 +10240,44 @@
         {
           label: 'Open Chat',
           variant: 'primary',
-          onClick: function () { openChatPanel(); }
+          onClick: function () {
+            openChatPanel();
+          }
         },
         {
           label: 'Ask Another Task',
           variant: 'secondary',
-          onClick: function () { focusHomeAssistantInput(); }
+          onClick: function () {
+            focusHomeAssistantInput();
+          }
         }
       ]);
     } catch (error) {
-      dashLog.debug('Direct utility execution failed', { error: error && error.message || error });
-      appendHomeAssistantMessage('assistant', 'I could not execute that utility request directly right now.');
-      setHomeAssistantRoutingSummary('Utility Direct Failed', 'Could not execute utility request directly.');
+      dashLog.debug('Direct utility execution failed', {
+        error: (error && error.message) || error
+      });
+      appendHomeAssistantMessage(
+        'assistant',
+        'I could not execute that utility request directly right now.'
+      );
+      setHomeAssistantRoutingSummary(
+        'Utility Direct Failed',
+        'Could not execute utility request directly.'
+      );
       renderHomeAssistantActions([
         {
           label: 'Retry',
           variant: 'primary',
-          onClick: function () { runUtilityTaskDirect(prompt, agentName); }
+          onClick: function () {
+            runUtilityTaskDirect(prompt, agentName);
+          }
         },
         {
           label: 'Ask Another Task',
           variant: 'secondary',
-          onClick: function () { focusHomeAssistantInput(); }
+          onClick: function () {
+            focusHomeAssistantInput();
+          }
         }
       ]);
     } finally {
@@ -8722,7 +10300,9 @@
     renderHomeAssistantActions([]);
     setHomeAssistantRoutingSummary(
       summaryLabel,
-      confirmedAction ? 'Applying your confirmed action…' : 'Reviewing your workspaces, tasks, and activity…'
+      confirmedAction
+        ? 'Applying your confirmed action…'
+        : 'Reviewing your workspaces, tasks, and activity…'
     );
 
     try {
@@ -8736,7 +10316,7 @@
       }
 
       var data = await API.post('/api/home-assistant/ask', payload);
-      var responseText = String(data && data.response || '').trim();
+      var responseText = String((data && data.response) || '').trim();
       if (responseText) {
         appendHomeAssistantMessage('assistant', responseText);
       }
@@ -8748,15 +10328,33 @@
 
       setHomeAssistantRoutingSummary(summaryLabel, formatHomeAskSummary(data));
       var buttons = buildHomeActionButtons(data && data.actions, routeContext, intent);
-      buttons.push({ label: 'Ask Another Task', variant: 'secondary', onClick: function () { focusHomeAssistantInput(); } });
+      buttons.push({
+        label: 'Ask Another Task',
+        variant: 'secondary',
+        onClick: function () {
+          focusHomeAssistantInput();
+        }
+      });
       renderHomeAssistantActions(buttons);
     } catch (error) {
-      dashLog.debug('Home inline ask failed', { error: error && error.message || error });
+      dashLog.debug('Home inline ask failed', { error: (error && error.message) || error });
       appendHomeAssistantMessage('assistant', 'I could not answer that right now. Please retry.');
       setHomeAssistantRoutingSummary(summaryLabel + ' Failed', 'Could not complete the request.');
       renderHomeAssistantActions([
-        { label: 'Retry', variant: 'primary', onClick: function () { runHomeAssistantInline(text, routeContext, intent, options); } },
-        { label: 'Ask Another Task', variant: 'secondary', onClick: function () { focusHomeAssistantInput(); } }
+        {
+          label: 'Retry',
+          variant: 'primary',
+          onClick: function () {
+            runHomeAssistantInline(text, routeContext, intent, options);
+          }
+        },
+        {
+          label: 'Ask Another Task',
+          variant: 'secondary',
+          onClick: function () {
+            focusHomeAssistantInput();
+          }
+        }
       ]);
     } finally {
       setHomeAssistantBusy(false);
@@ -8764,8 +10362,14 @@
   }
 
   function isMutatingHomeActionType(type) {
-    return type === 'create_workspace' || type === 'create_task' || type === 'start_task' ||
-      type === 'assign_agent' || type === 'create_agent' || type === 'remove_agent';
+    return (
+      type === 'create_workspace' ||
+      type === 'create_task' ||
+      type === 'start_task' ||
+      type === 'assign_agent' ||
+      type === 'create_agent' ||
+      type === 'remove_agent'
+    );
   }
 
   // buildHomeActionButtons maps the backend action schema to renderHomeAssistant-
@@ -8793,7 +10397,9 @@
       return {
         label: label,
         variant: type === 'navigate' ? 'secondary' : 'primary',
-        onClick: function () { window.location.href = href; }
+        onClick: function () {
+          window.location.href = href;
+        }
       };
     }
 
@@ -8801,18 +10407,26 @@
       var confirmation = {
         action_id: String(action.id || type),
         action_type: type,
-        summary: String(action.confirmation_summary || ('Confirm: ' + label)),
+        summary: String(action.confirmation_summary || 'Confirm: ' + label),
         arguments: action.arguments || {}
       };
       return {
         label: label,
         variant: 'primary',
-        onClick: function () { confirmHomeAction(confirmation, routeContext, intent); }
+        onClick: function () {
+          confirmHomeAction(confirmation, routeContext, intent);
+        }
       };
     }
 
     if (type === 'ask_followup') {
-      return { label: label, variant: 'secondary', onClick: function () { focusHomeAssistantInput(); } };
+      return {
+        label: label,
+        variant: 'secondary',
+        onClick: function () {
+          focusHomeAssistantInput();
+        }
+      };
     }
     return null;
   }
@@ -8835,7 +10449,9 @@
             workspace_id: String(args.workspace_id || ''),
             task_id: String(args.task_id || '')
           };
-          runHomeAssistantInline(homeAssistantState.pendingPrompt, routeContext, intent, { confirmedAction: confirmedAction });
+          runHomeAssistantInline(homeAssistantState.pendingPrompt, routeContext, intent, {
+            confirmedAction: confirmedAction
+          });
         }
       },
       {
@@ -8844,7 +10460,15 @@
         onClick: function () {
           appendHomeAssistantMessage('assistant', 'Okay, I will not make that change.');
           setHomeAssistantRoutingSummary('Cancelled', 'No changes made.');
-          renderHomeAssistantActions([{ label: 'Ask Another Task', variant: 'secondary', onClick: function () { focusHomeAssistantInput(); } }]);
+          renderHomeAssistantActions([
+            {
+              label: 'Ask Another Task',
+              variant: 'secondary',
+              onClick: function () {
+                focusHomeAssistantInput();
+              }
+            }
+          ]);
         }
       }
     ]);
@@ -8858,9 +10482,15 @@
       parts.push(meta.workspace_count + ' workspace' + (meta.workspace_count === 1 ? '' : 's'));
     }
     if (typeof meta.task_count === 'number') {
-      parts.push(meta.task_count + ' task' + (meta.task_count === 1 ? '' : 's') + ' ' + String(meta.window_label || 'recently'));
+      parts.push(
+        meta.task_count +
+          ' task' +
+          (meta.task_count === 1 ? '' : 's') +
+          ' ' +
+          String(meta.window_label || 'recently')
+      );
     }
-    var base = parts.length ? ('From ' + parts.join(', ')) : 'Answered from your app data';
+    var base = parts.length ? 'From ' + parts.join(', ') : 'Answered from your app data';
     if (meta.degraded && meta.degraded.length) {
       base += ' (some data unavailable)';
     }
@@ -8884,7 +10514,12 @@
     var text = normalizeToken(prompt);
     if (!text) return false;
     if (/\b(?:daily|weekly|monthly|weekdays|weekends|recurring)\b/.test(text)) return true;
-    if (/\bevery\s+(?:day|week|month|weekday|weekend|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/.test(text)) return true;
+    if (
+      /\bevery\s+(?:day|week|month|weekday|weekend|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/.test(
+        text
+      )
+    )
+      return true;
     if (/\bevery\s+\d+\s*(?:min|mins|minute|minutes|hour|hours|day|days)\b/.test(text)) return true;
     return false;
   }
@@ -8894,7 +10529,12 @@
     if (!text) return false;
     if (hasRecurringScheduleLanguage(text)) return true;
     if (/\b(?:schedule|scheduled|remind me|reminder)\b/.test(text)) return true;
-    if (/\b(?:today|tomorrow|tonight|next\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday))\b/.test(text)) return true;
+    if (
+      /\b(?:today|tomorrow|tonight|next\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday))\b/.test(
+        text
+      )
+    )
+      return true;
     if (/\b(?:at|@)\s*\d{1,2}(?::\d{2})?\s*(?:am|pm)\b/i.test(String(prompt || ''))) return true;
     if (/\b(?:at|@)\s*\d{1,2}:\d{2}\b/i.test(String(prompt || ''))) return true;
     return false;
@@ -9050,7 +10690,9 @@
     var text = normalizeToken(prompt);
     if (!text) return null;
 
-    var intervalMatch = text.match(/\bevery\s+(\d+)\s*(min|mins|minute|minutes|hour|hours|day|days)\b/);
+    var intervalMatch = text.match(
+      /\bevery\s+(\d+)\s*(min|mins|minute|minutes|hour|hours|day|days)\b/
+    );
     if (intervalMatch) {
       var amount = Number(intervalMatch[1]);
       if (Number.isFinite(amount) && amount > 0) {
@@ -9062,19 +10704,27 @@
           intervalMinutes = amount * 1440;
         }
         var intervalSchedule = { type: 'interval', interval_minutes: intervalMinutes };
-        return { schedule: intervalSchedule, schedule_name: buildScheduleNameFromConfig(intervalSchedule) };
+        return {
+          schedule: intervalSchedule,
+          schedule_name: buildScheduleNameFromConfig(intervalSchedule)
+        };
       }
     }
 
     var clock = parseClockTimeFromText(prompt);
-    var weekdayMatch = text.match(/\bevery\s+(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/);
+    var weekdayMatch = text.match(
+      /\bevery\s+(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/
+    );
     if (weekdayMatch) {
       var weeklySchedule = {
         type: 'weekly',
         day_of_week: normalizeScheduleDayOfWeek(weekdayMatch[1]),
         time: clock ? clock.hhmm : '09:00'
       };
-      return { schedule: weeklySchedule, schedule_name: buildScheduleNameFromConfig(weeklySchedule) };
+      return {
+        schedule: weeklySchedule,
+        schedule_name: buildScheduleNameFromConfig(weeklySchedule)
+      };
     }
 
     if (/\b(?:every day|daily|each day)\b/.test(text)) {
@@ -9102,13 +10752,20 @@
     var days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
     if (type === 'daily') {
-      return 'Daily at ' + formatScheduleTimeLabel(schedule.time || schedule.time_of_day || '09:00');
+      return (
+        'Daily at ' + formatScheduleTimeLabel(schedule.time || schedule.time_of_day || '09:00')
+      );
     }
 
     if (type === 'weekly') {
       var dayIndex = normalizeScheduleDayOfWeek(schedule.day_of_week);
       var dayLabel = days[dayIndex] || 'Weekly';
-      return 'Every ' + dayLabel + ' at ' + formatScheduleTimeLabel(schedule.time || schedule.time_of_day || '09:00');
+      return (
+        'Every ' +
+        dayLabel +
+        ' at ' +
+        formatScheduleTimeLabel(schedule.time || schedule.time_of_day || '09:00')
+      );
     }
 
     if (type === 'interval') {
@@ -9162,7 +10819,10 @@
     } else if (schedule && schedule.run_at) {
       var runDate = new Date(schedule.run_at);
       if (!Number.isNaN(runDate.getTime())) {
-        fallbackTime = String(runDate.getHours()).padStart(2, '0') + ':' + String(runDate.getMinutes()).padStart(2, '0');
+        fallbackTime =
+          String(runDate.getHours()).padStart(2, '0') +
+          ':' +
+          String(runDate.getMinutes()).padStart(2, '0');
       }
     }
     return { type: 'daily', time: fallbackTime };
@@ -9198,7 +10858,9 @@
           workspace_id: workspaceId
         });
       } catch (error) {
-        dashLog.debug('Auto-parse schedule draft unavailable', { error: error && error.message || error });
+        dashLog.debug('Auto-parse schedule draft unavailable', {
+          error: (error && error.message) || error
+        });
       }
     } else {
       try {
@@ -9214,7 +10876,9 @@
           parsed = await response.json();
         }
       } catch (error) {
-        dashLog.debug('Fallback auto-parse schedule draft unavailable', { error: error && error.message || error });
+        dashLog.debug('Fallback auto-parse schedule draft unavailable', {
+          error: (error && error.message) || error
+        });
       }
     }
 
@@ -9289,7 +10953,10 @@
 
   async function fetchWorkspaceTaskAgentInventory(workspaceId) {
     var workspaceAgents = [];
-    if (window.workspaceDetail && typeof window.workspaceDetail.getWorkspaceAgentNames === 'function') {
+    if (
+      window.workspaceDetail &&
+      typeof window.workspaceDetail.getWorkspaceAgentNames === 'function'
+    ) {
       workspaceAgents = normalizeAgentNameList(window.workspaceDetail.getWorkspaceAgentNames());
     }
 
@@ -9297,16 +10964,22 @@
       try {
         var workspaceData = null;
         if (typeof API !== 'undefined' && typeof API.get === 'function') {
-          workspaceData = await API.get('/api/orchestration/workspace?id=' + encodeURIComponent(workspaceId));
+          workspaceData = await API.get(
+            '/api/orchestration/workspace?id=' + encodeURIComponent(workspaceId)
+          );
         } else {
-          var wsResponse = await fetch('/api/orchestration/workspace?id=' + encodeURIComponent(workspaceId));
+          var wsResponse = await fetch(
+            '/api/orchestration/workspace?id=' + encodeURIComponent(workspaceId)
+          );
           if (wsResponse.ok) workspaceData = await wsResponse.json();
         }
         if (workspaceData && typeof workspaceData === 'object') {
           var merged = [];
           if (Array.isArray(workspaceData.agent_instances)) {
             for (var i = 0; i < workspaceData.agent_instances.length; i++) {
-              merged.push(workspaceData.agent_instances[i] && workspaceData.agent_instances[i].name);
+              merged.push(
+                workspaceData.agent_instances[i] && workspaceData.agent_instances[i].name
+              );
             }
           }
           if (Array.isArray(workspaceData.agents)) {
@@ -9319,7 +10992,7 @@
       } catch (error) {
         dashLog.debug('Failed to load workspace agents for scheduled task', {
           workspaceId: workspaceId,
-          error: error && error.message || error
+          error: (error && error.message) || error
         });
       }
     }
@@ -9328,7 +11001,9 @@
     try {
       allAgents = await fetchAgentsForMatching();
     } catch (error) {
-      dashLog.debug('Failed to load global agents for scheduled task', { error: error && error.message || error });
+      dashLog.debug('Failed to load global agents for scheduled task', {
+        error: (error && error.message) || error
+      });
       allAgents = [];
     }
 
@@ -9341,15 +11016,25 @@
   }
 
   function openWorkspaceTaskModalForConfiguration(workspaceId, description) {
-    if (window.taskModalController && typeof window.taskModalController.openForCreate === 'function') {
-      window.taskModalController.openForCreate(workspaceId, String(description || '').trim(), function () {
-        if (window.workspaceDetail && typeof window.workspaceDetail.loadTasks === 'function') {
-          window.workspaceDetail.loadTasks();
+    if (
+      window.taskModalController &&
+      typeof window.taskModalController.openForCreate === 'function'
+    ) {
+      window.taskModalController.openForCreate(
+        workspaceId,
+        String(description || '').trim(),
+        function () {
+          if (window.workspaceDetail && typeof window.workspaceDetail.loadTasks === 'function') {
+            window.workspaceDetail.loadTasks();
+          }
+          if (
+            window.workspaceDetail &&
+            typeof window.workspaceDetail.loadSchedules === 'function'
+          ) {
+            window.workspaceDetail.loadSchedules();
+          }
         }
-        if (window.workspaceDetail && typeof window.workspaceDetail.loadSchedules === 'function') {
-          window.workspaceDetail.loadSchedules();
-        }
-      });
+      );
       return true;
     }
     if (window.workspaceDetail && typeof window.workspaceDetail.showAddTaskModal === 'function') {
@@ -9372,7 +11057,10 @@
   }
 
   function openAgentCreationFlow() {
-    if (window.workspaceDetail && typeof window.workspaceDetail.openCreateAgentFlow === 'function') {
+    if (
+      window.workspaceDetail &&
+      typeof window.workspaceDetail.openCreateAgentFlow === 'function'
+    ) {
       window.workspaceDetail.openCreateAgentFlow();
       return;
     }
@@ -9384,11 +11072,14 @@
   }
 
   async function createWorkspaceTaskRecord(workspaceId, payload) {
-    var body = Object.assign({
-      workspace_id: workspaceId,
-      details: '',
-      status: 'pending'
-    }, payload || {});
+    var body = Object.assign(
+      {
+        workspace_id: workspaceId,
+        details: '',
+        status: 'pending'
+      },
+      payload || {}
+    );
 
     if (typeof API !== 'undefined' && typeof API.post === 'function') {
       return await API.post('/api/orchestration/tasks', body);
@@ -9418,7 +11109,10 @@
     }
 
     if (typeof API !== 'undefined' && typeof API.put === 'function') {
-      return await API.put('/api/orchestration/tasks/' + encodeURIComponent(normalizedTaskId), payload || {});
+      return await API.put(
+        '/api/orchestration/tasks/' + encodeURIComponent(normalizedTaskId),
+        payload || {}
+      );
     }
 
     var response = await fetch('/api/orchestration/tasks/' + encodeURIComponent(normalizedTaskId), {
@@ -9621,12 +11315,11 @@
 
     var detail = window.workspaceDetail;
     var targetWorkspaceId = String(
-      routeContext && routeContext.workspace_id ||
-      task.workspace_id ||
-      task.folder_id ||
-      ''
+      (routeContext && routeContext.workspace_id) || task.workspace_id || task.folder_id || ''
     ).trim();
-    var detailWorkspaceId = String(detail && (detail.workspaceId || detail.workspace && detail.workspace.id) || '').trim();
+    var detailWorkspaceId = String(
+      (detail && (detail.workspaceId || (detail.workspace && detail.workspace.id))) || ''
+    ).trim();
     var canUseWorkspaceDetail = Boolean(
       detail &&
       typeof detail.executeTask === 'function' &&
@@ -9652,7 +11345,9 @@
 
     appendHomeAssistantMessage(
       'assistant',
-      '"' + config.label + '" should own this travel-planning task. Create it first, then hand the task off there?'
+      '"' +
+        config.label +
+        '" should own this travel-planning task. Create it first, then hand the task off there?'
     );
     setHomeAssistantRoutingSummary(
       config.label,
@@ -9672,22 +11367,31 @@
       {
         label: 'Keep With ' + getWorkspaceHomeAssistantDisplayName(),
         variant: 'secondary',
-        onClick: function () { openWorkspaceAssistantForPrompt(prompt, routeContext, intent); }
+        onClick: function () {
+          openWorkspaceAssistantForPrompt(prompt, routeContext, intent);
+        }
       },
       {
         label: 'Ask Another Task',
         variant: 'secondary',
-        onClick: function () { focusHomeAssistantInput(); }
+        onClick: function () {
+          focusHomeAssistantInput();
+        }
       }
     ]);
   }
 
   async function routeWorkspacePromptToPlanningSpecialist(prompt, routeContext, intent, options) {
     var normalizedContext = normalizeHomeRouteContext(routeContext);
-    var workspaceId = hasWorkspaceRouteContext(normalizedContext) ? String(normalizedContext.workspace_id || '').trim() : '';
+    var workspaceId = hasWorkspaceRouteContext(normalizedContext)
+      ? String(normalizedContext.workspace_id || '').trim()
+      : '';
     if (!workspaceId) return false;
 
-    var config = options && options.config ? options.config : detectWorkspacePlanningSpecialist(prompt, intent);
+    var config =
+      options && options.config
+        ? options.config
+        : detectWorkspacePlanningSpecialist(prompt, intent);
     if (!config) return false;
 
     var allowCreate = options && options.allowCreate === true;
@@ -9699,7 +11403,9 @@
       'assistant',
       allowCreate
         ? 'Creating "' + config.label + '" and handing this task off there.'
-        : 'This looks like specialist-owned travel work. Routing it to "' + config.label + '" before execution starts.'
+        : 'This looks like specialist-owned travel work. Routing it to "' +
+            config.label +
+            '" before execution starts.'
     );
     setHomeAssistantRoutingSummary(config.label, 'Preparing a specialist-owned workspace task.');
 
@@ -9712,11 +11418,13 @@
       }
 
       var agentName = globalAgent
-        ? (typeof globalAgent === 'string' ? globalAgent : globalAgent.name)
+        ? typeof globalAgent === 'string'
+          ? globalAgent
+          : globalAgent.name
         : await createPlanningSpecialistAgent(config, {
-          summaryText: String(prompt || '').trim(),
-          agentLabel: managerLabel
-        });
+            summaryText: String(prompt || '').trim(),
+            agentLabel: managerLabel
+          });
 
       var workspaceAgent = findExactAgentByName(inventory && inventory.workspaceAgents, agentName);
       if (!workspaceAgent) {
@@ -9729,19 +11437,26 @@
       var createdResponse = await createWorkspaceTaskRecord(workspaceId, {
         from: managerLabel,
         to: String(agentName || '').trim(),
-        description: buildPlanningTaskDescriptionFromPrompt(prompt, config.taskTitle || config.label),
+        description: buildPlanningTaskDescriptionFromPrompt(
+          prompt,
+          config.taskTitle || config.label
+        ),
         details: buildWorkspaceSpecialistTaskDetails(prompt, managerLabel, config, agentName)
       });
-      var createdTask = createdResponse && createdResponse.task ? createdResponse.task : createdResponse;
+      var createdTask =
+        createdResponse && createdResponse.task ? createdResponse.task : createdResponse;
       if (!createdTask || !createdTask.id) {
         throw new Error('Failed to create the specialist task');
       }
 
       syncCreatedTaskIntoWorkspaceDetail(createdTask);
       var updatedTask = await updateWorkspaceTaskRecord(createdTask.id, {
-        context: buildWorkspaceSpecialistTaskContext(Object.assign({}, config, {
-          agentName: agentName
-        }), managerLabel)
+        context: buildWorkspaceSpecialistTaskContext(
+          Object.assign({}, config, {
+            agentName: agentName
+          }),
+          managerLabel
+        )
       });
       syncUpdatedTaskIntoWorkspaceDetail(updatedTask);
       await refreshWorkspaceDetailTaskPanels();
@@ -9758,10 +11473,16 @@
       dashLog.debug('Failed to hand off workspace travel task to specialist', {
         prompt: prompt,
         specialist: config && config.key,
-        error: error && error.message || error
+        error: (error && error.message) || error
       });
-      appendHomeAssistantMessage('assistant', 'I could not hand off this task to "' + config.label + '" right now.');
-      setHomeAssistantRoutingSummary(config.label, 'Could not create the specialist handoff right now.');
+      appendHomeAssistantMessage(
+        'assistant',
+        'I could not hand off this task to "' + config.label + '" right now.'
+      );
+      setHomeAssistantRoutingSummary(
+        config.label,
+        'Could not create the specialist handoff right now.'
+      );
       renderHomeAssistantActions([
         {
           label: 'Retry Specialist Handoff',
@@ -9776,12 +11497,16 @@
         {
           label: 'Keep With ' + managerLabel,
           variant: 'secondary',
-          onClick: function () { openWorkspaceAssistantForPrompt(prompt, normalizedContext, intent); }
+          onClick: function () {
+            openWorkspaceAssistantForPrompt(prompt, normalizedContext, intent);
+          }
         },
         {
           label: 'Ask Another Task',
           variant: 'secondary',
-          onClick: function () { focusHomeAssistantInput(); }
+          onClick: function () {
+            focusHomeAssistantInput();
+          }
         }
       ]);
       return true;
@@ -9797,22 +11522,25 @@
     if (typeof detail.openTaskAssistModal !== 'function') return false;
 
     var targetWorkspaceId = String(
-      routeContext && routeContext.workspace_id ||
-      updatedTask.workspace_id ||
-      updatedTask.folder_id ||
-      ''
+      (routeContext && routeContext.workspace_id) ||
+        updatedTask.workspace_id ||
+        updatedTask.folder_id ||
+        ''
     ).trim();
-    var detailWorkspaceId = String(detail.workspaceId || detail.workspace && detail.workspace.id || '').trim();
+    var detailWorkspaceId = String(
+      detail.workspaceId || (detail.workspace && detail.workspace.id) || ''
+    ).trim();
     if (targetWorkspaceId && detailWorkspaceId && targetWorkspaceId !== detailWorkspaceId) {
       return false;
     }
 
-    var humanLoop = updatedTask.context &&
+    var humanLoop =
+      updatedTask.context &&
       typeof updatedTask.context === 'object' &&
       updatedTask.context.human_loop &&
       typeof updatedTask.context.human_loop === 'object'
-      ? Object.assign({}, updatedTask.context.human_loop)
-      : null;
+        ? Object.assign({}, updatedTask.context.human_loop)
+        : null;
     var eventData = humanLoop
       ? Object.assign({ task_id: String(updatedTask.id), human_loop: humanLoop }, humanLoop)
       : { task_id: String(updatedTask.id) };
@@ -9823,7 +11551,7 @@
       } catch (error) {
         dashLog.debug('Failed to hand off planning subtask to task assist modal', {
           taskId: updatedTask.id,
-          error: error && error.message || error
+          error: (error && error.message) || error
         });
       }
     }
@@ -9862,16 +11590,22 @@
   function buildPlanningTaskQuestion(replyState) {
     if (!replyState) return 'How should I continue this planning task?';
 
-    if (replyState.workflowStep &&
-        String(replyState.workflowStep.step_type || '').trim() === 'ask_choice' &&
-        Array.isArray(replyState.workflowStep.choices) &&
-        replyState.workflowStep.choices.length > 0) {
-      var choiceLabels = replyState.workflowStep.choices.map(function (choice) {
-        var number = String(choice && choice.number || '').trim();
-        var label = String(choice && choice.label || '').trim();
-        return (number ? number + '. ' : '') + label;
-      }).filter(Boolean);
-      var prefix = String(replyState.workflowStep.summary || replyState.workflowStep.title || '').trim();
+    if (
+      replyState.workflowStep &&
+      String(replyState.workflowStep.step_type || '').trim() === 'ask_choice' &&
+      Array.isArray(replyState.workflowStep.choices) &&
+      replyState.workflowStep.choices.length > 0
+    ) {
+      var choiceLabels = replyState.workflowStep.choices
+        .map(function (choice) {
+          var number = String((choice && choice.number) || '').trim();
+          var label = String((choice && choice.label) || '').trim();
+          return (number ? number + '. ' : '') + label;
+        })
+        .filter(Boolean);
+      var prefix = String(
+        replyState.workflowStep.summary || replyState.workflowStep.title || ''
+      ).trim();
       var prompt = prefix || 'Choose the next step for this planning task.';
       if (choiceLabels.length > 0) {
         prompt += '\n\nOptions:\n- ' + choiceLabels.join('\n- ');
@@ -9906,15 +11640,20 @@
         human_loop: humanLoop,
         planning_latest_reply: String(replyState.latestReplyText || '').trim(),
         planning_workflow_step: replyState.workflowStep || null,
-        planning_session_id: String(replyState.routeContext && replyState.routeContext.session_id || '').trim()
+        planning_session_id: String(
+          (replyState.routeContext && replyState.routeContext.session_id) || ''
+        ).trim()
       }
     };
 
-    var response = await fetch('/api/orchestration/tasks/' + encodeURIComponent(replyState.linkedTask.id), {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
+    var response = await fetch(
+      '/api/orchestration/tasks/' + encodeURIComponent(replyState.linkedTask.id),
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      }
+    );
     if (!response.ok) {
       var text = '';
       try {
@@ -9931,7 +11670,13 @@
     return updatedTask;
   }
 
-  async function createScheduledWorkspaceTask(workspaceId, description, agentName, scheduleConfig, scheduleName) {
+  async function createScheduledWorkspaceTask(
+    workspaceId,
+    description,
+    agentName,
+    scheduleConfig,
+    scheduleName
+  ) {
     var assignedAgent = String(agentName || '').trim();
     if (!assignedAgent) {
       throw new Error('Scheduled tasks require an assigned agent.');
@@ -9940,7 +11685,8 @@
     if (!normalizedSchedule) {
       throw new Error('Could not parse schedule details from the prompt.');
     }
-    var label = String(scheduleName || '').trim() || buildScheduleNameFromConfig(normalizedSchedule);
+    var label =
+      String(scheduleName || '').trim() || buildScheduleNameFromConfig(normalizedSchedule);
     return await createWorkspaceTaskRecord(workspaceId, {
       description: String(description || '').trim(),
       to: assignedAgent,
@@ -9962,29 +11708,39 @@
     var inventory = await fetchWorkspaceTaskAgentInventory(workspaceId);
     var workspaceAgents = inventory.workspaceAgents || [];
     var globalAgents = inventory.allAgents || [];
-    var candidateAgents = workspaceAgents.length > 0 ? workspaceAgents.slice() : (inventory.allAgentNames || []);
+    var candidateAgents =
+      workspaceAgents.length > 0 ? workspaceAgents.slice() : inventory.allAgentNames || [];
 
     if (candidateAgents.length === 0) {
       appendHomeAssistantMessage(
         'assistant',
         'This task looks scheduled, and scheduled tasks need an assigned agent. There are no agents available yet.'
       );
-      setHomeAssistantRoutingSummary('Scheduled Task Needs Agent', 'Create an agent first, then assign the scheduled task.');
+      setHomeAssistantRoutingSummary(
+        'Scheduled Task Needs Agent',
+        'Create an agent first, then assign the scheduled task.'
+      );
       renderHomeAssistantActions([
         {
           label: 'Create Agent',
           variant: 'primary',
-          onClick: function () { openAgentCreationFlow(); }
+          onClick: function () {
+            openAgentCreationFlow();
+          }
         },
         {
           label: 'Open Task Modal',
           variant: 'secondary',
-          onClick: function () { openWorkspaceTaskModalForConfiguration(workspaceId, prompt); }
+          onClick: function () {
+            openWorkspaceTaskModalForConfiguration(workspaceId, prompt);
+          }
         },
         {
           label: 'Ask Another Task',
           variant: 'secondary',
-          onClick: function () { focusHomeAssistantInput(); }
+          onClick: function () {
+            focusHomeAssistantInput();
+          }
         }
       ]);
       return true;
@@ -9995,17 +11751,24 @@
         'assistant',
         'I detected scheduling intent, but I need one more step to confirm the schedule details.'
       );
-      setHomeAssistantRoutingSummary('Schedule Confirmation', 'Review schedule details in the task modal.');
+      setHomeAssistantRoutingSummary(
+        'Schedule Confirmation',
+        'Review schedule details in the task modal.'
+      );
       renderHomeAssistantActions([
         {
           label: 'Configure in Task Modal',
           variant: 'primary',
-          onClick: function () { openWorkspaceTaskModalForConfiguration(workspaceId, prompt); }
+          onClick: function () {
+            openWorkspaceTaskModalForConfiguration(workspaceId, prompt);
+          }
         },
         {
           label: 'Ask Another Task',
           variant: 'secondary',
-          onClick: function () { focusHomeAssistantInput(); }
+          onClick: function () {
+            focusHomeAssistantInput();
+          }
         }
       ]);
       return true;
@@ -10045,7 +11808,10 @@
     }
     if (!selectedAgent) selectedAgent = candidateAgents[0];
 
-    var scheduleSummary = formatScheduleSummary(scheduleDraft.schedule, scheduleDraft.schedule_name);
+    var scheduleSummary = formatScheduleSummary(
+      scheduleDraft.schedule,
+      scheduleDraft.schedule_name
+    );
     var workspaceHasSelectedAgent = false;
     for (var a = 0; a < workspaceAgents.length; a++) {
       if (normalizeToken(workspaceAgents[a]) === normalizeToken(selectedAgent)) {
@@ -10058,7 +11824,10 @@
       label: 'Open Schedules',
       variant: 'secondary',
       onClick: function () {
-        if (window.workspaceDetail && typeof window.workspaceDetail.showSchedulesModal === 'function') {
+        if (
+          window.workspaceDetail &&
+          typeof window.workspaceDetail.showSchedulesModal === 'function'
+        ) {
           window.workspaceDetail.showSchedulesModal();
           return;
         }
@@ -10074,44 +11843,71 @@
 
       setHomeAssistantBusy(true, 'Creating Scheduled Task…');
       renderHomeAssistantActions([]);
-      appendHomeAssistantMessage('assistant', 'Creating a scheduled task and assigning it to "' + chosenAgent + '"…');
+      appendHomeAssistantMessage(
+        'assistant',
+        'Creating a scheduled task and assigning it to "' + chosenAgent + '"…'
+      );
       setHomeAssistantRoutingSummary('Scheduled Task', 'Creating and assigning scheduled task…');
 
       try {
-        await createScheduledWorkspaceTask(workspaceId, prompt, chosenAgent, scheduleConfig, scheduleName);
+        await createScheduledWorkspaceTask(
+          workspaceId,
+          prompt,
+          chosenAgent,
+          scheduleConfig,
+          scheduleName
+        );
         await refreshWorkspaceDetailTaskPanels();
 
         var summary = formatScheduleSummary(scheduleConfig, scheduleName);
-        appendHomeAssistantMessage('assistant', 'Scheduled task created for "' + chosenAgent + '" (' + summary + ').');
+        appendHomeAssistantMessage(
+          'assistant',
+          'Scheduled task created for "' + chosenAgent + '" (' + summary + ').'
+        );
         if (!workspaceHasSelectedAgent) {
-          appendHomeAssistantMessage('assistant', '"' + chosenAgent + '" was added to this workspace for this scheduled task.');
+          appendHomeAssistantMessage(
+            'assistant',
+            '"' + chosenAgent + '" was added to this workspace for this scheduled task.'
+          );
         }
-        setHomeAssistantRoutingSummary('Scheduled Task Created', 'Assigned to "' + chosenAgent + '" with ' + summary + '.');
+        setHomeAssistantRoutingSummary(
+          'Scheduled Task Created',
+          'Assigned to "' + chosenAgent + '" with ' + summary + '.'
+        );
         renderHomeAssistantActions([
           openSchedulesAction,
           {
             label: 'Ask Another Task',
             variant: 'secondary',
-            onClick: function () { focusHomeAssistantInput(); }
+            onClick: function () {
+              focusHomeAssistantInput();
+            }
           }
         ]);
       } catch (error) {
         dashLog.debug('Failed to create scheduled workspace task', {
           workspaceId: workspaceId,
-          error: error && error.message || error
+          error: (error && error.message) || error
         });
-        appendHomeAssistantMessage('assistant', 'I could not create the scheduled task right now. Please try again.');
+        appendHomeAssistantMessage(
+          'assistant',
+          'I could not create the scheduled task right now. Please try again.'
+        );
         setHomeAssistantRoutingSummary('Scheduled Task Failed', 'Could not create scheduled task.');
         renderHomeAssistantActions([
           {
             label: 'Retry',
             variant: 'primary',
-            onClick: function () { finalizeScheduledCreation(chosenAgent, scheduleConfig, scheduleName); }
+            onClick: function () {
+              finalizeScheduledCreation(chosenAgent, scheduleConfig, scheduleName);
+            }
           },
           {
             label: 'Open Task Modal',
             variant: 'secondary',
-            onClick: function () { openWorkspaceTaskModalForConfiguration(workspaceId, prompt); }
+            onClick: function () {
+              openWorkspaceTaskModalForConfiguration(workspaceId, prompt);
+            }
           }
         ]);
       } finally {
@@ -10120,35 +11916,53 @@
     }
 
     if (scheduleDraft.needsFrequencyChoice) {
-      var dailyAlternative = normalizeScheduleConfigForTaskCreation(scheduleDraft.dailyAlternative || buildDailyScheduleFromPrompt(prompt, scheduleDraft.schedule));
+      var dailyAlternative = normalizeScheduleConfigForTaskCreation(
+        scheduleDraft.dailyAlternative ||
+          buildDailyScheduleFromPrompt(prompt, scheduleDraft.schedule)
+      );
       var onceName = buildScheduleNameFromConfig(scheduleDraft.schedule);
-      var dailyName = dailyAlternative ? buildScheduleNameFromConfig(dailyAlternative) : 'Daily schedule';
+      var dailyName = dailyAlternative
+        ? buildScheduleNameFromConfig(dailyAlternative)
+        : 'Daily schedule';
       appendHomeAssistantMessage(
         'assistant',
-        'I detected a scheduled task. Should this run once or every day? I can assign it to "' + selectedAgent + '".'
+        'I detected a scheduled task. Should this run once or every day? I can assign it to "' +
+          selectedAgent +
+          '".'
       );
-      setHomeAssistantRoutingSummary('Schedule Choice', 'Choose one-time or daily schedule and confirm assignment.');
+      setHomeAssistantRoutingSummary(
+        'Schedule Choice',
+        'Choose one-time or daily schedule and confirm assignment.'
+      );
       renderHomeAssistantActions([
         {
           label: 'Run Once',
           variant: 'primary',
-          onClick: function () { finalizeScheduledCreation(selectedAgent, scheduleDraft.schedule, onceName); }
+          onClick: function () {
+            finalizeScheduledCreation(selectedAgent, scheduleDraft.schedule, onceName);
+          }
         },
         {
           label: 'Run Daily',
           variant: 'secondary',
           disabled: !dailyAlternative,
-          onClick: function () { finalizeScheduledCreation(selectedAgent, dailyAlternative, dailyName); }
+          onClick: function () {
+            finalizeScheduledCreation(selectedAgent, dailyAlternative, dailyName);
+          }
         },
         {
           label: 'Pick Agent',
           variant: 'secondary',
-          onClick: function () { openWorkspaceAgentAddFlow(workspaceId); }
+          onClick: function () {
+            openWorkspaceAgentAddFlow(workspaceId);
+          }
         },
         {
           label: 'Open Task Modal',
           variant: 'secondary',
-          onClick: function () { openWorkspaceTaskModalForConfiguration(workspaceId, prompt); }
+          onClick: function () {
+            openWorkspaceTaskModalForConfiguration(workspaceId, prompt);
+          }
         }
       ]);
       return true;
@@ -10156,21 +11970,36 @@
 
     appendHomeAssistantMessage(
       'assistant',
-      'This task includes scheduling. I can assign it to "' + selectedAgent + '" and set "' + scheduleSummary + '".'
+      'This task includes scheduling. I can assign it to "' +
+        selectedAgent +
+        '" and set "' +
+        scheduleSummary +
+        '".'
     );
     if (!workspaceHasSelectedAgent) {
       appendHomeAssistantMessage(
         'assistant',
-        '"' + selectedAgent + '" is not in this workspace yet. I can add and assign this agent when creating the task.'
+        '"' +
+          selectedAgent +
+          '" is not in this workspace yet. I can add and assign this agent when creating the task.'
       );
     }
-    setHomeAssistantRoutingSummary('Scheduled Task Ready', 'Confirm agent assignment and schedule.');
+    setHomeAssistantRoutingSummary(
+      'Scheduled Task Ready',
+      'Confirm agent assignment and schedule.'
+    );
 
     var actions = [
       {
         label: workspaceHasSelectedAgent ? 'Create Scheduled Task' : 'Add + Create Scheduled Task',
         variant: 'primary',
-        onClick: function () { finalizeScheduledCreation(selectedAgent, scheduleDraft.schedule, scheduleDraft.schedule_name); }
+        onClick: function () {
+          finalizeScheduledCreation(
+            selectedAgent,
+            scheduleDraft.schedule,
+            scheduleDraft.schedule_name
+          );
+        }
       }
     ];
 
@@ -10185,7 +12014,13 @@
         actions.push({
           label: 'Use ' + altAgent,
           variant: 'secondary',
-          onClick: function () { finalizeScheduledCreation(altAgent, scheduleDraft.schedule, scheduleDraft.schedule_name); }
+          onClick: function () {
+            finalizeScheduledCreation(
+              altAgent,
+              scheduleDraft.schedule,
+              scheduleDraft.schedule_name
+            );
+          }
         });
       })(alternateAgents[0]);
     }
@@ -10193,12 +12028,16 @@
     actions.push({
       label: 'Open Task Modal',
       variant: 'secondary',
-      onClick: function () { openWorkspaceTaskModalForConfiguration(workspaceId, prompt); }
+      onClick: function () {
+        openWorkspaceTaskModalForConfiguration(workspaceId, prompt);
+      }
     });
     actions.push({
       label: 'Ask Another Task',
       variant: 'secondary',
-      onClick: function () { focusHomeAssistantInput(); }
+      onClick: function () {
+        focusHomeAssistantInput();
+      }
     });
 
     renderHomeAssistantActions(actions);
@@ -10208,7 +12047,7 @@
   async function confirmWorkspaceAssistantTaskCreation(content, options) {
     var taskText = String(content || '').trim();
     if (!taskText) return false;
-    var assignee = String(options && options.assignee || '').trim();
+    var assignee = String((options && options.assignee) || '').trim();
 
     var dialogOptions = {
       eyebrow: 'Assistant Task',
@@ -10220,11 +12059,17 @@
       details: assignee ? [taskText, 'Assigned to: ' + assignee] : [taskText]
     };
 
-    if (window.workspaceDetail && typeof window.workspaceDetail.showTaskConfirmDialog === 'function') {
+    if (
+      window.workspaceDetail &&
+      typeof window.workspaceDetail.showTaskConfirmDialog === 'function'
+    ) {
       return window.workspaceDetail.showTaskConfirmDialog(dialogOptions);
     }
 
-    if (window.WorkspaceHubModals && typeof window.WorkspaceHubModals.showExecutionConfirm === 'function') {
+    if (
+      window.WorkspaceHubModals &&
+      typeof window.WorkspaceHubModals.showExecutionConfirm === 'function'
+    ) {
       return window.WorkspaceHubModals.showExecutionConfirm(dialogOptions);
     }
 
@@ -10243,7 +12088,11 @@
     var displayCommand = '/' + command;
     var isInferredAction = Boolean(options && options.inferred);
     var commandSummaryTitle = isInferredAction
-      ? (command === 'task' ? 'Task Mode' : command === 'note' ? 'Note Mode' : 'Workspace Action')
+      ? command === 'task'
+        ? 'Task Mode'
+        : command === 'note'
+          ? 'Note Mode'
+          : 'Workspace Action'
       : 'Workspace Command';
     var commandSummaryText = 'Executing ' + displayCommand + ' in this workspace.';
     if (isInferredAction && command === 'task') {
@@ -10252,7 +12101,14 @@
       commandSummaryText = 'Saving a note in this workspace.';
     }
 
-    setHomeAssistantBusy(true, command === 'task' ? 'Creating Task…' : command === 'note' ? 'Saving Note…' : 'Running Command…');
+    setHomeAssistantBusy(
+      true,
+      command === 'task'
+        ? 'Creating Task…'
+        : command === 'note'
+          ? 'Saving Note…'
+          : 'Running Command…'
+    );
     renderHomeAssistantActions([]);
     setHomeAssistantRoutingSummary(commandSummaryTitle, commandSummaryText);
 
@@ -10282,12 +12138,17 @@
           });
           if (createdTask === false) {
             appendHomeAssistantMessage('assistant', 'Task creation cancelled.');
-            setHomeAssistantRoutingSummary('Task Cancelled', 'Task creation was cancelled before anything was created.');
+            setHomeAssistantRoutingSummary(
+              'Task Cancelled',
+              'Task creation was cancelled before anything was created.'
+            );
             renderHomeAssistantActions([
               {
                 label: 'Ask Another Task',
                 variant: 'secondary',
-                onClick: function () { focusHomeAssistantInput(); }
+                onClick: function () {
+                  focusHomeAssistantInput();
+                }
               }
             ]);
             return true;
@@ -10296,15 +12157,22 @@
             throw new Error('Failed to create task');
           }
         } else if (typeof API !== 'undefined' && typeof API.post === 'function') {
-          var confirmedByApi = await confirmWorkspaceAssistantTaskCreation(content, { assignee: taskAssignee });
+          var confirmedByApi = await confirmWorkspaceAssistantTaskCreation(content, {
+            assignee: taskAssignee
+          });
           if (!confirmedByApi) {
             appendHomeAssistantMessage('assistant', 'Task creation cancelled.');
-            setHomeAssistantRoutingSummary('Task Cancelled', 'Task creation was cancelled before anything was created.');
+            setHomeAssistantRoutingSummary(
+              'Task Cancelled',
+              'Task creation was cancelled before anything was created.'
+            );
             renderHomeAssistantActions([
               {
                 label: 'Ask Another Task',
                 variant: 'secondary',
-                onClick: function () { focusHomeAssistantInput(); }
+                onClick: function () {
+                  focusHomeAssistantInput();
+                }
               }
             ]);
             return true;
@@ -10317,15 +12185,22 @@
             to: taskAssignee || undefined
           });
         } else {
-          var confirmedByFetch = await confirmWorkspaceAssistantTaskCreation(content, { assignee: taskAssignee });
+          var confirmedByFetch = await confirmWorkspaceAssistantTaskCreation(content, {
+            assignee: taskAssignee
+          });
           if (!confirmedByFetch) {
             appendHomeAssistantMessage('assistant', 'Task creation cancelled.');
-            setHomeAssistantRoutingSummary('Task Cancelled', 'Task creation was cancelled before anything was created.');
+            setHomeAssistantRoutingSummary(
+              'Task Cancelled',
+              'Task creation was cancelled before anything was created.'
+            );
             renderHomeAssistantActions([
               {
                 label: 'Ask Another Task',
                 variant: 'secondary',
-                onClick: function () { focusHomeAssistantInput(); }
+                onClick: function () {
+                  focusHomeAssistantInput();
+                }
               }
             ]);
             return true;
@@ -10344,13 +12219,25 @@
           if (!taskResponse.ok) throw new Error('Failed to create task');
         }
 
-        appendHomeAssistantMessage('assistant', taskAssignee ? 'Created a task for "' + taskAssignee + '".' : 'Created a task in this workspace.');
-        setHomeAssistantRoutingSummary('Task Created', taskAssignee ? 'Task assigned to "' + taskAssignee + '".' : 'Task added to this workspace.');
+        appendHomeAssistantMessage(
+          'assistant',
+          taskAssignee
+            ? 'Created a task for "' + taskAssignee + '".'
+            : 'Created a task in this workspace.'
+        );
+        setHomeAssistantRoutingSummary(
+          'Task Created',
+          taskAssignee
+            ? 'Task assigned to "' + taskAssignee + '".'
+            : 'Task added to this workspace.'
+        );
         renderHomeAssistantActions([
           {
             label: 'Ask Another Task',
             variant: 'secondary',
-            onClick: function () { focusHomeAssistantInput(); }
+            onClick: function () {
+              focusHomeAssistantInput();
+            }
           }
         ]);
         return true;
@@ -10372,11 +12259,14 @@
             content: content
           });
         } else {
-          var noteResponse = await fetch('/api/workspaces/' + encodeURIComponent(workspaceId) + '/notes', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: 'Quick Note', content: content })
-          });
+          var noteResponse = await fetch(
+            '/api/workspaces/' + encodeURIComponent(workspaceId) + '/notes',
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ name: 'Quick Note', content: content })
+            }
+          );
           if (!noteResponse.ok) throw new Error('Failed to create note');
         }
 
@@ -10386,7 +12276,9 @@
           {
             label: 'Ask Another Task',
             variant: 'secondary',
-            onClick: function () { focusHomeAssistantInput(); }
+            onClick: function () {
+              focusHomeAssistantInput();
+            }
           }
         ]);
         return true;
@@ -10405,12 +12297,16 @@
           {
             label: 'Open Chat',
             variant: 'primary',
-            onClick: function () { openChatPanel(); }
+            onClick: function () {
+              openChatPanel();
+            }
           },
           {
             label: 'Ask Another Task',
             variant: 'secondary',
-            onClick: function () { focusHomeAssistantInput(); }
+            onClick: function () {
+              focusHomeAssistantInput();
+            }
           }
         ]);
         return true;
@@ -10422,39 +12318,63 @@
           directoryPath = extractLikelyPathFromText(content);
         }
 
-        if (window.workspaceDetail && typeof window.workspaceDetail.addDirectory === 'function' && directoryPath) {
+        if (
+          window.workspaceDetail &&
+          typeof window.workspaceDetail.addDirectory === 'function' &&
+          directoryPath
+        ) {
           await window.workspaceDetail.addDirectory(directoryPath);
-        } else if (window.workspaceDetail && typeof window.workspaceDetail.showAddDirectoryModal === 'function') {
+        } else if (
+          window.workspaceDetail &&
+          typeof window.workspaceDetail.showAddDirectoryModal === 'function'
+        ) {
           await window.workspaceDetail.showAddDirectoryModal();
         } else if (directoryPath) {
           var directorySegments = String(directoryPath).split(/[\\/]/).filter(Boolean);
-          var directoryTitle = directorySegments.length > 0 ? directorySegments[directorySegments.length - 1] : directoryPath;
-          var directoryResponse = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/attachments`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              type: 'directory',
-              path: directoryPath,
-              title: directoryTitle
-            })
-          });
+          var directoryTitle =
+            directorySegments.length > 0
+              ? directorySegments[directorySegments.length - 1]
+              : directoryPath;
+          var directoryResponse = await fetch(
+            `/api/workspaces/${encodeURIComponent(workspaceId)}/attachments`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                type: 'directory',
+                path: directoryPath,
+                title: directoryTitle
+              })
+            }
+          );
           if (!directoryResponse.ok) throw new Error('Failed to add directory');
         } else {
           throw new Error('Directory picker unavailable');
         }
 
         if (directoryPath) {
-          appendHomeAssistantMessage('assistant', 'Added directory "' + directoryPath + '" to this workspace.');
+          appendHomeAssistantMessage(
+            'assistant',
+            'Added directory "' + directoryPath + '" to this workspace.'
+          );
           setHomeAssistantRoutingSummary('Directory Added', 'Directory linked to this workspace.');
         } else {
-          appendHomeAssistantMessage('assistant', 'Opened the folder picker. Select a directory to add it to this workspace.');
-          setHomeAssistantRoutingSummary('Directory Picker', 'Select a folder to add it to this workspace.');
+          appendHomeAssistantMessage(
+            'assistant',
+            'Opened the folder picker. Select a directory to add it to this workspace.'
+          );
+          setHomeAssistantRoutingSummary(
+            'Directory Picker',
+            'Select a folder to add it to this workspace.'
+          );
         }
         renderHomeAssistantActions([
           {
             label: 'Ask Another Task',
             variant: 'secondary',
-            onClick: function () { focusHomeAssistantInput(); }
+            onClick: function () {
+              focusHomeAssistantInput();
+            }
           }
         ]);
         return true;
@@ -10463,23 +12383,39 @@
       if (command === 'file') {
         if (window.workspaceDetail && typeof window.workspaceDetail.showFileModal === 'function') {
           window.workspaceDetail.showFileModal();
-        } else if (window.WorkspaceHubFiles && typeof window.WorkspaceHubFiles.openAddFileModal === 'function') {
+        } else if (
+          window.WorkspaceHubFiles &&
+          typeof window.WorkspaceHubFiles.openAddFileModal === 'function'
+        ) {
           window.WorkspaceHubFiles.openAddFileModal();
         } else {
           throw new Error('File upload modal unavailable');
         }
 
         if (content) {
-          appendHomeAssistantMessage('assistant', 'Opened the upload modal for "' + content + '". Select the file to attach it to this workspace.');
+          appendHomeAssistantMessage(
+            'assistant',
+            'Opened the upload modal for "' +
+              content +
+              '". Select the file to attach it to this workspace.'
+          );
         } else {
-          appendHomeAssistantMessage('assistant', 'Opened the upload modal. Select file(s) to attach to this workspace.');
+          appendHomeAssistantMessage(
+            'assistant',
+            'Opened the upload modal. Select file(s) to attach to this workspace.'
+          );
         }
-        setHomeAssistantRoutingSummary('File Upload', 'File upload modal is ready for this workspace.');
+        setHomeAssistantRoutingSummary(
+          'File Upload',
+          'File upload modal is ready for this workspace.'
+        );
         renderHomeAssistantActions([
           {
             label: 'Ask Another Task',
             variant: 'secondary',
-            onClick: function () { focusHomeAssistantInput(); }
+            onClick: function () {
+              focusHomeAssistantInput();
+            }
           }
         ]);
         return true;
@@ -10488,20 +12424,30 @@
       dashLog.debug('Workspace slash command failed', {
         command: command,
         workspaceId: workspaceId,
-        error: error && error.message || error
+        error: (error && error.message) || error
       });
-      appendHomeAssistantMessage('assistant', 'I could not run ' + displayCommand + ' right now. Please try again.');
-      setHomeAssistantRoutingSummary('Workspace Command Failed', 'Could not execute ' + displayCommand + ' right now.');
+      appendHomeAssistantMessage(
+        'assistant',
+        'I could not run ' + displayCommand + ' right now. Please try again.'
+      );
+      setHomeAssistantRoutingSummary(
+        'Workspace Command Failed',
+        'Could not execute ' + displayCommand + ' right now.'
+      );
       renderHomeAssistantActions([
         {
           label: 'Retry',
           variant: 'primary',
-          onClick: function () { focusHomeAssistantInput(); }
+          onClick: function () {
+            focusHomeAssistantInput();
+          }
         },
         {
           label: 'Ask Another Task',
           variant: 'secondary',
-          onClick: function () { focusHomeAssistantInput(); }
+          onClick: function () {
+            focusHomeAssistantInput();
+          }
         }
       ]);
       return true;
@@ -10517,32 +12463,32 @@
     if (!normalized) return 'New Workspace';
 
     var ignored = {
-      'a': true,
-      'an': true,
-      'and': true,
-      'for': true,
-      'from': true,
-      'help': true,
-      'i': true,
-      'is': true,
-      'it': true,
-      'lets': true,
-      'my': true,
-      'of': true,
-      'please': true,
-      'that': true,
-      'the': true,
-      'to': true,
-      'with': true,
-      'you': true,
-      'build': true,
-      'create': true,
-      'develop': true,
-      'design': true,
-      'implement': true,
-      'make': true,
-      'setup': true,
-      'start': true
+      a: true,
+      an: true,
+      and: true,
+      for: true,
+      from: true,
+      help: true,
+      i: true,
+      is: true,
+      it: true,
+      lets: true,
+      my: true,
+      of: true,
+      please: true,
+      that: true,
+      the: true,
+      to: true,
+      with: true,
+      you: true,
+      build: true,
+      create: true,
+      develop: true,
+      design: true,
+      implement: true,
+      make: true,
+      setup: true,
+      start: true
     };
 
     var tokens = uniqueValues(normalized.split(/[^a-z0-9]+/g));
@@ -10598,22 +12544,30 @@
       return { status: 'unavailable', reason: 'workspace_modal_prerequisites_missing' };
     }
 
-    nameInput.value = String(seedPayload && seedPayload.name || '').trim();
+    nameInput.value = String((seedPayload && seedPayload.name) || '').trim();
     if (descriptionInput) {
       descriptionInput.value = String(
-        seedPayload && seedPayload.workspaceBootstrap && seedPayload.workspaceBootstrap.goal
-          || seedPayload && seedPayload.description
-          || ''
+        (seedPayload && seedPayload.workspaceBootstrap && seedPayload.workspaceBootstrap.goal) ||
+          (seedPayload && seedPayload.description) ||
+          ''
       ).trim();
     }
     if (primaryGoalInput) {
-      primaryGoalInput.value = String(seedPayload && seedPayload.workspaceBootstrap && seedPayload.workspaceBootstrap.goal || '').trim();
+      primaryGoalInput.value = String(
+        (seedPayload && seedPayload.workspaceBootstrap && seedPayload.workspaceBootstrap.goal) || ''
+      ).trim();
     }
     if (systemsInput) {
-      systemsInput.value = String(seedPayload && seedPayload.workspaceBootstrap && seedPayload.workspaceBootstrap.systems || '').trim();
+      systemsInput.value = String(
+        (seedPayload && seedPayload.workspaceBootstrap && seedPayload.workspaceBootstrap.systems) ||
+          ''
+      ).trim();
     }
     if (contextInput) {
-      contextInput.value = String(seedPayload && seedPayload.workspaceBootstrap && seedPayload.workspaceBootstrap.context || '').trim();
+      contextInput.value = String(
+        (seedPayload && seedPayload.workspaceBootstrap && seedPayload.workspaceBootstrap.context) ||
+          ''
+      ).trim();
     }
     if (parentSelect) {
       parentSelect.value = '';
@@ -10630,11 +12584,15 @@
       delete modalElement.dataset.askOriSeedTask;
     }
     if (!modalElement.dataset.askOriCleanupBound) {
-      modalElement.addEventListener('hidden.bs.modal', function () {
-        delete modalElement.dataset.askOriPostCreate;
-        delete modalElement.dataset.askOriSeedNote;
-        delete modalElement.dataset.askOriSeedTask;
-      }, true);
+      modalElement.addEventListener(
+        'hidden.bs.modal',
+        function () {
+          delete modalElement.dataset.askOriPostCreate;
+          delete modalElement.dataset.askOriSeedNote;
+          delete modalElement.dataset.askOriSeedTask;
+        },
+        true
+      );
       modalElement.dataset.askOriCleanupBound = '1';
     }
 
@@ -10650,7 +12608,8 @@
     }
 
     closeHomeAssistantThinkingModal({ force: true });
-    var modalInstance = bootstrap.Modal.getInstance(modalElement) || new bootstrap.Modal(modalElement);
+    var modalInstance =
+      bootstrap.Modal.getInstance(modalElement) || new bootstrap.Modal(modalElement);
     modalInstance.show();
 
     window.setTimeout(function () {
@@ -10669,13 +12628,18 @@
     var sourcePrompt = String(prompt || '').trim();
     var payload = {
       name: name,
-      description: buildWorkspaceDescriptionFromPrompt(sourcePrompt || ('Create workspace: ' + name)),
-      workspaceBootstrap: buildWorkspaceBootstrapFromPrompt(sourcePrompt || ('Create workspace: ' + name))
+      description: buildWorkspaceDescriptionFromPrompt(sourcePrompt || 'Create workspace: ' + name),
+      workspaceBootstrap: buildWorkspaceBootstrapFromPrompt(
+        sourcePrompt || 'Create workspace: ' + name
+      )
     };
 
     setHomeAssistantBusy(true, 'Preparing Workspace…');
     renderHomeAssistantActions([]);
-    appendHomeAssistantMessage('assistant', 'Opening the Create Workspace modal for "' + name + '"…');
+    appendHomeAssistantMessage(
+      'assistant',
+      'Opening the Create Workspace modal for "' + name + '"…'
+    );
     setHomeAssistantRoutingSummary('Workspace', 'Preparing Create Workspace modal.');
 
     try {
@@ -10684,29 +12648,49 @@
         throw new Error('Workspace create modal unavailable');
       }
 
-      appendHomeAssistantMessage('assistant', 'Create Workspace is ready. Review details and click Create. I will open its Workspace Dashboard next.');
-      setHomeAssistantRoutingSummary('Workspace', 'Review and confirm in the Create Workspace modal.');
+      appendHomeAssistantMessage(
+        'assistant',
+        'Create Workspace is ready. Review details and click Create. I will open its Workspace Dashboard next.'
+      );
+      setHomeAssistantRoutingSummary(
+        'Workspace',
+        'Review and confirm in the Create Workspace modal.'
+      );
       renderHomeAssistantActions([
         {
           label: 'Ask Another Task',
           variant: 'secondary',
-          onClick: function () { focusHomeAssistantInput(); }
+          onClick: function () {
+            focusHomeAssistantInput();
+          }
         }
       ]);
     } catch (error) {
-      dashLog.debug('Opening workspace create modal from Ask Ori failed', { error: error && error.message || error });
-      appendHomeAssistantMessage('assistant', 'I could not open the Create Workspace modal right now. You can open Workspaces and create it there.');
-      setHomeAssistantRoutingSummary('Workspace Modal Failed', 'Could not open Create Workspace modal automatically.');
+      dashLog.debug('Opening workspace create modal from Ask Ori failed', {
+        error: (error && error.message) || error
+      });
+      appendHomeAssistantMessage(
+        'assistant',
+        'I could not open the Create Workspace modal right now. You can open Workspaces and create it there.'
+      );
+      setHomeAssistantRoutingSummary(
+        'Workspace Modal Failed',
+        'Could not open Create Workspace modal automatically.'
+      );
       renderHomeAssistantActions([
         {
           label: 'Open Workspaces',
           variant: 'primary',
-          onClick: function () { window.location.href = '/workspaces'; }
+          onClick: function () {
+            window.location.href = '/workspaces';
+          }
         },
         {
           label: 'Ask Another Task',
           variant: 'secondary',
-          onClick: function () { focusHomeAssistantInput(); }
+          onClick: function () {
+            focusHomeAssistantInput();
+          }
         }
       ]);
     } finally {
@@ -10720,7 +12704,8 @@
 
     var agentName = options && options.agentName ? String(options.agentName).trim() : '';
     var appLaunchRequest = options && options.appLaunchRequest ? options.appLaunchRequest : null;
-    var routeContext = options && options.routeContext ? options.routeContext : buildHomeRouteContext();
+    var routeContext =
+      options && options.routeContext ? options.routeContext : buildHomeRouteContext();
     var payload = {
       name: buildWorkspaceNameFromPrompt(text),
       description: buildWorkspaceDescriptionFromPrompt(text),
@@ -10743,7 +12728,10 @@
 
     setHomeAssistantBusy(true, 'Preparing Workspace…');
     renderHomeAssistantActions([]);
-    appendHomeAssistantMessage('assistant', 'Opening Create Workspace so you can review details first…');
+    appendHomeAssistantMessage(
+      'assistant',
+      'Opening Create Workspace so you can review details first…'
+    );
     setHomeAssistantRoutingSummary('Workspace', 'Preparing Create Workspace modal.');
 
     try {
@@ -10752,41 +12740,71 @@
         throw new Error('Workspace create modal unavailable');
       }
 
-      appendHomeAssistantMessage('assistant', 'Create Workspace is ready. Review details and click Create. I will open its Workspace Dashboard next.');
-      setHomeAssistantRoutingSummary('Workspace', 'Review and confirm in the Create Workspace modal.');
+      appendHomeAssistantMessage(
+        'assistant',
+        'Create Workspace is ready. Review details and click Create. I will open its Workspace Dashboard next.'
+      );
+      setHomeAssistantRoutingSummary(
+        'Workspace',
+        'Review and confirm in the Create Workspace modal.'
+      );
       renderHomeAssistantActions([
         {
           label: 'Continue in Chat',
           variant: 'secondary',
           disabled: !agentName,
-          onClick: function () { runPendingTaskWithAgent(text, agentName, { appLaunchRequest: appLaunchRequest, routeContext: routeContext }); }
+          onClick: function () {
+            runPendingTaskWithAgent(text, agentName, {
+              appLaunchRequest: appLaunchRequest,
+              routeContext: routeContext
+            });
+          }
         },
         {
           label: 'Ask Another Task',
           variant: 'secondary',
-          onClick: function () { focusHomeAssistantInput(); }
+          onClick: function () {
+            focusHomeAssistantInput();
+          }
         }
       ]);
     } catch (error) {
-      dashLog.debug('Opening workspace create modal from Ask Ori failed', { error: error && error.message || error });
-      appendHomeAssistantMessage('assistant', 'I could not open Create Workspace automatically. You can open Workspaces manually or continue in chat.');
-      setHomeAssistantRoutingSummary('Workspace Modal Failed', 'Could not open Create Workspace modal automatically.');
+      dashLog.debug('Opening workspace create modal from Ask Ori failed', {
+        error: (error && error.message) || error
+      });
+      appendHomeAssistantMessage(
+        'assistant',
+        'I could not open Create Workspace automatically. You can open Workspaces manually or continue in chat.'
+      );
+      setHomeAssistantRoutingSummary(
+        'Workspace Modal Failed',
+        'Could not open Create Workspace modal automatically.'
+      );
       renderHomeAssistantActions([
         {
           label: 'Open Workspaces',
           variant: 'primary',
-          onClick: function () { window.location.href = '/workspaces'; }
+          onClick: function () {
+            window.location.href = '/workspaces';
+          }
         },
         {
           label: 'Continue in Chat',
           variant: 'secondary',
           disabled: !agentName,
-          onClick: function () { runPendingTaskWithAgent(text, agentName, { appLaunchRequest: appLaunchRequest, routeContext: routeContext }); }
+          onClick: function () {
+            runPendingTaskWithAgent(text, agentName, {
+              appLaunchRequest: appLaunchRequest,
+              routeContext: routeContext
+            });
+          }
         },
         {
           label: 'Ask Another Task',
           variant: 'secondary',
-          onClick: function () { focusHomeAssistantInput(); }
+          onClick: function () {
+            focusHomeAssistantInput();
+          }
         }
       ]);
     } finally {
@@ -10797,9 +12815,16 @@
   async function runPendingTaskWithAgent(prompt, agentName, options) {
     if (!prompt || !agentName) return;
     var appLaunchRequest = options && options.appLaunchRequest ? options.appLaunchRequest : null;
-    var dispatchIntent = options && options.intent ? options.intent : homeAssistantState.pendingIntent;
-    var routeContext = options && options.routeContext ? options.routeContext : buildHomeRouteContext();
-    var dispatchMessage = buildAskOriDispatchMessage(prompt, appLaunchRequest, dispatchIntent, routeContext);
+    var dispatchIntent =
+      options && options.intent ? options.intent : homeAssistantState.pendingIntent;
+    var routeContext =
+      options && options.routeContext ? options.routeContext : buildHomeRouteContext();
+    var dispatchMessage = buildAskOriDispatchMessage(
+      prompt,
+      appLaunchRequest,
+      dispatchIntent,
+      routeContext
+    );
     emitHomeAssistantIntakeTrace(homeAssistantState.pendingRouteData, {
       prompt: prompt,
       routeContext: routeContext,
@@ -10811,8 +12836,12 @@
     appendHomeAssistantMessage('assistant', 'Opening a chat session with "' + agentName + '"…');
     setHomeAssistantRoutingSummary('Handoff', 'Routing task to "' + agentName + '"…');
     if (appLaunchRequest && appLaunchRequest.appName) {
-      appendHomeAssistantMessage('assistant',
-        'Routing steps: 1) Start a new session. 2) Execute /openapp ' + appLaunchRequest.appName + ' to launch the app.');
+      appendHomeAssistantMessage(
+        'assistant',
+        'Routing steps: 1) Start a new session. 2) Execute /openapp ' +
+          appLaunchRequest.appName +
+          ' to launch the app.'
+      );
     }
 
     try {
@@ -10820,10 +12849,19 @@
       if (!session) throw new Error('Failed to launch chat session');
       trackHomeAssistantSession(session, prompt, agentName);
       setHomeAssistantMode('continue_session');
-      appendHomeAssistantMessage('assistant', 'Started session "' + (session.title || 'New Session') + '" with "' + agentName + '".');
-      setHomeAssistantRoutingSummary('Session Started', 'Session "' + (session.title || 'New Session') + '" is ready in chat.');
+      appendHomeAssistantMessage(
+        'assistant',
+        'Started session "' + (session.title || 'New Session') + '" with "' + agentName + '".'
+      );
+      setHomeAssistantRoutingSummary(
+        'Session Started',
+        'Session "' + (session.title || 'New Session') + '" is ready in chat.'
+      );
       if (appLaunchRequest && appLaunchRequest.appName) {
-        appendHomeAssistantMessage('assistant', 'Launch command queued for "' + appLaunchRequest.appName + '". Continue in chat.');
+        appendHomeAssistantMessage(
+          'assistant',
+          'Launch command queued for "' + appLaunchRequest.appName + '". Continue in chat.'
+        );
       } else {
         appendHomeAssistantMessage('assistant', 'Your task was queued in chat. Continue in chat.');
       }
@@ -10832,28 +12870,42 @@
         {
           label: 'Open Chat',
           variant: 'primary',
-          onClick: function () { openChatPanel(); }
+          onClick: function () {
+            openChatPanel();
+          }
         },
         {
           label: 'Ask Another Task',
           variant: 'secondary',
-          onClick: function () { focusHomeAssistantInput(); }
+          onClick: function () {
+            focusHomeAssistantInput();
+          }
         }
       ]);
     } catch (error) {
-      dashLog.debug('Task session launch failed', { error: error && error.message || error });
-      appendHomeAssistantMessage('assistant', 'I could not open chat for this task. You can retry or open agent settings.');
-      setHomeAssistantRoutingSummary('Handoff Failed', 'Could not open a chat session. Retry to continue.');
+      dashLog.debug('Task session launch failed', { error: (error && error.message) || error });
+      appendHomeAssistantMessage(
+        'assistant',
+        'I could not open chat for this task. You can retry or open agent settings.'
+      );
+      setHomeAssistantRoutingSummary(
+        'Handoff Failed',
+        'Could not open a chat session. Retry to continue.'
+      );
       renderHomeAssistantActions([
         {
           label: 'Retry',
           variant: 'primary',
-          onClick: function () { runPendingTaskWithAgent(prompt, agentName, options); }
+          onClick: function () {
+            runPendingTaskWithAgent(prompt, agentName, options);
+          }
         },
         {
           label: 'Open Agent Settings',
           variant: 'secondary',
-          onClick: function () { window.location.href = '/agents'; }
+          onClick: function () {
+            window.location.href = '/agents';
+          }
         }
       ]);
     } finally {
@@ -10867,7 +12919,8 @@
 
   function promptForMatchedAgentSelection(prompt, agentName, options) {
     if (!prompt || !agentName) return;
-    var routeContext = options && options.routeContext ? options.routeContext : buildHomeRouteContext();
+    var routeContext =
+      options && options.routeContext ? options.routeContext : buildHomeRouteContext();
     var appLaunchRequest = options && options.appLaunchRequest ? options.appLaunchRequest : null;
     var inWorkspaceContext = hasWorkspaceRouteContext(routeContext);
     var shortAgentName = truncateText(agentName, 32);
@@ -10875,8 +12928,12 @@
     appendHomeAssistantMessage(
       'assistant',
       inWorkspaceContext
-        ? 'I found "' + agentName + '" for this workspace task. Do you want to use this agent, or create a new one before I continue?'
-        : 'I found "' + agentName + '" for this task. Do you want to use this agent, or create a new one before I continue?'
+        ? 'I found "' +
+            agentName +
+            '" for this workspace task. Do you want to use this agent, or create a new one before I continue?'
+        : 'I found "' +
+            agentName +
+            '" for this task. Do you want to use this agent, or create a new one before I continue?'
     );
     setHomeAssistantRoutingSummary(
       'Confirmation Required',
@@ -10898,12 +12955,16 @@
       {
         label: 'Create New Agent',
         variant: 'secondary',
-        onClick: function () { createAgentForPendingTask(); }
+        onClick: function () {
+          createAgentForPendingTask();
+        }
       },
       {
         label: 'Ask Another Task',
         variant: 'secondary',
-        onClick: function () { focusHomeAssistantInput(); }
+        onClick: function () {
+          focusHomeAssistantInput();
+        }
       }
     ]);
   }
@@ -10920,7 +12981,11 @@
     var directWorkspaceCommand = parseCreateWorkspaceCommand(text);
     var workspaceSlashCommand = parseWorkspaceSlashCommand(text);
     var inferredWorkspaceModeCommand = false;
-    if (!workspaceSlashCommand && inWorkspaceContext && !(options && options.skipWorkspacePromptMode)) {
+    if (
+      !workspaceSlashCommand &&
+      inWorkspaceContext &&
+      !(options && options.skipWorkspacePromptMode)
+    ) {
       workspaceSlashCommand = buildWorkspacePromptModeCommand(text, routeContext);
       inferredWorkspaceModeCommand = Boolean(workspaceSlashCommand);
     }
@@ -10941,7 +13006,9 @@
         {
           label: 'Ask Another Task',
           variant: 'primary',
-          onClick: function () { focusHomeAssistantInput(); }
+          onClick: function () {
+            focusHomeAssistantInput();
+          }
         }
       ]);
       return;
@@ -10973,9 +13040,11 @@
       return;
     }
 
-    if (inWorkspaceContext &&
-        !promptRequestsWorkspaceSwitch(text) &&
-        homeAssistantState.pendingIntent.key !== 'utility_direct') {
+    if (
+      inWorkspaceContext &&
+      !promptRequestsWorkspaceSwitch(text) &&
+      homeAssistantState.pendingIntent.key !== 'utility_direct'
+    ) {
       var specialistHandoffHandled = await routeWorkspacePromptToPlanningSpecialist(
         text,
         routeContext,
@@ -10996,7 +13065,9 @@
       try {
         await openWorkspaceAssistantForPrompt(text, routeContext, homeAssistantState.pendingIntent);
       } catch (error) {
-        dashLog.debug('Workspace manager handoff failed', { error: error && error.message || error });
+        dashLog.debug('Workspace manager handoff failed', {
+          error: (error && error.message) || error
+        });
         homeAssistantState.awaitingCreateConfirmation = false;
         var workspaceManagerTimedOut = isLikelyHomeAssistantRequestTimeout(error);
         var failureSummary = workspaceManagerTimedOut
@@ -11010,11 +13081,11 @@
           workspaceManagerTimedOut
             ? { state: 'timeout' }
             : {
-              state: failureSummary.state,
-              detail: failureSummary.detail,
-              heading: failureSummary.heading,
-              conversationSummary: failureSummary.conversationSummary
-            }
+                state: failureSummary.state,
+                detail: failureSummary.detail,
+                heading: failureSummary.heading,
+                conversationSummary: failureSummary.conversationSummary
+              }
         );
         if (hasHomeAssistantConversation()) {
           homeAssistantState.conversationCollapsed = true;
@@ -11024,17 +13095,23 @@
           {
             label: 'Retry',
             variant: 'primary',
-            onClick: function () { handleHomeAssistantPrompt(text, { routeContext: routeContext }); }
+            onClick: function () {
+              handleHomeAssistantPrompt(text, { routeContext: routeContext });
+            }
           },
           {
             label: 'Open Full Chat',
             variant: 'secondary',
-            onClick: function () { openChatPanel(); }
+            onClick: function () {
+              openChatPanel();
+            }
           },
           {
             label: 'Ask Another Task',
             variant: 'secondary',
-            onClick: function () { focusHomeAssistantInput(); }
+            onClick: function () {
+              focusHomeAssistantInput();
+            }
           }
         ]);
       } finally {
@@ -11084,7 +13161,11 @@
         }
 
         if (inWorkspaceContext && shouldOpenWorkspaceAssistantForRoute(routeData, routeContext)) {
-          await openWorkspaceAssistantForPrompt(text, routeContext, homeAssistantState.pendingIntent);
+          await openWorkspaceAssistantForPrompt(
+            text,
+            routeContext,
+            homeAssistantState.pendingIntent
+          );
           return;
         }
 
@@ -11112,9 +13193,11 @@
       // Home harness inline path (hybrid): answer app activity / navigation asks
       // here instead of routing to an agent. Backend route is authoritative; the
       // local detector covers the route-unavailable fallback.
-      if (!inWorkspaceContext &&
-          (homeAssistantState.pendingIntent.key === 'app_introspection' ||
-           homeAssistantState.pendingIntent.key === 'app_navigation')) {
+      if (
+        !inWorkspaceContext &&
+        (homeAssistantState.pendingIntent.key === 'app_introspection' ||
+          homeAssistantState.pendingIntent.key === 'app_navigation')
+      ) {
         await runHomeAssistantInline(text, routeContext, homeAssistantState.pendingIntent.key);
         return;
       }
@@ -11128,32 +13211,51 @@
         var agents = await fetchAgentsForMatching();
         match = findSuitableAgent(agents, homeAssistantState.pendingIntent, text);
       }
-      if ((!routeData || typeof routeData.workspace_recommended !== 'boolean') && !inWorkspaceContext) {
+      if (
+        (!routeData || typeof routeData.workspace_recommended !== 'boolean') &&
+        !inWorkspaceContext
+      ) {
         workspaceRecommended = isComplexProjectPrompt(text, homeAssistantState.pendingIntent);
       }
       if (inWorkspaceContext) {
         workspaceRecommended = false;
       }
-      if (homeAssistantState.pendingIntent.key === 'calendar_check' && !homeAssistantState.pendingIntentVariant) {
-        homeAssistantState.pendingIntentVariant = inferCalendarIntentVariant(text, routeContext, routeData);
+      if (
+        homeAssistantState.pendingIntent.key === 'calendar_check' &&
+        !homeAssistantState.pendingIntentVariant
+      ) {
+        homeAssistantState.pendingIntentVariant = inferCalendarIntentVariant(
+          text,
+          routeContext,
+          routeData
+        );
       }
 
       if (match && match.agent) {
         homeAssistantState.pendingAgentName = match.agent.name;
         homeAssistantState.awaitingCreateConfirmation = false;
-        var summary = 'I found "' + match.agent.name + '" for ' + homeAssistantState.pendingIntent.label + '.';
+        var summary =
+          'I found "' + match.agent.name + '" for ' + homeAssistantState.pendingIntent.label + '.';
         if (match.reasons.length > 0) {
           summary += ' Reason: ' + match.reasons.join(', ') + '.';
         }
         appendHomeAssistantMessage('assistant', summary);
-        setHomeAssistantRoutingSummary('Match Found', '"' + match.agent.name + '" is best for this task.');
+        setHomeAssistantRoutingSummary(
+          'Match Found',
+          '"' + match.agent.name + '" is best for this task.'
+        );
 
         if (homeAssistantState.pendingIntent.key === 'email_check') {
-          appendHomeAssistantMessage('assistant',
-            'Idea for email handling: add OAuth (Gmail/Outlook), start read-only, summarize unread, and require explicit confirmation before any send action.');
+          appendHomeAssistantMessage(
+            'assistant',
+            'Idea for email handling: add OAuth (Gmail/Outlook), start read-only, summarize unread, and require explicit confirmation before any send action.'
+          );
         }
 
-        if (homeAssistantState.pendingIntent && homeAssistantState.pendingIntent.key === 'utility_direct') {
+        if (
+          homeAssistantState.pendingIntent &&
+          homeAssistantState.pendingIntent.key === 'utility_direct'
+        ) {
           await runUtilityTaskDirect(text, match.agent.name);
           return;
         }
@@ -11176,9 +13278,14 @@
           return;
         }
         if (workspaceRecommended) {
-          appendHomeAssistantMessage('assistant',
-            'This looks like a complex project. I recommend starting in a Workspace so files, tasks, and context stay organized. Do you want me to create one now?');
-          setHomeAssistantRoutingSummary('Workspace Recommended', 'Complex project detected. Create a workspace or continue in chat.');
+          appendHomeAssistantMessage(
+            'assistant',
+            'This looks like a complex project. I recommend starting in a Workspace so files, tasks, and context stay organized. Do you want me to create one now?'
+          );
+          setHomeAssistantRoutingSummary(
+            'Workspace Recommended',
+            'Complex project detected. Create a workspace or continue in chat.'
+          );
           renderHomeAssistantActions([
             {
               label: 'Create Workspace',
@@ -11194,17 +13301,26 @@
             {
               label: 'Continue in Chat',
               variant: 'secondary',
-              onClick: function () { runPendingTaskWithAgent(text, match.agent.name, { appLaunchRequest: appLaunchRequest, routeContext: routeContext }); }
+              onClick: function () {
+                runPendingTaskWithAgent(text, match.agent.name, {
+                  appLaunchRequest: appLaunchRequest,
+                  routeContext: routeContext
+                });
+              }
             },
             {
               label: 'Open Workspaces',
               variant: 'secondary',
-              onClick: function () { window.location.href = '/workspaces'; }
+              onClick: function () {
+                window.location.href = '/workspaces';
+              }
             },
             {
               label: 'Ask Another Task',
               variant: 'secondary',
-              onClick: function () { focusHomeAssistantInput(); }
+              onClick: function () {
+                focusHomeAssistantInput();
+              }
             }
           ]);
           return;
@@ -11216,7 +13332,10 @@
           });
           return;
         }
-        await runPendingTaskWithAgent(text, match.agent.name, { appLaunchRequest: appLaunchRequest, routeContext: routeContext });
+        await runPendingTaskWithAgent(text, match.agent.name, {
+          appLaunchRequest: appLaunchRequest,
+          routeContext: routeContext
+        });
       } else {
         var unmatchedCapabilityHandled = await handleCapabilityResolutionFlow({
           prompt: text,
@@ -11238,12 +13357,16 @@
             {
               label: 'Go to Settings',
               variant: 'primary',
-              onClick: function () { window.location.href = '/settings'; }
+              onClick: function () {
+                window.location.href = '/settings';
+              }
             },
             {
               label: 'Ask Another Task',
               variant: 'secondary',
-              onClick: function () { focusHomeAssistantInput(); }
+              onClick: function () {
+                focusHomeAssistantInput();
+              }
             }
           ]);
           if (window.Toast) {
@@ -11254,20 +13377,32 @@
 
         if (isSemiAutoMode()) {
           if (homeAssistantState.pendingIntent.key === 'email_check') {
-            appendHomeAssistantMessage('assistant',
-              'No suitable email agent found yet. Choose a setup path and I can continue.');
+            appendHomeAssistantMessage(
+              'assistant',
+              'No suitable email agent found yet. Choose a setup path and I can continue.'
+            );
             await renderEmailSolutionActions(text);
             return;
           }
-          appendHomeAssistantMessage('assistant',
-            'No suitable agent found for this task. I will open the Create Agent modal so you can review details.');
-          setHomeAssistantRoutingSummary('Semi-auto', 'No match found. Review and confirm agent creation.');
+          appendHomeAssistantMessage(
+            'assistant',
+            'No suitable agent found for this task. I will open the Create Agent modal so you can review details.'
+          );
+          setHomeAssistantRoutingSummary(
+            'Semi-auto',
+            'No match found. Review and confirm agent creation.'
+          );
           await createAgentForPendingTask();
         } else {
           homeAssistantState.awaitingCreateConfirmation = true;
-          appendHomeAssistantMessage('assistant',
-            'No suitable agent found for this task. Would you like me to create one?');
-          setHomeAssistantRoutingSummary('No Match', 'No suitable agent was found. Create a new agent to continue.');
+          appendHomeAssistantMessage(
+            'assistant',
+            'No suitable agent found for this task. Would you like me to create one?'
+          );
+          setHomeAssistantRoutingSummary(
+            'No Match',
+            'No suitable agent was found. Create a new agent to continue.'
+          );
 
           if (homeAssistantState.pendingIntent.key === 'email_check') {
             await renderEmailSolutionActions(text);
@@ -11278,16 +13413,24 @@
             {
               label: 'Create Agent',
               variant: 'primary',
-              onClick: function () { createAgentForPendingTask(); }
+              onClick: function () {
+                createAgentForPendingTask();
+              }
             }
           ]);
         }
       }
     } catch (error) {
-      dashLog.debug('Task routing failed', { error: error && error.message || error });
+      dashLog.debug('Task routing failed', { error: (error && error.message) || error });
       homeAssistantState.awaitingCreateConfirmation = false;
-      appendHomeAssistantMessage('assistant', 'I could not evaluate agent suitability right now. Please retry.');
-      setHomeAssistantRoutingSummary('Routing Failed', 'Could not evaluate agent suitability right now.');
+      appendHomeAssistantMessage(
+        'assistant',
+        'I could not evaluate agent suitability right now. Please retry.'
+      );
+      setHomeAssistantRoutingSummary(
+        'Routing Failed',
+        'Could not evaluate agent suitability right now.'
+      );
     } finally {
       setHomeAssistantBusy(false);
     }
@@ -11307,11 +13450,15 @@
 
   function initHomeAssistant() {
     var els = getHomeAssistantElements();
-    var supportsRecentSessions = Boolean(els.recentSection || els.recentSessions || els.viewAllBtn || els.clearRecentBtn);
+    var supportsRecentSessions = Boolean(
+      els.recentSection || els.recentSessions || els.viewAllBtn || els.clearRecentBtn
+    );
     var routeContext = buildHomeRouteContext();
 
     homeAssistantState.automationMode = loadHomeAssistantAutomationMode();
-    homeAssistantState.recentSessions = supportsRecentSessions ? loadHomeAssistantRecentSessions() : [];
+    homeAssistantState.recentSessions = supportsRecentSessions
+      ? loadHomeAssistantRecentSessions()
+      : [];
     setHomeAssistantRoutingSummary('', '');
     renderHomeAssistantRecentSessions();
     if (supportsRecentSessions) {
@@ -11350,10 +13497,15 @@
       });
     }
     if (els.workspaceModeButtons) {
-      for (var workspaceModeIndex = 0; workspaceModeIndex < els.workspaceModeButtons.length; workspaceModeIndex++) {
+      for (
+        var workspaceModeIndex = 0;
+        workspaceModeIndex < els.workspaceModeButtons.length;
+        workspaceModeIndex++
+      ) {
         els.workspaceModeButtons[workspaceModeIndex].addEventListener('click', function (event) {
           if (homeAssistantState.busy) return;
-          var mode = event.currentTarget && event.currentTarget.getAttribute('data-home-workspace-mode');
+          var mode =
+            event.currentTarget && event.currentTarget.getAttribute('data-home-workspace-mode');
           setHomeAssistantWorkspacePromptMode(mode);
           focusHomeAssistantInput();
         });
@@ -11427,10 +13579,16 @@
 
     var experience = Math.max(0, Number(assistant.experience) || 0);
     var level = Math.max(0, Number(assistant.level) || 0);
-    var rank = (typeof assistant.rank === 'string' && assistant.rank.trim()) ? assistant.rank.trim() : 'novice';
+    var rank =
+      typeof assistant.rank === 'string' && assistant.rank.trim()
+        ? assistant.rank.trim()
+        : 'novice';
 
     var progressWithinLevel = experience % XP_PER_LEVEL;
-    var progressPercent = Math.min(100, Math.max(0, Math.round((progressWithinLevel / XP_PER_LEVEL) * 100)));
+    var progressPercent = Math.min(
+      100,
+      Math.max(0, Math.round((progressWithinLevel / XP_PER_LEVEL) * 100))
+    );
 
     var rankBadge = document.getElementById('dashboardRankBadge');
     var levelText = document.getElementById('dashboardLevelText');
@@ -11493,21 +13651,36 @@
         if (stage) {
           evoHtml =
             '<span class="badge ms-2" style="background: var(--bg-tertiary); color: var(--text-secondary); font-size: 0.7rem;">' +
-            stage + ' Lv.' + evoLevel +
+            stage +
+            ' Lv.' +
+            evoLevel +
             '</span>';
         }
       }
 
       html +=
-        '<div class="d-flex align-items-center justify-content-between py-2' + (i < agents.length - 1 ? ' border-bottom' : '') + '" style="border-color: var(--border-color) !important;">' +
+        '<div class="d-flex align-items-center justify-content-between py-2' +
+        (i < agents.length - 1 ? ' border-bottom' : '') +
+        '" style="border-color: var(--border-color) !important;">' +
         '  <div class="d-flex align-items-center gap-3">' +
-        '    <div style="width: 36px; height: 36px; border-radius: 50%; background: ' + color + '; display: flex; align-items: center; justify-content: center; color: white; font-weight: 600; font-size: 0.85rem; flex-shrink: 0;">' + initial + '</div>' +
+        '    <div style="width: 36px; height: 36px; border-radius: 50%; background: ' +
+        color +
+        '; display: flex; align-items: center; justify-content: center; color: white; font-weight: 600; font-size: 0.85rem; flex-shrink: 0;">' +
+        initial +
+        '</div>' +
         '    <div>' +
-        '      <div style="color: var(--text-primary); font-weight: 500;">' + name + evoHtml + '</div>' +
-        '      <div style="color: var(--text-muted); font-size: 0.8rem;">' + model + '</div>' +
+        '      <div style="color: var(--text-primary); font-weight: 500;">' +
+        name +
+        evoHtml +
+        '</div>' +
+        '      <div style="color: var(--text-muted); font-size: 0.8rem;">' +
+        model +
+        '</div>' +
         '    </div>' +
         '  </div>' +
-        '  <div style="color: var(--text-muted); font-size: 0.8rem;">' + msgCount + ' msgs</div>' +
+        '  <div style="color: var(--text-muted); font-size: 0.8rem;">' +
+        msgCount +
+        ' msgs</div>' +
         '</div>';
     }
     container.innerHTML = html;
@@ -11519,7 +13692,8 @@
 
     var profile = data && data.profile;
     // Show banner if no profile or personalized_at is zero/missing
-    var isPersonalized = profile && profile.personalized_at && profile.personalized_at !== '0001-01-01T00:00:00Z';
+    var isPersonalized =
+      profile && profile.personalized_at && profile.personalized_at !== '0001-01-01T00:00:00Z';
 
     if (isPersonalized) {
       banner.classList.add('d-none');
@@ -11592,7 +13766,9 @@
     );
     var needsAgentList = Boolean(document.getElementById('dashboardAgentList'));
     var needsProfile = Boolean(document.getElementById('dashboardPersonalizeBanner'));
-    var needsProgress = Boolean(evolutionEnabled && document.getElementById('dashboardProgressCard'));
+    var needsProgress = Boolean(
+      evolutionEnabled && document.getElementById('dashboardProgressCard')
+    );
 
     var tasks = [];
 
@@ -11600,7 +13776,7 @@
       tasks.push({
         key: 'stats',
         promise: API.get('/api/agents/dashboard/stats').catch(function (err) {
-          dashLog.debug('Failed to load dashboard stats', { error: err && err.message || err });
+          dashLog.debug('Failed to load dashboard stats', { error: (err && err.message) || err });
           return null;
         })
       });
@@ -11610,7 +13786,7 @@
       tasks.push({
         key: 'agents',
         promise: API.get('/api/agents/dashboard/list').catch(function (err) {
-          dashLog.debug('Failed to load agent list', { error: err && err.message || err });
+          dashLog.debug('Failed to load agent list', { error: (err && err.message) || err });
           return null;
         })
       });
@@ -11620,7 +13796,7 @@
       tasks.push({
         key: 'profile',
         promise: API.get('/api/onboarding/user-profile').catch(function (err) {
-          dashLog.debug('Failed to load user profile', { error: err && err.message || err });
+          dashLog.debug('Failed to load user profile', { error: (err && err.message) || err });
           return null;
         })
       });
@@ -11630,7 +13806,9 @@
       tasks.push({
         key: 'progress',
         promise: API.get('/api/evolution/assistant').catch(function (err) {
-          dashLog.debug('Failed to load assistant progress', { error: err && err.message || err });
+          dashLog.debug('Failed to load assistant progress', {
+            error: (err && err.message) || err
+          });
           return null;
         })
       });
@@ -11638,7 +13816,11 @@
 
     if (tasks.length === 0) return;
 
-    Promise.allSettled(tasks.map(function (task) { return task.promise; })).then(function (results) {
+    Promise.allSettled(
+      tasks.map(function (task) {
+        return task.promise;
+      })
+    ).then(function (results) {
       for (var i = 0; i < tasks.length; i++) {
         var key = tasks[i].key;
         var value = results[i].status === 'fulfilled' ? results[i].value : null;

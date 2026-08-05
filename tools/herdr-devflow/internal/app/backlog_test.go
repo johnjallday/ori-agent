@@ -231,7 +231,7 @@ func TestBacklogSaysNothingMatchedWithoutSoundingBroken(t *testing.T) {
 	if !strings.Contains(output, "0 open Issues") || !strings.Contains(output, "GitHub returned no open Issues") {
 		t.Fatalf("listing = %q, want it to say GitHub answered with nothing", output)
 	}
-	if !strings.Contains(output, "wt backlog add") {
+	if !strings.Contains(output, "./scripts/backlog.sh add") {
 		t.Fatalf("listing = %q, want the empty state to say how to fill it", output)
 	}
 }

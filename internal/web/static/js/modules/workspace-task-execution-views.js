@@ -18,7 +18,7 @@ import {
   getStatusClass,
   getTaskEventData,
   summarizeText,
-  stringifyTraceValue,
+  stringifyTraceValue
 } from './workspace-task.js';
 
 // Trace pagination page size, exported so the WorkspaceTaskPage constructor
@@ -37,14 +37,17 @@ export const taskExecutionViewsMethods = {
       return;
     }
 
-    this.elements.trace.innerHTML = steps.map((step, index) => {
-      const statusKey = String(step?.status || this.task?.status || 'pending').trim().toLowerCase();
-      const statusClass = getStatusClass(statusKey);
-      const detail = String(step?.detail || '').trim();
-      const defaultOpen = index < 2 ? ' open' : '';
-      const title = String(step?.title || `Run ${index + 1}`).trim() || `Run ${index + 1}`;
+    this.elements.trace.innerHTML = steps
+      .map((step, index) => {
+        const statusKey = String(step?.status || this.task?.status || 'pending')
+          .trim()
+          .toLowerCase();
+        const statusClass = getStatusClass(statusKey);
+        const detail = String(step?.detail || '').trim();
+        const defaultOpen = index < 2 ? ' open' : '';
+        const title = String(step?.title || `Run ${index + 1}`).trim() || `Run ${index + 1}`;
 
-      return `
+        return `
         <details class="workspace-task-breakdown-step"${defaultOpen}>
           <summary>
             <span class="workspace-task-breakdown-title">
@@ -56,7 +59,8 @@ export const taskExecutionViewsMethods = {
           <div class="workspace-task-breakdown-body">${detail ? this.escapeHtml(detail) : 'No additional detail.'}</div>
         </details>
       `;
-    }).join('');
+      })
+      .join('');
   },
 
   renderRunHistory() {
@@ -74,16 +78,23 @@ export const taskExecutionViewsMethods = {
       return;
     }
 
-    const totalCalls = tools.reduce((sum, item) => sum + Math.max(item.calls, item.results + item.errors), 0);
-    const cardsHtml = tools.map((item) => {
-      const status = item.errors > 0 ? 'Error' : (item.results > 0 ? 'Completed' : 'Called');
-      const count = Math.max(item.calls, item.results + item.errors);
-      const countText = count === 1 ? '1 call' : `${count} calls`;
-      const detail = [item.latestArgs ? `Args: ${item.latestArgs}` : '', item.latestResult ? `Result: ${item.latestResult}` : '']
-        .filter(Boolean)
-        .join(' · ');
+    const totalCalls = tools.reduce(
+      (sum, item) => sum + Math.max(item.calls, item.results + item.errors),
+      0
+    );
+    const cardsHtml = tools
+      .map(item => {
+        const status = item.errors > 0 ? 'Error' : item.results > 0 ? 'Completed' : 'Called';
+        const count = Math.max(item.calls, item.results + item.errors);
+        const countText = count === 1 ? '1 call' : `${count} calls`;
+        const detail = [
+          item.latestArgs ? `Args: ${item.latestArgs}` : '',
+          item.latestResult ? `Result: ${item.latestResult}` : ''
+        ]
+          .filter(Boolean)
+          .join(' · ');
 
-      return `
+        return `
         <div class="workspace-task-tool-card">
           <div class="workspace-task-tool-card-top">
             <div class="workspace-task-tool-name">${this.escapeHtml(item.name)}</div>
@@ -93,7 +104,8 @@ export const taskExecutionViewsMethods = {
           ${detail ? `<div class="workspace-task-tool-detail">${this.escapeHtml(detail)}</div>` : ''}
         </div>
       `;
-    }).join('');
+      })
+      .join('');
 
     target.hidden = false;
     target.innerHTML = `
@@ -109,7 +121,7 @@ export const taskExecutionViewsMethods = {
     const trace = Array.isArray(this.task?.execution_trace) ? this.task.execution_trace : [];
     const byName = new Map();
 
-    trace.forEach((entry) => {
+    trace.forEach(entry => {
       if (!this.isToolTraceEntry(entry)) return;
 
       const toolName = this.extractToolNameFromTraceEntry(entry);
@@ -128,8 +140,12 @@ export const taskExecutionViewsMethods = {
       }
 
       const item = byName.get(toolName);
-      const status = String(entry?.status || entry?.type || '').trim().toLowerCase();
-      const title = String(entry?.title || '').trim().toLowerCase();
+      const status = String(entry?.status || entry?.type || '')
+        .trim()
+        .toLowerCase();
+      const title = String(entry?.title || '')
+        .trim()
+        .toLowerCase();
 
       if (status.includes('call') || title.startsWith('calling ')) {
         item.calls += 1;
@@ -156,24 +172,31 @@ export const taskExecutionViewsMethods = {
   // whether the run finished and was persisted, so we union both.
   collectUsedToolNames() {
     const names = new Set();
-    this.getToolUsageSummary().forEach((tool) => {
-      const name = String(tool?.name || '').trim().toLowerCase();
+    this.getToolUsageSummary().forEach(tool => {
+      const name = String(tool?.name || '')
+        .trim()
+        .toLowerCase();
       if (name) names.add(name);
     });
-    this.getCurrentTaskEvents().forEach((event) => {
+    this.getCurrentTaskEvents().forEach(event => {
       const data = getTaskEventData(event);
-      const name = String(data?.tool_name || '').trim().toLowerCase();
+      const name = String(data?.tool_name || '')
+        .trim()
+        .toLowerCase();
       if (name) names.add(name);
     });
     return names;
   },
 
   isWebSearchToolName(name) {
-    const normalized = String(name || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+    const normalized = String(name || '')
+      .trim()
+      .toLowerCase()
+      .replace(/[\s-]+/g, '_');
     if (!normalized) return false;
-    return normalized === 'web_search' ||
-      normalized === 'websearch' ||
-      normalized.includes('web_search');
+    return (
+      normalized === 'web_search' || normalized === 'websearch' || normalized.includes('web_search')
+    );
   },
 
   usedWebSearch() {
@@ -184,12 +207,18 @@ export const taskExecutionViewsMethods = {
   },
 
   isToolTraceEntry(entry) {
-    const status = String(entry?.status || entry?.type || '').trim().toLowerCase();
-    const title = String(entry?.title || '').trim().toLowerCase();
-    return status.includes('tool') ||
+    const status = String(entry?.status || entry?.type || '')
+      .trim()
+      .toLowerCase();
+    const title = String(entry?.title || '')
+      .trim()
+      .toLowerCase();
+    return (
+      status.includes('tool') ||
       title.startsWith('calling ') ||
       title.startsWith('completed ') ||
-      title.startsWith('failed ');
+      title.startsWith('failed ')
+    );
   },
 
   extractToolNameFromTraceEntry(entry) {
@@ -205,12 +234,24 @@ export const taskExecutionViewsMethods = {
   },
 
   getToolKindLabel(toolName, entry) {
-    const source = String(entry?.source || '').trim().toLowerCase();
-    const name = String(toolName || '').trim().toLowerCase();
+    const source = String(entry?.source || '')
+      .trim()
+      .toLowerCase();
+    const name = String(toolName || '')
+      .trim()
+      .toLowerCase();
     if (source.includes('mcp') || name.startsWith('mcp.') || name.startsWith('mcp:')) {
       return 'MCP';
     }
-    const nativeTools = new Set(['web_search', 'web_fetch', 'weather', 'time', 'finance', 'sports', 'air_quality']);
+    const nativeTools = new Set([
+      'web_search',
+      'web_fetch',
+      'weather',
+      'time',
+      'finance',
+      'sports',
+      'air_quality'
+    ]);
     if (nativeTools.has(name)) {
       return 'Native';
     }
@@ -276,7 +317,7 @@ export const taskExecutionViewsMethods = {
     if (historicalRunSteps.length > 0) {
       if (retryHistorySteps.length > 0) {
         const currentRunNumber = historicalRunSteps.length + 1;
-        const currentRunSteps = retryHistorySteps.map((step) => ({
+        const currentRunSteps = retryHistorySteps.map(step => ({
           ...step,
           title: `Run ${currentRunNumber} • ${step.title}`
         }));
@@ -314,7 +355,10 @@ export const taskExecutionViewsMethods = {
 
       return {
         title: String(step?.title || `Step ${index + 1}`).trim() || `Step ${index + 1}`,
-        status: String(step?.status || 'pending').trim().toLowerCase() || 'pending',
+        status:
+          String(step?.status || 'pending')
+            .trim()
+            .toLowerCase() || 'pending',
         detail: detailParts.join('\n')
       };
     });
@@ -326,8 +370,10 @@ export const taskExecutionViewsMethods = {
       : [];
     if (!history.length) return [];
 
-    const outcomeToStatus = (outcome) => {
-      const normalized = String(outcome || '').trim().toLowerCase();
+    const outcomeToStatus = outcome => {
+      const normalized = String(outcome || '')
+        .trim()
+        .toLowerCase();
       if (normalized === 'success') return 'completed';
       if (normalized === 'error' || normalized === 'failed') return 'failed';
       if (normalized === 'needs_input' || normalized === 'blocked') return 'blocked';
@@ -338,7 +384,9 @@ export const taskExecutionViewsMethods = {
       const attemptNumber = Number.isFinite(Number(item?.attempt))
         ? Number(item.attempt)
         : index + 1;
-      const outcome = String(item?.outcome || '').trim().toLowerCase();
+      const outcome = String(item?.outcome || '')
+        .trim()
+        .toLowerCase();
       const summary = this.normalizeBreakdownField(item?.summary);
       const createdAt = this.normalizeBreakdownField(item?.created_at);
       const detailParts = [];
@@ -368,8 +416,10 @@ export const taskExecutionViewsMethods = {
         ? Number(options.startIndex)
         : 1;
 
-    const mapRecordedStatus = (status) => {
-      const normalized = String(status || '').trim().toLowerCase();
+    const mapRecordedStatus = status => {
+      const normalized = String(status || '')
+        .trim()
+        .toLowerCase();
       if (normalized === 'success') return 'completed';
       if (normalized === 'failed' || normalized === 'error') return 'failed';
       if (normalized === 'blocked') return 'blocked';
@@ -378,7 +428,9 @@ export const taskExecutionViewsMethods = {
 
     return relevantHistory.map((item, index) => {
       const recordedAt = this.normalizeBreakdownField(item?.executed_at);
-      const rawStatus = String(item?.status || '').trim().toLowerCase();
+      const rawStatus = String(item?.status || '')
+        .trim()
+        .toLowerCase();
       const validation = item?.validation_result || item?.validation || null;
       const validationLabel = this.getTaskValidationDisplayLabel(validation);
       const summary = this.normalizeBreakdownField(item?.summary);
@@ -390,7 +442,12 @@ export const taskExecutionViewsMethods = {
       if (rawStatus) detailParts.push(`Outcome: ${rawStatus.replace(/_/g, ' ')}`);
       if (validationLabel) detailParts.push(`Storage: ${validationLabel}`);
       if (Array.isArray(validation?.errors) && validation.errors.length > 0) {
-        detailParts.push(`Validation: ${validation.errors.map((error) => error?.message || error?.code).filter(Boolean).join(' ')}`);
+        detailParts.push(
+          `Validation: ${validation.errors
+            .map(error => error?.message || error?.code)
+            .filter(Boolean)
+            .join(' ')}`
+        );
       }
       if (durationMs > 0) detailParts.push(`Duration: ${Math.round(durationMs / 1000)}s`);
       if (summary) {
@@ -400,23 +457,38 @@ export const taskExecutionViewsMethods = {
       }
 
       return {
-        title: validationLabel ? `Run ${startIndex + index} • ${validationLabel}` : `Run ${startIndex + index}`,
-        status: validation?.validation_status === 'needs_review' ? 'blocked' : mapRecordedStatus(rawStatus),
+        title: validationLabel
+          ? `Run ${startIndex + index} • ${validationLabel}`
+          : `Run ${startIndex + index}`,
+        status:
+          validation?.validation_status === 'needs_review'
+            ? 'blocked'
+            : mapRecordedStatus(rawStatus),
         detail: detailParts.join('\n')
       };
     });
   },
 
   getTaskValidationDisplayLabel(validation) {
-    const validationStatus = String(validation?.validation_status || '').trim().toLowerCase();
-    const storageStatus = String(validation?.storage_status || '').trim().toLowerCase();
+    const validationStatus = String(validation?.validation_status || '')
+      .trim()
+      .toLowerCase();
+    const storageStatus = String(validation?.storage_status || '')
+      .trim()
+      .toLowerCase();
     if (!validationStatus || validationStatus === 'not_applicable') return '';
     if (validationStatus === 'dismissed') return 'Dismissed';
-    if (validationStatus === 'manually_approved' || storageStatus === 'manually_appended') return 'Manually Approved';
-    if (validationStatus === 'needs_review' || storageStatus === 'skipped_invalid') return 'Needs Review';
-    if (validationStatus === 'passed' && (storageStatus === 'saved' || storageStatus === 'appended')) return 'Saved';
+    if (validationStatus === 'manually_approved' || storageStatus === 'manually_appended')
+      return 'Manually Approved';
+    if (validationStatus === 'needs_review' || storageStatus === 'skipped_invalid')
+      return 'Needs Review';
+    if (
+      validationStatus === 'passed' &&
+      (storageStatus === 'saved' || storageStatus === 'appended')
+    )
+      return 'Saved';
     if (validationStatus === 'passed') return 'Validated';
-    return validationStatus.replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());
+    return validationStatus.replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase());
   },
 
   buildExecutionBreakdownDetail(task, fallbackDetail = '') {
@@ -428,18 +500,24 @@ export const taskExecutionViewsMethods = {
     if (currentStep) parts.push(`Execution: ${currentStep}`);
 
     const attemptsUsed = Number(task?.context?.execution_retry?.attempts_used || 0);
-    const maxAttempts = Number(task?.context?.execution_retry?.max_attempts || task?.context?.execution_max_attempts || 0);
+    const maxAttempts = Number(
+      task?.context?.execution_retry?.max_attempts || task?.context?.execution_max_attempts || 0
+    );
     if (attemptsUsed > 0 && maxAttempts > 0) {
       parts.push(`Attempts: ${attemptsUsed}/${maxAttempts}`);
     }
 
-    const retryFinalOutcome = this.normalizeBreakdownField(task?.context?.execution_retry?.final_outcome);
+    const retryFinalOutcome = this.normalizeBreakdownField(
+      task?.context?.execution_retry?.final_outcome
+    );
     if (retryFinalOutcome) parts.push(`Final outcome: ${retryFinalOutcome}`);
 
     const blockedReason = this.normalizeBreakdownField(task?.context?.human_loop?.reason);
     const blockedQuestion = this.normalizeBreakdownField(task?.context?.human_loop?.question);
-    if (blockedReason) parts.push(`Blocked reason: ${this.truncateBreakdownText(blockedReason, 260)}`);
-    if (blockedQuestion) parts.push(`Needs input: ${this.truncateBreakdownText(blockedQuestion, 260)}`);
+    if (blockedReason)
+      parts.push(`Blocked reason: ${this.truncateBreakdownText(blockedReason, 260)}`);
+    if (blockedQuestion)
+      parts.push(`Needs input: ${this.truncateBreakdownText(blockedQuestion, 260)}`);
 
     const errorText = this.normalizeBreakdownField(task?.error);
     if (errorText) parts.push(`Error: ${this.truncateBreakdownText(errorText, 360)}`);
@@ -456,15 +534,27 @@ export const taskExecutionViewsMethods = {
     const toStep = (title, detail = '') => ({ title, detail });
 
     let baseSteps = [];
-    if ((lower.includes('wear') && lower.includes('tomorrow')) || lower.includes('what should i wear')) {
+    if (
+      (lower.includes('wear') && lower.includes('tomorrow')) ||
+      lower.includes('what should i wear')
+    ) {
       baseSteps = [
-        toStep("Checking tomorrow's weather", 'Collect forecast details such as temperature, rain chance, and wind.'),
-        toStep('Recommendation for clothing based on the weather', 'Translate weather conditions into practical outfit guidance.')
+        toStep(
+          "Checking tomorrow's weather",
+          'Collect forecast details such as temperature, rain chance, and wind.'
+        ),
+        toStep(
+          'Recommendation for clothing based on the weather',
+          'Translate weather conditions into practical outfit guidance.'
+        )
       ];
     } else if (lower.includes('weather')) {
       baseSteps = [
         toStep('Checking weather conditions', 'Gather forecast or relevant weather signals.'),
-        toStep('Summarizing weather insight', 'Return a concise recommendation tailored to the request.')
+        toStep(
+          'Summarizing weather insight',
+          'Return a concise recommendation tailored to the request.'
+        )
       ];
     } else {
       baseSteps = [
@@ -473,7 +563,10 @@ export const taskExecutionViewsMethods = {
       ];
     }
 
-    const statusSequence = this.getSyntheticStepStatuses(String(task?.status || 'pending'), baseSteps.length);
+    const statusSequence = this.getSyntheticStepStatuses(
+      String(task?.status || 'pending'),
+      baseSteps.length
+    );
     return baseSteps.map((step, index) => ({
       ...step,
       status: statusSequence[index] || String(task?.status || 'pending')
@@ -481,14 +574,20 @@ export const taskExecutionViewsMethods = {
   },
 
   getSyntheticStepStatuses(status, count) {
-    const normalized = String(status || 'pending').trim().toLowerCase();
+    const normalized = String(status || 'pending')
+      .trim()
+      .toLowerCase();
     if (count <= 0) return [];
     if (normalized === 'completed') return Array.from({ length: count }, () => 'completed');
     if (normalized === 'in_progress') {
-      return Array.from({ length: count }, (_value, index) => index === 0 ? 'in_progress' : 'pending');
+      return Array.from({ length: count }, (_value, index) =>
+        index === 0 ? 'in_progress' : 'pending'
+      );
     }
     if (normalized === 'failed' || normalized === 'timeout') {
-      return Array.from({ length: count }, (_value, index) => index < Math.max(0, count - 1) ? 'completed' : 'failed');
+      return Array.from({ length: count }, (_value, index) =>
+        index < Math.max(0, count - 1) ? 'completed' : 'failed'
+      );
     }
     if (normalized === 'blocked') {
       return Array.from({ length: count }, (_value, index) => {
@@ -546,14 +645,18 @@ export const taskExecutionViewsMethods = {
     }
 
     const buckets = this.bucketTraceEntries(entries);
-    const activeFilter = this._traceFilter && buckets[this._traceFilter] ? this._traceFilter : 'all';
+    const activeFilter =
+      this._traceFilter && buckets[this._traceFilter] ? this._traceFilter : 'all';
     if (activeFilter !== this._traceFilter) {
       this._traceFilter = activeFilter;
     }
 
     this.renderTraceFilterChips(buckets, activeFilter);
 
-    const filtered = activeFilter === 'all' ? entries : entries.filter((entry) => this.traceBucketForStatus(entry.status) === activeFilter);
+    const filtered =
+      activeFilter === 'all'
+        ? entries
+        : entries.filter(entry => this.traceBucketForStatus(entry.status) === activeFilter);
 
     const visible = filtered.slice(0, showCount);
     const hiddenCount = Math.max(filtered.length - visible.length, 0);
@@ -575,7 +678,9 @@ export const taskExecutionViewsMethods = {
       return;
     }
 
-    const itemsHtml = visible.map((entry) => `
+    const itemsHtml = visible
+      .map(
+        entry => `
       <div class="workspace-task-trace-item">
         <div class="workspace-task-trace-status">${this.escapeHtml(entry.status)}</div>
         <div>
@@ -583,11 +688,14 @@ export const taskExecutionViewsMethods = {
           ${entry.meta ? `<div class="workspace-task-trace-meta">${this.escapeHtml(entry.meta)}</div>` : ''}
         </div>
       </div>
-    `).join('');
+    `
+      )
+      .join('');
 
-    const showMoreHtml = hiddenCount > 0
-      ? `<button type="button" class="workspace-task-trace-show-more" data-trace-action="show-more">Show ${Math.min(hiddenCount, TRACE_PAGE_SIZE)} more (${hiddenCount} hidden)</button>`
-      : '';
+    const showMoreHtml =
+      hiddenCount > 0
+        ? `<button type="button" class="workspace-task-trace-show-more" data-trace-action="show-more">Show ${Math.min(hiddenCount, TRACE_PAGE_SIZE)} more (${hiddenCount} hidden)</button>`
+        : '';
 
     this.elements.executionTrace.innerHTML = itemsHtml + showMoreHtml;
 
@@ -616,21 +724,35 @@ export const taskExecutionViewsMethods = {
   },
 
   traceBucketForStatus(rawStatus) {
-    const s = String(rawStatus || '').toLowerCase().trim();
+    const s = String(rawStatus || '')
+      .toLowerCase()
+      .trim();
     if (s === 'tool call' || s === 'tool result') return 'tool';
     if (s === 'tool error' || s === 'failed' || s === 'error') return 'errors';
     if (s === 'progress' || s === 'thinking' || s === 'waiting') return 'progress';
-    if (s === 'started' || s === 'completed' || s === 'blocked' || s === 'cancelled' || s === 'timeout') return 'lifecycle';
+    if (
+      s === 'started' ||
+      s === 'completed' ||
+      s === 'blocked' ||
+      s === 'cancelled' ||
+      s === 'timeout'
+    )
+      return 'lifecycle';
     return 'other';
   },
 
   traceBucketLabel(bucket) {
     switch (bucket) {
-      case 'tool': return 'Tools';
-      case 'errors': return 'Errors';
-      case 'progress': return 'Progress';
-      case 'lifecycle': return 'Lifecycle';
-      default: return 'Other';
+      case 'tool':
+        return 'Tools';
+      case 'errors':
+        return 'Errors';
+      case 'progress':
+        return 'Progress';
+      case 'lifecycle':
+        return 'Lifecycle';
+      default:
+        return 'Other';
     }
   },
 
@@ -638,13 +760,15 @@ export const taskExecutionViewsMethods = {
     if (!this.elements.executionTraceFilters || !this.elements.executionTraceControls) return;
 
     const order = ['all', 'lifecycle', 'tool', 'progress', 'errors', 'other'];
-    const present = order.filter((key) => buckets[key]);
+    const present = order.filter(key => buckets[key]);
     if (present.length <= 1) {
       this.elements.executionTraceControls.hidden = true;
       return;
     }
     this.elements.executionTraceControls.hidden = false;
-    this.elements.executionTraceFilters.innerHTML = present.map((key) => `
+    this.elements.executionTraceFilters.innerHTML = present
+      .map(
+        key => `
       <button type="button"
               class="workspace-task-trace-filter"
               data-trace-filter="${this.escapeHtml(key)}"
@@ -652,9 +776,11 @@ export const taskExecutionViewsMethods = {
         <span>${this.escapeHtml(buckets[key].label)}</span>
         <span class="workspace-task-trace-filter-count">${buckets[key].count}</span>
       </button>
-    `).join('');
+    `
+      )
+      .join('');
 
-    this.elements.executionTraceFilters.querySelectorAll('[data-trace-filter]').forEach((btn) => {
+    this.elements.executionTraceFilters.querySelectorAll('[data-trace-filter]').forEach(btn => {
       btn.addEventListener('click', () => {
         const key = btn.getAttribute('data-trace-filter') || 'all';
         if (key === this._traceFilter) return;
@@ -681,10 +807,13 @@ export const taskExecutionViewsMethods = {
   },
 
   hasExecutionActivity() {
-    const status = String(this.task?.status || '').trim().toLowerCase();
+    const status = String(this.task?.status || '')
+      .trim()
+      .toLowerCase();
     if (status && status !== 'pending' && status !== 'assigned') return true;
     if (this.task?.started_at || this.task?.completed_at) return true;
-    if (Array.isArray(this.task?.execution_history) && this.task.execution_history.length > 0) return true;
+    if (Array.isArray(this.task?.execution_history) && this.task.execution_history.length > 0)
+      return true;
     if (this.task?.context?.execution_retry) return true;
     return false;
   },
@@ -692,8 +821,11 @@ export const taskExecutionViewsMethods = {
   normalizePersistedExecutionTrace() {
     const trace = Array.isArray(this.task?.execution_trace) ? this.task.execution_trace : [];
     return trace
-      .map((entry) => {
-        const status = String(entry?.status || entry?.type || 'event').trim().replace(/_/g, ' ') || 'event';
+      .map(entry => {
+        const status =
+          String(entry?.status || entry?.type || 'event')
+            .trim()
+            .replace(/_/g, ' ') || 'event';
         const title = String(entry?.title || '').trim();
         const detail = stringifyTraceValue(entry?.detail || entry?.summary || '', 1200);
         const timestamp = formatDateTime(entry?.timestamp || entry?.created_at);
@@ -708,7 +840,7 @@ export const taskExecutionViewsMethods = {
 
   buildExecutionTraceEntriesFromEvents() {
     return this.getCurrentTaskEvents()
-      .map((event) => this.formatExecutionTraceEvent(event))
+      .map(event => this.formatExecutionTraceEvent(event))
       .filter(Boolean);
   },
 
@@ -716,14 +848,16 @@ export const taskExecutionViewsMethods = {
     const events = Array.isArray(this.taskEvents) ? this.taskEvents : [];
     const taskId = String(this.taskId || '').trim();
     return events
-      .filter((event) => {
+      .filter(event => {
         const eventTaskId = this.getEventTaskId(event);
         return eventTaskId && eventTaskId === taskId;
       })
       .sort((left, right) => {
         const leftTime = new Date(left?.timestamp || left?.created_at || 0).getTime();
         const rightTime = new Date(right?.timestamp || right?.created_at || 0).getTime();
-        return (Number.isFinite(leftTime) ? leftTime : 0) - (Number.isFinite(rightTime) ? rightTime : 0);
+        return (
+          (Number.isFinite(leftTime) ? leftTime : 0) - (Number.isFinite(rightTime) ? rightTime : 0)
+        );
       });
   },
 
@@ -760,14 +894,19 @@ export const taskExecutionViewsMethods = {
       case 'task.thinking':
         return {
           status: 'thinking',
-          summary: stringifyTraceValue(data?.message || data?.summary || 'Agent is analyzing the task.', 900),
+          summary: stringifyTraceValue(
+            data?.message || data?.summary || 'Agent is analyzing the task.',
+            900
+          ),
           meta
         };
       case 'task.tool_call': {
         const args = stringifyTraceValue(data?.arguments, 900);
         return {
           status: 'tool call',
-          summary: [`Calling ${toolName || 'tool'}`, args ? `Arguments:\n${args}` : ''].filter(Boolean).join('\n'),
+          summary: [`Calling ${toolName || 'tool'}`, args ? `Arguments:\n${args}` : '']
+            .filter(Boolean)
+            .join('\n'),
           meta
         };
       }
@@ -778,14 +917,19 @@ export const taskExecutionViewsMethods = {
           : stringifyTraceValue(data?.error || 'Tool failed.', 1000);
         return {
           status: success ? 'tool result' : 'tool error',
-          summary: [`${success ? 'Completed' : 'Failed'} ${toolName || 'tool'}`, detail].filter(Boolean).join('\n'),
+          summary: [`${success ? 'Completed' : 'Failed'} ${toolName || 'tool'}`, detail]
+            .filter(Boolean)
+            .join('\n'),
           meta
         };
       }
       case 'task.completed':
         return {
           status: 'completed',
-          summary: stringifyTraceValue(data?.result || data?.description || 'Task completed.', 1000),
+          summary: stringifyTraceValue(
+            data?.result || data?.description || 'Task completed.',
+            1000
+          ),
           meta
         };
       case 'task.failed':
@@ -797,7 +941,10 @@ export const taskExecutionViewsMethods = {
       case 'task.blocked':
         return {
           status: 'blocked',
-          summary: stringifyTraceValue(data?.reason || data?.agent_response || 'Task paused for user input.', 1000),
+          summary: stringifyTraceValue(
+            data?.reason || data?.agent_response || 'Task paused for user input.',
+            1000
+          ),
           meta
         };
       case 'task.resumed':
@@ -818,20 +965,27 @@ export const taskExecutionViewsMethods = {
 
   buildExecutionTraceEntriesFromSteps() {
     const steps = Array.isArray(this.task?.execution_steps) ? this.task.execution_steps : [];
-    return steps.map((step, index) => {
-      const status = String(step?.status || 'step').trim().replace(/_/g, ' ') || 'step';
-      const title = String(step?.title || `Step ${index + 1}`).trim();
-      const detail = String(step?.detail || '').trim();
-      const result = stringifyTraceValue(step?.result || step?.error || '', 900);
-      const startedAt = formatDateTime(step?.started_at);
-      const completedAt = formatDateTime(step?.completed_at);
-      const meta = [
-        startedAt !== '—' ? `Started ${startedAt}` : '',
-        completedAt !== '—' ? `Completed ${completedAt}` : '',
-        step?.tag ? String(step.tag).trim() : ''
-      ].filter(Boolean).join(' • ');
-      const summary = [title, detail, result].filter(Boolean).join('\n');
-      return summary ? { status, summary, meta } : null;
-    }).filter(Boolean);
-  },
+    return steps
+      .map((step, index) => {
+        const status =
+          String(step?.status || 'step')
+            .trim()
+            .replace(/_/g, ' ') || 'step';
+        const title = String(step?.title || `Step ${index + 1}`).trim();
+        const detail = String(step?.detail || '').trim();
+        const result = stringifyTraceValue(step?.result || step?.error || '', 900);
+        const startedAt = formatDateTime(step?.started_at);
+        const completedAt = formatDateTime(step?.completed_at);
+        const meta = [
+          startedAt !== '—' ? `Started ${startedAt}` : '',
+          completedAt !== '—' ? `Completed ${completedAt}` : '',
+          step?.tag ? String(step.tag).trim() : ''
+        ]
+          .filter(Boolean)
+          .join(' • ');
+        const summary = [title, detail, result].filter(Boolean).join('\n');
+        return summary ? { status, summary, meta } : null;
+      })
+      .filter(Boolean);
+  }
 };

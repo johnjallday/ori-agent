@@ -152,7 +152,8 @@ import { emailSetupView, chipStateLabel } from './personal-hq-onboarding.js';
       toast('Could not check your Google connection.', 'danger');
       return;
     }
-    const gmail = conn && Array.isArray(conn.grants) ? conn.grants.find((g) => g.product === 'gmail') : null;
+    const gmail =
+      conn && Array.isArray(conn.grants) ? conn.grants.find(g => g.product === 'gmail') : null;
     if (!(conn && conn.subject && gmail && gmail.health === 'healthy')) {
       toast('Connect Google and enable Gmail in Settings → Google Account first.', 'danger');
       window.open('/settings#google-account', '_blank');
@@ -160,7 +161,8 @@ import { emailSetupView, chipStateLabel } from './personal-hq-onboarding.js';
     }
     try {
       const linked = await postJSON(
-        '/api/connections/google/gmail/link?workspace_id=' + encodeURIComponent(currentWorkspaceId()),
+        '/api/connections/google/gmail/link?workspace_id=' +
+          encodeURIComponent(currentWorkspaceId()),
         {}
       );
       if (!linked || !linked.account_id) throw new Error('no account');
@@ -173,7 +175,11 @@ import { emailSetupView, chipStateLabel } from './personal-hq-onboarding.js';
       // a fault, and saying so is the difference between a dead button and a
       // next step.
       if (err && err.code === 'credential_missing') {
-        toast(err.message || 'Your Gmail credential is no longer in the vault. Re-enable Gmail to reconnect it.', 'danger');
+        toast(
+          err.message ||
+            'Your Gmail credential is no longer in the vault. Re-enable Gmail to reconnect it.',
+          'danger'
+        );
         window.open('/settings#google-account', '_blank');
         renderBody();
         return;
@@ -223,7 +229,9 @@ import { emailSetupView, chipStateLabel } from './personal-hq-onboarding.js';
 
     const action = document.createElement('button');
     action.type = 'button';
-    action.className = 'modern-btn modern-btn-sm ' + (view.action === 'disconnect' ? 'modern-btn-secondary' : 'modern-btn-primary');
+    action.className =
+      'modern-btn modern-btn-sm ' +
+      (view.action === 'disconnect' ? 'modern-btn-secondary' : 'modern-btn-primary');
     action.textContent = view.actionLabel;
     action.setAttribute('aria-label', view.actionLabel);
     action.addEventListener('click', async () => {
@@ -278,7 +286,8 @@ import { emailSetupView, chipStateLabel } from './personal-hq-onboarding.js';
     title.textContent = 'Connect your email';
     const sub = document.createElement('p');
     sub.className = 'workspace-email-connect-sub';
-    sub.textContent = 'Link an account so this workspace can triage your inbox and draft replies. Nothing is ever sent without your confirmation.';
+    sub.textContent =
+      'Link an account so this workspace can triage your inbox and draft replies. Nothing is ever sent without your confirmation.';
     text.append(title, sub);
     const connect = document.createElement('button');
     connect.type = 'button';
@@ -393,8 +402,11 @@ import { emailSetupView, chipStateLabel } from './personal-hq-onboarding.js';
     // The repair the server named. Connecting an account or granting mail
     // access happens in Settings — a different page, so the wizard records
     // where to come back to before sending anyone there.
-    const needsSettings = setup.action === 'connect_google' || setup.action === 'enable_gmail' ||
-      setup.action === 'repair_vault' || setup.action === 'reconnect_gmail';
+    const needsSettings =
+      setup.action === 'connect_google' ||
+      setup.action === 'enable_gmail' ||
+      setup.action === 'repair_vault' ||
+      setup.action === 'reconnect_gmail';
     const action = document.createElement('button');
     action.type = 'button';
     action.className = 'modern-btn modern-btn-primary modern-btn-sm';
@@ -443,10 +455,11 @@ import { emailSetupView, chipStateLabel } from './personal-hq-onboarding.js';
   }
 
   btn.addEventListener('click', openModal);
-  modal.addEventListener('click', (e) => {
-    if (e.target && e.target.hasAttribute && e.target.hasAttribute('data-hq-email-close')) closeModal();
+  modal.addEventListener('click', e => {
+    if (e.target && e.target.hasAttribute && e.target.hasAttribute('data-hq-email-close'))
+      closeModal();
   });
-  document.addEventListener('keydown', (e) => {
+  document.addEventListener('keydown', e => {
     if (e.key === 'Escape' && modal.classList.contains('is-open')) closeModal();
   });
 

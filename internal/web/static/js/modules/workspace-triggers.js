@@ -23,7 +23,7 @@
     empty: '#workspace-detail-triggers-empty',
     actions: '#workspace-detail-triggers-actions',
     statusText: '#workspace-detail-triggers-status-text',
-    refresh: '#workspace-detail-triggers-refresh',
+    refresh: '#workspace-detail-triggers-refresh'
   };
 
   let loaded = false;
@@ -185,7 +185,7 @@
   }
 
   function findTrigger(id) {
-    return cache.find((t) => t.id === id);
+    return cache.find(t => t.id === id);
   }
 
   // --- row actions ---
@@ -208,7 +208,10 @@
     try {
       if (act === 'toggle') {
         const enable = ev.target.checked;
-        await api('POST', `/api/workspaces/${wsId}/triggers/${id}/${enable ? 'enable' : 'disable'}`);
+        await api(
+          'POST',
+          `/api/workspaces/${wsId}/triggers/${id}/${enable ? 'enable' : 'disable'}`
+        );
         await load();
       } else if (act === 'delete') {
         if (!window.confirm(`Delete trigger "${t ? t.name : id}"? This cannot be undone.`)) return;
@@ -244,7 +247,8 @@
       return;
     }
     const wsId = getWorkspaceId();
-    panel.innerHTML = '<div class="workspace-detail-settings-field-hint">Loading fire history…</div>';
+    panel.innerHTML =
+      '<div class="workspace-detail-settings-field-hint">Loading fire history…</div>';
     panel.style.display = '';
     try {
       const data = await api('GET', `/api/workspaces/${wsId}/triggers/${id}/fires`);
@@ -256,9 +260,11 @@
       panel.innerHTML = fires
         .slice()
         .reverse()
-        .map((f) => {
+        .map(f => {
           const ref = f.run_id ? `run ${esc(f.run_id)}` : f.task_id ? `task ${esc(f.task_id)}` : '';
-          const err = f.error ? `<span style="color:var(--danger-color,#c0392b);">${esc(f.error)}</span>` : ref;
+          const err = f.error
+            ? `<span style="color:var(--danger-color,#c0392b);">${esc(f.error)}</span>`
+            : ref;
           return `<div style="display:flex; justify-content:space-between; gap:1rem; padding:0.2rem 0; border-top:1px solid var(--border-color,#eee); font-size:0.82rem;">
             <span>${fmtTime(f.fired_at)} — ${esc(f.summary || '')}</span>
             <span class="text-muted">${err}</span>
@@ -296,7 +302,7 @@
     const a = (t && t.action) || { kind: missionEnabled() ? 'mission_run' : 'task_prompt' };
     const fw = (t && t.file_watch) || { events: ['create'] };
     const events = fw.events || ['create'];
-    const evCheck = (e) => (events.indexOf(e) >= 0 ? 'checked' : '');
+    const evCheck = e => (events.indexOf(e) >= 0 ? 'checked' : '');
     const curlUrl = (t && t.webhook_url) || 'PASTE_URL_AFTER_CREATE';
 
     return `
@@ -351,7 +357,7 @@
             <div style="display:flex; gap:1rem; flex-wrap:wrap;">
               ${['create', 'modify', 'remove', 'rename']
                 .map(
-                  (e) =>
+                  e =>
                     `<label class="form-check-label" style="display:flex; gap:0.3rem; align-items:center;">
                       <input class="form-check-input trg-event" type="checkbox" value="${e}" ${evCheck(e)}> ${e}
                     </label>`
@@ -415,11 +421,12 @@
     modalEl.appendChild(dialog);
     document.body.appendChild(modalEl);
 
-    modalEl.addEventListener('click', (e) => {
+    modalEl.addEventListener('click', e => {
       if (e.target === modalEl) closeModal();
       if (e.target.closest('[data-trg-close]')) closeModal();
       if (e.target.closest('[data-trg-save]')) saveModal(t);
-      if (e.target.closest('[data-trg-copy]') && t) copy(t.webhook_url).then(() => setStatus('Webhook URL copied.'));
+      if (e.target.closest('[data-trg-copy]') && t)
+        copy(t.webhook_url).then(() => setStatus('Webhook URL copied.'));
       if (e.target.closest('[data-trg-regen]') && t) regenerate(t);
     });
     const kindSel = dialog.querySelector('#trg-action-kind');
@@ -442,7 +449,7 @@
   }
 
   function readModal() {
-    const q = (s) => modalEl.querySelector(s);
+    const q = s => modalEl.querySelector(s);
     const type = q('#trg-type').value;
     const kind = q('#trg-action-kind').value;
     const action = { kind };
@@ -456,7 +463,7 @@
       type,
       enabled: q('#trg-enabled').checked,
       action,
-      debounce_seconds: debounceRaw ? parseInt(debounceRaw, 10) : 0,
+      debounce_seconds: debounceRaw ? parseInt(debounceRaw, 10) : 0
     };
     if (type === 'webhook') {
       const secret = q('#trg-secret') ? q('#trg-secret').value : '';
@@ -464,12 +471,12 @@
       if (secret) payload.webhook.secret = secret;
     } else {
       const events = Array.from(modalEl.querySelectorAll('.trg-event'))
-        .filter((c) => c.checked)
-        .map((c) => c.value);
+        .filter(c => c.checked)
+        .map(c => c.value);
       payload.file_watch = {
         path: q('#trg-path').value.trim(),
         glob: q('#trg-glob').value.trim(),
-        events,
+        events
       };
     }
     return payload;
@@ -511,10 +518,14 @@
   }
 
   async function regenerate(t) {
-    if (!window.confirm('Issue a new webhook URL? The current URL will stop working immediately.')) return;
+    if (!window.confirm('Issue a new webhook URL? The current URL will stop working immediately.'))
+      return;
     const wsId = getWorkspaceId();
     try {
-      const updated = await api('POST', `/api/workspaces/${wsId}/triggers/${t.id}/regenerate-token`);
+      const updated = await api(
+        'POST',
+        `/api/workspaces/${wsId}/triggers/${t.id}/regenerate-token`
+      );
       if (updated && updated.webhook_url) await copy(updated.webhook_url);
       setStatus('New webhook URL generated and copied.');
       closeModal();
@@ -544,7 +555,7 @@
       // If the tab is already active on page load, load now.
       if (tab.classList.contains('active')) load();
     }
-    document.addEventListener('keydown', (e) => {
+    document.addEventListener('keydown', e => {
       if (e.key === 'Escape' && modalEl) closeModal();
     });
   }

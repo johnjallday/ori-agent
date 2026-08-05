@@ -21,7 +21,7 @@ type scriptedDaemon struct {
 func (d *scriptedDaemon) dial(context.Context, string) (net.Conn, error) {
 	client, server := net.Pipe()
 	go func() {
-		defer server.Close()
+		defer func() { _ = server.Close() }()
 		request, err := wakeprotocol.ReadRequest(server)
 		if err != nil {
 			return
@@ -174,7 +174,7 @@ func TestLostResponseIsUncertainAndRetryUsesSameIdempotencyKey(t *testing.T) {
 	client.Dial = func(context.Context, string) (net.Conn, error) {
 		caller, daemon := net.Pipe()
 		go func() {
-			defer daemon.Close()
+			defer func() { _ = daemon.Close() }()
 			request, _ := wakeprotocol.ReadRequest(daemon)
 			requests = append(requests, request)
 			// Deliberately close without a response.

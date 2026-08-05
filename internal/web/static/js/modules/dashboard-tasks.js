@@ -37,29 +37,35 @@ export class DashboardTasks {
     const isCompleted = task.status === 'completed';
     const hasResult = task.result && isCompleted;
     const hasInputTasks = task.input_task_ids && task.input_task_ids.length > 0;
-    const hasCombinationMode = task.result_combination_mode && task.result_combination_mode !== 'default';
+    const hasCombinationMode =
+      task.result_combination_mode && task.result_combination_mode !== 'default';
     const hasSchedule = task.schedule && task.schedule_enabled;
 
     // For tasks without agents, show checkbox for manual completion
-    const checkboxHTML = !hasAgent ? `
+    const checkboxHTML = !hasAgent
+      ? `
       <input type="checkbox" class="form-check-input me-2"
              ${isCompleted ? 'checked' : ''}
              onclick="event.stopPropagation(); workspaceDashboard.toggleTaskComplete('${task.id}', this.checked)"
              style="cursor: pointer; width: 20px; height: 20px;">
-    ` : '';
+    `
+      : '';
 
     // Schedule indicator
-    const scheduleIndicator = hasSchedule ? `
+    const scheduleIndicator = hasSchedule
+      ? `
       <span style="color: #f59e0b;" title="Scheduled: ${task.schedule_name || task.schedule.type}${task.next_run ? ' - Next: ' + new Date(task.next_run).toLocaleString() : ''}">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" class="me-1">
           <path d="M12,20A8,8 0 0,0 20,12A8,8 0 0,0 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20M12,2A10,10 0 0,1 22,12A10,10 0 0,1 12,22C6.47,22 2,17.5 2,12A10,10 0 0,1 12,2M12.5,7V12.25L17,14.92L16.25,16.15L11,13V7H12.5Z"/>
         </svg>
         ${task.schedule_name || task.schedule.type}
       </span>
-    ` : '';
+    `
+      : '';
 
     // Agent info (only if task has agents assigned)
-    const agentInfoHTML = hasAgent ? `
+    const agentInfoHTML = hasAgent
+      ? `
       <div class="d-flex gap-3 text-muted small flex-wrap">
         ${task.from ? `<span>From: ${this.escapeHtml(task.from)}</span>` : ''}
         <span>To: ${this.escapeHtml(task.to)}</span>
@@ -68,7 +74,8 @@ export class DashboardTasks {
         ${hasCombinationMode ? `<span style="color: #e67e22;" title="Combination mode: ${task.result_combination_mode}">⚙️ ${this.escapeHtml(task.result_combination_mode)}</span>` : ''}
         ${scheduleIndicator}
       </div>
-    ` : `
+    `
+      : `
       <div class="d-flex gap-3 text-muted small">
         ${task.priority ? `<span>Priority: ${task.priority}</span>` : ''}
         ${task.details ? `<span>${this.escapeHtml(task.details.substring(0, 50))}${task.details.length > 50 ? '...' : ''}</span>` : ''}
@@ -84,11 +91,15 @@ export class DashboardTasks {
            style="position: relative; cursor: pointer; ${isCompleted && !hasAgent ? 'opacity: 0.7;' : ''}"
            onclick="workspaceDashboard.showTaskDetails('${task.id}')"
            onkeydown="if ((event.key === 'Enter' || event.key === ' ') && !event.target.closest('button, a, input, select, textarea, label')) { event.preventDefault(); workspaceDashboard.showTaskDetails('${task.id}'); }">
-        ${hasResult ? `
+        ${
+          hasResult
+            ? `
           <span class="position-absolute top-0 end-0 m-2" title="This task has a result that can be used in other tasks" style="cursor: help;">
             📊
           </span>
-        ` : ''}
+        `
+            : ''
+        }
         <div class="d-flex justify-content-between align-items-start" onclick="event.stopPropagation();">
           <div class="flex-grow-1">
             <div class="d-flex align-items-center gap-2 mb-2">
@@ -97,36 +108,52 @@ export class DashboardTasks {
               <h6 class="mb-0" style="color: var(--text-primary); ${isCompleted && !hasAgent ? 'text-decoration: line-through;' : ''}">${this.escapeHtml(task.description)}</h6>
             </div>
             ${agentInfoHTML}
-            ${task.result ? `
+            ${
+              task.result
+                ? `
               <div class="alert alert-success mt-2 mb-0 py-2" style="font-size: 0.85rem;">
                 <strong>Result:</strong>
-                ${task.result.length > 300 ? `
+                ${
+                  task.result.length > 300
+                    ? `
                   <br>
                   <pre style="white-space: pre-wrap; margin-bottom: 0; font-size: 0.85rem; max-height: 150px; overflow: hidden;">${this.escapeHtml(task.result.substring(0, 300))}...</pre>
                   <button class="btn btn-sm btn-outline-success mt-2" onclick="workspaceDashboard.showTaskDetails('${task.id}')">
                     View Full Result
                   </button>
-                ` : `
+                `
+                    : `
                   <br>
                   <pre style="white-space: pre-wrap; margin-bottom: 0; font-size: 0.85rem;">${this.escapeHtml(task.result)}</pre>
-                `}
+                `
+                }
               </div>
-            ` : ''}
-            ${task.error ? `
+            `
+                : ''
+            }
+            ${
+              task.error
+                ? `
               <div class="alert alert-danger mt-2 mb-0 py-2" style="font-size: 0.85rem;">
                 <strong>Error:</strong> ${this.escapeHtml(task.error)}
               </div>
-            ` : ''}
+            `
+                : ''
+            }
           </div>
           <div class="d-flex align-items-start gap-2">
-            ${canExecute ? `
+            ${
+              canExecute
+                ? `
               <button class="modern-btn modern-btn-primary modern-btn-sm" onclick="workspaceDashboard.executeTask('${task.id}')">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
                   <path d="M8,5.14V19.14L19,12.14L8,5.14Z"/>
                 </svg>
                 Execute Now
               </button>
-            ` : ''}
+            `
+                : ''
+            }
             <button class="modern-btn modern-btn-danger modern-btn-sm" onclick="workspaceDashboard.deleteTask('${task.id}')" title="Delete task">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
@@ -149,12 +176,15 @@ export class DashboardTasks {
       return '<option disabled>No completed tasks with results available</option>';
     }
 
-    return completedTasks.map(task => {
-      const truncatedDesc = task.description.length > 50
-        ? task.description.substring(0, 47) + '...'
-        : task.description;
-      return `<option value="${task.id}">${this.escapeHtml(truncatedDesc)} (${task.from} → ${task.to})</option>`;
-    }).join('');
+    return completedTasks
+      .map(task => {
+        const truncatedDesc =
+          task.description.length > 50
+            ? task.description.substring(0, 47) + '...'
+            : task.description;
+        return `<option value="${task.id}">${this.escapeHtml(truncatedDesc)} (${task.from} → ${task.to})</option>`;
+      })
+      .join('');
   }
 
   showCreateTaskForm() {
@@ -215,11 +245,14 @@ export class DashboardTasks {
 
     // Get selected input task IDs
     const inputTasksSelect = document.getElementById('task-input-tasks');
-    const inputTaskIds = inputTasksSelect ? Array.from(inputTasksSelect.selectedOptions).map(opt => opt.value) : [];
+    const inputTaskIds = inputTasksSelect
+      ? Array.from(inputTasksSelect.selectedOptions).map(opt => opt.value)
+      : [];
 
     // Get combination mode and instruction
     const combinationMode = document.getElementById('task-combination-mode')?.value || 'default';
-    const combinationInstruction = document.getElementById('task-combination-instruction')?.value || '';
+    const combinationInstruction =
+      document.getElementById('task-combination-instruction')?.value || '';
 
     // Get schedule fields
     const scheduleEnabled = document.getElementById('task-schedule-enabled')?.checked || false;
@@ -256,7 +289,8 @@ export class DashboardTasks {
           schedule.day_of_week = parseInt(document.getElementById('task-schedule-day')?.value) || 0;
           break;
         case 'interval': {
-          const intervalValue = parseInt(document.getElementById('task-schedule-interval-value')?.value) || 1;
+          const intervalValue =
+            parseInt(document.getElementById('task-schedule-interval-value')?.value) || 1;
           const intervalUnit = document.getElementById('task-schedule-interval-unit')?.value || 'h';
           // Convert to nanoseconds (Go time.Duration)
           if (intervalUnit === 'm') {
@@ -447,12 +481,16 @@ export class DashboardTasks {
     // Get input tasks if any
     let inputTasksHTML = '';
     if (task.input_task_ids && task.input_task_ids.length > 0) {
-      const inputTasks = task.input_task_ids.map(id => this.data.tasks.find(t => t.id === id)).filter(Boolean);
+      const inputTasks = task.input_task_ids
+        .map(id => this.data.tasks.find(t => t.id === id))
+        .filter(Boolean);
       if (inputTasks.length > 0) {
         inputTasksHTML = `
           <h6>Input Tasks:</h6>
           <div class="mb-3">
-            ${inputTasks.map(it => `
+            ${inputTasks
+              .map(
+                it => `
               <div class="card mb-2" style="background-color: var(--bg-secondary);">
                 <div class="card-body py-2">
                   <div class="d-flex justify-content-between align-items-start">
@@ -465,15 +503,21 @@ export class DashboardTasks {
                       View
                     </button>
                   </div>
-                  ${it.result ? `
+                  ${
+                    it.result
+                      ? `
                     <div class="mt-2">
                       <small class="text-muted">Result:</small>
                       <pre style="font-size: 0.75rem; max-height: 100px; overflow-y: auto; background: var(--surface-color); padding: 8px; border-radius: 4px;">${this.escapeHtml(it.result.substring(0, 200))}${it.result.length > 200 ? '...' : ''}</pre>
                     </div>
-                  ` : ''}
+                  `
+                      : ''
+                  }
                 </div>
               </div>
-            `).join('')}
+            `
+              )
+              .join('')}
           </div>
         `;
       }
@@ -549,13 +593,17 @@ export class DashboardTasks {
             <label class="form-label small">Execute At</label>
             <input type="datetime-local" id="edit-schedule-datetime" class="form-control form-control-sm" value="${task.schedule?.execute_at ? new Date(task.schedule.execute_at).toISOString().slice(0, 16) : ''}">
           </div>
-          ${hasSchedule ? `
+          ${
+            hasSchedule
+              ? `
             <div class="mt-3 small text-muted">
               <div><strong>Execution Count:</strong> ${task.execution_count || 0}</div>
               ${task.next_run ? `<div><strong>Next Run:</strong> ${new Date(task.next_run).toLocaleString()}</div>` : ''}
               ${task.last_run ? `<div><strong>Last Run:</strong> ${new Date(task.last_run).toLocaleString()}</div>` : ''}
             </div>
-          ` : ''}
+          `
+              : ''
+          }
         </div>
       </div>
     `;
@@ -589,7 +637,9 @@ export class DashboardTasks {
 
               ${scheduleHTML}
 
-              ${task.result ? `
+              ${
+                task.result
+                  ? `
                 <h6>Result:</h6>
                 <div class="alert alert-success">
                   <div class="d-flex justify-content-between align-items-center mb-2">
@@ -600,14 +650,20 @@ export class DashboardTasks {
                   </div>
                   <pre style="white-space: pre-wrap; margin-bottom: 0; max-height: 400px; overflow-y: auto;">${this.escapeHtml(task.result)}</pre>
                 </div>
-              ` : ''}
+              `
+                  : ''
+              }
 
-              ${task.error ? `
+              ${
+                task.error
+                  ? `
                 <h6>Error:</h6>
                 <div class="alert alert-danger">
                   <pre style="white-space: pre-wrap; margin-bottom: 0;">${this.escapeHtml(task.error)}</pre>
                 </div>
-              ` : ''}
+              `
+                  : ''
+              }
             </div>
             <div class="modal-footer" style="border-top: 1px solid var(--border-color);">
               <button type="button" class="btn btn-warning" onclick="workspaceDashboard.saveTaskSchedule('${task.id}')">
@@ -616,11 +672,15 @@ export class DashboardTasks {
                 </svg>
                 Save Schedule
               </button>
-              ${task.result && task.status === 'completed' ? `
+              ${
+                task.result && task.status === 'completed'
+                  ? `
                 <button type="button" class="btn btn-primary" onclick="workspaceDashboard.useTaskResultInNewTask('${task.id}')" data-bs-dismiss="modal">
                   ✨ Use Result in New Task
                 </button>
-              ` : ''}
+              `
+                  : ''
+              }
               <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
             </div>
           </div>
@@ -666,7 +726,8 @@ export class DashboardTasks {
         // Add a helpful placeholder text
         const descriptionField = document.getElementById('task-description');
         if (descriptionField && !descriptionField.value) {
-          descriptionField.placeholder = 'Describe how to process the result from the selected task...';
+          descriptionField.placeholder =
+            'Describe how to process the result from the selected task...';
           descriptionField.focus();
         }
       }
@@ -677,9 +738,16 @@ export class DashboardTasks {
     const inputTasksSelect = document.getElementById('task-input-tasks');
     const combinationModeContainer = document.getElementById('combination-mode-container');
     const combinationModeSelect = document.getElementById('task-combination-mode');
-    const combinationInstructionContainer = document.getElementById('combination-instruction-container');
+    const combinationInstructionContainer = document.getElementById(
+      'combination-instruction-container'
+    );
 
-    if (!inputTasksSelect || !combinationModeContainer || !combinationModeSelect || !combinationInstructionContainer) {
+    if (
+      !inputTasksSelect ||
+      !combinationModeContainer ||
+      !combinationModeSelect ||
+      !combinationInstructionContainer
+    ) {
       return;
     }
 
@@ -701,7 +769,8 @@ export class DashboardTasks {
     combinationModeSelect.addEventListener('change', () => {
       const isCustomMode = combinationModeSelect.value === 'custom';
       const hasInputTasks = inputTasksSelect.selectedOptions.length > 0;
-      combinationInstructionContainer.style.display = (isCustomMode && hasInputTasks) ? 'block' : 'none';
+      combinationInstructionContainer.style.display =
+        isCustomMode && hasInputTasks ? 'block' : 'none';
     });
   }
 
@@ -725,7 +794,8 @@ export class DashboardTasks {
     let hintsHTML = '';
 
     // Shortcuts (always available when there are inputs)
-    hintsHTML += '<small class="d-block" style="font-family: monospace; color: #495057;"><code>{previous}</code> or <code>{result}</code> - most recent input</small>';
+    hintsHTML +=
+      '<small class="d-block" style="font-family: monospace; color: #495057;"><code>{previous}</code> or <code>{result}</code> - most recent input</small>';
 
     // Numbered placeholders
     for (let i = 1; i <= inputCount; i++) {
@@ -847,7 +917,8 @@ export class DashboardTasks {
           schedule.day_of_week = parseInt(document.getElementById('edit-schedule-day')?.value) || 0;
           break;
         case 'interval': {
-          const intervalValue = parseInt(document.getElementById('edit-schedule-interval-value')?.value) || 1;
+          const intervalValue =
+            parseInt(document.getElementById('edit-schedule-interval-value')?.value) || 1;
           const intervalUnit = document.getElementById('edit-schedule-interval-unit')?.value || 'h';
           if (intervalUnit === 'm') {
             schedule.interval = intervalValue * 60 * 1000000000;
@@ -894,5 +965,4 @@ export class DashboardTasks {
       this.showToast('Failed to save schedule: ' + error.message, 'error');
     }
   }
-
 }

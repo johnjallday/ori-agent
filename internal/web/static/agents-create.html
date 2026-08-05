@@ -1,684 +1,837 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en" data-bs-theme="light">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Create Agent - Ori Agent</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <script>
-        // Apply theme immediately to prevent flash
-        (function() {
-            const savedTheme = localStorage.getItem('ori-theme') || 'light';
-            document.documentElement.setAttribute('data-bs-theme', savedTheme);
-            if (savedTheme === 'dark') {
-                document.documentElement.classList.add('dark-mode');
-            }
-        })();
+      // Apply theme immediately to prevent flash
+      (function () {
+        const savedTheme = localStorage.getItem('ori-theme') || 'light';
+        document.documentElement.setAttribute('data-bs-theme', savedTheme);
+        if (savedTheme === 'dark') {
+          document.documentElement.classList.add('dark-mode');
+        }
+      })();
     </script>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="/css/variables.css" rel="stylesheet">
-    <link href="/css/layout.css" rel="stylesheet">
-    <link href="/css/components.css" rel="stylesheet">
-    <link rel="stylesheet" href="/css/common.css">
-    <link rel="stylesheet" href="/styles.css">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
+    <link href="/css/variables.css" rel="stylesheet" />
+    <link href="/css/layout.css" rel="stylesheet" />
+    <link href="/css/components.css" rel="stylesheet" />
+    <link rel="stylesheet" href="/css/common.css" />
+    <link rel="stylesheet" href="/styles.css" />
     <style>
-        body {
-            margin: 0;
-            padding: 0;
-            min-height: 100vh;
-            background:
-                radial-gradient(circle at 15% -10%, rgba(29, 78, 216, 0.15), transparent 42%),
-                radial-gradient(circle at 100% 20%, rgba(56, 189, 248, 0.12), transparent 36%),
-                var(--bg-primary);
-        }
+      body {
+        margin: 0;
+        padding: 0;
+        min-height: 100vh;
+        background:
+          radial-gradient(circle at 15% -10%, rgba(29, 78, 216, 0.15), transparent 42%),
+          radial-gradient(circle at 100% 20%, rgba(56, 189, 248, 0.12), transparent 36%), var(--bg-primary);
+      }
 
+      .create-container {
+        max-width: 980px;
+        margin: 0 auto;
+        padding: 24px 20px 36px;
+      }
+
+      .page-header {
+        margin-bottom: 18px;
+        padding: 22px 24px;
+        border-radius: var(--radius-lg);
+        background: linear-gradient(
+          145deg,
+          color-mix(in srgb, var(--bg-primary) 86%, var(--primary-color) 14%),
+          var(--bg-primary)
+        );
+        border: 1px solid color-mix(in srgb, var(--border-color) 78%, var(--primary-color) 22%);
+        box-shadow: 0 14px 30px rgba(0, 0, 0, 0.12);
+        position: relative;
+        overflow: hidden;
+      }
+
+      .page-header::after {
+        content: '';
+        position: absolute;
+        width: 220px;
+        height: 220px;
+        border-radius: 50%;
+        right: -80px;
+        top: -120px;
+        background: radial-gradient(
+          circle,
+          color-mix(in srgb, var(--primary-color) 34%, transparent) 0%,
+          transparent 72%
+        );
+        pointer-events: none;
+      }
+
+      .page-header h1 {
+        font-size: clamp(26px, 4vw, 32px);
+        margin-bottom: 6px;
+        color: var(--text-primary);
+        position: relative;
+        z-index: 1;
+      }
+
+      .page-header p {
+        color: var(--text-secondary);
+        font-size: 14px;
+        margin: 0;
+        position: relative;
+        z-index: 1;
+      }
+
+      .form-card {
+        border: 1px solid color-mix(in srgb, var(--border-color) 86%, var(--primary-color) 14%);
+        border-radius: 16px;
+        padding: 22px 24px;
+        margin-bottom: 16px;
+        box-shadow: 0 8px 26px rgba(0, 0, 0, 0.08);
+      }
+
+      .form-card.modern-card:hover {
+        transform: none;
+        box-shadow: 0 10px 28px rgba(0, 0, 0, 0.1);
+      }
+
+      .form-section-title {
+        font-size: 18px;
+        font-weight: 650;
+        margin-bottom: 16px;
+        padding-bottom: 11px;
+        border-bottom: 1px solid color-mix(in srgb, var(--border-color) 84%, var(--primary-color) 16%);
+        color: var(--text-primary);
+      }
+
+      .form-group {
+        margin-bottom: 18px;
+      }
+
+      .form-label {
+        display: block;
+        font-weight: 520;
+        margin-bottom: 7px;
+        color: var(--text-primary);
+        letter-spacing: 0.1px;
+      }
+
+      .form-label.required::after {
+        content: ' *';
+        color: var(--danger-color);
+      }
+
+      .form-input,
+      .form-select,
+      .form-textarea {
+        width: 100%;
+        padding: 10px 13px;
+        border: 1px solid color-mix(in srgb, var(--border-color) 86%, var(--primary-color) 14%);
+        border-radius: 10px;
+        font-size: 14px;
+        font-family: inherit;
+        background: var(--bg-secondary);
+        color: var(--text-primary);
+        transition:
+          border-color 0.2s ease,
+          box-shadow 0.2s ease,
+          background 0.2s ease;
+      }
+
+      .form-input:focus,
+      .form-select:focus,
+      .form-textarea:focus {
+        outline: none;
+        border-color: var(--primary-color);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary-color) 20%, transparent);
+        background: var(--bg-primary);
+      }
+
+      .form-textarea {
+        resize: vertical;
+        min-height: 110px;
+        line-height: 1.45;
+      }
+
+      input[type='range'].form-input {
+        padding: 0;
+        height: 6px;
+        border: none;
+        border-radius: 999px;
+        background: color-mix(in srgb, var(--bg-tertiary) 75%, var(--primary-color) 25%);
+        appearance: none;
+        -webkit-appearance: none;
+      }
+
+      input[type='range'].form-input::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        background: var(--primary-color);
+        border: 2px solid var(--bg-primary);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+        cursor: pointer;
+      }
+
+      input[type='range'].form-input::-moz-range-thumb {
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        background: var(--primary-color);
+        border: 2px solid var(--bg-primary);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+        cursor: pointer;
+      }
+
+      .form-help {
+        font-size: 12px;
+        color: var(--text-secondary);
+        margin-top: 5px;
+        line-height: 1.4;
+      }
+
+      .form-row {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 16px;
+      }
+
+      .color-picker-group {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+
+      .color-preview {
+        width: 40px;
+        height: 40px;
+        border-radius: 10px;
+        border: 2px solid color-mix(in srgb, var(--border-color) 78%, var(--primary-color) 22%);
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22);
+      }
+
+      .color-input {
+        width: 130px;
+      }
+
+      .tags-input-container {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        padding: 8px;
+        border: 1px solid color-mix(in srgb, var(--border-color) 86%, var(--primary-color) 14%);
+        border-radius: 10px;
+        min-height: 46px;
+        cursor: text;
+        background: var(--bg-secondary);
+        transition:
+          border-color 0.2s ease,
+          box-shadow 0.2s ease;
+      }
+
+      .tags-input-container:focus-within {
+        border-color: var(--primary-color);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary-color) 20%, transparent);
+        background: var(--bg-primary);
+      }
+
+      .tag-item {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 10px;
+        background: linear-gradient(135deg, var(--primary-color), var(--primary-light));
+        color: white;
+        border-radius: 999px;
+        font-size: 12px;
+        box-shadow: 0 3px 10px rgba(0, 0, 0, 0.14);
+      }
+
+      .tag-remove {
+        cursor: pointer;
+        font-weight: 700;
+        opacity: 0.85;
+        line-height: 1;
+      }
+
+      .tag-remove:hover {
+        opacity: 1;
+      }
+
+      .tag-input {
+        border: none;
+        outline: none;
+        padding: 4px;
+        flex: 1;
+        min-width: 120px;
+        font-size: 14px;
+        background: transparent;
+        color: var(--text-primary);
+      }
+
+      .plugin-list {
+        max-height: 320px;
+        overflow-y: auto;
+        border: 1px solid color-mix(in srgb, var(--border-color) 86%, var(--primary-color) 14%);
+        border-radius: 10px;
+        padding: 8px;
+        background: var(--bg-secondary);
+      }
+
+      .plugin-item {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 11px 10px;
+        border-radius: 8px;
+        margin-bottom: 5px;
+        transition:
+          background 0.2s ease,
+          border-color 0.2s ease;
+        border: 1px solid transparent;
+      }
+
+      .plugin-item:hover {
+        background: color-mix(in srgb, var(--bg-tertiary) 80%, var(--primary-color) 20%);
+        border-color: color-mix(in srgb, var(--border-color) 72%, var(--primary-color) 28%);
+      }
+
+      .plugin-checkbox {
+        width: 18px;
+        height: 18px;
+        cursor: pointer;
+        accent-color: var(--primary-color);
+      }
+
+      .plugin-info {
+        flex: 1;
+      }
+
+      .plugin-name {
+        font-weight: 600;
+        margin-bottom: 2px;
+        color: var(--text-primary);
+      }
+
+      .plugin-description {
+        font-size: 12px;
+        color: var(--text-secondary);
+      }
+
+      .form-actions {
+        display: flex;
+        gap: 12px;
+        justify-content: flex-end;
+        align-items: center;
+      }
+
+      .modern-btn:disabled,
+      .btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+        transform: none !important;
+      }
+
+      #createGenerateAutoConfigBtn {
+        margin-top: 2px;
+      }
+
+      .btn-group .btn {
+        border-radius: 10px;
+        border: 1px solid color-mix(in srgb, var(--border-color) 78%, var(--primary-color) 22%);
+        color: var(--text-primary);
+        background: var(--bg-secondary);
+        font-size: 13px;
+        font-weight: 550;
+        padding: 7px 13px;
+      }
+
+      .btn-check:checked + .btn {
+        background: color-mix(in srgb, var(--primary-color) 20%, var(--bg-secondary));
+        border-color: var(--primary-color);
+        color: var(--text-primary);
+        box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary-color) 18%, transparent);
+      }
+
+      .error-message {
+        padding: 12px 14px;
+        background: rgba(239, 68, 68, 0.12);
+        color: #dc2626;
+        border: 1px solid rgba(239, 68, 68, 0.25);
+        border-radius: 10px;
+        margin-bottom: 16px;
+        display: none;
+        font-size: 13px;
+      }
+
+      [data-bs-theme='dark'] .error-message {
+        background: rgba(239, 68, 68, 0.17);
+        color: #fca5a5;
+        border-color: rgba(239, 68, 68, 0.35);
+      }
+
+      .loading-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(2, 6, 23, 0.5);
+        backdrop-filter: blur(6px);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        z-index: 1000;
+      }
+
+      .loading-spinner {
+        background: var(--bg-primary);
+        padding: 24px 30px;
+        border-radius: 14px;
+        text-align: center;
+        border: 1px solid var(--border-color);
+        color: var(--text-primary);
+        box-shadow: 0 16px 40px rgba(0, 0, 0, 0.25);
+      }
+
+      @media (max-width: 900px) {
         .create-container {
-            max-width: 980px;
-            margin: 0 auto;
-            padding: 24px 20px 36px;
+          padding: 18px 14px 28px;
         }
+      }
 
-        .page-header {
-            margin-bottom: 18px;
-            padding: 22px 24px;
-            border-radius: var(--radius-lg);
-            background: linear-gradient(145deg, color-mix(in srgb, var(--bg-primary) 86%, var(--primary-color) 14%), var(--bg-primary));
-            border: 1px solid color-mix(in srgb, var(--border-color) 78%, var(--primary-color) 22%);
-            box-shadow: 0 14px 30px rgba(0, 0, 0, 0.12);
-            position: relative;
-            overflow: hidden;
+      @media (max-width: 1080px) {
+        .create-nav-links {
+          display: none !important;
         }
+      }
 
-        .page-header::after {
-            content: "";
-            position: absolute;
-            width: 220px;
-            height: 220px;
-            border-radius: 50%;
-            right: -80px;
-            top: -120px;
-            background: radial-gradient(circle, color-mix(in srgb, var(--primary-color) 34%, transparent) 0%, transparent 72%);
-            pointer-events: none;
-        }
-
-        .page-header h1 {
-            font-size: clamp(26px, 4vw, 32px);
-            margin-bottom: 6px;
-            color: var(--text-primary);
-            position: relative;
-            z-index: 1;
-        }
-
-        .page-header p {
-            color: var(--text-secondary);
-            font-size: 14px;
-            margin: 0;
-            position: relative;
-            z-index: 1;
+      @media (max-width: 768px) {
+        .form-row {
+          grid-template-columns: 1fr;
         }
 
         .form-card {
-            border: 1px solid color-mix(in srgb, var(--border-color) 86%, var(--primary-color) 14%);
-            border-radius: 16px;
-            padding: 22px 24px;
-            margin-bottom: 16px;
-            box-shadow: 0 8px 26px rgba(0, 0, 0, 0.08);
-        }
-
-        .form-card.modern-card:hover {
-            transform: none;
-            box-shadow: 0 10px 28px rgba(0, 0, 0, 0.1);
-        }
-
-        .form-section-title {
-            font-size: 18px;
-            font-weight: 650;
-            margin-bottom: 16px;
-            padding-bottom: 11px;
-            border-bottom: 1px solid color-mix(in srgb, var(--border-color) 84%, var(--primary-color) 16%);
-            color: var(--text-primary);
-        }
-
-        .form-group {
-            margin-bottom: 18px;
-        }
-
-        .form-label {
-            display: block;
-            font-weight: 520;
-            margin-bottom: 7px;
-            color: var(--text-primary);
-            letter-spacing: 0.1px;
-        }
-
-        .form-label.required::after {
-            content: " *";
-            color: var(--danger-color);
-        }
-
-        .form-input,
-        .form-select,
-        .form-textarea {
-            width: 100%;
-            padding: 10px 13px;
-            border: 1px solid color-mix(in srgb, var(--border-color) 86%, var(--primary-color) 14%);
-            border-radius: 10px;
-            font-size: 14px;
-            font-family: inherit;
-            background: var(--bg-secondary);
-            color: var(--text-primary);
-            transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
-        }
-
-        .form-input:focus,
-        .form-select:focus,
-        .form-textarea:focus {
-            outline: none;
-            border-color: var(--primary-color);
-            box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary-color) 20%, transparent);
-            background: var(--bg-primary);
-        }
-
-        .form-textarea {
-            resize: vertical;
-            min-height: 110px;
-            line-height: 1.45;
-        }
-
-        input[type="range"].form-input {
-            padding: 0;
-            height: 6px;
-            border: none;
-            border-radius: 999px;
-            background: color-mix(in srgb, var(--bg-tertiary) 75%, var(--primary-color) 25%);
-            appearance: none;
-            -webkit-appearance: none;
-        }
-
-        input[type="range"].form-input::-webkit-slider-thumb {
-            -webkit-appearance: none;
-            width: 16px;
-            height: 16px;
-            border-radius: 50%;
-            background: var(--primary-color);
-            border: 2px solid var(--bg-primary);
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
-            cursor: pointer;
-        }
-
-        input[type="range"].form-input::-moz-range-thumb {
-            width: 16px;
-            height: 16px;
-            border-radius: 50%;
-            background: var(--primary-color);
-            border: 2px solid var(--bg-primary);
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
-            cursor: pointer;
-        }
-
-        .form-help {
-            font-size: 12px;
-            color: var(--text-secondary);
-            margin-top: 5px;
-            line-height: 1.4;
-        }
-
-        .form-row {
-            display: grid;
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-            gap: 16px;
-        }
-
-        .color-picker-group {
-            display: flex;
-            gap: 12px;
-            align-items: center;
-            flex-wrap: wrap;
-        }
-
-        .color-preview {
-            width: 40px;
-            height: 40px;
-            border-radius: 10px;
-            border: 2px solid color-mix(in srgb, var(--border-color) 78%, var(--primary-color) 22%);
-            box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22);
-        }
-
-        .color-input {
-            width: 130px;
-        }
-
-        .tags-input-container {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 8px;
-            padding: 8px;
-            border: 1px solid color-mix(in srgb, var(--border-color) 86%, var(--primary-color) 14%);
-            border-radius: 10px;
-            min-height: 46px;
-            cursor: text;
-            background: var(--bg-secondary);
-            transition: border-color 0.2s ease, box-shadow 0.2s ease;
-        }
-
-        .tags-input-container:focus-within {
-            border-color: var(--primary-color);
-            box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary-color) 20%, transparent);
-            background: var(--bg-primary);
-        }
-
-        .tag-item {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            padding: 4px 10px;
-            background: linear-gradient(135deg, var(--primary-color), var(--primary-light));
-            color: white;
-            border-radius: 999px;
-            font-size: 12px;
-            box-shadow: 0 3px 10px rgba(0, 0, 0, 0.14);
-        }
-
-        .tag-remove {
-            cursor: pointer;
-            font-weight: 700;
-            opacity: 0.85;
-            line-height: 1;
-        }
-
-        .tag-remove:hover {
-            opacity: 1;
-        }
-
-        .tag-input {
-            border: none;
-            outline: none;
-            padding: 4px;
-            flex: 1;
-            min-width: 120px;
-            font-size: 14px;
-            background: transparent;
-            color: var(--text-primary);
-        }
-
-        .plugin-list {
-            max-height: 320px;
-            overflow-y: auto;
-            border: 1px solid color-mix(in srgb, var(--border-color) 86%, var(--primary-color) 14%);
-            border-radius: 10px;
-            padding: 8px;
-            background: var(--bg-secondary);
-        }
-
-        .plugin-item {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            padding: 11px 10px;
-            border-radius: 8px;
-            margin-bottom: 5px;
-            transition: background 0.2s ease, border-color 0.2s ease;
-            border: 1px solid transparent;
-        }
-
-        .plugin-item:hover {
-            background: color-mix(in srgb, var(--bg-tertiary) 80%, var(--primary-color) 20%);
-            border-color: color-mix(in srgb, var(--border-color) 72%, var(--primary-color) 28%);
-        }
-
-        .plugin-checkbox {
-            width: 18px;
-            height: 18px;
-            cursor: pointer;
-            accent-color: var(--primary-color);
-        }
-
-        .plugin-info {
-            flex: 1;
-        }
-
-        .plugin-name {
-            font-weight: 600;
-            margin-bottom: 2px;
-            color: var(--text-primary);
-        }
-
-        .plugin-description {
-            font-size: 12px;
-            color: var(--text-secondary);
+          padding: 18px 16px;
         }
 
         .form-actions {
-            display: flex;
-            gap: 12px;
-            justify-content: flex-end;
-            align-items: center;
+          justify-content: stretch;
+          flex-wrap: wrap;
         }
 
-        .modern-btn:disabled,
-        .btn:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-            transform: none !important;
+        .form-actions .modern-btn {
+          flex: 1 1 100%;
+          justify-content: center;
         }
 
-        #createGenerateAutoConfigBtn {
-            margin-top: 2px;
+        .create-model-indicator {
+          display: none !important;
         }
-
-        .btn-group .btn {
-            border-radius: 10px;
-            border: 1px solid color-mix(in srgb, var(--border-color) 78%, var(--primary-color) 22%);
-            color: var(--text-primary);
-            background: var(--bg-secondary);
-            font-size: 13px;
-            font-weight: 550;
-            padding: 7px 13px;
-        }
-
-        .btn-check:checked + .btn {
-            background: color-mix(in srgb, var(--primary-color) 20%, var(--bg-secondary));
-            border-color: var(--primary-color);
-            color: var(--text-primary);
-            box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary-color) 18%, transparent);
-        }
-
-        .error-message {
-            padding: 12px 14px;
-            background: rgba(239, 68, 68, 0.12);
-            color: #dc2626;
-            border: 1px solid rgba(239, 68, 68, 0.25);
-            border-radius: 10px;
-            margin-bottom: 16px;
-            display: none;
-            font-size: 13px;
-        }
-
-        [data-bs-theme="dark"] .error-message {
-            background: rgba(239, 68, 68, 0.17);
-            color: #fca5a5;
-            border-color: rgba(239, 68, 68, 0.35);
-        }
-
-        .loading-overlay {
-            position: fixed;
-            inset: 0;
-            background: rgba(2, 6, 23, 0.5);
-            backdrop-filter: blur(6px);
-            display: none;
-            align-items: center;
-            justify-content: center;
-            z-index: 1000;
-        }
-
-        .loading-spinner {
-            background: var(--bg-primary);
-            padding: 24px 30px;
-            border-radius: 14px;
-            text-align: center;
-            border: 1px solid var(--border-color);
-            color: var(--text-primary);
-            box-shadow: 0 16px 40px rgba(0, 0, 0, 0.25);
-        }
-
-        @media (max-width: 900px) {
-            .create-container {
-                padding: 18px 14px 28px;
-            }
-        }
-
-        @media (max-width: 1080px) {
-            .create-nav-links {
-                display: none !important;
-            }
-        }
-
-        @media (max-width: 768px) {
-            .form-row {
-                grid-template-columns: 1fr;
-            }
-
-            .form-card {
-                padding: 18px 16px;
-            }
-
-            .form-actions {
-                justify-content: stretch;
-                flex-wrap: wrap;
-            }
-
-            .form-actions .modern-btn {
-                flex: 1 1 100%;
-                justify-content: center;
-            }
-
-            .create-model-indicator {
-                display: none !important;
-            }
-        }
+      }
     </style>
-</head>
-<body class="bg-light">
+  </head>
+  <body class="bg-light">
     <!-- Navigation -->
-    <nav class="navbar modern-card glassmorphism" style="border-radius: 0; border: none; border-bottom: 1px solid var(--border-color); backdrop-filter: blur(20px);">
-        <div class="container-fluid">
-            <div class="d-flex align-items-center w-100">
-                <!-- Back button -->
-                <a href="/agents" class="modern-btn modern-btn-secondary me-3" title="Back to Agents">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                        <path d="M20,11V13H8L13.5,18.5L12.08,19.92L4.16,12L12.08,4.08L13.5,5.5L8,11H20Z"/>
-                    </svg>
-                </a>
+    <nav
+      class="navbar modern-card glassmorphism"
+      style="border-radius: 0; border: none; border-bottom: 1px solid var(--border-color); backdrop-filter: blur(20px)"
+    >
+      <div class="container-fluid">
+        <div class="d-flex align-items-center w-100">
+          <!-- Back button -->
+          <a href="/agents" class="modern-btn modern-btn-secondary me-3" title="Back to Agents">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M20,11V13H8L13.5,18.5L12.08,19.92L4.16,12L12.08,4.08L13.5,5.5L8,11H20Z" />
+            </svg>
+          </a>
 
-                <!-- Brand -->
-                <a class="navbar-brand fw-bold text-decoration-none align-items-center" href="/" style="color: var(--primary-color); font-size: 1.25rem; cursor: pointer;">
-                    <svg width="36" height="36" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" class="me-2">
-                        <path d="M 724 410 L 714 405 L 686 404 L 663 397 L 651 386 L 632 352 L 618 339 L 600 329 L 582 324 L 561 324 L 542 329 L 518 344
+          <!-- Brand -->
+          <a
+            class="navbar-brand fw-bold text-decoration-none align-items-center"
+            href="/"
+            style="color: var(--primary-color); font-size: 1.25rem; cursor: pointer"
+          >
+            <svg width="36" height="36" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" class="me-2">
+              <path
+                d="M 724 410 L 714 405 L 686 404 L 663 397 L 651 386 L 632 352 L 618 339 L 600 329 L 582 324 L 561 324 L 542 329 L 518 344
                              L 503 362 L 493 386 L 491 412 L 494 428 L 503 448 L 541 493 L 554 520 L 526 508 L 501 503 L 464 504 L 414 514 L 383 513
                              L 349 498 L 330 480 L 321 467 L 308 498 L 303 523 L 304 562 L 316 601 L 338 635 L 362 658 L 386 674 L 432 693 L 467 700
                              L 527 701 L 570 695 L 607 683 L 638 665 L 659 645 L 675 619 L 682 591 L 680 562 L 674 544 L 658 518 L 626 486 L 621 474
                              L 623 459 L 626 453 L 638 444 L 672 442 L 702 434 L 723 418 Z"
-                          fill="currentColor"/>
-                    </svg>
-                    Ori Agent
-                </a>
+                fill="currentColor"
+              />
+            </svg>
+            Ori Agent
+          </a>
 
-                <!-- Center: Navigation Links -->
-                <div class="create-nav-links d-flex align-items-center gap-2 ms-4">
-                    <a href="/agents" class="nav-link-item" style="color: var(--text-primary); text-decoration: none; padding: 0.5rem 1rem; border-radius: var(--radius-md); transition: background 0.2s; background: var(--bg-tertiary);">Agents</a>
-                    <span style="color: var(--text-muted);">|</span>
-                    <a href="/plugins" class="nav-link-item" style="color: var(--text-primary); text-decoration: none; padding: 0.5rem 1rem; border-radius: var(--radius-md); transition: background 0.2s;">Plugins</a>
-                    <!-- Plugin Pages Dropdown (hidden by default, populated via JS) -->
-                    <span id="pluginPagesDelimiter" style="color: var(--text-muted); display: none;">|</span>
-                    <div id="pluginPagesDropdown" class="dropdown" style="display: none; position: relative; z-index: 10001;">
-                        <button class="nav-link-item dropdown-toggle" type="button" id="pluginPagesBtn" data-bs-toggle="dropdown" aria-expanded="false" style="color: var(--text-primary); background: none; border: none; padding: 0.5rem 1rem; border-radius: var(--radius-md); transition: background 0.2s; cursor: pointer;">
-                            Pages
-                        </button>
-                        <ul class="dropdown-menu dropdown-menu-dark" id="pluginPagesMenu" aria-labelledby="pluginPagesBtn" style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-md); box-shadow: 0 4px 12px rgba(0,0,0,0.3); position: absolute; z-index: 10001;">
-                            <!-- Populated dynamically via JavaScript -->
-                        </ul>
-                    </div>
-                </div>
-
-                <!-- Center-Right: System Model Indicator -->
-                <div class="create-model-indicator d-flex align-items-center ms-auto me-3">
-                    <a href="/settings#system-model" id="systemModelIndicator" class="d-flex align-items-center gap-2 text-decoration-none" style="padding: 0.4rem 0.8rem; border-radius: var(--radius-md); background: var(--bg-secondary); border: 1px solid var(--border-color); transition: all 0.2s;" title="System Model - Click to configure">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="color: var(--text-muted);">
-                            <path d="M12,2A2,2 0 0,1 14,4C14,4.74 13.6,5.39 13,5.73V7H14A7,7 0 0,1 21,14H22A1,1 0 0,1 23,15V18A1,1 0 0,1 22,19H21V20A2,2 0 0,1 19,22H5A2,2 0 0,1 3,20V19H2A1,1 0 0,1 1,18V15A1,1 0 0,1 2,14H3A7,7 0 0,1 10,7H11V5.73C10.4,5.39 10,4.74 10,4A2,2 0 0,1 12,2M7.5,13A2.5,2.5 0 0,0 5,15.5A2.5,2.5 0 0,0 7.5,18A2.5,2.5 0 0,0 10,15.5A2.5,2.5 0 0,0 7.5,13M16.5,13A2.5,2.5 0 0,0 14,15.5A2.5,2.5 0 0,0 16.5,18A2.5,2.5 0 0,0 19,15.5A2.5,2.5 0 0,0 16.5,13Z"/>
-                        </svg>
-                        <span id="systemModelName" style="font-size: 0.85rem; font-weight: 500; color: var(--text-primary);">Loading...</span>
-                        <span id="navSystemModelProvider" class="badge" style="font-size: 0.7rem; padding: 0.2rem 0.4rem; background: var(--bg-tertiary); color: var(--text-muted);"></span>
-                    </a>
-                </div>
-
-                <!-- Right: Theme Toggle -->
-                <div class="d-flex align-items-center gap-3">
-                    <button id="darkModeToggle" class="modern-btn modern-btn-secondary">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
-                            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z"/>
-                        </svg>
-                        <span id="darkModeText">Dark</span>
-                    </button>
-                </div>
+          <!-- Center: Navigation Links -->
+          <div class="create-nav-links d-flex align-items-center gap-2 ms-4">
+            <a
+              href="/agents"
+              class="nav-link-item"
+              style="
+                color: var(--text-primary);
+                text-decoration: none;
+                padding: 0.5rem 1rem;
+                border-radius: var(--radius-md);
+                transition: background 0.2s;
+                background: var(--bg-tertiary);
+              "
+              >Agents</a
+            >
+            <span style="color: var(--text-muted)">|</span>
+            <a
+              href="/plugins"
+              class="nav-link-item"
+              style="
+                color: var(--text-primary);
+                text-decoration: none;
+                padding: 0.5rem 1rem;
+                border-radius: var(--radius-md);
+                transition: background 0.2s;
+              "
+              >Plugins</a
+            >
+            <!-- Plugin Pages Dropdown (hidden by default, populated via JS) -->
+            <span id="pluginPagesDelimiter" style="color: var(--text-muted); display: none">|</span>
+            <div id="pluginPagesDropdown" class="dropdown" style="display: none; position: relative; z-index: 10001">
+              <button
+                class="nav-link-item dropdown-toggle"
+                type="button"
+                id="pluginPagesBtn"
+                data-bs-toggle="dropdown"
+                aria-expanded="false"
+                style="
+                  color: var(--text-primary);
+                  background: none;
+                  border: none;
+                  padding: 0.5rem 1rem;
+                  border-radius: var(--radius-md);
+                  transition: background 0.2s;
+                  cursor: pointer;
+                "
+              >
+                Pages
+              </button>
+              <ul
+                class="dropdown-menu dropdown-menu-dark"
+                id="pluginPagesMenu"
+                aria-labelledby="pluginPagesBtn"
+                style="
+                  background: var(--bg-secondary);
+                  border: 1px solid var(--border-color);
+                  border-radius: var(--radius-md);
+                  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+                  position: absolute;
+                  z-index: 10001;
+                "
+              >
+                <!-- Populated dynamically via JavaScript -->
+              </ul>
             </div>
+          </div>
+
+          <!-- Center-Right: System Model Indicator -->
+          <div class="create-model-indicator d-flex align-items-center ms-auto me-3">
+            <a
+              href="/settings#system-model"
+              id="systemModelIndicator"
+              class="d-flex align-items-center gap-2 text-decoration-none"
+              style="
+                padding: 0.4rem 0.8rem;
+                border-radius: var(--radius-md);
+                background: var(--bg-secondary);
+                border: 1px solid var(--border-color);
+                transition: all 0.2s;
+              "
+              title="System Model - Click to configure"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="color: var(--text-muted)">
+                <path
+                  d="M12,2A2,2 0 0,1 14,4C14,4.74 13.6,5.39 13,5.73V7H14A7,7 0 0,1 21,14H22A1,1 0 0,1 23,15V18A1,1 0 0,1 22,19H21V20A2,2 0 0,1 19,22H5A2,2 0 0,1 3,20V19H2A1,1 0 0,1 1,18V15A1,1 0 0,1 2,14H3A7,7 0 0,1 10,7H11V5.73C10.4,5.39 10,4.74 10,4A2,2 0 0,1 12,2M7.5,13A2.5,2.5 0 0,0 5,15.5A2.5,2.5 0 0,0 7.5,18A2.5,2.5 0 0,0 10,15.5A2.5,2.5 0 0,0 7.5,13M16.5,13A2.5,2.5 0 0,0 14,15.5A2.5,2.5 0 0,0 16.5,18A2.5,2.5 0 0,0 19,15.5A2.5,2.5 0 0,0 16.5,13Z"
+                />
+              </svg>
+              <span id="systemModelName" style="font-size: 0.85rem; font-weight: 500; color: var(--text-primary)"
+                >Loading...</span
+              >
+              <span
+                id="navSystemModelProvider"
+                class="badge"
+                style="
+                  font-size: 0.7rem;
+                  padding: 0.2rem 0.4rem;
+                  background: var(--bg-tertiary);
+                  color: var(--text-muted);
+                "
+              ></span>
+            </a>
+          </div>
+
+          <!-- Right: Theme Toggle -->
+          <div class="d-flex align-items-center gap-3">
+            <button id="darkModeToggle" class="modern-btn modern-btn-secondary">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z" />
+              </svg>
+              <span id="darkModeText">Dark</span>
+            </button>
+          </div>
         </div>
+      </div>
     </nav>
 
     <div class="create-container">
-        <!-- Page Header -->
-        <div class="page-header">
-            <h1>Create New Agent</h1>
-            <p>Configure and customize your AI agent</p>
-        </div>
+      <!-- Page Header -->
+      <div class="page-header">
+        <h1>Create New Agent</h1>
+        <p>Configure and customize your AI agent</p>
+      </div>
 
-        <!-- Error Message -->
-        <div id="errorMessage" class="error-message"></div>
+      <!-- Error Message -->
+      <div id="errorMessage" class="error-message"></div>
 
-        <!-- Configuration Mode -->
-        <div class="form-card modern-card">
-            <h2 class="form-section-title">Configuration Mode</h2>
-            <div class="form-group">
-                <div class="d-flex align-items-center gap-3 mb-2">
-                    <div class="btn-group" role="group" aria-label="Configuration mode toggle">
-                        <input type="radio" class="btn-check" name="createConfigMode" id="createConfigModeManual" value="manual" checked>
-                        <label class="btn btn-outline-secondary" for="createConfigModeManual">Manual</label>
-                        <input type="radio" class="btn-check" name="createConfigMode" id="createConfigModeAuto" value="auto">
-                        <label class="btn btn-outline-secondary" for="createConfigModeAuto">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
-                                <path d="M19,2L14,6.5V17.5L19,13V2M6.5,5C4.55,5 2.45,5.4 1,6.5V21.16C1,21.41 1.25,21.66 1.5,21.66C1.6,21.66 1.65,21.59 1.75,21.59C3.1,20.94 5.05,20.5 6.5,20.5C8.45,20.5 10.55,20.9 12,22C13.35,21.15 15.8,20.5 17.5,20.5C19.15,20.5 20.85,20.81 22.25,21.56C22.35,21.61 22.4,21.59 22.5,21.59C22.75,21.59 23,21.34 23,21.09V6.5C22.4,6.05 21.75,5.75 21,5.5V19C19.9,18.65 18.7,18.5 17.5,18.5C15.8,18.5 13.35,19.15 12,20V6.5C10.55,5.4 8.45,5 6.5,5Z"/>
-                            </svg>
-                            Auto Configure
-                        </label>
-                    </div>
-                    <span id="createAutoConfigStatus" class="badge bg-secondary d-none" style="font-size: 0.75rem;"></span>
-                </div>
-                <div class="form-help">Choose Manual to set all options yourself, or Auto to generate configuration from a description.</div>
-            </div>
-
-            <!-- Auto-config Description (shown when Auto mode selected) -->
-            <div id="createAutoConfigSection" class="d-none">
-                <div class="form-group">
-                    <label class="form-label" for="createAutoConfigDescription">Describe Your Agent</label>
-                    <textarea id="createAutoConfigDescription" class="form-textarea" rows="3"
-                              placeholder="Example: An agent that helps with code reviews, understands multiple programming languages, and can suggest improvements..."></textarea>
-                    <div class="form-help">Be specific about what tasks this agent should handle and what tools it needs.</div>
-                </div>
-                <button type="button" id="createGenerateAutoConfigBtn" class="modern-btn modern-btn-primary mb-3">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
-                        <path d="M12,3L2,12H5V20H19V12H22L12,3M12,8.75A2.25,2.25 0 0,1 14.25,11A2.25,2.25 0 0,1 12,13.25A2.25,2.25 0 0,1 9.75,11A2.25,2.25 0 0,1 12,8.75Z"/>
-                    </svg>
-                    Generate Configuration
-                </button>
-            </div>
-
-            <!-- LLM Not Available Warning -->
-            <div id="createLlmNotAvailableWarning" class="alert alert-warning d-none" style="font-size: 0.875rem;">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1" style="vertical-align: text-bottom;">
-                    <path d="M13,14H11V10H13M13,18H11V16H13M1,21H23L12,2L1,21Z"/>
+      <!-- Configuration Mode -->
+      <div class="form-card modern-card">
+        <h2 class="form-section-title">Configuration Mode</h2>
+        <div class="form-group">
+          <div class="d-flex align-items-center gap-3 mb-2">
+            <div class="btn-group" role="group" aria-label="Configuration mode toggle">
+              <input
+                type="radio"
+                class="btn-check"
+                name="createConfigMode"
+                id="createConfigModeManual"
+                value="manual"
+                checked
+              />
+              <label class="btn btn-outline-secondary" for="createConfigModeManual">Manual</label>
+              <input type="radio" class="btn-check" name="createConfigMode" id="createConfigModeAuto" value="auto" />
+              <label class="btn btn-outline-secondary" for="createConfigModeAuto">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+                  <path
+                    d="M19,2L14,6.5V17.5L19,13V2M6.5,5C4.55,5 2.45,5.4 1,6.5V21.16C1,21.41 1.25,21.66 1.5,21.66C1.6,21.66 1.65,21.59 1.75,21.59C3.1,20.94 5.05,20.5 6.5,20.5C8.45,20.5 10.55,20.9 12,22C13.35,21.15 15.8,20.5 17.5,20.5C19.15,20.5 20.85,20.81 22.25,21.56C22.35,21.61 22.4,21.59 22.5,21.59C22.75,21.59 23,21.34 23,21.09V6.5C22.4,6.05 21.75,5.75 21,5.5V19C19.9,18.65 18.7,18.5 17.5,18.5C15.8,18.5 13.35,19.15 12,20V6.5C10.55,5.4 8.45,5 6.5,5Z"
+                  />
                 </svg>
-                <span id="createLlmWarningMessage">Auto-config requires an LLM provider. Please set up an API key or install Ollama in Settings.</span>
-                <a href="/settings" class="alert-link ms-1" id="createLlmWarningSettingsLink">Go to Settings</a>
+                Auto Configure
+              </label>
             </div>
-
-            <!-- Auto-selected Indicator -->
-            <div id="createAutoSelectedIndicator" class="alert alert-info d-none" style="font-size: 0.875rem;">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1" style="vertical-align: text-bottom;">
-                    <path d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/>
-                </svg>
-                <strong>Auto-configured!</strong> Settings below were generated from your description. You can still adjust them manually.
-            </div>
+            <span id="createAutoConfigStatus" class="badge bg-secondary d-none" style="font-size: 0.75rem"></span>
+          </div>
+          <div class="form-help">
+            Choose Manual to set all options yourself, or Auto to generate configuration from a description.
+          </div>
         </div>
 
-        <!-- Basic Information -->
-        <div class="form-card modern-card">
-            <h2 class="form-section-title">Basic Information</h2>
-
-            <div class="form-group">
-                <label class="form-label required" for="agentName">Agent Name</label>
-                <input type="text" id="agentName" class="form-input" placeholder="e.g., Code Assistant" required>
-                <div class="form-help">Choose a unique, descriptive name for your agent</div>
-            </div>
-
-            <div class="form-group">
-                <label class="form-label" for="agentDescription">Description</label>
-                <textarea id="agentDescription" class="form-textarea" placeholder="Describe what this agent does..."></textarea>
-                <div class="form-help">Optional: Help others understand the agent's purpose</div>
-            </div>
-
-            <div class="form-row">
-                <div class="form-group">
-                    <label class="form-label required" for="agentType">Agent Type</label>
-                    <select id="agentType" class="form-select" required onchange="updateModelOptions()">
-                        <option value="tool-calling">Tool Calling</option>
-                        <option value="general">General Purpose</option>
-                        <option value="research">Research</option>
-                        <option value="orchestration">Orchestration</option>
-                    </select>
-                    <div class="form-help">Defines the agent's interaction style and available models</div>
-                </div>
-
-                <div class="form-group">
-                    <label class="form-label required" for="agentRole">Role</label>
-                    <select id="agentRole" class="form-select" required>
-                        <option value="general">General</option>
-                        <option value="coding">Coding</option>
-                        <option value="research">Research</option>
-                        <option value="creative">Creative</option>
-                        <option value="analysis">Analysis</option>
-                    </select>
-                    <div class="form-help">The agent's primary role or specialty</div>
-                </div>
-            </div>
+        <!-- Auto-config Description (shown when Auto mode selected) -->
+        <div id="createAutoConfigSection" class="d-none">
+          <div class="form-group">
+            <label class="form-label" for="createAutoConfigDescription">Describe Your Agent</label>
+            <textarea
+              id="createAutoConfigDescription"
+              class="form-textarea"
+              rows="3"
+              placeholder="Example: An agent that helps with code reviews, understands multiple programming languages, and can suggest improvements..."
+            ></textarea>
+            <div class="form-help">Be specific about what tasks this agent should handle and what tools it needs.</div>
+          </div>
+          <button type="button" id="createGenerateAutoConfigBtn" class="modern-btn modern-btn-primary mb-3">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
+              <path
+                d="M12,3L2,12H5V20H19V12H22L12,3M12,8.75A2.25,2.25 0 0,1 14.25,11A2.25,2.25 0 0,1 12,13.25A2.25,2.25 0 0,1 9.75,11A2.25,2.25 0 0,1 12,8.75Z"
+              />
+            </svg>
+            Generate Configuration
+          </button>
         </div>
 
-        <!-- LLM Configuration -->
-        <div class="form-card modern-card">
-            <h2 class="form-section-title">LLM Configuration</h2>
-
-            <div class="form-row">
-                <div class="form-group">
-                    <label class="form-label" for="llmProvider">Provider Filter</label>
-                    <select id="llmProvider" class="form-select" onchange="updateModelOptions()">
-                        <option value="">All Providers</option>
-                        <option value="openai">OpenAI</option>
-                        <option value="codex">OpenAI Codex (CLI)</option>
-                        <option value="claude_code">Claude Code (CLI)</option>
-                        <option value="claude">Anthropic Claude</option>
-                        <option value="gemini">Google Gemini</option>
-                        <option value="ollama">Ollama (Local)</option>
-                    </select>
-                    <div class="form-help">Filter models by provider (optional)</div>
-                </div>
-
-                <div class="form-group">
-                    <label class="form-label required" for="llmModel">Model</label>
-                    <select id="llmModel" class="form-select" required>
-                        <option value="">Loading models...</option>
-                    </select>
-                </div>
-            </div>
-
-            <div class="form-group">
-                <label class="form-label" for="temperature">Temperature: <span id="tempValue">1.0</span></label>
-                <input type="range" id="temperature" class="form-input" min="0" max="2" step="0.1" value="1.0"
-                       oninput="document.getElementById('tempValue').textContent = this.value">
-                <div class="form-help">Controls randomness: 0 = focused, 2 = creative</div>
-            </div>
-
-            <div class="form-group">
-                <label class="form-label" for="systemPrompt">System Prompt</label>
-                <textarea id="systemPrompt" class="form-textarea" placeholder="You are a helpful assistant..."></textarea>
-                <div class="form-help">Optional: Custom instructions for the agent's behavior</div>
-            </div>
+        <!-- LLM Not Available Warning -->
+        <div id="createLlmNotAvailableWarning" class="alert alert-warning d-none" style="font-size: 0.875rem">
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="currentColor"
+            class="me-1"
+            style="vertical-align: text-bottom"
+          >
+            <path d="M13,14H11V10H13M13,18H11V16H13M1,21H23L12,2L1,21Z" />
+          </svg>
+          <span id="createLlmWarningMessage"
+            >Auto-config requires an LLM provider. Please set up an API key or install Ollama in Settings.</span
+          >
+          <a href="/settings" class="alert-link ms-1" id="createLlmWarningSettingsLink">Go to Settings</a>
         </div>
 
-        <!-- Appearance -->
-        <div class="form-card modern-card">
-            <h2 class="form-section-title">Appearance</h2>
+        <!-- Auto-selected Indicator -->
+        <div id="createAutoSelectedIndicator" class="alert alert-info d-none" style="font-size: 0.875rem">
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="currentColor"
+            class="me-1"
+            style="vertical-align: text-bottom"
+          >
+            <path d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z" />
+          </svg>
+          <strong>Auto-configured!</strong> Settings below were generated from your description. You can still adjust
+          them manually.
+        </div>
+      </div>
 
-            <div class="form-group">
-                <label class="form-label" for="avatarColor">Avatar Color</label>
-                <div class="color-picker-group">
-                    <div id="colorPreview" class="color-preview" style="background: #1d4ed8;"></div>
-                    <input type="color" id="avatarColor" class="form-input color-input" value="#1d4ed8"
-                           onchange="document.getElementById('colorPreview').style.background = this.value">
-                    <span class="form-help">Choose a color for the agent's avatar</span>
-                </div>
-            </div>
+      <!-- Basic Information -->
+      <div class="form-card modern-card">
+        <h2 class="form-section-title">Basic Information</h2>
 
-            <div class="form-group">
-                <label class="form-label" for="tagsInput">Tags</label>
-                <div id="tagsContainer" class="tags-input-container" onclick="document.getElementById('tagsInput').focus()">
-                    <input type="text" id="tagsInput" class="tag-input" placeholder="Add tags...">
-                </div>
-                <div class="form-help">Press Enter to add tags (e.g., "coding", "creative", "research")</div>
-            </div>
+        <div class="form-group">
+          <label class="form-label required" for="agentName">Agent Name</label>
+          <input type="text" id="agentName" class="form-input" placeholder="e.g., Code Assistant" required />
+          <div class="form-help">Choose a unique, descriptive name for your agent</div>
         </div>
 
-        <!-- Plugins -->
-        <div class="form-card modern-card">
-            <h2 class="form-section-title">Plugins</h2>
-            <div class="form-help" style="margin-bottom: 12px;">Select which plugins this agent can use</div>
-
-            <div id="pluginsList" class="plugin-list">
-                <!-- Populated by JavaScript -->
-            </div>
+        <div class="form-group">
+          <label class="form-label" for="agentDescription">Description</label>
+          <textarea
+            id="agentDescription"
+            class="form-textarea"
+            placeholder="Describe what this agent does..."
+          ></textarea>
+          <div class="form-help">Optional: Help others understand the agent's purpose</div>
         </div>
 
-        <!-- Actions -->
-        <div class="form-card modern-card">
-            <div class="form-actions">
-                <button type="button" class="modern-btn modern-btn-secondary" onclick="window.location.href='/agents'">Cancel</button>
-                <button type="button" class="modern-btn modern-btn-primary" onclick="createAgent()" id="createBtn">Create Agent</button>
-            </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label required" for="agentType">Agent Type</label>
+            <select id="agentType" class="form-select" required onchange="updateModelOptions()">
+              <option value="tool-calling">Tool Calling</option>
+              <option value="general">General Purpose</option>
+              <option value="research">Research</option>
+              <option value="orchestration">Orchestration</option>
+            </select>
+            <div class="form-help">Defines the agent's interaction style and available models</div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label required" for="agentRole">Role</label>
+            <select id="agentRole" class="form-select" required>
+              <option value="general">General</option>
+              <option value="coding">Coding</option>
+              <option value="research">Research</option>
+              <option value="creative">Creative</option>
+              <option value="analysis">Analysis</option>
+            </select>
+            <div class="form-help">The agent's primary role or specialty</div>
+          </div>
         </div>
+      </div>
+
+      <!-- LLM Configuration -->
+      <div class="form-card modern-card">
+        <h2 class="form-section-title">LLM Configuration</h2>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label" for="llmProvider">Provider Filter</label>
+            <select id="llmProvider" class="form-select" onchange="updateModelOptions()">
+              <option value="">All Providers</option>
+              <option value="openai">OpenAI</option>
+              <option value="codex">OpenAI Codex (CLI)</option>
+              <option value="claude_code">Claude Code (CLI)</option>
+              <option value="claude">Anthropic Claude</option>
+              <option value="gemini">Google Gemini</option>
+              <option value="ollama">Ollama (Local)</option>
+            </select>
+            <div class="form-help">Filter models by provider (optional)</div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label required" for="llmModel">Model</label>
+            <select id="llmModel" class="form-select" required>
+              <option value="">Loading models...</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="temperature">Temperature: <span id="tempValue">1.0</span></label>
+          <input
+            type="range"
+            id="temperature"
+            class="form-input"
+            min="0"
+            max="2"
+            step="0.1"
+            value="1.0"
+            oninput="document.getElementById('tempValue').textContent = this.value"
+          />
+          <div class="form-help">Controls randomness: 0 = focused, 2 = creative</div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="systemPrompt">System Prompt</label>
+          <textarea id="systemPrompt" class="form-textarea" placeholder="You are a helpful assistant..."></textarea>
+          <div class="form-help">Optional: Custom instructions for the agent's behavior</div>
+        </div>
+      </div>
+
+      <!-- Appearance -->
+      <div class="form-card modern-card">
+        <h2 class="form-section-title">Appearance</h2>
+
+        <div class="form-group">
+          <label class="form-label" for="avatarColor">Avatar Color</label>
+          <div class="color-picker-group">
+            <div id="colorPreview" class="color-preview" style="background: #1d4ed8"></div>
+            <input
+              type="color"
+              id="avatarColor"
+              class="form-input color-input"
+              value="#1d4ed8"
+              onchange="document.getElementById('colorPreview').style.background = this.value"
+            />
+            <span class="form-help">Choose a color for the agent's avatar</span>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="tagsInput">Tags</label>
+          <div id="tagsContainer" class="tags-input-container" onclick="document.getElementById('tagsInput').focus()">
+            <input type="text" id="tagsInput" class="tag-input" placeholder="Add tags..." />
+          </div>
+          <div class="form-help">Press Enter to add tags (e.g., "coding", "creative", "research")</div>
+        </div>
+      </div>
+
+      <!-- Plugins -->
+      <div class="form-card modern-card">
+        <h2 class="form-section-title">Plugins</h2>
+        <div class="form-help" style="margin-bottom: 12px">Select which plugins this agent can use</div>
+
+        <div id="pluginsList" class="plugin-list">
+          <!-- Populated by JavaScript -->
+        </div>
+      </div>
+
+      <!-- Actions -->
+      <div class="form-card modern-card">
+        <div class="form-actions">
+          <button type="button" class="modern-btn modern-btn-secondary" onclick="window.location.href = '/agents'">
+            Cancel
+          </button>
+          <button type="button" class="modern-btn modern-btn-primary" onclick="createAgent()" id="createBtn">
+            Create Agent
+          </button>
+        </div>
+      </div>
     </div>
 
     <!-- Loading Overlay -->
     <div id="loadingOverlay" class="loading-overlay">
-        <div class="loading-spinner">
-            <p>Creating agent...</p>
-        </div>
+      <div class="loading-spinner">
+        <p>Creating agent...</p>
+      </div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
@@ -686,10 +839,10 @@
     <script src="/js/utils/dom-utils.js"></script>
     <script src="/js/agents-create.js"></script>
     <script>
-        // Initialize theme on page load
-        document.addEventListener('DOMContentLoaded', function() {
-            themeManager.initialize();
-        });
+      // Initialize theme on page load
+      document.addEventListener('DOMContentLoaded', function () {
+        themeManager.initialize();
+      });
     </script>
-</body>
+  </body>
 </html>

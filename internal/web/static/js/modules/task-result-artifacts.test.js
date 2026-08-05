@@ -7,17 +7,14 @@ import {
   buildTaskResultArtifact,
   detectTabularResult,
   parseDelimitedRecords,
-  rowsToCSV,
+  rowsToCSV
 } from './task-result-artifacts.js';
 
 test('parseDelimitedRecords handles quoted commas', () => {
-  assert.deepEqual(
-    parseDelimitedRecords('date,summary\n2026-05-19,"High, tree pollen"'),
-    [
-      ['date', 'summary'],
-      ['2026-05-19', 'High, tree pollen'],
-    ],
-  );
+  assert.deepEqual(parseDelimitedRecords('date,summary\n2026-05-19,"High, tree pollen"'), [
+    ['date', 'summary'],
+    ['2026-05-19', 'High, tree pollen']
+  ]);
 });
 
 test('detectTabularResult parses markdown table output', () => {
@@ -33,9 +30,9 @@ test('detectTabularResult uses task structured output first', () => {
     context: {
       structured_output: {
         location: 'NYC',
-        value: 8,
-      },
-    },
+        value: 8
+      }
+    }
   });
   assert.equal(artifact.source, 'output_schema');
   assert.deepEqual(artifact.columns, ['location', 'value']);
@@ -48,14 +45,14 @@ test('buildRunHistoryArtifact turns repeated runs into CSV rows', () => {
       {
         executed_at: '2026-05-18T12:00:00Z',
         status: 'success',
-        result: '{"location":"NYC","level":"Moderate"}',
+        result: '{"location":"NYC","level":"Moderate"}'
       },
       {
         executed_at: '2026-05-19T12:00:00Z',
         status: 'success',
-        result: '{"location":"NYC","level":"High"}',
-      },
-    ],
+        result: '{"location":"NYC","level":"High"}'
+      }
+    ]
   });
   assert.equal(artifact.source, 'run_history');
   assert.equal(artifact.rows.length, 2);
@@ -68,9 +65,17 @@ test('buildTaskResultArtifact prefers the run-history dataset when runs produced
   const artifact = buildTaskResultArtifact({
     result: '{"location":"NYC","level":"High"}',
     execution_history: [
-      { executed_at: '2026-05-18T12:00:00Z', status: 'success', result: '{"location":"NYC","level":"Moderate"}' },
-      { executed_at: '2026-05-19T12:00:00Z', status: 'success', result: '{"location":"NYC","level":"High"}' },
-    ],
+      {
+        executed_at: '2026-05-18T12:00:00Z',
+        status: 'success',
+        result: '{"location":"NYC","level":"Moderate"}'
+      },
+      {
+        executed_at: '2026-05-19T12:00:00Z',
+        status: 'success',
+        result: '{"location":"NYC","level":"High"}'
+      }
+    ]
   });
   assert.equal(artifact.source, 'run_history');
   assert.ok(artifact.columns.includes('level'));
@@ -84,8 +89,8 @@ test('buildTaskResultArtifact shows the latest result when the history is summar
     result: '{"location":"NYC","level":"High"}',
     execution_history: [
       { executed_at: '2026-05-18T12:00:00Z', status: 'success', summary: 'Moderate' },
-      { executed_at: '2026-05-19T12:00:00Z', status: 'success', summary: 'High' },
-    ],
+      { executed_at: '2026-05-19T12:00:00Z', status: 'success', summary: 'High' }
+    ]
   });
   assert.notEqual(artifact?.source, 'run_history');
   assert.ok(artifact && artifact.columns.includes('level'));

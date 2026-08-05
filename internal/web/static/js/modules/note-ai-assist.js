@@ -12,15 +12,15 @@
 // for the non-module sessions.js to drive.
 
 const ACTIONS = [
-  { id: 'expand',    label: 'Expand',         icon: '+',  defaultMode: 'replace'      },
-  { id: 'summarize', label: 'Summarize',      icon: '≡',  defaultMode: 'replace'      },
-  { id: 'rewrite',   label: 'Rewrite',        icon: '✎',  defaultMode: 'replace'      },
-  { id: 'counter',   label: 'Counter',        icon: '↹',  defaultMode: 'insert-after' },
-  { id: 'cite',      label: 'Cite',           icon: '★',  defaultMode: 'insert-after' },
-  { id: 'ask',       label: 'Ask AI…',        icon: '?',  defaultMode: 'insert-after' },
+  { id: 'expand', label: 'Expand', icon: '+', defaultMode: 'replace' },
+  { id: 'summarize', label: 'Summarize', icon: '≡', defaultMode: 'replace' },
+  { id: 'rewrite', label: 'Rewrite', icon: '✎', defaultMode: 'replace' },
+  { id: 'counter', label: 'Counter', icon: '↹', defaultMode: 'insert-after' },
+  { id: 'cite', label: 'Cite', icon: '★', defaultMode: 'insert-after' },
+  { id: 'ask', label: 'Ask AI…', icon: '?', defaultMode: 'insert-after' },
   // `local: true` — runs entirely client-side (create note + leave a wikilink),
   // so it skips the /api/notes/assist dispatch and the agent-ready gate.
-  { id: 'extract',   label: 'Extract → note', icon: '⤴', local: true                 },
+  { id: 'extract', label: 'Extract → note', icon: '⤴', local: true }
 ];
 
 const MAX_CARDS_PER_NOTE = 20;
@@ -29,20 +29,21 @@ const state = {
   noteId: null,
   workspaceId: null,
   agentId: null,
-  cards: [],            // Suggestion[] for the current note
+  cards: [], // Suggestion[] for the current note
   pendingSelection: null, // { range, text, source: 'textarea'|'preview' }
-  bar: null,             // floating action-bar element
-  rail: null,            // assist rail element
-  cardsContainer: null,  // where cards mount
-  emptyEl: null,         // empty-state element
-  sessionsApi: null,     // bridge back to sessions.js for save / scroll
-  view: 'stack',         // 'stack' | 'review'
+  bar: null, // floating action-bar element
+  rail: null, // assist rail element
+  cardsContainer: null, // where cards mount
+  emptyEl: null, // empty-state element
+  sessionsApi: null, // bridge back to sessions.js for save / scroll
+  view: 'stack' // 'stack' | 'review'
 };
 
 function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, (c) => (
-    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
-  ));
+  return String(s).replace(
+    /[&<>"']/g,
+    c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]
+  );
 }
 
 function uid() {
@@ -130,7 +131,8 @@ function buildActionBar() {
   const bar = state.bar;
   if (!bar) return;
   bar.innerHTML = '';
-  const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.platform || '');
+  const isMac =
+    typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.platform || '');
   const askShortcut = isMac ? '⌘J' : 'Ctrl+J';
   const canExtract = typeof state.sessionsApi?.createNote === 'function';
   for (const action of ACTIONS) {
@@ -200,8 +202,13 @@ function deriveNoteTitle(text) {
     const heading = line.match(/^\s*#{1,6}\s+(.+?)\s*$/);
     if (heading) return heading[1].trim().slice(0, 80);
   }
-  const firstNonEmpty = lines.find((line) => line.trim());
-  return (firstNonEmpty || 'Untitled').replace(/^\s*#+\s*/, '').trim().slice(0, 80) || 'Untitled';
+  const firstNonEmpty = lines.find(line => line.trim());
+  return (
+    (firstNonEmpty || 'Untitled')
+      .replace(/^\s*#+\s*/, '')
+      .trim()
+      .slice(0, 80) || 'Untitled'
+  );
 }
 
 // buildExtractedContent returns `content` with the [range.start, range.end)
@@ -221,9 +228,12 @@ function buildExtractedContent(content, range, linkTitle) {
 async function extractSelectionToNote() {
   const sel = state.pendingSelection;
   const api = state.sessionsApi;
-  if (!sel?.text || !sel.text.trim()
-      || !Number.isInteger(sel.range?.start)
-      || !Number.isInteger(sel.range?.end)) {
+  if (
+    !sel?.text ||
+    !sel.text.trim() ||
+    !Number.isInteger(sel.range?.start) ||
+    !Number.isInteger(sel.range?.end)
+  ) {
     return;
   }
   if (typeof api?.createNote !== 'function') {
@@ -257,7 +267,10 @@ function dispatchAsk(selection, prompt) {
   if (!selection || !selection.text) return false;
   const trimmed = (prompt || '').trim();
   if (!trimmed) return false;
-  if (!isAgentReady()) { notifyAgentMissing(); return false; }
+  if (!isAgentReady()) {
+    notifyAgentMissing();
+    return false;
+  }
   state.pendingSelection = selection;
   dispatch({ action: 'ask', prompt: trimmed });
   return true;
@@ -265,9 +278,7 @@ function dispatchAsk(selection, prompt) {
 
 function hasSourceRange(card) {
   const range = card?.sourceRange;
-  return Number.isInteger(range?.start)
-    && Number.isInteger(range?.end)
-    && range.start <= range.end;
+  return Number.isInteger(range?.start) && Number.isInteger(range?.end) && range.start <= range.end;
 }
 
 // =============================================================================
@@ -290,7 +301,7 @@ function dispatch({ action, prompt = null, parentId = null }) {
     status: 'loading',
     parentId,
     paneId: sel.paneId || '',
-    createdAt: Date.now(),
+    createdAt: Date.now()
   };
 
   // Bound the stack (no eviction policy yet — just hard cap).
@@ -307,9 +318,8 @@ function dispatch({ action, prompt = null, parentId = null }) {
 async function callAssistEndpoint(card) {
   try {
     const noteContent = state.sessionsApi?.getNoteContent?.(card.paneId) || '';
-    const context = noteContent === card.originalText
-      ? ''
-      : noteContent.replace(card.originalText, '⟦SELECTED⟧');
+    const context =
+      noteContent === card.originalText ? '' : noteContent.replace(card.originalText, '⟦SELECTED⟧');
     const history = buildHistoryChain(card);
 
     const resp = await fetch('/api/notes/assist', {
@@ -322,13 +332,18 @@ async function callAssistEndpoint(card) {
         selection: card.originalText,
         context,
         prompt: card.prompt || '',
-        history,
-      }),
+        history
+      })
     });
 
     if (!resp.ok) {
       let message = 'AI assist failed';
-      try { const j = await resp.json(); message = j.error || message; } catch (_) { /* ignore */ }
+      try {
+        const j = await resp.json();
+        message = j.error || message;
+      } catch (_) {
+        /* ignore */
+      }
       throw new Error(message);
     }
     const data = await resp.json();
@@ -349,7 +364,7 @@ function buildHistoryChain(card) {
     if (!parent || parent.status !== 'ready') break;
     chain.unshift({
       prompt: parent.prompt || ACTIONS.find(a => a.id === parent.action)?.label || '',
-      output: parent.output,
+      output: parent.output
     });
     cursor = parent.parentId;
   }
@@ -366,8 +381,8 @@ function render() {
   // The rail hosts both the Ask AI panel and the suggestion cards. Hide it
   // only when *both* are inactive — otherwise the user loses the panel they
   // just opened simply because no suggestions have arrived yet.
-  const panelOpen = typeof window !== 'undefined'
-    && window.NoteEditor?.isGeneratePanelOpen?.() === true;
+  const panelOpen =
+    typeof window !== 'undefined' && window.NoteEditor?.isGeneratePanelOpen?.() === true;
 
   if (state.cards.length === 0) {
     state.view = 'stack';
@@ -410,7 +425,10 @@ function renderCard(card) {
   if (card.staged) el.classList.add('is-staged');
 
   const label = ACTIONS.find(a => a.id === card.action)?.label || card.action;
-  const ts = new Date(card.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const ts = new Date(card.createdAt).toLocaleTimeString([], {
+    hour: '2-digit',
+    minute: '2-digit'
+  });
 
   el.innerHTML = `
     <header class="note-ai-card-header">
@@ -433,10 +451,13 @@ function renderCard(card) {
   // Output region
   const outputEl = el.querySelector('[data-role="output"]');
   if (card.status === 'loading') {
-    outputEl.innerHTML = '<div class="note-ai-card-loading"><span class="spinner-border spinner-border-sm me-2"></span>Working…</div>';
+    outputEl.innerHTML =
+      '<div class="note-ai-card-loading"><span class="spinner-border spinner-border-sm me-2"></span>Working…</div>';
   } else if (card.status === 'error') {
     outputEl.innerHTML = `<div class="note-ai-card-error">${escapeHtml(card.errorMessage || 'Failed')}<button type="button" class="note-ai-card-retry">Retry</button></div>`;
-    outputEl.querySelector('.note-ai-card-retry')?.addEventListener('click', () => retryCard(card.id));
+    outputEl
+      .querySelector('.note-ai-card-retry')
+      ?.addEventListener('click', () => retryCard(card.id));
   } else if (card.status === 'committed') {
     outputEl.innerHTML = `<div class="note-ai-card-committed">Committed.</div>`;
   } else {
@@ -461,10 +482,16 @@ function renderCard(card) {
       <button type="button" class="note-ai-card-quick" data-role="quick" ${canCommit ? '' : 'disabled'} title="${canCommit ? 'Stage and commit this single suggestion now' : 'This selection could not be mapped to note source'}">Quick commit</button>
     `;
     controls.querySelector('[data-role="mode"]').value = card.mode;
-    controls.querySelector('[data-role="mode"]').addEventListener('change', (e) => updateCardMode(card.id, e.target.value));
-    controls.querySelector('[data-role="stage"]').addEventListener('click', () => toggleStaged(card.id));
+    controls
+      .querySelector('[data-role="mode"]')
+      .addEventListener('change', e => updateCardMode(card.id, e.target.value));
+    controls
+      .querySelector('[data-role="stage"]')
+      .addEventListener('click', () => toggleStaged(card.id));
     controls.querySelector('[data-role="copy"]').addEventListener('click', () => copyCard(card.id));
-    controls.querySelector('[data-role="quick"]').addEventListener('click', () => quickCommit(card.id));
+    controls
+      .querySelector('[data-role="quick"]')
+      .addEventListener('click', () => quickCommit(card.id));
   } else {
     controls.style.display = 'none';
   }
@@ -482,8 +509,11 @@ function renderCard(card) {
       refineInput.value = '';
       addRefinement(card.id, v);
     };
-    refineInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') { e.preventDefault(); submitRefine(); }
+    refineInput.addEventListener('keydown', e => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        submitRefine();
+      }
     });
     refineBtn.addEventListener('click', submitRefine);
   }
@@ -499,7 +529,8 @@ function updateStatusBar() {
   if (!bar) {
     bar = document.createElement('div');
     bar.className = 'note-ai-status-bar';
-    bar.innerHTML = '<span data-role="count"></span><button type="button" class="note-ai-review-btn" disabled>Review &amp; Commit</button>';
+    bar.innerHTML =
+      '<span data-role="count"></span><button type="button" class="note-ai-review-btn" disabled>Review &amp; Commit</button>';
     bar.querySelector('.note-ai-review-btn').addEventListener('click', () => openReviewPane());
     state.rail.appendChild(bar);
   }
@@ -507,16 +538,19 @@ function updateStatusBar() {
     stagedCount === 0 ? 'No staged changes' : `${stagedCount} staged`;
   const reviewBtn = bar.querySelector('.note-ai-review-btn');
   reviewBtn.disabled = stagedCount === 0 || state.view === 'review';
-  reviewBtn.title = stagedCount === 0
-    ? 'Stage a suggestion to enable Review & Commit'
-    : 'Review staged changes and commit them to the note';
+  reviewBtn.title =
+    stagedCount === 0
+      ? 'Stage a suggestion to enable Review & Commit'
+      : 'Review staged changes and commit them to the note';
 }
 
 // =============================================================================
 // Card actions
 // =============================================================================
 
-function findCard(id) { return state.cards.find(c => c.id === id) || null; }
+function findCard(id) {
+  return state.cards.find(c => c.id === id) || null;
+}
 
 function updateCardMode(id, mode) {
   const card = findCard(id);
@@ -528,7 +562,10 @@ function toggleStaged(id) {
   const card = findCard(id);
   if (!card || card.status !== 'ready') return;
   if (!hasSourceRange(card)) {
-    state.sessionsApi?.showToast?.('Could not map that selection to the note source. Copy the suggestion instead.', 'warning');
+    state.sessionsApi?.showToast?.(
+      'Could not map that selection to the note source. Copy the suggestion instead.',
+      'warning'
+    );
     return;
   }
   card.staged = !card.staged;
@@ -541,7 +578,7 @@ function copyCard(id) {
   if (navigator.clipboard?.writeText) {
     navigator.clipboard.writeText(card.output).then(
       () => state.sessionsApi?.showToast?.('Suggestion copied', 'success'),
-      () => state.sessionsApi?.showToast?.('Copy failed', 'error'),
+      () => state.sessionsApi?.showToast?.('Copy failed', 'error')
     );
   }
 }
@@ -608,7 +645,9 @@ function renderReviewPane() {
   if (staging) {
     for (const [paneId, cards] of cardsByPane) {
       const paneHunks = staging.projectHunks(cards);
-      paneHunks.forEach((h) => { h.paneId = paneId; });
+      paneHunks.forEach(h => {
+        h.paneId = paneId;
+      });
       hunks.push(...paneHunks);
     }
   }
@@ -653,9 +692,8 @@ function renderReviewHunk(hunk, allHunks) {
 
   const label = ACTIONS.find(a => a.id === hunk.action)?.label || hunk.action;
   const lineNo = lineNumberFor(hunk.sourceRange.start, hunk.paneId);
-  const modeLabel = hunk.mode === 'insert-before' ? 'before' :
-                    hunk.mode === 'insert-after'  ? 'after'  :
-                    'replace';
+  const modeLabel =
+    hunk.mode === 'insert-before' ? 'before' : hunk.mode === 'insert-after' ? 'after' : 'replace';
   const paneLabel = hunk.paneId === 'secondary' ? ' · pane 2' : '';
 
   const head = document.createElement('header');
@@ -671,11 +709,13 @@ function renderReviewHunk(hunk, allHunks) {
   const lines = staging ? staging.diffLines(hunk.originalText, hunk.output, hunk.mode) : [];
   const diff = document.createElement('pre');
   diff.className = 'note-ai-review-diff';
-  diff.innerHTML = lines.map(l => {
-    const cls = `note-ai-diff-${l.kind}`;
-    const prefix = l.kind === 'added' ? '+ ' : l.kind === 'removed' ? '- ' : '  ';
-    return `<span class="${cls}">${escapeHtml(prefix + l.text)}</span>`;
-  }).join('\n');
+  diff.innerHTML = lines
+    .map(l => {
+      const cls = `note-ai-diff-${l.kind}`;
+      const prefix = l.kind === 'added' ? '+ ' : l.kind === 'removed' ? '- ' : '  ';
+      return `<span class="${cls}">${escapeHtml(prefix + l.text)}</span>`;
+    })
+    .join('\n');
   el.appendChild(diff);
 
   if (hunk.conflictsWith.length > 0) {
@@ -684,7 +724,10 @@ function renderReviewHunk(hunk, allHunks) {
     const otherLabels = hunk.conflictsWith
       .map(id => allHunks.find(h => h.id === id))
       .filter(Boolean)
-      .map(h => `${ACTIONS.find(a => a.id === h.action)?.label || h.action} (line ${lineNumberFor(h.sourceRange.start, h.paneId)})`)
+      .map(
+        h =>
+          `${ACTIONS.find(a => a.id === h.action)?.label || h.action} (line ${lineNumberFor(h.sourceRange.start, h.paneId)})`
+      )
       .join(', ');
     warn.textContent = `⚠ Conflicts with ${otherLabels}. Unstage one to commit.`;
     el.appendChild(warn);
@@ -743,7 +786,10 @@ function commit() {
     state.sessionsApi?.scheduleAutoSave?.(paneId);
     allApplied.push(...result.applied);
   }
-  state.sessionsApi?.showToast?.(`Committed ${allApplied.length} change${allApplied.length === 1 ? '' : 's'} — ⌘Z to undo.`, 'success');
+  state.sessionsApi?.showToast?.(
+    `Committed ${allApplied.length} change${allApplied.length === 1 ? '' : 's'} — ⌘Z to undo.`,
+    'success'
+  );
 
   // Mark committed cards and remove them from the stack after a short flash.
   const committedIds = new Set(allApplied);
@@ -765,7 +811,10 @@ function quickCommit(cardId) {
   const card = findCard(cardId);
   if (!card || card.status !== 'ready') return;
   if (!hasSourceRange(card)) {
-    state.sessionsApi?.showToast?.('Could not map that selection to the note source. Copy the suggestion instead.', 'warning');
+    state.sessionsApi?.showToast?.(
+      'Could not map that selection to the note source. Copy the suggestion instead.',
+      'warning'
+    );
     return;
   }
 
@@ -773,7 +822,7 @@ function quickCommit(cardId) {
   // then ensure no other staged state is mutated.
   const previouslyStaged = state.cards.filter(c => c.staged).map(c => c.id);
   // Unstage everything else so only this card commits.
-  for (const c of state.cards) c.staged = (c.id === cardId);
+  for (const c of state.cards) c.staged = c.id === cardId;
   commit();
   // Restore other staged flags (commit cleared them via committed status,
   // but those didn't apply since they weren't staged when commit ran).
@@ -791,7 +840,7 @@ function addRefinement(parentId, refinementPrompt) {
   state.pendingSelection = {
     text: parent.originalText,
     range: parent.sourceRange,
-    paneId: parent.paneId || '',
+    paneId: parent.paneId || ''
   };
   dispatch({ action: 'ask', prompt: refinementPrompt, parentId });
 }
@@ -811,7 +860,7 @@ const api = {
   render,
   extractSelectionToNote,
   // Expose for tasks 5.0 / debugging.
-  _state: state,
+  _state: state
 };
 
 if (typeof window !== 'undefined') {
@@ -829,5 +878,5 @@ export {
   render,
   deriveNoteTitle,
   buildExtractedContent,
-  extractSelectionToNote,
+  extractSelectionToNote
 };

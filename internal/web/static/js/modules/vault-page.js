@@ -1,4 +1,4 @@
-(function() {
+(function () {
   const DEFAULT_VAULT_ID = '';
   const VAULT_STORAGE_KEY = 'ori-selected-vault-id';
   const ROOT_FOLDER_PATH = 'vault';
@@ -134,7 +134,9 @@
   const emailAccountConnectPanelEl = document.getElementById('vaultEmailAccountConnectPanel');
   const emailAccountConnectBtn = document.getElementById('vaultConnectEmailAccountBtn');
   const emailAccountOauthHelpEl = document.getElementById('vaultEmailOauthHelp');
-  const emailAccountOauthProviderStatusEl = document.getElementById('vaultEmailOauthProviderStatus');
+  const emailAccountOauthProviderStatusEl = document.getElementById(
+    'vaultEmailOauthProviderStatus'
+  );
   const emailAccountCredentialHelpEl = document.getElementById('vaultEmailAccountCredentialHelp');
   const emailAccountOauthAdvancedEl = document.getElementById('vaultEmailAccountOauthAdvanced');
   const _emailAccountOauthFields = document.getElementById('vaultEmailAccountOauthFields');
@@ -145,7 +147,9 @@
   const emailAccountClientSecretInput = document.getElementById('vaultEmailAccountClientSecret');
   const emailAccountTokenEndpointInput = document.getElementById('vaultEmailAccountTokenEndpoint');
   const emailAccountPasswordInput = document.getElementById('vaultEmailAccountPassword');
-  const emailAccountCredentialStatusEl = document.getElementById('vaultEmailAccountCredentialStatus');
+  const emailAccountCredentialStatusEl = document.getElementById(
+    'vaultEmailAccountCredentialStatus'
+  );
   const saveEmailAccountBtn = document.getElementById('vaultSaveEmailAccountBtn');
   const resetEmailAccountBtn = document.getElementById('vaultResetEmailAccountBtn');
   const deleteEmailAccountBtn = document.getElementById('vaultDeleteEmailAccountBtn');
@@ -173,21 +177,17 @@
   const importVaultNameInput = document.getElementById('vaultImportVaultName');
   const importVaultDescriptionInput = document.getElementById('vaultImportVaultDescription');
   const importVaultPasswordInput = document.getElementById('vaultImportVaultPassword');
-  const importConfirmVaultPasswordInput = document.getElementById('vaultImportConfirmVaultPassword');
+  const importConfirmVaultPasswordInput = document.getElementById(
+    'vaultImportConfirmVaultPassword'
+  );
   const importRestoreGrantsInput = document.getElementById('vaultImportRestoreGrants');
   const importBtn = document.getElementById('vaultImportBtn');
   const importCancelBtn = document.getElementById('vaultImportCancelBtn');
 
   function mountPageDialogOverlays() {
-    const overlays = [
-      unlockOverlay,
-      createOverlay,
-      exportOverlay,
-      importOverlay,
-      editorOverlay
-    ];
+    const overlays = [unlockOverlay, createOverlay, exportOverlay, importOverlay, editorOverlay];
 
-    overlays.forEach((overlay) => {
+    overlays.forEach(overlay => {
       if (overlay && overlay.parentElement !== document.body) {
         document.body.appendChild(overlay);
       }
@@ -292,17 +292,20 @@
   }
 
   function currentVault() {
-    return vaults.find((item) => item.id === currentVaultID()) || null;
+    return vaults.find(item => item.id === currentVaultID()) || null;
   }
 
   function syncDialogBodyState() {
-    document.body.classList.toggle('vault-page-dialog-open', Boolean(
-      unlockDialogOpen
-      || createDialogOpen
-      || exportDialogOpen
-      || importDialogOpen
-      || editorDialogOpen
-    ));
+    document.body.classList.toggle(
+      'vault-page-dialog-open',
+      Boolean(
+        unlockDialogOpen ||
+        createDialogOpen ||
+        exportDialogOpen ||
+        importDialogOpen ||
+        editorDialogOpen
+      )
+    );
   }
 
   function vaultRecordCount(vaultItem) {
@@ -370,9 +373,11 @@
 
     if (createStoragePreviewEl) {
       if (mode !== 'custom_dir') {
-        createStoragePreviewEl.textContent = 'Ori will store this vault as a managed vault folder inside the configured Vault Directory.';
+        createStoragePreviewEl.textContent =
+          'Ori will store this vault as a managed vault folder inside the configured Vault Directory.';
       } else if (!customDirectory) {
-        createStoragePreviewEl.textContent = 'Choose a folder. Ori will create a vault package such as <new-vault-id>.orivault/vault.db inside it.';
+        createStoragePreviewEl.textContent =
+          'Choose a folder. Ori will create a vault package such as <new-vault-id>.orivault/vault.db inside it.';
       } else {
         createStoragePreviewEl.textContent = `Ori will create ${customDirectory}/<new-vault-id>.orivault/vault.db and keep that package structure stable for relink and recovery flows.`;
       }
@@ -448,7 +453,7 @@
   function parseTags(rawValue) {
     return String(rawValue || '')
       .split(',')
-      .map((tag) => tag.trim())
+      .map(tag => tag.trim())
       .filter(Boolean);
   }
 
@@ -483,7 +488,11 @@
   }
 
   function attachmentKindForMimeType(mimeType) {
-    return String(mimeType || '').toLowerCase().startsWith('image/') ? 'image' : 'file';
+    return String(mimeType || '')
+      .toLowerCase()
+      .startsWith('image/')
+      ? 'image'
+      : 'file';
   }
 
   function attachmentIcon(kind) {
@@ -515,8 +524,12 @@
       return null;
     }
 
-    const mimeType = String(item.mime_type || item.mimeType || file?.type || 'application/octet-stream').trim() || 'application/octet-stream';
-    const sizeBytes = Number(item.size_bytes ?? item.size ?? file?.size ?? base64ByteLength(contentBase64));
+    const mimeType =
+      String(item.mime_type || item.mimeType || file?.type || 'application/octet-stream').trim() ||
+      'application/octet-stream';
+    const sizeBytes = Number(
+      item.size_bytes ?? item.size ?? file?.size ?? base64ByteLength(contentBase64)
+    );
 
     return {
       id: String(item.id || generateAttachmentID()),
@@ -555,7 +568,7 @@
     }
 
     const next = {};
-    Object.keys(payload).forEach((key) => {
+    Object.keys(payload).forEach(key => {
       if (key !== 'attachments') {
         next[key] = payload[key];
       }
@@ -571,7 +584,7 @@
     const next = payloadWithoutAttachments(payload);
     const attachments = entryAttachmentsFromPayload(payload);
     if (attachments.length) {
-      next.attachments = attachments.map((item) => ({
+      next.attachments = attachments.map(item => ({
         id: item.id,
         name: item.name,
         mime_type: item.mime_type,
@@ -588,13 +601,17 @@
       return downloadURL;
     }
 
-    const mimeType = String(attachment?.mime_type || 'application/octet-stream').trim() || 'application/octet-stream';
+    const mimeType =
+      String(attachment?.mime_type || 'application/octet-stream').trim() ||
+      'application/octet-stream';
     const contentBase64 = String(attachment?.content_base64 || '').trim();
     return contentBase64 ? `data:${mimeType};base64,${contentBase64}` : '';
   }
 
   function base64ByteLength(value) {
-    const normalized = String(value || '').trim().replace(/\s+/g, '');
+    const normalized = String(value || '')
+      .trim()
+      .replace(/\s+/g, '');
     if (!normalized) {
       return 0;
     }
@@ -664,12 +681,14 @@
     }
 
     if (!entryAttachments.length) {
-      entryAttachmentsList.innerHTML = '<div class="vault-modal-attachments-empty">No files or images attached yet.</div>';
+      entryAttachmentsList.innerHTML =
+        '<div class="vault-modal-attachments-empty">No files or images attached yet.</div>';
       return;
     }
 
-    entryAttachmentsList.innerHTML = entryAttachments.map((attachment) => {
-      return `
+    entryAttachmentsList.innerHTML = entryAttachments
+      .map(attachment => {
+        return `
         <div class="vault-modal-attachment-item">
           <div class="vault-modal-attachment-item-main">
             <span class="vault-modal-attachment-icon">${attachmentIcon(attachment.kind)}</span>
@@ -681,7 +700,8 @@
           <button type="button" class="modern-btn modern-btn-secondary vault-modal-attachment-remove" data-action="remove-entry-attachment" data-attachment-id="${escapeHTML(attachment.id)}">Remove</button>
         </div>
       `;
-    }).join('');
+      })
+      .join('');
   }
 
   async function addEntryAttachments(fileList) {
@@ -694,7 +714,10 @@
     const rejected = [];
 
     if (nextAttachments.length >= MAX_ENTRY_ATTACHMENTS) {
-      showInlineAlert(`You can attach up to ${String(MAX_ENTRY_ATTACHMENTS)} files per vault entry.`, 'warning');
+      showInlineAlert(
+        `You can attach up to ${String(MAX_ENTRY_ATTACHMENTS)} files per vault entry.`,
+        'warning'
+      );
       return;
     }
 
@@ -728,7 +751,10 @@
     }
 
     if (rejected.length) {
-      showInlineAlert(`Some attachments were skipped. Entries support up to ${String(MAX_ENTRY_ATTACHMENTS)} files and ${formatBytes(MAX_ENTRY_ATTACHMENT_BYTES)} total.`, 'warning');
+      showInlineAlert(
+        `Some attachments were skipped. Entries support up to ${String(MAX_ENTRY_ATTACHMENTS)} files and ${formatBytes(MAX_ENTRY_ATTACHMENT_BYTES)} total.`,
+        'warning'
+      );
       return;
     }
 
@@ -736,7 +762,7 @@
   }
 
   function removeEntryAttachment(attachmentID) {
-    entryAttachments = entryAttachments.filter((item) => item.id !== attachmentID);
+    entryAttachments = entryAttachments.filter(item => item.id !== attachmentID);
     renderEntryAttachments();
   }
 
@@ -793,9 +819,12 @@
 
   function isDefaultPayloadTemplate(raw) {
     const normalized = String(raw || '').trim();
-    return !normalized || ['personal_note', 'email_snippet', 'secret'].some((type) => {
-      return normalized === defaultPayloadValue(type);
-    });
+    return (
+      !normalized ||
+      ['personal_note', 'email_snippet', 'secret'].some(type => {
+        return normalized === defaultPayloadValue(type);
+      })
+    );
   }
 
   function entryLabelPlaceholder(type) {
@@ -855,7 +884,7 @@
     }
 
     const key = simplePayloadKey(type);
-    const dataKeys = keys.filter((item) => item !== 'attachments');
+    const dataKeys = keys.filter(item => item !== 'attachments');
 
     if (!dataKeys.length) {
       return true;
@@ -928,9 +957,8 @@
     }
 
     const link = document.createElement('a');
-    const objectURL = normalized.file instanceof File
-      ? window.URL.createObjectURL(normalized.file)
-      : '';
+    const objectURL =
+      normalized.file instanceof File ? window.URL.createObjectURL(normalized.file) : '';
     link.href = objectURL || attachmentDataURL(normalized);
     link.download = normalized.name || 'vault-attachment';
     link.style.display = 'none';
@@ -957,7 +985,11 @@
   }
 
   function normalizeRecordType(type) {
-    return String(type || '').trim().toLowerCase() || 'personal_note';
+    return (
+      String(type || '')
+        .trim()
+        .toLowerCase() || 'personal_note'
+    );
   }
 
   function recordTypeLabel(type) {
@@ -966,7 +998,10 @@
   }
 
   function normalizeEmailProvider(provider) {
-    return String(provider || '').trim().toLowerCase().replaceAll('-', '_');
+    return String(provider || '')
+      .trim()
+      .toLowerCase()
+      .replaceAll('-', '_');
   }
 
   function emailProviderLabel(provider) {
@@ -975,7 +1010,9 @@
   }
 
   function normalizeEmailAuthType(authType) {
-    return String(authType || '').trim().toLowerCase();
+    return String(authType || '')
+      .trim()
+      .toLowerCase();
   }
 
   function emailAuthTypeLabel(authType) {
@@ -1007,18 +1044,22 @@
         ? `Checking ${oauthProviderButtonLabel(normalized)} OAuth availability...`
         : 'This provider uses manual credentials or advanced token import.';
 
-    return emailOAuthProviders[normalized] || {
-      provider: normalized,
-      label: oauthProviderButtonLabel(normalized),
-      connect_supported: isNativeOAuthProvider(normalized),
-      enabled: false,
-      reason: fallbackReason
-    };
+    return (
+      emailOAuthProviders[normalized] || {
+        provider: normalized,
+        label: oauthProviderButtonLabel(normalized),
+        connect_supported: isNativeOAuthProvider(normalized),
+        enabled: false,
+        reason: fallbackReason
+      }
+    );
   }
 
   function currentEmailOAuthConnectMode() {
-    return normalizeEmailAuthType(emailAccountAuthTypeInput?.value) === 'oauth2'
-      && isNativeOAuthProvider(emailAccountProviderInput?.value);
+    return (
+      normalizeEmailAuthType(emailAccountAuthTypeInput?.value) === 'oauth2' &&
+      isNativeOAuthProvider(emailAccountProviderInput?.value)
+    );
   }
 
   function emailAccountHasStoredConnection(account) {
@@ -1072,11 +1113,9 @@
     const rawSegments = String(value || '')
       .replaceAll('\\', '/')
       .split('/');
-    const segments = rawSegments
-      .map((segment) => segment.trim())
-      .filter(Boolean);
+    const segments = rawSegments.map(segment => segment.trim()).filter(Boolean);
 
-    if (segments.some((segment) => segment === '.' || segment === '..')) {
+    if (segments.some(segment => segment === '.' || segment === '..')) {
       throw new Error('Folder paths cannot contain "." or "..".');
     }
 
@@ -1217,9 +1256,10 @@
     const mode = importModeInput?.value === 'current' && canImportCurrent ? 'current' : 'new';
     if (importCurrentHint) {
       importCurrentHint.hidden = mode !== 'current';
-      importCurrentHint.textContent = mode === 'current'
-        ? `The selected vault "${vaultDisplayLabel(currentVault())}" is unlocked and ready for imported records.`
-        : 'The selected vault must already be unlocked before Ori can import records into it.';
+      importCurrentHint.textContent =
+        mode === 'current'
+          ? `The selected vault "${vaultDisplayLabel(currentVault())}" is unlocked and ready for imported records.`
+          : 'The selected vault must already be unlocked before Ori can import records into it.';
     }
 
     if (importCreateFields) {
@@ -1264,9 +1304,10 @@
 
     if (options.restoreFocus !== false) {
       window.requestAnimationFrame(() => {
-        const focusTarget = folderVaultTabsEl?.querySelector('.vault-modal-folder-vault-tab-icon')
-          || folderVaultTabsEl?.querySelector('.vault-modal-folder-vault-tab.is-active')
-          || explorerAddBtn;
+        const focusTarget =
+          folderVaultTabsEl?.querySelector('.vault-modal-folder-vault-tab-icon') ||
+          folderVaultTabsEl?.querySelector('.vault-modal-folder-vault-tab.is-active') ||
+          explorerAddBtn;
         focusTarget?.focus();
       });
     }
@@ -1440,13 +1481,15 @@
     syncImportControls();
 
     const currentVaultName = vaultDisplayLabel(currentVault());
-    const mode = importModeInput?.value === 'current' && canImportIntoCurrentVault() ? 'current' : 'new';
+    const mode =
+      importModeInput?.value === 'current' && canImportIntoCurrentVault() ? 'current' : 'new';
     const canShow = Boolean(importDialogOpen);
 
     if (importDialogDescription) {
-      importDialogDescription.textContent = mode === 'current'
-        ? `Import the encrypted bundle into ${currentVaultName}. The selected vault stays unlocked while Ori writes the restored records.`
-        : 'Import the encrypted bundle into a freshly created vault with its own Ori password.';
+      importDialogDescription.textContent =
+        mode === 'current'
+          ? `Import the encrypted bundle into ${currentVaultName}. The selected vault stays unlocked while Ori writes the restored records.`
+          : 'Import the encrypted bundle into a freshly created vault with its own Ori password.';
     }
 
     importOverlay.hidden = !canShow;
@@ -1490,7 +1533,9 @@
     const vaultLabel = vaultDisplayLabel(currentVault());
     const editing = Boolean(selectedRecord?.id);
     const recordLabel = String(selectedRecord?.label || '').trim();
-    const canShow = Boolean(editorDialogOpen && vaultStatus?.available && !vaultStatus?.locked && currentVaultID());
+    const canShow = Boolean(
+      editorDialogOpen && vaultStatus?.available && !vaultStatus?.locked && currentVaultID()
+    );
 
     if (editorTitleEl) {
       editorTitleEl.textContent = editing ? 'Edit Vault Item' : 'New Vault Item';
@@ -1532,7 +1577,8 @@
 
     if (options.restoreFocus !== false) {
       window.requestAnimationFrame(() => {
-        const focusTarget = recordsListEl?.querySelector('.vault-page-record.is-selected') || explorerAddBtn;
+        const focusTarget =
+          recordsListEl?.querySelector('.vault-page-record.is-selected') || explorerAddBtn;
         focusTarget?.focus();
       });
     }
@@ -1550,8 +1596,11 @@
     if (!vaults.length) {
       if (editVaultNameInput) editVaultNameInput.value = '';
       if (editVaultDescriptionInput) editVaultDescriptionInput.value = '';
-      if (storageStatusSummaryEl) storageStatusSummaryEl.textContent = 'Create a vault to review its storage location.';
-      if (storageLocationSummaryEl) storageLocationSummaryEl.textContent = 'Ori-managed or custom vault-folder details will appear here.';
+      if (storageStatusSummaryEl)
+        storageStatusSummaryEl.textContent = 'Create a vault to review its storage location.';
+      if (storageLocationSummaryEl)
+        storageLocationSummaryEl.textContent =
+          'Ori-managed or custom vault-folder details will appear here.';
       if (renameVaultBtn) renameVaultBtn.disabled = true;
       if (relinkVaultBtn) relinkVaultBtn.disabled = true;
       if (deleteVaultBtn) deleteVaultBtn.disabled = true;
@@ -1564,7 +1613,8 @@
     if (!selectedVault) {
       if (editVaultNameInput) editVaultNameInput.value = '';
       if (editVaultDescriptionInput) editVaultDescriptionInput.value = '';
-      if (storageStatusSummaryEl) storageStatusSummaryEl.textContent = 'Select a vault to inspect its storage location.';
+      if (storageStatusSummaryEl)
+        storageStatusSummaryEl.textContent = 'Select a vault to inspect its storage location.';
       if (storageLocationSummaryEl) storageLocationSummaryEl.textContent = '';
       if (renameVaultBtn) renameVaultBtn.disabled = true;
       if (relinkVaultBtn) relinkVaultBtn.disabled = true;
@@ -1591,7 +1641,8 @@
         : vaultStorageModeLabel(selectedVault);
     }
     if (storageLocationSummaryEl) {
-      storageLocationSummaryEl.textContent = vaultLocationSummary(selectedVault) || 'Ori-managed vault folder';
+      storageLocationSummaryEl.textContent =
+        vaultLocationSummary(selectedVault) || 'Ori-managed vault folder';
     }
     if (relinkVaultBtn) {
       relinkVaultBtn.disabled = !vaultIsMissing(selectedVault);
@@ -1612,9 +1663,7 @@
     vaults = Array.isArray(data.vaults) ? data.vaults : [];
 
     const preferredVaultID = String(selectedVaultID || readStoredVaultID() || '').trim();
-    const nextVault = vaults.find((item) => item.id === preferredVaultID)
-      || vaults[0]
-      || null;
+    const nextVault = vaults.find(item => item.id === preferredVaultID) || vaults[0] || null;
 
     selectedVaultID = nextVault?.id || DEFAULT_VAULT_ID;
     writeStoredVaultID(selectedVaultID);
@@ -1754,13 +1803,18 @@
       return;
     }
 
-    const deleteFile = !vaultIsMissing(selectedVault) && window.confirm(
-      `Also permanently delete the backing vault folder from disk? Click OK to remove it permanently, or Cancel to keep the vault storage and only remove it from Ori.`
-    );
+    const deleteFile =
+      !vaultIsMissing(selectedVault) &&
+      window.confirm(
+        `Also permanently delete the backing vault folder from disk? Click OK to remove it permanently, or Cancel to keep the vault storage and only remove it from Ori.`
+      );
 
     try {
       setButtonLoading(deleteVaultBtn, true, 'Deleting vault');
-      const deleteURL = new URL(`/api/vault/vaults/${encodeURIComponent(selectedVault.id)}`, window.location.origin);
+      const deleteURL = new URL(
+        `/api/vault/vaults/${encodeURIComponent(selectedVault.id)}`,
+        window.location.origin
+      );
       if (deleteFile) {
         deleteURL.searchParams.set('delete_file', 'true');
       }
@@ -1776,7 +1830,12 @@
       folderComposerOpen = false;
       selectedFolderPath = ROOT_FOLDER_PATH;
       clearRecordForm({ refreshList: false, refreshExplorer: false });
-      notify(deleteFile ? 'Vault and backing storage deleted.' : 'Vault removed from Ori. Backing storage kept on disk.', 'success');
+      notify(
+        deleteFile
+          ? 'Vault and backing storage deleted.'
+          : 'Vault removed from Ori. Backing storage kept on disk.',
+        'success'
+      );
       await refreshVault();
     } catch (error) {
       console.error('Failed to delete vault:', error);
@@ -1793,25 +1852,34 @@
       return;
     }
     if (!vaultIsMissing(selectedVault)) {
-      showInlineAlert('Relink is only needed when the selected vault storage is missing.', 'warning');
+      showInlineAlert(
+        'Relink is only needed when the selected vault storage is missing.',
+        'warning'
+      );
       return;
     }
 
     try {
-      const nextDirectory = await browseForFolderPath(`Select Vault Folder for ${vaultDisplayLabel(selectedVault)}`, relinkVaultBtn);
+      const nextDirectory = await browseForFolderPath(
+        `Select Vault Folder for ${vaultDisplayLabel(selectedVault)}`,
+        relinkVaultBtn
+      );
       if (!nextDirectory) {
         return;
       }
 
-      const response = await apiRequest(`/api/vault/vaults/${encodeURIComponent(selectedVault.id)}/relink`, {
-        method: 'POST',
-        body: {
-          storage: {
-            mode: 'custom_dir',
-            directory: nextDirectory
+      const response = await apiRequest(
+        `/api/vault/vaults/${encodeURIComponent(selectedVault.id)}/relink`,
+        {
+          method: 'POST',
+          body: {
+            storage: {
+              mode: 'custom_dir',
+              directory: nextDirectory
+            }
           }
         }
-      });
+      );
 
       if (response?.vault?.id) {
         selectedVaultID = response.vault.id;
@@ -1873,7 +1941,12 @@
       renderEmailAccountsList([]);
       clearEmailAccountForm({ refreshList: false });
       renderEmailAccountsSummary();
-      clearRecordForm({ preserveStatus: true, refreshList: false, refreshExplorer: false, hide: true });
+      clearRecordForm({
+        preserveStatus: true,
+        refreshList: false,
+        refreshExplorer: false,
+        hide: true
+      });
       renderExplorer();
     }
   }
@@ -2011,7 +2084,8 @@
     entryRetentionInput.value = record.retention_policy || '';
     entryAttachments = entryAttachmentsFromPayload(payload);
     entryAttachmentSnapshot = cloneEntryAttachments(entryAttachments);
-    entryPayloadInput.value = payloadValue === '{}' ? defaultPayloadValue(normalizedType) : payloadValue;
+    entryPayloadInput.value =
+      payloadValue === '{}' ? defaultPayloadValue(normalizedType) : payloadValue;
     if (entryAdvancedDetails) {
       entryAdvancedDetails.open = Boolean(
         record.workspace_id ||
@@ -2062,18 +2136,19 @@
       return;
     }
 
-    recordsListEl.innerHTML = records.map((record) => {
-      const isSelected = selectedRecord?.id === record.id ? ' is-selected' : '';
-      const subtitleParts = [recordTypeLabel(record.type)];
-      if (record.folder_path) {
-        subtitleParts.push(record.folder_path);
-      }
-      if (record.workspace_id) {
-        subtitleParts.push(record.workspace_id);
-      }
-      const subtitle = escapeHTML(subtitleParts.join(' • '));
-      const tagCount = Array.isArray(record.tags) ? record.tags.length : 0;
-      return `
+    recordsListEl.innerHTML = records
+      .map(record => {
+        const isSelected = selectedRecord?.id === record.id ? ' is-selected' : '';
+        const subtitleParts = [recordTypeLabel(record.type)];
+        if (record.folder_path) {
+          subtitleParts.push(record.folder_path);
+        }
+        if (record.workspace_id) {
+          subtitleParts.push(record.workspace_id);
+        }
+        const subtitle = escapeHTML(subtitleParts.join(' • '));
+        const tagCount = Array.isArray(record.tags) ? record.tags.length : 0;
+        return `
         <button type="button" class="vault-page-record${isSelected}" data-record-id="${escapeHTML(record.id)}">
           <div class="vault-page-record-row">
             <div>
@@ -2084,7 +2159,8 @@
           </div>
         </button>
       `;
-    }).join('');
+      })
+      .join('');
   }
 
   function vaultLockIcon(locked) {
@@ -2102,7 +2178,9 @@
       name,
       parentPath: parentPath || '',
       recordIDs: Array.isArray(recordIDs) ? recordIDs.slice() : [],
-      directRecordIDs: Array.isArray(options?.directRecordIDs) ? options.directRecordIDs.slice() : [],
+      directRecordIDs: Array.isArray(options?.directRecordIDs)
+        ? options.directRecordIDs.slice()
+        : [],
       children: [],
       description: String(options?.description || ''),
       meta: String(options?.meta || '')
@@ -2125,19 +2203,22 @@
     const activeVaultItem = currentVault();
     const rootLabel = vaultDisplayLabel(activeVaultItem) || 'Vault Root';
     const folderPaths = new Set();
-    const itemsByID = new Map(items.map((record) => [record.id, record]));
+    const itemsByID = new Map(items.map(record => [record.id, record]));
 
-    addFolderNode(index, createFolderNode(ROOT_FOLDER_PATH, rootLabel, '', [], {
-      folderPath: '',
-      description: 'Everything in the active vault, including nested folders.',
-      meta: 'Vault root'
-    }));
+    addFolderNode(
+      index,
+      createFolderNode(ROOT_FOLDER_PATH, rootLabel, '', [], {
+        folderPath: '',
+        description: 'Everything in the active vault, including nested folders.',
+        meta: 'Vault root'
+      })
+    );
 
-    folders.forEach((folder) => {
-      folderPathAncestors(folder.path).forEach((path) => folderPaths.add(path));
+    folders.forEach(folder => {
+      folderPathAncestors(folder.path).forEach(path => folderPaths.add(path));
     });
-    items.forEach((record) => {
-      folderPathAncestors(record.folder_path || '').forEach((path) => folderPaths.add(path));
+    items.forEach(record => {
+      folderPathAncestors(record.folder_path || '').forEach(path => folderPaths.add(path));
     });
 
     Array.from(folderPaths)
@@ -2149,25 +2230,31 @@
         }
         return left.localeCompare(right, undefined, { sensitivity: 'base' });
       })
-      .forEach((folderPath) => {
+      .forEach(folderPath => {
         const parentSegments = folderPathSegments(folderPath);
         parentSegments.pop();
         const parentPath = parentSegments.join('/');
-        addFolderNode(index, createFolderNode(
-          folderNodePath(folderPath),
-          folderNameFromPath(folderPath),
-          folderNodePath(parentPath),
-          [],
-          {
-            folderPath,
-            description: folderPath,
-            meta: 'Encrypted folder'
-          }
-        ));
+        addFolderNode(
+          index,
+          createFolderNode(
+            folderNodePath(folderPath),
+            folderNameFromPath(folderPath),
+            folderNodePath(parentPath),
+            [],
+            {
+              folderPath,
+              description: folderPath,
+              meta: 'Encrypted folder'
+            }
+          )
+        );
       });
 
-    items.forEach((record) => {
-      [ROOT_FOLDER_PATH, ...folderPathAncestors(record.folder_path || '').map(folderNodePath)].forEach((nodePath) => {
+    items.forEach(record => {
+      [
+        ROOT_FOLDER_PATH,
+        ...folderPathAncestors(record.folder_path || '').map(folderNodePath)
+      ].forEach(nodePath => {
         const node = index.get(nodePath);
         if (node) {
           node.recordIDs.push(record.id);
@@ -2180,16 +2267,24 @@
       }
     });
 
-    index.forEach((node) => {
+    index.forEach(node => {
       node.children.sort((left, right) => {
         const leftNode = index.get(left);
         const rightNode = index.get(right);
-        return String(leftNode?.name || '').localeCompare(String(rightNode?.name || ''), undefined, { sensitivity: 'base' });
+        return String(leftNode?.name || '').localeCompare(
+          String(rightNode?.name || ''),
+          undefined,
+          { sensitivity: 'base' }
+        );
       });
       node.directRecordIDs.sort((leftID, rightID) => {
         const leftRecord = itemsByID.get(leftID);
         const rightRecord = itemsByID.get(rightID);
-        return String(leftRecord?.label || leftRecord?.id || '').localeCompare(String(rightRecord?.label || rightRecord?.id || ''), undefined, { sensitivity: 'base' });
+        return String(leftRecord?.label || leftRecord?.id || '').localeCompare(
+          String(rightRecord?.label || rightRecord?.id || ''),
+          undefined,
+          { sensitivity: 'base' }
+        );
       });
     });
 
@@ -2230,19 +2325,23 @@
   }
 
   function filteredRecords(items) {
-    const query = String(searchInput?.value || '').trim().toLowerCase();
+    const query = String(searchInput?.value || '')
+      .trim()
+      .toLowerCase();
     if (!query) {
       return items.slice();
     }
 
-    return items.filter((record) => {
+    return items.filter(record => {
       const haystack = [
         record.label,
         record.folder_path,
         record.type,
         record.workspace_id,
         Array.isArray(record.tags) ? record.tags.join(' ') : ''
-      ].join(' ').toLowerCase();
+      ]
+        .join(' ')
+        .toLowerCase();
 
       return haystack.includes(query);
     });
@@ -2261,7 +2360,9 @@
   }
 
   function folderPathLabel(folder) {
-    return folderAncestorChain(folder?.path || ROOT_FOLDER_PATH).map((node) => node.name).join(' / ');
+    return folderAncestorChain(folder?.path || ROOT_FOLDER_PATH)
+      .map(node => node.name)
+      .join(' / ');
   }
 
   function isRootFolderPath(nodePath) {
@@ -2327,7 +2428,9 @@
   }
 
   async function deleteFolder(folderPath, triggerButton) {
-    const normalizedFolderPath = normalizeFolderPathInput(folderPathFromNodePath(folderPath) || folderPath);
+    const normalizedFolderPath = normalizeFolderPathInput(
+      folderPathFromNodePath(folderPath) || folderPath
+    );
     if (!normalizedFolderPath) {
       showInlineAlert('Select a folder before deleting it.', 'warning');
       return;
@@ -2362,7 +2465,9 @@
       affectedParts.push(`${itemCount} ${itemCount === 1 ? 'item' : 'items'}`);
     }
     if (nestedFolderCount > 0) {
-      affectedParts.push(`${nestedFolderCount} nested ${nestedFolderCount === 1 ? 'folder' : 'folders'}`);
+      affectedParts.push(
+        `${nestedFolderCount} nested ${nestedFolderCount === 1 ? 'folder' : 'folders'}`
+      );
     }
     const confirmed = window.confirm(
       recursive
@@ -2406,9 +2511,10 @@
       return '';
     }
 
-    const thumbnail = normalized.kind === 'image'
-      ? `<img class="vault-modal-attachment-thumb" src="${escapeHTML(attachmentDataURL(normalized))}" alt="${escapeHTML(normalized.name)}">`
-      : `<div class="vault-modal-attachment-thumb is-generic">${attachmentIcon(normalized.kind)}</div>`;
+    const thumbnail =
+      normalized.kind === 'image'
+        ? `<img class="vault-modal-attachment-thumb" src="${escapeHTML(attachmentDataURL(normalized))}" alt="${escapeHTML(normalized.name)}">`
+        : `<div class="vault-modal-attachment-thumb is-generic">${attachmentIcon(normalized.kind)}</div>`;
 
     return `
       <div class="vault-modal-attachment-card">
@@ -2468,9 +2574,13 @@
       return null;
     }
 
-    return target.closest('.vault-modal-folder-main[data-action="select-folder"]')
-      || target.closest('.vault-modal-folder-node')?.querySelector('.vault-modal-folder-main[data-action="select-folder"]')
-      || null;
+    return (
+      target.closest('.vault-modal-folder-main[data-action="select-folder"]') ||
+      target
+        .closest('.vault-modal-folder-node')
+        ?.querySelector('.vault-modal-folder-main[data-action="select-folder"]') ||
+      null
+    );
   }
 
   function beginRecordDrag(button, event) {
@@ -2527,9 +2637,11 @@
         }
       });
 
-      [ROOT_FOLDER_PATH, ...folderPathAncestors(nextFolderPath).map(folderNodePath)].forEach((path) => {
-        expandedFolderPaths.add(path);
-      });
+      [ROOT_FOLDER_PATH, ...folderPathAncestors(nextFolderPath).map(folderNodePath)].forEach(
+        path => {
+          expandedFolderPaths.add(path);
+        }
+      );
       selectedFolderPath = folderNodePath(nextFolderPath);
       selectedRecord = record;
       payloadRevealed = false;
@@ -2575,7 +2687,8 @@
     }
 
     const hasFolderChildren = Array.isArray(node.children) && node.children.length > 0;
-    const hasRecordChildren = Array.isArray(node.directRecordIDs) && node.directRecordIDs.length > 0;
+    const hasRecordChildren =
+      Array.isArray(node.directRecordIDs) && node.directRecordIDs.length > 0;
     const hasChildren = hasFolderChildren || hasRecordChildren;
     const canToggle = hasChildren;
     const isExpanded = hasChildren && (forceExpanded || expandedFolderPaths.has(node.path));
@@ -2587,15 +2700,19 @@
         </button>`
       : '<span class="vault-modal-folder-spacer"></span>';
 
-    const childFoldersHTML = hasChildren && isExpanded
-      ? node.children.map((childPath) => renderFolderTreeNode(childPath, depth + 1, false)).join('')
-      : '';
+    const childFoldersHTML =
+      hasChildren && isExpanded
+        ? node.children.map(childPath => renderFolderTreeNode(childPath, depth + 1, false)).join('')
+        : '';
     const recordChildrenHTML = isExpanded
-      ? directRecordsForFolder(node).map((record) => renderFolderTreeRecord(record.id, node.path, depth + 1)).join('')
+      ? directRecordsForFolder(node)
+          .map(record => renderFolderTreeRecord(record.id, node.path, depth + 1))
+          .join('')
       : '';
-    const childrenHTML = childFoldersHTML || recordChildrenHTML
-      ? `<div class="vault-modal-folder-children">${childFoldersHTML}${recordChildrenHTML}</div>`
-      : '';
+    const childrenHTML =
+      childFoldersHTML || recordChildrenHTML
+        ? `<div class="vault-modal-folder-children">${childFoldersHTML}${recordChildrenHTML}</div>`
+        : '';
 
     return `
       <div class="vault-modal-folder-node${isSelected ? ' is-selected' : ''}">
@@ -2624,12 +2741,14 @@
     }
 
     if (!vaultStatus.available) {
-      folderTreeEl.innerHTML = '<div class="vault-modal-empty">No vault exists yet. Create your first encrypted vault to start saving private items.</div>';
+      folderTreeEl.innerHTML =
+        '<div class="vault-modal-empty">No vault exists yet. Create your first encrypted vault to start saving private items.</div>';
       return;
     }
 
     if (vaultStatus.locked) {
-      folderTreeEl.innerHTML = '<div class="vault-modal-empty">Use the lock icon on the selected vault tab to unlock the vault and browse saved items.</div>';
+      folderTreeEl.innerHTML =
+        '<div class="vault-modal-empty">Use the lock icon on the selected vault tab to unlock the vault and browse saved items.</div>';
       return;
     }
 
@@ -2639,12 +2758,15 @@
       return;
     }
 
-    const destinationLabel = isRootFolderPath(selectedFolderPath) ? 'vault root' : selectedFolder()?.name || 'selected folder';
+    const destinationLabel = isRootFolderPath(selectedFolderPath)
+      ? 'vault root'
+      : selectedFolder()?.name || 'selected folder';
 
     folderTreeEl.innerHTML = `
       <div class="vault-modal-folder-tree-scroll">
-        ${folderComposerOpen
-          ? `
+        ${
+          folderComposerOpen
+            ? `
             <div class="vault-modal-folder-create-card">
               <div class="vault-modal-folder-create-copy">Create a folder inside ${escapeHTML(destinationLabel)}.</div>
               <div class="vault-modal-folder-create-row">
@@ -2654,7 +2776,8 @@
               </div>
             </div>
           `
-          : ''}
+            : ''
+        }
         ${renderFolderTreeNode(ROOT_FOLDER_PATH, 0, true)}
       </div>
     `;
@@ -2672,15 +2795,16 @@
     }
 
     folderVaultTabsEl.hidden = false;
-    folderVaultTabsEl.innerHTML = vaults.map((vaultItem) => {
-      const isActive = vaultItem.id === currentVaultID();
-      const canToggleAccess = isActive && Boolean(vaultStatus?.available);
-      const locked = canToggleAccess ? Boolean(vaultStatus?.locked) : true;
-      const actionButton = canToggleAccess
-        ? `<button type="button" class="vault-modal-folder-vault-tab-icon${locked ? ' is-locked' : ' is-unlocked'}" data-action="toggle-vault-access" data-vault-id="${escapeHTML(vaultItem.id)}" aria-label="${escapeHTML((locked ? 'Unlock ' : 'Lock ') + vaultDisplayLabel(vaultItem))}" title="${escapeHTML(locked ? 'Unlock vault' : 'Lock vault')}">${vaultLockIcon(locked)}</button>`
-        : '';
+    folderVaultTabsEl.innerHTML = vaults
+      .map(vaultItem => {
+        const isActive = vaultItem.id === currentVaultID();
+        const canToggleAccess = isActive && Boolean(vaultStatus?.available);
+        const locked = canToggleAccess ? Boolean(vaultStatus?.locked) : true;
+        const actionButton = canToggleAccess
+          ? `<button type="button" class="vault-modal-folder-vault-tab-icon${locked ? ' is-locked' : ' is-unlocked'}" data-action="toggle-vault-access" data-vault-id="${escapeHTML(vaultItem.id)}" aria-label="${escapeHTML((locked ? 'Unlock ' : 'Lock ') + vaultDisplayLabel(vaultItem))}" title="${escapeHTML(locked ? 'Unlock vault' : 'Lock vault')}">${vaultLockIcon(locked)}</button>`
+          : '';
 
-      return `
+        return `
         <div class="vault-modal-folder-vault-tab-wrap${isActive ? ' is-active' : ''}">
           <button type="button" class="vault-modal-folder-vault-tab${isActive ? ' is-active' : ''}" role="tab" aria-selected="${isActive ? 'true' : 'false'}" data-action="select-folder-vault-tab" data-vault-id="${escapeHTML(vaultItem.id)}">
             <span class="vault-modal-folder-vault-tab-label">${escapeHTML(vaultDisplayLabel(vaultItem))}</span>
@@ -2688,7 +2812,8 @@
           ${actionButton}
         </div>
       `;
-    }).join('');
+      })
+      .join('');
   }
 
   function renderFolderBreadcrumb() {
@@ -2710,16 +2835,19 @@
     }
 
     folderBreadcrumbEl.hidden = false;
-    folderBreadcrumbEl.innerHTML = chain.map((node, index) => {
-      const separator = index === 0 ? '' : '<span class="vault-modal-folder-crumb-separator">/</span>';
-      const active = index === chain.length - 1;
+    folderBreadcrumbEl.innerHTML = chain
+      .map((node, index) => {
+        const separator =
+          index === 0 ? '' : '<span class="vault-modal-folder-crumb-separator">/</span>';
+        const active = index === chain.length - 1;
 
-      if (active) {
-        return `${separator}<span class="vault-modal-folder-crumb is-active">${escapeHTML(node.name)}</span>`;
-      }
+        if (active) {
+          return `${separator}<span class="vault-modal-folder-crumb is-active">${escapeHTML(node.name)}</span>`;
+        }
 
-      return `${separator}<button type="button" class="vault-modal-folder-crumb" data-action="select-folder" data-folder-path="${escapeHTML(node.path)}">${escapeHTML(node.name)}</button>`;
-    }).join('');
+        return `${separator}<button type="button" class="vault-modal-folder-crumb" data-action="select-folder" data-folder-path="${escapeHTML(node.path)}">${escapeHTML(node.name)}</button>`;
+      })
+      .join('');
   }
 
   function renderSelectedRecordDetail() {
@@ -2729,9 +2857,12 @@
 
     const record = selectedRecord;
     const attachments = entryAttachmentsFromPayload(record.payload);
-    const tags = Array.isArray(record.tags) && record.tags.length > 0
-      ? record.tags.map((tag) => `<span class="vault-modal-chip">${escapeHTML(tag)}</span>`).join('')
-      : '<span class="vault-modal-chip is-muted">No tags</span>';
+    const tags =
+      Array.isArray(record.tags) && record.tags.length > 0
+        ? record.tags
+            .map(tag => `<span class="vault-modal-chip">${escapeHTML(tag)}</span>`)
+            .join('')
+        : '<span class="vault-modal-chip is-muted">No tags</span>';
     const revealLabel = payloadRevealed ? 'Hide Payload' : 'Reveal Payload';
     const payloadClass = `vault-modal-payload-preview${payloadRevealed ? '' : ' is-concealed'}`;
     const payloadToggleButton = `<button type="button" class="modern-btn modern-btn-secondary" data-action="toggle-payload">${escapeHTML(revealLabel)}</button>`;
@@ -2741,15 +2872,19 @@
           <div class="vault-modal-inline-head">
             <div class="vault-modal-inline-head-copy">
               <div class="vault-modal-payload-label">Encrypted attachments</div>
-              ${payloadRevealed
-                ? ''
-                : '<div class="vault-modal-preview-empty-inline">Reveal the payload to inspect or download attached files.</div>'}
+              ${
+                payloadRevealed
+                  ? ''
+                  : '<div class="vault-modal-preview-empty-inline">Reveal the payload to inspect or download attached files.</div>'
+              }
             </div>
             ${payloadToggleButton}
           </div>
-          ${payloadRevealed
-            ? `<div class="vault-modal-attachment-grid">${attachments.map(renderRecordAttachmentCard).join('')}</div>`
-            : ''}
+          ${
+            payloadRevealed
+              ? `<div class="vault-modal-attachment-grid">${attachments.map(renderRecordAttachmentCard).join('')}</div>`
+              : ''
+          }
         </div>
       `
       : '';
@@ -2777,16 +2912,18 @@
         </div>
         ${attachmentsHTML}
         <div class="vault-modal-payload-wrap">
-          ${attachments.length
-            ? '<div class="vault-modal-payload-label">Protected payload</div>'
-            : `
+          ${
+            attachments.length
+              ? '<div class="vault-modal-payload-label">Protected payload</div>'
+              : `
               <div class="vault-modal-inline-head">
                 <div class="vault-modal-inline-head-copy">
                   <div class="vault-modal-payload-label">Protected payload</div>
                 </div>
                 ${payloadToggleButton}
               </div>
-            `}
+            `
+          }
           <pre class="${payloadClass}">${escapeHTML(prettyPayload(payloadForPreview(record.payload)))}</pre>
         </div>
       </div>
@@ -2800,50 +2937,59 @@
 
     if (!vaultStatus) {
       recordsSummaryEl.textContent = 'Waiting for vault status...';
-      explorerPreviewEl.innerHTML = '<div class="vault-modal-empty">Checking vault availability.</div>';
+      explorerPreviewEl.innerHTML =
+        '<div class="vault-modal-empty">Checking vault availability.</div>';
       return;
     }
 
     if (!vaultStatus.available) {
       if (vaultStatus.file_missing) {
         recordsSummaryEl.textContent = 'Vault storage missing';
-        explorerPreviewEl.innerHTML = '<div class="vault-modal-empty">The selected vault storage is missing. Use the Relink Vault action to point Ori at the vault folder that contains this vault.</div>';
+        explorerPreviewEl.innerHTML =
+          '<div class="vault-modal-empty">The selected vault storage is missing. Use the Relink Vault action to point Ori at the vault folder that contains this vault.</div>';
       } else {
         recordsSummaryEl.textContent = 'No vault selected';
-        explorerPreviewEl.innerHTML = '<div class="vault-modal-empty">Create a vault to start saving encrypted items in your private library.</div>';
+        explorerPreviewEl.innerHTML =
+          '<div class="vault-modal-empty">Create a vault to start saving encrypted items in your private library.</div>';
       }
       return;
     }
 
     if (vaultStatus.locked) {
       recordsSummaryEl.textContent = 'Vault is locked';
-      explorerPreviewEl.innerHTML = '<div class="vault-modal-empty">Use the lock icon on the selected vault tab to unlock the vault and browse saved items.</div>';
+      explorerPreviewEl.innerHTML =
+        '<div class="vault-modal-empty">Use the lock icon on the selected vault tab to unlock the vault and browse saved items.</div>';
       return;
     }
 
     const folder = selectedFolder();
     if (!folder) {
       recordsSummaryEl.textContent = 'No view selected';
-      explorerPreviewEl.innerHTML = '<div class="vault-modal-empty">Select a folder to continue.</div>';
+      explorerPreviewEl.innerHTML =
+        '<div class="vault-modal-empty">Select a folder to continue.</div>';
       return;
     }
 
     const folderRecords = recordsForFolder(folder);
     const visibleRecords = filteredRecords(folderRecords);
 
-    if (selectedRecord && !folderRecords.some((record) => record.id === selectedRecord.id)) {
+    if (selectedRecord && !folderRecords.some(record => record.id === selectedRecord.id)) {
       clearRecordForm({ preserveStatus: true, refreshExplorer: false });
     }
 
     recordsSummaryEl.textContent = `${visibleRecords.length} of ${folderRecords.length} ${folderRecords.length === 1 ? 'item' : 'items'} in ${folder.name}`;
 
-    const filesHTML = visibleRecords.length > 0
-      ? visibleRecords.map((record) => {
-        const selectedClass = selectedRecord?.id === record.id ? ' is-selected' : '';
-        const subtitle = [recordTypeLabel(record.type), record.workspace_id || 'Global'].join(' • ');
-        const tags = Array.isArray(record.tags) ? record.tags.length : 0;
+    const filesHTML =
+      visibleRecords.length > 0
+        ? visibleRecords
+            .map(record => {
+              const selectedClass = selectedRecord?.id === record.id ? ' is-selected' : '';
+              const subtitle = [recordTypeLabel(record.type), record.workspace_id || 'Global'].join(
+                ' • '
+              );
+              const tags = Array.isArray(record.tags) ? record.tags.length : 0;
 
-        return `
+              return `
           <button type="button" class="vault-modal-preview-file${selectedClass}" draggable="true" data-action="select-record" data-drag-record="true" data-record-id="${escapeHTML(record.id)}">
             <span class="vault-modal-preview-file-icon">${fileTypeIcon(record.type)}</span>
             <span class="vault-modal-preview-file-main">
@@ -2856,15 +3002,16 @@
             </span>
           </button>
         `;
-      }).join('')
-      : '<div class="vault-modal-preview-empty-inline">No items match this view and search combination yet.</div>';
+            })
+            .join('')
+        : '<div class="vault-modal-preview-empty-inline">No items match this view and search combination yet.</div>';
 
-    const previewSubtitle = folder.path === ROOT_FOLDER_PATH
-      ? 'Vault root'
-      : folderPathLabel(folder);
-    const folderDeleteAction = folder.path === ROOT_FOLDER_PATH
-      ? ''
-      : `<button type="button" class="modern-btn modern-btn-secondary vault-modal-danger-btn" data-action="delete-folder" data-folder-path="${escapeHTML(folder.folderPath)}">Delete Folder</button>`;
+    const previewSubtitle =
+      folder.path === ROOT_FOLDER_PATH ? 'Vault root' : folderPathLabel(folder);
+    const folderDeleteAction =
+      folder.path === ROOT_FOLDER_PATH
+        ? ''
+        : `<button type="button" class="modern-btn modern-btn-secondary vault-modal-danger-btn" data-action="delete-folder" data-folder-path="${escapeHTML(folder.folderPath)}">Delete Folder</button>`;
 
     explorerPreviewEl.innerHTML = `
       <div class="vault-modal-preview-header">
@@ -2921,19 +3068,24 @@
       return false;
     }
 
-    return (Array.isArray(folder.children) && folder.children.length > 0)
-      || (Array.isArray(folder.directRecordIDs) && folder.directRecordIDs.length > 0);
+    return (
+      (Array.isArray(folder.children) && folder.children.length > 0) ||
+      (Array.isArray(folder.directRecordIDs) && folder.directRecordIDs.length > 0)
+    );
   }
 
   function renderGrantsList(items) {
     grants = Array.isArray(items) ? items : [];
 
     if (!grants.length) {
-      grantsListEl.innerHTML = '<div class="vault-page-empty">No persistent grants configured.</div>';
+      grantsListEl.innerHTML =
+        '<div class="vault-page-empty">No persistent grants configured.</div>';
       return;
     }
 
-    grantsListEl.innerHTML = grants.map((grant) => `
+    grantsListEl.innerHTML = grants
+      .map(
+        grant => `
       <div class="vault-page-grant">
         <div class="vault-page-grant-row">
           <div>
@@ -2943,7 +3095,9 @@
           <button type="button" class="btn btn-sm btn-outline-danger vault-page-danger-btn" data-grant-id="${escapeHTML(grant.id)}">Revoke</button>
         </div>
       </div>
-    `).join('');
+    `
+      )
+      .join('');
   }
 
   function currentEmailAccountSecretState(account) {
@@ -2968,7 +3122,10 @@
 
     if (state.has_refresh_token) stored.push('Refresh token');
     if (state.has_access_token) stored.push('Access token');
-    if (state.has_password) stored.push(normalizeEmailAuthType(account?.auth_type) === 'app_password' ? 'App password' : 'Password');
+    if (state.has_password)
+      stored.push(
+        normalizeEmailAuthType(account?.auth_type) === 'app_password' ? 'App password' : 'Password'
+      );
     if (state.has_client_id) stored.push('Client ID');
     if (state.has_client_secret) stored.push('Client secret');
 
@@ -2979,7 +3136,9 @@
       return 'No credentials stored yet.';
     }
 
-    if (normalizeEmailAuthType(account?.auth_type || emailAccountAuthTypeInput?.value) === 'oauth2') {
+    if (
+      normalizeEmailAuthType(account?.auth_type || emailAccountAuthTypeInput?.value) === 'oauth2'
+    ) {
       return `Connected through OAuth. Stored in vault: ${stored.join(', ')}.`;
     }
     return `Stored in vault: ${stored.join(', ')}.`;
@@ -3034,8 +3193,10 @@
     const connectMode = authType === 'oauth2' && isNativeOAuthProvider(provider);
     const providerStatus = currentEmailOAuthProviderStatus(provider);
     const buttonProviderLabel = oauthProviderButtonLabel(provider);
-    const accountMatchesProvider = normalizeEmailProvider(selectedEmailAccount?.provider) === provider;
-    const hasConnectedAccount = accountMatchesProvider && emailAccountHasStoredConnection(selectedEmailAccount);
+    const accountMatchesProvider =
+      normalizeEmailProvider(selectedEmailAccount?.provider) === provider;
+    const hasConnectedAccount =
+      accountMatchesProvider && emailAccountHasStoredConnection(selectedEmailAccount);
 
     if (emailAccountConnectPanelEl) {
       emailAccountConnectPanelEl.hidden = !connectMode;
@@ -3053,9 +3214,11 @@
           ? 'Ori keeps the OAuth tokens write-only. You can reconnect to rotate them, or save metadata changes without reconnecting.'
           : `Ori will save the OAuth tokens only after ${buttonProviderLabel} approves access.`;
       } else if (authType === 'oauth2') {
-        emailAccountCredentialHelpEl.textContent = 'Paste existing OAuth tokens or custom client credentials only if you already manage this provider outside Ori.';
+        emailAccountCredentialHelpEl.textContent =
+          'Paste existing OAuth tokens or custom client credentials only if you already manage this provider outside Ori.';
       } else {
-        emailAccountCredentialHelpEl.textContent = 'Leave password fields blank when editing unless you want to replace the stored secret.';
+        emailAccountCredentialHelpEl.textContent =
+          'Leave password fields blank when editing unless you want to replace the stored secret.';
       }
     }
 
@@ -3065,10 +3228,7 @@
     }
 
     const readyToConnect = Boolean(
-      providerStatus.enabled
-        && currentVaultID()
-        && vaultStatus?.available
-        && !vaultStatus?.locked
+      providerStatus.enabled && currentVaultID() && vaultStatus?.available && !vaultStatus?.locked
     );
 
     if (emailAccountOauthHelpEl) {
@@ -3111,12 +3271,14 @@
     }
 
     if (!vaultStatus?.available) {
-      emailAccountsSummaryEl.textContent = 'Create a vault before saving reusable email identities.';
+      emailAccountsSummaryEl.textContent =
+        'Create a vault before saving reusable email identities.';
       return;
     }
 
     if (vaultStatus.locked) {
-      emailAccountsSummaryEl.textContent = 'Unlock the selected vault to review or edit email accounts.';
+      emailAccountsSummaryEl.textContent =
+        'Unlock the selected vault to review or edit email accounts.';
       return;
     }
 
@@ -3154,7 +3316,7 @@
       emailAccountConnectBtn,
       saveEmailAccountBtn,
       deleteEmailAccountBtn
-    ].forEach((element) => {
+    ].forEach(element => {
       if (element) {
         element.disabled = Boolean(disabled);
       }
@@ -3201,35 +3363,46 @@
     }
 
     if (!currentVaultID()) {
-      emailAccountsListEl.innerHTML = '<div class="vault-page-empty">Select a vault to manage reusable email identities.</div>';
+      emailAccountsListEl.innerHTML =
+        '<div class="vault-page-empty">Select a vault to manage reusable email identities.</div>';
       return;
     }
 
     if (!vaultStatus?.available) {
-      emailAccountsListEl.innerHTML = '<div class="vault-page-empty">Create a vault before adding reusable email identities.</div>';
+      emailAccountsListEl.innerHTML =
+        '<div class="vault-page-empty">Create a vault before adding reusable email identities.</div>';
       return;
     }
 
     if (vaultStatus.locked) {
-      emailAccountsListEl.innerHTML = '<div class="vault-page-empty">Unlock the selected vault to review stored email accounts.</div>';
+      emailAccountsListEl.innerHTML =
+        '<div class="vault-page-empty">Unlock the selected vault to review stored email accounts.</div>';
       return;
     }
 
     if (!emailAccounts.length) {
-      emailAccountsListEl.innerHTML = '<div class="vault-page-empty">No email accounts stored in this vault yet.</div>';
+      emailAccountsListEl.innerHTML =
+        '<div class="vault-page-empty">No email accounts stored in this vault yet.</div>';
       return;
     }
 
-    emailAccountsListEl.innerHTML = emailAccounts.map((account) => {
-      const isSelected = selectedEmailAccount?.id === account.id ? ' is-selected' : '';
-      const subtitle = [account.email_address, emailProviderLabel(account.provider)].filter(Boolean).join(' • ');
-      const chips = [
-        emailAccountConnectionChip(account),
-        `<span class="vault-page-email-chip">${escapeHTML(emailAuthTypeLabel(account.auth_type))}</span>`,
-        account.workspace_id ? `<span class="vault-page-email-chip">Workspace: ${escapeHTML(account.workspace_id)}</span>` : '<span class="vault-page-email-chip">Global</span>'
-      ].filter(Boolean).join('');
+    emailAccountsListEl.innerHTML = emailAccounts
+      .map(account => {
+        const isSelected = selectedEmailAccount?.id === account.id ? ' is-selected' : '';
+        const subtitle = [account.email_address, emailProviderLabel(account.provider)]
+          .filter(Boolean)
+          .join(' • ');
+        const chips = [
+          emailAccountConnectionChip(account),
+          `<span class="vault-page-email-chip">${escapeHTML(emailAuthTypeLabel(account.auth_type))}</span>`,
+          account.workspace_id
+            ? `<span class="vault-page-email-chip">Workspace: ${escapeHTML(account.workspace_id)}</span>`
+            : '<span class="vault-page-email-chip">Global</span>'
+        ]
+          .filter(Boolean)
+          .join('');
 
-      return `
+        return `
         <button type="button" class="vault-page-record vault-page-email-account${isSelected}" data-email-account-id="${escapeHTML(account.id)}">
           <div class="vault-page-record-row">
             <div class="vault-page-email-account-main">
@@ -3241,7 +3414,8 @@
           </div>
         </button>
       `;
-    }).join('');
+      })
+      .join('');
   }
 
   function clearEmailAccountForm(options = {}) {
@@ -3290,25 +3464,36 @@
     selectedEmailAccount = account;
     if (emailAccountLabelInput) emailAccountLabelInput.value = account.label || '';
     if (emailAccountAddressInput) emailAccountAddressInput.value = account.email_address || '';
-    if (emailAccountProviderInput) emailAccountProviderInput.value = normalizeEmailProvider(account.provider || 'gmail') || 'gmail';
-    if (emailAccountAuthTypeInput) emailAccountAuthTypeInput.value = normalizeEmailAuthType(account.auth_type || 'oauth2') || 'oauth2';
-    if (emailAccountDisplayNameInput) emailAccountDisplayNameInput.value = account.display_name || '';
+    if (emailAccountProviderInput)
+      emailAccountProviderInput.value =
+        normalizeEmailProvider(account.provider || 'gmail') || 'gmail';
+    if (emailAccountAuthTypeInput)
+      emailAccountAuthTypeInput.value =
+        normalizeEmailAuthType(account.auth_type || 'oauth2') || 'oauth2';
+    if (emailAccountDisplayNameInput)
+      emailAccountDisplayNameInput.value = account.display_name || '';
     if (emailAccountUsernameInput) emailAccountUsernameInput.value = account.username || '';
     if (emailAccountWorkspaceInput) emailAccountWorkspaceInput.value = account.workspace_id || '';
-    if (emailAccountTagsInput) emailAccountTagsInput.value = Array.isArray(account.tags) ? account.tags.join(', ') : '';
+    if (emailAccountTagsInput)
+      emailAccountTagsInput.value = Array.isArray(account.tags) ? account.tags.join(', ') : '';
     if (emailAccountSourceInput) emailAccountSourceInput.value = account.source || '';
-    if (emailAccountRetentionInput) emailAccountRetentionInput.value = account.retention_policy || '';
+    if (emailAccountRetentionInput)
+      emailAccountRetentionInput.value = account.retention_policy || '';
     if (emailAccountImapHostInput) emailAccountImapHostInput.value = account.imap_host || '';
-    if (emailAccountImapPortInput) emailAccountImapPortInput.value = account.imap_port ? String(account.imap_port) : '';
+    if (emailAccountImapPortInput)
+      emailAccountImapPortInput.value = account.imap_port ? String(account.imap_port) : '';
     if (emailAccountSmtpHostInput) emailAccountSmtpHostInput.value = account.smtp_host || '';
-    if (emailAccountSmtpPortInput) emailAccountSmtpPortInput.value = account.smtp_port ? String(account.smtp_port) : '';
+    if (emailAccountSmtpPortInput)
+      emailAccountSmtpPortInput.value = account.smtp_port ? String(account.smtp_port) : '';
     if (emailAccountOauthAdvancedEl) emailAccountOauthAdvancedEl.open = false;
     resetEmailCredentialInputs();
     syncEmailAccountProviderFields();
     syncEmailAccountAuthFields();
 
     if (emailAccountModeBadgeEl) {
-      emailAccountModeBadgeEl.textContent = emailAccountHasStoredConnection(account) ? 'Connected account' : 'Editing account';
+      emailAccountModeBadgeEl.textContent = emailAccountHasStoredConnection(account)
+        ? 'Connected account'
+        : 'Editing account';
     }
     if (deleteEmailAccountBtn) {
       deleteEmailAccountBtn.classList.remove('d-none');
@@ -3321,7 +3506,7 @@
   }
 
   function selectEmailAccount(accountID) {
-    const match = emailAccounts.find((account) => account.id === accountID) || null;
+    const match = emailAccounts.find(account => account.id === accountID) || null;
     if (!match) {
       clearEmailAccountForm();
       return;
@@ -3344,7 +3529,7 @@
 
     const selectedID = String(preferredAccountID || selectedEmailAccount?.id || '').trim();
     if (selectedID) {
-      const match = emailAccounts.find((account) => account.id === selectedID) || null;
+      const match = emailAccounts.find(account => account.id === selectedID) || null;
       if (match) {
         applyEmailAccountToForm(match);
       } else {
@@ -3362,7 +3547,7 @@
       const data = await apiRequest('/api/vault/email-oauth/providers');
       const nextProviders = {};
       const items = Array.isArray(data.providers) ? data.providers : [];
-      items.forEach((item) => {
+      items.forEach(item => {
         const key = normalizeEmailProvider(item.provider);
         if (key) {
           nextProviders[key] = item;
@@ -3429,10 +3614,14 @@
     if (basePayload.display_name) params.set('display_name', basePayload.display_name);
     if (basePayload.username) params.set('username', basePayload.username);
     if (basePayload.workspace_id) params.set('workspace_id', basePayload.workspace_id);
-    if (Array.isArray(basePayload.tags) && basePayload.tags.length) params.set('tags', basePayload.tags.join(','));
+    if (Array.isArray(basePayload.tags) && basePayload.tags.length)
+      params.set('tags', basePayload.tags.join(','));
     if (basePayload.source) params.set('source', basePayload.source);
     if (basePayload.retention_policy) params.set('retention_policy', basePayload.retention_policy);
-    if (selectedEmailAccount?.id && normalizeEmailProvider(selectedEmailAccount.provider) === provider) {
+    if (
+      selectedEmailAccount?.id &&
+      normalizeEmailProvider(selectedEmailAccount.provider) === provider
+    ) {
       params.set('account_id', selectedEmailAccount.id);
     }
 
@@ -3452,7 +3641,10 @@
       const popup = window.open(start.url, 'ori-email-oauth', 'popup=yes,width=560,height=760');
       if (!popup) {
         clearEmailOAuthPopupState();
-        showInlineAlert('Ori could not open the connection window. Allow popups and try again.', 'warning');
+        showInlineAlert(
+          'Ori could not open the connection window. Allow popups and try again.',
+          'warning'
+        );
         return;
       }
 
@@ -3465,7 +3657,10 @@
           clearEmailOAuthPopupState();
           renderEmailOAuthConnectPanel();
           if (wasPending) {
-            showInlineAlert('Connection window closed before the account was connected.', 'warning');
+            showInlineAlert(
+              'Connection window closed before the account was connected.',
+              'warning'
+            );
           }
         }
       }, 400);
@@ -3493,16 +3688,23 @@
 
     const connectMode = currentEmailOAuthConnectMode();
     const manualTokenProvided = Boolean(
-      String(emailAccountAccessTokenInput?.value || '').trim()
-      || String(emailAccountRefreshTokenInput?.value || '').trim()
+      String(emailAccountAccessTokenInput?.value || '').trim() ||
+      String(emailAccountRefreshTokenInput?.value || '').trim()
     );
     if (connectMode && !selectedEmailAccount?.id && !manualTokenProvided) {
-      showInlineAlert(`This account is not connected yet. Use Connect with ${oauthProviderButtonLabel(basePayload.provider)} or open Advanced OAuth import to paste existing tokens.`, 'warning');
+      showInlineAlert(
+        `This account is not connected yet. Use Connect with ${oauthProviderButtonLabel(basePayload.provider)} or open Advanced OAuth import to paste existing tokens.`,
+        'warning'
+      );
       return;
     }
 
     try {
-      setButtonLoading(saveEmailAccountBtn, true, selectedEmailAccount ? 'Saving account' : 'Saving account');
+      setButtonLoading(
+        saveEmailAccountBtn,
+        true,
+        selectedEmailAccount ? 'Saving account' : 'Saving account'
+      );
 
       let response;
       if (selectedEmailAccount?.id) {
@@ -3521,10 +3723,13 @@
         if (clientSecret) updatePayload.client_secret = clientSecret;
         if (tokenEndpoint) updatePayload.token_endpoint = tokenEndpoint;
 
-        response = await apiRequest(`/api/vault/email-accounts/${encodeURIComponent(selectedEmailAccount.id)}`, {
-          method: 'PATCH',
-          body: updatePayload
-        });
+        response = await apiRequest(
+          `/api/vault/email-accounts/${encodeURIComponent(selectedEmailAccount.id)}`,
+          {
+            method: 'PATCH',
+            body: updatePayload
+          }
+        );
       } else {
         response = await apiRequest('/api/vault/email-accounts', {
           method: 'POST',
@@ -3638,7 +3843,7 @@
 
     const data = await apiRequest(vaultURL('/api/vault/records'));
     records = Array.isArray(data.records) ? data.records : [];
-    recordIndex = new Map(records.map((record) => [record.id, record]));
+    recordIndex = new Map(records.map(record => [record.id, record]));
     rebuildFolderTree();
     renderRecordsList(records);
     renderExplorer();
@@ -3699,12 +3904,17 @@
     }
 
     try {
-      const record = await apiRequest(vaultURL(`/api/vault/records/${encodeURIComponent(recordID)}`));
+      const record = await apiRequest(
+        vaultURL(`/api/vault/records/${encodeURIComponent(recordID)}`)
+      );
       const keepFolder = Boolean(options.keepFolder);
       const openEditor = options.openEditor !== false;
       if (!keepFolder) {
         const activeFolder = selectedFolder();
-        const folderHasRecord = activeFolder && Array.isArray(activeFolder.recordIDs) && activeFolder.recordIDs.includes(record.id);
+        const folderHasRecord =
+          activeFolder &&
+          Array.isArray(activeFolder.recordIDs) &&
+          activeFolder.recordIDs.includes(record.id);
         if (!folderHasRecord) {
           selectedFolderPath = folderNodePath(record.folder_path || '');
         }
@@ -3774,7 +3984,9 @@
 
     const previous = cloneEntryAttachments(previousAttachments);
     const next = cloneEntryAttachments(nextAttachments);
-    const nextStoredIDs = new Set(next.filter(hasStoredAttachment).map((attachment) => attachment.id));
+    const nextStoredIDs = new Set(
+      next.filter(hasStoredAttachment).map(attachment => attachment.id)
+    );
 
     for (const attachment of next) {
       if (hasStoredAttachment(attachment)) {
@@ -3789,9 +4001,14 @@
         continue;
       }
 
-      await apiRequest(vaultURL(`/api/vault/records/${encodeURIComponent(recordID)}/attachments/${encodeURIComponent(attachment.id)}`), {
-        method: 'DELETE'
-      });
+      await apiRequest(
+        vaultURL(
+          `/api/vault/records/${encodeURIComponent(recordID)}/attachments/${encodeURIComponent(attachment.id)}`
+        ),
+        {
+          method: 'DELETE'
+        }
+      );
     }
   }
 
@@ -3804,7 +4021,12 @@
     }
 
     if (!vaultStatus?.available || vaultStatus?.locked) {
-      showInlineAlert(editing ? 'Unlock the selected vault before editing an entry.' : 'Unlock the selected vault before creating a new entry.', 'warning');
+      showInlineAlert(
+        editing
+          ? 'Unlock the selected vault before editing an entry.'
+          : 'Unlock the selected vault before creating a new entry.',
+        'warning'
+      );
       return;
     }
 
@@ -3838,10 +4060,13 @@
 
       let response;
       if (editing) {
-        response = await apiRequest(vaultURL(`/api/vault/records/${encodeURIComponent(selectedRecord.id)}`), {
-          method: 'PATCH',
-          body: payloadBody
-        });
+        response = await apiRequest(
+          vaultURL(`/api/vault/records/${encodeURIComponent(selectedRecord.id)}`),
+          {
+            method: 'PATCH',
+            body: payloadBody
+          }
+        );
       } else {
         response = await apiRequest('/api/vault/records', {
           method: 'POST',
@@ -3873,7 +4098,12 @@
       console.error('Failed to save vault entry:', error);
       if (recordPersisted) {
         closeVaultEditor({ restoreFocus: false });
-        notify(editing ? 'Vault entry updated, but attachments need attention.' : 'Vault entry saved, but attachments need attention.', 'warning');
+        notify(
+          editing
+            ? 'Vault entry updated, but attachments need attention.'
+            : 'Vault entry saved, but attachments need attention.',
+          'warning'
+        );
         if (editing) {
           await refreshVault();
         } else {
@@ -3882,22 +4112,33 @@
             await selectRecord(persistedRecordID, { openEditor: false });
           }
         }
-        showInlineAlert(error.message || 'The entry was saved, but attachments failed to sync.', 'error');
+        showInlineAlert(
+          error.message || 'The entry was saved, but attachments failed to sync.',
+          'error'
+        );
         return;
       }
-      showInlineAlert(error.message || (editing ? 'Failed to update vault entry.' : 'Failed to save vault entry.'), 'error');
+      showInlineAlert(
+        error.message ||
+          (editing ? 'Failed to update vault entry.' : 'Failed to save vault entry.'),
+        'error'
+      );
     } finally {
       setButtonLoading(saveEntryBtn, false);
     }
   }
 
   async function deleteRecord(recordID = selectedRecord?.id || '', triggerButton = null) {
-    const targetRecord = recordID ? recordIndex.get(recordID) || (selectedRecord?.id === recordID ? selectedRecord : null) : selectedRecord;
+    const targetRecord = recordID
+      ? recordIndex.get(recordID) || (selectedRecord?.id === recordID ? selectedRecord : null)
+      : selectedRecord;
     if (!recordID || !targetRecord) {
       return;
     }
 
-    const confirmed = window.confirm(`Delete vault item "${targetRecord.label || targetRecord.id}"?`);
+    const confirmed = window.confirm(
+      `Delete vault item "${targetRecord.label || targetRecord.id}"?`
+    );
     if (!confirmed) {
       return;
     }
@@ -4093,7 +4334,8 @@
       return;
     }
 
-    const mode = importModeInput?.value === 'current' && canImportIntoCurrentVault() ? 'current' : 'new';
+    const mode =
+      importModeInput?.value === 'current' && canImportIntoCurrentVault() ? 'current' : 'new';
     if (mode === 'current' && !canImportIntoCurrentVault()) {
       showInlineAlert('Unlock the selected vault before importing into it.', 'warning');
       return;
@@ -4118,7 +4360,10 @@
         return;
       }
       requestBody.append('create_vault_name', String(importVaultNameInput?.value || '').trim());
-      requestBody.append('create_vault_description', String(importVaultDescriptionInput?.value || '').trim());
+      requestBody.append(
+        'create_vault_description',
+        String(importVaultDescriptionInput?.value || '').trim()
+      );
       requestBody.append('create_vault_password', vaultPassword);
     }
 
@@ -4146,7 +4391,10 @@
       if (importModeInput) importModeInput.value = 'new';
 
       closeImportDialog({ restoreFocus: false });
-      notify(`Imported ${String(result.record_count || 0)} encrypted ${(result.record_count || 0) === 1 ? 'entry' : 'entries'} into ${vaultDisplayLabel(result.vault)}.`, 'success');
+      notify(
+        `Imported ${String(result.record_count || 0)} encrypted ${(result.record_count || 0) === 1 ? 'entry' : 'entries'} into ${vaultDisplayLabel(result.vault)}.`,
+        'success'
+      );
       await refreshVault();
     } catch (error) {
       console.error('Failed to import vault bundle:', error);
@@ -4182,7 +4430,7 @@
     closeUnlockDialog();
   });
 
-  unlockOverlay?.addEventListener('click', (event) => {
+  unlockOverlay?.addEventListener('click', event => {
     const dismissTrigger = event.target.closest('[data-action="dismiss-page-unlock-dialog"]');
     if (dismissTrigger) {
       closeUnlockDialog();
@@ -4193,14 +4441,14 @@
     closeCreateDialog();
   });
 
-  createOverlay?.addEventListener('click', (event) => {
+  createOverlay?.addEventListener('click', event => {
     const dismissTrigger = event.target.closest('[data-action="dismiss-page-create-dialog"]');
     if (dismissTrigger) {
       closeCreateDialog();
     }
   });
 
-  unlockPasswordInput?.addEventListener('keydown', (event) => {
+  unlockPasswordInput?.addEventListener('keydown', event => {
     if (event.key === 'Enter') {
       event.preventDefault();
       unlockVault();
@@ -4233,7 +4481,10 @@
 
   createStorageBrowseBtn?.addEventListener('click', async () => {
     try {
-      const nextPath = await browseForFolderPath('Select Folder for Custom Vault Package', createStorageBrowseBtn);
+      const nextPath = await browseForFolderPath(
+        'Select Folder for Custom Vault Package',
+        createStorageBrowseBtn
+      );
       if (!nextPath) {
         return;
       }
@@ -4247,28 +4498,28 @@
     }
   });
 
-  editVaultNameInput?.addEventListener('keydown', (event) => {
+  editVaultNameInput?.addEventListener('keydown', event => {
     if (event.key === 'Enter') {
       event.preventDefault();
       updateVaultSpace();
     }
   });
 
-  newVaultNameInput?.addEventListener('keydown', (event) => {
+  newVaultNameInput?.addEventListener('keydown', event => {
     if (event.key === 'Enter') {
       event.preventDefault();
       createVaultSpace();
     }
   });
 
-  createStorageDirectoryInput?.addEventListener('keydown', (event) => {
+  createStorageDirectoryInput?.addEventListener('keydown', event => {
     if (event.key === 'Enter') {
       event.preventDefault();
       createVaultSpace();
     }
   });
 
-  confirmVaultPasswordInput?.addEventListener('keydown', (event) => {
+  confirmVaultPasswordInput?.addEventListener('keydown', event => {
     if (event.key === 'Enter') {
       event.preventDefault();
       createVaultSpace();
@@ -4301,7 +4552,7 @@
     closeVaultEditor();
   });
 
-  editorOverlay?.addEventListener('click', (event) => {
+  editorOverlay?.addEventListener('click', event => {
     const dismissTrigger = event.target.closest('[data-action="dismiss-page-entry-dialog"]');
     if (dismissTrigger) {
       closeVaultEditor();
@@ -4334,14 +4585,14 @@
     entryAttachmentsInput?.click();
   });
 
-  entryAttachmentsInput?.addEventListener('change', (event) => {
-    addEntryAttachments(event.target.files).catch((error) => {
+  entryAttachmentsInput?.addEventListener('change', event => {
+    addEntryAttachments(event.target.files).catch(error => {
       console.error('Failed to add vault attachments:', error);
       showInlineAlert(error.message || 'Failed to add attachment.', 'error');
     });
   });
 
-  entryAttachmentsList?.addEventListener('click', (event) => {
+  entryAttachmentsList?.addEventListener('click', event => {
     const target = event.target.closest('[data-action="remove-entry-attachment"]');
     if (!target) {
       return;
@@ -4353,7 +4604,7 @@
     }
   });
 
-  recordsListEl?.addEventListener('click', (event) => {
+  recordsListEl?.addEventListener('click', event => {
     const trigger = event.target.closest('[data-record-id]');
     if (!trigger) {
       return;
@@ -4365,7 +4616,7 @@
     renderExplorerPreview();
   });
 
-  folderVaultTabsEl?.addEventListener('click', (event) => {
+  folderVaultTabsEl?.addEventListener('click', event => {
     const action = event.target.closest('[data-action]');
     if (!action) {
       return;
@@ -4382,7 +4633,7 @@
     }
   });
 
-  folderTreeEl?.addEventListener('click', (event) => {
+  folderTreeEl?.addEventListener('click', event => {
     const action = event.target.closest('[data-action]');
     if (!action) {
       return;
@@ -4433,7 +4684,7 @@
     }
   });
 
-  folderTreeEl?.addEventListener('keydown', (event) => {
+  folderTreeEl?.addEventListener('keydown', event => {
     if (event.key !== 'Enter') {
       return;
     }
@@ -4445,7 +4696,7 @@
     createFolderFromComposer();
   });
 
-  folderTreeEl?.addEventListener('dragstart', (event) => {
+  folderTreeEl?.addEventListener('dragstart', event => {
     const button = dragRecordButtonFromTarget(event.target);
     if (!button) {
       return;
@@ -4458,7 +4709,7 @@
     clearRecordDrag();
   });
 
-  folderTreeEl?.addEventListener('dragover', (event) => {
+  folderTreeEl?.addEventListener('dragover', event => {
     if (!draggedRecordID) {
       return;
     }
@@ -4476,7 +4727,7 @@
     setFolderDropTarget(folderButton);
   });
 
-  folderTreeEl?.addEventListener('dragleave', (event) => {
+  folderTreeEl?.addEventListener('dragleave', event => {
     if (!draggedRecordID) {
       return;
     }
@@ -4489,7 +4740,7 @@
     clearFolderDropTarget();
   });
 
-  folderTreeEl?.addEventListener('drop', async (event) => {
+  folderTreeEl?.addEventListener('drop', async event => {
     if (!draggedRecordID) {
       return;
     }
@@ -4503,10 +4754,13 @@
     }
 
     event.preventDefault();
-    await moveRecordToFolder(recordID, folderPathFromNodePath(folderButton.getAttribute('data-folder-path')));
+    await moveRecordToFolder(
+      recordID,
+      folderPathFromNodePath(folderButton.getAttribute('data-folder-path'))
+    );
   });
 
-  folderBreadcrumbEl?.addEventListener('click', (event) => {
+  folderBreadcrumbEl?.addEventListener('click', event => {
     const trigger = event.target.closest('[data-action="select-folder"]');
     if (!trigger) {
       return;
@@ -4514,7 +4768,7 @@
     selectFolder(trigger.getAttribute('data-folder-path'));
   });
 
-  explorerPreviewEl?.addEventListener('click', (event) => {
+  explorerPreviewEl?.addEventListener('click', event => {
     const action = event.target.closest('[data-action]');
     if (!action) {
       return;
@@ -4548,14 +4802,16 @@
 
     if (actionName === 'download-attachment') {
       const attachments = entryAttachmentsFromPayload(selectedRecord?.payload);
-      const attachment = attachments.find((item) => item.id === action.getAttribute('data-attachment-id'));
+      const attachment = attachments.find(
+        item => item.id === action.getAttribute('data-attachment-id')
+      );
       if (attachment) {
         downloadAttachment(attachment);
       }
     }
   });
 
-  explorerPreviewEl?.addEventListener('dragstart', (event) => {
+  explorerPreviewEl?.addEventListener('dragstart', event => {
     const button = dragRecordButtonFromTarget(event.target);
     if (!button) {
       return;
@@ -4572,7 +4828,7 @@
     createGrant();
   });
 
-  grantsListEl?.addEventListener('click', (event) => {
+  grantsListEl?.addEventListener('click', event => {
     const trigger = event.target.closest('[data-grant-id]');
     if (!trigger) {
       return;
@@ -4580,7 +4836,7 @@
     revokeGrant(trigger.getAttribute('data-grant-id'));
   });
 
-  window.addEventListener('message', async (event) => {
+  window.addEventListener('message', async event => {
     if (event.origin !== window.location.origin) {
       return;
     }
@@ -4631,7 +4887,7 @@
     deleteEmailAccount();
   });
 
-  emailAccountsListEl?.addEventListener('click', (event) => {
+  emailAccountsListEl?.addEventListener('click', event => {
     const trigger = event.target.closest('[data-email-account-id]');
     if (!trigger) {
       return;
@@ -4647,7 +4903,7 @@
     closeExportDialog();
   });
 
-  exportOverlay?.addEventListener('click', (event) => {
+  exportOverlay?.addEventListener('click', event => {
     const dismissTrigger = event.target.closest('[data-action="dismiss-page-export-dialog"]');
     if (dismissTrigger) {
       closeExportDialog();
@@ -4661,7 +4917,9 @@
   importFileInput?.addEventListener('change', () => {
     const file = importFileInput?.files?.[0] || null;
     if (importFileName) {
-      importFileName.textContent = file ? String(file.name || 'import-bundle.json') : 'No import file selected yet.';
+      importFileName.textContent = file
+        ? String(file.name || 'import-bundle.json')
+        : 'No import file selected yet.';
     }
   });
 
@@ -4669,14 +4927,14 @@
     syncImportDialog();
   });
 
-  importConfirmVaultPasswordInput?.addEventListener('keydown', (event) => {
+  importConfirmVaultPasswordInput?.addEventListener('keydown', event => {
     if (event.key === 'Enter') {
       event.preventDefault();
       importVault();
     }
   });
 
-  importPasswordInput?.addEventListener('keydown', (event) => {
+  importPasswordInput?.addEventListener('keydown', event => {
     if (event.key === 'Enter') {
       event.preventDefault();
       importVault();
@@ -4691,14 +4949,14 @@
     closeImportDialog();
   });
 
-  importOverlay?.addEventListener('click', (event) => {
+  importOverlay?.addEventListener('click', event => {
     const dismissTrigger = event.target.closest('[data-action="dismiss-page-import-dialog"]');
     if (dismissTrigger) {
       closeImportDialog();
     }
   });
 
-  document.addEventListener('keydown', (event) => {
+  document.addEventListener('keydown', event => {
     if (event.key !== 'Escape') {
       return;
     }
@@ -4733,7 +4991,7 @@
   const tabEls = document.querySelectorAll('#vaultTab button[data-bs-toggle="tab"]');
   if (tabEls.length && typeof bootstrap !== 'undefined' && bootstrap.Tab) {
     tabEls.forEach(tabEl => {
-      tabEl.addEventListener('shown.bs.tab', (event) => {
+      tabEl.addEventListener('shown.bs.tab', event => {
         localStorage.setItem(STORAGE_KEY_TAB, event.target.id);
       });
     });

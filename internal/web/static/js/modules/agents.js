@@ -49,18 +49,26 @@ function isWorkspaceGeneratedMCPServer(server) {
 }
 
 function supportsCodexReasoning(providerName, modelName) {
-  const provider = String(providerName || '').trim().toLowerCase();
-  const model = String(modelName || '').trim().toLowerCase();
+  const provider = String(providerName || '')
+    .trim()
+    .toLowerCase();
+  const model = String(modelName || '')
+    .trim()
+    .toLowerCase();
   return provider === 'codex' || model.includes('codex');
 }
 
 function normalizeProviderName(value) {
-  return String(value || '').trim().toLowerCase();
+  return String(value || '')
+    .trim()
+    .toLowerCase();
 }
 
 function getProviderDisplayName(providerName) {
   const normalized = normalizeProviderName(providerName);
-  const provider = availableProviders.find((item) => normalizeProviderName(item?.name) === normalized);
+  const provider = availableProviders.find(
+    item => normalizeProviderName(item?.name) === normalized
+  );
   return String(provider?.display_name || providerName || '').trim();
 }
 
@@ -91,11 +99,11 @@ async function loadSystemModelPreference(forceRefresh = false) {
   }
   if (!systemModelPreferencePromise) {
     systemModelPreferencePromise = API.get('/api/settings/system-model')
-      .then((data) => {
+      .then(data => {
         cachedSystemModelPreference = data || {};
         return cachedSystemModelPreference;
       })
-      .catch((error) => {
+      .catch(error => {
         agentsLog.debug('Failed to load system model preference', {
           error: error && error.message ? error.message : error
         });
@@ -134,8 +142,6 @@ function selectModelOption(modelSelect, providerName, modelName) {
 
   return false;
 }
-
-
 
 function updateAgentReasoningVisibility() {
   const field = document.getElementById('agentReasoningField');
@@ -260,7 +266,8 @@ function initializeAgentFormValidation() {
       maxLength: 50,
       maxLengthMessage: 'Name cannot exceed 50 characters',
       pattern: '^[a-zA-Z0-9][a-zA-Z0-9-_]*$',
-      patternMessage: 'Use letters, numbers, hyphens, and underscores. Must start with a letter or number.'
+      patternMessage:
+        'Use letters, numbers, hyphens, and underscores. Must start with a letter or number.'
     });
   }
 }
@@ -365,7 +372,7 @@ function normalizeAgentCreationFlowSelections(values) {
   const seen = new Set();
   const normalized = [];
 
-  source.forEach((value) => {
+  source.forEach(value => {
     const name = String(value || '').trim();
     const key = normalizeAgentCapabilityName(name);
     if (!name || !key || seen.has(key)) return;
@@ -473,11 +480,15 @@ async function applyPendingAgentCreationFlowToModal() {
 }
 
 function normalizeAgentCapabilityName(value) {
-  return String(value || '').trim().toLowerCase();
+  return String(value || '')
+    .trim()
+    .toLowerCase();
 }
 
 function deriveAgentRoleForType(agentType) {
-  const normalized = String(agentType || '').trim().toLowerCase();
+  const normalized = String(agentType || '')
+    .trim()
+    .toLowerCase();
   if (normalized === 'orchestration') {
     return 'orchestrator';
   }
@@ -504,14 +515,8 @@ function isAgentCreationMCPSelectionEnabled() {
 }
 
 function updateAgentCreationCapabilityCopy() {
-  const {
-    title,
-    grid,
-    mcpPanel,
-    capabilitiesIntro,
-    mcpSubtitle,
-    capabilitiesNote
-  } = getAgentCreationCapabilityElements();
+  const { title, grid, mcpPanel, capabilitiesIntro, mcpSubtitle, capabilitiesNote } =
+    getAgentCreationCapabilityElements();
   const hasWorkspace = isAgentCreationMCPSelectionEnabled();
 
   // When creating from a workspace context, hide the entire MCP/Skills section.
@@ -536,7 +541,8 @@ function updateAgentCreationCapabilityCopy() {
   }
 
   if (capabilitiesIntro) {
-    capabilitiesIntro.textContent = 'Optional. Skills attach to the agent here. If a skill needs MCP connectors, you will bind them after adding the agent to a workspace.';
+    capabilitiesIntro.textContent =
+      'Optional. Skills attach to the agent here. If a skill needs MCP connectors, you will bind them after adding the agent to a workspace.';
   }
 
   if (mcpSubtitle) {
@@ -544,13 +550,14 @@ function updateAgentCreationCapabilityCopy() {
   }
 
   if (capabilitiesNote) {
-    capabilitiesNote.textContent = 'Skills with scripts are trusted for this agent when selected. MCP connector access is configured later from the target workspace.';
+    capabilitiesNote.textContent =
+      'Skills with scripts are trusted for this agent when selected. MCP connector access is configured later from the target workspace.';
   }
 }
 
 function buildAgentCreationCommandSummary(server) {
   const pieces = [server?.command, ...(Array.isArray(server?.args) ? server.args.slice(0, 3) : [])]
-    .map((piece) => String(piece || '').trim())
+    .map(piece => String(piece || '').trim())
     .filter(Boolean);
 
   return pieces.length > 0 ? pieces.join(' ') : 'Configured MCP server';
@@ -571,9 +578,11 @@ function applyPendingAgentCreationCapabilitySuggestions() {
   }
 
   const availableMCPKeys = new Set(
-    agentCreationCapabilityState.mcpServers.map((server) => normalizeAgentCapabilityName(server?.name))
+    agentCreationCapabilityState.mcpServers.map(server =>
+      normalizeAgentCapabilityName(server?.name)
+    )
   );
-  suggestedMCPServers.forEach((serverName) => {
+  suggestedMCPServers.forEach(serverName => {
     const key = normalizeAgentCapabilityName(serverName);
     if (key && availableMCPKeys.has(key)) {
       agentCreationCapabilityState.selectedMCPServers.add(key);
@@ -581,9 +590,12 @@ function applyPendingAgentCreationCapabilitySuggestions() {
   });
 
   const skillByKey = new Map(
-    agentCreationCapabilityState.skills.map((skill) => [normalizeAgentCapabilityName(skill?.name), skill])
+    agentCreationCapabilityState.skills.map(skill => [
+      normalizeAgentCapabilityName(skill?.name),
+      skill
+    ])
   );
-  suggestedSkills.forEach((skillName) => {
+  suggestedSkills.forEach(skillName => {
     const key = normalizeAgentCapabilityName(skillName);
     const skill = skillByKey.get(key);
     if (!key || !skill) return;
@@ -591,8 +603,12 @@ function applyPendingAgentCreationCapabilitySuggestions() {
     const validationErrors = Array.isArray(skill.validationErrors) ? skill.validationErrors : [];
     if (validationErrors.length > 0) return;
 
-    const requiredMCPServers = Array.isArray(skill.requiredMCPServers) ? skill.requiredMCPServers : [];
-    const missingMCPServers = requiredMCPServers.filter((serverName) => !availableMCPKeys.has(normalizeAgentCapabilityName(serverName)));
+    const requiredMCPServers = Array.isArray(skill.requiredMCPServers)
+      ? skill.requiredMCPServers
+      : [];
+    const missingMCPServers = requiredMCPServers.filter(
+      serverName => !availableMCPKeys.has(normalizeAgentCapabilityName(serverName))
+    );
     if (missingMCPServers.length > 0) return;
 
     agentCreationCapabilityState.selectedSkills.add(key);
@@ -602,13 +618,16 @@ function applyPendingAgentCreationCapabilitySuggestions() {
 function getRequiredAgentCreationMCPServerKeys() {
   const required = new Set();
   const skillIndex = new Map(
-    agentCreationCapabilityState.skills.map((skill) => [normalizeAgentCapabilityName(skill?.name), skill])
+    agentCreationCapabilityState.skills.map(skill => [
+      normalizeAgentCapabilityName(skill?.name),
+      skill
+    ])
   );
 
-  agentCreationCapabilityState.selectedSkills.forEach((skillKey) => {
+  agentCreationCapabilityState.selectedSkills.forEach(skillKey => {
     const skill = skillIndex.get(skillKey);
     if (!skill || !Array.isArray(skill.requiredMCPServers)) return;
-    skill.requiredMCPServers.forEach((serverName) => {
+    skill.requiredMCPServers.forEach(serverName => {
       const normalized = normalizeAgentCapabilityName(serverName);
       if (normalized) required.add(normalized);
     });
@@ -619,7 +638,10 @@ function getRequiredAgentCreationMCPServerKeys() {
 
 function getSelectedAgentCreationMCPServers() {
   const serverNameByKey = new Map(
-    agentCreationCapabilityState.mcpServers.map((server) => [normalizeAgentCapabilityName(server?.name), server?.name])
+    agentCreationCapabilityState.mcpServers.map(server => [
+      normalizeAgentCapabilityName(server?.name),
+      server?.name
+    ])
   );
   const selected = new Set([
     ...agentCreationCapabilityState.selectedMCPServers,
@@ -627,19 +649,21 @@ function getSelectedAgentCreationMCPServers() {
   ]);
 
   return Array.from(selected)
-    .map((key) => serverNameByKey.get(key))
+    .map(key => serverNameByKey.get(key))
     .filter(Boolean);
 }
 
 function getSelectedAgentCreationSkills() {
-  return agentCreationCapabilityState.skills.filter((skill) =>
+  return agentCreationCapabilityState.skills.filter(skill =>
     agentCreationCapabilityState.selectedSkills.has(normalizeAgentCapabilityName(skill?.name))
   );
 }
 
 function renderAgentCreationCapabilityCounts() {
   const { mcpCount, skillCount } = getAgentCreationCapabilityElements();
-  const availableMCPCount = Array.isArray(agentCreationCapabilityState.mcpServers) ? agentCreationCapabilityState.mcpServers.length : 0;
+  const availableMCPCount = Array.isArray(agentCreationCapabilityState.mcpServers)
+    ? agentCreationCapabilityState.mcpServers.length
+    : 0;
   const requiredMCPCount = getRequiredAgentCreationMCPServerKeys().size;
   const suggestedMCPCount = agentCreationCapabilityState.selectedMCPServers.size;
   const selectedSkillCount = getSelectedAgentCreationSkills().length;
@@ -680,7 +704,9 @@ function renderAgentCreationMCPServers() {
     return;
   }
 
-  const servers = Array.isArray(agentCreationCapabilityState.mcpServers) ? agentCreationCapabilityState.mcpServers : [];
+  const servers = Array.isArray(agentCreationCapabilityState.mcpServers)
+    ? agentCreationCapabilityState.mcpServers
+    : [];
   const requiredKeys = getRequiredAgentCreationMCPServerKeys();
   const selectionEnabled = isAgentCreationMCPSelectionEnabled();
 
@@ -695,33 +721,37 @@ function renderAgentCreationMCPServers() {
     return;
   }
 
-  mcpList.innerHTML = servers.map((server) => {
-    const name = String(server?.name || '').trim();
-    const normalizedName = normalizeAgentCapabilityName(name);
-    const isRequired = requiredKeys.has(normalizedName);
-    const isSuggested = agentCreationCapabilityState.selectedMCPServers.has(normalizedName);
-    const isHighlighted = isRequired || isSuggested;
-    const commandSummary = buildAgentCreationCommandSummary(server);
-    const toolCount = Number.isFinite(server?.toolCount) ? server.toolCount : 0;
-    const status = String(server?.status || 'configured').trim() || 'configured';
-    const statusClass = status === 'running'
-      ? 'is-success'
-      : (status === 'starting' || status === 'restarting' ? 'is-warning' : 'is-muted');
-    const wrapperTag = selectionEnabled ? 'label' : 'div';
-    const selectionInput = selectionEnabled
-      ? `
+  mcpList.innerHTML = servers
+    .map(server => {
+      const name = String(server?.name || '').trim();
+      const normalizedName = normalizeAgentCapabilityName(name);
+      const isRequired = requiredKeys.has(normalizedName);
+      const isSuggested = agentCreationCapabilityState.selectedMCPServers.has(normalizedName);
+      const isHighlighted = isRequired || isSuggested;
+      const commandSummary = buildAgentCreationCommandSummary(server);
+      const toolCount = Number.isFinite(server?.toolCount) ? server.toolCount : 0;
+      const status = String(server?.status || 'configured').trim() || 'configured';
+      const statusClass =
+        status === 'running'
+          ? 'is-success'
+          : status === 'starting' || status === 'restarting'
+            ? 'is-warning'
+            : 'is-muted';
+      const wrapperTag = selectionEnabled ? 'label' : 'div';
+      const selectionInput = selectionEnabled
+        ? `
         <input type="checkbox"
                value="${escapeHtml(name)}"
                data-agent-create-mcp="true"
                ${isHighlighted ? 'checked' : ''}
                ${isRequired ? 'disabled' : ''}>
       `
-      : '';
-    const availabilityTag = selectionEnabled
-      ? '<span class="agent-create-capability-tag is-required">bind on create</span>'
-      : '<span class="agent-create-capability-tag is-muted">bind from a workspace</span>';
+        : '';
+      const availabilityTag = selectionEnabled
+        ? '<span class="agent-create-capability-tag is-required">bind on create</span>'
+        : '<span class="agent-create-capability-tag is-muted">bind from a workspace</span>';
 
-    return `
+      return `
       <${wrapperTag} class="agent-create-capability-card${isHighlighted ? ' is-selected' : ''}${isRequired ? ' is-locked' : ''}${selectionEnabled ? '' : ' is-readonly'}">
         ${selectionInput}
         <span class="agent-create-capability-copy">
@@ -743,10 +773,11 @@ function renderAgentCreationMCPServers() {
         </span>
       </${wrapperTag}>
     `;
-  }).join('');
+    })
+    .join('');
 
   if (selectionEnabled) {
-    mcpList.querySelectorAll('input[data-agent-create-mcp]').forEach((checkbox) => {
+    mcpList.querySelectorAll('input[data-agent-create-mcp]').forEach(checkbox => {
       checkbox.addEventListener('change', () => {
         const normalizedName = normalizeAgentCapabilityName(checkbox.value);
         if (!normalizedName) return;
@@ -776,9 +807,13 @@ function renderAgentCreationSkills() {
     return;
   }
 
-  const skills = Array.isArray(agentCreationCapabilityState.skills) ? agentCreationCapabilityState.skills : [];
+  const skills = Array.isArray(agentCreationCapabilityState.skills)
+    ? agentCreationCapabilityState.skills
+    : [];
   const availableMCPServerKeys = new Set(
-    agentCreationCapabilityState.mcpServers.map((server) => normalizeAgentCapabilityName(server?.name))
+    agentCreationCapabilityState.mcpServers.map(server =>
+      normalizeAgentCapabilityName(server?.name)
+    )
   );
   const selectionEnabled = isAgentCreationMCPSelectionEnabled();
 
@@ -793,17 +828,22 @@ function renderAgentCreationSkills() {
     return;
   }
 
-  skillsList.innerHTML = skills.map((skill) => {
-    const name = String(skill?.name || '').trim();
-    const normalizedName = normalizeAgentCapabilityName(name);
-    const validationErrors = Array.isArray(skill?.validationErrors) ? skill.validationErrors : [];
-    const requiredMCPServers = Array.isArray(skill?.requiredMCPServers) ? skill.requiredMCPServers.filter(Boolean) : [];
-    const missingMCPServers = requiredMCPServers.filter((serverName) => !availableMCPServerKeys.has(normalizeAgentCapabilityName(serverName)));
-    const hasBlockingIssue = validationErrors.length > 0 || missingMCPServers.length > 0;
-    const isSelected = agentCreationCapabilityState.selectedSkills.has(normalizedName);
-    const description = String(skill?.description || '').trim() || 'No description provided.';
+  skillsList.innerHTML = skills
+    .map(skill => {
+      const name = String(skill?.name || '').trim();
+      const normalizedName = normalizeAgentCapabilityName(name);
+      const validationErrors = Array.isArray(skill?.validationErrors) ? skill.validationErrors : [];
+      const requiredMCPServers = Array.isArray(skill?.requiredMCPServers)
+        ? skill.requiredMCPServers.filter(Boolean)
+        : [];
+      const missingMCPServers = requiredMCPServers.filter(
+        serverName => !availableMCPServerKeys.has(normalizeAgentCapabilityName(serverName))
+      );
+      const hasBlockingIssue = validationErrors.length > 0 || missingMCPServers.length > 0;
+      const isSelected = agentCreationCapabilityState.selectedSkills.has(normalizedName);
+      const description = String(skill?.description || '').trim() || 'No description provided.';
 
-    return `
+      return `
       <label class="agent-create-capability-card${isSelected ? ' is-selected' : ''}">
         <input type="checkbox"
                value="${escapeHtml(name)}"
@@ -820,23 +860,30 @@ function renderAgentCreationSkills() {
             </span>
           </span>
           <span class="agent-create-capability-description">${escapeHtml(description)}</span>
-          ${requiredMCPServers.length > 0 ? `
+          ${
+            requiredMCPServers.length > 0
+              ? `
             <span class="agent-create-capability-tags">
-              ${requiredMCPServers.map((serverName) => {
-                const missing = missingMCPServers.includes(serverName);
-                return `<span class="agent-create-capability-tag ${missing ? 'is-danger' : 'is-required'}">${escapeHtml(serverName)}</span>`;
-              }).join('')}
+              ${requiredMCPServers
+                .map(serverName => {
+                  const missing = missingMCPServers.includes(serverName);
+                  return `<span class="agent-create-capability-tag ${missing ? 'is-danger' : 'is-required'}">${escapeHtml(serverName)}</span>`;
+                })
+                .join('')}
             </span>
-          ` : ''}
+          `
+              : ''
+          }
           ${requiredMCPServers.length > 0 && !selectionEnabled ? '<span class="agent-create-capability-meta">Bind these connectors after adding the agent to a workspace.</span>' : ''}
           ${validationErrors.length > 0 ? `<span class="agent-create-capability-meta">${escapeHtml(validationErrors.join('; '))}</span>` : ''}
           ${missingMCPServers.length > 0 ? `<span class="agent-create-capability-meta">Missing MCP servers: ${escapeHtml(missingMCPServers.join(', '))}</span>` : ''}
         </span>
       </label>
     `;
-  }).join('');
+    })
+    .join('');
 
-  skillsList.querySelectorAll('input[data-agent-create-skill]').forEach((checkbox) => {
+  skillsList.querySelectorAll('input[data-agent-create-skill]').forEach(checkbox => {
     checkbox.addEventListener('change', () => {
       const normalizedName = normalizeAgentCapabilityName(checkbox.value);
       if (!normalizedName) return;
@@ -875,8 +922,8 @@ async function loadAgentCreationCapabilityCatalog() {
       const stats = data?.stats && typeof data.stats === 'object' ? data.stats : {};
       const servers = Array.isArray(data?.servers) ? data.servers : [];
       agentCreationCapabilityState.mcpServers = servers
-        .filter((server) => !isWorkspaceGeneratedMCPServer(server))
-        .map((server) => {
+        .filter(server => !isWorkspaceGeneratedMCPServer(server))
+        .map(server => {
           const name = String(server?.name || '').trim();
           if (!name) return null;
           const stat = stats[name] || {};
@@ -907,7 +954,7 @@ async function loadAgentCreationCapabilityCatalog() {
       const data = await response.json().catch(() => ({}));
       const skills = Array.isArray(data?.skills) ? data.skills : [];
       agentCreationCapabilityState.skills = skills
-        .map((skill) => {
+        .map(skill => {
           const name = String(skill?.name || '').trim();
           if (!name) return null;
           return {
@@ -915,7 +962,9 @@ async function loadAgentCreationCapabilityCatalog() {
             description: skill?.description || '',
             source: skill?.source || 'repo',
             hasScripts: Boolean(skill?.has_scripts),
-            requiredMCPServers: Array.isArray(skill?.required_mcp_servers) ? skill.required_mcp_servers : [],
+            requiredMCPServers: Array.isArray(skill?.required_mcp_servers)
+              ? skill.required_mcp_servers
+              : [],
             validationErrors: Array.isArray(skill?.validation_errors) ? skill.validation_errors : []
           };
         })
@@ -944,30 +993,32 @@ async function applyAgentCreationCapabilities(agentName) {
     failures: []
   };
 
-  await Promise.all(selectedSkills.map(async (skill) => {
-    try {
-      await API.post(`/api/skills/${encodeURIComponent(skill.name)}/enable`, {
-        agent: agentName,
-        enabled: true
-      });
-      summary.skillsEnabled += 1;
-    } catch (error) {
-      summary.failures.push(`Skill ${skill.name}: ${error.message || 'failed to enable'}`);
-      return;
-    }
-
-    if (skill.hasScripts) {
+  await Promise.all(
+    selectedSkills.map(async skill => {
       try {
-        await API.post(`/api/skills/${encodeURIComponent(skill.name)}/trust`, {
+        await API.post(`/api/skills/${encodeURIComponent(skill.name)}/enable`, {
           agent: agentName,
-          trusted: true
+          enabled: true
         });
-        summary.scriptedSkillsTrusted += 1;
+        summary.skillsEnabled += 1;
       } catch (error) {
-        summary.failures.push(`Skill ${skill.name}: ${error.message || 'failed to trust'}`);
+        summary.failures.push(`Skill ${skill.name}: ${error.message || 'failed to enable'}`);
+        return;
       }
-    }
-  }));
+
+      if (skill.hasScripts) {
+        try {
+          await API.post(`/api/skills/${encodeURIComponent(skill.name)}/trust`, {
+            agent: agentName,
+            trusted: true
+          });
+          summary.scriptedSkillsTrusted += 1;
+        } catch (error) {
+          summary.failures.push(`Skill ${skill.name}: ${error.message || 'failed to trust'}`);
+        }
+      }
+    })
+  );
 
   return summary;
 }
@@ -978,7 +1029,9 @@ function describeAgentCreationCapabilities(summary) {
     parts.push(`${summary.skillsEnabled} skill${summary.skillsEnabled === 1 ? '' : 's'}`);
   }
   if (summary.scriptedSkillsTrusted > 0) {
-    parts.push(`${summary.scriptedSkillsTrusted} scripted trust${summary.scriptedSkillsTrusted === 1 ? '' : 's'}`);
+    parts.push(
+      `${summary.scriptedSkillsTrusted} scripted trust${summary.scriptedSkillsTrusted === 1 ? '' : 's'}`
+    );
   }
 
   if (parts.length === 0) return '';
@@ -991,23 +1044,31 @@ function findAgentCreationWorkspaceBindingByServerName(workspaceData, serverName
 
   const target = normalizeAgentCapabilityName(serverName);
   const bindings = Array.isArray(workspaceData.mcp_bindings) ? workspaceData.mcp_bindings : [];
-  return bindings.find((binding) => normalizeAgentCapabilityName(binding?.server_name) === target) || null;
+  return (
+    bindings.find(binding => normalizeAgentCapabilityName(binding?.server_name) === target) || null
+  );
 }
 
 function getAgentCreationWorkspaceAccessEntry(workspaceData, agentInstanceId) {
   if (!workspaceData || !agentInstanceId) return null;
 
   const target = String(agentInstanceId || '').trim();
-  const entries = Array.isArray(workspaceData.agent_mcp_access) ? workspaceData.agent_mcp_access : [];
-  return entries.find((entry) => String(entry?.agent_instance_id || '').trim() === target) || null;
+  const entries = Array.isArray(workspaceData.agent_mcp_access)
+    ? workspaceData.agent_mcp_access
+    : [];
+  return entries.find(entry => String(entry?.agent_instance_id || '').trim() === target) || null;
 }
 
 function upsertAgentCreationWorkspaceBinding(workspaceData, nextBinding) {
   if (!workspaceData || !nextBinding) return;
 
-  const bindings = Array.isArray(workspaceData.mcp_bindings) ? workspaceData.mcp_bindings.slice() : [];
+  const bindings = Array.isArray(workspaceData.mcp_bindings)
+    ? workspaceData.mcp_bindings.slice()
+    : [];
   const bindingId = String(nextBinding.id || '').trim();
-  const existingIndex = bindings.findIndex((binding) => String(binding?.id || '').trim() === bindingId);
+  const existingIndex = bindings.findIndex(
+    binding => String(binding?.id || '').trim() === bindingId
+  );
   if (existingIndex >= 0) {
     bindings[existingIndex] = nextBinding;
   } else {
@@ -1019,9 +1080,13 @@ function upsertAgentCreationWorkspaceBinding(workspaceData, nextBinding) {
 function upsertAgentCreationWorkspaceAccessEntry(workspaceData, nextEntry) {
   if (!workspaceData || !nextEntry) return;
 
-  const entries = Array.isArray(workspaceData.agent_mcp_access) ? workspaceData.agent_mcp_access.slice() : [];
+  const entries = Array.isArray(workspaceData.agent_mcp_access)
+    ? workspaceData.agent_mcp_access.slice()
+    : [];
   const agentInstanceId = String(nextEntry.agent_instance_id || '').trim();
-  const existingIndex = entries.findIndex((entry) => String(entry?.agent_instance_id || '').trim() === agentInstanceId);
+  const existingIndex = entries.findIndex(
+    entry => String(entry?.agent_instance_id || '').trim() === agentInstanceId
+  );
   if (existingIndex >= 0) {
     entries[existingIndex] = nextEntry;
   } else {
@@ -1031,21 +1096,24 @@ function upsertAgentCreationWorkspaceAccessEntry(workspaceData, nextEntry) {
 }
 
 function mergeAgentCreationBindingIDs(values = []) {
-  return Array.from(new Set(
-    values
-      .map((value) => String(value || '').trim())
-      .filter(Boolean)
-  ));
+  return Array.from(new Set(values.map(value => String(value || '').trim()).filter(Boolean)));
 }
 
-async function bindAgentCreationMCPServersForWorkspace(workspaceId, agentInstanceId, serverNames, workspaceData) {
+async function bindAgentCreationMCPServersForWorkspace(
+  workspaceId,
+  agentInstanceId,
+  serverNames,
+  workspaceData
+) {
   const normalizedWorkspaceId = String(workspaceId || '').trim();
   const normalizedAgentInstanceId = String(agentInstanceId || '').trim();
-  const dedupedServerNames = Array.from(new Set(
-    (Array.isArray(serverNames) ? serverNames : [])
-      .map((value) => String(value || '').trim())
-      .filter(Boolean)
-  ));
+  const dedupedServerNames = Array.from(
+    new Set(
+      (Array.isArray(serverNames) ? serverNames : [])
+        .map(value => String(value || '').trim())
+        .filter(Boolean)
+    )
+  );
   const summary = {
     connectorsReady: 0,
     failures: []
@@ -1055,9 +1123,10 @@ async function bindAgentCreationMCPServersForWorkspace(workspaceId, agentInstanc
     return summary;
   }
 
-  const localWorkspaceData = workspaceData && typeof workspaceData === 'object'
-    ? workspaceData
-    : { mcp_bindings: [], agent_mcp_access: [] };
+  const localWorkspaceData =
+    workspaceData && typeof workspaceData === 'object'
+      ? workspaceData
+      : { mcp_bindings: [], agent_mcp_access: [] };
 
   if (!Array.isArray(localWorkspaceData.mcp_bindings)) {
     localWorkspaceData.mcp_bindings = [];
@@ -1071,10 +1140,13 @@ async function bindAgentCreationMCPServersForWorkspace(workspaceId, agentInstanc
 
     try {
       if (!binding) {
-        const created = await API.post(`/api/workspaces/${encodeURIComponent(normalizedWorkspaceId)}/mcp-bindings`, {
-          server_name: serverName,
-          enabled: true
-        });
+        const created = await API.post(
+          `/api/workspaces/${encodeURIComponent(normalizedWorkspaceId)}/mcp-bindings`,
+          {
+            server_name: serverName,
+            enabled: true
+          }
+        );
         binding = created?.binding || {
           id: '',
           server_name: serverName,
@@ -1100,7 +1172,10 @@ async function bindAgentCreationMCPServersForWorkspace(workspaceId, agentInstanc
       continue;
     }
 
-    const accessEntry = getAgentCreationWorkspaceAccessEntry(localWorkspaceData, normalizedAgentInstanceId);
+    const accessEntry = getAgentCreationWorkspaceAccessEntry(
+      localWorkspaceData,
+      normalizedAgentInstanceId
+    );
     const nextBindingIDs = mergeAgentCreationBindingIDs([
       ...(Array.isArray(accessEntry?.enabled_binding_ids) ? accessEntry.enabled_binding_ids : []),
       bindingId
@@ -1118,7 +1193,9 @@ async function bindAgentCreationMCPServersForWorkspace(workspaceId, agentInstanc
       });
       summary.connectorsReady += 1;
     } catch (error) {
-      summary.failures.push(`MCP ${serverName}: ${error.message || 'failed to update agent access'}`);
+      summary.failures.push(
+        `MCP ${serverName}: ${error.message || 'failed to update agent access'}`
+      );
     }
   }
 
@@ -1143,18 +1220,26 @@ async function applyPendingAgentCreationFollowUp(agentName) {
 
   if (flow.workspaceId) {
     try {
-      const result = await API.post(`/api/workspaces/${encodeURIComponent(flow.workspaceId)}/agents`, {
-        agent_name: agentName
-      });
+      const result = await API.post(
+        `/api/workspaces/${encodeURIComponent(flow.workspaceId)}/agents`,
+        {
+          agent_name: agentName
+        }
+      );
       summary.workspaceAdded = true;
       workspaceAgentInstanceId = String(result?.agent_instance?.id || '').trim();
-      workspaceData = result?.workspace && typeof result.workspace === 'object'
-        ? {
-            ...result.workspace,
-            mcp_bindings: Array.isArray(result.workspace.mcp_bindings) ? result.workspace.mcp_bindings : [],
-            agent_mcp_access: Array.isArray(result.workspace.agent_mcp_access) ? result.workspace.agent_mcp_access : []
-          }
-        : { mcp_bindings: [], agent_mcp_access: [] };
+      workspaceData =
+        result?.workspace && typeof result.workspace === 'object'
+          ? {
+              ...result.workspace,
+              mcp_bindings: Array.isArray(result.workspace.mcp_bindings)
+                ? result.workspace.mcp_bindings
+                : [],
+              agent_mcp_access: Array.isArray(result.workspace.agent_mcp_access)
+                ? result.workspace.agent_mcp_access
+                : []
+            }
+          : { mcp_bindings: [], agent_mcp_access: [] };
       if (window.EventBus) {
         EventBus.emit('workspace:agents:updated', { workspaceId: flow.workspaceId, agentName });
       }
@@ -1182,7 +1267,9 @@ async function applyPendingAgentCreationFollowUp(agentName) {
 
   if (flow.taskId && flow.assignTask && (!flow.workspaceId || summary.workspaceAdded)) {
     try {
-      await API.put(`/api/orchestration/tasks/${encodeURIComponent(flow.taskId)}`, { to: agentName });
+      await API.put(`/api/orchestration/tasks/${encodeURIComponent(flow.taskId)}`, {
+        to: agentName
+      });
       summary.taskAssigned = true;
       if (window.EventBus) {
         EventBus.emit('task:updated', { workspaceId: flow.workspaceId, taskId: flow.taskId });
@@ -1201,7 +1288,9 @@ function describeAgentCreationFollowUp(summary) {
     parts.push('added to the workspace');
   }
   if (summary.workspaceMCPReady > 0) {
-    parts.push(`${summary.workspaceMCPReady} MCP connector${summary.workspaceMCPReady === 1 ? '' : 's'} ready in the workspace`);
+    parts.push(
+      `${summary.workspaceMCPReady} MCP connector${summary.workspaceMCPReady === 1 ? '' : 's'} ready in the workspace`
+    );
   }
   if (summary.taskAssigned) {
     parts.push('assigned to the task');
@@ -1236,11 +1325,14 @@ async function createNewAgent() {
   // Set loading state
   const originalText = createBtn.textContent;
   createBtn.disabled = true;
-  createBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status"></span>Creating...';
+  createBtn.innerHTML =
+    '<span class="spinner-border spinner-border-sm me-2" role="status"></span>Creating...';
 
   try {
     const requestBody = { name: agentName };
-    requestBody.allow_web_search = agentAllowWebSearchInput ? Boolean(agentAllowWebSearchInput.checked) : true;
+    requestBody.allow_web_search = agentAllowWebSearchInput
+      ? Boolean(agentAllowWebSearchInput.checked)
+      : true;
 
     // Add agent type if provided
     if (agentTypeInput && agentTypeInput.value) {
@@ -1259,7 +1351,10 @@ async function createNewAgent() {
       if (selectedProvider) {
         requestBody.llm_provider = selectedProvider;
       }
-      if (supportsCodexReasoning(selectedProvider, agentModelInput.value) && agentReasoningInput?.value) {
+      if (
+        supportsCodexReasoning(selectedProvider, agentModelInput.value) &&
+        agentReasoningInput?.value
+      ) {
         requestBody.reasoning_effort = agentReasoningInput.value;
       }
     }
@@ -1287,7 +1382,8 @@ async function createNewAgent() {
     };
 
     if (capabilitySelections.skills.length > 0) {
-      createBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status"></span>Configuring...';
+      createBtn.innerHTML =
+        '<span class="spinner-border spinner-border-sm me-2" role="status"></span>Configuring...';
       capabilitySummary = await applyAgentCreationCapabilities(agentName);
     }
 
@@ -1297,7 +1393,8 @@ async function createNewAgent() {
       failures: []
     };
     if (pendingAgentCreationFlow.workspaceId || pendingAgentCreationFlow.taskId) {
-      createBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status"></span>Linking...';
+      createBtn.innerHTML =
+        '<span class="spinner-border spinner-border-sm me-2" role="status"></span>Linking...';
       followUpSummary = await applyPendingAgentCreationFollowUp(agentName);
     }
 
@@ -1314,7 +1411,9 @@ async function createNewAgent() {
     }
     if (agentModelInput) {
       // Select first available tool-calling model
-      const firstToolCallingOption = agentModelInput.querySelector('option[data-type="tool-calling"]:not([disabled])');
+      const firstToolCallingOption = agentModelInput.querySelector(
+        'option[data-type="tool-calling"]:not([disabled])'
+      );
       if (firstToolCallingOption) {
         agentModelInput.value = firstToolCallingOption.value;
       }
@@ -1346,7 +1445,9 @@ async function createNewAgent() {
       const detailParts = [capabilityDetails, followUpDetails].filter(Boolean);
       const detailText = detailParts.length > 0 ? ` with ${detailParts.join(' and ')}` : '';
       if (failureCount > 0) {
-        Toast.warning(`Agent "${agentName}" created${detailText}, but ${failureCount} follow-up update${failureCount === 1 ? '' : 's'} failed.`);
+        Toast.warning(
+          `Agent "${agentName}" created${detailText}, but ${failureCount} follow-up update${failureCount === 1 ? '' : 's'} failed.`
+        );
       } else {
         Toast.success(`Agent "${agentName}" created successfully${detailText}.`);
       }
@@ -1368,7 +1469,6 @@ async function createNewAgent() {
     // Force page reload to ensure UI updates
     agentsLog.debug('Reloading page to show new agent...');
     window.location.reload();
-
   } catch (error) {
     agentsLog.error('Error creating agent', error);
     if (window.Toast) {
@@ -1390,10 +1490,9 @@ async function loadAgentsForSidebar() {
     // Every definition is listed — entry agents are no longer hidden from the
     // global sidebar; their workspace membership is surfaced elsewhere
     // (PRD FR6). Keep only well-formed entries.
-    const visible = all.filter((agent) => !!agent);
+    const visible = all.filter(agent => !!agent);
     agentsLog.debug('Received agents', { count: all.length, visible: visible.length });
     displayAgents(visible, resolveSidebarCurrentAgent());
-
   } catch (error) {
     agentsLog.error('Error loading agents', error);
     const agentsList = document.getElementById('agentsList');
@@ -1442,7 +1541,10 @@ function resolveSidebarCurrentAgent() {
 }
 
 function renderAgents() {
-  agentsLog.debug('Rendering agents', { total: allAgents?.length || 0, visible: visibleAgentCount });
+  agentsLog.debug('Rendering agents', {
+    total: allAgents?.length || 0,
+    visible: visibleAgentCount
+  });
   const agentsList = document.getElementById('agentsList');
   if (!agentsList) {
     agentsLog.warn('agentsList element not found in renderAgents');
@@ -1457,7 +1559,6 @@ function renderAgents() {
 
   // Add each visible agent
   agentsToShow.forEach(agent => {
-    
     const agentItem = createAgentElement(agent, currentAgentName);
     agentsList.appendChild(agentItem);
   });
@@ -1528,7 +1629,7 @@ function getAgentName(agent) {
 }
 
 function getAgentType(agent) {
-  return typeof agent === 'string' ? 'tool-calling' : (agent?.type || 'tool-calling');
+  return typeof agent === 'string' ? 'tool-calling' : agent?.type || 'tool-calling';
 }
 
 function getAgentStatus(agent) {
@@ -1536,15 +1637,25 @@ function getAgentStatus(agent) {
 }
 
 function isSystemAssistantAgentName(agentName) {
-  return String(agentName || '').trim().toLowerCase() === SYSTEM_ASSISTANT_AGENT_NAME.toLowerCase();
+  return (
+    String(agentName || '')
+      .trim()
+      .toLowerCase() === SYSTEM_ASSISTANT_AGENT_NAME.toLowerCase()
+  );
 }
 
 // Built-in CLI agents (Claude Code, Codex, Gemini CLI) are projected from the
 // CLI registry, not stored records; the backend rejects deleting them.
 function isCLIAgentEntry(agent) {
   if (typeof agent === 'string') return false;
-  return String(agent?.source || '').trim().toLowerCase() === 'cli'
-    || String(agent?.role || '').trim().toLowerCase() === 'cli_agent';
+  return (
+    String(agent?.source || '')
+      .trim()
+      .toLowerCase() === 'cli' ||
+    String(agent?.role || '')
+      .trim()
+      .toLowerCase() === 'cli_agent'
+  );
 }
 
 function normalizeAgentEvolution(agent) {
@@ -1554,8 +1665,13 @@ function normalizeAgentEvolution(agent) {
   }
 
   const level = Number.isFinite(Number(evolution.level)) ? Math.max(0, Number(evolution.level)) : 0;
-  const experience = Number.isFinite(Number(evolution.experience)) ? Math.max(0, Number(evolution.experience)) : 0;
-  const stage = typeof evolution.stage === 'string' && evolution.stage.trim() ? evolution.stage.trim() : 'spark';
+  const experience = Number.isFinite(Number(evolution.experience))
+    ? Math.max(0, Number(evolution.experience))
+    : 0;
+  const stage =
+    typeof evolution.stage === 'string' && evolution.stage.trim()
+      ? evolution.stage.trim()
+      : 'spark';
   const path = typeof evolution.path === 'string' ? evolution.path.trim() : '';
 
   return { level, experience, stage, path };
@@ -1627,8 +1743,8 @@ function createAgentElement(agent, currentAgent) {
   // Format type label
   const typeLabels = {
     'tool-calling': 'Tool Calling',
-    'general': 'General',
-    'research': 'Research'
+    general: 'General',
+    research: 'Research'
   };
   const typeLabel = typeLabels[agentType] || agentType;
 
@@ -1643,7 +1759,9 @@ function createAgentElement(agent, currentAgent) {
   const safeAgentNameJs = escapeJs(agentName);
   const safeAgentNameAttr = escapeAttr(agentName);
   const safeTypeLabel = escapeHtml(typeLabel);
-  const evolutionSummary = isSystemAssistant ? renderAssistantProgressSlot() : renderAgentEvolutionSummary(evolution);
+  const evolutionSummary = isSystemAssistant
+    ? renderAssistantProgressSlot()
+    : renderAgentEvolutionSummary(evolution);
   const disabledBadge = isDisabled
     ? '<span class="badge" style="background: rgba(234, 179, 8, 0.16); color: #ca8a04; font-size: 0.62rem;">Disabled</span>'
     : '';
@@ -1665,7 +1783,9 @@ function createAgentElement(agent, currentAgent) {
   // backend rejects it, so render the control as a disabled, non-clickable icon.
   const deleteBlockedReason = isSystemAssistant
     ? 'System assistant cannot be deleted.'
-    : (isCLIAgentEntry(agent) ? 'Built-in CLI agent cannot be deleted.' : '');
+    : isCLIAgentEntry(agent)
+      ? 'Built-in CLI agent cannot be deleted.'
+      : '';
   const deleteIconSvg = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
               <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
             </svg>`;
@@ -1807,7 +1927,6 @@ async function newChatWithAgent(agentName) {
 
     // Show workspace picker modal
     showWorkspacePickerForAgent(agentName, folders);
-
   } catch (error) {
     agentsLog.error('Error fetching workspaces', error);
     // Fallback: create session without workspace
@@ -1830,7 +1949,7 @@ function showWorkspacePickerForAgent(agentName, folders) {
   modal.style.backgroundColor = 'rgba(0,0,0,0.5)';
   modal.style.zIndex = '10600';
 
-  const escapeHtml = (str) => {
+  const escapeHtml = str => {
     const div = document.createElement('div');
     div.textContent = str;
     return div.innerHTML;
@@ -1857,14 +1976,18 @@ function showWorkspacePickerForAgent(agentName, folders) {
               </svg>
               <span>No workspace (root)</span>
             </button>
-            ${folders.map(folder => `
+            ${folders
+              .map(
+                folder => `
               <button class="workspace-picker-item modern-btn modern-btn-secondary w-100 mb-2 text-start" data-folder="${folder.id}">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-2" style="opacity: 0.6;">
                   <path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6H12L10,4Z"/>
                 </svg>
                 <span>${escapeHtml(folder.name)}</span>
               </button>
-            `).join('')}
+            `
+              )
+              .join('')}
           </div>
         </div>
       </div>
@@ -1895,7 +2018,6 @@ function showWorkspacePickerForAgent(agentName, folders) {
 
         // Refresh agent list to show new current agent
         await loadAgentsForSidebar();
-
       } catch (error) {
         agentsLog.error('Error creating session', error);
         if (typeof showNotification === 'function') {
@@ -1907,12 +2029,12 @@ function showWorkspacePickerForAgent(agentName, folders) {
 
   // Handle close
   modal.querySelector('.btn-close').addEventListener('click', () => modal.remove());
-  modal.addEventListener('click', (e) => {
+  modal.addEventListener('click', e => {
     if (e.target === modal) modal.remove();
   });
 
   // Handle escape key
-  const handleEscape = (e) => {
+  const handleEscape = e => {
     if (e.key === 'Escape') {
       modal.remove();
       document.removeEventListener('keydown', handleEscape);
@@ -1940,7 +2062,6 @@ async function deleteAgent(agentName) {
     if (window.Toast) {
       Toast.success(`Agent "${agentName}" deleted`);
     }
-
   } catch (error) {
     agentsLog.error('Error deleting agent', error);
     if (window.Toast) {
@@ -1976,7 +2097,7 @@ function setupAgentManagement() {
   // Handle form submission with Enter key
   const addAgentForm = document.getElementById('addAgentForm');
   if (addAgentForm) {
-    addAgentForm.addEventListener('submit', (e) => {
+    addAgentForm.addEventListener('submit', e => {
       e.preventDefault();
       createNewAgent();
     });
@@ -2001,7 +2122,7 @@ function setupAgentManagement() {
   const agentTemperatureInput = document.getElementById('agentTemperature');
   const temperatureValueSpan = document.getElementById('temperatureValue');
   if (agentTemperatureInput && temperatureValueSpan) {
-    agentTemperatureInput.addEventListener('input', (e) => {
+    agentTemperatureInput.addEventListener('input', e => {
       temperatureValueSpan.textContent = e.target.value;
     });
   }
@@ -2010,7 +2131,7 @@ function setupAgentManagement() {
   const agentTypeInput = document.getElementById('agentType');
   const agentModelInput = document.getElementById('agentModel');
   if (agentTypeInput && agentModelInput) {
-    agentTypeInput.addEventListener('change', async (e) => {
+    agentTypeInput.addEventListener('change', async e => {
       filterModelsByType(e.target.value, agentModelInput);
       setAgentModelRecommendationMessage('');
       updateAgentReasoningVisibility();
@@ -2035,7 +2156,11 @@ let baseLLMAvailable = false;
 let baseSystemModelConfigured = false;
 
 function isBaseAutoConfigFallback(config) {
-  return Boolean(config && typeof config.reasoning === 'string' && config.reasoning.startsWith('Auto-config failed'));
+  return Boolean(
+    config &&
+    typeof config.reasoning === 'string' &&
+    config.reasoning.startsWith('Auto-config failed')
+  );
 }
 
 // Setup auto-config event listeners
@@ -2044,13 +2169,13 @@ function setupAutoConfigListeners() {
   const configModeAuto = document.getElementById('baseConfigModeAuto');
 
   if (configModeManual) {
-    configModeManual.addEventListener('change', function() {
+    configModeManual.addEventListener('change', function () {
       if (this.checked) handleBaseConfigModeChange('manual');
     });
   }
 
   if (configModeAuto) {
-    configModeAuto.addEventListener('change', async function() {
+    configModeAuto.addEventListener('change', async function () {
       if (this.checked) {
         await checkBaseLLMAvailability();
         handleBaseConfigModeChange('auto');
@@ -2076,7 +2201,11 @@ async function checkBaseLLMAvailability() {
     agentsLog.error('Failed to check LLM availability', error);
     baseLLMAvailable = false;
     baseSystemModelConfigured = false;
-    return { available: false, system_model_configured: false, message: 'Failed to check LLM availability' };
+    return {
+      available: false,
+      system_model_configured: false,
+      message: 'Failed to check LLM availability'
+    };
   }
 }
 
@@ -2102,7 +2231,8 @@ function handleBaseConfigModeChange(mode) {
         if (!baseSystemModelConfigured) {
           llmWarningMessage.textContent = 'Auto-config requires a System Model to be configured.';
         } else {
-          llmWarningMessage.textContent = 'Auto-config requires an LLM provider. Please set up an API key or install Ollama.';
+          llmWarningMessage.textContent =
+            'Auto-config requires an LLM provider. Please set up an API key or install Ollama.';
         }
       }
     }
@@ -2124,7 +2254,9 @@ async function generateBaseAutoConfig() {
 
   if (!description) {
     if (window.Toast) {
-      Toast.warning('Please describe what you want your agent to do', { title: 'Missing Description' });
+      Toast.warning('Please describe what you want your agent to do', {
+        title: 'Missing Description'
+      });
     }
     return;
   }
@@ -2166,7 +2298,6 @@ async function generateBaseAutoConfig() {
     if (fallback && window.Toast) {
       Toast.warning('Auto-config failed, using defaults. Review the settings before saving.');
     }
-
   } catch (error) {
     agentsLog.error('Auto-config error', error);
     if (autoConfigStatus) {
@@ -2323,7 +2454,6 @@ async function updateAgentSettings(agentName, accordionId) {
     if (newAgentName !== agentName) {
       await loadAgentsForSidebar();
     }
-
   } catch (error) {
     agentsLog.error('Error saving settings', error);
     if (typeof showNotification === 'function') {
@@ -2341,7 +2471,7 @@ function setupAccordionListeners() {
     const modelSelect = document.getElementById(`gptModelSelect-${accordionId}`);
 
     if (temperatureValue) {
-      slider.addEventListener('input', function(e) {
+      slider.addEventListener('input', function (e) {
         // Enforce GPT-5 temperature restriction
         if (modelSelect && modelSelect.value.includes('gpt-5')) {
           e.target.value = 1.0;
@@ -2359,7 +2489,7 @@ function setupAccordionListeners() {
     const temperatureSlider = document.getElementById(`temperatureSlider-${accordionId}`);
     const temperatureValue = document.getElementById(`temperatureValue-${accordionId}`);
 
-    modelSelect.addEventListener('change', function() {
+    modelSelect.addEventListener('change', function () {
       if (this.value.includes('gpt-5')) {
         if (temperatureSlider) {
           temperatureSlider.value = 1.0;
@@ -2428,9 +2558,10 @@ async function loadAgentSettings(agentName, agentType, accordionId) {
     // Update temperature slider
     const temperatureSlider = document.getElementById(`temperatureSlider-${accordionId}`);
     const temperatureValue = document.getElementById(`temperatureValue-${accordionId}`);
-    let temperatureValueData = (settings.Settings && typeof settings.Settings.temperature !== 'undefined')
-      ? settings.Settings.temperature
-      : settings.temperature;
+    let temperatureValueData =
+      settings.Settings && typeof settings.Settings.temperature !== 'undefined'
+        ? settings.Settings.temperature
+        : settings.temperature;
 
     // Force temperature to 1.0 for GPT-5 models
     if (modelValue && modelValue.includes('gpt-5')) {
@@ -2449,7 +2580,8 @@ async function loadAgentSettings(agentName, agentType, accordionId) {
 
     // Update system prompt
     const systemPromptInput = document.getElementById(`systemPromptInput-${accordionId}`);
-    const systemPromptValue = (settings.Settings && settings.Settings.system_prompt) || settings.system_prompt || '';
+    const systemPromptValue =
+      (settings.Settings && settings.Settings.system_prompt) || settings.system_prompt || '';
     if (systemPromptInput) {
       systemPromptInput.value = systemPromptValue;
     }
@@ -2459,7 +2591,6 @@ async function loadAgentSettings(agentName, agentType, accordionId) {
 
     // Load MCP servers for this agent
     await loadAgentMCPServers(agentName, accordionId);
-
   } catch (error) {
     agentsLog.error('Error loading settings for agent', { agent: agentName, error });
   }
@@ -2481,7 +2612,13 @@ async function loadAgentPlugins(agentName, accordionId) {
     const activePluginNames = new Set(
       activePlugins.plugins
         .filter(p => p.enabled === true)
-        .map(p => p.name.toLowerCase().replace(/_/g, '-').replace(/-\d+\.\d+\.\d+(?:[-+][\w.]+)?$/, '').trim())
+        .map(p =>
+          p.name
+            .toLowerCase()
+            .replace(/_/g, '-')
+            .replace(/-\d+\.\d+\.\d+(?:[-+][\w.]+)?$/, '')
+            .trim()
+        )
     );
 
     // Filter to only show installed plugins (those with a local path in uploaded_plugins)
@@ -2500,7 +2637,9 @@ async function loadAgentPlugins(agentName, accordionId) {
     // Render plugins list
     let html = '';
     localPlugins.forEach(plugin => {
-      const normalizedName = stripVersionSuffix(plugin.name.toLowerCase().replace(/_/g, '-')).trim();
+      const normalizedName = stripVersionSuffix(
+        plugin.name.toLowerCase().replace(/_/g, '-')
+      ).trim();
       const isActive = activePluginNames.has(normalizedName);
 
       html += `
@@ -2522,7 +2661,6 @@ async function loadAgentPlugins(agentName, accordionId) {
     });
 
     pluginsList.innerHTML = html;
-
   } catch (error) {
     agentsLog.error('Error loading plugins for agent', { agent: agentName, error });
     pluginsList.innerHTML = '<div class="text-danger small">Failed to load plugins</div>';
@@ -2554,7 +2692,9 @@ async function toggleAgentPlugin(agentName, pluginName, pluginPath, enabled, acc
       }
     } else {
       // Disable the plugin for this agent
-      await API.delete(`/api/plugins?name=${encodeURIComponent(pluginName)}&agent=${encodeURIComponent(agentName)}`);
+      await API.delete(
+        `/api/plugins?name=${encodeURIComponent(pluginName)}&agent=${encodeURIComponent(agentName)}`
+      );
     }
 
     // Show success notification
@@ -2564,7 +2704,6 @@ async function toggleAgentPlugin(agentName, pluginName, pluginPath, enabled, acc
 
     // Reload plugins list to update state
     await loadAgentPlugins(agentName, accordionId);
-
   } catch (error) {
     agentsLog.error('Error toggling plugin', error);
 
@@ -2575,7 +2714,10 @@ async function toggleAgentPlugin(agentName, pluginName, pluginPath, enabled, acc
 
     // Show error notification
     if (typeof showNotification === 'function') {
-      showNotification(`Failed to ${enabled ? 'enable' : 'disable'} plugin: ${error.message}`, 'error');
+      showNotification(
+        `Failed to ${enabled ? 'enable' : 'disable'} plugin: ${error.message}`,
+        'error'
+      );
     }
   }
 }

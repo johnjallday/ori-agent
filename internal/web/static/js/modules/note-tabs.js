@@ -35,7 +35,7 @@ export function initialState(initialNoteId = null) {
   return {
     panes: [{ activeId: initialNoteId, tabs }],
     splitMode: 'none',
-    focusedPaneIndex: 0,
+    focusedPaneIndex: 0
   };
 }
 
@@ -47,7 +47,7 @@ function cloneState(state) {
   return {
     panes: state.panes.map(clonePane),
     splitMode: state.splitMode,
-    focusedPaneIndex: state.focusedPaneIndex,
+    focusedPaneIndex: state.focusedPaneIndex
   };
 }
 
@@ -292,7 +292,7 @@ if (typeof window !== 'undefined') {
     moveTab,
     hydrate,
     allOpenNoteIds,
-    activeNoteIdFor,
+    activeNoteIdFor
   };
 }
 
@@ -310,5 +310,5 @@ export default {
   moveTab,
   hydrate,
   allOpenNoteIds,
-  activeNoteIdFor,
+  activeNoteIdFor
 };

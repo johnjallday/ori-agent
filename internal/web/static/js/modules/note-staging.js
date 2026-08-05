@@ -13,7 +13,9 @@
 // AND at least one is `replace` mode. Insert-before/after at the same exact
 // position do not conflict by themselves.
 export function projectHunks(cards) {
-  const staged = (cards || []).filter(c => c.staged && c.status === 'ready' && hasValidSourceRange(c.sourceRange));
+  const staged = (cards || []).filter(
+    c => c.staged && c.status === 'ready' && hasValidSourceRange(c.sourceRange)
+  );
   const hunks = staged.map(c => ({
     id: c.id,
     suggestionId: c.id,
@@ -22,7 +24,7 @@ export function projectHunks(cards) {
     output: c.output || '',
     originalText: c.originalText || '',
     action: c.action,
-    conflictsWith: [],
+    conflictsWith: []
   }));
 
   for (let i = 0; i < hunks.length; i++) {
@@ -37,9 +39,7 @@ export function projectHunks(cards) {
 }
 
 function hasValidSourceRange(range) {
-  return Number.isInteger(range?.start)
-    && Number.isInteger(range?.end)
-    && range.start <= range.end;
+  return Number.isInteger(range?.start) && Number.isInteger(range?.end) && range.start <= range.end;
 }
 
 function hunksConflict(a, b) {

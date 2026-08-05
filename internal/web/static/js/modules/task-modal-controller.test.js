@@ -16,7 +16,7 @@ function loadController(overrides = {}) {
     querySelectorAll() {
       return [];
     },
-    addEventListener() {},
+    addEventListener() {}
   };
   const window = {};
   const context = {
@@ -26,7 +26,7 @@ function loadController(overrides = {}) {
     setTimeout,
     clearTimeout,
     fetch: overrides.fetch || (async () => ({ ok: false, text: async () => 'not configured' })),
-    confirm: overrides.confirm || (() => true),
+    confirm: overrides.confirm || (() => true)
   };
   vm.runInNewContext(source, context, { filename: 'task-modal-controller.js' });
   return { Controller: window.TaskModalController, elements };
@@ -52,11 +52,14 @@ test('output contract save gating rejects empty and duplicate columns', () => {
   const controller = new Controller();
   controller.getOutputContractRows = () => [{ name: '', type: 'string', required: true }];
 
-  assert.equal(controller.getOutputContractData().error, 'Each output contract column needs a name.');
+  assert.equal(
+    controller.getOutputContractData().error,
+    'Each output contract column needs a name.'
+  );
 
   controller.getOutputContractRows = () => [
     { name: 'date', type: 'date', required: true },
-    { name: 'DATE', type: 'string', required: false },
+    { name: 'DATE', type: 'string', required: false }
   ];
   assert.equal(controller.getOutputContractData().error, 'Duplicate output contract column: DATE');
 });
@@ -71,12 +74,15 @@ test('output contract normalization deduplicates and preserves usable columns', 
       { name: ' date ', type: 'date', required: true, description: 'Run date' },
       { name: 'DATE', type: 'number', required: true },
       { name: 'pollen_count', type: 'number', required: true },
-      { name: 'ignored' },
-    ],
+      { name: 'ignored' }
+    ]
   });
 
   assert.equal(normalized.source, 'ai_suggested');
-  assert.equal(JSON.stringify(normalized.columns.map((column) => column.name)), JSON.stringify(['date', 'pollen_count', 'ignored']));
+  assert.equal(
+    JSON.stringify(normalized.columns.map(column => column.name)),
+    JSON.stringify(['date', 'pollen_count', 'ignored'])
+  );
   assert.equal(normalized.columns[0].description, 'Run date');
   assert.equal(normalized.columns[2].type, 'string');
 });
@@ -86,7 +92,7 @@ test('output contract data includes structured output spec payload', () => {
   const controller = new Controller();
   controller.getOutputContractRows = () => [
     { name: 'date', type: 'date', required: true, description: 'Run date' },
-    { name: 'pollen_count', type: 'number', required: true, description: 'Reported pollen level' },
+    { name: 'pollen_count', type: 'number', required: true, description: 'Reported pollen level' }
   ];
 
   const data = controller.getOutputContractData();
@@ -108,11 +114,14 @@ test('output contract suggestion cache key is stable for equivalent drafts', () 
     schedule_enabled: true,
     schedule_name: 'Daily',
     schedule: { type: 'daily', time: '09:00' },
-    result_storage: { enabled: true, format: 'csv', write_mode: 'append' },
+    result_storage: { enabled: true, format: 'csv', write_mode: 'append' }
   };
 
   const first = controller.getOutputContractSuggestionCacheKey(draft);
-  const second = controller.getOutputContractSuggestionCacheKey({ ...draft, workspace_id: 'workspace-2' });
+  const second = controller.getOutputContractSuggestionCacheKey({
+    ...draft,
+    workspace_id: 'workspace-2'
+  });
   assert.equal(first, second);
 });
 
@@ -123,7 +132,10 @@ test('output contract heuristic fallback covers common recurring tasks', () => {
   elements.set('taskModalDetails', { value: '' });
 
   const columns = controller.suggestOutputContractColumns();
-  assert.equal(JSON.stringify(columns.map((column) => column.name)), JSON.stringify(['date', 'location', 'pollen_count', 'category', 'source']));
+  assert.equal(
+    JSON.stringify(columns.map(column => column.name)),
+    JSON.stringify(['date', 'location', 'pollen_count', 'category', 'source'])
+  );
 });
 
 test('modal state snapshot includes reference URL field', () => {
@@ -248,7 +260,8 @@ test('auto mode parse failure shows inline error and does not create task', asyn
       calls.push({ url, body });
       return {
         ok: false,
-        text: async () => 'Failed to parse task description: request timed out - the AI took too long to respond.'
+        text: async () =>
+          'Failed to parse task description: request timed out - the AI took too long to respond.'
       };
     }
   });
@@ -261,9 +274,15 @@ test('auto mode parse failure shows inline error and does not create task', asyn
   controller.showToast = (message, type) => toasts.push({ message, type });
   elements.set('taskAutoDescription', {
     value: '3 things to do in Vienna Austria',
-    focus() { focused = true; },
-    setAttribute(name, value) { attributes.set(name, value); },
-    removeAttribute(name) { attributes.delete(name); }
+    focus() {
+      focused = true;
+    },
+    setAttribute(name, value) {
+      attributes.set(name, value);
+    },
+    removeAttribute(name) {
+      attributes.delete(name);
+    }
   });
   elements.set('taskAutoReferenceURL', { value: '' });
   elements.set('taskModalReferenceURL', { value: '' });
@@ -291,7 +310,7 @@ test('auto mode asks for confirmation before creating an unassigned parsed task'
   const toasts = [];
   let confirmText = '';
   const { Controller, elements } = loadController({
-    confirm: (message) => {
+    confirm: message => {
       confirmText = message;
       return false;
     },
@@ -385,7 +404,7 @@ test('auto mode uses in-modal confirmation and shows assigned agent', async () =
   elements.set('taskAutoConfirmCancel', makeElement());
 
   const savePromise = controller.saveAutoMode();
-  await new Promise((resolve) => setTimeout(resolve, 0));
+  await new Promise(resolve => setTimeout(resolve, 0));
 
   assert.equal(elements.get('taskAutoConfirm').hidden, false);
   assert.equal(elements.get('taskAutoConfirmAssignment').textContent, 'Ori');
@@ -406,7 +425,7 @@ test('output contract manual edits emit telemetry only once per draft', () => {
     fetch: async (url, options) => {
       calls.push({ url, body: JSON.parse(options.body) });
       return { ok: true, json: async () => ({ success: true }) };
-    },
+    }
   });
   const controller = new Controller();
   controller.workspaceId = 'workspace-1';
@@ -428,7 +447,7 @@ test('output contract regenerate emits telemetry and requests forced suggestion'
     fetch: async (url, options) => {
       calls.push({ url, body: JSON.parse(options.body) });
       return { ok: true, json: async () => ({ success: true }) };
-    },
+    }
   });
   const controller = new Controller();
   controller.workspaceId = 'workspace-1';
@@ -455,14 +474,20 @@ test('workflow auto-save payload routes output contract to final step only', () 
     output_contract: {
       columns: [
         { name: 'date', type: 'date', required: true },
-        { name: 'pollen_count', type: 'number', required: true },
-      ],
-    },
+        { name: 'pollen_count', type: 'number', required: true }
+      ]
+    }
   };
 
-  assert.equal(JSON.stringify(controller.getWorkflowAutoSavePayload(autoSaveData, 0, 2, true)), JSON.stringify({
-    result_storage: null,
-    output_contract: { columns: [] },
-  }));
-  assert.equal(JSON.stringify(controller.getWorkflowAutoSavePayload(autoSaveData, 1, 2, true)), JSON.stringify(autoSaveData));
+  assert.equal(
+    JSON.stringify(controller.getWorkflowAutoSavePayload(autoSaveData, 0, 2, true)),
+    JSON.stringify({
+      result_storage: null,
+      output_contract: { columns: [] }
+    })
+  );
+  assert.equal(
+    JSON.stringify(controller.getWorkflowAutoSavePayload(autoSaveData, 1, 2, true)),
+    JSON.stringify(autoSaveData)
+  );
 });

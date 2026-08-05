@@ -58,14 +58,24 @@ class TaskModalController {
     document.getElementById('taskModalClose')?.addEventListener('click', () => this.close());
     document.getElementById('taskModalCancel')?.addEventListener('click', () => this.close());
     document.querySelector('.task-modal-backdrop')?.addEventListener('click', () => this.close());
-    document.getElementById('taskModal')?.addEventListener('keydown', (e) => this.handleModalKeydown(e));
+    document
+      .getElementById('taskModal')
+      ?.addEventListener('keydown', e => this.handleModalKeydown(e));
 
     // Save button
     document.getElementById('taskModalSave')?.addEventListener('click', () => this.save());
-    document.getElementById('taskAutoDescription')?.addEventListener('input', () => this.clearAutoParseError());
-    document.getElementById('taskAutoConfirmCreate')?.addEventListener('click', () => this.resolveAutoParseConfirm(true));
-    document.getElementById('taskAutoConfirmCancel')?.addEventListener('click', () => this.resolveAutoParseConfirm(false));
-    document.getElementById('taskAutoConfirmClose')?.addEventListener('click', () => this.resolveAutoParseConfirm(false));
+    document
+      .getElementById('taskAutoDescription')
+      ?.addEventListener('input', () => this.clearAutoParseError());
+    document
+      .getElementById('taskAutoConfirmCreate')
+      ?.addEventListener('click', () => this.resolveAutoParseConfirm(true));
+    document
+      .getElementById('taskAutoConfirmCancel')
+      ?.addEventListener('click', () => this.resolveAutoParseConfirm(false));
+    document
+      .getElementById('taskAutoConfirmClose')
+      ?.addEventListener('click', () => this.resolveAutoParseConfirm(false));
     document.getElementById('taskModalMCPRequirementAdd')?.addEventListener('click', () => {
       void this.addRequiredMCPConnector();
     });
@@ -73,7 +83,7 @@ class TaskModalController {
     this.bindReferenceURLMirrorInputs();
 
     // Schedule fields toggle
-    document.getElementById('taskModalScheduleEnabled')?.addEventListener('change', (e) => {
+    document.getElementById('taskModalScheduleEnabled')?.addEventListener('change', e => {
       const scheduleFields = document.getElementById('taskModalScheduleFields');
       if (scheduleFields) {
         scheduleFields.style.display = e.target.checked ? 'block' : 'none';
@@ -95,7 +105,7 @@ class TaskModalController {
       'taskModalScheduleIntervalUnit',
       'taskModalScheduleDatetime',
       'taskModalScheduleCron'
-    ].forEach((id) => {
+    ].forEach(id => {
       document.getElementById(id)?.addEventListener('input', () => this.updateSchedulePreview());
       document.getElementById(id)?.addEventListener('change', () => this.updateSchedulePreview());
     });
@@ -105,7 +115,7 @@ class TaskModalController {
     if (dayRow) {
       dayRow.addEventListener('change', () => this.updateSchedulePreview());
     }
-    document.querySelectorAll('[data-day-preset]').forEach((btn) => {
+    document.querySelectorAll('[data-day-preset]').forEach(btn => {
       btn.addEventListener('click', () => {
         const preset = btn.getAttribute('data-day-preset') || '';
         const presets = {
@@ -119,7 +129,7 @@ class TaskModalController {
     });
 
     // Auto-save fields toggle
-    document.getElementById('taskModalAutoSaveEnabled')?.addEventListener('change', (e) => {
+    document.getElementById('taskModalAutoSaveEnabled')?.addEventListener('change', e => {
       const autoSaveFields = document.getElementById('taskModalAutoSaveFields');
       if (autoSaveFields) {
         autoSaveFields.style.display = e.target.checked ? 'block' : 'none';
@@ -142,7 +152,7 @@ class TaskModalController {
     document.getElementById('taskModalOutputContractSuggest')?.addEventListener('click', () => {
       void this.regenerateOutputContractSuggestion();
     });
-    document.getElementById('taskModalOutputContractRows')?.addEventListener('click', (event) => {
+    document.getElementById('taskModalOutputContractRows')?.addEventListener('click', event => {
       const removeButton = event.target?.closest?.('[data-output-contract-remove]');
       if (!removeButton) return;
       this.markOutputContractEdited();
@@ -159,7 +169,7 @@ class TaskModalController {
     });
 
     // Escape key handler (document-level for reliable closing)
-    document.addEventListener('keydown', (e) => {
+    document.addEventListener('keydown', e => {
       if (e.key === 'Escape') {
         const modal = document.getElementById('taskModal');
         if (modal && modal.style.display !== 'none' && modal.style.display !== '') {
@@ -174,13 +184,13 @@ class TaskModalController {
     });
 
     // Mode toggle handlers
-    document.getElementById('taskConfigModeManual')?.addEventListener('change', (e) => {
+    document.getElementById('taskConfigModeManual')?.addEventListener('change', e => {
       if (e.target.checked) {
         this.handleModeChange('manual');
       }
     });
 
-    document.getElementById('taskConfigModeAuto')?.addEventListener('change', async (e) => {
+    document.getElementById('taskConfigModeAuto')?.addEventListener('change', async e => {
       if (e.target.checked) {
         await this.checkLlmAvailability();
         this.handleModeChange('auto');
@@ -188,13 +198,13 @@ class TaskModalController {
     });
 
     // Workspace selector handlers
-    document.getElementById('taskModalChangeWorkspace')?.addEventListener('click', (e) => {
+    document.getElementById('taskModalChangeWorkspace')?.addEventListener('click', e => {
       e.preventDefault();
       e.stopPropagation();
       this.showWorkspaceSelector();
     });
 
-    document.getElementById('taskModalWorkspaceSelect')?.addEventListener('change', async (e) => {
+    document.getElementById('taskModalWorkspaceSelect')?.addEventListener('change', async e => {
       const newWorkspaceId = e.target.value;
       if (newWorkspaceId) {
         this.workspaceId = newWorkspaceId;
@@ -225,10 +235,11 @@ class TaskModalController {
   }
 
   getModalStateSnapshot() {
-    const readValue = (id) => document.getElementById(id)?.value || '';
-    const readChecked = (id) => Boolean(document.getElementById(id)?.checked);
-    const taskMode = document.querySelector('input[name="taskConfigMode"]:checked')?.value || 'manual';
-    const normalizePendingItem = (item) => {
+    const readValue = id => document.getElementById(id)?.value || '';
+    const readChecked = id => Boolean(document.getElementById(id)?.checked);
+    const taskMode =
+      document.querySelector('input[name="taskConfigMode"]:checked')?.value || 'manual';
+    const normalizePendingItem = item => {
       if (item === null || item === undefined) return '';
       if (typeof item === 'string' || typeof item === 'number' || typeof item === 'boolean') {
         return String(item);
@@ -239,7 +250,9 @@ class TaskModalController {
       return String(item);
     };
 
-    const subtasks = Array.from(document.querySelectorAll('#taskModalSubtaskList .task-modal-subtask-card')).map((card) => {
+    const subtasks = Array.from(
+      document.querySelectorAll('#taskModalSubtaskList .task-modal-subtask-card')
+    ).map(card => {
       const inputSelect = card.querySelector('.task-modal-subtask-inputs');
       let inputRefs = this.getSelectedInputRefs(inputSelect);
       if (inputRefs.length === 0 && inputSelect?.dataset.selectedInputs) {
@@ -299,7 +312,7 @@ class TaskModalController {
         format: autoSaveEnabled ? readValue('taskModalAutoSaveFormat') : '',
         outputContract: autoSaveEnabled ? this.getOutputContractRows() : []
       },
-      files: this.pendingFiles.map((file) => ({
+      files: this.pendingFiles.map(file => ({
         name: file.name,
         size: file.size,
         lastModified: file.lastModified
@@ -358,13 +371,21 @@ class TaskModalController {
     const content = this.getModalContent();
     if (!content) return [];
 
-    return Array.from(content.querySelectorAll(
-      'button:not([disabled]), [href], input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
-    )).filter((element) => !element.hidden && element.getAttribute('aria-hidden') !== 'true' && element.offsetParent !== null);
+    return Array.from(
+      content.querySelectorAll(
+        'button:not([disabled]), [href], input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      )
+    ).filter(
+      element =>
+        !element.hidden &&
+        element.getAttribute('aria-hidden') !== 'true' &&
+        element.offsetParent !== null
+    );
   }
 
   focusModalElement(preferredElement = null) {
-    const preferredVisible = preferredElement &&
+    const preferredVisible =
+      preferredElement &&
       typeof preferredElement.focus === 'function' &&
       !preferredElement.hidden &&
       preferredElement.offsetParent !== null;
@@ -406,7 +427,11 @@ class TaskModalController {
     const previousElement = this.lastFocusedElement;
     this.lastFocusedElement = null;
 
-    if (!previousElement || !document.contains(previousElement) || typeof previousElement.focus !== 'function') {
+    if (
+      !previousElement ||
+      !document.contains(previousElement) ||
+      typeof previousElement.focus !== 'function'
+    ) {
       return;
     }
 
@@ -479,16 +504,15 @@ class TaskModalController {
   }
 
   getReferenceURLValue() {
-    const activeId = this.autoMode && !this.editingTaskId
-      ? 'taskAutoReferenceURL'
-      : 'taskModalReferenceURL';
+    const activeId =
+      this.autoMode && !this.editingTaskId ? 'taskAutoReferenceURL' : 'taskModalReferenceURL';
     const activeInput = document.getElementById(activeId);
     if (activeInput) {
       return activeInput.value?.trim() || '';
     }
-    const fallbackInput = document.getElementById(activeId === 'taskAutoReferenceURL'
-      ? 'taskModalReferenceURL'
-      : 'taskAutoReferenceURL');
+    const fallbackInput = document.getElementById(
+      activeId === 'taskAutoReferenceURL' ? 'taskModalReferenceURL' : 'taskAutoReferenceURL'
+    );
     return fallbackInput?.value?.trim() || '';
   }
 
@@ -522,7 +546,7 @@ class TaskModalController {
     const llmWarningMessage = document.getElementById('taskLlmWarningMessage');
     const saveButtonText = document.getElementById('taskModalSaveText');
 
-    this.autoMode = (mode === 'auto');
+    this.autoMode = mode === 'auto';
     this.clearAutoParseError();
 
     if (mode === 'auto') {
@@ -551,7 +575,8 @@ class TaskModalController {
           if (!this.systemModelConfigured) {
             llmWarningMessage.textContent = 'Auto mode requires a System Model to be configured.';
           } else {
-            llmWarningMessage.textContent = 'Auto mode requires an LLM provider. Please set up an API key or install Ollama.';
+            llmWarningMessage.textContent =
+              'Auto mode requires an LLM provider. Please set up an API key or install Ollama.';
           }
         }
       }
@@ -560,7 +585,8 @@ class TaskModalController {
       if (manualSection) manualSection.style.display = 'block';
       if (autoSection) autoSection.style.display = 'none';
       if (llmWarning) llmWarning.style.display = 'none';
-      if (saveButtonText) saveButtonText.textContent = this.editingTaskId ? 'Save Task' : 'Save Task';
+      if (saveButtonText)
+        saveButtonText.textContent = this.editingTaskId ? 'Save Task' : 'Save Task';
     }
   }
 
@@ -647,7 +673,10 @@ class TaskModalController {
       const result = await response.json();
 
       if (result.success) {
-        this.showToast('Folder picker opened. Select a folder to add it as a directory reference.', 'info');
+        this.showToast(
+          'Folder picker opened. Select a folder to add it as a directory reference.',
+          'info'
+        );
       } else {
         this.showToast(result.error || 'Failed to open folder picker', 'error');
       }
@@ -757,7 +786,10 @@ class TaskModalController {
     }
 
     // Fallback: try to get from sessionManager
-    if (options === '<option value="">-- Select a workspace --</option>' && window.sessionManager?.folders) {
+    if (
+      options === '<option value="">-- Select a workspace --</option>' &&
+      window.sessionManager?.folders
+    ) {
       window.sessionManager.folders.forEach(folder => {
         const selected = folder.id === this.workspaceId ? 'selected' : '';
         options += `<option value="${folder.id}" ${selected}>${folder.name || 'Unnamed Workspace'}</option>`;
@@ -780,18 +812,20 @@ class TaskModalController {
       ? createOptions.draftSubtasks.filter(Boolean)
       : [];
     const draftMainInputRefs = Array.isArray(createOptions.draftMainInputRefs)
-      ? createOptions.draftMainInputRefs.filter((value) => String(value || '').trim() !== '')
+      ? createOptions.draftMainInputRefs.filter(value => String(value || '').trim() !== '')
       : [];
     const draftAssignmentValue = String(createOptions.draftAssignmentValue || '').trim();
     const shouldForceAutoMode = Boolean(createOptions.forceAutoMode);
     const prefillAutoDescription = String(createOptions.prefillAutoDescription || '');
-    const shouldForceManualMode = !shouldForceAutoMode && Boolean(
-      createOptions.forceManualMode ||
-      draftSubtasks.length > 0 ||
-      draftMainInputRefs.length > 0 ||
-      String(createOptions.prefillDetails || '').trim() ||
-      draftAssignmentValue
-    );
+    const shouldForceManualMode =
+      !shouldForceAutoMode &&
+      Boolean(
+        createOptions.forceManualMode ||
+        draftSubtasks.length > 0 ||
+        draftMainInputRefs.length > 0 ||
+        String(createOptions.prefillDetails || '').trim() ||
+        draftAssignmentValue
+      );
 
     this.editingTaskId = null;
     this.workspaceId = workspaceId;
@@ -810,7 +844,9 @@ class TaskModalController {
     // Set modal title
     const modalTitle = document.getElementById('taskModalTitle');
     if (modalTitle) {
-      modalTitle.textContent = String(createOptions.modalTitle || '').trim() || (draftSubtasks.length > 0 ? 'Review Workflow Draft' : 'Create Task');
+      modalTitle.textContent =
+        String(createOptions.modalTitle || '').trim() ||
+        (draftSubtasks.length > 0 ? 'Review Workflow Draft' : 'Create Task');
     }
 
     // Show workspace badge or selector based on whether workspaceId is provided
@@ -850,9 +886,12 @@ class TaskModalController {
     const autoReferenceURLInput = document.getElementById('taskAutoReferenceURL');
     const priorityInput = document.getElementById('taskModalPriority');
     const assignmentInput = document.getElementById('taskModalAssignment');
-    const referenceURL = String(createOptions.prefillReferenceURL || createOptions.reference_url || '');
+    const referenceURL = String(
+      createOptions.prefillReferenceURL || createOptions.reference_url || ''
+    );
 
-    if (descriptionInput) descriptionInput.value = String(createOptions.prefillTitle || prefillTitle || '');
+    if (descriptionInput)
+      descriptionInput.value = String(createOptions.prefillTitle || prefillTitle || '');
     if (detailsInput) detailsInput.value = String(createOptions.prefillDetails || '');
     if (referenceURLInput) referenceURLInput.value = referenceURL;
     if (autoReferenceURLInput) autoReferenceURLInput.value = referenceURL;
@@ -873,13 +912,17 @@ class TaskModalController {
     // Reset subtasks
     this.resetSubtasks();
     if (draftSubtasks.length > 0) {
-      draftSubtasks.forEach((subtask) => {
+      draftSubtasks.forEach(subtask => {
         this.addSubtaskRow({
           description: String(subtask.description || '').trim(),
           details: String(subtask.details || '').trim(),
           assignmentValue: String(subtask.assignmentValue || draftAssignmentValue || '').trim(),
-          inputTaskIds: Array.isArray(subtask.inputTaskIds) ? subtask.inputTaskIds.filter(Boolean) : [],
-          inputCount: Array.isArray(subtask.inputTaskIds) ? subtask.inputTaskIds.filter(Boolean).length : 0
+          inputTaskIds: Array.isArray(subtask.inputTaskIds)
+            ? subtask.inputTaskIds.filter(Boolean)
+            : [],
+          inputCount: Array.isArray(subtask.inputTaskIds)
+            ? subtask.inputTaskIds.filter(Boolean).length
+            : 0
         });
       });
     }
@@ -958,7 +1001,10 @@ class TaskModalController {
     this.resetSubtasks();
     const isSubtask = Boolean(task.parent_task_id && String(task.parent_task_id).trim() !== '');
     if (isSubtask) {
-      this.setSubtaskSectionDisabled(true, 'This task is already part of a workflow. Subtasks can only be added to top-level tasks.');
+      this.setSubtaskSectionDisabled(
+        true,
+        'This task is already part of a workflow. Subtasks can only be added to top-level tasks.'
+      );
     }
 
     // Set priority
@@ -982,7 +1028,7 @@ class TaskModalController {
     if (!isSubtask) {
       loadedSubtasks = await this.loadSubtasks(task.id);
       this.loadedSubtasks = loadedSubtasks;
-      loadedSubtasks.forEach((subtask) => {
+      loadedSubtasks.forEach(subtask => {
         const inputRefs = this.mapInputTaskIdsToRefs(subtask.input_task_ids || [], loadedSubtasks);
         const inputCount = inputRefs.length;
         this.addSubtaskRow({
@@ -1153,7 +1199,9 @@ class TaskModalController {
   }
 
   truncateToolSummaryText(value, maxLength = 180) {
-    const text = String(value || '').replace(/\s+/g, ' ').trim();
+    const text = String(value || '')
+      .replace(/\s+/g, ' ')
+      .trim();
     if (!text) return '';
     return text.length > maxLength ? `${text.slice(0, maxLength).trim()}...` : text;
   }
@@ -1175,12 +1223,24 @@ class TaskModalController {
   }
 
   getToolKindLabel(toolName, entry) {
-    const source = String(entry?.source || '').trim().toLowerCase();
-    const name = String(toolName || '').trim().toLowerCase();
+    const source = String(entry?.source || '')
+      .trim()
+      .toLowerCase();
+    const name = String(toolName || '')
+      .trim()
+      .toLowerCase();
     if (source.includes('mcp') || name.startsWith('mcp.') || name.startsWith('mcp:')) {
       return 'MCP';
     }
-    const nativeTools = new Set(['web_search', 'web_fetch', 'weather', 'time', 'finance', 'sports', 'air_quality']);
+    const nativeTools = new Set([
+      'web_search',
+      'web_fetch',
+      'weather',
+      'time',
+      'finance',
+      'sports',
+      'air_quality'
+    ]);
     if (nativeTools.has(name)) {
       return 'Native';
     }
@@ -1212,13 +1272,19 @@ class TaskModalController {
     const trace = Array.isArray(task?.execution_trace) ? task.execution_trace : [];
     const byName = new Map();
 
-    trace.forEach((entry) => {
-      const rawStatus = String(entry?.status || entry?.type || '').trim().toLowerCase();
-      const rawTitle = String(entry?.title || '').trim().toLowerCase();
-      if (!rawStatus.includes('tool') &&
-          !rawTitle.startsWith('calling ') &&
-          !rawTitle.startsWith('completed ') &&
-          !rawTitle.startsWith('failed ')) {
+    trace.forEach(entry => {
+      const rawStatus = String(entry?.status || entry?.type || '')
+        .trim()
+        .toLowerCase();
+      const rawTitle = String(entry?.title || '')
+        .trim()
+        .toLowerCase();
+      if (
+        !rawStatus.includes('tool') &&
+        !rawTitle.startsWith('calling ') &&
+        !rawTitle.startsWith('completed ') &&
+        !rawTitle.startsWith('failed ')
+      ) {
         return;
       }
 
@@ -1264,13 +1330,17 @@ class TaskModalController {
       return;
     }
 
-    const totalCalls = tools.reduce((sum, item) => sum + Math.max(item.calls, item.results + item.errors), 0);
-    const cards = tools.map((item) => {
-      const status = item.errors > 0 ? 'Error' : (item.results > 0 ? 'Completed' : 'Called');
-      const callCount = Math.max(item.calls, item.results + item.errors);
-      const count = callCount === 1 ? '1 call' : `${callCount} calls`;
-      const detail = item.latestArgs || item.latestResult || '';
-      return `
+    const totalCalls = tools.reduce(
+      (sum, item) => sum + Math.max(item.calls, item.results + item.errors),
+      0
+    );
+    const cards = tools
+      .map(item => {
+        const status = item.errors > 0 ? 'Error' : item.results > 0 ? 'Completed' : 'Called';
+        const callCount = Math.max(item.calls, item.results + item.errors);
+        const count = callCount === 1 ? '1 call' : `${callCount} calls`;
+        const detail = item.latestArgs || item.latestResult || '';
+        return `
         <div style="display: grid; gap: 4px; padding: 9px 10px; border: 1px solid color-mix(in srgb, var(--border-color) 80%, transparent); border-radius: 9px; background: color-mix(in srgb, var(--bg-secondary) 84%, transparent);">
           <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
             <div style="min-width: 0; color: var(--text-primary); font-size: 0.84rem; font-weight: 700; overflow-wrap: anywhere;">${this.escapeHtml(item.name)}</div>
@@ -1280,7 +1350,8 @@ class TaskModalController {
           ${detail ? `<div style="font-size: 0.72rem; color: var(--text-muted); line-height: 1.4; overflow-wrap: anywhere;">${this.escapeHtml(detail)}</div>` : ''}
         </div>
       `;
-    }).join('');
+      })
+      .join('');
 
     elements.toolSummary.style.display = 'grid';
     elements.toolSummary.innerHTML = `
@@ -1295,20 +1366,20 @@ class TaskModalController {
   getTaskDiagnosticText(task, resultText = '') {
     const parts = [resultText, task?.error, task?.last_error];
 
-    const addValue = (value) => {
+    const addValue = value => {
       const text = String(value || '').trim();
       if (text) parts.push(text);
     };
 
     if (Array.isArray(task?.execution_trace)) {
-      task.execution_trace.forEach((entry) => {
+      task.execution_trace.forEach(entry => {
         addValue(entry?.summary);
         addValue(entry?.title);
       });
     }
 
     if (Array.isArray(task?.execution_history)) {
-      task.execution_history.forEach((entry) => {
+      task.execution_history.forEach(entry => {
         addValue(entry?.error);
         addValue(entry?.summary);
       });
@@ -1322,7 +1393,7 @@ class TaskModalController {
 
     const retry = task?.context?.execution_retry;
     if (retry && typeof retry === 'object' && Array.isArray(retry.history)) {
-      retry.history.forEach((entry) => addValue(entry?.summary));
+      retry.history.forEach(entry => addValue(entry?.summary));
     }
 
     return parts.filter(Boolean).join('\n');
@@ -1334,9 +1405,15 @@ class TaskModalController {
       return null;
     }
 
-    const directMatch = diagnostic.match(/load\s+MCP\s+template\s+([^\s:]+)\s+for\s+binding\s+([^:\s]+):\s+server\s+([^\s:]+)\s+not\s+found/i);
-    const fallbackMatch = diagnostic.match(/load\s+MCP\s+template\s+([^\s:]+).*?server\s+([^\s:]+)\s+not\s+found/i);
-    const serverName = String(directMatch?.[1] || fallbackMatch?.[1] || fallbackMatch?.[2] || '').trim();
+    const directMatch = diagnostic.match(
+      /load\s+MCP\s+template\s+([^\s:]+)\s+for\s+binding\s+([^:\s]+):\s+server\s+([^\s:]+)\s+not\s+found/i
+    );
+    const fallbackMatch = diagnostic.match(
+      /load\s+MCP\s+template\s+([^\s:]+).*?server\s+([^\s:]+)\s+not\s+found/i
+    );
+    const serverName = String(
+      directMatch?.[1] || fallbackMatch?.[1] || fallbackMatch?.[2] || ''
+    ).trim();
     if (!serverName || !/^[a-zA-Z0-9._-]+$/.test(serverName)) {
       return null;
     }
@@ -1398,7 +1475,9 @@ class TaskModalController {
   }
 
   fallbackRegistryEntryForMCPServer(serverName) {
-    const normalized = String(serverName || '').trim().toLowerCase();
+    const normalized = String(serverName || '')
+      .trim()
+      .toLowerCase();
     if (normalized !== 'fetch') {
       return null;
     }
@@ -1412,7 +1491,9 @@ class TaskModalController {
   }
 
   async findRegistryMCPServer(serverName) {
-    const normalized = String(serverName || '').trim().toLowerCase();
+    const normalized = String(serverName || '')
+      .trim()
+      .toLowerCase();
     if (!normalized) return null;
 
     try {
@@ -1420,7 +1501,12 @@ class TaskModalController {
       if (response.ok) {
         const entries = await response.json();
         if (Array.isArray(entries)) {
-          const exact = entries.find((entry) => String(entry?.name || '').trim().toLowerCase() === normalized);
+          const exact = entries.find(
+            entry =>
+              String(entry?.name || '')
+                .trim()
+                .toLowerCase() === normalized
+          );
           if (exact) return exact;
         }
       }
@@ -1438,9 +1524,10 @@ class TaskModalController {
       return null;
     }
 
-    const env = entry?.env && typeof entry.env === 'object' && !Array.isArray(entry.env)
-      ? { ...entry.env }
-      : {};
+    const env =
+      entry?.env && typeof entry.env === 'object' && !Array.isArray(entry.env)
+        ? { ...entry.env }
+        : {};
 
     return {
       name,
@@ -1468,11 +1555,16 @@ class TaskModalController {
     try {
       this.setMCPRequirementStatus('Checking My Servers...');
       const configuredServers = await this.getConfiguredMCPServers();
-      const alreadyConfigured = configuredServers.some((server) =>
-        String(server?.name || '').trim().toLowerCase() === serverName.toLowerCase()
+      const alreadyConfigured = configuredServers.some(
+        server =>
+          String(server?.name || '')
+            .trim()
+            .toLowerCase() === serverName.toLowerCase()
       );
       if (alreadyConfigured) {
-        this.setMCPRequirementStatus(`${serverName} is already in My Servers. Retry the task when ready.`);
+        this.setMCPRequirementStatus(
+          `${serverName} is already in My Servers. Retry the task when ready.`
+        );
         if (button) button.textContent = 'Connector available';
         this.showToast(`${serverName} is already available`, 'info');
         return;
@@ -1482,7 +1574,9 @@ class TaskModalController {
       const entry = await this.findRegistryMCPServer(serverName);
       const serverConfig = this.buildMCPServerConfigFromRegistry(entry, serverName);
       if (!serverConfig) {
-        throw new Error(`${serverName} was not found in the MCP registry. Add it from MCP settings.`);
+        throw new Error(
+          `${serverName} was not found in the MCP registry. Add it from MCP settings.`
+        );
       }
 
       this.setMCPRequirementStatus(`Adding ${serverName} to My Servers...`);
@@ -1498,7 +1592,9 @@ class TaskModalController {
         }
       }
 
-      this.setMCPRequirementStatus(`${serverName} has been added to My Servers. Retry the task to use it.`);
+      this.setMCPRequirementStatus(
+        `${serverName} has been added to My Servers. Retry the task to use it.`
+      );
       if (button) button.textContent = 'Connector added';
       this.showToast(`${serverName} connector added`, 'success');
     } catch (error) {
@@ -1515,7 +1611,9 @@ class TaskModalController {
   }
 
   getTaskStatusLabel(status) {
-    const normalized = String(status || '').trim().toLowerCase();
+    const normalized = String(status || '')
+      .trim()
+      .toLowerCase();
     const labels = {
       pending: 'Pending',
       in_progress: 'In Progress',
@@ -1532,10 +1630,13 @@ class TaskModalController {
   resolveTaskResultData(task) {
     if (!task || typeof task !== 'object') return null;
 
-    if (window.workspaceDetail &&
-        String(window.workspaceDetail.workspaceId || '').trim() === String(this.workspaceId || '').trim() &&
-        typeof window.workspaceDetail.getSubtasksForParent === 'function' &&
-        typeof window.workspaceDetail.getDisplayResult === 'function') {
+    if (
+      window.workspaceDetail &&
+      String(window.workspaceDetail.workspaceId || '').trim() ===
+        String(this.workspaceId || '').trim() &&
+      typeof window.workspaceDetail.getSubtasksForParent === 'function' &&
+      typeof window.workspaceDetail.getDisplayResult === 'function'
+    ) {
       const subtasks = window.workspaceDetail.getSubtasksForParent(task.id);
       const resultData = window.workspaceDetail.getDisplayResult(task, subtasks);
       if (resultData && resultData.text) {
@@ -1561,9 +1662,10 @@ class TaskModalController {
     }
 
     const humanLoop = task?.context?.human_loop;
-    const agentResponse = humanLoop && typeof humanLoop === 'object'
-      ? String(humanLoop.agent_response || '').trim()
-      : '';
+    const agentResponse =
+      humanLoop && typeof humanLoop === 'object'
+        ? String(humanLoop.agent_response || '').trim()
+        : '';
     if (agentResponse) {
       return {
         label: 'Agent Output',
@@ -1592,20 +1694,25 @@ class TaskModalController {
   }
 
   buildResultNextStepId(number, label) {
-    const base = this.normalizeResultNextStepToken(label)
-      .replace(/\s+/g, '-')
-      .slice(0, 48) || 'next-step';
+    const base =
+      this.normalizeResultNextStepToken(label).replace(/\s+/g, '-').slice(0, 48) || 'next-step';
     return `task-result-step-${String(number || '').trim() || 'x'}-${base}`;
   }
 
   extractResultNextSteps(text) {
     const lines = String(text || '').split(/\r?\n/);
-    const cues = ['next steps', 'next step', 'would you like me to', 'let me know', 'next steps for you'];
+    const cues = [
+      'next steps',
+      'next step',
+      'would you like me to',
+      'let me know',
+      'next steps for you'
+    ];
     let cueIndex = -1;
 
     for (let i = 0; i < lines.length; i += 1) {
       const normalized = this.normalizeResultNextStepToken(lines[i]);
-      if (cues.some((cue) => normalized.includes(cue))) {
+      if (cues.some(cue => normalized.includes(cue))) {
         cueIndex = i;
         break;
       }
@@ -1645,8 +1752,17 @@ class TaskModalController {
     if (!elements.section || !task) return;
 
     const resultData = this.resolveTaskResultData(task);
-    const status = String(task.status || '').trim().toLowerCase();
-    if (!resultData?.text || (status !== 'completed' && status !== 'failed' && status !== 'blocked' && status !== 'timeout' && status !== 'waiting_for_choice')) {
+    const status = String(task.status || '')
+      .trim()
+      .toLowerCase();
+    if (
+      !resultData?.text ||
+      (status !== 'completed' &&
+        status !== 'failed' &&
+        status !== 'blocked' &&
+        status !== 'timeout' &&
+        status !== 'waiting_for_choice')
+    ) {
       this.resetResultSection();
       return;
     }
@@ -1657,7 +1773,8 @@ class TaskModalController {
 
     elements.section.style.display = 'block';
     if (elements.meta) {
-      const answeredBy = String(resultData.answeredBy || task.to || 'Unknown agent').trim() || 'Unknown agent';
+      const answeredBy =
+        String(resultData.answeredBy || task.to || 'Unknown agent').trim() || 'Unknown agent';
       elements.meta.textContent = `${resultData.label} • Answered by ${answeredBy} • ${this.getTaskStatusLabel(task.status)}`;
     }
     if (elements.body) {
@@ -1681,12 +1798,14 @@ class TaskModalController {
     }
 
     elements.nextSteps.style.display = 'block';
-    elements.nextStepsCopy.textContent = 'Choose the next step to create and run a follow-up task linked to this result.';
-    elements.nextStepsActions.innerHTML = this.currentResultNextSteps.map((step) => {
-      const buttonLabel = this.currentResultFollowUpPending
-        ? 'Creating follow-up task...'
-        : 'Create follow-up task';
-      return `
+    elements.nextStepsCopy.textContent =
+      'Choose the next step to create and run a follow-up task linked to this result.';
+    elements.nextStepsActions.innerHTML = this.currentResultNextSteps
+      .map(step => {
+        const buttonLabel = this.currentResultFollowUpPending
+          ? 'Creating follow-up task...'
+          : 'Create follow-up task';
+        return `
         <button type="button"
                 class="task-modal-btn task-modal-btn-secondary"
                 data-task-result-next-step-id="${step.id}"
@@ -1699,19 +1818,25 @@ class TaskModalController {
           </span>
         </button>
       `;
-    }).join('');
+      })
+      .join('');
 
-    elements.nextStepsActions.querySelectorAll('[data-task-result-next-step-id]').forEach((button) => {
-      button.addEventListener('click', () => {
-        const nextStepId = String(button.getAttribute('data-task-result-next-step-id') || '').trim();
-        if (!nextStepId) return;
-        void this.continueFromResult(nextStepId);
+    elements.nextStepsActions
+      .querySelectorAll('[data-task-result-next-step-id]')
+      .forEach(button => {
+        button.addEventListener('click', () => {
+          const nextStepId = String(
+            button.getAttribute('data-task-result-next-step-id') || ''
+          ).trim();
+          if (!nextStepId) return;
+          void this.continueFromResult(nextStepId);
+        });
       });
-    });
   }
 
   buildFollowUpTitle(task, step) {
-    const baseTitle = String(task?.description || task?.name || 'Follow-up task').trim() || 'Follow-up task';
+    const baseTitle =
+      String(task?.description || task?.name || 'Follow-up task').trim() || 'Follow-up task';
     const stepLabel = this.cleanResultNextStepText(step?.label || '');
     if (!stepLabel) return baseTitle;
     const combined = `${baseTitle} - ${stepLabel}`;
@@ -1720,7 +1845,9 @@ class TaskModalController {
 
   buildFollowUpDetails(task, sourceTaskId, step) {
     const parts = [];
-    const baseTitle = String(task?.description || task?.name || task?.id || 'Completed task').trim();
+    const baseTitle = String(
+      task?.description || task?.name || task?.id || 'Completed task'
+    ).trim();
     const stepLabel = this.cleanResultNextStepText(step?.label || '');
     const stepNumber = String(step?.number || '').trim();
     parts.push(`Follow-up created from completed task: ${baseTitle}`);
@@ -1730,7 +1857,9 @@ class TaskModalController {
     if (sourceTaskId) {
       parts.push(`Linked input task: ${sourceTaskId}`);
     }
-    parts.push('Use the linked task result as the starting context and continue the work from there.');
+    parts.push(
+      'Use the linked task result as the starting context and continue the work from there.'
+    );
     return parts.join('\n');
   }
 
@@ -1777,7 +1906,7 @@ class TaskModalController {
     if (this.currentResultFollowUpPending || !this.currentTask) return;
 
     const task = this.currentTask;
-    const nextStep = this.currentResultNextSteps.find((item) => item.id === nextStepId);
+    const nextStep = this.currentResultNextSteps.find(item => item.id === nextStepId);
     if (!nextStep) return;
 
     this.currentResultFollowUpPending = true;
@@ -1787,7 +1916,11 @@ class TaskModalController {
       const payload = {
         workspace_id: this.workspaceId,
         description: this.buildFollowUpTitle(task, nextStep),
-        details: this.buildFollowUpDetails(task, this.currentResultSourceTaskId || task.id, nextStep),
+        details: this.buildFollowUpDetails(
+          task,
+          this.currentResultSourceTaskId || task.id,
+          nextStep
+        ),
         to: String(task.to || '').trim() || undefined,
         assigned_node_id: String(task.assigned_node_id || '').trim() || undefined,
         input_task_ids: [this.currentResultSourceTaskId || task.id].filter(Boolean)
@@ -1830,7 +1963,7 @@ class TaskModalController {
     if (!elements.steps) return;
     const stepIndex = this.progressSteps.indexOf(step);
     const items = Array.from(elements.steps.querySelectorAll('li'));
-    items.forEach((item) => {
+    items.forEach(item => {
       const itemStep = item.dataset.step;
       const itemIndex = this.progressSteps.indexOf(itemStep);
       item.classList.remove('is-active', 'is-complete');
@@ -1854,7 +1987,8 @@ class TaskModalController {
   }
 
   formatAutoParseErrorMessage(error) {
-    const raw = String(error?.message || error || '').trim()
+    const raw = String(error?.message || error || '')
+      .trim()
       .replace(/^Failed to parse task description:\s*/i, '')
       .replace(/^Auto-parse unavailable:\s*/i, '');
     const normalized = raw.replace(/\s+/g, ' ').trim();
@@ -1920,7 +2054,15 @@ class TaskModalController {
       return `Daily at ${schedule.time || 'scheduled time'}`;
     }
     if (schedule.type === 'weekly') {
-      const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+      const dayNames = [
+        'Sunday',
+        'Monday',
+        'Tuesday',
+        'Wednesday',
+        'Thursday',
+        'Friday',
+        'Saturday'
+      ];
       const day = dayNames[Number(schedule.day_of_week)] || 'selected day';
       return `Every ${day} at ${schedule.time || 'scheduled time'}`;
     }
@@ -1934,7 +2076,9 @@ class TaskModalController {
     const storage = resultStorageData.result_storage;
     if (!storage || storage.enabled !== true) return '';
     const columns = Array.isArray(resultStorageData.output_contract?.columns)
-      ? resultStorageData.output_contract.columns.map((column) => String(column?.name || '').trim()).filter(Boolean)
+      ? resultStorageData.output_contract.columns
+          .map(column => String(column?.name || '').trim())
+          .filter(Boolean)
       : [];
     const columnSummary = columns.length > 0 ? ` Columns: ${columns.join(', ')}` : '';
 
@@ -2025,10 +2169,15 @@ class TaskModalController {
     const assignmentLabel = assignment || 'Unassigned';
     const assignmentState = options.assignmentState || (assignment ? 'assigned' : 'unassigned');
 
-    if (elements.eyebrow) elements.eyebrow.textContent = String(options.eyebrow || 'Auto Parsed Task');
+    if (elements.eyebrow)
+      elements.eyebrow.textContent = String(options.eyebrow || 'Auto Parsed Task');
     if (elements.title) elements.title.textContent = String(options.title || 'Create this task?');
-    if (elements.message) elements.message.textContent = String(options.message || 'Review the task parsed from your request before it is created.');
-    if (elements.parsedTitle) elements.parsedTitle.textContent = String(options.parsedTitle || 'New Task');
+    if (elements.message)
+      elements.message.textContent = String(
+        options.message || 'Review the task parsed from your request before it is created.'
+      );
+    if (elements.parsedTitle)
+      elements.parsedTitle.textContent = String(options.parsedTitle || 'New Task');
     if (elements.assignment) {
       elements.assignment.textContent = assignmentLabel;
       elements.assignment.dataset.state = assignmentState;
@@ -2036,13 +2185,18 @@ class TaskModalController {
     this.setAutoConfirmOptionalRow(elements.detailsRow, elements.details, options.details);
     this.setAutoConfirmOptionalRow(elements.scheduleRow, elements.schedule, options.schedule);
     this.setAutoConfirmOptionalRow(elements.storageRow, elements.storage, options.storage);
-    this.renderAutoConfirmSteps(elements.steps, Array.isArray(options.workflowSteps) ? options.workflowSteps : []);
+    this.renderAutoConfirmSteps(
+      elements.steps,
+      Array.isArray(options.workflowSteps) ? options.workflowSteps : []
+    );
 
-    if (elements.createButton) elements.createButton.textContent = String(options.confirmLabel || 'Create Task');
-    if (elements.cancelButton) elements.cancelButton.textContent = String(options.cancelLabel || 'Cancel');
+    if (elements.createButton)
+      elements.createButton.textContent = String(options.confirmLabel || 'Create Task');
+    if (elements.cancelButton)
+      elements.cancelButton.textContent = String(options.cancelLabel || 'Cancel');
     elements.container.hidden = false;
 
-    return new Promise((resolve) => {
+    return new Promise(resolve => {
       this.autoParseConfirmResolve = resolve;
       const scheduleFocus = window.setTimeout || setTimeout;
       scheduleFocus(() => {
@@ -2051,7 +2205,12 @@ class TaskModalController {
     });
   }
 
-  confirmAutoParsedTaskCreation(parsed, workflowSteps = [], scheduleData = {}, resultStorageData = {}) {
+  confirmAutoParsedTaskCreation(
+    parsed,
+    workflowSteps = [],
+    scheduleData = {},
+    resultStorageData = {}
+  ) {
     const isWorkflow = workflowSteps.length > 0;
     const assignee = String(isWorkflow ? '' : parsed?.agent_name || '').trim();
     const title = isWorkflow ? 'Create this workflow?' : 'Create this task?';
@@ -2068,7 +2227,9 @@ class TaskModalController {
       workflowSteps.forEach((step, index) => {
         const stepTitle = String(step?.title || step?.description || `Task ${index + 1}`).trim();
         const stepAssignee = String(step?.agent_name || '').trim();
-        details.push(`Step ${index + 1}: ${stepTitle}${stepAssignee ? ` | Assigned to ${stepAssignee}` : ' | Unassigned'}`);
+        details.push(
+          `Step ${index + 1}: ${stepTitle}${stepAssignee ? ` | Assigned to ${stepAssignee}` : ' | Unassigned'}`
+        );
       });
     } else {
       details.push(assignee ? `Assigned to: ${assignee}` : 'Assignment: Unassigned');
@@ -2078,14 +2239,18 @@ class TaskModalController {
 
     const metaItems = ['Auto Parse', isWorkflow ? `${workflowSteps.length} steps` : 'Task'];
     if (isWorkflow) {
-      const assignedStepCount = workflowSteps.filter((step) => String(step?.agent_name || '').trim()).length;
-      metaItems.push(assignedStepCount === workflowSteps.length ? 'Assigned' : 'Review assignments');
+      const assignedStepCount = workflowSteps.filter(step =>
+        String(step?.agent_name || '').trim()
+      ).length;
+      metaItems.push(
+        assignedStepCount === workflowSteps.length ? 'Assigned' : 'Review assignments'
+      );
     } else {
       metaItems.push(assignee || 'Unassigned');
     }
 
     const assignedStepCount = isWorkflow
-      ? workflowSteps.filter((step) => String(step?.agent_name || '').trim()).length
+      ? workflowSteps.filter(step => String(step?.agent_name || '').trim()).length
       : 0;
     const inlineConfirm = this.showAutoParseConfirmDialog({
       eyebrow: 'Auto Parsed Task',
@@ -2096,10 +2261,16 @@ class TaskModalController {
       confirmLabel,
       cancelLabel: 'Cancel',
       parsedTitle: parsedTitle || (isWorkflow ? 'New Workflow' : 'New Task'),
-      assignment: isWorkflow ? `${assignedStepCount}/${workflowSteps.length} steps assigned` : assignee,
+      assignment: isWorkflow
+        ? `${assignedStepCount}/${workflowSteps.length} steps assigned`
+        : assignee,
       assignmentState: isWorkflow
-        ? (assignedStepCount === workflowSteps.length ? 'assigned' : 'unassigned')
-        : (assignee ? 'assigned' : 'unassigned'),
+        ? assignedStepCount === workflowSteps.length
+          ? 'assigned'
+          : 'unassigned'
+        : assignee
+          ? 'assigned'
+          : 'unassigned',
       details: parsedDetails,
       schedule: scheduleSummary,
       storage: storageSummary,
@@ -2107,7 +2278,10 @@ class TaskModalController {
     });
     if (inlineConfirm) return inlineConfirm;
 
-    if (window.WorkspaceHubModals && typeof window.WorkspaceHubModals.showExecutionConfirm === 'function') {
+    if (
+      window.WorkspaceHubModals &&
+      typeof window.WorkspaceHubModals.showExecutionConfirm === 'function'
+    ) {
       return window.WorkspaceHubModals.showExecutionConfirm({
         eyebrow: 'Auto Parsed Task',
         title,
@@ -2123,9 +2297,13 @@ class TaskModalController {
 
     const fallbackText = [
       title,
-      isWorkflow ? 'Review the workflow parsed from your request before it is created.' : 'Review the task parsed from your request before it is created.',
+      isWorkflow
+        ? 'Review the workflow parsed from your request before it is created.'
+        : 'Review the task parsed from your request before it is created.',
       ...details
-    ].filter(Boolean).join('\n\n');
+    ]
+      .filter(Boolean)
+      .join('\n\n');
     if (typeof window.confirm === 'function') {
       return Promise.resolve(window.confirm(fallbackText));
     }
@@ -2196,7 +2374,9 @@ class TaskModalController {
       return;
     }
 
-    const canManageSubtasks = !(this.currentTask?.parent_task_id && String(this.currentTask.parent_task_id).trim() !== '');
+    const canManageSubtasks = !(
+      this.currentTask?.parent_task_id && String(this.currentTask.parent_task_id).trim() !== ''
+    );
     if (!canManageSubtasks && subtasks.length > 0) {
       this.showToast('Subtasks can only be added to top-level tasks', 'error');
       return;
@@ -2227,12 +2407,14 @@ class TaskModalController {
       const autoSaveData = this.getAutoSaveData();
       if (autoSaveData.output_contract_error) {
         this.showToast(autoSaveData.output_contract_error, 'error');
-        const firstNameInput = document.querySelector('#taskModalOutputContractRows [data-output-contract-name]');
+        const firstNameInput = document.querySelector(
+          '#taskModalOutputContractRows [data-output-contract-name]'
+        );
         firstNameInput?.focus();
         return;
       }
 
-      const createTask = async (payload) => {
+      const createTask = async payload => {
         const response = await fetch('/api/orchestration/tasks', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -2281,25 +2463,33 @@ class TaskModalController {
         }
       };
 
-      const deleteTask = async (taskId) => {
+      const deleteTask = async taskId => {
         if (!taskId) return;
-        const response = await fetch(`/api/orchestration/tasks?id=${encodeURIComponent(taskId)}&workspace_id=${encodeURIComponent(this.workspaceId)}`, {
-          method: 'DELETE'
-        });
+        const response = await fetch(
+          `/api/orchestration/tasks?id=${encodeURIComponent(taskId)}&workspace_id=${encodeURIComponent(this.workspaceId)}`,
+          {
+            method: 'DELETE'
+          }
+        );
         if (!response.ok) {
           const errText = await response.text();
           throw new Error(errText || 'Failed to delete subtask');
         }
       };
 
-      const hasExistingSubtasks = Array.isArray(this.loadedSubtasks) && this.loadedSubtasks.length > 0;
+      const hasExistingSubtasks =
+        Array.isArray(this.loadedSubtasks) && this.loadedSubtasks.length > 0;
       const hasSubtaskDeletes = this.subtasksToDelete && this.subtasksToDelete.size > 0;
-      const isWorkflow = canManageSubtasks && (subtasks.length > 0 || hasExistingSubtasks || hasSubtaskDeletes);
+      const isWorkflow =
+        canManageSubtasks && (subtasks.length > 0 || hasExistingSubtasks || hasSubtaskDeletes);
 
       if (subtasks.length > 0 && scheduleData.schedule_enabled) {
         const firstSubtask = subtasks[0];
         if (!firstSubtask?.to || firstSubtask.to === 'unassigned') {
-          this.showToast('Assign an agent to the first subtask before enabling a schedule', 'error');
+          this.showToast(
+            'Assign an agent to the first subtask before enabling a schedule',
+            'error'
+          );
           return;
         }
       }
@@ -2342,8 +2532,8 @@ class TaskModalController {
           });
 
           const totalSubtasks = subtasks.length;
-          let lastSubtaskId = totalSubtasks > 0 ? (subtasks[totalSubtasks - 1].id || '') : '';
-          const stepIdsByIndex = subtasks.map((subtask) => subtask.id || '');
+          let lastSubtaskId = totalSubtasks > 0 ? subtasks[totalSubtasks - 1].id || '' : '';
+          const stepIdsByIndex = subtasks.map(subtask => subtask.id || '');
 
           for (let i = 0; i < totalSubtasks; i++) {
             const subtask = subtasks[i];
@@ -2418,7 +2608,7 @@ class TaskModalController {
         // ref / duplicate ID — no half-created workflow if validation
         // trips on subtask 5.
         const parentId = this._generateTaskId();
-        const subtaskIds = subtasks.map((subtask) => subtask.id || this._generateTaskId());
+        const subtaskIds = subtasks.map(subtask => subtask.id || this._generateTaskId());
         // Stamp the IDs back onto the in-memory subtask list and the DOM
         // cards so per-subtask error highlighting can map server issues
         // (`issue.task_id`) onto the correct row.
@@ -2455,8 +2645,18 @@ class TaskModalController {
         // This keeps the bulk contract small while preserving the modal's
         // existing per-step schedule semantics.
         for (let i = 0; i < subtasks.length; i++) {
-          const schedulePayload = this.getWorkflowSchedulePayload(scheduleData, i, subtasks.length, false);
-          const autoSavePayload = this.getWorkflowAutoSavePayload(autoSaveData, i, subtasks.length, false);
+          const schedulePayload = this.getWorkflowSchedulePayload(
+            scheduleData,
+            i,
+            subtasks.length,
+            false
+          );
+          const autoSavePayload = this.getWorkflowAutoSavePayload(
+            autoSaveData,
+            i,
+            subtasks.length,
+            false
+          );
           const extras = { ...schedulePayload, ...autoSavePayload };
           if (Object.keys(extras).length === 0) continue;
           await updateTask(subtaskIds[i], extras);
@@ -2570,9 +2770,10 @@ class TaskModalController {
 
     const counts = failures.reduce((sum, entry) => sum + (Number(entry?.count) || 0), 0);
     const firstMessage = failures[0]?.message || '';
-    const summary = counts > 0
-      ? `${counts} attachment${counts === 1 ? '' : 's'} failed to upload — task saved without them.${firstMessage ? ` ${firstMessage}` : ''}`
-      : `Some attachments failed to upload — task saved without them.${firstMessage ? ` ${firstMessage}` : ''}`;
+    const summary =
+      counts > 0
+        ? `${counts} attachment${counts === 1 ? '' : 's'} failed to upload — task saved without them.${firstMessage ? ` ${firstMessage}` : ''}`
+        : `Some attachments failed to upload — task saved without them.${firstMessage ? ` ${firstMessage}` : ''}`;
     this.showToast(summary, 'warning');
     this._uploadFailures = [];
   }
@@ -2586,7 +2787,10 @@ class TaskModalController {
     if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
       return crypto.randomUUID();
     }
-    const part = () => Math.floor(Math.random() * 0xffffffff).toString(16).padStart(8, '0');
+    const part = () =>
+      Math.floor(Math.random() * 0xffffffff)
+        .toString(16)
+        .padStart(8, '0');
     return `${part()}-${part().slice(0, 4)}-${part().slice(0, 4)}-${part().slice(0, 4)}-${part()}${part().slice(0, 4)}`;
   }
 
@@ -2618,7 +2822,11 @@ class TaskModalController {
     }
     let parsed = null;
     if (bodyText) {
-      try { parsed = JSON.parse(bodyText); } catch (_e) { parsed = null; }
+      try {
+        parsed = JSON.parse(bodyText);
+      } catch (_e) {
+        parsed = null;
+      }
     }
     const message = (parsed && (parsed.error || parsed.message)) || bodyText || fallbackMessage;
     const error = new Error(message || fallbackMessage);
@@ -2637,10 +2845,10 @@ class TaskModalController {
   _applySubtaskGraphErrors(issues) {
     this._clearSubtaskGraphErrors();
     const byId = new Map();
-    document.querySelectorAll('#taskModalSubtaskList .task-modal-subtask-card').forEach((card) => {
+    document.querySelectorAll('#taskModalSubtaskList .task-modal-subtask-card').forEach(card => {
       if (card.dataset.subtaskId) byId.set(card.dataset.subtaskId, card);
     });
-    issues.forEach((issue) => {
+    issues.forEach(issue => {
       const card = byId.get(issue?.task_id);
       if (!card) return;
       card.classList.add('task-modal-subtask-card--has-error');
@@ -2656,12 +2864,16 @@ class TaskModalController {
   }
 
   _clearSubtaskGraphErrors() {
-    document.querySelectorAll('#taskModalSubtaskList .task-modal-subtask-card--has-error').forEach((card) => {
-      card.classList.remove('task-modal-subtask-card--has-error');
-    });
-    document.querySelectorAll('#taskModalSubtaskList .task-modal-subtask-card-error').forEach((el) => {
-      el.remove();
-    });
+    document
+      .querySelectorAll('#taskModalSubtaskList .task-modal-subtask-card--has-error')
+      .forEach(card => {
+        card.classList.remove('task-modal-subtask-card--has-error');
+      });
+    document
+      .querySelectorAll('#taskModalSubtaskList .task-modal-subtask-card-error')
+      .forEach(el => {
+        el.remove();
+      });
   }
 
   /**
@@ -2730,7 +2942,8 @@ class TaskModalController {
       if (parsed.assignment_mode) {
         assignmentProvenance.assignment_mode = parsed.assignment_mode;
         if (parsed.assigned_by) assignmentProvenance.assigned_by = parsed.assigned_by;
-        if (parsed.assignment_reason) assignmentProvenance.assignment_reason = parsed.assignment_reason;
+        if (parsed.assignment_reason)
+          assignmentProvenance.assignment_reason = parsed.assignment_reason;
       }
 
       this.updateProgress('prepare', {
@@ -2780,7 +2993,12 @@ class TaskModalController {
       const workflowSteps = Array.isArray(parsed.tasks) ? parsed.tasks.filter(Boolean) : [];
       if (workflowSteps.length > 0) {
         this.hideProgress();
-        const confirmed = await this.confirmAutoParsedTaskCreation(parsed, workflowSteps, scheduleData, resultStorageData);
+        const confirmed = await this.confirmAutoParsedTaskCreation(
+          parsed,
+          workflowSteps,
+          scheduleData,
+          resultStorageData
+        );
         if (!confirmed) {
           this.showToast('Task creation cancelled', 'info');
           return;
@@ -2827,7 +3045,9 @@ class TaskModalController {
           const stepId = step.id || `step-${i + 1}`;
           const stepTitle = step.title || step.description || parsed.title || `Task ${i + 1}`;
           const stepDetails = step.details || '';
-          const stepPriority = Number.isInteger(step.priority) ? step.priority : (parsed.priority || 3);
+          const stepPriority = Number.isInteger(step.priority)
+            ? step.priority
+            : parsed.priority || 3;
 
           let to = '';
           let assignedNodeId = '';
@@ -2841,7 +3061,7 @@ class TaskModalController {
             const fallbackId = workflowSteps[i - 1]?.id || `step-${i}`;
             dependsOn = [fallbackId];
           }
-          const inputTaskIds = dependsOn.map((id) => stepIdToTaskId.get(id)).filter(Boolean);
+          const inputTaskIds = dependsOn.map(id => stepIdToTaskId.get(id)).filter(Boolean);
 
           const stepScheduleData = i === 0 ? scheduleData : { schedule_enabled: false };
           const stepResultStorageData = i === workflowSteps.length - 1 ? resultStorageData : {};
@@ -2899,7 +3119,12 @@ class TaskModalController {
       }
 
       this.hideProgress();
-      const confirmed = await this.confirmAutoParsedTaskCreation(parsed, [], scheduleData, resultStorageData);
+      const confirmed = await this.confirmAutoParsedTaskCreation(
+        parsed,
+        [],
+        scheduleData,
+        resultStorageData
+      );
       if (!confirmed) {
         this.showToast('Task creation cancelled', 'info');
         return;
@@ -3091,7 +3316,7 @@ class TaskModalController {
         body: JSON.stringify({
           task_id: this.editingTaskId,
           description: parsed.title || this.currentTask.description,
-          details: parsed.details !== undefined ? parsed.details : (this.currentTask.details || ''),
+          details: parsed.details !== undefined ? parsed.details : this.currentTask.details || '',
           priority: parsed.priority || this.currentTask.priority || 3,
           to: to || this.currentTask.to || undefined,
           assigned_node_id: assignedNodeId || undefined,
@@ -3222,7 +3447,7 @@ class TaskModalController {
       // form so the checkbox row stays the canonical UI for that case.
       const schedule = task.schedule;
       const cronWeekly = this.parseWeeklyCron(schedule.type === 'cron' ? schedule.cron_expr : '');
-      const inferredType = cronWeekly ? 'weekly' : (schedule.type || 'interval');
+      const inferredType = cronWeekly ? 'weekly' : schedule.type || 'interval';
       if (scheduleType) scheduleType.value = inferredType;
 
       // Populate type-specific fields
@@ -3278,16 +3503,16 @@ class TaskModalController {
     const row = document.getElementById('taskModalScheduleDayRow');
     if (!row) return [];
     return Array.from(row.querySelectorAll('input[type="checkbox"][data-day-value]'))
-      .filter((cb) => cb.checked)
-      .map((cb) => Number.parseInt(cb.getAttribute('data-day-value') || '0', 10))
+      .filter(cb => cb.checked)
+      .map(cb => Number.parseInt(cb.getAttribute('data-day-value') || '0', 10))
       .sort((a, b) => a - b);
   }
 
   setSelectedScheduleDays(days) {
     const row = document.getElementById('taskModalScheduleDayRow');
     if (!row) return;
-    const set = new Set((days || []).map((d) => Number(d)));
-    row.querySelectorAll('input[type="checkbox"][data-day-value]').forEach((cb) => {
+    const set = new Set((days || []).map(d => Number(d)));
+    row.querySelectorAll('input[type="checkbox"][data-day-value]').forEach(cb => {
       cb.checked = set.has(Number(cb.getAttribute('data-day-value')));
     });
   }
@@ -3298,12 +3523,17 @@ class TaskModalController {
    * round-trip — the user will see the raw cron in the cron field.
    */
   parseWeeklyCron(expr) {
-    const parts = String(expr || '').trim().split(/\s+/);
+    const parts = String(expr || '')
+      .trim()
+      .split(/\s+/);
     if (parts.length !== 5) return null;
     const [minutePart, hourPart, dom, mon, dow] = parts;
     if (dom !== '*' || mon !== '*') return null;
     if (!/^\d+$/.test(minutePart) || !/^\d+$/.test(hourPart)) return null;
-    const days = dow.split(',').map((d) => d.trim()).filter(Boolean);
+    const days = dow
+      .split(',')
+      .map(d => d.trim())
+      .filter(Boolean);
     if (days.length < 2) return null;
     const numericDays = [];
     for (const d of days) {
@@ -3348,12 +3578,15 @@ class TaskModalController {
         } else if (days.length === 7) {
           summary = `Every day at ${time}`;
         } else {
-          summary = `Every ${days.map((d) => dayLabels[d] || '?').join(', ')} at ${time}`;
+          summary = `Every ${days.map(d => dayLabels[d] || '?').join(', ')} at ${time}`;
         }
         break;
       }
       case 'interval': {
-        const value = Number.parseInt(document.getElementById('taskModalScheduleIntervalValue')?.value || '0', 10);
+        const value = Number.parseInt(
+          document.getElementById('taskModalScheduleIntervalValue')?.value || '0',
+          10
+        );
         const unit = document.getElementById('taskModalScheduleIntervalUnit')?.value || 'hours';
         if (value > 0) {
           summary = `Every ${value} ${unit}`;
@@ -3427,8 +3660,12 @@ class TaskModalController {
         break;
       }
       case 'interval': {
-        const intervalValue = parseInt(document.getElementById('taskModalScheduleIntervalValue')?.value || '1', 10);
-        const intervalUnit = document.getElementById('taskModalScheduleIntervalUnit')?.value || 'hours';
+        const intervalValue = parseInt(
+          document.getElementById('taskModalScheduleIntervalValue')?.value || '1',
+          10
+        );
+        const intervalUnit =
+          document.getElementById('taskModalScheduleIntervalUnit')?.value || 'hours';
         let intervalMinutes = intervalValue;
         if (intervalUnit === 'hours') {
           intervalMinutes = intervalValue * 60;
@@ -3446,7 +3683,8 @@ class TaskModalController {
         break;
       }
       case 'cron':
-        schedule.cron_expr = document.getElementById('taskModalScheduleCron')?.value?.trim() || '0 9 * * *';
+        schedule.cron_expr =
+          document.getElementById('taskModalScheduleCron')?.value?.trim() || '0 9 * * *';
         break;
     }
 
@@ -3494,12 +3732,16 @@ class TaskModalController {
 
     const interval = schedule.interval;
     if (typeof interval === 'number' && Number.isFinite(interval) && interval > 0) {
-      return interval > 1000000 ? Math.max(1, Math.round(interval / 60000000000)) : Math.round(interval);
+      return interval > 1000000
+        ? Math.max(1, Math.round(interval / 60000000000))
+        : Math.round(interval);
     }
     if (typeof interval === 'string') {
       const numeric = Number.parseFloat(interval);
       if (Number.isFinite(numeric) && numeric > 0) {
-        return numeric > 1000000 ? Math.max(1, Math.round(numeric / 60000000000)) : Math.round(numeric);
+        return numeric > 1000000
+          ? Math.max(1, Math.round(numeric / 60000000000))
+          : Math.round(numeric);
       }
     }
 
@@ -3514,12 +3756,11 @@ class TaskModalController {
       return '';
     }
 
-    const pad = (number) => String(number).padStart(2, '0');
-    return [
-      date.getFullYear(),
-      pad(date.getMonth() + 1),
-      pad(date.getDate())
-    ].join('-') + `T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+    const pad = number => String(number).padStart(2, '0');
+    return (
+      [date.getFullYear(), pad(date.getMonth() + 1), pad(date.getDate())].join('-') +
+      `T${pad(date.getHours())}:${pad(date.getMinutes())}`
+    );
   }
 
   /**
@@ -3588,7 +3829,10 @@ class TaskModalController {
         writeModeSelect.value = task.result_storage.write_mode === 'append' ? 'append' : 'new_file';
       }
 
-      this.populateOutputContractRows(task.output_contract?.columns || [], task.output_contract?.source || 'manual');
+      this.populateOutputContractRows(
+        task.output_contract?.columns || [],
+        task.output_contract?.source || 'manual'
+      );
       this.updateAutoSaveTargetFields();
       this.updateAutoSaveWriteModeFields();
     } else {
@@ -3616,7 +3860,9 @@ class TaskModalController {
   }
 
   getOutputContractRows() {
-    return Array.from(document.querySelectorAll('#taskModalOutputContractRows .task-modal-output-contract-row')).map((row) => ({
+    return Array.from(
+      document.querySelectorAll('#taskModalOutputContractRows .task-modal-output-contract-row')
+    ).map(row => ({
       name: row.querySelector('[data-output-contract-name]')?.value?.trim() || '',
       type: row.querySelector('[data-output-contract-type]')?.value || 'string',
       required: Boolean(row.querySelector('[data-output-contract-required]')?.checked),
@@ -3628,9 +3874,10 @@ class TaskModalController {
     const rows = document.getElementById('taskModalOutputContractRows');
     if (!rows) return;
     rows.innerHTML = '';
-    (Array.isArray(columns) ? columns : []).forEach((column) => this.addOutputContractRow(column));
+    (Array.isArray(columns) ? columns : []).forEach(column => this.addOutputContractRow(column));
     this.outputContractEdited = false;
-    this.outputContractSource = source === 'ai_suggested' || source === 'csv_header' ? source : 'manual';
+    this.outputContractSource =
+      source === 'ai_suggested' || source === 'csv_header' ? source : 'manual';
     this.outputContractEditTelemetrySent = false;
     this.updateOutputContractEmptyState();
     this.clearOutputContractError();
@@ -3655,16 +3902,19 @@ class TaskModalController {
     typeSelect.className = 'task-modal-input';
     typeSelect.dataset.outputContractType = 'true';
     typeSelect.style.fontSize = '0.78rem';
-    ['string', 'number', 'boolean', 'date'].forEach((type) => {
+    ['string', 'number', 'boolean', 'date'].forEach(type => {
       const option = document.createElement('option');
       option.value = type;
       option.textContent = type;
       typeSelect.appendChild(option);
     });
-    typeSelect.value = ['string', 'number', 'boolean', 'date'].includes(column.type) ? column.type : 'string';
+    typeSelect.value = ['string', 'number', 'boolean', 'date'].includes(column.type)
+      ? column.type
+      : 'string';
 
     const requiredLabel = document.createElement('label');
-    requiredLabel.style.cssText = 'display: inline-flex; align-items: center; gap: 6px; color: var(--text-secondary); font-size: 0.76rem;';
+    requiredLabel.style.cssText =
+      'display: inline-flex; align-items: center; gap: 6px; color: var(--text-secondary); font-size: 0.76rem;';
     const requiredInput = document.createElement('input');
     requiredInput.type = 'checkbox';
     requiredInput.checked = column.required !== false;
@@ -3686,7 +3936,8 @@ class TaskModalController {
     removeButton.dataset.outputContractRemove = 'true';
     removeButton.title = 'Remove column';
     removeButton.setAttribute('aria-label', 'Remove output contract column');
-    removeButton.style.cssText = 'width: 32px; height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center;';
+    removeButton.style.cssText =
+      'width: 32px; height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center;';
     removeButton.textContent = '×';
 
     row.appendChild(nameInput);
@@ -3711,7 +3962,7 @@ class TaskModalController {
       this.outputContractEditTelemetrySent = true;
       this.trackOutputContractTelemetry('suggestion_edited', {
         source: 'manual',
-        column_count: this.getOutputContractRows().filter((row) => row.name).length
+        column_count: this.getOutputContractRows().filter(row => row.name).length
       });
     }
   }
@@ -3741,8 +3992,14 @@ class TaskModalController {
     const storagePath = document.getElementById('taskModalAutoSavePath')?.value?.trim() || '';
     const storeNodeId = document.getElementById('taskModalAutoSaveStoreNode')?.value || '';
     return {
-      title: document.getElementById('taskModalDescription')?.value?.trim() || this.currentTask?.description || '',
-      details: document.getElementById('taskModalDetails')?.value?.trim() || this.currentTask?.details || '',
+      title:
+        document.getElementById('taskModalDescription')?.value?.trim() ||
+        this.currentTask?.description ||
+        '',
+      details:
+        document.getElementById('taskModalDetails')?.value?.trim() ||
+        this.currentTask?.details ||
+        '',
       workspace_id: this.workspaceId || '',
       schedule: scheduleData.schedule || null,
       schedule_enabled: Boolean(scheduleData.schedule_enabled),
@@ -3773,10 +4030,14 @@ class TaskModalController {
     const contract = outputSpec?.contract || suggestion?.output_contract || suggestion;
     const normalized = this.normalizeOutputContractPayload(contract);
     if (!normalized) return false;
-    this.outputSpecDraft = outputSpec ? this.normalizeOutputSpecPayload(outputSpec) : this.buildOutputSpecFromContract(normalized);
+    this.outputSpecDraft = outputSpec
+      ? this.normalizeOutputSpecPayload(outputSpec)
+      : this.buildOutputSpecFromContract(normalized);
     this.populateOutputContractRows(normalized.columns, normalized.source || 'ai_suggested');
     this.outputContractSuggestionRequestKey = key || '';
-    this.setOutputContractStatus(cached ? 'Using the cached AI suggestion for this draft.' : 'AI suggestion applied.');
+    this.setOutputContractStatus(
+      cached ? 'Using the cached AI suggestion for this draft.' : 'AI suggestion applied.'
+    );
     this.trackOutputContractTelemetry('suggestion_accepted', {
       source: normalized.source || 'ai_suggested',
       column_count: normalized.columns.length
@@ -3797,7 +4058,9 @@ class TaskModalController {
     }
     if (!draft.title && !draft.details) {
       this.populateOutputContractRows(this.suggestOutputContractColumns(), 'manual');
-      this.setOutputContractStatus('Add a task title or details to improve the contract suggestion.');
+      this.setOutputContractStatus(
+        'Add a task title or details to improve the contract suggestion.'
+      );
       return;
     }
     if (this.outputContractSuggestionRequestKey === key) return;
@@ -3816,16 +4079,25 @@ class TaskModalController {
         })
       });
       if (!response.ok) {
-        throw new Error(await response.text() || 'Unable to suggest output contract');
+        throw new Error((await response.text()) || 'Unable to suggest output contract');
       }
       const data = await response.json();
       const outputSpec = data.output_spec || null;
       const contract = outputSpec?.contract || data.output_contract;
-      this.outputContractSuggestionCache.set(key, { output_spec: outputSpec, output_contract: contract });
+      this.outputContractSuggestionCache.set(key, {
+        output_spec: outputSpec,
+        output_contract: contract
+      });
       if (!this.outputContractEdited || force || this.getOutputContractRows().length === 0) {
-        this.applyOutputContractSuggestion({ output_spec: outputSpec, output_contract: contract }, key, false);
+        this.applyOutputContractSuggestion(
+          { output_spec: outputSpec, output_contract: contract },
+          key,
+          false
+        );
       } else {
-        this.setOutputContractStatus('AI suggestion is ready. Regenerate to replace your manual edits.');
+        this.setOutputContractStatus(
+          'AI suggestion is ready. Regenerate to replace your manual edits.'
+        );
       }
     } catch (error) {
       console.warn('Output contract suggestion failed:', error);
@@ -3833,10 +4105,13 @@ class TaskModalController {
         this.populateOutputContractRows(this.suggestOutputContractColumns(), 'manual');
         this.outputSpecDraft = null;
       }
-      this.setOutputContractStatus('AI suggestion unavailable. You can edit these columns manually.', 'error');
+      this.setOutputContractStatus(
+        'AI suggestion unavailable. You can edit these columns manually.',
+        'error'
+      );
       this.trackOutputContractTelemetry('suggestion_failed', {
         source: 'manual',
-        column_count: this.getOutputContractRows().filter((row) => row.name).length
+        column_count: this.getOutputContractRows().filter(row => row.name).length
       });
     } finally {
       if (suggestButton) suggestButton.disabled = false;
@@ -3847,14 +4122,18 @@ class TaskModalController {
   }
 
   async regenerateOutputContractSuggestion() {
-    const hasManualRows = this.getOutputContractRows().some((row) => row.name || row.description);
-    if (this.outputContractEdited && hasManualRows && !confirm('Replace your unsaved output contract edits with a new suggestion?')) {
+    const hasManualRows = this.getOutputContractRows().some(row => row.name || row.description);
+    if (
+      this.outputContractEdited &&
+      hasManualRows &&
+      !confirm('Replace your unsaved output contract edits with a new suggestion?')
+    ) {
       return;
     }
     this.outputContractEdited = false;
     this.trackOutputContractTelemetry('suggestion_regenerated', {
       source: this.outputContractSource || 'manual',
-      column_count: this.getOutputContractRows().filter((row) => row.name).length
+      column_count: this.getOutputContractRows().filter(row => row.name).length
     });
     await this.ensureOutputContractSuggestion({ force: true });
   }
@@ -3872,14 +4151,16 @@ class TaskModalController {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
-    }).catch((error) => {
+    }).catch(error => {
       console.debug('Output contract telemetry unavailable:', error);
     });
   }
 
   suggestOutputContractColumns() {
-    const title = document.getElementById('taskModalDescription')?.value || this.currentTask?.description || '';
-    const details = document.getElementById('taskModalDetails')?.value || this.currentTask?.details || '';
+    const title =
+      document.getElementById('taskModalDescription')?.value || this.currentTask?.description || '';
+    const details =
+      document.getElementById('taskModalDetails')?.value || this.currentTask?.details || '';
     const text = `${title} ${details}`.toLowerCase();
     const base = [
       { name: 'date', type: 'date', required: true, description: 'Run date' },
@@ -3889,8 +4170,18 @@ class TaskModalController {
       return [
         { name: 'date', type: 'date', required: true, description: 'Forecast date' },
         { name: 'location', type: 'string', required: true, description: 'City or area' },
-        { name: 'pollen_count', type: 'number', required: true, description: 'Reported pollen level' },
-        { name: 'category', type: 'string', required: false, description: 'Low, moderate, high, or similar label' },
+        {
+          name: 'pollen_count',
+          type: 'number',
+          required: true,
+          description: 'Reported pollen level'
+        },
+        {
+          name: 'category',
+          type: 'string',
+          required: false,
+          description: 'Low, moderate, high, or similar label'
+        },
         { name: 'source', type: 'string', required: false, description: 'Data source' }
       ];
     }
@@ -3940,12 +4231,19 @@ class TaskModalController {
       return { error: 'Append to CSV requires at least one output contract column.' };
     }
     const outputContract = {
-      source: this.outputContractEdited ? 'manual' : (this.outputContractSource || 'manual'),
+      source: this.outputContractEdited ? 'manual' : this.outputContractSource || 'manual',
       columns
     };
-    const outputSpec = !this.outputContractEdited && this.outputSpecDraft && this.outputSpecMatchesContract(this.outputSpecDraft, outputContract)
-      ? this.normalizeOutputSpecPayload({ ...this.outputSpecDraft, contract: outputContract, source: outputContract.source })
-      : this.buildOutputSpecFromContract(outputContract);
+    const outputSpec =
+      !this.outputContractEdited &&
+      this.outputSpecDraft &&
+      this.outputSpecMatchesContract(this.outputSpecDraft, outputContract)
+        ? this.normalizeOutputSpecPayload({
+            ...this.outputSpecDraft,
+            contract: outputContract,
+            source: outputContract.source
+          })
+        : this.buildOutputSpecFromContract(outputContract);
     return {
       output_contract: outputContract,
       output_spec: outputSpec
@@ -3956,13 +4254,15 @@ class TaskModalController {
     const columns = Array.isArray(contract?.columns) ? contract.columns : [];
     const seen = new Set();
     const normalized = [];
-    columns.forEach((column) => {
+    columns.forEach(column => {
       const name = String(column?.name || '').trim();
       if (!name) return;
       const key = name.toLowerCase();
       if (seen.has(key)) return;
       seen.add(key);
-      const type = ['string', 'number', 'boolean', 'date'].includes(column?.type) ? column.type : 'string';
+      const type = ['string', 'number', 'boolean', 'date'].includes(column?.type)
+        ? column.type
+        : 'string';
       normalized.push({
         name,
         type,
@@ -3984,13 +4284,17 @@ class TaskModalController {
     const schemaFields = Array.isArray(spec.schema?.fields) ? spec.schema.fields : [];
     const normalizedFields = [];
     const seenFields = new Set();
-    schemaFields.forEach((field) => {
+    schemaFields.forEach(field => {
       const name = String(field?.name || '').trim();
       if (!name) return;
       const key = name.toLowerCase();
       if (seenFields.has(key)) return;
       seenFields.add(key);
-      const type = ['string', 'number', 'integer', 'boolean', 'object', 'array'].includes(field?.type) ? field.type : 'string';
+      const type = ['string', 'number', 'integer', 'boolean', 'object', 'array'].includes(
+        field?.type
+      )
+        ? field.type
+        : 'string';
       normalizedFields.push({
         name,
         type,
@@ -4002,25 +4306,37 @@ class TaskModalController {
       name: String(spec.schema?.name || 'task_result').trim() || 'task_result',
       description: String(spec.schema?.description || '').trim() || undefined,
       strict: spec.schema?.strict !== false,
-      fields: normalizedFields.length ? normalizedFields : contract.columns.map((column) => ({
-        name: column.name,
-        type: column.type === 'number' ? 'number' : column.type === 'boolean' ? 'boolean' : 'string',
-        required: Boolean(column.required),
-        description: column.description
-      }))
+      fields: normalizedFields.length
+        ? normalizedFields
+        : contract.columns.map(column => ({
+            name: column.name,
+            type:
+              column.type === 'number'
+                ? 'number'
+                : column.type === 'boolean'
+                  ? 'boolean'
+                  : 'string',
+            required: Boolean(column.required),
+            description: column.description
+          }))
     };
-    const mappings = Array.isArray(spec.mappings) && spec.mappings.length
-      ? spec.mappings.map((mapping) => ({
-        schema_field: String(mapping?.schema_field || '').trim(),
-        csv_column: String(mapping?.csv_column || '').trim(),
-        transform: ['identity', 'json_string'].includes(mapping?.transform) ? mapping.transform : 'identity',
-        default_value: String(mapping?.default_value || '').trim() || undefined
-      })).filter((mapping) => mapping.schema_field && mapping.csv_column)
-      : contract.columns.map((column) => ({
-        schema_field: column.name,
-        csv_column: column.name,
-        transform: 'identity'
-      }));
+    const mappings =
+      Array.isArray(spec.mappings) && spec.mappings.length
+        ? spec.mappings
+            .map(mapping => ({
+              schema_field: String(mapping?.schema_field || '').trim(),
+              csv_column: String(mapping?.csv_column || '').trim(),
+              transform: ['identity', 'json_string'].includes(mapping?.transform)
+                ? mapping.transform
+                : 'identity',
+              default_value: String(mapping?.default_value || '').trim() || undefined
+            }))
+            .filter(mapping => mapping.schema_field && mapping.csv_column)
+        : contract.columns.map(column => ({
+            schema_field: column.name,
+            csv_column: column.name,
+            transform: 'identity'
+          }));
     return {
       source: spec.source || contract.source || 'manual',
       version: spec.version || undefined,
@@ -4028,7 +4344,10 @@ class TaskModalController {
       contract,
       mappings,
       metadata_policy: spec.metadata_policy || {
-        fields: ['run_id', 'executed_at', 'status', 'duration_ms'].map((name) => ({ name, include: true }))
+        fields: ['run_id', 'executed_at', 'status', 'duration_ms'].map(name => ({
+          name,
+          include: true
+        }))
       }
     };
   }
@@ -4041,15 +4360,16 @@ class TaskModalController {
       schema: {
         name: 'task_result',
         strict: true,
-        fields: normalized.columns.map((column) => ({
+        fields: normalized.columns.map(column => ({
           name: column.name,
-          type: column.type === 'number' ? 'number' : column.type === 'boolean' ? 'boolean' : 'string',
+          type:
+            column.type === 'number' ? 'number' : column.type === 'boolean' ? 'boolean' : 'string',
           required: Boolean(column.required),
           description: column.description
         }))
       },
       contract: normalized,
-      mappings: normalized.columns.map((column) => ({
+      mappings: normalized.columns.map(column => ({
         schema_field: column.name,
         csv_column: column.name,
         transform: 'identity'
@@ -4061,7 +4381,15 @@ class TaskModalController {
     const specColumns = Array.isArray(spec?.contract?.columns) ? spec.contract.columns : [];
     const columns = Array.isArray(contract?.columns) ? contract.columns : [];
     if (specColumns.length !== columns.length) return false;
-    return specColumns.every((column, index) => String(column?.name || '').trim().toLowerCase() === String(columns[index]?.name || '').trim().toLowerCase());
+    return specColumns.every(
+      (column, index) =>
+        String(column?.name || '')
+          .trim()
+          .toLowerCase() ===
+        String(columns[index]?.name || '')
+          .trim()
+          .toLowerCase()
+    );
   }
 
   /**
@@ -4128,7 +4456,9 @@ class TaskModalController {
     }
 
     try {
-      const response = await fetch(`/api/orchestration/tasks?workspace_id=${encodeURIComponent(this.workspaceId)}`);
+      const response = await fetch(
+        `/api/orchestration/tasks?workspace_id=${encodeURIComponent(this.workspaceId)}`
+      );
       if (!response.ok) {
         throw new Error('Failed to load tasks');
       }
@@ -4158,8 +4488,8 @@ class TaskModalController {
   getWorkspaceTaskOptions({ excludeIds = new Set() } = {}) {
     const tasks = Array.isArray(this.workspaceTasks) ? this.workspaceTasks : [];
     return tasks
-      .filter((task) => task && task.id && !excludeIds.has(task.id))
-      .map((task) => ({
+      .filter(task => task && task.id && !excludeIds.has(task.id))
+      .map(task => ({
         value: `task:${task.id}`,
         label: this.formatTaskOptionLabel(task)
       }));
@@ -4172,7 +4502,7 @@ class TaskModalController {
     const resolved = [];
     const seen = new Set();
 
-    (inputRefs || []).forEach((ref) => {
+    (inputRefs || []).forEach(ref => {
       if (!ref) return;
       let taskId = '';
       if (ref.startsWith('step:')) {
@@ -4208,7 +4538,7 @@ class TaskModalController {
       }
     });
 
-    inputTaskIds.forEach((taskId) => {
+    inputTaskIds.forEach(taskId => {
       const stepIndex = idToStep.get(taskId);
       if (stepIndex) {
         refs.push(`step:${stepIndex}`);
@@ -4234,12 +4564,12 @@ class TaskModalController {
     if (!container) return [];
     if (container.tagName === 'SELECT') {
       return Array.from(container.selectedOptions)
-        .map((option) => option.value)
-        .filter((value) => value && value.trim() !== '');
+        .map(option => option.value)
+        .filter(value => value && value.trim() !== '');
     }
     try {
       const raw = JSON.parse(container.dataset.selectedInputs || '[]');
-      return Array.isArray(raw) ? raw.filter((v) => typeof v === 'string' && v.trim() !== '') : [];
+      return Array.isArray(raw) ? raw.filter(v => typeof v === 'string' && v.trim() !== '') : [];
     } catch (_e) {
       return [];
     }
@@ -4267,16 +4597,17 @@ class TaskModalController {
       return;
     }
 
-    const escapeAttr = (value) => this.escapeHtml(value);
+    const escapeAttr = value => this.escapeHtml(value);
     const sectionsHtml = groups
-      .filter((group) => group?.items?.length)
-      .map((group) => {
+      .filter(group => group?.items?.length)
+      .map(group => {
         const labelHtml = group.label
           ? `<div class="task-modal-input-chip-group-label">${escapeAttr(group.label)}</div>`
           : '';
-        const chipsHtml = group.items.map((item) => {
-          const checked = selectedSet.has(item.value);
-          return `
+        const chipsHtml = group.items
+          .map(item => {
+            const checked = selectedSet.has(item.value);
+            return `
             <button type="button"
                     class="task-modal-input-chip${checked ? ' is-selected' : ''}"
                     data-input-value="${escapeAttr(item.value)}"
@@ -4286,13 +4617,15 @@ class TaskModalController {
               <span class="task-modal-input-chip-label">${escapeAttr(item.label)}</span>
             </button>
           `;
-        }).join('');
+          })
+          .join('');
         return `${labelHtml}<div class="task-modal-input-chip-row">${chipsHtml}</div>`;
-      }).join('');
+      })
+      .join('');
 
     container.innerHTML = sectionsHtml;
 
-    container.querySelectorAll('[data-input-value]').forEach((btn) => {
+    container.querySelectorAll('[data-input-value]').forEach(btn => {
       btn.addEventListener('click', () => {
         if (btn.disabled) return;
         const value = btn.getAttribute('data-input-value') || '';
@@ -4321,7 +4654,7 @@ class TaskModalController {
     if (container.dataset.toggleBound === 'true') return;
     container.dataset.toggleBound = 'true';
 
-    container.addEventListener('mousedown', (event) => {
+    container.addEventListener('mousedown', event => {
       if (container.disabled) return;
       const option = event.target;
       if (!option || option.tagName !== 'OPTION' || option.disabled) return;
@@ -4343,7 +4676,7 @@ class TaskModalController {
     if (currentTaskId) excludeIds.add(currentTaskId);
 
     const options = this.getWorkspaceTaskOptions({ excludeIds });
-    const selectedRefs = (task?.input_task_ids || []).map((id) => `task:${id}`);
+    const selectedRefs = (task?.input_task_ids || []).map(id => `task:${id}`);
 
     this.renderInputTaskChips(container, [{ items: options }], selectedRefs);
 
@@ -4357,11 +4690,11 @@ class TaskModalController {
     const container = document.getElementById('taskModalInputTasks');
     if (!container) return;
     const normalized = Array.isArray(refs)
-      ? refs.map((value) => String(value || '').trim()).filter(Boolean)
+      ? refs.map(value => String(value || '').trim()).filter(Boolean)
       : [];
     container.dataset.selectedInputs = JSON.stringify(normalized);
     const selectedSet = new Set(normalized);
-    container.querySelectorAll('[data-input-value]').forEach((btn) => {
+    container.querySelectorAll('[data-input-value]').forEach(btn => {
       const value = btn.getAttribute('data-input-value') || '';
       const checked = selectedSet.has(value);
       btn.classList.toggle('is-selected', checked);
@@ -4382,13 +4715,13 @@ class TaskModalController {
     noticeEl.style.display = hasSubtasks ? 'block' : 'none';
 
     container.classList.toggle('is-disabled', hasSubtasks);
-    container.querySelectorAll('[data-input-value]').forEach((btn) => {
+    container.querySelectorAll('[data-input-value]').forEach(btn => {
       btn.disabled = hasSubtasks;
     });
     if (hasSubtasks) {
       // Wipe selection — workflow inputs live on each subtask now.
       container.dataset.selectedInputs = JSON.stringify([]);
-      container.querySelectorAll('[data-input-value].is-selected').forEach((btn) => {
+      container.querySelectorAll('[data-input-value].is-selected').forEach(btn => {
         btn.classList.remove('is-selected');
         btn.setAttribute('aria-pressed', 'false');
       });
@@ -4413,7 +4746,7 @@ class TaskModalController {
 
     const workflowTaskIds = new Set();
     if (Array.isArray(this.loadedSubtasks)) {
-      this.loadedSubtasks.forEach((task) => {
+      this.loadedSubtasks.forEach(task => {
         if (task?.id) workflowTaskIds.add(task.id);
       });
     }
@@ -4436,11 +4769,14 @@ class TaskModalController {
 
       const availableSteps = stepOptions.slice(0, index);
       const groups = [];
-      if (availableSteps.length > 0) groups.push({ label: 'Workflow steps', items: availableSteps });
-      if (externalOptions.length > 0) groups.push({ label: 'Workspace tasks', items: externalOptions });
+      if (availableSteps.length > 0)
+        groups.push({ label: 'Workflow steps', items: availableSteps });
+      if (externalOptions.length > 0)
+        groups.push({ label: 'Workspace tasks', items: externalOptions });
 
       if (groups.length === 0) {
-        container.innerHTML = '<div class="task-modal-input-empty">No input tasks available — add another step or another task to the workspace.</div>';
+        container.innerHTML =
+          '<div class="task-modal-input-empty">No input tasks available — add another step or another task to the workspace.</div>';
         container.dataset.selectedInputs = JSON.stringify([]);
         this.updateSubtaskInputsBadge(card, 0);
         return;
@@ -4450,8 +4786,8 @@ class TaskModalController {
       // prevents stale "task:abc" refs from sticking around after the
       // referenced sibling step is removed.
       const validValues = new Set();
-      groups.forEach((g) => g.items.forEach((item) => validValues.add(item.value)));
-      const filteredRefs = selectedRefs.filter((ref) => validValues.has(ref));
+      groups.forEach(g => g.items.forEach(item => validValues.add(item.value)));
+      const filteredRefs = selectedRefs.filter(ref => validValues.has(ref));
 
       this.renderInputTaskChips(container, groups, filteredRefs);
       this.updateSubtaskInputsBadge(card, filteredRefs.length);
@@ -4495,7 +4831,7 @@ class TaskModalController {
   getAssignmentOptions() {
     const selectEl = document.getElementById('taskModalAssignment');
     if (!selectEl) return [];
-    return Array.from(selectEl.options).map((opt) => ({
+    return Array.from(selectEl.options).map(opt => ({
       value: opt.value,
       label: opt.textContent || ''
     }));
@@ -4521,10 +4857,10 @@ class TaskModalController {
     const options = this.getAssignmentOptions();
     if (options.length === 0) return;
 
-    document.querySelectorAll('.task-modal-subtask-assignment').forEach((select) => {
+    document.querySelectorAll('.task-modal-subtask-assignment').forEach(select => {
       const currentValue = select.value;
       select.innerHTML = '';
-      options.forEach((opt) => {
+      options.forEach(opt => {
         const optionEl = document.createElement('option');
         optionEl.value = opt.value;
         optionEl.textContent = opt.label;
@@ -4550,7 +4886,7 @@ class TaskModalController {
 
     const list = document.getElementById('taskModalSubtaskList');
     if (list) {
-      list.addEventListener('click', (event) => {
+      list.addEventListener('click', event => {
         const removeBtn = event.target.closest('[data-action="remove-subtask"]');
         if (!removeBtn) return;
         const card = removeBtn.closest('.task-modal-subtask-card');
@@ -4599,7 +4935,8 @@ class TaskModalController {
       if (disabled && message) disabledEl.textContent = message;
     }
     if (list) list.style.display = disabled ? 'none' : 'flex';
-    if (empty) empty.style.display = disabled ? 'none' : (list && list.children.length > 0 ? 'none' : 'block');
+    if (empty)
+      empty.style.display = disabled ? 'none' : list && list.children.length > 0 ? 'none' : 'block';
     if (addBtn) addBtn.disabled = disabled;
     this.updateSubtaskHint();
   }
@@ -4740,7 +5077,7 @@ class TaskModalController {
       optionEl.textContent = '-- No agent (manual task) --';
       assignmentSelect.appendChild(optionEl);
     } else {
-      options.forEach((opt) => {
+      options.forEach(opt => {
         const optionEl = document.createElement('option');
         optionEl.value = opt.value;
         optionEl.textContent = opt.label;
@@ -4786,7 +5123,8 @@ class TaskModalController {
 
     const inputsHint = document.createElement('div');
     inputsHint.className = 'task-modal-subtask-inputs-hint';
-    inputsHint.textContent = 'Click a step or task to feed its result into this step. Reference values with {input1}, {input2}, {previous}, or {result} in the title.';
+    inputsHint.textContent =
+      'Click a step or task to feed its result into this step. Reference values with {input1}, {input2}, {previous}, or {result} in the title.';
     inputsField.appendChild(inputsHint);
 
     inputsContainer.addEventListener('change', () => {
@@ -4896,11 +5234,17 @@ class TaskModalController {
       if (tasks.length === 0) {
         tasks = await this.loadWorkspaceTasks();
       }
-      const subtasks = tasks.filter((task) => task.parent_task_id === parentTaskId);
+      const subtasks = tasks.filter(task => task.parent_task_id === parentTaskId);
 
       subtasks.sort((a, b) => {
-        const aIndex = Number.isFinite(a.subtask_index) && a.subtask_index > 0 ? a.subtask_index : Number.MAX_SAFE_INTEGER;
-        const bIndex = Number.isFinite(b.subtask_index) && b.subtask_index > 0 ? b.subtask_index : Number.MAX_SAFE_INTEGER;
+        const aIndex =
+          Number.isFinite(a.subtask_index) && a.subtask_index > 0
+            ? a.subtask_index
+            : Number.MAX_SAFE_INTEGER;
+        const bIndex =
+          Number.isFinite(b.subtask_index) && b.subtask_index > 0
+            ? b.subtask_index
+            : Number.MAX_SAFE_INTEGER;
         if (aIndex !== bIndex) return aIndex - bIndex;
         const aTime = a.created_at ? new Date(a.created_at).getTime() : 0;
         const bTime = b.created_at ? new Date(b.created_at).getTime() : 0;
@@ -4973,7 +5317,12 @@ class TaskModalController {
       window.sessionManager.showToast(message, type);
     } else if (window.Toast) {
       const normalizedType = (type || 'info').toLowerCase();
-      const toastType = normalizedType === 'danger' ? 'error' : normalizedType === 'warn' ? 'warning' : normalizedType;
+      const toastType =
+        normalizedType === 'danger'
+          ? 'error'
+          : normalizedType === 'warn'
+            ? 'warning'
+            : normalizedType;
       const toastFn = window.Toast[toastType];
       if (typeof toastFn === 'function') {
         toastFn(message);
@@ -5005,22 +5354,22 @@ class TaskModalController {
       dropZone.addEventListener('click', () => {
         document.getElementById('taskModalFileInput')?.click();
       });
-      dropZone.addEventListener('keydown', (e) => {
+      dropZone.addEventListener('keydown', e => {
         if (e.key !== 'Enter' && e.key !== ' ') return;
         e.preventDefault();
         document.getElementById('taskModalFileInput')?.click();
       });
-      dropZone.addEventListener('dragover', (e) => {
+      dropZone.addEventListener('dragover', e => {
         e.preventDefault();
         e.stopPropagation();
         dropZone.classList.add('drag-active');
       });
-      dropZone.addEventListener('dragleave', (e) => {
+      dropZone.addEventListener('dragleave', e => {
         e.preventDefault();
         e.stopPropagation();
         dropZone.classList.remove('drag-active');
       });
-      dropZone.addEventListener('drop', (e) => {
+      dropZone.addEventListener('drop', e => {
         e.preventDefault();
         e.stopPropagation();
         dropZone.classList.remove('drag-active');
@@ -5032,7 +5381,7 @@ class TaskModalController {
     }
 
     if (fileInput) {
-      fileInput.addEventListener('change', (e) => {
+      fileInput.addEventListener('change', e => {
         const files = e.target?.files;
         if (files && files.length > 0) {
           this.addFiles(Array.from(files));
@@ -5078,7 +5427,7 @@ class TaskModalController {
 
     // Allow Enter key to confirm file path
     if (filePathText) {
-      filePathText.addEventListener('keydown', (e) => {
+      filePathText.addEventListener('keydown', e => {
         if (e.key === 'Enter') {
           e.preventDefault();
           this.addFilePath(filePathText.value);
@@ -5138,13 +5487,13 @@ class TaskModalController {
   addFiles(files) {
     const maxSize = 100 * 1024 * 1024; // 100MB
 
-    files.forEach((file) => {
+    files.forEach(file => {
       if (file.size > maxSize) {
         this.showToast(`${file.name} exceeds 100MB limit`, 'warning');
         return;
       }
       // Avoid duplicates
-      if (!this.pendingFiles.some((f) => f.name === file.name && f.size === file.size)) {
+      if (!this.pendingFiles.some(f => f.name === file.name && f.size === file.size)) {
         this.pendingFiles.push(file);
       }
     });
@@ -5188,21 +5537,22 @@ class TaskModalController {
 
     container.style.display = 'block';
 
-    const formatSize = (bytes) => {
+    const formatSize = bytes => {
       if (!bytes) return '';
       if (bytes < 1024) return bytes + ' B';
       if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
       return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
     };
 
-    const escapeHtml = (text) => {
+    const escapeHtml = text => {
       const div = document.createElement('div');
       div.textContent = text;
       return div.innerHTML;
     };
 
     // Uploaded files
-    const fileItems = this.pendingFiles.map((file, index) => `
+    const fileItems = this.pendingFiles.map(
+      (file, index) => `
       <div class="task-selected-file-item" data-index="${index}" data-type="file">
         <span class="task-file-name">${escapeHtml(file.name)}</span>
         <span class="task-file-size">${formatSize(file.size)}</span>
@@ -5212,7 +5562,8 @@ class TaskModalController {
           </svg>
         </button>
       </div>
-    `);
+    `
+    );
 
     // File path references
     const pathItems = this.pendingFilePaths.map((path, index) => {
@@ -5238,8 +5589,8 @@ class TaskModalController {
     container.innerHTML = [...fileItems, ...pathItems].join('');
 
     // Bind remove buttons
-    container.querySelectorAll('.task-file-remove').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
+    container.querySelectorAll('.task-file-remove').forEach(btn => {
+      btn.addEventListener('click', e => {
         e.stopPropagation();
         const index = parseInt(btn.dataset.index, 10);
         const type = btn.dataset.type;

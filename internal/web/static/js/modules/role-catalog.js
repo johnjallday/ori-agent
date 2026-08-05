@@ -39,7 +39,9 @@
   }
 
   function normalizeRole(role) {
-    return String(role || '').trim().toLowerCase();
+    return String(role || '')
+      .trim()
+      .toLowerCase();
   }
 
   function isUnspecialized(role) {

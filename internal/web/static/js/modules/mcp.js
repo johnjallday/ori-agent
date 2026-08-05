@@ -1,20 +1,20 @@
 // MCP (Model Context Protocol) Management Module
 
 // Load MCP servers on page load
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', function () {
   if (document.getElementById('mcpServersList')) {
     loadMcpServers();
   }
 });
 
 // Add MCP Server button
-document.getElementById('addMcpServerBtn')?.addEventListener('click', function() {
+document.getElementById('addMcpServerBtn')?.addEventListener('click', function () {
   const modal = new bootstrap.Modal(document.getElementById('addMcpServerModal'));
   modal.show();
 });
 
 // Save MCP Server
-document.getElementById('saveMcpServerBtn')?.addEventListener('click', async function() {
+document.getElementById('saveMcpServerBtn')?.addEventListener('click', async function () {
   const name = document.getElementById('mcpServerName').value.trim();
   const command = document.getElementById('mcpServerCommand').value.trim();
   const argsText = document.getElementById('mcpServerArgs').value.trim();
@@ -26,7 +26,10 @@ document.getElementById('saveMcpServerBtn')?.addEventListener('click', async fun
   }
 
   // Parse arguments (one per line)
-  const args = argsText.split('\n').map(a => a.trim()).filter(a => a);
+  const args = argsText
+    .split('\n')
+    .map(a => a.trim())
+    .filter(a => a);
 
   // Parse environment variables (KEY=value format)
   const env = {};
@@ -75,7 +78,8 @@ async function loadMcpServers() {
   const container = document.getElementById('mcpServersList');
   if (!container) return;
 
-  container.innerHTML = '<div class="text-center py-4" style="color: var(--text-secondary);"><div class="spinner-border spinner-border-sm me-2"></div>Loading...</div>';
+  container.innerHTML =
+    '<div class="text-center py-4" style="color: var(--text-secondary);"><div class="spinner-border spinner-border-sm me-2"></div>Loading...</div>';
 
   try {
     const response = await fetch('/api/mcp/servers');
@@ -86,7 +90,8 @@ async function loadMcpServers() {
     const stats = data.stats || {};
 
     if (servers.length === 0) {
-      container.innerHTML = '<div class="text-center py-4" style="color: var(--text-secondary);">No MCP servers configured. Click "Add MCP Server" to get started.</div>';
+      container.innerHTML =
+        '<div class="text-center py-4" style="color: var(--text-secondary);">No MCP servers configured. Click "Add MCP Server" to get started.</div>';
       return;
     }
 
@@ -98,11 +103,12 @@ async function loadMcpServers() {
       const toolCount = stat.tool_count || 0;
       const enabled = stat.enabled || false;
 
-      const statusBadge = status === 'running'
-        ? '<span class="badge bg-success">Running</span>'
-        : status === 'error'
-          ? '<span class="badge bg-danger">Error</span>'
-          : '<span class="badge bg-secondary">Stopped</span>';
+      const statusBadge =
+        status === 'running'
+          ? '<span class="badge bg-success">Running</span>'
+          : status === 'error'
+            ? '<span class="badge bg-danger">Error</span>'
+            : '<span class="badge bg-secondary">Stopped</span>';
 
       html += `
         <div class="card mb-2" style="background: var(--bg-secondary); border: 1px solid var(--border-color);">
@@ -143,7 +149,10 @@ async function loadMcpServers() {
     container.innerHTML = html;
   } catch (error) {
     console.error('Error loading MCP servers:', error);
-    container.innerHTML = '<div class="alert alert-danger">Error loading servers: ' + escapeHtml(error.message) + '</div>';
+    container.innerHTML =
+      '<div class="alert alert-danger">Error loading servers: ' +
+      escapeHtml(error.message) +
+      '</div>';
   }
 }
 
@@ -208,7 +217,10 @@ async function viewMcpServerDetails(serverName) {
     bodyEl.innerHTML = html;
   } catch (error) {
     console.error('Error loading server details:', error);
-    bodyEl.innerHTML = '<div class="alert alert-danger">Error loading details: ' + escapeHtml(error.message) + '</div>';
+    bodyEl.innerHTML =
+      '<div class="alert alert-danger">Error loading details: ' +
+      escapeHtml(error.message) +
+      '</div>';
   }
 }
 

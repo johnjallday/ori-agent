@@ -16,7 +16,7 @@ export function readWorkspaceNotesRoute(pathname) {
   }
   return {
     workspaceId: decodePathSegment(parts[idx + 1]),
-    noteId: idx + 3 < parts.length ? decodePathSegment(parts[idx + 3]) : '',
+    noteId: idx + 3 < parts.length ? decodePathSegment(parts[idx + 3]) : ''
   };
 }
 
@@ -77,6 +77,6 @@ if (typeof window !== 'undefined') {
     workspaceNotePath,
     workspaceNotePathForNote,
     notePathForNote,
-    appendHash,
+    appendHash
   };
 }

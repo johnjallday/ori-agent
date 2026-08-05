@@ -138,15 +138,15 @@ export class RendererPrimitives {
     // Triangles: input points upward, output points downward
     const points = pointUp
       ? [
-        { x: x, y: y - size },      // top
-        { x: x - size, y: y + size },
-        { x: x + size, y: y + size }
-      ]
+          { x: x, y: y - size }, // top
+          { x: x - size, y: y + size },
+          { x: x + size, y: y + size }
+        ]
       : [
-        { x: x, y: y + size },      // bottom
-        { x: x - size, y: y - size },
-        { x: x + size, y: y - size }
-      ];
+          { x: x, y: y + size }, // bottom
+          { x: x - size, y: y - size },
+          { x: x + size, y: y - size }
+        ];
 
     // Outer triangle
     this.ctx.beginPath();

@@ -231,5 +231,11 @@ export function moveHeadingRange(source, fromPosition, toPosition) {
 
 // Bridge for non-module scripts (sessions.js).
 if (typeof window !== 'undefined') {
-  window.NoteTOC = { parseHeadings, parseOutlineEntries, buildOutline, sliceHeadingRange, moveHeadingRange };
+  window.NoteTOC = {
+    parseHeadings,
+    parseOutlineEntries,
+    buildOutline,
+    sliceHeadingRange,
+    moveHeadingRange
+  };
 }

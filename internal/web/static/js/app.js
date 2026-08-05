@@ -23,8 +23,10 @@ const CHAT_SPECIALIST_INTENT_DEFAULTS = {
     domains: ['utility'],
     externalSystems: [],
     sideEffects: 'none',
-    descriptionBase: 'Create a utility assistant for quick everyday requests such as time lookups, weather checks, simple conversions, and short factual questions.',
-    systemPrompt: 'You are a utility assistant for quick requests. Handle time, weather, simple conversions, and short factual lookups with concise direct answers.'
+    descriptionBase:
+      'Create a utility assistant for quick everyday requests such as time lookups, weather checks, simple conversions, and short factual questions.',
+    systemPrompt:
+      'You are a utility assistant for quick requests. Handle time, weather, simple conversions, and short factual lookups with concise direct answers.'
   },
   travel_planning: {
     defaultType: 'research',
@@ -33,8 +35,10 @@ const CHAT_SPECIALIST_INTENT_DEFAULTS = {
     domains: ['travel'],
     externalSystems: [],
     sideEffects: 'none',
-    descriptionBase: 'Create an agent that plans multi-day travel itineraries with day-by-day plans, transportation ideas, budget ranges, and local recommendations.',
-    systemPrompt: 'You are a travel planning assistant. Build realistic day-by-day itineraries with concise options, practical transit notes, and budget-aware recommendations.'
+    descriptionBase:
+      'Create an agent that plans multi-day travel itineraries with day-by-day plans, transportation ideas, budget ranges, and local recommendations.',
+    systemPrompt:
+      'You are a travel planning assistant. Build realistic day-by-day itineraries with concise options, practical transit notes, and budget-aware recommendations.'
   },
   email_check: {
     defaultType: 'tool-calling',
@@ -43,8 +47,10 @@ const CHAT_SPECIALIST_INTENT_DEFAULTS = {
     domains: ['email'],
     externalSystems: ['email', 'gmail', 'outlook'],
     sideEffects: 'external_account',
-    descriptionBase: 'Create an email triage agent that summarizes unread mail, categorizes urgency, and drafts replies. It must default to read-only behavior and never send without explicit user confirmation.',
-    systemPrompt: 'You are an email assistant. Summarize inbox content and draft responses. Never send or delete email without explicit user approval. Start in read-only mode.'
+    descriptionBase:
+      'Create an email triage agent that summarizes unread mail, categorizes urgency, and drafts replies. It must default to read-only behavior and never send without explicit user confirmation.',
+    systemPrompt:
+      'You are an email assistant. Summarize inbox content and draft responses. Never send or delete email without explicit user approval. Start in read-only mode.'
   },
   calendar_check: {
     defaultType: 'tool-calling',
@@ -53,8 +59,10 @@ const CHAT_SPECIALIST_INTENT_DEFAULTS = {
     domains: ['calendar'],
     externalSystems: ['calendar'],
     sideEffects: 'external_account',
-    descriptionBase: 'Create a calendar assistant that checks schedule availability, summarizes upcoming events, and answers calendar questions. It must default to read-only behavior and always use configured skills or MCP connectors before claiming lack of access.',
-    systemPrompt: 'You are a calendar assistant. Default to read-only behavior unless the user explicitly asks to create or edit events.'
+    descriptionBase:
+      'Create a calendar assistant that checks schedule availability, summarizes upcoming events, and answers calendar questions. It must default to read-only behavior and always use configured skills or MCP connectors before claiming lack of access.',
+    systemPrompt:
+      'You are a calendar assistant. Default to read-only behavior unless the user explicitly asks to create or edit events.'
   },
   app_launch: {
     defaultType: 'tool-calling',
@@ -63,8 +71,10 @@ const CHAT_SPECIALIST_INTENT_DEFAULTS = {
     domains: ['desktop'],
     externalSystems: [],
     sideEffects: 'local_app',
-    descriptionBase: 'Create a desktop launcher agent that can interpret app-launch requests, execute safe local launch commands, and confirm completion clearly.',
-    systemPrompt: 'You are a desktop app launcher assistant. For requests like "open obsidian", launch the requested app immediately and confirm success or report the exact failure reason.'
+    descriptionBase:
+      'Create a desktop launcher agent that can interpret app-launch requests, execute safe local launch commands, and confirm completion clearly.',
+    systemPrompt:
+      'You are a desktop app launcher assistant. For requests like "open obsidian", launch the requested app immediately and confirm success or report the exact failure reason.'
   },
   general_task: {
     defaultType: 'general',
@@ -73,8 +83,10 @@ const CHAT_SPECIALIST_INTENT_DEFAULTS = {
     domains: ['tasks'],
     externalSystems: [],
     sideEffects: '',
-    descriptionBase: 'Create a practical task execution assistant that can route and complete user requests from chat.',
-    systemPrompt: 'You are a helpful assistant focused on completing practical user tasks with clear, concise outputs.'
+    descriptionBase:
+      'Create a practical task execution assistant that can route and complete user requests from chat.',
+    systemPrompt:
+      'You are a helpful assistant focused on completing practical user tasks with clear, concise outputs.'
   }
 };
 
@@ -85,7 +97,7 @@ function sanitizeHistory(messages) {
 
   for (let i = 0; i < messages.length; i++) {
     const msg = messages[i];
-    const content = (msg && msg.content) ? String(msg.content) : '';
+    const content = msg && msg.content ? String(msg.content) : '';
 
     if (!msg || !content) {
       continue;
@@ -93,8 +105,7 @@ function sanitizeHistory(messages) {
 
     // Remove update-available announcements that may have been persisted in older sessions
     const isUpdateAnnouncement =
-      content.includes('Update Available') &&
-      content.includes('Latest Version:');
+      content.includes('Update Available') && content.includes('Latest Version:');
 
     if (isUpdateAnnouncement) {
       continue;
@@ -137,7 +148,9 @@ function getActiveChatStorageKey() {
   }
 
   const pathname = String(window.location?.pathname || '/').trim() || '/';
-  const workspaceId = extractWorkspaceIdFromPath(pathname) || String(window.sessionManager?.getActiveSession?.()?.folder_id || '').trim();
+  const workspaceId =
+    extractWorkspaceIdFromPath(pathname) ||
+    String(window.sessionManager?.getActiveSession?.()?.folder_id || '').trim();
   if (workspaceId) {
     return `ori_chat_assistant_${workspaceId}`;
   }
@@ -276,7 +289,12 @@ async function refreshChatWebSearchToggle(explicitAgentName = '') {
 
   const agentName = resolveChatWebSearchAgentName(explicitAgentName);
   if (!agentName) {
-    setChatWebSearchToggleVisualState({ enabled: true, loading: false, agentName: '', available: false });
+    setChatWebSearchToggleVisualState({
+      enabled: true,
+      loading: false,
+      agentName: '',
+      available: false
+    });
     return;
   }
 
@@ -291,7 +309,8 @@ async function refreshChatWebSearchToggle(explicitAgentName = '') {
     const data = await response.json();
     if (requestId !== chatWebSearchToggleRequestId) return;
 
-    const allowWebSearch = typeof data.allow_web_search === 'boolean' ? data.allow_web_search : true;
+    const allowWebSearch =
+      typeof data.allow_web_search === 'boolean' ? data.allow_web_search : true;
     setChatWebSearchToggleVisualState({
       enabled: allowWebSearch,
       loading: false,
@@ -301,7 +320,12 @@ async function refreshChatWebSearchToggle(explicitAgentName = '') {
   } catch (error) {
     appLog.warn('Failed to load chat web search toggle state', error);
     if (requestId !== chatWebSearchToggleRequestId) return;
-    setChatWebSearchToggleVisualState({ enabled: true, loading: false, agentName, available: false });
+    setChatWebSearchToggleVisualState({
+      enabled: true,
+      loading: false,
+      agentName,
+      available: false
+    });
   }
 }
 
@@ -365,7 +389,7 @@ function setupChatWebSearchToggle() {
   if (btn.dataset.bound === 'true') return;
   btn.dataset.bound = 'true';
 
-  btn.addEventListener('click', async (event) => {
+  btn.addEventListener('click', async event => {
     event.preventDefault();
     await toggleChatWebSearchForActiveAgent();
   });
@@ -394,7 +418,7 @@ function setupAgentDisplayClick() {
     agentDisplay.title = 'Assistant';
   };
 
-  agentDisplay.addEventListener('click', function() {
+  agentDisplay.addEventListener('click', function () {
     const agentName = String(this.dataset.agentName || '').trim();
     if (agentName) {
       window.location.href = `/agents/${encodeURIComponent(agentName)}`;
@@ -595,7 +619,8 @@ function renderTable(data, metadata) {
 
   const columns = metadata?.columns || Object.keys(data[0]);
 
-  let html = '<div style="overflow-x: auto;"><table class="table table-sm table-bordered table-hover" style="margin-top: 8px;">';
+  let html =
+    '<div style="overflow-x: auto;"><table class="table table-sm table-bordered table-hover" style="margin-top: 8px;">';
 
   // Table header
   html += '<thead class="table-light"><tr>';
@@ -642,7 +667,9 @@ function renderModal(data, metadata) {
   const html = `
     <div class="modal-script-selector" id="${modalId}">
       <div class="list-group mb-3" style="max-height: 400px; overflow-y: auto;">
-        ${data.map((item, index) => `
+        ${data
+          .map(
+            (item, index) => `
           <label class="list-group-item list-group-item-action d-flex align-items-start" style="cursor: pointer;">
             <input type="checkbox" name="script-select-${modalId}" value="${index}" class="me-3 mt-1 form-check-input" data-filename="${escapeHtml(item.filename || '')}" data-item-index="${index}">
             <div class="flex-grow-1">
@@ -654,7 +681,9 @@ function renderModal(data, metadata) {
               ${item.filename ? `<small class="text-primary">📄 ${escapeHtml(item.filename)}</small>` : ''}
             </div>
           </label>
-        `).join('')}
+        `
+          )
+          .join('')}
       </div>
       <div class="d-flex justify-content-between align-items-center">
         <span class="text-muted small" id="selected-count-${modalId}">0 selected</span>
@@ -679,7 +708,9 @@ function renderModal(data, metadata) {
 
     // Update selected count
     function updateCount() {
-      const checked = document.querySelectorAll(`input[name="script-select-${modalId}"]:checked`).length;
+      const checked = document.querySelectorAll(
+        `input[name="script-select-${modalId}"]:checked`
+      ).length;
       if (selectedCount) {
         selectedCount.textContent = `${checked} selected`;
       }
@@ -692,24 +723,26 @@ function renderModal(data, metadata) {
 
     // Select All button
     if (selectAllBtn) {
-      selectAllBtn.addEventListener('click', function() {
-        checkboxes.forEach(cb => cb.checked = true);
+      selectAllBtn.addEventListener('click', function () {
+        checkboxes.forEach(cb => (cb.checked = true));
         updateCount();
       });
     }
 
     // Clear All button
     if (clearBtn) {
-      clearBtn.addEventListener('click', function() {
-        checkboxes.forEach(cb => cb.checked = false);
+      clearBtn.addEventListener('click', function () {
+        checkboxes.forEach(cb => (cb.checked = false));
         updateCount();
       });
     }
 
     // Download button
     if (downloadBtn) {
-      downloadBtn.addEventListener('click', async function() {
-        const selected = document.querySelectorAll(`input[name="script-select-${modalId}"]:checked`);
+      downloadBtn.addEventListener('click', async function () {
+        const selected = document.querySelectorAll(
+          `input[name="script-select-${modalId}"]:checked`
+        );
         if (selected.length === 0) {
           alert('Please select at least one script');
           return;
@@ -769,10 +802,9 @@ function renderModal(data, metadata) {
             downloadBtn.innerHTML = `<span class="download-icon">⬇️</span> ${escapeHtml(buttonLabel)}`;
             downloadBtn.disabled = false;
             // Uncheck all checkboxes
-            selected.forEach(cb => cb.checked = false);
+            selected.forEach(cb => (cb.checked = false));
             updateCount();
           }, 2000);
-
         } catch (error) {
           appLog.error('Download error:', error);
           addMessageToChat(`Error: ${error.message}`, false, true);
@@ -896,15 +928,16 @@ function normalizeRouteMetadata(payload) {
   if (!payload || typeof payload !== 'object') return null;
 
   const route = payload.route && typeof payload.route === 'object' ? payload.route : {};
-  const mode = String(route.mode || payload.route_mode || '').trim().toLowerCase();
+  const mode = String(route.mode || payload.route_mode || '')
+    .trim()
+    .toLowerCase();
   if (!mode) return null;
 
   const toolName = String(route.tool_name || payload.tool_name || '').trim();
   const provider = String(route.provider || payload.provider || '').trim();
   const parsedToolCount = Number(route.tool_count || payload.tool_count || 0);
-  const toolCount = Number.isFinite(parsedToolCount) && parsedToolCount > 0
-    ? Math.floor(parsedToolCount)
-    : 0;
+  const toolCount =
+    Number.isFinite(parsedToolCount) && parsedToolCount > 0 ? Math.floor(parsedToolCount) : 0;
 
   return {
     mode,
@@ -915,7 +948,9 @@ function normalizeRouteMetadata(payload) {
 }
 
 function normalizeSpecialistToken(value) {
-  return String(value || '').trim().toLowerCase();
+  return String(value || '')
+    .trim()
+    .toLowerCase();
 }
 
 function uniqueSpecialistValues(values) {
@@ -932,16 +967,21 @@ function uniqueSpecialistValues(values) {
 
 function getChatSpecialistIntentDefaults(intentKey) {
   const normalizedKey = normalizeSpecialistToken(intentKey);
-  return CHAT_SPECIALIST_INTENT_DEFAULTS[normalizedKey] || CHAT_SPECIALIST_INTENT_DEFAULTS.general_task;
+  return (
+    CHAT_SPECIALIST_INTENT_DEFAULTS[normalizedKey] || CHAT_SPECIALIST_INTENT_DEFAULTS.general_task
+  );
 }
 
 function normalizeSpecialistHandoff(payload) {
   if (!payload || typeof payload !== 'object') return null;
 
-  const handoff = payload.specialist_handoff && typeof payload.specialist_handoff === 'object'
-    ? payload.specialist_handoff
-    : payload;
-  const mode = String(handoff.route_mode || payload.route_mode || '').trim().toLowerCase();
+  const handoff =
+    payload.specialist_handoff && typeof payload.specialist_handoff === 'object'
+      ? payload.specialist_handoff
+      : payload;
+  const mode = String(handoff.route_mode || payload.route_mode || '')
+    .trim()
+    .toLowerCase();
   if (mode !== 'specialist_handoff') return null;
 
   const matchedAgent = String(handoff.matched_agent || payload.matched_agent || '').trim();
@@ -949,11 +989,17 @@ function normalizeSpecialistHandoff(payload) {
     mode,
     matchedAgent,
     requiresCreation: handoff.requires_creation === true || payload.requires_creation === true,
-    routingPolicy: String(handoff.routing_policy || payload.routing_policy || '').trim().toLowerCase(),
+    routingPolicy: String(handoff.routing_policy || payload.routing_policy || '')
+      .trim()
+      .toLowerCase(),
     intent: String(handoff.intent || payload.intent || '').trim(),
     intentLabel: String(handoff.intent_label || payload.intent_label || '').trim(),
-    suggestedAgentName: String(handoff.suggested_agent_name || payload.suggested_agent_name || '').trim(),
-    suggestedAgentType: String(handoff.suggested_agent_type || payload.suggested_agent_type || '').trim()
+    suggestedAgentName: String(
+      handoff.suggested_agent_name || payload.suggested_agent_name || ''
+    ).trim(),
+    suggestedAgentType: String(
+      handoff.suggested_agent_type || payload.suggested_agent_type || ''
+    ).trim()
   };
 }
 
@@ -979,13 +1025,17 @@ function buildChatSpecialistRoutingProfile(originalMessage, handoff) {
     match_phrases: taskText ? [taskText] : [],
     example_requests: taskText ? [taskText] : [],
     domains: Array.isArray(defaults.domains) ? defaults.domains.slice() : [],
-    external_systems: Array.isArray(defaults.externalSystems) ? defaults.externalSystems.slice() : [],
+    external_systems: Array.isArray(defaults.externalSystems)
+      ? defaults.externalSystems.slice()
+      : [],
     side_effects: defaults.sideEffects || ''
   };
 }
 
 function buildUniqueChatSpecialistAgentName(baseName, existingNames) {
-  let sanitized = String(baseName || 'Task Assistant').replace(/[^a-zA-Z0-9 _-]/g, '').trim();
+  let sanitized = String(baseName || 'Task Assistant')
+    .replace(/[^a-zA-Z0-9 _-]/g, '')
+    .trim();
   if (!sanitized) sanitized = 'Task Assistant';
 
   const lowerNames = Object.create(null);
@@ -1017,7 +1067,7 @@ async function fetchChatSpecialistCreationAvailability() {
     return {
       available: Boolean(data && data.available),
       systemModelConfigured: Boolean(data && data.system_model_configured),
-      message: String(data && data.message || '')
+      message: String((data && data.message) || '')
     };
   } catch (error) {
     appLog.warn('Failed to load specialist creation availability', error);
@@ -1080,15 +1130,21 @@ async function createSpecialistAgentFromHandoff(payload, originalMessage) {
   const description = buildChatSpecialistDescription(originalMessage, handoff);
   const autoConfig = await maybeLoadChatSpecialistAutoConfig(description);
   const existingNames = await fetchExistingChatAgentNames();
-  const desiredBaseName = autoConfig && autoConfig.agent_name
-    ? autoConfig.agent_name
-    : (handoff.suggestedAgentName || defaults.suggestedName);
+  const desiredBaseName =
+    autoConfig && autoConfig.agent_name
+      ? autoConfig.agent_name
+      : handoff.suggestedAgentName || defaults.suggestedName;
   const agentName = buildUniqueChatSpecialistAgentName(desiredBaseName, existingNames);
 
   const requestBody = {
     name: agentName,
-    type: (autoConfig && autoConfig.agent_type) || handoff.suggestedAgentType || defaults.defaultType || 'tool-calling',
-    system_prompt: (autoConfig && autoConfig.system_prompt) || buildChatSpecialistSystemPrompt(handoff),
+    type:
+      (autoConfig && autoConfig.agent_type) ||
+      handoff.suggestedAgentType ||
+      defaults.defaultType ||
+      'tool-calling',
+    system_prompt:
+      (autoConfig && autoConfig.system_prompt) || buildChatSpecialistSystemPrompt(handoff),
     description: (autoConfig && autoConfig.description) || description,
     tags: buildChatSpecialistTags(handoff),
     routing_profile: buildChatSpecialistRoutingProfile(originalMessage, handoff)
@@ -1122,11 +1178,15 @@ async function createSpecialistAgentFromHandoff(payload, originalMessage) {
 }
 
 function buildDisplayMessageForRequest(requestBody, fallbackMessage) {
-  const question = typeof requestBody?.question === 'string' ? requestBody.question : fallbackMessage;
+  const question =
+    typeof requestBody?.question === 'string' ? requestBody.question : fallbackMessage;
   let displayMessage = String(question || '').trim();
   const files = Array.isArray(requestBody?.files) ? requestBody.files : [];
   if (files.length > 0) {
-    const fileNames = files.map(file => file && file.name).filter(Boolean).join(', ');
+    const fileNames = files
+      .map(file => file && file.name)
+      .filter(Boolean)
+      .join(', ');
     if (fileNames) {
       displayMessage += `\n\n📎 Attached: ${fileNames}`;
     }
@@ -1139,9 +1199,7 @@ async function createSpecialistSessionForHandoff(agentName, requestBody) {
   if (!manager || !agentName) return null;
 
   const workspaceId = String(
-    requestBody?.route_context?.workspace_id ||
-    manager.getActiveSession?.()?.folder_id ||
-    ''
+    requestBody?.route_context?.workspace_id || manager.getActiveSession?.()?.folder_id || ''
   ).trim();
 
   if (workspaceId && typeof manager.createSessionWithAgentInFolder === 'function') {
@@ -1150,7 +1208,11 @@ async function createSpecialistSessionForHandoff(agentName, requestBody) {
       return createdInWorkspace;
     }
     const activeWorkspaceSession = manager.getActiveSession?.();
-    if (activeWorkspaceSession && activeWorkspaceSession.id && activeWorkspaceSession.agent_name === agentName) {
+    if (
+      activeWorkspaceSession &&
+      activeWorkspaceSession.id &&
+      activeWorkspaceSession.agent_name === agentName
+    ) {
       return activeWorkspaceSession;
     }
   }
@@ -1175,12 +1237,14 @@ async function executeSpecialistHandoff(payload, fallbackMessage, isSlashCommand
     return false;
   }
 
-  const requestBody = payload && typeof payload._requestBody === 'object' ? { ...payload._requestBody } : null;
+  const requestBody =
+    payload && typeof payload._requestBody === 'object' ? { ...payload._requestBody } : null;
   if (!requestBody) return false;
 
-  const requestHeaders = payload && typeof payload._requestHeaders === 'object'
-    ? { ...payload._requestHeaders }
-    : { 'Content-Type': 'application/json' };
+  const requestHeaders =
+    payload && typeof payload._requestHeaders === 'object'
+      ? { ...payload._requestHeaders }
+      : { 'Content-Type': 'application/json' };
 
   const session = await createSpecialistSessionForHandoff(handoff.matchedAgent, requestBody);
   if (!session || !session.id) {
@@ -1191,9 +1255,10 @@ async function executeSpecialistHandoff(payload, fallbackMessage, isSlashCommand
     ...requestBody,
     agent_name: handoff.matchedAgent
   };
-  const handoffRouteContext = handoffRequestBody.route_context && typeof handoffRequestBody.route_context === 'object'
-    ? { ...handoffRequestBody.route_context }
-    : {};
+  const handoffRouteContext =
+    handoffRequestBody.route_context && typeof handoffRequestBody.route_context === 'object'
+      ? { ...handoffRequestBody.route_context }
+      : {};
   if (!handoffRouteContext.workspace_id && session.folder_id) {
     handoffRouteContext.workspace_id = session.folder_id;
   }
@@ -1205,7 +1270,13 @@ async function executeSpecialistHandoff(payload, fallbackMessage, isSlashCommand
     'X-Session-ID': session.id
   };
 
-  addMessageToChat(buildDisplayMessageForRequest(handoffRequestBody, fallbackMessage), true, false, false, isSlashCommand);
+  addMessageToChat(
+    buildDisplayMessageForRequest(handoffRequestBody, fallbackMessage),
+    true,
+    false,
+    false,
+    isSlashCommand
+  );
 
   if (chatStateMachine && chatStateMachine.isActive()) {
     chatStateMachine.think();
@@ -1231,15 +1302,21 @@ async function executeSpecialistHandoff(payload, fallbackMessage, isSlashCommand
     chatStateMachine.process();
   }
 
-  await handleChatResponsePayload(data, handoffRequestBody.question || fallbackMessage, isSlashCommand);
+  await handleChatResponsePayload(
+    data,
+    handoffRequestBody.question || fallbackMessage,
+    isSlashCommand
+  );
   return true;
 }
 
 function shouldRenderRouteBadge(routeMeta) {
   if (!routeMeta || !routeMeta.mode) return false;
-  return routeMeta.mode === 'utility_direct' ||
+  return (
+    routeMeta.mode === 'utility_direct' ||
     routeMeta.mode === 'direct_tool' ||
-    routeMeta.mode === 'specialist_handoff';
+    routeMeta.mode === 'specialist_handoff'
+  );
 }
 
 function formatRouteBadgeText(routeMeta) {
@@ -1319,7 +1396,14 @@ function appendMessageToUI(message, isUser = false, isError = false, routeMeta =
 }
 
 // Public function: Add message and optionally persist to localStorage
-function addMessageToChat(message, isUser = false, isError = false, isSystemNotification = false, skipHistory = false, routeMeta = null) {
+function addMessageToChat(
+  message,
+  isUser = false,
+  isError = false,
+  isSystemNotification = false,
+  skipHistory = false,
+  routeMeta = null
+) {
   // Add to UI
   appendMessageToUI(message, isUser, isError, routeMeta);
 
@@ -1349,7 +1433,8 @@ function formatToolCallsForChat(toolCalls) {
     .map((tc, idx) => {
       const functionName = tc.function || tc.name || `tool_${idx + 1}`;
       const args = typeof tc.args === 'string' ? tc.args : JSON.stringify(tc.args ?? {}, null, 2);
-      const result = typeof tc.result === 'string' ? tc.result : JSON.stringify(tc.result ?? '', null, 2);
+      const result =
+        typeof tc.result === 'string' ? tc.result : JSON.stringify(tc.result ?? '', null, 2);
       return [
         '<details>',
         `<summary>Tool: <code>${functionName}</code></summary>`,
@@ -1374,13 +1459,16 @@ function formatActionReceiptsForChat(receipts) {
       const tool = receipt.tool_name ? `Tool: ${receipt.tool_name}` : '';
       const reason = receipt.reason || '';
       const status = receipt.success === false ? 'Failed' : 'Success';
-      const duration = typeof receipt.duration_ms === 'number' ? `Duration: ${receipt.duration_ms}ms` : '';
-      const targets = Array.isArray(receipt.targets) && receipt.targets.length > 0
-        ? `Targets: ${receipt.targets.join(', ')}`
-        : '';
-      const locations = Array.isArray(receipt.locations) && receipt.locations.length > 0
-        ? `Locations: ${receipt.locations.join(', ')}`
-        : '';
+      const duration =
+        typeof receipt.duration_ms === 'number' ? `Duration: ${receipt.duration_ms}ms` : '';
+      const targets =
+        Array.isArray(receipt.targets) && receipt.targets.length > 0
+          ? `Targets: ${receipt.targets.join(', ')}`
+          : '';
+      const locations =
+        Array.isArray(receipt.locations) && receipt.locations.length > 0
+          ? `Locations: ${receipt.locations.join(', ')}`
+          : '';
       const preview = receipt.result_preview || '';
 
       const summaryParts = [action, status];
@@ -1394,17 +1482,22 @@ function formatActionReceiptsForChat(receipts) {
         duration ? `<div><strong>${escapeHtml(duration)}</strong></div>` : '',
         targets ? `<div><strong>${escapeHtml(targets)}</strong></div>` : '',
         locations ? `<div><strong>${escapeHtml(locations)}</strong></div>` : '',
-        preview ? `<div><strong>What changed</strong><pre style="white-space:pre-wrap; margin:8px 0;">${escapeHtml(preview)}</pre></div>` : '',
+        preview
+          ? `<div><strong>What changed</strong><pre style="white-space:pre-wrap; margin:8px 0;">${escapeHtml(preview)}</pre></div>`
+          : '',
         '</div>',
         '</details>'
-      ].filter(Boolean).join('\n');
+      ]
+        .filter(Boolean)
+        .join('\n');
     })
     .join('\n\n');
 }
 
 function formatActionPlanForChat(data) {
   const plan = data?.action_plan;
-  const fallback = typeof data?.response === 'string' ? data.response : 'Action plan is ready for approval.';
+  const fallback =
+    typeof data?.response === 'string' ? data.response : 'Action plan is ready for approval.';
   if (!plan || !Array.isArray(plan.steps) || plan.steps.length === 0) {
     return fallback;
   }
@@ -1469,7 +1562,7 @@ function renderActionPlanControls(planId, originalMessage) {
     window.scrollChatToBottomIfNeeded();
   }
 
-  const setDisabled = (disabled) => {
+  const setDisabled = disabled => {
     approveBtn.disabled = disabled;
     editBtn.disabled = disabled;
     cancelBtn.disabled = disabled;
@@ -1559,7 +1652,7 @@ function renderSpecialistCreationControls(payload, originalMessage, isSlashComma
     window.scrollChatToBottomIfNeeded();
   }
 
-  const setDisabled = (disabled) => {
+  const setDisabled = disabled => {
     createBtn.disabled = disabled;
     cancelBtn.disabled = disabled;
     openAgentsBtn.disabled = disabled;
@@ -1568,18 +1661,27 @@ function renderSpecialistCreationControls(payload, originalMessage, isSlashComma
   createBtn.addEventListener('click', async () => {
     const originalHtml = createBtn.innerHTML;
     setDisabled(true);
-    createBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status"></span>Creating...';
+    createBtn.innerHTML =
+      '<span class="spinner-border spinner-border-sm me-2" role="status"></span>Creating...';
 
     try {
       const createdAgentName = await createSpecialistAgentFromHandoff(payload, originalMessage);
-      addMessageToChat(`Created "${createdAgentName}". Continuing in specialist chat.`, false, false, true, true);
+      addMessageToChat(
+        `Created "${createdAgentName}". Continuing in specialist chat.`,
+        false,
+        false,
+        true,
+        true
+      );
 
       const resumedPayload = {
         ...payload,
         matched_agent: createdAgentName,
         requires_creation: false,
         specialist_handoff: {
-          ...(payload && typeof payload.specialist_handoff === 'object' ? payload.specialist_handoff : {}),
+          ...(payload && typeof payload.specialist_handoff === 'object'
+            ? payload.specialist_handoff
+            : {}),
           matched_agent: createdAgentName,
           requires_creation: false
         }
@@ -1612,7 +1714,7 @@ function normalizeDependencyResolution(payload) {
   if (!raw || typeof raw !== 'object') return null;
 
   const steps = Array.isArray(raw.steps)
-    ? raw.steps.filter((step) => step && typeof step === 'object')
+    ? raw.steps.filter(step => step && typeof step === 'object')
     : [];
 
   return {
@@ -1645,7 +1747,8 @@ function inferDependencyResolutionFromResponse(payload) {
     {
       type: 'open_url',
       label: 'Open Agents',
-      description: 'Review external agent permissions and allow the required tool or MCP, then retry this request.',
+      description:
+        'Review external agent permissions and allow the required tool or MCP, then retry this request.',
       variant: 'primary',
       url: '/agents'
     }
@@ -1687,22 +1790,27 @@ function inferDependencyResolutionFromResponse(payload) {
 
 function looksLikePermissionDeniedDependencyText(lower) {
   return (
-    lower.includes('denied permission') ||
-    lower.includes('permission mode') ||
-    lower.includes('permission settings') ||
-    lower.includes('permissions settings') ||
-    lower.includes("isn't enabled in the current permission mode") ||
-    lower.includes('is not enabled in the current permission mode') ||
-    lower.includes('enable the mcp__') ||
-    lower.includes('enable the `mcp__') ||
-    lower.includes("enable the 'mcp__") ||
-    lower.includes('enable the "mcp__')
-  ) && (lower.includes('tool') || lower.includes('mcp') || lower.includes('reaper'));
+    (lower.includes('denied permission') ||
+      lower.includes('permission mode') ||
+      lower.includes('permission settings') ||
+      lower.includes('permissions settings') ||
+      lower.includes("isn't enabled in the current permission mode") ||
+      lower.includes('is not enabled in the current permission mode') ||
+      lower.includes('enable the mcp__') ||
+      lower.includes('enable the `mcp__') ||
+      lower.includes("enable the 'mcp__") ||
+      lower.includes('enable the "mcp__')) &&
+    (lower.includes('tool') || lower.includes('mcp') || lower.includes('reaper'))
+  );
 }
 
 function inferDependencyResolutionTarget(responseText) {
   const lower = responseText.toLowerCase();
-  if (lower.includes('mcp__ori-reaper') || lower.includes('ori-reaper') || lower.includes('reaper')) {
+  if (
+    lower.includes('mcp__ori-reaper') ||
+    lower.includes('ori-reaper') ||
+    lower.includes('reaper')
+  ) {
     return { displayName: 'REAPER MCP tool', serverName: 'ori-reaper' };
   }
 
@@ -1733,7 +1841,9 @@ function humanizeDependencyResolutionServerName(serverName) {
   return cleaned
     .split(/[-_.]+/)
     .filter(Boolean)
-    .map((part) => part.length <= 3 ? part.toUpperCase() : `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+    .map(part =>
+      part.length <= 3 ? part.toUpperCase() : `${part.charAt(0).toUpperCase()}${part.slice(1)}`
+    )
     .join(' ');
 }
 
@@ -1780,22 +1890,26 @@ function ensureDependencyResolutionModal() {
 
 function hideDependencyResolutionModal() {
   if (!dependencyResolutionModalState?.modalEl || !window.bootstrap) return;
-  const modal = typeof bootstrap.Modal.getOrCreateInstance === 'function'
-    ? bootstrap.Modal.getOrCreateInstance(dependencyResolutionModalState.modalEl)
-    : bootstrap.Modal.getInstance(dependencyResolutionModalState.modalEl);
+  const modal =
+    typeof bootstrap.Modal.getOrCreateInstance === 'function'
+      ? bootstrap.Modal.getOrCreateInstance(dependencyResolutionModalState.modalEl)
+      : bootstrap.Modal.getInstance(dependencyResolutionModalState.modalEl);
   modal?.hide();
 }
 
 function createDependencyActionButton(action, context) {
   const button = document.createElement('button');
   button.type = 'button';
-  const variant = String(action?.variant || 'secondary').trim().toLowerCase();
+  const variant = String(action?.variant || 'secondary')
+    .trim()
+    .toLowerCase();
   button.className = `btn btn-sm ${variant === 'primary' ? 'btn-primary' : variant === 'danger' ? 'btn-danger' : 'btn-outline-secondary'}`;
   button.textContent = String(action?.label || 'Continue').trim() || 'Continue';
   button.addEventListener('click', async () => {
     const originalLabel = button.innerHTML;
     button.disabled = true;
-    button.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status"></span>Working...';
+    button.innerHTML =
+      '<span class="spinner-border spinner-border-sm me-2" role="status"></span>Working...';
     try {
       await handleDependencyResolutionAction(action, context);
     } catch (error) {
@@ -1810,7 +1924,13 @@ function createDependencyActionButton(action, context) {
   return button;
 }
 
-function renderDependencyResolutionModal(resolution, payload, originalMessage, isSlashCommand, options = {}) {
+function renderDependencyResolutionModal(
+  resolution,
+  payload,
+  originalMessage,
+  isSlashCommand,
+  options = {}
+) {
   const state = ensureDependencyResolutionModal();
   if (!state || !window.bootstrap) return false;
   const context = {
@@ -1821,10 +1941,11 @@ function renderDependencyResolutionModal(resolution, payload, originalMessage, i
   };
 
   state.titleEl.textContent = resolution.title;
-  state.summaryEl.textContent = resolution.summary || 'This request needs setup before it can continue.';
+  state.summaryEl.textContent =
+    resolution.summary || 'This request needs setup before it can continue.';
   state.stepsEl.innerHTML = '';
 
-  resolution.steps.forEach((step) => {
+  resolution.steps.forEach(step => {
     const card = document.createElement('section');
     card.style.border = '1px solid var(--border-color)';
     card.style.borderRadius = '14px';
@@ -1856,7 +1977,8 @@ function renderDependencyResolutionModal(resolution, payload, originalMessage, i
     if (step.risk_level) {
       const risk = document.createElement('span');
       risk.className = 'badge';
-      risk.style.background = step.risk_level === 'high' ? 'rgba(220, 53, 69, 0.18)' : 'rgba(13, 110, 253, 0.14)';
+      risk.style.background =
+        step.risk_level === 'high' ? 'rgba(220, 53, 69, 0.18)' : 'rgba(13, 110, 253, 0.14)';
       risk.style.color = step.risk_level === 'high' ? '#ffb3bd' : '#9ec5fe';
       risk.textContent = `${String(step.risk_level).trim()} risk`;
       heading.appendChild(risk);
@@ -1871,7 +1993,7 @@ function renderDependencyResolutionModal(resolution, payload, originalMessage, i
     actionsWrap.style.marginTop = '12px';
 
     const actions = Array.isArray(step.actions) ? step.actions : [];
-    actions.forEach((action) => {
+    actions.forEach(action => {
       actionsWrap.appendChild(createDependencyActionButton(action, context));
     });
 
@@ -1879,16 +2001,21 @@ function renderDependencyResolutionModal(resolution, payload, originalMessage, i
     state.stepsEl.appendChild(card);
   });
 
-  const modal = typeof bootstrap.Modal.getOrCreateInstance === 'function'
-    ? bootstrap.Modal.getOrCreateInstance(state.modalEl)
-    : (bootstrap.Modal.getInstance(state.modalEl) || new bootstrap.Modal(state.modalEl));
+  const modal =
+    typeof bootstrap.Modal.getOrCreateInstance === 'function'
+      ? bootstrap.Modal.getOrCreateInstance(state.modalEl)
+      : bootstrap.Modal.getInstance(state.modalEl) || new bootstrap.Modal(state.modalEl);
   modal.show();
   return true;
 }
 
 async function retryDependencyResolutionRequest(payload, originalMessage, isSlashCommand) {
-  const requestBody = payload?._requestBody ? { ...payload._requestBody } : { question: originalMessage };
-  const headers = payload?._requestHeaders ? { ...payload._requestHeaders } : { 'Content-Type': 'application/json' };
+  const requestBody = payload?._requestBody
+    ? { ...payload._requestBody }
+    : { question: originalMessage };
+  const headers = payload?._requestHeaders
+    ? { ...payload._requestHeaders }
+    : { 'Content-Type': 'application/json' };
 
   if (chatStateMachine) {
     chatStateMachine.send();
@@ -1936,23 +2063,29 @@ async function handleDependencyResolutionAction(action, context) {
     return;
   }
 
-  if (actionType === 'workspace_enable_mcp_binding' || actionType === 'suppress_dependency_prompt') {
+  if (
+    actionType === 'workspace_enable_mcp_binding' ||
+    actionType === 'suppress_dependency_prompt'
+  ) {
     const workspaceId = String(action?.workspace_id || '').trim();
     if (!workspaceId) {
       throw new Error('Dependency action requires a workspace');
     }
 
-    const response = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/dependency-actions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        type: actionType,
-        server_name: action?.server_name || '',
-        skill_name: action?.skill_name || '',
-        dependency_type: action?.dependency_type || '',
-        preference_key: action?.preference_key || ''
-      })
-    });
+    const response = await fetch(
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/dependency-actions`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: actionType,
+          server_name: action?.server_name || '',
+          skill_name: action?.skill_name || '',
+          dependency_type: action?.dependency_type || '',
+          preference_key: action?.preference_key || ''
+        })
+      }
+    );
     if (!response.ok) {
       const text = await response.text();
       throw new Error(text || 'Failed to resolve dependency');
@@ -1961,14 +2094,22 @@ async function handleDependencyResolutionAction(action, context) {
     const result = await response.json();
     hideDependencyResolutionModal();
     if (window.Toast) {
-      Toast.success(actionType === 'suppress_dependency_prompt' ? 'Prompt preference saved' : 'Dependency resolved');
+      Toast.success(
+        actionType === 'suppress_dependency_prompt'
+          ? 'Prompt preference saved'
+          : 'Dependency resolved'
+      );
     }
 
     if (action?.auto_retry && result?.retry_ready) {
       if (typeof context?.retry === 'function') {
         await context.retry(action, result, context);
       } else {
-        await retryDependencyResolutionRequest(context?.payload, context?.originalMessage, context?.isSlashCommand);
+        await retryDependencyResolutionRequest(
+          context?.payload,
+          context?.originalMessage,
+          context?.isSlashCommand
+        );
       }
     }
     return;
@@ -2080,7 +2221,14 @@ async function handleChatResponsePayload(data, trimmedMessage, isSlashCommand) {
     if (hasResponseField && responseText !== null && responseText.trim().length > 0) {
       addMessageToChat(responseText, false, false, false, isSlashCommand, routeMeta);
     } else {
-      addMessageToChat('This request needs a specialist before it can continue.', false, false, false, isSlashCommand, routeMeta);
+      addMessageToChat(
+        'This request needs a specialist before it can continue.',
+        false,
+        false,
+        false,
+        isSlashCommand,
+        routeMeta
+      );
     }
 
     if (receiptsText) {
@@ -2122,7 +2270,14 @@ async function handleChatResponsePayload(data, trimmedMessage, isSlashCommand) {
   }
 
   if (dependencyResolution) {
-    addMessageToChat(dependencyResolution.summary || 'This request needs setup before it can continue.', false, false, false, isSlashCommand, routeMeta);
+    addMessageToChat(
+      dependencyResolution.summary || 'This request needs setup before it can continue.',
+      false,
+      false,
+      false,
+      isSlashCommand,
+      routeMeta
+    );
     renderDependencyResolutionModal(dependencyResolution, data, trimmedMessage, isSlashCommand);
     if (window.sessionManager && window.sessionManager.onMessageSent) {
       window.sessionManager.onMessageSent();
@@ -2133,7 +2288,11 @@ async function handleChatResponsePayload(data, trimmedMessage, isSlashCommand) {
 
   appLog.error('No response field found. Available fields:', Object.keys(data));
   const details = escapeHtml(JSON.stringify(data, null, 2));
-  addMessageToChat(`Sorry, I received an unexpected response format.\n\n<details><summary>Raw response</summary><pre style="white-space:pre-wrap; margin:8px 0;">${details}</pre></details>`, false, true);
+  addMessageToChat(
+    `Sorry, I received an unexpected response format.\n\n<details><summary>Raw response</summary><pre style="white-space:pre-wrap; margin:8px 0;">${details}</pre></details>`,
+    false,
+    true
+  );
   if (window.Toast) {
     Toast.warning('Received unexpected response format');
   }
@@ -2151,7 +2310,8 @@ function updatePlannerIndicator(decision) {
   }
 
   const mode = decision.mode || 'auto';
-  const score = typeof decision.complexity_score === 'number' ? decision.complexity_score.toFixed(1) : '--';
+  const score =
+    typeof decision.complexity_score === 'number' ? decision.complexity_score.toFixed(1) : '--';
   const threshold = typeof decision.threshold === 'number' ? decision.threshold.toFixed(1) : '--';
   const status = decision.multi_agent ? 'ON' : 'OFF';
 
@@ -2172,7 +2332,11 @@ function renderPlannerPlanSummary(data) {
 }
 
 async function handleDynamicAgentApprovals(data) {
-  if (!data || !Array.isArray(data.dynamic_agent_requests) || data.dynamic_agent_requests.length === 0) {
+  if (
+    !data ||
+    !Array.isArray(data.dynamic_agent_requests) ||
+    data.dynamic_agent_requests.length === 0
+  ) {
     return;
   }
   const workspaceId = data.workspace_id;
@@ -2182,9 +2346,7 @@ async function handleDynamicAgentApprovals(data) {
     .map(req => `- ${req.name} (${req.role || 'general'})`)
     .join('\n');
 
-  const approve = window.confirm(
-    `Dynamic agent creation requested:\n\n${summary}\n\nApprove?`
-  );
+  const approve = window.confirm(`Dynamic agent creation requested:\n\n${summary}\n\nApprove?`);
 
   let resumeResult = null;
   for (const req of data.dynamic_agent_requests) {
@@ -2269,7 +2431,11 @@ async function displayTaskList(sessionId) {
     const tasks = data.tasks || [];
 
     if (tasks.length === 0) {
-      addMessageToChat('No tasks for this session. Use `/task <description>` to create one.', false, false);
+      addMessageToChat(
+        'No tasks for this session. Use `/task <description>` to create one.',
+        false,
+        false
+      );
       return;
     }
 
@@ -2301,8 +2467,14 @@ async function displayTaskList(sessionId) {
 function isTextLikeMimeType(mimeType) {
   if (!mimeType) return false;
   const lower = mimeType.toLowerCase();
-  return lower.startsWith('text/') || lower.includes('json') || lower.includes('xml') ||
-    lower.includes('csv') || lower.includes('markdown') || lower.includes('html');
+  return (
+    lower.startsWith('text/') ||
+    lower.includes('json') ||
+    lower.includes('xml') ||
+    lower.includes('csv') ||
+    lower.includes('markdown') ||
+    lower.includes('html')
+  );
 }
 
 function hasTextExtension(filename) {
@@ -2394,10 +2566,16 @@ async function persistUploadedFilesToSession(sessionId, files, workspaceId) {
   if (!sessionId || !files || files.length === 0) return;
 
   try {
-    const results = await Promise.allSettled(files.map(file => uploadFileToSession(sessionId, file)));
+    const results = await Promise.allSettled(
+      files.map(file => uploadFileToSession(sessionId, file))
+    );
     const failures = results.filter(result => result.status === 'rejected');
     const successes = results
-      .map((result, index) => (result.status === 'fulfilled' && result.value ? { file: files[index], entry: result.value } : null))
+      .map((result, index) =>
+        result.status === 'fulfilled' && result.value
+          ? { file: files[index], entry: result.value }
+          : null
+      )
       .filter(Boolean);
 
     if (failures.length > 0 && window.Toast) {
@@ -2413,7 +2591,9 @@ async function persistUploadedFilesToSession(sessionId, files, workspaceId) {
       const workspaceUploadResults = await Promise.allSettled(
         successes.map(item => uploadFileToWorkspace(workspaceId, item.file, item.entry))
       );
-      const workspaceUploadFailures = workspaceUploadResults.filter(result => result.status === 'rejected');
+      const workspaceUploadFailures = workspaceUploadResults.filter(
+        result => result.status === 'rejected'
+      );
       if (workspaceUploadFailures.length > 0 && window.Toast) {
         Toast.warning('Some files could not be copied into the workspace');
       }
@@ -2441,7 +2621,9 @@ function extractWorkspaceIdFromPath(pathname) {
 }
 
 function inferChatRouteSurface(pathname, workspaceId) {
-  const path = String(pathname || '').trim().toLowerCase();
+  const path = String(pathname || '')
+    .trim()
+    .toLowerCase();
   if (!path) return workspaceId ? 'workspace_detail' : 'dashboard';
   if (path.startsWith('/workspaces/')) {
     if (path.includes('/canvas')) return 'workspace_canvas';
@@ -2456,7 +2638,9 @@ function inferChatRouteSurface(pathname, workspaceId) {
 function normalizeRouteContextForChat(routeContext) {
   if (!routeContext || typeof routeContext !== 'object') return null;
   const normalized = {
-    surface: String(routeContext.surface || '').trim().toLowerCase(),
+    surface: String(routeContext.surface || '')
+      .trim()
+      .toLowerCase(),
     page_path: String(routeContext.page_path || '').trim(),
     workspace_id: String(routeContext.workspace_id || '').trim(),
     origin: String(routeContext.origin || '').trim()
@@ -2470,12 +2654,17 @@ function normalizeRouteContextForChat(routeContext) {
 function buildChatRequestRouteContext(overrideRouteContext) {
   const normalizedOverride = normalizeRouteContextForChat(overrideRouteContext);
   const pathname = String(window.location?.pathname || '/').trim() || '/';
-  const activeWorkspaceId = String(window.sessionManager?.getActiveSession?.()?.folder_id || '').trim();
+  const activeWorkspaceId = String(
+    window.sessionManager?.getActiveSession?.()?.folder_id || ''
+  ).trim();
   const workspaceIdFromPath = extractWorkspaceIdFromPath(pathname);
 
   const routeContext = {
     page_path: (normalizedOverride && normalizedOverride.page_path) || pathname,
-    workspace_id: (normalizedOverride && normalizedOverride.workspace_id) || workspaceIdFromPath || activeWorkspaceId,
+    workspace_id:
+      (normalizedOverride && normalizedOverride.workspace_id) ||
+      workspaceIdFromPath ||
+      activeWorkspaceId,
     origin: (normalizedOverride && normalizedOverride.origin) || 'chat'
   };
 
@@ -2505,7 +2694,10 @@ async function expandAttachedChatNotes(message, attachedNotes) {
           noteContent = String(payload?.content || '').trim();
         }
       } catch (error) {
-        appLog.warn('Failed to fetch attached note content', { noteId, error: error && error.message ? error.message : error });
+        appLog.warn('Failed to fetch attached note content', {
+          noteId,
+          error: error && error.message ? error.message : error
+        });
       }
     }
 
@@ -2675,7 +2867,6 @@ async function sendMessage(message) {
       chatStateMachine.process();
     }
     await handleChatResponsePayload(data, rawMessage, isSlashCommand);
-
   } catch (error) {
     // Handle user cancellation gracefully
     if (error.name === 'AbortError') {
@@ -2699,7 +2890,7 @@ async function sendMessage(message) {
 
 // Send a message to chat programmatically (used by task execution, etc.)
 // Exposed globally so other modules can trigger chat messages
-window.sendMessageToChat = function(message, options) {
+window.sendMessageToChat = function (message, options) {
   const routeContext = options && typeof options === 'object' ? options.routeContext : null;
   pendingChatRouteContext = routeContext || null;
   const input = document.getElementById('input');
@@ -2742,7 +2933,7 @@ function setupChat() {
   });
 
   // Input handling
-  input.addEventListener('keydown', (e) => {
+  input.addEventListener('keydown', e => {
     if (isComposing) return;
 
     // Handle Enter key
@@ -2814,7 +3005,10 @@ function setupChat() {
       planBeforeActionToggle.checked = savedPlanBeforeAction === 'true';
     }
     planBeforeActionToggle.addEventListener('change', () => {
-      localStorage.setItem(PLAN_BEFORE_ACTION_STORAGE_KEY, planBeforeActionToggle.checked ? 'true' : 'false');
+      localStorage.setItem(
+        PLAN_BEFORE_ACTION_STORAGE_KEY,
+        planBeforeActionToggle.checked ? 'true' : 'false'
+      );
     });
   }
 
@@ -2873,7 +3067,7 @@ function setupChatPanel() {
   closeBtn?.addEventListener('click', close);
   backdrop?.addEventListener('click', close);
 
-  document.addEventListener('keydown', (event) => {
+  document.addEventListener('keydown', event => {
     if (event.key === 'Escape' && document.body.classList.contains('chat-panel-open')) {
       close();
     }
@@ -2885,7 +3079,7 @@ function setupChatPanel() {
     let startX = 0;
     let startWidth = 0;
 
-    const startResize = (e) => {
+    const startResize = e => {
       isResizing = true;
       startX = e.clientX;
       startWidth = panel.offsetWidth;
@@ -2895,7 +3089,7 @@ function setupChatPanel() {
       e.preventDefault();
     };
 
-    const doResize = (e) => {
+    const doResize = e => {
       if (!isResizing) return;
       const diff = startX - e.clientX;
       const newWidth = Math.min(Math.max(startWidth + diff, 360), window.innerWidth * 0.8);
@@ -2917,7 +3111,12 @@ function setupChatPanel() {
     document.addEventListener('mouseup', stopResize);
   }
 
-  window.chatPanel = { open, close, toggle, isOpen: () => document.body.classList.contains('chat-panel-open') };
+  window.chatPanel = {
+    open,
+    close,
+    toggle,
+    isOpen: () => document.body.classList.contains('chat-panel-open')
+  };
 }
 
 // ---- Sidebar Functionality ----
@@ -2944,7 +3143,7 @@ function setupSkillsDropdown() {
 
   async function fetchSkills() {
     const now = Date.now();
-    if (skillsCache && (now - cacheTime) < CACHE_TTL) {
+    if (skillsCache && now - cacheTime < CACHE_TTL) {
       return skillsCache;
     }
     try {
@@ -2962,31 +3161,36 @@ function setupSkillsDropdown() {
 
   function renderSkills(skills) {
     if (!skills) {
-      content.innerHTML = '<div style="padding: 12px; text-align: center; color: var(--text-muted); font-size: 12px;">Failed to load skills</div>';
+      content.innerHTML =
+        '<div style="padding: 12px; text-align: center; color: var(--text-muted); font-size: 12px;">Failed to load skills</div>';
       return;
     }
     const runnableSkills = skills.filter(skill => {
       const enabled = skill?.enabled !== false;
-      const valid = !Array.isArray(skill?.validation_errors) || skill.validation_errors.length === 0;
+      const valid =
+        !Array.isArray(skill?.validation_errors) || skill.validation_errors.length === 0;
       const trusted = !skill?.has_scripts || Boolean(skill?.trusted);
       return enabled && valid && trusted;
     });
     if (runnableSkills.length === 0) {
-      content.innerHTML = '<div style="padding: 12px; text-align: center; color: var(--text-muted); font-size: 12px;">No skills available</div>';
+      content.innerHTML =
+        '<div style="padding: 12px; text-align: center; color: var(--text-muted); font-size: 12px;">No skills available</div>';
       return;
     }
-    content.innerHTML = runnableSkills.map(skill => {
-      const desc = skill.description || 'Run /' + skill.name;
-      const src = skill.source || 'local';
-      return `<button class="skill-item" data-skill="${skill.name}" style="display: block; width: 100%; text-align: left; padding: 8px 12px; border: none; background: none; cursor: pointer; font-size: 12px; color: var(--text-primary); transition: background 0.15s;">
+    content.innerHTML = runnableSkills
+      .map(skill => {
+        const desc = skill.description || 'Run /' + skill.name;
+        const src = skill.source || 'local';
+        return `<button class="skill-item" data-skill="${skill.name}" style="display: block; width: 100%; text-align: left; padding: 8px 12px; border: none; background: none; cursor: pointer; font-size: 12px; color: var(--text-primary); transition: background 0.15s;">
         <div style="font-weight: 500;">${skill.name} <span style="font-size: 10px; padding: 2px 6px; border-radius: 4px; background: var(--bg-secondary); color: var(--text-muted);">${src}</span></div>
         <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${desc}</div>
       </button>`;
-    }).join('');
+      })
+      .join('');
 
     content.querySelectorAll('.skill-item').forEach(item => {
-      item.addEventListener('mouseenter', () => item.style.background = 'var(--bg-secondary)');
-      item.addEventListener('mouseleave', () => item.style.background = 'none');
+      item.addEventListener('mouseenter', () => (item.style.background = 'var(--bg-secondary)'));
+      item.addEventListener('mouseleave', () => (item.style.background = 'none'));
       item.addEventListener('click', () => {
         const name = item.dataset.skill;
         dropdown.style.display = 'none';
@@ -3004,12 +3208,13 @@ function setupSkillsDropdown() {
       return;
     }
     dropdown.style.display = 'block';
-    content.innerHTML = '<div style="padding: 12px; text-align: center; color: var(--text-muted); font-size: 12px;">Loading...</div>';
+    content.innerHTML =
+      '<div style="padding: 12px; text-align: center; color: var(--text-muted); font-size: 12px;">Loading...</div>';
     const skills = await fetchSkills();
     renderSkills(skills);
   });
 
-  document.addEventListener('click', (e) => {
+  document.addEventListener('click', e => {
     if (!btn.contains(e.target) && !dropdown.contains(e.target)) {
       dropdown.style.display = 'none';
     }
@@ -3088,7 +3293,7 @@ function refreshSystemModelDisplayIfVisible() {
 }
 
 // Initialize when DOM is ready
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', function () {
   // Keep the navbar out of the heavier app bootstrap path. Task/detail pages
   // should resolve "Loading..." even if chat or dashboard initialization stalls.
   refreshSystemModelDisplay();

@@ -11,7 +11,9 @@ make test
 # Run only fast unit tests
 make test-unit
 
-# Run integration tests (needs API key)
+# Run integration tests (needs API key; make test-integration sets the
+# required ORI_RUN_PROVIDER_INTEGRATION=1 opt-in for you when a key is
+# present - a bare `go test -run Integration ./...` will skip without it)
 OPENAI_API_KEY=sk-... make test-integration
 
 # Run E2E tests (needs build + API key)
@@ -28,6 +30,11 @@ make check
 ```
 
 ## Test Selection
+
+Prefer `make test-unit` / `make test-unit-verbose` over a bare
+`go test ./...` from the repo root: root `./...` can discover Go source
+vendored under `node_modules`, which the Makefile's package selection
+(`./scripts/list-unit-packages.sh`) excludes.
 
 ```bash
 # Run specific package
@@ -116,8 +123,12 @@ make clean && make all
 # Run exactly what CI runs
 make fmt
 make vet
-make lint
 make test-all
+
+# CI's lint gate only fails on issues NEW since origin/dev (only-new-issues);
+# `make lint` runs the full check including the existing legacy baseline
+make lint-new   # matches the CI gate
+make lint       # full picture, non-blocking
 ```
 
 ## Test File Patterns
@@ -141,7 +152,7 @@ export OPENAI_API_KEY="your-key"
 
 # Port in use
 lsof -i :8765
-kill -9 <PID>
+kill <PID>          # graceful; add -9 only if it doesn't stop
 
 # Module issues
 go mod tidy

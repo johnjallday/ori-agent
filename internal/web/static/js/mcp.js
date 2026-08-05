@@ -5,7 +5,7 @@ let mcpServers = [];
 let statusPollInterval = null;
 
 // Initialize on page load
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', function () {
   initializeEventListeners();
   loadMarketplaceServers();
   loadServers();
@@ -15,13 +15,13 @@ document.addEventListener('DOMContentLoaded', function() {
 
 function initializeEventListeners() {
   // Add server button
-  document.getElementById('addServerBtn').addEventListener('click', function() {
+  document.getElementById('addServerBtn').addEventListener('click', function () {
     const modal = new bootstrap.Modal(document.getElementById('addServerModal'));
     modal.show();
   });
 
   // Manual config form
-  document.getElementById('manualConfigForm').addEventListener('submit', function(e) {
+  document.getElementById('manualConfigForm').addEventListener('submit', function (e) {
     e.preventDefault();
     addServerManual();
   });
@@ -58,8 +58,10 @@ function renderMarketplace() {
 
   marketplaceServers.forEach(server => {
     const item = document.createElement('div');
-    item.className = 'list-group-item d-flex justify-content-between align-items-start marketplace-item';
-    item.style = 'background: var(--bg-tertiary); border-color: var(--border-color); cursor: pointer;';
+    item.className =
+      'list-group-item d-flex justify-content-between align-items-start marketplace-item';
+    item.style =
+      'background: var(--bg-tertiary); border-color: var(--border-color); cursor: pointer;';
 
     const envRequired = server.env_required ? Object.keys(server.env_required).join(', ') : '';
 
@@ -82,7 +84,7 @@ function renderMarketplace() {
 
   // Add event listeners to install buttons
   document.querySelectorAll('.install-btn').forEach(btn => {
-    btn.addEventListener('click', function(e) {
+    btn.addEventListener('click', function (e) {
       e.stopPropagation();
       const serverData = JSON.parse(decodeURIComponent(this.dataset.server));
       installFromMarketplace(serverData);
@@ -206,7 +208,7 @@ function handleFileImport(event) {
   if (!file) return;
 
   const reader = new FileReader();
-  reader.onload = function(e) {
+  reader.onload = function (e) {
     try {
       const content = e.target.result;
       const config = JSON.parse(content);
@@ -264,7 +266,8 @@ async function loadServers() {
   const container = document.getElementById('mcpServersList');
   const emptyState = document.getElementById('emptyState');
 
-  container.innerHTML = '<div class="text-center py-3"><div class="spinner-border text-primary"></div></div>';
+  container.innerHTML =
+    '<div class="text-center py-3"><div class="spinner-border text-primary"></div></div>';
   emptyState.style.display = 'none';
 
   try {
@@ -313,7 +316,10 @@ function createServerCard(server) {
 
   const statusBadge = getStatusBadge(server.status || 'stopped');
   const argsDisplay = server.args ? server.args.join(' ') : '';
-  const toolCountBadge = server.tool_count > 0 ? `<span class="badge bg-info ms-2">${server.tool_count} tools</span>` : '';
+  const toolCountBadge =
+    server.tool_count > 0
+      ? `<span class="badge bg-info ms-2">${server.tool_count} tools</span>`
+      : '';
   const enabledBadge = server.enabled
     ? '<span class="badge bg-primary ms-2">Enabled globally</span>'
     : '<span class="badge bg-secondary ms-2">Disabled globally</span>';
@@ -346,14 +352,20 @@ function createServerCard(server) {
         <button class="modern-btn modern-btn-secondary modern-btn-sm" onclick="testConnection('${server.name}')">
           Test
         </button>
-        ${server.status === 'error' ? `
+        ${
+          server.status === 'error'
+            ? `
           <button class="modern-btn modern-btn-warning modern-btn-sm" onclick="retryConnection('${server.name}')">
             Retry
           </button>
-        ` : ''}
-        ${isPlugin
-          ? '<span class="modern-btn modern-btn-secondary modern-btn-sm disabled" title="Managed by its plugin; uninstall from the Plugins page">Managed by plugin</span>'
-          : `<button class="modern-btn modern-btn-danger modern-btn-sm" onclick="confirmRemoveServer('${server.name}')">Remove</button>`}
+        `
+            : ''
+        }
+        ${
+          isPlugin
+            ? '<span class="modern-btn modern-btn-secondary modern-btn-sm disabled" title="Managed by its plugin; uninstall from the Plugins page">Managed by plugin</span>'
+            : `<button class="modern-btn modern-btn-danger modern-btn-sm" onclick="confirmRemoveServer('${server.name}')">Remove</button>`
+        }
       </div>
     </div>
   `;
@@ -388,11 +400,11 @@ async function toggleServerEnabled(encodedServerName, currentlyEnabled) {
 
 function getStatusBadge(status) {
   const badges = {
-    'running': '<span class="badge bg-success">Running</span>',
-    'stopped': '<span class="badge bg-secondary">Stopped</span>',
-    'starting': '<span class="badge bg-info">Starting</span>',
-    'error': '<span class="badge bg-danger">Error</span>',
-    'restarting': '<span class="badge bg-warning">Restarting</span>'
+    running: '<span class="badge bg-success">Running</span>',
+    stopped: '<span class="badge bg-secondary">Stopped</span>',
+    starting: '<span class="badge bg-info">Starting</span>',
+    error: '<span class="badge bg-danger">Error</span>',
+    restarting: '<span class="badge bg-warning">Restarting</span>'
   };
   return badges[status] || badges['stopped'];
 }
@@ -444,7 +456,7 @@ function confirmRemoveServer(serverName) {
   const modal = new bootstrap.Modal(document.getElementById('removeServerModal'));
   modal.show();
 
-  document.getElementById('confirmRemoveBtn').onclick = function() {
+  document.getElementById('confirmRemoveBtn').onclick = function () {
     removeServer(serverName);
     modal.hide();
   };
@@ -510,7 +522,7 @@ function createToastContainer() {
 }
 
 // Cleanup on page unload
-window.addEventListener('beforeunload', function() {
+window.addEventListener('beforeunload', function () {
   if (statusPollInterval) {
     clearInterval(statusPollInterval);
   }
@@ -520,9 +532,9 @@ window.addEventListener('beforeunload', function() {
 // BROWSE TAB — Registry browser
 // ============================================================
 
-let allRegistryEntries = [];   // full cached result from /api/mcp/search
-let registrySources = [];      // from /api/mcp/registry-sources
-let browseLoaded = false;      // avoid duplicate fetches on tab re-click
+let allRegistryEntries = []; // full cached result from /api/mcp/search
+let registrySources = []; // from /api/mcp/registry-sources
+let browseLoaded = false; // avoid duplicate fetches on tab re-click
 let activeCategoryFilter = 'all';
 let sourcesPanelOpen = false;
 
@@ -571,7 +583,8 @@ async function loadSearchResults() {
   const container = document.getElementById('browseResults');
   if (!container) return;
 
-  container.innerHTML = '<div class="text-center py-5"><div class="spinner-border text-primary" role="status"></div></div>';
+  container.innerHTML =
+    '<div class="text-center py-5"><div class="spinner-border text-primary" role="status"></div></div>';
 
   try {
     const res = await fetch('/api/mcp/search');
@@ -580,7 +593,8 @@ async function loadSearchResults() {
     filterSearch(); // apply current UI filters to the freshly loaded data
   } catch (err) {
     console.error('Failed to load registry entries:', err);
-    container.innerHTML = '<div class="alert alert-danger m-3">Failed to load registry. Check your connection and try refreshing.</div>';
+    container.innerHTML =
+      '<div class="alert alert-danger m-3">Failed to load registry. Check your connection and try refreshing.</div>';
   }
 }
 
@@ -595,10 +609,13 @@ function filterSearch() {
 
   const filtered = allRegistryEntries.filter(entry => {
     if (q) {
-      const haystack = [entry.name, entry.description, entry.category, ...(entry.tags || [])].join(' ').toLowerCase();
+      const haystack = [entry.name, entry.description, entry.category, ...(entry.tags || [])]
+        .join(' ')
+        .toLowerCase();
       if (!haystack.includes(q)) return false;
     }
-    if (category && category !== 'all' && (entry.category || '').toLowerCase() !== category) return false;
+    if (category && category !== 'all' && (entry.category || '').toLowerCase() !== category)
+      return false;
     if (source && source !== 'all' && (entry.source || '').toLowerCase() !== source) return false;
     return true;
   });
@@ -631,9 +648,10 @@ function renderSearchResults(entries) {
 
   entries.forEach(entry => {
     const isInstalled = installed.has(entry.name);
-    const envWarning = entry.env_required && Object.keys(entry.env_required).length > 0
-      ? `<span class="badge bg-warning text-dark me-1" title="Requires environment variables">Needs env</span>`
-      : '';
+    const envWarning =
+      entry.env_required && Object.keys(entry.env_required).length > 0
+        ? `<span class="badge bg-warning text-dark me-1" title="Requires environment variables">Needs env</span>`
+        : '';
 
     const col = document.createElement('div');
     col.className = 'col-12 col-md-6 col-xl-4';
@@ -649,9 +667,10 @@ function renderSearchResults(entries) {
         <p class="small mb-2 flex-grow-1" style="color: var(--text-secondary);">${mcpEscapeHtml(entry.description || '')}</p>
         <div class="d-flex align-items-center justify-content-between mt-auto pt-2" style="border-top: 1px solid var(--border-color);">
           <div>${envWarning}${entry.maintainer ? `<small style="color: var(--text-secondary);">${mcpEscapeHtml(entry.maintainer)}</small>` : ''}</div>
-          ${isInstalled
-            ? `<button class="modern-btn modern-btn-secondary modern-btn-sm" disabled>Added</button>`
-            : `<button class="modern-btn modern-btn-primary modern-btn-sm" onclick='addFromRegistry(${JSON.stringify(entry)})'>Add</button>`
+          ${
+            isInstalled
+              ? `<button class="modern-btn modern-btn-secondary modern-btn-sm" disabled>Added</button>`
+              : `<button class="modern-btn modern-btn-primary modern-btn-sm" onclick='addFromRegistry(${JSON.stringify(entry)})'>Add</button>`
           }
         </div>
       </div>`;
@@ -682,7 +701,7 @@ async function addFromRegistry(entry) {
     if (res.ok) {
       showToast(`${entry.name} added to My Servers`, 'success');
       await loadServers(); // refresh My Servers list
-      filterSearch();      // re-render cards to show "Added" state
+      filterSearch(); // re-render cards to show "Added" state
     } else {
       const err = await res.text();
       showToast(`Failed to add: ${err}`, 'error');
@@ -823,9 +842,10 @@ function renderSourcesList(sources) {
         ${src.url ? `<br><small style="color: var(--text-secondary);">${mcpEscapeHtml(src.url)}</small>` : ''}
       </div>
       <div>
-        ${!src.is_builtin
-          ? `<button class="modern-btn modern-btn-danger modern-btn-sm" onclick="deleteRegistrySource('${mcpEscapeHtml(src.id)}')">Remove</button>`
-          : ''
+        ${
+          !src.is_builtin
+            ? `<button class="modern-btn modern-btn-danger modern-btn-sm" onclick="deleteRegistrySource('${mcpEscapeHtml(src.id)}')">Remove</button>`
+            : ''
         }
       </div>`;
     container.appendChild(row);
@@ -949,10 +969,11 @@ function renderDetailTools(data) {
     return '<p class="text-muted">This server is running but reported no tools.</p>';
   }
 
-  return tools.map((tool, i) => {
-    const params = renderToolParams(tool.inputSchema);
-    const collapseId = `toolParams${i}`;
-    return `
+  return tools
+    .map((tool, i) => {
+      const params = renderToolParams(tool.inputSchema);
+      const collapseId = `toolParams${i}`;
+      return `
       <div class="modern-card p-3 mb-2">
         <div class="d-flex justify-content-between align-items-start">
           <div class="flex-grow-1">
@@ -960,14 +981,19 @@ function renderDetailTools(data) {
             ${tool.title && tool.title !== tool.name ? `<span class="ms-2 small" style="color: var(--text-secondary);">${mcpEscapeHtml(tool.title)}</span>` : ''}
             ${tool.description ? `<p class="mb-0 mt-1 small" style="color: var(--text-secondary);">${mcpEscapeHtml(tool.description)}</p>` : ''}
           </div>
-          ${params ? `
+          ${
+            params
+              ? `
           <button class="modern-btn modern-btn-secondary modern-btn-sm flex-shrink-0 ms-2" type="button" data-bs-toggle="collapse" data-bs-target="#${collapseId}">
             Params
-          </button>` : ''}
+          </button>`
+              : ''
+          }
         </div>
         ${params ? `<div class="collapse mt-2" id="${collapseId}">${params}</div>` : ''}
       </div>`;
-  }).join('');
+    })
+    .join('');
 }
 
 /** Render an input-schema's properties as a small parameter list. */
@@ -976,24 +1002,27 @@ function renderToolParams(schema) {
   const props = schema.properties || {};
   const required = new Set(schema.required || []);
   const names = Object.keys(props);
-  if (names.length === 0) return '<div class="small" style="color: var(--text-secondary);">No parameters.</div>';
+  if (names.length === 0)
+    return '<div class="small" style="color: var(--text-secondary);">No parameters.</div>';
 
-  return names.map(name => {
-    const p = props[name] || {};
-    let type = p.type || (Array.isArray(p.enum) ? 'enum' : '');
-    if (Array.isArray(type)) type = type.join(' | ');
-    const reqBadge = required.has(name)
-      ? '<span class="badge bg-danger ms-1" style="font-size:0.65rem;">required</span>'
-      : '';
-    const typeBadge = type
-      ? `<span class="badge bg-secondary ms-1" style="font-size:0.65rem;">${mcpEscapeHtml(type)}</span>`
-      : '';
-    return `
+  return names
+    .map(name => {
+      const p = props[name] || {};
+      let type = p.type || (Array.isArray(p.enum) ? 'enum' : '');
+      if (Array.isArray(type)) type = type.join(' | ');
+      const reqBadge = required.has(name)
+        ? '<span class="badge bg-danger ms-1" style="font-size:0.65rem;">required</span>'
+        : '';
+      const typeBadge = type
+        ? `<span class="badge bg-secondary ms-1" style="font-size:0.65rem;">${mcpEscapeHtml(type)}</span>`
+        : '';
+      return `
       <div class="py-1" style="border-bottom: 1px solid var(--border-color);">
         <code style="color: var(--text-primary);">${mcpEscapeHtml(name)}</code>${typeBadge}${reqBadge}
         ${p.description ? `<div class="small mt-1" style="color: var(--text-secondary);">${mcpEscapeHtml(p.description)}</div>` : ''}
       </div>`;
-  }).join('');
+    })
+    .join('');
 }
 
 /** Render the README tab: native instructions (if any) + fetched README markdown. */
@@ -1019,7 +1048,8 @@ function renderDetailReadme(readme, instructions) {
       </div>
       <div class="mcp-markdown">${renderMcpMarkdown(readme.markdown)}</div>`;
   } else if (!instructions || !instructions.trim()) {
-    html = '<p class="text-muted">No README or instructions found for this server. It may not publish documentation, or the package homepage is unknown.</p>';
+    html =
+      '<p class="text-muted">No README or instructions found for this server. It may not publish documentation, or the package homepage is unknown.</p>';
   }
 
   return html;
@@ -1037,8 +1067,11 @@ function renderDetailInfo(data) {
   const rows = [
     ['Status', getStatusBadge(data.status || 'stopped')],
     ['Enabled', enabledBadge],
-    ['Command', `<code style="color: var(--text-primary);">${mcpEscapeHtml(data.command || '')} ${mcpEscapeHtml(argsLine)}</code>`],
-    ['Transport', mcpEscapeHtml(data.transport || 'stdio')],
+    [
+      'Command',
+      `<code style="color: var(--text-primary);">${mcpEscapeHtml(data.command || '')} ${mcpEscapeHtml(argsLine)}</code>`
+    ],
+    ['Transport', mcpEscapeHtml(data.transport || 'stdio')]
   ];
 
   if (info.name) {
@@ -1048,17 +1081,24 @@ function renderDetailInfo(data) {
     rows.push(['Version', mcpEscapeHtml(info.version)]);
   }
   if (envKeys.length > 0) {
-    rows.push(['Environment', envKeys.map(k => `<span class="badge bg-secondary me-1">${mcpEscapeHtml(k)}</span>`).join('')]);
+    rows.push([
+      'Environment',
+      envKeys.map(k => `<span class="badge bg-secondary me-1">${mcpEscapeHtml(k)}</span>`).join('')
+    ]);
   }
 
   return `
     <table class="table table-sm align-middle mb-0">
       <tbody>
-        ${rows.map(([label, value]) => `
+        ${rows
+          .map(
+            ([label, value]) => `
           <tr>
             <th scope="row" class="text-nowrap" style="color: var(--text-secondary); font-weight: 600; width: 140px;">${label}</th>
             <td style="color: var(--text-primary);">${value}</td>
-          </tr>`).join('')}
+          </tr>`
+          )
+          .join('')}
       </tbody>
     </table>`;
 }
@@ -1080,9 +1120,10 @@ function renderMcpMarkdown(md) {
 /** Safely escape HTML to prevent XSS when building innerHTML. */
 function mcpEscapeHtml(str) {
   if (typeof str !== 'string') return '';
-  return str.replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;')
-            .replace(/'/g, '&#039;');
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
 }

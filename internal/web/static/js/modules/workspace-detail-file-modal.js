@@ -317,10 +317,14 @@ export class WorkspaceFileModalManager {
       const folders = (Array.isArray(payload.files) ? payload.files : [])
         .filter(item => item?.is_dir && item?.relative_path)
         .sort((left, right) =>
-          String(left.relative_path || '').localeCompare(String(right.relative_path || ''), undefined, {
-            sensitivity: 'base',
-            numeric: true
-          })
+          String(left.relative_path || '').localeCompare(
+            String(right.relative_path || ''),
+            undefined,
+            {
+              sensitivity: 'base',
+              numeric: true
+            }
+          )
         );
 
       folderSelect.innerHTML = [
@@ -905,7 +909,9 @@ export class WorkspaceFileModalManager {
     try {
       for (const item of items) {
         const file =
-          item.source === 'vault' ? this.host.buildWorkspaceFileFromVaultAttachment(item) : item.file;
+          item.source === 'vault'
+            ? this.host.buildWorkspaceFileFromVaultAttachment(item)
+            : item.file;
 
         if (!file) {
           throw new Error(`Missing file data for ${item.name || 'selected item'}`);

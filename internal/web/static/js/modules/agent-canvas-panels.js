@@ -161,7 +161,10 @@ export class AgentCanvasPanelManager {
           requestAnimationFrame(animate);
         }
       } else {
-        this.state.expandedAgentPanelWidth = Math.max(this.state.expandedAgentPanelWidth - speed, 0);
+        this.state.expandedAgentPanelWidth = Math.max(
+          this.state.expandedAgentPanelWidth - speed,
+          0
+        );
 
         this.parent.draw();
 
@@ -223,7 +226,10 @@ export class AgentCanvasPanelManager {
           requestAnimationFrame(animate);
         }
       } else {
-        this.state.expandedCombinerPanelWidth = Math.max(this.state.expandedCombinerPanelWidth - speed, 0);
+        this.state.expandedCombinerPanelWidth = Math.max(
+          this.state.expandedCombinerPanelWidth - speed,
+          0
+        );
         this.parent.draw(); // Redraw canvas to show animation
         if (this.state.expandedCombinerPanelWidth <= 0) {
           this.state.expandedCombinerPanelAnimating = false;

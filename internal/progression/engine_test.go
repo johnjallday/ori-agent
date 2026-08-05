@@ -10,13 +10,19 @@ import (
 
 // fakeStore is an in-memory StateStore for tests.
 type fakeStore struct {
-	state  types.ProgressionState
-	writes int
+	state types.ProgressionState
+
+	writes   int
+	failNext int // number of upcoming SetProgression calls to fail
 }
 
 func (f *fakeStore) GetProgression() types.ProgressionState { return f.state }
 
 func (f *fakeStore) SetProgression(p types.ProgressionState) error {
+	if f.failNext > 0 {
+		f.failNext--
+		return errors.New("fakeStore: simulated persistence failure")
+	}
 	f.state = p
 	f.writes++
 	return nil
@@ -128,6 +134,60 @@ func TestComplete_DirectAndIdempotent(t *testing.T) {
 	}
 	if e.Complete("does-not-exist") {
 		t.Fatal("unknown quest should not complete")
+	}
+}
+
+// TestHandleEvent_PersistFailureSuppressesCallback covers FR-26/FR-27: a
+// persistence failure must not be silently discarded, and the live
+// notification must not fire for a completion that was not durably saved.
+func TestHandleEvent_PersistFailureSuppressesCallback(t *testing.T) {
+	store := &fakeStore{failNext: 1}
+	fires := 0
+	e := New(store, WithOnComplete(func(Quest) { fires++ }))
+
+	e.HandleEvent(ws.Event{Type: ws.EventMessageSent})
+
+	if fires != 0 {
+		t.Fatalf("onComplete must not fire when persistence fails, got %d calls", fires)
+	}
+	// The completion is not lost: it stays in memory for the next successful
+	// persist, even though this attempt failed.
+	if !completed(e, "t1-first-message") {
+		t.Fatal("in-memory state should still reflect the completion after a failed persist")
+	}
+	if store.writes != 0 {
+		t.Fatalf("store must not have recorded a write on a failed persist, got %d", store.writes)
+	}
+
+	// A later, successful event carries the earlier pending completion
+	// through too, since persistLocked always saves the full state.
+	e.HandleEvent(ws.Event{Type: ws.EventWorkspaceCreated})
+	if store.writes != 1 {
+		t.Fatalf("expected exactly one successful write once persistence recovers, got %d", store.writes)
+	}
+	if _, ok := store.state.CompletedQuests["t1-first-message"]; !ok {
+		t.Fatal("the previously unsaved completion should be included in the next successful write")
+	}
+}
+
+// TestComplete_PersistFailureReturnsFalseAndSuppressesCallback mirrors the
+// HandleEvent case for the direct-completion path.
+func TestComplete_PersistFailureReturnsFalseAndSuppressesCallback(t *testing.T) {
+	store := &fakeStore{failNext: 1}
+	fires := 0
+	e := New(store, WithOnComplete(func(Quest) { fires++ }))
+
+	if e.Complete("t1-personalize") {
+		t.Fatal("Complete should report failure, not success, when persistence fails")
+	}
+	if fires != 0 {
+		t.Fatalf("onComplete must not fire when persistence fails, got %d calls", fires)
+	}
+	if !completed(e, "t1-personalize") {
+		t.Fatal("in-memory state should still reflect the completion after a failed persist")
+	}
+	if store.writes != 0 {
+		t.Fatalf("store must not have recorded a write on a failed persist, got %d", store.writes)
 	}
 }
 

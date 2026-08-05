@@ -32,7 +32,7 @@
  *   EventBus.offAll('chatModule');  // Remove all handlers from namespace
  */
 
-const EventBus = (function() {
+const EventBus = (function () {
   'use strict';
 
   // Event listeners storage
@@ -60,9 +60,7 @@ const EventBus = (function() {
     if (!pattern.includes('*')) return eventName === pattern;
 
     // Convert pattern to regex
-    const regexPattern = pattern
-      .replace(/[.+?^${}()|[\]\\]/g, '\\$&')
-      .replace(/\*/g, '.*');
+    const regexPattern = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
 
     return new RegExp(`^${regexPattern}$`).test(eventName);
   }
@@ -292,7 +290,7 @@ const EventBus = (function() {
     return new Promise((resolve, reject) => {
       let timeoutId;
 
-      const unsubscribe = once(eventName, (data) => {
+      const unsubscribe = once(eventName, data => {
         if (timeoutId) clearTimeout(timeoutId);
         resolve(data);
       });
@@ -337,16 +335,12 @@ const EventBus = (function() {
     let filtered = [...eventHistory];
 
     if (filter.event) {
-      filtered = filtered.filter(entry =>
-        matchesPattern(entry.event, filter.event)
-      );
+      filtered = filtered.filter(entry => matchesPattern(entry.event, filter.event));
     }
 
     if (filter.since) {
       const sinceTime = new Date(filter.since).getTime();
-      filtered = filtered.filter(entry =>
-        new Date(entry.timestamp).getTime() >= sinceTime
-      );
+      filtered = filtered.filter(entry => new Date(entry.timestamp).getTime() >= sinceTime);
     }
 
     return filtered;

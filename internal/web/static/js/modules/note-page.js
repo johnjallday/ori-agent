@@ -13,7 +13,7 @@ import {
   readFocusedNoteRoute,
   readWorkspaceNotesRoute,
   workspaceNotePath,
-  workspaceNotesPath,
+  workspaceNotesPath
 } from './note-routes.js';
 
 const LEGACY_STATE_KEY = 'note.tabs';
@@ -35,11 +35,11 @@ const NOTE_PAGE_MODE = INITIAL_ROUTE.mode === 'focused' ? 'focused' : 'workspace
 const FOCUSED_NOTE_PAGE = NOTE_PAGE_MODE === 'focused';
 const WORKSPACE_ID = INITIAL_ROUTE.workspaceId;
 const NOTE_ID = INITIAL_ROUTE.noteId;
-let currentNote = null;          // the note shown in the active pane
-let bundle = null;                // NoteEditor.mount return value (single instance)
-let state = null;                 // NoteTabs reducer state
-let switching = false;            // re-entrancy guard while swapping content
-let pendingGenerateDraft = null;   // last whole-note AI draft waiting to apply
+let currentNote = null; // the note shown in the active pane
+let bundle = null; // NoteEditor.mount return value (single instance)
+let state = null; // NoteTabs reducer state
+let switching = false; // re-entrancy guard while swapping content
+let pendingGenerateDraft = null; // last whole-note AI draft waiting to apply
 let creatingNoteFromTabStrip = false;
 let stateWorkspaceId = WORKSPACE_ID || null; // workspace scope for persisted tab state
 
@@ -74,7 +74,12 @@ function loadSavedState(fallbackNoteId, workspaceId) {
 
 function persistState() {
   if (FOCUSED_NOTE_PAGE) return;
-  try { localStorage.setItem(noteTabsStateKey(stateWorkspaceId || noteWorkspaceId(currentNote)), JSON.stringify(state)); } catch (_) {}
+  try {
+    localStorage.setItem(
+      noteTabsStateKey(stateWorkspaceId || noteWorkspaceId(currentNote)),
+      JSON.stringify(state)
+    );
+  } catch (_) {}
 }
 
 // =============================================================================
@@ -102,7 +107,9 @@ async function fetchWorkspaceName(workspaceId) {
     if (!resp.ok) return null;
     const data = await resp.json();
     return data?.name || data?.workspace?.name || null;
-  } catch (_) { return null; }
+  } catch (_) {
+    return null;
+  }
 }
 
 async function fetchWorkspaceNotes(workspaceId) {
@@ -117,12 +124,17 @@ async function fetchWorkspaceNotes(workspaceId) {
   }
 }
 
-export async function createWorkspaceNoteWithContent(workspaceId, name, content, fetchImpl = fetch) {
+export async function createWorkspaceNoteWithContent(
+  workspaceId,
+  name,
+  content,
+  fetchImpl = fetch
+) {
   if (!workspaceId) throw new Error('No workspace selected');
   const resp = await fetchImpl(`/api/workspaces/${encodeURIComponent(workspaceId)}/notes`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: name || 'Untitled', content: content || '' }),
+    body: JSON.stringify({ name: name || 'Untitled', content: content || '' })
   });
   if (!resp.ok) {
     throw new Error(`Failed to create note: ${resp.status}`);
@@ -142,10 +154,12 @@ export async function createWorkspaceNote(workspaceId, fetchImpl = fetch) {
 function showLoadError(message) {
   const previewContent = document.getElementById('notePreviewContent');
   if (previewContent) {
-    previewContent.innerHTML = `<div class="note-page-error">${
-      String(message || 'Could not load this note.')
-        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    }</div>`;
+    previewContent.innerHTML = `<div class="note-page-error">${String(
+      message || 'Could not load this note.'
+    )
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')}</div>`;
   }
 }
 
@@ -158,7 +172,9 @@ function populateBreadcrumb(note, workspaceName, workspaceId = currentWorkspaceI
   }
 }
 
-function showWorkspaceEmptyState(message = 'No notes in this workspace yet. Create a note to start writing.') {
+function showWorkspaceEmptyState(
+  message = 'No notes in this workspace yet. Create a note to start writing.'
+) {
   const titleInput = document.getElementById('noteNameInput');
   const contentInput = document.getElementById('noteContentInput');
   if (titleInput) {
@@ -201,14 +217,13 @@ function showToast(msg, kind) {
 }
 
 function escapeText(s) {
-  return String(s ?? '').replace(/[&<>]/g, (c) => (
-    { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]
-  ));
+  return String(s ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);
 }
 function escapeAttr(s) {
-  return String(s ?? '').replace(/[&<>"']/g, (c) => (
-    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
-  ));
+  return String(s ?? '').replace(
+    /[&<>"']/g,
+    c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]
+  );
 }
 
 function noteTabButtonId(paneIndex, noteId) {
@@ -237,7 +252,7 @@ function focusActiveTab(paneIndex) {
   const activeId = state.panes[paneIndex].activeId;
   const focus = () => {
     const buttons = tabButtonsForPane(paneIndex);
-    const button = buttons.find((btn) => btn.closest('.note-tab')?.dataset.noteId === activeId);
+    const button = buttons.find(btn => btn.closest('.note-tab')?.dataset.noteId === activeId);
     button?.focus?.();
   };
   if (typeof requestAnimationFrame === 'function') requestAnimationFrame(focus);
@@ -247,13 +262,15 @@ function focusActiveTab(paneIndex) {
 function readPageSelection() {
   if (typeof document === 'undefined' || typeof window === 'undefined') return null;
   if (!window.NoteEditor) return null;
-  const panes = [{
-    paneId: 'primary',
-    getContent: () => document.getElementById('noteContentInput')?.value || '',
-    isPreviewMode: () => true,
-    textareaId: 'noteContentInput',
-    previewPaneId: 'notePreviewContent',
-  }];
+  const panes = [
+    {
+      paneId: 'primary',
+      getContent: () => document.getElementById('noteContentInput')?.value || '',
+      isPreviewMode: () => true,
+      textareaId: 'noteContentInput',
+      previewPaneId: 'notePreviewContent'
+    }
+  ];
   // Scan the secondary pane too when it's mounted, so selections made there
   // open the AI Assist bar against the secondary content.
   if (secondaryBundle && document.getElementById('notePageSecondaryPreview')) {
@@ -262,7 +279,7 @@ function readPageSelection() {
       getContent: () => document.getElementById('notePageSecondaryEditor')?.value || '',
       isPreviewMode: () => true,
       textareaId: 'notePageSecondaryEditor',
-      previewPaneId: 'notePageSecondaryPreview',
+      previewPaneId: 'notePageSecondaryPreview'
     });
   }
   return window.NoteEditor.readSelection({ panes });
@@ -276,11 +293,13 @@ function getPagePaneApi(paneId) {
   if (!source) return null;
   return {
     getContent: () => source.value || '',
-    setContent: (value) => { source.value = String(value || ''); },
+    setContent: value => {
+      source.value = String(value || '');
+    },
     pushUndo: () => secondaryBundle?.history?.push?.(source.value || ''),
     scheduleAutoSave: () => secondaryBundle?.autosave?.schedule?.(),
     render: () => secondaryBundle?.render?.(),
-    scheduleTocRebuild: () => {},
+    scheduleTocRebuild: () => {}
   };
 }
 
@@ -306,12 +325,14 @@ async function createExtractedNote(title, content) {
   }
 }
 
-function resetPageAIAssistForCurrentNote(agentId = window.NoteEditor?.getSelectedAgentId?.() || null) {
+function resetPageAIAssistForCurrentNote(
+  agentId = window.NoteEditor?.getSelectedAgentId?.() || null
+) {
   const workspaceId = currentWorkspaceId();
   window.NoteAIAssist?.onNoteOpened?.({
     noteId: currentNote?.id || null,
     workspaceId: workspaceId || null,
-    agentId,
+    agentId
   });
 }
 
@@ -334,7 +355,7 @@ async function savePageNote() {
     const resp = await fetch(`/api/notes/${encodeURIComponent(currentNote.id)}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, content }),
+      body: JSON.stringify({ name, content })
     });
     if (!resp.ok) return false;
     const data = await resp.json();
@@ -343,7 +364,9 @@ async function savePageNote() {
     // Refresh the tab label in case the title changed.
     renderTabStrip();
     return true;
-  } catch (_) { return false; }
+  } catch (_) {
+    return false;
+  }
 }
 
 // =============================================================================
@@ -359,7 +382,7 @@ async function saveNoteTags(tags) {
     const resp = await fetch(`/api/notes/${encodeURIComponent(noteId)}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tags }),
+      body: JSON.stringify({ tags })
     });
     if (!resp.ok) {
       showToast('Failed to save tags', 'error');
@@ -388,7 +411,9 @@ function syncNoteTagsWidget() {
     noteTagsWidget = window.OriTagInput.createTagInput({
       container: mount,
       initialTags: currentNote.tags || [],
-      onChange: (tags) => { void saveNoteTags(tags); },
+      onChange: tags => {
+        void saveNoteTags(tags);
+      }
     });
   } else if (noteTagsWidget) {
     noteTagsWidget.setTags(currentNote.tags || []);
@@ -411,7 +436,7 @@ function sendPrimaryKeepaliveSave() {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body,
-      keepalive: true,
+      keepalive: true
     });
   } catch (_) {
     // Page is closing; there is no useful recovery surface here.
@@ -469,20 +494,22 @@ async function generatePageNoteWithAI() {
       body: JSON.stringify({
         prompt,
         workspace_id: workspaceId,
-        agent_id: agentId,
-      }),
+        agent_id: agentId
+      })
     });
 
     if (!response.ok) {
       let payload = null;
-      try { payload = await response.json(); } catch (_) {}
+      try {
+        payload = await response.json();
+      } catch (_) {}
       throw new Error(payload?.error || 'Failed to generate note');
     }
 
     const result = await response.json();
     pendingGenerateDraft = {
       title: result.title || '',
-      content: result.content || '',
+      content: result.content || ''
     };
     window.NoteEditor?.setGenerateDraft?.(pendingGenerateDraft);
     showToast('AI draft generated', 'success');
@@ -552,8 +579,12 @@ function bindGenerateWithAIControls() {
     pendingGenerateDraft = null;
     window.NoteEditor?.closeGeneratePanel?.();
   });
-  document.getElementById('noteAIReplaceBtn')?.addEventListener('click', () => applyPageGenerateDraft('replace'));
-  document.getElementById('noteAIAppendBtn')?.addEventListener('click', () => applyPageGenerateDraft('append'));
+  document
+    .getElementById('noteAIReplaceBtn')
+    ?.addEventListener('click', () => applyPageGenerateDraft('replace'));
+  document
+    .getElementById('noteAIAppendBtn')
+    ?.addEventListener('click', () => applyPageGenerateDraft('append'));
   const insertBtn = document.getElementById('noteAIInsertBtn');
   if (insertBtn) {
     insertBtn.disabled = true;
@@ -577,7 +608,7 @@ function refreshSecondaryTabLabels() {
   if (!state?.panes?.[1]) return;
   const tabsEl = document.getElementById('notePageSecondaryTabs');
   if (!tabsEl) return;
-  tabsEl.querySelectorAll('[data-note-id]').forEach((tab) => {
+  tabsEl.querySelectorAll('[data-note-id]').forEach(tab => {
     const id = tab.dataset.noteId;
     if (!id) return;
     const label = tabLabel(id);
@@ -594,7 +625,7 @@ async function prefetchTabLabels() {
   const ids = window.NoteTabs.allOpenNoteIds(state);
   for (const id of ids) {
     if (_tabLabelCache.has(id) || id === currentNote?.id) continue;
-    fetchNote(id).then((n) => {
+    fetchNote(id).then(n => {
       if (n?.name) {
         _tabLabelCache.set(n.id, n.name);
         renderTabStrip();
@@ -607,8 +638,12 @@ async function prefetchTabLabels() {
 function updatePaneFocusState() {
   if (typeof document === 'undefined') return;
   const focusedIndex = state?.focusedPaneIndex ?? 0;
-  document.getElementById('notePagePrimaryPane')?.classList.toggle('is-focused', focusedIndex === 0);
-  document.getElementById('notePageSecondaryPane')?.classList.toggle('is-focused', focusedIndex === 1);
+  document
+    .getElementById('notePagePrimaryPane')
+    ?.classList.toggle('is-focused', focusedIndex === 0);
+  document
+    .getElementById('notePageSecondaryPane')
+    ?.classList.toggle('is-focused', focusedIndex === 1);
 }
 
 function renderTabStrip() {
@@ -629,30 +664,36 @@ function renderTabStrip() {
   updatePaneFocusState();
 
   // Split button visibility — only meaningful when not already split.
-  if (splitBtn) splitBtn.hidden = state.splitMode !== 'none' || (state.panes[0]?.tabs?.length ?? 0) === 0;
+  if (splitBtn)
+    splitBtn.hidden = state.splitMode !== 'none' || (state.panes[0]?.tabs?.length ?? 0) === 0;
   if (unsplitBtn) unsplitBtn.hidden = state.splitMode === 'none';
 
   // The primary tab strip shows pane 0's tabs (the editable pane).
   const pane = state.panes[0];
-  if (!pane) { list.innerHTML = ''; return; }
+  if (!pane) {
+    list.innerHTML = '';
+    return;
+  }
 
-  list.innerHTML = pane.tabs.map((id, i) => {
-    const isActive = id === pane.activeId;
-    const label = escapeText(tabLabel(id));
-    const buttonId = escapeAttr(noteTabButtonId(0, id));
-    return `<li class="note-tab${isActive ? ' is-active' : ''}" data-note-id="${escapeAttr(id)}" data-pane="0" data-index="${i}" role="presentation" draggable="true">
+  list.innerHTML = pane.tabs
+    .map((id, i) => {
+      const isActive = id === pane.activeId;
+      const label = escapeText(tabLabel(id));
+      const buttonId = escapeAttr(noteTabButtonId(0, id));
+      return `<li class="note-tab${isActive ? ' is-active' : ''}" data-note-id="${escapeAttr(id)}" data-pane="0" data-index="${i}" role="presentation" draggable="true">
       <button type="button" id="${buttonId}" class="note-tab-button" role="tab" aria-selected="${isActive}" aria-controls="notePagePrimaryPane" tabindex="${isActive ? '0' : '-1'}" title="${label}">
         <span class="note-tab-label">${label}</span>
       </button>
       <button type="button" class="note-tab-close" data-note-id="${escapeAttr(id)}" aria-label="Close tab" title="Close">×</button>
     </li>`;
-  }).join('');
+    })
+    .join('');
 }
 
 // Secondary pane's local state. Its note is independent of pane 0's currentNote.
-let secondaryNote = null;       // the full note object loaded in pane 1
-let secondaryBundle = null;     // NoteEditor.mount return value for pane 1
-let secondaryReadOnly = false;  // true when pane 1 mirrors pane 0's note
+let secondaryNote = null; // the full note object loaded in pane 1
+let secondaryBundle = null; // NoteEditor.mount return value for pane 1
+let secondaryReadOnly = false; // true when pane 1 mirrors pane 0's note
 let secondaryStatusTimer = null;
 
 function setSecondaryStatus(text) {
@@ -690,17 +731,21 @@ function ensureSecondaryBundle() {
     previewPaneId: 'notePageSecondaryPreview',
     enableToc: false,
     getContent: () => source.value || '',
-    setContent: (value) => { source.value = String(value || ''); },
+    setContent: value => {
+      source.value = String(value || '');
+    },
     getContentLines: () => {
       const value = source.value || '';
       return value.length > 0 ? value.split('\n') : [''];
     },
-    setContentLines: (lines) => { source.value = (lines || []).join('\n'); },
+    setContentLines: lines => {
+      source.value = (lines || []).join('\n');
+    },
     isPreviewMode: () => true,
     isReadOnly: () => secondaryReadOnly,
     onAutosaveFlush: flushSecondarySave,
     onAutosaveStatusChange: setSecondaryAutosaveStatus,
-    autosaveDelayMs: 800,
+    autosaveDelayMs: 800
   });
   // Register the secondary textarea with the shared selection tracker so
   // text selections in plain-edit mode there also drive the AI Assist bar.
@@ -712,12 +757,13 @@ function ensureSecondaryBundle() {
 
 function mirrorPrimaryIntoSecondarySource(source) {
   if (!source || currentNote?.id !== secondaryNote?.id) return;
-  const primaryContent = document.getElementById('noteContentInput')?.value ?? currentNote.content ?? '';
+  const primaryContent =
+    document.getElementById('noteContentInput')?.value ?? currentNote.content ?? '';
   source.value = primaryContent;
   secondaryNote = {
     ...secondaryNote,
     name: currentNote.name || secondaryNote.name,
-    content: primaryContent,
+    content: primaryContent
   };
 }
 
@@ -730,7 +776,7 @@ async function flushSecondarySave() {
     const resp = await fetch(`/api/notes/${encodeURIComponent(secondaryNote.id)}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: secondaryNote.name || 'Untitled Note', content }),
+      body: JSON.stringify({ name: secondaryNote.name || 'Untitled Note', content })
     });
     if (!resp.ok) return false;
     const data = await resp.json();
@@ -796,17 +842,19 @@ async function renderSecondaryPane() {
   updatePaneFocusState();
 
   const pane = state.panes[1];
-  tabsEl.innerHTML = pane.tabs.map((id, i) => {
-    const isActive = id === pane.activeId;
-    const label = escapeText(tabLabel(id));
-    const buttonId = escapeAttr(noteTabButtonId(1, id));
-    return `<div class="note-tab${isActive ? ' is-active' : ''}" data-note-id="${escapeAttr(id)}" data-pane="1" data-index="${i}" role="presentation" title="${label}" draggable="true">
+  tabsEl.innerHTML = pane.tabs
+    .map((id, i) => {
+      const isActive = id === pane.activeId;
+      const label = escapeText(tabLabel(id));
+      const buttonId = escapeAttr(noteTabButtonId(1, id));
+      return `<div class="note-tab${isActive ? ' is-active' : ''}" data-note-id="${escapeAttr(id)}" data-pane="1" data-index="${i}" role="presentation" title="${label}" draggable="true">
       <button type="button" id="${buttonId}" class="note-tab-button" role="tab" aria-selected="${isActive}" aria-controls="notePageSecondaryPane" tabindex="${isActive ? '0' : '-1'}" title="${label}">
         <span class="note-tab-label">${label}</span>
       </button>
       <button type="button" class="note-tab-close note-tab-close-secondary" data-action="close" data-note-id="${escapeAttr(id)}" aria-label="Close tab" title="Close">×</button>
     </div>`;
-  }).join('');
+    })
+    .join('');
 
   if (!pane.activeId) {
     preview.hidden = true;
@@ -940,7 +988,9 @@ async function loadNoteIntoActivePane(noteId) {
   currentNote = next;
   resetPageAIAssistForCurrentNote(null);
   syncNoteTagsWidget();
-  fetchWorkspaceName(stateWorkspaceId).then((name) => populateBreadcrumb(currentNote, name, stateWorkspaceId));
+  fetchWorkspaceName(stateWorkspaceId).then(name =>
+    populateBreadcrumb(currentNote, name, stateWorkspaceId)
+  );
 
   // 4. Reset history so undo doesn't cross note boundaries.
   bundle?.history?.reset?.();
@@ -1183,7 +1233,7 @@ async function unsplit() {
 let _dragState = null; // { fromPane: 0|1, fromIdx: number } | null
 
 function clearDragVisuals() {
-  document.querySelectorAll('.is-dragging, .is-drop-target').forEach((el) => {
+  document.querySelectorAll('.is-dragging, .is-drop-target').forEach(el => {
     el.classList.remove('is-dragging', 'is-drop-target');
   });
 }
@@ -1210,10 +1260,12 @@ function installDetachZone() {
   const zone = document.getElementById('notePageDetachZone');
   if (!zone) return;
 
-  zone.addEventListener('dragover', (e) => {
+  zone.addEventListener('dragover', e => {
     if (!_dragState) return;
     e.preventDefault();
-    try { e.dataTransfer.dropEffect = 'move'; } catch (_) {}
+    try {
+      e.dataTransfer.dropEffect = 'move';
+    } catch (_) {}
     zone.classList.add('is-drop-target');
   });
 
@@ -1221,7 +1273,7 @@ function installDetachZone() {
     zone.classList.remove('is-drop-target');
   });
 
-  zone.addEventListener('drop', async (e) => {
+  zone.addEventListener('drop', async e => {
     if (!_dragState || !window.NoteTabs) return;
     e.preventDefault();
     const { fromPane, fromIdx } = _dragState;
@@ -1258,7 +1310,7 @@ function installDragReorder(container, paneIndex) {
   if (!container) return;
   const tabSelector = '.note-tab[draggable="true"]';
 
-  container.addEventListener('dragstart', (e) => {
+  container.addEventListener('dragstart', e => {
     const tab = e.target.closest(tabSelector);
     if (!tab) return;
     const fromIdx = Number(tab.dataset.index);
@@ -1281,13 +1333,17 @@ function installDragReorder(container, paneIndex) {
     _dragState = null;
   });
 
-  container.addEventListener('dragover', (e) => {
+  container.addEventListener('dragover', e => {
     if (!_dragState) return;
     // Accept drops anywhere inside the container, not just on a .note-tab —
     // an empty-area drop appends to the end of that pane's tabs.
     e.preventDefault();
-    try { e.dataTransfer.dropEffect = 'move'; } catch (_) {}
-    document.querySelectorAll('.is-drop-target').forEach((el) => el.classList.remove('is-drop-target'));
+    try {
+      e.dataTransfer.dropEffect = 'move';
+    } catch (_) {}
+    document
+      .querySelectorAll('.is-drop-target')
+      .forEach(el => el.classList.remove('is-drop-target'));
     const tab = e.target.closest(tabSelector);
     if (tab) {
       tab.classList.add('is-drop-target');
@@ -1296,12 +1352,12 @@ function installDragReorder(container, paneIndex) {
     }
   });
 
-  container.addEventListener('dragleave', (e) => {
+  container.addEventListener('dragleave', e => {
     // Only clear when leaving the container itself (not its children).
     if (e.target === container) container.classList.remove('is-drop-target');
   });
 
-  container.addEventListener('drop', async (e) => {
+  container.addEventListener('drop', async e => {
     if (!_dragState || !window.NoteTabs) return;
     e.preventDefault();
     const { fromPane, fromIdx } = _dragState;
@@ -1363,7 +1419,7 @@ function bindPublicAPI() {
     getWorkspaceId: () => currentWorkspaceId() || null,
     getPageMode: () => NOTE_PAGE_MODE,
     notePath,
-    workspaceNotePath,
+    workspaceNotePath
   };
 }
 
@@ -1398,7 +1454,9 @@ async function bootstrap() {
   if (FOCUSED_NOTE_PAGE) {
     currentNote = await fetchNote(NOTE_ID);
     if (!currentNote) {
-      showLoadError(`Note not found (id: ${NOTE_ID}). The note may have been deleted or you may not have access.`);
+      showLoadError(
+        `Note not found (id: ${NOTE_ID}). The note may have been deleted or you may not have access.`
+      );
       showToast('Note not found', 'error');
       return;
     }
@@ -1417,12 +1475,17 @@ async function bootstrap() {
       currentNote = await fetchNote(initialNoteId);
       if (!currentNote) {
         if (NOTE_ID) {
-          showLoadError(`Note not found (id: ${NOTE_ID}). The note may have been deleted or you may not have access.`);
+          showLoadError(
+            `Note not found (id: ${NOTE_ID}). The note may have been deleted or you may not have access.`
+          );
           showToast('Note not found', 'error');
           return;
         }
         initialNoteId = '';
-      } else if (noteWorkspaceId(currentNote) && noteWorkspaceId(currentNote) !== stateWorkspaceId) {
+      } else if (
+        noteWorkspaceId(currentNote) &&
+        noteWorkspaceId(currentNote) !== stateWorkspaceId
+      ) {
         showLoadError('This note belongs to a different workspace.');
         showToast('Note belongs to a different workspace', 'error');
         return;
@@ -1434,7 +1497,11 @@ async function bootstrap() {
       if (notes[0]?.id) {
         initialNoteId = notes[0].id;
         currentNote = await fetchNote(initialNoteId);
-        if (currentNote && noteWorkspaceId(currentNote) && noteWorkspaceId(currentNote) !== stateWorkspaceId) {
+        if (
+          currentNote &&
+          noteWorkspaceId(currentNote) &&
+          noteWorkspaceId(currentNote) !== stateWorkspaceId
+        ) {
           currentNote = null;
           initialNoteId = '';
         }
@@ -1475,7 +1542,7 @@ async function bootstrap() {
     state = {
       panes: [{ activeId: currentNote?.id || null, tabs: currentNote?.id ? [currentNote.id] : [] }],
       splitMode: 'none',
-      focusedPaneIndex: 0,
+      focusedPaneIndex: 0
     };
   }
 
@@ -1496,7 +1563,9 @@ async function bootstrap() {
   syncNoteTagsWidget();
 
   // 4. Breadcrumb workspace name (best effort).
-  fetchWorkspaceName(stateWorkspaceId).then((name) => populateBreadcrumb(currentNote, name, stateWorkspaceId));
+  fetchWorkspaceName(stateWorkspaceId).then(name =>
+    populateBreadcrumb(currentNote, name, stateWorkspaceId)
+  );
 
   // 5. Cross-module hooks (wikilinks, backlinks, rail, presence).
   window.NoteWikilinks?.setWorkspaceContext(() => currentWorkspaceId() || null);
@@ -1505,7 +1574,7 @@ async function bootstrap() {
   if (!FOCUSED_NOTE_PAGE) {
     window.NoteRailNotes?.initRail({
       workspaceIdResolver: () => currentWorkspaceId() || null,
-      activeNoteId: currentNote?.id || null,
+      activeNoteId: currentNote?.id || null
     });
   }
   // Apply persisted collapse state so the rail doesn't flash expanded on
@@ -1522,12 +1591,14 @@ async function bootstrap() {
   // 6. Mount the editor.
   bundle = window.NoteEditor.mount({
     getContent: () => contentInput?.value || '',
-    setContent: (v) => { if (contentInput) contentInput.value = String(v || ''); },
+    setContent: v => {
+      if (contentInput) contentInput.value = String(v || '');
+    },
     getContentLines: () => {
       const value = contentInput?.value || '';
       return value.length > 0 ? value.split('\n') : [''];
     },
-    setContentLines: (lines) => {
+    setContentLines: lines => {
       if (contentInput) contentInput.value = (lines || []).join('\n');
     },
     isPreviewMode: () => true,
@@ -1536,8 +1607,8 @@ async function bootstrap() {
       readSelection: readPageSelection,
       showToast,
       getPaneApi: getPagePaneApi,
-      createNote: createExtractedNote,
-    },
+      createNote: createExtractedNote
+    }
   });
   bundle.render();
   if (!currentNote) showWorkspaceEmptyState();
@@ -1559,7 +1630,7 @@ async function bootstrap() {
   if (!FOCUSED_NOTE_PAGE) prefetchTabLabels();
 
   // 8. Delegated handlers for the primary tab strip (pane 0).
-  document.getElementById('notePageTabList')?.addEventListener('click', (e) => {
+  document.getElementById('notePageTabList')?.addEventListener('click', e => {
     const closeBtn = e.target.closest('.note-tab-close');
     if (closeBtn) {
       e.preventDefault();
@@ -1573,7 +1644,7 @@ async function bootstrap() {
       switchToTab(tab.dataset.noteId, 0);
     }
   });
-  document.getElementById('notePageTabList')?.addEventListener('keydown', (e) => {
+  document.getElementById('notePageTabList')?.addEventListener('keydown', e => {
     handleTabListKeydown(e, 0);
   });
 
@@ -1582,7 +1653,7 @@ async function bootstrap() {
   installDragReorder(document.getElementById('notePageTabList'), 0);
 
   // Delegated handlers for the secondary pane (pane 1).
-  document.getElementById('notePageSecondaryTabs')?.addEventListener('click', (e) => {
+  document.getElementById('notePageSecondaryTabs')?.addEventListener('click', e => {
     const closeAction = e.target.closest('[data-action="close"]');
     if (closeAction) {
       e.preventDefault();
@@ -1596,7 +1667,7 @@ async function bootstrap() {
       switchToTab(tab.dataset.noteId, 1);
     }
   });
-  document.getElementById('notePageSecondaryTabs')?.addEventListener('keydown', (e) => {
+  document.getElementById('notePageSecondaryTabs')?.addEventListener('keydown', e => {
     handleTabListKeydown(e, 1);
   });
 
@@ -1624,8 +1695,11 @@ async function bootstrap() {
           fetch(`/api/notes/${encodeURIComponent(secondaryNote.id)}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: secondaryNote.name || 'Untitled Note', content: source.value }),
-            keepalive: true,
+            body: JSON.stringify({
+              name: secondaryNote.name || 'Untitled Note',
+              content: source.value
+            }),
+            keepalive: true
           });
         } catch (_) {}
       }

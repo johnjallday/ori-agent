@@ -70,7 +70,10 @@ export function renderManagementCard(doc, view, act) {
   };
 
   if (view.isCandidate) {
-    actions.append(button('Track this', true, 'confirm'), button('Not a follow-up', false, 'dismiss'));
+    actions.append(
+      button('Track this', true, 'confirm'),
+      button('Not a follow-up', false, 'dismiss')
+    );
   } else {
     actions.append(button('Done', true, 'complete'), button('Snooze 1 day', false, 'snooze'));
   }
@@ -108,7 +111,14 @@ export function renderManagementPanel(doc, mount, view, act) {
 // wireWorkspaceFollowUps fetches the workspace's follow-ups and renders the
 // management panel, re-fetching after each mutation. Dependencies are injected
 // for testability.
-export async function wireWorkspaceFollowUps({ doc, workspaceId, mount, fetchImpl, postImpl, toast }) {
+export async function wireWorkspaceFollowUps({
+  doc,
+  workspaceId,
+  mount,
+  fetchImpl,
+  postImpl,
+  toast
+}) {
   if (!mount || !workspaceId) return;
   const load = async () => {
     let items = [];

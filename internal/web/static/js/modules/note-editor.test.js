@@ -34,7 +34,7 @@ import {
   NoteLiveEditor,
   mount,
   bindGenerateToggleButton,
-  readSelection,
+  readSelection
 } from './note-editor.js';
 
 // =============================================================================
@@ -148,21 +148,21 @@ test('lineKindClass: ordered list and blockquote', () => {
 test('normalizeCompactTaskListMarkdown: rewrites compact form', () => {
   assert.equal(
     normalizeCompactTaskListMarkdown('- [] one\n- [ ] two\n- [x] three\n'),
-    '- [ ] one\n- [ ] two\n- [x] three\n',
+    '- [ ] one\n- [ ] two\n- [x] three\n'
   );
 });
 
 test('normalizeCompactTaskListMarkdown: leaves non-task lines alone', () => {
   assert.equal(
     normalizeCompactTaskListMarkdown('# Heading\nbody\n[] not a task\n'),
-    '# Heading\nbody\n[] not a task\n',
+    '# Heading\nbody\n[] not a task\n'
   );
 });
 
 test('normalizeCompactTaskListMarkdown: preserves indent and bullet flavor', () => {
   assert.equal(
     normalizeCompactTaskListMarkdown('  * [] indented\n+ [] plus'),
-    '  * [ ] indented\n+ [ ] plus',
+    '  * [ ] indented\n+ [ ] plus'
   );
 });
 
@@ -176,7 +176,7 @@ const evt = (overrides = {}) => ({
   ctrlKey: false,
   altKey: false,
   shiftKey: false,
-  ...overrides,
+  ...overrides
 });
 
 test('isUndoShortcut: matches Cmd+Z / Ctrl+Z', () => {
@@ -225,9 +225,9 @@ test('selectAllTargetRange: targets the focused line before the whole note', () 
   assert.deepEqual(
     selectAllTargetRange({
       lineCount: 5,
-      lineIndex: 2,
+      lineIndex: 2
     }),
-    { start: 2, end: 2 },
+    { start: 2, end: 2 }
   );
 });
 
@@ -237,9 +237,9 @@ test('selectAllTargetRange: expands a browser single-line selection to that whol
       lineCount: 5,
       selectedRange: { start: 2, end: 2 },
       selectionAnchorIndex: 2,
-      selectionFocusIndex: null,
+      selectionFocusIndex: null
     }),
-    { start: 2, end: 2 },
+    { start: 2, end: 2 }
   );
 });
 
@@ -249,9 +249,9 @@ test('selectAllTargetRange: expands an editor-selected single line to the whole 
       lineCount: 5,
       selectedRange: { start: 2, end: 2 },
       selectionAnchorIndex: 2,
-      selectionFocusIndex: 2,
+      selectionFocusIndex: 2
     }),
-    { start: 0, end: 4 },
+    { start: 0, end: 4 }
   );
 });
 
@@ -259,18 +259,18 @@ test('selectAllTargetRange: keeps multi-line selections as whole-note select-all
   assert.deepEqual(
     selectAllTargetRange({
       lineCount: 5,
-      selectedRange: { start: 1, end: 3 },
+      selectedRange: { start: 1, end: 3 }
     }),
-    { start: 0, end: 4 },
+    { start: 0, end: 4 }
   );
 });
 
 test('selectAllTargetRange: targets the whole note when no line context exists', () => {
   assert.deepEqual(
     selectAllTargetRange({
-      lineCount: 5,
+      lineCount: 5
     }),
-    { start: 0, end: 4 },
+    { start: 0, end: 4 }
   );
 });
 
@@ -307,7 +307,7 @@ test('normalizeVaultReference: snake_case fields are accepted', () => {
   const got = normalizeVaultReference({
     vault_name: 'Personal',
     record_label: 'Login',
-    record_id: 'rec_123',
+    record_id: 'rec_123'
   });
   assert.deepEqual(got, { vaultName: 'Personal', recordLabel: 'Login', recordId: 'rec_123' });
 });
@@ -316,7 +316,7 @@ test('normalizeVaultReference: camelCase fields also work', () => {
   const got = normalizeVaultReference({
     vaultName: 'Personal',
     recordLabel: 'Login',
-    recordId: 'rec_123',
+    recordId: 'rec_123'
   });
   assert.deepEqual(got, { vaultName: 'Personal', recordLabel: 'Login', recordId: 'rec_123' });
 });
@@ -331,7 +331,7 @@ test('normalizeVaultReference: trims whitespace from each field', () => {
   const got = normalizeVaultReference({
     vault_name: '  Personal  ',
     record_label: '\tLogin\t',
-    record_id: '  rec_123  ',
+    record_id: '  rec_123  '
   });
   assert.deepEqual(got, { vaultName: 'Personal', recordLabel: 'Login', recordId: 'rec_123' });
 });
@@ -356,7 +356,10 @@ test('NoteHistory: push de-dupes consecutive identical values', () => {
 
 test('NoteHistory: push respects the limit by dropping oldest', () => {
   const h = new NoteHistory({ limit: 3 });
-  h.push('a'); h.push('b'); h.push('c'); h.push('d');
+  h.push('a');
+  h.push('b');
+  h.push('c');
+  h.push('d');
   assert.deepEqual(h.undoStack, ['b', 'c', 'd']);
 });
 
@@ -378,7 +381,8 @@ test('NoteHistory: push clears the redo stack', () => {
 
 test('NoteHistory: undo returns previous and shifts redo', () => {
   const h = new NoteHistory();
-  h.push('a'); h.push('b');
+  h.push('a');
+  h.push('b');
   const prev = h.undo('c'); // current is 'c', stacks become undo=[a], redo=[c]
   assert.equal(prev, 'b');
   assert.deepEqual(h.undoStack, ['a']);
@@ -392,7 +396,8 @@ test('NoteHistory: undo returns null when empty', () => {
 
 test('NoteHistory: redo replays correctly', () => {
   const h = new NoteHistory();
-  h.push('a'); h.push('b');
+  h.push('a');
+  h.push('b');
   const prev = h.undo('c'); // prev = 'b', undo=[a], redo=[c]
   assert.equal(prev, 'b');
   const next = h.redo('b'); // next = 'c', undo=[a, b], redo=[]
@@ -408,7 +413,9 @@ test('NoteHistory: redo returns null when empty', () => {
 
 test('NoteHistory: reset clears everything', () => {
   const h = new NoteHistory();
-  h.push('a'); h.push('b'); h.undo('c');
+  h.push('a');
+  h.push('b');
+  h.undo('c');
   h.applying = true;
   h.reset();
   assert.deepEqual(h.undoStack, []);
@@ -452,7 +459,7 @@ test('NoteAutoSaveTimer: schedule emits unsaved status and marks dirty', () => {
   const t = new NoteAutoSaveTimer({
     delayMs: 1000,
     onFlush: () => {},
-    onStatusChange: (s) => statuses.push(s),
+    onStatusChange: s => statuses.push(s)
   });
   t.schedule();
   assert.deepEqual(statuses, ['unsaved']);
@@ -473,7 +480,7 @@ test('NoteAutoSaveTimer: flushImmediate resolves true and marks clean on success
   const t = new NoteAutoSaveTimer({
     delayMs: 1000,
     onFlush: () => true,
-    onStatusChange: (s) => statuses.push(s),
+    onStatusChange: s => statuses.push(s)
   });
   t.schedule();
   const ok = await t.flushImmediate();
@@ -487,7 +494,7 @@ test('NoteAutoSaveTimer: flushImmediate resolves false and stays dirty when flus
   const t = new NoteAutoSaveTimer({
     delayMs: 1000,
     onFlush: () => false,
-    onStatusChange: (s) => statuses.push(s),
+    onStatusChange: s => statuses.push(s)
   });
   t.schedule();
   const ok = await t.flushImmediate();
@@ -500,8 +507,10 @@ test('NoteAutoSaveTimer: flushImmediate resolves false and stays dirty when flus
   const statuses = [];
   const t = new NoteAutoSaveTimer({
     delayMs: 1000,
-    onFlush: () => { throw new Error('network down'); },
-    onStatusChange: (s) => statuses.push(s),
+    onFlush: () => {
+      throw new Error('network down');
+    },
+    onStatusChange: s => statuses.push(s)
   });
   t.schedule();
   const ok = await t.flushImmediate();
@@ -515,8 +524,11 @@ test('NoteAutoSaveTimer: edit during in-flight flush remains dirty', async () =>
   let resolveFlush;
   const t = new NoteAutoSaveTimer({
     delayMs: 1000,
-    onFlush: () => new Promise((resolve) => { resolveFlush = resolve; }),
-    onStatusChange: (s) => statuses.push(s),
+    onFlush: () =>
+      new Promise(resolve => {
+        resolveFlush = resolve;
+      }),
+    onStatusChange: s => statuses.push(s)
   });
   t.schedule();
   const firstFlush = t.flushImmediate();
@@ -552,7 +564,7 @@ test('NoteAutoSaveTimer: markClean clears dirty and emits saved status', () => {
   const t = new NoteAutoSaveTimer({
     delayMs: 1000,
     onFlush: () => {},
-    onStatusChange: (s) => statuses.push(s),
+    onStatusChange: s => statuses.push(s)
   });
   t.schedule(); // dirty + 'unsaved'
   t.markClean();
@@ -631,7 +643,7 @@ test('escapeHtml: stringifies non-string inputs', () => {
 test('escapeHtml: prevents XSS via injected tags', () => {
   assert.equal(
     escapeHtml('<script>alert("x")</script>'),
-    '&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;',
+    '&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;'
   );
 });
 
@@ -844,22 +856,26 @@ test('readSelection: maps active live-editor input selection to source offsets',
     selectionEnd: 10,
     dataset: { lineIndex: '1' },
     classList: { contains: () => false },
-    closest(selector) { return selector === '.note-live-line-input' ? this : null; },
-    getBoundingClientRect() { return { top: 10, right: 420 }; },
+    closest(selector) {
+      return selector === '.note-live-line-input' ? this : null;
+    },
+    getBoundingClientRect() {
+      return { top: 10, right: 420 };
+    }
   };
-  const preview = { contains: (node) => node === input };
+  const preview = { contains: node => node === input };
   globalThis.document = {
     activeElement: input,
     getElementById(id) {
       return id === 'preview' ? preview : null;
-    },
+    }
   };
   globalThis.window = {};
   try {
     const sel = readSelection({
       getContent: () => 'alpha\nbeta gamma\nomega',
       isPreviewMode: () => true,
-      previewPaneId: 'preview',
+      previewPaneId: 'preview'
     });
     assert.equal(sel.text, 'gamma');
     assert.deepEqual(sel.range, { start: 11, end: 16 });
@@ -879,7 +895,10 @@ test('pruneCollapsedHeadings: drops indexes outside the array', () => {
   const lines = ['# A', 'body', '# B'];
   const set = new Set([0, 2, 5, 99]);
   pruneCollapsedHeadings(lines, set);
-  assert.deepEqual([...set].sort((a, b) => a - b), [0, 2]);
+  assert.deepEqual(
+    [...set].sort((a, b) => a - b),
+    [0, 2]
+  );
 });
 
 test('pruneCollapsedHeadings: drops indexes that no longer point at headings', () => {
@@ -887,7 +906,10 @@ test('pruneCollapsedHeadings: drops indexes that no longer point at headings', (
   const lines = ['# A', 'body', '# B'];
   const set = new Set([0, 1, 2]);
   pruneCollapsedHeadings(lines, set);
-  assert.deepEqual([...set].sort((a, b) => a - b), [0, 2]);
+  assert.deepEqual(
+    [...set].sort((a, b) => a - b),
+    [0, 2]
+  );
 });
 
 test('pruneCollapsedHeadings: keeps valid heading indexes intact', () => {
@@ -946,7 +968,7 @@ test('buildLiveEditorHTML: activeLineIndex renders that line as a textarea', () 
 
 test('buildLiveEditorHTML: activeRange renders one block textarea covering the range', () => {
   const html = buildLiveEditorHTML(['line0', 'line1', 'line2', 'line3'], {
-    activeRange: { start: 1, end: 2 },
+    activeRange: { start: 1, end: 2 }
   });
   // Block textarea spans lines 1..2.
   assert.match(html, /data-line-start="1"[^>]*data-line-end="2"/);
@@ -968,7 +990,7 @@ test('buildLiveEditorHTML: renders fenced CSV as a table block', () => {
 
 test('buildLiveEditorHTML: active line inside fenced CSV keeps raw lines editable', () => {
   const html = buildLiveEditorHTML(['```csv', 'date,level', '2026-05-19,High', '```'], {
-    activeLineIndex: 1,
+    activeLineIndex: 1
   });
   assert.doesNotMatch(html, /note-csv-table-block/);
   assert.match(html, /<textarea[^>]*data-line-index="1"/);
@@ -1077,14 +1099,26 @@ function mockHost(initialLines) {
     host: {
       getContent: () => lines.join('\n'),
       getContentLines: () => lines,
-      setContentLines: (next) => { lines = [...next]; },
-      pushUndo: () => { calls.pushUndo += 1; },
-      scheduleAutoSave: () => { calls.scheduleAutoSave += 1; },
-      render: (opts) => { calls.render.push(opts || null); },
-      clearWindowSelection: () => { calls.clearWindowSelection += 1; },
+      setContentLines: next => {
+        lines = [...next];
+      },
+      pushUndo: () => {
+        calls.pushUndo += 1;
+      },
+      scheduleAutoSave: () => {
+        calls.scheduleAutoSave += 1;
+      },
+      render: opts => {
+        calls.render.push(opts || null);
+      },
+      clearWindowSelection: () => {
+        calls.clearWindowSelection += 1;
+      }
     },
-    get lines() { return lines; },
-    calls,
+    get lines() {
+      return lines;
+    },
+    calls
   };
 }
 
@@ -1189,9 +1223,18 @@ test('NoteLiveEditor: isInputFullySelected detects full / partial / empty select
   const { host } = mockHost(['x']);
   const ed = new NoteLiveEditor(host);
 
-  assert.equal(ed.isInputFullySelected({ value: 'hello', selectionStart: 0, selectionEnd: 5 }), true);
-  assert.equal(ed.isInputFullySelected({ value: 'hello', selectionStart: 5, selectionEnd: 5 }), false);
-  assert.equal(ed.isInputFullySelected({ value: 'hello', selectionStart: 0, selectionEnd: 3 }), false);
+  assert.equal(
+    ed.isInputFullySelected({ value: 'hello', selectionStart: 0, selectionEnd: 5 }),
+    true
+  );
+  assert.equal(
+    ed.isInputFullySelected({ value: 'hello', selectionStart: 5, selectionEnd: 5 }),
+    false
+  );
+  assert.equal(
+    ed.isInputFullySelected({ value: 'hello', selectionStart: 0, selectionEnd: 3 }),
+    false
+  );
   assert.equal(ed.isInputFullySelected({ value: '', selectionStart: 0, selectionEnd: 0 }), true);
   assert.equal(ed.isInputFullySelected(null), false);
 });
@@ -1200,24 +1243,48 @@ test('NoteLiveEditor: Cmd+A on a line escalates to whole-note select only once t
   const { host } = mockHost(['## Description', 'testing']);
   const ed = new NoteLiveEditor(host);
   const wholeNoteCalls = [];
-  ed.selectWholeNote = (preview) => { wholeNoteCalls.push(preview); };
+  ed.selectWholeNote = preview => {
+    wholeNoteCalls.push(preview);
+  };
 
-  const cmdA = (input) => {
+  const cmdA = input => {
     let prevented = false;
     ed.handleInputKeydown(
-      { key: 'a', metaKey: true, preventDefault: () => { prevented = true; } },
+      {
+        key: 'a',
+        metaKey: true,
+        preventDefault: () => {
+          prevented = true;
+        }
+      },
       input,
-      'PREVIEW',
+      'PREVIEW'
     );
     return prevented;
   };
 
   // First press: cursor at end, text not fully selected — defer to browser default.
-  assert.equal(cmdA({ dataset: { lineIndex: '0' }, value: '## Description', selectionStart: 14, selectionEnd: 14 }), false);
+  assert.equal(
+    cmdA({
+      dataset: { lineIndex: '0' },
+      value: '## Description',
+      selectionStart: 14,
+      selectionEnd: 14
+    }),
+    false
+  );
   assert.equal(wholeNoteCalls.length, 0);
 
   // Second press: text now fully selected — escalate to whole-note selection.
-  assert.equal(cmdA({ dataset: { lineIndex: '0' }, value: '## Description', selectionStart: 0, selectionEnd: 14 }), true);
+  assert.equal(
+    cmdA({
+      dataset: { lineIndex: '0' },
+      value: '## Description',
+      selectionStart: 0,
+      selectionEnd: 14
+    }),
+    true
+  );
   assert.deepEqual(wholeNoteCalls, ['PREVIEW']);
 });
 
@@ -1229,11 +1296,15 @@ test('mount: returns the four controller handles', () => {
   let content = '# Hello';
   const bundle = mount({
     getContent: () => content,
-    setContent: (v) => { content = v; },
+    setContent: v => {
+      content = v;
+    },
     getContentLines: () => content.split('\n'),
-    setContentLines: (lines) => { content = lines.join('\n'); },
+    setContentLines: lines => {
+      content = lines.join('\n');
+    },
     isPreviewMode: () => true,
-    render: () => {},
+    render: () => {}
   });
   assert.ok(bundle.history);
   assert.ok(bundle.autosave);
@@ -1246,11 +1317,15 @@ test('mount: can disable the shared TOC for secondary editor surfaces', () => {
   let content = '# Secondary';
   const bundle = mount({
     getContent: () => content,
-    setContent: (v) => { content = v; },
+    setContent: v => {
+      content = v;
+    },
     getContentLines: () => content.split('\n'),
-    setContentLines: (lines) => { content = lines.join('\n'); },
+    setContentLines: lines => {
+      content = lines.join('\n');
+    },
     isPreviewMode: () => true,
-    enableToc: false,
+    enableToc: false
   });
   assert.equal(bundle.toc, null);
   assert.ok(bundle.live);
@@ -1262,11 +1337,17 @@ test('mount: live.pushUndo records into history; undo/redo round-trip via shortc
   const renderCalls = [];
   const bundle = mount({
     getContent: () => content,
-    setContent: (v) => { content = v; },
+    setContent: v => {
+      content = v;
+    },
     getContentLines: () => content.split('\n'),
-    setContentLines: (lines) => { content = lines.join('\n'); },
+    setContentLines: lines => {
+      content = lines.join('\n');
+    },
     isPreviewMode: () => true,
-    render: (opts) => { renderCalls.push(opts || null); },
+    render: opts => {
+      renderCalls.push(opts || null);
+    }
   });
 
   // Simulate two edits with undo entries pushed in between.
@@ -1276,11 +1357,25 @@ test('mount: live.pushUndo records into history; undo/redo round-trip via shortc
   content = 'third';
 
   // Undo via the host shortcut (Cmd+Z synthesized).
-  const undoEvent = { key: 'z', metaKey: true, ctrlKey: false, altKey: false, shiftKey: false, preventDefault: () => {} };
+  const undoEvent = {
+    key: 'z',
+    metaKey: true,
+    ctrlKey: false,
+    altKey: false,
+    shiftKey: false,
+    preventDefault: () => {}
+  };
   assert.equal(bundle.live.host.handleHistoryShortcut(undoEvent), true);
   assert.equal(content, 'second');
 
-  const redoEvent = { key: 'z', metaKey: true, ctrlKey: false, altKey: false, shiftKey: true, preventDefault: () => {} };
+  const redoEvent = {
+    key: 'z',
+    metaKey: true,
+    ctrlKey: false,
+    altKey: false,
+    shiftKey: true,
+    preventDefault: () => {}
+  };
   assert.equal(bundle.live.host.handleHistoryShortcut(redoEvent), true);
   assert.equal(content, 'third');
 });
@@ -1295,8 +1390,10 @@ test('mount: live.host.scheduleAutoSave fires the autosave timer', () => {
     setContentLines: () => {},
     isPreviewMode: () => true,
     render: () => {},
-    onAutosaveFlush: () => { flushed += 1; },
-    autosaveDelayMs: 100,
+    onAutosaveFlush: () => {
+      flushed += 1;
+    },
+    autosaveDelayMs: 100
   });
   bundle.live.host.scheduleAutoSave();
   mock.timers.tick(99);
@@ -1317,8 +1414,10 @@ test('mount: destroy cancels pending timers and tears down toc observer', () => 
     setContentLines: () => {},
     isPreviewMode: () => true,
     render: () => {},
-    onAutosaveFlush: () => { flushed += 1; },
-    autosaveDelayMs: 100,
+    onAutosaveFlush: () => {
+      flushed += 1;
+    },
+    autosaveDelayMs: 100
   });
   bundle.autosave.schedule();
   bundle.destroy();
@@ -1336,12 +1435,12 @@ test('bindGenerateToggleButton: binds the Generate toggle once', () => {
       assert.equal(type, 'click');
       assert.equal(typeof handler, 'function');
       boundCount += 1;
-    },
+    }
   };
   globalThis.document = {
     getElementById(id) {
       return id === 'noteGenerateAIToggle' ? toggle : null;
-    },
+    }
   };
 
   try {

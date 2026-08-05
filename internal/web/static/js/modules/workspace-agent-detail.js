@@ -19,7 +19,7 @@ export class WorkspaceAgentDetailPage {
   constructor(workspaceId, agentName) {
     this.workspaceId = String(workspaceId || '').trim();
     this.agentName = String(agentName || '').trim();
-    this.el = (id) => document.getElementById(id);
+    this.el = id => document.getElementById(id);
   }
 
   async init() {
@@ -90,7 +90,7 @@ export class WorkspaceAgentDetailPage {
     const data = await res.json();
     const agents = Array.isArray(data?.agents) ? data.agents : [];
     const target = this.normalize(this.agentName);
-    return agents.find((a) => this.normalize(a?.name) === target) || null;
+    return agents.find(a => this.normalize(a?.name) === target) || null;
   }
 
   async loadPrompt() {
@@ -148,10 +148,16 @@ export class WorkspaceAgentDetailPage {
       if (!res.ok) throw new Error(`skill-bindings failed: ${res.status}`);
       const data = await res.json();
       const bindings = Array.isArray(data?.bindings) ? data.bindings : [];
-      this.renderChips('wad-skills', 'wad-skills-count', bindings, (b) => ({
-        label: b?.skill_name,
-        enabled: b?.enabled !== false
-      }), 'No skills are bound to this workspace.');
+      this.renderChips(
+        'wad-skills',
+        'wad-skills-count',
+        bindings,
+        b => ({
+          label: b?.skill_name,
+          enabled: b?.enabled !== false
+        }),
+        'No skills are bound to this workspace.'
+      );
     } catch (error) {
       console.error('Failed to load skill bindings:', error);
       this.renderChipsError('wad-skills', 'wad-skills-count');
@@ -166,10 +172,16 @@ export class WorkspaceAgentDetailPage {
       if (!res.ok) throw new Error(`mcp-bindings failed: ${res.status}`);
       const data = await res.json();
       const bindings = Array.isArray(data?.bindings) ? data.bindings : [];
-      this.renderChips('wad-mcp', 'wad-mcp-count', bindings, (b) => ({
-        label: b?.alias || b?.server_name,
-        enabled: b?.enabled !== false
-      }), 'No MCP servers are bound to this workspace.');
+      this.renderChips(
+        'wad-mcp',
+        'wad-mcp-count',
+        bindings,
+        b => ({
+          label: b?.alias || b?.server_name,
+          enabled: b?.enabled !== false
+        }),
+        'No MCP servers are bound to this workspace.'
+      );
     } catch (error) {
       console.error('Failed to load MCP bindings:', error);
       this.renderChipsError('wad-mcp', 'wad-mcp-count');
@@ -200,9 +212,12 @@ export class WorkspaceAgentDetailPage {
       if (this.isEntryAgent) {
         // Commander-slot label (PRD FR21/FR22): "Commander" when this agent's
         // own role is orchestrator, "Acting Commander" otherwise.
-        const commanderLabel = String(profile?.role || '').trim().toLowerCase() === 'orchestrator'
-          ? 'Commander'
-          : 'Acting Commander';
+        const commanderLabel =
+          String(profile?.role || '')
+            .trim()
+            .toLowerCase() === 'orchestrator'
+            ? 'Commander'
+            : 'Acting Commander';
         chips.push(`<span class="wad-badge is-leader">${this.escape(commanderLabel)}</span>`);
       }
       chips.push('<span class="wad-badge is-muted">Workspace-local</span>');
@@ -349,9 +364,7 @@ export class WorkspaceAgentDetailPage {
     const count = this.el(countId);
     if (!list) return;
 
-    const items = (bindings || [])
-      .map(map)
-      .filter((it) => String(it?.label || '').trim() !== '');
+    const items = (bindings || []).map(map).filter(it => String(it?.label || '').trim() !== '');
 
     if (count) count.textContent = items.length ? `(${items.length})` : '';
 
@@ -361,7 +374,7 @@ export class WorkspaceAgentDetailPage {
     }
 
     list.innerHTML = items
-      .map((it) => {
+      .map(it => {
         const enabled = it.enabled !== false;
         return `<span class="wad-chip${enabled ? '' : ' is-disabled'}" title="${
           enabled ? 'Enabled' : 'Disabled'
@@ -394,17 +407,22 @@ export class WorkspaceAgentDetailPage {
   // ---- Helpers ------------------------------------------------------------
 
   normalize(value) {
-    return String(value || '').trim().toLowerCase();
+    return String(value || '')
+      .trim()
+      .toLowerCase();
   }
 
   roleLabel(role) {
     const key = this.normalize(role);
     if (!key) return '';
-    return ROLE_LABELS[key] || (role.charAt(0).toUpperCase() + role.slice(1));
+    return ROLE_LABELS[key] || role.charAt(0).toUpperCase() + role.slice(1);
   }
 
   initials(name) {
-    const words = String(name || '').trim().split(/\s+/).filter(Boolean);
+    const words = String(name || '')
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean);
     if (!words.length) return '?';
     if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
     return (words[0][0] + words[words.length - 1][0]).toUpperCase();

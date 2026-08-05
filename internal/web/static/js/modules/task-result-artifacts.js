@@ -1,4 +1,11 @@
-const DEFAULT_HISTORY_COLUMNS = ['executed_at', 'status', 'validation_status', 'storage_status', 'run_id', 'duration_ms'];
+const DEFAULT_HISTORY_COLUMNS = [
+  'executed_at',
+  'status',
+  'validation_status',
+  'storage_status',
+  'run_id',
+  'duration_ms'
+];
 
 function cleanColumnName(value, fallback = 'value') {
   const cleaned = String(value ?? '')
@@ -20,7 +27,7 @@ function normalizeCellValue(value) {
 
 function normalizeRows(rows) {
   return (Array.isArray(rows) ? rows : [])
-    .map((row) => {
+    .map(row => {
       if (!row || typeof row !== 'object' || Array.isArray(row)) return null;
       const normalized = {};
       Object.entries(row).forEach(([key, value]) => {
@@ -34,7 +41,7 @@ function normalizeRows(rows) {
 function uniqueColumns(rows, preferredColumns = []) {
   const columns = [];
   const seen = new Set();
-  const add = (value) => {
+  const add = value => {
     const column = cleanColumnName(value, '');
     const key = column.toLowerCase();
     if (!column || seen.has(key)) return;
@@ -43,7 +50,7 @@ function uniqueColumns(rows, preferredColumns = []) {
   };
 
   preferredColumns.forEach(add);
-  rows.forEach((row) => Object.keys(row || {}).forEach(add));
+  rows.forEach(row => Object.keys(row || {}).forEach(add));
   return columns;
 }
 
@@ -61,13 +68,13 @@ function makeArtifact({ kind, title, source, columns, rows }) {
     source: source || 'result',
     columns: normalizedColumns,
     rows: normalizedRows,
-    csv: rowsToCSV(normalizedColumns, normalizedRows),
+    csv: rowsToCSV(normalizedColumns, normalizedRows)
   };
 }
 
 export function rowsToCSV(columns, rows) {
   const activeColumns = uniqueColumns(rows, columns);
-  const escapeValue = (value) => {
+  const escapeValue = value => {
     const cell = normalizeCellValue(value);
     if (/[",\r\n]/.test(cell)) {
       return `"${cell.replace(/"/g, '""')}"`;
@@ -77,12 +84,14 @@ export function rowsToCSV(columns, rows) {
 
   return [
     activeColumns.map(escapeValue).join(','),
-    ...rows.map((row) => activeColumns.map((column) => escapeValue(row?.[column] ?? '')).join(',')),
+    ...rows.map(row => activeColumns.map(column => escapeValue(row?.[column] ?? '')).join(','))
   ].join('\n');
 }
 
 export function parseDelimitedRecords(text, delimiter = ',') {
-  const input = String(text ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const input = String(text ?? '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n');
   const rows = [];
   let row = [];
   let field = '';
@@ -128,9 +137,9 @@ export function parseDelimitedRecords(text, delimiter = ',') {
   rows.push(row);
 
   return rows
-    .map((items) => items.map((item) => String(item ?? '').trim()))
+    .map(items => items.map(item => String(item ?? '').trim()))
     .filter((items, index, allRows) => {
-      const nonEmpty = items.some((item) => item !== '');
+      const nonEmpty = items.some(item => item !== '');
       if (nonEmpty) return true;
       return index < allRows.length - 1;
     });
@@ -140,9 +149,10 @@ function rowsFromDelimitedRecords(records) {
   if (!Array.isArray(records) || records.length < 2) return null;
   const header = records[0].map((value, index) => cleanColumnName(value, `column_${index + 1}`));
   if (header.length < 2) return null;
-  const rows = records.slice(1)
-    .filter((record) => record.some((value) => String(value || '').trim()))
-    .map((record) => {
+  const rows = records
+    .slice(1)
+    .filter(record => record.some(value => String(value || '').trim()))
+    .map(record => {
       const row = {};
       header.forEach((column, index) => {
         row[column] = record[index] ?? '';
@@ -155,7 +165,7 @@ function rowsFromDelimitedRecords(records) {
     title: 'CSV result',
     source: 'csv',
     columns: header,
-    rows,
+    rows
   });
 }
 
@@ -180,7 +190,7 @@ function parseFencedCSV(text) {
     ...artifact,
     kind: 'fenced_csv',
     title: 'CSV block',
-    source: 'fenced_csv',
+    source: 'fenced_csv'
   };
 }
 
@@ -188,19 +198,24 @@ function splitMarkdownTableRow(line) {
   let value = String(line ?? '').trim();
   if (value.startsWith('|')) value = value.slice(1);
   if (value.endsWith('|')) value = value.slice(0, -1);
-  return value.split('|').map((cell) => cell.trim());
+  return value.split('|').map(cell => cell.trim());
 }
 
 function isMarkdownSeparatorRow(line) {
   const cells = splitMarkdownTableRow(line);
-  return cells.length > 1 && cells.every((cell) => /^:?-{3,}:?$/.test(cell.replace(/\s+/g, '')));
+  return cells.length > 1 && cells.every(cell => /^:?-{3,}:?$/.test(cell.replace(/\s+/g, '')));
 }
 
 function parseMarkdownTable(text) {
-  const lines = String(text ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+  const lines = String(text ?? '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .split('\n');
   for (let index = 0; index < lines.length - 1; index += 1) {
     if (!lines[index].includes('|') || !isMarkdownSeparatorRow(lines[index + 1])) continue;
-    const header = splitMarkdownTableRow(lines[index]).map((value, columnIndex) => cleanColumnName(value, `column_${columnIndex + 1}`));
+    const header = splitMarkdownTableRow(lines[index]).map((value, columnIndex) =>
+      cleanColumnName(value, `column_${columnIndex + 1}`)
+    );
     if (header.length < 2) continue;
 
     const rows = [];
@@ -222,7 +237,7 @@ function parseMarkdownTable(text) {
         title: 'Markdown table',
         source: 'markdown_table',
         columns: header,
-        rows,
+        rows
       });
     }
   }
@@ -250,14 +265,16 @@ function rowsFromObject(value) {
 
 function tableFromJSONValue(value, title = 'Structured result', source = 'json') {
   if (Array.isArray(value)) {
-    const objectRows = value.filter((item) => item && typeof item === 'object' && !Array.isArray(item));
+    const objectRows = value.filter(
+      item => item && typeof item === 'object' && !Array.isArray(item)
+    );
     if (objectRows.length !== value.length || objectRows.length === 0) return null;
     return makeArtifact({
       kind: 'json',
       title,
       source,
       columns: uniqueColumns(objectRows),
-      rows: objectRows,
+      rows: objectRows
     });
   }
 
@@ -276,7 +293,10 @@ function tableFromJSONValue(value, title = 'Structured result', source = 'json')
   }
 
   for (const [key, nested] of Object.entries(value)) {
-    if (Array.isArray(nested) && nested.some((item) => item && typeof item === 'object' && !Array.isArray(item))) {
+    if (
+      Array.isArray(nested) &&
+      nested.some(item => item && typeof item === 'object' && !Array.isArray(item))
+    ) {
       return tableFromJSONValue(nested, cleanColumnName(key), source);
     }
   }
@@ -286,7 +306,7 @@ function tableFromJSONValue(value, title = 'Structured result', source = 'json')
     title,
     source,
     columns: Object.keys(value),
-    rows: rowsFromObject(value),
+    rows: rowsFromObject(value)
   });
 }
 
@@ -305,7 +325,7 @@ function structuredOutputArtifact(task) {
     ...artifact,
     kind: 'output_schema',
     source: 'output_schema',
-    title: 'Structured output',
+    title: 'Structured output'
   };
 }
 
@@ -313,7 +333,7 @@ function parsePlainDelimitedTable(text) {
   const trimmed = String(text ?? '').trim();
   if (!trimmed) return null;
 
-  const lines = trimmed.split(/\r?\n/).filter((line) => line.trim());
+  const lines = trimmed.split(/\r?\n/).filter(line => line.trim());
   if (lines.length < 2) return null;
 
   const first = lines[0];
@@ -328,20 +348,24 @@ function parsePlainDelimitedTable(text) {
     ...artifact,
     kind: delimiter === '\t' ? 'tsv' : 'csv',
     source: delimiter === '\t' ? 'tsv' : 'csv',
-    title: delimiter === '\t' ? 'TSV result' : 'CSV result',
+    title: delimiter === '\t' ? 'TSV result' : 'CSV result'
   };
 }
 
 export function detectTabularResult(text, task = null) {
-  return structuredOutputArtifact(task)
-    || parseJSONTable(text)
-    || parseFencedCSV(text)
-    || parseMarkdownTable(text)
-    || parsePlainDelimitedTable(text);
+  return (
+    structuredOutputArtifact(task) ||
+    parseJSONTable(text) ||
+    parseFencedCSV(text) ||
+    parseMarkdownTable(text) ||
+    parsePlainDelimitedTable(text)
+  );
 }
 
 function summarizeText(value, maxLength = 420) {
-  const normalized = String(value ?? '').replace(/\s+/g, ' ').trim();
+  const normalized = String(value ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
   if (!normalized || normalized.length <= maxLength) return normalized;
   return `${normalized.slice(0, maxLength - 1).trim()}...`;
 }
@@ -349,7 +373,7 @@ function summarizeText(value, maxLength = 420) {
 function buildHistoryRow(entry, parsed, parsedRow = null, rowIndex = 0) {
   const row = {
     executed_at: String(entry?.executed_at || ''),
-    status: String(entry?.status || ''),
+    status: String(entry?.status || '')
   };
   if (entry?.run_id) row.run_id = String(entry.run_id);
   const validation = entry?.validation_result || entry?.validation || null;
@@ -378,12 +402,12 @@ export function buildRunHistoryArtifact(task) {
   let parsedCount = 0;
   let hasSummary = false;
 
-  history.forEach((entry) => {
+  history.forEach(entry => {
     const validation = entry?.validation_result || entry?.validation || null;
     const normalizedRow = validation?.normalized_row;
     if (normalizedRow && typeof normalizedRow === 'object' && !Array.isArray(normalizedRow)) {
       parsedCount += 1;
-      Object.keys(normalizedRow).forEach((column) => parsedColumns.push(column));
+      Object.keys(normalizedRow).forEach(column => parsedColumns.push(column));
       rows.push(buildHistoryRow(entry, { rows: [normalizedRow] }, normalizedRow, 0));
       return;
     }
@@ -391,7 +415,7 @@ export function buildRunHistoryArtifact(task) {
     const parsed = detectTabularResult(raw);
     if (parsed && parsed.rows.length > 0) {
       parsedCount += 1;
-      parsed.columns.forEach((column) => parsedColumns.push(column));
+      parsed.columns.forEach(column => parsedColumns.push(column));
       parsed.rows.forEach((parsedRow, rowIndex) => {
         rows.push(buildHistoryRow(entry, parsed, parsedRow, rowIndex));
       });
@@ -401,9 +425,9 @@ export function buildRunHistoryArtifact(task) {
     rows.push(buildHistoryRow(entry, null));
   });
 
-  const preferred = DEFAULT_HISTORY_COLUMNS.filter((column) => rows.some((row) => row[column]));
+  const preferred = DEFAULT_HISTORY_COLUMNS.filter(column => rows.some(row => row[column]));
   if (parsedCount > 0) preferred.push(...parsedColumns);
-  if (rows.some((row) => row.result_row)) preferred.push('result_row');
+  if (rows.some(row => row.result_row)) preferred.push('result_row');
   if (hasSummary) preferred.push('summary');
 
   return makeArtifact({
@@ -411,7 +435,7 @@ export function buildRunHistoryArtifact(task) {
     title: parsedCount > 0 ? 'Run history dataset' : 'Run history summary',
     source: 'run_history',
     columns: preferred,
-    rows,
+    rows
   });
 }
 

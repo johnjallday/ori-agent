@@ -3,14 +3,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-const { itemTags, collectTags, matchesActiveTags, filterItems } = await import('./tag-filter-bar.js');
+const { itemTags, collectTags, matchesActiveTags, filterItems } =
+  await import('./tag-filter-bar.js');
 
 const items = [
   { id: 'a', tags: ['music', 'client'] },
   { id: 'b', tags: ['music'] },
   { id: 'c', tags: [] },
   { id: 'd' },
-  { id: 'e', tags: [' archive '] },
+  { id: 'e', tags: [' archive '] }
 ];
 
 test('itemTags trims and drops empty entries', () => {
@@ -37,17 +38,26 @@ test('filterItems with no active tags returns all items', () => {
 
 test('filterItems narrows to items carrying every active tag', () => {
   const one = filterItems(items, ['music']);
-  assert.deepEqual(one.map((item) => item.id), ['a', 'b']);
+  assert.deepEqual(
+    one.map(item => item.id),
+    ['a', 'b']
+  );
 
   const both = filterItems(items, new Set(['music', 'client']));
-  assert.deepEqual(both.map((item) => item.id), ['a']);
+  assert.deepEqual(
+    both.map(item => item.id),
+    ['a']
+  );
 });
 
 test('filterItems supports a custom tag getter', () => {
   const rows = [
     { name: 'x', labels: ['alpha'] },
-    { name: 'y', labels: ['beta'] },
+    { name: 'y', labels: ['beta'] }
   ];
-  const filtered = filterItems(rows, ['beta'], (row) => row.labels || []);
-  assert.deepEqual(filtered.map((row) => row.name), ['y']);
+  const filtered = filterItems(rows, ['beta'], row => row.labels || []);
+  assert.deepEqual(
+    filtered.map(row => row.name),
+    ['y']
+  );
 });

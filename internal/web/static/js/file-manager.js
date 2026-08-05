@@ -52,20 +52,20 @@ class FileManager {
     // Dropzone events
     if (this.dropzone) {
       this.dropzone.addEventListener('click', () => this.fileInput?.click());
-      this.dropzone.addEventListener('dragover', (e) => this.handleDragOver(e));
-      this.dropzone.addEventListener('dragleave', (e) => this.handleDragLeave(e));
-      this.dropzone.addEventListener('drop', (e) => this.handleDrop(e));
+      this.dropzone.addEventListener('dragover', e => this.handleDragOver(e));
+      this.dropzone.addEventListener('dragleave', e => this.handleDragLeave(e));
+      this.dropzone.addEventListener('drop', e => this.handleDrop(e));
     }
 
     if (this.browseBtn) {
-      this.browseBtn.addEventListener('click', (e) => {
+      this.browseBtn.addEventListener('click', e => {
         e.stopPropagation();
         this.fileInput?.click();
       });
     }
 
     if (this.fileInput) {
-      this.fileInput.addEventListener('change', (e) => this.handleFileSelect(e));
+      this.fileInput.addEventListener('change', e => this.handleFileSelect(e));
     }
 
     // Compact dropzone
@@ -74,7 +74,7 @@ class FileManager {
     }
 
     if (this.fileInputCompact) {
-      this.fileInputCompact.addEventListener('change', (e) => this.handleFileSelect(e));
+      this.fileInputCompact.addEventListener('change', e => this.handleFileSelect(e));
     }
 
     // Action buttons
@@ -88,7 +88,7 @@ class FileManager {
 
     // File list actions (event delegation)
     if (this.fileList) {
-      this.fileList.addEventListener('click', (e) => this.handleFileAction(e));
+      this.fileList.addEventListener('click', e => this.handleFileAction(e));
     }
 
     // Modal confirmations
@@ -108,8 +108,8 @@ class FileManager {
     }
 
     // Global drag and drop on document
-    document.addEventListener('dragover', (e) => e.preventDefault());
-    document.addEventListener('drop', (e) => e.preventDefault());
+    document.addEventListener('dragover', e => e.preventDefault());
+    document.addEventListener('drop', e => e.preventDefault());
   }
 
   // ===== Drag and Drop =====
@@ -155,7 +155,9 @@ class FileManager {
     const maxFiles = 50;
 
     if (currentCount + files.length > maxFiles) {
-      this.showError(`Cannot add ${files.length} files. Maximum is ${maxFiles} files per session (current: ${currentCount}).`);
+      this.showError(
+        `Cannot add ${files.length} files. Maximum is ${maxFiles} files per session (current: ${currentCount}).`
+      );
       return;
     }
 
@@ -187,7 +189,7 @@ class FileManager {
     const xhr = new XMLHttpRequest();
 
     return new Promise((resolve, reject) => {
-      xhr.upload.addEventListener('progress', (e) => {
+      xhr.upload.addEventListener('progress', e => {
         if (e.lengthComputable) {
           const percent = Math.round((e.loaded / e.total) * 100);
           this.updateUploadProgress(uploadId, percent);
@@ -275,21 +277,27 @@ class FileManager {
 
   renderFileItem(file) {
     const iconClass = file.is_link ? 'file-icon-link' : 'file-icon-default';
-    const statusBadge = file.status === 'broken' ? `
+    const statusBadge =
+      file.status === 'broken'
+        ? `
       <span class="file-status-broken" title="Link is broken - original file not found">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
           <path d="M13,14H11V10H13M13,18H11V16H13M1,21H23L12,2L1,21Z"/>
         </svg>
       </span>
-    ` : '';
+    `
+        : '';
 
-    const actions = file.status === 'broken' ? `
+    const actions =
+      file.status === 'broken'
+        ? `
       <button class="file-action-btn file-relink-btn" title="Re-link file" data-action="relink">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
           <path d="M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z"/>
         </svg>
       </button>
-    ` : `
+    `
+        : `
       <button class="file-action-btn file-preview-btn" title="Preview" data-action="preview">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
           <path d="M12,9A3,3 0 0,0 9,12A3,3 0 0,0 12,15A3,3 0 0,0 15,12A3,3 0 0,0 12,9M12,17A5,5 0 0,1 7,12A5,5 0 0,1 12,7A5,5 0 0,1 17,12A5,5 0 0,1 12,17M12,4.5C7,4.5 2.73,7.61 1,12C2.73,16.39 7,19.5 12,19.5C17,19.5 21.27,16.39 23,12C21.27,7.61 17,4.5 12,4.5Z"/>
@@ -306,10 +314,11 @@ class FileManager {
       <div class="file-item" data-file-id="${file.id}" data-file-name="${this.escapeHtml(file.name)}">
         <div class="file-item-icon">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="${iconClass}">
-            ${file.is_link ?
-    '<path d="M10.59,13.41C11,13.8 11,14.44 10.59,14.83C10.2,15.22 9.56,15.22 9.17,14.83C7.22,12.88 7.22,9.71 9.17,7.76V7.76L12.71,4.22C14.66,2.27 17.83,2.27 19.78,4.22C21.73,6.17 21.73,9.34 19.78,11.29L18.29,12.78C18.3,11.96 18.17,11.14 17.89,10.36L18.36,9.88C19.54,8.71 19.54,6.81 18.36,5.64C17.19,4.46 15.29,4.46 14.12,5.64L10.59,9.17C9.41,10.34 9.41,12.24 10.59,13.41M13.41,9.17C13.8,8.78 14.44,8.78 14.83,9.17C16.78,11.12 16.78,14.29 14.83,16.24V16.24L11.29,19.78C9.34,21.73 6.17,21.73 4.22,19.78C2.27,17.83 2.27,14.66 4.22,12.71L5.71,11.22C5.7,12.04 5.83,12.86 6.11,13.65L5.64,14.12C4.46,15.29 4.46,17.19 5.64,18.36C6.81,19.54 8.71,19.54 9.88,18.36L13.41,14.83C14.59,13.66 14.59,11.76 13.41,10.59C13,10.2 13,9.56 13.41,9.17Z"/>' :
-    '<path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z"/>'
-}
+            ${
+              file.is_link
+                ? '<path d="M10.59,13.41C11,13.8 11,14.44 10.59,14.83C10.2,15.22 9.56,15.22 9.17,14.83C7.22,12.88 7.22,9.71 9.17,7.76V7.76L12.71,4.22C14.66,2.27 17.83,2.27 19.78,4.22C21.73,6.17 21.73,9.34 19.78,11.29L18.29,12.78C18.3,11.96 18.17,11.14 17.89,10.36L18.36,9.88C19.54,8.71 19.54,6.81 18.36,5.64C17.19,4.46 15.29,4.46 14.12,5.64L10.59,9.17C9.41,10.34 9.41,12.24 10.59,13.41M13.41,9.17C13.8,8.78 14.44,8.78 14.83,9.17C16.78,11.12 16.78,14.29 14.83,16.24V16.24L11.29,19.78C9.34,21.73 6.17,21.73 4.22,19.78C2.27,17.83 2.27,14.66 4.22,12.71L5.71,11.22C5.7,12.04 5.83,12.86 6.11,13.65L5.64,14.12C4.46,15.29 4.46,17.19 5.64,18.36C6.81,19.54 8.71,19.54 9.88,18.36L13.41,14.83C14.59,13.66 14.59,11.76 13.41,10.59C13,10.2 13,9.56 13.41,9.17Z"/>'
+                : '<path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z"/>'
+            }
           </svg>
           ${statusBadge}
         </div>
@@ -374,7 +383,9 @@ class FileManager {
     const infoEl = document.getElementById('previewFileInfo');
 
     if (nameEl) nameEl.textContent = fileName;
-    if (content) content.innerHTML = '<div class="file-preview-loading"><div class="spinner-border" role="status"></div></div>';
+    if (content)
+      content.innerHTML =
+        '<div class="file-preview-loading"><div class="spinner-border" role="status"></div></div>';
 
     try {
       const response = await fetch(`${this.baseUrl}/${this.sessionId}/files/${fileId}/download`);
@@ -390,7 +401,11 @@ class FileManager {
       if (contentType.startsWith('image/')) {
         const url = URL.createObjectURL(blob);
         content.innerHTML = `<img src="${url}" class="file-preview-image" alt="${this.escapeHtml(fileName)}">`;
-      } else if (contentType.startsWith('text/') || contentType.includes('json') || contentType.includes('xml')) {
+      } else if (
+        contentType.startsWith('text/') ||
+        contentType.includes('json') ||
+        contentType.includes('xml')
+      ) {
         const text = await blob.text();
         content.innerHTML = `<pre class="file-preview-text">${this.escapeHtml(text)}</pre>`;
       } else {
@@ -490,11 +505,14 @@ class FileManager {
     const modal = bootstrap.Modal.getInstance(this.relinkModal);
 
     try {
-      const response = await fetch(`${this.baseUrl}/${this.sessionId}/files/${this.relinkFileId}/relink`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: newPath })
-      });
+      const response = await fetch(
+        `${this.baseUrl}/${this.sessionId}/files/${this.relinkFileId}/relink`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: newPath })
+        }
+      );
 
       if (!response.ok) throw new Error('Failed to relink file');
 
@@ -592,7 +610,7 @@ class FileManager {
 
     this.eventSource = new EventSource(`${this.baseUrl}/${this.sessionId}/files/events`);
 
-    this.eventSource.onmessage = (event) => {
+    this.eventSource.onmessage = event => {
       try {
         const data = JSON.parse(event.data);
         this.handleSSEEvent(data);

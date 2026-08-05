@@ -87,7 +87,8 @@ async function refreshSystemModelDisplay() {
 
     if (data?.configured && data?.model) {
       const fullModelName = String(data.model);
-      modelNameEl.textContent = fullModelName.length > 20 ? `${fullModelName.substring(0, 18)}...` : fullModelName;
+      modelNameEl.textContent =
+        fullModelName.length > 20 ? `${fullModelName.substring(0, 18)}...` : fullModelName;
       modelNameEl.title = fullModelName;
 
       if (data.provider) {
@@ -195,28 +196,31 @@ function renderSourceFilters() {
   }
 
   const sources = ['all', ...[...counts.keys()].sort()];
-  container.innerHTML = sources.map(source => {
-    const count = source === 'all' ? skillsAll.length : (counts.get(source) || 0);
-    const isActive = selectedSource === source;
-    const theme = source === 'all'
-      ? { bg: 'var(--bg-tertiary)', color: 'var(--text-primary)' }
-      : getSourceTheme(source);
-    const label = source === 'all' ? 'All' : source;
-    const style = [
-      'font-size: 12px',
-      'padding: 4px 12px',
-      'border-radius: 999px',
-      'cursor: pointer',
-      `border: 1px solid ${isActive ? theme.color : 'var(--border-color)'}`,
-      `background: ${isActive ? theme.bg : 'transparent'}`,
-      `color: ${isActive ? theme.color : 'var(--text-secondary)'}`,
-      'display: inline-flex',
-      'align-items: center',
-      'gap: 6px',
-      'transition: background 120ms ease, border-color 120ms ease, color 120ms ease',
-    ].join('; ');
-    return `<button type="button" class="skill-source-chip" data-source="${safeText(source)}" style="${style}">${safeText(label)}<span style="opacity: 0.7;">${count}</span></button>`;
-  }).join('');
+  container.innerHTML = sources
+    .map(source => {
+      const count = source === 'all' ? skillsAll.length : counts.get(source) || 0;
+      const isActive = selectedSource === source;
+      const theme =
+        source === 'all'
+          ? { bg: 'var(--bg-tertiary)', color: 'var(--text-primary)' }
+          : getSourceTheme(source);
+      const label = source === 'all' ? 'All' : source;
+      const style = [
+        'font-size: 12px',
+        'padding: 4px 12px',
+        'border-radius: 999px',
+        'cursor: pointer',
+        `border: 1px solid ${isActive ? theme.color : 'var(--border-color)'}`,
+        `background: ${isActive ? theme.bg : 'transparent'}`,
+        `color: ${isActive ? theme.color : 'var(--text-secondary)'}`,
+        'display: inline-flex',
+        'align-items: center',
+        'gap: 6px',
+        'transition: background 120ms ease, border-color 120ms ease, color 120ms ease'
+      ].join('; ');
+      return `<button type="button" class="skill-source-chip" data-source="${safeText(source)}" style="${style}">${safeText(label)}<span style="opacity: 0.7;">${count}</span></button>`;
+    })
+    .join('');
   container.classList.remove('d-none');
 
   container.querySelectorAll('.skill-source-chip').forEach(btn => {
@@ -264,7 +268,8 @@ function renderSkills(skills) {
     const description = skill?.description || 'No description';
     const source = getSourceLabel(skill?.source);
     const isPlugin = pNames.has(name);
-    const isEditable = !isPlugin && (source === 'agent' || source === '.agents' || source === 'personal');
+    const isEditable =
+      !isPlugin && (source === 'agent' || source === '.agents' || source === 'personal');
     const canDelete = source === 'agent';
     const validationErrors = Array.isArray(skill?.validation_errors) ? skill.validation_errors : [];
     const hasErrors = validationErrors.length > 0;
@@ -282,15 +287,23 @@ function renderSkills(skills) {
 
     const sourceTheme = getSourceTheme(source);
     const badges = [];
-    badges.push(`<span class="badge" style="background: ${sourceTheme.bg}; color: ${sourceTheme.color}; font-size: 10px; text-transform: uppercase; letter-spacing: 0.3px;">${safeText(source)}</span>`);
+    badges.push(
+      `<span class="badge" style="background: ${sourceTheme.bg}; color: ${sourceTheme.color}; font-size: 10px; text-transform: uppercase; letter-spacing: 0.3px;">${safeText(source)}</span>`
+    );
     if (isPlugin) {
-      badges.push('<span class="badge bg-info" style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.3px;">plugin</span>');
+      badges.push(
+        '<span class="badge bg-info" style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.3px;">plugin</span>'
+      );
     }
     if (hasErrors) {
-      badges.push('<span class="badge bg-danger" style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.3px;">invalid</span>');
+      badges.push(
+        '<span class="badge bg-danger" style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.3px;">invalid</span>'
+      );
     }
     if (hasScripts) {
-      badges.push(`<span class="badge ${isTrusted ? 'bg-success' : 'bg-danger'}" style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.3px;">${isTrusted ? 'trusted' : 'untrusted'}</span>`);
+      badges.push(
+        `<span class="badge ${isTrusted ? 'bg-success' : 'bg-danger'}" style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.3px;">${isTrusted ? 'trusted' : 'untrusted'}</span>`
+      );
     }
 
     const errorSummary = hasErrors
@@ -319,16 +332,18 @@ function renderSkills(skills) {
       </div>
       <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: auto; padding-top: 12px;">
         <button class="modern-btn modern-btn-primary btn-sm" data-action="details">Details</button>
-        <button class="modern-btn modern-btn-secondary btn-sm" data-action="run" ${(requiresTrust || hasErrors) ? 'disabled' : ''}>Run</button>
+        <button class="modern-btn modern-btn-secondary btn-sm" data-action="run" ${requiresTrust || hasErrors ? 'disabled' : ''}>Run</button>
         <div class="dropdown" style="margin-left: auto;">
           <button class="modern-btn modern-btn-secondary btn-sm" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="More actions" style="padding: 4px 8px;">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12,16A2,2 0 0,1 14,18A2,2 0 0,1 12,20A2,2 0 0,1 10,18A2,2 0 0,1 12,16M12,10A2,2 0 0,1 14,12A2,2 0 0,1 12,14A2,2 0 0,1 10,12A2,2 0 0,1 12,10M12,4A2,2 0 0,1 14,6A2,2 0 0,1 12,8A2,2 0 0,1 10,6A2,2 0 0,1 12,4Z"/></svg>
           </button>
           <ul class="dropdown-menu dropdown-menu-end">
-            ${isEditable
-    ? `<li><button class="dropdown-item" type="button" data-action="edit">Edit</button></li>
+            ${
+              isEditable
+                ? `<li><button class="dropdown-item" type="button" data-action="edit">Edit</button></li>
                ${canDelete ? '<li><button class="dropdown-item text-danger" type="button" data-action="delete">Delete</button></li>' : ''}`
-    : '<li><button class="dropdown-item" type="button" data-action="clone">Clone & Edit</button></li>'}
+                : '<li><button class="dropdown-item" type="button" data-action="clone">Clone & Edit</button></li>'
+            }
             ${hasScripts ? `<li><button class="dropdown-item" type="button" data-action="trust">${isTrusted ? 'Untrust' : 'Trust'}</button></li>` : ''}
           </ul>
         </div>
@@ -398,20 +413,22 @@ async function loadSkills(agentName) {
   setSkillsMessage('Loading skills...', false);
   clearSkillsError();
 
-  const url = agentName
-    ? `/api/skills?agent=${encodeURIComponent(agentName)}`
-    : '/api/skills';
+  const url = agentName ? `/api/skills?agent=${encodeURIComponent(agentName)}` : '/api/skills';
 
   try {
     const response = await fetch(url);
     if (response.status === 409) {
       const data = await response.json();
       const conflicts = Array.isArray(data.conflicts) ? data.conflicts : [];
-      const conflictHtml = conflicts.map(conflict => {
-        const paths = (conflict.paths || []).map(path => `<li>${safeText(path)}</li>`).join('');
-        return `<li><strong>${safeText(conflict.name)}</strong><ul>${paths}</ul></li>`;
-      }).join('');
-      showSkillsError(`<strong>Duplicate skill names detected.</strong><br/>Resolve these conflicts to continue.<ul>${conflictHtml}</ul>`);
+      const conflictHtml = conflicts
+        .map(conflict => {
+          const paths = (conflict.paths || []).map(path => `<li>${safeText(path)}</li>`).join('');
+          return `<li><strong>${safeText(conflict.name)}</strong><ul>${paths}</ul></li>`;
+        })
+        .join('');
+      showSkillsError(
+        `<strong>Duplicate skill names detected.</strong><br/>Resolve these conflicts to continue.<ul>${conflictHtml}</ul>`
+      );
       skillsAll = [];
       skillsFiltered = [];
       setSkillsCount(0);
@@ -424,7 +441,9 @@ async function loadSkills(agentName) {
     }
     const data = await response.json();
     skillsAll = Array.isArray(data.skills) ? data.skills : [];
-    skillsAll.sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' }));
+    skillsAll.sort((a, b) =>
+      (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' })
+    );
     renderSourceFilters();
     applySkillsFilter();
   } catch (error) {
@@ -441,9 +460,7 @@ function populateAgentSelect(agents, selected) {
   const select = document.getElementById('skillsAgentSelect');
   if (!select) return;
 
-  const names = (agents || [])
-    .map(getAgentDisplayName)
-    .filter(name => name);
+  const names = (agents || []).map(getAgentDisplayName).filter(name => name);
 
   names.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
 
@@ -567,7 +584,7 @@ function setupSkillsEvents() {
   }
 
   if (marketQuery) {
-    marketQuery.addEventListener('keydown', (event) => {
+    marketQuery.addEventListener('keydown', event => {
       if (event.key === 'Enter') {
         event.preventDefault();
         searchMarketplaceSkills();
@@ -583,7 +600,7 @@ function setupSkillsEvents() {
   }
 
   if (marketPackageInput) {
-    marketPackageInput.addEventListener('keydown', (event) => {
+    marketPackageInput.addEventListener('keydown', event => {
       if (event.key === 'Enter') {
         event.preventDefault();
         installMarketplacePackage(marketPackageInput.value);
@@ -627,7 +644,7 @@ function setupSkillsEvents() {
   }
 
   if (marketRemoveInput) {
-    marketRemoveInput.addEventListener('keydown', (event) => {
+    marketRemoveInput.addEventListener('keydown', event => {
       if (event.key === 'Enter') {
         event.preventDefault();
         removeMarketplaceSkill(marketRemoveInput.value);
@@ -639,12 +656,14 @@ function setupSkillsEvents() {
 function cleanSkillDescriptionForCard(description) {
   const text = String(description || '').trim();
   if (!text) return 'No description';
-  return text
-    .replace(/<example>[\s\S]*?<\/example>/gi, '')
-    .replace(/<commentary>[\s\S]*?<\/commentary>/gi, '')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim() || text;
+  return (
+    text
+      .replace(/<example>[\s\S]*?<\/example>/gi, '')
+      .replace(/<commentary>[\s\S]*?<\/commentary>/gi, '')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim() || text
+  );
 }
 
 function getDetailsModal() {
@@ -682,12 +701,18 @@ async function openSkillDetails(skill) {
 
   if (badgesEl) {
     const sourceTheme = getSourceTheme(source);
-    const badges = [`<span class="badge" style="background: ${sourceTheme.bg}; color: ${sourceTheme.color}; font-size: 10px; text-transform: uppercase; letter-spacing: 0.3px;">${safeText(source)}</span>`];
+    const badges = [
+      `<span class="badge" style="background: ${sourceTheme.bg}; color: ${sourceTheme.color}; font-size: 10px; text-transform: uppercase; letter-spacing: 0.3px;">${safeText(source)}</span>`
+    ];
     if (hasErrors) {
-      badges.push('<span class="badge bg-danger" style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.3px;">invalid</span>');
+      badges.push(
+        '<span class="badge bg-danger" style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.3px;">invalid</span>'
+      );
     }
     if (hasScripts) {
-      badges.push(`<span class="badge ${isTrusted ? 'bg-success' : 'bg-danger'}" style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.3px;">${isTrusted ? 'trusted' : 'untrusted'}</span>`);
+      badges.push(
+        `<span class="badge ${isTrusted ? 'bg-success' : 'bg-danger'}" style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.3px;">${isTrusted ? 'trusted' : 'untrusted'}</span>`
+      );
     }
     badgesEl.innerHTML = badges.join('');
   }
@@ -718,21 +743,31 @@ async function openSkillDetails(skill) {
 
   if (actionsEl) {
     const buttons = [];
-    buttons.push(`<button type="button" class="modern-btn modern-btn-secondary btn-sm" data-detail-action="run" ${(requiresTrust || hasErrors) ? 'disabled' : ''}>Run</button>`);
+    buttons.push(
+      `<button type="button" class="modern-btn modern-btn-secondary btn-sm" data-detail-action="run" ${requiresTrust || hasErrors ? 'disabled' : ''}>Run</button>`
+    );
     if (isEditable) {
-      buttons.push('<button type="button" class="modern-btn modern-btn-secondary btn-sm" data-detail-action="edit">Edit</button>');
+      buttons.push(
+        '<button type="button" class="modern-btn modern-btn-secondary btn-sm" data-detail-action="edit">Edit</button>'
+      );
       if (canDelete) {
-        buttons.push('<button type="button" class="modern-btn modern-btn-secondary btn-sm" data-detail-action="delete">Delete</button>');
+        buttons.push(
+          '<button type="button" class="modern-btn modern-btn-secondary btn-sm" data-detail-action="delete">Delete</button>'
+        );
       }
     } else {
-      buttons.push('<button type="button" class="modern-btn modern-btn-secondary btn-sm" data-detail-action="clone">Clone & Edit</button>');
+      buttons.push(
+        '<button type="button" class="modern-btn modern-btn-secondary btn-sm" data-detail-action="clone">Clone & Edit</button>'
+      );
     }
     if (hasScripts) {
-      buttons.push(`<button type="button" class="modern-btn modern-btn-secondary btn-sm" data-detail-action="trust">${isTrusted ? 'Untrust' : 'Trust'}</button>`);
+      buttons.push(
+        `<button type="button" class="modern-btn modern-btn-secondary btn-sm" data-detail-action="trust">${isTrusted ? 'Untrust' : 'Trust'}</button>`
+      );
     }
     actionsEl.innerHTML = buttons.join('');
 
-    actionsEl.querySelectorAll('[data-detail-action]').forEach((btn) => {
+    actionsEl.querySelectorAll('[data-detail-action]').forEach(btn => {
       const action = btn.getAttribute('data-detail-action');
       btn.addEventListener('click', () => {
         const modal = getDetailsModal();
@@ -772,7 +807,9 @@ async function openSkillDetails(skill) {
   }
 
   try {
-    const response = await fetch(`/api/skills/${encodeURIComponent(skill.name)}?agent=${encodeURIComponent(selectedAgentName)}`);
+    const response = await fetch(
+      `/api/skills/${encodeURIComponent(skill.name)}?agent=${encodeURIComponent(selectedAgentName)}`
+    );
     if (!response.ok) {
       throw new Error('Failed to load skill prompt.');
     }
@@ -847,10 +884,10 @@ function setMarketplaceActionBusy(isBusy) {
   if (removeInput) removeInput.disabled = isBusy;
   if (removeBtn) removeBtn.disabled = isBusy;
 
-  document.querySelectorAll('[data-market-install]').forEach((button) => {
+  document.querySelectorAll('[data-market-install]').forEach(button => {
     button.disabled = isBusy;
   });
-  document.querySelectorAll('[data-market-remove]').forEach((button) => {
+  document.querySelectorAll('[data-market-remove]').forEach(button => {
     button.disabled = isBusy;
   });
 }
@@ -864,19 +901,21 @@ function renderMarketplaceResults(results) {
     return;
   }
 
-  const anyMarketplaceBusy = marketplaceSearchBusy || marketplaceInstallBusy || marketplaceManageBusy;
+  const anyMarketplaceBusy =
+    marketplaceSearchBusy || marketplaceInstallBusy || marketplaceManageBusy;
 
-  container.innerHTML = results.map((result) => {
-    const packageSpec = result?.package || '';
-    const repository = result?.repository || '';
-    const skillName = result?.skill || '';
-    const installs = result?.installs || '';
-    const url = result?.url || '';
-    const urlHtml = url
-      ? `<a href="${safeText(url)}" target="_blank" rel="noopener noreferrer" style="font-size: 12px;">View on skills.sh</a>`
-      : '';
+  container.innerHTML = results
+    .map(result => {
+      const packageSpec = result?.package || '';
+      const repository = result?.repository || '';
+      const skillName = result?.skill || '';
+      const installs = result?.installs || '';
+      const url = result?.url || '';
+      const urlHtml = url
+        ? `<a href="${safeText(url)}" target="_blank" rel="noopener noreferrer" style="font-size: 12px;">View on skills.sh</a>`
+        : '';
 
-    return `
+      return `
       <div class="plugin-item" style="display: flex; flex-direction: column; gap: 10px;">
         <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
           <div style="min-width: 0;">
@@ -894,9 +933,10 @@ function renderMarketplaceResults(results) {
         </div>
       </div>
     `;
-  }).join('');
+    })
+    .join('');
 
-  container.querySelectorAll('[data-market-install]').forEach((button) => {
+  container.querySelectorAll('[data-market-install]').forEach(button => {
     button.addEventListener('click', () => {
       const packageSpec = button.getAttribute('data-market-install') || '';
       installMarketplacePackage(packageSpec);
@@ -919,15 +959,17 @@ function renderInstalledMarketplaceSkills(skills) {
     return;
   }
 
-  const anyMarketplaceBusy = marketplaceSearchBusy || marketplaceInstallBusy || marketplaceManageBusy;
+  const anyMarketplaceBusy =
+    marketplaceSearchBusy || marketplaceInstallBusy || marketplaceManageBusy;
 
-  container.innerHTML = skills.map((skill) => {
-    const name = skill?.name || '';
-    const path = skill?.path || '';
-    const agents = skill?.agents || '';
-    const scope = skill?.scope || '';
+  container.innerHTML = skills
+    .map(skill => {
+      const name = skill?.name || '';
+      const path = skill?.path || '';
+      const agents = skill?.agents || '';
+      const scope = skill?.scope || '';
 
-    return `
+      return `
       <div class="plugin-item" style="display: flex; flex-direction: column; gap: 10px;">
         <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
           <div style="min-width: 0;">
@@ -944,9 +986,10 @@ function renderInstalledMarketplaceSkills(skills) {
         </div>
       </div>
     `;
-  }).join('');
+    })
+    .join('');
 
-  container.querySelectorAll('[data-market-remove]').forEach((button) => {
+  container.querySelectorAll('[data-market-remove]').forEach(button => {
     button.addEventListener('click', () => {
       const skillName = button.getAttribute('data-market-remove') || '';
       removeMarketplaceSkill(skillName);
@@ -972,7 +1015,10 @@ async function loadInstalledMarketplaceSkills(force = false) {
 
     marketplaceInstalledSkills = Array.isArray(data?.skills) ? data.skills : [];
     renderInstalledMarketplaceSkills(marketplaceInstalledSkills);
-    setMarketplaceStatus(`Loaded ${marketplaceInstalledSkills.length} installed skill${marketplaceInstalledSkills.length === 1 ? '' : 's'}.`, false);
+    setMarketplaceStatus(
+      `Loaded ${marketplaceInstalledSkills.length} installed skill${marketplaceInstalledSkills.length === 1 ? '' : 's'}.`,
+      false
+    );
   } catch (error) {
     console.error('Failed to load installed marketplace skills:', error);
     setMarketplaceStatus(error?.message || 'Failed to load installed skills.', true);
@@ -994,7 +1040,7 @@ async function checkMarketplaceUpdates() {
     const response = await fetch('/api/skills/marketplace/check', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: '{}',
+      body: '{}'
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {
@@ -1030,7 +1076,7 @@ async function updateMarketplaceSkills() {
     const response = await fetch('/api/skills/marketplace/update', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: '{}',
+      body: '{}'
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {
@@ -1080,7 +1126,7 @@ async function removeMarketplaceSkill(skillName) {
     const response = await fetch('/api/skills/marketplace/remove', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ skill: normalized }),
+      body: JSON.stringify({ skill: normalized })
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {
@@ -1135,7 +1181,7 @@ async function searchMarketplaceSkills() {
     const response = await fetch('/api/skills/marketplace/search', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query, limit: 12 }),
+      body: JSON.stringify({ query, limit: 12 })
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {
@@ -1148,7 +1194,10 @@ async function searchMarketplaceSkills() {
     if (marketplaceResults.length === 0) {
       setMarketplaceStatus('Search completed. No skills matched your query.', true);
     } else {
-      setMarketplaceStatus(`Found ${marketplaceResults.length} matching skill${marketplaceResults.length === 1 ? '' : 's'}.`, false);
+      setMarketplaceStatus(
+        `Found ${marketplaceResults.length} matching skill${marketplaceResults.length === 1 ? '' : 's'}.`,
+        false
+      );
     }
   } catch (error) {
     console.error('Failed to search marketplace skills:', error);
@@ -1179,7 +1228,7 @@ async function installMarketplacePackage(packageSpec) {
     const response = await fetch('/api/skills/marketplace/install', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ package: normalized }),
+      body: JSON.stringify({ package: normalized })
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {
@@ -1256,7 +1305,10 @@ function extractAssistantPrompt(raw) {
     text = text.slice('prompt:'.length).trim();
   }
 
-  if ((text.startsWith('"') && text.endsWith('"')) || (text.startsWith("'") && text.endsWith("'"))) {
+  if (
+    (text.startsWith('"') && text.endsWith('"')) ||
+    (text.startsWith("'") && text.endsWith("'"))
+  ) {
     text = text.slice(1, -1).trim();
   }
 
@@ -1307,9 +1359,9 @@ async function generatePromptWithAssistant(force = false) {
       body: JSON.stringify({
         agent: selectedAgentName,
         name,
-        description,
+        description
       }),
-      signal: controller.signal,
+      signal: controller.signal
     });
     const data = await response.json().catch(() => ({}));
     if (requestId !== promptGenerationRequestId) return;
@@ -1358,10 +1410,7 @@ function toYamlList(key, values) {
   if (normalized.length === 0) {
     return [`  ${key}: []`];
   }
-  return [
-    `  ${key}:`,
-    ...normalized.map(item => `    - ${toYamlQuoted(item)}`),
-  ];
+  return [`  ${key}:`, ...normalized.map(item => `    - ${toYamlQuoted(item)}`)];
 }
 
 function buildGeneratedSkillConfig() {
@@ -1372,9 +1421,8 @@ function buildGeneratedSkillConfig() {
   const skillName = nameInput ? nameInput.value.trim() : '';
   const description = descriptionInput ? descriptionInput.value.trim() : '';
   const prompt = promptInput ? promptInput.value : '';
-  const cleanedPrompt = (prompt || '').trim() === 'Loading...'
-    ? ''
-    : (prompt || '').replace(/\r\n/g, '\n').trim();
+  const cleanedPrompt =
+    (prompt || '').trim() === 'Loading...' ? '' : (prompt || '').replace(/\r\n/g, '\n').trim();
 
   const promptLines = cleanedPrompt
     ? cleanedPrompt.split('\n').map(line => `  ${line}`)
@@ -1388,7 +1436,7 @@ function buildGeneratedSkillConfig() {
     'dependencies:',
     ...toYamlList('tools', []),
     ...toYamlList('mcp_servers', []),
-    '',
+    ''
   ];
 
   return lines.join('\n');
@@ -1400,7 +1448,9 @@ function generateSkillConfiguration() {
 
   const existing = openAIYamlInput.value.trim();
   if (existing) {
-    const confirmed = window.confirm('Replace the current OpenAI configuration with a generated template?');
+    const confirmed = window.confirm(
+      'Replace the current OpenAI configuration with a generated template?'
+    );
     if (!confirmed) return;
   }
 
@@ -1422,9 +1472,9 @@ function normalizeCloneSkillBaseName(name) {
 }
 
 function buildCloneSkillName(name) {
-  const existing = new Set((skillsAll || [])
-    .map(skill => (skill?.name || '').toLowerCase())
-    .filter(Boolean));
+  const existing = new Set(
+    (skillsAll || []).map(skill => (skill?.name || '').toLowerCase()).filter(Boolean)
+  );
 
   const base = `${normalizeCloneSkillBaseName(name)}-local`;
   let candidate = base;
@@ -1470,7 +1520,9 @@ async function cloneSkillToAgent(skill) {
   if (modal) modal.show();
 
   try {
-    const response = await fetch(`/api/skills/${encodeURIComponent(skill.name)}?agent=${encodeURIComponent(selectedAgentName)}`);
+    const response = await fetch(
+      `/api/skills/${encodeURIComponent(skill.name)}?agent=${encodeURIComponent(selectedAgentName)}`
+    );
     if (!response.ok) {
       throw new Error('Failed to load source skill content.');
     }
@@ -1515,8 +1567,10 @@ function openSkillEditor(skill) {
   if (modal) modal.show();
 
   if (skill && promptInput) {
-    fetch(`/api/skills/${encodeURIComponent(skill.name)}?agent=${encodeURIComponent(selectedAgentName)}`)
-      .then(res => res.ok ? res.json() : Promise.reject(new Error('Failed to load skill')))
+    fetch(
+      `/api/skills/${encodeURIComponent(skill.name)}?agent=${encodeURIComponent(selectedAgentName)}`
+    )
+      .then(res => (res.ok ? res.json() : Promise.reject(new Error('Failed to load skill'))))
       .then(data => {
         promptInput.value = data.prompt || '';
       })
@@ -1542,7 +1596,7 @@ async function saveSkillEditor() {
     agent: selectedAgentName,
     name: nameInput ? nameInput.value.trim() : '',
     description: descriptionInput ? descriptionInput.value.trim() : '',
-    prompt: promptInput ? promptInput.value : '',
+    prompt: promptInput ? promptInput.value : ''
   };
   const openAIYamlValue = openAIYamlInput ? openAIYamlInput.value.trim() : '';
   if (openAIYamlValue !== '') {
@@ -1566,16 +1620,14 @@ async function saveSkillEditor() {
   }
 
   const isEdit = Boolean(editingSkillName);
-  const url = isEdit
-    ? `/api/skills/${encodeURIComponent(editingSkillName)}`
-    : '/api/skills';
+  const url = isEdit ? `/api/skills/${encodeURIComponent(editingSkillName)}` : '/api/skills';
   const method = isEdit ? 'PUT' : 'POST';
 
   try {
     const response = await fetch(url, {
       method,
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(payload)
     });
 
     if (!response.ok) {
@@ -1611,9 +1663,12 @@ async function deleteSkill(skill) {
   if (!confirmed) return;
 
   try {
-    const response = await fetch(`/api/skills/${encodeURIComponent(skill.name)}?agent=${encodeURIComponent(selectedAgentName)}`, {
-      method: 'DELETE',
-    });
+    const response = await fetch(
+      `/api/skills/${encodeURIComponent(skill.name)}?agent=${encodeURIComponent(selectedAgentName)}`,
+      {
+        method: 'DELETE'
+      }
+    );
     if (!response.ok && response.status !== 204) {
       throw new Error('Failed to delete skill');
     }
@@ -1630,7 +1685,7 @@ async function toggleSkillTrust(skill) {
     const response = await fetch(`/api/skills/${encodeURIComponent(skill.name)}/trust`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ agent: selectedAgentName, trusted: !skill.trusted }),
+      body: JSON.stringify({ agent: selectedAgentName, trusted: !skill.trusted })
     });
     if (!response.ok) {
       throw new Error('Failed to update skill trust');
@@ -1656,7 +1711,7 @@ async function runSkill(name) {
     const response = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question: `/${name}`, agent_name: selectedAgentName }),
+      body: JSON.stringify({ question: `/${name}`, agent_name: selectedAgentName })
     });
     if (!response.ok) {
       throw new Error('Failed to run skill');

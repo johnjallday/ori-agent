@@ -46,7 +46,7 @@ func TestManagerStagesDigestAndUsesOneFixedSudoBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer prepared.Cleanup()
+	defer func() { _ = prepared.Cleanup() }()
 	if prepared.ArtifactDigest != "f77b12a53ece5f6b7050800bbdbf8cc5ebe87f1b1387cf739f243e43e2ce886b" {
 		t.Fatalf("artifact digest = %s", prepared.ArtifactDigest)
 	}
@@ -249,7 +249,7 @@ func TestProtocolSelfTestRegistersVerifiesAndLeavesNoWake(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer listener.Close()
+	defer func() { _ = listener.Close() }()
 	var operations []wakeprotocol.Operation
 	serverErrors := make(chan error, 1)
 	go func() {

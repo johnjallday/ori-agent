@@ -25,20 +25,25 @@ const state = {
   selectedIndex: 0,
   debounceTimer: null,
   inFlightAbort: null,
-  previousFocus: null,
+  previousFocus: null
 };
 
-function $(id) { return document.getElementById(id); }
+function $(id) {
+  return document.getElementById(id);
+}
 
 function escapeHtml(s) {
-  return String(s ?? '').replace(/[&<>"']/g, (c) => (
-    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
-  ));
+  return String(s ?? '').replace(
+    /[&<>"']/g,
+    c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]
+  );
 }
 
 // Heading-search snippets come back already wrapped with <mark>. Note-search
 // snippets do too. We trust the server's snippet escaping.
-function snippetHTML(s) { return s || ''; }
+function snippetHTML(s) {
+  return s || '';
+}
 
 // =============================================================================
 // Open / close
@@ -111,7 +116,7 @@ async function runQuery(q) {
   try {
     const [notesResp, headingsResp] = await Promise.allSettled([
       fetch(`/api/notes/search?q=${encodeURIComponent(q)}`, { signal: ac.signal }),
-      fetch(`/api/notes/search/headings?q=${encodeURIComponent(q)}`, { signal: ac.signal }),
+      fetch(`/api/notes/search/headings?q=${encodeURIComponent(q)}`, { signal: ac.signal })
     ]);
 
     let notes = [];
@@ -167,18 +172,23 @@ function renderRecent() {
   renderStatus('');
   const recent = readRecent();
   if (recent.length === 0) {
-    results.innerHTML = '<div class="search-palette-empty">Type to search notes and headings…</div>';
+    results.innerHTML =
+      '<div class="search-palette-empty">Type to search notes and headings…</div>';
     return;
   }
   results.innerHTML = `
     <div class="search-palette-section">
       <div class="search-palette-section-label">Recent</div>
-      ${recent.map((q, i) => `
+      ${recent
+        .map(
+          (q, i) => `
         <button type="button" class="search-palette-recent-row" data-index="${i}" data-query="${escapeHtml(q)}">
           <span class="search-palette-recent-icon">↺</span>
           <span class="search-palette-recent-text">${escapeHtml(q)}</span>
         </button>
-      `).join('')}
+      `
+        )
+        .join('')}
     </div>
   `;
   results.querySelectorAll('.search-palette-recent-row').forEach(el => {
@@ -196,7 +206,8 @@ function renderResults() {
   if (!results) return;
 
   if (state.loading) {
-    results.innerHTML = '<div class="search-palette-empty"><span class="spinner-border spinner-border-sm me-2"></span>Searching…</div>';
+    results.innerHTML =
+      '<div class="search-palette-empty"><span class="spinner-border spinner-border-sm me-2"></span>Searching…</div>';
     renderStatus('');
     return;
   }
@@ -215,11 +226,15 @@ function renderResults() {
 
   const html = [];
   if (state.notes.length > 0) {
-    html.push('<div class="search-palette-section"><div class="search-palette-section-label">Notes</div>');
+    html.push(
+      '<div class="search-palette-section"><div class="search-palette-section-label">Notes</div>'
+    );
     state.notes.forEach((n, i) => {
       const idx = i;
       const sel = idx === state.selectedIndex ? ' is-selected' : '';
-      const wsName = n.workspace_name ? `<span class="search-palette-row-ws">${escapeHtml(n.workspace_name)}</span>` : '';
+      const wsName = n.workspace_name
+        ? `<span class="search-palette-row-ws">${escapeHtml(n.workspace_name)}</span>`
+        : '';
       const snippet = (n.snippets && n.snippets[0]) || '';
       html.push(`
         <button type="button" class="search-palette-row${sel}" data-index="${idx}" role="option" aria-selected="${idx === state.selectedIndex}">
@@ -234,11 +249,15 @@ function renderResults() {
     html.push('</div>');
   }
   if (state.headings.length > 0) {
-    html.push('<div class="search-palette-section"><div class="search-palette-section-label">Headings</div>');
+    html.push(
+      '<div class="search-palette-section"><div class="search-palette-section-label">Headings</div>'
+    );
     state.headings.forEach((h, i) => {
       const idx = state.notes.length + i;
       const sel = idx === state.selectedIndex ? ' is-selected' : '';
-      const wsName = h.workspace_name ? `<span class="search-palette-row-ws">${escapeHtml(h.workspace_name)}</span>` : '';
+      const wsName = h.workspace_name
+        ? `<span class="search-palette-row-ws">${escapeHtml(h.workspace_name)}</span>`
+        : '';
       const noteName = h.note_name ? escapeHtml(h.note_name) : 'Untitled';
       html.push(`
         <button type="button" class="search-palette-row${sel}" data-index="${idx}" role="option" aria-selected="${idx === state.selectedIndex}">
@@ -363,7 +382,11 @@ function pushRecent(q) {
   if (!q) return;
   let list = readRecent();
   list = [q, ...list.filter(x => x !== q)].slice(0, RECENT_MAX);
-  try { localStorage.setItem(RECENT_KEY, JSON.stringify(list)); } catch (_) { /* ignore */ }
+  try {
+    localStorage.setItem(RECENT_KEY, JSON.stringify(list));
+  } catch (_) {
+    /* ignore */
+  }
 }
 
 // =============================================================================
@@ -381,7 +404,7 @@ function mount() {
   palette.querySelector('[data-role="overlay"]')?.addEventListener('click', () => close());
 
   // Focus trap — keep tab within the palette while it's open.
-  palette.addEventListener('keydown', (e) => {
+  palette.addEventListener('keydown', e => {
     if (!state.open) return;
     if (e.key === 'Tab') {
       // Only one focusable element (input); just keep it focused.
@@ -391,8 +414,9 @@ function mount() {
   });
 
   // Global shortcut.
-  document.addEventListener('keydown', (e) => {
-    const isToggle = (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'k';
+  document.addEventListener('keydown', e => {
+    const isToggle =
+      (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'k';
     if (isToggle) {
       e.preventDefault();
       toggle();

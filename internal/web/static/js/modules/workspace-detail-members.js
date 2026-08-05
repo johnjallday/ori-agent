@@ -26,7 +26,11 @@ export function escapeHtml(value) {
 }
 
 export function normalizeWorkspaceKind(kind) {
-  return String(kind || '').trim().toLowerCase() === 'group' ? 'group' : 'workspace';
+  return String(kind || '')
+    .trim()
+    .toLowerCase() === 'group'
+    ? 'group'
+    : 'workspace';
 }
 
 export function isGroupNode(node) {
@@ -54,22 +58,24 @@ export function directMembers(group) {
 
 export function flattenTree(nodes) {
   const out = [];
-  const walk = (list) => (list || []).forEach((node) => {
-    if (!node || !node.id) return;
-    out.push(node);
-    walk(node.children);
-  });
+  const walk = list =>
+    (list || []).forEach(node => {
+      if (!node || !node.id) return;
+      out.push(node);
+      walk(node.children);
+    });
   walk(nodes);
   return out;
 }
 
 export function collectDescendantIds(node) {
   const ids = new Set();
-  const walk = (n) => (n && Array.isArray(n.children) ? n.children : []).forEach((child) => {
-    if (!child || !child.id) return;
-    ids.add(child.id);
-    walk(child);
-  });
+  const walk = n =>
+    (n && Array.isArray(n.children) ? n.children : []).forEach(child => {
+      if (!child || !child.id) return;
+      ids.add(child.id);
+      walk(child);
+    });
   walk(node);
   return ids;
 }
@@ -81,7 +87,7 @@ export function eligibleAddTargets(tree, group) {
   if (!group || !group.id) return [];
   const excluded = collectDescendantIds(group);
   excluded.add(group.id);
-  return flattenTree(tree).filter((node) => !excluded.has(node.id));
+  return flattenTree(tree).filter(node => !excluded.has(node.id));
 }
 
 export function formatMemberCount(count) {
@@ -89,7 +95,16 @@ export function formatMemberCount(count) {
 }
 
 // Color choices for group color editing ('' = no color).
-export const GROUP_COLOR_PRESETS = ['', '#ef4444', '#f59e0b', '#10b981', '#3b82f6', '#8b5cf6', '#ec4899', '#6b7280'];
+export const GROUP_COLOR_PRESETS = [
+  '',
+  '#ef4444',
+  '#f59e0b',
+  '#10b981',
+  '#3b82f6',
+  '#8b5cf6',
+  '#ec4899',
+  '#6b7280'
+];
 
 // Decide which save calls a metadata edit needs: the name uses the rename
 // endpoint, description/color use PATCH. Returns flags so callers only hit
@@ -100,16 +115,23 @@ export function metadataChanges(group, next) {
     nameChanged: String(next.name ?? '') !== String(cur.name ?? ''),
     metaChanged:
       String(next.description ?? '') !== String(cur.description ?? '') ||
-      String(next.color ?? '') !== String(cur.color ?? ''),
+      String(next.color ?? '') !== String(cur.color ?? '')
   };
 }
 
 // --- Task roll-up helpers ------------------------------------------------------
 
-export const OPEN_TASK_STATUSES = new Set(['pending', 'assigned', 'in_progress', 'waiting_for_choice']);
+export const OPEN_TASK_STATUSES = new Set([
+  'pending',
+  'assigned',
+  'in_progress',
+  'waiting_for_choice'
+]);
 
 export function normalizeStatus(status) {
-  return String(status || '').trim().toLowerCase();
+  return String(status || '')
+    .trim()
+    .toLowerCase();
 }
 
 export function isOpenTask(task) {
@@ -143,7 +165,11 @@ export function taskMatchesFilters(task, filters = {}, now = Date.now()) {
     return false;
   }
 
-  if (filters.member && filters.member !== 'all' && (task.__workspaceId || task.workspace_id) !== filters.member) {
+  if (
+    filters.member &&
+    filters.member !== 'all' &&
+    (task.__workspaceId || task.workspace_id) !== filters.member
+  ) {
     return false;
   }
 
@@ -157,7 +183,9 @@ export function taskMatchesFilters(task, filters = {}, now = Date.now()) {
 
 // Sort the roll-up newest-first by created_at.
 export function sortTasksForRollup(tasks) {
-  return [...(tasks || [])].sort((a, b) => (Date.parse(b.created_at) || 0) - (Date.parse(a.created_at) || 0));
+  return [...(tasks || [])].sort(
+    (a, b) => (Date.parse(b.created_at) || 0) - (Date.parse(a.created_at) || 0)
+  );
 }
 
 // --- Notes/files helpers -------------------------------------------------------
@@ -169,10 +197,10 @@ export function isFileAttachment(attachment) {
 }
 
 export function extractFileItems(attachments) {
-  return (attachments || []).filter(isFileAttachment).map((attachment) => ({
+  return (attachments || []).filter(isFileAttachment).map(attachment => ({
     id: attachment.id,
     title: attachment.title || attachment.file_meta.name || 'File',
-    url: attachment.file_meta.url || '',
+    url: attachment.file_meta.url || ''
   }));
 }
 
@@ -211,7 +239,7 @@ export class WorkspaceMembersPanel {
       badge: document.getElementById('workspace-group-badge'),
       swatch: document.getElementById('workspace-group-color'),
       memberStat: document.getElementById('workspace-member-stat'),
-      memberCount: document.getElementById('workspace-member-count'),
+      memberCount: document.getElementById('workspace-member-count')
     };
   }
 
@@ -301,7 +329,7 @@ export class WorkspaceMembersPanel {
     if (createBtn) createBtn.addEventListener('click', () => this.openCreateMember());
     if (createCancel) createCancel.addEventListener('click', () => this.closeCreateMember());
     if (createForm) {
-      createForm.addEventListener('submit', (event) => {
+      createForm.addEventListener('submit', event => {
         event.preventDefault();
         void this.createMember();
       });
@@ -316,7 +344,8 @@ export class WorkspaceMembersPanel {
   armLazyRollups() {
     if (this.rollupObserver || !this.els.panel) return;
     if (this.els.rollups) {
-      this.els.rollups.innerHTML = '<div class="group-detail-empty">Expand the panel to load member tasks, notes, and files.</div>';
+      this.els.rollups.innerHTML =
+        '<div class="group-detail-empty">Expand the panel to load member tasks, notes, and files.</div>';
     }
     this.rollupObserver = new MutationObserver(() => {
       if (this.els.panel.getAttribute('aria-expanded') === 'true' && !this.rollupsLoaded) {
@@ -324,12 +353,16 @@ export class WorkspaceMembersPanel {
         void this.loadRollups();
       }
     });
-    this.rollupObserver.observe(this.els.panel, { attributes: true, attributeFilter: ['aria-expanded'] });
+    this.rollupObserver.observe(this.els.panel, {
+      attributes: true,
+      attributeFilter: ['aria-expanded']
+    });
   }
 
   async loadRollups() {
     if (!this.els.rollups || !this.group) return;
-    this.els.rollups.innerHTML = '<div class="group-detail-empty">Loading member tasks, notes &amp; files…</div>';
+    this.els.rollups.innerHTML =
+      '<div class="group-detail-empty">Loading member tasks, notes &amp; files…</div>';
     await Promise.all([this.loadTasks(), this.loadNotesFiles()]);
     this.renderRollups();
   }
@@ -359,7 +392,8 @@ export class WorkspaceMembersPanel {
 
     const members = directMembers(this.group);
     if (members.length === 0) {
-      container.innerHTML = '<div class="group-detail-empty">No members yet. Add an existing workspace or create a new one.</div>';
+      container.innerHTML =
+        '<div class="group-detail-empty">No members yet. Add an existing workspace or create a new one.</div>';
       return;
     }
 
@@ -373,7 +407,9 @@ export class WorkspaceMembersPanel {
     const kindLabel = isGroup ? 'Group' : 'Workspace';
     const meta = isGroup
       ? formatMemberCount(directMembers(member).length)
-      : (member.status ? `Status: ${member.status}` : '');
+      : member.status
+        ? `Status: ${member.status}`
+        : '';
     const desc = member.description || '';
     const safeId = escapeHtml(member.id);
     const safeName = escapeHtml(name);
@@ -397,19 +433,28 @@ export class WorkspaceMembersPanel {
   bindMemberActions() {
     const container = this.els.list;
     if (!container) return;
-    container.querySelectorAll('[data-member-id]').forEach((btn) => {
+    container.querySelectorAll('[data-member-id]').forEach(btn => {
       btn.addEventListener('click', () => {
         window.location.href = `/workspaces/${encodeURIComponent(btn.getAttribute('data-member-id'))}`;
       });
     });
-    container.querySelectorAll('[data-member-remove]').forEach((btn) => {
-      btn.addEventListener('click', () => void this.removeMember(btn.getAttribute('data-member-remove')));
+    container.querySelectorAll('[data-member-remove]').forEach(btn => {
+      btn.addEventListener(
+        'click',
+        () => void this.removeMember(btn.getAttribute('data-member-remove'))
+      );
     });
-    container.querySelectorAll('[data-member-up]').forEach((btn) => {
-      btn.addEventListener('click', () => void this.moveMember(btn.getAttribute('data-member-up'), 'up'));
+    container.querySelectorAll('[data-member-up]').forEach(btn => {
+      btn.addEventListener(
+        'click',
+        () => void this.moveMember(btn.getAttribute('data-member-up'), 'up')
+      );
     });
-    container.querySelectorAll('[data-member-down]').forEach((btn) => {
-      btn.addEventListener('click', () => void this.moveMember(btn.getAttribute('data-member-down'), 'down'));
+    container.querySelectorAll('[data-member-down]').forEach(btn => {
+      btn.addEventListener(
+        'click',
+        () => void this.moveMember(btn.getAttribute('data-member-down'), 'down')
+      );
     });
   }
 
@@ -419,7 +464,12 @@ export class WorkspaceMembersPanel {
     // never deletes the workspace/group.
     const newParent = (this.group && this.group.parent_id) || '';
     try {
-      await this.sendJson(`/api/workspaces/${encodeURIComponent(memberId)}`, 'PATCH', { parent_id: newParent }, 'Failed to remove member');
+      await this.sendJson(
+        `/api/workspaces/${encodeURIComponent(memberId)}`,
+        'PATCH',
+        { parent_id: newParent },
+        'Failed to remove member'
+      );
       await this.reload();
     } catch (err) {
       console.error('Failed to remove member:', err);
@@ -429,7 +479,7 @@ export class WorkspaceMembersPanel {
 
   async moveMember(memberId, direction) {
     const members = directMembers(this.group).slice();
-    const i = members.findIndex((m) => m && m.id === memberId);
+    const i = members.findIndex(m => m && m.id === memberId);
     const j = direction === 'up' ? i - 1 : i + 1;
     if (i < 0 || j < 0 || j >= members.length) return;
     [members[i], members[j]] = [members[j], members[i]];
@@ -437,7 +487,12 @@ export class WorkspaceMembersPanel {
     try {
       // Persist a sequential order_index for the new order.
       for (let k = 0; k < members.length; k += 1) {
-        await this.sendJson(`/api/workspaces/${encodeURIComponent(members[k].id)}`, 'PATCH', { order_index: k + 1 }, 'Failed to reorder members');
+        await this.sendJson(
+          `/api/workspaces/${encodeURIComponent(members[k].id)}`,
+          'PATCH',
+          { order_index: k + 1 },
+          'Failed to reorder members'
+        );
       }
       await this.reload();
     } catch (err) {
@@ -459,7 +514,10 @@ export class WorkspaceMembersPanel {
       return;
     }
     const options = targets
-      .map((t) => `<option value="${escapeHtml(t.id)}">${escapeHtml(t.name || t.id)}${isGroupNode(t) ? ' (group)' : ''}</option>`)
+      .map(
+        t =>
+          `<option value="${escapeHtml(t.id)}">${escapeHtml(t.name || t.id)}${isGroupNode(t) ? ' (group)' : ''}</option>`
+      )
       .join('');
     picker.innerHTML = `
       <div class="d-flex gap-2 align-items-center">
@@ -480,7 +538,12 @@ export class WorkspaceMembersPanel {
   async addMember(memberId) {
     if (!memberId) return;
     try {
-      await this.sendJson(`/api/workspaces/${encodeURIComponent(memberId)}`, 'PATCH', { parent_id: this.workspaceId }, 'Failed to add member');
+      await this.sendJson(
+        `/api/workspaces/${encodeURIComponent(memberId)}`,
+        'PATCH',
+        { parent_id: this.workspaceId },
+        'Failed to add member'
+      );
       if (this.els.picker) this.els.picker.hidden = true;
       await this.reload();
     } catch (err) {
@@ -513,7 +576,12 @@ export class WorkspaceMembersPanel {
       return;
     }
     try {
-      await this.sendJson('/api/workspaces', 'POST', { name, description, parent_id: this.workspaceId }, 'Failed to create workspace');
+      await this.sendJson(
+        '/api/workspaces',
+        'POST',
+        { name, description, parent_id: this.workspaceId },
+        'Failed to create workspace'
+      );
       this.closeCreateMember();
       await this.reload();
     } catch (err) {
@@ -537,7 +605,7 @@ export class WorkspaceMembersPanel {
     popover.className = 'workspace-group-color-popover';
     popover.setAttribute('role', 'group');
     popover.setAttribute('aria-label', 'Group color');
-    GROUP_COLOR_PRESETS.forEach((color) => {
+    GROUP_COLOR_PRESETS.forEach(color => {
       const isSelected = color === (this.group?.color || '');
       const btn = document.createElement('button');
       btn.type = 'button';
@@ -558,7 +626,12 @@ export class WorkspaceMembersPanel {
 
   async saveColor(color) {
     try {
-      await this.sendJson(`/api/workspaces/${encodeURIComponent(this.workspaceId)}`, 'PATCH', { color }, 'Failed to update group color');
+      await this.sendJson(
+        `/api/workspaces/${encodeURIComponent(this.workspaceId)}`,
+        'PATCH',
+        { color },
+        'Failed to update group color'
+      );
       const popover = document.getElementById('workspace-group-color-popover');
       if (popover) popover.remove();
       this.colorPopoverOpen = false;
@@ -573,28 +646,41 @@ export class WorkspaceMembersPanel {
 
   async loadNotesFiles() {
     if (!this.group) return;
-    const members = directMembers(this.group).filter((m) => !isGroupNode(m));
+    const members = directMembers(this.group).filter(m => !isGroupNode(m));
 
-    const noteResults = await Promise.allSettled(members.map(async (member) => {
-      const res = await fetch(`/api/workspaces/${encodeURIComponent(member.id)}/notes`);
-      if (!res.ok) throw new Error(`notes fetch failed: ${res.status}`);
-      const data = await res.json();
-      return (data.notes || []).map((note) => ({ ...note, __wsId: member.id, __wsName: member.name || member.id }));
-    }));
+    const noteResults = await Promise.allSettled(
+      members.map(async member => {
+        const res = await fetch(`/api/workspaces/${encodeURIComponent(member.id)}/notes`);
+        if (!res.ok) throw new Error(`notes fetch failed: ${res.status}`);
+        const data = await res.json();
+        return (data.notes || []).map(note => ({
+          ...note,
+          __wsId: member.id,
+          __wsName: member.name || member.id
+        }));
+      })
+    );
 
-    const fileResults = await Promise.allSettled(members.map(async (member) => {
-      const res = await fetch(`/api/workspaces/${encodeURIComponent(member.id)}`);
-      if (!res.ok) throw new Error(`files fetch failed: ${res.status}`);
-      const data = await res.json();
-      const attachments = data.attachments || (data.workspace && data.workspace.attachments) || [];
-      return extractFileItems(attachments).map((file) => ({ ...file, __wsId: member.id, __wsName: member.name || member.id }));
-    }));
+    const fileResults = await Promise.allSettled(
+      members.map(async member => {
+        const res = await fetch(`/api/workspaces/${encodeURIComponent(member.id)}`);
+        if (!res.ok) throw new Error(`files fetch failed: ${res.status}`);
+        const data = await res.json();
+        const attachments =
+          data.attachments || (data.workspace && data.workspace.attachments) || [];
+        return extractFileItems(attachments).map(file => ({
+          ...file,
+          __wsId: member.id,
+          __wsName: member.name || member.id
+        }));
+      })
+    );
 
     const notes = [];
     const files = [];
     let failures = 0;
-    noteResults.forEach((r) => (r.status === 'fulfilled' ? notes.push(...r.value) : (failures += 1)));
-    fileResults.forEach((r) => (r.status === 'fulfilled' ? files.push(...r.value) : (failures += 1)));
+    noteResults.forEach(r => (r.status === 'fulfilled' ? notes.push(...r.value) : (failures += 1)));
+    fileResults.forEach(r => (r.status === 'fulfilled' ? files.push(...r.value) : (failures += 1)));
 
     this.memberNotes = notes;
     this.memberFiles = files;
@@ -607,12 +693,14 @@ export class WorkspaceMembersPanel {
     const notes = this.memberNotes || [];
     const files = this.memberFiles || [];
 
-    const notesHtml = notes.length === 0
-      ? '<div class="group-detail-empty">No notes.</div>'
-      : `<div class="group-task-list" role="list">${notes.map((note) => this.noteRowHtml(note)).join('')}</div>`;
-    const filesHtml = files.length === 0
-      ? '<div class="group-detail-empty">No files.</div>'
-      : `<div class="group-task-list" role="list">${files.map((file) => this.fileRowHtml(file)).join('')}</div>`;
+    const notesHtml =
+      notes.length === 0
+        ? '<div class="group-detail-empty">No notes.</div>'
+        : `<div class="group-task-list" role="list">${notes.map(note => this.noteRowHtml(note)).join('')}</div>`;
+    const filesHtml =
+      files.length === 0
+        ? '<div class="group-detail-empty">No files.</div>'
+        : `<div class="group-task-list" role="list">${files.map(file => this.fileRowHtml(file)).join('')}</div>`;
 
     container.innerHTML = `
       ${this.notesFilesFailures > 0 ? '<div class="text-warning small mb-2" role="alert">Some members’ notes or files could not be loaded.</div>' : ''}
@@ -648,21 +736,25 @@ export class WorkspaceMembersPanel {
     if (!this.group) return;
 
     // Direct concrete workspace members only; sub-group tasks are excluded.
-    const members = directMembers(this.group).filter((m) => !isGroupNode(m));
-    const results = await Promise.allSettled(members.map(async (member) => {
-      const res = await fetch(`/api/orchestration/tasks?workspace_id=${encodeURIComponent(member.id)}`);
-      if (!res.ok) throw new Error(`tasks fetch failed: ${res.status}`);
-      const data = await res.json();
-      return (data.tasks || []).map((task) => ({
-        ...task,
-        __workspaceId: member.id,
-        __workspaceName: member.name || member.id,
-      }));
-    }));
+    const members = directMembers(this.group).filter(m => !isGroupNode(m));
+    const results = await Promise.allSettled(
+      members.map(async member => {
+        const res = await fetch(
+          `/api/orchestration/tasks?workspace_id=${encodeURIComponent(member.id)}`
+        );
+        if (!res.ok) throw new Error(`tasks fetch failed: ${res.status}`);
+        const data = await res.json();
+        return (data.tasks || []).map(task => ({
+          ...task,
+          __workspaceId: member.id,
+          __workspaceName: member.name || member.id
+        }));
+      })
+    );
 
     const all = [];
     let failures = 0;
-    results.forEach((r) => {
+    results.forEach(r => {
       if (r.status === 'fulfilled') all.push(...r.value);
       else failures += 1;
     });
@@ -674,33 +766,57 @@ export class WorkspaceMembersPanel {
     const container = document.getElementById('workspace-detail-members-tasks');
     if (!container) return;
 
-    const filtered = sortTasksForRollup(this.allTasks.filter((task) => taskMatchesFilters(task, this.taskFilters)));
+    const filtered = sortTasksForRollup(
+      this.allTasks.filter(task => taskMatchesFilters(task, this.taskFilters))
+    );
 
     container.innerHTML = `
       ${this.taskFiltersHtml()}
       ${this.taskLoadFailures > 0 ? '<div class="text-warning small mb-2" role="alert">Some members’ tasks could not be loaded.</div>' : ''}
-      ${filtered.length === 0
-        ? '<div class="group-detail-empty">No tasks match the current filters.</div>'
-        : `<div class="group-task-list" role="list">${filtered.map((task) => this.taskRowHtml(task)).join('')}</div>`}
+      ${
+        filtered.length === 0
+          ? '<div class="group-detail-empty">No tasks match the current filters.</div>'
+          : `<div class="group-task-list" role="list">${filtered.map(task => this.taskRowHtml(task)).join('')}</div>`
+      }
     `;
     this.bindTaskFilters();
   }
 
   taskFiltersHtml() {
-    const members = directMembers(this.group).filter((m) => !isGroupNode(m));
-    const statuses = ['pending', 'assigned', 'in_progress', 'waiting_for_choice', 'completed', 'failed', 'cancelled'];
-    const sel = (cond) => (cond ? ' selected' : '');
+    const members = directMembers(this.group).filter(m => !isGroupNode(m));
+    const statuses = [
+      'pending',
+      'assigned',
+      'in_progress',
+      'waiting_for_choice',
+      'completed',
+      'failed',
+      'cancelled'
+    ];
+    const sel = cond => (cond ? ' selected' : '');
     const statusOptions = [
       `<option value="default"${sel(this.taskFilters.status === 'default')}>Open + scheduled</option>`,
       `<option value="all"${sel(this.taskFilters.status === 'all')}>All statuses</option>`,
-      ...statuses.map((s) => `<option value="${s}"${sel(this.taskFilters.status === s)}>${s}</option>`),
+      ...statuses.map(
+        s => `<option value="${s}"${sel(this.taskFilters.status === s)}>${s}</option>`
+      )
     ].join('');
     const memberOptions = [
       `<option value="all"${sel(this.taskFilters.member === 'all')}>All members</option>`,
-      ...members.map((m) => `<option value="${escapeHtml(m.id)}"${sel(this.taskFilters.member === m.id)}>${escapeHtml(m.name || m.id)}</option>`),
+      ...members.map(
+        m =>
+          `<option value="${escapeHtml(m.id)}"${sel(this.taskFilters.member === m.id)}>${escapeHtml(m.name || m.id)}</option>`
+      )
     ].join('');
-    const dates = [['any', 'Any time'], ['today', 'Created today'], ['7d', 'Created last 7 days'], ['30d', 'Created last 30 days']];
-    const dateOptions = dates.map(([v, l]) => `<option value="${v}"${sel(this.taskFilters.dateRange === v)}>${l}</option>`).join('');
+    const dates = [
+      ['any', 'Any time'],
+      ['today', 'Created today'],
+      ['7d', 'Created last 7 days'],
+      ['30d', 'Created last 30 days']
+    ];
+    const dateOptions = dates
+      .map(([v, l]) => `<option value="${v}"${sel(this.taskFilters.dateRange === v)}>${l}</option>`)
+      .join('');
 
     return `
       <div class="group-task-filters d-flex gap-2 flex-wrap mb-2">
@@ -747,7 +863,7 @@ export class WorkspaceMembersPanel {
     const res = await fetch(url, {
       method,
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      body: JSON.stringify(body)
     });
     if (!res.ok) {
       const text = await res.text().catch(() => '');

@@ -96,7 +96,10 @@ export class RendererPanels {
 
     this.ctx.fillStyle = '#1f2937';
     this.ctx.font = '13px system-ui';
-    const descLines = this.primitives.wrapText(this.state.expandedTask.description || '', this.state.expandedPanelWidth - padding * 2);
+    const descLines = this.primitives.wrapText(
+      this.state.expandedTask.description || '',
+      this.state.expandedPanelWidth - padding * 2
+    );
     descLines.forEach(line => {
       this.ctx.fillText(line, contentX, currentY);
       currentY += 18;
@@ -106,7 +109,11 @@ export class RendererPanels {
     // Agents
     this.ctx.fillStyle = '#4b5563';
     this.ctx.font = '12px system-ui';
-    this.ctx.fillText(`From: ${this.state.expandedTask.from}  →  To: ${this.state.expandedTask.to}`, contentX, currentY);
+    this.ctx.fillText(
+      `From: ${this.state.expandedTask.from}  →  To: ${this.state.expandedTask.to}`,
+      contentX,
+      currentY
+    );
     currentY += 25;
 
     // Schedule section (if task has or can have a schedule)
@@ -147,7 +154,9 @@ export class RendererPanels {
       } else if (schedule.type === 'cron') {
         scheduleText = `Cron: ${schedule.cron_expr || '0 9 * * *'}`;
       } else if (schedule.type === 'once') {
-        scheduleText = schedule.execute_at ? `Once at ${new Date(schedule.execute_at).toLocaleString()}` : 'One-time';
+        scheduleText = schedule.execute_at
+          ? `Once at ${new Date(schedule.execute_at).toLocaleString()}`
+          : 'One-time';
       }
 
       this.ctx.fillStyle = '#1f2937';
@@ -200,7 +209,11 @@ export class RendererPanels {
       this.ctx.fillStyle = '#ffffff';
       this.ctx.font = 'bold 10px system-ui';
       this.ctx.textAlign = 'center';
-      this.ctx.fillText(scheduleEnabled ? 'Disable' : 'Enable', toggleBtnX + toggleBtnWidth / 2, toggleBtnY + 16);
+      this.ctx.fillText(
+        scheduleEnabled ? 'Disable' : 'Enable',
+        toggleBtnX + toggleBtnWidth / 2,
+        toggleBtnY + 16
+      );
       this.ctx.textAlign = 'left';
 
       // Store toggle button bounds
@@ -292,14 +305,22 @@ export class RendererPanels {
       this.ctx.fillStyle = '#eff6ff';
       this.ctx.strokeStyle = '#3b82f6';
       this.ctx.lineWidth = 2;
-      this.primitives.roundRect(contentX, currentY, this.state.expandedPanelWidth - padding * 2, progressBoxHeight, 6);
+      this.primitives.roundRect(
+        contentX,
+        currentY,
+        this.state.expandedPanelWidth - padding * 2,
+        progressBoxHeight,
+        6
+      );
       this.ctx.fill();
       this.ctx.stroke();
 
       let progressY = currentY + 20;
 
       // Percentage or indeterminate
-      const hasProgress = this.state.expandedTask.progress && this.state.expandedTask.progress.percentage !== undefined;
+      const hasProgress =
+        this.state.expandedTask.progress &&
+        this.state.expandedTask.progress.percentage !== undefined;
       if (hasProgress) {
         const percentage = this.state.expandedTask.progress.percentage;
 
@@ -330,7 +351,10 @@ export class RendererPanels {
         if (this.state.expandedTask.progress.current_step) {
           this.ctx.fillStyle = '#1e3a8a';
           this.ctx.font = '11px system-ui';
-          const stepLines = this.primitives.wrapText(this.state.expandedTask.progress.current_step, this.state.expandedPanelWidth - padding * 2 - 40);
+          const stepLines = this.primitives.wrapText(
+            this.state.expandedTask.progress.current_step,
+            this.state.expandedPanelWidth - padding * 2 - 40
+          );
           stepLines.forEach(line => {
             this.ctx.fillText(line, contentX + 20, progressY);
             progressY += 14;
@@ -404,7 +428,11 @@ export class RendererPanels {
       this.ctx.font = 'bold 11px system-ui';
       this.ctx.textAlign = 'center';
       const buttonText = this.state.copyButtonState === 'copied' ? '✓ Copied!' : '📋 Copy';
-      this.ctx.fillText(buttonText, copyButtonX + copyButtonWidth / 2, copyButtonY + copyButtonHeight / 2 + 4);
+      this.ctx.fillText(
+        buttonText,
+        copyButtonX + copyButtonWidth / 2,
+        copyButtonY + copyButtonHeight / 2 + 4
+      );
       this.ctx.textAlign = 'left';
 
       currentY += 25;
@@ -432,14 +460,20 @@ export class RendererPanels {
       // Result text with scrolling
       this.ctx.fillStyle = '#065f46';
       this.ctx.font = '11px monospace';
-      const resultLines = this.primitives.wrapText(this.state.expandedTask.result, resultBoxWidth - 40); // Extra padding for scrollbar
+      const resultLines = this.primitives.wrapText(
+        this.state.expandedTask.result,
+        resultBoxWidth - 40
+      ); // Extra padding for scrollbar
       const lineHeight = 14;
       const visibleLines = Math.floor((resultBoxHeight - 20) / lineHeight);
       const totalLines = resultLines.length;
 
       // Clamp scroll offset
       const maxScroll = Math.max(0, totalLines - visibleLines);
-      this.state.resultScrollOffset = Math.max(0, Math.min(this.state.resultScrollOffset, maxScroll));
+      this.state.resultScrollOffset = Math.max(
+        0,
+        Math.min(this.state.resultScrollOffset, maxScroll)
+      );
 
       // Enable clipping to prevent text overflow
       this.ctx.save();
@@ -452,7 +486,11 @@ export class RendererPanels {
       const endLine = Math.min(startLine + visibleLines + 1, totalLines);
 
       resultLines.slice(startLine, endLine).forEach((line, i) => {
-        const yPos = resultBoxY + 15 + (i * lineHeight) - ((this.state.resultScrollOffset - startLine) * lineHeight);
+        const yPos =
+          resultBoxY +
+          15 +
+          i * lineHeight -
+          (this.state.resultScrollOffset - startLine) * lineHeight;
         this.ctx.fillText(line, contentX + 10, yPos);
       });
 
@@ -462,15 +500,28 @@ export class RendererPanels {
       if (totalLines > visibleLines) {
         const scrollbarWidth = 8;
         const scrollbarHeight = (visibleLines / totalLines) * (resultBoxHeight - 20);
-        const scrollbarY = resultBoxY + 10 + (this.state.resultScrollOffset / maxScroll) * (resultBoxHeight - 20 - scrollbarHeight);
+        const scrollbarY =
+          resultBoxY +
+          10 +
+          (this.state.resultScrollOffset / maxScroll) * (resultBoxHeight - 20 - scrollbarHeight);
 
         // Scrollbar track
         this.ctx.fillStyle = 'rgba(16, 185, 129, 0.1)';
-        this.ctx.fillRect(contentX + resultBoxWidth - scrollbarWidth - 5, resultBoxY + 10, scrollbarWidth, resultBoxHeight - 20);
+        this.ctx.fillRect(
+          contentX + resultBoxWidth - scrollbarWidth - 5,
+          resultBoxY + 10,
+          scrollbarWidth,
+          resultBoxHeight - 20
+        );
 
         // Scrollbar thumb
         this.ctx.fillStyle = 'rgba(16, 185, 129, 0.5)';
-        this.ctx.fillRect(contentX + resultBoxWidth - scrollbarWidth - 5, scrollbarY, scrollbarWidth, scrollbarHeight);
+        this.ctx.fillRect(
+          contentX + resultBoxWidth - scrollbarWidth - 5,
+          scrollbarY,
+          scrollbarWidth,
+          scrollbarHeight
+        );
       }
     } else if (this.state.expandedTask.error) {
       this.state.resultBoxBounds = null;
@@ -482,7 +533,10 @@ export class RendererPanels {
 
       this.ctx.fillStyle = '#7f1d1d';
       this.ctx.font = '11px monospace';
-      const errorLines = this.primitives.wrapText(this.state.expandedTask.error, this.state.expandedPanelWidth - padding * 2);
+      const errorLines = this.primitives.wrapText(
+        this.state.expandedTask.error,
+        this.state.expandedPanelWidth - padding * 2
+      );
       errorLines.slice(0, 10).forEach(line => {
         this.ctx.fillText(line, contentX, currentY);
         currentY += 14;
@@ -511,7 +565,10 @@ export class RendererPanels {
     const panelHeight = this.canvas.height;
 
     // Debug: Log once when panel width reaches target
-    if (this.state.expandedAgentPanelWidth === this.state.expandedAgentPanelTargetWidth && !this.state._panelDrawnLogged) {
+    if (
+      this.state.expandedAgentPanelWidth === this.state.expandedAgentPanelTargetWidth &&
+      !this.state._panelDrawnLogged
+    ) {
       this.state._panelDrawnLogged = true;
     }
 
@@ -605,14 +662,16 @@ export class RendererPanels {
       const resultText = this.state.expandedAgent.lastResult.toString();
 
       // Wrap text for long results
-      
+
       const resultLines = this.primitives.wrapText(resultText, resultBoxWidth - 20);
       const resultBoxHeight = Math.max(60, resultLines.length * 18 + 20);
 
       // Background gradient
       const gradient = this.ctx.createLinearGradient(
-        contentX, currentY,
-        contentX, currentY + resultBoxHeight
+        contentX,
+        currentY,
+        contentX,
+        currentY + resultBoxHeight
       );
       gradient.addColorStop(0, 'rgba(16, 185, 129, 0.1)');
       gradient.addColorStop(1, 'rgba(5, 150, 105, 0.15)');
@@ -642,8 +701,16 @@ export class RendererPanels {
 
     // Statistics grid
     const stats = [
-      { label: 'Current Tasks', value: this.state.expandedAgent.currentTasks?.length || 0, color: '#10b981' },
-      { label: 'Queued Tasks', value: this.state.expandedAgent.queuedTasks?.length || 0, color: '#3b82f6' },
+      {
+        label: 'Current Tasks',
+        value: this.state.expandedAgent.currentTasks?.length || 0,
+        color: '#10b981'
+      },
+      {
+        label: 'Queued Tasks',
+        value: this.state.expandedAgent.queuedTasks?.length || 0,
+        color: '#3b82f6'
+      },
       { label: 'Completed', value: this.state.expandedAgent.completedTasks || 0, color: '#6b7280' },
       { label: 'Failed', value: this.state.expandedAgent.failedTasks || 0, color: '#ef4444' }
     ];
@@ -751,15 +818,24 @@ export class RendererPanels {
       // Calculate height based on actual content (now showing ALL lines)
       this.ctx.fillStyle = '#7c2d12';
       this.ctx.font = '10px system-ui';
-      const promptLines = this.primitives.wrapText(this.state.expandedAgent.config.system_prompt, this.state.expandedAgentPanelWidth - padding * 2 - 20);
+      const promptLines = this.primitives.wrapText(
+        this.state.expandedAgent.config.system_prompt,
+        this.state.expandedAgentPanelWidth - padding * 2 - 20
+      );
       const lineHeight = 13;
-      const promptBoxHeight = Math.max(60, 15 + (promptLines.length * lineHeight) + 15); // top padding + lines + bottom padding
+      const promptBoxHeight = Math.max(60, 15 + promptLines.length * lineHeight + 15); // top padding + lines + bottom padding
 
       // Draw box
       this.ctx.fillStyle = '#fff7ed';
       this.ctx.strokeStyle = '#ea580c';
       this.ctx.lineWidth = 2;
-      this.primitives.roundRect(contentX, promptBoxY, this.state.expandedAgentPanelWidth - padding * 2, promptBoxHeight, 6);
+      this.primitives.roundRect(
+        contentX,
+        promptBoxY,
+        this.state.expandedAgentPanelWidth - padding * 2,
+        promptBoxHeight,
+        6
+      );
       this.ctx.fill();
       this.ctx.stroke();
 
@@ -816,14 +892,23 @@ export class RendererPanels {
           this.ctx.fillStyle = '#f0fdf4';
           this.ctx.strokeStyle = '#10b981';
           this.ctx.lineWidth = 1;
-          this.primitives.roundRect(contentX, taskBoxY, this.state.expandedAgentPanelWidth - padding * 2, taskBoxHeight, 6);
+          this.primitives.roundRect(
+            contentX,
+            taskBoxY,
+            this.state.expandedAgentPanelWidth - padding * 2,
+            taskBoxHeight,
+            6
+          );
           this.ctx.fill();
           this.ctx.stroke();
 
           // Task description (truncated)
           this.ctx.fillStyle = '#065f46';
           this.ctx.font = '11px system-ui';
-          const desc = task.description.length > 35 ? task.description.substring(0, 32) + '...' : task.description;
+          const desc =
+            task.description.length > 35
+              ? task.description.substring(0, 32) + '...'
+              : task.description;
           this.ctx.fillText(desc, contentX + 8, taskBoxY + 15);
 
           // Task status
@@ -838,7 +923,11 @@ export class RendererPanels {
       if (this.state.expandedAgent.tasks.length > maxTasksToShow) {
         this.ctx.fillStyle = '#6b7280';
         this.ctx.font = 'italic 10px system-ui';
-        this.ctx.fillText(`... and ${this.state.expandedAgent.tasks.length - maxTasksToShow} more`, contentX, currentY + 5);
+        this.ctx.fillText(
+          `... and ${this.state.expandedAgent.tasks.length - maxTasksToShow} more`,
+          contentX,
+          currentY + 5
+        );
         currentY += 20;
       }
     }
@@ -855,14 +944,22 @@ export class RendererPanels {
     this.state.agentPanelMaxScroll = maxScroll; // Store for wheel event handler
 
     // Clamp scroll offset
-    this.state.agentPanelScrollOffset = Math.max(0, Math.min(this.state.agentPanelScrollOffset, maxScroll));
+    this.state.agentPanelScrollOffset = Math.max(
+      0,
+      Math.min(this.state.agentPanelScrollOffset, maxScroll)
+    );
 
     // Draw scrollbar if content is scrollable
     if (maxScroll > 0) {
       const scrollbarWidth = 6;
       const scrollbarX = panelX + this.state.expandedAgentPanelWidth - padding / 2 - scrollbarWidth;
-      const scrollbarHeight = Math.max(30, (scrollableHeight / totalContentHeight) * scrollableHeight);
-      const scrollbarY = scrollableStartY + (this.state.agentPanelScrollOffset / maxScroll) * (scrollableHeight - scrollbarHeight);
+      const scrollbarHeight = Math.max(
+        30,
+        (scrollableHeight / totalContentHeight) * scrollableHeight
+      );
+      const scrollbarY =
+        scrollableStartY +
+        (this.state.agentPanelScrollOffset / maxScroll) * (scrollableHeight - scrollbarHeight);
 
       this.ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
       this.primitives.roundRect(scrollbarX, scrollbarY, scrollbarWidth, scrollbarHeight, 3);
@@ -909,7 +1006,11 @@ export class RendererPanels {
 
     this.ctx.fillStyle = '#6b7280';
     this.ctx.font = '12px system-ui';
-    this.ctx.fillText(`Mode: ${this.state.expandedCombiner.resultCombinationMode || 'merge'}`, panelX + padding, currentY);
+    this.ctx.fillText(
+      `Mode: ${this.state.expandedCombiner.resultCombinationMode || 'merge'}`,
+      panelX + padding,
+      currentY
+    );
     currentY += 22;
 
     // Inputs section
@@ -918,7 +1019,9 @@ export class RendererPanels {
     this.ctx.fillText('Inputs', panelX + padding, currentY);
     currentY += 18;
 
-    const inputConnections = this.state.connections.filter(c => c.to === this.state.expandedCombiner.id);
+    const inputConnections = this.state.connections.filter(
+      c => c.to === this.state.expandedCombiner.id
+    );
     if (inputConnections.length === 0) {
       this.ctx.fillStyle = '#9ca3af';
       this.ctx.font = '12px system-ui';
@@ -929,7 +1032,11 @@ export class RendererPanels {
         const source = this.parent.getNodeById(conn.from);
         this.ctx.fillStyle = '#2563eb';
         this.ctx.font = 'bold 12px system-ui';
-        this.ctx.fillText(source?.node?.description || source?.node?.name || conn.from, panelX + padding, currentY);
+        this.ctx.fillText(
+          source?.node?.description || source?.node?.name || conn.from,
+          panelX + padding,
+          currentY
+        );
         currentY += 16;
       });
     }
@@ -950,7 +1057,10 @@ export class RendererPanels {
     currentY += 18;
 
     const combinedText = this.parent.buildCombinerResultPreview(this.state.expandedCombiner);
-    const textLines = this.primitives.wrapText(combinedText || 'No results yet', this.state.expandedCombinerPanelWidth - padding * 2);
+    const textLines = this.primitives.wrapText(
+      combinedText || 'No results yet',
+      this.state.expandedCombinerPanelWidth - padding * 2
+    );
 
     this.ctx.fillStyle = combinedText ? '#111827' : '#9ca3af';
     this.ctx.font = '12px system-ui';
@@ -1027,7 +1137,12 @@ export class RendererPanels {
     const visibleEvents = this.state.timelineEvents.slice(0, maxVisibleEvents);
 
     visibleEvents.forEach((event, index) => {
-      this.drawTimelineEvent(event, contentX, currentY, this.state.timelinePanelWidth - padding * 2);
+      this.drawTimelineEvent(
+        event,
+        contentX,
+        currentY,
+        this.state.timelinePanelWidth - padding * 2
+      );
       currentY += 70;
     });
 
@@ -1077,7 +1192,11 @@ export class RendererPanels {
     this.ctx.font = '13px system-ui';
     this.ctx.textAlign = 'center';
     this.ctx.fillText('No activity yet', panelX + this.state.timelinePanelWidth / 2, currentY);
-    this.ctx.fillText('Events will appear here', panelX + this.state.timelinePanelWidth / 2, currentY + 20);
+    this.ctx.fillText(
+      'Events will appear here',
+      panelX + this.state.timelinePanelWidth / 2,
+      currentY + 20
+    );
 
     this.ctx.restore();
   }
@@ -1113,5 +1232,4 @@ export class RendererPanels {
       this.ctx.fillText(`Agent: ${event.data.agent}`, x + 30, y + 54);
     }
   }
-
 }

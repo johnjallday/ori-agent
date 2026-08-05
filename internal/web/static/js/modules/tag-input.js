@@ -43,7 +43,10 @@ export function normalizeTagList(tags, options = {}) {
 
   const overlong = normalized.find(tag => Array.from(tag).length > maxTagLength);
   if (overlong) {
-    return { tags: normalized, error: `"${overlong}" exceeds the ${maxTagLength} character limit.` };
+    return {
+      tags: normalized,
+      error: `"${overlong}" exceeds the ${maxTagLength} character limit.`
+    };
   }
   if (normalized.length > maxTags) {
     return { tags: normalized, error: `At most ${maxTags} tags are allowed.` };

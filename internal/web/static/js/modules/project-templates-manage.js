@@ -98,7 +98,8 @@ function ptmBuildRow(template) {
   title.appendChild(nameSpan);
   const idSpan = document.createElement('span');
   idSpan.textContent = ` ${template.id}`;
-  idSpan.style.cssText = 'font-size: 11px; color: var(--text-secondary); font-family: var(--font-mono, monospace);';
+  idSpan.style.cssText =
+    'font-size: 11px; color: var(--text-secondary); font-family: var(--font-mono, monospace);';
   title.appendChild(idSpan);
   info.appendChild(title);
 
@@ -114,10 +115,12 @@ function ptmBuildRow(template) {
   actions.className = 'd-flex gap-2';
   actions.style.whiteSpace = 'nowrap';
   actions.appendChild(ptmActionButton('Reveal', () => ptmReveal(template.id)));
-  actions.appendChild(ptmActionButton('Edit', () => {
-    projectTemplatesManageState.editingId = template.id;
-    ptmRenderList();
-  }));
+  actions.appendChild(
+    ptmActionButton('Edit', () => {
+      projectTemplatesManageState.editingId = template.id;
+      ptmRenderList();
+    })
+  );
   actions.appendChild(ptmActionButton('Delete', () => ptmDelete(template), true));
   row.appendChild(actions);
   return row;
@@ -131,7 +134,7 @@ function ptmBuildEditRow(template) {
   const nameInput = document.createElement('input');
   nameInput.className = 'modern-input w-100';
   nameInput.placeholder = `Display name (defaults to ${template.id})`;
-  nameInput.value = template.name === template.id ? '' : (template.name || '');
+  nameInput.value = template.name === template.id ? '' : template.name || '';
   const descInput = document.createElement('input');
   descInput.className = 'modern-input w-100';
   descInput.placeholder = 'Description';
@@ -143,24 +146,31 @@ function ptmBuildEditRow(template) {
   const actions = document.createElement('div');
   actions.className = 'd-flex gap-2';
   actions.style.whiteSpace = 'nowrap';
-  actions.appendChild(ptmActionButton('Save', async () => {
-    try {
-      await ptmFetchJSON(`/api/project-templates/${encodeURIComponent(template.id)}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: nameInput.value.trim(), description: descInput.value.trim() })
-      });
+  actions.appendChild(
+    ptmActionButton('Save', async () => {
+      try {
+        await ptmFetchJSON(`/api/project-templates/${encodeURIComponent(template.id)}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: nameInput.value.trim(),
+            description: descInput.value.trim()
+          })
+        });
+        projectTemplatesManageState.editingId = '';
+        await ptmRefresh();
+        ptmNotifyChanged();
+      } catch (error) {
+        ptmToast(error.message || 'Failed to update template', 'error');
+      }
+    })
+  );
+  actions.appendChild(
+    ptmActionButton('Cancel', () => {
       projectTemplatesManageState.editingId = '';
-      await ptmRefresh();
-      ptmNotifyChanged();
-    } catch (error) {
-      ptmToast(error.message || 'Failed to update template', 'error');
-    }
-  }));
-  actions.appendChild(ptmActionButton('Cancel', () => {
-    projectTemplatesManageState.editingId = '';
-    ptmRenderList();
-  }));
+      ptmRenderList();
+    })
+  );
   row.appendChild(actions);
   return row;
 }
@@ -190,11 +200,15 @@ async function ptmReveal(id) {
 
 async function ptmDelete(template) {
   const label = template.name || template.id;
-  if (!window.confirm(`Delete the template "${label}"? It will be moved to the Trash when possible.`)) {
+  if (
+    !window.confirm(`Delete the template "${label}"? It will be moved to the Trash when possible.`)
+  ) {
     return;
   }
   try {
-    const result = await ptmFetchJSON(`/api/project-templates/${encodeURIComponent(template.id)}`, { method: 'DELETE' });
+    const result = await ptmFetchJSON(`/api/project-templates/${encodeURIComponent(template.id)}`, {
+      method: 'DELETE'
+    });
     ptmToast(result.trashed ? `"${label}" moved to Trash.` : `"${label}" deleted.`, 'success');
     await ptmRefresh();
     ptmNotifyChanged();
@@ -227,7 +241,8 @@ async function ptmImport() {
 }
 
 function ptmOpenModal(options) {
-  projectTemplatesManageState.onChanged = options && typeof options.onChanged === 'function' ? options.onChanged : null;
+  projectTemplatesManageState.onChanged =
+    options && typeof options.onChanged === 'function' ? options.onChanged : null;
   projectTemplatesManageState.editingId = '';
   const modalElement = document.getElementById('projectTemplatesManageModal');
   if (!modalElement) {
@@ -276,7 +291,12 @@ async function ptmSettingsLoad() {
     const state = await ptmFetchJSON('/api/settings/templates-root');
     input.value = state.templates_root || '';
     if (statusText) {
-      const sourceLabel = { settings: 'custom directory', environment: 'environment variable', default: 'built-in default' }[state.source] || state.source;
+      const sourceLabel =
+        {
+          settings: 'custom directory',
+          environment: 'environment variable',
+          default: 'built-in default'
+        }[state.source] || state.source;
       statusText.textContent = `Using ${sourceLabel}`;
     }
     if (statusDetails) statusDetails.textContent = state.effective_templates_root || '';
@@ -395,22 +415,25 @@ function ptcGetSelectedTemplate() {
 
 function ptcEmitSelection() {
   const modal = document.getElementById('addFolderModal');
-  modal?.dispatchEvent(new CustomEvent('workspace-template-selected', {
-    detail: { template: ptcSelected }
-  }));
+  modal?.dispatchEvent(
+    new CustomEvent('workspace-template-selected', {
+      detail: { template: ptcSelected }
+    })
+  );
 }
 
 // Double-click on a blueprint: select it, then ask the wizard to advance to the
 // Construct step (the host listens for this on #addFolderModal).
 function ptcEmitAdvance() {
-  document.getElementById('addFolderModal')
+  document
+    .getElementById('addFolderModal')
     ?.dispatchEvent(new CustomEvent('workspace-template-advance'));
 }
 
 function ptcMarkSelectedAcross(selectedEl) {
   const els = ptcElements();
-  [els.grid, els.userList].forEach((container) => {
-    container?.querySelectorAll('.workspace-template-card, .workspace-template-row').forEach((el) => {
+  [els.grid, els.userList].forEach(container => {
+    container?.querySelectorAll('.workspace-template-card, .workspace-template-row').forEach(el => {
       const on = el === selectedEl;
       el.classList.toggle('is-selected', on);
       el.setAttribute('aria-checked', on ? 'true' : 'false');
@@ -452,7 +475,10 @@ function ptcCard(template) {
     card.append(tagline);
   }
   card.addEventListener('click', () => ptcSelect(template, card));
-  card.addEventListener('dblclick', () => { ptcSelect(template, card); ptcEmitAdvance(); });
+  card.addEventListener('dblclick', () => {
+    ptcSelect(template, card);
+    ptcEmitAdvance();
+  });
   return card;
 }
 
@@ -472,7 +498,10 @@ function ptcRow(template) {
   label.textContent = template.name || template.id;
   row.append(icon, label);
   row.addEventListener('click', () => ptcSelect(template, row));
-  row.addEventListener('dblclick', () => { ptcSelect(template, row); ptcEmitAdvance(); });
+  row.addEventListener('dblclick', () => {
+    ptcSelect(template, row);
+    ptcEmitAdvance();
+  });
   return row;
 }
 
@@ -496,9 +525,7 @@ function ptcUpdateUI() {
   );
   if (els.openAfterCreate) els.openAfterCreate.hidden = !hasEntry;
   if (els.openAfterCreateToggle) {
-    els.openAfterCreateToggle.checked = hasEntry
-      ? Boolean(entry.open_after_create_default)
-      : false;
+    els.openAfterCreateToggle.checked = hasEntry ? Boolean(entry.open_after_create_default) : false;
   }
 }
 
@@ -514,11 +541,7 @@ function ptcRenderBriefing(els, importMode, templatePath) {
   // A meaningful briefing needs a real, non-Blank template with no ad-hoc
   // folder override and outside import mode (which hides the picker entirely).
   const showBriefing = Boolean(
-    !importMode &&
-    !templatePath &&
-    template &&
-    !template.blank &&
-    template.id
+    !importMode && !templatePath && template && !template.blank && template.id
   );
 
   const description = showBriefing ? String(template.description || '').trim() : '';
@@ -530,11 +553,13 @@ function ptcRenderBriefing(els, importMode, templatePath) {
 
   const agentSpecs = showBriefing && Array.isArray(template.agents) ? template.agents : [];
   const briefingAgents = agentSpecs
-    .map((a) => ({
+    .map(a => ({
       name: String(a?.name || '').trim(),
-      role: String(a?.role || '').trim().toLowerCase()
+      role: String(a?.role || '')
+        .trim()
+        .toLowerCase()
     }))
-    .filter((a) => a.name);
+    .filter(a => a.name);
   const showAgents = briefingAgents.length > 0;
   if (els.briefingAgentsRow) els.briefingAgentsRow.hidden = !showAgents;
   if (els.briefingAgentsValue) {
@@ -549,9 +574,12 @@ function ptcRenderBriefing(els, importMode, templatePath) {
       if (agent.role) chip.dataset.role = agent.role;
       // Commander-slot label (PRD FR21/FR22): "Commander" when this agent's
       // own role is orchestrator, "Acting Commander" otherwise.
-      const commanderLabel = String(agent.role || '').trim().toLowerCase() === 'orchestrator'
-        ? 'Commander'
-        : 'Acting Commander';
+      const commanderLabel =
+        String(agent.role || '')
+          .trim()
+          .toLowerCase() === 'orchestrator'
+          ? 'Commander'
+          : 'Acting Commander';
       const roleLabel = isEntry
         ? `${commanderLabel}${agent.role ? ` · ${agent.role}` : ''}`
         : agent.role;
@@ -569,7 +597,7 @@ function ptcRenderBriefing(els, importMode, templatePath) {
   // selectable and creatable either way; this only informs the choice.
   if (els.briefingNoCommanderNudge) {
     const needsNudge =
-      briefingAgents.length >= 3 && !briefingAgents.some((a) => a.role === 'orchestrator');
+      briefingAgents.length >= 3 && !briefingAgents.some(a => a.role === 'orchestrator');
     els.briefingNoCommanderNudge.hidden = !needsNudge;
   }
 
@@ -579,9 +607,10 @@ function ptcRenderBriefing(els, importMode, templatePath) {
     els.briefingScaffoldValue.textContent = 'Scaffolds a starter project folder';
   }
 
-  const addons = showBriefing && Array.isArray(template.addons)
-    ? template.addons.map((a) => String(a || '').trim()).filter(Boolean)
-    : [];
+  const addons =
+    showBriefing && Array.isArray(template.addons)
+      ? template.addons.map(a => String(a || '').trim()).filter(Boolean)
+      : [];
   const showAddons = addons.length > 0;
   if (els.briefingAddonsRow) els.briefingAddonsRow.hidden = !showAddons;
   if (els.briefingAddonsList) {
@@ -604,9 +633,7 @@ function ptcRenderBriefing(els, importMode, templatePath) {
 function ptcShouldOpenAfterCreate() {
   const els = ptcElements();
   return Boolean(
-    els.openAfterCreate &&
-    !els.openAfterCreate.hidden &&
-    els.openAfterCreateToggle?.checked
+    els.openAfterCreate && !els.openAfterCreate.hidden && els.openAfterCreateToggle?.checked
   );
 }
 
@@ -649,8 +676,8 @@ async function ptcPopulate() {
   try {
     const data = await ptmFetchJSON('/api/project-templates');
     const templates = Array.isArray(data.templates) ? data.templates : [];
-    const builtins = templates.filter((t) => t && t.id && t.builtin);
-    const userTemplates = templates.filter((t) => t && t.id && !t.builtin);
+    const builtins = templates.filter(t => t && t.id && t.builtin);
+    const userTemplates = templates.filter(t => t && t.id && !t.builtin);
 
     for (const template of builtins) {
       els.grid.appendChild(ptcCard(template));
@@ -669,7 +696,8 @@ async function ptcPopulate() {
   } catch (error) {
     console.error('Failed to load project templates:', error);
     if (els.emptyHint) {
-      els.emptyHint.textContent = 'Could not load the template library. You can still use any folder in Advanced as a template.';
+      els.emptyHint.textContent =
+        'Could not load the template library. You can still use any folder in Advanced as a template.';
       els.emptyHint.hidden = false;
     }
   }
@@ -766,7 +794,8 @@ function ptmInitListeners() {
   if (detailManageBtn) {
     detailManageBtn.addEventListener('click', () => {
       ptmOpenModal({
-        onChanged: () => document.getElementById('workspace-detail-project-template-refresh')?.click()
+        onChanged: () =>
+          document.getElementById('workspace-detail-project-template-refresh')?.click()
       });
     });
   }
@@ -794,7 +823,9 @@ function ptmInitListeners() {
         ptmToast(error.message || 'Failed to open folder picker', 'error');
       }
     });
-    document.getElementById('openTemplatesRootBtn')?.addEventListener('click', () => void ptmReveal(''));
+    document
+      .getElementById('openTemplatesRootBtn')
+      ?.addEventListener('click', () => void ptmReveal(''));
     document.getElementById('manageTemplatesBtn')?.addEventListener('click', () => {
       ptmOpenModal({ onChanged: null });
     });

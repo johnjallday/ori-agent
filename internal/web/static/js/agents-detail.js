@@ -13,8 +13,12 @@ let profileSelectedTags = [];
 let profileAvatarImage = null;
 
 function supportsCodexReasoning(providerName, modelName) {
-  const provider = String(providerName || '').trim().toLowerCase();
-  const model = String(modelName || '').trim().toLowerCase();
+  const provider = String(providerName || '')
+    .trim()
+    .toLowerCase();
+  const model = String(modelName || '')
+    .trim()
+    .toLowerCase();
   return provider === 'codex' || model.includes('codex');
 }
 
@@ -36,10 +40,11 @@ function updateEditReasoningVisibility() {
   }
 
   const selectedOption = modelSelect.selectedOptions?.[0];
-  const provider = selectedOption?.getAttribute('data-provider')
-    || providerFilter?.value
-    || currentAgent?.provider
-    || '';
+  const provider =
+    selectedOption?.getAttribute('data-provider') ||
+    providerFilter?.value ||
+    currentAgent?.provider ||
+    '';
   const show = supportsCodexReasoning(provider, modelSelect.value);
 
   field.style.display = show ? '' : 'none';
@@ -137,7 +142,9 @@ function getAgentNameFromURL() {
 }
 
 function normalizeAgentLookupToken(value) {
-  return String(value || '').trim().toLowerCase();
+  return String(value || '')
+    .trim()
+    .toLowerCase();
 }
 
 function isAgentNotFoundError(error) {
@@ -146,7 +153,7 @@ function isAgentNotFoundError(error) {
 
 function flattenWorkspaceRecords(items, output = []) {
   const list = Array.isArray(items) ? items : [];
-  list.forEach((item) => {
+  list.forEach(item => {
     if (!item || typeof item !== 'object') return;
     output.push(item);
     if (Array.isArray(item.children) && item.children.length > 0) {
@@ -167,7 +174,8 @@ function findMissingAgentWorkspaceMatch(workspace, requestedAgentName) {
     return null;
   }
 
-  const workspaceName = String(workspace.name || 'Untitled Workspace').trim() || 'Untitled Workspace';
+  const workspaceName =
+    String(workspace.name || 'Untitled Workspace').trim() || 'Untitled Workspace';
   const directEntryName = String(workspace.entry_agent_name || '').trim();
   const sharedEntryName = String(workspace?.shared_data?.entry_agent_name || '').trim();
   if (normalizeAgentLookupToken(directEntryName) === target) {
@@ -202,7 +210,7 @@ function findMissingAgentWorkspaceMatch(workspace, requestedAgentName) {
   }
 
   const agents = Array.isArray(workspace.agents) ? workspace.agents : [];
-  if (agents.some((name) => normalizeAgentLookupToken(name) === target)) {
+  if (agents.some(name => normalizeAgentLookupToken(name) === target)) {
     return {
       workspaceId,
       workspaceName,
@@ -246,7 +254,7 @@ async function loadMissingAgentWorkspaceRecovery(requestedAgentName) {
     const payload = await response.json();
     const workspaces = flattenWorkspaceRecords(payload.workspaces || payload.folders || []);
     const matches = workspaces
-      .map((workspace) => findMissingAgentWorkspaceMatch(workspace, requestedName))
+      .map(workspace => findMissingAgentWorkspaceMatch(workspace, requestedName))
       .filter(Boolean)
       .sort((a, b) => scoreMissingAgentWorkspaceMatch(b) - scoreMissingAgentWorkspaceMatch(a));
 
@@ -298,18 +306,20 @@ async function showMissingAgentState(message) {
   const normalizedMessage = String(message || '').trim();
   const fallbackBody = isAgentNotFoundError(normalizedMessage)
     ? genericMessage
-    : (normalizedMessage || genericMessage);
+    : normalizedMessage || genericMessage;
 
   let title = 'Agent not found';
   let body = fallbackBody;
-  let detail = 'Return to the agents directory or open the relevant workspace to repair the missing reference.';
+  let detail =
+    'Return to the agents directory or open the relevant workspace to repair the missing reference.';
 
   if (recovery?.workspaceId && recovery.isEntryAgent) {
     title = 'Workspace Commander is missing';
     body = requestedName
       ? `"${requestedName}" is still referenced as the Commander for "${recovery.workspaceName}", but the runnable agent definition no longer exists.`
       : `The Commander for "${recovery.workspaceName}" no longer exists.`;
-    detail = 'Create a replacement Commander to restore workspace routing, chats, and task execution. You can also open the workspace first to inspect the current configuration.';
+    detail =
+      'Create a replacement Commander to restore workspace routing, chats, and task execution. You can also open the workspace first to inspect the current configuration.';
   } else if (recovery?.workspaceId) {
     body = requestedName
       ? `"${requestedName}" is still referenced inside "${recovery.workspaceName}", but the runnable agent definition no longer exists.`
@@ -343,12 +353,16 @@ async function showMissingAgentState(message) {
 
     if (metaItems.length > 0) {
       metaEl.style.display = 'flex';
-      metaEl.innerHTML = metaItems.map((item) => `
+      metaEl.innerHTML = metaItems
+        .map(
+          item => `
         <span class="agent-missing-chip">
           <span class="agent-missing-chip-label">${escapeHtml(item.label)}</span>
           <span>${escapeHtml(item.value)}</span>
         </span>
-      `).join('');
+      `
+        )
+        .join('');
     } else {
       metaEl.style.display = 'none';
       metaEl.innerHTML = '';
@@ -430,7 +444,7 @@ function populateEditModelOptions() {
   }
 
   const selectedProvider = providerFilter ? providerFilter.value : '';
-  const selectedAgentType = typeSelect ? typeSelect.value : (currentAgent?.type || 'tool-calling');
+  const selectedAgentType = typeSelect ? typeSelect.value : currentAgent?.type || 'tool-calling';
 
   // Store current value to re-select it after populating
   const currentModelValue = currentAgent?.model || '';
@@ -440,12 +454,12 @@ function populateEditModelOptions() {
 
   // Map provider display names to our filter values
   const providerNameMap = {
-    'OpenAI': 'openai',
+    OpenAI: 'openai',
     'OpenAI Codex (CLI)': 'codex',
-    'Anthropic': 'claude',
+    Anthropic: 'claude',
     'Anthropic Claude': 'claude',
     'Claude Code (CLI)': 'claude_code',
-    'Ollama': 'ollama',
+    Ollama: 'ollama',
     'LM Studio (Local)': 'lmstudio',
     'MLX-LM (Local)': 'mlx_lm',
     'Google Gemini': 'gemini'
@@ -535,11 +549,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   // Load providers in parallel with agent details
-  await Promise.all([
-    loadAvailableProviders(),
-    loadGlobalMCPServers(),
-    loadAgentDetails()
-  ]);
+  await Promise.all([loadAvailableProviders(), loadGlobalMCPServers(), loadAgentDetails()]);
 
   if (!currentAgent) {
     return;
@@ -571,11 +581,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   if (window.EventBus && typeof EventBus.on === 'function') {
-    EventBus.on('plugin:uploaded', async () => {
-      if (pluginManagerVisible) {
-        await loadAvailablePlugins();
-      }
-    }, 'agents-detail');
+    EventBus.on(
+      'plugin:uploaded',
+      async () => {
+        if (pluginManagerVisible) {
+          await loadAvailablePlugins();
+        }
+      },
+      'agents-detail'
+    );
   }
 });
 
@@ -679,9 +693,8 @@ function renderAgentDetails() {
   const statCost = document.getElementById('statCost');
   if (statCost) statCost.textContent = '$' + (stats.total_cost || 0).toFixed(4);
 
-  const avgTokens = stats.message_count > 0
-    ? Math.round(stats.token_usage / stats.message_count)
-    : 0;
+  const avgTokens =
+    stats.message_count > 0 ? Math.round(stats.token_usage / stats.message_count) : 0;
   const statAvgTokens = document.getElementById('statAvgTokens');
   if (statAvgTokens) statAvgTokens.textContent = formatNumber(avgTokens);
 
@@ -698,7 +711,8 @@ function renderAgentDetails() {
   const configType = document.getElementById('configType');
   if (configType) configType.textContent = formatAgentTypeLabel(currentAgent.type);
   const configRole = document.getElementById('configRole');
-  if (configRole) configRole.textContent = formatAgentRoleLabel(currentAgent.role, currentAgent.type);
+  if (configRole)
+    configRole.textContent = formatAgentRoleLabel(currentAgent.role, currentAgent.type);
 
   const systemPrompt = currentAgent.system_prompt || 'Default system prompt';
   const promptEl = document.getElementById('configPrompt');
@@ -779,7 +793,7 @@ function setupProfileEditor() {
   editButton?.addEventListener('click', openProfileEditor);
   saveButton?.addEventListener('click', saveProfileChanges);
   colorInput?.addEventListener('input', () => updateProfileColorPreview(colorInput.value));
-  fileInput?.addEventListener('change', (event) => {
+  fileInput?.addEventListener('change', event => {
     const file = event.target.files?.[0];
     if (file) {
       uploadProfileAvatarFile(file);
@@ -787,7 +801,7 @@ function setupProfileEditor() {
   });
   removeAvatarButton?.addEventListener('click', removeProfileAvatar);
   tagsContainer?.addEventListener('click', () => tagsInput?.focus());
-  tagsInput?.addEventListener('keydown', (event) => {
+  tagsInput?.addEventListener('keydown', event => {
     const value = tagsInput.value.trim();
     if (event.key === 'Enter' && value) {
       event.preventDefault();
@@ -800,23 +814,23 @@ function setupProfileEditor() {
 
   if (dropZone) {
     dropZone.addEventListener('click', () => fileInput?.click());
-    dropZone.addEventListener('keydown', (event) => {
+    dropZone.addEventListener('keydown', event => {
       if (event.key === 'Enter' || event.key === ' ') {
         event.preventDefault();
         fileInput?.click();
       }
     });
-    dropZone.addEventListener('dragover', (event) => {
+    dropZone.addEventListener('dragover', event => {
       event.preventDefault();
       event.stopPropagation();
       dropZone.classList.add('is-dragover');
     });
-    dropZone.addEventListener('dragleave', (event) => {
+    dropZone.addEventListener('dragleave', event => {
       event.preventDefault();
       event.stopPropagation();
       dropZone.classList.remove('is-dragover');
     });
-    dropZone.addEventListener('drop', (event) => {
+    dropZone.addEventListener('drop', event => {
       event.preventDefault();
       event.stopPropagation();
       dropZone.classList.remove('is-dragover');
@@ -854,7 +868,10 @@ function populateProfileForm() {
 
   if (nameInput) {
     nameInput.value = currentAgent.name || '';
-    nameInput.disabled = String(currentAgent.name || '').trim().toLowerCase() === 'ori';
+    nameInput.disabled =
+      String(currentAgent.name || '')
+        .trim()
+        .toLowerCase() === 'ori';
   }
   if (descriptionInput) {
     descriptionInput.value = metadata.description || '';
@@ -885,8 +902,8 @@ function renderProfileTags() {
   const input = document.getElementById('profileTagsInput');
   if (!container || !input) return;
 
-  container.querySelectorAll('.agent-profile-tag-chip').forEach((chip) => chip.remove());
-  profileSelectedTags.forEach((tag) => {
+  container.querySelectorAll('.agent-profile-tag-chip').forEach(chip => chip.remove());
+  profileSelectedTags.forEach(tag => {
     const chip = document.createElement('span');
     chip.className = 'agent-profile-tag-chip';
 
@@ -914,7 +931,7 @@ function addProfileTag(tag) {
 }
 
 function removeProfileTag(tag) {
-  profileSelectedTags = profileSelectedTags.filter((item) => item !== tag);
+  profileSelectedTags = profileSelectedTags.filter(item => item !== tag);
   renderProfileTags();
 }
 
@@ -958,7 +975,7 @@ function updateProfileAvatarPreview() {
 
 function previewProfileAvatarFile(file) {
   const reader = new FileReader();
-  reader.onload = (event) => {
+  reader.onload = event => {
     const img = document.getElementById('profileAvatarImg');
     const placeholder = document.getElementById('profileAvatarPlaceholder');
     if (img) {
@@ -1116,9 +1133,10 @@ async function saveProfileChanges() {
     setProfileStatus('Profile updated successfully.', 'success');
 
     const modalElement = document.getElementById('profileEditModal');
-    const modal = modalElement && typeof bootstrap !== 'undefined'
-      ? bootstrap.Modal.getInstance(modalElement)
-      : null;
+    const modal =
+      modalElement && typeof bootstrap !== 'undefined'
+        ? bootstrap.Modal.getInstance(modalElement)
+        : null;
     modal?.hide();
     showToast('Agent profile updated.', 'success');
   } catch (error) {
@@ -1136,24 +1154,28 @@ async function saveProfileChanges() {
 // 409, different error codes) fall through as a normal non-ok response for the
 // caller's error handling. Returns { response, cancelled }.
 async function saveAgentPatch(name, payload) {
-  const doPatch = (body) => fetch(`/api/agents/${encodeURIComponent(name)}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
-  });
+  const doPatch = body =>
+    fetch(`/api/agents/${encodeURIComponent(name)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
 
   let response = await doPatch(payload);
   if (response.status === 409) {
-    const info = await response.clone().json().catch(() => ({}));
+    const info = await response
+      .clone()
+      .json()
+      .catch(() => ({}));
     if (info && info.error === 'shared_agent_edit_requires_confirmation') {
       const names = Array.isArray(info.workspaces)
-        ? info.workspaces.map((w) => w && w.name).filter(Boolean)
+        ? info.workspaces.map(w => w && w.name).filter(Boolean)
         : [];
       const count = Number(info.workspace_count || names.length || 0);
       const list = names.length ? `\n\n• ${names.join('\n• ')}` : '';
       const proceed = window.confirm(
-        `"${name}" is attached to ${count} workspace${count === 1 ? '' : 's'}. `
-        + `This change affects all of them:${list}\n\nApply the change everywhere?`
+        `"${name}" is attached to ${count} workspace${count === 1 ? '' : 's'}. ` +
+          `This change affects all of them:${list}\n\nApply the change everywhere?`
       );
       if (!proceed) {
         return { response, cancelled: true };
@@ -1345,7 +1367,8 @@ function setConfigSavingState(isSaving) {
   if (saveBtn) {
     saveBtn.disabled = isSaving;
     if (isSaving) {
-      saveBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Saving...';
+      saveBtn.innerHTML =
+        '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Saving...';
     } else {
       saveBtn.innerHTML = 'Save';
     }
@@ -1418,7 +1441,9 @@ async function savePromptChanges() {
     setPromptSavingState(true);
     setPromptStatus('Saving system prompt...');
 
-    const { response, cancelled } = await saveAgentPatch(agentName, { system_prompt: systemPrompt });
+    const { response, cancelled } = await saveAgentPatch(agentName, {
+      system_prompt: systemPrompt
+    });
     if (cancelled) {
       setPromptStatus('Change cancelled — shared agent not modified.');
       return;
@@ -1445,7 +1470,8 @@ function setPromptSavingState(isSaving) {
   if (saveBtn) {
     saveBtn.disabled = isSaving;
     if (isSaving) {
-      saveBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Saving...';
+      saveBtn.innerHTML =
+        '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Saving...';
     } else {
       saveBtn.innerHTML = 'Save';
     }
@@ -1488,7 +1514,7 @@ function normalizeMCPServerList(values) {
     return [];
   }
   return values
-    .map((value) => String(value || '').trim())
+    .map(value => String(value || '').trim())
     .filter((value, index, array) => value && array.indexOf(value) === index);
 }
 
@@ -1503,15 +1529,15 @@ function isMCPServerStartingStatus(status) {
 
 function getRequiredSkillMCPServerNames() {
   const skills = Array.isArray(currentAgentSkills) ? currentAgentSkills : [];
-  const enabledSkills = skills.filter((skill) => skill?.enabled !== false);
+  const enabledSkills = skills.filter(skill => skill?.enabled !== false);
   const dependencyMap = new Map();
 
-  enabledSkills.forEach((skill) => {
+  enabledSkills.forEach(skill => {
     const required = normalizeMCPServerList(skill?.required_mcp_servers || []);
-    required.forEach((serverName) => {
+    required.forEach(serverName => {
       const existing = dependencyMap.get(serverName) || {
         name: serverName,
-        requiredBy: [],
+        requiredBy: []
       };
       existing.requiredBy.push(skill?.name || '(Unnamed skill)');
       dependencyMap.set(serverName, existing);
@@ -1522,7 +1548,7 @@ function getRequiredSkillMCPServerNames() {
 }
 
 function getGlobalMCPServerConfig(name) {
-  return (globalMCPServers || []).find((server) => server?.name === name) || null;
+  return (globalMCPServers || []).find(server => server?.name === name) || null;
 }
 
 function getGlobalMCPServerStatus(name) {
@@ -1544,10 +1570,12 @@ function collectCapabilityState() {
   }
 
   const enabledPlugins = getEnabledPluginsArray();
-  const globalMCPNames = new Set((globalMCPServers || []).map((server) => server?.name).filter(Boolean));
+  const globalMCPNames = new Set(
+    (globalMCPServers || []).map(server => server?.name).filter(Boolean)
+  );
   const skills = Array.isArray(currentAgentSkills) ? currentAgentSkills : [];
-  const enabledSkills = skills.filter((skill) => skill?.enabled !== false);
-  const dependencies = getRequiredSkillMCPServerNames().map((dependency) => {
+  const enabledSkills = skills.filter(skill => skill?.enabled !== false);
+  const dependencies = getRequiredSkillMCPServerNames().map(dependency => {
     const status = getGlobalMCPServerStatus(dependency.name);
     const existsGlobal = globalMCPNames.has(dependency.name);
     return {
@@ -1557,12 +1585,12 @@ function collectCapabilityState() {
       status,
       running: isMCPServerRunningStatus(status),
       starting: isMCPServerStartingStatus(status),
-      toolCount: getGlobalMCPToolCount(dependency.name),
+      toolCount: getGlobalMCPToolCount(dependency.name)
     };
   });
 
   const missingModel = !String(currentAgent.model || '').trim();
-  const unavailableRequiredMCP = dependencies.filter((dependency) => !dependency.existsGlobal);
+  const unavailableRequiredMCP = dependencies.filter(dependency => !dependency.existsGlobal);
 
   const issues = [];
   if (missingModel) {
@@ -1571,16 +1599,16 @@ function collectCapabilityState() {
       title: 'Model not configured',
       detail: 'Set a model so this agent can process requests.',
       action: 'edit-config',
-      actionLabel: 'Edit Config',
+      actionLabel: 'Edit Config'
     });
   }
   if (unavailableRequiredMCP.length > 0) {
     issues.push({
       key: 'missing-global-mcp',
       title: `${unavailableRequiredMCP.length} required MCP server${unavailableRequiredMCP.length > 1 ? 's are' : ' is'} missing globally`,
-      detail: unavailableRequiredMCP.map((dependency) => dependency.name).join(', '),
+      detail: unavailableRequiredMCP.map(dependency => dependency.name).join(', '),
       action: 'open-mcp-page',
-      actionLabel: 'Open MCP Page',
+      actionLabel: 'Open MCP Page'
     });
   }
 
@@ -1590,9 +1618,9 @@ function collectCapabilityState() {
     enabledSkills,
     dependencies,
     requiredMCPCount: dependencies.length,
-    availableRequiredMCPCount: dependencies.filter((dependency) => dependency.existsGlobal).length,
+    availableRequiredMCPCount: dependencies.filter(dependency => dependency.existsGlobal).length,
     missingModel,
-    issues,
+    issues
   };
 }
 
@@ -1622,13 +1650,17 @@ function renderSetupHealthBanner() {
     <div class="setup-health-title">Setup Health: Needs Attention</div>
     <p class="setup-health-subtitle">Fix the items below to make sure this agent's workspace dependencies can be satisfied.</p>
     <div class="setup-health-list">
-      ${issues.map((issue) => `
+      ${issues
+        .map(
+          issue => `
         <div class="setup-health-item">
           <div>
             <p class="setup-health-item-title">${escapeHtml(issue.title || 'Issue')}</p>
             <p class="setup-health-item-detail">${escapeHtml(issue.detail || '')}</p>
           </div>
-          ${issue.action ? `
+          ${
+            issue.action
+              ? `
             <button
               type="button"
               class="modern-btn modern-btn-secondary"
@@ -1637,13 +1669,17 @@ function renderSetupHealthBanner() {
             >
               ${escapeHtml(issue.actionLabel || 'Fix')}
             </button>
-          ` : ''}
+          `
+              : ''
+          }
         </div>
-      `).join('')}
+      `
+        )
+        .join('')}
     </div>
   `;
 
-  banner.querySelectorAll('[data-health-action]').forEach((button) => {
+  banner.querySelectorAll('[data-health-action]').forEach(button => {
     button.addEventListener('click', async () => {
       const action = button.getAttribute('data-health-action');
       await handleHealthAction(action);
@@ -1672,9 +1708,10 @@ function renderCapabilitiesCard() {
   badge.className = `capability-pill ${readinessClass}`;
   badge.textContent = capabilityState.issues.length === 0 ? 'Ready' : 'Needs Setup';
 
-  summaryText.textContent = capabilityState.issues.length === 0
-    ? 'Global prerequisites are available. Bind MCP connectors from a workspace when this agent is assigned there.'
-    : `Resolve ${capabilityState.issues.length} setup issue${capabilityState.issues.length > 1 ? 's' : ''} so workspaces can bind the required MCP connectors.`;
+  summaryText.textContent =
+    capabilityState.issues.length === 0
+      ? 'Global prerequisites are available. Bind MCP connectors from a workspace when this agent is assigned there.'
+      : `Resolve ${capabilityState.issues.length} setup issue${capabilityState.issues.length > 1 ? 's' : ''} so workspaces can bind the required MCP connectors.`;
 
   summaryGrid.innerHTML = `
     <div class="capability-summary-item">
@@ -1704,19 +1741,20 @@ function renderCapabilitiesCard() {
     return;
   }
 
-  dependenciesContainer.innerHTML = capabilityState.dependencies.map((dependency) => {
-    let actionButton = '';
-    if (!dependency.existsGlobal) {
-      actionButton = `
+  dependenciesContainer.innerHTML = capabilityState.dependencies
+    .map(dependency => {
+      let actionButton = '';
+      if (!dependency.existsGlobal) {
+        actionButton = `
         <a class="modern-btn modern-btn-secondary" style="padding: 6px 10px; font-size: 12px;" href="/mcp">Add Server</a>
       `;
-    } else {
-      actionButton = `
+      } else {
+        actionButton = `
         <a class="modern-btn modern-btn-secondary" style="padding: 6px 10px; font-size: 12px;" href="/">Bind in Workspace</a>
       `;
-    }
+      }
 
-    return `
+      return `
       <div class="capability-dependency-item">
         <div>
           <p class="capability-dependency-name">${escapeHtml(dependency.name)}</p>
@@ -1725,12 +1763,13 @@ function renderCapabilitiesCard() {
         <div class="capability-dependency-status">
           <span class="capability-pill ${dependency.existsGlobal ? 'ready' : 'error'}">${dependency.existsGlobal ? 'Installed' : 'Missing'}</span>
           <span class="capability-pill ${dependency.existsGlobal ? 'warning' : 'error'}">${dependency.existsGlobal ? 'Workspace scoped' : 'Unavailable'}</span>
-          <span class="capability-pill ${dependency.running ? 'ready' : (dependency.starting ? 'warning' : 'warning')}">${dependency.running ? 'Global: running' : (dependency.starting ? 'Global: starting' : `Global: ${dependency.status}`)}</span>
+          <span class="capability-pill ${dependency.running ? 'ready' : dependency.starting ? 'warning' : 'warning'}">${dependency.running ? 'Global: running' : dependency.starting ? 'Global: starting' : `Global: ${dependency.status}`}</span>
           ${actionButton}
         </div>
       </div>
     `;
-  }).join('');
+    })
+    .join('');
 }
 
 async function handleHealthAction(action) {
@@ -1762,7 +1801,7 @@ async function renderPlugins() {
   if (!container) return;
 
   const pluginsRaw = currentAgent?.enabled_plugins;
-  const plugins = Array.isArray(pluginsRaw) ? pluginsRaw : (pluginsRaw ? [pluginsRaw] : []);
+  const plugins = Array.isArray(pluginsRaw) ? pluginsRaw : pluginsRaw ? [pluginsRaw] : [];
 
   if (plugins.length === 0) {
     container.innerHTML = '<div class="empty-message">No plugins enabled</div>';
@@ -1770,12 +1809,14 @@ async function renderPlugins() {
   }
 
   // Show loading while checking config status
-  container.innerHTML = '<div class="text-center py-4" style="color: var(--text-secondary);">Loading plugins...</div>';
+  container.innerHTML =
+    '<div class="text-center py-4" style="color: var(--text-secondary);">Loading plugins...</div>';
 
   // Check configuration status for all plugins in parallel
   const configChecks = await Promise.all(
-    plugins.map(async (plugin) => {
-      const name = typeof plugin === 'string' ? plugin : (plugin?.name || plugin?.id || plugin?.plugin || '');
+    plugins.map(async plugin => {
+      const name =
+        typeof plugin === 'string' ? plugin : plugin?.name || plugin?.id || plugin?.plugin || '';
       const hasConfig = await checkPluginHasConfig(name);
       return { name, hasConfig };
     })
@@ -1788,9 +1829,14 @@ async function renderPlugins() {
 
   container.innerHTML = '';
   plugins.forEach(plugin => {
-    const rawName = typeof plugin === 'string' ? plugin : (plugin?.name || plugin?.id || plugin?.plugin || '');
-    const displayName = typeof plugin === 'object' && plugin?.metadata?.name ? plugin.metadata.name : stripVersionSuffix(rawName);
-    const version = typeof plugin === 'object' && plugin ? (plugin.version || plugin?.meta?.version || '') : '';
+    const rawName =
+      typeof plugin === 'string' ? plugin : plugin?.name || plugin?.id || plugin?.plugin || '';
+    const displayName =
+      typeof plugin === 'object' && plugin?.metadata?.name
+        ? plugin.metadata.name
+        : stripVersionSuffix(rawName);
+    const version =
+      typeof plugin === 'object' && plugin ? plugin.version || plugin?.meta?.version || '' : '';
     const hasConfig = configStatus.get(rawName) || false;
 
     const item = document.createElement('div');
@@ -1801,7 +1847,9 @@ async function renderPlugins() {
                 <div class="plugin-name">${escapeHtml(displayName || '(unknown plugin)')}</div>
                 ${version ? `<div class="plugin-version">v${escapeHtml(version)}</div>` : ''}
             </div>
-            ${hasConfig ? `
+            ${
+              hasConfig
+                ? `
                 <button class="modern-btn modern-btn-secondary plugin-config-btn"
                         data-plugin-name="${escapeHtml(rawName)}"
                         title="Configure plugin"
@@ -1811,7 +1859,9 @@ async function renderPlugins() {
                     </svg>
                     Configure
                 </button>
-            ` : ''}
+            `
+                : ''
+            }
         `;
     container.appendChild(item);
   });
@@ -1824,7 +1874,7 @@ async function renderPlugins() {
 function setupPluginConfigButtons() {
   const configButtons = document.querySelectorAll('#enabledPluginsList .plugin-config-btn');
   configButtons.forEach(button => {
-    button.addEventListener('click', async (e) => {
+    button.addEventListener('click', async e => {
       e.stopPropagation();
       const pluginName = button.dataset.pluginName;
       if (pluginName && typeof showPluginConfigModal === 'function') {
@@ -1871,17 +1921,20 @@ async function renderSkills() {
   }
 
   section.style.display = 'block';
-  container.innerHTML = '<div class="text-center py-3" style="color: var(--text-secondary);">Loading skills...</div>';
+  container.innerHTML =
+    '<div class="text-center py-3" style="color: var(--text-secondary);">Loading skills...</div>';
 
   try {
     const response = await fetch(`/api/skills?agent=${encodeURIComponent(name)}`);
     if (response.status === 409) {
       const data = await response.json();
       const conflicts = Array.isArray(data.conflicts) ? data.conflicts : [];
-      const conflictList = conflicts.map(conflict => {
-        const paths = (conflict.paths || []).map(path => `<li>${escapeHtml(path)}</li>`).join('');
-        return `<li><strong>${escapeHtml(conflict.name || '')}</strong><ul>${paths}</ul></li>`;
-      }).join('');
+      const conflictList = conflicts
+        .map(conflict => {
+          const paths = (conflict.paths || []).map(path => `<li>${escapeHtml(path)}</li>`).join('');
+          return `<li><strong>${escapeHtml(conflict.name || '')}</strong><ul>${paths}</ul></li>`;
+        })
+        .join('');
       currentAgentSkills = [];
       container.innerHTML = `<div class="text-center py-3" style="color: var(--danger-color);">Resolve duplicate skill names to view skills.<ul style="text-align: left; margin-top: 8px;">${conflictList}</ul></div>`;
       renderMCPServers();
@@ -1899,18 +1952,23 @@ async function renderSkills() {
     renderSkillSlotUsage();
 
     if (skills.length === 0) {
-      container.innerHTML = '<div class="text-center py-3" style="color: var(--text-secondary);">No skills available for this agent.</div>';
+      container.innerHTML =
+        '<div class="text-center py-3" style="color: var(--text-secondary);">No skills available for this agent.</div>';
       renderMCPServers();
       renderSetupHealthBanner();
       renderCapabilitiesCard();
       return;
     }
 
-    skills.sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' }));
+    skills.sort((a, b) =>
+      (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' })
+    );
 
     // At cap (non-expert) means no *new* skills can be enabled; already-enabled
     // ones can still be toggled off.
-    const atCap = Boolean(currentAgentLoadout) && !currentAgentLoadout.expert_mode &&
+    const atCap =
+      Boolean(currentAgentLoadout) &&
+      !currentAgentLoadout.expert_mode &&
       currentAgentLoadout.slots_used >= currentAgentLoadout.slot_cap;
 
     container.innerHTML = '';
@@ -1922,7 +1980,9 @@ async function renderSkills() {
       const isEnabled = skill?.enabled !== false;
       const hasScripts = Boolean(skill?.has_scripts);
       const isTrusted = Boolean(skill?.trusted);
-      const validationErrors = Array.isArray(skill?.validation_errors) ? skill.validation_errors : [];
+      const validationErrors = Array.isArray(skill?.validation_errors)
+        ? skill.validation_errors
+        : [];
       const hasErrors = validationErrors.length > 0;
 
       // Only disabled skills are blocked at cap; enabled skills can always be
@@ -1933,7 +1993,8 @@ async function renderSkills() {
         : '';
 
       const item = document.createElement('div');
-      item.style.cssText = 'padding: 12px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-secondary); display: flex; flex-direction: column; gap: 8px;';
+      item.style.cssText =
+        'padding: 12px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-secondary); display: flex; flex-direction: column; gap: 8px;';
       item.innerHTML = `
         <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
           <div style="font-weight: 600; color: var(--text-primary);">${escapeHtml(skillName)}</div>
@@ -1974,7 +2035,8 @@ async function renderSkills() {
   } catch (error) {
     console.error('Failed to load skills:', error);
     currentAgentSkills = [];
-    container.innerHTML = '<div class="text-center py-3" style="color: var(--danger-color);">Failed to load skills.</div>';
+    container.innerHTML =
+      '<div class="text-center py-3" style="color: var(--danger-color);">Failed to load skills.</div>';
     renderMCPServers();
     renderSetupHealthBanner();
     renderCapabilitiesCard();
@@ -2121,7 +2183,8 @@ async function toggleAvailablePluginsPanel() {
 // Load all available plugins from registry
 async function loadAvailablePlugins() {
   const container = document.getElementById('availablePluginsList');
-  container.innerHTML = '<div class="text-center py-3" style="color: var(--text-secondary);">Loading plugins...</div>';
+  container.innerHTML =
+    '<div class="text-center py-3" style="color: var(--text-secondary);">Loading plugins...</div>';
 
   try {
     const response = await fetch('/api/plugins');
@@ -2133,7 +2196,8 @@ async function loadAvailablePlugins() {
     renderAvailablePlugins();
   } catch (error) {
     console.error('Error loading plugins:', error);
-    container.innerHTML = '<div class="text-center py-3" style="color: var(--danger-color);">Failed to load plugins</div>';
+    container.innerHTML =
+      '<div class="text-center py-3" style="color: var(--danger-color);">Failed to load plugins</div>';
   }
 }
 
@@ -2142,7 +2206,7 @@ function renderAvailablePlugins() {
   const container = document.getElementById('availablePluginsList');
   const enabledPlugins = currentAgent?.enabled_plugins || [];
   // enabled_plugins can be an array of strings or objects with 'name' property
-  const enabledNames = enabledPlugins.map(p => typeof p === 'string' ? p : (p?.name || p));
+  const enabledNames = enabledPlugins.map(p => (typeof p === 'string' ? p : p?.name || p));
   const enabledSet = new Set(enabledNames);
 
   if (allAvailablePlugins.length === 0) {
@@ -2168,7 +2232,8 @@ function renderAvailablePlugins() {
 
     const item = document.createElement('div');
     item.className = 'plugin-item';
-    item.style.cssText = 'display: flex; justify-content: space-between; align-items: center; padding: 12px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px;';
+    item.style.cssText =
+      'display: flex; justify-content: space-between; align-items: center; padding: 12px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px;';
     item.innerHTML = `
             <div style="flex: 1;">
                 <div style="font-weight: 500; color: var(--text-primary);">${escapeHtml(displayName)}</div>
@@ -2227,21 +2292,30 @@ function renderMCPServers() {
 
   const dependencies = getRequiredSkillMCPServerNames();
   if (dependencies.length === 0) {
-    container.innerHTML = '<p style="color: var(--text-secondary); font-size: 14px;">No enabled skills currently declare MCP dependencies for this agent.</p>';
+    container.innerHTML =
+      '<p style="color: var(--text-secondary); font-size: 14px;">No enabled skills currently declare MCP dependencies for this agent.</p>';
     return;
   }
 
   container.innerHTML = '';
-  dependencies.forEach((dependency) => {
+  dependencies.forEach(dependency => {
     const status = String(getGlobalMCPServerStatus(dependency.name) || 'missing').toLowerCase();
     const toolCount = getGlobalMCPToolCount(dependency.name);
     const existsGlobal = Boolean(getGlobalMCPServerConfig(dependency.name));
     const statusClass = !existsGlobal
       ? 'error'
-      : (isMCPServerRunningStatus(status) ? 'ready' : (isMCPServerStartingStatus(status) ? 'warning' : 'warning'));
+      : isMCPServerRunningStatus(status)
+        ? 'ready'
+        : isMCPServerStartingStatus(status)
+          ? 'warning'
+          : 'warning';
     const statusLabel = !existsGlobal
       ? 'missing globally'
-      : (isMCPServerRunningStatus(status) ? 'global: running' : (isMCPServerStartingStatus(status) ? 'global: starting' : `global: ${status}`));
+      : isMCPServerRunningStatus(status)
+        ? 'global: running'
+        : isMCPServerStartingStatus(status)
+          ? 'global: starting'
+          : `global: ${status}`;
 
     const item = document.createElement('div');
     item.className = 'plugin-item';
@@ -2310,7 +2384,9 @@ function chatWithAgent() {
 }
 
 async function confirmDelete() {
-  if (!confirm(`Are you sure you want to delete agent "${agentName}"? This action cannot be undone.`)) {
+  if (
+    !confirm(`Are you sure you want to delete agent "${agentName}"? This action cannot be undone.`)
+  ) {
     return;
   }
 
@@ -2325,7 +2401,6 @@ async function confirmDelete() {
 
     alert(`Agent "${agentName}" deleted successfully`);
     window.location.href = '/agents';
-
   } catch (error) {
     console.error('Error deleting agent:', error);
     showError('Failed to delete agent');
@@ -2392,7 +2467,7 @@ function showLoading(show) {
   const loading = document.getElementById('loadingState');
   const content = document.getElementById('content');
   if (loading) loading.style.display = show ? 'flex' : 'none';
-  if (content) content.style.display = show ? 'none' : (currentAgent ? 'block' : 'none');
+  if (content) content.style.display = show ? 'none' : currentAgent ? 'block' : 'none';
   if (show) {
     hideMissingAgentState();
   }

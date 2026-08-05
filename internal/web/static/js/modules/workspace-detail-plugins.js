@@ -141,7 +141,9 @@ export class WorkspacePluginsManager {
   }
 
   describePluginAttachment(plugin) {
-    const mcpServers = (Array.isArray(plugin?.mcp_servers) ? plugin.mcp_servers : []).filter(Boolean);
+    const mcpServers = (Array.isArray(plugin?.mcp_servers) ? plugin.mcp_servers : []).filter(
+      Boolean
+    );
     const skills = (Array.isArray(plugin?.skills) ? plugin.skills : []).filter(Boolean);
     const total = mcpServers.length + skills.length;
 
@@ -183,7 +185,8 @@ export class WorkspacePluginsManager {
     if (skills.length > 0) {
       componentBits.push(`${skills.length} skill${skills.length === 1 ? '' : 's'}`);
     }
-    const componentSummary = componentBits.length > 0 ? componentBits.join(' · ') : 'No bindable components';
+    const componentSummary =
+      componentBits.length > 0 ? componentBits.join(' · ') : 'No bindable components';
 
     const statusChip =
       status === 'attached'
@@ -194,7 +197,9 @@ export class WorkspacePluginsManager {
 
     const chips = [
       statusChip,
-      format ? `<span class="workspace-detail-mcp-chip source">${this.host.escapeHtml(format)}</span>` : '',
+      format
+        ? `<span class="workspace-detail-mcp-chip source">${this.host.escapeHtml(format)}</span>`
+        : '',
       `<span class="workspace-detail-mcp-chip scope">${this.host.escapeHtml(componentSummary)}</span>`,
       plugin?.enabled === false
         ? '<span class="workspace-detail-mcp-chip status is-disabled">Globally disabled</span>'
@@ -304,13 +309,16 @@ export class WorkspacePluginsManager {
         skills: (Array.isArray(plugin.skills) ? plugin.skills : []).filter(Boolean)
       };
 
-      const result = await window.WorkspaceBootstrapReview.applySelectedPlan(this.host.workspaceId, {
-        agents: [],
-        mcps: [],
-        skills: [],
-        plugins: [candidate],
-        queries: []
-      });
+      const result = await window.WorkspaceBootstrapReview.applySelectedPlan(
+        this.host.workspaceId,
+        {
+          agents: [],
+          mcps: [],
+          skills: [],
+          plugins: [candidate],
+          queries: []
+        }
+      );
 
       await this.host.loadWorkspace();
       // Attachment changed: refresh the durable REAPER readiness card if present.
@@ -399,7 +407,8 @@ export class WorkspacePluginsManager {
       if (window.Toast) window.Toast.success(`Removed ${label} from this workspace`);
     } catch (error) {
       console.error('Failed to remove plugin from workspace:', error);
-      if (window.Toast) window.Toast.error(error.message || 'Failed to remove plugin from workspace');
+      if (window.Toast)
+        window.Toast.error(error.message || 'Failed to remove plugin from workspace');
     } finally {
       this.setPluginBusy(name, false);
     }

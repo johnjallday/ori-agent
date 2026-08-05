@@ -1,4 +1,4 @@
-(function() {
+(function () {
   const root = document.getElementById('behaviorStudioPage');
   if (!root) {
     return;
@@ -40,7 +40,9 @@
   }
 
   function slugify(value) {
-    const trimmed = String(value || '').trim().toLowerCase();
+    const trimmed = String(value || '')
+      .trim()
+      .toLowerCase();
     if (!trimmed) {
       return '';
     }
@@ -57,7 +59,7 @@
   function titleCase(value) {
     return String(value || '')
       .replace(/[_-]+/g, ' ')
-      .replace(/\b\w/g, (match) => match.toUpperCase());
+      .replace(/\b\w/g, match => match.toUpperCase());
   }
 
   function safeArray(value) {
@@ -143,13 +145,14 @@
     if (!schema || typeof schema !== 'object') {
       return null;
     }
-    const fields = safeArray(schema.fields)
-      .map((field) => ({
-        name: String(field?.name || '').trim(),
-        type: OUTPUT_FIELD_TYPES.includes(String(field?.type || '').trim()) ? String(field.type).trim() : 'string',
-        description: String(field?.description || '').trim(),
-        required: Boolean(field?.required)
-      }));
+    const fields = safeArray(schema.fields).map(field => ({
+      name: String(field?.name || '').trim(),
+      type: OUTPUT_FIELD_TYPES.includes(String(field?.type || '').trim())
+        ? String(field.type).trim()
+        : 'string',
+      description: String(field?.description || '').trim(),
+      required: Boolean(field?.required)
+    }));
 
     return {
       name: String(schema.name || '').trim(),
@@ -165,10 +168,12 @@
     }
     const normalized = normalizeSchema(schema);
     const fields = safeArray(normalized?.fields)
-      .filter((field) => String(field.name || '').trim() !== '')
-      .map((field) => ({
+      .filter(field => String(field.name || '').trim() !== '')
+      .map(field => ({
         name: String(field.name || '').trim(),
-        type: OUTPUT_FIELD_TYPES.includes(String(field.type || '').trim()) ? String(field.type).trim() : 'string',
+        type: OUTPUT_FIELD_TYPES.includes(String(field.type || '').trim())
+          ? String(field.type).trim()
+          : 'string',
         description: String(field.description || '').trim(),
         required: Boolean(field.required)
       }));
@@ -200,9 +205,10 @@
     const type = PARAM_TYPE_OPTIONS.includes(String(parameter?.type || '').trim())
       ? String(parameter.type).trim()
       : 'string';
-    const defaultValue = parameter && Object.prototype.hasOwnProperty.call(parameter, 'default_value')
-      ? parameter.default_value
-      : '';
+    const defaultValue =
+      parameter && Object.prototype.hasOwnProperty.call(parameter, 'default_value')
+        ? parameter.default_value
+        : '';
 
     return {
       name: String(parameter?.name || `param_${index + 1}`).trim(),
@@ -232,7 +238,9 @@
   }
 
   function normalizeStep(step, index) {
-    const normalizedRole = ROLE_OPTIONS.some((option) => option.value === String(step?.role || '').trim())
+    const normalizedRole = ROLE_OPTIONS.some(
+      option => option.value === String(step?.role || '').trim()
+    )
       ? String(step.role).trim()
       : 'general';
 
@@ -243,7 +251,9 @@
       agent_name: String(step?.agent_name || '').trim(),
       description: String(step?.description || '').trim(),
       details: String(step?.details || '').trim(),
-      depends_on: safeArray(step?.depends_on).map((dep) => String(dep || '').trim()).filter(Boolean),
+      depends_on: safeArray(step?.depends_on)
+        .map(dep => String(dep || '').trim())
+        .filter(Boolean),
       priority: Math.min(5, Math.max(1, Number(step?.priority || 3) || 3)),
       timeout: Number(step?.timeout || 0) || durationFromMinutes(10),
       context: safeObject(step?.context),
@@ -283,13 +293,21 @@
       description: String(template.description || '').trim(),
       category: String(template.category || '').trim(),
       source: String(template.source || 'custom').trim() || 'custom',
-      required_roles: safeArray(template.required_roles).map((role) => String(role || '').trim()).filter(Boolean),
-      parameters: safeArray(template.parameters).map((parameter, index) => normalizeParameter(parameter, index)),
+      required_roles: safeArray(template.required_roles)
+        .map(role => String(role || '').trim())
+        .filter(Boolean),
+      parameters: safeArray(template.parameters).map((parameter, index) =>
+        normalizeParameter(parameter, index)
+      ),
       steps: safeArray(template.steps).map((step, index) => normalizeStep(step, index)),
-      orchestration_mode: ORCHESTRATION_OPTIONS.some((option) => option.value === String(template.orchestration_mode || '').trim())
+      orchestration_mode: ORCHESTRATION_OPTIONS.some(
+        option => option.value === String(template.orchestration_mode || '').trim()
+      )
         ? String(template.orchestration_mode).trim()
         : 'graph',
-      result_combination_mode: COMBINATION_OPTIONS.some((option) => option.value === String(template.result_combination_mode || '').trim())
+      result_combination_mode: COMBINATION_OPTIONS.some(
+        option => option.value === String(template.result_combination_mode || '').trim()
+      )
         ? String(template.result_combination_mode).trim()
         : 'structured_outputs',
       combination_instruction: String(template.combination_instruction || '').trim(),
@@ -300,11 +318,13 @@
   }
 
   function uniqueRoles(steps) {
-    return Array.from(new Set(
-      safeArray(steps)
-        .map((step) => String(step?.role || '').trim())
-        .filter(Boolean)
-    ));
+    return Array.from(
+      new Set(
+        safeArray(steps)
+          .map(step => String(step?.role || '').trim())
+          .filter(Boolean)
+      )
+    );
   }
 
   function parseValueByType(rawValue, type, label) {
@@ -343,17 +363,17 @@
   }
 
   function detectGraphCycle(steps) {
-    const stepIds = new Set(safeArray(steps).map((step) => step.id));
+    const stepIds = new Set(safeArray(steps).map(step => step.id));
     const indegree = new Map();
     const adjacency = new Map();
 
-    safeArray(steps).forEach((step) => {
+    safeArray(steps).forEach(step => {
       indegree.set(step.id, 0);
       adjacency.set(step.id, []);
     });
 
-    safeArray(steps).forEach((step) => {
-      safeArray(step.depends_on).forEach((depId) => {
+    safeArray(steps).forEach(step => {
+      safeArray(step.depends_on).forEach(depId => {
         if (!stepIds.has(depId)) {
           return;
         }
@@ -374,7 +394,7 @@
       const currentId = queue.shift();
       visited += 1;
       const neighbors = adjacency.get(currentId) || [];
-      neighbors.forEach((neighborId) => {
+      neighbors.forEach(neighborId => {
         const next = (indegree.get(neighborId) || 0) - 1;
         indegree.set(neighborId, next);
         if (next === 0) {
@@ -387,19 +407,19 @@
   }
 
   function buildGraphLayout(steps) {
-    const normalizedSteps = safeArray(steps).filter((step) => step && step.id);
-    const stepIds = new Set(normalizedSteps.map((step) => step.id));
+    const normalizedSteps = safeArray(steps).filter(step => step && step.id);
+    const stepIds = new Set(normalizedSteps.map(step => step.id));
     const indegree = new Map();
     const dependents = new Map();
     const layerById = new Map();
 
-    normalizedSteps.forEach((step) => {
+    normalizedSteps.forEach(step => {
       indegree.set(step.id, 0);
       dependents.set(step.id, []);
     });
 
-    normalizedSteps.forEach((step) => {
-      safeArray(step.depends_on).forEach((depId) => {
+    normalizedSteps.forEach(step => {
+      safeArray(step.depends_on).forEach(depId => {
         if (!stepIds.has(depId)) {
           return;
         }
@@ -409,8 +429,8 @@
     });
 
     const queue = normalizedSteps
-      .filter((step) => (indegree.get(step.id) || 0) === 0)
-      .map((step) => step.id);
+      .filter(step => (indegree.get(step.id) || 0) === 0)
+      .map(step => step.id);
 
     const order = [];
     while (queue.length > 0) {
@@ -418,7 +438,7 @@
       order.push(currentId);
       const currentLayer = layerById.get(currentId) || 0;
       const neighbors = dependents.get(currentId) || [];
-      neighbors.forEach((neighborId) => {
+      neighbors.forEach(neighborId => {
         layerById.set(neighborId, Math.max(layerById.get(neighborId) || 0, currentLayer + 1));
         const next = (indegree.get(neighborId) || 0) - 1;
         indegree.set(neighborId, next);
@@ -433,7 +453,7 @@
     }
 
     const layers = [];
-    normalizedSteps.forEach((step) => {
+    normalizedSteps.forEach(step => {
       const layerIndex = layerById.get(step.id) || 0;
       if (!layers[layerIndex]) {
         layers[layerIndex] = [];
@@ -441,7 +461,7 @@
       layers[layerIndex].push(step);
     });
 
-    const maxLayerSize = Math.max(...layers.map((layer) => layer.length), 1);
+    const maxLayerSize = Math.max(...layers.map(layer => layer.length), 1);
     const width = Math.max(720, layers.length * 220 + 120);
     const height = Math.max(240, maxLayerSize * 130 + 120);
     const positions = {};
@@ -496,10 +516,11 @@
       this.launchModalEl = document.getElementById('behaviorLaunchModal');
       this.launchModalBodyEl = document.getElementById('behaviorLaunchModalBody');
       this.launchModalSubmitEl = document.getElementById('behaviorLaunchSubmit');
-      this.launchModal = this.launchModalEl && window.bootstrap
-        ? new window.bootstrap.Modal(this.launchModalEl)
-        : null;
-      this.beforeUnloadHandler = (event) => {
+      this.launchModal =
+        this.launchModalEl && window.bootstrap
+          ? new window.bootstrap.Modal(this.launchModalEl)
+          : null;
+      this.beforeUnloadHandler = event => {
         if (!this.state.isDirty) {
           return;
         }
@@ -542,13 +563,12 @@
 
     async init() {
       this.bindEvents();
-      await Promise.all([
-        this.loadTemplates(),
-        this.loadWorkspaces()
-      ]);
+      await Promise.all([this.loadTemplates(), this.loadWorkspaces()]);
       const requestedTemplateId = this.getRequestedTemplateId();
       if (requestedTemplateId) {
-        const requestedTemplate = this.state.templates.find((template) => template.id === requestedTemplateId);
+        const requestedTemplate = this.state.templates.find(
+          template => template.id === requestedTemplateId
+        );
         if (requestedTemplate) {
           this.selectTemplate(requestedTemplate.id, { skipDirtyCheck: true });
           return;
@@ -563,19 +583,19 @@
     bindEvents() {
       window.addEventListener('beforeunload', this.beforeUnloadHandler);
 
-      this.searchInput?.addEventListener('input', (event) => {
+      this.searchInput?.addEventListener('input', event => {
         this.state.search = String(event.target.value || '');
         this.applyFilters();
         this.renderSidebar();
       });
 
-      this.sourceFilter?.addEventListener('change', (event) => {
+      this.sourceFilter?.addEventListener('change', event => {
         this.state.sourceFilter = String(event.target.value || 'all');
         this.applyFilters();
         this.renderSidebar();
       });
 
-      this.categoryFilter?.addEventListener('change', (event) => {
+      this.categoryFilter?.addEventListener('change', event => {
         this.state.categoryFilter = String(event.target.value || 'all');
         this.applyFilters();
         this.renderSidebar();
@@ -583,15 +603,15 @@
 
       this.newButton?.addEventListener('click', () => this.startNewBehavior());
       this.importButton?.addEventListener('click', () => this.importInput?.click());
-      this.importInput?.addEventListener('change', (event) => this.handleImport(event));
+      this.importInput?.addEventListener('change', event => this.handleImport(event));
 
-      this.listEl?.addEventListener('click', (event) => this.handleListClick(event));
-      this.editorEl?.addEventListener('click', (event) => this.handleEditorClick(event));
-      this.editorEl?.addEventListener('input', (event) => this.handleEditorInput(event));
-      this.editorEl?.addEventListener('change', (event) => this.handleEditorInput(event));
-      this.previewEl?.addEventListener('click', (event) => this.handlePreviewClick(event));
-      this.launchModalBodyEl?.addEventListener('input', (event) => this.handleLaunchInput(event));
-      this.launchModalBodyEl?.addEventListener('change', (event) => this.handleLaunchInput(event));
+      this.listEl?.addEventListener('click', event => this.handleListClick(event));
+      this.editorEl?.addEventListener('click', event => this.handleEditorClick(event));
+      this.editorEl?.addEventListener('input', event => this.handleEditorInput(event));
+      this.editorEl?.addEventListener('change', event => this.handleEditorInput(event));
+      this.previewEl?.addEventListener('click', event => this.handlePreviewClick(event));
+      this.launchModalBodyEl?.addEventListener('input', event => this.handleLaunchInput(event));
+      this.launchModalBodyEl?.addEventListener('change', event => this.handleLaunchInput(event));
       this.launchModalSubmitEl?.addEventListener('click', () => this.instantiateBehavior());
     }
 
@@ -606,7 +626,7 @@
 
     async loadTemplates() {
       const payload = await this.fetchJSON('/api/orchestration/templates');
-      const templates = safeArray(payload.templates).map((template) => normalizeTemplate(template));
+      const templates = safeArray(payload.templates).map(template => normalizeTemplate(template));
       templates.sort((left, right) => {
         if (left.source !== right.source) {
           return left.source === 'custom' ? -1 : 1;
@@ -620,7 +640,7 @@
     async loadWorkspaces() {
       try {
         const payload = await this.fetchJSON('/api/workspaces');
-        const workspaces = safeArray(payload.workspaces || payload.folders).map((workspace) => ({
+        const workspaces = safeArray(payload.workspaces || payload.folders).map(workspace => ({
           id: String(workspace.id || '').trim(),
           name: String(workspace.name || 'Untitled Workspace').trim(),
           description: String(workspace.description || '').trim(),
@@ -643,7 +663,9 @@
 
       try {
         const payload = await this.fetchJSON(`/api/workspaces/${encodeURIComponent(workspaceId)}`);
-        this.state.launchAgents = safeArray(payload.agents).map((agent) => String(agent || '').trim()).filter(Boolean);
+        this.state.launchAgents = safeArray(payload.agents)
+          .map(agent => String(agent || '').trim())
+          .filter(Boolean);
         this.state.launchWorkspaceName = String(payload.name || '').trim();
       } catch (error) {
         console.error('Failed to load workspace agents', error);
@@ -654,19 +676,24 @@
 
     applyFilters() {
       const searchNeedle = this.state.search.trim().toLowerCase();
-      this.state.filteredTemplates = this.state.templates.filter((template) => {
-        const matchesSearch = !searchNeedle ||
+      this.state.filteredTemplates = this.state.templates.filter(template => {
+        const matchesSearch =
+          !searchNeedle ||
           template.name.toLowerCase().includes(searchNeedle) ||
           template.description.toLowerCase().includes(searchNeedle) ||
           template.category.toLowerCase().includes(searchNeedle);
-        const matchesSource = this.state.sourceFilter === 'all' || template.source === this.state.sourceFilter;
-        const matchesCategory = this.state.categoryFilter === 'all' || template.category === this.state.categoryFilter;
+        const matchesSource =
+          this.state.sourceFilter === 'all' || template.source === this.state.sourceFilter;
+        const matchesCategory =
+          this.state.categoryFilter === 'all' || template.category === this.state.categoryFilter;
         return matchesSearch && matchesSource && matchesCategory;
       });
     }
 
     ensureSelection() {
-      const current = this.state.templates.find((template) => template.id === this.state.selectedTemplateId);
+      const current = this.state.templates.find(
+        template => template.id === this.state.selectedTemplateId
+      );
       if (current) {
         return;
       }
@@ -709,7 +736,7 @@
       if (!skipDirtyCheck && !this.confirmDiscardChanges()) {
         return;
       }
-      const template = this.state.templates.find((item) => item.id === templateId);
+      const template = this.state.templates.find(item => item.id === templateId);
       if (!template) {
         return;
       }
@@ -733,7 +760,9 @@
 
       const clone = deepClone(current);
       clone.source = 'custom';
-      clone.id = this.buildUniqueTemplateId(`${current.id || slugify(current.name) || 'skill'}-copy`);
+      clone.id = this.buildUniqueTemplateId(
+        `${current.id || slugify(current.name) || 'skill'}-copy`
+      );
       clone.name = current.name ? `${current.name} Copy` : 'Skill Copy';
       clone.created_at = '';
       clone.updated_at = '';
@@ -761,7 +790,7 @@
       try {
         await fetch(`/api/orchestration/templates?id=${encodeURIComponent(current.id)}`, {
           method: 'DELETE'
-        }).then(async (response) => {
+        }).then(async response => {
           if (!response.ok) {
             throw new Error(await response.text());
           }
@@ -782,9 +811,11 @@
     async saveBehavior() {
       try {
         const payload = this.buildTemplatePayload();
-        const existing = this.state.templates.find((template) => template.id === payload.id);
+        const existing = this.state.templates.find(template => template.id === payload.id);
         if (existing && payload.id !== this.state.originalTemplateId) {
-          throw new Error(`An orchestration skill with id "${payload.id}" already exists. Use a different id.`);
+          throw new Error(
+            `An orchestration skill with id "${payload.id}" already exists. Use a different id.`
+          );
         }
 
         const response = await fetch('/api/orchestration/templates', {
@@ -814,7 +845,7 @@
 
     buildUniqueTemplateId(baseValue) {
       const base = slugify(baseValue) || 'skill';
-      const reserved = new Set(this.state.templates.map((template) => template.id));
+      const reserved = new Set(this.state.templates.map(template => template.id));
       if (!reserved.has(base)) {
         return base;
       }
@@ -870,7 +901,11 @@
           required: Boolean(parameter.required)
         };
         if (String(parameter._defaultText || '').trim() !== '') {
-          normalized.default_value = parseValueByType(parameter._defaultText, type, `Default value for ${name}`);
+          normalized.default_value = parseValueByType(
+            parameter._defaultText,
+            type,
+            `Default value for ${name}`
+          );
         }
         parameters.push(normalized);
       });
@@ -886,13 +921,15 @@
         return {
           id: stepId,
           name: String(step.name || '').trim(),
-          role: ROLE_OPTIONS.some((option) => option.value === String(step.role || '').trim())
+          role: ROLE_OPTIONS.some(option => option.value === String(step.role || '').trim())
             ? String(step.role).trim()
             : 'general',
           agent_name: String(step.agent_name || '').trim(),
           description: String(step.description || '').trim() || String(step.name || '').trim(),
           details: String(step.details || '').trim(),
-          depends_on: safeArray(step.depends_on).map((dep) => String(dep || '').trim()).filter(Boolean),
+          depends_on: safeArray(step.depends_on)
+            .map(dep => String(dep || '').trim())
+            .filter(Boolean),
           priority: Math.min(5, Math.max(1, Number(step.priority || 3) || 3)),
           timeout: durationFromMinutes(minutesFromDuration(step.timeout)),
           context: this.parseStepContext(step, index),
@@ -904,11 +941,11 @@
         throw new Error('Add at least one step to the orchestration skill.');
       }
 
-      steps.forEach((step) => {
+      steps.forEach(step => {
         if (!step.description) {
           throw new Error(`Step "${step.id}" needs a description.`);
         }
-        step.depends_on.forEach((dependencyId) => {
+        step.depends_on.forEach(dependencyId => {
           if (dependencyId === step.id) {
             throw new Error(`Step "${step.id}" cannot depend on itself.`);
           }
@@ -941,8 +978,11 @@
     buildLaunchState() {
       const draft = normalizeTemplate(this.state.draft);
       const parameterInputs = {};
-      safeArray(draft.parameters).forEach((parameter) => {
-        parameterInputs[parameter.name] = formatValueForInput(parameter.default_value, parameter.type);
+      safeArray(draft.parameters).forEach(parameter => {
+        parameterInputs[parameter.name] = formatValueForInput(
+          parameter.default_value,
+          parameter.type
+        );
       });
       return {
         workspaceId: '',
@@ -977,7 +1017,7 @@
         const action = actionButton.dataset.listAction;
         const templateId = actionButton.dataset.templateId;
         if (action === 'duplicate') {
-          const template = this.state.templates.find((item) => item.id === templateId);
+          const template = this.state.templates.find(item => item.id === templateId);
           if (!template) {
             return;
           }
@@ -988,7 +1028,7 @@
           this.state.isDirty = false;
           this.duplicateSelectedBehavior();
         } else if (action === 'delete') {
-          const template = this.state.templates.find((item) => item.id === templateId);
+          const template = this.state.templates.find(item => item.id === templateId);
           if (!template) {
             return;
           }
@@ -1067,7 +1107,9 @@
           return;
         }
         imported.source = 'custom';
-        imported.id = this.buildUniqueTemplateId(imported.id || slugify(imported.name) || 'imported-skill');
+        imported.id = this.buildUniqueTemplateId(
+          imported.id || slugify(imported.name) || 'imported-skill'
+        );
         imported.name = imported.name || file.name.replace(/\.json$/i, '');
         this.state.selectedTemplateId = '';
         this.state.originalTemplateId = '';
@@ -1247,14 +1289,17 @@
             step.depends_on.push(dependencyId);
           }
         } else {
-          step.depends_on = step.depends_on.filter((value) => value !== dependencyId);
+          step.depends_on = step.depends_on.filter(value => value !== dependencyId);
         }
         this.markDirty(true);
         return;
       }
 
       if (target.dataset.schemaField) {
-        const schema = this.resolveSchemaTarget(target.dataset.schemaScope, Number(target.dataset.stepIndex));
+        const schema = this.resolveSchemaTarget(
+          target.dataset.schemaScope,
+          Number(target.dataset.stepIndex)
+        );
         if (!schema) {
           return;
         }
@@ -1269,7 +1314,10 @@
       }
 
       if (target.dataset.schemaItemField) {
-        const schema = this.resolveSchemaTarget(target.dataset.schemaScope, Number(target.dataset.stepIndex));
+        const schema = this.resolveSchemaTarget(
+          target.dataset.schemaScope,
+          Number(target.dataset.stepIndex)
+        );
         if (!schema) {
           return;
         }
@@ -1327,8 +1375,10 @@
       if (!removed) {
         return;
       }
-      this.state.draft.steps.forEach((step) => {
-        step.depends_on = safeArray(step.depends_on).filter((dependencyId) => dependencyId !== removed.id);
+      this.state.draft.steps.forEach(step => {
+        step.depends_on = safeArray(step.depends_on).filter(
+          dependencyId => dependencyId !== removed.id
+        );
       });
       if (this.state.draft.steps.length === 0) {
         this.state.draft.steps.push(buildBlankStep(0));
@@ -1342,8 +1392,10 @@
       if (!oldId || !newId || oldId === newId) {
         return;
       }
-      this.state.draft.steps.forEach((step) => {
-        step.depends_on = safeArray(step.depends_on).map((dependencyId) => dependencyId === oldId ? newId : dependencyId);
+      this.state.draft.steps.forEach(step => {
+        step.depends_on = safeArray(step.depends_on).map(dependencyId =>
+          dependencyId === oldId ? newId : dependencyId
+        );
       });
     }
 
@@ -1364,26 +1416,27 @@
     }
 
     renderSidebar() {
-      const categories = Array.from(new Set(
-        this.state.templates
-          .map((template) => template.category)
-          .filter(Boolean)
-      )).sort((left, right) => left.localeCompare(right));
+      const categories = Array.from(
+        new Set(this.state.templates.map(template => template.category).filter(Boolean))
+      ).sort((left, right) => left.localeCompare(right));
 
       if (this.categoryFilter) {
         const currentValue = this.state.categoryFilter;
         this.categoryFilter.innerHTML = [
           '<option value="all">All categories</option>',
-          ...categories.map((category) => `<option value="${escapeAttr(category)}">${escapeHtml(category)}</option>`)
+          ...categories.map(
+            category => `<option value="${escapeAttr(category)}">${escapeHtml(category)}</option>`
+          )
         ].join('');
         this.categoryFilter.value = currentValue;
       }
 
       const selectedId = this.state.selectedTemplateId;
-      this.listEl.innerHTML = this.state.filteredTemplates.map((template) => {
-        const isSelected = template.id === selectedId;
-        const stepCount = safeArray(template.steps).length;
-        return `
+      this.listEl.innerHTML = this.state.filteredTemplates
+        .map(template => {
+          const isSelected = template.id === selectedId;
+          const stepCount = safeArray(template.steps).length;
+          return `
           <article class="behavior-card ${isSelected ? 'is-selected' : ''}" data-template-id="${escapeAttr(template.id)}">
             <div class="behavior-card__head">
               <div>
@@ -1398,17 +1451,22 @@
                 <button class="behavior-icon-btn" type="button" data-list-action="duplicate" data-template-id="${escapeAttr(template.id)}" title="Duplicate">
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M19,21H9V7H19M19,3H9C7.89,3 7,3.89 7,5V17A2,2 0 0,0 9,19H19A2,2 0 0,0 21,17V5C21,3.89 20.1,3 19,3M5,7H3V19A2,2 0 0,0 5,21H17V19H5V7Z"/></svg>
                 </button>
-                ${template.source === 'custom' ? `
+                ${
+                  template.source === 'custom'
+                    ? `
                   <button class="behavior-icon-btn" type="button" data-list-action="delete" data-template-id="${escapeAttr(template.id)}" title="Delete">
                     <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M9,3V4H4V6H5V19A2,2 0 0,0 7,21H17A2,2 0 0,0 19,19V6H20V4H15V3M7,6H17V19H7M9,8V17H11V8M13,8V17H15V8Z"/></svg>
                   </button>
-                ` : ''}
+                `
+                    : ''
+                }
               </div>
             </div>
             <p class="behavior-card__summary">${escapeHtml(truncate(template.description || 'No description yet.', 108) || 'No description yet.')}</p>
           </article>
         `;
-      }).join('');
+        })
+        .join('');
 
       if (this.state.filteredTemplates.length === 0) {
         this.listEl.innerHTML = `
@@ -1423,7 +1481,9 @@
         this.countEl.textContent = String(this.state.templates.length);
       }
       if (this.customCountEl) {
-        this.customCountEl.textContent = String(this.state.templates.filter((template) => template.source === 'custom').length);
+        this.customCountEl.textContent = String(
+          this.state.templates.filter(template => template.source === 'custom').length
+        );
       }
       if (this.selectedLabelEl) {
         const label = this.state.draft?.name || this.state.draft?.id || 'New orchestration skill';
@@ -1434,9 +1494,16 @@
     renderEditor() {
       const draft = normalizeTemplate(this.state.draft);
       const isBuiltin = draft.source === 'builtin';
-      const stepCards = safeArray(draft.steps).map((step, index) => this.renderStepCard(step, index)).join('');
-      const parameterRows = safeArray(draft.parameters).map((parameter, index) => this.renderParameterRow(parameter, index)).join('');
-      const schemaEditor = this.renderSchemaEditor(draft.output_schema, { scope: 'template', heading: 'Parent Structured Output' });
+      const stepCards = safeArray(draft.steps)
+        .map((step, index) => this.renderStepCard(step, index))
+        .join('');
+      const parameterRows = safeArray(draft.parameters)
+        .map((parameter, index) => this.renderParameterRow(parameter, index))
+        .join('');
+      const schemaEditor = this.renderSchemaEditor(draft.output_schema, {
+        scope: 'template',
+        heading: 'Parent Structured Output'
+      });
 
       this.editorEl.innerHTML = `
         <section class="behavior-section">
@@ -1478,13 +1545,13 @@
                 <label class="behavior-field">
                   <span class="behavior-field__label">Orchestration</span>
                   <select class="behavior-input" data-field="orchestration_mode">
-                    ${ORCHESTRATION_OPTIONS.map((option) => `<option value="${option.value}" ${draft.orchestration_mode === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
+                    ${ORCHESTRATION_OPTIONS.map(option => `<option value="${option.value}" ${draft.orchestration_mode === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
                   </select>
                 </label>
                 <label class="behavior-field">
                   <span class="behavior-field__label">Result Combination</span>
                   <select class="behavior-input" data-field="result_combination_mode">
-                    ${COMBINATION_OPTIONS.map((option) => `<option value="${option.value}" ${draft.result_combination_mode === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
+                    ${COMBINATION_OPTIONS.map(option => `<option value="${option.value}" ${draft.result_combination_mode === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
                   </select>
                 </label>
               </div>
@@ -1534,7 +1601,7 @@
             <label class="behavior-field">
               <span class="behavior-field__label">Type</span>
               <select class="behavior-input" data-param-index="${index}" data-param-field="type">
-                ${PARAM_TYPE_OPTIONS.map((option) => `<option value="${option}" ${parameter.type === option ? 'selected' : ''}>${titleCase(option)}</option>`).join('')}
+                ${PARAM_TYPE_OPTIONS.map(option => `<option value="${option}" ${parameter.type === option ? 'selected' : ''}>${titleCase(option)}</option>`).join('')}
               </select>
             </label>
             <label class="behavior-field behavior-field--toggle">
@@ -1548,17 +1615,23 @@
           </label>
           <label class="behavior-field">
             <span class="behavior-field__label">Default Value</span>
-            ${usesTextarea ? `
+            ${
+              usesTextarea
+                ? `
               <textarea class="behavior-textarea behavior-textarea--compact behavior-input--mono" rows="3" data-param-index="${index}" data-param-field="default_value" placeholder='${parameter.type === 'array' ? '["value"]' : '{"key":"value"}'}'>${escapeHtml(parameter._defaultText)}</textarea>
-            ` : parameter.type === 'boolean' ? `
+            `
+                : parameter.type === 'boolean'
+                  ? `
               <select class="behavior-input" data-param-index="${index}" data-param-field="default_value">
                 <option value="">No default</option>
                 <option value="true" ${parameter._defaultText === 'true' ? 'selected' : ''}>True</option>
                 <option value="false" ${parameter._defaultText === 'false' ? 'selected' : ''}>False</option>
               </select>
-            ` : `
+            `
+                  : `
               <input class="behavior-input ${parameter.type === 'number' ? 'behavior-input--mono' : ''}" type="${parameter.type === 'number' ? 'number' : 'text'}" data-param-index="${index}" data-param-field="default_value" value="${escapeAttr(parameter._defaultText)}" placeholder="${parameter.type === 'number' ? '0' : 'Default value'}">
-            `}
+            `
+            }
           </label>
           <div class="behavior-parameter-row__footer">
             <button class="behavior-link-btn" type="button" data-action="remove-param" data-param-index="${index}">Remove parameter</button>
@@ -1568,9 +1641,15 @@
     }
 
     renderStepCard(step, index) {
-      const otherSteps = this.state.draft.steps.filter((candidate, candidateIndex) => candidateIndex !== index);
+      const otherSteps = this.state.draft.steps.filter(
+        (candidate, candidateIndex) => candidateIndex !== index
+      );
       const timeoutMinutes = minutesFromDuration(step.timeout);
-      const schemaEditor = this.renderSchemaEditor(step.output_schema, { scope: 'step', stepIndex: index, heading: 'Step Structured Output' });
+      const schemaEditor = this.renderSchemaEditor(step.output_schema, {
+        scope: 'step',
+        stepIndex: index,
+        heading: 'Step Structured Output'
+      });
       return `
         <article class="behavior-step-card">
           <div class="behavior-step-card__head">
@@ -1603,7 +1682,7 @@
             <label class="behavior-field">
               <span class="behavior-field__label">Role</span>
               <select class="behavior-input" data-step-index="${index}" data-step-field="role">
-                ${ROLE_OPTIONS.map((option) => `<option value="${option.value}" ${step.role === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
+                ${ROLE_OPTIONS.map(option => `<option value="${option.value}" ${step.role === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
               </select>
             </label>
             <label class="behavior-field">
@@ -1633,12 +1712,20 @@
           <div class="behavior-field">
             <span class="behavior-field__label">Depends On</span>
             <div class="behavior-dependency-grid">
-              ${otherSteps.length === 0 ? '<div class="behavior-field__hint">No other steps yet.</div>' : otherSteps.map((candidate) => `
+              ${
+                otherSteps.length === 0
+                  ? '<div class="behavior-field__hint">No other steps yet.</div>'
+                  : otherSteps
+                      .map(
+                        candidate => `
                 <label class="behavior-dependency-pill">
                   <input type="checkbox" data-step-index="${index}" data-step-dependency="${escapeAttr(candidate.id)}" ${safeArray(step.depends_on).includes(candidate.id) ? 'checked' : ''}>
                   <span>${escapeHtml(candidate.name || candidate.description || candidate.id)}</span>
                 </label>
-              `).join('')}
+              `
+                      )
+                      .join('')
+              }
             </div>
           </div>
 
@@ -1694,7 +1781,9 @@
             <textarea class="behavior-textarea behavior-textarea--compact" rows="2" data-schema-scope="${scope}" ${scope === 'step' ? `data-step-index="${stepIndex}"` : ''} data-schema-field="description" placeholder="What the JSON object represents.">${escapeHtml(schema.description)}</textarea>
           </label>
           <div class="behavior-schema-field-list">
-            ${safeArray(schema.fields).map((field, fieldIndex) => `
+            ${safeArray(schema.fields)
+              .map(
+                (field, fieldIndex) => `
               <div class="behavior-schema-field-row">
                 <div class="behavior-form-grid behavior-form-grid--schema-row">
                   <label class="behavior-field">
@@ -1704,7 +1793,7 @@
                   <label class="behavior-field">
                     <span class="behavior-field__label">Type</span>
                     <select class="behavior-input" data-schema-scope="${scope}" ${scope === 'step' ? `data-step-index="${stepIndex}"` : ''} data-field-index="${fieldIndex}" data-schema-item-field="type">
-                      ${OUTPUT_FIELD_TYPES.map((option) => `<option value="${option}" ${field.type === option ? 'selected' : ''}>${titleCase(option)}</option>`).join('')}
+                      ${OUTPUT_FIELD_TYPES.map(option => `<option value="${option}" ${field.type === option ? 'selected' : ''}>${titleCase(option)}</option>`).join('')}
                     </select>
                   </label>
                   <label class="behavior-field behavior-field--toggle">
@@ -1720,7 +1809,9 @@
                   <button class="behavior-link-btn" type="button" data-action="${scope === 'template' ? 'remove-template-schema-field' : 'remove-step-schema-field'}" ${scope === 'step' ? `data-step-index="${stepIndex}"` : ''} data-field-index="${fieldIndex}">Remove field</button>
                 </div>
               </div>
-            `).join('')}
+            `
+              )
+              .join('')}
           </div>
         </div>
       `;
@@ -1729,7 +1820,9 @@
     renderPreview() {
       const draft = normalizeTemplate(this.state.draft);
       const graphLayout = buildGraphLayout(draft.steps);
-      const graphMarkup = graphLayout ? this.renderGraphSVG(draft.steps, graphLayout) : `
+      const graphMarkup = graphLayout
+        ? this.renderGraphSVG(draft.steps, graphLayout)
+        : `
         <div class="behavior-graph-empty">
           <div class="behavior-graph-empty__title">Graph preview unavailable</div>
           <div class="behavior-graph-empty__copy">Resolve duplicate ids or circular dependencies to render the step graph.</div>
@@ -1737,7 +1830,9 @@
       `;
       const isBuiltin = draft.source === 'builtin';
       const stepCount = safeArray(draft.steps).length;
-      const parameterCount = safeArray(draft.parameters).filter((parameter) => String(parameter.name || '').trim()).length;
+      const parameterCount = safeArray(draft.parameters).filter(parameter =>
+        String(parameter.name || '').trim()
+      ).length;
       const schema = serializeSchema(draft.output_schema);
       this.previewEl.innerHTML = `
         <section class="behavior-preview-card">
@@ -1748,7 +1843,7 @@
               <p class="behavior-preview-card__copy">${escapeHtml(draft.description || 'Describe the reusable orchestration this skill should execute.')}</p>
             </div>
             <div class="behavior-preview-card__status ${this.state.isDirty ? 'is-dirty' : ''}">
-              ${this.state.isDirty ? 'Unsaved draft' : (isBuiltin ? 'Built-in' : 'Saved')}
+              ${this.state.isDirty ? 'Unsaved draft' : isBuiltin ? 'Built-in' : 'Saved'}
             </div>
           </div>
 
@@ -1792,16 +1887,24 @@
               <h3>Structured Output</h3>
               <span>${schema ? `${schema.fields.length} field${schema.fields.length === 1 ? '' : 's'}` : 'Disabled'}</span>
             </div>
-            ${schema ? `
+            ${
+              schema
+                ? `
               <div class="behavior-output-summary">
-                ${schema.fields.map((field) => `
+                ${schema.fields
+                  .map(
+                    field => `
                   <div class="behavior-output-chip">
                     <span class="behavior-output-chip__name">${escapeHtml(field.name)}</span>
                     <span class="behavior-output-chip__meta">${escapeHtml(field.type)}${field.required ? ' · required' : ''}</span>
                   </div>
-                `).join('')}
+                `
+                  )
+                  .join('')}
               </div>
-            ` : '<div class="behavior-output-summary behavior-output-summary--empty">Parent output is free-form.</div>'}
+            `
+                : '<div class="behavior-output-summary behavior-output-summary--empty">Parent output is free-form.</div>'
+            }
           </div>
 
           <details class="behavior-json-inspector">
@@ -1814,31 +1917,34 @@
 
     renderGraphSVG(steps, graphLayout) {
       const positions = graphLayout.positions;
-      const edges = safeArray(steps).flatMap((step) => {
-        const target = positions[step.id];
-        if (!target) {
-          return [];
-        }
-        return safeArray(step.depends_on).map((dependencyId) => {
-          const source = positions[dependencyId];
-          if (!source) {
+      const edges = safeArray(steps)
+        .flatMap(step => {
+          const target = positions[step.id];
+          if (!target) {
+            return [];
+          }
+          return safeArray(step.depends_on).map(dependencyId => {
+            const source = positions[dependencyId];
+            if (!source) {
+              return '';
+            }
+            const controlOffset = Math.max(60, (target.x - source.x) / 2);
+            const path = `M ${source.x + 72} ${source.y} C ${source.x + 72 + controlOffset} ${source.y}, ${target.x - 72 - controlOffset} ${target.y}, ${target.x - 72} ${target.y}`;
+            return `<path d="${path}" class="behavior-graph-edge"></path>`;
+          });
+        })
+        .join('');
+
+      const nodes = safeArray(steps)
+        .map(step => {
+          const position = positions[step.id];
+          if (!position) {
             return '';
           }
-          const controlOffset = Math.max(60, (target.x - source.x) / 2);
-          const path = `M ${source.x + 72} ${source.y} C ${source.x + 72 + controlOffset} ${source.y}, ${target.x - 72 - controlOffset} ${target.y}, ${target.x - 72} ${target.y}`;
-          return `<path d="${path}" class="behavior-graph-edge"></path>`;
-        });
-      }).join('');
-
-      const nodes = safeArray(steps).map((step) => {
-        const position = positions[step.id];
-        if (!position) {
-          return '';
-        }
-        const accent = getRoleAccent(step.role);
-        const label = truncate(step.name || step.description || step.id, 28);
-        const sublabel = truncate(step.agent_name || step.role || 'general', 20);
-        return `
+          const accent = getRoleAccent(step.role);
+          const label = truncate(step.name || step.description || step.id, 28);
+          const sublabel = truncate(step.agent_name || step.role || 'general', 20);
+          return `
           <g transform="translate(${position.x - 72}, ${position.y - 34})">
             <rect width="144" height="68" rx="18" fill="rgba(255,255,255,0.94)" stroke="${accent}" stroke-width="2.2"></rect>
             <rect width="144" height="10" rx="10" fill="${accent}" opacity="0.88"></rect>
@@ -1846,7 +1952,8 @@
             <text x="16" y="52" class="behavior-graph-sublabel">${escapeHtml(sublabel)}</text>
           </g>
         `;
-      }).join('');
+        })
+        .join('');
 
       return `
         <svg class="behavior-graph-svg" viewBox="0 0 ${graphLayout.width} ${graphLayout.height}" preserveAspectRatio="xMidYMid meet">
@@ -1876,27 +1983,43 @@
       }
       const draft = normalizeTemplate(this.state.draft);
       const launchState = this.state.launchState || this.buildLaunchState();
-      const workspaceOptions = this.state.workspaces.map((workspace) => `
+      const workspaceOptions = this.state.workspaces
+        .map(
+          workspace => `
         <option value="${escapeAttr(workspace.id)}" ${launchState.workspaceId === workspace.id ? 'selected' : ''}>${escapeHtml(workspace.name)}</option>
-      `).join('');
-      const parameterFields = safeArray(draft.parameters)
-        .filter((parameter) => String(parameter.name || '').trim() !== '')
-        .map((parameter) => this.renderLaunchParameterField(parameter, launchState))
+      `
+        )
         .join('');
-      const _agentOptions = this.state.launchAgents.map((agentName) => `
+      const parameterFields = safeArray(draft.parameters)
+        .filter(parameter => String(parameter.name || '').trim() !== '')
+        .map(parameter => this.renderLaunchParameterField(parameter, launchState))
+        .join('');
+      const _agentOptions = this.state.launchAgents
+        .map(
+          agentName => `
         <option value="${escapeAttr(agentName)}">${escapeHtml(agentName)}</option>
-      `).join('');
-      const agentAssignments = safeArray(draft.steps).map((step) => `
+      `
+        )
+        .join('');
+      const agentAssignments = safeArray(draft.steps)
+        .map(
+          step => `
         <label class="behavior-field">
           <span class="behavior-field__label">${escapeHtml(step.name || step.id)}</span>
           <select class="behavior-input" data-launch-field="assignment" data-step-id="${escapeAttr(step.id)}">
             <option value="">Use skill default${step.agent_name ? ` (${escapeHtml(step.agent_name)})` : ''}</option>
-            ${this.state.launchAgents.map((agentName) => `
+            ${this.state.launchAgents
+              .map(
+                agentName => `
               <option value="${escapeAttr(agentName)}" ${launchState.agentAssignments[step.id] === agentName ? 'selected' : ''}>${escapeHtml(agentName)}</option>
-            `).join('')}
+            `
+              )
+              .join('')}
           </select>
         </label>
-      `).join('');
+      `
+        )
+        .join('');
 
       this.launchModalBodyEl.innerHTML = `
         <div class="behavior-launch-grid">
@@ -1918,13 +2041,15 @@
               <span class="behavior-field__label">Fallback Agent</span>
               <select class="behavior-input" data-launch-field="fallbackAgent" ${this.state.launchAgents.length === 0 ? 'disabled' : ''}>
                 <option value="">Leave unassigned unless a step pins an agent</option>
-                ${this.state.launchAgents.map((agentName) => `<option value="${escapeAttr(agentName)}" ${launchState.fallbackAgent === agentName ? 'selected' : ''}>${escapeHtml(agentName)}</option>`).join('')}
+                ${this.state.launchAgents.map(agentName => `<option value="${escapeAttr(agentName)}" ${launchState.fallbackAgent === agentName ? 'selected' : ''}>${escapeHtml(agentName)}</option>`).join('')}
               </select>
             </label>
             <div class="behavior-launch-note">
-              ${this.state.launchWorkspaceName
-                ? `Workspace loaded: <strong>${escapeHtml(this.state.launchWorkspaceName)}</strong>`
-                : 'Select a workspace to load available agents.'}
+              ${
+                this.state.launchWorkspaceName
+                  ? `Workspace loaded: <strong>${escapeHtml(this.state.launchWorkspaceName)}</strong>`
+                  : 'Select a workspace to load available agents.'
+              }
             </div>
           </div>
 
@@ -1939,14 +2064,14 @@
               <span class="behavior-field__label">Orchestration Override</span>
               <select class="behavior-input" data-launch-field="orchestrationMode">
                 <option value="">Use skill default (${escapeHtml(draft.orchestration_mode)})</option>
-                ${ORCHESTRATION_OPTIONS.map((option) => `<option value="${option.value}" ${launchState.orchestrationMode === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
+                ${ORCHESTRATION_OPTIONS.map(option => `<option value="${option.value}" ${launchState.orchestrationMode === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
               </select>
             </label>
             <label class="behavior-field">
               <span class="behavior-field__label">Combination Override</span>
               <select class="behavior-input" data-launch-field="resultCombinationMode">
                 <option value="">Use skill default (${escapeHtml(draft.result_combination_mode)})</option>
-                ${COMBINATION_OPTIONS.map((option) => `<option value="${option.value}" ${launchState.resultCombinationMode === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
+                ${COMBINATION_OPTIONS.map(option => `<option value="${option.value}" ${launchState.resultCombinationMode === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
               </select>
             </label>
             <label class="behavior-field">
@@ -2081,13 +2206,17 @@
       const parameters = {};
       try {
         safeArray(draft.parameters)
-          .filter((parameter) => String(parameter.name || '').trim() !== '')
-          .forEach((parameter) => {
+          .filter(parameter => String(parameter.name || '').trim() !== '')
+          .forEach(parameter => {
             const rawValue = this.state.launchState.parameterInputs[parameter.name];
             if (String(rawValue || '').trim() === '') {
               return;
             }
-            parameters[parameter.name] = parseValueByType(rawValue, parameter.type, `Parameter ${parameter.name}`);
+            parameters[parameter.name] = parseValueByType(
+              rawValue,
+              parameter.type,
+              `Parameter ${parameter.name}`
+            );
           });
       } catch (error) {
         notify(error.message || 'One or more parameter values are invalid.', 'error');
@@ -2095,15 +2224,18 @@
       }
 
       const agentAssignments = {};
-      Object.entries(safeObject(this.state.launchState.agentAssignments)).forEach(([stepId, agentName]) => {
-        if (String(agentName || '').trim() !== '') {
-          agentAssignments[stepId] = String(agentName).trim();
+      Object.entries(safeObject(this.state.launchState.agentAssignments)).forEach(
+        ([stepId, agentName]) => {
+          if (String(agentName || '').trim() !== '') {
+            agentAssignments[stepId] = String(agentName).trim();
+          }
         }
-      });
+      );
 
       try {
         this.launchModalSubmitEl.disabled = true;
-        this.launchModalSubmitEl.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Adding…';
+        this.launchModalSubmitEl.innerHTML =
+          '<span class="spinner-border spinner-border-sm me-2"></span>Adding…';
         const response = await fetch('/api/orchestration/templates/instantiate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -2115,14 +2247,19 @@
             parameters,
             orchestration_mode: this.state.launchState.orchestrationMode || '',
             result_combination_mode: this.state.launchState.resultCombinationMode || '',
-            combination_instruction: String(this.state.launchState.combinationInstruction || '').trim()
+            combination_instruction: String(
+              this.state.launchState.combinationInstruction || ''
+            ).trim()
           })
         });
         if (!response.ok) {
           throw new Error(await response.text());
         }
         const payload = await response.json();
-        notify(`Orchestration skill added to ${this.state.launchWorkspaceName || 'workspace'}.`, 'success');
+        notify(
+          `Orchestration skill added to ${this.state.launchWorkspaceName || 'workspace'}.`,
+          'success'
+        );
         this.launchModal?.hide();
         if (payload.parent_task?.id) {
           window.location.href = `/workspaces/${encodeURIComponent(workspaceId)}`;

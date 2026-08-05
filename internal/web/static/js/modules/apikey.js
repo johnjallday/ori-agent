@@ -59,7 +59,7 @@ class APIKeyManager {
     // Form submission
     const form = document.getElementById('apiKeyForm');
     if (form) {
-      form.addEventListener('submit', (e) => {
+      form.addEventListener('submit', e => {
         e.preventDefault();
         this.saveAPIKey();
       });
@@ -89,7 +89,6 @@ class APIKeyManager {
       if (this.apiKeyMaskedSpan) {
         this.apiKeyMaskedSpan.textContent = data.masked || 'No API key set';
       }
-
     } catch (error) {
       console.error('Error loading API key:', error);
       if (this.apiKeyMaskedSpan) {
@@ -148,7 +147,6 @@ class APIKeyManager {
 
       // Show success message (optional)
       this.showNotification('API key updated successfully', 'success');
-
     } catch (error) {
       console.error('Error saving API key:', error);
       this.showNotification('Error saving API key: ' + error.message, 'error');
@@ -175,17 +173,19 @@ class APIKeyManager {
 
     if (isVisible) {
       // Eye slash icon (hide)
-      eyeIcon.innerHTML = '<path d="M2,5.27L3.28,4L20,20.72L18.73,22L15.65,18.92C14.5,19.3 13.28,19.5 12,19.5C7,19.5 2.73,16.39 1,12C1.69,10.24 2.79,8.69 4.19,7.46L2,5.27M12,9A3,3 0 0,1 15,12C15,12.35 14.94,12.69 14.83,13L11,9.17C11.31,9.06 11.65,9 12,9M12,4.5C17,4.5 21.27,7.61 23,12C22.18,14.08 20.79,15.88 19,17.19L17.58,15.76C18.94,14.82 20.06,13.54 20.82,12C19.17,8.64 15.76,6.5 12,6.5C10.91,6.5 9.84,6.68 8.84,7L7.3,5.47C8.74,4.85 10.33,4.5 12,4.5Z"/>';
+      eyeIcon.innerHTML =
+        '<path d="M2,5.27L3.28,4L20,20.72L18.73,22L15.65,18.92C14.5,19.3 13.28,19.5 12,19.5C7,19.5 2.73,16.39 1,12C1.69,10.24 2.79,8.69 4.19,7.46L2,5.27M12,9A3,3 0 0,1 15,12C15,12.35 14.94,12.69 14.83,13L11,9.17C11.31,9.06 11.65,9 12,9M12,4.5C17,4.5 21.27,7.61 23,12C22.18,14.08 20.79,15.88 19,17.19L17.58,15.76C18.94,14.82 20.06,13.54 20.82,12C19.17,8.64 15.76,6.5 12,6.5C10.91,6.5 9.84,6.68 8.84,7L7.3,5.47C8.74,4.85 10.33,4.5 12,4.5Z"/>';
     } else {
       // Eye icon (show)
-      eyeIcon.innerHTML = '<path d="M12,9A3,3 0 0,0 9,12A3,3 0 0,0 12,15A3,3 0 0,0 15,12A3,3 0 0,0 12,9M12,17A5,5 0 0,1 7,12A5,5 0 0,1 12,7A5,5 0 0,1 17,12A5,5 0 0,1 12,17M12,4.5C7,4.5 2.73,7.61 1,12C2.73,16.39 7,19.5 12,19.5C17,19.5 21.27,16.39 23,12C21.27,7.61 17,4.5 12,4.5Z"/>';
+      eyeIcon.innerHTML =
+        '<path d="M12,9A3,3 0 0,0 9,12A3,3 0 0,0 12,15A3,3 0 0,0 15,12A3,3 0 0,0 12,9M12,17A5,5 0 0,1 7,12A5,5 0 0,1 12,7A5,5 0 0,1 17,12A5,5 0 0,1 12,17M12,4.5C7,4.5 2.73,7.61 1,12C2.73,16.39 7,19.5 12,19.5C17,19.5 21.27,16.39 23,12C21.27,7.61 17,4.5 12,4.5Z"/>';
     }
   }
 
   showNotification(message, type = 'info') {
     // Simple notification system - could be improved with a proper toast library
-    const alertClass = type === 'success' ? 'alert-success' :
-      type === 'error' ? 'alert-danger' : 'alert-info';
+    const alertClass =
+      type === 'success' ? 'alert-success' : type === 'error' ? 'alert-danger' : 'alert-info';
 
     const notification = document.createElement('div');
     notification.className = `alert ${alertClass} alert-dismissible fade show position-fixed`;

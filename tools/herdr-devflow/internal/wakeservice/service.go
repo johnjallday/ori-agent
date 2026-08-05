@@ -199,8 +199,8 @@ func (s *Service) Serve(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("listen on fixed wake socket: %w", err)
 	}
-	defer listener.Close()
-	defer os.Remove(s.config.SocketPath)
+	defer func() { _ = listener.Close() }()
+	defer func() { _ = os.Remove(s.config.SocketPath) }()
 	if err := os.Chmod(s.config.SocketPath, 0600); err != nil {
 		return fmt.Errorf("secure wake socket: %w", err)
 	}
@@ -226,7 +226,7 @@ func (s *Service) Serve(ctx context.Context) error {
 }
 
 func (s *Service) handleConnection(ctx context.Context, connection net.Conn) {
-	defer connection.Close()
+	defer func() { _ = connection.Close() }()
 	// Socket deadlines are real elapsed-time limits. The injected service clock
 	// is for candidate decisions and may deliberately be frozen in tests.
 	deadline := time.Now().Add(s.config.IOTimeout)
@@ -398,7 +398,7 @@ func LoadInstallMetadata(path string) (InstallMetadata, error) {
 	if err != nil {
 		return InstallMetadata{}, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	payload, err := io.ReadAll(io.LimitReader(file, 16*1024+1))
 	if err != nil {
 		return InstallMetadata{}, fmt.Errorf("read install metadata: %w", err)

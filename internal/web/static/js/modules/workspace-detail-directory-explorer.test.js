@@ -3,7 +3,12 @@ import assert from 'node:assert/strict';
 import { describeDirectoryEntry } from './workspace-detail-directory-explorer.js';
 
 test('describeDirectoryEntry marks a registered workspace folder as openable', () => {
-  const node = { name: 'member-folder', isWorkspace: true, workspaceId: 'ws-123', workspaceName: 'Clients' };
+  const node = {
+    name: 'member-folder',
+    isWorkspace: true,
+    workspaceId: 'ws-123',
+    workspaceName: 'Clients'
+  };
   const d = describeDirectoryEntry(node);
   assert.equal(d.isWorkspace, true);
   assert.equal(d.openHref, '/workspaces/ws-123');
@@ -12,7 +17,11 @@ test('describeDirectoryEntry marks a registered workspace folder as openable', (
 });
 
 test('describeDirectoryEntry falls back to the folder name when unnamed', () => {
-  const d = describeDirectoryEntry({ name: 'member-folder', isWorkspace: true, workspaceId: 'ws-9' });
+  const d = describeDirectoryEntry({
+    name: 'member-folder',
+    isWorkspace: true,
+    workspaceId: 'ws-9'
+  });
   assert.equal(d.label, 'member-folder');
   assert.equal(d.openHref, '/workspaces/ws-9');
 });
@@ -22,7 +31,7 @@ test('describeDirectoryEntry leaves ordinary folders/files untouched', () => {
     { name: 'docs' },
     { name: 'flagged-but-no-id', isWorkspace: true },
     { name: 'notes.txt', isWorkspace: false },
-    null,
+    null
   ]) {
     const d = describeDirectoryEntry(node);
     assert.equal(d.isWorkspace, false);

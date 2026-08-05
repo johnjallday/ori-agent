@@ -43,8 +43,7 @@ export class AgentCanvasInteractionHandler {
           const cardHeight = 60;
           const cardX = task.x - cardWidth / 2;
           const cardY = task.y - cardHeight / 2;
-          if (x >= cardX && x <= cardX + cardWidth &&
-              y >= cardY && y <= cardY + cardHeight) {
+          if (x >= cardX && x <= cardX + cardWidth && y >= cardY && y <= cardY + cardHeight) {
             return { id: task.id, type: 'task', node: task };
           }
         }
@@ -57,8 +56,12 @@ export class AgentCanvasInteractionHandler {
         const storeNode = this.state.storeNodes[i];
         if (storeNode && storeNode.cardBounds) {
           const cardBounds = storeNode.cardBounds;
-          if (x >= cardBounds.x && x <= cardBounds.x + cardBounds.width &&
-              y >= cardBounds.y && y <= cardBounds.y + cardBounds.height) {
+          if (
+            x >= cardBounds.x &&
+            x <= cardBounds.x + cardBounds.width &&
+            y >= cardBounds.y &&
+            y <= cardBounds.y + cardBounds.height
+          ) {
             return { id: storeNode.id, type: 'store', node: storeNode };
           }
         }
@@ -74,8 +77,7 @@ export class AgentCanvasInteractionHandler {
           const cardHeight = 70;
           const cardX = attachment.x - cardWidth / 2;
           const cardY = attachment.y - cardHeight / 2;
-          if (x >= cardX && x <= cardX + cardWidth &&
-              y >= cardY && y <= cardY + cardHeight) {
+          if (x >= cardX && x <= cardX + cardWidth && y >= cardY && y <= cardY + cardHeight) {
             return { id: attachment.id, type: 'attachment', node: attachment };
           }
         }
@@ -88,8 +90,12 @@ export class AgentCanvasInteractionHandler {
         const folder = this.state.workspaceFolders[i];
         if (folder && folder.cardBounds) {
           const cardBounds = folder.cardBounds;
-          if (x >= cardBounds.x && x <= cardBounds.x + cardBounds.width &&
-              y >= cardBounds.y && y <= cardBounds.y + cardBounds.height) {
+          if (
+            x >= cardBounds.x &&
+            x <= cardBounds.x + cardBounds.width &&
+            y >= cardBounds.y &&
+            y <= cardBounds.y + cardBounds.height
+          ) {
             return { id: folder.id, type: 'workspace_folder', node: folder };
           }
         }
@@ -100,8 +106,12 @@ export class AgentCanvasInteractionHandler {
     for (const agent of this.state.agents) {
       const halfWidth = (agent.width || 120) / 2;
       const halfHeight = (agent.height || 70) / 2;
-      if (x >= agent.x - halfWidth && x <= agent.x + halfWidth &&
-          y >= agent.y - halfHeight && y <= agent.y + halfHeight) {
+      if (
+        x >= agent.x - halfWidth &&
+        x <= agent.x + halfWidth &&
+        y >= agent.y - halfHeight &&
+        y <= agent.y + halfHeight
+      ) {
         return { id: agent.nodeId || agent.name, type: 'agent', node: agent };
       }
     }
@@ -157,12 +167,12 @@ export class AgentCanvasInteractionHandler {
     // Don't trigger if user is typing in any input/textarea (modals, forms, etc.)
     if (e.key === 'h' || e.key === 'H') {
       const activeElement = document.activeElement;
-      const isTyping = activeElement && (
-        activeElement.tagName === 'INPUT' ||
-        activeElement.tagName === 'TEXTAREA' ||
-        activeElement.isContentEditable ||
-        this.state.forms.createTaskDescriptionFocused
-      );
+      const isTyping =
+        activeElement &&
+        (activeElement.tagName === 'INPUT' ||
+          activeElement.tagName === 'TEXTAREA' ||
+          activeElement.isContentEditable ||
+          this.state.forms.createTaskDescriptionFocused);
 
       if (!isTyping) {
         e.preventDefault();
@@ -190,7 +200,10 @@ export class AgentCanvasInteractionHandler {
         if (!this.state.forms.createTaskDescription) {
           this.state.forms.createTaskDescription = '';
         }
-        this.state.forms.createTaskDescription = this.state.forms.createTaskDescription.slice(0, -1);
+        this.state.forms.createTaskDescription = this.state.forms.createTaskDescription.slice(
+          0,
+          -1
+        );
         this.parent.draw();
         return;
       } else if (e.key.length === 1) {
@@ -302,8 +315,12 @@ export class AgentCanvasInteractionHandler {
     // Handle context menu clicks (screen coordinates)
     if (this.state.contextMenuVisible && this.state.contextMenuItems) {
       for (const item of this.state.contextMenuItems) {
-        if (screenX >= item.x && screenX <= item.x + item.width &&
-            screenY >= item.y && screenY <= item.y + item.height) {
+        if (
+          screenX >= item.x &&
+          screenX <= item.x + item.width &&
+          screenY >= item.y &&
+          screenY <= item.y + item.height
+        ) {
           // Handle menu item click
           this.parent.handleContextMenuAction(item.action, item.agent);
           this.state.contextMenuVisible = false;
@@ -324,8 +341,12 @@ export class AgentCanvasInteractionHandler {
     // Handle multi-select context menu clicks (screen coordinates)
     if (this.state.multiSelectContextMenu && this.state.multiSelectMenuItems) {
       for (const item of this.state.multiSelectMenuItems) {
-        if (screenX >= item.x && screenX <= item.x + item.width &&
-            screenY >= item.y && screenY <= item.y + item.height) {
+        if (
+          screenX >= item.x &&
+          screenX <= item.x + item.width &&
+          screenY >= item.y &&
+          screenY <= item.y + item.height
+        ) {
           // Handle menu item click
           this.parent.handleMultiSelectAction(item.action);
           this.state.hideMultiSelectContextMenu();
@@ -341,8 +362,11 @@ export class AgentCanvasInteractionHandler {
 
     // If in assignment mode, prioritize assignment clicks over manual port wiring
     // Only honor port clicks when explicitly in connection modes to avoid blocking drag
-    const allowPortClick = this.state.ctrlPressed || this.state.isDraggingConnection ||
-      this.state.connectionDragStart || this.state.pendingAttachmentSource;
+    const allowPortClick =
+      this.state.ctrlPressed ||
+      this.state.isDraggingConnection ||
+      this.state.connectionDragStart ||
+      this.state.pendingAttachmentSource;
     if (allowPortClick) {
       const clickedPort = this.parent.getPortAtPosition(x, y);
       if (clickedPort) {
@@ -371,8 +395,12 @@ export class AgentCanvasInteractionHandler {
       // Check delete button first (higher priority)
       if (combiner.deleteButtonBounds) {
         const bounds = combiner.deleteButtonBounds;
-        if (x >= bounds.x && x <= bounds.x + bounds.width &&
-            y >= bounds.y && y <= bounds.y + bounds.height) {
+        if (
+          x >= bounds.x &&
+          x <= bounds.x + bounds.width &&
+          y >= bounds.y &&
+          y <= bounds.y + bounds.height
+        ) {
           // Delete this combiner
           e.stopPropagation();
           e.preventDefault();
@@ -385,8 +413,7 @@ export class AgentCanvasInteractionHandler {
       // Check RUN button
       if (combiner.runButtonBounds) {
         const b = combiner.runButtonBounds;
-        if (x >= b.x && x <= b.x + b.width &&
-            y >= b.y && y <= b.y + b.height) {
+        if (x >= b.x && x <= b.x + b.width && y >= b.y && y <= b.y + b.height) {
           e.stopPropagation();
           e.preventDefault();
           this.parent.executeCombiner(combiner);
@@ -397,11 +424,14 @@ export class AgentCanvasInteractionHandler {
       // Check assign output button
       if (combiner.assignButtonBounds) {
         const b = combiner.assignButtonBounds;
-        if (x >= b.x && x <= b.x + b.width &&
-            y >= b.y && y <= b.y + b.height) {
+        if (x >= b.x && x <= b.x + b.width && y >= b.y && y <= b.y + b.height) {
           e.stopPropagation();
           e.preventDefault();
-          if (this.state.combinerAssignMode && this.state.combinerAssignmentSource && this.state.combinerAssignmentSource.id === combiner.id) {
+          if (
+            this.state.combinerAssignMode &&
+            this.state.combinerAssignmentSource &&
+            this.state.combinerAssignmentSource.id === combiner.id
+          ) {
             this.state.combinerAssignMode = false;
             this.state.combinerAssignmentSource = null;
             this.canvas.style.cursor = 'grab';
@@ -419,9 +449,12 @@ export class AgentCanvasInteractionHandler {
       }
 
       // Check if clicking on combiner body
-      if (x >= combiner.x && x <= combiner.x + combiner.width &&
-          y >= combiner.y && y <= combiner.y + combiner.height) {
-
+      if (
+        x >= combiner.x &&
+        x <= combiner.x + combiner.width &&
+        y >= combiner.y &&
+        y <= combiner.y + combiner.height
+      ) {
         // Check if in assignment mode first (higher priority than dragging)
         if (this.state.assignmentMode && this.state.assignmentSourceTask) {
           e.stopPropagation();
@@ -473,17 +506,18 @@ export class AgentCanvasInteractionHandler {
 
     // Check if clicking on a task card first (tasks are drawn on top)
     if (this.state.tasks && this.state.tasks.length > 0) {
-      for (let i = this.state.tasks.length - 1; i >= 0; i--) {  // Check in reverse order (top to bottom)
+      for (let i = this.state.tasks.length - 1; i >= 0; i--) {
+        // Check in reverse order (top to bottom)
         const task = this.state.tasks[i];
-        if (task && task.x != null && task.y != null) {  // Use != to catch both null and undefined
+        if (task && task.x != null && task.y != null) {
+          // Use != to catch both null and undefined
           // Use a larger hit area around the task center
           const cardWidth = 160;
           const cardHeight = 60;
           const cardX = task.x - cardWidth / 2;
           const cardY = task.y - cardHeight / 2;
 
-          if (x >= cardX && x <= cardX + cardWidth &&
-              y >= cardY && y <= cardY + cardHeight) {
+          if (x >= cardX && x <= cardX + cardWidth && y >= cardY && y <= cardY + cardHeight) {
             // Handle Shift+Click for multi-selection
             if (e.shiftKey) {
               e.stopPropagation();
@@ -516,8 +550,7 @@ export class AgentCanvasInteractionHandler {
           // Delete button first (highest priority)
           if (storeNode.deleteButton) {
             const btn = storeNode.deleteButton;
-            if (x >= btn.x && x <= btn.x + btn.width &&
-                y >= btn.y && y <= btn.y + btn.height) {
+            if (x >= btn.x && x <= btn.x + btn.width && y >= btn.y && y <= btn.y + btn.height) {
               e.stopPropagation();
               e.preventDefault();
               if (confirm('Delete this store node?')) {
@@ -530,8 +563,7 @@ export class AgentCanvasInteractionHandler {
           // Assign button
           if (storeNode.assignBtnBounds) {
             const btn = storeNode.assignBtnBounds;
-            if (x >= btn.x && x <= btn.x + btn.width &&
-                y >= btn.y && y <= btn.y + btn.height) {
+            if (x >= btn.x && x <= btn.x + btn.width && y >= btn.y && y <= btn.y + btn.height) {
               e.stopPropagation();
               e.preventDefault();
               this.parent.toggleStoreAssignmentMode(storeNode);
@@ -540,8 +572,12 @@ export class AgentCanvasInteractionHandler {
           }
 
           // Check if clicking inside the card (for dragging or selecting)
-          if (x >= cardBounds.x && x <= cardBounds.x + cardBounds.width &&
-              y >= cardBounds.y && y <= cardBounds.y + cardBounds.height) {
+          if (
+            x >= cardBounds.x &&
+            x <= cardBounds.x + cardBounds.width &&
+            y >= cardBounds.y &&
+            y <= cardBounds.y + cardBounds.height
+          ) {
             // Handle Shift+Click for multi-selection
             if (e.shiftKey) {
               e.stopPropagation();
@@ -576,8 +612,7 @@ export class AgentCanvasInteractionHandler {
           // Delete button first
           if (attachment.deleteButton) {
             const btn = attachment.deleteButton;
-            if (x >= btn.x && x <= btn.x + btn.width &&
-                y >= btn.y && y <= btn.y + btn.height) {
+            if (x >= btn.x && x <= btn.x + btn.width && y >= btn.y && y <= btn.y + btn.height) {
               e.stopPropagation();
               e.preventDefault();
               if (confirm('Delete this attachment?')) {
@@ -590,8 +625,7 @@ export class AgentCanvasInteractionHandler {
           // Attach button
           if (attachment.attachButton) {
             const btn = attachment.attachButton;
-            if (x >= btn.x && x <= btn.x + btn.width &&
-                y >= btn.y && y <= btn.y + btn.height) {
+            if (x >= btn.x && x <= btn.x + btn.width && y >= btn.y && y <= btn.y + btn.height) {
               e.stopPropagation();
               e.preventDefault();
               this.state.isDraggingConnection = true;
@@ -607,8 +641,7 @@ export class AgentCanvasInteractionHandler {
             }
           }
 
-          if (x >= cardX && x <= cardX + cardWidth &&
-              y >= cardY && y <= cardY + cardHeight) {
+          if (x >= cardX && x <= cardX + cardWidth && y >= cardY && y <= cardY + cardHeight) {
             // Handle Shift+Click for multi-selection
             if (e.shiftKey) {
               e.stopPropagation();
@@ -638,8 +671,7 @@ export class AgentCanvasInteractionHandler {
 
         if (folder.collapseButton) {
           const btn = folder.collapseButton;
-          if (x >= btn.x && x <= btn.x + btn.width &&
-              y >= btn.y && y <= btn.y + btn.height) {
+          if (x >= btn.x && x <= btn.x + btn.width && y >= btn.y && y <= btn.y + btn.height) {
             e.stopPropagation();
             e.preventDefault();
             folder.collapsed = !folder.collapsed;
@@ -648,8 +680,12 @@ export class AgentCanvasInteractionHandler {
           }
         }
 
-        if (x >= cardBounds.x && x <= cardBounds.x + cardBounds.width &&
-            y >= cardBounds.y && y <= cardBounds.y + cardBounds.height) {
+        if (
+          x >= cardBounds.x &&
+          x <= cardBounds.x + cardBounds.width &&
+          y >= cardBounds.y &&
+          y <= cardBounds.y + cardBounds.height
+        ) {
           if (e.shiftKey) {
             e.stopPropagation();
             e.preventDefault();
@@ -676,8 +712,12 @@ export class AgentCanvasInteractionHandler {
       // Check delete button first (higher priority than dragging)
       if (agent.deleteButton) {
         const deleteBtn = agent.deleteButton;
-        if (x >= deleteBtn.x && x <= deleteBtn.x + deleteBtn.width &&
-            y >= deleteBtn.y && y <= deleteBtn.y + deleteBtn.height) {
+        if (
+          x >= deleteBtn.x &&
+          x <= deleteBtn.x + deleteBtn.width &&
+          y >= deleteBtn.y &&
+          y <= deleteBtn.y + deleteBtn.height
+        ) {
           // Remove agent from workspace
           e.stopPropagation();
           e.preventDefault();
@@ -686,8 +726,12 @@ export class AgentCanvasInteractionHandler {
         }
       }
 
-      if (x >= agent.x - halfWidth && x <= agent.x + halfWidth &&
-          y >= agent.y - halfHeight && y <= agent.y + halfHeight) {
+      if (
+        x >= agent.x - halfWidth &&
+        x <= agent.x + halfWidth &&
+        y >= agent.y - halfHeight &&
+        y <= agent.y + halfHeight
+      ) {
         // Handle Shift+Click for multi-selection
         if (e.shiftKey) {
           e.stopPropagation();
@@ -838,7 +882,6 @@ export class AgentCanvasInteractionHandler {
       return;
     }
 
-
     if (this.state.isDraggingStoreNode && this.state.draggedStoreNode) {
       const rect = this.canvas.getBoundingClientRect();
       const x = (e.clientX - rect.left - this.state.offsetX) / this.state.scale;
@@ -880,8 +923,8 @@ export class AgentCanvasInteractionHandler {
 
     if (this.state.isDragging) {
       // Pan the canvas
-      this.state.offsetX = (e.clientX - rect.left) - this.state.dragStartX;
-      this.state.offsetY = (e.clientY - rect.top) - this.state.dragStartY;
+      this.state.offsetX = e.clientX - rect.left - this.state.dragStartX;
+      this.state.offsetY = e.clientY - rect.top - this.state.dragStartY;
       this.parent.draw();
       return;
     }
@@ -892,10 +935,12 @@ export class AgentCanvasInteractionHandler {
       const mouseY = e.clientY - rect.top;
       const bounds = this.state.copyButtonBounds;
 
-      const isHovering = mouseX >= bounds.x && mouseX <= bounds.x + bounds.width &&
-                        mouseY >= bounds.y && mouseY <= bounds.y + bounds.height;
+      const isHovering =
+        mouseX >= bounds.x &&
+        mouseX <= bounds.x + bounds.width &&
+        mouseY >= bounds.y &&
+        mouseY <= bounds.y + bounds.height;
 
-      
       if (isHovering && this.state.copyButtonState === 'idle') {
         this.state.copyButtonState = 'hover';
         this.canvas.style.cursor = 'pointer';
@@ -949,8 +994,7 @@ export class AgentCanvasInteractionHandler {
           const cardX = task.bounds ? task.bounds.x : task.x - cardWidth / 2;
           const cardY = task.bounds ? task.bounds.y : task.y - cardHeight / 2;
 
-          if (x >= cardX && x <= cardX + cardWidth &&
-              y >= cardY && y <= cardY + cardHeight) {
+          if (x >= cardX && x <= cardX + cardWidth && y >= cardY && y <= cardY + cardHeight) {
             targetTask = task;
             break;
           }
@@ -959,21 +1003,28 @@ export class AgentCanvasInteractionHandler {
 
       if (targetTask) {
         // Find agent's most recent completed task
-        const agentTasks = this.state.tasks.filter(t =>
-          t.to === this.state.resultSourceAgent.name &&
-          t.assigned_node_id === this.state.resultSourceAgent.nodeId &&
-          t.status === 'completed'
-        ).sort((a, b) =>
-          new Date(b.completed_at) - new Date(a.completed_at)
-        );
+        const agentTasks = this.state.tasks
+          .filter(
+            t =>
+              t.to === this.state.resultSourceAgent.name &&
+              t.assigned_node_id === this.state.resultSourceAgent.nodeId &&
+              t.status === 'completed'
+          )
+          .sort((a, b) => new Date(b.completed_at) - new Date(a.completed_at));
 
         if (agentTasks.length > 0) {
           const latestTask = agentTasks[0];
           // Use existing linkTaskResult function from parent
           this.parent.linkTaskResult(latestTask.id, targetTask.id);
-          this.parent.showNotification(`Linked ${this.state.resultSourceAgent.name}'s latest result to task`, 'success');
+          this.parent.showNotification(
+            `Linked ${this.state.resultSourceAgent.name}'s latest result to task`,
+            'success'
+          );
         } else {
-          this.parent.showNotification(`Agent ${this.state.resultSourceAgent.name} has no completed tasks`, 'warning');
+          this.parent.showNotification(
+            `Agent ${this.state.resultSourceAgent.name} has no completed tasks`,
+            'warning'
+          );
         }
       }
 
@@ -1002,8 +1053,12 @@ export class AgentCanvasInteractionHandler {
         for (const agent of this.state.agents) {
           const halfWidth = (agent.width || 120) / 2;
           const halfHeight = (agent.height || 70) / 2;
-          if (x >= agent.x - halfWidth && x <= agent.x + halfWidth &&
-              y >= agent.y - halfHeight && y <= agent.y + halfHeight) {
+          if (
+            x >= agent.x - halfWidth &&
+            x <= agent.x + halfWidth &&
+            y >= agent.y - halfHeight &&
+            y <= agent.y + halfHeight
+          ) {
             resolvedPort = {
               nodeId: agent.nodeId || agent.name,
               nodeType: 'agent',
@@ -1023,8 +1078,7 @@ export class AgentCanvasInteractionHandler {
           const cardX = task.cardBounds ? task.cardBounds.x : task.x - cardWidth / 2;
           const cardY = task.cardBounds ? task.cardBounds.y : task.y - cardHeight / 2;
 
-          if (x >= cardX && x <= cardX + cardWidth &&
-              y >= cardY && y <= cardY + cardHeight) {
+          if (x >= cardX && x <= cardX + cardWidth && y >= cardY && y <= cardY + cardHeight) {
             resolvedPort = {
               nodeId: task.id,
               nodeType: 'task',
@@ -1039,8 +1093,12 @@ export class AgentCanvasInteractionHandler {
       // Fallback: if no port but dropped on a combiner body, attach to a new input port
       if (!resolvedPort) {
         for (const combiner of this.state.combinerNodes) {
-          if (x >= combiner.x && x <= combiner.x + combiner.width &&
-              y >= combiner.y && y <= combiner.y + combiner.height) {
+          if (
+            x >= combiner.x &&
+            x <= combiner.x + combiner.width &&
+            y >= combiner.y &&
+            y <= combiner.y + combiner.height
+          ) {
             const nextIndex = Math.max(combiner.inputPorts.length, 0);
             const portId = `input-${nextIndex}`;
             this.parent.ensureCombinerInputPort(combiner, portId);
@@ -1066,7 +1124,14 @@ export class AgentCanvasInteractionHandler {
           const dist = Math.hypot(portX - x, portY - y);
           if (dist < closestDist) {
             closestDist = dist;
-            closest = { nodeId: agent.nodeId || agent.name, nodeType: 'agent', portId: 'input', type: 'input', x: portX, y: portY };
+            closest = {
+              nodeId: agent.nodeId || agent.name,
+              nodeType: 'agent',
+              portId: 'input',
+              type: 'input',
+              x: portX,
+              y: portY
+            };
           }
         });
         // Accept if within 80px to make drops forgiving
@@ -1084,10 +1149,12 @@ export class AgentCanvasInteractionHandler {
           resolvedPort.portId
         );
         // If connecting task output to task input, persist as input_task_ids link
-        if (connection &&
-            this.state.connectionDragStart.nodeType === 'task' &&
-            resolvedPort.nodeType === 'task' &&
-            resolvedPort.type === 'input') {
+        if (
+          connection &&
+          this.state.connectionDragStart.nodeType === 'task' &&
+          resolvedPort.nodeType === 'task' &&
+          resolvedPort.type === 'input'
+        ) {
           this.parent.linkTaskResult(this.state.connectionDragStart.nodeId, resolvedPort.nodeId);
         }
         this.parent.showNotification('Connection created', 'success');
@@ -1130,8 +1197,7 @@ export class AgentCanvasInteractionHandler {
       const x = (e.clientX - rect.left - this.state.offsetX) / this.state.scale;
       const y = (e.clientY - rect.top - this.state.offsetY) / this.state.scale;
       const dragDistance = Math.sqrt(
-        Math.pow(x - this.state.dragStartX, 2) +
-        Math.pow(y - this.state.dragStartY, 2)
+        Math.pow(x - this.state.dragStartX, 2) + Math.pow(y - this.state.dragStartY, 2)
       );
 
       // If drag distance is small (< 5 pixels), treat as a click
@@ -1148,8 +1214,7 @@ export class AgentCanvasInteractionHandler {
       const x = (e.clientX - rect.left - this.state.offsetX) / this.state.scale;
       const y = (e.clientY - rect.top - this.state.offsetY) / this.state.scale;
       const dragDistance = Math.sqrt(
-        Math.pow(x - this.state.dragStartX, 2) +
-        Math.pow(y - this.state.dragStartY, 2)
+        Math.pow(x - this.state.dragStartX, 2) + Math.pow(y - this.state.dragStartY, 2)
       );
       const targetFolder = dragDistance >= 5 ? this.findWorkspaceFolderAtPosition(x, y) : null;
       if (targetFolder) {
@@ -1172,7 +1237,14 @@ export class AgentCanvasInteractionHandler {
     this.state.draggedTask = null;
 
     // Save layout if we were dragging something
-    if (wasDraggingAgent || wasDraggingTask || wasDraggingStoreNode || wasDraggingAttachment || wasDraggingCombiner || wasDraggingFolder) {
+    if (
+      wasDraggingAgent ||
+      wasDraggingTask ||
+      wasDraggingStoreNode ||
+      wasDraggingAttachment ||
+      wasDraggingCombiner ||
+      wasDraggingFolder
+    ) {
       this.parent.saveLayout();
     }
 
@@ -1193,8 +1265,12 @@ export class AgentCanvasInteractionHandler {
       const folder = this.state.workspaceFolders[i];
       const bounds = folder?.dropZoneBounds || folder?.cardBounds;
       if (!bounds) continue;
-      if (x >= bounds.x && x <= bounds.x + bounds.width &&
-          y >= bounds.y && y <= bounds.y + bounds.height) {
+      if (
+        x >= bounds.x &&
+        x <= bounds.x + bounds.width &&
+        y >= bounds.y &&
+        y <= bounds.y + bounds.height
+      ) {
         return folder;
       }
     }
@@ -1222,13 +1298,20 @@ export class AgentCanvasInteractionHandler {
       const panelWidth = this.state.expandedAgentPanelWidth;
       const panelHeight = this.state.height;
 
-      if (mouseX >= panelX && mouseX <= panelX + panelWidth &&
-          mouseY >= panelY && mouseY <= panelY + panelHeight) {
+      if (
+        mouseX >= panelX &&
+        mouseX <= panelX + panelWidth &&
+        mouseY >= panelY &&
+        mouseY <= panelY + panelHeight
+      ) {
         // Scroll the agent panel content
         const scrollAmount = e.deltaY > 0 ? 20 : -20; // Scroll 20 pixels at a time
 
         this.state.agentPanelScrollOffset += scrollAmount;
-        this.state.agentPanelScrollOffset = Math.max(0, Math.min(this.state.agentPanelMaxScroll, this.state.agentPanelScrollOffset));
+        this.state.agentPanelScrollOffset = Math.max(
+          0,
+          Math.min(this.state.agentPanelMaxScroll, this.state.agentPanelScrollOffset)
+        );
 
         this.parent.draw();
         return;
@@ -1238,8 +1321,12 @@ export class AgentCanvasInteractionHandler {
     // Check if mouse is over result box for scrolling
     if (this.state.resultBoxBounds && this.state.expandedTask) {
       const bounds = this.state.resultBoxBounds;
-      if (mouseX >= bounds.x && mouseX <= bounds.x + bounds.width &&
-          mouseY >= bounds.y && mouseY <= bounds.y + bounds.height) {
+      if (
+        mouseX >= bounds.x &&
+        mouseX <= bounds.x + bounds.width &&
+        mouseY >= bounds.y &&
+        mouseY <= bounds.y + bounds.height
+      ) {
         // Scroll the result content
         const scrollAmount = e.deltaY > 0 ? 3 : -3; // Scroll 3 lines at a time
         this.state.resultScrollOffset += scrollAmount;
@@ -1275,7 +1362,13 @@ export class AgentCanvasInteractionHandler {
    */
   onClick(e) {
     // Ignore clicks during drag operations
-    if (this.state.isDragging || this.state.isDraggingAgent || this.state.isDraggingTask || this.state.isDraggingAttachment || this.state.isDraggingFolder) {
+    if (
+      this.state.isDragging ||
+      this.state.isDraggingAgent ||
+      this.state.isDraggingTask ||
+      this.state.isDraggingAttachment ||
+      this.state.isDraggingFolder
+    ) {
       return;
     }
 
@@ -1289,8 +1382,12 @@ export class AgentCanvasInteractionHandler {
       // Check close button
       if (this.state.forms.addAgentCloseButtonBounds) {
         const btn = this.state.forms.addAgentCloseButtonBounds;
-        if (screenX >= btn.x && screenX <= btn.x + btn.width &&
-            screenY >= btn.y && screenY <= btn.y + btn.height) {
+        if (
+          screenX >= btn.x &&
+          screenX <= btn.x + btn.width &&
+          screenY >= btn.y &&
+          screenY <= btn.y + btn.height
+        ) {
           this.state.forms.hideAddAgentForm();
           return;
         }
@@ -1299,8 +1396,12 @@ export class AgentCanvasInteractionHandler {
       // Check submit button
       if (this.state.forms.addAgentSubmitButtonBounds) {
         const btn = this.state.forms.addAgentSubmitButtonBounds;
-        if (screenX >= btn.x && screenX <= btn.x + btn.width &&
-            screenY >= btn.y && screenY <= btn.y + btn.height) {
+        if (
+          screenX >= btn.x &&
+          screenX <= btn.x + btn.width &&
+          screenY >= btn.y &&
+          screenY <= btn.y + btn.height
+        ) {
           this.state.forms.submitAddAgentForm();
           return;
         }
@@ -1309,8 +1410,13 @@ export class AgentCanvasInteractionHandler {
       // Check agent selection buttons
       if (this.state.forms.agentAddSelectionBounds) {
         for (const bounds of this.state.forms.agentAddSelectionBounds) {
-          if (bounds && screenX >= bounds.x && screenX <= bounds.x + bounds.width &&
-              screenY >= bounds.y && screenY <= bounds.y + bounds.height) {
+          if (
+            bounds &&
+            screenX >= bounds.x &&
+            screenX <= bounds.x + bounds.width &&
+            screenY >= bounds.y &&
+            screenY <= bounds.y + bounds.height
+          ) {
             this.state.forms.selectedAgentToAdd = bounds.agentName;
             this.parent.draw();
             return;
@@ -1321,8 +1427,12 @@ export class AgentCanvasInteractionHandler {
       // Click outside form - close it
       if (this.state.forms.addAgentFormBounds) {
         const form = this.state.forms.addAgentFormBounds;
-        if (screenX < form.x || screenX > form.x + form.width ||
-            screenY < form.y || screenY > form.y + form.height) {
+        if (
+          screenX < form.x ||
+          screenX > form.x + form.width ||
+          screenY < form.y ||
+          screenY > form.y + form.height
+        ) {
           this.state.forms.hideAddAgentForm();
           return;
         }
@@ -1337,19 +1447,26 @@ export class AgentCanvasInteractionHandler {
       // Check close button
       if (this.state.forms.createTaskCloseButtonBounds) {
         const btn = this.state.forms.createTaskCloseButtonBounds;
-        if (screenX >= btn.x && screenX <= btn.x + btn.width &&
-            screenY >= btn.y && screenY <= btn.y + btn.height) {
+        if (
+          screenX >= btn.x &&
+          screenX <= btn.x + btn.width &&
+          screenY >= btn.y &&
+          screenY <= btn.y + btn.height
+        ) {
           this.state.forms.hideCreateTaskForm();
           return;
         }
       }
 
-
       // Check submit button
       if (this.state.forms.createTaskSubmitButtonBounds) {
         const btn = this.state.forms.createTaskSubmitButtonBounds;
-        if (screenX >= btn.x && screenX <= btn.x + btn.width &&
-            screenY >= btn.y && screenY <= btn.y + btn.height) {
+        if (
+          screenX >= btn.x &&
+          screenX <= btn.x + btn.width &&
+          screenY >= btn.y &&
+          screenY <= btn.y + btn.height
+        ) {
           this.state.forms.submitCreateTaskForm();
           return;
         }
@@ -1358,8 +1475,12 @@ export class AgentCanvasInteractionHandler {
       // Check checkbox
       if (this.state.forms.createTaskCheckboxBounds) {
         const cb = this.state.forms.createTaskCheckboxBounds;
-        if (screenX >= cb.x && screenX <= cb.x + cb.width &&
-            screenY >= cb.y && screenY <= cb.y + cb.height) {
+        if (
+          screenX >= cb.x &&
+          screenX <= cb.x + cb.width &&
+          screenY >= cb.y &&
+          screenY <= cb.y + cb.height
+        ) {
           this.state.forms.createTaskAssignToAgent = !this.state.forms.createTaskAssignToAgent;
           if (!this.state.forms.createTaskAssignToAgent) {
             this.state.forms.selectedAgentForTask = null;
@@ -1372,8 +1493,13 @@ export class AgentCanvasInteractionHandler {
       // Check agent selection buttons
       if (this.state.forms.createTaskAssignToAgent && this.state.forms.agentSelectionBounds) {
         for (const bounds of this.state.forms.agentSelectionBounds) {
-          if (bounds && screenX >= bounds.x && screenX <= bounds.x + bounds.width &&
-              screenY >= bounds.y && screenY <= bounds.y + bounds.height) {
+          if (
+            bounds &&
+            screenX >= bounds.x &&
+            screenX <= bounds.x + bounds.width &&
+            screenY >= bounds.y &&
+            screenY <= bounds.y + bounds.height
+          ) {
             this.state.forms.selectedAgentForTask = bounds.agentName;
             this.parent.draw();
             return;
@@ -1384,8 +1510,12 @@ export class AgentCanvasInteractionHandler {
       // Check description field - enable direct typing
       if (this.state.forms.createTaskDescriptionBounds) {
         const input = this.state.forms.createTaskDescriptionBounds;
-        if (screenX >= input.x && screenX <= input.x + input.width &&
-            screenY >= input.y && screenY <= input.y + input.height) {
+        if (
+          screenX >= input.x &&
+          screenX <= input.x + input.width &&
+          screenY >= input.y &&
+          screenY <= input.y + input.height
+        ) {
           this.state.forms.createTaskDescriptionFocused = true;
           this.canvas.style.cursor = 'text';
           this.parent.draw();
@@ -1401,8 +1531,12 @@ export class AgentCanvasInteractionHandler {
       // Click outside form - close it
       if (this.state.forms.createTaskFormBounds) {
         const form = this.state.forms.createTaskFormBounds;
-        if (screenX < form.x || screenX > form.x + form.width ||
-            screenY < form.y || screenY > form.y + form.height) {
+        if (
+          screenX < form.x ||
+          screenX > form.x + form.width ||
+          screenY < form.y ||
+          screenY > form.y + form.height
+        ) {
           this.state.forms.hideCreateTaskForm();
           return;
         }
@@ -1415,8 +1549,12 @@ export class AgentCanvasInteractionHandler {
     // Check for click on "Create Task" button
     if (this.state.createTaskButtonBounds) {
       const btn = this.state.createTaskButtonBounds;
-      if (screenX >= btn.x && screenX <= btn.x + btn.width &&
-          screenY >= btn.y && screenY <= btn.y + btn.height) {
+      if (
+        screenX >= btn.x &&
+        screenX <= btn.x + btn.width &&
+        screenY >= btn.y &&
+        screenY <= btn.y + btn.height
+      ) {
         this.state.forms.showCreateTaskForm();
         return;
       }
@@ -1425,8 +1563,12 @@ export class AgentCanvasInteractionHandler {
     // Check for click on "Add Agent" button
     if (this.state.addAgentButtonBounds) {
       const btn = this.state.addAgentButtonBounds;
-      if (screenX >= btn.x && screenX <= btn.x + btn.width &&
-          screenY >= btn.y && screenY <= btn.y + btn.height) {
+      if (
+        screenX >= btn.x &&
+        screenX <= btn.x + btn.width &&
+        screenY >= btn.y &&
+        screenY <= btn.y + btn.height
+      ) {
         this.state.forms.showAddAgentForm();
         return;
       }
@@ -1435,8 +1577,12 @@ export class AgentCanvasInteractionHandler {
     // Check for click on "Timeline" toggle button
     if (this.state.timelineToggleBounds) {
       const btn = this.state.timelineToggleBounds;
-      if (screenX >= btn.x && screenX <= btn.x + btn.width &&
-          screenY >= btn.y && screenY <= btn.y + btn.height) {
+      if (
+        screenX >= btn.x &&
+        screenX <= btn.x + btn.width &&
+        screenY >= btn.y &&
+        screenY <= btn.y + btn.height
+      ) {
         this.parent.toggleTimeline();
         return;
       }
@@ -1445,8 +1591,12 @@ export class AgentCanvasInteractionHandler {
     // Check for click on "Auto-Layout" button
     if (this.state.autoLayoutButtonBounds) {
       const btn = this.state.autoLayoutButtonBounds;
-      if (screenX >= btn.x && screenX <= btn.x + btn.width &&
-          screenY >= btn.y && screenY <= btn.y + btn.height) {
+      if (
+        screenX >= btn.x &&
+        screenX <= btn.x + btn.width &&
+        screenY >= btn.y &&
+        screenY <= btn.y + btn.height
+      ) {
         this.parent.autoLayoutTasks();
         return;
       }
@@ -1455,8 +1605,12 @@ export class AgentCanvasInteractionHandler {
     // Check for click on "Save Layout" button
     if (this.state.saveLayoutButtonBounds) {
       const btn = this.state.saveLayoutButtonBounds;
-      if (screenX >= btn.x && screenX <= btn.x + btn.width &&
-          screenY >= btn.y && screenY <= btn.y + btn.height) {
+      if (
+        screenX >= btn.x &&
+        screenX <= btn.x + btn.width &&
+        screenY >= btn.y &&
+        screenY <= btn.y + btn.height
+      ) {
         this.parent.saveLayout();
         this.parent.showNotification('💾 Layout saved', 'success');
         return;
@@ -1470,8 +1624,12 @@ export class AgentCanvasInteractionHandler {
       const closeButtonY = 15;
       const closeButtonSize = 30;
 
-      if (screenX >= closeButtonX && screenX <= closeButtonX + closeButtonSize &&
-          screenY >= closeButtonY && screenY <= closeButtonY + closeButtonSize) {
+      if (
+        screenX >= closeButtonX &&
+        screenX <= closeButtonX + closeButtonSize &&
+        screenY >= closeButtonY &&
+        screenY <= closeButtonY + closeButtonSize
+      ) {
         this.parent.toggleTimeline();
         return;
       }
@@ -1484,8 +1642,12 @@ export class AgentCanvasInteractionHandler {
       const closeButtonY = 30;
       const closeButtonSize = 40;
 
-      if (screenX >= closeButtonX && screenX <= closeButtonX + closeButtonSize &&
-          screenY >= closeButtonY && screenY <= closeButtonY + closeButtonSize) {
+      if (
+        screenX >= closeButtonX &&
+        screenX <= closeButtonX + closeButtonSize &&
+        screenY >= closeButtonY &&
+        screenY <= closeButtonY + closeButtonSize
+      ) {
         this.parent.closeAgentPanel();
         return;
       }
@@ -1503,8 +1665,12 @@ export class AgentCanvasInteractionHandler {
       const closeButtonY = 30;
       const closeButtonSize = 40;
 
-      if (screenX >= closeButtonX && screenX <= closeButtonX + closeButtonSize &&
-          screenY >= closeButtonY && screenY <= closeButtonY + closeButtonSize) {
+      if (
+        screenX >= closeButtonX &&
+        screenX <= closeButtonX + closeButtonSize &&
+        screenY >= closeButtonY &&
+        screenY <= closeButtonY + closeButtonSize
+      ) {
         this.parent.closeCombinerPanel();
         return;
       }
@@ -1522,8 +1688,12 @@ export class AgentCanvasInteractionHandler {
       const closeButtonY = 30;
       const closeButtonSize = 40;
 
-      if (screenX >= closeButtonX && screenX <= closeButtonX + closeButtonSize &&
-          screenY >= closeButtonY && screenY <= closeButtonY + closeButtonSize) {
+      if (
+        screenX >= closeButtonX &&
+        screenX <= closeButtonX + closeButtonSize &&
+        screenY >= closeButtonY &&
+        screenY <= closeButtonY + closeButtonSize
+      ) {
         this.parent.closeTaskPanel();
         return;
       }
@@ -1531,8 +1701,12 @@ export class AgentCanvasInteractionHandler {
       // Check if click is on copy button
       if (this.state.copyButtonBounds) {
         const btn = this.state.copyButtonBounds;
-        if (screenX >= btn.x && screenX <= btn.x + btn.width &&
-            screenY >= btn.y && screenY <= btn.y + btn.height) {
+        if (
+          screenX >= btn.x &&
+          screenX <= btn.x + btn.width &&
+          screenY >= btn.y &&
+          screenY <= btn.y + btn.height
+        ) {
           this.parent.copyResultToClipboard();
           return;
         }
@@ -1559,9 +1733,13 @@ export class AgentCanvasInteractionHandler {
         const cardX = task.cardBounds ? task.cardBounds.x : task.x - cardWidth / 2;
         const cardY = task.cardBounds ? task.cardBounds.y : task.y - cardHeight / 2;
 
-        if (x >= cardX && x <= cardX + cardWidth &&
-            y >= cardY && y <= cardY + cardHeight) {
-          this.parent.createConnection(this.state.pendingAttachmentSource.id, 'output', task.id, 'input');
+        if (x >= cardX && x <= cardX + cardWidth && y >= cardY && y <= cardY + cardHeight) {
+          this.parent.createConnection(
+            this.state.pendingAttachmentSource.id,
+            'output',
+            task.id,
+            'input'
+          );
           this.state.pendingAttachmentSource = null;
           this.state.isDraggingConnection = false;
           this.state.connectionDragStart = null;
@@ -1582,7 +1760,12 @@ export class AgentCanvasInteractionHandler {
           bottom: agent.y + halfHeight
         };
         if (x >= bounds.left && x <= bounds.right && y >= bounds.top && y <= bounds.bottom) {
-          this.parent.createConnection(this.state.pendingAttachmentSource.id, 'output', agent.nodeId || agent.name, 'input');
+          this.parent.createConnection(
+            this.state.pendingAttachmentSource.id,
+            'output',
+            agent.nodeId || agent.name,
+            'input'
+          );
           this.state.pendingAttachmentSource = null;
           this.state.isDraggingConnection = false;
           this.state.connectionDragStart = null;
@@ -1622,8 +1805,7 @@ export class AgentCanvasInteractionHandler {
         // Check if click is on delete button first
         if (task.deleteBtnBounds) {
           const btn = task.deleteBtnBounds;
-          if (x >= btn.x && x <= btn.x + btn.width &&
-              y >= btn.y && y <= btn.y + btn.height) {
+          if (x >= btn.x && x <= btn.x + btn.width && y >= btn.y && y <= btn.y + btn.height) {
             // Delete button clicked
             this.parent.deleteTask(task);
             return;
@@ -1633,8 +1815,7 @@ export class AgentCanvasInteractionHandler {
         // Check if click is on execute button
         if (task.executeBtnBounds && task.status === 'pending') {
           const btn = task.executeBtnBounds;
-          if (x >= btn.x && x <= btn.x + btn.width &&
-              y >= btn.y && y <= btn.y + btn.height) {
+          if (x >= btn.x && x <= btn.x + btn.width && y >= btn.y && y <= btn.y + btn.height) {
             // Execute button clicked
             this.parent.executeTask(task);
             return;
@@ -1644,8 +1825,7 @@ export class AgentCanvasInteractionHandler {
         // Check if click is on rerun button
         if (task.rerunBtnBounds && (task.status === 'completed' || task.status === 'failed')) {
           const btn = task.rerunBtnBounds;
-          if (x >= btn.x && x <= btn.x + btn.width &&
-              y >= btn.y && y <= btn.y + btn.height) {
+          if (x >= btn.x && x <= btn.x + btn.width && y >= btn.y && y <= btn.y + btn.height) {
             // Rerun button clicked
             this.parent.rerunTask(task);
             return;
@@ -1655,11 +1835,13 @@ export class AgentCanvasInteractionHandler {
         // Check if click is on assign button
         if (task.assignBtnBounds) {
           const btn = task.assignBtnBounds;
-          if (x >= btn.x && x <= btn.x + btn.width &&
-              y >= btn.y && y <= btn.y + btn.height) {
+          if (x >= btn.x && x <= btn.x + btn.width && y >= btn.y && y <= btn.y + btn.height) {
             // If already assigning from another task, treat this as target
-            if (this.state.assignmentMode && this.state.assignmentSourceTask &&
-                this.state.assignmentSourceTask.id !== task.id) {
+            if (
+              this.state.assignmentMode &&
+              this.state.assignmentSourceTask &&
+              this.state.assignmentSourceTask.id !== task.id
+            ) {
               this.parent.linkTaskResult(this.state.assignmentSourceTask.id, task.id);
               this.state.assignmentMode = false;
               this.state.assignmentSourceTask = null;
@@ -1678,11 +1860,13 @@ export class AgentCanvasInteractionHandler {
 
         // Log button click handler removed - button no longer rendered
 
-        if (x >= cardX && x <= cardX + cardWidth &&
-            y >= cardY && y <= cardY + cardHeight) {
+        if (x >= cardX && x <= cardX + cardWidth && y >= cardY && y <= cardY + cardHeight) {
           // Check if we're in assignment mode and this is a different task
-          if (this.state.assignmentMode && this.state.assignmentSourceTask &&
-              this.state.assignmentSourceTask.id !== task.id) {
+          if (
+            this.state.assignmentMode &&
+            this.state.assignmentSourceTask &&
+            this.state.assignmentSourceTask.id !== task.id
+          ) {
             // Link source task output to this task as an input
             this.parent.linkTaskResult(this.state.assignmentSourceTask.id, task.id);
             this.state.assignmentMode = false;
@@ -1716,8 +1900,7 @@ export class AgentCanvasInteractionHandler {
         const cardX = att.cardBounds ? att.cardBounds.x : att.x - cardWidth / 2;
         const cardY = att.cardBounds ? att.cardBounds.y : att.y - cardHeight / 2;
 
-        if (x >= cardX && x <= cardX + cardWidth &&
-            y >= cardY && y <= cardY + cardHeight) {
+        if (x >= cardX && x <= cardX + cardWidth && y >= cardY && y <= cardY + cardHeight) {
           if (window.showAttachmentDetails) {
             window.showAttachmentDetails(att);
           }
@@ -1732,8 +1915,12 @@ export class AgentCanvasInteractionHandler {
         const folder = this.state.workspaceFolders[i];
         const bounds = folder?.cardBounds;
         if (!bounds) continue;
-        if (x >= bounds.x && x <= bounds.x + bounds.width &&
-            y >= bounds.y && y <= bounds.y + bounds.height) {
+        if (
+          x >= bounds.x &&
+          x <= bounds.x + bounds.width &&
+          y >= bounds.y &&
+          y <= bounds.y + bounds.height
+        ) {
           this.state.clearSelection();
           this.state.selectNode(folder.id, 'workspace_folder', folder);
           this.parent.draw();
@@ -1752,8 +1939,8 @@ export class AgentCanvasInteractionHandler {
         top: agent.y - halfHeight,
         bottom: agent.y + halfHeight
       };
-      const inBounds = x >= bounds.left && x <= bounds.right &&
-          y >= bounds.top && y <= bounds.bottom;
+      const inBounds =
+        x >= bounds.left && x <= bounds.right && y >= bounds.top && y <= bounds.bottom;
 
       if (inBounds) {
         // Agent clicked
@@ -1763,7 +1950,12 @@ export class AgentCanvasInteractionHandler {
           return;
         } else if (this.state.combinerAssignMode && this.state.combinerAssignmentSource) {
           // Wire combiner output to this agent
-          this.parent.createConnection(this.state.combinerAssignmentSource.id, 'output', agent.name, 'input');
+          this.parent.createConnection(
+            this.state.combinerAssignmentSource.id,
+            'output',
+            agent.name,
+            'input'
+          );
           this.state.combinerAssignMode = false;
           this.state.combinerAssignmentSource = null;
           this.canvas.style.cursor = 'grab';
@@ -1783,8 +1975,12 @@ export class AgentCanvasInteractionHandler {
 
     // Check combiner node clicks (for task assignment)
     for (const combiner of this.state.combinerNodes) {
-      if (x >= combiner.x && x <= combiner.x + combiner.width &&
-          y >= combiner.y && y <= combiner.y + combiner.height) {
+      if (
+        x >= combiner.x &&
+        x <= combiner.x + combiner.width &&
+        y >= combiner.y &&
+        y <= combiner.y + combiner.height
+      ) {
         // Combiner clicked
         if (this.state.assignmentMode && this.state.assignmentSourceTask) {
           // In assignment mode - assign task to combiner
@@ -1912,7 +2108,10 @@ export class AgentCanvasInteractionHandler {
     // Show notification if nodes were selected
     const selectedCount = this.state.getSelectionCount();
     if (selectedCount > 0) {
-      this.parent.showNotification(`Selected ${selectedCount} node${selectedCount > 1 ? 's' : ''}`, 'info');
+      this.parent.showNotification(
+        `Selected ${selectedCount} node${selectedCount > 1 ? 's' : ''}`,
+        'info'
+      );
     }
   }
 
@@ -1992,8 +2191,12 @@ export class AgentCanvasInteractionHandler {
     const clickedAgent = this.state.agents.find(agent => {
       const halfWidth = (agent.width || 120) / 2;
       const halfHeight = (agent.height || 70) / 2;
-      return canvasX >= agent.x - halfWidth && canvasX <= agent.x + halfWidth &&
-             canvasY >= agent.y - halfHeight && canvasY <= agent.y + halfHeight;
+      return (
+        canvasX >= agent.x - halfWidth &&
+        canvasX <= agent.x + halfWidth &&
+        canvasY >= agent.y - halfHeight &&
+        canvasY <= agent.y + halfHeight
+      );
     });
 
     if (clickedAgent) {

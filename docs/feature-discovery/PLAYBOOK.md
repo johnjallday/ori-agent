@@ -54,8 +54,8 @@ John's own captured ideas — the highest-signal source. Read them fresh at the 
 run:
 
 ```bash
-wt backlog --json      # open Issues in this repository authored by the current gh user
-wt backlog view <number>   # one Issue's full body, when the title is not enough
+./scripts/backlog.sh --json          # open Issues in this repository authored by the current gh user
+./scripts/backlog.sh view <number>   # one Issue's full body, when the title is not enough
 ```
 
 Treat **every** open Issue as a candidate and score it with the same rubric. An Issue counts

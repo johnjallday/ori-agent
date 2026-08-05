@@ -81,8 +81,7 @@
 
 #templatesPage .tpl-agent-card {
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.58), rgba(255, 255, 255, 0)),
-    var(--bg-secondary);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.58), rgba(255, 255, 255, 0)), var(--bg-secondary);
   border: 1px solid rgba(148, 163, 184, 0.25);
   border-radius: 8px;
   box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
@@ -433,8 +432,7 @@
 
 [data-bs-theme="dark"] #templatesPage .tpl-agent-card {
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0)),
-    var(--bg-secondary);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0)), var(--bg-secondary);
   box-shadow: 0 12px 28px rgba(0, 0, 0, 0.22);
 }
 

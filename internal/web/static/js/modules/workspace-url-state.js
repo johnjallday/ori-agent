@@ -136,7 +136,11 @@ export function isSafeReturnTarget(raw, workspaceId) {
   if (!value.startsWith('/')) return false; // rejects absolute URLs and bare hosts
   if (value.startsWith('//')) return false; // rejects protocol-relative URLs
   const expectedPrefix = '/workspaces/' + encodeURIComponent(id);
-  return value === expectedPrefix || value.startsWith(expectedPrefix + '?') || value.startsWith(expectedPrefix + '/');
+  return (
+    value === expectedPrefix ||
+    value.startsWith(expectedPrefix + '?') ||
+    value.startsWith(expectedPrefix + '/')
+  );
 }
 
 /**

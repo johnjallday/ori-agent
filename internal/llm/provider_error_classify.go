@@ -172,7 +172,7 @@ func classifyStatus(provider string, err error, status int, code string) *Provid
 
 	typed := NewProviderError(provider, category, err).WithHTTP(status, code)
 	if after := retryAfterFrom(err); after > 0 {
-		typed.WithRetryAfter(after)
+		typed = typed.WithRetryAfter(after)
 	}
 	return typed
 }

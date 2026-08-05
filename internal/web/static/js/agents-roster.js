@@ -832,7 +832,11 @@
         html += '<option value="' + esc(slug) + '">' + esc(roleLabel(slug)) + '</option>';
       });
       html +=
-        '<option value="' + UNSPECIALIZED_FILTER_VALUE + '">' + esc(roleLabel('general')) + '</option>';
+        '<option value="' +
+        UNSPECIALIZED_FILTER_VALUE +
+        '">' +
+        esc(roleLabel('general')) +
+        '</option>';
       els.filterRole.innerHTML = html;
       if (state.filters.role) els.filterRole.value = state.filters.role;
     }
@@ -1717,7 +1721,7 @@
 
   function readonlyFacts(detail) {
     var facts = [
-      ['Role', (detail && detail.role) ? roleLabel(detail.role) : '—'],
+      ['Role', detail && detail.role ? roleLabel(detail.role) : '—'],
       ['Model', (detail && detail.model) || '—'],
       ['Provider', detail && detail.provider ? titleCase(detail.provider) : '—'],
       ['Temperature', detail && detail.temperature != null ? String(detail.temperature) : '—']
@@ -2106,7 +2110,11 @@
       els.workspacesBody.innerHTML =
         members.length === 0
           ? '<p class="stage-hint">Not attached to any workspace.</p>'
-          : members.map(function (ws) { return readonlyWsRow(ws, listItem.role); }).join('');
+          : members
+              .map(function (ws) {
+                return readonlyWsRow(ws, listItem.role);
+              })
+              .join('');
       return;
     }
 
@@ -3307,8 +3315,7 @@
           return '<option value="' + esc(slug) + '">' + esc(roleLabel(slug)) + '</option>';
         })
         .join('');
-      options +=
-        '<option value="general">' + esc(roleLabel('general')) + '</option>';
+      options += '<option value="general">' + esc(roleLabel('general')) + '</option>';
       els.bulkTagsBody.innerHTML =
         '<p class="bulk-dialog__lead">Assign one role to every selected agent. Metadata only — model, prompt, and skills are unchanged.</p>' +
         '<label class="bulk-dialog__field"><span class="visually-hidden">Role</span>' +
@@ -4094,7 +4101,11 @@
   // Specialist holding the slot). Distinct from roleLabel, which names the
   // agent's own role rather than its Commander-slot status.
   function commanderSlotLabel(role) {
-    return String(role || '').trim().toLowerCase() === 'orchestrator' ? 'Commander' : 'Acting Commander';
+    return String(role || '')
+      .trim()
+      .toLowerCase() === 'orchestrator'
+      ? 'Commander'
+      : 'Acting Commander';
   }
 
   function titleCase(s) {

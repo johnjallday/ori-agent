@@ -62,12 +62,12 @@
 [data-bs-theme="dark"] .card .card-text,
 [data-bs-theme="dark"] .card h5,
 [data-bs-theme="dark"] .card p {
-  color: #F5F6F7 !important;
+  color: #f5f6f7 !important;
 }
 
 [data-bs-theme="dark"] .card .text-muted,
 [data-bs-theme="dark"] .card small {
-  color: #C9CCD1 !important;
+  color: #c9ccd1 !important;
 }
 
 /* =============================================================================
@@ -91,7 +91,7 @@
 }
 
 .modern-btn::before {
-  content: '';
+  content: "";
   position: absolute;
   top: 0;
   left: -100%;
@@ -153,7 +153,7 @@
 }
 
 .sidebar .modern-card .modern-btn-primary::after {
-  content: '';
+  content: "";
   position: absolute;
   left: -12px;
   top: 50%;
@@ -165,7 +165,7 @@
 }
 
 [data-bs-theme="dark"] .sidebar .modern-card .modern-btn-primary::after {
-  background: #2A8762;
+  background: #2a8762;
 }
 
 /* Bootstrap outline buttons enhancement */
@@ -308,10 +308,22 @@ textarea.form-control:focus {
   border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
-.badge-primary { background: var(--primary-color); color: white; }
-.badge-secondary { background: var(--bg-tertiary); color: var(--text-secondary); }
-.badge-success { background: var(--success-color); color: white; }
-.badge-info { background: var(--info-color); color: white; }
+.badge-primary {
+  background: var(--primary-color);
+  color: white;
+}
+.badge-secondary {
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+}
+.badge-success {
+  background: var(--success-color);
+  color: white;
+}
+.badge-info {
+  background: var(--info-color);
+  color: white;
+}
 
 /* =============================================================================
    GLASSMORPHISM EFFECTS
@@ -348,13 +360,18 @@ textarea.form-control:focus {
 }
 
 .floating-glass::before {
-  content: '';
+  content: "";
   position: absolute;
   top: -2px;
   left: -2px;
   right: -2px;
   bottom: -2px;
-  background: linear-gradient(45deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.1));
+  background: linear-gradient(
+    45deg,
+    rgba(255, 255, 255, 0.1),
+    rgba(255, 255, 255, 0.05),
+    rgba(255, 255, 255, 0.1)
+  );
   border-radius: inherit;
   z-index: -1;
   opacity: 0;
@@ -520,8 +537,12 @@ textarea.form-control:focus {
   display: inline-block;
 }
 
-.status-online { background: var(--success-color); }
-.status-offline { background: var(--secondary-color); }
+.status-online {
+  background: var(--success-color);
+}
+.status-offline {
+  background: var(--secondary-color);
+}
 
 /* Plugin health badge */
 .plugin-health-badge {
@@ -589,8 +610,12 @@ textarea.form-control:focus {
   line-height: 1.6;
 }
 
-.chat-content h1, .chat-content h2, .chat-content h3,
-.chat-content h4, .chat-content h5, .chat-content h6 {
+.chat-content h1,
+.chat-content h2,
+.chat-content h3,
+.chat-content h4,
+.chat-content h5,
+.chat-content h6 {
   color: var(--text-primary);
   margin: 0.75rem 0 0.5rem 0;
   font-weight: 600;
@@ -659,7 +684,7 @@ textarea.form-control:focus {
   color: var(--primary-color);
   padding: 0.125rem 0.25rem;
   border-radius: var(--radius-sm);
-  font-family: 'SF Mono', 'Monaco', 'Cascadia Code', 'Roboto Mono', monospace;
+  font-family: "SF Mono", "Monaco", "Cascadia Code", "Roboto Mono", monospace;
   font-size: 0.875em;
 }
 
@@ -689,7 +714,8 @@ textarea.form-control:focus {
   padding: 0;
 }
 
-.chat-content ul, .chat-content ol {
+.chat-content ul,
+.chat-content ol {
   margin: 0.5rem 0;
   padding-left: 1.25rem;
 }
@@ -739,7 +765,7 @@ textarea.form-control:focus {
 }
 
 .message-container .modern-card::before {
-  content: '';
+  content: "";
   position: absolute;
   top: 0;
   left: -100%;
@@ -776,7 +802,9 @@ textarea.form-control:focus {
 }
 
 @keyframes typing {
-  0%, 60%, 100% {
+  0%,
+  60%,
+  100% {
     transform: translateY(0);
     opacity: 0.5;
   }
@@ -850,7 +878,9 @@ textarea.form-control:focus {
   gap: 0.5rem;
   border-radius: 4px;
   margin: 2px 4px;
-  transition: background 0.15s ease, color 0.15s ease;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
 }
 
 #pluginPagesMenu .dropdown-item:hover,
@@ -923,8 +953,14 @@ textarea.form-control:focus {
 }
 
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* Loading shimmer effect */
@@ -934,7 +970,7 @@ textarea.form-control:focus {
 }
 
 .loading-glass::after {
-  content: '';
+  content: "";
   position: absolute;
   top: 0;
   left: -100%;
@@ -945,8 +981,12 @@ textarea.form-control:focus {
 }
 
 @keyframes shimmer {
-  0% { left: -100%; }
-  100% { left: 100%; }
+  0% {
+    left: -100%;
+  }
+  100% {
+    left: 100%;
+  }
 }
 
 /* =============================================================================
@@ -959,7 +999,7 @@ textarea.form-control:focus {
 
 /* Override Bootstrap's text-muted in dark mode */
 [data-bs-theme="dark"] .text-muted {
-  color: #C9CCD1 !important;
+  color: #c9ccd1 !important;
 }
 
 /* =============================================================================

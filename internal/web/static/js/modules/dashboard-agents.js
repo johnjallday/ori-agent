@@ -19,7 +19,9 @@ export class DashboardAgents {
 
     return `
       <div class="agent-list">
-        ${agents.map(agent => `
+        ${agents
+          .map(
+            agent => `
           <div class="agent-item d-flex align-items-center justify-content-between p-2 mb-2" style="border-left: 3px solid var(--primary-color); background: var(--surface-color); border-radius: var(--radius-sm);">
             <div class="d-flex align-items-center gap-3">
               <div class="status-indicator status-online"></div>
@@ -37,7 +39,9 @@ export class DashboardAgents {
               </svg>
             </button>
           </div>
-        `).join('')}
+        `
+          )
+          .join('')}
       </div>
     `;
   }
@@ -143,9 +147,12 @@ export class DashboardAgents {
     }
 
     try {
-      const response = await fetch(`/api/orchestration/workspace/agents?workspace_id=${this.parent.workspaceId}&agent_name=${encodeURIComponent(agentName)}`, {
-        method: 'DELETE'
-      });
+      const response = await fetch(
+        `/api/orchestration/workspace/agents?workspace_id=${this.parent.workspaceId}&agent_name=${encodeURIComponent(agentName)}`,
+        {
+          method: 'DELETE'
+        }
+      );
 
       if (!response.ok) {
         const error = await response.text();
@@ -165,7 +172,11 @@ export class DashboardAgents {
       this.parent.showToast('Agent Removed', `✅ ${agentName} removed from workspace`, 'success');
     } catch (error) {
       console.error('Error removing agent:', error);
-      this.parent.showToast('Remove Failed', '❌ Failed to remove agent: ' + error.message, 'error');
+      this.parent.showToast(
+        'Remove Failed',
+        '❌ Failed to remove agent: ' + error.message,
+        'error'
+      );
     }
   }
 
@@ -185,8 +196,12 @@ export class DashboardAgents {
 
     const stage = this.escapeHtml(this.toTitleCase(evolution.stage || 'spark'));
     const path = evolution.path ? this.escapeHtml(this.toTitleCase(evolution.path)) : '';
-    const level = Number.isFinite(Number(evolution.level)) ? Math.max(0, Math.floor(Number(evolution.level))) : 0;
-    const experience = Number.isFinite(Number(evolution.experience)) ? Math.max(0, Math.floor(Number(evolution.experience))) : 0;
+    const level = Number.isFinite(Number(evolution.level))
+      ? Math.max(0, Math.floor(Number(evolution.level)))
+      : 0;
+    const experience = Number.isFinite(Number(evolution.experience))
+      ? Math.max(0, Math.floor(Number(evolution.experience)))
+      : 0;
     const progressPercent = Math.min(100, Math.max(0, Math.round(experience % 100)));
 
     return `

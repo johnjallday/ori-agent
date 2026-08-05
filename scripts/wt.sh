@@ -15,13 +15,9 @@
 #   wt status --worktrees   # Show ahead/behind/merged vs dev for all worktrees
 #   wt cd <name>            # Navigate to a worktree
 #   wt demo [port]          # Build current worktree + serve an ISOLATED demo sandbox (default port 8931)
-#   wt backlog [list] [--all] [--json]  # This repository's open GitHub Issues
-#   wt merge [name]         # Local merge into dev (legacy; prefer wt pr)
 #
-# The backlog is GitHub Issues, read live on every invocation. `wt backlog`
-# lists the open Issues you authored in the current repository; --all drops only
-# the author filter. There is no backlog file, no cache, and no backlog commit:
-# GitHub owns the record, so nothing here has to be kept in sync with it.
+# The backlog left this file: ./scripts/backlog.sh reads and writes this
+# repository's open GitHub Issues.
 #
 # Planning docs live in the dev worktree's tasks/ folder (gitignored). Create
 # each PRD + task list there, then `wt start` fans a single PRD out into its
@@ -94,6 +90,70 @@ function wt_parse_name {
     WT_BRANCH_NAME="feature/$raw"
     WT_DIR_NAME="$raw"
   fi
+}
+
+function wt_parse_create_flags {
+  # The argument parser `wt start` and `wt new` share. Both accept the same five
+  # things — --no-herdr, --yes/-y, --kind <value>, one positional name, and no
+  # other option — and both used to say so in their own copy of this loop.
+  #
+  # What they do not share is wording. Each command names itself, prints its own
+  # usage line, and calls its positional something different, so the caller
+  # passes those three strings in: they are the user-visible surface, and
+  # homogenizing them would be a behavior change wearing a refactor's clothes.
+  #
+  # Results come back in WT_PARSE_* globals rather than on stdout, because a
+  # positional may contain anything and a command substitution would re-split it.
+  typeset -g WT_PARSE_NAME WT_PARSE_NO_HERDR WT_PARSE_KIND WT_PARSE_ASSUME_YES
+  local label="$1" usage="$2" positional_noun="$3"
+  shift 3
+
+  WT_PARSE_NAME=""
+  WT_PARSE_NO_HERDR=0
+  WT_PARSE_KIND=""
+  WT_PARSE_ASSUME_YES=0
+
+  local -a parse_args
+  parse_args=("$@")
+  local parse_arg parse_index=1
+  while (( parse_index <= ${#parse_args[@]} )); do
+    parse_arg="${parse_args[$parse_index]}"
+    case "$parse_arg" in
+      --no-herdr)
+        WT_PARSE_NO_HERDR=1
+        ;;
+      --yes|-y)
+        WT_PARSE_ASSUME_YES=1
+        ;;
+      --kind)
+        parse_index=$(( parse_index + 1 ))
+        if (( parse_index > ${#parse_args[@]} )) || [[ "${parse_args[$parse_index]}" == --* ]]; then
+          echo "$label --kind requires a Herdr agent kind"
+          echo "$usage"
+          return 1
+        fi
+        if [[ -n "$WT_PARSE_KIND" ]]; then
+          echo "$label accepts --kind only once"
+          return 1
+        fi
+        WT_PARSE_KIND="${parse_args[$parse_index]}"
+        ;;
+      --*)
+        echo "Unknown $label option: $parse_arg"
+        echo "$usage"
+        return 1
+        ;;
+      *)
+        if [[ -n "$WT_PARSE_NAME" ]]; then
+          echo "$label accepts one $positional_noun (got: $WT_PARSE_NAME and $parse_arg)"
+          return 1
+        fi
+        WT_PARSE_NAME="$parse_arg"
+        ;;
+    esac
+    parse_index=$(( parse_index + 1 ))
+  done
+  return 0
 }
 
 function wt_resolve_worktree_path {
@@ -358,7 +418,7 @@ function wt_repl {
   # current shell (wt is sourced), so cd/start still change the shell's dir; the
   # prompt shows the current directory's basename so you can see where you are.
   wt_color_init
-  echo "wt REPL - commands: go, status, start, new, pr, done, cd, ls, rm, demo, backlog, herd, merge, help  (q to quit)"
+  echo "wt REPL - commands: go, status, start, new, pr, done, cd, ls, rm, demo, herd, help  (q to quit)"
   local line
   local -a words
   while true; do
@@ -862,47 +922,17 @@ function wt_dispatch {
       prd_files+=("${f:t}")
     done
 
-    local chosen="" no_herdr=0 primary_kind="" assume_yes=0 start_arg start_index
-    local -a start_args
-    start_args=("${@:2}")
-    start_index=1
-    while (( start_index <= ${#start_args[@]} )); do
-      start_arg="${start_args[$start_index]}"
-      case "$start_arg" in
-        --no-herdr)
-          no_herdr=1
-          ;;
-        --yes|-y)
-          assume_yes=1
-          ;;
-        --kind)
-          start_index=$(( start_index + 1 ))
-          if (( start_index > ${#start_args[@]} )) || [[ "${start_args[$start_index]}" == --* ]]; then
-            echo "wt start --kind requires a Herdr agent kind"
-            echo "Usage: wt start [feature] [--kind KIND] [--no-herdr] [--yes]"
-            return 1
-          fi
-          if [[ -n "$primary_kind" ]]; then
-            echo "wt start accepts --kind only once"
-            return 1
-          fi
-          primary_kind="${start_args[$start_index]}"
-          ;;
-        --*)
-          echo "Unknown wt start option: $start_arg"
-          echo "Usage: wt start [feature] [--kind KIND] [--no-herdr] [--yes]"
-          return 1
-          ;;
-        *)
-          if [[ -n "$chosen" ]]; then
-            echo "wt start accepts one PRD/feature name (got: $chosen and $start_arg)"
-            return 1
-          fi
-          chosen="$start_arg"
-          ;;
-      esac
-      start_index=$(( start_index + 1 ))
-    done
+    local chosen no_herdr primary_kind assume_yes
+    if ! wt_parse_create_flags "wt start" \
+      "Usage: wt start [feature] [--kind KIND] [--no-herdr] [--yes]" \
+      "PRD/feature name" "${@:2}"; then
+      return 1
+    fi
+    chosen="$WT_PARSE_NAME"
+    no_herdr="$WT_PARSE_NO_HERDR"
+    primary_kind="$WT_PARSE_KIND"
+    assume_yes="$WT_PARSE_ASSUME_YES"
+
     if (( no_herdr )) && [[ -n "$primary_kind" ]]; then
       echo "wt start --kind cannot be combined with --no-herdr"
       return 1
@@ -1037,47 +1067,16 @@ function wt_dispatch {
     wt_color_init
     wt_plan_reset
 
-    local name="" no_herdr=0 primary_kind="" assume_yes=0 new_arg new_index
-    local -a new_args
-    new_args=("${@:2}")
-    new_index=1
-    while (( new_index <= ${#new_args[@]} )); do
-      new_arg="${new_args[$new_index]}"
-      case "$new_arg" in
-        --no-herdr)
-          no_herdr=1
-          ;;
-        --yes|-y)
-          assume_yes=1
-          ;;
-        --kind)
-          new_index=$(( new_index + 1 ))
-          if (( new_index > ${#new_args[@]} )) || [[ "${new_args[$new_index]}" == --* ]]; then
-            echo "wt new --kind requires a Herdr agent kind"
-            echo "Usage: wt new <name> [--kind KIND] [--no-herdr] [--yes]"
-            return 1
-          fi
-          if [[ -n "$primary_kind" ]]; then
-            echo "wt new accepts --kind only once"
-            return 1
-          fi
-          primary_kind="${new_args[$new_index]}"
-          ;;
-        --*)
-          echo "Unknown wt new option: $new_arg"
-          echo "Usage: wt new <name> [--kind KIND] [--no-herdr] [--yes]"
-          return 1
-          ;;
-        *)
-          if [[ -n "$name" ]]; then
-            echo "wt new accepts one name (got: $name and $new_arg)"
-            return 1
-          fi
-          name="$new_arg"
-          ;;
-      esac
-      new_index=$(( new_index + 1 ))
-    done
+    local name no_herdr primary_kind assume_yes
+    if ! wt_parse_create_flags "wt new" \
+      "Usage: wt new <name> [--kind KIND] [--no-herdr] [--yes]" \
+      "name" "${@:2}"; then
+      return 1
+    fi
+    name="$WT_PARSE_NAME"
+    no_herdr="$WT_PARSE_NO_HERDR"
+    primary_kind="$WT_PARSE_KIND"
+    assume_yes="$WT_PARSE_ASSUME_YES"
 
     if [[ -z "$name" ]]; then
       echo "Usage: wt new <name>            (branch feature/<name>)"
@@ -1451,147 +1450,19 @@ function wt_dispatch {
     wt_status "$@"
     ;;
   merge)
-    local name="$2"
-    local target_path target_branch
-
-    local dev_path
-    dev_path="$(wt_get_dev_worktree)"
-    if [[ -z "$dev_path" ]]; then
-      echo "Could not find $BASE_BRANCH worktree"
-      return 1
-    fi
-
-    wt_load_worktrees
-
-    # Build candidate list: skip detached, skip dev, skip main.
-    local -a m_names m_paths m_branches
-    local i
-    for i in {1..${#WT_PATHS[@]}}; do
-      local wt_path="${WT_PATHS[$i]}"
-      local branch="${WT_BRANCHES[$i]}"
-      [[ -z "$branch" ]] && continue
-      [[ "$branch" == "$BASE_BRANCH" || "$branch" == "main" ]] && continue
-      m_names+=("${wt_path:t}")
-      m_paths+=("$wt_path")
-      m_branches+=("$branch")
-    done
-
-    if [[ -z "$name" ]]; then
-      if [[ ${#m_names[@]} -eq 0 ]]; then
-        echo "No worktrees available to merge into $BASE_BRANCH"
-        return 1
-      fi
-
-      wt_color_init
-      wt_compute_widths m_paths m_branches
-
-      echo "Select worktree to merge into ${WT_C_CYAN}$BASE_BRANCH${WT_C_RESET}:"
-      wt_render_header "      "
-      local idx_prefix
-      local -a info
-      for i in {1..${#m_names[@]}}; do
-        info=("${(@s/ /)$(wt_branch_status "${m_branches[$i]}")}")
-        printf -v idx_prefix "  ${WT_C_BOLD}%2d)${WT_C_RESET} " "$i"
-        wt_render_row "$idx_prefix" "${m_names[$i]}" "${m_branches[$i]}" \
-          "${info[1]}" "${info[2]}" "${info[3]}"
-      done
-      print -r -- "  ${WT_C_BOLD} q)${WT_C_RESET} Quit"
-      echo
-
-      read "choice?Choice: "
-
-      if [[ "$choice" == "q" || -z "$choice" ]]; then
-        return 0
-      fi
-
-      if ! [[ "$choice" =~ ^[0-9]+$ ]] || (( choice < 1 || choice > ${#m_names[@]} )); then
-        echo "Invalid choice"
-        return 1
-      fi
-
-      name="${m_names[$choice]}"
-      target_path="${m_paths[$choice]}"
-      target_branch="${m_branches[$choice]}"
-    else
-      target_path="$(wt_resolve_worktree_path "$name")"
-      target_branch=""
-      for i in {1..${#WT_PATHS[@]}}; do
-        if [[ "${WT_PATHS[$i]:t}" == "$name" || "${WT_PATHS[$i]}" == "$target_path" ]]; then
-          target_branch="${WT_BRANCHES[$i]}"
-          break
-        fi
-      done
-      [[ -z "$target_branch" ]] && target_branch="feature/$name"
-    fi
-
-    if ! git rev-parse --verify "$target_branch" >/dev/null 2>&1; then
-      echo "Branch not found: $target_branch"
-      return 1
-    fi
-
-    if [[ -n "$(git -C "$dev_path" status --porcelain)" ]]; then
-      echo "Dev worktree has uncommitted changes: $dev_path"
-      git -C "$dev_path" status --short
-      return 1
-    fi
-
-    if git merge-base --is-ancestor "$target_branch" "$BASE_BRANCH" 2>/dev/null; then
-      echo "$target_branch is already merged into $BASE_BRANCH (nothing to do)"
-      read "remove?Remove worktree '$name'? [y/N]: "
-      if [[ "$remove" == "y" || "$remove" == "Y" ]]; then
-        if wt_is_protected_worktree "$target_path"; then
-          echo "Refusing to remove protected worktree: ${target_path:t}"
-          return 0
-        fi
-        git worktree remove "$target_path" --force
-        git branch -D "$target_branch" 2>/dev/null
-        echo "Removed worktree and branch: $name"
-      fi
-      return 0
-    fi
-
-    local ahead
-    ahead=$(git rev-list --count "${BASE_BRANCH}..${target_branch}" 2>/dev/null || echo "?")
-    echo
-    echo "Will merge '$target_branch' into '$BASE_BRANCH' ($ahead commits ahead)"
-    echo "  Dev worktree: $dev_path"
-    echo
-    git --no-pager log --oneline "${BASE_BRANCH}..${target_branch}" | head -20
-    echo
-    read "confirm?Proceed with merge? [y/N]: "
-    if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
-      echo "Aborted"
-      return 0
-    fi
-
-    if ! git -C "$dev_path" merge --no-ff "$target_branch"; then
-      echo "Merge failed. Resolve conflicts in $dev_path then commit."
-      return 1
-    fi
-
-    echo "Merged $target_branch into $BASE_BRANCH"
-    echo
-    read "remove?Remove worktree '$name'? [y/N]: "
-    if [[ "$remove" == "y" || "$remove" == "Y" ]]; then
-      if wt_is_protected_worktree "$target_path"; then
-        echo "Refusing to remove protected worktree: ${target_path:t}"
-        return 0
-      fi
-      git worktree remove "$target_path" --force
-      git branch -D "$target_branch" 2>/dev/null
-      echo "Removed worktree and branch: $name"
-    fi
+    # Removed. It merged straight into the dev worktree with --no-ff, which
+    # bypasses PR review and the checks $BASE_BRANCH now requires. There is no
+    # single-command replacement, so this names the workflow that replaced it
+    # rather than leaving the generic usage dump to be read as a typo.
+    echo "wt merge was removed — use wt pr, then wt done after the PR merges"
+    return 1
     ;;
   backlog)
-    # The backlog is this repository's open GitHub Issues. Every subcommand —
-    # list, view, add, their flags, and any spelling this shell has never heard
-    # of — goes to the Go helper, which owns the query, the bounds, the
-    # sanitization, the JSON contract, and the rejections.
-    #
-    # One parser decides what an invocation means. Splitting that between the
-    # shell and the helper is how a quoted title ends up as two arguments.
-    wt_devflow backlog "${@:2}"
-    return $?
+    # Moved to scripts/backlog.sh, an executable anyone can call as a single
+    # token — including an agent, which cannot source this file. A signpost, not
+    # an alias: forwarding would keep the old spelling alive indefinitely.
+    echo "wt backlog moved to ./scripts/backlog.sh"
+    return 1
     ;;
   *)
     echo "Usage: wt [command] [args]"
@@ -1615,14 +1486,8 @@ function wt_dispatch {
     echo "  wt cd <name>     - Navigate to worktree"
     echo "  wt demo [port]   - Build current worktree + serve an isolated demo sandbox (default 8931)"
     echo "  wt herd <sub>    - Manage the opt-in Ori-to-Herdr devflow bridge (setup, doctor, ...)"
-    echo "  wt backlog [list] [--all] [--json] - This repository's open GitHub Issues"
-    echo "                     Default scope is the Issues you authored; --all drops only"
-    echo "                     that author filter. Queried live on every run (no cache)."
-    echo "  wt backlog view <number> [--json] - One Issue in full, including its body"
-    echo "  wt backlog add \"<title>\" [--body \"<text>\"] [--json] - Capture an idea as an Issue"
-    echo "                     Creates the Issue and nothing else: no label, assignee,"
-    echo "                     milestone, or Project, and no browser or editor."
-    echo "  wt merge [name]  - Local merge into $BASE_BRANCH (legacy; prefer wt pr)"
+    echo "  ./scripts/backlog.sh [list|view|add] - This repository's open GitHub Issues"
+    echo "                     Its own executable, so no shell has to be sourced first."
     ;;
   esac
 }

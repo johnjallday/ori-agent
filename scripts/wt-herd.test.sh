@@ -279,6 +279,50 @@ fi
 wt new adhoc <<< "n" > /dev/null 2>&1
 [[ ! -f "$fixture_root/decline-mutations" ]]
 
+# start and new share one flag parser but not one voice. Each command names
+# itself, prints its own usage line, and calls its positional what it calls it —
+# the wording is the user-visible surface, so a shared parser must carry it
+# rather than flatten it. Every rejection below also has to happen before
+# anything is created.
+rm -f "$fixture_root/decline-mutations"
+typeset -a parser_cases
+parser_cases=(
+  "start x --kind|wt start --kind requires a Herdr agent kind"
+  "start x --kind|Usage: wt start [feature] [--kind KIND] [--no-herdr] [--yes]"
+  "start x --kind --nope|wt start --kind requires a Herdr agent kind"
+  "start x --kind a --kind b|wt start accepts --kind only once"
+  "start --bogus|Unknown wt start option: --bogus"
+  "start --bogus|Usage: wt start [feature] [--kind KIND] [--no-herdr] [--yes]"
+  "start one two|wt start accepts one PRD/feature name (got: one and two)"
+  "start x --kind codex --no-herdr|wt start --kind cannot be combined with --no-herdr"
+  "new x --kind|wt new --kind requires a Herdr agent kind"
+  "new x --kind|Usage: wt new <name> [--kind KIND] [--no-herdr] [--yes]"
+  "new x --kind --nope|wt new --kind requires a Herdr agent kind"
+  "new x --kind a --kind b|wt new accepts --kind only once"
+  "new --bogus|Unknown wt new option: --bogus"
+  "new --bogus|Usage: wt new <name> [--kind KIND] [--no-herdr] [--yes]"
+  "new one two|wt new accepts one name (got: one and two)"
+  "new x --kind codex --no-herdr|wt new --kind cannot be combined with --no-herdr"
+)
+for parser_case in "${parser_cases[@]}"; do
+  parser_args="${parser_case%%|*}"
+  parser_expected="${parser_case#*|}"
+  parser_status=0
+  wt ${=parser_args} > "$fixture_root/parser-output" 2>&1 < /dev/null || parser_status=$?
+  if [[ "$parser_status" == "0" ]]; then
+    print -r -- "wt $parser_args was accepted; it must be rejected" >&2
+    exit 1
+  fi
+  if ! rg -qF -- "$parser_expected" "$fixture_root/parser-output"; then
+    print -r -- "wt $parser_args did not say '$parser_expected': $(<"$fixture_root/parser-output")" >&2
+    exit 1
+  fi
+done
+if [[ -f "$fixture_root/decline-mutations" ]]; then
+  print -r -- "a rejected invocation still mutated something" >&2
+  exit 1
+fi
+
 # A name the bridge could never adopt is rejected before the branch exists,
 # rather than after a worktree has been created that handoff will always refuse.
 for bad_name in "bad name" "-leading-dash" "has/slash/but//empty"; do
@@ -612,22 +656,38 @@ for herdr_free_command in pr merge demo backlog cd ls; do
   fi
 done
 
-# `wt backlog` is the one Herdr-free command that does call the shared Go
-# helper, because GitHub Issues are collected there. Grepping for the bridge
-# function name is therefore no longer enough on its own: what makes the command
-# Herdr-free is that the only thing it asks the helper for is `backlog`. A
-# bridge subcommand appearing here would need a running Herdr to read a backlog.
-backlog_body="$(wt_case_branch_body backlog)"
-if ! print -r -- "$backlog_body" | rg -q "wt_devflow backlog"; then
-  print -r -- "wt backlog no longer routes its listing through the devflow helper" >&2
+# The backlog left this dispatcher for scripts/backlog.sh, but the property that
+# assertion protected did not: reading GitHub Issues must never need a running
+# Herdr. The entrypoint calls the shared Go helper — that is how it reaches
+# GitHub — and the only thing it may ask the helper for is `backlog`. A bridge
+# subcommand appearing there would put a live Herdr between a developer and
+# their own backlog.
+backlog_entrypoint="$repo_root/scripts/backlog.sh"
+if [[ ! -f "$backlog_entrypoint" ]]; then
+  print -r -- "scripts/backlog.sh is missing; the backlog has no entrypoint" >&2
   exit 1
 fi
-for bridge_command in handoff retry setup doctor cleanup target status overview add prompt; do
-  if print -r -- "$backlog_body" | rg -q "wt_devflow $bridge_command"; then
-    print -r -- "wt backlog asked the helper for the Herdr command '$bridge_command'" >&2
+helper_calls="$(rg -- '--repo-root' "$backlog_entrypoint" || true)"
+if [[ -z "$helper_calls" ]]; then
+  print -r -- "backlog.sh no longer routes its listing through the devflow helper" >&2
+  exit 1
+fi
+for helper_call in ${(f)helper_calls}; do
+  if ! print -r -- "$helper_call" | rg -q 'backlog "\$@"$'; then
+    print -r -- "backlog.sh asks the helper for something other than the backlog: $helper_call" >&2
     exit 1
   fi
 done
+for bridge_command in handoff retry setup doctor cleanup target status overview add prompt; do
+  if print -r -- "$helper_calls" | rg -q -- "$bridge_command"; then
+    print -r -- "backlog.sh asked the helper for the Herdr command '$bridge_command'" >&2
+    exit 1
+  fi
+done
+if rg -q "wt_herd" "$backlog_entrypoint"; then
+  print -r -- "backlog.sh reaches for the Herdr bridge" >&2
+  exit 1
+fi
 
 # --no-herdr is the supported per-invocation escape hatch (FR-33), so it has to
 # be discoverable from wt help rather than only from the source.

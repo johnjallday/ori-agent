@@ -98,17 +98,31 @@ wt new <name>          # create a worktree
 wt rm <name>           # remove a worktree
 wt ls                  # list worktrees
 wt cd <name>           # navigate to a worktree
-wt backlog                       # the open GitHub Issues you authored
-wt backlog --all                 # every author's open Issues in this repository
-wt backlog view <number>         # one Issue in full, including its body
-wt backlog add "<title>"         # capture an idea as a new Issue
 ```
 Source it (don't execute) so `cd` affects your current shell.
 
 `wt demo` removes its exact sandbox when the demo exits. Set
 `ORI_KEEP_DEMO_SANDBOX=1` when the sandbox needs to be retained for debugging.
 
-### `wt backlog` — the repository's GitHub Issues
+### `backlog.sh` — the repository's GitHub Issues
+
+```bash
+./scripts/backlog.sh                     # the open GitHub Issues you authored
+./scripts/backlog.sh --all               # every author's open Issues in this repository
+./scripts/backlog.sh view <number>       # one Issue in full, including its body
+./scripts/backlog.sh add "<title>"       # capture an idea as a new Issue
+```
+
+Its own executable, so nothing has to be sourced first — one stable token a
+human or an agent can run from any checkout of this repository. It needs `gh`
+authenticated; it does not need Herdr installed, running, or healthy.
+
+It runs the first helper it finds, preferring an already-built one over
+compiling: `$HERDR_DEVFLOW_BINARY`, then the installed runtime helper
+(`$HERDR_DEVFLOW_HOME`, or `<user config dir>/herdr/ori-devflow`), then
+`bin/herdr-devflow` in the checkout, then `go run`. If it answers
+`unknown command "backlog"`, the installed helper is older than this command —
+`wt herd setup` reinstalls it.
 
 The product backlog is GitHub Issues. There is no backlog file to maintain,
 sync, or prune, and no backlog commit ever lands on `dev`.
@@ -143,7 +157,7 @@ wt status --worktrees          # the legacy Git-only worktree table
 planning artifacts, feature worktrees, local Git, GitHub pull requests, and live
 Herdr agents on the exact feature slug. It is read-only: it never writes
 planning files, Git, GitHub, bridge, or Herdr state. It describes selected and
-executing work; unselected ideas live in `wt backlog`.
+executing work; unselected ideas live in `./scripts/backlog.sh`.
 
 Exit codes: `0` complete, `1` incomplete (a required source, normally GitHub,
 was unavailable — the board still prints every local fact it observed), `2`

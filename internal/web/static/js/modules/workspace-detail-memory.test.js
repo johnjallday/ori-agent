@@ -6,14 +6,21 @@ import { WorkspaceMemoryManager } from './workspace-detail-memory.js';
 function makeManager() {
   const host = {
     workspaceId: 'ws1',
-    escapeHtml: text => String(text ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    escapeHtml: text =>
+      String(text ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
   };
   return new WorkspaceMemoryManager(host);
 }
 
 test('entryRowHtml renders type badge, text, and provenance', () => {
   const m = makeManager();
-  const html = m.entryRowHtml({ type: 'watch', date: '2026-06-11', provenance: 'run:abc', text: 'baseline ~7 min' }, 0);
+  const html = m.entryRowHtml(
+    { type: 'watch', date: '2026-06-11', provenance: 'run:abc', text: 'baseline ~7 min' },
+    0
+  );
   assert.match(html, /workspace-detail-memory-badge-watch/);
   assert.match(html, /baseline ~7 min/);
   assert.match(html, /run:abc · 2026-06-11/);

@@ -4,7 +4,7 @@
  * smooth scrolling, and URL hash synchronization for the settings page.
  */
 
-const SettingsNavigation = (function() {
+const SettingsNavigation = (function () {
   // DOM elements
   let searchInput = null;
   let navItems = [];
@@ -48,7 +48,7 @@ const SettingsNavigation = (function() {
   function setupSearchListener() {
     let debounceTimer;
 
-    searchInput.addEventListener('input', function() {
+    searchInput.addEventListener('input', function () {
       clearTimeout(debounceTimer);
       debounceTimer = setTimeout(() => {
         filterNavigation(this.value.trim().toLowerCase());
@@ -56,7 +56,7 @@ const SettingsNavigation = (function() {
     });
 
     // Clear search on Escape
-    searchInput.addEventListener('keydown', function(e) {
+    searchInput.addEventListener('keydown', function (e) {
       if (e.key === 'Escape') {
         this.value = '';
         filterNavigation('');
@@ -115,7 +115,7 @@ const SettingsNavigation = (function() {
    */
   function setupNavClickListeners() {
     navItems.forEach(item => {
-      item.addEventListener('click', function(e) {
+      item.addEventListener('click', function (e) {
         const sectionId = this.getAttribute('data-section');
         const isExternalLink = this.dataset.externalLink === 'true';
         if (!sectionId || isExternalLink) {
@@ -143,7 +143,8 @@ const SettingsNavigation = (function() {
     const contentRect = settingsContent.getBoundingClientRect();
 
     // Current scroll position plus the offset from the top of the container
-    const scrollTop = settingsContent.scrollTop + (sectionRect.top - contentRect.top) - SCROLL_OFFSET;
+    const scrollTop =
+      settingsContent.scrollTop + (sectionRect.top - contentRect.top) - SCROLL_OFFSET;
 
     settingsContent.scrollTo({
       top: Math.max(0, scrollTop),
@@ -177,7 +178,7 @@ const SettingsNavigation = (function() {
     // Use a throttled scroll handler for better performance
     let ticking = false;
 
-    settingsContent.addEventListener('scroll', function() {
+    settingsContent.addEventListener('scroll', function () {
       if (!ticking) {
         requestAnimationFrame(() => {
           updateActiveOnScroll();

@@ -4,7 +4,7 @@
  *
  * @module workspace-input-router
  */
-(function() {
+(function () {
   'use strict';
 
   const ASK_COMMAND_RE = /^\/ask\b/i;
@@ -25,11 +25,17 @@
   }
 
   function extractAskPrompt(input) {
-    return String(input || '').replace(ASK_COMMAND_RE, '').trim();
+    return String(input || '')
+      .replace(ASK_COMMAND_RE, '')
+      .trim();
   }
 
   function buildWorkspaceHubRouteContext(workspaceId) {
-    const pagePath = (window.location && typeof window.location.pathname === 'string' && window.location.pathname) || '/workspaces';
+    const pagePath =
+      (window.location &&
+        typeof window.location.pathname === 'string' &&
+        window.location.pathname) ||
+      '/workspaces';
     return {
       surface: 'workspace_hub',
       page_path: pagePath,

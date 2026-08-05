@@ -6,6 +6,11 @@ bin/
 *.so
 *.dylib
 
+# Compiled scenario-runner binary (source-backed: `cd tests/user/scenarios &&
+# go run scenario_runner.go`, or `make test-scenarios`). Exact path only, so
+# this never shadows scenario_runner.go or other files in the same directory.
+tests/user/scenarios/scenario_runner
+
 # Test binary, built with `go test -c`
 *.test
 

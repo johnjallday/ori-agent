@@ -10,14 +10,25 @@ jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
+        with:
+          # Full history so --new-from-merge-base can resolve origin/dev
+          # locally. The alternative, golangci-lint-action's only-new-issues,
+          # depends on the GitHub PR-diff API for pull_request events, which
+          # has a size ceiling this repo's larger PRs (e.g. a mechanical
+          # Prettier-baseline commit touching ~200 files) can exceed - when
+          # that happens the action silently reports the full, unfiltered
+          # backlog instead of just what the PR changed.
+          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.25.11'
+          go-version: '1.25.12'
           cache: true
 
       - name: Run go fmt
@@ -31,11 +42,14 @@ jobs:
       - name: Run go vet
         run: go vet ./...
 
+      - name: Check generated Wails binding file modes
+        run: ./scripts/check-wails-binding-modes.sh
+
       - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v9
         with:
-          version: v1.62.2
-        continue-on-error: true  # Don't fail build on linter warnings initially
+          version-file: .golangci-lint-version
+          args: --new-from-merge-base=origin/dev
 
   frontend-lint:
     name: Frontend Lint
@@ -53,6 +67,9 @@ jobs:
 
       - name: Install frontend dependencies
         run: npm ci
+
+      - name: Run frontend format check
+        run: npm run format:check
 
       - name: Run frontend lint
         run: npm run lint
@@ -73,7 +90,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.25.11'
+          go-version: '1.25.12'
           cache: true
 
       - name: Set up Node.js
@@ -137,7 +154,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
-        go-version: ['1.25.11']
+        go-version: ['1.25.12']
 
     steps:
       - name: Checkout code
@@ -153,7 +170,8 @@ jobs:
         run: go mod download
 
       - name: Run unit tests
-        run: go test -v -short -race -coverprofile=coverage.txt -covermode=atomic ./...
+        shell: bash
+        run: go test -v -short -race -coverprofile=coverage.txt -covermode=atomic $(./scripts/list-unit-packages.sh)
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
@@ -175,7 +193,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.25.11'
+          go-version: '1.25.12'
           cache: true
 
       - name: Download dependencies
@@ -187,7 +205,7 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           if [ -n "$OPENAI_API_KEY" ] || [ -n "$ANTHROPIC_API_KEY" ]; then
-            go test -v -run Integration ./...
+            ORI_RUN_PROVIDER_INTEGRATION=1 go test -v -run Integration ./...
           else
             echo "Skipping integration tests (no API keys configured)"
           fi
@@ -204,7 +222,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.25.11'
+          go-version: '1.25.12'
           cache: true
 
       - name: Download dependencies
@@ -219,7 +237,7 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           if [ -n "$OPENAI_API_KEY" ] || [ -n "$ANTHROPIC_API_KEY" ]; then
-            go test -v ./tests/e2e/...
+            ORI_RUN_PROVIDER_INTEGRATION=1 go test -v ./tests/e2e/...
           else
             echo "Skipping E2E tests (no API keys configured)"
           fi
@@ -230,7 +248,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        go-version: ['1.25.11']
+        go-version: ['1.25.12']
 
     steps:
       - name: Checkout code
@@ -271,7 +289,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.25.11'
+          go-version: '1.25.12'
 
       - name: Run Gosec Security Scanner
         uses: securego/gosec@master

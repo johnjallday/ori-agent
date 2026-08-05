@@ -392,7 +392,8 @@ export class WorkspaceDetailPage {
     }
     if (!raw) return false;
 
-    let message = 'Workspace created, but the project could not be opened. Use Open Project to try again.';
+    let message =
+      'Workspace created, but the project could not be opened. Use Open Project to try again.';
     try {
       const notice = JSON.parse(raw);
       if (notice?.workspace_id && String(notice.workspace_id) !== String(this.workspaceId)) {
@@ -2408,7 +2409,11 @@ export class WorkspaceDetailPage {
     if (this.hasWorkspaceEntryAgentReference() && references.length >= 3) {
       const hasOrchestrator = references.some(reference => {
         const profile = this.getAgentProfile(reference.name);
-        return String(profile?.role || '').trim().toLowerCase() === 'orchestrator';
+        return (
+          String(profile?.role || '')
+            .trim()
+            .toLowerCase() === 'orchestrator'
+        );
       });
       if (!hasOrchestrator) {
         const workspaceName = String(this.workspace?.name || '').trim() || 'This workspace';
@@ -11796,7 +11801,11 @@ export class WorkspaceDetailPage {
     const effective = new Set(
       mgr
         .getEffectiveWorkspaceSkillBindingsForAgent(agentName)
-        .map(binding => String(binding?.id || '').trim().toLowerCase())
+        .map(binding =>
+          String(binding?.id || '')
+            .trim()
+            .toLowerCase()
+        )
         .filter(Boolean)
     );
     return mgr
@@ -11819,7 +11828,11 @@ export class WorkspaceDetailPage {
     const effective = new Set(
       mgr
         .getEffectiveWorkspaceMCPBindingsForAgent(agentName)
-        .map(binding => String(binding?.id || '').trim().toLowerCase())
+        .map(binding =>
+          String(binding?.id || '')
+            .trim()
+            .toLowerCase()
+        )
         .filter(Boolean)
     );
     return mgr
@@ -11844,15 +11857,17 @@ export class WorkspaceDetailPage {
     if (!mgr) return [];
     let registry = [];
     try {
-      registry = isMCP
-        ? await mgr.loadAvailableMCPServers()
-        : await mgr.loadAvailableSkills();
+      registry = isMCP ? await mgr.loadAvailableMCPServers() : await mgr.loadAvailableSkills();
     } catch (_error) {
       registry = [];
     }
     const bound = new Set(
       (isMCP ? mgr.getWorkspaceMCPBindings() : mgr.getWorkspaceSkillBindings())
-        .map(binding => String(isMCP ? binding?.serverName : binding?.skillName || '').trim().toLowerCase())
+        .map(binding =>
+          String(isMCP ? binding?.serverName : binding?.skillName || '')
+            .trim()
+            .toLowerCase()
+        )
         .filter(Boolean)
     );
     return (Array.isArray(registry) ? registry : [])
@@ -14771,9 +14786,7 @@ export class WorkspaceDetailPage {
 
   hasProjectEntry() {
     const entryPath = this.workspace?.shared_data?.project_entry_path;
-    return (
-      this.workspaceHasProject() && typeof entryPath === 'string' && entryPath.trim() !== ''
-    );
+    return this.workspaceHasProject() && typeof entryPath === 'string' && entryPath.trim() !== '';
   }
 
   async openProject() {

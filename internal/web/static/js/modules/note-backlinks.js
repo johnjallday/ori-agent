@@ -16,15 +16,14 @@ const COUNT_ID = 'noteBacklinksCount';
 let _currentNoteId = null;
 
 function escapeText(s) {
-  return String(s ?? '').replace(/[&<>]/g, (c) => (
-    { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]
-  ));
+  return String(s ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);
 }
 
 function escapeAttr(s) {
-  return String(s ?? '').replace(/[&<>"']/g, (c) => (
-    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
-  ));
+  return String(s ?? '').replace(
+    /[&<>"']/g,
+    c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]
+  );
 }
 
 // renderBacklinkItem returns one row of HTML for the backlinks list. The
@@ -132,10 +131,12 @@ try {
   if (typeof BroadcastChannel === 'function') {
     _channel = new BroadcastChannel('note-edits');
   }
-} catch (_) { _channel = null; }
+} catch (_) {
+  _channel = null;
+}
 
 if (_channel) {
-  _channel.addEventListener('message', (ev) => {
+  _channel.addEventListener('message', ev => {
     const msg = ev?.data;
     if (!msg || msg.type !== 'saved' || !msg.hasWikilinks) return;
     if (!_currentNoteId) return;
@@ -161,7 +162,7 @@ if (typeof window !== 'undefined') {
     renderBacklinksInto,
     loadBacklinksFor,
     clearBacklinks,
-    announceNoteSaved,
+    announceNoteSaved
   };
 }
 
@@ -171,5 +172,5 @@ export default {
   renderBacklinksInto,
   loadBacklinksFor,
   clearBacklinks,
-  announceNoteSaved,
+  announceNoteSaved
 };

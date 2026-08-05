@@ -228,7 +228,7 @@
 
 .workspace-detail-health-issue.is-error .workspace-detail-health-issue-icon {
   background: rgba(239, 68, 68, 0.12);
-  color: #C9CCD1;
+  color: #c9ccd1;
 }
 
 .workspace-detail-health-issue.is-warning .workspace-detail-health-issue-icon {
@@ -347,7 +347,7 @@
 
 .workspace-detail-ui-smoke-status.is-failed {
   background: rgba(239, 68, 68, 0.14);
-  color: #C9CCD1;
+  color: #c9ccd1;
 }
 
 .workspace-detail-ui-smoke-checks {
@@ -382,7 +382,7 @@
 
 .workspace-detail-ui-smoke-check.is-failed .workspace-detail-ui-smoke-check-icon {
   background: rgba(239, 68, 68, 0.14);
-  color: #C9CCD1;
+  color: #c9ccd1;
 }
 
 .workspace-detail-ui-smoke-check-name {

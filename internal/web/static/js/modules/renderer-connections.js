@@ -41,12 +41,22 @@ export class RendererConnections {
       const fromRect = this.getNodeRect(fromData);
       const toRect = this.getNodeRect(toData);
 
-      const startPoint = this.getEdgePoint(fromRect, fromCenter, toCenter) ||
+      const startPoint =
+        this.getEdgePoint(fromRect, fromCenter, toCenter) ||
         this.offsetByRadius(fromCenter, toCenter, this.getNodeRadius(fromData));
-      const endPoint = this.getEdgePoint(toRect, fromCenter, toCenter) ||
+      const endPoint =
+        this.getEdgePoint(toRect, fromCenter, toCenter) ||
         this.offsetByRadius(toCenter, fromCenter, this.getNodeRadius(toData));
 
-      this.primitives.drawArrow(startPoint.x, startPoint.y, endPoint.x, endPoint.y, '#22c55e', 2, true);
+      this.primitives.drawArrow(
+        startPoint.x,
+        startPoint.y,
+        endPoint.x,
+        endPoint.y,
+        '#22c55e',
+        2,
+        true
+      );
     });
   }
 
@@ -60,7 +70,13 @@ export class RendererConnections {
       // Draw connection from each input task to this task
       task.input_task_ids.forEach(inputTaskId => {
         const inputTask = this.state.tasks.find(t => t.id === inputTaskId);
-        if (!inputTask || inputTask.x == null || inputTask.y == null || task.x == null || task.y == null) {
+        if (
+          !inputTask ||
+          inputTask.x == null ||
+          inputTask.y == null ||
+          task.x == null ||
+          task.y == null
+        ) {
           return;
         }
 
@@ -79,14 +95,24 @@ export class RendererConnections {
         const fromRect = this.getNodeRect(fromData);
         const toRect = this.getNodeRect(toData);
 
-        const startPoint = this.getEdgePoint(fromRect, fromCenter, toCenter) ||
+        const startPoint =
+          this.getEdgePoint(fromRect, fromCenter, toCenter) ||
           this.offsetByRadius(fromCenter, toCenter, this.getNodeRadius(fromData) + 6);
-        const endPoint = this.getEdgePoint(toRect, fromCenter, toCenter) ||
+        const endPoint =
+          this.getEdgePoint(toRect, fromCenter, toCenter) ||
           this.offsetByRadius(toCenter, fromCenter, this.getNodeRadius(toData) + 8);
 
         // Draw softened line with arrowhead for result flow
         this.ctx.setLineDash([6, 10]);
-        this.primitives.drawArrow(startPoint.x, startPoint.y, endPoint.x, endPoint.y, 'rgba(155, 89, 182, 0.45)', 2, true);
+        this.primitives.drawArrow(
+          startPoint.x,
+          startPoint.y,
+          endPoint.x,
+          endPoint.y,
+          'rgba(155, 89, 182, 0.45)',
+          2,
+          true
+        );
         this.ctx.setLineDash([]);
         this.ctx.restore();
       });
@@ -98,7 +124,11 @@ export class RendererConnections {
 
   drawParticles() {
     this.state.particles.forEach(p => {
-      this.ctx.fillStyle = p.color + Math.floor(p.alpha * 255).toString(16).padStart(2, '0');
+      this.ctx.fillStyle =
+        p.color +
+        Math.floor(p.alpha * 255)
+          .toString(16)
+          .padStart(2, '0');
       this.ctx.beginPath();
       this.ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
       this.ctx.fill();
@@ -230,7 +260,9 @@ export class RendererConnections {
     if (!this.state.chainParticles || this.state.chainParticles.length === 0) return;
 
     this.state.chainParticles.forEach(p => {
-      const alphaHex = Math.floor(p.alpha * 255).toString(16).padStart(2, '0');
+      const alphaHex = Math.floor(p.alpha * 255)
+        .toString(16)
+        .padStart(2, '0');
       this.ctx.fillStyle = p.color + alphaHex;
 
       // Add glow effect
@@ -290,9 +322,13 @@ export class RendererConnections {
 
   drawWorkflowConnections() {
     // Get mouse position in canvas coordinates for hover detection
-    
-    const mouseCanvasX = this.state.lastMouseX ? (this.state.lastMouseX - this.state.offsetX) / this.state.scale : -9999;
-    const mouseCanvasY = this.state.lastMouseY ? (this.state.lastMouseY - this.state.offsetY) / this.state.scale : -9999;
+
+    const mouseCanvasX = this.state.lastMouseX
+      ? (this.state.lastMouseX - this.state.offsetX) / this.state.scale
+      : -9999;
+    const mouseCanvasY = this.state.lastMouseY
+      ? (this.state.lastMouseY - this.state.offsetY) / this.state.scale
+      : -9999;
 
     let _hasMissingPositions = false;
 
@@ -343,11 +379,7 @@ export class RendererConnections {
 
       // Bezier curve for smooth connection
       const controlOffset = Math.abs(toY - fromY) / 2;
-      this.ctx.bezierCurveTo(
-        fromX, fromY + controlOffset,
-        toX, toY - controlOffset,
-        toX, toY
-      );
+      this.ctx.bezierCurveTo(fromX, fromY + controlOffset, toX, toY - controlOffset, toX, toY);
 
       this.ctx.stroke();
       this.ctx.restore();
@@ -431,7 +463,7 @@ export class RendererConnections {
     const fromY = (fromPos.y - this.state.offsetY) / this.state.scale;
 
     // Mouse position in canvas coordinates
-    
+
     const mouseX = (this.state.lastMouseX - this.state.offsetX) / this.state.scale;
     const mouseY = (this.state.lastMouseY - this.state.offsetY) / this.state.scale;
 
@@ -519,7 +551,7 @@ export class RendererConnections {
     }
     // Right
     if (dx !== 0) {
-      const t = ((rect.x + rect.width) - from.x) / dx;
+      const t = (rect.x + rect.width - from.x) / dx;
       const y = from.y + dy * t;
       if (t > 0 && t < 1 && y >= rect.y && y <= rect.y + rect.height) {
         candidates.push({ t, x: rect.x + rect.width, y });
@@ -535,7 +567,7 @@ export class RendererConnections {
     }
     // Bottom
     if (dy !== 0) {
-      const t = ((rect.y + rect.height) - from.y) / dy;
+      const t = (rect.y + rect.height - from.y) / dy;
       const x = from.x + dx * t;
       if (t > 0 && t < 1 && x >= rect.x && x <= rect.x + rect.width) {
         candidates.push({ t, x, y: rect.y + rect.height });
@@ -566,8 +598,8 @@ export class RendererConnections {
       if (!storeNode.agent_node_id) return;
 
       // Find the agent
-      const agent = this.state.agents.find(a =>
-        a.nodeId === storeNode.agent_node_id || a.id === storeNode.agent_node_id
+      const agent = this.state.agents.find(
+        a => a.nodeId === storeNode.agent_node_id || a.id === storeNode.agent_node_id
       );
       if (!agent || !storeNode.inPort) return;
 

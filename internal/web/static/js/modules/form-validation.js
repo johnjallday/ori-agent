@@ -3,7 +3,7 @@
  * Provides real-time validation, character counters, and form state management
  */
 
-const FormValidation = (function() {
+const FormValidation = (function () {
   'use strict';
 
   /**
@@ -28,7 +28,7 @@ const FormValidation = (function() {
     // Update function
     function updateCounter() {
       const currentLength = input.value.length;
-      
+
       const percentage = (currentLength / maxLength) * 100;
 
       counter.textContent = `${currentLength} / ${maxLength}`;
@@ -84,13 +84,15 @@ const FormValidation = (function() {
       // Min length validation
       if (isValid && validators.minLength && value.length < validators.minLength) {
         isValid = false;
-        errorMessage = validators.minLengthMessage || `Minimum ${validators.minLength} characters required`;
+        errorMessage =
+          validators.minLengthMessage || `Minimum ${validators.minLength} characters required`;
       }
 
       // Max length validation
       if (isValid && validators.maxLength && value.length > validators.maxLength) {
         isValid = false;
-        errorMessage = validators.maxLengthMessage || `Maximum ${validators.maxLength} characters allowed`;
+        errorMessage =
+          validators.maxLengthMessage || `Maximum ${validators.maxLength} characters allowed`;
       }
 
       // Pattern validation
@@ -141,7 +143,8 @@ const FormValidation = (function() {
    */
   function initForm(form, options = {}) {
     const validators = {};
-    const submitBtn = options.submitButton || form.querySelector('[type="submit"], .form-submit-btn');
+    const submitBtn =
+      options.submitButton || form.querySelector('[type="submit"], .form-submit-btn');
 
     // Track validation state
     let formIsValid = false;
@@ -175,7 +178,7 @@ const FormValidation = (function() {
     }
 
     // Form submit handler
-    form.addEventListener('submit', (e) => {
+    form.addEventListener('submit', e => {
       if (!validateAll()) {
         e.preventDefault();
         // Focus first invalid input

@@ -96,7 +96,7 @@ func (s *rootStore) load() (rootState, error) {
 	if err != nil {
 		return rootState{}, fmt.Errorf("open wake state: %w", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	payload, err := io.ReadAll(io.LimitReader(file, maxRootStateBytes+1))
 	if err != nil {
 		return rootState{}, fmt.Errorf("read wake state: %w", err)
@@ -135,7 +135,9 @@ func (s *rootStore) save(state rootState) error {
 		return fmt.Errorf("create temporary wake state: %w", err)
 	}
 	temporaryPath := temporary.Name()
-	defer os.Remove(temporaryPath)
+	// Cleans up the temp file on any early return above the rename below; a
+	// successful rename already removed it, so this is expected to no-op.
+	defer func() { _ = os.Remove(temporaryPath) }()
 	if err := temporary.Chmod(0600); err != nil {
 		_ = temporary.Close()
 		return fmt.Errorf("secure temporary wake state: %w", err)

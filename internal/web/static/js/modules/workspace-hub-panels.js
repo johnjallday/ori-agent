@@ -4,7 +4,7 @@
  *
  * @module workspace-hub-panels
  */
-(function() {
+(function () {
   'use strict';
 
   let expandedPanel = null;
@@ -19,9 +19,9 @@
 
     const expandablePanels = document.querySelectorAll('.hub-panel.is-expandable');
 
-    expandablePanels.forEach((panel) => {
+    expandablePanels.forEach(panel => {
       // Click on panel to expand
-      panel.addEventListener('click', (event) => {
+      panel.addEventListener('click', event => {
         // Don't expand if clicking on interactive elements
         if (event.target.closest('button, a, input, select, textarea, .hub-item-checkbox')) {
           return;
@@ -38,7 +38,7 @@
       // Close button
       const closeBtn = panel.querySelector('.hub-panel-close');
       if (closeBtn) {
-        closeBtn.addEventListener('click', (event) => {
+        closeBtn.addEventListener('click', event => {
           event.stopPropagation();
           collapsePanel();
         });
@@ -49,7 +49,7 @@
     backdrop.addEventListener('click', collapsePanel);
 
     // Escape key to close
-    document.addEventListener('keydown', (event) => {
+    document.addEventListener('keydown', event => {
       if (event.key === 'Escape' && expandedPanel) {
         collapsePanel();
       }

@@ -646,7 +646,10 @@ test('cockpit mode makes no selection on a bare load (FR74)', () => {
   const map = loadMapForMount();
   const { container } = createMapHarness({ tiles: ['ws-1', 'ws-2'] });
   map.mount(container, {
-    workspaces: [{ id: 'ws-1', name: 'Alpha' }, { id: 'ws-2', name: 'Beta' }],
+    workspaces: [
+      { id: 'ws-1', name: 'Alpha' },
+      { id: 'ws-2', name: 'Beta' }
+    ],
     hideChrome: true,
     selectOnly: true,
     noAutoSelect: true
@@ -772,7 +775,10 @@ test('tiles are spaced so a row cannot collide with the row below it', () => {
   const map = loadMapForMount();
   const { container } = createMapHarness({ tiles: ['ws-1', 'ws-2'] });
   map.mount(container, {
-    workspaces: [{ id: 'ws-1', name: 'A' }, { id: 'ws-2', name: 'B' }],
+    workspaces: [
+      { id: 'ws-1', name: 'A' },
+      { id: 'ws-2', name: 'B' }
+    ],
     hideChrome: true,
     selectOnly: true,
     noAutoSelect: true

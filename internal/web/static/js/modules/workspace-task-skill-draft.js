@@ -24,13 +24,18 @@ import {
   trimTaskSkillText,
   TASK_SKILL_DETAILS_CONTEXT_MAX_CHARS,
   TASK_SKILL_GENERATION_CONTEXT_MAX_CHARS,
-  TASK_SKILL_RESULT_CONTEXT_MAX_CHARS,
+  TASK_SKILL_RESULT_CONTEXT_MAX_CHARS
 } from './workspace-task.js';
 
 export const taskSkillDraftMethods = {
   canCreateSkillFromTask(task = this.task) {
     if (!task || typeof task !== 'object') return false;
-    if (String(task.status || '').trim().toLowerCase() !== 'completed') return false;
+    if (
+      String(task.status || '')
+        .trim()
+        .toLowerCase() !== 'completed'
+    )
+      return false;
     if (!String(task.to || '').trim()) return false;
     if (String(task.error || '').trim()) return false;
     return Boolean(normalizeResultText(task.result).trim());
@@ -58,7 +63,8 @@ export const taskSkillDraftMethods = {
     const busy = this.skillDraftGenerating || this.skillDraftSubmitting;
     if (this.elements.skillGenerateBtn) {
       const label = this.elements.skillGenerateBtn.querySelector('span');
-      if (label) label.textContent = this.skillDraftGenerating ? 'Generating...' : 'Regenerate With AI';
+      if (label)
+        label.textContent = this.skillDraftGenerating ? 'Generating...' : 'Regenerate With AI';
       this.elements.skillGenerateBtn.disabled = busy;
     }
     if (this.elements.skillSubmitBtn) {
@@ -83,7 +89,9 @@ export const taskSkillDraftMethods = {
     const title = stripSkillUnsafeMarkup(this.getTaskDisplayLabel()) || 'completed task';
     const details = stripSkillUnsafeMarkup(this.task?.details || '');
     const result = stripSkillUnsafeMarkup(this.getCurrentResultText());
-    const parts = [`Repeatable workflow derived from a completed Ori task: ${trimTaskSkillText(title, 140)}.`];
+    const parts = [
+      `Repeatable workflow derived from a completed Ori task: ${trimTaskSkillText(title, 140)}.`
+    ];
 
     if (details) {
       parts.push(`Use when: ${trimTaskSkillText(details, 360)}.`);
@@ -117,13 +125,25 @@ export const taskSkillDraftMethods = {
     if (completedAt !== '—') lines.push(`Completed: ${completedAt}`);
     if (taskTitle) lines.push(`Original task title: ${taskTitle}`);
     if (taskDetails) {
-      lines.push('', 'Original task details:', trimTaskSkillText(taskDetails, TASK_SKILL_DETAILS_CONTEXT_MAX_CHARS));
+      lines.push(
+        '',
+        'Original task details:',
+        trimTaskSkillText(taskDetails, TASK_SKILL_DETAILS_CONTEXT_MAX_CHARS)
+      );
     }
     if (assistMessage) {
-      lines.push('', 'User clarification collected during the task:', trimTaskSkillText(assistMessage, 900));
+      lines.push(
+        '',
+        'User clarification collected during the task:',
+        trimTaskSkillText(assistMessage, 900)
+      );
     }
     if (resultText) {
-      lines.push('', 'Successful result excerpt:', trimTaskSkillText(resultText, TASK_SKILL_RESULT_CONTEXT_MAX_CHARS));
+      lines.push(
+        '',
+        'Successful result excerpt:',
+        trimTaskSkillText(resultText, TASK_SKILL_RESULT_CONTEXT_MAX_CHARS)
+      );
     }
 
     lines.push(
@@ -161,7 +181,10 @@ export const taskSkillDraftMethods = {
 
   openSkillDraftModal() {
     if (!this.canCreateSkillFromTask()) {
-      this.notify('warning', 'Only completed tasks with a successful result and assigned agent can become skills.');
+      this.notify(
+        'warning',
+        'Only completed tasks with a successful result and assigned agent can become skills.'
+      );
       return;
     }
     if (!this.elements.skillModal || typeof bootstrap === 'undefined') {
@@ -186,10 +209,19 @@ export const taskSkillDraftMethods = {
   async generateSkillPromptFromTask(force = false) {
     if (this.skillDraftGenerating || this.skillDraftSubmitting) return;
 
-    const agentName = String(this.elements.skillAgentInput?.value || this.getTaskSkillAgentName()).trim();
-    const rawName = String(this.elements.skillNameInput?.value || this.buildTaskSkillDefaultName()).trim();
+    const agentName = String(
+      this.elements.skillAgentInput?.value || this.getTaskSkillAgentName()
+    ).trim();
+    const rawName = String(
+      this.elements.skillNameInput?.value || this.buildTaskSkillDefaultName()
+    ).trim();
     const skillName = buildTaskSkillNameSlug(rawName);
-    const savedDescription = trimTaskSkillText(stripSkillUnsafeMarkup(this.elements.skillDescriptionInput?.value || this.buildTaskSkillSavedDescription()), 1024);
+    const savedDescription = trimTaskSkillText(
+      stripSkillUnsafeMarkup(
+        this.elements.skillDescriptionInput?.value || this.buildTaskSkillSavedDescription()
+      ),
+      1024
+    );
 
     if (!agentName || !skillName || !savedDescription) {
       this.setSkillDraftError('Skill name, description, and agent are required.');
@@ -197,7 +229,8 @@ export const taskSkillDraftMethods = {
     }
 
     if (this.elements.skillNameInput) this.elements.skillNameInput.value = skillName;
-    if (this.elements.skillDescriptionInput) this.elements.skillDescriptionInput.value = savedDescription;
+    if (this.elements.skillDescriptionInput)
+      this.elements.skillDescriptionInput.value = savedDescription;
 
     const currentPrompt = String(this.elements.skillPromptInput?.value || '').trim();
     if (force && currentPrompt && currentPrompt !== 'Generating prompt...') {
@@ -226,15 +259,16 @@ export const taskSkillDraftMethods = {
         body: JSON.stringify({
           agent: agentName,
           name: skillName,
-          description: this.buildTaskSkillGenerationDescription(skillName, savedDescription),
+          description: this.buildTaskSkillGenerationDescription(skillName, savedDescription)
         }),
-        signal: controller.signal,
+        signal: controller.signal
       });
       const data = await response.json().catch(() => ({}));
       if (requestId !== this.skillDraftRequestId) return;
 
       const details = typeof data?.details === 'string' ? data.details.trim() : '';
-      const baseError = typeof data?.error === 'string' ? data.error : 'Failed to generate skill prompt.';
+      const baseError =
+        typeof data?.error === 'string' ? data.error : 'Failed to generate skill prompt.';
       if (!response.ok) throw new Error(`${baseError}${details ? ` ${details}` : ''}`);
 
       const generated = extractGeneratedSkillPrompt(data?.prompt || '');
@@ -249,7 +283,8 @@ export const taskSkillDraftMethods = {
       if (requestId !== this.skillDraftRequestId) return;
 
       if (this.elements.skillPromptInput) {
-        this.elements.skillPromptInput.value = currentPrompt === 'Generating prompt...' ? '' : currentPrompt;
+        this.elements.skillPromptInput.value =
+          currentPrompt === 'Generating prompt...' ? '' : currentPrompt;
       }
       this.setSkillDraftError(error?.message || 'Failed to generate skill prompt.');
     } finally {
@@ -264,14 +299,22 @@ export const taskSkillDraftMethods = {
   async submitTaskSkillDraft() {
     if (this.skillDraftSubmitting) return;
 
-    const agentName = String(this.elements.skillAgentInput?.value || this.getTaskSkillAgentName()).trim();
+    const agentName = String(
+      this.elements.skillAgentInput?.value || this.getTaskSkillAgentName()
+    ).trim();
     const rawSkillName = String(this.elements.skillNameInput?.value || '').trim();
     const skillName = rawSkillName ? buildTaskSkillNameSlug(rawSkillName) : '';
-    const description = trimTaskSkillText(stripSkillUnsafeMarkup(this.elements.skillDescriptionInput?.value || ''), 1024);
-    const prompt = String(this.elements.skillPromptInput?.value || '').replace(/\r\n/g, '\n').trim();
+    const description = trimTaskSkillText(
+      stripSkillUnsafeMarkup(this.elements.skillDescriptionInput?.value || ''),
+      1024
+    );
+    const prompt = String(this.elements.skillPromptInput?.value || '')
+      .replace(/\r\n/g, '\n')
+      .trim();
 
     if (this.elements.skillNameInput) this.elements.skillNameInput.value = skillName;
-    if (this.elements.skillDescriptionInput) this.elements.skillDescriptionInput.value = description;
+    if (this.elements.skillDescriptionInput)
+      this.elements.skillDescriptionInput.value = description;
 
     if (!agentName) {
       this.setSkillDraftError('Agent is required.');
@@ -302,8 +345,8 @@ export const taskSkillDraftMethods = {
           agent: agentName,
           name: skillName,
           description,
-          prompt,
-        }),
+          prompt
+        })
       });
       const data = await response.json().catch(() => ({}));
       const details = typeof data?.details === 'string' ? data.details.trim() : '';
@@ -322,5 +365,5 @@ export const taskSkillDraftMethods = {
       this.skillDraftSubmitting = false;
       this.updateSkillDraftButtons();
     }
-  },
+  }
 };

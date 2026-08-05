@@ -27,9 +27,10 @@
   // time (same phase as the module bootstrap), so racing on a later read is
   // not safe; capturing the raw query string as the very first statement in
   // this IIFE is.
-  const initialPanelParam = (typeof window !== 'undefined' && window.location && window.location.search)
-    ? new URLSearchParams(window.location.search).get('panel')
-    : null;
+  const initialPanelParam =
+    typeof window !== 'undefined' && window.location && window.location.search
+      ? new URLSearchParams(window.location.search).get('panel')
+      : null;
 
   // ---------------------------------------------------------------------
   // Pure logic (no DOM) -- exported below for direct unit testing.
@@ -43,7 +44,15 @@
    * *calendar* days, not 168 hours).
    */
   function getViewRange(view, anchorDate) {
-    const start = new Date(anchorDate.getFullYear(), anchorDate.getMonth(), anchorDate.getDate(), 0, 0, 0, 0);
+    const start = new Date(
+      anchorDate.getFullYear(),
+      anchorDate.getMonth(),
+      anchorDate.getDate(),
+      0,
+      0,
+      0,
+      0
+    );
     if (view === 'week') {
       // Week starts on Sunday, matching Date#getDay()'s 0-indexed convention.
       start.setDate(start.getDate() - start.getDay());
@@ -84,7 +93,11 @@
   function computeConflicts(events) {
     const blocking = (events || [])
       .filter(isBlockingEvent)
-      .map(evt => ({ id: evt.id, start: Date.parse(evt.start_time), end: Date.parse(evt.end_time) }))
+      .map(evt => ({
+        id: evt.id,
+        start: Date.parse(evt.start_time),
+        end: Date.parse(evt.end_time)
+      }))
       .filter(e => Number.isFinite(e.start) && Number.isFinite(e.end) && e.end > e.start)
       .sort((a, b) => a.start - b.start);
 
@@ -120,8 +133,24 @@
     const cursor = new Date(start);
     while (cursor < end) {
       windows.push({
-        start: new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate(), WORK_START_HOUR, 0, 0, 0),
-        end: new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate(), WORK_END_HOUR, 0, 0, 0)
+        start: new Date(
+          cursor.getFullYear(),
+          cursor.getMonth(),
+          cursor.getDate(),
+          WORK_START_HOUR,
+          0,
+          0,
+          0
+        ),
+        end: new Date(
+          cursor.getFullYear(),
+          cursor.getMonth(),
+          cursor.getDate(),
+          WORK_END_HOUR,
+          0,
+          0,
+          0
+        )
       });
       cursor.setDate(cursor.getDate() + 1);
     }
@@ -138,7 +167,10 @@
   function deriveEventFreeWindows(events, dayStart, dayEnd) {
     const busy = (events || [])
       .filter(isBlockingEvent)
-      .map(evt => ({ start: Math.max(Date.parse(evt.start_time), dayStart.getTime()), end: Math.min(Date.parse(evt.end_time), dayEnd.getTime()) }))
+      .map(evt => ({
+        start: Math.max(Date.parse(evt.start_time), dayStart.getTime()),
+        end: Math.min(Date.parse(evt.end_time), dayEnd.getTime())
+      }))
       .filter(e => Number.isFinite(e.start) && Number.isFinite(e.end) && e.end > e.start)
       .sort((a, b) => a.start - b.start);
 
@@ -155,11 +187,18 @@
     const windows = [];
     let cursor = dayStart.getTime();
     for (const b of merged) {
-      if (b.start > cursor) windows.push({ start_time: new Date(cursor).toISOString(), end_time: new Date(b.start).toISOString() });
+      if (b.start > cursor)
+        windows.push({
+          start_time: new Date(cursor).toISOString(),
+          end_time: new Date(b.start).toISOString()
+        });
       cursor = Math.max(cursor, b.end);
     }
     if (cursor < dayEnd.getTime()) {
-      windows.push({ start_time: new Date(cursor).toISOString(), end_time: new Date(dayEnd.getTime()).toISOString() });
+      windows.push({
+        start_time: new Date(cursor).toISOString(),
+        end_time: new Date(dayEnd.getTime()).toISOString()
+      });
     }
     return windows;
   }
@@ -188,7 +227,10 @@
    */
   function attendeeImpactLabel(attendees, operation) {
     if (!attendees || attendees.length === 0) return 'No attendees will be notified.';
-    const verb = operation === 'update_event' ? 'may receive an update notification' : 'may receive an invitation';
+    const verb =
+      operation === 'update_event'
+        ? 'may receive an update notification'
+        : 'may receive an invitation';
     return attendees.length + ' attendee' + (attendees.length === 1 ? '' : 's') + ' ' + verb + '.';
   }
 
@@ -250,7 +292,10 @@
     if (!isSafeHttpUrl(href)) return null;
     return el('a', {
       text,
-      attrs: Object.assign({ href, target: '_blank', rel: 'noopener noreferrer' }, opts.attrs || {}),
+      attrs: Object.assign(
+        { href, target: '_blank', rel: 'noopener noreferrer' },
+        opts.attrs || {}
+      ),
       className: opts.className,
       style: opts.style
     });
@@ -326,7 +371,8 @@
     busy = on;
     const { toolbar, body } = els();
     [toolbar, body].forEach(host => {
-      if (host) host.querySelectorAll('button, input, select, textarea').forEach(n => (n.disabled = on));
+      if (host)
+        host.querySelectorAll('button, input, select, textarea').forEach(n => (n.disabled = on));
     });
   }
 
@@ -336,7 +382,9 @@
     const id = wsId();
     if (!id) return;
     try {
-      capabilities = await apiGet('/api/calendar-ops/capabilities?workspace_id=' + encodeURIComponent(id));
+      capabilities = await apiGet(
+        '/api/calendar-ops/capabilities?workspace_id=' + encodeURIComponent(id)
+      );
       lastCapabilitiesError = null;
       showChip(true);
       await loadCalendarsAndRender();
@@ -411,7 +459,9 @@
     const id = wsId();
     if (!id) return;
     try {
-      const resp = await apiGet('/api/calendar-ops/calendars?workspace_id=' + encodeURIComponent(id));
+      const resp = await apiGet(
+        '/api/calendar-ops/calendars?workspace_id=' + encodeURIComponent(id)
+      );
       allCalendars = resp.calendars || [];
       const preselected = resp.selected_calendar_ids || [];
       if (selectedCalendarIds.size === 0 && preselected.length) {
@@ -434,8 +484,11 @@
       params.set('workspace_id', id);
       params.set('start', start.toISOString());
       params.set('end', end.toISOString());
-      if (capabilities && capabilities.display_time_zone) params.set('time_zone', capabilities.display_time_zone);
-      const ids = selectedCalendarIds.size ? Array.from(selectedCalendarIds) : Array.from(new Set(allCalendars.map(c => c.id)));
+      if (capabilities && capabilities.display_time_zone)
+        params.set('time_zone', capabilities.display_time_zone);
+      const ids = selectedCalendarIds.size
+        ? Array.from(selectedCalendarIds)
+        : Array.from(new Set(allCalendars.map(c => c.id)));
       ids.forEach(id2 => params.append('calendar_id', id2));
 
       const resp = await apiGet('/api/calendar-ops/events?' + params.toString());
@@ -468,7 +521,10 @@
   function renderErrorState(err) {
     const { status, body } = els();
     if (body) body.removeAttribute('aria-busy');
-    const message = (err && err.code && stateMessages[err.code]) || (err && err.message) || 'Something went wrong loading the calendar.';
+    const message =
+      (err && err.code && stateMessages[err.code]) ||
+      (err && err.message) ||
+      'Something went wrong loading the calendar.';
     if (status) status.textContent = message;
     if (body) {
       body.textContent = '';
@@ -480,7 +536,9 @@
     const { status, body } = els();
     if (body) body.removeAttribute('aria-busy');
     if (status) {
-      const tz = (capabilities && capabilities.display_time_zone) || Intl.DateTimeFormat().resolvedOptions().timeZone;
+      const tz =
+        (capabilities && capabilities.display_time_zone) ||
+        Intl.DateTimeFormat().resolvedOptions().timeZone;
       status.textContent = tz;
     }
     renderToolbar();
@@ -494,19 +552,57 @@
     if (!toolbar) return;
     toolbar.textContent = '';
 
-    const nav = el('div', { className: 'calendar-console-nav', attrs: { role: 'group', 'aria-label': 'Date navigation' } });
-    nav.appendChild(button('Today', { onClick: () => { anchorDate = new Date(); void loadEventsAndRender(); } }));
-    nav.appendChild(button('◀', { onClick: () => { anchorDate = shiftAnchor(view, anchorDate, -1); void loadEventsAndRender(); }, attrs: { 'aria-label': 'Previous' } }));
-    nav.appendChild(button('▶', { onClick: () => { anchorDate = shiftAnchor(view, anchorDate, 1); void loadEventsAndRender(); }, attrs: { 'aria-label': 'Next' } }));
-    nav.appendChild(el('span', { text: formatAnchorLabel(), className: 'calendar-console-nav-label', attrs: { 'aria-live': 'polite' } }));
+    const nav = el('div', {
+      className: 'calendar-console-nav',
+      attrs: { role: 'group', 'aria-label': 'Date navigation' }
+    });
+    nav.appendChild(
+      button('Today', {
+        onClick: () => {
+          anchorDate = new Date();
+          void loadEventsAndRender();
+        }
+      })
+    );
+    nav.appendChild(
+      button('◀', {
+        onClick: () => {
+          anchorDate = shiftAnchor(view, anchorDate, -1);
+          void loadEventsAndRender();
+        },
+        attrs: { 'aria-label': 'Previous' }
+      })
+    );
+    nav.appendChild(
+      button('▶', {
+        onClick: () => {
+          anchorDate = shiftAnchor(view, anchorDate, 1);
+          void loadEventsAndRender();
+        },
+        attrs: { 'aria-label': 'Next' }
+      })
+    );
+    nav.appendChild(
+      el('span', {
+        text: formatAnchorLabel(),
+        className: 'calendar-console-nav-label',
+        attrs: { 'aria-live': 'polite' }
+      })
+    );
     toolbar.appendChild(nav);
 
-    const viewSwitch = el('div', { className: 'calendar-console-view-switch', attrs: { role: 'group', 'aria-label': 'Day or week view' } });
+    const viewSwitch = el('div', {
+      className: 'calendar-console-view-switch',
+      attrs: { role: 'group', 'aria-label': 'Day or week view' }
+    });
     ['day', 'week'].forEach(v => {
       const b = button(v === 'day' ? 'Day' : 'Week', {
         primary: view === v,
         attrs: { 'aria-pressed': String(view === v) },
-        onClick: () => { view = v; void loadEventsAndRender(); }
+        onClick: () => {
+          view = v;
+          void loadEventsAndRender();
+        }
       });
       viewSwitch.appendChild(b);
     });
@@ -515,11 +611,16 @@
     toolbar.appendChild(button('Refresh', { onClick: () => loadEventsAndRender() }));
 
     if (capabilities && capabilities.can_create) {
-      toolbar.appendChild(button('New event', { primary: true, onClick: () => openForm('create_event', null) }));
+      toolbar.appendChild(
+        button('New event', { primary: true, onClick: () => openForm('create_event', null) })
+      );
     }
 
     if (allCalendars.length) {
-      const filters = el('div', { className: 'calendar-console-filters', attrs: { role: 'group', 'aria-label': 'Visible calendars' } });
+      const filters = el('div', {
+        className: 'calendar-console-filters',
+        attrs: { role: 'group', 'aria-label': 'Visible calendars' }
+      });
       allCalendars.forEach(cal => {
         const label = el('label', { className: 'calendar-console-filter' });
         const checkbox = el('input', { attrs: { type: 'checkbox' } });
@@ -558,7 +659,9 @@
     body.textContent = '';
 
     if (currentEvents.length === 0) {
-      body.appendChild(el('div', { className: 'calendar-console-empty', text: 'No events in this range.' }));
+      body.appendChild(
+        el('div', { className: 'calendar-console-empty', text: 'No events in this range.' })
+      );
       renderFreeWindowsSection(body);
       return;
     }
@@ -577,9 +680,14 @@
       .forEach(key => {
         const dayEvents = byDay.get(key);
         const allDay = dayEvents.filter(e => e.all_day);
-        const timed = dayEvents.filter(e => !e.all_day).sort((a, b) => Date.parse(a.start_time) - Date.parse(b.start_time));
+        const timed = dayEvents
+          .filter(e => !e.all_day)
+          .sort((a, b) => Date.parse(a.start_time) - Date.parse(b.start_time));
 
-        const daySection = el('section', { className: 'calendar-console-day', attrs: { 'aria-label': key } });
+        const daySection = el('section', {
+          className: 'calendar-console-day',
+          attrs: { 'aria-label': key }
+        });
         daySection.appendChild(el('h3', { text: key, className: 'calendar-console-day-heading' }));
 
         if (allDay.length) {
@@ -605,14 +713,21 @@
   function renderEventCard(evt, hasConflict) {
     const tz = capabilities && capabilities.display_time_zone;
     const card = el('button', {
-      className: 'calendar-console-event' + (hasConflict ? ' calendar-console-event-conflict' : '') + (evt.private ? ' calendar-console-event-private' : ''),
+      className:
+        'calendar-console-event' +
+        (hasConflict ? ' calendar-console-event-conflict' : '') +
+        (evt.private ? ' calendar-console-event-private' : ''),
       attrs: { type: 'button' },
       onClick: () => openDetailDrawer(evt)
     });
 
     if (evt.private) {
-      card.appendChild(el('div', { className: 'calendar-console-event-time', text: formatTimeRangeLabel(evt, tz) }));
-      card.appendChild(el('div', { className: 'calendar-console-event-title', text: 'Private event' }));
+      card.appendChild(
+        el('div', { className: 'calendar-console-event-time', text: formatTimeRangeLabel(evt, tz) })
+      );
+      card.appendChild(
+        el('div', { className: 'calendar-console-event-title', text: 'Private event' })
+      );
       card.setAttribute('aria-label', 'Private event, ' + formatTimeRangeLabel(evt, tz));
       return card;
     }
@@ -624,19 +739,39 @@
     if (evt.recurring) labelParts.push('Recurring');
     card.setAttribute('aria-label', labelParts.join(', '));
 
-    card.appendChild(el('div', { className: 'calendar-console-event-time', text: formatTimeRangeLabel(evt, tz) }));
+    card.appendChild(
+      el('div', { className: 'calendar-console-event-time', text: formatTimeRangeLabel(evt, tz) })
+    );
     const titleRow = el('div', { className: 'calendar-console-event-title-row' });
     if (cal && cal.color) {
-      titleRow.appendChild(el('span', { className: 'calendar-console-color-dot', style: 'background:' + cssColorOrNone(cal.color) + ';' }));
+      titleRow.appendChild(
+        el('span', {
+          className: 'calendar-console-color-dot',
+          style: 'background:' + cssColorOrNone(cal.color) + ';'
+        })
+      );
     }
-    titleRow.appendChild(el('span', { className: 'calendar-console-event-title', text: evt.title || 'Untitled event' }));
+    titleRow.appendChild(
+      el('span', { className: 'calendar-console-event-title', text: evt.title || 'Untitled event' })
+    );
     card.appendChild(titleRow);
 
     const badges = el('div', { className: 'calendar-console-event-badges' });
-    if (hasConflict) badges.appendChild(el('span', { className: 'calendar-console-badge calendar-console-badge-conflict', text: 'Conflict' }));
-    if (evt.canceled) badges.appendChild(el('span', { className: 'calendar-console-badge', text: 'Canceled' }));
-    if (evt.recurring) badges.appendChild(el('span', { className: 'calendar-console-badge', text: 'Recurring' }));
-    if (evt.response_status) badges.appendChild(el('span', { className: 'calendar-console-badge', text: evt.response_status }));
+    if (hasConflict)
+      badges.appendChild(
+        el('span', {
+          className: 'calendar-console-badge calendar-console-badge-conflict',
+          text: 'Conflict'
+        })
+      );
+    if (evt.canceled)
+      badges.appendChild(el('span', { className: 'calendar-console-badge', text: 'Canceled' }));
+    if (evt.recurring)
+      badges.appendChild(el('span', { className: 'calendar-console-badge', text: 'Recurring' }));
+    if (evt.response_status)
+      badges.appendChild(
+        el('span', { className: 'calendar-console-badge', text: evt.response_status })
+      );
     if (badges.children.length) card.appendChild(badges);
 
     return card;
@@ -661,7 +796,9 @@
 
     const closeBtn = button('Close', { onClick: () => closeDetailDrawer() });
     const head = el('div', { className: 'calendar-console-drawer-head' });
-    head.appendChild(el('h3', { text: evt.private ? 'Private event' : evt.title || 'Untitled event' }));
+    head.appendChild(
+      el('h3', { text: evt.private ? 'Private event' : evt.title || 'Untitled event' })
+    );
     head.appendChild(closeBtn);
     drawer.appendChild(head);
     drawer.setAttribute('role', 'dialog');
@@ -676,11 +813,19 @@
 
     if (!evt.private) {
       if (evt.location) drawer.appendChild(el('div', { text: 'Location: ' + evt.location }));
-      if (evt.description) drawer.appendChild(el('div', { text: evt.description, className: 'calendar-console-drawer-description' }));
+      if (evt.description)
+        drawer.appendChild(
+          el('div', { text: evt.description, className: 'calendar-console-drawer-description' })
+        );
       if (evt.attendees && evt.attendees.length) {
         const list = el('ul', { className: 'calendar-console-attendee-list' });
         evt.attendees.forEach(a => {
-          list.appendChild(el('li', { text: (a.display_name || a.email) + (a.response_status ? ' — ' + a.response_status : '') }));
+          list.appendChild(
+            el('li', {
+              text:
+                (a.display_name || a.email) + (a.response_status ? ' — ' + a.response_status : '')
+            })
+          );
         });
         drawer.appendChild(list);
       }
@@ -692,7 +837,9 @@
       if (links.children.length) drawer.appendChild(links);
 
       if (capabilities && capabilities.can_edit && evt.id) {
-        drawer.appendChild(button('Edit', { primary: true, onClick: () => openForm('update_event', evt) }));
+        drawer.appendChild(
+          button('Edit', { primary: true, onClick: () => openForm('update_event', evt) })
+        );
       }
 
       if (isPreparableEvent(evt)) {
@@ -728,15 +875,25 @@
     container.appendChild(body);
 
     const params = new URLSearchParams({
-      workspace_id: wsId(), calendar_id: evt.calendar_id || '', event_id: evt.id,
-      title: evt.title || '', start_time: evt.start_time || '', end_time: evt.end_time || '',
-      location: evt.location || '', description: evt.description || ''
+      workspace_id: wsId(),
+      calendar_id: evt.calendar_id || '',
+      event_id: evt.id,
+      title: evt.title || '',
+      start_time: evt.start_time || '',
+      end_time: evt.end_time || '',
+      location: evt.location || '',
+      description: evt.description || ''
     });
     let status;
     try {
       status = await apiGet('/api/calendar-ops/events/prep-status?' + params.toString());
     } catch (err) {
-      body.appendChild(el('div', { className: 'calendar-console-form-error', text: 'Could not load prep status: ' + err.message }));
+      body.appendChild(
+        el('div', {
+          className: 'calendar-console-form-error',
+          text: 'Could not load prep status: ' + err.message
+        })
+      );
       return;
     }
     renderPrepStatusBody(body, evt, status, 0);
@@ -747,7 +904,12 @@
 
     if (!status.linked || status.status === 'failed') {
       if (status.linked && status.status === 'failed') {
-        body.appendChild(el('div', { className: 'calendar-console-form-error', text: 'Prep failed: ' + (status.error || 'unknown error') }));
+        body.appendChild(
+          el('div', {
+            className: 'calendar-console-form-error',
+            text: 'Prep failed: ' + (status.error || 'unknown error')
+          })
+        );
       }
       body.appendChild(
         button(status.linked ? 'Retry prepare' : 'Prepare me', {
@@ -765,9 +927,14 @@
           if (!body.isConnected) return; // drawer was closed/replaced; stop polling
           try {
             const params = new URLSearchParams({
-              workspace_id: wsId(), calendar_id: evt.calendar_id || '', event_id: evt.id,
-              title: evt.title || '', start_time: evt.start_time || '', end_time: evt.end_time || '',
-              location: evt.location || '', description: evt.description || ''
+              workspace_id: wsId(),
+              calendar_id: evt.calendar_id || '',
+              event_id: evt.id,
+              title: evt.title || '',
+              start_time: evt.start_time || '',
+              end_time: evt.end_time || '',
+              location: evt.location || '',
+              description: evt.description || ''
             });
             const next = await apiGet('/api/calendar-ops/events/prep-status?' + params.toString());
             renderPrepStatusBody(body, evt, next, pollAttempt + 1);
@@ -782,7 +949,12 @@
 
     // Ready.
     const row = el('div', { className: 'calendar-console-prep-ready' });
-    row.appendChild(el('a', { text: 'View prep note', attrs: { href: '/notes/' + encodeURIComponent(status.note_id) } }));
+    row.appendChild(
+      el('a', {
+        text: 'View prep note',
+        attrs: { href: '/notes/' + encodeURIComponent(status.note_id) }
+      })
+    );
     if (status.is_stale) {
       row.appendChild(el('span', { className: 'calendar-console-badge', text: 'may be outdated' }));
     }
@@ -798,8 +970,15 @@
       renderPrepStatusBody(body, evt, { linked: true, status: 'pending' }, 0);
     } catch (err) {
       body.textContent = '';
-      body.appendChild(el('div', { className: 'calendar-console-form-error', text: 'Could not start prep: ' + err.message }));
-      body.appendChild(button('Prepare me', { primary: true, onClick: () => startPrepare(body, evt) }));
+      body.appendChild(
+        el('div', {
+          className: 'calendar-console-form-error',
+          text: 'Could not start prep: ' + err.message
+        })
+      );
+      body.appendChild(
+        button('Prepare me', { primary: true, onClick: () => startPrepare(body, evt) })
+      );
     }
   }
 
@@ -813,7 +992,10 @@
   // --- free windows -----------------------------------------------------
 
   async function renderFreeWindowsSection(container) {
-    const section = el('section', { className: 'calendar-console-free-windows', attrs: { 'aria-label': 'Free windows' } });
+    const section = el('section', {
+      className: 'calendar-console-free-windows',
+      attrs: { 'aria-label': 'Free windows' }
+    });
     section.appendChild(el('h4', { text: 'Free windows' }));
     const list = el('div', { className: 'calendar-console-free-windows-list' });
     section.appendChild(list);
@@ -823,7 +1005,11 @@
 
     if (capabilities && (capabilities.can_freebusy || capabilities.can_suggest_time)) {
       try {
-        const params = new URLSearchParams({ workspace_id: wsId(), start: lastRangeStartISO, end: lastRangeEndISO });
+        const params = new URLSearchParams({
+          workspace_id: wsId(),
+          start: lastRangeStartISO,
+          end: lastRangeEndISO
+        });
         const resp = await apiGet('/api/calendar-ops/free-windows?' + params.toString());
         if (resp.mapped) {
           renderFreeWindowList(list, resp.windows || [], false);
@@ -834,22 +1020,33 @@
       }
     }
 
-    const windows = workingDayWindows(view, anchorDate)
-      .flatMap(w => deriveEventFreeWindows(currentEvents, w.start, w.end));
+    const windows = workingDayWindows(view, anchorDate).flatMap(w =>
+      deriveEventFreeWindows(currentEvents, w.start, w.end)
+    );
     renderFreeWindowList(list, windows, true);
   }
 
   function renderFreeWindowList(container, windows, eventDerived) {
     container.textContent = '';
     if (!windows.length) {
-      container.appendChild(el('div', { className: 'calendar-console-empty', text: 'No free windows found in this range.' }));
+      container.appendChild(
+        el('div', {
+          className: 'calendar-console-empty',
+          text: 'No free windows found in this range.'
+        })
+      );
       return;
     }
     const tz = capabilities && capabilities.display_time_zone;
     windows.slice(0, 20).forEach(w => {
       const row = el('div', { className: 'calendar-console-free-window' });
-      row.appendChild(el('span', { text: formatTimeRangeLabel({ start_time: w.start_time, end_time: w.end_time }, tz) }));
-      if (eventDerived) row.appendChild(el('span', { className: 'calendar-console-badge', text: 'event-derived' }));
+      row.appendChild(
+        el('span', {
+          text: formatTimeRangeLabel({ start_time: w.start_time, end_time: w.end_time }, tz)
+        })
+      );
+      if (eventDerived)
+        row.appendChild(el('span', { className: 'calendar-console-badge', text: 'event-derived' }));
       container.appendChild(row);
     });
   }
@@ -889,9 +1086,15 @@
     }
     const isUpdate = openFormOperation === 'update_event';
     const seed = openFormSeed || {};
-    const form = el('form', { className: 'calendar-console-form', attrs: { 'aria-label': isUpdate ? 'Edit event' : 'New event' } });
+    const form = el('form', {
+      className: 'calendar-console-form',
+      attrs: { 'aria-label': isUpdate ? 'Edit event' : 'New event' }
+    });
 
-    const titleInput = el('input', { className: 'form-control', attrs: { type: 'text', placeholder: 'Title', required: 'required' } });
+    const titleInput = el('input', {
+      className: 'form-control',
+      attrs: { type: 'text', placeholder: 'Title', required: 'required' }
+    });
     titleInput.value = seed.title || '';
     const calendarSelect = el('select', { className: 'form-select' });
     allCalendars.forEach(cal => {
@@ -899,21 +1102,36 @@
       if (cal.id === seed.calendar_id) opt.setAttribute('selected', 'selected');
       calendarSelect.appendChild(opt);
     });
-    const startInput = el('input', { className: 'form-control', attrs: { type: 'datetime-local' } });
+    const startInput = el('input', {
+      className: 'form-control',
+      attrs: { type: 'datetime-local' }
+    });
     if (seed.start_time) startInput.value = toDateTimeLocal(seed.start_time);
     const endInput = el('input', { className: 'form-control', attrs: { type: 'datetime-local' } });
     if (seed.end_time) endInput.value = toDateTimeLocal(seed.end_time);
-    const tzInput = el('input', { className: 'form-control', attrs: { type: 'text', placeholder: 'Timezone (e.g. America/New_York)' } });
+    const tzInput = el('input', {
+      className: 'form-control',
+      attrs: { type: 'text', placeholder: 'Timezone (e.g. America/New_York)' }
+    });
     tzInput.value = seed.time_zone || (capabilities && capabilities.display_time_zone) || '';
-    const locationInput = el('input', { className: 'form-control', attrs: { type: 'text', placeholder: 'Location' } });
+    const locationInput = el('input', {
+      className: 'form-control',
+      attrs: { type: 'text', placeholder: 'Location' }
+    });
     locationInput.value = seed.location || '';
-    const descriptionInput = el('textarea', { className: 'form-control', attrs: { placeholder: 'Description', rows: '3' } });
+    const descriptionInput = el('textarea', {
+      className: 'form-control',
+      attrs: { placeholder: 'Description', rows: '3' }
+    });
     descriptionInput.value = seed.description || '';
     const attendeesInput = el('input', {
       className: 'form-control',
       attrs: { type: 'text', placeholder: 'Attendees (comma-separated emails)' }
     });
-    attendeesInput.value = (seed.attendees || []).map(a => a.email).filter(Boolean).join(', ');
+    attendeesInput.value = (seed.attendees || [])
+      .map(a => a.email)
+      .filter(Boolean)
+      .join(', ');
 
     [
       ['Title', titleInput],
@@ -931,7 +1149,10 @@
       form.appendChild(row);
     });
 
-    const errorBox = el('div', { className: 'calendar-console-form-error', attrs: { role: 'alert' } });
+    const errorBox = el('div', {
+      className: 'calendar-console-form-error',
+      attrs: { role: 'alert' }
+    });
     form.appendChild(errorBox);
 
     const actions = el('div', { className: 'calendar-console-form-actions' });
@@ -980,7 +1201,17 @@
     const d = new Date(iso);
     if (Number.isNaN(d.getTime())) return '';
     const pad = n => String(n).padStart(2, '0');
-    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+    return (
+      d.getFullYear() +
+      '-' +
+      pad(d.getMonth() + 1) +
+      '-' +
+      pad(d.getDate()) +
+      'T' +
+      pad(d.getHours()) +
+      ':' +
+      pad(d.getMinutes())
+    );
   }
 
   function fromDateTimeLocal(value) {
@@ -995,7 +1226,10 @@
   // attendees, and invitation/update impact. Nothing here has written
   // anything yet -- Preview performed zero MCP calls.
   function renderCheckpoint(preview, originalPayload) {
-    const box = el('div', { className: 'calendar-console-checkpoint', attrs: { role: 'group', 'aria-label': 'Confirm calendar change' } });
+    const box = el('div', {
+      className: 'calendar-console-checkpoint',
+      attrs: { role: 'group', 'aria-label': 'Confirm calendar change' }
+    });
     box.appendChild(el('h4', { text: 'Confirm this change' }));
 
     const cal = calendarById(preview.calendar_id);
@@ -1014,9 +1248,17 @@
       row.appendChild(document.createTextNode(value));
       box.appendChild(row);
     });
-    box.appendChild(el('div', { text: attendeeImpactLabel(preview.attendees, preview.operation), className: 'calendar-console-checkpoint-impact' }));
+    box.appendChild(
+      el('div', {
+        text: attendeeImpactLabel(preview.attendees, preview.operation),
+        className: 'calendar-console-checkpoint-impact'
+      })
+    );
 
-    const errorBox = el('div', { className: 'calendar-console-form-error', attrs: { role: 'alert' } });
+    const errorBox = el('div', {
+      className: 'calendar-console-form-error',
+      attrs: { role: 'alert' }
+    });
     const actions = el('div', { className: 'calendar-console-form-actions' });
     actions.appendChild(button('Cancel', { onClick: () => renderForm() }));
     actions.appendChild(
@@ -1026,10 +1268,13 @@
           errorBox.textContent = '';
           setBusy(true);
           try {
-            const confirmPayload = Object.assign({}, originalPayload, { confirmation_id: preview.confirmation_id });
+            const confirmPayload = Object.assign({}, originalPayload, {
+              confirmation_id: preview.confirmation_id
+            });
             const result = await apiPost('/api/calendar-ops/mutations/confirm', confirmPayload);
             if (!result.success) {
-              errorBox.textContent = 'The connector reported a failure: ' + (result.error || 'unknown error');
+              errorBox.textContent =
+                'The connector reported a failure: ' + (result.error || 'unknown error');
               return;
             }
             closeForm();

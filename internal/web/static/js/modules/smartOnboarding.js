@@ -88,10 +88,12 @@ export class SmartOnboardingManager {
     // Quick add marketplace buttons
     const addMusicMarketplaceBtn = document.getElementById('addMusicMarketplaceBtn');
     if (addMusicMarketplaceBtn) {
-      addMusicMarketplaceBtn.addEventListener('click', () => this.quickAddMarketplace(
-        'Ori Music Plugins',
-        'https://gitlab.com/johnjallday/ori-music-plugin-registry'
-      ));
+      addMusicMarketplaceBtn.addEventListener('click', () =>
+        this.quickAddMarketplace(
+          'Ori Music Plugins',
+          'https://gitlab.com/johnjallday/ori-music-plugin-registry'
+        )
+      );
     }
   }
 
@@ -134,12 +136,20 @@ export class SmartOnboardingManager {
     const container = document.getElementById('detectedAppsPreview');
     if (!container) return;
 
-    const appsHtml = this.detectedApps.slice(0, 15).map(app => `
+    const appsHtml = this.detectedApps
+      .slice(0, 15)
+      .map(
+        app => `
       <span class="badge bg-secondary me-1 mb-1">${this.escapeHtml(app.name)}</span>
-    `).join('');
+    `
+      )
+      .join('');
 
     const moreCount = this.detectedApps.length - 15;
-    const moreHtml = moreCount > 0 ? `<span class="badge bg-light text-dark me-1 mb-1">+${moreCount} more</span>` : '';
+    const moreHtml =
+      moreCount > 0
+        ? `<span class="badge bg-light text-dark me-1 mb-1">+${moreCount} more</span>`
+        : '';
 
     container.innerHTML = appsHtml + moreHtml;
 
@@ -166,12 +176,20 @@ export class SmartOnboardingManager {
     const container = document.getElementById('detectedAppsList');
     if (!container) return;
 
-    const appsHtml = this.detectedApps.slice(0, 10).map(app => `
+    const appsHtml = this.detectedApps
+      .slice(0, 10)
+      .map(
+        app => `
       <span class="badge bg-secondary me-1 mb-1">${this.escapeHtml(app.name)}</span>
-    `).join('');
+    `
+      )
+      .join('');
 
     const moreCount = this.detectedApps.length - 10;
-    const moreHtml = moreCount > 0 ? `<span class="badge bg-light text-dark me-1 mb-1">+${moreCount} more</span>` : '';
+    const moreHtml =
+      moreCount > 0
+        ? `<span class="badge bg-light text-dark me-1 mb-1">+${moreCount} more</span>`
+        : '';
 
     container.innerHTML = appsHtml + moreHtml;
   }
@@ -292,7 +310,8 @@ export class SmartOnboardingManager {
 
     if (!name || !source) {
       if (resultEl) {
-        resultEl.innerHTML = '<div class="alert alert-warning py-2">Please enter both name and source.</div>';
+        resultEl.innerHTML =
+          '<div class="alert alert-warning py-2">Please enter both name and source.</div>';
         resultEl.classList.remove('d-none');
       }
       return;
@@ -337,7 +356,8 @@ export class SmartOnboardingManager {
     } catch (error) {
       console.error('Error testing marketplace:', error);
       if (resultEl) {
-        resultEl.innerHTML = '<div class="alert alert-danger py-2">Failed to test connection.</div>';
+        resultEl.innerHTML =
+          '<div class="alert alert-danger py-2">Failed to test connection.</div>';
         resultEl.classList.remove('d-none');
       }
       if (addBtn) addBtn.disabled = true;
@@ -386,7 +406,8 @@ export class SmartOnboardingManager {
         if (nameInput) nameInput.value = '';
         if (sourceInput) sourceInput.value = '';
         if (resultEl) {
-          resultEl.innerHTML = '<div class="alert alert-success py-2">Marketplace added successfully!</div>';
+          resultEl.innerHTML =
+            '<div class="alert alert-success py-2">Marketplace added successfully!</div>';
           resultEl.classList.remove('d-none');
           setTimeout(() => resultEl.classList.add('d-none'), 3000);
         }
@@ -399,7 +420,8 @@ export class SmartOnboardingManager {
     } catch (error) {
       console.error('Error adding marketplace:', error);
       if (resultEl) {
-        resultEl.innerHTML = '<div class="alert alert-danger py-2">Failed to add marketplace.</div>';
+        resultEl.innerHTML =
+          '<div class="alert alert-danger py-2">Failed to add marketplace.</div>';
         resultEl.classList.remove('d-none');
       }
     } finally {
@@ -418,7 +440,8 @@ export class SmartOnboardingManager {
     // Check if already added
     if (this.addedMarketplaces.some(mp => mp.source === source)) {
       if (resultEl) {
-        resultEl.innerHTML = '<div class="alert alert-info py-2">This marketplace is already added.</div>';
+        resultEl.innerHTML =
+          '<div class="alert alert-info py-2">This marketplace is already added.</div>';
         resultEl.classList.remove('d-none');
         setTimeout(() => resultEl.classList.add('d-none'), 3000);
       }
@@ -494,7 +517,8 @@ export class SmartOnboardingManager {
     } catch (error) {
       console.error('Error adding marketplace:', error);
       if (resultEl) {
-        resultEl.innerHTML = '<div class="alert alert-danger py-2">Failed to add marketplace.</div>';
+        resultEl.innerHTML =
+          '<div class="alert alert-danger py-2">Failed to add marketplace.</div>';
         resultEl.classList.remove('d-none');
       }
       if (btn) {
@@ -538,9 +562,13 @@ export class SmartOnboardingManager {
     }
 
     container.classList.remove('d-none');
-    listEl.innerHTML = this.addedMarketplaces.map(mp => `
+    listEl.innerHTML = this.addedMarketplaces
+      .map(
+        mp => `
       <div class="badge bg-success me-1 mb-1">${this.escapeHtml(mp.name)}</div>
-    `).join('');
+    `
+      )
+      .join('');
   }
 
   // Go back from marketplace step
@@ -704,7 +732,9 @@ export class SmartOnboardingManager {
 
     // Separate recommended and other plugins
     const recommendedPluginNames = new Set(this.aiRecommendations.map(r => r.name));
-    const recommendedPlugins = this.availablePlugins.filter(p => recommendedPluginNames.has(p.name));
+    const recommendedPlugins = this.availablePlugins.filter(p =>
+      recommendedPluginNames.has(p.name)
+    );
     const otherPlugins = this.availablePlugins.filter(p => !recommendedPluginNames.has(p.name));
 
     // Sort recommended plugins by relevance level
@@ -757,8 +787,12 @@ export class SmartOnboardingManager {
   renderPluginItem(plugin, index, isRecommended) {
     const aiRec = this.getAIRecommendation(plugin.name);
     const displayName = plugin.metadata?.name || stripVersionSuffix(plugin.name || '');
-    const relevanceBadgeColor = aiRec?.relevance === 'high' ? 'bg-success' :
-      aiRec?.relevance === 'medium' ? 'bg-info' : 'bg-secondary';
+    const relevanceBadgeColor =
+      aiRec?.relevance === 'high'
+        ? 'bg-success'
+        : aiRec?.relevance === 'medium'
+          ? 'bg-info'
+          : 'bg-secondary';
 
     let reasonHtml = '';
     if (aiRec?.reason) {
@@ -809,12 +843,12 @@ export class SmartOnboardingManager {
 
     // Define profile-to-plugin mapping
     const recommendations = {
-      'developer': ['git', 'code', 'script', 'api', 'debug', 'test'],
-      'devops': ['docker', 'kubernetes', 'aws', 'cloud', 'deploy', 'ci', 'monitor'],
-      'data_scientist': ['data', 'python', 'analysis', 'ml', 'chart', 'csv', 'sql'],
-      'designer': ['image', 'design', 'color', 'ui', 'figma'],
-      'writer': ['write', 'text', 'document', 'markdown', 'note'],
-      'project_manager': ['task', 'project', 'calendar', 'team', 'slack']
+      developer: ['git', 'code', 'script', 'api', 'debug', 'test'],
+      devops: ['docker', 'kubernetes', 'aws', 'cloud', 'deploy', 'ci', 'monitor'],
+      data_scientist: ['data', 'python', 'analysis', 'ml', 'chart', 'csv', 'sql'],
+      designer: ['image', 'design', 'color', 'ui', 'figma'],
+      writer: ['write', 'text', 'document', 'markdown', 'note'],
+      project_manager: ['task', 'project', 'calendar', 'team', 'slack']
     };
 
     const keywords = recommendations[category] || [];
@@ -937,15 +971,16 @@ export class SmartOnboardingManager {
     const listEl = document.getElementById('createdAgentsList');
 
     if (installed.length > 0) {
-      if (successMsg) successMsg.textContent = `${installed.length} plugin${installed.length > 1 ? 's' : ''} installed successfully!`;
+      if (successMsg)
+        successMsg.textContent = `${installed.length} plugin${installed.length > 1 ? 's' : ''} installed successfully!`;
       if (headerEl) {
         headerEl.textContent = 'Installed Plugins:';
         headerEl.classList.remove('d-none');
       }
       if (listEl) {
-        listEl.innerHTML = installed.map(name =>
-          `<li class="mb-1"><strong>${this.escapeHtml(name)}</strong></li>`
-        ).join('');
+        listEl.innerHTML = installed
+          .map(name => `<li class="mb-1"><strong>${this.escapeHtml(name)}</strong></li>`)
+          .join('');
       }
     } else {
       if (successMsg) successMsg.textContent = 'No plugins were installed.';
@@ -971,8 +1006,16 @@ export class SmartOnboardingManager {
   // Show a specific section
   showSection(sectionId) {
     const sections = [
-      'mode-selection', 'detecting', 'no-apps', 'apps-detected', 'describe',
-      'analyzing', 'marketplace', 'confirmation', 'applying', 'success'
+      'mode-selection',
+      'detecting',
+      'no-apps',
+      'apps-detected',
+      'describe',
+      'analyzing',
+      'marketplace',
+      'confirmation',
+      'applying',
+      'success'
     ];
 
     sections.forEach(id => {
@@ -1000,13 +1043,13 @@ export class SmartOnboardingManager {
   // Format category for display
   formatCategory(category) {
     const categories = {
-      'developer': 'Software Developer',
-      'devops': 'DevOps Engineer',
-      'designer': 'Designer',
-      'data_scientist': 'Data Scientist',
-      'writer': 'Writer / Content Creator',
-      'project_manager': 'Project Manager',
-      'general': 'General User'
+      developer: 'Software Developer',
+      devops: 'DevOps Engineer',
+      designer: 'Designer',
+      data_scientist: 'Data Scientist',
+      writer: 'Writer / Content Creator',
+      project_manager: 'Project Manager',
+      general: 'General User'
     };
     return categories[category] || category || 'General User';
   }

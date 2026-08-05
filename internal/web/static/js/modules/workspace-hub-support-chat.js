@@ -43,9 +43,11 @@
 
   function getFocusableElements() {
     if (!elements || !elements.panel) return [];
-    return Array.from(elements.panel.querySelectorAll(
-      'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
-    )).filter((node) => {
+    return Array.from(
+      elements.panel.querySelectorAll(
+        'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      )
+    ).filter(node => {
       if (!node || node.hidden) return false;
       const style = window.getComputedStyle(node);
       return style.display !== 'none' && style.visibility !== 'hidden';
@@ -163,7 +165,7 @@
 
     if (elements.input) {
       elements.input.addEventListener('input', autoResizeInput);
-      elements.input.addEventListener('keydown', (event) => {
+      elements.input.addEventListener('keydown', event => {
         if (event.key === 'Enter' && !event.shiftKey) {
           event.preventDefault();
           if (elements.form && typeof elements.form.requestSubmit === 'function') {
@@ -175,7 +177,7 @@
       });
     }
 
-    document.addEventListener('keydown', (event) => {
+    document.addEventListener('keydown', event => {
       if (event.key === 'Escape' && elements.root.getAttribute('data-state') === 'open') {
         closePanel();
       }

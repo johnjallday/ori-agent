@@ -73,16 +73,28 @@ test('followUpActionFor maps kinds to the shared mutation endpoints', () => {
 test('renderManagementCard wires Done to a complete action; candidates get Track/Dismiss', () => {
   const doc = fakeDoc();
   const fired = [];
-  const active = renderManagementCard(doc, { id: 'f1', title: 'X', category: 'You owe', isCandidate: false }, (kind, v) =>
-    fired.push([kind, v.id])
+  const active = renderManagementCard(
+    doc,
+    { id: 'f1', title: 'X', category: 'You owe', isCandidate: false },
+    (kind, v) => fired.push([kind, v.id])
   );
   const btns = collectButtons(active);
-  assert.deepEqual(btns.map(b => b.textContent), ['Done', 'Snooze 1 day']);
+  assert.deepEqual(
+    btns.map(b => b.textContent),
+    ['Done', 'Snooze 1 day']
+  );
   btns[0].listeners.click();
   assert.deepEqual(fired, [['complete', 'f1']]);
 
-  const cand = renderManagementCard(doc, { id: 'f2', title: 'Y', category: 'Waiting on', isCandidate: true }, () => {});
-  assert.deepEqual(collectButtons(cand).map(b => b.textContent), ['Track this', 'Not a follow-up']);
+  const cand = renderManagementCard(
+    doc,
+    { id: 'f2', title: 'Y', category: 'Waiting on', isCandidate: true },
+    () => {}
+  );
+  assert.deepEqual(
+    collectButtons(cand).map(b => b.textContent),
+    ['Track this', 'Not a follow-up']
+  );
 });
 
 test('renderManagementPanel hides when empty, shows cards otherwise', () => {
@@ -92,7 +104,12 @@ test('renderManagementPanel hides when empty, shows cards otherwise', () => {
   renderManagementPanel(doc, mount, managementView([]), () => {});
   assert.equal(mount.hidden, true);
 
-  renderManagementPanel(doc, mount, managementView([{ id: 'f1', title: 'X', category: 'i_owe', status: 'active' }]), () => {});
+  renderManagementPanel(
+    doc,
+    mount,
+    managementView([{ id: 'f1', title: 'X', category: 'i_owe', status: 'active' }]),
+    () => {}
+  );
   assert.equal(mount.hidden, false);
   assert.ok(collectButtons(mount).length >= 1);
 });
@@ -102,7 +119,9 @@ test('wireWorkspaceFollowUps loads the workspace list and re-fetches after a mut
   const mount = doc.createElement('div');
   const fetched = [];
   const posted = [];
-  let payload = { followups: [{ id: 'f1', title: 'Reply to landlord', category: 'i_owe', status: 'active' }] };
+  let payload = {
+    followups: [{ id: 'f1', title: 'Reply to landlord', category: 'i_owe', status: 'active' }]
+  };
   const fetchImpl = async url => {
     fetched.push(url);
     return { ok: true, json: async () => payload };

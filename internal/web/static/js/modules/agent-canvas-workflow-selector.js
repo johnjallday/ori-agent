@@ -118,10 +118,14 @@ export class AgentCanvasWorkflowSelector {
             <span class="workflow-selector-item-count">${totalTasks}</span>
           </div>
 
-          ${hasWorkflows ? `
+          ${
+            hasWorkflows
+              ? `
             <div class="workflow-selector-divider"></div>
 
-            ${workflows.map(wf => `
+            ${workflows
+              .map(
+                wf => `
               <div class="workflow-selector-item ${this.state.selectedWorkflowId === wf.id ? 'selected' : ''}"
                    onclick="event.stopPropagation(); window.workflowSelector?.selectWorkflow('${wf.id}')">
                 <span class="workflow-selector-item-icon">
@@ -130,8 +134,12 @@ export class AgentCanvasWorkflowSelector {
                 <span class="workflow-selector-item-text">${this.escapeHtml(wf.name)}</span>
                 <span class="workflow-selector-item-count">${wf.taskCount}</span>
               </div>
-            `).join('')}
-          ` : ''}
+            `
+              )
+              .join('')}
+          `
+              : ''
+          }
 
           <div class="workflow-selector-divider"></div>
 
@@ -258,7 +266,11 @@ export class AgentCanvasWorkflowSelector {
     // Check for different modal systems
     if (typeof showAddTaskModal === 'function') {
       showAddTaskModal();
-    } else if (this.parent && this.parent.forms && typeof this.parent.forms.showCreateTaskForm === 'function') {
+    } else if (
+      this.parent &&
+      this.parent.forms &&
+      typeof this.parent.forms.showCreateTaskForm === 'function'
+    ) {
       this.parent.forms.showCreateTaskForm();
     } else {
       console.warn('Task creation modal not available');

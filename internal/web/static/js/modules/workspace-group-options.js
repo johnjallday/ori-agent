@@ -22,7 +22,7 @@
     const groups = [];
 
     (function walk(items, depth) {
-      (items || []).forEach((node) => {
+      (items || []).forEach(node => {
         if (!node || !node.id) return;
         if (String(node.kind || '').trim() === 'group') {
           groups.push({ id: node.id, name: node.name || node.id, depth });
@@ -39,9 +39,11 @@
   function renderWorkspaceParentOptions(groups) {
     const options = ['<option value="">No group</option>'];
 
-    (groups || []).forEach((group) => {
+    (groups || []).forEach(group => {
       const indent = group.depth > 0 ? `${'--'.repeat(group.depth)} ` : '';
-      options.push(`<option value="${escapeHtml(group.id)}">${escapeHtml(indent + group.name)}</option>`);
+      options.push(
+        `<option value="${escapeHtml(group.id)}">${escapeHtml(indent + group.name)}</option>`
+      );
     });
 
     return options.join('');

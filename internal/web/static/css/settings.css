@@ -86,7 +86,9 @@
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   color: var(--text-primary);
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
 }
 
 .settings-nav-search input:focus {
@@ -132,7 +134,10 @@
   color: var(--text-secondary);
   text-decoration: none;
   border-left: 3px solid transparent;
-  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease,
+    border-color 0.15s ease;
   cursor: pointer;
 }
 
@@ -269,7 +274,9 @@
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   color: var(--text-primary);
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
 }
 
 .settings-input:focus {
@@ -487,8 +494,12 @@ body.settings-page .settings-field .input-group > :not(:first-child) {
 
 .settings-card-highlight {
   padding: 1rem;
-  background: linear-gradient(135deg, rgba(var(--accent-color-rgb, 79,70,229), 0.1) 0%, rgba(var(--accent-color-rgb, 79,70,229), 0.05) 100%);
-  border: 1px solid rgba(var(--accent-color-rgb, 79,70,229), 0.2);
+  background: linear-gradient(
+    135deg,
+    rgba(var(--accent-color-rgb, 79, 70, 229), 0.1) 0%,
+    rgba(var(--accent-color-rgb, 79, 70, 229), 0.05) 100%
+  );
+  border: 1px solid rgba(var(--accent-color-rgb, 79, 70, 229), 0.2);
   border-radius: var(--radius-md);
   margin-bottom: 1rem;
 }

@@ -152,7 +152,9 @@ export class AgentCanvasNotifications {
       });
     } else {
       // Fallback: show in alert
-      const logText = logs.map(log => `[${log.timestamp.toLocaleTimeString()}] ${log.message}`).join('\n');
+      const logText = logs
+        .map(log => `[${log.timestamp.toLocaleTimeString()}] ${log.message}`)
+        .join('\n');
       alert(`Execution Log:\n\n${logText}`);
     }
   }

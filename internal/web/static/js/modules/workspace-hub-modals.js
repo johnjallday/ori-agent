@@ -4,7 +4,7 @@
  *
  * @module workspace-hub-modals
  */
-(function() {
+(function () {
   'use strict';
 
   let deleteConfirmResolve = null;
@@ -43,9 +43,9 @@
 
     elements.executionConfirmMeta.innerHTML = '';
     (Array.isArray(items) ? items : [])
-      .map((item) => String(item || '').trim())
+      .map(item => String(item || '').trim())
       .filter(Boolean)
-      .forEach((item) => {
+      .forEach(item => {
         const chip = document.createElement('span');
         chip.className = 'hub-execution-confirm-chip';
         chip.textContent = item;
@@ -58,7 +58,7 @@
     if (!elements.executionConfirmDetails) return;
 
     const normalizedItems = (Array.isArray(items) ? items : [])
-      .map((item) => String(item || '').trim())
+      .map(item => String(item || '').trim())
       .filter(Boolean);
 
     elements.executionConfirmDetails.innerHTML = '';
@@ -92,7 +92,8 @@
     if (!elements.executionConfirmModal || !window.bootstrap) return null;
     return typeof bootstrap.Modal.getOrCreateInstance === 'function'
       ? bootstrap.Modal.getOrCreateInstance(elements.executionConfirmModal)
-      : (bootstrap.Modal.getInstance(elements.executionConfirmModal) || new bootstrap.Modal(elements.executionConfirmModal));
+      : bootstrap.Modal.getInstance(elements.executionConfirmModal) ||
+          new bootstrap.Modal(elements.executionConfirmModal);
   }
 
   /**
@@ -107,9 +108,10 @@
     const elements = window.WorkspaceHubState.getElements();
     const title = options.title || 'Confirm Delete';
     const message = options.message || 'Are you sure you want to delete the selected items?';
-    const confirmLabel = options.confirmLabel || (options.variant === 'trash' ? 'Move to Trash' : 'Delete');
+    const confirmLabel =
+      options.confirmLabel || (options.variant === 'trash' ? 'Move to Trash' : 'Delete');
 
-    return new Promise((resolve) => {
+    return new Promise(resolve => {
       if (!elements.deleteConfirmModal || !window.bootstrap) {
         resolve(window.confirm([title, message].filter(Boolean).join('\n\n')));
         return;
@@ -132,9 +134,11 @@
         elements.deleteConfirmBtn.textContent = confirmLabel;
       }
 
-      const modal = typeof bootstrap.Modal.getOrCreateInstance === 'function'
-        ? bootstrap.Modal.getOrCreateInstance(elements.deleteConfirmModal)
-        : (bootstrap.Modal.getInstance(elements.deleteConfirmModal) || new bootstrap.Modal(elements.deleteConfirmModal));
+      const modal =
+        typeof bootstrap.Modal.getOrCreateInstance === 'function'
+          ? bootstrap.Modal.getOrCreateInstance(elements.deleteConfirmModal)
+          : bootstrap.Modal.getInstance(elements.deleteConfirmModal) ||
+            new bootstrap.Modal(elements.deleteConfirmModal);
       modal.show();
       window.setTimeout(() => {
         elements.deleteConfirmBtn?.focus();
@@ -178,14 +182,15 @@
   function showParentDeletePrompt(options) {
     const elements = window.WorkspaceHubState.getElements();
 
-    return new Promise((resolve) => {
+    return new Promise(resolve => {
       parentDeleteResolve = resolve;
 
       if (elements.parentDeleteTitle) {
         elements.parentDeleteTitle.textContent = options.title || 'Delete Workflow';
       }
       if (elements.parentDeleteBody) {
-        elements.parentDeleteBody.textContent = options.message || 'This workflow has subtasks. What would you like to do?';
+        elements.parentDeleteBody.textContent =
+          options.message || 'This workflow has subtasks. What would you like to do?';
       }
 
       if (elements.parentDeleteModal && window.bootstrap) {
@@ -263,7 +268,7 @@
     renderExecutionConfirmMeta(metaItems);
     renderExecutionConfirmDetails(details);
 
-    return new Promise((resolve) => {
+    return new Promise(resolve => {
       executionConfirmResolve = resolve;
       const modal = getExecutionConfirmModal();
       modal?.show();
@@ -301,10 +306,14 @@
     }
 
     if (elements.parentDeleteUngroupBtn) {
-      elements.parentDeleteUngroupBtn.addEventListener('click', () => handleParentDeleteChoice('ungroup'));
+      elements.parentDeleteUngroupBtn.addEventListener('click', () =>
+        handleParentDeleteChoice('ungroup')
+      );
     }
     if (elements.parentDeleteAllBtn) {
-      elements.parentDeleteAllBtn.addEventListener('click', () => handleParentDeleteChoice('delete_all'));
+      elements.parentDeleteAllBtn.addEventListener('click', () =>
+        handleParentDeleteChoice('delete_all')
+      );
     }
     if (elements.parentDeleteModal) {
       elements.parentDeleteModal.addEventListener('hidden.bs.modal', handleParentDeleteCancel);
@@ -314,7 +323,9 @@
       elements.executionConfirmCancelBtn.addEventListener('click', handleExecutionConfirmCancel);
     }
     if (elements.executionConfirmConfirmBtn) {
-      elements.executionConfirmConfirmBtn.addEventListener('click', () => handleExecutionConfirm(true));
+      elements.executionConfirmConfirmBtn.addEventListener('click', () =>
+        handleExecutionConfirm(true)
+      );
     }
     if (elements.executionConfirmModal) {
       elements.executionConfirmModal.addEventListener('hidden.bs.modal', () => {

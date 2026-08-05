@@ -4,7 +4,7 @@
  *
  * @module workspace-hub-state
  */
-(function() {
+(function () {
   'use strict';
 
   const STORAGE_KEY = 'oriWorkspaceHubSelectedId';
@@ -171,11 +171,13 @@
   function shouldRefreshForEvent(type) {
     if (!type) return false;
     if (type === 'workspace.status') return false;
-    return type.startsWith('task.') ||
+    return (
+      type.startsWith('task.') ||
       type.startsWith('workflow.') ||
       type.startsWith('step.') ||
       type === 'workspace.updated' ||
-      type === 'workspace.completed';
+      type === 'workspace.completed'
+    );
   }
 
   // Expose state manager globally

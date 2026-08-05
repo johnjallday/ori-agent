@@ -13,17 +13,21 @@ function notify(message, type = 'info') {
 }
 
 // Toggle password visibility for API keys
-document.getElementById('toggleOpenaiKey')?.addEventListener('click', function() {
+document.getElementById('toggleOpenaiKey')?.addEventListener('click', function () {
   const input = document.getElementById('openaiApiKeyInput');
   input.type = input.type === 'password' ? 'text' : 'password';
 });
 
 // Reset Getting Started (quest-log) progress. Non-destructive: clears
 // completions so the quests show from the beginning. Nothing is deleted.
-document.getElementById('resetGettingStartedBtn')?.addEventListener('click', async function() {
+document.getElementById('resetGettingStartedBtn')?.addEventListener('click', async function () {
   const btn = this;
   const status = document.getElementById('resetGettingStartedStatus');
-  if (!window.confirm('Reset your Getting Started quest progress?\n\nThis clears the quest log and shows the quests from the beginning. Nothing is deleted.')) {
+  if (
+    !window.confirm(
+      'Reset your Getting Started quest progress?\n\nThis clears the quest log and shows the quests from the beginning. Nothing is deleted.'
+    )
+  ) {
     return;
   }
   btn.disabled = true;
@@ -41,18 +45,18 @@ document.getElementById('resetGettingStartedBtn')?.addEventListener('click', asy
   }
 });
 
-document.getElementById('toggleAnthropicKey')?.addEventListener('click', function() {
+document.getElementById('toggleAnthropicKey')?.addEventListener('click', function () {
   const input = document.getElementById('anthropicApiKeyInput');
   input.type = input.type === 'password' ? 'text' : 'password';
 });
 
-document.getElementById('toggleGeminiKey')?.addEventListener('click', function() {
+document.getElementById('toggleGeminiKey')?.addEventListener('click', function () {
   const input = document.getElementById('geminiApiKeyInput');
   input.type = input.type === 'password' ? 'text' : 'password';
 });
 
 // Save OpenAI API Key
-document.getElementById('saveOpenaiKey')?.addEventListener('click', async function() {
+document.getElementById('saveOpenaiKey')?.addEventListener('click', async function () {
   const apiKey = document.getElementById('openaiApiKeyInput').value.trim();
 
   if (!apiKey) {
@@ -89,7 +93,7 @@ document.getElementById('saveOpenaiKey')?.addEventListener('click', async functi
 });
 
 // Save Anthropic API Key
-document.getElementById('saveAnthropicKey')?.addEventListener('click', async function() {
+document.getElementById('saveAnthropicKey')?.addEventListener('click', async function () {
   const apiKey = document.getElementById('anthropicApiKeyInput').value.trim();
 
   if (!apiKey) {
@@ -128,13 +132,13 @@ document.getElementById('saveAnthropicKey')?.addEventListener('click', async fun
 });
 
 // Toggle Claude setup token visibility
-document.getElementById('toggleClaudeSetupToken')?.addEventListener('click', function() {
+document.getElementById('toggleClaudeSetupToken')?.addEventListener('click', function () {
   const input = document.getElementById('claudeSetupTokenInput');
   input.type = input.type === 'password' ? 'text' : 'password';
 });
 
 // Save Claude Setup Token
-document.getElementById('saveClaudeSetupToken')?.addEventListener('click', async function() {
+document.getElementById('saveClaudeSetupToken')?.addEventListener('click', async function () {
   const token = document.getElementById('claudeSetupTokenInput').value.trim();
 
   if (!token) {
@@ -143,7 +147,10 @@ document.getElementById('saveClaudeSetupToken')?.addEventListener('click', async
   }
 
   if (!token.startsWith('sk-ant-oat01-') || token.length < 80) {
-    notify('Invalid setup token. Must start with "sk-ant-oat01-" and be at least 80 characters.', 'warning');
+    notify(
+      'Invalid setup token. Must start with "sk-ant-oat01-" and be at least 80 characters.',
+      'warning'
+    );
     return;
   }
 
@@ -172,7 +179,7 @@ document.getElementById('saveClaudeSetupToken')?.addEventListener('click', async
 });
 
 // Save Gemini API Key
-document.getElementById('saveGeminiKey')?.addEventListener('click', async function() {
+document.getElementById('saveGeminiKey')?.addEventListener('click', async function () {
   const apiKey = document.getElementById('geminiApiKeyInput').value.trim();
 
   if (!apiKey) {
@@ -204,7 +211,7 @@ document.getElementById('saveGeminiKey')?.addEventListener('click', async functi
 });
 
 // System Diagnostics Button
-document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async function() {
+document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async function () {
   try {
     const response = await fetch('/api/updates/version');
     const data = await response.json();
@@ -217,7 +224,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
 });
 
 // Utility Web Search Settings
-(function() {
+(function () {
   const providerSelect = document.getElementById('utilitySearchProvider');
   const browserControlProviderSelect = document.getElementById('utilityBrowserControlProvider');
   const playwrightBrowserSelect = document.getElementById('utilityPlaywrightBrowser');
@@ -323,7 +330,8 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
     if (provider === 'brave' && !hasBraveKey) {
       statusIndicator.innerHTML = icon.warn;
       statusText.textContent = 'Brave Search selected, API key missing';
-      statusDetails.textContent = 'Web search will fall back to DuckDuckGo until a Brave key is added.';
+      statusDetails.textContent =
+        'Web search will fall back to DuckDuckGo until a Brave key is added.';
       return;
     }
 
@@ -351,7 +359,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
       keyStatusEl.textContent = hasBraveKey ? 'Configured' : 'Not configured';
     }
     if (keyMaskedEl) {
-      keyMaskedEl.textContent = hasBraveKey ? (maskedKey || '***') : 'Not configured';
+      keyMaskedEl.textContent = hasBraveKey ? maskedKey || '***' : 'Not configured';
     }
     if (currentKeyText) {
       currentKeyText.textContent = hasBraveKey
@@ -363,7 +371,9 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
   function applyUtilitySettings(utilitySettings) {
     utility = utilitySettings || {};
     const provider = normalizeProvider(utility.search_provider);
-    const browserControlProvider = normalizeBrowserControlProvider(utility.browser_control_provider);
+    const browserControlProvider = normalizeBrowserControlProvider(
+      utility.browser_control_provider
+    );
     const playwrightBrowser = normalizePlaywrightBrowser(utility.playwright_browser);
     const playwrightExecutablePath = String(utility.playwright_executable_path || '').trim();
     const hasBraveKey = Boolean(utility.has_brave_api_key);
@@ -387,7 +397,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
     try {
       const response = await fetch('/api/settings/utility');
       if (!response.ok) {
-        throw new Error(await response.text() || 'Failed to load utility settings');
+        throw new Error((await response.text()) || 'Failed to load utility settings');
       }
       const data = await response.json();
       applyUtilitySettings(data.utility || {});
@@ -431,9 +441,11 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
     return data.utility || {};
   }
 
-  saveProviderBtn?.addEventListener('click', async function() {
+  saveProviderBtn?.addEventListener('click', async function () {
     const provider = normalizeProvider(providerSelect.value);
-    const browserControlProvider = normalizeBrowserControlProvider(browserControlProviderSelect?.value);
+    const browserControlProvider = normalizeBrowserControlProvider(
+      browserControlProviderSelect?.value
+    );
     const playwrightBrowser = normalizePlaywrightBrowser(playwrightBrowserSelect?.value);
     const playwrightExecutablePath = (playwrightExecutablePathInput?.value || '').trim();
     setButtonLoading(saveProviderBtn, true, 'Saving...');
@@ -456,7 +468,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
     }
   });
 
-  openApiModalBtn?.addEventListener('click', function() {
+  openApiModalBtn?.addEventListener('click', function () {
     if (!searchApiModalEl) return;
     if (!searchApiModal) {
       searchApiModal = new bootstrap.Modal(searchApiModalEl);
@@ -469,12 +481,12 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
     searchApiModal.show();
   });
 
-  toggleApiKeyBtn?.addEventListener('click', function() {
+  toggleApiKeyBtn?.addEventListener('click', function () {
     if (!searchApiInput) return;
     searchApiInput.type = searchApiInput.type === 'password' ? 'text' : 'password';
   });
 
-  saveApiKeyBtn?.addEventListener('click', async function() {
+  saveApiKeyBtn?.addEventListener('click', async function () {
     const braveKey = searchApiInput?.value.trim() || '';
     if (!braveKey) {
       notify('Enter a Brave API key, or use "Remove Key".', 'warning');
@@ -500,7 +512,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
     }
   });
 
-  removeApiKeyBtn?.addEventListener('click', async function() {
+  removeApiKeyBtn?.addEventListener('click', async function () {
     if (!utility?.has_brave_api_key) {
       notify('No Brave API key is stored.', 'info');
       return;
@@ -526,7 +538,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
     }
   });
 
-  searchApiModalEl?.addEventListener('hidden.bs.modal', function() {
+  searchApiModalEl?.addEventListener('hidden.bs.modal', function () {
     if (!searchApiInput) return;
     searchApiInput.value = '';
     searchApiInput.type = 'password';
@@ -536,7 +548,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
 })();
 
 // Workspace Directory Settings
-(function() {
+(function () {
   const input = document.getElementById('workspaceRootInput');
   const browseBtn = document.getElementById('browseWorkspaceRootBtn');
   const saveBtn = document.getElementById('saveWorkspaceRootBtn');
@@ -579,7 +591,8 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
         </svg>
       `;
       statusText.textContent = 'Workspace directory not confirmed';
-      statusDetails.textContent = 'Ori is not scanning the suggested directory yet. Choose a folder and save it to continue.';
+      statusDetails.textContent =
+        'Ori is not scanning the suggested directory yet. Choose a folder and save it to continue.';
       return;
     }
 
@@ -590,7 +603,9 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
         </svg>
       `;
       statusText.textContent = 'Custom workspace directory active';
-      statusDetails.textContent = effectiveRoot ? `New workspaces will be created in ${effectiveRoot}.` : '';
+      statusDetails.textContent = effectiveRoot
+        ? `New workspaces will be created in ${effectiveRoot}.`
+        : '';
       return;
     }
 
@@ -601,7 +616,9 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
         </svg>
       `;
       statusText.textContent = 'Using workspace directory from WORKSPACE_DIR';
-      statusDetails.textContent = effectiveRoot ? `${effectiveRoot} is active until you save a custom directory.` : '';
+      statusDetails.textContent = effectiveRoot
+        ? `${effectiveRoot} is active until you save a custom directory.`
+        : '';
       return;
     }
 
@@ -611,7 +628,9 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
       </svg>
     `;
     statusText.textContent = 'Using built-in workspace directory';
-    statusDetails.textContent = effectiveRoot ? `${effectiveRoot} is the current default until you save a custom directory.` : '';
+    statusDetails.textContent = effectiveRoot
+      ? `${effectiveRoot} is the current default until you save a custom directory.`
+      : '';
   }
 
   function applyWorkspaceRootState(state) {
@@ -629,7 +648,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
   async function loadWorkspaceRoot() {
     const response = await fetch('/api/settings/workspace-root');
     if (!response.ok) {
-      throw new Error(await response.text() || 'Failed to load workspace directory');
+      throw new Error((await response.text()) || 'Failed to load workspace directory');
     }
     const data = await response.json();
     applyWorkspaceRootState(data);
@@ -645,7 +664,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
     });
 
     if (!response.ok) {
-      throw new Error(await response.text() || 'Failed to save workspace directory');
+      throw new Error((await response.text()) || 'Failed to save workspace directory');
     }
 
     const data = await response.json();
@@ -653,7 +672,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
     return data;
   }
 
-  browseBtn?.addEventListener('click', async function() {
+  browseBtn?.addEventListener('click', async function () {
     setButtonLoading(browseBtn, true, 'Selecting...');
     try {
       const response = await fetch('/api/folder-picker/select-path', {
@@ -681,7 +700,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
     }
   });
 
-  saveBtn?.addEventListener('click', async function() {
+  saveBtn?.addEventListener('click', async function () {
     setButtonLoading(saveBtn, true, 'Saving...');
     try {
       await saveWorkspaceRoot(input.value.trim());
@@ -694,7 +713,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
     }
   });
 
-  resetBtn?.addEventListener('click', async function() {
+  resetBtn?.addEventListener('click', async function () {
     if (!workspaceRootState?.workspace_root) {
       return;
     }
@@ -711,7 +730,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
     }
   });
 
-  loadWorkspaceRoot().catch((error) => {
+  loadWorkspaceRoot().catch(error => {
     console.error('Failed to load workspace directory:', error);
     if (statusIndicator) {
       statusIndicator.innerHTML = `
@@ -730,7 +749,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
 })();
 
 // Vault Directory Settings
-(function() {
+(function () {
   const input = document.getElementById('vaultRootInput');
   const browseBtn = document.getElementById('browseVaultRootBtn');
   const saveBtn = document.getElementById('saveVaultRootBtn');
@@ -773,7 +792,9 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
         </svg>
       `;
       statusText.textContent = 'Custom vault directory active';
-      statusDetails.textContent = effectiveRoot ? `New managed vault folders will be created in ${effectiveRoot}.` : '';
+      statusDetails.textContent = effectiveRoot
+        ? `New managed vault folders will be created in ${effectiveRoot}.`
+        : '';
       return;
     }
 
@@ -784,7 +805,9 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
         </svg>
       `;
       statusText.textContent = 'Using vault directory from ORI_VAULT_DIR';
-      statusDetails.textContent = effectiveRoot ? `${effectiveRoot} is active until you save a custom directory.` : '';
+      statusDetails.textContent = effectiveRoot
+        ? `${effectiveRoot} is active until you save a custom directory.`
+        : '';
       return;
     }
 
@@ -794,7 +817,9 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
       </svg>
     `;
     statusText.textContent = 'Using built-in vault directory';
-    statusDetails.textContent = effectiveRoot ? `${effectiveRoot} is the current default until you save a custom directory.` : '';
+    statusDetails.textContent = effectiveRoot
+      ? `${effectiveRoot} is the current default until you save a custom directory.`
+      : '';
   }
 
   function applyVaultRootState(state) {
@@ -811,7 +836,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
   async function loadVaultRoot() {
     const response = await fetch('/api/settings/vault-root');
     if (!response.ok) {
-      throw new Error(await response.text() || 'Failed to load vault directory');
+      throw new Error((await response.text()) || 'Failed to load vault directory');
     }
     const data = await response.json();
     applyVaultRootState(data);
@@ -827,7 +852,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
     });
 
     if (!response.ok) {
-      throw new Error(await response.text() || 'Failed to save vault directory');
+      throw new Error((await response.text()) || 'Failed to save vault directory');
     }
 
     const data = await response.json();
@@ -835,7 +860,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
     return data;
   }
 
-  browseBtn?.addEventListener('click', async function() {
+  browseBtn?.addEventListener('click', async function () {
     setButtonLoading(browseBtn, true, 'Selecting...');
     try {
       const response = await fetch('/api/folder-picker/select-path', {
@@ -863,7 +888,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
     }
   });
 
-  saveBtn?.addEventListener('click', async function() {
+  saveBtn?.addEventListener('click', async function () {
     setButtonLoading(saveBtn, true, 'Saving...');
     try {
       await saveVaultRoot(input.value.trim());
@@ -876,7 +901,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
     }
   });
 
-  resetBtn?.addEventListener('click', async function() {
+  resetBtn?.addEventListener('click', async function () {
     if (!vaultRootState?.vault_root) {
       return;
     }
@@ -893,7 +918,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
     }
   });
 
-  loadVaultRoot().catch((error) => {
+  loadVaultRoot().catch(error => {
     console.error('Failed to load vault directory:', error);
     if (statusIndicator) {
       statusIndicator.innerHTML = `
@@ -912,7 +937,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
 })();
 
 // Session Management Settings
-(function() {
+(function () {
   const sessionCleanupEnabled = document.getElementById('sessionCleanupEnabled');
   const sessionCleanupDays = document.getElementById('sessionCleanupDays');
   const sessionMaxCount = document.getElementById('sessionMaxCount');
@@ -976,7 +1001,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
   }
 
   // Save session settings
-  saveSessionSettingsBtn?.addEventListener('click', async function() {
+  saveSessionSettingsBtn?.addEventListener('click', async function () {
     try {
       const response = await fetch('/api/settings/session', {
         method: 'POST',
@@ -1001,15 +1026,18 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
   });
 
   // Run cleanup now
-  runSessionCleanupBtn?.addEventListener('click', async function() {
+  runSessionCleanupBtn?.addEventListener('click', async function () {
     const days = parseInt(sessionCleanupDays?.value || '30', 10);
 
-    if (!confirm(`This will permanently delete all sessions inactive for ${days}+ days. Continue?`)) {
+    if (
+      !confirm(`This will permanently delete all sessions inactive for ${days}+ days. Continue?`)
+    ) {
       return;
     }
 
     runSessionCleanupBtn.disabled = true;
-    runSessionCleanupBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Cleaning...';
+    runSessionCleanupBtn.innerHTML =
+      '<span class="spinner-border spinner-border-sm me-2"></span>Cleaning...';
 
     try {
       const response = await fetch('/api/sessions/cleanup', {
@@ -1052,7 +1080,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
 })();
 
 // Reset Application functionality
-(function() {
+(function () {
   const resetCheckboxes = {
     settings: document.getElementById('resetSettings'),
     agents: document.getElementById('resetAgents'),
@@ -1094,7 +1122,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
   });
 
   // Select All button
-  selectAllBtn?.addEventListener('click', function() {
+  selectAllBtn?.addEventListener('click', function () {
     Object.values(resetCheckboxes).forEach(cb => {
       if (cb) cb.checked = true;
     });
@@ -1102,7 +1130,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
   });
 
   // Clear All button
-  clearAllBtn?.addEventListener('click', function() {
+  clearAllBtn?.addEventListener('click', function () {
     Object.values(resetCheckboxes).forEach(cb => {
       if (cb) cb.checked = false;
     });
@@ -1121,7 +1149,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
   }
 
   // Open confirmation modal
-  resetAppBtn?.addEventListener('click', function() {
+  resetAppBtn?.addEventListener('click', function () {
     const selected = getSelectedItems();
     const selectedKeys = Object.keys(selected);
 
@@ -1156,7 +1184,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
   });
 
   // Validate confirmation input
-  resetConfirmInput?.addEventListener('input', function() {
+  resetConfirmInput?.addEventListener('input', function () {
     const isValid = this.value.trim() === 'RESET';
     if (confirmResetBtn) {
       confirmResetBtn.disabled = !isValid;
@@ -1167,14 +1195,14 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
   });
 
   // Handle Enter key in confirmation input
-  resetConfirmInput?.addEventListener('keydown', function(e) {
+  resetConfirmInput?.addEventListener('keydown', function (e) {
     if (e.key === 'Enter' && this.value.trim() === 'RESET') {
       confirmResetBtn?.click();
     }
   });
 
   // Perform the reset
-  confirmResetBtn?.addEventListener('click', async function() {
+  confirmResetBtn?.addEventListener('click', async function () {
     const inputValue = resetConfirmInput?.value.trim();
 
     if (inputValue !== 'RESET') {
@@ -1198,7 +1226,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-Requested-With': 'XMLHttpRequest'  // CSRF protection
+          'X-Requested-With': 'XMLHttpRequest' // CSRF protection
         },
         body: JSON.stringify(selected)
       });
@@ -1216,10 +1244,14 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
         // Check if onboarding was reset - redirect to root to trigger onboarding
         if (selected.onboarding) {
           notify(`Successfully reset: ${resetItems}. Redirecting to setup wizard...`, 'success');
-          setTimeout(() => { window.location.href = '/'; }, 1500);
+          setTimeout(() => {
+            window.location.href = '/';
+          }, 1500);
         } else {
           notify(`Successfully reset: ${resetItems}. Reloading...`, 'success');
-          setTimeout(() => { window.location.reload(); }, 1500);
+          setTimeout(() => {
+            window.location.reload();
+          }, 1500);
         }
       } else {
         // Show error
@@ -1236,7 +1268,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
   });
 
   // Reset modal state when hidden
-  document.getElementById('resetConfirmModal')?.addEventListener('hidden.bs.modal', function() {
+  document.getElementById('resetConfirmModal')?.addEventListener('hidden.bs.modal', function () {
     if (resetConfirmInput) {
       resetConfirmInput.value = '';
     }
@@ -1250,7 +1282,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
 })();
 
 // System Model Settings
-(function() {
+(function () {
   const providerSelect = document.getElementById('systemModelProvider');
   const modelSelect = document.getElementById('systemModelModel');
   const reasoningField = document.getElementById('systemModelReasoningField');
@@ -1323,8 +1355,9 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
         .filter(option => option && typeof option.id === 'string' && option.id.length > 0)
         .map(option => ({
           id: option.id,
-          label: (typeof option.label === 'string' && option.label.length > 0) ? option.label : option.id,
-          description: (typeof option.description === 'string') ? option.description : '',
+          label:
+            typeof option.label === 'string' && option.label.length > 0 ? option.label : option.id,
+          description: typeof option.description === 'string' ? option.description : '',
           recommended: Boolean(option.recommended)
         }));
     }
@@ -1371,27 +1404,27 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
           });
 
         // Add unavailable providers as disabled options
-      availableProviders
-        .filter(p => !p.available)
-        .forEach(provider => {
-          const option = document.createElement('option');
-          option.value = provider.name;
-          let unavailableReason = 'CLI required';
-          if (provider.requires_key) {
-            unavailableReason = 'API key required';
-          } else if (provider.name === 'codex') {
-            unavailableReason = 'Codex CLI required';
-          } else if (provider.name === 'claude_code') {
-            unavailableReason = 'Claude CLI required';
-          } else if (provider.name === 'lmstudio') {
-            unavailableReason = 'Start LM Studio server';
-          } else if (provider.name === 'mlx_lm') {
-            unavailableReason = 'Start mlx_lm.server';
-          }
-          option.textContent = `${provider.display_name} (${unavailableReason})`;
-          option.disabled = true;
-          providerSelect.appendChild(option);
-        });
+        availableProviders
+          .filter(p => !p.available)
+          .forEach(provider => {
+            const option = document.createElement('option');
+            option.value = provider.name;
+            let unavailableReason = 'CLI required';
+            if (provider.requires_key) {
+              unavailableReason = 'API key required';
+            } else if (provider.name === 'codex') {
+              unavailableReason = 'Codex CLI required';
+            } else if (provider.name === 'claude_code') {
+              unavailableReason = 'Claude CLI required';
+            } else if (provider.name === 'lmstudio') {
+              unavailableReason = 'Start LM Studio server';
+            } else if (provider.name === 'mlx_lm') {
+              unavailableReason = 'Start mlx_lm.server';
+            }
+            option.textContent = `${provider.display_name} (${unavailableReason})`;
+            option.disabled = true;
+            providerSelect.appendChild(option);
+          });
       }
     } catch (error) {
       console.error('Error loading providers:', error);
@@ -1408,7 +1441,12 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
       }
       const data = await response.json();
 
-      updateStatusIndicator(data.configured, data.provider, data.model, data.reasoning_effort || '');
+      updateStatusIndicator(
+        data.configured,
+        data.provider,
+        data.model,
+        data.reasoning_effort || ''
+      );
 
       if (data.configured && providerSelect && modelSelect) {
         providerSelect.value = data.provider;
@@ -1439,7 +1477,9 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
     }
 
     try {
-      const response = await fetch(`/api/settings/available-models?provider=${encodeURIComponent(providerName)}`);
+      const response = await fetch(
+        `/api/settings/available-models?provider=${encodeURIComponent(providerName)}`
+      );
       if (!response.ok) {
         throw new Error('Failed to fetch models');
       }
@@ -1475,7 +1515,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
   }
 
   // Provider selection change
-  providerSelect?.addEventListener('change', async function() {
+  providerSelect?.addEventListener('change', async function () {
     const provider = this.value;
     updateReasoningVisibility(provider);
     await loadModelsForProvider(provider);
@@ -1483,17 +1523,15 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
   });
 
   // Model selection change
-  modelSelect?.addEventListener('change', function() {
+  modelSelect?.addEventListener('change', function () {
     updateSaveButtonState();
   });
 
   // Save system model
-  saveBtn?.addEventListener('click', async function() {
+  saveBtn?.addEventListener('click', async function () {
     const provider = providerSelect?.value;
     const model = modelSelect?.value;
-    const reasoning_effort = provider === 'codex'
-      ? (reasoningSelect?.value || 'medium')
-      : '';
+    const reasoning_effort = provider === 'codex' ? reasoningSelect?.value || 'medium' : '';
 
     if (!provider || !model) {
       showSystemModelAlert('Please select both a provider and a model.', 'warning');
@@ -1516,7 +1554,12 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
       }
 
       const data = await response.json();
-      updateStatusIndicator(data.configured, data.provider, data.model, data.reasoning_effort || '');
+      updateStatusIndicator(
+        data.configured,
+        data.provider,
+        data.model,
+        data.reasoning_effort || ''
+      );
       updateReasoningVisibility(data.provider, data.reasoning_effort || '');
       showSystemModelAlert('System model saved successfully!', 'success');
 
@@ -1540,8 +1583,12 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
   });
 
   // Clear system model
-  clearBtn?.addEventListener('click', async function() {
-    if (!confirm('Are you sure you want to clear the system model configuration? Auto-config and other AI features will not work without it.')) {
+  clearBtn?.addEventListener('click', async function () {
+    if (
+      !confirm(
+        'Are you sure you want to clear the system model configuration? Auto-config and other AI features will not work without it.'
+      )
+    ) {
       return;
     }
 
@@ -1593,7 +1640,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
 })();
 
 // Voice Settings (local storage for now)
-(function() {
+(function () {
   const providerSelect = document.getElementById('speechProviderSelect');
   const languageSelect = document.getElementById('speechLanguageSelect');
   const saveBtn = document.getElementById('saveSpeechSettingsBtn');
@@ -1626,10 +1673,13 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
   function cacheSettings(settings) {
     if (!window.localStorage) return;
     try {
-      localStorage.setItem(storageKey, JSON.stringify({
-        provider: settings.speech_provider || settings.provider,
-        language: settings.speech_language || settings.language
-      }));
+      localStorage.setItem(
+        storageKey,
+        JSON.stringify({
+          provider: settings.speech_provider || settings.provider,
+          language: settings.speech_language || settings.language
+        })
+      );
     } catch (error) {
       console.error('Failed to cache voice settings:', error);
     }
@@ -1707,7 +1757,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         micStatus = 'granted';
-        stream.getTracks().forEach((track) => track.stop());
+        stream.getTracks().forEach(track => track.stop());
       } catch (error) {
         if (error && error.name === 'NotAllowedError') {
           micStatus = 'denied';
@@ -1736,7 +1786,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
 })();
 
 // Private Vault Settings
-(function() {
+(function () {
   const DEFAULT_VAULT_ID = '';
   const VAULT_STORAGE_KEY = 'ori-selected-vault-id';
   const section = document.getElementById('private-vault');
@@ -1806,7 +1856,9 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
   const importVaultNameInput = document.getElementById('vaultImportVaultName');
   const importVaultDescriptionInput = document.getElementById('vaultImportVaultDescription');
   const importVaultPasswordInput = document.getElementById('vaultImportVaultPassword');
-  const importConfirmVaultPasswordInput = document.getElementById('vaultImportConfirmVaultPassword');
+  const importConfirmVaultPasswordInput = document.getElementById(
+    'vaultImportConfirmVaultPassword'
+  );
   const importRestoreGrantsInput = document.getElementById('vaultImportRestoreGrants');
   const importBtn = document.getElementById('vaultImportBtn');
 
@@ -1867,7 +1919,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
   }
 
   function currentVault() {
-    return vaults.find((item) => item.id === currentVaultID()) || null;
+    return vaults.find(item => item.id === currentVaultID()) || null;
   }
 
   function vaultRecordCount(vaultItem) {
@@ -1946,7 +1998,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
   function parseTags(rawValue) {
     return String(rawValue || '')
       .split(',')
-      .map((tag) => tag.trim())
+      .map(tag => tag.trim())
       .filter(Boolean);
   }
 
@@ -2044,9 +2096,10 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
     const mode = importModeInput?.value === 'current' && canImportCurrent ? 'current' : 'new';
     if (importCurrentHint) {
       importCurrentHint.hidden = mode !== 'current';
-      importCurrentHint.textContent = mode === 'current'
-        ? `The selected vault "${vaultDisplayLabel(currentVault())}" is unlocked and ready for imported records.`
-        : 'The selected vault must already be unlocked before Ori can import records into it.';
+      importCurrentHint.textContent =
+        mode === 'current'
+          ? `The selected vault "${vaultDisplayLabel(currentVault())}" is unlocked and ready for imported records.`
+          : 'The selected vault must already be unlocked before Ori can import records into it.';
     }
 
     if (importCreateFields) {
@@ -2070,11 +2123,13 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
       return;
     }
 
-    activeVaultSelect.innerHTML = vaults.map((item) => {
-      const selected = item.id === currentVaultID() ? ' selected' : '';
-      const label = `${vaultDisplayLabel(item)} · ${vaultRecordCount(item)}`;
-      return `<option value="${escapeHTML(item.id)}"${selected}>${escapeHTML(label)}</option>`;
-    }).join('');
+    activeVaultSelect.innerHTML = vaults
+      .map(item => {
+        const selected = item.id === currentVaultID() ? ' selected' : '';
+        const label = `${vaultDisplayLabel(item)} · ${vaultRecordCount(item)}`;
+        return `<option value="${escapeHTML(item.id)}"${selected}>${escapeHTML(label)}</option>`;
+      })
+      .join('');
 
     const selectedVault = currentVault();
     if (!selectedVault) {
@@ -2092,7 +2147,9 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
       details.push(selectedVault.description);
     }
     details.push(selectedVault.password_protected ? 'Own password' : 'Legacy vault');
-    details.push(`${vaultRecordCount(selectedVault)} stored ${vaultRecordCount(selectedVault) === 1 ? 'entry' : 'entries'}`);
+    details.push(
+      `${vaultRecordCount(selectedVault)} stored ${vaultRecordCount(selectedVault) === 1 ? 'entry' : 'entries'}`
+    );
     activeVaultMeta.textContent = details.join(' • ');
 
     if (editVaultNameInput) {
@@ -2118,9 +2175,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
     vaults = Array.isArray(data.vaults) ? data.vaults : [];
 
     const preferredVaultID = String(selectedVaultID || readStoredVaultID() || '').trim();
-    const nextVault = vaults.find((item) => item.id === preferredVaultID)
-      || vaults[0]
-      || null;
+    const nextVault = vaults.find(item => item.id === preferredVaultID) || vaults[0] || null;
 
     selectedVaultID = nextVault?.id || DEFAULT_VAULT_ID;
     writeStoredVaultID(selectedVaultID);
@@ -2265,7 +2320,10 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
     resetEntryBtn.disabled = false;
     exportBtn.disabled = disableVaultEditing;
     lockBtn.disabled = !vaultStatus || !vaultStatus.available || vaultStatus.locked;
-    unlockBtn.disabled = !vaultStatus || !vaultStatus.available || Boolean(vaultStatus && !vaultStatus.locked && !vaultStatus.requires_passphrase);
+    unlockBtn.disabled =
+      !vaultStatus ||
+      !vaultStatus.available ||
+      Boolean(vaultStatus && !vaultStatus.locked && !vaultStatus.requires_passphrase);
     revealPayloadBtn.disabled = disableVaultEditing || !selectedRecord;
     deleteEntryBtn.disabled = disableVaultEditing || !selectedRecord;
 
@@ -2286,7 +2344,8 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
     if (!vaultStatus.available) {
       statusIndicator.innerHTML = statusDot('#94a3b8');
       statusText.textContent = 'No vault selected';
-      statusDetails.textContent = vaultStatus.message || 'Create a vault to begin storing encrypted records.';
+      statusDetails.textContent =
+        vaultStatus.message || 'Create a vault to begin storing encrypted records.';
       backendLabel.textContent = backendLabelFor(vaultStatus);
       recordCountLabel.textContent = '0';
       writableLabel.textContent = 'Unavailable';
@@ -2294,7 +2353,8 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
       modeLabel.style.background = '#e2e8f0';
       modeLabel.style.color = '#475569';
       if (unlockPasswordHelp) {
-        unlockPasswordHelp.textContent = 'Per-vault passwords are required for new vaults. Legacy vaults may still unlock through secure system storage or the older fallback passphrase flow.';
+        unlockPasswordHelp.textContent =
+          'Per-vault passwords are required for new vaults. Legacy vaults may still unlock through secure system storage or the older fallback passphrase flow.';
       }
       setInteractiveState(true);
       syncImportControls();
@@ -2426,7 +2486,9 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
       return;
     }
 
-    recordsListEl.innerHTML = records.map((record) => `
+    recordsListEl.innerHTML = records
+      .map(
+        record => `
       <button
         type="button"
         class="btn btn-outline-secondary text-start"
@@ -2441,7 +2503,9 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
           <span class="badge" style="background: var(--bg-tertiary); color: var(--text-primary);">${(record.tags || []).length} tags</span>
         </div>
       </button>
-    `).join('');
+    `
+      )
+      .join('');
   }
 
   function renderGrantsList(items) {
@@ -2452,7 +2516,9 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
       return;
     }
 
-    grantsListEl.innerHTML = grants.map((grant) => `
+    grantsListEl.innerHTML = grants
+      .map(
+        grant => `
       <div class="settings-info-box">
         <div class="settings-info-row" style="align-items: flex-start;">
           <div>
@@ -2462,7 +2528,9 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
           <button type="button" class="btn btn-sm btn-outline-danger" data-grant-id="${escapeHTML(grant.id)}">Revoke</button>
         </div>
       </div>
-    `).join('');
+    `
+      )
+      .join('');
   }
 
   async function loadVaultStatus() {
@@ -2535,7 +2603,9 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
 
   async function selectRecord(recordID) {
     try {
-      const record = await apiRequest(vaultURL(`/api/vault/records/${encodeURIComponent(recordID)}`));
+      const record = await apiRequest(
+        vaultURL(`/api/vault/records/${encodeURIComponent(recordID)}`)
+      );
       applyRecordToForm(record);
       renderRecordsList(records);
     } catch (error) {
@@ -2578,10 +2648,13 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
 
       let response;
       if (selectedRecord) {
-        response = await apiRequest(vaultURL(`/api/vault/records/${encodeURIComponent(selectedRecord.id)}`), {
-          method: 'PATCH',
-          body: payloadBody
-        });
+        response = await apiRequest(
+          vaultURL(`/api/vault/records/${encodeURIComponent(selectedRecord.id)}`),
+          {
+            method: 'PATCH',
+            body: payloadBody
+          }
+        );
       } else {
         response = await apiRequest('/api/vault/records', {
           method: 'POST',
@@ -2611,7 +2684,9 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
       return;
     }
 
-    const confirmed = window.confirm(`Delete vault entry "${selectedRecord.label || selectedRecord.id}"?`);
+    const confirmed = window.confirm(
+      `Delete vault entry "${selectedRecord.label || selectedRecord.id}"?`
+    );
     if (!confirmed) {
       return;
     }
@@ -2795,7 +2870,8 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
       return;
     }
 
-    const mode = importModeInput?.value === 'current' && canImportIntoCurrentVault() ? 'current' : 'new';
+    const mode =
+      importModeInput?.value === 'current' && canImportIntoCurrentVault() ? 'current' : 'new';
     if (mode === 'current' && !canImportIntoCurrentVault()) {
       showInlineAlert('Unlock the selected vault before importing into it.', 'warning');
       return;
@@ -2860,7 +2936,10 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
       if (importRestoreGrantsInput) importRestoreGrantsInput.checked = true;
       if (importModeInput) importModeInput.value = 'new';
 
-      notify(`Imported ${String(result.record_count || 0)} encrypted ${(result.record_count || 0) === 1 ? 'entry' : 'entries'} into ${vaultDisplayLabel(result.vault)}.`, 'success');
+      notify(
+        `Imported ${String(result.record_count || 0)} encrypted ${(result.record_count || 0) === 1 ? 'entry' : 'entries'} into ${vaultDisplayLabel(result.vault)}.`,
+        'success'
+      );
       await refreshVault();
     } catch (error) {
       console.error('Failed to import vault bundle:', error);
@@ -2888,7 +2967,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
     refreshVault();
   });
 
-  activeVaultSelect?.addEventListener('change', (event) => {
+  activeVaultSelect?.addEventListener('change', event => {
     switchVault(event.target.value);
   });
 
@@ -2904,21 +2983,21 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
     createVaultSpace();
   });
 
-  editVaultNameInput?.addEventListener('keydown', (event) => {
+  editVaultNameInput?.addEventListener('keydown', event => {
     if (event.key === 'Enter') {
       event.preventDefault();
       updateVaultSpace();
     }
   });
 
-  newVaultNameInput?.addEventListener('keydown', (event) => {
+  newVaultNameInput?.addEventListener('keydown', event => {
     if (event.key === 'Enter') {
       event.preventDefault();
       createVaultSpace();
     }
   });
 
-  confirmVaultPasswordInput?.addEventListener('keydown', (event) => {
+  confirmVaultPasswordInput?.addEventListener('keydown', event => {
     if (event.key === 'Enter') {
       event.preventDefault();
       createVaultSpace();
@@ -2941,7 +3020,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
     deleteRecord();
   });
 
-  recordsListEl?.addEventListener('click', (event) => {
+  recordsListEl?.addEventListener('click', event => {
     const trigger = event.target.closest('[data-record-id]');
     if (!trigger) {
       return;
@@ -2953,7 +3032,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
     createGrant();
   });
 
-  grantsListEl?.addEventListener('click', (event) => {
+  grantsListEl?.addEventListener('click', event => {
     const trigger = event.target.closest('[data-grant-id]');
     if (!trigger) {
       return;
@@ -2972,7 +3051,9 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
   importFileInput?.addEventListener('change', () => {
     const file = importFileInput?.files?.[0] || null;
     if (importFileName) {
-      importFileName.textContent = file ? String(file.name || 'import-bundle.json') : 'No import file selected yet.';
+      importFileName.textContent = file
+        ? String(file.name || 'import-bundle.json')
+        : 'No import file selected yet.';
     }
   });
 
@@ -2980,14 +3061,14 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
     syncImportControls();
   });
 
-  importConfirmVaultPasswordInput?.addEventListener('keydown', (event) => {
+  importConfirmVaultPasswordInput?.addEventListener('keydown', event => {
     if (event.key === 'Enter') {
       event.preventDefault();
       importVault();
     }
   });
 
-  importPasswordInput?.addEventListener('keydown', (event) => {
+  importPasswordInput?.addEventListener('keydown', event => {
     if (event.key === 'Enter') {
       event.preventDefault();
       importVault();
@@ -3004,7 +3085,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
 })();
 
 // Display Density Settings (local storage)
-(function() {
+(function () {
   const storageKey = 'ori-ui-density';
   const previewEl = document.getElementById('uiDensityPreview');
   const radioInputs = Array.from(document.querySelectorAll('input[name="uiDensityMode"]'));
@@ -3051,7 +3132,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
   }
 
   function refreshOptionState() {
-    document.querySelectorAll('.ui-density-option').forEach((optionEl) => {
+    document.querySelectorAll('.ui-density-option').forEach(optionEl => {
       const input = optionEl.querySelector('input[name="uiDensityMode"]');
       optionEl.classList.toggle('is-selected', Boolean(input && input.checked));
     });
@@ -3075,7 +3156,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
 
   function setMode(mode, showNotice = false) {
     const normalized = validModes.has(mode) ? mode : 'auto';
-    radioInputs.forEach((input) => {
+    radioInputs.forEach(input => {
       input.checked = input.value === normalized;
     });
 
@@ -3088,7 +3169,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
     }
   }
 
-  radioInputs.forEach((input) => {
+  radioInputs.forEach(input => {
     input.addEventListener('change', () => {
       if (input.checked) {
         setMode(input.value, true);
@@ -3101,7 +3182,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
 
 // Notes Open Behavior preference (server-persisted via /api/notes-open-behavior,
 // mirrored to localStorage so the page-load routing path stays synchronous).
-(function() {
+(function () {
   const STORAGE_KEY = 'note.openBehavior';
   const VALID = new Set(['modal', 'page', 'page-new-tab']);
   const radios = Array.from(document.querySelectorAll('input[name="notesOpenBehavior"]'));
@@ -3109,7 +3190,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
   if (!radios.length) return;
 
   function refreshOptionState() {
-    document.querySelectorAll('label.ui-density-option').forEach((el) => {
+    document.querySelectorAll('label.ui-density-option').forEach(el => {
       const input = el.querySelector('input[name="notesOpenBehavior"]');
       if (!input) return;
       el.classList.toggle('is-selected', Boolean(input.checked));
@@ -3117,24 +3198,32 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
   }
 
   function setLocal(value) {
-    try { localStorage.setItem(STORAGE_KEY, value); } catch (_) {}
+    try {
+      localStorage.setItem(STORAGE_KEY, value);
+    } catch (_) {}
   }
 
   function readLocal() {
     try {
       const v = localStorage.getItem(STORAGE_KEY);
       return VALID.has(v) ? v : null;
-    } catch (_) { return null; }
+    } catch (_) {
+      return null;
+    }
   }
 
   function select(value, showNotice = false) {
     const v = VALID.has(value) ? value : 'modal';
-    radios.forEach((r) => { r.checked = r.value === v; });
+    radios.forEach(r => {
+      r.checked = r.value === v;
+    });
     refreshOptionState();
     setLocal(v);
     if (showNotice && statusEl) {
       statusEl.textContent = 'Saved.';
-      setTimeout(() => { if (statusEl.textContent === 'Saved.') statusEl.textContent = ''; }, 1500);
+      setTimeout(() => {
+        if (statusEl.textContent === 'Saved.') statusEl.textContent = '';
+      }, 1500);
     }
   }
 
@@ -3143,7 +3232,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
       const resp = await fetch('/api/notes-open-behavior', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ behavior: value }),
+        body: JSON.stringify({ behavior: value })
       });
       if (!resp.ok) {
         console.warn('Failed to persist notes_open_behavior:', resp.status);
@@ -3155,7 +3244,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
     }
   }
 
-  radios.forEach((input) => {
+  radios.forEach(input => {
     input.addEventListener('change', () => {
       if (!input.checked) return;
       select(input.value, true);
@@ -3166,10 +3255,13 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
   // Initial paint: local mirror first (instant), then reconcile with the server.
   const local = readLocal();
   if (local) select(local, false);
-  fetch('/api/notes-open-behavior').then((r) => r.ok ? r.json() : null).then((data) => {
-    const v = data?.behavior;
-    if (VALID.has(v)) select(v, false);
-  }).catch(() => {});
+  fetch('/api/notes-open-behavior')
+    .then(r => (r.ok ? r.json() : null))
+    .then(data => {
+      const v = data?.behavior;
+      if (VALID.has(v)) select(v, false);
+    })
+    .catch(() => {});
 })();
 
 // =============================================================================
@@ -3185,11 +3277,20 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
   if (!tableBody) return;
 
   const refreshBtn = document.getElementById('tagManagementRefreshBtn');
-  const esc = (value) => (typeof escapeHtml === 'function'
-    ? escapeHtml(String(value ?? ''))
-    : String(value ?? '').replace(/[&<>"']/g, (ch) => ({
-      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
-    })[ch]));
+  const esc = value =>
+    typeof escapeHtml === 'function'
+      ? escapeHtml(String(value ?? ''))
+      : String(value ?? '').replace(
+          /[&<>"']/g,
+          ch =>
+            ({
+              '&': '&amp;',
+              '<': '&lt;',
+              '>': '&gt;',
+              '"': '&quot;',
+              "'": '&#39;'
+            })[ch]
+        );
 
   async function fetchPool() {
     const response = await fetch('/api/tags?scope=all');
@@ -3215,7 +3316,8 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
     let summary = parts.join(', ');
     const templates = Array.isArray(usage?.templates) ? usage.templates : [];
     if (templates.length > 0) {
-      summary += `\n\nNote: declared by template${templates.length === 1 ? '' : 's'} ${templates.join(', ')}. ` +
+      summary +=
+        `\n\nNote: declared by template${templates.length === 1 ? '' : 's'} ${templates.join(', ')}. ` +
         'Template manifests are read-only, so new workspaces created from them will reintroduce this tag.';
     }
     return summary;
@@ -3223,23 +3325,26 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
 
   function renderRows(pool) {
     if (!Array.isArray(pool) || pool.length === 0) {
-      tableBody.innerHTML = '<tr><td colspan="7" class="text-muted">No tags yet. Tags you add to workspaces, sessions, notes, or tasks show up here.</td></tr>';
+      tableBody.innerHTML =
+        '<tr><td colspan="7" class="text-muted">No tags yet. Tags you add to workspaces, sessions, notes, or tasks show up here.</td></tr>';
       return;
     }
 
-    tableBody.innerHTML = pool.map((tag) => {
-      const counts = tag.counts || {};
-      const templateOnly = (tag.total || 0) > 0 && tag.total === (counts.templates || 0);
-      const lockHint = (counts.templates || 0) > 0
-        ? ' <span class="text-muted" title="Declared by a project template (read-only in the manifest)">●</span>'
-        : '';
-      const actions = templateOnly
-        ? '<span class="text-muted" title="Only declared by templates — nothing to rename or delete on entities">template-only</span>'
-        : `
+    tableBody.innerHTML = pool
+      .map(tag => {
+        const counts = tag.counts || {};
+        const templateOnly = (tag.total || 0) > 0 && tag.total === (counts.templates || 0);
+        const lockHint =
+          (counts.templates || 0) > 0
+            ? ' <span class="text-muted" title="Declared by a project template (read-only in the manifest)">●</span>'
+            : '';
+        const actions = templateOnly
+          ? '<span class="text-muted" title="Only declared by templates — nothing to rename or delete on entities">template-only</span>'
+          : `
           <button type="button" class="modern-btn modern-btn-secondary modern-btn-sm" data-tag-rename="${esc(tag.name)}">Rename</button>
           <button type="button" class="modern-btn modern-btn-secondary modern-btn-sm" data-tag-delete="${esc(tag.name)}">Delete</button>
         `;
-      return `
+        return `
         <tr>
           <td><span class="workspace-detail-tag-chip" style="max-width: 16rem;">${esc(tag.name)}</span>${lockHint}</td>
           <td class="text-end">${counts.workspaces || 0}</td>
@@ -3250,12 +3355,13 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
           <td class="text-end" style="white-space: nowrap;">${actions}</td>
         </tr>
       `;
-    }).join('');
+      })
+      .join('');
 
-    tableBody.querySelectorAll('[data-tag-rename]').forEach((button) => {
+    tableBody.querySelectorAll('[data-tag-rename]').forEach(button => {
       button.addEventListener('click', () => renameTag(button.getAttribute('data-tag-rename')));
     });
-    tableBody.querySelectorAll('[data-tag-delete]').forEach((button) => {
+    tableBody.querySelectorAll('[data-tag-delete]').forEach(button => {
       button.addEventListener('click', () => deleteTag(button.getAttribute('data-tag-delete')));
     });
   }
@@ -3265,7 +3371,8 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
       renderRows(await fetchPool());
     } catch (error) {
       console.error('Failed to load tag management table:', error);
-      tableBody.innerHTML = '<tr><td colspan="7" class="text-danger">Failed to load tags.</td></tr>';
+      tableBody.innerHTML =
+        '<tr><td colspan="7" class="text-danger">Failed to load tags.</td></tr>';
     }
   }
 

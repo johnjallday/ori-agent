@@ -23,7 +23,7 @@
  *   Logger.setLevel(Logger.LEVELS.WARN);  // Only show warnings and errors
  */
 
-const Logger = (function() {
+const Logger = (function () {
   'use strict';
 
   // Log levels
@@ -253,25 +253,18 @@ const Logger = (function() {
     let filtered = [...logHistory];
 
     if (filter.level !== undefined) {
-      const minLevel = typeof filter.level === 'string'
-        ? LEVELS[filter.level.toUpperCase()]
-        : filter.level;
-      filtered = filtered.filter(entry =>
-        LEVELS[entry.level] >= minLevel
-      );
+      const minLevel =
+        typeof filter.level === 'string' ? LEVELS[filter.level.toUpperCase()] : filter.level;
+      filtered = filtered.filter(entry => LEVELS[entry.level] >= minLevel);
     }
 
     if (filter.context) {
-      filtered = filtered.filter(entry =>
-        entry.context === filter.context
-      );
+      filtered = filtered.filter(entry => entry.context === filter.context);
     }
 
     if (filter.search) {
       const searchLower = filter.search.toLowerCase();
-      filtered = filtered.filter(entry =>
-        entry.message.toLowerCase().includes(searchLower)
-      );
+      filtered = filtered.filter(entry => entry.message.toLowerCase().includes(searchLower));
     }
 
     return filtered;
@@ -297,9 +290,13 @@ const Logger = (function() {
   function time(label) {
     const start = performance.now();
     return {
-      end: (message) => {
+      end: message => {
         const duration = performance.now() - start;
-        log(LEVELS.DEBUG, 'Timer', `${label}: ${message || 'completed'} (${duration.toFixed(2)}ms)`);
+        log(
+          LEVELS.DEBUG,
+          'Timer',
+          `${label}: ${message || 'completed'} (${duration.toFixed(2)}ms)`
+        );
         return duration;
       }
     };

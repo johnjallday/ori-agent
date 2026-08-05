@@ -41,7 +41,7 @@ export function initChatStateUI() {
  * Handle state changes from the state machine
  * @param {object} param0 - State change data
  */
-function handleStateChange({  newState, type, elapsed }) {
+function handleStateChange({ newState, type, elapsed }) {
   // Handle tick events (elapsed time updates)
   if (type === 'tick') {
     updateElapsedTime(elapsed);

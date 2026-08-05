@@ -18,7 +18,9 @@
 
   async function fetchWorkspaceInput(workspaceId) {
     try {
-      const response = await fetch(`/api/orchestration/workspace?id=${encodeURIComponent(workspaceId)}`);
+      const response = await fetch(
+        `/api/orchestration/workspace?id=${encodeURIComponent(workspaceId)}`
+      );
       if (!response.ok) return {};
       const ws = await response.json();
       const bootstrap = (ws && ws.shared_data && ws.shared_data.workspace_bootstrap) || {};
@@ -37,7 +39,12 @@
     const container = document.getElementById('workspace-tools-panel-host');
     const trigger = document.getElementById('workspace-tools-find-btn');
     const review = window.WorkspaceBootstrapReview;
-    if (!container || !trigger || !review || typeof review.mountWorkspaceToolsPanel !== 'function') {
+    if (
+      !container ||
+      !trigger ||
+      !review ||
+      typeof review.mountWorkspaceToolsPanel !== 'function'
+    ) {
       return;
     }
     const workspaceId = workspaceIdFromPath();

@@ -4,7 +4,7 @@
  *
  * @module workspace-hub-smart-input
  */
-(function() {
+(function () {
   'use strict';
 
   const SMART_INPUT_CLASSIFY_ENDPOINT = '/api/smart-input/classify';
@@ -102,7 +102,7 @@
 
     const stepIndex = SMART_INPUT_PROGRESS_STEPS.indexOf(step);
     const items = Array.from(elements.smartInputProgressSteps.querySelectorAll('li'));
-    items.forEach((item) => {
+    items.forEach(item => {
       const itemStep = item.dataset.step;
       const itemIndex = SMART_INPUT_PROGRESS_STEPS.indexOf(itemStep);
       item.classList.remove('is-active', 'is-complete');
@@ -289,16 +289,17 @@
   }
 
   function summarizeScheduleForConfirmation(scheduleData) {
-    if (!scheduleData || scheduleData.schedule_enabled !== true || !scheduleData.schedule) return '';
+    if (!scheduleData || scheduleData.schedule_enabled !== true || !scheduleData.schedule)
+      return '';
     const schedule = scheduleData.schedule;
     return String(
       scheduleData.schedule_name ||
-      schedule.description ||
-      schedule.expression ||
-      schedule.cron ||
-      schedule.run_at ||
-      schedule.type ||
-      'Scheduled'
+        schedule.description ||
+        schedule.expression ||
+        schedule.cron ||
+        schedule.run_at ||
+        schedule.type ||
+        'Scheduled'
     ).trim();
   }
 
@@ -306,10 +307,14 @@
     const storage = resultStorageData?.result_storage;
     if (!storage || storage.enabled !== true) return '';
     const contractColumns = Array.isArray(resultStorageData?.output_contract?.columns)
-      ? resultStorageData.output_contract.columns.map((column) => String(column?.name || '').trim()).filter(Boolean)
+      ? resultStorageData.output_contract.columns
+          .map(column => String(column?.name || '').trim())
+          .filter(Boolean)
       : [];
-    const contractSummary = contractColumns.length > 0 ? ` Columns: ${contractColumns.join(', ')}` : '';
-    if (storage.write_mode === 'append') return `Append result to ${storage.file_path || 'a CSV file'}.${contractSummary}`;
+    const contractSummary =
+      contractColumns.length > 0 ? ` Columns: ${contractColumns.join(', ')}` : '';
+    if (storage.write_mode === 'append')
+      return `Append result to ${storage.file_path || 'a CSV file'}.${contractSummary}`;
     if (storage.file_path) return `Store result at ${storage.file_path}`;
     if (storage.store_node_id) return `Store result in node ${storage.store_node_id}`;
     return `Store result as ${storage.format || 'text'}`;
@@ -319,13 +324,15 @@
     const columns = Array.isArray(contract?.columns) ? contract.columns : [];
     const seen = new Set();
     const normalized = [];
-    columns.forEach((column) => {
+    columns.forEach(column => {
       const name = String(column?.name || '').trim();
       if (!name) return;
       const key = name.toLowerCase();
       if (seen.has(key)) return;
       seen.add(key);
-      const type = ['string', 'number', 'boolean', 'date'].includes(column?.type) ? column.type : 'string';
+      const type = ['string', 'number', 'boolean', 'date'].includes(column?.type)
+        ? column.type
+        : 'string';
       normalized.push({
         name,
         type,
@@ -341,7 +348,8 @@
   }
 
   function createAutoParseFailureError(message) {
-    const raw = String(message || '').trim()
+    const raw = String(message || '')
+      .trim()
       .replace(/^Failed to parse task description:\s*/i, '');
     const detail = raw ? ` ${raw}` : '';
     const error = new Error(`Auto parsing did not work. No task was created.${detail}`);
@@ -353,7 +361,10 @@
     const kind = String(options.kind || 'task').trim();
     const title = kind === 'workflow' ? 'Create this workflow?' : 'Create this task?';
     const confirmLabel = kind === 'workflow' ? 'Create Workflow' : 'Create Task';
-    const metaItems = ['Assistant', kind === 'workflow' ? `${options.stepCount || 0} steps` : 'Task'];
+    const metaItems = [
+      'Assistant',
+      kind === 'workflow' ? `${options.stepCount || 0} steps` : 'Task'
+    ];
     if (options.assignee) {
       metaItems.push(String(options.assignee));
     }
@@ -362,16 +373,20 @@
     }
 
     const details = (Array.isArray(options.details) ? options.details : [])
-      .map((item) => String(item || '').trim())
+      .map(item => String(item || '').trim())
       .filter(Boolean);
 
-    if (window.WorkspaceHubModals && typeof window.WorkspaceHubModals.showExecutionConfirm === 'function') {
+    if (
+      window.WorkspaceHubModals &&
+      typeof window.WorkspaceHubModals.showExecutionConfirm === 'function'
+    ) {
       return window.WorkspaceHubModals.showExecutionConfirm({
         eyebrow: 'Assistant Task',
         title,
-        message: kind === 'workflow'
-          ? 'Assistant wants to create a workflow in this workspace.'
-          : 'Assistant wants to create this task in the workspace.',
+        message:
+          kind === 'workflow'
+            ? 'Assistant wants to create a workflow in this workspace.'
+            : 'Assistant wants to create this task in the workspace.',
         confirmLabel,
         cancelLabel: 'Cancel',
         metaItems,
@@ -412,7 +427,8 @@
     if (parsed.assignment_mode) {
       assignmentProvenance.assignment_mode = parsed.assignment_mode;
       if (parsed.assigned_by) assignmentProvenance.assigned_by = parsed.assigned_by;
-      if (parsed.assignment_reason) assignmentProvenance.assignment_reason = parsed.assignment_reason;
+      if (parsed.assignment_reason)
+        assignmentProvenance.assignment_reason = parsed.assignment_reason;
     }
 
     let scheduleData = { schedule_enabled: false };
@@ -520,7 +536,7 @@
         const stepId = step.id || `step-${i + 1}`;
         const stepTitle = step.title || step.description || parsed.title || `Task ${i + 1}`;
         const stepDetails = step.details || '';
-        const stepPriority = Number.isInteger(step.priority) ? step.priority : (parsed.priority || 3);
+        const stepPriority = Number.isInteger(step.priority) ? step.priority : parsed.priority || 3;
 
         let to = '';
         let assignedNodeId = '';
@@ -534,7 +550,7 @@
           const fallbackId = workflowSteps[i - 1]?.id || `step-${i}`;
           dependsOn = [fallbackId];
         }
-        const inputTaskIds = dependsOn.map((id) => stepIdToTaskId.get(id)).filter(Boolean);
+        const inputTaskIds = dependsOn.map(id => stepIdToTaskId.get(id)).filter(Boolean);
 
         const stepScheduleData = i === 0 ? scheduleData : { schedule_enabled: false };
         const stepResultStorageData = i === workflowSteps.length - 1 ? resultStorageData : {};
@@ -588,11 +604,7 @@
       kind: 'task',
       assignee: parsed.agent_name || '',
       scheduleSummary: singleTaskScheduleSummary,
-      details: [
-        parsed.title || input,
-        parsed.details || '',
-        singleTaskStorageSummary
-      ]
+      details: [parsed.title || input, parsed.details || '', singleTaskStorageSummary]
     });
     if (!confirmed) {
       return { kind: 'task', cancelled: true, fallback: false };
@@ -628,7 +640,14 @@
   // of the idea itself, so a leading match is stripped before the raw input
   // becomes the item's title (found via live testing: "backlog: fix X"
   // otherwise saved a title literally starting with "backlog:").
-  const SMART_INPUT_BACKLOG_PREFIXES = ['backlog:', 'backlog ', 'idea:', 'idea ', 'someday:', 'someday '];
+  const SMART_INPUT_BACKLOG_PREFIXES = [
+    'backlog:',
+    'backlog ',
+    'idea:',
+    'idea ',
+    'someday:',
+    'someday '
+  ];
 
   function stripBacklogCapturePrefix(input) {
     const trimmed = String(input || '').trim();
@@ -653,11 +672,15 @@
     const description = String(options.description || '').trim();
     const details = description ? [description] : [];
 
-    if (window.WorkspaceHubModals && typeof window.WorkspaceHubModals.showExecutionConfirm === 'function') {
+    if (
+      window.WorkspaceHubModals &&
+      typeof window.WorkspaceHubModals.showExecutionConfirm === 'function'
+    ) {
       return window.WorkspaceHubModals.showExecutionConfirm({
         eyebrow: 'Assistant Backlog',
         title: 'Add this to the backlog?',
-        message: 'Saved in this workspace without an agent or schedule — nothing runs until you promote it to Ready.',
+        message:
+          'Saved in this workspace without an agent or schedule — nothing runs until you promote it to Ready.',
         confirmLabel: 'Add to Backlog',
         cancelLabel: 'Cancel',
         metaItems: ['Assistant', 'Backlog'],
@@ -720,7 +743,10 @@
         state.selectedId,
         input ? input.slice(0, 50) : 'Assistant'
       );
-    } else if (window.workspaceDetail && typeof window.workspaceDetail.createSessionWithMessage === 'function') {
+    } else if (
+      window.workspaceDetail &&
+      typeof window.workspaceDetail.createSessionWithMessage === 'function'
+    ) {
       await window.workspaceDetail.createSessionWithMessage(input);
       return;
     } else {
@@ -735,9 +761,21 @@
   }
 
   const SMART_INPUT_DECISION_COPY = {
-    task: { busy: 'Creating task...', headline: 'Creating task', message: 'Building tasks in your workspace.' },
-    backlog: { busy: 'Adding to backlog...', headline: 'Adding to backlog', message: 'Saving the idea without committing it.' },
-    chat: { busy: 'Starting Assistant...', headline: 'Starting Assistant', message: 'Opening a new session.' }
+    task: {
+      busy: 'Creating task...',
+      headline: 'Creating task',
+      message: 'Building tasks in your workspace.'
+    },
+    backlog: {
+      busy: 'Adding to backlog...',
+      headline: 'Adding to backlog',
+      message: 'Saving the idea without committing it.'
+    },
+    chat: {
+      busy: 'Starting Assistant...',
+      headline: 'Starting Assistant',
+      message: 'Opening a new session.'
+    }
   };
 
   /**
@@ -752,7 +790,8 @@
     if (state.smartInputCancelled) return;
 
     const meta = classification || state.smartInput || {};
-    const input = meta.input || (elements.smartInputField ? elements.smartInputField.value.trim() : '');
+    const input =
+      meta.input || (elements.smartInputField ? elements.smartInputField.value.trim() : '');
     if (!input) return;
 
     const predictedDecision = meta.decision || meta.predictedDecision || decision;
@@ -776,7 +815,8 @@
           state.smartInput = null;
           return;
         }
-        const createdLabel = createResult?.kind === 'workflow' ? 'Workflow created.' : 'Task created.';
+        const createdLabel =
+          createResult?.kind === 'workflow' ? 'Workflow created.' : 'Task created.';
         setBusy(false, createdLabel);
       } else if (decision === 'backlog') {
         const createResult = await createBacklogItemFromSmartInput(input);
@@ -802,7 +842,12 @@
     } catch (error) {
       console.error('Smart input routing failed:', error);
       const autoParseFailed = error?.code === 'auto_parse_failed';
-      setBusy(false, autoParseFailed ? 'Auto parsing did not work. No task was created.' : 'Something went wrong. Try again.');
+      setBusy(
+        false,
+        autoParseFailed
+          ? 'Auto parsing did not work. No task was created.'
+          : 'Something went wrong. Try again.'
+      );
       if (window.Toast) {
         let failureMessage = 'Failed to start chat';
         if (autoParseFailed) failureMessage = 'Auto parsing did not work. No task was created.';
@@ -902,7 +947,10 @@
     setBusy(true, 'Starting Assistant...');
 
     try {
-      if (window.sessionManager && typeof window.sessionManager.createAssistantSession === 'function') {
+      if (
+        window.sessionManager &&
+        typeof window.sessionManager.createAssistantSession === 'function'
+      ) {
         const session = await window.sessionManager.createAssistantSession(
           state.selectedId,
           initialMessage ? initialMessage.slice(0, 50) : 'Assistant'
@@ -980,9 +1028,11 @@
     // Handle slash commands
     const lowerInput = input.toLowerCase();
 
-    if (window.WorkspaceInputRouter &&
-        typeof window.WorkspaceInputRouter.isAskCommand === 'function' &&
-        window.WorkspaceInputRouter.isAskCommand(input)) {
+    if (
+      window.WorkspaceInputRouter &&
+      typeof window.WorkspaceInputRouter.isAskCommand === 'function' &&
+      window.WorkspaceInputRouter.isAskCommand(input)
+    ) {
       setBusy(true, 'Routing with Assistant...');
       showProgress('analyze', {
         headline: 'Assistant routing',
@@ -990,7 +1040,9 @@
       });
 
       try {
-        await window.WorkspaceInputRouter.dispatchToAskOri(input, { workspaceId: state.selectedId });
+        await window.WorkspaceInputRouter.dispatchToAskOri(input, {
+          workspaceId: state.selectedId
+        });
         clearField();
         resetPrompt();
         setBusy(false);
@@ -1054,15 +1106,19 @@
       classification = await classifyInput(input);
     } catch (error) {
       console.error('Smart input classification failed:', error);
-      if (window.WorkspaceInputRouter &&
-          typeof window.WorkspaceInputRouter.canUseAskOri === 'function' &&
-          window.WorkspaceInputRouter.canUseAskOri()) {
+      if (
+        window.WorkspaceInputRouter &&
+        typeof window.WorkspaceInputRouter.canUseAskOri === 'function' &&
+        window.WorkspaceInputRouter.canUseAskOri()
+      ) {
         try {
           updateProgress('decide', {
             headline: 'Escalating to Assistant',
             message: 'Smart classification unavailable, using full routing.'
           });
-          await window.WorkspaceInputRouter.dispatchToAskOri(`/ask ${input}`, { workspaceId: state.selectedId });
+          await window.WorkspaceInputRouter.dispatchToAskOri(`/ask ${input}`, {
+            workspaceId: state.selectedId
+          });
           clearField();
           resetPrompt();
           setBusy(false);
@@ -1129,7 +1185,7 @@
     }
 
     if (elements.smartInputField) {
-      elements.smartInputField.addEventListener('keydown', (event) => {
+      elements.smartInputField.addEventListener('keydown', event => {
         if (event.key === 'Enter') {
           event.preventDefault();
           submit();

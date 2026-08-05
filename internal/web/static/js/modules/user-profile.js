@@ -55,7 +55,7 @@ const userProfileManager = {
     if (!this.form) return;
     this.populateTimezoneSelect(this.detectTimezone());
 
-    this.form.addEventListener('submit', (event) => {
+    this.form.addEventListener('submit', event => {
       event.preventDefault();
       this.saveProfile();
     });
@@ -79,7 +79,9 @@ const userProfileManager = {
             <small>Could not load profile. <button type="button" class="btn btn-link btn-sm p-0 align-baseline user-profile-retry">Retry</button></small>
           </div>
         `;
-        this.loading.querySelector('.user-profile-retry')?.addEventListener('click', () => this.loadProfile());
+        this.loading
+          .querySelector('.user-profile-retry')
+          ?.addEventListener('click', () => this.loadProfile());
       }
     }
   },
@@ -92,7 +94,10 @@ const userProfileManager = {
     this.setValue('profileTimezone', profile.timezone || this.detectTimezone());
     this.setValue('profileLocale', profile.locale || navigator.language || '');
     this.setValue('profileRoleCategory', profile.role_category || '');
-    this.setValue('profileSpecializations', Array.isArray(profile.specializations) ? profile.specializations.join(', ') : '');
+    this.setValue(
+      'profileSpecializations',
+      Array.isArray(profile.specializations) ? profile.specializations.join(', ') : ''
+    );
     this.setValue('profileResponseStyle', preferences.response_style || '');
     this.setValue('profileUnits', preferences.units || '');
     this.setValue('profileLanguage', preferences.language || '');
@@ -144,7 +149,7 @@ const userProfileManager = {
       role_category: this.getValue('profileRoleCategory'),
       specializations: this.getValue('profileSpecializations')
         .split(',')
-        .map((item) => item.trim())
+        .map(item => item.trim())
         .filter(Boolean),
       preferences,
       about: this.getValue('profileAbout')
@@ -181,12 +186,9 @@ const userProfileManager = {
       }
     }
 
-    const allZones = new Set([
-      selectedTimezone,
-      this.detectTimezone(),
-      'UTC',
-      ...zones
-    ].filter(Boolean));
+    const allZones = new Set(
+      [selectedTimezone, this.detectTimezone(), 'UTC', ...zones].filter(Boolean)
+    );
 
     return Array.from(allZones).sort((a, b) => {
       if (a === 'UTC') return -1;
@@ -199,7 +201,10 @@ const userProfileManager = {
     if (!timezone || timezone === 'UTC') {
       return timezone || '';
     }
-    return timezone.split('/').map(part => part.replace(/_/g, ' ')).join(' / ');
+    return timezone
+      .split('/')
+      .map(part => part.replace(/_/g, ' '))
+      .join(' / ');
   },
 
   populateTimezoneSelect(selectedTimezone) {
@@ -217,7 +222,7 @@ const userProfileManager = {
       select.appendChild(placeholder);
     }
 
-    zones.forEach((zone) => {
+    zones.forEach(zone => {
       const option = document.createElement('option');
       option.value = zone;
       option.textContent = this.formatTimezoneLabel(zone);
@@ -238,7 +243,7 @@ const userProfileManager = {
   }
 };
 
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', function () {
   if (document.getElementById('userProfileForm')) {
     userProfileManager.init();
   }

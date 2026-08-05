@@ -1,7 +1,11 @@
 import { AgentCanvasForms } from './agent-canvas-forms.js';
-import {  apiPost, apiPut, apiPatch, apiDelete } from './agent-canvas-api.js';
+import { apiPost, apiPut, apiPatch, apiDelete } from './agent-canvas-api.js';
 
-import { executeTask as tasksExecuteTask, rerunTask as tasksRerunTask, linkTaskResult as tasksLinkTaskResult } from './agent-canvas-tasks.js';
+import {
+  executeTask as tasksExecuteTask,
+  rerunTask as tasksRerunTask,
+  linkTaskResult as tasksLinkTaskResult
+} from './agent-canvas-tasks.js';
 import { AgentCanvasState, EVENT_TYPES } from './agent-canvas-state.js';
 import { AgentCanvasRenderer } from './agent-canvas-renderer.js';
 import { AgentCanvasInteractionHandler } from './agent-canvas-interactions.js';
@@ -63,7 +67,6 @@ class AgentCanvas {
     // Initialize notifications module
     this.notifications = new AgentCanvasNotifications(this.state, this);
 
-
     // Initialize context menu module
     this.contextMenu = new AgentCanvasContextMenu(this.state, this);
 
@@ -74,17 +77,17 @@ class AgentCanvas {
     this.initModule = new AgentCanvasInitialization(this.state, this);
 
     // Mouse event listeners - delegate to interaction handler
-    this.canvas.addEventListener('mousedown', (e) => this.interactions.onMouseDown(e));
-    this.canvas.addEventListener('mousemove', (e) => this.interactions.onMouseMove(e));
-    this.canvas.addEventListener('mouseup', (e) => this.interactions.onMouseUp(e));
-    this.canvas.addEventListener('mouseleave', (e) => this.interactions.onMouseUp(e));
-    this.canvas.addEventListener('wheel', (e) => this.interactions.onWheel(e));
-    this.canvas.addEventListener('click', (e) => this.interactions.onClick(e));
-    this.canvas.addEventListener('contextmenu', (e) => this.interactions.onContextMenu(e));
+    this.canvas.addEventListener('mousedown', e => this.interactions.onMouseDown(e));
+    this.canvas.addEventListener('mousemove', e => this.interactions.onMouseMove(e));
+    this.canvas.addEventListener('mouseup', e => this.interactions.onMouseUp(e));
+    this.canvas.addEventListener('mouseleave', e => this.interactions.onMouseUp(e));
+    this.canvas.addEventListener('wheel', e => this.interactions.onWheel(e));
+    this.canvas.addEventListener('click', e => this.interactions.onClick(e));
+    this.canvas.addEventListener('contextmenu', e => this.interactions.onContextMenu(e));
 
     // Keyboard interactions - delegate to interaction handler
-    window.addEventListener('keydown', (e) => this.interactions.onKeyDown(e));
-    window.addEventListener('keyup', (e) => this.interactions.onKeyUp(e));
+    window.addEventListener('keydown', e => this.interactions.onKeyDown(e));
+    window.addEventListener('keyup', e => this.interactions.onKeyUp(e));
 
     // Subscribe to state changes that require redraw
     this.state.on(EVENT_TYPES.AGENT_MOVED, () => this.draw());
@@ -96,7 +99,8 @@ class AgentCanvas {
     // Start periodic countdown timer for scheduled tasks (update every 10 seconds)
     this.countdownTimer = setInterval(() => {
       // Check for tasks with schedules that need countdown updates
-      const hasScheduledTasks = this.state.tasks && this.state.tasks.some(t => t.schedule && t.schedule_enabled);
+      const hasScheduledTasks =
+        this.state.tasks && this.state.tasks.some(t => t.schedule && t.schedule_enabled);
       if (hasScheduledTasks) {
         this.draw(); // Redraw to update countdown displays
       }
@@ -120,263 +124,570 @@ class AgentCanvas {
   // ==================== PROPERTY ACCESSORS (Backward Compatibility) ====================
   // These getters/setters delegate to the state module for backward compatibility
 
-  get agents() { return this.state.agents; }
-  set agents(value) { this.state.setAgents(value); }
+  get agents() {
+    return this.state.agents;
+  }
+  set agents(value) {
+    this.state.setAgents(value);
+  }
 
-  get tasks() { return this.state.tasks; }
-  set tasks(value) { this.state.setTasks(value); }
+  get tasks() {
+    return this.state.tasks;
+  }
+  set tasks(value) {
+    this.state.setTasks(value);
+  }
 
-  get attachments() { return this.state.attachments; }
-  set attachments(value) { this.state.setAttachments(value); }
+  get attachments() {
+    return this.state.attachments;
+  }
+  set attachments(value) {
+    this.state.setAttachments(value);
+  }
 
-  get workspaceFolders() { return this.state.workspaceFolders; }
-  set workspaceFolders(value) { this.state.setWorkspaceFolders(value); }
+  get workspaceFolders() {
+    return this.state.workspaceFolders;
+  }
+  set workspaceFolders(value) {
+    this.state.setWorkspaceFolders(value);
+  }
 
-  get messages() { return this.state.messages; }
-  set messages(value) { this.state.messages = value; }
+  get messages() {
+    return this.state.messages;
+  }
+  set messages(value) {
+    this.state.messages = value;
+  }
 
-  get mission() { return this.state.mission; }
-  set mission(value) { this.state.mission = value; }
+  get mission() {
+    return this.state.mission;
+  }
+  set mission(value) {
+    this.state.mission = value;
+  }
 
-  get eventSource() { return this.state.eventSource; }
-  set eventSource(value) { this.state.eventSource = value; }
+  get eventSource() {
+    return this.state.eventSource;
+  }
+  set eventSource(value) {
+    this.state.eventSource = value;
+  }
 
   // Transform state
-  get offsetX() { return this.state.offsetX; }
-  set offsetX(value) { this.state.offsetX = value; }
+  get offsetX() {
+    return this.state.offsetX;
+  }
+  set offsetX(value) {
+    this.state.offsetX = value;
+  }
 
-  get offsetY() { return this.state.offsetY; }
-  set offsetY(value) { this.state.offsetY = value; }
+  get offsetY() {
+    return this.state.offsetY;
+  }
+  set offsetY(value) {
+    this.state.offsetY = value;
+  }
 
-  get scale() { return this.state.scale; }
-  set scale(value) { this.state.setScale(value); }
+  get scale() {
+    return this.state.scale;
+  }
+  set scale(value) {
+    this.state.setScale(value);
+  }
 
   // Drag states
-  get isDragging() { return this.state.isDragging; }
-  set isDragging(value) { this.state.isDragging = value; }
+  get isDragging() {
+    return this.state.isDragging;
+  }
+  set isDragging(value) {
+    this.state.isDragging = value;
+  }
 
-  get isDraggingAgent() { return this.state.isDraggingAgent; }
-  set isDraggingAgent(value) { this.state.isDraggingAgent = value; }
+  get isDraggingAgent() {
+    return this.state.isDraggingAgent;
+  }
+  set isDraggingAgent(value) {
+    this.state.isDraggingAgent = value;
+  }
 
-  get draggedAgent() { return this.state.draggedAgent; }
-  set draggedAgent(value) { this.state.draggedAgent = value; }
+  get draggedAgent() {
+    return this.state.draggedAgent;
+  }
+  set draggedAgent(value) {
+    this.state.draggedAgent = value;
+  }
 
-  get isDraggingTask() { return this.state.isDraggingTask; }
-  set isDraggingTask(value) { this.state.isDraggingTask = value; }
+  get isDraggingTask() {
+    return this.state.isDraggingTask;
+  }
+  set isDraggingTask(value) {
+    this.state.isDraggingTask = value;
+  }
 
-  get isDraggingAttachment() { return this.state.isDraggingAttachment; }
-  set isDraggingAttachment(value) { this.state.isDraggingAttachment = value; }
+  get isDraggingAttachment() {
+    return this.state.isDraggingAttachment;
+  }
+  set isDraggingAttachment(value) {
+    this.state.isDraggingAttachment = value;
+  }
 
-  get draggedTask() { return this.state.draggedTask; }
-  set draggedTask(value) { this.state.draggedTask = value; }
+  get draggedTask() {
+    return this.state.draggedTask;
+  }
+  set draggedTask(value) {
+    this.state.draggedTask = value;
+  }
 
-  get draggedAttachment() { return this.state.draggedAttachment; }
-  set draggedAttachment(value) { this.state.draggedAttachment = value; }
+  get draggedAttachment() {
+    return this.state.draggedAttachment;
+  }
+  set draggedAttachment(value) {
+    this.state.draggedAttachment = value;
+  }
 
-  get isDraggingConnection() { return this.state.isDraggingConnection; }
-  set isDraggingConnection(value) { this.state.isDraggingConnection = value; }
+  get isDraggingConnection() {
+    return this.state.isDraggingConnection;
+  }
+  set isDraggingConnection(value) {
+    this.state.isDraggingConnection = value;
+  }
 
-  get draggedConnection() { return this.state.draggedConnection; }
-  set draggedConnection(value) { this.state.draggedConnection = value; }
+  get draggedConnection() {
+    return this.state.draggedConnection;
+  }
+  set draggedConnection(value) {
+    this.state.draggedConnection = value;
+  }
 
-  get connectionDragStart() { return this.state.connectionDragStart; }
-  set connectionDragStart(value) { this.state.connectionDragStart = value; }
+  get connectionDragStart() {
+    return this.state.connectionDragStart;
+  }
+  set connectionDragStart(value) {
+    this.state.connectionDragStart = value;
+  }
 
+  get dragStartX() {
+    return this.state.dragStartX;
+  }
+  set dragStartX(value) {
+    this.state.dragStartX = value;
+  }
 
-  get dragStartX() { return this.state.dragStartX; }
-  set dragStartX(value) { this.state.dragStartX = value; }
-
-  get dragStartY() { return this.state.dragStartY; }
-  set dragStartY(value) { this.state.dragStartY = value; }
+  get dragStartY() {
+    return this.state.dragStartY;
+  }
+  set dragStartY(value) {
+    this.state.dragStartY = value;
+  }
 
   // Keyboard state
-  get spacePressed() { return this.state.spacePressed; }
-  set spacePressed(value) { this.state.spacePressed = value; }
+  get spacePressed() {
+    return this.state.spacePressed;
+  }
+  set spacePressed(value) {
+    this.state.spacePressed = value;
+  }
 
-  get ctrlPressed() { return this.state.ctrlPressed; }
-  set ctrlPressed(value) { this.state.ctrlPressed = value; }
+  get ctrlPressed() {
+    return this.state.ctrlPressed;
+  }
+  set ctrlPressed(value) {
+    this.state.ctrlPressed = value;
+  }
 
   // Selection
-  get selectedNodes() { return this.state.getSelectedNodes(); }
-  get selectionCount() { return this.state.getSelectionCount(); }
-  get hasMultipleSelected() { return this.state.hasMultipleSelected(); }
-  clearSelection() { this.state.clearSelection(); this.draw(); }
+  get selectedNodes() {
+    return this.state.getSelectedNodes();
+  }
+  get selectionCount() {
+    return this.state.getSelectionCount();
+  }
+  get hasMultipleSelected() {
+    return this.state.hasMultipleSelected();
+  }
+  clearSelection() {
+    this.state.clearSelection();
+    this.draw();
+  }
 
   // Context menu
-  get contextMenuVisible() { return this.state.contextMenuVisible; }
-  set contextMenuVisible(value) { this.state.contextMenuVisible = value; }
+  get contextMenuVisible() {
+    return this.state.contextMenuVisible;
+  }
+  set contextMenuVisible(value) {
+    this.state.contextMenuVisible = value;
+  }
 
-  get contextMenuAgent() { return this.state.contextMenuAgent; }
-  set contextMenuAgent(value) { this.state.contextMenuAgent = value; }
+  get contextMenuAgent() {
+    return this.state.contextMenuAgent;
+  }
+  set contextMenuAgent(value) {
+    this.state.contextMenuAgent = value;
+  }
 
-  get contextMenuX() { return this.state.contextMenuX; }
-  set contextMenuX(value) { this.state.contextMenuX = value; }
+  get contextMenuX() {
+    return this.state.contextMenuX;
+  }
+  set contextMenuX(value) {
+    this.state.contextMenuX = value;
+  }
 
-  get contextMenuY() { return this.state.contextMenuY; }
-  set contextMenuY(value) { this.state.contextMenuY = value; }
+  get contextMenuY() {
+    return this.state.contextMenuY;
+  }
+  set contextMenuY(value) {
+    this.state.contextMenuY = value;
+  }
 
   // Help overlay
-  get helpOverlayVisible() { return this.state.helpOverlayVisible; }
-  set helpOverlayVisible(value) { this.state.helpOverlayVisible = value; }
+  get helpOverlayVisible() {
+    return this.state.helpOverlayVisible;
+  }
+  set helpOverlayVisible(value) {
+    this.state.helpOverlayVisible = value;
+  }
 
   // Animation
-  get animationFrame() { return this.state.animationFrame; }
-  set animationFrame(value) { this.state.animationFrame = value; }
+  get animationFrame() {
+    return this.state.animationFrame;
+  }
+  set animationFrame(value) {
+    this.state.animationFrame = value;
+  }
 
-  get animationPaused() { return this.state.animationPaused; }
-  set animationPaused(value) { this.state.animationPaused = value; }
+  get animationPaused() {
+    return this.state.animationPaused;
+  }
+  set animationPaused(value) {
+    this.state.animationPaused = value;
+  }
 
-  get particles() { return this.state.particles; }
-  set particles(value) { this.state.particles = value; }
+  get particles() {
+    return this.state.particles;
+  }
+  set particles(value) {
+    this.state.particles = value;
+  }
 
   // Appearance
-  get backgroundColor() { return this.state.backgroundColor; }
-  set backgroundColor(value) { this.state.backgroundColor = value; }
+  get backgroundColor() {
+    return this.state.backgroundColor;
+  }
+  set backgroundColor(value) {
+    this.state.backgroundColor = value;
+  }
 
   // Expanded panels
-  get expandedTask() { return this.state.expandedTask; }
-  set expandedTask(value) { this.state.expandedTask = value; }
+  get expandedTask() {
+    return this.state.expandedTask;
+  }
+  set expandedTask(value) {
+    this.state.expandedTask = value;
+  }
 
-  get expandedPanelWidth() { return this.state.expandedPanelWidth; }
-  set expandedPanelWidth(value) { this.state.expandedPanelWidth = value; }
+  get expandedPanelWidth() {
+    return this.state.expandedPanelWidth;
+  }
+  set expandedPanelWidth(value) {
+    this.state.expandedPanelWidth = value;
+  }
 
-  get expandedPanelTargetWidth() { return this.state.expandedPanelTargetWidth; }
-  set expandedPanelTargetWidth(value) { this.state.expandedPanelTargetWidth = value; }
+  get expandedPanelTargetWidth() {
+    return this.state.expandedPanelTargetWidth;
+  }
+  set expandedPanelTargetWidth(value) {
+    this.state.expandedPanelTargetWidth = value;
+  }
 
-  get expandedPanelAnimating() { return this.state.expandedPanelAnimating; }
-  set expandedPanelAnimating(value) { this.state.expandedPanelAnimating = value; }
+  get expandedPanelAnimating() {
+    return this.state.expandedPanelAnimating;
+  }
+  set expandedPanelAnimating(value) {
+    this.state.expandedPanelAnimating = value;
+  }
 
-  get resultScrollOffset() { return this.state.resultScrollOffset; }
-  set resultScrollOffset(value) { this.state.resultScrollOffset = value; }
+  get resultScrollOffset() {
+    return this.state.resultScrollOffset;
+  }
+  set resultScrollOffset(value) {
+    this.state.resultScrollOffset = value;
+  }
 
-  get resultBoxBounds() { return this.state.resultBoxBounds; }
-  set resultBoxBounds(value) { this.state.resultBoxBounds = value; }
+  get resultBoxBounds() {
+    return this.state.resultBoxBounds;
+  }
+  set resultBoxBounds(value) {
+    this.state.resultBoxBounds = value;
+  }
 
-  get copyButtonBounds() { return this.state.copyButtonBounds; }
-  set copyButtonBounds(value) { this.state.copyButtonBounds = value; }
+  get copyButtonBounds() {
+    return this.state.copyButtonBounds;
+  }
+  set copyButtonBounds(value) {
+    this.state.copyButtonBounds = value;
+  }
 
-  get copyButtonState() { return this.state.copyButtonState; }
-  set copyButtonState(value) { this.state.copyButtonState = value; }
+  get copyButtonState() {
+    return this.state.copyButtonState;
+  }
+  set copyButtonState(value) {
+    this.state.copyButtonState = value;
+  }
 
-  get expandedAgent() { return this.state.expandedAgent; }
-  set expandedAgent(value) { this.state.expandedAgent = value; }
+  get expandedAgent() {
+    return this.state.expandedAgent;
+  }
+  set expandedAgent(value) {
+    this.state.expandedAgent = value;
+  }
 
-  get expandedAgentPanelWidth() { return this.state.expandedAgentPanelWidth; }
-  set expandedAgentPanelWidth(value) { this.state.expandedAgentPanelWidth = value; }
+  get expandedAgentPanelWidth() {
+    return this.state.expandedAgentPanelWidth;
+  }
+  set expandedAgentPanelWidth(value) {
+    this.state.expandedAgentPanelWidth = value;
+  }
 
-  get expandedAgentPanelTargetWidth() { return this.state.expandedAgentPanelTargetWidth; }
-  set expandedAgentPanelTargetWidth(value) { this.state.expandedAgentPanelTargetWidth = value; }
+  get expandedAgentPanelTargetWidth() {
+    return this.state.expandedAgentPanelTargetWidth;
+  }
+  set expandedAgentPanelTargetWidth(value) {
+    this.state.expandedAgentPanelTargetWidth = value;
+  }
 
-  get expandedAgentPanelAnimating() { return this.state.expandedAgentPanelAnimating; }
-  set expandedAgentPanelAnimating(value) { this.state.expandedAgentPanelAnimating = value; }
+  get expandedAgentPanelAnimating() {
+    return this.state.expandedAgentPanelAnimating;
+  }
+  set expandedAgentPanelAnimating(value) {
+    this.state.expandedAgentPanelAnimating = value;
+  }
 
-  get agentPanelScrollOffset() { return this.state.agentPanelScrollOffset; }
-  set agentPanelScrollOffset(value) { this.state.agentPanelScrollOffset = value; }
+  get agentPanelScrollOffset() {
+    return this.state.agentPanelScrollOffset;
+  }
+  set agentPanelScrollOffset(value) {
+    this.state.agentPanelScrollOffset = value;
+  }
 
-  get agentPanelMaxScroll() { return this.state.agentPanelMaxScroll; }
-  set agentPanelMaxScroll(value) { this.state.agentPanelMaxScroll = value; }
-
+  get agentPanelMaxScroll() {
+    return this.state.agentPanelMaxScroll;
+  }
+  set agentPanelMaxScroll(value) {
+    this.state.agentPanelMaxScroll = value;
+  }
 
   // Modes
-  get connectionMode() { return this.state.connectionMode; }
-  set connectionMode(value) { this.state.connectionMode = value; }
+  get connectionMode() {
+    return this.state.connectionMode;
+  }
+  set connectionMode(value) {
+    this.state.connectionMode = value;
+  }
 
-  get connectionSourceTask() { return this.state.connectionSourceTask; }
-  set connectionSourceTask(value) { this.state.connectionSourceTask = value; }
+  get connectionSourceTask() {
+    return this.state.connectionSourceTask;
+  }
+  set connectionSourceTask(value) {
+    this.state.connectionSourceTask = value;
+  }
 
-  get highlightedAgent() { return this.state.highlightedAgent; }
-  set highlightedAgent(value) { this.state.highlightedAgent = value; }
+  get highlightedAgent() {
+    return this.state.highlightedAgent;
+  }
+  set highlightedAgent(value) {
+    this.state.highlightedAgent = value;
+  }
 
-  get assignmentMode() { return this.state.assignmentMode; }
-  set assignmentMode(value) { this.state.assignmentMode = value; }
+  get assignmentMode() {
+    return this.state.assignmentMode;
+  }
+  set assignmentMode(value) {
+    this.state.assignmentMode = value;
+  }
 
-  get assignmentSourceTask() { return this.state.assignmentSourceTask; }
-  set assignmentSourceTask(value) { this.state.assignmentSourceTask = value; }
+  get assignmentSourceTask() {
+    return this.state.assignmentSourceTask;
+  }
+  set assignmentSourceTask(value) {
+    this.state.assignmentSourceTask = value;
+  }
 
-  get assignmentMouseX() { return this.state.assignmentMouseX; }
-  set assignmentMouseX(value) { this.state.assignmentMouseX = value; }
+  get assignmentMouseX() {
+    return this.state.assignmentMouseX;
+  }
+  set assignmentMouseX(value) {
+    this.state.assignmentMouseX = value;
+  }
 
-  get assignmentMouseY() { return this.state.assignmentMouseY; }
-  set assignmentMouseY(value) { this.state.assignmentMouseY = value; }
+  get assignmentMouseY() {
+    return this.state.assignmentMouseY;
+  }
+  set assignmentMouseY(value) {
+    this.state.assignmentMouseY = value;
+  }
 
-  get combinerAssignMode() { return this.state.combinerAssignMode; }
-  set combinerAssignMode(value) { this.state.combinerAssignMode = value; }
+  get combinerAssignMode() {
+    return this.state.combinerAssignMode;
+  }
+  set combinerAssignMode(value) {
+    this.state.combinerAssignMode = value;
+  }
 
-  get combinerAssignmentSource() { return this.state.combinerAssignmentSource; }
-  set combinerAssignmentSource(value) { this.state.combinerAssignmentSource = value; }
+  get combinerAssignmentSource() {
+    return this.state.combinerAssignmentSource;
+  }
+  set combinerAssignmentSource(value) {
+    this.state.combinerAssignmentSource = value;
+  }
 
-  get createTaskMode() { return this.state.createTaskMode; }
-  set createTaskMode(value) { this.state.createTaskMode = value; }
+  get createTaskMode() {
+    return this.state.createTaskMode;
+  }
+  set createTaskMode(value) {
+    this.state.createTaskMode = value;
+  }
 
   // Timeline
-  get timelineVisible() { return this.state.timelineVisible; }
-  set timelineVisible(value) { this.state.timelineVisible = value; }
+  get timelineVisible() {
+    return this.state.timelineVisible;
+  }
+  set timelineVisible(value) {
+    this.state.timelineVisible = value;
+  }
 
-  get timelinePanelWidth() { return this.state.timelinePanelWidth; }
-  set timelinePanelWidth(value) { this.state.timelinePanelWidth = value; }
+  get timelinePanelWidth() {
+    return this.state.timelinePanelWidth;
+  }
+  set timelinePanelWidth(value) {
+    this.state.timelinePanelWidth = value;
+  }
 
-  get timelinePanelTargetWidth() { return this.state.timelinePanelTargetWidth; }
-  set timelinePanelTargetWidth(value) { this.state.timelinePanelTargetWidth = value; }
+  get timelinePanelTargetWidth() {
+    return this.state.timelinePanelTargetWidth;
+  }
+  set timelinePanelTargetWidth(value) {
+    this.state.timelinePanelTargetWidth = value;
+  }
 
-  get timelinePanelAnimating() { return this.state.timelinePanelAnimating; }
-  set timelinePanelAnimating(value) { this.state.timelinePanelAnimating = value; }
+  get timelinePanelAnimating() {
+    return this.state.timelinePanelAnimating;
+  }
+  set timelinePanelAnimating(value) {
+    this.state.timelinePanelAnimating = value;
+  }
 
-  get timelineEvents() { return this.state.timelineEvents; }
-  set timelineEvents(value) { this.state.timelineEvents = value; }
+  get timelineEvents() {
+    return this.state.timelineEvents;
+  }
+  set timelineEvents(value) {
+    this.state.timelineEvents = value;
+  }
 
-  get timelineScrollOffset() { return this.state.timelineScrollOffset; }
-  set timelineScrollOffset(value) { this.state.timelineScrollOffset = value; }
+  get timelineScrollOffset() {
+    return this.state.timelineScrollOffset;
+  }
+  set timelineScrollOffset(value) {
+    this.state.timelineScrollOffset = value;
+  }
 
-  get timelineMaxEvents() { return this.state.timelineMaxEvents; }
-  set timelineMaxEvents(value) { this.state.timelineMaxEvents = value; }
+  get timelineMaxEvents() {
+    return this.state.timelineMaxEvents;
+  }
+  set timelineMaxEvents(value) {
+    this.state.timelineMaxEvents = value;
+  }
 
   // Chains
-  get activeChains() { return this.state.activeChains; }
-  set activeChains(value) { this.state.activeChains = value; }
+  get activeChains() {
+    return this.state.activeChains;
+  }
+  set activeChains(value) {
+    this.state.activeChains = value;
+  }
 
-  get chainParticles() { return this.state.chainParticles; }
-  set chainParticles(value) { this.state.chainParticles = value; }
+  get chainParticles() {
+    return this.state.chainParticles;
+  }
+  set chainParticles(value) {
+    this.state.chainParticles = value;
+  }
 
   // Connections
-  get connections() { return this.state.connections; }
-  set connections(value) { this.state.connections = value; }
+  get connections() {
+    return this.state.connections;
+  }
+  set connections(value) {
+    this.state.connections = value;
+  }
 
   // Execution logs
-  get executionLogs() { return this.state.executionLogs; }
-  set executionLogs(value) { this.state.executionLogs = value; }
+  get executionLogs() {
+    return this.state.executionLogs;
+  }
+  set executionLogs(value) {
+    this.state.executionLogs = value;
+  }
 
   // Callbacks
-  get onAgentClick() { return this.state.onAgentClick; }
-  set onAgentClick(value) { this.state.onAgentClick = value; }
+  get onAgentClick() {
+    return this.state.onAgentClick;
+  }
+  set onAgentClick(value) {
+    this.state.onAgentClick = value;
+  }
 
-
-  get onTimelineEvent() { return this.state.onTimelineEvent; }
-  set onTimelineEvent(value) { this.state.onTimelineEvent = value; }
+  get onTimelineEvent() {
+    return this.state.onTimelineEvent;
+  }
+  set onTimelineEvent(value) {
+    this.state.onTimelineEvent = value;
+  }
 
   // ==================== METHODS ====================
 
-
   // Initialization methods delegated to initialization module
-  init() { return this.initModule.init(); }
-  resize() { return this.initModule.resize(); }
-  initializeAgents() { return this.initModule.initializeAgents(); }
+  init() {
+    return this.initModule.init();
+  }
+  resize() {
+    return this.initModule.resize();
+  }
+  initializeAgents() {
+    return this.initModule.initializeAgents();
+  }
 
   // Animation methods delegated to animation module
-  updateChains() { return this.animation.updateChains(); }
-  createChainParticle(fromTask, toTask) { return this.animation.createChainParticle(fromTask, toTask); }
-  updateChainParticles() { return this.animation.updateChainParticles(); }
-
+  updateChains() {
+    return this.animation.updateChains();
+  }
+  createChainParticle(fromTask, toTask) {
+    return this.animation.createChainParticle(fromTask, toTask);
+  }
+  updateChainParticles() {
+    return this.animation.updateChainParticles();
+  }
 
   // Timeline methods delegated to timeline module
-  addTimelineEvent(eventData) { return this.timeline.addTimelineEvent(eventData); }
-  toggleTimeline() { return this.timeline.toggleTimeline(); }
-  animateTimelinePanel(expanding) { return this.timeline.animateTimelinePanel(expanding); }
-
+  addTimelineEvent(eventData) {
+    return this.timeline.addTimelineEvent(eventData);
+  }
+  toggleTimeline() {
+    return this.timeline.toggleTimeline();
+  }
+  animateTimelinePanel(expanding) {
+    return this.timeline.animateTimelinePanel(expanding);
+  }
 
   // Animation methods delegated to animation module (continued)
-  createTaskParticles(task) { return this.animation.createTaskParticles(task); }
-  startAnimation() { return this.animation.startAnimation(); }
-  update() { return this.animation.update(); }
+  createTaskParticles(task) {
+    return this.animation.createTaskParticles(task);
+  }
+  startAnimation() {
+    return this.animation.startAnimation();
+  }
+  update() {
+    return this.animation.update();
+  }
 
   draw() {
     // Clear canvas with selected background color
@@ -504,16 +815,13 @@ class AgentCanvas {
     }
   }
 
-
   /**
    * Draw an arrow from (x1, y1) to (x2, y2)
    */
 
-
   /**
    * Draw connections from completed tasks to tasks that use their results
    */
-
 
   /**
    * Draw highlighted connection paths for active chains
@@ -523,14 +831,11 @@ class AgentCanvas {
    * Draw chain particles
    */
 
-
   // Helper function to wrap text
-
 
   // Helper function to draw rounded rectangle
 
   // Mouse interaction handlers
-
 
   async copyResultToClipboard() {
     if (!this.expandedTask || !this.expandedTask.result) {
@@ -569,59 +874,131 @@ class AgentCanvas {
     }
   }
 
-
   // Layout methods delegated to layout module
-  autoLayoutTasks() { return this.layout.autoLayoutTasks(); }
+  autoLayoutTasks() {
+    return this.layout.autoLayoutTasks();
+  }
 
-  zoomToFitContent() { return this.layout.zoomToFitContent(); }
+  zoomToFitContent() {
+    return this.layout.zoomToFitContent();
+  }
 
+  calculateTaskLevels() {
+    return this.layout.calculateTaskLevels();
+  }
 
-  calculateTaskLevels() { return this.layout.calculateTaskLevels(); }
-
-  refreshWorkspaceFileFolders() { return this.initModule.loadWorkspaceFileFolders(); }
+  refreshWorkspaceFileFolders() {
+    return this.initModule.loadWorkspaceFileFolders();
+  }
 
   // Helper methods delegated to helpers module
-  getAgentColor(index) { return this.helpers.getAgentColor(index); }
-  getNodeById(nodeId) { return this.helpers.getNodeById(nodeId); }
-  getPortPosition(nodeId, portId) { return this.helpers.getPortPosition(nodeId, portId); }
-  getPortAtPosition(x, y) { return this.helpers.getPortAtPosition(x, y); }
-  getConnectionAtPosition(x, y, threshold = 10) { return this.helpers.getConnectionAtPosition(x, y, threshold); }
-  getLatestTaskForAgent(agentName) { return this.helpers.getLatestTaskForAgent(agentName); }
-  lightenColor(color, percent) { return this.helpers.lightenColor(color, percent); }
-  darkenColor(color, percent) { return this.helpers.darkenColor(color, percent); }
+  getAgentColor(index) {
+    return this.helpers.getAgentColor(index);
+  }
+  getNodeById(nodeId) {
+    return this.helpers.getNodeById(nodeId);
+  }
+  getPortPosition(nodeId, portId) {
+    return this.helpers.getPortPosition(nodeId, portId);
+  }
+  getPortAtPosition(x, y) {
+    return this.helpers.getPortAtPosition(x, y);
+  }
+  getConnectionAtPosition(x, y, threshold = 10) {
+    return this.helpers.getConnectionAtPosition(x, y, threshold);
+  }
+  getLatestTaskForAgent(agentName) {
+    return this.helpers.getLatestTaskForAgent(agentName);
+  }
+  lightenColor(color, percent) {
+    return this.helpers.lightenColor(color, percent);
+  }
+  darkenColor(color, percent) {
+    return this.helpers.darkenColor(color, percent);
+  }
 
   // Notification methods delegated to notifications module
-  showNotification(message, type = 'info') { return this.notifications.showNotification(message, type); }
-  dismissNotification(id) { return this.notifications.dismissNotification(id); }
-  addExecutionLog(taskId, type, message) { return this.notifications.addExecutionLog(taskId, type, message); }
-  showExecutionLog(task) { return this.notifications.showExecutionLog(task); }
-  getEventIcon(type) { return this.notifications.getEventIcon(type); }
-  getEventColor(type) { return this.notifications.getEventColor(type); }
-  getEventMessage(event) { return this.notifications.getEventMessage(event); }
+  showNotification(message, type = 'info') {
+    return this.notifications.showNotification(message, type);
+  }
+  dismissNotification(id) {
+    return this.notifications.dismissNotification(id);
+  }
+  addExecutionLog(taskId, type, message) {
+    return this.notifications.addExecutionLog(taskId, type, message);
+  }
+  showExecutionLog(task) {
+    return this.notifications.showExecutionLog(task);
+  }
+  getEventIcon(type) {
+    return this.notifications.getEventIcon(type);
+  }
+  getEventColor(type) {
+    return this.notifications.getEventColor(type);
+  }
+  getEventMessage(event) {
+    return this.notifications.getEventMessage(event);
+  }
 
   // Panel methods delegated to panels module
-  toggleTaskPanel(task) { return this.panels.toggleTaskPanel(task); }
-  closeTaskPanel() { return this.panels.closeTaskPanel(); }
-  animatePanel(expanding) { return this.panels.animatePanel(expanding); }
-  toggleAgentPanel(agent) { return this.panels.toggleAgentPanel(agent); }
-  closeAgentPanel() { return this.panels.closeAgentPanel(); }
-  animateAgentPanel(expanding) { return this.panels.animateAgentPanel(expanding); }
-  toggleHelpOverlay() { return this.panels.toggleHelpOverlay(); }
+  toggleTaskPanel(task) {
+    return this.panels.toggleTaskPanel(task);
+  }
+  closeTaskPanel() {
+    return this.panels.closeTaskPanel();
+  }
+  animatePanel(expanding) {
+    return this.panels.animatePanel(expanding);
+  }
+  toggleAgentPanel(agent) {
+    return this.panels.toggleAgentPanel(agent);
+  }
+  closeAgentPanel() {
+    return this.panels.closeAgentPanel();
+  }
+  animateAgentPanel(expanding) {
+    return this.panels.animateAgentPanel(expanding);
+  }
+  toggleHelpOverlay() {
+    return this.panels.toggleHelpOverlay();
+  }
 
   // Context menu methods delegated to context menu module
-  toggleAssignmentMode(task) { return this.contextMenu.toggleAssignmentMode(task); }
-  handleContextMenuAction(action, agent) { return this.contextMenu.handleContextMenuAction(action, agent); }
-  handleMultiSelectAction(action) { return this.contextMenu.handleMultiSelectAction(action); }
+  toggleAssignmentMode(task) {
+    return this.contextMenu.toggleAssignmentMode(task);
+  }
+  handleContextMenuAction(action, agent) {
+    return this.contextMenu.handleContextMenuAction(action, agent);
+  }
+  handleMultiSelectAction(action) {
+    return this.contextMenu.handleMultiSelectAction(action);
+  }
 
   // Event handler methods delegated to event handler module
-  connectEventStream() { return this.eventHandler.connectEventStream(); }
-  handleTaskEvent(eventData) { return this.eventHandler.handleTaskEvent(eventData); }
-  handleEvent(event) { return this.eventHandler.handleEvent(event); }
-  addTask(taskData) { return this.eventHandler.addTask(taskData); }
-  updateTaskStatus(taskId, status) { return this.eventHandler.updateTaskStatus(taskId, status); }
-  setAgentStatus(agentName, status) { return this.eventHandler.setAgentStatus(agentName, status); }
-  addMessage(messageData) { return this.eventHandler.addMessage(messageData); }
-  setMission(missionText) { return this.eventHandler.setMission(missionText); }
+  connectEventStream() {
+    return this.eventHandler.connectEventStream();
+  }
+  handleTaskEvent(eventData) {
+    return this.eventHandler.handleTaskEvent(eventData);
+  }
+  handleEvent(event) {
+    return this.eventHandler.handleEvent(event);
+  }
+  addTask(taskData) {
+    return this.eventHandler.addTask(taskData);
+  }
+  updateTaskStatus(taskId, status) {
+    return this.eventHandler.updateTaskStatus(taskId, status);
+  }
+  setAgentStatus(agentName, status) {
+    return this.eventHandler.setAgentStatus(agentName, status);
+  }
+  addMessage(messageData) {
+    return this.eventHandler.addMessage(messageData);
+  }
+  setMission(missionText) {
+    return this.eventHandler.setMission(missionText);
+  }
 
   async assignTaskToAgent(agent) {
     // Update task assignment via API
@@ -669,7 +1046,6 @@ class AgentCanvas {
   async linkTaskResult(sourceTaskId, targetTaskId) {
     return tasksLinkTaskResult(this, sourceTaskId, targetTaskId);
   }
-
 
   /**
    * Draw the floating "Create Task" button in the top-right corner
@@ -729,7 +1105,9 @@ class AgentCanvas {
     }
 
     // Confirm deletion
-    const confirmed = confirm(`Are you sure you want to delete this task?\n\n"${task.description || 'Task'}"\n\nThis action cannot be undone.`);
+    const confirmed = confirm(
+      `Are you sure you want to delete this task?\n\n"${task.description || 'Task'}"\n\nThis action cannot be undone.`
+    );
     if (!confirmed) return;
 
     try {
@@ -757,7 +1135,6 @@ class AgentCanvas {
       // Update metrics
       // Reload to ensure consistency
       setTimeout(() => this.init(), 500);
-
     } catch (error) {
       console.error('❌ Error deleting task:', error);
       alert('Failed to delete task: ' + error.message);
@@ -771,16 +1148,23 @@ class AgentCanvas {
     // Extract agent name from nodeId (e.g., "default-node-2" -> "default")
     const agentName = nodeId.split('-node-')[0];
 
-    if (!confirm(`Remove agent "${agentName} #${instanceNumber}" from this workspace?\n\nThis will only remove it from the canvas, not delete the agent.`)) {
+    if (
+      !confirm(
+        `Remove agent "${agentName} #${instanceNumber}" from this workspace?\n\nThis will only remove it from the canvas, not delete the agent.`
+      )
+    ) {
       return;
     }
 
     try {
       // Use name:instanceNumber format for specific instance removal
       const agentIdentifier = `${agentName}:${instanceNumber}`;
-      const response = await fetch(`/api/workspaces/${this.workspaceId}/agents/${agentIdentifier}`, {
-        method: 'DELETE'
-      });
+      const response = await fetch(
+        `/api/workspaces/${this.workspaceId}/agents/${agentIdentifier}`,
+        {
+          method: 'DELETE'
+        }
+      );
 
       if (response.ok) {
         // Remove only this specific agent instance from local state
@@ -833,7 +1217,8 @@ class AgentCanvas {
         this.draw();
 
         // Show notification
-        const unassignNote = affectedTasks.length > 0 ? ` and unassigned ${affectedTasks.length} task(s)` : '';
+        const unassignNote =
+          affectedTasks.length > 0 ? ` and unassigned ${affectedTasks.length} task(s)` : '';
         this.showNotification(`Agent "${agentName}" removed${unassignNote}`, 'success');
 
         // Reload to ensure consistency
@@ -898,7 +1283,10 @@ class AgentCanvas {
     const targetFolder = String(folder?.relative_path || folder?.path || '').trim();
     const fileMeta = attachment?.file || attachment?.file_meta;
     if (!attachment?.id || !this.workspaceId || !fileMeta?.relative_path || !targetFolder) {
-      this.notifications?.showNotification?.('Only workspace files can be moved into folders', 'warning');
+      this.notifications?.showNotification?.(
+        'Only workspace files can be moved into folders',
+        'warning'
+      );
       return;
     }
 
@@ -915,7 +1303,8 @@ class AgentCanvas {
       );
       const updated = response?.attachment || {};
       Object.assign(attachment, updated);
-      attachment.file = updated.file || updated.file_meta || attachment.file || attachment.file_meta;
+      attachment.file =
+        updated.file || updated.file_meta || attachment.file || attachment.file_meta;
       await this.refreshWorkspaceFileFolders();
       this.draw();
       this.notifications?.showNotification?.('File moved to folder', 'success');
@@ -970,8 +1359,10 @@ class AgentCanvas {
    * Toggle store node assignment mode
    */
   toggleStoreAssignmentMode(storeNode) {
-    if (this.state.storeAssignmentMode &&
-        this.state.storeAssignmentSource?.canvas_node_id === storeNode.canvas_node_id) {
+    if (
+      this.state.storeAssignmentMode &&
+      this.state.storeAssignmentSource?.canvas_node_id === storeNode.canvas_node_id
+    ) {
       // Cancel if clicking same store node
       this.state.storeAssignmentMode = false;
       this.state.storeAssignmentSource = null;
@@ -996,9 +1387,12 @@ class AgentCanvas {
 
     try {
       // Update the store node's agent_node_id
-      await apiPatch(`/api/workspaces/${this.workspaceId}/canvas/store-nodes/${storeNode.canvas_node_id}`, {
-        agent_node_id: agent.nodeId || agent.id
-      });
+      await apiPatch(
+        `/api/workspaces/${this.workspaceId}/canvas/store-nodes/${storeNode.canvas_node_id}`,
+        {
+          agent_node_id: agent.nodeId || agent.id
+        }
+      );
 
       // Update local state
       storeNode.agent_node_id = agent.nodeId || agent.id;
@@ -1010,7 +1404,10 @@ class AgentCanvas {
 
       this.saveLayout();
       this.draw();
-      this.notifications?.showNotification?.(`Agent "${agent.name}" assigned to store "${storeNode.name}"`, 'success');
+      this.notifications?.showNotification?.(
+        `Agent "${agent.name}" assigned to store "${storeNode.name}"`,
+        'success'
+      );
     } catch (err) {
       console.error('Failed to assign agent to store', err);
       alert('Failed to assign agent: ' + (err?.message || err));
@@ -1032,7 +1429,6 @@ class AgentCanvas {
     return combinerExecute(this, combiner);
   }
 
-
   destroy() {
     if (this.animationFrame) {
       cancelAnimationFrame(this.animationFrame);
@@ -1048,9 +1444,13 @@ class AgentCanvas {
     }
   }
 
-  async saveLayout() { return this.layout.saveLayout(); }
+  async saveLayout() {
+    return this.layout.saveLayout();
+  }
 
-  loadLayout() { return this.layout.loadLayout(); }
+  loadLayout() {
+    return this.layout.loadLayout();
+  }
 
   // === NEW FEATURES ===
 
@@ -1184,7 +1584,10 @@ class AgentCanvas {
 
     // Enforce attachment direction: attachments can only connect outward to tasks/agents
     if (fromNode.type === 'attachment' && !(toNode.type === 'task' || toNode.type === 'agent')) {
-      this.notifications?.showNotification?.('Attachments can only connect to tasks or agents', 'warning');
+      this.notifications?.showNotification?.(
+        'Attachments can only connect to tasks or agents',
+        'warning'
+      );
       return null;
     }
     if (toNode.type === 'attachment') {
@@ -1194,12 +1597,14 @@ class AgentCanvas {
 
     // Avoid duplicate connections - check for any connection between same nodes
     // This prevents creating multiple connections from same source to same destination
-    const existing = this.state.connections.find(conn =>
-      conn.from === fromNodeId &&
-      conn.to === toNodeId
+    const existing = this.state.connections.find(
+      conn => conn.from === fromNodeId && conn.to === toNodeId
     );
     if (existing) {
-      this.notifications?.showNotification?.('A connection already exists between these nodes', 'info');
+      this.notifications?.showNotification?.(
+        'A connection already exists between these nodes',
+        'info'
+      );
       return existing;
     }
 
@@ -1459,7 +1864,7 @@ class AgentCanvas {
     tempCtx.drawImage(this.canvas, 0, 0);
 
     // Create download link
-    tempCanvas.toBlob((blob) => {
+    tempCanvas.toBlob(blob => {
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
@@ -1475,7 +1880,7 @@ class AgentCanvas {
 window.AgentCanvas = AgentCanvas;
 
 // Export canvas function - accessible globally for button onclick
-window.exportCanvas = function() {
+window.exportCanvas = function () {
   if (window.currentCanvas) {
     window.currentCanvas.exportCanvas();
   } else {
