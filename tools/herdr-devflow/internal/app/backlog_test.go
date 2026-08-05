@@ -266,6 +266,70 @@ func TestBacklogRefusesWhenSeveralBoardsAreLinked(t *testing.T) {
 	}
 }
 
+// TestBacklogRetiredSubcommandsNameTheirReplacement covers the week after this
+// split, when muscle memory still types the old command.
+//
+// Each retired spelling was a real, working command recently, so the failure
+// has to say where it went. Falling through to "unknown subcommand" would claim
+// it never existed, which is both false and unhelpful.
+func TestBacklogRetiredSubcommandsNameTheirReplacement(t *testing.T) {
+	t.Parallel()
+	cases := map[string]struct {
+		args []string
+		want string
+	}{
+		"view moved":  {[]string{"view", "292"}, "./scripts/issue.sh view"},
+		"show moved":  {[]string{"show", "292"}, "./scripts/issue.sh view"},
+		"add moved":   {[]string{"add", "a title"}, "./scripts/issue.sh add"},
+		"new moved":   {[]string{"new", "a title"}, "./scripts/issue.sh add"},
+		"list moved":  {[]string{"list"}, "./scripts/issue.sh"},
+		"ls moved":    {[]string{"ls"}, "./scripts/issue.sh"},
+		"--all moved": {[]string{"--all"}, "./scripts/issue.sh --all"},
+	}
+	for name, testCase := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			remote := &fakeBoard{items: readyBoard}
+			application, stdout, stderr, base := newBoardApp(t, remote)
+
+			exit := application.Run(context.Background(), append(base, testCase.args...))
+
+			if exit != 2 {
+				t.Fatalf("exit = %d, want 2 for a retired invocation; stdout=%q", exit, stdout.String())
+			}
+			if !strings.Contains(stderr.String(), testCase.want) {
+				t.Fatalf("stderr = %q, want it to name %q", stderr.String(), testCase.want)
+			}
+			// A rejected invocation must cost nothing: no board read, and above
+			// all no Issue created by a spelling this command no longer owns.
+			if len(remote.calls) != 0 {
+				t.Fatalf("a retired invocation still queried GitHub: %v", remote.calls)
+			}
+		})
+	}
+}
+
+// TestBacklogListIsNotSilentlyRedefined is the one retirement that could have
+// gone wrong quietly. `list` used to mean "list Issues" and is also the obvious
+// spelling for "list the board", so accepting it would answer a different
+// question than the one asked — with no error to notice.
+func TestBacklogListIsNotSilentlyRedefined(t *testing.T) {
+	t.Parallel()
+	application, stdout, stderr, base := newBoardApp(t, &fakeBoard{items: readyBoard})
+
+	exit := application.Run(context.Background(), append(base, "list"))
+
+	if exit != 2 {
+		t.Fatalf("exit = %d, want 2 — `list` must not quietly become the board listing", exit)
+	}
+	if strings.Contains(stdout.String(), "Coordinate based map") {
+		t.Fatalf("`backlog.sh list` rendered the board: %q", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "Ready column") {
+		t.Fatalf("stderr = %q, want it to explain what backlog.sh now reads", stderr.String())
+	}
+}
+
 func indexOfAll(haystack string, needles ...string) []int {
 	found := make([]int, 0, len(needles))
 	for _, needle := range needles {
