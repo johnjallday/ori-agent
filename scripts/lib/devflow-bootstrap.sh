@@ -47,17 +47,27 @@ devflow_installed_helper() {
   printf '%s/bin/herdr-devflow' "$root"
 }
 
-# First hit wins: an explicit override, then the installed runtime binary, then
-# a binary built into this checkout. Compiling is the last resort, because
+# First hit wins: an explicit override, then a binary built into this checkout,
+# then the installed runtime binary. Compiling is the last resort, because
 # reading a backlog should not rebuild a Go program.
+#
+# The checkout's own bin/ outranks the installed helper deliberately. Only one
+# kind of person has both — somebody working on the helper — and for them the
+# global install is by definition the older of the two. Preferring it means a
+# freshly built subcommand reports itself as unknown, which reads as a bug in
+# the feature rather than a stale binary answering for it.
+#
+# This does not reintroduce the cost that put the installed helper first: that
+# concern is about the `go run` fallback at the end of this chain, and a binary
+# already sitting in bin/ compiles nothing.
 helper=""
 devflow_installed="$(devflow_installed_helper || true)"
 if [[ -n "${HERDR_DEVFLOW_BINARY:-}" && -x "${HERDR_DEVFLOW_BINARY}" ]]; then
   helper="$HERDR_DEVFLOW_BINARY"
-elif [[ -n "$devflow_installed" && -x "$devflow_installed" ]]; then
-  helper="$devflow_installed"
 elif [[ -x "$repo_root/bin/herdr-devflow" ]]; then
   helper="$repo_root/bin/herdr-devflow"
+elif [[ -n "$devflow_installed" && -x "$devflow_installed" ]]; then
+  helper="$devflow_installed"
 fi
 unset devflow_installed
 

@@ -485,24 +485,33 @@ fi
 
 # The installed runtime binary comes next: $HERDR_DEVFLOW_HOME is the runtime
 # root and the helper sits at <root>/bin/herdr-devflow, exactly where the Go code
-# puts it. A checkout-local bin/ exists here to prove it does not win.
+# puts it.
+#
+# The checkout's own bin/ is asserted to OUTRANK it. Only somebody working on
+# the helper has both, and for them the global install is by definition the
+# older of the two — so preferring it makes a freshly built subcommand report
+# itself as unknown, which reads as a bug in the feature rather than a stale
+# binary answering for it.
 mkdir -p "$gh_root/installed-runtime/bin" "$gh_root/feature-checkout/bin"
 cp "$resolution_root/installed" "$gh_root/installed-runtime/bin/herdr-devflow"
 cp "$resolution_root/repo-bin" "$gh_root/feature-checkout/bin/herdr-devflow"
 resolution_output="$( cd "$gh_root/feature-checkout" \
   && env -u HERDR_DEVFLOW_BINARY HERDR_DEVFLOW_HOME="$gh_root/installed-runtime" ./scripts/issue.sh list )"
-if ! print -r -- "$resolution_output" | rg -q '^INSTALLED '; then
-  print -r -- "the installed runtime binary was not preferred: $resolution_output" >&2
+if ! print -r -- "$resolution_output" | rg -q '^REPO-BIN '; then
+  print -r -- "the checkout's own bin/ did not outrank the installed helper: $resolution_output" >&2
   exit 1
 fi
 
-# A checkout-local bin/herdr-devflow is the third candidate.
+# With no checkout-local build, the installed runtime binary answers.
+rm -f "$gh_root/feature-checkout/bin/herdr-devflow"
 resolution_output="$( cd "$gh_root/feature-checkout" \
-  && env -u HERDR_DEVFLOW_BINARY HERDR_DEVFLOW_HOME="$gh_root/nothing-installed" ./scripts/issue.sh list )"
-if ! print -r -- "$resolution_output" | rg -q '^REPO-BIN '; then
-  print -r -- "\$repo_root/bin/herdr-devflow was not used: $resolution_output" >&2
+  && env -u HERDR_DEVFLOW_BINARY HERDR_DEVFLOW_HOME="$gh_root/installed-runtime" ./scripts/issue.sh list )"
+if ! print -r -- "$resolution_output" | rg -q '^INSTALLED '; then
+  print -r -- "the installed runtime binary was not used as the fallback: $resolution_output" >&2
   exit 1
 fi
+# Left removed on purpose: the platform-derivation check below also needs the
+# installed helper to answer, which it cannot do while a checkout build outranks it.
 
 # Without $HERDR_DEVFLOW_HOME the runtime root comes from the platform's user
 # config directory. Getting the Linux spelling wrong degrades silently to a
