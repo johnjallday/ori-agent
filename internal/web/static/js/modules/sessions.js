@@ -34,6 +34,9 @@ const sessionManager = {
   importDuplicateWorkspaceName: '',
   importEntryPoint: 'workspace_hub_create',
   workspacePostCreateAction: '',
+  // True while the open Create Workspace modal was launched from the Workspace
+  // Map's Build mode, which changes only where the flow returns to (#292 FR-53).
+  workspaceMapOrigin: false,
 
   // Create-workspace "Starting point" template currently picked in the modal.
   // Populated when the modal opens (defaults to the first/Blank template).
@@ -467,6 +470,7 @@ const sessionManager = {
       this.importEntryPoint =
         entryPoint || (importMode ? 'workspace_hub_import' : 'workspace_hub_create');
       this.workspacePostCreateAction = postCreateAction;
+      this.workspaceMapOrigin = String(addFolderModal.dataset.pendingMapOrigin || '') === 'true';
       if (importMode) {
         this.setImportModeEnabled(true);
       } else if (pendingBlueprint) {
@@ -477,6 +481,7 @@ const sessionManager = {
       delete addFolderModal.dataset.pendingEntryPoint;
       delete addFolderModal.dataset.pendingPostCreateAction;
       delete addFolderModal.dataset.pendingBlueprint;
+      delete addFolderModal.dataset.pendingMapOrigin;
     });
 
     // Closing or cancelling discards the team draft immediately rather than
@@ -485,6 +490,14 @@ const sessionManager = {
     // wizard. Nothing was persisted, so nothing needs undoing (FR13).
     addFolderModal?.addEventListener('hidden.bs.modal', () => {
       this.discardWorkspaceTeamDraft();
+      // Closing without creating leaves the map exactly as it was: no workspace,
+      // no position record, no lingering placement mode (#292 FR-54). A pending
+      // coordinate that a successful create already consumed is gone by now, so
+      // this only ever clears an abandoned one.
+      this.workspaceMapOrigin = false;
+      if (window.OriWorkspaceMap && typeof window.OriWorkspaceMap.cancelBuild === 'function') {
+        window.OriWorkspaceMap.cancelBuild();
+      }
     });
 
     // Close dropdowns when clicking outside
@@ -5575,6 +5588,35 @@ const sessionManager = {
       modal?.hide();
       this.resetAddWorkspaceModalForm();
 
+      // A Map-origin create returns to the map (#292 FR-53). The user asked for
+      // a workspace at a point they chose; navigating into it would take them
+      // away from the arrangement they were building. The coordinate is saved
+      // by the map, which owns it — and saving it is deliberately not allowed to
+      // fail the create: a workspace that exists stays created even if its
+      // position does not save (FR-56).
+      const mapOrigin = this.workspaceMapOrigin;
+      this.workspaceMapOrigin = false;
+      if (createdWorkspaceId && mapOrigin) {
+        if (window.OriWorkspaceMap && typeof window.OriWorkspaceMap.completeBuild === 'function') {
+          try {
+            await window.OriWorkspaceMap.completeBuild(createdWorkspaceId);
+          } catch (error) {
+            console.warn('Workspace created but its map position did not save:', error);
+          }
+        }
+        await this.loadFolders();
+        if (window.WorkspaceHub && typeof window.WorkspaceHub.loadWorkspaces === 'function') {
+          await window.WorkspaceHub.loadWorkspaces();
+        }
+        if (window.OriHomeCockpit && typeof window.OriHomeCockpit.refreshQuietly === 'function') {
+          await window.OriHomeCockpit.refreshQuietly();
+          if (typeof window.OriHomeCockpit.select === 'function') {
+            window.OriHomeCockpit.select(createdWorkspaceId);
+          }
+        }
+        return;
+      }
+
       // Navigate to the new workspace once the reviewed setup has been applied
       if (createdWorkspaceId) {
         window.location.href =
@@ -6323,6 +6365,15 @@ const sessionManager = {
     modalElement.dataset.pendingEntryPoint = String(
       options.entryPoint || (options.importMode ? 'workspace_hub_import' : 'workspace_hub_create')
     );
+    // Map-origin creation (#292 FR-51). The Workspace Map holds the coordinate
+    // the user chose; this flag only records that the create came from there, so
+    // a successful create returns to the map instead of navigating into the new
+    // workspace. There is no second creation form — this is the same modal.
+    if (options.mapOrigin) {
+      modalElement.dataset.pendingMapOrigin = 'true';
+    } else {
+      delete modalElement.dataset.pendingMapOrigin;
+    }
     if (options.blueprint) {
       modalElement.dataset.pendingBlueprint = String(options.blueprint);
     } else {

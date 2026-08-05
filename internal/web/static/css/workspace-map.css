@@ -428,6 +428,58 @@
   font-size: 11px;
   color: var(--ws-ink-faint);
 }
+/* Build mode. The banner names the mode, shows the candidate coordinate and
+   whether snapping applies, and carries its own way out — a mode the user
+   cannot see is one they will enter by accident (#292 FR-48 – FR-50). */
+.ws-map-build {
+  position: absolute;
+  z-index: 8;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: calc(100% - 32px);
+  padding: 8px 12px;
+  border: 1px solid var(--ws-faction);
+  background: var(--ws-bg-2);
+  color: var(--ws-ink);
+  font-size: 12px;
+}
+.ws-map-build[hidden] {
+  display: none;
+}
+.ws-map-build-dot {
+  color: var(--ws-faction);
+}
+.ws-map-build-coords {
+  font-family: var(--ws-font-mono);
+  font-size: 11px;
+  color: var(--ws-faction);
+  white-space: nowrap;
+}
+/* Build mode gets its own cursor as well as the banner: the state is carried by
+   shape and text, not by colour alone (FR-120). */
+.ws-map-canvas.is-building {
+  cursor: crosshair;
+}
+/* The candidate site, drawn in world space so it tracks the coordinate through
+   pans and zooms. */
+.ws-map-build-site {
+  position: absolute;
+  z-index: 6;
+  width: 150px;
+  height: 118px;
+  margin: 0;
+  pointer-events: none;
+  border: 2px dashed var(--ws-faction);
+  background: rgba(123, 108, 240, 0.08);
+}
+.ws-map-build-site[hidden] {
+  display: none;
+}
+
 /* The shared announcement region. Visually hidden, never focus-stealing
    (FR-116). */
 .ws-map-live {

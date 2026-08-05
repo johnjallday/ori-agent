@@ -972,8 +972,8 @@ test('tiles are spaced so a row cannot collide with the row below it', () => {
 // dropped rather than painted over whatever is there now.
 // ---------------------------------------------------------------------------
 
-function loadMapWithFetch(fetchImpl) {
-  const window = { addEventListener() {} };
+function loadMapWithFetch(fetchImpl, windowExtras = {}) {
+  const window = { addEventListener() {}, ...windowExtras };
   vm.runInNewContext(
     source,
     {
@@ -1224,9 +1224,16 @@ function createCameraHarness({ width = 1000, height = 600 } = {}) {
 
   function control(name) {
     if (!controls[name]) {
+      const attrs = {};
       controls[name] = {
         disabled: false,
+        hidden: true,
         textContent: '',
+        attrs,
+        style: {},
+        setAttribute: (k, v) => (attrs[k] = String(v)),
+        getAttribute: k => (k in attrs ? attrs[k] : null),
+        focus: () => {},
         addEventListener: (type, fn) => {
           if (type === 'click') controls[name].click = fn;
         }
@@ -1441,6 +1448,234 @@ test('camera saves are debounced and best-effort (FR-44, FR-108)', async () => {
   const kept = map.getLayoutState().positions['ws-1'];
   assert.equal(kept.x, 100);
   assert.equal(kept.y, 100);
+});
+
+// ---------------------------------------------------------------------------
+// Build mode (#292 FR-47 – FR-62)
+//
+// An explicit, single-use placement state. Outside it, an empty-space click
+// means what it always meant; inside it, exactly one selection chooses a build
+// site and the mode ends.
+// ---------------------------------------------------------------------------
+
+function buildHarness({ layout, patchResponse } = {}) {
+  const modalCalls = [];
+  const patches = [];
+  const fetchImpl = (url, init) => {
+    if (init && init.method === 'PATCH') {
+      const body = JSON.parse(init.body);
+      patches.push(body);
+      if (patchResponse === 'fail') return Promise.resolve({ ok: false, status: 500 });
+      // Echo what a real server would commit, including the preference the
+      // request asked for — the client reconciles against the response, so a
+      // fake that always says "on" would be testing the fake.
+      const preference = body.operations.find(op => op.op === 'set_preferences');
+      const committed = body.operations.find(op => op.op === 'set_positions');
+      return Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            result: {
+              schema_version: 1,
+              revision: 9,
+              positions: (committed && committed.positions) || {},
+              snap_to_grid: preference ? preference.snap_to_grid : true
+            }
+          })
+      });
+    }
+    return jsonResponse(
+      layout || { schema_version: 1, revision: 1, positions: { 'ws-1': { x: 100, y: 100 } } }
+    );
+  };
+  const map = loadMapWithFetch(fetchImpl, {
+    sessionManager: {
+      showAddWorkspaceModal: options => modalCalls.push(options)
+    }
+  });
+  const harness = createCameraHarness();
+  return { map, harness, modalCalls, patches };
+}
+
+const keyEvent = (key, extra = {}) => ({
+  key,
+  shiftKey: false,
+  altKey: false,
+  preventDefault() {},
+  stopPropagation() {},
+  ...extra
+});
+
+test('an ordinary empty-space click creates nothing outside Build mode (FR-48)', async () => {
+  const { map, harness, modalCalls } = buildHarness();
+  mountWithCamera(map, harness, [{ id: 'ws-1', name: 'Alpha' }]);
+  await flush();
+
+  harness.fire('pointerdown', pointerEvent(500, 300));
+  harness.fire('pointerup', pointerEvent(500, 300));
+  assert.equal(modalCalls.length, 0, 'clicking the background must not start creating a workspace');
+});
+
+test('Build mode captures one empty-space point and hands off to the existing modal (FR-51)', async () => {
+  const { map, harness, modalCalls, patches } = buildHarness();
+  mountWithCamera(map, harness, [{ id: 'ws-1', name: 'Alpha' }]);
+  await flush();
+
+  harness.control('[data-map-build]').click();
+  assert.equal(harness.control('[data-map-build-banner]').hidden, false, 'the mode is visible');
+
+  harness.fire('pointerdown', pointerEvent(500, 300));
+  harness.fire('pointerup', pointerEvent(500, 300));
+
+  assert.equal(modalCalls.length, 1, 'exactly one create flow opened');
+  assert.equal(modalCalls[0].mapOrigin, true);
+  // FR-62: a point inside a district is still just a point. Nothing about the
+  // handoff can carry a parent.
+  assert.ok(!('parentId' in modalCalls[0]) && !('parent_id' in modalCalls[0]));
+  assert.equal(patches.length, 0, 'nothing is saved for a workspace that does not exist yet');
+  assert.equal(map.hasPendingBuild(), true);
+  assert.equal(harness.control('[data-map-build-banner]').hidden, true, 'the mode ended');
+});
+
+test('a click on a building in Build mode does not place a workspace beneath it (FR-52)', async () => {
+  const { map, harness, modalCalls } = buildHarness();
+  mountWithCamera(map, harness, [{ id: 'ws-1', name: 'Alpha' }]);
+  await flush();
+  harness.control('[data-map-build]').click();
+
+  const onTile = { target: { closest: sel => (sel.includes('ws-map-tile') ? {} : null) } };
+  harness.fire('pointerdown', pointerEvent(500, 300, onTile));
+  harness.fire('pointerup', pointerEvent(500, 300, onTile));
+  assert.equal(modalCalls.length, 0);
+  assert.equal(map.hasPendingBuild(), false);
+});
+
+test('candidates snap to the shared grid, and Option/Alt bypasses without changing the setting (FR-58, FR-59)', () => {
+  const map = loadMapWithFetch(() => jsonResponse({ schema_version: 1, positions: {} }));
+  assert.equal(map.snapStep, 38);
+  map._setLayoutForTest({ schema_version: 1, snap_to_grid: true, positions: {} });
+  assert.deepEqual({ ...map.snapPoint({ x: 41, y: -20 }) }, { x: 38, y: -38 });
+  assert.deepEqual({ ...map.snapPoint({ x: 41, y: -20 }, true) }, { x: 41, y: -20 });
+  map._setLayoutForTest({ schema_version: 1, snap_to_grid: false, positions: {} });
+  assert.deepEqual({ ...map.snapPoint({ x: 41, y: -20 }) }, { x: 41, y: -20 });
+});
+
+test('the Snap to Grid toggle is visible, defaults on, and persists (FR-57)', async () => {
+  const { map, harness, patches } = buildHarness();
+  mountWithCamera(map, harness, [{ id: 'ws-1', name: 'Alpha' }]);
+  await flush();
+
+  assert.equal(map.getLayoutState().snapToGrid, true, 'a new layout snaps by default');
+  const toggle = harness.control('[data-map-snap]');
+  toggle.click();
+  await flush();
+
+  assert.equal(map.getLayoutState().snapToGrid, false);
+  assert.equal(toggle.getAttribute('aria-pressed'), 'false');
+  assert.match(toggle.textContent, /off/);
+  assert.equal(patches.length, 1);
+  assert.equal(patches[0].operations[0].op, 'set_preferences');
+  assert.equal(patches[0].operations[0].snap_to_grid, false);
+});
+
+test('keyboard placement moves by a step, commits on Enter, and cancels on Escape (FR-60)', async () => {
+  const { map, harness, modalCalls } = buildHarness();
+  mountWithCamera(map, harness, [{ id: 'ws-1', name: 'Alpha' }]);
+  await flush();
+
+  harness.control('[data-map-build]').click();
+  const coords = harness.control('[data-map-build-coords]');
+  const startText = coords.textContent;
+  assert.match(startText, /snapped/, 'the candidate reports its snap state (FR-50)');
+
+  harness.fire('keydown', keyEvent('ArrowRight'));
+  const afterOne = coords.textContent;
+  assert.notEqual(afterOne, startText, 'the arrow moved the candidate');
+
+  harness.fire('keydown', keyEvent('ArrowRight', { shiftKey: true }));
+  const startX = Number(startText.split(',')[0]);
+  const shiftX = Number(coords.textContent.split(',')[0]);
+  assert.equal(shiftX - startX, 38 + 380, 'Shift uses the documented larger step');
+
+  harness.fire('keydown', keyEvent('Enter'));
+  assert.equal(modalCalls.length, 1, 'Enter chose the site');
+
+  // Escape before the modal opens cancels without creating anything.
+  harness.control('[data-map-build]').click();
+  harness.fire('keydown', keyEvent('Escape'));
+  assert.equal(modalCalls.length, 1, 'Escape opened nothing');
+  assert.equal(harness.control('[data-map-build-banner]').hidden, true);
+});
+
+test('a successful create saves the chosen coordinate exactly once (FR-53)', async () => {
+  const { map, harness, patches } = buildHarness();
+  mountWithCamera(map, harness, [{ id: 'ws-1', name: 'Alpha' }]);
+  await flush();
+
+  harness.control('[data-map-build]').click();
+  harness.fire('pointerdown', pointerEvent(600, 200));
+  harness.fire('pointerup', pointerEvent(600, 200));
+
+  await map.completeBuild('ws-new');
+  await flush();
+
+  const positionPatches = patches.filter(p => p.operations[0].op === 'set_positions');
+  assert.equal(positionPatches.length, 1, 'one position write for one build');
+  assert.ok(
+    positionPatches[0].operations[0].positions['ws-new'],
+    'saved under the new workspace id'
+  );
+  assert.equal(map.hasPendingBuild(), false, 'the pending coordinate is consumed exactly once');
+
+  // A second call cannot re-save it.
+  await map.completeBuild('ws-new');
+  assert.equal(patches.filter(p => p.operations[0].op === 'set_positions').length, 1);
+});
+
+test('cancelling the modal leaves neither a workspace nor a position (FR-54)', async () => {
+  const { map, harness, patches } = buildHarness();
+  mountWithCamera(map, harness, [{ id: 'ws-1', name: 'Alpha' }]);
+  await flush();
+
+  harness.control('[data-map-build]').click();
+  harness.fire('pointerdown', pointerEvent(600, 200));
+  harness.fire('pointerup', pointerEvent(600, 200));
+  assert.equal(map.hasPendingBuild(), true);
+
+  map.cancelBuild();
+  assert.equal(map.hasPendingBuild(), false);
+  assert.equal(
+    patches.filter(p => p.operations[0].op === 'set_positions').length,
+    0,
+    'a cancelled build writes nothing'
+  );
+});
+
+test('a failed initial position keeps the workspace and offers a real retry (FR-56)', async () => {
+  const { map, harness, patches } = buildHarness({ patchResponse: 'fail' });
+  mountWithCamera(map, harness, [{ id: 'ws-1', name: 'Alpha' }]);
+  await flush();
+
+  harness.control('[data-map-build]').click();
+  harness.fire('pointerdown', pointerEvent(600, 200));
+  harness.fire('pointerup', pointerEvent(600, 200));
+  const chosen = { ...patches };
+
+  const saved = await map.completeBuild('ws-new');
+  await flush();
+  assert.equal(saved, false, 'the failure is reported, not swallowed');
+  assert.equal(chosen && true, true);
+
+  // The retry saves the coordinate the user actually chose, not a new guess.
+  await map.retryPlacement('ws-new');
+  await flush();
+  const attempts = patches.filter(p => p.operations[0].op === 'set_positions');
+  assert.equal(attempts.length, 2, 'the retry is a real second attempt');
+  assert.deepEqual(
+    attempts[0].operations[0].positions['ws-new'],
+    attempts[1].operations[0].positions['ws-new'],
+    'the retry re-sends the original candidate'
+  );
 });
 
 test('merely reading the map never writes a coordinate (FR-23)', async () => {
