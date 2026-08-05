@@ -252,7 +252,7 @@ func (a *App) issueAdd(
 		return 0
 	}
 	style := a.listStyle()
-	fmt.Fprintf(a.stdout, "Created %s#%d%s  %s\n%s%s%s\n",
+	a.out("Created %s#%d%s  %s\n%s%s%s\n",
 		style.bold, created.Number, style.reset, created.Title,
 		style.dim, created.URL, style.reset)
 	return 0
@@ -276,7 +276,7 @@ func (a *App) renderIssueListStyled(list github.IssueList, style listStyle) {
 		scope = "by all authors"
 	}
 
-	fmt.Fprintf(a.stdout, "%sOri Issues%s — %s%s%s — %s %s\n",
+	a.out("%sOri Issues%s — %s%s%s — %s %s\n",
 		style.bold, style.reset,
 		style.cyan, list.Repository.Slug(), style.reset,
 		countedIssues(len(list.Issues)), scope)
@@ -284,21 +284,21 @@ func (a *App) renderIssueListStyled(list github.IssueList, style listStyle) {
 	if len(list.Issues) == 0 {
 		// The distinction matters: GitHub answered, and the answer was none.
 		// A failed query never reaches this branch — it exits 1 with a reason.
-		fmt.Fprintf(a.stdout, "\nGitHub returned no open Issues %s. Capture one with: ./scripts/issue.sh add \"<title>\"\n", scope)
+		a.out("\nGitHub returned no open Issues %s. Capture one with: ./scripts/issue.sh add \"<title>\"\n", scope)
 		return
 	}
 
-	fmt.Fprintln(a.stdout)
+	a.outln()
 	for _, issue := range list.Issues {
-		fmt.Fprintf(a.stdout, "%s#%-5d%s %s", style.bold, issue.Number, style.reset, issue.Title)
+		a.out("%s#%-5d%s %s", style.bold, issue.Number, style.reset, issue.Title)
 		if secondary := issueRowDetail(issue, list.ObservedAt); secondary != "" {
-			fmt.Fprintf(a.stdout, "  %s%s%s", style.dim, secondary, style.reset)
+			a.out("  %s%s%s", style.dim, secondary, style.reset)
 		}
-		fmt.Fprintln(a.stdout)
+		a.outln()
 	}
 
 	if list.Truncated {
-		fmt.Fprintf(a.stdout,
+		a.out(
 			"\n%sMore open Issues matched than this listing reads; showing the first %d.%s\n",
 			style.dim, len(list.Issues), style.reset)
 	}
@@ -316,24 +316,24 @@ func (a *App) renderIssueDetail(detail github.IssueDetail) {
 		state += " (" + detail.StateReason + ")"
 	}
 
-	fmt.Fprintf(a.stdout, "%s#%d  %s%s\n", style.bold, detail.Number, detail.Title, style.reset)
-	fmt.Fprintf(a.stdout, "%sstate%s    %s\n", style.dim, style.reset, state)
-	fmt.Fprintf(a.stdout, "%sauthor%s   %s\n", style.dim, style.reset, orPlaceholder(detail.Author, "unknown"))
-	fmt.Fprintf(a.stdout, "%slabels%s   %s\n", style.dim, style.reset, orPlaceholder(strings.Join(detail.Labels, ", "), "none"))
-	fmt.Fprintf(a.stdout, "%screated%s  %s\n", style.dim, style.reset, orPlaceholder(ghTimestamp(detail.CreatedAt), "unknown"))
-	fmt.Fprintf(a.stdout, "%supdated%s  %s\n", style.dim, style.reset, orPlaceholder(ghTimestamp(detail.UpdatedAt), "unknown"))
+	a.out("%s#%d  %s%s\n", style.bold, detail.Number, detail.Title, style.reset)
+	a.out("%sstate%s    %s\n", style.dim, style.reset, state)
+	a.out("%sauthor%s   %s\n", style.dim, style.reset, orPlaceholder(detail.Author, "unknown"))
+	a.out("%slabels%s   %s\n", style.dim, style.reset, orPlaceholder(strings.Join(detail.Labels, ", "), "none"))
+	a.out("%screated%s  %s\n", style.dim, style.reset, orPlaceholder(ghTimestamp(detail.CreatedAt), "unknown"))
+	a.out("%supdated%s  %s\n", style.dim, style.reset, orPlaceholder(ghTimestamp(detail.UpdatedAt), "unknown"))
 	if !detail.ClosedAt.IsZero() {
-		fmt.Fprintf(a.stdout, "%sclosed%s   %s\n", style.dim, style.reset, ghTimestamp(detail.ClosedAt))
+		a.out("%sclosed%s   %s\n", style.dim, style.reset, ghTimestamp(detail.ClosedAt))
 	}
-	fmt.Fprintf(a.stdout, "%surl%s      %s\n", style.dim, style.reset, detail.URL)
+	a.out("%surl%s      %s\n", style.dim, style.reset, detail.URL)
 
-	fmt.Fprintln(a.stdout)
+	a.outln()
 	if strings.TrimSpace(detail.Body) == "" {
 		// Said explicitly, because a blank space below the header reads like
 		// the command failed to print something.
-		fmt.Fprintf(a.stdout, "%s(this Issue has no description)%s\n", style.dim, style.reset)
+		a.out("%s(this Issue has no description)%s\n", style.dim, style.reset)
 	} else {
-		fmt.Fprintln(a.stdout, detail.Body)
+		a.outln(detail.Body)
 	}
 	a.renderIssueSpec(detail, style)
 }
@@ -347,16 +347,16 @@ func (a *App) renderIssueSpec(detail github.IssueDetail, style listStyle) {
 	if strings.TrimSpace(detail.Spec) == "" {
 		return
 	}
-	fmt.Fprintf(a.stdout, "\n%s── Agent spec ──%s\n", style.dim, style.reset)
+	a.out("\n%s── Agent spec ──%s\n", style.dim, style.reset)
 	if detail.SpecDuplicates {
 		// The agent edits its comment in place, so more than one means something
 		// upstream misbehaved. Saying so beats silently picking one.
-		fmt.Fprintf(a.stdout,
+		a.out(
 			"%s(several spec comments found; showing the most recently updated)%s\n",
 			style.dim, style.reset)
 	}
-	fmt.Fprintln(a.stdout)
-	fmt.Fprintln(a.stdout, detail.Spec)
+	a.outln()
+	a.outln(detail.Spec)
 }
 
 // issueDetailPayload is the `./scripts/issue.sh view --json` contract: the same

@@ -132,7 +132,7 @@ func (a *App) writeBacklogError(err error, asJSON bool) {
 func (a *App) renderBacklog(board github.ProjectBoard, style listStyle) {
 	ready := board.Ready()
 
-	fmt.Fprintf(a.stdout, "%sOri backlog%s — %s%s%s — %s%s%s — %s\n",
+	a.out("%sOri backlog%s — %s%s%s — %s%s%s — %s\n",
 		style.bold, style.reset,
 		style.cyan, board.Repository.Slug(), style.reset,
 		style.cyan, board.Project.Title, style.reset,
@@ -142,28 +142,28 @@ func (a *App) renderBacklog(board github.ProjectBoard, style listStyle) {
 		// Said as an answer, not as a failure: GitHub was reached, the board was
 		// read, and nothing on it is groomed yet. A failed read never arrives
 		// here — it exits 1 with a reason.
-		fmt.Fprintf(a.stdout,
+		a.out(
 			"\nThe board has nothing in Ready yet. Captured Issues waiting to be groomed: ./scripts/issue.sh\n")
 		return
 	}
 
-	fmt.Fprintln(a.stdout)
+	a.outln()
 	for _, item := range ready {
-		fmt.Fprintf(a.stdout, "%s%-3s%s %s%s%s %s",
+		a.out("%s%-3s%s %s%s%s %s",
 			style.bold, rankLabel(item), style.reset,
 			style.bold, itemLabel(item), style.reset,
 			item.Title)
 		if item.Size != "" {
-			fmt.Fprintf(a.stdout, "  %s[%s]%s", style.dim, item.Size, style.reset)
+			a.out("  %s[%s]%s", style.dim, item.Size, style.reset)
 		}
-		fmt.Fprintln(a.stdout)
+		a.outln()
 		if item.Why != "" {
-			fmt.Fprintf(a.stdout, "    %s%s%s\n", style.dim, item.Why, style.reset)
+			a.out("    %s%s%s\n", style.dim, item.Why, style.reset)
 		}
 	}
 
 	if board.Truncated {
-		fmt.Fprintf(a.stdout,
+		a.out(
 			"\n%sMore cards are on this board than this listing reads; showing the first %d.%s\n",
 			style.dim, len(board.Items), style.reset)
 	}

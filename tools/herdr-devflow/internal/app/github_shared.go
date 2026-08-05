@@ -85,10 +85,30 @@ func (a *App) writeGitHubError(err error, asJSON bool, schemaVersion int, comman
 		})
 		return
 	}
-	fmt.Fprintf(a.stderr, "%s: %s\n", command, remoteErr.Detail)
+	a.errf("%s: %s\n", command, remoteErr.Detail)
 	if recovery := remoteErr.Recovery(); recovery != "" {
-		fmt.Fprintf(a.stderr, "Recovery: %s\n", recovery)
+		a.errf("Recovery: %s\n", recovery)
 	}
+}
+
+// out, outln and errf write one piece of command output.
+//
+// They exist to make one argument once instead of thirty times: the write error
+// is deliberately discarded. Every call here is rendering to a terminal or a
+// pipe the caller already owns, and if that destination has gone away there is
+// nothing useful left to do about it — reporting the failure would need the
+// same writer that just failed. The alternative, checking each call
+// individually, adds thirty branches that can only ever be dead.
+func (a *App) out(format string, args ...any) {
+	_, _ = fmt.Fprintf(a.stdout, format, args...)
+}
+
+func (a *App) outln(args ...any) {
+	_, _ = fmt.Fprintln(a.stdout, args...)
+}
+
+func (a *App) errf(format string, args ...any) {
+	_, _ = fmt.Fprintf(a.stderr, format, args...)
 }
 
 // ghTimestamp renders one time as UTC RFC 3339, or as an empty string when the
