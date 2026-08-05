@@ -293,7 +293,8 @@ test('content bounds grow around placed content with a viewport of margin (FR-10
     far.world.width >= far.bounds.maxX - far.bounds.minX + viewport.width * 2,
     'at least one viewport of margin on each side'
   );
-  assert.ok(far.world.originX <= far.bounds.minX - viewport.width);
+  assert.ok(far.world.minX <= far.bounds.minX - viewport.width);
+  assert.ok(far.world.maxY >= far.bounds.maxY + viewport.height);
 });
 
 test('computeStats sums enriched agent/task counts and counts groups', () => {
@@ -1094,6 +1095,352 @@ test('an unavailable layout still draws a usable map, marked read-only (FR-105)'
   assert.doesNotMatch(container.innerHTML, /is-settling/);
   // The buildings are still drawn and still reachable.
   assert.match(container.innerHTML, /data-ws-id="ws-1"/);
+});
+
+// ---------------------------------------------------------------------------
+// Camera transforms (#292 FR-31 – FR-46, FR-123)
+//
+// Pure in, pure out. Pointer-centred zoom in particular is the kind of maths
+// that looks right in a browser until the day it drifts, so it is pinned here.
+// ---------------------------------------------------------------------------
+
+const VIEWPORT = { width: 1000, height: 600 };
+
+function loadCamera() {
+  return loadOriWorkspaceMap().camera;
+}
+
+test('screen and world coordinates round-trip through the camera (FR-31)', () => {
+  const cam = loadCamera();
+  const view = { centerX: 400, centerY: 250, zoom: 1.5 };
+  const world = { x: 912, y: -37 };
+  const screen = cam.worldToScreen(world, view, VIEWPORT);
+  const back = cam.screenToWorld(screen, view, VIEWPORT);
+  assert.ok(Math.abs(back.x - world.x) < 1e-9);
+  assert.ok(Math.abs(back.y - world.y) < 1e-9);
+});
+
+test('the world point under the pointer stays still while zooming (FR-39)', () => {
+  const cam = loadCamera();
+  const before = { centerX: 300, centerY: 200, zoom: 1 };
+  const pointer = { x: 820, y: 140 };
+  const anchored = cam.screenToWorld(pointer, before, VIEWPORT);
+
+  const after = cam.zoomAroundPoint(before, VIEWPORT, pointer, 1.25);
+  const stillThere = cam.worldToScreen(anchored, after, VIEWPORT);
+  assert.ok(Math.abs(stillThere.x - pointer.x) < 1e-6, 'x drifted');
+  assert.ok(Math.abs(stillThere.y - pointer.y) < 1e-6, 'y drifted');
+  assert.equal(after.zoom, 1.25);
+});
+
+test('button and keyboard zoom keep the viewport centre fixed (FR-39)', () => {
+  const cam = loadCamera();
+  const before = { centerX: 300, centerY: 200, zoom: 1 };
+  const after = cam.zoomAroundCenter(before, 1.25);
+  assert.equal(after.centerX, before.centerX);
+  assert.equal(after.centerY, before.centerY);
+  assert.equal(after.zoom, 1.25);
+});
+
+test('zoom is clamped to the usable 50%–200% range (FR-38)', () => {
+  const cam = loadCamera();
+  assert.equal(cam.limits.min, 0.5);
+  assert.equal(cam.limits.max, 2);
+  assert.equal(cam.clampZoom(50), 2);
+  assert.equal(cam.clampZoom(0.01), 0.5);
+  assert.equal(cam.clampZoom(Number.NaN), 1, 'a corrupt zoom opens at 100%, not at nothing');
+  assert.equal(cam.zoomAroundCenter({ centerX: 0, centerY: 0, zoom: 2 }, 4).zoom, 2);
+});
+
+test('Fit All frames the whole content with padding (FR-40)', () => {
+  const cam = loadCamera();
+  const bounds = { minX: 0, minY: 0, maxX: 2000, maxY: 1000 };
+  const fitted = cam.fitBounds(bounds, VIEWPORT, 50);
+  assert.equal(fitted.centerX, 1000);
+  assert.equal(fitted.centerY, 500);
+  // Everything must be inside the viewport once fitted.
+  const topLeft = cam.worldToScreen({ x: bounds.minX, y: bounds.minY }, fitted, VIEWPORT);
+  const bottomRight = cam.worldToScreen({ x: bounds.maxX, y: bounds.maxY }, fitted, VIEWPORT);
+  assert.ok(topLeft.x >= 0 && topLeft.y >= 0, 'content starts inside the viewport');
+  assert.ok(bottomRight.x <= VIEWPORT.width && bottomRight.y <= VIEWPORT.height);
+});
+
+test('Center Selected moves the view, not the record (FR-41)', () => {
+  const cam = loadCamera();
+  const before = { centerX: 0, centerY: 0, zoom: 1.5 };
+  const node = { x: 760, y: 456 };
+  const after = cam.centerOn(before, node);
+  assert.equal(after.zoom, before.zoom, 'centering is not a zoom');
+  assert.deepEqual(node, { x: 760, y: 456 }, 'the node object is not mutated');
+  // The node's centre lands on the viewport's centre.
+  const screen = cam.worldToScreen({ x: node.x + 88, y: node.y + 85 }, after, VIEWPORT);
+  assert.ok(Math.abs(screen.x - VIEWPORT.width / 2) < 1e-6);
+  assert.ok(Math.abs(screen.y - VIEWPORT.height / 2) < 1e-6);
+});
+
+test('the camera cannot be panned outside the navigable world (FR-11)', () => {
+  const cam = loadCamera();
+  const world = { minX: -500, minY: -500, maxX: 1500, maxY: 1200 };
+  const clamped = cam.clampCamera({ centerX: 99999, centerY: -99999, zoom: 1 }, world);
+  assert.equal(clamped.centerX, 1500);
+  assert.equal(clamped.centerY, -500);
+  const inside = cam.clampCamera({ centerX: 10, centerY: 10, zoom: 1 }, world);
+  assert.deepEqual({ ...inside }, { centerX: 10, centerY: 10, zoom: 1 });
+});
+
+// ---------------------------------------------------------------------------
+// Camera behaviour at the mount seam (#292 FR-43 – FR-46, FR-106, FR-108)
+// ---------------------------------------------------------------------------
+
+// createCameraHarness is a DOM stub rich enough for the camera bindings: the
+// canvas records its listeners so pointer and wheel gestures can be replayed
+// without a browser, and the world layer records the transform that was applied
+// to it.
+function createCameraHarness({ width = 1000, height = 600 } = {}) {
+  const listeners = {};
+  const styleProps = {};
+  const classes = new Set();
+  const world = { style: { transform: '' } };
+  const controls = {};
+
+  const canvas = {
+    clientWidth: width,
+    clientHeight: height,
+    classList: {
+      add: c => classes.add(c),
+      remove: c => classes.delete(c),
+      contains: c => classes.has(c)
+    },
+    style: { setProperty: (k, v) => (styleProps[k] = v) },
+    getBoundingClientRect: () => ({ left: 0, top: 0, width, height }),
+    addEventListener: (type, fn) => {
+      (listeners[type] = listeners[type] || []).push(fn);
+    },
+    setPointerCapture: () => {},
+    releasePointerCapture: () => {},
+    hasPointerCapture: () => true,
+    querySelector: sel => (sel.includes('world') ? world : null)
+  };
+
+  function control(name) {
+    if (!controls[name]) {
+      controls[name] = {
+        disabled: false,
+        textContent: '',
+        addEventListener: (type, fn) => {
+          if (type === 'click') controls[name].click = fn;
+        }
+      };
+    }
+    return controls[name];
+  }
+
+  const container = {
+    clientWidth: width,
+    clientHeight: height,
+    hidden: false,
+    isConnected: true,
+    querySelectorAll: () => [],
+    querySelector: sel => {
+      if (sel.includes('ws-map-canvas') || sel.includes('ws-map-viewport')) return canvas;
+      if (sel.includes('ws-map-world')) return world;
+      if (sel.includes('data-map-')) return control(sel);
+      return null;
+    }
+  };
+  // Writing innerHTML replaces the canvas in a real DOM, which drops every
+  // listener bound to the old one. The stub reuses one canvas object, so it has
+  // to drop them explicitly — otherwise a second mount would double every
+  // gesture and the harness, not the map, would be what the test measured.
+  let html = '';
+  Object.defineProperty(container, 'innerHTML', {
+    get: () => html,
+    set: value => {
+      html = value;
+      Object.keys(listeners).forEach(type => delete listeners[type]);
+    }
+  });
+
+  return {
+    container,
+    world,
+    styleProps,
+    classes,
+    control,
+    fire: (type, event) => (listeners[type] || []).forEach(fn => fn(event)),
+    hasListener: type => !!(listeners[type] && listeners[type].length)
+  };
+}
+
+const pointerEvent = (x, y, extra = {}) => ({
+  button: 0,
+  pointerId: 1,
+  clientX: x,
+  clientY: y,
+  target: { closest: () => null },
+  preventDefault() {},
+  ...extra
+});
+
+function mountWithCamera(map, harness, workspaces) {
+  map.mount(harness.container, {
+    workspaces,
+    hideChrome: true,
+    selectOnly: true,
+    noAutoSelect: true
+  });
+}
+
+test('a saved camera is restored instead of refitting (FR-43, FR-45)', async () => {
+  const map = loadMapWithFetch(() =>
+    jsonResponse({
+      schema_version: 1,
+      revision: 2,
+      positions: { 'ws-1': { x: 100, y: 100 } },
+      viewport: { center_x: 640, center_y: 480, zoom: 1.5 }
+    })
+  );
+  const harness = createCameraHarness();
+  mountWithCamera(map, harness, [{ id: 'ws-1', name: 'Alpha' }]);
+  await flush();
+
+  assert.deepEqual({ ...map.getCamera() }, { centerX: 640, centerY: 480, zoom: 1.5 });
+  assert.match(harness.world.style.transform, /scale\(1\.5\)/);
+});
+
+test('an invalid saved camera opens on a sensible view instead of nowhere (FR-45)', async () => {
+  const map = loadMapWithFetch(() =>
+    jsonResponse({
+      schema_version: 1,
+      positions: { 'ws-1': { x: 100, y: 100 } },
+      viewport: { center_x: 'somewhere', center_y: null, zoom: 400 }
+    })
+  );
+  const harness = createCameraHarness();
+  mountWithCamera(map, harness, [{ id: 'ws-1', name: 'Alpha' }]);
+  await flush();
+
+  const cam = map.getCamera();
+  assert.ok(Number.isFinite(cam.centerX) && Number.isFinite(cam.centerY));
+  assert.ok(cam.zoom >= 0.5 && cam.zoom <= 2);
+  // The building is inside the opening view rather than stranded off-screen.
+  const screen = map.camera.worldToScreen({ x: 100, y: 100 }, cam, { width: 1000, height: 600 });
+  assert.ok(screen.x > 0 && screen.x < 1000, 'x on screen: ' + screen.x);
+  assert.ok(screen.y > 0 && screen.y < 600, 'y on screen: ' + screen.y);
+});
+
+test('a workspace refresh reconciles into the current view (FR-106)', async () => {
+  const map = loadMapWithFetch(() =>
+    jsonResponse({
+      schema_version: 1,
+      positions: { 'ws-1': { x: 100, y: 100 } },
+      viewport: { center_x: 300, center_y: 200, zoom: 1.25 }
+    })
+  );
+  const harness = createCameraHarness();
+  mountWithCamera(map, harness, [{ id: 'ws-1', name: 'Alpha' }]);
+  await flush();
+  const before = map.getCamera();
+
+  // A realtime refresh adds a workspace. The camera must not jump.
+  mountWithCamera(map, harness, [
+    { id: 'ws-1', name: 'Alpha' },
+    { id: 'ws-2', name: 'Beta' }
+  ]);
+  await flush();
+  assert.deepEqual(map.getCamera(), before);
+});
+
+test('empty-space drag pans only after the threshold, and never from a building (FR-32 – FR-35)', async () => {
+  const map = loadMapWithFetch(() =>
+    jsonResponse({ schema_version: 1, positions: { 'ws-1': { x: 100, y: 100 } } })
+  );
+  const harness = createCameraHarness();
+  mountWithCamera(map, harness, [{ id: 'ws-1', name: 'Alpha' }]);
+  await flush();
+  const start = map.getCamera();
+
+  // A press that barely moves is a click, not a pan.
+  harness.fire('pointerdown', pointerEvent(500, 300));
+  harness.fire('pointermove', pointerEvent(502, 301));
+  assert.deepEqual(map.getCamera(), start, 'a 2px wobble must not pan');
+
+  // Past the threshold it pans, in world units.
+  harness.fire('pointermove', pointerEvent(400, 300));
+  const panned = map.getCamera();
+  assert.ok(panned.centerX > start.centerX, 'dragging left moves the camera right');
+  assert.ok(harness.classes.has('is-panning'), 'the grabbing cue is on');
+
+  harness.fire('pointerup', pointerEvent(400, 300));
+  assert.ok(!harness.classes.has('is-panning'), 'the gesture cleaned up on pointerup');
+
+  // A gesture that starts on a building belongs to the building.
+  const afterPan = map.getCamera();
+  harness.fire(
+    'pointerdown',
+    pointerEvent(500, 300, {
+      target: { closest: sel => (sel.includes('ws-map-tile') ? {} : null) }
+    })
+  );
+  harness.fire('pointermove', pointerEvent(100, 300));
+  assert.deepEqual(map.getCamera(), afterPan, 'a drag from a tile must not pan the map');
+});
+
+test('wheel pans and the zoom modifier zooms about the pointer (FR-36)', async () => {
+  const map = loadMapWithFetch(() =>
+    jsonResponse({
+      schema_version: 1,
+      positions: { 'ws-1': { x: 100, y: 100 } },
+      viewport: { center_x: 300, center_y: 200, zoom: 1 }
+    })
+  );
+  const harness = createCameraHarness();
+  mountWithCamera(map, harness, [{ id: 'ws-1', name: 'Alpha' }]);
+  await flush();
+
+  harness.fire('wheel', pointerEvent(500, 300, { deltaX: 40, deltaY: 80 }));
+  let cam = map.getCamera();
+  assert.equal(cam.zoom, 1, 'an ordinary wheel must not zoom');
+  assert.equal(cam.centerX, 340);
+  assert.equal(cam.centerY, 280);
+
+  const beforeZoom = map.getCamera();
+  harness.fire('wheel', pointerEvent(500, 300, { deltaY: -200, ctrlKey: true }));
+  cam = map.getCamera();
+  assert.ok(cam.zoom > beforeZoom.zoom, 'pinch/ctrl-wheel zooms in');
+});
+
+test('camera saves are debounced and best-effort (FR-44, FR-108)', async () => {
+  const patches = [];
+  const map = loadMapWithFetch((url, init) => {
+    if (init && init.method === 'PATCH') {
+      patches.push(JSON.parse(init.body));
+      return Promise.resolve({ ok: false, status: 500 });
+    }
+    return jsonResponse({
+      schema_version: 1,
+      positions: { 'ws-1': { x: 100, y: 100 } },
+      viewport: { center_x: 300, center_y: 200, zoom: 1 }
+    });
+  });
+  const harness = createCameraHarness();
+  mountWithCamera(map, harness, [{ id: 'ws-1', name: 'Alpha' }]);
+  await flush();
+
+  harness.fire('pointerdown', pointerEvent(500, 300));
+  for (let i = 0; i < 30; i += 1) harness.fire('pointermove', pointerEvent(500 - i * 5, 300));
+  harness.fire('pointerup', pointerEvent(350, 300));
+
+  assert.equal(patches.length, 0, 'pointer movement must not write (FR-69)');
+  await new Promise(resolve => setTimeout(resolve, 750));
+  await flush();
+  assert.equal(patches.length, 1, 'a whole pan is one debounced save, not 30');
+  assert.equal(patches[0].operations[0].op, 'set_viewport');
+
+  // The save failed; the committed building position is untouched.
+  const kept = map.getLayoutState().positions['ws-1'];
+  assert.equal(kept.x, 100);
+  assert.equal(kept.y, 100);
 });
 
 test('merely reading the map never writes a coordinate (FR-23)', async () => {

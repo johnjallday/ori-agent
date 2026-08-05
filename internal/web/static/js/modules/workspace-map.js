@@ -49,6 +49,32 @@
   var DEFAULT_VIEWPORT = { width: 1100, height: 620 };
   var HQ_SITE_ID = '__personal_hq_site__';
 
+  // ---------- camera ----------
+  //
+  // The camera is world-space: a point to look at plus a zoom level (FR-43).
+  // Storing a scroll offset instead would tie the saved view to the container
+  // it was saved from, so the same layout would open somewhere else on a
+  // different window size or on the other Map surface.
+  var MIN_ZOOM = 0.5;
+  var MAX_ZOOM = 2;
+  var DEFAULT_ZOOM = 1;
+  // One press of Zoom In/Out. Small enough to feel like a step, large enough
+  // that crossing the 50%–200% range does not take a dozen presses.
+  var ZOOM_STEP = 1.25;
+  // Wheel-zoom sensitivity, applied per normalized wheel notch.
+  var WHEEL_ZOOM_RATE = 0.0022;
+  // A press must travel this far before it becomes a pan rather than a click
+  // (FR-33).
+  var PAN_THRESHOLD = 4;
+  // Comfortable breathing room around the content that Fit All frames (FR-40).
+  var FIT_PADDING = 48;
+  // The background grid's spacing at 100% zoom, shared with the CSS grid so a
+  // snapped anchor always lands on a line the user can see (FR-58).
+  var SNAP_STEP = 38;
+  // Camera saves are debounced: a pan is hundreds of events and one intent
+  // (FR-44).
+  var CAMERA_SAVE_DELAY = 600;
+
   // ---------- current user's coordinate layout ----------
   //
   // One layout, shared by the Map on Home and the Map on /workspaces (FR-4).
@@ -153,6 +179,46 @@
         if (seq !== layoutRequestSeq) return;
         layoutState.status = 'unavailable';
         settleLayout();
+      });
+  }
+
+  /**
+   * Send one partial update and reconcile against what the server committed.
+   *
+   * The body carries operations, never a whole-layout snapshot, so a tab that
+   * has been open for a while can save the one thing the user just did without
+   * proposing values for anything else (FR-96, FR-101). The response — not the
+   * request — is what updates local state, so the revision and coordinates the
+   * client believes are always the ones actually stored (FR-102).
+   */
+  function patchLayout(operations) {
+    if (typeof fetch !== 'function') {
+      return Promise.reject(new Error('workspace map layout is unavailable'));
+    }
+    if (layoutState.status !== 'ready') {
+      return Promise.reject(new Error('workspace map layout is read-only'));
+    }
+    return fetch(LAYOUT_ENDPOINT, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ operations: operations })
+    })
+      .then(function (response) {
+        if (!response || !response.ok) throw new Error('workspace map layout save failed');
+        return response.json();
+      })
+      .then(function (data) {
+        var result = (data && data.result) || null;
+        if (!result) throw new Error('workspace map layout save returned nothing');
+        if (typeof result.revision === 'number') layoutState.revision = result.revision;
+        if (typeof result.snap_to_grid === 'boolean') layoutState.snapToGrid = result.snap_to_grid;
+        var viewport = safeViewport(result.viewport);
+        if (viewport) layoutState.viewport = viewport;
+        Object.keys(result.positions || {}).forEach(function (id) {
+          var point = safePoint(result.positions[id]);
+          if (point) layoutState.positions[id] = point;
+        });
+        return result;
       });
   }
 
@@ -632,12 +698,18 @@
     var districtAnchors = Object.create(null);
     grid.districts.forEach(function (district) {
       var anchor = saved[district.id];
-      if (!anchor) {
-        // The group's own anchor is the outline's corner, deliberately offset
-        // from its first member's cell — otherwise an empty group and that
-        // member would compete for the same point (FR-82).
-        var cell = placer.cell(district.col, district.row);
-        anchor = placer.place({ x: cell.x - DISTRICT_PAD_X, y: cell.y - DISTRICT_PAD_Y });
+      if (anchor) {
+        // A saved district still occupies a cell, so claim the one it covers.
+        // Otherwise the automatic scan would hand that cell to a building and
+        // park it inside the outline (FR-20).
+        placer.claim({ x: anchor.x + DISTRICT_PAD_X, y: anchor.y + DISTRICT_PAD_Y });
+      } else {
+        // The group's own anchor is the outline's corner, offset from the cell
+        // it occupies — otherwise an empty group and its first member would
+        // compete for the same point (FR-82). The cell is what gets claimed,
+        // because that is the space the district actually covers.
+        var cell = placer.place(placer.cell(district.col, district.row));
+        anchor = { x: cell.x - DISTRICT_PAD_X, y: cell.y - DISTRICT_PAD_Y };
       }
       districtAnchors[district.id] = anchor;
     });
@@ -770,14 +842,208 @@
   function expandWorld(bounds, viewport) {
     var marginX = Math.max(CELL_W, (viewport && viewport.width) || DEFAULT_VIEWPORT.width);
     var marginY = Math.max(CELL_H, (viewport && viewport.height) || DEFAULT_VIEWPORT.height);
-    var originX = bounds.minX - marginX;
-    var originY = bounds.minY - marginY;
     return {
-      originX: originX,
-      originY: originY,
+      minX: bounds.minX - marginX,
+      minY: bounds.minY - marginY,
+      maxX: bounds.maxX + marginX,
+      maxY: bounds.maxY + marginY,
       width: bounds.maxX - bounds.minX + marginX * 2,
       height: bounds.maxY - bounds.minY + marginY * 2
     };
+  }
+
+  // ---------- camera transforms ----------
+  //
+  // Every one of these is pure: camera in, camera out, no DOM. That is what
+  // lets pointer-centred zoom, Fit All, and clamping be asserted exactly rather
+  // than eyeballed in a browser (FR-123).
+
+  function clampZoom(zoom) {
+    if (typeof zoom !== 'number' || !isFinite(zoom)) return DEFAULT_ZOOM;
+    return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom));
+  }
+
+  /** Convert a point in viewport CSS pixels into world units. */
+  function screenToWorld(point, cam, viewport) {
+    return {
+      x: (point.x - viewport.width / 2) / cam.zoom + cam.centerX,
+      y: (point.y - viewport.height / 2) / cam.zoom + cam.centerY
+    };
+  }
+
+  /** Convert a world point into viewport CSS pixels. */
+  function worldToScreen(point, cam, viewport) {
+    return {
+      x: (point.x - cam.centerX) * cam.zoom + viewport.width / 2,
+      y: (point.y - cam.centerY) * cam.zoom + viewport.height / 2
+    };
+  }
+
+  /**
+   * Zoom about a screen point, keeping the world point under it visually still
+   * (FR-39). This is what makes wheel and pinch zoom feel like the map is being
+   * pulled toward the cursor rather than sliding out from under it.
+   */
+  function zoomAroundPoint(cam, viewport, screenPoint, factor) {
+    var zoom = clampZoom(cam.zoom * factor);
+    var world = screenToWorld(screenPoint, cam, viewport);
+    return {
+      centerX: world.x - (screenPoint.x - viewport.width / 2) / zoom,
+      centerY: world.y - (screenPoint.y - viewport.height / 2) / zoom,
+      zoom: zoom
+    };
+  }
+
+  /**
+   * Zoom about the viewport centre (FR-39). Buttons and keyboard use this: with
+   * no pointer there is no "point under the cursor" to preserve, and moving the
+   * centre would make the map drift every time someone pressed Zoom In.
+   */
+  function zoomAroundCenter(cam, factor) {
+    return { centerX: cam.centerX, centerY: cam.centerY, zoom: clampZoom(cam.zoom * factor) };
+  }
+
+  /** The camera that frames everything in `bounds` with padding (FR-40). */
+  function fitBounds(bounds, viewport, padding) {
+    var pad = typeof padding === 'number' ? padding : FIT_PADDING;
+    var width = Math.max(1, bounds.maxX - bounds.minX);
+    var height = Math.max(1, bounds.maxY - bounds.minY);
+    var usableWidth = Math.max(1, (viewport.width || DEFAULT_VIEWPORT.width) - pad * 2);
+    var usableHeight = Math.max(1, (viewport.height || DEFAULT_VIEWPORT.height) - pad * 2);
+    return {
+      centerX: (bounds.minX + bounds.maxX) / 2,
+      centerY: (bounds.minY + bounds.maxY) / 2,
+      zoom: clampZoom(Math.min(usableWidth / width, usableHeight / height))
+    };
+  }
+
+  /** Look at one node without moving it (FR-41). */
+  function centerOn(cam, point) {
+    return { centerX: point.x + CELL_W / 2, centerY: point.y + CELL_H / 2, zoom: cam.zoom };
+  }
+
+  /**
+   * Keep the camera inside the navigable world.
+   *
+   * Panning may roam a viewport past the outermost building — that margin is
+   * what makes it possible to build near an edge (FR-11) — but not further, so
+   * it is never possible to end up in empty space with no content in any
+   * direction and no idea which way to go back.
+   */
+  function clampCamera(cam, world) {
+    return {
+      centerX: Math.min(Math.max(cam.centerX, world.minX), world.maxX),
+      centerY: Math.min(Math.max(cam.centerY, world.minY), world.maxY),
+      zoom: clampZoom(cam.zoom)
+    };
+  }
+
+  // ---------- camera state ----------
+
+  var camera = { centerX: 0, centerY: 0, zoom: DEFAULT_ZOOM };
+  // Until the layout has settled and the container has a real size, there is
+  // nothing meaningful to frame; the first honest measurement initializes the
+  // camera once and every later mount reuses it (FR-106).
+  var cameraReady = false;
+  // The most recent computed world, held so the camera controls can fit, clamp,
+  // and centre without recomputing placement.
+  var lastWorldLayout = null;
+  var cameraSaveTimer = null;
+
+  function viewportSize(canvas) {
+    var width = (canvas && canvas.clientWidth) || 0;
+    var height = (canvas && canvas.clientHeight) || 0;
+    if (width <= 0 || height <= 0) return DEFAULT_VIEWPORT;
+    return { width: width, height: height };
+  }
+
+  function setCamera(next, container) {
+    var world = lastWorldLayout ? lastWorldLayout.world : null;
+    camera = world
+      ? clampCamera(next, world)
+      : { centerX: next.centerX, centerY: next.centerY, zoom: clampZoom(next.zoom) };
+    applyCamera(container);
+    scheduleCameraSave();
+  }
+
+  /**
+   * Push the camera into the DOM.
+   *
+   * One transform on the world layer moves every building at once, so panning
+   * and zooming never re-render the map or touch a node's coordinates
+   * (FR-31, FR-122). The background grid is offset and scaled by the same
+   * camera so it stays welded to world space instead of sliding under it.
+   */
+  function applyCamera(container) {
+    if (!container || typeof container.querySelector !== 'function') return;
+    var canvas = container.querySelector('.ws-map-canvas');
+    if (!canvas) return;
+    var world = canvas.querySelector('.ws-map-world');
+    var viewport = viewportSize(canvas);
+    var translateX = viewport.width / 2 - camera.centerX * camera.zoom;
+    var translateY = viewport.height / 2 - camera.centerY * camera.zoom;
+    if (world && world.style) {
+      world.style.transform =
+        'translate(' + translateX + 'px, ' + translateY + 'px) scale(' + camera.zoom + ')';
+    }
+    if (canvas.style && typeof canvas.style.setProperty === 'function') {
+      var grid = SNAP_STEP * camera.zoom;
+      canvas.style.setProperty('--ws-map-grid', grid + 'px');
+      canvas.style.setProperty('--ws-map-grid-x', (translateX % grid) + 'px');
+      canvas.style.setProperty('--ws-map-grid-y', (translateY % grid) + 'px');
+    }
+    updateCameraControls(container);
+  }
+
+  // scheduleCameraSave persists the settled camera, debounced. A pan is
+  // hundreds of events and one intention (FR-44), and a camera that fails to
+  // save is a lost view — never a lost building (FR-108).
+  function scheduleCameraSave() {
+    if (layoutState.status !== 'ready') return;
+    if (typeof setTimeout !== 'function') return;
+    if (cameraSaveTimer) clearTimeout(cameraSaveTimer);
+    cameraSaveTimer = setTimeout(function () {
+      cameraSaveTimer = null;
+      patchLayout([
+        {
+          op: 'set_viewport',
+          viewport: { center_x: camera.centerX, center_y: camera.centerY, zoom: camera.zoom }
+        }
+      ]).catch(function () {
+        // Best-effort by design: committed positions are untouched either way.
+      });
+    }, CAMERA_SAVE_DELAY);
+    if (cameraSaveTimer && typeof cameraSaveTimer.unref === 'function') cameraSaveTimer.unref();
+  }
+
+  // ensureCamera initializes the view exactly once: from the user's saved
+  // camera when there is a usable one, and otherwise from Fit All, so a missing
+  // or unreadable viewport opens on something sensible rather than leaving
+  // valid buildings off-screen (FR-45).
+  function ensureCamera(container) {
+    if (cameraReady || !lastWorldLayout) return;
+    if (layoutState.status === 'loading') return;
+    var stored = layoutState.viewport;
+    if (stored) {
+      camera = { centerX: stored.centerX, centerY: stored.centerY, zoom: clampZoom(stored.zoom) };
+      cameraReady = true;
+      return;
+    }
+    // Wait for something worth framing. The first mount can happen before the
+    // workspace list arrives, and framing the bare create pad would lock the
+    // camera onto an empty corner that every later refresh then inherits.
+    if (!lastWorldLayout.nodes.length && !lastWorldLayout.districts.length) return;
+    var canvas = container && container.querySelector && container.querySelector('.ws-map-canvas');
+    var fitted = fitBounds(lastWorldLayout.bounds, viewportSize(canvas));
+    // Fit All zooms in when there is little content; the opening view does not.
+    // Landing at 200% on a two-workspace map is disorienting, and the button is
+    // right there for anyone who wants it.
+    camera = {
+      centerX: fitted.centerX,
+      centerY: fitted.centerY,
+      zoom: Math.min(DEFAULT_ZOOM, fitted.zoom)
+    };
+    cameraReady = true;
   }
 
   // ---------- rendering ----------
@@ -1108,16 +1374,13 @@
       viewport: opts.viewport,
       hqSite: site.show
     });
-    // The layer is drawn around the content itself, one pad in from the
-    // outermost building. The much larger navigable world computed alongside it
-    // (content plus a viewport of margin, FR-11) is what the camera will be
-    // allowed to roam over; drawing that whole expanse now would be a mostly
-    // empty layer with the content parked off-screen in the middle of it.
-    var origin = { x: layout.bounds.minX - PAD, y: layout.bounds.minY - PAD };
-    var layerWidth = layout.bounds.maxX - layout.bounds.minX + PAD * 2;
-    var layerHeight = layout.bounds.maxY - layout.bounds.minY + PAD * 2;
+    // Nodes carry their raw world coordinates into the DOM; the world layer's
+    // camera transform is the only thing standing between world space and the
+    // screen (FR-31). Nothing here subtracts an origin, so panning and zooming
+    // move one element rather than rewriting every position.
+    lastWorldLayout = layout;
     function toLayer(point) {
-      return { left: point.x - origin.x, top: point.y - origin.y };
+      return { left: point.x, top: point.y };
     }
 
     var parts = [];
@@ -1154,19 +1417,41 @@
         '<div class="ws-map-canvas' +
         settling +
         readOnly +
-        '" role="group" aria-label="Workspaces map"' +
+        '" role="group" aria-label="Workspaces map" tabindex="0"' +
         (settling ? ' aria-busy="true"' : '') +
-        '>' +
-        '<div class="ws-map-world" style="width:' +
-        Math.round(layerWidth) +
-        'px;height:' +
-        Math.round(layerHeight) +
-        'px">' +
+        ' data-ws-map-viewport>' +
+        '<div class="ws-map-world">' +
         parts.join('') +
-        '</div></div>',
+        '</div></div>' +
+        cameraControlsHTML(),
       empty: layout.nodes.length === 0,
       layout: layout
     };
+  }
+
+  /**
+   * Visible camera controls.
+   *
+   * Every navigation gesture the map supports by pointer also has a button
+   * here, so a wheel, a trackpad, and a steady hand are conveniences rather
+   * than requirements (FR-37, FR-115). The three framing actions are separate
+   * and named for what they do: Fit All changes the zoom to show everything,
+   * Center Selected moves the view to one record, Reset View returns to the
+   * default view. None of them moves a building — that distinction is what
+   * keeps Reset View from being mistaken for Reset Layout (FR-42, FR-109).
+   */
+  function cameraControlsHTML() {
+    return (
+      '<div class="ws-map-controls" role="group" aria-label="Map view controls">' +
+      '<button type="button" class="ws-map-ctl" data-map-zoom-out aria-label="Zoom out">−</button>' +
+      '<span class="ws-map-zoom" data-map-zoom-readout aria-hidden="true">100%</span>' +
+      '<button type="button" class="ws-map-ctl" data-map-zoom-in aria-label="Zoom in">+</button>' +
+      '<button type="button" class="ws-map-ctl ws-map-ctl--wide" data-map-fit>Fit all</button>' +
+      '<button type="button" class="ws-map-ctl ws-map-ctl--wide" data-map-center>Center selected</button>' +
+      '<button type="button" class="ws-map-ctl ws-map-ctl--wide" data-map-reset-view>Reset view</button>' +
+      '</div>' +
+      '<p class="ws-map-live" data-map-live role="status" aria-live="polite"></p>'
+    );
   }
 
   function emptyCanvasHTML() {
@@ -1795,6 +2080,10 @@
       bindOverviewActions(container, options);
       ensureSetupStatus(container, selected);
     }
+    // Center Selected is only meaningful once something is selected, so the
+    // control's enabled state has to follow the selection rather than waiting
+    // for the next camera change (FR-41).
+    updateCameraControls(container);
     if (options && typeof options.onSelect === 'function') {
       options.onSelect(id, selected || null);
     }
@@ -1943,6 +2232,287 @@
     });
   }
 
+  // ---------- viewport navigation ----------
+
+  // announce speaks through the map's shared live region. It never moves focus:
+  // a user in the middle of a gesture must not be yanked somewhere else to be
+  // told what just happened (FR-116).
+  function announce(container, message) {
+    if (!container || typeof container.querySelector !== 'function') return;
+    var region = container.querySelector('[data-map-live]');
+    if (region) region.textContent = message;
+  }
+
+  // isInteractiveTarget guards empty-space panning. A gesture that starts on a
+  // building, a group label, a checkbox, a control, or a link belongs to that
+  // element, not to the camera (FR-34).
+  function isInteractiveTarget(target) {
+    if (!target || typeof target.closest !== 'function') return false;
+    return !!target.closest(
+      '.ws-map-tile, .ws-map-district-tag, .ws-map-pad, .ws-map-controls, button, a, input, select, textarea, [data-ws-check], [role="checkbox"]'
+    );
+  }
+
+  function pointerPosition(canvas, event) {
+    if (canvas && typeof canvas.getBoundingClientRect === 'function') {
+      var rect = canvas.getBoundingClientRect();
+      return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+    }
+    return { x: event.clientX || 0, y: event.clientY || 0 };
+  }
+
+  /**
+   * Empty-space panning.
+   *
+   * A press only becomes a pan once it has travelled past a small threshold, so
+   * an ordinary click on the background still reads as a click (FR-33). Pointer
+   * capture keeps the gesture alive when the pointer outruns the canvas, and
+   * every exit — up, cancel, blur, unmount — releases it, so the map can never
+   * be left stuck in a drag the user already finished (FR-35).
+   */
+  function bindViewportPan(container) {
+    var canvas = container.querySelector('[data-ws-map-viewport]');
+    if (!canvas || typeof canvas.addEventListener !== 'function') return;
+
+    var pan = null;
+
+    function stop() {
+      if (!pan) return;
+      if (
+        canvas.releasePointerCapture &&
+        canvas.hasPointerCapture &&
+        canvas.hasPointerCapture(pan.pointerId)
+      ) {
+        canvas.releasePointerCapture(pan.pointerId);
+      }
+      if (canvas.classList) canvas.classList.remove('is-panning');
+      pan = null;
+    }
+
+    canvas.addEventListener('pointerdown', function (event) {
+      if (event.button != null && event.button !== 0) return;
+      if (isInteractiveTarget(event.target)) return;
+      var start = pointerPosition(canvas, event);
+      pan = {
+        pointerId: event.pointerId,
+        startX: start.x,
+        startY: start.y,
+        centerX: camera.centerX,
+        centerY: camera.centerY,
+        moved: false
+      };
+      if (canvas.setPointerCapture) canvas.setPointerCapture(event.pointerId);
+    });
+
+    canvas.addEventListener('pointermove', function (event) {
+      if (!pan || event.pointerId !== pan.pointerId) return;
+      var point = pointerPosition(canvas, event);
+      var dx = point.x - pan.startX;
+      var dy = point.y - pan.startY;
+      if (!pan.moved) {
+        if (Math.abs(dx) < PAN_THRESHOLD && Math.abs(dy) < PAN_THRESHOLD) return;
+        pan.moved = true;
+        if (canvas.classList) canvas.classList.add('is-panning');
+      }
+      if (event.preventDefault) event.preventDefault();
+      setCamera(
+        {
+          centerX: pan.centerX - dx / camera.zoom,
+          centerY: pan.centerY - dy / camera.zoom,
+          zoom: camera.zoom
+        },
+        container
+      );
+    });
+
+    ['pointerup', 'pointercancel', 'pointerleave'].forEach(function (type) {
+      canvas.addEventListener(type, function (event) {
+        if (pan && event.pointerId !== pan.pointerId) return;
+        stop();
+      });
+    });
+    if (typeof window !== 'undefined' && window.addEventListener) {
+      window.addEventListener('blur', stop);
+    }
+  }
+
+  /**
+   * Wheel and trackpad navigation.
+   *
+   * An ordinary wheel or two-finger swipe pans, which is what those gestures do
+   * everywhere else; a pinch (which browsers report as a ctrl-wheel) or the
+   * platform's zoom modifier zooms about the pointer (FR-36, FR-39). The page's
+   * own scrolling is only suppressed for gestures the map actually consumes.
+   */
+  function bindViewportWheel(container) {
+    var canvas = container.querySelector('[data-ws-map-viewport]');
+    if (!canvas || typeof canvas.addEventListener !== 'function') return;
+    canvas.addEventListener(
+      'wheel',
+      function (event) {
+        if (isInteractiveTarget(event.target)) return;
+        if (event.preventDefault) event.preventDefault();
+        var viewport = viewportSize(canvas);
+        if (event.ctrlKey || event.metaKey) {
+          var factor = Math.exp(-(event.deltaY || 0) * WHEEL_ZOOM_RATE);
+          setCamera(
+            zoomAroundPoint(camera, viewport, pointerPosition(canvas, event), factor),
+            container
+          );
+          return;
+        }
+        setCamera(
+          {
+            centerX: camera.centerX + (event.deltaX || 0) / camera.zoom,
+            centerY: camera.centerY + (event.deltaY || 0) / camera.zoom,
+            zoom: camera.zoom
+          },
+          container
+        );
+      },
+      { passive: false }
+    );
+  }
+
+  // updateCameraControls keeps the readout truthful and disables a zoom button
+  // that can no longer do anything, so the clamp is visible rather than a
+  // button that silently stops responding (FR-38).
+  function updateCameraControls(container) {
+    if (!container || typeof container.querySelector !== 'function') return;
+    var readout = container.querySelector('[data-map-zoom-readout]');
+    if (readout) readout.textContent = Math.round(camera.zoom * 100) + '%';
+    var zoomIn = container.querySelector('[data-map-zoom-in]');
+    var zoomOut = container.querySelector('[data-map-zoom-out]');
+    if (zoomIn) zoomIn.disabled = camera.zoom >= MAX_ZOOM - 0.0001;
+    if (zoomOut) zoomOut.disabled = camera.zoom <= MIN_ZOOM + 0.0001;
+    var center = container.querySelector('[data-map-center]');
+    if (center) center.disabled = !selectedNodeAnchor();
+  }
+
+  // selectedNodeAnchor finds the world anchor of whatever is selected, whether
+  // that is a building or a group district.
+  function selectedNodeAnchor() {
+    if (!selectedId || !lastWorldLayout) return null;
+    var node = null;
+    lastWorldLayout.nodes.forEach(function (candidate) {
+      if (candidate.id === selectedId) node = { x: candidate.x, y: candidate.y };
+    });
+    if (node) return node;
+    lastWorldLayout.districts.forEach(function (district) {
+      if (district.id === selectedId) node = { x: district.anchorX, y: district.anchorY };
+    });
+    return node;
+  }
+
+  function bindCameraControls(container) {
+    var canvas = container.querySelector('[data-ws-map-viewport]');
+
+    function on(selector, handler) {
+      var el = container.querySelector(selector);
+      if (el && typeof el.addEventListener === 'function') el.addEventListener('click', handler);
+    }
+
+    on('[data-map-zoom-in]', function () {
+      setCamera(zoomAroundCenter(camera, ZOOM_STEP), container);
+      announce(container, 'Zoomed to ' + Math.round(camera.zoom * 100) + ' percent');
+    });
+    on('[data-map-zoom-out]', function () {
+      setCamera(zoomAroundCenter(camera, 1 / ZOOM_STEP), container);
+      announce(container, 'Zoomed to ' + Math.round(camera.zoom * 100) + ' percent');
+    });
+    on('[data-map-fit]', function () {
+      fitAll(container);
+      announce(container, 'Showing every workspace');
+    });
+    on('[data-map-center]', function () {
+      var anchor = selectedNodeAnchor();
+      if (!anchor) {
+        announce(container, 'Select a workspace first');
+        return;
+      }
+      // Centering moves the view, never the record (FR-41).
+      setCamera(centerOn(camera, anchor), container);
+      announce(container, 'Centered the selected workspace');
+    });
+    on('[data-map-reset-view]', function () {
+      resetView(container);
+      announce(container, 'View reset. Workspace positions are unchanged');
+    });
+
+    if (!canvas || typeof canvas.addEventListener !== 'function') return;
+    // Keyboard equivalents for every camera gesture, so navigating the map
+    // never requires a pointer (FR-115).
+    canvas.addEventListener('keydown', function (event) {
+      var step = (event.shiftKey ? 4 : 1) * (SNAP_STEP * 2);
+      var handled = true;
+      switch (event.key) {
+        case '+':
+        case '=':
+          setCamera(zoomAroundCenter(camera, ZOOM_STEP), container);
+          break;
+        case '-':
+        case '_':
+          setCamera(zoomAroundCenter(camera, 1 / ZOOM_STEP), container);
+          break;
+        case '0':
+          resetView(container);
+          break;
+        case 'f':
+        case 'F':
+          fitAll(container);
+          break;
+        case 'ArrowLeft':
+          setCamera(
+            { centerX: camera.centerX - step, centerY: camera.centerY, zoom: camera.zoom },
+            container
+          );
+          break;
+        case 'ArrowRight':
+          setCamera(
+            { centerX: camera.centerX + step, centerY: camera.centerY, zoom: camera.zoom },
+            container
+          );
+          break;
+        case 'ArrowUp':
+          setCamera(
+            { centerX: camera.centerX, centerY: camera.centerY - step, zoom: camera.zoom },
+            container
+          );
+          break;
+        case 'ArrowDown':
+          setCamera(
+            { centerX: camera.centerX, centerY: camera.centerY + step, zoom: camera.zoom },
+            container
+          );
+          break;
+        default:
+          handled = false;
+      }
+      if (handled && event.preventDefault) event.preventDefault();
+    });
+  }
+
+  function fitAll(container) {
+    if (!lastWorldLayout) return;
+    var canvas = container.querySelector('[data-ws-map-viewport]');
+    setCamera(fitBounds(lastWorldLayout.bounds, viewportSize(canvas)), container);
+  }
+
+  // Reset View restores the default framing — the content, centred, at 100%.
+  // It deliberately changes nothing else: no building moves, and the snap
+  // preference is untouched (FR-42).
+  function resetView(container) {
+    if (!lastWorldLayout) return;
+    setCamera(
+      {
+        centerX: (lastWorldLayout.bounds.minX + lastWorldLayout.bounds.maxX) / 2,
+        centerY: (lastWorldLayout.bounds.minY + lastWorldLayout.bounds.maxY) / 2,
+        zoom: DEFAULT_ZOOM
+      },
+      container
+    );
+  }
+
   function bindHQSite(container, options) {
     var site = container.querySelector('[data-hq-site]');
     if (!site) return;
@@ -2020,6 +2590,14 @@
     bindTiles(container, workspaces, state);
     bindHQSite(container, state);
     bindOverviewActions(container, state);
+    // The camera survives every re-mount: a workspace refresh, a filter, or a
+    // Map/Tree switch reconciles into the world the user is already looking at
+    // rather than snapping them back to a default view (FR-106).
+    ensureCamera(container);
+    applyCamera(container);
+    bindViewportPan(container);
+    bindViewportWheel(container);
+    bindCameraControls(container);
     // The first paint has a selection too, so its setup state is read here as
     // well as on every later selection change.
     ensureSetupStatus(container, findWs(workspaces, selectedId));
@@ -2069,6 +2647,22 @@
     // elastic districts, content bounds, and world sizing, all pure so they can
     // be asserted without a browser (FR-123).
     computeWorldLayout: computeWorldLayout,
+    // Pure camera math (FR-123). Exported so pointer-centred zoom, framing, and
+    // clamping can be asserted exactly rather than eyeballed.
+    camera: {
+      clampZoom: clampZoom,
+      screenToWorld: screenToWorld,
+      worldToScreen: worldToScreen,
+      zoomAroundPoint: zoomAroundPoint,
+      zoomAroundCenter: zoomAroundCenter,
+      fitBounds: fitBounds,
+      centerOn: centerOn,
+      clampCamera: clampCamera,
+      limits: { min: MIN_ZOOM, max: MAX_ZOOM, step: ZOOM_STEP }
+    },
+    getCamera: function () {
+      return { centerX: camera.centerX, centerY: camera.centerY, zoom: camera.zoom };
+    },
     computeStats: computeStats,
     tileHTML: tileHTML,
     overviewBodyHTML: overviewBodyHTML,
