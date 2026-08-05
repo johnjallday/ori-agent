@@ -3851,9 +3851,10 @@
       avatarImage: vm.avatarImage,
       avatarColor: vm.avatarColor,
       displayMode: vm.displayMode,
-      character: vm.characterId && window.CharacterCatalog
-        ? window.CharacterCatalog.get(vm.characterId)
-        : null
+      character:
+        vm.characterId && window.CharacterCatalog
+          ? window.CharacterCatalog.get(vm.characterId)
+          : null
     };
   }
 

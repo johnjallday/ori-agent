@@ -469,6 +469,14 @@ async function installFixtureRoutes(page: Page) {
       await json(route, { plugins: [] });
       return;
     }
+    // The workspace page resolves agent identities through the shared character
+    // catalog. An empty catalog is a real, handled state — every agent falls
+    // back to its deterministic identity — and none of this scene's fixture
+    // agents has a curated character, so the captured screenshot is unchanged.
+    if (url.pathname === '/api/characters') {
+      await json(route, { catalog_version: '1.0.0', guide: null, characters: [] });
+      return;
+    }
     if (url.pathname === '/api/orchestration/workspace/activate') {
       await json(route, { activated: true });
       return;

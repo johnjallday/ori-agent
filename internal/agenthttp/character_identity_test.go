@@ -15,6 +15,9 @@ import (
 	"github.com/johnjallday/ori-agent/internal/types"
 )
 
+// The one agent every test in this file patches.
+const characterTestAgent = "Solo"
+
 func characterTestHandlers(t *testing.T, agentName string) (*Handler, store.Store) {
 	t.Helper()
 	st, err := store.NewFileStore(
@@ -30,9 +33,11 @@ func characterTestHandlers(t *testing.T, agentName string) (*Handler, store.Stor
 	return New(st), st
 }
 
-func patchAgent(t *testing.T, h *Handler, name, body string) *httptest.ResponseRecorder {
+// Every caller patches the single fixture agent these tests create, so the
+// name is fixed here rather than passed at each of the eighteen call sites.
+func patchAgent(t *testing.T, h *Handler, body string) *httptest.ResponseRecorder {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodPatch, "/api/agents/"+name, strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPatch, "/api/agents/"+characterTestAgent, strings.NewReader(body))
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	return rec
@@ -58,7 +63,7 @@ func TestPatchRejectsTheReservedGuideCharacter(t *testing.T) {
 	h, st := characterTestHandlers(t, "Solo")
 	reserved := string(charactercatalog.MustLoad().ReservedGuideID)
 
-	rec := patchAgent(t, h, "Solo", `{"character":{"catalog_id":"`+reserved+`","display_mode":"character"}}`)
+	rec := patchAgent(t, h, `{"character":{"catalog_id":"`+reserved+`","display_mode":"character"}}`)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
 	}
@@ -76,7 +81,7 @@ func TestPatchRejectsUnknownCharacter(t *testing.T) {
 	h, st := characterTestHandlers(t, "Solo")
 	for _, id := range []string{"does-not-exist", "../escape", "Sable", "ori"} {
 		t.Run(id, func(t *testing.T) {
-			rec := patchAgent(t, h, "Solo", `{"character":{"catalog_id":"`+id+`","display_mode":"character"}}`)
+			rec := patchAgent(t, h, `{"character":{"catalog_id":"`+id+`","display_mode":"character"}}`)
 			if rec.Code != http.StatusBadRequest {
 				t.Fatalf("expected 400 for %q, got %d", id, rec.Code)
 			}
@@ -91,7 +96,7 @@ func TestPatchRejectsUnknownCharacter(t *testing.T) {
 func TestPatchRejectsUnknownDisplayMode(t *testing.T) {
 	h, _ := characterTestHandlers(t, "Solo")
 	for _, mode := range []string{"hologram", "guide", "Character", ""} {
-		rec := patchAgent(t, h, "Solo", `{"character":{"display_mode":"`+mode+`"}}`)
+		rec := patchAgent(t, h, `{"character":{"display_mode":"`+mode+`"}}`)
 		if rec.Code != http.StatusBadRequest {
 			t.Errorf("expected 400 for display mode %q, got %d", mode, rec.Code)
 		}
@@ -122,7 +127,7 @@ func TestPatchPersistsACharacterChoice(t *testing.T) {
 	h, st := characterTestHandlers(t, "Solo")
 	id := firstWorkingID(t)
 
-	rec := patchAgent(t, h, "Solo", `{"character":{"catalog_id":"`+id+`","display_mode":"character","voice_enabled":true}}`)
+	rec := patchAgent(t, h, `{"character":{"catalog_id":"`+id+`","display_mode":"character","voice_enabled":true}}`)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
@@ -198,7 +203,7 @@ func TestSwitchingToACharacterPreservesTheUploadedAvatar(t *testing.T) {
 		t.Fatalf("seed avatar: %v", err)
 	}
 
-	rec := patchAgent(t, h, "Solo", `{"character":{"catalog_id":"`+id+`","display_mode":"character"}}`)
+	rec := patchAgent(t, h, `{"character":{"catalog_id":"`+id+`","display_mode":"character"}}`)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
@@ -212,7 +217,7 @@ func TestSwitchingToACharacterPreservesTheUploadedAvatar(t *testing.T) {
 	}
 
 	// ...and switching back restores the upload without re-uploading.
-	rec = patchAgent(t, h, "Solo", `{"character":{"display_mode":"uploaded"}}`)
+	rec = patchAgent(t, h, `{"character":{"display_mode":"uploaded"}}`)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("switch back failed: %d %s", rec.Code, rec.Body.String())
 	}
@@ -227,7 +232,7 @@ func TestSwitchingToACharacterPreservesTheUploadedAvatar(t *testing.T) {
 
 func TestUploadedModeRequiresAnUploadedAvatar(t *testing.T) {
 	h, _ := characterTestHandlers(t, "Solo")
-	rec := patchAgent(t, h, "Solo", `{"character":{"display_mode":"uploaded"}}`)
+	rec := patchAgent(t, h, `{"character":{"display_mode":"uploaded"}}`)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 when there is no uploaded avatar, got %d", rec.Code)
 	}
@@ -235,7 +240,7 @@ func TestUploadedModeRequiresAnUploadedAvatar(t *testing.T) {
 
 func TestCharacterModeRequiresASelection(t *testing.T) {
 	h, _ := characterTestHandlers(t, "Solo")
-	rec := patchAgent(t, h, "Solo", `{"character":{"display_mode":"character"}}`)
+	rec := patchAgent(t, h, `{"character":{"display_mode":"character"}}`)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 when no character is selected, got %d", rec.Code)
 	}
@@ -263,7 +268,7 @@ func TestCharacterChangeLeavesTheRestOfTheAgentAlone(t *testing.T) {
 	}
 	before, _ := json.Marshal(ag.Settings)
 
-	if rec := patchAgent(t, h, "Solo", `{"character":{"catalog_id":"`+id+`","display_mode":"character"}}`); rec.Code != http.StatusOK {
+	if rec := patchAgent(t, h, `{"character":{"catalog_id":"`+id+`","display_mode":"character"}}`); rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 
@@ -290,7 +295,7 @@ func TestCharacterChangeMovesTheVersionToken(t *testing.T) {
 	ag, _ := st.GetAgent("Solo")
 	before := agentConfigVersion(ag)
 
-	if rec := patchAgent(t, h, "Solo", `{"character":{"catalog_id":"`+id+`","display_mode":"character"}}`); rec.Code != http.StatusOK {
+	if rec := patchAgent(t, h, `{"character":{"catalog_id":"`+id+`","display_mode":"character"}}`); rec.Code != http.StatusOK {
 		t.Fatalf("patch failed: %d", rec.Code)
 	}
 
@@ -304,7 +309,7 @@ func TestStaleVersionBlocksACharacterChange(t *testing.T) {
 	h, st := characterTestHandlers(t, "Solo")
 	id := firstWorkingID(t)
 
-	rec := patchAgent(t, h, "Solo",
+	rec := patchAgent(t, h,
 		`{"character":{"catalog_id":"`+id+`","display_mode":"character"},"expected_version":"deadbeefdeadbeef"}`)
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("expected 409 for a stale token, got %d: %s", rec.Code, rec.Body.String())
@@ -322,11 +327,11 @@ func TestClearingACharacterDisablesItsVoice(t *testing.T) {
 	h, st := characterTestHandlers(t, "Solo")
 	id := firstWorkingID(t)
 
-	if rec := patchAgent(t, h, "Solo",
+	if rec := patchAgent(t, h,
 		`{"character":{"catalog_id":"`+id+`","display_mode":"character","voice_enabled":true}}`); rec.Code != http.StatusOK {
 		t.Fatalf("setup patch failed: %d", rec.Code)
 	}
-	if rec := patchAgent(t, h, "Solo",
+	if rec := patchAgent(t, h,
 		`{"character":{"catalog_id":"","display_mode":"fallback"}}`); rec.Code != http.StatusOK {
 		t.Fatalf("clear failed: %d", rec.Code)
 	}
@@ -344,11 +349,11 @@ func TestVoiceCanBeToggledWithoutRestatingTheCharacter(t *testing.T) {
 	h, st := characterTestHandlers(t, "Solo")
 	id := firstWorkingID(t)
 
-	if rec := patchAgent(t, h, "Solo",
+	if rec := patchAgent(t, h,
 		`{"character":{"catalog_id":"`+id+`","display_mode":"character","voice_enabled":true}}`); rec.Code != http.StatusOK {
 		t.Fatalf("setup failed: %d", rec.Code)
 	}
-	if rec := patchAgent(t, h, "Solo", `{"character":{"voice_enabled":false}}`); rec.Code != http.StatusOK {
+	if rec := patchAgent(t, h, `{"character":{"voice_enabled":false}}`); rec.Code != http.StatusOK {
 		t.Fatalf("toggle failed: %d", rec.Code)
 	}
 
@@ -381,7 +386,7 @@ func TestACharacterSurvivesAStoreReload(t *testing.T) {
 	h := New(st)
 	id := firstWorkingID(t)
 
-	if rec := patchAgent(t, h, "Solo",
+	if rec := patchAgent(t, h,
 		`{"character":{"catalog_id":"`+id+`","display_mode":"character","voice_enabled":true}}`); rec.Code != http.StatusOK {
 		t.Fatalf("setup failed: %d %s", rec.Code, rec.Body.String())
 	}
@@ -450,11 +455,11 @@ func TestUnrelatedPatchLeavesTheCharacterAlone(t *testing.T) {
 	h, st := characterTestHandlers(t, "Solo")
 	id := firstWorkingID(t)
 
-	if rec := patchAgent(t, h, "Solo",
+	if rec := patchAgent(t, h,
 		`{"character":{"catalog_id":"`+id+`","display_mode":"character","voice_enabled":true}}`); rec.Code != http.StatusOK {
 		t.Fatalf("setup failed: %d", rec.Code)
 	}
-	if rec := patchAgent(t, h, "Solo", `{"description":"changed"}`); rec.Code != http.StatusOK {
+	if rec := patchAgent(t, h, `{"description":"changed"}`); rec.Code != http.StatusOK {
 		t.Fatalf("description patch failed: %d", rec.Code)
 	}
 
