@@ -74,11 +74,12 @@ type Runner func(ctx context.Context, args ...string) ([]byte, error)
 
 // Client queries pull requests and Issues for one repository.
 type Client struct {
-	run            Runner
-	dir            string
-	timeout        time.Duration
-	candidateLimit int
-	issueLimit     int
+	run              Runner
+	dir              string
+	timeout          time.Duration
+	candidateLimit   int
+	issueLimit       int
+	projectItemLimit int
 }
 
 // Options configures a Client.
@@ -97,16 +98,22 @@ type Options struct {
 	// because the two answer different questions: delivery evidence wants every
 	// recent pull request, while a backlog wants a list somebody can read.
 	IssueLimit int
+	// ProjectItemLimit bounds how many board cards one read requests and
+	// decodes; zero uses DefaultProjectItemLimit. A board holds every Issue,
+	// groomed or not, so it outgrows a single readable column before the Issue
+	// list itself does.
+	ProjectItemLimit int
 }
 
 // New builds a Client, applying bounded defaults.
 func New(options Options) *Client {
 	client := &Client{
-		run:            options.Run,
-		dir:            options.Dir,
-		timeout:        options.Timeout,
-		candidateLimit: options.CandidateLimit,
-		issueLimit:     options.IssueLimit,
+		run:              options.Run,
+		dir:              options.Dir,
+		timeout:          options.Timeout,
+		candidateLimit:   options.CandidateLimit,
+		issueLimit:       options.IssueLimit,
+		projectItemLimit: options.ProjectItemLimit,
 	}
 	if client.run == nil {
 		client.run = ExecRunner(options.Dir)
@@ -119,6 +126,9 @@ func New(options Options) *Client {
 	}
 	if client.issueLimit <= 0 {
 		client.issueLimit = DefaultIssueLimit
+	}
+	if client.projectItemLimit <= 0 {
+		client.projectItemLimit = DefaultProjectItemLimit
 	}
 	return client
 }
@@ -324,6 +334,18 @@ const (
 	// ErrorNotFound means the repository or Issue named does not exist, or is
 	// invisible to this credential — GitHub does not distinguish the two.
 	ErrorNotFound ErrorKind = "gh_not_found"
+	// ErrorProjectScope means the credential is valid but carries none of the
+	// scopes ProjectsV2 requires. It is separate from ErrorForbidden because the
+	// fix is a token edit, not a permission grant, and separate from
+	// ErrorUnauthenticated because logging in again changes nothing.
+	ErrorProjectScope ErrorKind = "gh_project_scope"
+	// ErrorProjectMissing means no project board is linked to the repository, so
+	// there is no backlog to read.
+	ErrorProjectMissing ErrorKind = "gh_project_missing"
+	// ErrorProjectAmbiguous means several boards are linked and none can be
+	// chosen without guessing. Guessing here reads the wrong backlog silently,
+	// which is worse than refusing.
+	ErrorProjectAmbiguous ErrorKind = "gh_project_ambiguous"
 )
 
 // Error is a sanitized query failure. It never carries raw `gh` output.
@@ -354,10 +376,23 @@ func (e *Error) Recovery() string {
 		return "wait for the GitHub rate limit to reset, then retry; check it with: gh api rate_limit"
 	case ErrorNotFound:
 		return "check the repository and Issue number, then retry"
+	case ErrorProjectScope:
+		// gh's own advice here is `gh auth refresh -s ...`, which cannot work
+		// when the credential comes from the GITHUB_TOKEN environment variable:
+		// there is no stored OAuth token for it to refresh, and it refuses
+		// outright. Naming the token page instead is the difference between a
+		// fix and a loop.
+		return "add the project scopes to the token at https://github.com/settings/tokens " +
+			"(read:project, read:org, read:discussion); if gh suggests `gh auth refresh`, " +
+			"that cannot work while GITHUB_TOKEN is set — edit the token itself, its value does not change"
+	case ErrorProjectMissing:
+		return "link the board to this repository: gh project link <number> --owner <login> --repo <owner>/<name>"
+	case ErrorProjectAmbiguous:
+		return "unlink every board but the one that is the backlog: gh project unlink <number> --owner <login> --repo <owner>/<name>"
 	case ErrorTimeout, ErrorNetwork:
 		return "check network access to github.com, then retry"
 	case ErrorRepository:
-		return "run ./scripts/backlog.sh from a checkout of a GitHub repository you can read; verify with: gh repo view"
+		return "run this from a checkout of a GitHub repository you can read; verify with: gh repo view"
 	default:
 		return "run: gh pr list --limit 1"
 	}
@@ -371,6 +406,13 @@ func (e *Error) Recovery() string {
 // 403, and reporting it as an authorization problem would send someone to check
 // permissions that are fine.
 var (
+	// Checked before authMessage, and the order is load-bearing: gh phrases the
+	// scope refusal as "your authentication token is missing required scopes",
+	// which authMessage matches. Classified that way it would send someone to
+	// `gh auth login`, which succeeds and changes nothing, because the token is
+	// valid — it simply lacks the project scopes.
+	projectScopeMessage = regexp.MustCompile(
+		`(?i)(missing required scopes|read:project|read:org|read:discussion)`)
 	authMessage = regexp.MustCompile(
 		`(?i)(gh auth login|not logged in|bad credentials|requires authentication|` +
 			`authentication token|missing required token|HTTP 401|401 Unauthorized)`)
@@ -407,6 +449,11 @@ func classify(ctx context.Context, err error) error {
 // text being matched.
 func classifyStderr(stderr []byte) *Error {
 	switch {
+	case projectScopeMessage.Match(stderr):
+		return &Error{
+			Kind:   ErrorProjectScope,
+			Detail: "this GitHub token does not carry the scopes ProjectsV2 reads require",
+		}
 	case authMessage.Match(stderr):
 		return &Error{Kind: ErrorUnauthenticated, Detail: "the GitHub CLI is not authenticated for this repository"}
 	case rateLimitMessage.Match(stderr):
