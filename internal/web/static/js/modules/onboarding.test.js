@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { workspaceRootSetupView } from './onboarding.js';
+import { OnboardingManager, workspaceRootSetupView } from './onboarding.js';
+import { resetOnboardingGateForTests } from './onboarding-gate.js';
 
 test('workspaceRootSetupView presents the default path as an unconfirmed suggestion', () => {
   const view = workspaceRootSetupView({
@@ -39,4 +40,21 @@ test('workspaceRootSetupView treats an operator WORKSPACE_DIR as confirmed', () 
 
   assert.equal(view.path, '/srv/ori-workspaces');
   assert.equal(view.confirmed, true);
+});
+
+test('OnboardingManager consumes the shared memoized status gate', async () => {
+  let calls = 0;
+  resetOnboardingGateForTests(async () => {
+    calls += 1;
+    return {
+      ok: true,
+      json: async () => ({ needs_onboarding: true, assistant_name: 'Ori' })
+    };
+  });
+  const manager = new OnboardingManager();
+  const first = await manager.checkOnboardingStatus();
+  const second = await manager.checkOnboardingStatus();
+  assert.equal(first.needs_onboarding, true);
+  assert.equal(second, first);
+  assert.equal(calls, 1);
 });

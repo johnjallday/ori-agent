@@ -115,36 +115,13 @@ func TestAgentLifecycle(t *testing.T) {
 
 	// 1. Create agent
 	t.Log("Creating agent...")
-	model := helpers.GetTestModel()
-	agentData := map[string]any{
-		"name":        "e2e-test-agent",
-		"description": "Agent for E2E testing",
-		"model":       model,
-		"provider":    "openai",
-	}
-
-	agentJSON, _ := json.Marshal(agentData)
-	resp, err := client.Post(baseURL+"/api/agents", "application/json", bytes.NewBuffer(agentJSON))
-	if err != nil {
-		t.Fatalf("Failed to create agent: %v", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		body, _ := io.ReadAll(resp.Body)
-		t.Fatalf("Failed to create agent (status %d): %s", resp.StatusCode, body)
-	}
-
-	var createdAgent map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&createdAgent); err != nil {
-		t.Fatalf("Failed to decode created agent: %v", err)
-	}
+	createdAgent := createServerAgent(t, client, "e2e-test-agent", "Agent for E2E testing")
 
 	t.Logf("✓ Agent created: %v", createdAgent["name"])
 
 	// 2. List agents
 	t.Log("Listing agents...")
-	resp, err = client.Get(baseURL + "/api/agents")
+	resp, err := client.Get(baseURL + "/api/agents")
 	if err != nil {
 		t.Fatalf("Failed to list agents: %v", err)
 	}
@@ -199,6 +176,7 @@ func TestSettingsEndpoint(t *testing.T) {
 	}
 
 	skipIfNoAPIKey(t)
+	ensureServerBuilt(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -210,10 +188,11 @@ func TestSettingsEndpoint(t *testing.T) {
 	}
 
 	client := &http.Client{Timeout: 10 * time.Second}
+	createServerAgent(t, client, "e2e-settings-agent", "Agent for settings endpoint testing")
 
 	// Get settings
 	t.Log("Getting settings...")
-	resp, err := client.Get(baseURL + "/api/settings")
+	resp, err := client.Get(baseURL + "/api/settings?agent=e2e-settings-agent")
 	if err != nil {
 		t.Fatalf("Failed to get settings: %v", err)
 	}
@@ -291,20 +270,6 @@ func TestHomeAssistantRoute_UtilityPromptUsesExistingAssistant(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// The system assistant "Ori" is no longer auto-created at startup
-	// (requires a configured system model). Seed it into the test data
-	// directory before starting the server so the route handler can match
-	// against it.
-	oriAgentDir := filepath.Join("ori-data", "agents", "Ori")
-	if err := os.MkdirAll(oriAgentDir, 0o755); err != nil {
-		t.Fatalf("Failed to create Ori agent dir: %v", err)
-	}
-	oriConfig := `{"type":"general","settings":{"model":"gpt-4.1-nano","provider":"openai"}}`
-	if err := os.WriteFile(filepath.Join(oriAgentDir, "config.json"), []byte(oriConfig), 0o644); err != nil {
-		t.Fatalf("Failed to write Ori config: %v", err)
-	}
-	defer func() { _ = os.RemoveAll(oriAgentDir) }()
-
 	cmd := startServer(t, ctx)
 	defer stopServer(cmd)
 
@@ -312,11 +277,17 @@ func TestHomeAssistantRoute_UtilityPromptUsesExistingAssistant(t *testing.T) {
 		t.Fatalf("Server failed to start: %v", err)
 	}
 
+	client := &http.Client{Timeout: 10 * time.Second}
+	// The Workspace Manager is intentionally not auto-created without a
+	// configured system model. Configure one through the public API inside this
+	// test's owned runtime profile so the normal creation path is exercised.
+	configureSystemModel(t, client)
+
 	payload, _ := json.Marshal(map[string]string{
 		"prompt": "what time is it in tokyo",
 	})
 
-	resp, err := http.Post(baseURL+"/api/home-assistant/route", "application/json", bytes.NewBuffer(payload))
+	resp, err := client.Post(baseURL+"/api/home-assistant/route", "application/json", bytes.NewBuffer(payload))
 	if err != nil {
 		t.Fatalf("Failed to route prompt: %v", err)
 	}
@@ -347,10 +318,17 @@ func TestHomeAssistantRoute_UtilityPromptUsesExistingAssistant(t *testing.T) {
 
 func startServer(t *testing.T, ctx context.Context) *exec.Cmd {
 	t.Helper()
+	return startServerWithDataDir(t, ctx, t.TempDir())
+}
+
+func startServerWithDataDir(t *testing.T, ctx context.Context, dataDir string) *exec.Cmd {
+	t.Helper()
 
 	cmd := exec.CommandContext(ctx, resolveBuiltBinaryPath())
 	cmd.Env = append(os.Environ(),
 		"PORT="+defaultPort,
+		"ORI_DATA_DIR="+dataDir,
+		"WORKSPACE_DIR=",
 		fmt.Sprintf("OPENAI_API_KEY=%s", os.Getenv("OPENAI_API_KEY")),
 		fmt.Sprintf("ANTHROPIC_API_KEY=%s", os.Getenv("ANTHROPIC_API_KEY")),
 	)
@@ -365,6 +343,61 @@ func startServer(t *testing.T, ctx context.Context) *exec.Cmd {
 
 	t.Logf("Started server (PID: %d)", cmd.Process.Pid)
 	return cmd
+}
+
+func createServerAgent(t *testing.T, client *http.Client, name, description string) map[string]any {
+	t.Helper()
+
+	agentData := map[string]any{
+		"name":         name,
+		"description":  description,
+		"model":        helpers.GetTestModel(),
+		"llm_provider": "openai",
+	}
+	agentJSON, err := json.Marshal(agentData)
+	if err != nil {
+		t.Fatalf("Failed to encode agent %q: %v", name, err)
+	}
+
+	resp, err := client.Post(baseURL+"/api/agents", "application/json", bytes.NewBuffer(agentJSON))
+	if err != nil {
+		t.Fatalf("Failed to create agent %q: %v", name, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("Failed to create agent %q (status %d): %s", name, resp.StatusCode, body)
+	}
+
+	var createdAgent map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&createdAgent); err != nil {
+		t.Fatalf("Failed to decode created agent %q: %v", name, err)
+	}
+	return createdAgent
+}
+
+func configureSystemModel(t *testing.T, client *http.Client) {
+	t.Helper()
+
+	payload, err := json.Marshal(map[string]string{
+		"provider": "openai",
+		"model":    helpers.GetTestModel(),
+	})
+	if err != nil {
+		t.Fatalf("Failed to encode system model: %v", err)
+	}
+
+	resp, err := client.Post(baseURL+"/api/settings/system-model", "application/json", bytes.NewBuffer(payload))
+	if err != nil {
+		t.Fatalf("Failed to configure system model: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("Failed to configure system model (status %d): %s", resp.StatusCode, body)
+	}
 }
 
 func stopServer(cmd *exec.Cmd) {

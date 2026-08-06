@@ -2,13 +2,23 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
+import {
+  loadInitialWorkspaceTree,
+  loadOnboardingStatus,
+  onboardingGateDecision,
+  resetOnboardingGateForTests
+} from './onboarding-gate.js';
 
 const source = readFileSync(new URL('./sessions.js', import.meta.url), 'utf8');
 
 function loadSessionManager(fetchImpl = async () => ({ ok: true, json: async () => ({}) })) {
   const window = {};
   const document = { addEventListener() {} };
-  vm.runInNewContext(source, { window, document, fetch: fetchImpl }, { filename: 'sessions.js' });
+  vm.runInNewContext(
+    source,
+    { window, document, fetch: fetchImpl, console },
+    { filename: 'sessions.js' }
+  );
   return window.sessionManager;
 }
 
@@ -34,7 +44,13 @@ function loadSessionManagerWithModal() {
   };
   vm.runInNewContext(
     source,
-    { window, document, bootstrap, fetch: async () => ({ ok: true, json: async () => ({}) }) },
+    {
+      window,
+      document,
+      bootstrap,
+      fetch: async () => ({ ok: true, json: async () => ({}) }),
+      console
+    },
     { filename: 'sessions.js' }
   );
   return { manager: window.sessionManager, modalElement, shown };
@@ -82,4 +98,75 @@ test('Personal HQ import designates the imported workspace and completes onboard
   assert.deepEqual(JSON.parse(calls[0].options.body), { workspace_id: 'hq-workspace' });
   assert.equal(calls[1].url, '/api/personal-hq/onboarding-state');
   assert.deepEqual(JSON.parse(calls[1].options.body), { state: 'completed' });
+});
+
+test('pending onboarding prevents the session manager from fetching workspaces', async () => {
+  resetOnboardingGateForTests(async () => ({
+    ok: true,
+    json: async () => ({ needs_onboarding: true })
+  }));
+  const calls = [];
+  const manager = loadSessionManager(async url => {
+    calls.push(url);
+    return { ok: true, json: async () => ({ folders: [] }) };
+  });
+  manager.onboardingGate = { loadOnboardingStatus, onboardingGateDecision };
+  manager.updateSessionsEmptyState = () => {};
+
+  assert.equal(await manager.canHydrateWorkspaceData(), false);
+  await manager.loadFolders();
+  assert.deepEqual(calls, []);
+  assert.equal(manager.folders.length, 0);
+});
+
+test('completed onboarding preserves normal session-manager workspace loading', async () => {
+  resetOnboardingGateForTests(async () => ({
+    ok: true,
+    json: async () => ({ needs_onboarding: false, completed: true })
+  }));
+  const calls = [];
+  const manager = loadSessionManager(async url => {
+    calls.push(url);
+    return { ok: true, json: async () => ({ folders: [] }) };
+  });
+  manager.onboardingGate = { loadOnboardingStatus, onboardingGateDecision };
+  manager.updateSessionsEmptyState = () => {};
+  manager.renderFolderTree = () => {};
+
+  assert.equal(await manager.canHydrateWorkspaceData(), true);
+  await manager.loadFolders();
+  assert.deepEqual(calls, ['/api/workspaces?tree=true']);
+});
+
+test('session bootstrap consumes the shared initial workspace tree', async () => {
+  resetOnboardingGateForTests(async () => ({
+    ok: true,
+    json: async () => ({ needs_onboarding: false, completed: true })
+  }));
+  let directCalls = 0;
+  const manager = loadSessionManager(async () => {
+    directCalls += 1;
+    return { ok: true, json: async () => ({ folders: [] }) };
+  });
+  manager.onboardingGate = {
+    loadOnboardingStatus,
+    onboardingGateDecision,
+    loadInitialWorkspaceTree: () =>
+      loadInitialWorkspaceTree({
+        fetchImpl: async () => ({
+          ok: true,
+          json: async () => ({ folders: [{ id: 'shared-bootstrap' }] })
+        })
+      })
+  };
+  manager.updateSessionsEmptyState = () => {};
+  manager.renderFolderTree = () => {};
+  manager.loadAllFolderNotes = async () => {};
+  manager.loadAllWorkspaceTasks = async () => {};
+  manager.loadAllWorkspaceScheduledTasks = async () => {};
+
+  await manager.loadFolders({ bootstrap: true });
+
+  assert.equal(directCalls, 0);
+  assert.equal(manager.folders[0].id, 'shared-bootstrap');
 });

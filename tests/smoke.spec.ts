@@ -215,7 +215,10 @@ test.describe('Home First Run', () => {
     await expect(page.locator('body.home-command-page')).toBeVisible();
     await expect(page.locator('#homeAssistantCard')).toHaveAttribute('data-first-run', 'true');
     await expect(page.locator('#homeCockpit')).toBeVisible();
-    await expect(page.locator('#homeFirstRunStart')).toContainText('Establish first workspace');
+    const emptyState = page.locator('#cockpitWorkspaceStatus [data-state="empty"]');
+    await expect(emptyState).toContainText('No workspaces yet.');
+    await expect(emptyState.getByRole('button', { name: 'New Workspace' })).toBeVisible();
+    await expect(emptyState.getByRole('button', { name: 'Import Folder' })).toBeVisible();
     await expect(page.locator('#homeAssistantInput')).toHaveAttribute(
       'placeholder',
       'Plan a product launch…'
@@ -226,7 +229,7 @@ test.describe('Home First Run', () => {
 
     await page.goto('/workspaces');
     await expect(page.locator('#addFolderModal')).toBeHidden();
-    await expect(page.locator('[data-hq-site], .ws-map-empty-cluster').first()).toBeVisible();
+    await expect(page.locator('#cockpitWorkspaceStatus [data-state="empty"]')).toBeVisible();
   });
 
   test('keeps the command-strip interaction contract on home', async ({ page }) => {
@@ -399,6 +402,13 @@ test.describe('Home First Run', () => {
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({ workspaces })
+      });
+    });
+    await page.route('**/api/workspaces?tree=true', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ workspaces, folders: workspaces })
       });
     });
     await page.route('**/api/orchestration/scheduled-tasks/upcoming**', async route => {
@@ -719,7 +729,33 @@ test.describe('Agent Management', () => {
 });
 
 test.describe('Workspace Import Flow', () => {
+  async function installEmptyHomeRoutes(page) {
+    await page.route('**/api/onboarding/status', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          needs_onboarding: false,
+          current_step: 3,
+          completed: true,
+          skipped: false,
+          steps_completed: [0, 1, 2],
+          user_name: 'Smoke Tester',
+          assistant_name: 'Ori'
+        })
+      });
+    });
+    await page.route('**/api/workspaces?tree=true', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ workspaces: [], folders: [] })
+      });
+    });
+  }
+
   test('import modal supports picker selection and duplicate override', async ({ page }) => {
+    await installEmptyHomeRoutes(page);
     await page.route('**/api/folder-picker/select-path', async route => {
       await route.fulfill({
         status: 200,
@@ -797,10 +833,11 @@ test.describe('Workspace Import Flow', () => {
       });
     });
 
-    await page.goto('/workspaces');
-    await expect(page.locator('#launcherCreateWorkspaceBtn')).toBeVisible();
+    await page.goto('/');
+    const importButton = page.locator('[data-workspace-entry-point="home_cockpit_import"]');
+    await expect(importButton).toBeVisible();
     const modal = page.locator('#addFolderModal');
-    await page.locator('#launcherImportFolderBtn').click();
+    await importButton.click();
     await expect(modal).toBeVisible();
 
     const importToggle = page.locator('#folderImportToggle');
@@ -820,12 +857,14 @@ test.describe('Workspace Import Flow', () => {
   });
 
   test('import controls are keyboard and mobile friendly', async ({ page }) => {
+    await installEmptyHomeRoutes(page);
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto('/workspaces');
-    await expect(page.locator('#launcherCreateWorkspaceBtn')).toBeVisible();
+    await page.goto('/');
+    const importButton = page.locator('[data-workspace-entry-point="home_cockpit_import"]');
+    await expect(importButton).toBeVisible();
 
     const modal = page.locator('#addFolderModal');
-    await page.locator('#launcherImportFolderBtn').focus();
+    await importButton.focus();
     await page.keyboard.press('Enter');
     await expect(modal).toBeVisible();
 
@@ -1099,14 +1138,14 @@ test.describe('Workspace Agent Character Roster', () => {
     await expect(roster).toHaveCount(2);
     await expect(roster.first()).toHaveAttribute('aria-pressed', 'true');
     await expect(roster.first()).toContainText('Roster Manager');
-    await expect(roster.first()).toContainText('Entry');
-    await expect(roster.first().locator('.ws-cmd-character svg')).toBeVisible();
+    await expect(roster.first().locator('.ws-cmd-roster-entry')).toHaveText('CMD');
+    await expect(roster.first().locator('.ws-cmd-character')).toBeVisible();
     await expect(roster.nth(1)).toContainText('Working');
     await expect(roster.nth(1)).toContainText('2×');
 
     const stage = page.locator('#workspaceCommandView .ws-cmd-agent-stage');
     await expect(stage.locator('h3')).toHaveText('Roster Manager');
-    await expect(stage).toContainText('Entry Agent');
+    await expect(stage).toContainText('Commander');
     await expect(stage).toContainText('Idle');
 
     await roster.nth(1).click();
@@ -1116,7 +1155,7 @@ test.describe('Workspace Agent Character Roster', () => {
     await page.getByRole('tab', { name: 'Tasks' }).click();
     await expect(page.locator('.ws-cmd-agent-tabpanel.is-active')).toContainText('Choose source');
 
-    await page.getByRole('tab', { name: 'Loadout' }).click();
+    await page.getByRole('tab', { name: 'Toolbox' }).click();
     await expect(page.locator('.ws-cmd-agent-tabpanel.is-active')).toContainText('Model');
     await expect(page.locator('.ws-cmd-agent-tabpanel.is-active')).toContainText('Skills');
     await expect(page.locator('.ws-cmd-loadout-prompt')).toContainText(
@@ -1243,8 +1282,8 @@ test.describe('Workspace Agent Character Roster', () => {
     expect(beltLabelGeometry).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          ariaLabel: 'Workspace Objective',
-          labelText: 'Workspace Objective'
+          ariaLabel: 'Workspace Mission',
+          labelText: 'Workspace Mission'
         })
       ])
     );
@@ -1263,10 +1302,11 @@ test.describe('Workspace Agent Character Roster', () => {
     const entryUnit = page
       .locator('#workspaceCommandView .ws-cmd-map-agent')
       .filter({ hasText: 'Roster Manager' });
-    await expect(entryUnit.locator('.ws-cmd-map-entry-badge')).toBeVisible();
+    await expect(entryUnit).toHaveClass(/is-command-node/);
+    await expect(entryUnit.locator('.ws-cmd-map-command-role')).toContainText('Commander');
     await expect(entryUnit.locator('.ws-cmd-map-agent-status')).toBeVisible();
     await expect(entryUnit).toHaveClass(/waiting/);
-    await expect(entryUnit).toHaveAttribute('aria-label', /Entry Agent/);
+    await expect(entryUnit).toHaveAttribute('aria-label', /Commander/);
 
     await page
       .locator('#workspaceCommandView .ws-cmd-map-belt-btn[data-cmd-map-window="inventory"]')
@@ -1319,7 +1359,7 @@ test.describe('Workspace Agent Character Roster', () => {
     const inspector = page.locator('#workspaceCommandView .ws-cmd-map-window');
     await expect(inspector).toContainText('Research Analyst');
     await expect(inspector).toContainText('Needs input');
-    await expect(inspector).toContainText('Class');
+    await expect(inspector).toContainText('Role');
     await expect(inspector).toContainText('Toolbox');
     await expect(inspector).toContainText('Current Quest');
     await expect(inspector).toContainText('Command Menu');
@@ -2324,9 +2364,7 @@ test.describe('Home Workspace Routing', () => {
     await page.locator('#homeAssistantInput').fill('build the broken ops roadmap');
     await page.locator('#homeAssistantSendBtn').click();
 
-    await expect(page.locator('#homeAssistantRoutingSummary')).toContainText(
-      'Entry Agent Required'
-    );
+    await expect(page.locator('#homeAssistantRoutingSummary')).toContainText('Commander Required');
     await expect(
       page.locator('#homeAssistantActions').getByText('Open Workspace Setup', { exact: true })
     ).toBeVisible();

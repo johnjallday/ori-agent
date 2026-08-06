@@ -23,6 +23,102 @@ async function skipOnboarding(page: Page) {
   );
 }
 
+test.describe('Home onboarding workspace gate', () => {
+  test('pending onboarding makes no workspace request and reveals no seeded workspace', async ({
+    page
+  }) => {
+    const seededName = 'Foreign workspace must stay hidden';
+    let workspaceTreeRequests = 0;
+    const workspaceDerivedRequests: string[] = [];
+    const workspaceDerivedPaths = new Set([
+      '/api/activity/recent',
+      '/api/calendar-ops/home-portal-summary',
+      '/api/orchestration/scheduled-tasks/upcoming',
+      '/api/personal-hq/status',
+      '/api/progression'
+    ]);
+
+    page.on('request', request => {
+      const url = new URL(request.url());
+      if (url.pathname === '/api/workspaces' && url.searchParams.get('tree') === 'true') {
+        workspaceTreeRequests += 1;
+        workspaceDerivedRequests.push(`${url.pathname}${url.search}`);
+      } else if (workspaceDerivedPaths.has(url.pathname)) {
+        workspaceDerivedRequests.push(`${url.pathname}${url.search}`);
+      }
+    });
+    await page.route('**/api/onboarding/status', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          needs_onboarding: true,
+          current_step: 0,
+          completed: false,
+          skipped: false,
+          steps_completed: [],
+          user_name: '',
+          assistant_name: 'Ori'
+        })
+      })
+    );
+    await page.route('**/api/workspaces?tree=true', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          folders: [{ id: 'foreign-workspace', name: seededName, kind: 'workspace' }]
+        })
+      })
+    );
+
+    await page.goto('/');
+
+    await expect(page.locator('#onboardingModal')).toBeVisible();
+    await expect(page.locator('#homeCockpit')).toHaveAttribute('data-state', 'onboarding-required');
+    await expect(page.getByText(seededName)).toHaveCount(0);
+    await expect(page.locator('.ws-map-tile[data-ws-id="foreign-workspace"]')).toHaveCount(0);
+    expect(workspaceTreeRequests).toBe(0);
+    expect(workspaceDerivedRequests).toEqual([]);
+  });
+
+  test('completed onboarding hydrates and renders the seeded workspace Map', async ({ page }) => {
+    const seeded = {
+      id: 'onboarding-gate-seeded',
+      name: 'Ready workspace',
+      kind: 'workspace',
+      status: 'idle',
+      agent_count: 0,
+      open_task_count: 0,
+      children: []
+    };
+    let workspaceTreeRequests = 0;
+
+    page.on('request', request => {
+      const url = new URL(request.url());
+      if (url.pathname === '/api/workspaces' && url.searchParams.get('tree') === 'true') {
+        workspaceTreeRequests += 1;
+      }
+    });
+    await skipOnboarding(page);
+    await page.route('**/api/workspaces?tree=true', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ folders: [seeded] })
+      })
+    );
+
+    await page.goto('/');
+
+    await expect(page.locator('#homeCockpit')).toHaveAttribute('data-state', 'ready');
+    await expect(
+      page.locator(`.ws-map-tile[data-ws-id="${seeded.id}"] .ws-map-tile-name`)
+    ).toHaveText(seeded.name);
+    expect(workspaceTreeRequests).toBe(1);
+  });
+});
+
 /**
  * Ensure at least one CONCRETE workspace exists so the Map has a tile to draw.
  *
