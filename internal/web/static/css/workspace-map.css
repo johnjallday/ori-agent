@@ -690,10 +690,13 @@
    footprint. Solid (not dashed like is-dragging, not dotted like is-unsaved)
    so the shape alone tells the three states apart, colour aside (FR-120);
    the readout text carries the same information for anyone who can't see
-   colour or shape either. */
+   colour or shape either. Half-transparent so the building underneath —
+   the one it would land on — stays visible through it, rather than just
+   telling the user something is wrong without showing what. */
 .ws-map-tile.is-blocked {
   outline: 3px solid var(--ws-danger, #d9534f);
   outline-offset: 4px;
+  opacity: 0.5;
 }
 .ws-map-tile.is-dragging.is-blocked {
   cursor: not-allowed;

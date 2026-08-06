@@ -2222,6 +2222,7 @@ test('a cluster drag over an outside footprint shows a blocked indicator that cl
 
   const handle = harness.handle('grp');
   const district = harness.district('grp');
+  const childA = harness.tile('child-a');
   const bannerText = harness.control('[data-map-build-text]');
   const banner = harness.control('[data-map-build-banner]');
   const outsider = harness.tile('outsider');
@@ -2232,6 +2233,7 @@ test('a cluster drag over an outside footprint shows a blocked indicator that cl
   // Well clear of the outsider: no blocked state yet.
   handle.fire('pointermove', tilePointer(300, 300));
   assert.equal(district.classList.contains('is-blocked'), false, 'not overlapping yet');
+  assert.equal(childA.classList.contains('is-blocked'), false);
   assert.equal(banner.classList.contains('is-blocked'), false);
 
   // child-a (152,152) would land at (862,900) — one snap step short of the
@@ -2241,17 +2243,23 @@ test('a cluster drag over an outside footprint shows a blocked indicator that cl
     district.classList.contains('is-blocked'),
     'a cluster overlap is shown live, not only refused after the drop'
   );
+  assert.ok(
+    childA.classList.contains('is-blocked'),
+    'the member tile itself goes translucent too, not just the district border — that tile is what covers the outsider'
+  );
   assert.ok(banner.classList.contains('is-blocked'), 'the banner box itself turns red too, not just the district');
   assert.match(bannerText.textContent, /Occupied/, 'the state is also carried by text, not colour alone');
 
   // Back to clear ground before releasing: the indicator lifts live too.
   handle.fire('pointermove', tilePointer(300, 300));
   assert.equal(district.classList.contains('is-blocked'), false, 'clears once no longer overlapping');
+  assert.equal(childA.classList.contains('is-blocked'), false);
   assert.equal(banner.classList.contains('is-blocked'), false);
 
   handle.fire('pointerup', tilePointer(300, 300));
   await flush();
   assert.equal(district.classList.contains('is-blocked'), false, 'nothing lingers after the drop');
+  assert.equal(childA.classList.contains('is-blocked'), false);
   assert.equal(banner.classList.contains('is-blocked'), false);
 });
 

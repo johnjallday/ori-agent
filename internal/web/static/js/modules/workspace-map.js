@@ -3113,6 +3113,24 @@
   }
 
   /**
+   * Mirror .is-blocked onto the district AND every member tile, not just the
+   * district's own border — the member tiles are the opaque things actually
+   * covering whatever they'd land on, so they're what needs to go
+   * translucent for that building to show through (see .ws-map-tile.is-
+   * blocked's opacity in workspace-map.css).
+   */
+  function setClusterBlocked(state, blocked) {
+    if (state.districtEl && state.districtEl.classList) {
+      state.districtEl.classList.toggle('is-blocked', blocked);
+    }
+    (state.members || []).forEach(function (member) {
+      if (member.el && member.el.classList) {
+        member.el.classList.toggle('is-blocked', blocked);
+      }
+    });
+  }
+
+  /**
    * Commit a cluster move.
    *
    * The client sends the group and one delta, not a list of coordinates: the
@@ -3196,9 +3214,7 @@
         };
         previewCluster(clusterDrag, clusterDrag.delta);
         var blocked = clusterCollides(clusterDrag.groupId, clusterDrag.members, clusterDrag.delta);
-        if (clusterDrag.districtEl && clusterDrag.districtEl.classList) {
-          clusterDrag.districtEl.classList.toggle('is-blocked', blocked);
-        }
+        setClusterBlocked(clusterDrag, blocked);
         setDragReadout(container, snappedTarget, blocked ? MOVE_BLOCKED_INSTRUCTION : undefined);
       });
 
@@ -3216,8 +3232,8 @@
         }
         if (state.districtEl && state.districtEl.classList) {
           state.districtEl.classList.remove('is-dragging');
-          state.districtEl.classList.remove('is-blocked');
         }
+        setClusterBlocked(state, false);
         setDragReadout(container, null);
         if (!state.moved) return;
         if (cancelled) {
@@ -3318,9 +3334,7 @@
     var banner = container.querySelector('[data-map-build-banner]');
     if (banner && !buildState.active) banner.hidden = true;
     if (state.cluster) {
-      if (state.cluster.districtEl && state.cluster.districtEl.classList) {
-        state.cluster.districtEl.classList.remove('is-blocked');
-      }
+      setClusterBlocked(state.cluster, false);
     } else if (state.el && state.el.classList) {
       state.el.classList.remove('is-blocked');
     }
@@ -3390,9 +3404,7 @@
       var delta = { x: next.x - moveState.origin.x, y: next.y - moveState.origin.y };
       previewCluster(moveState.cluster, delta);
       blocked = clusterCollides(moveState.cluster.groupId, moveState.cluster.members, delta);
-      if (moveState.cluster.districtEl && moveState.cluster.districtEl.classList) {
-        moveState.cluster.districtEl.classList.toggle('is-blocked', blocked);
-      }
+      setClusterBlocked(moveState.cluster, blocked);
     } else {
       placeElement(moveState.el, next);
       blocked = wouldOverlapOccupied(next, moveState.id);
