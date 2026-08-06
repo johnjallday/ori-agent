@@ -1276,12 +1276,19 @@ function createCameraHarness({ width = 1000, height = 600, tiles = [], districts
   function control(name) {
     if (!controls[name]) {
       const attrs = {};
+      const controlClasses = new Set();
       controls[name] = {
         disabled: false,
         hidden: true,
         textContent: '',
         attrs,
         style: {},
+        classList: {
+          add: c => controlClasses.add(c),
+          remove: c => controlClasses.delete(c),
+          contains: c => controlClasses.has(c),
+          toggle: (c, on) => (on ? controlClasses.add(c) : controlClasses.delete(c))
+        },
         setAttribute: (k, v) => (attrs[k] = String(v)),
         getAttribute: k => (k in attrs ? attrs[k] : null),
         // The selection bar owns a live count element inside it.
@@ -1912,6 +1919,66 @@ test('a drop onto an occupied anchor resolves to the nearest free one (FR-72)', 
   assert.equal(other.style.left, '456px', 'the resident building did not move to make room');
 });
 
+test('a drop one snap step from an occupied anchor is pushed clear of its footprint, not just its point (FR-72, FR-73)', async () => {
+  // ws-1 is dragged to a point distinct from ws-2's anchor — one snap step
+  // away — but still well inside ws-2's CELL_W-wide box, so the two would
+  // render fully stacked if only exact-point equality were checked.
+  const { harness, patches } = await mountedDrag({
+    positions: { 'ws-1': { x: 380, y: 228 }, 'ws-2': { x: 760, y: 228 } }
+  });
+  const tile = harness.tile('ws-1');
+  const other = harness.tile('ws-2');
+  other.style.left = '760px';
+  other.style.top = '228px';
+
+  tile.fire('pointerdown', tilePointer(100, 100));
+  tile.fire('pointermove', tilePointer(442, 100)); // world (722, 228): 38 short of ws-2
+  tile.fire('pointerup', tilePointer(442, 100));
+  await flush();
+
+  const committed = patches[0].operations[0].positions['ws-1'];
+  assert.ok(
+    Math.abs(committed.x - 760) >= 176 || Math.abs(committed.y - 228) >= 170,
+    'the resolved anchor must clear the occupied footprint, not just its point'
+  );
+  assert.equal(other.style.left, '760px', 'the resident building did not move to make room');
+});
+
+test('a drag over an occupied footprint shows a blocked indicator that clears on release (FR-72, FR-73, FR-120)', async () => {
+  const { harness, patches } = await mountedDrag({
+    positions: { 'ws-1': { x: 380, y: 228 }, 'ws-2': { x: 760, y: 228 } }
+  });
+  const tile = harness.tile('ws-1');
+  const bannerText = harness.control('[data-map-build-text]');
+  const banner = harness.control('[data-map-build-banner]');
+  harness.tile('ws-2').style.left = '760px';
+  harness.tile('ws-2').style.top = '228px';
+
+  tile.fire('pointerdown', tilePointer(100, 100));
+  // Still clear of ws-2's footprint: no blocked state.
+  tile.fire('pointermove', tilePointer(200, 100));
+  assert.equal(tile.classList.contains('is-blocked'), false, 'not overlapping yet');
+  assert.equal(banner.classList.contains('is-blocked'), false);
+  assert.doesNotMatch(bannerText.textContent, /Occupied/);
+
+  // 38 short of ws-2's anchor — inside its box, the exact #308 scenario.
+  tile.fire('pointermove', tilePointer(442, 100));
+  assert.ok(tile.classList.contains('is-blocked'), 'overlapping another building is shown, not silent');
+  assert.ok(banner.classList.contains('is-blocked'), 'the banner box itself turns red too, not just the tile');
+  assert.match(bannerText.textContent, /Occupied/, 'the state is also carried by text, not colour alone');
+
+  // Move back off it: the indicator clears live, not just on drop.
+  tile.fire('pointermove', tilePointer(200, 100));
+  assert.equal(tile.classList.contains('is-blocked'), false, 'clears once no longer overlapping');
+  assert.equal(banner.classList.contains('is-blocked'), false);
+
+  tile.fire('pointerup', tilePointer(200, 100));
+  await flush();
+  assert.equal(tile.classList.contains('is-blocked'), false, 'nothing lingers after the drop');
+  assert.equal(banner.classList.contains('is-blocked'), false);
+  assert.equal(patches.length, 1);
+});
+
 test('a failed save puts the building back and offers a retry (FR-71)', async () => {
   const { map, harness, patches } = await mountedDrag({ patchResponse: 'fail' });
   const tile = harness.tile('ws-1');
@@ -2015,6 +2082,37 @@ test('Escape during a keyboard move restores and saves nothing (FR-79)', async (
   assert.deepEqual({ ...harness.tile('ws-1').at() }, { x: 380, y: 228 });
 });
 
+test('a keyboard move over an occupied footprint shows a blocked indicator too, not just pointer drags (FR-77 – FR-79, FR-120)', async () => {
+  const { map, harness, patches } = await mountedDrag({
+    positions: { 'ws-1': { x: 380, y: 228 }, 'ws-2': { x: 760, y: 228 } }
+  });
+  map.setSelectedId(null, [], 'ws-1');
+  const tile = harness.tile('ws-1');
+  const bannerText = harness.control('[data-map-build-text]');
+  const banner = harness.control('[data-map-build-banner]');
+  harness.tile('ws-2').style.left = '760px';
+  harness.tile('ws-2').style.top = '228px';
+
+  harness.control('[data-map-move]').click();
+  assert.equal(tile.classList.contains('is-blocked'), false, 'starts clear');
+  assert.equal(banner.classList.contains('is-blocked'), false);
+
+  // Shift+Right then Left nets +342: one snap step short of ws-2's anchor,
+  // inside its footprint — the keyboard path must see the same collision the
+  // pointer path does.
+  harness.fire('keydown', keyEvent('ArrowRight', { shiftKey: true }));
+  harness.fire('keydown', keyEvent('ArrowLeft'));
+  assert.ok(tile.classList.contains('is-blocked'), 'a keyboard-driven overlap is shown live');
+  assert.ok(banner.classList.contains('is-blocked'), 'the banner box itself turns red too, not just the tile');
+  assert.match(bannerText.textContent, /Occupied/, 'the state is also carried by text, not colour alone');
+
+  harness.fire('keydown', keyEvent('Escape'));
+  await flush();
+  assert.equal(tile.classList.contains('is-blocked'), false, 'nothing lingers after cancelling');
+  assert.equal(banner.classList.contains('is-blocked'), false);
+  assert.equal(patches.length, 0);
+});
+
 // ---------------------------------------------------------------------------
 // Moving districts (#292 FR-81 – FR-94)
 //
@@ -2116,6 +2214,55 @@ test('dragging the district handle moves the whole cluster by one delta (FR-86)'
   assert.equal(JSON.stringify(patches[0]).includes('parent'), false);
 });
 
+test('a cluster drag over an outside footprint shows a blocked indicator that clears when it moves clear (FR-88, FR-73, FR-120)', async () => {
+  const { harness } = await mountedCluster();
+  // Snapping off, so the drag lands exactly where the arithmetic says.
+  harness.control('[data-map-snap]').click();
+  await flush();
+
+  const handle = harness.handle('grp');
+  const district = harness.district('grp');
+  const childA = harness.tile('child-a');
+  const bannerText = harness.control('[data-map-build-text]');
+  const banner = harness.control('[data-map-build-banner]');
+  const outsider = harness.tile('outsider');
+  outsider.style.left = '900px';
+  outsider.style.top = '900px';
+
+  handle.fire('pointerdown', tilePointer(0, 0));
+  // Well clear of the outsider: no blocked state yet.
+  handle.fire('pointermove', tilePointer(300, 300));
+  assert.equal(district.classList.contains('is-blocked'), false, 'not overlapping yet');
+  assert.equal(childA.classList.contains('is-blocked'), false);
+  assert.equal(banner.classList.contains('is-blocked'), false);
+
+  // child-a (152,152) would land at (862,900) — one snap step short of the
+  // outsider's anchor (900,900), inside its footprint.
+  handle.fire('pointermove', tilePointer(710, 748));
+  assert.ok(
+    district.classList.contains('is-blocked'),
+    'a cluster overlap is shown live, not only refused after the drop'
+  );
+  assert.ok(
+    childA.classList.contains('is-blocked'),
+    'the member tile itself goes translucent too, not just the district border — that tile is what covers the outsider'
+  );
+  assert.ok(banner.classList.contains('is-blocked'), 'the banner box itself turns red too, not just the district');
+  assert.match(bannerText.textContent, /Occupied/, 'the state is also carried by text, not colour alone');
+
+  // Back to clear ground before releasing: the indicator lifts live too.
+  handle.fire('pointermove', tilePointer(300, 300));
+  assert.equal(district.classList.contains('is-blocked'), false, 'clears once no longer overlapping');
+  assert.equal(childA.classList.contains('is-blocked'), false);
+  assert.equal(banner.classList.contains('is-blocked'), false);
+
+  handle.fire('pointerup', tilePointer(300, 300));
+  await flush();
+  assert.equal(district.classList.contains('is-blocked'), false, 'nothing lingers after the drop');
+  assert.equal(childA.classList.contains('is-blocked'), false);
+  assert.equal(banner.classList.contains('is-blocked'), false);
+});
+
 test('a cluster move that would land on an outside building is refused, not resolved (FR-88)', async () => {
   const { harness, patches } = await mountedCluster();
   // Snapping off, so the drag lands exactly where the arithmetic says.
@@ -2135,6 +2282,36 @@ test('a cluster move that would land on an outside building is refused, not reso
 
   const moves = patches.filter(p => p.operations[0].op === 'translate_group');
   assert.equal(moves.length, 0, 'the collision blocked the commit');
+  assert.deepEqual(
+    { ...harness.district('grp').at() },
+    { x: 100, y: 100 },
+    'the district returned'
+  );
+  assert.deepEqual({ ...harness.tile('child-a').at() }, { x: 152, y: 152 });
+  assert.equal(outsider.style.left, '900px', 'the outside building was never touched');
+});
+
+test('a cluster move that would only overlap an outside building is refused too (FR-88, FR-73)', async () => {
+  const { harness, patches } = await mountedCluster();
+  // Snapping off, so the drag lands exactly where the arithmetic says.
+  harness.control('[data-map-snap]').click();
+  await flush();
+
+  const handle = harness.handle('grp');
+  const outsider = harness.tile('outsider');
+  outsider.style.left = '900px';
+  outsider.style.top = '900px';
+
+  // Move child-a from (152,152) to (862,900) — one snap step short of the
+  // outsider's anchor (900,900): a distinct point, but still inside its
+  // CELL_W-wide footprint.
+  handle.fire('pointerdown', tilePointer(0, 0));
+  handle.fire('pointermove', tilePointer(710, 748));
+  handle.fire('pointerup', tilePointer(710, 748));
+  await flush();
+
+  const moves = patches.filter(p => p.operations[0].op === 'translate_group');
+  assert.equal(moves.length, 0, 'an overlapping-but-distinct anchor is still a collision');
   assert.deepEqual(
     { ...harness.district('grp').at() },
     { x: 100, y: 100 },

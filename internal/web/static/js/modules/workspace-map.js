@@ -85,6 +85,10 @@
   var MOVE_INSTRUCTION = 'Moving — release to drop, or press Escape to put it back.';
   var KEYBOARD_MOVE_INSTRUCTION =
     'Moving — arrow keys to position, Enter to save, Escape to put it back.';
+  // Shown in place of the instruction above while the current candidate
+  // overlaps another building — the red outline carries the same meaning for
+  // sighted users, but state must never be colour alone (FR-120).
+  var MOVE_BLOCKED_INSTRUCTION = 'Occupied — this would land on top of another building.';
 
   // ---------- current user's coordinate layout ----------
   //
@@ -2773,19 +2777,21 @@
   }
 
   /**
-   * Resolve where a drop may actually land.
-   *
-   * Two buildings may not be committed to the same anchor (FR-72). When the
-   * requested point is taken, the nearest free anchor is chosen by walking a
-   * deterministic ring of snap-step offsets — nearest first, and in a fixed
-   * order at equal distance, so the same drop always resolves the same way. No
-   * other building is moved to make room (FR-74).
+   * Would a box of CELL_W x CELL_H anchored at `a` overlap the same box
+   * anchored at `b`? Anchors are top-left corners (see placeElement), so this
+   * is a same-size axis-aligned rectangle intersection test. Touching edges
+   * (the boxes exactly abut) is not an overlap — only shared area is.
    */
-  function resolveDropAnchor(id, point) {
-    var taken = Object.create(null);
+  function footprintsOverlap(a, b) {
+    return Math.abs(a.x - b.x) < CELL_W && Math.abs(a.y - b.y) < CELL_H;
+  }
+
+  /** Every committed anchor other than `excludeId`'s own. */
+  function occupiedAnchors(excludeId) {
+    var occupied = [];
     function claim(nodeId, anchor) {
-      if (!anchor || nodeId === id) return;
-      taken[anchorKey(anchor)] = true;
+      if (!anchor || nodeId === excludeId) return;
+      occupied.push(anchor);
     }
     Object.keys(layoutState.positions).forEach(function (nodeId) {
       claim(nodeId, layoutState.positions[nodeId]);
@@ -2795,7 +2801,40 @@
         claim(node.id, node);
       });
     }
-    if (!taken[anchorKey(point)]) return { x: point.x, y: point.y, resolved: false };
+    return occupied;
+  }
+
+  /**
+   * Would `excludeId`'s box land on another building if dropped at `point`?
+   * Cheap enough to call on every pointermove/keystroke for live feedback —
+   * same recompute-per-move cost the readout coordinate already pays.
+   */
+  function wouldOverlapOccupied(point, excludeId) {
+    return occupiedAnchors(excludeId).some(function (anchor) {
+      return footprintsOverlap(point, anchor);
+    });
+  }
+
+  /**
+   * Resolve where a drop may actually land.
+   *
+   * A building's on-screen box is CELL_W x CELL_H, so "occupied" means "any
+   * part of this box already belongs to another building" — not just "the
+   * exact same point" (FR-72, FR-73: two buildings may not be committed to
+   * the same anchor, and every building's hit target must stay reachable).
+   * When the requested point would overlap, the nearest free anchor is chosen
+   * by walking a deterministic ring of snap-step offsets — nearest first, and
+   * in a fixed order at equal distance, so the same drop always resolves the
+   * same way. No other building is moved to make room (FR-74).
+   */
+  function resolveDropAnchor(id, point) {
+    var occupied = occupiedAnchors(id);
+    function overlapsOccupied(candidate) {
+      return occupied.some(function (anchor) {
+        return footprintsOverlap(candidate, anchor);
+      });
+    }
+    if (!overlapsOccupied(point)) return { x: point.x, y: point.y, resolved: false };
 
     var step = layoutState.snapToGrid ? SNAP_STEP : Math.round(CELL_W / 4);
     for (var ring = 1; ring <= 12; ring++) {
@@ -2804,7 +2843,7 @@
           if (Math.max(Math.abs(dx), Math.abs(dy)) !== ring) continue;
           var candidate = { x: point.x + dx * step, y: point.y + dy * step };
           if (
-            !taken[anchorKey(candidate)] &&
+            !overlapsOccupied(candidate) &&
             isSafeCoordinate(candidate.x) &&
             isSafeCoordinate(candidate.y)
           ) {
@@ -2907,7 +2946,9 @@
         // Only the dragged element is touched: no re-render, no request
         // (FR-65, FR-69, FR-122).
         placeElement(el, dragState.candidate);
-        setDragReadout(container, dragState.candidate);
+        var blocked = wouldOverlapOccupied(dragState.candidate, dragState.id);
+        if (el.classList) el.classList.toggle('is-blocked', blocked);
+        setDragReadout(container, dragState.candidate, blocked ? MOVE_BLOCKED_INSTRUCTION : undefined);
       });
 
       function finish(event, cancelled) {
@@ -2922,7 +2963,10 @@
         ) {
           el.releasePointerCapture(state.pointerId);
         }
-        if (el.classList) el.classList.remove('is-dragging');
+        if (el.classList) {
+          el.classList.remove('is-dragging');
+          el.classList.remove('is-blocked');
+        }
         setDragReadout(container, null);
         if (!state.moved) return;
         // A gesture that became a drag must not also read as a click (FR-66).
@@ -2974,9 +3018,16 @@
     if (!readout || !banner) return;
     if (!point) {
       if (!buildState.active) banner.hidden = true;
+      if (banner.classList) banner.classList.remove('is-blocked');
       return;
     }
     banner.hidden = false;
+    // The banner itself carries the same red signal as the tile/district
+    // outline — driven by which instruction it's showing, so every call site
+    // that already passes MOVE_BLOCKED_INSTRUCTION gets this for free.
+    if (banner.classList) {
+      banner.classList.toggle('is-blocked', instruction === MOVE_BLOCKED_INSTRUCTION);
+    }
     setBannerMode(container, instruction || MOVE_INSTRUCTION, false);
     readout.textContent = candidateLabel(point);
   }
@@ -3019,9 +3070,12 @@
   /**
    * Would this delta drop a cluster member on top of a building outside it?
    *
-   * A cluster collision is refused rather than resolved: nudging one member
-   * would shear the district, and moving the resident building would move
-   * something the user never touched (FR-88).
+   * Overlap, not just exact-anchor equality, counts as a collision here too
+   * (same footprint rule as resolveDropAnchor) — otherwise a group drag could
+   * still bury an outside building under a member's box. A cluster collision
+   * is refused rather than resolved: nudging one member would shear the
+   * district, and moving the resident building would move something the user
+   * never touched (FR-88).
    */
   function clusterCollides(groupId, members, delta) {
     var inCluster = Object.create(null);
@@ -3029,16 +3083,18 @@
     members.forEach(function (member) {
       inCluster[member.id] = true;
     });
-    var taken = Object.create(null);
+    var occupied = [];
     if (lastWorldLayout) {
       lastWorldLayout.nodes.forEach(function (node) {
         if (inCluster[node.id]) return;
-        var anchor = committedAnchor(node.id) || { x: node.x, y: node.y };
-        taken[anchorKey(anchor)] = true;
+        occupied.push(committedAnchor(node.id) || { x: node.x, y: node.y });
       });
     }
     return members.some(function (member) {
-      return taken[anchorKey({ x: member.origin.x + delta.x, y: member.origin.y + delta.y })];
+      var candidate = { x: member.origin.x + delta.x, y: member.origin.y + delta.y };
+      return occupied.some(function (anchor) {
+        return footprintsOverlap(candidate, anchor);
+      });
     });
   }
 
@@ -3054,6 +3110,24 @@
 
   function restoreCluster(state) {
     previewCluster(state, { x: 0, y: 0 });
+  }
+
+  /**
+   * Mirror .is-blocked onto the district AND every member tile, not just the
+   * district's own border — the member tiles are the opaque things actually
+   * covering whatever they'd land on, so they're what needs to go
+   * translucent for that building to show through (see .ws-map-tile.is-
+   * blocked's opacity in workspace-map.css).
+   */
+  function setClusterBlocked(state, blocked) {
+    if (state.districtEl && state.districtEl.classList) {
+      state.districtEl.classList.toggle('is-blocked', blocked);
+    }
+    (state.members || []).forEach(function (member) {
+      if (member.el && member.el.classList) {
+        member.el.classList.toggle('is-blocked', blocked);
+      }
+    });
   }
 
   /**
@@ -3139,7 +3213,9 @@
           y: snappedTarget.y - clusterDrag.districtOrigin.y
         };
         previewCluster(clusterDrag, clusterDrag.delta);
-        setDragReadout(container, snappedTarget);
+        var blocked = clusterCollides(clusterDrag.groupId, clusterDrag.members, clusterDrag.delta);
+        setClusterBlocked(clusterDrag, blocked);
+        setDragReadout(container, snappedTarget, blocked ? MOVE_BLOCKED_INSTRUCTION : undefined);
       });
 
       function finish(event, cancelled) {
@@ -3157,6 +3233,7 @@
         if (state.districtEl && state.districtEl.classList) {
           state.districtEl.classList.remove('is-dragging');
         }
+        setClusterBlocked(state, false);
         setDragReadout(container, null);
         if (!state.moved) return;
         if (cancelled) {
@@ -3256,6 +3333,11 @@
     setDragReadout(container, null);
     var banner = container.querySelector('[data-map-build-banner]');
     if (banner && !buildState.active) banner.hidden = true;
+    if (state.cluster) {
+      setClusterBlocked(state.cluster, false);
+    } else if (state.el && state.el.classList) {
+      state.el.classList.remove('is-blocked');
+    }
 
     if (state.cluster) {
       var delta = {
@@ -3317,15 +3399,20 @@
         return false;
     }
     moveState.candidate = next;
+    var blocked;
     if (moveState.cluster) {
-      previewCluster(moveState.cluster, {
-        x: next.x - moveState.origin.x,
-        y: next.y - moveState.origin.y
-      });
+      var delta = { x: next.x - moveState.origin.x, y: next.y - moveState.origin.y };
+      previewCluster(moveState.cluster, delta);
+      blocked = clusterCollides(moveState.cluster.groupId, moveState.cluster.members, delta);
+      setClusterBlocked(moveState.cluster, blocked);
     } else {
       placeElement(moveState.el, next);
+      blocked = wouldOverlapOccupied(next, moveState.id);
+      if (moveState.el && moveState.el.classList) {
+        moveState.el.classList.toggle('is-blocked', blocked);
+      }
     }
-    setDragReadout(container, next, KEYBOARD_MOVE_INSTRUCTION);
+    setDragReadout(container, next, blocked ? MOVE_BLOCKED_INSTRUCTION : KEYBOARD_MOVE_INSTRUCTION);
     announce(container, 'Candidate ' + candidateLabel(next));
     return true;
   }

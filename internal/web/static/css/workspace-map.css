@@ -473,6 +473,18 @@
   color: var(--ws-faction);
   white-space: nowrap;
 }
+/* The banner turns the same red as the tile/district outline while the
+   current move candidate is occupied (set in setDragReadout, driven by
+   MOVE_BLOCKED_INSTRUCTION) — the instruction text right next to it still
+   says "Occupied" either way, so this is reinforcement, not the only signal
+   (FR-120). */
+.ws-map-build.is-blocked {
+  border-color: var(--ws-danger, #d9534f);
+}
+.ws-map-build.is-blocked .ws-map-build-dot,
+.ws-map-build.is-blocked .ws-map-build-coords {
+  color: var(--ws-danger, #d9534f);
+}
 /* Build mode gets its own cursor as well as the banner: the state is carried by
    shape and text, not by colour alone (FR-120). */
 .ws-map-canvas.is-building {
@@ -625,6 +637,18 @@
 .ws-map-district.is-dragging .ws-map-district-handle {
   cursor: grabbing;
 }
+/* Would this delta bury a building outside the district? Same red-solid
+   signal as .ws-map-tile.is-blocked below, sized for a border instead of an
+   outline. Declared after is-dragging so it wins the colour while both
+   classes are present mid-drag. */
+.ws-map-district.is-blocked {
+  border-style: solid;
+  border-width: 2px;
+  border-color: var(--ws-danger, #d9534f);
+}
+.ws-map-district.is-blocked .ws-map-district-handle {
+  cursor: not-allowed;
+}
 
 /* building tile */
 .ws-map-tile {
@@ -661,6 +685,21 @@
 .ws-map-tile.is-unsaved {
   outline: 2px dotted var(--ws-danger, #d9534f);
   outline-offset: 4px;
+}
+/* The current drag/keyboard candidate would overlap another building's
+   footprint. Solid (not dashed like is-dragging, not dotted like is-unsaved)
+   so the shape alone tells the three states apart, colour aside (FR-120);
+   the readout text carries the same information for anyone who can't see
+   colour or shape either. Half-transparent so the building underneath —
+   the one it would land on — stays visible through it, rather than just
+   telling the user something is wrong without showing what. */
+.ws-map-tile.is-blocked {
+  outline: 3px solid var(--ws-danger, #d9534f);
+  outline-offset: 4px;
+  opacity: 0.5;
+}
+.ws-map-tile.is-dragging.is-blocked {
+  cursor: not-allowed;
 }
 @media (prefers-reduced-motion: reduce) {
   .ws-map-tile,
