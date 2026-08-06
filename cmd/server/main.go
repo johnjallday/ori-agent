@@ -260,7 +260,7 @@ func activateDataDirectory(dataDir string) error {
 		if !os.IsNotExist(err) {
 			return fmt.Errorf("inspect data directory %q: %w", absoluteDir, err)
 		}
-		if err := os.MkdirAll(absoluteDir, 0o755); err != nil {
+		if err := os.MkdirAll(absoluteDir, 0o750); err != nil {
 			return fmt.Errorf("create data directory %q: %w", absoluteDir, err)
 		}
 		createdDataDir = true
@@ -271,7 +271,7 @@ func activateDataDirectory(dataDir string) error {
 	}
 	absoluteDir = physicalDir
 
-	if err := os.MkdirAll(filepath.Join(absoluteDir, "vaults"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(absoluteDir, "vaults"), 0o750); err != nil {
 		return fmt.Errorf("create vault directory: %w", err)
 	}
 
