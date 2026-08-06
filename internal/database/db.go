@@ -174,8 +174,10 @@ func (db *DB) Close() error {
 	return db.DB.Close()
 }
 
-// getDataDir returns the application's data directory.
-// This mirrors the logic in other parts of the application.
+// getDataDir returns the application's activated data directory. cmd/server
+// publishes the canonical absolute root through ORI_DATA_DIR before opening the
+// database. The CWD fallback is retained only for package callers that bypass
+// the application startup boundary.
 func getDataDir() (string, error) {
 	// Check for environment variable first
 	if dir := os.Getenv("ORI_DATA_DIR"); dir != "" {
