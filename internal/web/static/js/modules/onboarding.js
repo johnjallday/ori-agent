@@ -1,5 +1,7 @@
 // Onboarding module - Simplified 3-phase conversational onboarding with Ori character
 
+import { loadOnboardingStatus } from './onboarding-gate.js';
+
 const FALLBACK_TIMEZONES = [
   'UTC',
   'Africa/Cairo',
@@ -238,14 +240,7 @@ export class OnboardingManager {
   // --- API calls ---
 
   async checkOnboardingStatus() {
-    try {
-      const response = await fetch('/api/onboarding/status');
-      if (!response.ok) throw new Error('Failed to fetch onboarding status');
-      return await response.json();
-    } catch (error) {
-      console.error('Error checking onboarding status:', error);
-      return { needs_onboarding: false };
-    }
+    return loadOnboardingStatus();
   }
 
   async saveNames() {

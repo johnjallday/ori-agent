@@ -167,80 +167,141 @@ func main() {
 	logger.Info("Server stopped", nil)
 }
 
-// ensureDataDirectory checks if runtime data files exist in current directory.
-// If they don't exist and we're running as a standalone binary, create an ori-data folder.
+// dataDirectoryInputs contains the process facts used to choose the one runtime
+// data root. Keeping resolution pure makes the launch-mode precedence testable
+// without reading or mutating a developer's real HOME.
+type dataDirectoryInputs struct {
+	configuredDir  string
+	executablePath string
+	goos           string
+	homeDir        string
+	workingDir     string
+	hasDataFiles   bool
+}
+
+// ensureDataDirectory resolves and activates one canonical runtime root before
+// server.New constructs SQLite, config, agent, vault, reset, or workspace
+// stores. Publishing the absolute root through ORI_DATA_DIR is the ownership
+// contract shared by packages that historically chose different CWD/HOME
+// fallbacks.
 func ensureDataDirectory() error {
 	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("resolve launch directory: %w", err)
+	}
+
+	executablePath, _ := os.Executable()
+	homeDir, _ := os.UserHomeDir()
+	dataDir, err := resolveDataDirectory(dataDirectoryInputs{
+		configuredDir:  os.Getenv("ORI_DATA_DIR"),
+		executablePath: executablePath,
+		goos:           runtime.GOOS,
+		homeDir:        homeDir,
+		workingDir:     cwd,
+		hasDataFiles:   hasRecognizedDataFiles(cwd),
+	})
 	if err != nil {
 		return err
 	}
 
-	// Check if we're already in a data directory or if data files exist
-	baseName := filepath.Base(cwd)
-	hasDataFiles := fileExists("agents.json") ||
-		fileExists("settings.json") ||
-		fileExists("sessions.db")
+	return activateDataDirectory(dataDir)
+}
 
-	// If already in ori-data directory (or OriAgent for installed app) or data files exist, we're good
-	if baseName == "ori-data" || baseName == "OriAgent" || hasDataFiles {
-		return nil
+// resolveDataDirectory applies launch precedence without touching the file
+// system: explicit override, installed macOS app, existing data directory, then
+// a standalone launch-local ori-data directory.
+func resolveDataDirectory(inputs dataDirectoryInputs) (string, error) {
+	workingDir := strings.TrimSpace(inputs.workingDir)
+	if workingDir == "" {
+		return "", errors.New("working directory is required")
+	}
+	workingDir, err := filepath.Abs(workingDir)
+	if err != nil {
+		return "", fmt.Errorf("resolve working directory %q: %w", inputs.workingDir, err)
 	}
 
-	// If running from a macOS app bundle, use Application Support directory
-	if runtime.GOOS == "darwin" {
-		if exePath, err := os.Executable(); err == nil && strings.Contains(exePath, ".app/Contents/MacOS") {
-			homeDir, err := os.UserHomeDir()
-			if err != nil {
-				return err
-			}
-			dataDir := filepath.Join(homeDir, "Library", "Application Support", "OriAgent")
-			if err := os.MkdirAll(dataDir, 0755); err != nil {
-				return err
-			}
-			if err := os.Chdir(dataDir); err != nil {
-				return err
-			}
-			logger.Debug("Working directory", logger.Fields{"dataDir": dataDir})
-			return nil
+	if configuredDir := strings.TrimSpace(inputs.configuredDir); configuredDir != "" {
+		if !filepath.IsAbs(configuredDir) {
+			configuredDir = filepath.Join(workingDir, configuredDir)
 		}
+		return filepath.Clean(configuredDir), nil
 	}
 
-	// Create ori-data directory and change into it
-	dataDir := filepath.Join(cwd, "ori-data")
+	if inputs.goos == "darwin" && strings.Contains(inputs.executablePath, ".app/Contents/MacOS") {
+		homeDir := strings.TrimSpace(inputs.homeDir)
+		if homeDir == "" {
+			return "", errors.New("resolve installed app data directory: home directory is unavailable")
+		}
+		return filepath.Join(homeDir, "Library", "Application Support", "OriAgent"), nil
+	}
+
+	baseName := filepath.Base(workingDir)
+	if baseName == "ori-data" || baseName == "OriAgent" || inputs.hasDataFiles {
+		return workingDir, nil
+	}
+
+	return filepath.Join(workingDir, "ori-data"), nil
+}
+
+// activateDataDirectory creates and enters the selected root, then publishes
+// its absolute path so every downstream package resolves the same profile.
+func activateDataDirectory(dataDir string) error {
+	dataDir = strings.TrimSpace(dataDir)
+	if dataDir == "" {
+		return errors.New("data directory is required")
+	}
+	absoluteDir, err := filepath.Abs(dataDir)
+	if err != nil {
+		return fmt.Errorf("resolve data directory %q: %w", dataDir, err)
+	}
+
 	createdDataDir := false
-	if _, err := os.Stat(dataDir); err != nil {
+	if _, err := os.Stat(absoluteDir); err != nil {
 		if !os.IsNotExist(err) {
-			return err
+			return fmt.Errorf("inspect data directory %q: %w", absoluteDir, err)
 		}
-		if mkErr := os.MkdirAll(dataDir, 0755); mkErr != nil {
-			return mkErr
+		if err := os.MkdirAll(absoluteDir, 0o750); err != nil {
+			return fmt.Errorf("create data directory %q: %w", absoluteDir, err)
 		}
 		createdDataDir = true
 	}
+	physicalDir, err := filepath.EvalSymlinks(absoluteDir)
+	if err != nil {
+		return fmt.Errorf("canonicalize data directory %q: %w", absoluteDir, err)
+	}
+	absoluteDir = physicalDir
+
+	if err := os.MkdirAll(filepath.Join(absoluteDir, "vaults"), 0o750); err != nil {
+		return fmt.Errorf("create vault directory: %w", err)
+	}
+
+	previousCWD, _ := os.Getwd()
+	if err := os.Chdir(absoluteDir); err != nil {
+		return fmt.Errorf("enter data directory %q: %w", absoluteDir, err)
+	}
+	if err := os.Setenv("ORI_DATA_DIR", absoluteDir); err != nil {
+		if previousCWD != "" {
+			_ = os.Chdir(previousCWD)
+		}
+		return fmt.Errorf("publish data directory: %w", err)
+	}
 
 	if createdDataDir {
-		logger.Info("Created data directory", logger.Fields{"dataDir": dataDir})
+		logger.Info("Created data directory", logger.Fields{"dataDir": absoluteDir})
 	} else {
-		logger.Info("Using existing data directory", logger.Fields{"dataDir": dataDir})
+		logger.Info("Using existing data directory", logger.Fields{"dataDir": absoluteDir})
 	}
-
-	vaultsDir := filepath.Join(dataDir, "vaults")
-	if err := os.MkdirAll(vaultsDir, 0755); err != nil {
-		return err
-	}
-
-	// Change working directory to the data directory
-	if err := os.Chdir(dataDir); err != nil {
-		return err
-	}
-
-	logger.Debug("Working directory", logger.Fields{"dataDir": dataDir})
+	logger.Debug("Working directory", logger.Fields{"dataDir": absoluteDir})
 	return nil
 }
 
-func fileExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
+func hasRecognizedDataFiles(dir string) bool {
+	for _, name := range []string{"agents.json", "settings.json", "sessions.db"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 // openBrowser opens the specified URL in the default browser

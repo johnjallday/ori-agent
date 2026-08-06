@@ -11,6 +11,8 @@
 // mirroring home-daily-brief.js) so home-calendar-ops-portal.test.js can
 // exercise them under plain Node with no DOM/network.
 
+import { loadOnboardingStatus, onboardingGateDecision } from './onboarding-gate.js';
+
 export function escapeHtml(value) {
   return String(value == null ? '' : value)
     .replace(/&/g, '&amp;')
@@ -159,6 +161,9 @@ export function renderBodyHTML(view) {
   }
 
   async function bootstrap() {
+    const onboardingStatus = await loadOnboardingStatus();
+    if (!onboardingGateDecision(onboardingStatus).allowWorkspaceHydration) return;
+
     let payload;
     try {
       payload = await fetchJSON('/api/calendar-ops/home-portal-summary');

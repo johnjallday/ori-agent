@@ -155,6 +155,13 @@
     });
   }
 
+  async function canHydrateWorkspaceData() {
+    const gate = window.OriOnboardingGate;
+    if (!gate?.loadOnboardingStatus || !gate?.onboardingGateDecision) return false;
+    const status = await gate.loadOnboardingStatus();
+    return gate.onboardingGateDecision(status).allowWorkspaceHydration === true;
+  }
+
   // ----- Section: Upcoming Scheduled Tasks -----
 
   async function loadUpcoming() {
@@ -269,7 +276,7 @@
 
   // ----- Init -----
 
-  function init() {
+  async function init() {
     // Ask Ori chips and the ⌘J shortcut live above the cockpit and are wired on
     // every Home render.
     wireChips();
@@ -280,13 +287,14 @@
     // the others — and Map, Tree, and Ask Ori — usable (FR85, FR113).
     if (!document.getElementById('cockpitRailToday')) return;
     wireTodayActions();
+    if (!(await canHydrateWorkspaceData())) return;
     loadUpcoming();
     loadRecentActivity();
   }
 
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
+    document.addEventListener('DOMContentLoaded', () => void init());
   } else {
-    init();
+    void init();
   }
 })();

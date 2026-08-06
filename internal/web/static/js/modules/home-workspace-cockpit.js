@@ -1072,6 +1072,13 @@ export function captureAvailability(hqStatus) {
 // Workspace-area states (FR110, FR112, FR113, FR114, FR120)
 // ---------------------------------------------------------------------------
 
+export function workspaceHydrationAllowed(onboardingGate) {
+  return (
+    onboardingGate?.state === ONBOARDING_GATE_READY &&
+    onboardingGate?.allowWorkspaceHydration === true
+  );
+}
+
 /**
  * Decide what the workspace area should show for a given load outcome.
  *
@@ -1079,7 +1086,25 @@ export function captureAvailability(hqStatus) {
  * FR120 forbids collapsing them, and FR113/FR114 require Retry and the
  * onboarding actions respectively.
  */
-export function workspaceAreaState({ loading, error, workspaces }) {
+export function workspaceAreaState({ loading, error, workspaces, onboardingGate }) {
+  if (onboardingGate?.state === ONBOARDING_GATE_LOADING) {
+    return {
+      state: 'onboarding-loading',
+      message: 'Preparing your workspace setup…',
+      canRetry: false
+    };
+  }
+  if (onboardingGate?.state === ONBOARDING_GATE_REQUIRED) {
+    return { state: 'onboarding-required', message: onboardingGate.message, canRetry: false };
+  }
+  if (onboardingGate?.state === ONBOARDING_GATE_UNAVAILABLE) {
+    return {
+      state: 'onboarding-unavailable',
+      message: onboardingGate.message,
+      detail: 'Workspace data remains hidden until Ori can verify setup status.',
+      canRetry: true
+    };
+  }
   if (loading) return { state: 'loading', message: 'Loading workspaces…', canRetry: false };
   if (error) {
     return {
@@ -1097,6 +1122,18 @@ export function workspaceAreaState({ loading, error, workspaces }) {
 
 export function renderWorkspaceAreaStatusHTML(status) {
   if (!status || status.state === 'ready') return '';
+  if (status.state === 'onboarding-loading' || status.state === 'onboarding-required') {
+    return `<div class="cockpit-area-message" data-state="${status.state}">${escapeHtml(status.message)}</div>`;
+  }
+  if (status.state === 'onboarding-unavailable') {
+    return (
+      '<div class="cockpit-area-message" data-state="onboarding-unavailable">' +
+      `<p class="cockpit-area-message-text">${escapeHtml(status.message)}</p>` +
+      `<p class="cockpit-area-message-detail">${escapeHtml(status.detail)}</p>` +
+      '<button type="button" class="modern-btn modern-btn-secondary" data-cockpit-onboarding-retry>Retry</button>' +
+      '</div>'
+    );
+  }
   if (status.state === 'loading') {
     return `<div class="cockpit-area-message" data-state="loading">${escapeHtml(status.message)}</div>`;
   }
@@ -1132,6 +1169,15 @@ export function renderWorkspaceAreaStatusHTML(status) {
 // interaction, and hands every mutation back here so shared state, refresh, and
 // rail context stay single-authority (FR117).
 import { mountTree, ancestorIds } from './home-workspace-tree.js';
+import {
+  ONBOARDING_GATE_LOADING,
+  ONBOARDING_GATE_REQUIRED,
+  ONBOARDING_GATE_READY,
+  ONBOARDING_GATE_UNAVAILABLE,
+  loadInitialWorkspaceTree,
+  loadOnboardingStatus,
+  onboardingGateDecision
+} from './onboarding-gate.js';
 
 (function () {
   if (typeof document === 'undefined' || typeof window === 'undefined') return;
@@ -1198,6 +1244,11 @@ import { mountTree, ancestorIds } from './home-workspace-tree.js';
     // Personal HQ status, read once and refreshed on HQ actions. Quick Capture
     // needs it to know where a capture goes (FR102/FR104).
     hqStatus: null,
+    onboardingGate: {
+      state: ONBOARDING_GATE_LOADING,
+      allowWorkspaceHydration: false,
+      message: 'Preparing your workspace setup…'
+    },
     loading: true,
     error: null,
     inFlight: null
@@ -1214,12 +1265,20 @@ import { mountTree, ancestorIds } from './home-workspace-tree.js';
     const status = workspaceAreaState({
       loading: state.loading,
       error: state.error,
-      workspaces: state.flattened
+      workspaces: state.flattened,
+      onboardingGate: state.onboardingGate
     });
     if (els.areaStatus) {
       els.areaStatus.innerHTML = renderWorkspaceAreaStatusHTML(status);
       const retry = els.areaStatus.querySelector('[data-cockpit-retry]');
       if (retry) retry.addEventListener('click', () => refresh());
+      const onboardingRetry = els.areaStatus.querySelector('[data-cockpit-onboarding-retry]');
+      if (onboardingRetry) {
+        onboardingRetry.addEventListener(
+          'click',
+          () => void initializeWorkspaceHydration({ force: true })
+        );
+      }
     }
     root.dataset.state = status.state;
     // The map is only meaningful once there is something truthful to draw.
@@ -1380,6 +1439,7 @@ import { mountTree, ancestorIds } from './home-workspace-tree.js';
    * rather than presenting the fallback as if it were a confirmed setting.
    */
   async function refreshWorkspaceRoot() {
+    if (!canHydrateWorkspaceData()) return;
     try {
       const res = await fetch('/api/settings/workspace-root');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -1858,6 +1918,7 @@ import { mountTree, ancestorIds } from './home-workspace-tree.js';
 
   /** Personal HQ status, used by Quick Capture. Additive and non-blocking. */
   async function refreshHQStatus() {
+    if (!canHydrateWorkspaceData()) return;
     try {
       const res = await fetch('/api/personal-hq/status');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -1909,6 +1970,7 @@ import { mountTree, ancestorIds } from './home-workspace-tree.js';
   }
 
   async function refresh() {
+    if (!canHydrateWorkspaceData()) return null;
     if (state.inFlight) return state.inFlight;
     state.loading = true;
     state.error = null;
@@ -1918,9 +1980,7 @@ import { mountTree, ancestorIds } from './home-workspace-tree.js';
     // selection context — no per-view fetching.
     state.inFlight = (async () => {
       try {
-        const response = await fetch('/api/workspaces?tree=true');
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const data = await response.json();
+        const data = await loadInitialWorkspaceTree();
         state.tree = Array.isArray(data.folders) ? data.folders : [];
         state.flattened = flattenWorkspaceTree(state.tree);
         state.metadata = buildMapMetadata(state.flattened, state.tree);
@@ -1961,6 +2021,7 @@ import { mountTree, ancestorIds } from './home-workspace-tree.js';
    * request rather than stacking (FR122).
    */
   async function refreshQuietly() {
+    if (!canHydrateWorkspaceData()) return null;
     if (state.inFlight) return state.inFlight;
     const railScroll = els.railContext ? els.railContext.scrollTop : 0;
     const todayScroll = els.railToday ? els.railToday.scrollTop : 0;
@@ -1996,6 +2057,7 @@ import { mountTree, ancestorIds } from './home-workspace-tree.js';
 
   let realtimeTimer = null;
   function scheduleRealtimeRefresh() {
+    if (!canHydrateWorkspaceData()) return;
     // Coalesce bursts: a run that emits many task events must cause one
     // refresh, not one per event.
     if (realtimeTimer) return;
@@ -2133,7 +2195,7 @@ import { mountTree, ancestorIds } from './home-workspace-tree.js';
   // authoritative reload updates Map, Tree, Summary, and the rail together
   // rather than each view refetching for itself (FR108, FR117).
   window.addEventListener('ori:workspaces-changed', () => {
-    void refreshQuietly();
+    if (canHydrateWorkspaceData()) void refreshQuietly();
   });
 
   // Expose a narrow seam so later cockpit surfaces (Tree, Today, Ask Ori) and
@@ -2151,8 +2213,42 @@ import { mountTree, ancestorIds } from './home-workspace-tree.js';
     openCapture: () => setCaptureOpen(true)
   };
 
+  function canHydrateWorkspaceData() {
+    return workspaceHydrationAllowed(state.onboardingGate);
+  }
+
+  async function initializeWorkspaceHydration({ force = false } = {}) {
+    state.onboardingGate = {
+      state: ONBOARDING_GATE_LOADING,
+      allowWorkspaceHydration: false,
+      message: 'Preparing your workspace setup…'
+    };
+    state.loading = true;
+    state.error = null;
+    renderAreaStatus();
+
+    const status = await loadOnboardingStatus({ force });
+    state.onboardingGate = onboardingGateDecision(status);
+    if (!canHydrateWorkspaceData()) {
+      state.loading = false;
+      state.tree = [];
+      state.flattened = [];
+      state.metadata = { folderDisplayById: {}, tagsById: {}, groupPreviewById: {} };
+      renderAreaStatus();
+      renderFilters();
+      mountMap();
+      mountTreeView();
+      renderToday();
+      renderRail({ announceChange: false });
+      return state.onboardingGate;
+    }
+
+    void refreshWorkspaceRoot();
+    void refreshHQStatus();
+    await refresh();
+    return state.onboardingGate;
+  }
+
   applyView(state.view, { pushUrl: false });
-  refresh();
-  void refreshWorkspaceRoot();
-  void refreshHQStatus();
+  void initializeWorkspaceHydration();
 })();
