@@ -2442,19 +2442,6 @@ a.quest-title:hover {
   color: var(--text-muted, var(--text-secondary));
 }
 
-/* Upcoming section rows omit the icon column — start from column 1. */
-.home-section-upcoming .home-row-link {
-  grid-template-columns: 1fr auto;
-}
-
-.home-section-upcoming .home-row-primary {
-  grid-column: 1 / 2;
-}
-
-.home-section-upcoming .home-row-meta {
-  grid-column: 2 / 3;
-}
-
 @media (max-width: 768px) {
   .home-assistant-minimal-title {
     font-size: 1.6rem;

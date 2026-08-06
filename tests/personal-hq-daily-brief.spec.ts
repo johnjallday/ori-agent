@@ -146,6 +146,9 @@ test.describe.serial('Personal HQ onboarding and Daily Brief', () => {
 
   test('Brief settings modal opens scoped to the HQ and shows recent history', async ({ page }) => {
     await page.goto('/');
+    // Secondary brief actions live behind the header's overflow disclosure;
+    // only Refresh keeps permanent space in the rail.
+    await page.locator('#homeDailyBriefMenu > summary').click();
     await page.locator('#homeDailyBriefSettingsBtn').click();
     await expect(page.locator('#homeDailyBriefSettingsModal')).toBeVisible();
     await expect(page.locator('#homeDailyBriefTimezone')).not.toHaveValue('');

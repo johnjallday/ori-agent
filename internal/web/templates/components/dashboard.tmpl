@@ -128,10 +128,21 @@
           <h2 id="homeDailyBriefTitle" class="home-daily-brief-title">Today</h2>
           <p id="homeDailyBriefMeta" class="home-daily-brief-meta"></p>
         </div>
+        <!-- Refresh is the only action that earns permanent space in a ~320px
+             rail; Open My HQ and Brief settings live one disclosure away. A
+             native <details> rather than a JS menu, so it costs no script and
+             stays keyboard- and screen-reader-operable for free. -->
         <div class="home-daily-brief-actions">
-          <a id="homeDailyBriefOpenHQ" href="/" class="modern-btn modern-btn-secondary modern-btn-sm">Open My HQ</a>
-          <button type="button" id="homeDailyBriefSettingsBtn" class="modern-btn modern-btn-secondary modern-btn-sm">Brief settings</button>
           <button type="button" id="homeDailyBriefRefreshBtn" class="modern-btn modern-btn-primary modern-btn-sm">Refresh</button>
+          <details class="home-daily-brief-menu" id="homeDailyBriefMenu">
+            <summary class="home-daily-brief-menu-toggle" aria-label="More Daily Brief actions" title="More actions">
+              <span aria-hidden="true">&#8943;</span>
+            </summary>
+            <div class="home-daily-brief-menu-panel">
+              <a id="homeDailyBriefOpenHQ" href="/" class="home-daily-brief-menu-item">Open My HQ</a>
+              <button type="button" id="homeDailyBriefSettingsBtn" class="home-daily-brief-menu-item">Brief settings</button>
+            </div>
+          </details>
         </div>
       </header>
       <div id="homeDailyBriefBanner" class="home-daily-brief-banner" role="status" aria-live="polite" hidden></div>
@@ -161,18 +172,14 @@
       </div>
     </section>
 
-        <!-- Upcoming scheduled work and recent activity move out of the retired
-             Operations Board row into Today, keeping their existing endpoints
-             and lifecycle (FR81/FR84). -->
-        <section id="homeUpcomingTasks" class="home-section home-section-upcoming" aria-labelledby="homeUpcomingTasksTitle">
-          <header class="home-section-header">
-            <h2 id="homeUpcomingTasksTitle" class="home-section-title">Upcoming</h2>
-          </header>
-          <div class="home-section-body" data-role="content" aria-live="polite">
-            <div class="home-section-placeholder" data-role="placeholder">Loading schedule…</div>
-          </div>
-        </section>
+        <!-- Recent activity moved out of the retired Operations Board row into
+             Today, keeping its existing endpoint and lifecycle (FR81/FR84).
 
+             The "Upcoming" section that used to sit here was a second rendering
+             of the SAME /api/orchestration/scheduled-tasks/upcoming data that
+             "Scheduled today" above already shows — two fetches of one endpoint
+             stacked in one column. "Scheduled today" is the survivor: it is
+             time-bounded and marks overdue runs. -->
         <section id="homeRecentActivity" class="home-section home-section-activity" aria-labelledby="homeRecentActivityTitle">
           <header class="home-section-header">
             <h2 id="homeRecentActivityTitle" class="home-section-title">Activity</h2>
@@ -309,14 +316,17 @@
         </section>
       </section>
 
-      <!-- Rail footer: Quick Capture, Summary, and a Map/Tree shortcut kept in
-           sync with the primary toggle. Reachable from EVERY rail state
-           (FR88, FR101). A normal flex row after the scrolling body, so its
-           actions stay reachable on a short viewport (FR139). -->
+      <!-- Rail footer: backlog capture and Summary, reachable from EVERY rail
+           state (FR88, FR101). A normal flex row after the scrolling body, so
+           its actions stay reachable on a short viewport (FR139).
+
+           There is deliberately NO Map/Tree shortcut here. It used to duplicate
+           the primary toggle in the workspace-area header, which is visible in
+           every rail state — and below the 1040px breakpoint the two rendered
+           within a few hundred pixels of each other. One toggle, one place. -->
       <div class="cockpit-rail-footer">
-        <button type="button" id="cockpitCaptureBtn" class="modern-btn modern-btn-primary modern-btn-sm" aria-expanded="false" aria-controls="cockpitCapturePanel">Quick Capture</button>
+        <button type="button" id="cockpitCaptureBtn" class="modern-btn modern-btn-primary modern-btn-sm" aria-expanded="false" aria-controls="cockpitCapturePanel">Add to backlog</button>
         <button type="button" id="cockpitSummaryBtn" class="modern-btn modern-btn-secondary modern-btn-sm" aria-pressed="false">Summary</button>
-        <button type="button" id="cockpitRailViewBtn" class="modern-btn modern-btn-secondary modern-btn-sm">Tree</button>
       </div>
 
       <!-- Quick Capture. Writes to the designated Personal HQ's backlog through

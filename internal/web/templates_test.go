@@ -407,7 +407,6 @@ func TestRenderHomeCockpitShell(t *testing.T) {
 		`id="cockpitSignalFilters"`,
 		`id="cockpitSummaryBtn"`,
 		`id="cockpitCaptureBtn"`,
-		`id="cockpitRailViewBtn"`,
 		`id="cockpitCapturePanel"`,
 		// Ask Ori activity lives in the rail as an embedded panel (FR96).
 		`data-home-assistant-surface="panel"`,
@@ -423,7 +422,6 @@ func TestRenderHomeCockpitShell(t *testing.T) {
 		// Today's sources survive the migration (FR77, FR81, FR82, FR84, FR86).
 		`id="homeDailyBrief"`,
 		`id="homeCalendarOpsPortal"`,
-		`id="homeUpcomingTasks"`,
 		`id="homeRecentActivity"`,
 		`id="questLog"`,
 		// Optional Personal HQ mounts survive the migration (FR115).
@@ -440,12 +438,20 @@ func TestRenderHomeCockpitShell(t *testing.T) {
 
 	// The retired Operations Board and its duplicate workspace overview must
 	// not render below or beside the cockpit (FR22).
+	//
+	// Also listed: two controls retired for duplicating a surface the page
+	// already had. cockpitRailViewBtn was a second Map/Tree toggle beside the
+	// primary one in the workspace-area header; homeUpcomingTasks was a second
+	// rendering of the scheduled-run data "Scheduled today" already shows, from
+	// a second fetch of the same endpoint.
 	for _, gone := range []string{
 		`id="homeDashboardSections"`,
 		`id="homeRecentWorkspaces"`,
 		`home-operations-board`,
 		`class="home-command-layout"`,
 		`aria-label="Operations board"`,
+		`id="cockpitRailViewBtn"`,
+		`id="homeUpcomingTasks"`,
 	} {
 		if strings.Contains(html, gone) {
 			t.Errorf("rendered Home page still contains retired element %q", gone)

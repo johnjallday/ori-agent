@@ -629,18 +629,13 @@ body.home-command-page .home-command-bridge * {
   gap: 1px;
 }
 
-.home-row-link,
-.home-section-upcoming .home-row-link {
+.home-row-link {
   grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 7px;
   padding: 7px 6px;
   border: 1px solid transparent;
   border-radius: 0;
   color: var(--hc-ink);
-}
-
-.home-section-upcoming .home-row-link {
-  grid-template-columns: minmax(0, 1fr) auto;
 }
 
 .home-row-link:hover,
@@ -659,8 +654,7 @@ body.home-command-page .home-command-bridge * {
   font-size: 10px;
 }
 
-.home-row-primary,
-.home-section-upcoming .home-row-primary {
+.home-row-primary {
   min-width: 0;
   color: var(--hc-ink);
   font-family: "Chakra Petch", system-ui, sans-serif;
@@ -669,8 +663,7 @@ body.home-command-page .home-command-bridge * {
   letter-spacing: 0.2px;
 }
 
-.home-row-meta,
-.home-section-upcoming .home-row-meta {
+.home-row-meta {
   align-items: flex-end;
   gap: 2px;
   color: var(--hc-ink-faint);
@@ -1295,7 +1288,75 @@ a.quest-title:focus-visible {
 .home-daily-brief-actions {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
+}
+
+/* Secondary Daily Brief actions behind a native <details> disclosure. Only
+   Refresh keeps permanent space in a ~320px rail; Open My HQ and Brief settings
+   are one click away and cost no JavaScript to reach. */
+.home-daily-brief-menu {
+  position: relative;
+}
+
+.home-daily-brief-menu-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--hc-line);
+  color: var(--hc-ink-soft, var(--hc-ink));
+  font-size: 14px;
+  line-height: 1;
+  list-style: none;
+  cursor: pointer;
+}
+
+/* Safari still paints the default marker without this. */
+.home-daily-brief-menu-toggle::-webkit-details-marker {
+  display: none;
+}
+
+.home-daily-brief-menu-toggle:hover,
+.home-daily-brief-menu[open] .home-daily-brief-menu-toggle {
+  border-color: var(--hc-signal);
+  color: var(--hc-ink);
+}
+
+/* Anchored to the toggle and above the brief body, so a short rail does not
+   push the panel behind the content below it. */
+.home-daily-brief-menu-panel {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  min-width: 150px;
+  padding: 4px;
+  border: 1px solid var(--hc-line);
+  background: var(--hc-panel-deep, var(--hc-panel));
+  box-shadow: var(--hc-shadow);
+}
+
+.home-daily-brief-menu-item {
+  padding: 7px 10px;
+  border: 0;
+  background: none;
+  color: var(--hc-ink);
+  font-size: 11px;
+  text-align: left;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.home-daily-brief-menu-item:hover,
+.home-daily-brief-menu-item:focus-visible {
+  background: color-mix(in srgb, var(--hc-signal) 16%, transparent);
+  color: var(--hc-ink);
 }
 
 .home-daily-brief-banner {

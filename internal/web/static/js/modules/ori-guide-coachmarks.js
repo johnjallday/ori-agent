@@ -31,7 +31,7 @@
     quick_capture: {
       routes: ['/'],
       selector: '#cockpitCaptureBtn',
-      label: 'Quick Capture'
+      label: 'Add to backlog'
     },
     new_workspace: {
       routes: ['/', '/workspaces'],

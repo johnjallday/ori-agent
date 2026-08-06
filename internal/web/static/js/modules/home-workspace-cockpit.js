@@ -604,7 +604,8 @@ export function summaryView(flattened, scheduleIndex, now) {
     return known.reduce((a, b) => a + b, 0);
   };
 
-  const attentionWorkspaces = workspaces.filter(ws => (workspaceSignals(ws).attention || 0) > 0);
+  // No attentionWorkspaces list: Today owns that list (see attentionItems), and
+  // Summary carries attention as a count only. `attention` below is the total.
   const runningWorkspaces = workspaces.filter(ws => workspaceSignals(ws).active);
 
   const upcoming = scheduleIndex
@@ -617,7 +618,6 @@ export function summaryView(flattened, scheduleIndex, now) {
     agents: sum(ws => workspaceSignals(ws).agents),
     openTasks: sum(ws => workspaceSignals(ws).openTasks),
     attention: sum(ws => workspaceSignals(ws).attention),
-    attentionWorkspaces: attentionWorkspaces.map(ws => ({ id: ws.id, name: ws.name })),
     runningWorkspaces: runningWorkspaces.map(ws => ({ id: ws.id, name: ws.name })),
     upcomingCount: upcoming,
     dueToday: scheduleIndex
@@ -860,7 +860,11 @@ export function renderSummaryRailHTML(view) {
     metricHTML('Attention', view.attention) +
     metricHTML('Due today', view.dueToday) +
     '</div>' +
-    listHTML('Needs attention', view.attentionWorkspaces, 'Nothing needs attention.') +
+    // Deliberately no "Needs attention" LIST here. Today — the default rail
+    // state, zero clicks away — already lists the same workspaces from the same
+    // state. Summary owns the cross-workspace *counts* plus the one thing Today
+    // does not show at all: what is running right now. The Attention metric
+    // above still carries the total.
     listHTML('Running now', view.runningWorkspaces, 'No workspace is running work.') +
     (view.upcomingCount === null
       ? '<p class="cockpit-rail-empty">Scheduled-work data is unavailable.</p>'
@@ -1055,7 +1059,7 @@ export function captureRequestBody(hqWorkspaceId, draft) {
   };
 }
 
-/** What Quick Capture can do right now, given the Personal HQ status. */
+/** What backlog capture can do right now, given the Personal HQ status. */
 export function captureAvailability(hqStatus) {
   const valid = !!(hqStatus && hqStatus.valid && hqStatus.workspace_id);
   if (valid) return { canSave: true, hqWorkspaceId: hqStatus.workspace_id, message: '' };
@@ -1064,7 +1068,7 @@ export function captureAvailability(hqStatus) {
     hqWorkspaceId: '',
     // FR104: explain the requirement and offer the existing HQ path, without
     // discarding whatever the user already typed.
-    message: 'Quick Capture saves to your Personal HQ backlog, and no Personal HQ is set up yet.'
+    message: 'This saves to your Personal HQ backlog, and no Personal HQ is set up yet.'
   };
 }
 
@@ -1202,7 +1206,6 @@ import {
     railContext: document.getElementById('cockpitRailContext'),
     railLive: document.getElementById('cockpitRailLive'),
     summaryBtn: document.getElementById('cockpitSummaryBtn'),
-    railViewBtn: document.getElementById('cockpitRailViewBtn'),
     todayAttention: document.getElementById('cockpitTodayAttention'),
     todayScheduled: document.getElementById('cockpitTodayScheduled'),
     captureBtn: document.getElementById('cockpitCaptureBtn'),
@@ -1735,16 +1738,6 @@ import {
       els.summaryBtn.setAttribute('aria-pressed', inSummary ? 'true' : 'false');
       els.summaryBtn.textContent = inSummary ? 'Close summary' : 'Summary';
     }
-    // The footer shortcut names the view it switches TO, and stays in step with
-    // the primary toggle (FR88).
-    if (els.railViewBtn) {
-      const toTree = state.view !== VIEW_TREE;
-      els.railViewBtn.textContent = toTree ? 'Tree' : 'Map';
-      els.railViewBtn.setAttribute(
-        'aria-label',
-        toTree ? 'Switch to Tree view' : 'Switch to Map view'
-      );
-    }
   }
 
   // ---- Ask Ori rail activity (FR92-FR100) ----
@@ -1947,7 +1940,7 @@ import {
       if (els.captureStatus) {
         els.captureStatus.textContent = 'Could not save. Your text is still here — try again.';
       }
-      announce('Quick Capture failed. Your text was kept.');
+      announce('Saving to the backlog failed. Your text was kept.');
       console.error('home-workspace-cockpit: capture failed', err);
     } finally {
       if (els.captureSave) els.captureSave.disabled = false;
@@ -2158,13 +2151,6 @@ import {
     els.summaryBtn.addEventListener('click', () =>
       state.railState === RAIL_SUMMARY ? leaveSummary() : showSummary()
     );
-  }
-
-  if (els.railViewBtn) {
-    els.railViewBtn.addEventListener('click', () => {
-      applyView(state.view === VIEW_TREE ? VIEW_MAP : VIEW_TREE);
-      fireTTFA('view-toggle');
-    });
   }
 
   if (els.captureBtn) {
