@@ -11,6 +11,8 @@
 // can exercise the optional/skipped-quest rendering and toast-suppression
 // decisions without a DOM.
 
+import { loadOnboardingStatus, onboardingGateDecision } from './onboarding-gate.js';
+
 export function currentTier(status) {
   return (
     (status.tiers || []).find(tier => tier.tier === status.current_tier) ||
@@ -362,6 +364,8 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete) {
 
   async function refresh() {
     try {
+      const onboardingStatus = await loadOnboardingStatus();
+      if (!onboardingGateDecision(onboardingStatus).allowWorkspaceHydration) return;
       const status = await fetchStatus();
       announceChanges(status);
       render(status);

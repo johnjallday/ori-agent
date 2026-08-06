@@ -29,6 +29,7 @@ import {
   workspaceRailView,
   renderWorkspaceRailHTML,
   workspaceAreaState,
+  workspaceHydrationAllowed,
   renderWorkspaceAreaStatusHTML,
   escapeHtml,
   SIGNAL_ATTENTION,
@@ -484,6 +485,69 @@ test('workspaceAreaState distinguishes loading, error, empty, and ready (FR120)'
     workspaceAreaState({ loading: true, error: new Error('old'), workspaces: [] }).state,
     'loading'
   );
+});
+
+test('workspaceAreaState keeps workspace affordances hidden while onboarding is pending', () => {
+  const status = workspaceAreaState({
+    loading: false,
+    workspaces: [{ id: 'foreign', name: 'Foreign Workspace' }],
+    onboardingGate: {
+      state: 'required',
+      allowWorkspaceHydration: false,
+      message: 'Finish setup to load your workspaces.'
+    }
+  });
+  assert.equal(status.state, 'onboarding-required');
+  const html = renderWorkspaceAreaStatusHTML(status);
+  assert.match(html, /Finish setup/);
+  assert.doesNotMatch(html, /Foreign Workspace|New Workspace|Import Folder/);
+});
+
+test('workspaceHydrationAllowed fails closed unless the gate is explicitly ready', () => {
+  assert.equal(workspaceHydrationAllowed(null), false);
+  assert.equal(workspaceHydrationAllowed({ state: 'loading' }), false);
+  assert.equal(
+    workspaceHydrationAllowed({ state: 'required', allowWorkspaceHydration: false }),
+    false
+  );
+  assert.equal(
+    workspaceHydrationAllowed({ state: 'unavailable', allowWorkspaceHydration: false }),
+    false
+  );
+  assert.equal(
+    workspaceHydrationAllowed({ state: 'ready', allowWorkspaceHydration: false }),
+    false
+  );
+  assert.equal(workspaceHydrationAllowed({ state: 'ready', allowWorkspaceHydration: true }), true);
+});
+
+test('a queued realtime refresh is blocked if consent is no longer ready when it runs', () => {
+  const gate = { state: 'ready', allowWorkspaceHydration: true };
+  assert.equal(workspaceHydrationAllowed(gate), true);
+
+  // scheduleRealtimeRefresh checks once before queuing; refreshQuietly checks
+  // this same predicate again inside the delayed callback.
+  gate.state = 'required';
+  gate.allowWorkspaceHydration = false;
+  assert.equal(workspaceHydrationAllowed(gate), false);
+});
+
+test('workspaceAreaState makes an unknown onboarding status retryable without exposing data', () => {
+  const status = workspaceAreaState({
+    loading: false,
+    workspaces: [{ id: 'foreign', name: 'Foreign Workspace' }],
+    onboardingGate: {
+      state: 'unavailable',
+      allowWorkspaceHydration: false,
+      message: 'Ori could not confirm onboarding status.'
+    }
+  });
+  assert.equal(status.state, 'onboarding-unavailable');
+  assert.equal(status.canRetry, true);
+  const html = renderWorkspaceAreaStatusHTML(status);
+  assert.match(html, /data-cockpit-onboarding-retry/);
+  assert.match(html, /remains hidden/i);
+  assert.doesNotMatch(html, /Foreign Workspace|New Workspace|Import Folder/);
 });
 
 test('workspaceAreaState treats a non-array payload as empty, never as ready', () => {

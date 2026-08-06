@@ -153,8 +153,14 @@ const sessionManager = {
     this.initChatAgentBar();
     this.initMainTaskPanel();
     this.initScheduledTasksModal();
+    if (!(await this.canHydrateWorkspaceData())) {
+      this.sessions = [];
+      this.folders = [];
+      this.updateSessionsEmptyState();
+      return;
+    }
     await this.loadSessions();
-    await this.loadFolders();
+    await this.loadFolders({ bootstrap: true });
     await this.loadTags();
 
     // Try to restore an active session. An empty workspace launcher owns its
@@ -177,6 +183,47 @@ const sessionManager = {
         this.startPolling();
       }
     });
+  },
+
+  async canHydrateWorkspaceData({ force = false } = {}) {
+    try {
+      const gate = this.onboardingGate || window.OriOnboardingGate;
+      if (gate?.loadOnboardingStatus && gate?.onboardingGateDecision) {
+        const status = await gate.loadOnboardingStatus({ force });
+        return gate.onboardingGateDecision(status).allowWorkspaceHydration === true;
+      }
+
+      // Non-Home pages may not load the module gate. Use the same window-level
+      // promise key so a later module import adopts this request rather than
+      // issuing a second one.
+      const key = '__oriOnboardingStatusPromise';
+      if (force) delete window[key];
+      if (!window[key]) {
+        window[key] = Promise.resolve()
+          .then(async () => {
+            const response = await fetch('/api/onboarding/status');
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const status = await response.json();
+            if (typeof status?.needs_onboarding !== 'boolean') {
+              throw new Error('Invalid onboarding status');
+            }
+            return status;
+          })
+          .catch(error => ({
+            needs_onboarding: null,
+            onboarding_status_unavailable: true,
+            onboarding_status_error: String(error?.message || error || 'Unknown error').slice(
+              0,
+              200
+            )
+          }));
+      }
+      const status = await window[key];
+      return status?.needs_onboarding === false;
+    } catch (error) {
+      console.error('Failed to resolve onboarding workspace gate:', error);
+      return false;
+    }
   },
 
   // Bind all event listeners
@@ -721,12 +768,44 @@ const sessionManager = {
   },
 
   // Load workspaces (folders) from API
-  async loadFolders() {
+  async loadFolders({ bootstrap = false } = {}) {
+    if (!(await this.canHydrateWorkspaceData())) {
+      this.folders = [];
+      this.updateSessionsEmptyState();
+      return;
+    }
     try {
-      const response = await fetch('/api/workspaces?tree=true');
-      if (!response.ok) throw new Error('Failed to load workspaces');
-
-      const data = await response.json();
+      const gate = this.onboardingGate || window.OriOnboardingGate;
+      let data;
+      if (bootstrap && gate?.loadInitialWorkspaceTree) {
+        data = await gate.loadInitialWorkspaceTree();
+      } else if (bootstrap) {
+        // sessions.js is a classic deferred script and can reach DOMContentLoaded
+        // before the Home ES module publishes its helper. Adopt the same global
+        // promise key so whichever side starts first still owns one request.
+        const key = '__oriInitialWorkspaceTreePromise';
+        if (!window[key]) {
+          window[key] = Promise.resolve()
+            .then(async () => {
+              const response = await fetch('/api/workspaces?tree=true');
+              if (!response.ok) throw new Error('Failed to load workspaces');
+              const payload = await response.json();
+              if (!payload || !Array.isArray(payload.folders)) {
+                throw new Error('Workspace tree response is invalid');
+              }
+              return payload;
+            })
+            .catch(error => {
+              delete window[key];
+              throw error;
+            });
+        }
+        data = await window[key];
+      } else {
+        const response = await fetch('/api/workspaces?tree=true');
+        if (!response.ok) throw new Error('Failed to load workspaces');
+        data = await response.json();
+      }
       this.folders = data.folders || [];
       this.updateSessionsEmptyState();
 
