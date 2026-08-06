@@ -3004,17 +3004,17 @@ a.quest-title:hover {
   gap: 0.15rem;
 }
 
+/* Sentence case: a mode switch is an action. */
 .home-assistant-workspace-mode-btn {
   border: 0;
   background: transparent;
   color: var(--text-secondary);
   border-radius: 999px;
-  font-size: 0.74rem;
+  font-size: 0.76rem;
   font-weight: 700;
   line-height: 1;
   min-width: 52px;
   padding: 0.45rem 0.62rem;
-  text-transform: uppercase;
 }
 
 .home-assistant-workspace-mode-btn:hover {

@@ -245,6 +245,8 @@ body.home-command-page .home-command-bridge * {
   animation: home-command-caret 1s steps(2, jump-none) infinite;
 }
 
+/* Sentence case: this re-declared the uppercase that .modern-btn used to set,
+   so it would have been the one shouting button left in the command strip. */
 .home-command-execute.modern-btn {
   align-self: stretch;
   min-width: 92px;
@@ -255,10 +257,9 @@ body.home-command-page .home-command-bridge * {
   background: color-mix(in srgb, var(--hc-signal-deep) 80%, var(--hc-panel));
   color: var(--hc-signal);
   font-family: "Chakra Petch", system-ui, sans-serif;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
-  letter-spacing: 1.5px;
-  text-transform: uppercase;
+  letter-spacing: 0.2px;
 }
 
 .home-command-execute.modern-btn:hover,
@@ -273,6 +274,9 @@ body.home-command-page .home-command-bridge * {
   margin: 0;
 }
 
+/* Sentence case: a chip fills the command box, so it is an action. These
+   labels are also whole sentences ("What should I work on?") — uppercase made
+   them read as shouting and dropped the sentence's own casing cues. */
 .home-command-page .home-prompt-chip {
   border-color: var(--hc-line);
   border-radius: 0;
@@ -280,9 +284,8 @@ body.home-command-page .home-command-bridge * {
   background: color-mix(in srgb, var(--hc-panel-deep) 54%, transparent);
   color: var(--hc-ink-dim);
   font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 9px;
-  letter-spacing: 0.5px;
-  text-transform: uppercase;
+  font-size: 9.5px;
+  letter-spacing: 0.2px;
 }
 
 .home-command-page .home-prompt-chip:hover,
@@ -865,14 +868,24 @@ body.home-command-page .home-command-bridge * {
   gap: 8px;
 }
 
+/* Kicker and status NAME things ("Mission 01", "Ready"), so they keep the
+   uppercase label treatment. */
 .quest-log-first-mission-kicker,
-.quest-log-first-mission-status,
-.quest-log-first-mission-action {
+.quest-log-first-mission-status {
   font-family: "JetBrains Mono", ui-monospace, monospace;
   font-size: 8px;
   font-weight: 600;
   letter-spacing: 1px;
   text-transform: uppercase;
+}
+
+/* The action beside them DOES something, so it takes sentence case. It also
+   renders a mission name supplied by the server, which uppercase flattened. */
+.quest-log-first-mission-action {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
 }
 
 .quest-log-first-mission-kicker {
@@ -905,6 +918,9 @@ body.home-command-page .home-command-bridge * {
   min-width: 0;
 }
 
+/* The mission title is a server-supplied name, and it renders directly above a
+   button carrying the SAME text. Uppercase here would have shown one string in
+   two casings side by side. Names keep their author's casing. */
 .quest-log-first-mission-title {
   margin: 0;
   color: var(--hc-ink);
@@ -913,7 +929,6 @@ body.home-command-page .home-command-bridge * {
   font-weight: 700;
   letter-spacing: 0.25px;
   line-height: 1.1;
-  text-transform: uppercase;
 }
 
 .quest-log-first-mission-why {
