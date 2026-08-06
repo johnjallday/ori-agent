@@ -679,13 +679,14 @@ fi
 
 typeset -A backlog_entrypoints
 backlog_entrypoints=(
-  "$repo_root/scripts/issue.sh"   "issue"
-  "$repo_root/scripts/backlog.sh" "backlog"
+  "$repo_root/scripts/devops/issue.sh"   "issue"
+  "$repo_root/scripts/devops/backlog.sh" "backlog"
+  "$repo_root/scripts/devops/ready.sh"   "ready"
 )
 for entrypoint subcommand in "${(@kv)backlog_entrypoints}"; do
   name="${entrypoint:t}"
   if [[ ! -f "$entrypoint" ]]; then
-    print -r -- "scripts/$name is missing" >&2
+    print -r -- "scripts/devops/$name is missing" >&2
     exit 1
   fi
   if ! rg -q "devflow_exec $subcommand \"\\\$@\"" "$entrypoint"; then

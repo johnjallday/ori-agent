@@ -279,6 +279,8 @@ func (a *App) Run(ctx context.Context, args []string) int {
 		return a.issue(ctx, opts, commandArgs)
 	case "backlog":
 		return a.backlog(ctx, opts, commandArgs)
+	case "ready":
+		return a.ready(ctx, opts, commandArgs)
 	case "target":
 		return a.handoffTarget(ctx, opts)
 	case "cleanup":
@@ -3133,25 +3135,35 @@ Usage:
   wt herd overview [same options]
                                 Compatibility alias for wt herd status.
   wt herd status --clear-view  Clear only the Ori Devflow source-scoped Herdr agent view
-  ./scripts/backlog.sh [list] [--all] [--json]
-                                List this repository's open GitHub Issues, which are the
-                                product backlog. The default scope is the Issues you
-                                authored (author:@me); --all keeps the repository and the
-                                open state and drops only that author filter.
+  ./scripts/devops/issue.sh [--all] [--json]
+                                List this repository's open GitHub Issues — the raw capture
+                                list, before any grooming. The default scope is the Issues
+                                you authored (author:@me); --all keeps the repository and
+                                the open state and drops only that author filter.
                                 Every invocation queries GitHub: there is no cache and no
                                 local backlog file, so a failure is reported as a failure
-                                rather than as an empty backlog. Issue bodies are not
-                                listed; read one with ./scripts/backlog.sh view.
-  ./scripts/backlog.sh view <number|url> [--json]
+                                rather than as an empty list. Issue bodies are not listed;
+                                read one with ./scripts/devops/issue.sh view.
+  ./scripts/devops/issue.sh view <number|url> [--json]
                                 Show one Issue of this repository in full, open or closed:
                                 state, author, labels, timestamps, URL, and body. The body
                                 is printed as Markdown text — no HTML is rendered, no link
                                 is followed, and no attachment is downloaded.
-  ./scripts/backlog.sh add "<title>" [--body "<text>"] [--json]
+  ./scripts/devops/issue.sh add "<title>" [--body "<text>"] [--json]
                                 Create one Issue in this repository from a required title
                                 and an optional Markdown body. It sets nothing else: no
                                 label, assignee, milestone, Issue type, Project, or
                                 parent, and it opens no browser or editor.
+  ./scripts/devops/backlog.sh [--json]
+                                Read the Backlog column of the project board linked to this
+                                repository: captured work that has not been groomed yet,
+                                where GitHub's auto-add workflow puts every new Issue.
+                                Read-only — it never moves, ranks, or closes a card.
+  ./scripts/devops/ready.sh [--json]
+                                Read the Ready column of that same board, in the order it
+                                was ranked: work a grooming agent has researched and
+                                specced, so it is buildable now. Ready is not approved —
+                                choosing what to build stays with you. Read-only.
   wt herd target [--json]       Name the workspace a new feature's tab would be added to.
                                 Read-only and always exits 0; reports disabled or
                                 unavailable instead of failing.

@@ -104,25 +104,45 @@ Source it (don't execute) so `cd` affects your current shell.
 `wt demo` removes its exact sandbox when the demo exits. Set
 `ORI_KEEP_DEMO_SANDBOX=1` when the sandbox needs to be retained for debugging.
 
-### `backlog.sh` — the repository's GitHub Issues
+### `scripts/devops/` — the Issues, and the board built from them
+
+Three executables, one question each:
 
 ```bash
-./scripts/backlog.sh                     # the open GitHub Issues you authored
-./scripts/backlog.sh --all               # every author's open Issues in this repository
-./scripts/backlog.sh view <number>       # one Issue in full, including its body
-./scripts/backlog.sh add "<title>"       # capture an idea as a new Issue
+./scripts/devops/issue.sh                     # the open GitHub Issues you authored
+./scripts/devops/issue.sh --all               # every author's open Issues in this repository
+./scripts/devops/issue.sh view <number>       # one Issue in full, including its body
+./scripts/devops/issue.sh add "<title>"       # capture an idea as a new Issue
+
+./scripts/devops/backlog.sh                   # the board's Backlog column: captured, not yet groomed
+./scripts/devops/ready.sh                     # the board's Ready column: groomed and buildable, ranked
 ```
 
-Its own executable, so nothing has to be sourced first — one stable token a
-human or an agent can run from any checkout of this repository. It needs `gh`
-authenticated; it does not need Herdr installed, running, or healthy.
+`issue.sh` is the record — your words, plus the grooming agent's spec comment.
+The other two read one column each of the ProjectV2 linked to this repository,
+and never write: ranking belongs to the grooming agent and lifecycle to GitHub's
+own workflows.
 
-It runs the first helper it finds, preferring an already-built one over
-compiling: `$HERDR_DEVFLOW_BINARY`, then the installed runtime helper
-(`$HERDR_DEVFLOW_HOME`, or `<user config dir>/herdr/ori-devflow`), then
-`bin/herdr-devflow` in the checkout, then `go run`. If it answers
-`unknown command "backlog"`, the installed helper is older than this command —
-`wt herd setup` reinstalls it.
+**Each command is named after the column it reads.** `backlog.sh` shows exactly
+what GitHub labels `Backlog`, so its count always matches the number on the
+board's own column header. That equivalence is the point: an earlier version of
+this command was named `backlog` while reading `Ready`, which meant the four
+cards actually sitting in Backlog appeared in no command at all.
+
+`Ready` means buildable, not approved — choosing what to build stays with you.
+
+Each is its own executable, so nothing has to be sourced first — one stable
+token a human or an agent can run from any checkout of this repository. They
+need `gh` authenticated; they do not need Herdr installed, running, or healthy.
+
+They run the first helper they find, preferring an already-built one over
+compiling: `$HERDR_DEVFLOW_BINARY`, then `bin/herdr-devflow` in the checkout,
+then the installed runtime helper (`$HERDR_DEVFLOW_HOME`, or
+`<user config dir>/herdr/ori-devflow`), then `go run`. If one answers
+`unknown command "ready"`, the helper answering it is older than the command —
+build the checkout's own with
+`go build -o bin/herdr-devflow ./tools/herdr-devflow/cmd/herdr-devflow`, or run
+`wt herd setup` to reinstall the runtime copy.
 
 The product backlog is GitHub Issues. There is no backlog file to maintain,
 sync, or prune, and no backlog commit ever lands on `dev`.
@@ -157,7 +177,7 @@ wt status --worktrees          # the legacy Git-only worktree table
 planning artifacts, feature worktrees, local Git, GitHub pull requests, and live
 Herdr agents on the exact feature slug. It is read-only: it never writes
 planning files, Git, GitHub, bridge, or Herdr state. It describes selected and
-executing work; unselected ideas live in `./scripts/backlog.sh`.
+executing work; unselected ideas live in `./scripts/devops/issue.sh`.
 
 Exit codes: `0` complete, `1` incomplete (a required source, normally GitHub,
 was unavailable — the board still prints every local fact it observed), `2`

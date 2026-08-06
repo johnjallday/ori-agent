@@ -449,32 +449,41 @@ binding diagnostics and feature history that the deliberately smaller
 
 ## Issues and the backlog
 
-Two commands, each named for what it reads. Issues are the record; the board is
-the ordered, groomed view of them.
+Three commands in `scripts/devops/`, each named for exactly what it reads.
+Issues are the record; the board is the ordered view of them, read one column at
+a time.
 
 ~~~bash
-./scripts/issue.sh                       # open Issues in this repository that you authored
-./scripts/issue.sh --all                 # every author's open Issues in this repository
-./scripts/issue.sh view <number>         # one Issue in full, with the agent's spec comment
-./scripts/issue.sh add "<title>" [--body "<text>"]
-./scripts/issue.sh --json                # any of the above, as a schema-versioned envelope
+./scripts/devops/issue.sh                # open Issues in this repository that you authored
+./scripts/devops/issue.sh --all          # every author's open Issues in this repository
+./scripts/devops/issue.sh view <number>  # one Issue in full, with the agent's spec comment
+./scripts/devops/issue.sh add "<title>" [--body "<text>"]
+./scripts/devops/issue.sh --json         # any of the above, as a schema-versioned envelope
 
-./scripts/backlog.sh                     # the linked project board's Ready column, ranked
-./scripts/backlog.sh --json              # the same, as its own schema-versioned envelope
+./scripts/devops/backlog.sh              # the board's Backlog column: captured, not yet groomed
+./scripts/devops/ready.sh                # the board's Ready column, ranked: groomed and buildable
+./scripts/devops/backlog.sh --json       # either board command, as its own schema-versioned envelope
 ~~~
 
-`./scripts/issue.sh view` prints the grooming agent's research — what the Issue
-concretely means, its scope boundary, the files it touches, and the questions a
-PRD must answer — from a marked comment below the body. The Issue's own text is
-never edited by anything automated.
+`./scripts/devops/issue.sh view` prints the grooming agent's research — what the
+Issue concretely means, its scope boundary, the files it touches, and the
+questions a PRD must answer — from a marked comment below the body. The Issue's
+own text is never edited by anything automated.
 
-`./scripts/backlog.sh` reads whichever ProjectV2 is linked to this repository,
-so exactly one must be; several linked boards is an error naming all of them
-rather than a guess. `Ready` means buildable, not approved. It is read-only:
-ranking belongs to the grooming agent and lifecycle to GitHub's own project
-workflows.
+The two board commands read whichever ProjectV2 is linked to this repository, so
+exactly one must be; several linked boards is an error naming all of them rather
+than a guess. Each shows exactly the column GitHub labels with its name, so a
+command's count always matches the number on the board's own column header —
+`backlog.sh` reading anything but the `Backlog` column is the specific bug this
+split fixed. `Ready` means buildable, not approved. Both are read-only: ranking
+belongs to the grooming agent and lifecycle to GitHub's own project workflows.
 
-Both are their own executables rather than `wt` subcommands: `wt` is a shell
+Their JSON envelopes carry a `column` field naming the column they read, because
+the two payloads are otherwise the same shape from the same board. `ready.sh`
+starts at `schema_version` 1 and inherits what `backlog.sh` version 1 emitted;
+`backlog.sh` is version 2, since its shape held but its meaning changed.
+
+All three are their own executables rather than `wt` subcommands: `wt` is a shell
 function that must be sourced, which puts it out of reach of anything that is not
 an interactive zsh — an agent, a script, a Makefile. It reaches the same Go
 helper the bridge commands use, but it needs no Herdr: a missing, stopped, or
@@ -545,8 +554,9 @@ while that worktree exists, and the archived copy in `dev` after `wt done`.
 There is no backlog source. The repository's backlog is GitHub Issues, and an
 Issue nobody has planned yet has no PRD, no branch, and no worktree — it would
 be a row describing nothing. `wt status` describes selected and executing work;
-`./scripts/issue.sh` reads every captured idea, and `./scripts/backlog.sh` reads
-the groomed subset of them that is ready to start.
+`./scripts/devops/issue.sh` reads every captured idea, `./scripts/devops/backlog.sh`
+the ones still waiting to be groomed, and `./scripts/devops/ready.sh` the groomed
+subset that is ready to start.
 
 ### Phases
 

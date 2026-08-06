@@ -10,7 +10,7 @@ import (
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/github"
 )
 
-// This file owns the `./scripts/issue.sh` command surface: argument parsing,
+// This file owns the `./scripts/devops/issue.sh` command surface: argument parsing,
 // human rendering, and the JSON contract below.
 //
 // The JSON is an Ori-owned envelope, not `gh` output passed through. Whatever
@@ -18,10 +18,12 @@ import (
 // contract keeps working — and the fields it does expose are the ones Ori can
 // promise, because Ori decoded and bounded every one of them.
 //
-// Issues are the record. The ordered, groomed view of them lives on a project
-// board, which `./scripts/backlog.sh` reads under its own separate contract.
+// Issues are the record. The ordered view of them lives on a project board,
+// read one column at a time under its own separate contract:
+// `./scripts/devops/backlog.sh` for what is captured and not yet groomed, and
+// `./scripts/devops/ready.sh` for what has been specced and is buildable.
 
-// issueSchemaVersion is the version of every JSON payload `./scripts/issue.sh`
+// issueSchemaVersion is the version of every JSON payload `./scripts/devops/issue.sh`
 // emits. It stays at 1 across the rename from `backlog.sh`: the shape did not
 // change, and raising it would tell every consumer to expect a break that never
 // happened.
@@ -97,7 +99,7 @@ func parseIssueArgs(args []string) (issueArgs, error) {
 	case "view", "show":
 		parsed.command = "view"
 		if len(positional) == 0 {
-			return issueArgs{}, errors.New("issue: view needs an Issue number, for example: ./scripts/issue.sh view 292")
+			return issueArgs{}, errors.New("issue: view needs an Issue number, for example: ./scripts/devops/issue.sh view 292")
 		}
 		if len(positional) > 1 {
 			return issueArgs{}, fmt.Errorf("issue: view takes one Issue, but also got %q", positional[1])
@@ -111,7 +113,7 @@ func parseIssueArgs(args []string) (issueArgs, error) {
 		parsed.command = "add"
 		if len(positional) == 0 {
 			return issueArgs{}, errors.New(
-				"issue: add needs a quoted title, for example: ./scripts/issue.sh add \"Coordinate based map\"")
+				"issue: add needs a quoted title, for example: ./scripts/devops/issue.sh add \"Coordinate based map\"")
 		}
 		if len(positional) > 1 {
 			// Almost always an unquoted title. Creating an Issue named after
@@ -155,7 +157,7 @@ func parseIssueArgs(args []string) (issueArgs, error) {
 	return parsed, nil
 }
 
-// issue runs one `./scripts/issue.sh` invocation.
+// issue runs one `./scripts/devops/issue.sh` invocation.
 //
 // Exit codes are the contract scripts branch on: 0 when the requested
 // operation completed, 1 when GitHub could not answer, and 2 when the
@@ -192,7 +194,7 @@ func (a *App) issue(ctx context.Context, opts options, args []string) int {
 }
 
 func (a *App) writeIssueError(err error, asJSON bool) {
-	a.writeGitHubError(err, asJSON, issueSchemaVersion, "./scripts/issue.sh")
+	a.writeGitHubError(err, asJSON, issueSchemaVersion, "./scripts/devops/issue.sh")
 }
 
 func (a *App) issueList(
@@ -262,7 +264,7 @@ func (a *App) issueAdd(
 //
 // The shape is chosen for the job it does: this is the raw capture list, so it
 // stays one line per Issue with the number first — the number is what every
-// later step is named after. Bodies are not here; `./scripts/issue.sh view`
+// later step is named after. Bodies are not here; `./scripts/devops/issue.sh view`
 // exists for the moment you want one.
 func (a *App) renderIssueList(list github.IssueList) {
 	a.renderIssueListStyled(list, a.listStyle())
@@ -284,7 +286,7 @@ func (a *App) renderIssueListStyled(list github.IssueList, style listStyle) {
 	if len(list.Issues) == 0 {
 		// The distinction matters: GitHub answered, and the answer was none.
 		// A failed query never reaches this branch — it exits 1 with a reason.
-		a.out("\nGitHub returned no open Issues %s. Capture one with: ./scripts/issue.sh add \"<title>\"\n", scope)
+		a.out("\nGitHub returned no open Issues %s. Capture one with: ./scripts/devops/issue.sh add \"<title>\"\n", scope)
 		return
 	}
 
@@ -359,7 +361,7 @@ func (a *App) renderIssueSpec(detail github.IssueDetail, style listStyle) {
 	a.outln(detail.Spec)
 }
 
-// issueDetailPayload is the `./scripts/issue.sh view --json` contract: the same
+// issueDetailPayload is the `./scripts/devops/issue.sh view --json` contract: the same
 // core identity as a list item, plus the fields that only exist for one Issue.
 type issueDetailPayload struct {
 	SchemaVersion int    `json:"schema_version"`
@@ -401,7 +403,7 @@ func newIssueDetailPayload(repository github.Repository, detail github.IssueDeta
 	}
 }
 
-// issueCreatedPayload is the `./scripts/issue.sh add --json` contract. It names
+// issueCreatedPayload is the `./scripts/devops/issue.sh add --json` contract. It names
 // what was created and where to find it, and nothing else: this command sets no
 // metadata, so there is none to report.
 type issueCreatedPayload struct {
@@ -447,7 +449,7 @@ func countedIssues(count int) string {
 	return fmt.Sprintf("%d open Issues", count)
 }
 
-// issueListPayload is the `./scripts/issue.sh --json` contract.
+// issueListPayload is the `./scripts/devops/issue.sh --json` contract.
 //
 // The five facts around `issues` exist so a consumer never has to guess what it
 // is holding: which repository was read, whose Issues were selected, which
@@ -467,7 +469,7 @@ type issueListPayload struct {
 }
 
 // issuePayload is one listed Issue. It carries no body: a backlog collection
-// stays bounded, and the body is available through `./scripts/issue.sh view`.
+// stays bounded, and the body is available through `./scripts/devops/issue.sh view`.
 type issuePayload struct {
 	Number    int      `json:"number"`
 	Title     string   `json:"title"`

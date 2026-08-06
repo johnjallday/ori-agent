@@ -1,12 +1,12 @@
 # shellcheck shell=bash
 # Locates this repository and the herdr-devflow helper that serves its CLI
-# entry points. Sourced — never executed — by the thin scripts in scripts/,
-# each of which then execs the helper with its own subcommand.
+# entry points. Sourced — never executed — by the thin scripts in
+# scripts/devops/, each of which then execs the helper with its own subcommand.
 #
-# One copy exists because the two callers must never disagree about which
-# binary they run: a stale helper answering one script and a fresh one
-# answering the other is the kind of split-brain that presents as an
-# unrelated bug somewhere else entirely.
+# One copy exists because the callers must never disagree about which binary
+# they run: a stale helper answering one script and a fresh one answering
+# another is the kind of split-brain that presents as an unrelated bug
+# somewhere else entirely.
 #
 # On success the caller has:
 #   repo_root  absolute path to this checkout
