@@ -21,7 +21,7 @@ import (
 // needs it, and every remote string is bounded and sanitized before it becomes
 // one. Bodies are absent by design: a listing that printed them would flood the
 // screen and multiply the decoded response size for no gain, so the body lives
-// only on the detail type behind `./scripts/backlog.sh view`.
+// only on the detail type behind `./scripts/devops/issue.sh view`.
 
 const (
 	// DefaultIssueLimit bounds how many Issues one listing requests, decodes,

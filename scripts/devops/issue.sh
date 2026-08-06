@@ -4,8 +4,9 @@
 # stable token instead of sourcing a zsh file first.
 #
 # Issues are the record — your words, and the grooming agent's spec comment.
-# The ordered, groomed view of them is a project board, which `backlog.sh`
-# reads. Capture here; decide there.
+# The board built from them has two columns worth reading, each with its own
+# command here: backlog.sh (captured, not yet groomed) and ready.sh (groomed and
+# buildable). Capture here; decide there.
 #
 # Every subcommand — list, view, add, their flags, and any spelling this shell
 # has never heard of — goes to the Go helper, which owns the query, the bounds,
@@ -16,6 +17,6 @@ set -euo pipefail
 
 devflow_script_name="issue.sh"
 # shellcheck source=scripts/lib/devflow-bootstrap.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/devflow-bootstrap.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/../lib/devflow-bootstrap.sh"
 
 devflow_exec issue "$@"

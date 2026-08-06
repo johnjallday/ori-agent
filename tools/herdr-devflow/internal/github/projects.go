@@ -266,21 +266,43 @@ func (c *Client) ListProjectItems(
 // essay would push everything else off the screen.
 const maxWhyRunes = 240
 
-// Ready returns the board's Ready column in the order it should be worked:
-// ranked items first, ascending, then everything unranked by Issue number.
+// Ready returns the board's Ready column: work that has been groomed and is
+// buildable now. This is the column you read to answer "what do I start".
+func (b ProjectBoard) Ready() []ProjectItem {
+	return b.column(StatusReady)
+}
+
+// Backlog returns the board's Backlog column: captured work that has not been
+// groomed yet.
+//
+// This is deliberately the literal column and not "everything that is not
+// Ready". A card in progress or in review is not backlog, and folding those in
+// would make the count disagree with the number GitHub prints on the column
+// header — which is the number somebody is looking at when they ask why the two
+// disagree.
+func (b ProjectBoard) Backlog() []ProjectItem {
+	return b.column(StatusBacklog)
+}
+
+// column returns one status column in the order it should be worked: ranked
+// items first, ascending, then everything unranked by Issue number.
 //
 // Unranked sorts last rather than first because an absent rank means the
 // grooming agent has not placed it yet, and an unplaced item must not out-rank
 // one somebody deliberately put at the top.
-func (b ProjectBoard) Ready() []ProjectItem {
-	ready := make([]ProjectItem, 0, len(b.Items))
+//
+// Matching is case-insensitive because the status arrives as whatever text the
+// board's single-select option carries, and a board renamed to "ready" is still
+// the same column to the person who renamed it.
+func (b ProjectBoard) column(status string) []ProjectItem {
+	matched := make([]ProjectItem, 0, len(b.Items))
 	for _, item := range b.Items {
-		if strings.EqualFold(item.Status, StatusReady) {
-			ready = append(ready, item)
+		if strings.EqualFold(item.Status, status) {
+			matched = append(matched, item)
 		}
 	}
-	sort.SliceStable(ready, func(i, j int) bool {
-		left, right := ready[i], ready[j]
+	sort.SliceStable(matched, func(i, j int) bool {
+		left, right := matched[i], matched[j]
 		if left.HasRank != right.HasRank {
 			return left.HasRank
 		}
@@ -289,12 +311,16 @@ func (b ProjectBoard) Ready() []ProjectItem {
 		}
 		return left.Number < right.Number
 	})
-	return ready
+	return matched
 }
 
 // StatusReady is the board column meaning "researched and buildable". It is not
 // "approved": choosing what to build stays with the person reading the column.
 const StatusReady = "Ready"
+
+// StatusBacklog is the board column every newly captured Issue lands in, put
+// there by GitHub's own auto-add workflow rather than by anybody's judgement.
+const StatusBacklog = "Backlog"
 
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {

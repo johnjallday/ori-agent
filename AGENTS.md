@@ -26,14 +26,17 @@ For the PRD and task-list workflows below, create planning artifacts in this dev
 
 ## Feature Naming: Issue Number First
 
-Ideas are captured as GitHub Issues and read back through two commands, each named for what it reads:
+Ideas are captured as GitHub Issues and read back through three commands in `scripts/devops/`, each named for exactly what it reads:
 
 | Command | Reads | Answers |
 |---|---|---|
-| `./scripts/issue.sh` | GitHub Issues — `list`, `view <n>`, `add "<title>"` | "what have I captured?" |
-| `./scripts/backlog.sh` | the linked project board's `Ready` column, ranked | "what should I work on?" |
+| `./scripts/devops/issue.sh` | GitHub Issues — `list`, `view <n>`, `add "<title>"` | "what have I captured?" |
+| `./scripts/devops/backlog.sh` | the linked project board's `Backlog` column | "what is waiting to be groomed?" |
+| `./scripts/devops/ready.sh` | the linked project board's `Ready` column, ranked | "what should I work on?" |
 
-Issues are the record: your capture, plus the grooming agent's spec comment, which `./scripts/issue.sh view` prints under the body. The board adds what an Issue cannot express — an ordering and a "researched enough to build" state — and is resolved from whichever ProjectV2 is linked to this repository, so exactly one must be. `Ready` means buildable, not approved; choosing what to build stays with you.
+Issues are the record: your capture, plus the grooming agent's spec comment, which `./scripts/devops/issue.sh view` prints under the body. The board adds what an Issue cannot express — an ordering and a "researched enough to build" state — and is resolved from whichever ProjectV2 is linked to this repository, so exactly one must be. `Ready` means buildable, not approved; choosing what to build stays with you.
+
+Each board command shows exactly the column GitHub labels with that name, so its count always matches the board's own column header. Nothing reads "the board" as a whole: a command that showed one column while named after another is precisely the trap this split removed.
 
 Work selected from an Issue uses the Issue number at the front of its identity:
 

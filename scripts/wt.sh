@@ -16,8 +16,9 @@
 #   wt cd <name>            # Navigate to a worktree
 #   wt demo [port]          # Build current worktree + serve an ISOLATED demo sandbox (default port 8931)
 #
-# The backlog left this file: ./scripts/backlog.sh reads and writes this
-# repository's open GitHub Issues.
+# The backlog left this file for scripts/devops/: issue.sh reads and writes this
+# repository's open GitHub Issues, while backlog.sh and ready.sh each read one
+# column of the project board built from them.
 #
 # Planning docs live in the dev worktree's tasks/ folder (gitignored). Create
 # each PRD + task list there, then `wt start` fans a single PRD out into its
@@ -1458,10 +1459,16 @@ function wt_dispatch {
     return 1
     ;;
   backlog)
-    # Moved to scripts/backlog.sh, an executable anyone can call as a single
-    # token — including an agent, which cannot source this file. A signpost, not
-    # an alias: forwarding would keep the old spelling alive indefinitely.
-    echo "wt backlog moved to ./scripts/backlog.sh"
+    # Moved to scripts/devops/, executables anyone can call as a single token —
+    # including an agent, which cannot source this file. A signpost, not an
+    # alias: forwarding would keep the old spelling alive indefinitely.
+    #
+    # Three commands answer what this one used to, because it conflated them:
+    # the captured Issues, and the two board columns built from those.
+    echo "wt backlog moved to ./scripts/devops/backlog.sh"
+    echo "  ./scripts/devops/issue.sh    - the open GitHub Issues themselves"
+    echo "  ./scripts/devops/backlog.sh  - the board's Backlog column (captured, not groomed)"
+    echo "  ./scripts/devops/ready.sh    - the board's Ready column (groomed, buildable)"
     return 1
     ;;
   *)
@@ -1486,8 +1493,10 @@ function wt_dispatch {
     echo "  wt cd <name>     - Navigate to worktree"
     echo "  wt demo [port]   - Build current worktree + serve an isolated demo sandbox (default 8931)"
     echo "  wt herd <sub>    - Manage the opt-in Ori-to-Herdr devflow bridge (setup, doctor, ...)"
-    echo "  ./scripts/backlog.sh [list|view|add] - This repository's open GitHub Issues"
-    echo "                     Its own executable, so no shell has to be sourced first."
+    echo "  ./scripts/devops/issue.sh [view|add] - This repository's open GitHub Issues"
+    echo "  ./scripts/devops/backlog.sh - The board's Backlog column: captured, not yet groomed"
+    echo "  ./scripts/devops/ready.sh   - The board's Ready column: groomed and buildable"
+    echo "                     Each its own executable, so no shell has to be sourced first."
     ;;
   esac
 }

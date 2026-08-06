@@ -7,15 +7,15 @@ at a time, harvesting product gaps as backlog entries while doing it.
 `#dogfood` in its title or body. The loop's job is to feed itself.
 
 ```bash
-./scripts/issue.sh add "#dogfood <the friction, in one line>" --body "<what you were doing>"
-./scripts/issue.sh                 # what is open, mine, and unplanned
-./scripts/issue.sh view <number>   # the full idea before deciding anything
+./scripts/devops/issue.sh add "#dogfood <the friction, in one line>" --body "<what you were doing>"
+./scripts/devops/issue.sh                 # what is open, mine, and unplanned
+./scripts/devops/issue.sh view <number>   # the full idea before deciding anything
 ```
 
 Capture it while you are annoyed, not later. One line is enough; the body is optional and the
 Issue needs no label, milestone, assignee, or Project to count.
 
-**Selecting the day's work stays manual.** `./scripts/issue.sh` reads and captures;
+**Selecting the day's work stays manual.** `./scripts/devops/issue.sh` reads and captures;
 choosing what to do next — and moving it on a GitHub Project, if you keep one — is done by
 hand in GitHub for now. That is deliberate: the selection workflow gets designed after enough
 days of doing it manually to know what it should be.
@@ -43,7 +43,7 @@ product-development sibling.
 ## Stage 1 — Backlog skill (smallest surface first)
 
 Author a `backlog` skill in Ori's skills system (`internal/skills/`) that captures and reads
-GitHub Issues — the same list / view / add surface `./scripts/issue.sh` exposes, reachable from a
+GitHub Issues — the same list / view / add surface `./scripts/devops/issue.sh` exposes, reachable from a
 chat. Bind it to the HQ workspace.
 
 The skill stays read-and-capture, like the command it mirrors: no promoting, closing, or
