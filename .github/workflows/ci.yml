@@ -6,6 +6,20 @@ on:
   pull_request:
     branches: [ main, dev, develop, 'epic/**' ]
 
+# Cancel an in-flight run when the same ref is pushed again. Without this, a
+# quick follow-up push left the previous full matrix running to completion: 59
+# runs in one 30-day window were already obsolete before they finished. Minutes
+# are free on a public repo, so this buys wall-clock time and runner slots, not
+# money - macOS runners in particular are a scarce pool and obsolete jobs sit in
+# front of the ones you actually care about.
+#
+# main/dev are excluded from cancellation because auto-release.yml reads the CI
+# conclusion on dev to decide whether the tree is releasable - a cancelled run
+# there would read as "not green" and silently stall the release gate.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/dev' && github.ref != 'refs/heads/main' }}
+
 jobs:
   lint:
     name: Lint
@@ -271,12 +285,14 @@ jobs:
         if: runner.os == 'Windows'
         run: go build -o bin/ori-agent.exe ./cmd/server
 
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v5
-        with:
-          name: ori-agent-${{ matrix.os }}
-          path: bin/
-          retention-days: 7
+      # No upload-artifact here on purpose. This job exists to prove the tree
+      # still compiles on all three platforms; the binaries it produces are
+      # throwaway. Uploading them stored ~110 MB per run (3 OSes x ~37 MB) that
+      # nothing consumed - there is no download-artifact step anywhere in this
+      # repo and no workflow depends on them. Storage is free on a public repo,
+      # so this is not a cost fix; it just drops ~110 MB of pointless upload
+      # time from every run. Real distributables come from GoReleaser in
+      # release.yml on tags - grab those from the release page instead.
 
   security:
     name: Security Scan
