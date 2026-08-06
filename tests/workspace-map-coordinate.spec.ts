@@ -122,9 +122,88 @@ async function emptyPointOn(page: Page): Promise<{ x: number; y: number }> {
   throw new Error('no empty spot found on the map');
 }
 
+/**
+ * A workspace of this test's own, parked somewhere nothing else is.
+ *
+ * The demo sandbox accumulates workspaces across runs, so reusing "the first
+ * workspace" eventually means dragging one that another building is sitting on
+ * top of. A drag test needs a fixture it controls.
+ */
+async function ownWorkspaceAt(page: Page): Promise<string> {
+  const layout = await (await page.request.get('/api/workspace-map/layout')).json();
+  const placed = Object.values(layout.layout.positions || {}) as Array<{ x: number; y: number }>;
+  const bottom = placed.length ? Math.max(...placed.map(p => p.y)) : 0;
+  const id = await ensureWorkspace(page, `Drag subject ${Date.now()}`);
+  // Below everything that already exists, so repeated runs never stack their
+  // subjects on top of each other.
+  await savePosition(page, id, 38, bottom + 380);
+  return id;
+}
+
+/**
+ * A point on a building that is actually on top at that pixel.
+ *
+ * The map floats control clusters over the world, so a tile's bounding-box
+ * centre is not necessarily grabbable. Pressing there hits the control instead
+ * and the test then reports that dragging is broken when it is not.
+ */
+async function grabPointOn(page: Page, id: string): Promise<{ x: number; y: number }> {
+  const box = (await page.locator(`.ws-map-tile[data-ws-id="${id}"]`).boundingBox())!;
+  const candidates = [
+    [0.5, 0.5],
+    [0.5, 0.25],
+    [0.25, 0.35],
+    [0.75, 0.35],
+    [0.5, 0.1]
+  ];
+  for (const [fx, fy] of candidates) {
+    const point = { x: box.x + box.width * fx, y: box.y + box.height * fy };
+    const onTile = await page.evaluate(
+      ([x, y, wanted]) => {
+        const el = document.elementFromPoint(Number(x), Number(y));
+        const tile = el && (el as HTMLElement).closest('.ws-map-tile[data-ws-id]');
+        return !!tile && tile.getAttribute('data-ws-id') === wanted;
+      },
+      [point.x, point.y, id]
+    );
+    if (onTile) return point;
+  }
+  throw new Error(`no grabbable point on ${id} — it is covered`);
+}
+
 async function openMap(page: Page) {
   await page.goto('/');
   await page.locator('.ws-map-world .ws-map-tile[data-ws-id]').first().waitFor();
+  await page.waitForTimeout(300);
+}
+
+/**
+ * Bring one workspace into view at 100%.
+ *
+ * A building parked far from the rest is genuinely off-screen — the map pans,
+ * it does not scroll, so Playwright cannot reach it by itself. Fit All brings
+ * everything into frame, then Center Selected and Reset View put this one under
+ * the middle of the viewport at a readable zoom.
+ */
+async function centerOnWorkspace(page: Page, id: string) {
+  // Selected through the cockpit's own API rather than by clicking: zoom is
+  // clamped at 50%, so a layout spread over more than two viewports genuinely
+  // cannot all be on screen at once, and the building this test wants may not
+  // be reachable by pointer until the camera is already on it.
+  await page.evaluate(workspaceId => {
+    (window as unknown as { OriHomeCockpit: { select(id: string): void } }).OriHomeCockpit.select(
+      workspaceId
+    );
+  }, id);
+  await page.waitForTimeout(300);
+  const center = page.locator('[data-map-center]');
+  if (await center.isEnabled()) {
+    await center.click();
+  } else {
+    // Nothing selected (a group child can resolve to its district): fall back
+    // to framing everything rather than waiting out a disabled button.
+    await page.click('[data-map-fit]');
+  }
   await page.waitForTimeout(300);
 }
 
@@ -289,10 +368,11 @@ test.describe('Coordinate Workspace Map', () => {
   });
 
   test('dragging a building saves once and survives a reload (FR-63 – FR-70)', async ({ page }) => {
-    const id = await ensureWorkspace(page);
-    await savePosition(page, id, 342, 190);
+    // A dedicated subject at a far, empty coordinate: nothing else is there, so
+    // the drag is testing the drag rather than the sandbox.
+    const id = await ownWorkspaceAt(page);
     await openMap(page);
-    await page.click('[data-map-reset-view]');
+    await centerOnWorkspace(page, id);
 
     const writes: string[] = [];
     page.on('request', request => {
@@ -302,11 +382,11 @@ test.describe('Coordinate Workspace Map', () => {
     });
 
     const tile = page.locator(`.ws-map-tile[data-ws-id="${id}"]`);
-    const box = (await tile.boundingBox())!;
-    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    const grab = await grabPointOn(page, id);
+    await page.mouse.move(grab.x, grab.y);
     await page.mouse.down();
     // Several move events, one drop.
-    await page.mouse.move(box.x + box.width / 2 + 140, box.y + box.height / 2 + 90, { steps: 15 });
+    await page.mouse.move(grab.x + 140, grab.y + 90, { steps: 15 });
     const duringDrag = writes.filter(body => body.includes('set_positions')).length;
     expect(duringDrag, 'pointer movement performs zero writes (metric 7)').toBe(0);
     await page.mouse.up();
@@ -333,10 +413,10 @@ test.describe('Coordinate Workspace Map', () => {
   test('a failed move visibly returns the building to where it was (FR-71, metric 6)', async ({
     page
   }) => {
-    const id = await ensureWorkspace(page);
-    await savePosition(page, id, 266, 152);
+    const id = await ownWorkspaceAt(page);
     await openMap(page);
-    await page.click('[data-map-reset-view]');
+    await centerOnWorkspace(page, id);
+    const placedAt = (await anchors(page)).find(a => a.id === id)!;
 
     await page.route(LAYOUT_API, async route => {
       if (route.request().method() === 'PATCH') {
@@ -347,25 +427,31 @@ test.describe('Coordinate Workspace Map', () => {
     });
 
     const tile = page.locator(`.ws-map-tile[data-ws-id="${id}"]`);
-    const box = (await tile.boundingBox())!;
-    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    const grab = await grabPointOn(page, id);
+    await page.mouse.move(grab.x, grab.y);
     await page.mouse.down();
-    await page.mouse.move(box.x + box.width / 2 + 120, box.y + box.height / 2 + 60, { steps: 10 });
+    await page.mouse.move(grab.x + 120, grab.y + 60, { steps: 10 });
     await page.mouse.up();
     await page.waitForTimeout(800);
 
-    // The browser re-serializes an inline style set from JS with spaces, so the
-    // pattern has to tolerate both spellings.
-    await expect(tile).toHaveAttribute('style', /left:\s*266px;\s*top:\s*152px/);
+    const restored = (await anchors(page)).find(a => a.id === id)!;
+    expect(restored, 'restored to the committed position').toEqual(placedAt);
     await expect(tile).toHaveClass(/is-unsaved/);
   });
 
   test('a selected building can be moved by keyboard alone (FR-77 – FR-79)', async ({ page }) => {
-    const id = await ensureWorkspace(page);
-    await savePosition(page, id, 380, 228);
+    const id = await ownWorkspaceAt(page);
     await openMap(page);
+    const placedAt = (await anchors(page)).find(a => a.id === id)!;
+    // Selecting without a pointer is the point of this test: the cockpit's own
+    // select path is what a keyboard user reaches through the rail.
+    await page.evaluate(workspaceId => {
+      (window as unknown as { OriHomeCockpit: { select(id: string): void } }).OriHomeCockpit.select(
+        workspaceId
+      );
+    }, id);
+    await page.waitForTimeout(300);
 
-    await page.locator(`.ws-map-tile[data-ws-id="${id}"]`).click();
     await page.click('[data-map-move]');
     await page.locator('.ws-map-canvas').press('ArrowRight');
     await page.locator('.ws-map-canvas').press('ArrowDown');
@@ -373,7 +459,54 @@ test.describe('Coordinate Workspace Map', () => {
     await page.waitForTimeout(800);
 
     const layout = await (await page.request.get('/api/workspace-map/layout')).json();
-    expect(layout.layout.positions[id]).toEqual({ x: 418, y: 266 });
+    expect(layout.layout.positions[id]).toEqual({ x: placedAt.x + 38, y: placedAt.y + 38 });
+  });
+
+  test('a district moves as one cluster and keeps every parent_id (FR-86, metric 4)', async ({
+    page
+  }) => {
+    // Creating a group, a child, reparenting, and two saves before the drag adds
+    // up past the default budget on a cold sandbox.
+    test.setTimeout(60_000);
+    // A group with one member, both placed, so the cluster geometry is known.
+    const rows = await listWorkspaces(page);
+    let group = rows.find(ws => String((ws as { kind?: string }).kind) === 'group');
+    if (!group) {
+      const created = await page.request.post('/api/workspaces', {
+        data: { name: `Map group ${Date.now()}`, kind: 'group' }
+      });
+      group = (await created.json())?.folder;
+    }
+    const child = await ensureWorkspace(page, `Cluster child ${Date.now()}`);
+    await page.request.put(`/api/workspaces/${child}`, { data: { parent_id: group!.id } });
+    await savePosition(page, group!.id, 152, 152);
+    await savePosition(page, child, 228, 228);
+
+    // Exercised through the real endpoint rather than by dragging the handle.
+    // Zoom is clamped at 50%, so on a map whose content spans more than two
+    // viewports there is no guarantee any particular district is on screen —
+    // and what this test is for is the server-side contract: the client sends
+    // one delta, the server resolves the district's members and moves them
+    // together. The pointer and keyboard paths are covered against a
+    // deterministic DOM in workspace-map.test.js.
+    const moved = await page.request.patch('/api/workspace-map/layout', {
+      data: {
+        operations: [{ op: 'translate_group', group_id: group!.id, delta: { x: 38, y: 38 } }]
+      }
+    });
+    expect(moved.ok(), await moved.text()).toBe(true);
+
+    const layout = await (await page.request.get('/api/workspace-map/layout')).json();
+    const groupAnchor = layout.layout.positions[group!.id];
+    const childAnchor = layout.layout.positions[child];
+    expect(childAnchor.x - groupAnchor.x, 'relative spacing survived the move').toBe(76);
+    expect(childAnchor.y - groupAnchor.y).toBe(76);
+    expect(groupAnchor, 'the whole cluster moved by one step').toEqual({ x: 190, y: 190 });
+
+    // Metric 4: membership is untouched by a spatial move.
+    const after = await listWorkspaces(page);
+    const movedChild = after.find(ws => ws.id === child) as { parent_id?: string };
+    expect(movedChild.parent_id).toBe(group!.id);
   });
 
   test('an unavailable layout still renders a navigable read-only map (FR-105)', async ({

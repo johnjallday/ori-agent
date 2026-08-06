@@ -674,6 +674,10 @@ func (b *ServerBuilder) wireWorkspaceMap() {
 		return
 	}
 	b.workspaceMapStore = workspacemap.NewSQLiteStore(db)
+	// Cluster moves resolve their members from the live hierarchy inside the
+	// write transaction, so a district commits whatever it actually contains at
+	// commit time rather than what a browser tab drew (#292 FR-86).
+	b.workspaceMapStore.SetDescendantResolver(workspacemap.NewDescendantResolver(b.workspaceStore))
 	b.workspaceMapService = workspacemap.NewService(b.workspaceMapStore, b.workspaceStore)
 	b.workspaceMapHandler = workspacemaphttp.NewHandler(b.workspaceMapService, b.userProvider)
 }

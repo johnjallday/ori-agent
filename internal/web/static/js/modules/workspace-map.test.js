@@ -1196,7 +1196,7 @@ test('the camera cannot be panned outside the navigable world (FR-11)', () => {
 // canvas records its listeners so pointer and wheel gestures can be replayed
 // without a browser, and the world layer records the transform that was applied
 // to it.
-function createCameraHarness({ width = 1000, height = 600, tiles = [] } = {}) {
+function createCameraHarness({ width = 1000, height = 600, tiles = [], districts = [] } = {}) {
   const listeners = {};
   const styleProps = {};
   const classes = new Set();
@@ -1204,10 +1204,11 @@ function createCameraHarness({ width = 1000, height = 600, tiles = [] } = {}) {
   const controls = {};
 
   // Building stubs, rich enough for the drag state machine: their own listener
-  // table, class list, and inline position.
-  const tileEls = tiles.map(id => {
+  // table, class list, and inline position. Districts and their drag handles
+  // use the same shape.
+  const makeNode = (id, { attribute = 'data-ws-id', classes: extraClasses = [] } = {}) => {
     const own = {};
-    const tileClasses = new Set(['ws-map-tile']);
+    const tileClasses = new Set(extraClasses.length ? extraClasses : ['ws-map-tile']);
     const el = {
       style: { left: '', top: '' },
       classList: {
@@ -1216,7 +1217,7 @@ function createCameraHarness({ width = 1000, height = 600, tiles = [] } = {}) {
         contains: c => tileClasses.has(c),
         toggle: (c, on) => (on ? tileClasses.add(c) : tileClasses.delete(c))
       },
-      getAttribute: name => (name === 'data-ws-id' ? id : null),
+      getAttribute: name => (name === attribute ? id : null),
       setAttribute: () => {},
       addEventListener: (type, fn) => {
         (own[type] = own[type] || []).push(fn);
@@ -1236,7 +1237,15 @@ function createCameraHarness({ width = 1000, height = 600, tiles = [] } = {}) {
       })
     };
     return el;
-  });
+  };
+
+  const tileEls = tiles.map(id => makeNode(id));
+  const districtEls = districts.map(id =>
+    makeNode(id, { attribute: 'data-group-id', classes: ['ws-map-district'] })
+  );
+  const handleEls = districts.map(id =>
+    makeNode(id, { attribute: 'data-group-drag', classes: ['ws-map-district-handle'] })
+  );
 
   const canvas = {
     clientWidth: width,
@@ -1282,12 +1291,18 @@ function createCameraHarness({ width = 1000, height = 600, tiles = [] } = {}) {
     clientHeight: height,
     hidden: false,
     isConnected: true,
-    querySelectorAll: sel => (sel.includes('ws-map-tile') ? tileEls : []),
+    querySelectorAll: sel => {
+      if (sel.includes('data-group-drag')) return handleEls;
+      if (sel.includes('ws-map-tile')) return tileEls;
+      return [];
+    },
     querySelector: sel => {
       if (sel.includes('ws-map-canvas') || sel.includes('ws-map-viewport')) return canvas;
       if (sel.includes('ws-map-world')) return world;
       const tileMatch = sel.match(/ws-map-tile\[data-ws-id="([^"]+)"\]/);
       if (tileMatch) return tileEls.find(el => el.id === tileMatch[1]) || null;
+      const districtMatch = sel.match(/ws-map-district\[data-group-id="([^"]+)"\]/);
+      if (districtMatch) return districtEls.find(el => el.id === districtMatch[1]) || null;
       if (sel.includes('data-map-')) return control(sel);
       return null;
     }
@@ -1312,6 +1327,8 @@ function createCameraHarness({ width = 1000, height = 600, tiles = [] } = {}) {
     classes,
     control,
     tile: id => tileEls.find(el => el.id === id),
+    district: id => districtEls.find(el => el.id === id),
+    handle: id => handleEls.find(el => el.id === id),
     fire: (type, event) => (listeners[type] || []).forEach(fn => fn(event)),
     hasListener: type => !!(listeners[type] && listeners[type].length)
   };
@@ -1965,6 +1982,235 @@ test('Escape during a keyboard move restores and saves nothing (FR-79)', async (
 
   assert.equal(patches.length, 0);
   assert.deepEqual({ ...harness.tile('ws-1').at() }, { x: 380, y: 228 });
+});
+
+// ---------------------------------------------------------------------------
+// Moving districts (#292 FR-81 – FR-94)
+//
+// A cluster move is one delta applied to the group and every visible
+// descendant. It is presentation only: no payload it can produce contains a
+// parent.
+// ---------------------------------------------------------------------------
+
+async function mountedCluster({ patchResponse } = {}) {
+  const patches = [];
+  const map = loadMapWithFetch((url, init) => {
+    if (init && init.method === 'PATCH') {
+      const body = JSON.parse(init.body);
+      patches.push(body);
+      if (patchResponse === 'fail') return Promise.resolve({ ok: false, status: 500 });
+      const preference = body.operations.find(op => op.op === 'set_preferences');
+      return Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            result: {
+              schema_version: 1,
+              revision: 4,
+              positions: {},
+              snap_to_grid: preference ? preference.snap_to_grid : true
+            }
+          })
+      });
+    }
+    return jsonResponse({
+      schema_version: 1,
+      revision: 1,
+      snap_to_grid: true,
+      positions: {
+        grp: { x: 100, y: 100 },
+        'child-a': { x: 152, y: 152 },
+        'child-b': { x: 380, y: 152 },
+        outsider: { x: 900, y: 900 }
+      }
+    });
+  });
+  const harness = createCameraHarness({
+    tiles: ['child-a', 'child-b', 'outsider'],
+    districts: ['grp']
+  });
+  map.mount(harness.container, {
+    workspaces: [
+      { id: 'grp', kind: 'group', name: 'Ops' },
+      { id: 'child-a', parent_id: 'grp', name: 'A' },
+      { id: 'child-b', parent_id: 'grp', name: 'B' },
+      { id: 'outsider', name: 'Outside' }
+    ],
+    hideChrome: true,
+    selectOnly: true,
+    noAutoSelect: true
+  });
+  await flush();
+  // Reset View pins the camera at 100%, so a screen delta in these tests is a
+  // world delta and the expected numbers stay readable.
+  harness.control('[data-map-reset-view]').click();
+  return { map, harness, patches };
+}
+
+test('dragging the district handle moves the whole cluster by one delta (FR-86)', async () => {
+  const { harness, patches } = await mountedCluster();
+  const handle = harness.handle('grp');
+  const childA = harness.tile('child-a');
+  const childB = harness.tile('child-b');
+  const outsider = harness.tile('outsider');
+  outsider.style.left = '900px';
+  outsider.style.top = '900px';
+
+  handle.fire('pointerdown', tilePointer(200, 200));
+  handle.fire('pointermove', tilePointer(276, 238));
+
+  // Relative spacing inside the cluster is preserved exactly.
+  const a = childA.at();
+  const b = childB.at();
+  assert.equal(b.x - a.x, 380 - 152, 'members kept their relative spacing');
+  assert.equal(b.y - a.y, 0);
+  assert.equal(outsider.style.left, '900px', 'a workspace outside the district did not move');
+
+  handle.fire('pointerup', tilePointer(276, 238));
+  await flush();
+
+  assert.equal(patches.length, 1, 'one cluster move, one request');
+  const op = patches[0].operations[0];
+  assert.equal(op.op, 'translate_group');
+  assert.equal(op.group_id, 'grp');
+  // The group's anchor snaps to the grid like any other placement, so the delta
+  // is whatever carries (100,100) to the nearest grid point past the drag —
+  // (190,152) — rather than the raw pointer distance.
+  assert.deepEqual(
+    { ...op.delta },
+    { x: 90, y: 52 },
+    'the server is sent a delta, not coordinates'
+  );
+  // FR-8: nothing in a cluster move can express membership.
+  assert.equal(JSON.stringify(patches[0]).includes('parent'), false);
+});
+
+test('a cluster move that would land on an outside building is refused, not resolved (FR-88)', async () => {
+  const { harness, patches } = await mountedCluster();
+  // Snapping off, so the drag lands exactly where the arithmetic says.
+  harness.control('[data-map-snap]').click();
+  await flush();
+
+  const handle = harness.handle('grp');
+  const outsider = harness.tile('outsider');
+  outsider.style.left = '900px';
+  outsider.style.top = '900px';
+
+  // Move child-a (152,152) exactly onto the outsider at (900,900).
+  handle.fire('pointerdown', tilePointer(0, 0));
+  handle.fire('pointermove', tilePointer(748, 748));
+  handle.fire('pointerup', tilePointer(748, 748));
+  await flush();
+
+  const moves = patches.filter(p => p.operations[0].op === 'translate_group');
+  assert.equal(moves.length, 0, 'the collision blocked the commit');
+  assert.deepEqual(
+    { ...harness.district('grp').at() },
+    { x: 100, y: 100 },
+    'the district returned'
+  );
+  assert.deepEqual({ ...harness.tile('child-a').at() }, { x: 152, y: 152 });
+  assert.equal(outsider.style.left, '900px', 'the outside building was never touched');
+});
+
+test('a failed cluster save restores every anchor together (FR-87)', async () => {
+  const { harness, patches } = await mountedCluster({ patchResponse: 'fail' });
+  const handle = harness.handle('grp');
+
+  handle.fire('pointerdown', tilePointer(200, 200));
+  handle.fire('pointermove', tilePointer(300, 300));
+  handle.fire('pointerup', tilePointer(300, 300));
+  await flush();
+
+  assert.equal(patches.length, 1, 'it was attempted');
+  assert.deepEqual({ ...harness.district('grp').at() }, { x: 100, y: 100 });
+  assert.deepEqual({ ...harness.tile('child-a').at() }, { x: 152, y: 152 });
+  assert.deepEqual({ ...harness.tile('child-b').at() }, { x: 380, y: 152 });
+});
+
+test('a selected district moves by keyboard with the same contract (FR-93)', async () => {
+  const { map, harness, patches } = await mountedCluster();
+  map.setSelectedId(null, [], 'grp');
+
+  harness.control('[data-map-move]').click();
+  harness.fire('keydown', keyEvent('ArrowRight'));
+  assert.deepEqual(
+    { ...harness.tile('child-a').at() },
+    { x: 152 + 38, y: 152 },
+    'the cluster previewed'
+  );
+  assert.equal(patches.length, 0, 'stepping does not save');
+
+  harness.fire('keydown', keyEvent('Escape'));
+  assert.deepEqual({ ...harness.tile('child-a').at() }, { x: 152, y: 152 }, 'Escape restored it');
+  assert.equal(patches.length, 0);
+
+  harness.control('[data-map-move]').click();
+  harness.fire('keydown', keyEvent('ArrowDown'));
+  harness.fire('keydown', keyEvent('Enter'));
+  await flush();
+  assert.equal(patches.length, 1);
+  assert.equal(patches[0].operations[0].op, 'translate_group');
+  assert.deepEqual({ ...patches[0].operations[0].delta }, { x: 0, y: 38 });
+});
+
+test('moving one child expands its district and moves no sibling (FR-89)', async () => {
+  const { harness, patches } = await mountedCluster();
+  const childA = harness.tile('child-a');
+  const childB = harness.tile('child-b');
+  childB.style.left = '380px';
+  childB.style.top = '152px';
+
+  childA.fire('pointerdown', tilePointer(100, 100));
+  childA.fire('pointermove', tilePointer(400, 400));
+  childA.fire('pointerup', tilePointer(400, 400));
+  await flush();
+
+  const op = patches[0].operations[0];
+  assert.equal(
+    op.op,
+    'set_positions',
+    'a child move is a plain position update, not a cluster move'
+  );
+  assert.deepEqual(Object.keys(op.positions), ['child-a'], 'only the child was saved');
+  assert.equal(childB.style.left, '380px', 'the sibling stayed put');
+  assert.equal(JSON.stringify(patches[0]).includes('parent'), false, 'membership is untouched');
+});
+
+test('a Tree reparent keeps absolute coordinates and only redraws the district (FR-90, FR-91)', () => {
+  const computeWorldLayout = loadWorldLayout();
+  const positions = {
+    grp: { x: 100, y: 100 },
+    other: { x: 900, y: 100 },
+    mover: { x: 500, y: 400 }
+  };
+  const before = computeWorldLayout(
+    [
+      { id: 'grp', kind: 'group', name: 'Ops' },
+      { id: 'other', kind: 'group', name: 'Research' },
+      { id: 'mover', parent_id: 'grp', name: 'Mover' }
+    ],
+    { positions }
+  );
+  const after = computeWorldLayout(
+    [
+      { id: 'grp', kind: 'group', name: 'Ops' },
+      { id: 'other', kind: 'group', name: 'Research' },
+      { id: 'mover', parent_id: 'other', name: 'Mover' }
+    ],
+    { positions }
+  );
+
+  // The workspace stays exactly where it was: changing a parent is not a move,
+  // and it must never snap to the destination group's anchor (FR-91).
+  assert.deepEqual(anchorsById(before).mover, { x: 500, y: 400 });
+  assert.deepEqual(anchorsById(after).mover, { x: 500, y: 400 });
+
+  // Only the district presentation changed: the outline that now contains it.
+  const districtAfter = after.districts.find(d => d.id === 'other');
+  assert.ok(districtAfter.x <= 500 && districtAfter.y <= 400, 'the new district grew around it');
+  const oldDistrictAfter = after.districts.find(d => d.id === 'grp');
+  assert.ok(oldDistrictAfter.width < districtAfter.width, 'the old district shrank back');
 });
 
 test('merely reading the map never writes a coordinate (FR-23)', async () => {

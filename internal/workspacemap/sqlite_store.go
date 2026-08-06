@@ -27,9 +27,10 @@ var ErrGroupResolverUnavailable = errors.New("workspace map group resolver is no
 //
 // It is injected rather than implemented here because membership is workspace
 // hierarchy, which this package deliberately cannot read or write. The store
-// calls it inside the write transaction so a cluster move translates whatever
-// the hierarchy says right now, not whatever a browser tab believed a minute
-// ago.
+// calls it immediately before opening the write transaction, so a cluster move
+// translates whatever the hierarchy says right now rather than whatever a
+// browser tab believed a minute ago — but without taking a second database
+// connection while the write lock is held (see Apply).
 type DescendantResolver interface {
 	GroupNodeIDs(ctx context.Context, groupID string) ([]string, error)
 }
@@ -188,6 +189,17 @@ func (s *SQLiteStore) Apply(ctx context.Context, userID string, patch Patch) (Re
 	}
 	userID = normalizeUserID(userID)
 
+	// Group membership is resolved BEFORE the transaction opens. The resolver
+	// reads the workspace store, which lives in this same SQLite database — and
+	// a read issued from inside the write transaction takes a second connection
+	// that waits on the write lock this transaction is holding. That is a
+	// deadlock, not a slow query, and it hangs the request until the busy
+	// timeout gives up.
+	members, err := s.resolveGroups(ctx, normalized)
+	if err != nil {
+		return Result{}, err
+	}
+
 	var result Result
 	err = s.db.InTransaction(ctx, func(tx *sql.Tx) error {
 		now := time.Now().UTC()
@@ -196,7 +208,7 @@ func (s *SQLiteStore) Apply(ctx context.Context, userID string, patch Patch) (Re
 			return err
 		}
 		for i, op := range normalized.Operations {
-			if err := s.applyOperation(ctx, tx, userID, now, op, state); err != nil {
+			if err := s.applyOperation(ctx, tx, userID, now, op, members, state); err != nil {
 				return fmt.Errorf("operation %d (%s): %w", i, op.Kind, err)
 			}
 		}
@@ -280,7 +292,34 @@ func (s *SQLiteStore) beginLayout(ctx context.Context, tx *sql.Tx, userID string
 	return state, nil
 }
 
-func (s *SQLiteStore) applyOperation(ctx context.Context, tx *sql.Tx, userID string, now time.Time, op Operation, state *layoutState) error {
+// resolveGroups asks the resolver which nodes belong to each group a patch
+// translates, keyed by group ID. Running this ahead of the transaction is what
+// keeps the write lock and the membership read off the same connection.
+func (s *SQLiteStore) resolveGroups(ctx context.Context, patch Patch) (map[string][]string, error) {
+	members := map[string][]string{}
+	for _, op := range patch.Operations {
+		if op.Kind != OpTranslateGroup {
+			continue
+		}
+		if s.resolver == nil {
+			return nil, ErrGroupResolverUnavailable
+		}
+		if _, done := members[op.GroupID]; done {
+			continue
+		}
+		ids, err := s.resolver.GroupNodeIDs(ctx, op.GroupID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve group %q: %w", op.GroupID, err)
+		}
+		if len(ids) > MaxPositionsPerOperation {
+			return nil, fmt.Errorf("%w: group %q has %d members, limit %d", ErrPatchTooLarge, op.GroupID, len(ids), MaxPositionsPerOperation)
+		}
+		members[op.GroupID] = ids
+	}
+	return members, nil
+}
+
+func (s *SQLiteStore) applyOperation(ctx context.Context, tx *sql.Tx, userID string, now time.Time, op Operation, members map[string][]string, state *layoutState) error {
 	switch op.Kind {
 	case OpSetPositions:
 		return s.writePositions(ctx, tx, userID, now, op.Positions, state)
@@ -295,7 +334,7 @@ func (s *SQLiteStore) applyOperation(ctx context.Context, tx *sql.Tx, userID str
 		return nil
 
 	case OpTranslateGroup:
-		return s.translateGroup(ctx, tx, userID, now, op, state)
+		return s.translateGroup(ctx, tx, userID, now, op, members[op.GroupID], state)
 
 	case OpReset:
 		if _, err := tx.ExecContext(ctx, `
@@ -349,16 +388,9 @@ func (s *SQLiteStore) writePositions(ctx context.Context, tx *sql.Tx, userID str
 // fallback into a saved position. Callers that want fallbacks materialized send
 // an OpSetPositions ahead of the translation in the same patch, which this
 // transaction will already have written by the time the read below runs.
-func (s *SQLiteStore) translateGroup(ctx context.Context, tx *sql.Tx, userID string, now time.Time, op Operation, state *layoutState) error {
-	if s.resolver == nil {
+func (s *SQLiteStore) translateGroup(ctx context.Context, tx *sql.Tx, userID string, now time.Time, op Operation, memberIDs []string, state *layoutState) error {
+	if memberIDs == nil {
 		return ErrGroupResolverUnavailable
-	}
-	memberIDs, err := s.resolver.GroupNodeIDs(ctx, op.GroupID)
-	if err != nil {
-		return fmt.Errorf("failed to resolve group %q: %w", op.GroupID, err)
-	}
-	if len(memberIDs) > MaxPositionsPerOperation {
-		return fmt.Errorf("%w: group %q has %d members, limit %d", ErrPatchTooLarge, op.GroupID, len(memberIDs), MaxPositionsPerOperation)
 	}
 
 	delta := *op.Delta

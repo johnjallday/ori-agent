@@ -310,6 +310,11 @@
   /* The map consumes its own drag and pinch gestures; without this the browser
      scrolls the page out from under a pan on touch (FR-46). */
   touch-action: none;
+  /* Every gesture here is a drag of something. Without this the browser starts
+     selecting label text instead, which both looks broken and swallows the
+     drag. */
+  -webkit-user-select: none;
+  user-select: none;
   cursor: grab;
 }
 .ws-map-canvas:focus-visible {
@@ -380,11 +385,10 @@
 /* Camera controls. Every pointer navigation gesture also has a button here, so
    a wheel or a pinch is a shortcut rather than a requirement (#292 FR-37,
    FR-115). Sized for touch at any zoom (FR-118). */
-.ws-map-controls {
+.ws-map-controls,
+.ws-map-actions {
   position: absolute;
   z-index: 7;
-  left: 16px;
-  bottom: 14px;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -392,6 +396,16 @@
   padding: 6px;
   border: 1px solid var(--ws-line-bright);
   background: var(--ws-bg-2);
+}
+.ws-map-controls {
+  left: 16px;
+  bottom: 14px;
+}
+/* Placement actions sit opposite the camera controls so neither cluster grows
+   into a bar that covers the buildings it exists to help with. */
+.ws-map-actions {
+  right: 16px;
+  bottom: 14px;
 }
 .ws-map-ctl {
   min-width: 44px;
@@ -522,6 +536,39 @@
 .ws-map-district-tag:focus-visible {
   outline: 2px solid var(--ws-keeper);
   outline-offset: 2px;
+}
+/* The cluster drag handle. Separate from the label so selecting a group and
+   moving everything in it are unmistakably different gestures, and sized for a
+   finger at any zoom (#292 FR-85, FR-118). */
+.ws-map-district-handle {
+  position: absolute;
+  top: -11px;
+  right: 10px;
+  min-width: 44px;
+  min-height: 44px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(232, 134, 77, 0.35);
+  background: var(--ws-bg-2);
+  color: var(--ws-keeper);
+  cursor: grab;
+  touch-action: none;
+  font-size: 14px;
+  line-height: 1;
+}
+.ws-map-district-handle:hover {
+  background: rgba(232, 134, 77, 0.12);
+}
+.ws-map-district-handle:focus-visible {
+  outline: 2px solid var(--ws-keeper);
+  outline-offset: 2px;
+}
+.ws-map-district.is-dragging {
+  border-style: solid;
+  border-color: var(--ws-keeper);
+}
+.ws-map-district.is-dragging .ws-map-district-handle {
+  cursor: grabbing;
 }
 
 /* building tile */

@@ -68,6 +68,9 @@
   var PAN_THRESHOLD = 4;
   // Comfortable breathing room around the content that Fit All frames (FR-40).
   var FIT_PADDING = 48;
+  // Height of the floating control strip along the bottom of the map. Framing
+  // actions keep content clear of it so a fitted building is always clickable.
+  var CONTROL_STRIP_HEIGHT = 76;
   // The background grid's spacing at 100% zoom, shared with the CSS grid so a
   // snapped anchor always lands on a line the user can see (FR-58).
   var SNAP_STEP = 38;
@@ -1034,15 +1037,15 @@
     // camera onto an empty corner that every later refresh then inherits.
     if (!lastWorldLayout.nodes.length && !lastWorldLayout.districts.length) return;
     var canvas = container && container.querySelector && container.querySelector('.ws-map-canvas');
-    var fitted = fitBounds(lastWorldLayout.bounds, viewportSize(canvas));
+    var fitted = fitBounds(lastWorldLayout.bounds, framedViewport(canvas));
     // Fit All zooms in when there is little content; the opening view does not.
     // Landing at 200% on a two-workspace map is disorienting, and the button is
     // right there for anyone who wants it.
-    camera = {
+    camera = liftAboveControls({
       centerX: fitted.centerX,
       centerY: fitted.centerY,
       zoom: Math.min(DEFAULT_ZOOM, fitted.zoom)
-    };
+    });
     cameraReady = true;
   }
 
@@ -1340,6 +1343,15 @@
       '">▢ ' +
       escapeHtml(ws.name || 'Group') +
       ' · Group</button>' +
+      // A separate, touch-sized handle for cluster movement. Dragging the label
+      // would make "select this group" and "move everything in it" the same
+      // gesture, and every existing group action — select, overview, open,
+      // delete, Tree management — has to stay reachable (FR-85, FR-94).
+      '<button type="button" class="ws-map-district-handle" data-group-drag="' +
+      escapeHtml(ws.id) +
+      '" aria-label="' +
+      escapeHtml('Move the ' + (ws.name || 'group') + ' district and its workspaces') +
+      '" title="Move this district">⤧</button>' +
       '</div>'
     );
   }
@@ -1450,26 +1462,32 @@
     var readOnly = layoutState.status !== 'ready';
     return (
       buildBannerHTML() +
+      // Two clusters, because they are two different jobs. Navigation moves the
+      // camera and can never change the map; the placement actions change where
+      // things are. Keeping them apart also keeps either group from growing into
+      // a bar that covers the buildings it is meant to help with.
+      '<div class="ws-map-actions" role="group" aria-label="Map placement actions">' +
+      '<button type="button" class="ws-map-ctl ws-map-ctl--wide ws-map-ctl--build" data-map-build' +
+      (readOnly ? ' disabled' : '') +
+      '>⊕ Build</button>' +
+      '<button type="button" class="ws-map-ctl ws-map-ctl--wide" data-map-move' +
+      (readOnly ? ' disabled' : '') +
+      '>Move</button>' +
+      '<button type="button" class="ws-map-ctl ws-map-ctl--wide" data-map-snap aria-pressed="' +
+      (snapOn ? 'true' : 'false') +
+      '"' +
+      (readOnly ? ' disabled' : '') +
+      '>Snap: ' +
+      (snapOn ? 'on' : 'off') +
+      '</button>' +
+      '</div>' +
       '<div class="ws-map-controls" role="group" aria-label="Map view controls">' +
       '<button type="button" class="ws-map-ctl" data-map-zoom-out aria-label="Zoom out">−</button>' +
       '<span class="ws-map-zoom" data-map-zoom-readout aria-hidden="true">100%</span>' +
       '<button type="button" class="ws-map-ctl" data-map-zoom-in aria-label="Zoom in">+</button>' +
       '<button type="button" class="ws-map-ctl ws-map-ctl--wide" data-map-fit>Fit all</button>' +
-      '<button type="button" class="ws-map-ctl ws-map-ctl--wide" data-map-center>Center selected</button>' +
-      '<button type="button" class="ws-map-ctl ws-map-ctl--wide" data-map-reset-view>Reset view</button>' +
-      '<button type="button" class="ws-map-ctl ws-map-ctl--wide ws-map-ctl--build" data-map-build' +
-      (readOnly ? ' disabled' : '') +
-      '>⊕ Build workspace</button>' +
-      '<button type="button" class="ws-map-ctl ws-map-ctl--wide" data-map-move' +
-      (readOnly ? ' disabled' : '') +
-      '>Move selected</button>' +
-      '<button type="button" class="ws-map-ctl ws-map-ctl--wide" data-map-snap aria-pressed="' +
-      (snapOn ? 'true' : 'false') +
-      '"' +
-      (readOnly ? ' disabled' : '') +
-      '>Snap to grid: ' +
-      (snapOn ? 'on' : 'off') +
-      '</button>' +
+      '<button type="button" class="ws-map-ctl ws-map-ctl--wide" data-map-center aria-label="Center selected">Center</button>' +
+      '<button type="button" class="ws-map-ctl ws-map-ctl--wide" data-map-reset-view aria-label="Reset view">Reset</button>' +
       '</div>' +
       '<p class="ws-map-live" data-map-live role="status" aria-live="polite"></p>'
     );
@@ -2293,7 +2311,7 @@
   function isInteractiveTarget(target) {
     if (!target || typeof target.closest !== 'function') return false;
     return !!target.closest(
-      '.ws-map-tile, .ws-map-district-tag, .ws-map-pad, .ws-map-controls, button, a, input, select, textarea, [data-ws-check], [role="checkbox"]'
+      '.ws-map-tile, .ws-map-district-tag, .ws-map-district-handle, .ws-map-pad, .ws-map-controls, .ws-map-actions, .ws-map-build, button, a, input, select, textarea, [data-ws-check], [role="checkbox"]'
     );
   }
 
@@ -2495,7 +2513,15 @@
     });
     on('[data-map-fit]', function () {
       fitAll(container);
-      announce(container, 'Showing every workspace');
+      // Zoom is clamped at 50%, so a layout spread wider than two viewports
+      // cannot literally all fit. Saying so is better than a button that
+      // quietly under-delivers (FR-38, FR-40).
+      announce(
+        container,
+        camera.zoom <= MIN_ZOOM + 0.0001
+          ? 'Zoomed out as far as the map goes. Some workspaces are still off-screen — pan to reach them.'
+          : 'Showing every workspace'
+      );
     });
     on('[data-map-center]', function () {
       var anchor = selectedNodeAnchor();
@@ -2577,10 +2603,37 @@
     });
   }
 
+  // framedViewport is the part of the canvas that is actually clear. The camera
+  // controls float over the bottom of the map, so framing content into the full
+  // height would park buildings underneath them — visible, but not clickable,
+  // which is exactly what FR-73 forbids.
+  function framedViewport(canvas) {
+    var viewport = viewportSize(canvas);
+    return {
+      width: viewport.width,
+      height: Math.max(CELL_H, viewport.height - CONTROL_STRIP_HEIGHT),
+      full: viewport
+    };
+  }
+
+  // liftAboveControls shifts a framing camera up by half the reserved strip, so
+  // the content it framed is centred in the clear area rather than in the whole
+  // canvas.
+  function liftAboveControls(cam) {
+    return {
+      centerX: cam.centerX,
+      centerY: cam.centerY + CONTROL_STRIP_HEIGHT / 2 / cam.zoom,
+      zoom: cam.zoom
+    };
+  }
+
   function fitAll(container) {
     if (!lastWorldLayout) return;
     var canvas = container.querySelector('[data-ws-map-viewport]');
-    setCamera(fitBounds(lastWorldLayout.bounds, viewportSize(canvas)), container);
+    setCamera(
+      liftAboveControls(fitBounds(lastWorldLayout.bounds, framedViewport(canvas))),
+      container
+    );
   }
 
   // Reset View restores the default framing — the content, centred, at 100%.
@@ -2589,11 +2642,11 @@
   function resetView(container) {
     if (!lastWorldLayout) return;
     setCamera(
-      {
+      liftAboveControls({
         centerX: (lastWorldLayout.bounds.minX + lastWorldLayout.bounds.maxX) / 2,
         centerY: (lastWorldLayout.bounds.minY + lastWorldLayout.bounds.maxY) / 2,
         zoom: DEFAULT_ZOOM
-      },
+      }),
       container
     );
   }
@@ -2835,11 +2888,218 @@
     readout.textContent = candidateLabel(point);
   }
 
+  // ---------- moving districts ----------
+  //
+  // A cluster move is one world-space delta applied to the group and every
+  // visible descendant, preserving all relative spacing (FR-86). It is a
+  // presentation move: `parent_id` is never in the payload, so no arrangement
+  // of buildings can change who belongs to what (FR-8).
+
+  var clusterDrag = null;
+
+  /** The group's members as currently drawn, with their live anchors. */
+  function clusterMembers(container, groupId) {
+    if (!lastWorldLayout) return [];
+    var members = [];
+    lastWorldLayout.nodes.forEach(function (node) {
+      if (node.groupId !== groupId) return;
+      members.push({
+        id: node.id,
+        el: container.querySelector('.ws-map-tile[data-ws-id="' + node.id + '"]'),
+        origin: committedAnchor(node.id) || { x: node.x, y: node.y }
+      });
+    });
+    return members;
+  }
+
+  /**
+   * Would this delta drop a cluster member on top of a building outside it?
+   *
+   * A cluster collision is refused rather than resolved: nudging one member
+   * would shear the district, and moving the resident building would move
+   * something the user never touched (FR-88).
+   */
+  function clusterCollides(groupId, members, delta) {
+    var inCluster = Object.create(null);
+    inCluster[groupId] = true;
+    members.forEach(function (member) {
+      inCluster[member.id] = true;
+    });
+    var taken = Object.create(null);
+    if (lastWorldLayout) {
+      lastWorldLayout.nodes.forEach(function (node) {
+        if (inCluster[node.id]) return;
+        var anchor = committedAnchor(node.id) || { x: node.x, y: node.y };
+        taken[anchorKey(anchor)] = true;
+      });
+    }
+    return members.some(function (member) {
+      return taken[anchorKey({ x: member.origin.x + delta.x, y: member.origin.y + delta.y })];
+    });
+  }
+
+  function previewCluster(state, delta) {
+    placeElement(state.districtEl, {
+      x: state.districtOrigin.x + delta.x,
+      y: state.districtOrigin.y + delta.y
+    });
+    state.members.forEach(function (member) {
+      placeElement(member.el, { x: member.origin.x + delta.x, y: member.origin.y + delta.y });
+    });
+  }
+
+  function restoreCluster(state) {
+    previewCluster(state, { x: 0, y: 0 });
+  }
+
+  /**
+   * Commit a cluster move.
+   *
+   * The client sends the group and one delta, not a list of coordinates: the
+   * server resolves the district's current members and translates their latest
+   * anchors inside one transaction, so the whole cluster lands or none of it
+   * does (FR-87).
+   */
+  function commitClusterMove(container, state, delta) {
+    return patchLayout([
+      { op: 'translate_group', group_id: state.groupId, delta: { x: delta.x, y: delta.y } }
+    ])
+      .then(function () {
+        announce(container, 'District moved. Every workspace kept its place inside it.');
+        pendingFocusId = '';
+        settleLayout();
+        return true;
+      })
+      .catch(function () {
+        // Every prior anchor comes back together — a district cannot be left
+        // half-moved (FR-87).
+        restoreCluster(state);
+        announce(
+          container,
+          'That district move could not be saved. Everything is back where it was.'
+        );
+        return false;
+      });
+  }
+
+  function bindDistrictDrag(container) {
+    var handles = container.querySelectorAll('[data-group-drag]');
+    Array.prototype.forEach.call(handles, function (handle) {
+      if (!handle || typeof handle.addEventListener !== 'function') return;
+
+      handle.addEventListener('pointerdown', function (event) {
+        if (layoutState.status !== 'ready') return;
+        if (event.button != null && event.button !== 0) return;
+        var groupId = handle.getAttribute('data-group-drag');
+        var origin = committedAnchor(groupId);
+        if (!groupId || !origin) return;
+        clusterDrag = {
+          groupId: groupId,
+          handle: handle,
+          pointerId: event.pointerId,
+          startX: event.clientX,
+          startY: event.clientY,
+          districtEl: container.querySelector('.ws-map-district[data-group-id="' + groupId + '"]'),
+          districtOrigin: origin,
+          members: clusterMembers(container, groupId),
+          delta: { x: 0, y: 0 },
+          moved: false
+        };
+        if (handle.setPointerCapture) handle.setPointerCapture(event.pointerId);
+        if (event.stopPropagation) event.stopPropagation();
+        // Suppress the browser's own drag/selection behaviour so the gesture
+        // moves the district instead of highlighting its label.
+        if (event.preventDefault) event.preventDefault();
+      });
+
+      handle.addEventListener('pointermove', function (event) {
+        if (!clusterDrag || clusterDrag.handle !== handle) return;
+        if (event.pointerId !== clusterDrag.pointerId) return;
+        var dx = event.clientX - clusterDrag.startX;
+        var dy = event.clientY - clusterDrag.startY;
+        if (!clusterDrag.moved) {
+          if (Math.abs(dx) < PAN_THRESHOLD && Math.abs(dy) < PAN_THRESHOLD) return;
+          clusterDrag.moved = true;
+          if (clusterDrag.districtEl && clusterDrag.districtEl.classList) {
+            clusterDrag.districtEl.classList.add('is-dragging');
+          }
+        }
+        if (event.preventDefault) event.preventDefault();
+        var raw = { x: dx / camera.zoom, y: dy / camera.zoom };
+        var snappedTarget = snapPoint(
+          { x: clusterDrag.districtOrigin.x + raw.x, y: clusterDrag.districtOrigin.y + raw.y },
+          !!event.altKey
+        );
+        clusterDrag.delta = {
+          x: snappedTarget.x - clusterDrag.districtOrigin.x,
+          y: snappedTarget.y - clusterDrag.districtOrigin.y
+        };
+        previewCluster(clusterDrag, clusterDrag.delta);
+        setDragReadout(container, snappedTarget);
+      });
+
+      function finish(event, cancelled) {
+        if (!clusterDrag || clusterDrag.handle !== handle) return;
+        if (event && event.pointerId != null && event.pointerId !== clusterDrag.pointerId) return;
+        var state = clusterDrag;
+        clusterDrag = null;
+        if (
+          handle.releasePointerCapture &&
+          handle.hasPointerCapture &&
+          handle.hasPointerCapture(state.pointerId)
+        ) {
+          handle.releasePointerCapture(state.pointerId);
+        }
+        if (state.districtEl && state.districtEl.classList) {
+          state.districtEl.classList.remove('is-dragging');
+        }
+        setDragReadout(container, null);
+        if (!state.moved) return;
+        if (cancelled) {
+          restoreCluster(state);
+          announce(container, 'District move cancelled.');
+          return;
+        }
+        if (clusterCollides(state.groupId, state.members, state.delta)) {
+          restoreCluster(state);
+          announce(
+            container,
+            'That would land a workspace on top of one outside this district. The district is back where it was.'
+          );
+          return;
+        }
+        commitClusterMove(container, state, state.delta);
+      }
+
+      handle.addEventListener('pointerup', function (event) {
+        finish(event, false);
+      });
+      handle.addEventListener('pointercancel', function (event) {
+        finish(event, true);
+      });
+      handle.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape' && clusterDrag && clusterDrag.handle === handle) {
+          finish(null, true);
+        }
+      });
+    });
+  }
+
   // ---------- keyboard move ----------
   //
   // The same commit contract as a drag, reachable without a pointer (FR-77).
 
   var moveState = null;
+
+  // isDistrictId reports whether the selection is a group district rather than a
+  // building, which decides whether a keyboard move carries one anchor or a
+  // whole cluster (FR-93).
+  function isDistrictId(id) {
+    if (!lastWorldLayout) return false;
+    return lastWorldLayout.districts.some(function (district) {
+      return district.id === id;
+    });
+  }
 
   function startKeyboardMove(container) {
     if (layoutState.status !== 'ready') {
@@ -2851,14 +3111,37 @@
       announce(container, 'Select a workspace or group first');
       return;
     }
-    var el = container.querySelector('.ws-map-tile[data-ws-id="' + selectedId + '"]');
-    moveState = { id: selectedId, el: el, origin: anchor, candidate: anchor };
+    if (isDistrictId(selectedId)) {
+      // A selected group moves as the same cluster the drag handle moves, with
+      // the same commit-or-cancel contract (FR-93).
+      moveState = {
+        cluster: {
+          groupId: selectedId,
+          districtEl: container.querySelector(
+            '.ws-map-district[data-group-id="' + selectedId + '"]'
+          ),
+          districtOrigin: anchor,
+          members: clusterMembers(container, selectedId)
+        },
+        origin: anchor,
+        candidate: anchor
+      };
+    } else {
+      moveState = {
+        id: selectedId,
+        el: container.querySelector('.ws-map-tile[data-ws-id="' + selectedId + '"]'),
+        origin: anchor,
+        candidate: anchor
+      };
+    }
     var banner = container.querySelector('[data-map-build-banner]');
     if (banner) banner.hidden = false;
     setDragReadout(container, anchor);
     announce(
       container,
-      'Moving from ' + formatCoordinate(anchor) + '. Arrow keys move, Enter saves, Escape cancels.'
+      (moveState.cluster ? 'Moving this district from ' : 'Moving from ') +
+        formatCoordinate(anchor) +
+        '. Arrow keys move, Enter saves, Escape cancels.'
     );
   }
 
@@ -2869,6 +3152,29 @@
     setDragReadout(container, null);
     var banner = container.querySelector('[data-map-build-banner]');
     if (banner && !buildState.active) banner.hidden = true;
+
+    if (state.cluster) {
+      var delta = {
+        x: state.candidate.x - state.origin.x,
+        y: state.candidate.y - state.origin.y
+      };
+      if (!commit) {
+        restoreCluster(state.cluster);
+        announce(container, 'Move cancelled. The district is back where it was.');
+        return;
+      }
+      if (clusterCollides(state.cluster.groupId, state.cluster.members, delta)) {
+        restoreCluster(state.cluster);
+        announce(
+          container,
+          'That would land a workspace on top of one outside this district. The district is back where it was.'
+        );
+        return;
+      }
+      commitClusterMove(container, state.cluster, delta);
+      return;
+    }
+
     if (!commit) {
       placeElement(state.el, state.origin);
       announce(container, 'Move cancelled. The workspace is back where it was.');
@@ -2907,7 +3213,14 @@
         return false;
     }
     moveState.candidate = next;
-    placeElement(moveState.el, next);
+    if (moveState.cluster) {
+      previewCluster(moveState.cluster, {
+        x: next.x - moveState.origin.x,
+        y: next.y - moveState.origin.y
+      });
+    } else {
+      placeElement(moveState.el, next);
+    }
     setDragReadout(container, next);
     announce(container, 'Candidate ' + candidateLabel(next));
     return true;
@@ -3280,6 +3593,7 @@
     bindCameraControls(container);
     bindBuildMode(container);
     bindTileDrag(container);
+    bindDistrictDrag(container);
     // A re-render (a refresh landing mid-placement) rebuilt the banner and the
     // marker, so restore what the user was in the middle of.
     if (buildState.active) restoreBuildMode(container);
