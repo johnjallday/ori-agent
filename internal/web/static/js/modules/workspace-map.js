@@ -1251,7 +1251,8 @@
       'aria-checked="' +
       (isMulti ? 'true' : 'false') +
       '" ' +
-      'aria-label="Select for bulk action" title="Select"></span>' +
+      'aria-label="Select for bulk action" ' +
+      'title="Select for bulk action (or Shift/Cmd + Enter on the tile)"></span>' +
       '<span class="ws-map-tile-flag"><span class="ws-map-led' +
       (active ? ' is-working' : '') +
       '"></span>' +
@@ -2109,13 +2110,33 @@
     window.location.href = '/workspaces/' + encodeURIComponent(id) + query;
   }
 
-  function deleteWorkspace(id) {
+  // Delete and group are owned by the host, not the map: the cockpit passes them
+  // in as options wired to workspace-bulk-actions.js, which Tree also uses.
+  //
+  // These used to call `window.WorkspaceHub` directly. That global ships only
+  // with the retired `/workspaces` launcher, which redirects to Home, so it was
+  // never defined where the map actually renders and every click was a silent
+  // no-op. `requireAction` keeps the fallback for the legacy page but refuses to
+  // fail quietly again: an unwired action is a wiring bug and says so.
+  var LEGACY_HUB_ACTIONS = {
+    onDeleteWorkspace: 'deleteWorkspace',
+    onDeleteWorkspaces: 'deleteWorkspaces',
+    onGroupWorkspaces: 'groupWorkspaces'
+  };
+
+  function requireAction(options, name) {
+    if (options && typeof options[name] === 'function') return options[name];
+    var hub = window.WorkspaceHub;
+    var legacy = LEGACY_HUB_ACTIONS[name];
+    if (hub && legacy && typeof hub[legacy] === 'function') return hub[legacy].bind(hub);
+    console.error('workspace-map: no handler for ' + name + '. The host must pass it to mount().');
+    return null;
+  }
+
+  function deleteWorkspace(id, options) {
     if (!id) return;
-    // Reuse the hub's single-item delete flow (confirm modal, group handling,
-    // Trash + Undo, toasts). It reloads on success, which re-mounts the map.
-    if (window.WorkspaceHub && typeof window.WorkspaceHub.deleteWorkspace === 'function') {
-      window.WorkspaceHub.deleteWorkspace(id);
-    }
+    var action = requireAction(options, 'onDeleteWorkspace');
+    if (action) action(id);
   }
 
   function bindOverviewActions(container, options) {
@@ -2152,7 +2173,7 @@
     var deletes = container.querySelectorAll('[data-ws-delete]');
     Array.prototype.forEach.call(deletes, function (el) {
       el.addEventListener('click', function () {
-        deleteWorkspace(el.getAttribute('data-ws-delete'));
+        deleteWorkspace(el.getAttribute('data-ws-delete'), options);
       });
     });
     var tagFilters = container.querySelectorAll('[data-ws-tag-filter]');
@@ -2257,36 +2278,32 @@
     updateSelBar(container);
   }
 
-  function deleteMulti() {
+  // Batch delete + group. On success the host reloads and re-mounts the map,
+  // where mount() prunes ids that no longer exist.
+  function deleteMulti(options) {
     var ids = multiIds();
     if (!ids.length) return;
-    // Reuse the hub's batch delete (confirm + Trash + Undo). On success it
-    // reloads and re-mounts the map, where mount() prunes the deleted ids.
-    if (window.WorkspaceHub && typeof window.WorkspaceHub.deleteWorkspaces === 'function') {
-      window.WorkspaceHub.deleteWorkspaces(ids);
-    }
+    var action = requireAction(options, 'onDeleteWorkspaces');
+    if (action) action(ids);
   }
 
-  function groupMulti() {
+  function groupMulti(options) {
     var ids = multiIds();
     if (!ids.length) return;
-    // Reuse the hub's Create Group modal + create/reparent flow. On success it
-    // reloads and re-mounts the map, where mount() prunes the grouped ids.
-    if (window.WorkspaceHub && typeof window.WorkspaceHub.groupWorkspaces === 'function') {
-      window.WorkspaceHub.groupWorkspaces(ids);
-    }
+    var action = requireAction(options, 'onGroupWorkspaces');
+    if (action) action(ids);
   }
 
-  function bindSelBar(container) {
+  function bindSelBar(container, options) {
     var group = container.querySelector('[data-ws-selbar-group]');
     if (group)
       group.addEventListener('click', function () {
-        groupMulti();
+        groupMulti(options);
       });
     var del = container.querySelector('[data-ws-selbar-delete]');
     if (del)
       del.addEventListener('click', function () {
-        deleteMulti();
+        deleteMulti(options);
       });
     var clr = container.querySelector('[data-ws-selbar-clear]');
     if (clr)
@@ -2327,6 +2344,19 @@
         }
         applySelection(container, workspaces, id, options);
       });
+      // Keyboard equivalent of the modifier-click and the corner checkbox. The
+      // checkbox itself stays tabindex="-1" — it lives inside the tile <button>,
+      // and a focusable control nested in a control is invalid — so without this
+      // handler the whole bulk bar was reachable by mouse only.
+      if (isTile) {
+        el.addEventListener('keydown', function (e) {
+          if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;
+          if (!(e.metaKey || e.ctrlKey || e.shiftKey)) return;
+          // Suppress the synthesized click so the tile does not also select.
+          e.preventDefault();
+          toggleMulti(container, el.getAttribute('data-ws-id'));
+        });
+      }
       if (selectOnly) {
         // A <button> fires click on BOTH Enter (keydown) and Space (keyup), so
         // the click handler above already gives Space its select-only meaning.
@@ -2334,6 +2364,8 @@
         // default suppressed so it does not also fire a selecting click.
         el.addEventListener('keydown', function (e) {
           if (e.key !== 'Enter') return;
+          // A modified Enter is a multi-select toggle, handled above.
+          if (e.metaKey || e.ctrlKey || e.shiftKey) return;
           e.preventDefault();
           var id = el.getAttribute('data-ws-id');
           if (!id) return;
@@ -3798,7 +3830,7 @@
     // The first paint has a selection too, so its setup state is read here as
     // well as on every later selection change.
     ensureSetupStatus(container, findWs(workspaces, selectedId));
-    bindSelBar(container);
+    bindSelBar(container, state);
     // No resize listener: world coordinates are viewport-independent, so a
     // resize changes only how much of the world is visible — never where a
     // building is (FR-13, FR-46).
@@ -3831,6 +3863,14 @@
     },
     isHQSiteId: function (id) {
       return id === HQ_SITE_ID;
+    },
+    // Clear the multi-select set once the host finishes a bulk action. Delete
+    // needs no call — mount() already prunes ids that stopped existing — but a
+    // grouped workspace still exists, so without this its tile would come back
+    // still checked and the action bar would still claim a live selection.
+    clearMultiSelection: function () {
+      multiSelected = Object.create(null);
+      if (lastMount && lastMount.container) updateSelBar(lastMount.container);
     },
     setSelectedId: function (container, workspaces, id, options) {
       if (!container) {
