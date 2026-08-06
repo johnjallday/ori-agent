@@ -85,6 +85,10 @@
   var MOVE_INSTRUCTION = 'Moving — release to drop, or press Escape to put it back.';
   var KEYBOARD_MOVE_INSTRUCTION =
     'Moving — arrow keys to position, Enter to save, Escape to put it back.';
+  // Shown in place of the instruction above while the current candidate
+  // overlaps another building — the red outline carries the same meaning for
+  // sighted users, but state must never be colour alone (FR-120).
+  var MOVE_BLOCKED_INSTRUCTION = 'Occupied — this would land on top of another building.';
 
   // ---------- current user's coordinate layout ----------
   //
@@ -2782,6 +2786,35 @@
     return Math.abs(a.x - b.x) < CELL_W && Math.abs(a.y - b.y) < CELL_H;
   }
 
+  /** Every committed anchor other than `excludeId`'s own. */
+  function occupiedAnchors(excludeId) {
+    var occupied = [];
+    function claim(nodeId, anchor) {
+      if (!anchor || nodeId === excludeId) return;
+      occupied.push(anchor);
+    }
+    Object.keys(layoutState.positions).forEach(function (nodeId) {
+      claim(nodeId, layoutState.positions[nodeId]);
+    });
+    if (lastWorldLayout) {
+      lastWorldLayout.nodes.forEach(function (node) {
+        claim(node.id, node);
+      });
+    }
+    return occupied;
+  }
+
+  /**
+   * Would `excludeId`'s box land on another building if dropped at `point`?
+   * Cheap enough to call on every pointermove/keystroke for live feedback —
+   * same recompute-per-move cost the readout coordinate already pays.
+   */
+  function wouldOverlapOccupied(point, excludeId) {
+    return occupiedAnchors(excludeId).some(function (anchor) {
+      return footprintsOverlap(point, anchor);
+    });
+  }
+
   /**
    * Resolve where a drop may actually land.
    *
@@ -2795,19 +2828,7 @@
    * same way. No other building is moved to make room (FR-74).
    */
   function resolveDropAnchor(id, point) {
-    var occupied = [];
-    function claim(nodeId, anchor) {
-      if (!anchor || nodeId === id) return;
-      occupied.push(anchor);
-    }
-    Object.keys(layoutState.positions).forEach(function (nodeId) {
-      claim(nodeId, layoutState.positions[nodeId]);
-    });
-    if (lastWorldLayout) {
-      lastWorldLayout.nodes.forEach(function (node) {
-        claim(node.id, node);
-      });
-    }
+    var occupied = occupiedAnchors(id);
     function overlapsOccupied(candidate) {
       return occupied.some(function (anchor) {
         return footprintsOverlap(candidate, anchor);
@@ -2925,7 +2946,9 @@
         // Only the dragged element is touched: no re-render, no request
         // (FR-65, FR-69, FR-122).
         placeElement(el, dragState.candidate);
-        setDragReadout(container, dragState.candidate);
+        var blocked = wouldOverlapOccupied(dragState.candidate, dragState.id);
+        if (el.classList) el.classList.toggle('is-blocked', blocked);
+        setDragReadout(container, dragState.candidate, blocked ? MOVE_BLOCKED_INSTRUCTION : undefined);
       });
 
       function finish(event, cancelled) {
@@ -2940,7 +2963,10 @@
         ) {
           el.releasePointerCapture(state.pointerId);
         }
-        if (el.classList) el.classList.remove('is-dragging');
+        if (el.classList) {
+          el.classList.remove('is-dragging');
+          el.classList.remove('is-blocked');
+        }
         setDragReadout(container, null);
         if (!state.moved) return;
         // A gesture that became a drag must not also read as a click (FR-66).
@@ -3162,7 +3188,11 @@
           y: snappedTarget.y - clusterDrag.districtOrigin.y
         };
         previewCluster(clusterDrag, clusterDrag.delta);
-        setDragReadout(container, snappedTarget);
+        var blocked = clusterCollides(clusterDrag.groupId, clusterDrag.members, clusterDrag.delta);
+        if (clusterDrag.districtEl && clusterDrag.districtEl.classList) {
+          clusterDrag.districtEl.classList.toggle('is-blocked', blocked);
+        }
+        setDragReadout(container, snappedTarget, blocked ? MOVE_BLOCKED_INSTRUCTION : undefined);
       });
 
       function finish(event, cancelled) {
@@ -3179,6 +3209,7 @@
         }
         if (state.districtEl && state.districtEl.classList) {
           state.districtEl.classList.remove('is-dragging');
+          state.districtEl.classList.remove('is-blocked');
         }
         setDragReadout(container, null);
         if (!state.moved) return;
@@ -3279,6 +3310,13 @@
     setDragReadout(container, null);
     var banner = container.querySelector('[data-map-build-banner]');
     if (banner && !buildState.active) banner.hidden = true;
+    if (state.cluster) {
+      if (state.cluster.districtEl && state.cluster.districtEl.classList) {
+        state.cluster.districtEl.classList.remove('is-blocked');
+      }
+    } else if (state.el && state.el.classList) {
+      state.el.classList.remove('is-blocked');
+    }
 
     if (state.cluster) {
       var delta = {
@@ -3340,15 +3378,22 @@
         return false;
     }
     moveState.candidate = next;
+    var blocked;
     if (moveState.cluster) {
-      previewCluster(moveState.cluster, {
-        x: next.x - moveState.origin.x,
-        y: next.y - moveState.origin.y
-      });
+      var delta = { x: next.x - moveState.origin.x, y: next.y - moveState.origin.y };
+      previewCluster(moveState.cluster, delta);
+      blocked = clusterCollides(moveState.cluster.groupId, moveState.cluster.members, delta);
+      if (moveState.cluster.districtEl && moveState.cluster.districtEl.classList) {
+        moveState.cluster.districtEl.classList.toggle('is-blocked', blocked);
+      }
     } else {
       placeElement(moveState.el, next);
+      blocked = wouldOverlapOccupied(next, moveState.id);
+      if (moveState.el && moveState.el.classList) {
+        moveState.el.classList.toggle('is-blocked', blocked);
+      }
     }
-    setDragReadout(container, next, KEYBOARD_MOVE_INSTRUCTION);
+    setDragReadout(container, next, blocked ? MOVE_BLOCKED_INSTRUCTION : KEYBOARD_MOVE_INSTRUCTION);
     announce(container, 'Candidate ' + candidateLabel(next));
     return true;
   }

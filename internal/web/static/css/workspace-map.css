@@ -625,6 +625,18 @@
 .ws-map-district.is-dragging .ws-map-district-handle {
   cursor: grabbing;
 }
+/* Would this delta bury a building outside the district? Same red-solid
+   signal as .ws-map-tile.is-blocked below, sized for a border instead of an
+   outline. Declared after is-dragging so it wins the colour while both
+   classes are present mid-drag. */
+.ws-map-district.is-blocked {
+  border-style: solid;
+  border-width: 2px;
+  border-color: var(--ws-danger, #d9534f);
+}
+.ws-map-district.is-blocked .ws-map-district-handle {
+  cursor: not-allowed;
+}
 
 /* building tile */
 .ws-map-tile {
@@ -661,6 +673,18 @@
 .ws-map-tile.is-unsaved {
   outline: 2px dotted var(--ws-danger, #d9534f);
   outline-offset: 4px;
+}
+/* The current drag/keyboard candidate would overlap another building's
+   footprint. Solid (not dashed like is-dragging, not dotted like is-unsaved)
+   so the shape alone tells the three states apart, colour aside (FR-120);
+   the readout text carries the same information for anyone who can't see
+   colour or shape either. */
+.ws-map-tile.is-blocked {
+  outline: 3px solid var(--ws-danger, #d9534f);
+  outline-offset: 4px;
+}
+.ws-map-tile.is-dragging.is-blocked {
+  cursor: not-allowed;
 }
 @media (prefers-reduced-motion: reduce) {
   .ws-map-tile,
