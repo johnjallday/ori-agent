@@ -8,6 +8,8 @@
 // exercise them under plain Node with no DOM/network — `document`/`window`
 // are genuinely undefined there, so the DOM-wiring IIFE below simply no-ops.
 
+import { loadOnboardingStatus, onboardingGateDecision } from './onboarding-gate.js';
+
 // parseContent safely decodes a Revision's ContentJSON. Returns {} (never
 // throws) on missing/invalid JSON so a corrupt revision degrades to an
 // empty brief rather than breaking the page.
@@ -478,6 +480,9 @@ export function renderContent(content) {
   }
 
   async function bootstrap() {
+    const onboardingStatus = await loadOnboardingStatus();
+    if (!onboardingGateDecision(onboardingStatus).allowWorkspaceHydration) return;
+
     let status;
     try {
       const statusResp = await fetchJSON('/api/personal-hq/status');

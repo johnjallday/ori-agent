@@ -6,6 +6,8 @@
 // Pure decision logic is exported (loaded as type="module") so
 // personal-hq-onboarding.test.js can exercise it without a DOM.
 
+import { loadOnboardingStatus, onboardingGateDecision } from './onboarding-gate.js';
+
 // upgradeView turns an upgrade plan (from GET /api/personal-hq/upgrade/preview)
 // into the view-model the DOM code renders, so all the branching lives here and
 // is unit-testable without a DOM. It deliberately hides itself when there is
@@ -1120,18 +1122,24 @@ export function followUpView(f) {
     mount.appendChild(journalLauncher(mount));
   }
 
-  function init() {
-    wireMapActions();
-    wireBuildModal();
+  async function initializeWorkspaceDerivedUI() {
+    const onboardingStatus = await loadOnboardingStatus();
+    if (!onboardingGateDecision(onboardingStatus).allowWorkspaceHydration) return;
 
     void refreshHQStatus().catch(() => {
       /* Status is additive; a degraded HQ service must not block the launcher. */
     });
-    wireUpgrade();
-    wireEmail();
-    wireMailReview();
-    wireFollowUps();
-    wireJournal();
+    void wireUpgrade();
+    void wireEmail();
+    void wireMailReview();
+    void wireFollowUps();
+    void wireJournal();
+  }
+
+  function init() {
+    wireMapActions();
+    wireBuildModal();
+    void initializeWorkspaceDerivedUI();
   }
 
   if (document.readyState === 'loading') {

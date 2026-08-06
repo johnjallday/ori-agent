@@ -172,6 +172,7 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 	// 2. WORKSPACE_DIR env var
 	// 3. Default: ~/Ori Workspaces
 	workspaceDir := resolveWorkspaceRoot(b.configManager)
+	startupMaintenanceApproved := shouldRunWorkspaceStartupMaintenance(b.configManager)
 	fileStore, err := workspace.NewFileStore(workspaceDir)
 	if err != nil {
 		logger.Warn("Failed to create folder-based workspace store", logger.Fields{"error": err})
@@ -187,32 +188,38 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 		}
 
 		b.workspaceFileStore = fileStore
-		// The template-intake engine is gone; remove any of its per-workspace
-		// session sidecars left on disk. Best-effort and non-fatal.
-		cleanupLegacyTemplateOnboardingSidecars(fileStore)
+		if startupMaintenanceApproved {
+			// The template-intake engine is gone; remove any of its per-workspace
+			// session sidecars left on disk. Best-effort and non-fatal.
+			cleanupLegacyTemplateOnboardingSidecars(fileStore)
+		}
 		if b.sessionHandler != nil {
 			b.sessionHandler.SetWorkspaceStore(fileStore)
-			// Disk is the source of truth for grouping: reconcile the session
-			// store's structure with the on-disk layout once at startup so
-			// groups that arrived via git/cloud sync show up without a manual
-			// rescan. Non-fatal.
-			if err := b.sessionHandler.ReconcileWorkspacesFromDisk(context.Background()); err != nil {
-				logger.Warn("Startup workspace reconcile from disk failed", logger.Fields{"error": err.Error()})
-			}
-			// Upgrade groups created before they supported direct work with
-			// the scoped scaffolding (files/, notes/, directory reference,
-			// workspace-files MCP binding). Idempotent; non-fatal.
-			if err := b.sessionHandler.BackfillGroupScaffolding(context.Background()); err != nil {
-				logger.Warn("Startup group scaffolding backfill failed", logger.Fields{"error": err.Error()})
-			}
-			// Backfill BACKLOG.md for every managed workspace created before
-			// this feature shipped (PRD workspace-backlog FR68, 99).
-			// Idempotent; non-fatal — a pre-existing unmanaged collision is
-			// left untouched by design, not an error.
-			if written, errs := workspace.BackfillBacklogMarkdownForAllWorkspaces(fileStore); len(errs) > 0 {
-				logger.Warn("Startup BACKLOG.md backfill had errors", logger.Fields{"written": written, "error_count": len(errs), "first_error": errs[0].Error()})
+			if startupMaintenanceApproved {
+				// Disk is the source of truth for grouping: reconcile the session
+				// store's structure with the on-disk layout once at startup so
+				// groups that arrived via git/cloud sync show up without a manual
+				// rescan. Non-fatal.
+				if err := b.sessionHandler.ReconcileWorkspacesFromDisk(context.Background()); err != nil {
+					logger.Warn("Startup workspace reconcile from disk failed", logger.Fields{"error": err.Error()})
+				}
+				// Upgrade groups created before they supported direct work with
+				// the scoped scaffolding (files/, notes/, directory reference,
+				// workspace-files MCP binding). Idempotent; non-fatal.
+				if err := b.sessionHandler.BackfillGroupScaffolding(context.Background()); err != nil {
+					logger.Warn("Startup group scaffolding backfill failed", logger.Fields{"error": err.Error()})
+				}
+				// Backfill BACKLOG.md for every managed workspace created before
+				// this feature shipped (PRD workspace-backlog FR68, 99).
+				// Idempotent; non-fatal — a pre-existing unmanaged collision is
+				// left untouched by design, not an error.
+				if written, errs := workspace.BackfillBacklogMarkdownForAllWorkspaces(fileStore); len(errs) > 0 {
+					logger.Warn("Startup BACKLOG.md backfill had errors", logger.Fields{"written": written, "error_count": len(errs), "first_error": errs[0].Error()})
+				} else {
+					logger.Debug("Startup BACKLOG.md backfill complete", logger.Fields{"written": written})
+				}
 			} else {
-				logger.Debug("Startup BACKLOG.md backfill complete", logger.Fields{"written": written})
+				logger.Info("Skipping workspace startup maintenance until root confirmation", logger.Fields{"dir": workspaceDir})
 			}
 			// Personal HQ designation projection: the folder store only exists
 			// now (Phase 18), after personalHQService was constructed (Phase
@@ -224,10 +231,12 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 			if b.personalHQService != nil {
 				b.personalHQService.SetDesignationSyncer(b.sessionHandler)
 				b.personalHQService.SetDesignationReader(fileStore)
-				if designated, err := b.personalHQService.DesignatedWorkspaceIDs(context.Background()); err != nil {
-					logger.Warn("Startup designation backfill: failed to resolve designated workspaces", logger.Fields{"error": err.Error()})
-				} else if err := b.sessionHandler.BackfillWorkspaceDesignations(context.Background(), designated); err != nil {
-					logger.Warn("Startup workspace designation backfill failed", logger.Fields{"error": err.Error()})
+				if startupMaintenanceApproved {
+					if designated, err := b.personalHQService.DesignatedWorkspaceIDs(context.Background()); err != nil {
+						logger.Warn("Startup designation backfill: failed to resolve designated workspaces", logger.Fields{"error": err.Error()})
+					} else if err := b.sessionHandler.BackfillWorkspaceDesignations(context.Background(), designated); err != nil {
+						logger.Warn("Startup workspace designation backfill failed", logger.Fields{"error": err.Error()})
+					}
 				}
 			}
 		}
@@ -269,26 +278,26 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 		// not wiped) on startup. Foreign workspaces that are not in the local
 		// folder tree stay gated, preserving cross-worktree isolation. Runs before
 		// the wipe/restore below.
-		if fileStore != nil {
+		if fileStore != nil && startupMaintenanceApproved {
 			workspace.BackfillLocalWorkspacesIntoAllowlist(fileStore, allowlist)
 		}
 
 		// First wipe agents whose only source is a non-allowlisted workspace
 		// snapshot — keeps cross-worktree contamination from lingering after
 		// the user revokes (or never granted) an import.
-		if fileStore != nil {
+		if fileStore != nil && startupMaintenanceApproved {
 			workspace.WipeNonAllowlistedAgentSnapshots(fileStore, b.st, allowlist)
 		}
 		workspace.WipeNonAllowlistedAgentSnapshots(ws, b.st, allowlist)
 
 		// Restore only allowlisted workspaces' agent snapshots.
-		if fileStore != nil {
+		if fileStore != nil && startupMaintenanceApproved {
 			workspace.RestoreAllowlistedWorkspaceAgents(fileStore, b.st, allowlist)
 		}
 		ws = workspace.NewAgentSnapshotStore(ws, b.st)
 		workspace.RestoreAllowlistedWorkspaceAgents(ws, b.st, allowlist)
 		workspace.SnapshotAllWorkspaces(ws, b.st)
-		if fileStore != nil {
+		if fileStore != nil && startupMaintenanceApproved {
 			workspace.SnapshotAllWorkspaces(fileStore, b.st)
 		}
 	}

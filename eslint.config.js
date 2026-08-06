@@ -131,6 +131,7 @@ export default defineConfig([
       'internal/web/static/js/modules/note-tabs.js',
       'internal/web/static/js/modules/note-toc.js',
       'internal/web/static/js/modules/note-wikilinks.js',
+      'internal/web/static/js/modules/onboarding-gate.js',
       'internal/web/static/js/modules/onboarding.js',
       'internal/web/static/js/modules/personal-hq-onboarding.js',
       'internal/web/static/js/modules/personal-hq-email-setup.js',

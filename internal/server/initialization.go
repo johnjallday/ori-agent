@@ -483,6 +483,21 @@ func resolveWorkspaceRoot(configManager *config.Manager) string {
 	return config.UnconfirmedWorkspaceRoot()
 }
 
+// shouldRunWorkspaceStartupMaintenance reports whether startup may reconcile
+// or mutate the folder-backed workspace tree. A configured WORKSPACE_DIR is an
+// explicit operator decision; otherwise first-run staging stays inert until the
+// user confirms a root through onboarding. A nil manager preserves the legacy
+// fallback used by narrowly constructed tests and alternate callers.
+func shouldRunWorkspaceStartupMaintenance(configManager *config.Manager) bool {
+	if strings.TrimSpace(os.Getenv("WORKSPACE_DIR")) != "" {
+		return true
+	}
+	if configManager == nil {
+		return true
+	}
+	return configManager.IsWorkspaceRootConfirmed()
+}
+
 // resolveVaultRoot determines the root directory for new managed vault files.
 // Priority: 1) settings vault_root, 2) ORI_VAULT_DIR env, 3) current data dir + /vaults
 func resolveVaultRoot(configManager *config.Manager) string {
