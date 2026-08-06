@@ -991,6 +991,180 @@ func TestMigration034UpgradesFromPriorSchema(t *testing.T) {
 	}
 }
 
+// TestMigration038CreatesWorkspaceMapSchema checks that a fresh database gets
+// the coordinate-map tables, and — the part that actually matters — that the
+// map schema is a separate domain from the workspace record it points at
+// (#292 FR-5, FR-104).
+func TestMigration038CreatesWorkspaceMapSchema(t *testing.T) {
+	ctx := context.Background()
+
+	db, err := Open(ctx, &Config{Path: ":memory:", WALMode: false})
+	if err != nil {
+		t.Fatalf("Failed to open database: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	for _, table := range []string{"workspace_map_layouts", "workspace_map_positions"} {
+		exists, err := db.tableExists(ctx, table)
+		if err != nil {
+			t.Fatalf("tableExists(%s): %v", table, err)
+		}
+		if !exists {
+			t.Fatalf("fresh database is missing %s", table)
+		}
+	}
+
+	// The per-workspace CanvasLayout column is untouched by this feature.
+	var layoutColumns int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(1) FROM pragma_table_info('workspaces') WHERE name = 'layout'
+	`).Scan(&layoutColumns); err != nil {
+		t.Fatalf("inspect workspaces columns: %v", err)
+	}
+	if layoutColumns != 1 {
+		t.Errorf("workspaces.layout column count = %d, want 1 (the map must not disturb it)", layoutColumns)
+	}
+}
+
+// TestMigration038PositionLifecycleFollowsTheWorkspace proves the two lifecycle
+// rules the foreign key exists for: a trashed workspace keeps its anchor so a
+// restore puts the building back where it was (FR-26, FR-27), and a permanently
+// deleted one takes exactly its own anchor with it (FR-28).
+func TestMigration038PositionLifecycleFollowsTheWorkspace(t *testing.T) {
+	ctx := context.Background()
+
+	db, err := Open(ctx, &Config{Path: ":memory:", WALMode: false})
+	if err != nil {
+		t.Fatalf("Failed to open database: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	for _, id := range []string{"ws-keep", "ws-drop"} {
+		if _, err := db.ExecContext(ctx, `
+			INSERT INTO workspaces (id, name, created_at, updated_at)
+			VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+		`, id, id); err != nil {
+			t.Fatalf("seed workspace %s: %v", id, err)
+		}
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO workspace_map_layouts (user_id, schema_version, revision, snap_to_grid, created_at, updated_at)
+		VALUES ('local', 1, 1, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`); err != nil {
+		t.Fatalf("seed layout: %v", err)
+	}
+	for _, id := range []string{"ws-keep", "ws-drop"} {
+		if _, err := db.ExecContext(ctx, `
+			INSERT INTO workspace_map_positions (user_id, workspace_id, x, y, updated_at)
+			VALUES ('local', ?, 10, 20, CURRENT_TIMESTAMP)
+		`, id); err != nil {
+			t.Fatalf("seed position %s: %v", id, err)
+		}
+	}
+
+	// Soft delete leaves the row in place, so the anchor survives.
+	if _, err := db.ExecContext(ctx, `UPDATE workspaces SET status = 'trashed' WHERE id = 'ws-drop'`); err != nil {
+		t.Fatalf("trash workspace: %v", err)
+	}
+	var count int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(1) FROM workspace_map_positions`).Scan(&count); err != nil {
+		t.Fatalf("count positions: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("positions after trash = %d, want 2 (a trashed workspace keeps its anchor)", count)
+	}
+
+	// Permanent deletion cascades away exactly one anchor.
+	if _, err := db.ExecContext(ctx, `DELETE FROM workspaces WHERE id = 'ws-drop'`); err != nil {
+		t.Fatalf("delete workspace: %v", err)
+	}
+	var remaining string
+	if err := db.QueryRowContext(ctx, `SELECT workspace_id FROM workspace_map_positions`).Scan(&remaining); err != nil {
+		t.Fatalf("read remaining position: %v", err)
+	}
+	if remaining != "ws-keep" {
+		t.Errorf("remaining anchor = %q, want ws-keep", remaining)
+	}
+}
+
+// TestMigration038UpgradesFromPriorSchema proves an existing database gains the
+// map tables without its workspace data being touched.
+func TestMigration038UpgradesFromPriorSchema(t *testing.T) {
+	ctx := context.Background()
+
+	tmpDir, err := os.MkdirTemp("", "ori-db-migration-038-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp directory: %v", err)
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	dbPath := filepath.Join(tmpDir, "test.db")
+	legacyDB, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("Failed to open legacy database: %v", err)
+	}
+	if _, err := legacyDB.ExecContext(ctx, `
+		CREATE TABLE schema_migrations (
+			version INTEGER PRIMARY KEY,
+			applied_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)
+	`); err != nil {
+		t.Fatalf("Failed to create schema_migrations: %v", err)
+	}
+	if _, err := legacyDB.ExecContext(ctx, `INSERT INTO schema_migrations (version) VALUES (37)`); err != nil {
+		t.Fatalf("Failed to seed schema version 37: %v", err)
+	}
+	if _, err := legacyDB.ExecContext(ctx, `
+		CREATE TABLE workspaces (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			parent_id TEXT,
+			layout TEXT,
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL,
+			status TEXT DEFAULT 'active'
+		)
+	`); err != nil {
+		t.Fatalf("Failed to create legacy workspaces table: %v", err)
+	}
+	if _, err := legacyDB.ExecContext(ctx, `
+		INSERT INTO workspaces (id, name, parent_id, layout, created_at, updated_at, status)
+		VALUES ('ws-legacy', 'Alpha', 'grp-1', '{"pan":{"x":4}}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'active')
+	`); err != nil {
+		t.Fatalf("Failed to seed legacy workspace: %v", err)
+	}
+	if err := legacyDB.Close(); err != nil {
+		t.Fatalf("Failed to close legacy database: %v", err)
+	}
+
+	db, err := Open(ctx, &Config{Path: dbPath, WALMode: false})
+	if err != nil {
+		t.Fatalf("Failed to reopen migrated database: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	exists, err := db.tableExists(ctx, "workspace_map_positions")
+	if err != nil {
+		t.Fatalf("tableExists: %v", err)
+	}
+	if !exists {
+		t.Fatal("upgraded database is missing workspace_map_positions")
+	}
+
+	var name, parent, layout string
+	if err := db.QueryRowContext(ctx, `
+		SELECT name, parent_id, layout FROM workspaces WHERE id = 'ws-legacy'
+	`).Scan(&name, &parent, &layout); err != nil {
+		t.Fatalf("query workspace after upgrade: %v", err)
+	}
+	if name != "Alpha" || parent != "grp-1" {
+		t.Errorf("migration altered workspace metadata: name=%q parent=%q", name, parent)
+	}
+	if layout != `{"pan":{"x":4}}` {
+		t.Errorf("migration altered the per-workspace CanvasLayout: %q", layout)
+	}
+}
+
 // TestMigration034IsIdempotentOnAlreadyMigratedSchema proves the duplicate-column
 // guard: re-running migration 34 against a workspaces table that already has the
 // column must succeed rather than fail the whole startup (PRD FR-145 isolation).

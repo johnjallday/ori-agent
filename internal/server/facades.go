@@ -55,6 +55,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/workflowhttp"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 	"github.com/johnjallday/ori-agent/internal/workspacecapabilityhttp"
+	"github.com/johnjallday/ori-agent/internal/workspacemaphttp"
 	"github.com/johnjallday/ori-agent/internal/workspacerun"
 )
 
@@ -158,6 +159,11 @@ type HandlerFacade struct {
 	// and install lifecycle. One set of routes serves every capability; there
 	// is no per-capability lifecycle API.
 	WorkspaceCapabilities *workspacecapabilityhttp.Handler
+	// WorkspaceMap serves the current user's coordinate-based Workspace Map
+	// layout. It is deliberately not part of the workspace API surface: the
+	// layout belongs to a user, not to a workspace, and must never be confused
+	// with a single workspace's internal Canvas (#292 FR-4, FR-104).
+	WorkspaceMap *workspacemaphttp.Handler
 	// SetupWizard serves the shared blueprint Setup Wizard for every
 	// wizard-enabled workspace, whichever blueprint it came from.
 	SetupWizard *setupwizardhttp.Handler

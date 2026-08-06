@@ -231,10 +231,14 @@
 
 .cockpit-map .ws-map-layout.is-cockpit .ws-map-theatre {
   height: 100%;
-  /* Every site stays reachable: the theatre pans/scrolls internally rather
-     than clipping tiles or pushing the page sideways (FR135, FR138). */
+  /* Every site stays reachable: the map pans and zooms inside this panel
+     rather than clipping tiles or pushing the page sideways (FR135, FR138;
+     #292 FR-31). The theatre itself no longer scrolls — the camera moves. */
   min-height: 320px;
-  overflow: auto;
+  overflow: hidden;
+}
+.cockpit-map .ws-map-layout.is-cockpit .ws-map-theatre .ws-map-canvas {
+  min-height: 0;
 }
 
 .cockpit-area-status:empty {

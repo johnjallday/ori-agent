@@ -69,6 +69,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/workspace"
 	"github.com/johnjallday/ori-agent/internal/workspacecapability"
 	"github.com/johnjallday/ori-agent/internal/workspacecapabilityhttp"
+	"github.com/johnjallday/ori-agent/internal/workspacemap"
+	"github.com/johnjallday/ori-agent/internal/workspacemaphttp"
 	"github.com/johnjallday/ori-agent/internal/workspacerun"
 )
 
@@ -644,6 +646,40 @@ func (b *ServerBuilder) wireWorkspaceCapabilities() {
 	b.workspaceCapabilityHandler = workspacecapabilityhttp.NewHandler(service, b.workspaceStore, b.userProvider)
 
 	b.backfillLegacyCapabilities(registry, legacyProbe)
+}
+
+// wireWorkspaceMap constructs the current user's coordinate-map layout storage,
+// the ownership service over it, and its HTTP handler.
+//
+// Like wireWorkspaceCapabilities it runs in the workspace-store phase (18)
+// rather than initializeHandlers (17): the service resolves node ownership
+// through the composed workspace store, which does not exist yet at 17.
+// Capturing a nil store there would have produced a handler that silently
+// rejected every placement as "workspace not found".
+//
+// Failure is contained. Without a session store there is no database to hold a
+// layout, so the handler stays unwired and answers 503 — which the Map reads as
+// "render deterministic fallback placement, allow read-only pan and zoom, and
+// say plainly that positions cannot be saved" (FR-105). That is a usable map,
+// and it is a far better outcome than refusing to start the server over a
+// spatial preference.
+func (b *ServerBuilder) wireWorkspaceMap() {
+	if b.workspaceStore == nil || b.sessionStore == nil {
+		logger.Warn("Workspace map layout not wired: no workspace store or database", logger.Fields{})
+		return
+	}
+	db := b.sessionStore.DB()
+	if db == nil {
+		logger.Warn("Workspace map layout not wired: session store has no database", logger.Fields{})
+		return
+	}
+	b.workspaceMapStore = workspacemap.NewSQLiteStore(db)
+	// Cluster moves resolve their members from the live hierarchy inside the
+	// write transaction, so a district commits whatever it actually contains at
+	// commit time rather than what a browser tab drew (#292 FR-86).
+	b.workspaceMapStore.SetDescendantResolver(workspacemap.NewDescendantResolver(b.workspaceStore))
+	b.workspaceMapService = workspacemap.NewService(b.workspaceMapStore, b.workspaceStore)
+	b.workspaceMapHandler = workspacemaphttp.NewHandler(b.workspaceMapService, b.userProvider)
 }
 
 // backfillLegacyCapabilities records the file-janitor install for workspaces

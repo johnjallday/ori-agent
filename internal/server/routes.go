@@ -43,6 +43,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	registerWorkspaceMemoryRoutes(mux, s)
 	registerDownloadsJanitorRoutes(mux, s)
 	registerWorkspaceCapabilityRoutes(mux, s)
+	registerWorkspaceMapRoutes(mux, s)
 	registerSetupWizardRoutes(mux, s)
 	registerExternalAgentRoutes(mux, s)
 	registerSkillsRoutes(mux, s)
@@ -915,6 +916,24 @@ func registerWorkspaceCapabilityRoutes(mux *http.ServeMux, s *Server) {
 	// Workspace Capability Endpoints
 	// =============================================================================
 	s.Handlers.WorkspaceCapabilities.Register(mux)
+}
+
+// registerWorkspaceMapRoutes registers the current user's coordinate-map layout
+// endpoints.
+//
+// These live at /api/workspace-map/layout, deliberately outside
+// /api/workspaces/{id}/layout: that route serves one workspace's internal
+// Canvas, while this one serves the user's arrangement of all of them. Sharing a
+// path would have made "layout" mean two different things depending on where you
+// stood (#292 FR-104).
+//
+// A nil handler (the map failed to wire) registers nothing, so the Map falls
+// back to read-only deterministic placement rather than taking the API down.
+func registerWorkspaceMapRoutes(mux *http.ServeMux, s *Server) {
+	// =============================================================================
+	// Workspace Map Layout Endpoints (current user)
+	// =============================================================================
+	s.Handlers.WorkspaceMap.Register(mux)
 }
 
 // registerSetupWizardRoutes registers the workspace-scoped blueprint Setup

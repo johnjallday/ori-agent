@@ -196,6 +196,7 @@
 /api/workflows
 /api/workflows/x
 /api/workflows/x/check-agents
+/api/workspace-map/layout
 /api/workspaces
 /api/workspaces/import
 /api/workspaces/import/check

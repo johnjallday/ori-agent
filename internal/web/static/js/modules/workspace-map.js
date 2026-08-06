@@ -13,6 +13,14 @@
 (function () {
   'use strict';
 
+  // ---------- world coordinates ----------
+  //
+  // Everything the map draws is anchored in WORLD space: viewport-independent
+  // logical units, not CSS pixels, not percentages of the current container, and
+  // not grid column numbers (#292 FR-2). One world unit happens to equal one CSS
+  // pixel at 100% zoom, which is what keeps the art, the spacing, and the
+  // background grid identical to the pre-coordinate map — but nothing here reads
+  // the container's width, so a resize can never move a building (FR-13).
   var CELL_W = 176;
   // Tiles measure ~155px tall (status flag, structure, name, ops mode, meta).
   // CELL_H was 150, so every row's meta line collided with the status flag of
@@ -20,8 +28,220 @@
   // operational signals are unambiguous (PRD FR30).
   var CELL_H = 170;
   var PAD = 26;
-  var MAX_COLS = 5;
+  // FALLBACK_COLS replaces the old responsive `maxCols`. Automatic placement now
+  // uses one fixed world-space rule so the same unplaced workspaces land on the
+  // same logical coordinates on Home and on /workspaces, at any window size
+  // (FR-19, FR-21).
+  var FALLBACK_COLS = 5;
+  // The district outline is drawn around its members with this much slack, and a
+  // group's own anchor sits at the outline's corner rather than on a member's
+  // cell — otherwise an empty group and its first member would want the same
+  // point (FR-82, FR-84).
+  var DISTRICT_PAD_X = 12;
+  var DISTRICT_PAD_Y = 6;
+  // Safe world bounds, mirroring internal/workspacemap/model.go. A coordinate
+  // outside them is treated as unreadable and the record falls back to
+  // automatic placement rather than being drawn somewhere impossible (FR-12).
+  var MIN_COORD = -1000000;
+  var MAX_COORD = 1000000;
+  // Fallback margin used when the real viewport size is not known yet, so world
+  // sizing stays deterministic in tests and during the first paint (FR-11).
+  var DEFAULT_VIEWPORT = { width: 1100, height: 620 };
   var HQ_SITE_ID = '__personal_hq_site__';
+
+  // ---------- camera ----------
+  //
+  // The camera is world-space: a point to look at plus a zoom level (FR-43).
+  // Storing a scroll offset instead would tie the saved view to the container
+  // it was saved from, so the same layout would open somewhere else on a
+  // different window size or on the other Map surface.
+  var MIN_ZOOM = 0.5;
+  var MAX_ZOOM = 2;
+  var DEFAULT_ZOOM = 1;
+  // One press of Zoom In/Out. Small enough to feel like a step, large enough
+  // that crossing the 50%–200% range does not take a dozen presses.
+  var ZOOM_STEP = 1.25;
+  // Wheel-zoom sensitivity, applied per normalized wheel notch.
+  var WHEEL_ZOOM_RATE = 0.0022;
+  // A press must travel this far before it becomes a pan rather than a click
+  // (FR-33).
+  var PAN_THRESHOLD = 4;
+  // Comfortable breathing room around the content that Fit All frames (FR-40).
+  var FIT_PADDING = 48;
+  // Height of the floating control strip along the bottom of the map. Framing
+  // actions keep content clear of it so a fitted building is always clickable.
+  var CONTROL_STRIP_HEIGHT = 76;
+  // The background grid's spacing at 100% zoom, shared with the CSS grid so a
+  // snapped anchor always lands on a line the user can see (FR-58).
+  var SNAP_STEP = 38;
+  // Camera saves are debounced: a pan is hundreds of events and one intent
+  // (FR-44).
+  var CAMERA_SAVE_DELAY = 600;
+
+  // The banner's two voices. Build mode asks for a site; a move reports where
+  // the thing being moved would land.
+  var BUILD_INSTRUCTION =
+    'Choose where to build — click an empty spot, or use the arrow keys and Enter. Escape cancels.';
+  var MOVE_INSTRUCTION = 'Moving — release to drop, or press Escape to put it back.';
+  var KEYBOARD_MOVE_INSTRUCTION =
+    'Moving — arrow keys to position, Enter to save, Escape to put it back.';
+
+  // ---------- current user's coordinate layout ----------
+  //
+  // One layout, shared by the Map on Home and the Map on /workspaces (FR-4).
+  // It lives at module scope rather than per-mount because both surfaces load
+  // the same script and must not each hold their own idea of where a building
+  // is. The server record is authoritative: localStorage caches nothing
+  // canonical here (FR-103).
+  var LAYOUT_ENDPOINT = '/api/workspace-map/layout';
+  var LAYOUT_LOAD_TIMEOUT_MS = 2500;
+
+  var layoutState = {
+    // idle → loading → ready | unavailable. "unavailable" is the honest
+    // read-only state: deterministic fallback placement is still drawn and
+    // still navigable, but nothing can be saved (FR-105).
+    status: 'idle',
+    positions: Object.create(null),
+    viewport: null,
+    snapToGrid: true,
+    revision: 0,
+    schemaVersion: 1
+  };
+  // Bumped for every layout request. A response whose sequence no longer
+  // matches is a stale answer to a question nobody is asking any more, and is
+  // dropped rather than painted over the current world.
+  var layoutRequestSeq = 0;
+
+  function isSafeCoordinate(value) {
+    return typeof value === 'number' && isFinite(value) && value >= MIN_COORD && value <= MAX_COORD;
+  }
+
+  function safePoint(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    var x = Number(raw.x);
+    var y = Number(raw.y);
+    if (!isSafeCoordinate(x) || !isSafeCoordinate(y)) return null;
+    return { x: x, y: y };
+  }
+
+  function safeViewport(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    var center = safePoint({ x: raw.center_x, y: raw.center_y });
+    var zoom = Number(raw.zoom);
+    if (!center || !isFinite(zoom) || zoom <= 0) return null;
+    return { centerX: center.x, centerY: center.y, zoom: zoom };
+  }
+
+  // applyLayoutPayload degrades per field, never wholesale: one unreadable
+  // anchor costs that building its saved spot and nothing else, and an
+  // unreadable camera opens on the default view without hiding valid buildings
+  // (FR-22, FR-45).
+  function applyLayoutPayload(payload) {
+    var positions = Object.create(null);
+    var raw = (payload && payload.positions) || {};
+    Object.keys(raw).forEach(function (id) {
+      if (!id || id === HQ_SITE_ID) return;
+      var point = safePoint(raw[id]);
+      if (point) positions[id] = point;
+    });
+    layoutState.positions = positions;
+    layoutState.viewport = safeViewport(payload && payload.viewport);
+    layoutState.snapToGrid =
+      payload && typeof payload.snap_to_grid === 'boolean' ? payload.snap_to_grid : true;
+    layoutState.revision = Number((payload && payload.revision) || 0) || 0;
+    layoutState.schemaVersion = Number((payload && payload.schema_version) || 1) || 1;
+  }
+
+  // ensureLayoutLoaded fetches the layout once per page. Both Map surfaces call
+  // it, and whichever mounts first pays for it; the second reuses the result,
+  // which is what makes the two surfaces agree by construction rather than by
+  // coincidence (FR-4, FR-16).
+  function ensureLayoutLoaded() {
+    if (layoutState.status !== 'idle') return;
+    if (typeof fetch !== 'function') {
+      layoutState.status = 'unavailable';
+      return;
+    }
+    layoutState.status = 'loading';
+    var seq = ++layoutRequestSeq;
+    // A request that never answers must not leave the world hidden forever.
+    // After the deadline the map settles into its honest read-only state:
+    // deterministic placement, navigable, nothing saveable (FR-105).
+    if (typeof setTimeout === 'function') {
+      var deadline = setTimeout(function () {
+        if (seq !== layoutRequestSeq || layoutState.status !== 'loading') return;
+        layoutState.status = 'unavailable';
+        settleLayout();
+      }, LAYOUT_LOAD_TIMEOUT_MS);
+      if (deadline && typeof deadline.unref === 'function') deadline.unref();
+    }
+    fetch(LAYOUT_ENDPOINT, { headers: { Accept: 'application/json' } })
+      .then(function (response) {
+        if (!response || !response.ok) throw new Error('layout unavailable');
+        return response.json();
+      })
+      .then(function (data) {
+        if (seq !== layoutRequestSeq) return;
+        applyLayoutPayload(data && data.layout);
+        layoutState.status = 'ready';
+        settleLayout();
+      })
+      .catch(function () {
+        if (seq !== layoutRequestSeq) return;
+        layoutState.status = 'unavailable';
+        settleLayout();
+      });
+  }
+
+  /**
+   * Send one partial update and reconcile against what the server committed.
+   *
+   * The body carries operations, never a whole-layout snapshot, so a tab that
+   * has been open for a while can save the one thing the user just did without
+   * proposing values for anything else (FR-96, FR-101). The response — not the
+   * request — is what updates local state, so the revision and coordinates the
+   * client believes are always the ones actually stored (FR-102).
+   */
+  function patchLayout(operations) {
+    if (typeof fetch !== 'function') {
+      return Promise.reject(new Error('workspace map layout is unavailable'));
+    }
+    if (layoutState.status !== 'ready') {
+      return Promise.reject(new Error('workspace map layout is read-only'));
+    }
+    return fetch(LAYOUT_ENDPOINT, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ operations: operations })
+    })
+      .then(function (response) {
+        if (!response || !response.ok) throw new Error('workspace map layout save failed');
+        return response.json();
+      })
+      .then(function (data) {
+        var result = (data && data.result) || null;
+        if (!result) throw new Error('workspace map layout save returned nothing');
+        if (typeof result.revision === 'number') layoutState.revision = result.revision;
+        if (typeof result.snap_to_grid === 'boolean') layoutState.snapToGrid = result.snap_to_grid;
+        var viewport = safeViewport(result.viewport);
+        if (viewport) layoutState.viewport = viewport;
+        Object.keys(result.positions || {}).forEach(function (id) {
+          var point = safePoint(result.positions[id]);
+          if (point) layoutState.positions[id] = point;
+        });
+        return result;
+      });
+  }
+
+  // settleLayout repaints the surface that is still mounted once the layout
+  // resolves. It is the only place a load result reaches the DOM, so a response
+  // arriving after the user switched to Tree, navigated away, or remounted is
+  // simply dropped.
+  function settleLayout() {
+    if (!lastMount || !lastMount.container) return;
+    if (lastMount.container.isConnected === false) return;
+    mount(lastMount.container, lastMount.state);
+  }
 
   // Currently-selected workspace id, remembered across re-mounts (data refreshes).
   var selectedId = '';
@@ -244,14 +464,20 @@
   }
 
   /**
-   * Pure, stable, no-overlap layout. Returns grid-cell coordinates so rendering
-   * can convert them to pixels. Groups cluster into rectangular districts; only
-   * top-level groups form districts (nesting capped — deeper members flatten).
+   * Pure, stable, no-overlap arrangement in grid cells.
+   *
+   * This is no longer the map's layout — it is the *seed* for automatic
+   * placement (FR-21). It decides the order and relative arrangement of records
+   * that have never been placed by hand; computeWorldLayout turns those cells
+   * into world coordinates and lets any saved anchor override them. The cell
+   * ordering is keyed by a hash of each immutable ID, so it does not depend on
+   * the order the API returned records in (FR-19).
+   *
    * @returns {{tiles: Array, districts: Array, cols: number, rows: number}}
    */
   function computeMapLayout(workspaces, options) {
     var opts = options || {};
-    var maxCols = Math.max(1, opts.maxCols || MAX_COLS);
+    var maxCols = Math.max(1, opts.maxCols || FALLBACK_COLS);
     var list = (Array.isArray(workspaces) ? workspaces : []).filter(function (w) {
       return w && w.id;
     });
@@ -347,6 +573,488 @@
       cols: Math.max(1, Math.min(maxCols, usedCols)),
       rows: Math.max(1, totalRows)
     };
+  }
+
+  // ---------- world placement ----------
+
+  // Anchors are compared on a rounded key so "the same point" means the same
+  // thing to the uniqueness check as it does to the eye. Exact float equality
+  // would let two buildings sit a millionth of a unit apart and both claim to be
+  // unique (FR-20).
+  function anchorKey(point) {
+    return Math.round(point.x * 2) / 2 + ',' + Math.round(point.y * 2) / 2;
+  }
+
+  /**
+   * FallbackGrid hands out automatic anchors.
+   *
+   * It walks a fixed-width grid of world cells in a deterministic order and
+   * skips any cell already claimed, so two records can never be handed the same
+   * anchor and no building is ever placed under another one's hit target
+   * (FR-20). The grid can be based anywhere: placing new records relative to the
+   * content that already exists is what keeps an externally created workspace
+   * visible instead of stranding it at a distant origin the user panned away
+   * from years ago (FR-24).
+   */
+  function createFallbackGrid(origin) {
+    var claimed = Object.create(null);
+    var cursor = 0;
+    function claim(point) {
+      claimed[anchorKey(point)] = true;
+      return point;
+    }
+    return {
+      claim: claim,
+      // cell translates a seed cell from computeMapLayout into world space. The
+      // whole seeded arrangement moves with the origin, so its relative shape —
+      // which records sit beside which — is preserved wherever it is based.
+      cell: function (col, row, base) {
+        var from = base || origin;
+        return { x: from.x + col * CELL_W, y: from.y + row * CELL_H };
+      },
+      // next returns the next unclaimed cell, scanning row by row from the
+      // grid's base. The cursor only moves forward, so assigning N records
+      // costs one pass rather than N scans.
+      next: function () {
+        for (;;) {
+          var col = cursor % FALLBACK_COLS;
+          var row = Math.floor(cursor / FALLBACK_COLS);
+          cursor += 1;
+          var point = { x: origin.x + col * CELL_W, y: origin.y + row * CELL_H };
+          if (!claimed[anchorKey(point)]) return claim(point);
+        }
+      },
+      // place takes the record's preferred point, or the next free cell when
+      // something already occupies it.
+      place: function (point) {
+        return claimed[anchorKey(point)] ? this.next() : claim(point);
+      }
+    };
+  }
+
+  // fallbackOrigin decides where automatic placement starts.
+  //
+  // With no saved anchors at all — a legacy map opened for the first time — it
+  // is the classic (PAD, PAD) corner, so nothing appears to have moved (FR-18).
+  // Once the user has placed anything, new records appear one row below their
+  // arranged content instead of back at an origin they may have panned far away
+  // from (FR-24).
+  function fallbackOrigin(savedAnchors) {
+    var ids = Object.keys(savedAnchors);
+    if (!ids.length) return { x: PAD, y: PAD };
+    var minX = Infinity;
+    var maxY = -Infinity;
+    ids.forEach(function (id) {
+      var point = savedAnchors[id];
+      if (point.x < minX) minX = point.x;
+      if (point.y > maxY) maxY = point.y;
+    });
+    return { x: minX, y: maxY + CELL_H };
+  }
+
+  // groupAffinityOrigin places an unplaced member beneath the cluster its group
+  // already occupies, so a workspace created into a moved district joins that
+  // district rather than appearing across the world from it (FR-24).
+  function groupAffinityOrigin(groupId, placedByGroup) {
+    var cluster = placedByGroup[groupId];
+    if (!cluster) return null;
+    return { x: cluster.minX, y: cluster.maxY + CELL_H };
+  }
+
+  /**
+   * Resolve every record's world anchor: saved coordinates win, everything else
+   * gets a deterministic automatic one (FR-17, FR-18).
+   *
+   * Pure and viewport-independent by construction — nothing in here reads a
+   * container size, a breakpoint, or the order the API happened to return
+   * records in, which is what lets a resize, a filter, a Map/Tree switch, or a
+   * data refresh leave every coordinate exactly where it was (FR-13, FR-19).
+   *
+   * @param {Array} workspaces enriched workspace summaries
+   * @param {object} [options] { positions, viewport, hqSite }
+   */
+  function computeWorldLayout(workspaces, options) {
+    var opts = options || {};
+    var savedInput = opts.positions || {};
+    var viewport = opts.viewport || DEFAULT_VIEWPORT;
+    var grid = computeMapLayout(workspaces, { maxCols: FALLBACK_COLS });
+
+    // 1. Keep only saved anchors that are safe numbers AND belong to a record
+    //    this map is actually drawing. A coordinate for a trashed or deleted
+    //    workspace stays in the layout record for restore, but it must not
+    //    influence anything drawn now (FR-26).
+    var present = Object.create(null);
+    grid.tiles.forEach(function (tile) {
+      present[tile.id] = true;
+    });
+    grid.districts.forEach(function (district) {
+      present[district.id] = true;
+    });
+    var saved = Object.create(null);
+    Object.keys(savedInput).forEach(function (id) {
+      if (!present[id]) return;
+      var point = safePoint(savedInput[id]);
+      if (point) saved[id] = point;
+    });
+
+    var placer = createFallbackGrid(fallbackOrigin(saved));
+    // Saved anchors are claimed before any automatic one is handed out, so
+    // automatic placement can never land on top of a building the user placed.
+    Object.keys(saved).forEach(function (id) {
+      placer.claim(saved[id]);
+    });
+
+    // 2. Group anchors first: a member's automatic placement may want to sit
+    //    near its district, which needs the district's anchor to exist.
+    var districtAnchors = Object.create(null);
+    grid.districts.forEach(function (district) {
+      var anchor = saved[district.id];
+      if (anchor) {
+        // A saved district still occupies a cell, so claim the one it covers.
+        // Otherwise the automatic scan would hand that cell to a building and
+        // park it inside the outline (FR-20).
+        placer.claim({ x: anchor.x + DISTRICT_PAD_X, y: anchor.y + DISTRICT_PAD_Y });
+      } else {
+        // The group's own anchor is the outline's corner, offset from the cell
+        // it occupies — otherwise an empty group and its first member would
+        // compete for the same point (FR-82). The cell is what gets claimed,
+        // because that is the space the district actually covers.
+        var cell = placer.place(placer.cell(district.col, district.row));
+        anchor = { x: cell.x - DISTRICT_PAD_X, y: cell.y - DISTRICT_PAD_Y };
+      }
+      districtAnchors[district.id] = anchor;
+    });
+
+    // 3. Buildings. Saved wins; otherwise the seeded cell if it is free, else
+    //    the next free cell in the deterministic scan.
+    var placedByGroup = Object.create(null);
+    function recordCluster(groupId, anchor) {
+      if (!groupId) return;
+      var cluster = placedByGroup[groupId];
+      if (!cluster) {
+        placedByGroup[groupId] = { minX: anchor.x, maxY: anchor.y };
+        return;
+      }
+      if (anchor.x < cluster.minX) cluster.minX = anchor.x;
+      if (anchor.y > cluster.maxY) cluster.maxY = anchor.y;
+    }
+    grid.tiles.forEach(function (tile) {
+      if (saved[tile.id]) recordCluster(tile.groupId, saved[tile.id]);
+    });
+
+    var nodes = grid.tiles.map(function (tile) {
+      var anchor = saved[tile.id];
+      var isSaved = !!anchor;
+      if (!anchor) {
+        // A member of a group whose cluster already sits somewhere joins that
+        // cluster; everything else takes its seeded cell in the fallback grid.
+        var affinity = tile.groupId ? groupAffinityOrigin(tile.groupId, placedByGroup) : null;
+        anchor = placer.place(
+          affinity ? placer.cell(0, 0, affinity) : placer.cell(tile.col, tile.row)
+        );
+        recordCluster(tile.groupId, anchor);
+      }
+      return {
+        id: tile.id,
+        kind: 'workspace',
+        ws: tile.ws,
+        groupId: tile.groupId,
+        x: anchor.x,
+        y: anchor.y,
+        saved: isSaved
+      };
+    });
+
+    // 4. District outlines are elastic presentation derived from the anchors
+    //    above. They never rewrite a member's coordinate; a member dragged past
+    //    the old edge simply makes the outline grow (FR-84).
+    var membersByGroup = Object.create(null);
+    nodes.forEach(function (node) {
+      if (!node.groupId) return;
+      (membersByGroup[node.groupId] = membersByGroup[node.groupId] || []).push(node);
+    });
+    var districts = grid.districts.map(function (district) {
+      var anchor = districtAnchors[district.id];
+      var members = membersByGroup[district.id] || [];
+      var minX = anchor.x;
+      var minY = anchor.y;
+      var maxX = anchor.x + CELL_W - 8;
+      var maxY = anchor.y + CELL_H - 10;
+      members.forEach(function (member) {
+        var left = member.x - DISTRICT_PAD_X;
+        var top = member.y - DISTRICT_PAD_Y;
+        if (left < minX) minX = left;
+        if (top < minY) minY = top;
+        if (member.x + CELL_W - 8 > maxX) maxX = member.x + CELL_W - 8;
+        if (member.y + CELL_H - 10 > maxY) maxY = member.y + CELL_H - 10;
+      });
+      return {
+        id: district.id,
+        ws: district.ws,
+        anchorX: anchor.x,
+        anchorY: anchor.y,
+        x: minX,
+        y: minY,
+        width: Math.max(CELL_W - 8, maxX - minX),
+        height: Math.max(CELL_H - 10, maxY - minY),
+        saved: !!saved[district.id]
+      };
+    });
+
+    // 5. The reserved Personal HQ site and the New Workspace pad get stable
+    //    automatic anchors from the same scan, but they are never persisted:
+    //    neither is a workspace, so neither may occupy a workspace ID in the
+    //    saved layout (FR-30).
+    var hqSite = opts.hqSite ? placer.next() : null;
+    var pad = placer.next();
+
+    var bounds = worldBounds(nodes, districts, hqSite, pad);
+    return {
+      nodes: nodes,
+      districts: districts,
+      hqSite: hqSite,
+      pad: pad,
+      bounds: bounds,
+      world: expandWorld(bounds, viewport)
+    };
+  }
+
+  // worldBounds is the tight box around everything currently drawn. It grows
+  // automatically as content is placed further out, and it never adjusts a
+  // coordinate to fit (FR-10).
+  function worldBounds(nodes, districts, hqSite, pad) {
+    var minX = Infinity;
+    var minY = Infinity;
+    var maxX = -Infinity;
+    var maxY = -Infinity;
+    function include(x, y, w, h) {
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x + w > maxX) maxX = x + w;
+      if (y + h > maxY) maxY = y + h;
+    }
+    nodes.forEach(function (node) {
+      include(node.x, node.y, CELL_W, CELL_H);
+    });
+    districts.forEach(function (district) {
+      include(district.x, district.y, district.width, district.height);
+    });
+    if (hqSite) include(hqSite.x, hqSite.y, CELL_W, CELL_H);
+    if (pad) include(pad.x, pad.y, CELL_W, CELL_H);
+    if (minX === Infinity) {
+      return { minX: 0, minY: 0, maxX: CELL_W, maxY: CELL_H };
+    }
+    return { minX: minX, minY: minY, maxX: maxX, maxY: maxY };
+  }
+
+  // expandWorld adds at least one viewport of navigable margin around the
+  // outermost content, so there is always somewhere to pan to and somewhere to
+  // build near an edge (FR-11).
+  function expandWorld(bounds, viewport) {
+    var marginX = Math.max(CELL_W, (viewport && viewport.width) || DEFAULT_VIEWPORT.width);
+    var marginY = Math.max(CELL_H, (viewport && viewport.height) || DEFAULT_VIEWPORT.height);
+    return {
+      minX: bounds.minX - marginX,
+      minY: bounds.minY - marginY,
+      maxX: bounds.maxX + marginX,
+      maxY: bounds.maxY + marginY,
+      width: bounds.maxX - bounds.minX + marginX * 2,
+      height: bounds.maxY - bounds.minY + marginY * 2
+    };
+  }
+
+  // ---------- camera transforms ----------
+  //
+  // Every one of these is pure: camera in, camera out, no DOM. That is what
+  // lets pointer-centred zoom, Fit All, and clamping be asserted exactly rather
+  // than eyeballed in a browser (FR-123).
+
+  function clampZoom(zoom) {
+    if (typeof zoom !== 'number' || !isFinite(zoom)) return DEFAULT_ZOOM;
+    return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom));
+  }
+
+  /** Convert a point in viewport CSS pixels into world units. */
+  function screenToWorld(point, cam, viewport) {
+    return {
+      x: (point.x - viewport.width / 2) / cam.zoom + cam.centerX,
+      y: (point.y - viewport.height / 2) / cam.zoom + cam.centerY
+    };
+  }
+
+  /** Convert a world point into viewport CSS pixels. */
+  function worldToScreen(point, cam, viewport) {
+    return {
+      x: (point.x - cam.centerX) * cam.zoom + viewport.width / 2,
+      y: (point.y - cam.centerY) * cam.zoom + viewport.height / 2
+    };
+  }
+
+  /**
+   * Zoom about a screen point, keeping the world point under it visually still
+   * (FR-39). This is what makes wheel and pinch zoom feel like the map is being
+   * pulled toward the cursor rather than sliding out from under it.
+   */
+  function zoomAroundPoint(cam, viewport, screenPoint, factor) {
+    var zoom = clampZoom(cam.zoom * factor);
+    var world = screenToWorld(screenPoint, cam, viewport);
+    return {
+      centerX: world.x - (screenPoint.x - viewport.width / 2) / zoom,
+      centerY: world.y - (screenPoint.y - viewport.height / 2) / zoom,
+      zoom: zoom
+    };
+  }
+
+  /**
+   * Zoom about the viewport centre (FR-39). Buttons and keyboard use this: with
+   * no pointer there is no "point under the cursor" to preserve, and moving the
+   * centre would make the map drift every time someone pressed Zoom In.
+   */
+  function zoomAroundCenter(cam, factor) {
+    return { centerX: cam.centerX, centerY: cam.centerY, zoom: clampZoom(cam.zoom * factor) };
+  }
+
+  /** The camera that frames everything in `bounds` with padding (FR-40). */
+  function fitBounds(bounds, viewport, padding) {
+    var pad = typeof padding === 'number' ? padding : FIT_PADDING;
+    var width = Math.max(1, bounds.maxX - bounds.minX);
+    var height = Math.max(1, bounds.maxY - bounds.minY);
+    var usableWidth = Math.max(1, (viewport.width || DEFAULT_VIEWPORT.width) - pad * 2);
+    var usableHeight = Math.max(1, (viewport.height || DEFAULT_VIEWPORT.height) - pad * 2);
+    return {
+      centerX: (bounds.minX + bounds.maxX) / 2,
+      centerY: (bounds.minY + bounds.maxY) / 2,
+      zoom: clampZoom(Math.min(usableWidth / width, usableHeight / height))
+    };
+  }
+
+  /** Look at one node without moving it (FR-41). */
+  function centerOn(cam, point) {
+    return { centerX: point.x + CELL_W / 2, centerY: point.y + CELL_H / 2, zoom: cam.zoom };
+  }
+
+  /**
+   * Keep the camera inside the navigable world.
+   *
+   * Panning may roam a viewport past the outermost building — that margin is
+   * what makes it possible to build near an edge (FR-11) — but not further, so
+   * it is never possible to end up in empty space with no content in any
+   * direction and no idea which way to go back.
+   */
+  function clampCamera(cam, world) {
+    return {
+      centerX: Math.min(Math.max(cam.centerX, world.minX), world.maxX),
+      centerY: Math.min(Math.max(cam.centerY, world.minY), world.maxY),
+      zoom: clampZoom(cam.zoom)
+    };
+  }
+
+  // ---------- camera state ----------
+
+  var camera = { centerX: 0, centerY: 0, zoom: DEFAULT_ZOOM };
+  // Until the layout has settled and the container has a real size, there is
+  // nothing meaningful to frame; the first honest measurement initializes the
+  // camera once and every later mount reuses it (FR-106).
+  var cameraReady = false;
+  // The most recent computed world, held so the camera controls can fit, clamp,
+  // and centre without recomputing placement.
+  var lastWorldLayout = null;
+  var cameraSaveTimer = null;
+
+  function viewportSize(canvas) {
+    var width = (canvas && canvas.clientWidth) || 0;
+    var height = (canvas && canvas.clientHeight) || 0;
+    if (width <= 0 || height <= 0) return DEFAULT_VIEWPORT;
+    return { width: width, height: height };
+  }
+
+  function setCamera(next, container) {
+    var world = lastWorldLayout ? lastWorldLayout.world : null;
+    camera = world
+      ? clampCamera(next, world)
+      : { centerX: next.centerX, centerY: next.centerY, zoom: clampZoom(next.zoom) };
+    applyCamera(container);
+    scheduleCameraSave();
+  }
+
+  /**
+   * Push the camera into the DOM.
+   *
+   * One transform on the world layer moves every building at once, so panning
+   * and zooming never re-render the map or touch a node's coordinates
+   * (FR-31, FR-122). The background grid is offset and scaled by the same
+   * camera so it stays welded to world space instead of sliding under it.
+   */
+  function applyCamera(container) {
+    if (!container || typeof container.querySelector !== 'function') return;
+    var canvas = container.querySelector('.ws-map-canvas');
+    if (!canvas) return;
+    var world = canvas.querySelector('.ws-map-world');
+    var viewport = viewportSize(canvas);
+    var translateX = viewport.width / 2 - camera.centerX * camera.zoom;
+    var translateY = viewport.height / 2 - camera.centerY * camera.zoom;
+    if (world && world.style) {
+      world.style.transform =
+        'translate(' + translateX + 'px, ' + translateY + 'px) scale(' + camera.zoom + ')';
+    }
+    if (canvas.style && typeof canvas.style.setProperty === 'function') {
+      var grid = SNAP_STEP * camera.zoom;
+      canvas.style.setProperty('--ws-map-grid', grid + 'px');
+      canvas.style.setProperty('--ws-map-grid-x', (translateX % grid) + 'px');
+      canvas.style.setProperty('--ws-map-grid-y', (translateY % grid) + 'px');
+    }
+    updateCameraControls(container);
+  }
+
+  // scheduleCameraSave persists the settled camera, debounced. A pan is
+  // hundreds of events and one intention (FR-44), and a camera that fails to
+  // save is a lost view — never a lost building (FR-108).
+  function scheduleCameraSave() {
+    if (layoutState.status !== 'ready') return;
+    if (typeof setTimeout !== 'function') return;
+    if (cameraSaveTimer) clearTimeout(cameraSaveTimer);
+    cameraSaveTimer = setTimeout(function () {
+      cameraSaveTimer = null;
+      patchLayout([
+        {
+          op: 'set_viewport',
+          viewport: { center_x: camera.centerX, center_y: camera.centerY, zoom: camera.zoom }
+        }
+      ]).catch(function () {
+        // Best-effort by design: committed positions are untouched either way.
+      });
+    }, CAMERA_SAVE_DELAY);
+    if (cameraSaveTimer && typeof cameraSaveTimer.unref === 'function') cameraSaveTimer.unref();
+  }
+
+  // ensureCamera initializes the view exactly once: from the user's saved
+  // camera when there is a usable one, and otherwise from Fit All, so a missing
+  // or unreadable viewport opens on something sensible rather than leaving
+  // valid buildings off-screen (FR-45).
+  function ensureCamera(container) {
+    if (cameraReady || !lastWorldLayout) return;
+    if (layoutState.status === 'loading') return;
+    var stored = layoutState.viewport;
+    if (stored) {
+      camera = { centerX: stored.centerX, centerY: stored.centerY, zoom: clampZoom(stored.zoom) };
+      cameraReady = true;
+      return;
+    }
+    // Wait for something worth framing. The first mount can happen before the
+    // workspace list arrives, and framing the bare create pad would lock the
+    // camera onto an empty corner that every later refresh then inherits.
+    if (!lastWorldLayout.nodes.length && !lastWorldLayout.districts.length) return;
+    var canvas = container && container.querySelector && container.querySelector('.ws-map-canvas');
+    var fitted = fitBounds(lastWorldLayout.bounds, framedViewport(canvas));
+    // Fit All zooms in when there is little content; the opening view does not.
+    // Landing at 200% on a two-workspace map is disorienting, and the button is
+    // right there for anyone who wants it.
+    camera = liftAboveControls({
+      centerX: fitted.centerX,
+      centerY: fitted.centerY,
+      zoom: Math.min(DEFAULT_ZOOM, fitted.zoom)
+    });
+    cameraReady = true;
   }
 
   // ---------- rendering ----------
@@ -486,8 +1194,11 @@
     var selected = isSel ? ' is-selected' : '';
     var isMulti = !!multiSelected[ws.id];
     var multiCls = isMulti ? ' is-multi' : '';
-    var left = PAD + tile.col * CELL_W;
-    var top = PAD + tile.row * CELL_H;
+    // Layer coordinates: the node's world anchor with the world layer's origin
+    // already subtracted by canvasHTML. The building itself knows only where it
+    // sits in the world; nothing here reads the container (FR-2).
+    var left = Number(tile.left) || 0;
+    var top = Number(tile.top) || 0;
     var meta =
       agents +
       (agents === 1 ? ' agent' : ' agents') +
@@ -562,8 +1273,8 @@
 
   function hqSiteHTML(cell, selectedId, index, view) {
     var isSelected = selectedId === HQ_SITE_ID;
-    var left = PAD + cell.col * CELL_W;
-    var top = PAD + cell.row * CELL_H;
+    var left = Number(cell && cell.left) || 0;
+    var top = Number(cell && cell.top) || 0;
     var status = view.statusLabel || 'Not created';
     return (
       '<button type="button" class="ws-map-tile ws-map-hq-site' +
@@ -602,10 +1313,14 @@
     // A selected GROUP must keep its highlight across a re-mount, not only
     // until the next applySelection call (PRD FR58).
     var isSel = !!selectedId && ws.id === selectedId;
-    var left = PAD + d.col * CELL_W - 12;
-    var top = PAD + d.row * CELL_H - 6;
-    var width = d.w * CELL_W - 8;
-    var height = d.h * CELL_H - 10;
+    // Elastic bounds computed by computeWorldLayout from the group's anchor and
+    // its members' anchors. The outline is presentation only — it grows around
+    // a member that moved and never claims that geometry changed membership
+    // (FR-84, FR-8).
+    var left = Number(d.left) || 0;
+    var top = Number(d.top) || 0;
+    var width = Number(d.width) || CELL_W;
+    var height = Number(d.height) || CELL_H;
     var label = (ws.name || 'Group') + ' group';
     return (
       '<div class="ws-map-district" role="group" aria-label="' +
@@ -636,13 +1351,20 @@
       '">▢ ' +
       escapeHtml(ws.name || 'Group') +
       ' · Group</button>' +
+      // A separate, touch-sized handle for cluster movement. Dragging the label
+      // would make "select this group" and "move everything in it" the same
+      // gesture, and every existing group action — select, overview, open,
+      // delete, Tree management — has to stay reachable (FR-85, FR-94).
+      '<button type="button" class="ws-map-district-handle" data-group-drag="' +
+      escapeHtml(ws.id) +
+      '" aria-label="' +
+      escapeHtml('Move the ' + (ws.name || 'group') + ' district and its workspaces') +
+      '" title="Move this district">⤧</button>' +
       '</div>'
     );
   }
 
-  function padHTML(col, row) {
-    var left = PAD + col * CELL_W;
-    var top = PAD + row * CELL_H;
+  function padHTML(left, top) {
     return (
       '<button type="button" class="ws-map-pad" data-ws-map-create ' +
       'style="left:' +
@@ -655,71 +1377,200 @@
     );
   }
 
-  function occupiedMapCells(layout) {
-    var occupied = Object.create(null);
-    layout.tiles.forEach(function (tile) {
-      occupied[tile.col + ',' + tile.row] = true;
-    });
-    layout.districts.forEach(function (district) {
-      for (var row = district.row; row < district.row + district.h; row++) {
-        for (var col = district.col; col < district.col + district.w; col++) {
-          occupied[col + ',' + row] = true;
-        }
-      }
-    });
-    return occupied;
-  }
-
-  function nextFreeMapCell(occupied, cols) {
-    var maxCols = Math.max(1, cols || MAX_COLS);
-    for (var row = 0; ; row++) {
-      for (var col = 0; col < maxCols; col++) {
-        if (!occupied[col + ',' + row]) return { col: col, row: row };
-      }
-    }
-  }
-
-  function canvasHTML(workspaces, selectedId, maxCols) {
-    var cols = Math.max(1, maxCols || MAX_COLS);
-    var layout = computeMapLayout(workspaces, { maxCols: cols });
-    var parts = [];
-    layout.districts.forEach(function (d) {
-      parts.push(districtHTML(d, selectedId));
-    });
-    layout.tiles.forEach(function (t, i) {
-      parts.push(tileHTML(t, selectedId, i));
-    });
-
-    var occupied = occupiedMapCells(layout);
-    var lastRow = 0;
-    Object.keys(occupied).forEach(function (key) {
-      var row = Number(key.split(',')[1]);
-      if (row > lastRow) lastRow = row;
-    });
-
+  /**
+   * Draw the world.
+   *
+   * The canvas is the viewport; the layer inside it holds every building at its
+   * world anchor with the layer's origin subtracted. Keeping that one
+   * subtraction in a single place is what lets the same anchors be rendered by
+   * a scrolled layer today and by a panned/zoomed camera later without touching
+   * a single node coordinate.
+   */
+  function canvasHTML(workspaces, selectedId, options) {
+    var opts = options || {};
     var site = hqSiteView(hqStatus);
-    if (site.show) {
-      var hqCell = nextFreeMapCell(occupied, cols);
-      occupied[hqCell.col + ',' + hqCell.row] = true;
-      if (hqCell.row > lastRow) lastRow = hqCell.row;
-      parts.push(hqSiteHTML(hqCell, selectedId, layout.tiles.length, site));
+    var layout = computeWorldLayout(workspaces, {
+      positions: layoutState.positions,
+      viewport: opts.viewport,
+      hqSite: site.show
+    });
+    // Nodes carry their raw world coordinates into the DOM; the world layer's
+    // camera transform is the only thing standing between world space and the
+    // screen (FR-31). Nothing here subtracts an origin, so panning and zooming
+    // move one element rather than rewriting every position.
+    lastWorldLayout = layout;
+    function toLayer(point) {
+      return { left: point.x, top: point.y };
     }
 
+    var parts = [];
+    layout.districts.forEach(function (district) {
+      var placed = toLayer(district);
+      parts.push(
+        districtHTML(
+          {
+            ws: district.ws,
+            left: placed.left,
+            top: placed.top,
+            width: district.width,
+            height: district.height
+          },
+          selectedId
+        )
+      );
+    });
+    layout.nodes.forEach(function (node, index) {
+      var placed = toLayer(node);
+      parts.push(tileHTML({ ws: node.ws, left: placed.left, top: placed.top }, selectedId, index));
+    });
+    if (layout.hqSite) {
+      parts.push(hqSiteHTML(toLayer(layout.hqSite), selectedId, layout.nodes.length, site));
+    }
     // Keep the ordinary create affordance after all real and reserved sites.
-    var padCell = nextFreeMapCell(occupied, cols);
-    if (padCell.row > lastRow) lastRow = padCell.row;
-    parts.push(padHTML(padCell.col, padCell.row));
+    var pad = toLayer(layout.pad);
+    parts.push(padHTML(pad.left, pad.top));
+    // The build-site marker lives in world space so it tracks the candidate
+    // coordinate through pans and zooms rather than floating over the screen.
+    parts.push(
+      '<div class="ws-map-build-site" data-map-build-marker hidden aria-hidden="true"></div>'
+    );
 
-    var height = PAD * 2 + (lastRow + 1) * CELL_H;
+    var settling = layoutState.status === 'loading' ? ' is-settling' : '';
+    var readOnly = layoutState.status === 'unavailable' ? ' is-readonly' : '';
     return {
       html:
-        '<div class="ws-map-canvas" role="group" aria-label="Workspaces map" style="height:' +
-        height +
-        'px">' +
+        '<div class="ws-map-canvas' +
+        settling +
+        readOnly +
+        '" role="group" aria-label="Workspaces map" tabindex="0"' +
+        (settling ? ' aria-busy="true"' : '') +
+        ' data-ws-map-viewport>' +
+        '<div class="ws-map-world">' +
         parts.join('') +
-        '</div>',
-      empty: layout.tiles.length === 0
+        '</div></div>' +
+        cameraControlsHTML(),
+      empty: layout.nodes.length === 0,
+      layout: layout
     };
+  }
+
+  /**
+   * Visible camera controls.
+   *
+   * Every navigation gesture the map supports by pointer also has a button
+   * here, so a wheel, a trackpad, and a steady hand are conveniences rather
+   * than requirements (FR-37, FR-115). The three framing actions are separate
+   * and named for what they do: Fit All changes the zoom to show everything,
+   * Center Selected moves the view to one record, Reset View returns to the
+   * default view. None of them moves a building — that distinction is what
+   * keeps Reset View from being mistaken for Reset Layout (FR-42, FR-109).
+   */
+  function cameraControlsHTML() {
+    var snapOn = layoutState.snapToGrid;
+    var readOnly = layoutState.status !== 'ready';
+    return (
+      buildBannerHTML() +
+      // Two clusters, because they are two different jobs. Navigation moves the
+      // camera and can never change the map; the placement actions change where
+      // things are. Keeping them apart also keeps either group from growing into
+      // a bar that covers the buildings it is meant to help with.
+      '<div class="ws-map-actions" role="group" aria-label="Map placement actions">' +
+      '<button type="button" class="ws-map-ctl ws-map-ctl--wide ws-map-ctl--build" data-map-build' +
+      (readOnly ? ' disabled' : '') +
+      '>⊕ Build</button>' +
+      '<button type="button" class="ws-map-ctl ws-map-ctl--wide" data-map-move' +
+      (readOnly ? ' disabled' : '') +
+      '>Move</button>' +
+      '<button type="button" class="ws-map-ctl ws-map-ctl--wide" data-map-snap aria-pressed="' +
+      (snapOn ? 'true' : 'false') +
+      '"' +
+      (readOnly ? ' disabled' : '') +
+      '>Snap: ' +
+      (snapOn ? 'on' : 'off') +
+      '</button>' +
+      // Reset Layout is deliberately worded and placed apart from Reset View:
+      // one changes where the camera is, the other changes where every building
+      // is (FR-109).
+      '<button type="button" class="ws-map-ctl ws-map-ctl--wide" data-map-reset-layout' +
+      (readOnly ? ' disabled' : '') +
+      '>Reset layout…</button>' +
+      '<button type="button" class="ws-map-ctl ws-map-ctl--wide" data-map-undo-reset hidden>Undo reset</button>' +
+      '<button type="button" class="ws-map-ctl" data-map-help aria-expanded="false" aria-label="How the map works">?</button>' +
+      '</div>' +
+      helpHTML() +
+      (readOnly
+        ? '<p class="ws-map-notice" role="status">Positions cannot be saved right now. You can still look around; building and moving are unavailable until the map layout loads.</p>'
+        : '') +
+      '<div class="ws-map-controls" role="group" aria-label="Map view controls">' +
+      '<button type="button" class="ws-map-ctl" data-map-zoom-out aria-label="Zoom out">−</button>' +
+      '<span class="ws-map-zoom" data-map-zoom-readout aria-hidden="true">100%</span>' +
+      '<button type="button" class="ws-map-ctl" data-map-zoom-in aria-label="Zoom in">+</button>' +
+      '<button type="button" class="ws-map-ctl ws-map-ctl--wide" data-map-fit>Fit all</button>' +
+      '<button type="button" class="ws-map-ctl ws-map-ctl--wide" data-map-center aria-label="Center selected">Center</button>' +
+      '<button type="button" class="ws-map-ctl ws-map-ctl--wide" data-map-reset-view aria-label="Reset view">Reset</button>' +
+      '</div>' +
+      '<p class="ws-map-live" data-map-live role="status" aria-live="polite"></p>'
+    );
+  }
+
+  /**
+   * The placement-mode banner.
+   *
+   * Build mode has to be unmistakable — it changes what the next click on empty
+   * space means, and a mode the user cannot see is a mode they will trigger by
+   * accident (FR-48, FR-49). The banner names the mode, shows the candidate
+   * coordinate and whether snapping is applied (FR-50), and carries its own
+   * cancel action so leaving does not depend on knowing about Escape.
+   *
+   * It is rendered on every mount and hidden, so entering the mode is a class
+   * change rather than a re-render that would disturb the map underneath.
+   */
+  /**
+   * Concise, discoverable help (FR-121).
+   *
+   * Every gesture the map supports is worth exactly one line. A user who never
+   * opens this should still be able to work the map from the buttons; this is
+   * for the ones that have no button — drag to pan, pinch to zoom, Alt to
+   * bypass snapping.
+   */
+  function helpHTML() {
+    return (
+      '<div class="ws-map-help" data-map-help-panel hidden role="region" aria-label="How the map works">' +
+      '<h4>How the map works</h4>' +
+      '<ul>' +
+      '<li><b>Pan</b> — drag empty space, or scroll/swipe.</li>' +
+      '<li><b>Zoom</b> — pinch, ' +
+      (isApplePlatform() ? '⌘' : 'Ctrl') +
+      '+scroll, the + / − buttons, or the + / − keys.</li>' +
+      '<li><b>Move a building</b> — drag it. Select it and press Move to do the same with arrow keys; Enter saves, Escape cancels.</li>' +
+      '<li><b>Move a district</b> — drag the small handle on its outline. Its workspaces move with it; membership never changes.</li>' +
+      '<li><b>Build</b> — press Build, then click an empty spot (or use arrow keys and Enter).</li>' +
+      '<li><b>Snap</b> — on by default. Hold ' +
+      (isApplePlatform() ? 'Option' : 'Alt') +
+      ' to place freely for one move.</li>' +
+      '<li><b>Escape</b> — cancels whatever is in progress without saving.</li>' +
+      '</ul>' +
+      '<p class="ws-map-help-note">Fit all, Center and Reset view move the camera. Reset layout moves the buildings — and can be undone.</p>' +
+      '</div>'
+    );
+  }
+
+  function isApplePlatform() {
+    if (typeof navigator === 'undefined') return true;
+    return /Mac|iPhone|iPad/i.test(String(navigator.platform || navigator.userAgent || ''));
+  }
+
+  function buildBannerHTML() {
+    return (
+      '<div class="ws-map-build" data-map-build-banner hidden>' +
+      '<span class="ws-map-build-dot" aria-hidden="true">◎</span>' +
+      '<span class="ws-map-build-text" data-map-build-text>' +
+      BUILD_INSTRUCTION +
+      '</span>' +
+      '<span class="ws-map-build-coords" data-map-build-coords></span>' +
+      '<button type="button" class="ws-map-ctl" data-map-build-cancel hidden>Cancel</button>' +
+      '</div>'
+    );
   }
 
   function emptyCanvasHTML() {
@@ -1066,11 +1917,11 @@
     );
   }
 
-  function shellHTML(stats, workspaces, selectedId, maxCols, options) {
+  function shellHTML(stats, workspaces, selectedId, viewport, options) {
     var site = hqSiteView(hqStatus);
     var canvas =
       (Array.isArray(workspaces) && workspaces.length > 0) || site.show
-        ? canvasHTML(workspaces, selectedId, maxCols).html
+        ? canvasHTML(workspaces, selectedId, { viewport: viewport }).html
         : emptyCanvasHTML();
     // Cockpit mode: the workspace-area header and the persistent context rail
     // already own the title, the stat readout, New Workspace, and the selected
@@ -1138,47 +1989,25 @@
     );
   }
 
-  // ---------- responsive columns ----------
-
-  // Grid column count from the theatre's usable width, capped at MAX_COLS so
-  // wide screens keep the compact command-table look. Unknown/zero width
-  // (e.g. measured while hidden) falls back to the cap. The theatre clips
-  // overflow, so tiles MUST wrap into rows that fit — a fixed column count
-  // cuts tiles off on narrow windows with no way to scroll to them.
-  function computeMaxCols(theatreWidth) {
-    if (!theatreWidth || theatreWidth <= 0) return MAX_COLS;
-    return Math.max(1, Math.min(MAX_COLS, Math.floor((theatreWidth - PAD * 2) / CELL_W)));
-  }
-
-  function measureMaxCols(container) {
+  // ---------- viewport measurement ----------
+  //
+  // The container's size is used for exactly one thing: how much navigable
+  // margin to leave around the content (FR-11). It never decides where a
+  // building goes, which is why a resize cannot move one (FR-13). The old
+  // responsive column count that used to reflow the whole map on every
+  // breakpoint is gone.
+  function measureViewport(container) {
     var width = (container && container.clientWidth) || 0;
-    if (width <= 0) return MAX_COLS;
-    // Beside the theatre sits the 338px overview column + 18px grid gap,
-    // except in the stacked narrow layout where the theatre spans full width —
-    // and except in cockpit mode, where the overview column does not exist at
-    // all (the persistent context rail replaces it), so reserving its width
-    // would cost the map a whole column for nothing.
+    var height = (container && container.clientHeight) || 0;
+    if (width <= 0 || height <= 0) return DEFAULT_VIEWPORT;
+    // Beside the theatre sits the 338px overview column + 18px grid gap, except
+    // in the stacked narrow layout and in cockpit mode, where the theatre spans
+    // the full width.
     var theatre = hideChromeMode || isNarrowViewport() ? width : width - 338 - 18;
-    return computeMaxCols(theatre);
+    return { width: Math.max(CELL_W, theatre), height: Math.max(CELL_H, height) };
   }
 
-  // Re-lay-out when a window resize changes how many columns fit. mount() is
-  // idempotent and preserves the selection, so a plain re-mount is safe.
   var lastMount = null; // { container, state }
-  var lastMaxCols = 0;
-  var resizeTimer = null;
-  var resizeBound = false;
-  function handleResize() {
-    if (resizeTimer) clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(function () {
-      resizeTimer = null;
-      if (!lastMount || !lastMount.container) return;
-      if (!lastMount.container.isConnected || lastMount.container.hidden) return;
-      if (measureMaxCols(lastMount.container) !== lastMaxCols) {
-        mount(lastMount.container, lastMount.state);
-      }
-    }, 150);
-  }
 
   // Reuse the page's existing create flow for every create affordance, rather
   // than opening a second Create Workspace path (PRD FR105). The cockpit's
@@ -1370,6 +2199,10 @@
       bindOverviewActions(container, options);
       ensureSetupStatus(container, selected);
     }
+    // Center Selected is only meaningful once something is selected, so the
+    // control's enabled state has to follow the selection rather than waiting
+    // for the next camera change (FR-41).
+    updateCameraControls(container);
     if (options && typeof options.onSelect === 'function') {
       options.onSelect(id, selected || null);
     }
@@ -1518,6 +2351,1351 @@
     });
   }
 
+  // ---------- viewport navigation ----------
+
+  // announce speaks through the map's shared live region. It never moves focus:
+  // a user in the middle of a gesture must not be yanked somewhere else to be
+  // told what just happened (FR-116).
+  function announce(container, message) {
+    if (!container || typeof container.querySelector !== 'function') return;
+    var region = container.querySelector('[data-map-live]');
+    if (region) region.textContent = message;
+  }
+
+  // isInteractiveTarget guards empty-space panning. A gesture that starts on a
+  // building, a group label, a checkbox, a control, or a link belongs to that
+  // element, not to the camera (FR-34).
+  function isInteractiveTarget(target) {
+    if (!target || typeof target.closest !== 'function') return false;
+    return !!target.closest(
+      '.ws-map-tile, .ws-map-district-tag, .ws-map-district-handle, .ws-map-pad, .ws-map-controls, .ws-map-actions, .ws-map-build, button, a, input, select, textarea, [data-ws-check], [role="checkbox"]'
+    );
+  }
+
+  function pointerPosition(canvas, event) {
+    if (canvas && typeof canvas.getBoundingClientRect === 'function') {
+      var rect = canvas.getBoundingClientRect();
+      return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+    }
+    return { x: event.clientX || 0, y: event.clientY || 0 };
+  }
+
+  /**
+   * Empty-space panning.
+   *
+   * A press only becomes a pan once it has travelled past a small threshold, so
+   * an ordinary click on the background still reads as a click (FR-33). Pointer
+   * capture keeps the gesture alive when the pointer outruns the canvas, and
+   * every exit — up, cancel, blur, unmount — releases it, so the map can never
+   * be left stuck in a drag the user already finished (FR-35).
+   */
+  function bindViewportPan(container) {
+    var canvas = container.querySelector('[data-ws-map-viewport]');
+    if (!canvas || typeof canvas.addEventListener !== 'function') return;
+
+    var pan = null;
+
+    function stop() {
+      if (!pan) return;
+      if (
+        canvas.releasePointerCapture &&
+        canvas.hasPointerCapture &&
+        canvas.hasPointerCapture(pan.pointerId)
+      ) {
+        canvas.releasePointerCapture(pan.pointerId);
+      }
+      if (canvas.classList) canvas.classList.remove('is-panning');
+      pan = null;
+    }
+
+    canvas.addEventListener('pointerdown', function (event) {
+      if (event.button != null && event.button !== 0) return;
+      if (isInteractiveTarget(event.target)) return;
+      var start = pointerPosition(canvas, event);
+      pan = {
+        pointerId: event.pointerId,
+        startX: start.x,
+        startY: start.y,
+        centerX: camera.centerX,
+        centerY: camera.centerY,
+        moved: false
+      };
+      if (canvas.setPointerCapture) canvas.setPointerCapture(event.pointerId);
+    });
+
+    canvas.addEventListener('pointermove', function (event) {
+      if (!pan && buildState.active) {
+        // Preview where the next click would land, snapped or free, so the
+        // candidate is visible before it is committed (FR-49, FR-50).
+        var previewViewport = viewportSize(canvas);
+        setBuildCandidate(
+          container,
+          snapPoint(
+            screenToWorld(pointerPosition(canvas, event), camera, previewViewport),
+            !!event.altKey
+          )
+        );
+        return;
+      }
+      if (!pan || event.pointerId !== pan.pointerId) return;
+      var point = pointerPosition(canvas, event);
+      var dx = point.x - pan.startX;
+      var dy = point.y - pan.startY;
+      if (!pan.moved) {
+        if (Math.abs(dx) < PAN_THRESHOLD && Math.abs(dy) < PAN_THRESHOLD) return;
+        pan.moved = true;
+        if (canvas.classList) canvas.classList.add('is-panning');
+      }
+      if (event.preventDefault) event.preventDefault();
+      setCamera(
+        {
+          centerX: pan.centerX - dx / camera.zoom,
+          centerY: pan.centerY - dy / camera.zoom,
+          zoom: camera.zoom
+        },
+        container
+      );
+    });
+
+    canvas.addEventListener('pointerup', function (event) {
+      if (pan && event.pointerId !== pan.pointerId) return;
+      var wasDrag = !!(pan && pan.moved);
+      stop();
+      // In build mode a press on empty world space that did not become a pan is
+      // the user choosing where to build. A press that landed on a building, a
+      // group label, or a control was never a site (FR-51, FR-52), and a drag
+      // was a pan (FR-33).
+      if (!buildState.active || wasDrag || isInteractiveTarget(event.target)) return;
+      var viewport = viewportSize(canvas);
+      var world = screenToWorld(pointerPosition(canvas, event), camera, viewport);
+      // Option/Alt temporarily bypasses snapping without changing the saved
+      // preference (FR-59).
+      chooseBuildSite(container, snapPoint(world, !!event.altKey));
+    });
+
+    ['pointercancel', 'pointerleave'].forEach(function (type) {
+      canvas.addEventListener(type, function (event) {
+        if (pan && event.pointerId !== pan.pointerId) return;
+        stop();
+      });
+    });
+    if (typeof window !== 'undefined' && window.addEventListener) {
+      window.addEventListener('blur', stop);
+    }
+  }
+
+  /**
+   * Wheel and trackpad navigation.
+   *
+   * An ordinary wheel or two-finger swipe pans, which is what those gestures do
+   * everywhere else; a pinch (which browsers report as a ctrl-wheel) or the
+   * platform's zoom modifier zooms about the pointer (FR-36, FR-39). The page's
+   * own scrolling is only suppressed for gestures the map actually consumes.
+   */
+  function bindViewportWheel(container) {
+    var canvas = container.querySelector('[data-ws-map-viewport]');
+    if (!canvas || typeof canvas.addEventListener !== 'function') return;
+    canvas.addEventListener(
+      'wheel',
+      function (event) {
+        if (isInteractiveTarget(event.target)) return;
+        if (event.preventDefault) event.preventDefault();
+        var viewport = viewportSize(canvas);
+        if (event.ctrlKey || event.metaKey) {
+          var factor = Math.exp(-(event.deltaY || 0) * WHEEL_ZOOM_RATE);
+          setCamera(
+            zoomAroundPoint(camera, viewport, pointerPosition(canvas, event), factor),
+            container
+          );
+          return;
+        }
+        setCamera(
+          {
+            centerX: camera.centerX + (event.deltaX || 0) / camera.zoom,
+            centerY: camera.centerY + (event.deltaY || 0) / camera.zoom,
+            zoom: camera.zoom
+          },
+          container
+        );
+      },
+      { passive: false }
+    );
+  }
+
+  // updateCameraControls keeps the readout truthful and disables a zoom button
+  // that can no longer do anything, so the clamp is visible rather than a
+  // button that silently stops responding (FR-38).
+  function updateCameraControls(container) {
+    if (!container || typeof container.querySelector !== 'function') return;
+    var readout = container.querySelector('[data-map-zoom-readout]');
+    if (readout) readout.textContent = Math.round(camera.zoom * 100) + '%';
+    var zoomIn = container.querySelector('[data-map-zoom-in]');
+    var zoomOut = container.querySelector('[data-map-zoom-out]');
+    if (zoomIn) zoomIn.disabled = camera.zoom >= MAX_ZOOM - 0.0001;
+    if (zoomOut) zoomOut.disabled = camera.zoom <= MIN_ZOOM + 0.0001;
+    var center = container.querySelector('[data-map-center]');
+    if (center) center.disabled = !selectedNodeAnchor();
+  }
+
+  // selectedNodeAnchor finds the world anchor of whatever is selected, whether
+  // that is a building or a group district.
+  function selectedNodeAnchor() {
+    if (!selectedId || !lastWorldLayout) return null;
+    var node = null;
+    lastWorldLayout.nodes.forEach(function (candidate) {
+      if (candidate.id === selectedId) node = { x: candidate.x, y: candidate.y };
+    });
+    if (node) return node;
+    lastWorldLayout.districts.forEach(function (district) {
+      if (district.id === selectedId) node = { x: district.anchorX, y: district.anchorY };
+    });
+    return node;
+  }
+
+  function bindCameraControls(container) {
+    var canvas = container.querySelector('[data-ws-map-viewport]');
+
+    function on(selector, handler) {
+      var el = container.querySelector(selector);
+      if (el && typeof el.addEventListener === 'function') el.addEventListener('click', handler);
+    }
+
+    on('[data-map-zoom-in]', function () {
+      setCamera(zoomAroundCenter(camera, ZOOM_STEP), container);
+      announce(container, 'Zoomed to ' + Math.round(camera.zoom * 100) + ' percent');
+    });
+    on('[data-map-zoom-out]', function () {
+      setCamera(zoomAroundCenter(camera, 1 / ZOOM_STEP), container);
+      announce(container, 'Zoomed to ' + Math.round(camera.zoom * 100) + ' percent');
+    });
+    on('[data-map-fit]', function () {
+      fitAll(container);
+      // Zoom is clamped at 50%, so a layout spread wider than two viewports
+      // cannot literally all fit. Saying so is better than a button that
+      // quietly under-delivers (FR-38, FR-40).
+      announce(
+        container,
+        camera.zoom <= MIN_ZOOM + 0.0001
+          ? 'Zoomed out as far as the map goes. Some workspaces are still off-screen — pan to reach them.'
+          : 'Showing every workspace'
+      );
+    });
+    on('[data-map-center]', function () {
+      var anchor = selectedNodeAnchor();
+      if (!anchor) {
+        announce(container, 'Select a workspace first');
+        return;
+      }
+      // Centering moves the view, never the record (FR-41).
+      setCamera(centerOn(camera, anchor), container);
+      announce(container, 'Centered the selected workspace');
+    });
+    on('[data-map-reset-view]', function () {
+      resetView(container);
+      announce(container, 'View reset. Workspace positions are unchanged');
+    });
+    on('[data-map-move]', function () {
+      startKeyboardMove(container);
+      var canvasEl = container.querySelector('[data-ws-map-viewport]');
+      if (canvasEl && canvasEl.focus) canvasEl.focus();
+    });
+
+    if (!canvas || typeof canvas.addEventListener !== 'function') return;
+    // Keyboard equivalents for every camera gesture, so navigating the map
+    // never requires a pointer (FR-115).
+    canvas.addEventListener('keydown', function (event) {
+      // Build mode and keyboard Move own the arrow keys while either is active:
+      // they move the candidate, not the camera (FR-60, FR-78).
+      if (buildState.active) return;
+      if (handleMoveKey(container, event)) {
+        if (event.preventDefault) event.preventDefault();
+        return;
+      }
+      var step = (event.shiftKey ? 4 : 1) * (SNAP_STEP * 2);
+      var handled = true;
+      switch (event.key) {
+        case '+':
+        case '=':
+          setCamera(zoomAroundCenter(camera, ZOOM_STEP), container);
+          break;
+        case '-':
+        case '_':
+          setCamera(zoomAroundCenter(camera, 1 / ZOOM_STEP), container);
+          break;
+        case '0':
+          resetView(container);
+          break;
+        case 'f':
+        case 'F':
+          fitAll(container);
+          break;
+        case 'ArrowLeft':
+          setCamera(
+            { centerX: camera.centerX - step, centerY: camera.centerY, zoom: camera.zoom },
+            container
+          );
+          break;
+        case 'ArrowRight':
+          setCamera(
+            { centerX: camera.centerX + step, centerY: camera.centerY, zoom: camera.zoom },
+            container
+          );
+          break;
+        case 'ArrowUp':
+          setCamera(
+            { centerX: camera.centerX, centerY: camera.centerY - step, zoom: camera.zoom },
+            container
+          );
+          break;
+        case 'ArrowDown':
+          setCamera(
+            { centerX: camera.centerX, centerY: camera.centerY + step, zoom: camera.zoom },
+            container
+          );
+          break;
+        default:
+          handled = false;
+      }
+      if (handled && event.preventDefault) event.preventDefault();
+    });
+  }
+
+  // framedViewport is the part of the canvas that is actually clear. The camera
+  // controls float over the bottom of the map, so framing content into the full
+  // height would park buildings underneath them — visible, but not clickable,
+  // which is exactly what FR-73 forbids.
+  function framedViewport(canvas) {
+    var viewport = viewportSize(canvas);
+    return {
+      width: viewport.width,
+      height: Math.max(CELL_H, viewport.height - CONTROL_STRIP_HEIGHT),
+      full: viewport
+    };
+  }
+
+  // liftAboveControls shifts a framing camera up by half the reserved strip, so
+  // the content it framed is centred in the clear area rather than in the whole
+  // canvas.
+  function liftAboveControls(cam) {
+    return {
+      centerX: cam.centerX,
+      centerY: cam.centerY + CONTROL_STRIP_HEIGHT / 2 / cam.zoom,
+      zoom: cam.zoom
+    };
+  }
+
+  function fitAll(container) {
+    if (!lastWorldLayout) return;
+    var canvas = container.querySelector('[data-ws-map-viewport]');
+    setCamera(
+      liftAboveControls(fitBounds(lastWorldLayout.bounds, framedViewport(canvas))),
+      container
+    );
+  }
+
+  // Reset View restores the default framing — the content, centred, at 100%.
+  // It deliberately changes nothing else: no building moves, and the snap
+  // preference is untouched (FR-42).
+  function resetView(container) {
+    if (!lastWorldLayout) return;
+    setCamera(
+      liftAboveControls({
+        centerX: (lastWorldLayout.bounds.minX + lastWorldLayout.bounds.maxX) / 2,
+        centerY: (lastWorldLayout.bounds.minY + lastWorldLayout.bounds.maxY) / 2,
+        zoom: DEFAULT_ZOOM
+      }),
+      container
+    );
+  }
+
+  // ---------- moving buildings ----------
+  //
+  // A drag is a state machine, not a click handler. It only becomes a drag once
+  // the pointer has travelled past a threshold, so every existing meaning of a
+  // press — select, open, check for a bulk action — survives untouched
+  // (FR-63, FR-64).
+
+  var dragState = null;
+  // Set for one click after a drag so the click the browser synthesises on
+  // pointerup cannot re-select or open the workspace that was just dropped
+  // (FR-66).
+  var suppressClickFor = null;
+  // The record to put focus back on after the re-render that follows a
+  // committed move (FR-117).
+  var pendingFocusId = '';
+
+  /** The anchor a node is currently committed to, saved or automatic. */
+  function committedAnchor(id) {
+    var saved = layoutState.positions[id];
+    if (saved) return { x: saved.x, y: saved.y };
+    if (!lastWorldLayout) return null;
+    var found = null;
+    lastWorldLayout.nodes.forEach(function (node) {
+      if (node.id === id) found = { x: node.x, y: node.y };
+    });
+    if (found) return found;
+    lastWorldLayout.districts.forEach(function (district) {
+      if (district.id === id) found = { x: district.anchorX, y: district.anchorY };
+    });
+    return found;
+  }
+
+  /**
+   * Resolve where a drop may actually land.
+   *
+   * Two buildings may not be committed to the same anchor (FR-72). When the
+   * requested point is taken, the nearest free anchor is chosen by walking a
+   * deterministic ring of snap-step offsets — nearest first, and in a fixed
+   * order at equal distance, so the same drop always resolves the same way. No
+   * other building is moved to make room (FR-74).
+   */
+  function resolveDropAnchor(id, point) {
+    var taken = Object.create(null);
+    function claim(nodeId, anchor) {
+      if (!anchor || nodeId === id) return;
+      taken[anchorKey(anchor)] = true;
+    }
+    Object.keys(layoutState.positions).forEach(function (nodeId) {
+      claim(nodeId, layoutState.positions[nodeId]);
+    });
+    if (lastWorldLayout) {
+      lastWorldLayout.nodes.forEach(function (node) {
+        claim(node.id, node);
+      });
+    }
+    if (!taken[anchorKey(point)]) return { x: point.x, y: point.y, resolved: false };
+
+    var step = layoutState.snapToGrid ? SNAP_STEP : Math.round(CELL_W / 4);
+    for (var ring = 1; ring <= 12; ring++) {
+      for (var dy = -ring; dy <= ring; dy++) {
+        for (var dx = -ring; dx <= ring; dx++) {
+          if (Math.max(Math.abs(dx), Math.abs(dy)) !== ring) continue;
+          var candidate = { x: point.x + dx * step, y: point.y + dy * step };
+          if (
+            !taken[anchorKey(candidate)] &&
+            isSafeCoordinate(candidate.x) &&
+            isSafeCoordinate(candidate.y)
+          ) {
+            return { x: candidate.x, y: candidate.y, resolved: true };
+          }
+        }
+      }
+    }
+    return { x: point.x, y: point.y, resolved: false };
+  }
+
+  function placeElement(el, point) {
+    if (!el || !el.style) return;
+    el.style.left = point.x + 'px';
+    el.style.top = point.y + 'px';
+  }
+
+  /**
+   * Commit a moved node.
+   *
+   * One drop is at most one request (FR-69), sent only after the gesture ends.
+   * The server's answer — not the browser's optimism — becomes the committed
+   * position (FR-70); if it refuses or never arrives, the building goes back
+   * where it was, keeps focus and selection, and says so with a retry
+   * (FR-71).
+   */
+  function commitMove(container, id, el, point, previous) {
+    var positions = {};
+    positions[id] = { x: point.x, y: point.y };
+    return patchLayout([{ op: 'set_positions', positions: positions }])
+      .then(function (result) {
+        var committed = (result && result.positions && result.positions[id]) || point;
+        placeElement(el, committed);
+        pendingFocusId = id;
+        announce(container, 'Moved to ' + formatCoordinate(committed));
+        settleLayout();
+        return true;
+      })
+      .catch(function () {
+        placeElement(el, previous);
+        if (el && el.classList) el.classList.add('is-unsaved');
+        rememberFailedPlacement(id, point);
+        if (el && el.focus) el.focus();
+        announce(
+          container,
+          'That move could not be saved. The workspace is back at ' +
+            formatCoordinate(previous) +
+            '. Use Retry position to try again.'
+        );
+        return false;
+      });
+  }
+
+  function bindTileDrag(container) {
+    var tiles = container.querySelectorAll('.ws-map-tile[data-ws-id]');
+    Array.prototype.forEach.call(tiles, function (el) {
+      if (!el || typeof el.addEventListener !== 'function') return;
+
+      el.addEventListener('pointerdown', function (event) {
+        if (layoutState.status !== 'ready') return;
+        if (event.button != null && event.button !== 0) return;
+        // The checkbox and modifier-clicks belong to bulk selection, and must
+        // never start a spatial move (FR-76).
+        if (event.metaKey || event.ctrlKey || event.shiftKey) return;
+        if (event.target && event.target.closest && event.target.closest('[data-ws-check]')) return;
+        var id = el.getAttribute('data-ws-id');
+        var origin = committedAnchor(id);
+        if (!id || !origin) return;
+        dragState = {
+          id: id,
+          el: el,
+          pointerId: event.pointerId,
+          startX: event.clientX,
+          startY: event.clientY,
+          origin: origin,
+          candidate: origin,
+          moved: false
+        };
+        if (el.setPointerCapture) el.setPointerCapture(event.pointerId);
+      });
+
+      el.addEventListener('pointermove', function (event) {
+        if (!dragState || dragState.el !== el || event.pointerId !== dragState.pointerId) return;
+        var dx = event.clientX - dragState.startX;
+        var dy = event.clientY - dragState.startY;
+        if (!dragState.moved) {
+          if (Math.abs(dx) < PAN_THRESHOLD && Math.abs(dy) < PAN_THRESHOLD) return;
+          dragState.moved = true;
+          if (el.classList) el.classList.add('is-dragging');
+          announce(container, 'Moving. Release to drop, or press Escape to cancel.');
+        }
+        if (event.preventDefault) event.preventDefault();
+        // Screen movement becomes world movement through the current camera, so
+        // a drag tracks the pointer at any zoom (FR-67).
+        var moved = {
+          x: dragState.origin.x + dx / camera.zoom,
+          y: dragState.origin.y + dy / camera.zoom
+        };
+        dragState.candidate = snapPoint(moved, !!event.altKey);
+        // Only the dragged element is touched: no re-render, no request
+        // (FR-65, FR-69, FR-122).
+        placeElement(el, dragState.candidate);
+        setDragReadout(container, dragState.candidate);
+      });
+
+      function finish(event, cancelled) {
+        if (!dragState || dragState.el !== el) return;
+        if (event && event.pointerId != null && event.pointerId !== dragState.pointerId) return;
+        var state = dragState;
+        dragState = null;
+        if (
+          el.releasePointerCapture &&
+          el.hasPointerCapture &&
+          el.hasPointerCapture(state.pointerId)
+        ) {
+          el.releasePointerCapture(state.pointerId);
+        }
+        if (el.classList) el.classList.remove('is-dragging');
+        setDragReadout(container, null);
+        if (!state.moved) return;
+        // A gesture that became a drag must not also read as a click (FR-66).
+        suppressClickFor = state.id;
+        if (cancelled) {
+          placeElement(el, state.origin);
+          announce(container, 'Move cancelled. The workspace is back where it was.');
+          return;
+        }
+        var target = resolveDropAnchor(state.id, state.candidate);
+        if (target.resolved) {
+          placeElement(el, target);
+          announce(container, 'That spot was taken; moved to the nearest free one.');
+        }
+        commitMove(container, state.id, el, target, state.origin);
+      }
+
+      el.addEventListener('pointerup', function (event) {
+        finish(event, false);
+      });
+      el.addEventListener('pointercancel', function (event) {
+        finish(event, true);
+      });
+      el.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape' && dragState && dragState.el === el) finish(null, true);
+      });
+      // Runs before the selection handler bound in bindTiles, so a drop is
+      // swallowed rather than re-selecting or opening the workspace.
+      el.addEventListener(
+        'click',
+        function (event) {
+          if (suppressClickFor !== el.getAttribute('data-ws-id')) return;
+          suppressClickFor = null;
+          if (event.preventDefault) event.preventDefault();
+          if (event.stopPropagation) event.stopPropagation();
+          if (event.stopImmediatePropagation) event.stopImmediatePropagation();
+        },
+        true
+      );
+    });
+  }
+
+  // setDragReadout shows the live candidate coordinate during a move. It shares
+  // the banner with Build mode but never its words: a user dragging a building
+  // must not be told to "choose where to build" (FR-68).
+  function setDragReadout(container, point, instruction) {
+    var readout = container.querySelector('[data-map-build-coords]');
+    var banner = container.querySelector('[data-map-build-banner]');
+    if (!readout || !banner) return;
+    if (!point) {
+      if (!buildState.active) banner.hidden = true;
+      return;
+    }
+    banner.hidden = false;
+    setBannerMode(container, instruction || MOVE_INSTRUCTION, false);
+    readout.textContent = candidateLabel(point);
+  }
+
+  // setBannerMode swaps the banner's instruction and whether it offers Cancel.
+  // Build mode owns the Cancel button; a drag is cancelled with Escape or by
+  // dropping, so offering a button there would be a third way to do the same
+  // thing.
+  function setBannerMode(container, instruction, showCancel) {
+    var text = container.querySelector('[data-map-build-text]');
+    if (text) text.textContent = instruction;
+    var cancel = container.querySelector('[data-map-build-cancel]');
+    if (cancel) cancel.hidden = !showCancel;
+  }
+
+  // ---------- moving districts ----------
+  //
+  // A cluster move is one world-space delta applied to the group and every
+  // visible descendant, preserving all relative spacing (FR-86). It is a
+  // presentation move: `parent_id` is never in the payload, so no arrangement
+  // of buildings can change who belongs to what (FR-8).
+
+  var clusterDrag = null;
+
+  /** The group's members as currently drawn, with their live anchors. */
+  function clusterMembers(container, groupId) {
+    if (!lastWorldLayout) return [];
+    var members = [];
+    lastWorldLayout.nodes.forEach(function (node) {
+      if (node.groupId !== groupId) return;
+      members.push({
+        id: node.id,
+        el: container.querySelector('.ws-map-tile[data-ws-id="' + node.id + '"]'),
+        origin: committedAnchor(node.id) || { x: node.x, y: node.y }
+      });
+    });
+    return members;
+  }
+
+  /**
+   * Would this delta drop a cluster member on top of a building outside it?
+   *
+   * A cluster collision is refused rather than resolved: nudging one member
+   * would shear the district, and moving the resident building would move
+   * something the user never touched (FR-88).
+   */
+  function clusterCollides(groupId, members, delta) {
+    var inCluster = Object.create(null);
+    inCluster[groupId] = true;
+    members.forEach(function (member) {
+      inCluster[member.id] = true;
+    });
+    var taken = Object.create(null);
+    if (lastWorldLayout) {
+      lastWorldLayout.nodes.forEach(function (node) {
+        if (inCluster[node.id]) return;
+        var anchor = committedAnchor(node.id) || { x: node.x, y: node.y };
+        taken[anchorKey(anchor)] = true;
+      });
+    }
+    return members.some(function (member) {
+      return taken[anchorKey({ x: member.origin.x + delta.x, y: member.origin.y + delta.y })];
+    });
+  }
+
+  function previewCluster(state, delta) {
+    placeElement(state.districtEl, {
+      x: state.districtOrigin.x + delta.x,
+      y: state.districtOrigin.y + delta.y
+    });
+    state.members.forEach(function (member) {
+      placeElement(member.el, { x: member.origin.x + delta.x, y: member.origin.y + delta.y });
+    });
+  }
+
+  function restoreCluster(state) {
+    previewCluster(state, { x: 0, y: 0 });
+  }
+
+  /**
+   * Commit a cluster move.
+   *
+   * The client sends the group and one delta, not a list of coordinates: the
+   * server resolves the district's current members and translates their latest
+   * anchors inside one transaction, so the whole cluster lands or none of it
+   * does (FR-87).
+   */
+  function commitClusterMove(container, state, delta) {
+    return patchLayout([
+      { op: 'translate_group', group_id: state.groupId, delta: { x: delta.x, y: delta.y } }
+    ])
+      .then(function () {
+        announce(container, 'District moved. Every workspace kept its place inside it.');
+        pendingFocusId = '';
+        settleLayout();
+        return true;
+      })
+      .catch(function () {
+        // Every prior anchor comes back together — a district cannot be left
+        // half-moved (FR-87).
+        restoreCluster(state);
+        announce(
+          container,
+          'That district move could not be saved. Everything is back where it was.'
+        );
+        return false;
+      });
+  }
+
+  function bindDistrictDrag(container) {
+    var handles = container.querySelectorAll('[data-group-drag]');
+    Array.prototype.forEach.call(handles, function (handle) {
+      if (!handle || typeof handle.addEventListener !== 'function') return;
+
+      handle.addEventListener('pointerdown', function (event) {
+        if (layoutState.status !== 'ready') return;
+        if (event.button != null && event.button !== 0) return;
+        var groupId = handle.getAttribute('data-group-drag');
+        var origin = committedAnchor(groupId);
+        if (!groupId || !origin) return;
+        clusterDrag = {
+          groupId: groupId,
+          handle: handle,
+          pointerId: event.pointerId,
+          startX: event.clientX,
+          startY: event.clientY,
+          districtEl: container.querySelector('.ws-map-district[data-group-id="' + groupId + '"]'),
+          districtOrigin: origin,
+          members: clusterMembers(container, groupId),
+          delta: { x: 0, y: 0 },
+          moved: false
+        };
+        if (handle.setPointerCapture) handle.setPointerCapture(event.pointerId);
+        if (event.stopPropagation) event.stopPropagation();
+        // Suppress the browser's own drag/selection behaviour so the gesture
+        // moves the district instead of highlighting its label.
+        if (event.preventDefault) event.preventDefault();
+      });
+
+      handle.addEventListener('pointermove', function (event) {
+        if (!clusterDrag || clusterDrag.handle !== handle) return;
+        if (event.pointerId !== clusterDrag.pointerId) return;
+        var dx = event.clientX - clusterDrag.startX;
+        var dy = event.clientY - clusterDrag.startY;
+        if (!clusterDrag.moved) {
+          if (Math.abs(dx) < PAN_THRESHOLD && Math.abs(dy) < PAN_THRESHOLD) return;
+          clusterDrag.moved = true;
+          if (clusterDrag.districtEl && clusterDrag.districtEl.classList) {
+            clusterDrag.districtEl.classList.add('is-dragging');
+          }
+        }
+        if (event.preventDefault) event.preventDefault();
+        var raw = { x: dx / camera.zoom, y: dy / camera.zoom };
+        var snappedTarget = snapPoint(
+          { x: clusterDrag.districtOrigin.x + raw.x, y: clusterDrag.districtOrigin.y + raw.y },
+          !!event.altKey
+        );
+        clusterDrag.delta = {
+          x: snappedTarget.x - clusterDrag.districtOrigin.x,
+          y: snappedTarget.y - clusterDrag.districtOrigin.y
+        };
+        previewCluster(clusterDrag, clusterDrag.delta);
+        setDragReadout(container, snappedTarget);
+      });
+
+      function finish(event, cancelled) {
+        if (!clusterDrag || clusterDrag.handle !== handle) return;
+        if (event && event.pointerId != null && event.pointerId !== clusterDrag.pointerId) return;
+        var state = clusterDrag;
+        clusterDrag = null;
+        if (
+          handle.releasePointerCapture &&
+          handle.hasPointerCapture &&
+          handle.hasPointerCapture(state.pointerId)
+        ) {
+          handle.releasePointerCapture(state.pointerId);
+        }
+        if (state.districtEl && state.districtEl.classList) {
+          state.districtEl.classList.remove('is-dragging');
+        }
+        setDragReadout(container, null);
+        if (!state.moved) return;
+        if (cancelled) {
+          restoreCluster(state);
+          announce(container, 'District move cancelled.');
+          return;
+        }
+        if (clusterCollides(state.groupId, state.members, state.delta)) {
+          restoreCluster(state);
+          announce(
+            container,
+            'That would land a workspace on top of one outside this district. The district is back where it was.'
+          );
+          return;
+        }
+        commitClusterMove(container, state, state.delta);
+      }
+
+      handle.addEventListener('pointerup', function (event) {
+        finish(event, false);
+      });
+      handle.addEventListener('pointercancel', function (event) {
+        finish(event, true);
+      });
+      handle.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape' && clusterDrag && clusterDrag.handle === handle) {
+          finish(null, true);
+        }
+      });
+    });
+  }
+
+  // ---------- keyboard move ----------
+  //
+  // The same commit contract as a drag, reachable without a pointer (FR-77).
+
+  var moveState = null;
+
+  // isDistrictId reports whether the selection is a group district rather than a
+  // building, which decides whether a keyboard move carries one anchor or a
+  // whole cluster (FR-93).
+  function isDistrictId(id) {
+    if (!lastWorldLayout) return false;
+    return lastWorldLayout.districts.some(function (district) {
+      return district.id === id;
+    });
+  }
+
+  function startKeyboardMove(container) {
+    if (layoutState.status !== 'ready') {
+      announce(container, 'Positions cannot be saved right now, so moving is unavailable');
+      return;
+    }
+    var anchor = selectedNodeAnchor();
+    if (!selectedId || !anchor) {
+      announce(container, 'Select a workspace or group first');
+      return;
+    }
+    if (isDistrictId(selectedId)) {
+      // A selected group moves as the same cluster the drag handle moves, with
+      // the same commit-or-cancel contract (FR-93).
+      moveState = {
+        cluster: {
+          groupId: selectedId,
+          districtEl: container.querySelector(
+            '.ws-map-district[data-group-id="' + selectedId + '"]'
+          ),
+          districtOrigin: anchor,
+          members: clusterMembers(container, selectedId)
+        },
+        origin: anchor,
+        candidate: anchor
+      };
+    } else {
+      moveState = {
+        id: selectedId,
+        el: container.querySelector('.ws-map-tile[data-ws-id="' + selectedId + '"]'),
+        origin: anchor,
+        candidate: anchor
+      };
+    }
+    var banner = container.querySelector('[data-map-build-banner]');
+    if (banner) banner.hidden = false;
+    setDragReadout(container, anchor, KEYBOARD_MOVE_INSTRUCTION);
+    announce(
+      container,
+      (moveState.cluster ? 'Moving this district from ' : 'Moving from ') +
+        formatCoordinate(anchor) +
+        '. Arrow keys move, Enter saves, Escape cancels.'
+    );
+  }
+
+  function endKeyboardMove(container, commit) {
+    if (!moveState) return;
+    var state = moveState;
+    moveState = null;
+    setDragReadout(container, null);
+    var banner = container.querySelector('[data-map-build-banner]');
+    if (banner && !buildState.active) banner.hidden = true;
+
+    if (state.cluster) {
+      var delta = {
+        x: state.candidate.x - state.origin.x,
+        y: state.candidate.y - state.origin.y
+      };
+      if (!commit) {
+        restoreCluster(state.cluster);
+        announce(container, 'Move cancelled. The district is back where it was.');
+        return;
+      }
+      if (clusterCollides(state.cluster.groupId, state.cluster.members, delta)) {
+        restoreCluster(state.cluster);
+        announce(
+          container,
+          'That would land a workspace on top of one outside this district. The district is back where it was.'
+        );
+        return;
+      }
+      commitClusterMove(container, state.cluster, delta);
+      return;
+    }
+
+    if (!commit) {
+      placeElement(state.el, state.origin);
+      announce(container, 'Move cancelled. The workspace is back where it was.');
+      return;
+    }
+    var target = resolveDropAnchor(state.id, state.candidate);
+    commitMove(container, state.id, state.el, target, state.origin);
+  }
+
+  function handleMoveKey(container, event) {
+    if (!moveState) return false;
+    var step = layoutState.snapToGrid ? SNAP_STEP : 1;
+    if (event.shiftKey) step *= 10;
+    var candidate = moveState.candidate;
+    var next = null;
+    switch (event.key) {
+      case 'ArrowLeft':
+        next = { x: candidate.x - step, y: candidate.y };
+        break;
+      case 'ArrowRight':
+        next = { x: candidate.x + step, y: candidate.y };
+        break;
+      case 'ArrowUp':
+        next = { x: candidate.x, y: candidate.y - step };
+        break;
+      case 'ArrowDown':
+        next = { x: candidate.x, y: candidate.y + step };
+        break;
+      case 'Enter':
+        endKeyboardMove(container, true);
+        return true;
+      case 'Escape':
+        endKeyboardMove(container, false);
+        return true;
+      default:
+        return false;
+    }
+    moveState.candidate = next;
+    if (moveState.cluster) {
+      previewCluster(moveState.cluster, {
+        x: next.x - moveState.origin.x,
+        y: next.y - moveState.origin.y
+      });
+    } else {
+      placeElement(moveState.el, next);
+    }
+    setDragReadout(container, next, KEYBOARD_MOVE_INSTRUCTION);
+    announce(container, 'Candidate ' + candidateLabel(next));
+    return true;
+  }
+
+  // ---------- reset and undo ----------
+  //
+  // Reset Layout clears the user's arrangement, not their workspaces. It is
+  // separate from Reset View in name, in placement, and in what it touches
+  // (FR-109, FR-111).
+
+  // The exact position set as it stood before the last reset, held in memory
+  // for the session. A permanent history table would be a lot of machinery for
+  // one undo of one action (FR-112).
+  var undoSnapshot = null;
+
+  function resetLayout(container) {
+    if (layoutState.status !== 'ready') {
+      announce(container, 'Positions cannot be saved right now, so Reset layout is unavailable');
+      return;
+    }
+    var count = Object.keys(layoutState.positions).length;
+    var message =
+      'Reset the map layout?\n\n' +
+      'Every workspace and district goes back to an automatic position. ' +
+      'Nothing is deleted, renamed, regrouped or reordered — only where things sit on your map changes. ' +
+      'Your Snap to Grid setting is kept, and you can undo this during this session.' +
+      (count
+        ? '\n\n' + count + ' saved position' + (count === 1 ? '' : 's') + ' will be cleared.'
+        : '');
+    if (
+      typeof window !== 'undefined' &&
+      typeof window.confirm === 'function' &&
+      !window.confirm(message)
+    ) {
+      return;
+    }
+
+    // Snapshot before asking the server, so Undo restores exactly what was
+    // there rather than whatever survived the reset.
+    var snapshot = {};
+    Object.keys(layoutState.positions).forEach(function (id) {
+      snapshot[id] = { x: layoutState.positions[id].x, y: layoutState.positions[id].y };
+    });
+
+    deleteLayout()
+      .then(function () {
+        undoSnapshot = snapshot;
+        layoutState.positions = Object.create(null);
+        announce(
+          container,
+          'Layout reset. Every workspace is at an automatic position; nothing else changed. Undo reset is available.'
+        );
+        settleLayout();
+        fitAll(lastMount ? lastMount.container : container);
+      })
+      .catch(function () {
+        // A failed reset changes nothing, and says so (FR-112).
+        announce(container, 'The layout could not be reset. Everything is still where it was.');
+      });
+  }
+
+  function undoReset(container) {
+    if (!undoSnapshot) return;
+    var snapshot = undoSnapshot;
+    patchLayout([{ op: 'restore_positions', positions: snapshot }])
+      .then(function () {
+        undoSnapshot = null;
+        Object.keys(snapshot).forEach(function (id) {
+          layoutState.positions[id] = snapshot[id];
+        });
+        announce(container, 'Reset undone. Every workspace is back where it was.');
+        settleLayout();
+      })
+      .catch(function () {
+        // The post-reset state is still valid and still saved; only the undo
+        // failed, so the offer stays (FR-112).
+        announce(
+          container,
+          'That could not be undone. The reset layout is unchanged — try Undo reset again.'
+        );
+      });
+  }
+
+  function deleteLayout() {
+    if (typeof fetch !== 'function') return Promise.reject(new Error('unavailable'));
+    return fetch(LAYOUT_ENDPOINT, {
+      method: 'DELETE',
+      headers: { Accept: 'application/json' }
+    }).then(function (response) {
+      if (!response || !response.ok) throw new Error('workspace map layout reset failed');
+      return response.json();
+    });
+  }
+
+  function bindResetLayout(container) {
+    var reset = container.querySelector('[data-map-reset-layout]');
+    if (reset && reset.addEventListener) {
+      reset.addEventListener('click', function () {
+        resetLayout(container);
+      });
+    }
+    var undo = container.querySelector('[data-map-undo-reset]');
+    if (undo) {
+      undo.hidden = !undoSnapshot;
+      if (undo.addEventListener) {
+        undo.addEventListener('click', function () {
+          undoReset(container);
+        });
+      }
+    }
+    var help = container.querySelector('[data-map-help]');
+    var panel = container.querySelector('[data-map-help-panel]');
+    if (help && panel && help.addEventListener) {
+      help.addEventListener('click', function () {
+        panel.hidden = !panel.hidden;
+        if (help.setAttribute) help.setAttribute('aria-expanded', panel.hidden ? 'false' : 'true');
+      });
+    }
+  }
+
+  // ---------- build mode ----------
+  //
+  // An explicit, single-use placement state. Ordinary empty-space clicks keep
+  // their ordinary meaning; only inside this mode does the next selection choose
+  // a build site, and the mode ends as soon as it has one (FR-48).
+
+  var buildState = { active: false, candidate: null, pending: null, container: null };
+
+  function snapValue(value) {
+    return Math.round(value / SNAP_STEP) * SNAP_STEP;
+  }
+
+  // snapPoint applies the one shared grid constant, aligned with the visible
+  // background grid at 100% zoom (FR-58). `bypass` is the Option/Alt override:
+  // it changes this one placement and never the persisted preference (FR-59).
+  function snapPoint(point, bypass) {
+    if (!layoutState.snapToGrid || bypass) return { x: point.x, y: point.y };
+    return { x: snapValue(point.x), y: snapValue(point.y) };
+  }
+
+  function formatCoordinate(point) {
+    return Math.round(point.x) + ', ' + Math.round(point.y);
+  }
+
+  function candidateLabel(point) {
+    return formatCoordinate(point) + (layoutState.snapToGrid ? ' · snapped' : ' · free');
+  }
+
+  function setBuildCandidate(container, point) {
+    buildState.candidate = point;
+    var readout = container.querySelector('[data-map-build-coords]');
+    if (readout) readout.textContent = point ? candidateLabel(point) : '';
+    var marker = container.querySelector('[data-map-build-marker]');
+    if (marker && marker.style) {
+      if (point) {
+        marker.hidden = false;
+        marker.style.left = point.x + 'px';
+        marker.style.top = point.y + 'px';
+      } else {
+        marker.hidden = true;
+      }
+    }
+  }
+
+  function startBuild(container) {
+    if (layoutState.status !== 'ready') {
+      announce(
+        container,
+        'Positions cannot be saved right now, so building at a point is unavailable'
+      );
+      return;
+    }
+    buildState.active = true;
+    buildState.container = container;
+    var canvas = container.querySelector('[data-ws-map-viewport]');
+    if (canvas && canvas.classList) canvas.classList.add('is-building');
+    var banner = container.querySelector('[data-map-build-banner]');
+    if (banner) banner.hidden = false;
+    setBannerMode(container, BUILD_INSTRUCTION, true);
+    // Keyboard placement starts at the middle of what the user is looking at,
+    // which is the only starting point that needs no pointer (FR-60).
+    var viewport = viewportSize(canvas);
+    setBuildCandidate(
+      container,
+      snapPoint(screenToWorld({ x: viewport.width / 2, y: viewport.height / 2 }, camera, viewport))
+    );
+    if (canvas && canvas.focus) canvas.focus();
+    announce(container, 'Build mode. Choose a spot on the map, then press Enter. Escape cancels.');
+  }
+
+  // exitBuildMode leaves placement mode. It deliberately does NOT clear the
+  // pending coordinate: choosing a site ends the mode but the coordinate has to
+  // survive until the create flow either uses it or is abandoned.
+  function exitBuildMode(container) {
+    var host = container || buildState.container;
+    buildState.active = false;
+    buildState.candidate = null;
+    if (!host || typeof host.querySelector !== 'function') return;
+    var canvas = host.querySelector('[data-ws-map-viewport]');
+    if (canvas && canvas.classList) canvas.classList.remove('is-building');
+    var banner = host.querySelector('[data-map-build-banner]');
+    if (banner) banner.hidden = true;
+    setBuildCandidate(host, null);
+  }
+
+  // cancelBuild is the abandonment path: leave the mode AND forget the site, so
+  // nothing is left pointing at a workspace that will never exist (FR-54).
+  function cancelBuild(container) {
+    buildState.pending = null;
+    exitBuildMode(container);
+  }
+
+  /**
+   * Commit to a site and hand off to the existing Create Workspace flow.
+   *
+   * The coordinate is held as `pending` rather than saved: nothing is written
+   * for a workspace that does not exist yet, so cancelling the modal leaves no
+   * stray position behind (FR-54). The modal itself is Ori's existing one —
+   * there is deliberately no second creation form (FR-51).
+   */
+  function chooseBuildSite(container, point) {
+    if (!buildState.active || !point) return;
+    buildState.pending = { x: point.x, y: point.y };
+    exitBuildMode(container);
+    announce(
+      container,
+      'Building at ' + formatCoordinate(point) + '. Complete the workspace details.'
+    );
+    var manager = typeof window !== 'undefined' ? window.sessionManager : null;
+    if (manager && typeof manager.showAddWorkspaceModal === 'function') {
+      manager.showAddWorkspaceModal({ mapOrigin: true, entryPoint: 'workspace_map_build' });
+      return;
+    }
+    // No modal available (an older page): keep the map usable rather than
+    // stranding the user in a mode with nowhere to go.
+    buildState.pending = null;
+  }
+
+  /**
+   * Save the coordinate the user chose for the workspace they just created.
+   *
+   * Creation and placement are separate failure domains on purpose (FR-56). By
+   * the time this runs the workspace exists; if its coordinate cannot be saved,
+   * the workspace stays, appears at its deterministic fallback, and the user is
+   * told plainly and offered a retry — the client never deletes a real
+   * workspace to tidy up a layout failure.
+   */
+  function completeBuild(workspaceId) {
+    var point = buildState.pending;
+    var container = buildState.container;
+    buildState.pending = null;
+    if (!workspaceId) return Promise.resolve(false);
+    if (!point) return Promise.resolve(false);
+    // Two buildings may not be committed to the same anchor, and a snapped
+    // build click lands on the grid exactly like a snapped drop does — so
+    // placement resolves collisions through the same rule (FR-72).
+    var target = resolveDropAnchor(workspaceId, point);
+    point = { x: target.x, y: target.y };
+    var positions = {};
+    positions[workspaceId] = { x: point.x, y: point.y };
+    return patchLayout([{ op: 'set_positions', positions: positions }])
+      .then(function () {
+        selectedId = workspaceId;
+        announce(container, 'Workspace built at ' + formatCoordinate(point));
+        settleLayout();
+        return true;
+      })
+      .catch(function () {
+        rememberFailedPlacement(workspaceId, point);
+        announce(
+          container,
+          'The workspace was created, but its position could not be saved. It is shown at a default spot; use Retry position to try again.'
+        );
+        settleLayout();
+        return false;
+      });
+  }
+
+  // Failed initial placements are remembered so the honest retry offered to the
+  // user saves the coordinate they actually chose, not a new guess (FR-56).
+  var failedPlacements = Object.create(null);
+
+  function rememberFailedPlacement(workspaceId, point) {
+    failedPlacements[workspaceId] = { x: point.x, y: point.y };
+  }
+
+  function retryFailedPlacement(workspaceId) {
+    var point = failedPlacements[workspaceId];
+    if (!point) return Promise.resolve(false);
+    var positions = {};
+    positions[workspaceId] = point;
+    return patchLayout([{ op: 'set_positions', positions: positions }])
+      .then(function () {
+        delete failedPlacements[workspaceId];
+        settleLayout();
+        return true;
+      })
+      .catch(function () {
+        return false;
+      });
+  }
+
+  function toggleSnap(container) {
+    var next = !layoutState.snapToGrid;
+    layoutState.snapToGrid = next;
+    updateSnapControl(container);
+    if (buildState.active && buildState.candidate) {
+      setBuildCandidate(container, snapPoint(buildState.candidate));
+    }
+    announce(container, next ? 'Snap to grid on' : 'Snap to grid off');
+    // The preference is the user's, so it persists (FR-57). A failed save
+    // leaves the toggle where they put it for this session rather than
+    // silently flipping back under them.
+    patchLayout([{ op: 'set_preferences', snap_to_grid: next }]).catch(function () {
+      announce(container, 'Snap preference could not be saved for next time');
+    });
+  }
+
+  function updateSnapControl(container) {
+    var toggle = container.querySelector('[data-map-snap]');
+    if (!toggle) return;
+    if (toggle.setAttribute)
+      toggle.setAttribute('aria-pressed', layoutState.snapToGrid ? 'true' : 'false');
+    toggle.textContent = 'Snap to grid: ' + (layoutState.snapToGrid ? 'on' : 'off');
+  }
+
+  // restoreBuildMode reinstates an in-progress placement after a re-render, so a
+  // realtime workspace refresh cannot silently drop the user out of build mode
+  // (FR-106).
+  function restoreBuildMode(container) {
+    buildState.container = container;
+    var canvas = container.querySelector('[data-ws-map-viewport]');
+    if (canvas && canvas.classList) canvas.classList.add('is-building');
+    var banner = container.querySelector('[data-map-build-banner]');
+    if (banner) banner.hidden = false;
+    setBannerMode(container, BUILD_INSTRUCTION, true);
+    setBuildCandidate(container, buildState.candidate);
+  }
+
+  function bindBuildMode(container) {
+    var canvas = container.querySelector('[data-ws-map-viewport]');
+
+    var build = container.querySelector('[data-map-build]');
+    if (build && build.addEventListener) {
+      build.addEventListener('click', function () {
+        startBuild(container);
+      });
+    }
+    var snap = container.querySelector('[data-map-snap]');
+    if (snap && snap.addEventListener) {
+      snap.addEventListener('click', function () {
+        toggleSnap(container);
+      });
+    }
+    var cancel = container.querySelector('[data-map-build-cancel]');
+    if (cancel && cancel.addEventListener) {
+      cancel.addEventListener('click', function () {
+        cancelBuild(container);
+        announce(container, 'Build cancelled. Nothing was created.');
+      });
+    }
+    if (!canvas || typeof canvas.addEventListener !== 'function') return;
+
+    canvas.addEventListener('keydown', function (event) {
+      if (!buildState.active) return;
+      var step = layoutState.snapToGrid ? SNAP_STEP : 1;
+      if (event.shiftKey) step *= 10;
+      var candidate = buildState.candidate || { x: 0, y: 0 };
+      var moved = null;
+      switch (event.key) {
+        case 'ArrowLeft':
+          moved = { x: candidate.x - step, y: candidate.y };
+          break;
+        case 'ArrowRight':
+          moved = { x: candidate.x + step, y: candidate.y };
+          break;
+        case 'ArrowUp':
+          moved = { x: candidate.x, y: candidate.y - step };
+          break;
+        case 'ArrowDown':
+          moved = { x: candidate.x, y: candidate.y + step };
+          break;
+        case 'Enter':
+          if (event.preventDefault) event.preventDefault();
+          if (event.stopPropagation) event.stopPropagation();
+          chooseBuildSite(container, buildState.candidate);
+          return;
+        case 'Escape':
+          if (event.preventDefault) event.preventDefault();
+          cancelBuild(container);
+          announce(container, 'Build cancelled. Nothing was created.');
+          return;
+        default:
+          return;
+      }
+      if (event.preventDefault) event.preventDefault();
+      if (event.stopPropagation) event.stopPropagation();
+      setBuildCandidate(container, moved);
+      announce(container, 'Candidate ' + candidateLabel(moved));
+    });
+  }
+
   function bindHQSite(container, options) {
     var site = container.querySelector('[data-hq-site]');
     if (!site) return;
@@ -1533,6 +3711,11 @@
    */
   function mount(container, state) {
     if (!container) return;
+    // Start the layout load before anything is drawn so the first settled paint
+    // shows saved coordinates rather than fallback placement that then jumps
+    // (FR-16). Whichever surface mounts first pays for the request; the other
+    // reuses the same module-level result (FR-4).
+    ensureLayoutLoaded();
     // Read the cockpit mode flags before any HTML is built — the exported
     // builders below consult them.
     selectOnlyMode = !!(state && state.selectOnly);
@@ -1576,36 +3759,57 @@
       if (!findWs(workspaces, id)) delete multiSelected[id];
     });
 
-    var maxCols = measureMaxCols(container);
+    var viewport = measureViewport(container);
     lastMount = { container: container, state: state };
-    lastMaxCols = maxCols;
 
     container.innerHTML = shellHTML(
       computeStats(workspaces),
       workspaces,
       selectedId,
-      maxCols,
+      viewport,
       state
     );
     bindCreate(container);
     bindTiles(container, workspaces, state);
     bindHQSite(container, state);
     bindOverviewActions(container, state);
+    // The camera survives every re-mount: a workspace refresh, a filter, or a
+    // Map/Tree switch reconciles into the world the user is already looking at
+    // rather than snapping them back to a default view (FR-106).
+    ensureCamera(container);
+    applyCamera(container);
+    bindViewportPan(container);
+    bindViewportWheel(container);
+    bindCameraControls(container);
+    bindBuildMode(container);
+    bindTileDrag(container);
+    bindDistrictDrag(container);
+    bindResetLayout(container);
+    // A re-render (a refresh landing mid-placement) rebuilt the banner and the
+    // marker, so restore what the user was in the middle of.
+    if (buildState.active) restoreBuildMode(container);
+    // Focus returns to the record it was on before a committed move or a
+    // refresh re-rendered the map (FR-117).
+    if (pendingFocusId) {
+      var refocus = container.querySelector('.ws-map-tile[data-ws-id="' + pendingFocusId + '"]');
+      pendingFocusId = '';
+      if (refocus && refocus.focus) refocus.focus();
+    }
     // The first paint has a selection too, so its setup state is read here as
     // well as on every later selection change.
     ensureSetupStatus(container, findWs(workspaces, selectedId));
     bindSelBar(container);
-
-    if (!resizeBound && typeof window.addEventListener === 'function') {
-      window.addEventListener('resize', handleResize);
-      resizeBound = true;
-    }
+    // No resize listener: world coordinates are viewport-independent, so a
+    // resize changes only how much of the world is visible — never where a
+    // building is (FR-13, FR-46).
   }
 
   /** Tear down the map view (called when switching away). */
   function unmount(container) {
     if (!container) return;
     container.innerHTML = '';
+    // Clearing lastMount is what makes a layout response still in flight a
+    // no-op when it lands: settleLayout has nothing to repaint.
     lastMount = null;
     multiSelected = Object.create(null);
   }
@@ -1636,16 +3840,70 @@
       applySelection(container, workspaces || [], id || '', options);
     },
     computeLayout: computeMapLayout,
+    // The coordinate engine: saved anchors, deterministic fallback placement,
+    // elastic districts, content bounds, and world sizing, all pure so they can
+    // be asserted without a browser (FR-123).
+    computeWorldLayout: computeWorldLayout,
+    // Pure camera math (FR-123). Exported so pointer-centred zoom, framing, and
+    // clamping can be asserted exactly rather than eyeballed.
+    camera: {
+      clampZoom: clampZoom,
+      screenToWorld: screenToWorld,
+      worldToScreen: worldToScreen,
+      zoomAroundPoint: zoomAroundPoint,
+      zoomAroundCenter: zoomAroundCenter,
+      fitBounds: fitBounds,
+      centerOn: centerOn,
+      clampCamera: clampCamera,
+      limits: { min: MIN_ZOOM, max: MAX_ZOOM, step: ZOOM_STEP }
+    },
+    getCamera: function () {
+      return { centerX: camera.centerX, centerY: camera.centerY, zoom: camera.zoom };
+    },
+    // Build mode's seam with the existing Create Workspace flow. sessions.js
+    // calls completeBuild after a successful create and cancelBuild when the
+    // modal closes without one, so the pending coordinate is consumed exactly
+    // once and never for a workspace that does not exist (FR-53, FR-54).
+    completeBuild: completeBuild,
+    cancelBuild: function () {
+      cancelBuild();
+    },
+    hasPendingBuild: function () {
+      return !!buildState.pending;
+    },
+    retryPlacement: retryFailedPlacement,
+    snapPoint: snapPoint,
+    snapStep: SNAP_STEP,
+    hasUndoableReset: function () {
+      return !!undoSnapshot;
+    },
     computeStats: computeStats,
-    computeMaxCols: computeMaxCols,
     tileHTML: tileHTML,
     overviewBodyHTML: overviewBodyHTML,
     selBarHTML: selBarHTML,
     hqSiteView: hqSiteView,
     hqSiteHTML: hqSiteHTML,
     hqOverviewHTML: hqOverviewHTML,
-    nextFreeMapCell: nextFreeMapCell,
     setHQStatus: setHQStatus,
+    // The one reconciled layout state both surfaces read. Exposed so Home and
+    // the /workspaces launcher can reflect "positions cannot be saved right
+    // now" without each keeping its own copy (FR-4, FR-105).
+    getLayoutState: function () {
+      return {
+        status: layoutState.status,
+        revision: layoutState.revision,
+        snapToGrid: layoutState.snapToGrid,
+        readOnly: layoutState.status !== 'ready',
+        positions: Object.assign(Object.create(null), layoutState.positions),
+        viewport: layoutState.viewport ? Object.assign({}, layoutState.viewport) : null
+      };
+    },
+    // Test-only seam for the persisted layout, so coordinate behavior can be
+    // asserted without a network round-trip.
+    _setLayoutForTest: function (payload, status) {
+      applyLayoutPayload(payload || {});
+      layoutState.status = status || 'ready';
+    },
     // Test-only seam for the lazily-read setup status, so the overview's setup
     // row can be asserted without a network round-trip.
     _setSetupStatusForTest: function (workspaceId, status) {

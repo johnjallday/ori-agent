@@ -10,7 +10,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 37
+const schemaVersion = 38
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -139,6 +139,8 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 		return db.migration036WorkspaceMission(ctx)
 	case 37:
 		return db.migration037RunToolboxSnapshot(ctx)
+	case 38:
+		return db.migration038WorkspaceMapLayouts(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
@@ -1350,6 +1352,71 @@ func (db *DB) migration037RunToolboxSnapshot(ctx context.Context) error {
 			"ALTER TABLE workspace_runs ADD COLUMN "+column+" TEXT",
 		); err != nil && !isDuplicateColumnError(err) {
 			return fmt.Errorf("failed to add workspace run %s column: %w", column, err)
+		}
+	}
+	return nil
+}
+
+// migration038WorkspaceMapLayouts creates the coordinate-based Workspace Map
+// storage: one versioned layout record per user, plus one normalized position
+// row per (user, workspace) anchor (#292 FR-3, FR-14, FR-15).
+//
+// Two tables rather than one JSON blob, for three reasons the feature depends
+// on. A single dropped building updates one row instead of rewriting the whole
+// map, so a stale browser tab cannot erase coordinates for workspaces it never
+// touched (FR-101). A corrupt value degrades to one unusable row while every
+// valid sibling still reads (FR-22). And the workspace foreign key can do the
+// lifecycle work directly: a trashed workspace keeps its SQLite row, so its
+// anchor survives for restore (FR-26, FR-27), while permanently deleting a
+// workspace cascades away exactly its own position and nothing else (FR-28).
+//
+// The layout row is deliberately separate from the position rows so a reset can
+// clear every anchor while preserving the user's snap preference (FR-110), and
+// so a user who has only panned the camera still has a record to write to.
+//
+// Viewport columns are nullable REALs, not a JSON object. "No camera saved yet"
+// is a real state that must open on Fit All rather than on a fabricated
+// (0, 0, 1x) camera (FR-45), and a single corrupt axis can then be dropped
+// without discarding the zoom beside it.
+//
+// Nothing here touches workspaces.layout. That column is the per-workspace
+// CanvasLayout — tasks, agents, attachments, folders, stations — and stays
+// under /api/workspaces/{id}/layout (FR-5, FR-104).
+//
+// user_id carries no foreign key on purpose: a layout must be writable for the
+// current user whether or not a profile row was ever created for them, and V1
+// never deletes users, so there is no cascade to gain.
+func (db *DB) migration038WorkspaceMapLayouts(ctx context.Context) error {
+	statements := []string{
+		`CREATE TABLE IF NOT EXISTS workspace_map_layouts (
+			user_id TEXT PRIMARY KEY,
+			schema_version INTEGER NOT NULL DEFAULT 1,
+			revision INTEGER NOT NULL DEFAULT 0,
+			viewport_center_x REAL,
+			viewport_center_y REAL,
+			viewport_zoom REAL,
+			snap_to_grid INTEGER NOT NULL DEFAULT 1,
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS workspace_map_positions (
+			user_id TEXT NOT NULL,
+			workspace_id TEXT NOT NULL,
+			x REAL NOT NULL,
+			y REAL NOT NULL,
+			updated_at DATETIME NOT NULL,
+			PRIMARY KEY (user_id, workspace_id),
+			FOREIGN KEY (user_id) REFERENCES workspace_map_layouts(user_id) ON DELETE CASCADE,
+			FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+		)`,
+		// Indexed for the workspace-side cascade and for the permanent-deletion
+		// cleanup path, which look a position up by workspace rather than by user.
+		`CREATE INDEX IF NOT EXISTS idx_workspace_map_positions_workspace
+			ON workspace_map_positions(workspace_id)`,
+	}
+	for _, stmt := range statements {
+		if _, err := db.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("failed to create workspace map layout schema: %w", err)
 		}
 	}
 	return nil

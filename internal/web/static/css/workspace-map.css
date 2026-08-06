@@ -246,18 +246,9 @@
   );
   box-shadow: var(--ws-glow);
 }
-.ws-map-theatre::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  opacity: 0.55;
-  background-image:
-    linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.038) 1px, transparent 1px);
-  background-size: 38px 38px;
-  -webkit-mask-image: radial-gradient(120% 100% at 50% 40%, #000 30%, transparent 88%);
-  mask-image: radial-gradient(120% 100% at 50% 40%, #000 30%, transparent 88%);
-}
+/* The grid used to live here, fixed to the panel. It now lives on the canvas
+   and moves with the camera (see .ws-map-canvas::before), so it can no longer
+   contradict where the buildings actually are. */
 .ws-map-theatre-tag {
   position: absolute;
   top: 14px;
@@ -301,16 +292,84 @@
 .ws-map-compass b {
   color: var(--ws-faction);
 }
-/* canvas holds absolutely-positioned tiles + districts */
+/* The canvas is the map's viewport onto the world; .ws-map-world inside it is
+   the layer every building is positioned in. Buildings carry WORLD coordinates
+   (logical units), and the layer carries the offset between world space and the
+   screen — so a window resize changes what is visible and never where anything
+   is (#292 FR-2, FR-13, FR-31). */
 .ws-map-canvas {
   position: relative;
   z-index: 5;
   width: 100%;
+  /* A definite height is what makes this a viewport rather than a page that
+     grows with its content: the world is panned inside it, not scrolled. */
+  height: 100%;
+  min-height: 466px;
+  overflow: hidden;
+  overscroll-behavior: contain;
+  /* The map consumes its own drag and pinch gestures; without this the browser
+     scrolls the page out from under a pan on touch (FR-46). */
+  touch-action: none;
+  /* Every gesture here is a drag of something. Without this the browser starts
+     selecting label text instead, which both looks broken and swallows the
+     drag. */
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: grab;
+}
+.ws-map-canvas:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: -2px;
+}
+.ws-map-canvas.is-panning {
+  cursor: grabbing;
+}
+/* The background grid is welded to world space: the camera's own translation
+   and scale are applied to it, so lines stay under the buildings they were
+   drawn beneath instead of sliding around during a pan (#292 FR-31). */
+.ws-map-canvas::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.55;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.038) 1px, transparent 1px);
+  background-size: var(--ws-map-grid, 38px) var(--ws-map-grid, 38px);
+  background-position: var(--ws-map-grid-x, 0) var(--ws-map-grid-y, 0);
+  -webkit-mask-image: radial-gradient(120% 100% at 50% 40%, #000 30%, transparent 88%);
+  mask-image: radial-gradient(120% 100% at 50% 40%, #000 30%, transparent 88%);
+}
+/* One transform on this layer moves every building at once. Buildings inside
+   carry raw world coordinates, so panning and zooming never rewrite a single
+   node position (FR-13, FR-122). */
+.ws-map-world {
+  position: absolute;
+  inset: 0;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+/* While the saved layout is still loading, the world is held back rather than
+   painted at fallback positions and then jumped to saved ones (FR-16). */
+.ws-map-canvas.is-settling .ws-map-world {
+  opacity: 0;
+}
+.ws-map-canvas .ws-map-world {
+  transition: opacity 0.12s ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ws-map-canvas .ws-map-world {
+    transition: none;
+  }
 }
 .ws-map-canvas--empty {
   display: grid;
   place-items: center;
   min-height: 360px;
+  /* Nothing to pan yet, so the grab cue would be a lie. */
+  cursor: default;
 }
 .ws-map-empty-cluster {
   text-align: center;
@@ -321,6 +380,187 @@
   font-size: 12px;
   letter-spacing: 1px;
   color: var(--ws-ink-faint);
+}
+
+/* Camera controls. Every pointer navigation gesture also has a button here, so
+   a wheel or a pinch is a shortcut rather than a requirement (#292 FR-37,
+   FR-115). Sized for touch at any zoom (FR-118). */
+.ws-map-controls,
+.ws-map-actions {
+  position: absolute;
+  z-index: 7;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px;
+  border: 1px solid var(--ws-line-bright);
+  background: var(--ws-bg-2);
+}
+.ws-map-controls {
+  left: 16px;
+  bottom: 14px;
+}
+/* Placement actions sit opposite the camera controls so neither cluster grows
+   into a bar that covers the buildings it exists to help with. */
+.ws-map-actions {
+  right: 16px;
+  bottom: 14px;
+}
+.ws-map-ctl {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 10px;
+  border: 1px solid var(--ws-line-bright);
+  background: transparent;
+  color: var(--ws-ink);
+  cursor: pointer;
+  font-family: var(--ws-font-mono);
+  font-size: 12px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.ws-map-ctl--wide {
+  min-width: 0;
+}
+.ws-map-ctl:hover:not(:disabled) {
+  border-color: var(--ws-faction);
+  color: var(--ws-faction);
+}
+.ws-map-ctl:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 2px;
+}
+.ws-map-ctl:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.ws-map-zoom {
+  min-width: 48px;
+  text-align: center;
+  font-family: var(--ws-font-mono);
+  font-size: 11px;
+  color: var(--ws-ink-faint);
+}
+/* Build mode. The banner names the mode, shows the candidate coordinate and
+   whether snapping applies, and carries its own way out — a mode the user
+   cannot see is one they will enter by accident (#292 FR-48 – FR-50). */
+.ws-map-build {
+  position: absolute;
+  z-index: 8;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: calc(100% - 32px);
+  padding: 8px 12px;
+  border: 1px solid var(--ws-faction);
+  background: var(--ws-bg-2);
+  color: var(--ws-ink);
+  font-size: 12px;
+}
+.ws-map-build[hidden] {
+  display: none;
+}
+.ws-map-build-dot {
+  color: var(--ws-faction);
+}
+.ws-map-build-coords {
+  font-family: var(--ws-font-mono);
+  font-size: 11px;
+  color: var(--ws-faction);
+  white-space: nowrap;
+}
+/* Build mode gets its own cursor as well as the banner: the state is carried by
+   shape and text, not by colour alone (FR-120). */
+.ws-map-canvas.is-building {
+  cursor: crosshair;
+}
+/* The candidate site, drawn in world space so it tracks the coordinate through
+   pans and zooms. */
+.ws-map-build-site {
+  position: absolute;
+  z-index: 6;
+  width: 150px;
+  height: 118px;
+  margin: 0;
+  pointer-events: none;
+  border: 2px dashed var(--ws-faction);
+  background: rgba(123, 108, 240, 0.08);
+}
+.ws-map-build-site[hidden] {
+  display: none;
+}
+
+/* The honest read-only notice: the map is navigable, but nothing can be saved
+   (#292 FR-105). Stated in words, not implied by a greyed-out button. */
+.ws-map-notice {
+  position: absolute;
+  z-index: 8;
+  top: 12px;
+  left: 16px;
+  right: 16px;
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--ws-line-bright);
+  background: var(--ws-bg-2);
+  color: var(--ws-ink-faint);
+  font-size: 12px;
+}
+
+/* Map help (FR-121). One line per gesture, opened from the ? control. */
+.ws-map-help {
+  position: absolute;
+  z-index: 9;
+  right: 16px;
+  bottom: 96px;
+  width: min(360px, calc(100% - 32px));
+  max-height: 60%;
+  overflow: auto;
+  padding: 12px 14px;
+  border: 1px solid var(--ws-line-bright);
+  background: var(--ws-bg-2);
+  color: var(--ws-ink);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.ws-map-help[hidden] {
+  display: none;
+}
+.ws-map-help h4 {
+  margin: 0 0 8px;
+  font-family: var(--ws-font-mono);
+  font-size: 11px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--ws-faction);
+}
+.ws-map-help ul {
+  margin: 0;
+  padding-left: 16px;
+}
+.ws-map-help li {
+  margin-bottom: 5px;
+}
+.ws-map-help-note {
+  margin: 8px 0 0;
+  color: var(--ws-ink-faint);
+}
+
+/* The shared announcement region. Visually hidden, never focus-stealing
+   (FR-116). */
+.ws-map-live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
 }
 
 /* district (group) zone */
@@ -352,6 +592,39 @@
   outline: 2px solid var(--ws-keeper);
   outline-offset: 2px;
 }
+/* The cluster drag handle. Separate from the label so selecting a group and
+   moving everything in it are unmistakably different gestures, and sized for a
+   finger at any zoom (#292 FR-85, FR-118). */
+.ws-map-district-handle {
+  position: absolute;
+  top: -11px;
+  right: 10px;
+  min-width: 44px;
+  min-height: 44px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(232, 134, 77, 0.35);
+  background: var(--ws-bg-2);
+  color: var(--ws-keeper);
+  cursor: grab;
+  touch-action: none;
+  font-size: 14px;
+  line-height: 1;
+}
+.ws-map-district-handle:hover {
+  background: rgba(232, 134, 77, 0.12);
+}
+.ws-map-district-handle:focus-visible {
+  outline: 2px solid var(--ws-keeper);
+  outline-offset: 2px;
+}
+.ws-map-district.is-dragging {
+  border-style: solid;
+  border-color: var(--ws-keeper);
+}
+.ws-map-district.is-dragging .ws-map-district-handle {
+  cursor: grabbing;
+}
 
 /* building tile */
 .ws-map-tile {
@@ -361,7 +634,10 @@
   padding: 0;
   border: 0;
   background: none;
-  cursor: pointer;
+  /* Buildings are grabbable; empty world space is pannable. Two different cues
+     for two different kinds of movement (#292 design §6). */
+  cursor: grab;
+  touch-action: none;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -371,6 +647,28 @@
 }
 .ws-map-tile:hover {
   transform: translateY(-4px);
+}
+/* Drag and unsaved states carry a shape and an outline, never colour alone
+   (FR-120). */
+.ws-map-tile.is-dragging {
+  z-index: 9;
+  cursor: grabbing;
+  transform: translateY(-6px);
+  outline: 2px dashed var(--ws-faction);
+  outline-offset: 4px;
+  transition: none;
+}
+.ws-map-tile.is-unsaved {
+  outline: 2px dotted var(--ws-danger, #d9534f);
+  outline-offset: 4px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ws-map-tile,
+  .ws-map-tile:hover,
+  .ws-map-tile.is-dragging {
+    transition: none;
+    transform: none;
+  }
 }
 .ws-map-tile:focus-visible {
   outline: 2px solid var(--ws-faction);
@@ -1396,7 +1694,7 @@
   background: var(--ws-theatre-bg);
 }
 
-[data-bs-theme="light"] .ws-map-theatre::before {
+[data-bs-theme="light"] .ws-map-canvas::before {
   background-image:
     linear-gradient(var(--ws-grid-line) 1px, transparent 1px),
     linear-gradient(90deg, var(--ws-grid-line-soft) 1px, transparent 1px);
