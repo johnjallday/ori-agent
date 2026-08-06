@@ -1963,9 +1963,19 @@ test('a drag over an occupied footprint shows a blocked indicator that clears on
 
   // 38 short of ws-2's anchor — inside its box, the exact #308 scenario.
   tile.fire('pointermove', tilePointer(442, 100));
-  assert.ok(tile.classList.contains('is-blocked'), 'overlapping another building is shown, not silent');
-  assert.ok(banner.classList.contains('is-blocked'), 'the banner box itself turns red too, not just the tile');
-  assert.match(bannerText.textContent, /Occupied/, 'the state is also carried by text, not colour alone');
+  assert.ok(
+    tile.classList.contains('is-blocked'),
+    'overlapping another building is shown, not silent'
+  );
+  assert.ok(
+    banner.classList.contains('is-blocked'),
+    'the banner box itself turns red too, not just the tile'
+  );
+  assert.match(
+    bannerText.textContent,
+    /Occupied/,
+    'the state is also carried by text, not colour alone'
+  );
 
   // Move back off it: the indicator clears live, not just on drop.
   tile.fire('pointermove', tilePointer(200, 100));
@@ -2103,8 +2113,15 @@ test('a keyboard move over an occupied footprint shows a blocked indicator too, 
   harness.fire('keydown', keyEvent('ArrowRight', { shiftKey: true }));
   harness.fire('keydown', keyEvent('ArrowLeft'));
   assert.ok(tile.classList.contains('is-blocked'), 'a keyboard-driven overlap is shown live');
-  assert.ok(banner.classList.contains('is-blocked'), 'the banner box itself turns red too, not just the tile');
-  assert.match(bannerText.textContent, /Occupied/, 'the state is also carried by text, not colour alone');
+  assert.ok(
+    banner.classList.contains('is-blocked'),
+    'the banner box itself turns red too, not just the tile'
+  );
+  assert.match(
+    bannerText.textContent,
+    /Occupied/,
+    'the state is also carried by text, not colour alone'
+  );
 
   harness.fire('keydown', keyEvent('Escape'));
   await flush();
@@ -2247,12 +2264,23 @@ test('a cluster drag over an outside footprint shows a blocked indicator that cl
     childA.classList.contains('is-blocked'),
     'the member tile itself goes translucent too, not just the district border — that tile is what covers the outsider'
   );
-  assert.ok(banner.classList.contains('is-blocked'), 'the banner box itself turns red too, not just the district');
-  assert.match(bannerText.textContent, /Occupied/, 'the state is also carried by text, not colour alone');
+  assert.ok(
+    banner.classList.contains('is-blocked'),
+    'the banner box itself turns red too, not just the district'
+  );
+  assert.match(
+    bannerText.textContent,
+    /Occupied/,
+    'the state is also carried by text, not colour alone'
+  );
 
   // Back to clear ground before releasing: the indicator lifts live too.
   handle.fire('pointermove', tilePointer(300, 300));
-  assert.equal(district.classList.contains('is-blocked'), false, 'clears once no longer overlapping');
+  assert.equal(
+    district.classList.contains('is-blocked'),
+    false,
+    'clears once no longer overlapping'
+  );
   assert.equal(childA.classList.contains('is-blocked'), false);
   assert.equal(banner.classList.contains('is-blocked'), false);
 

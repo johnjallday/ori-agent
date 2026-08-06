@@ -2948,7 +2948,11 @@
         placeElement(el, dragState.candidate);
         var blocked = wouldOverlapOccupied(dragState.candidate, dragState.id);
         if (el.classList) el.classList.toggle('is-blocked', blocked);
-        setDragReadout(container, dragState.candidate, blocked ? MOVE_BLOCKED_INSTRUCTION : undefined);
+        setDragReadout(
+          container,
+          dragState.candidate,
+          blocked ? MOVE_BLOCKED_INSTRUCTION : undefined
+        );
       });
 
       function finish(event, cancelled) {
