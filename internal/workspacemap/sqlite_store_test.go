@@ -3,6 +3,8 @@ package workspacemap
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -352,6 +354,89 @@ func TestResetAndRestorePositions(t *testing.T) {
 	if len(restored.Positions) != 2 || restored.Positions["ws-a"] != (Point{X: 1, Y: 2}) || restored.Positions["ws-b"] != (Point{X: 3, Y: 4}) {
 		t.Errorf("restored positions = %v, want the exact pre-reset set (FR-112)", restored.Positions)
 	}
+}
+
+// TestMapOperationsLeaveWorkspaceRowsByteIdentical is success metric 5, asserted
+// against the real database rather than a fake.
+//
+// Every map operation the feature has runs against a seeded workspace, and then
+// every column of that workspace row is compared with what it was. The map is
+// allowed to remember where a building sits; it is not allowed to touch a single
+// thing about the workspace itself (FR-6).
+func TestMapOperationsLeaveWorkspaceRowsByteIdentical(t *testing.T) {
+	store, db := newTestStore(t)
+	ctx := context.Background()
+	seedWorkspace(t, db, "grp", "ws-a", "ws-b")
+	store.SetDescendantResolver(staticResolver{"grp": {"grp", "ws-a"}})
+
+	if _, err := db.ExecContext(ctx, `
+		UPDATE workspaces
+		SET parent_id = 'grp', layout = '{"pan":{"x":9}}', status = 'active', description = 'unchanged'
+		WHERE id = 'ws-a'
+	`); err != nil {
+		t.Fatalf("seed workspace fields: %v", err)
+	}
+	before := snapshotWorkspaceRows(t, db)
+
+	steps := []Patch{
+		{Operations: []Operation{SetPositions(map[string]Point{"ws-a": {X: 38, Y: 38}, "ws-b": {X: 380, Y: 38}, "grp": {X: 10, Y: 10}})}},
+		{Operations: []Operation{SetViewport(Viewport{CenterX: 100, CenterY: 100, Zoom: 1.5})}},
+		{Operations: []Operation{SetSnapToGrid(false)}},
+		{Operations: []Operation{TranslateGroup("grp", Point{X: 76, Y: 0})}},
+		{Operations: []Operation{RestorePositions(map[string]Point{"ws-a": {X: 1, Y: 1}})}},
+		{Operations: []Operation{Reset()}},
+	}
+	for i, patch := range steps {
+		if _, err := store.Apply(ctx, "local", patch); err != nil {
+			t.Fatalf("step %d (%s): %v", i, patch.Operations[0].Kind, err)
+		}
+	}
+
+	if after := snapshotWorkspaceRows(t, db); after != before {
+		t.Errorf("map operations changed workspace data.\nbefore: %s\nafter:  %s", before, after)
+	}
+}
+
+type staticResolver map[string][]string
+
+func (s staticResolver) GroupNodeIDs(_ context.Context, groupID string) ([]string, error) {
+	return s[groupID], nil
+}
+
+// snapshotWorkspaceRows serializes every column of every workspace row, so a
+// change to any field — hierarchy, order, status, timestamps, content, the
+// per-workspace CanvasLayout — shows up as a difference.
+func snapshotWorkspaceRows(t *testing.T, db *database.DB) string {
+	t.Helper()
+	rows, err := db.QueryContext(context.Background(), `SELECT * FROM workspaces ORDER BY id`)
+	if err != nil {
+		t.Fatalf("read workspaces: %v", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	columns, err := rows.Columns()
+	if err != nil {
+		t.Fatalf("read columns: %v", err)
+	}
+	var out strings.Builder
+	for rows.Next() {
+		values := make([]any, len(columns))
+		pointers := make([]any, len(columns))
+		for i := range values {
+			pointers[i] = &values[i]
+		}
+		if err := rows.Scan(pointers...); err != nil {
+			t.Fatalf("scan workspace row: %v", err)
+		}
+		for i, column := range columns {
+			fmt.Fprintf(&out, "%s=%v;", column, values[i])
+		}
+		out.WriteString("\n")
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate workspaces: %v", err)
+	}
+	return out.String()
 }
 
 func TestPositionsSurviveTrashAndVanishOnPermanentDelete(t *testing.T) {

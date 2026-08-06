@@ -1841,6 +1841,23 @@ test('a completed drop sends exactly one position update (FR-69, FR-70)', async 
   assert.equal(state.positions['ws-1'].y, committed.y);
 });
 
+test('the coordinate readout during a move never says "build" (FR-68)', async () => {
+  const { harness } = await mountedDrag();
+  const tile = harness.tile('ws-1');
+  const banner = harness.control('[data-map-build-text]');
+
+  tile.fire('pointerdown', tilePointer(100, 100));
+  tile.fire('pointermove', tilePointer(220, 180));
+  assert.doesNotMatch(banner.textContent, /build/i, 'a move is not a build: ' + banner.textContent);
+  assert.match(banner.textContent, /Moving/);
+  assert.equal(
+    harness.control('[data-map-build-cancel]').hidden,
+    true,
+    'a drag is cancelled with Escape or by dropping, not by a third button'
+  );
+  tile.fire('pointerup', tilePointer(220, 180));
+});
+
 test('a drop snaps to the shared grid unless Option/Alt is held (FR-67)', async () => {
   const { harness, patches } = await mountedDrag();
   const tile = harness.tile('ws-1');

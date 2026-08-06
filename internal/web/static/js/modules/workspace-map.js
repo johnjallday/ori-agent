@@ -78,6 +78,14 @@
   // (FR-44).
   var CAMERA_SAVE_DELAY = 600;
 
+  // The banner's two voices. Build mode asks for a site; a move reports where
+  // the thing being moved would land.
+  var BUILD_INSTRUCTION =
+    'Choose where to build — click an empty spot, or use the arrow keys and Enter. Escape cancels.';
+  var MOVE_INSTRUCTION = 'Moving — release to drop, or press Escape to put it back.';
+  var KEYBOARD_MOVE_INSTRUCTION =
+    'Moving — arrow keys to position, Enter to save, Escape to put it back.';
+
   // ---------- current user's coordinate layout ----------
   //
   // One layout, shared by the Map on Home and the Map on /workspaces (FR-4).
@@ -1556,9 +1564,11 @@
     return (
       '<div class="ws-map-build" data-map-build-banner hidden>' +
       '<span class="ws-map-build-dot" aria-hidden="true">◎</span>' +
-      '<span class="ws-map-build-text">Choose where to build — click an empty spot, or use the arrow keys and Enter. Escape cancels.</span>' +
+      '<span class="ws-map-build-text" data-map-build-text>' +
+      BUILD_INSTRUCTION +
+      '</span>' +
       '<span class="ws-map-build-coords" data-map-build-coords></span>' +
-      '<button type="button" class="ws-map-ctl" data-map-build-cancel>Cancel</button>' +
+      '<button type="button" class="ws-map-ctl" data-map-build-cancel hidden>Cancel</button>' +
       '</div>'
     );
   }
@@ -2923,7 +2933,10 @@
     });
   }
 
-  function setDragReadout(container, point) {
+  // setDragReadout shows the live candidate coordinate during a move. It shares
+  // the banner with Build mode but never its words: a user dragging a building
+  // must not be told to "choose where to build" (FR-68).
+  function setDragReadout(container, point, instruction) {
     var readout = container.querySelector('[data-map-build-coords]');
     var banner = container.querySelector('[data-map-build-banner]');
     if (!readout || !banner) return;
@@ -2932,7 +2945,19 @@
       return;
     }
     banner.hidden = false;
+    setBannerMode(container, instruction || MOVE_INSTRUCTION, false);
     readout.textContent = candidateLabel(point);
+  }
+
+  // setBannerMode swaps the banner's instruction and whether it offers Cancel.
+  // Build mode owns the Cancel button; a drag is cancelled with Escape or by
+  // dropping, so offering a button there would be a third way to do the same
+  // thing.
+  function setBannerMode(container, instruction, showCancel) {
+    var text = container.querySelector('[data-map-build-text]');
+    if (text) text.textContent = instruction;
+    var cancel = container.querySelector('[data-map-build-cancel]');
+    if (cancel) cancel.hidden = !showCancel;
   }
 
   // ---------- moving districts ----------
@@ -3183,7 +3208,7 @@
     }
     var banner = container.querySelector('[data-map-build-banner]');
     if (banner) banner.hidden = false;
-    setDragReadout(container, anchor);
+    setDragReadout(container, anchor, KEYBOARD_MOVE_INSTRUCTION);
     announce(
       container,
       (moveState.cluster ? 'Moving this district from ' : 'Moving from ') +
@@ -3268,7 +3293,7 @@
     } else {
       placeElement(moveState.el, next);
     }
-    setDragReadout(container, next);
+    setDragReadout(container, next, KEYBOARD_MOVE_INSTRUCTION);
     announce(container, 'Candidate ' + candidateLabel(next));
     return true;
   }
@@ -3447,6 +3472,7 @@
     if (canvas && canvas.classList) canvas.classList.add('is-building');
     var banner = container.querySelector('[data-map-build-banner]');
     if (banner) banner.hidden = false;
+    setBannerMode(container, BUILD_INSTRUCTION, true);
     // Keyboard placement starts at the middle of what the user is looking at,
     // which is the only starting point that needs no pointer (FR-60).
     var viewport = viewportSize(canvas);
@@ -3603,6 +3629,7 @@
     if (canvas && canvas.classList) canvas.classList.add('is-building');
     var banner = container.querySelector('[data-map-build-banner]');
     if (banner) banner.hidden = false;
+    setBannerMode(container, BUILD_INSTRUCTION, true);
     setBuildCandidate(container, buildState.candidate);
   }
 
