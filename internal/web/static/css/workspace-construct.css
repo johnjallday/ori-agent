@@ -602,15 +602,24 @@
   justify-content: space-between;
   gap: 12px;
 }
+/* Agent tiles render through the shared identity renderer (agent-avatar.css),
+   which supplies the colours, motif, and portrait. This rule owns only the
+   geometry: --aa-size drives the renderer's own width/height, so the tile keeps
+   this modal's compact circle without the art dictating the layout. */
 .workspace-create-modal .workspace-agent-avatar {
-  display: inline-flex;
+  --aa-size: 30px;
   flex: 0 0 auto;
+  border-radius: 50%;
+}
+/* The initials-only tile the renderer degrades to when its script is missing.
+   Scoped to :not(.agent-avatar) so it never repaints a real portrait. */
+.workspace-create-modal .workspace-agent-avatar:not(.agent-avatar) {
+  display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 30px;
   height: 30px;
   border: 1px solid var(--wc-faction-deep);
-  border-radius: 50%;
   background: color-mix(in srgb, var(--wc-faction) 14%, transparent);
   color: var(--wc-faction);
   font-family: var(--wc-font-mono);
