@@ -972,7 +972,7 @@ test('tiles are spaced so a row cannot collide with the row below it', () => {
 // dropped rather than painted over whatever is there now.
 // ---------------------------------------------------------------------------
 
-function loadMapWithFetch(fetchImpl, windowExtras = {}) {
+function loadMapWithFetch(fetchImpl, windowExtras = {}, consoleImpl) {
   const window = { addEventListener() {}, ...windowExtras };
   vm.runInNewContext(
     source,
@@ -981,7 +981,8 @@ function loadMapWithFetch(fetchImpl, windowExtras = {}) {
       document: { getElementById: () => null },
       setTimeout,
       clearTimeout,
-      fetch: fetchImpl
+      fetch: fetchImpl,
+      console: consoleImpl || { error() {}, warn() {}, log() {} }
     },
     { filename: 'workspace-map.js' }
   );
@@ -1219,6 +1220,9 @@ function createCameraHarness({ width = 1000, height = 600, tiles = [], districts
       },
       getAttribute: name => (name === attribute ? id : null),
       setAttribute: () => {},
+      // updateSelBar reads each tile's corner checkbox to mirror the checked
+      // state onto aria-checked.
+      querySelector: () => ({ setAttribute: () => {} }),
       addEventListener: (type, fn) => {
         (own[type] = own[type] || []).push(fn);
       },
@@ -1231,6 +1235,9 @@ function createCameraHarness({ width = 1000, height = 600, tiles = [], districts
       focused: false,
       id,
       fire: (type, event = {}) => (own[type] || []).forEach(fn => fn(event)),
+      // See the innerHTML setter below: a real re-mount destroys these elements
+      // and their listeners, so the stub has to drop them too.
+      resetListeners: () => Object.keys(own).forEach(type => delete own[type]),
       at: () => ({
         x: Number(el.style.left.replace('px', '')),
         y: Number(el.style.top.replace('px', ''))
@@ -1277,6 +1284,8 @@ function createCameraHarness({ width = 1000, height = 600, tiles = [], districts
         style: {},
         setAttribute: (k, v) => (attrs[k] = String(v)),
         getAttribute: k => (k in attrs ? attrs[k] : null),
+        // The selection bar owns a live count element inside it.
+        querySelector: inner => control(name + ' ' + inner),
         focus: () => {},
         addEventListener: (type, fn) => {
           if (type === 'click') controls[name].click = fn;
@@ -1303,7 +1312,7 @@ function createCameraHarness({ width = 1000, height = 600, tiles = [], districts
       if (tileMatch) return tileEls.find(el => el.id === tileMatch[1]) || null;
       const districtMatch = sel.match(/ws-map-district\[data-group-id="([^"]+)"\]/);
       if (districtMatch) return districtEls.find(el => el.id === districtMatch[1]) || null;
-      if (sel.includes('data-map-')) return control(sel);
+      if (sel.includes('data-map-') || sel.includes('data-ws-selbar')) return control(sel);
       return null;
     }
   };
@@ -1311,12 +1320,17 @@ function createCameraHarness({ width = 1000, height = 600, tiles = [], districts
   // listener bound to the old one. The stub reuses one canvas object, so it has
   // to drop them explicitly — otherwise a second mount would double every
   // gesture and the harness, not the map, would be what the test measured.
+  //
+  // The same is true of the tiles, districts, and drag handles: the layout fetch
+  // triggers a settled re-mount, so anything bound per-mount would fire twice
+  // and a paired action (like toggling a checkbox) would cancel itself out.
   let html = '';
   Object.defineProperty(container, 'innerHTML', {
     get: () => html,
     set: value => {
       html = value;
       Object.keys(listeners).forEach(type => delete listeners[type]);
+      [...tileEls, ...districtEls, ...handleEls].forEach(el => el.resetListeners());
     }
   });
 
@@ -2372,4 +2386,131 @@ test('merely reading the map never writes a coordinate (FR-23)', async () => {
     calls.every(c => c.method === 'GET'),
     'viewing fallback placement must not write: ' + JSON.stringify(calls)
   );
+});
+
+// ---------------------------------------------------------------------------
+// Bulk actions: delete + group are host-owned, and must never fail silently
+//
+// These are the regression tests for the shipped bug where the Map's Delete and
+// Group buttons did nothing at all. The map called `window.WorkspaceHub`, a
+// global carried only by the retired /workspaces launcher; on Home that global
+// is undefined, so all three actions took an `if` that was never true and
+// returned without a sound. Nothing here asserted the wiring, so a fully green
+// suite still said the feature worked.
+// ---------------------------------------------------------------------------
+
+function bulkHarness({ handlers = {}, consoleImpl } = {}) {
+  const map = loadMapWithFetch(
+    () =>
+      jsonResponse({
+        schema_version: 1,
+        revision: 1,
+        snap_to_grid: true,
+        positions: { 'ws-1': { x: 100, y: 100 }, 'ws-2': { x: 300, y: 100 } }
+      }),
+    {},
+    consoleImpl
+  );
+  const harness = createCameraHarness({ tiles: ['ws-1', 'ws-2'] });
+  map.mount(harness.container, {
+    workspaces: [
+      { id: 'ws-1', name: 'Alpha' },
+      { id: 'ws-2', name: 'Beta' }
+    ],
+    hideChrome: true,
+    selectOnly: true,
+    noAutoSelect: true,
+    ...handlers
+  });
+  return { map, harness };
+}
+
+// Check a tile the way a mouse user does: click its corner checkbox.
+const checkboxClick = () => ({
+  target: { closest: sel => (sel.includes('data-ws-check') ? {} : null) },
+  preventDefault() {}
+});
+
+// The map builds its id arrays inside the vm sandbox, so they are Arrays from
+// another realm and fail a strict deepEqual against host-built ones.
+const ids = calls => calls.map(call => Array.from(call));
+
+test('the selection bar hands the checked ids to the host (the shipped no-op)', async () => {
+  const deleted = [];
+  const grouped = [];
+  const { harness } = bulkHarness({
+    handlers: {
+      onDeleteWorkspaces: ids => deleted.push(ids),
+      onGroupWorkspaces: ids => grouped.push(ids)
+    }
+  });
+  await flush();
+
+  harness.tile('ws-1').fire('click', checkboxClick());
+  harness.tile('ws-2').fire('click', checkboxClick());
+
+  harness.container.querySelector('[data-ws-selbar-delete]').click();
+  assert.deepEqual(ids(deleted), [['ws-1', 'ws-2']], 'Delete must reach the host');
+
+  harness.container.querySelector('[data-ws-selbar-group]').click();
+  assert.deepEqual(ids(grouped), [['ws-1', 'ws-2']], 'Group must reach the host');
+});
+
+test('an unwired bulk action reports the wiring bug instead of doing nothing', async () => {
+  const errors = [];
+  const { harness } = bulkHarness({
+    consoleImpl: { error: msg => errors.push(String(msg)), warn() {}, log() {} }
+  });
+  await flush();
+
+  harness.tile('ws-1').fire('click', checkboxClick());
+  harness.container.querySelector('[data-ws-selbar-delete]').click();
+  harness.container.querySelector('[data-ws-selbar-group]').click();
+
+  assert.equal(errors.length, 2, 'both unwired actions must complain');
+  assert.ok(
+    errors.every(msg => msg.includes('workspace-map: no handler for')),
+    'the message must name the missing handler: ' + JSON.stringify(errors)
+  );
+});
+
+test('a modified Enter or Space toggles multi-select from the keyboard', async () => {
+  const grouped = [];
+  const opened = [];
+  const { harness } = bulkHarness({
+    handlers: {
+      onGroupWorkspaces: selected => grouped.push(selected),
+      onOpen: id => opened.push(id)
+    }
+  });
+  await flush();
+
+  const key = (k, extra) => ({ key: k, preventDefault() {}, ...extra });
+
+  // An unmodified Enter still opens rather than selecting, so the existing
+  // keyboard contract is untouched.
+  harness.tile('ws-1').fire('keydown', key('Enter'));
+  harness.container.querySelector('[data-ws-selbar-group]').click();
+  assert.deepEqual(opened, ['ws-1'], 'a bare Enter still opens');
+  assert.deepEqual(grouped, [], 'a bare Enter must not check anything');
+
+  harness.tile('ws-1').fire('keydown', key('Enter', { shiftKey: true }));
+  harness.tile('ws-2').fire('keydown', key(' ', { metaKey: true }));
+  harness.container.querySelector('[data-ws-selbar-group]').click();
+  assert.deepEqual(ids(grouped), [['ws-1', 'ws-2']], 'modified Enter/Space must check the tile');
+  assert.deepEqual(opened, ['ws-1'], 'a modified key must not also open');
+});
+
+test('clearMultiSelection empties the checked set after a group', async () => {
+  const grouped = [];
+  const { map, harness } = bulkHarness({
+    handlers: { onGroupWorkspaces: ids => grouped.push(ids) }
+  });
+  await flush();
+
+  harness.tile('ws-1').fire('click', checkboxClick());
+  map.clearMultiSelection();
+  harness.container.querySelector('[data-ws-selbar-group]').click();
+
+  assert.deepEqual(grouped, [], 'a cleared selection has nothing to group');
 });

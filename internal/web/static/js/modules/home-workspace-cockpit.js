@@ -1132,6 +1132,11 @@ export function renderWorkspaceAreaStatusHTML(status) {
 // interaction, and hands every mutation back here so shared state, refresh, and
 // rail context stay single-authority (FR117).
 import { mountTree, ancestorIds } from './home-workspace-tree.js';
+import {
+  createGroupFrom as createGroupAction,
+  deleteWorkspace as deleteWorkspaceAction,
+  deleteWorkspaces as deleteWorkspacesAction
+} from './workspace-bulk-actions.js';
 
 (function () {
   if (typeof document === 'undefined' || typeof window === 'undefined') return;
@@ -1286,7 +1291,20 @@ import { mountTree, ancestorIds } from './home-workspace-tree.js';
       noAutoSelect: true,
       onSelect: id => selectItem(id, { fromMap: true }),
       onOpen: id => openItem(id),
-      onSelectHQSite: view => selectHQSite(view)
+      onSelectHQSite: view => selectHQSite(view),
+      // Delete and group. The map owns no mutation of its own — it hands the
+      // ids back here, and these run the very same workspace-bulk-actions.js
+      // code Tree runs, so the two views cannot diverge.
+      onDeleteWorkspace: id => void deleteWorkspaceAction(id, bulkContext()),
+      onDeleteWorkspaces: ids => void deleteWorkspacesAction(ids, bulkContext()),
+      onGroupWorkspaces: ids =>
+        void createGroupAction(ids, bulkContext()).then(groupId => {
+          // Grouped workspaces still exist, so the map's own prune-on-mount
+          // cannot drop them from the checked set — clear it explicitly.
+          if (groupId && typeof window.OriWorkspaceMap.clearMultiSelection === 'function') {
+            window.OriWorkspaceMap.clearMultiSelection();
+          }
+        })
     });
     // A re-mount rebuilds the tiles, so the active filter must be reapplied.
     applyFilterToMap();
@@ -1346,6 +1364,26 @@ import { mountTree, ancestorIds } from './home-workspace-tree.js';
         els.tree.querySelector('[data-tree-row]');
       if (target) target.focus();
     }
+  }
+
+  /**
+   * Host context for workspace-bulk-actions.js.
+   *
+   * Map has no mutation code of its own, so it calls back into here; Tree builds
+   * the equivalent context itself. Both feed the same undo stack, so an item
+   * trashed from either view is restorable by the same Undo (FR52).
+   */
+  function bulkContext() {
+    return {
+      rows: state.flattened,
+      announce,
+      onTrashed: (id, name) => {
+        state.undoStack.push({ id, name });
+      },
+      onChanged: async () => {
+        await refreshQuietly();
+      }
+    };
   }
 
   /** Restore the most recent trashed item (FR52 session Undo). */

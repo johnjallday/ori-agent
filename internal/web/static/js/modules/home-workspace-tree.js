@@ -29,6 +29,11 @@ import {
   isGroupWorkspace,
   workspaceSignals
 } from './home-workspace-cockpit.js';
+import {
+  createGroupFrom as createGroupAction,
+  deleteWorkspace as deleteWorkspaceAction,
+  deleteWorkspaces as deleteWorkspacesAction
+} from './workspace-bulk-actions.js';
 
 // ---------------------------------------------------------------------------
 // Hierarchy shaping
@@ -873,89 +878,34 @@ function bindTree(container, state, cb, rows) {
     }
   }
 
+  // Delete and group live in workspace-bulk-actions.js so the Map runs the very
+  // same code — see that module's header for why the Map could not before.
+  function bulkContext() {
+    return {
+      rows: state.flattened,
+      announce,
+      toast,
+      onTrashed: cb.onTrashed,
+      onChanged: cb.onChanged
+    };
+  }
+
   async function performDelete(id) {
-    const row = state.flattened.find(r => r.id === id);
-    if (!row) return;
-    const group = isGroupWorkspace(row);
-    const confirmed = await confirmDelete(row, group);
-    if (!confirmed) return;
-    const query =
-      group && confirmed.mode ? `&delete_mode=${encodeURIComponent(confirmed.mode)}` : '';
-    try {
-      const res = await fetch(`/api/workspaces/${encodeURIComponent(id)}?confirm=true${query}`, {
-        method: 'DELETE'
-      });
-      if (!res.ok) throw new Error(await errorText(res, 'Failed to delete'));
-      let trashed = false;
-      if (res.status !== 204) {
-        const data = await res.json().catch(() => ({}));
-        trashed = !!(data && data.trashed);
-      }
-      if (trashed && typeof cb.onTrashed === 'function') cb.onTrashed(id, row.name);
-      announce(`${row.name} deleted.`);
-      if (typeof cb.onChanged === 'function') await cb.onChanged();
-    } catch (err) {
-      const message = err && err.message ? err.message : 'Failed to delete.';
-      announce(message);
-      toast(message, 'error');
-    }
+    await deleteWorkspaceAction(id, bulkContext());
   }
 
   async function deleteSelected() {
     const ids = Array.from(state.bulkSelection);
     if (ids.length === 0) return;
-    const ok = await confirmBulkDelete(ids.length);
-    if (!ok) return;
-    for (const id of ids) {
-      const row = state.flattened.find(r => r.id === id);
-      if (!row) continue;
-      try {
-        const res = await fetch(`/api/workspaces/${encodeURIComponent(id)}?confirm=true`, {
-          method: 'DELETE'
-        });
-        if (!res.ok) continue;
-        if (res.status !== 204) {
-          const data = await res.json().catch(() => ({}));
-          if (data && data.trashed && typeof cb.onTrashed === 'function') {
-            cb.onTrashed(id, row.name);
-          }
-        }
-      } catch (_) {
-        /* keep going; the reload below reports the real outcome */
-      }
-    }
-    state.bulkSelection.clear();
-    announce(`${ids.length} items deleted.`);
-    if (typeof cb.onChanged === 'function') await cb.onChanged();
+    const deleted = await deleteWorkspacesAction(ids, bulkContext());
+    // Only clear the checkboxes once something actually went; a declined
+    // confirmation must leave the selection exactly as the user left it.
+    if (deleted > 0) state.bulkSelection.clear();
   }
 
   async function createGroup(memberIds) {
-    const name = window.prompt('Name for the new group:');
-    if (!name || !name.trim()) return;
-    try {
-      const res = await fetch('/api/workspaces', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name.trim(), kind: 'group' })
-      });
-      if (!res.ok) throw new Error(await errorText(res, 'Failed to create group'));
-      const body = await res.json().catch(() => ({}));
-      const groupId = body && body.folder && body.folder.id;
-      if (groupId && memberIds.length) {
-        const updates = {};
-        memberIds.forEach((id, index) => {
-          updates[id] = { parent_id: groupId, order_index: index + 1 };
-        });
-        await patchWorkspaces(updates);
-      }
-      state.bulkSelection.clear();
-      announce(`Group "${name.trim()}" created.`);
-      if (typeof cb.onChanged === 'function') await cb.onChanged();
-    } catch (err) {
-      const message = err && err.message ? err.message : 'Failed to create group.';
-      announce(message);
-      toast(message, 'error');
-    }
+    const groupId = await createGroupAction(memberIds, bulkContext());
+    if (groupId) state.bulkSelection.clear();
   }
 
   /**
@@ -1022,13 +972,18 @@ function toast(message, variant) {
   }
 }
 
+// The workspace API reports failures as `{"error": ...}`, with a few endpoints
+// using `message`. Reading only `message` surfaced raw JSON to the user on the
+// most common real failure (a folder-slug conflict on move).
 async function errorText(response, fallback) {
   try {
     const text = await response.text();
     if (!text) return fallback;
     try {
       const parsed = JSON.parse(text);
-      return parsed && parsed.message ? parsed.message : text;
+      if (parsed && typeof parsed.error === 'string' && parsed.error) return parsed.error;
+      if (parsed && typeof parsed.message === 'string' && parsed.message) return parsed.message;
+      return text;
     } catch (_) {
       return text;
     }
@@ -1054,32 +1009,5 @@ async function patchWorkspaces(updates) {
   if (failed) throw new Error(await errorText(failed, 'Failed to move workspace'));
 }
 
-/**
- * Delete confirmation. Groups keep their two-mode choice (group only vs group
- * and contents), and nothing is ever deleted without a confirmation (FR52/FR53).
- */
-async function confirmDelete(row, isGroup) {
-  if (!isGroup) {
-    const ok = window.confirm(
-      `Delete "${row.name}"?\n\nIt moves to the Trash and can be restored with Undo.`
-    );
-    return ok ? { mode: '' } : null;
-  }
-  const withContents = window.confirm(
-    `Delete the group "${row.name}"?\n\n` +
-      'OK — delete the group AND everything inside it.\n' +
-      'Cancel — choose to keep the workspaces instead.'
-  );
-  if (withContents) return { mode: 'contents' };
-  const groupOnly = window.confirm(
-    `Delete only the group "${row.name}" and move its workspaces back to the top level?`
-  );
-  return groupOnly ? { mode: 'group_only' } : null;
-}
-
-async function confirmBulkDelete(count) {
-  return window.confirm(
-    `Delete ${count} selected item${count === 1 ? '' : 's'}?\n\n` +
-      'They move to the Trash and can be restored with Undo.'
-  );
-}
+// The delete confirmations moved to workspace-bulk-actions.js along with the
+// operations they guard (FR52/FR53), so Map and Tree ask the same questions.
