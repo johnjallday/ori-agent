@@ -6,6 +6,12 @@
   <title>{{.Title}}</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <!-- Deferred scripts execute in document order, and this head precedes every
+       page's own scripts, so AgentAvatar and CharacterCatalog are installed
+       before any consumer (agents-roster.js, workspace-detail.js, sessions.js)
+       runs. CharacterCatalog does not self-fetch; each surface calls load(). -->
+  <script defer src="/js/modules/agent-avatar.js"></script>
+  <script defer src="/js/modules/character-catalog.js"></script>
   <script defer src="/js/modules/update-checker.js"></script>
   <script defer src="/js/modules/vault-modal.js"></script>
   <script defer src="/js/modules/keyboard-navigation.js"></script>
@@ -59,6 +65,12 @@
   <link href="/css/workspace-map.css" rel="stylesheet">
   <link href="/css/workspace-command.css" rel="stylesheet">
   <link href="/css/workspace-construct.css" rel="stylesheet">
+  <!-- Agent identity is rendered on pages across the app (the Agents roster, a
+       workspace's agent cards, and the Create Workspace team roster), so the one
+       renderer and its stylesheet live in the shared head rather than being
+       re-declared per page — a second <script defer> of the same module would
+       execute it twice. -->
+  <link href="/css/agent-avatar.css" rel="stylesheet">
   <link href="/css/file-janitor.css" rel="stylesheet">
   <link href="/css/setup-wizard.css" rel="stylesheet">
   {{if index .Extra "HomeCommandBridge"}}<link href="/css/home-command.css" rel="stylesheet">

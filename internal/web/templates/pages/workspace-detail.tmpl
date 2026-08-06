@@ -3,8 +3,8 @@
 <html data-bs-theme="light">
 {{template "head.tmpl" .}}
 <!-- Agents on this page render through the shared Avatar Identity resolver, so
-     an agent's face is the same here as on /agents and Home (PRD FR-99). -->
-<link rel="stylesheet" href="/css/agent-avatar.css">
+     an agent's face is the same here as on /agents and Home (PRD FR-99). Its
+     stylesheet and scripts come from head.tmpl, which every page shares. -->
 
 <body class="bg-light">
   {{template "navbar.tmpl" .}}
@@ -8867,10 +8867,8 @@
   <script defer src="/js/modules/form-validation.js"></script>
   <script defer src="/js/file-manager.js"></script>
   <script defer src="/js/app.js"></script>
-  <!-- The shared identity renderer and its catalog. Both are classic deferred
-       scripts, so they are ready before workspace-detail.js renders an agent. -->
-  <script defer src="/js/modules/agent-avatar.js"></script>
-  <script defer src="/js/modules/character-catalog.js"></script>
+  <!-- The shared identity renderer and its catalog load from head.tmpl; deferred
+       order still has them ready before workspace-detail.js renders an agent. -->
   <script defer src="/js/modules/workspace-realtime.js"></script>
 
   <!-- Workspace Hub Modules (for task/session/file/note management) -->

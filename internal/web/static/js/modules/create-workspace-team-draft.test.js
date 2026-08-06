@@ -648,6 +648,81 @@ test('an agent-less team is advisory and still produces a valid request', () => 
   assert.equal(view.payload.create_template_agents, false);
 });
 
+test('a saved roster row carries the identity fields the shared avatar renderer needs', () => {
+  const draft = readyDraft([]);
+  withSavedRoster(draft, [
+    {
+      name: 'Research Scout',
+      model: 'gpt-5',
+      role: 'researcher',
+      source: 'user',
+      metadata: {
+        avatar_image: 'scout.png',
+        avatar_color: '#3498db',
+        character: { catalog_id: 'sable', display_mode: 'character' }
+      }
+    }
+  ]);
+  Draft.addSavedAgent(draft, 'Research Scout');
+
+  const entry = Draft.derive(draft).roster.find(row => row.name === 'Research Scout');
+  assert.deepEqual(entry.identity, {
+    name: 'Research Scout',
+    source: 'user',
+    role: 'researcher',
+    avatarImage: 'scout.png',
+    avatarColor: '#3498db',
+    displayMode: 'character',
+    characterId: 'sable'
+  });
+});
+
+test('a blueprint agent that does not exist yet gets a name-seeded identity', () => {
+  const draft = readyDraft([planAgent('Brand New', { entry_point: true })]);
+
+  const entry = Draft.derive(draft).roster.find(row => row.name === 'Brand New');
+  assert.equal(entry.identity.name, 'Brand New');
+  assert.equal(entry.identity.characterId, '', 'no character until the agent exists');
+  assert.equal(entry.identity.avatarImage, '');
+  assert.equal(entry.identity.displayMode, '', 'mode is a stored choice, never inferred');
+});
+
+test('an unrenamed blueprint row shows the saved agent it actually reuses (FR41)', () => {
+  const draft = readyDraft([planAgent('File Curator', { action: 'reuse', entry_point: true })]);
+  withSavedRoster(draft, [
+    {
+      name: 'File Curator',
+      metadata: { character: { catalog_id: 'pebble', display_mode: 'character' } }
+    }
+  ]);
+
+  const entry = Draft.derive(draft).roster.find(row => row.name === 'File Curator');
+  assert.equal(entry.identity.characterId, 'pebble');
+  assert.equal(entry.identity.displayMode, 'character');
+});
+
+test('renaming a blueprint agent re-seeds its identity to the new name', () => {
+  const draft = readyDraft([planAgent('Lead', { entry_point: true })]);
+  Draft.stageOverride(draft, 0, { name: 'Renamed Lead' });
+
+  const entry = Draft.derive(draft).roster.find(row => row.name === 'Renamed Lead');
+  assert.equal(entry.identity.name, 'Renamed Lead');
+});
+
+test('identityFrom keeps a legacy record on the historical upload-first rule', () => {
+  // No stored display_mode: the agent predates the character system, so the
+  // uploaded image must still win rather than being treated as "no choice".
+  const identity = Draft.identityFrom('Legacy', {
+    metadata: { avatar_image: 'legacy.png' }
+  });
+  assert.equal(identity.avatarImage, 'legacy.png');
+  assert.equal(identity.displayMode, '');
+
+  const cli = Draft.identityFrom('Claude Code', { source: 'CLI' });
+  assert.equal(cli.source, 'cli', 'source is normalized for the renderer');
+  assert.deepEqual(Draft.identityFrom('Bare', null).name, 'Bare');
+});
+
 test('issue ordering puts blockers ahead of advisories', () => {
   const draft = Draft.createDraft();
   Draft.setPlanError(draft, 'template:x', 'plan unavailable');

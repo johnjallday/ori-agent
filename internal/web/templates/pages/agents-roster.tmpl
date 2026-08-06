@@ -3,7 +3,6 @@
 <html lang="en">
 {{template "head.tmpl" .}}
 <link rel="stylesheet" href="/css/tag-input.css">
-<link rel="stylesheet" href="/css/agent-avatar.css">
 <link rel="stylesheet" href="/css/agents-roster.css">
 <link rel="stylesheet" href="/css/character-picker.css">
 
@@ -311,10 +310,8 @@
   <script defer src="/js/modules/toast.js"></script>
   <script defer src="/js/modules/role-catalog.js"></script>
   <script defer src="/js/modules/stage-up-toast.js"></script>
-  <!-- Shared deterministic avatar renderer (exposes window.AgentAvatar). Must load
-       before the roster controller so first paint already uses one identity. -->
-  <script defer src="/js/modules/agent-avatar.js"></script>
-  <script defer src="/js/modules/character-catalog.js"></script>
+  <!-- agent-avatar.js and character-catalog.js load from head.tmpl, which every
+       page shares; deferred order still puts them before this controller. -->
   <script defer src="/js/modules/character-picker.js"></script>
   <script defer src="/js/agents-roster.js"></script>
 </body>

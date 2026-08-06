@@ -255,6 +255,40 @@
     return (draft.savedSelections || []).some(selected => agentKey(selected) === key);
   }
 
+  // The renderer input for one agent's visual identity, projected from the saved
+  // record the dashboard list already returns. Every Team-step surface reads
+  // this rather than deriving a face of its own, so the wizard shows the same
+  // identity as the Agents page and the workspace (shared-renderer contract).
+  //
+  // `agent` is null for a blueprint agent that does not exist yet: the resolver
+  // then falls back to art seeded on the name, which is exactly what that agent
+  // will look like once it is created. The lookup is by name for BOTH sources,
+  // because an unrenamed blueprint row sharing a name with a saved agent is
+  // ordinary reuse (FR41) — that agent's real face is the honest one to show.
+  function identityFrom(name, agent) {
+    const metadata = (agent && agent.metadata) || {};
+    const character = metadata.character || {};
+    return {
+      name: text(name),
+      source: text(agent && agent.source).toLocaleLowerCase() === 'cli' ? 'cli' : 'user',
+      role: text(agent && agent.role),
+      avatarImage: text(metadata.avatar_image),
+      avatarColor: text(metadata.avatar_color),
+      // Identity is an explicit stored choice; an empty mode means the agent
+      // predates the character system and keeps the historical upload-first
+      // rule. Never infer the mode from whichever field is populated.
+      displayMode: text(character.display_mode),
+      characterId: text(character.catalog_id)
+    };
+  }
+
+  // Identity for a name as it stands in the draft right now. Renaming a
+  // blueprint agent re-seeds its fallback art, which is correct: the created
+  // agent will carry the new name.
+  function identityForName(draft, name) {
+    return identityFrom(name, findSavedAgent(draft, name));
+  }
+
   // True when the blueprint already contributes this name under its ORIGINAL
   // identity. Used to disable the picker's Add action (FR62) and, in derive(),
   // to explain which source owns a retained selection after a blueprint change
@@ -354,6 +388,7 @@
       key: agentKey(name),
       name,
       source: 'blueprint',
+      identity: identityForName(draft, name),
       lifecycle,
       lifecycleLabel: LIFECYCLE_LABELS[lifecycle],
       modelLabel: modelLabel(model, provider),
@@ -385,6 +420,7 @@
       key: agentKey(canonical),
       name: canonical,
       source: 'saved',
+      identity: identityFrom(canonical, agent),
       lifecycle: 'reuse',
       lifecycleLabel: LIFECYCLE_LABELS.reuse,
       modelLabel: text(agent.model) || 'Uses saved agent model',
@@ -655,6 +691,7 @@
     isBlueprintOwned,
     isAttachableSavedAgent,
     findSavedAgent,
+    identityFrom,
     agentKey,
     derive,
     toCreatePayload

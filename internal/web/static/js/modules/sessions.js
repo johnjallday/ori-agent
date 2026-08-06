@@ -3831,7 +3831,7 @@ const sessionManager = {
           data-agent-key="${this.escapeHtml(entry.key)}"
           ${isBlueprint ? `data-template-agent-index="${entry.templateAgentIndex}"` : ''}>
         <div class="workspace-team-row-main">
-          ${this.renderAgentAvatar(entry.name, 'workspace-agent-avatar')}
+          ${this.renderAgentAvatar(entry.identity, 'workspace-agent-avatar')}
           <div class="workspace-team-row-copy">
             <strong>${this.escapeHtml(entry.name)}${badge}</strong>
             <span class="workspace-team-row-lifecycle">${this.escapeHtml(entry.lifecycleLabel)}</span>
@@ -4293,9 +4293,30 @@ const sessionManager = {
   // Loading Your Agents is independent of the blueprint team: a failure here is
   // advisory, so an already-valid preconfigured team stays reviewable and
   // creatable while the picker offers Retry.
+  // The character catalog does NOT fetch on its own — a page that never opens
+  // this wizard should pay nothing for it, so the request is made here, the one
+  // place the Team step loads agent data. Without this call every chosen
+  // character silently renders as the generated fallback: wired-looking, wrong.
+  //
+  // The fetch is deliberately not awaited. The roster paints on the data it
+  // already has and portraits swap in when the catalog lands; a catalog that is
+  // slow or never arrives just leaves every agent on its deterministic art.
+  watchCharacterCatalog() {
+    if (this.characterCatalogWatched) return;
+    const catalog = window.CharacterCatalog;
+    if (!catalog || typeof catalog.onChange !== 'function') return;
+    this.characterCatalogWatched = true;
+    catalog.onChange(() => {
+      this.renderExistingAgentRoster();
+      this.renderWorkspaceTeamRoster();
+    });
+    catalog.load();
+  },
+
   async loadExistingAgentRoster() {
     const api = window.CreateWorkspaceTeamDraft;
     const draft = this.ensureWorkspaceTeamDraft();
+    this.watchCharacterCatalog();
     this.existingAgentRosterLoading = true;
     if (draft && api) api.setSavedRosterLoading(draft);
     this.renderExistingAgentRoster();
@@ -4361,6 +4382,14 @@ const sessionManager = {
     list.innerHTML = matches.map(agent => this.renderExistingAgentRosterCard(agent)).join('');
   },
 
+  // The picker cards and the Team roster must show one agent one way, so both
+  // project identity through the draft module's builder rather than each
+  // reading the raw record its own way.
+  existingAgentIdentity(name, agent) {
+    const api = window.CreateWorkspaceTeamDraft;
+    return api && typeof api.identityFrom === 'function' ? api.identityFrom(name, agent) : { name };
+  },
+
   renderExistingAgentRosterCard(agent) {
     const name = String(agent?.name || '').trim();
     const key = this.existingAgentKey(name);
@@ -4392,7 +4421,7 @@ const sessionManager = {
       : `Add ${name} to this workspace`;
     return `
       <article class="workspace-existing-agent-card" role="listitem" data-existing-agent-name="${this.escapeHtml(name)}">
-        ${this.renderAgentAvatar(name, 'workspace-agent-avatar')}
+        ${this.renderAgentAvatar(this.existingAgentIdentity(name, agent), 'workspace-agent-avatar')}
         <div class="workspace-existing-agent-card-copy">
           <strong>${this.escapeHtml(name)}</strong>
           <span>${this.escapeHtml(agent?.model || 'Uses saved agent model')} · ${workspaceCount === 1 ? '1 workspace' : `${workspaceCount} workspaces`}</span>
@@ -4402,16 +4431,48 @@ const sessionManager = {
       </article>`;
   },
 
-  renderAgentAvatar(name, className = '') {
-    const initials =
-      String(name || '')
-        .split(/\s+/)
-        .filter(Boolean)
-        .slice(0, 2)
-        .map(part => part[0])
-        .join('')
-        .toUpperCase() || 'A';
-    return `<span class="${className}" aria-hidden="true">${this.escapeHtml(initials)}</span>`;
+  // Create Workspace renders agent identities through the one shared renderer,
+  // so an agent whose character the user chose on the Agents page has that same
+  // face here — the wizard is where a team is picked, and a faceless roster is
+  // exactly where a chosen identity being invisible hurts most.
+  //
+  // `identity` is the projection built by CreateWorkspaceTeamDraft.identityFrom;
+  // a bare name string is still accepted for callers that have nothing else.
+  // The caller's className keeps its own geometry by overriding --aa-size, so
+  // the shared art never dictates this modal's layout.
+  renderAgentAvatar(identity, className = '') {
+    const input = typeof identity === 'string' ? { name: identity } : identity || {};
+    // Both are deferred scripts. If either is missing the roster still needs a
+    // tile in the same box, so fall back to the initials this used to draw.
+    if (!window.AgentAvatar) {
+      const initials =
+        String(input.name || '')
+          .split(/\s+/)
+          .filter(Boolean)
+          .slice(0, 2)
+          .map(part => part[0])
+          .join('')
+          .toUpperCase() || 'A';
+      return `<span class="${className}" aria-hidden="true">${this.escapeHtml(initials)}</span>`;
+    }
+    return window.AgentAvatar.markup(
+      {
+        name: input.name || '',
+        source: input.source || 'user',
+        role: input.role || '',
+        avatarImage: input.avatarImage || '',
+        avatarColor: input.avatarColor || '',
+        displayMode: input.displayMode || '',
+        // The catalog lookup is synchronous and returns null until the fetch
+        // lands; the resolver treats that as a missing character and falls
+        // back, so a slow catalog never delays rendering the roster.
+        character:
+          input.characterId && window.CharacterCatalog
+            ? window.CharacterCatalog.get(input.characterId)
+            : null
+      },
+      { size: 54, className }
+    );
   },
 
   // Returns the derived team view, or null when the draft helper is unavailable.
