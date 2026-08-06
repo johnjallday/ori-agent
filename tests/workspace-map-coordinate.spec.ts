@@ -526,6 +526,82 @@ test.describe('Coordinate Workspace Map', () => {
     await expect(page.locator('[data-map-build]')).toBeDisabled();
   });
 
+  test('Reset Layout clears only positions and can be undone (FR-109 – FR-112, metric 9)', async ({
+    page
+  }) => {
+    const id = await ownWorkspaceAt(page);
+    await openMap(page);
+    const before = await (await page.request.get('/api/workspace-map/layout')).json();
+    const beforePositions = before.layout.positions;
+    expect(Object.keys(beforePositions).length).toBeGreaterThan(0);
+    const workspacesBefore = (await listWorkspaces(page)).map(ws => ws.id).sort();
+
+    // Reset Layout is a separate control from Reset View, and it confirms.
+    page.once('dialog', dialog => dialog.accept());
+    await page.click('[data-map-reset-layout]');
+    await page.waitForTimeout(800);
+
+    const cleared = await (await page.request.get('/api/workspace-map/layout')).json();
+    expect(Object.keys(cleared.layout.positions).length, 'every anchor cleared').toBe(0);
+    expect(
+      (await listWorkspaces(page)).map(ws => ws.id).sort(),
+      'no workspace was deleted'
+    ).toEqual(workspacesBefore);
+    // The building is still on the map, at an automatic position.
+    await expect(page.locator(`.ws-map-tile[data-ws-id="${id}"]`)).toBeAttached();
+
+    await page.click('[data-map-undo-reset]');
+    await page.waitForTimeout(800);
+    const restored = await (await page.request.get('/api/workspace-map/layout')).json();
+    expect(restored.layout.positions, 'the exact prior set came back').toEqual(beforePositions);
+  });
+
+  test('many buildings: pointer movement writes nothing and does not remount (FR-122, metric 11)', async ({
+    page
+  }) => {
+    test.setTimeout(120_000);
+    // A fixture big enough that a per-move re-render would be obvious.
+    const existing = await listWorkspaces(page);
+    for (let i = existing.length; i < 30; i += 1) {
+      await page.request.post('/api/workspaces', { data: { name: `Perf ${i} ${Date.now()}` } });
+    }
+    const id = await ownWorkspaceAt(page);
+    await openMap(page);
+    await centerOnWorkspace(page, id);
+
+    // Position writes only. A camera save may also land here — it is debounced
+    // and best-effort, and it is not what FR-69 bounds.
+    const writes: string[] = [];
+    page.on('request', request => {
+      if (request.url().includes('/api/workspace-map/layout') && request.method() !== 'GET') {
+        const body = request.postData() || '';
+        if (body.includes('set_positions') || request.method() === 'DELETE') writes.push(body);
+      }
+    });
+    // Tag the element so a remount (which rebuilds the DOM) is detectable.
+    await page.evaluate(workspaceId => {
+      const tile = document.querySelector(`.ws-map-tile[data-ws-id="${workspaceId}"]`);
+      (tile as HTMLElement & { __probe?: string }).__probe = 'same-element';
+    }, id);
+
+    const grab = await grabPointOn(page, id);
+    await page.mouse.move(grab.x, grab.y);
+    await page.mouse.down();
+    for (let step = 1; step <= 20; step += 1) {
+      await page.mouse.move(grab.x + step * 6, grab.y + step * 3);
+    }
+    expect(writes.length, 'pointer movement performs zero writes').toBe(0);
+    const sameElement = await page.evaluate(workspaceId => {
+      const tile = document.querySelector(`.ws-map-tile[data-ws-id="${workspaceId}"]`);
+      return (tile as HTMLElement & { __probe?: string }).__probe === 'same-element';
+    }, id);
+    expect(sameElement, 'the map was not remounted during the drag').toBe(true);
+
+    await page.mouse.up();
+    await page.waitForTimeout(900);
+    expect(writes.length, 'one drop, one position update').toBe(1);
+  });
+
   test('Snap to Grid is visible, on by default, and persists (FR-57)', async ({ page }) => {
     await ensureWorkspace(page);
     await openMap(page);

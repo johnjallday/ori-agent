@@ -1480,7 +1480,19 @@
       '>Snap: ' +
       (snapOn ? 'on' : 'off') +
       '</button>' +
+      // Reset Layout is deliberately worded and placed apart from Reset View:
+      // one changes where the camera is, the other changes where every building
+      // is (FR-109).
+      '<button type="button" class="ws-map-ctl ws-map-ctl--wide" data-map-reset-layout' +
+      (readOnly ? ' disabled' : '') +
+      '>Reset layout…</button>' +
+      '<button type="button" class="ws-map-ctl ws-map-ctl--wide" data-map-undo-reset hidden>Undo reset</button>' +
+      '<button type="button" class="ws-map-ctl" data-map-help aria-expanded="false" aria-label="How the map works">?</button>' +
       '</div>' +
+      helpHTML() +
+      (readOnly
+        ? '<p class="ws-map-notice" role="status">Positions cannot be saved right now. You can still look around; building and moving are unavailable until the map layout loads.</p>'
+        : '') +
       '<div class="ws-map-controls" role="group" aria-label="Map view controls">' +
       '<button type="button" class="ws-map-ctl" data-map-zoom-out aria-label="Zoom out">−</button>' +
       '<span class="ws-map-zoom" data-map-zoom-readout aria-hidden="true">100%</span>' +
@@ -1505,6 +1517,41 @@
    * It is rendered on every mount and hidden, so entering the mode is a class
    * change rather than a re-render that would disturb the map underneath.
    */
+  /**
+   * Concise, discoverable help (FR-121).
+   *
+   * Every gesture the map supports is worth exactly one line. A user who never
+   * opens this should still be able to work the map from the buttons; this is
+   * for the ones that have no button — drag to pan, pinch to zoom, Alt to
+   * bypass snapping.
+   */
+  function helpHTML() {
+    return (
+      '<div class="ws-map-help" data-map-help-panel hidden role="region" aria-label="How the map works">' +
+      '<h4>How the map works</h4>' +
+      '<ul>' +
+      '<li><b>Pan</b> — drag empty space, or scroll/swipe.</li>' +
+      '<li><b>Zoom</b> — pinch, ' +
+      (isApplePlatform() ? '⌘' : 'Ctrl') +
+      '+scroll, the + / − buttons, or the + / − keys.</li>' +
+      '<li><b>Move a building</b> — drag it. Select it and press Move to do the same with arrow keys; Enter saves, Escape cancels.</li>' +
+      '<li><b>Move a district</b> — drag the small handle on its outline. Its workspaces move with it; membership never changes.</li>' +
+      '<li><b>Build</b> — press Build, then click an empty spot (or use arrow keys and Enter).</li>' +
+      '<li><b>Snap</b> — on by default. Hold ' +
+      (isApplePlatform() ? 'Option' : 'Alt') +
+      ' to place freely for one move.</li>' +
+      '<li><b>Escape</b> — cancels whatever is in progress without saving.</li>' +
+      '</ul>' +
+      '<p class="ws-map-help-note">Fit all, Center and Reset view move the camera. Reset layout moves the buildings — and can be undone.</p>' +
+      '</div>'
+    );
+  }
+
+  function isApplePlatform() {
+    if (typeof navigator === 'undefined') return true;
+    return /Mac|iPhone|iPad/i.test(String(navigator.platform || navigator.userAgent || ''));
+  }
+
   function buildBannerHTML() {
     return (
       '<div class="ws-map-build" data-map-build-banner hidden>' +
@@ -3226,6 +3273,122 @@
     return true;
   }
 
+  // ---------- reset and undo ----------
+  //
+  // Reset Layout clears the user's arrangement, not their workspaces. It is
+  // separate from Reset View in name, in placement, and in what it touches
+  // (FR-109, FR-111).
+
+  // The exact position set as it stood before the last reset, held in memory
+  // for the session. A permanent history table would be a lot of machinery for
+  // one undo of one action (FR-112).
+  var undoSnapshot = null;
+
+  function resetLayout(container) {
+    if (layoutState.status !== 'ready') {
+      announce(container, 'Positions cannot be saved right now, so Reset layout is unavailable');
+      return;
+    }
+    var count = Object.keys(layoutState.positions).length;
+    var message =
+      'Reset the map layout?\n\n' +
+      'Every workspace and district goes back to an automatic position. ' +
+      'Nothing is deleted, renamed, regrouped or reordered — only where things sit on your map changes. ' +
+      'Your Snap to Grid setting is kept, and you can undo this during this session.' +
+      (count
+        ? '\n\n' + count + ' saved position' + (count === 1 ? '' : 's') + ' will be cleared.'
+        : '');
+    if (
+      typeof window !== 'undefined' &&
+      typeof window.confirm === 'function' &&
+      !window.confirm(message)
+    ) {
+      return;
+    }
+
+    // Snapshot before asking the server, so Undo restores exactly what was
+    // there rather than whatever survived the reset.
+    var snapshot = {};
+    Object.keys(layoutState.positions).forEach(function (id) {
+      snapshot[id] = { x: layoutState.positions[id].x, y: layoutState.positions[id].y };
+    });
+
+    deleteLayout()
+      .then(function () {
+        undoSnapshot = snapshot;
+        layoutState.positions = Object.create(null);
+        announce(
+          container,
+          'Layout reset. Every workspace is at an automatic position; nothing else changed. Undo reset is available.'
+        );
+        settleLayout();
+        fitAll(lastMount ? lastMount.container : container);
+      })
+      .catch(function () {
+        // A failed reset changes nothing, and says so (FR-112).
+        announce(container, 'The layout could not be reset. Everything is still where it was.');
+      });
+  }
+
+  function undoReset(container) {
+    if (!undoSnapshot) return;
+    var snapshot = undoSnapshot;
+    patchLayout([{ op: 'restore_positions', positions: snapshot }])
+      .then(function () {
+        undoSnapshot = null;
+        Object.keys(snapshot).forEach(function (id) {
+          layoutState.positions[id] = snapshot[id];
+        });
+        announce(container, 'Reset undone. Every workspace is back where it was.');
+        settleLayout();
+      })
+      .catch(function () {
+        // The post-reset state is still valid and still saved; only the undo
+        // failed, so the offer stays (FR-112).
+        announce(
+          container,
+          'That could not be undone. The reset layout is unchanged — try Undo reset again.'
+        );
+      });
+  }
+
+  function deleteLayout() {
+    if (typeof fetch !== 'function') return Promise.reject(new Error('unavailable'));
+    return fetch(LAYOUT_ENDPOINT, {
+      method: 'DELETE',
+      headers: { Accept: 'application/json' }
+    }).then(function (response) {
+      if (!response || !response.ok) throw new Error('workspace map layout reset failed');
+      return response.json();
+    });
+  }
+
+  function bindResetLayout(container) {
+    var reset = container.querySelector('[data-map-reset-layout]');
+    if (reset && reset.addEventListener) {
+      reset.addEventListener('click', function () {
+        resetLayout(container);
+      });
+    }
+    var undo = container.querySelector('[data-map-undo-reset]');
+    if (undo) {
+      undo.hidden = !undoSnapshot;
+      if (undo.addEventListener) {
+        undo.addEventListener('click', function () {
+          undoReset(container);
+        });
+      }
+    }
+    var help = container.querySelector('[data-map-help]');
+    var panel = container.querySelector('[data-map-help-panel]');
+    if (help && panel && help.addEventListener) {
+      help.addEventListener('click', function () {
+        panel.hidden = !panel.hidden;
+        if (help.setAttribute) help.setAttribute('aria-expanded', panel.hidden ? 'false' : 'true');
+      });
+    }
+  }
+
   // ---------- build mode ----------
   //
   // An explicit, single-use placement state. Ordinary empty-space clicks keep
@@ -3594,6 +3757,7 @@
     bindBuildMode(container);
     bindTileDrag(container);
     bindDistrictDrag(container);
+    bindResetLayout(container);
     // A re-render (a refresh landing mid-placement) rebuilt the banner and the
     // marker, so restore what the user was in the middle of.
     if (buildState.active) restoreBuildMode(container);
@@ -3683,6 +3847,9 @@
     retryPlacement: retryFailedPlacement,
     snapPoint: snapPoint,
     snapStep: SNAP_STEP,
+    hasUndoableReset: function () {
+      return !!undoSnapshot;
+    },
     computeStats: computeStats,
     tileHTML: tileHTML,
     overviewBodyHTML: overviewBodyHTML,

@@ -2213,6 +2213,130 @@ test('a Tree reparent keeps absolute coordinates and only redraws the district (
   assert.ok(oldDistrictAfter.width < districtAfter.width, 'the old district shrank back');
 });
 
+// ---------------------------------------------------------------------------
+// Reset Layout and Undo (#292 FR-109 – FR-112)
+//
+// Reset clears the user's arrangement, not their workspaces — and it is
+// reversible for the session.
+// ---------------------------------------------------------------------------
+
+async function mountedReset({ confirm = true, deleteFails = false, undoFails = false } = {}) {
+  const calls = [];
+  const map = loadMapWithFetch(
+    (url, init) => {
+      const method = (init && init.method) || 'GET';
+      calls.push({ method, body: init && init.body ? JSON.parse(init.body) : null });
+      if (method === 'DELETE') {
+        if (deleteFails) return Promise.resolve({ ok: false, status: 500 });
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              result: { schema_version: 1, revision: 7, positions: {}, snap_to_grid: false }
+            })
+        });
+      }
+      if (method === 'PATCH') {
+        if (undoFails) return Promise.resolve({ ok: false, status: 500 });
+        const body = JSON.parse(init.body);
+        const restore = body.operations.find(op => op.op === 'restore_positions');
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              result: {
+                schema_version: 1,
+                revision: 8,
+                positions: (restore && restore.positions) || {},
+                snap_to_grid: false
+              }
+            })
+        });
+      }
+      return jsonResponse({
+        schema_version: 1,
+        revision: 1,
+        snap_to_grid: false,
+        positions: { 'ws-1': { x: 380, y: 228 }, 'ws-2': { x: 760, y: 456 } }
+      });
+    },
+    { confirm: () => confirm }
+  );
+  const harness = createCameraHarness({ tiles: ['ws-1', 'ws-2'] });
+  mountWithCamera(map, harness, [
+    { id: 'ws-1', name: 'Alpha' },
+    { id: 'ws-2', name: 'Beta' }
+  ]);
+  await flush();
+  return { map, harness, calls };
+}
+
+test('Reset Layout is confirmed, clears only positions, and keeps the snap preference (FR-110, FR-111)', async () => {
+  const { map, harness, calls } = await mountedReset();
+  assert.equal(map.getLayoutState().snapToGrid, false, 'the preference under test starts off');
+
+  harness.control('[data-map-reset-layout]').click();
+  await flush();
+
+  const deletes = calls.filter(c => c.method === 'DELETE');
+  assert.equal(deletes.length, 1, 'reset goes through the dedicated reset endpoint');
+  assert.equal(Object.keys(map.getLayoutState().positions).length, 0, 'anchors cleared');
+  assert.equal(map.getLayoutState().snapToGrid, false, 'the snap preference survived the reset');
+  assert.equal(map.hasUndoableReset(), true, 'an in-session undo is offered');
+});
+
+test('a declined confirmation resets nothing (FR-110)', async () => {
+  const { map, harness, calls } = await mountedReset({ confirm: false });
+  harness.control('[data-map-reset-layout]').click();
+  await flush();
+
+  assert.equal(calls.filter(c => c.method === 'DELETE').length, 0);
+  assert.equal(Object.keys(map.getLayoutState().positions).length, 2, 'positions untouched');
+  assert.equal(map.hasUndoableReset(), false);
+});
+
+test('Undo restores the exact pre-reset position set atomically (FR-112)', async () => {
+  const { map, harness, calls } = await mountedReset();
+  const before = map.getLayoutState().positions;
+
+  harness.control('[data-map-reset-layout]').click();
+  await flush();
+  harness.control('[data-map-undo-reset]').click();
+  await flush();
+
+  const restore = calls.find(c => c.body && c.body.operations[0].op === 'restore_positions');
+  assert.ok(restore, 'undo uses the atomic exact-restore operation');
+  assert.deepEqual(Object.keys(restore.body.operations[0].positions).sort(), ['ws-1', 'ws-2']);
+  const after = map.getLayoutState().positions;
+  assert.equal(after['ws-1'].x, before['ws-1'].x);
+  assert.equal(after['ws-2'].y, before['ws-2'].y);
+  assert.equal(map.hasUndoableReset(), false, 'the snapshot is consumed once');
+});
+
+test('a failed reset leaves the previous layout intact (FR-112)', async () => {
+  const { map, harness } = await mountedReset({ deleteFails: true });
+  harness.control('[data-map-reset-layout]').click();
+  await flush();
+
+  assert.equal(
+    Object.keys(map.getLayoutState().positions).length,
+    2,
+    'a reset that did not happen must not look like it did'
+  );
+  assert.equal(map.hasUndoableReset(), false, 'nothing to undo');
+});
+
+test('a failed Undo keeps the post-reset state and keeps offering the retry (FR-112)', async () => {
+  const { map, harness } = await mountedReset({ undoFails: true });
+  harness.control('[data-map-reset-layout]').click();
+  await flush();
+  harness.control('[data-map-undo-reset]').click();
+  await flush();
+
+  assert.equal(Object.keys(map.getLayoutState().positions).length, 0, 'still reset');
+  assert.equal(map.hasUndoableReset(), true, 'the undo offer survives a failed attempt');
+});
+
 test('merely reading the map never writes a coordinate (FR-23)', async () => {
   const calls = [];
   const map = loadMapWithFetch((url, init) => {

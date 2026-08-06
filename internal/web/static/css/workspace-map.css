@@ -494,6 +494,61 @@
   display: none;
 }
 
+/* The honest read-only notice: the map is navigable, but nothing can be saved
+   (#292 FR-105). Stated in words, not implied by a greyed-out button. */
+.ws-map-notice {
+  position: absolute;
+  z-index: 8;
+  top: 12px;
+  left: 16px;
+  right: 16px;
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--ws-line-bright);
+  background: var(--ws-bg-2);
+  color: var(--ws-ink-faint);
+  font-size: 12px;
+}
+
+/* Map help (FR-121). One line per gesture, opened from the ? control. */
+.ws-map-help {
+  position: absolute;
+  z-index: 9;
+  right: 16px;
+  bottom: 96px;
+  width: min(360px, calc(100% - 32px));
+  max-height: 60%;
+  overflow: auto;
+  padding: 12px 14px;
+  border: 1px solid var(--ws-line-bright);
+  background: var(--ws-bg-2);
+  color: var(--ws-ink);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.ws-map-help[hidden] {
+  display: none;
+}
+.ws-map-help h4 {
+  margin: 0 0 8px;
+  font-family: var(--ws-font-mono);
+  font-size: 11px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--ws-faction);
+}
+.ws-map-help ul {
+  margin: 0;
+  padding-left: 16px;
+}
+.ws-map-help li {
+  margin-bottom: 5px;
+}
+.ws-map-help-note {
+  margin: 8px 0 0;
+  color: var(--ws-ink-faint);
+}
+
 /* The shared announcement region. Visually hidden, never focus-stealing
    (FR-116). */
 .ws-map-live {
