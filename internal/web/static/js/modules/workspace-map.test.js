@@ -1276,12 +1276,19 @@ function createCameraHarness({ width = 1000, height = 600, tiles = [], districts
   function control(name) {
     if (!controls[name]) {
       const attrs = {};
+      const controlClasses = new Set();
       controls[name] = {
         disabled: false,
         hidden: true,
         textContent: '',
         attrs,
         style: {},
+        classList: {
+          add: c => controlClasses.add(c),
+          remove: c => controlClasses.delete(c),
+          contains: c => controlClasses.has(c),
+          toggle: (c, on) => (on ? controlClasses.add(c) : controlClasses.delete(c))
+        },
         setAttribute: (k, v) => (attrs[k] = String(v)),
         getAttribute: k => (k in attrs ? attrs[k] : null),
         // The selection bar owns a live count element inside it.
@@ -1942,7 +1949,8 @@ test('a drag over an occupied footprint shows a blocked indicator that clears on
     positions: { 'ws-1': { x: 380, y: 228 }, 'ws-2': { x: 760, y: 228 } }
   });
   const tile = harness.tile('ws-1');
-  const banner = harness.control('[data-map-build-text]');
+  const bannerText = harness.control('[data-map-build-text]');
+  const banner = harness.control('[data-map-build-banner]');
   harness.tile('ws-2').style.left = '760px';
   harness.tile('ws-2').style.top = '228px';
 
@@ -1950,20 +1958,24 @@ test('a drag over an occupied footprint shows a blocked indicator that clears on
   // Still clear of ws-2's footprint: no blocked state.
   tile.fire('pointermove', tilePointer(200, 100));
   assert.equal(tile.classList.contains('is-blocked'), false, 'not overlapping yet');
-  assert.doesNotMatch(banner.textContent, /Occupied/);
+  assert.equal(banner.classList.contains('is-blocked'), false);
+  assert.doesNotMatch(bannerText.textContent, /Occupied/);
 
   // 38 short of ws-2's anchor — inside its box, the exact #308 scenario.
   tile.fire('pointermove', tilePointer(442, 100));
   assert.ok(tile.classList.contains('is-blocked'), 'overlapping another building is shown, not silent');
-  assert.match(banner.textContent, /Occupied/, 'the state is also carried by text, not colour alone');
+  assert.ok(banner.classList.contains('is-blocked'), 'the banner box itself turns red too, not just the tile');
+  assert.match(bannerText.textContent, /Occupied/, 'the state is also carried by text, not colour alone');
 
   // Move back off it: the indicator clears live, not just on drop.
   tile.fire('pointermove', tilePointer(200, 100));
   assert.equal(tile.classList.contains('is-blocked'), false, 'clears once no longer overlapping');
+  assert.equal(banner.classList.contains('is-blocked'), false);
 
   tile.fire('pointerup', tilePointer(200, 100));
   await flush();
   assert.equal(tile.classList.contains('is-blocked'), false, 'nothing lingers after the drop');
+  assert.equal(banner.classList.contains('is-blocked'), false);
   assert.equal(patches.length, 1);
 });
 
@@ -2076,12 +2088,14 @@ test('a keyboard move over an occupied footprint shows a blocked indicator too, 
   });
   map.setSelectedId(null, [], 'ws-1');
   const tile = harness.tile('ws-1');
-  const banner = harness.control('[data-map-build-text]');
+  const bannerText = harness.control('[data-map-build-text]');
+  const banner = harness.control('[data-map-build-banner]');
   harness.tile('ws-2').style.left = '760px';
   harness.tile('ws-2').style.top = '228px';
 
   harness.control('[data-map-move]').click();
   assert.equal(tile.classList.contains('is-blocked'), false, 'starts clear');
+  assert.equal(banner.classList.contains('is-blocked'), false);
 
   // Shift+Right then Left nets +342: one snap step short of ws-2's anchor,
   // inside its footprint — the keyboard path must see the same collision the
@@ -2089,11 +2103,13 @@ test('a keyboard move over an occupied footprint shows a blocked indicator too, 
   harness.fire('keydown', keyEvent('ArrowRight', { shiftKey: true }));
   harness.fire('keydown', keyEvent('ArrowLeft'));
   assert.ok(tile.classList.contains('is-blocked'), 'a keyboard-driven overlap is shown live');
-  assert.match(banner.textContent, /Occupied/, 'the state is also carried by text, not colour alone');
+  assert.ok(banner.classList.contains('is-blocked'), 'the banner box itself turns red too, not just the tile');
+  assert.match(bannerText.textContent, /Occupied/, 'the state is also carried by text, not colour alone');
 
   harness.fire('keydown', keyEvent('Escape'));
   await flush();
   assert.equal(tile.classList.contains('is-blocked'), false, 'nothing lingers after cancelling');
+  assert.equal(banner.classList.contains('is-blocked'), false);
   assert.equal(patches.length, 0);
 });
 
@@ -2206,7 +2222,8 @@ test('a cluster drag over an outside footprint shows a blocked indicator that cl
 
   const handle = harness.handle('grp');
   const district = harness.district('grp');
-  const banner = harness.control('[data-map-build-text]');
+  const bannerText = harness.control('[data-map-build-text]');
+  const banner = harness.control('[data-map-build-banner]');
   const outsider = harness.tile('outsider');
   outsider.style.left = '900px';
   outsider.style.top = '900px';
@@ -2215,6 +2232,7 @@ test('a cluster drag over an outside footprint shows a blocked indicator that cl
   // Well clear of the outsider: no blocked state yet.
   handle.fire('pointermove', tilePointer(300, 300));
   assert.equal(district.classList.contains('is-blocked'), false, 'not overlapping yet');
+  assert.equal(banner.classList.contains('is-blocked'), false);
 
   // child-a (152,152) would land at (862,900) — one snap step short of the
   // outsider's anchor (900,900), inside its footprint.
@@ -2223,15 +2241,18 @@ test('a cluster drag over an outside footprint shows a blocked indicator that cl
     district.classList.contains('is-blocked'),
     'a cluster overlap is shown live, not only refused after the drop'
   );
-  assert.match(banner.textContent, /Occupied/, 'the state is also carried by text, not colour alone');
+  assert.ok(banner.classList.contains('is-blocked'), 'the banner box itself turns red too, not just the district');
+  assert.match(bannerText.textContent, /Occupied/, 'the state is also carried by text, not colour alone');
 
   // Back to clear ground before releasing: the indicator lifts live too.
   handle.fire('pointermove', tilePointer(300, 300));
   assert.equal(district.classList.contains('is-blocked'), false, 'clears once no longer overlapping');
+  assert.equal(banner.classList.contains('is-blocked'), false);
 
   handle.fire('pointerup', tilePointer(300, 300));
   await flush();
   assert.equal(district.classList.contains('is-blocked'), false, 'nothing lingers after the drop');
+  assert.equal(banner.classList.contains('is-blocked'), false);
 });
 
 test('a cluster move that would land on an outside building is refused, not resolved (FR-88)', async () => {

@@ -3018,9 +3018,16 @@
     if (!readout || !banner) return;
     if (!point) {
       if (!buildState.active) banner.hidden = true;
+      if (banner.classList) banner.classList.remove('is-blocked');
       return;
     }
     banner.hidden = false;
+    // The banner itself carries the same red signal as the tile/district
+    // outline — driven by which instruction it's showing, so every call site
+    // that already passes MOVE_BLOCKED_INSTRUCTION gets this for free.
+    if (banner.classList) {
+      banner.classList.toggle('is-blocked', instruction === MOVE_BLOCKED_INSTRUCTION);
+    }
     setBannerMode(container, instruction || MOVE_INSTRUCTION, false);
     readout.textContent = candidateLabel(point);
   }

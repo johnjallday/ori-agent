@@ -473,6 +473,18 @@
   color: var(--ws-faction);
   white-space: nowrap;
 }
+/* The banner turns the same red as the tile/district outline while the
+   current move candidate is occupied (set in setDragReadout, driven by
+   MOVE_BLOCKED_INSTRUCTION) — the instruction text right next to it still
+   says "Occupied" either way, so this is reinforcement, not the only signal
+   (FR-120). */
+.ws-map-build.is-blocked {
+  border-color: var(--ws-danger, #d9534f);
+}
+.ws-map-build.is-blocked .ws-map-build-dot,
+.ws-map-build.is-blocked .ws-map-build-coords {
+  color: var(--ws-danger, #d9534f);
+}
 /* Build mode gets its own cursor as well as the banner: the state is carried by
    shape and text, not by colour alone (FR-120). */
 .ws-map-canvas.is-building {
