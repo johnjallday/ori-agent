@@ -261,6 +261,31 @@ async function installFixtureRoutes(page: Page) {
       await json(route, { folders: README_SCENES.workspaces });
       return;
     }
+    // The coordinate Workspace Map reads the current user's layout on mount
+    // (#292). Fixturing it keeps the capture deterministic: without a saved
+    // arrangement the three fictional workspaces would fall back to automatic
+    // placement, which is correct but not the picture the README is meant to
+    // show. Only GET is answered -- a capture that wrote would not be a capture.
+    if (url.pathname === '/api/workspace-map/layout') {
+      if (route.request().method() !== 'GET') {
+        await json(route, { success: false }, 405);
+        return;
+      }
+      await json(route, {
+        success: true,
+        layout: {
+          schema_version: 1,
+          revision: 1,
+          snap_to_grid: true,
+          positions: {
+            'ws-personal-hq': { x: 38, y: 38 },
+            'ws-product-launch': { x: 418, y: 38 },
+            'ws-research-lab': { x: 228, y: 342 }
+          }
+        }
+      });
+      return;
+    }
     if (url.pathname === '/api/orchestration/scheduled-tasks/upcoming') {
       await json(route, { tasks: [] });
       return;
