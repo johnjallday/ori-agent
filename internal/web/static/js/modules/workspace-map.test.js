@@ -1912,6 +1912,31 @@ test('a drop onto an occupied anchor resolves to the nearest free one (FR-72)', 
   assert.equal(other.style.left, '456px', 'the resident building did not move to make room');
 });
 
+test('a drop one snap step from an occupied anchor is pushed clear of its footprint, not just its point (FR-72, FR-73)', async () => {
+  // ws-1 is dragged to a point distinct from ws-2's anchor — one snap step
+  // away — but still well inside ws-2's CELL_W-wide box, so the two would
+  // render fully stacked if only exact-point equality were checked.
+  const { harness, patches } = await mountedDrag({
+    positions: { 'ws-1': { x: 380, y: 228 }, 'ws-2': { x: 760, y: 228 } }
+  });
+  const tile = harness.tile('ws-1');
+  const other = harness.tile('ws-2');
+  other.style.left = '760px';
+  other.style.top = '228px';
+
+  tile.fire('pointerdown', tilePointer(100, 100));
+  tile.fire('pointermove', tilePointer(442, 100)); // world (722, 228): 38 short of ws-2
+  tile.fire('pointerup', tilePointer(442, 100));
+  await flush();
+
+  const committed = patches[0].operations[0].positions['ws-1'];
+  assert.ok(
+    Math.abs(committed.x - 760) >= 176 || Math.abs(committed.y - 228) >= 170,
+    'the resolved anchor must clear the occupied footprint, not just its point'
+  );
+  assert.equal(other.style.left, '760px', 'the resident building did not move to make room');
+});
+
 test('a failed save puts the building back and offers a retry (FR-71)', async () => {
   const { map, harness, patches } = await mountedDrag({ patchResponse: 'fail' });
   const tile = harness.tile('ws-1');
@@ -2135,6 +2160,36 @@ test('a cluster move that would land on an outside building is refused, not reso
 
   const moves = patches.filter(p => p.operations[0].op === 'translate_group');
   assert.equal(moves.length, 0, 'the collision blocked the commit');
+  assert.deepEqual(
+    { ...harness.district('grp').at() },
+    { x: 100, y: 100 },
+    'the district returned'
+  );
+  assert.deepEqual({ ...harness.tile('child-a').at() }, { x: 152, y: 152 });
+  assert.equal(outsider.style.left, '900px', 'the outside building was never touched');
+});
+
+test('a cluster move that would only overlap an outside building is refused too (FR-88, FR-73)', async () => {
+  const { harness, patches } = await mountedCluster();
+  // Snapping off, so the drag lands exactly where the arithmetic says.
+  harness.control('[data-map-snap]').click();
+  await flush();
+
+  const handle = harness.handle('grp');
+  const outsider = harness.tile('outsider');
+  outsider.style.left = '900px';
+  outsider.style.top = '900px';
+
+  // Move child-a from (152,152) to (862,900) — one snap step short of the
+  // outsider's anchor (900,900): a distinct point, but still inside its
+  // CELL_W-wide footprint.
+  handle.fire('pointerdown', tilePointer(0, 0));
+  handle.fire('pointermove', tilePointer(710, 748));
+  handle.fire('pointerup', tilePointer(710, 748));
+  await flush();
+
+  const moves = patches.filter(p => p.operations[0].op === 'translate_group');
+  assert.equal(moves.length, 0, 'an overlapping-but-distinct anchor is still a collision');
   assert.deepEqual(
     { ...harness.district('grp').at() },
     { x: 100, y: 100 },

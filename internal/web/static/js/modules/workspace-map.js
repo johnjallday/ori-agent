@@ -2773,19 +2773,32 @@
   }
 
   /**
+   * Would a box of CELL_W x CELL_H anchored at `a` overlap the same box
+   * anchored at `b`? Anchors are top-left corners (see placeElement), so this
+   * is a same-size axis-aligned rectangle intersection test. Touching edges
+   * (the boxes exactly abut) is not an overlap — only shared area is.
+   */
+  function footprintsOverlap(a, b) {
+    return Math.abs(a.x - b.x) < CELL_W && Math.abs(a.y - b.y) < CELL_H;
+  }
+
+  /**
    * Resolve where a drop may actually land.
    *
-   * Two buildings may not be committed to the same anchor (FR-72). When the
-   * requested point is taken, the nearest free anchor is chosen by walking a
-   * deterministic ring of snap-step offsets — nearest first, and in a fixed
-   * order at equal distance, so the same drop always resolves the same way. No
-   * other building is moved to make room (FR-74).
+   * A building's on-screen box is CELL_W x CELL_H, so "occupied" means "any
+   * part of this box already belongs to another building" — not just "the
+   * exact same point" (FR-72, FR-73: two buildings may not be committed to
+   * the same anchor, and every building's hit target must stay reachable).
+   * When the requested point would overlap, the nearest free anchor is chosen
+   * by walking a deterministic ring of snap-step offsets — nearest first, and
+   * in a fixed order at equal distance, so the same drop always resolves the
+   * same way. No other building is moved to make room (FR-74).
    */
   function resolveDropAnchor(id, point) {
-    var taken = Object.create(null);
+    var occupied = [];
     function claim(nodeId, anchor) {
       if (!anchor || nodeId === id) return;
-      taken[anchorKey(anchor)] = true;
+      occupied.push(anchor);
     }
     Object.keys(layoutState.positions).forEach(function (nodeId) {
       claim(nodeId, layoutState.positions[nodeId]);
@@ -2795,7 +2808,12 @@
         claim(node.id, node);
       });
     }
-    if (!taken[anchorKey(point)]) return { x: point.x, y: point.y, resolved: false };
+    function overlapsOccupied(candidate) {
+      return occupied.some(function (anchor) {
+        return footprintsOverlap(candidate, anchor);
+      });
+    }
+    if (!overlapsOccupied(point)) return { x: point.x, y: point.y, resolved: false };
 
     var step = layoutState.snapToGrid ? SNAP_STEP : Math.round(CELL_W / 4);
     for (var ring = 1; ring <= 12; ring++) {
@@ -2804,7 +2822,7 @@
           if (Math.max(Math.abs(dx), Math.abs(dy)) !== ring) continue;
           var candidate = { x: point.x + dx * step, y: point.y + dy * step };
           if (
-            !taken[anchorKey(candidate)] &&
+            !overlapsOccupied(candidate) &&
             isSafeCoordinate(candidate.x) &&
             isSafeCoordinate(candidate.y)
           ) {
@@ -3019,9 +3037,12 @@
   /**
    * Would this delta drop a cluster member on top of a building outside it?
    *
-   * A cluster collision is refused rather than resolved: nudging one member
-   * would shear the district, and moving the resident building would move
-   * something the user never touched (FR-88).
+   * Overlap, not just exact-anchor equality, counts as a collision here too
+   * (same footprint rule as resolveDropAnchor) — otherwise a group drag could
+   * still bury an outside building under a member's box. A cluster collision
+   * is refused rather than resolved: nudging one member would shear the
+   * district, and moving the resident building would move something the user
+   * never touched (FR-88).
    */
   function clusterCollides(groupId, members, delta) {
     var inCluster = Object.create(null);
@@ -3029,16 +3050,18 @@
     members.forEach(function (member) {
       inCluster[member.id] = true;
     });
-    var taken = Object.create(null);
+    var occupied = [];
     if (lastWorldLayout) {
       lastWorldLayout.nodes.forEach(function (node) {
         if (inCluster[node.id]) return;
-        var anchor = committedAnchor(node.id) || { x: node.x, y: node.y };
-        taken[anchorKey(anchor)] = true;
+        occupied.push(committedAnchor(node.id) || { x: node.x, y: node.y });
       });
     }
     return members.some(function (member) {
-      return taken[anchorKey({ x: member.origin.x + delta.x, y: member.origin.y + delta.y })];
+      var candidate = { x: member.origin.x + delta.x, y: member.origin.y + delta.y };
+      return occupied.some(function (anchor) {
+        return footprintsOverlap(candidate, anchor);
+      });
     });
   }
 
