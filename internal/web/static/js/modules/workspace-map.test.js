@@ -656,12 +656,20 @@ test('tileHTML shows no HQ badge for any workspace when no HQ is designated', ()
   assert.doesNotMatch(html, /ws-map-tile-hq-badge/);
 });
 
-test('selBarHTML offers group, delete, and clear actions for the multi-select set', () => {
+test('the selection bar is a count plus Clear — group and delete live in the context menu (#317)', () => {
   const { selBarHTML } = loadOriWorkspaceMap();
   const html = selBarHTML();
-  assert.match(html, /data-ws-selbar-group/);
-  assert.match(html, /data-ws-selbar-delete/);
+  assert.match(html, /data-ws-selbar-count/);
   assert.match(html, /data-ws-selbar-clear/);
+  assert.doesNotMatch(html, /data-ws-selbar-group/, 'Group moved to the context menu');
+  assert.doesNotMatch(html, /data-ws-selbar-delete/, 'Delete moved to the context menu');
+});
+
+test('the selection bar is hidden at zero and counts what is checked', () => {
+  const { selBarHTML } = loadOriWorkspaceMap();
+  const html = selBarHTML();
+  assert.match(html, /data-ws-selbar hidden/, 'nothing checked means nothing to show');
+  assert.match(html, />0 selected</);
 });
 
 // ---------------------------------------------------------------------------
@@ -2724,7 +2732,23 @@ const checkboxClick = () => ({
 // another realm and fail a strict deepEqual against host-built ones.
 const ids = calls => calls.map(call => Array.from(call));
 
-test('the selection bar hands the checked ids to the host (the shipped no-op)', async () => {
+// Right-click a tile. Since #317 this is how the bulk actions are reached: the
+// selection bar carries only the count and Clear, and Group/Delete moved into
+// the menu that opens on any checked building.
+const openTileMenu = (harness, id, at = { x: 200, y: 150 }) =>
+  harness.fire('contextmenu', {
+    target: {
+      closest: sel =>
+        sel.includes('data-ws-id') && !sel.includes('data-hq-site')
+          ? { getAttribute: () => id, focus() {} }
+          : null
+    },
+    clientX: at.x,
+    clientY: at.y,
+    preventDefault() {}
+  });
+
+test('the context menu hands the checked ids to the host (the shipped no-op)', async () => {
   const deleted = [];
   const grouped = [];
   const { harness } = bulkHarness({
@@ -2738,10 +2762,12 @@ test('the selection bar hands the checked ids to the host (the shipped no-op)', 
   harness.tile('ws-1').fire('click', checkboxClick());
   harness.tile('ws-2').fire('click', checkboxClick());
 
-  harness.container.querySelector('[data-ws-selbar-delete]').click();
+  openTileMenu(harness, 'ws-1');
+  harness.menu.item('delete-multi').fire('click');
   assert.deepEqual(ids(deleted), [['ws-1', 'ws-2']], 'Delete must reach the host');
 
-  harness.container.querySelector('[data-ws-selbar-group]').click();
+  openTileMenu(harness, 'ws-1');
+  harness.menu.item('group-multi').fire('click');
   assert.deepEqual(ids(grouped), [['ws-1', 'ws-2']], 'Group must reach the host');
 });
 
@@ -2753,8 +2779,10 @@ test('an unwired bulk action reports the wiring bug instead of doing nothing', a
   await flush();
 
   harness.tile('ws-1').fire('click', checkboxClick());
-  harness.container.querySelector('[data-ws-selbar-delete]').click();
-  harness.container.querySelector('[data-ws-selbar-group]').click();
+  openTileMenu(harness, 'ws-1');
+  harness.menu.item('delete-multi').fire('click');
+  openTileMenu(harness, 'ws-1');
+  harness.menu.item('group-multi').fire('click');
 
   assert.equal(errors.length, 2, 'both unwired actions must complain');
   assert.ok(
@@ -2779,13 +2807,19 @@ test('a modified Enter or Space toggles multi-select from the keyboard', async (
   // An unmodified Enter still opens rather than selecting, so the existing
   // keyboard contract is untouched.
   harness.tile('ws-1').fire('keydown', key('Enter'));
-  harness.container.querySelector('[data-ws-selbar-group]').click();
+  openTileMenu(harness, 'ws-1');
+  assert.equal(
+    harness.menu.item('group-multi'),
+    null,
+    'a bare Enter checked nothing, so the tile menu is the single-target one'
+  );
   assert.deepEqual(opened, ['ws-1'], 'a bare Enter still opens');
   assert.deepEqual(grouped, [], 'a bare Enter must not check anything');
 
   harness.tile('ws-1').fire('keydown', key('Enter', { shiftKey: true }));
   harness.tile('ws-2').fire('keydown', key(' ', { metaKey: true }));
-  harness.container.querySelector('[data-ws-selbar-group]').click();
+  openTileMenu(harness, 'ws-1');
+  harness.menu.item('group-multi').fire('click');
   assert.deepEqual(ids(grouped), [['ws-1', 'ws-2']], 'modified Enter/Space must check the tile');
   assert.deepEqual(opened, ['ws-1'], 'a modified key must not also open');
 });
@@ -2799,8 +2833,12 @@ test('clearMultiSelection empties the checked set after a group', async () => {
 
   harness.tile('ws-1').fire('click', checkboxClick());
   map.clearMultiSelection();
-  harness.container.querySelector('[data-ws-selbar-group]').click();
+  openTileMenu(harness, 'ws-1');
 
+  // With nothing checked, the tile is no longer part of a set, so it offers its
+  // own single-target menu — there is no bulk Group to press.
+  assert.equal(harness.menu.item('group-multi'), null);
+  assert.ok(harness.menu.item('toggle-selection'), 'and offers to add itself back');
   assert.deepEqual(grouped, [], 'a cleared selection has nothing to group');
 });
 
@@ -3073,17 +3111,19 @@ test('right-clicking an unselected tile selects it first, and never opens it (FR
 });
 
 test('right-click does not toggle the multi-select checkbox', async () => {
-  const grouped = [];
-  const { harness } = await menuHarness({
-    handlers: { onGroupWorkspaces: ids => grouped.push(ids) }
-  });
+  const { harness } = await menuHarness();
 
   harness.fire('contextmenu', rightClick(tileTarget('ws-1')).event);
-  assert.ok(harness.menu.isOpen(), 'the menu opened');
-  // The bulk set is what the checkbox feeds; a right-click must leave it empty.
-  harness.container.querySelector('[data-ws-selbar-group]').click();
 
-  assert.deepEqual(grouped, [], 'nothing was added to the bulk set');
+  // Nothing was checked, so this is the single-target menu — and it offers to
+  // add the tile, which it would not if the right-click had already done so.
+  assert.equal(harness.menu.item('group-multi'), null, 'the bulk set is still empty');
+  assert.equal(harness.menu.item('toggle-selection').label, 'Add to selection');
+  assert.equal(
+    harness.container.querySelector('[data-ws-selbar]').hidden,
+    true,
+    'the selection bar stayed hidden'
+  );
 });
 
 test('each tile item runs the action the rail runs', async () => {
@@ -3106,13 +3146,17 @@ test('each tile item runs the action the rail runs', async () => {
   open();
   harness.menu.item('toggle-selection').fire('click');
   open();
-  assert.equal(
-    harness.menu.item('toggle-selection').label,
-    'Remove from selection',
-    'the item now offers the inverse'
-  );
+  // The tile is now inside the checked set, so it acts on the set.
+  assert.equal(harness.menu.item('toggle-selection'), null);
+  assert.ok(harness.menu.item('delete-multi'), 'the tile joined the bulk set');
+  harness.menu.item('clear-selection').fire('click');
 
   open();
+  assert.equal(
+    harness.menu.item('toggle-selection').label,
+    'Add to selection',
+    'and offers to join again once the set is empty'
+  );
   harness.menu.item('delete').fire('click');
   assert.deepEqual(deleted, ['ws-1'], 'Delete routes to the host delete');
   assert.equal(map.getSelectedId(), 'ws-1');
@@ -3251,6 +3295,96 @@ test('closing the menu returns focus to the tile it was opened from (FR-19)', as
   });
   harness.menu.menu().fire('keydown', { key: 'Escape' });
   assert.equal(focused, 1, 'focus went back exactly once');
+});
+
+// --- the multi-target menu (FR-7, FR-11, FR-25) ------------------------------
+
+// Check both tiles the way a mouse user does, then right-click one of them.
+async function selectedPairHarness(handlers = {}) {
+  const ctx = await menuHarness({ handlers });
+  ctx.harness.tile('ws-1').fire('click', checkboxClick());
+  ctx.harness.tile('ws-2').fire('click', checkboxClick());
+  return ctx;
+}
+
+test('right-clicking inside the checked set opens the multi-target menu with the count', async () => {
+  const { harness } = await selectedPairHarness();
+  harness.fire('contextmenu', rightClick(tileTarget('ws-1')).event);
+
+  assert.deepEqual(harness.menu.labels(), [
+    'Group 2 workspaces',
+    'Clear selection',
+    'Delete 2 workspaces'
+  ]);
+});
+
+test('right-clicking inside the selection leaves the selection untouched (FR-7)', async () => {
+  const grouped = [];
+  const { harness } = await selectedPairHarness({ onGroupWorkspaces: list => grouped.push(list) });
+
+  harness.fire('contextmenu', rightClick(tileTarget('ws-2')).event);
+  harness.menu.item('group-multi').fire('click');
+
+  assert.deepEqual(
+    ids(grouped),
+    [['ws-1', 'ws-2']],
+    'both checked workspaces survived the right-click'
+  );
+});
+
+test('right-clicking outside the checked set gives that tile its own menu', async () => {
+  const { harness } = await menuHarness();
+  harness.tile('ws-1').fire('click', checkboxClick());
+
+  harness.fire('contextmenu', rightClick(tileTarget('ws-2')).event);
+  assert.ok(harness.menu.item('delete'), 'ws-2 is not in the set, so it acts on itself');
+  assert.equal(harness.menu.item('delete-multi'), null);
+});
+
+test('the multi-target labels count exactly what is checked', async () => {
+  const { harness } = await menuHarness();
+  harness.tile('ws-1').fire('click', checkboxClick());
+
+  harness.fire('contextmenu', rightClick(tileTarget('ws-1')).event);
+  assert.deepEqual(harness.menu.labels(), [
+    'Group 1 workspace',
+    'Clear selection',
+    'Delete 1 workspace'
+  ]);
+});
+
+test('the multi-target menu deletes and clears through the existing paths', async () => {
+  const deleted = [];
+  const { map, harness } = await selectedPairHarness({
+    onDeleteWorkspaces: list => deleted.push(list)
+  });
+
+  harness.fire('contextmenu', rightClick(tileTarget('ws-1')).event);
+  harness.menu.item('delete-multi').fire('click');
+  assert.deepEqual(ids(deleted), [['ws-1', 'ws-2']], 'one call, with both ids, no second confirm');
+
+  harness.fire('contextmenu', rightClick(tileTarget('ws-1')).event);
+  harness.menu.item('clear-selection').fire('click');
+  harness.fire('contextmenu', rightClick(tileTarget('ws-1')).event);
+  assert.equal(harness.menu.item('delete-multi'), null, 'Clear selection emptied the set');
+  assert.equal(map.getSelectedId(), 'ws-1', 'clearing the bulk set is not a selection change');
+});
+
+test('the selection bar still counts in place, and still hides at zero', async () => {
+  const { harness } = await menuHarness();
+  const bar = harness.container.querySelector('[data-ws-selbar]');
+  const count = harness.container.querySelector('[data-ws-selbar] [data-ws-selbar-count]');
+
+  harness.tile('ws-1').fire('click', checkboxClick());
+  assert.equal(bar.hidden, false, 'the bar appears once something is checked');
+  assert.equal(count.textContent, '1 selected');
+
+  harness.tile('ws-2').fire('click', checkboxClick());
+  assert.equal(count.textContent, '2 selected', 'updated in place, without a re-mount');
+
+  harness.tile('ws-1').fire('click', checkboxClick());
+  harness.tile('ws-2').fire('click', checkboxClick());
+  assert.equal(bar.hidden, true, 'and hides again at zero');
 });
 
 test('a re-mount closes an open menu instead of leaving it bound to dead DOM', async () => {

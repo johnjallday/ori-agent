@@ -1594,9 +1594,14 @@
     );
   }
 
-  // Contextual action bar for the multi-select set. Rendered inside the theatre
-  // and shown only while at least one tile is checked. Count text is refreshed
-  // in place by updateSelBar so toggling selection never re-mounts the map.
+  // Readout for the multi-select set. Shown only while at least one tile is
+  // checked, and refreshed in place by updateSelBar so toggling selection never
+  // re-mounts the map.
+  //
+  // Group and Delete used to live here. They moved into the context menu (#317)
+  // where the count is in the label and the cursor is already on one of the
+  // checked buildings; the bar keeps only what it is uniquely good at — saying
+  // how many are checked, and letting go of all of them at once.
   function selBarHTML() {
     var n = multiCount();
     return (
@@ -1607,8 +1612,6 @@
       n +
       ' selected</span>' +
       '<div class="ws-map-selbar-actions">' +
-      '<button type="button" class="ws-map-selbar-group" data-ws-selbar-group>⊕ Group</button>' +
-      '<button type="button" class="ws-map-selbar-del" data-ws-selbar-delete>✕ Delete</button>' +
       '<button type="button" class="ws-map-selbar-clear" data-ws-selbar-clear>Clear</button>' +
       '</div>' +
       '</div>'
@@ -2308,17 +2311,9 @@
     if (action) action(ids);
   }
 
-  function bindSelBar(container, options) {
-    var group = container.querySelector('[data-ws-selbar-group]');
-    if (group)
-      group.addEventListener('click', function () {
-        groupMulti(options);
-      });
-    var del = container.querySelector('[data-ws-selbar-delete]');
-    if (del)
-      del.addEventListener('click', function () {
-        deleteMulti(options);
-      });
+  // Only Clear is bound here now: Group and Delete are reached by right-clicking
+  // any checked building (see contextMenuItemsFor).
+  function bindSelBar(container) {
     var clr = container.querySelector('[data-ws-selbar-clear]');
     if (clr)
       clr.addEventListener('click', function () {
@@ -2423,18 +2418,50 @@
     return items;
   }
 
+  function workspaceCountLabel(verb, count) {
+    return verb + ' ' + count + (count === 1 ? ' workspace' : ' workspaces');
+  }
+
+  // The checked set, when the right-click landed inside it. The count is in
+  // every label rather than only in the confirm dialog, so the blast radius is
+  // visible before the click (FR-7, FR-11).
+  function multiMenuItems() {
+    var count = multiCount();
+    var readOnly = isMapReadOnly();
+    return [
+      { label: workspaceCountLabel('Group', count), action: 'group-multi', disabled: readOnly },
+      { label: 'Clear selection', action: 'clear-selection' },
+      menuDivider(),
+      {
+        label: workspaceCountLabel('Delete', count),
+        action: 'delete-multi',
+        variant: 'danger',
+        disabled: readOnly
+      }
+    ];
+  }
+
   // The item set for a resolved target. Pure apart from the module state the
   // rail reads too (multi-select set, setup cache, layout status), so a menu can
   // be asserted without a DOM.
   function contextMenuItemsFor(target) {
     var spec = target || {};
-    if (spec.type === 'tile') return tileMenuItems(spec.ws || { id: spec.id });
+    if (spec.type === 'tile') {
+      // A tile inside the checked set acts on the whole set; a tile outside it
+      // acts on itself. Which menu you get is therefore a statement about what
+      // is already selected, not a mode.
+      if (spec.id && multiSelected[spec.id]) return multiMenuItems();
+      return tileMenuItems(spec.ws || { id: spec.id });
+    }
     return [];
   }
 
   function menuLabelFor(target) {
     var spec = target || {};
     if (spec.type === 'tile') {
+      if (spec.id && multiSelected[spec.id]) {
+        return 'Actions for ' + multiCount() + ' selected';
+      }
       var name = (spec.ws && spec.ws.name) || 'workspace';
       return 'Actions for ' + name;
     }
@@ -2724,6 +2751,18 @@
         break;
       case 'delete':
         deleteWorkspace(id, options);
+        break;
+      // The bulk actions the selection bar used to carry. They run the host's
+      // own callbacks, so the existing confirm paths in workspace-bulk-actions
+      // are the only confirmation — the menu adds no second one.
+      case 'group-multi':
+        groupMulti(options);
+        break;
+      case 'delete-multi':
+        deleteMulti(options);
+        break;
+      case 'clear-selection':
+        clearMulti(container);
         break;
       default:
         break;
@@ -4409,7 +4448,7 @@
     // The first paint has a selection too, so its setup state is read here as
     // well as on every later selection change.
     ensureSetupStatus(container, findWs(workspaces, selectedId));
-    bindSelBar(container, state);
+    bindSelBar(container);
     // No resize listener: world coordinates are viewport-independent, so a
     // resize changes only how much of the world is visible — never where a
     // building is (FR-13, FR-46).

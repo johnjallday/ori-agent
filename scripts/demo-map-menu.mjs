@@ -228,6 +228,66 @@ try {
   await page.waitForTimeout(800);
   check(/\/workspaces\//.test(page.url()), 'Open navigated to the workspace: ' + page.url());
   await shot('06-opened-workspace');
+
+  // --- the checked set --------------------------------------------------
+  //
+  // Runs last, and mutates: it really groups workspaces on the demo server.
+  // The sandbox is thrown away when the demo server stops.
+  console.log('\n--- multi-select menu ---');
+  await page.goto(base + '/', { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('.ws-map-tile[data-ws-id]', { timeout: 15000 });
+  await frame(null);
+
+  const checked = await page.evaluate(() => {
+    const picked = [];
+    for (const tile of document.querySelectorAll('.ws-map-tile[data-ws-id]')) {
+      if (picked.length === 3) break;
+      const check = tile.querySelector('[data-ws-check]');
+      if (!check) continue;
+      check.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+      picked.push(tile.getAttribute('data-ws-id'));
+    }
+    return picked;
+  });
+  await page.waitForTimeout(200);
+  check(checked.length === 3, 'checked three workspaces: ' + checked.length);
+
+  const bar = await page.evaluate(() => {
+    const el = document.querySelector('[data-ws-selbar]');
+    if (!el) return null;
+    return {
+      hidden: el.hidden,
+      count: el.querySelector('[data-ws-selbar-count]')?.textContent,
+      buttons: [...el.querySelectorAll('button')].map(b => b.textContent.trim())
+    };
+  });
+  console.log('  selection bar: ' + JSON.stringify(bar));
+  check(bar?.hidden === false, 'the selection bar is showing');
+  check(bar?.count === '3 selected', 'it counts the checked set');
+  check(
+    JSON.stringify(bar?.buttons) === JSON.stringify(['Clear']),
+    'and carries only Clear now: ' + JSON.stringify(bar?.buttons)
+  );
+
+  const bulk = await openOnTile('bulk');
+  const bulkLabels = (bulk?.menu?.items || []).map(item => item.label);
+  console.log('  menu: ' + JSON.stringify(bulkLabels));
+  check(
+    bulkLabels.includes('Delete 3 workspaces'),
+    'the delete item names the blast radius before the click'
+  );
+  check(bulkLabels.includes('Group 3 workspaces'), 'so does the group item');
+  await shot('07-multi-menu');
+
+  // Group really runs: the existing flow asks for a name through a prompt.
+  page.on('dialog', dialog => dialog.accept('Demo Group'));
+  await page.click('[data-menu-action="group-multi"]');
+  await page.waitForTimeout(1500);
+  const districts = await page.evaluate(
+    () => document.querySelectorAll('.ws-map-district[data-group-id]').length
+  );
+  check(districts > 0, 'grouping produced a district on the map: ' + districts);
+  await shot('08-after-group');
 } finally {
   console.log('\n--- page noise (not failures) ---');
   if (noise.length === 0) console.log('  none');
