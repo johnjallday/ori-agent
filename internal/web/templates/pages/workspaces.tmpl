@@ -25,6 +25,11 @@
 
   {{template "modals.tmpl" .}}
 
+  <!-- This page is currently unreachable (`/workspaces` redirects to Home), but
+       it still loads personal-hq-onboarding.js below. Keep its modals included
+       so restoring the route cannot silently reintroduce #322. -->
+  {{template "personal-hq-modals.tmpl" .}}
+
   <!-- File Manager Modals -->
   {{template "file_preview_dialog"}}
   {{template "file_delete_dialog"}}
