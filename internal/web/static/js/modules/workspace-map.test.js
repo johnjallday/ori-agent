@@ -3525,6 +3525,195 @@ test('the canvas framing items move the camera without touching a workspace', as
   assert.equal(map.getCamera().zoom, 1, 'Reset view returns to 100%');
 });
 
+// --- read-only, the keyboard open path, and announcements (FR-3, FR-15, FR-21, FR-23) ---
+
+test('a read-only map disables exactly the mutating items, and nothing else', () => {
+  const map = loadOriWorkspaceMap();
+  map._setLayoutForTest({ positions: {} }, 'unavailable');
+
+  const tile = map.contextMenuItemsFor({ type: 'tile', id: 'ws-1', ws: { id: 'ws-1' } });
+  const byAction = items => {
+    const table = {};
+    items.forEach(item => {
+      if (item.action) table[item.action] = !!item.disabled;
+    });
+    return table;
+  };
+  const tileState = byAction(tile);
+  assert.equal(tileState.delete, true, 'Delete cannot run without a layout to save');
+  assert.equal(tileState.open, false, 'looking around is still allowed');
+  assert.equal(tileState['open-backlog'], false);
+  assert.equal(tileState['toggle-selection'], false);
+
+  const canvas = byAction(map.contextMenuItemsFor({ type: 'canvas' }));
+  assert.equal(canvas.create, true, 'New Workspace is disabled');
+  assert.equal(canvas.fit, false, 'the framing actions stay enabled');
+  assert.equal(canvas['reset-view'], false);
+
+  const district = byAction(
+    map.contextMenuItemsFor({ type: 'district', id: 'g', ws: { id: 'g', kind: 'group' } })
+  );
+  assert.equal(district.delete, true);
+  assert.equal(district.open, false);
+});
+
+test('a ready map disables nothing that a read-only one would', () => {
+  const map = loadOriWorkspaceMap();
+  map._setLayoutForTest({ positions: {} }, 'ready');
+  const items = map.contextMenuItemsFor({ type: 'tile', id: 'ws-1', ws: { id: 'ws-1' } });
+  assert.ok(items.every(item => !item.disabled));
+});
+
+test('disabled items are announced as disabled and skipped by arrow navigation (FR-21)', async () => {
+  const { map, harness } = await menuHarness();
+  // A map whose layout could not load: New Workspace is present but disabled.
+  map._setLayoutForTest({ positions: {} }, 'unavailable');
+
+  harness.fire('contextmenu', rightClick(canvasTarget()).event);
+  const create = harness.menu.item('create');
+  assert.equal(create.getAttribute('aria-disabled'), 'true', 'still present, still announced');
+  assert.notEqual(
+    harness.menu.focused().action,
+    'create',
+    'focus starts on the first enabled item'
+  );
+
+  const menu = harness.menu.menu();
+  menu.fire('keydown', { key: 'ArrowUp' });
+  assert.notEqual(harness.menu.focused().action, 'create', 'wrapping skips it too');
+
+  // And it cannot be run.
+  create.fire('click');
+  assert.ok(harness.menu.isOpen(), 'a disabled item does not even close the menu');
+});
+
+test('Shift+F10 and the Context Menu key open the menu from a focused target (FR-3)', async () => {
+  for (const key of [{ key: 'F10', shiftKey: true }, { key: 'ContextMenu' }]) {
+    const { harness, env } = await menuHarness();
+    // Tall enough that the menu opens below the element rather than flipping up
+    // over it — the flip itself is covered by the placement tests.
+    env.window.innerHeight = 1200;
+    let prevented = false;
+    harness.fire('keydown', {
+      ...key,
+      target: {
+        closest: sel =>
+          sel.includes('data-ws-id') && !sel.includes('data-hq-site')
+            ? {
+                getAttribute: () => 'ws-1',
+                focus() {},
+                getBoundingClientRect: () => ({ left: 300, top: 200, width: 176, height: 150 })
+              }
+            : null
+      },
+      preventDefault: () => {
+        prevented = true;
+      }
+    });
+    assert.ok(harness.menu.isOpen(), JSON.stringify(key) + ' opens the menu');
+    assert.ok(prevented, 'and suppresses the browser default');
+    // Anchored to the element, since a key press has no cursor position.
+    assert.equal(harness.menu.menu().style.left, '300px');
+    assert.equal(harness.menu.menu().style.top, '350px', 'below the focused element');
+  }
+});
+
+test('an ordinary key press does not open the menu', async () => {
+  const { harness } = await menuHarness();
+  harness.fire('keydown', {
+    key: 'F10',
+    target: { closest: () => ({ getAttribute: () => 'ws-1' }) }
+  });
+  assert.equal(harness.menu.isOpen(), false, 'F10 without Shift is not the gesture');
+});
+
+test('menu actions speak through the map’s existing live region (FR-23)', async () => {
+  const { harness } = await menuHarness({ handlers: { onDeleteWorkspace() {} } });
+  const live = harness.container.querySelector('[data-map-live]');
+
+  harness.fire('contextmenu', rightClick(tileTarget('ws-1')).event);
+  harness.menu.item('toggle-selection').fire('click');
+  assert.match(live.textContent, /Added Alpha\. 1 selected/);
+
+  harness.fire('contextmenu', rightClick(tileTarget('ws-1')).event);
+  harness.menu.item('clear-selection').fire('click');
+  assert.equal(live.textContent, 'Selection cleared');
+
+  harness.fire('contextmenu', rightClick(tileTarget('ws-1')).event);
+  harness.menu.item('delete').fire('click');
+  assert.match(live.textContent, /Delete Alpha — confirm to continue/, 'it claims no outcome');
+});
+
+test('the announcement never moves focus (FR-24)', async () => {
+  const { harness } = await menuHarness();
+  let focusCalls = 0;
+  const origin = {
+    getAttribute: () => 'ws-1',
+    focus: () => (focusCalls += 1)
+  };
+  harness.fire('contextmenu', {
+    target: { closest: sel => (sel.includes('data-ws-id') ? origin : null) },
+    clientX: 100,
+    clientY: 100,
+    preventDefault() {}
+  });
+  harness.menu.item('toggle-selection').fire('click');
+  // Exactly one focus call: the deliberate restore on close, not the
+  // announcement.
+  assert.equal(focusCalls, 1);
+});
+
+test('focus returns to its origin from every target', async () => {
+  const targets = [
+    ['tile', tileTarget('ws-1')],
+    ['district', districtTarget('grp-1')],
+    ['HQ site', hqTarget()],
+    ['canvas', canvasTarget()]
+  ];
+  for (const [name, matcher] of targets) {
+    const { harness } = await menuHarness();
+    let focused = 0;
+    const origin = { getAttribute: () => 'grp-1', focus: () => (focused += 1) };
+    harness.fire('contextmenu', {
+      target: {
+        closest: sel => {
+          const hit = matcher(sel);
+          return hit ? Object.assign({}, hit, origin) : null;
+        }
+      },
+      clientX: 120,
+      clientY: 120,
+      preventDefault() {}
+    });
+    assert.ok(harness.menu.isOpen(), name + ' opened a menu');
+    harness.menu.menu().fire('keydown', { key: 'Escape' });
+    assert.equal(focused, 1, 'focus went back to the ' + name);
+  }
+});
+
+test('the legacy launcher mode behaves exactly like the cockpit', async () => {
+  const env = menuEnvironment();
+  const map = loadMapForMenu(env);
+  const harness = createCameraHarness({ tiles: ['ws-1', 'ws-2'] });
+  // No selectOnly, no hideChrome: the /workspaces launcher's mount.
+  map.mount(harness.container, {
+    workspaces: [
+      { id: 'ws-1', name: 'Alpha' },
+      { id: 'ws-2', name: 'Beta' }
+    ]
+  });
+  await flush();
+
+  harness.fire('contextmenu', rightClick(tileTarget('ws-2')).event);
+  assert.deepEqual(harness.menu.labels(), [
+    'Open workspace',
+    'Open → Backlog',
+    'Add to selection',
+    'Delete workspace'
+  ]);
+  assert.equal(map.getSelectedId(), 'ws-2', 'and right-click still selects first');
+});
+
 test('a re-mount closes an open menu instead of leaving it bound to dead DOM', async () => {
   const { map, harness } = await menuHarness();
   harness.fire('contextmenu', rightClick(tileTarget('ws-1')).event);

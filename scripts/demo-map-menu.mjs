@@ -299,6 +299,72 @@ try {
   check(/\/workspaces\//.test(page.url()), 'Open navigated to the workspace: ' + page.url());
   await shot('06-opened-workspace');
 
+  // --- keyboard only ------------------------------------------------------
+  console.log('\n--- keyboard: Shift+F10, arrows, Enter, focus restore ---');
+  await page.goto(base + '/', { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('.ws-map-tile[data-ws-id]', { timeout: 15000 });
+  await frame(null);
+
+  // Focus a building the way a keyboard user reaches it, then open its menu.
+  const focusedId = await page.evaluate(() => {
+    const tile = document.querySelector('.ws-map-tile[data-ws-id]');
+    tile.focus();
+    return document.activeElement === tile ? tile.getAttribute('data-ws-id') : '';
+  });
+  check(!!focusedId, 'a building can take keyboard focus: ' + focusedId);
+
+  await page.keyboard.press('Shift+F10');
+  await page.waitForTimeout(150);
+  const keyboardMenu = await menuState();
+  check(!!keyboardMenu, 'Shift+F10 opens the menu');
+  const activeIsItem = () =>
+    page.evaluate(() => ({
+      action: document.activeElement?.getAttribute('data-menu-action') || null,
+      tabindex: document.activeElement?.getAttribute('tabindex') || null
+    }));
+  const firstFocus = await activeIsItem();
+  console.log('  focus on open: ' + JSON.stringify(firstFocus));
+  check(firstFocus.action === 'open', 'focus lands on the first item');
+  check(firstFocus.tabindex === '0', 'and it is the tabbable one (roving tabindex)');
+  await shot('07-keyboard-menu');
+
+  await page.keyboard.press('ArrowDown');
+  const second = await activeIsItem();
+  check(second.action === 'open-backlog', 'ArrowDown moves to the next item');
+  await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('ArrowUp');
+  const wrapped = await activeIsItem();
+  check(wrapped.action === 'delete', 'ArrowUp wraps to the last item: ' + wrapped.action);
+  await page.keyboard.press('Home');
+  check((await activeIsItem()).action === 'open', 'Home jumps to the first item');
+
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(120);
+  check((await menuState()) === null, 'Escape closes the menu');
+  const restored = await page.evaluate(
+    () => document.activeElement?.getAttribute('data-ws-id') || ''
+  );
+  check(restored === focusedId, 'focus returned to the building: ' + restored);
+
+  // Enter really runs the focused item — announced through the map's own live
+  // region, with no second one anywhere on the page.
+  await page.keyboard.press('Shift+F10');
+  await page.waitForTimeout(120);
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowDown');
+  const beforeEnter = await activeIsItem();
+  check(beforeEnter.action === 'toggle-selection', 'arrowed to Add to selection');
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(200);
+  const announced = await page.evaluate(() => {
+    const regions = document.querySelectorAll('[data-map-live]');
+    return { count: regions.length, text: regions[0]?.textContent || '' };
+  });
+  console.log('  live region: ' + JSON.stringify(announced));
+  check(announced.count === 1, 'exactly one live region, the map’s existing one');
+  check(/selected/.test(announced.text), 'the action announced its result: ' + announced.text);
+  await shot('08-keyboard-announced');
+
   // --- the other three targets ------------------------------------------
   console.log('\n--- district, HQ site, and empty canvas ---');
   await page.goto(base + '/', { waitUntil: 'domcontentloaded' });
@@ -312,7 +378,7 @@ try {
     JSON.stringify(districtLabels) === JSON.stringify(['Open group', 'Delete group']),
     'the district menu is Open group + Delete group'
   );
-  await shot('07-district-menu');
+  await shot('09-district-menu');
   await page.keyboard.press('Escape');
 
   const hq = await openOn('[data-hq-site]', 'HQ site');
@@ -321,7 +387,7 @@ try {
   check(hqLabels[0] === 'Build My HQ', 'the HQ menu leads with Build My HQ');
   check(hqLabels.includes('Import HQ'), 'and offers Import HQ');
   check(!hqLabels.includes('Clear broken HQ link'), 'no repair entry on a healthy site');
-  await shot('08-hq-menu');
+  await shot('10-hq-menu');
   await page.keyboard.press('Escape');
 
   const canvas = await openAtPoint(await emptyCanvasPoint(), 'empty canvas');
@@ -336,7 +402,7 @@ try {
       (await page.evaluate(() => !!window.OriWorkspaceMap.getSelectedId())),
     'Center selected is disabled when nothing is selected'
   );
-  await shot('09-canvas-menu');
+  await shot('11-canvas-menu');
 
   await page.click('[data-menu-action="create"]');
   await page.waitForTimeout(900);
@@ -344,7 +410,7 @@ try {
     () => !!document.querySelector('.modal.show, dialog[open], [data-create-workspace-open]')
   );
   check(modalOpen, 'New Workspace opened the existing create flow');
-  await shot('10-create-modal');
+  await shot('12-create-modal');
   await page.keyboard.press('Escape');
   await page.waitForTimeout(400);
 
@@ -396,7 +462,7 @@ try {
     'the delete item names the blast radius before the click'
   );
   check(bulkLabels.includes('Group 3 workspaces'), 'so does the group item');
-  await shot('11-multi-menu');
+  await shot('13-multi-menu');
 
   // Group really runs: the existing flow asks for a name through a prompt.
   page.on('dialog', dialog => dialog.accept('Demo Group'));
@@ -406,7 +472,7 @@ try {
     () => document.querySelectorAll('.ws-map-district[data-group-id]').length
   );
   check(districts > 0, 'grouping produced a district on the map: ' + districts);
-  await shot('12-after-group');
+  await shot('14-after-group');
 } finally {
   console.log('\n--- page noise (not failures) ---');
   if (noise.length === 0) console.log('  none');

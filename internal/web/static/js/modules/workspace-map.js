@@ -2582,6 +2582,17 @@
     menu.style.top = placed.top + 'px';
   }
 
+  // A right-click anchors at the cursor; the keyboard open path anchors at the
+  // focused element instead, so the menu appears where the user's attention
+  // already is (FR-3).
+  function anchorForElement(el) {
+    if (el && typeof el.getBoundingClientRect === 'function') {
+      var rect = el.getBoundingClientRect();
+      if (rect) return { x: rect.left || 0, y: (rect.top || 0) + (rect.height || 0) };
+    }
+    return { x: 0, y: 0 };
+  }
+
   function menuItemElements(menu) {
     if (!menu || typeof menu.querySelectorAll !== 'function') return [];
     return Array.prototype.slice.call(menu.querySelectorAll('[data-menu-action]'));
@@ -2669,7 +2680,11 @@
     if (!state || !el || isMenuItemDisabled(el)) return;
     var action = el.getAttribute ? el.getAttribute('data-menu-action') : '';
     var container = state.container;
-    var context = state.context;
+    // The chosen item's own wording travels with the action, so an announcement
+    // can say what the user actually picked.
+    var context = Object.assign({}, state.context, {
+      label: String(el.textContent || el.label || '').trim()
+    });
     var options = state.options;
     // Close first: focus goes back to the target before the action runs, so a
     // confirm dialog or a navigation starts from a sane place.
@@ -2793,39 +2808,64 @@
     return true;
   }
 
+  /**
+   * Run a chosen item.
+   *
+   * Every result is spoken through the map's existing live region rather than a
+   * second one of the menu's own (FR-23), and announce() never moves focus
+   * (FR-24). Where the action is the host's — delete, group — the map says what
+   * it asked for, not what happened: the confirmation and the outcome belong to
+   * workspace-bulk-actions, and claiming a result here would sometimes be a lie.
+   */
   function runMenuAction(container, action, context, options) {
     var id = context.id || '';
+    var name = context.name || 'workspace';
+    var count = multiCount();
     switch (action) {
       case 'open':
         // The map's explicit open: the host's onOpen when it has one (the
         // cockpit records the first action there), else plain navigation, which
         // is what the rail's Open button does.
+        announce(container, 'Opening ' + name);
         if (options && typeof options.onOpen === 'function') options.onOpen(id);
         else openWorkspace(id);
         break;
       case 'open-backlog':
+        announce(container, 'Opening the Backlog for ' + name);
         openWorkspace(id, { panel: 'backlog' });
         break;
       case 'open-setup':
+        announce(container, 'Opening Setup for ' + name);
         openWorkspace(id, { setup: true });
         break;
       case 'toggle-selection':
+        var wasSelected = !!multiSelected[id];
         toggleMulti(container, id);
+        announce(
+          container,
+          (wasSelected ? 'Removed ' + name + ' from the selection. ' : 'Added ' + name + '. ') +
+            multiCount() +
+            ' selected'
+        );
         break;
       case 'delete':
+        announce(container, 'Delete ' + name + ' — confirm to continue');
         deleteWorkspace(id, options);
         break;
       // The bulk actions the selection bar used to carry. They run the host's
       // own callbacks, so the existing confirm paths in workspace-bulk-actions
       // are the only confirmation — the menu adds no second one.
       case 'group-multi':
+        announce(container, workspaceCountLabel('Grouping', count));
         groupMulti(options);
         break;
       case 'delete-multi':
+        announce(container, workspaceCountLabel('Delete', count) + ' — confirm to continue');
         deleteMulti(options);
         break;
       case 'clear-selection':
         clearMulti(container);
+        announce(container, 'Selection cleared');
         break;
       // The HQ site's four choices reach the host exactly as the rail's buttons
       // do — one custom event, one action name.
@@ -2833,9 +2873,11 @@
       case 'hq-import':
       case 'hq-clear':
       case 'hq-skip':
+        announce(container, 'Personal HQ: ' + (context.label || action.slice(3)));
         dispatchHQAction(action.slice(3));
         break;
       case 'create':
+        announce(container, 'Opening the new workspace flow');
         triggerCreateWorkspace();
         break;
       // Framing actions. Same calls and same announcements as the control
@@ -2887,7 +2929,18 @@
     var district = node.closest('.ws-map-district');
     if (district) {
       var groupId = district.getAttribute('data-group-id');
-      return { type: 'district', id: groupId, ws: findWs(workspaces, groupId), element: district };
+      // Focus goes back to the district's label button, not to the outline: the
+      // outline is a plain div and cannot hold focus (FR-19).
+      var tag =
+        typeof district.querySelector === 'function'
+          ? district.querySelector('.ws-map-district-tag')
+          : null;
+      return {
+        type: 'district',
+        id: groupId,
+        ws: findWs(workspaces, groupId),
+        element: tag || district
+      };
     }
     var canvas = node.closest('.ws-map-canvas');
     if (canvas) return { type: 'canvas', element: canvas };
@@ -2917,7 +2970,11 @@
       label: menuLabelFor(target),
       at: at,
       origin: target.element,
-      context: { id: target.id || '', type: target.type },
+      context: {
+        id: target.id || '',
+        type: target.type,
+        name: (target.ws && target.ws.name) || (target.type === 'hq' ? 'Personal HQ' : 'workspace')
+      },
       options: options,
       event: event
     });
@@ -2945,6 +3002,30 @@
         options,
         target,
         { x: (event && event.clientX) || 0, y: (event && event.clientY) || 0 },
+        event
+      );
+    });
+
+    // The keyboard equivalent (FR-3). Both of the platform gestures work — the
+    // Context Menu key and Shift+F10 — and the menu opens at the focused
+    // element, because there is no cursor to anchor to. Canvas is deliberately
+    // absent: the map's own controls already carry those actions, and a key
+    // press on the canvas has no location to mean.
+    canvas.addEventListener('keydown', function (event) {
+      if (!event) return;
+      var wanted = event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey);
+      if (!wanted) return;
+      if (dragState || clusterDrag) return;
+      var target = resolveMenuTarget(event.target, workspaces);
+      if (!target || target.type === 'canvas') return;
+      if (!contextMenuItemsFor(target).length) return;
+      if (event.preventDefault) event.preventDefault();
+      openMenuForTarget(
+        container,
+        workspaces,
+        options,
+        target,
+        anchorForElement(target.element),
         event
       );
     });
