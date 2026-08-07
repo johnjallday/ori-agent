@@ -756,6 +756,14 @@ func (b *ServerBuilder) wireSetupWizard() {
 			}
 		}
 	}
+	if b.githubHandler != nil {
+		if folders, ok := b.workspaceStore.(githubhttp.WorkspaceStore); ok {
+			adapter := githubhttp.NewSetupAdapter(b.githubHandler.Connection(), folders)
+			if err := registry.Register(adapter); err != nil {
+				logger.Warn("GitHub Ops setup adapter not registered", logger.Fields{"error": err})
+			}
+		}
+	}
 	if b.reaperResolver != nil {
 		if err := registry.Register(reapersetup.NewSetupAdapter(b.reaperResolver)); err != nil {
 			logger.Warn("Reaper Song setup adapter not registered", logger.Fields{"error": err})

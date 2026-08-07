@@ -17,9 +17,9 @@ import { chromium } from "playwright";
 import { mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 
-const [baseUrl, outDir] = process.argv.slice(2);
+const [baseUrl, outDir, workspaceId] = process.argv.slice(2);
 if (!baseUrl || !outDir) {
-  console.error("usage: node scripts/demo-github.mjs <baseUrl> <outDir>");
+  console.error("usage: node scripts/demo-github.mjs <baseUrl> <outDir> [workspaceId]");
   process.exit(1);
 }
 mkdirSync(resolve(outDir), { recursive: true });
@@ -65,14 +65,28 @@ async function shot(name) {
 }
 
 try {
-  await page.goto(`${baseUrl}/settings`, { waitUntil: "networkidle" });
-  await dismissOverlays();
+  if (workspaceId) {
+    // Setup Wizard mode: capture the wizard on the workspace it belongs to.
+    // The workspace page keeps a live connection open, so networkidle never
+    // settles here -- wait for the document instead and then let it paint.
+    await page.goto(`${baseUrl}/workspaces/${workspaceId}`, { waitUntil: "domcontentloaded" });
+    await page.waitForTimeout(2500);
+    await dismissOverlays();
+    await page.waitForTimeout(1200);
 
-  // The nav item drives the section switch.
-  await page.getByRole("link", { name: "GitHub Account" }).click();
-  await page.waitForTimeout(800);
+    const file = join(resolve(outDir), "setup-wizard.png");
+    await page.screenshot({ path: file, fullPage: false });
+    console.log("  wrote setup-wizard.png");
+  } else {
+    await page.goto(`${baseUrl}/settings`, { waitUntil: "networkidle" });
+    await dismissOverlays();
 
-  await shot("settings-github");
+    // The nav item drives the section switch.
+    await page.getByRole("link", { name: "GitHub Account" }).click();
+    await page.waitForTimeout(800);
+
+    await shot("settings-github");
+  }
 
   if (problems.length) {
     failures += 1;

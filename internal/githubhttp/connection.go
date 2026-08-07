@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -236,6 +237,193 @@ func (c *Connection) Status(ctx context.Context) Status {
 		TokenType: identity.TokenType,
 		CheckedAt: time.Now().UTC(),
 	}
+}
+
+// Repository is one repository the stored token can reach. It holds nothing
+// secret and is safe to return over HTTP.
+type Repository struct {
+	// FullName is "owner/name" -- the form a workspace binds to.
+	FullName string `json:"full_name"`
+	Private  bool   `json:"private"`
+	// OpenIssues is shown in the picker so an obviously-empty repo is
+	// recognizable before it is chosen.
+	OpenIssues int `json:"open_issues"`
+}
+
+// maxRepositoryPages bounds repo listing. A user with more repositories than
+// this uses the search box instead of scrolling: paging an entire large
+// account on every wizard render would be slow and would burn rate limit for
+// no benefit.
+const (
+	maxRepositoryPages  = 4
+	repositoriesPerPage = 100
+)
+
+// ListRepositories returns the repositories the stored token can reach, newest
+// activity first. When query is non-empty it filters server-side via the
+// search API, which is what keeps a large account usable.
+func (c *Connection) ListRepositories(ctx context.Context, query string) ([]Repository, error) {
+	token, ok, err := mcp.LoadStaticBearerToken(ctx, MCPServerConfig())
+	if err != nil {
+		if errors.Is(err, mcp.ErrCredentialStoreLocked) {
+			return nil, &ConnectionError{
+				Category: ErrorCategoryVaultLocked,
+				Message:  "Your vault is locked. Unlock it to choose a repository.",
+			}
+		}
+		return nil, &ConnectionError{
+			Category: ErrorCategoryUnavailable,
+			Message:  "Could not read the saved GitHub connection.",
+		}
+	}
+	if !ok {
+		return nil, &ConnectionError{
+			Category: ErrorCategoryNotConnected,
+			Message:  "Connect GitHub before choosing a repository.",
+		}
+	}
+
+	if trimmed := strings.TrimSpace(query); trimmed != "" {
+		return c.searchRepositories(ctx, token, trimmed)
+	}
+	return c.listAffiliatedRepositories(ctx, token)
+}
+
+func (c *Connection) listAffiliatedRepositories(ctx context.Context, token string) ([]Repository, error) {
+	repos := make([]Repository, 0, repositoriesPerPage)
+	for page := 1; page <= maxRepositoryPages; page++ {
+		url := fmt.Sprintf("%s/user/repos?per_page=%d&page=%d&sort=pushed", apiBaseURL, repositoriesPerPage, page)
+		resp, err := c.do(ctx, token, http.MethodGet, url)
+		if err != nil {
+			return nil, err
+		}
+		if resp.StatusCode != http.StatusOK {
+			err := classifyResponse(resp)
+			_ = resp.Body.Close()
+			return nil, err
+		}
+		var batch []struct {
+			FullName   string `json:"full_name"`
+			Private    bool   `json:"private"`
+			OpenIssues int    `json:"open_issues_count"`
+		}
+		decodeErr := json.NewDecoder(resp.Body).Decode(&batch)
+		_ = resp.Body.Close()
+		if decodeErr != nil {
+			return nil, &ConnectionError{
+				Category: ErrorCategoryUnavailable,
+				Message:  "GitHub returned a repository list Ori could not read.",
+			}
+		}
+		for _, r := range batch {
+			if name := strings.TrimSpace(r.FullName); name != "" {
+				repos = append(repos, Repository{FullName: name, Private: r.Private, OpenIssues: r.OpenIssues})
+			}
+		}
+		// A short page is the last page.
+		if len(batch) < repositoriesPerPage {
+			break
+		}
+	}
+	return repos, nil
+}
+
+func (c *Connection) searchRepositories(ctx context.Context, token, query string) ([]Repository, error) {
+	// Scope the search to repositories the caller can actually act on, so the
+	// picker never offers something the token cannot reach.
+	q := url.QueryEscape(query + " fork:true")
+	endpoint := fmt.Sprintf("%s/search/repositories?q=%s&per_page=%d", apiBaseURL, q, repositoriesPerPage)
+
+	resp, err := c.do(ctx, token, http.MethodGet, endpoint)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return nil, classifyResponse(resp)
+	}
+
+	var body struct {
+		Items []struct {
+			FullName   string `json:"full_name"`
+			Private    bool   `json:"private"`
+			OpenIssues int    `json:"open_issues_count"`
+		} `json:"items"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return nil, &ConnectionError{
+			Category: ErrorCategoryUnavailable,
+			Message:  "GitHub returned search results Ori could not read.",
+		}
+	}
+	repos := make([]Repository, 0, len(body.Items))
+	for _, r := range body.Items {
+		if name := strings.TrimSpace(r.FullName); name != "" {
+			repos = append(repos, Repository{FullName: name, Private: r.Private, OpenIssues: r.OpenIssues})
+		}
+	}
+	return repos, nil
+}
+
+// CheckRepository verifies the stored token can still reach fullName. It is
+// the per-repo half of the readiness check: a connection that works overall
+// says nothing about whether *this* workspace's repo is still visible, which
+// is exactly what changes when a token is replaced with a narrower one.
+func (c *Connection) CheckRepository(ctx context.Context, fullName string) error {
+	owner, name, ok := SplitRepo(fullName)
+	if !ok {
+		return &ConnectionError{
+			Category: ErrorCategoryNotConnected,
+			Message:  "No repository is chosen for this workspace yet.",
+		}
+	}
+
+	token, stored, err := mcp.LoadStaticBearerToken(ctx, MCPServerConfig())
+	if err != nil {
+		if errors.Is(err, mcp.ErrCredentialStoreLocked) {
+			return &ConnectionError{
+				Category: ErrorCategoryVaultLocked,
+				Message:  "Your vault is locked. Unlock it to check this repository.",
+			}
+		}
+		return &ConnectionError{
+			Category: ErrorCategoryUnavailable,
+			Message:  "Could not read the saved GitHub connection.",
+		}
+	}
+	if !stored {
+		return &ConnectionError{
+			Category: ErrorCategoryNotConnected,
+			Message:  "GitHub is not connected yet.",
+		}
+	}
+
+	resp, err := c.do(ctx, token, http.MethodGet,
+		fmt.Sprintf("%s/repos/%s/%s", apiBaseURL, url.PathEscape(owner), url.PathEscape(name)))
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return classifyResponse(resp)
+	}
+	return nil
+}
+
+// SplitRepo splits an "owner/name" reference. It reports ok == false for
+// anything that is not exactly two non-empty segments, so a malformed binding
+// can never be turned into a request path.
+func SplitRepo(fullName string) (owner, name string, ok bool) {
+	parts := strings.Split(strings.TrimSpace(fullName), "/")
+	if len(parts) != 2 {
+		return "", "", false
+	}
+	owner = strings.TrimSpace(parts[0])
+	name = strings.TrimSpace(parts[1])
+	if owner == "" || name == "" {
+		return "", "", false
+	}
+	return owner, name, true
 }
 
 // identify runs `GET /user` with an explicit token. It is the single place a

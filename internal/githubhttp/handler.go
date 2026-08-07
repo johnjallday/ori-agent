@@ -27,6 +27,16 @@ func NewHandler(conn *Connection, guard Guard) *Handler {
 	return &Handler{conn: conn, guard: guard}
 }
 
+// Connection exposes the global connection so server wiring can share the one
+// instance between the HTTP surface and the setup adapter -- they must agree
+// about connection state, and two instances would each hold their own client.
+func (h *Handler) Connection() *Connection {
+	if h == nil {
+		return nil
+	}
+	return h.conn
+}
+
 // Register wires the routes onto mux, mirroring the
 // /api/connections/<provider>/... convention the Google connection
 // established.

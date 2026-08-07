@@ -31,7 +31,7 @@ die() {
 }
 
 usage() {
-  echo "usage: ./scripts/smoke.sh {serve|github|github-connect <token-file>|github-disconnect} [--port N]"
+  echo "usage: ./scripts/smoke.sh {serve|github|github-connect <token-file>|github-disconnect|wizard <owner/repo>} [--port N]"
 }
 
 # require_server fails loudly rather than letting every check below report a
@@ -130,6 +130,62 @@ smoke_github_disconnect() {
     show connected error message
 }
 
+# smoke_wizard creates a GitHub Ops workspace and walks its Setup Wizard,
+# printing each step's readiness. Takes the repo to bind, e.g. owner/name.
+smoke_wizard() {
+  local repo="$1"
+  require_server
+  local base="http://localhost:$PORT"
+
+  echo "=== create workspace from the github-ops blueprint ==="
+  curl -s -X POST "$base/api/workspaces" \
+    -H 'Content-Type: application/json' \
+    -d "{\"name\":\"GitHub Ops Demo $(date +%H%M%S)\",\"template_id\":\"github-ops\"}" \
+    -o "$TMPDIR/ws.json"
+  local ws
+  ws="$(python3 -c '
+import json, os
+d = json.load(open(os.path.join(os.environ["TMPDIR"], "ws.json")))
+w = d.get("workspace") or d.get("folder") or d
+print(w.get("id", ""))
+')"
+  [[ -n "$ws" ]] || die "workspace was not created: $(head -c 300 "$TMPDIR/ws.json")"
+  echo "  workspace: $ws"
+
+  echo
+  echo "=== open the wizard ==="
+  curl -s -X POST "$base/api/workspaces/$ws/setup-wizard/open" -o /dev/null
+  show_wizard "$base" "$ws"
+
+  echo
+  echo "=== confirm the repository step with $repo ==="
+  curl -s -X POST "$base/api/workspaces/$ws/setup-wizard/steps/repository/confirm" \
+    -H 'Content-Type: application/json' \
+    -d "{\"option\":\"$repo\"}" -o /dev/null
+  show_wizard "$base" "$ws"
+
+  echo
+  echo "workspace id: $ws"
+}
+
+show_wizard() {
+  local base="$1" ws="$2"
+  curl -s "$base/api/workspaces/$ws/setup-wizard" -o "$TMPDIR/wiz.json"
+  python3 -c '
+import json, os
+d = json.load(open(os.path.join(os.environ["TMPDIR"], "wiz.json")))
+w = d.get("setup") or d.get("setup_wizard") or d
+print("  overall state:", w.get("state"))
+for s in w.get("steps", []):
+    print("  [%-9s] %-12s %s" % (s.get("status", "?"), s.get("id"), s.get("summary", "")))
+    if s.get("error_category"):
+        print("               category: %s" % s["error_category"])
+    for o in (s.get("options") or [])[:4]:
+        mark = "*" if o.get("selected") else " "
+        print("             %s %s — %s" % (mark, o.get("id"), o.get("description", "")))
+'
+}
+
 main() {
   local args=()
   while [[ $# -gt 0 ]]; do
@@ -171,6 +227,13 @@ main() {
       ;;
     github-disconnect)
       smoke_github_disconnect
+      ;;
+    wizard)
+      [[ ${#args[@]} -eq 2 ]] || {
+        usage
+        exit 2
+      }
+      smoke_wizard "${args[1]}"
       ;;
     *)
       die "unknown check: ${args[0]}"
