@@ -304,6 +304,9 @@ func registerSettingsRoutes(mux *http.ServeMux, s *Server) {
 	if s.Handlers.Connections != nil {
 		s.Handlers.Connections.Register(mux)
 	}
+	if s.Handlers.GitHub != nil {
+		s.Handlers.GitHub.Register(mux)
+	}
 	if s.Handlers.Vault != nil {
 		mux.Handle("/api/vault", s.Handlers.Vault)
 		mux.Handle("/api/vault/", s.Handlers.Vault)

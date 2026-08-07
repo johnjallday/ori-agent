@@ -116,6 +116,14 @@
               </span>
               <span class="settings-nav-item-text">Google Account</span>
             </a>
+            <a href="#github-account" class="settings-nav-item" data-section="github-account">
+              <span class="settings-nav-item-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M12,2A10,10 0 0,0 2,12C2,16.42 4.87,20.17 8.84,21.5C9.34,21.58 9.5,21.27 9.5,21C9.5,20.77 9.5,20.14 9.5,19.31C6.73,19.91 6.14,17.97 6.14,17.97C5.68,16.81 5.03,16.5 5.03,16.5C4.12,15.88 5.1,15.9 5.1,15.9C6.1,15.97 6.63,16.93 6.63,16.93C7.5,18.45 8.97,18 9.54,17.76C9.63,17.11 9.89,16.67 10.17,16.42C7.95,16.17 5.62,15.31 5.62,11.5C5.62,10.39 6,9.5 6.65,8.79C6.55,8.54 6.2,7.5 6.75,6.15C6.75,6.15 7.59,5.88 9.5,7.17C10.29,6.95 11.15,6.84 12,6.84C12.85,6.84 13.71,6.95 14.5,7.17C16.41,5.88 17.25,6.15 17.25,6.15C17.8,7.5 17.45,8.54 17.35,8.79C18,9.5 18.38,10.39 18.38,11.5C18.38,15.32 16.04,16.16 13.81,16.41C14.17,16.72 14.5,17.33 14.5,18.26C14.5,19.6 14.5,20.68 14.5,21C14.5,21.27 14.66,21.59 15.17,21.5C19.14,20.16 22,16.42 22,12A10,10 0 0,0 12,2Z"/>
+                </svg>
+              </span>
+              <span class="settings-nav-item-text">GitHub Account</span>
+            </a>
             <a href="#mcp-servers" class="settings-nav-item" data-section="mcp-servers">
               <span class="settings-nav-item-icon">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
@@ -996,6 +1004,102 @@
               </div>
             </div>
             <div id="googleConnError" class="gc-error d-none" role="alert"></div>
+          </section>
+
+          <!-- GitHub Account Section -->
+          <section id="github-account" class="settings-section modern-card p-4">
+            <style>
+              #github-account .gh-avatar{width:40px;height:40px;border-radius:50%;background:var(--primary-color);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:1.1rem;flex-shrink:0}
+              #github-account .gh-badge{font-size:0.75rem;padding:0.15rem 0.6rem;border-radius:999px;background:rgba(34,197,94,0.15);color:#16a34a;font-weight:600}
+              #github-account .gh-meta{color:var(--text-secondary);font-size:0.85rem}
+              #github-account .gh-scopes{display:flex;flex-wrap:wrap;gap:0.3rem;margin-top:0.35rem}
+              #github-account .gh-scope{font-size:0.72rem;padding:0.1rem 0.5rem;border-radius:999px;background:rgba(128,128,128,0.15);color:var(--text-secondary)}
+              #github-account .gh-connect{display:flex;flex-direction:column;gap:0.55rem;max-width:34rem;margin:0 auto;text-align:left}
+              #github-account .gh-field{display:flex;flex-direction:column;gap:0.25rem;font-size:0.82rem;color:var(--text-secondary)}
+              #github-account .gh-field .modern-input{width:100%;font-family:var(--font-mono,monospace)}
+              #github-account .gh-steps{margin:0;padding-left:1.15rem;font-size:0.83rem;color:var(--text-secondary);line-height:1.6}
+              #github-account .gh-perm{font-family:var(--font-mono,monospace);font-size:0.8rem;color:var(--text-primary)}
+              #github-account .gh-disclosure{margin-top:0.6rem;padding:0.85rem 1rem;border:1px solid var(--border-color,rgba(128,128,128,0.2));border-radius:0.5rem;background:rgba(128,128,128,0.04);font-size:0.83rem;color:var(--text-secondary);line-height:1.5}
+              #github-account .gh-disclosure strong{color:var(--text-primary)}
+              #github-account .gh-error{margin-top:0.75rem;color:#dc2626;font-size:0.85rem}
+              #github-account .gh-confirm{margin-top:0.6rem;padding:0.9rem 1rem;border:1px solid rgba(239,68,68,0.35);border-radius:0.5rem;background:rgba(239,68,68,0.05);display:flex;flex-direction:column;gap:0.55rem}
+              #github-account .gh-confirm-title{font-weight:600;color:var(--text-primary)}
+              #github-account .gh-confirm-actions{display:flex;gap:0.5rem;margin-top:0.25rem}
+            </style>
+            <div class="settings-section-header">
+              <span class="settings-section-icon">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M12,2A10,10 0 0,0 2,12C2,16.42 4.87,20.17 8.84,21.5C9.34,21.58 9.5,21.27 9.5,21C9.5,20.77 9.5,20.14 9.5,19.31C6.73,19.91 6.14,17.97 6.14,17.97C5.68,16.81 5.03,16.5 5.03,16.5C4.12,15.88 5.1,15.9 5.1,15.9C6.1,15.97 6.63,16.93 6.63,16.93C7.5,18.45 8.97,18 9.54,17.76C9.63,17.11 9.89,16.67 10.17,16.42C7.95,16.17 5.62,15.31 5.62,11.5C5.62,10.39 6,9.5 6.65,8.79C6.55,8.54 6.2,7.5 6.75,6.15C6.75,6.15 7.59,5.88 9.5,7.17C10.29,6.95 11.15,6.84 12,6.84C12.85,6.84 13.71,6.95 14.5,7.17C16.41,5.88 17.25,6.15 17.25,6.15C17.8,7.5 17.45,8.54 17.35,8.79C18,9.5 18.38,10.39 18.38,11.5C18.38,15.32 16.04,16.16 13.81,16.41C14.17,16.72 14.5,17.33 14.5,18.26C14.5,19.6 14.5,20.68 14.5,21C14.5,21.27 14.66,21.59 15.17,21.5C19.14,20.16 22,16.42 22,12A10,10 0 0,0 12,2Z"/></svg>
+              </span>
+              <h2 class="settings-section-title">GitHub Account</h2>
+              <span class="settings-section-subtitle">(issue triage &amp; backlog grooming)</span>
+            </div>
+            <p class="settings-section-description">
+              Connect GitHub once with a personal access token. Every GitHub workspace shares this connection and picks its own repository. Your token is stored in your vault on this device and is never shown again after you save it.
+            </p>
+
+            <div id="githubConnStatus" class="settings-status" role="status" aria-live="polite">
+              <div id="githubConnStatusIndicator"><span class="spinner-border spinner-border-sm" role="status" aria-label="Loading"></span></div>
+              <div class="settings-status-content">
+                <div id="githubConnStatusText" class="settings-status-text">Checking GitHub connection…</div>
+              </div>
+            </div>
+
+            <div id="githubConnConnected" class="d-none">
+              <div class="settings-info-box mb-3">
+                <div class="d-flex align-items-center">
+                  <div id="githubConnAvatar" class="gh-avatar" aria-hidden="true">@</div>
+                  <div class="ms-3">
+                    <div id="githubConnLogin" style="color:var(--text-primary);font-weight:600;">-</div>
+                    <div id="githubConnMeta" class="gh-meta"></div>
+                    <div id="githubConnScopes" class="gh-scopes"></div>
+                  </div>
+                  <span id="githubConnBadge" class="gh-badge ms-auto">Connected</span>
+                </div>
+              </div>
+              <div id="githubConnConfirm" class="gh-confirm d-none" role="group" aria-label="Disconnect confirmation" aria-live="polite"></div>
+              <div class="settings-actions mt-3">
+                <button id="githubConnDisconnectBtn" type="button" class="modern-btn modern-btn-danger">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2"><path d="M19,3H5C3.89,3 3,3.89 3,5V9H5V5H19V19H5V15H3V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5C21,3.89 20.1,3 19,3M10.08,15.58L11.5,17L16.5,12L11.5,7L10.08,8.41L12.67,11H3V13H12.67L10.08,15.58Z"/></svg>
+                  Disconnect GitHub
+                </button>
+                <button id="githubConnReplaceBtn" type="button" class="modern-btn modern-btn-secondary">Replace token</button>
+              </div>
+              <div class="gh-disclosure">
+                Disconnecting removes the token from this device only. To revoke it at GitHub as well, delete it under
+                <a href="https://github.com/settings/personal-access-tokens" target="_blank" rel="noopener noreferrer">Personal access tokens ↗</a>.
+              </div>
+            </div>
+
+            <div id="githubConnDisconnected" class="d-none">
+              <div class="empty-state">
+                <svg class="empty-state-icon" width="64" height="64" viewBox="0 0 24 24" fill="currentColor"><path d="M12,2A10,10 0 0,0 2,12C2,16.42 4.87,20.17 8.84,21.5C9.34,21.58 9.5,21.27 9.5,21C9.5,20.77 9.5,20.14 9.5,19.31C6.73,19.91 6.14,17.97 6.14,17.97C5.68,16.81 5.03,16.5 5.03,16.5C4.12,15.88 5.1,15.9 5.1,15.9C6.1,15.97 6.63,16.93 6.63,16.93C7.5,18.45 8.97,18 9.54,17.76C9.63,17.11 9.89,16.67 10.17,16.42C7.95,16.17 5.62,15.31 5.62,11.5C5.62,10.39 6,9.5 6.65,8.79C6.55,8.54 6.2,7.5 6.75,6.15C6.75,6.15 7.59,5.88 9.5,7.17C10.29,6.95 11.15,6.84 12,6.84C12.85,6.84 13.71,6.95 14.5,7.17C16.41,5.88 17.25,6.15 17.25,6.15C17.8,7.5 17.45,8.54 17.35,8.79C18,9.5 18.38,10.39 18.38,11.5C18.38,15.32 16.04,16.16 13.81,16.41C14.17,16.72 14.5,17.33 14.5,18.26C14.5,19.6 14.5,20.68 14.5,21C14.5,21.27 14.66,21.59 15.17,21.5C19.14,20.16 22,16.42 22,12A10,10 0 0,0 12,2Z"/></svg>
+                <h3 class="empty-state-title">No GitHub account connected</h3>
+                <p class="empty-state-description">Paste a fine-grained personal access token to let Ori read and triage your issues.</p>
+                <div class="gh-connect mt-3">
+                  <ol class="gh-steps">
+                    <li>Open <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener noreferrer">GitHub's token page ↗</a>.</li>
+                    <li>Under <em>Repository access</em>, choose <strong>Only select repositories</strong> and pick the repo you want triaged.</li>
+                    <li>Under <em>Permissions → Repository permissions</em>, set <span class="gh-perm">Issues: Read and write</span> and <span class="gh-perm">Metadata: Read-only</span>. Leave everything else at <em>No access</em>.</li>
+                    <li>Generate the token and paste it below.</li>
+                  </ol>
+                  <label class="gh-field" for="githubConnTokenInput">
+                    Personal access token
+                    <input id="githubConnTokenInput" type="password" class="modern-input" autocomplete="off"
+                           spellcheck="false" placeholder="github_pat_…" aria-describedby="githubConnDisclosure">
+                  </label>
+                  <div class="settings-actions">
+                    <button id="githubConnConnectBtn" type="button" class="modern-btn modern-btn-primary">Connect GitHub</button>
+                  </div>
+                  <div id="githubConnDisclosure" class="gh-disclosure">
+                    <strong>Nothing is ever written to GitHub without your approval.</strong>
+                    Connecting only lets Ori read your issues and <em>draft</em> changes. Every comment, label, and open/close
+                    is shown to you in full and posted only after you approve that specific action.
+                    Ori never requests access to your code — <span class="gh-perm">Contents</span> permission is not needed.
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div id="githubConnError" class="gh-error d-none" role="alert"></div>
           </section>
 
           <!-- MCP Servers Section -->
@@ -1922,6 +2026,7 @@
   <script defer src="/js/modules/device-capabilities.js"></script>
   <script defer src="/js/modules/web3-settings.js"></script>
   <script defer src="/js/modules/google-connection.js"></script>
+  <script defer src="/js/modules/github-connection.js"></script>
 </body>
 </html>
 {{end}}

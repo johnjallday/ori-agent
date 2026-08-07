@@ -241,6 +241,33 @@ func (cm *ConfigManager) InitializeDefaultServers() error {
 	return cm.SaveGlobalConfig(config)
 }
 
+// GitHub's official hosted MCP server. Kept here rather than in the
+// githubhttp package that owns the connection, because defaultMCPServers must
+// name it and internal/mcp cannot import a package that imports it.
+const (
+	GitHubServerName = "github"
+	// GitHubServerURL is the hosted Streamable HTTP endpoint. Reached with
+	// a static bearer token, so there is no local binary or Docker
+	// dependency to install.
+	GitHubServerURL = "https://api.githubcopilot.com/mcp/"
+)
+
+// GitHubServerConfig returns the canonical registry entry for GitHub's hosted
+// MCP server.
+//
+// It ships disabled: the server cannot start until a token is stored under
+// its AuthRef, and starting it without one would surface a spurious
+// auth-required error to every user who never connected GitHub.
+func GitHubServerConfig() ServerConfig {
+	return ServerConfig{
+		Name:      GitHubServerName,
+		Transport: TransportStreamableHTTP,
+		URL:       GitHubServerURL,
+		AuthMode:  AuthModeStaticBearer,
+		Enabled:   false,
+	}
+}
+
 func defaultMCPServers(homeDir string) []ServerConfig {
 	if strings.TrimSpace(homeDir) == "" {
 		homeDir = "/tmp"
@@ -263,6 +290,7 @@ func defaultMCPServers(homeDir string) []ServerConfig {
 			Transport: "stdio",
 			Enabled:   false,
 		},
+		GitHubServerConfig(),
 	}
 }
 

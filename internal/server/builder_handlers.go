@@ -31,6 +31,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/fileshttp"
 	"github.com/johnjallday/ori-agent/internal/filewatcher"
 	"github.com/johnjallday/ori-agent/internal/followup"
+	"github.com/johnjallday/ori-agent/internal/githubhttp"
 	"github.com/johnjallday/ori-agent/internal/locationhttp"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/macwake"
@@ -359,6 +360,14 @@ func (b *ServerBuilder) initializeHandlers() {
 			connDeps.Migrator = sink
 		}
 		b.connectionsHandler = connectionshttp.NewHandler(connDeps)
+		// The GitHub connection is a separate, simpler surface: one static
+		// token rather than an OAuth grant, so it shares only the origin
+		// guard. Its token lives in the same vault-backed MCP credential
+		// store every remote MCP server uses.
+		b.githubHandler = githubhttp.NewHandler(
+			githubhttp.NewConnection(nil),
+			connectionshttp.NewOriginGuard(),
+		)
 		// When a Google MCP server (Calendar/Drive) authorizes, verify the ID
 		// token and attach the grant to this connection (FR 23, 40).
 		mcp.SetGoogleMCPIdentityHook(b.googleMCPIdentityHook)

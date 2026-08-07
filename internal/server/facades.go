@@ -20,6 +20,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/externalagentshttp"
 	"github.com/johnjallday/ori-agent/internal/fileshttp"
 	"github.com/johnjallday/ori-agent/internal/gateway"
+	"github.com/johnjallday/ori-agent/internal/githubhttp"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/location"
 	"github.com/johnjallday/ori-agent/internal/locationhttp"
@@ -146,6 +147,7 @@ type HandlerFacade struct {
 	Evolution        *evolutionhttp.Handler
 	Vault            *vaulthttp.Handler
 	Connections      *connectionshttp.Handler
+	GitHub           *githubhttp.Handler
 	ExternalAgents   *externalagentshttp.Handler
 	Skills           *skillshttp.Handler
 	CLIAgents        *cliagenthttp.Handler

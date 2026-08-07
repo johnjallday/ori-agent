@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/auth"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -19,6 +20,44 @@ const (
 	TransportStreamableHTTP = "streamable_http"
 )
 
+// AuthMode identifies how a *remote* server's credential is presented to the
+// endpoint. It is meaningless for stdio servers, which authenticate (if at
+// all) through Env.
+//
+// Why this is an explicit config field rather than something startRemote()
+// infers from the shape of the stored credential: startRemote() is shared
+// plumbing that every remote MCP server flows through, so the branch between
+// "run the OAuth authorization-code dance" and "attach a static bearer token"
+// must be an unambiguous, declared property of the server. Inferring it from
+// the credential (e.g. "ClientID set => OAuth, AccessToken set => bearer")
+// would make the auth path depend on mutable vault state: a credential that
+// momentarily fails to load, or an OAuth credential mid-flow that has an
+// AccessToken but no ClientID yet, would silently take the wrong path and
+// either skip authorization or send a token to a server expecting a client
+// handshake. Declaring the mode keeps the decision static and reviewable.
+const (
+	// AuthModeOAuth runs the vault-backed OAuth authorization-code flow via
+	// buildOAuthHandler. It is the zero value, so every remote server
+	// config written before this field existed keeps its current behavior.
+	AuthModeOAuth = "oauth"
+	// AuthModeStaticBearer attaches a long-lived token from the credential
+	// store as an `Authorization: Bearer` header. Used by endpoints that
+	// accept a personal access token directly (e.g. GitHub's hosted MCP
+	// server) and have no OAuth client registration to perform.
+	AuthModeStaticBearer = "static_bearer"
+)
+
+// NormalizedAuthMode returns cfg.AuthMode lower-cased and trimmed, defaulting
+// an empty value to AuthModeOAuth so pre-existing configs keep the only auth
+// path that existed when they were written.
+func NormalizedAuthMode(cfg ServerConfig) string {
+	mode := strings.ToLower(strings.TrimSpace(cfg.AuthMode))
+	if mode == "" {
+		return AuthModeOAuth
+	}
+	return mode
+}
+
 // ServerConfig contains configuration for an MCP server
 type ServerConfig struct {
 	Name        string            `json:"name"`
@@ -26,9 +65,10 @@ type ServerConfig struct {
 	Args        []string          `json:"args,omitempty"`
 	Env         map[string]string `json:"env,omitempty"`
 	EnvRequired map[string]string `json:"env_required,omitempty"`
-	Transport   string            `json:"transport"`          // "stdio" (default) or "streamable_http"
-	URL         string            `json:"url,omitempty"`      // HTTPS endpoint; required for streamable_http
-	AuthRef     string            `json:"auth_ref,omitempty"` // opaque vault credential reference; never a raw secret
+	Transport   string            `json:"transport"`           // "stdio" (default) or "streamable_http"
+	URL         string            `json:"url,omitempty"`       // HTTPS endpoint; required for streamable_http
+	AuthRef     string            `json:"auth_ref,omitempty"`  // opaque vault credential reference; never a raw secret
+	AuthMode    string            `json:"auth_mode,omitempty"` // remote only: "oauth" (default) or "static_bearer"
 	Enabled     bool              `json:"enabled"`
 }
 
@@ -66,6 +106,9 @@ func ValidateServerConfig(cfg ServerConfig) error {
 		if strings.TrimSpace(cfg.URL) != "" {
 			return fmt.Errorf("stdio server %q must not specify a url", cfg.Name)
 		}
+		if strings.TrimSpace(cfg.AuthMode) != "" {
+			return fmt.Errorf("stdio server %q must not specify an auth mode", cfg.Name)
+		}
 	case TransportStreamableHTTP:
 		if strings.TrimSpace(cfg.Command) != "" {
 			return fmt.Errorf("remote server %q must not specify a command", cfg.Name)
@@ -78,6 +121,11 @@ func ValidateServerConfig(cfg ServerConfig) error {
 		}
 		if _, err := ValidateRemoteEndpoint(cfg.URL); err != nil {
 			return fmt.Errorf("remote server %q: %w", cfg.Name, err)
+		}
+		switch NormalizedAuthMode(cfg) {
+		case AuthModeOAuth, AuthModeStaticBearer:
+		default:
+			return fmt.Errorf("remote server %q: unsupported auth mode %q", cfg.Name, cfg.AuthMode)
 		}
 	default:
 		return fmt.Errorf("server %q: unsupported transport %q", cfg.Name, cfg.Transport)
@@ -245,14 +293,33 @@ func (s *Server) startRemote() error {
 
 	httpClient := newRemoteHTTPClient()
 
-	oauthHandler, err := s.buildOAuthHandler(s.ctx, httpClient)
-	if err != nil {
-		if isOAuthReconnectError(err) {
-			s.setStatus(StatusAuthRequired)
-		} else {
-			s.setStatus(StatusError)
+	// Two mutually exclusive auth paths, selected by the server's declared
+	// AuthMode (see the AuthMode constants). The static-bearer path never
+	// builds an OAuth handler, and the OAuth path is byte-for-byte what it
+	// was before static-bearer existed.
+	var oauthHandler auth.OAuthHandler
+	if NormalizedAuthMode(s.config) == AuthModeStaticBearer {
+		bearerClient, err := s.buildBearerClient(s.ctx, httpClient, endpoint)
+		if err != nil {
+			if isOAuthReconnectError(err) {
+				s.setStatus(StatusAuthRequired)
+			} else {
+				s.setStatus(StatusError)
+			}
+			return fmt.Errorf("failed to configure bearer auth: %w", err)
 		}
-		return fmt.Errorf("failed to configure oauth: %w", err)
+		httpClient = bearerClient
+	} else {
+		handler, err := s.buildOAuthHandler(s.ctx, httpClient)
+		if err != nil {
+			if isOAuthReconnectError(err) {
+				s.setStatus(StatusAuthRequired)
+			} else {
+				s.setStatus(StatusError)
+			}
+			return fmt.Errorf("failed to configure oauth: %w", err)
+		}
+		oauthHandler = handler
 	}
 
 	transport := &sdkmcp.StreamableClientTransport{

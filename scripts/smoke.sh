@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# smoke.sh - manual API checks against a running isolated demo server.
+# smoke.sh - manual checks against a running isolated demo server.
 #
 # Every worktree keeps its feature's smoke checks here, under this one stable
 # name, so a single allowlist entry - Bash(./scripts/smoke.sh:*) - covers them
@@ -9,19 +9,21 @@
 # analyzer, so it prompts no matter how many rules exist. A script is one
 # stable token. Put the shell in here, not in the tool call.
 #
-# Start the server first (from inside this worktree):
-#
-#   ./scripts/wt.sh demo 8931
+# This worktree's feature: the GitHub Ops workspace template.
 #
 # Usage:
-#   ./scripts/smoke.sh toolbox <workspace-id> <agent-instance-id> <toolbox-id>
+#   ./scripts/smoke.sh serve [--port N]         # build + run an isolated demo server
+#   ./scripts/smoke.sh github [--port N]        # connection status
+#   ./scripts/smoke.sh github-connect <token-file> [--port N]
+#   ./scripts/smoke.sh github-disconnect [--port N]
 #
 # Options:
 #   --port N   server port (default 8931, or $SMOKE_PORT)
 
-set -euo pipefail
+set -uo pipefail
 
 PORT="${SMOKE_PORT:-8931}"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 die() {
   echo "smoke: $*" >&2
@@ -29,14 +31,14 @@ die() {
 }
 
 usage() {
-  echo "usage: ./scripts/smoke.sh toolbox <workspace-id> <agent-instance-id> <toolbox-id> [--port N]"
+  echo "usage: ./scripts/smoke.sh {serve|github|github-connect <token-file>|github-disconnect} [--port N]"
 }
 
 # require_server fails loudly rather than letting every check below report a
 # confusing empty body.
 require_server() {
   curl -sf -o /dev/null "http://localhost:$PORT/" ||
-    die "no server on port $PORT - start one with: ./scripts/wt.sh demo $PORT"
+    die "no server on port $PORT - start one with: ./scripts/smoke.sh serve --port $PORT"
 }
 
 # show pretty-prints selected fields from a JSON body on stdin. The python is
@@ -69,31 +71,63 @@ for field in fields:
 ' "$@"
 }
 
-smoke_toolbox() {
-  local workspace="$1" instance="$2" toolbox="$3"
-  local base="http://localhost:$PORT/api/workspaces/$workspace"
-  local endpoint="$base/agent-toolboxes/$instance"
+# smoke_serve builds this worktree and runs it against a throwaway sandbox.
+#
+# Isolation rules (repo CLAUDE.md, "Smoke Testing"): HOME is overridden so
+# "Ori Workspaces" never touches the real tree, ORI_DATA_DIR is overridden so
+# the DB/vaults/templates are sandboxed, and the binary is launched from
+# INSIDE the sandbox because the plugin store resolves relative to the launch
+# directory. The sandbox lives under $TMPDIR rather than coming from
+# `mktemp -d`, which fails silently under the agent sandbox and yields an
+# empty path - which would land real state in the worktree.
+smoke_serve() {
+  local sandbox="${TMPDIR:-/tmp}"
+  sandbox="${sandbox%/}/ori-demo-$(basename "$REPO_ROOT")"
 
+  echo "building $REPO_ROOT ..."
+  (cd "$REPO_ROOT" && go build -o bin/ori-agent ./cmd/server) || die "build failed"
+
+  mkdir -p "$sandbox" || die "could not create $sandbox"
+  echo "sandbox: $sandbox"
+  echo "serving on http://localhost:$PORT ..."
+
+  cd "$sandbox" || die "could not enter $sandbox"
+  HOME="$sandbox" ORI_DATA_DIR="$sandbox" PORT="$PORT" exec "$REPO_ROOT/bin/ori-agent"
+}
+
+smoke_github_status() {
+  require_server
+  echo "=== GET /api/connections/github/status ==="
+  curl -s "http://localhost:$PORT/api/connections/github/status" |
+    show connected login token_type scopes error error_category
+}
+
+# smoke_github_connect reads the token from a FILE rather than an argument so
+# the credential never appears in a command line, a process list, or a shell
+# history entry.
+smoke_github_connect() {
+  local token_file="$1"
+  [[ -f "$token_file" ]] || die "token file not found: $token_file"
   require_server
 
-  echo "=== preview ==="
-  curl -s "$endpoint/preview?toolbox_id=$toolbox" |
-    show action preview.can_use_directly workspace_version
+  local token
+  token="$(tr -d '\r\n' <"$token_file")"
+  [[ -n "$token" ]] || die "token file is empty: $token_file"
 
-  echo "=== use (one-click) ==="
-  curl -s -X POST "$endpoint/use" \
+  echo "=== POST /api/connections/github/connect ==="
+  python3 -c 'import json,sys; print(json.dumps({"token": sys.argv[1]}))' "$token" >"$token_file.body"
+  curl -s -X POST "http://localhost:$PORT/api/connections/github/connect" \
     -H 'Content-Type: application/json' \
-    -d "{\"toolbox_id\":\"$toolbox\"}" |
-    show message receipt.focus.state receipt.capacity receipt.permissions receipt.previous
+    --data-binary "@$token_file.body" |
+    show connected login token_type scopes error message
+  rm -f "$token_file.body"
+}
 
-  echo "=== undo preview ==="
-  curl -s "$endpoint/undo" | show available action previous
-
-  echo "=== stale write rejected (expect 409) ==="
-  curl -s -o /dev/null -w "  status: %{http_code}\n" \
-    -X POST "$endpoint/use" \
-    -H 'Content-Type: application/json' \
-    -d "{\"toolbox_id\":\"$toolbox\",\"expected_workspace_version\":1}"
+smoke_github_disconnect() {
+  require_server
+  echo "=== POST /api/connections/github/disconnect ==="
+  curl -s -X POST "http://localhost:$PORT/api/connections/github/disconnect" |
+    show connected error message
 }
 
 main() {
@@ -122,12 +156,21 @@ main() {
   }
 
   case "${args[0]}" in
-    toolbox)
-      [[ ${#args[@]} -eq 4 ]] || {
+    serve)
+      smoke_serve
+      ;;
+    github)
+      smoke_github_status
+      ;;
+    github-connect)
+      [[ ${#args[@]} -eq 2 ]] || {
         usage
         exit 2
       }
-      smoke_toolbox "${args[1]}" "${args[2]}" "${args[3]}"
+      smoke_github_connect "${args[1]}"
+      ;;
+    github-disconnect)
+      smoke_github_disconnect
       ;;
     *)
       die "unknown check: ${args[0]}"
