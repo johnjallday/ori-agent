@@ -103,11 +103,15 @@ scripts every vault state and never contacts Google:
 
 ```bash
 ./scripts/build-server.sh
-SMOKE_DIR=$(mktemp -d)
+SMOKE_DIR="$TMPDIR/smoke-oauth-$$"
+mkdir -p "$SMOKE_DIR"
 cd "$SMOKE_DIR" && HOME="$SMOKE_DIR" ORI_DATA_DIR="$SMOKE_DIR" PORT=8931 \
   /path/to/bin/ori-agent &
-PLAYWRIGHT_BASE_URL=http://localhost:8931 npx playwright test tests/google-account-email-ops.spec.ts
+./scripts/e2e.sh --port 8931 tests/google-account-email-ops.spec.ts
 ```
+
+Use `$TMPDIR`, not `$(mktemp -d)` — see the smoke-testing recipe in `CLAUDE.md`
+for why an empty `SMOKE_DIR` silently writes server state into your worktree.
 
 ## Upgrading from an earlier build
 
