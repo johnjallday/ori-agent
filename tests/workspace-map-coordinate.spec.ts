@@ -178,12 +178,34 @@ async function openMap(page: Page) {
 }
 
 /**
+ * Open the empty-ground context menu and choose one of its framing actions.
+ *
+ * Fit all, Center selected and Reset view have no buttons: since #317 they are
+ * items on the canvas menu, reached by right-clicking bare ground or by
+ * Shift+F10 on the focused canvas. The keyboard route is used here because it
+ * needs no empty pixel to aim at.
+ */
+async function frameFromMenu(page: Page, action: 'fit' | 'center' | 'reset-view') {
+  await page.locator('[data-ws-map-viewport]').focus();
+  await page.keyboard.press('Shift+F10');
+  const item = page.locator(`[data-menu-action="${action}"]`);
+  await item.waitFor({ state: 'visible' });
+  if ((await item.getAttribute('aria-disabled')) === 'true') {
+    await page.keyboard.press('Escape');
+    return false;
+  }
+  await item.click();
+  await page.waitForTimeout(200);
+  return true;
+}
+
+/**
  * Bring one workspace into view at 100%.
  *
  * A building parked far from the rest is genuinely off-screen — the map pans,
- * it does not scroll, so Playwright cannot reach it by itself. Fit All brings
- * everything into frame, then Center Selected and Reset View put this one under
- * the middle of the viewport at a readable zoom.
+ * it does not scroll, so Playwright cannot reach it by itself. Center Selected
+ * puts this one under the middle of the viewport; Fit All is the fallback when
+ * nothing resolvable is selected.
  */
 async function centerOnWorkspace(page: Page, id: string) {
   // Selected through the cockpit's own API rather than by clicking: zoom is
@@ -196,13 +218,10 @@ async function centerOnWorkspace(page: Page, id: string) {
     );
   }, id);
   await page.waitForTimeout(300);
-  const center = page.locator('[data-map-center]');
-  if (await center.isEnabled()) {
-    await center.click();
-  } else {
-    // Nothing selected (a group child can resolve to its district): fall back
-    // to framing everything rather than waiting out a disabled button.
-    await page.click('[data-map-fit]');
+  // Nothing selected (a group child can resolve to its district) leaves Center
+  // disabled: fall back to framing everything.
+  if (!(await frameFromMenu(page, 'center'))) {
+    await frameFromMenu(page, 'fit');
   }
   await page.waitForTimeout(300);
 }
@@ -271,8 +290,8 @@ test.describe('Coordinate Workspace Map', () => {
     await page.click('[data-map-zoom-in]');
     expect((await cameraOf(page)).zoom).toBeGreaterThan(panned.zoom);
 
-    await page.click('[data-map-fit]');
-    await page.click('[data-map-reset-view]');
+    await frameFromMenu(page, 'fit');
+    await frameFromMenu(page, 'reset-view');
     expect((await cameraOf(page)).zoom).toBe(1);
 
     expect(await anchors(page)).toEqual(before);

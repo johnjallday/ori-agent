@@ -68,12 +68,46 @@ const menuState = () =>
 const camera = () => page.evaluate(() => window.OriWorkspaceMap.getCamera());
 
 // The map persists its camera, so a run inherits wherever the last one left the
-// view. Every stage starts from Fit All to make the framing deterministic, then
-// zooms from there — zoom is applied around the viewport centre, so framed
-// content stays framed.
-const frame = async direction => {
-  await page.click('[data-map-fit]', { force: true }).catch(() => {});
+// view; every stage below re-frames first.
+//
+// Fit all is a menu item since #317, and the map's own `f` shortcut never fires
+// in the app — keyboard-navigation.js claims that key globally for its link
+// hints and stops the event in the capture phase. Shift+F10 on the focused
+// canvas opens the same menu and is the keyboard route that actually works.
+const fitAll = async () => {
+  await page.locator('[data-ws-map-viewport]').focus();
+  await page.keyboard.press('Shift+F10');
+  await page.locator('[data-menu-action="fit"]').click();
   await page.waitForTimeout(250);
+  return camera();
+};
+
+// Center Selected is a menu item now too. Opened from the keyboard so it does
+// not need an empty pixel to right-click.
+const centerSelected = async () => {
+  await page.locator('[data-ws-map-viewport]').focus();
+  await page.keyboard.press('Shift+F10');
+  const item = page.locator('[data-menu-action="center"]');
+  if ((await item.count()) && (await item.getAttribute('aria-disabled')) !== 'true') {
+    await item.click();
+  } else {
+    await page.keyboard.press('Escape');
+  }
+  await page.waitForTimeout(250);
+};
+
+// Reset view is the deterministic base: content centred at exactly 100%,
+// whatever shape the fixture is in. (Fit all is content-dependent — it lands on
+// 50% for a spread-out map and 200% for a compact one, which made every
+// downstream coordinate in this run a guess.)
+const resetView = async () => {
+  await page.locator('[data-ws-map-viewport]').focus();
+  await page.keyboard.press('0');
+  await page.waitForTimeout(250);
+};
+
+const frame = async direction => {
+  await resetView();
   if (direction) {
     for (let i = 0; i < 6; i += 1) {
       await page.click('[data-map-' + direction + ']', { force: true }).catch(() => {});
@@ -251,7 +285,28 @@ try {
   await page.waitForTimeout(500);
   const opening = await frame(null);
   console.log('framed at ' + Math.round(opening.zoom * 100) + '%');
+  check(Math.abs(opening.zoom - 1) < 0.001, 'Reset view (the 0 key) lands at exactly 100%');
   await shot('01-map');
+
+  // The control strip lost its three framing buttons (#317): they are menu
+  // items now, and the keys are the direct route.
+  const strip = await page.evaluate(() =>
+    [...document.querySelectorAll('.ws-map-controls button, .ws-map-controls span')].map(el =>
+      el.textContent.trim()
+    )
+  );
+  console.log('  control strip: ' + JSON.stringify(strip));
+  check(strip.length === 3, 'the strip is zoom out / readout / zoom in only');
+  check(
+    !strip.some(label => /Fit|Center|Reset/i.test(label)),
+    'no framing buttons left on the strip'
+  );
+  const fitted = await fitAll();
+  check(
+    fitted.zoom !== opening.zoom,
+    'Fit all still frames everything, from the keyboard: ' + fitted.zoom
+  );
+  await frame(null);
 
   console.log('\n--- tile menu at 100% ---');
   const first = await openOnTile('100%');
@@ -315,7 +370,7 @@ try {
   for (let i = 0; i < 6; i += 1) {
     await page.click('[data-map-zoom-in]', { force: true }).catch(() => {});
   }
-  await page.click('[data-map-center]', { force: true }).catch(() => {});
+  await centerSelected();
   await page.waitForTimeout(300);
   const zoomedIn = await camera();
   console.log('  zoom now ' + Math.round(zoomedIn.zoom * 100) + '%');
@@ -418,6 +473,7 @@ try {
   await page.waitForSelector('.ws-map-tile[data-ws-id]', { timeout: 15000 });
   await frame(null);
 
+  await bringIntoView('.ws-map-district[data-group-id]');
   const district = await openOn('.ws-map-district[data-group-id]', 'group district');
   const districtLabels = (district?.menu?.items || []).map(item => item.label);
   console.log('  district: ' + JSON.stringify(districtLabels));
@@ -428,6 +484,7 @@ try {
   await shot('09-district-menu');
   await page.keyboard.press('Escape');
 
+  await bringIntoView('[data-hq-site]');
   const hq = await openOn('[data-hq-site]', 'HQ site');
   const hqLabels = (hq?.menu?.items || []).map(item => item.label);
   console.log('  HQ site: ' + JSON.stringify(hqLabels));
@@ -512,13 +569,12 @@ try {
     ['canvas', async () => openAtPoint(await emptyCanvasPoint(), 'canvas', opt)]
   ];
 
-  // Reset view is 100% by definition; Fit All then zooming out clamps at 50%;
+  // Reset view is 100% by definition; zooming out from there clamps at 50%;
   // zooming in needs a selected building to centre on, or a spread-out map
   // leaves every target off-screen at 200%.
   const framings = {
     '100%': async () => {
-      await page.click('[data-map-reset-view]', { force: true }).catch(() => {});
-      await page.waitForTimeout(250);
+      await resetView();
       return camera();
     },
     '50%': () => frame('zoom-out'),
@@ -535,7 +591,7 @@ try {
       for (let i = 0; i < 6; i += 1) {
         await page.click('[data-map-zoom-in]', { force: true }).catch(() => {});
       }
-      await page.click('[data-map-center]', { force: true }).catch(() => {});
+      await centerSelected();
       await page.waitForTimeout(300);
       return camera();
     }
@@ -552,9 +608,20 @@ try {
         console.log('  skip   ' + label + ' — not on screen at this zoom');
         continue;
       }
+      // Anchored means "at the cursor, or flipped back across it by exactly its
+      // own width/height" — flipping near a viewport edge is the design, and it
+      // is still anchored. Drift caused by the world transform would be some
+      // other number entirely, and would scale with the zoom.
+      const anchored = (delta, size) => Math.abs(delta) <= 2 || Math.abs(delta + size) <= 2;
       check(
-        Math.abs(opened.menu.anchorDx) <= 2 && Math.abs(opened.menu.anchorDy) <= 2,
-        label + ' stays on the cursor'
+        anchored(opened.menu.anchorDx, opened.menu.width) &&
+          anchored(opened.menu.anchorDy, opened.menu.height),
+        label +
+          ' stays on the cursor (dx ' +
+          opened.menu.anchorDx +
+          ', dy ' +
+          opened.menu.anchorDy +
+          ')'
       );
       check(opened.menu.insideWorld === false, label + ' is outside the world layer');
       await page.keyboard.press('Escape');
@@ -604,12 +671,22 @@ try {
   await frame(null);
 
   const checked = await page.evaluate(() => {
+    // Start from an empty set: an earlier section in this run may have left a
+    // building checked, and a count that is off by one would make every label
+    // below look wrong for the wrong reason.
+    const tiles = [...document.querySelectorAll('.ws-map-tile[data-ws-id]')];
+    const click = el =>
+      el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    tiles.forEach(tile => {
+      const box = tile.querySelector('[data-ws-check]');
+      if (box && tile.classList.contains('is-multi')) click(box);
+    });
     const picked = [];
-    for (const tile of document.querySelectorAll('.ws-map-tile[data-ws-id]')) {
+    for (const tile of tiles) {
       if (picked.length === 3) break;
-      const check = tile.querySelector('[data-ws-check]');
-      if (!check) continue;
-      check.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+      const box = tile.querySelector('[data-ws-check]');
+      if (!box) continue;
+      click(box);
       picked.push(tile.getAttribute('data-ws-id'));
     }
     return picked;

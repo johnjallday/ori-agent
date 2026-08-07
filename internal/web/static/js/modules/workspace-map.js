@@ -1511,13 +1511,16 @@
       (readOnly
         ? '<p class="ws-map-notice" role="status">Positions cannot be saved right now. You can still look around; building and moving are unavailable until the map layout loads.</p>'
         : '') +
+      // Zoom only. Fit all, Center selected and Reset view moved into the
+      // canvas context menu (#317): they are framing choices you make about a
+      // spot on the map, so they belong under the cursor rather than in a
+      // permanent strip across the bottom of it. Keyboard users reach them by
+      // Shift+F10 on the focused canvas, which opens that same menu; 0 still
+      // resets the view directly.
       '<div class="ws-map-controls" role="group" aria-label="Map view controls">' +
       '<button type="button" class="ws-map-ctl" data-map-zoom-out aria-label="Zoom out">−</button>' +
       '<span class="ws-map-zoom" data-map-zoom-readout aria-hidden="true">100%</span>' +
       '<button type="button" class="ws-map-ctl" data-map-zoom-in aria-label="Zoom in">+</button>' +
-      '<button type="button" class="ws-map-ctl ws-map-ctl--wide" data-map-fit>Fit all</button>' +
-      '<button type="button" class="ws-map-ctl ws-map-ctl--wide" data-map-center aria-label="Center selected">Center</button>' +
-      '<button type="button" class="ws-map-ctl ws-map-ctl--wide" data-map-reset-view aria-label="Reset view">Reset</button>' +
       '</div>' +
       '<p class="ws-map-live" data-map-live role="status" aria-live="polite"></p>'
     );
@@ -1559,8 +1562,9 @@
       (isApplePlatform() ? 'Option' : 'Alt') +
       ' to place freely for one move.</li>' +
       '<li><b>Escape</b> — cancels whatever is in progress without saving.</li>' +
+      '<li><b>Right-click</b> — anything on the map has a menu: a building, a district, the HQ site, or empty ground. Shift+F10 does the same from the keyboard.</li>' +
       '</ul>' +
-      '<p class="ws-map-help-note">Fit all, Center and Reset view move the camera. Reset layout moves the buildings — and can be undone.</p>' +
+      '<p class="ws-map-help-note">Fit all, Center and Reset view live on the empty-ground menu (0 resets the view directly) and move the camera. Reset layout moves the buildings — and can be undone.</p>' +
       '</div>'
     );
   }
@@ -3006,18 +3010,18 @@
       );
     });
 
-    // The keyboard equivalent (FR-3). Both of the platform gestures work — the
-    // Context Menu key and Shift+F10 — and the menu opens at the focused
-    // element, because there is no cursor to anchor to. Canvas is deliberately
-    // absent: the map's own controls already carry those actions, and a key
-    // press on the canvas has no location to mean.
+    // The keyboard equivalent (FR-3). Both platform gestures work — the Context
+    // Menu key and Shift+F10 — and the menu opens at the focused element,
+    // because there is no cursor to anchor to. The canvas counts as a target
+    // here: it is focusable, and since the framing buttons were retired the
+    // menu is the only way to reach Center Selected without a mouse.
     canvas.addEventListener('keydown', function (event) {
       if (!event) return;
       var wanted = event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey);
       if (!wanted) return;
       if (dragState || clusterDrag) return;
       var target = resolveMenuTarget(event.target, workspaces);
-      if (!target || target.type === 'canvas') return;
+      if (!target) return;
       if (!contextMenuItemsFor(target).length) return;
       if (event.preventDefault) event.preventDefault();
       openMenuForTarget(
@@ -3284,8 +3288,9 @@
     var zoomOut = container.querySelector('[data-map-zoom-out]');
     if (zoomIn) zoomIn.disabled = camera.zoom >= MAX_ZOOM - 0.0001;
     if (zoomOut) zoomOut.disabled = camera.zoom <= MIN_ZOOM + 0.0001;
-    var center = container.querySelector('[data-map-center]');
-    if (center) center.disabled = !selectedNodeAnchor();
+    // Center Selected has no button to keep in step any more; the canvas menu
+    // computes its own disabled state from selectedNodeAnchor() each time it
+    // opens, which cannot go stale.
   }
 
   // selectedNodeAnchor finds the world anchor of whatever is selected, whether
@@ -3319,32 +3324,9 @@
       setCamera(zoomAroundCenter(camera, 1 / ZOOM_STEP), container);
       announce(container, 'Zoomed to ' + Math.round(camera.zoom * 100) + ' percent');
     });
-    on('[data-map-fit]', function () {
-      fitAll(container);
-      // Zoom is clamped at 50%, so a layout spread wider than two viewports
-      // cannot literally all fit. Saying so is better than a button that
-      // quietly under-delivers (FR-38, FR-40).
-      announce(
-        container,
-        camera.zoom <= MIN_ZOOM + 0.0001
-          ? 'Zoomed out as far as the map goes. Some workspaces are still off-screen — pan to reach them.'
-          : 'Showing every workspace'
-      );
-    });
-    on('[data-map-center]', function () {
-      var anchor = selectedNodeAnchor();
-      if (!anchor) {
-        announce(container, 'Select a workspace first');
-        return;
-      }
-      // Centering moves the view, never the record (FR-41).
-      setCamera(centerOn(camera, anchor), container);
-      announce(container, 'Centered the selected workspace');
-    });
-    on('[data-map-reset-view]', function () {
-      resetView(container);
-      announce(container, 'View reset. Workspace positions are unchanged');
-    });
+    // Fit all, Center selected and Reset view have no buttons any more: they are
+    // items on the canvas context menu (see runMenuAction), plus the f / 0 keys
+    // below. Nothing about what they do changed.
     on('[data-map-move]', function () {
       startKeyboardMove(container);
       var canvasEl = container.querySelector('[data-ws-map-viewport]');
@@ -3373,12 +3355,29 @@
         case '_':
           setCamera(zoomAroundCenter(camera, 1 / ZOOM_STEP), container);
           break;
+        // With the framing buttons gone, this key is a direct route to what the
+        // canvas menu offers, so it announces its result the way the menu item
+        // does.
         case '0':
           resetView(container);
+          announce(container, 'View reset. Workspace positions are unchanged');
           break;
+        // `f` never reaches this handler in the app: keyboard-navigation.js
+        // claims it globally as the link-hint activation key and stops the event
+        // in the capture phase. It is kept because the behaviour is correct on
+        // its own terms — a page without that module still gets Fit All — but
+        // nothing may advertise it. The reachable routes are the canvas context
+        // menu (right-click, or Shift+F10 on the focused canvas) and the buttons
+        // that action never lost.
         case 'f':
         case 'F':
           fitAll(container);
+          announce(
+            container,
+            camera.zoom <= MIN_ZOOM + 0.0001
+              ? 'Zoomed out as far as the map goes. Some workspaces are still off-screen — pan to reach them.'
+              : 'Showing every workspace'
+          );
           break;
         case 'ArrowLeft':
           setCamera(

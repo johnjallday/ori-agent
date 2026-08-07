@@ -2282,8 +2282,10 @@ async function mountedCluster({ patchResponse } = {}) {
   });
   await flush();
   // Reset View pins the camera at 100%, so a screen delta in these tests is a
-  // world delta and the expected numbers stay readable.
-  harness.control('[data-map-reset-view]').click();
+  // world delta and the expected numbers stay readable. It has no button any
+  // more (#317 moved it to the canvas menu); `0` on the canvas is the same
+  // action.
+  harness.fire('keydown', { key: '0', preventDefault() {} });
   return { map, harness, patches };
 }
 
@@ -3712,6 +3714,66 @@ test('the legacy launcher mode behaves exactly like the cockpit', async () => {
     'Delete workspace'
   ]);
   assert.equal(map.getSelectedId(), 'ws-2', 'and right-click still selects first');
+});
+
+// --- the framing buttons moved into the menu (#317) --------------------------
+
+test('the control strip keeps zoom only — Fit all, Center and Reset left it', async () => {
+  const { harness } = await menuHarness();
+  const html = harness.container.innerHTML;
+  assert.match(html, /data-map-zoom-out/, 'zoom out stays');
+  assert.match(html, /data-map-zoom-in/, 'zoom in stays');
+  assert.match(html, /data-map-zoom-readout/, 'and the readout');
+  assert.doesNotMatch(html, /data-map-fit/, 'Fit all is on the canvas menu now');
+  assert.doesNotMatch(html, /data-map-center/, 'so is Center selected');
+  assert.doesNotMatch(html, /data-map-reset-view/, 'and Reset view');
+  // The placement cluster is untouched: those are not framing actions.
+  assert.match(html, /data-map-build/);
+  assert.match(html, /data-map-reset-layout/);
+});
+
+test('the three framing actions are still reachable, by menu and by key', async () => {
+  const { map, harness } = await menuHarness();
+  const live = harness.container.querySelector('[data-map-live]');
+
+  // Menu route.
+  harness.fire('contextmenu', rightClick(canvasTarget()).event);
+  const actions = Array.from(harness.menu.items().map(item => item.action));
+  assert.deepEqual(actions, ['create', 'fit', 'center', 'reset-view']);
+  harness.menu.item('fit').fire('click');
+  assert.match(live.textContent, /workspace/i, 'Fit all announced through the live region');
+
+  // Keyboard route on the canvas, which is what the buttons used to give.
+  harness.fire('keydown', { key: '0', preventDefault() {} });
+  assert.equal(map.getCamera().zoom, 1, '0 resets the view');
+  assert.match(live.textContent, /View reset/, 'and says so now that no button does');
+});
+
+test('the help panel does not advertise f, which the app-wide link hints take', async () => {
+  const { harness } = await menuHarness();
+  const help = harness.container.innerHTML;
+  assert.match(help, /How the map works/, 'the help panel is rendered');
+  // keyboard-navigation.js claims `f` globally in the capture phase, so the
+  // map's own f-to-Fit-All handler never runs in the app. Telling users to
+  // press it would be a lie; the menu and 0 are the honest routes.
+  assert.doesNotMatch(help, /press f\b/i);
+  assert.match(help, /0 resets the view/);
+  assert.match(help, /Shift\+F10/, 'and the keyboard route to the menu is documented');
+});
+
+test('Shift+F10 on the focused canvas opens the canvas menu (the only keyboard route to Center)', async () => {
+  const { harness } = await menuHarness();
+  harness.fire('keydown', {
+    key: 'F10',
+    shiftKey: true,
+    target: {
+      closest: sel => (sel.includes('ws-map-canvas') ? { focus() {} } : null),
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 800, height: 400 })
+    },
+    preventDefault() {}
+  });
+  assert.ok(harness.menu.isOpen(), 'the canvas menu opens from the keyboard');
+  assert.ok(harness.menu.item('center'), 'and carries Center selected');
 });
 
 test('a re-mount closes an open menu instead of leaving it bound to dead DOM', async () => {

@@ -46,7 +46,11 @@ if (group && child) {
 }
 
 await open();
-await page.click('[data-map-fit]');
+// Fit all lives on the empty-ground context menu since #317; Shift+F10 on the
+// focused canvas is the keyboard route to it.
+await page.locator('[data-ws-map-viewport]').focus();
+await page.keyboard.press('Shift+F10');
+await page.locator('[data-menu-action="fit"]').click();
 await page.waitForTimeout(400);
 await shot('01-home-wide');
 
@@ -66,7 +70,9 @@ if (group) {
     if (box) {
       await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
       await page.mouse.down();
-      await page.mouse.move(box.x + box.width / 2 + 152, box.y + box.height / 2 + 38, { steps: 12 });
+      await page.mouse.move(box.x + box.width / 2 + 152, box.y + box.height / 2 + 38, {
+        steps: 12
+      });
       await shot('03-district-moving');
       await page.mouse.up();
       await page.waitForTimeout(800);
