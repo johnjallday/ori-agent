@@ -973,6 +973,11 @@
   }
 
   function setCamera(next, container) {
+    // Every pan, zoom, fit, centre and reset lands here, which makes it the one
+    // place that can honestly say "the camera moved". An open context menu is
+    // anchored to a screen point, so it stops meaning anything the moment the
+    // world slides underneath it (FR-18).
+    closeContextMenu({ restoreFocus: false });
     var world = lastWorldLayout ? lastWorldLayout.world : null;
     camera = world
       ? clampCamera(next, world)
@@ -1940,7 +1945,8 @@
         canvas +
         '</section>' +
         '</div>' +
-        selBarHTML()
+        selBarHTML() +
+        menuHostHTML()
       );
     }
     return (
@@ -1982,7 +1988,11 @@
       // (fixed descendants are still clipped by an ancestor's clip-path), making
       // it invisible at the viewport bottom. Kept inside the container so
       // bindSelBar/updateSelBar still resolve it.
-      selBarHTML()
+      selBarHTML() +
+      // The context menu's host, for the same reason: the menu is positioned in
+      // viewport coordinates, so it must sit outside both the theatre's
+      // clip-path and the world layer's pan/zoom transform.
+      menuHostHTML()
     );
   }
 
@@ -2314,6 +2324,479 @@
       clr.addEventListener('click', function () {
         clearMulti(container);
       });
+  }
+
+  // ---------- context menu ----------
+  //
+  // Right-click puts a target's own actions under the cursor (#317). Three
+  // rules shape everything below:
+  //
+  //   1. The menu is mounted in a host that lives OUTSIDE the transformed world
+  //      layer — and outside the theatre's clip-path, like the selection bar —
+  //      so it is positioned in viewport coordinates. A menu inside the world
+  //      would scale with the zoom level and slide away during a pan.
+  //   2. One delegated `contextmenu` listener on the canvas resolves its target
+  //      with closest(). Tiles are re-rendered on every data refresh, so
+  //      per-tile binding would be lost or doubled across re-mounts.
+  //   3. Every item routes to an action that already exists — the rail's
+  //      handlers, the bulk callbacks the host passes in, or the camera
+  //      controls. The menu adds no capability of its own.
+
+  var MENU_EDGE_PAD = 8;
+  // Used only when the environment cannot measure the menu (before layout, or
+  // in a stub DOM). Flipping on an estimate beats not flipping at all.
+  var MENU_FALLBACK_SIZE = { width: 232, height: 260 };
+
+  // The one open menu: its host, the element focus returns to, the action
+  // context, and the listeners that close it.
+  var menuState = null;
+
+  function menuDivider() {
+    return { divider: true };
+  }
+
+  // The same read-only condition the placement controls already use: a layout
+  // that cannot be loaded cannot be saved, so anything that mutates workspaces
+  // or layout is offered but disabled (FR-15, mirroring "Reset layout…").
+  function isMapReadOnly() {
+    return layoutState.status !== 'ready';
+  }
+
+  function contextMenuHTML(items, options) {
+    var opts = options || {};
+    var body = (Array.isArray(items) ? items : [])
+      .map(function (item) {
+        if (!item) return '';
+        if (item.divider) return '<div class="ori-context-divider" role="separator"></div>';
+        return (
+          '<button type="button" class="ori-context-item ws-map-menu-item' +
+          (item.variant === 'danger' ? ' ori-context-danger' : '') +
+          '" role="menuitem" tabindex="-1" data-menu-action="' +
+          escapeHtml(item.action) +
+          '"' +
+          // Disabled items keep their place and their announcement; only the
+          // activation and the arrow stop are withheld (FR-21).
+          (item.disabled ? ' aria-disabled="true"' : '') +
+          '>' +
+          escapeHtml(item.label) +
+          '</button>'
+        );
+      })
+      .join('');
+    return (
+      '<div class="ori-context-menu ws-map-menu" data-ws-map-menu role="menu" aria-label="' +
+      escapeHtml(opts.label || 'Map actions') +
+      '">' +
+      body +
+      '</div>'
+    );
+  }
+
+  function menuHostHTML() {
+    return '<div class="ws-map-menu-host" data-ws-map-menu-host></div>';
+  }
+
+  // Single workspace tile. Every entry mirrors a control the Overview rail
+  // already renders, including the rail's own "Delete group" wording for a
+  // group and its condition for the Setup entry point.
+  function tileMenuItems(ws) {
+    var id = (ws && ws.id) || '';
+    var items = [
+      { label: 'Open workspace', action: 'open' },
+      { label: 'Open → Backlog', action: 'open-backlog' }
+    ];
+    if (setupPresentation(setupStatusCache[id])) {
+      items.push({ label: 'Open → Setup', action: 'open-setup' });
+    }
+    items.push(menuDivider());
+    items.push({
+      label: multiSelected[id] ? 'Remove from selection' : 'Add to selection',
+      action: 'toggle-selection'
+    });
+    items.push(menuDivider());
+    items.push({
+      label: isGroup(ws) ? 'Delete group' : 'Delete workspace',
+      action: 'delete',
+      variant: 'danger',
+      disabled: isMapReadOnly()
+    });
+    return items;
+  }
+
+  // The item set for a resolved target. Pure apart from the module state the
+  // rail reads too (multi-select set, setup cache, layout status), so a menu can
+  // be asserted without a DOM.
+  function contextMenuItemsFor(target) {
+    var spec = target || {};
+    if (spec.type === 'tile') return tileMenuItems(spec.ws || { id: spec.id });
+    return [];
+  }
+
+  function menuLabelFor(target) {
+    var spec = target || {};
+    if (spec.type === 'tile') {
+      var name = (spec.ws && spec.ws.name) || 'workspace';
+      return 'Actions for ' + name;
+    }
+    return 'Map actions';
+  }
+
+  function clampToRange(value, min, max) {
+    if (max < min) return min;
+    return Math.max(min, Math.min(value, max));
+  }
+
+  /**
+   * Where the menu opens.
+   *
+   * The menu flips back across the anchor point when it would otherwise run
+   * past a viewport edge, and is then clamped inside the viewport, so it can
+   * never render off-screen or push the page into a scroll (FR-17). Pure, so
+   * the edge cases are assertable without a browser.
+   */
+  function menuPosition(point, size, viewport) {
+    var left = point.x + size.width > viewport.width ? point.x - size.width : point.x;
+    var top = point.y + size.height > viewport.height ? point.y - size.height : point.y;
+    return {
+      left: clampToRange(left, MENU_EDGE_PAD, viewport.width - size.width - MENU_EDGE_PAD),
+      top: clampToRange(top, MENU_EDGE_PAD, viewport.height - size.height - MENU_EDGE_PAD)
+    };
+  }
+
+  function menuViewport() {
+    var width = (typeof window !== 'undefined' && window.innerWidth) || 0;
+    var height = (typeof window !== 'undefined' && window.innerHeight) || 0;
+    return {
+      width: width > 0 ? width : DEFAULT_VIEWPORT.width,
+      height: height > 0 ? height : DEFAULT_VIEWPORT.height
+    };
+  }
+
+  function measureMenu(menu) {
+    var rect =
+      menu && typeof menu.getBoundingClientRect === 'function'
+        ? menu.getBoundingClientRect()
+        : null;
+    var width = (rect && rect.width) || (menu && menu.offsetWidth) || 0;
+    var height = (rect && rect.height) || (menu && menu.offsetHeight) || 0;
+    return {
+      width: width > 0 ? width : MENU_FALLBACK_SIZE.width,
+      height: height > 0 ? height : MENU_FALLBACK_SIZE.height
+    };
+  }
+
+  function placeMenu(menu, point) {
+    if (!menu || !menu.style) return;
+    var placed = menuPosition(point, measureMenu(menu), menuViewport());
+    menu.style.left = placed.left + 'px';
+    menu.style.top = placed.top + 'px';
+  }
+
+  function menuItemElements(menu) {
+    if (!menu || typeof menu.querySelectorAll !== 'function') return [];
+    return Array.prototype.slice.call(menu.querySelectorAll('[data-menu-action]'));
+  }
+
+  function isMenuItemDisabled(el) {
+    return !!(el && el.getAttribute && el.getAttribute('aria-disabled') === 'true');
+  }
+
+  // Roving tabindex: exactly one item is tabbable at a time, and it is the one
+  // that has focus (FR-21, FR-22).
+  function focusMenuItem(index) {
+    var state = menuState;
+    if (!state) return;
+    var items = state.items;
+    if (!items.length) return;
+    var next = clampToRange(index, 0, items.length - 1);
+    state.index = next;
+    items.forEach(function (el, i) {
+      if (el && el.setAttribute) el.setAttribute('tabindex', i === next ? '0' : '-1');
+    });
+    var target = items[next];
+    if (target && typeof target.focus === 'function') target.focus();
+  }
+
+  // Arrow navigation wraps at both ends and steps over disabled items, which
+  // stay visible and announced (FR-21).
+  function nextEnabledIndex(from, step) {
+    var state = menuState;
+    if (!state || !state.items.length) return -1;
+    var count = state.items.length;
+    for (var i = 1; i <= count; i++) {
+      var candidate = (((from + step * i) % count) + count) % count;
+      if (!isMenuItemDisabled(state.items[candidate])) return candidate;
+    }
+    return -1;
+  }
+
+  function firstEnabledIndex(step) {
+    var state = menuState;
+    if (!state || !state.items.length) return -1;
+    var start = step > 0 ? -1 : 0;
+    return nextEnabledIndex(start, step);
+  }
+
+  function listenWhileOpen(target, type, handler, capture) {
+    if (!target || typeof target.addEventListener !== 'function') return;
+    target.addEventListener(type, handler, capture);
+    if (menuState) {
+      menuState.teardown.push(function () {
+        if (typeof target.removeEventListener === 'function') {
+          target.removeEventListener(type, handler, capture);
+        }
+      });
+    }
+  }
+
+  function insideOpenMenu(node) {
+    if (!node || typeof node.closest !== 'function') return false;
+    return !!node.closest('[data-ws-map-menu]');
+  }
+
+  /**
+   * Close the open menu.
+   *
+   * Every dismissal route lands here — Escape, a click or right-click outside,
+   * choosing an item, a resize, a camera change, and a re-mount — so focus
+   * returns to the element the menu was opened from exactly once, no matter how
+   * it was closed (FR-19).
+   */
+  function closeContextMenu(options) {
+    var state = menuState;
+    if (!state) return;
+    menuState = null;
+    state.teardown.forEach(function (off) {
+      off();
+    });
+    if (state.host) state.host.innerHTML = '';
+    var restore = !(options && options.restoreFocus === false);
+    if (restore && state.origin && typeof state.origin.focus === 'function') state.origin.focus();
+  }
+
+  function activateMenuItem(el) {
+    var state = menuState;
+    if (!state || !el || isMenuItemDisabled(el)) return;
+    var action = el.getAttribute ? el.getAttribute('data-menu-action') : '';
+    var container = state.container;
+    var context = state.context;
+    var options = state.options;
+    // Close first: focus goes back to the target before the action runs, so a
+    // confirm dialog or a navigation starts from a sane place.
+    closeContextMenu();
+    runMenuAction(container, action, context, options);
+  }
+
+  function bindMenuInteractions() {
+    var state = menuState;
+    if (!state) return;
+    state.items.forEach(function (el) {
+      if (!el || typeof el.addEventListener !== 'function') return;
+      el.addEventListener('click', function (event) {
+        if (event && event.preventDefault) event.preventDefault();
+        activateMenuItem(el);
+      });
+    });
+    listenWhileOpen(state.menu, 'keydown', function (event) {
+      handleMenuKey(event);
+    });
+    // Dismissal that cannot be seen from inside the menu: a pointer or a key
+    // elsewhere on the page, and a resize that would strand the menu away from
+    // what it was anchored to (FR-18).
+    //
+    // `openEvent` is the right-click (or key press) that opened this menu, and
+    // it is still propagating while these listeners are being added. A listener
+    // attached to a node the event has not reached yet is still called for that
+    // event, so without this guard the menu would close itself on the way up to
+    // the document — opening and dismissing in one gesture.
+    var openEvent = state.openEvent;
+    if (typeof document !== 'undefined') {
+      listenWhileOpen(document, 'mousedown', function (event) {
+        if (event === openEvent) return;
+        if (insideOpenMenu(event && event.target)) return;
+        closeContextMenu();
+      });
+      listenWhileOpen(document, 'contextmenu', function (event) {
+        if (event === openEvent) return;
+        if (insideOpenMenu(event && event.target)) return;
+        closeContextMenu();
+      });
+      listenWhileOpen(document, 'keydown', function (event) {
+        if (event === openEvent) return;
+        if (!event || event.key !== 'Escape') return;
+        closeContextMenu();
+      });
+    }
+    if (typeof window !== 'undefined') {
+      listenWhileOpen(window, 'resize', function () {
+        closeContextMenu();
+      });
+    }
+  }
+
+  function handleMenuKey(event) {
+    var state = menuState;
+    if (!state || !event) return;
+    var key = event.key;
+    var handled = true;
+    switch (key) {
+      case 'ArrowDown':
+        focusMenuItem(nextEnabledIndex(state.index, 1));
+        break;
+      case 'ArrowUp':
+        focusMenuItem(nextEnabledIndex(state.index, -1));
+        break;
+      case 'Home':
+        focusMenuItem(firstEnabledIndex(1));
+        break;
+      case 'End':
+        focusMenuItem(firstEnabledIndex(-1));
+        break;
+      case 'Enter':
+      case ' ':
+      case 'Spacebar':
+        activateMenuItem(state.items[state.index]);
+        break;
+      case 'Escape':
+      case 'Tab':
+        closeContextMenu();
+        break;
+      default:
+        handled = false;
+    }
+    // Enter and Space are prevented too: a <button> would otherwise synthesize
+    // a click and run the action a second time.
+    if (handled && event.preventDefault) event.preventDefault();
+  }
+
+  function openContextMenu(container, spec) {
+    closeContextMenu({ restoreFocus: false });
+    if (!container || typeof container.querySelector !== 'function') return false;
+    var host = container.querySelector('[data-ws-map-menu-host]');
+    if (!host) return false;
+    var items = (spec.items || []).filter(Boolean);
+    if (!items.length) return false;
+    host.innerHTML = contextMenuHTML(items, { label: spec.label });
+    var menu =
+      typeof host.querySelector === 'function' ? host.querySelector('[data-ws-map-menu]') : null;
+    if (!menu) {
+      host.innerHTML = '';
+      return false;
+    }
+    menuState = {
+      container: container,
+      host: host,
+      menu: menu,
+      items: menuItemElements(menu),
+      index: 0,
+      origin: spec.origin || null,
+      context: spec.context || {},
+      options: spec.options || {},
+      // The gesture that opened this menu, so the dismissal listeners can
+      // ignore it while it is still propagating (see bindMenuInteractions).
+      openEvent: spec.event || null,
+      teardown: []
+    };
+    placeMenu(menu, spec.at || { x: 0, y: 0 });
+    bindMenuInteractions();
+    focusMenuItem(firstEnabledIndex(1));
+    return true;
+  }
+
+  function runMenuAction(container, action, context, options) {
+    var id = context.id || '';
+    switch (action) {
+      case 'open':
+        // The map's explicit open: the host's onOpen when it has one (the
+        // cockpit records the first action there), else plain navigation, which
+        // is what the rail's Open button does.
+        if (options && typeof options.onOpen === 'function') options.onOpen(id);
+        else openWorkspace(id);
+        break;
+      case 'open-backlog':
+        openWorkspace(id, { panel: 'backlog' });
+        break;
+      case 'open-setup':
+        openWorkspace(id, { setup: true });
+        break;
+      case 'toggle-selection':
+        toggleMulti(container, id);
+        break;
+      case 'delete':
+        deleteWorkspace(id, options);
+        break;
+      default:
+        break;
+    }
+  }
+
+  // resolveMenuTarget turns whatever was right-clicked into one of the map's
+  // four targets. Order matters: the HQ site is also a `.ws-map-tile`, and a
+  // district's label sits inside the district outline.
+  function resolveMenuTarget(node, workspaces) {
+    if (!node || typeof node.closest !== 'function') return null;
+    var hq = node.closest('[data-hq-site]');
+    if (hq) return { type: 'hq', element: hq };
+    var tile = node.closest('.ws-map-tile[data-ws-id]');
+    if (tile) {
+      var tileId = tile.getAttribute('data-ws-id');
+      return { type: 'tile', id: tileId, ws: findWs(workspaces, tileId), element: tile };
+    }
+    var district = node.closest('.ws-map-district');
+    if (district) {
+      var groupId = district.getAttribute('data-group-id');
+      return { type: 'district', id: groupId, ws: findWs(workspaces, groupId), element: district };
+    }
+    var canvas = node.closest('.ws-map-canvas');
+    if (canvas) return { type: 'canvas', element: canvas };
+    return null;
+  }
+
+  function openMenuForTarget(container, workspaces, options, target, at, event) {
+    // Right-clicking a tile that is not in the multi-select set selects it
+    // first, so the menu always acts on something the user can see is chosen
+    // (FR-6). It never opens the workspace and never touches the checkbox.
+    if (target.type === 'tile' && target.id && !multiSelected[target.id]) {
+      applySelection(container, workspaces, target.id, options);
+    }
+    var items = contextMenuItemsFor(target);
+    if (!items.length) return false;
+    return openContextMenu(container, {
+      items: items,
+      label: menuLabelFor(target),
+      at: at,
+      origin: target.element,
+      context: { id: target.id || '', type: target.type },
+      options: options,
+      event: event
+    });
+  }
+
+  function bindContextMenu(container, workspaces, options) {
+    var canvas =
+      container.querySelector('[data-ws-map-viewport]') ||
+      container.querySelector('.ws-map-canvas');
+    if (!canvas || typeof canvas.addEventListener !== 'function') return;
+    // One delegated listener, because tiles are replaced on every refresh.
+    canvas.addEventListener('contextmenu', function (event) {
+      // A menu opened mid-gesture would act on a target that is still moving.
+      if (dragState || clusterDrag) return;
+      var target = resolveMenuTarget(event && event.target, workspaces);
+      if (!target) return;
+      var items = contextMenuItemsFor(target);
+      // No item set for this target yet: leave the browser's own menu alone
+      // rather than suppressing it and offering nothing in its place.
+      if (!items.length) return;
+      if (event.preventDefault) event.preventDefault();
+      openMenuForTarget(
+        container,
+        workspaces,
+        options,
+        target,
+        { x: (event && event.clientX) || 0, y: (event && event.clientY) || 0 },
+        event
+      );
+    });
   }
 
   function bindTiles(container, workspaces, options) {
@@ -3883,6 +4366,10 @@
     });
 
     var viewport = measureViewport(container);
+    // The re-render below destroys the menu's host along with everything else.
+    // Closing it first keeps the listeners and the focus-restore target from
+    // outliving the DOM they referred to.
+    closeContextMenu({ restoreFocus: false });
     lastMount = { container: container, state: state };
 
     container.innerHTML = shellHTML(
@@ -3894,6 +4381,7 @@
     );
     bindCreate(container);
     bindTiles(container, workspaces, state);
+    bindContextMenu(container, workspaces, state);
     bindHQSite(container, state);
     bindOverviewActions(container, state);
     // The camera survives every re-mount: a workspace refresh, a filter, or a
@@ -3930,6 +4418,7 @@
   /** Tear down the map view (called when switching away). */
   function unmount(container) {
     if (!container) return;
+    closeContextMenu({ restoreFocus: false });
     container.innerHTML = '';
     // Clearing lastMount is what makes a layout response still in flight a
     // no-op when it lands: settleLayout has nothing to repaint.
@@ -4009,6 +4498,14 @@
       return !!undoSnapshot;
     },
     computeStats: computeStats,
+    // The context menu's pure halves: the item set a target offers, the markup
+    // that renders it, and the edge-flipping placement math (FR-17, FR-123).
+    contextMenuItemsFor: contextMenuItemsFor,
+    contextMenuHTML: contextMenuHTML,
+    contextMenuPosition: menuPosition,
+    closeContextMenu: function () {
+      closeContextMenu({ restoreFocus: false });
+    },
     tileHTML: tileHTML,
     overviewBodyHTML: overviewBodyHTML,
     selBarHTML: selBarHTML,

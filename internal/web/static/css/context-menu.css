@@ -1,0 +1,87 @@
+/* Shared context-menu component.
+ *
+ * These rules were lifted out of sessions.css, where the session / folder / note
+ * menus defined them. The Workspace Map now opens menus too (#317), and one app
+ * should have one menu surface — so the declarations live here once and carry
+ * two selectors: the neutral `.ori-context-*` names for new surfaces, and the
+ * legacy `.session-context-*` names the sessions page's existing markup and JS
+ * still use. Nothing is duplicated: both names share a single rule block.
+ *
+ * Loaded immediately after sessions.css in layout/head.tmpl so the component
+ * keeps the exact cascade position it had before the lift.
+ */
+
+.ori-context-menu,
+.session-context-menu {
+  position: fixed;
+  min-width: 160px;
+  padding: 4px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  box-shadow: var(--shadow-lg);
+  z-index: 10000;
+}
+
+.ori-context-item,
+.session-context-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  background: none;
+  color: var(--text-primary);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background 0.15s ease;
+}
+
+.ori-context-item:hover,
+.session-context-item:hover {
+  background: var(--bg-secondary);
+}
+
+.ori-context-item.ori-context-danger,
+.session-context-item.session-context-danger {
+  color: var(--danger-color);
+}
+
+.ori-context-item.ori-context-danger:hover,
+.session-context-item.session-context-danger:hover {
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.ori-context-divider,
+.session-context-divider {
+  height: 1px;
+  background: var(--border-color);
+  margin: 4px 0;
+}
+
+/* Keyboard operation. Menu items carry a roving tabindex, so the focused item
+   is the only visible cue for where the user is — it cannot be left to the
+   browser default that a `background` hover rule would otherwise hide. */
+.ori-context-item:focus-visible,
+.session-context-item:focus-visible {
+  outline: 2px solid var(--primary-color);
+  outline-offset: -2px;
+  background: var(--bg-secondary);
+}
+
+/* Disabled items stay in the menu and stay announced (aria-disabled), so the
+   action's existence is still discoverable while the reason it cannot run is
+   visible. Arrow navigation skips them. */
+.ori-context-item[aria-disabled="true"],
+.session-context-item[aria-disabled="true"] {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.ori-context-item[aria-disabled="true"]:hover,
+.session-context-item[aria-disabled="true"]:hover {
+  background: none;
+}

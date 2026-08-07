@@ -1302,6 +1302,88 @@ function createCameraHarness({ width = 1000, height = 600, tiles = [], districts
     return controls[name];
   }
 
+  // The context menu's host. The map writes menu markup into it and then works
+  // with the real elements it finds there, so the stub parses what was written
+  // back into element stubs — enough for clicks, roving focus, and the
+  // aria-disabled contract.
+  const menuHost = (() => {
+    let hostHTML = '';
+    let menu = null;
+
+    const makeItem = (action, label, disabled) => {
+      const attrs = { 'data-menu-action': action, tabindex: '-1' };
+      if (disabled) attrs['aria-disabled'] = 'true';
+      const own = {};
+      const item = {
+        action,
+        label: label.trim(),
+        attrs,
+        focused: false,
+        getAttribute: name => (name in attrs ? attrs[name] : null),
+        setAttribute: (name, value) => {
+          attrs[name] = String(value);
+        },
+        addEventListener: (type, fn) => {
+          (own[type] = own[type] || []).push(fn);
+        },
+        focus: () => {
+          if (menu) menu.items.forEach(other => (other.focused = false));
+          item.focused = true;
+        },
+        fire: (type, event = {}) =>
+          (own[type] || []).forEach(fn => fn({ preventDefault() {}, ...event }))
+      };
+      return item;
+    };
+
+    const parseItems = value => {
+      const items = [];
+      const pattern = /<button[^>]*data-menu-action="([^"]*)"([^>]*)>([\s\S]*?)<\/button>/g;
+      let match;
+      while ((match = pattern.exec(value))) {
+        items.push(makeItem(match[1], match[3], /aria-disabled="true"/.test(match[2])));
+      }
+      return items;
+    };
+
+    const makeMenu = value => {
+      const own = {};
+      return {
+        items: parseItems(value),
+        style: {},
+        focusedAction: null,
+        addEventListener: (type, fn) => {
+          (own[type] = own[type] || []).push(fn);
+        },
+        fire: (type, event = {}) =>
+          (own[type] || []).forEach(fn => fn({ preventDefault() {}, ...event })),
+        querySelectorAll: sel => (sel.includes('data-menu-action') ? host.menu().items : []),
+        // Left unmeasured on purpose: an unlaid-out menu is exactly the case
+        // the placement fallback exists for.
+        getBoundingClientRect: () => ({ left: 0, top: 0, width: 0, height: 0 })
+      };
+    };
+
+    const host = {
+      style: {},
+      querySelector: sel => (sel.includes('data-ws-map-menu') ? menu : null),
+      menu: () => menu,
+      items: () => (menu ? menu.items : []),
+      labels: () => (menu ? menu.items.map(item => item.label) : []),
+      item: action => (menu ? menu.items.find(entry => entry.action === action) || null : null),
+      focused: () => (menu ? menu.items.find(entry => entry.focused) || null : null),
+      isOpen: () => !!menu
+    };
+    Object.defineProperty(host, 'innerHTML', {
+      get: () => hostHTML,
+      set: value => {
+        hostHTML = value;
+        menu = value && value.includes('data-ws-map-menu') ? makeMenu(value) : null;
+      }
+    });
+    return host;
+  })();
+
   const container = {
     clientWidth: width,
     clientHeight: height,
@@ -1315,6 +1397,7 @@ function createCameraHarness({ width = 1000, height = 600, tiles = [], districts
     querySelector: sel => {
       if (sel.includes('ws-map-canvas') || sel.includes('ws-map-viewport')) return canvas;
       if (sel.includes('ws-map-world')) return world;
+      if (sel.includes('data-ws-map-menu-host')) return menuHost;
       const tileMatch = sel.match(/ws-map-tile\[data-ws-id="([^"]+)"\]/);
       if (tileMatch) return tileEls.find(el => el.id === tileMatch[1]) || null;
       const districtMatch = sel.match(/ws-map-district\[data-group-id="([^"]+)"\]/);
@@ -1347,6 +1430,7 @@ function createCameraHarness({ width = 1000, height = 600, tiles = [], districts
     styleProps,
     classes,
     control,
+    menu: menuHost,
     tile: id => tileEls.find(el => el.id === id),
     district: id => districtEls.find(el => el.id === id),
     handle: id => handleEls.find(el => el.id === id),
@@ -2718,4 +2802,467 @@ test('clearMultiSelection empties the checked set after a group', async () => {
   harness.container.querySelector('[data-ws-selbar-group]').click();
 
   assert.deepEqual(grouped, [], 'a cleared selection has nothing to group');
+});
+
+// ---------------------------------------------------------------------------
+// Right-click context menu (#317)
+//
+// The menu adds no capability: every item routes to an action the map already
+// had. What is new — and what these tests pin — is where the menu opens, what
+// each target offers, how it is dismissed, and that it is fully operable from
+// the keyboard.
+// ---------------------------------------------------------------------------
+
+// A document and window rich enough for the menu's global listeners, so the
+// dismissal routes can be replayed without a browser.
+function menuEnvironment() {
+  const docListeners = {};
+  const winListeners = {};
+  const dispatched = [];
+
+  const record = (table, type, fn) => {
+    (table[type] = table[type] || []).push(fn);
+  };
+  const drop = (table, type, fn) => {
+    table[type] = (table[type] || []).filter(entry => entry !== fn);
+  };
+  // A caller that hands over a real event object gets that exact object passed
+  // through: listener identity checks (see the open-event guard) depend on it.
+  const emit = (table, type, event) => {
+    const payload =
+      event && typeof event.preventDefault === 'function'
+        ? event
+        : { preventDefault() {}, ...event };
+    (table[type] || []).slice().forEach(fn => fn(payload));
+  };
+
+  const document = {
+    getElementById: () => null,
+    addEventListener: (type, fn) => record(docListeners, type, fn),
+    removeEventListener: (type, fn) => drop(docListeners, type, fn)
+  };
+  const window = {
+    innerWidth: 1000,
+    innerHeight: 600,
+    location: { href: '', search: '' },
+    addEventListener: (type, fn) => record(winListeners, type, fn),
+    removeEventListener: (type, fn) => drop(winListeners, type, fn),
+    dispatchEvent: event => {
+      dispatched.push(event);
+      return true;
+    }
+  };
+
+  return {
+    document,
+    window,
+    dispatched,
+    fireDocument: (type, event) => emit(docListeners, type, event),
+    fireWindow: (type, event) => emit(winListeners, type, event),
+    documentListeners: type => (docListeners[type] || []).length,
+    windowListeners: type => (winListeners[type] || []).length
+  };
+}
+
+class TestCustomEvent {
+  constructor(type, init) {
+    this.type = type;
+    this.detail = (init && init.detail) || null;
+  }
+}
+
+function loadMapForMenu(env, positions) {
+  vm.runInNewContext(
+    source,
+    {
+      window: env.window,
+      document: env.document,
+      setTimeout,
+      clearTimeout,
+      CustomEvent: TestCustomEvent,
+      URLSearchParams,
+      fetch: () =>
+        jsonResponse({
+          schema_version: 1,
+          revision: 1,
+          snap_to_grid: true,
+          positions: positions || { 'ws-1': { x: 100, y: 100 }, 'ws-2': { x: 400, y: 100 } }
+        }),
+      console: { error() {}, warn() {}, log() {} }
+    },
+    { filename: 'workspace-map.js' }
+  );
+  return env.window.OriWorkspaceMap;
+}
+
+// Mount the cockpit's map with two workspaces and whatever handlers the test
+// cares about, then hand back everything needed to drive a right-click.
+async function menuHarness({ handlers = {}, workspaces, tiles } = {}) {
+  const env = menuEnvironment();
+  const map = loadMapForMenu(env);
+  const harness = createCameraHarness({ tiles: tiles || ['ws-1', 'ws-2'] });
+  map.mount(harness.container, {
+    workspaces: workspaces || [
+      { id: 'ws-1', name: 'Alpha' },
+      { id: 'ws-2', name: 'Beta' }
+    ],
+    hideChrome: true,
+    selectOnly: true,
+    noAutoSelect: true,
+    ...handlers
+  });
+  await flush();
+  return { map, harness, env };
+}
+
+// Right-click something. `closest` answers for the element the map asks about,
+// which is how the delegated listener resolves its target.
+function rightClick(match, { x = 200, y = 150 } = {}) {
+  let prevented = false;
+  const target = {
+    closest: sel => match(sel)
+  };
+  return {
+    event: {
+      target,
+      clientX: x,
+      clientY: y,
+      preventDefault: () => {
+        prevented = true;
+      }
+    },
+    prevented: () => prevented
+  };
+}
+
+const tileTarget = id => sel =>
+  sel.includes('data-ws-id') && !sel.includes('data-hq-site')
+    ? { getAttribute: () => id, focus() {}, focused: false }
+    : null;
+
+test('contextMenuHTML renders a menu with menuitems, dividers, danger and disabled variants', () => {
+  const { contextMenuHTML } = loadOriWorkspaceMap();
+  const html = contextMenuHTML(
+    [
+      { label: 'Open workspace', action: 'open' },
+      { divider: true },
+      { label: 'New Workspace', action: 'create', disabled: true },
+      { label: 'Delete workspace', action: 'delete', variant: 'danger' }
+    ],
+    { label: 'Actions for Alpha' }
+  );
+  assert.match(html, /role="menu"/);
+  assert.match(html, /aria-label="Actions for Alpha"/);
+  assert.match(html, /role="menuitem"[^>]*data-menu-action="open"/);
+  assert.match(html, /ori-context-divider[^>]*role="separator"/);
+  assert.match(html, /data-menu-action="create"[^>]*aria-disabled="true"/);
+  assert.match(html, /ori-context-danger[^>]*data-menu-action="delete"/);
+  // Every item is reachable only through the roving tabindex.
+  assert.equal((html.match(/tabindex="-1"/g) || []).length, 3);
+});
+
+test('contextMenuHTML escapes a hostile workspace name instead of rendering it', () => {
+  const { contextMenuHTML } = loadOriWorkspaceMap();
+  const html = contextMenuHTML([{ label: 'Delete <img src=x>', action: 'delete' }], {
+    label: '<script>'
+  });
+  assert.ok(!html.includes('<img'), 'the label is escaped');
+  assert.ok(!html.includes('<script>'), 'the menu label is escaped');
+});
+
+test('the menu flips back across the cursor at the right and bottom edges (FR-17)', () => {
+  const { contextMenuPosition } = loadOriWorkspaceMap();
+  const size = { width: 200, height: 180 };
+  const viewport = { width: 1000, height: 600 };
+
+  const roomy = contextMenuPosition({ x: 300, y: 200 }, size, viewport);
+  assert.deepEqual({ ...roomy }, { left: 300, top: 200 }, 'with room, it opens at the cursor');
+
+  const nearRight = contextMenuPosition({ x: 960, y: 200 }, size, viewport);
+  assert.equal(nearRight.left, 760, 'flips left of the cursor');
+
+  const nearBottom = contextMenuPosition({ x: 300, y: 580 }, size, viewport);
+  assert.equal(nearBottom.top, 400, 'flips above the cursor');
+});
+
+test('the menu never renders off-screen, even in a viewport smaller than itself', () => {
+  const { contextMenuPosition } = loadOriWorkspaceMap();
+  const placed = contextMenuPosition(
+    { x: 10, y: 10 },
+    { width: 400, height: 500 },
+    { width: 300, height: 200 }
+  );
+  assert.ok(placed.left >= 0 && placed.top >= 0, 'stays on screen: ' + JSON.stringify(placed));
+});
+
+test('a workspace tile offers open, backlog, selection, and a danger delete', () => {
+  const map = loadOriWorkspaceMap();
+  map._setLayoutForTest({ positions: {} }, 'ready');
+  const items = map.contextMenuItemsFor({ type: 'tile', id: 'ws-1', ws: { id: 'ws-1' } });
+  // The map builds its arrays inside the vm sandbox, so they need copying into
+  // this realm before a strict deepEqual (see `ids` above).
+  const actions = Array.from(items.filter(item => !item.divider).map(item => item.action));
+  assert.deepEqual(actions, ['open', 'open-backlog', 'toggle-selection', 'delete']);
+  const del = items[items.length - 1];
+  assert.equal(del.variant, 'danger', 'delete is the danger item');
+  assert.equal(del.label, 'Delete workspace');
+  assert.equal(items.filter(item => item.divider).length, 2, 'two dividers separate the groups');
+});
+
+test('the tile menu names Delete group for a group, as the rail already does', () => {
+  const map = loadOriWorkspaceMap();
+  const items = map.contextMenuItemsFor({
+    type: 'tile',
+    id: 'grp-1',
+    ws: { id: 'grp-1', kind: 'group' }
+  });
+  assert.equal(items[items.length - 1].label, 'Delete group');
+});
+
+test('Open → Setup appears only for a workspace whose setup status is known and applicable', () => {
+  const map = loadOriWorkspaceMap();
+  const without = map.contextMenuItemsFor({ type: 'tile', id: 'ws-1', ws: { id: 'ws-1' } });
+  assert.ok(
+    !without.some(item => item.action === 'open-setup'),
+    'an unfetched status shows no Setup item, exactly as the rail shows no Setup row'
+  );
+
+  map._setSetupStatusForTest('ws-1', { applicable: true, state: 'in_progress' });
+  const withSetup = map.contextMenuItemsFor({ type: 'tile', id: 'ws-1', ws: { id: 'ws-1' } });
+  assert.ok(withSetup.some(item => item.action === 'open-setup'));
+
+  map._setSetupStatusForTest('ws-2', { applicable: false, state: 'not_applicable' });
+  const notApplicable = map.contextMenuItemsFor({ type: 'tile', id: 'ws-2', ws: { id: 'ws-2' } });
+  assert.ok(!notApplicable.some(item => item.action === 'open-setup'));
+});
+
+test('right-clicking a tile opens the menu and suppresses the browser menu', async () => {
+  const { harness } = await menuHarness();
+  const click = rightClick(tileTarget('ws-1'));
+  harness.fire('contextmenu', click.event);
+
+  assert.ok(click.prevented(), 'the native menu is suppressed');
+  assert.ok(harness.menu.isOpen(), 'the map menu is open');
+  assert.deepEqual(harness.menu.labels(), [
+    'Open workspace',
+    'Open → Backlog',
+    'Add to selection',
+    'Delete workspace'
+  ]);
+});
+
+test('the menu is positioned in viewport coordinates from the cursor', async () => {
+  const { harness } = await menuHarness();
+  harness.fire('contextmenu', rightClick(tileTarget('ws-1'), { x: 240, y: 310 }).event);
+  assert.equal(harness.menu.menu().style.left, '240px');
+  assert.equal(harness.menu.menu().style.top, '310px');
+});
+
+test('right-clicking an unselected tile selects it first, and never opens it (FR-6, FR-9)', async () => {
+  const selected = [];
+  const opened = [];
+  const { map, harness } = await menuHarness({
+    handlers: { onSelect: id => selected.push(id), onOpen: id => opened.push(id) }
+  });
+
+  harness.fire('contextmenu', rightClick(tileTarget('ws-2')).event);
+
+  assert.deepEqual(selected, ['ws-2'], 'the right-clicked tile becomes the selection');
+  assert.equal(map.getSelectedId(), 'ws-2');
+  assert.deepEqual(opened, [], 'right-click never opens a workspace');
+});
+
+test('right-click does not toggle the multi-select checkbox', async () => {
+  const grouped = [];
+  const { harness } = await menuHarness({
+    handlers: { onGroupWorkspaces: ids => grouped.push(ids) }
+  });
+
+  harness.fire('contextmenu', rightClick(tileTarget('ws-1')).event);
+  assert.ok(harness.menu.isOpen(), 'the menu opened');
+  // The bulk set is what the checkbox feeds; a right-click must leave it empty.
+  harness.container.querySelector('[data-ws-selbar-group]').click();
+
+  assert.deepEqual(grouped, [], 'nothing was added to the bulk set');
+});
+
+test('each tile item runs the action the rail runs', async () => {
+  const opened = [];
+  const deleted = [];
+  const { map, harness, env } = await menuHarness({
+    handlers: { onOpen: id => opened.push(id), onDeleteWorkspace: id => deleted.push(id) }
+  });
+
+  const open = () => harness.fire('contextmenu', rightClick(tileTarget('ws-1')).event);
+
+  open();
+  harness.menu.item('open').fire('click');
+  assert.deepEqual(opened, ['ws-1'], 'Open routes to the host open');
+
+  open();
+  harness.menu.item('open-backlog').fire('click');
+  assert.match(env.window.location.href, /\/workspaces\/ws-1\?panel=backlog$/);
+
+  open();
+  harness.menu.item('toggle-selection').fire('click');
+  open();
+  assert.equal(
+    harness.menu.item('toggle-selection').label,
+    'Remove from selection',
+    'the item now offers the inverse'
+  );
+
+  open();
+  harness.menu.item('delete').fire('click');
+  assert.deepEqual(deleted, ['ws-1'], 'Delete routes to the host delete');
+  assert.equal(map.getSelectedId(), 'ws-1');
+});
+
+test('choosing an item closes the menu', async () => {
+  const { harness } = await menuHarness({ handlers: { onOpen() {} } });
+  harness.fire('contextmenu', rightClick(tileTarget('ws-1')).event);
+  harness.menu.item('open').fire('click');
+  assert.equal(harness.menu.isOpen(), false);
+});
+
+test('every dismissal route closes the menu (FR-18)', async () => {
+  const routes = [
+    ['Escape', ({ env }) => env.fireDocument('keydown', { key: 'Escape' })],
+    [
+      'a click outside',
+      ({ env }) => env.fireDocument('mousedown', { target: { closest: () => null } })
+    ],
+    [
+      'a right-click outside',
+      ({ env }) => env.fireDocument('contextmenu', { target: { closest: () => null } })
+    ],
+    ['a window resize', ({ env }) => env.fireWindow('resize', {})],
+    [
+      'a camera change',
+      ({ harness }) => harness.container.querySelector('[data-map-zoom-in]').click()
+    ]
+  ];
+
+  for (const [name, dismiss] of routes) {
+    const ctx = await menuHarness();
+    ctx.harness.fire('contextmenu', rightClick(tileTarget('ws-1')).event);
+    assert.ok(ctx.harness.menu.isOpen(), 'menu opened before ' + name);
+    dismiss(ctx);
+    assert.equal(ctx.harness.menu.isOpen(), false, name + ' must close the menu');
+  }
+});
+
+test('a click inside the menu does not dismiss it before the item runs', async () => {
+  const { harness, env } = await menuHarness();
+  harness.fire('contextmenu', rightClick(tileTarget('ws-1')).event);
+  env.fireDocument('mousedown', {
+    target: { closest: sel => (sel.includes('ws-map-menu') ? {} : null) }
+  });
+  assert.ok(harness.menu.isOpen(), 'a press on the menu itself is not "outside"');
+});
+
+test('the right-click that opened the menu does not also dismiss it', async () => {
+  const { harness, env } = await menuHarness();
+  const click = rightClick(tileTarget('ws-1'));
+  harness.fire('contextmenu', click.event);
+  // The opening right-click is still propagating when the dismissal listeners
+  // are added, and a listener attached to a node the event has not reached yet
+  // is still called for it. Without the open-event guard the menu opened and
+  // closed in the same gesture — which is exactly what the browser demo showed.
+  env.fireDocument('contextmenu', click.event);
+  assert.ok(harness.menu.isOpen(), 'the opening gesture must not close the menu');
+
+  const elsewhere = rightClick(() => null);
+  env.fireDocument('contextmenu', elsewhere.event);
+  assert.equal(harness.menu.isOpen(), false, 'a later right-click still dismisses it');
+});
+
+test('the menu unbinds its global listeners when it closes', async () => {
+  const { harness, env } = await menuHarness();
+  harness.fire('contextmenu', rightClick(tileTarget('ws-1')).event);
+  assert.ok(env.documentListeners('keydown') > 0, 'listeners are bound while open');
+  env.fireDocument('keydown', { key: 'Escape' });
+  assert.equal(env.documentListeners('keydown'), 0, 'and dropped when it closes');
+  assert.equal(env.documentListeners('mousedown'), 0);
+  assert.equal(env.windowListeners('resize'), 0);
+});
+
+test('only one menu is open at a time', async () => {
+  const { harness } = await menuHarness();
+  harness.fire('contextmenu', rightClick(tileTarget('ws-1')).event);
+  const first = harness.menu.menu();
+  harness.fire('contextmenu', rightClick(tileTarget('ws-2'), { x: 500, y: 400 }).event);
+  const second = harness.menu.menu();
+  assert.notEqual(first, second, 'the second right-click replaced the first menu');
+  assert.equal(second.style.left, '500px');
+});
+
+test('the menu opens with the first item focused and moves focus with the arrows', async () => {
+  const { harness } = await menuHarness();
+  harness.fire('contextmenu', rightClick(tileTarget('ws-1')).event);
+
+  assert.equal(harness.menu.focused().action, 'open', 'the first item takes focus (FR-22)');
+  assert.equal(harness.menu.item('open').getAttribute('tabindex'), '0', 'roving tabindex');
+
+  const menu = harness.menu.menu();
+  menu.fire('keydown', { key: 'ArrowDown' });
+  assert.equal(harness.menu.focused().action, 'open-backlog');
+  menu.fire('keydown', { key: 'ArrowUp' });
+  assert.equal(harness.menu.focused().action, 'open');
+  menu.fire('keydown', { key: 'ArrowUp' });
+  assert.equal(harness.menu.focused().action, 'delete', 'arrow navigation wraps at both ends');
+  menu.fire('keydown', { key: 'Home' });
+  assert.equal(harness.menu.focused().action, 'open');
+  menu.fire('keydown', { key: 'End' });
+  assert.equal(harness.menu.focused().action, 'delete');
+  assert.equal(
+    harness.menu.item('open').getAttribute('tabindex'),
+    '-1',
+    'only one item is tabbable'
+  );
+});
+
+test('Enter activates the focused item and Escape closes without acting', async () => {
+  const deleted = [];
+  const { harness } = await menuHarness({
+    handlers: { onDeleteWorkspace: id => deleted.push(id) }
+  });
+
+  harness.fire('contextmenu', rightClick(tileTarget('ws-1')).event);
+  harness.menu.menu().fire('keydown', { key: 'End' });
+  harness.menu.menu().fire('keydown', { key: 'Enter' });
+  assert.deepEqual(deleted, ['ws-1'], 'Enter runs the focused item');
+
+  harness.fire('contextmenu', rightClick(tileTarget('ws-1')).event);
+  harness.menu.menu().fire('keydown', { key: 'Escape' });
+  assert.equal(harness.menu.isOpen(), false);
+  assert.deepEqual(deleted, ['ws-1'], 'Escape acts on nothing');
+});
+
+test('closing the menu returns focus to the tile it was opened from (FR-19)', async () => {
+  const { harness } = await menuHarness();
+  let focused = 0;
+  const origin = { getAttribute: () => 'ws-1', focus: () => (focused += 1) };
+  harness.fire('contextmenu', {
+    target: { closest: sel => (sel.includes('data-ws-id') ? origin : null) },
+    clientX: 100,
+    clientY: 100,
+    preventDefault() {}
+  });
+  harness.menu.menu().fire('keydown', { key: 'Escape' });
+  assert.equal(focused, 1, 'focus went back exactly once');
+});
+
+test('a re-mount closes an open menu instead of leaving it bound to dead DOM', async () => {
+  const { map, harness } = await menuHarness();
+  harness.fire('contextmenu', rightClick(tileTarget('ws-1')).event);
+  assert.ok(harness.menu.isOpen());
+  map.mount(harness.container, {
+    workspaces: [{ id: 'ws-1', name: 'Alpha' }],
+    hideChrome: true,
+    selectOnly: true,
+    noAutoSelect: true
+  });
+  await flush();
+  assert.equal(harness.menu.isOpen(), false);
 });
