@@ -183,11 +183,44 @@ jobs:
       - name: Download dependencies
         run: go mod download
 
+      # The macOS leg exists to cover darwin-specific code, not to re-run what
+      # the ubuntu leg just ran. Measured over 34 runs (2026-08-05..07) it spent
+      # ~8.5 min on the identical 150 packages at 10x the per-minute rate: 88%
+      # of every macOS minute this repo burns, for zero extra signal. Scoping it
+      # to the packages whose behaviour can differ by GOOS takes that to ~22s of
+      # test time while still compiling every darwin-tagged file - which nothing
+      # else in CI does, since `make build` only builds ./cmd/server.
+      #
+      # The scope is chosen inside the step on purpose. Adding a matrix key
+      # would rename the job, and `Unit Tests (macos-latest, 1.25.12)` is a
+      # required check on dev: a renamed job leaves the old context pending
+      # forever and wedges every PR.
       - name: Run unit tests
         shell: bash
-        run: go test -v -short -race -coverprofile=coverage.txt -covermode=atomic $(./scripts/list-unit-packages.sh)
+        run: |
+          set -euo pipefail
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            packages=$(./scripts/list-unit-packages.sh --platform)
+            {
+              echo "### Darwin-scoped unit run"
+              echo
+              echo "This leg ran only the platform-conditional packages. Full-suite"
+              echo "coverage comes from \`Unit Tests (ubuntu-latest, 1.25.12)\`."
+              echo
+              echo '```'
+              echo "$packages"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            packages=$(./scripts/list-unit-packages.sh)
+          fi
+          go test -v -short -race -coverprofile=coverage.txt -covermode=atomic $packages
 
+      # Linux only: the macOS profile now covers a 15-package subset, and
+      # uploading it under the same flag would report the difference as a
+      # coverage drop rather than as the deliberate scope it is.
       - name: Upload coverage to Codecov
+        if: runner.os == 'Linux'
         uses: codecov/codecov-action@v4
         with:
           file: ./coverage.txt
