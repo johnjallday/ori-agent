@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "acceptance_state": "accepted",
-  "last_accepted_capture_commit": "a0db2b917631adb748da96c952a8feaea9fb2d74",
+  "last_accepted_capture_commit": "dc6aa32539b9614fb3c66ddcc76d97f8a6a72c91",
   "accepted_readme_sha256": "09bcf6dbda181869b377f5ddcf843994e1372a2fecae1c261ca85a32519cc390",
   "accepted_environment": {
     "platform": "darwin",
@@ -48,8 +48,8 @@
         "internal/web/static/css/home-command.css",
         "internal/web/static/css/home-workspace-cockpit.css"
       ],
-      "accepted_sha256": "a09dcec65ecebd5ce5ec54699513a5815132dd14793513815fe39e5990ec38bc",
-      "accepted_bytes": 98412
+      "accepted_sha256": "e6bb7f7ff272f5a7f2bfcc98f928109931f7b086f58b4de358dcfd88e1e0caf9",
+      "accepted_bytes": 96066
     },
     {
       "id": "action-center",
@@ -105,8 +105,8 @@
         "internal/web/static/js/modules/home-workspace-cockpit.js",
         "internal/web/static/js/modules/personal-hq-onboarding.js"
       ],
-      "accepted_sha256": "ecc349679a457076abfcfb83e271162f71267804531ddda002dfb3e49c5024ad",
-      "accepted_bytes": 84666
+      "accepted_sha256": "8e92a9a533be24d82d1157c9f1a9ab29d3b4a3fd97ebce0b687232dc55df1cf1",
+      "accepted_bytes": 82132
     },
     {
       "id": "workspace",
