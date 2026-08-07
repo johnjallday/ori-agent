@@ -108,6 +108,76 @@ async function visibleTileBox() {
   );
 }
 
+// The first element matching `selector` that a click at its own centre would
+// reach. Same hit test as visibleTileBox, for the other map targets.
+async function visibleBox(selector) {
+  const size = page.viewportSize();
+  return page.evaluate(
+    ({ sel, w, h }) => {
+      for (const el of document.querySelectorAll(sel)) {
+        const box = el.getBoundingClientRect();
+        const cx = box.left + box.width / 2;
+        const cy = box.top + box.height / 2;
+        if (cx < 40 || cx > w - 40 || cy < 40 || cy > h - 140) continue;
+        const hit = document.elementFromPoint(cx, cy);
+        if (hit && (el.contains(hit) || hit === el)) {
+          return { x: box.left, y: box.top, width: box.width, height: box.height };
+        }
+      }
+      return null;
+    },
+    { sel: selector, w: size.width, h: size.height }
+  );
+}
+
+// A point on the canvas with nothing on it: the hit test must land on the
+// canvas or its world layer, not on a building, a district, or a control.
+async function emptyCanvasPoint() {
+  const size = page.viewportSize();
+  return page.evaluate(
+    ({ w, h }) => {
+      for (let y = 120; y < h - 160; y += 40) {
+        for (let x = 80; x < w - 500; x += 40) {
+          const hit = document.elementFromPoint(x, y);
+          if (!hit) continue;
+          if (hit.classList.contains('ws-map-world') || hit.classList.contains('ws-map-canvas')) {
+            return { x, y };
+          }
+        }
+      }
+      return null;
+    },
+    { w: size.width, h: size.height }
+  );
+}
+
+async function openAtPoint(point, name) {
+  if (!point) {
+    problems.push('no point to right-click for ' + name);
+    return null;
+  }
+  await page.mouse.click(point.x, point.y, { button: 'right' });
+  await page.waitForTimeout(120);
+  const menu = await menuState();
+  if (menu) {
+    menu.anchorDx = menu.left - point.x;
+    menu.anchorDy = menu.top - point.y;
+  }
+  return { point, menu };
+}
+
+async function openOn(selector, name) {
+  const box = await visibleBox(selector);
+  if (!box) {
+    problems.push('no on-screen ' + name + ' to right-click');
+    return null;
+  }
+  return openAtPoint(
+    { x: Math.round(box.x + box.width / 2), y: Math.round(box.y + box.height / 2) },
+    name
+  );
+}
+
 // Right-click the centre of a tile and report where the menu landed relative to
 // the cursor. The menu is allowed to flip near a viewport edge; what it may
 // never do is drift by an amount that tracks the zoom level.
@@ -229,6 +299,55 @@ try {
   check(/\/workspaces\//.test(page.url()), 'Open navigated to the workspace: ' + page.url());
   await shot('06-opened-workspace');
 
+  // --- the other three targets ------------------------------------------
+  console.log('\n--- district, HQ site, and empty canvas ---');
+  await page.goto(base + '/', { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('.ws-map-tile[data-ws-id]', { timeout: 15000 });
+  await frame(null);
+
+  const district = await openOn('.ws-map-district[data-group-id]', 'group district');
+  const districtLabels = (district?.menu?.items || []).map(item => item.label);
+  console.log('  district: ' + JSON.stringify(districtLabels));
+  check(
+    JSON.stringify(districtLabels) === JSON.stringify(['Open group', 'Delete group']),
+    'the district menu is Open group + Delete group'
+  );
+  await shot('07-district-menu');
+  await page.keyboard.press('Escape');
+
+  const hq = await openOn('[data-hq-site]', 'HQ site');
+  const hqLabels = (hq?.menu?.items || []).map(item => item.label);
+  console.log('  HQ site: ' + JSON.stringify(hqLabels));
+  check(hqLabels[0] === 'Build My HQ', 'the HQ menu leads with Build My HQ');
+  check(hqLabels.includes('Import HQ'), 'and offers Import HQ');
+  check(!hqLabels.includes('Clear broken HQ link'), 'no repair entry on a healthy site');
+  await shot('08-hq-menu');
+  await page.keyboard.press('Escape');
+
+  const canvas = await openAtPoint(await emptyCanvasPoint(), 'empty canvas');
+  const canvasItems = canvas?.menu?.items || [];
+  console.log('  canvas: ' + JSON.stringify(canvasItems.map(item => item.label)));
+  check(
+    canvasItems.some(item => item.action === 'create'),
+    'the canvas menu offers New Workspace'
+  );
+  check(
+    canvasItems.some(item => item.action === 'center' && item.disabled) ||
+      (await page.evaluate(() => !!window.OriWorkspaceMap.getSelectedId())),
+    'Center selected is disabled when nothing is selected'
+  );
+  await shot('09-canvas-menu');
+
+  await page.click('[data-menu-action="create"]');
+  await page.waitForTimeout(900);
+  const modalOpen = await page.evaluate(
+    () => !!document.querySelector('.modal.show, dialog[open], [data-create-workspace-open]')
+  );
+  check(modalOpen, 'New Workspace opened the existing create flow');
+  await shot('10-create-modal');
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(400);
+
   // --- the checked set --------------------------------------------------
   //
   // Runs last, and mutates: it really groups workspaces on the demo server.
@@ -277,7 +396,7 @@ try {
     'the delete item names the blast radius before the click'
   );
   check(bulkLabels.includes('Group 3 workspaces'), 'so does the group item');
-  await shot('07-multi-menu');
+  await shot('11-multi-menu');
 
   // Group really runs: the existing flow asks for a name through a prompt.
   page.on('dialog', dialog => dialog.accept('Demo Group'));
@@ -287,7 +406,7 @@ try {
     () => document.querySelectorAll('.ws-map-district[data-group-id]').length
   );
   check(districts > 0, 'grouping produced a district on the map: ' + districts);
-  await shot('08-after-group');
+  await shot('12-after-group');
 } finally {
   console.log('\n--- page noise (not failures) ---');
   if (noise.length === 0) console.log('  none');

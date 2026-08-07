@@ -2030,14 +2030,19 @@
   // Reuse the page's existing create flow for every create affordance, rather
   // than opening a second Create Workspace path (PRD FR105). The cockpit's
   // button is checked first because the launcher's is absent on Home.
+  function triggerCreateWorkspace() {
+    if (typeof document === 'undefined' || typeof document.getElementById !== 'function') return;
+    var create =
+      document.getElementById('cockpitCreateWorkspaceBtn') ||
+      document.getElementById('launcherCreateWorkspaceBtn');
+    if (create && typeof create.click === 'function') create.click();
+  }
+
   function bindCreate(container) {
     var els = container.querySelectorAll('[data-ws-map-create]');
     Array.prototype.forEach.call(els, function (el) {
       el.addEventListener('click', function () {
-        var create =
-          document.getElementById('cockpitCreateWorkspaceBtn') ||
-          document.getElementById('launcherCreateWorkspaceBtn');
-        if (create) create.click();
+        triggerCreateWorkspace();
       });
     });
   }
@@ -2441,6 +2446,58 @@
     ];
   }
 
+  // A group district. Districts cannot be multi-selected, so this menu is
+  // always single-target, and its delete runs the same host callback (and the
+  // same group_only confirm) the rail's Delete group runs.
+  function districtMenuItems(ws) {
+    return [
+      { label: 'Open group', action: 'open' },
+      menuDivider(),
+      {
+        label: isGroup(ws) ? 'Delete group' : 'Delete workspace',
+        action: 'delete',
+        variant: 'danger',
+        disabled: isMapReadOnly()
+      }
+    ];
+  }
+
+  // The reserved Personal HQ site. The conditions mirror hqOverviewHTML exactly:
+  // build and import always; clear only while repairing a broken link; skip only
+  // when not repairing and the offer has not been dismissed. Clear and skip are
+  // mutually exclusive.
+  function hqMenuItems(view) {
+    var site = view || {};
+    var items = [
+      { label: site.repair ? 'Build replacement HQ' : 'Build My HQ', action: 'hq-build' },
+      { label: 'Import HQ', action: 'hq-import' }
+    ];
+    if (site.repair) items.push({ label: 'Clear broken HQ link', action: 'hq-clear' });
+    else if (site.showSkip) items.push({ label: 'Not now', action: 'hq-skip' });
+    return items;
+  }
+
+  // Empty ground. The create affordance and the three framing actions, which is
+  // exactly what the control cluster offers — just under the cursor. Centre is
+  // disabled with nothing selected, the same rule updateCameraControls applies
+  // to the button.
+  function canvasMenuItems() {
+    var items = [
+      { label: 'New Workspace', action: 'create', disabled: isMapReadOnly() },
+      menuDivider(),
+      { label: 'Fit all', action: 'fit' },
+      { label: 'Center selected', action: 'center', disabled: !selectedNodeAnchor() },
+      { label: 'Reset view', action: 'reset-view' }
+    ];
+    // Offered only when there is something to clear, so the menu does not carry
+    // a permanently dead entry.
+    if (multiCount() > 0) {
+      items.push(menuDivider());
+      items.push({ label: 'Clear selection', action: 'clear-selection' });
+    }
+    return items;
+  }
+
   // The item set for a resolved target. Pure apart from the module state the
   // rail reads too (multi-select set, setup cache, layout status), so a menu can
   // be asserted without a DOM.
@@ -2453,6 +2510,9 @@
       if (spec.id && multiSelected[spec.id]) return multiMenuItems();
       return tileMenuItems(spec.ws || { id: spec.id });
     }
+    if (spec.type === 'district') return districtMenuItems(spec.ws || { id: spec.id });
+    if (spec.type === 'hq') return hqMenuItems(spec.view || hqSiteView(hqStatus));
+    if (spec.type === 'canvas') return canvasMenuItems();
     return [];
   }
 
@@ -2462,9 +2522,12 @@
       if (spec.id && multiSelected[spec.id]) {
         return 'Actions for ' + multiCount() + ' selected';
       }
-      var name = (spec.ws && spec.ws.name) || 'workspace';
-      return 'Actions for ' + name;
+      return 'Actions for ' + ((spec.ws && spec.ws.name) || 'workspace');
     }
+    if (spec.type === 'district') {
+      return 'Actions for ' + ((spec.ws && spec.ws.name) || 'group') + ' group';
+    }
+    if (spec.type === 'hq') return 'Personal HQ actions';
     return 'Map actions';
   }
 
@@ -2764,9 +2827,49 @@
       case 'clear-selection':
         clearMulti(container);
         break;
+      // The HQ site's four choices reach the host exactly as the rail's buttons
+      // do — one custom event, one action name.
+      case 'hq-build':
+      case 'hq-import':
+      case 'hq-clear':
+      case 'hq-skip':
+        dispatchHQAction(action.slice(3));
+        break;
+      case 'create':
+        triggerCreateWorkspace();
+        break;
+      // Framing actions. Same calls and same announcements as the control
+      // cluster, so the two cannot drift apart.
+      case 'fit':
+        fitAll(container);
+        announce(
+          container,
+          camera.zoom <= MIN_ZOOM + 0.0001
+            ? 'Zoomed out as far as the map goes. Some workspaces are still off-screen — pan to reach them.'
+            : 'Showing every workspace'
+        );
+        break;
+      case 'center':
+        var anchor = selectedNodeAnchor();
+        if (!anchor) {
+          announce(container, 'Select a workspace first');
+          break;
+        }
+        setCamera(centerOn(camera, anchor), container);
+        announce(container, 'Centered the selected workspace');
+        break;
+      case 'reset-view':
+        resetView(container);
+        announce(container, 'View reset. Workspace positions are unchanged');
+        break;
       default:
         break;
     }
+  }
+
+  function dispatchHQAction(name) {
+    if (typeof window === 'undefined' || typeof window.dispatchEvent !== 'function') return;
+    window.dispatchEvent(new CustomEvent('ori:personal-hq-action', { detail: { action: name } }));
   }
 
   // resolveMenuTarget turns whatever was right-clicked into one of the map's
@@ -2775,7 +2878,7 @@
   function resolveMenuTarget(node, workspaces) {
     if (!node || typeof node.closest !== 'function') return null;
     var hq = node.closest('[data-hq-site]');
-    if (hq) return { type: 'hq', element: hq };
+    if (hq) return { type: 'hq', view: hqSiteView(hqStatus), element: hq };
     var tile = node.closest('.ws-map-tile[data-ws-id]');
     if (tile) {
       var tileId = tile.getAttribute('data-ws-id');
@@ -2792,11 +2895,20 @@
   }
 
   function openMenuForTarget(container, workspaces, options, target, at, event) {
-    // Right-clicking a tile that is not in the multi-select set selects it
+    // Right-clicking a site that is not in the multi-select set selects it
     // first, so the menu always acts on something the user can see is chosen
     // (FR-6). It never opens the workspace and never touches the checkbox.
+    // Empty canvas is the exception: it has nothing of its own to select, and
+    // clearing the selection to open a menu would destroy what the menu's own
+    // Center and Clear items act on (FR-8).
     if (target.type === 'tile' && target.id && !multiSelected[target.id]) {
       applySelection(container, workspaces, target.id, options);
+    }
+    if (target.type === 'district' && target.id) {
+      applySelection(container, workspaces, target.id, options);
+    }
+    if (target.type === 'hq') {
+      applyHQSelection(container, target.view || hqSiteView(hqStatus), options);
     }
     var items = contextMenuItemsFor(target);
     if (!items.length) return false;
