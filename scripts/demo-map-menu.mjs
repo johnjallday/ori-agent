@@ -108,20 +108,28 @@ async function visibleTileBox() {
   );
 }
 
-// The first element matching `selector` that a click at its own centre would
-// reach. Same hit test as visibleTileBox, for the other map targets.
+// A point on the first element matching `selector` that a click would actually
+// reach. A district is large and its centre is usually covered by one of its own
+// buildings, so several points inside it are tried before giving up.
 async function visibleBox(selector) {
   const size = page.viewportSize();
   return page.evaluate(
     ({ sel, w, h }) => {
+      const onScreen = (x, y) => x > 40 && x < w - 40 && y > 40 && y < h - 140;
       for (const el of document.querySelectorAll(sel)) {
         const box = el.getBoundingClientRect();
-        const cx = box.left + box.width / 2;
-        const cy = box.top + box.height / 2;
-        if (cx < 40 || cx > w - 40 || cy < 40 || cy > h - 140) continue;
-        const hit = document.elementFromPoint(cx, cy);
-        if (hit && (el.contains(hit) || hit === el)) {
-          return { x: box.left, y: box.top, width: box.width, height: box.height };
+        const candidates = [
+          [box.left + box.width / 2, box.top + box.height / 2],
+          [box.left + 8, box.top + 8],
+          [box.right - 8, box.top + 8],
+          [box.left + 8, box.bottom - 8],
+          [box.right - 8, box.bottom - 8],
+          [box.left + box.width / 2, box.top + 6]
+        ];
+        for (const [x, y] of candidates) {
+          if (!onScreen(x, y)) continue;
+          const hit = document.elementFromPoint(x, y);
+          if (hit && (el.contains(hit) || hit === el)) return { x, y };
         }
       }
       return null;
@@ -151,9 +159,51 @@ async function emptyCanvasPoint() {
   );
 }
 
-async function openAtPoint(point, name) {
+// `optional` is for the sweep: on a spread-out map not every target is on
+// screen at every zoom level, and that is a fact about the fixture, not a bug.
+// Pan the camera by dragging empty ground, so a target that a zoom pushed
+// off-screen can be brought back under the cursor. Returns how far the world
+// actually moved; the drag is clamped to the clear part of the canvas.
+async function panBy(dx, dy) {
+  const size = page.viewportSize();
+  const start = await emptyCanvasPoint();
+  if (!start) return { dx: 0, dy: 0 };
+  const endX = Math.max(60, Math.min(start.x + dx, size.width - 480));
+  const endY = Math.max(120, Math.min(start.y + dy, size.height - 200));
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  await page.mouse.move(endX, endY, { steps: 10 });
+  await page.mouse.up();
+  await page.waitForTimeout(150);
+  return { dx: endX - start.x, dy: endY - start.y };
+}
+
+// Drag the world until `selector` sits in the clear area, or give up. Used by
+// the anchoring sweep: a target that is off-screen at 200% is a fact about the
+// fixture, and panning to it is exactly what a user would do.
+async function bringIntoView(selector) {
+  const goal = { x: 400, y: 430 };
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    if (await visibleBox(selector)) return true;
+    const at = await page.evaluate(sel => {
+      const el = document.querySelector(sel);
+      if (!el) return null;
+      const box = el.getBoundingClientRect();
+      return {
+        x: box.left + Math.min(box.width, 176) / 2,
+        y: box.top + Math.min(box.height, 150) / 2
+      };
+    }, selector);
+    if (!at) return false;
+    const moved = await panBy(goal.x - at.x, goal.y - at.y);
+    if (moved.dx === 0 && moved.dy === 0) return false;
+  }
+  return !!(await visibleBox(selector));
+}
+
+async function openAtPoint(point, name, { optional = false } = {}) {
   if (!point) {
-    problems.push('no point to right-click for ' + name);
+    if (!optional) problems.push('no point to right-click for ' + name);
     return null;
   }
   await page.mouse.click(point.x, point.y, { button: 'right' });
@@ -166,25 +216,22 @@ async function openAtPoint(point, name) {
   return { point, menu };
 }
 
-async function openOn(selector, name) {
-  const box = await visibleBox(selector);
-  if (!box) {
-    problems.push('no on-screen ' + name + ' to right-click');
+async function openOn(selector, name, options = {}) {
+  const point = await visibleBox(selector);
+  if (!point) {
+    if (!options.optional) problems.push('no on-screen ' + name + ' to right-click');
     return null;
   }
-  return openAtPoint(
-    { x: Math.round(box.x + box.width / 2), y: Math.round(box.y + box.height / 2) },
-    name
-  );
+  return openAtPoint({ x: Math.round(point.x), y: Math.round(point.y) }, name, options);
 }
 
 // Right-click the centre of a tile and report where the menu landed relative to
 // the cursor. The menu is allowed to flip near a viewport edge; what it may
 // never do is drift by an amount that tracks the zoom level.
-async function openOnTile(name) {
+async function openOnTile(name, { optional = false } = {}) {
   const box = await visibleTileBox();
   if (!box) {
-    problems.push('no on-screen tile to right-click for ' + name);
+    if (!optional) problems.push('no on-screen tile to right-click for ' + name);
     return null;
   }
   const point = { x: Math.round(box.x + box.width / 2), y: Math.round(box.y + box.height / 2) };
@@ -413,6 +460,139 @@ try {
   await shot('12-create-modal');
   await page.keyboard.press('Escape');
   await page.waitForTimeout(400);
+
+  // --- anchoring, every target, every zoom level --------------------------
+  //
+  // The tile checks above cover the case most likely to break; this sweep is
+  // the one that proves the rule holds for all four targets, which is what the
+  // "menu inside the world layer" mistake would violate.
+  console.log('\n--- anchoring sweep: four targets x three zoom levels ---');
+  await page.goto(base + '/', { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('.ws-map-tile[data-ws-id]', { timeout: 15000 });
+  // A wider window and the default (clustered) layout put all four targets on
+  // screen at once, so the sweep measures anchoring rather than reachability.
+  // Reset Layout moves buildings, never records, and this sandbox is discarded.
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await page.click('[data-map-reset-layout]', { force: true }).catch(() => {});
+  await page.waitForTimeout(800);
+  console.log(
+    '  sites on the map: ' +
+      JSON.stringify(
+        await page.evaluate(() => ({
+          tiles: document.querySelectorAll('.ws-map-tile[data-ws-id]').length,
+          districts: document.querySelectorAll('.ws-map-district[data-group-id]').length,
+          hq: document.querySelectorAll('[data-hq-site]').length
+        }))
+      )
+  );
+
+  const opt = { optional: true };
+  const sweepTargets = [
+    [
+      'tile',
+      async () => {
+        await bringIntoView('.ws-map-tile[data-ws-id]');
+        return openOnTile('sweep', opt);
+      }
+    ],
+    [
+      'district',
+      async () => {
+        await bringIntoView('.ws-map-district[data-group-id]');
+        return openOn('.ws-map-district[data-group-id]', 'district', opt);
+      }
+    ],
+    [
+      'HQ site',
+      async () => {
+        await bringIntoView('[data-hq-site]');
+        return openOn('[data-hq-site]', 'HQ site', opt);
+      }
+    ],
+    ['canvas', async () => openAtPoint(await emptyCanvasPoint(), 'canvas', opt)]
+  ];
+
+  // Reset view is 100% by definition; Fit All then zooming out clamps at 50%;
+  // zooming in needs a selected building to centre on, or a spread-out map
+  // leaves every target off-screen at 200%.
+  const framings = {
+    '100%': async () => {
+      await page.click('[data-map-reset-view]', { force: true }).catch(() => {});
+      await page.waitForTimeout(250);
+      return camera();
+    },
+    '50%': () => frame('zoom-out'),
+    '200%': async () => {
+      await frame(null);
+      const box = await visibleTileBox();
+      if (box) {
+        await page.mouse.click(
+          Math.round(box.x + box.width / 2),
+          Math.round(box.y + box.height / 2)
+        );
+        await page.waitForTimeout(200);
+      }
+      for (let i = 0; i < 6; i += 1) {
+        await page.click('[data-map-zoom-in]', { force: true }).catch(() => {});
+      }
+      await page.click('[data-map-center]', { force: true }).catch(() => {});
+      await page.waitForTimeout(300);
+      return camera();
+    }
+  };
+
+  for (const zoomName of ['100%', '50%', '200%']) {
+    for (const [targetName, open] of sweepTargets) {
+      const cam = await framings[zoomName]();
+      const opened = await open();
+      const label = targetName + ' at ' + zoomName + ' (zoom ' + Math.round(cam.zoom * 100) + '%)';
+      if (!opened?.menu) {
+        // Not every target is reachable at every framing on a spread-out map;
+        // say so rather than silently passing.
+        console.log('  skip   ' + label + ' — not on screen at this zoom');
+        continue;
+      }
+      check(
+        Math.abs(opened.menu.anchorDx) <= 2 && Math.abs(opened.menu.anchorDy) <= 2,
+        label + ' stays on the cursor'
+      );
+      check(opened.menu.insideWorld === false, label + ' is outside the world layer');
+      await page.keyboard.press('Escape');
+    }
+  }
+
+  // --- the behaviour the menu sits next to --------------------------------
+  console.log('\n--- regression: selection, checkboxes, and the rail ---');
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(base + '/', { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('.ws-map-tile[data-ws-id]', { timeout: 15000 });
+  await frame(null);
+
+  const leftClickBox = await visibleTileBox();
+  await page.mouse.click(
+    Math.round(leftClickBox.x + leftClickBox.width / 2),
+    Math.round(leftClickBox.y + leftClickBox.height / 2)
+  );
+  await page.waitForTimeout(300);
+  check(new URL(page.url()).pathname === '/', 'a left click still selects without navigating');
+  check(
+    await page.evaluate(() => !!window.OriWorkspaceMap.getSelectedId()),
+    'and the selection reached the map'
+  );
+  check(
+    await page.evaluate(() => !!document.querySelector('[data-cockpit-rail-open]')),
+    'the rail still offers its own Open Workspace action'
+  );
+
+  const checkboxWorks = await page.evaluate(() => {
+    const tile = document.querySelector('.ws-map-tile[data-ws-id]');
+    const box = tile.querySelector('[data-ws-check]');
+    box.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    const on = tile.classList.contains('is-multi');
+    box.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    return on && !tile.classList.contains('is-multi');
+  });
+  check(checkboxWorks, 'the corner checkbox still toggles the bulk set both ways');
 
   // --- the checked set --------------------------------------------------
   //
