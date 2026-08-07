@@ -29,6 +29,7 @@ import {
   workspaceRailView,
   renderWorkspaceRailHTML,
   workspaceAreaState,
+  hqSiteVisible,
   workspaceHydrationAllowed,
   renderWorkspaceAreaStatusHTML,
   escapeHtml,
@@ -484,6 +485,61 @@ test('workspaceAreaState distinguishes loading, error, empty, and ready (FR120)'
   assert.equal(
     workspaceAreaState({ loading: true, error: new Error('old'), workspaces: [] }).state,
     'loading'
+  );
+});
+
+// --- The unbuilt HQ landmark is drawable content (#322) ---------------------
+//
+// FR114 keeps a misleading OPERATIONAL map off an empty account. The reserved
+// HQ blueprint is not operational data — it is the invitation to build one, and
+// in cockpit mode the rail it opens is the ONLY place Build My HQ exists. When
+// zero workspaces hid the map outright, a brand-new profile (exactly who
+// Mission 01 targets) had no route to the button at all.
+
+test('hqSiteVisible mirrors the map: a status that is not a valid HQ has a site to draw', () => {
+  assert.equal(hqSiteVisible({ valid: false }), true, 'never built');
+  assert.equal(hqSiteVisible({ valid: false, workspace_id: 'ws-1' }), true, 'built then broken');
+  assert.equal(hqSiteVisible({ valid: true, workspace_id: 'ws-1' }), false, 'a working HQ');
+  // No status yet is not the same as "no site": there is simply nothing to draw
+  // until the request lands, and guessing would flash the wrong state.
+  assert.equal(hqSiteVisible(null), false);
+  assert.equal(hqSiteVisible(undefined), false);
+});
+
+test('workspaceAreaState: zero workspaces still renders the map when the HQ site shows (#322)', () => {
+  assert.equal(workspaceAreaState({ workspaces: [], hqSiteVisible: true }).state, 'ready');
+  assert.equal(workspaceAreaState({ workspaces: [], hqSiteVisible: false }).state, 'empty');
+  // Omitting the flag entirely must behave exactly as before.
+  assert.equal(workspaceAreaState({ workspaces: [] }).state, 'empty');
+  // A populated account is ready either way — the site never makes it emptier.
+  assert.equal(
+    workspaceAreaState({ workspaces: [{ id: 'a' }], hqSiteVisible: true }).state,
+    'ready'
+  );
+  assert.equal(
+    workspaceAreaState({ workspaces: [{ id: 'a' }], hqSiteVisible: false }).state,
+    'ready'
+  );
+});
+
+test('workspaceAreaState: the HQ site never overrides loading, error, or the onboarding gate', () => {
+  // Drawing a landmark over an unresolved account would be the same lie FR114
+  // exists to prevent — these states outrank it.
+  assert.equal(
+    workspaceAreaState({ loading: true, workspaces: [], hqSiteVisible: true }).state,
+    'loading'
+  );
+  assert.equal(
+    workspaceAreaState({ error: new Error('boom'), workspaces: [], hqSiteVisible: true }).state,
+    'error'
+  );
+  assert.equal(
+    workspaceAreaState({
+      workspaces: [],
+      hqSiteVisible: true,
+      onboardingGate: { state: 'required', message: 'Finish setup' }
+    }).state,
+    'onboarding-required'
   );
 });
 
