@@ -2638,12 +2638,17 @@ body[data-vault-record-dragging="true"] #vaultModal .vault-modal-folder-tree * {
   box-shadow: 0 20px 38px rgba(0, 0, 0, 0.6);
 }
 
+/* Sentence case, not uppercase. Uppercase belongs to eyebrows and kickers —
+   short standing labels that name a region. Forcing it on every button turned
+   ordinary actions into shouting ("REFRESH", "UNAVAILABLE", "BRIEF SETTINGS"),
+   cost ~10% width per label in already-tight rails, and destroyed the casing
+   cues in proper nouns. The letter-spacing that made uppercase legible goes
+   with it; mixed-case text does not need the extra tracking. */
 .modern-btn {
   border-radius: 999px;
   font-size: 0.78rem;
   font-weight: 700;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
+  letter-spacing: 0.01em;
   border-color: rgba(92, 92, 94, 0.28);
   transition:
     transform 0.2s ease,

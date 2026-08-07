@@ -132,13 +132,15 @@
 }
 
 /* ---------- buttons ---------- */
+/* Sentence case: this re-declared the uppercase .modern-btn used to set, which
+   would have left the wizard's primary button shouting next to its own
+   secondary buttons. */
 .workspace-create-modal .modern-btn-primary {
   background: linear-gradient(180deg, rgba(70, 211, 154, 0.18), rgba(70, 211, 154, 0.05));
   border: 1px solid var(--wc-faction-deep);
   color: var(--wc-faction);
   font-family: var(--wc-font-display);
-  letter-spacing: 1px;
-  text-transform: uppercase;
+  letter-spacing: 0.2px;
   font-weight: 700;
 }
 .workspace-create-modal .modern-btn-primary:hover {
@@ -517,15 +519,15 @@
   font-size: 12px;
   line-height: 1.45;
 }
+/* Sentence case: action, not label. */
 .workspace-create-modal .workspace-wizard-inline-action {
   border: 0;
   padding: 2px 0;
   background: transparent;
   color: var(--wc-faction);
   font-family: var(--wc-font-mono);
-  font-size: 10px;
-  letter-spacing: 0.6px;
-  text-transform: uppercase;
+  font-size: 10.5px;
+  letter-spacing: 0.2px;
   cursor: pointer;
 }
 .workspace-create-modal .workspace-wizard-inline-action:hover {

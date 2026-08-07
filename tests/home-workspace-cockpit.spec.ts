@@ -341,7 +341,7 @@ test.describe('Home workspace cockpit', () => {
     }
   });
 
-  test('Quick Capture and Summary are reachable from every rail state', async ({ page }) => {
+  test('Add to backlog and Summary are reachable from every rail state', async ({ page }) => {
     await ensureWorkspace(page);
     await page.goto('/');
     await page.locator('.ws-map-tile[data-ws-id]').first().waitFor();

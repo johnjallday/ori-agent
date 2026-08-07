@@ -2,10 +2,9 @@
 //
 // Wires the suggested prompt chips (populate-and-focus the Ask Ori input,
 // no auto-submit), the global Cmd+J / Ctrl+J shortcut that focuses the
-// hero input, and the Today rail's Upcoming Scheduled Tasks and Recent
-// Activity sections from their respective API endpoints. Also instruments
-// time-to-first-action (TTfA) for Home — the primary success metric from
-// the PRD.
+// hero input, and the Today rail's Recent Activity section from its API
+// endpoint. Also instruments time-to-first-action (TTfA) for Home — the
+// primary success metric from the PRD.
 //
 // The Recent Workspaces card strip and its stat readout used to live here.
 // They were retired with the Operations Board: the Map is now Home's single
@@ -53,7 +52,7 @@
   }
 
   // The cockpit reports its own distinct action sources (Map select, Tree
-  // select, Open Workspace, view toggle, Quick Capture, Create Workspace)
+  // select, Open Workspace, view toggle, backlog capture, Create Workspace)
   // through one event so every Home surface shares a single TTfA contract.
   function wireCockpitTTFA() {
     window.addEventListener('ori:home-ttfa', e => {
@@ -141,8 +140,8 @@
   // ----- Delegated Today actions (TTfA) -----
 
   // One delegated click listener on the context rail fires the TTfA marker for
-  // any qualifying Today action (an upcoming row, an activity row). One
-  // listener instead of N keeps the JS small and survives re-renders.
+  // any qualifying Today action (an activity row). One listener instead of N
+  // keeps the JS small and survives re-renders.
   function wireTodayActions() {
     const rail = document.getElementById('cockpitRailToday');
     if (!rail) return;
@@ -151,7 +150,7 @@
       if (!t) return;
       const rowLink = t.closest && t.closest('.home-row-link');
       if (!rowLink) return;
-      fireTTFA(rowLink.closest('#homeUpcomingTasks') ? 'upcoming-row' : 'activity-row');
+      fireTTFA('activity-row');
     });
   }
 
@@ -162,53 +161,14 @@
     return gate.onboardingGateDecision(status).allowWorkspaceHydration === true;
   }
 
-  // ----- Section: Upcoming Scheduled Tasks -----
-
-  async function loadUpcoming() {
-    const section = document.getElementById('homeUpcomingTasks');
-    if (!section) return;
-    const body = section.querySelector('[data-role="content"]');
-    if (!body) return;
-
-    try {
-      const resp = await fetch('/api/orchestration/scheduled-tasks/upcoming?limit=5');
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      const data = await resp.json();
-      const rows = Array.isArray(data.upcoming) ? data.upcoming : [];
-
-      if (rows.length === 0) {
-        body.innerHTML = `
-          <div class="home-section-empty">
-            No scheduled tasks.
-          </div>
-        `;
-        return;
-      }
-      body.innerHTML = `<ul class="home-row-list">${rows.map(renderUpcomingRow).join('')}</ul>`;
-    } catch (err) {
-      console.error('home-dashboard: failed to load upcoming tasks', err);
-      body.innerHTML = '<div class="home-section-placeholder">Schedule data unavailable.</div>';
-    }
-  }
-
-  function renderUpcomingRow(row) {
-    const wsId = encodeURIComponent(row.workspace_id || '');
-    const href = wsId ? `/workspaces/${wsId}` : '#';
-    return `
-      <li class="home-row">
-        <a href="${href}" class="home-row-link">
-          <span class="home-row-primary">${escapeHtml(row.task_name || '(untitled task)')}</span>
-          <span class="home-row-meta">
-            <span class="home-row-workspace">${escapeHtml(row.workspace_name || '')}</span>
-            ${row.agent_name ? `<span class="home-row-agent">${escapeHtml(row.agent_name)}</span>` : ''}
-            <span class="home-row-time">${escapeHtml(relTime(row.next_run))}</span>
-          </span>
-        </a>
-      </li>
-    `;
-  }
-
   // ----- Section: Recent Activity -----
+  //
+  // The "Upcoming Scheduled Tasks" section that used to live here was removed:
+  // it fetched /api/orchestration/scheduled-tasks/upcoming?limit=5 and rendered
+  // the same scheduled runs that home-workspace-cockpit.js already shows as
+  // "Scheduled today" from its own ?limit=200 read of that endpoint. Two fetches
+  // of one endpoint, two lists, one rail column. The cockpit's version wins —
+  // it is bounded to today and flags overdue runs.
 
   async function loadRecentActivity() {
     const section = document.getElementById('homeRecentActivity');
@@ -288,7 +248,6 @@
     if (!document.getElementById('cockpitRailToday')) return;
     wireTodayActions();
     if (!(await canHydrateWorkspaceData())) return;
-    loadUpcoming();
     loadRecentActivity();
   }
 

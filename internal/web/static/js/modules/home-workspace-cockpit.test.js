@@ -896,7 +896,7 @@ test('summaryView totals come from the same shared state, groups counted separat
   assert.equal(view.attention, 3);
 });
 
-test('summaryView lists the workspaces that need attention and that are running', () => {
+test('summaryView lists the running workspaces and counts attention without listing it', () => {
   const rows = flattenWorkspaceTree([
     { id: 'a', name: 'Alpha', needs_attention_count: 2 },
     { id: 'b', name: 'Beta', active: true },
@@ -904,13 +904,13 @@ test('summaryView lists the workspaces that need attention and that are running'
   ]);
   const view = summaryView(rows, {});
   assert.deepEqual(
-    view.attentionWorkspaces.map(w => w.name),
-    ['Alpha']
-  );
-  assert.deepEqual(
     view.runningWorkspaces.map(w => w.name),
     ['Beta']
   );
+  // Attention is a Summary metric, not a Summary list — Today owns the list, so
+  // the view model must not carry a second copy of it.
+  assert.equal(view.attention, 2);
+  assert.equal('attentionWorkspaces' in view, false);
 });
 
 test('summaryView reports schedule figures as unavailable when the source is down', () => {
@@ -943,10 +943,18 @@ test('renderSummaryRailHTML shows totals, a Back action, and honest empty lists'
   assert.match(html, /data-unavailable="true"/);
 });
 
-test('the Summary attention list links back into selection, not to a URL', () => {
-  const rows = flattenWorkspaceTree([{ id: 'a', name: 'Alpha', needs_attention_count: 1 }]);
+test('the Summary running list links back into selection, not to a URL', () => {
+  const rows = flattenWorkspaceTree([{ id: 'a', name: 'Alpha', active: true }]);
   const html = renderSummaryRailHTML(summaryView(rows, {}));
   assert.match(html, /data-cockpit-summary-select="a"/);
+});
+
+test('renderSummaryRailHTML does not repeat the attention list Today already shows', () => {
+  const rows = flattenWorkspaceTree([{ id: 'a', name: 'Alpha', needs_attention_count: 1 }]);
+  const html = renderSummaryRailHTML(summaryView(rows, {}));
+  // The Attention metric stays; the duplicate roster does not.
+  assert.match(html, /Attention/);
+  assert.equal(/data-cockpit-summary-select="a"/.test(html), false);
 });
 
 test('renderSummaryRailHTML caps long lists and says how many more there are', () => {
@@ -954,7 +962,7 @@ test('renderSummaryRailHTML caps long lists and says how many more there are', (
     Array.from({ length: 8 }, (_, i) => ({
       id: `w${i}`,
       name: `W${i}`,
-      needs_attention_count: 1
+      active: true
     }))
   );
   const html = renderSummaryRailHTML(summaryView(rows, {}));
