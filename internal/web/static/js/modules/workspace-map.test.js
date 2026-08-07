@@ -3829,3 +3829,131 @@ test('a re-mount closes an open menu instead of leaving it bound to dead DOM', a
   await flush();
   assert.equal(harness.menu.isOpen(), false);
 });
+
+// --- Focus-intent selection is announced to the host (#322) -----------------
+//
+// `?focus=personal-hq` is the one selection the map makes with no click behind
+// it. Every other selection reaches the host through a handler, so the host
+// hears about it; this one it can only hear about if the map says so. It cannot
+// poll for it either, because HQ status arrives asynchronously and re-mounts the
+// map from setHQStatus long after the host's own mount() call has returned.
+//
+// When this is silent the map draws a selected HQ landmark while the cockpit
+// rail is still on Today — and since cockpit mode has no map-owned overview
+// panel, the rail is the ONLY place the Build My HQ button exists. The result
+// is a highlighted HQ with no way to act on it.
+
+const UNBUILT_HQ = { valid: false, hq_onboarding_state: 'unseen' };
+
+function loadMapAt(search) {
+  const window = { addEventListener() {}, location: { search } };
+  const fetch = () => new Promise(() => {});
+  vm.runInNewContext(
+    source,
+    {
+      window,
+      document: { getElementById: () => null },
+      setTimeout,
+      clearTimeout,
+      fetch,
+      // hasHQFocusIntent parses the query string with it.
+      URLSearchParams
+    },
+    { filename: 'workspace-map.js' }
+  );
+  return window.OriWorkspaceMap;
+}
+
+function cockpitState(extra) {
+  return {
+    workspaces: [{ id: 'ws-1', name: 'Alpha' }],
+    hideChrome: true,
+    selectOnly: true,
+    noAutoSelect: true,
+    ...extra
+  };
+}
+
+test('focus intent tells the host the HQ site was auto-selected (#322)', () => {
+  const map = loadMapAt('?focus=personal-hq');
+  const { container } = createMapHarness({ tiles: ['ws-1'] });
+  const seen = [];
+  map.setHQStatus(UNBUILT_HQ);
+  map.mount(container, cockpitState({ onSelectHQSite: view => seen.push(view) }));
+
+  assert.equal(map.getSelectedId(), '__personal_hq_site__');
+  assert.equal(seen.length, 1, 'the host is told exactly once');
+  assert.equal(seen[0].show, true);
+  assert.equal(seen[0].repair, false);
+});
+
+test('the HQ status arriving after mount still reaches the host (the #322 race)', () => {
+  const map = loadMapAt('?focus=personal-hq');
+  const { container } = createMapHarness({ tiles: ['ws-1'] });
+  const seen = [];
+  const state = cockpitState({ onSelectHQSite: view => seen.push(view) });
+
+  // First mount happens before /api/personal-hq/status resolves, so there is no
+  // site to select yet and the host is correctly told nothing.
+  map.mount(container, state);
+  assert.equal(seen.length, 0);
+  assert.notEqual(map.getSelectedId(), '__personal_hq_site__');
+
+  // Status lands and re-mounts the map internally. THIS is the path that used
+  // to select the tile without ever telling the cockpit.
+  map.setHQStatus(UNBUILT_HQ);
+  assert.equal(map.getSelectedId(), '__personal_hq_site__');
+  assert.equal(seen.length, 1, 'the late status still announces the selection');
+});
+
+test('later re-mounts do not re-announce the focus selection', () => {
+  const map = loadMapAt('?focus=personal-hq');
+  const { container } = createMapHarness({ tiles: ['ws-1'] });
+  const seen = [];
+  const state = cockpitState({ onSelectHQSite: view => seen.push(view) });
+  map.setHQStatus(UNBUILT_HQ);
+  map.mount(container, state);
+  assert.equal(seen.length, 1);
+
+  // A filter change, a workspace refresh, a Map/Tree switch: all re-mount. The
+  // rail must not be rebuilt and re-announced to screen readers each time.
+  map.mount(container, state);
+  map.mount(container, state);
+  assert.equal(seen.length, 1, 'focus intent is consumed once per page load');
+});
+
+test('without focus intent the map announces no HQ selection', () => {
+  const map = loadMapAt('');
+  const { container } = createMapHarness({ tiles: ['ws-1'] });
+  const seen = [];
+  map.setHQStatus(UNBUILT_HQ);
+  map.mount(container, cockpitState({ onSelectHQSite: view => seen.push(view) }));
+
+  assert.equal(seen.length, 0);
+  assert.notEqual(map.getSelectedId(), '__personal_hq_site__');
+});
+
+test('focus intent on a BUILT HQ selects its workspace and announces that instead', () => {
+  const map = loadMapAt('?focus=personal-hq');
+  const { container } = createMapHarness({ tiles: ['ws-1', 'hq-1'] });
+  const hqSeen = [];
+  const selected = [];
+  map.setHQStatus({ valid: true, workspace_id: 'hq-1' });
+  map.mount(
+    container,
+    cockpitState({
+      workspaces: [
+        { id: 'ws-1', name: 'Alpha' },
+        { id: 'hq-1', name: 'My HQ' }
+      ],
+      onSelectHQSite: view => hqSeen.push(view),
+      onSelect: (id, ws) => selected.push([id, ws && ws.name])
+    })
+  );
+
+  // A built HQ has no blueprint site, so this is an ordinary workspace
+  // selection — it must travel on onSelect, not the HQ-site channel.
+  assert.equal(hqSeen.length, 0);
+  assert.deepEqual(selected, [['hq-1', 'My HQ']]);
+  assert.equal(map.getSelectedId(), 'hq-1');
+});
