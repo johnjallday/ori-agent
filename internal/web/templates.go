@@ -81,6 +81,7 @@ func (tr *TemplateRenderer) LoadTemplates() error {
 		"templates/components/chat-area.tmpl",
 		"templates/components/task-modal.tmpl",
 		"templates/components/modals.tmpl",
+		"templates/components/personal-hq-modals.tmpl",
 		"templates/components/navbar.tmpl",
 		"templates/components/ori-guide.tmpl",
 		"templates/components/vault-modal.tmpl",

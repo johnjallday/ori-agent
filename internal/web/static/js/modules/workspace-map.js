@@ -295,7 +295,26 @@
   function setHQStatus(status) {
     hqStatus = status || null;
     hqWorkspaceId = hqStatus && hqStatus.valid ? hqStatus.workspace_id : null;
+    // mount() announces a focus-intent selection itself, exactly once. Remember
+    // whether this call is the one that consumed it, so the refresh below does
+    // not announce the same selection a second time.
+    var focusPending = !hqFocusConsumed;
     if (lastMount) mount(lastMount.container, lastMount.state);
+    var announcedByMount = focusPending && hqFocusConsumed && selectedId === HQ_SITE_ID;
+
+    // The host renders the site's own choices — cockpit mode has no map-owned
+    // overview panel — from a view it was handed once. A status change rewrites
+    // that view, so without this the rail keeps offering stale actions: "Not
+    // now" survives being clicked, and a repaired HQ still reads as broken.
+    var opts = lastMount && lastMount.state;
+    if (
+      !announcedByMount &&
+      selectedId === HQ_SITE_ID &&
+      opts &&
+      typeof opts.onSelectHQSite === 'function'
+    ) {
+      opts.onSelectHQSite(hqSiteView(hqStatus));
+    }
   }
 
   // Ids checked for a bulk operation (multi-select), remembered across re-mounts.
@@ -4456,12 +4475,22 @@
     var incoming = (state && state.selectedId) || '';
     var site = hqSiteView(hqStatus);
     var focusHQ = !hqFocusConsumed && hasHQFocusIntent();
+    // A focus intent selects on the host's behalf, so the host has to be told.
+    // Every other selection reaches it through a click handler; this one has no
+    // click, and the host cannot poll for it either — HQ status arrives async
+    // and re-mounts us from setHQStatus, long after the host's own mount call
+    // returned. Left unannounced, the map shows a selected HQ landmark while
+    // the cockpit rail still sits on Today with no Build affordance anywhere on
+    // screen (#322). Recorded here, dispatched once the DOM below exists.
+    var focusNotify = '';
     if (focusHQ && site.show) {
       selectedId = HQ_SITE_ID;
       hqFocusConsumed = true;
+      focusNotify = 'hq-site';
     } else if (focusHQ && findWs(workspaces, hqWorkspaceId)) {
       selectedId = hqWorkspaceId;
       hqFocusConsumed = true;
+      focusNotify = 'hq-workspace';
     } else if (selectedId === HQ_SITE_ID && site.show) {
       selectedId = HQ_SITE_ID;
     } else if (selectedId === HQ_SITE_ID && findWs(workspaces, hqWorkspaceId)) {
@@ -4533,6 +4562,19 @@
     // well as on every later selection change.
     ensureSetupStatus(container, findWs(workspaces, selectedId));
     bindSelBar(container);
+    // Announce the focus-intent selection recorded above, now that the tiles it
+    // refers to actually exist. `hqFocusConsumed` makes this fire at most once
+    // per page load, so later re-mounts (filters, refreshes, Map/Tree switches)
+    // stay silent instead of re-announcing to screen readers. The host's own
+    // post-mount reconciliation then no-ops, because its selection already
+    // matches what it was just told.
+    if (focusNotify === 'hq-site') {
+      if (state && typeof state.onSelectHQSite === 'function') state.onSelectHQSite(site);
+    } else if (focusNotify === 'hq-workspace') {
+      if (state && typeof state.onSelect === 'function') {
+        state.onSelect(selectedId, findWs(workspaces, selectedId) || null);
+      }
+    }
     // No resize listener: world coordinates are viewport-independent, so a
     // resize changes only how much of the world is visible — never where a
     // building is (FR-13, FR-46).

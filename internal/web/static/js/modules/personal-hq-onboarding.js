@@ -380,6 +380,31 @@ export function followUpView(f) {
     return window.bootstrap.Modal.getOrCreateInstance(el);
   }
 
+  /**
+   * Resolve a modal that the user just asked for, complaining loudly if it is
+   * not on the page.
+   *
+   * A plain `if (modal) modal.show()` turns a missing template include into a
+   * dead button: no error, no request, nothing for the user OR for us to go on.
+   * That is exactly how #322 shipped — the markup lived in a component only
+   * reachable from the retired `/workspaces` page, so every Build My HQ entry
+   * point silently did nothing. Fail visibly instead.
+   */
+  function requireModal(id) {
+    const modal = bootstrapModal(id);
+    if (modal) return modal;
+    console.error(
+      `[personal-hq] modal #${id} is missing from this page — check that ` +
+        'components/personal-hq-modals.tmpl is included by the page layout.'
+    );
+    toast(
+      'Something went wrong opening that dialog. Please reload the page.',
+      'Personal HQ',
+      'error'
+    );
+    return null;
+  }
+
   function browserTimezone() {
     try {
       return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
@@ -499,7 +524,7 @@ export function followUpView(f) {
     await Promise.all(tasks);
     const errorBox = document.getElementById('hqBuildError');
     if (errorBox) errorBox.hidden = true;
-    const modal = bootstrapModal('hqBuildModal');
+    const modal = requireModal('hqBuildModal');
     if (modal) modal.show();
   }
 

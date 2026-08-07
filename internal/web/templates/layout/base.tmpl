@@ -300,6 +300,11 @@
 
   {{template "modals.tmpl" .}}
 
+  <!-- Personal HQ modals. Must be included wherever personal-hq-onboarding.js
+       loads (see the script tag below) — the script binds by id, so a missing
+       modal makes every Build My HQ entry point a silent no-op (#322). -->
+  {{template "personal-hq-modals.tmpl" .}}
+
   <!-- File Manager Modals -->
   {{template "file_preview_dialog"}}
   {{template "file_delete_dialog"}}

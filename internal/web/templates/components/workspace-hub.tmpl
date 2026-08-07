@@ -1001,82 +1001,9 @@
     </div>
   </div>
 
-  <!-- Build My HQ modal; wired by personal-hq-onboarding.js. Defaults are
-       pre-filled so the default path is: open, confirm, submit. -->
-  <div class="modal fade" id="hqBuildModal" tabindex="-1" aria-labelledby="hqBuildModalTitle" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h5 class="modal-title" id="hqBuildModalTitle">Build My HQ</h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-        </div>
-        <div class="modal-body">
-          <p class="hq-build-intro">
-            Your HQ uses a curated snapshot of your workspaces for its daily brief — it does
-            not automatically get every project's tools or files.
-          </p>
-          <div class="hq-build-root mb-3">
-            <label for="hqBuildWorkspaceRoot" class="form-label">Workspace directory</label>
-            <div class="hq-build-root-row">
-              <input type="text" class="modern-input w-100" id="hqBuildWorkspaceRoot" autocomplete="off" spellcheck="false" placeholder="Choose where Ori workspaces live">
-              <button type="button" id="hqBuildWorkspaceRootBrowseBtn" class="modern-btn modern-btn-secondary">Browse</button>
-            </div>
-            <small id="hqBuildWorkspaceRootStatus" class="hq-build-root-status is-unconfirmed" aria-live="polite">Loading suggested directory…</small>
-            <small id="hqBuildWorkspaceRootError" class="hq-build-root-error" role="alert" hidden></small>
-            <small class="hq-build-root-note">Ori only scans the directory you confirm.</small>
-          </div>
-          <div class="mb-3">
-            <label for="hqBuildName" class="form-label">Name</label>
-            <input type="text" class="modern-input w-100" id="hqBuildName" value="My HQ" autocomplete="off">
-          </div>
-          <div class="mb-3">
-            <label for="hqBuildTimezone" class="form-label">Timezone</label>
-            <input type="text" class="modern-input w-100" id="hqBuildTimezone" autocomplete="off">
-          </div>
-          <button type="button" id="hqBuildAdvancedToggle" class="hq-build-advanced-toggle" aria-expanded="false" aria-controls="hqBuildAdvanced">
-            Brief schedule &amp; notifications
-          </button>
-          <div id="hqBuildAdvanced" class="hq-build-advanced" hidden>
-            <div class="mb-3">
-              <label class="form-label">Brief days</label>
-              <div class="hq-build-days" role="group" aria-label="Daily brief schedule days">
-                <label><input type="checkbox" value="mon" checked> Mon</label>
-                <label><input type="checkbox" value="tue" checked> Tue</label>
-                <label><input type="checkbox" value="wed" checked> Wed</label>
-                <label><input type="checkbox" value="thu" checked> Thu</label>
-                <label><input type="checkbox" value="fri" checked> Fri</label>
-                <label><input type="checkbox" value="sat"> Sat</label>
-                <label><input type="checkbox" value="sun"> Sun</label>
-              </div>
-            </div>
-            <div class="mb-3">
-              <label for="hqBuildTime" class="form-label">Brief time</label>
-              <input type="time" class="modern-input" id="hqBuildTime" value="08:00">
-            </div>
-            <div class="mb-3">
-              <label for="hqBuildScope" class="form-label">Workspaces covered</label>
-              <select id="hqBuildScope" class="modern-input w-100">
-                <option value="all" selected>All eligible workspaces</option>
-                <option value="selected">Selected workspaces (choose later in HQ settings)</option>
-              </select>
-            </div>
-            <div class="form-check">
-              <input type="checkbox" class="form-check-input" id="hqBuildIncludeFuture" checked>
-              <label class="form-check-label" for="hqBuildIncludeFuture">Include new workspaces automatically</label>
-            </div>
-            <div class="form-check">
-              <input type="checkbox" class="form-check-input" id="hqBuildNotify">
-              <label class="form-check-label" for="hqBuildNotify">Notify me in Action Center when a brief is ready</label>
-            </div>
-          </div>
-          <div id="hqBuildError" class="hq-build-error" hidden></div>
-        </div>
-        <div class="modal-footer">
-          <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Cancel</button>
-          <button type="button" id="hqBuildSubmitBtn" class="modern-btn modern-btn-primary">Build My HQ</button>
-        </div>
-      </div>
-    </div>
-  </div>
+  <!-- The Build My HQ modal used to live here. It moved to
+       components/personal-hq-modals.tmpl (included from base.tmpl) because this
+       component is only reachable via pages/workspaces.tmpl, which no longer
+       renders — `/workspaces` redirects to Home (#322). -->
 
 </div>
