@@ -3922,6 +3922,33 @@ test('later re-mounts do not re-announce the focus selection', () => {
   assert.equal(seen.length, 1, 'focus intent is consumed once per page load');
 });
 
+test('a status change refreshes the selected HQ site view in the host', () => {
+  const map = loadMapAt('?focus=personal-hq');
+  const { container } = createMapHarness({ tiles: ['ws-1'] });
+  const seen = [];
+  const state = cockpitState({ onSelectHQSite: view => seen.push(view) });
+  map.setHQStatus(UNBUILT_HQ);
+  map.mount(container, state);
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].showSkip, true, 'Not now is offered before it is used');
+
+  // Skipping the objective rewrites the site view. The host renders those
+  // choices from the view it was handed, so it has to be handed the new one —
+  // otherwise "Not now" survives being clicked.
+  map.setHQStatus({ valid: false, hq_onboarding_state: 'skipped' });
+  assert.equal(seen.length, 2, 'the host is re-notified');
+  assert.equal(seen[1].showSkip, false, 'and Not now is gone');
+});
+
+test('a status change does not notify a host that has no HQ site selected', () => {
+  const map = loadMapAt('');
+  const { container } = createMapHarness({ tiles: ['ws-1'] });
+  const seen = [];
+  map.mount(container, cockpitState({ onSelectHQSite: view => seen.push(view) }));
+  map.setHQStatus(UNBUILT_HQ);
+  assert.equal(seen.length, 0, 'nothing was selected, so nothing is announced');
+});
+
 test('without focus intent the map announces no HQ selection', () => {
   const map = loadMapAt('');
   const { container } = createMapHarness({ tiles: ['ws-1'] });

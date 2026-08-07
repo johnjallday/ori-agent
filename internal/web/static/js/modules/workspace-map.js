@@ -295,7 +295,26 @@
   function setHQStatus(status) {
     hqStatus = status || null;
     hqWorkspaceId = hqStatus && hqStatus.valid ? hqStatus.workspace_id : null;
+    // mount() announces a focus-intent selection itself, exactly once. Remember
+    // whether this call is the one that consumed it, so the refresh below does
+    // not announce the same selection a second time.
+    var focusPending = !hqFocusConsumed;
     if (lastMount) mount(lastMount.container, lastMount.state);
+    var announcedByMount = focusPending && hqFocusConsumed && selectedId === HQ_SITE_ID;
+
+    // The host renders the site's own choices — cockpit mode has no map-owned
+    // overview panel — from a view it was handed once. A status change rewrites
+    // that view, so without this the rail keeps offering stale actions: "Not
+    // now" survives being clicked, and a repaired HQ still reads as broken.
+    var opts = lastMount && lastMount.state;
+    if (
+      !announcedByMount &&
+      selectedId === HQ_SITE_ID &&
+      opts &&
+      typeof opts.onSelectHQSite === 'function'
+    ) {
+      opts.onSelectHQSite(hqSiteView(hqStatus));
+    }
   }
 
   // Ids checked for a bulk operation (multi-select), remembered across re-mounts.
