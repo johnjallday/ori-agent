@@ -49,7 +49,7 @@ async function listWorkspaces(page: Page): Promise<Array<{ id: string; name?: st
 /**
  * Drive Ori's existing Create Workspace wizard to completion.
  *
- * Build mode reuses this flow rather than replacing it (FR-51), so the spec
+ * Build reuses this flow rather than replacing it (FR-51), so the spec
  * drives the real four steps — Blueprint → Details → Team → Review — exactly as
  * tests/create-workspace-behavior.spec.ts does.
  */
@@ -311,22 +311,23 @@ test.describe('Coordinate Workspace Map', () => {
     expect(Math.round(restored.zoom * 100)).toBe(Math.round(saved.zoom * 100));
   });
 
-  test('Build mode places a workspace at the chosen point (FR-47 – FR-53, metric 3)', async ({
+  test('Build places a workspace at the right-clicked point (FR-47 – FR-53, metric 3)', async ({
     page
   }) => {
     await ensureWorkspace(page);
     await openMap(page);
 
-    await page.click('[data-map-build]');
-    await expect(page.locator('[data-map-build-banner]')).toBeVisible();
-
+    // Build is a context-menu item now (#317): right-click the spot you want,
+    // and that point is the coordinate. There is no mode and no second click.
     const site = await emptyPointOn(page);
-    await page.mouse.click(site.x, site.y);
+    await page.mouse.click(site.x, site.y, { button: 'right' });
+    await expect(page.locator('[data-menu-action="build"]')).toBeVisible();
+    await page.click('[data-menu-action="build"]');
 
     // The existing Create Workspace modal opens — the same four-step wizard,
     // not a second form (FR-51).
     await expect(page.locator('#addFolderModal')).toBeVisible();
-    await expect(page.locator('[data-map-build-banner]')).toBeHidden();
+    await expect(page.locator('[data-ws-map-menu]')).toHaveCount(0);
 
     const name = `Built ${Date.now()}`;
     await completeCreateWizard(page, name);
@@ -344,7 +345,7 @@ test.describe('Coordinate Workspace Map', () => {
     expect(layout.layout.positions[built!.id], 'its chosen coordinate was saved').toBeTruthy();
   });
 
-  test('cancelling Build mode creates nothing (FR-54)', async ({ page }) => {
+  test('cancelling a build creates nothing (FR-54)', async ({ page }) => {
     await ensureWorkspace(page);
     await openMap(page);
     // Counted through the API rather than the DOM: what must not change is the
@@ -354,15 +355,17 @@ test.describe('Coordinate Workspace Map', () => {
       (await (await page.request.get('/api/workspace-map/layout')).json()).layout.positions
     ).length;
 
-    await page.click('[data-map-build]');
-    await page.locator('.ws-map-canvas').press('Escape');
-    await expect(page.locator('[data-map-build-banner]')).toBeHidden();
+    // Escaping the menu without choosing Build creates nothing.
+    const spot = await emptyPointOn(page);
+    await page.mouse.click(spot.x, spot.y, { button: 'right' });
+    await page.keyboard.press('Escape');
+    await expect(page.locator('[data-ws-map-menu]')).toHaveCount(0);
     await expect(page.locator('#addFolderModal')).toBeHidden();
 
     // And cancelling from inside the modal leaves nothing behind either.
-    await page.click('[data-map-build]');
     const site = await emptyPointOn(page);
-    await page.mouse.click(site.x, site.y);
+    await page.mouse.click(site.x, site.y, { button: 'right' });
+    await page.click('[data-menu-action="build"]');
     await expect(page.locator('#addFolderModal')).toBeVisible();
     // Let the show transition finish: hiding a Bootstrap modal mid-fade is a
     // no-op, which looks exactly like "cancel is broken".
@@ -542,7 +545,12 @@ test.describe('Coordinate Workspace Map', () => {
     // Navigation still works; placement does not.
     await page.click('[data-map-zoom-in]');
     expect((await cameraOf(page)).zoom).toBeGreaterThan(0.5);
-    await expect(page.locator('[data-map-build]')).toBeDisabled();
+    const site = await emptyPointOn(page);
+    await page.mouse.click(site.x, site.y, { button: 'right' });
+    await expect(page.locator('[data-menu-action="build"]')).toHaveAttribute(
+      'aria-disabled',
+      'true'
+    );
   });
 
   test('Reset Layout clears only positions and can be undone (FR-109 – FR-112, metric 9)', async ({

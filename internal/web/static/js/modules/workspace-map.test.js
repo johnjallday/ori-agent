@@ -1676,7 +1676,22 @@ const keyEvent = (key, extra = {}) => ({
   ...extra
 });
 
-test('an ordinary empty-space click creates nothing outside Build mode (FR-48)', async () => {
+// Right-click empty ground at a screen point and choose Build. Since #317 this
+// replaces the old Build *mode* — a button that armed the map, then a second
+// click to pick the spot. The menu already opens at a spot, so it is the spot.
+function buildFromMenu(harness, at = { x: 500, y: 300 }) {
+  harness.fire('contextmenu', {
+    target: { closest: sel => (sel.includes('ws-map-canvas') ? { focus() {} } : null) },
+    clientX: at.x,
+    clientY: at.y,
+    preventDefault() {}
+  });
+  const item = harness.menu.item('build');
+  if (item) item.fire('click');
+  return item;
+}
+
+test('an ordinary empty-space click creates nothing (FR-48)', async () => {
   const { map, harness, modalCalls } = buildHarness();
   mountWithCamera(map, harness, [{ id: 'ws-1', name: 'Alpha' }]);
   await flush();
@@ -1686,36 +1701,69 @@ test('an ordinary empty-space click creates nothing outside Build mode (FR-48)',
   assert.equal(modalCalls.length, 0, 'clicking the background must not start creating a workspace');
 });
 
-test('Build mode captures one empty-space point and hands off to the existing modal (FR-51)', async () => {
+test('Build takes the right-clicked point and hands off to the existing modal (FR-51)', async () => {
   const { map, harness, modalCalls, patches } = buildHarness();
   mountWithCamera(map, harness, [{ id: 'ws-1', name: 'Alpha' }]);
   await flush();
 
-  harness.control('[data-map-build]').click();
-  assert.equal(harness.control('[data-map-build-banner]').hidden, false, 'the mode is visible');
-
-  harness.fire('pointerdown', pointerEvent(500, 300));
-  harness.fire('pointerup', pointerEvent(500, 300));
+  assert.ok(buildFromMenu(harness), 'the canvas menu offers Build');
 
   assert.equal(modalCalls.length, 1, 'exactly one create flow opened');
   assert.equal(modalCalls[0].mapOrigin, true);
+  assert.equal(modalCalls[0].entryPoint, 'workspace_map_build');
   // FR-62: a point inside a district is still just a point. Nothing about the
   // handoff can carry a parent.
   assert.ok(!('parentId' in modalCalls[0]) && !('parent_id' in modalCalls[0]));
   assert.equal(patches.length, 0, 'nothing is saved for a workspace that does not exist yet');
   assert.equal(map.hasPendingBuild(), true);
-  assert.equal(harness.control('[data-map-build-banner]').hidden, true, 'the mode ended');
 });
 
-test('a click on a building in Build mode does not place a workspace beneath it (FR-52)', async () => {
+test('where you right-click is where it builds', async () => {
+  const near = buildHarness();
+  mountWithCamera(near.map, near.harness, [{ id: 'ws-1', name: 'Alpha' }]);
+  await flush();
+  buildFromMenu(near.harness, { x: 200, y: 150 });
+  await near.map.completeBuild('ws-near');
+  await flush();
+
+  const far = buildHarness();
+  mountWithCamera(far.map, far.harness, [{ id: 'ws-1', name: 'Alpha' }]);
+  await flush();
+  buildFromMenu(far.harness, { x: 800, y: 500 });
+  await far.map.completeBuild('ws-far');
+  await flush();
+
+  const saved = ctx =>
+    ctx.patches.filter(p => p.operations[0].op === 'set_positions')[0].operations[0].positions;
+  const a = saved(near)['ws-near'];
+  const b = saved(far)['ws-far'];
+  assert.ok(b.x > a.x, 'a click further right builds further right: ' + a.x + ' vs ' + b.x);
+  assert.ok(b.y > a.y, 'a click further down builds further down: ' + a.y + ' vs ' + b.y);
+  // Snapped to the same grid a drop uses. (A negative multiple gives -0, which
+  // is not strictly equal to 0.)
+  [a, b].forEach(point => {
+    assert.ok(point.x % 38 === 0, 'x is on the grid: ' + point.x);
+    assert.ok(point.y % 38 === 0, 'y is on the grid: ' + point.y);
+  });
+});
+
+test('right-clicking a building offers no Build — that menu is about the building', async () => {
   const { map, harness, modalCalls } = buildHarness();
   mountWithCamera(map, harness, [{ id: 'ws-1', name: 'Alpha' }]);
   await flush();
-  harness.control('[data-map-build]').click();
 
-  const onTile = { target: { closest: sel => (sel.includes('ws-map-tile') ? {} : null) } };
-  harness.fire('pointerdown', pointerEvent(500, 300, onTile));
-  harness.fire('pointerup', pointerEvent(500, 300, onTile));
+  harness.fire('contextmenu', {
+    target: {
+      closest: sel =>
+        sel.includes('data-ws-id') && !sel.includes('data-hq-site')
+          ? { getAttribute: () => 'ws-1', focus() {} }
+          : null
+    },
+    clientX: 500,
+    clientY: 300,
+    preventDefault() {}
+  });
+  assert.equal(harness.menu.item('build'), null, 'a building has no Build item (FR-52)');
   assert.equal(modalCalls.length, 0);
   assert.equal(map.hasPendingBuild(), false);
 });
@@ -1748,33 +1796,35 @@ test('the Snap to Grid toggle is visible, defaults on, and persists (FR-57)', as
   assert.equal(patches[0].operations[0].snap_to_grid, false);
 });
 
-test('keyboard placement moves by a step, commits on Enter, and cancels on Escape (FR-60)', async () => {
-  const { map, harness, modalCalls } = buildHarness();
+test('a keyboard-opened menu builds at the middle of what the user is looking at (FR-60)', async () => {
+  const { map, harness, modalCalls, patches } = buildHarness();
   mountWithCamera(map, harness, [{ id: 'ws-1', name: 'Alpha' }]);
   await flush();
 
-  harness.control('[data-map-build]').click();
-  const coords = harness.control('[data-map-build-coords]');
-  const startText = coords.textContent;
-  assert.match(startText, /snapped/, 'the candidate reports its snap state (FR-50)');
+  // Shift+F10 on the focused canvas: there is no cursor, so the coordinate
+  // comes from the centre of the viewport rather than from a pointer.
+  harness.fire('keydown', {
+    key: 'F10',
+    shiftKey: true,
+    target: {
+      closest: sel => (sel.includes('ws-map-canvas') ? { focus() {} } : null),
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 1000, height: 600 })
+    },
+    preventDefault() {}
+  });
+  harness.menu.item('build').fire('click');
+  assert.equal(modalCalls.length, 1, 'the keyboard route reaches the same create flow');
 
-  harness.fire('keydown', keyEvent('ArrowRight'));
-  const afterOne = coords.textContent;
-  assert.notEqual(afterOne, startText, 'the arrow moved the candidate');
-
-  harness.fire('keydown', keyEvent('ArrowRight', { shiftKey: true }));
-  const startX = Number(startText.split(',')[0]);
-  const shiftX = Number(coords.textContent.split(',')[0]);
-  assert.equal(shiftX - startX, 38 + 380, 'Shift uses the documented larger step');
-
-  harness.fire('keydown', keyEvent('Enter'));
-  assert.equal(modalCalls.length, 1, 'Enter chose the site');
-
-  // Escape before the modal opens cancels without creating anything.
-  harness.control('[data-map-build]').click();
-  harness.fire('keydown', keyEvent('Escape'));
-  assert.equal(modalCalls.length, 1, 'Escape opened nothing');
-  assert.equal(harness.control('[data-map-build-banner]').hidden, true);
+  await map.completeBuild('ws-keyboard');
+  await flush();
+  const saved = patches.filter(p => p.operations[0].op === 'set_positions')[0].operations[0]
+    .positions['ws-keyboard'];
+  const centre = map.camera.screenToWorld({ x: 500, y: 300 }, map.getCamera(), {
+    width: 1000,
+    height: 600
+  });
+  const snapped = map.snapPoint(centre);
+  assert.deepEqual({ ...saved }, { ...snapped }, 'built at the centre of the view');
 });
 
 test('a successful create saves the chosen coordinate exactly once (FR-53)', async () => {
@@ -1782,9 +1832,7 @@ test('a successful create saves the chosen coordinate exactly once (FR-53)', asy
   mountWithCamera(map, harness, [{ id: 'ws-1', name: 'Alpha' }]);
   await flush();
 
-  harness.control('[data-map-build]').click();
-  harness.fire('pointerdown', pointerEvent(600, 200));
-  harness.fire('pointerup', pointerEvent(600, 200));
+  buildFromMenu(harness, { x: 600, y: 200 });
 
   await map.completeBuild('ws-new');
   await flush();
@@ -1807,9 +1855,7 @@ test('cancelling the modal leaves neither a workspace nor a position (FR-54)', a
   mountWithCamera(map, harness, [{ id: 'ws-1', name: 'Alpha' }]);
   await flush();
 
-  harness.control('[data-map-build]').click();
-  harness.fire('pointerdown', pointerEvent(600, 200));
-  harness.fire('pointerup', pointerEvent(600, 200));
+  buildFromMenu(harness, { x: 600, y: 200 });
   assert.equal(map.hasPendingBuild(), true);
 
   map.cancelBuild();
@@ -1826,9 +1872,7 @@ test('a failed initial position keeps the workspace and offers a real retry (FR-
   mountWithCamera(map, harness, [{ id: 'ws-1', name: 'Alpha' }]);
   await flush();
 
-  harness.control('[data-map-build]').click();
-  harness.fire('pointerdown', pointerEvent(600, 200));
-  harness.fire('pointerup', pointerEvent(600, 200));
+  buildFromMenu(harness, { x: 600, y: 200 });
   const chosen = { ...patches };
 
   const saved = await map.completeBuild('ws-new');
@@ -2988,7 +3032,7 @@ test('contextMenuHTML renders a menu with menuitems, dividers, danger and disabl
     [
       { label: 'Open workspace', action: 'open' },
       { divider: true },
-      { label: 'New Workspace', action: 'create', disabled: true },
+      { label: 'Build', action: 'build', disabled: true },
       { label: 'Delete workspace', action: 'delete', variant: 'danger' }
     ],
     { label: 'Actions for Alpha' }
@@ -2997,7 +3041,7 @@ test('contextMenuHTML renders a menu with menuitems, dividers, danger and disabl
   assert.match(html, /aria-label="Actions for Alpha"/);
   assert.match(html, /role="menuitem"[^>]*data-menu-action="open"/);
   assert.match(html, /ori-context-divider[^>]*role="separator"/);
-  assert.match(html, /data-menu-action="create"[^>]*aria-disabled="true"/);
+  assert.match(html, /data-menu-action="build"[^>]*aria-disabled="true"/);
   assert.match(html, /ori-context-danger[^>]*data-menu-action="delete"/);
   // Every item is reachable only through the roving tabindex.
   assert.equal((html.match(/tabindex="-1"/g) || []).length, 3);
@@ -3454,7 +3498,7 @@ test('empty canvas offers create plus the framing actions, with Center disabled 
   map._setLayoutForTest({ positions: {} }, 'ready');
   const items = map.contextMenuItemsFor({ type: 'canvas' });
   const actions = Array.from(items.filter(item => !item.divider).map(item => item.action));
-  assert.deepEqual(actions, ['create', 'fit', 'center', 'reset-view']);
+  assert.deepEqual(actions, ['build', 'fit', 'center', 'reset-view']);
   const center = items.find(item => item.action === 'center');
   assert.equal(center.disabled, true, 'Center Selected has nothing to centre yet');
   assert.ok(
@@ -3484,7 +3528,7 @@ test('each of the four targets opens its own menu', async () => {
   assert.ok(harness.menu.item('hq-build'), 'HQ menu');
 
   harness.fire('contextmenu', rightClick(canvasTarget()).event);
-  assert.ok(harness.menu.item('create'), 'canvas menu');
+  assert.ok(harness.menu.item('build'), 'canvas menu');
   assert.ok(harness.menu.item('fit'), 'with the framing actions');
 });
 
@@ -3548,7 +3592,7 @@ test('a read-only map disables exactly the mutating items, and nothing else', ()
   assert.equal(tileState['toggle-selection'], false);
 
   const canvas = byAction(map.contextMenuItemsFor({ type: 'canvas' }));
-  assert.equal(canvas.create, true, 'New Workspace is disabled');
+  assert.equal(canvas.build, true, 'Build is disabled');
   assert.equal(canvas.fit, false, 'the framing actions stay enabled');
   assert.equal(canvas['reset-view'], false);
 
@@ -3568,21 +3612,17 @@ test('a ready map disables nothing that a read-only one would', () => {
 
 test('disabled items are announced as disabled and skipped by arrow navigation (FR-21)', async () => {
   const { map, harness } = await menuHarness();
-  // A map whose layout could not load: New Workspace is present but disabled.
+  // A map whose layout could not load: Build is present but disabled.
   map._setLayoutForTest({ positions: {} }, 'unavailable');
 
   harness.fire('contextmenu', rightClick(canvasTarget()).event);
-  const create = harness.menu.item('create');
+  const create = harness.menu.item('build');
   assert.equal(create.getAttribute('aria-disabled'), 'true', 'still present, still announced');
-  assert.notEqual(
-    harness.menu.focused().action,
-    'create',
-    'focus starts on the first enabled item'
-  );
+  assert.notEqual(harness.menu.focused().action, 'build', 'focus starts on the first enabled item');
 
   const menu = harness.menu.menu();
   menu.fire('keydown', { key: 'ArrowUp' });
-  assert.notEqual(harness.menu.focused().action, 'create', 'wrapping skips it too');
+  assert.notEqual(harness.menu.focused().action, 'build', 'wrapping skips it too');
 
   // And it cannot be run.
   create.fire('click');
@@ -3739,7 +3779,7 @@ test('the three framing actions are still reachable, by menu and by key', async 
   // Menu route.
   harness.fire('contextmenu', rightClick(canvasTarget()).event);
   const actions = Array.from(harness.menu.items().map(item => item.action));
-  assert.deepEqual(actions, ['create', 'fit', 'center', 'reset-view']);
+  assert.deepEqual(actions, ['build', 'fit', 'center', 'reset-view']);
   harness.menu.item('fit').fire('click');
   assert.match(live.textContent, /workspace/i, 'Fit all announced through the live region');
 

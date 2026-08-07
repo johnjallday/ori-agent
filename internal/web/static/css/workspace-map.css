@@ -443,9 +443,10 @@
   font-size: 11px;
   color: var(--ws-ink-faint);
 }
-/* Build mode. The banner names the mode, shows the candidate coordinate and
-   whether snapping applies, and carries its own way out — a mode the user
-   cannot see is one they will enter by accident (#292 FR-48 – FR-50). */
+/* The move banner: it names what is happening, and shows the candidate
+   coordinate and whether snapping applies. It kept its `build` class names from
+   when placement was a mode; #317 replaced that mode with the context menu's
+   Build item, and the banner now belongs entirely to moving. */
 .ws-map-build {
   position: absolute;
   z-index: 8;
@@ -486,26 +487,9 @@
 .ws-map-build.is-blocked .ws-map-build-coords {
   color: var(--ws-danger, #d9534f);
 }
-/* Build mode gets its own cursor as well as the banner: the state is carried by
-   shape and text, not by colour alone (FR-120). */
-.ws-map-canvas.is-building {
-  cursor: crosshair;
-}
-/* The candidate site, drawn in world space so it tracks the coordinate through
-   pans and zooms. */
-.ws-map-build-site {
-  position: absolute;
-  z-index: 6;
-  width: 150px;
-  height: 118px;
-  margin: 0;
-  pointer-events: none;
-  border: 2px dashed var(--ws-faction);
-  background: rgba(123, 108, 240, 0.08);
-}
-.ws-map-build-site[hidden] {
-  display: none;
-}
+/* The build-mode cursor and candidate-site marker are gone with the mode
+   itself (#317): there is no in-between state to preview when the right-click
+   is the coordinate. */
 
 /* The honest read-only notice: the map is navigable, but nothing can be saved
    (#292 FR-105). Stated in words, not implied by a greyed-out button. */

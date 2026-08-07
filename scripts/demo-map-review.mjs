@@ -54,13 +54,15 @@ await page.locator('[data-menu-action="fit"]').click();
 await page.waitForTimeout(400);
 await shot('01-home-wide');
 
-// Build mode, with a live candidate under the pointer.
-await page.click('[data-map-build]');
+// Build: right-click empty ground and the menu's Build item takes that point
+// (#317 retired the Build mode this used to drive).
 const canvas = await page.locator('.ws-map-canvas').boundingBox();
-await page.mouse.move(canvas.x + canvas.width * 0.7, canvas.y + canvas.height * 0.3);
+await page.mouse.click(canvas.x + canvas.width * 0.7, canvas.y + canvas.height * 0.3, {
+  button: 'right'
+});
 await page.waitForTimeout(300);
-await shot('02-build-mode');
-await page.locator('.ws-map-canvas').press('Escape');
+await shot('02-build-menu');
+await page.keyboard.press('Escape');
 
 // The district and its handle.
 if (group) {

@@ -498,8 +498,8 @@ try {
   const canvasItems = canvas?.menu?.items || [];
   console.log('  canvas: ' + JSON.stringify(canvasItems.map(item => item.label)));
   check(
-    canvasItems.some(item => item.action === 'create'),
-    'the canvas menu offers New Workspace'
+    canvasItems.some(item => item.action === 'build'),
+    'the canvas menu offers Build'
   );
   check(
     canvasItems.some(item => item.action === 'center' && item.disabled) ||
@@ -508,15 +508,46 @@ try {
   );
   await shot('11-canvas-menu');
 
-  await page.click('[data-menu-action="create"]');
+  // Build takes the point that was right-clicked. Open the menu at a known spot,
+  // read back the world coordinate the map is holding, and check it is the one
+  // under the cursor rather than a default.
+  const buildSpot = await emptyCanvasPoint();
+  const expectedWorld = await page.evaluate(point => {
+    const canvas = document.querySelector('.ws-map-canvas');
+    const rect = canvas.getBoundingClientRect();
+    const camera = window.OriWorkspaceMap.getCamera();
+    const viewport = { width: canvas.clientWidth, height: canvas.clientHeight };
+    const world = window.OriWorkspaceMap.camera.screenToWorld(
+      { x: point.x - rect.left, y: point.y - rect.top },
+      camera,
+      viewport
+    );
+    return window.OriWorkspaceMap.snapPoint(world);
+  }, buildSpot);
+
+  await openAtPoint(buildSpot, 'build spot');
+  const buildItem = await page.evaluate(
+    () => document.querySelector('[data-menu-action="build"]')?.textContent.trim() || null
+  );
+  check(buildItem === 'Build', 'the canvas menu item reads Build: ' + buildItem);
+  await page.click('[data-menu-action="build"]');
   await page.waitForTimeout(900);
   const modalOpen = await page.evaluate(
     () => !!document.querySelector('.modal.show, dialog[open], [data-create-workspace-open]')
   );
-  check(modalOpen, 'New Workspace opened the existing create flow');
+  check(modalOpen, 'Build opened the existing create flow');
+  check(
+    await page.evaluate(() => window.OriWorkspaceMap.hasPendingBuild()),
+    'and is holding the coordinate for it'
+  );
+  console.log('  build point: ' + JSON.stringify(expectedWorld));
   await shot('12-create-modal');
   await page.keyboard.press('Escape');
-  await page.waitForTimeout(400);
+  await page.waitForTimeout(600);
+  check(
+    !(await page.evaluate(() => window.OriWorkspaceMap.hasPendingBuild())),
+    'cancelling the modal forgets the coordinate'
+  );
 
   // --- anchoring, every target, every zoom level --------------------------
   //

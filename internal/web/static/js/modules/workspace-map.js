@@ -78,10 +78,7 @@
   // (FR-44).
   var CAMERA_SAVE_DELAY = 600;
 
-  // The banner's two voices. Build mode asks for a site; a move reports where
-  // the thing being moved would land.
-  var BUILD_INSTRUCTION =
-    'Choose where to build — click an empty spot, or use the arrow keys and Enter. Escape cancels.';
+  // The banner's voice: a move reports where the thing being moved would land.
   var MOVE_INSTRUCTION = 'Moving — release to drop, or press Escape to put it back.';
   var KEYBOARD_MOVE_INSTRUCTION =
     'Moving — arrow keys to position, Enter to save, Escape to put it back.';
@@ -1439,11 +1436,8 @@
     // Keep the ordinary create affordance after all real and reserved sites.
     var pad = toLayer(layout.pad);
     parts.push(padHTML(pad.left, pad.top));
-    // The build-site marker lives in world space so it tracks the candidate
-    // coordinate through pans and zooms rather than floating over the screen.
-    parts.push(
-      '<div class="ws-map-build-site" data-map-build-marker hidden aria-hidden="true"></div>'
-    );
+    // No candidate marker: build is not a mode any more, so there is no
+    // in-between state to preview. Right-click is the coordinate.
 
     var settling = layoutState.status === 'loading' ? ' is-settling' : '';
     var readOnly = layoutState.status === 'unavailable' ? ' is-readonly' : '';
@@ -1485,9 +1479,10 @@
       // things are. Keeping them apart also keeps either group from growing into
       // a bar that covers the buildings it is meant to help with.
       '<div class="ws-map-actions" role="group" aria-label="Map placement actions">' +
-      '<button type="button" class="ws-map-ctl ws-map-ctl--wide ws-map-ctl--build" data-map-build' +
-      (readOnly ? ' disabled' : '') +
-      '>⊕ Build</button>' +
+      // Build is not a button any more (#317). It was a mode — press Build, then
+      // click a spot — and the context menu already knows the spot: right-click
+      // where you want the workspace and choose Build. One gesture instead of
+      // three, and no mode to be stuck in.
       '<button type="button" class="ws-map-ctl ws-map-ctl--wide" data-map-move' +
       (readOnly ? ' disabled' : '') +
       '>Move</button>' +
@@ -1574,15 +1569,17 @@
     return /Mac|iPhone|iPad/i.test(String(navigator.platform || navigator.userAgent || ''));
   }
 
+  // The move banner. It kept the `build` names from when placement was a mode
+  // and this told you to pick a spot; today it belongs entirely to moving, and
+  // renaming the hooks would churn CSS and tests for no user-visible gain.
   function buildBannerHTML() {
     return (
       '<div class="ws-map-build" data-map-build-banner hidden>' +
       '<span class="ws-map-build-dot" aria-hidden="true">◎</span>' +
       '<span class="ws-map-build-text" data-map-build-text>' +
-      BUILD_INSTRUCTION +
+      MOVE_INSTRUCTION +
       '</span>' +
       '<span class="ws-map-build-coords" data-map-build-coords></span>' +
-      '<button type="button" class="ws-map-ctl" data-map-build-cancel hidden>Cancel</button>' +
       '</div>'
     );
   }
@@ -2481,13 +2478,13 @@
     return items;
   }
 
-  // Empty ground. The create affordance and the three framing actions, which is
-  // exactly what the control cluster offers — just under the cursor. Centre is
-  // disabled with nothing selected, the same rule updateCameraControls applies
-  // to the button.
+  // Empty ground. Build plus the three framing actions, which is what the
+  // control cluster used to offer — just under the cursor, and Build now knows
+  // *where*: the workspace is created at the point that was right-clicked.
+  // Centre is disabled with nothing selected, the same rule the control applied.
   function canvasMenuItems() {
     var items = [
-      { label: 'New Workspace', action: 'create', disabled: isMapReadOnly() },
+      { label: 'Build', action: 'build', disabled: isMapReadOnly() },
       menuDivider(),
       { label: 'Fit all', action: 'fit' },
       { label: 'Center selected', action: 'center', disabled: !selectedNodeAnchor() },
@@ -2880,7 +2877,17 @@
         announce(container, 'Personal HQ: ' + (context.label || action.slice(3)));
         dispatchHQAction(action.slice(3));
         break;
-      case 'create':
+      // Build creates the workspace where the menu was opened. The coordinate is
+      // held as pending rather than saved — nothing is written for a workspace
+      // that does not exist yet — and the existing create modal takes it from
+      // there, exactly as the retired build mode did.
+      case 'build':
+        if (context.world) {
+          chooseBuildSite(container, context.world);
+          break;
+        }
+        // No usable coordinate (a map with no canvas to measure): fall back to
+        // the plain create flow rather than silently doing nothing.
         announce(container, 'Opening the new workspace flow');
         triggerCreateWorkspace();
         break;
@@ -2951,7 +2958,38 @@
     return null;
   }
 
-  function openMenuForTarget(container, workspaces, options, target, at, event) {
+  /**
+   * The world coordinate the menu was opened over.
+   *
+   * Build creates a workspace *there*, so the screen point has to be converted
+   * back through the camera the moment the menu opens — after a pan or a zoom
+   * the same screen point means somewhere else entirely. Snapped by the user's
+   * own preference, exactly as a drag-drop is.
+   *
+   * A menu opened from the keyboard has no cursor, so it builds at the middle of
+   * what the user is looking at — the same choice the old build mode made for
+   * its keyboard start point.
+   */
+  function menuWorldPoint(container, at, viaKeyboard) {
+    var canvas = container && container.querySelector && container.querySelector('.ws-map-canvas');
+    if (!canvas) return null;
+    var viewport = viewportSize(canvas);
+    var local = viaKeyboard
+      ? { x: viewport.width / 2, y: viewport.height / 2 }
+      : localPoint(canvas, at);
+    return snapPoint(screenToWorld(local, camera, viewport));
+  }
+
+  function localPoint(canvas, at) {
+    var point = at || { x: 0, y: 0 };
+    if (typeof canvas.getBoundingClientRect === 'function') {
+      var rect = canvas.getBoundingClientRect();
+      if (rect) return { x: point.x - (rect.left || 0), y: point.y - (rect.top || 0) };
+    }
+    return { x: point.x, y: point.y };
+  }
+
+  function openMenuForTarget(container, workspaces, options, target, at, event, viaKeyboard) {
     // Right-clicking a site that is not in the multi-select set selects it
     // first, so the menu always acts on something the user can see is chosen
     // (FR-6). It never opens the workspace and never touches the checkbox.
@@ -2977,7 +3015,9 @@
       context: {
         id: target.id || '',
         type: target.type,
-        name: (target.ws && target.ws.name) || (target.type === 'hq' ? 'Personal HQ' : 'workspace')
+        name: (target.ws && target.ws.name) || (target.type === 'hq' ? 'Personal HQ' : 'workspace'),
+        // Only the canvas menu builds, and only it needs a coordinate.
+        world: target.type === 'canvas' ? menuWorldPoint(container, at, viaKeyboard) : null
       },
       options: options,
       event: event
@@ -3030,7 +3070,8 @@
         options,
         target,
         anchorForElement(target.element),
-        event
+        event,
+        true
       );
     });
   }
@@ -3179,19 +3220,6 @@
     });
 
     canvas.addEventListener('pointermove', function (event) {
-      if (!pan && buildState.active) {
-        // Preview where the next click would land, snapped or free, so the
-        // candidate is visible before it is committed (FR-49, FR-50).
-        var previewViewport = viewportSize(canvas);
-        setBuildCandidate(
-          container,
-          snapPoint(
-            screenToWorld(pointerPosition(canvas, event), camera, previewViewport),
-            !!event.altKey
-          )
-        );
-        return;
-      }
       if (!pan || event.pointerId !== pan.pointerId) return;
       var point = pointerPosition(canvas, event);
       var dx = point.x - pan.startX;
@@ -3214,18 +3242,7 @@
 
     canvas.addEventListener('pointerup', function (event) {
       if (pan && event.pointerId !== pan.pointerId) return;
-      var wasDrag = !!(pan && pan.moved);
       stop();
-      // In build mode a press on empty world space that did not become a pan is
-      // the user choosing where to build. A press that landed on a building, a
-      // group label, or a control was never a site (FR-51, FR-52), and a drag
-      // was a pan (FR-33).
-      if (!buildState.active || wasDrag || isInteractiveTarget(event.target)) return;
-      var viewport = viewportSize(canvas);
-      var world = screenToWorld(pointerPosition(canvas, event), camera, viewport);
-      // Option/Alt temporarily bypasses snapping without changing the saved
-      // preference (FR-59).
-      chooseBuildSite(container, snapPoint(world, !!event.altKey));
     });
 
     ['pointercancel', 'pointerleave'].forEach(function (type) {
@@ -3337,9 +3354,8 @@
     // Keyboard equivalents for every camera gesture, so navigating the map
     // never requires a pointer (FR-115).
     canvas.addEventListener('keydown', function (event) {
-      // Build mode and keyboard Move own the arrow keys while either is active:
-      // they move the candidate, not the camera (FR-60, FR-78).
-      if (buildState.active) return;
+      // Keyboard Move owns the arrow keys while it is active: they move the
+      // building, not the camera (FR-78).
       if (handleMoveKey(container, event)) {
         if (event.preventDefault) event.preventDefault();
         return;
@@ -3735,7 +3751,7 @@
     var banner = container.querySelector('[data-map-build-banner]');
     if (!readout || !banner) return;
     if (!point) {
-      if (!buildState.active) banner.hidden = true;
+      banner.hidden = true;
       if (banner.classList) banner.classList.remove('is-blocked');
       return;
     }
@@ -3750,15 +3766,12 @@
     readout.textContent = candidateLabel(point);
   }
 
-  // setBannerMode swaps the banner's instruction and whether it offers Cancel.
-  // Build mode owns the Cancel button; a drag is cancelled with Escape or by
-  // dropping, so offering a button there would be a third way to do the same
-  // thing.
-  function setBannerMode(container, instruction, showCancel) {
+  // setBannerMode swaps the banner's instruction. The banner belongs to moving
+  // now that build is not a mode: a move is cancelled with Escape or by
+  // dropping, so it offers no button of its own.
+  function setBannerMode(container, instruction) {
     var text = container.querySelector('[data-map-build-text]');
     if (text) text.textContent = instruction;
-    var cancel = container.querySelector('[data-map-build-cancel]');
-    if (cancel) cancel.hidden = !showCancel;
   }
 
   // ---------- moving districts ----------
@@ -4050,7 +4063,7 @@
     moveState = null;
     setDragReadout(container, null);
     var banner = container.querySelector('[data-map-build-banner]');
-    if (banner && !buildState.active) banner.hidden = true;
+    if (banner) banner.hidden = true;
     if (state.cluster) {
       setClusterBlocked(state.cluster, false);
     } else if (state.el && state.el.classList) {
@@ -4253,11 +4266,17 @@
 
   // ---------- build mode ----------
   //
-  // An explicit, single-use placement state. Ordinary empty-space clicks keep
-  // their ordinary meaning; only inside this mode does the next selection choose
-  // a build site, and the mode ends as soon as it has one (FR-48).
+  // Placement is no longer a mode. It used to be one — press Build, watch a
+  // banner, click a spot — because a button has no way of knowing where you
+  // want the building. The context menu does: it opens at a point, so Build
+  // takes that point and goes straight to the create modal (#317).
+  //
+  // What survives is the part that was never about the mode: a *pending*
+  // coordinate, held rather than saved, because nothing may be written for a
+  // workspace that does not exist yet (FR-54). sessions.js consumes it through
+  // completeBuild/cancelBuild when its modal closes.
 
-  var buildState = { active: false, candidate: null, pending: null, container: null };
+  var buildState = { pending: null, container: null };
 
   function snapValue(value) {
     return Math.round(value / SNAP_STEP) * SNAP_STEP;
@@ -4279,68 +4298,11 @@
     return formatCoordinate(point) + (layoutState.snapToGrid ? ' · snapped' : ' · free');
   }
 
-  function setBuildCandidate(container, point) {
-    buildState.candidate = point;
-    var readout = container.querySelector('[data-map-build-coords]');
-    if (readout) readout.textContent = point ? candidateLabel(point) : '';
-    var marker = container.querySelector('[data-map-build-marker]');
-    if (marker && marker.style) {
-      if (point) {
-        marker.hidden = false;
-        marker.style.left = point.x + 'px';
-        marker.style.top = point.y + 'px';
-      } else {
-        marker.hidden = true;
-      }
-    }
-  }
-
-  function startBuild(container) {
-    if (layoutState.status !== 'ready') {
-      announce(
-        container,
-        'Positions cannot be saved right now, so building at a point is unavailable'
-      );
-      return;
-    }
-    buildState.active = true;
-    buildState.container = container;
-    var canvas = container.querySelector('[data-ws-map-viewport]');
-    if (canvas && canvas.classList) canvas.classList.add('is-building');
-    var banner = container.querySelector('[data-map-build-banner]');
-    if (banner) banner.hidden = false;
-    setBannerMode(container, BUILD_INSTRUCTION, true);
-    // Keyboard placement starts at the middle of what the user is looking at,
-    // which is the only starting point that needs no pointer (FR-60).
-    var viewport = viewportSize(canvas);
-    setBuildCandidate(
-      container,
-      snapPoint(screenToWorld({ x: viewport.width / 2, y: viewport.height / 2 }, camera, viewport))
-    );
-    if (canvas && canvas.focus) canvas.focus();
-    announce(container, 'Build mode. Choose a spot on the map, then press Enter. Escape cancels.');
-  }
-
-  // exitBuildMode leaves placement mode. It deliberately does NOT clear the
-  // pending coordinate: choosing a site ends the mode but the coordinate has to
-  // survive until the create flow either uses it or is abandoned.
-  function exitBuildMode(container) {
-    var host = container || buildState.container;
-    buildState.active = false;
-    buildState.candidate = null;
-    if (!host || typeof host.querySelector !== 'function') return;
-    var canvas = host.querySelector('[data-ws-map-viewport]');
-    if (canvas && canvas.classList) canvas.classList.remove('is-building');
-    var banner = host.querySelector('[data-map-build-banner]');
-    if (banner) banner.hidden = true;
-    setBuildCandidate(host, null);
-  }
-
-  // cancelBuild is the abandonment path: leave the mode AND forget the site, so
-  // nothing is left pointing at a workspace that will never exist (FR-54).
-  function cancelBuild(container) {
+  // cancelBuild is the abandonment path: forget the site, so nothing is left
+  // pointing at a workspace that will never exist (FR-54). sessions.js calls it
+  // when the create modal closes without creating anything.
+  function cancelBuild() {
     buildState.pending = null;
-    exitBuildMode(container);
   }
 
   /**
@@ -4352,9 +4314,9 @@
    * there is deliberately no second creation form (FR-51).
    */
   function chooseBuildSite(container, point) {
-    if (!buildState.active || !point) return;
+    if (!point) return;
     buildState.pending = { x: point.x, y: point.y };
-    exitBuildMode(container);
+    buildState.container = container;
     announce(
       container,
       'Building at ' + formatCoordinate(point) + '. Complete the workspace details.'
@@ -4437,9 +4399,6 @@
     var next = !layoutState.snapToGrid;
     layoutState.snapToGrid = next;
     updateSnapControl(container);
-    if (buildState.active && buildState.candidate) {
-      setBuildCandidate(container, snapPoint(buildState.candidate));
-    }
     announce(container, next ? 'Snap to grid on' : 'Snap to grid off');
     // The preference is the user's, so it persists (FR-57). A failed save
     // leaves the toggle where they put it for this session rather than
@@ -4457,80 +4416,16 @@
     toggle.textContent = 'Snap to grid: ' + (layoutState.snapToGrid ? 'on' : 'off');
   }
 
-  // restoreBuildMode reinstates an in-progress placement after a re-render, so a
-  // realtime workspace refresh cannot silently drop the user out of build mode
-  // (FR-106).
-  function restoreBuildMode(container) {
-    buildState.container = container;
-    var canvas = container.querySelector('[data-ws-map-viewport]');
-    if (canvas && canvas.classList) canvas.classList.add('is-building');
-    var banner = container.querySelector('[data-map-build-banner]');
-    if (banner) banner.hidden = false;
-    setBannerMode(container, BUILD_INSTRUCTION, true);
-    setBuildCandidate(container, buildState.candidate);
-  }
-
-  function bindBuildMode(container) {
-    var canvas = container.querySelector('[data-ws-map-viewport]');
-
-    var build = container.querySelector('[data-map-build]');
-    if (build && build.addEventListener) {
-      build.addEventListener('click', function () {
-        startBuild(container);
-      });
-    }
+  // Snap is still a control of its own: it is a persisted preference that
+  // affects every placement — a drop, a keyboard move, and the coordinate the
+  // context menu's Build hands to the create flow.
+  function bindSnapControl(container) {
     var snap = container.querySelector('[data-map-snap]');
     if (snap && snap.addEventListener) {
       snap.addEventListener('click', function () {
         toggleSnap(container);
       });
     }
-    var cancel = container.querySelector('[data-map-build-cancel]');
-    if (cancel && cancel.addEventListener) {
-      cancel.addEventListener('click', function () {
-        cancelBuild(container);
-        announce(container, 'Build cancelled. Nothing was created.');
-      });
-    }
-    if (!canvas || typeof canvas.addEventListener !== 'function') return;
-
-    canvas.addEventListener('keydown', function (event) {
-      if (!buildState.active) return;
-      var step = layoutState.snapToGrid ? SNAP_STEP : 1;
-      if (event.shiftKey) step *= 10;
-      var candidate = buildState.candidate || { x: 0, y: 0 };
-      var moved = null;
-      switch (event.key) {
-        case 'ArrowLeft':
-          moved = { x: candidate.x - step, y: candidate.y };
-          break;
-        case 'ArrowRight':
-          moved = { x: candidate.x + step, y: candidate.y };
-          break;
-        case 'ArrowUp':
-          moved = { x: candidate.x, y: candidate.y - step };
-          break;
-        case 'ArrowDown':
-          moved = { x: candidate.x, y: candidate.y + step };
-          break;
-        case 'Enter':
-          if (event.preventDefault) event.preventDefault();
-          if (event.stopPropagation) event.stopPropagation();
-          chooseBuildSite(container, buildState.candidate);
-          return;
-        case 'Escape':
-          if (event.preventDefault) event.preventDefault();
-          cancelBuild(container);
-          announce(container, 'Build cancelled. Nothing was created.');
-          return;
-        default:
-          return;
-      }
-      if (event.preventDefault) event.preventDefault();
-      if (event.stopPropagation) event.stopPropagation();
-      setBuildCandidate(container, moved);
-      announce(container, 'Candidate ' + candidateLabel(moved));
-    });
   }
 
   function bindHQSite(container, options) {
@@ -4623,13 +4518,10 @@
     bindViewportPan(container);
     bindViewportWheel(container);
     bindCameraControls(container);
-    bindBuildMode(container);
+    bindSnapControl(container);
     bindTileDrag(container);
     bindDistrictDrag(container);
     bindResetLayout(container);
-    // A re-render (a refresh landing mid-placement) rebuilt the banner and the
-    // marker, so restore what the user was in the middle of.
-    if (buildState.active) restoreBuildMode(container);
     // Focus returns to the record it was on before a committed move or a
     // refresh re-rendered the map (FR-117).
     if (pendingFocusId) {
