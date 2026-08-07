@@ -38,7 +38,8 @@ const anchors = () =>
   );
 
 const cameraNow = () => page.evaluate(() => window.OriWorkspaceMap.getCamera());
-const canvasBox = async () => (await page.locator('.ws-map-canvas').boundingBox()) || { x: 0, y: 0, width: 0, height: 0 };
+const canvasBox = async () =>
+  (await page.locator('.ws-map-canvas').boundingBox()) || { x: 0, y: 0, width: 0, height: 0 };
 
 async function settle() {
   await page.waitForTimeout(500);
@@ -79,23 +80,31 @@ await settle();
 console.log('after modifier zoom:', await cameraNow());
 await shot('03-zoomed');
 
-// --- camera buttons --------------------------------------------------------
+// --- camera controls -------------------------------------------------------
+//
+// Zoom still has buttons. Fit all, Center selected and Reset view moved onto
+// the empty-ground context menu in #317, so they are driven from the keyboard
+// route here: Shift+F10 on the focused canvas opens that menu.
+async function framing(action) {
+  await page.locator('[data-ws-map-viewport]').focus();
+  await page.keyboard.press('Shift+F10');
+  await page.locator(`[data-menu-action="${action}"]`).click();
+  await settle();
+}
+
 await page.click('[data-map-zoom-in]');
 await page.click('[data-map-zoom-out]');
-await page.click('[data-map-fit]');
-await settle();
+await framing('fit');
 console.log('after Fit All:', await cameraNow());
 await shot('04-fit-all');
 
 await page.locator('.ws-map-tile[data-ws-id]').first().click();
 await settle();
-await page.click('[data-map-center]');
-await settle();
+await framing('center');
 console.log('after Center Selected:', await cameraNow());
 await shot('05-center-selected');
 
-await page.click('[data-map-reset-view]');
-await settle();
+await framing('reset-view');
 console.log('after Reset View:', await cameraNow());
 await shot('06-reset-view');
 

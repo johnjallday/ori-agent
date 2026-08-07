@@ -78,10 +78,7 @@
   // (FR-44).
   var CAMERA_SAVE_DELAY = 600;
 
-  // The banner's two voices. Build mode asks for a site; a move reports where
-  // the thing being moved would land.
-  var BUILD_INSTRUCTION =
-    'Choose where to build — click an empty spot, or use the arrow keys and Enter. Escape cancels.';
+  // The banner's voice: a move reports where the thing being moved would land.
   var MOVE_INSTRUCTION = 'Moving — release to drop, or press Escape to put it back.';
   var KEYBOARD_MOVE_INSTRUCTION =
     'Moving — arrow keys to position, Enter to save, Escape to put it back.';
@@ -973,6 +970,11 @@
   }
 
   function setCamera(next, container) {
+    // Every pan, zoom, fit, centre and reset lands here, which makes it the one
+    // place that can honestly say "the camera moved". An open context menu is
+    // anchored to a screen point, so it stops meaning anything the moment the
+    // world slides underneath it (FR-18).
+    closeContextMenu({ restoreFocus: false });
     var world = lastWorldLayout ? lastWorldLayout.world : null;
     camera = world
       ? clampCamera(next, world)
@@ -1434,11 +1436,8 @@
     // Keep the ordinary create affordance after all real and reserved sites.
     var pad = toLayer(layout.pad);
     parts.push(padHTML(pad.left, pad.top));
-    // The build-site marker lives in world space so it tracks the candidate
-    // coordinate through pans and zooms rather than floating over the screen.
-    parts.push(
-      '<div class="ws-map-build-site" data-map-build-marker hidden aria-hidden="true"></div>'
-    );
+    // No candidate marker: build is not a mode any more, so there is no
+    // in-between state to preview. Right-click is the coordinate.
 
     var settling = layoutState.status === 'loading' ? ' is-settling' : '';
     var readOnly = layoutState.status === 'unavailable' ? ' is-readonly' : '';
@@ -1480,9 +1479,10 @@
       // things are. Keeping them apart also keeps either group from growing into
       // a bar that covers the buildings it is meant to help with.
       '<div class="ws-map-actions" role="group" aria-label="Map placement actions">' +
-      '<button type="button" class="ws-map-ctl ws-map-ctl--wide ws-map-ctl--build" data-map-build' +
-      (readOnly ? ' disabled' : '') +
-      '>⊕ Build</button>' +
+      // Build is not a button any more (#317). It was a mode — press Build, then
+      // click a spot — and the context menu already knows the spot: right-click
+      // where you want the workspace and choose Build. One gesture instead of
+      // three, and no mode to be stuck in.
       '<button type="button" class="ws-map-ctl ws-map-ctl--wide" data-map-move' +
       (readOnly ? ' disabled' : '') +
       '>Move</button>' +
@@ -1506,13 +1506,16 @@
       (readOnly
         ? '<p class="ws-map-notice" role="status">Positions cannot be saved right now. You can still look around; building and moving are unavailable until the map layout loads.</p>'
         : '') +
+      // Zoom only. Fit all, Center selected and Reset view moved into the
+      // canvas context menu (#317): they are framing choices you make about a
+      // spot on the map, so they belong under the cursor rather than in a
+      // permanent strip across the bottom of it. Keyboard users reach them by
+      // Shift+F10 on the focused canvas, which opens that same menu; 0 still
+      // resets the view directly.
       '<div class="ws-map-controls" role="group" aria-label="Map view controls">' +
       '<button type="button" class="ws-map-ctl" data-map-zoom-out aria-label="Zoom out">−</button>' +
       '<span class="ws-map-zoom" data-map-zoom-readout aria-hidden="true">100%</span>' +
       '<button type="button" class="ws-map-ctl" data-map-zoom-in aria-label="Zoom in">+</button>' +
-      '<button type="button" class="ws-map-ctl ws-map-ctl--wide" data-map-fit>Fit all</button>' +
-      '<button type="button" class="ws-map-ctl ws-map-ctl--wide" data-map-center aria-label="Center selected">Center</button>' +
-      '<button type="button" class="ws-map-ctl ws-map-ctl--wide" data-map-reset-view aria-label="Reset view">Reset</button>' +
       '</div>' +
       '<p class="ws-map-live" data-map-live role="status" aria-live="polite"></p>'
     );
@@ -1554,8 +1557,9 @@
       (isApplePlatform() ? 'Option' : 'Alt') +
       ' to place freely for one move.</li>' +
       '<li><b>Escape</b> — cancels whatever is in progress without saving.</li>' +
+      '<li><b>Right-click</b> — anything on the map has a menu: a building, a district, the HQ site, or empty ground. Shift+F10 does the same from the keyboard.</li>' +
       '</ul>' +
-      '<p class="ws-map-help-note">Fit all, Center and Reset view move the camera. Reset layout moves the buildings — and can be undone.</p>' +
+      '<p class="ws-map-help-note">Fit all, Center and Reset view live on the empty-ground menu (0 resets the view directly) and move the camera. Reset layout moves the buildings — and can be undone.</p>' +
       '</div>'
     );
   }
@@ -1565,15 +1569,17 @@
     return /Mac|iPhone|iPad/i.test(String(navigator.platform || navigator.userAgent || ''));
   }
 
+  // The move banner. It kept the `build` names from when placement was a mode
+  // and this told you to pick a spot; today it belongs entirely to moving, and
+  // renaming the hooks would churn CSS and tests for no user-visible gain.
   function buildBannerHTML() {
     return (
       '<div class="ws-map-build" data-map-build-banner hidden>' +
       '<span class="ws-map-build-dot" aria-hidden="true">◎</span>' +
       '<span class="ws-map-build-text" data-map-build-text>' +
-      BUILD_INSTRUCTION +
+      MOVE_INSTRUCTION +
       '</span>' +
       '<span class="ws-map-build-coords" data-map-build-coords></span>' +
-      '<button type="button" class="ws-map-ctl" data-map-build-cancel hidden>Cancel</button>' +
       '</div>'
     );
   }
@@ -1589,9 +1595,14 @@
     );
   }
 
-  // Contextual action bar for the multi-select set. Rendered inside the theatre
-  // and shown only while at least one tile is checked. Count text is refreshed
-  // in place by updateSelBar so toggling selection never re-mounts the map.
+  // Readout for the multi-select set. Shown only while at least one tile is
+  // checked, and refreshed in place by updateSelBar so toggling selection never
+  // re-mounts the map.
+  //
+  // Group and Delete used to live here. They moved into the context menu (#317)
+  // where the count is in the label and the cursor is already on one of the
+  // checked buildings; the bar keeps only what it is uniquely good at — saying
+  // how many are checked, and letting go of all of them at once.
   function selBarHTML() {
     var n = multiCount();
     return (
@@ -1602,8 +1613,6 @@
       n +
       ' selected</span>' +
       '<div class="ws-map-selbar-actions">' +
-      '<button type="button" class="ws-map-selbar-group" data-ws-selbar-group>⊕ Group</button>' +
-      '<button type="button" class="ws-map-selbar-del" data-ws-selbar-delete>✕ Delete</button>' +
       '<button type="button" class="ws-map-selbar-clear" data-ws-selbar-clear>Clear</button>' +
       '</div>' +
       '</div>'
@@ -1940,7 +1949,8 @@
         canvas +
         '</section>' +
         '</div>' +
-        selBarHTML()
+        selBarHTML() +
+        menuHostHTML()
       );
     }
     return (
@@ -1982,7 +1992,11 @@
       // (fixed descendants are still clipped by an ancestor's clip-path), making
       // it invisible at the viewport bottom. Kept inside the container so
       // bindSelBar/updateSelBar still resolve it.
-      selBarHTML()
+      selBarHTML() +
+      // The context menu's host, for the same reason: the menu is positioned in
+      // viewport coordinates, so it must sit outside both the theatre's
+      // clip-path and the world layer's pan/zoom transform.
+      menuHostHTML()
     );
   }
 
@@ -2017,14 +2031,19 @@
   // Reuse the page's existing create flow for every create affordance, rather
   // than opening a second Create Workspace path (PRD FR105). The cockpit's
   // button is checked first because the launcher's is absent on Home.
+  function triggerCreateWorkspace() {
+    if (typeof document === 'undefined' || typeof document.getElementById !== 'function') return;
+    var create =
+      document.getElementById('cockpitCreateWorkspaceBtn') ||
+      document.getElementById('launcherCreateWorkspaceBtn');
+    if (create && typeof create.click === 'function') create.click();
+  }
+
   function bindCreate(container) {
     var els = container.querySelectorAll('[data-ws-map-create]');
     Array.prototype.forEach.call(els, function (el) {
       el.addEventListener('click', function () {
-        var create =
-          document.getElementById('cockpitCreateWorkspaceBtn') ||
-          document.getElementById('launcherCreateWorkspaceBtn');
-        if (create) create.click();
+        triggerCreateWorkspace();
       });
     });
   }
@@ -2298,22 +2317,763 @@
     if (action) action(ids);
   }
 
-  function bindSelBar(container, options) {
-    var group = container.querySelector('[data-ws-selbar-group]');
-    if (group)
-      group.addEventListener('click', function () {
-        groupMulti(options);
-      });
-    var del = container.querySelector('[data-ws-selbar-delete]');
-    if (del)
-      del.addEventListener('click', function () {
-        deleteMulti(options);
-      });
+  // Only Clear is bound here now: Group and Delete are reached by right-clicking
+  // any checked building (see contextMenuItemsFor).
+  function bindSelBar(container) {
     var clr = container.querySelector('[data-ws-selbar-clear]');
     if (clr)
       clr.addEventListener('click', function () {
         clearMulti(container);
       });
+  }
+
+  // ---------- context menu ----------
+  //
+  // Right-click puts a target's own actions under the cursor (#317). Three
+  // rules shape everything below:
+  //
+  //   1. The menu is mounted in a host that lives OUTSIDE the transformed world
+  //      layer — and outside the theatre's clip-path, like the selection bar —
+  //      so it is positioned in viewport coordinates. A menu inside the world
+  //      would scale with the zoom level and slide away during a pan.
+  //   2. One delegated `contextmenu` listener on the canvas resolves its target
+  //      with closest(). Tiles are re-rendered on every data refresh, so
+  //      per-tile binding would be lost or doubled across re-mounts.
+  //   3. Every item routes to an action that already exists — the rail's
+  //      handlers, the bulk callbacks the host passes in, or the camera
+  //      controls. The menu adds no capability of its own.
+
+  var MENU_EDGE_PAD = 8;
+  // Used only when the environment cannot measure the menu (before layout, or
+  // in a stub DOM). Flipping on an estimate beats not flipping at all.
+  var MENU_FALLBACK_SIZE = { width: 232, height: 260 };
+
+  // The one open menu: its host, the element focus returns to, the action
+  // context, and the listeners that close it.
+  var menuState = null;
+
+  function menuDivider() {
+    return { divider: true };
+  }
+
+  // The same read-only condition the placement controls already use: a layout
+  // that cannot be loaded cannot be saved, so anything that mutates workspaces
+  // or layout is offered but disabled (FR-15, mirroring "Reset layout…").
+  function isMapReadOnly() {
+    return layoutState.status !== 'ready';
+  }
+
+  function contextMenuHTML(items, options) {
+    var opts = options || {};
+    var body = (Array.isArray(items) ? items : [])
+      .map(function (item) {
+        if (!item) return '';
+        if (item.divider) return '<div class="ori-context-divider" role="separator"></div>';
+        return (
+          '<button type="button" class="ori-context-item ws-map-menu-item' +
+          (item.variant === 'danger' ? ' ori-context-danger' : '') +
+          '" role="menuitem" tabindex="-1" data-menu-action="' +
+          escapeHtml(item.action) +
+          '"' +
+          // Disabled items keep their place and their announcement; only the
+          // activation and the arrow stop are withheld (FR-21).
+          (item.disabled ? ' aria-disabled="true"' : '') +
+          '>' +
+          escapeHtml(item.label) +
+          '</button>'
+        );
+      })
+      .join('');
+    return (
+      '<div class="ori-context-menu ws-map-menu" data-ws-map-menu role="menu" aria-label="' +
+      escapeHtml(opts.label || 'Map actions') +
+      '">' +
+      body +
+      '</div>'
+    );
+  }
+
+  function menuHostHTML() {
+    return '<div class="ws-map-menu-host" data-ws-map-menu-host></div>';
+  }
+
+  // Single workspace tile. Every entry mirrors a control the Overview rail
+  // already renders, including the rail's own "Delete group" wording for a
+  // group and its condition for the Setup entry point.
+  function tileMenuItems(ws) {
+    var id = (ws && ws.id) || '';
+    var items = [
+      { label: 'Open workspace', action: 'open' },
+      { label: 'Open → Backlog', action: 'open-backlog' }
+    ];
+    if (setupPresentation(setupStatusCache[id])) {
+      items.push({ label: 'Open → Setup', action: 'open-setup' });
+    }
+    items.push(menuDivider());
+    items.push({
+      label: multiSelected[id] ? 'Remove from selection' : 'Add to selection',
+      action: 'toggle-selection'
+    });
+    items.push(menuDivider());
+    items.push({
+      label: isGroup(ws) ? 'Delete group' : 'Delete workspace',
+      action: 'delete',
+      variant: 'danger',
+      disabled: isMapReadOnly()
+    });
+    return items;
+  }
+
+  function workspaceCountLabel(verb, count) {
+    return verb + ' ' + count + (count === 1 ? ' workspace' : ' workspaces');
+  }
+
+  // The checked set, when the right-click landed inside it. The count is in
+  // every label rather than only in the confirm dialog, so the blast radius is
+  // visible before the click (FR-7, FR-11).
+  function multiMenuItems() {
+    var count = multiCount();
+    var readOnly = isMapReadOnly();
+    return [
+      { label: workspaceCountLabel('Group', count), action: 'group-multi', disabled: readOnly },
+      { label: 'Clear selection', action: 'clear-selection' },
+      menuDivider(),
+      {
+        label: workspaceCountLabel('Delete', count),
+        action: 'delete-multi',
+        variant: 'danger',
+        disabled: readOnly
+      }
+    ];
+  }
+
+  // A group district. Districts cannot be multi-selected, so this menu is
+  // always single-target, and its delete runs the same host callback (and the
+  // same group_only confirm) the rail's Delete group runs.
+  function districtMenuItems(ws) {
+    return [
+      { label: 'Open group', action: 'open' },
+      menuDivider(),
+      {
+        label: isGroup(ws) ? 'Delete group' : 'Delete workspace',
+        action: 'delete',
+        variant: 'danger',
+        disabled: isMapReadOnly()
+      }
+    ];
+  }
+
+  // The reserved Personal HQ site. The conditions mirror hqOverviewHTML exactly:
+  // build and import always; clear only while repairing a broken link; skip only
+  // when not repairing and the offer has not been dismissed. Clear and skip are
+  // mutually exclusive.
+  function hqMenuItems(view) {
+    var site = view || {};
+    var items = [
+      { label: site.repair ? 'Build replacement HQ' : 'Build My HQ', action: 'hq-build' },
+      { label: 'Import HQ', action: 'hq-import' }
+    ];
+    if (site.repair) items.push({ label: 'Clear broken HQ link', action: 'hq-clear' });
+    else if (site.showSkip) items.push({ label: 'Not now', action: 'hq-skip' });
+    return items;
+  }
+
+  // Empty ground. Build plus the three framing actions, which is what the
+  // control cluster used to offer — just under the cursor, and Build now knows
+  // *where*: the workspace is created at the point that was right-clicked.
+  // Centre is disabled with nothing selected, the same rule the control applied.
+  function canvasMenuItems() {
+    var items = [
+      { label: 'Build', action: 'build', disabled: isMapReadOnly() },
+      menuDivider(),
+      { label: 'Fit all', action: 'fit' },
+      { label: 'Center selected', action: 'center', disabled: !selectedNodeAnchor() },
+      { label: 'Reset view', action: 'reset-view' }
+    ];
+    // Offered only when there is something to clear, so the menu does not carry
+    // a permanently dead entry.
+    if (multiCount() > 0) {
+      items.push(menuDivider());
+      items.push({ label: 'Clear selection', action: 'clear-selection' });
+    }
+    return items;
+  }
+
+  // The item set for a resolved target. Pure apart from the module state the
+  // rail reads too (multi-select set, setup cache, layout status), so a menu can
+  // be asserted without a DOM.
+  function contextMenuItemsFor(target) {
+    var spec = target || {};
+    if (spec.type === 'tile') {
+      // A tile inside the checked set acts on the whole set; a tile outside it
+      // acts on itself. Which menu you get is therefore a statement about what
+      // is already selected, not a mode.
+      if (spec.id && multiSelected[spec.id]) return multiMenuItems();
+      return tileMenuItems(spec.ws || { id: spec.id });
+    }
+    if (spec.type === 'district') return districtMenuItems(spec.ws || { id: spec.id });
+    if (spec.type === 'hq') return hqMenuItems(spec.view || hqSiteView(hqStatus));
+    if (spec.type === 'canvas') return canvasMenuItems();
+    return [];
+  }
+
+  function menuLabelFor(target) {
+    var spec = target || {};
+    if (spec.type === 'tile') {
+      if (spec.id && multiSelected[spec.id]) {
+        return 'Actions for ' + multiCount() + ' selected';
+      }
+      return 'Actions for ' + ((spec.ws && spec.ws.name) || 'workspace');
+    }
+    if (spec.type === 'district') {
+      return 'Actions for ' + ((spec.ws && spec.ws.name) || 'group') + ' group';
+    }
+    if (spec.type === 'hq') return 'Personal HQ actions';
+    return 'Map actions';
+  }
+
+  function clampToRange(value, min, max) {
+    if (max < min) return min;
+    return Math.max(min, Math.min(value, max));
+  }
+
+  /**
+   * Where the menu opens.
+   *
+   * The menu flips back across the anchor point when it would otherwise run
+   * past a viewport edge, and is then clamped inside the viewport, so it can
+   * never render off-screen or push the page into a scroll (FR-17). Pure, so
+   * the edge cases are assertable without a browser.
+   */
+  function menuPosition(point, size, viewport) {
+    var left = point.x + size.width > viewport.width ? point.x - size.width : point.x;
+    var top = point.y + size.height > viewport.height ? point.y - size.height : point.y;
+    return {
+      left: clampToRange(left, MENU_EDGE_PAD, viewport.width - size.width - MENU_EDGE_PAD),
+      top: clampToRange(top, MENU_EDGE_PAD, viewport.height - size.height - MENU_EDGE_PAD)
+    };
+  }
+
+  function menuViewport() {
+    var width = (typeof window !== 'undefined' && window.innerWidth) || 0;
+    var height = (typeof window !== 'undefined' && window.innerHeight) || 0;
+    return {
+      width: width > 0 ? width : DEFAULT_VIEWPORT.width,
+      height: height > 0 ? height : DEFAULT_VIEWPORT.height
+    };
+  }
+
+  function measureMenu(menu) {
+    var rect =
+      menu && typeof menu.getBoundingClientRect === 'function'
+        ? menu.getBoundingClientRect()
+        : null;
+    var width = (rect && rect.width) || (menu && menu.offsetWidth) || 0;
+    var height = (rect && rect.height) || (menu && menu.offsetHeight) || 0;
+    return {
+      width: width > 0 ? width : MENU_FALLBACK_SIZE.width,
+      height: height > 0 ? height : MENU_FALLBACK_SIZE.height
+    };
+  }
+
+  function placeMenu(menu, point) {
+    if (!menu || !menu.style) return;
+    var placed = menuPosition(point, measureMenu(menu), menuViewport());
+    menu.style.left = placed.left + 'px';
+    menu.style.top = placed.top + 'px';
+  }
+
+  // A right-click anchors at the cursor; the keyboard open path anchors at the
+  // focused element instead, so the menu appears where the user's attention
+  // already is (FR-3).
+  function anchorForElement(el) {
+    if (el && typeof el.getBoundingClientRect === 'function') {
+      var rect = el.getBoundingClientRect();
+      if (rect) return { x: rect.left || 0, y: (rect.top || 0) + (rect.height || 0) };
+    }
+    return { x: 0, y: 0 };
+  }
+
+  function menuItemElements(menu) {
+    if (!menu || typeof menu.querySelectorAll !== 'function') return [];
+    return Array.prototype.slice.call(menu.querySelectorAll('[data-menu-action]'));
+  }
+
+  function isMenuItemDisabled(el) {
+    return !!(el && el.getAttribute && el.getAttribute('aria-disabled') === 'true');
+  }
+
+  // Roving tabindex: exactly one item is tabbable at a time, and it is the one
+  // that has focus (FR-21, FR-22).
+  function focusMenuItem(index) {
+    var state = menuState;
+    if (!state) return;
+    var items = state.items;
+    if (!items.length) return;
+    var next = clampToRange(index, 0, items.length - 1);
+    state.index = next;
+    items.forEach(function (el, i) {
+      if (el && el.setAttribute) el.setAttribute('tabindex', i === next ? '0' : '-1');
+    });
+    var target = items[next];
+    if (target && typeof target.focus === 'function') target.focus();
+  }
+
+  // Arrow navigation wraps at both ends and steps over disabled items, which
+  // stay visible and announced (FR-21).
+  function nextEnabledIndex(from, step) {
+    var state = menuState;
+    if (!state || !state.items.length) return -1;
+    var count = state.items.length;
+    for (var i = 1; i <= count; i++) {
+      var candidate = (((from + step * i) % count) + count) % count;
+      if (!isMenuItemDisabled(state.items[candidate])) return candidate;
+    }
+    return -1;
+  }
+
+  function firstEnabledIndex(step) {
+    var state = menuState;
+    if (!state || !state.items.length) return -1;
+    var start = step > 0 ? -1 : 0;
+    return nextEnabledIndex(start, step);
+  }
+
+  function listenWhileOpen(target, type, handler, capture) {
+    if (!target || typeof target.addEventListener !== 'function') return;
+    target.addEventListener(type, handler, capture);
+    if (menuState) {
+      menuState.teardown.push(function () {
+        if (typeof target.removeEventListener === 'function') {
+          target.removeEventListener(type, handler, capture);
+        }
+      });
+    }
+  }
+
+  function insideOpenMenu(node) {
+    if (!node || typeof node.closest !== 'function') return false;
+    return !!node.closest('[data-ws-map-menu]');
+  }
+
+  /**
+   * Close the open menu.
+   *
+   * Every dismissal route lands here — Escape, a click or right-click outside,
+   * choosing an item, a resize, a camera change, and a re-mount — so focus
+   * returns to the element the menu was opened from exactly once, no matter how
+   * it was closed (FR-19).
+   */
+  function closeContextMenu(options) {
+    var state = menuState;
+    if (!state) return;
+    menuState = null;
+    state.teardown.forEach(function (off) {
+      off();
+    });
+    if (state.host) state.host.innerHTML = '';
+    var restore = !(options && options.restoreFocus === false);
+    if (restore && state.origin && typeof state.origin.focus === 'function') state.origin.focus();
+  }
+
+  function activateMenuItem(el) {
+    var state = menuState;
+    if (!state || !el || isMenuItemDisabled(el)) return;
+    var action = el.getAttribute ? el.getAttribute('data-menu-action') : '';
+    var container = state.container;
+    // The chosen item's own wording travels with the action, so an announcement
+    // can say what the user actually picked.
+    var context = Object.assign({}, state.context, {
+      label: String(el.textContent || el.label || '').trim()
+    });
+    var options = state.options;
+    // Close first: focus goes back to the target before the action runs, so a
+    // confirm dialog or a navigation starts from a sane place.
+    closeContextMenu();
+    runMenuAction(container, action, context, options);
+  }
+
+  function bindMenuInteractions() {
+    var state = menuState;
+    if (!state) return;
+    state.items.forEach(function (el) {
+      if (!el || typeof el.addEventListener !== 'function') return;
+      el.addEventListener('click', function (event) {
+        if (event && event.preventDefault) event.preventDefault();
+        activateMenuItem(el);
+      });
+    });
+    listenWhileOpen(state.menu, 'keydown', function (event) {
+      handleMenuKey(event);
+    });
+    // Dismissal that cannot be seen from inside the menu: a pointer or a key
+    // elsewhere on the page, and a resize that would strand the menu away from
+    // what it was anchored to (FR-18).
+    //
+    // `openEvent` is the right-click (or key press) that opened this menu, and
+    // it is still propagating while these listeners are being added. A listener
+    // attached to a node the event has not reached yet is still called for that
+    // event, so without this guard the menu would close itself on the way up to
+    // the document — opening and dismissing in one gesture.
+    var openEvent = state.openEvent;
+    if (typeof document !== 'undefined') {
+      listenWhileOpen(document, 'mousedown', function (event) {
+        if (event === openEvent) return;
+        if (insideOpenMenu(event && event.target)) return;
+        closeContextMenu();
+      });
+      listenWhileOpen(document, 'contextmenu', function (event) {
+        if (event === openEvent) return;
+        if (insideOpenMenu(event && event.target)) return;
+        closeContextMenu();
+      });
+      listenWhileOpen(document, 'keydown', function (event) {
+        if (event === openEvent) return;
+        if (!event || event.key !== 'Escape') return;
+        closeContextMenu();
+      });
+    }
+    if (typeof window !== 'undefined') {
+      listenWhileOpen(window, 'resize', function () {
+        closeContextMenu();
+      });
+    }
+  }
+
+  function handleMenuKey(event) {
+    var state = menuState;
+    if (!state || !event) return;
+    var key = event.key;
+    var handled = true;
+    switch (key) {
+      case 'ArrowDown':
+        focusMenuItem(nextEnabledIndex(state.index, 1));
+        break;
+      case 'ArrowUp':
+        focusMenuItem(nextEnabledIndex(state.index, -1));
+        break;
+      case 'Home':
+        focusMenuItem(firstEnabledIndex(1));
+        break;
+      case 'End':
+        focusMenuItem(firstEnabledIndex(-1));
+        break;
+      case 'Enter':
+      case ' ':
+      case 'Spacebar':
+        activateMenuItem(state.items[state.index]);
+        break;
+      case 'Escape':
+      case 'Tab':
+        closeContextMenu();
+        break;
+      default:
+        handled = false;
+    }
+    // Enter and Space are prevented too: a <button> would otherwise synthesize
+    // a click and run the action a second time.
+    if (handled && event.preventDefault) event.preventDefault();
+  }
+
+  function openContextMenu(container, spec) {
+    closeContextMenu({ restoreFocus: false });
+    if (!container || typeof container.querySelector !== 'function') return false;
+    var host = container.querySelector('[data-ws-map-menu-host]');
+    if (!host) return false;
+    var items = (spec.items || []).filter(Boolean);
+    if (!items.length) return false;
+    host.innerHTML = contextMenuHTML(items, { label: spec.label });
+    var menu =
+      typeof host.querySelector === 'function' ? host.querySelector('[data-ws-map-menu]') : null;
+    if (!menu) {
+      host.innerHTML = '';
+      return false;
+    }
+    menuState = {
+      container: container,
+      host: host,
+      menu: menu,
+      items: menuItemElements(menu),
+      index: 0,
+      origin: spec.origin || null,
+      context: spec.context || {},
+      options: spec.options || {},
+      // The gesture that opened this menu, so the dismissal listeners can
+      // ignore it while it is still propagating (see bindMenuInteractions).
+      openEvent: spec.event || null,
+      teardown: []
+    };
+    placeMenu(menu, spec.at || { x: 0, y: 0 });
+    bindMenuInteractions();
+    focusMenuItem(firstEnabledIndex(1));
+    return true;
+  }
+
+  /**
+   * Run a chosen item.
+   *
+   * Every result is spoken through the map's existing live region rather than a
+   * second one of the menu's own (FR-23), and announce() never moves focus
+   * (FR-24). Where the action is the host's — delete, group — the map says what
+   * it asked for, not what happened: the confirmation and the outcome belong to
+   * workspace-bulk-actions, and claiming a result here would sometimes be a lie.
+   */
+  function runMenuAction(container, action, context, options) {
+    var id = context.id || '';
+    var name = context.name || 'workspace';
+    var count = multiCount();
+    switch (action) {
+      case 'open':
+        // The map's explicit open: the host's onOpen when it has one (the
+        // cockpit records the first action there), else plain navigation, which
+        // is what the rail's Open button does.
+        announce(container, 'Opening ' + name);
+        if (options && typeof options.onOpen === 'function') options.onOpen(id);
+        else openWorkspace(id);
+        break;
+      case 'open-backlog':
+        announce(container, 'Opening the Backlog for ' + name);
+        openWorkspace(id, { panel: 'backlog' });
+        break;
+      case 'open-setup':
+        announce(container, 'Opening Setup for ' + name);
+        openWorkspace(id, { setup: true });
+        break;
+      case 'toggle-selection':
+        var wasSelected = !!multiSelected[id];
+        toggleMulti(container, id);
+        announce(
+          container,
+          (wasSelected ? 'Removed ' + name + ' from the selection. ' : 'Added ' + name + '. ') +
+            multiCount() +
+            ' selected'
+        );
+        break;
+      case 'delete':
+        announce(container, 'Delete ' + name + ' — confirm to continue');
+        deleteWorkspace(id, options);
+        break;
+      // The bulk actions the selection bar used to carry. They run the host's
+      // own callbacks, so the existing confirm paths in workspace-bulk-actions
+      // are the only confirmation — the menu adds no second one.
+      case 'group-multi':
+        announce(container, workspaceCountLabel('Grouping', count));
+        groupMulti(options);
+        break;
+      case 'delete-multi':
+        announce(container, workspaceCountLabel('Delete', count) + ' — confirm to continue');
+        deleteMulti(options);
+        break;
+      case 'clear-selection':
+        clearMulti(container);
+        announce(container, 'Selection cleared');
+        break;
+      // The HQ site's four choices reach the host exactly as the rail's buttons
+      // do — one custom event, one action name.
+      case 'hq-build':
+      case 'hq-import':
+      case 'hq-clear':
+      case 'hq-skip':
+        announce(container, 'Personal HQ: ' + (context.label || action.slice(3)));
+        dispatchHQAction(action.slice(3));
+        break;
+      // Build creates the workspace where the menu was opened. The coordinate is
+      // held as pending rather than saved — nothing is written for a workspace
+      // that does not exist yet — and the existing create modal takes it from
+      // there, exactly as the retired build mode did.
+      case 'build':
+        if (context.world) {
+          chooseBuildSite(container, context.world);
+          break;
+        }
+        // No usable coordinate (a map with no canvas to measure): fall back to
+        // the plain create flow rather than silently doing nothing.
+        announce(container, 'Opening the new workspace flow');
+        triggerCreateWorkspace();
+        break;
+      // Framing actions. Same calls and same announcements as the control
+      // cluster, so the two cannot drift apart.
+      case 'fit':
+        fitAll(container);
+        announce(
+          container,
+          camera.zoom <= MIN_ZOOM + 0.0001
+            ? 'Zoomed out as far as the map goes. Some workspaces are still off-screen — pan to reach them.'
+            : 'Showing every workspace'
+        );
+        break;
+      case 'center':
+        var anchor = selectedNodeAnchor();
+        if (!anchor) {
+          announce(container, 'Select a workspace first');
+          break;
+        }
+        setCamera(centerOn(camera, anchor), container);
+        announce(container, 'Centered the selected workspace');
+        break;
+      case 'reset-view':
+        resetView(container);
+        announce(container, 'View reset. Workspace positions are unchanged');
+        break;
+      default:
+        break;
+    }
+  }
+
+  function dispatchHQAction(name) {
+    if (typeof window === 'undefined' || typeof window.dispatchEvent !== 'function') return;
+    window.dispatchEvent(new CustomEvent('ori:personal-hq-action', { detail: { action: name } }));
+  }
+
+  // resolveMenuTarget turns whatever was right-clicked into one of the map's
+  // four targets. Order matters: the HQ site is also a `.ws-map-tile`, and a
+  // district's label sits inside the district outline.
+  function resolveMenuTarget(node, workspaces) {
+    if (!node || typeof node.closest !== 'function') return null;
+    var hq = node.closest('[data-hq-site]');
+    if (hq) return { type: 'hq', view: hqSiteView(hqStatus), element: hq };
+    var tile = node.closest('.ws-map-tile[data-ws-id]');
+    if (tile) {
+      var tileId = tile.getAttribute('data-ws-id');
+      return { type: 'tile', id: tileId, ws: findWs(workspaces, tileId), element: tile };
+    }
+    var district = node.closest('.ws-map-district');
+    if (district) {
+      var groupId = district.getAttribute('data-group-id');
+      // Focus goes back to the district's label button, not to the outline: the
+      // outline is a plain div and cannot hold focus (FR-19).
+      var tag =
+        typeof district.querySelector === 'function'
+          ? district.querySelector('.ws-map-district-tag')
+          : null;
+      return {
+        type: 'district',
+        id: groupId,
+        ws: findWs(workspaces, groupId),
+        element: tag || district
+      };
+    }
+    var canvas = node.closest('.ws-map-canvas');
+    if (canvas) return { type: 'canvas', element: canvas };
+    return null;
+  }
+
+  /**
+   * The world coordinate the menu was opened over.
+   *
+   * Build creates a workspace *there*, so the screen point has to be converted
+   * back through the camera the moment the menu opens — after a pan or a zoom
+   * the same screen point means somewhere else entirely. Snapped by the user's
+   * own preference, exactly as a drag-drop is.
+   *
+   * A menu opened from the keyboard has no cursor, so it builds at the middle of
+   * what the user is looking at — the same choice the old build mode made for
+   * its keyboard start point.
+   */
+  function menuWorldPoint(container, at, viaKeyboard) {
+    var canvas = container && container.querySelector && container.querySelector('.ws-map-canvas');
+    if (!canvas) return null;
+    var viewport = viewportSize(canvas);
+    var local = viaKeyboard
+      ? { x: viewport.width / 2, y: viewport.height / 2 }
+      : localPoint(canvas, at);
+    return snapPoint(screenToWorld(local, camera, viewport));
+  }
+
+  function localPoint(canvas, at) {
+    var point = at || { x: 0, y: 0 };
+    if (typeof canvas.getBoundingClientRect === 'function') {
+      var rect = canvas.getBoundingClientRect();
+      if (rect) return { x: point.x - (rect.left || 0), y: point.y - (rect.top || 0) };
+    }
+    return { x: point.x, y: point.y };
+  }
+
+  function openMenuForTarget(container, workspaces, options, target, at, event, viaKeyboard) {
+    // Right-clicking a site that is not in the multi-select set selects it
+    // first, so the menu always acts on something the user can see is chosen
+    // (FR-6). It never opens the workspace and never touches the checkbox.
+    // Empty canvas is the exception: it has nothing of its own to select, and
+    // clearing the selection to open a menu would destroy what the menu's own
+    // Center and Clear items act on (FR-8).
+    if (target.type === 'tile' && target.id && !multiSelected[target.id]) {
+      applySelection(container, workspaces, target.id, options);
+    }
+    if (target.type === 'district' && target.id) {
+      applySelection(container, workspaces, target.id, options);
+    }
+    if (target.type === 'hq') {
+      applyHQSelection(container, target.view || hqSiteView(hqStatus), options);
+    }
+    var items = contextMenuItemsFor(target);
+    if (!items.length) return false;
+    return openContextMenu(container, {
+      items: items,
+      label: menuLabelFor(target),
+      at: at,
+      origin: target.element,
+      context: {
+        id: target.id || '',
+        type: target.type,
+        name: (target.ws && target.ws.name) || (target.type === 'hq' ? 'Personal HQ' : 'workspace'),
+        // Only the canvas menu builds, and only it needs a coordinate.
+        world: target.type === 'canvas' ? menuWorldPoint(container, at, viaKeyboard) : null
+      },
+      options: options,
+      event: event
+    });
+  }
+
+  function bindContextMenu(container, workspaces, options) {
+    var canvas =
+      container.querySelector('[data-ws-map-viewport]') ||
+      container.querySelector('.ws-map-canvas');
+    if (!canvas || typeof canvas.addEventListener !== 'function') return;
+    // One delegated listener, because tiles are replaced on every refresh.
+    canvas.addEventListener('contextmenu', function (event) {
+      // A menu opened mid-gesture would act on a target that is still moving.
+      if (dragState || clusterDrag) return;
+      var target = resolveMenuTarget(event && event.target, workspaces);
+      if (!target) return;
+      var items = contextMenuItemsFor(target);
+      // No item set for this target yet: leave the browser's own menu alone
+      // rather than suppressing it and offering nothing in its place.
+      if (!items.length) return;
+      if (event.preventDefault) event.preventDefault();
+      openMenuForTarget(
+        container,
+        workspaces,
+        options,
+        target,
+        { x: (event && event.clientX) || 0, y: (event && event.clientY) || 0 },
+        event
+      );
+    });
+
+    // The keyboard equivalent (FR-3). Both platform gestures work — the Context
+    // Menu key and Shift+F10 — and the menu opens at the focused element,
+    // because there is no cursor to anchor to. The canvas counts as a target
+    // here: it is focusable, and since the framing buttons were retired the
+    // menu is the only way to reach Center Selected without a mouse.
+    canvas.addEventListener('keydown', function (event) {
+      if (!event) return;
+      var wanted = event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey);
+      if (!wanted) return;
+      if (dragState || clusterDrag) return;
+      var target = resolveMenuTarget(event.target, workspaces);
+      if (!target) return;
+      if (!contextMenuItemsFor(target).length) return;
+      if (event.preventDefault) event.preventDefault();
+      openMenuForTarget(
+        container,
+        workspaces,
+        options,
+        target,
+        anchorForElement(target.element),
+        event,
+        true
+      );
+    });
   }
 
   function bindTiles(container, workspaces, options) {
@@ -2460,19 +3220,6 @@
     });
 
     canvas.addEventListener('pointermove', function (event) {
-      if (!pan && buildState.active) {
-        // Preview where the next click would land, snapped or free, so the
-        // candidate is visible before it is committed (FR-49, FR-50).
-        var previewViewport = viewportSize(canvas);
-        setBuildCandidate(
-          container,
-          snapPoint(
-            screenToWorld(pointerPosition(canvas, event), camera, previewViewport),
-            !!event.altKey
-          )
-        );
-        return;
-      }
       if (!pan || event.pointerId !== pan.pointerId) return;
       var point = pointerPosition(canvas, event);
       var dx = point.x - pan.startX;
@@ -2495,18 +3242,7 @@
 
     canvas.addEventListener('pointerup', function (event) {
       if (pan && event.pointerId !== pan.pointerId) return;
-      var wasDrag = !!(pan && pan.moved);
       stop();
-      // In build mode a press on empty world space that did not become a pan is
-      // the user choosing where to build. A press that landed on a building, a
-      // group label, or a control was never a site (FR-51, FR-52), and a drag
-      // was a pan (FR-33).
-      if (!buildState.active || wasDrag || isInteractiveTarget(event.target)) return;
-      var viewport = viewportSize(canvas);
-      var world = screenToWorld(pointerPosition(canvas, event), camera, viewport);
-      // Option/Alt temporarily bypasses snapping without changing the saved
-      // preference (FR-59).
-      chooseBuildSite(container, snapPoint(world, !!event.altKey));
     });
 
     ['pointercancel', 'pointerleave'].forEach(function (type) {
@@ -2569,8 +3305,9 @@
     var zoomOut = container.querySelector('[data-map-zoom-out]');
     if (zoomIn) zoomIn.disabled = camera.zoom >= MAX_ZOOM - 0.0001;
     if (zoomOut) zoomOut.disabled = camera.zoom <= MIN_ZOOM + 0.0001;
-    var center = container.querySelector('[data-map-center]');
-    if (center) center.disabled = !selectedNodeAnchor();
+    // Center Selected has no button to keep in step any more; the canvas menu
+    // computes its own disabled state from selectedNodeAnchor() each time it
+    // opens, which cannot go stale.
   }
 
   // selectedNodeAnchor finds the world anchor of whatever is selected, whether
@@ -2604,32 +3341,9 @@
       setCamera(zoomAroundCenter(camera, 1 / ZOOM_STEP), container);
       announce(container, 'Zoomed to ' + Math.round(camera.zoom * 100) + ' percent');
     });
-    on('[data-map-fit]', function () {
-      fitAll(container);
-      // Zoom is clamped at 50%, so a layout spread wider than two viewports
-      // cannot literally all fit. Saying so is better than a button that
-      // quietly under-delivers (FR-38, FR-40).
-      announce(
-        container,
-        camera.zoom <= MIN_ZOOM + 0.0001
-          ? 'Zoomed out as far as the map goes. Some workspaces are still off-screen — pan to reach them.'
-          : 'Showing every workspace'
-      );
-    });
-    on('[data-map-center]', function () {
-      var anchor = selectedNodeAnchor();
-      if (!anchor) {
-        announce(container, 'Select a workspace first');
-        return;
-      }
-      // Centering moves the view, never the record (FR-41).
-      setCamera(centerOn(camera, anchor), container);
-      announce(container, 'Centered the selected workspace');
-    });
-    on('[data-map-reset-view]', function () {
-      resetView(container);
-      announce(container, 'View reset. Workspace positions are unchanged');
-    });
+    // Fit all, Center selected and Reset view have no buttons any more: they are
+    // items on the canvas context menu (see runMenuAction), plus the f / 0 keys
+    // below. Nothing about what they do changed.
     on('[data-map-move]', function () {
       startKeyboardMove(container);
       var canvasEl = container.querySelector('[data-ws-map-viewport]');
@@ -2640,9 +3354,8 @@
     // Keyboard equivalents for every camera gesture, so navigating the map
     // never requires a pointer (FR-115).
     canvas.addEventListener('keydown', function (event) {
-      // Build mode and keyboard Move own the arrow keys while either is active:
-      // they move the candidate, not the camera (FR-60, FR-78).
-      if (buildState.active) return;
+      // Keyboard Move owns the arrow keys while it is active: they move the
+      // building, not the camera (FR-78).
       if (handleMoveKey(container, event)) {
         if (event.preventDefault) event.preventDefault();
         return;
@@ -2658,12 +3371,29 @@
         case '_':
           setCamera(zoomAroundCenter(camera, 1 / ZOOM_STEP), container);
           break;
+        // With the framing buttons gone, this key is a direct route to what the
+        // canvas menu offers, so it announces its result the way the menu item
+        // does.
         case '0':
           resetView(container);
+          announce(container, 'View reset. Workspace positions are unchanged');
           break;
+        // `f` never reaches this handler in the app: keyboard-navigation.js
+        // claims it globally as the link-hint activation key and stops the event
+        // in the capture phase. It is kept because the behaviour is correct on
+        // its own terms — a page without that module still gets Fit All — but
+        // nothing may advertise it. The reachable routes are the canvas context
+        // menu (right-click, or Shift+F10 on the focused canvas) and the buttons
+        // that action never lost.
         case 'f':
         case 'F':
           fitAll(container);
+          announce(
+            container,
+            camera.zoom <= MIN_ZOOM + 0.0001
+              ? 'Zoomed out as far as the map goes. Some workspaces are still off-screen — pan to reach them.'
+              : 'Showing every workspace'
+          );
           break;
         case 'ArrowLeft':
           setCamera(
@@ -3021,7 +3751,7 @@
     var banner = container.querySelector('[data-map-build-banner]');
     if (!readout || !banner) return;
     if (!point) {
-      if (!buildState.active) banner.hidden = true;
+      banner.hidden = true;
       if (banner.classList) banner.classList.remove('is-blocked');
       return;
     }
@@ -3036,15 +3766,12 @@
     readout.textContent = candidateLabel(point);
   }
 
-  // setBannerMode swaps the banner's instruction and whether it offers Cancel.
-  // Build mode owns the Cancel button; a drag is cancelled with Escape or by
-  // dropping, so offering a button there would be a third way to do the same
-  // thing.
-  function setBannerMode(container, instruction, showCancel) {
+  // setBannerMode swaps the banner's instruction. The banner belongs to moving
+  // now that build is not a mode: a move is cancelled with Escape or by
+  // dropping, so it offers no button of its own.
+  function setBannerMode(container, instruction) {
     var text = container.querySelector('[data-map-build-text]');
     if (text) text.textContent = instruction;
-    var cancel = container.querySelector('[data-map-build-cancel]');
-    if (cancel) cancel.hidden = !showCancel;
   }
 
   // ---------- moving districts ----------
@@ -3336,7 +4063,7 @@
     moveState = null;
     setDragReadout(container, null);
     var banner = container.querySelector('[data-map-build-banner]');
-    if (banner && !buildState.active) banner.hidden = true;
+    if (banner) banner.hidden = true;
     if (state.cluster) {
       setClusterBlocked(state.cluster, false);
     } else if (state.el && state.el.classList) {
@@ -3539,11 +4266,17 @@
 
   // ---------- build mode ----------
   //
-  // An explicit, single-use placement state. Ordinary empty-space clicks keep
-  // their ordinary meaning; only inside this mode does the next selection choose
-  // a build site, and the mode ends as soon as it has one (FR-48).
+  // Placement is no longer a mode. It used to be one — press Build, watch a
+  // banner, click a spot — because a button has no way of knowing where you
+  // want the building. The context menu does: it opens at a point, so Build
+  // takes that point and goes straight to the create modal (#317).
+  //
+  // What survives is the part that was never about the mode: a *pending*
+  // coordinate, held rather than saved, because nothing may be written for a
+  // workspace that does not exist yet (FR-54). sessions.js consumes it through
+  // completeBuild/cancelBuild when its modal closes.
 
-  var buildState = { active: false, candidate: null, pending: null, container: null };
+  var buildState = { pending: null, container: null };
 
   function snapValue(value) {
     return Math.round(value / SNAP_STEP) * SNAP_STEP;
@@ -3565,68 +4298,11 @@
     return formatCoordinate(point) + (layoutState.snapToGrid ? ' · snapped' : ' · free');
   }
 
-  function setBuildCandidate(container, point) {
-    buildState.candidate = point;
-    var readout = container.querySelector('[data-map-build-coords]');
-    if (readout) readout.textContent = point ? candidateLabel(point) : '';
-    var marker = container.querySelector('[data-map-build-marker]');
-    if (marker && marker.style) {
-      if (point) {
-        marker.hidden = false;
-        marker.style.left = point.x + 'px';
-        marker.style.top = point.y + 'px';
-      } else {
-        marker.hidden = true;
-      }
-    }
-  }
-
-  function startBuild(container) {
-    if (layoutState.status !== 'ready') {
-      announce(
-        container,
-        'Positions cannot be saved right now, so building at a point is unavailable'
-      );
-      return;
-    }
-    buildState.active = true;
-    buildState.container = container;
-    var canvas = container.querySelector('[data-ws-map-viewport]');
-    if (canvas && canvas.classList) canvas.classList.add('is-building');
-    var banner = container.querySelector('[data-map-build-banner]');
-    if (banner) banner.hidden = false;
-    setBannerMode(container, BUILD_INSTRUCTION, true);
-    // Keyboard placement starts at the middle of what the user is looking at,
-    // which is the only starting point that needs no pointer (FR-60).
-    var viewport = viewportSize(canvas);
-    setBuildCandidate(
-      container,
-      snapPoint(screenToWorld({ x: viewport.width / 2, y: viewport.height / 2 }, camera, viewport))
-    );
-    if (canvas && canvas.focus) canvas.focus();
-    announce(container, 'Build mode. Choose a spot on the map, then press Enter. Escape cancels.');
-  }
-
-  // exitBuildMode leaves placement mode. It deliberately does NOT clear the
-  // pending coordinate: choosing a site ends the mode but the coordinate has to
-  // survive until the create flow either uses it or is abandoned.
-  function exitBuildMode(container) {
-    var host = container || buildState.container;
-    buildState.active = false;
-    buildState.candidate = null;
-    if (!host || typeof host.querySelector !== 'function') return;
-    var canvas = host.querySelector('[data-ws-map-viewport]');
-    if (canvas && canvas.classList) canvas.classList.remove('is-building');
-    var banner = host.querySelector('[data-map-build-banner]');
-    if (banner) banner.hidden = true;
-    setBuildCandidate(host, null);
-  }
-
-  // cancelBuild is the abandonment path: leave the mode AND forget the site, so
-  // nothing is left pointing at a workspace that will never exist (FR-54).
-  function cancelBuild(container) {
+  // cancelBuild is the abandonment path: forget the site, so nothing is left
+  // pointing at a workspace that will never exist (FR-54). sessions.js calls it
+  // when the create modal closes without creating anything.
+  function cancelBuild() {
     buildState.pending = null;
-    exitBuildMode(container);
   }
 
   /**
@@ -3638,9 +4314,9 @@
    * there is deliberately no second creation form (FR-51).
    */
   function chooseBuildSite(container, point) {
-    if (!buildState.active || !point) return;
+    if (!point) return;
     buildState.pending = { x: point.x, y: point.y };
-    exitBuildMode(container);
+    buildState.container = container;
     announce(
       container,
       'Building at ' + formatCoordinate(point) + '. Complete the workspace details.'
@@ -3723,9 +4399,6 @@
     var next = !layoutState.snapToGrid;
     layoutState.snapToGrid = next;
     updateSnapControl(container);
-    if (buildState.active && buildState.candidate) {
-      setBuildCandidate(container, snapPoint(buildState.candidate));
-    }
     announce(container, next ? 'Snap to grid on' : 'Snap to grid off');
     // The preference is the user's, so it persists (FR-57). A failed save
     // leaves the toggle where they put it for this session rather than
@@ -3743,80 +4416,16 @@
     toggle.textContent = 'Snap to grid: ' + (layoutState.snapToGrid ? 'on' : 'off');
   }
 
-  // restoreBuildMode reinstates an in-progress placement after a re-render, so a
-  // realtime workspace refresh cannot silently drop the user out of build mode
-  // (FR-106).
-  function restoreBuildMode(container) {
-    buildState.container = container;
-    var canvas = container.querySelector('[data-ws-map-viewport]');
-    if (canvas && canvas.classList) canvas.classList.add('is-building');
-    var banner = container.querySelector('[data-map-build-banner]');
-    if (banner) banner.hidden = false;
-    setBannerMode(container, BUILD_INSTRUCTION, true);
-    setBuildCandidate(container, buildState.candidate);
-  }
-
-  function bindBuildMode(container) {
-    var canvas = container.querySelector('[data-ws-map-viewport]');
-
-    var build = container.querySelector('[data-map-build]');
-    if (build && build.addEventListener) {
-      build.addEventListener('click', function () {
-        startBuild(container);
-      });
-    }
+  // Snap is still a control of its own: it is a persisted preference that
+  // affects every placement — a drop, a keyboard move, and the coordinate the
+  // context menu's Build hands to the create flow.
+  function bindSnapControl(container) {
     var snap = container.querySelector('[data-map-snap]');
     if (snap && snap.addEventListener) {
       snap.addEventListener('click', function () {
         toggleSnap(container);
       });
     }
-    var cancel = container.querySelector('[data-map-build-cancel]');
-    if (cancel && cancel.addEventListener) {
-      cancel.addEventListener('click', function () {
-        cancelBuild(container);
-        announce(container, 'Build cancelled. Nothing was created.');
-      });
-    }
-    if (!canvas || typeof canvas.addEventListener !== 'function') return;
-
-    canvas.addEventListener('keydown', function (event) {
-      if (!buildState.active) return;
-      var step = layoutState.snapToGrid ? SNAP_STEP : 1;
-      if (event.shiftKey) step *= 10;
-      var candidate = buildState.candidate || { x: 0, y: 0 };
-      var moved = null;
-      switch (event.key) {
-        case 'ArrowLeft':
-          moved = { x: candidate.x - step, y: candidate.y };
-          break;
-        case 'ArrowRight':
-          moved = { x: candidate.x + step, y: candidate.y };
-          break;
-        case 'ArrowUp':
-          moved = { x: candidate.x, y: candidate.y - step };
-          break;
-        case 'ArrowDown':
-          moved = { x: candidate.x, y: candidate.y + step };
-          break;
-        case 'Enter':
-          if (event.preventDefault) event.preventDefault();
-          if (event.stopPropagation) event.stopPropagation();
-          chooseBuildSite(container, buildState.candidate);
-          return;
-        case 'Escape':
-          if (event.preventDefault) event.preventDefault();
-          cancelBuild(container);
-          announce(container, 'Build cancelled. Nothing was created.');
-          return;
-        default:
-          return;
-      }
-      if (event.preventDefault) event.preventDefault();
-      if (event.stopPropagation) event.stopPropagation();
-      setBuildCandidate(container, moved);
-      announce(container, 'Candidate ' + candidateLabel(moved));
-    });
   }
 
   function bindHQSite(container, options) {
@@ -3883,6 +4492,10 @@
     });
 
     var viewport = measureViewport(container);
+    // The re-render below destroys the menu's host along with everything else.
+    // Closing it first keeps the listeners and the focus-restore target from
+    // outliving the DOM they referred to.
+    closeContextMenu({ restoreFocus: false });
     lastMount = { container: container, state: state };
 
     container.innerHTML = shellHTML(
@@ -3894,6 +4507,7 @@
     );
     bindCreate(container);
     bindTiles(container, workspaces, state);
+    bindContextMenu(container, workspaces, state);
     bindHQSite(container, state);
     bindOverviewActions(container, state);
     // The camera survives every re-mount: a workspace refresh, a filter, or a
@@ -3904,13 +4518,10 @@
     bindViewportPan(container);
     bindViewportWheel(container);
     bindCameraControls(container);
-    bindBuildMode(container);
+    bindSnapControl(container);
     bindTileDrag(container);
     bindDistrictDrag(container);
     bindResetLayout(container);
-    // A re-render (a refresh landing mid-placement) rebuilt the banner and the
-    // marker, so restore what the user was in the middle of.
-    if (buildState.active) restoreBuildMode(container);
     // Focus returns to the record it was on before a committed move or a
     // refresh re-rendered the map (FR-117).
     if (pendingFocusId) {
@@ -3921,7 +4532,7 @@
     // The first paint has a selection too, so its setup state is read here as
     // well as on every later selection change.
     ensureSetupStatus(container, findWs(workspaces, selectedId));
-    bindSelBar(container, state);
+    bindSelBar(container);
     // No resize listener: world coordinates are viewport-independent, so a
     // resize changes only how much of the world is visible — never where a
     // building is (FR-13, FR-46).
@@ -3930,6 +4541,7 @@
   /** Tear down the map view (called when switching away). */
   function unmount(container) {
     if (!container) return;
+    closeContextMenu({ restoreFocus: false });
     container.innerHTML = '';
     // Clearing lastMount is what makes a layout response still in flight a
     // no-op when it lands: settleLayout has nothing to repaint.
@@ -4009,6 +4621,14 @@
       return !!undoSnapshot;
     },
     computeStats: computeStats,
+    // The context menu's pure halves: the item set a target offers, the markup
+    // that renders it, and the edge-flipping placement math (FR-17, FR-123).
+    contextMenuItemsFor: contextMenuItemsFor,
+    contextMenuHTML: contextMenuHTML,
+    contextMenuPosition: menuPosition,
+    closeContextMenu: function () {
+      closeContextMenu({ restoreFocus: false });
+    },
     tileHTML: tileHTML,
     overviewBodyHTML: overviewBodyHTML,
     selBarHTML: selBarHTML,

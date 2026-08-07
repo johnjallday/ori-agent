@@ -835,51 +835,9 @@
   margin-bottom: 16px;
 }
 
-/* Context Menu */
-.session-context-menu {
-  position: fixed;
-  min-width: 160px;
-  padding: 4px;
-  background: var(--bg-primary);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  box-shadow: var(--shadow-lg);
-  z-index: 10000;
-}
-
-.session-context-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 8px 12px;
-  border: none;
-  background: none;
-  color: var(--text-primary);
-  font-size: 13px;
-  text-align: left;
-  cursor: pointer;
-  border-radius: 4px;
-  transition: background 0.15s ease;
-}
-
-.session-context-item:hover {
-  background: var(--bg-secondary);
-}
-
-.session-context-item.session-context-danger {
-  color: var(--danger-color);
-}
-
-.session-context-item.session-context-danger:hover {
-  background: rgba(239, 68, 68, 0.1);
-}
-
-.session-context-divider {
-  height: 1px;
-  background: var(--border-color);
-  margin: 4px 0;
-}
+/* Context Menu — the .session-context-* component now lives in
+   css/context-menu.css, shared with the Workspace Map's menus (#317). The
+   markup and JS on this page are unchanged; only the declarations moved. */
 
 /* Resize Handle */
 .session-sidebar-resize-handle {
