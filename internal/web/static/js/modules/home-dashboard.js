@@ -170,6 +170,15 @@
   // of one endpoint, two lists, one rail column. The cockpit's version wins —
   // it is bounded to today and flags overdue runs.
 
+  /** Put the Activity section into a terminal, non-loading state. */
+  function showActivityPlaceholder(message) {
+    const section = document.getElementById('homeRecentActivity');
+    if (!section) return;
+    const body = section.querySelector('[data-role="content"]');
+    if (!body) return;
+    body.innerHTML = `<div class="home-section-placeholder">${escapeHtml(message)}</div>`;
+  }
+
   async function loadRecentActivity() {
     const section = document.getElementById('homeRecentActivity');
     if (!section) return;
@@ -247,7 +256,14 @@
     // the others — and Map, Tree, and Ask Ori — usable (FR85, FR113).
     if (!document.getElementById('cockpitRailToday')) return;
     wireTodayActions();
-    if (!(await canHydrateWorkspaceData())) return;
+    // The gate deciding we must not hydrate yet is a real answer, not a reason
+    // to walk away: returning here used to leave the template's "Loading
+    // activity…" placeholder on screen permanently, with no timeout and no
+    // error path, so a section that had finished looked like one still working.
+    if (!(await canHydrateWorkspaceData())) {
+      showActivityPlaceholder('Activity appears once your workspaces are set up.');
+      return;
+    }
     loadRecentActivity();
   }
 

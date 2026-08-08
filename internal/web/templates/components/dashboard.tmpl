@@ -47,7 +47,7 @@
        as mutually exclusive peer views) plus one persistent context rail
        (PRD FR15-FR21). The Ask Ori command bridge above stays visible in both
        views (FR14/FR92). -->
-  <div class="home-cockpit" id="homeCockpit" data-view="map" data-state="loading">
+  <div class="home-cockpit" id="homeCockpit" data-view="map" data-state="loading" data-rail-open="false">
     <section class="cockpit-workspace-area" id="cockpitWorkspaceArea" aria-labelledby="cockpitWorkspaceAreaTitle">
       <header class="cockpit-area-header">
         <div class="cockpit-area-heading">
@@ -72,6 +72,29 @@
             aria-label="Ask Ori — app guide">
             <img src="/characters/ori-guide/sprite.svg" alt="" width="26" height="26" decoding="async">
             <span class="cockpit-map-ori__label">Ask Ori</span>
+            <!-- Home hides the floating launcher, which was the only place that
+                 spelled out Ori's role. The boundary between the guide and
+                 Workspace Manager has to be readable BEFORE anything is asked
+                 (FR-22/FR-27), so the role moves onto the surviving entry
+                 point rather than disappearing with the duplicate. -->
+            <span class="cockpit-map-ori__role">App Guide</span>
+          </button>
+          <!--
+            The rail's own switch. The rail is closed by default and opens on
+            demand (a selection, something needing attention, or this button),
+            so there has to be one obvious way back to it. The badge carries the
+            attention count and is empty at zero — a closed rail with nothing
+            waiting should look calm, not like a dismissed notification.
+          -->
+          <button
+            type="button"
+            class="cockpit-rail-toggle"
+            id="cockpitRailToggle"
+            aria-expanded="false"
+            aria-controls="cockpitRail"
+            aria-label="Show the Today panel">
+            <span class="cockpit-rail-toggle__label">Today</span>
+            <span class="cockpit-rail-toggle__count" data-cockpit-rail-toggle-count hidden></span>
           </button>
           <!-- Mutually exclusive Map/Tree toggle. aria-pressed carries the
                active view; the visible labels carry it without color (FR24). -->
@@ -79,6 +102,17 @@
             <button type="button" id="cockpitViewMap" class="cockpit-view-btn is-active" data-cockpit-view="map" aria-pressed="true">Map</button>
             <button type="button" id="cockpitViewTree" class="cockpit-view-btn" data-cockpit-view="tree" aria-pressed="false">Tree</button>
           </div>
+          <!--
+            Add to backlog and Summary must be reachable from EVERY rail state
+            (FR88, FR101). They used to sit in the rail's own footer, which was
+            fine while the rail was always on screen — now that it closes, a
+            footer inside it would take both actions with it. The header is the
+            one surface present in every state, open or closed.
+          -->
+          <button type="button" id="cockpitCaptureBtn" class="modern-btn modern-btn-secondary modern-btn-sm"
+                  aria-expanded="false" aria-controls="cockpitCapturePanel">Add to backlog</button>
+          <button type="button" id="cockpitSummaryBtn" class="modern-btn modern-btn-secondary modern-btn-sm"
+                  aria-pressed="false">Summary</button>
           <button id="cockpitCreateWorkspaceBtn" class="modern-btn modern-btn-primary modern-btn-sm" type="button"
                   data-bs-toggle="modal" data-bs-target="#addFolderModal"
                   data-workspace-import-mode="false" data-workspace-entry-point="home_cockpit_create">
@@ -86,6 +120,28 @@
           </button>
         </div>
       </header>
+
+      <!-- Quick Capture. Writes to the designated Personal HQ's backlog through
+           the existing backlog contract — never a second inbox (FR102).
+
+           It follows its button out of the rail: a disclosure panel has to live
+           where the control that opens it lives, or opening it would reveal a
+           form inside a hidden rail. -->
+      <div id="cockpitCapturePanel" class="cockpit-capture" hidden>
+        <form id="cockpitCaptureForm" class="cockpit-capture-form">
+          <label class="cockpit-capture-label" for="cockpitCaptureTitle">Capture to your HQ backlog</label>
+          <input type="text" id="cockpitCaptureTitle" class="modern-input" maxlength="300" required
+                 autocomplete="off" placeholder="What's on your mind?">
+          <label class="visually-hidden" for="cockpitCaptureDetails">Optional details</label>
+          <textarea id="cockpitCaptureDetails" class="modern-input cockpit-capture-details" rows="2"
+                    maxlength="2000" placeholder="Optional details"></textarea>
+          <div class="cockpit-capture-actions">
+            <button type="submit" id="cockpitCaptureSave" class="modern-btn modern-btn-primary modern-btn-sm">Save</button>
+            <button type="button" id="cockpitCaptureCancel" class="modern-btn modern-btn-secondary modern-btn-sm">Cancel</button>
+          </div>
+          <p id="cockpitCaptureStatus" class="cockpit-capture-status" role="status" aria-live="polite"></p>
+        </form>
+      </div>
       <!-- Map-only signal filters. Single-select and keyboard-operable; counts
            come from the same authoritative state Map and Summary read, and an
            unavailable count renders as an em dash rather than a fake 0
@@ -101,7 +157,13 @@
       </div>
     </section>
 
-    <aside class="cockpit-rail" id="cockpitRail" aria-label="Context">
+    <!--
+      Closed until something earns it: home-workspace-cockpit.js opens the rail
+      on a selection, on an attention count, or when the user asks for it. The
+      closed state is declared here rather than left to the first render, so the
+      map does not start full-width and then get shoved sideways a frame later.
+    -->
+    <aside class="cockpit-rail" id="cockpitRail" aria-label="Context" hidden>
       <!-- Polite rail announcements; never re-reads the whole rail (FR130). -->
       <div id="cockpitRailLive" class="visually-hidden" role="status" aria-live="polite"></div>
 
@@ -316,36 +378,10 @@
         </section>
       </section>
 
-      <!-- Rail footer: backlog capture and Summary, reachable from EVERY rail
-           state (FR88, FR101). A normal flex row after the scrolling body, so
-           its actions stay reachable on a short viewport (FR139).
-
-           There is deliberately NO Map/Tree shortcut here. It used to duplicate
-           the primary toggle in the workspace-area header, which is visible in
-           every rail state — and below the 1040px breakpoint the two rendered
-           within a few hundred pixels of each other. One toggle, one place. -->
-      <div class="cockpit-rail-footer">
-        <button type="button" id="cockpitCaptureBtn" class="modern-btn modern-btn-primary modern-btn-sm" aria-expanded="false" aria-controls="cockpitCapturePanel">Add to backlog</button>
-        <button type="button" id="cockpitSummaryBtn" class="modern-btn modern-btn-secondary modern-btn-sm" aria-pressed="false">Summary</button>
-      </div>
-
-      <!-- Quick Capture. Writes to the designated Personal HQ's backlog through
-           the existing backlog contract — never a second inbox (FR102). -->
-      <div id="cockpitCapturePanel" class="cockpit-capture" hidden>
-        <form id="cockpitCaptureForm" class="cockpit-capture-form">
-          <label class="cockpit-capture-label" for="cockpitCaptureTitle">Capture to your HQ backlog</label>
-          <input type="text" id="cockpitCaptureTitle" class="modern-input" maxlength="300" required
-                 autocomplete="off" placeholder="What's on your mind?">
-          <label class="visually-hidden" for="cockpitCaptureDetails">Optional details</label>
-          <textarea id="cockpitCaptureDetails" class="modern-input cockpit-capture-details" rows="2"
-                    maxlength="2000" placeholder="Optional details"></textarea>
-          <div class="cockpit-capture-actions">
-            <button type="submit" id="cockpitCaptureSave" class="modern-btn modern-btn-primary modern-btn-sm">Save</button>
-            <button type="button" id="cockpitCaptureCancel" class="modern-btn modern-btn-secondary modern-btn-sm">Cancel</button>
-          </div>
-          <p id="cockpitCaptureStatus" class="cockpit-capture-status" role="status" aria-live="polite"></p>
-        </form>
-      </div>
+      <!-- The rail footer that used to sit here held Add to backlog and
+           Summary. Both moved into the workspace-area header when the rail
+           became closable: FR88/FR101 require them in every rail state, and a
+           footer inside a closed rail is in none of them. -->
     </aside>
   </div>
 
