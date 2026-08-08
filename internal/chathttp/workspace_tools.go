@@ -56,6 +56,10 @@ type WorkspaceToolProvider struct {
 	// reply proposal; never sends).
 	mailDrafter MailDrafter
 
+	// githubProposer, when set, enables the github_propose_change tool
+	// (records a LOCAL proposal; never writes to GitHub).
+	githubProposer GitHubProposer
+
 	// hqVisibility carries the live, read-only dependencies that only Personal
 	// HQ tools need. The source factory deliberately resolves stores when the
 	// tool runs, after server construction has finished wiring its stores.
@@ -204,6 +208,14 @@ func (p *WorkspaceToolProvider) Tools() []toolapi.Tool {
 		if p.mailDrafter != nil {
 			tools = append(tools, p.mailDraftReplyTool())
 		}
+	}
+
+	// The only way an agent can express intent to write to GitHub. The
+	// mutating GitHub MCP tools are classified `external`, which every
+	// autonomy policy denies, so this proposal path is not one route among
+	// several -- it is the only one.
+	if p.githubProposer != nil {
+		tools = append(tools, p.githubProposeChangeTool())
 	}
 
 	// Personal HQ-only: the coordinator gets a bounded, read-only overview of

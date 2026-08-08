@@ -17,14 +17,26 @@ type Guard interface {
 
 // Handler serves the global GitHub connection's HTTP surface.
 type Handler struct {
-	conn  *Connection
-	guard Guard
+	conn   *Connection
+	guard  Guard
+	broker *Broker
 }
 
 // NewHandler builds the handler. A nil guard leaves routes unwrapped, which
 // is only appropriate in tests -- server wiring always supplies one.
 func NewHandler(conn *Connection, guard Guard) *Handler {
 	return &Handler{conn: conn, guard: guard}
+}
+
+// WithBroker attaches the confirm-gated write broker, enabling the proposal
+// routes. Without it the handler serves connection management only -- which is
+// the correct degraded state, since a workspace with no broker cannot write to
+// GitHub at all rather than writing without confirmation.
+func (h *Handler) WithBroker(broker *Broker) *Handler {
+	if h != nil {
+		h.broker = broker
+	}
+	return h
 }
 
 // Connection exposes the global connection so server wiring can share the one

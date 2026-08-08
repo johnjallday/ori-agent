@@ -364,10 +364,17 @@ func (b *ServerBuilder) initializeHandlers() {
 		// token rather than an OAuth grant, so it shares only the origin
 		// guard. Its token lives in the same vault-backed MCP credential
 		// store every remote MCP server uses.
-		b.githubHandler = githubhttp.NewHandler(
-			githubhttp.NewConnection(nil),
-			connectionshttp.NewOriginGuard(),
-		)
+		githubConn := githubhttp.NewConnection(nil)
+		b.githubHandler = githubhttp.NewHandler(githubConn, connectionshttp.NewOriginGuard())
+		// The repository binding is resolved lazily: this runs in phase 17,
+		// and b.workspaceStore is not assigned until phase 18. Reading it
+		// here would capture nil, the resolver would answer "no binding"
+		// forever, and the proposal routes would never register -- a write
+		// path that is silently absent rather than visibly broken.
+		b.githubHandler.WithBroker(githubhttp.NewBroker(
+			githubhttp.NewRepoResolver(b.githubWorkspaceStore),
+			githubhttp.NewExecutor(githubConn),
+		))
 		// When a Google MCP server (Calendar/Drive) authorizes, verify the ID
 		// token and attach the grant to this connection (FR 23, 40).
 		mcp.SetGoogleMCPIdentityHook(b.googleMCPIdentityHook)
