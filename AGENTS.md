@@ -21,6 +21,19 @@ Never commit API keys or local state. Load provider credentials through environm
 ## Agent-Specific Instructions
 CLI-provider agents can run native workspace MCP only after both `Workspace.AllowNativeMCPCLI` and `Settings.AllowNativeMCPTools` are enabled. Treat this as trusted autonomy: calls execute outside Ori's per-call confirmation gate, sandboxed to the workspace folder. Native MCP execution uses `native_mcp_exec_timeout_seconds`, defaulting to 300 seconds.
 
+## Where Work Happens: One Worktree Per Change
+
+Every change is implemented in its own feature worktree. `ori-agent-dev` is for planning and review only — **never** implementation. This holds no matter how much planning preceded the change: a PRD and a task list are opt-in (see the two rules below), the worktree is not.
+
+| Starting point | Command |
+|---|---|
+| A PRD, optionally with a task list, already in `ori-agent-dev/tasks/` | `wt start [feature-name]` — copies the planning docs into the new worktree |
+| Ad-hoc work with no planning artifacts | `wt new <name>`, or `wt new <type>/<name>` to set the branch prefix |
+
+Both accept `--yes` for non-interactive runs and `--no-herdr` to skip the agent handoff. If `wt` itself is broken, that is a bug to fix — not a reason to fall back to implementing in `ori-agent-dev`. Bootstrapping a fix to `wt` is the one case where creating the worktree by hand with `git worktree add` is correct.
+
+**Why a worktree and not just a branch:** `ori-agent-dev` is shared — other sessions commit in it, and a `git switch` there is visible to every one of them, and can disturb a running server or build mid-flight. Separate worktrees let several changes be in flight at once without any of them touching each other's checkout.
+
 ## Planning Artifact Location
 For the PRD and task-list workflows below, create planning artifacts in this dev worktree's `tasks/` directory (that is, `ori-agent-dev/tasks/`), creating it if necessary. `/tasks/` is not an absolute filesystem path. Finish both planning artifacts there before running `wt start`; it copies them to the isolated feature worktree. Because `tasks/` is gitignored, verify planning artifacts by reading the files directly (and, if needed, use `git status --ignored`) rather than relying on `git diff`.
 
@@ -243,7 +256,7 @@ The `Demo:` checkpoint stays, but it is a **self**-check, not a review request: 
 
 Break the continuous run only for a **real blocker**, never for a check-in: a genuine ambiguity where guessing could produce the wrong feature; a plan whose premise turns out to be invalid; a destructive or outward-facing action the plan didn't cover; something only the user can supply (credential, interactive login, product decision); or the same step failing ~3 times with no new idea. Stop immediately in those cases with the specific question rather than burning the remaining groups first. Otherwise deliver one final summary — what each group shipped, the screenshots, real test results, any deviations — and then ask for PR approval.
 
-There is a third checkpoint, but it is **not** a pause: once the sub-tasks are generated and the task list is saved (step 8), immediately proceed to step 9 (`wt start [feature-name]`) without asking again. PRD generation and the full task list (parent + sub-tasks) both happen in the `ori-agent-dev` worktree, which is the single source of truth for planning docs (`tasks/` is gitignored, so it doesn't sync between worktrees on its own). Only after the complete task list is saved does a feature worktree get created — implementation never starts in dev.
+There is a third checkpoint, but it is **not** a pause: once the sub-tasks are generated and the task list is saved (step 8), immediately proceed to step 9 (`wt start [feature-name]`) without asking again. PRD generation and the full task list (parent + sub-tasks) both happen in the `ori-agent-dev` worktree, which is the single source of truth for planning docs (`tasks/` is gitignored, so it doesn't sync between worktrees on its own). Only after the complete task list is saved does *this flow's* feature worktree get created — implementation never starts in dev. Work that skips the PRD and task list still gets its own worktree, created up front with `wt new` (see "Where Work Happens: One Worktree Per Change").
 
 ## Target Audience
 

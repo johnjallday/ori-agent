@@ -193,6 +193,7 @@ test-herdr-devflow: test-herdr-devflow-cross ## Run focused Ori-to-Herdr bridge 
 	$(TEST_RUNNER) $(GOTEST) ./tools/herdr-devflow/...
 	@$(TEST_RUNNER) bash scripts/herdr-devflow.test.sh
 	@$(TEST_RUNNER) zsh scripts/wt-herd.test.sh
+	@$(TEST_RUNNER) zsh scripts/wt-config.test.sh
 	@$(TEST_RUNNER) zsh scripts/issue-cli.test.sh
 	@$(TEST_RUNNER) zsh scripts/check-backlog-docs.sh
 
