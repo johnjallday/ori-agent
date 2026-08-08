@@ -35,6 +35,32 @@
             background: var(--surface-1, rgba(255,255,255,0.03)); border: 1px solid var(--border-subtle, rgba(255,255,255,0.08)); }
           .workspace-email-connect-title { font-size: 1rem; font-weight: 600; margin: 0; color: var(--text-primary, #e8e8e8); }
           .workspace-email-connect-sub { font-size: 0.8rem; margin: 0.15rem 0 0; color: var(--text-secondary, #9aa0a6); }
+
+          /* GitHub changes awaiting approval */
+          .github-proposals-mount { margin: 0 0 1rem; }
+          .ghp-card { border: 1px solid var(--border-color, rgba(128,128,128,0.2)); border-radius: 0.6rem; padding: 1rem 1.15rem; background: var(--card-bg, rgba(128,128,128,0.04)); }
+          .ghp-header { display: flex; align-items: center; gap: 0.6rem; }
+          .ghp-title { font-size: 1rem; font-weight: 600; margin: 0; color: var(--text-primary, #e8e8e8); }
+          .ghp-badge { font-size: 0.72rem; padding: 0.1rem 0.55rem; border-radius: 999px; background: rgba(234,179,8,0.16); color: #b45309; font-weight: 600; }
+          .ghp-note { margin: 0.35rem 0 0.85rem; font-size: 0.82rem; color: var(--text-secondary, #9aa0a6); }
+          .ghp-proposal { border: 1px solid var(--border-color, rgba(128,128,128,0.2)); border-radius: 0.5rem; padding: 0.8rem 0.9rem; margin-bottom: 0.7rem; }
+          .ghp-proposal-head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; }
+          .ghp-summary { font-weight: 600; color: var(--text-primary, #e8e8e8); }
+          .ghp-status { font-size: 0.72rem; color: var(--text-secondary, #9aa0a6); white-space: nowrap; }
+          .ghp-status-applied { color: #16a34a; }
+          .ghp-rationale { margin: 0.35rem 0 0; font-size: 0.83rem; color: var(--text-secondary, #9aa0a6); font-style: italic; }
+          .ghp-content { margin-top: 0.6rem; }
+          .ghp-content-label { font-size: 0.76rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-secondary, #9aa0a6); margin-bottom: 0.3rem; }
+          .ghp-body { margin: 0 0 0.5rem; padding: 0.65rem 0.8rem; border-radius: 0.4rem; background: rgba(128,128,128,0.1); color: var(--text-primary, #e8e8e8); font-size: 0.85rem; white-space: pre-wrap; word-break: break-word; overflow-x: auto; font-family: var(--font-mono, ui-monospace, monospace); }
+          .ghp-labels { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-bottom: 0.5rem; }
+          .ghp-label { font-size: 0.74rem; padding: 0.1rem 0.55rem; border-radius: 999px; font-weight: 600; }
+          .ghp-label-add { background: rgba(34,197,94,0.16); color: #16a34a; }
+          .ghp-label-remove { background: rgba(239,68,68,0.14); color: #dc2626; text-decoration: line-through; }
+          .ghp-target { font-size: 0.76rem; color: var(--text-secondary, #9aa0a6); font-family: var(--font-mono, ui-monospace, monospace); }
+          .ghp-actions { display: flex; gap: 0.5rem; margin-top: 0.75rem; flex-wrap: wrap; }
+          .ghp-error { margin: 0.5rem 0 0; font-size: 0.82rem; color: #dc2626; }
+          .ghp-applied { opacity: 0.75; }
+          .ghp-link { font-size: 0.8rem; }
         </style>
         <!-- File Janitor compact card. Populated by file-janitor-console.js,
              which mounts it only when the server reports the capability is
@@ -47,6 +73,15 @@
              so there is no second copy to fall out of date or to act on
              unnoticed (FR-100, FR-114). The console mounts itself on <body>. -->
         <div id="downloadsJanitorMount" class="downloads-janitor-mount" hidden></div>
+        <!-- GitHub changes awaiting approval. Populated by
+             github-proposals.js, which mounts it only when this workspace has
+             proposals pending.
+
+             It shows the LITERAL content of each change — the exact comment
+             text, the exact label names — because approving a summary is not
+             informed consent. Nothing here has reached GitHub: a proposal is
+             inert until approved, and approving is the only path that writes. -->
+        <div id="githubProposalsMount" class="github-proposals-mount" hidden></div>
         <!-- Shared blueprint Setup Wizard: status banner + dialog. Mounted here,
              outside #workspaceCommandView, so the banner is visible in both
              Details and Map modes — a workspace that still needs setup says so
@@ -8846,6 +8881,7 @@
        never at load time. -->
   <script type="module" src="/js/modules/workspace-overlay-coordinator.js"></script>
   <script defer src="/js/modules/file-janitor-console.js"></script>
+  <script defer src="/js/modules/github-proposals.js"></script>
   <script defer src="/js/modules/workspace-capabilities.js"></script>
   <!-- The Workshop: named, versioned toolboxes for one agent instance. It
        mounts into #workspace-toolbox-panel, which workspace-command.js renders
