@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/githubhttp"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // githubProposer adapts the agent-facing github_propose_change tool to the
@@ -22,6 +23,48 @@ type githubProposer struct {
 
 func newGitHubProposer(broker *githubhttp.Broker, repos githubhttp.RepoResolver) *githubProposer {
 	return &githubProposer{broker: broker, repos: repos}
+}
+
+// lazyGitHubWorkspaceStore adapts the builder's workspace store to
+// githubhttp.WorkspaceStore, resolving it per call. Handlers are wired in
+// phase 17 and the store is assigned in phase 18, so a value captured here
+// would be nil forever.
+type lazyGitHubWorkspaceStore struct {
+	b *ServerBuilder
+}
+
+func (l lazyGitHubWorkspaceStore) GetFolderWorkspace(id string) (*workspace.Workspace, error) {
+	store := l.b.githubWorkspaceStore()
+	if store == nil {
+		return nil, nil
+	}
+	return store.GetFolderWorkspace(id)
+}
+
+func (l lazyGitHubWorkspaceStore) Save(ws *workspace.Workspace) error {
+	store := l.b.githubWorkspaceStore()
+	if store == nil {
+		return fmt.Errorf("workspace store is unavailable")
+	}
+	return store.Save(ws)
+}
+
+// githubWorkspaceLister enumerates workspace IDs for the linked-workspaces
+// surface. Like githubWorkspaceStore it resolves the store per call, because
+// handlers are wired a phase before it exists.
+type githubWorkspaceLister struct {
+	b *ServerBuilder
+}
+
+func (l githubWorkspaceLister) ListWorkspaceIDs() []string {
+	if l.b == nil || l.b.workspaceStore == nil {
+		return nil
+	}
+	ids, err := l.b.workspaceStore.List()
+	if err != nil {
+		return nil
+	}
+	return ids
 }
 
 // githubWorkspaceStore resolves the workspace store for GitHub repo bindings,

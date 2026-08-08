@@ -20,6 +20,20 @@ type Handler struct {
 	conn   *Connection
 	guard  Guard
 	broker *Broker
+	// workspaces and lister together answer "which workspaces depend on
+	// this connection", derived on demand rather than stored.
+	workspaces WorkspaceStore
+	lister     WorkspaceLister
+}
+
+// WithWorkspaces enables the linked-workspaces surface, which the Settings
+// card uses to warn before a disconnect.
+func (h *Handler) WithWorkspaces(workspaces WorkspaceStore, lister WorkspaceLister) *Handler {
+	if h != nil {
+		h.workspaces = workspaces
+		h.lister = lister
+	}
+	return h
 }
 
 // NewHandler builds the handler. A nil guard leaves routes unwrapped, which
@@ -56,6 +70,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("/api/connections/github/connect", h.wrap(http.HandlerFunc(h.connect)))
 	mux.Handle("/api/connections/github/disconnect", h.wrap(http.HandlerFunc(h.disconnect)))
 	mux.Handle("/api/connections/github/status", h.wrap(http.HandlerFunc(h.status)))
+	mux.Handle("/api/connections/github/linked", h.wrap(http.HandlerFunc(h.linked)))
 }
 
 func (h *Handler) wrap(next http.Handler) http.Handler {

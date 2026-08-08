@@ -42,6 +42,60 @@ func (r *workspaceRepoResolver) BoundRepo(workspaceID string) (string, bool) {
 	return BoundRepo(ws)
 }
 
+// LinkedWorkspace is one workspace depending on the global connection.
+type LinkedWorkspace struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Repo string `json:"repo"`
+}
+
+// WorkspaceLister enumerates workspaces so the connection surface can report
+// which ones depend on it.
+type WorkspaceLister interface {
+	ListWorkspaceIDs() []string
+}
+
+// linkedWorkspaces returns every workspace bound to a GitHub repository.
+//
+// It is derived by walking the workspaces rather than kept as a list on the
+// connection, for the same reason nothing else about the connection is
+// cached: a stored list drifts the moment a workspace is deleted or
+// rebound, and the first symptom would be a disconnect warning naming
+// workspaces that no longer exist.
+func (h *Handler) linkedWorkspaces() []LinkedWorkspace {
+	if h == nil || h.workspaces == nil || h.lister == nil {
+		return nil
+	}
+	var linked []LinkedWorkspace
+	for _, id := range h.lister.ListWorkspaceIDs() {
+		ws, err := h.workspaces.GetFolderWorkspace(id)
+		if err != nil || ws == nil {
+			continue
+		}
+		repo, ok := BoundRepo(ws)
+		if !ok {
+			continue
+		}
+		linked = append(linked, LinkedWorkspace{ID: ws.ID, Name: ws.Name, Repo: repo})
+	}
+	return linked
+}
+
+// linked serves GET /api/connections/github/linked — the workspaces that stop
+// working if this connection goes away. It is what the Settings card warns
+// with before a disconnect.
+func (h *Handler) linked(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	workspaces := h.linkedWorkspaces()
+	if workspaces == nil {
+		workspaces = []LinkedWorkspace{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"workspaces": workspaces})
+}
+
 // RegisterProposalRoutes wires the proposal surface.
 //
 // There is no "apply" endpoint and no "propose and apply" shortcut: the only

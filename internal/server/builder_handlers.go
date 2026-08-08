@@ -375,6 +375,13 @@ func (b *ServerBuilder) initializeHandlers() {
 			githubhttp.NewRepoResolver(b.githubWorkspaceStore),
 			githubhttp.NewExecutor(githubConn),
 		))
+		// Lets Settings report which workspaces depend on the connection,
+		// so a disconnect can say what it will break. Same lazy resolution:
+		// the workspace store does not exist yet at this phase.
+		b.githubHandler.WithWorkspaces(
+			lazyGitHubWorkspaceStore{b: b},
+			githubWorkspaceLister{b: b},
+		)
 		// When a Google MCP server (Calendar/Drive) authorizes, verify the ID
 		// token and attach the grant to this connection (FR 23, 40).
 		mcp.SetGoogleMCPIdentityHook(b.googleMCPIdentityHook)

@@ -46,6 +46,7 @@
         'githubConnLogin',
         'githubConnMeta',
         'githubConnScopes',
+        'githubConnLinked',
         'githubConnBadge',
         'githubConnConfirm',
         'githubConnTokenInput',
@@ -144,7 +145,7 @@
       this.el.githubConnTokenInput?.focus();
     }
 
-    askDisconnect() {
+    async askDisconnect() {
       const host = this.el.githubConnConfirm;
       if (!host) return;
       host.innerHTML = '';
@@ -154,11 +155,16 @@
       title.className = 'gh-confirm-title';
       title.textContent = 'Disconnect GitHub?';
 
+      // Name the workspaces this breaks rather than warning in the
+      // abstract. "2 workspaces will stop working" is a decision the user
+      // can make; "workspaces may be affected" is not.
+      const linked = await this.fetchLinked();
       const note = document.createElement('p');
       note.className = 'gh-meta';
       note.style.margin = '0';
-      note.textContent =
-        'Workspaces using GitHub will stop working until you connect again. Nothing on GitHub is changed.';
+      note.textContent = linked.length
+        ? `${linked.length} workspace${linked.length === 1 ? '' : 's'} use this connection and will stop working until you connect again. Nothing on GitHub is changed, and each workspace keeps its repository.`
+        : 'Nothing on GitHub is changed. No workspaces currently use this connection.';
 
       const actions = document.createElement('div');
       actions.className = 'gh-confirm-actions';
@@ -176,7 +182,53 @@
       cancelBtn.addEventListener('click', () => host.classList.add('d-none'));
 
       actions.append(confirmBtn, cancelBtn);
-      host.append(title, note, actions);
+      host.append(title, note);
+      if (linked.length) host.append(this.buildLinkedList(linked));
+      host.append(actions);
+    }
+
+    async fetchLinked() {
+      const { ok, payload } = await this.request('/api/connections/github/linked', {
+        method: 'GET'
+      });
+      if (!ok || !Array.isArray(payload.workspaces)) return [];
+      return payload.workspaces;
+    }
+
+    buildLinkedList(linked) {
+      const list = document.createElement('ul');
+      list.className = 'gh-linked';
+      linked.forEach(ws => {
+        const item = document.createElement('li');
+        const name = document.createElement('span');
+        name.className = 'gh-linked-name';
+        name.textContent = ws.name || 'Untitled workspace';
+        const repo = document.createElement('span');
+        repo.className = 'gh-perm';
+        repo.textContent = ws.repo || '';
+        item.append(name, document.createTextNode(' · '), repo);
+        list.appendChild(item);
+      });
+      return list;
+    }
+
+    // renderLinked shows the dependent workspaces on the connected card, so
+    // the connection's blast radius is visible before anyone opens the
+    // disconnect dialog.
+    async renderLinked() {
+      const host = this.el.githubConnLinked;
+      if (!host) return;
+      const linked = await this.fetchLinked();
+      host.innerHTML = '';
+      if (!linked.length) {
+        host.classList.add('d-none');
+        return;
+      }
+      const label = document.createElement('div');
+      label.className = 'gh-linked-label';
+      label.textContent = `Used by ${linked.length} workspace${linked.length === 1 ? '' : 's'}`;
+      host.append(label, this.buildLinkedList(linked));
+      host.classList.remove('d-none');
     }
 
     async disconnect() {
@@ -200,6 +252,9 @@
       this.el.githubConnConnected?.classList.remove('d-none');
       this.el.githubConnDisconnected?.classList.add('d-none');
       this.el.githubConnStatus?.classList.add('d-none');
+      // Fire-and-forget: the card is useful before the workspace list
+      // arrives, so it is not worth blocking the render on.
+      void this.renderLinked();
 
       const login = status.login || '';
       if (this.el.githubConnLogin) this.el.githubConnLogin.textContent = login ? '@' + login : '-';

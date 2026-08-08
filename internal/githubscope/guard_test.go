@@ -282,6 +282,42 @@ func TestDefinition_DisclosesTheBinding(t *testing.T) {
 	}
 }
 
+// Two GitHub Ops workspaces share one token but not one repository. Each
+// builds its own guard from its own binding, so neither can reach the other's
+// repo -- which is the only thing that can enforce this, since the shared
+// fine-grained token can read every public repository regardless of scoping.
+func TestTwoWorkspaces_GuardsRefuseEachOthersRepo(t *testing.T) {
+	alphaInner, alpha := wrapOne(t, "octocat/alpha", "list_issues")
+	betaInner, beta := wrapOne(t, "octocat/beta", "list_issues")
+
+	// The alpha workspace's agent aims at beta's repository.
+	if _, err := alpha.Call(context.Background(), `{"owner":"octocat","repo":"beta"}`); err == nil {
+		t.Fatal("the alpha workspace must not reach beta's repository")
+	}
+	if alphaInner.called {
+		t.Fatal("no call may be made against another workspace's repo")
+	}
+
+	// And the reverse.
+	if _, err := beta.Call(context.Background(), `{"owner":"octocat","repo":"alpha"}`); err == nil {
+		t.Fatal("the beta workspace must not reach alpha's repository")
+	}
+	if betaInner.called {
+		t.Fatal("no call may be made against another workspace's repo")
+	}
+
+	// Each still works on its own.
+	if _, err := alpha.Call(context.Background(), `{"owner":"octocat","repo":"alpha"}`); err != nil {
+		t.Fatalf("alpha should reach its own repo: %v", err)
+	}
+	if _, err := beta.Call(context.Background(), `{"owner":"octocat","repo":"beta"}`); err != nil {
+		t.Fatalf("beta should reach its own repo: %v", err)
+	}
+	if !alphaInner.called || !betaInner.called {
+		t.Fatal("each workspace should reach its own repository")
+	}
+}
+
 func TestWrap_DropsNilTools(t *testing.T) {
 	guard, _ := New("octocat/demo")
 	got := guard.Wrap([]toolapi.Tool{nil, &recordingTool{name: "list_issues"}, nil})

@@ -1025,6 +1025,10 @@
               #github-account .gh-confirm{margin-top:0.6rem;padding:0.9rem 1rem;border:1px solid rgba(239,68,68,0.35);border-radius:0.5rem;background:rgba(239,68,68,0.05);display:flex;flex-direction:column;gap:0.55rem}
               #github-account .gh-confirm-title{font-weight:600;color:var(--text-primary)}
               #github-account .gh-confirm-actions{display:flex;gap:0.5rem;margin-top:0.25rem}
+              #github-account .gh-linked-box{margin-top:0.6rem;padding:0.7rem 0.9rem;border:1px solid var(--border-color,rgba(128,128,128,0.2));border-radius:0.5rem;background:rgba(128,128,128,0.04)}
+              #github-account .gh-linked-label{font-size:0.76rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-secondary);margin-bottom:0.35rem}
+              #github-account .gh-linked{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:0.25rem;font-size:0.83rem;color:var(--text-secondary)}
+              #github-account .gh-linked-name{color:var(--text-primary);font-weight:500}
             </style>
             <div class="settings-section-header">
               <span class="settings-section-icon">
@@ -1056,6 +1060,7 @@
                   <span id="githubConnBadge" class="gh-badge ms-auto">Connected</span>
                 </div>
               </div>
+              <div id="githubConnLinked" class="gh-linked-box d-none" aria-live="polite"></div>
               <div id="githubConnConfirm" class="gh-confirm d-none" role="group" aria-label="Disconnect confirmation" aria-live="polite"></div>
               <div class="settings-actions mt-3">
                 <button id="githubConnDisconnectBtn" type="button" class="modern-btn modern-btn-danger">
