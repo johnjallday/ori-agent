@@ -61,6 +61,13 @@
           .ghp-error { margin: 0.5rem 0 0; font-size: 0.82rem; color: #dc2626; }
           .ghp-applied { opacity: 0.75; }
           .ghp-link { font-size: 0.8rem; }
+
+          /* GitHub Ops — the wizard's Connect step */
+          .github-setup-connect { display: flex; flex-direction: column; gap: 0.6rem; margin-top: 0.75rem; }
+          .github-setup-steps { margin: 0; padding-left: 1.15rem; font-size: 0.85rem; color: var(--text-secondary, #9aa0a6); line-height: 1.6; }
+          .github-setup-label { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.82rem; color: var(--text-secondary, #9aa0a6); }
+          .github-setup-input { width: 100%; font-family: var(--font-mono, ui-monospace, monospace); }
+          .github-setup-note { margin: 0; font-size: 0.8rem; color: var(--text-secondary, #9aa0a6); line-height: 1.5; }
         </style>
         <!-- File Janitor compact card. Populated by file-janitor-console.js,
              which mounts it only when the server reports the capability is
@@ -8875,6 +8882,7 @@
   <script defer src="/js/modules/reaper-setup-card.js"></script>
   <script defer src="/js/modules/reaper-readiness-panel.js"></script>
   <script defer src="/js/modules/setup-wizard.js"></script>
+  <script defer src="/js/modules/github-setup-step.js"></script>
   <!-- The one overlay coordinator for this page. It is a module, so it runs
        after the deferred classic scripts below; that is fine because they read
        window.workspaceOverlayCoordinator lazily, when the user opens something,

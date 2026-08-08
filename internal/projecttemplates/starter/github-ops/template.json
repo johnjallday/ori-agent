@@ -17,7 +17,7 @@
   "starter_tasks": [
     {
       "description": "Connect GitHub and pick a repository",
-      "details": "Optional help while the Setup Wizard is open. The wizard owns setup: it reuses the GitHub connection already made in Settings, links this workspace to exactly one repository, and checks that the connection and that repository are both reachable. Your job here is to answer questions about what that means — especially that this workspace reads issues and prepares changes, and never writes anything to GitHub without the user confirming that specific action. The token it uses needs only two permissions: Issues (read and write) and Metadata (read-only); it deliberately has no access to the user's code. Do not connect an account for the user, do not pick a repository for them, do not claim setup is complete, and do not describe the wizard's steps as work you performed. Ori completes this task by itself once setup passes.",
+      "details": "Optional help while the Setup Wizard is open. The wizard owns setup: it connects GitHub (or reuses a connection already made in Settings), links this workspace to exactly one repository, and checks that the connection and that repository are both reachable. Your job here is to answer questions about what that means — especially that this workspace reads issues and prepares changes, and never writes anything to GitHub without the user confirming that specific action. The token it uses needs only two permissions: Issues (read and write) and Metadata (read-only); it deliberately has no access to the user's code. Do not connect an account for the user, do not pick a repository for them, do not claim setup is complete, and do not describe the wizard's steps as work you performed. Ori completes this task by itself once setup passes.",
       "setup": true
     },
     {
@@ -65,7 +65,7 @@
         "adapter": "github_ops",
         "required": true,
         "title": "Connect GitHub",
-        "description": "Ori uses the GitHub connection you have already made in Settings, and links it to this workspace.",
+        "description": "Connect GitHub once. If you have already connected it in Settings, this step just links this workspace to it.",
         "disclosure": "This workspace reads your issues and can prepare changes to them. It never writes anything on its own: a comment, label, or close only reaches GitHub when you confirm that specific action, and you see exactly what will be posted first. The access token is created by you on GitHub and needs only two permissions — Issues (read and write) and Metadata (read-only). Ori never asks for access to your code."
       },
       {
