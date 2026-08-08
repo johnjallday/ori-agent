@@ -250,6 +250,22 @@ const (
 	// a static bearer token, so there is no local binary or Docker
 	// dependency to install.
 	GitHubServerURL = "https://api.githubcopilot.com/mcp/"
+	// GitHubAuthRef pins where the GitHub token lives, independently of the
+	// server's name.
+	//
+	// This is load-bearing, not tidiness. Binding a server to a workspace
+	// materializes a per-workspace copy named
+	// "ws:<workspace>:mcp:github:<binding>", and NormalizedAuthRef derives a
+	// reference from the *name* when AuthRef is empty -- so every workspace
+	// copy would look for a credential under its own unique key and find
+	// none, while the token sat under "mcp:github". The connection would be
+	// green in Settings and every workspace would still report
+	// auth_required with zero tools.
+	//
+	// Pinning it is exactly the credential-sharing case AuthRef was
+	// introduced for, and it is correct here because this connection is
+	// deliberately global: one token, shared by every GitHub workspace.
+	GitHubAuthRef = "mcp:github"
 )
 
 // GitHubServerConfig returns the canonical registry entry for GitHub's hosted
@@ -263,6 +279,7 @@ func GitHubServerConfig() ServerConfig {
 		Name:      GitHubServerName,
 		Transport: TransportStreamableHTTP,
 		URL:       GitHubServerURL,
+		AuthRef:   GitHubAuthRef,
 		AuthMode:  AuthModeStaticBearer,
 		Enabled:   false,
 	}

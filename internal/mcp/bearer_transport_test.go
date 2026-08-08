@@ -462,6 +462,40 @@ func TestHasRemoteCredentials_UsesTheAuthModesOwnQuestion(t *testing.T) {
 	}
 }
 
+// Binding GitHub to a workspace materializes a per-workspace copy under a
+// different NAME. Without a pinned AuthRef each copy would derive its own
+// credential key, find nothing, and report auth_required with zero tools --
+// while Settings still showed a healthy connection.
+func TestGitHubServerConfig_SharesOneCredentialAcrossWorkspaceCopies(t *testing.T) {
+	global := GitHubServerConfig()
+	if global.AuthRef == "" {
+		t.Fatal("the GitHub server must pin an AuthRef so workspace copies share one token")
+	}
+
+	// What materializeRuntimeBinding does: clone the template, rename it.
+	workspaceCopy := global
+	workspaceCopy.Name = "ws:ws-1:mcp:github:binding-1"
+
+	if NormalizedAuthRef(workspaceCopy) != NormalizedAuthRef(global) {
+		t.Fatalf("a workspace copy resolved to %q, want the global %q",
+			NormalizedAuthRef(workspaceCopy), NormalizedAuthRef(global))
+	}
+
+	// And a token stored once is readable through the renamed copy.
+	withFakeCredentialStore(t)
+	ctx := context.Background()
+	if err := SaveStaticBearerToken(ctx, global, testBearerToken); err != nil {
+		t.Fatalf("SaveStaticBearerToken error: %v", err)
+	}
+	got, ok, err := LoadStaticBearerToken(ctx, workspaceCopy)
+	if err != nil || !ok {
+		t.Fatalf("the workspace copy could not read the shared token: ok=%v err=%v", ok, err)
+	}
+	if got != testBearerToken {
+		t.Fatalf("token = %q, want the shared one", got)
+	}
+}
+
 // --- auth mode ---------------------------------------------------------------
 
 func TestNormalizedAuthMode(t *testing.T) {
