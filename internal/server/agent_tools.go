@@ -6,6 +6,8 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/johnjallday/ori-agent/internal/githubhttp"
+	"github.com/johnjallday/ori-agent/internal/mcp"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -80,9 +82,20 @@ func bindWorkspaceMCPServers(b *ServerBuilder, workspaceID string, servers []str
 			}
 		}
 		bound[key] = true
-		if err := ws.UpsertMCPBinding(workspace.MCPBinding{
+		binding := workspace.MCPBinding{
 			ID: uuid.NewString(), ServerName: name, Enabled: true, CreatedAt: now, UpdatedAt: now,
-		}); err == nil {
+		}
+		// A binding created from a blueprint carries no tool restriction,
+		// which is the right default for most servers and the wrong one for
+		// GitHub: its hosted endpoint exposes 44 tools, including
+		// push_files and delete_file, on the same connection an
+		// issue-triage workspace uses. Harden it here so the window between
+		// "workspace created" and "repository chosen" is never a window in
+		// which an agent can reach the user's code.
+		if strings.EqualFold(name, mcp.GitHubServerName) {
+			binding = githubhttp.HardenBinding(binding)
+		}
+		if err := ws.UpsertMCPBinding(binding); err == nil {
 			applied = append(applied, "mcp:"+name)
 			changed = true
 		}

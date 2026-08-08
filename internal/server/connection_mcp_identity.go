@@ -7,6 +7,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/connections"
 	"github.com/johnjallday/ori-agent/internal/drive"
+	"github.com/johnjallday/ori-agent/internal/githubhttp"
 	"github.com/johnjallday/ori-agent/internal/logger"
 )
 
@@ -21,6 +22,14 @@ func connectionProductForMCPEndpoint(endpoint string) connections.ProductKey {
 	default:
 		return ""
 	}
+}
+
+// isGitHubMCPEndpoint reports whether an MCP endpoint is GitHub's hosted
+// server. Matched by host rather than by the registry name, because the
+// exposure hook is keyed by URL and a user could add the same endpoint under
+// any name -- the cap must follow the endpoint, not the label on it.
+func isGitHubMCPEndpoint(endpoint string) bool {
+	return strings.Contains(strings.ToLower(endpoint), "api.githubcopilot.com")
 }
 
 // googleMCPIdentityHook verifies the ID token captured from a Google MCP
@@ -72,6 +81,14 @@ func (b *ServerBuilder) googleMCPIdentityHook(serverName, endpoint, rawIDToken, 
 // its tools regardless of any grant or binding (FR 75). Every other server is
 // unrestricted here; their tools are gated by workspace bindings elsewhere.
 func (b *ServerBuilder) mcpToolExposureAllowed(serverURL, toolName string) bool {
+	// GitHub's hosted MCP server exposes 44 tools, only a dozen of which
+	// belong to an issue-triage workspace; the rest include push_files,
+	// delete_file, and merge_pull_request. Cap it to its allowlist at both
+	// listing and execution, so a denied tool is neither advertised to a
+	// model nor runnable if one names it directly.
+	if isGitHubMCPEndpoint(serverURL) {
+		return githubhttp.IsAllowedTool(toolName)
+	}
 	switch connectionProductForMCPEndpoint(serverURL) {
 	case connections.ProductDrive:
 		if !googleProductEnabled("DRIVE") {
