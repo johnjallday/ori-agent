@@ -147,9 +147,26 @@
       }
 
       ctx.announce(`GitHub connected as @${payload.login || ''}`.trim());
-      // Re-read from the server rather than assuming: the step advances only
-      // because the adapter now reports it satisfied.
-      await ctx.recheck();
+      // Confirm rather than merely recheck. Recheck refreshes the status --
+      // which correctly marked step 1 done -- but leaves the dialog showing
+      // the step the user is standing on, so connecting appeared to do
+      // nothing while the progress header said otherwise. Confirming is the
+      // wizard's own advance path, and it still advances only because the
+      // server re-evaluated the step as satisfied.
+      await ctx.confirm();
+    }
+  };
+
+  // The repository step needs no custom UI -- the wizard's own renderer draws
+  // an options list, which is exactly right for "pick one repository". It
+  // needs a renderer only to CLAIM the step: `capability_configure` is also
+  // registered by Calendar Ops, whose renderer returns early for steps it does
+  // not own without drawing anything, leaving this step with an empty body and
+  // no repositories to choose from.
+  const repositoryStepRenderer = {
+    owns: ownsStep,
+    render(container, ctx) {
+      ctx.renderDefault(container);
     }
   };
 
@@ -157,6 +174,7 @@
     const wizard = window.SetupWizard;
     if (!wizard || typeof wizard.registerStepRenderer !== 'function') return false;
     wizard.registerStepRenderer('account_link', connectStepRenderer);
+    wizard.registerStepRenderer('capability_configure', repositoryStepRenderer);
     return true;
   }
 

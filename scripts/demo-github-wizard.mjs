@@ -73,6 +73,28 @@ try {
       .click();
     await page.waitForTimeout(4000);
     await shot("wizard-after-connect");
+
+    // Step 2 must offer the repositories the token can reach. An empty body
+    // here is the failure this driver exists to catch.
+    const options = page.locator("dialog[open] input[type=radio], dialog[open] .setup-wizard-option");
+    const optionCount = await options.count();
+    console.log(`  repository options offered: ${optionCount}`);
+    if (optionCount > 0) {
+      await options.first().click();
+      await page.waitForTimeout(600);
+      await shot("wizard-repository-step");
+      const label2 = await page
+        .locator("dialog[open] button")
+        .filter({ hasText: /continue|choose an option|approve/i })
+        .first()
+        .textContent()
+        .catch(() => null);
+      console.log(`  primary after choosing: ${JSON.stringify((label2 || "").trim())}`);
+    } else {
+      failures += 1;
+      console.log("  FAILED: the repository step offered nothing to choose");
+      await shot("wizard-repository-step");
+    }
   }
 
   if (problems.length) {
