@@ -2,6 +2,7 @@ package githubhttp
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -43,6 +44,9 @@ type githubAPI struct {
 	user  http.HandlerFunc
 	repos http.HandlerFunc
 	repo  http.HandlerFunc
+	// writeProbe answers the POST .../issues write-capability probe. The
+	// default is 422, meaning "authorized, body rejected, nothing created".
+	writeProbe http.HandlerFunc
 }
 
 func newAdapter(t *testing.T, api githubAPI, ws *agentworkspace.Workspace) (*SetupAdapter, *fakeWorkspaceStore, *fakeCredentialStore) {
@@ -66,6 +70,16 @@ func newAdapter(t *testing.T, api githubAPI, ws *agentworkspace.Workspace) (*Set
 		okUser("octocat")(w, r)
 	})
 	mux.HandleFunc("/repos/", func(w http.ResponseWriter, r *http.Request) {
+		// A POST to .../issues is the write-capability probe, not a repo read.
+		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/issues") {
+			if api.writeProbe != nil {
+				api.writeProbe(w, r)
+				return
+			}
+			// Authorized; the empty body is what was rejected.
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			return
+		}
 		if api.repo != nil {
 			api.repo(w, r)
 			return
@@ -303,20 +317,116 @@ func TestSetupAdapter_ConfirmBindsRepoIdempotently(t *testing.T) {
 	}
 }
 
+// The picker can only offer repositories the token can READ, which is a much
+// wider set than it can write to -- a fine-grained PAT reads every public repo
+// on GitHub. Binding one the token cannot write to would produce a workspace
+// that triages happily and then fails on the first approved change, so the
+// choice is verified before it is recorded.
+func TestSetupAdapter_RefusesRepoTheTokenCannotWriteTo(t *testing.T) {
+	ws := newWorkspace()
+	adapter, wsStore, store := newAdapter(t, githubAPI{
+		repos: reposJSON(`[{"full_name":"someone/readonly","private":false,"open_issues_count":9}]`),
+		// Readable...
+		repo: func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"full_name":"someone/readonly"}`))
+		},
+		// ...but not writable.
+		writeProbe: status(http.StatusForbidden),
+	}, ws)
+	connectToken(t, store)
+
+	_, err := adapter.Confirm(context.Background(),
+		step(agentworkspace.SetupStepKindCapabilityConfigure),
+		setupwizard.StepAction{Type: setupwizard.ActionConfirm, Option: "someone/readonly"})
+
+	// It must be an ERROR, not a blocked readiness: the service discards
+	// Confirm's readiness and re-evaluates, so a readiness-only refusal would
+	// reach the user as a silently unchanged step.
+	if err == nil {
+		t.Fatal("expected Confirm to reject a repo the token cannot write to")
+	}
+	if !errors.Is(err, setupwizard.ErrStepRejected) {
+		t.Fatalf("the refusal must be marked user-safe with ErrStepRejected, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "someone/readonly") {
+		t.Fatalf("the message should name the repo: %v", err)
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "issues") {
+		t.Fatalf("the message should name the permission to fix: %v", err)
+	}
+
+	// Nothing was persisted, so the workspace is not left pointing at a
+	// repository it cannot act on.
+	if _, ok := BoundRepo(ws); ok {
+		t.Fatal("an unwritable repository must not be bound")
+	}
+	if wsStore.saved != 0 {
+		t.Fatalf("expected no workspace save, got %d", wsStore.saved)
+	}
+}
+
+// The probe must not create anything: it sends a body GitHub is guaranteed to
+// reject, and a 422 is the success signal.
+func TestCheckWriteAccess_TreatsUnprocessableAsAuthorized(t *testing.T) {
+	var gotMethod, gotPath, gotBody string
+	store := withFakeStore(t)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/repos/", func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath = r.Method, r.URL.Path
+		buf := make([]byte, 64)
+		n, _ := r.Body.Read(buf)
+		gotBody = string(buf[:n])
+		w.WriteHeader(http.StatusUnprocessableEntity)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	conn := NewConnection(&http.Client{Transport: rewriteHostTransport{target: srv.URL, next: http.DefaultTransport}})
+	connectToken(t, store)
+
+	if err := conn.CheckWriteAccess(context.Background(), "octocat/demo"); err != nil {
+		t.Fatalf("422 must be read as authorized: %v", err)
+	}
+	if gotMethod != http.MethodPost || gotPath != "/repos/octocat/demo/issues" {
+		t.Fatalf("unexpected probe request: %s %s", gotMethod, gotPath)
+	}
+	// An empty object has no title, so GitHub can only reject it -- the
+	// request could never have created an issue.
+	if strings.TrimSpace(gotBody) != "{}" {
+		t.Fatalf("the probe body must be an empty object, got %q", gotBody)
+	}
+}
+
+func TestCheckWriteAccess_RequiresAConnection(t *testing.T) {
+	withFakeStore(t)
+	conn, _ := newFakeGitHub(t, okUser("octocat"))
+
+	err := conn.CheckWriteAccess(context.Background(), "octocat/demo")
+	var connErr *ConnectionError
+	if !errors.As(err, &connErr) || connErr.Category != ErrorCategoryNotConnected {
+		t.Fatalf("expected not_connected, got %v", err)
+	}
+}
+
 // Confirming a malformed reference must not persist anything.
 func TestSetupAdapter_ConfirmRejectsMalformedRepo(t *testing.T) {
 	ws := newWorkspace()
 	adapter, _, store := newAdapter(t, githubAPI{}, ws)
 	connectToken(t, store)
 
-	got, err := adapter.Confirm(context.Background(),
+	_, err := adapter.Confirm(context.Background(),
 		step(agentworkspace.SetupStepKindCapabilityConfigure),
 		setupwizard.StepAction{Type: setupwizard.ActionConfirm, Option: "not-a-repo"})
-	if err != nil {
-		t.Fatalf("Confirm error: %v", err)
+	if err == nil {
+		t.Fatal("expected a malformed repository reference to be rejected")
 	}
-	if got.Ready {
-		t.Fatal("a malformed repository reference must not produce a ready step")
+	if !errors.Is(err, setupwizard.ErrStepRejected) {
+		t.Fatalf("expected ErrStepRejected, got %v", err)
+	}
+	// The message must describe the malformed reference, not whatever GitHub
+	// would have said about a nonsense path.
+	if !strings.Contains(err.Error(), "not a repository reference") {
+		t.Fatalf("unexpected message: %v", err)
 	}
 	if _, ok := BoundRepo(ws); ok {
 		t.Fatal("a malformed repository reference must not be persisted")

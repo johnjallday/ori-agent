@@ -85,6 +85,33 @@ func (a *SetupAdapter) Confirm(ctx context.Context, req setupwizard.StepRequest,
 
 	if req.Step.Kind == agentworkspace.SetupStepKindCapabilityConfigure {
 		if chosen := strings.TrimSpace(action.Option); chosen != "" {
+			// Check the shape before spending a request on it, so a
+			// malformed reference reports what is wrong with it rather than
+			// whatever GitHub says about a nonsense path.
+			if _, _, ok := SplitRepo(chosen); !ok {
+				return setupwizard.StepReadiness{}, fmt.Errorf(
+					"%w: %q is not a repository reference. Choose one from the list.",
+					setupwizard.ErrStepRejected, chosen)
+			}
+			// Verify the token can actually write issues here BEFORE
+			// recording the choice. The picker can only offer repositories
+			// the token can read, which is a much wider set -- binding one
+			// it cannot write to produces a workspace that triages happily
+			// and then fails on the user's first approved change. Checking
+			// once, here, is the whole cost; the ongoing readiness check
+			// stays read-only.
+			if err := a.conn.CheckWriteAccess(ctx, chosen); err != nil {
+				// Returned as an error, not as a blocked readiness: the
+				// service discards Confirm's readiness and re-evaluates, so
+				// an error is the only channel that reaches the user with a
+				// reason. ErrStepRejected marks the message as user-safe,
+				// which a ConnectionError's message contractually is.
+				var connErr *ConnectionError
+				if errors.As(err, &connErr) {
+					return setupwizard.StepReadiness{}, fmt.Errorf("%w: %s", setupwizard.ErrStepRejected, connErr.Message)
+				}
+				return setupwizard.StepReadiness{}, fmt.Errorf("%w: Ori could not check that repository.", setupwizard.ErrStepRejected)
+			}
 			if err := a.bind(req.WorkspaceID, chosen); err != nil {
 				return setupwizard.StepReadiness{
 					Blocked:       true,

@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -410,6 +411,84 @@ func (c *Connection) CheckRepository(ctx context.Context, fullName string) error
 	return nil
 }
 
+// CheckWriteAccess verifies the stored token may write issues to fullName,
+// without creating anything.
+//
+// It POSTs an issue body with no `title`. GitHub authorizes a request before
+// validating its payload, so the response separates the two questions
+// cleanly: 422 means "you were allowed to do this, but the body was invalid"
+// and 403/404 means "you were not allowed". Nothing is created on either
+// path -- a title is required, so the 422 request could never have succeeded.
+//
+// This exists because listing a repository proves nothing about writing to
+// it. A fine-grained token can read every public repository on GitHub
+// regardless of how it is scoped, so the repository picker necessarily offers
+// repositories the token cannot act on. Without this check a workspace
+// configures cleanly, triages happily, and only fails when the user approves
+// their first change -- after the work is done.
+//
+// It runs once, when the repository is chosen. It is deliberately not part of
+// the ongoing readiness check: that runs repeatedly, and a write-shaped call
+// on every re-evaluation is a poor trade for detecting a rare change.
+func (c *Connection) CheckWriteAccess(ctx context.Context, fullName string) error {
+	owner, name, ok := SplitRepo(fullName)
+	if !ok {
+		return &ConnectionError{
+			Category: ErrorCategoryNotConnected,
+			Message:  "No repository is chosen for this workspace yet.",
+		}
+	}
+
+	token, stored, err := mcp.LoadStaticBearerToken(ctx, MCPServerConfig())
+	if err != nil {
+		if errors.Is(err, mcp.ErrCredentialStoreLocked) {
+			return &ConnectionError{
+				Category: ErrorCategoryVaultLocked,
+				Message:  "Your vault is locked. Unlock it to check this repository.",
+			}
+		}
+		return &ConnectionError{
+			Category: ErrorCategoryUnavailable,
+			Message:  "Could not read the saved GitHub connection.",
+		}
+	}
+	if !stored {
+		return &ConnectionError{
+			Category: ErrorCategoryNotConnected,
+			Message:  "GitHub is not connected yet.",
+		}
+	}
+
+	endpoint := fmt.Sprintf("%s/repos/%s/%s/issues", apiBaseURL, url.PathEscape(owner), url.PathEscape(name))
+	resp, err := c.doWithBody(ctx, token, http.MethodPost, endpoint, "{}")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	switch resp.StatusCode {
+	case http.StatusUnprocessableEntity:
+		// Authorized. The empty body was rejected, which is the point.
+		return nil
+	case http.StatusForbidden, http.StatusNotFound:
+		if isRateLimited(resp) {
+			return &ConnectionError{
+				Category: ErrorCategoryRateLimited,
+				Message:  rateLimitMessage(resp),
+				Status:   resp.StatusCode,
+			}
+		}
+		return &ConnectionError{
+			Category: ErrorCategoryInsufficientScope,
+			Message: "This token can read " + fullName +
+				" but cannot post to its issues. Give the token Issues (read and write) access to this repository, or choose a different one.",
+			Status: resp.StatusCode,
+		}
+	default:
+		return classifyResponse(resp)
+	}
+}
+
 // SplitRepo splits an "owner/name" reference. It reports ok == false for
 // anything that is not exactly two non-empty segments, so a malformed binding
 // can never be turned into a request path.
@@ -461,7 +540,16 @@ func (c *Connection) identify(ctx context.Context, token string) (Identity, erro
 // wholesale rather than wrapped, so no URL, header, or token fragment from
 // the underlying error can reach the user.
 func (c *Connection) do(ctx context.Context, token, method, url string) (*http.Response, error) {
-	req, err := http.NewRequestWithContext(ctx, method, url, nil)
+	return c.doWithBody(ctx, token, method, url, "")
+}
+
+// doWithBody issues an authenticated request, optionally with a JSON body.
+func (c *Connection) doWithBody(ctx context.Context, token, method, url, body string) (*http.Response, error) {
+	var reader io.Reader
+	if body != "" {
+		reader = strings.NewReader(body)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, url, reader)
 	if err != nil {
 		return nil, &ConnectionError{
 			Category: ErrorCategoryUnavailable,
@@ -471,6 +559,9 @@ func (c *Connection) do(ctx context.Context, token, method, url string) (*http.R
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	if body != "" {
+		req.Header.Set("Content-Type", "application/json")
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
