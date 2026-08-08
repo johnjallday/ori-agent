@@ -24,16 +24,40 @@
 # each PRD + task list there, then `wt start` fans a single PRD out into its
 # own worktree so one PRD = one branch = one PR.
 
-WORKTREE_DIR="../"
-BASE_BRANCH="dev"
-PROTECTED_WORKTREES=("ori-agent" "ori-agent-dev")
+# Configuration.
+#
+# These live inside a function rather than at the top level on purpose. Claude
+# Code — and anything else that restores a shell from a snapshot of its
+# function definitions — captures `function` bodies but NOT top-level
+# assignments. A restored shell therefore had `wt` defined while every value
+# here was empty, which resolved the worktree root to `/`, the base branch to
+# `origin/`, and emptied PROTECTED_WORKTREES so the removal guard below
+# silently permitted everything. Initializing from inside `wt` keeps the config
+# correct in a restored shell as well as a freshly-sourced one.
+#
+# Each value is only defaulted, never overwritten, so an operator who exports
+# their own WORKTREE_DIR or BASE_BRANCH still wins.
+function wt_config_init {
+  typeset -g WORKTREE_DIR="${WORKTREE_DIR:-../}"
+  typeset -g BASE_BRANCH="${BASE_BRANCH:-dev}"
 
-# Permission mode written into each new feature worktree's
-# .claude/settings.local.json. Feature worktrees are isolated and reviewed at
-# merge, so they run hotter than dev. Options:
-#   acceptEdits       - auto-apply file edits, still gate/deny bash (recommended)
-#   bypassPermissions - skip all prompts, fully unattended (use for headless runs)
-FEATURE_WORKTREE_PERMISSION_MODE="acceptEdits"
+  # Permission mode written into each new feature worktree's
+  # .claude/settings.local.json. Feature worktrees are isolated and reviewed at
+  # merge, so they run hotter than dev. Options:
+  #   acceptEdits       - auto-apply file edits, still gate/deny bash (recommended)
+  #   bypassPermissions - skip all prompts, fully unattended (use for headless runs)
+  typeset -g FEATURE_WORKTREE_PERMISSION_MODE="${FEATURE_WORKTREE_PERMISSION_MODE:-acceptEdits}"
+
+  # Declare first so the count below is safe under `set -u` when the parameter
+  # is entirely unset (the snapshot case). On an array that already has values
+  # this is a no-op and preserves them.
+  typeset -ga PROTECTED_WORKTREES
+  (( ${#PROTECTED_WORKTREES[@]} )) || PROTECTED_WORKTREES=("ori-agent" "ori-agent-dev")
+}
+
+# Initialize at source time as well, so non-`wt` helpers in this file behave the
+# same when the script is sourced normally.
+wt_config_init
 
 unalias wt 2>/dev/null || true
 
@@ -41,6 +65,17 @@ function wt_is_protected_worktree {
   local candidate="$1"
   local candidate_name="${candidate:t}"
   local protected_name
+
+  # Fail closed. An empty list means the config never initialized, and reading
+  # that as "nothing is protected" is exactly what made this guard a silent
+  # no-op: `wt rm ori-agent-dev` would have reached `git worktree remove
+  # --force` plus `git branch -D dev`. Refusing every removal until the config
+  # is sane is the recoverable direction to be wrong in. `${+NAME}` is tested
+  # first so an entirely unset parameter does not trip `set -u` before the
+  # count is reached.
+  if (( ! ${+PROTECTED_WORKTREES} )) || (( ${#PROTECTED_WORKTREES[@]} == 0 )); then
+    return 0
+  fi
 
   for protected_name in "${PROTECTED_WORKTREES[@]}"; do
     if [[ "$candidate_name" == "$protected_name" ]]; then
@@ -439,6 +474,11 @@ function wt_repl {
 }
 
 function wt {
+  # Re-assert config on every invocation. In a snapshot-restored shell the
+  # source-time call above never ran, so this is the only thing standing
+  # between `wt` and an empty WORKTREE_DIR/BASE_BRANCH.
+  wt_config_init
+
   # No args -> interactive REPL. With args -> one-shot dispatch.
   if [[ $# -eq 0 ]]; then
     wt_repl
