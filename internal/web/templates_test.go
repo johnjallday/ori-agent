@@ -618,3 +618,59 @@ func TestWorkspaceDetailFileJanitorContract(t *testing.T) {
 		t.Error("downloads-janitor.js was renamed; a stale script tag would 404")
 	}
 }
+
+// TestRenderHomeCarriesPersonalHQBuildModal guards issue #322.
+//
+// personal-hq-onboarding.js binds the Build My HQ flow by element id, and its
+// modal lookup returns null when the markup is absent — which produced a button
+// that did nothing at all: no console error, no request. The markup originally
+// lived in workspace-hub.tmpl, reachable only from pages/workspaces.tmpl, and
+// went dark the moment `/workspaces` started redirecting to Home.
+//
+// Home loads the script, so Home must carry the modal. Every id asserted here
+// is one the script actually reads; dropping any of them silently breaks a
+// field rather than the whole dialog.
+func TestRenderHomeCarriesPersonalHQBuildModal(t *testing.T) {
+	r := NewTemplateRenderer()
+	if err := r.LoadTemplates(); err != nil {
+		t.Fatalf("LoadTemplates failed: %v", err)
+	}
+
+	html, err := r.RenderTemplate("index", GetDefaultData())
+	if err != nil {
+		t.Fatalf("RenderTemplate(index) failed: %v", err)
+	}
+
+	for _, want := range []string{
+		`id="hqBuildModal"`,
+		`id="hqBuildName"`,
+		`id="hqBuildTimezone"`,
+		`id="hqBuildWorkspaceRoot"`,
+		`id="hqBuildWorkspaceRootBrowseBtn"`,
+		`id="hqBuildWorkspaceRootStatus"`,
+		`id="hqBuildAdvancedToggle"`,
+		`id="hqBuildAdvanced"`,
+		`id="hqBuildTime"`,
+		`id="hqBuildScope"`,
+		`id="hqBuildIncludeFuture"`,
+		`id="hqBuildNotify"`,
+		`id="hqBuildError"`,
+		`id="hqBuildSubmitBtn"`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("Home is missing %s — the Build My HQ flow binds to it (#322)", want)
+		}
+	}
+
+	// The script that binds all of the above must actually load here, otherwise
+	// the modal is inert markup and this test proves nothing.
+	if !strings.Contains(html, "/js/modules/personal-hq-onboarding.js") {
+		t.Error("Home must load personal-hq-onboarding.js to wire the modal above")
+	}
+
+	// Exactly one definition: a second copy would give getElementById an
+	// ambiguous target and let the two dialogs drift apart.
+	if n := strings.Count(html, `id="hqBuildModal"`); n != 1 {
+		t.Errorf(`Home renders id="hqBuildModal" %d times, want exactly 1`, n)
+	}
+}

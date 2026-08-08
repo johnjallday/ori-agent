@@ -1084,13 +1084,30 @@ export function workspaceHydrationAllowed(onboardingGate) {
 }
 
 /**
+ * Is the reserved Personal HQ blueprint site something the map can draw?
+ *
+ * Mirrors hqSiteView() in workspace-map.js, which is the authority: the site
+ * shows exactly while a status has loaded and it is not a valid HQ (either
+ * never built, or built and since broken). No status yet means nothing to draw.
+ */
+export function hqSiteVisible(hqStatus) {
+  return !!hqStatus && !hqStatus.valid;
+}
+
+/**
  * Decide what the workspace area should show for a given load outcome.
  *
  * Loading, error, and empty are distinct states with distinct affordances —
  * FR120 forbids collapsing them, and FR113/FR114 require Retry and the
  * onboarding actions respectively.
  */
-export function workspaceAreaState({ loading, error, workspaces, onboardingGate }) {
+export function workspaceAreaState({
+  loading,
+  error,
+  workspaces,
+  onboardingGate,
+  hqSiteVisible: hqSite = false
+}) {
   if (onboardingGate?.state === ONBOARDING_GATE_LOADING) {
     return {
       state: 'onboarding-loading',
@@ -1119,6 +1136,13 @@ export function workspaceAreaState({ loading, error, workspaces, onboardingGate 
     };
   }
   if (!Array.isArray(workspaces) || workspaces.length === 0) {
+    // FR114 keeps a misleading OPERATIONAL map off an empty account — but the
+    // unbuilt HQ landmark is not operational data, it is the invitation to
+    // build one, and it is the only place Build My HQ lives. Hiding the map for
+    // a brand-new profile hid that invitation from precisely the people Mission
+    // 01 is aimed at (#322). The map already draws its canvas whenever the site
+    // shows (see shellHTML in workspace-map.js); this keeps the two agreeing.
+    if (hqSite) return { state: 'ready', message: '', canRetry: false };
     return { state: 'empty', message: 'No workspaces yet.', canRetry: false };
   }
   return { state: 'ready', message: '', canRetry: false };
@@ -1274,7 +1298,8 @@ import {
       loading: state.loading,
       error: state.error,
       workspaces: state.flattened,
-      onboardingGate: state.onboardingGate
+      onboardingGate: state.onboardingGate,
+      hqSiteVisible: hqSiteVisible(state.hqStatus)
     });
     if (els.areaStatus) {
       els.areaStatus.innerHTML = renderWorkspaceAreaStatusHTML(status);
@@ -1950,6 +1975,7 @@ import {
   /** Personal HQ status, used by Quick Capture. Additive and non-blocking. */
   async function refreshHQStatus() {
     if (!canHydrateWorkspaceData()) return;
+    const hadSite = hqSiteVisible(state.hqStatus);
     try {
       const res = await fetch('/api/personal-hq/status');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -1959,6 +1985,16 @@ import {
       state.hqStatus = null;
     }
     refreshCaptureAvailability();
+    // This request races the workspace load, so on a brand-new profile the area
+    // has usually already settled on `empty` by the time the status lands. The
+    // arriving blueprint site is drawable content, so re-decide — otherwise the
+    // map stays hidden and Build My HQ is unreachable (#322). Re-mount after
+    // the container is visible: a map measured while hidden has no width.
+    if (hqSiteVisible(state.hqStatus) !== hadSite) {
+      renderAreaStatus();
+      renderFilters();
+      mountMap();
+    }
   }
 
   function openItem(id) {

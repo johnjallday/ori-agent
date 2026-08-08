@@ -12,6 +12,22 @@ import { test, expect } from '@playwright/test';
  * of workers: 1) rather than depending on test isolation the shared local
  * server does not provide.
  *
+ * THIS FILE IS NOT RUN BY CI. The only Playwright job in ci.yml is the README
+ * capture; `tests/*.spec.ts` are manual smoke specs. That is how #322 shipped:
+ * the whole suite had been failing since `/workspaces` started redirecting (a
+ * stale URL assertion in the first test, and `describe.serial` skipping the
+ * five after it), and nothing was watching. Treat a green run here as a
+ * release-time check, not a safety net.
+ *
+ * The automated guards for the same defects, which DO run in CI, are:
+ *   - internal/web/templates_test.go — Home renders the build modal at all
+ *   - workspace-map.test.js          — focus intent announces the HQ selection
+ *   - home-workspace-cockpit.test.js — a lone HQ site still renders the map
+ * (the last two via `npm run test:modules`, ci.yml).
+ *
+ * `describe.serial` is kept deliberately: test 3 builds the HQ that tests 4-6
+ * inspect, so running them after it fails would only produce noise.
+ *
  * Scope note: concurrent first-open/scheduled generation, DST gap/fold
  * schedule correctness, and Action Center notification deduplication are
  * already covered by fast, deterministic Go tests (internal/dailybrief,
@@ -41,17 +57,36 @@ test.describe.serial('Personal HQ onboarding and Daily Brief', () => {
     await expect(mission).toContainText('Build My HQ');
     await mission.locator('[data-role="first-mission-action"]').click();
 
-    await expect(page).toHaveURL(/\/workspaces\?view=map&focus=personal-hq/);
+    // The quest link still points at the retired launcher; `/workspaces`
+    // redirects to Home carrying the focus intent (the redirect's own contract
+    // is covered by TestServeWorkspacesRedirect in internal/server).
+    await expect(page).toHaveURL(/\/\?.*focus=personal-hq/);
     await expect(page.locator('#hqOnboardingGuided')).toHaveCount(0);
+
+    // This profile has ZERO workspaces. The map must still render, because the
+    // unbuilt HQ landmark is the whole point of this screen — hiding it as an
+    // "empty" account is how a fresh user lost the only route to Build My HQ
+    // (#322).
+    await expect(page.locator('#cockpitMap')).toBeVisible();
     const site = page.locator('[data-hq-site]');
     await expect(site).toBeVisible();
     await expect(site).toHaveClass(/is-selected/);
     await expect(site).toContainText('Not created');
-    await expect(page.locator('.ws-map-overview-body')).toContainText(
+
+    // Cockpit mode suppresses the map's own overview panel, so the context rail
+    // is where the HQ's choices live — and the ONLY place they live. It has to
+    // follow the map's focus-intent selection with no click from the user (#322).
+    await expect(page.locator('[data-rail-panel="personal-hq"]')).toBeVisible();
+    await expect(page.locator('[data-rail-panel="personal-hq"]')).toContainText(
       'Personal HQ has not been created'
     );
     await expect(page.locator('[data-hq-action="build"]')).toBeVisible();
     await expect(page.locator('[data-hq-action="import"]')).toBeVisible();
+
+    // The dialog those actions open must exist on THIS page. It is hidden until
+    // shown, so presence — not visibility — is the assertion that matters; when
+    // it was absent the button silently did nothing at all (#322).
+    await expect(page.locator('#hqBuildModal')).toHaveCount(1);
     await expect(page.locator('#addFolderModal')).toBeHidden();
 
     await page.locator('[data-hq-action="import"]').click();
@@ -69,7 +104,7 @@ test.describe.serial('Personal HQ onboarding and Daily Brief', () => {
   test('Not now keeps the unbuilt HQ on the Map without a duplicate Home banner', async ({
     page
   }) => {
-    await page.goto('/workspaces?view=map&focus=personal-hq');
+    await page.goto('/?focus=personal-hq');
     await expect(page.locator('[data-hq-site]')).toBeVisible();
     await page.locator('[data-hq-action="skip"]').click();
     await expect(page.locator('[data-hq-site]')).toBeVisible();
@@ -87,8 +122,10 @@ test.describe.serial('Personal HQ onboarding and Daily Brief', () => {
   test('Build My HQ with defaults creates the workspace and Home shows the Daily Brief', async ({
     page
   }) => {
-    await page.goto('/workspaces?view=map&focus=personal-hq');
+    await page.goto('/?focus=personal-hq');
     await expect(page.locator('[data-hq-site]')).toBeVisible();
+    // Reached straight from the URL — no tile click. If the rail did not follow
+    // the map's selection this button would not exist (#322).
     await page.locator('[data-hq-action="build"]').click();
     await expect(page.locator('#hqBuildModal')).toBeVisible();
     await expect(page.locator('#hqBuildWorkspaceRoot')).not.toHaveValue('');
@@ -114,7 +151,7 @@ test.describe.serial('Personal HQ onboarding and Daily Brief', () => {
   test('the workspace Map shows the HQ badge on the designated workspace tile only', async ({
     page
   }) => {
-    await page.goto('/workspaces');
+    await page.goto('/');
     const hqTile = page.locator('.ws-map-tile.is-hq');
     await expect(hqTile).toHaveCount(1);
     await expect(hqTile.locator('.ws-map-tile-hq-badge')).toHaveText('HQ');
