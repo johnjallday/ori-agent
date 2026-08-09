@@ -2047,6 +2047,39 @@
 
   var lastMount = null; // { container, state }
 
+  // Keeping the view centred when the container resizes.
+  //
+  // World coordinates really are viewport-independent — a resize never moves a
+  // building (FR-13, FR-46). The *transform* is not: applyCamera anchors
+  // camera.centerX at the canvas's live horizontal centre, so a canvas that
+  // changes size without a re-mount keeps the translate it was given at its old
+  // width. The content stays pinned to where the old centre was and the space
+  // just gained sits empty beside it.
+  //
+  // Re-applying the camera fixes that framing while preserving the user's pan
+  // and zoom. Deliberately NOT fitAll: refitting on every resize would discard
+  // the view the user chose, and the camera is supposed to survive (FR-106).
+  var resizeObserver = null;
+
+  function stopResizeWatch() {
+    if (resizeObserver && typeof resizeObserver.disconnect === 'function') {
+      resizeObserver.disconnect();
+    }
+    resizeObserver = null;
+  }
+
+  function watchResize(container) {
+    stopResizeWatch();
+    if (typeof ResizeObserver !== 'function' || !container) return;
+    // ResizeObserver already coalesces to one callback per animation frame, so
+    // an animating rail costs one applyCamera per painted frame — a single
+    // style write, no re-render.
+    resizeObserver = new ResizeObserver(function () {
+      if (lastMount && lastMount.container === container) applyCamera(container);
+    });
+    resizeObserver.observe(container);
+  }
+
   // Reuse the page's existing create flow for every create affordance, rather
   // than opening a second Create Workspace path (PRD FR105). The cockpit's
   // button is checked first because the launcher's is absent on Home.
@@ -4575,14 +4608,17 @@
         state.onSelect(selectedId, findWs(workspaces, selectedId) || null);
       }
     }
-    // No resize listener: world coordinates are viewport-independent, so a
-    // resize changes only how much of the world is visible — never where a
-    // building is (FR-13, FR-46).
+    // A resize changes only how much of the world is visible — never where a
+    // building is (FR-13, FR-46). It does still change where the world layer
+    // has to be translated to keep the camera centred, which is all
+    // watchResize re-applies.
+    watchResize(container);
   }
 
   /** Tear down the map view (called when switching away). */
   function unmount(container) {
     if (!container) return;
+    stopResizeWatch();
     closeContextMenu({ restoreFocus: false });
     container.innerHTML = '';
     // Clearing lastMount is what makes a layout response still in flight a

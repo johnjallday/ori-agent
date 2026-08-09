@@ -140,20 +140,53 @@ async function ensureWorkspace(page: Page): Promise<string> {
   return (await res.json())?.folder?.id;
 }
 
+/**
+ * Put the rail into a known state.
+ *
+ * The rail opens on demand — a selection, an attention count, or an unfinished
+ * onboarding mission — so a fixture's rail may already be open before a test
+ * touches it. Clicking the toggle blindly would then close what the test meant
+ * to open, so drive it from the state the cockpit reports.
+ */
+async function setRailOpen(page: Page, open: boolean) {
+  const cockpit = page.locator('#homeCockpit');
+  await expect(cockpit).toHaveAttribute('data-rail-open', /true|false/);
+  if ((await cockpit.getAttribute('data-rail-open')) !== String(open)) {
+    await page.locator('#cockpitRailToggle').click();
+  }
+  await expect(cockpit).toHaveAttribute('data-rail-open', String(open));
+}
+
 test.describe('Home workspace cockpit', () => {
   test.beforeEach(async ({ page }) => {
     await skipOnboarding(page);
   });
 
-  test('renders the cockpit shell with Map active and Today in the rail', async ({ page }) => {
+  test('renders the cockpit shell, and closing the rail gives the map the width', async ({
+    page
+  }) => {
     await ensureWorkspace(page);
     await page.goto('/');
     await expect(page.locator('#homeCockpit')).toBeVisible();
     await expect(page.locator('#homeAssistantInput')).toBeVisible();
     await expect(page.locator('#cockpitMap')).toBeVisible();
     await expect(page.locator('#cockpitTree')).toBeHidden();
-    await expect(page.locator('#cockpitRailToday')).toBeVisible();
     await expect(page.locator('[data-cockpit-view="map"]')).toHaveAttribute('aria-pressed', 'true');
+
+    await setRailOpen(page, true);
+    await expect(page.locator('#cockpitRailToday')).toBeVisible();
+    await expect(page.locator('#cockpitRailToggle')).toHaveAttribute('aria-expanded', 'true');
+    const openWidth = (await page.locator('.cockpit-workspace-area').boundingBox())!.width;
+
+    // The point of the whole change: with the rail closed the workspace area
+    // takes the space the rail was holding, rather than the map living in ~70%
+    // of the window while the rail reports a quiet day.
+    await setRailOpen(page, false);
+    await expect(page.locator('#cockpitRail')).toBeHidden();
+    await expect(page.locator('#cockpitRailToggle')).toHaveAttribute('aria-expanded', 'false');
+    const closedWidth = (await page.locator('.cockpit-workspace-area').boundingBox())!.width;
+    expect(closedWidth).toBeGreaterThan(openWidth);
+
     // FR22: the retired Operations Board must not render anywhere.
     await expect(page.locator('#homeDashboardSections')).toHaveCount(0);
   });
@@ -309,6 +342,12 @@ test.describe('Home workspace cockpit', () => {
       await page.setViewportSize({ width, height });
       await page.goto('/');
       await page.locator('.ws-map-tile[data-ws-id]').first().waitFor();
+
+      // The rail's geometry only exists once it is open, and whether it starts
+      // open depends on the fixture. This test is about where the rail sits
+      // relative to the workspace area, not about when it appears.
+      await setRailOpen(page, true);
+      await expect(page.locator('#cockpitRail')).toBeVisible();
 
       const layout = await page.evaluate(() => {
         const area = document.querySelector('.cockpit-workspace-area')?.getBoundingClientRect();

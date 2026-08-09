@@ -323,16 +323,39 @@
   display: block;
 }
 
+/* Ori's role, carried here because Home no longer renders the fixed launcher
+   that used to be the only surface naming it. The separator is generated so the
+   accessible name stays "Ask Ori App Guide" rather than picking up punctuation
+   (FR-22/FR-27). */
+.cockpit-map-ori__role {
+  color: var(--ori-ink-dim, #7a6647);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.cockpit-map-ori__role::before {
+  content: "·";
+  margin-right: 5px;
+}
+
+[data-bs-theme="dark"] .cockpit-map-ori__role {
+  color: #bfae94;
+}
+
 [data-bs-theme="dark"] .cockpit-map-ori {
   border-color: #574a38;
   background: #2f2820;
   color: #f2e7d5;
 }
 
-/* At narrow widths the header is tight, so this collapses to the sprite alone;
-   the fixed launcher is still available either way. */
+/* At narrow widths the header is tight, so this collapses to the sprite alone.
+   The button keeps its aria-label ("Ask Ori — app guide"), which is what a
+   screen reader announces, so dropping the visible text costs nothing there.
+   On Home the fixed launcher is hidden, making this the only entry point — the
+   sprite therefore has to stay a real, hittable target rather than decoration. */
 @media (max-width: 560px) {
-  .cockpit-map-ori__label {
+  .cockpit-map-ori__label,
+  .cockpit-map-ori__role {
     display: none;
   }
 }
