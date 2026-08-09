@@ -67,9 +67,10 @@ type Assets struct {
 }
 
 // Character is one catalog entry. Note what is deliberately absent: no prompt
-// text, no tool list, no permission, no operational status. A character is
-// presentation and tone only, so assigning one can never grant a capability
-// (FR-73, Non-Goal 6).
+// text, no tool list, no permission, no operational status — and, since the
+// appearance unification, no tone traits or sample speech either. A character
+// is presentation only, so assigning one can never grant a capability or change
+// how an agent behaves (PRD FR-17/FR-22).
 type Character struct {
 	ID           CharacterID `json:"id"`
 	EntryVersion int         `json:"entry_version"`
