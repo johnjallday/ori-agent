@@ -1839,18 +1839,30 @@
     });
   }
 
-  // Upload/remove control, reusing the appearance upload endpoints. Uploads
-  // apply immediately (multipart) and refresh the card + stage avatar.
+  // Upload/remove control, driving the appearance upload endpoints.
+  //
+  // A successful upload also activates Upload mode — that is one server
+  // operation, not two — so the card and hero move to the new image as soon as
+  // the response lands (FR-36). The wording distinguishes replacing an existing
+  // image from adding a first one, and "Remove" is the only destructive word
+  // here: choosing another source elsewhere never deletes this file (FR-38).
   function wireAvatarControl(name, appearance) {
     var host = document.getElementById('ov-avatar-control');
     if (!host) return;
     var hasImage = !!(appearance && appearance.uploaded && appearance.uploaded.image);
     host.innerHTML =
       '<div class="avatar-control">' +
-      '<input type="file" id="ov-avatar-file" aria-label="Upload avatar image" accept="image/png,image/jpeg,image/gif,image/webp" class="avatar-control__file">' +
+      '<input type="file" id="ov-avatar-file" aria-label="' +
+      (hasImage ? 'Replace uploaded image' : 'Upload an image') +
+      '" accept="image/png,image/jpeg,image/gif,image/webp" class="avatar-control__file">' +
       (hasImage
         ? '<button type="button" class="btn-ghost avatar-control__remove" id="ov-avatar-remove">Remove image</button>'
         : '') +
+      // Stating the limits up front is cheaper than a rejected upload, and the
+      // list matches exactly what the server content-sniffs for (FR-63).
+      '<p class="avatar-control__help">PNG, JPEG, GIF, or WebP, up to 5 MB.' +
+      (hasImage ? ' Uploading a new image replaces the current one.' : '') +
+      '</p>' +
       '<span class="avatar-control__status" id="ov-avatar-status" aria-live="polite"></span>' +
       '</div>';
     var file = document.getElementById('ov-avatar-file');
@@ -1886,11 +1898,14 @@
           });
       })
       .then(function (res) {
-        if (res.status >= 200 && res.status < 300) afterAvatarChange(name, status, 'Uploaded.');
-        else if (status) status.textContent = (res.data && res.data.message) || 'Upload failed.';
+        if (res.status >= 200 && res.status < 300) {
+          afterAvatarChange(name, status, 'Uploaded.');
+          return;
+        }
+        failedAvatarChange(name, status, (res.data && res.data.message) || 'Upload failed.');
       })
       .catch(function () {
-        if (status) status.textContent = 'Network error.';
+        failedAvatarChange(name, status, 'Network error — the image was not uploaded.');
       });
   }
 
@@ -1902,11 +1917,34 @@
         return r.status;
       })
       .then(function (code) {
-        if (code >= 200 && code < 300) afterAvatarChange(name, status, 'Removed.');
-        else if (status) status.textContent = 'Remove failed.';
+        if (code >= 200 && code < 300) {
+          afterAvatarChange(name, status, 'Removed.');
+          return;
+        }
+        failedAvatarChange(name, status, 'Remove failed.');
       })
       .catch(function () {
-        if (status) status.textContent = 'Network error.';
+        failedAvatarChange(name, status, 'Network error — the image was not removed.');
+      });
+  }
+
+  // A failed mutation must leave the surface showing the last state the server
+  // actually confirmed, not the one the user was reaching for. Re-rendering the
+  // control from a forced detail fetch is what restores it — clearing the file
+  // input alone would leave a stale "Remove image" button on an agent whose
+  // upload never landed (FR-41).
+  function failedAvatarChange(name, status, message) {
+    if (status) status.textContent = message;
+    fetchDetail(name, true)
+      .then(function (detail) {
+        if (state.selected !== name) return;
+        applyDetailToCollection(name, detail);
+        wireAvatarControl(name, normalizeAppearance(detail.appearance));
+        setAvatarStatus(message);
+      })
+      .catch(function () {
+        // Nothing further to restore from; the message already says the
+        // mutation did not happen.
       });
   }
 

@@ -1324,6 +1324,16 @@ body.agents-roster-page {
   align-items: center;
   gap: 8px;
 }
+/* The accepted formats and size limit take the full row so they read as help
+   rather than as another control competing with the file input (FR-97). */
+.avatar-control__help {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--card-muted);
+}
+
 .avatar-control__status {
   font-size: 12px;
   color: var(--card-muted);

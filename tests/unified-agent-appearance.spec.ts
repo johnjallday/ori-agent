@@ -201,6 +201,63 @@ test.describe('unified agent appearance', () => {
     expect(appearance.character.catalog_id).toBe(characterId);
   });
 
+  test('an uploaded image renders immediately and survives a reload', async ({ page, request }) => {
+    const uploaded = await request.post(
+      `/api/agents/${encodeURIComponent(AGENT)}/appearance/upload`,
+      { multipart: { image: { name: 'demo.png', mimeType: 'image/png', buffer: onePixelPng() } } }
+    );
+    expect(uploaded.ok(), await uploaded.text()).toBeTruthy();
+
+    await page.goto('/agents');
+    await page.waitForSelector(`.agent-avatar[data-aa-name="${AGENT}"]`, { timeout: 15000 });
+    for (const source of await renderedSources(page)) {
+      expect(source.requested).toBe('uploaded');
+      expect(source.rendered).toBe('uploaded');
+    }
+
+    // A reload proves the server is the source of truth, not a local staged
+    // state that merely looked right (FR-41).
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForSelector(`.agent-avatar[data-aa-name="${AGENT}"]`, { timeout: 15000 });
+    for (const source of await renderedSources(page)) {
+      expect(source.rendered).toBe('uploaded');
+    }
+  });
+
+  test('a broken uploaded image falls back to generated without losing the saved mode', async ({
+    page,
+    request
+  }) => {
+    await request.post(`/api/agents/${encodeURIComponent(AGENT)}/appearance/upload`, {
+      multipart: { image: { name: 'demo.png', mimeType: 'image/png', buffer: onePixelPng() } }
+    });
+
+    // Make the stored image unreachable so the runtime failure path runs.
+    await page.route('**/avatars/**', route => route.abort());
+    await page.goto('/agents');
+    await page.waitForSelector(`.agent-avatar[data-aa-name="${AGENT}"]`, { timeout: 15000 });
+
+    const host = page.locator(`.agent-avatar[data-aa-name="${AGENT}"]`).first();
+    await expect(host).toHaveClass(/agent-avatar--generated/);
+    // No broken-image element is ever painted (FR-83)...
+    await expect(host.locator('img')).toHaveCount(0);
+    // ...and the saved mode is untouched, so this reads as "asset unavailable"
+    // rather than "your choice was lost" (FR-84).
+    await expect(host).toHaveAttribute('data-aa-requested', 'uploaded');
+    await expect(host).toHaveAttribute('data-aa-reason', 'asset-load-failed');
+    expect((await appearanceOf(request)).mode).toBe('uploaded');
+  });
+
+  test('a JSON request cannot name an uploaded file', async ({ request }) => {
+    // Allowing this would let a caller point an agent at any filename in the
+    // avatar directory, including one belonging to another agent (FR-8/FR-55).
+    const res = await request.patch(`/api/agents?name=${encodeURIComponent(AGENT)}`, {
+      data: { appearance: { uploaded: { image: 'someone-else.png' } } }
+    });
+    expect(res.status()).toBe(400);
+    expect((await appearanceOf(request)).uploaded).toBeUndefined();
+  });
+
   test('the old avatar route no longer stores an image', async ({ request }) => {
     // The removed route must not proxy to the new one; whatever the generic
     // agent dispatcher makes of the leftover path, it must not upload (FR-62).
