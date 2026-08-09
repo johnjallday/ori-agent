@@ -293,27 +293,23 @@
   margin-top: 14px;
 }
 
-/* ---- Inspector identity section -------------------------------------------- */
+/* ---- Inspector Appearance section ------------------------------------------ */
 
-.identity-mode {
+.appearance-mode {
   margin: 0 0 4px;
   font-weight: 600;
   font-size: 13px;
 }
 
-.identity-explain,
-.identity-readonly {
+.appearance-explain,
+.appearance-readonly {
   margin: 0 0 8px;
   color: var(--text-secondary, #6b7280);
   font-size: 12px;
   line-height: 1.45;
 }
 
-.identity-voice {
-  margin: 0 0 8px;
-  font-size: 12px;
-}
-
+.appearance-choice,
 .identity-choice {
   display: flex;
   flex-wrap: wrap;
@@ -324,6 +320,12 @@
 .identity-choice__state {
   color: var(--text-secondary, #6b7280);
   font-size: 12.5px;
+}
+
+/* Resetting the colour is a secondary action beside the swatch, not a
+   destructive one — nothing else about the appearance changes (FR-31). */
+.appearance-color__reset {
+  margin-left: 8px;
 }
 
 /* ---- narrow ----------------------------------------------------------------- */

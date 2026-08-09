@@ -1,7 +1,6 @@
 package types
 
 import (
-	"strings"
 	"sync"
 	"time"
 )
@@ -81,73 +80,15 @@ type AgentRoutingProfile struct {
 	SideEffects     string   `json:"side_effects,omitempty"`     // none, local_app, external_account, destructive, etc.
 }
 
-// AgentDisplayMode names which visual identity an agent renders. It is stored
-// explicitly rather than inferred from whichever field happens to be non-empty,
-// so trying a curated character and switching back is a reversible choice
-// instead of a destructive one (PRD FR-67).
-type AgentDisplayMode string
-
-const (
-	// DisplayModeFallback renders the deterministic Avatar Identity signature.
-	DisplayModeFallback AgentDisplayMode = "fallback"
-	// DisplayModeUploaded renders the user's uploaded avatar_image.
-	DisplayModeUploaded AgentDisplayMode = "uploaded"
-	// DisplayModeCharacter renders the curated catalog character.
-	DisplayModeCharacter AgentDisplayMode = "character"
-)
-
-// IsValidDisplayMode reports whether m is one of the three known modes. Write
-// paths use this to reject an unknown mode from a direct API call rather than
-// persisting a value no renderer understands (FR-64/FR-75).
-func IsValidDisplayMode(m AgentDisplayMode) bool {
-	switch m {
-	case DisplayModeFallback, DisplayModeUploaded, DisplayModeCharacter:
-		return true
-	}
-	return false
-}
-
-// AgentCharacterIdentity is the agent's curated visual identity and optional
-// tone layer.
+// AgentMetadata contains descriptive and organizational information about an agent.
 //
-// It deliberately stores a catalog ID rather than a filename, so a reviewed
-// replacement asset ships without rewriting agent records (FR-114). It carries
-// no prompt text: the tone layer is derived from the reviewed catalog entry and
-// gated on VoiceEnabled, so character metadata can never smuggle in arbitrary
-// instructions (FR-53/FR-62/FR-75).
-type AgentCharacterIdentity struct {
-	// DisplayMode is the user's explicit choice of what to render. Empty means
-	// the agent predates this field; ResolveDisplayMode infers the legacy
-	// behaviour for those records.
-	DisplayMode AgentDisplayMode `json:"display_mode,omitempty"`
-	// CatalogID is the stable curated character identifier. It is retained when
-	// the user switches to another mode, so switching back restores the same
-	// character without re-picking it (FR-68 applied to characters).
-	CatalogID string `json:"catalog_id,omitempty"`
-	// CatalogVersion records which catalog entry version was chosen, so a later
-	// art revision is detectable without breaking the assignment.
-	CatalogVersion int `json:"catalog_version,omitempty"`
-	// VoiceEnabled turns on the bounded character-tone layer. Off by default:
-	// tone only applies when the user knowingly enables it (FR-60).
-	VoiceEnabled bool `json:"voice_enabled,omitempty"`
-}
-
-// Clone returns a deep copy, so handlers can mutate a candidate identity
-// without touching the stored one.
-func (c *AgentCharacterIdentity) Clone() *AgentCharacterIdentity {
-	if c == nil {
-		return nil
-	}
-	out := *c
-	return &out
-}
-
-// AgentMetadata contains descriptive and organizational information about an agent
+// It deliberately carries no visual-identity fields. An agent's appearance lives
+// in one first-class Appearance object on the agent itself, not scattered across
+// generic metadata as a colour, a filename, and a nested character record that
+// also owned the active mode (PRD FR-1/FR-14).
 type AgentMetadata struct {
 	Description       string               `json:"description,omitempty"`        // Human-readable description of the agent's purpose
 	Tags              []string             `json:"tags,omitempty"`               // Organizational tags for filtering and categorization
-	AvatarColor       string               `json:"avatar_color,omitempty"`       // Color for avatar display (hex color code)
-	AvatarImage       string               `json:"avatar_image,omitempty"`       // Path to custom avatar image (relative to /avatars/)
 	Favorite          bool                 `json:"favorite,omitempty"`           // Whether this agent is marked as favorite
 	ReviewEnabled     *bool                `json:"review_enabled,omitempty"`     // Whether conversation review is enabled for this agent
 	ReviewSensitivity string               `json:"review_sensitivity,omitempty"` // Review sensitivity level: "low", "medium", "high" (default: "medium")
@@ -156,54 +97,12 @@ type AgentMetadata struct {
 	// for this agent when true. Nil means unset; IsExpertMode resolves the
 	// default from the agent's role.
 	ExpertMode *bool `json:"expert_mode,omitempty"`
-	// Character is the agent's curated visual identity and optional tone layer.
-	// Nil on every agent that predates the character system; those keep
-	// rendering through the existing uploaded/fallback priority until the user
-	// picks something (FR-69).
-	Character *AgentCharacterIdentity `json:"character,omitempty"`
-}
 
-// ResolveDisplayMode returns the identity mode this agent should render.
-//
-// An explicit stored mode always wins — that is the whole point of storing it.
-// Records written before the character system have no mode, so they fall back
-// to the historical rule (uploaded image if present, otherwise the generated
-// identity), which is what keeps old agents looking exactly as they did
-// (FR-66/FR-69).
-func (m *AgentMetadata) ResolveDisplayMode() AgentDisplayMode {
-	if m == nil {
-		return DisplayModeFallback
-	}
-	if m.Character != nil && IsValidDisplayMode(m.Character.DisplayMode) {
-		return m.Character.DisplayMode
-	}
-	if strings.TrimSpace(m.AvatarImage) != "" {
-		return DisplayModeUploaded
-	}
-	return DisplayModeFallback
-}
-
-// CharacterCatalogID returns the selected curated character ID, or "" when the
-// agent has never chosen one. The ID is returned regardless of the active
-// display mode: a user who switched to their uploaded avatar has not discarded
-// their character, and the Inspector still shows what it would switch back to.
-func (m *AgentMetadata) CharacterCatalogID() string {
-	if m == nil || m.Character == nil {
-		return ""
-	}
-	return strings.TrimSpace(m.Character.CatalogID)
-}
-
-// IsCharacterVoiceEnabled reports whether the bounded tone layer applies. It
-// requires both an active character display mode and an explicit opt-in, so
-// switching away from a character silently stops its tone layer too (FR-60).
-func (m *AgentMetadata) IsCharacterVoiceEnabled() bool {
-	if m == nil || m.Character == nil {
-		return false
-	}
-	return m.Character.VoiceEnabled &&
-		m.ResolveDisplayMode() == DisplayModeCharacter &&
-		strings.TrimSpace(m.Character.CatalogID) != ""
+	// legacyAppearance holds retired avatar/character fields found while
+	// decoding an old record, for the migration to drain exactly once. It is
+	// unexported so it cannot be serialized back out — see
+	// agent_appearance_legacy.go.
+	legacyAppearance *LegacyAppearance
 }
 
 // IsExpertMode reports whether the agent bypasses stage-based skill slot

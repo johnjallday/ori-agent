@@ -758,21 +758,38 @@ function renderAgentDetails() {
   setPromptEditMode(isEditingPrompt);
 }
 
+// The hero goes through the shared renderer, so this page shows the same active
+// source as the Agents roster instead of its own upload-or-initials rule — the
+// exact drift this feature exists to remove (FR-80/FR-85).
 function renderCurrentAgentAvatar() {
   const avatar = document.getElementById('agentAvatar');
   if (!avatar || !currentAgent) return;
 
-  if (currentAgent.metadata?.avatar_image) {
-    avatar.innerHTML = `<img src="${getAvatarURL(currentAgent.metadata.avatar_image)}" alt="${escapeHtml(currentAgent.name)}" style="width: 100%; height: 100%; object-fit: cover; border-radius: inherit;">`;
-    avatar.style.background = 'transparent';
-    avatar.style.overflow = 'hidden';
+  if (!window.AgentAvatar) {
+    // The renderer is a deferred script; initials keep the box filled if it
+    // somehow has not installed yet.
+    avatar.innerHTML = '';
+    avatar.style.background = getAgentColor(currentAgent);
+    avatar.textContent = getAgentInitials(currentAgent.name);
     return;
   }
 
-  avatar.innerHTML = '';
-  avatar.style.background = getAgentColor(currentAgent);
-  avatar.style.overflow = '';
-  avatar.textContent = getAgentInitials(currentAgent.name);
+  const characterId = currentAgent.appearance?.character?.catalog_id || '';
+  avatar.innerHTML = window.AgentAvatar.markup(
+    {
+      name: currentAgent.name || '',
+      source: currentAgent.source || 'user',
+      role: currentAgent.role || '',
+      appearance: currentAgent.appearance || null,
+      character:
+        characterId && window.CharacterCatalog ? window.CharacterCatalog.get(characterId) : null
+    },
+    { size: 88 }
+  );
+  // The renderer owns the box entirely, so the inline background and overflow
+  // this used to set would only fight its own styles.
+  avatar.style.background = 'transparent';
+  avatar.style.overflow = 'hidden';
 }
 
 function getAvatarURL(filename) {
@@ -864,7 +881,7 @@ function populateProfileForm() {
   const favoriteToggle = document.getElementById('profileFavoriteToggle');
 
   profileSelectedTags = Array.isArray(metadata.tags) ? metadata.tags.slice() : [];
-  profileAvatarImage = metadata.avatar_image || null;
+  profileAvatarImage = currentAgent.appearance?.uploaded?.image || null;
 
   if (nameInput) {
     nameInput.value = currentAgent.name || '';
@@ -877,7 +894,7 @@ function populateProfileForm() {
     descriptionInput.value = metadata.description || '';
   }
   if (colorInput) {
-    colorInput.value = metadata.avatar_color || '#4f46e5';
+    colorInput.value = currentAgent.appearance?.generated?.color || '#4f46e5';
     updateProfileColorPreview(colorInput.value);
   }
   if (favoriteToggle) {
@@ -1005,24 +1022,26 @@ async function uploadProfileAvatarFile(file) {
   previewProfileAvatarFile(file);
 
   const formData = new FormData();
-  formData.append('avatar', file);
+  formData.append('image', file);
 
   try {
     setProfileAvatarStatus('Uploading...');
-    const response = await fetch(`/api/agents/${encodeURIComponent(agentName)}/avatar`, {
+    const response = await fetch(`/api/agents/${encodeURIComponent(agentName)}/appearance/upload`, {
       method: 'POST',
       body: formData
     });
 
     if (!response.ok) {
-      throw new Error(await readResponseError(response, 'Failed to upload avatar'));
+      throw new Error(await readResponseError(response, 'Failed to upload image'));
     }
 
+    // Adopt the server's canonical appearance rather than reconstructing it
+    // locally: the upload also activates Upload mode, and only the response
+    // says so authoritatively (FR-36/FR-41/FR-59).
     const data = await response.json();
-    profileAvatarImage = data.avatar_url?.replace('/avatars/', '') || null;
-    currentAgent.metadata = currentAgent.metadata || {};
-    currentAgent.metadata.avatar_image = profileAvatarImage;
-    setProfileAvatarStatus('Avatar uploaded successfully.', 'success');
+    currentAgent.appearance = data.appearance || currentAgent.appearance;
+    profileAvatarImage = currentAgent.appearance?.uploaded?.image || null;
+    setProfileAvatarStatus('Image uploaded successfully.', 'success');
     updateProfileAvatarPreview();
     renderCurrentAgentAvatar();
   } catch (error) {
@@ -1037,18 +1056,21 @@ async function removeProfileAvatar() {
 
   try {
     setProfileAvatarStatus('Removing...');
-    const response = await fetch(`/api/agents/${encodeURIComponent(agentName)}/avatar`, {
+    const response = await fetch(`/api/agents/${encodeURIComponent(agentName)}/appearance/upload`, {
       method: 'DELETE'
     });
 
     if (!response.ok) {
-      throw new Error(await readResponseError(response, 'Failed to remove avatar'));
+      throw new Error(await readResponseError(response, 'Failed to remove image'));
     }
 
+    // The server decides whether removal also changes the active mode — it does
+    // when Upload was rendering, and does not otherwise — so the response is the
+    // only honest source for the new state (FR-38/FR-39).
+    const data = await response.json();
+    currentAgent.appearance = data.appearance || currentAgent.appearance;
     profileAvatarImage = null;
-    currentAgent.metadata = currentAgent.metadata || {};
-    currentAgent.metadata.avatar_image = '';
-    setProfileAvatarStatus('Avatar removed.', 'success');
+    setProfileAvatarStatus('Image removed.', 'success');
     updateProfileAvatarPreview();
     renderCurrentAgentAvatar();
   } catch (error) {
@@ -1097,7 +1119,9 @@ async function saveProfileChanges() {
   const payload = {
     name: newName,
     description: String(descriptionInput?.value || '').trim(),
-    avatar_color: colorInput?.value || '#4f46e5',
+    // Nested under the canonical appearance object; the retired flat field is
+    // rejected by the server rather than ignored (FR-50/FR-51).
+    appearance: { generated: { color: colorInput?.value || '#4f46e5' } },
     tags: profileSelectedTags,
     favorite: Boolean(favoriteToggle?.checked)
   };
@@ -2409,8 +2433,8 @@ async function confirmDelete() {
 
 // Helper functions
 function getAgentColor(agent) {
-  if (agent.metadata?.avatar_color) {
-    return agent.metadata.avatar_color;
+  if (agent.appearance?.generated?.color) {
+    return agent.appearance.generated.color;
   }
   // Generate color from name
   const hash = agent.name.split('').reduce((acc, char) => {

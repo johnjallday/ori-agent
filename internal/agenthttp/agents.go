@@ -196,7 +196,9 @@ func (h *Handler) handleGet(w http.ResponseWriter, r *http.Request) {
 			"system_prompt":     agent.Settings.SystemPrompt,
 			"allow_web_search":  agent.Settings.IsWebSearchAllowed(),
 			"metadata":          agent.Metadata,
+			"appearance":        appearanceForAgent(agent),
 			"evolution":         cloneAgentEvolution(agent),
+			"version":           agentConfigVersion(agent),
 			"source":            "user",
 		})
 		return
@@ -222,6 +224,10 @@ func (h *Handler) handleGet(w http.ResponseWriter, r *http.Request) {
 		Workspaces     []workspace.WorkspaceRef `json:"workspaces,omitempty"`
 		Status         types.AgentStatus        `json:"status,omitempty"`
 		Evolution      *types.AgentEvolution    `json:"evolution,omitempty"`
+		// Appearance travels with the light-weight list too, so a picker or a
+		// session header can render an agent without a second round trip per
+		// row (FR-49/FR-104).
+		Appearance map[string]any `json:"appearance"`
 	}
 	annotate := func(info AgentInfo) AgentInfo {
 		if m, ok := memberships[strings.ToLower(strings.TrimSpace(info.Name))]; ok {
@@ -241,18 +247,20 @@ func (h *Handler) handleGet(w http.ResponseWriter, r *http.Request) {
 		agent, ok := h.State.GetAgent(name)
 		if ok && agent != nil {
 			agentInfos = append(agentInfos, annotate(AgentInfo{
-				Name:      name,
-				Type:      agent.Type,
-				Source:    "user",
-				Status:    agent.Status,
-				Evolution: cloneAgentEvolution(agent),
+				Name:       name,
+				Type:       agent.Type,
+				Source:     "user",
+				Status:     agent.Status,
+				Evolution:  cloneAgentEvolution(agent),
+				Appearance: appearanceForAgent(agent),
 			}))
 		} else {
 			// Fallback for agents that couldn't be loaded
 			agentInfos = append(agentInfos, annotate(AgentInfo{
-				Name:   name,
-				Type:   "tool-calling", // default
-				Source: "user",
+				Name:       name,
+				Type:       "tool-calling", // default
+				Source:     "user",
+				Appearance: appearanceForAgent(nil),
 			}))
 		}
 	}
@@ -264,10 +272,11 @@ func (h *Handler) handleGet(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			agentInfos = append(agentInfos, AgentInfo{
-				Name:   cliAgentDisplayName(info.Backend),
-				Type:   "research",
-				Source: "cli",
-				Status: getCLIAgentOperationalStatus(info.Backend),
+				Name:       cliAgentDisplayName(info.Backend),
+				Type:       "research",
+				Source:     "cli",
+				Status:     getCLIAgentOperationalStatus(info.Backend),
+				Appearance: appearanceForAgent(nil),
 			})
 		}
 	}
@@ -288,7 +297,6 @@ func (h *Handler) handleCreate(w http.ResponseWriter, r *http.Request) {
 		SystemPrompt    string                     `json:"system_prompt,omitempty"`
 		Description     string                     `json:"description,omitempty"`
 		Tags            []string                   `json:"tags,omitempty"`
-		AvatarColor     string                     `json:"avatar_color,omitempty"`
 		Favorite        bool                       `json:"favorite,omitempty"`
 		LLMProvider     string                     `json:"llm_provider,omitempty"`
 		ReasoningEffort string                     `json:"reasoning_effort,omitempty"`
@@ -300,12 +308,16 @@ func (h *Handler) handleCreate(w http.ResponseWriter, r *http.Request) {
 		// prompt/skills come from the entry. Domain is Specialist-only.
 		CatalogRole string `json:"catalog_role,omitempty"`
 		Domain      string `json:"domain,omitempty"`
-		// Character is the optional curated identity chosen during creation.
-		// Skipping it is a first-class path: the agent simply renders the
-		// deterministic fallback until someone picks one (FR-56/FR-69).
-		Character *characterIdentityRequest `json:"character,omitempty"`
+		// Appearance is the optional visual configuration chosen during
+		// creation. Skipping it is a first-class path: the agent simply renders
+		// the deterministic generated portrait until someone changes it (FR-4).
+		//
+		// An upload cannot be part of this request — the file has nowhere to go
+		// until the agent exists — so a create-time upload is a second call to
+		// the agent-scoped upload endpoint (FR-46).
+		Appearance *appearanceRequest `json:"appearance,omitempty"`
 	}
-	if !orihttp.ParseJSONBody(w, r, &req) {
+	if !parseAgentRequest(w, r, &req) {
 		return
 	}
 	logger.Debug("CreateAgent request", logger.Fields{
@@ -337,10 +349,10 @@ func (h *Handler) handleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate the character choice before the agent exists, so a bad selection
-	// is a clean 400 rather than a half-configured agent left behind.
-	createMeta := &types.AgentMetadata{}
-	if err := applyCharacterIdentity(createMeta, req.Character); err != nil {
+	// Validate the appearance before the agent exists, so a bad selection is a
+	// clean 400 rather than a half-configured agent left behind.
+	createAppearance, err := applyAppearanceRequest(nil, req.Appearance)
+	if err != nil {
 		orihttp.BadRequest(w, err.Error())
 		return
 	}
@@ -365,25 +377,25 @@ func (h *Handler) handleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Set metadata if provided
-	if req.Description != "" || len(req.Tags) > 0 || req.AvatarColor != "" || req.Favorite || req.RoutingProfile != nil || createMeta.Character != nil {
-		agent, ok := h.State.GetAgent(req.Name)
-		if ok && agent != nil {
-			if agent.Metadata == nil {
-				agent.Metadata = &types.AgentMetadata{}
-			}
-			agent.Metadata.Description = req.Description
-			agent.Metadata.Tags = req.Tags
-			agent.Metadata.AvatarColor = req.AvatarColor
-			agent.Metadata.Favorite = req.Favorite
-			agent.Metadata.RoutingProfile = cloneRoutingProfile(req.RoutingProfile)
-			// Persisted in the same successful creation flow as the rest of the
-			// configuration, so a chosen character is never lost between
-			// creating the agent and opening it (FR-93).
-			agent.Metadata.Character = createMeta.Character
-			if err := h.State.SetAgent(req.Name, agent); err != nil {
-				logger.Error("Failed to set metadata", logger.Fields{"err": err})
-			}
+	// Persist metadata and appearance in the same successful creation flow as
+	// the rest of the configuration, so a chosen source is never lost between
+	// creating the agent and opening it.
+	//
+	// Appearance is written unconditionally rather than behind the "did the user
+	// supply anything?" check the metadata fields use: every agent must resolve
+	// to a non-nil Appearance, and the default Generated object is exactly what a
+	// request that omitted the field asked for (FR-4).
+	if created, ok := h.State.GetAgent(req.Name); ok && created != nil {
+		if created.Metadata == nil {
+			created.Metadata = &types.AgentMetadata{}
+		}
+		created.Metadata.Description = req.Description
+		created.Metadata.Tags = req.Tags
+		created.Metadata.Favorite = req.Favorite
+		created.Metadata.RoutingProfile = cloneRoutingProfile(req.RoutingProfile)
+		created.Appearance = createAppearance
+		if err := h.State.SetAgent(req.Name, created); err != nil {
+			logger.Error("Failed to set metadata", logger.Fields{"err": err})
 		}
 	}
 
@@ -401,9 +413,13 @@ func (h *Handler) handleCreate(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Echoing the canonical appearance lets a create-then-upload flow stage its
+	// next call without a second GET, and lets a client see the server-assigned
+	// catalog version it could not choose itself (FR-49/FR-59).
 	orihttp.Success(w, map[string]any{
-		"success": true,
-		"message": "Agent '" + req.Name + "' created successfully",
+		"success":    true,
+		"message":    "Agent '" + req.Name + "' created successfully",
+		"appearance": appearancePayload(createAppearance),
 	})
 }
 
@@ -445,16 +461,15 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		// Metadata
 		Description    *string                    `json:"description,omitempty"`
 		Tags           *[]string                  `json:"tags,omitempty"`
-		AvatarColor    *string                    `json:"avatar_color,omitempty"`
 		Favorite       *bool                      `json:"favorite,omitempty"`
 		RoutingProfile *types.AgentRoutingProfile `json:"routing_profile,omitempty"`
 		// ExpertMode lifts stage-based skill slot caps for this agent (PRD FR13).
 		// Metadata-only; does not touch model/prompt/skills.
 		ExpertMode *bool `json:"expert_mode,omitempty"`
-		// Character selects the agent's curated visual identity and optional
-		// tone layer. Presentation only: it never changes role, model, tools,
-		// skills, permissions, or the uploaded avatar file (FR-64).
-		Character *characterIdentityRequest `json:"character,omitempty"`
+		// Appearance selects the agent's visual source. Presentation only: it
+		// never changes role, model, tools, skills, permissions, routing, or
+		// execution (FR-17).
+		Appearance *appearanceRequest `json:"appearance,omitempty"`
 		// ExpectedVersion is the optimistic-concurrency token the client received
 		// from GET /api/agents/{name}. When present and no longer matching the
 		// stored agent, the update is rejected as stale (PRD FR13). Omitted =
@@ -467,7 +482,7 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		// cannot bypass the UI warning.
 		ConfirmSharedEdit *bool `json:"confirm_shared_edit,omitempty"`
 	}
-	if !orihttp.ParseJSONBody(w, r, &req) {
+	if !parseAgentRequest(w, r, &req) {
 		return
 	}
 
@@ -496,13 +511,14 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	// definition affects every attached workspace. When attached to more than
 	// one workspace, require explicit confirmation and re-check here so a direct
 	// PATCH cannot skip the warning.
-	// A character lives on the shared definition, so changing it is visible in
-	// every workspace the agent is attached to — the same reason avatar_color is
-	// already on this list (FR-92).
+	// Appearance lives on the shared definition — this project deliberately adds
+	// no per-workspace override (FR-43) — so changing it is visible in every
+	// workspace the agent is attached to and gets the same confirmation as a
+	// prompt or model change (FR-42).
 	touchesSharedDefinition := req.SystemPrompt != nil || req.Model != nil || req.LLMProvider != nil ||
-		req.Type != nil || req.Role != nil || req.Tags != nil || req.AvatarColor != nil ||
+		req.Type != nil || req.Role != nil || req.Tags != nil ||
 		req.RoutingProfile != nil || req.Temperature != nil || req.ReasoningEffort != nil ||
-		req.MaxTokens != nil || req.AllowWebSearch != nil || req.Character != nil
+		req.MaxTokens != nil || req.AllowWebSearch != nil || !req.Appearance.isEmpty()
 	confirmed := req.ConfirmSharedEdit != nil && *req.ConfirmSharedEdit
 	if guardsApply && membership.Count > 1 && touchesSharedDefinition && !confirmed {
 		_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{
@@ -564,9 +580,6 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	if req.Tags != nil {
 		agent.Metadata.Tags = *req.Tags
 	}
-	if req.AvatarColor != nil {
-		agent.Metadata.AvatarColor = *req.AvatarColor
-	}
 	if req.Favorite != nil {
 		agent.Metadata.Favorite = *req.Favorite
 	}
@@ -577,12 +590,18 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		expert := *req.ExpertMode
 		agent.Metadata.ExpertMode = &expert
 	}
-	// Applied after the other metadata so a rejected character choice fails the
-	// whole request before anything is written, rather than half-applying.
-	if err := applyCharacterIdentity(agent.Metadata, req.Character); err != nil {
-		orihttp.BadRequest(w, err.Error())
-		return
+	// Validated against a clone and adopted only on success, so a request that
+	// sets a valid colour and then names an unknown character changes neither —
+	// the stored appearance is never left half-applied (FR-58).
+	if !req.Appearance.isEmpty() {
+		nextAppearance, err := applyAppearanceRequest(agent.Appearance, req.Appearance)
+		if err != nil {
+			orihttp.BadRequest(w, err.Error())
+			return
+		}
+		agent.Appearance = nextAppearance
 	}
+	agent.EnsureAppearance()
 
 	newName := agentName
 
@@ -674,8 +693,8 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		if req.Tags != nil {
 			updatedFields = append(updatedFields, "tags")
 		}
-		if req.AvatarColor != nil {
-			updatedFields = append(updatedFields, "avatar_color")
+		if !req.Appearance.isEmpty() {
+			updatedFields = append(updatedFields, "appearance")
 		}
 		if req.Favorite != nil {
 			updatedFields = append(updatedFields, "favorite")
@@ -689,10 +708,14 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// The complete canonical appearance comes back on every update, so an editor
+	// can adopt the confirmed state — including the server-assigned catalog
+	// version — instead of trusting its own staged copy (FR-41/FR-59).
 	orihttp.Success(w, map[string]any{
-		"success": true,
-		"name":    newName,
-		"message": "Agent updated successfully",
+		"success":    true,
+		"name":       newName,
+		"message":    "Agent updated successfully",
+		"appearance": appearanceForAgent(agent),
 	})
 }
 

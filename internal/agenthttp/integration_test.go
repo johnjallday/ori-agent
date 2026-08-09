@@ -163,7 +163,10 @@ func createTestAgent(t *testing.T, ts *TestServer, name, agentType string) {
 		"temperature":  1.0,
 		"description":  "Test agent for integration testing",
 		"tags":         []string{"test", "integration"},
-		"avatar_color": "#007bff",
+		"appearance": map[string]any{
+			"mode":      "generated",
+			"generated": map[string]any{"color": "#007bff"},
+		},
 	}
 
 	rr := ts.doRequest(t, http.MethodPost, "/api/agents", reqBody)
@@ -334,6 +337,30 @@ func TestCompleteAgentLifecycle(t *testing.T) {
 
 		if metadata["description"] != "Test agent for integration testing" {
 			t.Errorf("Expected description, got %v", metadata["description"])
+		}
+
+		// The retired fields must be gone from responses, not merely unused by
+		// the client — a field that still ships is a contract someone will build
+		// on (FR-52).
+		for _, retired := range []string{"avatar_color", "avatar_image", "character"} {
+			if _, present := metadata[retired]; present {
+				t.Errorf("metadata still exposes retired field %q", retired)
+			}
+		}
+
+		appearance, ok := agent["appearance"].(map[string]any)
+		if !ok {
+			t.Fatal("Expected top-level appearance in detail response")
+		}
+		if appearance["mode"] != "generated" {
+			t.Errorf("expected generated mode, got %v", appearance["mode"])
+		}
+		generated, ok := appearance["generated"].(map[string]any)
+		if !ok {
+			t.Fatal("Expected appearance.generated to always be present")
+		}
+		if generated["color"] != "#007bff" {
+			t.Errorf("expected the created colour to survive, got %v", generated["color"])
 		}
 	})
 

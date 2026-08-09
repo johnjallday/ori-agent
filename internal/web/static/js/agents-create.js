@@ -546,7 +546,9 @@ async function createAgent() {
   // Add optional fields
   if (description) requestData.description = description;
   if (systemPrompt) requestData.system_prompt = systemPrompt;
-  if (avatarColor) requestData.avatar_color = avatarColor;
+  // Nested under the canonical appearance object. An omitted appearance is a
+  // first-class path — the agent simply starts Generated (FR-4/FR-50).
+  if (avatarColor) requestData.appearance = { generated: { color: avatarColor } };
   if (selectedTags.length > 0) requestData.tags = selectedTags;
   if (enabledPlugins.length > 0) requestData.enabled_plugins = enabledPlugins;
 

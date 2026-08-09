@@ -260,7 +260,6 @@ func TestAgentMetadata_JSONSerialization(t *testing.T) {
 	metadata := &AgentMetadata{
 		Description: "Test agent",
 		Tags:        []string{"test", "development"},
-		AvatarColor: "#3498db",
 		Favorite:    true,
 		RoutingProfile: &AgentRoutingProfile{
 			MatchPhrases:    []string{"open my latest reaper project"},
@@ -290,10 +289,6 @@ func TestAgentMetadata_JSONSerialization(t *testing.T) {
 
 	if len(decoded.Tags) != len(metadata.Tags) {
 		t.Error("Tags length mismatch after serialization")
-	}
-
-	if decoded.AvatarColor != metadata.AvatarColor {
-		t.Error("AvatarColor mismatch after serialization")
 	}
 
 	if decoded.Favorite != metadata.Favorite {

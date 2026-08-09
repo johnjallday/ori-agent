@@ -1,4 +1,5 @@
-// Tests for agent-avatar.js — Avatar Identity v1 (PRD FR66–FR78).
+// Tests for agent-avatar.js — the shared appearance renderer
+// (unified-agent-appearance FR-80 through FR-84, FR-99 through FR-106).
 //
 // agent-avatar.js is a classic deferred script (it must install itself before
 // the roster controller runs), so it is evaluated in a node:vm sandbox with a
@@ -38,6 +39,29 @@ const { api: AgentAvatar, listeners: docListeners } = load();
 
 function agent(overrides = {}) {
   return { name: 'Atlas', source: 'user', ...overrides };
+}
+
+// appearance builds the canonical object the renderer consumes, so every test
+// exercises the real wire shape rather than a convenience alias (FR-2/FR-81).
+function appearance(mode, { color, image, catalogId } = {}) {
+  const out = { mode, generated: {} };
+  if (color) out.generated.color = color;
+  if (image) out.uploaded = { image };
+  if (catalogId) out.character = { catalog_id: catalogId, catalog_version: 1 };
+  return out;
+}
+
+// A minimal catalog entry, passed in by the caller exactly as a real surface
+// would after resolving the saved catalog id.
+function catalogEntry(overrides = {}) {
+  return {
+    id: 'sable',
+    name: 'Field Scout',
+    familyLabel: 'Explorers',
+    palette: { base: '#123a7a', accent: '#0ea5e9' },
+    assets: { portrait: '/static/img/characters/sable.webp' },
+    ...overrides
+  };
 }
 
 /* ---- determinism (FR69, Success Metric 3) --------------------------------- */
@@ -135,7 +159,7 @@ test('the gradient end is always darker than the base, so contrast cannot drop',
 
 test('a custom avatar colour still gets an ink that clears AA', () => {
   for (const color of ['#ffffff', '#ffe600', '#000000', '#7f7f7f', '#0b4f52']) {
-    const sig = AgentAvatar.signature(agent({ avatarColor: color }));
+    const sig = AgentAvatar.signature(agent({ color: color }));
     assert.ok(
       AgentAvatar.contrastRatio(sig.ink, sig.base) >= 4.5,
       `${color} → ink ${sig.ink} is only ${AgentAvatar.contrastRatio(sig.ink, sig.base).toFixed(2)}:1`
@@ -145,9 +169,9 @@ test('a custom avatar colour still gets an ink that clears AA', () => {
 
 /* ---- custom colour (FR72) ------------------------------------------------- */
 
-test('a valid avatar_color becomes the base but keeps motif, tone, and initials', () => {
+test('a valid colour override becomes the base but keeps motif, tone, and initials', () => {
   const plain = AgentAvatar.signature(agent());
-  const custom = AgentAvatar.signature(agent({ avatarColor: '#7c3aed' }));
+  const custom = AgentAvatar.signature(agent({ color: '#7c3aed' }));
   assert.equal(custom.base, '#7c3aed');
   assert.equal(custom.custom, true);
   assert.equal(custom.paletteId, 'custom');
@@ -164,7 +188,7 @@ test('short hex is expanded and case-normalized', () => {
   assert.equal(AgentAvatar.normalizeHex('#A1B2C3'), '#a1b2c3');
 });
 
-test('an invalid avatar_color is ignored rather than reaching CSS', () => {
+test('an invalid colour override is ignored rather than reaching CSS', () => {
   const plain = AgentAvatar.signature(agent());
   for (const bad of [
     'red',
@@ -176,7 +200,7 @@ test('an invalid avatar_color is ignored rather than reaching CSS', () => {
     'expression(alert(1))',
     ''
   ]) {
-    const sig = AgentAvatar.signature(agent({ avatarColor: bad }));
+    const sig = AgentAvatar.signature(agent({ color: bad }));
     assert.equal(sig.custom, false, `${bad} must not be accepted`);
     assert.equal(sig.base, plain.base);
   }
@@ -220,7 +244,7 @@ test('an unsafe emblem slug is dropped instead of being rendered', () => {
   for (const bad of ['../../x', 'a b', 'x"><script>', 'Diagram3']) {
     assert.equal(AgentAvatar.signature(agent({ roleEmblem: bad })).emblem, '');
   }
-  const html = AgentAvatar.fallbackHTML(agent({ roleEmblem: 'x"><script>alert(1)</script>' }));
+  const html = AgentAvatar.generatedHTML(agent({ roleEmblem: 'x"><script>alert(1)</script>' }));
   assert.ok(!html.includes('<script>'));
 });
 
@@ -319,17 +343,134 @@ test('the fixture spreads across many palettes rather than clustering', () => {
   assert.ok(palettes.size >= 8, `expected wide palette spread, got ${palettes.size}`);
 });
 
-/* ---- image priority and failure (FR67, FR74, FR97) ------------------------ */
+/* ---- explicit mode selection (FR-5, FR-12, FR-82) ------------------------- */
 
-test('a valid uploaded image renders ahead of the fallback', () => {
-  const html = AgentAvatar.markup(agent({ avatarImage: 'atlas.png' }), { size: 72 });
+test('only the named source is requested, whatever else is saved', () => {
+  // The old model inferred the active source from whichever field was
+  // populated. Every case below has all three sources saved at once, so an
+  // inference rule would pick the wrong one.
+  const all = { color: '#7c3aed', image: 'atlas.png', catalogId: 'sable' };
+  const character = catalogEntry();
+
+  const generated = AgentAvatar.resolve(
+    agent({ appearance: appearance('generated', all), character })
+  );
+  assert.equal(generated.mode, 'generated');
+  assert.equal(generated.reason, 'ok');
+
+  const uploaded = AgentAvatar.resolve(
+    agent({ appearance: appearance('uploaded', all), character })
+  );
+  assert.equal(uploaded.mode, 'uploaded');
+  assert.equal(uploaded.uploadedImage, 'atlas.png');
+
+  const chosen = AgentAvatar.resolve(
+    agent({ appearance: appearance('character', all), character })
+  );
+  assert.equal(chosen.mode, 'character');
+  assert.equal(chosen.portrait, character.assets.portrait);
+});
+
+test('an absent or unrecognized mode resolves to generated, not to a guess', () => {
+  // Generated is the source that can always render, which is the only safe
+  // default. Guessing from a populated field is what made switching feel
+  // destructive (FR-13).
+  for (const mode of [undefined, '', 'fallback', 'hologram', 'CHARACTER']) {
+    const res = AgentAvatar.resolve(
+      agent({ appearance: { mode, uploaded: { image: 'atlas.png' } } })
+    );
+    assert.equal(res.mode, 'generated', `mode=${JSON.stringify(mode)}`);
+    assert.equal(res.requested, 'generated');
+  }
+});
+
+test('an agent with no appearance at all still renders', () => {
+  const res = AgentAvatar.resolve(agent());
+  assert.equal(res.mode, 'generated');
+  assert.ok(AgentAvatar.markup(agent()).includes('agent-avatar--generated'));
+});
+
+test('switching the requested source never discards the others', () => {
+  const all = { color: '#7c3aed', image: 'atlas.png', catalogId: 'sable' };
+  for (const mode of ['generated', 'uploaded', 'character']) {
+    const input = agent({ appearance: appearance(mode, all), character: catalogEntry() });
+    const res = AgentAvatar.resolve(input);
+    // The renderer reads inactive state without rendering it, which is what
+    // lets an editor offer "switch back" without a re-upload (FR-11/FR-12).
+    assert.equal(res.color, '#7c3aed');
+    assert.equal(res.catalogId, 'sable');
+    assert.equal(input.appearance.uploaded.image, 'atlas.png');
+  }
+});
+
+/* ---- runtime fallback and its reasons (FR-83, FR-84) ---------------------- */
+
+test('a requested upload with no filename falls back and says why', () => {
+  const res = AgentAvatar.resolve(agent({ appearance: { mode: 'uploaded' } }));
+  assert.equal(res.mode, 'generated');
+  assert.equal(res.reason, 'upload-missing');
+  // The saved choice is intact — only what can be shown right now differs, and
+  // conflating the two would look like the user's choice was lost.
+  assert.equal(res.requested, 'uploaded');
+});
+
+test('a requested character with no catalog entry falls back and says why', () => {
+  const res = AgentAvatar.resolve(
+    agent({ appearance: appearance('character', { catalogId: 'gone' }) })
+  );
+  assert.equal(res.mode, 'generated');
+  assert.equal(res.reason, 'character-missing');
+  assert.equal(res.requested, 'character');
+  assert.equal(res.catalogId, 'gone');
+});
+
+test('a withdrawn entry with no portrait is treated as missing art', () => {
+  const res = AgentAvatar.resolve(
+    agent({
+      appearance: appearance('character', { catalogId: 'sable' }),
+      character: catalogEntry({ assets: {} })
+    })
+  );
+  assert.equal(res.mode, 'generated');
+  assert.equal(res.reason, 'character-missing');
+});
+
+test('a fallen-back agent still renders its own generated portrait', () => {
+  const withUpload = AgentAvatar.markup(agent({ appearance: { mode: 'uploaded' } }));
+  const plain = AgentAvatar.markup(agent());
+  // Visually identical — the fallback is this agent's own portrait, not a
+  // generic placeholder...
+  assert.equal(
+    withUpload.replace(/ data-aa-requested="[^"]*"/, ''),
+    plain.replace(/ data-aa-requested="[^"]*"/, '')
+  );
+  // ...but the saved mode still travels with the element, so an editor reading
+  // the DOM can tell "asset missing" from "user chose generated" (FR-84).
+  assert.ok(withUpload.includes('data-aa-requested="uploaded"'));
+  assert.ok(plain.includes('data-aa-requested="generated"'));
+});
+
+/* ---- uploaded rendering (FR-103, FR-105, FR-106) -------------------------- */
+
+test('a requested upload renders as a lazily decoded image', () => {
+  const html = AgentAvatar.markup(
+    agent({ appearance: appearance('uploaded', { image: 'atlas.png' }) }),
+    {
+      size: 72
+    }
+  );
   assert.ok(html.includes('agent-avatar--image'));
   assert.ok(html.includes('src="/avatars/atlas.png"'));
   assert.ok(!html.includes('agent-avatar__initials'));
 });
 
 test('an uploaded image reserves its box and defers decoding', () => {
-  const html = AgentAvatar.markup(agent({ avatarImage: 'atlas.png' }), { size: 72 });
+  const html = AgentAvatar.markup(
+    agent({ appearance: appearance('uploaded', { image: 'atlas.png' }) }),
+    {
+      size: 72
+    }
+  );
   assert.ok(html.includes('width="72"'));
   assert.ok(html.includes('height="72"'));
   assert.ok(html.includes('loading="lazy"'));
@@ -337,23 +478,77 @@ test('an uploaded image reserves its box and defers decoding', () => {
   assert.ok(html.includes('alt=""'));
 });
 
-test('a blank or whitespace-only image path falls through to the fallback', () => {
+test('a blank or whitespace-only image falls through to generated', () => {
   for (const image of ['', '   ', undefined, null]) {
-    const html = AgentAvatar.markup(agent({ avatarImage: image }));
-    assert.ok(html.includes('agent-avatar--fallback'), `image=${JSON.stringify(image)}`);
+    const html = AgentAvatar.markup(
+      agent({ appearance: { mode: 'uploaded', uploaded: { image } } })
+    );
+    assert.ok(html.includes('agent-avatar--generated'), `image=${JSON.stringify(image)}`);
   }
 });
 
-test('an image path is escaped rather than closing the attribute', () => {
-  const html = AgentAvatar.markup(agent({ avatarImage: 'x" onerror="alert(1)' }));
-  // The payload survives as inert text inside src; what matters is that it
-  // never closes the attribute and so never becomes a live handler.
-  assert.ok(html.includes('src="/avatars/x&quot; onerror=&quot;alert(1)"'));
+test('an image filename is URL-encoded rather than closing the attribute', () => {
+  const html = AgentAvatar.markup(
+    agent({ appearance: appearance('uploaded', { image: 'x" onerror="alert(1)' }) })
+  );
+  // Encoding, not just escaping: the filename lands in a URL, so the quote must
+  // stop being a quote before it reaches the attribute at all (FR-106).
+  assert.ok(!html.includes('onerror='), 'the payload must not survive as markup');
   assert.equal(html.match(/\son[a-z]+="/g), null, 'no live event-handler attribute');
   assert.equal((html.match(/<img/g) || []).length, 1, 'exactly the one intended <img>');
 });
 
-test("a failed image is replaced in place by that agent's own fallback", () => {
+/* ---- character rendering (FR-93, FR-103, FR-106) -------------------------- */
+
+test('a curated portrait renders as a lazily decoded image with a stable box', () => {
+  const html = AgentAvatar.markup(
+    agent({
+      appearance: appearance('character', { catalogId: 'sable' }),
+      character: catalogEntry()
+    }),
+    { size: 72 }
+  );
+  assert.ok(html.includes('agent-avatar--character'));
+  assert.ok(html.includes('src="/static/img/characters/sable.webp"'));
+  assert.ok(html.includes('width="72"'));
+  assert.ok(html.includes('height="72"'));
+  assert.ok(html.includes('loading="lazy"'));
+  assert.ok(html.includes('decoding="async"'));
+  // Decorative: the agent's own name is already text beside it (FR-99).
+  assert.ok(html.includes('aria-hidden="true"'));
+  assert.ok(html.includes('alt=""'));
+});
+
+test('the catalog id travels with the element and cannot break out of it', () => {
+  const html = AgentAvatar.markup(
+    agent({
+      appearance: appearance('character', { catalogId: 'x' }),
+      character: catalogEntry({ id: 'x"><script>alert(1)</script>' })
+    })
+  );
+  assert.ok(!html.includes('<script>'));
+  assert.ok(html.includes('data-aa-character="x&quot;&gt;&lt;script&gt;'));
+});
+
+test('a catalog accent is applied as a bounded custom property', () => {
+  const html = AgentAvatar.markup(
+    agent({
+      appearance: appearance('character', { catalogId: 'sable' }),
+      character: catalogEntry()
+    })
+  );
+  assert.ok(html.includes('--aa-accent:#0ea5e9'));
+  // A palette value that is not a colour must never reach CSS.
+  const hostile = AgentAvatar.markup(
+    agent({
+      appearance: appearance('character', { catalogId: 'sable' }),
+      character: catalogEntry({ palette: { accent: 'red;background:url(evil)' } })
+    })
+  );
+  assert.ok(!hostile.includes('url('));
+});
+
+test("a failed image is replaced in place by that agent's own generated portrait", () => {
   // Minimal element stand-in: the swap only touches dataset, className,
   // attributes, and innerHTML.
   const attrs = {};
@@ -369,11 +564,14 @@ test("a failed image is replaced in place by that agent's own fallback", () => {
       return attrs[k];
     }
   };
-  AgentAvatar.replaceWithFallback(host);
+  AgentAvatar.replaceWithGenerated(host);
 
-  const expected = AgentAvatar.signature({ name: 'Atlas', source: 'user', avatarColor: '#7c3aed' });
-  assert.ok(host.className.includes('agent-avatar--fallback'));
+  const expected = AgentAvatar.signature({ name: 'Atlas', source: 'user', color: '#7c3aed' });
+  assert.ok(host.className.includes('agent-avatar--generated'));
   assert.ok(!host.className.includes('agent-avatar--image'));
+  // The saved mode is untouched and the failure is named, so an editor can
+  // explain the gap rather than implying the choice was lost (FR-84).
+  assert.equal(host.dataset.aaReason, 'asset-load-failed');
   // The failed <img> is gone entirely, so no broken-image glyph can paint.
   assert.ok(!host.innerHTML.includes('<img'));
   assert.ok(host.innerHTML.includes(expected.initials));
@@ -394,7 +592,11 @@ test('size is expressed as a class so CSS can resize a portrait per view', () =>
   // An inline --aa-size would beat any stylesheet rule, so it must not appear.
   for (const size of [54, 72, 88]) {
     assert.ok(!AgentAvatar.markup(agent(), { size }).includes('--aa-size'));
-    assert.ok(!AgentAvatar.markup(agent({ avatarImage: 'a.png' }), { size }).includes('--aa-size'));
+    assert.ok(
+      !AgentAvatar.markup(agent({ appearance: appearance('uploaded', { image: 'a.png' }) }), {
+        size
+      }).includes('--aa-size')
+    );
   }
 });
 
@@ -402,14 +604,14 @@ test('replacing an already-replaced avatar is a no-op', () => {
   let writes = 0;
   const host = {
     dataset: { aaName: 'Atlas', aaSource: 'user', aaFallback: '1' },
-    className: 'agent-avatar agent-avatar--fallback',
+    className: 'agent-avatar agent-avatar--generated',
     style: { getPropertyValue: () => '' },
     innerHTML: 'kept',
     setAttribute() {
       writes++;
     }
   };
-  AgentAvatar.replaceWithFallback(host);
+  AgentAvatar.replaceWithGenerated(host);
   assert.equal(writes, 0);
   assert.equal(host.innerHTML, 'kept');
 });
@@ -423,7 +625,7 @@ test('image failure is handled by one delegated capture listener', () => {
 /* ---- markup contract (FR70, FR76, FR98) ----------------------------------- */
 
 test('the fallback carries initials, motif, and role emblem', () => {
-  const html = AgentAvatar.fallbackHTML(
+  const html = AgentAvatar.generatedHTML(
     agent({ role: 'orchestrator', roleAccent: '#f59e0b', roleEmblem: 'diagram-3' })
   );
   assert.ok(html.includes('agent-avatar__initials'));
@@ -435,11 +637,15 @@ test('the fallback carries initials, motif, and role emblem', () => {
 
 test('the avatar is decorative for assistive technology', () => {
   assert.ok(AgentAvatar.markup(agent()).includes('aria-hidden="true"'));
-  assert.ok(AgentAvatar.markup(agent({ avatarImage: 'a.png' })).includes('aria-hidden="true"'));
+  assert.ok(
+    AgentAvatar.markup(agent({ appearance: appearance('uploaded', { image: 'a.png' }) })).includes(
+      'aria-hidden="true"'
+    )
+  );
 });
 
 test('the fallback needs no image file or remote reference', () => {
-  const html = AgentAvatar.fallbackHTML(agent());
+  const html = AgentAvatar.generatedHTML(agent());
   assert.ok(!/<img/.test(html));
   assert.ok(!/https?:\/\//.test(html));
   assert.ok(!/url\(/.test(html));
@@ -461,7 +667,7 @@ test('agent names are escaped everywhere they reach markup', () => {
 });
 
 test('only tokens this module owns reach the style attribute', () => {
-  const html = AgentAvatar.fallbackHTML(agent({ avatarColor: '#7c3aed', roleAccent: '#f59e0b' }));
+  const html = AgentAvatar.generatedHTML(agent({ color: '#7c3aed', roleAccent: '#f59e0b' }));
   const style = html.match(/style="([^"]*)"/)[1];
   for (const decl of style.split(';')) {
     assert.match(
@@ -474,7 +680,7 @@ test('only tokens this module owns reach the style attribute', () => {
 
 test('motif, turn, and tone are emitted as bounded tokens', () => {
   for (const name of FIXTURE_NAMES) {
-    const html = AgentAvatar.fallbackHTML({ name, source: 'user' });
+    const html = AgentAvatar.generatedHTML({ name, source: 'user' });
     const motif = html.match(/data-aa-motif="([^"]+)"/)[1];
     const turn = Number(html.match(/data-aa-turn="(\d+)"/)[1]);
     const tone = Number(html.match(/data-aa-tone="(\d+)"/)[1]);
@@ -492,6 +698,6 @@ test('optional id and className are applied without breaking the base classes', 
   });
   assert.ok(html.includes('id="stageAvatar"'));
   assert.ok(
-    html.includes('class="agent-avatar agent-avatar--fallback agent-avatar--lg stage__avatar"')
+    html.includes('class="agent-avatar agent-avatar--generated agent-avatar--lg stage__avatar"')
   );
 });

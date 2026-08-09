@@ -2682,7 +2682,10 @@ const sessionManager = {
     }
 
     const colorInput = document.getElementById('editAgentAvatarColor');
-    const colorValue = agent.metadata?.avatar_color || '#4f46e5';
+    // Read from the canonical appearance rather than the retired metadata
+    // field. `#4f46e5` is only the control's placeholder when no override is
+    // saved; an absent colour means "use the deterministic one" (FR-6).
+    const colorValue = agent.appearance?.generated?.color || '#4f46e5';
     if (colorInput) {
       colorInput.value = colorValue;
       this.updateEditAgentColorPreview(colorValue);
@@ -3010,7 +3013,9 @@ const sessionManager = {
       role,
       model,
       description: descriptionInput?.value.trim() || '',
-      avatar_color: colorInput?.value || '#4f46e5',
+      // Nested under the canonical appearance object. The retired flat field is
+      // rejected outright by the server, not ignored (FR-50/FR-51).
+      appearance: { generated: { color: colorInput?.value || '#4f46e5' } },
       tags: this.editAgentSelectedTags,
       favorite: Boolean(favoriteToggle?.checked)
     };
@@ -4539,12 +4544,12 @@ const sessionManager = {
         name: input.name || '',
         source: input.source || 'user',
         role: input.role || '',
-        avatarImage: input.avatarImage || '',
-        avatarColor: input.avatarColor || '',
-        displayMode: input.displayMode || '',
+        // The canonical object is handed over whole. Nothing here re-derives an
+        // active source from the fields that happen to be set (FR-81/FR-82).
+        appearance: input.appearance || null,
         // The catalog lookup is synchronous and returns null until the fetch
         // lands; the resolver treats that as a missing character and falls
-        // back, so a slow catalog never delays rendering the roster.
+        // back, so a slow catalog never delays rendering the roster (FR-103).
         character:
           input.characterId && window.CharacterCatalog
             ? window.CharacterCatalog.get(input.characterId)

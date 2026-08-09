@@ -80,6 +80,10 @@ type AgentListItem struct {
 	Evolution      *types.AgentEvolution    `json:"evolution,omitempty"`
 	AllowWebSearch bool                     `json:"allow_web_search"`
 	Model          string                   `json:"model"`
+	// Appearance is the complete canonical object, always present. The shared
+	// client renderer consumes it directly, so a list row and a detail page
+	// cannot disagree about what an agent looks like (FR-49/FR-80).
+	Appearance map[string]any `json:"appearance"`
 }
 
 // AgentDetailResponse represents detailed agent information
@@ -99,6 +103,10 @@ type AgentDetailResponse struct {
 	MaxOutputTokens int                    `json:"max_output_tokens,omitempty"`
 	SystemPrompt    string                 `json:"system_prompt"`
 	AllowWebSearch  bool                   `json:"allow_web_search"`
+	// Appearance is the complete canonical object, always present — including
+	// for read-only CLI/system agents, which render through the same resolver
+	// but expose no mutation controls (FR-44/FR-49).
+	Appearance map[string]any `json:"appearance"`
 	// Version is an optimistic-concurrency token over the editable definition.
 	// The Agents page echoes it back on update so the server can reject stale
 	// edits (PRD FR13). Empty for CLI agents, which are read-only.
@@ -174,6 +182,7 @@ func (h *DashboardHandler) ListAgentsWithStats(w http.ResponseWriter, r *http.Re
 			Evolution:      cloneAgentEvolution(ag),
 			AllowWebSearch: ag.Settings.IsWebSearchAllowed(),
 			Model:          ag.Settings.Model,
+			Appearance:     appearanceForAgent(ag),
 		}
 
 		// Annotate workspace membership so the UI can group definitions by the
@@ -215,6 +224,12 @@ func (h *DashboardHandler) ListAgentsWithStats(w http.ResponseWriter, r *http.Re
 				Capabilities: []string{"file_operations", "code_generation", "code_analysis"},
 				Status:       status,
 				Model:        defaultModel,
+				// A built-in agent has no stored definition to hold an
+				// appearance, but it still renders through the same resolver.
+				// Handing it the resolved Generated default is what keeps the
+				// client free of a "some agents have no appearance" branch
+				// (FR-44).
+				Appearance: appearanceForAgent(nil),
 			})
 		}
 	}
@@ -281,6 +296,7 @@ func (h *DashboardHandler) GetAgentDetail(w http.ResponseWriter, r *http.Request
 						Status:       getCLIAgentOperationalStatus(backend),
 						Model:        defaultModel,
 						Provider:     backend,
+						Appearance:   appearanceForAgent(nil),
 					}
 					// Attach read-only synced ~/.claude state for the Claude Code agent.
 					if backend == cliagent.BackendClaude && h.claudeSync != nil {
@@ -329,6 +345,7 @@ func (h *DashboardHandler) GetAgentDetail(w http.ResponseWriter, r *http.Request
 		SystemPrompt:    ag.Settings.SystemPrompt,
 		AllowWebSearch:  ag.Settings.IsWebSearchAllowed(),
 		Version:         agentConfigVersion(ag),
+		Appearance:      appearanceForAgent(ag),
 	}
 
 	// Return JSON response
