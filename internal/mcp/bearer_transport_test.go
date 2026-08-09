@@ -675,10 +675,10 @@ func newFakeBearerMCPServer(t *testing.T, acceptToken string) *fakeBearerMCPServ
 func (f *fakeBearerMCPServer) mcpURL() string { return f.server.URL + "/mcp" }
 func (f *fakeBearerMCPServer) close()         { f.server.Close() }
 
-func (f *fakeBearerMCPServer) snapshot() (auths []string, probes int, tool string) {
+func (f *fakeBearerMCPServer) snapshot() (auths []string, probes int) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return append([]string(nil), f.sawAuth...), f.oauthProbes, f.toolCallName
+	return append([]string(nil), f.sawAuth...), f.oauthProbes
 }
 
 func TestServer_StartRemote_StaticBearerConnectsAndListsTools(t *testing.T) {
@@ -710,7 +710,7 @@ func TestServer_StartRemote_StaticBearerConnectsAndListsTools(t *testing.T) {
 		t.Fatalf("status = %s, want %s", got, StatusRunning)
 	}
 
-	auths, probes, _ := fake.snapshot()
+	auths, probes := fake.snapshot()
 	if len(auths) == 0 {
 		t.Fatal("server saw no requests")
 	}
@@ -747,7 +747,7 @@ func TestServer_StartRemote_StaticBearerWithoutTokenReportsAuthRequired(t *testi
 	if got := s.GetStatus(); got != StatusAuthRequired {
 		t.Fatalf("status = %s, want %s", got, StatusAuthRequired)
 	}
-	if _, probes, _ := fake.snapshot(); probes != 0 {
+	if _, probes := fake.snapshot(); probes != 0 {
 		t.Fatalf("expected no OAuth discovery probes, got %d", probes)
 	}
 }

@@ -90,7 +90,7 @@ func (a *SetupAdapter) Confirm(ctx context.Context, req setupwizard.StepRequest,
 			// whatever GitHub says about a nonsense path.
 			if _, _, ok := SplitRepo(chosen); !ok {
 				return setupwizard.StepReadiness{}, fmt.Errorf(
-					"%w: %q is not a repository reference. Choose one from the list.",
+					"%w: %q is not a repository reference — choose one from the list",
 					setupwizard.ErrStepRejected, chosen)
 			}
 			// Verify the token can actually write issues here BEFORE
@@ -110,7 +110,7 @@ func (a *SetupAdapter) Confirm(ctx context.Context, req setupwizard.StepRequest,
 				if errors.As(err, &connErr) {
 					return setupwizard.StepReadiness{}, fmt.Errorf("%w: %s", setupwizard.ErrStepRejected, connErr.Message)
 				}
-				return setupwizard.StepReadiness{}, fmt.Errorf("%w: Ori could not check that repository.", setupwizard.ErrStepRejected)
+				return setupwizard.StepReadiness{}, fmt.Errorf("%w: Ori could not check that repository", setupwizard.ErrStepRejected)
 			}
 			if err := a.bind(req.WorkspaceID, chosen); err != nil {
 				return setupwizard.StepReadiness{

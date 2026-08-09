@@ -100,7 +100,8 @@ func (c Change) Hash() string {
 		for _, p := range parts {
 			// The length prefix stops ("ab","c") and ("a","bc") hashing
 			// alike, which would let an edit slip past the check.
-			fmt.Fprintf(h, "%d:%s|", len(p), p)
+			// hash.Hash never returns an error from Write.
+			_, _ = fmt.Fprintf(h, "%d:%s|", len(p), p)
 		}
 	}
 	write(string(c.Kind), c.Repo, fmt.Sprint(c.Issue), c.Body, c.State, c.StateReason, c.Rationale)

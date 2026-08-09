@@ -102,7 +102,7 @@ func TestStatus_CannotCarryTheToken(t *testing.T) {
 	store.byRef[authRef] = mcp.RemoteCredential{
 		AuthRef: authRef, AccessToken: testToken, TokenType: mcp.StaticBearerTokenType,
 	}
-	conn, _ := newFakeGitHub(t, okUser("octocat"))
+	conn, _ := newFakeGitHub(t, okUser())
 
 	encoded, err := json.Marshal(conn.Status(context.Background()))
 	if err != nil {

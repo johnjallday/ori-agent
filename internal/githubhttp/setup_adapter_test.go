@@ -67,7 +67,7 @@ func newAdapter(t *testing.T, api githubAPI, ws *agentworkspace.Workspace) (*Set
 			api.user(w, r)
 			return
 		}
-		okUser("octocat")(w, r)
+		okUser()(w, r)
 	})
 	mux.HandleFunc("/repos/", func(w http.ResponseWriter, r *http.Request) {
 		// A POST to .../issues is the write-capability probe, not a repo read.
@@ -257,7 +257,7 @@ func TestSetupAdapter_NarrowerTokenCannotReachBoundRepo(t *testing.T) {
 	}
 	adapter, _, store := newAdapter(t, githubAPI{
 		// The connection itself is fine...
-		user: okUser("octocat"),
+		user: okUser(),
 		// ...but this repo is invisible to the token now.
 		repo: status(http.StatusNotFound),
 	}, ws)
@@ -399,7 +399,7 @@ func TestCheckWriteAccess_TreatsUnprocessableAsAuthorized(t *testing.T) {
 
 func TestCheckWriteAccess_RequiresAConnection(t *testing.T) {
 	withFakeStore(t)
-	conn, _ := newFakeGitHub(t, okUser("octocat"))
+	conn, _ := newFakeGitHub(t, okUser())
 
 	err := conn.CheckWriteAccess(context.Background(), "octocat/demo")
 	var connErr *ConnectionError

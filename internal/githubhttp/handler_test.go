@@ -45,7 +45,7 @@ func decode(t *testing.T, rec *httptest.ResponseRecorder) map[string]any {
 }
 
 func TestConnectEndpoint_ReturnsIdentityNeverTheToken(t *testing.T) {
-	h, store := newTestHandler(t, okUser("octocat"))
+	h, store := newTestHandler(t, okUser())
 
 	rec := do(t, h, http.MethodPost, "/api/connections/github/connect", `{"token":"`+testToken+`"}`)
 	if rec.Code != http.StatusOK {
@@ -112,7 +112,7 @@ func TestConnectEndpoint_MapsCategoriesToStatusCodes(t *testing.T) {
 }
 
 func TestConnectEndpoint_RejectsMalformedBody(t *testing.T) {
-	h, _ := newTestHandler(t, okUser("octocat"))
+	h, _ := newTestHandler(t, okUser())
 	rec := do(t, h, http.MethodPost, "/api/connections/github/connect", `{not json`)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", rec.Code)
@@ -120,7 +120,7 @@ func TestConnectEndpoint_RejectsMalformedBody(t *testing.T) {
 }
 
 func TestConnectEndpoint_RejectsNonPost(t *testing.T) {
-	h, _ := newTestHandler(t, okUser("octocat"))
+	h, _ := newTestHandler(t, okUser())
 	rec := do(t, h, http.MethodGet, "/api/connections/github/connect", "")
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("status = %d, want 405", rec.Code)
@@ -128,7 +128,7 @@ func TestConnectEndpoint_RejectsNonPost(t *testing.T) {
 }
 
 func TestStatusEndpoint_ReportsConnectionWithoutToken(t *testing.T) {
-	h, store := newTestHandler(t, okUser("octocat"))
+	h, store := newTestHandler(t, okUser())
 	authRef := mcp.NormalizedAuthRef(MCPServerConfig())
 	store.byRef[authRef] = mcp.RemoteCredential{
 		AuthRef:     authRef,
@@ -150,7 +150,7 @@ func TestStatusEndpoint_ReportsConnectionWithoutToken(t *testing.T) {
 }
 
 func TestStatusEndpoint_ReportsDisconnectedWhenNoToken(t *testing.T) {
-	h, _ := newTestHandler(t, okUser("octocat"))
+	h, _ := newTestHandler(t, okUser())
 
 	rec := do(t, h, http.MethodGet, "/api/connections/github/status", "")
 	if rec.Code != http.StatusOK {
@@ -166,7 +166,7 @@ func TestStatusEndpoint_ReportsDisconnectedWhenNoToken(t *testing.T) {
 }
 
 func TestDisconnectEndpoint_IsIdempotent(t *testing.T) {
-	h, store := newTestHandler(t, okUser("octocat"))
+	h, store := newTestHandler(t, okUser())
 
 	if _, err := h.conn.Connect(context.Background(), testToken); err != nil {
 		t.Fatalf("Connect error: %v", err)
@@ -190,7 +190,7 @@ func TestDisconnectEndpoint_IsIdempotent(t *testing.T) {
 // Every response on this surface carries a credential-adjacent payload and
 // must not be cached.
 func TestResponses_AreNoStore(t *testing.T) {
-	h, _ := newTestHandler(t, okUser("octocat"))
+	h, _ := newTestHandler(t, okUser())
 	for _, route := range []struct {
 		method string
 		path   string
@@ -210,7 +210,7 @@ func TestResponses_AreNoStore(t *testing.T) {
 // The guard must actually be applied when one is supplied.
 func TestRoutes_RespectGuard(t *testing.T) {
 	withFakeStore(t)
-	conn, _ := newFakeGitHub(t, okUser("octocat"))
+	conn, _ := newFakeGitHub(t, okUser())
 	h := NewHandler(conn, blockingGuard{})
 
 	mux := http.NewServeMux()

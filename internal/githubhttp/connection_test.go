@@ -129,10 +129,12 @@ func (f *fakeGitHub) snapshot() ([]string, int) {
 	return append([]string(nil), f.sawAuth...), f.requests
 }
 
-func okUser(login string) http.HandlerFunc {
+// okUser answers GET /user as a healthy connection. Every test that needs a
+// login needs the same one, so it is fixed here rather than passed in.
+func okUser() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"login":"` + login + `"}`))
+		_, _ = w.Write([]byte(`{"login":"octocat"}`))
 	}
 }
 
@@ -144,7 +146,7 @@ func status(code int) http.HandlerFunc {
 
 func TestConnect_StoresTokenOnlyAfterSuccessfulValidation(t *testing.T) {
 	store := withFakeStore(t)
-	conn, fake := newFakeGitHub(t, okUser("octocat"))
+	conn, fake := newFakeGitHub(t, okUser())
 
 	identity, err := conn.Connect(context.Background(), "  "+testToken+"  ")
 	if err != nil {
@@ -195,7 +197,7 @@ func TestConnect_DoesNotStoreOrReplaceOnValidationFailure(t *testing.T) {
 
 func TestConnect_RejectsEmptyToken(t *testing.T) {
 	withFakeStore(t)
-	conn, fake := newFakeGitHub(t, okUser("octocat"))
+	conn, fake := newFakeGitHub(t, okUser())
 
 	_, err := conn.Connect(context.Background(), "   ")
 	if err == nil {
@@ -213,7 +215,7 @@ func TestConnect_RejectsEmptyToken(t *testing.T) {
 func TestConnect_StorageFailureDoesNotLeakToken(t *testing.T) {
 	store := withFakeStore(t)
 	store.failSave = true
-	conn, _ := newFakeGitHub(t, okUser("octocat"))
+	conn, _ := newFakeGitHub(t, okUser())
 
 	_, err := conn.Connect(context.Background(), testToken)
 	if err == nil {
@@ -226,7 +228,7 @@ func TestConnect_StorageFailureDoesNotLeakToken(t *testing.T) {
 
 func TestTestConnection_NotConnected(t *testing.T) {
 	withFakeStore(t)
-	conn, fake := newFakeGitHub(t, okUser("octocat"))
+	conn, fake := newFakeGitHub(t, okUser())
 
 	_, err := conn.TestConnection(context.Background())
 	var connErr *ConnectionError
@@ -313,7 +315,7 @@ func TestTestConnection_ClassifiesFailures(t *testing.T) {
 func TestTestConnection_LockedVaultIsItsOwnState(t *testing.T) {
 	store := withFakeStore(t)
 	store.lockedLoad = true
-	conn, fake := newFakeGitHub(t, okUser("octocat"))
+	conn, fake := newFakeGitHub(t, okUser())
 
 	_, err := conn.TestConnection(context.Background())
 	var connErr *ConnectionError
@@ -337,7 +339,7 @@ func TestTestConnection_LockedVaultIsItsOwnState(t *testing.T) {
 func TestTestConnection_StorageFailureDoesNotLeakToken(t *testing.T) {
 	store := withFakeStore(t)
 	store.failLoad = true
-	conn, _ := newFakeGitHub(t, okUser("octocat"))
+	conn, _ := newFakeGitHub(t, okUser())
 
 	_, err := conn.TestConnection(context.Background())
 	if err == nil {
@@ -393,7 +395,7 @@ func TestStatus_ReflectsLiveTokenStateNotSavedState(t *testing.T) {
 
 func TestDisconnect_RemovesTokenAndIsIdempotent(t *testing.T) {
 	store := withFakeStore(t)
-	conn, _ := newFakeGitHub(t, okUser("octocat"))
+	conn, _ := newFakeGitHub(t, okUser())
 
 	if _, err := conn.Connect(context.Background(), testToken); err != nil {
 		t.Fatalf("Connect error: %v", err)

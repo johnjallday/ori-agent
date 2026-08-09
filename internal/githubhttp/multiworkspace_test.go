@@ -33,7 +33,7 @@ func TestSecondWorkspace_ReusesTheConnectionWithoutReprompting(t *testing.T) {
 		"ws-1": first, "ws-2": second,
 	}}
 
-	conn, _ := newFakeGitHub(t, okUser("octocat"))
+	conn, _ := newFakeGitHub(t, okUser())
 	adapter := NewSetupAdapter(conn, workspaces)
 	connectToken(t, store)
 
