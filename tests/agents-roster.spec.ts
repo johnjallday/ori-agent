@@ -690,7 +690,7 @@ test.describe('Agents gallery', () => {
       expect(new Set(Object.values(first)).size).toBe(3);
 
       // Every fallback renders locally — no <img>, no remote reference (FR98).
-      const imgs = await page.locator('.roster-card .agent-avatar--fallback img').count();
+      const imgs = await page.locator('.roster-card .agent-avatar--generated img').count();
       expect(imgs).toBe(0);
     } finally {
       for (const n of names) {
@@ -718,8 +718,8 @@ test.describe('Agents gallery', () => {
 
     try {
       const upload = await request.post(
-        `${baseUrl}/api/agents/${encodeURIComponent(name)}/avatar`,
-        { multipart: { avatar: { name: 'a.png', mimeType: 'image/png', buffer: png } } }
+        `${baseUrl}/api/agents/${encodeURIComponent(name)}/appearance/upload`,
+        { multipart: { image: { name: 'a.png', mimeType: 'image/png', buffer: png } } }
       );
       expect(upload.ok()).toBeTruthy();
 
@@ -739,12 +739,12 @@ test.describe('Agents gallery', () => {
 
       // Removing it restores the deterministic identity (FR67/FR75).
       const removed = await request.delete(
-        `${baseUrl}/api/agents/${encodeURIComponent(name)}/avatar`
+        `${baseUrl}/api/agents/${encodeURIComponent(name)}/appearance/upload`
       );
       expect(removed.ok()).toBeTruthy();
       await page.reload({ waitUntil: 'domcontentloaded' });
       await page.locator('#rosterSearch').fill(name);
-      await expect(card(page, name).locator('.agent-avatar')).toHaveClass(/agent-avatar--fallback/);
+      await expect(card(page, name).locator('.agent-avatar')).toHaveClass(/agent-avatar--generated/);
       await expect(card(page, name).locator('.agent-avatar__initials')).toBeVisible();
     } finally {
       await request
@@ -767,8 +767,8 @@ test.describe('Agents gallery', () => {
     );
 
     try {
-      await request.post(`${baseUrl}/api/agents/${encodeURIComponent(name)}/avatar`, {
-        multipart: { avatar: { name: 'a.png', mimeType: 'image/png', buffer: png } }
+      await request.post(`${baseUrl}/api/agents/${encodeURIComponent(name)}/appearance/upload`, {
+        multipart: { image: { name: 'a.png', mimeType: 'image/png', buffer: png } }
       });
 
       await page.addInitScript(() => window.localStorage.setItem('ori-theme', 'dark'));
@@ -786,7 +786,7 @@ test.describe('Agents gallery', () => {
       await page.locator('#rosterSearch').fill(name);
 
       const avatar = card(page, name).locator('.agent-avatar');
-      await expect(avatar).toHaveClass(/agent-avatar--fallback/);
+      await expect(avatar).toHaveClass(/agent-avatar--generated/);
       await expect(avatar.locator('img')).toHaveCount(0);
       await expect(avatar.locator('.agent-avatar__initials')).toBeVisible();
     } finally {
@@ -928,7 +928,7 @@ test.describe('Agents single-agent editing', () => {
     try {
       await openAgent(page, name);
       const card = page.locator(`.roster-card[data-name="${name}"]`);
-      await expect(card.locator('.agent-avatar')).toHaveClass(/agent-avatar--fallback/);
+      await expect(card.locator('.agent-avatar')).toHaveClass(/agent-avatar--generated/);
 
       await page.locator('#ov-avatar-file').setInputFiles({
         name: 'a.png',
@@ -944,8 +944,8 @@ test.describe('Agents single-agent editing', () => {
 
       await page.locator('#ov-avatar-remove').click();
       await expect(page.locator('#ov-avatar-status')).toHaveText('Removed.');
-      await expect(card.locator('.agent-avatar')).toHaveClass(/agent-avatar--fallback/);
-      await expect(page.locator('#stageAvatar')).toHaveClass(/agent-avatar--fallback/);
+      await expect(card.locator('.agent-avatar')).toHaveClass(/agent-avatar--generated/);
+      await expect(page.locator('#stageAvatar')).toHaveClass(/agent-avatar--generated/);
     } finally {
       await request
         .delete(`${baseUrl}/api/agents?name=${encodeURIComponent(name)}`)

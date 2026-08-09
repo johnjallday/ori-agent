@@ -19,7 +19,11 @@ const WITHOUT_CHARACTER = `${RUN} Plain`;
 
 async function seedAgent(request: APIRequestContext, name: string, catalogId?: string) {
   const data: Record<string, unknown> = { name, model: 'gpt-5.5', role: 'specialist' };
-  if (catalogId) data.character = { display_mode: 'character', catalog_id: catalogId };
+  // Canonical appearance: the mode is explicit and the catalog version is left
+  // to the server, which is the only thing allowed to assign it (FR-10/FR-50).
+  if (catalogId) {
+    data.appearance = { mode: 'character', character: { catalog_id: catalogId } };
+  }
   const res = await request.post('/api/agents', { data });
   expect(res.ok(), `seeding ${name} failed (${res.status()})`).toBe(true);
 }
@@ -94,7 +98,7 @@ test('Team step renders agent identities through the shared renderer', async ({ 
   const plain = page.locator(
     `.workspace-existing-agent-card[data-existing-agent-name="${WITHOUT_CHARACTER}"]`
   );
-  await expect(plain.locator('.agent-avatar--fallback')).toBeVisible();
+  await expect(plain.locator('.agent-avatar--generated')).toBeVisible();
 
   // Add one so the left-hand Resulting Workspace Team roster shows it too.
   await page.locator(`[data-existing-agent-add="${WITH_CHARACTER}"]`).click();
@@ -104,7 +108,7 @@ test('Team step renders agent identities through the shared renderer', async ({ 
     `#workspaceTeamRoster [data-agent-key="${WITH_CHARACTER.toLowerCase()}"]`
   );
   await expect(teamRow.locator('.agent-avatar--character .agent-avatar__portrait')).toBeVisible();
-  await expect(page.locator('#workspaceTeamRoster .agent-avatar--fallback').first()).toBeVisible();
+  await expect(page.locator('#workspaceTeamRoster .agent-avatar--generated').first()).toBeVisible();
 
   // Both rosters scroll independently; capture them from the top so the
   // Resulting Workspace Team roster is in frame, not scrolled past.

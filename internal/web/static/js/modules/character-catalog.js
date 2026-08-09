@@ -66,8 +66,8 @@
       silhouette: String(raw.silhouette || '').trim(),
       prop: String(raw.signature_prop || '').trim(),
       idleBehavior: String(raw.idle_behavior || '').trim(),
-      toneTraits: Array.isArray(raw.tone_traits) ? raw.tone_traits.map(String) : [],
-      sampleLine: String(raw.sample_line || '').trim(),
+      // Nothing tone-shaped is read here, because the catalog no longer serves
+      // it: a character changes how an agent looks and nothing else (FR-22).
       palette: {
         base: String(palette.base || '').trim(),
         accent: String(palette.accent || '').trim(),
