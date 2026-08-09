@@ -480,8 +480,13 @@ func (c *Connection) CheckWriteAccess(ctx context.Context, fullName string) erro
 		}
 		return &ConnectionError{
 			Category: ErrorCategoryInsufficientScope,
+			// Names where to fix it, not just what is wrong. The picker can
+			// only list repositories the token can read, so landing here is
+			// a normal outcome rather than a mistake, and the remedy lives
+			// on a page the user would otherwise have to go find.
 			Message: "This token can read " + fullName +
-				" but cannot post to its issues. Give the token Issues (read and write) access to this repository, or choose a different one.",
+				" but cannot post to its issues. Edit it at github.com/settings/personal-access-tokens" +
+				" to give it Issues (read and write) on this repository, or choose a different one.",
 			Status: resp.StatusCode,
 		}
 	default:

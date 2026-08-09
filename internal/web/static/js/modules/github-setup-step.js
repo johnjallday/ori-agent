@@ -21,6 +21,13 @@
 
   const ADAPTER_ID = 'github_ops';
   const TOKEN_URL = 'https://github.com/settings/personal-access-tokens/new';
+  // The list of existing tokens, where repository access is edited. This is
+  // where a user lands when a repo they picked turns out not to be writable,
+  // so it is offered on the repository step rather than buried in an error.
+  const TOKEN_SETTINGS_URL = 'https://github.com/settings/personal-access-tokens';
+  // Below this many repositories the filter is noise; above it, scanning the
+  // list is the slow part.
+  const FILTER_THRESHOLD = 6;
 
   function ownsStep(step) {
     return String(step?.adapter || '') === ADAPTER_ID;
@@ -166,9 +173,76 @@
   const repositoryStepRenderer = {
     owns: ownsStep,
     render(container, ctx) {
+      const options = Array.isArray(ctx.step?.options) ? ctx.step.options : [];
+
+      // A link to where repository access is actually changed, offered up
+      // front. The picker can only list what the token can READ, which is a
+      // wider set than it can write to, so "this one is not writable" is a
+      // normal outcome here -- and the fix lives on a page the user would
+      // otherwise have to go find.
+      const help = document.createElement('p');
+      help.className = 'github-setup-help';
+      help.appendChild(document.createTextNode('Repository missing, or not writable? '));
+      const manage = document.createElement('a');
+      manage.href = TOKEN_SETTINGS_URL;
+      manage.target = '_blank';
+      manage.rel = 'noopener noreferrer';
+      manage.textContent = "Manage your token's repository access ↗";
+      help.appendChild(manage);
+      help.appendChild(
+        document.createTextNode(
+          ' — grant it Issues (read and write) on the repo you want, then come back and choose it.'
+        )
+      );
+      container.appendChild(help);
+
+      // The wizard draws the options; this only adds a way to find one.
       ctx.renderDefault(container);
+
+      if (options.length > FILTER_THRESHOLD) {
+        attachFilter(container, options.length);
+      }
     }
   };
+
+  // attachFilter narrows the rendered option list in place. It filters what is
+  // already on screen rather than re-querying: the server's list is already
+  // capped, and a round trip per keystroke would make a long list slower, not
+  // faster.
+  function attachFilter(container, total) {
+    const list = container.querySelector('.setup-wizard-options');
+    if (!list) return;
+
+    const wrap = document.createElement('label');
+    wrap.className = 'github-setup-filter';
+    wrap.textContent = `Filter ${total} repositories`;
+
+    const input = document.createElement('input');
+    input.type = 'search';
+    input.className = 'modern-input';
+    input.placeholder = 'Start typing a name…';
+    input.autocomplete = 'off';
+    wrap.appendChild(input);
+
+    const empty = document.createElement('p');
+    empty.className = 'github-setup-help';
+    empty.hidden = true;
+    empty.textContent = 'No repository matches that. Clear the filter to see them all.';
+
+    input.addEventListener('input', () => {
+      const needle = input.value.trim().toLowerCase();
+      let shown = 0;
+      list.querySelectorAll('.setup-wizard-option').forEach(item => {
+        const match = !needle || item.textContent.toLowerCase().includes(needle);
+        item.hidden = !match;
+        if (match) shown += 1;
+      });
+      empty.hidden = shown !== 0;
+    });
+
+    list.parentNode.insertBefore(wrap, list);
+    list.parentNode.insertBefore(empty, list.nextSibling);
+  }
 
   function register() {
     const wizard = window.SetupWizard;

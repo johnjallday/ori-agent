@@ -16,7 +16,7 @@
     invalid_token:
       'Check that you copied the whole token. Tokens are shown only once — if you have lost it, generate a new one.',
     insufficient_scope:
-      'Re-create the token with Issues set to "Read and write" and Metadata set to "Read-only".',
+      'Edit the token at github.com/settings/personal-access-tokens — give it Issues (read and write) on that repository.',
     vault_locked: 'Unlock your vault from the Vault page, then reload this page.',
     rate_limited: 'GitHub is throttling this token. Wait for the reset and try again.',
     unavailable: 'GitHub could not be reached. Check your connection and try again.'

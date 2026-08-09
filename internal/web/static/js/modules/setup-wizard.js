@@ -182,6 +182,16 @@
     if (!error) return;
     error.textContent = message ? String(message) : '';
     error.hidden = !message;
+    // Bring the reason into view. On a step with a long body -- a repository
+    // list, a folder list -- the error sits below the fold, so a rejected
+    // choice looked like nothing happened at all.
+    if (message && typeof error.scrollIntoView === 'function') {
+      try {
+        error.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      } catch {
+        error.scrollIntoView();
+      }
+    }
   }
 
   function announce(message) {
