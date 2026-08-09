@@ -234,11 +234,47 @@ func (cm *ConfigManager) InitializeDefaultServers() error {
 		config.Servers = append(config.Servers, server)
 		added = true
 	}
-	if !added {
+
+	repaired := repairRemoteAuthDefaults(config.Servers)
+
+	if !added && !repaired {
 		return nil
 	}
 
 	return cm.SaveGlobalConfig(config)
+}
+
+// repairRemoteAuthDefaults fixes an already-stored default server whose auth
+// wiring predates the field it needs, and reports whether anything changed.
+//
+// Adding a default server only ever *adds*: an entry already on disk is left
+// alone, which is right for anything a user can edit. But AuthRef and AuthMode
+// are not preferences -- they are how the server finds its credential at all,
+// and a server stored before those fields existed can never resolve one. The
+// GitHub entry shipped that way: without a pinned AuthRef, every workspace
+// copy derives a key from its own unique name and finds nothing, so the
+// connection reads healthy in Settings while every workspace reports
+// "connect this server with an access token first".
+//
+// Only the two auth fields are touched, and only when empty. A URL, an enabled
+// flag, or anything else the user set is theirs.
+func repairRemoteAuthDefaults(servers []ServerConfig) bool {
+	repaired := false
+	for i := range servers {
+		if !strings.EqualFold(strings.TrimSpace(servers[i].Name), GitHubServerName) {
+			continue
+		}
+		canonical := GitHubServerConfig()
+		if strings.TrimSpace(servers[i].AuthRef) == "" {
+			servers[i].AuthRef = canonical.AuthRef
+			repaired = true
+		}
+		if strings.TrimSpace(servers[i].AuthMode) == "" {
+			servers[i].AuthMode = canonical.AuthMode
+			repaired = true
+		}
+	}
+	return repaired
 }
 
 // GitHub's official hosted MCP server. Kept here rather than in the

@@ -496,6 +496,77 @@ func TestGitHubServerConfig_SharesOneCredentialAcrossWorkspaceCopies(t *testing.
 	}
 }
 
+// An install that already had a github entry before AuthRef was pinned keeps
+// that entry forever, because adding defaults never updates what is already
+// stored. The result is a connection that looks healthy in Settings while
+// every workspace reports "connect this server with an access token first".
+func TestInitializeDefaultServers_RepairsStoredGitHubAuthFields(t *testing.T) {
+	baseDir := t.TempDir()
+	cm := NewConfigManager(baseDir)
+
+	// A github entry as it was stored before the fix: no auth ref, no auth
+	// mode, and a user-set enabled flag that must survive.
+	if err := cm.SaveGlobalConfig(&GlobalConfig{
+		Servers: []ServerConfig{{
+			Name:      GitHubServerName,
+			Transport: TransportStreamableHTTP,
+			URL:       GitHubServerURL,
+			Enabled:   true,
+		}},
+	}); err != nil {
+		t.Fatalf("SaveGlobalConfig: %v", err)
+	}
+
+	if err := cm.InitializeDefaultServers(); err != nil {
+		t.Fatalf("InitializeDefaultServers: %v", err)
+	}
+
+	cfg, err := cm.LoadGlobalConfig()
+	if err != nil {
+		t.Fatalf("LoadGlobalConfig: %v", err)
+	}
+	github, ok := findServerByName(cfg.Servers, GitHubServerName)
+	if !ok {
+		t.Fatal("expected the github server to still be present")
+	}
+	if github.AuthRef != GitHubAuthRef {
+		t.Fatalf("AuthRef = %q, want the pinned %q", github.AuthRef, GitHubAuthRef)
+	}
+	if NormalizedAuthMode(github) != AuthModeStaticBearer {
+		t.Fatalf("AuthMode = %q, want static_bearer", github.AuthMode)
+	}
+	// What the user set is theirs.
+	if !github.Enabled {
+		t.Fatal("the repair must not reset the user's enabled flag")
+	}
+
+	// And a workspace copy of the repaired entry resolves to the same
+	// credential, which is the whole point.
+	workspaceCopy := github
+	workspaceCopy.Name = "ws:ws-1:mcp:github:binding-1"
+	if NormalizedAuthRef(workspaceCopy) != NormalizedAuthRef(github) {
+		t.Fatalf("a workspace copy still resolves elsewhere: %q vs %q",
+			NormalizedAuthRef(workspaceCopy), NormalizedAuthRef(github))
+	}
+}
+
+// The repair must not overwrite an AuthRef someone set deliberately.
+func TestRepairRemoteAuthDefaults_LeavesAnExplicitAuthRefAlone(t *testing.T) {
+	servers := []ServerConfig{{
+		Name:      GitHubServerName,
+		Transport: TransportStreamableHTTP,
+		URL:       GitHubServerURL,
+		AuthRef:   "mcp:my-own-reference",
+		AuthMode:  AuthModeStaticBearer,
+	}}
+	if repaired := repairRemoteAuthDefaults(servers); repaired {
+		t.Fatal("nothing needed repairing")
+	}
+	if servers[0].AuthRef != "mcp:my-own-reference" {
+		t.Fatalf("AuthRef was overwritten: %q", servers[0].AuthRef)
+	}
+}
+
 // --- auth mode ---------------------------------------------------------------
 
 func TestNormalizedAuthMode(t *testing.T) {
