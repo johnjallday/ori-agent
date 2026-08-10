@@ -114,15 +114,18 @@ A changed asset is not shippable until all of the following exist:
 - a regenerated `docs/character-asset-hashes.txt`, regenerated **after** the
   visual review rather than as part of making the change.
 
-### Migration ratchet (temporary)
+### Migration ratchet (completed 2026-08-10)
 
-`scripts/character-transparency-pending.json` lists the assets still carrying a
-baked background. Both checks read that one file, so an asset can never be
-exempt from one and enforced by the other. The list may only shrink: converting
-an asset means deleting its entry, and the tests fail both when an unlisted
-asset breaks the contract and when a listed asset has quietly started passing.
-**The file and every reference to it are deleted once the list is empty**, after
-which the contract applies unconditionally to all 27 assets.
+The conversion ran behind a temporary ratchet,
+`scripts/character-transparency-pending.json`, listing the assets that still
+carried a baked background. Both checks read that one file, so an asset could
+never be exempt from one and enforced by the other, and the list could only
+shrink: the tests failed both when an unlisted asset broke the contract and when
+a listed asset had quietly started passing.
+
+**The list reached empty and the file and both of its call sites are gone.** The
+contract now applies unconditionally to all 27 assets, with no exemption
+mechanism to re-open. A new character is held to it from its first commit.
 
 ## Naming decision (2026-08-04)
 
@@ -317,25 +320,61 @@ provisional, unchanged from revision 1.
   and the body height 20 → 17 to reach the y=43 ground line. The living sprout,
   shell plate, and pouch are preserved, and the `moss-sway` idle is unchanged.
 
+**Revision 2 — 2026-08-10, transparent map-ready artwork (familiars and
+constructs).** Entry version 1 → 2 for each. Same treatment as the residents
+above: backgrounds removed from all twelve variants, every idle keeping its
+existing selector, duration, easing, keyframes, and reduced-motion guard, and
+each `static.svg` rebuilt at its idle's resting pose. These four were the worst
+affected by the old frame — three of them had artwork running off the artboard
+that the card and disc were quietly cropping — so their per-character notes
+below record more geometry movement than the residents needed. All twelve pass
+both halves of the contract, and each animated sprite was verified across 16
+phases of its own cycle. **Reviewer:** unreviewed — pending project-owner
+sign-off. **Decision:** provisional, unchanged from revision 1.
+
 ### insight-researcher
 
-- **Catalog ID:** `insight-researcher` · **Entry version:** 1
+- **Catalog ID:** `insight-researcher` · **Entry version:** 2
 - **Brief:** light-framed familiar with tall ears and folded crescent wings, holding a tabbed field notebook. Curious, lyrical, evidence-grounded.
+- **Revision 2 human edits:** the most cropped asset in the set. In the portrait
+  the ear tips and both antenna curls ran to y=-2, so the frame had been cutting
+  them off outright; ears and curls are lowered and the inner-ear tint follows
+  them. In the sprite the ears reached y=-5 and both wings overhung the
+  artboard; ears rebuilt shorter, wings pulled in from x=3/x=45, head r 11 → 10,
+  body base to y=43. Crescent wings, tall ears, notebook, and the drifting mote
+  are all preserved, and `luma-drift`/`luma-shimmer` are unchanged.
 
 ### decision-strategist
 
-- **Catalog ID:** `decision-strategist` · **Entry version:** 1
+- **Catalog ID:** `decision-strategist` · **Entry version:** 2
 - **Brief:** alert familiar with tall ears and a diagonal cape, holding a map tube and a decision token. Candid, economical, respectfully challenging.
+- **Revision 2 human edits:** portrait ear tips lowered from y=8 to y=11 (inner
+  tint follows). In the sprite the ears ran to y=-2, the cape hem to y≈47, and
+  the tail to x=46 before the flick started; ears shortened, cape hem raised,
+  tail pulled in to x=39, head r 11 → 10, body base to y=43. The `nox-flick`
+  idle is unchanged and its -11deg/+5deg extremes now stay inside the perimeter.
 
 ### operations-keeper
 
-- **Catalog ID:** `operations-keeper` · **Entry version:** 1
+- **Catalog ID:** `operations-keeper` · **Entry version:** 2
 - **Brief:** stacked rounded stones with a bright central core and modular utility pouches. Steady, transparent, low-drama.
+- **Revision 2 human edits:** portrait was a pure background removal. Sprite
+  base stone height 14 → 11 to reach the y=43 ground line, and the crown moss
+  lowered a unit so its tips clear the perimeter. Stone stack, bright core, and
+  pouches preserved; the `cairn-pulse` opacity idle is unchanged and still
+  carries no state meaning.
 
 ### automation-specialist
 
-- **Catalog ID:** `automation-specialist` · **Entry version:** 1
+- **Catalog ID:** `automation-specialist` · **Entry version:** 2
 - **Brief:** narrow bird-profiled construct with mechanical joints, a wind-up key, and a status lens. Exact, brisk, surprisingly personable.
+- **Revision 2 human edits:** portrait was a pure background removal. In the
+  sprite the crest ball sat at cy=3 with a 2px stroke, so its top was being cut
+  off by the artboard; the head moved down and in (cy 16 → 18, r 9 → 8) to make
+  room, with the crest pin shortened, the ball at cy=6.5, and the beak and lens
+  following the head. Body base to y=43. Wind-up key, beak, and status lens
+  preserved; `tock-turn` and `tock-click` are unchanged, and the lens remains an
+  aperture rather than a state indicator.
 
 ## Asset hashes
 

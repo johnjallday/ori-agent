@@ -23,7 +23,6 @@ import { ASSET_CONTRACT, inspectAsset, formatFindings } from './lib/character-as
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const charDir = join(repoRoot, 'internal/web/static/characters');
 const catalogPath = join(repoRoot, 'internal/charactercatalog/catalog.json');
-const pendingPath = join(repoRoot, 'scripts/character-transparency-pending.json');
 
 const svg = (size, body) =>
   Buffer.from(
@@ -106,11 +105,12 @@ test('fixture: an unknown variant is a programming error, not a finding', async 
 });
 
 // ---------------------------------------------------------------------------
-// Production sweep, gated by the shrinking migration ratchet.
+// Production sweep. This ran behind a temporary migration ratchet while the 27
+// assets were converted one family at a time; the ratchet is gone because the
+// list reached empty, so the contract now applies unconditionally.
 // ---------------------------------------------------------------------------
 
 const catalog = JSON.parse(readFileSync(catalogPath, 'utf8'));
-const pending = new Set(JSON.parse(readFileSync(pendingPath, 'utf8')).pending);
 
 const assets = catalog.characters.flatMap(ch =>
   Object.keys(ASSET_CONTRACT).map(variant => ({
@@ -133,17 +133,11 @@ test('every catalog asset is present on disk', () => {
 
 test('catalog assets meet the transparent map-ready contract', async () => {
   const violations = [];
-  const stale = [];
 
   for (const asset of assets) {
     const { findings } = await inspectAsset(asset.path, asset.variant);
-    const exempt = pending.has(asset.key);
-
-    if (findings.length > 0 && !exempt) {
+    if (findings.length > 0) {
       violations.push(formatFindings(asset.id, asset.variant, findings));
-    }
-    if (findings.length === 0 && exempt) {
-      stale.push(asset.key);
     }
   }
 
@@ -151,23 +145,5 @@ test('catalog assets meet the transparent map-ready contract', async () => {
     violations,
     [],
     'character assets break the transparent map-ready contract:\n' + violations.join('\n')
-  );
-
-  assert.deepEqual(
-    stale,
-    [],
-    'these assets now pass the contract but are still listed in ' +
-      'scripts/character-transparency-pending.json; delete their entries so the ratchet cannot slip back:\n  ' +
-      stale.join('\n  ')
-  );
-});
-
-test('the migration ratchet only ever names real, unconverted assets', () => {
-  const known = new Set(assets.map(a => a.key));
-  const unknown = [...pending].filter(key => !known.has(key));
-  assert.deepEqual(
-    unknown,
-    [],
-    `the pending list names assets no catalog entry declares: ${unknown.join(', ')}`
   );
 });

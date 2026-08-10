@@ -1,10 +1,8 @@
 package web
 
 import (
-	"encoding/json"
 	"fmt"
 	"io/fs"
-	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -151,34 +149,6 @@ var variantSpecs = map[string]struct {
 	"static":   {size: 48, viewBox: "0 0 48 48"},
 }
 
-// pendingTransparency loads the shared migration ratchet. Both halves of the
-// contract read this one file so an asset can never be exempt from one check
-// and enforced by the other.
-func pendingTransparency(t *testing.T) map[string]bool {
-	t.Helper()
-	const path = "../../scripts/character-transparency-pending.json"
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		// The file is deleted once every asset is converted; its absence means
-		// the contract now applies unconditionally.
-		if os.IsNotExist(err) {
-			return map[string]bool{}
-		}
-		t.Fatalf("read %s: %v", path, err)
-	}
-	var doc struct {
-		Pending []string `json:"pending"`
-	}
-	if err := json.Unmarshal(raw, &doc); err != nil {
-		t.Fatalf("parse %s: %v", path, err)
-	}
-	out := make(map[string]bool, len(doc.Pending))
-	for _, key := range doc.Pending {
-		out[key] = true
-	}
-	return out
-}
-
 // characterVariants yields every (id, variant, asset path) the catalog declares.
 func characterVariants(t *testing.T) []struct{ ID, Variant, Path string } {
 	t.Helper()
@@ -299,17 +269,14 @@ func TestCharacterAssetsDeclareNativeGeometry(t *testing.T) {
 	}
 }
 
-// The non-growing ratchet. An asset not on the pending list may carry no
-// background primitive; an asset on the list that has been cleaned must be
-// removed from it, so the exemption cannot outlive the problem.
+// No character asset may carry a background primitive. This ran behind a
+// temporary migration ratchet while the 27 assets were converted one family at
+// a time; the ratchet is gone because the list reached empty.
 func TestCharacterAssetsCarryNoBakedBackground(t *testing.T) {
 	sub := staticFS(t)
-	pending := pendingTransparency(t)
-	seen := map[string]bool{}
 
 	for _, v := range characterVariants(t) {
 		key := v.ID + "/" + v.Variant
-		seen[key] = true
 		spec := variantSpecs[v.Variant]
 
 		raw, err := fs.ReadFile(sub, v.Path)
@@ -317,21 +284,8 @@ func TestCharacterAssetsCarryNoBakedBackground(t *testing.T) {
 			t.Errorf("%s: read: %v", key, err)
 			continue
 		}
-		found := bakedBackgrounds(string(raw), spec.size)
-
-		switch {
-		case len(found) > 0 && !pending[key]:
+		if found := bakedBackgrounds(string(raw), spec.size); len(found) > 0 {
 			t.Errorf("%s carries a baked background: %s", key, strings.Join(found, "; "))
-		case len(found) == 0 && pending[key]:
-			t.Errorf("%s is background-free but still listed in "+
-				"scripts/character-transparency-pending.json; delete its entry so the "+
-				"contract starts protecting it", key)
-		}
-	}
-
-	for key := range pending {
-		if !seen[key] {
-			t.Errorf("pending list names %q, which no catalog entry declares", key)
 		}
 	}
 }
