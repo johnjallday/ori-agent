@@ -67,9 +67,10 @@ type Assets struct {
 }
 
 // Character is one catalog entry. Note what is deliberately absent: no prompt
-// text, no tool list, no permission, no operational status. A character is
-// presentation and tone only, so assigning one can never grant a capability
-// (FR-73, Non-Goal 6).
+// text, no tool list, no permission, no operational status — and, since the
+// appearance unification, no tone traits or sample speech either. A character
+// is presentation only, so assigning one can never grant a capability or change
+// how an agent behaves (PRD FR-17/FR-22).
 type Character struct {
 	ID           CharacterID `json:"id"`
 	EntryVersion int         `json:"entry_version"`
@@ -78,19 +79,17 @@ type Character struct {
 	// were dropped: a single common word is exactly where trademark collisions
 	// cluster, and the role reads more usefully beside an agent's own name
 	// anyway (see docs/CHARACTER_ASSET_PROVENANCE.md).
-	Name         string   `json:"name"`
-	Family       string   `json:"family"`
-	FamilyLabel  string   `json:"family_label"`
-	Purpose      string   `json:"purpose"`
-	Description  string   `json:"description"`
-	Silhouette   string   `json:"silhouette"`
-	Prop         string   `json:"signature_prop"`
-	IdleBehavior string   `json:"idle_behavior"`
-	ToneTraits   []string `json:"tone_traits"`
-	SampleLine   string   `json:"sample_line"`
-	Palette      Palette  `json:"palette"`
-	Assets       Assets   `json:"assets"`
-	Provenance   string   `json:"provenance"`
+	Name         string  `json:"name"`
+	Family       string  `json:"family"`
+	FamilyLabel  string  `json:"family_label"`
+	Purpose      string  `json:"purpose"`
+	Description  string  `json:"description"`
+	Silhouette   string  `json:"silhouette"`
+	Prop         string  `json:"signature_prop"`
+	IdleBehavior string  `json:"idle_behavior"`
+	Palette      Palette `json:"palette"`
+	Assets       Assets  `json:"assets"`
+	Provenance   string  `json:"provenance"`
 	// Roles this character reads well beside — an ordering hint for the picker's
 	// recommendation, nothing more. It is emphatically NOT a restriction: any
 	// character can be chosen for any agent, and nothing downstream reads this
@@ -264,7 +263,6 @@ func validateEntry(ch Character) error {
 		"silhouette":     ch.Silhouette,
 		"signature_prop": ch.Prop,
 		"idle_behavior":  ch.IdleBehavior,
-		"sample_line":    ch.SampleLine,
 		"provenance":     ch.Provenance,
 	}
 	for field, value := range required {
@@ -272,14 +270,12 @@ func validateEntry(ch Character) error {
 			return fmt.Errorf("%s is required", field)
 		}
 	}
-	if len(ch.ToneTraits) == 0 {
-		return fmt.Errorf("tone_traits must list at least one trait")
-	}
-	for _, t := range ch.ToneTraits {
-		if strings.TrimSpace(t) == "" {
-			return fmt.Errorf("tone_traits contains an empty trait")
-		}
-	}
+	// Note what a working entry is no longer required — or permitted — to
+	// carry: tone traits and sample speech. A character is visual appearance
+	// only, and a catalog that still described how an agent talks would keep
+	// that promise alive even with every prompt path ignoring it (PRD FR-22).
+	// The decoder rejects unknown fields, so a manifest that reintroduces them
+	// fails to load rather than being silently trimmed.
 
 	for field, hex := range map[string]string{
 		"palette.base":   ch.Palette.Base,

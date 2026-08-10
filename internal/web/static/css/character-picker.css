@@ -1,22 +1,38 @@
 /*
- * Character picker — the chooser used by New Agent and the Inspector's
- * Identity section (PRD FR-53/FR-59/FR-115–FR-119).
+ * Character picker — the chooser the shared Appearance editor opens, from every
+ * host that mounts it.
  *
  * A modal, because choosing is a focused decision that should not compete with
  * the collection behind it. Selection is carried by an aria-checked radiogroup
- * and a visible border, never by colour alone (FR-118).
+ * and a visible border, never by colour alone (FR-100).
  */
 
+/* Above this app's overlay scale, not Bootstrap's.
+   The picker is opened *from* the Appearance editor, which on the agent detail
+   page lives inside `#profileEditModal`. That modal is not at Bootstrap's
+   default 1055 — the app overrides it to 10100, and the scale runs up to 10700
+   (workspace-hub). At the picker's original 1050/1051 it opened *behind* the
+   very dialog that launched it, so its cards were visible but every click was
+   intercepted by the modal on top.
+   10800/10801 clears the whole scale. Measure before changing it: the numbers
+   here are the app's, not the framework's. */
 .char-picker__backdrop {
   position: fixed;
   inset: 0;
-  z-index: 1050;
+  z-index: 10800;
   background: rgb(0 0 0 / 45%);
 }
 
 .char-picker {
+  /* One calibrated token for every piece of secondary copy in the picker,
+     matching the Appearance editor's. The global `--text-secondary` is tuned
+     for the page background and reaches only 3.67:1 on the picker's own panel
+     in dark mode — below AA at these sizes, and caught by the axe pass over
+     `#charPicker` in the roster a11y spec (FR-101). */
+  --picker-muted: var(--card-muted, var(--cozy-ink-dim, var(--text-secondary, #6b7280)));
+
   position: fixed;
-  z-index: 1051;
+  z-index: 10801;
   top: 50%;
   left: 50%;
   display: flex;
@@ -60,7 +76,7 @@
    picks one (FR-73/FR-97). */
 .char-picker__lede {
   margin: 6px 0 14px;
-  color: var(--text-secondary, #6b7280);
+  color: var(--picker-muted);
   font-size: 13px;
 }
 
@@ -169,19 +185,23 @@
 }
 
 .char-card__family {
-  color: var(--text-secondary, #6b7280);
+  color: var(--picker-muted);
   font-size: 11px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 
+/* The "Unused" hint is emphasised by weight, not by the primary colour: in dark
+   mode that colour is a deep green that reaches 1.97:1 against the card, and
+   this is 11px bold — normal-size text for WCAG. The word itself is already the
+   distinguishing signal, so nothing is lost (FR-100/FR-101). */
 .char-card__rec {
-  color: var(--primary-color, #4f46e5);
+  color: var(--text-primary, #111827);
   font-weight: 700;
 }
 
 .char-card__purpose {
-  color: var(--text-secondary, #6b7280);
+  color: var(--picker-muted);
   font-size: 12px;
   line-height: 1.35;
 }
@@ -210,7 +230,7 @@
 
 .char-preview__family {
   margin: 2px 0 12px;
-  color: var(--text-secondary, #6b7280);
+  color: var(--picker-muted);
   font-size: 11px;
   letter-spacing: 0.04em;
   text-align: center;
@@ -222,8 +242,10 @@
   font-size: 12px;
 }
 
+/* 10px labels are normal-size text for WCAG purposes, so they need the full
+   4.5:1 rather than the large-text allowance (FR-101). */
 .char-preview__facts dt {
-  color: var(--text-secondary, #6b7280);
+  color: var(--picker-muted);
   font-size: 10px;
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -234,19 +256,12 @@
   line-height: 1.4;
 }
 
-.char-preview__sample {
-  margin: 0 0 10px;
-  font-size: 12.5px;
-  font-style: italic;
-  line-height: 1.45;
-}
-
-/* The one line that keeps a prop from reading as a capability (FR-97). */
+/* The one line that keeps a prop from reading as a capability (FR-29). */
 .char-preview__note {
   margin: 0;
   padding-top: 8px;
   border-top: 1px dashed var(--border-color, #e5e7eb);
-  color: var(--text-secondary, #6b7280);
+  color: var(--picker-muted);
   font-size: 11px;
   line-height: 1.4;
 }
@@ -255,36 +270,12 @@
 .char-preview__empty {
   margin: 0;
   padding: 20px;
-  color: var(--text-secondary, #6b7280);
+  color: var(--picker-muted);
   font-size: 13px;
   text-align: center;
 }
 
-/* ---- voice + actions ------------------------------------------------------- */
-
-.char-picker__voice {
-  display: flex;
-  gap: 10px;
-  align-items: flex-start;
-  margin-top: 14px;
-  padding: 10px 12px;
-  border: 1px solid var(--border-color, #e5e7eb);
-  border-radius: 10px;
-  cursor: pointer;
-}
-
-.char-picker__voice > span {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  font-size: 13px;
-}
-
-.char-picker__voice-note {
-  color: var(--text-secondary, #6b7280);
-  font-size: 11.5px;
-  line-height: 1.4;
-}
+/* ---- actions --------------------------------------------------------------- */
 
 .char-picker__actions {
   display: flex;
@@ -293,38 +284,45 @@
   margin-top: 14px;
 }
 
-/* ---- Inspector identity section -------------------------------------------- */
-
-.identity-mode {
-  margin: 0 0 4px;
-  font-weight: 600;
-  font-size: 13px;
+/* The picker styles its own actions. They previously used `.btn-ghost` and
+   `.btn-primary`, defined only in agents-roster.css — so the moment the picker
+   became reachable from the detail page, the create page, and the session
+   modal, its Cancel/Skip/Choose buttons rendered as browser defaults. */
+.char-picker__btn {
+  padding: 8px 16px;
+  border: 1px solid var(--border-color, #d1d5db);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-primary, #111827);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
 }
 
-.identity-explain,
-.identity-readonly {
-  margin: 0 0 8px;
-  color: var(--text-secondary, #6b7280);
-  font-size: 12px;
-  line-height: 1.45;
+.char-picker__btn:hover:not(:disabled) {
+  border-color: var(--primary-color, #4f46e5);
 }
 
-.identity-voice {
-  margin: 0 0 8px;
-  font-size: 12px;
+.char-picker__btn--primary {
+  border-color: var(--primary-color, #4f46e5);
+  background: var(--primary-color, #4f46e5);
+  color: #fff;
 }
 
-.identity-choice {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
+.char-picker__btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
-.identity-choice__state {
-  color: var(--text-secondary, #6b7280);
-  font-size: 12.5px;
+.char-picker__btn:focus-visible {
+  outline: 3px solid var(--primary-color, #4f46e5);
+  outline-offset: 2px;
 }
+
+/* The Inspector's own Appearance markup used to live here. It is now the shared
+   editor in agent-appearance.css, which every host mounts, so these rules had
+   no remaining selector to match — and `--picker-muted` would not have resolved
+   outside `.char-picker` anyway. */
 
 /* ---- narrow ----------------------------------------------------------------- */
 

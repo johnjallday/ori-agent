@@ -19,8 +19,6 @@ function character(overrides = {}) {
     silhouette: 'Wide brow, feather cape',
     prop: 'Pocket ledger',
     idleBehavior: 'Straightens a stack of notes',
-    toneTraits: ['measured', 'precise'],
-    sampleLine: 'I indexed the sources.',
     roles: ['researcher', 'validator'],
     assets: { portrait: '/characters/research-archivist/portrait.svg' },
     ...overrides
@@ -35,7 +33,6 @@ const CATALOG = [
     family: 'resident',
     familyLabel: 'Resident',
     purpose: 'Practical maker who favors narrow slices.',
-    toneTraits: ['practical', 'direct'],
     roles: ['specialist'],
     assets: { portrait: '/characters/product-builder/portrait.svg' }
   }),
@@ -45,7 +42,6 @@ const CATALOG = [
     family: 'familiar',
     familyLabel: 'Familiar',
     purpose: 'Sharp advisor who compares paths.',
-    toneTraits: ['candid', 'economical'],
     roles: ['analyzer', 'synthesizer'],
     assets: { portrait: '/characters/decision-strategist/portrait.svg' }
   })
@@ -119,7 +115,6 @@ function makeDom() {
     'charPickerSearch',
     'charPickerGrid',
     'charPickerPreview',
-    'charPickerVoice',
     'charPickerCancel',
     'charPickerSkip',
     'charPickerConfirm'
@@ -225,7 +220,7 @@ test('search covers the labels a user can actually see', () => {
   const { picker } = load();
   const hay = picker._haystack(character());
 
-  for (const visible of ['research archivist', 'resident', 'patient source-finder', 'measured']) {
+  for (const visible of ['research archivist', 'resident', 'patient source-finder']) {
     assert.ok(hay.includes(visible), `expected search to cover ${visible}`);
   }
 });
@@ -243,7 +238,7 @@ test('search does not match hidden fields', () => {
 
 /* ---- opening and resolving (FR-95) ---------------------------------------------- */
 
-test('choosing resolves with the id and voice choice, and nothing else happens', async () => {
+test('choosing resolves with the catalog id and nothing else', async () => {
   const { picker, dom } = load();
   const promise = picker.open({ selectedId: 'product-builder' });
 
@@ -254,36 +249,24 @@ test('choosing resolves with the id and voice choice, and nothing else happens',
   // prototype, which assert/strict treats as a mismatch.
   assert.equal(result.action, 'choose');
   assert.equal(result.catalogId, 'product-builder');
-  assert.equal(result.voiceEnabled, false);
+  // The version is server-assigned, so the picker has nothing to say about it
+  // and must not invent one (FR-10/FR-55).
+  assert.equal(result.catalogVersion, undefined);
   assert.equal(picker.isOpen(), false);
 });
 
-test('the voice toggle rides along with the choice', async () => {
+test('the picker offers no voice control and resolves no voice state', async () => {
   const { picker, dom } = load();
   const promise = picker.open({ selectedId: 'product-builder' });
 
-  const voice = dom.nodes.get('charPickerVoice');
-  voice.checked = true;
-  voice.fire('change');
-  dom.nodes.get('charPickerConfirm').fire('click');
+  // The control is gone from the DOM entirely, not merely hidden or ignored:
+  // a toggle that implied a character changes how an agent speaks is the exact
+  // promise this feature removed (FR-19/FR-23).
+  assert.equal(dom.nodes.get('charPickerVoice'), undefined);
 
-  assert.equal((await promise).voiceEnabled, true);
-});
-
-test('voice defaults to off — tone is opt-in', async () => {
-  const { picker, dom } = load();
-  const promise = picker.open({});
-  assert.equal(dom.nodes.get('charPickerVoice').checked, false);
   dom.nodes.get('charPickerConfirm').fire('click');
-  assert.equal((await promise).voiceEnabled, false);
-});
-
-test('an existing voice setting is carried in', async () => {
-  const { picker, dom } = load();
-  const promise = picker.open({ selectedId: 'research-archivist', voiceEnabled: true });
-  assert.equal(dom.nodes.get('charPickerVoice').checked, true);
-  dom.nodes.get('charPickerConfirm').fire('click');
-  assert.equal((await promise).voiceEnabled, true);
+  const result = await promise;
+  assert.equal(result.voiceEnabled, undefined);
 });
 
 test('skip resolves as an explicit no-character', async () => {
@@ -357,31 +340,31 @@ test('the grid renders every character with its art and purpose', () => {
   picker._cancel();
 });
 
-// FR-59: the preview must show what the user is committing to before they save.
-test('the preview shows silhouette, prop, idle, tone, and a sample line', () => {
+// FR-28: the preview must show what the user is committing to before they save.
+test('the preview shows the visual facts and nothing about how the agent talks', () => {
   const { picker, dom } = load();
   picker.open({ selectedId: 'research-archivist' });
   const html = dom.nodes.get('charPickerPreview').innerHTML;
 
-  for (const expected of [
-    'Wide brow',
-    'Pocket ledger',
-    'Straightens a stack of notes',
-    'measured, precise',
-    'I indexed the sources.'
-  ]) {
+  for (const expected of ['Wide brow', 'Pocket ledger', 'Straightens a stack of notes']) {
     assert.ok(html.includes(expected), `preview missing ${expected}`);
+  }
+  // No tone line and no sample speech. Copy describing how a character talks
+  // would keep the removed promise alive even with the behavior gone (FR-23).
+  for (const gone of ['Tone', 'measured', 'I indexed the sources.', 'char-preview__sample']) {
+    assert.ok(!html.includes(gone), `preview must not mention ${gone}`);
   }
   picker._cancel();
 });
 
-// FR-97: a prop is identity, not an installed capability.
+// FR-29: a prop is appearance, not an installed capability.
 test('the preview says the character grants nothing', () => {
   const { picker, dom } = load();
   picker.open({ selectedId: 'research-archivist' });
   const html = dom.nodes.get('charPickerPreview').innerHTML.toLowerCase();
 
-  assert.ok(html.includes('identity only'));
+  assert.ok(html.includes('appearance only'));
+  assert.ok(html.includes('does not change how the agent works'));
   assert.ok(html.includes('never change'));
   picker._cancel();
 });

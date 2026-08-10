@@ -10,6 +10,7 @@ import (
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/types"
 )
 
 // AddAgentRequest represents the request to add an agent to a workspace
@@ -233,6 +234,11 @@ type WorkspaceAgentProfile struct {
 	Model    string `json:"model"`
 	Provider string `json:"provider"`
 	Source   string `json:"source"` // always "workspace"
+	// Appearance travels so the workspace agent detail page renders through the
+	// shared resolver instead of deriving its own initials — which is how that
+	// one page used to show initials for an agent everything else showed with a
+	// character or an uploaded image (unified-agent-appearance FR-80/FR-89).
+	Appearance *types.AgentAppearance `json:"appearance,omitempty"`
 }
 
 // ListWorkspaceAgentProfiles handles GET /api/workspaces/:id/agents and returns
@@ -253,13 +259,17 @@ func (h *HTTPHandler) ListWorkspaceAgentProfiles(w http.ResponseWriter, r *http.
 		if agErr != nil || !ok || ag == nil {
 			continue
 		}
+		// Snapshot reads already migrate and normalize appearance, so this is
+		// always the canonical object by the time it gets here.
+		ag.EnsureAppearance()
 		profiles = append(profiles, WorkspaceAgentProfile{
-			Name:     name,
-			Type:     ag.Type,
-			Role:     string(ag.Role),
-			Model:    ag.Settings.Model,
-			Provider: ag.Settings.Provider,
-			Source:   "workspace",
+			Name:       name,
+			Type:       ag.Type,
+			Role:       string(ag.Role),
+			Model:      ag.Settings.Model,
+			Provider:   ag.Settings.Provider,
+			Source:     "workspace",
+			Appearance: ag.Appearance,
 		})
 	}
 

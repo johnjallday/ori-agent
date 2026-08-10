@@ -32,24 +32,22 @@ const CHARACTER_IDS = [
 // same file means the two runs differ only in the fixture (Success Metric 10).
 const PLAIN_IDENTITIES = process.env.PERF_PLAIN_IDENTITIES === '1';
 
-// Every third agent gets a portrait, every seventh an uploaded avatar; the rest
-// stay on the deterministic fallback.
+// Every third agent gets a character portrait; the rest stay generated. The
+// fixture uses the canonical appearance contract, so it measures what the app
+// actually serves rather than a shape the API no longer accepts.
+//
+// Uploads are deliberately absent here: an upload has to be POSTed per agent
+// after creation, which would make seeding 100 agents an order of magnitude
+// slower without changing what this benchmark measures — the catalog fetch and
+// the portrait-loading behaviour. Upload rendering is covered in
+// tests/unified-agent-appearance.spec.ts.
 function identityFor(i: number) {
   if (PLAIN_IDENTITIES) return {};
-  if (i % 7 === 3) {
-    return {
-      avatar_image:
-        'data:image/svg+xml;base64,' +
-        Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"/>').toString(
-          'base64'
-        )
-    };
-  }
   if (i % 3 === 0) {
     return {
-      character: {
-        catalog_id: CHARACTER_IDS[i % CHARACTER_IDS.length],
-        display_mode: 'character'
+      appearance: {
+        mode: 'character',
+        character: { catalog_id: CHARACTER_IDS[i % CHARACTER_IDS.length] }
       }
     };
   }
@@ -102,10 +100,12 @@ test.describe('Agents collection performance (100 agents)', () => {
 
       const listRequests: string[] = [];
       const detailRequests: string[] = [];
+      const catalogRequests: string[] = [];
       page.on('request', r => {
         const u = r.url();
         if (u.includes('/api/agents/dashboard/list')) listRequests.push(u);
         if (/\/api\/agents\/[^/]+\/detail/.test(u)) detailRequests.push(u);
+        if (u.includes('/api/characters')) catalogRequests.push(u);
       });
 
       // Character art is served slowly and one asset is failed outright, so the
@@ -158,6 +158,25 @@ test.describe('Agents collection performance (100 agents)', () => {
         'initial render must not fetch per-card detail'
       ).toBeLessThanOrEqual(1);
       expect(listRequests.length, 'initial render must use exactly one list request').toBe(1);
+
+      // One catalog fetch for the whole page, however many agents have a
+      // character. A per-agent fetch is the failure this guards: it would be
+      // invisible on a three-agent roster and crippling on a hundred (FR-104).
+      expect(
+        catalogRequests.length,
+        `expected at most one catalog request, got ${catalogRequests.length}`
+      ).toBeLessThanOrEqual(1);
+
+      // Every avatar reserves its box before its bitmap arrives, so a slow or
+      // failed portrait cannot reflow the collection (FR-103).
+      const unsizedImages = await page
+        .locator('.roster-card .agent-avatar img')
+        .evaluateAll(
+          imgs =>
+            imgs.filter(img => !img.getAttribute('width') || !img.getAttribute('height')).length
+        );
+      expect(unsizedImages, 'every avatar image must reserve its box').toBe(0);
+
       const initialDetailCount = detailRequests.length;
 
       await time(`search "${prefix}"`, async () => {

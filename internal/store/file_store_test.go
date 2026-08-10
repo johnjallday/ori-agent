@@ -43,10 +43,13 @@ func TestFileStore_SaveLoad_NestedRoundTrip(t *testing.T) {
 				},
 				Status:     types.AgentStatusActive,
 				Statistics: stats,
+				Appearance: &types.AgentAppearance{
+					Mode:      types.AppearanceModeGenerated,
+					Generated: &types.GeneratedAppearance{Color: "#3366ff"},
+				},
 				Metadata: &types.AgentMetadata{
 					Description: "Primary analysis agent",
 					Tags:        []string{"analysis", "primary"},
-					AvatarColor: "#3366ff",
 					Favorite:    true,
 					RoutingProfile: &types.AgentRoutingProfile{
 						MatchPhrases:    []string{"open my latest reaper project"},
@@ -124,6 +127,18 @@ func TestFileStore_SaveLoad_NestedRoundTrip(t *testing.T) {
 	}
 	if len(got.Metadata.RoutingProfile.ExampleRequests) != 1 {
 		t.Errorf("expected routing profile examples to persist, got %d", len(got.Metadata.RoutingProfile.ExampleRequests))
+	}
+	// The persistence projection is explicit, so a first-class field that is not
+	// listed in it round-trips as nil. Appearance is asserted here rather than
+	// only in the migration tests because that omission is silent (FR-1/FR-68).
+	if got.Appearance == nil {
+		t.Fatal("expected appearance to be loaded")
+	}
+	if got.Appearance.Mode != types.AppearanceModeGenerated {
+		t.Errorf("expected generated mode to persist, got %q", got.Appearance.Mode)
+	}
+	if got.Appearance.GeneratedColor() != "#3366ff" {
+		t.Errorf("expected generated colour to persist, got %q", got.Appearance.GeneratedColor())
 	}
 }
 

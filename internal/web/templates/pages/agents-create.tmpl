@@ -848,16 +848,12 @@
         </div>
 
         <div class="form-card modern-card">
-          <h2 class="form-section-title">Appearance</h2>
-
+          <!-- The card already said "Appearance" while offering only a colour.
+               The shared editor makes that true: all three sources, one
+               preview, and the same staged-upload handling every other create
+               flow uses (FR-45/FR-87). -->
           <div class="form-group">
-            <label class="form-label" for="avatarColor">Avatar Color</label>
-            <div class="color-picker-group">
-              <div id="colorPreview" class="color-preview" style="background: #1d4ed8;"></div>
-              <input type="color" id="avatarColor" class="form-input color-input" name="avatar_color" autocomplete="off" value="#1d4ed8"
-                onchange="document.getElementById('colorPreview').style.background = this.value">
-              <span class="form-help">Choose a color for the agent's avatar</span>
-            </div>
+            <div id="createAppearanceHost"></div>
           </div>
 
           <div class="form-group">

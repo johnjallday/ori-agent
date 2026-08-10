@@ -701,6 +701,11 @@ test('workspace detail renders an agent through the shared identity renderer', (
   globalThis.window.CharacterCatalog = {
     get: id => (id === 'research-archivist' ? { id, name: 'Research Archivist' } : null)
   };
+  const appearance = {
+    mode: 'character',
+    generated: {},
+    character: { catalog_id: 'research-archivist', catalog_version: 1 }
+  };
   page.agentIndex = new Map([
     [
       'trip planning manager',
@@ -709,9 +714,7 @@ test('workspace detail renders an agent through the shared identity renderer', (
         source: 'user',
         role: 'orchestrator',
         characterId: 'research-archivist',
-        displayMode: 'character',
-        avatarImage: '',
-        avatarColor: ''
+        appearance
       }
     ]
   ]);
@@ -723,7 +726,9 @@ test('workspace detail renders an agent through the shared identity renderer', (
     assert.equal(seen.length, 1);
     // The chosen character is what reaches the renderer, not just the name.
     assert.equal(seen[0].input.character.id, 'research-archivist');
-    assert.equal(seen[0].input.displayMode, 'character');
+    // The canonical object is handed over whole, so this page cannot form its
+    // own opinion about which source wins (FR-80/FR-89).
+    assert.deepEqual(seen[0].input.appearance, appearance);
     assert.match(html, /data-shared="1"/);
     // Geometry stays the page's own.
     assert.match(html, /workspace-detail-agent-avatar/);

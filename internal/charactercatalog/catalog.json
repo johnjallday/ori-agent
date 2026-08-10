@@ -14,8 +14,6 @@
       "silhouette": "Broad bill, crown tuft, open navigator stance",
       "signature_prop": "Folded map and location-pin satchel",
       "idle_behavior": "Traces a route across the map, then gives a small tail wag",
-      "tone_traits": ["warm", "concise", "gently curious"],
-      "sample_line": "You're in the right neighborhood. I can show you the exact place, or explain what happens there.",
       "palette": {
         "base": "#bd7c24",
         "accent": "#bd7c24",
@@ -40,8 +38,6 @@
       "silhouette": "Wide brow, feather cape, grounded stance",
       "signature_prop": "Pocket ledger and reading lenses",
       "idle_behavior": "Straightens a stack of notes, then blinks slowly",
-      "tone_traits": ["measured", "precise", "gently skeptical"],
-      "sample_line": "I indexed the sources and marked the three claims that still need evidence.",
       "palette": {
         "base": "#4f744a",
         "accent": "#4f744a",
@@ -67,8 +63,6 @@
       "silhouette": "Round tail, forward stance, open expression",
       "signature_prop": "Cross-body planner satchel",
       "idle_behavior": "Checks a small list, then taps the next item",
-      "tone_traits": ["upbeat", "concise", "socially aware"],
-      "sample_line": "The handoff is tidy. I put the next decision at the top so nobody has to hunt for it.",
       "palette": {
         "base": "#b75d34",
         "accent": "#b75d34",
@@ -94,8 +88,6 @@
       "silhouette": "Compact body, broad hands, planted feet",
       "signature_prop": "Modular tool belt",
       "idle_behavior": "Adjusts one tool, then gives a small nod",
-      "tone_traits": ["practical", "direct", "quietly playful"],
-      "sample_line": "The smallest honest slice is ready. Want the working demo or the test notes first?",
       "palette": {
         "base": "#658c36",
         "accent": "#658c36",
@@ -121,8 +113,6 @@
       "silhouette": "Soft rectangular shape, relaxed shoulders",
       "signature_prop": "Messenger pouch and living sprout",
       "idle_behavior": "Waters the sprout, then settles into an easy breath",
-      "tone_traits": ["calm", "reassuring", "never vague"],
-      "sample_line": "Two tasks can wait. I kept today to the three things that actually unblock the team.",
       "palette": {
         "base": "#7d8f3c",
         "accent": "#7d8f3c",
@@ -148,8 +138,6 @@
       "silhouette": "Tall ears, folded moon wings, light frame",
       "signature_prop": "Field notebook with specimen tabs",
       "idle_behavior": "Wings shimmer as it follows a drifting mote",
-      "tone_traits": ["curious", "lyrical", "evidence-grounded"],
-      "sample_line": "There is a pattern in the outliers. I saved the surprising version beside the safe one.",
       "palette": {
         "base": "#83618a",
         "accent": "#83618a",
@@ -175,8 +163,6 @@
       "silhouette": "Tall ears, diagonal cape, alert posture",
       "signature_prop": "Map tube and decision token",
       "idle_behavior": "Unrolls a map corner, then flicks its tail tip",
-      "tone_traits": ["candid", "economical", "respectfully challenging"],
-      "sample_line": "Option B is faster. Option A is easier to reverse. The real choice is speed versus optionality.",
       "palette": {
         "base": "#6c4b74",
         "accent": "#6c4b74",
@@ -202,8 +188,6 @@
       "silhouette": "Heavy rounded stones, bright central core",
       "signature_prop": "Modular utility pouches",
       "idle_behavior": "Core brightens and dims steadily while the moss settles",
-      "tone_traits": ["steady", "transparent", "low-drama"],
-      "sample_line": "Everything is stable. One dependency is warming up, and I will tell you before it becomes a delay.",
       "palette": {
         "base": "#2f8580",
         "accent": "#2f8580",
@@ -229,8 +213,6 @@
       "silhouette": "Narrow bird profile, mechanical joints",
       "signature_prop": "Wind-up key and status lens",
       "idle_behavior": "Lens aperture clicks, then the key turns once",
-      "tone_traits": ["exact", "brisk", "surprisingly personable"],
-      "sample_line": "The routine ran in forty-two seconds. Nothing changed outside the approved steps.",
       "palette": {
         "base": "#a66d23",
         "accent": "#a66d23",

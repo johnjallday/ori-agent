@@ -55,8 +55,6 @@ const payload = {
       entry_version: 1,
       family: 'resident',
       family_label: 'Resident',
-      tone_traits: ['measured', 'precise'],
-      sample_line: 'Here is what I found.',
       assets: {
         portrait: '/characters/research-archivist/portrait.svg',
         sprite: '/characters/research-archivist/sprite.svg',
@@ -75,12 +73,15 @@ function ready(extra) {
 
 /* ---- lookup ---------------------------------------------------------------- */
 
-test('a known character resolves with its assets and tone data', () => {
+test('a known character resolves with its visual assets', () => {
   const archivist = ready().get('research-archivist');
   assert.equal(archivist.name, 'Research Archivist');
   assert.equal(archivist.familyLabel, 'Resident');
   assert.equal(archivist.assets.portrait, '/characters/research-archivist/portrait.svg');
-  assert.deepEqual(archivist.toneTraits, ['measured', 'precise']);
+  // Nothing tone-shaped comes back, because the catalog no longer serves it
+  // and this module has no field to put it in (FR-22).
+  assert.equal(archivist.toneTraits, undefined);
+  assert.equal(archivist.sampleLine, undefined);
 });
 
 test('an unknown or withdrawn character resolves to null so the caller falls back', () => {
@@ -251,7 +252,6 @@ test('an entry missing optional fields still resolves with safe defaults', () =>
   cat._ingest({ characters: [{ id: 'bare' }] });
   const bare = cat.get('bare');
   assert.equal(bare.name, 'bare'); // falls back to the id rather than blank
-  assert.equal(bare.toneTraits.length, 0);
   assert.equal(bare.assets.portrait, '');
 });
 

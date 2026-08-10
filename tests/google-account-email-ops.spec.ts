@@ -87,7 +87,11 @@ async function stubSettingsPage(page: Page, options: ConnectionOptions = {}) {
   );
 
   await page.route('**/api/connections/google/migratable', route =>
-    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ accounts: [] }) })
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ accounts: [] })
+    })
   );
 }
 
@@ -166,7 +170,11 @@ test.describe('Gmail enablement vault preflight', () => {
     let unlockCalls = 0;
     await page.route('**/api/vault/unlock', async route => {
       unlockCalls += 1;
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ locked: false }) });
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ locked: false })
+      });
     });
 
     await openGoogleAccountCard(page);
@@ -257,7 +265,9 @@ test.describe('Gmail enablement vault preflight', () => {
     await expect(page.locator('#googleConnProducts')).toContainText('Not enabled');
   });
 
-  test('a ready vault hands back an authorize URL with the read-only scope only', async ({ page }) => {
+  test('a ready vault hands back an authorize URL with the read-only scope only', async ({
+    page
+  }) => {
     await stubSettingsPage(page);
     let requestedUrl = '';
     await page.route('**/api/connections/google/gmail/enable*', async route => {
@@ -285,10 +295,16 @@ test.describe('Callback repair hints', () => {
     let enableCalls = 0;
     await page.route('**/api/connections/google/gmail/enable*', async route => {
       enableCalls += 1;
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({}) });
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({})
+      });
     });
 
-    await page.goto('/settings?gc_action=unlock&gc_vault=vault-personal#google-account', { waitUntil: 'domcontentloaded' });
+    await page.goto('/settings?gc_action=unlock&gc_vault=vault-personal#google-account', {
+      waitUntil: 'domcontentloaded'
+    });
     await expect(page.locator('#googleConnConnected')).toBeVisible();
 
     await expect(vaultPanel(page)).toContainText('Unlock your vault');
@@ -315,7 +331,11 @@ test.describe('Callback repair hints', () => {
     let enableCalls = 0;
     await page.route('**/api/connections/google/gmail/enable*', async route => {
       enableCalls += 1;
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({}) });
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({})
+      });
     });
 
     await page.goto('/settings?gc_action=choose#google-account', { waitUntil: 'domcontentloaded' });
@@ -363,7 +383,13 @@ test.describe('Nothing secret reaches the page', () => {
     await openGoogleAccountCard(page);
 
     const cardText = (await page.locator('#google-account').innerText()).toLowerCase();
-    for (const forbidden of ['access_token', 'refresh_token', 'client_secret', 'id_token', 'gocspx-']) {
+    for (const forbidden of [
+      'access_token',
+      'refresh_token',
+      'client_secret',
+      'id_token',
+      'gocspx-'
+    ]) {
       expect(cardText, `card must not contain ${forbidden}`).not.toContain(forbidden);
     }
   });

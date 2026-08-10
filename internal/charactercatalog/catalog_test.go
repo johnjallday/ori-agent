@@ -181,8 +181,6 @@ func base(t *testing.T) map[string]any {
 			"silhouette":     "Wide brow",
 			"signature_prop": "Ledger",
 			"idle_behavior":  "Straightens notes",
-			"tone_traits":    []string{"measured"},
-			"sample_line":    "Here is what I found.",
 			"palette": map[string]any{
 				"base": "#4f744a", "accent": "#4f744a", "ink": "#0f1a0e",
 			},
@@ -251,7 +249,7 @@ func TestRejectsMissingRequiredFields(t *testing.T) {
 	for _, field := range []string{
 		"name", "family", "family_label", "purpose",
 		"description", "silhouette", "signature_prop", "idle_behavior",
-		"sample_line", "provenance",
+		"provenance",
 	} {
 		t.Run(field, func(t *testing.T) {
 			m := base(t)
@@ -273,11 +271,41 @@ func TestRejectsMissingAccessibleDescription(t *testing.T) {
 	}
 }
 
-func TestRejectsMissingToneTraits(t *testing.T) {
-	m := base(t)
-	m["characters"].([]any)[1].(map[string]any)["tone_traits"] = []string{}
-	if _, err := parseMap(t, m); err == nil {
-		t.Fatal("expected empty tone_traits to be rejected")
+// The tone layer is gone as a concept, so a manifest that reintroduces it must
+// fail to load rather than have the fields quietly trimmed. The decoder's
+// unknown-field rejection is what enforces that, which is why this asserts on
+// loading rather than on the projection (PRD FR-22).
+func TestRejectsTonePropertiesEntirely(t *testing.T) {
+	for _, field := range []string{"tone_traits", "sample_line"} {
+		t.Run(field, func(t *testing.T) {
+			m := base(t)
+			m["characters"].([]any)[1].(map[string]any)[field] = []string{"anything"}
+			_, err := parseMap(t, m)
+			if err == nil || !strings.Contains(err.Error(), field) {
+				t.Fatalf("expected %q to be rejected outright, got: %v", field, err)
+			}
+		})
+	}
+}
+
+// A working entry still has to carry reviewed visual and provenance metadata:
+// removing tone must not have loosened what makes an asset shippable (FR-22).
+func TestVisualAndProvenanceMetadataIsStillRequired(t *testing.T) {
+	cat := MustLoad()
+	for _, ch := range cat.Working() {
+		if strings.TrimSpace(ch.Description) == "" {
+			t.Errorf("%s: accessible description is missing", ch.ID)
+		}
+		if strings.TrimSpace(ch.Assets.Portrait) == "" {
+			t.Errorf("%s: portrait asset is missing", ch.ID)
+		}
+		if !strings.Contains(ch.Provenance, "#") {
+			t.Errorf("%s: provenance must link to a specific record", ch.ID)
+		}
+	}
+	// The catalog must still offer a usable working set after the removal.
+	if len(cat.Working()) < MinWorkingCharacters {
+		t.Fatalf("working set shrank to %d, below the floor of %d", len(cat.Working()), MinWorkingCharacters)
 	}
 }
 

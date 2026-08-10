@@ -20,10 +20,12 @@ async function createWorkspace(page: Page, name: string, description: string): P
   const res = await page.request.post('/api/workspaces', {
     data: { name: uniqueName(name), description, workspace_preset: 'general' }
   });
-  const body = await res.json().catch(() => ({} as Record<string, unknown>));
+  const body = await res.json().catch(() => ({}) as Record<string, unknown>);
   const id = (body as { folder?: { id?: string } }).folder?.id;
   if (!res.ok() || !id) {
-    throw new Error(`create workspace failed (${res.status()}): ${JSON.stringify(body).slice(0, 300)}`);
+    throw new Error(
+      `create workspace failed (${res.status()}): ${JSON.stringify(body).slice(0, 300)}`
+    );
   }
   return id;
 }
@@ -31,7 +33,7 @@ async function createWorkspace(page: Page, name: string, description: string): P
 // Concrete workspaces are created without an entry agent (by design), so the
 // detail page would otherwise show a mandatory "Create an entry agent?" prompt.
 async function suppressEntryAgentPrompt(page: Page, workspaceId: string) {
-  await page.addInitScript((id) => {
+  await page.addInitScript(id => {
     window.sessionStorage.setItem(`workspace-detail-entry-agent-prompt-dismissed:${id}`, '1');
   }, workspaceId);
 }
@@ -43,7 +45,9 @@ async function gotoWorkspaceCommand(page: Page, workspaceId: string) {
 }
 
 async function openFindToolsSurface(page: Page) {
-  const toolsStat = page.getByRole('button', { name: /Open tools: MCP, skills, plugins, and find tools/i });
+  const toolsStat = page.getByRole('button', {
+    name: /Open tools: MCP, skills, plugins, and find tools/i
+  });
   await expect(toolsStat).toBeVisible();
   await toolsStat.click();
 
@@ -63,7 +67,7 @@ test.beforeEach(async ({ page }) => {
 
 test('creating a workspace is non-blocking and makes no marketplace calls', async ({ page }) => {
   const marketplaceHits: string[] = [];
-  page.on('request', (req) => {
+  page.on('request', req => {
     if (/\/api\/(skills\/marketplace|mcp\/search)/.test(req.url())) marketplaceHits.push(req.url());
   });
 
@@ -109,10 +113,20 @@ test('workspace page shows Find tools and not the old setup-review surface', asy
 test('Find tools searches and renders add-ons only with honest copy', async ({ page }) => {
   // Stub the slow marketplace/registry searches so the panel resolves fast and
   // deterministically (we assert structure + copy, not specific results).
-  await page.route('**/api/skills/marketplace/search**', (r) =>
-    r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ skills: [], results: [] }) }));
-  await page.route('**/api/mcp/search**', (r) =>
-    r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ servers: [], results: [] }) }));
+  await page.route('**/api/skills/marketplace/search**', r =>
+    r.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ skills: [], results: [] })
+    })
+  );
+  await page.route('**/api/mcp/search**', r =>
+    r.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ servers: [], results: [] })
+    })
+  );
 
   const wid = await createWorkspace(page, 'E2E Search', 'Plans and tracks trips.');
   await gotoWorkspaceCommand(page, wid);

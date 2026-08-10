@@ -7,6 +7,8 @@
 /api/agents/dashboard/list
 /api/agents/dashboard/stats
 /api/agents/x
+/api/agents/x/appearance/upload
+/api/agents/x/avatar
 /api/api-key
 /api/chat
 /api/chat/send
