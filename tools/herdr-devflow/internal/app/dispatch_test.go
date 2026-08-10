@@ -45,9 +45,6 @@ func TestFeatureOverviewCarriesNoBacklogEvidence(t *testing.T) {
 		Stderr:    &stderr,
 		Getwd:     func() (string, error) { return repo, nil },
 		LookupEnv: func(string) (string, bool) { return "", false },
-		// Issue and pull-request queries both come through here; the empty
-		// answer keeps the test off the network.
-		GitHubRunner: func(context.Context, ...string) ([]byte, error) { return []byte("[]"), nil },
 	})
 	args := []string{
 		"--repo-root", repo, "--home", filepath.Join(t.TempDir(), "runtime"),

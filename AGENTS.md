@@ -39,17 +39,22 @@ For the PRD and task-list workflows below, create planning artifacts in this dev
 
 ## Feature Naming: Issue Number First
 
-Ideas are captured as GitHub Issues and read back through three commands in `scripts/devops/`, each named for exactly what it reads:
+Ideas are captured as GitHub Issues. `./scripts/devops.sh` is the read-only human
+interface: with no arguments it lists every open Issue and starts a small REPL;
+one-shot commands expose the same views to scripts and agents.
 
-| Command | Reads | Answers |
-|---|---|---|
-| `./scripts/devops/issue.sh` | GitHub Issues — `list`, `view <n>`, `add "<title>"` | "what have I captured?" |
-| `./scripts/devops/backlog.sh` | the linked project board's `Backlog` column | "what is waiting to be groomed?" |
-| `./scripts/devops/ready.sh` | the linked project board's `Ready` column, ranked | "what should I work on?" |
+| Command | Reads |
+|---|---|
+| `./scripts/devops.sh` or `./scripts/devops.sh all` | every open Issue |
+| `./scripts/devops.sh decisions` | open Issues labeled `needs-decision` |
+| `./scripts/devops.sh backlog` | open Issues labeled `backlog` |
+| `./scripts/devops.sh proposals` | open Issues labeled `feature-proposal` |
+| `./scripts/devops.sh view <n>` | one Issue in full |
 
-Issues are the record: your capture, plus the grooming agent's spec comment, which `./scripts/devops/issue.sh view` prints under the body. The board adds what an Issue cannot express — an ordering and a "researched enough to build" state — and is resolved from whichever ProjectV2 is linked to this repository, so exactly one must be. `Ready` means buildable, not approved; choosing what to build stays with you.
-
-Each board command shows exactly the column GitHub labels with that name, so its count always matches the board's own column header. Nothing reads "the board" as a whole: a command that showed one column while named after another is precisely the trap this split removed.
+The script delegates directly to `gh issue list` and `gh issue view`. Its filters
+are literal GitHub labels, not Project columns, and every read is fresh. The REPL
+does not create, label, comment on, close, rank, or otherwise mutate an Issue.
+Use `gh issue create` for capture and GitHub itself for lifecycle changes.
 
 Work selected from an Issue uses the Issue number at the front of its identity:
 

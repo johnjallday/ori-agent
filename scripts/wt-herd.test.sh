@@ -656,58 +656,31 @@ for herdr_free_command in pr merge demo backlog cd ls; do
   fi
 done
 
-# The backlog left this dispatcher for two executables, but the property that
-# assertion protected did not: reading GitHub Issues or the board must never
-# need a running Herdr. Both entrypoints reach GitHub through the shared Go
-# helper, and each may ask it for exactly one subcommand — its own. A bridge
-# subcommand appearing there would put a live Herdr between a developer and
-# their own backlog.
-#
-# The helper invocation itself now lives in the sourced bootstrap, so that is
-# where the routing is asserted; the entrypoints are checked for which
-# subcommand they name.
-devflow_bootstrap="$repo_root/scripts/lib/devflow-bootstrap.sh"
-if [[ ! -f "$devflow_bootstrap" ]]; then
-  print -r -- "scripts/lib/devflow-bootstrap.sh is missing; the entrypoints share no resolution" >&2
+# Reading GitHub Issues must never need a running Herdr. The one DevOps
+# entrypoint calls `gh` directly and the former helper bootstrap is gone.
+devops_entrypoint="$repo_root/scripts/devops.sh"
+if [[ ! -x "$devops_entrypoint" ]]; then
+  print -r -- "scripts/devops.sh is missing or not executable" >&2
   exit 1
 fi
-helper_calls="$(rg -- '--repo-root' "$devflow_bootstrap" || true)"
-if [[ -z "$helper_calls" ]]; then
-  print -r -- "the bootstrap no longer routes through the devflow helper" >&2
+if ! rg -q 'gh "\$\{args\[@\]\}"' "$devops_entrypoint"; then
+  print -r -- "scripts/devops.sh no longer invokes gh directly" >&2
   exit 1
 fi
-
-typeset -A backlog_entrypoints
-backlog_entrypoints=(
-  "$repo_root/scripts/devops/issue.sh"   "issue"
-  "$repo_root/scripts/devops/backlog.sh" "backlog"
-  "$repo_root/scripts/devops/ready.sh"   "ready"
-)
-for entrypoint subcommand in "${(@kv)backlog_entrypoints}"; do
-  name="${entrypoint:t}"
-  if [[ ! -f "$entrypoint" ]]; then
-    print -r -- "scripts/devops/$name is missing" >&2
-    exit 1
-  fi
-  if ! rg -q "devflow_exec $subcommand \"\\\$@\"" "$entrypoint"; then
-    print -r -- "$name does not ask the helper for '$subcommand'" >&2
-    exit 1
-  fi
-  for bridge_command in handoff retry setup doctor cleanup target status overview prompt; do
-    if rg -q -- "devflow_exec $bridge_command" "$entrypoint"; then
-      print -r -- "$name asked the helper for the Herdr command '$bridge_command'" >&2
-      exit 1
-    fi
-  done
-  if rg -q "wt_herd" "$entrypoint"; then
-    print -r -- "$name reaches for the Herdr bridge" >&2
+if rg -q 'wt_herd|herdr-devflow|devflow_exec|devflow-bootstrap' "$devops_entrypoint"; then
+  print -r -- "scripts/devops.sh reaches for the Herdr bridge" >&2
+  exit 1
+fi
+if [[ -e "$repo_root/scripts/lib/devflow-bootstrap.sh" ]]; then
+  print -r -- "the retired DevOps-to-Herdr bootstrap still exists" >&2
+  exit 1
+fi
+for retired_entrypoint in issue backlog ready; do
+  if [[ -e "$repo_root/scripts/devops/$retired_entrypoint.sh" ]]; then
+    print -r -- "the retired scripts/devops/$retired_entrypoint.sh still exists" >&2
     exit 1
   fi
 done
-if rg -q "wt_herd" "$devflow_bootstrap"; then
-  print -r -- "the bootstrap reaches for the Herdr bridge" >&2
-  exit 1
-fi
 
 # --no-herdr is the supported per-invocation escape hatch (FR-33), so it has to
 # be discoverable from wt help rather than only from the source.
