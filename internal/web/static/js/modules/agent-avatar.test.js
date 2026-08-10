@@ -519,6 +519,36 @@ test('a curated portrait renders as a lazily decoded image with a stable box', (
   assert.ok(html.includes('alt=""'));
 });
 
+test('agent surfaces render the still portrait, never the animated sprite', () => {
+  // This feature introduces no required animation, so there is nothing for
+  // reduced-motion to suppress on an agent avatar: the renderer asks for
+  // `assets.portrait` and never for `assets.sprite`. Pinning it here is what
+  // stops a later change from quietly making every roster card animate
+  // (FR-102, Non-Goal "expanding character animation").
+  const entry = catalogEntry({
+    assets: {
+      portrait: '/still.webp',
+      sprite: '/animated.svg',
+      static: '/motionless.svg'
+    }
+  });
+  const html = AgentAvatar.markup(
+    agent({ appearance: appearance('character', { catalogId: 'sable' }), character: entry })
+  );
+  assert.ok(html.includes('/still.webp'));
+  assert.ok(!html.includes('/animated.svg'), 'the sprite must not reach an agent avatar');
+  assert.ok(!html.includes('/motionless.svg'));
+});
+
+test('a character with no portrait falls back rather than reaching for a sprite', () => {
+  const entry = catalogEntry({ assets: { sprite: '/animated.svg', static: '/motionless.svg' } });
+  const res = AgentAvatar.resolve(
+    agent({ appearance: appearance('character', { catalogId: 'sable' }), character: entry })
+  );
+  assert.equal(res.mode, 'generated');
+  assert.equal(res.reason, 'character-missing');
+});
+
 test('the catalog id travels with the element and cannot break out of it', () => {
   const html = AgentAvatar.markup(
     agent({

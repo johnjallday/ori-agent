@@ -16,6 +16,14 @@
   margin: 0;
   padding: 0;
   border: 0;
+
+  /* One token for every piece of secondary copy in here, resolved in host
+     order. This matters more than it looks: the global `--text-secondary` is
+     calibrated for the page background, and on the Agents Inspector's own panel
+     it only reaches 3.67:1 in dark mode — below AA, and caught by the axe pass
+     in this component's a11y spec. Hosts that theme their cards expose a token
+     calibrated for that surface, so prefer it and fall back outward. */
+  --appearance-muted: var(--card-muted, var(--cozy-ink-dim, var(--text-secondary, #6b7280)));
 }
 
 .appearance-editor__legend {
@@ -25,7 +33,7 @@
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--text-secondary, #6b7280);
+  color: var(--appearance-muted);
 }
 
 /* ---- preview ---------------------------------------------------------------- */
@@ -61,11 +69,15 @@
   gap: 10px;
 }
 
+/* Deliberately unpainted. The card's own `--bg-primary` is lighter than the
+   Inspector panel in dark mode, and `--text-secondary` only clears AA against
+   the panel — painting the card took the descriptions to 3.67:1. Letting the
+   host's background show through means this section's secondary copy sits on
+   exactly what the rest of the surrounding form's does (FR-101). */
 .appearance-source {
   padding: 10px 12px;
   border: 1px solid var(--border-color, #e5e7eb);
   border-radius: 10px;
-  background: var(--bg-primary, #fff);
 }
 
 /* The selected state is carried by a border weight and an accent bar as well as
@@ -75,8 +87,17 @@
   box-shadow: inset 3px 0 0 var(--accent-color, #4f46e5);
 }
 
+/* Unavailable is a dashed border and nothing else.
+   Two earlier attempts both broke AA in dark mode, for the same underlying
+   reason: anything that changes what the card's text sits on, or how opaque it
+   is, changes its contrast. `opacity: 0.75` dimmed the copy to 2.71:1, and a
+   `--bg-secondary` background took it to 4.28:1 — both below the 4.5:1 floor,
+   both caught by the axe pass in this component's a11y spec. The border alone
+   leaves every card's text on the same background as every other card's, and
+   the state is already carried by a sentence inside the card, so nothing is
+   lost by signalling it more quietly (FR-100/FR-101). */
 .appearance-source.is-unavailable {
-  opacity: 0.75;
+  border-style: dashed;
 }
 
 .appearance-source__choice {
@@ -100,7 +121,7 @@
   margin: 4px 0 0 24px;
   font-size: 12px;
   line-height: 1.45;
-  color: var(--text-secondary, #6b7280);
+  color: var(--appearance-muted);
 }
 
 /* The unavailable reason is text, never colour alone: "you cannot pick this
@@ -109,7 +130,7 @@
   margin: 4px 0 0 24px;
   font-size: 11.5px;
   line-height: 1.4;
-  color: var(--text-secondary, #6b7280);
+  color: var(--appearance-muted);
   font-style: italic;
 }
 
@@ -141,7 +162,7 @@
   align-items: center;
   gap: 6px;
   font-size: 12px;
-  color: var(--text-secondary, #6b7280);
+  color: var(--appearance-muted);
 }
 
 .appearance-color input[type="color"] {
@@ -164,7 +185,7 @@
   margin: 0;
   font-size: 11.5px;
   line-height: 1.4;
-  color: var(--text-secondary, #6b7280);
+  color: var(--appearance-muted);
 }
 
 /* ---- state ------------------------------------------------------------------ */
@@ -173,7 +194,7 @@
   margin: 10px 0 0;
   font-size: 12px;
   line-height: 1.45;
-  color: var(--text-secondary, #6b7280);
+  color: var(--appearance-muted);
 }
 
 .appearance-editor__status {
@@ -183,7 +204,7 @@
 }
 
 .appearance-editor__status.is-info {
-  color: var(--text-secondary, #6b7280);
+  color: var(--appearance-muted);
 }
 
 .appearance-editor__status.is-success {

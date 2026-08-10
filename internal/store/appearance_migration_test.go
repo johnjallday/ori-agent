@@ -241,6 +241,162 @@ func TestMigrationRecordsANoteWithoutLeakingPaths(t *testing.T) {
 	}
 }
 
+// The store has three distinct load paths, and only the nested one is
+// exercised above. The other two are the ones a long-lived install actually
+// arrives on, so a migration that only worked for new-format records would miss
+// exactly the users it exists for (FR-79's "old top-level index" and "nested
+// files" rows).
+
+func TestLoadMigratesTheOldTopLevelIndexFormat(t *testing.T) {
+	dir := t.TempDir()
+	indexPath := filepath.Join(dir, "agents_index.json")
+	// The pre-nested format: every agent inline under an "agents" key.
+	index := `{
+		"current": "legacy",
+		"agents": {
+			"legacy": {
+				"type": "general",
+				"Settings": {"model": "gpt-4o-mini"},
+				"metadata": {
+					"description": "kept",
+					"avatar_color": "#3366FF",
+					"character": {"display_mode": "fallback", "voice_enabled": true}
+				}
+			}
+		}
+	}`
+	if err := os.WriteFile(indexPath, []byte(index), 0o644); err != nil {
+		t.Fatalf("write index: %v", err)
+	}
+
+	fs := &fileStore{path: indexPath, agents: make(map[string]*agent.Agent)}
+	if err := fs.load(); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+
+	ag, ok := fs.agents["legacy"]
+	if !ok || ag == nil {
+		t.Fatal("agent not loaded from the old index format")
+	}
+	if ag.Appearance == nil {
+		t.Fatal("the old index path must migrate appearance too")
+	}
+	if ag.Appearance.Mode != types.AppearanceModeGenerated {
+		t.Errorf("mode = %q, want generated", ag.Appearance.Mode)
+	}
+	if ag.Appearance.GeneratedColor() != "#3366ff" {
+		t.Errorf("colour = %q, want the migrated legacy colour", ag.Appearance.GeneratedColor())
+	}
+	if ag.Metadata == nil || ag.Metadata.Description != "kept" {
+		t.Error("unrelated metadata must survive the old-index path")
+	}
+}
+
+func TestLoadMigratesTheFlatPerAgentFileFormat(t *testing.T) {
+	dir := t.TempDir()
+	// The middle format: agents/<name>.json rather than a directory per agent.
+	if err := os.MkdirAll(filepath.Join(dir, "agents"), 0o755); err != nil {
+		t.Fatalf("create agents dir: %v", err)
+	}
+	flat := `{
+		"type": "general",
+		"Settings": {"model": "gpt-4o-mini"},
+		"metadata": {"avatar_image": "atlas.webp"}
+	}`
+	if err := os.WriteFile(filepath.Join(dir, "agents", "flat.json"), []byte(flat), 0o644); err != nil {
+		t.Fatalf("write flat agent: %v", err)
+	}
+	seedUpload(t, "atlas.webp")
+
+	fs := &fileStore{
+		path:   filepath.Join(dir, "agents_index.json"),
+		agents: make(map[string]*agent.Agent),
+	}
+	if err := fs.load(); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+
+	ag, ok := fs.agents["flat"]
+	if !ok || ag == nil {
+		t.Fatal("agent not loaded from the flat file format")
+	}
+	// No explicit mode plus an upload that exists reproduces the historical
+	// field-presence rule, so the agent looks exactly as it did (FR-70).
+	if ag.Appearance == nil || ag.Appearance.Mode != types.AppearanceModeUploaded {
+		t.Fatalf("expected uploaded mode, got %+v", ag.Appearance)
+	}
+}
+
+func TestSaveLeavesNoTemporaryArtifacts(t *testing.T) {
+	dir := t.TempDir()
+	writeLegacyAgent(t, dir, "tidy", `{
+		"type":"general",
+		"Settings":{"model":"gpt-4o-mini"},
+		"metadata":{"avatar_color":"#3366ff"}
+	}`)
+
+	fs := loadStore(t, dir)
+	if err := fs.saveUnlocked(); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	// Writes go through a temp file and a rename. A leftover .tmp means a
+	// partially-written record survived, which is exactly what the atomic write
+	// exists to prevent (FR-75).
+	var leftovers []string
+	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() && strings.HasSuffix(path, ".tmp") {
+			leftovers = append(leftovers, path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk: %v", err)
+	}
+	if len(leftovers) > 0 {
+		t.Errorf("temporary artifacts survived a successful save: %v", leftovers)
+	}
+}
+
+func TestAFailedWriteLeavesTheOriginalRecordIntact(t *testing.T) {
+	dir := t.TempDir()
+	path := writeLegacyAgent(t, dir, "protected", `{
+		"type":"general",
+		"Settings":{"model":"gpt-4o-mini"},
+		"metadata":{"avatar_color":"#3366ff"}
+	}`)
+	original, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read original: %v", err)
+	}
+
+	fs := loadStore(t, dir)
+
+	// Make the agent's directory read-only so the temp write fails. The record
+	// itself must survive unchanged: a migration that cannot be persisted has to
+	// leave the user's data exactly as it found it (FR-75).
+	agentDir := filepath.Join(dir, "agents", "protected")
+	if err := os.Chmod(agentDir, 0o555); err != nil {
+		t.Skipf("cannot make the directory read-only here: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(agentDir, 0o755) })
+
+	if err := fs.saveUnlocked(); err == nil {
+		t.Skip("the filesystem allowed the write despite read-only permissions")
+	}
+
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("the original record disappeared: %v", err)
+	}
+	if string(after) != string(original) {
+		t.Error("a failed save modified the original record")
+	}
+}
+
 // seedUpload writes a placeholder image into the avatar directory the store
 // resolves against, and removes it afterwards. The directory is relative to the
 // process working directory, which is the package directory under `go test`.

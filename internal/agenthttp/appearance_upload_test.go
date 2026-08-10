@@ -6,6 +6,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"testing"
@@ -48,7 +49,14 @@ func uploadRequest(t *testing.T, agentName string, body []byte, fields map[strin
 	if err := mw.Close(); err != nil {
 		t.Fatalf("close writer: %v", err)
 	}
-	req := httptest.NewRequest(http.MethodPost, "/api/agents/"+agentName+"/appearance/upload", &buf)
+	// Agent names may legally contain spaces, which are not legal in a request
+	// line — so the segment is escaped here, exercising the handler's own
+	// decoding rather than sidestepping it.
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/agents/"+url.PathEscape(agentName)+"/appearance/upload",
+		&buf,
+	)
 	req.Header.Set("Content-Type", mw.FormDataContentType())
 	return req
 }

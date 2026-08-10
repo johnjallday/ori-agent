@@ -37,7 +37,12 @@ const RUN_SUFFIX = Date.now().toString(36);
 
 async function createCalendarOpsWorkspace(request: APIRequestContext, name: string) {
   const res = await request.post('/api/workspaces', {
-    data: { name, description: '', template_id: CALENDAR_OPS_TEMPLATE_ID, create_template_agents: true }
+    data: {
+      name,
+      description: '',
+      template_id: CALENDAR_OPS_TEMPLATE_ID,
+      create_template_agents: true
+    }
   });
   expect(res.ok()).toBeTruthy();
   const body = await res.json();
@@ -78,7 +83,12 @@ async function bindAndMapConnector(request: APIRequestContext, workspaceId: stri
           },
           create_event: {
             tool: 'events_insert',
-            fields: { id: '/id', title: '/summary', start_time: '/start/dateTime', end_time: '/end/dateTime' },
+            fields: {
+              id: '/id',
+              title: '/summary',
+              start_time: '/start/dateTime',
+              end_time: '/end/dateTime'
+            },
             arguments: {
               calendar_id: '/calendarId',
               title: '/summary',
@@ -110,9 +120,14 @@ test.describe.serial('Calendar Ops', () => {
     await bindAndMapConnector(request, readyWorkspaceId);
   });
 
-  test('Construct wizard offers Calendar Ops as a selectable blueprint with a briefing', async ({ page }) => {
+  test('Construct wizard offers Calendar Ops as a selectable blueprint with a briefing', async ({
+    page
+  }) => {
     await page.goto('/workspaces');
-    await page.getByRole('button', { name: /new workspace/i }).first().click();
+    await page
+      .getByRole('button', { name: /new workspace/i })
+      .first()
+      .click();
     await expect(page.locator('#addFolderModal')).toBeVisible();
     const card = page.locator('.workspace-template-card', { hasText: 'Calendar Ops' });
     await expect(card).toBeVisible();
@@ -158,7 +173,9 @@ test.describe.serial('Calendar Ops', () => {
     });
     expect(hqRes.ok()).toBeTruthy();
     const hqId = (await hqRes.json()).folder.id as string;
-    const designateRes = await request.post('/api/personal-hq/designate', { data: { workspace_id: hqId } });
+    const designateRes = await request.post('/api/personal-hq/designate', {
+      data: { workspace_id: hqId }
+    });
     expect(designateRes.ok()).toBeTruthy();
 
     await page.goto(`/workspaces/${hqId}?mode=map`);
@@ -177,11 +194,19 @@ test.describe.serial('Calendar Ops', () => {
     await expect(page.locator('#calendarConsoleRoot')).toBeVisible({ timeout: 10000 });
   });
 
-  test('setup panel starts in connector_missing state for a fresh Calendar Ops workspace', async ({ page, request }) => {
-    const freshId = await createCalendarOpsWorkspace(request, `Calendar Ops Setup States ${RUN_SUFFIX}`);
+  test('setup panel starts in connector_missing state for a fresh Calendar Ops workspace', async ({
+    page,
+    request
+  }) => {
+    const freshId = await createCalendarOpsWorkspace(
+      request,
+      `Calendar Ops Setup States ${RUN_SUFFIX}`
+    );
     await page.goto(`/workspaces/${freshId}?panel=calendar`);
     await expect(page.locator('#calendarConsoleRoot')).toBeVisible({ timeout: 10000 });
-    await expect(page.locator('#calendarConsoleBody')).toContainText(/no calendar connector is configured/i);
+    await expect(page.locator('#calendarConsoleBody')).toContainText(
+      /no calendar connector is configured/i
+    );
   });
 
   test('the blueprint Setup Wizard owns Calendar setup and opens at the connect step', async ({
@@ -201,7 +226,9 @@ test.describe.serial('Calendar Ops', () => {
     // in actually happens before sending anyone there.
     const content = page.locator('#setupWizardStepContent');
     await expect(content).toContainText('Choose a calendar connector');
-    await expect(page.locator('#setupWizardDisclosure')).toContainText('with your calendar provider');
+    await expect(page.locator('#setupWizardDisclosure')).toContainText(
+      'with your calendar provider'
+    );
 
     // Dismissing leaves the workspace visibly unfinished and starts nothing.
     await page.locator('#setupWizardClose').click();
@@ -233,30 +260,40 @@ test.describe.serial('Calendar Ops', () => {
     await expect(page.locator('#setupWizardDialog')).toBeHidden();
   });
 
-  test('day view renders events grouped by day with conflict badges and a private-event redaction', async ({ page }) => {
+  test('day view renders events grouped by day with conflict badges and a private-event redaction', async ({
+    page
+  }) => {
     await page.goto(`/workspaces/${readyWorkspaceId}?panel=calendar`);
     const root = page.locator('#calendarConsoleRoot');
     await expect(root).toBeVisible({ timeout: 10000 });
 
-    await expect(page.getByRole('button', { name: 'Day', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByRole('button', { name: 'Day', exact: true })).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    );
     const events = page.locator('.calendar-console-event');
     await expect(events.first()).toBeVisible({ timeout: 10000 });
     await expect(page.locator('.calendar-console-badge-conflict').first()).toBeVisible();
     await expect(page.locator('.calendar-console-event-private')).toContainText('Private event');
   });
 
-  test('week view shows more events than day view and preserves the toggle state', async ({ page }) => {
+  test('week view shows more events than day view and preserves the toggle state', async ({
+    page
+  }) => {
     await page.goto(`/workspaces/${readyWorkspaceId}?panel=calendar`);
     await expect(page.locator('#calendarConsoleRoot')).toBeVisible({ timeout: 10000 });
     const dayCount = await page.locator('.calendar-console-event').count();
 
     await page.getByRole('button', { name: 'Week', exact: true }).click();
-    await expect(page.getByRole('button', { name: 'Week', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByRole('button', { name: 'Week', exact: true })).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    );
     const weekCount = await page.locator('.calendar-console-event').count();
     expect(weekCount).toBeGreaterThanOrEqual(dayCount);
   });
 
-  test('calendar filters hide and re-show a calendar\'s events', async ({ page }) => {
+  test("calendar filters hide and re-show a calendar's events", async ({ page }) => {
     await page.goto(`/workspaces/${readyWorkspaceId}?panel=calendar`);
     await expect(page.locator('.calendar-console-event').first()).toBeVisible({ timeout: 10000 });
     const filters = page.locator('.calendar-console-filter');
@@ -294,7 +331,9 @@ test.describe.serial('Calendar Ops', () => {
     await expect(prepSection.locator('.calendar-console-prep-body')).not.toBeEmpty();
   });
 
-  test('creating an event goes through preview (no write) then an explicit confirm dialog', async ({ page }) => {
+  test('creating an event goes through preview (no write) then an explicit confirm dialog', async ({
+    page
+  }) => {
     await page.goto(`/workspaces/${readyWorkspaceId}?panel=calendar`);
     await expect(page.locator('#calendarConsoleRoot')).toBeVisible({ timeout: 10000 });
 
@@ -318,7 +357,10 @@ test.describe.serial('Calendar Ops', () => {
     await expect(checkpoint).toBeHidden();
   });
 
-  test('a broken connector reports an unavailable state without breaking the page', async ({ page, request }) => {
+  test('a broken connector reports an unavailable state without breaking the page', async ({
+    page,
+    request
+  }) => {
     // A registered server whose command can never start (an unmapped binary
     // path) reaches a real error/stopped registry status, unlike an
     // unregistered server name -- resolveGateway resolves *that* straight to
@@ -327,12 +369,20 @@ test.describe.serial('Calendar Ops', () => {
     // "connector exists but is broken" branch instead.
     const brokenServerName = `broken-connector-${RUN_SUFFIX}`;
     const addRes = await request.post('/api/mcp/servers', {
-      data: { name: brokenServerName, transport: 'stdio', command: '/nonexistent/path/to/binary', enabled: true }
+      data: {
+        name: brokenServerName,
+        transport: 'stdio',
+        command: '/nonexistent/path/to/binary',
+        enabled: true
+      }
     });
     expect(addRes.ok()).toBeTruthy();
     await request.post(`/api/mcp/servers/${brokenServerName}/connect`);
 
-    const degradedId = await createCalendarOpsWorkspace(request, `Calendar Ops Degraded ${RUN_SUFFIX}`);
+    const degradedId = await createCalendarOpsWorkspace(
+      request,
+      `Calendar Ops Degraded ${RUN_SUFFIX}`
+    );
     const connectorRes = await request.post('/api/calendar-ops/setup/connector', {
       data: { workspace_id: degradedId, server_name: brokenServerName }
     });
@@ -350,7 +400,9 @@ test.describe.serial('Calendar Ops', () => {
     await expect(page.locator('body')).not.toContainText(/uncaught|typeerror|stack trace/i);
   });
 
-  test('keyboard: Tab reaches the toolbar controls and Enter activates the focused button', async ({ page }) => {
+  test('keyboard: Tab reaches the toolbar controls and Enter activates the focused button', async ({
+    page
+  }) => {
     await page.goto(`/workspaces/${readyWorkspaceId}?panel=calendar`);
     await expect(page.locator('#calendarConsoleRoot')).toBeVisible({ timeout: 10000 });
 
@@ -370,5 +422,4 @@ test.describe.serial('Calendar Ops', () => {
     await expect(page.getByRole('group', { name: 'Day or week view' })).toBeVisible();
     await expect(page.getByRole('group', { name: 'Visible calendars' })).toBeVisible();
   });
-
 });

@@ -734,7 +734,9 @@ test('Team visualizes every included template agent and its lifecycle', async ({
   // Lifecycle copy is future tense and never claims prior attachment (FR37-FR39).
   await expect(rows.nth(0)).toContainText('Saved agent · will be attached');
   await expect(rows.nth(2)).toContainText('New reusable agent · will be created and attached');
-  await expect(page.locator('#workspaceTeamRoster')).not.toContainText('already saved and attached');
+  await expect(page.locator('#workspaceTeamRoster')).not.toContainText(
+    'already saved and attached'
+  );
   await expect(page.locator('#workspaceTeamRoster')).not.toContainText(
     'Added to Your Agents and attached'
   );
@@ -823,7 +825,11 @@ test('Team stages a customized copy without touching the reused agent (FR40-FR47
 
   expect(payload?.create_template_agents).toBe(true);
   expect(payload?.template_agent_overrides).toEqual([
-    expect.objectContaining({ index: 0, name: 'Shared Lead Studio', system_prompt: 'Behave differently.' })
+    expect.objectContaining({
+      index: 0,
+      name: 'Shared Lead Studio',
+      system_prompt: 'Behave differently.'
+    })
   ]);
 });
 
@@ -1066,7 +1072,9 @@ test('a Your Agents failure stays advisory and offers Retry (FR65, FR66)', async
   const issue = page.locator('#workspaceTeamIssues .workspace-team-issue');
   await expect(issue).toHaveClass(/is-advisory/);
   await expect(issue).toContainText('saved agents could not be loaded');
-  await expect(page.locator('#workspaceTeamIssues .workspace-team-issue.is-blocking')).toHaveCount(0);
+  await expect(page.locator('#workspaceTeamIssues .workspace-team-issue.is-blocking')).toHaveCount(
+    0
+  );
 
   // Retry recovers the picker in place.
   await issue.locator('[data-team-recovery="retry-saved-roster"]').click();
@@ -1133,7 +1141,9 @@ test('an unavailable blueprint plan blocks Team and offers recovery (FR94, FR95)
 
   // Taking the exclude path clears the blocker.
   await blocker.locator('[data-team-recovery="exclude-blueprint-team"]').click();
-  await expect(page.locator('#workspaceTeamIssues .workspace-team-issue.is-blocking')).toHaveCount(0);
+  await expect(page.locator('#workspaceTeamIssues .workspace-team-issue.is-blocking')).toHaveCount(
+    0
+  );
 });
 
 test('Blueprint summarizes included agents read-only, with no agent controls', async ({ page }) => {
@@ -1146,7 +1156,12 @@ test('Blueprint summarizes included agents read-only, with no agent controls', a
         entry_agent_name: 'Research Lead',
         agents: [
           { name: 'Research Lead', action: 'reuse', entry_point: true, model_source: 'template' },
-          { name: 'Source Scout', action: 'reuse', entry_point: false, model_source: 'agent_default' },
+          {
+            name: 'Source Scout',
+            action: 'reuse',
+            entry_point: false,
+            model_source: 'agent_default'
+          },
           {
             name: 'Synthesis Writer',
             action: 'create',
@@ -1327,7 +1342,12 @@ test('Review reads as a receipt: name once, blueprint as provenance, team summar
         entry_agent_name: 'Reaper Producer',
         agents: [
           { name: 'Reaper Producer', action: 'reuse', entry_point: true, model_source: 'existing' },
-          { name: 'Session Scout', action: 'create', entry_point: false, model_source: 'agent_default' }
+          {
+            name: 'Session Scout',
+            action: 'create',
+            entry_point: false,
+            model_source: 'agent_default'
+          }
         ],
         warnings: []
       })
@@ -1405,7 +1425,9 @@ test('Review summarizes only the details that were actually chosen (FR81)', asyn
   await page.locator('#folderAdvancedDisclosure .workspace-advanced-summary').click();
   await page.locator('#folderPresetSelect').selectOption('research');
   await advanceToReview(page);
-  await expect(page.locator('#workspaceReviewSummary')).toContainText('Opens the project after creation');
+  await expect(page.locator('#workspaceReviewSummary')).toContainText(
+    'Opens the project after creation'
+  );
   await expect(page.locator('#workspaceReviewSummary')).toContainText('Agent behavior: Research');
 });
 
@@ -1504,12 +1526,12 @@ test('Team refuses to reach Review while a blocker is unresolved (FR89, FR94)', 
   await page.locator('#wizardNextBtn').click();
   await expect(page.locator('#wizardStep3')).toBeVisible();
   await expect(page.locator('#wizardStep4')).toBeHidden();
-  await expect(page.locator('#workspaceTeamIssues .workspace-team-issue.is-blocking')).toBeFocused();
+  await expect(
+    page.locator('#workspaceTeamIssues .workspace-team-issue.is-blocking')
+  ).toBeFocused();
 
   // Clearing the blocker lets the flow continue, and Create is enabled.
-  await page
-    .locator('#workspaceTeamIssues [data-team-recovery="exclude-blueprint-team"]')
-    .click();
+  await page.locator('#workspaceTeamIssues [data-team-recovery="exclude-blueprint-team"]').click();
   await advanceToReviewFromTeam(page);
   await expect(page.locator('#createFolderBtn')).toBeEnabled();
 });
@@ -1549,9 +1571,9 @@ test('Team carries text semantics, list roles, and quiet live-region updates', a
   await expect(page.locator('#workspaceTeamRoster .workspace-team-row').first()).toHaveRole(
     'listitem'
   );
-  await expect(page.locator('#existingAgentRosterList .workspace-existing-agent-card').first()).toHaveRole(
-    'listitem'
-  );
+  await expect(
+    page.locator('#existingAgentRosterList .workspace-existing-agent-card').first()
+  ).toHaveRole('listitem');
 
   // Designation and lifecycle are words, not colour (FR102).
   await expect(page.locator('#workspaceTeamRoster .workspace-team-badge').first()).toHaveText(
@@ -1622,7 +1644,9 @@ test('the modal never scrolls horizontally at a narrow viewport (FR108)', async 
   const teamBox = await page.locator('#workspaceTeamReview').boundingBox();
   const pickerBox = await page.locator('#existingAgentRosterPanel').boundingBox();
   expect(teamBox!.y).toBeLessThan(pickerBox!.y);
-  await page.locator('[data-existing-agent-add="An Extremely Long Saved Agent Name For Wrapping"]').click();
+  await page
+    .locator('[data-existing-agent-add="An Extremely Long Saved Agent Name For Wrapping"]')
+    .click();
   expect(await noHorizontalOverflow()).toBe(true);
 
   await page.locator('#workspaceTeamRoster [data-team-customize]').first().click();
@@ -1675,8 +1699,18 @@ test('the wizard never persists an agent before the workspace is created (FR68)'
         has_agents: true,
         entry_agent_name: 'Reaper Producer',
         agents: [
-          { name: 'Reaper Producer', action: 'create', entry_point: true, model_source: 'agent_default' },
-          { name: 'Session Scout', action: 'create', entry_point: false, model_source: 'agent_default' }
+          {
+            name: 'Reaper Producer',
+            action: 'create',
+            entry_point: true,
+            model_source: 'agent_default'
+          },
+          {
+            name: 'Session Scout',
+            action: 'create',
+            entry_point: false,
+            model_source: 'agent_default'
+          }
         ],
         warnings: []
       })

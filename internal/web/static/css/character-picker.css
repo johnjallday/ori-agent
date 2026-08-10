@@ -1,10 +1,10 @@
 /*
- * Character picker — the chooser used by New Agent and the Inspector's
- * Identity section (PRD FR-53/FR-59/FR-115–FR-119).
+ * Character picker — the chooser the shared Appearance editor opens, from every
+ * host that mounts it.
  *
  * A modal, because choosing is a focused decision that should not compete with
  * the collection behind it. Selection is carried by an aria-checked radiogroup
- * and a visible border, never by colour alone (FR-118).
+ * and a visible border, never by colour alone (FR-100).
  */
 
 .char-picker__backdrop {
@@ -15,6 +15,13 @@
 }
 
 .char-picker {
+  /* One calibrated token for every piece of secondary copy in the picker,
+     matching the Appearance editor's. The global `--text-secondary` is tuned
+     for the page background and reaches only 3.67:1 on the picker's own panel
+     in dark mode — below AA at these sizes, and caught by the axe pass over
+     `#charPicker` in the roster a11y spec (FR-101). */
+  --picker-muted: var(--card-muted, var(--cozy-ink-dim, var(--text-secondary, #6b7280)));
+
   position: fixed;
   z-index: 1051;
   top: 50%;
@@ -60,7 +67,7 @@
    picks one (FR-73/FR-97). */
 .char-picker__lede {
   margin: 6px 0 14px;
-  color: var(--text-secondary, #6b7280);
+  color: var(--picker-muted);
   font-size: 13px;
 }
 
@@ -169,19 +176,23 @@
 }
 
 .char-card__family {
-  color: var(--text-secondary, #6b7280);
+  color: var(--picker-muted);
   font-size: 11px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 
+/* The "Unused" hint is emphasised by weight, not by the primary colour: in dark
+   mode that colour is a deep green that reaches 1.97:1 against the card, and
+   this is 11px bold — normal-size text for WCAG. The word itself is already the
+   distinguishing signal, so nothing is lost (FR-100/FR-101). */
 .char-card__rec {
-  color: var(--primary-color, #4f46e5);
+  color: var(--text-primary, #111827);
   font-weight: 700;
 }
 
 .char-card__purpose {
-  color: var(--text-secondary, #6b7280);
+  color: var(--picker-muted);
   font-size: 12px;
   line-height: 1.35;
 }
@@ -210,7 +221,7 @@
 
 .char-preview__family {
   margin: 2px 0 12px;
-  color: var(--text-secondary, #6b7280);
+  color: var(--picker-muted);
   font-size: 11px;
   letter-spacing: 0.04em;
   text-align: center;
@@ -222,8 +233,10 @@
   font-size: 12px;
 }
 
+/* 10px labels are normal-size text for WCAG purposes, so they need the full
+   4.5:1 rather than the large-text allowance (FR-101). */
 .char-preview__facts dt {
-  color: var(--text-secondary, #6b7280);
+  color: var(--picker-muted);
   font-size: 10px;
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -239,7 +252,7 @@
   margin: 0;
   padding-top: 8px;
   border-top: 1px dashed var(--border-color, #e5e7eb);
-  color: var(--text-secondary, #6b7280);
+  color: var(--picker-muted);
   font-size: 11px;
   line-height: 1.4;
 }
@@ -248,7 +261,7 @@
 .char-preview__empty {
   margin: 0;
   padding: 20px;
-  color: var(--text-secondary, #6b7280);
+  color: var(--picker-muted);
   font-size: 13px;
   text-align: center;
 }
@@ -262,40 +275,10 @@
   margin-top: 14px;
 }
 
-/* ---- Inspector Appearance section ------------------------------------------ */
-
-.appearance-mode {
-  margin: 0 0 4px;
-  font-weight: 600;
-  font-size: 13px;
-}
-
-.appearance-explain,
-.appearance-readonly {
-  margin: 0 0 8px;
-  color: var(--text-secondary, #6b7280);
-  font-size: 12px;
-  line-height: 1.45;
-}
-
-.appearance-choice,
-.identity-choice {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-}
-
-.identity-choice__state {
-  color: var(--text-secondary, #6b7280);
-  font-size: 12.5px;
-}
-
-/* Resetting the colour is a secondary action beside the swatch, not a
-   destructive one — nothing else about the appearance changes (FR-31). */
-.appearance-color__reset {
-  margin-left: 8px;
-}
+/* The Inspector's own Appearance markup used to live here. It is now the shared
+   editor in agent-appearance.css, which every host mounts, so these rules had
+   no remaining selector to match — and `--picker-muted` would not have resolved
+   outside `.char-picker` anyway. */
 
 /* ---- narrow ----------------------------------------------------------------- */
 
