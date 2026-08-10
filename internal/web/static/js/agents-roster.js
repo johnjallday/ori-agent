@@ -1615,27 +1615,17 @@
           '> Favorited</label>'
       ) +
       field('Tags', '<div id="ov-tags-host"></div>', 'ov-tags-host') +
-      field(
-        'Generated color',
-        colorInput(
-          'ov-generatedcolor',
-          overviewAppearance.generated.color || generatedAvatarColor(name)
-        ) +
-          '<button type="button" class="btn-ghost appearance-color__reset" id="ov-generatedcolor-reset">Reset to generated</button>',
-        'ov-generatedcolor'
-      ) +
-      '<div class="field"><span class="field__label">Uploaded image</span><div class="field__control" id="ov-avatar-control"></div></div>' +
-      appearanceSectionHTML(detail, name) +
+      // One Appearance section replaces the three controls that used to sit
+      // here — a colour input, an upload widget, and a character button — each
+      // of which had its own idea of what "saved" meant (FR-26).
+      '<div class="field field--appearance"><div class="field__control" id="ov-appearance-host"></div></div>' +
       '</form>' +
       readonlyMetaHTML(detail) +
       saveBar('overview');
 
     els.overviewDesc.innerHTML = '';
     wireOverviewTags(name, md.tags || []);
-    wireAvatarControl(name, overviewAppearance);
-    wireAppearanceSection(name, detail);
-    wireColorInput('ov-generatedcolor');
-    wireGeneratedColorReset(name);
+    mountAppearanceEditor(name, detail, overviewAppearance);
     wireDirty('overview', document.getElementById('overviewForm'));
     wireSaveBar('overview', function () {
       saveOverview(name);
@@ -1769,15 +1759,10 @@
     if (desc !== (md.description || '')) out.description = desc;
     var fav = checked('ov-favorite');
     if (fav !== !!md.favorite) out.favorite = fav;
-    // The colour is nested under appearance rather than sent flat, and only when
-    // it actually differs from the saved override — sending it unchanged would
-    // make every save look like an appearance edit to the shared-definition
-    // guard (FR-42/FR-53).
-    var savedColor = normalizeAppearance(detail.appearance).generated.color || '';
-    var color = window.AgentAvatar.normalizeHex(val('ov-generatedcolor'));
-    if (color && color !== savedColor) {
-      out.appearance = { generated: { color: color } };
-    }
+    // Appearance is deliberately absent from this diff. The shared editor saves
+    // each appearance change on its own, immediately, through its adapter — so
+    // folding it into the Overview Save would give one setting two write paths
+    // that could disagree about what is staged (FR-41).
     // Tags: compare case-insensitively so re-saving unchanged tags is a no-op.
     if (overviewTagsInput) {
       var nextTags = overviewTagsInput.getTags();
@@ -1824,154 +1809,6 @@
         esc((initial || []).join(', ')) +
         '" placeholder="tag1, tag2">';
     }
-  }
-
-  // Resetting the colour override is an explicit mutation, not just a cleared
-  // input: the server has to be told to drop the saved value, and it does that
-  // for `generated.color: null` (FR-31/FR-54).
-  function wireGeneratedColorReset(name) {
-    var btn = document.getElementById('ov-generatedcolor-reset');
-    if (!btn) return;
-    btn.addEventListener('click', function () {
-      var input = document.getElementById('ov-generatedcolor');
-      if (input) input.value = generatedAvatarColor(name);
-      saveAppearance(name, { generated: { color: null } });
-    });
-  }
-
-  // Upload/remove control, driving the appearance upload endpoints.
-  //
-  // A successful upload also activates Upload mode — that is one server
-  // operation, not two — so the card and hero move to the new image as soon as
-  // the response lands (FR-36). The wording distinguishes replacing an existing
-  // image from adding a first one, and "Remove" is the only destructive word
-  // here: choosing another source elsewhere never deletes this file (FR-38).
-  function wireAvatarControl(name, appearance) {
-    var host = document.getElementById('ov-avatar-control');
-    if (!host) return;
-    var hasImage = !!(appearance && appearance.uploaded && appearance.uploaded.image);
-    host.innerHTML =
-      '<div class="avatar-control">' +
-      '<input type="file" id="ov-avatar-file" aria-label="' +
-      (hasImage ? 'Replace uploaded image' : 'Upload an image') +
-      '" accept="image/png,image/jpeg,image/gif,image/webp" class="avatar-control__file">' +
-      (hasImage
-        ? '<button type="button" class="btn-ghost avatar-control__remove" id="ov-avatar-remove">Remove image</button>'
-        : '') +
-      // Stating the limits up front is cheaper than a rejected upload, and the
-      // list matches exactly what the server content-sniffs for (FR-63).
-      '<p class="avatar-control__help">PNG, JPEG, GIF, or WebP, up to 5 MB.' +
-      (hasImage ? ' Uploading a new image replaces the current one.' : '') +
-      '</p>' +
-      '<span class="avatar-control__status" id="ov-avatar-status" aria-live="polite"></span>' +
-      '</div>';
-    var file = document.getElementById('ov-avatar-file');
-    if (file)
-      file.addEventListener('change', function () {
-        uploadAvatar(name, file.files && file.files[0]);
-      });
-    var remove = document.getElementById('ov-avatar-remove');
-    if (remove)
-      remove.addEventListener('click', function () {
-        removeAvatar(name);
-      });
-  }
-
-  function uploadAvatar(name, fileObj) {
-    if (!fileObj) return;
-    var status = document.getElementById('ov-avatar-status');
-    if (status) status.textContent = 'Uploading…';
-    var form = new FormData();
-    form.append('image', fileObj);
-    fetch('/api/agents/' + encodeURIComponent(name) + '/appearance/upload', {
-      method: 'POST',
-      body: form
-    })
-      .then(function (r) {
-        return r
-          .json()
-          .catch(function () {
-            return {};
-          })
-          .then(function (d) {
-            return { status: r.status, data: d };
-          });
-      })
-      .then(function (res) {
-        if (res.status >= 200 && res.status < 300) {
-          afterAvatarChange(name, status, 'Uploaded.');
-          return;
-        }
-        failedAvatarChange(name, status, (res.data && res.data.message) || 'Upload failed.');
-      })
-      .catch(function () {
-        failedAvatarChange(name, status, 'Network error — the image was not uploaded.');
-      });
-  }
-
-  function removeAvatar(name) {
-    var status = document.getElementById('ov-avatar-status');
-    if (status) status.textContent = 'Removing…';
-    fetch('/api/agents/' + encodeURIComponent(name) + '/appearance/upload', { method: 'DELETE' })
-      .then(function (r) {
-        return r.status;
-      })
-      .then(function (code) {
-        if (code >= 200 && code < 300) {
-          afterAvatarChange(name, status, 'Removed.');
-          return;
-        }
-        failedAvatarChange(name, status, 'Remove failed.');
-      })
-      .catch(function () {
-        failedAvatarChange(name, status, 'Network error — the image was not removed.');
-      });
-  }
-
-  // A failed mutation must leave the surface showing the last state the server
-  // actually confirmed, not the one the user was reaching for. Re-rendering the
-  // control from a forced detail fetch is what restores it — clearing the file
-  // input alone would leave a stale "Remove image" button on an agent whose
-  // upload never landed (FR-41).
-  function failedAvatarChange(name, status, message) {
-    if (status) status.textContent = message;
-    fetchDetail(name, true)
-      .then(function (detail) {
-        if (state.selected !== name) return;
-        applyDetailToCollection(name, detail);
-        wireAvatarControl(name, normalizeAppearance(detail.appearance));
-        setAvatarStatus(message);
-      })
-      .catch(function () {
-        // Nothing further to restore from; the message already says the
-        // mutation did not happen.
-      });
-  }
-
-  function afterAvatarChange(name, status, msg) {
-    fetchDetail(name, true)
-      .then(function (detail) {
-        if (state.selected !== name) {
-          if (status) status.textContent = msg;
-          return;
-        }
-        applyDetailToCollection(name, detail);
-        // wireAvatarControl rebuilds the control, status element included, so
-        // the outcome has to be written to the element that survives — writing
-        // it first left the user with no confirmation at all (PRD FR75/FR96).
-        wireAvatarControl(name, normalizeAppearance(detail.appearance));
-        setAvatarStatus(msg);
-      })
-      .catch(function () {
-        // The change landed on the server; only the refresh failed, so say that
-        // rather than implying the upload itself did not work (PRD FR101).
-        setAvatarStatus(msg + ' Reload to see it everywhere.');
-      });
-  }
-
-  function setAvatarStatus(msg) {
-    var status = document.getElementById('ov-avatar-status');
-    if (status) status.textContent = msg;
   }
 
   // Read-only created / updated / last-active timestamps below the editable form.
@@ -2372,17 +2209,11 @@
         '<label class="check"><input id="cr-favorite" type="checkbox"> Favorited</label>'
       ) +
       field('Tags', '<div id="cr-tags-host"></div>', 'cr-tags-host') +
-      field('Avatar color', colorInput('cr-avatarcolor', '#4f46e5'), 'cr-avatarcolor') +
-      // Choosing a character is offered, never required: Skip is a first-class
-      // path and the agent simply keeps its generated identity (FR-56).
-      field(
-        'Character',
-        '<div class="identity-choice" id="cr-character-host">' +
-          '<span class="identity-choice__state" id="cr-character-state">No character chosen</span>' +
-          '<button type="button" class="btn-ghost" id="cr-character-btn">Choose character</button>' +
-          '</div>',
-        'cr-character-btn'
-      ) +
+      // The same Appearance editor the Inspector uses, in staged mode: all
+      // three sources are offered here too, and choosing one is never required
+      // — an agent created without touching this simply starts Generated
+      // (FR-4/FR-45).
+      '<div class="field field--appearance"><div class="field__control" id="cr-appearance-host"></div></div>' +
       '</form>' +
       '<div class="save-bar" id="savebar-create">' +
       '<span class="save-status is-muted"></span>' +
@@ -2399,52 +2230,46 @@
     } else if (tagHost) {
       tagHost.innerHTML = '<input id="cr-tags-text" type="text" placeholder="tag1, tag2">';
     }
-    wireColorInput('cr-avatarcolor');
-    wireCreateCharacterChoice();
+    mountCreateAppearanceEditor();
     document.getElementById('createSubmit').addEventListener('click', submitCreate);
     document.getElementById('createCancel2').addEventListener('click', closeCreate);
     var nameInput = document.getElementById('cr-name');
     if (nameInput) nameInput.focus();
   }
 
-  // The character chosen in the create panel, held here until the create
-  // request succeeds. Nothing is persisted before then.
-  var createCharacter = null;
+  // The staged appearance for the create panel. Nothing is persisted before the
+  // create request succeeds, and a staged upload keeps its File until after the
+  // agent exists (FR-46).
+  var createAppearanceEditor = null;
 
-  function wireCreateCharacterChoice() {
-    createCharacter = null;
-    var btn = document.getElementById('cr-character-btn');
-    if (!btn || !window.CharacterPicker) return;
-
-    btn.addEventListener('click', function () {
-      window.CharacterPicker.open({
-        trigger: btn,
-        selectedId: createCharacter ? createCharacter.catalogId : '',
-        taken: takenCharacterIds(),
-        // Read at click time, not at wire time: the user may have changed the
-        // Role select since the form was built.
-        role: val('cr-role')
-      }).then(function (result) {
-        if (result.action === 'cancel') return;
-        createCharacter = result.action === 'choose' ? result : null;
-        renderCreateCharacterState();
-      });
+  function mountCreateAppearanceEditor() {
+    var host = document.getElementById('cr-appearance-host');
+    if (!host || !window.AgentAppearanceEditor) return;
+    if (createAppearanceEditor && createAppearanceEditor.destroy) createAppearanceEditor.destroy();
+    createAppearanceEditor = window.AgentAppearanceEditor.create({
+      host: host,
+      idPrefix: 'cr-appearance',
+      mode: 'create',
+      agent: { name: val('cr-name'), source: 'user', role: val('cr-role') },
+      takenCharacterIds: takenCharacterIds
     });
-  }
 
-  function renderCreateCharacterState() {
-    var label = document.getElementById('cr-character-state');
-    var btn = document.getElementById('cr-character-btn');
-    if (!label) return;
-
-    if (!createCharacter) {
-      label.textContent = 'No character chosen';
-      if (btn) btn.textContent = 'Choose character';
-      return;
+    // The generated portrait is seeded from the agent's name, so the preview
+    // has to follow the name field. Only the preview is re-rendered, never the
+    // whole editor: rebuilding it on each keystroke would take focus out of the
+    // field the user is typing in.
+    var nameInput = document.getElementById('cr-name');
+    if (nameInput) {
+      nameInput.addEventListener('input', function () {
+        if (createAppearanceEditor) createAppearanceEditor.setAgentName(nameInput.value);
+      });
     }
-    var entry = window.CharacterCatalog && window.CharacterCatalog.get(createCharacter.catalogId);
-    label.textContent = entry ? entry.name : createCharacter.catalogId;
-    if (btn) btn.textContent = 'Change character';
+    var roleSelect = document.getElementById('cr-role');
+    if (roleSelect) {
+      roleSelect.addEventListener('change', function () {
+        if (createAppearanceEditor) createAppearanceEditor.setAgentRole(roleSelect.value);
+      });
+    }
   }
 
   // Characters already in use, so the picker can offer an unused one first.
@@ -2461,7 +2286,9 @@
 
   function closeCreate() {
     state.creating = false;
-    createCharacter = null;
+    // Releases any object URL the staged upload was holding.
+    if (createAppearanceEditor && createAppearanceEditor.destroy) createAppearanceEditor.destroy();
+    createAppearanceEditor = null;
     els.createPanel.hidden = true;
     if (state.selected) {
       els.stage.hidden = false;
@@ -2499,17 +2326,20 @@
     };
     // Appearance is persisted in the same successful create as the rest of the
     // configuration, so a chosen source is never lost between creating the
-    // agent and opening it (FR-45).
-    var createAppearance = { generated: { color: val('cr-avatarcolor') } };
-    if (createCharacter) {
-      // Only the catalog id travels; the server assigns the version (FR-10).
-      createAppearance.mode = window.AgentAvatar.MODES.CHARACTER;
-      createAppearance.character = { catalog_id: createCharacter.catalogId };
-    }
-    body.appearance = createAppearance;
+    // agent and opening it (FR-45). An upload is the exception: it needs an
+    // agent to belong to, so it is a second call (FR-46).
+    var pendingFile = createAppearanceEditor ? createAppearanceEditor.pendingFile() : null;
+    if (createAppearanceEditor) body.appearance = createAppearanceEditor.createRequest();
+
     var submit = document.getElementById('createSubmit');
     submit.disabled = true;
     submit.textContent = 'Creating…';
+
+    var restore = function () {
+      submit.disabled = false;
+      submit.textContent = 'Create agent';
+    };
+
     fetch('/api/agents', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -2526,23 +2356,86 @@
           });
       })
       .then(function (res) {
-        submit.disabled = false;
-        submit.textContent = 'Create agent';
-        if (res.status >= 200 && res.status < 300) {
-          reloadThenSelect(name);
-          closeCreate();
-        } else {
+        if (res.status < 200 || res.status >= 300) {
+          restore();
           status.textContent =
             (res.data && res.data.message) || 'Create failed (' + res.status + ').';
           status.className = 'save-status is-error';
+          return;
         }
+        if (!pendingFile) {
+          restore();
+          reloadThenSelect(name);
+          closeCreate();
+          return;
+        }
+        // The agent exists now, so the staged image finally has somewhere to
+        // go. Completion is only claimed after both calls succeed (FR-46).
+        status.textContent = 'Uploading image…';
+        status.className = 'save-status is-muted';
+        var form = new FormData();
+        form.append('image', pendingFile);
+        fetch('/api/agents/' + encodeURIComponent(name) + '/appearance/upload', {
+          method: 'POST',
+          body: form
+        })
+          .then(function (uploadRes) {
+            restore();
+            if (uploadRes.ok) {
+              reloadThenSelect(name);
+              closeCreate();
+              return;
+            }
+            reportPartialCreate(name, status);
+          })
+          .catch(function () {
+            restore();
+            reportPartialCreate(name, status);
+          });
       })
       .catch(function () {
-        submit.disabled = false;
-        submit.textContent = 'Create agent';
+        restore();
         status.textContent = 'Network error.';
         status.className = 'save-status is-error';
       });
+  }
+
+  // A create that succeeded with an upload that did not is partial success, and
+  // saying "created" would be a lie the user only discovers later. The agent is
+  // real and valid in Generated mode; the panel stays open on the same agent so
+  // the retry is one click and creates no duplicate (FR-47).
+  function reportPartialCreate(name, status) {
+    status.innerHTML =
+      esc(name) +
+      ' was created, but its image was not uploaded. The agent is valid and is ' +
+      'showing its generated appearance. ' +
+      '<button type="button" class="btn-ghost" id="cr-upload-retry">Retry upload</button>';
+    status.className = 'save-status is-error';
+    var retry = document.getElementById('cr-upload-retry');
+    if (!retry) return;
+    retry.addEventListener('click', function () {
+      var file = createAppearanceEditor && createAppearanceEditor.pendingFile();
+      if (!file) return;
+      status.textContent = 'Uploading image…';
+      status.className = 'save-status is-muted';
+      var form = new FormData();
+      form.append('image', file);
+      fetch('/api/agents/' + encodeURIComponent(name) + '/appearance/upload', {
+        method: 'POST',
+        body: form
+      })
+        .then(function (res) {
+          if (!res.ok) {
+            reportPartialCreate(name, status);
+            return;
+          }
+          reloadThenSelect(name);
+          closeCreate();
+        })
+        .catch(function () {
+          reportPartialCreate(name, status);
+        });
+    });
   }
 
   // Reload the roster from the server, then select the named agent if present.
@@ -3746,36 +3639,6 @@
   function textareaInput(id, value, rows) {
     return '<textarea id="' + id + '" rows="' + rows + '">' + esc(value) + '</textarea>';
   }
-  // Color picker + hex text, kept in sync, for the avatar color field.
-  function colorInput(id, value) {
-    var v = /^#[0-9a-fA-F]{6}$/.test(String(value)) ? value : '#4f46e5';
-    return (
-      '<span class="color-input">' +
-      '<input id="' +
-      id +
-      '" type="color" value="' +
-      esc(v) +
-      '">' +
-      '<input id="' +
-      id +
-      '-hex" type="text" class="color-input__hex" value="' +
-      esc(v) +
-      '" maxlength="7" spellcheck="false" aria-label="Avatar color hex">' +
-      '</span>'
-    );
-  }
-  // Keep the color picker and its hex text field in sync (either drives the other).
-  function wireColorInput(id) {
-    var picker = document.getElementById(id);
-    var hex = document.getElementById(id + '-hex');
-    if (!picker || !hex) return;
-    picker.addEventListener('input', function () {
-      hex.value = picker.value;
-    });
-    hex.addEventListener('input', function () {
-      if (/^#[0-9a-fA-F]{6}$/.test(hex.value)) picker.value = hex.value;
-    });
-  }
   // Grouped <select> of available models (optgroup per provider). Each option
   // carries data-provider so the Provider field can follow the chosen model. A
   // model that isn't in the catalog (custom, or a provider without a key) is
@@ -3964,129 +3827,117 @@
     return out;
   }
 
-  // The Appearance section states which of the three sources is actually
-  // rendering and why, so a user is never left guessing whether their upload or
-  // their character is the one being shown (FR-26/FR-84).
+  // The Inspector's Appearance section is the shared editor, given a
+  // persistence adapter. The roster contributes only what it alone knows: which
+  // characters are already taken, and how to refresh its own caches after a
+  // confirmed mutation (FR-26/FR-66).
   //
-  // Built-in agents get the same explanation without any control the server
-  // would reject (FR-44).
-  function appearanceSectionHTML(detail, name) {
+  // Built-in agents mount the same editor read-only, so they render through the
+  // same resolver but are never offered a control the server would reject
+  // (FR-44).
+  var appearanceEditor = null;
+
+  function mountAppearanceEditor(name, detail, appearance) {
+    var host = document.getElementById('ov-appearance-host');
+    if (!host || !window.AgentAppearanceEditor) return;
+    if (appearanceEditor && appearanceEditor.destroy) appearanceEditor.destroy();
+
     var listItem = state.byName[name];
-    var res = listItem ? appearanceFor(listItem) : null;
-    var appearance = normalizeAppearance(detail && detail.appearance);
-    var editable = isEditable(detail);
-    var modes = window.AgentAvatar.MODES;
+    var vm = listItem ? viewFor(listItem) : null;
+    var entry = vm ? vm.roleEntry : null;
 
-    var modeLabel = 'Generated';
-    var explain =
-      'This agent shows a generated portrait derived from its name. ' +
-      'Choose a character or upload an image to change it.';
-
-    if (res) {
-      if (res.mode === modes.CHARACTER && res.character) {
-        modeLabel = 'Character art — ' + res.character.name;
-        explain =
-          'Showing curated character art. Appearance only — this does not change how ' +
-          'the agent works. Your uploaded image and colour, if any, are kept.';
-      } else if (res.mode === modes.UPLOADED) {
-        modeLabel = 'Uploaded image';
-        explain =
-          'Showing your uploaded image.' +
-          (appearance.character
-            ? ' A character is still saved and can be switched back to at any time.'
-            : '');
-      } else if (res.reason === window.AgentAvatar.REASONS.CHARACTER_MISSING) {
-        // A withdrawn or broken entry is a recoverable state, not a silent
-        // downgrade: the saved choice is intact, only the art is missing
-        // (FR-84).
-        modeLabel = 'Character art unavailable';
-        explain =
-          'The character saved for this agent could not be loaded, so Ori is showing ' +
-          "the generated appearance. Your agent's behavior is unchanged. " +
-          'Choose another character to replace it.';
-      } else if (res.reason === window.AgentAvatar.REASONS.UPLOAD_MISSING) {
-        modeLabel = 'Uploaded image unavailable';
-        explain =
-          'The uploaded image for this agent could not be found, so Ori is showing ' +
-          "the generated appearance. Your agent's behavior is unchanged. " +
-          'Upload a new image to replace it.';
+    appearanceEditor = window.AgentAppearanceEditor.create({
+      host: host,
+      idPrefix: 'ov-appearance',
+      mode: 'edit',
+      readOnly: !isEditable(detail),
+      appearance: appearance,
+      defaultColor: generatedAvatarColor(name),
+      agent: {
+        name: name,
+        source: vm ? vm.source : 'user',
+        role: (detail && detail.role) || (vm ? vm.role : ''),
+        roleAccent: entry ? entry.accent_color : '',
+        roleEmblem: entry ? entry.emblem : '',
+        builtIn: vm ? vm.builtIn : false
+      },
+      takenCharacterIds: takenCharacterIds,
+      adapter: appearanceAdapter(name),
+      onChange: function () {
+        // The editor owns its own saving/error copy; the roster only has to
+        // keep the card, the hero, and the projection in step.
+        refreshAppearanceSurfaces(name);
       }
-    }
-
-    var hasCharacter = !!appearance.character;
-
-    var controls = '';
-    if (editable) {
-      controls =
-        '<div class="appearance-choice">' +
-        '<button type="button" class="btn-ghost" id="ov-character-btn">' +
-        (hasCharacter ? 'Change character' : 'Choose character') +
-        '</button>' +
-        (hasCharacter
-          ? '<button type="button" class="btn-ghost" id="ov-character-clear">Remove character</button>'
-          : '') +
-        '</div>';
-    } else {
-      controls =
-        '<p class="appearance-readonly">This agent\'s appearance is fixed and cannot be changed here.</p>';
-    }
-
-    return (
-      '<div class="field appearance-section" id="ov-appearance">' +
-      '<span class="field__label">Appearance</span>' +
-      '<div class="field__control">' +
-      '<p class="appearance-mode" id="ov-appearance-mode">' +
-      esc(modeLabel) +
-      '</p>' +
-      '<p class="appearance-explain">' +
-      esc(explain) +
-      '</p>' +
-      controls +
-      '</div>' +
-      '</div>'
-    );
+    });
   }
 
-  function wireAppearanceSection(name, detail) {
-    var btn = document.getElementById('ov-character-btn');
-    var clear = document.getElementById('ov-character-clear');
-    var appearance = normalizeAppearance(detail && detail.appearance);
-
-    if (btn && window.CharacterPicker) {
-      btn.addEventListener('click', function () {
-        window.CharacterPicker.open({
-          trigger: btn,
-          selectedId: (appearance.character && appearance.character.catalog_id) || '',
-          taken: takenCharacterIds(),
-          role: detail && detail.role,
-          showSkip: false
-        }).then(function (result) {
-          if (result.action !== 'choose') return;
-          // The catalog version is deliberately not sent: it is server-assigned
-          // from the validated entry, and a client that could choose it could
-          // claim an art revision that does not exist (FR-10/FR-55).
-          saveAppearance(name, { character: { catalog_id: result.catalogId } });
+  // The adapter is the only place the roster's save semantics meet the editor.
+  //
+  // Every mutation goes through the same detail refresh the upload path already
+  // used, so an appearance change inherits the cache refresh and the projection
+  // rebuild rather than working around them with a second write path (FR-66).
+  function appearanceAdapter(name) {
+    var uploadURL = '/api/agents/' + encodeURIComponent(name) + '/appearance/upload';
+    return {
+      saveAppearance: function (patch) {
+        return appearanceRequest(name, '/api/agents?name=' + encodeURIComponent(name), {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ appearance: patch })
         });
-      });
-    }
-
-    if (clear) {
-      clear.addEventListener('click', function () {
-        // Removing the character removes only the character. The server decides
-        // whether that also changes the active mode — it does when Character was
-        // rendering, and does not otherwise (FR-33/FR-34/FR-35).
-        saveAppearance(name, { character: null });
-      });
-    }
+      },
+      uploadImage: function (file) {
+        var form = new FormData();
+        form.append('image', file);
+        return appearanceRequest(name, uploadURL, { method: 'POST', body: form });
+      },
+      removeImage: function () {
+        return appearanceRequest(name, uploadURL, { method: 'DELETE' });
+      }
+    };
   }
 
-  // saveAppearance reuses the Overview save path, so an appearance change
-  // inherits the optimistic-version check, the shared-definition confirmation,
-  // the stale-edit recovery, and the cache refresh — rather than working around
-  // any of them with a second write path (FR-42/FR-66).
-  function saveAppearance(name, appearance) {
-    if (!state.detailCache[name]) return;
-    submitPatch(name, 'overview', { appearance: appearance });
+  // Resolves with the canonical appearance from the response, or rejects with
+  // the server's own message. The editor only marks a change saved on resolve,
+  // so a rejection here is what restores the last confirmed state (FR-41).
+  function appearanceRequest(name, url, init) {
+    return fetch(url, init)
+      .then(function (response) {
+        return response
+          .json()
+          .catch(function () {
+            return {};
+          })
+          .then(function (data) {
+            if (response.status >= 200 && response.status < 300) return data.appearance;
+            throw new Error(data.message || data.error || 'That change could not be saved.');
+          });
+      })
+      .then(function (appearance) {
+        // A forced detail fetch is what keeps the card, the projection, and the
+        // hero in step with the mutation — the same refresh the upload path
+        // already used (FR-66).
+        return fetchDetail(name, true)
+          .then(function (detail) {
+            applyDetailToCollection(name, detail);
+            return detail.appearance || appearance;
+          })
+          .catch(function () {
+            // The mutation landed; only the refresh failed. Returning the
+            // response's own appearance keeps the editor honest about what the
+            // server actually confirmed.
+            return appearance;
+          });
+      });
+  }
+
+  function refreshAppearanceSurfaces(name) {
+    if (state.selected !== name) return;
+    var listItem = state.byName[name];
+    if (!listItem || !els.avatar) return;
+    els.avatar.outerHTML = avatarMarkup(listItem, 'stage__avatar', 'stageAvatar', AVATAR_SIZE.hero);
+    els.avatar = document.getElementById('stageAvatar');
+    renderCharacterLabel(listItem);
   }
 
   // The hero's character line. The agent's own name stays primary above it;

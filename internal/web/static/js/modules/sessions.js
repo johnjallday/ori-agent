@@ -2595,13 +2595,6 @@ const sessionManager = {
       });
     }
 
-    const colorInput = document.getElementById('editAgentAvatarColor');
-    if (colorInput) {
-      colorInput.addEventListener('input', event => {
-        this.updateEditAgentColorPreview(event.target.value);
-      });
-    }
-
     // Listen for Type changes to update Model options
     const typeSelect = document.getElementById('editAgentTypeSelect');
     if (typeSelect) {
@@ -2681,15 +2674,7 @@ const sessionManager = {
       descriptionInput.value = agent.metadata?.description || '';
     }
 
-    const colorInput = document.getElementById('editAgentAvatarColor');
-    // Read from the canonical appearance rather than the retired metadata
-    // field. `#4f46e5` is only the control's placeholder when no override is
-    // saved; an absent colour means "use the deterministic one" (FR-6).
-    const colorValue = agent.appearance?.generated?.color || '#4f46e5';
-    if (colorInput) {
-      colorInput.value = colorValue;
-      this.updateEditAgentColorPreview(colorValue);
-    }
+    this.mountEditAgentAppearance(agent);
 
     const favoriteToggle = document.getElementById('editAgentFavoriteToggle');
     if (favoriteToggle) {
@@ -2910,11 +2895,53 @@ const sessionManager = {
     selectEl.appendChild(option);
   },
 
-  updateEditAgentColorPreview(color) {
-    const preview = document.getElementById('editAgentColorPreview');
-    if (preview) {
-      preview.style.background = color;
-    }
+  // The Edit Agent modal mounts the same shared editor the Agents page does, so
+  // an appearance changed from a chat session is the same operation with the
+  // same guards — not a second, weaker write path (FR-26/FR-90).
+  //
+  // It saves on its own, immediately, through its adapter; the modal's Save
+  // button continues to own only the non-appearance fields.
+  mountEditAgentAppearance(agent) {
+    const host = document.getElementById('editAgentAppearanceHost');
+    if (!host || !window.AgentAppearanceEditor) return;
+    if (this.editAgentAppearanceEditor?.destroy) this.editAgentAppearanceEditor.destroy();
+
+    const name = agent.name || '';
+    const uploadURL = `/api/agents/${encodeURIComponent(name)}/appearance/upload`;
+    const request = (url, init) =>
+      fetch(url, init).then(async response => {
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(data.message || data.error || 'That change could not be saved.');
+        }
+        // Keep the modal's own copy in step so a later Save does not send a
+        // stale appearance alongside the fields it does own (FR-66).
+        if (data.appearance) agent.appearance = data.appearance;
+        this.refreshAgentAppearanceCaches?.(name, data.appearance);
+        return data.appearance;
+      });
+
+    this.editAgentAppearanceEditor = window.AgentAppearanceEditor.create({
+      host,
+      idPrefix: 'editAgentAppearance',
+      mode: 'edit',
+      appearance: agent.appearance,
+      agent: { name, source: agent.source || 'user', role: agent.role || '' },
+      adapter: {
+        saveAppearance: patch =>
+          request(`/api/agents?name=${encodeURIComponent(name)}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ appearance: patch })
+          }),
+        uploadImage: file => {
+          const form = new FormData();
+          form.append('image', file);
+          return request(uploadURL, { method: 'POST', body: form });
+        },
+        removeImage: () => request(uploadURL, { method: 'DELETE' })
+      }
+    });
   },
 
   renderEditAgentTags() {
@@ -2967,7 +2994,6 @@ const sessionManager = {
     const roleSelect = document.getElementById('editAgentRoleSelect');
     const modelSelect = document.getElementById('editAgentModelSelect');
     const descriptionInput = document.getElementById('editAgentDescription');
-    const colorInput = document.getElementById('editAgentAvatarColor');
     const favoriteToggle = document.getElementById('editAgentFavoriteToggle');
 
     const newName = nameInput?.value.trim();
@@ -3013,9 +3039,10 @@ const sessionManager = {
       role,
       model,
       description: descriptionInput?.value.trim() || '',
-      // Nested under the canonical appearance object. The retired flat field is
-      // rejected outright by the server, not ignored (FR-50/FR-51).
-      appearance: { generated: { color: colorInput?.value || '#4f46e5' } },
+      // Appearance is deliberately absent: the shared editor saves each change
+      // on its own the moment it happens, so including it here would give one
+      // setting two write paths that could disagree about what is staged
+      // (FR-41).
       tags: this.editAgentSelectedTags,
       favorite: Boolean(favoriteToggle?.checked)
     };
@@ -3164,7 +3191,12 @@ const sessionManager = {
     if (form) {
       form.reset();
     }
-    this.updateEditAgentColorPreview('#4f46e5');
+    // Releases the editor's object URL and drops its listeners before the next
+    // agent mounts a fresh one.
+    if (this.editAgentAppearanceEditor?.destroy) this.editAgentAppearanceEditor.destroy();
+    this.editAgentAppearanceEditor = null;
+    const appearanceHost = document.getElementById('editAgentAppearanceHost');
+    if (appearanceHost) appearanceHost.innerHTML = '';
     this.renderEditAgentTags();
     this.renderEditAgentMCPServers([]);
     this.clearEditAgentMessages();
@@ -4469,6 +4501,14 @@ const sessionManager = {
   // The picker cards and the Team roster must show one agent one way, so both
   // project identity through the draft module's builder rather than each
   // reading the raw record its own way.
+  // Create Workspace reviews agents; it does not define their appearance.
+  //
+  // Its team step picks existing agents and names blueprint ones, so every
+  // avatar here is a *preview* and goes through the shared renderer (FR-88). It
+  // deliberately mounts no Appearance editor: a blueprint agent has no editable
+  // definition until it exists, and adding a second creation form here is
+  // exactly what FR-45's "never add a second creation form" rules out. The
+  // agent's appearance is edited afterwards, from Agents or its detail page.
   existingAgentIdentity(name, agent) {
     const api = window.CreateWorkspaceTeamDraft;
     return api && typeof api.identityFrom === 'function' ? api.identityFrom(name, agent) : { name };

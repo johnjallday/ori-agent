@@ -222,12 +222,13 @@
                           placeholder="Describe the agent's purpose or behavior"></textarea>
               </div>
               <div class="row">
+                <!-- The shared Appearance editor replaces the colour-only
+                     control that used to sit here. This modal edits the same
+                     shared agent definition the Agents page does, so it must
+                     offer the same three sources rather than the one it
+                     happened to implement first (FR-26/FR-90). -->
                 <div class="col-md-6 mb-3">
-                  <label class="form-label" style="color: var(--text-primary);">Avatar Color</label>
-                  <div class="agent-edit-color-picker">
-                    <div id="editAgentColorPreview" class="agent-edit-color-preview"></div>
-                    <input type="color" id="editAgentAvatarColor" class="modern-input w-100" value="#4f46e5">
-                  </div>
+                  <div id="editAgentAppearanceHost"></div>
                 </div>
                 <div class="col-md-6 mb-3">
                   <label class="form-label" style="color: var(--text-primary);">Favorite</label>

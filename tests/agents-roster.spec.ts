@@ -744,7 +744,9 @@ test.describe('Agents gallery', () => {
       expect(removed.ok()).toBeTruthy();
       await page.reload({ waitUntil: 'domcontentloaded' });
       await page.locator('#rosterSearch').fill(name);
-      await expect(card(page, name).locator('.agent-avatar')).toHaveClass(/agent-avatar--generated/);
+      await expect(card(page, name).locator('.agent-avatar')).toHaveClass(
+        /agent-avatar--generated/
+      );
       await expect(card(page, name).locator('.agent-avatar__initials')).toBeVisible();
     } finally {
       await request
@@ -930,20 +932,20 @@ test.describe('Agents single-agent editing', () => {
       const card = page.locator(`.roster-card[data-name="${name}"]`);
       await expect(card.locator('.agent-avatar')).toHaveClass(/agent-avatar--generated/);
 
-      await page.locator('#ov-avatar-file').setInputFiles({
+      await page.locator('#ov-appearance-file').setInputFiles({
         name: 'a.png',
         mimeType: 'image/png',
         buffer: png
       });
-      await expect(page.locator('#ov-avatar-status')).toHaveText('Uploaded.');
+      await expect(page.locator('#ov-appearance-status')).toHaveText('Image uploaded.');
 
       // Both surfaces must move together; a stale projection would leave the
       // hero on the old identity while the card updated.
       await expect(card.locator('.agent-avatar')).toHaveClass(/agent-avatar--image/);
       await expect(page.locator('#stageAvatar')).toHaveClass(/agent-avatar--image/);
 
-      await page.locator('#ov-avatar-remove').click();
-      await expect(page.locator('#ov-avatar-status')).toHaveText('Removed.');
+      await page.locator('#ov-appearance-upload-remove').click();
+      await expect(page.locator('#ov-appearance-status')).toHaveText('Image removed.');
       await expect(card.locator('.agent-avatar')).toHaveClass(/agent-avatar--generated/);
       await expect(page.locator('#stageAvatar')).toHaveClass(/agent-avatar--generated/);
     } finally {

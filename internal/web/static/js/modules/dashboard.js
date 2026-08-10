@@ -9396,11 +9396,9 @@
         routeContext: routeContext
       });
 
-      API.get('/api/agents/dashboard/list')
-        .then(function (agentData) {
-          if (agentData) renderAgentList(agentData);
-        })
-        .catch(function () {});
+      // The agent list this used to repaint had no host element in any template
+      // and was dropped with its renderer; Home's own surfaces refresh through
+      // their own paths (unified-agent-appearance FR-92).
     } catch (error) {
       dashLog.debug('Failed to create agent', { error: (error && error.message) || error });
       appendHomeAssistantMessage(
@@ -13619,73 +13617,6 @@
     if (elCost) elCost.textContent = formatCost(stats.total_cost);
   }
 
-  function renderAgentList(data) {
-    var container = document.getElementById('dashboardAgentList');
-    if (!container) return;
-
-    var agents = (data && data.agents) || [];
-    if (agents.length === 0) {
-      container.innerHTML =
-        '<div class="text-center py-4">' +
-        '<p style="color: var(--text-muted); margin-bottom: 0.5rem;">No agents configured yet.</p>' +
-        '<a href="/agents" class="modern-btn modern-btn-primary" style="font-size: 0.85rem;">Create Your First Agent</a>' +
-        '</div>';
-      return;
-    }
-
-    var evolutionEnabled = Boolean(window.oriFeatures && window.oriFeatures.evolutionEnabled);
-    var html = '';
-    for (var i = 0; i < agents.length; i++) {
-      var agent = agents[i];
-      var name = agent.name || 'Unknown';
-      var model = agent.model || 'N/A';
-      var msgCount = formatNumber(agent.message_count);
-      var color = agent.avatar_color || '#4f46e5';
-      var initial = name.charAt(0).toUpperCase();
-
-      // Evolution info
-      var evoHtml = '';
-      if (evolutionEnabled && agent.evolution) {
-        var stage = toTitleCase(agent.evolution.stage || '');
-        var evoLevel = agent.evolution.level || 0;
-        if (stage) {
-          evoHtml =
-            '<span class="badge ms-2" style="background: var(--bg-tertiary); color: var(--text-secondary); font-size: 0.7rem;">' +
-            stage +
-            ' Lv.' +
-            evoLevel +
-            '</span>';
-        }
-      }
-
-      html +=
-        '<div class="d-flex align-items-center justify-content-between py-2' +
-        (i < agents.length - 1 ? ' border-bottom' : '') +
-        '" style="border-color: var(--border-color) !important;">' +
-        '  <div class="d-flex align-items-center gap-3">' +
-        '    <div style="width: 36px; height: 36px; border-radius: 50%; background: ' +
-        color +
-        '; display: flex; align-items: center; justify-content: center; color: white; font-weight: 600; font-size: 0.85rem; flex-shrink: 0;">' +
-        initial +
-        '</div>' +
-        '    <div>' +
-        '      <div style="color: var(--text-primary); font-weight: 500;">' +
-        name +
-        evoHtml +
-        '</div>' +
-        '      <div style="color: var(--text-muted); font-size: 0.8rem;">' +
-        model +
-        '</div>' +
-        '    </div>' +
-        '  </div>' +
-        '  <div style="color: var(--text-muted); font-size: 0.8rem;">' +
-        msgCount +
-        ' msgs</div>' +
-        '</div>';
-    }
-    container.innerHTML = html;
-  }
-
   function renderPersonalizeBanner(data) {
     var banner = document.getElementById('dashboardPersonalizeBanner');
     if (!banner) return;
@@ -13764,7 +13695,6 @@
       document.getElementById('dashboardStatMessages') ||
       document.getElementById('dashboardStatCost')
     );
-    var needsAgentList = Boolean(document.getElementById('dashboardAgentList'));
     var needsProfile = Boolean(document.getElementById('dashboardPersonalizeBanner'));
     var needsProgress = Boolean(
       evolutionEnabled && document.getElementById('dashboardProgressCard')
@@ -13777,16 +13707,6 @@
         key: 'stats',
         promise: API.get('/api/agents/dashboard/stats').catch(function (err) {
           dashLog.debug('Failed to load dashboard stats', { error: (err && err.message) || err });
-          return null;
-        })
-      });
-    }
-
-    if (needsAgentList) {
-      tasks.push({
-        key: 'agents',
-        promise: API.get('/api/agents/dashboard/list').catch(function (err) {
-          dashLog.debug('Failed to load agent list', { error: (err && err.message) || err });
           return null;
         })
       });
@@ -13826,7 +13746,6 @@
         var value = results[i].status === 'fulfilled' ? results[i].value : null;
         if (!value) continue;
         if (key === 'stats') renderStats(value);
-        if (key === 'agents') renderAgentList(value);
         if (key === 'profile') renderPersonalizeBanner(value);
         if (key === 'progress') renderAssistantProgress(value);
       }

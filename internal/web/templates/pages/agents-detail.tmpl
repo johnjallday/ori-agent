@@ -827,22 +827,12 @@
         </div>
         <div class="modal-body">
           <div class="agent-profile-modal-grid">
+            <!-- One Appearance section replaces the separate avatar-image panel
+                 and the colour field that used to sit in the form beside it.
+                 This page and the Agents roster edit the same agent, so they
+                 must offer the same control (FR-26/FR-85). -->
             <div class="agent-profile-avatar-panel">
-              <label class="form-label" style="color: var(--text-primary); font-weight: 600;">Avatar Image</label>
-              <div id="profileAvatarImagePreview" class="agent-profile-avatar-preview">
-                <span id="profileAvatarPlaceholder" style="color: var(--text-muted); font-size: 12px; text-align: center; padding: 8px;">No Image</span>
-                <img id="profileAvatarImg" src="" alt="Agent avatar preview">
-              </div>
-              <div id="profileAvatarDropZone" class="agent-profile-drop-zone" role="button" tabindex="0" aria-describedby="profileAvatarHelp">
-                <div style="color: var(--text-secondary); font-size: 13px; margin-bottom: 8px;">Drop an image here</div>
-                <label for="profileAvatarFileInput" class="modern-btn modern-btn-secondary" style="padding: 6px 12px; font-size: 13px; cursor: pointer;">Choose File</label>
-                <input type="file" id="profileAvatarFileInput" name="avatar" accept="image/png,image/jpeg,image/gif,image/webp" style="display: none;">
-              </div>
-              <div id="profileAvatarActions" style="margin-top: 10px; display: none;">
-                <button type="button" id="profileRemoveAvatarBtn" class="modern-btn modern-btn-secondary" style="padding: 6px 12px; font-size: 13px; color: var(--danger-color);">Remove Image</button>
-              </div>
-              <div id="profileAvatarHelp" class="form-helper" style="color: var(--text-muted); font-size: 12px; margin-top: 8px;">PNG, JPG, GIF, or WebP. Max 5 MB.</div>
-              <div id="profileAvatarUploadStatus" aria-live="polite" style="margin-top: 8px; font-size: 13px;"></div>
+              <div id="profileAppearanceHost"></div>
             </div>
 
             <div>
@@ -854,13 +844,6 @@
                 <div class="col-12">
                   <label for="profileDescriptionInput" class="form-label" style="color: var(--text-primary);">Description</label>
                   <textarea id="profileDescriptionInput" name="description" class="form-control" rows="4" placeholder="Describe the agent's purpose…" style="background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-primary); resize: vertical;"></textarea>
-                </div>
-                <div class="col-sm-6">
-                  <label for="profileAvatarColorInput" class="form-label" style="color: var(--text-primary);">Avatar Color</label>
-                  <div style="display: flex; align-items: center; gap: 10px;">
-                    <span id="profileAvatarColorPreview" aria-hidden="true" style="width: 34px; height: 34px; border-radius: 8px; border: 2px solid var(--border-color); background: #4f46e5;"></span>
-                    <input type="color" id="profileAvatarColorInput" name="avatar_color" class="form-control form-control-color" value="#4f46e5" autocomplete="off" style="background: var(--bg-secondary); border: 1px solid var(--border-color);">
-                  </div>
                 </div>
                 <div class="col-sm-6">
                   <label class="form-label" for="profileFavoriteToggle" style="color: var(--text-primary);">Favorite</label>

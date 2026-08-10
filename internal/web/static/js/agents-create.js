@@ -78,6 +78,7 @@ document.addEventListener('DOMContentLoaded', () => {
   setupAutoConfigListeners();
   setupValidationListeners();
   setupCreateFormSubmission();
+  mountCreateAppearanceEditor();
   refreshSystemModelDisplay();
 
   const providerSelect = document.getElementById('llmProvider');
@@ -518,7 +519,6 @@ async function createAgent() {
   const description = document.getElementById('agentDescription').value.trim();
   const temperature = parseFloat(document.getElementById('temperature').value);
   const systemPrompt = document.getElementById('systemPrompt').value.trim();
-  const avatarColor = document.getElementById('avatarColor').value;
   const allowWebSearchInput = document.getElementById('allowWebSearch');
   const allowWebSearch = allowWebSearchInput ? Boolean(allowWebSearchInput.checked) : true;
 
@@ -546,9 +546,10 @@ async function createAgent() {
   // Add optional fields
   if (description) requestData.description = description;
   if (systemPrompt) requestData.system_prompt = systemPrompt;
-  // Nested under the canonical appearance object. An omitted appearance is a
-  // first-class path — the agent simply starts Generated (FR-4/FR-50).
-  if (avatarColor) requestData.appearance = { generated: { color: avatarColor } };
+  // The staged appearance travels in the create request. An omitted appearance
+  // is a first-class path — the agent simply starts Generated (FR-4/FR-50).
+  const pendingImage = createAppearanceEditor ? createAppearanceEditor.pendingFile() : null;
+  if (createAppearanceEditor) requestData.appearance = createAppearanceEditor.createRequest();
   if (selectedTags.length > 0) requestData.tags = selectedTags;
   if (enabledPlugins.length > 0) requestData.enabled_plugins = enabledPlugins;
 
@@ -567,7 +568,31 @@ async function createAgent() {
 
     if (!response.ok) {
       const error = await response.json();
-      throw new Error(error.error || 'Failed to create agent');
+      throw new Error(error.error || error.message || 'Failed to create agent');
+    }
+
+    // A staged image only has somewhere to go now that the agent exists, so it
+    // is a second call — and completion is claimed only after both succeed
+    // (FR-46).
+    if (pendingImage) {
+      const form = new FormData();
+      form.append('image', pendingImage);
+      const upload = await fetch(`/api/agents/${encodeURIComponent(name)}/appearance/upload`, {
+        method: 'POST',
+        body: form
+      });
+      if (!upload.ok) {
+        // Partial success. Saying "created" and moving on would hide it until
+        // the user noticed the wrong portrait later, so this stays on the page
+        // with the agent intact and the retry one click away (FR-47).
+        showLoading(false);
+        showError(
+          `${name} was created, but its image was not uploaded. The agent is valid and is ` +
+            'showing its generated appearance. Use Appearance below to upload it again.'
+        );
+        document.getElementById('createBtn').disabled = false;
+        return;
+      }
     }
 
     // Success - redirect to agents page
@@ -578,6 +603,32 @@ async function createAgent() {
     showLoading(false);
     document.getElementById('createBtn').disabled = false;
   }
+}
+
+// The standalone create page mounts the same shared editor as every other host,
+// in staged mode: nothing is persisted until the create request succeeds.
+let createAppearanceEditor = null;
+
+function mountCreateAppearanceEditor() {
+  const host = document.getElementById('createAppearanceHost');
+  if (!host || !window.AgentAppearanceEditor) return;
+  const nameInput = document.getElementById('agentName');
+  const roleSelect = document.getElementById('agentRole');
+
+  createAppearanceEditor = window.AgentAppearanceEditor.create({
+    host,
+    idPrefix: 'createAppearance',
+    mode: 'create',
+    agent: { name: nameInput?.value || '', source: 'user', role: roleSelect?.value || '' }
+  });
+
+  // The generated portrait is seeded from the name, so the preview follows the
+  // field. Only the preview repaints — rebuilding the editor on each keystroke
+  // would pull focus out of the input.
+  nameInput?.addEventListener('input', () => createAppearanceEditor?.setAgentName(nameInput.value));
+  roleSelect?.addEventListener('change', () =>
+    createAppearanceEditor?.setAgentRole(roleSelect.value)
+  );
 }
 
 function showLoading(show) {
