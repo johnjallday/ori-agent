@@ -35,6 +35,88 @@ Consequences for the FR-103–FR-114 checklist:
 | FR-113 — concept art is not production art | **Enforced** | The concept PNGs under the gitignored `docs/design/` are never referenced by the catalog or shipped; production assets are the tracked SVGs under `internal/web/static/characters/`. |
 | FR-114 — assignment by ID, not filename | **Complete** | Agents store a catalog ID. Replacing an asset is a file swap plus a hash update here; no agent record changes. |
 
+## Map-ready authoring contract (2026-08-10)
+
+V1 art baked its own presentation into every file: a full-artboard card, a soft
+halo, a ground strip, and — on the 48px variants — a disc the character sat
+inside. That reads well on one surface and badly on every other, because the
+baked frame is opaque: dropped onto the workspace map, each character arrived as
+a pale rectangle with a duck in it rather than as a duck.
+
+**The artwork is now host-independent.** A character asset carries the character
+and nothing else. Cards, rings, shadows, terrain, selection frames, and status
+treatments belong to the UI that hosts the art, which already owns them
+(`.agent-avatar--character` supplies the border and surface tint).
+
+Both halves of this contract are machine-checked; neither is sufficient alone:
+
+| Check | Where | Catches |
+|---|---|---|
+| Raster: transparency, safe perimeter, native dimensions | `scripts/character-assets.test.mjs` (`npm run test:character-assets`) | Anything that paints a full artboard or reaches an edge, whichever primitive drew it |
+| Structural: background primitives, native viewBox | `internal/web/character_assets_test.go` | A baked halo that never touches an edge, which alpha alone cannot distinguish from the character |
+
+### Rules
+
+1. **Transparent artboard.** No element may cover the artboard. Specifically
+   banned: a full-artboard `<rect>` card, a full-width `<rect>` band (ground
+   strip), a `<circle>` of radius ≥ 30% of the artboard (disc or halo), a
+   near-circular `<ellipse>` of the same scale, and any `<clipPath>` — once the
+   background is gone there is nothing left to clip.
+2. **Native dimensions.** Portraits are `viewBox="0 0 160 160"` at
+   `width="160" height="160"`; sprites and their static counterparts are
+   `viewBox="0 0 48 48"` at `width="48" height="48"`. The catalog and every host
+   size the art by CSS from there.
+3. **Safe perimeter.** Portraits keep the outer **6** units fully transparent;
+   sprites and statics keep the outer **2**. This is measured on the rasterized
+   file, stroke width included, so an outline that reaches the edge fails even
+   though its path coordinate does not.
+4. **Baseline and scale.** A character's ground contact sits at **y=146** in a
+   portrait and **y=44** in a sprite, so a row of characters shares a floor
+   instead of bobbing. Keep visual scale and stroke weight consistent with the
+   rest of the cast; the size ladder in `scripts/character-preview.mjs` is how
+   that gets judged.
+5. **Painted area.** No asset may paint more than **62%** of its artboard. A
+   card paints 100% and a disc 79%; converted character art measures 20–35%.
+   The ceiling sits in the empty middle, so it flags backgrounds without
+   policing how large a character is.
+6. **Outline resilience.** The dark outline is what keeps a character legible
+   over an arbitrary surface. Transparent art has no baked backdrop to separate
+   it from the host, so every silhouette edge — including props — keeps its
+   outline.
+7. **Existing motion only.** This contract does not expand the animation
+   vocabulary. Each sprite keeps the decorative idle it already had, at its
+   existing selector, duration, and easing; motion never encodes work or status
+   (FR-72). Every animated sprite keeps its internal
+   `prefers-reduced-motion` guard, and every `static.svg` stays motionless and
+   meaningfully equivalent to its sprite's resting pose.
+8. **Identity is preserved, not redrawn.** Removing a background is not licence
+   to restyle. Silhouette, signature prop, palette, name, and catalog ID survive
+   the conversion unchanged; only geometry needed to meet rules 3–4 moves.
+
+### Required review evidence
+
+A changed asset is not shippable until all of the following exist:
+
+- the entry's `entry_version` in `internal/charactercatalog/catalog.json` is
+  incremented;
+- a dated revision note in this register naming the exact human edits, the
+  preserved motion, and the sprite/static parity check;
+- the contact sheets from `node scripts/character-preview.mjs`, inspected over
+  checkerboard, light, dark, warm-card, and map surfaces at every size in the
+  ladder;
+- a regenerated `docs/character-asset-hashes.txt`, regenerated **after** the
+  visual review rather than as part of making the change.
+
+### Migration ratchet (temporary)
+
+`scripts/character-transparency-pending.json` lists the assets still carrying a
+baked background. Both checks read that one file, so an asset can never be
+exempt from one and enforced by the other. The list may only shrink: converting
+an asset means deleting its entry, and the tests fail both when an unlisted
+asset breaks the contract and when a listed asset has quietly started passing.
+**The file and every reference to it are deleted once the list is empty**, after
+which the contract applies unconditionally to all 27 assets.
+
 ## Naming decision (2026-08-04)
 
 **Working characters are named for the role they depict, not with invented

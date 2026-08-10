@@ -91,6 +91,12 @@ jobs:
       - name: Run frontend module tests
         run: npm run test:modules
 
+      # Rasterizes the 27 character SVGs and proves they stay transparent and
+      # map-ready. Deterministic and offline: sharp is already a devDependency,
+      # and one process checks every asset.
+      - name: Run character asset contract
+        run: npm run test:character-assets
+
   readme-contract:
     name: README Contract
     runs-on: ubuntu-latest

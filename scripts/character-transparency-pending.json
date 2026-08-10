@@ -1,0 +1,36 @@
+{
+  "note": "TEMPORARY migration ratchet for the map-ready transparent-asset conversion. Every entry is a character asset that still carries a baked background and is therefore exempt from the transparency contract for now. The list may only ever shrink: converting an asset means deleting its entry, and both halves of the contract fail if an entry here now passes (a stale allowlist) or if an asset not listed here fails (a new violation). This file and every reference to it are deleted once the list is empty; the contract then applies unconditionally to all 27 assets.",
+  "enforced_by": [
+    "scripts/character-assets.test.mjs (raster: transparency, safe perimeter, dimensions)",
+    "internal/web/character_assets_test.go (structural: background primitives, native viewBox)"
+  ],
+  "pending": [
+    "ori-guide/portrait",
+    "ori-guide/sprite",
+    "ori-guide/static",
+    "research-archivist/portrait",
+    "research-archivist/sprite",
+    "research-archivist/static",
+    "project-coordinator/portrait",
+    "project-coordinator/sprite",
+    "project-coordinator/static",
+    "product-builder/portrait",
+    "product-builder/sprite",
+    "product-builder/static",
+    "team-caretaker/portrait",
+    "team-caretaker/sprite",
+    "team-caretaker/static",
+    "insight-researcher/portrait",
+    "insight-researcher/sprite",
+    "insight-researcher/static",
+    "decision-strategist/portrait",
+    "decision-strategist/sprite",
+    "decision-strategist/static",
+    "operations-keeper/portrait",
+    "operations-keeper/sprite",
+    "operations-keeper/static",
+    "automation-specialist/portrait",
+    "automation-specialist/sprite",
+    "automation-specialist/static"
+  ]
+}
