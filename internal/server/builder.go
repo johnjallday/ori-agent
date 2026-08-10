@@ -31,6 +31,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/filewatcher"
 	"github.com/johnjallday/ori-agent/internal/followup"
 	"github.com/johnjallday/ori-agent/internal/gateway"
+	"github.com/johnjallday/ori-agent/internal/githubhttp"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/location"
 	"github.com/johnjallday/ori-agent/internal/locationhttp"
@@ -225,6 +226,7 @@ type ServerBuilder struct {
 	evolutionHandler   *evolutionhttp.Handler
 	vaultHandler       *vaulthttp.Handler
 	connectionsHandler *connectionshttp.Handler
+	githubHandler      *githubhttp.Handler
 	connStore          *connections.Store
 
 	// External agents (Claude Code, Codex)
@@ -513,6 +515,7 @@ func (b *ServerBuilder) createDomainFacades() {
 		Evolution:             b.evolutionHandler,
 		Vault:                 b.vaultHandler,
 		Connections:           b.connectionsHandler,
+		GitHub:                b.githubHandler,
 		ExternalAgents:        b.externalAgentsHandler,
 		Skills:                b.skillsHandler,
 		User:                  b.userHandler,

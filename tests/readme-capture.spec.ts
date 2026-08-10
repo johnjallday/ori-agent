@@ -451,6 +451,14 @@ async function installFixtureRoutes(page: Page) {
     // accurate mock is the real handler's own answer for that case --
     // setupwizard.Status with applicable:false and state:not_applicable, which
     // keeps the dialog closed and the banner hidden exactly as in production.
+    // The GitHub approval panel asks every workspace page whether it has
+    // changes awaiting approval. An empty list is the answer for a workspace
+    // with no GitHub binding, and the panel then hides itself entirely --
+    // which is what keeps this scene identical to before the panel existed.
+    if (/^\/api\/workspaces\/[^/]+\/github\/proposals$/.test(url.pathname)) {
+      await json(route, { proposals: [] });
+      return;
+    }
     if (/^\/api\/workspaces\/[^/]+\/setup-wizard$/.test(url.pathname)) {
       await json(route, {
         success: true,

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
+	"github.com/johnjallday/ori-agent/internal/githubscope"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/mcp"
@@ -91,6 +92,10 @@ type resolvedTaskAgent struct {
 	// to the tool names its binding permits; a missing key means no
 	// restriction. See ResolvedAgentRuntime.MCPToolAllowlist.
 	MCPToolAllowlist map[string][]string
+	// MCPRepoScope maps a runtime server name to the single repository its
+	// binding is confined to; a missing key means no repository constraint.
+	// See ResolvedAgentRuntime.MCPRepoScope.
+	MCPRepoScope map[string]string
 }
 
 const (
@@ -1541,10 +1546,36 @@ func (h *LLMTaskHandler) getAgentMCPTools(ag *resolvedTaskAgent) []toolapi.Tool 
 			})
 			continue
 		}
-		tools = append(tools, filterAllowedMCPTools(serverTools, ag.MCPToolAllowlist, name)...)
+		allowed := filterAllowedMCPTools(serverTools, ag.MCPToolAllowlist, name)
+		tools = append(tools, applyMCPRepoScope(allowed, ag.MCPRepoScope, name)...)
 	}
 
 	return tools
+}
+
+// applyMCPRepoScope confines serverName's tools to a single repository when
+// its binding declares one. It is the argument-level half of the binding's
+// policy: the allowlist decides which tools exist, this decides what they may
+// be pointed at. See the same function in internal/chathttp -- both paths hand
+// MCP tools to a model, so both must apply it.
+func applyMCPRepoScope(tools []toolapi.Tool, scopes map[string]string, serverName string) []toolapi.Tool {
+	if len(scopes) == 0 {
+		return tools
+	}
+	repo, scoped := scopes[serverName]
+	if !scoped {
+		return tools
+	}
+	guard, ok := githubscope.New(repo)
+	if !ok {
+		// A malformed constraint fails closed: expose nothing rather than
+		// fall back to unrestricted access.
+		logger.Warn("MCP binding declares an unusable repository scope; exposing no tools for it", logger.Fields{
+			"server": serverName,
+		})
+		return nil
+	}
+	return guard.Wrap(tools)
 }
 
 // filterAllowedMCPTools restricts tools to those permitted by allowlist for

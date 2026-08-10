@@ -26,7 +26,7 @@ async function skipOnboarding(page: Page) {
 }
 
 async function openGuide(page: Page) {
-  await page.locator('#oriGuideLauncher').click();
+  await guideEntryPoint(page).click();
   await expect(page.locator('#oriGuidePanel')).toBeVisible();
   // Opening fires its own greeting request. Wait for it to land before asking
   // anything: otherwise its late response can satisfy the next wait, and the
@@ -48,22 +48,36 @@ async function ask(page: Page, question: string) {
   await expect(page.locator('#oriGuideReply')).not.toHaveAttribute('data-status', 'awaiting-test');
 }
 
+/**
+ * The guide's entry point for a given route.
+ *
+ * Every page floats the launcher bottom-right EXCEPT Home, which already names
+ * Ori in the workspace-area header — two buttons driving one controller and one
+ * panel was a duplicate, so Home hides the floating one. Tests therefore ask
+ * the page which entry point it has rather than assuming the launcher.
+ */
+function guideEntryPoint(page: Page) {
+  const onHome = new URL(page.url()).pathname === '/';
+  return onHome ? page.locator('#oriGuideMapTrigger') : page.locator('#oriGuideLauncher');
+}
+
 async function gotoPage(page: Page, route: string) {
   await skipOnboarding(page);
   await page.goto(route, { waitUntil: 'domcontentloaded' });
-  await expect(page.locator('#oriGuideLauncher')).toBeVisible();
+  await expect(guideEntryPoint(page)).toBeVisible();
 }
 
 test.describe('Ori Guide identity and boundary', () => {
-  test('the launcher names Ori as a guide before anything is asked', async ({ page }) => {
+  test('the entry point names Ori as a guide before anything is asked', async ({ page }) => {
     await gotoPage(page, '/');
 
     // The boundary has to be legible on first exposure, not discovered after
-    // mistaking Ori for a work agent (FR-22/FR-27).
-    const launcher = page.locator('#oriGuideLauncher');
-    await expect(launcher).toContainText('Ask Ori');
-    await expect(launcher).toContainText('App Guide');
-    await expect(launcher).toHaveAttribute('aria-expanded', 'false');
+    // mistaking Ori for a work agent (FR-22/FR-27). Whichever button a page
+    // shows has to carry the name AND the role.
+    const entry = guideEntryPoint(page);
+    await expect(entry).toContainText('Ask Ori');
+    await expect(entry).toContainText('App Guide');
+    await expect(page.locator('#oriGuideLauncher')).toHaveAttribute('aria-expanded', 'false');
 
     await openGuide(page);
     const boundary = page.locator('.ori-guide__boundary');
@@ -197,7 +211,7 @@ test.describe('Ori Guide explanations and destinations', () => {
 });
 
 test.describe('Ori on the Home map', () => {
-  test('the map character opens the same guide as the launcher', async ({ page }) => {
+  test('the map character drives the one shared panel and controller', async ({ page }) => {
     await gotoPage(page, '/');
 
     const mapOri = page.locator('#oriGuideMapTrigger');
@@ -205,21 +219,30 @@ test.describe('Ori on the Home map', () => {
 
     await mapOri.click();
     await expect(page.locator('#oriGuidePanel')).toBeVisible();
-    // One controller, one panel: the shared launcher reflects the state the map
-    // character just set (FR-21).
+    // One controller, one panel: the shared launcher still tracks the state the
+    // map character set, even though Home does not show it (FR-21).
     await expect(page.locator('#oriGuideLauncher')).toHaveAttribute('aria-expanded', 'true');
 
-    // Closing from the shared launcher closes what the map opened.
-    await page.locator('#oriGuideLauncher').click();
+    await mapOri.click();
     await expect(page.locator('#oriGuidePanel')).toBeHidden();
     await expect(page.locator('#oriGuideLauncher')).toHaveAttribute('aria-expanded', 'false');
   });
 
-  test('there is still exactly one panel with two entry points', async ({ page }) => {
+  test('Home shows exactly one entry point, and it names Ori as the guide', async ({ page }) => {
     await gotoPage(page, '/');
     await expect(page.locator('#oriGuidePanel')).toHaveCount(1);
-    await expect(page.locator('#oriGuideMapTrigger')).toHaveCount(1);
-    await expect(page.locator('#oriGuideLauncher')).toHaveCount(1);
+
+    // The header character is the only VISIBLE way in on Home. The floating
+    // launcher is still in the DOM — one controller owns both — but showing it
+    // here was a second button for one thing.
+    const mapOri = page.locator('#oriGuideMapTrigger');
+    await expect(mapOri).toBeVisible();
+    await expect(page.locator('#oriGuideLauncher')).toBeHidden();
+
+    // Losing the launcher must not lose the role it carried: the guide/work
+    // boundary has to be readable before anything is asked (FR-22/FR-27).
+    await expect(mapOri).toContainText('Ask Ori');
+    await expect(mapOri).toContainText('App Guide');
   });
 
   test('the map character does not appear away from Home', async ({ page }) => {
@@ -409,7 +432,7 @@ test.describe('Ori Guide keyboard and focus', () => {
   test('the guide is fully operable from the keyboard', async ({ page }) => {
     await gotoPage(page, '/');
 
-    await page.locator('#oriGuideLauncher').focus();
+    await guideEntryPoint(page).focus();
     await page.keyboard.press('Enter');
     await expect(page.locator('#oriGuidePanel')).toBeVisible();
     // Opening focuses the input, because that is what the user came to use.
@@ -420,11 +443,13 @@ test.describe('Ori Guide keyboard and focus', () => {
     await expect(page.locator('#oriGuideReply')).toHaveAttribute('data-status', 'answered');
   });
 
-  test('closing returns focus to the launcher', async ({ page }) => {
+  test('closing returns focus to whichever entry point opened it', async ({ page }) => {
     await gotoPage(page, '/');
     await openGuide(page);
     await page.locator('#oriGuideClose').click();
-    await expect(page.locator('#oriGuideLauncher')).toBeFocused();
+    // Focus goes back to the button the user actually pressed (FR-26), which on
+    // Home is the header character rather than the suppressed launcher.
+    await expect(guideEntryPoint(page)).toBeFocused();
   });
 
   test('the panel exposes dialog semantics and a live region', async ({ page }) => {
@@ -492,30 +517,31 @@ test.describe('Workspace Manager keeps its own identity', () => {
     await expect(page.locator('.ori-guide__launcher-name')).toHaveText('Ask Ori');
   });
 
-  // Fifth occurrence of this bug class in this feature, so it is asserted on
-  // Home too: the rail footer is the last row of the right-hand column, which
-  // is exactly where the fixed launcher floats (measured failing at 1280x800).
-  test('the Ori launcher never covers the rail footer actions', async ({ page }) => {
+  // Fifth occurrence of this bug class in this feature, so Home asserts it too.
+  // The specific collision it was written for is gone — the rail footer moved
+  // into the header and Home no longer renders the fixed launcher — but the bug
+  // class is "a floating element silently eats a control's clicks", which is
+  // worth guarding by hit-testing rather than by geometry against one element.
+  test('nothing floating covers Home’s cockpit actions', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await gotoPage(page, '/');
-    await expect(page.locator('.cockpit-rail-footer')).toBeVisible();
 
-    const covered = await page.evaluate(() => {
-      const launcher = document.querySelector('.ori-guide__launcher')!.getBoundingClientRect();
-      return Array.from(document.querySelectorAll('.cockpit-rail-footer button'))
-        .filter(el => {
-          const r = el.getBoundingClientRect();
-          return !(
-            r.right < launcher.left ||
-            r.left > launcher.right ||
-            r.bottom < launcher.top ||
-            r.top > launcher.bottom
-          );
-        })
-        .map(el => (el.textContent || '').trim());
-    });
+    // Home suppresses the floating launcher precisely so it cannot land on
+    // anything; the header character is the entry point here.
+    await expect(page.locator('#oriGuideLauncher')).toBeHidden();
 
-    expect(covered, `covered by the launcher: ${covered.join(', ')}`).toEqual([]);
+    // Every header action must be the element that actually receives a click at
+    // its own centre — the check the geometry version was approximating.
+    for (const id of ['#cockpitCaptureBtn', '#cockpitSummaryBtn', '#cockpitRailToggle']) {
+      const topmost = await page.evaluate(selector => {
+        const el = document.querySelector(selector);
+        if (!el) return 'missing';
+        const r = el.getBoundingClientRect();
+        const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+        return el.contains(hit) || el === hit ? 'clickable' : (hit?.className ?? 'unknown');
+      }, id);
+      expect(topmost, `${id} is covered by ${topmost}`).toBe('clickable');
+    }
   });
 
   test('Cmd/Ctrl+J still focuses the work surface, not the guide', async ({ page }) => {

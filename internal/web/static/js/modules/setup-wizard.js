@@ -47,7 +47,34 @@
     pending: 'not started'
   };
 
+  // kind -> [renderer]. A list rather than a single entry because step kinds
+  // are shared: `account_link` belongs to both Email Ops and GitHub Ops, and
+  // `capability_configure` to both Calendar Ops and GitHub Ops. With a single
+  // slot the last module to load silently replaced every earlier one, and the
+  // blueprint that lost showed the generic controls — a step whose primary
+  // button could not do anything.
   const renderers = new Map();
+
+  // rendererFor picks the renderer that claims this step.
+  //
+  // A renderer may declare `owns(step)` to claim only its own blueprint's
+  // steps. One that does not declare it keeps the old behavior exactly --
+  // last registered wins -- so existing renderers are unaffected.
+  function rendererFor(step) {
+    if (!step) return undefined;
+    const list = renderers.get(step.kind);
+    if (!list || !list.length) return undefined;
+    const claimed = list.find(renderer => {
+      try {
+        return typeof renderer.owns === 'function' && renderer.owns(step);
+      } catch {
+        return false;
+      }
+    });
+    if (claimed) return claimed;
+    const unclaimed = list.filter(renderer => typeof renderer.owns !== 'function');
+    return unclaimed.length ? unclaimed[unclaimed.length - 1] : undefined;
+  }
 
   let workspaceId = '';
   let status = null;
@@ -155,6 +182,16 @@
     if (!error) return;
     error.textContent = message ? String(message) : '';
     error.hidden = !message;
+    // Bring the reason into view. On a step with a long body -- a repository
+    // list, a folder list -- the error sits below the fold, so a rejected
+    // choice looked like nothing happened at all.
+    if (message && typeof error.scrollIntoView === 'function') {
+      try {
+        error.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      } catch {
+        error.scrollIntoView();
+      }
+    }
   }
 
   function announce(message) {
@@ -238,7 +275,7 @@
 
     if (stepContent) {
       stepContent.textContent = '';
-      const renderer = renderers.get(step.kind);
+      const renderer = rendererFor(step);
       if (renderer && typeof renderer.render === 'function') {
         try {
           renderer.render(stepContent, rendererContext(step));
@@ -399,7 +436,7 @@
     ) {
       return true;
     }
-    const renderer = renderers.get(step.kind);
+    const renderer = rendererFor(step);
     if (renderer && typeof renderer.disablePrimary === 'function') {
       return Boolean(renderer.disablePrimary(rendererContext(step)));
     }
@@ -422,7 +459,7 @@
       return 'Choose an option to continue';
     }
     if (step.action === ACTION_RECHECK) return 'Check again';
-    const renderer = renderers.get(step.kind);
+    const renderer = rendererFor(step);
     if (renderer && typeof renderer.primaryLabel === 'function') {
       const label = renderer.primaryLabel(rendererContext(step));
       if (label) return label;
@@ -692,7 +729,7 @@
       return;
     }
 
-    const renderer = renderers.get(step.kind);
+    const renderer = rendererFor(step);
     if (renderer && typeof renderer.onPrimary === 'function') {
       await renderer.onPrimary(rendererContext(step));
       return;
@@ -848,7 +885,13 @@
     getStatus: () => status,
     registerStepRenderer(kind, renderer) {
       if (!kind || !renderer) return;
-      renderers.set(String(kind), renderer);
+      const key = String(kind);
+      const list = renderers.get(key) || [];
+      // Registering the same renderer twice is a no-op rather than a
+      // duplicate entry, so a module that re-registers on a retry does not
+      // grow the list.
+      if (!list.includes(renderer)) list.push(renderer);
+      renderers.set(key, list);
       if (status && currentStep()?.kind === kind) renderStep();
     },
     // Exposed for tests and for domain modules that need the same vocabulary.

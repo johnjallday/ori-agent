@@ -485,7 +485,7 @@ func TestShippedBlueprintsDeclareRunnableWizards(t *testing.T) {
 	// Blueprints that shipped with a wizard from their first release. There are
 	// no pre-wizard installs of these to refresh, so version 1 is correct and
 	// requiring a bump would only invite a meaningless one.
-	shippedWithWizard := []string{"file-janitor"}
+	shippedWithWizard := []string{"file-janitor", "github-ops"}
 
 	used := map[string]bool{}
 	for _, id := range append(append([]string{}, migrated...), shippedWithWizard...) {

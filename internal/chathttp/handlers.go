@@ -593,6 +593,7 @@ func (h *Handler) findMCPToolByName(ag *resolvedChatAgent, toolName string) (too
 			continue
 		}
 		mcpTools = filterAllowedMCPTools(mcpTools, ag.MCPToolAllowlist, serverName)
+		mcpTools = applyMCPRepoScope(mcpTools, ag.MCPRepoScope, serverName)
 		for _, mcpTool := range mcpTools {
 			defName := strings.TrimSpace(mcpTool.Definition().Name)
 			for _, candidate := range candidateNames {
@@ -1510,6 +1511,7 @@ func (h *Handler) buildChatToolList(ag *resolvedChatAgent, current string, invok
 				continue
 			}
 			mcpTools = filterAllowedMCPTools(mcpTools, ag.MCPToolAllowlist, serverName)
+			mcpTools = applyMCPRepoScope(mcpTools, ag.MCPRepoScope, serverName)
 			for _, mcpTool := range mcpTools {
 				mcpDef := mcpTool.Definition()
 				appendTool(llm.Tool{

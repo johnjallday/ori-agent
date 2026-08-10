@@ -86,6 +86,14 @@ test.describe('Home cockpit resilience', () => {
     // FR113: a bounded, retryable error — not a blank cockpit.
     await expect(page.locator('[data-cockpit-retry]')).toBeVisible();
     await expect(page.locator('#homeAssistantInput')).toBeEnabled();
+    // The rail opens on demand, so what FR113 needs here is that it is still
+    // REACHABLE while the list is failing — a broken fetch must not take the
+    // rest of the cockpit down with it. Only click when it is actually closed:
+    // a blind click would close a rail the fixture had already opened.
+    const cockpit = page.locator('#homeCockpit');
+    if ((await cockpit.getAttribute('data-rail-open')) !== 'true') {
+      await page.locator('#cockpitRailToggle').click();
+    }
     await expect(page.locator('#cockpitRailToday')).toBeVisible();
 
     // Retry recovers rather than requiring a reload.

@@ -73,7 +73,7 @@ func (h *Handler) ConnectServerHandler(w http.ResponseWriter, r *http.Request) {
 				orihttp.InternalError(w, err.Error())
 				return
 			}
-		} else if configured, err := mcp.HasOAuthCredentials(r.Context(), *cfg); err != nil {
+		} else if configured, err := mcp.HasRemoteCredentials(r.Context(), *cfg); err != nil {
 			orihttp.InternalError(w, err.Error())
 			return
 		} else if !configured {

@@ -211,6 +211,7 @@ func (h *Handler) getAvailableToolNames(ag *resolvedChatAgent) []string {
 				continue
 			}
 			mcpTools = filterAllowedMCPTools(mcpTools, ag.MCPToolAllowlist, serverName)
+			mcpTools = applyMCPRepoScope(mcpTools, ag.MCPRepoScope, serverName)
 			for _, mcpTool := range mcpTools {
 				toolNames = append(toolNames, mcpTool.Definition().Name)
 			}

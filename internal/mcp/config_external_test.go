@@ -97,8 +97,35 @@ func TestInitializeDefaultServersAddsMissingDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadGlobalConfig failed: %v", err)
 	}
-	if len(cfg.Servers) != 3 {
-		t.Fatalf("expected 3 servers, got %#v", cfg.Servers)
+	// The result is the union of what was already configured and the
+	// built-in defaults. Derived rather than hardcoded so that adding a
+	// default server doesn't require editing a magic number here -- the
+	// property under test is "existing preserved, missing defaults added",
+	// not the specific count.
+	seeded := map[string]struct{}{"filesystem": {}, "ori-reaper": {}}
+	wantCount := len(seeded)
+	for _, def := range defaultMCPServers("") {
+		if _, alreadySeeded := seeded[def.Name]; !alreadySeeded {
+			wantCount++
+		}
+	}
+	if len(cfg.Servers) != wantCount {
+		t.Fatalf("expected %d servers, got %#v", wantCount, cfg.Servers)
+	}
+
+	names := make(map[string]int, len(cfg.Servers))
+	for _, server := range cfg.Servers {
+		names[server.Name]++
+	}
+	for name, count := range names {
+		if count > 1 {
+			t.Fatalf("server %q was added %d times", name, count)
+		}
+	}
+	for _, def := range defaultMCPServers("") {
+		if _, ok := names[def.Name]; !ok {
+			t.Fatalf("expected default server %q in global config", def.Name)
+		}
 	}
 
 	filesystem, ok := findServerByName(cfg.Servers, "filesystem")
@@ -107,6 +134,20 @@ func TestInitializeDefaultServersAddsMissingDefaults(t *testing.T) {
 	}
 	if filesystem.Command != "/custom/filesystem" || !filesystem.Enabled {
 		t.Fatalf("expected existing filesystem server to be preserved, got %#v", filesystem)
+	}
+
+	github, ok := findServerByName(cfg.Servers, GitHubServerName)
+	if !ok {
+		t.Fatalf("expected github default in global config")
+	}
+	if github.Enabled {
+		t.Fatalf("the github default must ship disabled until a token is stored, got %#v", github)
+	}
+	if NormalizedAuthMode(github) != AuthModeStaticBearer || github.URL != GitHubServerURL {
+		t.Fatalf("unexpected github default shape: %#v", github)
+	}
+	if err := ValidateServerConfig(github); err != nil {
+		t.Fatalf("github default is not a valid server config: %v", err)
 	}
 
 	fetch, ok := findServerByName(cfg.Servers, "fetch")

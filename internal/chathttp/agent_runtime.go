@@ -48,6 +48,10 @@ type resolvedChatAgent struct {
 	// binding permits; a missing key means no restriction. See
 	// workspace.ResolvedAgentRuntime.MCPToolAllowlist.
 	MCPToolAllowlist map[string][]string
+	// MCPRepoScope maps a runtime server name to the single repository its
+	// binding is confined to; a missing key means no repository constraint.
+	// See workspace.ResolvedAgentRuntime.MCPRepoScope.
+	MCPRepoScope map[string]string
 }
 
 // SetRuntimeResolver configures workspace-aware agent runtime resolution for chat requests.
@@ -86,6 +90,7 @@ func (h *Handler) resolveEffectiveAgent(agentName string, routeCtx normalizedCha
 			Agent:            cloneAgentForChat(resolved.Agent),
 			MCPServers:       append([]string{}, resolved.MCPServers...),
 			MCPToolAllowlist: resolved.MCPToolAllowlist,
+			MCPRepoScope:     resolved.MCPRepoScope,
 		}
 		if len(resolved.EffectiveSkills) > 0 {
 			result.EffectiveSkills = append([]workspace.ResolvedSkill{}, resolved.EffectiveSkills...)

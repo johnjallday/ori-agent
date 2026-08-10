@@ -1226,6 +1226,9 @@ import {
     areaStatus: document.getElementById('cockpitWorkspaceStatus'),
     viewButtons: Array.from(document.querySelectorAll('[data-cockpit-view]')),
     filters: document.getElementById('cockpitSignalFilters'),
+    rail: document.getElementById('cockpitRail'),
+    railToggle: document.getElementById('cockpitRailToggle'),
+    railToggleCount: document.querySelector('[data-cockpit-rail-toggle-count]'),
     railToday: document.getElementById('cockpitRailToday'),
     railContext: document.getElementById('cockpitRailContext'),
     railLive: document.getElementById('cockpitRailLive'),
@@ -1260,6 +1263,12 @@ import {
     signal: '',
     selectedId: '',
     railState: RAIL_TODAY,
+    // Whether the rail is open is DERIVED, not a sixth rail state: a selection
+    // opens it, quiet Today leaves it closed, and this holds the user's own
+    // override. null = follow the derivation, true/false = the user said so.
+    // Kept separate from railState so opening the rail can never disturb which
+    // panel it is showing.
+    railUserToggle: null,
     hqSiteView: null,
     // The workspace/group context to restore when Summary or Ask Ori closes
     // (FR91, FR100).
@@ -1321,6 +1330,12 @@ import {
   }
 
   // ---- signal filters (FR31-FR34) ----
+
+  // Hiding the chip row when every count is a known zero was tried and dropped:
+  // the chips are the ONLY way to reach a signal filter, so hiding them at zero
+  // makes filtering unreachable in exactly the fixture where tests (and users
+  // arriving at a quiet Home) go looking for it. Three compact chips in the map
+  // header are a much smaller cost than a control that comes and goes.
 
   function renderFilters() {
     if (!els.filters) return;
@@ -1600,10 +1615,15 @@ import {
    * Clearing the active item must NOT clear Map signal filters or Tree
    * management state — those are separate, deliberately sticky concerns (FR61).
    */
-  function clearSelection() {
+  function clearSelection({ keepRailOpen = true } = {}) {
     if (!state.selectedId && state.railState === RAIL_TODAY) return;
     state.hqSiteView = null;
     state.priorContext = null;
+    // Backing out of a selection returns to Today; it does not dismiss the rail.
+    // The user was reading the rail a moment ago, and collapsing it under them
+    // would make Escape feel like it closed two things at once. Only the rail's
+    // own toggle closes the rail, which is why it opts out here.
+    if (keepRailOpen) state.railUserToggle = true;
     selectItem('');
   }
 
@@ -1684,6 +1704,93 @@ import {
     );
   }
 
+  // ---- rail openness (derived) ----
+  //
+  // The rail is not entitled to a third of the window for saying "a quiet day".
+  // It earns its space when it has something to show:
+  //
+  //   1. anything other than Today is showing — a workspace, group, the HQ
+  //      site, Summary or Ask Ori. Selecting always opens, which is also what
+  //      keeps the select-then-open contract (and its Playwright assertions on
+  //      [data-cockpit-rail-open]) true;
+  //   2. Today itself needs the user — something is flagged for attention;
+  //   3. the user opened it themselves, which outranks 1 and 2 either way.
+
+  function railAttentionCount() {
+    const counts = signalCounts(state.flattened, state.scheduleIndex);
+    const attention = counts ? counts[SIGNAL_ATTENTION] : null;
+    return typeof attention === 'number' ? attention : 0;
+  }
+
+  /**
+   * Whether onboarding still has a step to offer.
+   *
+   * Mission 01 ("Build My HQ") is the first thing a new user is meant to do,
+   * and it lives in Today. A closed rail would hide the only call to action on
+   * a first run — the same class of dead-end as #322, where Home shipped with
+   * that button unreachable. progression-widget.js owns #questLog and emits no
+   * event, so its `hidden` attribute is the signal.
+   */
+  function railHasOnboardingWork() {
+    const quest = document.getElementById('questLog');
+    return !!quest && !quest.hidden;
+  }
+
+  function railShouldBeOpen() {
+    if (state.railUserToggle !== null) return state.railUserToggle;
+    if (state.railState !== RAIL_TODAY) return true;
+    return railAttentionCount() > 0 || railHasOnboardingWork();
+  }
+
+  /**
+   * The quest log renders asynchronously from its own fetch, well after the
+   * first rail render, so its arrival has to re-open the rail. An explicit
+   * close still wins: applyRailOpen reads railUserToggle first.
+   */
+  function watchProgressionForRail() {
+    const quest = document.getElementById('questLog');
+    if (!quest || typeof MutationObserver !== 'function') return;
+    new MutationObserver(() => applyRailOpen()).observe(quest, {
+      attributes: true,
+      attributeFilter: ['hidden']
+    });
+  }
+
+  function applyRailOpen() {
+    const open = railShouldBeOpen();
+    root.dataset.railOpen = open ? 'true' : 'false';
+    if (els.rail) els.rail.hidden = !open;
+    if (els.railToggle) {
+      els.railToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+      els.railToggle.setAttribute(
+        'aria-label',
+        open ? 'Hide the Today panel' : 'Show the Today panel'
+      );
+    }
+    // The badge is the only reason to look at a closed rail, so it carries the
+    // attention count and disappears at zero rather than showing a "0".
+    if (els.railToggleCount) {
+      const count = railAttentionCount();
+      els.railToggleCount.textContent = count > 0 ? String(count) : '';
+      els.railToggleCount.hidden = count === 0;
+    }
+  }
+
+  function toggleRail() {
+    const open = railShouldBeOpen();
+    if (open && state.railState !== RAIL_TODAY) {
+      // Closing while a context panel is showing would leave a selected
+      // workspace with nowhere to see it. Drop back to Today first, so
+      // reopening lands somewhere coherent.
+      clearSelection({ keepRailOpen: false });
+      state.railUserToggle = false;
+      applyRailOpen();
+      return;
+    }
+    state.railUserToggle = !open;
+    applyRailOpen();
+  }
+
   function renderRail({ announceChange = true } = {}) {
     if (!els.railContext) return;
 
@@ -1718,6 +1825,11 @@ import {
         state.selectedId = '';
         state.railState = RAIL_TODAY;
         state.priorContext = null;
+        // Keep the rail open. The user was reading this workspace a moment ago,
+        // and the explanation below is only useful if it lands somewhere they
+        // can still see — closing the rail here would delete the context AND
+        // the notice that says why.
+        state.railUserToggle = true;
         showTodayPanel();
         announce('The selected workspace is no longer available. Showing Today.');
         return;
@@ -1748,6 +1860,7 @@ import {
     els.railContext.innerHTML = html;
     bindRailCommon();
     updateRailFooter();
+    applyRailOpen();
   }
 
   function showTodayPanel() {
@@ -1755,6 +1868,7 @@ import {
     els.railContext.hidden = true;
     els.railContext.innerHTML = '';
     updateRailFooter();
+    applyRailOpen();
   }
 
   function updateRailFooter() {
@@ -1797,6 +1911,8 @@ import {
       state.railState = RAIL_ASK;
       if (els.railToday) els.railToday.hidden = true;
       if (els.railContext) els.railContext.hidden = true;
+      // Ask Ori activity is never worth showing in a rail the user cannot see.
+      applyRailOpen();
       renderAskTarget();
       announce('Ask Ori activity.');
       return;
@@ -2182,6 +2298,11 @@ import {
       fireTTFA('view-toggle');
     });
   });
+
+  if (els.railToggle) {
+    els.railToggle.addEventListener('click', () => toggleRail());
+  }
+  watchProgressionForRail();
 
   if (els.summaryBtn) {
     els.summaryBtn.addEventListener('click', () =>

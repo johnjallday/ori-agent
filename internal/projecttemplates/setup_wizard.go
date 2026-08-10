@@ -54,6 +54,7 @@ var ValidSetupWizardAdapters = []string{
 	"file_janitor",
 	"calendar_ops",
 	"email_ops",
+	"github_ops",
 	"reaper_song",
 }
 
