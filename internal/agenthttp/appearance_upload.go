@@ -27,6 +27,11 @@ const (
 	// MaxAvatarSize is the maximum accepted upload size (5 MB), unchanged from
 	// the previous contract (FR-63).
 	MaxAvatarSize = 5 << 20
+	// maxUploadOverhead is the slack allowed above MaxAvatarSize for the
+	// multipart envelope: boundaries, part headers, and the handful of small
+	// text fields the guards travel in. Generous enough never to reject a
+	// legitimate 5 MB image, small enough that the body stays bounded.
+	maxUploadOverhead = 1 << 20
 
 	// appearanceUploadSuffix is the exact path tail this handler serves.
 	appearanceUploadSuffix = "/appearance/upload"
@@ -122,6 +127,15 @@ func (h *AppearanceUploadHandler) upload(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
+	// ParseMultipartForm's argument caps only what is held in memory — the rest
+	// spills to disk, so on its own it bounds nothing. MaxBytesReader is what
+	// actually stops a caller streaming far more than the limit; the small
+	// headroom covers the multipart envelope around a 5 MB image (FR-63).
+	r.Body = http.MaxBytesReader(w, r.Body, MaxAvatarSize+maxUploadOverhead)
+	// #nosec G120 -- the body is bounded by the MaxBytesReader immediately
+	// above, which the rule does not recognise. It fires on every
+	// ParseMultipartForm in the repository; this is the only caller that
+	// actually caps the request body rather than just the in-memory portion.
 	if err := r.ParseMultipartForm(MaxAvatarSize); err != nil {
 		orihttp.BadRequest(w, fmt.Sprintf("File too large or invalid form: %v", err))
 		return
@@ -163,32 +177,45 @@ func (h *AppearanceUploadHandler) upload(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
-	if err := os.MkdirAll(AvatarDir, 0o755); err != nil {
+	// 0o750, not 0o755: nothing outside this process needs to read the
+	// directory, and the static route serves its contents anyway.
+	if err := os.MkdirAll(AvatarDir, 0o750); err != nil {
 		logger.Error("Failed to create avatar directory", logger.Fields{"error": err})
 		orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to create avatar directory", err)
 		return
 	}
 
+	// Every write below goes through an os.Root confined to the avatar
+	// directory. The filenames here are already server-generated, so this is
+	// belt and braces — but it makes the confinement enforced by the runtime
+	// rather than asserted by the code that builds the names (FR-64).
+	root, err := os.OpenRoot(AvatarDir)
+	if err != nil {
+		logger.Error("Failed to open avatar directory", logger.Fields{"error": err})
+		orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to save image", err)
+		return
+	}
+	defer func() { _ = root.Close() }()
+
 	// The filename is derived entirely from the agent name and the sniffed
 	// type. The client's original path is never consulted, so there is nothing
 	// to traverse with (FR-64).
 	filename := appearanceUploadFilename(agentName, ext)
-	finalPath := filepath.Join(AvatarDir, filename)
 	previous := ag.Appearance.UploadedImage()
 
 	// Stream to a temporary file first, then rename into place. The previous
 	// image is only removed after the replacement is durably written and the
 	// record is saved — a failure anywhere before that leaves the agent showing
 	// exactly what it showed before (FR-37).
-	tmpPath := finalPath + ".upload.tmp"
-	if err := writeUploadFile(tmpPath, file); err != nil {
-		_ = os.Remove(tmpPath)
+	tmpName := filename + ".upload.tmp"
+	if err := writeUploadFile(root, tmpName, file); err != nil {
+		_ = root.Remove(tmpName)
 		logger.Error("Failed to write uploaded image", logger.Fields{"error": err, "agent": agentName})
 		orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to save image", err)
 		return
 	}
-	if err := os.Rename(tmpPath, finalPath); err != nil {
-		_ = os.Remove(tmpPath)
+	if err := root.Rename(tmpName, filename); err != nil {
+		_ = root.Remove(tmpName)
 		logger.Error("Failed to install uploaded image", logger.Fields{"error": err, "agent": agentName})
 		orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to save image", err)
 		return
@@ -204,7 +231,7 @@ func (h *AppearanceUploadHandler) upload(w http.ResponseWriter, r *http.Request,
 		// file this request created — never the one it was replacing.
 		ag.Appearance = restore
 		if filename != previous {
-			_ = os.Remove(finalPath)
+			_ = root.Remove(filename)
 		}
 		logger.Error("Failed to save agent appearance", logger.Fields{"error": err, "agent": agentName})
 		orihttp.RespondErrorWithErr(w, http.StatusInternalServerError, "Failed to update agent", err)
@@ -329,22 +356,30 @@ func appearanceUploadFilename(agentName, ext string) string {
 	return safe + ext
 }
 
-// removeAppearanceUpload deletes one stored image, refusing anything that is not
-// a plain filename. A stored value with a separator in it could only have come
-// from somewhere it should not have, and following it would be a traversal.
+// removeAppearanceUpload deletes one stored image.
+//
+// Two independent guards: the name must be a plain basename, and the delete
+// goes through an os.Root confined to the avatar directory. The first rejects a
+// stored value that could only have been hand-edited; the second means even a
+// mistake there cannot escape the directory, because the runtime enforces it.
 func removeAppearanceUpload(filename string) {
 	name := strings.TrimSpace(filename)
 	if name == "" || name != filepath.Base(name) || name == "." || name == ".." {
 		return
 	}
-	path := filepath.Join(AvatarDir, name)
-	if err := os.Remove(path); err == nil {
+	root, err := os.OpenRoot(AvatarDir)
+	if err != nil {
+		return
+	}
+	defer func() { _ = root.Close() }()
+	if err := root.Remove(name); err == nil {
 		logger.Debug("Removed appearance image", logger.Fields{"filename": name})
 	}
 }
 
-func writeUploadFile(path string, src io.Reader) error {
-	dst, err := os.Create(path) // #nosec G304 -- path is built from a sanitized basename inside AvatarDir
+// writeUploadFile streams the upload to `name` inside the confined root.
+func writeUploadFile(root *os.Root, name string, src io.Reader) error {
+	dst, err := root.Create(name)
 	if err != nil {
 		return err
 	}
