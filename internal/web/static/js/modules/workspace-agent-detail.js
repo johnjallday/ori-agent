@@ -31,6 +31,18 @@ export class WorkspaceAgentDetailPage {
     document.title = `${this.agentName} · Workspace Agent - Ori Agent`;
     this.setText('wad-breadcrumb-agent', this.agentName);
 
+    // The catalog does not fetch on its own — each page asks for it, so a page
+    // showing no characters pays nothing. Without this a chosen character
+    // silently renders as the generated portrait here (FR-103).
+    if (window.CharacterCatalog) {
+      if (typeof window.CharacterCatalog.onChange === 'function') {
+        window.CharacterCatalog.onChange(() => {
+          if (this.profile) this.renderIdentity(this.profile);
+        });
+      }
+      window.CharacterCatalog.load();
+    }
+
     // Workspace name + entry-agent status (best-effort; failure is non-fatal).
     await this.loadWorkspace();
 
@@ -50,6 +62,9 @@ export class WorkspaceAgentDetailPage {
       return;
     }
 
+    // Held so a late catalog arrival can repaint the portrait without refetching
+    // the profile.
+    this.profile = profile;
     this.renderIdentity(profile);
     this.renderModel(profile);
     this.reveal();
@@ -194,8 +209,27 @@ export class WorkspaceAgentDetailPage {
     const name = String(profile?.name || this.agentName).trim();
     const avatar = this.el('wad-avatar');
     if (avatar) {
-      avatar.textContent = this.initials(name);
-      avatar.style.setProperty('--wad-hue', String(this.hue(name)));
+      // Through the shared renderer, so this page shows the same active source
+      // as every other surface. It used to derive its own initials and a hue
+      // from the name, which meant an agent with a character or an uploaded
+      // image silently appeared as initials here alone (FR-80/FR-92).
+      if (window.AgentAvatar) {
+        const catalogId = profile?.appearance?.character?.catalog_id || '';
+        avatar.innerHTML = window.AgentAvatar.markup(
+          {
+            name,
+            source: profile?.source || 'user',
+            role: profile?.role || '',
+            appearance: profile?.appearance || null,
+            character:
+              catalogId && window.CharacterCatalog ? window.CharacterCatalog.get(catalogId) : null
+          },
+          { size: 72 }
+        );
+      } else {
+        avatar.textContent = this.initials(name);
+        avatar.style.setProperty('--wad-hue', String(this.hue(name)));
+      }
     }
     this.setText('wad-name', name);
 
