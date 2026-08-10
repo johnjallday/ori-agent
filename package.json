@@ -13,6 +13,7 @@
     "format": "prettier --write 'internal/web/static/**/*.{js,css,html}'",
     "format:check": "prettier --check 'internal/web/static/**/*.{js,css,html}'",
     "test:modules": "./scripts/run-test-command.sh node --test internal/web/static/js/modules/*.test.js",
+    "test:character-assets": "./scripts/run-test-command.sh node --test scripts/character-assets.test.mjs",
     "test": "./scripts/run-test-command.sh playwright test",
     "test:smoke": "./scripts/run-test-command.sh playwright test tests/smoke.spec.ts",
     "readme:audit": "node scripts/readme/audit.mjs",

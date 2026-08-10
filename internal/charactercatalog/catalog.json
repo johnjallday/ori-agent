@@ -4,7 +4,7 @@
   "characters": [
     {
       "id": "ori-guide",
-      "entry_version": 1,
+      "entry_version": 2,
       "kind": "guide",
       "name": "Ori",
       "family": "guide",
@@ -30,7 +30,7 @@
     },
     {
       "id": "research-archivist",
-      "entry_version": 1,
+      "entry_version": 2,
       "kind": "working",
       "name": "Research Archivist",
       "family": "resident",
@@ -57,7 +57,7 @@
     },
     {
       "id": "project-coordinator",
-      "entry_version": 1,
+      "entry_version": 2,
       "kind": "working",
       "name": "Project Coordinator",
       "family": "resident",
@@ -84,7 +84,7 @@
     },
     {
       "id": "product-builder",
-      "entry_version": 1,
+      "entry_version": 2,
       "kind": "working",
       "name": "Product Builder",
       "family": "resident",
@@ -111,7 +111,7 @@
     },
     {
       "id": "team-caretaker",
-      "entry_version": 1,
+      "entry_version": 2,
       "kind": "working",
       "name": "Team Caretaker",
       "family": "resident",
@@ -138,7 +138,7 @@
     },
     {
       "id": "insight-researcher",
-      "entry_version": 1,
+      "entry_version": 2,
       "kind": "working",
       "name": "Insight Researcher",
       "family": "familiar",
@@ -165,7 +165,7 @@
     },
     {
       "id": "decision-strategist",
-      "entry_version": 1,
+      "entry_version": 2,
       "kind": "working",
       "name": "Decision Strategist",
       "family": "familiar",
@@ -192,7 +192,7 @@
     },
     {
       "id": "operations-keeper",
-      "entry_version": 1,
+      "entry_version": 2,
       "kind": "working",
       "name": "Operations Keeper",
       "family": "construct",
@@ -219,7 +219,7 @@
     },
     {
       "id": "automation-specialist",
-      "entry_version": 1,
+      "entry_version": 2,
       "kind": "working",
       "name": "Automation Specialist",
       "family": "construct",

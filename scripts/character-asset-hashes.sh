@@ -31,7 +31,13 @@ if [[ "${1:-}" == "--check" ]]; then
     echo "no committed hash record at $record; run without --check first" >&2
     exit 1
   fi
-  if diff -u "$record" <(hash_all); then
+  # A real temp file rather than process substitution: agent sandboxes deny
+  # /dev/fd/*, which made --check fail with "Operation not permitted" and look
+  # exactly like genuine hash drift.
+  current="$(mktemp "${TMPDIR:-/tmp}/character-asset-hashes.XXXXXX")"
+  trap 'rm -f "$current"' EXIT
+  hash_all >"$current"
+  if diff -u "$record" "$current"; then
     echo "character assets match their reviewed hashes"
   else
     echo >&2
