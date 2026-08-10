@@ -30,7 +30,7 @@
     },
     {
       "id": "research-archivist",
-      "entry_version": 1,
+      "entry_version": 2,
       "kind": "working",
       "name": "Research Archivist",
       "family": "resident",
@@ -57,7 +57,7 @@
     },
     {
       "id": "project-coordinator",
-      "entry_version": 1,
+      "entry_version": 2,
       "kind": "working",
       "name": "Project Coordinator",
       "family": "resident",
@@ -84,7 +84,7 @@
     },
     {
       "id": "product-builder",
-      "entry_version": 1,
+      "entry_version": 2,
       "kind": "working",
       "name": "Product Builder",
       "family": "resident",
@@ -111,7 +111,7 @@
     },
     {
       "id": "team-caretaker",
-      "entry_version": 1,
+      "entry_version": 2,
       "kind": "working",
       "name": "Team Caretaker",
       "family": "resident",

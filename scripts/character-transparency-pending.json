@@ -5,18 +5,6 @@
     "internal/web/character_assets_test.go (structural: background primitives, native viewBox)"
   ],
   "pending": [
-    "research-archivist/portrait",
-    "research-archivist/sprite",
-    "research-archivist/static",
-    "project-coordinator/portrait",
-    "project-coordinator/sprite",
-    "project-coordinator/static",
-    "product-builder/portrait",
-    "product-builder/sprite",
-    "product-builder/static",
-    "team-caretaker/portrait",
-    "team-caretaker/sprite",
-    "team-caretaker/static",
     "insight-researcher/portrait",
     "insight-researcher/sprite",
     "insight-researcher/static",

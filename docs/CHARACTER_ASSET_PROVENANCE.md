@@ -262,25 +262,60 @@ reason: each is named for the role it depicts, in ordinary English. **Name
 review: N/A — descriptive role phrase, not a distinctive mark, and not used as a
 brand.** See the naming decision above for what was dropped and why.
 
+**Revision 2 — 2026-08-10, transparent map-ready artwork (all four residents).**
+Entry version 1 → 2 for each. Every portrait was a pure background removal: the
+clip frame, the 160×160 card, the r=54 halo, and the ground strip came out and
+no character geometry moved, because all four already sat inside the 6-unit safe
+perimeter once the backdrop was gone. The sprite and static variants each lost
+the r=24 disc, which had been doubling as a crop — so the per-character edits
+below are the parts the disc was hiding. Every idle keeps its existing selector,
+duration, easing, keyframes, and reduced-motion guard; no motion was added, and
+each `static.svg` is the same geometry at its idle's resting pose. All twelve
+variants pass both halves of the contract, and each animated sprite was verified
+across 16 phases of its own cycle by the motion check in
+`scripts/character-preview.mjs`. Inspected over checkerboard, light, dark,
+warm-card, and map surfaces at every size in the ladder, and on the real Agents
+gallery, list, and inspector in both themes at both widths. No host CSS changed:
+`.agent-avatar--character` already supplies the frame and surface tint.
+**Reviewer:** unreviewed — pending project-owner sign-off. **Decision:**
+provisional, unchanged from revision 1.
+
 ### research-archivist
 
-- **Catalog ID:** `research-archivist` · **Entry version:** 1
+- **Catalog ID:** `research-archivist` · **Entry version:** 2
 - **Brief:** wide-browed resident in a feather cape with a grounded stance, carrying a pocket ledger and reading lenses. Measured, precise, gently skeptical.
+- **Revision 2 human edits:** sprite/static body base raised from y=44 to the
+  shared y=43 ground line. Cape, brow band, lenses, and the blink lids are
+  untouched; the `sable-blink` idle is unchanged.
 
 ### project-coordinator
 
-- **Catalog ID:** `project-coordinator` · **Entry version:** 1
+- **Catalog ID:** `project-coordinator` · **Entry version:** 2
 - **Brief:** round-tailed resident with a forward stance and open expression, wearing a cross-body planner satchel. Upbeat, concise, socially aware.
+- **Revision 2 human edits:** the most refitting of the four. The disc had been
+  cutting the ears off at y=-1 and the tail reached x=45 before the flick even
+  started. Ears rebuilt as shorter lobes bottoming out at y=5; tail pulled in to
+  x=41 and its `transform-origin` moved to its base at 32px 38px so the 7deg
+  flick swings inside the perimeter; body base to y=43; head r 12 → 11 with the
+  eyes and mouth following it down. Round tail, satchel, and open expression all
+  preserved.
 
 ### product-builder
 
-- **Catalog ID:** `product-builder` · **Entry version:** 1
+- **Catalog ID:** `product-builder` · **Entry version:** 2
 - **Brief:** compact resident with broad hands and planted feet, wearing a modular tool belt. Practical, direct, quietly playful.
+- **Revision 2 human edits:** sprite/static body height 18 → 15 so its base sits
+  on the y=43 ground line. Tool belt, ears, teeth, and the `rivet-nod` idle are
+  untouched.
 
 ### team-caretaker
 
-- **Catalog ID:** `team-caretaker` · **Entry version:** 1
+- **Catalog ID:** `team-caretaker` · **Entry version:** 2
 - **Brief:** soft rectangular resident with relaxed shoulders, carrying a messenger pouch and a living sprout. Calm, reassuring, never vague.
+- **Revision 2 human edits:** the disc had been clipping the sprout's leaf tips,
+  so the sprout is lowered onto the head (stem 12→8, leaves bottoming at y=5)
+  and the body height 20 → 17 to reach the y=43 ground line. The living sprout,
+  shell plate, and pouch are preserved, and the `moss-sway` idle is unchanged.
 
 ### insight-researcher
 

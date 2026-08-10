@@ -1,8 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48" role="img" aria-label="Research Archivist">
   <!-- Reduced-motion variant of sprite.svg: eyes open, no blink (FR-120). -->
-  <circle cx="24" cy="24" r="24" fill="#dfe8d8"/>
   <g stroke="#0f1a0e" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round">
-    <path d="M9 44 q0-16 15-16 q15 0 15 16 z" fill="#f3f0e2"/>
+    <path d="M9 43 q0-15 15-15 q15 0 15 15 z" fill="#f3f0e2"/>
     <path d="M8 32 q3-11 16-11 q13 0 16 11 q-7 4 -16 4 q-9 0 -16 -4 z" fill="#4f744a"/>
     <path d="M11 17 q0-10 13-10 q13 0 13 10 l0 3 q0 8 -13 8 q-13 0 -13 -8 z" fill="#f3f0e2"/>
     <path d="M11 16 q13-6 26 0" fill="none" stroke-width="3"/>

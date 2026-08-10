@@ -5,9 +5,9 @@
     @keyframes rivet-nod { 0%,66%,100% { transform: translateY(0); } 78% { transform: translateY(1.6px); } }
     @media (prefers-reduced-motion: reduce) { .rivet-head { animation: none; } }
   </style>
-  <circle cx="24" cy="24" r="24" fill="#e2ead4"/>
   <g stroke="#12200a" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round">
-    <rect x="12" y="28" width="24" height="18" rx="6" fill="#f5f2e0"/>
+    <!-- body; its base is the y=43 ground line -->
+    <rect x="12" y="28" width="24" height="15" rx="6" fill="#f5f2e0"/>
     <rect x="10" y="33" width="28" height="6" rx="2" fill="#658c36"/>
     <g class="rivet-head">
       <rect x="13" y="10" width="22" height="19" rx="6" fill="#f5f2e0"/>

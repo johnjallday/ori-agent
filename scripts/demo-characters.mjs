@@ -115,6 +115,13 @@ try {
       await page.waitForTimeout(700);
       await shot(page, `agents-gallery-${theme}-${view.name}`);
 
+      // The roster sorts A-Z, so the later characters are below the fold.
+      await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+      await page.waitForTimeout(600);
+      await shot(page, `agents-gallery-scrolled-${theme}-${view.name}`);
+      await page.evaluate(() => window.scrollTo(0, 0));
+      await page.waitForTimeout(300);
+
       // The list view renders the same identities at a denser size.
       const listToggle = page.locator('[data-view="list"], #agentsViewList').first();
       if (await listToggle.count()) {
