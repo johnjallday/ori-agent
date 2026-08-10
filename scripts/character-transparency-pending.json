@@ -5,9 +5,6 @@
     "internal/web/character_assets_test.go (structural: background primitives, native viewBox)"
   ],
   "pending": [
-    "ori-guide/portrait",
-    "ori-guide/sprite",
-    "ori-guide/static",
     "research-archivist/portrait",
     "research-archivist/sprite",
     "research-archivist/static",

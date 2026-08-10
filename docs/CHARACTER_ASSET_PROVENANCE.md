@@ -71,10 +71,17 @@ Both halves of this contract are machine-checked; neither is sufficient alone:
    file, stroke width included, so an outline that reaches the edge fails even
    though its path coordinate does not.
 4. **Baseline and scale.** A character's ground contact sits at **y=146** in a
-   portrait and **y=44** in a sprite, so a row of characters shares a floor
+   portrait and **y=43** in a sprite, so a row of characters shares a floor
    instead of bobbing. Keep visual scale and stroke weight consistent with the
    rest of the cast; the size ladder in `scripts/character-preview.mjs` is how
    that gets judged.
+
+   Leave at least **1.5 units of clearance** between the painted edge (stroke
+   included) and the safe perimeter rather than tuning right up to it. Browsers
+   antialias more generously than the `sharp`/librsvg rasterizer the contract
+   test uses, so art that measures exactly clean in the test can still fringe
+   into the perimeter on screen. Ori's crown tuft was caught doing precisely
+   that mid-tilt, at alpha 1, with 0.8 units of headroom.
 5. **Painted area.** No asset may paint more than **62%** of its artboard. A
    card paints 100% and a disc 79%; converted character art measures 20–35%.
    The ceiling sits in the empty middle, so it flags backgrounds without
@@ -211,10 +218,44 @@ Common to every V1 record below, stated once rather than repeated:
 ### ori-guide
 
 - **Catalog ID:** `ori-guide` — **reserved**, may never be assigned to a working agent
-- **Entry version:** 1
+- **Entry version:** 2
 - **Brief:** a duck navigator with a broad bill, crown tuft, and open navigator stance, carrying a folded map and a location-pin satchel. Warm, concise, gently curious. Deliberately *not* modelled on any existing mascot, franchise creature, or brand character.
 - **Name review:** OUTSTANDING — "Ori" is also this application's own product name; the search must cover both the product and character use.
 - **Assets:** see `scripts/character-asset-hashes.sh` output committed below.
+
+**Revision 2 — 2026-08-10, transparent map-ready artwork.** Entry version 1 → 2.
+All three variants converted under the map-ready authoring contract above.
+
+- **Human edits, `portrait.svg`:** removed the `#ori-frame` clip path, the
+  160×160 background card, the r=54 halo, and the 160×16 ground strip, then
+  unwrapped the clipped group. No character geometry changed: the duck, folded
+  map, satchel, outline, scale, and the y=146 foot baseline are byte-identical to
+  revision 1, and the art already sat inside the 6-unit safe perimeter once the
+  background was gone.
+- **Human edits, `sprite.svg`:** removed the r=24 disc. The disc had been
+  cropping two edges, so the duck was refitted to the 2-unit safe perimeter —
+  body `cx22 cy34 rx12 ry9` (ground line y=43), head `cx23 cy20 r10`, bill
+  shortened to `M31 17 h8 …` (was reaching x=47.2), crown tuft lowered to peaks
+  at y=5 (was clipping at y=-1 in revision 1, i.e. the shipped tuft tips were
+  already being cut off). Eye and highlight moved with the head. Tilt pivot
+  `transform-origin` moved 24px 30px → 23px 30px to stay at the new neck.
+- **Preserved motion:** the `ori-tilt` idle is unchanged — same selector, same
+  3.2s duration, same ease-in-out, same 0/-6/+3deg keyframes, same internal
+  `prefers-reduced-motion` guard. No motion was added.
+- **Static parity:** `static.svg` is the same geometry at the idle's resting
+  pose with no animation, verified motionless by the Go contract test.
+- **Validation:** passes both halves of the contract (raster and structural).
+  Verified across 16 phases of its own tilt cycle by the motion check in
+  `scripts/character-preview.mjs`, which caught the crown tuft fringing into the
+  perimeter at 2.20s in a first attempt and is clean after the refit. Inspected
+  over checkerboard, light, dark, warm-card, and map surfaces at 32/40/48/54/72
+  and 160px.
+- **Host framing:** none added. Every Ori consumer — the guide launcher, the
+  panel header, and the Home map entry point — already draws its own paper pill,
+  so removing the baked backdrop needed no CSS change.
+- **Reviewer:** unreviewed — pending project-owner sign-off. **Decision:**
+  provisional, unchanged from revision 1; the FR-109 name search still blocks
+  final approval.
 
 The eight working characters below share one name review, because they share one
 reason: each is named for the role it depicts, in ordinary English. **Name

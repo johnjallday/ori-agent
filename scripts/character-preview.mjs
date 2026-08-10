@@ -156,6 +156,58 @@ async function report() {
   }
 }
 
+/* Rasterizing a file only ever shows the idle's resting pose, so the safe
+   perimeter could still be breached mid-animation by a bill or an ear that
+   swings out. This walks each sprite through its own cycle in a real browser,
+   freezing the animation at sampled phases and checking the perimeter at each
+   one. It is the only check that sees the extremes. */
+const MOTION_PHASES = 16;
+
+async function motionReport(browser) {
+  const page = await browser.newPage({ viewport: { width: 48, height: 48 } });
+  const breaches = [];
+  let checked = 0;
+
+  try {
+    for (const id of ids) {
+      const src = inline(assetPath(id, 'sprite'));
+      if (!src.includes('@keyframes')) continue;
+
+      // Longest declared duration is the cycle worth sampling.
+      const durations = [...src.matchAll(/animation:\s*[\w-]+\s+([\d.]+)s/g)].map(m =>
+        parseFloat(m[1])
+      );
+      const cycle = durations.length > 0 ? Math.max(...durations) : 1;
+      checked++;
+
+      for (let i = 0; i < MOTION_PHASES; i++) {
+        const phase = (cycle * i) / MOTION_PHASES;
+        await page.setContent(
+          `<!doctype html><meta charset="utf-8"><style>
+             html,body{margin:0;padding:0;width:48px;height:48px;background:transparent}
+             *{animation-delay:-${phase}s !important;animation-play-state:paused !important}
+           </style><body>${src}</body>`
+        );
+        const shot = await page.screenshot({ omitBackground: true });
+        const { findings } = await inspectAsset(shot, 'sprite');
+        const perimeter = findings.filter(f => f.code === 'perimeter');
+        if (perimeter.length > 0) {
+          breaches.push(`  ${id}/sprite.svg at ${phase.toFixed(2)}s — ${perimeter[0].detail}`);
+          break; // one report per character is enough to send someone to the file
+        }
+      }
+    }
+  } finally {
+    await page.close();
+  }
+
+  console.log(
+    `\nmotion: ${checked - breaches.length}/${checked} animated sprites stay inside the safe ` +
+      `perimeter across ${MOTION_PHASES} phases of their own cycle`
+  );
+  for (const line of breaches) console.log(line);
+}
+
 const browser = await chromium.launch();
 try {
   const page = await browser.newPage({ viewport: { width: 760, height: 900 } });
@@ -171,6 +223,7 @@ try {
   console.log(
     `rendered ${ids.length} character(s) over ${SURFACES.length} surface(s) -> ${outDir}`
   );
+  await motionReport(browser);
 } finally {
   await browser.close();
 }
