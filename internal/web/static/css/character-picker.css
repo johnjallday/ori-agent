@@ -7,10 +7,19 @@
  * and a visible border, never by colour alone (FR-100).
  */
 
+/* Above this app's overlay scale, not Bootstrap's.
+   The picker is opened *from* the Appearance editor, which on the agent detail
+   page lives inside `#profileEditModal`. That modal is not at Bootstrap's
+   default 1055 — the app overrides it to 10100, and the scale runs up to 10700
+   (workspace-hub). At the picker's original 1050/1051 it opened *behind* the
+   very dialog that launched it, so its cards were visible but every click was
+   intercepted by the modal on top.
+   10800/10801 clears the whole scale. Measure before changing it: the numbers
+   here are the app's, not the framework's. */
 .char-picker__backdrop {
   position: fixed;
   inset: 0;
-  z-index: 1050;
+  z-index: 10800;
   background: rgb(0 0 0 / 45%);
 }
 
@@ -23,7 +32,7 @@
   --picker-muted: var(--card-muted, var(--cozy-ink-dim, var(--text-secondary, #6b7280)));
 
   position: fixed;
-  z-index: 1051;
+  z-index: 10801;
   top: 50%;
   left: 50%;
   display: flex;
@@ -273,6 +282,41 @@
   justify-content: flex-end;
   gap: 8px;
   margin-top: 14px;
+}
+
+/* The picker styles its own actions. They previously used `.btn-ghost` and
+   `.btn-primary`, defined only in agents-roster.css — so the moment the picker
+   became reachable from the detail page, the create page, and the session
+   modal, its Cancel/Skip/Choose buttons rendered as browser defaults. */
+.char-picker__btn {
+  padding: 8px 16px;
+  border: 1px solid var(--border-color, #d1d5db);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-primary, #111827);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.char-picker__btn:hover:not(:disabled) {
+  border-color: var(--primary-color, #4f46e5);
+}
+
+.char-picker__btn--primary {
+  border-color: var(--primary-color, #4f46e5);
+  background: var(--primary-color, #4f46e5);
+  color: #fff;
+}
+
+.char-picker__btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.char-picker__btn:focus-visible {
+  outline: 3px solid var(--primary-color, #4f46e5);
+  outline-offset: 2px;
 }
 
 /* The Inspector's own Appearance markup used to live here. It is now the shared

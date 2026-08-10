@@ -220,8 +220,24 @@
 
   /* ---- open / close -------------------------------------------------------------- */
 
-  function buildShell() {
+  // The picker creates its own mount point when the page has not provided one.
+  //
+  // It used to require every host page to remember a `<div id="charPickerHost">`
+  // and to load this script itself, which only the Agents roster did. On every
+  // other host the button rendered, clicked, and did nothing — a silent no-op,
+  // the worst kind of failure. A shared component owns its own mount.
+  function ensureHost() {
     var host = document.getElementById('charPickerHost');
+    if (host) return host;
+    if (!document.body) return null;
+    host = document.createElement('div');
+    host.id = 'charPickerHost';
+    document.body.appendChild(host);
+    return host;
+  }
+
+  function buildShell() {
+    var host = ensureHost();
     if (!host) return null;
 
     host.innerHTML =
@@ -254,9 +270,14 @@
       // is a picture; offering a toggle that implied otherwise is the promise
       // this feature removed (FR-19/FR-23).
       '<div class="char-picker__actions">' +
-      '<button type="button" class="btn-ghost" id="charPickerCancel">Cancel</button>' +
-      '<button type="button" class="btn-ghost" id="charPickerSkip">Skip for now</button>' +
-      '<button type="button" class="btn-primary" id="charPickerConfirm">Choose character</button>' +
+      // These carry the picker's own classes rather than the roster's
+      // `.btn-ghost` / `.btn-primary`, which are defined only in
+      // agents-roster.css. Borrowing them left the picker's actions completely
+      // unstyled on every other host that opens it.
+      '<button type="button" class="char-picker__btn" id="charPickerCancel">Cancel</button>' +
+      '<button type="button" class="char-picker__btn" id="charPickerSkip">Skip for now</button>' +
+      '<button type="button" class="char-picker__btn char-picker__btn--primary" ' +
+      'id="charPickerConfirm">Choose character</button>' +
       '</div>' +
       '</div>' +
       '<div class="char-picker__backdrop" id="charPickerBackdrop"></div>';

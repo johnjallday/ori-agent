@@ -16,6 +16,12 @@
   margin: 0;
   padding: 0;
   border: 0;
+  /* The section fits whatever column its host gives it and never spills into a
+     neighbour. A fieldset's default min-width is its content's intrinsic size,
+     which is how this overflowed a 240px panel and had its buttons painted
+     over by the next grid column. */
+  min-width: 0;
+  max-width: 100%;
 
   /* One token for every piece of secondary copy in here, resolved in host
      order. This matters more than it looks: the global `--text-secondary` is
@@ -67,6 +73,10 @@
 .appearance-editor__sources {
   display: grid;
   gap: 10px;
+  /* A grid item's default `min-width: auto` is its content's intrinsic width,
+     so one long button label would widen the whole section past whatever
+     column the host gave it. Zero lets the cards actually fit. */
+  min-width: 0;
 }
 
 /* Deliberately unpainted. The card's own `--bg-primary` is lighter than the
@@ -146,6 +156,42 @@
   align-items: center;
   gap: 8px;
   margin: 8px 0 0 24px;
+  /* Without this a flex item wider than the row refuses to shrink, pushes the
+     card past its grid column, and — because the next column is later in the
+     DOM — gets painted over and becomes unclickable. That is exactly how
+     "Change character" ended up unreachable in the profile modal. */
+  min-width: 0;
+}
+
+/* The editor styles its own buttons rather than borrowing a host's class.
+   It previously emitted `.btn-ghost`, which is defined only in
+   agents-roster.css — so the same component rendered correctly in the Agents
+   Inspector and completely unstyled on the detail page, the create page, and
+   the session modal. A shared component cannot depend on a stylesheet its host
+   may not load. */
+.appearance-btn {
+  max-width: 100%;
+  padding: 6px 12px;
+  border: 1px solid var(--border-color, #d1d5db);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-primary, #111827);
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 1.3;
+  /* Long labels wrap instead of forcing the card wider. */
+  white-space: normal;
+  text-align: left;
+  cursor: pointer;
+}
+
+.appearance-btn:hover:not(:disabled) {
+  border-color: var(--primary-color, #4f46e5);
+}
+
+.appearance-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* Focus has to be visible on every control in here, including the radios and

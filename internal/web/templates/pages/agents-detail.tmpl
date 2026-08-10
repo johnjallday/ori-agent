@@ -50,11 +50,20 @@
       box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.2);
     }
 
+    /* The left column holds the shared Appearance editor, which is a good deal
+       richer than the 96px avatar preview it replaced: three source cards, each
+       with its own actions. 240px was too narrow for it, and `min-width: 0`
+       below is what stops any future overflow from being painted over by the
+       second column instead of wrapping. */
     .agent-profile-modal-grid {
       display: grid;
-      grid-template-columns: minmax(180px, 240px) 1fr;
+      grid-template-columns: minmax(260px, 320px) 1fr;
       gap: 20px;
       align-items: start;
+    }
+
+    .agent-profile-modal-grid > * {
+      min-width: 0;
     }
 
     .agent-profile-avatar-panel {

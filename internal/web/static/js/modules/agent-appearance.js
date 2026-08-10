@@ -233,7 +233,7 @@
         '</label>' +
         // Reset is not a removal of anything the user can lose: it hands the
         // colour back to the deterministic algorithm (FR-31).
-        '<button type="button" class="btn-ghost" id="' +
+        '<button type="button" class="appearance-btn" id="' +
         esc(id('color-reset')) +
         '"' +
         (color ? '' : ' disabled') +
@@ -251,7 +251,7 @@
         (entry
           ? '<p class="appearance-source__selection">Character art: ' + esc(entry.name) + '</p>'
           : '') +
-        '<button type="button" class="btn-ghost" id="' +
+        '<button type="button" class="appearance-btn" id="' +
         esc(id('character-choose')) +
         '">' +
         (chosen ? 'Change character' : 'Choose character') +
@@ -259,7 +259,7 @@
         // Explicitly destructive wording, reserved for the one action that
         // actually discards data (FR-30/design 6.3).
         (chosen
-          ? '<button type="button" class="btn-ghost" id="' +
+          ? '<button type="button" class="appearance-btn" id="' +
             esc(id('character-remove')) +
             '">Remove character selection</button>'
           : '')
@@ -283,7 +283,7 @@
         (uploaded ? ' Uploading a new image replaces the current one.' : '') +
         '</p>' +
         (uploaded
-          ? '<button type="button" class="btn-ghost" id="' +
+          ? '<button type="button" class="appearance-btn" id="' +
             esc(id('upload-remove')) +
             '">Remove uploaded image</button>'
           : '')
@@ -657,6 +657,22 @@
       },
       destroy: releasePendingURL
     };
+
+    // The catalog does not fetch on its own — each surface asks for it, so a
+    // page showing no characters pays nothing. The editor asks on the editor's
+    // behalf rather than relying on its host to remember: forgetting left the
+    // picker's grid empty and the preview on the generated portrait even for an
+    // agent that had a character saved (FR-103).
+    if (window.CharacterCatalog) {
+      if (typeof window.CharacterCatalog.onChange === 'function') {
+        window.CharacterCatalog.onChange(function () {
+          // Only the preview needs repainting; re-rendering the whole editor
+          // would drop focus if the catalog lands mid-interaction.
+          renderPreview();
+        });
+      }
+      if (typeof window.CharacterCatalog.load === 'function') window.CharacterCatalog.load();
+    }
 
     render();
     return api;
