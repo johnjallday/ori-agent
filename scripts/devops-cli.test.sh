@@ -71,6 +71,7 @@ case "$1 $2" in
     ;;
   "issue view")
     if [ "${4:-}" = "--comments" ]; then
+      printf 'Issue #%s detail\n' "$3"
       printf 'Issue #%s decision comment\n' "$3"
     else
       printf 'Issue #%s detail\n' "$3"
@@ -140,7 +141,6 @@ fi
 "$script" view 334 > "$fixture_root/view-output"
 grep -Fq "Issue #334 detail" "$fixture_root/view-output"
 grep -Fq "Issue #334 decision comment" "$fixture_root/view-output"
-assert_call $'CALL\tissue\tview\t334'
 assert_call $'CALL\tissue\tview\t334\t--comments'
 
 # Invalid invocations fail before contacting GitHub.
@@ -167,7 +167,6 @@ assert_call $'CALL\tissue\tlist\t--state\topen\t--limit\t1000\t--label\tneeds-de
 assert_call $'CALL\tissue\tlist\t--state\topen\t--limit\t1000\t--label\tbacklog'
 assert_call $'CALL\tissue\tlist\t--state\topen\t--limit\t1000\t--label\tfeature-proposal'
 assert_call $'CALL\tissue\tview\t334\t--comments'
-assert_call $'CALL\tissue\tview\t334'
 
 : > "$gh_calls"
 printf '2\nr\nq\n' | "$script" > /dev/null

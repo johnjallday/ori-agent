@@ -124,10 +124,12 @@ to quit. In a pipe or redirected shell, the line REPL remains available: use
 Issue. The default and `all` view include every author; closed Issues stay out
 of lists.
 
-Each view is one direct `gh issue list` call. There is no ProjectV2 query,
-Herdr helper, cache, local fallback, custom formatter, or Ori-owned JSON
-contract. Empty label views say so explicitly. GitHub failures retain `gh`'s
-non-zero exit status instead of looking like an empty backlog.
+One-shot and line-REPL views are direct `gh issue list` calls. The terminal
+picker fetches the complete open-Issue index once, then filters it locally until
+`r` refreshes it. There is no ProjectV2 query, Herdr helper, persisted cache,
+local fallback, custom formatter, or Ori-owned JSON contract. Empty label views
+say so explicitly. GitHub failures retain `gh`'s non-zero exit status instead
+of looking like an empty backlog.
 
 The product backlog is GitHub Issues. There is no backlog file to maintain,
 sync, or prune, and no backlog commit ever lands on `dev`.

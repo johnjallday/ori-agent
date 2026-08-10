@@ -468,9 +468,11 @@ and `q` to quit. In a pipe or redirected shell, the line REPL accepts `1/a`,
 open Issues. Filters are literal labels; no Project board or rank participates.
 
 The command runs `gh issue list` or `gh issue view` directly from its checkout.
-It does not source `wt`, invoke the Herdr helper, cache results, or define a JSON
-contract. Agents that need structured data should use `gh issue list --json`
-directly. Capture likewise remains the GitHub CLI's job:
+The terminal picker fetches the complete open-Issue index once and filters it
+locally until `r` refreshes it; it does not persist a cache, source `wt`, invoke
+the Herdr helper, or define a JSON contract. Agents that need structured data
+should use `gh issue list --json` directly. Capture likewise remains the GitHub
+CLI's job:
 
 ~~~bash
 gh issue create --title "<title>" --body "<optional context>"

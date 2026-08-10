@@ -94,8 +94,6 @@ view_issue() {
     printf '%s\n' "view requires one positive Issue number" >&2
     return 2
   fi
-  gh issue view "$1" || return $?
-  printf '\n%s\n\n' "Comments"
   gh issue view "$1" --comments
 }
 
@@ -180,26 +178,30 @@ truncate() {
 }
 
 declare -a picker_filters=(all decisions backlog proposals)
+declare -a all_issue_numbers=()
+declare -a all_issue_titles=()
+declare -a all_issue_labels=()
+declare -a all_issue_updates=()
 declare -a issue_numbers=()
 declare -a issue_titles=()
 declare -a issue_labels=()
 declare -a issue_updates=()
 picker_error=""
 
-load_picker_issues() {
-  local filter="$1" label output line number title labels updated
+load_picker_index() {
+  local output number title labels updated
   local -a args
 
+  all_issue_numbers=()
+  all_issue_titles=()
+  all_issue_labels=()
+  all_issue_updates=()
   issue_numbers=()
   issue_titles=()
   issue_labels=()
   issue_updates=()
   picker_error=""
-  label="$(filter_label "$filter")" || return 2
   args=(issue list --state open --limit "$issue_limit")
-  if [[ -n "$label" ]]; then
-    args+=(--label "$label")
-  fi
   args+=(--json number,title,labels,updatedAt --template '{{range .}}{{printf "%v\t%s\t" .number .title}}{{range $i,$label := .labels}}{{if $i}}, {{end}}{{.name}}{{end}}{{printf "\t%s\n" .updatedAt}}{{end}}')
 
   if ! output="$(gh "${args[@]}")"; then
@@ -209,11 +211,29 @@ load_picker_issues() {
 
   while IFS=$'\t' read -r number title labels updated; do
     [[ -z "$number" ]] && continue
-    issue_numbers+=("$number")
-    issue_titles+=("$title")
-    issue_labels+=("$labels")
-    issue_updates+=("$updated")
+    all_issue_numbers+=("$number")
+    all_issue_titles+=("$title")
+    all_issue_labels+=("$labels")
+    all_issue_updates+=("$updated")
   done <<< "$output"
+}
+
+apply_picker_filter() {
+  local filter="$1" label index
+
+  issue_numbers=()
+  issue_titles=()
+  issue_labels=()
+  issue_updates=()
+  label="$(filter_label "$filter")" || return 2
+  for index in "${!all_issue_numbers[@]}"; do
+    if [[ -z "$label" || ",${all_issue_labels[$index]}," == *",$label,"* ]]; then
+      issue_numbers+=("${all_issue_numbers[$index]}")
+      issue_titles+=("${all_issue_titles[$index]}")
+      issue_labels+=("${all_issue_labels[$index]}")
+      issue_updates+=("${all_issue_updates[$index]}")
+    fi
+  done
 }
 
 render_picker() {
@@ -312,7 +332,8 @@ run_picker() {
   local filter_index=0 selected_index=0 count key reload
   enter_picker_screen
   trap restore_terminal EXIT INT TERM
-  load_picker_issues "${picker_filters[$filter_index]}" || true
+  load_picker_index || true
+  apply_picker_filter "${picker_filters[$filter_index]}"
 
   while true; do
     count="${#issue_numbers[@]}"
@@ -349,7 +370,10 @@ run_picker() {
         ;;
     esac
     if [[ "$reload" -eq 1 ]]; then
-      load_picker_issues "${picker_filters[$filter_index]}" || true
+      if [[ "$key" == r ]]; then
+        load_picker_index || true
+      fi
+      apply_picker_filter "${picker_filters[$filter_index]}"
     fi
   done
 }
