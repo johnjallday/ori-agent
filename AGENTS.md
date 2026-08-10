@@ -40,7 +40,7 @@ For the PRD and task-list workflows below, create planning artifacts in this dev
 ## Feature Naming: Issue Number First
 
 Ideas are captured as GitHub Issues. `./scripts/devops.sh` is the read-only human
-interface: with no arguments it lists every open Issue and starts a small REPL;
+interface: with no arguments in a terminal it opens a colorful Issue picker;
 one-shot commands expose the same views to scripts and agents.
 
 | Command | Reads |

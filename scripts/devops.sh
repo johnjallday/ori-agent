@@ -29,7 +29,8 @@ Usage:
   ./scripts/devops.sh proposals
   ./scripts/devops.sh view <issue-number>
 
-With no arguments, the script lists every open Issue and starts the REPL.
+With no arguments in a terminal, the script opens a keyboard-driven Issue picker.
+In a pipe or redirected shell, it lists every open Issue and starts the line REPL.
 One-shot commands print their result and exit.
 EOF
 }
@@ -134,6 +135,225 @@ run_one_shot() {
   esac
 }
 
+filter_label() {
+  case "$1" in
+    all) printf '%s' "" ;;
+    decisions) printf '%s' "needs-decision" ;;
+    backlog) printf '%s' "backlog" ;;
+    proposals) printf '%s' "feature-proposal" ;;
+    *) return 2 ;;
+  esac
+}
+
+filter_title() {
+  case "$1" in
+    all) printf '%s' "All open issues" ;;
+    decisions) printf '%s' "Needs my decision" ;;
+    backlog) printf '%s' "Backlog" ;;
+    proposals) printf '%s' "Feature proposals" ;;
+    *) return 2 ;;
+  esac
+}
+
+color_enabled=0
+if [[ -t 1 && "${TERM:-dumb}" != "dumb" && -z "${NO_COLOR:-}" ]]; then
+  color_enabled=1
+fi
+
+style() {
+  local code="$1"
+  shift
+  if [[ "$color_enabled" -eq 1 ]]; then
+    printf '\033[%sm%s\033[0m' "$code" "$*"
+  else
+    printf '%s' "$*"
+  fi
+}
+
+truncate() {
+  local value="$1" limit="$2"
+  if [[ "${#value}" -le "$limit" ]]; then
+    printf '%s' "$value"
+  else
+    printf '%s...' "${value:0:$((limit - 3))}"
+  fi
+}
+
+declare -a picker_filters=(all decisions backlog proposals)
+declare -a issue_numbers=()
+declare -a issue_titles=()
+declare -a issue_labels=()
+declare -a issue_updates=()
+picker_error=""
+
+load_picker_issues() {
+  local filter="$1" label output line number title labels updated
+  local -a args
+
+  issue_numbers=()
+  issue_titles=()
+  issue_labels=()
+  issue_updates=()
+  picker_error=""
+  label="$(filter_label "$filter")" || return 2
+  args=(issue list --state open --limit "$issue_limit")
+  if [[ -n "$label" ]]; then
+    args+=(--label "$label")
+  fi
+  args+=(--json number,title,labels,updatedAt --template '{{range .}}{{printf "%v\t%s\t" .number .title}}{{range $i,$label := .labels}}{{if $i}}, {{end}}{{.name}}{{end}}{{printf "\t%s\n" .updatedAt}}{{end}}')
+
+  if ! output="$(gh "${args[@]}")"; then
+    picker_error="GitHub query failed. Press r to retry or q to quit."
+    return 1
+  fi
+
+  while IFS=$'\t' read -r number title labels updated; do
+    [[ -z "$number" ]] && continue
+    issue_numbers+=("$number")
+    issue_titles+=("$title")
+    issue_labels+=("$labels")
+    issue_updates+=("$updated")
+  done <<< "$output"
+}
+
+render_picker() {
+  local filter_index="$1" selected_index="$2" count="$3"
+  local current_filter="${picker_filters[$filter_index]}" index marker title labels updated
+
+  printf '\033[H\033[2J'
+  style '1;36' 'Ori DevOps'
+  printf '  '
+  style '2' 'open GitHub Issues'
+  printf '\n\n'
+  for index in "${!picker_filters[@]}"; do
+    if [[ "$index" -eq "$filter_index" ]]; then
+      style '1;30;46' " ${picker_filters[$index]} "
+    else
+      style '2' " ${picker_filters[$index]} "
+    fi
+    printf ' '
+  done
+  printf '\n\n'
+  style '1' "$(filter_title "$current_filter")"
+  printf '  '
+  style '2' "$count issue(s)"
+  printf '\n\n'
+
+  if [[ -n "$picker_error" ]]; then
+    style '1;31' "$picker_error"
+    printf '\n'
+  elif [[ "$count" -eq 0 ]]; then
+    style '2' 'No matching open issues.'
+    printf '\n'
+  else
+    for ((index = 0; index < count; index++)); do
+      marker=' '
+      title="#${issue_numbers[$index]} $(truncate "${issue_titles[$index]}" 68)"
+      labels="${issue_labels[$index]}"
+      updated="${issue_updates[$index]:0:10}"
+      if [[ "$index" -eq "$selected_index" ]]; then
+        marker='›'
+        style '1;30;47' "$marker $title"
+      else
+        printf '%s %s' "$marker" "$title"
+      fi
+      if [[ -n "$labels" ]]; then
+        printf '  '
+        style '35' "[$(truncate "$labels" 28)]"
+      fi
+      printf '  '
+      style '2' "$updated"
+      printf '\n'
+    done
+  fi
+
+  printf '\n'
+  style '2' '↑/↓ or j/k select  •  ←/→ or h/l change view  •  Enter open  •  r refresh  •  q quit'
+  printf '\n'
+}
+
+read_picker_key() {
+  local first rest
+  IFS= read -rsn1 first
+  if [[ "$first" == $'\e' ]]; then
+    IFS= read -rsn2 rest
+    printf '%s' "$first$rest"
+  else
+    printf '%s' "$first"
+  fi
+}
+
+restore_terminal() {
+  if [[ -n "${picker_stty:-}" ]]; then
+    stty "$picker_stty"
+  fi
+  printf '\033[?25h\033[?1049l'
+}
+
+enter_picker_screen() {
+  picker_stty="$(stty -g)"
+  stty -echo -icanon min 1 time 0
+  printf '\033[?1049h\033[?25l'
+}
+
+open_picker_issue() {
+  local issue_number="$1"
+  restore_terminal
+  trap - EXIT INT TERM
+  printf '\n'
+  view_issue "$issue_number"
+  printf '\nPress Enter to return to the Issue picker.'
+  IFS= read -r _
+  enter_picker_screen
+  trap restore_terminal EXIT INT TERM
+}
+
+run_picker() {
+  local filter_index=0 selected_index=0 count key reload
+  enter_picker_screen
+  trap restore_terminal EXIT INT TERM
+  load_picker_issues "${picker_filters[$filter_index]}" || true
+
+  while true; do
+    count="${#issue_numbers[@]}"
+    if [[ "$selected_index" -ge "$count" ]]; then
+      selected_index=$((count > 0 ? count - 1 : 0))
+    fi
+    render_picker "$filter_index" "$selected_index" "$count"
+    key="$(read_picker_key)" || break
+    reload=0
+
+    case "$key" in
+      q) break ;;
+      r) reload=1 ;;
+      $'\e[A'|k) ((selected_index > 0)) && selected_index=$((selected_index - 1)) ;;
+      $'\e[B'|j) ((selected_index + 1 < count)) && selected_index=$((selected_index + 1)) ;;
+      $'\e[D'|h)
+        filter_index=$(((filter_index + ${#picker_filters[@]} - 1) % ${#picker_filters[@]}))
+        selected_index=0
+        reload=1
+        ;;
+      $'\e[C'|l)
+        filter_index=$(((filter_index + 1) % ${#picker_filters[@]}))
+        selected_index=0
+        reload=1
+        ;;
+      1) filter_index=0; selected_index=0; reload=1 ;;
+      2) filter_index=1; selected_index=0; reload=1 ;;
+      3) filter_index=2; selected_index=0; reload=1 ;;
+      4) filter_index=3; selected_index=0; reload=1 ;;
+      ''|$'\r'|$'\n')
+        if [[ "$count" -gt 0 ]]; then
+          open_picker_issue "${issue_numbers[$selected_index]}"
+        fi
+        ;;
+    esac
+    if [[ "$reload" -eq 1 ]]; then
+      load_picker_issues "${picker_filters[$filter_index]}" || true
+    fi
+  done
+}
+
 if [[ $# -gt 0 ]]; then
   run_one_shot "$@"
   status=$?
@@ -144,6 +364,11 @@ if [[ $# -gt 0 ]]; then
     fi
     exit "$status"
   fi
+  exit 0
+fi
+
+if [[ -t 0 && -t 1 ]]; then
+  run_picker
   exit 0
 fi
 

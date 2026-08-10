@@ -117,9 +117,12 @@ One read-only command covers the human issue workflow:
 ./scripts/devops.sh view <number>   # one Issue in full
 ```
 
-Inside the REPL use `1/a`, `2/d`, `3/b`, or `4/f` to change views, `v <number>`
-to inspect an Issue, `r` to refresh the current filter, and `q` to quit. The
-default and `all` view include every author; closed Issues stay out of lists.
+In a terminal, the colorful picker uses `↑/↓` or `j/k` to select an Issue,
+`←/→` or `h/l` to change views, `Enter` to inspect it, `r` to refresh, and `q`
+to quit. In a pipe or redirected shell, the line REPL remains available: use
+`1/a`, `2/d`, `3/b`, or `4/f` to change views and `v <number>` to inspect an
+Issue. The default and `all` view include every author; closed Issues stay out
+of lists.
 
 Each view is one direct `gh issue list` call. There is no ProjectV2 query,
 Herdr helper, cache, local fallback, custom formatter, or Ori-owned JSON

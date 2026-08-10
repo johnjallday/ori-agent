@@ -461,10 +461,11 @@ arguments it lists every open Issue before prompting for another view.
 ./scripts/devops.sh view <number>   # one Issue in full
 ~~~
 
-The REPL accepts `1/a`, `2/d`, `3/b`, and `4/f` for those four list views,
-`v <number>` to inspect one Issue, `r` to refresh, and `q` to quit. Lists include
-every author and only open Issues. Filters are literal labels; no Project board
-or rank participates.
+In a terminal, the colorful picker accepts `↑/↓` or `j/k` to select an Issue,
+`←/→` or `h/l` for those four list views, `Enter` to inspect it, `r` to refresh,
+and `q` to quit. In a pipe or redirected shell, the line REPL accepts `1/a`,
+`2/d`, `3/b`, and `4/f`, plus `v <number>`. Lists include every author and only
+open Issues. Filters are literal labels; no Project board or rank participates.
 
 The command runs `gh issue list` or `gh issue view` directly from its checkout.
 It does not source `wt`, invoke the Herdr helper, cache results, or define a JSON

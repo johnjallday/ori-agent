@@ -95,8 +95,9 @@ assert_call() {
   fi
 }
 
-# With no arguments, the command lists every open Issue before showing the
-# prompt. EOF or q exits cleanly, so non-interactive callers cannot hang.
+# With no arguments in a non-TTY, the command lists every open Issue before
+# showing the line prompt. EOF or q exits cleanly, so automated callers cannot
+# hang; a TTY instead gets the keyboard-driven picker.
 : > "$gh_calls"
 printf 'q\n' | "$script" > "$fixture_root/default-output"
 grep -Fq "Open issues" "$fixture_root/default-output"
