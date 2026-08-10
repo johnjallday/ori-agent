@@ -14,6 +14,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/chathttp"
 	"github.com/johnjallday/ori-agent/internal/dailybrief"
 	"github.com/johnjallday/ori-agent/internal/gateway"
+	"github.com/johnjallday/ori-agent/internal/githubhttp"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/orchestration"
 	"github.com/johnjallday/ori-agent/internal/orchestration/templates"
@@ -63,6 +64,16 @@ func (b *ServerBuilder) buildWorkspaceToolFactory() workspace.WorkspaceToolFacto
 		}
 		if b.mailDrafter != nil {
 			provider.SetMailDrafter(b.mailDrafter)
+		}
+		// Only workspaces with a bound repository get the proposal tool.
+		// Exposing it without a binding would let an agent propose changes
+		// the broker would then refuse, which reads to a model as a broken
+		// tool rather than as a workspace that is not set up yet.
+		if b.githubHandler != nil && b.githubHandler.Broker() != nil {
+			resolver := githubhttp.NewRepoResolver(b.githubWorkspaceStore)
+			if _, bound := resolver.BoundRepo(workspaceID); bound {
+				provider.SetGitHubProposer(newGitHubProposer(b.githubHandler.Broker(), resolver))
+			}
 		}
 		return provider.Tools()
 	}

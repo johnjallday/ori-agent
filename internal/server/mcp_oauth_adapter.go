@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"errors"
+	"fmt"
 
 	"github.com/johnjallday/ori-agent/internal/mcp"
 	"github.com/johnjallday/ori-agent/internal/userprofile"
@@ -30,8 +32,28 @@ func newVaultMCPCredentialStore(store *vault.Store) *vaultMCPCredentialStore {
 
 func (a *vaultMCPCredentialStore) LoadCredential(ctx context.Context, authRef string) (mcp.RemoteCredential, bool, error) {
 	cred, ok, err := a.store.RevealMCPOAuthCredential(ctx, a.vaultID, authRef)
-	if err != nil || !ok {
-		return mcp.RemoteCredential{}, ok, err
+	if err != nil {
+		// No vault has been created yet (or the selection is ambiguous) is
+		// not a failure to report -- it is simply the state of having no
+		// stored credential, since a credential can only live in a vault.
+		// Translating it here keeps every caller from having to special-case
+		// a vault error: a remote server with no credential reports
+		// "needs connecting" rather than "something went wrong", which is
+		// both truthful and actionable on a fresh install.
+		if errors.Is(err, vault.ErrVaultRequired) {
+			return mcp.RemoteCredential{}, false, nil
+		}
+		// A locked vault is the opposite case: the credential is there,
+		// it just cannot be read until the user unlocks it. Map it onto the
+		// storage-agnostic sentinel so callers can tell "unlock this" apart
+		// from "connect something" without importing the vault package.
+		if errors.Is(err, vault.ErrVaultLocked) {
+			return mcp.RemoteCredential{}, false, fmt.Errorf("%w: %w", mcp.ErrCredentialStoreLocked, err)
+		}
+		return mcp.RemoteCredential{}, false, err
+	}
+	if !ok {
+		return mcp.RemoteCredential{}, false, nil
 	}
 	return mcp.RemoteCredential{
 		AuthRef:       cred.AuthRef,

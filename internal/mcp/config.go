@@ -234,11 +234,91 @@ func (cm *ConfigManager) InitializeDefaultServers() error {
 		config.Servers = append(config.Servers, server)
 		added = true
 	}
-	if !added {
+
+	repaired := repairRemoteAuthDefaults(config.Servers)
+
+	if !added && !repaired {
 		return nil
 	}
 
 	return cm.SaveGlobalConfig(config)
+}
+
+// repairRemoteAuthDefaults fixes an already-stored default server whose auth
+// wiring predates the field it needs, and reports whether anything changed.
+//
+// Adding a default server only ever *adds*: an entry already on disk is left
+// alone, which is right for anything a user can edit. But AuthRef and AuthMode
+// are not preferences -- they are how the server finds its credential at all,
+// and a server stored before those fields existed can never resolve one. The
+// GitHub entry shipped that way: without a pinned AuthRef, every workspace
+// copy derives a key from its own unique name and finds nothing, so the
+// connection reads healthy in Settings while every workspace reports
+// "connect this server with an access token first".
+//
+// Only the two auth fields are touched, and only when empty. A URL, an enabled
+// flag, or anything else the user set is theirs.
+func repairRemoteAuthDefaults(servers []ServerConfig) bool {
+	repaired := false
+	for i := range servers {
+		if !strings.EqualFold(strings.TrimSpace(servers[i].Name), GitHubServerName) {
+			continue
+		}
+		canonical := GitHubServerConfig()
+		if strings.TrimSpace(servers[i].AuthRef) == "" {
+			servers[i].AuthRef = canonical.AuthRef
+			repaired = true
+		}
+		if strings.TrimSpace(servers[i].AuthMode) == "" {
+			servers[i].AuthMode = canonical.AuthMode
+			repaired = true
+		}
+	}
+	return repaired
+}
+
+// GitHub's official hosted MCP server. Kept here rather than in the
+// githubhttp package that owns the connection, because defaultMCPServers must
+// name it and internal/mcp cannot import a package that imports it.
+const (
+	GitHubServerName = "github"
+	// GitHubServerURL is the hosted Streamable HTTP endpoint. Reached with
+	// a static bearer token, so there is no local binary or Docker
+	// dependency to install.
+	GitHubServerURL = "https://api.githubcopilot.com/mcp/"
+	// GitHubAuthRef pins where the GitHub token lives, independently of the
+	// server's name.
+	//
+	// This is load-bearing, not tidiness. Binding a server to a workspace
+	// materializes a per-workspace copy named
+	// "ws:<workspace>:mcp:github:<binding>", and NormalizedAuthRef derives a
+	// reference from the *name* when AuthRef is empty -- so every workspace
+	// copy would look for a credential under its own unique key and find
+	// none, while the token sat under "mcp:github". The connection would be
+	// green in Settings and every workspace would still report
+	// auth_required with zero tools.
+	//
+	// Pinning it is exactly the credential-sharing case AuthRef was
+	// introduced for, and it is correct here because this connection is
+	// deliberately global: one token, shared by every GitHub workspace.
+	GitHubAuthRef = "mcp:github"
+)
+
+// GitHubServerConfig returns the canonical registry entry for GitHub's hosted
+// MCP server.
+//
+// It ships disabled: the server cannot start until a token is stored under
+// its AuthRef, and starting it without one would surface a spurious
+// auth-required error to every user who never connected GitHub.
+func GitHubServerConfig() ServerConfig {
+	return ServerConfig{
+		Name:      GitHubServerName,
+		Transport: TransportStreamableHTTP,
+		URL:       GitHubServerURL,
+		AuthRef:   GitHubAuthRef,
+		AuthMode:  AuthModeStaticBearer,
+		Enabled:   false,
+	}
 }
 
 func defaultMCPServers(homeDir string) []ServerConfig {
@@ -263,6 +343,7 @@ func defaultMCPServers(homeDir string) []ServerConfig {
 			Transport: "stdio",
 			Enabled:   false,
 		},
+		GitHubServerConfig(),
 	}
 }
 

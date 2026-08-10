@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/johnjallday/ori-agent/internal/githubscope"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/toolapi"
 )
@@ -69,4 +70,31 @@ func filterAllowedMCPTools(tools []toolapi.Tool, allowlist map[string][]string, 
 		}
 	}
 	return filtered
+}
+
+// applyMCPRepoScope confines serverName's tools to a single repository when
+// its binding declares one.
+//
+// This is the second half of the binding's policy: filterAllowedMCPTools says
+// which tools exist, this says what they may be pointed at. Both are applied
+// wherever MCP tools are handed to a model, since a permitted tool aimed at
+// someone else's repository is just as much a breach as a forbidden one.
+func applyMCPRepoScope(tools []toolapi.Tool, scopes map[string]string, serverName string) []toolapi.Tool {
+	if len(scopes) == 0 {
+		return tools
+	}
+	repo, scoped := scopes[serverName]
+	if !scoped {
+		return tools
+	}
+	guard, ok := githubscope.New(repo)
+	if !ok {
+		// A malformed constraint must fail closed: expose nothing rather
+		// than fall back to unrestricted access.
+		logger.Warn("MCP binding declares an unusable repository scope; exposing no tools for it", logger.Fields{
+			"server": serverName,
+		})
+		return nil
+	}
+	return guard.Wrap(tools)
 }

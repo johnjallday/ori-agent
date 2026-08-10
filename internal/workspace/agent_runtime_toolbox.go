@@ -98,12 +98,23 @@ func (r *AgentRuntimeResolver) resolveRuntimeFromToolbox(
 
 	effectiveServers := make([]string, 0, len(selected))
 	var toolAllowlist map[string][]string
+	var repoScope map[string]string
 	for _, binding := range selected {
 		runtimeName, err := r.materializeRuntimeBinding(ws.ID, binding)
 		if err != nil {
 			return nil, err
 		}
 		effectiveServers = append(effectiveServers, runtimeName)
+
+		// A repository constraint belongs to the binding, so a Toolbox
+		// cannot widen past it -- a Toolbox narrows which tools are
+		// exposed, never what they may be pointed at.
+		if repo := BindingRepoScope(binding); repo != "" {
+			if repoScope == nil {
+				repoScope = make(map[string]string, len(selected))
+			}
+			repoScope[runtimeName] = repo
+		}
 
 		key := strings.ToLower(strings.TrimSpace(binding.ID))
 		allowed, narrowed := toolSelection[key]
@@ -127,6 +138,7 @@ func (r *AgentRuntimeResolver) resolveRuntimeFromToolbox(
 
 	resolved.MCPServers = dedupeStringsPreserveOrder(effectiveServers)
 	resolved.MCPToolAllowlist = toolAllowlist
+	resolved.MCPRepoScope = repoScope
 
 	logger.Debug("Resolved agent runtime from pinned toolbox", logger.Fields{
 		"workspace_id":      ws.ID,

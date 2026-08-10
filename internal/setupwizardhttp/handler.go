@@ -244,6 +244,14 @@ func (h *Handler) respondError(w http.ResponseWriter, err error) {
 	case errors.Is(err, setupwizard.ErrInvalidAction):
 		_ = orihttp.RespondAPIError(w, http.StatusBadRequest,
 			orihttp.NewAPIError("invalid_action", errorMessage(err)))
+	case errors.Is(err, setupwizard.ErrStepRejected):
+		// The one domain error whose text reaches the user. Returning it is
+		// an adapter's promise that the message is user-safe -- see
+		// setupwizard.ErrStepRejected. Without this the user's choice would
+		// be refused with "that step could not be completed", which says
+		// nothing about what to do instead.
+		_ = orihttp.RespondAPIError(w, http.StatusConflict,
+			orihttp.NewAPIError("step_rejected", rejectionMessage(err)))
 	default:
 		// Domain failures are logged server-side and reported generically: a raw
 		// error can name a folder, a mailbox, or a connector.
@@ -260,6 +268,19 @@ func errorMessage(err error) string {
 	message := strings.TrimSpace(err.Error())
 	if message == "" {
 		return "That setup action is not available."
+	}
+	return message
+}
+
+// rejectionMessage strips the ErrStepRejected sentinel prefix, leaving the
+// adapter's own plain-language reason.
+func rejectionMessage(err error) string {
+	message := strings.TrimSpace(err.Error())
+	if _, reason, found := strings.Cut(message, setupwizard.ErrStepRejected.Error()+": "); found {
+		message = strings.TrimSpace(reason)
+	}
+	if message == "" {
+		return "That choice could not be used."
 	}
 	return message
 }

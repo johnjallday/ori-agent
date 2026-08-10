@@ -44,6 +44,21 @@ var (
 	ErrUnknownAdapter = errors.New("unknown setup adapter")
 	// ErrInvalidAction reports an action a step does not offer.
 	ErrInvalidAction = errors.New("invalid setup action")
+	// ErrStepRejected reports that an adapter refused a confirmed action for
+	// a reason the user can do something about -- a chosen option that turns
+	// out not to work, rather than a malformed request or a broken service.
+	//
+	// It is the one domain error whose text is shown to the user, so
+	// returning it is a promise about that text: it must be plain language
+	// naming no path, address, credential, or connector internal, exactly as
+	// StepReadiness.Summary must be. Every other domain failure is reported
+	// generically, because a raw error can leak any of those.
+	//
+	// Confirm's returned readiness cannot carry this: the service discards it
+	// and re-evaluates, which is correct (the persisted state must reflect
+	// what is true now, not what an adapter asserted) but leaves an error as
+	// the only channel for "your choice was refused, and here is why".
+	ErrStepRejected = errors.New("setup step rejected")
 )
 
 // Safe error categories. They are stable, non-identifying strings: safe to log,

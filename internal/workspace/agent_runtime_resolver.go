@@ -67,6 +67,18 @@ type ResolvedAgentRuntime struct {
 	// missions, or delegated tasks must consult this map (see
 	// chathttp.getMCPToolsForServer / LLMTaskHandler.getAgentMCPTools).
 	MCPToolAllowlist map[string][]string
+	// MCPRepoScope maps a materialized runtime server name to the single
+	// GitHub repository ("owner/name") its binding is confined to. A missing
+	// key means no repository constraint applies.
+	//
+	// It is a parallel to MCPToolAllowlist and is consulted at the same
+	// points, because it answers the other half of the same question: the
+	// allowlist says *which tools* a binding may use, this says *what they
+	// may be pointed at*. Restricting the tool list alone would still let a
+	// permitted list_issues call read someone else's repository -- and for
+	// a fine-grained GitHub token, that means any public repo on GitHub,
+	// which is why token scoping cannot cover this.
+	MCPRepoScope map[string]string
 }
 
 // AgentRuntimeResolver composes base agent configuration with workspace-owned MCP bindings and skills.
@@ -179,6 +191,7 @@ func (r *AgentRuntimeResolver) resolveAgentRuntime(agentName, workspaceID, nodeI
 
 	effectiveServers := make([]string, 0, len(allowedBindings))
 	var toolAllowlist map[string][]string
+	var repoScope map[string]string
 	for _, binding := range allowedBindings {
 		runtimeName, err := r.materializeRuntimeBinding(ws.ID, binding)
 		if err != nil {
@@ -191,11 +204,35 @@ func (r *AgentRuntimeResolver) resolveAgentRuntime(agentName, workspaceID, nodeI
 			}
 			toolAllowlist[runtimeName] = append([]string(nil), binding.AllowedTools...)
 		}
+		if repo := BindingRepoScope(binding); repo != "" {
+			if repoScope == nil {
+				repoScope = make(map[string]string, len(allowedBindings))
+			}
+			repoScope[runtimeName] = repo
+		}
 	}
 
 	resolved.MCPServers = dedupeStringsPreserveOrder(effectiveServers)
 	resolved.MCPToolAllowlist = toolAllowlist
+	resolved.MCPRepoScope = repoScope
 	return resolved, nil
+}
+
+// BindingRepoScope returns the single repository a binding is confined to, or
+// "" when it carries no such constraint.
+//
+// The key is defined here rather than in the GitHub package because this is
+// where it is read: internal/githubhttp writes it, but it imports this package
+// and so cannot be imported back.
+func BindingRepoScope(binding MCPBinding) string {
+	if binding.Scope == nil {
+		return ""
+	}
+	repo, ok := binding.Scope["repo"].(string)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(repo)
 }
 
 func (r *AgentRuntimeResolver) resolveWorkspaceBindings(ws *Workspace, instance *AgentInstance) ([]MCPBinding, []string) {

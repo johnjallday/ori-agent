@@ -31,6 +31,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/fileshttp"
 	"github.com/johnjallday/ori-agent/internal/filewatcher"
 	"github.com/johnjallday/ori-agent/internal/followup"
+	"github.com/johnjallday/ori-agent/internal/githubhttp"
 	"github.com/johnjallday/ori-agent/internal/locationhttp"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/macwake"
@@ -359,6 +360,28 @@ func (b *ServerBuilder) initializeHandlers() {
 			connDeps.Migrator = sink
 		}
 		b.connectionsHandler = connectionshttp.NewHandler(connDeps)
+		// The GitHub connection is a separate, simpler surface: one static
+		// token rather than an OAuth grant, so it shares only the origin
+		// guard. Its token lives in the same vault-backed MCP credential
+		// store every remote MCP server uses.
+		githubConn := githubhttp.NewConnection(nil)
+		b.githubHandler = githubhttp.NewHandler(githubConn, connectionshttp.NewOriginGuard())
+		// The repository binding is resolved lazily: this runs in phase 17,
+		// and b.workspaceStore is not assigned until phase 18. Reading it
+		// here would capture nil, the resolver would answer "no binding"
+		// forever, and the proposal routes would never register -- a write
+		// path that is silently absent rather than visibly broken.
+		b.githubHandler.WithBroker(githubhttp.NewBroker(
+			githubhttp.NewRepoResolver(b.githubWorkspaceStore),
+			githubhttp.NewExecutor(githubConn),
+		))
+		// Lets Settings report which workspaces depend on the connection,
+		// so a disconnect can say what it will break. Same lazy resolution:
+		// the workspace store does not exist yet at this phase.
+		b.githubHandler.WithWorkspaces(
+			lazyGitHubWorkspaceStore{b: b},
+			githubWorkspaceLister{b: b},
+		)
 		// When a Google MCP server (Calendar/Drive) authorizes, verify the ID
 		// token and attach the grant to this connection (FR 23, 40).
 		mcp.SetGoogleMCPIdentityHook(b.googleMCPIdentityHook)
@@ -744,6 +767,14 @@ func (b *ServerBuilder) wireSetupWizard() {
 			adapter := calendarhttp.NewSetupAdapter(b.calendarOpsHandler, folders)
 			if err := registry.Register(adapter); err != nil {
 				logger.Warn("Calendar Ops setup adapter not registered", logger.Fields{"error": err})
+			}
+		}
+	}
+	if b.githubHandler != nil {
+		if folders, ok := b.workspaceStore.(githubhttp.WorkspaceStore); ok {
+			adapter := githubhttp.NewSetupAdapter(b.githubHandler.Connection(), folders)
+			if err := registry.Register(adapter); err != nil {
+				logger.Warn("GitHub Ops setup adapter not registered", logger.Fields{"error": err})
 			}
 		}
 	}
