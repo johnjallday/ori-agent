@@ -5,8 +5,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 // This file is the Group-2 capture/query/mutation/promotion service for the
@@ -189,76 +187,31 @@ func normalizeBacklogPriority(priority int) int {
 	return priority
 }
 
-// buildCaptureTask validates a capture input and constructs the Task to
-// persist at the given initial status. Shared by Create (Backlog) and
-// CreateReadyUnassigned (direct Ready creation, FR2.10/56/78).
-func buildCaptureTask(input BacklogCreateInput, status TaskStatus) (Task, error) {
-	wsID := strings.TrimSpace(input.WorkspaceID)
-	if wsID == "" {
-		return Task{}, fmt.Errorf("workspace_id is required")
-	}
-	description := strings.TrimSpace(input.Description)
-	if description == "" {
-		return Task{}, fmt.Errorf("title is required")
-	}
-	referenceURL, err := NormalizeReferenceURL(input.ReferenceURL)
-	if err != nil {
-		return Task{}, err
-	}
-	tags, err := ValidateWorkspaceTags(input.Tags)
-	if err != nil {
-		return Task{}, err
-	}
-	sourceType := strings.TrimSpace(input.SourceType)
-	if sourceType == "" {
-		sourceType = BacklogSourceManual
-	}
-
-	task := Task{
-		ID:           uuid.New().String(),
-		WorkspaceID:  wsID,
-		Description:  description,
-		Details:      strings.TrimSpace(input.Details),
-		Tags:         tags,
-		Priority:     normalizeBacklogPriority(input.Priority),
-		ReferenceURL: referenceURL,
-		SourceType:   sourceType,
-		SourceID:     strings.TrimSpace(input.SourceID),
-		Status:       status,
-		CreatedAt:    time.Now(),
-	}
-	if status != TaskStatusBacklog {
-		// Direct Ready creation stays quiescent until an explicit
-		// assignment/run/schedule action (FR11-12).
-		task.AwaitingExecutionIntent = true
-	}
-	return task, nil
-}
-
-// Create captures a new Backlog item (FR4-5, 19-22). The new item is ranked
-// last among the workspace's existing Backlog items (deterministic initial
-// rank).
+// Create captures a new Backlog item (FR4-5, 19-22).
+//
+// This is now a COMPATIBILITY ADAPTER over the canonical Ticket service
+// (tasks/prd-workspace-ticket-management.md FR-85, FR-96). Every caller —
+// Action Center conversion, the Home assistant, BACKLOG.md import, the legacy
+// HTTP routes — therefore gets canonical state, an immutable workspace-local
+// number, provenance, per-state ranking, audited history, and canonical
+// events, without any of them changing.
+//
+// It keeps the Task-shaped signature its callers already use, and owns no
+// lifecycle rules of its own. That is the whole point: two creation paths with
+// their own rules is exactly how the Backlog and Task surfaces drifted apart
+// in the first place.
 func (s *BacklogService) Create(input BacklogCreateInput) (*Task, error) {
-	task, err := buildCaptureTask(input, TaskStatusBacklog)
-	if err != nil {
-		return nil, err
-	}
-	if err := ValidateBacklogTaskInvariants(&task); err != nil {
-		return nil, err
-	}
-
-	var created Task
-	err = s.store.Update(task.WorkspaceID, func(ws *Workspace) error {
-		task.BacklogRank = nextBacklogRank(ws)
-		if err := ws.AddTask(task); err != nil {
-			return err
-		}
-		got, err := ws.GetTask(task.ID)
-		if err != nil {
-			return err
-		}
-		created = *got
-		return nil
+	created, err := s.tickets().createRecord(TicketCreateInput{
+		WorkspaceID:  input.WorkspaceID,
+		State:        TicketStateBacklog,
+		Title:        input.Description,
+		Description:  input.Details,
+		Tags:         input.Tags,
+		Priority:     input.Priority,
+		ReferenceURL: input.ReferenceURL,
+		Source:       input.SourceType,
+		SourceID:     input.SourceID,
+		Actor:        TicketActorUser,
 	})
 	if err != nil {
 		return nil, err
@@ -267,6 +220,16 @@ func (s *BacklogService) Create(input BacklogCreateInput) (*Task, error) {
 	s.publish(EventTaskBacklogCaptured, created.WorkspaceID, created.ID, created)
 	s.renderAfterMutation(created.WorkspaceID)
 	return &created, nil
+}
+
+// tickets builds the canonical service this adapter delegates to. It is
+// constructed per call rather than held as state because TicketService is a
+// stateless holder of its store/bus references — the store it wraps is the
+// shared source of truth.
+func (s *BacklogService) tickets() *TicketService {
+	svc := NewTicketService(s.store)
+	svc.SetEventBus(s.eventBus)
+	return svc
 }
 
 // CreateReadyUnassigned creates a task directly in the Ready stage without
@@ -278,23 +241,20 @@ func (s *BacklogService) Create(input BacklogCreateInput) (*Task, error) {
 // coordinator default (the ordinary create-task flow) should keep using
 // Workspace.AddTask + Workspace.ApplyEntryAgentDefault directly instead of
 // this method.
+// It is likewise a compatibility adapter over the canonical Ticket service,
+// creating directly in Ready (FR-19, FR-85).
 func (s *BacklogService) CreateReadyUnassigned(input BacklogCreateInput) (*Task, error) {
-	task, err := buildCaptureTask(input, TaskStatusPending)
-	if err != nil {
-		return nil, err
-	}
-
-	var created Task
-	err = s.store.Update(task.WorkspaceID, func(ws *Workspace) error {
-		if err := ws.AddTask(task); err != nil {
-			return err
-		}
-		got, err := ws.GetTask(task.ID)
-		if err != nil {
-			return err
-		}
-		created = *got
-		return nil
+	created, err := s.tickets().createRecord(TicketCreateInput{
+		WorkspaceID:  input.WorkspaceID,
+		State:        TicketStateReady,
+		Title:        input.Description,
+		Description:  input.Details,
+		Tags:         input.Tags,
+		Priority:     input.Priority,
+		ReferenceURL: input.ReferenceURL,
+		Source:       input.SourceType,
+		SourceID:     input.SourceID,
+		Actor:        TicketActorUser,
 	})
 	if err != nil {
 		return nil, err
@@ -302,21 +262,6 @@ func (s *BacklogService) CreateReadyUnassigned(input BacklogCreateInput) (*Task,
 
 	s.publish(EventTaskCreated, created.WorkspaceID, created.ID, created)
 	return &created, nil
-}
-
-// nextBacklogRank returns the rank to assign a newly captured Backlog item:
-// one past the current maximum among the workspace's existing Backlog items,
-// so new captures sort last by default (FR20-22).
-func nextBacklogRank(ws *Workspace) int64 {
-	ws.mu.RLock()
-	defer ws.mu.RUnlock()
-	var max int64
-	for _, t := range ws.Tasks {
-		if t.Status == TaskStatusBacklog && t.BacklogRank > max {
-			max = t.BacklogRank
-		}
-	}
-	return max + 1
 }
 
 // Get fetches a single Backlog item, importing any pending file-side changes

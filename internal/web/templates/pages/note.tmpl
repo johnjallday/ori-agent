@@ -45,6 +45,21 @@
         <div id="notePageTagsMount"></div>
       </div>
 
+      <!--
+        Tickets referencing this note
+        (tasks/prd-workspace-ticket-management.md FR-75, FR-78).
+
+        Read-only by design: this navigates to tickets, it is never a second
+        place to mutate them. The note itself is not runnable and gains no
+        execution controls by being referenced.
+
+        Populated by note-page-tickets.js; stays hidden when nothing links here.
+      -->
+      <section class="note-page-tickets" id="notePageTickets" aria-labelledby="notePageTicketsTitle" hidden>
+        <h2 class="note-page-tickets-title" id="notePageTicketsTitle">Linked tickets</h2>
+        <ul class="note-page-tickets-list" id="notePageTicketsList"></ul>
+      </section>
+
       <!-- Toolbar (reused IDs match the modal so NoteEditor wires them automatically) -->
       <div class="note-editor-toolbar">
         <button type="button" id="noteTocToggle" class="note-toolbar-btn" title="Toggle Notes &amp; Outline sidebar" aria-pressed="false">
@@ -205,6 +220,11 @@
   <script type="module" src="/js/modules/note-tabs.js"></script>
   <script type="module" src="/js/modules/note-ai-assist.js"></script>
   <script type="module" src="/js/modules/search-palette.js"></script>
+  <!-- Canonical Ticket client, then the note page's linked-tickets panel.
+       Both are classic scripts so the client is defined before the panel
+       runs; the panel no-ops when nothing links to this note. -->
+  <script defer src="/js/modules/workspace-hub-tickets.js"></script>
+  <script defer src="/js/modules/note-page-tickets.js"></script>
   <script type="module" src="/js/modules/note-page.js"></script>
   {{template "theme-init.tmpl" .}}
 </body>

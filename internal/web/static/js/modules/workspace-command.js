@@ -337,7 +337,34 @@ export class WorkspaceCommandView {
    * refresh() (which the page calls once real data arrives), bounded so a
    * truly stale link still eventually gets dropped per FR91.
    */
+  /**
+   * Opens the Tickets modal when the URL carries `?ticket=<stable id>`
+   * (tasks/prd-workspace-ticket-management.md FR-83, FR-84).
+   *
+   * The Tickets surface lives inside this modal, so a deep link that only
+   * told the module which ticket to show would be a silent no-op — the panel
+   * it renders into is closed. Opening the section is what makes the link
+   * actually land somewhere.
+   *
+   * The ticket module itself reads the same parameter and opens detail once
+   * its surface is mounted.
+   */
+  applyTicketDeepLink() {
+    if (this._ticketDeepLinkApplied || typeof window === 'undefined') return;
+    let ticketId = '';
+    try {
+      ticketId = new URLSearchParams(window.location.search).get('ticket') || '';
+    } catch {
+      return;
+    }
+    if (!ticketId) return;
+
+    this._ticketDeepLinkApplied = true;
+    this.openStatModal('tickets', null);
+  }
+
   applyBootURLState() {
+    this.applyTicketDeepLink();
     if (this._urlStateApplied || !this._urlBootState) {
       this._urlSyncEnabled = true;
       return;

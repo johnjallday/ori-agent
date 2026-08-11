@@ -395,6 +395,21 @@
       }));
     },
 
+    /**
+     * The workspace's notes, for the link picker (FR-17).
+     *
+     * Scoped to ONE workspace because a ticket may only link notes from its
+     * own — there is deliberately no cross-workspace note search here.
+     */
+    async workspaceNotes(studioId) {
+      const payload = await request('GET', `/api/workspaces/${encodeURIComponent(studioId)}/notes`);
+      const notes = (payload && (payload.notes || payload.data || payload)) || [];
+      if (!Array.isArray(notes)) return [];
+      return notes
+        .map(note => ({ id: note.id || '', title: note.name || note.title || '' }))
+        .filter(note => note.id);
+    },
+
     /** Attaches a note. Idempotent, so a double-click is harmless (FR-77). */
     async linkNote(studioId, ticketId, noteId, version) {
       const payload = await request(
@@ -1276,9 +1291,15 @@
       host.appendChild(failed);
       return;
     }
+    appendSectionTitle(host, notes.length ? `Linked notes (${notes.length})` : 'Linked notes');
+    if (!notes.length) {
+      const none = document.createElement('p');
+      none.className = 'ticket-detail-empty';
+      none.textContent = 'No notes linked yet.';
+      host.appendChild(none);
+    }
+    host.appendChild(buildNotePicker(ticket, notes));
     if (!notes.length) return;
-
-    appendSectionTitle(host, `Linked notes (${notes.length})`);
     const list = document.createElement('ul');
     list.className = 'ticket-detail-notes-list';
 
@@ -1314,6 +1335,91 @@
     reassurance.className = 'ticket-detail-note-hint';
     reassurance.textContent = 'Unlinking removes the reference only. The note is kept.';
     host.appendChild(reassurance);
+  }
+
+  /**
+   * A same-workspace note picker (FR-17, FR-77).
+   *
+   * Scoped to the ticket's OWN workspace: a ticket may only reference notes
+   * from its own, so there is deliberately no cross-workspace search. Already
+   * linked notes are filtered out rather than shown disabled — an option that
+   * does nothing is noise.
+   */
+  function buildNotePicker(ticket, linked) {
+    const wrap = document.createElement('div');
+    wrap.className = 'ticket-note-picker';
+
+    const label = document.createElement('label');
+    label.className = 'ticket-note-picker-label';
+    label.textContent = 'Link a note';
+
+    const select = document.createElement('select');
+    select.className = 'ticket-note-picker-select';
+    select.setAttribute('aria-label', `Link a note to ticket ${ticket.displayNumber}`);
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = 'Loading notes…';
+    select.appendChild(placeholder);
+    select.disabled = true;
+
+    label.appendChild(select);
+    wrap.appendChild(label);
+
+    const linkedIds = new Set(linked.map(note => note.id));
+    void (async () => {
+      let available = [];
+      try {
+        available = await api.workspaceNotes(ticket.owningWorkspaceId);
+      } catch {
+        placeholder.textContent = 'Notes are unavailable';
+        return;
+      }
+      const options = available.filter(note => !linkedIds.has(note.id));
+      if (!options.length) {
+        placeholder.textContent = available.length
+          ? 'All notes are already linked'
+          : 'No notes in this workspace';
+        return;
+      }
+
+      placeholder.textContent = 'Choose a note…';
+      options.forEach(note => {
+        const option = document.createElement('option');
+        option.value = note.id;
+        option.textContent = note.title || note.id;
+        select.appendChild(option);
+      });
+      select.disabled = false;
+    })();
+
+    select.addEventListener('change', () => {
+      const noteId = select.value;
+      select.value = '';
+      if (noteId) void handleLinkNote(ticket, noteId);
+    });
+
+    return wrap;
+  }
+
+  async function handleLinkNote(ticket, noteId) {
+    try {
+      const updated = await api.linkNote(
+        ticket.owningWorkspaceId,
+        ticket.id,
+        noteId,
+        ticket.version
+      );
+      renderDetail(updated);
+      setStatus('Note linked.', 'success');
+      announce(`Note linked to ${ticket.displayNumber}`);
+    } catch (error) {
+      if (error.isVersionConflict && error.currentTicket) {
+        renderDetail(error.currentTicket);
+        setStatus('Someone else changed this ticket. Showing the current version.', 'error');
+        return;
+      }
+      setStatus(error.message, 'error');
+    }
   }
 
   async function handleUnlinkNote(ticket, note) {
@@ -1597,6 +1703,39 @@
     wireFilterControls();
 
     view.initialized = true;
+    void openDeepLinkedTicket();
+  }
+
+  /**
+   * The canonical Ticket deep-link contract: `?ticket=<stable id>` on a
+   * workspace URL opens that Ticket's detail (FR-83, FR-84).
+   *
+   * The stable ID is the link key, never the display number — numbers are
+   * workspace-local, so a number in a URL would resolve to the wrong Ticket in
+   * a different workspace. Every first-party surface that links to a Ticket
+   * (Note page, search, Map, saved links) builds this shape.
+   */
+  async function openDeepLinkedTicket() {
+    if (typeof window === 'undefined' || !window.location) return;
+    let ticketId = '';
+    try {
+      ticketId = new URLSearchParams(window.location.search).get('ticket') || '';
+    } catch {
+      return;
+    }
+    if (!ticketId) return;
+
+    const studioId = currentStudioId();
+    if (!studioId) return;
+
+    // Load the list first so closing detail returns to a populated view rather
+    // than an empty one.
+    await load();
+    try {
+      await openDetail(studioId, ticketId);
+    } catch {
+      setStatus('That ticket could not be found in this workspace.', 'error');
+    }
   }
 
   /**

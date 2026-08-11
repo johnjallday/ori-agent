@@ -392,30 +392,54 @@ func (s *TicketService) descendantWorkspaceIDs(rootID string) ([]string, error) 
 // assigned inside one store.Update so a concurrent create on the same
 // workspace cannot hand out a duplicate number or rank (FR-140).
 func (s *TicketService) Create(input TicketCreateInput) (*Ticket, error) {
+	created, err := s.createRecord(input)
+	if err != nil {
+		return nil, err
+	}
+	ticket := NewTicket(&created, created.WorkspaceID, s.WorkspaceName(created.WorkspaceID))
+	s.publishTicket(EventTicketCreated, ticket, nil)
+	// Legacy consumers (Details panel, drawer, Quest Board) still listen for
+	// the old capture events; keep them fed during the compatibility window.
+	s.publishLegacyTaskEvent(legacyCreateEventFor(input.State), created)
+	return &ticket, nil
+}
+
+// createRecord is the shared creation core. It returns the persisted record so
+// compatibility adapters can keep their existing Task-shaped signatures while
+// still getting canonical numbering, state, provenance, ranking, and history
+// (FR-85, FR-96). Callers are responsible for publishing events.
+func (s *TicketService) createRecord(input TicketCreateInput) (Task, error) {
 	workspaceID := strings.TrimSpace(input.WorkspaceID)
 	if workspaceID == "" {
-		return nil, invalidTicketField("studio_id", "studio_id is required")
+		return Task{}, invalidTicketField("studio_id", "studio_id is required")
 	}
 
 	state := input.State
 	if !state.Valid() {
-		return nil, invalidTicketField("state", "creating a ticket requires an explicit state of backlog or ready")
+		return Task{}, invalidTicketField("state", "creating a ticket requires an explicit state of backlog or ready")
 	}
 	// Creation is a capture decision, not a lifecycle shortcut: work cannot
 	// be born already started, reviewed, done, or cancelled (FR-19, FR-36).
 	if state != TicketStateBacklog && state != TicketStateReady {
-		return nil, invalidTicketField("state", "a new ticket must be created in backlog or ready, not %s", state.Label())
+		return Task{}, invalidTicketField("state", "a new ticket must be created in backlog or ready, not %s", state.Label())
 	}
 
 	task, err := buildTicketRecord(workspaceID, state, input)
 	if err != nil {
-		return nil, err
+		return Task{}, err
 	}
 
 	var created Task
 	err = s.store.Update(workspaceID, func(ws *Workspace) error {
 		task.TicketNumber = allocateTicketNumber(ws)
 		task.StateRank = nextTicketRank(ws, state)
+		if state == TicketStateBacklog {
+			// Legacy compatibility projection, exactly like Status: the legacy
+			// Backlog list still sorts on BacklogRank, so leaving it at zero
+			// would silently flatten that ordering during the compatibility
+			// window. StateRank remains the authority; Group 7 retires this.
+			task.BacklogRank = task.StateRank
+		}
 		if err := ws.AddTask(task); err != nil {
 			return err
 		}
@@ -427,15 +451,10 @@ func (s *TicketService) Create(input TicketCreateInput) (*Ticket, error) {
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return Task{}, err
 	}
 
-	ticket := NewTicket(&created, created.WorkspaceID, s.WorkspaceName(created.WorkspaceID))
-	s.publishTicket(EventTicketCreated, ticket, nil)
-	// Legacy consumers (Details panel, drawer, Quest Board) still listen for
-	// the old capture events; keep them fed during the compatibility window.
-	s.publishLegacyTaskEvent(legacyCreateEventFor(state), created)
-	return &ticket, nil
+	return created, nil
 }
 
 // buildTicketRecord validates a create request and constructs the record to
