@@ -185,6 +185,135 @@ func TestTicketHandler_List(t *testing.T) {
 	})
 }
 
+// FR-59/FR-65 through FR-68: filters, search, sort, and paging are all applied
+// server-side and are reflected in the response envelope.
+func TestTicketHandler_List_QuerySurface(t *testing.T) {
+	mux, store := newTicketTestMux(t)
+	ws := newTicketHandlerWorkspace(t, store, "Alpha")
+
+	createTicketViaAPI(t, mux, ws.ID,
+		`{"state":"backlog","title":"Investigate flaky pipeline","description":"nightly build","tags":["infra","ci"],"priority":1}`)
+	createTicketViaAPI(t, mux, ws.ID, `{"state":"backlog","title":"Rewrite docs","tags":["docs"],"priority":4}`)
+	createTicketViaAPI(t, mux, ws.ID, `{"state":"ready","title":"Ship the cache fix","tags":["infra"],"priority":2}`)
+
+	listTickets := func(query string) []workspace.Ticket {
+		t.Helper()
+		rec := doTicketRequest(t, mux, http.MethodGet, "/api/workspaces/"+ws.ID+"/tickets"+query, "")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET %s status = %d; body=%s", query, rec.Code, rec.Body.String())
+		}
+		var envelope struct {
+			Tickets []workspace.Ticket `json:"tickets"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &envelope); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return envelope.Tickets
+	}
+
+	t.Run("tags require every listed value", func(t *testing.T) {
+		if got := listTickets("?tag=infra,ci"); len(got) != 1 {
+			t.Fatalf("got %d tickets, want the one carrying both tags", len(got))
+		}
+		if got := listTickets("?tag=infra"); len(got) != 2 {
+			t.Fatalf("got %d tickets, want both infra tickets", len(got))
+		}
+	})
+
+	t.Run("repeated and comma-separated params are equivalent", func(t *testing.T) {
+		repeated := listTickets("?state=backlog&state=ready")
+		combined := listTickets("?state=backlog,ready")
+		if len(repeated) != len(combined) || len(repeated) != 3 {
+			t.Fatalf("repeated=%d combined=%d, want 3 each", len(repeated), len(combined))
+		}
+	})
+
+	t.Run("search matches title and description", func(t *testing.T) {
+		if got := listTickets("?search=nightly"); len(got) != 1 {
+			t.Fatalf("description search returned %d tickets", len(got))
+		}
+		if got := listTickets("?search=FLAKY"); len(got) != 1 {
+			t.Fatalf("case-insensitive title search returned %d tickets", len(got))
+		}
+	})
+
+	t.Run("sort by priority", func(t *testing.T) {
+		got := listTickets("?sort=priority")
+		if len(got) != 3 || got[0].Priority != 1 {
+			t.Fatalf("priority sort returned %+v", got)
+		}
+		desc := listTickets("?sort=priority&desc=true")
+		if desc[0].Priority != 4 {
+			t.Fatalf("descending priority sort returned %+v", desc)
+		}
+	})
+
+	t.Run("limit reports the pre-limit total", func(t *testing.T) {
+		rec := doTicketRequest(t, mux, http.MethodGet, "/api/workspaces/"+ws.ID+"/tickets?limit=1", "")
+		var envelope struct {
+			Tickets   []workspace.Ticket `json:"tickets"`
+			Count     int                `json:"count"`
+			Total     int                `json:"total"`
+			Truncated bool               `json:"truncated"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &envelope); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if envelope.Count != 1 || envelope.Total != 3 || !envelope.Truncated {
+			t.Fatalf("count=%d total=%d truncated=%v; want 1/3/true", envelope.Count, envelope.Total, envelope.Truncated)
+		}
+	})
+
+	t.Run("rejects bad filter values with a 400 naming the field", func(t *testing.T) {
+		for _, query := range []string{
+			"?priority=9", "?priority=high", "?due=someday", "?archive=maybe",
+			"?sort=vibes", "?limit=999999", "?state=archived", "?desc=perhaps",
+		} {
+			rec := doTicketRequest(t, mux, http.MethodGet, "/api/workspaces/"+ws.ID+"/tickets"+query, "")
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("GET %s status = %d, want 400; body=%s", query, rec.Code, rec.Body.String())
+			}
+		}
+	})
+}
+
+// FR-142: hierarchy is exposed on detail reads, never on the collection.
+func TestTicketHandler_Detail_ExposesHierarchy(t *testing.T) {
+	mux, store := newTicketTestMux(t)
+	ws := newTicketHandlerWorkspace(t, store, "Alpha")
+
+	parent := createTicketViaAPI(t, mux, ws.ID, `{"state":"ready","title":"Parent work"}`)
+	child := createTicketViaAPI(t, mux, ws.ID, `{"state":"ready","title":"Child work"}`)
+
+	err := store.Update(ws.ID, func(w *workspace.Workspace) error {
+		return w.MutateTask(child.ID, func(task *workspace.Task) error {
+			task.ParentTaskID = parent.ID
+			return nil
+		})
+	})
+	if err != nil {
+		t.Fatalf("link subticket: %v", err)
+	}
+
+	rec := doTicketRequest(t, mux, http.MethodGet, "/api/workspaces/"+ws.ID+"/tickets/"+parent.ID, "")
+	detail := decodeTicket(t, rec)
+	if len(detail.Subtickets) != 1 || detail.Subtickets[0].ID != child.ID {
+		t.Fatalf("parent detail missing its subticket: %+v", detail.Subtickets)
+	}
+
+	list := doTicketRequest(t, mux, http.MethodGet, "/api/workspaces/"+ws.ID+"/tickets", "")
+	var envelope struct {
+		Tickets []workspace.Ticket `json:"tickets"`
+	}
+	_ = json.Unmarshal(list.Body.Bytes(), &envelope)
+	if len(envelope.Tickets) != 1 {
+		t.Fatalf("collection returned %d tickets, want only the parent", len(envelope.Tickets))
+	}
+	if len(envelope.Tickets[0].Subtickets) != 0 {
+		t.Fatalf("collection reads must stay flat, got %+v", envelope.Tickets[0].Subtickets)
+	}
+}
+
 // FR-88: PATCH edits content only. State moves through the transition route.
 func TestTicketHandler_Patch_CannotChangeState(t *testing.T) {
 	mux, store := newTicketTestMux(t)

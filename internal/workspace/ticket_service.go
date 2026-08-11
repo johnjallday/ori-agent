@@ -130,16 +130,43 @@ type TicketTransitionInput struct {
 // TicketQuery selects Tickets for a collection read. WorkspaceID is the
 // requesting workspace and always the default scope; IncludeDescendants opts
 // into the read-only roll-up (FR-89).
+//
+// Every predicate is applied on the server (see ticket_query.go). Filtering
+// and sorting in the browser would force a rolled-up parent to download its
+// entire descendant tree just to display a handful of rows (FR-68).
 type TicketQuery struct {
 	WorkspaceID        string
 	IncludeDescendants bool
 	// States filters to the given canonical states. Empty means every state,
-	// subject to the recent/archive default applied by the caller.
+	// subject to the recent/archive window below.
 	States []TicketState
 	// IncludeSubtickets includes child Tickets in the result. Collection
 	// reads default to top-level Tickets only, matching the existing Backlog
 	// list behavior; hierarchy is presented inside Ticket detail (FR-142).
 	IncludeSubtickets bool
+
+	// Filters (FR-59, FR-65). Multi-valued fields match any listed value,
+	// except Tags, which requires all of them.
+	Tags       []string
+	Priorities []int
+	Assignees  []string
+	Sources    []string
+	// OwnerIDs narrows a roll-up to specific owning workspaces. It cannot
+	// widen scope: an owner outside the requested subtree simply matches
+	// nothing.
+	OwnerIDs []string
+	Due      TicketDueFilter
+	Archive  TicketArchiveFilter
+
+	// Search matches title, description, and Ticket number (FR-67).
+	Search string
+
+	// Sort selects the ordering; the zero value is state-then-rank (FR-68).
+	Sort           TicketSortField
+	SortDescending bool
+
+	// Limit bounds the returned page. Zero means TicketDefaultLimit.
+	Limit int
 }
 
 // --- Reads ----------------------------------------------------------------
@@ -169,7 +196,66 @@ func (s *TicketService) Get(workspaceID, ticketID string) (*Ticket, error) {
 		return nil, fmt.Errorf("%w: %s", ErrTicketNotFound, ticketID)
 	}
 	ticket := NewTicket(task, ws.ID, ws.Name)
+	ticket.Archived = ticket.State.Terminal() && ticketIsArchived(task, s.clock())
+	attachTicketHierarchy(ws, task, &ticket)
 	return &ticket, nil
+}
+
+// attachTicketHierarchy populates parent and subticket references for a
+// detail read (FR-142). Hierarchy is a detail-only concern: the Board renders
+// independent cards, so collection reads never carry these.
+func attachTicketHierarchy(ws *Workspace, task *Task, ticket *Ticket) {
+	ws.mu.RLock()
+	defer ws.mu.RUnlock()
+
+	if task.ParentTaskID != "" {
+		for i := range ws.Tasks {
+			if ws.Tasks[i].ID == task.ParentTaskID {
+				parent := NewTicketSummary(&ws.Tasks[i], ws.ID, ws.Name)
+				ticket.Parent = &parent
+				break
+			}
+		}
+	}
+
+	for i := range ws.Tasks {
+		if ws.Tasks[i].ParentTaskID != task.ID {
+			continue
+		}
+		ticket.Subtickets = append(ticket.Subtickets, NewTicketSummary(&ws.Tasks[i], ws.ID, ws.Name))
+	}
+	// Preserve the author's declared subtask order, falling back to the stable
+	// ID so two unordered subtickets never swap between reads.
+	sort.SliceStable(ticket.Subtickets, func(i, j int) bool {
+		a, b := ticket.Subtickets[i], ticket.Subtickets[j]
+		if a.SubticketIndex != b.SubticketIndex {
+			return a.SubticketIndex < b.SubticketIndex
+		}
+		return a.ID < b.ID
+	})
+}
+
+// Promote is the explicit Backlog → Ready commitment transition (FR-22).
+// It is a named wrapper over Transition rather than separate logic, so the
+// legality check, rank assignment, history entry, and idempotence are exactly
+// the same ones every other state change goes through.
+//
+// Promoting a Ticket that has already left Backlog returns the current record
+// unchanged rather than erroring, so a repeated click or a race between two
+// promoters is safe (FR-23).
+func (s *TicketService) Promote(workspaceID, ticketID string, ifVersion int64) (*Ticket, error) {
+	current, err := s.Get(workspaceID, ticketID)
+	if err != nil {
+		return nil, err
+	}
+	if current.State != TicketStateBacklog {
+		return current, nil
+	}
+	return s.Transition(workspaceID, ticketID, TicketTransitionInput{
+		To:        TicketStateReady,
+		Actor:     TicketActorUser,
+		IfVersion: ifVersion,
+	})
 }
 
 // List returns the requesting workspace's Tickets, optionally rolling up
@@ -182,80 +268,80 @@ func (s *TicketService) Get(workspaceID, ticketID string) (*Ticket, error) {
 // result the caller can surface beats a parent workspace whose list breaks
 // because one child is mid-write.
 func (s *TicketService) List(query TicketQuery) ([]Ticket, error) {
-	ws, err := s.store.Get(query.WorkspaceID)
+	page, err := s.Search(query)
 	if err != nil {
 		return nil, err
 	}
+	return page.Tickets, nil
+}
 
-	tickets := localTickets(ws, query)
+// Search is the full collection read: filters, search, sort, and bounded
+// paging (FR-59, FR-65 through FR-68). List wraps it for callers that only
+// want the records.
+func (s *TicketService) Search(query TicketQuery) (TicketPage, error) {
+	limit, err := normalizeTicketLimit(query.Limit)
+	if err != nil {
+		return TicketPage{}, err
+	}
+	if !query.Sort.Valid() {
+		return TicketPage{}, invalidTicketField("sort", "unknown sort field %q", string(query.Sort))
+	}
+	filter, err := compileTicketFilter(query, s.clock())
+	if err != nil {
+		return TicketPage{}, err
+	}
+
+	ws, err := s.store.Get(query.WorkspaceID)
+	if err != nil {
+		return TicketPage{}, err
+	}
+
+	page := TicketPage{Tickets: localTickets(ws, filter)}
 	if query.IncludeDescendants {
 		descendantIDs, err := s.descendantWorkspaceIDs(query.WorkspaceID)
 		if err != nil {
-			return nil, err
+			return TicketPage{}, err
 		}
 		for _, id := range descendantIDs {
 			child, err := s.store.Get(id)
 			if err != nil {
+				// One unreadable descendant must not break a parent's list.
+				// Report it instead of silently returning a short result that
+				// looks complete (FR-133).
+				page.PartialOwners = append(page.PartialOwners, id)
 				continue
 			}
-			tickets = append(tickets, localTickets(child, query)...)
+			page.Tickets = append(page.Tickets, localTickets(child, filter)...)
 		}
 	}
 
-	sortTickets(tickets)
-	return tickets, nil
+	sortTicketsBy(page.Tickets, query.Sort, query.SortDescending)
+
+	page.Total = len(page.Tickets)
+	if len(page.Tickets) > limit {
+		page.Tickets = page.Tickets[:limit]
+		page.Truncated = true
+	}
+	return page, nil
 }
 
 // localTickets projects one workspace's own matching Tickets. It holds the
 // workspace read lock for the duration of the scan.
-func localTickets(ws *Workspace, query TicketQuery) []Ticket {
-	wanted := make(map[TicketState]struct{}, len(query.States))
-	for _, state := range query.States {
-		wanted[state] = struct{}{}
-	}
-
+func localTickets(ws *Workspace, filter *ticketFilter) []Ticket {
 	ws.mu.RLock()
 	defer ws.mu.RUnlock()
 
 	out := make([]Ticket, 0, len(ws.Tasks))
 	for i := range ws.Tasks {
 		task := &ws.Tasks[i]
-		if task.ParentTaskID != "" && !query.IncludeSubtickets {
+		if !filter.matches(task, ws.ID) {
 			continue
 		}
-		if len(wanted) > 0 {
-			if _, ok := wanted[task.CanonicalState()]; !ok {
-				continue
-			}
-		}
-		out = append(out, NewTicket(task, ws.ID, ws.Name))
+		ticket := NewTicket(task, ws.ID, ws.Name)
+		ticket.Archived = ticket.State.Terminal() && ticketIsArchived(task, filter.now)
+		out = append(out, ticket)
 	}
 	return out
-}
-
-// sortTickets orders results deterministically: canonical state order first
-// (so a mixed list reads Backlog → Ready → … the same way the Board does),
-// then manual rank within the state, then creation time, then stable ID as
-// the final tiebreak so the order never depends on map or slice iteration
-// order.
-func sortTickets(tickets []Ticket) {
-	stateOrder := make(map[TicketState]int, len(AllTicketStates))
-	for i, state := range AllTicketStates {
-		stateOrder[state] = i
-	}
-	sort.SliceStable(tickets, func(i, j int) bool {
-		a, b := tickets[i], tickets[j]
-		if a.State != b.State {
-			return stateOrder[a.State] < stateOrder[b.State]
-		}
-		if a.StateRank != b.StateRank {
-			return a.StateRank < b.StateRank
-		}
-		if !a.CreatedAt.Equal(b.CreatedAt) {
-			return a.CreatedAt.Before(b.CreatedAt)
-		}
-		return a.ID < b.ID
-	})
 }
 
 // descendantWorkspaceIDs returns every workspace transitively parented under

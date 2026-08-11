@@ -259,6 +259,114 @@ test('transitionOptions renders only legal moves and labels promotion explicitly
   assert.equal(api.canTransitionTo(backlog, 'done'), false);
 });
 
+// --- Group 2: filters, search, sort, archive, hierarchy -------------------
+
+test('list sends every filter to the server rather than filtering locally', async () => {
+  const { api, calls } = loadTickets(() => ({ body: { tickets: [], count: 0, total: 0 } }));
+
+  await api.api.list('ws-1', {
+    states: ['backlog', 'ready'],
+    tags: ['infra', 'ci'],
+    priorities: [1, 2],
+    assignees: ['unassigned'],
+    sources: ['note'],
+    owners: ['ws-child'],
+    due: 'overdue',
+    archive: 'archived',
+    search: 'flaky',
+    sort: 'due_date',
+    descending: true,
+    limit: 50,
+    includeDescendants: true
+  });
+
+  const url = calls[0].url;
+  ['state=backlog', 'state=ready', 'tag=infra', 'tag=ci', 'priority=1', 'priority=2'].forEach(
+    part => assert.ok(url.includes(part), `expected ${part} in ${url}`)
+  );
+  assert.match(url, /assignee=unassigned/);
+  assert.match(url, /source=note/);
+  assert.match(url, /owner=ws-child/);
+  assert.match(url, /due=overdue/);
+  assert.match(url, /archive=archived/);
+  assert.match(url, /search=flaky/);
+  assert.match(url, /sort=due_date/);
+  assert.match(url, /desc=true/);
+  assert.match(url, /limit=50/);
+  assert.match(url, /include_descendants=true/);
+});
+
+test('an omitted filter is not sent at all', async () => {
+  const { api, calls } = loadTickets(() => ({ body: { tickets: [], count: 0 } }));
+  await api.api.list('ws-1');
+  // A bare list must not smuggle in defaults the caller never asked for.
+  assert.equal(calls[0].url, '/api/workspaces/ws-1/tickets');
+});
+
+test('list surfaces truncation and unreadable roll-up owners', async () => {
+  const { api } = loadTickets(() => ({
+    body: {
+      tickets: [serverTicket()],
+      count: 1,
+      total: 40,
+      truncated: true,
+      partial_owners: ['ws-broken']
+    }
+  }));
+
+  const result = await api.api.list('ws-1', { includeDescendants: true });
+
+  // The caller has to be able to say "this list is partial" rather than
+  // present it as complete.
+  assert.equal(result.total, 40);
+  assert.equal(result.truncated, true);
+  assert.deepEqual(plain(result.partialOwners), ['ws-broken']);
+});
+
+test('normalizeTicket carries hierarchy and the archived flag on detail reads', () => {
+  const { api } = loadTickets();
+  const ticket = api.normalizeTicket(
+    serverTicket({
+      archived: true,
+      parent: {
+        id: 'tkt-parent',
+        number: 2,
+        display_number: '#2',
+        title: 'Parent work',
+        state: 'ready',
+        state_label: 'Ready',
+        owning_workspace_id: 'ws-1'
+      },
+      subtickets: [
+        {
+          id: 'tkt-child',
+          number: 3,
+          display_number: '#3',
+          title: 'Child work',
+          state: 'backlog',
+          state_label: 'Backlog',
+          owning_workspace_id: 'ws-1'
+        }
+      ]
+    })
+  );
+
+  assert.equal(ticket.archived, true);
+  assert.equal(ticket.parent.id, 'tkt-parent');
+  assert.equal(ticket.parent.displayNumber, '#2');
+  assert.equal(ticket.subtickets.length, 1);
+  assert.equal(ticket.subtickets[0].title, 'Child work');
+});
+
+test('a list response leaves hierarchy empty', () => {
+  const { api } = loadTickets();
+  // Hierarchy is a detail-only concern; the Board renders independent cards.
+  const ticket = api.normalizeTicket(serverTicket());
+  assert.equal(ticket.parent, null);
+  assert.deepEqual(plain(ticket.subtickets), []);
+  assert.equal(ticket.archived, false);
+});
+
 test('state metadata never relies on color alone', () => {
   const { api } = loadTickets();
   // Every state carries a distinct human-readable label; `tone` is a

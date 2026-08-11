@@ -643,6 +643,19 @@ type Ticket struct {
 	// clients render only legal actions (FR-70).
 	LegalTransitions []TicketState `json:"legal_transitions,omitempty"`
 
+	// Parent and Subtickets are populated on detail reads only (FR-142).
+	// Hierarchy is presented inside Ticket detail; the Board renders every
+	// Ticket as an independent card and never nests them, so collection reads
+	// deliberately leave these empty.
+	Parent     *TicketSummary  `json:"parent,omitempty"`
+	Subtickets []TicketSummary `json:"subtickets,omitempty"`
+
+	// Archived reports that this terminal Ticket has aged past the 14-day
+	// recent window (FR-143). It is a presentation flag derived at read time,
+	// never a stored state: the Ticket and all its history remain intact and
+	// queryable, it simply stops appearing in default views.
+	Archived bool `json:"archived,omitempty"`
+
 	// Version is the optimistic-concurrency token to echo back on mutation
 	// (FR-93).
 	Version   int64     `json:"version"`
@@ -653,6 +666,45 @@ type Ticket struct {
 	// for adapters that still speak the old vocabulary. It is never lifecycle
 	// authority (FR-7, FR-97).
 	LegacyStatus TaskStatus `json:"legacy_status,omitempty"`
+}
+
+// TicketSummary is the compact reference used for parent/subticket links and
+// for the Note-side linked-Ticket projection (FR-75, FR-142). It carries
+// enough to render and navigate to a Ticket without duplicating the full
+// record — and deliberately not enough to be mistaken for a second copy of it.
+type TicketSummary struct {
+	ID                  string      `json:"id"`
+	Number              int64       `json:"number,omitempty"`
+	DisplayNumber       string      `json:"display_number,omitempty"`
+	Title               string      `json:"title"`
+	State               TicketState `json:"state"`
+	StateLabel          string      `json:"state_label"`
+	OwningWorkspaceID   string      `json:"owning_workspace_id"`
+	OwningWorkspaceName string      `json:"owning_workspace_name,omitempty"`
+	SubticketIndex      int         `json:"subticket_index,omitempty"`
+}
+
+// NewTicketSummary builds the compact reference for a record.
+func NewTicketSummary(task *Task, owningWorkspaceID, owningWorkspaceName string) TicketSummary {
+	if task == nil {
+		return TicketSummary{}
+	}
+	state := task.CanonicalState()
+	ownerID := strings.TrimSpace(owningWorkspaceID)
+	if ownerID == "" {
+		ownerID = task.WorkspaceID
+	}
+	return TicketSummary{
+		ID:                  task.ID,
+		Number:              task.TicketNumber,
+		DisplayNumber:       FormatTicketNumber(task.TicketNumber),
+		Title:               task.Description,
+		State:               state,
+		StateLabel:          state.Label(),
+		OwningWorkspaceID:   ownerID,
+		OwningWorkspaceName: owningWorkspaceName,
+		SubticketIndex:      task.SubtaskIndex,
+	}
 }
 
 // NewTicket builds the canonical representation of a persisted record,

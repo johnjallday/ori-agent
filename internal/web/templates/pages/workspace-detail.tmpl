@@ -1062,6 +1062,59 @@
                   </div>
 
                   <p class="hub-tickets-status" id="hubTicketsStatus" role="status" aria-live="polite" hidden></p>
+                  <!-- Announces state changes to assistive technology. Visually
+                       hidden but never display:none — a hidden live region is
+                       not announced at all (FR-129). -->
+                  <p class="hub-tickets-live" id="hubTicketsLiveRegion" role="status" aria-live="polite"></p>
+
+                  <!--
+                    Filters. Every control here re-queries the SERVER (FR-65 to
+                    FR-68); nothing is filtered in the browser, so a rolled-up
+                    parent never has to download a descendant tree to show a
+                    handful of rows.
+                  -->
+                  <div class="hub-tickets-controls">
+                    <div class="hub-tickets-filters" id="hubTicketsFilters" role="group" aria-label="Filter tickets by state">
+                      <button type="button" class="ticket-filter-chip is-active" data-ticket-state-filter="all" aria-pressed="true">All</button>
+                      <button type="button" class="ticket-filter-chip" data-ticket-state-filter="backlog" aria-pressed="false">Backlog</button>
+                      <button type="button" class="ticket-filter-chip" data-ticket-state-filter="ready" aria-pressed="false">Ready</button>
+                      <button type="button" class="ticket-filter-chip" data-ticket-state-filter="in_progress" aria-pressed="false">In Progress</button>
+                      <button type="button" class="ticket-filter-chip" data-ticket-state-filter="review" aria-pressed="false">Review</button>
+                      <button type="button" class="ticket-filter-chip" data-ticket-state-filter="done" aria-pressed="false">Done</button>
+                      <button type="button" class="ticket-filter-chip" data-ticket-state-filter="cancelled" aria-pressed="false">Cancelled</button>
+                    </div>
+
+                    <div class="hub-tickets-controls-row">
+                      <label class="hub-tickets-control">
+                        <span class="hub-tickets-control-label">Search</span>
+                        <input type="search" class="form-control form-control-sm" id="hubTicketsSearch" placeholder="Title, description, or #number">
+                      </label>
+
+                      <label class="hub-tickets-control">
+                        <span class="hub-tickets-control-label">Sort</span>
+                        <select class="form-select form-select-sm" id="hubTicketsSort">
+                          <option value="">Manual order</option>
+                          <option value="priority">Priority</option>
+                          <option value="due_date">Due date</option>
+                          <option value="created">Created</option>
+                          <option value="updated">Updated</option>
+                          <option value="number">Ticket number</option>
+                        </select>
+                      </label>
+
+                      <label class="hub-tickets-toggle">
+                        <input type="checkbox" id="hubTicketsRollUp">
+                        <span>Include sub-workspaces</span>
+                      </label>
+
+                      <!-- Done and Cancelled tickets stay in the default view
+                           for 14 days, then move here. Nothing is deleted. -->
+                      <label class="hub-tickets-toggle">
+                        <input type="checkbox" id="hubTicketsArchive">
+                        <span>Archive only</span>
+                      </label>
+                    </div>
+                  </div>
 
                   <form class="hub-ticket-create" id="hubTicketCreateForm">
                     <label class="hub-ticket-create-label" for="hubTicketCreateTitle">Title</label>

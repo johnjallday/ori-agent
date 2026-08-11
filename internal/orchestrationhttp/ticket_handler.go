@@ -102,10 +102,18 @@ type ticketReorderRequest struct {
 }
 
 type ticketListResponse struct {
-	Tickets            []workspace.Ticket `json:"tickets"`
-	Count              int                `json:"count"`
-	StudioID           string             `json:"studio_id"`
-	IncludeDescendants bool               `json:"include_descendants"`
+	Tickets []workspace.Ticket `json:"tickets"`
+	Count   int                `json:"count"`
+	// Total is how many Tickets matched before the limit was applied, so a
+	// client can distinguish "that is all of them" from "there are more".
+	Total     int  `json:"total"`
+	Truncated bool `json:"truncated,omitempty"`
+	// PartialOwners names descendant workspaces that could not be read during
+	// a roll-up, so the UI can say the list is incomplete rather than present
+	// it as whole (FR-133).
+	PartialOwners      []string `json:"partial_owners,omitempty"`
+	StudioID           string   `json:"studio_id"`
+	IncludeDescendants bool     `json:"include_descendants"`
 }
 
 type ticketReorderResponse struct {
@@ -152,35 +160,110 @@ func (th *TicketHandler) handleList(w http.ResponseWriter, r *http.Request, stud
 	}
 	query.IncludeSubtickets = includeSubtickets
 
-	// `state` may repeat or be comma-separated; both are accepted so a client
-	// can build the query either way.
-	for _, raw := range r.URL.Query()["state"] {
-		for value := range strings.SplitSeq(raw, ",") {
-			if strings.TrimSpace(value) == "" {
-				continue
-			}
-			state, err := workspace.ParseTicketState(value)
-			if err != nil {
-				orihttp.BadRequest(w, err.Error())
-				return
-			}
-			query.States = append(query.States, state)
+	// Multi-valued params may repeat or be comma-separated; both forms are
+	// accepted so a client can build the query either way.
+	for _, value := range multiValueParam(r, "state") {
+		state, err := workspace.ParseTicketState(value)
+		if err != nil {
+			orihttp.BadRequest(w, err.Error())
+			return
 		}
+		query.States = append(query.States, state)
+	}
+	query.Tags = multiValueParam(r, "tag")
+	query.Assignees = multiValueParam(r, "assignee")
+	query.Sources = multiValueParam(r, "source")
+	query.OwnerIDs = multiValueParam(r, "owner")
+
+	for _, value := range multiValueParam(r, "priority") {
+		priority, err := strconv.Atoi(value)
+		if err != nil {
+			orihttp.BadRequest(w, "priority must be an integer between 1 and 5")
+			return
+		}
+		query.Priorities = append(query.Priorities, priority)
 	}
 
-	tickets, err := th.service.List(query)
+	if raw := r.URL.Query().Get("due"); strings.TrimSpace(raw) != "" {
+		due, err := workspace.ParseTicketDueFilter(raw)
+		if err != nil {
+			orihttp.BadRequest(w, err.Error())
+			return
+		}
+		query.Due = due
+	}
+	if raw := r.URL.Query().Get("archive"); strings.TrimSpace(raw) != "" {
+		archive, err := workspace.ParseTicketArchiveFilter(raw)
+		if err != nil {
+			orihttp.BadRequest(w, err.Error())
+			return
+		}
+		query.Archive = archive
+	}
+	if raw := r.URL.Query().Get("sort"); strings.TrimSpace(raw) != "" {
+		field, err := workspace.ParseTicketSortField(raw)
+		if err != nil {
+			orihttp.BadRequest(w, err.Error())
+			return
+		}
+		query.Sort = field
+	}
+
+	descending, err := parseOptionalBool(r.URL.Query().Get("desc"))
 	if err != nil {
+		orihttp.BadRequest(w, "desc must be a boolean")
+		return
+	}
+	query.SortDescending = descending
+	query.Search = r.URL.Query().Get("search")
+
+	if raw := r.URL.Query().Get("limit"); strings.TrimSpace(raw) != "" {
+		limit, err := strconv.Atoi(strings.TrimSpace(raw))
+		if err != nil {
+			orihttp.BadRequest(w, "limit must be an integer")
+			return
+		}
+		query.Limit = limit
+	}
+
+	page, err := th.service.Search(query)
+	if err != nil {
+		// A bad filter value is the client's problem, not a missing workspace;
+		// only fall through to 404 when the workspace itself cannot be read.
+		if validationErr, ok := workspace.IsTicketValidationError(err); ok {
+			_ = orihttp.RespondAPIError(w, http.StatusBadRequest,
+				orihttp.NewAPIError(orihttp.ErrCodeValidation, validationErr.Message).
+					WithDetails(map[string]string{"field": validationErr.Field}))
+			return
+		}
 		logger.Error("Failed to list tickets", logger.Fields{"error": err, "studio_id": studioID})
 		orihttp.RespondErrorWithErr(w, http.StatusNotFound, "Workspace not found", err)
 		return
 	}
 
 	_ = orihttp.RespondJSON(w, http.StatusOK, ticketListResponse{
-		Tickets:            tickets,
-		Count:              len(tickets),
+		Tickets:            page.Tickets,
+		Count:              len(page.Tickets),
+		Total:              page.Total,
+		Truncated:          page.Truncated,
+		PartialOwners:      page.PartialOwners,
 		StudioID:           studioID,
 		IncludeDescendants: query.IncludeDescendants,
 	})
+}
+
+// multiValueParam collects a repeated and/or comma-separated query parameter
+// into a trimmed, non-empty list.
+func multiValueParam(r *http.Request, name string) []string {
+	var out []string
+	for _, raw := range r.URL.Query()[name] {
+		for value := range strings.SplitSeq(raw, ",") {
+			if trimmed := strings.TrimSpace(value); trimmed != "" {
+				out = append(out, trimmed)
+			}
+		}
+	}
+	return out
 }
 
 func (th *TicketHandler) handleCreate(w http.ResponseWriter, r *http.Request, studioID string) {
