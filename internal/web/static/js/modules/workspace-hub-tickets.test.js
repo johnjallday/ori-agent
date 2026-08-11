@@ -246,17 +246,57 @@ test('transitionOptions renders only legal moves and labels promotion explicitly
   );
   assert.deepEqual(plain(api.transitionOptions(backlog)), [
     { id: 'ready', label: 'Promote to Ready' },
-    { id: 'cancelled', label: 'Move to Cancelled' }
+    { id: 'cancelled', label: 'Cancel' }
   ]);
 
   const review = api.normalizeTicket(
     serverTicket({ state: 'review', legal_transitions: ['in_progress', 'done', 'cancelled'] })
   );
   const labels = api.transitionOptions(review).map(option => option.label);
-  assert.deepEqual(plain(labels), ['Move to In Progress', 'Move to Done', 'Move to Cancelled']);
+  // Labels name the INTENT, not the destination state: from Review,
+  // in_progress means "request changes" and done means "mark done".
+  assert.deepEqual(plain(labels), ['Request changes', 'Mark done', 'Cancel']);
 
   assert.equal(api.canTransitionTo(backlog, 'ready'), true);
   assert.equal(api.canTransitionTo(backlog, 'done'), false);
+});
+
+// FR-51/FR-70: the same destination state means different things from
+// different origins, and the label has to say which.
+test('the same transition is labelled by intent, not by destination', () => {
+  const { api } = loadTickets();
+
+  const labelFor = (state, legal, target) => {
+    const ticket = api.normalizeTicket(serverTicket({ state, legal_transitions: legal }));
+    return api.transitionOptions(ticket).find(option => option.id === target).label;
+  };
+
+  // `ready` from three different origins is three different decisions.
+  assert.equal(labelFor('backlog', ['ready'], 'ready'), 'Promote to Ready');
+  assert.equal(labelFor('done', ['ready'], 'ready'), 'Reopen');
+  assert.equal(labelFor('cancelled', ['ready'], 'ready'), 'Reopen');
+  assert.equal(labelFor('in_progress', ['ready'], 'ready'), 'Stop work');
+
+  // `in_progress` likewise.
+  assert.equal(labelFor('ready', ['in_progress'], 'in_progress'), 'Start work');
+  assert.equal(labelFor('review', ['in_progress'], 'in_progress'), 'Request changes');
+});
+
+// FR-29/FR-30: Done is offered from Review and nowhere else.
+test('Mark done is offered only from Review', () => {
+  const { api } = loadTickets();
+
+  const offersDone = (state, legal) => {
+    const ticket = api.normalizeTicket(serverTicket({ state, legal_transitions: legal }));
+    return api.transitionOptions(ticket).some(option => option.id === 'done');
+  };
+
+  assert.equal(offersDone('review', ['in_progress', 'done', 'cancelled']), true);
+  // The server never lists `done` as legal from these, so the UI never shows
+  // it — a successful run cannot put the button there either.
+  assert.equal(offersDone('backlog', ['ready', 'cancelled']), false);
+  assert.equal(offersDone('ready', ['backlog', 'in_progress', 'cancelled']), false);
+  assert.equal(offersDone('in_progress', ['ready', 'review', 'cancelled']), false);
 });
 
 // --- Group 2: filters, search, sort, archive, hierarchy -------------------
@@ -438,6 +478,26 @@ test('the board move menu offers exactly the legal board destinations', () => {
     ['in_progress', 'done'],
     'the keyboard menu must match the moves a drag could make'
   );
+});
+
+// FR-27/FR-33: a ticket's full attempt history is discoverable by its ID, and
+// a retry adds an attempt rather than replacing one.
+test('run history is fetched per ticket and ordered newest first', async () => {
+  const { api, calls } = loadTickets(() => ({
+    body: {
+      runs: [
+        { id: 'run-1', status: 'failed', started_at: '2026-08-01T10:00:00Z', error: 'boom' },
+        { id: 'run-2', status: 'succeeded', started_at: '2026-08-02T10:00:00Z' }
+      ]
+    }
+  }));
+
+  const runs = await api.api.runs('ws-1', 'tkt-1');
+
+  assert.match(calls[0].url, /\/api\/workspaces\/ws-1\/runs\?ticket_id=tkt-1/);
+  assert.equal(runs.length, 2, 'both attempts must survive; a retry never overwrites');
+  assert.equal(runs[0].id, 'run-2', 'newest attempt first');
+  assert.equal(runs[1].error, 'boom', 'the earlier failure keeps its error');
 });
 
 test('state metadata never relies on color alone', () => {

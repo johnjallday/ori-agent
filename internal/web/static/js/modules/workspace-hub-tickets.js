@@ -119,6 +119,8 @@
       parent: raw.parent ? normalizeTicketSummary(raw.parent) : null,
       subtickets: Array.isArray(raw.subtickets) ? raw.subtickets.map(normalizeTicketSummary) : [],
       archived: Boolean(raw.archived),
+      startedAt: raw.started_at || null,
+      completedAt: raw.completed_at || null,
       version: Number(raw.version) || 0,
       createdAt: raw.created_at || '',
       updatedAt: raw.updated_at || ''
@@ -350,6 +352,30 @@
       return normalizeTicketList(payload && payload.tickets);
     },
 
+    /**
+     * Every execution attempt for one ticket, newest first (FR-27, FR-33).
+     *
+     * Runs are attempt-level records: a retry adds one, it never rewrites the
+     * one before it. This is what lets detail show the whole story rather
+     * than only the latest outcome.
+     */
+    async runs(studioId, ticketId) {
+      const url =
+        `/api/workspaces/${encodeURIComponent(studioId)}/runs` +
+        `?ticket_id=${encodeURIComponent(ticketId)}`;
+      const payload = await request('GET', url);
+      const runs = (payload && (payload.runs || (payload.data && payload.data.runs))) || [];
+      return runs
+        .map(run => ({
+          id: run.id || '',
+          status: run.status || '',
+          startedAt: run.started_at || run.created_at || '',
+          finishedAt: run.finished_at || run.completed_at || '',
+          error: run.error || ''
+        }))
+        .sort((a, b) => String(b.startedAt).localeCompare(String(a.startedAt)));
+    },
+
     async remove(studioId, ticketId, version) {
       const suffix = typeof version === 'number' && version > 0 ? `?version=${version}` : '';
       await request(
@@ -376,14 +402,38 @@
    * menu. Backlog promotion is labeled explicitly rather than as a bare state
    * name, because "Ready" alone does not read as a commitment (FR-51).
    */
+  /**
+   * Labels a transition by the INTENT it expresses, not by its destination
+   * state. "Promote to Ready" and "Reopen" are the same `ready` transition,
+   * but they mean different things to the person clicking, and a bare "Move to
+   * Ready" would hide that difference (FR-51, FR-70).
+   */
+  function transitionLabel(fromState, toState) {
+    const key = `${fromState}->${toState}`;
+    const labels = {
+      'backlog->ready': 'Promote to Ready',
+      'backlog->cancelled': 'Cancel',
+      'ready->backlog': 'Return to Backlog',
+      'ready->in_progress': 'Start work',
+      'ready->cancelled': 'Cancel',
+      'in_progress->ready': 'Stop work',
+      'in_progress->review': 'Send for review',
+      'in_progress->cancelled': 'Cancel',
+      'review->in_progress': 'Request changes',
+      'review->done': 'Mark done',
+      'review->cancelled': 'Cancel',
+      'done->ready': 'Reopen',
+      'cancelled->ready': 'Reopen'
+    };
+    return labels[key] || `Move to ${stateLabel(toState)}`;
+  }
+
   function transitionOptions(ticket) {
     if (!ticket || !Array.isArray(ticket.legalTransitions)) return [];
-    return ticket.legalTransitions.map(id => {
-      if (ticket.state === 'backlog' && id === 'ready') {
-        return { id, label: 'Promote to Ready' };
-      }
-      return { id, label: `Move to ${stateLabel(id)}` };
-    });
+    return ticket.legalTransitions.map(id => ({
+      id,
+      label: transitionLabel(ticket.state, id)
+    }));
   }
 
   // --- Tickets destination view ------------------------------------------
@@ -1000,7 +1050,25 @@
     }
 
     // --- Execution ---
+    //
+    // Deliberately separate from Work. What a Run did is attempt-level data;
+    // it never restates the Ticket's own lifecycle state (FR-8, FR-61), which
+    // is why "Latest run" and "State" are different rows in different
+    // sections rather than one conflated status.
     appendSectionTitle(body, 'Execution');
+
+    if (ticket.needsAttention) {
+      const attention = document.createElement('p');
+      attention.className = 'ticket-detail-attention';
+      attention.setAttribute('role', 'status');
+      // The Ticket is still open and still wanted — the attempt failed, not
+      // the work (FR-32). The copy says so, and the retry path is the
+      // "Send for review"/"Stop work" actions already offered above.
+      attention.textContent =
+        'The latest run needs attention. This ticket is still open — retry it or take it over manually.';
+      body.appendChild(attention);
+    }
+
     const execution = document.createElement('dl');
     execution.className = 'ticket-detail-summary';
     appendDetailRow(execution, 'Assignee', ticket.assignee || 'Unassigned');
@@ -1008,22 +1076,20 @@
     appendDetailRow(
       execution,
       'Waiting for intent',
-      ticket.awaitingExecutionIntent ? 'Yes — no run will start until you start it' : ''
+      ticket.awaitingExecutionIntent ? 'Yes — no run starts until you start it' : ''
     );
-    appendDetailRow(execution, 'Latest run', ticket.currentRunID || ticket.currentRunId || '');
-    appendDetailRow(
-      execution,
-      'Attention',
-      ticket.needsAttention ? 'The latest run needs attention' : ''
-    );
-    if (!execution.childNodes.length) {
-      const none = document.createElement('p');
-      none.className = 'ticket-detail-empty';
-      none.textContent = 'No execution configured.';
-      body.appendChild(none);
-    } else {
-      body.appendChild(execution);
-    }
+    appendDetailRow(execution, 'Latest run', ticket.currentRunId || '');
+    appendDetailRow(execution, 'Started', ticket.startedAt ? formatDate(ticket.startedAt) : '');
+    appendDetailRow(execution, 'Closed', ticket.completedAt ? formatDate(ticket.completedAt) : '');
+    body.appendChild(execution);
+
+    // Run history loads separately and asynchronously: it is attempt-level
+    // data on a different store, and a slow or failing runs endpoint must not
+    // stop the Ticket itself from rendering.
+    const runsHost = document.createElement('div');
+    runsHost.className = 'ticket-detail-runs';
+    body.appendChild(runsHost);
+    void renderRunHistory(runsHost, ticket);
 
     // --- History ---
     if (ticket.stateHistory.length) {
@@ -1040,6 +1106,59 @@
       });
       body.appendChild(history);
     }
+  }
+
+  /**
+   * Lists every attempt for a Ticket, newest first. Run status is shown as
+   * the Run's own outcome and never restated as the Ticket's state — that
+   * separation is the whole point of having both (FR-8, FR-61).
+   */
+  async function renderRunHistory(host, ticket) {
+    if (!host) return;
+    host.replaceChildren();
+
+    let runs = [];
+    try {
+      runs = await api.runs(ticket.owningWorkspaceId, ticket.id);
+    } catch {
+      const failed = document.createElement('p');
+      failed.className = 'ticket-detail-empty';
+      failed.textContent = 'Run history is unavailable right now.';
+      host.appendChild(failed);
+      return;
+    }
+
+    // A Ticket that has never run is normal, not an error state.
+    if (!runs.length) return;
+
+    appendSectionTitle(host, `Runs (${runs.length})`);
+    const list = document.createElement('ol');
+    list.className = 'ticket-detail-runs-list';
+    runs.forEach((run, index) => {
+      const item = document.createElement('li');
+      item.className = 'ticket-detail-run';
+      if (index === 0) item.dataset.latest = 'true';
+
+      const status = document.createElement('span');
+      status.className = 'ticket-detail-run-status';
+      status.dataset.status = run.status;
+      status.textContent = index === 0 ? `${run.status} (latest)` : run.status;
+
+      const when = document.createElement('span');
+      when.className = 'ticket-detail-run-when';
+      when.textContent = run.startedAt ? formatDate(run.startedAt) : '';
+
+      item.appendChild(status);
+      item.appendChild(when);
+      if (run.error) {
+        const error = document.createElement('span');
+        error.className = 'ticket-detail-run-error';
+        error.textContent = run.error;
+        item.appendChild(error);
+      }
+      list.appendChild(item);
+    });
+    host.appendChild(list);
   }
 
   function buildSummaryRow(label, summary) {
@@ -1075,20 +1194,19 @@
     const row = document.createElement('div');
     row.className = 'ticket-detail-actions';
 
-    const planningTargets = new Set(['backlog', 'ready', 'in_progress']);
-    transitionOptions(ticket)
-      .filter(option => planningTargets.has(option.id))
-      .forEach(option => {
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.className = 'modern-btn modern-btn-secondary modern-btn-sm ticket-action';
-        button.dataset.transition = option.id;
-        // "Start work" reads as an intent; "Move to In Progress" reads as
-        // bookkeeping. Both are the same server transition.
-        button.textContent = option.id === 'in_progress' ? 'Start work' : option.label;
-        button.addEventListener('click', () => void applyTransition(ticket, option.id));
-        row.appendChild(button);
-      });
+    // "Mark done" is the ONLY path to Done and it exists only from Review.
+    // That is what makes acceptance an explicit human act rather than
+    // something a successful Run can claim on the user's behalf (FR-29, FR-30).
+    transitionOptions(ticket).forEach(option => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      const primary = option.id === 'done' || (ticket.state === 'backlog' && option.id === 'ready');
+      button.className = `modern-btn ${primary ? 'modern-btn-primary' : 'modern-btn-secondary'} modern-btn-sm ticket-action`;
+      button.dataset.transition = option.id;
+      button.textContent = option.label;
+      button.addEventListener('click', () => void applyTransition(ticket, option.id));
+      row.appendChild(button);
+    });
 
     const remove = document.createElement('button');
     remove.type = 'button';

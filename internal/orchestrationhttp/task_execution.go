@@ -822,12 +822,26 @@ func (th *TaskHandler) executeTaskWithDependencies(ws *workspace.Workspace, task
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	th.registerRunningTask(task.ID, cancel)
+	// Exclusive claim: a second concurrent start of the same Ticket is refused
+	// rather than run alongside the first (FR-26). Without this, two runs
+	// mutate one record at once and the first becomes uncancellable.
+	if !th.registerRunningTask(task.ID, cancel) {
+		cancel()
+		return "", fmt.Errorf("cannot start task: %s is already running", task.ID)
+	}
 	defer th.unregisterRunningTask(task.ID)
 
-	if task.Status != workspace.TaskStatusInProgress {
+	// Refuse closed work before starting: silently re-running a Ticket the
+	// user marked Done or Cancelled would erase a decision they made (FR-21).
+	if err := workspace.RequireTicketRunnable(task, "cannot start task"); err != nil {
+		return "", err
+	}
+	if task.CanonicalState() != workspace.TicketStateInProgress {
 		workspace.PrepareTaskExecutionStepsForResume(task)
-		if err := task.SetStatus(workspace.TaskStatusInProgress); err != nil {
+		// Ready → In Progress through the canonical path, so the start is
+		// audited with its Run id and the waiting-for-intent marker is
+		// cleared by the intent that actually arrived (FR-24, FR-26, FR-27).
+		if err := task.StartTicketRun(task.CurrentRunID, workspace.TicketActorUser, time.Now()); err != nil {
 			return "", fmt.Errorf("cannot start task: %w", err)
 		}
 	}
@@ -965,8 +979,24 @@ func (th *TaskHandler) executeTaskWithDependencies(ws *workspace.Workspace, task
 			completedAt := time.Now()
 			task.CompletedAt = &completedAt
 			logger.Info("Task completed successfully", logger.Fields{"task_id": task.ID})
-			if err := task.SetStatus(workspace.TaskStatusCompleted); err != nil {
-				logger.Error("Task completed transition rejected", logger.Fields{"task_id": task.ID, "error": err})
+			// A successful Run sends the Ticket to REVIEW, never to Done —
+			// acceptance is an explicit human action (FR-28, FR-29, FR-30).
+			// ApplyRunOutcome is a no-op when the Ticket has already moved on,
+			// so a late or duplicate callback cannot overwrite a state the
+			// user chose in the meantime (FR-134).
+			moved := task.ApplyRunOutcome(workspace.TicketRunResult{
+				Outcome: workspace.TicketRunSucceeded,
+				RunID:   task.CurrentRunID,
+				Actor:   workspace.TicketActorRun,
+				At:      completedAt,
+			})
+			if !moved {
+				// Either the Ticket was not In Progress (late callback) or the
+				// transition was refused. Keep the legacy projection honest for
+				// compatibility consumers without touching canonical state.
+				if err := task.SetStatus(workspace.TaskStatusCompleted); err != nil {
+					logger.Debug("Task completed transition not applied", logger.Fields{"task_id": task.ID, "error": err})
+				}
 			}
 			task.Result = result
 			workspace.ApplyTaskResultMetadata(task, result)

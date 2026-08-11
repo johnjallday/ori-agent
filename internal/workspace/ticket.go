@@ -638,6 +638,12 @@ type Ticket struct {
 	CurrentRunID   string `json:"current_run_id,omitempty"`
 	NeedsAttention bool   `json:"needs_attention,omitempty"`
 
+	// When work began and when it closed. Both are stamped by lifecycle
+	// transitions; reopening clears CompletedAt while the history entry that
+	// recorded the closure remains (FR-37).
+	StartedAt   *time.Time `json:"started_at,omitempty"`
+	CompletedAt *time.Time `json:"completed_at,omitempty"`
+
 	StateHistory []TicketStateChange `json:"state_history,omitempty"`
 	// LegalTransitions lists the states this Ticket may move to right now, so
 	// clients render only legal actions (FR-70).
@@ -749,6 +755,8 @@ func NewTicket(task *Task, owningWorkspaceID, owningWorkspaceName string) Ticket
 		AwaitingExecutionIntent: task.AwaitingExecutionIntent,
 		CurrentRunID:            task.CurrentRunID,
 		NeedsAttention:          task.NeedsAttention(),
+		StartedAt:               task.StartedAt,
+		CompletedAt:             task.CompletedAt,
 		StateHistory:            append([]TicketStateChange(nil), task.StateHistory...),
 		LegalTransitions:        LegalTicketTransitions(state),
 		Version:                 task.TicketVersion,

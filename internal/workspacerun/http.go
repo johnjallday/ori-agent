@@ -55,6 +55,24 @@ func (h *Handler) ListRuns(w http.ResponseWriter, r *http.Request) {
 		writeRunError(w, err)
 		return
 	}
+
+	// `ticket_id` narrows the list to one Ticket's attempts, which is what
+	// makes a Ticket's full Run history discoverable from its stable ID
+	// (tasks/prd-workspace-ticket-management.md FR-27, FR-95).
+	//
+	// It filters rather than deletes: every attempt stays in the store with
+	// its own trace, result, cost, and artifacts, so a retry can never
+	// overwrite the attempt before it (FR-33).
+	if ticketID := strings.TrimSpace(r.URL.Query().Get("ticket_id")); ticketID != "" {
+		filtered := make([]*Run, 0, len(runs))
+		for _, run := range runs {
+			if run != nil && run.Scope.TargetTaskID == ticketID {
+				filtered = append(filtered, run)
+			}
+		}
+		runs = filtered
+	}
+
 	orihttp.Success(w, map[string]any{"runs": runs})
 }
 

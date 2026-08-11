@@ -747,15 +747,36 @@ func applyTransitionSideEffects(task *Task, next TicketState) {
 	case TicketStateReady:
 		// Work arriving at Ready — freshly promoted, reopened, or stopped —
 		// is quiescent until someone explicitly acts on it again (FR-24).
+		//
+		// This is also why reopening does NOT restore a schedule that
+		// cancellation disabled: the Ticket comes back as work someone has to
+		// choose to start, not as work that silently resumes running on a
+		// timer the user thought they had stopped (FR-39).
 		task.AwaitingExecutionIntent = true
 		// BacklogRank belongs to the Backlog rank space only; leaving a stale
 		// value behind would let it leak into a later Backlog ordering.
 		task.BacklogRank = 0
+
 	case TicketStateBacklog:
 		// Returning to Backlog must satisfy the Backlog invariants, which
-		// forbid a waiting-for-execution marker.
+		// forbid a waiting-for-execution marker, a schedule, or a pending run.
 		task.AwaitingExecutionIntent = false
+		disableTicketSchedule(task)
+
+	case TicketStateCancelled:
+		// Cancelling stops future execution (FR-38). Leaving a schedule armed
+		// on cancelled work is how a Ticket a user closed runs again next
+		// morning. The schedule CONFIG is retained so the user can see what
+		// was disabled and re-enable it deliberately.
+		disableTicketSchedule(task)
 	}
+}
+
+// disableTicketSchedule disarms future scheduled execution without discarding
+// the schedule's configuration, so the decision is visible and reversible.
+func disableTicketSchedule(task *Task) {
+	task.ScheduleEnabled = false
+	task.NextRun = nil
 }
 
 func ticketActorOrDefault(actor string) string {
