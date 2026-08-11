@@ -990,6 +990,9 @@ function loadMapWithFetch(fetchImpl, windowExtras = {}, consoleImpl) {
       setTimeout,
       clearTimeout,
       fetch: fetchImpl,
+      // hasHQFocusIntent parses the query string with it, for the tests that
+      // pass a location through windowExtras.
+      URLSearchParams,
       console: consoleImpl || { error() {}, warn() {}, log() {} }
     },
     { filename: 'workspace-map.js' }
@@ -1924,6 +1927,27 @@ test('a saved camera still wins over framing the reserved site (#329, FR-45)', a
   assert.deepEqual({ ...map.getCamera() }, { centerX: 512, centerY: 384, zoom: 1.25 });
 });
 
+test('a reserved site does not frame the camera before the layout lands (#329)', async () => {
+  // The layout request is left unresolved: until it answers, saved anchors may
+  // still arrive and move everything, so framing now would frame the wrong
+  // world and then be spent.
+  let release;
+  const map = loadMapWithFetch(
+    () => new Promise(resolve => (release = () => resolve(jsonResponse({ positions: {} }))))
+  );
+  map.setHQStatus(HQ_MISSING);
+  const harness = hqHarness();
+  mountWithCamera(map, harness, []);
+  await flush();
+  assert.deepEqual({ ...map.getCamera() }, DEFAULT_CAMERA, 'framed while still loading');
+
+  release();
+  await flush();
+  mountWithCamera(map, harness, []);
+  await flush();
+  assert.notDeepEqual({ ...map.getCamera() }, DEFAULT_CAMERA, 'and framed once it settled');
+});
+
 test('framing the reserved site changes the camera and nothing else (#329)', async () => {
   const map = loadMapWithFetch(() => jsonResponse({ schema_version: 1, positions: {} }));
   map.setHQStatus(HQ_MISSING);
@@ -1946,6 +1970,37 @@ test('framing the reserved site changes the camera and nothing else (#329)', asy
     'and nothing was written for it'
   );
   assert.equal(map.getSelectedId(), '', 'framing is not a selection');
+
+  // The placement engine is untouched: same anchors, same world, whether or
+  // not the camera decided to frame them.
+  const layout = map.computeWorldLayout([], { hqSite: true });
+  assert.deepEqual({ x: layout.hqSite.x, y: layout.hqSite.y }, { x: anchor.x, y: anchor.y });
+  assert.ok(layout.pad && Number.isFinite(layout.pad.x), 'the create pad still has its anchor');
+  assert.ok(
+    layout.bounds.maxX > layout.bounds.minX && layout.bounds.maxY > layout.bounds.minY,
+    'and the world still has real bounds'
+  );
+});
+
+test('focus intent still selects and announces the reserved site it frames (#322, #329)', async () => {
+  const announced = [];
+  const map = loadMapWithFetch(() => jsonResponse({ schema_version: 1, positions: {} }), {
+    location: { search: '?focus=personal-hq', pathname: '/' }
+  });
+  map.setHQStatus(HQ_MISSING);
+  const harness = hqHarness();
+  map.mount(harness.container, {
+    workspaces: [],
+    hideChrome: true,
+    selectOnly: true,
+    noAutoSelect: true,
+    onSelectHQSite: view => announced.push(view)
+  });
+  await flush();
+
+  assert.equal(map.getSelectedId(), '__personal_hq_site__', 'the focus intent still selects');
+  assert.equal(announced.length, 1, 'and the host was still told exactly once');
+  assert.ok(clearOf(map, hqAnchor(map), map.getCamera()), 'while the camera framed it clear');
 });
 
 // ---------------------------------------------------------------------------

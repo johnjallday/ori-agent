@@ -73,6 +73,37 @@ test.describe.serial('Personal HQ onboarding and Daily Brief', () => {
     await expect(site).toHaveClass(/is-selected/);
     await expect(site).toContainText('Not created');
 
+    // ...and it must be reachable, not just present. The camera's first-paint
+    // guard only counted workspaces and group districts as content, so a
+    // profile whose whole map is this one landmark was left at the hard-coded
+    // default view — which put the site low and right of centre with its
+    // caption behind the floating control strip (#329). The strip is a real
+    // element, so this compares measured boxes rather than trusting a
+    // hard-coded height.
+    await expect(site.locator('.ws-map-tile-name')).toHaveText('Personal HQ');
+    // The camera settles on the first honest measurement of the canvas; wait
+    // for the transform it writes rather than for a fixed delay.
+    await expect
+      .poll(async () => page.evaluate(() => window.OriWorkspaceMap?.getCamera?.()?.zoom ?? null))
+      .not.toBeNull();
+    const strip = page.locator('.ws-map-actions');
+    await expect(strip).toBeVisible();
+    const siteBox = await site.boundingBox();
+    const stripBox = await strip.boundingBox();
+    const canvasBox = await page.locator('.ws-map-canvas').boundingBox();
+    expect(siteBox, 'the landmark has no box to measure').not.toBeNull();
+    expect(stripBox, 'the control strip has no box to measure').not.toBeNull();
+    expect(canvasBox).not.toBeNull();
+    expect(
+      siteBox!.y + siteBox!.height,
+      `landmark bottom ${siteBox!.y + siteBox!.height} must clear strip top ${stripBox!.y}`
+    ).toBeLessThanOrEqual(stripBox!.y);
+    // And inside the canvas on every other edge, so "clear of the strip" was
+    // not achieved by pushing it off-screen instead.
+    expect(siteBox!.y).toBeGreaterThanOrEqual(canvasBox!.y);
+    expect(siteBox!.x).toBeGreaterThanOrEqual(canvasBox!.x);
+    expect(siteBox!.x + siteBox!.width).toBeLessThanOrEqual(canvasBox!.x + canvasBox!.width);
+
     // Cockpit mode suppresses the map's own overview panel, so the context rail
     // is where the HQ's choices live — and the ONLY place they live. It has to
     // follow the map's focus-intent selection with no click from the user (#322).
