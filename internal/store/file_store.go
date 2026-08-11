@@ -341,7 +341,11 @@ func (s *fileStore) saveUnlocked() error {
 		return err
 	}
 
-	// Save individual agent files in nested structure
+	// Save individual agent files in nested structure.
+	//
+	// This is an explicit projection, not a marshal of agent.Agent, so a new
+	// first-class field is invisible on disk until it is listed here. Appearance
+	// is listed for exactly that reason (FR-1/FR-68).
 	type persistSettings struct {
 		Type         string                 `json:"type"` // Agent type
 		Role         types.AgentRole        `json:"role,omitempty"`
@@ -350,6 +354,7 @@ func (s *fileStore) saveUnlocked() error {
 		Status       types.AgentStatus      `json:"status,omitempty"`
 		Statistics   *types.AgentStatistics `json:"statistics,omitempty"`
 		Metadata     *types.AgentMetadata   `json:"metadata,omitempty"`
+		Appearance   *types.AgentAppearance `json:"appearance,omitempty"`
 		Evolution    *types.AgentEvolution  `json:"evolution,omitempty"`
 	}
 
@@ -362,6 +367,10 @@ func (s *fileStore) saveUnlocked() error {
 
 		// Only save agent_settings.json with everything (Type + Settings)
 		// Don't create config.json unless necessary
+		// Canonicalize immediately before serializing, so a record written by any
+		// code path — not just the migrating load path — is canonical on disk.
+		agent.EnsureAppearance()
+
 		agentSettings := persistSettings{
 			Type:         agent.Type,
 			Role:         agent.Role,
@@ -370,6 +379,7 @@ func (s *fileStore) saveUnlocked() error {
 			Status:       agent.Status,
 			Statistics:   agent.Statistics,
 			Metadata:     agent.Metadata,
+			Appearance:   agent.Appearance,
 			Evolution:    agent.Evolution,
 		}
 
@@ -440,8 +450,8 @@ func (s *fileStore) load() error {
 				s.agents = in.Agents
 			}
 			// Normalize migrated agents from legacy schema.
-			for _, ag := range s.agents {
-				s.normalizeLoadedAgent(ag)
+			for agentName, ag := range s.agents {
+				s.normalizeLoadedAgent(agentName, ag)
 			}
 			return nil
 		}
@@ -489,7 +499,7 @@ func (s *fileStore) load() error {
 						logger.Verbosef("⚠️ Could not read agent_settings.json for '%s': %v", agentName, err)
 					}
 
-					s.normalizeLoadedAgent(&ag)
+					s.normalizeLoadedAgent(agentName, &ag)
 					s.agents[agentName] = &ag
 				} else if filepath.Ext(entry.Name()) == ".json" {
 					// Legacy flat structure: agents/agent.json
@@ -506,7 +516,7 @@ func (s *fileStore) load() error {
 						continue
 					}
 
-					s.normalizeLoadedAgent(&ag)
+					s.normalizeLoadedAgent(agentName, &ag)
 					s.agents[agentName] = &ag
 				}
 			}
@@ -518,7 +528,7 @@ func (s *fileStore) load() error {
 
 // normalizeLoadedAgent applies defaults for backward compatibility while preserving
 // explicit values from disk.
-func (s *fileStore) normalizeLoadedAgent(ag *agent.Agent) {
+func (s *fileStore) normalizeLoadedAgent(name string, ag *agent.Agent) {
 	if ag == nil {
 		return
 	}
@@ -536,6 +546,24 @@ func (s *fileStore) normalizeLoadedAgent(ag *agent.Agent) {
 		ag.InitializeEvolution()
 	} else {
 		ag.Evolution.EnsureDefaults()
+	}
+
+	// Appearance migration runs here rather than in a one-shot startup pass so
+	// that any record reaching memory is canonical, whatever path loaded it. The
+	// migrated value is only in memory at this point; it reaches disk through the
+	// normal atomic save, so a crash mid-startup leaves the original file intact
+	// (FR-75).
+	result := ag.MigrateAppearance(agent.DefaultAppearanceEnvironment(agent.AppearanceUploadDir))
+	if len(result.Reasons) > 0 {
+		agent.RecordAppearanceMigrationNote(agent.AppearanceMigrationNote{
+			Agent:   name,
+			Scope:   "global",
+			Reasons: result.Reasons,
+		})
+		logger.Warn("Agent appearance migrated with notes", logger.Fields{
+			"agent":   name,
+			"reasons": strings.Join(result.Reasons, ", "),
+		})
 	}
 }
 

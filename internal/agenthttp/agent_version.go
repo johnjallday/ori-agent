@@ -40,24 +40,23 @@ func agentConfigVersion(a *agent.Agent) string {
 	type versionedMetadata struct {
 		Description    string                     `json:"description"`
 		Tags           []string                   `json:"tags"`
-		AvatarColor    string                     `json:"avatar_color"`
 		Favorite       bool                       `json:"favorite"`
 		RoutingProfile *types.AgentRoutingProfile `json:"routing_profile"`
-		// Character is part of the editable definition, so a concurrent identity
-		// change is caught by the same stale-edit guard as a prompt change
-		// (PRD FR-92).
-		//
-		// Adding this field shifts every agent's version token once, on the
-		// build that introduces it. That is harmless: a token is only held
-		// across a single load-then-save cycle, and a token issued by the
-		// previous build is already invalid after a restart.
-		Character *types.AgentCharacterIdentity `json:"character"`
 	}
 	payload := struct {
 		Type     string            `json:"type"`
 		Role     types.AgentRole   `json:"role"`
 		Settings versionedSettings `json:"settings"`
 		Metadata versionedMetadata `json:"metadata"`
+		// Appearance is part of the editable definition, so a concurrent
+		// appearance change is caught by the same stale-edit guard as a prompt
+		// change (PRD FR-16).
+		//
+		// It is hashed as the canonical object including inactive sources: two
+		// agents that render identically but hold different saved uploads are
+		// genuinely different definitions, and an edit based on one must not
+		// silently overwrite the other.
+		Appearance *types.AgentAppearance `json:"appearance"`
 	}{
 		Type: a.Type,
 		Role: a.Role,
@@ -70,15 +69,14 @@ func agentConfigVersion(a *agent.Agent) string {
 			MaxOutputTokens: a.Settings.MaxOutputTokens,
 			AllowWebSearch:  a.Settings.IsWebSearchAllowed(),
 		},
+		Appearance: a.Appearance,
 	}
 	if a.Metadata != nil {
 		payload.Metadata = versionedMetadata{
 			Description:    a.Metadata.Description,
 			Tags:           a.Metadata.Tags,
-			AvatarColor:    a.Metadata.AvatarColor,
 			Favorite:       a.Metadata.Favorite,
 			RoutingProfile: a.Metadata.RoutingProfile,
-			Character:      a.Metadata.Character,
 		}
 	}
 

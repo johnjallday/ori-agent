@@ -3,7 +3,11 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
-import { assertReadmeSceneContract, README_CAPTURE_CLOCK, README_SCENES } from './fixtures/readme-scenes';
+import {
+  assertReadmeSceneContract,
+  README_CAPTURE_CLOCK,
+  README_SCENES
+} from './fixtures/readme-scenes';
 
 const runDirectory = process.env.README_CAPTURE_RUN_DIR;
 const rawDirectory = process.env.README_CAPTURE_RAW_DIR;
@@ -13,46 +17,66 @@ const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url))
 const captureAssets = {
   bootstrapCss: path.join(repositoryRoot, 'node_modules/bootstrap/dist/css/bootstrap.min.css'),
   bootstrapJs: path.join(repositoryRoot, 'node_modules/bootstrap/dist/js/bootstrap.bundle.min.js'),
-  bootstrapIconsCss: path.join(repositoryRoot, 'node_modules/bootstrap-icons/font/bootstrap-icons.min.css'),
-  bootstrapIconsFont: path.join(repositoryRoot, 'node_modules/bootstrap-icons/font/fonts/bootstrap-icons.woff2'),
+  bootstrapIconsCss: path.join(
+    repositoryRoot,
+    'node_modules/bootstrap-icons/font/bootstrap-icons.min.css'
+  ),
+  bootstrapIconsFont: path.join(
+    repositoryRoot,
+    'node_modules/bootstrap-icons/font/fonts/bootstrap-icons.woff2'
+  )
 };
 
 const sceneStatuses: Array<{ id: string; status: 'passed' | 'failed'; detail?: string }> = [];
-const privatePatterns = [/\/Users\//i, /\/home\//i, /\bsk-[a-z0-9]/i, /AKIA[0-9A-Z]{16}/, /BEGIN PRIVATE KEY/];
+const privatePatterns = [
+  /\/Users\//i,
+  /\/home\//i,
+  /\bsk-[a-z0-9]/i,
+  /AKIA[0-9A-Z]{16}/,
+  /BEGIN PRIVATE KEY/
+];
 
-test.skip(!captureEnvironmentReady, 'Use scripts/readme-refresh.sh capture to supply an isolated staged run.');
+test.skip(
+  !captureEnvironmentReady,
+  'Use scripts/readme-refresh.sh capture to supply an isolated staged run.'
+);
 
 function json(route: Route, payload: unknown, status = 200) {
   return route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(payload) });
 }
 
 function workspace(id: string) {
-  const summary = README_SCENES.workspaces.find((item) => item.id === id) || README_SCENES.workspace_command;
+  const summary =
+    README_SCENES.workspaces.find(item => item.id === id) || README_SCENES.workspace_command;
   return {
     ...summary,
     id,
     description: 'Coordinate the launch review, owners, and next decisions.',
     entry_agent_name: 'Mira',
-    agents: README_SCENES.workspace_command.agents.map((agent) => agent.name),
+    agents: README_SCENES.workspace_command.agents.map(agent => agent.name),
     agent_instances: README_SCENES.workspace_command.agents.map((agent, index) => ({
       ...agent,
       id: `agent-${index + 1}`,
       entry_point: index === 0,
-      source: 'workspace',
+      source: 'workspace'
     })),
     attachments: [
       {
         id: README_SCENES.workspace_command.files[0].id,
         title: README_SCENES.workspace_command.files[0].name,
         type: 'other',
-        file_meta: { name: README_SCENES.workspace_command.files[0].name, size: 4096, status: 'synced' },
-      },
+        file_meta: {
+          name: README_SCENES.workspace_command.files[0].name,
+          size: 4096,
+          status: 'synced'
+        }
+      }
     ],
     directory_references: [],
     mcp_bindings: [],
     agent_mcp_access: [],
     shared_data: {},
-    workspace_settings: { execution_mode: 'guided' },
+    workspace_settings: { execution_mode: 'guided' }
   };
 }
 
@@ -65,8 +89,8 @@ function taskPayload() {
       assigned_to: index === 0 ? 'Mira' : 'Theo',
       created_at: '2026-07-17T12:00:00.000Z',
       updated_at: '2026-07-17T14:00:00.000Z',
-      tags: ['launch'],
-    })),
+      tags: ['launch']
+    }))
   };
 }
 
@@ -87,25 +111,29 @@ async function installFixtureRoutes(page: Page) {
   // (e.g. Calendar Ops's capabilities probe on a non-Calendar-Ops
   // workspace). Filtering only this exact network-layer message keeps the
   // check strict for everything that actually indicates a bug.
-  const resourceLoadStatusPattern = /^Failed to load resource: the server responded with a status of \d+/;
-  page.on('console', (message) => {
+  const resourceLoadStatusPattern =
+    /^Failed to load resource: the server responded with a status of \d+/;
+  page.on('console', message => {
     if (message.type() === 'error' && !resourceLoadStatusPattern.test(message.text())) {
       consoleErrors.push(message.text());
     }
   });
-  await page.addInitScript(({ clock }) => {
-    const RealDate = Date;
-    class FixedDate extends RealDate {
-      constructor(...args: ConstructorParameters<typeof Date>) {
-        super(args.length === 0 ? clock : args[0]);
+  await page.addInitScript(
+    ({ clock }) => {
+      const RealDate = Date;
+      class FixedDate extends RealDate {
+        constructor(...args: ConstructorParameters<typeof Date>) {
+          super(args.length === 0 ? clock : args[0]);
+        }
+        static now() {
+          return new RealDate(clock).valueOf();
+        }
       }
-      static now() {
-        return new RealDate(clock).valueOf();
-      }
-    }
-    // @ts-expect-error deterministic capture clock
-    window.Date = FixedDate;
-  }, { clock: README_CAPTURE_CLOCK });
+      // @ts-expect-error deterministic capture clock
+      window.Date = FixedDate;
+    },
+    { clock: README_CAPTURE_CLOCK }
+  );
   await page.addInitScript(() => {
     const NativeEventSource = window.EventSource;
     class ReadmeCaptureEventSource extends EventTarget {
@@ -134,7 +162,7 @@ async function installFixtureRoutes(page: Page) {
     // @ts-expect-error deterministic API-boundary fixture for an otherwise long-lived stream
     window.EventSource = ReadmeCaptureEventSource;
   });
-  await page.context().route('**/*', async (route) => {
+  await page.context().route('**/*', async route => {
     const request = route.request();
     const url = new URL(request.url());
     const base = new URL(test.info().project.use.baseURL as string);
@@ -143,19 +171,34 @@ async function installFixtureRoutes(page: Page) {
       // the pinned Bootstrap assets from node_modules so the real template can
       // initialize offline. All other third-party URLs receive a local stub;
       // the capture never contacts the network.
-      if (url.hostname === 'cdn.jsdelivr.net' && url.pathname.includes('/bootstrap@5.3.0/dist/css/bootstrap.min.css')) {
+      if (
+        url.hostname === 'cdn.jsdelivr.net' &&
+        url.pathname.includes('/bootstrap@5.3.0/dist/css/bootstrap.min.css')
+      ) {
         await route.fulfill({ path: captureAssets.bootstrapCss, contentType: 'text/css' });
         return;
       }
-      if (url.hostname === 'cdn.jsdelivr.net' && url.pathname.includes('/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js')) {
-        await route.fulfill({ path: captureAssets.bootstrapJs, contentType: 'application/javascript' });
+      if (
+        url.hostname === 'cdn.jsdelivr.net' &&
+        url.pathname.includes('/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js')
+      ) {
+        await route.fulfill({
+          path: captureAssets.bootstrapJs,
+          contentType: 'application/javascript'
+        });
         return;
       }
-      if (url.hostname === 'cdn.jsdelivr.net' && url.pathname.includes('/bootstrap-icons@1.11.3/font/bootstrap-icons.css')) {
+      if (
+        url.hostname === 'cdn.jsdelivr.net' &&
+        url.pathname.includes('/bootstrap-icons@1.11.3/font/bootstrap-icons.css')
+      ) {
         await route.fulfill({ path: captureAssets.bootstrapIconsCss, contentType: 'text/css' });
         return;
       }
-      if (url.hostname === 'cdn.jsdelivr.net' && url.pathname.includes('/bootstrap-icons@1.11.3/font/fonts/bootstrap-icons.woff2')) {
+      if (
+        url.hostname === 'cdn.jsdelivr.net' &&
+        url.pathname.includes('/bootstrap-icons@1.11.3/font/fonts/bootstrap-icons.woff2')
+      ) {
         await route.fulfill({ path: captureAssets.bootstrapIconsFont, contentType: 'font/woff2' });
         return;
       }
@@ -168,11 +211,22 @@ async function installFixtureRoutes(page: Page) {
     }
     const pathWithQuery = `${url.pathname}${url.search}`;
     if (url.pathname === '/api/personal-hq/status') {
-      await json(route, { status: { valid: true, workspace_id: README_SCENES.personal_hq.id, hq_onboarding_state: 'complete' } });
+      await json(route, {
+        status: {
+          valid: true,
+          workspace_id: README_SCENES.personal_hq.id,
+          hq_onboarding_state: 'complete'
+        }
+      });
       return;
     }
     if (url.pathname === '/api/onboarding/status') {
-      await json(route, { needs_onboarding: false, user_name: 'Riley', assistant_name: 'Ori', timezone: 'UTC' });
+      await json(route, {
+        needs_onboarding: false,
+        user_name: 'Riley',
+        assistant_name: 'Ori',
+        timezone: 'UTC'
+      });
       return;
     }
     if (url.pathname === '/api/settings/workspace-root') {
@@ -181,7 +235,7 @@ async function installFixtureRoutes(page: Page) {
         effective_workspace_root: '/Ori Workspaces',
         default_workspace_root: '/Ori Workspaces',
         source: 'default',
-        confirmed: true,
+        confirmed: true
       });
       return;
     }
@@ -205,8 +259,8 @@ async function installFixtureRoutes(page: Page) {
       await json(route, {
         status: {
           exists: false,
-          open_followup_count: 0,
-        },
+          open_followup_count: 0
+        }
       });
       return;
     }
@@ -231,7 +285,7 @@ async function installFixtureRoutes(page: Page) {
         '/api/personal-hq/email/status',
         '/api/settings/email-oauth',
         '/api/personal-hq/mail/proposals',
-        '/api/personal-hq/followups/home',
+        '/api/personal-hq/followups/home'
       ].includes(url.pathname)
     ) {
       await json(route, {});
@@ -299,7 +353,10 @@ async function installFixtureRoutes(page: Page) {
       return;
     }
     if (url.pathname === '/api/orchestration/workspace') {
-      await json(route, workspace(url.searchParams.get('id') || README_SCENES.workspace_command.workspace_id));
+      await json(
+        route,
+        workspace(url.searchParams.get('id') || README_SCENES.workspace_command.workspace_id)
+      );
       return;
     }
     if (url.pathname === '/api/orchestration/tasks') {
@@ -315,23 +372,44 @@ async function installFixtureRoutes(page: Page) {
       return;
     }
     if (url.pathname === '/api/agents/dashboard/list') {
-      await json(route, { agents: README_SCENES.workspace_command.agents.map((agent) => ({ ...agent, type: 'cli', model: 'gpt-5', provider: 'openai' })) });
+      await json(route, {
+        agents: README_SCENES.workspace_command.agents.map(agent => ({
+          ...agent,
+          type: 'cli',
+          model: 'gpt-5',
+          provider: 'openai'
+        }))
+      });
       return;
     }
     if (url.pathname === `/api/workspaces/${README_SCENES.workspace_command.workspace_id}/agents`) {
-      await json(route, { agents: README_SCENES.workspace_command.agents.map((agent) => ({ ...agent, type: 'cli', model: 'gpt-5', provider: 'openai', source: 'workspace' })) });
+      await json(route, {
+        agents: README_SCENES.workspace_command.agents.map(agent => ({
+          ...agent,
+          type: 'cli',
+          model: 'gpt-5',
+          provider: 'openai',
+          source: 'workspace'
+        }))
+      });
       return;
     }
-    if (url.pathname === `/api/workspaces/${README_SCENES.workspace_command.workspace_id}/files/tree`) {
+    if (
+      url.pathname === `/api/workspaces/${README_SCENES.workspace_command.workspace_id}/files/tree`
+    ) {
       await json(route, { files: [] });
       return;
     }
     if (/^\/api\/workspaces\/[^/]+\/notes$/.test(url.pathname)) {
       const id = url.pathname.split('/')[3];
       await json(route, {
-        notes: id === README_SCENES.workspace_command.workspace_id
-          ? README_SCENES.workspace_command.notes.map((note) => ({ ...note, content: 'Launch decision context is ready for review.' }))
-          : [],
+        notes:
+          id === README_SCENES.workspace_command.workspace_id
+            ? README_SCENES.workspace_command.notes.map(note => ({
+                ...note,
+                content: 'Launch decision context is ready for review.'
+              }))
+            : []
       });
       return;
     }
@@ -339,7 +417,9 @@ async function installFixtureRoutes(page: Page) {
       await json(route, { followups: [] });
       return;
     }
-    if (url.pathname === `/api/workspaces/${README_SCENES.workspace_command.workspace_id}/mission`) {
+    if (
+      url.pathname === `/api/workspaces/${README_SCENES.workspace_command.workspace_id}/mission`
+    ) {
       await json(route, {
         mission: README_SCENES.workspace_command.mission.title,
         cadence: null,
@@ -354,11 +434,14 @@ async function installFixtureRoutes(page: Page) {
         open_findings_count: 0,
         unclassified_mcp_ids: [],
         unclassified_skill_ids: [],
-        bindings_ready: true,
+        bindings_ready: true
       });
       return;
     }
-    if (url.pathname === `/api/workspaces/${README_SCENES.workspace_command.workspace_id}/template-setup/start`) {
+    if (
+      url.pathname ===
+      `/api/workspaces/${README_SCENES.workspace_command.workspace_id}/template-setup/start`
+    ) {
       await json(route, { started: false });
       return;
     }
@@ -384,8 +467,8 @@ async function installFixtureRoutes(page: Page) {
           applicable: false,
           state: 'not_applicable',
           dismissed: false,
-          auto_open: false,
-        },
+          auto_open: false
+        }
       });
       return;
     }
@@ -396,7 +479,10 @@ async function installFixtureRoutes(page: Page) {
     // internal/calendarhttp.Setup's applicable:false and Capabilities'
     // resolveGateway connector_missing (409), matching production exactly and
     // keeping both modules dormant for this scene.
-    if (url.pathname === '/api/calendar-ops/setup' && url.searchParams.get('workspace_id') === README_SCENES.workspace_command.workspace_id) {
+    if (
+      url.pathname === '/api/calendar-ops/setup' &&
+      url.searchParams.get('workspace_id') === README_SCENES.workspace_command.workspace_id
+    ) {
       await json(route, { applicable: false });
       return;
     }
@@ -404,7 +490,14 @@ async function installFixtureRoutes(page: Page) {
       url.pathname === '/api/calendar-ops/capabilities' &&
       url.searchParams.get('workspace_id') === README_SCENES.workspace_command.workspace_id
     ) {
-      await json(route, { error: 'no calendar connector is configured for this workspace', code: 'connector_missing' }, 409);
+      await json(
+        route,
+        {
+          error: 'no calendar connector is configured for this workspace',
+          code: 'connector_missing'
+        },
+        409
+      );
       return;
     }
     if (url.pathname === `/api/workspaces/${README_SCENES.workspace_command.workspace_id}`) {
@@ -446,10 +539,10 @@ async function installFixtureRoutes(page: Page) {
           agent_learned: [],
           workspace_provided: [],
           global_library: [],
-          capacity: { used: 0, capacity: 0, full: false },
+          capacity: { used: 0, capacity: 0, full: false }
         },
         workspace: README_SCENES.workspace_command.workspace_id,
-        workspace_version: 0,
+        workspace_version: 0
       });
       return;
     }
@@ -460,7 +553,7 @@ async function installFixtureRoutes(page: Page) {
       await json(route, {
         available: false,
         message: 'There is nothing to undo for this agent.',
-        workspace: README_SCENES.workspace_command.workspace_id,
+        workspace: README_SCENES.workspace_command.workspace_id
       });
       return;
     }
@@ -475,14 +568,16 @@ async function installFixtureRoutes(page: Page) {
         policy: null,
         goal: README_SCENES.workspace_command.mission.title,
         workspace: README_SCENES.workspace_command.workspace_id,
-        workspace_version: 0,
+        workspace_version: 0
       });
       return;
     }
     if (/^\/api\/workspaces\/[^/]+\/goal\/recommendations$/.test(url.pathname)) {
       await json(route, {
-        recommendations: { message: 'Choose the agent that will carry out this goal to see recommendations.' },
-        workspace: README_SCENES.workspace_command.workspace_id,
+        recommendations: {
+          message: 'Choose the agent that will carry out this goal to see recommendations.'
+        },
+        workspace: README_SCENES.workspace_command.workspace_id
       });
       return;
     }
@@ -515,7 +610,11 @@ async function installFixtureRoutes(page: Page) {
       return;
     }
     if (url.pathname === '/api/orchestration/workflow/stream') {
-      await route.fulfill({ status: 200, contentType: 'text/event-stream', body: 'event: done\ndata: {}\n\n' });
+      await route.fulfill({
+        status: 200,
+        contentType: 'text/event-stream',
+        body: 'event: done\ndata: {}\n\n'
+      });
       return;
     }
     unexpectedRequests.push(pathWithQuery);
@@ -524,13 +623,21 @@ async function installFixtureRoutes(page: Page) {
   return { consoleErrors, unexpectedRequests };
 }
 
-async function captureScene(page: Page, id: string, route: string, selector: string, definingText: string, prepare?: (page: Page) => Promise<void>) {
+async function captureScene(
+  page: Page,
+  id: string,
+  route: string,
+  selector: string,
+  definingText: string,
+  prepare?: (page: Page) => Promise<void>
+) {
   const fixture = await installFixtureRoutes(page);
   try {
     await page.goto(route, { waitUntil: 'networkidle' });
     if (prepare) await prepare(page);
     await page.addStyleTag({
-      content: '*,*::before,*::after{animation:none!important;transition:none!important;caret-color:transparent!important;}',
+      content:
+        '*,*::before,*::after{animation:none!important;transition:none!important;caret-color:transparent!important;}'
     });
     await page.evaluate(async () => document.fonts.ready);
     await expect(page.locator(selector)).toBeVisible();
@@ -542,12 +649,12 @@ async function captureScene(page: Page, id: string, route: string, selector: str
           ? '#action-center-list'
           : id === 'workspace-map'
             ? '#cockpitMap'
-            : '#workspaceCommandView',
+            : '#workspaceCommandView'
     );
     await expect(
       readinessRoot.locator(
-        '.home-daily-brief-placeholder:visible, .workspace-detail-loading:visible, .ws-cmd-loadout-prompt.is-loading:visible, .is-error:visible, [role="alert"]:visible',
-      ),
+        '.home-daily-brief-placeholder:visible, .workspace-detail-loading:visible, .ws-cmd-loadout-prompt.is-loading:visible, .is-error:visible, [role="alert"]:visible'
+      )
     ).toHaveCount(0);
     await expect(page.locator('.modal.show')).toHaveCount(0);
     const visibleText = await page.locator('body').innerText();
@@ -556,11 +663,22 @@ async function captureScene(page: Page, id: string, route: string, selector: str
     expect(fixture.consoleErrors, `Console errors for ${id}`).toEqual([]);
     mkdirSync(rawDirectory, { recursive: true });
     mkdirSync(sidecarDirectory, { recursive: true });
-    await page.screenshot({ path: path.join(rawDirectory, `${id}.png`), animations: 'disabled', caret: 'hide' });
-    writeFileSync(path.join(sidecarDirectory, `${id}.json`), `${JSON.stringify({ id, route: page.url(), visible_text: visibleText }, null, 2)}\n`);
+    await page.screenshot({
+      path: path.join(rawDirectory, `${id}.png`),
+      animations: 'disabled',
+      caret: 'hide'
+    });
+    writeFileSync(
+      path.join(sidecarDirectory, `${id}.json`),
+      `${JSON.stringify({ id, route: page.url(), visible_text: visibleText }, null, 2)}\n`
+    );
     sceneStatuses.push({ id, status: 'passed' });
   } catch (error) {
-    sceneStatuses.push({ id, status: 'failed', detail: error instanceof Error ? error.message : String(error) });
+    sceneStatuses.push({
+      id,
+      status: 'failed',
+      detail: error instanceof Error ? error.message : String(error)
+    });
     throw error;
   }
 }
@@ -568,7 +686,10 @@ async function captureScene(page: Page, id: string, route: string, selector: str
 test.afterAll(() => {
   if (!captureEnvironmentReady) return;
   mkdirSync(sidecarDirectory, { recursive: true });
-  writeFileSync(path.join(runDirectory, 'scene-statuses.json'), `${JSON.stringify(sceneStatuses, null, 2)}\n`);
+  writeFileSync(
+    path.join(runDirectory, 'scene-statuses.json'),
+    `${JSON.stringify(sceneStatuses, null, 2)}\n`
+  );
 });
 
 test('captures the Home command bridge and populated Personal HQ Daily Brief', async ({ page }) => {
@@ -576,7 +697,13 @@ test('captures the Home command bridge and populated Personal HQ Daily Brief', a
 });
 
 test('captures exactly three Action Center findings', async ({ page }) => {
-  await captureScene(page, 'action-center', '/action-center', '#action-center-list', 'Choose the research direction');
+  await captureScene(
+    page,
+    'action-center',
+    '/action-center',
+    '#action-center-list',
+    'Choose the research direction'
+  );
   await expect(page.locator('.action-center-row')).toHaveCount(3);
 });
 
@@ -588,16 +715,31 @@ test('captures the Workspace Map with Personal HQ and fictional workspaces', asy
   // select-then-open contract legible in a still image. Selecting also settles
   // the rail, which made the capture deterministic — capturing Today here was
   // flaky roughly one run in three on a sub-pixel Calendar Ops shift.
-  await captureScene(page, 'workspace-map', '/', '#cockpitMap', 'Northstar Personal HQ', async (scenePage) => {
-    await scenePage.locator('.ws-map-tile[data-ws-id]').first().click();
-    await expect(scenePage.locator('[data-cockpit-rail-open]')).toBeVisible();
-  });
+  await captureScene(
+    page,
+    'workspace-map',
+    '/',
+    '#cockpitMap',
+    'Northstar Personal HQ',
+    async scenePage => {
+      await scenePage.locator('.ws-map-tile[data-ws-id]').first().click();
+      await expect(scenePage.locator('[data-cockpit-rail-open]')).toBeVisible();
+    }
+  );
   await expect(page.locator('.ws-map-tile.is-hq')).toHaveCount(1);
   await expect(page.locator('.ws-map-tile')).toHaveCount(3);
 });
 
-test('captures Workspace Command with agents, task state, note/file context, and mission', async ({ page }) => {
-  await captureScene(page, 'workspace', '/workspaces/ws-product-launch', '#workspaceCommandView', 'Launch decision brief');
+test('captures Workspace Command with agents, task state, note/file context, and mission', async ({
+  page
+}) => {
+  await captureScene(
+    page,
+    'workspace',
+    '/workspaces/ws-product-launch',
+    '#workspaceCommandView',
+    'Launch decision brief'
+  );
   await expect(page.locator('.ws-cmd-deck')).toBeVisible();
   await expect(page.locator('#workspace-command-mission-card')).toBeVisible();
   await expect(page.locator('[data-view="detailed"]')).toHaveCount(0);

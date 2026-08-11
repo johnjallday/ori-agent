@@ -44,7 +44,33 @@ func readWorkspaceAgent(workspaceFolder, agentName string) (*agent.Agent, bool, 
 	if err := json.Unmarshal(data, &ag); err != nil {
 		return nil, false, fmt.Errorf("decode workspace agent %q: %w", agentName, err)
 	}
+	// A snapshot written by an older build still carries the retired
+	// avatar/character fields. Migrating on read — through the exact same
+	// contract the global store uses — is what stops a stale snapshot from
+	// reintroducing the old schema after the global record has moved on
+	// (PRD FR-69, risk 7.6).
+	migrateSnapshotAppearance(workspaceFolder, agentName, &ag)
 	return &ag, true, nil
+}
+
+// migrateSnapshotAppearance canonicalizes one snapshot's appearance in place.
+//
+// It touches nothing but Appearance: workspace snapshots own workspace-local
+// settings such as toolbox, designation, and assignment, and an appearance
+// migration is never a licence to rewrite those (FR-95).
+func migrateSnapshotAppearance(workspaceFolder, agentName string, ag *agent.Agent) {
+	result := ag.MigrateAppearance(agent.DefaultAppearanceEnvironment(agent.AppearanceUploadDir))
+	if len(result.Reasons) == 0 {
+		return
+	}
+	// The scope names the workspace by its folder base name, not its full path:
+	// enough to identify which snapshot needs attention, without putting a
+	// filesystem path into a message the user may see (FR-73).
+	agent.RecordAppearanceMigrationNote(agent.AppearanceMigrationNote{
+		Agent:   agentName,
+		Scope:   "workspace:" + filepath.Base(workspaceFolder),
+		Reasons: result.Reasons,
+	})
 }
 
 // writeWorkspaceAgent persists an agent snapshot under <workspace>/agents/<slug>/config.json.
@@ -59,6 +85,9 @@ func writeWorkspaceAgent(workspaceFolder, agentName string, ag *agent.Agent) err
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("create workspace agent dir: %w", err)
 	}
+	// Canonical on the way out too, so a snapshot can never be the one record
+	// that keeps the retired schema alive (FR-77).
+	ag.EnsureAppearance()
 	data, err := json.MarshalIndent(ag, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode workspace agent %q: %w", agentName, err)

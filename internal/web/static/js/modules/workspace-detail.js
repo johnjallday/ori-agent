@@ -3876,9 +3876,9 @@ export class WorkspaceDetailPage {
       name: normalizedName,
       source: profile?.source || 'user',
       role: profile?.role || '',
-      avatarImage: profile?.avatarImage || '',
-      avatarColor: profile?.avatarColor || '',
-      displayMode: profile?.displayMode || '',
+      // The canonical object goes to the shared renderer unmodified, so a
+      // workspace row shows exactly what the Agents roster shows (FR-80/FR-89).
+      appearance: profile?.appearance || null,
       character:
         characterId && window.CharacterCatalog ? window.CharacterCatalog.get(characterId) : null
     };
@@ -12066,13 +12066,12 @@ export class WorkspaceDetailPage {
             ? Math.max(0, Math.floor(Number(agent.evolution.level)))
             : 0,
           stage: String(agent?.evolution?.stage || '').trim(),
-          // Identity, carried so this page can render the SAME avatar the
-          // Agents collection does rather than deriving its own (FR-99). The
-          // list endpoint already returns these; they were simply dropped here.
-          avatarImage: String(agent?.metadata?.avatar_image || '').trim(),
-          avatarColor: String(agent?.metadata?.avatar_color || '').trim(),
-          displayMode: String(agent?.metadata?.character?.display_mode || '').trim(),
-          characterId: String(agent?.metadata?.character?.catalog_id || '').trim()
+          // Appearance, carried so this page renders the SAME avatar the Agents
+          // collection does rather than deriving its own (FR-80/FR-89). The list
+          // endpoint returns the complete canonical object; it is kept whole
+          // rather than unpacked into fields this page would have to reassemble.
+          appearance: agent?.appearance || null,
+          characterId: String(agent?.appearance?.character?.catalog_id || '').trim()
         };
 
         nextCatalog.push(profile);

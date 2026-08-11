@@ -1,8 +1,12 @@
 /*
  * Character picker — one reusable chooser over the server-owned catalog.
  *
- * Used by both New Agent and the Inspector's Identity section, so the two can
- * never drift into different selection rules (PRD FR-53/FR-55).
+ * Used by both New Agent and the Inspector's Appearance section, so the two can
+ * never drift into different selection rules.
+ *
+ * A character is one visual source within Appearance and nothing more: this
+ * module offers no voice control, shows no tone facts or sample speech, and
+ * resolves no behavioral state (PRD FR-19/FR-23).
  *
  * Two things this module deliberately does not do:
  *
@@ -34,20 +38,16 @@
     characters: [],
     filtered: [],
     selectedId: '',
-    voiceEnabled: false,
     lastTrigger: null,
     resolve: null
   };
 
   /* ---- filtering ------------------------------------------------------------- */
 
-  // Only visible labels: name, family, purpose, and tone traits. The catalog id,
-  // asset paths, and silhouette text are not searchable, because a user cannot
-  // see why they matched.
+  // Only visible labels: name, family, and purpose. The catalog id and asset
+  // paths are not searchable, because a user cannot see why they matched.
   function haystack(ch) {
-    return [ch.name, ch.familyLabel, ch.purpose, (ch.toneTraits || []).join(' ')]
-      .join(' ')
-      .toLowerCase();
+    return [ch.name, ch.familyLabel, ch.purpose].join(' ').toLowerCase();
   }
 
   function applyFilter() {
@@ -166,8 +166,8 @@
     renderPreview();
   }
 
-  // The preview is what FR-59 requires before a save: art, silhouette, prop,
-  // idle behaviour, tone traits, and a sample line.
+  // The preview is what FR-28 requires before a save: art, silhouette, prop, and
+  // idle behaviour. All visual, by design.
   function renderPreview() {
     var els = state.els;
     if (!els) return;
@@ -194,15 +194,16 @@
       fact('Silhouette', ch.silhouette) +
       fact('Signature prop', ch.prop) +
       fact('Idle', ch.idleBehavior) +
-      fact('Tone', (ch.toneTraits || []).join(', ')) +
       '</dl>' +
-      '<p class="char-preview__sample">“' +
-      esc(ch.sampleLine) +
-      '”</p>' +
-      // The prop is identity, not capability. Saying so here stops a user
-      // reading "tool belt" as "this agent has tools" (FR-97).
-      '<p class="char-preview__note">Character art and props are identity only. ' +
-      "They never change an agent's role, model, tools, or permissions.</p>";
+      // Every fact above is visual. There is deliberately no tone line and no
+      // sample speech: copy describing how a character talks would keep the
+      // false promise alive even with the behavior gone (FR-23).
+      //
+      // The prop is appearance, not capability. Saying so here stops a user
+      // reading "tool belt" as "this agent has tools" (FR-29).
+      '<p class="char-preview__note">Appearance only — this does not change how ' +
+      'the agent works. Character art and props never change its role, model, ' +
+      'tools, or permissions.</p>';
   }
 
   function fact(label, value) {
@@ -219,8 +220,24 @@
 
   /* ---- open / close -------------------------------------------------------------- */
 
-  function buildShell() {
+  // The picker creates its own mount point when the page has not provided one.
+  //
+  // It used to require every host page to remember a `<div id="charPickerHost">`
+  // and to load this script itself, which only the Agents roster did. On every
+  // other host the button rendered, clicked, and did nothing — a silent no-op,
+  // the worst kind of failure. A shared component owns its own mount.
+  function ensureHost() {
     var host = document.getElementById('charPickerHost');
+    if (host) return host;
+    if (!document.body) return null;
+    host = document.createElement('div');
+    host.id = 'charPickerHost';
+    document.body.appendChild(host);
+    return host;
+  }
+
+  function buildShell() {
+    var host = ensureHost();
     if (!host) return null;
 
     host.innerHTML =
@@ -231,12 +248,12 @@
       '<button type="button" class="char-picker__close" id="charPickerClose" ' +
       'aria-label="Close character picker">&times;</button>' +
       '</header>' +
-      '<p class="char-picker__lede">A character is how this agent looks. Its name, role, ' +
-      'model, tools, and permissions are unchanged.</p>' +
+      '<p class="char-picker__lede">Appearance only — this does not change how the ' +
+      'agent works. Its name, role, model, tools, and permissions are unchanged.</p>' +
       '<div class="char-picker__controls">' +
       '<label class="visually-hidden" for="charPickerSearch">Search characters</label>' +
       '<input type="search" id="charPickerSearch" class="char-picker__search" ' +
-      'placeholder="Search by name, family, or tone…" autocomplete="off">' +
+      'placeholder="Search by name, family, or look…" autocomplete="off">' +
       '<div class="char-picker__families" role="group" aria-label="Filter by family">' +
       '<button type="button" class="char-picker__family is-active" data-family="">All</button>' +
       '<button type="button" class="char-picker__family" data-family="resident">Residents</button>' +
@@ -249,19 +266,18 @@
       'aria-label="Available characters"></div>' +
       '<aside class="char-preview" id="charPickerPreview"></aside>' +
       '</div>' +
-      '<label class="char-picker__voice">' +
-      '<input type="checkbox" id="charPickerVoice">' +
-      '<span>' +
-      "<strong>Use this character's voice style</strong>" +
-      '<span class="char-picker__voice-note">Adjusts tone only — brevity and warmth. ' +
-      'It never overrides your system prompt, task instructions, tools, ' +
-      'permissions, or confirmation rules.</span>' +
-      '</span>' +
-      '</label>' +
+      // There is no voice control here, and no replacement for it. A character
+      // is a picture; offering a toggle that implied otherwise is the promise
+      // this feature removed (FR-19/FR-23).
       '<div class="char-picker__actions">' +
-      '<button type="button" class="btn-ghost" id="charPickerCancel">Cancel</button>' +
-      '<button type="button" class="btn-ghost" id="charPickerSkip">Skip for now</button>' +
-      '<button type="button" class="btn-primary" id="charPickerConfirm">Choose character</button>' +
+      // These carry the picker's own classes rather than the roster's
+      // `.btn-ghost` / `.btn-primary`, which are defined only in
+      // agents-roster.css. Borrowing them left the picker's actions completely
+      // unstyled on every other host that opens it.
+      '<button type="button" class="char-picker__btn" id="charPickerCancel">Cancel</button>' +
+      '<button type="button" class="char-picker__btn" id="charPickerSkip">Skip for now</button>' +
+      '<button type="button" class="char-picker__btn char-picker__btn--primary" ' +
+      'id="charPickerConfirm">Choose character</button>' +
       '</div>' +
       '</div>' +
       '<div class="char-picker__backdrop" id="charPickerBackdrop"></div>';
@@ -274,7 +290,6 @@
       families: host.querySelectorAll('.char-picker__family'),
       grid: document.getElementById('charPickerGrid'),
       preview: document.getElementById('charPickerPreview'),
-      voice: document.getElementById('charPickerVoice'),
       cancel: document.getElementById('charPickerCancel'),
       skip: document.getElementById('charPickerSkip'),
       confirm: document.getElementById('charPickerConfirm')
@@ -284,7 +299,7 @@
   /**
    * open resolves with the user's decision and nothing else happens on its own.
    *
-   *   { action: 'choose', catalogId, voiceEnabled }
+   *   { action: 'choose', catalogId }
    *   { action: 'skip' }        // explicitly no character
    *   { action: 'cancel' }      // leave whatever was there alone
    */
@@ -295,7 +310,6 @@
     var catalog = window.CharacterCatalog;
     state.characters = catalog ? catalog.working() : [];
     state.family = '';
-    state.voiceEnabled = !!opts.voiceEnabled;
     state.recommendedId = recommendedId(opts.taken, null, opts.role);
     // Pre-select what the agent already has, else the recommendation.
     state.selectedId = opts.selectedId || state.recommendedId;
@@ -306,7 +320,6 @@
     state.els = els;
     state.open = true;
 
-    els.voice.checked = state.voiceEnabled;
     if (opts.showSkip === false) els.skip.hidden = true;
 
     applyFilter();
@@ -364,17 +377,11 @@
       renderGrid();
     });
 
-    els.voice.addEventListener('change', function () {
-      state.voiceEnabled = !!els.voice.checked;
-    });
-
     els.confirm.addEventListener('click', function () {
       if (!state.selectedId) return;
-      finish({
-        action: 'choose',
-        catalogId: state.selectedId,
-        voiceEnabled: state.voiceEnabled
-      });
+      // The catalog version is deliberately absent: it is server-assigned from
+      // the validated entry, so the picker has nothing to say about it (FR-10).
+      finish({ action: 'choose', catalogId: state.selectedId });
     });
 
     els.skip.addEventListener('click', function () {

@@ -12,6 +12,18 @@
        runs. CharacterCatalog does not self-fetch; each surface calls load(). -->
   <script defer src="/js/modules/agent-avatar.js"></script>
   <script defer src="/js/modules/character-catalog.js"></script>
+  <!-- The Appearance editor reads AgentAvatar for its preview, so it must load
+       after it. Registering it here rather than per page is deliberate: an
+       editable agent surface can appear on several pages, and a per-page
+       registration is how one of them silently ends up without it.
+
+       The character picker is loaded for the same reason and must be here too:
+       the editor's "Choose character" opens it, and it previously lived only on
+       the Agents roster page — so on the detail page, the create page, and the
+       session Edit Agent modal that button did nothing at all. The picker
+       creates its own mount point, so no page needs to provide one. -->
+  <script defer src="/js/modules/agent-appearance.js"></script>
+  <script defer src="/js/modules/character-picker.js"></script>
   <script defer src="/js/modules/update-checker.js"></script>
   <script defer src="/js/modules/vault-modal.js"></script>
   <script defer src="/js/modules/keyboard-navigation.js"></script>
@@ -74,6 +86,12 @@
        re-declared per page — a second <script defer> of the same module would
        execute it twice. -->
   <link href="/css/agent-avatar.css" rel="stylesheet">
+  <link href="/css/agent-appearance.css" rel="stylesheet">
+  <!-- The picker's stylesheet travels with its script for the same reason: it
+       was registered only on the Agents roster, so on every other host the
+       picker opened as an unstyled block in the top-left of the page instead of
+       a centred dialog. -->
+  <link href="/css/character-picker.css" rel="stylesheet">
   <link href="/css/file-janitor.css" rel="stylesheet">
   <link href="/css/setup-wizard.css" rel="stylesheet">
   {{if index .Extra "HomeCommandBridge"}}<link href="/css/home-command.css" rel="stylesheet">

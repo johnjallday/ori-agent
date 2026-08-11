@@ -1,36 +1,41 @@
 /*
- * Avatar Identity — the single frontend renderer for an agent's visual
- * identity (PRD FR66–FR78, extended by cozy-character-experience FR-66/FR-67).
+ * Agent Appearance — the single frontend renderer for an agent's visual
+ * identity (unified-agent-appearance FR-80 through FR-84, FR-99 through FR-106).
  *
- * Priority is the agent's *explicit* display mode, then that mode's valid
- * asset, then the deterministic fallback. The mode is a stored choice, never
- * inferred from whichever field happens to be non-empty — that is what makes
- * trying a curated character reversible instead of destructive (FR-67).
+ * It consumes the canonical `appearance` object exactly as the API returns it:
  *
- *   character -> catalog portrait -> deterministic fallback
- *   uploaded  -> uploaded image   -> deterministic fallback
- *   fallback  -> deterministic fallback
+ *   { mode, generated: { color }, uploaded: { image }, character: { catalog_id } }
  *
- * Records with no stored mode are legacy and keep the historical rule (uploaded
- * image if present, else fallback), so existing agents look exactly as they did
- * (FR-69).
+ * and renders only the source named by `mode`. There is deliberately no
+ * priority rule such as "an upload wins when present" — the active source is an
+ * explicit saved choice, and inferring it from whichever field happens to be
+ * populated is what made trying a character feel destructive in the old model
+ * (FR-5/FR-82).
  *
- * The deterministic fallback is derived synchronously from data the dashboard
- * list response already carries. No network request, no generation step, no new
- * persisted seed, no per-agent image file (FR98). Curated character data is
- * *passed in* by the caller rather than fetched here, so this module stays
- * synchronous and a slow catalog can never delay rendering a name or status
- * (FR-101).
+ *   generated -> deterministic portrait (always renderable)
+ *   character -> catalog portrait  -> falls back to generated
+ *   uploaded  -> uploaded image    -> falls back to generated
  *
- * The fallback signature is a stable FNV-1a hash over the canonical agent name
- * plus its source, sliced into four independent dimensions — palette, motif,
- * orientation, and tone — so two agents sharing a role still look different
- * (FR69/FR70/FR71). Role contributes an accent ring and emblem only; it never
- * becomes the whole identity.
+ * Falling back is a *runtime outcome*, never a saved mode. `resolve()` reports
+ * the requested mode alongside the rendered one plus a machine-readable reason,
+ * so an editor can explain "your character art is unavailable" instead of
+ * silently showing initials and appearing to have lost the choice (FR-15/FR-84).
+ *
+ * The generated portrait is derived synchronously from data every list response
+ * already carries: no network request, no generation step, no per-agent image
+ * file. Curated character data is *passed in* by the caller rather than fetched
+ * here, so this module stays synchronous and a slow catalog can never delay
+ * rendering a name or status (FR-103).
+ *
+ * The generated signature is a stable FNV-1a hash over the agent name plus its
+ * source, sliced into four independent dimensions — palette, motif,
+ * orientation, and tone — so two agents sharing a role still look different.
+ * Role contributes an accent ring and emblem only; it never becomes the whole
+ * identity.
  *
  * Safety: every value that reaches CSS is either a token this module owns
  * (motif/turn/tone indices) or a hex colour re-serialised from validated input.
- * User-supplied metadata is never interpolated into executable CSS (PRD 7.2).
+ * User-supplied data is never interpolated into executable CSS (FR-106).
  *
  * Loaded as a classic deferred script so it is installed before the roster
  * controller runs; `window.AgentAvatar` is also the surface the unit tests
@@ -188,7 +193,7 @@
   }
 
   // Initials must stay legible on whatever base we end up with, including a
-  // custom avatar_color the user picked without contrast in mind (FR72/FR77).
+  // colour override the user picked without contrast in mind (FR-101).
   function inkFor(base) {
     return contrastRatio(LIGHT_INK, base) >= contrastRatio(DARK_INK, base) ? LIGHT_INK : DARK_INK;
   }
@@ -249,9 +254,14 @@
     var palette = table[paletteIndex];
     var tone = TONES[toneIndex];
 
-    // A valid custom colour replaces the palette's base but keeps every other
-    // dimension, so the motif, frame, and initials all survive (FR72).
-    var custom = normalizeHex(input && input.avatarColor);
+    // A valid colour override replaces the palette's base but keeps every other
+    // dimension, so the motif, frame, and initials all survive (FR-6).
+    //
+    // `color` is accepted alongside the canonical object because
+    // replaceWithGenerated rebuilds the signature from data attributes on an
+    // element that no longer has the full appearance — the two callers agree on
+    // this one field.
+    var custom = normalizeHex((input && input.color) || appearanceOf(input).color);
     var base = custom || palette.base;
     var deep = mixHex(base, GRADIENT_FLOOR, tone.mix);
 
@@ -318,20 +328,23 @@
     return parts.join(';');
   }
 
-  // Seed inputs travel with the element so a failed uploaded image can be
-  // replaced in place by this agent's own fallback, with no re-fetch and no
-  // broken-image control ever being shown (FR74).
+  // Seed inputs travel with the element so a failed image can be replaced in
+  // place by this agent's own generated portrait, with no re-fetch and no
+  // broken-image glyph ever being painted (FR-83).
   function seedAttrs(input) {
+    var appearance = appearanceOf(input);
     var attrs =
       ' data-aa-name="' +
       esc((input && input.name) || '') +
       '" data-aa-source="' +
       esc((input && input.source) || '') +
+      '" data-aa-requested="' +
+      esc(appearance.mode) +
       '"';
     if (input && input.role) attrs += ' data-aa-role="' + esc(input.role) + '"';
     if (input && input.roleAccent) attrs += ' data-aa-accent="' + esc(input.roleAccent) + '"';
     if (input && input.roleEmblem) attrs += ' data-aa-emblem="' + esc(input.roleEmblem) + '"';
-    if (input && input.avatarColor) attrs += ' data-aa-color="' + esc(input.avatarColor) + '"';
+    if (appearance.color) attrs += ' data-aa-color="' + esc(appearance.color) + '"';
     if (input && input.builtIn) attrs += ' data-aa-builtin="1"';
     return attrs;
   }
@@ -344,15 +357,15 @@
       role: d.aaRole || '',
       roleAccent: d.aaAccent || '',
       roleEmblem: d.aaEmblem || '',
-      avatarColor: d.aaColor || '',
+      color: d.aaColor || '',
       builtIn: d.aaBuiltin === '1'
     };
   }
 
-  // The visual identity is decorative: the agent's name, role, source, and
-  // status are all present as text beside it, so repeating them here would only
-  // make screen-reader output noisier (FR76).
-  function innerFallbackHTML(sig) {
+  // The avatar is decorative: the agent's name, role, source, and status are
+  // all present as text beside it, so repeating them here would only make
+  // screen-reader output noisier (FR-99).
+  function innerGeneratedHTML(sig) {
     var emblem = sig.emblem
       ? '<span class="agent-avatar__emblem"><i class="bi bi-' + sig.emblem + '"></i></span>'
       : '';
@@ -365,11 +378,11 @@
     );
   }
 
-  function fallbackHTML(input, options) {
+  function generatedHTML(input, options) {
     var opts = options || {};
     var sig = signature(input);
     var cls =
-      'agent-avatar agent-avatar--fallback ' +
+      'agent-avatar agent-avatar--generated ' +
       sizeClass(opts.size) +
       (opts.className ? ' ' + opts.className : '');
     return (
@@ -389,22 +402,26 @@
       (sig.system ? ' data-aa-system="1"' : '') +
       seedAttrs(input) +
       ' aria-hidden="true">' +
-      innerFallbackHTML(sig) +
+      innerGeneratedHTML(sig) +
       '</span>'
     );
   }
 
+  // imageHTML renders an uploaded image. The filename is server-generated, but
+  // it is still URL-encoded here rather than trusted: this module must be safe
+  // to call with any input, including a record hand-edited on disk (FR-106).
   function imageHTML(input, options) {
     var opts = options || {};
     var size = Number(opts.size) > 0 ? Number(opts.size) : SIZES.md;
+    var uploadedImage = String((input && input.uploadedImage) || appearanceOf(input).image);
     var cls =
       'agent-avatar agent-avatar--image ' +
       sizeClass(opts.size) +
       (opts.className ? ' ' + opts.className : '');
     // width/height give the box a 1:1 aspect ratio before the bitmap arrives,
     // and lazy+async decoding keeps a large collection interactive while images
-    // stream in (FR97). The rendered size comes from the size class, so a view
-    // or breakpoint can resize the portrait without re-rendering.
+    // stream in (FR-103/FR-105). The rendered size comes from the size class, so
+    // a view or breakpoint can resize the portrait without re-rendering.
     var dims = ' width="' + size + '" height="' + size + '"';
     return (
       '<span class="' +
@@ -414,7 +431,7 @@
       seedAttrs(input) +
       ' aria-hidden="true">' +
       '<img class="agent-avatar__img" src="/avatars/' +
-      esc(input.avatarImage) +
+      encodeURIComponent(uploadedImage) +
       '" alt=""' +
       dims +
       ' loading="lazy" decoding="async">' +
@@ -422,55 +439,73 @@
     );
   }
 
-  /* ---- identity resolution -------------------------------------------------- */
+  /* ---- appearance resolution ------------------------------------------------ */
 
-  var MODE_FALLBACK = 'fallback';
+  var MODE_GENERATED = 'generated';
   var MODE_UPLOADED = 'uploaded';
   var MODE_CHARACTER = 'character';
 
+  // Reason codes are part of the contract with editors, which use them to
+  // explain a temporary problem without implying the saved choice was lost
+  // (FR-84).
+  var REASON_OK = 'ok';
+  var REASON_UPLOAD_MISSING = 'upload-missing';
+  var REASON_CHARACTER_MISSING = 'character-missing';
+  var REASON_ASSET_LOAD_FAILED = 'asset-load-failed';
+
   function isValidMode(mode) {
-    return mode === MODE_FALLBACK || mode === MODE_UPLOADED || mode === MODE_CHARACTER;
+    return mode === MODE_GENERATED || mode === MODE_UPLOADED || mode === MODE_CHARACTER;
   }
 
-  // A catalog entry is only usable if it actually carries the asset we need.
-  // A withdrawn or half-populated entry resolves to the fallback rather than
-  // rendering a broken portrait (FR-74).
+  // appearanceOf reads the canonical object off the input.
+  //
+  // An absent or unrecognized mode resolves to Generated rather than to a
+  // field-presence guess. Generated is the source that can always render, so it
+  // is the only safe default (FR-13).
+  function appearanceOf(input) {
+    var appearance = (input && input.appearance) || {};
+    var generated = appearance.generated || {};
+    var uploaded = appearance.uploaded || {};
+    var character = appearance.character || {};
+    var mode = String(appearance.mode || '').trim();
+    return {
+      mode: isValidMode(mode) ? mode : MODE_GENERATED,
+      color: normalizeHex(generated.color),
+      image: String(uploaded.image || '').trim(),
+      catalogId: String(character.catalog_id || '').trim()
+    };
+  }
+
+  // A catalog entry is only usable if it actually carries the asset we need. A
+  // withdrawn or half-populated entry resolves to Generated rather than
+  // rendering a broken portrait (FR-83).
   function characterPortrait(character) {
     var assets = (character && character.assets) || {};
-    var portrait = String(assets.portrait || '').trim();
-    return portrait;
+    return String(assets.portrait || '').trim();
   }
 
   // resolve reports what will actually render and why.
   //
-  // `requested` is what the agent asked for and `mode` is what it gets; when
-  // they differ, `reason` names the gap. Surfaces use that to explain the
-  // current state honestly and to offer a re-selection when a character has
-  // gone missing, instead of silently showing initials (FR-74/FR-124).
+  // `requested` is the saved mode and `mode` is what can be shown right now.
+  // When they differ, `reason` names the gap — and `requested` deliberately
+  // keeps its original value, because a missing asset must not look like the
+  // user's choice changed (FR-84).
   function resolve(input) {
-    var stored = String((input && input.displayMode) || '').trim();
-    var image = String((input && input.avatarImage) || '').trim();
+    var appearance = appearanceOf(input);
     var character = (input && input.character) || null;
 
-    var requested;
-    if (isValidMode(stored)) {
-      requested = stored;
-    } else {
-      // Legacy record, or an unrecognized stored mode: fall back to the
-      // historical field-presence rule.
-      requested = image ? MODE_UPLOADED : MODE_FALLBACK;
-    }
-
     var result = {
-      requested: requested,
-      mode: MODE_FALLBACK,
-      reason: isValidMode(stored) ? 'ok' : 'legacy',
+      requested: appearance.mode,
+      mode: MODE_GENERATED,
+      reason: REASON_OK,
       character: null,
       portrait: '',
-      avatarImage: ''
+      uploadedImage: '',
+      color: appearance.color,
+      catalogId: appearance.catalogId
     };
 
-    if (requested === MODE_CHARACTER) {
+    if (appearance.mode === MODE_CHARACTER) {
       var portrait = characterPortrait(character);
       if (portrait) {
         result.mode = MODE_CHARACTER;
@@ -478,19 +513,19 @@
         result.portrait = portrait;
       } else {
         // The agent still *has* a character choice; the catalog just cannot
-        // supply it right now. Naming that separately from "never chose one"
-        // is what lets the Inspector offer a reselect action.
-        result.reason = character ? 'character-asset-missing' : 'character-missing';
+        // supply it right now. Saying so is what lets an editor offer a
+        // re-selection instead of showing an unexplained revert.
+        result.reason = REASON_CHARACTER_MISSING;
       }
       return result;
     }
 
-    if (requested === MODE_UPLOADED) {
-      if (image) {
+    if (appearance.mode === MODE_UPLOADED) {
+      if (appearance.image) {
         result.mode = MODE_UPLOADED;
-        result.avatarImage = image;
+        result.uploadedImage = appearance.image;
       } else {
-        result.reason = 'upload-missing';
+        result.reason = REASON_UPLOAD_MISSING;
       }
       return result;
     }
@@ -498,25 +533,25 @@
     return result;
   }
 
-  // markup is the one entry point every surface uses (FR66), so Home, the
-  // Gallery, and the Inspector cannot disagree about what an agent looks like
-  // (FR-99).
+  // markup is the one entry point every surface uses, so the Gallery, the
+  // Inspector, a workspace row, and a chat header cannot disagree about what an
+  // agent looks like (FR-80).
   function markup(input, options) {
     var res = resolve(input);
     if (res.mode === MODE_CHARACTER) {
       return characterHTML(input, res, options);
     }
     if (res.mode === MODE_UPLOADED) {
-      return imageHTML(Object.assign({}, input, { avatarImage: res.avatarImage }), options);
+      return imageHTML(Object.assign({}, input, { uploadedImage: res.uploadedImage }), options);
     }
-    return fallbackHTML(input, options);
+    return generatedHTML(input, options);
   }
 
   // characterHTML renders a curated portrait. The <img> keeps the same reserved
-  // box and lazy/async decoding as an uploaded avatar, so a slow or failed
+  // box and lazy/async decoding as an uploaded image, so a slow or failed
   // portrait cannot shift the layout or block the controls beside it
-  // (FR-101/FR-120–FR-123). A failure is caught by the same delegated listener
-  // that handles uploads and swaps in this agent's own fallback.
+  // (FR-103). A failure is caught by the same delegated listener that handles
+  // uploads and swaps in this agent's own generated portrait.
   function characterHTML(input, res, options) {
     var opts = options || {};
     var size = Number(opts.size) > 0 ? Number(opts.size) : SIZES.md;
@@ -553,27 +588,32 @@
     );
   }
 
-  // replaceWithFallback converts an already-rendered image avatar into this
-  // agent's fallback in place, keeping the reserved box and dropping the failed
-  // <img> entirely so no broken-image glyph is ever painted (FR74).
-  function replaceWithFallback(host) {
+  // replaceWithGenerated converts an already-rendered image avatar into this
+  // agent's generated portrait in place, keeping the reserved box and dropping
+  // the failed <img> entirely so no broken-image glyph is ever painted (FR-83).
+  //
+  // `data-aa-requested` is deliberately left alone. The saved mode has not
+  // changed — only what could be displayed right now — and an editor reads that
+  // attribute to explain the gap instead of implying the choice was lost
+  // (FR-84).
+  function replaceWithGenerated(host) {
     if (!host || host.dataset.aaFallback === '1') return;
     var sig = signature(inputFromElement(host));
     host.dataset.aaFallback = '1';
+    host.dataset.aaReason = REASON_ASSET_LOAD_FAILED;
     // The size class is left untouched, so the replacement occupies exactly the
-    // box the image reserved and the collection does not reflow. Both the
-    // uploaded-image and curated-character variants degrade to the same
-    // deterministic identity (FR-14/FR-74).
+    // box the image reserved and the collection does not reflow. Uploaded and
+    // curated-character avatars degrade to the same deterministic portrait.
     host.className = host.className
-      .replace('agent-avatar--image', 'agent-avatar--fallback')
-      .replace('agent-avatar--character', 'agent-avatar--fallback');
+      .replace('agent-avatar--image', 'agent-avatar--generated')
+      .replace('agent-avatar--character', 'agent-avatar--generated');
     if (typeof host.removeAttribute === 'function') host.removeAttribute('data-aa-character');
     host.setAttribute('style', styleFor(sig));
     host.setAttribute('data-aa-motif', sig.motif);
     host.setAttribute('data-aa-turn', String(sig.turn));
     host.setAttribute('data-aa-tone', String(sig.toneIndex));
     if (sig.system) host.setAttribute('data-aa-system', '1');
-    host.innerHTML = innerFallbackHTML(sig);
+    host.innerHTML = innerGeneratedHTML(sig);
   }
 
   // One capture-phase listener covers every avatar on the page, however many
@@ -586,7 +626,7 @@
         var target = event && event.target;
         if (!target || target.nodeName !== 'IMG') return;
         if (!target.classList || !target.classList.contains('agent-avatar__img')) return;
-        replaceWithFallback(target.parentNode);
+        replaceWithGenerated(target.parentNode);
       },
       true
     );
@@ -595,17 +635,23 @@
   var api = {
     markup: markup,
     resolve: resolve,
-    fallbackHTML: fallbackHTML,
+    generatedHTML: generatedHTML,
     imageHTML: imageHTML,
     characterHTML: characterHTML,
     signature: signature,
     MODES: {
-      FALLBACK: MODE_FALLBACK,
+      GENERATED: MODE_GENERATED,
       UPLOADED: MODE_UPLOADED,
       CHARACTER: MODE_CHARACTER
     },
+    REASONS: {
+      OK: REASON_OK,
+      UPLOAD_MISSING: REASON_UPLOAD_MISSING,
+      CHARACTER_MISSING: REASON_CHARACTER_MISSING,
+      ASSET_LOAD_FAILED: REASON_ASSET_LOAD_FAILED
+    },
     initialsFor: initialsFor,
-    replaceWithFallback: replaceWithFallback,
+    replaceWithGenerated: replaceWithGenerated,
     installImageFallback: installImageFallback,
     // Exposed so the unit tests can assert contrast and dimension counts over
     // the real tables rather than a copy that could drift.

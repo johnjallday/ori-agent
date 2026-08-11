@@ -648,31 +648,33 @@ test('an agent-less team is advisory and still produces a valid request', () => 
   assert.equal(view.payload.create_template_agents, false);
 });
 
-test('a saved roster row carries the identity fields the shared avatar renderer needs', () => {
+test('a saved roster row carries the canonical appearance the shared renderer needs', () => {
   const draft = readyDraft([]);
+  const appearance = {
+    mode: 'character',
+    generated: { color: '#3498db' },
+    uploaded: { image: 'scout.png' },
+    character: { catalog_id: 'sable', catalog_version: 2 }
+  };
   withSavedRoster(draft, [
     {
       name: 'Research Scout',
       model: 'gpt-5',
       role: 'researcher',
       source: 'user',
-      metadata: {
-        avatar_image: 'scout.png',
-        avatar_color: '#3498db',
-        character: { catalog_id: 'sable', display_mode: 'character' }
-      }
+      appearance
     }
   ]);
   Draft.addSavedAgent(draft, 'Research Scout');
 
   const entry = Draft.derive(draft).roster.find(row => row.name === 'Research Scout');
+  // The canonical object is passed through whole. Unpacking it here would mean
+  // this module gets its own opinion about which source wins (FR-81/FR-82).
   assert.deepEqual(entry.identity, {
     name: 'Research Scout',
     source: 'user',
     role: 'researcher',
-    avatarImage: 'scout.png',
-    avatarColor: '#3498db',
-    displayMode: 'character',
+    appearance,
     characterId: 'sable'
   });
 });
@@ -683,8 +685,9 @@ test('a blueprint agent that does not exist yet gets a name-seeded identity', ()
   const entry = Draft.derive(draft).roster.find(row => row.name === 'Brand New');
   assert.equal(entry.identity.name, 'Brand New');
   assert.equal(entry.identity.characterId, '', 'no character until the agent exists');
-  assert.equal(entry.identity.avatarImage, '');
-  assert.equal(entry.identity.displayMode, '', 'mode is a stored choice, never inferred');
+  // No appearance at all resolves to Generated in the renderer, which is
+  // exactly what the agent will look like once it is created (FR-13).
+  assert.equal(entry.identity.appearance, null);
 });
 
 test('an unrenamed blueprint row shows the saved agent it actually reuses (FR41)', () => {
@@ -692,13 +695,13 @@ test('an unrenamed blueprint row shows the saved agent it actually reuses (FR41)
   withSavedRoster(draft, [
     {
       name: 'File Curator',
-      metadata: { character: { catalog_id: 'pebble', display_mode: 'character' } }
+      appearance: { mode: 'character', character: { catalog_id: 'pebble', catalog_version: 1 } }
     }
   ]);
 
   const entry = Draft.derive(draft).roster.find(row => row.name === 'File Curator');
   assert.equal(entry.identity.characterId, 'pebble');
-  assert.equal(entry.identity.displayMode, 'character');
+  assert.equal(entry.identity.appearance.mode, 'character');
 });
 
 test('renaming a blueprint agent re-seeds its identity to the new name', () => {
@@ -709,14 +712,15 @@ test('renaming a blueprint agent re-seeds its identity to the new name', () => {
   assert.equal(entry.identity.name, 'Renamed Lead');
 });
 
-test('identityFrom keeps a legacy record on the historical upload-first rule', () => {
-  // No stored display_mode: the agent predates the character system, so the
-  // uploaded image must still win rather than being treated as "no choice".
-  const identity = Draft.identityFrom('Legacy', {
-    metadata: { avatar_image: 'legacy.png' }
+test('identityFrom reads no retired avatar/character metadata', () => {
+  // A record still carrying the retired fields contributes nothing: this module
+  // has no legacy adapter, so the renderer shows Generated rather than
+  // resurrecting the old inference rule (FR-81).
+  const legacy = Draft.identityFrom('Legacy', {
+    metadata: { avatar_image: 'legacy.png', avatar_color: '#123456' }
   });
-  assert.equal(identity.avatarImage, 'legacy.png');
-  assert.equal(identity.displayMode, '');
+  assert.equal(legacy.appearance, null);
+  assert.equal(legacy.characterId, '');
 
   const cli = Draft.identityFrom('Claude Code', { source: 'CLI' });
   assert.equal(cli.source, 'cli', 'source is normalized for the renderer');

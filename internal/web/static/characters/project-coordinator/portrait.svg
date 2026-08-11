@@ -1,40 +1,34 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" width="160" height="160" role="img" aria-label="Project Coordinator: a round-tailed resident leaning forward with a cross-body satchel">
-  <!-- Project Coordinator. Hand-authored; see docs/CHARACTER_ASSET_PROVENANCE.md#project-coordinator -->
-  <defs><clipPath id="piko-frame"><rect width="160" height="160" rx="16"/></clipPath></defs>
-  <g clip-path="url(#piko-frame)">
-    <rect width="160" height="160" fill="#f4ded1"/>
-    <circle cx="80" cy="74" r="54" fill="#fbeee6"/>
-    <rect x="0" y="144" width="160" height="16" fill="#e0c0ac"/>
+  <!-- Project Coordinator. Hand-authored; see docs/CHARACTER_ASSET_PROVENANCE.md#project-coordinator
+       Transparent artboard: the card, halo, ground strip, and clip frame are the host's to draw. -->
+  <g stroke="#2a1006" stroke-width="4" stroke-linejoin="round" stroke-linecap="round">
+    <path d="M64 128 v12 l-8 6 h20 z" fill="#8c421f"/>
+    <path d="M96 128 v12 l-8 6 h20 z" fill="#8c421f"/>
 
-    <g stroke="#2a1006" stroke-width="4" stroke-linejoin="round" stroke-linecap="round">
-      <path d="M64 128 v12 l-8 6 h20 z" fill="#8c421f"/>
-      <path d="M96 128 v12 l-8 6 h20 z" fill="#8c421f"/>
+    <!-- round tail, curling up behind -->
+    <path d="M112 122 q26 -6 22 -30 q-4 -24 -26 -18 q14 6 12 22 q-2 16 -12 20 z" fill="#b75d34"/>
 
-      <!-- round tail, curling up behind -->
-      <path d="M112 122 q26 -6 22 -30 q-4 -24 -26 -18 q14 6 12 22 q-2 16 -12 20 z" fill="#b75d34"/>
+    <!-- body, leaning forward -->
+    <path d="M52 132 q-2-40 30-42 q30 -2 28 42 z" fill="#fbf0e2"/>
 
-      <!-- body, leaning forward -->
-      <path d="M52 132 q-2-40 30-42 q30 -2 28 42 z" fill="#fbf0e2"/>
+    <!-- cross-body satchel strap -->
+    <path d="M58 92 l44 26" fill="none" stroke-width="7"/>
+    <path d="M58 92 l44 26" fill="none" stroke="#8c421f" stroke-width="4"/>
+    <rect x="94" y="110" width="24" height="20" rx="4" fill="#b75d34"/>
 
-      <!-- cross-body satchel strap -->
-      <path d="M58 92 l44 26" fill="none" stroke-width="7"/>
-      <path d="M58 92 l44 26" fill="none" stroke="#8c421f" stroke-width="4"/>
-      <rect x="94" y="110" width="24" height="20" rx="4" fill="#b75d34"/>
-
-      <!-- head -->
-      <circle cx="80" cy="56" r="26" fill="#fbf0e2"/>
-      <!-- ears -->
-      <path d="M60 38 q-6 -18 6 -20 q10 -2 8 14" fill="#fbf0e2"/>
-      <path d="M100 38 q6 -18 -6 -20 q-10 -2 -8 14" fill="#fbf0e2"/>
-    </g>
-
-    <!-- open expression -->
-    <circle cx="70" cy="54" r="4.5" fill="#2a1006"/>
-    <circle cx="90" cy="54" r="4.5" fill="#2a1006"/>
-    <circle cx="71.5" cy="52.5" r="1.6" fill="#fbf0e2"/>
-    <circle cx="91.5" cy="52.5" r="1.6" fill="#fbf0e2"/>
-    <path d="M74 68 q6 6 12 0" fill="none" stroke="#2a1006" stroke-width="3.5" stroke-linecap="round"/>
-    <circle cx="61" cy="64" r="5" fill="#e79a76" opacity="0.75"/>
-    <circle cx="99" cy="64" r="5" fill="#e79a76" opacity="0.75"/>
+    <!-- head -->
+    <circle cx="80" cy="56" r="26" fill="#fbf0e2"/>
+    <!-- ears -->
+    <path d="M60 38 q-6 -18 6 -20 q10 -2 8 14" fill="#fbf0e2"/>
+    <path d="M100 38 q6 -18 -6 -20 q-10 -2 -8 14" fill="#fbf0e2"/>
   </g>
+
+  <!-- open expression -->
+  <circle cx="70" cy="54" r="4.5" fill="#2a1006"/>
+  <circle cx="90" cy="54" r="4.5" fill="#2a1006"/>
+  <circle cx="71.5" cy="52.5" r="1.6" fill="#fbf0e2"/>
+  <circle cx="91.5" cy="52.5" r="1.6" fill="#fbf0e2"/>
+  <path d="M74 68 q6 6 12 0" fill="none" stroke="#2a1006" stroke-width="3.5" stroke-linecap="round"/>
+  <circle cx="61" cy="64" r="5" fill="#e79a76" opacity="0.75"/>
+  <circle cx="99" cy="64" r="5" fill="#e79a76" opacity="0.75"/>
 </svg>

@@ -1,45 +1,40 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" width="160" height="160" role="img" aria-label="Decision Strategist: an alert familiar with tall ears and a diagonal cape holding a map tube">
-  <!-- Decision Strategist. Hand-authored; see docs/CHARACTER_ASSET_PROVENANCE.md#decision-strategist -->
-  <defs><clipPath id="nox-frame"><rect width="160" height="160" rx="16"/></clipPath></defs>
-  <g clip-path="url(#nox-frame)">
-    <rect width="160" height="160" fill="#e2d9e6"/>
-    <circle cx="80" cy="74" r="54" fill="#efe9f1"/>
-    <rect x="0" y="144" width="160" height="16" fill="#c2b3c7"/>
+  <!-- Decision Strategist. Hand-authored; see docs/CHARACTER_ASSET_PROVENANCE.md#decision-strategist
+       Transparent artboard: the card, halo, ground strip, and clip frame are the host's to draw.
+       Ear tips lowered from y=8 to y=11 so the outline clears the safe perimeter. -->
+  <g stroke="#170e19" stroke-width="4" stroke-linejoin="round" stroke-linecap="round">
+    <path d="M64 130 v10 l-8 6 h18 z" fill="#4c3352"/>
+    <path d="M92 130 v10 l-8 6 h18 z" fill="#4c3352"/>
 
-    <g stroke="#170e19" stroke-width="4" stroke-linejoin="round" stroke-linecap="round">
-      <path d="M64 130 v10 l-8 6 h18 z" fill="#4c3352"/>
-      <path d="M92 130 v10 l-8 6 h18 z" fill="#4c3352"/>
+    <!-- tail, flicked out behind -->
+    <path d="M104 124 q28 -2 24 -24" fill="none" stroke-width="9"/>
+    <path d="M104 124 q28 -2 24 -24" fill="none" stroke="#6c4b74" stroke-width="5"/>
 
-      <!-- tail, flicked out behind -->
-      <path d="M104 124 q28 -2 24 -24" fill="none" stroke-width="9"/>
-      <path d="M104 124 q28 -2 24 -24" fill="none" stroke="#6c4b74" stroke-width="5"/>
+    <!-- body, alert posture -->
+    <path d="M58 132 q0-42 22-42 q22 0 22 42 z" fill="#f6f1f7"/>
 
-      <!-- body, alert posture -->
-      <path d="M58 132 q0-42 22-42 q22 0 22 42 z" fill="#f6f1f7"/>
+    <!-- diagonal cape -->
+    <path d="M56 88 q24 -14 48 2 l-8 44 q-16 6 -32 0 z" fill="#6c4b74"/>
+    <path d="M56 88 l48 46" fill="none" stroke-width="4"/>
 
-      <!-- diagonal cape -->
-      <path d="M56 88 q24 -14 48 2 l-8 44 q-16 6 -32 0 z" fill="#6c4b74"/>
-      <path d="M56 88 l48 46" fill="none" stroke-width="4"/>
+    <!-- head -->
+    <circle cx="80" cy="56" r="24" fill="#f6f1f7"/>
+    <!-- tall pointed ears -->
+    <path d="M62 38 l-4 -27 l24 13 z" fill="#f6f1f7"/>
+    <path d="M98 38 l4 -27 l-24 13 z" fill="#f6f1f7"/>
 
-      <!-- head -->
-      <circle cx="80" cy="56" r="24" fill="#f6f1f7"/>
-      <!-- tall pointed ears -->
-      <path d="M62 38 l-4 -30 l24 16 z" fill="#f6f1f7"/>
-      <path d="M98 38 l4 -30 l-24 16 z" fill="#f6f1f7"/>
-
-      <!-- map tube -->
-      <rect x="98" y="96" width="14" height="40" rx="7" fill="#d8c4a0"/>
-    </g>
-
-    <path d="M64 34 l-2 -18 l14 10 z" fill="#c0a3c6"/>
-    <path d="M96 34 l2 -18 l-14 10 z" fill="#c0a3c6"/>
-    <path d="M105 104 h0" stroke="#170e19" stroke-width="3"/>
-
-    <!-- narrowed, candid eyes -->
-    <path d="M66 54 q5 -5 10 0" fill="none" stroke="#170e19" stroke-width="4.5" stroke-linecap="round"/>
-    <path d="M84 54 q5 -5 10 0" fill="none" stroke="#170e19" stroke-width="4.5" stroke-linecap="round"/>
-    <!-- decision token -->
-    <circle cx="52" cy="112" r="11" fill="#c9a94f" stroke="#170e19" stroke-width="4"/>
-    <path d="M52 106 v12 M46 112 h12" stroke="#170e19" stroke-width="2.5"/>
+    <!-- map tube -->
+    <rect x="98" y="96" width="14" height="40" rx="7" fill="#d8c4a0"/>
   </g>
+
+  <path d="M64 34 l-2 -15 l14 8 z" fill="#c0a3c6"/>
+  <path d="M96 34 l2 -15 l-14 8 z" fill="#c0a3c6"/>
+  <path d="M105 104 h0" stroke="#170e19" stroke-width="3"/>
+
+  <!-- narrowed, candid eyes -->
+  <path d="M66 54 q5 -5 10 0" fill="none" stroke="#170e19" stroke-width="4.5" stroke-linecap="round"/>
+  <path d="M84 54 q5 -5 10 0" fill="none" stroke="#170e19" stroke-width="4.5" stroke-linecap="round"/>
+  <!-- decision token -->
+  <circle cx="52" cy="112" r="11" fill="#c9a94f" stroke="#170e19" stroke-width="4"/>
+  <path d="M52 106 v12 M46 112 h12" stroke="#170e19" stroke-width="2.5"/>
 </svg>

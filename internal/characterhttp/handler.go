@@ -39,20 +39,23 @@ func New() (*Handler, error) {
 // characterDTO is the browser-facing projection. It is deliberately not the
 // storage struct: `provenance` is a repository path that would leak the local
 // documentation layout to every client, and nothing in the UI needs it.
+//
+// It is visual metadata only. There is no tone, no sample speech, no prompt
+// text, and no executable instruction — a character changes how an agent looks
+// and nothing else, and the response says so by having nothing else to say
+// (PRD FR-22/FR-67).
 type characterDTO struct {
-	ID           string   `json:"id"`
-	EntryVersion int      `json:"entry_version"`
-	Kind         string   `json:"kind"`
-	Name         string   `json:"name"`
-	Family       string   `json:"family"`
-	FamilyLabel  string   `json:"family_label"`
-	Purpose      string   `json:"purpose"`
-	Description  string   `json:"description"`
-	Silhouette   string   `json:"silhouette"`
-	Prop         string   `json:"signature_prop"`
-	IdleBehavior string   `json:"idle_behavior"`
-	ToneTraits   []string `json:"tone_traits"`
-	SampleLine   string   `json:"sample_line"`
+	ID           string `json:"id"`
+	EntryVersion int    `json:"entry_version"`
+	Kind         string `json:"kind"`
+	Name         string `json:"name"`
+	Family       string `json:"family"`
+	FamilyLabel  string `json:"family_label"`
+	Purpose      string `json:"purpose"`
+	Description  string `json:"description"`
+	Silhouette   string `json:"silhouette"`
+	Prop         string `json:"signature_prop"`
+	IdleBehavior string `json:"idle_behavior"`
 	// Ordering hint for the picker only. Omitted when empty so a client cannot
 	// read an absent list as "compatible with nothing" — every character stays
 	// selectable for every agent (FR-65).
@@ -82,8 +85,6 @@ func toDTO(ch charactercatalog.Character) characterDTO {
 	d.Silhouette = ch.Silhouette
 	d.Prop = ch.Prop
 	d.IdleBehavior = ch.IdleBehavior
-	d.ToneTraits = append([]string{}, ch.ToneTraits...)
-	d.SampleLine = ch.SampleLine
 	for _, r := range ch.Roles {
 		d.Roles = append(d.Roles, string(r))
 	}

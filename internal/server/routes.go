@@ -157,7 +157,7 @@ func registerAgentRoutes(mux *http.ServeMux, s *Server) {
 	if s.Handlers.Skills != nil {
 		agentHandler.SetSkillsManager(s.Handlers.Skills.Manager())
 	}
-	avatarHandler := agenthttp.NewAvatarHandler(s.Storage.AgentStore)
+	appearanceUploadHandler := agenthttp.NewAppearanceUploadHandler(s.Storage.AgentStore, s.Storage.WorkspaceStore)
 	mux.Handle("/api/agents", agentHandler)
 	mux.HandleFunc("/api/agents/catalog", agenthttp.CatalogHandler)
 	if s.Handlers.Evolution != nil {
@@ -212,9 +212,15 @@ func registerAgentRoutes(mux *http.ServeMux, s *Server) {
 			dashboardHandler.GetAgentActivity(w, r)
 			return
 		}
-		// Route avatar upload/delete requests
-		if strings.Contains(r.URL.Path, "/avatar") {
-			avatarHandler.ServeHTTP(w, r)
+		// Route appearance upload/delete requests.
+		//
+		// An exact suffix, not a substring: the old `strings.Contains(path,
+		// "/avatar")` matched any agent whose name merely contained the word,
+		// and it is also how `/avatar` would keep working by accident. The old
+		// route is gone and must return the normal not-found result rather than
+		// proxying (FR-60/FR-62).
+		if agenthttp.IsAppearanceUploadPath(r.URL.Path) {
+			appearanceUploadHandler.ServeHTTP(w, r)
 			return
 		}
 		// Agent-centric workspace assignment: PUT /api/agents/{name}/workspaces

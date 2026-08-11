@@ -266,18 +266,16 @@
   // because an unrenamed blueprint row sharing a name with a saved agent is
   // ordinary reuse (FR41) — that agent's real face is the honest one to show.
   function identityFrom(name, agent) {
-    const metadata = (agent && agent.metadata) || {};
-    const character = metadata.character || {};
+    const appearance = (agent && agent.appearance) || null;
+    const character = (appearance && appearance.character) || {};
     return {
       name: text(name),
       source: text(agent && agent.source).toLocaleLowerCase() === 'cli' ? 'cli' : 'user',
       role: text(agent && agent.role),
-      avatarImage: text(metadata.avatar_image),
-      avatarColor: text(metadata.avatar_color),
-      // Identity is an explicit stored choice; an empty mode means the agent
-      // predates the character system and keeps the historical upload-first
-      // rule. Never infer the mode from whichever field is populated.
-      displayMode: text(character.display_mode),
+      // The canonical object travels whole to the shared renderer, which is the
+      // only thing that decides what shows. Inferring a source from populated
+      // fields here is exactly the drift this feature removes (FR-81/FR-82).
+      appearance: appearance,
       characterId: text(character.catalog_id)
     };
   }

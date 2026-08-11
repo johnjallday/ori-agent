@@ -758,21 +758,38 @@ function renderAgentDetails() {
   setPromptEditMode(isEditingPrompt);
 }
 
+// The hero goes through the shared renderer, so this page shows the same active
+// source as the Agents roster instead of its own upload-or-initials rule — the
+// exact drift this feature exists to remove (FR-80/FR-85).
 function renderCurrentAgentAvatar() {
   const avatar = document.getElementById('agentAvatar');
   if (!avatar || !currentAgent) return;
 
-  if (currentAgent.metadata?.avatar_image) {
-    avatar.innerHTML = `<img src="${getAvatarURL(currentAgent.metadata.avatar_image)}" alt="${escapeHtml(currentAgent.name)}" style="width: 100%; height: 100%; object-fit: cover; border-radius: inherit;">`;
-    avatar.style.background = 'transparent';
-    avatar.style.overflow = 'hidden';
+  if (!window.AgentAvatar) {
+    // The renderer is a deferred script; initials keep the box filled if it
+    // somehow has not installed yet.
+    avatar.innerHTML = '';
+    avatar.style.background = getAgentColor(currentAgent);
+    avatar.textContent = getAgentInitials(currentAgent.name);
     return;
   }
 
-  avatar.innerHTML = '';
-  avatar.style.background = getAgentColor(currentAgent);
-  avatar.style.overflow = '';
-  avatar.textContent = getAgentInitials(currentAgent.name);
+  const characterId = currentAgent.appearance?.character?.catalog_id || '';
+  avatar.innerHTML = window.AgentAvatar.markup(
+    {
+      name: currentAgent.name || '',
+      source: currentAgent.source || 'user',
+      role: currentAgent.role || '',
+      appearance: currentAgent.appearance || null,
+      character:
+        characterId && window.CharacterCatalog ? window.CharacterCatalog.get(characterId) : null
+    },
+    { size: 88 }
+  );
+  // The renderer owns the box entirely, so the inline background and overflow
+  // this used to set would only fight its own styles.
+  avatar.style.background = 'transparent';
+  avatar.style.overflow = 'hidden';
 }
 
 function getAvatarURL(filename) {
@@ -782,24 +799,12 @@ function getAvatarURL(filename) {
 function setupProfileEditor() {
   const editButton = document.getElementById('editProfileButton');
   const saveButton = document.getElementById('profileSaveBtn');
-  const colorInput = document.getElementById('profileAvatarColorInput');
   const tagsInput = document.getElementById('profileTagsInput');
   const tagsContainer = document.getElementById('profileTagsContainer');
-  const fileInput = document.getElementById('profileAvatarFileInput');
-  const dropZone = document.getElementById('profileAvatarDropZone');
-  const removeAvatarButton = document.getElementById('profileRemoveAvatarBtn');
   const modalElement = document.getElementById('profileEditModal');
 
   editButton?.addEventListener('click', openProfileEditor);
   saveButton?.addEventListener('click', saveProfileChanges);
-  colorInput?.addEventListener('input', () => updateProfileColorPreview(colorInput.value));
-  fileInput?.addEventListener('change', event => {
-    const file = event.target.files?.[0];
-    if (file) {
-      uploadProfileAvatarFile(file);
-    }
-  });
-  removeAvatarButton?.addEventListener('click', removeProfileAvatar);
   tagsContainer?.addEventListener('click', () => tagsInput?.focus());
   tagsInput?.addEventListener('keydown', event => {
     const value = tagsInput.value.trim();
@@ -812,38 +817,75 @@ function setupProfileEditor() {
     }
   });
 
-  if (dropZone) {
-    dropZone.addEventListener('click', () => fileInput?.click());
-    dropZone.addEventListener('keydown', event => {
-      if (event.key === 'Enter' || event.key === ' ') {
-        event.preventDefault();
-        fileInput?.click();
-      }
-    });
-    dropZone.addEventListener('dragover', event => {
-      event.preventDefault();
-      event.stopPropagation();
-      dropZone.classList.add('is-dragover');
-    });
-    dropZone.addEventListener('dragleave', event => {
-      event.preventDefault();
-      event.stopPropagation();
-      dropZone.classList.remove('is-dragover');
-    });
-    dropZone.addEventListener('drop', event => {
-      event.preventDefault();
-      event.stopPropagation();
-      dropZone.classList.remove('is-dragover');
-      const file = event.dataTransfer?.files?.[0];
-      if (file) {
-        uploadProfileAvatarFile(file);
-      }
-    });
-  }
-
   modalElement?.addEventListener('shown.bs.modal', () => {
     document.getElementById('profileAgentNameInput')?.focus();
   });
+}
+
+// The profile modal mounts the same shared editor as every other host, so this
+// page cannot drift back into its own upload-or-initials rule (FR-26/FR-85).
+//
+// Appearance saves through its own adapter the moment it changes; the modal's
+// Save button keeps owning only the fields it already owned.
+let profileAppearanceEditor = null;
+
+function mountProfileAppearanceEditor() {
+  const host = document.getElementById('profileAppearanceHost');
+  if (!host || !window.AgentAppearanceEditor || !currentAgent) return;
+  if (profileAppearanceEditor?.destroy) profileAppearanceEditor.destroy();
+
+  const name = currentAgent.name || agentName;
+  const uploadURL = `/api/agents/${encodeURIComponent(name)}/appearance/upload`;
+  const request = (url, init) =>
+    fetch(url, init).then(async response => {
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.message || data.error || 'That change could not be saved.');
+      }
+      // Adopt the server's canonical object, then repaint the hero so the page
+      // and its editor cannot disagree about the active source (FR-59/FR-66).
+      if (data.appearance) {
+        currentAgent.appearance = data.appearance;
+        profileAvatarImage = data.appearance.uploaded?.image || null;
+        renderCurrentAgentAvatar();
+      }
+      return data.appearance;
+    });
+
+  profileAppearanceEditor = window.AgentAppearanceEditor.create({
+    host,
+    idPrefix: 'profileAppearance',
+    mode: 'edit',
+    readOnly: isReadOnlyAgent(),
+    appearance: currentAgent.appearance,
+    agent: {
+      name,
+      source: currentAgent.source || 'user',
+      role: currentAgent.role || ''
+    },
+    adapter: {
+      saveAppearance: patch =>
+        request(`/api/agents?name=${encodeURIComponent(name)}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ appearance: patch })
+        }),
+      uploadImage: file => {
+        const form = new FormData();
+        form.append('image', file);
+        return request(uploadURL, { method: 'POST', body: form });
+      },
+      removeImage: () => request(uploadURL, { method: 'DELETE' })
+    }
+  });
+}
+
+// Built-in CLI agents have no editable definition, so they get the editor's
+// read-only explanation rather than controls the server rejects (FR-44).
+function isReadOnlyAgent() {
+  const source = String(currentAgent?.source || '').toLowerCase();
+  const role = String(currentAgent?.role || '').toLowerCase();
+  return source === 'cli' || role === 'cli_agent';
 }
 
 function openProfileEditor() {
@@ -860,11 +902,10 @@ function populateProfileForm() {
   const metadata = currentAgent.metadata || {};
   const nameInput = document.getElementById('profileAgentNameInput');
   const descriptionInput = document.getElementById('profileDescriptionInput');
-  const colorInput = document.getElementById('profileAvatarColorInput');
   const favoriteToggle = document.getElementById('profileFavoriteToggle');
 
   profileSelectedTags = Array.isArray(metadata.tags) ? metadata.tags.slice() : [];
-  profileAvatarImage = metadata.avatar_image || null;
+  profileAvatarImage = currentAgent.appearance?.uploaded?.image || null;
 
   if (nameInput) {
     nameInput.value = currentAgent.name || '';
@@ -876,25 +917,14 @@ function populateProfileForm() {
   if (descriptionInput) {
     descriptionInput.value = metadata.description || '';
   }
-  if (colorInput) {
-    colorInput.value = metadata.avatar_color || '#4f46e5';
-    updateProfileColorPreview(colorInput.value);
-  }
   if (favoriteToggle) {
     favoriteToggle.checked = Boolean(metadata.favorite);
   }
 
   renderProfileTags();
-  updateProfileAvatarPreview();
+  mountProfileAppearanceEditor();
   setProfileStatus('');
   setProfileSavingState(false);
-}
-
-function updateProfileColorPreview(color) {
-  const preview = document.getElementById('profileAvatarColorPreview');
-  if (preview) {
-    preview.style.background = color || '#4f46e5';
-  }
 }
 
 function renderProfileTags() {
@@ -935,156 +965,11 @@ function removeProfileTag(tag) {
   renderProfileTags();
 }
 
-function updateProfileAvatarPreview() {
-  const img = document.getElementById('profileAvatarImg');
-  const placeholder = document.getElementById('profileAvatarPlaceholder');
-  const actions = document.getElementById('profileAvatarActions');
-  const preview = document.getElementById('profileAvatarImagePreview');
-
-  if (profileAvatarImage) {
-    if (img) {
-      img.src = getAvatarURL(profileAvatarImage);
-      img.style.display = 'block';
-    }
-    if (placeholder) {
-      placeholder.style.display = 'none';
-    }
-    if (actions) {
-      actions.style.display = 'block';
-    }
-    if (preview) {
-      preview.style.borderStyle = 'solid';
-    }
-    return;
-  }
-
-  if (img) {
-    img.src = '';
-    img.style.display = 'none';
-  }
-  if (placeholder) {
-    placeholder.style.display = 'block';
-  }
-  if (actions) {
-    actions.style.display = 'none';
-  }
-  if (preview) {
-    preview.style.borderStyle = 'dashed';
-  }
-}
-
-function previewProfileAvatarFile(file) {
-  const reader = new FileReader();
-  reader.onload = event => {
-    const img = document.getElementById('profileAvatarImg');
-    const placeholder = document.getElementById('profileAvatarPlaceholder');
-    if (img) {
-      img.src = event.target.result;
-      img.style.display = 'block';
-    }
-    if (placeholder) {
-      placeholder.style.display = 'none';
-    }
-  };
-  reader.readAsDataURL(file);
-}
-
-async function uploadProfileAvatarFile(file) {
-  const allowedTypes = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
-  if (!allowedTypes.includes(file.type)) {
-    setProfileAvatarStatus('Invalid file type. Use PNG, JPG, GIF, or WebP.', 'error');
-    return;
-  }
-
-  const maxSize = 5 * 1024 * 1024;
-  if (file.size > maxSize) {
-    setProfileAvatarStatus('File too large. Maximum size is 5 MB.', 'error');
-    return;
-  }
-
-  previewProfileAvatarFile(file);
-
-  const formData = new FormData();
-  formData.append('avatar', file);
-
-  try {
-    setProfileAvatarStatus('Uploading...');
-    const response = await fetch(`/api/agents/${encodeURIComponent(agentName)}/avatar`, {
-      method: 'POST',
-      body: formData
-    });
-
-    if (!response.ok) {
-      throw new Error(await readResponseError(response, 'Failed to upload avatar'));
-    }
-
-    const data = await response.json();
-    profileAvatarImage = data.avatar_url?.replace('/avatars/', '') || null;
-    currentAgent.metadata = currentAgent.metadata || {};
-    currentAgent.metadata.avatar_image = profileAvatarImage;
-    setProfileAvatarStatus('Avatar uploaded successfully.', 'success');
-    updateProfileAvatarPreview();
-    renderCurrentAgentAvatar();
-  } catch (error) {
-    console.error('Error uploading avatar:', error);
-    setProfileAvatarStatus(error.message || 'Failed to upload avatar', 'error');
-    updateProfileAvatarPreview();
-  }
-}
-
-async function removeProfileAvatar() {
-  if (!profileAvatarImage) return;
-
-  try {
-    setProfileAvatarStatus('Removing...');
-    const response = await fetch(`/api/agents/${encodeURIComponent(agentName)}/avatar`, {
-      method: 'DELETE'
-    });
-
-    if (!response.ok) {
-      throw new Error(await readResponseError(response, 'Failed to remove avatar'));
-    }
-
-    profileAvatarImage = null;
-    currentAgent.metadata = currentAgent.metadata || {};
-    currentAgent.metadata.avatar_image = '';
-    setProfileAvatarStatus('Avatar removed.', 'success');
-    updateProfileAvatarPreview();
-    renderCurrentAgentAvatar();
-  } catch (error) {
-    console.error('Error removing avatar:', error);
-    setProfileAvatarStatus(error.message || 'Failed to remove avatar', 'error');
-  }
-}
-
-function setProfileAvatarStatus(message, type = 'info') {
-  const status = document.getElementById('profileAvatarUploadStatus');
-  if (!status) return;
-
-  status.textContent = message || '';
-  if (type === 'error') {
-    status.style.color = 'var(--danger-color)';
-  } else if (type === 'success') {
-    status.style.color = 'var(--success-color, #22c55e)';
-  } else {
-    status.style.color = 'var(--text-secondary)';
-  }
-
-  if (message && type !== 'error') {
-    window.setTimeout(() => {
-      if (status.textContent === message) {
-        status.textContent = '';
-      }
-    }, 3000);
-  }
-}
-
 async function saveProfileChanges() {
   if (!currentAgent) return;
 
   const nameInput = document.getElementById('profileAgentNameInput');
   const descriptionInput = document.getElementById('profileDescriptionInput');
-  const colorInput = document.getElementById('profileAvatarColorInput');
   const favoriteToggle = document.getElementById('profileFavoriteToggle');
   const newName = String(nameInput?.value || '').trim();
 
@@ -1097,7 +982,9 @@ async function saveProfileChanges() {
   const payload = {
     name: newName,
     description: String(descriptionInput?.value || '').trim(),
-    avatar_color: colorInput?.value || '#4f46e5',
+    // Appearance is deliberately absent: the shared editor saves each change on
+    // its own the moment it happens, so sending it here too would give one
+    // setting two write paths that could disagree (FR-41).
     tags: profileSelectedTags,
     favorite: Boolean(favoriteToggle?.checked)
   };
@@ -2409,8 +2296,8 @@ async function confirmDelete() {
 
 // Helper functions
 function getAgentColor(agent) {
-  if (agent.metadata?.avatar_color) {
-    return agent.metadata.avatar_color;
+  if (agent.appearance?.generated?.color) {
+    return agent.appearance.generated.color;
   }
   // Generate color from name
   const hash = agent.name.split('').reduce((acc, char) => {

@@ -38,7 +38,7 @@ async function openAgent(page: Page, name: string) {
 }
 
 async function openPickerFromInspector(page: Page) {
-  await page.locator('#ov-character-btn').click();
+  await page.locator('#ov-appearance-character-choose').click();
   await expect(page.locator('#charPicker')).toBeVisible();
 }
 
@@ -59,7 +59,12 @@ test.describe('choosing a character', () => {
     // The real assertion: it survives a round trip, not just a local re-render.
     await page.reload({ waitUntil: 'domcontentloaded' });
     await expect(page.locator('#stageCharacter')).toContainText('Research Archivist');
-    await expect(page.locator('#ov-identity-mode')).toContainText('Research Archivist');
+    // The editor lists all three sources, so "contains Generated" is trivially
+    // true; the radio is what says which one is actually active.
+    await expect(page.locator('#ov-appearance-mode-character')).toBeChecked();
+    await expect(page.locator('#ov-appearance-root')).toContainText(
+      'Character art: Research Archivist'
+    );
   });
 
   test('cancelling changes nothing', async ({ page }) => {
@@ -67,40 +72,58 @@ test.describe('choosing a character', () => {
     await makeAgent(page, name);
     await openAgent(page, name);
 
-    const before = await page.locator('#ov-identity-mode').innerText();
+    await expect(page.locator('#ov-appearance-mode-generated')).toBeChecked();
 
     await openPickerFromInspector(page);
     await page.locator('.char-card', { hasText: 'Product Builder' }).click();
     await page.locator('#charPickerCancel').click();
     await expect(page.locator('#charPicker')).toBeHidden();
 
-    await expect(page.locator('#ov-identity-mode')).toHaveText(before);
+    // Selecting a card inside the picker stages nothing: only Confirm assigns.
+    // Character therefore stays unselectable, because none was ever saved.
+    await expect(page.locator('#ov-appearance-mode-generated')).toBeChecked();
+    await expect(page.locator('#ov-appearance-mode-character')).toBeDisabled();
+
     await page.reload({ waitUntil: 'domcontentloaded' });
-    await expect(page.locator('#ov-identity-mode')).toHaveText(before);
+    await expect(page.locator('#ov-appearance-mode-generated')).toBeChecked();
+    await expect(page.locator('#ov-appearance-mode-character')).toBeDisabled();
   });
 
-  test('the voice toggle is off by default and persists when turned on', async ({ page }) => {
-    const name = unique('PWVoice');
+  test('choosing a character is appearance only — no voice control anywhere', async ({
+    page,
+    request
+  }) => {
+    const name = unique('PWVisualOnly');
     await makeAgent(page, name);
     await openAgent(page, name);
 
+    const before = await (
+      await request.get(`/api/agents/${encodeURIComponent(name)}/detail`)
+    ).json();
+
     await openPickerFromInspector(page);
-    await expect(page.locator('#charPickerVoice')).not.toBeChecked();
+    // The control is gone from the DOM, not merely hidden: a toggle implying a
+    // character changes how an agent speaks is the promise this feature removed
+    // (FR-19/FR-23).
+    await expect(page.locator('#charPickerVoice')).toHaveCount(0);
+    await expect(page.locator('#charPicker')).toContainText('Appearance only');
 
     await page.locator('.char-card', { hasText: 'Team Caretaker' }).click();
-    await page.locator('#charPickerVoice').check();
     await page.locator('#charPickerConfirm').click();
+    await expect(page.locator('#stageCharacter')).toContainText('Team Caretaker');
 
-    await expect(page.locator('#ov-identity-voice')).toContainText('on');
-
-    await page.reload({ waitUntil: 'domcontentloaded' });
-    await expect(page.locator('#ov-identity-voice')).toContainText('on');
-    // Reopening shows the stored state rather than resetting it.
-    await openPickerFromInspector(page);
-    await expect(page.locator('#charPickerVoice')).toBeChecked();
+    const after = await (
+      await request.get(`/api/agents/${encodeURIComponent(name)}/detail`)
+    ).json();
+    // Nothing about how the agent works may have moved (FR-17).
+    expect(after.system_prompt).toBe(before.system_prompt);
+    expect(after.model).toBe(before.model);
+    expect(after.role).toBe(before.role);
+    expect(JSON.stringify(after)).not.toContain('voice_enabled');
+    expect(JSON.stringify(after)).not.toContain('character_tone');
   });
 
-  test('removing a character returns the agent to its generated identity', async ({ page }) => {
+  test('removing a character returns the agent to its generated appearance', async ({ page }) => {
     const name = unique('PWRemove');
     await makeAgent(page, name);
     await openAgent(page, name);
@@ -110,11 +133,15 @@ test.describe('choosing a character', () => {
     await page.locator('#charPickerConfirm').click();
     await expect(page.locator('#stageCharacter')).toContainText('Operations Keeper');
 
-    await page.locator('#ov-character-clear').click();
-    await expect(page.locator('#ov-identity-mode')).toContainText('Generated identity');
+    await page.locator('#ov-appearance-character-remove').click();
+    await expect(page.locator('#ov-appearance-mode-generated')).toBeChecked();
+    // The selection is gone, so Character is no longer selectable — which is
+    // what distinguishes "removed" from merely "switched away from" (FR-33).
+    await expect(page.locator('#ov-appearance-mode-character')).toBeDisabled();
 
     await page.reload({ waitUntil: 'domcontentloaded' });
-    await expect(page.locator('#ov-identity-mode')).toContainText('Generated identity');
+    await expect(page.locator('#ov-appearance-mode-generated')).toBeChecked();
+    await expect(page.locator('#ov-appearance-mode-character')).toBeDisabled();
   });
 });
 
@@ -144,13 +171,15 @@ test.describe('the picker itself', () => {
     await page.locator('.char-card', { hasText: 'Automation Specialist' }).click();
     const preview = page.locator('#charPickerPreview');
 
-    // FR-59: silhouette, prop, idle behaviour, tone, and a sample line.
+    // FR-28: silhouette, prop, and idle behaviour — all visual.
     await expect(preview).toContainText('Narrow bird profile');
     await expect(preview).toContainText('Wind-up key');
-    await expect(preview).toContainText('exact');
-    await expect(preview).toContainText('forty-two seconds');
-    // FR-97: the prop is identity, not a capability.
-    await expect(preview).toContainText('identity only');
+    // No tone facts and no sample speech: copy describing how a character talks
+    // would keep the removed promise alive (FR-23).
+    await expect(preview).not.toContainText('Tone');
+    await expect(preview).not.toContainText('forty-two seconds');
+    // FR-29: the prop is appearance, not a capability.
+    await expect(preview).toContainText('Appearance only');
   });
 
   test('family filters and search narrow the grid', async ({ page }) => {
@@ -180,7 +209,7 @@ test.describe('the picker itself', () => {
 
     await page.keyboard.press('Escape');
     await expect(page.locator('#charPicker')).toBeHidden();
-    await expect(page.locator('#ov-character-btn')).toBeFocused();
+    await expect(page.locator('#ov-appearance-character-choose')).toBeFocused();
   });
 });
 
@@ -193,12 +222,14 @@ test.describe('creating an agent with a character', () => {
     await page.locator('#newAgentBtn').click();
     await page.locator('#cr-name').fill(name);
 
-    await page.locator('#cr-character-btn').click();
+    await page.locator('#cr-appearance-character-choose').click();
     await expect(page.locator('#charPicker')).toBeVisible();
     await page.locator('.char-card', { hasText: 'Insight Researcher' }).click();
     await page.locator('#charPickerConfirm').click();
 
-    await expect(page.locator('#cr-character-state')).toContainText('Insight Researcher');
+    // Staged only: nothing is persisted until the create request succeeds.
+    await expect(page.locator('#cr-appearance-mode-character')).toBeChecked();
+    await expect(page.locator('#cr-appearance-root')).toContainText('Insight Researcher');
     await page.locator('#createSubmit').click();
 
     // Persisted in the same successful creation, not a follow-up write (FR-93).
@@ -214,14 +245,14 @@ test.describe('creating an agent with a character', () => {
     await page.locator('#newAgentBtn').click();
     await page.locator('#cr-name').fill(name);
 
-    await page.locator('#cr-character-btn').click();
-    await page.locator('#charPickerSkip').click();
-    await expect(page.locator('#cr-character-state')).toContainText('No character chosen');
+    // Skipping is not a separate path any more — it is simply not touching the
+    // Appearance section, which starts on Generated (FR-4).
+    await expect(page.locator('#cr-appearance-mode-generated')).toBeChecked();
 
     await page.locator('#createSubmit').click();
     await expect(page.locator('#stageName')).toHaveText(name);
-    // No character means the generated identity, not a broken portrait.
-    await expect(page.locator('#ov-identity-mode')).toContainText('Generated identity');
+    // No character means the generated portrait, not a broken one.
+    await expect(page.locator('#ov-appearance-mode-generated')).toBeChecked();
     await expect(page.locator('#stageCharacter')).toBeHidden();
   });
 });
@@ -253,8 +284,8 @@ test.describe('identity does not disturb the rest of the page', () => {
     await openAgent(page, 'Claude Code');
 
     // The server would reject an edit, so the UI must not offer one (FR-70/FR-92).
-    await expect(page.locator('#ov-character-btn')).toHaveCount(0);
-    await expect(page.locator('#ov-character-clear')).toHaveCount(0);
+    await expect(page.locator('#ov-appearance-character-choose')).toHaveCount(0);
+    await expect(page.locator('#ov-appearance-character-remove')).toHaveCount(0);
   });
 
   test('the same identity renders in Gallery and List', async ({ page }) => {

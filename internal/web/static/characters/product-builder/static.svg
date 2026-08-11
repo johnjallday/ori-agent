@@ -1,8 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48" role="img" aria-label="Product Builder">
   <!-- Reduced-motion variant of sprite.svg: head at rest (FR-120). -->
-  <circle cx="24" cy="24" r="24" fill="#e2ead4"/>
   <g stroke="#12200a" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round">
-    <rect x="12" y="28" width="24" height="18" rx="6" fill="#f5f2e0"/>
+    <rect x="12" y="28" width="24" height="15" rx="6" fill="#f5f2e0"/>
     <rect x="10" y="33" width="28" height="6" rx="2" fill="#658c36"/>
     <rect x="13" y="10" width="22" height="19" rx="6" fill="#f5f2e0"/>
     <circle cx="13" cy="14" r="3.6" fill="#f5f2e0"/>
