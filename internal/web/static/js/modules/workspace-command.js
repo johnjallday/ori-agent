@@ -913,9 +913,48 @@ export class WorkspaceCommandView {
         'tools',
         'Open tools: MCP, skills, plugins, and find tools'
       ) +
+      // Tickets is the canonical destination for durable workspace work. The
+      // count is loaded asynchronously (see refreshTicketCount) rather than
+      // read from page.tasks, because Ticket state is server-authoritative and
+      // deriving a count from legacy task status would be the exact inference
+      // this feature exists to remove (FR-7, FR-101).
+      this.statBoxHTML(
+        this.ticketCountLabel(),
+        'Tickets',
+        'tickets',
+        'View tickets: backlog, ready, in progress, review, and done'
+      ) +
       '</div>' +
       '</header>'
     );
+  }
+
+  /** The Tickets stat value; an em dash until the real count arrives. */
+  ticketCountLabel() {
+    return typeof this.ticketCount === 'number' ? String(this.ticketCount) : '–';
+  }
+
+  /**
+   * Fetches the workspace's ticket count and paints it into the stat tile in
+   * place. It updates only the tile's value node rather than re-rendering the
+   * command view, so an in-flight count can never clobber an open modal or
+   * reset the user's scroll position.
+   */
+  async refreshTicketCount() {
+    const tickets = typeof window !== 'undefined' ? window.WorkspaceHubTickets : null;
+    const studioId = this.workspaceId();
+    if (!tickets || !studioId) return;
+    try {
+      const result = await tickets.api.list(studioId);
+      this.ticketCount = result.count;
+    } catch (_error) {
+      // A failed count leaves the placeholder rather than showing a wrong
+      // number; the Tickets modal surfaces the real error when opened.
+      return;
+    }
+    if (!this.container || typeof this.container.querySelector !== 'function') return;
+    const tile = this.container.querySelector('[data-cmd-section="tickets"] .ws-v');
+    if (tile) tile.textContent = this.ticketCountLabel();
   }
 
   renderMissionPanel() {
@@ -1134,6 +1173,11 @@ export class WorkspaceCommandView {
         this.renderTaskDrawerBody();
       }
     }
+
+    // Paint the real ticket count over the placeholder. Fire-and-forget: the
+    // count is a readout, so a slow or failed fetch must never delay or break
+    // the rest of the command view.
+    Promise.resolve(this.refreshTicketCount()).catch(() => {});
 
     // The Backlog drawer survives full re-renders too — same pattern.
     if (this.backlogDrawerEl && this.container && this.container.appendChild) {
@@ -1381,6 +1425,11 @@ export class WorkspaceCommandView {
         return { title: 'Agents', addLabel: '＋ Add Agent' };
       case 'tasks':
         return { title: this.taskModalShowAll ? 'Tasks' : 'Open Tasks', addLabel: '＋ Add Task' };
+      case 'tickets':
+        // The create form lives inside the Tickets surface itself, because
+        // creating a Ticket requires an explicit Backlog/Ready choice (FR-19)
+        // that a bare "＋ Add" header button cannot express.
+        return { title: 'Tickets', addLabel: '' };
       case 'mcp':
         return { title: 'MCP Servers', addLabel: '＋ Add MCP' };
       case 'skills':
@@ -1432,6 +1481,7 @@ export class WorkspaceCommandView {
     const wasBoard = this.taskModalBoardMode;
     const wasConfig = this.sectionUsesConfigSurface(this.statModalSection);
     const wasTools = this.statModalSection === 'tools';
+    const wasTickets = this.statModalSection === 'tickets';
     this.statModalSection = '';
     this.statModalTrigger = null;
     this.taskModalBoardMode = false;
@@ -1448,6 +1498,12 @@ export class WorkspaceCommandView {
     }
     if (wasTools) {
       this.releaseToolsModalSurface();
+    }
+    // Hand the live Tickets node back to the hidden hosts block, and refresh
+    // the stat tile so a ticket created in the modal is reflected immediately.
+    if (wasTickets) {
+      this.restoreSharedSurface('tickets');
+      Promise.resolve(this.refreshTicketCount()).catch(() => {});
     }
     if (this.statModalEl) this.statModalEl.hidden = true;
     this.setCommandBackgroundInert(false);
@@ -1557,9 +1613,44 @@ export class WorkspaceCommandView {
     if (panel.classList) panel.classList.toggle('is-config', isConfig);
     panel.innerHTML = this.statModalHTML(this.statModalSection);
     this.syncBoardSurface();
+    this.syncTicketsSurface();
     this.syncConfigModalSurface();
     this.syncToolsModalSurface();
     this.mountTaskFilterBar();
+  }
+
+  // Mount the live Tickets surface into the open Tickets modal, mirroring
+  // syncBoardSurface. The surface is a single relocated node, not a copy, so
+  // there is only ever one Ticket create form and one list in the document —
+  // a second editable copy is exactly how two surfaces drift apart.
+  syncTicketsSurface() {
+    const open =
+      this.statModalSection === 'tickets' && this.statModalEl && !this.statModalEl.hidden;
+    if (!open) {
+      this.restoreSharedSurface('tickets');
+      return;
+    }
+    const host = this.statModalEl.querySelector('[data-cmd-tickets-host]');
+    if (!host) return;
+
+    const surface = this.mountSharedSurface('tickets', '#workspace-detail-tickets-surface', host);
+    if (!surface) {
+      host.innerHTML = '<div class="ws-cmd-modal-empty">Tickets are unavailable.</div>';
+      return;
+    }
+    surface.hidden = false;
+    if (surface.style) surface.style.display = '';
+
+    // The Tickets module owns its own loading, empty, and error states and
+    // fetches fresh on every open, so the modal can never show a record the
+    // server no longer has.
+    const tickets = typeof window !== 'undefined' ? window.WorkspaceHubTickets : null;
+    if (tickets) {
+      tickets.init();
+      Promise.resolve(tickets.load()).catch(() => {
+        /* the module renders its own error state */
+      });
+    }
   }
 
   // Mount the live Workspace config surface into the open MCP/Skills stat modal, showing
@@ -1755,6 +1846,21 @@ export class WorkspaceCommandView {
     if (!meta) return '';
     if (section === 'watchtower') return this.watchtowerPanelHTML();
     if (section === 'calendar-ops') return this.calendarOpsPanelHTML();
+    // Tickets renders as an empty host; the live surface is relocated into it
+    // by syncTicketsSurface, the same way the Board and config panels work.
+    if (section === 'tickets') {
+      return (
+        '<header class="ws-cmd-modal-head">' +
+        '<h3 class="ws-cmd-modal-title">' +
+        escapeHtml(meta.title) +
+        '</h3>' +
+        '<div class="ws-cmd-modal-head-actions">' +
+        '<button type="button" class="ws-cmd-modal-close" data-cmd-modal-action="close" aria-label="Close tickets">×</button>' +
+        '</div>' +
+        '</header>' +
+        '<div class="ws-cmd-modal-body" data-cmd-tickets-host></div>'
+      );
+    }
     // The Tools modal groups every capability provider (MCP, Skills, Plugins) plus the
     // Find Tools discovery flow behind one tabbed surface.
     if (section === 'tools') {
@@ -8378,6 +8484,9 @@ export class WorkspaceCommandView {
     this.restoreSharedSurface('tools');
     this.restoreSharedSurface('members');
     this.restoreSharedSurface('board');
+    // Tickets is a relocated node like the others: without this it would be
+    // left inside a torn-down modal and vanish from the document.
+    this.restoreSharedSurface('tickets');
   }
 
   showConfigTab(tab) {

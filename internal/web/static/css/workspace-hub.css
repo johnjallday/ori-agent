@@ -5825,3 +5825,352 @@ body.modal-open .hub-support-chat {
   color: var(--bs-danger, #dc3545);
   font-size: 0.82rem;
 }
+
+/* ==========================================================================
+   Tickets (tasks/prd-workspace-ticket-management.md)
+
+   The canonical destination for durable workspace work. Mounted into the
+   Command view's Tickets modal from the shared-hosts block.
+
+   State is never communicated by color alone: every state chip carries its
+   own text label and its own border weight/style, so the surface stays
+   readable in greyscale, in forced-colors mode, and to a screen reader
+   (FR-131).
+   ========================================================================== */
+
+.hub-tickets-container {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.hub-tickets-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.hub-tickets-title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+}
+
+.hub-tickets-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary, #e8eaed);
+}
+
+.hub-tickets-count {
+  font-size: 0.82rem;
+  color: var(--text-muted, #9aa0a6);
+}
+
+.hub-tickets-status {
+  margin: 0;
+  padding: 0.5rem 0.7rem;
+  border-radius: var(--radius-sm, 0.25rem);
+  border: 1px solid var(--border-color, #3c4043);
+  background: var(--bg-tertiary, #2a2d31);
+  color: var(--text-secondary, #bdc1c6);
+  font-size: 0.85rem;
+}
+
+.hub-tickets-status[data-tone="error"] {
+  border-color: var(--bs-danger, #dc3545);
+  color: var(--bs-danger, #dc3545);
+}
+
+.hub-tickets-status[data-tone="success"] {
+  border-color: var(--accent-primary, #8ab4f8);
+  color: var(--text-primary, #e8eaed);
+}
+
+/* --- Create form --------------------------------------------------------- */
+
+.hub-ticket-create {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.9rem;
+  border: 1px solid var(--border-color, #3c4043);
+  border-radius: var(--radius-md, 0.5rem);
+  background: var(--bg-secondary, #202124);
+}
+
+.hub-ticket-create-label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-secondary, #bdc1c6);
+}
+
+.hub-ticket-create-optional {
+  font-weight: 400;
+  color: var(--text-muted, #9aa0a6);
+}
+
+.hub-ticket-create-state {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin: 0.3rem 0 0;
+  padding: 0;
+  border: 0;
+}
+
+.hub-ticket-create-state > legend {
+  float: none;
+  width: 100%;
+  margin-bottom: 0.4rem;
+  padding: 0;
+}
+
+.hub-ticket-state-choice {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: start;
+  gap: 0.15rem 0.5rem;
+  flex: 1 1 15rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--border-color, #3c4043);
+  border-radius: var(--radius-sm, 0.25rem);
+  cursor: pointer;
+}
+
+.hub-ticket-state-choice:hover {
+  border-color: var(--accent-primary, #8ab4f8);
+}
+
+/* The checked choice is marked by border weight as well as color, so the
+   selection survives greyscale and forced-colors rendering. */
+.hub-ticket-state-choice:has(input:checked) {
+  border-color: var(--accent-primary, #8ab4f8);
+  border-width: 2px;
+  padding: calc(0.55rem - 1px) calc(0.7rem - 1px);
+}
+
+.hub-ticket-state-choice:focus-within {
+  outline: 2px solid var(--accent-primary, #8ab4f8);
+  outline-offset: 2px;
+}
+
+.hub-ticket-state-choice-label {
+  grid-column: 2;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--text-primary, #e8eaed);
+}
+
+.hub-ticket-state-choice-hint {
+  grid-column: 2;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  color: var(--text-muted, #9aa0a6);
+}
+
+.hub-ticket-create-submit {
+  align-self: flex-start;
+}
+
+/* --- List ---------------------------------------------------------------- */
+
+.hub-tickets-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.hub-tickets-empty p {
+  margin: 0;
+  padding: 1.2rem;
+  text-align: center;
+  color: var(--text-muted, #9aa0a6);
+  font-size: 0.88rem;
+}
+
+.ticket-card-open {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  width: 100%;
+  padding: 0.6rem 0.75rem;
+  text-align: left;
+  border: 1px solid var(--border-color, #3c4043);
+  border-radius: var(--radius-sm, 0.25rem);
+  background: var(--bg-secondary, #202124);
+  color: var(--text-primary, #e8eaed);
+  font: inherit;
+  cursor: pointer;
+}
+
+.ticket-card-open:hover {
+  border-color: var(--accent-primary, #8ab4f8);
+}
+
+.ticket-card-open:focus-visible {
+  outline: 2px solid var(--accent-primary, #8ab4f8);
+  outline-offset: 2px;
+}
+
+.ticket-card-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.ticket-card-number {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.78rem;
+  color: var(--text-muted, #9aa0a6);
+}
+
+.ticket-card-title {
+  font-size: 0.92rem;
+  line-height: 1.35;
+}
+
+.ticket-card-tags {
+  font-size: 0.76rem;
+  color: var(--text-muted, #9aa0a6);
+}
+
+/* --- State chips ---------------------------------------------------------
+   Each state gets a distinct text label (set in markup) AND a distinct border
+   treatment, so the six states remain distinguishable without color. */
+
+.ticket-state-chip {
+  display: inline-block;
+  padding: 0.05rem 0.45rem;
+  border: 1px solid var(--border-color, #3c4043);
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--text-secondary, #bdc1c6);
+  white-space: nowrap;
+}
+
+.ticket-state-chip.ticket-state-backlog {
+  border-style: dashed;
+}
+
+.ticket-state-chip.ticket-state-ready {
+  border-color: var(--accent-primary, #8ab4f8);
+  color: var(--text-primary, #e8eaed);
+}
+
+.ticket-state-chip.ticket-state-in_progress {
+  border-color: var(--accent-primary, #8ab4f8);
+  border-width: 2px;
+  color: var(--text-primary, #e8eaed);
+}
+
+.ticket-state-chip.ticket-state-review {
+  border-color: var(--warning-color, #f9ab00);
+  border-width: 2px;
+  color: var(--warning-color, #f9ab00);
+}
+
+.ticket-state-chip.ticket-state-done {
+  border-color: var(--text-muted, #9aa0a6);
+  color: var(--text-muted, #9aa0a6);
+}
+
+.ticket-state-chip.ticket-state-cancelled {
+  border-style: dotted;
+  color: var(--text-muted, #9aa0a6);
+  text-decoration: line-through;
+}
+
+/* --- Detail -------------------------------------------------------------- */
+
+.hub-ticket-detail {
+  border: 1px solid var(--border-color, #3c4043);
+  border-radius: var(--radius-md, 0.5rem);
+  background: var(--bg-secondary, #202124);
+  padding: 0.9rem;
+}
+
+.hub-ticket-detail-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.6rem;
+}
+
+.hub-ticket-detail-title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-primary, #e8eaed);
+}
+
+.ticket-detail-summary {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.ticket-detail-row {
+  display: grid;
+  grid-template-columns: 7rem 1fr;
+  gap: 0.5rem;
+  font-size: 0.84rem;
+}
+
+.ticket-detail-row dt {
+  color: var(--text-muted, #9aa0a6);
+  font-weight: 500;
+}
+
+.ticket-detail-row dd {
+  margin: 0;
+  color: var(--text-primary, #e8eaed);
+  overflow-wrap: anywhere;
+}
+
+.ticket-detail-description {
+  margin: 0.7rem 0 0;
+  padding: 0.6rem;
+  border-radius: var(--radius-sm, 0.25rem);
+  background: var(--bg-tertiary, #2a2d31);
+  color: var(--text-secondary, #bdc1c6);
+  font-size: 0.84rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-x: auto;
+}
+
+.ticket-detail-section-title {
+  margin: 0.9rem 0 0.35rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-muted, #9aa0a6);
+}
+
+.ticket-detail-history {
+  margin: 0;
+  padding-left: 1.15rem;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: var(--text-secondary, #bdc1c6);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ticket-card-open,
+  .hub-ticket-state-choice {
+    transition: none;
+  }
+}

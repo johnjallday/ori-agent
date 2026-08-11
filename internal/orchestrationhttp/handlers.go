@@ -115,6 +115,7 @@ type Handler struct {
 	taskHandlerSub      *TaskHandler
 	dynamicAgentHandler *DynamicAgentHandler
 	backlogHandler      *BacklogHandler
+	ticketHandler       *TicketHandler
 }
 
 // NewHandler creates a new orchestration handler with all dependencies.
@@ -176,6 +177,7 @@ func (h *Handler) initializeSubHandlers() {
 	backlogService.SetSynchronizer(backlogFileSync)
 	h.backlogHandler = NewBacklogHandler(backlogService)
 	h.backlogHandler.SetFileSynchronizer(backlogFileSync)
+	h.ticketHandler = NewTicketHandler(newTicketService(h.workspaceStore, h.eventBus))
 
 	// Optional sub-handlers (created if dependencies are available)
 	if h.orchestrator != nil {
@@ -236,6 +238,7 @@ func (h *Handler) SetEventBus(eb *workspace.EventBus) {
 	backlogService.SetSynchronizer(legacyBacklogFileSync)
 	h.backlogHandler = NewBacklogHandler(backlogService)
 	h.backlogHandler.SetFileSynchronizer(legacyBacklogFileSync)
+	h.ticketHandler = NewTicketHandler(newTicketService(h.workspaceStore, eb))
 	h.initializeTemplateHandlerLegacy()
 	h.initializeStreamingHandlerLegacy()
 	h.initializeTaskHandlerLegacy()
@@ -474,6 +477,34 @@ func (h *Handler) BacklogListHandler(w http.ResponseWriter, r *http.Request) {
 // reorder, and sync. Delegates to BacklogHandler.
 func (h *Handler) BacklogItemPathHandler(w http.ResponseWriter, r *http.Request) {
 	h.backlogHandler.BacklogItemPathHandler(w, r)
+}
+
+// --- Canonical Ticket API (tasks/prd-workspace-ticket-management.md) -------
+//
+// These are the owner-scoped product routes. The legacy task/backlog handlers
+// above remain as compatibility adapters during the migration window.
+
+// TicketCollectionHandler handles GET/POST /api/workspaces/{studio_id}/tickets.
+func (h *Handler) TicketCollectionHandler(w http.ResponseWriter, r *http.Request) {
+	h.ticketHandler.TicketCollectionHandler(w, r)
+}
+
+// TicketItemHandler handles GET/PATCH/DELETE on
+// /api/workspaces/{studio_id}/tickets/{ticket_id}.
+func (h *Handler) TicketItemHandler(w http.ResponseWriter, r *http.Request) {
+	h.ticketHandler.TicketItemHandler(w, r)
+}
+
+// TicketTransitionHandler handles POST
+// /api/workspaces/{studio_id}/tickets/{ticket_id}/transition.
+func (h *Handler) TicketTransitionHandler(w http.ResponseWriter, r *http.Request) {
+	h.ticketHandler.TicketTransitionHandler(w, r)
+}
+
+// TicketReorderHandler handles POST
+// /api/workspaces/{studio_id}/tickets/reorder.
+func (h *Handler) TicketReorderHandler(w http.ResponseWriter, r *http.Request) {
+	h.ticketHandler.TicketReorderHandler(w, r)
 }
 
 // ProgressStreamHandler streams real-time progress updates using Server-Sent Events (SSE)

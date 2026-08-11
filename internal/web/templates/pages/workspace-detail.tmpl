@@ -1033,6 +1033,82 @@
                   </div>
                 </div>
 
+                <!--
+                  Tickets: the canonical destination for durable workspace work
+                  (tasks/prd-workspace-ticket-management.md).
+
+                  Lives here in the shared-hosts block and is relocated into
+                  the Command view's Tickets modal by syncTicketsSurface, the
+                  same way the task Board and config panels work. There is one
+                  node, not a copy per surface, so a second editable Ticket
+                  list cannot drift out of sync with this one.
+
+                  Everything below is server-backed: workspace-hub-tickets.js
+                  fills the list and detail from the canonical Ticket API and
+                  renders nothing on failure but an error state.
+                -->
+                <div id="workspace-detail-tickets-surface" class="hub-tickets-container" hidden>
+                  <div class="hub-tickets-header">
+                    <div class="hub-tickets-title-row">
+                      <h3 class="hub-tickets-title">Tickets</h3>
+                      <span class="hub-tickets-count" id="hubTicketsCount">0 tickets</span>
+                    </div>
+                    <button id="hubTicketsRefreshBtn" class="modern-btn modern-btn-secondary modern-btn-sm" type="button" title="Refresh tickets">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z"/>
+                      </svg>
+                      <span>Refresh</span>
+                    </button>
+                  </div>
+
+                  <p class="hub-tickets-status" id="hubTicketsStatus" role="status" aria-live="polite" hidden></p>
+
+                  <form class="hub-ticket-create" id="hubTicketCreateForm">
+                    <label class="hub-ticket-create-label" for="hubTicketCreateTitle">Title</label>
+                    <input type="text" class="form-control" id="hubTicketCreateTitle" name="title" placeholder="What needs doing?" required maxlength="300">
+
+                    <label class="hub-ticket-create-label" for="hubTicketCreateDescription">Description <span class="hub-ticket-create-optional">(optional, Markdown)</span></label>
+                    <textarea class="form-control" id="hubTicketCreateDescription" name="description" rows="2" placeholder="Context, links, acceptance criteria…"></textarea>
+
+                    <!--
+                      The Backlog/Ready choice is explicit and required (FR-19).
+                      Nothing is pre-selected: "captured an idea" and "committed
+                      to doing this" are different decisions, and defaulting one
+                      would make them indistinguishable afterwards.
+                    -->
+                    <fieldset class="hub-ticket-create-state">
+                      <legend class="hub-ticket-create-label">Where does this go?</legend>
+                      <label class="hub-ticket-state-choice">
+                        <input type="radio" name="hubTicketCreateState" value="backlog" required>
+                        <span class="hub-ticket-state-choice-label">Add to Backlog</span>
+                        <span class="hub-ticket-state-choice-hint">Captured for later. Cannot be assigned, scheduled, or run.</span>
+                      </label>
+                      <label class="hub-ticket-state-choice">
+                        <input type="radio" name="hubTicketCreateState" value="ready">
+                        <span class="hub-ticket-state-choice-label">Create Ready</span>
+                        <span class="hub-ticket-state-choice-hint">Committed work. Stays idle until you start it.</span>
+                      </label>
+                    </fieldset>
+
+                    <button type="submit" class="modern-btn modern-btn-primary modern-btn-sm hub-ticket-create-submit">Create ticket</button>
+                  </form>
+
+                  <div class="hub-tickets-body">
+                    <ul class="hub-tickets-list" id="hubTicketsList" aria-label="Tickets"></ul>
+                    <div class="hub-tickets-empty" id="hubTicketsEmpty">
+                      <p>No tickets yet. Create one above to get started.</p>
+                    </div>
+                  </div>
+
+                  <aside class="hub-ticket-detail" id="hubTicketDetail" aria-labelledby="hubTicketDetailTitle" hidden>
+                    <div class="hub-ticket-detail-header">
+                      <h4 class="hub-ticket-detail-title" id="hubTicketDetailTitle"></h4>
+                      <button type="button" class="modern-btn modern-btn-secondary modern-btn-sm" id="hubTicketDetailClose" aria-label="Close ticket detail">×</button>
+                    </div>
+                    <div class="hub-ticket-detail-body" id="hubTicketDetailBody"></div>
+                  </aside>
+                </div>
+
             <div class="modern-card workspace-detail-panel workspace-detail-panel-members is-expandable" id="workspace-detail-members-panel" role="button" tabindex="0" aria-haspopup="dialog" aria-expanded="false" aria-label="Open Members panel" hidden>
               <button class="workspace-detail-panel-close" type="button" title="Close" aria-label="Close expanded panel">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
@@ -8927,6 +9003,10 @@
   <script defer src="/js/modules/workspace-hub-sessions.js"></script>
   <script defer src="/js/modules/workspace-hub-notes.js"></script>
   <script defer src="/js/modules/workspace-hub-files.js"></script>
+  <!-- Canonical Ticket client + Tickets destination
+       (tasks/prd-workspace-ticket-management.md). Every first-party surface
+       that touches tickets goes through this module. -->
+  <script defer src="/js/modules/workspace-hub-tickets.js"></script>
   <script defer src="/js/modules/workspace-mission.js"></script>
   <script defer src="/js/modules/workspace-triggers.js"></script>
   <script defer src="/js/modules/project-templates-manage.js"></script>
