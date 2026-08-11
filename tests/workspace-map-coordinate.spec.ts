@@ -629,6 +629,237 @@ test.describe('Coordinate Workspace Map', () => {
     expect(writes.length, 'one drop, one position update').toBe(1);
   });
 
+  test.describe('a layout wider than two viewports (#307)', () => {
+    // Fit All promised to show every workspace but stopped at the interactive 50%
+    // floor, so a spread-out map was quietly framed as a subset. These drive the
+    // real fix through a browser: the framing floor, the interaction rules that
+    // did not change, and the save/restore round trip that makes a fitted view
+    // survive a reload.
+
+    // The cockpit's map is a panel inside Home, so its height follows the
+    // window's. At the project's default 1280x720 that panel is ~264px tall and
+    // leaves ~92px of usable framing height, which puts EVERY layout on the 10%
+    // floor and makes "fits below 50%" impossible to tell apart from "gave up".
+    // These tests pin the ordinary desktop viewport the issue describes so the
+    // fitted zoom is a property of the fixture rather than of the window. It is
+    // scoped to this block: the tests above are written against the project's
+    // default window and have no reason to move.
+    test.use({ viewport: { width: 1440, height: 900 } });
+
+    /** A span that needs well under 50% to fit, and well over the 10% floor. */
+    const WIDE_SPAN = 3000;
+    /** Wide enough that even the 10% framing floor cannot contain it. */
+    const IMPOSSIBLE_SPAN = 400000;
+
+    const readLayout = async (page: Page) =>
+      (await (await page.request.get('/api/workspace-map/layout')).json()).layout || {};
+
+    async function patchLayout(page: Page, operations: unknown[]) {
+      const response = await page.request.patch('/api/workspace-map/layout', {
+        data: { operations }
+      });
+      expect(response.ok(), `patch should succeed: ${await response.text()}`).toBe(true);
+    }
+
+    /**
+     * Run `body` against a map spread `span` units wide, then put the layout back
+     * exactly as it was.
+     *
+     * Two things make this necessary. The suite is serial and shares one layout
+     * record, so a test that leaves 3000-unit coordinates behind hands every
+     * later test a map it cannot fit; and the demo sandbox survives between runs,
+     * so the damage would accumulate. Every other workspace is pulled into a
+     * tight cluster for the duration, so the fitted zoom depends on the fixture
+     * rather than on however many workspaces this sandbox happens to hold.
+     *
+     * The restore runs from `finally`, so a failed assertion cleans up too.
+     */
+    async function withWideLayout(
+      page: Page,
+      span: number,
+      body: (ids: string[]) => Promise<void>
+    ) {
+      const before = await readLayout(page);
+      const rows = (await listWorkspaces(page)).filter(
+        ws => String((ws as { kind?: string }).kind || '').toLowerCase() !== 'group'
+      );
+      while (rows.length < 2) {
+        const id = await ensureWorkspace(page, `Wide fixture ${rows.length} ${Date.now()}`);
+        rows.push({ id });
+      }
+      const ids = [rows[0].id, rows[1].id];
+
+      const positions: Record<string, { x: number; y: number }> = {
+        [ids[0]]: { x: 0, y: 0 },
+        [ids[1]]: { x: span, y: Math.round(span / 4) }
+      };
+      // Everything else goes into a tight cluster between the two fixtures, so
+      // it neither widens the bounds nor stacks on top of them.
+      rows.slice(2).forEach((ws, index) => {
+        positions[ws.id] = {
+          x: Math.round(span / 2) + (index % 6) * 40,
+          y: Math.round(span / 8) + Math.floor(index / 6) * 40
+        };
+      });
+
+      try {
+        await patchLayout(page, [{ op: 'set_positions', positions }]);
+        await body(ids);
+      } finally {
+        const restore: unknown[] = [{ op: 'restore_positions', positions: before.positions || {} }];
+        if (before.viewport) restore.push({ op: 'set_viewport', viewport: before.viewport });
+        await page.request.patch('/api/workspace-map/layout', { data: { operations: restore } });
+      }
+    }
+
+    const liveText = (page: Page) => page.locator('[data-map-live]').innerText();
+
+    test('Fit All frames a map wider than two viewports (#307, FR-40)', async ({ page }) => {
+      await withWideLayout(page, WIDE_SPAN, async () => {
+        await openMap(page);
+        expect(await frameFromMenu(page, 'fit')).toBe(true);
+
+        const camera = await cameraOf(page);
+        expect(camera.zoom, `fitted at ${camera.zoom}`).toBeLessThan(0.5);
+        expect(
+          camera.zoom,
+          'this layout fits — landing exactly on the floor means the canvas was too short'
+        ).toBeGreaterThan(0.1);
+        expect(await liveText(page)).toContain('Showing every workspace');
+
+        // Every building is inside the part of the canvas the control strip does
+        // not cover — framed, not merely zoomed away from.
+        const canvas = (await page.locator('.ws-map-canvas').boundingBox())!;
+        const strip = await page.locator('.ws-map-actions').boundingBox();
+        const clearBottom = strip ? strip.y : canvas.y + canvas.height;
+        const tiles = page.locator('.ws-map-world .ws-map-tile[data-ws-id]');
+        const count = await tiles.count();
+        expect(count).toBeGreaterThan(1);
+        for (let i = 0; i < count; i += 1) {
+          const box = (await tiles.nth(i).boundingBox())!;
+          expect(box.x, `tile ${i} off the left edge`).toBeGreaterThanOrEqual(canvas.x - 1);
+          expect(box.x + box.width, `tile ${i} off the right edge`).toBeLessThanOrEqual(
+            canvas.x + canvas.width + 1
+          );
+          expect(box.y, `tile ${i} off the top edge`).toBeGreaterThanOrEqual(canvas.y - 1);
+          expect(box.y + box.height, `tile ${i} behind the control strip`).toBeLessThanOrEqual(
+            clearBottom + 1
+          );
+        }
+      });
+    });
+
+    test('the zoom controls stay truthful below 50% (#307, FR-38)', async ({ page }) => {
+      await withWideLayout(page, WIDE_SPAN, async () => {
+        await openMap(page);
+        await frameFromMenu(page, 'fit');
+        const fitted = await cameraOf(page);
+        expect(fitted.zoom).toBeLessThan(0.5);
+
+        await expect(page.locator('[data-map-zoom-readout]')).toHaveText(
+          `${Math.round(fitted.zoom * 100)}%`
+        );
+        // Zoom Out has nothing further out to offer, and says so rather than
+        // silently yanking the fitted view back in.
+        await expect(page.locator('[data-map-zoom-out]')).toBeDisabled();
+
+        await page.locator('[data-map-zoom-in]').click();
+        await page.waitForTimeout(200);
+        const zoomedIn = await cameraOf(page);
+        expect(zoomedIn.zoom, 'Zoom In steps inward from the fitted value').toBeGreaterThan(
+          fitted.zoom
+        );
+        expect(zoomedIn.zoom, 'without jumping straight back to the ordinary range').toBeLessThan(
+          0.5
+        );
+      });
+    });
+
+    test('an ordinary layout still cannot be zoomed below 50% by hand (#307, FR-38)', async ({
+      page
+    }) => {
+      await ensureWorkspace(page);
+      await openMap(page);
+      await frameFromMenu(page, 'reset-view');
+      expect((await cameraOf(page)).zoom).toBe(1);
+
+      const zoomOut = page.locator('[data-map-zoom-out]');
+      for (let press = 0; press < 8; press += 1) {
+        if (await zoomOut.isDisabled()) break;
+        await zoomOut.click();
+        await page.waitForTimeout(120);
+      }
+      expect((await cameraOf(page)).zoom, 'the interactive floor is unchanged').toBe(0.5);
+      await expect(zoomOut).toBeDisabled();
+      await frameFromMenu(page, 'reset-view');
+    });
+
+    test('pan and Center Selected keep a fitted sub-50% view (#307, FR-41)', async ({ page }) => {
+      await withWideLayout(page, WIDE_SPAN, async ids => {
+        await openMap(page);
+        await frameFromMenu(page, 'fit');
+        const fitted = await cameraOf(page);
+        expect(fitted.zoom).toBeLessThan(0.5);
+        const placed = await anchors(page);
+
+        const from = await emptyPointOn(page);
+        await page.mouse.move(from.x, from.y);
+        await page.mouse.down();
+        await page.mouse.move(from.x - 160, from.y - 60, { steps: 12 });
+        await page.mouse.up();
+        await page.waitForTimeout(250);
+        const panned = await cameraOf(page);
+        expect(panned.zoom, 'panning is not a zoom').toBe(fitted.zoom);
+        expect(panned.centerX, 'and it did pan').not.toBe(fitted.centerX);
+
+        await centerOnWorkspace(page, ids[0]);
+        expect((await cameraOf(page)).zoom, 'Center Selected is not a zoom either').toBe(
+          fitted.zoom
+        );
+        // The record is untouched by any of it (FR-13).
+        expect(await anchors(page)).toEqual(placed);
+      });
+    });
+
+    test('a fitted sub-50% camera is saved and restored (#307, FR-43 – FR-45)', async ({
+      page
+    }) => {
+      await withWideLayout(page, WIDE_SPAN, async () => {
+        await openMap(page);
+        await frameFromMenu(page, 'fit');
+        const fitted = await cameraOf(page);
+        expect(fitted.zoom).toBeLessThan(0.5);
+
+        // Past the 600ms camera-save debounce.
+        await page.waitForTimeout(1200);
+        const stored = (await readLayout(page)).viewport;
+        expect(stored, 'the fitted camera was never stored').toBeTruthy();
+        expect(stored.zoom, `stored ${stored.zoom}`).toBeLessThan(0.5);
+        expect(stored.zoom).toBeGreaterThanOrEqual(0.1);
+        expect(Math.abs(stored.zoom - fitted.zoom)).toBeLessThan(0.001);
+
+        await page.reload();
+        await page.locator('.ws-map-world .ws-map-tile[data-ws-id]').first().waitFor();
+        await page.waitForTimeout(400);
+        const restored = await cameraOf(page);
+        expect(restored.zoom, 'the saved view snapped back instead of reopening').toBe(stored.zoom);
+      });
+    });
+
+    test('a layout too wide even for the floor says so (#307)', async ({ page }) => {
+      await withWideLayout(page, IMPOSSIBLE_SPAN, async () => {
+        await openMap(page);
+        await frameFromMenu(page, 'fit');
+
+        expect((await cameraOf(page)).zoom, 'the framing floor holds').toBe(0.1);
+        expect(
+          await liveText(page),
+          'claiming success here would send someone hunting for a workspace that is not on screen'
+        ).toContain('still off-screen');
+      });
+    });
+  });
+
   test('Snap to Grid is visible, on by default, and persists (FR-57)', async ({ page }) => {
     await ensureWorkspace(page);
     await openMap(page);
