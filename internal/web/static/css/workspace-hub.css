@@ -6357,10 +6357,161 @@ body.modal-open .hub-support-chat {
   color: var(--text-muted, #9aa0a6);
 }
 
+/* --- Ticket Board -------------------------------------------------------
+   Fixed columns derived from canonical state. Drop legality is signalled by
+   an outline style as well as color, so a blocked column reads as blocked
+   without relying on hue (FR-131). */
+
+.hub-tickets-view-switch {
+  display: inline-flex;
+  margin-left: auto;
+  border: 1px solid var(--border-color, #3c4043);
+  border-radius: var(--radius-sm, 0.25rem);
+  overflow: hidden;
+}
+
+.hub-tickets-view-btn {
+  padding: 0.15rem 0.7rem;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary, #bdc1c6);
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.hub-tickets-view-btn.is-active {
+  background: var(--bg-tertiary, #2a2d31);
+  color: var(--text-primary, #e8eaed);
+  font-weight: 600;
+}
+
+.hub-tickets-view-btn:focus-visible {
+  outline: 2px solid var(--accent-primary, #8ab4f8);
+  outline-offset: -2px;
+}
+
+.ticket-board {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(13rem, 1fr);
+  gap: 0.6rem;
+  /* Wide content scrolls inside its own container rather than making the
+     whole panel scroll sideways. */
+  overflow-x: auto;
+  padding-bottom: 0.4rem;
+}
+
+.ticket-board-column {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border: 1px solid var(--border-color, #3c4043);
+  border-radius: var(--radius-md, 0.5rem);
+  background: var(--bg-secondary, #202124);
+}
+
+.ticket-board-column-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.4rem;
+  padding: 0.5rem 0.6rem;
+  border-bottom: 1px solid var(--border-color, #3c4043);
+}
+
+.ticket-board-column-title {
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-secondary, #bdc1c6);
+}
+
+.ticket-board-column-count {
+  font-size: 0.78rem;
+  color: var(--text-muted, #9aa0a6);
+}
+
+.ticket-board-column-body {
+  list-style: none;
+  margin: 0;
+  padding: 0.45rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  min-height: 4.5rem;
+  flex: 1;
+  border-radius: 0 0 var(--radius-md, 0.5rem) var(--radius-md, 0.5rem);
+}
+
+.ticket-board-column-body.is-drop-target {
+  outline: 2px dashed var(--accent-primary, #8ab4f8);
+  outline-offset: -4px;
+}
+
+/* Blocked columns get a distinct outline STYLE, not just a different color. */
+.ticket-board-column-body.is-drop-blocked {
+  outline: 2px dotted var(--bs-danger, #dc3545);
+  outline-offset: -4px;
+}
+
+.ticket-board-card {
+  cursor: grab;
+}
+
+.ticket-board-card.is-dragging {
+  opacity: 0.5;
+}
+
+/* A ticket owned by another workspace cannot be dragged here — the parent has
+   no authority over a child's rank space. */
+.ticket-board-card[data-foreign-owner="true"] {
+  cursor: not-allowed;
+  border-style: dashed;
+}
+
+.ticket-card-move {
+  padding: 0 0.75rem 0.5rem;
+}
+
+.ticket-card-move-label {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.72rem;
+  color: var(--text-muted, #9aa0a6);
+}
+
+.ticket-card-move-select {
+  flex: 1;
+  min-width: 0;
+  padding: 0.1rem 0.25rem;
+  border: 1px solid var(--border-color, #3c4043);
+  border-radius: var(--radius-sm, 0.25rem);
+  background: var(--bg-tertiary, #2a2d31);
+  color: var(--text-primary, #e8eaed);
+  font: inherit;
+  font-size: 0.74rem;
+}
+
+.ticket-card-move-select:focus-visible {
+  outline: 2px solid var(--accent-primary, #8ab4f8);
+  outline-offset: 1px;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .ticket-card-open,
   .ticket-filter-chip,
+  .ticket-board-card,
   .hub-ticket-state-choice {
     transition: none;
+  }
+
+  /* Card movement feedback is reduced to a static state change. */
+  .ticket-board-card.is-dragging {
+    opacity: 1;
+    outline: 2px solid var(--accent-primary, #8ab4f8);
   }
 }

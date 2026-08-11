@@ -367,6 +367,79 @@ test('a list response leaves hierarchy empty', () => {
   assert.equal(ticket.archived, false);
 });
 
+// --- Group 3: the fixed, server-authoritative Board -----------------------
+
+test('board columns are fixed, ordered, and exclude Cancelled', () => {
+  const { api } = loadTickets();
+  const ids = api.BOARD_COLUMNS.map(column => column.id);
+
+  // Fixed and derived from canonical state (FR-43, FR-44).
+  assert.deepEqual(plain(ids), ['backlog', 'ready', 'in_progress', 'review', 'done']);
+  // Cancelled is retained as a state but is not a default column (FR-45).
+  assert.equal(ids.includes('cancelled'), false);
+  assert.equal(api.stateMeta('cancelled').activeColumn, false);
+});
+
+test('every board column corresponds to a real canonical state', () => {
+  const { api } = loadTickets();
+  const known = new Set(api.TICKET_STATES.map(state => state.id));
+  api.BOARD_COLUMNS.forEach(column => {
+    assert.ok(known.has(column.id), `board column ${column.id} is not a canonical state`);
+  });
+});
+
+test('a board move goes through the transition route, never a context patch', async () => {
+  const { api, calls } = loadTickets(() => ({ body: serverTicket({ state: 'ready' }) }));
+  const ticket = api.normalizeTicket(serverTicket({ state: 'backlog' }));
+
+  await api.api.transition(ticket.owningWorkspaceId, ticket.id, 'ready', {
+    version: ticket.version
+  });
+
+  // The one thing that must never happen: a lifecycle change smuggled through
+  // a generic task/context update (FR-64, FR-88).
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, '/api/workspaces/ws-1/tickets/tkt-1/transition');
+  assert.equal(calls[0].method, 'POST');
+  assert.equal('kanban_column_id' in calls[0].body, false);
+  assert.equal('context' in calls[0].body, false);
+});
+
+test('drop legality is derived from the server legal transitions', () => {
+  const { api } = loadTickets();
+  const backlog = api.normalizeTicket(
+    serverTicket({ state: 'backlog', legal_transitions: ['ready', 'cancelled'] })
+  );
+
+  // Board columns a Backlog ticket may be dropped into.
+  const droppable = api.BOARD_COLUMNS.filter(column => api.canTransitionTo(backlog, column.id)).map(
+    column => column.id
+  );
+  assert.deepEqual(plain(droppable), ['ready']);
+
+  // FR-36: no shortcut past Ready, so these columns must reject the drop.
+  ['in_progress', 'review', 'done'].forEach(state => {
+    assert.equal(api.canTransitionTo(backlog, state), false);
+  });
+});
+
+test('the board move menu offers exactly the legal board destinations', () => {
+  const { api } = loadTickets();
+  const review = api.normalizeTicket(
+    serverTicket({ state: 'review', legal_transitions: ['in_progress', 'done', 'cancelled'] })
+  );
+
+  const boardIds = new Set(api.BOARD_COLUMNS.map(column => column.id));
+  const menu = api.transitionOptions(review).filter(option => boardIds.has(option.id));
+
+  // Cancelled is legal but is not a board column, so it is not a board move.
+  assert.deepEqual(
+    plain(menu.map(option => option.id)),
+    ['in_progress', 'done'],
+    'the keyboard menu must match the moves a drag could make'
+  );
+});
+
 test('state metadata never relies on color alone', () => {
   const { api } = loadTickets();
   // Every state carries a distinct human-readable label; `tone` is a

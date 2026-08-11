@@ -398,6 +398,11 @@
     tickets: [],
     selectedTicketId: '',
     initialized: false,
+    // Board vs List. Both render the same loaded tickets, so switching views
+    // never re-queries and never shows different data (FR-58).
+    boardMode: false,
+    // The in-flight drag's complete prior position, for exact rollback.
+    drag: null,
     // The active query. Held here rather than read out of the DOM at request
     // time so a filter can be changed programmatically (deep link, realtime
     // refresh) without depending on a control existing.
@@ -588,6 +593,246 @@
     updateCount();
   }
 
+  // --- Ticket Board -------------------------------------------------------
+  //
+  // The Board is a second presentation of the SAME data the List renders, from
+  // the same client call — not a second data path (FR-62 to FR-64). That is
+  // what makes counts, filters, owners, and refreshed records incapable of
+  // diverging between the two views.
+  //
+  // Columns are fixed and derived from canonical Ticket state (FR-43, FR-44).
+  // There is deliberately no column editor: a user-defined column would be a
+  // second lifecycle vocabulary, which is exactly what this feature removes.
+  // Existing custom board configuration is left untouched on the workspace for
+  // migration diagnostics and rollback (FR-52 to FR-55).
+
+  /** The five active Board columns. Cancelled is excluded by default (FR-45). */
+  const BOARD_COLUMNS = TICKET_STATES.filter(state => state.activeColumn);
+
+  function renderBoard() {
+    const board = view.elements.board;
+    if (!board) return;
+
+    board.replaceChildren();
+    const byState = new Map(BOARD_COLUMNS.map(column => [column.id, []]));
+    // Cancelled tickets have no default column; they stay reachable through
+    // the List's state filter rather than being silently dropped from view.
+    view.tickets.forEach(ticket => {
+      const bucket = byState.get(ticket.state);
+      if (bucket) bucket.push(ticket);
+    });
+
+    BOARD_COLUMNS.forEach(column => {
+      board.appendChild(buildBoardColumn(column, byState.get(column.id) || []));
+    });
+    updateCount();
+  }
+
+  function buildBoardColumn(column, tickets) {
+    const el = document.createElement('section');
+    el.className = 'ticket-board-column';
+    el.dataset.state = column.id;
+
+    const header = document.createElement('header');
+    header.className = 'ticket-board-column-header';
+
+    const name = document.createElement('h4');
+    name.className = 'ticket-board-column-title';
+    name.id = `ticket-board-column-${column.id}`;
+    name.textContent = column.label;
+
+    const count = document.createElement('span');
+    count.className = 'ticket-board-column-count';
+    count.textContent = String(tickets.length);
+
+    header.appendChild(name);
+    header.appendChild(count);
+    el.appendChild(header);
+
+    const body = document.createElement('ul');
+    body.className = 'ticket-board-column-body';
+    body.dataset.state = column.id;
+    // The column is a labelled list so a screen reader reads its programmatic
+    // name and item count, not just a stack of cards (FR-128).
+    body.setAttribute('aria-labelledby', name.id);
+    body.setAttribute('aria-label', `${column.label}, ${tickets.length} tickets`);
+
+    tickets.forEach(ticket => body.appendChild(buildBoardCard(ticket)));
+    wireColumnDropTarget(body, column.id);
+    el.appendChild(body);
+    return el;
+  }
+
+  function buildBoardCard(ticket) {
+    const card = buildTicketCard(ticket);
+    card.classList.add('ticket-board-card');
+
+    // A rolled-up ticket is owned elsewhere. Dragging it inside this board
+    // would imply the parent can reorder another workspace's rank space, which
+    // it cannot — so the gesture is disabled and the card says why (FR-91).
+    const foreign =
+      view.filters.includeDescendants && ticket.owningWorkspaceId !== currentStudioId();
+    card.draggable = !foreign;
+    if (foreign) {
+      card.dataset.foreignOwner = 'true';
+      card.title = `Owned by ${ticket.owningWorkspaceName}. Open it there to move it.`;
+    }
+
+    card.addEventListener('dragstart', event => {
+      if (foreign) {
+        event.preventDefault();
+        setStatus(
+          `${ticket.displayNumber} is owned by ${ticket.owningWorkspaceName}. Open that workspace to move it.`,
+          'error'
+        );
+        return;
+      }
+      // A complete prior-position snapshot, so a rejected move can be undone
+      // exactly rather than approximately (FR-49).
+      view.drag = {
+        ticket,
+        fromState: ticket.state,
+        fromColumn: card.parentElement,
+        nextSibling: card.nextElementSibling
+      };
+      card.classList.add('is-dragging');
+      if (event.dataTransfer) {
+        event.dataTransfer.effectAllowed = 'move';
+        event.dataTransfer.setData('text/plain', ticket.id);
+      }
+    });
+
+    card.addEventListener('dragend', () => {
+      card.classList.remove('is-dragging');
+      clearDropHints();
+    });
+
+    card.appendChild(buildMoveMenu(ticket));
+    return card;
+  }
+
+  /**
+   * A keyboard-operable menu offering exactly the moves a drag could make
+   * (FR-50). Drag and drop cannot be the only way to change state.
+   */
+  function buildMoveMenu(ticket) {
+    const options = transitionOptions(ticket).filter(option =>
+      BOARD_COLUMNS.some(column => column.id === option.id)
+    );
+    const wrap = document.createElement('div');
+    wrap.className = 'ticket-card-move';
+    if (!options.length) return wrap;
+
+    const label = document.createElement('label');
+    label.className = 'ticket-card-move-label';
+    label.textContent = 'Move';
+    const select = document.createElement('select');
+    select.className = 'ticket-card-move-select';
+    select.setAttribute(
+      'aria-label',
+      `Move ticket ${ticket.displayNumber} ${ticket.title} from ${ticket.stateLabel}`
+    );
+
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = 'Move to…';
+    select.appendChild(placeholder);
+
+    // Only legal destinations appear. An illegal one is never rendered
+    // disabled-but-visible, because an option a user cannot pick is noise.
+    options.forEach(option => {
+      const el = document.createElement('option');
+      el.value = option.id;
+      el.textContent = option.label;
+      select.appendChild(el);
+    });
+
+    select.addEventListener('change', () => {
+      const to = select.value;
+      select.value = '';
+      if (to) void applyTransition(ticket, to);
+    });
+    select.addEventListener('click', event => event.stopPropagation());
+
+    label.appendChild(select);
+    wrap.appendChild(label);
+    return wrap;
+  }
+
+  function clearDropHints() {
+    if (typeof document === 'undefined') return;
+    document
+      .querySelectorAll(
+        '.ticket-board-column-body.is-drop-target, .ticket-board-column-body.is-drop-blocked'
+      )
+      .forEach(el => el.classList.remove('is-drop-target', 'is-drop-blocked'));
+  }
+
+  function wireColumnDropTarget(body, state) {
+    body.addEventListener('dragover', event => {
+      const drag = view.drag;
+      if (!drag) return;
+      const legal = drag.fromState === state || canTransitionTo(drag.ticket, state);
+      // Legality is previewed from the server's own legal_transitions, so the
+      // hint cannot promise a move the server will refuse.
+      body.classList.toggle('is-drop-target', legal);
+      body.classList.toggle('is-drop-blocked', !legal);
+      if (legal) {
+        event.preventDefault();
+        if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+      }
+    });
+
+    body.addEventListener('dragleave', () => {
+      body.classList.remove('is-drop-target', 'is-drop-blocked');
+    });
+
+    body.addEventListener('drop', event => {
+      event.preventDefault();
+      clearDropHints();
+      const drag = view.drag;
+      view.drag = null;
+      if (!drag || drag.fromState === state) return;
+      void applyTransition(drag.ticket, state, drag);
+    });
+  }
+
+  /** Puts a card back exactly where it started after a refused move (FR-49). */
+  function restoreDragPosition(drag) {
+    if (!drag || !drag.fromColumn) return;
+    const card = view.elements.board
+      ? view.elements.board.querySelector(`[data-ticket-id="${cssEscape(drag.ticket.id)}"]`)
+      : null;
+    if (!card) return;
+    drag.fromColumn.insertBefore(card, drag.nextSibling || null);
+  }
+
+  /** Switches between List and Board. Both render the same loaded tickets. */
+  function setBoardMode(enabled) {
+    view.boardMode = Boolean(enabled);
+    const { list, empty, board, listBtn, boardBtn } = view.elements;
+    if (list) list.hidden = view.boardMode;
+    if (empty && view.boardMode) empty.hidden = true;
+    if (board) board.hidden = !view.boardMode;
+
+    [
+      [listBtn, !view.boardMode],
+      [boardBtn, view.boardMode]
+    ].forEach(([button, active]) => {
+      if (!button) return;
+      button.classList.toggle('is-active', active);
+      button.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+
+    render();
+  }
+
+  /** Paints whichever view is active from the already-loaded tickets. */
+  function render() {
+    if (view.boardMode) renderBoard();
+    else renderList();
+  }
+
   function hasActiveFilters() {
     const f = view.filters;
     return Boolean(f.states.length || f.search || f.archive || f.includeDescendants);
@@ -617,7 +862,7 @@
     if (!studioId) {
       view.tickets = [];
       view.lastPage = null;
-      renderList();
+      render();
       setStatus('Select a workspace to see its tickets.');
       return;
     }
@@ -634,12 +879,12 @@
       });
       view.tickets = result.tickets;
       view.lastPage = result;
-      renderList();
+      render();
       setStatus('');
     } catch (error) {
       view.tickets = [];
       view.lastPage = null;
-      renderList();
+      render();
       setStatus(`Could not load tickets: ${error.message}`, 'error');
     }
   }
@@ -856,8 +1101,16 @@
     return row;
   }
 
-  /** Routes a state change through the canonical transition endpoint. */
-  async function applyTransition(ticket, to) {
+  /**
+   * Routes a state change through the canonical transition endpoint — the only
+   * way state ever moves (FR-88). A board drag, a card menu, and a detail
+   * button all land here, so none of them can develop their own lifecycle
+   * rules.
+   *
+   * `drag` carries the card's prior position when the move came from a drag,
+   * so a refusal restores it exactly (FR-49).
+   */
+  async function applyTransition(ticket, to, drag) {
     setStatus(`Moving ${ticket.displayNumber} to ${stateLabel(to)}…`);
     try {
       // Addressed to the OWNING workspace, not the one being viewed — this is
@@ -865,17 +1118,35 @@
       const updated = await api.transition(ticket.owningWorkspaceId, ticket.id, to, {
         version: ticket.version
       });
-      renderDetail(updated);
+      if (view.selectedTicketId === updated.id) renderDetail(updated);
       await load();
       setStatus(`${updated.displayNumber} is now ${updated.stateLabel}.`, 'success');
       announce(`${updated.displayNumber} moved to ${updated.stateLabel}`);
     } catch (error) {
+      // Put the card back before doing anything else: leaving it in the
+      // destination column after a refusal is a lie about persisted state.
+      restoreDragPosition(drag);
+
       if (error.isVersionConflict && error.currentTicket) {
-        renderDetail(error.currentTicket);
+        if (view.selectedTicketId === error.currentTicket.id) renderDetail(error.currentTicket);
         setStatus('Someone else changed this ticket. Showing the current version.', 'error');
+        announce(`Move refused: ${ticket.displayNumber} was changed by someone else`);
+        await load();
+        return;
+      }
+      if (error.isIllegalTransition) {
+        const legal = (error.details.legal_transitions || []).map(stateLabel).join(', ');
+        const message = legal
+          ? `${ticket.displayNumber} cannot move to ${stateLabel(to)}. Allowed: ${legal}.`
+          : error.message;
+        setStatus(message, 'error');
+        announce(message);
+        await load();
         return;
       }
       setStatus(error.message, 'error');
+      announce(`Move failed: ${error.message}`);
+      await load();
     }
   }
 
@@ -1008,7 +1279,10 @@
       search: el('hubTicketsSearch'),
       sort: el('hubTicketsSort'),
       archive: el('hubTicketsArchive'),
-      rollUp: el('hubTicketsRollUp')
+      rollUp: el('hubTicketsRollUp'),
+      board: el('hubTicketsBoard'),
+      listBtn: el('hubTicketsViewList'),
+      boardBtn: el('hubTicketsViewBoard')
     };
 
     if (view.elements.form) {
@@ -1019,6 +1293,12 @@
     }
     if (view.elements.detailClose) {
       view.elements.detailClose.addEventListener('click', closeDetail);
+    }
+    if (view.elements.listBtn) {
+      view.elements.listBtn.addEventListener('click', () => setBoardMode(false));
+    }
+    if (view.elements.boardBtn) {
+      view.elements.boardBtn.addEventListener('click', () => setBoardMode(true));
     }
     wireFilterControls();
 
@@ -1119,10 +1399,13 @@
     stateLabel,
     stateMeta,
     transitionOptions,
-    // View surface, exported so the hub's view toggle and realtime refresh
+    BOARD_COLUMNS,
+    // View surface, exported so the page's view toggle and realtime refresh
     // can drive it without reaching into module internals.
     init,
     load,
+    render,
+    setBoardMode,
     openDetail,
     closeDetail
   };

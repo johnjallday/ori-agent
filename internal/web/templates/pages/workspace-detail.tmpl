@@ -1052,6 +1052,13 @@
                     <div class="hub-tickets-title-row">
                       <h3 class="hub-tickets-title">Tickets</h3>
                       <span class="hub-tickets-count" id="hubTicketsCount">0 tickets</span>
+                      <!-- List and Board render the SAME loaded tickets, so
+                           switching never re-queries and the two views cannot
+                           show different data (FR-58). -->
+                      <div class="hub-tickets-view-switch" role="tablist" aria-label="Ticket view">
+                        <button type="button" class="hub-tickets-view-btn is-active" id="hubTicketsViewList" role="tab" aria-selected="true" aria-controls="hubTicketsList">List</button>
+                        <button type="button" class="hub-tickets-view-btn" id="hubTicketsViewBoard" role="tab" aria-selected="false" aria-controls="hubTicketsBoard">Board</button>
+                      </div>
                     </div>
                     <button id="hubTicketsRefreshBtn" class="modern-btn modern-btn-secondary modern-btn-sm" type="button" title="Refresh tickets">
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
@@ -1148,6 +1155,15 @@
 
                   <div class="hub-tickets-body">
                     <ul class="hub-tickets-list" id="hubTicketsList" aria-label="Tickets"></ul>
+                    <!--
+                      The Ticket Board. Columns are FIXED and derived from
+                      canonical Ticket state (FR-43 to FR-46) — there is no
+                      column editor, because a user-defined column would be a
+                      second lifecycle vocabulary. Existing custom board
+                      configuration is left untouched on the workspace for
+                      migration diagnostics and rollback.
+                    -->
+                    <div class="ticket-board" id="hubTicketsBoard" aria-label="Ticket board" hidden></div>
                     <div class="hub-tickets-empty" id="hubTicketsEmpty">
                       <p>No tickets yet. Create one above to get started.</p>
                     </div>

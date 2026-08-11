@@ -47,7 +47,8 @@ const clearOverlays = () =>
 async function shot(name) {
   await clearOverlays();
   await page.addStyleTag({
-    content: '*,*::before,*::after{animation-duration:0s!important;transition-duration:0s!important}'
+    content:
+      '*,*::before,*::after{animation-duration:0s!important;transition-duration:0s!important}'
   });
   await page.waitForTimeout(150);
   const { data } = await cdp.send('Page.captureScreenshot', { format: 'png', fromSurface: true });
@@ -124,7 +125,10 @@ await page.check('#hubTicketsRollUp');
 await settle();
 const rolled = await rows();
 console.log('  rows:', JSON.stringify(rolled, null, 2));
-console.log('  owner badges present:', rolled.some(r => r.owner));
+console.log(
+  '  owner badges present:',
+  rolled.some(r => r.owner)
+);
 console.log('  screenshot:', await shot('04-rollup'));
 await page.uncheck('#hubTicketsRollUp');
 await settle();

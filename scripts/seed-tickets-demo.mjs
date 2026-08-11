@@ -75,7 +75,12 @@ const readyCache = await api('POST', tickets, {
   priority: 2,
   due_date: day(0)
 });
-await api('POST', tickets, { state: 'ready', title: 'Plan the quarter', priority: 3, due_date: day(3) });
+await api('POST', tickets, {
+  state: 'ready',
+  title: 'Plan the quarter',
+  priority: 3,
+  due_date: day(3)
+});
 
 // Child workspace ticket, for the descendant roll-up.
 await api('POST', childTickets, { state: 'ready', title: 'Child studio work', priority: 3 });
