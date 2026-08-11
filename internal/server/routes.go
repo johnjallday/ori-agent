@@ -838,6 +838,17 @@ func registerTicketRoutes(mux *http.ServeMux, s *Server) {
 	// The only route that changes lifecycle state — never a generic context
 	// patch (FR-88).
 	mux.HandleFunc("POST /api/workspaces/{studioID}/tickets/{ticketID}/transition", s.Handlers.Orchestration.TicketTransitionHandler)
+
+	// Ticket ↔ Note links (FR-77). Both directions are idempotent.
+	mux.HandleFunc("GET /api/workspaces/{studioID}/tickets/{ticketID}/notes", s.Handlers.Orchestration.TicketNoteLinkHandler)
+	mux.HandleFunc("POST /api/workspaces/{studioID}/tickets/{ticketID}/notes", s.Handlers.Orchestration.TicketNoteLinkHandler)
+	mux.HandleFunc("DELETE /api/workspaces/{studioID}/tickets/{ticketID}/notes", s.Handlers.Orchestration.TicketNoteLinkHandler)
+
+	// The reverse direction, plus create-from-Note (FR-73 to FR-75). These
+	// read and create Tickets; they are never a second Ticket mutation
+	// authority, which is why there is no PATCH here.
+	mux.HandleFunc("GET /api/workspaces/{studioID}/notes/{noteID}/tickets", s.Handlers.Orchestration.TicketsForNoteHandler)
+	mux.HandleFunc("POST /api/workspaces/{studioID}/notes/{noteID}/tickets", s.Handlers.Orchestration.TicketFromNoteHandler)
 }
 
 // registerTriggerRoutes registers event trigger and webhook endpoints.

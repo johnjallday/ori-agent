@@ -507,6 +507,34 @@ func (h *Handler) TicketReorderHandler(w http.ResponseWriter, r *http.Request) {
 	h.ticketHandler.TicketReorderHandler(w, r)
 }
 
+// TicketNoteLinkHandler handles GET/POST/DELETE on
+// /api/workspaces/{studio_id}/tickets/{ticket_id}/notes.
+func (h *Handler) TicketNoteLinkHandler(w http.ResponseWriter, r *http.Request) {
+	h.ticketHandler.TicketNoteLinkHandler(w, r)
+}
+
+// TicketsForNoteHandler handles GET
+// /api/workspaces/{studio_id}/notes/{note_id}/tickets.
+func (h *Handler) TicketsForNoteHandler(w http.ResponseWriter, r *http.Request) {
+	h.ticketHandler.TicketsForNoteHandler(w, r)
+}
+
+// TicketFromNoteHandler handles POST
+// /api/workspaces/{studio_id}/notes/{note_id}/tickets.
+func (h *Handler) TicketFromNoteHandler(w http.ResponseWriter, r *http.Request) {
+	h.ticketHandler.TicketFromNoteHandler(w, r)
+}
+
+// SetTicketNoteLookup wires Note validation into the canonical Ticket service.
+// Without it, link operations are refused rather than accepting unvalidated
+// Note IDs.
+func (h *Handler) SetTicketNoteLookup(lookup workspace.TicketNoteLookup) {
+	if h.ticketHandler == nil {
+		return
+	}
+	h.ticketHandler.SetNoteLookup(lookup)
+}
+
 // ProgressStreamHandler streams real-time progress updates using Server-Sent Events (SSE)
 // Delegates to StreamingHandler for modular organization
 func (h *Handler) ProgressStreamHandler(w http.ResponseWriter, r *http.Request) {

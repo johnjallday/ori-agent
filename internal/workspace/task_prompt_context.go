@@ -406,6 +406,9 @@ func (h *LLMTaskHandler) PrepareTaskContext(ctx context.Context, agentName strin
 			Detail: "The task includes an authoritative reference URL; inspect it with available web tools before claims or implementation that depends on its contents.",
 		})
 	}
+	if item, ok := linkedNotesContextItem(task); ok {
+		prepared.Items = append(prepared.Items, item)
+	}
 	if ws != nil {
 		if fileCount := countTaskPromptFiles(ws.Attachments); fileCount > 0 {
 			prepared.Items = append(prepared.Items, TaskPreparedContextItem{

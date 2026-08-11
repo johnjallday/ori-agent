@@ -40,6 +40,14 @@ func NewTicketHandler(service *workspace.TicketService) *TicketHandler {
 	return &TicketHandler{service: service}
 }
 
+// SetNoteLookup wires Note validation into the underlying service.
+func (th *TicketHandler) SetNoteLookup(lookup workspace.TicketNoteLookup) {
+	if th == nil || th.service == nil {
+		return
+	}
+	th.service.SetNoteLookup(lookup)
+}
+
 // newTicketService builds the canonical service the handler serves.
 // TicketService is a stateless holder of its store/bus references, so
 // constructing one per handler is safe — the store it wraps is the shared
@@ -486,6 +494,146 @@ func (th *TicketHandler) TicketTransitionHandler(w http.ResponseWriter, r *http.
 	_ = orihttp.RespondJSON(w, http.StatusOK, ticket)
 }
 
+// --- Note links -----------------------------------------------------------
+
+type ticketNoteLinkRequest struct {
+	NoteID  string `json:"note_id"`
+	Version *int64 `json:"version"`
+}
+
+// TicketNoteLinkHandler serves POST and DELETE on
+// /api/workspaces/{studio_id}/tickets/{ticket_id}/notes (FR-77).
+//
+// Both directions are idempotent, which is what makes a double-click or a
+// retried request harmless.
+func (th *TicketHandler) TicketNoteLinkHandler(w http.ResponseWriter, r *http.Request) {
+	studioID := strings.TrimSpace(r.PathValue("studioID"))
+	ticketID := strings.TrimSpace(r.PathValue("ticketID"))
+	if studioID == "" || ticketID == "" {
+		orihttp.BadRequest(w, "studio_id and ticket_id are required")
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		notes, err := th.service.LinkedNotes(r.Context(), studioID, ticketID)
+		if err != nil {
+			th.respondTicketError(w, "list linked notes", studioID, ticketID, err)
+			return
+		}
+		_ = orihttp.RespondJSON(w, http.StatusOK, map[string]any{
+			"notes":     notes,
+			"count":     len(notes),
+			"ticket_id": ticketID,
+			"studio_id": studioID,
+		})
+
+	case http.MethodPost, http.MethodDelete:
+		var req ticketNoteLinkRequest
+		if !orihttp.ParseJSONBody(w, r, &req) {
+			return
+		}
+		var version int64
+		if req.Version != nil {
+			version = *req.Version
+		}
+
+		var (
+			ticket *workspace.Ticket
+			err    error
+		)
+		if r.Method == http.MethodPost {
+			ticket, err = th.service.LinkNote(r.Context(), studioID, ticketID, req.NoteID, version)
+		} else {
+			ticket, err = th.service.UnlinkNote(r.Context(), studioID, ticketID, req.NoteID, version)
+		}
+		if err != nil {
+			th.respondTicketError(w, "link note", studioID, ticketID, err)
+			return
+		}
+		_ = orihttp.RespondJSON(w, http.StatusOK, ticket)
+
+	default:
+		orihttp.MethodNotAllowed(w)
+	}
+}
+
+// TicketsForNoteHandler serves GET
+// /api/workspaces/{studio_id}/notes/{note_id}/tickets — the reverse direction
+// of the same relationship (FR-75, FR-78).
+//
+// It returns compact summaries on purpose: the Note surface displays and
+// navigates to Tickets, it is never a second place to mutate them.
+func (th *TicketHandler) TicketsForNoteHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		orihttp.MethodNotAllowed(w)
+		return
+	}
+	studioID := strings.TrimSpace(r.PathValue("studioID"))
+	noteID := strings.TrimSpace(r.PathValue("noteID"))
+	if studioID == "" || noteID == "" {
+		orihttp.BadRequest(w, "studio_id and note_id are required")
+		return
+	}
+
+	tickets, err := th.service.TicketsLinkedToNote(studioID, noteID)
+	if err != nil {
+		th.respondTicketError(w, "list tickets for note", studioID, "", err)
+		return
+	}
+	_ = orihttp.RespondJSON(w, http.StatusOK, map[string]any{
+		"tickets":   tickets,
+		"count":     len(tickets),
+		"note_id":   noteID,
+		"studio_id": studioID,
+	})
+}
+
+// TicketFromNoteHandler serves POST
+// /api/workspaces/{studio_id}/notes/{note_id}/tickets — create a Ticket seeded
+// from a Note (FR-73 through FR-76).
+//
+// The body carries the REVIEWED values, so the user edits the prefill before
+// anything is created. The Note is preserved untouched.
+func (th *TicketHandler) TicketFromNoteHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		orihttp.MethodNotAllowed(w)
+		return
+	}
+	studioID := strings.TrimSpace(r.PathValue("studioID"))
+	noteID := strings.TrimSpace(r.PathValue("noteID"))
+	if studioID == "" || noteID == "" {
+		orihttp.BadRequest(w, "studio_id and note_id are required")
+		return
+	}
+
+	var req ticketCreateRequest
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+	state, err := workspace.ParseTicketState(req.State)
+	if err != nil {
+		orihttp.BadRequest(w, "state is required and must be 'backlog' or 'ready'")
+		return
+	}
+
+	ticket, err := th.service.CreateTicketFromNote(r.Context(), studioID, noteID, workspace.TicketCreateInput{
+		State:        state,
+		Title:        req.Title,
+		Description:  req.Description,
+		Tags:         req.Tags,
+		Priority:     req.Priority,
+		DueDate:      req.DueDate,
+		ReferenceURL: req.ReferenceURL,
+		Actor:        workspace.TicketActorUser,
+	})
+	if err != nil {
+		th.respondTicketError(w, "create ticket from note", studioID, "", err)
+		return
+	}
+	_ = orihttp.RespondJSON(w, http.StatusCreated, ticket)
+}
+
 // --- Error mapping --------------------------------------------------------
 
 // respondTicketError maps a service error onto the actionable 4xx the PRD
@@ -493,6 +641,13 @@ func (th *TicketHandler) TicketTransitionHandler(w http.ResponseWriter, r *http.
 // stop asking, reload, or pick a legal destination.
 func (th *TicketHandler) respondTicketError(w http.ResponseWriter, action, studioID, ticketID string, err error) {
 	switch {
+	case workspace.IsNoteNotFound(err):
+		// Unknown and foreign Note IDs are reported identically, for the same
+		// reason Ticket IDs are.
+		_ = orihttp.RespondAPIError(w, http.StatusNotFound,
+			orihttp.NewAPIError(orihttp.ErrCodeNotFound, "Note not found in this workspace").
+				WithDetails(map[string]string{"studio_id": studioID, "ticket_id": ticketID}))
+
 	case workspace.IsTicketNotFound(err):
 		// Unknown and foreign IDs are reported identically so this route
 		// cannot be used to probe another workspace's records.

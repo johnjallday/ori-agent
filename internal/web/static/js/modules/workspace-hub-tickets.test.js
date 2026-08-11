@@ -500,6 +500,92 @@ test('run history is fetched per ticket and ordered newest first', async () => {
   assert.equal(runs[1].error, 'boom', 'the earlier failure keeps its error');
 });
 
+// --- Group 5: Note links --------------------------------------------------
+
+test('linked notes come back as identity only, never note bodies', async () => {
+  const { api } = loadTickets(() => ({
+    body: {
+      notes: [
+        { id: 'note-1', title: 'Research spike', workspace_id: 'ws-1', content: 'SECRET BODY' }
+      ]
+    }
+  }));
+
+  const notes = await api.api.linkedNotes('ws-1', 'tkt-1');
+
+  assert.equal(notes.length, 1);
+  assert.equal(notes[0].title, 'Research spike');
+  // A ticket references notes; it does not contain them. Body must not be
+  // carried into ticket surfaces (FR-79).
+  assert.equal('content' in notes[0], false);
+  assert.equal('body' in notes[0], false);
+});
+
+test('unlink sends a DELETE that names the note, not the ticket content', async () => {
+  const { api, calls } = loadTickets(() => ({ body: serverTicket({ linked_note_ids: [] }) }));
+
+  await api.api.unlinkNote('ws-1', 'tkt-1', 'note-1', 3);
+
+  assert.equal(calls[0].method, 'DELETE');
+  assert.equal(calls[0].url, '/api/workspaces/ws-1/tickets/tkt-1/notes');
+  assert.equal(calls[0].body.note_id, 'note-1');
+  assert.equal(calls[0].body.version, 3);
+  // Nothing in the request could modify the note itself.
+  assert.equal('title' in calls[0].body, false);
+  assert.equal('content' in calls[0].body, false);
+});
+
+test('createFromNote requires an explicit capture choice and posts reviewed values', async () => {
+  const { api, calls } = loadTickets(() => ({ body: serverTicket({ source: 'note' }) }));
+
+  await assert.rejects(
+    () => api.api.createFromNote('ws-1', 'note-1', { title: 'no state' }),
+    err => err.field === 'state'
+  );
+  assert.equal(calls.length, 0, 'an unreviewed create must not reach the network');
+
+  await api.api.createFromNote('ws-1', 'note-1', {
+    state: 'backlog',
+    title: 'Reviewed title',
+    description: 'Reviewed body'
+  });
+
+  assert.equal(calls[0].method, 'POST');
+  assert.equal(calls[0].url, '/api/workspaces/ws-1/notes/note-1/tickets');
+  // The reviewed values are what get sent — the user edited the prefill.
+  assert.equal(calls[0].body.title, 'Reviewed title');
+  assert.equal(calls[0].body.state, 'backlog');
+});
+
+test('the reverse lookup returns navigable summaries, not mutable tickets', async () => {
+  const { api, calls } = loadTickets(() => ({
+    body: {
+      tickets: [
+        {
+          id: 'tkt-1',
+          number: 4,
+          display_number: '#4',
+          title: 'Linked work',
+          state: 'ready',
+          state_label: 'Ready',
+          owning_workspace_id: 'ws-1'
+        }
+      ]
+    }
+  }));
+
+  const summaries = await api.api.ticketsForNote('ws-1', 'note-1');
+
+  assert.equal(calls[0].url, '/api/workspaces/ws-1/notes/note-1/tickets');
+  assert.equal(summaries.length, 1);
+  assert.equal(summaries[0].displayNumber, '#4');
+  assert.equal(summaries[0].stateLabel, 'Ready');
+  // A summary carries enough to display and navigate, and deliberately not a
+  // version token — the note surface is not a second mutation authority.
+  assert.equal('version' in summaries[0], false);
+  assert.equal('legalTransitions' in summaries[0], false);
+});
+
 test('state metadata never relies on color alone', () => {
   const { api } = loadTickets();
   // Every state carries a distinct human-readable label; `tone` is a

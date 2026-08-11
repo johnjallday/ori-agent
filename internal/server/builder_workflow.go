@@ -525,6 +525,14 @@ func (b *ServerBuilder) initializeOrchestration() error {
 	}
 	b.orchestrationHandler = handler
 
+	// Wire Note validation into the canonical Ticket service so a Ticket can
+	// only link Notes that exist in its own workspace
+	// (tasks/prd-workspace-ticket-management.md FR-17, FR-71). Without this,
+	// link operations are refused rather than accepting unvalidated IDs.
+	if b.sessionStore != nil {
+		handler.SetTicketNoteLookup(session.NewTicketNoteLookup(b.sessionStore))
+	}
+
 	// Stop a task whose declared connection preconditions are unmet before its
 	// run starts (FR 34, 35). The evaluator was built in Phase 18; the task
 	// sub-handler only exists now.

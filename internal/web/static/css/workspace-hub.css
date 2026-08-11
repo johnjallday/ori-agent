@@ -6405,6 +6405,54 @@ body.modal-open .hub-support-chat {
   overflow-wrap: anywhere;
 }
 
+/* Linked notes. A ticket references notes; it never contains or owns them. */
+.ticket-detail-notes-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.ticket-detail-note {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.84rem;
+}
+
+.ticket-detail-note-link {
+  color: var(--accent-primary, #8ab4f8);
+  text-decoration: underline;
+  overflow-wrap: anywhere;
+}
+
+.ticket-detail-note-link:focus-visible,
+.ticket-detail-note-unlink:focus-visible {
+  outline: 2px solid var(--accent-primary, #8ab4f8);
+  outline-offset: 2px;
+}
+
+.ticket-detail-note-unlink {
+  flex: none;
+  padding: 0 0.35rem;
+  border: 1px solid var(--border-color, #3c4043);
+  border-radius: var(--radius-sm, 0.25rem);
+  background: transparent;
+  color: var(--text-secondary, #bdc1c6);
+  font: inherit;
+  font-size: 0.76rem;
+  cursor: pointer;
+}
+
+.ticket-detail-note-hint {
+  margin: 0.35rem 0 0;
+  font-size: 0.76rem;
+  color: var(--text-muted, #9aa0a6);
+}
+
 /* A failed attempt is called out in words, with a border rather than a bare
    color change, so the signal survives greyscale (FR-131). */
 .ticket-detail-attention {

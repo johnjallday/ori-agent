@@ -376,6 +376,92 @@
         .sort((a, b) => String(b.startedAt).localeCompare(String(a.startedAt)));
     },
 
+    /**
+     * The Notes this ticket references (FR-69).
+     *
+     * A ticket REFERENCES notes; it does not contain them. Only identity comes
+     * back — never note bodies — so note content cannot leak into ticket
+     * surfaces by accident (FR-79).
+     */
+    async linkedNotes(studioId, ticketId) {
+      const payload = await request(
+        'GET',
+        `${ticketsBasePath(studioId)}/${encodeURIComponent(ticketId)}/notes`
+      );
+      return ((payload && payload.notes) || []).map(note => ({
+        id: note.id || '',
+        title: note.title || '',
+        workspaceId: note.workspace_id || ''
+      }));
+    },
+
+    /** Attaches a note. Idempotent, so a double-click is harmless (FR-77). */
+    async linkNote(studioId, ticketId, noteId, version) {
+      const payload = await request(
+        'POST',
+        `${ticketsBasePath(studioId)}/${encodeURIComponent(ticketId)}/notes`,
+        { note_id: noteId, version }
+      );
+      return normalizeTicket(payload);
+    },
+
+    /**
+     * Detaches a note. This removes the REFERENCE and nothing else — the note
+     * itself is never modified or deleted (FR-18).
+     */
+    async unlinkNote(studioId, ticketId, noteId, version) {
+      const payload = await request(
+        'DELETE',
+        `${ticketsBasePath(studioId)}/${encodeURIComponent(ticketId)}/notes`,
+        { note_id: noteId, version }
+      );
+      return normalizeTicket(payload);
+    },
+
+    /**
+     * The tickets referencing a note — the reverse direction of the same
+     * relationship (FR-75, FR-78). Summaries only: the note surface displays
+     * and navigates to tickets, it never mutates them.
+     */
+    async ticketsForNote(studioId, noteId) {
+      const url =
+        `/api/workspaces/${encodeURIComponent(studioId)}/notes/` +
+        `${encodeURIComponent(noteId)}/tickets`;
+      const payload = await request('GET', url);
+      return ((payload && payload.tickets) || []).map(normalizeTicketSummary).filter(Boolean);
+    },
+
+    /**
+     * Creates a ticket seeded from a note (FR-73 to FR-76).
+     *
+     * `input` carries the REVIEWED values — the user edits the prefill before
+     * anything is created, so this is a decision rather than an automatic
+     * conversion. The note is preserved untouched, and the copy is one-time:
+     * nothing here establishes ongoing synchronization.
+     */
+    async createFromNote(studioId, noteId, input) {
+      if (!CAPTURE_STATES.includes(input && input.state)) {
+        throw new TicketApiError('Choose whether to add this to Backlog or create it Ready', {
+          status: 400,
+          code: 'validation_error',
+          details: { field: 'state' }
+        });
+      }
+      const url =
+        `/api/workspaces/${encodeURIComponent(studioId)}/notes/` +
+        `${encodeURIComponent(noteId)}/tickets`;
+      const payload = await request('POST', url, {
+        state: input.state,
+        title: input.title,
+        description: input.description || '',
+        tags: input.tags || [],
+        priority: input.priority || 0,
+        due_date: input.dueDate || null,
+        reference_url: input.referenceUrl || ''
+      });
+      return normalizeTicket(payload);
+    },
+
     async remove(studioId, ticketId, version) {
       const suffix = typeof version === 'number' && version > 0 ? `?version=${version}` : '';
       await request(
@@ -1091,6 +1177,14 @@
     body.appendChild(runsHost);
     void renderRunHistory(runsHost, ticket);
 
+    // --- Linked Notes ---
+    // Notes are independent knowledge records. This section navigates to them
+    // and detaches references; it never edits or deletes a Note (FR-18).
+    const notesHost = document.createElement('div');
+    notesHost.className = 'ticket-detail-notes';
+    body.appendChild(notesHost);
+    void renderLinkedNotes(notesHost, ticket);
+
     // --- History ---
     if (ticket.stateHistory.length) {
       appendSectionTitle(body, 'History');
@@ -1159,6 +1253,88 @@
       list.appendChild(item);
     });
     host.appendChild(list);
+  }
+
+  /**
+   * Lists the Notes a Ticket references, with a way to open each one and to
+   * detach it (FR-69, FR-77).
+   *
+   * Unlinking removes the REFERENCE only. The copy says so, because "Remove"
+   * next to a note is otherwise easy to read as "delete the note".
+   */
+  async function renderLinkedNotes(host, ticket) {
+    if (!host) return;
+    host.replaceChildren();
+
+    let notes = [];
+    try {
+      notes = await api.linkedNotes(ticket.owningWorkspaceId, ticket.id);
+    } catch {
+      const failed = document.createElement('p');
+      failed.className = 'ticket-detail-empty';
+      failed.textContent = 'Linked notes are unavailable right now.';
+      host.appendChild(failed);
+      return;
+    }
+    if (!notes.length) return;
+
+    appendSectionTitle(host, `Linked notes (${notes.length})`);
+    const list = document.createElement('ul');
+    list.className = 'ticket-detail-notes-list';
+
+    notes.forEach(note => {
+      const item = document.createElement('li');
+      item.className = 'ticket-detail-note';
+
+      const link = document.createElement('a');
+      link.className = 'ticket-detail-note-link';
+      link.href = `/workspaces/${encodeURIComponent(note.workspaceId)}/notes/${encodeURIComponent(note.id)}`;
+      link.textContent = note.title || note.id;
+
+      const unlink = document.createElement('button');
+      unlink.type = 'button';
+      unlink.className = 'ticket-detail-note-unlink';
+      unlink.textContent = 'Unlink';
+      // Spelled out for screen readers, where the button label alone is
+      // ambiguous about what gets removed.
+      unlink.setAttribute(
+        'aria-label',
+        `Unlink note ${note.title} from this ticket. The note itself is kept.`
+      );
+      unlink.addEventListener('click', () => void handleUnlinkNote(ticket, note));
+
+      item.appendChild(link);
+      item.appendChild(unlink);
+      list.appendChild(item);
+    });
+
+    host.appendChild(list);
+
+    const reassurance = document.createElement('p');
+    reassurance.className = 'ticket-detail-note-hint';
+    reassurance.textContent = 'Unlinking removes the reference only. The note is kept.';
+    host.appendChild(reassurance);
+  }
+
+  async function handleUnlinkNote(ticket, note) {
+    try {
+      const updated = await api.unlinkNote(
+        ticket.owningWorkspaceId,
+        ticket.id,
+        note.id,
+        ticket.version
+      );
+      renderDetail(updated);
+      setStatus(`Unlinked "${note.title}". The note is kept.`, 'success');
+      announce(`Note ${note.title} unlinked from ${ticket.displayNumber}`);
+    } catch (error) {
+      if (error.isVersionConflict && error.currentTicket) {
+        renderDetail(error.currentTicket);
+        setStatus('Someone else changed this ticket. Showing the current version.', 'error');
+        return;
+      }
+      setStatus(error.message, 'error');
+    }
   }
 
   function buildSummaryRow(label, summary) {

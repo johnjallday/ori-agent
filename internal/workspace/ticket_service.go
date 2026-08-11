@@ -31,6 +31,9 @@ import (
 type TicketService struct {
 	store    Store
 	eventBus *EventBus
+	// notes resolves Note identity for linking and display. Optional; see
+	// SetNoteLookup in ticket_notes.go for why it is an interface here.
+	notes TicketNoteLookup
 	// now is injectable so the 14-day recent/archive boundary (FR-143) can be
 	// tested at exact day boundaries without sleeping or faking system time.
 	now func() time.Time
