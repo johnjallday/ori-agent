@@ -21,8 +21,12 @@ var ErrBacklogTaskNotRunnable = errors.New("task is in Backlog and must be promo
 // Backlog stage, naming the action that was refused (FR8). It is a no-op
 // (nil) for a nil task or any other status, so callers can use it as a plain
 // guard clause: `if err := RequireTaskNotBacklog(task, "run task"); err != nil { ... }`.
+// It reads CANONICAL Ticket state, not the legacy Status field, so the guard
+// holds identically whether the call arrived through a canonical Ticket route
+// or a legacy Task endpoint (FR-21, FR-103). Every existing call site inherits
+// that without changing.
 func RequireTaskNotBacklog(task *Task, action string) error {
-	if task == nil || task.Status != TaskStatusBacklog {
+	if task == nil || task.CanonicalState() != TicketStateBacklog {
 		return nil
 	}
 	action = strings.TrimSpace(action)
@@ -40,7 +44,7 @@ func ValidateBacklogTaskInvariants(task *Task) error {
 	if task == nil {
 		return fmt.Errorf("task is nil")
 	}
-	if task.Status != TaskStatusBacklog {
+	if task.CanonicalState() != TicketStateBacklog {
 		return nil
 	}
 	if strings.TrimSpace(task.Description) == "" {

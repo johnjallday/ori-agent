@@ -315,6 +315,15 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 
 	b.workspaceStore = ws
 
+	// Evolve persisted Tasks into canonical Tickets, once, before anything
+	// reads them (tasks/prd-workspace-ticket-management.md FR-105, FR-106).
+	//
+	// Each workspace migrates in its own transaction, so one failure leaves
+	// the others migrated and the failing one untouched. It is idempotent and
+	// version-gated: on every subsequent boot this is a no-op that cannot
+	// renumber anything.
+	runTicketMigration(ws)
+
 	// Set workspace store on chat handler (uses SyncStore when available)
 	b.chatHandler.SetWorkspaceStore(ws)
 
@@ -524,6 +533,14 @@ func (b *ServerBuilder) initializeOrchestration() error {
 		return err
 	}
 	b.orchestrationHandler = handler
+
+	// Wire Note validation into the canonical Ticket service so a Ticket can
+	// only link Notes that exist in its own workspace
+	// (tasks/prd-workspace-ticket-management.md FR-17, FR-71). Without this,
+	// link operations are refused rather than accepting unvalidated IDs.
+	if b.sessionStore != nil {
+		handler.SetTicketNoteLookup(session.NewTicketNoteLookup(b.sessionStore))
+	}
 
 	// Stop a task whose declared connection preconditions are unmet before its
 	// run starts (FR 34, 35). The evaluator was built in Phase 18; the task

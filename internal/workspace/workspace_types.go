@@ -142,6 +142,18 @@ type Workspace struct {
 	Layout           *CanvasLayout          `json:"layout,omitempty"` // Canvas layout (positions of tasks and agents)
 	Status           WorkspaceStatus        `json:"status"`
 	Version          int64                  `json:"version,omitempty"` // monotonic, bumped on every Save; used to detect lost writes
+	// TicketMigrationVersion records that this workspace's legacy Task records
+	// have been evolved in place into canonical Tickets (FR-106). It makes the
+	// migration idempotent and restart-safe: a workspace already at the
+	// current version is skipped, so a second run can never renumber.
+	TicketMigrationVersion int `json:"ticket_migration_version,omitempty"`
+	// TicketSequence is the high-water mark of workspace-local Ticket numbers
+	// (FR-140). It only ever increases: allocation reserves the next value
+	// inside the same store.Update transaction that persists the Ticket, so a
+	// number is never reused even if the Ticket is later deleted, and a
+	// concurrent create cannot hand out the same number twice. Group 7's
+	// migration seeds it past the highest backfilled number.
+	TicketSequence int64 `json:"ticket_sequence,omitempty"`
 	// AllowNativeMCPCLI opts this workspace into letting CLI-provider agents
 	// (Claude Code / Codex) run the workspace's MCP + built-in tools natively,
 	// outside ori-agent's per-tool confirmation gate. Security-sensitive, so it
@@ -479,6 +491,56 @@ type Task struct {
 	// coordinator.go. It is cleared the moment a real assignee is stamped
 	// (stampAssignment) or a schedule/run action is explicitly taken.
 	AwaitingExecutionIntent bool `json:"awaiting_execution_intent,omitempty"`
+
+	// --- Canonical Ticket lifecycle (tasks/prd-workspace-ticket-management.md) ---
+	//
+	// These fields evolve this record in place into the product-facing Ticket
+	// (FR-2). There is deliberately no parallel Ticket row or mirror file: the
+	// same persisted Task IS the Ticket, so every stable ID, Run reference,
+	// schedule, and result above survives the rename untouched (FR-3, FR-5).
+
+	// TicketState is the canonical, first-class lifecycle state (FR-6, FR-7).
+	// It is the ONLY lifecycle authority. It is never derived from Status,
+	// KanbanColumnID, tags, assignee, latest Run status, or the presence of a
+	// result — those describe execution attempts or presentation, not the
+	// durable workflow state of the request (FR-8).
+	//
+	// Empty means "not yet migrated": records persisted before this field
+	// existed carry legacy Status only, and Group 7's migration backfills
+	// them. Read through Task.CanonicalState() rather than this field
+	// directly so unmigrated records still resolve to a sane state.
+	TicketState TicketState `json:"ticket_state,omitempty"`
+	// TicketNumber is the immutable, workspace-local, human-readable sequence
+	// number (FR-140). It is allocated once from Workspace.TicketSequence and
+	// never reused or renumbered — not by state changes, retries, reopening,
+	// or migration. The stable ID above remains the relationship key; this is
+	// purely what users say out loud.
+	TicketNumber int64 `json:"ticket_number,omitempty"`
+	// StateRank orders Tickets manually within one owning workspace and one
+	// state (FR-15). Rank spaces are per owner and per state, so moving
+	// between states always assigns a fresh deterministic destination rank.
+	// It supersedes BacklogRank, which remains only as migration input.
+	StateRank int64 `json:"state_rank,omitempty"`
+	// DueDate is the first-class optional due date (FR-14), replacing the
+	// generic kanban_due_date context entry that Group 7 migrates in.
+	DueDate *time.Time `json:"due_date,omitempty"`
+	// LinkedNoteIDs holds explicit structured references to Notes in the same
+	// workspace (FR-17). Relationships are never parsed out of body Markdown,
+	// and linking never mutates the Note itself (FR-18).
+	LinkedNoteIDs []string `json:"linked_note_ids,omitempty"`
+	// StateHistory is the append-only audit trail of state transitions
+	// (FR-40). Entries are never rewritten, so a reopened or retried Ticket
+	// keeps the full record of how it got here.
+	StateHistory []TicketStateChange `json:"state_history,omitempty"`
+	// TicketVersion is the optimistic-concurrency token (FR-93). It is bumped
+	// on every canonical mutation; a mutation carrying a stale value is
+	// refused with ErrTicketVersionConflict rather than silently overwriting
+	// a concurrent editor.
+	TicketVersion int64 `json:"ticket_version,omitempty"`
+	// UpdatedAt records the last canonical mutation (FR-4). CreatedAt above
+	// is never touched after creation. A zero value means the record has not
+	// been mutated since it was created; readers fall back to CreatedAt.
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // TaskRuntimeInputs carries the inputs computed for a task at execution time.

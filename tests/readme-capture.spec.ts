@@ -94,6 +94,45 @@ function taskPayload() {
   };
 }
 
+/**
+ * The canonical Ticket projection of the same scene work
+ * (tasks/prd-workspace-ticket-management.md).
+ *
+ * Derived from the scene's tasks rather than invented, so the TICKETS count on
+ * the workspace header can never disagree with the tasks the screenshot shows.
+ * A ticket IS a task evolved in place — one record, one number — so the
+ * fixture models it that way too.
+ */
+function ticketPayload() {
+  const owner = README_SCENES.workspaces.find(
+    item => item.id === README_SCENES.workspace_command.workspace_id
+  );
+  const tickets = README_SCENES.workspace_command.tasks.map((item, index) => ({
+    id: item.id,
+    number: index + 1,
+    title: item.title,
+    state: item.status === 'in_progress' ? 'in_progress' : 'ready',
+    priority: 3,
+    source: 'manual',
+    workspace_id: README_SCENES.workspace_command.workspace_id,
+    owning_workspace_id: README_SCENES.workspace_command.workspace_id,
+    owning_workspace_name: owner ? owner.name : 'Workspace',
+    version: 1,
+    created_at: '2026-07-17T12:00:00.000Z',
+    updated_at: '2026-07-17T14:00:00.000Z',
+    linked_note_ids: [],
+    state_history: []
+  }));
+  return {
+    tickets,
+    count: tickets.length,
+    total: tickets.length,
+    truncated: false,
+    partial_owners: [],
+    include_descendants: false
+  };
+}
+
 async function installFixtureRoutes(page: Page) {
   assertReadmeSceneContract();
   for (const [name, assetPath] of Object.entries(captureAssets)) {
@@ -579,6 +618,13 @@ async function installFixtureRoutes(page: Page) {
         },
         workspace: README_SCENES.workspace_command.workspace_id
       });
+      return;
+    }
+    // The workspace header's TICKETS tile reads its number from the canonical
+    // Ticket list, so this scene needs the endpoint even though the capture
+    // never opens the Tickets view itself.
+    if (/^\/api\/workspaces\/[^/]+\/tickets$/.test(url.pathname)) {
+      await json(route, ticketPayload());
       return;
     }
     if (url.pathname === '/api/skills') {

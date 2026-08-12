@@ -1,6 +1,8 @@
 package workspace
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -22,11 +24,27 @@ const groupWorkspaceKind = "group"
 // reusing the same folder-resolution mechanism as task_markdown_sync.go.
 type FileBacklogSynchronizer struct {
 	store Store
+	// forceRender skips the "was this generated file hand-edited?" guard.
+	// Only the explicit user-chosen replace path sets it — see
+	// ReplaceCollisionForce (FR-122).
+	forceRender bool
 }
 
 // NewFileBacklogSynchronizer constructs a synchronizer over store.
 func NewFileBacklogSynchronizer(store Store) *FileBacklogSynchronizer {
 	return &FileBacklogSynchronizer{store: store}
+}
+
+// ReplaceCollisionForce regenerates BACKLOG.md even though it was edited
+// outside Ori, discarding those edits (FR-122).
+//
+// This exists as a SEPARATE entry point so the overwrite can only happen as a
+// deliberate act. RenderAfterMutation — which runs automatically after every
+// ticket change — refuses to clobber a hand-edited file precisely so that this
+// choice stays with the user.
+func (s *FileBacklogSynchronizer) ReplaceCollisionForce(workspaceID string) error {
+	forced := &FileBacklogSynchronizer{store: s.store, forceRender: true}
+	return forced.RenderAfterMutation(workspaceID)
 }
 
 func (s *FileBacklogSynchronizer) resolve(workspaceID string) (path string, ws *Workspace, ok bool, err error) {
@@ -55,9 +73,61 @@ func (s *FileBacklogSynchronizer) persistSyncState(workspaceID string, mutate fu
 // a repair-needed sync warning rather than returned, so a read (list/detail)
 // never fails merely because the file is temporarily unreadable or invalid
 // (FR84, 88).
+// Once the final import has run, this is a NO-OP: BACKLOG.md has become a
+// generated, non-authoritative index, so manual edits to it must never mutate
+// a Ticket (tasks/prd-workspace-ticket-management.md FR-120, FR-121).
+//
+// That is the whole point of the switch. While the file was authoritative,
+// editing it changed records; once it is generated, editing it changes
+// nothing and the next render replaces it.
 func (s *FileBacklogSynchronizer) ImportBeforeRead(workspaceID string) error {
-	_, err := s.Import(workspaceID)
+	ws, err := s.store.Get(workspaceID)
+	if err == nil && backlogMarkdownIsGenerated(ws) {
+		return nil
+	}
+	_, err = s.Import(workspaceID)
 	return err
+}
+
+// FinalizeBacklogMarkdownImport performs the ONE-TIME final import and then
+// switches this workspace to generated-index behavior (FR-119, FR-120).
+//
+// It runs the existing two-way importer first, so file-side work a user did
+// before upgrading is adopted rather than discarded. Only after that import
+// succeeds is the switch recorded — a failed import leaves the workspace in
+// two-way mode so nothing is lost and the next attempt can retry.
+//
+// Unresolved conflicts block the switch for the same reason: flipping to
+// generated mode with conflicts outstanding would strand the file-side version
+// of that work with no way to adopt it.
+func (s *FileBacklogSynchronizer) FinalizeBacklogMarkdownImport(workspaceID string) (*BacklogMarkdownImportResult, error) {
+	ws, err := s.store.Get(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	if backlogMarkdownIsGenerated(ws) {
+		// Already finalized; idempotent.
+		return &BacklogMarkdownImportResult{}, nil
+	}
+
+	result, err := s.Import(workspaceID)
+	if err != nil {
+		return result, err
+	}
+	if conflicts := s.Conflicts(workspaceID); len(conflicts) > 0 {
+		return result, fmt.Errorf(
+			"%d backlog item(s) have unresolved BACKLOG.md conflicts; resolve them before the file becomes a generated index",
+			len(conflicts))
+	}
+
+	if err := s.persistSyncState(workspaceID, func(state *backlogMarkdownSyncState) {
+		state.FinalImportAt = time.Now()
+	}); err != nil {
+		return result, err
+	}
+	// Regenerate immediately so the file on disk carries the generated header
+	// rather than continuing to claim it is editable.
+	return result, s.RenderAfterMutation(workspaceID)
 }
 
 // Import reads, validates, and applies BACKLOG.md's current content to the
@@ -344,6 +414,26 @@ func (s *FileBacklogSynchronizer) RenderAfterMutation(workspaceID string) error 
 	if err != nil || !ok {
 		return err
 	}
+
+	// Once the file is a generated index, a regeneration must never silently
+	// overwrite edits someone made to it (FR-122). The stored hash of what we
+	// last wrote is the evidence: if the file no longer matches, a human
+	// changed it, and replacing it is a decision they have to make.
+	//
+	// The mutation that triggered this render is already persisted — the
+	// structured record is the source of truth — so refusing to write the file
+	// loses nothing. It only leaves the index stale until the collision is
+	// resolved, which the sync status reports.
+	if !s.forceRender && backlogMarkdownIsGenerated(ws) {
+		edited, hashErr := backlogMarkdownEditedSinceRender(path, getBacklogMarkdownSyncState(ws))
+		if hashErr == nil && edited {
+			return s.persistSyncState(workspaceID, func(state *backlogMarkdownSyncState) {
+				state.RepairNeeded = true
+				state.Warning = "BACKLOG.md was edited outside Ori. It is a generated index, so those edits were not imported; choose replace or export to continue."
+			})
+		}
+	}
+
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil { // #nosec G301 -- 0755 matches this package's established workspace-folder directory permission (see task_markdown_sync.go and the other ~20 os.MkdirAll call sites in this package)
 		return err
 	}
@@ -361,11 +451,44 @@ func (s *FileBacklogSynchronizer) RenderAfterMutation(workspaceID string) error 
 	for _, item := range localBacklogItemViews(ws) {
 		snapshots[item.Task.ID] = snapshotFromTask(item.Task)
 	}
+	// Record what we just wrote, so the next render can tell an untouched
+	// file from a hand-edited one.
+	rendered := backlogMarkdownContentHash(content)
 	return s.persistSyncState(workspaceID, func(state *backlogMarkdownSyncState) {
 		state.LastSyncedAt = time.Now()
 		state.LastRenderedItem = snapshots
+		state.LastRenderedHash = rendered
 		state.RepairNeeded = false
+		state.Warning = ""
 	})
+}
+
+// backlogMarkdownContentHash hashes a rendered document for edit detection.
+func backlogMarkdownContentHash(content string) string {
+	sum := sha256.Sum256([]byte(content))
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+// backlogMarkdownEditedSinceRender reports whether the file on disk differs
+// from what this synchronizer last wrote.
+//
+// A missing file is NOT an edit — it simply needs regenerating. An unreadable
+// file is treated as unedited so a transient IO error cannot permanently block
+// regeneration; the write itself will surface any real problem.
+func backlogMarkdownEditedSinceRender(path string, state backlogMarkdownSyncState) (bool, error) {
+	if state.LastRenderedHash == "" {
+		// Nothing was ever rendered under the new regime, so there is no
+		// baseline to compare against and nothing to protect yet.
+		return false, nil
+	}
+	data, err := os.ReadFile(path) // #nosec G304 -- path is the workspace's own managed BACKLOG.md, resolved by s.resolve
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return backlogMarkdownContentHash(string(data)) != state.LastRenderedHash, nil
 }
 
 // Status returns the current sync-health summary (FR84, 91).

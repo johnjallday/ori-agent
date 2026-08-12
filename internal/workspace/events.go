@@ -46,6 +46,22 @@ const (
 	EventTaskBacklogReordered EventType = "task.backlog.reordered"
 	EventTaskBacklogPromoted  EventType = "task.backlog.promoted"
 
+	// Canonical Ticket lifecycle events
+	// (tasks/prd-workspace-ticket-management.md FR-98 through FR-100).
+	//
+	// These are the versioned names every new consumer subscribes to. The
+	// legacy task.* and task.backlog.* events above are still published
+	// alongside them for the duration of the compatibility window, so
+	// existing projections keep refreshing while callers migrate; removing
+	// them is part of the separate legacy-API removal project, not this one.
+	EventTicketCreated      EventType = "ticket.created"
+	EventTicketUpdated      EventType = "ticket.updated"
+	EventTicketStateChanged EventType = "ticket.state_changed"
+	EventTicketReordered    EventType = "ticket.reordered"
+	EventTicketDeleted      EventType = "ticket.deleted"
+	EventTicketNoteLinked   EventType = "ticket.note_linked"
+	EventTicketNoteUnlinked EventType = "ticket.note_unlinked"
+
 	// Delegation loop events (adaptive delegation; see DelegationLoop)
 	EventDelegationStarted   EventType = "delegation.started"
 	EventDelegationCompleted EventType = "delegation.completed"

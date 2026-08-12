@@ -5,8 +5,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 // This file is the Group-2 capture/query/mutation/promotion service for the
@@ -189,76 +187,31 @@ func normalizeBacklogPriority(priority int) int {
 	return priority
 }
 
-// buildCaptureTask validates a capture input and constructs the Task to
-// persist at the given initial status. Shared by Create (Backlog) and
-// CreateReadyUnassigned (direct Ready creation, FR2.10/56/78).
-func buildCaptureTask(input BacklogCreateInput, status TaskStatus) (Task, error) {
-	wsID := strings.TrimSpace(input.WorkspaceID)
-	if wsID == "" {
-		return Task{}, fmt.Errorf("workspace_id is required")
-	}
-	description := strings.TrimSpace(input.Description)
-	if description == "" {
-		return Task{}, fmt.Errorf("title is required")
-	}
-	referenceURL, err := NormalizeReferenceURL(input.ReferenceURL)
-	if err != nil {
-		return Task{}, err
-	}
-	tags, err := ValidateWorkspaceTags(input.Tags)
-	if err != nil {
-		return Task{}, err
-	}
-	sourceType := strings.TrimSpace(input.SourceType)
-	if sourceType == "" {
-		sourceType = BacklogSourceManual
-	}
-
-	task := Task{
-		ID:           uuid.New().String(),
-		WorkspaceID:  wsID,
-		Description:  description,
-		Details:      strings.TrimSpace(input.Details),
-		Tags:         tags,
-		Priority:     normalizeBacklogPriority(input.Priority),
-		ReferenceURL: referenceURL,
-		SourceType:   sourceType,
-		SourceID:     strings.TrimSpace(input.SourceID),
-		Status:       status,
-		CreatedAt:    time.Now(),
-	}
-	if status != TaskStatusBacklog {
-		// Direct Ready creation stays quiescent until an explicit
-		// assignment/run/schedule action (FR11-12).
-		task.AwaitingExecutionIntent = true
-	}
-	return task, nil
-}
-
-// Create captures a new Backlog item (FR4-5, 19-22). The new item is ranked
-// last among the workspace's existing Backlog items (deterministic initial
-// rank).
+// Create captures a new Backlog item (FR4-5, 19-22).
+//
+// This is now a COMPATIBILITY ADAPTER over the canonical Ticket service
+// (tasks/prd-workspace-ticket-management.md FR-85, FR-96). Every caller —
+// Action Center conversion, the Home assistant, BACKLOG.md import, the legacy
+// HTTP routes — therefore gets canonical state, an immutable workspace-local
+// number, provenance, per-state ranking, audited history, and canonical
+// events, without any of them changing.
+//
+// It keeps the Task-shaped signature its callers already use, and owns no
+// lifecycle rules of its own. That is the whole point: two creation paths with
+// their own rules is exactly how the Backlog and Task surfaces drifted apart
+// in the first place.
 func (s *BacklogService) Create(input BacklogCreateInput) (*Task, error) {
-	task, err := buildCaptureTask(input, TaskStatusBacklog)
-	if err != nil {
-		return nil, err
-	}
-	if err := ValidateBacklogTaskInvariants(&task); err != nil {
-		return nil, err
-	}
-
-	var created Task
-	err = s.store.Update(task.WorkspaceID, func(ws *Workspace) error {
-		task.BacklogRank = nextBacklogRank(ws)
-		if err := ws.AddTask(task); err != nil {
-			return err
-		}
-		got, err := ws.GetTask(task.ID)
-		if err != nil {
-			return err
-		}
-		created = *got
-		return nil
+	created, err := s.tickets().createRecord(TicketCreateInput{
+		WorkspaceID:  input.WorkspaceID,
+		State:        TicketStateBacklog,
+		Title:        input.Description,
+		Description:  input.Details,
+		Tags:         input.Tags,
+		Priority:     input.Priority,
+		ReferenceURL: input.ReferenceURL,
+		Source:       input.SourceType,
+		SourceID:     input.SourceID,
+		Actor:        TicketActorUser,
 	})
 	if err != nil {
 		return nil, err
@@ -267,6 +220,16 @@ func (s *BacklogService) Create(input BacklogCreateInput) (*Task, error) {
 	s.publish(EventTaskBacklogCaptured, created.WorkspaceID, created.ID, created)
 	s.renderAfterMutation(created.WorkspaceID)
 	return &created, nil
+}
+
+// tickets builds the canonical service this adapter delegates to. It is
+// constructed per call rather than held as state because TicketService is a
+// stateless holder of its store/bus references — the store it wraps is the
+// shared source of truth.
+func (s *BacklogService) tickets() *TicketService {
+	svc := NewTicketService(s.store)
+	svc.SetEventBus(s.eventBus)
+	return svc
 }
 
 // CreateReadyUnassigned creates a task directly in the Ready stage without
@@ -278,23 +241,20 @@ func (s *BacklogService) Create(input BacklogCreateInput) (*Task, error) {
 // coordinator default (the ordinary create-task flow) should keep using
 // Workspace.AddTask + Workspace.ApplyEntryAgentDefault directly instead of
 // this method.
+// It is likewise a compatibility adapter over the canonical Ticket service,
+// creating directly in Ready (FR-19, FR-85).
 func (s *BacklogService) CreateReadyUnassigned(input BacklogCreateInput) (*Task, error) {
-	task, err := buildCaptureTask(input, TaskStatusPending)
-	if err != nil {
-		return nil, err
-	}
-
-	var created Task
-	err = s.store.Update(task.WorkspaceID, func(ws *Workspace) error {
-		if err := ws.AddTask(task); err != nil {
-			return err
-		}
-		got, err := ws.GetTask(task.ID)
-		if err != nil {
-			return err
-		}
-		created = *got
-		return nil
+	created, err := s.tickets().createRecord(TicketCreateInput{
+		WorkspaceID:  input.WorkspaceID,
+		State:        TicketStateReady,
+		Title:        input.Description,
+		Description:  input.Details,
+		Tags:         input.Tags,
+		Priority:     input.Priority,
+		ReferenceURL: input.ReferenceURL,
+		Source:       input.SourceType,
+		SourceID:     input.SourceID,
+		Actor:        TicketActorUser,
 	})
 	if err != nil {
 		return nil, err
@@ -302,21 +262,6 @@ func (s *BacklogService) CreateReadyUnassigned(input BacklogCreateInput) (*Task,
 
 	s.publish(EventTaskCreated, created.WorkspaceID, created.ID, created)
 	return &created, nil
-}
-
-// nextBacklogRank returns the rank to assign a newly captured Backlog item:
-// one past the current maximum among the workspace's existing Backlog items,
-// so new captures sort last by default (FR20-22).
-func nextBacklogRank(ws *Workspace) int64 {
-	ws.mu.RLock()
-	defer ws.mu.RUnlock()
-	var max int64
-	for _, t := range ws.Tasks {
-		if t.Status == TaskStatusBacklog && t.BacklogRank > max {
-			max = t.BacklogRank
-		}
-	}
-	return max + 1
 }
 
 // Get fetches a single Backlog item, importing any pending file-side changes
@@ -333,7 +278,7 @@ func (s *BacklogService) Get(workspaceID, taskID string) (*BacklogItemView, erro
 	if err != nil {
 		return nil, err
 	}
-	if task.Status != TaskStatusBacklog {
+	if task.CanonicalState() != TicketStateBacklog {
 		return nil, fmt.Errorf("item %s is not in Backlog", taskID)
 	}
 	return &BacklogItemView{Task: *task, OwningWorkspaceID: ws.ID, OwningWorkspaceName: ws.Name}, nil
@@ -378,7 +323,9 @@ func localBacklogItemViews(ws *Workspace) []BacklogItemView {
 	defer ws.mu.RUnlock()
 	out := make([]BacklogItemView, 0, 4)
 	for _, t := range ws.Tasks {
-		if t.Status != TaskStatusBacklog {
+		// Canonical state, so this legacy projection and the canonical List
+		// can never disagree about what is in Backlog (FR-7).
+		if t.CanonicalState() != TicketStateBacklog {
 			continue
 		}
 		if t.ParentTaskID != "" {
@@ -442,7 +389,9 @@ func (s *BacklogService) Update(workspaceID, taskID string, input BacklogUpdateI
 	var updated Task
 	err := s.store.Update(workspaceID, func(ws *Workspace) error {
 		return ws.MutateTask(taskID, func(t *Task) error {
-			if t.Status != TaskStatusBacklog {
+			// Canonical state, not the legacy field: an unmigrated record must
+			// be gated the same way (FR-7, FR-103).
+			if t.CanonicalState() != TicketStateBacklog {
 				return fmt.Errorf("item %s is not in Backlog", taskID)
 			}
 			if input.Description != nil {
@@ -472,6 +421,9 @@ func (s *BacklogService) Update(workspaceID, taskID string, input BacklogUpdateI
 				}
 				t.ReferenceURL = url
 			}
+			// Bump the concurrency token so a canonical editor holding an
+			// older version cannot silently overwrite this edit (FR-93).
+			touchTicket(t)
 			updated = *t
 			return nil
 		})
@@ -501,10 +453,16 @@ func (s *BacklogService) Reorder(workspaceID string, orderedIDs []string) ([]Tas
 			seen[id] = true
 			rank := int64(i)
 			if err := ws.MutateTask(id, func(t *Task) error {
-				if t.Status != TaskStatusBacklog {
+				if t.CanonicalState() != TicketStateBacklog {
 					return fmt.Errorf("item %s is not in Backlog", id)
 				}
 				t.BacklogRank = rank
+				// Keep the canonical rank in step. Writing only BacklogRank
+				// left the legacy list reordered while the canonical List and
+				// Board — which sort on StateRank — kept the old order. The
+				// canonical space is 1-based; see nextTicketRank.
+				t.StateRank = rank + 1
+				touchTicket(t)
 				return nil
 			}); err != nil {
 				return err
@@ -548,7 +506,7 @@ func (s *BacklogService) Delete(workspaceID, taskID string) error {
 		if err != nil {
 			return err
 		}
-		if t.Status != TaskStatusBacklog {
+		if t.CanonicalState() != TicketStateBacklog {
 			return fmt.Errorf("item %s is not in Backlog", taskID)
 		}
 		return ws.DeleteTask(taskID)
@@ -569,34 +527,33 @@ func (s *BacklogService) Delete(workspaceID, taskID string) error {
 // run, or schedule action. Promoting an item already at Ready-or-later is a
 // no-op that returns the current item unchanged rather than erroring, so a
 // repeated client call or a race with another promotion is safe.
+// Like Create, this is now a COMPATIBILITY ADAPTER over the canonical Ticket
+// service (tasks/prd-workspace-ticket-management.md FR-96).
+//
+// It previously moved only the LEGACY status, which left the record saying two
+// different things: legacy consumers saw `pending` while canonical consumers
+// still saw `backlog`. That is precisely the dual lifecycle authority this
+// feature exists to remove, so promotion goes through TicketService.Promote —
+// which records the transition in history, assigns a destination rank, and
+// keeps the legacy status as a projection of the canonical state.
 func (s *BacklogService) Promote(workspaceID, taskID string) (*Task, error) {
-	var result Task
-	alreadyPromoted := false
-	err := s.store.Update(workspaceID, func(ws *Workspace) error {
-		return ws.MutateTask(taskID, func(t *Task) error {
-			if t.Status != TaskStatusBacklog {
-				alreadyPromoted = true
-				result = *t
-				return nil
-			}
-			if err := t.SetStatus(TaskStatusPending); err != nil {
-				return fmt.Errorf("cannot promote item to Ready: %w", err)
-			}
-			t.BacklogRank = 0
-			t.AwaitingExecutionIntent = true
-			result = *t
-			return nil
-		})
-	})
+	ticket, err := s.tickets().Promote(workspaceID, taskID, 0)
+	if err != nil {
+		return nil, fmt.Errorf("cannot promote item to Ready: %w", err)
+	}
+
+	ws, err := s.store.Get(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	result, err := ws.GetTask(ticket.ID)
 	if err != nil {
 		return nil, err
 	}
 
-	if !alreadyPromoted {
-		s.publish(EventTaskBacklogPromoted, result.WorkspaceID, result.ID, result)
-		s.renderAfterMutation(result.WorkspaceID)
-	}
-	return &result, nil
+	s.publish(EventTaskBacklogPromoted, result.WorkspaceID, result.ID, *result)
+	s.renderAfterMutation(result.WorkspaceID)
+	return result, nil
 }
 
 func (s *BacklogService) publish(eventType EventType, workspaceID, taskID string, data any) {

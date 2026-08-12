@@ -39,6 +39,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	registerReviewRoutes(mux, s)
 	registerCLIAgentRoutes(mux, s)
 	registerWorkspaceRunRoutes(mux, s)
+	registerTicketRoutes(mux, s)
 	registerTriggerRoutes(mux, s)
 	registerWorkspaceMemoryRoutes(mux, s)
 	registerDownloadsJanitorRoutes(mux, s)
@@ -805,6 +806,49 @@ func registerWorkspaceRunRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/runs/{runID}/artifacts", s.Handlers.WorkspaceRuns.ListArtifacts)
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/runs/{runID}/trace", s.Handlers.WorkspaceRuns.ListTrace)
 	}
+}
+
+// registerTicketRoutes registers the canonical owner-scoped Ticket API
+// (tasks/prd-workspace-ticket-management.md FR-86 through FR-88).
+//
+// Ownership lives in the path so the route itself is the mutation authority:
+// a parent workspace that rolls up a descendant's Tickets cannot mutate one
+// under its own identity, because it would have to address the child's route
+// to do so (FR-12, FR-90).
+//
+// These patterns are strictly more specific than the /api/workspaces/
+// catch-all registered in registerWorkspaceRoutes, so Go's ServeMux matches
+// them first. The literal /reorder segment likewise wins over the
+// {ticketID} wildcard.
+func registerTicketRoutes(mux *http.ServeMux, s *Server) {
+	if s.Handlers.Orchestration == nil {
+		return
+	}
+
+	mux.HandleFunc("GET /api/workspaces/{studioID}/tickets", s.Handlers.Orchestration.TicketCollectionHandler)
+	mux.HandleFunc("POST /api/workspaces/{studioID}/tickets", s.Handlers.Orchestration.TicketCollectionHandler)
+
+	// Collection-level reorder: atomic within one owner and one state (FR-91).
+	mux.HandleFunc("POST /api/workspaces/{studioID}/tickets/reorder", s.Handlers.Orchestration.TicketReorderHandler)
+
+	mux.HandleFunc("GET /api/workspaces/{studioID}/tickets/{ticketID}", s.Handlers.Orchestration.TicketItemHandler)
+	mux.HandleFunc("PATCH /api/workspaces/{studioID}/tickets/{ticketID}", s.Handlers.Orchestration.TicketItemHandler)
+	mux.HandleFunc("DELETE /api/workspaces/{studioID}/tickets/{ticketID}", s.Handlers.Orchestration.TicketItemHandler)
+
+	// The only route that changes lifecycle state — never a generic context
+	// patch (FR-88).
+	mux.HandleFunc("POST /api/workspaces/{studioID}/tickets/{ticketID}/transition", s.Handlers.Orchestration.TicketTransitionHandler)
+
+	// Ticket ↔ Note links (FR-77). Both directions are idempotent.
+	mux.HandleFunc("GET /api/workspaces/{studioID}/tickets/{ticketID}/notes", s.Handlers.Orchestration.TicketNoteLinkHandler)
+	mux.HandleFunc("POST /api/workspaces/{studioID}/tickets/{ticketID}/notes", s.Handlers.Orchestration.TicketNoteLinkHandler)
+	mux.HandleFunc("DELETE /api/workspaces/{studioID}/tickets/{ticketID}/notes", s.Handlers.Orchestration.TicketNoteLinkHandler)
+
+	// The reverse direction, plus create-from-Note (FR-73 to FR-75). These
+	// read and create Tickets; they are never a second Ticket mutation
+	// authority, which is why there is no PATCH here.
+	mux.HandleFunc("GET /api/workspaces/{studioID}/notes/{noteID}/tickets", s.Handlers.Orchestration.TicketsForNoteHandler)
+	mux.HandleFunc("POST /api/workspaces/{studioID}/notes/{noteID}/tickets", s.Handlers.Orchestration.TicketFromNoteHandler)
 }
 
 // registerTriggerRoutes registers event trigger and webhook endpoints.

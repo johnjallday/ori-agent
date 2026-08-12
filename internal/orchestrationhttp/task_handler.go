@@ -84,10 +84,18 @@ func NewTaskHandler(workspaceStore workspace.Store,
 	}
 }
 
-func (th *TaskHandler) registerRunningTask(taskID string, cancel context.CancelFunc) {
+// registerRunningTask claims a task for execution and reports whether the
+// claim succeeded. A false return means the task is ALREADY running.
+//
+// The claim is exclusive on purpose (PRD workspace-ticket-management FR-26:
+// "prevent duplicate active starts"). This map previously overwrote the
+// existing entry, which had two consequences: two executions of the same
+// Ticket ran concurrently against one record, and the first one's cancel
+// function was dropped — leaving it running with no way to stop it.
+func (th *TaskHandler) registerRunningTask(taskID string, cancel context.CancelFunc) bool {
 	taskID = strings.TrimSpace(taskID)
 	if taskID == "" || cancel == nil {
-		return
+		return false
 	}
 
 	th.runningMu.Lock()
@@ -95,7 +103,11 @@ func (th *TaskHandler) registerRunningTask(taskID string, cancel context.CancelF
 	if th.runningCancels == nil {
 		th.runningCancels = make(map[string]context.CancelFunc)
 	}
+	if _, running := th.runningCancels[taskID]; running {
+		return false
+	}
 	th.runningCancels[taskID] = cancel
+	return true
 }
 
 func (th *TaskHandler) unregisterRunningTask(taskID string) {

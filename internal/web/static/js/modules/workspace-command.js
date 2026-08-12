@@ -34,7 +34,11 @@ import {
 const LEGACY_STORAGE_KEY = 'oriWorkspaceDetailView';
 const VIEW_MODE_STORAGE_KEY = 'oriWorkspaceCommandViewMode';
 const AGENT_TAB_KEYS = ['overview', 'tasks', 'loadout', 'recent'];
-const COMMAND_VIEW_MODES = ['details', 'map'];
+// Tickets is a first-class view, not a panel inside one
+// (tasks/prd-workspace-ticket-management.md FR-65): it is the destination
+// where durable work is managed, so it sits beside Details and Map rather than
+// one click deeper inside a modal.
+const COMMAND_VIEW_MODES = ['details', 'map', 'tickets'];
 
 function escapeHtml(value) {
   return String(value == null ? '' : value).replace(/[&<>"']/g, function (c) {
@@ -89,6 +93,10 @@ export class WorkspaceCommandView {
       this.readCommandViewModePreference()
     );
     this.activeRailSection = '';
+    // Whether the Tickets view has fetched since it was last entered. Reset on
+    // leaving, so re-entry always shows current data without every unrelated
+    // re-render re-fetching. See syncTicketsView.
+    this.ticketsViewLoaded = false;
     this.activeMapWindow = '';
     this.mapInventoryOpen = false;
     this.mapInventorySection = '';
@@ -337,7 +345,51 @@ export class WorkspaceCommandView {
    * refresh() (which the page calls once real data arrives), bounded so a
    * truly stale link still eventually gets dropped per FR91.
    */
+  /**
+   * Switches to the Tickets view when the URL carries `?ticket=<stable id>`
+   * (tasks/prd-workspace-ticket-management.md FR-83, FR-84).
+   *
+   * Tickets is not the default view mode, so a deep link that only told the
+   * module which ticket to show would be a silent no-op — the surface it
+   * renders into is hidden. Switching the view is what makes the link
+   * actually land somewhere.
+   *
+   * The ticket module itself reads the same parameter and opens detail once
+   * its surface is mounted.
+   */
+  applyTicketDeepLink() {
+    if (this._ticketDeepLinkApplied || typeof window === 'undefined') return;
+    let params;
+    try {
+      params = new URLSearchParams(window.location.search);
+    } catch {
+      return;
+    }
+    // Either shape opens the destination: `?ticket=<id>` for one ticket,
+    // `?tickets=<state>` for a filtered list behind a count.
+    if (!params.get('ticket') && !params.get('tickets')) return;
+
+    this._ticketDeepLinkApplied = true;
+    this.setCommandViewMode('tickets', { focus: false });
+  }
+
+  /**
+   * Opens the Tickets destination filtered to one canonical state (FR-65,
+   * FR-80, FR-81).
+   *
+   * This is what a count shortcut does: a panel that shows "Backlog 3" hands
+   * the user the three tickets behind the number, in the surface where they
+   * are actually managed — rather than being a third place to manage them.
+   */
+  openTicketsFiltered(state) {
+    const tickets = typeof window === 'undefined' ? null : window.WorkspaceHubTickets;
+    this.setCommandViewMode('tickets', { focus: false });
+    if (!tickets || typeof tickets.setFilterState !== 'function') return;
+    tickets.setFilterState(state);
+  }
+
   applyBootURLState() {
+    this.applyTicketDeepLink();
     if (this._urlStateApplied || !this._urlBootState) {
       this._urlSyncEnabled = true;
       return;
@@ -711,7 +763,8 @@ export class WorkspaceCommandView {
   commandViewSwitchHTML() {
     const modes = [
       { key: 'details', label: 'Details' },
-      { key: 'map', label: 'Map' }
+      { key: 'map', label: 'Map' },
+      { key: 'tickets', label: 'Tickets' }
     ];
     return (
       '<div class="ws-cmd-view-switch" role="group" aria-label="Workspace view">' +
@@ -913,9 +966,63 @@ export class WorkspaceCommandView {
         'tools',
         'Open tools: MCP, skills, plugins, and find tools'
       ) +
+      // Tickets is the canonical destination for durable workspace work. The
+      // count is loaded asynchronously (see refreshTicketCount) rather than
+      // read from page.tasks, because Ticket state is server-authoritative and
+      // deriving a count from legacy task status would be the exact inference
+      // this feature exists to remove (FR-7, FR-101).
+      this.statBoxHTML(
+        this.ticketCountLabel(),
+        'Tickets',
+        'tickets',
+        'View tickets: backlog, ready, in progress, review, and done'
+      ) +
       '</div>' +
       '</header>'
     );
+  }
+
+  /** The Tickets stat value; an em dash until the real count arrives. */
+  ticketCountLabel() {
+    return typeof this.ticketCount === 'number' ? String(this.ticketCount) : '–';
+  }
+
+  /**
+   * Fetches the workspace's ticket count and paints it into the stat tile in
+   * place. It updates only the tile's value node rather than re-rendering the
+   * command view, so an in-flight count can never clobber an open modal or
+   * reset the user's scroll position.
+   */
+  async refreshTicketCount() {
+    // While the Tickets view is open, the view itself is the count: it shows
+    // "N tickets" from the fetch it just made. Counting again here would mean
+    // two list requests per render for one number the user can already read.
+    // Leaving the view re-renders, which refreshes the tile.
+    if (this.viewMode === 'tickets') return;
+    const tickets = typeof window !== 'undefined' ? window.WorkspaceHubTickets : null;
+    const studioId = this.workspaceId();
+    if (!tickets || !studioId) return;
+    // render() runs many times while a workspace page boots as data arrives,
+    // and each pass lands here. Without this, one page load issues a dozen
+    // identical list requests for a single number. One in flight is enough;
+    // the next render paints whatever it resolves to.
+    if (this.ticketCountInFlight) return;
+    this.ticketCountInFlight = true;
+    try {
+      const result = await tickets.api.list(studioId);
+      this.ticketCount = result.count;
+    } catch (_error) {
+      // A failed count leaves the placeholder rather than showing a wrong
+      // number; the Tickets view surfaces the real error when opened.
+      return;
+    } finally {
+      // Always clear, including on the failure path — a stuck flag would
+      // silently retire the count for the rest of the session.
+      this.ticketCountInFlight = false;
+    }
+    if (!this.container || typeof this.container.querySelector !== 'function') return;
+    const tile = this.container.querySelector('[data-cmd-section="tickets"] .ws-v');
+    if (tile) tile.textContent = this.ticketCountLabel();
   }
 
   renderMissionPanel() {
@@ -1080,20 +1187,28 @@ export class WorkspaceCommandView {
     const mode = this.opsModeLabel();
     const stats = this.computeStats();
 
+    // Tickets renders NOTHING inside this container. Its surface is real DOM
+    // with bound listeners living beside the container, and this container is
+    // rebuilt with innerHTML on every render — which is exactly why the Board
+    // and config panels have to be relocated in and out. Keeping Tickets
+    // outside avoids that dance entirely, and with it the orphaning risk of
+    // forgetting to restore a moved node.
     const body =
-      this.viewMode === 'map'
-        ? this.renderOperationsMap()
-        : '<div class="ws-cmd-layout">' +
-          '<main class="ws-cmd-main">' +
-          this.renderMissionPanel() +
-          '<section class="ws-cmd-garrison">' +
-          this.renderGarrison() +
-          '</section>' +
-          '</main>' +
-          '<aside class="ws-cmd-rail">' +
-          this.renderRail() +
-          '</aside>' +
-          '</div>';
+      this.viewMode === 'tickets'
+        ? ''
+        : this.viewMode === 'map'
+          ? this.renderOperationsMap()
+          : '<div class="ws-cmd-layout">' +
+            '<main class="ws-cmd-main">' +
+            this.renderMissionPanel() +
+            '<section class="ws-cmd-garrison">' +
+            this.renderGarrison() +
+            '</section>' +
+            '</main>' +
+            '<aside class="ws-cmd-rail">' +
+            this.renderRail() +
+            '</aside>' +
+            '</div>';
 
     this.container.innerHTML = this.commandBarHTML(ws, name, mode, stats) + body;
 
@@ -1102,10 +1217,11 @@ export class WorkspaceCommandView {
     this.bindMissionPanel();
     if (this.viewMode === 'map') {
       this.bindOperationsMap();
-    } else {
+    } else if (this.viewMode !== 'tickets') {
       this.bindGarrison();
       this.bindRail();
     }
+    this.syncTicketsView();
     this.mountCommandTagInput();
     this.syncMissionPanel();
     this.syncSharedSurfaces();
@@ -1134,6 +1250,11 @@ export class WorkspaceCommandView {
         this.renderTaskDrawerBody();
       }
     }
+
+    // Paint the real ticket count over the placeholder. Fire-and-forget: the
+    // count is a readout, so a slow or failed fetch must never delay or break
+    // the rest of the command view.
+    Promise.resolve(this.refreshTicketCount()).catch(() => {});
 
     // The Backlog drawer survives full re-renders too — same pattern.
     if (this.backlogDrawerEl && this.container && this.container.appendChild) {
@@ -1324,7 +1445,14 @@ export class WorkspaceCommandView {
     root.addEventListener('click', event => {
       const sectionBtn = event.target.closest('[data-cmd-section]');
       if (!sectionBtn) return;
-      this.openStatModal(sectionBtn.getAttribute('data-cmd-section'), sectionBtn);
+      const section = sectionBtn.getAttribute('data-cmd-section');
+      // Tickets is a view mode, not a stat modal, so its tile switches the
+      // view rather than opening a panel over it.
+      if (section === 'tickets') {
+        this.setCommandViewMode('tickets', { focus: false });
+        return;
+      }
+      this.openStatModal(section, sectionBtn);
     });
   }
 
@@ -1560,6 +1688,43 @@ export class WorkspaceCommandView {
     this.syncConfigModalSurface();
     this.syncToolsModalSurface();
     this.mountTaskFilterBar();
+  }
+
+  /**
+   * Shows or hides the Tickets view.
+   *
+   * Tickets is a view MODE, not a relocated panel: its surface is real DOM
+   * with bound listeners that lives beside the command container and is simply
+   * shown or hidden. Nothing is moved, so nothing can be orphaned by a missed
+   * restore — the failure this page's shared-surface pattern invites.
+   */
+  syncTicketsView() {
+    if (typeof document === 'undefined') return;
+    const surface = document.getElementById('workspace-detail-tickets-surface');
+    if (!surface) return;
+
+    const active = this.viewMode === 'tickets';
+    surface.hidden = !active;
+    if (surface.style) surface.style.display = active ? '' : 'none';
+    if (!active) {
+      this.ticketsViewLoaded = false;
+      return;
+    }
+
+    // Load on ENTRY only. This runs from render(), which fires again on every
+    // workspace refresh — including the one a ticket transition triggers — so
+    // reloading unconditionally turned a single board move into five list
+    // fetches, throwing away the user's scroll and filter work each time. The
+    // Tickets module refreshes itself after its own mutations; entering the
+    // view is the only moment this owns.
+    if (this.ticketsViewLoaded) return;
+    const tickets = typeof window !== 'undefined' ? window.WorkspaceHubTickets : null;
+    if (!tickets) return;
+    this.ticketsViewLoaded = true;
+    tickets.init();
+    Promise.resolve(tickets.load()).catch(() => {
+      /* the module renders its own error state */
+    });
   }
 
   // Mount the live Workspace config surface into the open MCP/Skills stat modal, showing
@@ -4034,6 +4199,12 @@ export class WorkspaceCommandView {
       '</span></div>' +
       '<div class="ws-cmd-panel-tools">' +
       '<button type="button" class="ws-cmd-panel-action is-icon-only" data-cmd-backlog-add aria-label="Add to Backlog" title="Add to Backlog">+</button>' +
+      // Shortcut into the canonical destination, filtered to Backlog
+      // (tasks/prd-workspace-ticket-management.md FR-65, FR-80, FR-81).
+      // This panel is a COUNT and a way in; the Tickets destination is where
+      // backlog work is actually managed. Two editable backlog surfaces is
+      // how the Backlog and Task views drifted apart in the first place.
+      '<button type="button" class="ws-cmd-panel-action is-icon-only" data-cmd-open-tickets="backlog" aria-label="View backlog in Tickets" title="View backlog in Tickets">◉</button>' +
       '<button type="button" class="ws-cmd-panel-more" data-cmd-open-backlog-drawer aria-label="Open Backlog" title="Open Backlog">▸</button>' +
       '</div></div>' +
       '<div class="ws-cmd-panel-body">' +
@@ -4076,7 +4247,56 @@ export class WorkspaceCommandView {
     return this.backlogDrawerItems().find(it => String((it.task || it).id || '') === id) || null;
   }
 
+  /**
+   * RETIRED: the Backlog drawer was the second editable Backlog surface, and
+   * every way in now lands on the canonical Tickets destination instead
+   * (tasks/prd-workspace-ticket-management.md FR-81, FR-82).
+   *
+   * The redirect lives here rather than at each call site on purpose: every
+   * opener — the panel's ▸ button, a rail item, the Map's zone action, the
+   * "+N more" link, quick capture — already funnels through this method, so
+   * one change retires all of them and none can be missed.
+   *
+   * Its rendering and mutation methods below are now unreachable. They are
+   * left in place rather than deleted because removing the legacy Backlog
+   * surface wholesale is the separate breaking-change project the PRD
+   * describes; this change removes it from the user's reach, which is what
+   * FR-82 actually asks for.
+   */
   openBacklogDrawer(trigger, opts) {
+    const options = opts || {};
+    // Selecting a specific item opens that ticket; otherwise open the Backlog
+    // list. Either way the user ends up in the one place backlog work is
+    // managed.
+    const tickets = typeof window === 'undefined' ? null : window.WorkspaceHubTickets;
+    if (tickets && typeof tickets.setFilterState === 'function') {
+      this.setCommandViewMode('tickets', { focus: false });
+      const selectId = options.selectId ? String(options.selectId) : '';
+      void Promise.resolve(tickets.setFilterState('backlog'))
+        .then(() => {
+          if (selectId && typeof tickets.openDetail === 'function') {
+            return tickets.openDetail(this.workspaceId(), selectId);
+          }
+          // An "Add to Backlog" affordance asked to CAPTURE, so land the user
+          // in the create form already typing rather than in a list.
+          if (options.openCapture && typeof tickets.focusCreate === 'function') {
+            tickets.focusCreate('backlog');
+          }
+          return undefined;
+        })
+        .catch(() => {
+          /* the tickets surface renders its own error state */
+        });
+      return;
+    }
+
+    // No canonical surface available (the module failed to load): fall through
+    // to the legacy drawer rather than leaving the button dead.
+    this.openLegacyBacklogDrawer(trigger, options);
+  }
+
+  /** The pre-Ticket Backlog drawer. Reachable only as a fallback; see above. */
+  openLegacyBacklogDrawer(trigger, opts) {
     const options = opts || {};
     this.backlogDrawerTrigger = trigger || null;
     // Close the Map's Quest Board window so the drawer never opens beneath it
@@ -7310,6 +7530,14 @@ export class WorkspaceCommandView {
         this.openBacklogDrawer(backlogAddBtn, { openCapture: true });
         return;
       }
+      // Map-window count shortcuts into the Tickets destination. The Details
+      // rail has its own handler in bindRail; both route through the same
+      // openTicketsFiltered so the two entry points cannot diverge.
+      const mapOpenTickets = event.target.closest('[data-cmd-open-tickets]');
+      if (mapOpenTickets) {
+        this.openTicketsFiltered(mapOpenTickets.getAttribute('data-cmd-open-tickets'));
+        return;
+      }
       const backlogDrawerBtn = event.target.closest('[data-cmd-open-backlog-drawer]');
       if (backlogDrawerBtn) {
         this.openBacklogDrawer(backlogDrawerBtn);
@@ -8574,6 +8802,14 @@ export class WorkspaceCommandView {
     const root = this.container && this.container.querySelector('.ws-cmd-rail');
     if (!root) return;
     root.addEventListener('click', event => {
+      // Count shortcuts into the canonical Tickets destination, filtered to
+      // one state (FR-65, FR-80, FR-81). Checked before the Backlog handlers
+      // below so a shortcut inside the Backlog panel is not swallowed by them.
+      const openTickets = event.target.closest('[data-cmd-open-tickets]');
+      if (openTickets) {
+        this.openTicketsFiltered(openTickets.getAttribute('data-cmd-open-tickets'));
+        return;
+      }
       const backlogAdd = event.target.closest('[data-cmd-backlog-add]');
       if (backlogAdd) {
         this.openBacklogDrawer(backlogAdd, { openCapture: true });
