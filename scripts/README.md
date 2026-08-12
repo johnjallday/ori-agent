@@ -116,6 +116,7 @@ One command covers the human issue workflow:
 ./scripts/devops.sh backlog            # label: backlog
 ./scripts/devops.sh proposals          # label: feature-proposal
 ./scripts/devops.sh view <number>      # one Issue in full
+./scripts/devops.sh new <title>        # capture an Issue (confirm-gated)
 ./scripts/devops.sh answer <n> <text>  # post a comment (confirm-gated)
 ./scripts/devops.sh approve <n>        # add the approved label (confirm-gated)
 ./scripts/devops.sh unapprove <n>      # remove it again
@@ -127,23 +128,33 @@ are neither already covered by a proposal (`bundled`) nor already chosen
 and again as its members.
 
 In a terminal, the colorful picker uses `↑/↓` or `j/k` to select an Issue,
-`←/→` or `h/l` to change views, `Enter` to inspect it, `c` to answer its open
-questions, `o` to approve it, `r` to refresh, and `q` to quit. In a pipe or
-redirected shell, the line REPL remains available: use `1/a`, `2/d`, `3/b`,
-`4/f`, or `5/y` to change views, `v <number>` to inspect, `c <number> <text>` to
-answer, and `ok <number>` to approve. The default and `all` view include every
-author; closed Issues stay out of lists.
+`←/→` or `h/l` to change views, `Enter` to inspect it, `n` to capture a new
+Issue, `c` to answer its open questions, `o` to approve it, `r` to refresh, and
+`q` to quit. In a pipe or redirected shell, the line REPL remains available: use
+`1/a`, `2/d`, `3/b`, `4/f`, or `5/y` to change views, `v <number>` to inspect,
+`n <title>` to capture, `c <number> <text>` to answer, and `ok <number>` to
+approve. The default and `all` view include every author; closed Issues stay out
+of lists.
 
 Every row shows the Issue's `size:*` label in its own column, so a long label
 list can never truncate away the signal that says whether to open a PRD first.
 
-**Writes.** `answer`, `approve` and `unapprove` are the only mutating commands.
-Each prints what it will do and asks for confirmation; without a terminal they
-refuse unless given `--yes`, so a pipe can never post by accident. `approved` is
-the pipeline's single human gate — the grooming routine is forbidden from
-writing it — which is why setting it belongs here. Label changes use
-`--add-label`/`--remove-label` rather than a labels array write, so an Issue's
-other labels cannot be dropped.
+**Writes.** `new`, `answer`, `approve` and `unapprove` are the only mutating
+commands. Each prints what it will do and asks for confirmation; without a
+terminal they refuse unless given `--yes`, so a pipe can never write by
+accident.
+
+`new` exists because capture is supposed to take ten seconds — a title is
+enough, and the grooming routine researches and specs it on its next run. **It
+deliberately applies no labels.** Adding `backlog` here would skip the spec step
+the whole pipeline is built around, and `needs-decision` would assert a spec
+exists when none does. Titles are passed through verbatim, so an ampersand stays
+an ampersand rather than becoming a literal `&amp;`.
+
+`approved` is the pipeline's single human gate — the grooming routine is
+forbidden from writing it — which is why setting it belongs here. Label changes
+use `--add-label`/`--remove-label` rather than a labels array write, so an
+Issue's other labels cannot be dropped.
 
 One-shot and line-REPL views are direct `gh issue list` calls. The terminal
 picker fetches the complete open-Issue index once, then filters it locally until

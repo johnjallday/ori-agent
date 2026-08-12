@@ -167,6 +167,9 @@ case "$1 $2" in
   "issue comment")
     printf 'commented on #%s\n' "$3"
     ;;
+  "issue create")
+    printf 'https://github.com/johnjallday/ori-agent/issues/999\n'
+    ;;
   "issue edit")
     printf 'edited #%s\n' "$3"
     ;;
@@ -279,6 +282,38 @@ assert_no_github "an unconfirmed approve"
 "$script" answer 334 "1B, 2A" --yes > /dev/null
 assert_call $'CALL\tissue\tcomment\t334\t--body\t1B, 2A'
 
+# Capture is confirm-gated like every other write.
+: > "$gh_calls"
+status=0
+"$script" new "Map zoom is jumpy" < /dev/null > /dev/null 2>&1 || status=$?
+if [[ "$status" -ne 2 ]]; then
+  printf 'unconfirmed new exited %s, want 2\n' "$status" >&2
+  exit 1
+fi
+assert_no_github "an unconfirmed new"
+
+# A multi-word title stays ONE argument, and the Issue is created with no
+# labels: a raw capture must reach the grooming routine unlabelled, or it skips
+# the spec step the pipeline is built around.
+: > "$gh_calls"
+"$script" new "Map zoom is jumpy" --yes > "$fixture_root/new-output"
+assert_call $'CALL\tissue\tcreate\t--title\tMap zoom is jumpy\t--body\t'
+grep -Fq "issues/999" "$fixture_root/new-output"
+if grep -Eq -- '--label|backlog|needs-decision' "$gh_calls"; then
+  printf 'capture applied a label: %s\n' "$(cat "$gh_calls")" >&2
+  exit 1
+fi
+
+: > "$gh_calls"
+"$script" new "Map zoom is jumpy" --body "happens at 30% zoom" --yes > /dev/null
+assert_call $'CALL\tissue\tcreate\t--title\tMap zoom is jumpy\t--body\thappens at 30% zoom'
+
+# An ampersand must survive verbatim; HTML-escaping it here would leave a
+# literal &amp; in the Issue title forever.
+: > "$gh_calls"
+"$script" new "Fit All & zoom floor" --yes > /dev/null
+assert_call $'CALL\tissue\tcreate\t--title\tFit All & zoom floor\t--body\t'
+
 # approved is toggled with --add-label/--remove-label, never a labels array
 # write, so the Issue's other labels cannot be dropped.
 : > "$gh_calls"
@@ -295,7 +330,7 @@ if grep -Eq -- '--add-label[[:space:]]*$|labels' "$gh_calls"; then
 fi
 
 # Invalid invocations fail before contacting GitHub.
-for invalid in "view" "view nope" "view 0" "view 334 extra" "all extra" "ready extra" "unknown" "answer" "answer 334" "answer nope text" "approve" "approve nope" "approve 334 extra"; do
+for invalid in "view" "view nope" "view 0" "view 334 extra" "all extra" "ready extra" "unknown" "answer" "answer 334" "answer nope text" "approve" "approve nope" "approve 334 extra" "new" "new --yes" "new title --body"; do
   : > "$gh_calls"
   status=0
   # Intentional word splitting turns each fixture into an argument vector.

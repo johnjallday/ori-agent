@@ -39,6 +39,7 @@ Usage:
   ./scripts/devops.sh backlog
   ./scripts/devops.sh proposals
   ./scripts/devops.sh view <issue-number>
+  ./scripts/devops.sh new <title...> [--body <text>] [--yes]
   ./scripts/devops.sh answer <issue-number> <text...> [--yes]
   ./scripts/devops.sh approve <issue-number> [--yes]
   ./scripts/devops.sh unapprove <issue-number> [--yes]
@@ -51,14 +52,16 @@ One-shot commands print their result and exit.
 Issues that are neither already covered by a proposal (`bundled`) nor already
 chosen (`approved`).
 
-answer/approve/unapprove write to GitHub. They prompt for confirmation on a
-terminal, and require --yes when stdin is not a terminal.
+new/answer/approve/unapprove write to GitHub. They prompt for confirmation on a
+terminal, and require --yes when stdin is not a terminal. A new Issue is created
+with no labels - capture takes ten seconds and the grooming routine specs it.
 EOF
 }
 
 print_menu() {
   printf '\n%s\n' \
-    "[1/a] All  [2/d] Needs my decision  [3/b] Backlog  [4/f] Proposals  [5/y] Ready  [v #] View  [c #] Answer  [ok #] Approve  [q] Quit"
+    "[1/a] All  [2/d] Needs my decision  [3/b] Backlog  [4/f] Proposals  [5/y] Ready" \
+    "[v #] View  [n title] New  [c # text] Answer  [ok #] Approve  [q] Quit"
 }
 
 # Labels arrive from `gh` as a ", "-joined string. Split on commas and trim so a
@@ -250,6 +253,53 @@ answer_issue() {
   gh issue comment "$number" --body "$body"
 }
 
+# Capture is meant to take ten seconds: a title is enough, and the grooming
+# routine researches the rest on its next run. The new Issue therefore carries
+# NO labels - applying `backlog` here would skip the spec step the whole
+# pipeline is built around, and `needs-decision` would assert a spec exists.
+create_issue() {
+  local assume_yes=0 expecting_body=0
+  local -a rest=()
+  local argument title body=""
+
+  for argument in "$@"; do
+    if [[ "$expecting_body" -eq 1 ]]; then
+      body="$argument"
+      expecting_body=0
+      continue
+    fi
+    case "$argument" in
+      --yes) assume_yes=1 ;;
+      --body) expecting_body=1 ;;
+      *) rest+=("$argument") ;;
+    esac
+  done
+
+  if [[ "$expecting_body" -eq 1 ]]; then
+    printf '%s\n' "--body requires text" >&2
+    return 2
+  fi
+  if [[ "${#rest[@]}" -eq 0 ]]; then
+    printf '%s\n' "new requires a title" >&2
+    return 2
+  fi
+  title="${rest[*]}"
+  if [[ -z "${title// /}" ]]; then
+    printf '%s\n' "new requires a non-empty title" >&2
+    return 2
+  fi
+
+  printf '\nWill create an Issue titled:\n  %s\n' "$title"
+  if [[ -n "$body" ]]; then
+    printf 'with body:\n  %s\n' "$body"
+  fi
+  printf 'It gets no labels; the grooming routine specs and triages it next run.\n'
+  confirm_write "Create this Issue?" "$assume_yes" || return $?
+  # Pass the title through verbatim. GitHub stores it as given, so escaping an
+  # ampersand here would leave a literal `&amp;` in the title forever.
+  gh issue create --title "$title" --body "$body"
+}
+
 set_approved() {
   local action="$1"
   shift
@@ -314,6 +364,9 @@ run_one_shot() {
       ;;
     answer)
       answer_issue "$@"
+      ;;
+    new|create)
+      create_issue "$@"
       ;;
     approve)
       set_approved approve "$@"
@@ -529,7 +582,7 @@ render_picker() {
   fi
 
   printf '\n'
-  style '2' '↑/↓ or j/k select  •  ←/→ or h/l change view  •  Enter open  •  c answer  •  o approve  •  r refresh  •  q quit'
+  style '2' '↑/↓ or j/k select  •  ←/→ or h/l change view  •  Enter open  •  n new  •  c answer  •  o approve  •  r refresh  •  q quit'
   printf '\n'
 }
 
@@ -588,6 +641,19 @@ prompt_approve_issue() {
   set_approved approve "$issue_number"
 }
 
+prompt_create_issue() {
+  local title
+
+  printf 'Capture a new Issue. A title is enough; empty line cancels.\n'
+  printf 'title> '
+  IFS= read -r title || return 0
+  if [[ -z "${title// /}" ]]; then
+    printf 'Cancelled.\n'
+    return 0
+  fi
+  create_issue "$title"
+}
+
 run_picker() {
   local filter_index=0 selected_index=0 count key reload
   enter_picker_screen
@@ -637,6 +703,12 @@ run_picker() {
           load_picker_index || true
           apply_picker_filter "${picker_filters[$filter_index]}"
         fi
+        ;;
+      n)
+        # Capture does not need a selected row, so it works on an empty list.
+        with_normal_terminal prompt_create_issue
+        load_picker_index || true
+        apply_picker_filter "${picker_filters[$filter_index]}"
         ;;
       ''|$'\r'|$'\n')
         if [[ "$count" -gt 0 ]]; then
@@ -747,6 +819,13 @@ while true; do
         continue
       fi
       view_issue "$argument"
+      ;;
+    n|new)
+      if [[ -z "$argument" ]]; then
+        printf '%s\n' "new requires a title" >&2
+        continue
+      fi
+      create_issue "$argument" ${extra:+"$extra"}
       ;;
     c|comment|answer)
       if [[ -z "$argument" || -z "$extra" ]]; then

@@ -51,20 +51,25 @@ one-shot commands expose the same views to scripts and agents.
 | `./scripts/devops.sh backlog` | reads open Issues labeled `backlog` |
 | `./scripts/devops.sh proposals` | reads open Issues labeled `feature-proposal` |
 | `./scripts/devops.sh view <n>` | reads one Issue in full |
+| `./scripts/devops.sh new <title>` | **writes** a new unlabelled Issue, confirm-gated |
 | `./scripts/devops.sh answer <n> <text>` | **writes** a comment, confirm-gated |
 | `./scripts/devops.sh approve <n>` / `unapprove <n>` | **writes** the `approved` label, confirm-gated |
 
 The script delegates directly to `gh issue list`, `gh issue view`,
-`gh issue comment` and `gh issue edit`. Its filters are literal GitHub labels,
-not Project columns, and every read is fresh.
+`gh issue create`, `gh issue comment` and `gh issue edit`. Its filters are
+literal GitHub labels, not Project columns, and every read is fresh.
 
-Reads never mutate. The three write commands exist because they are the two
-things only a human does in this pipeline: answering a spec's open questions,
-and setting `approved` — the single gate the grooming routine is forbidden from
-touching. They confirm before writing and refuse without a terminal unless given
-`--yes`. Everything else about an Issue's lifecycle — creating, closing,
-triaging, sizing, bundling — belongs to `gh issue create`, the grooming routine,
-or the PR that implements the work.
+Reads never mutate. The write commands exist because they are the three things
+only a human does in this pipeline: capturing an idea, answering a spec's open
+questions, and setting `approved` — the single gate the grooming routine is
+forbidden from touching. They confirm before writing and refuse without a
+terminal unless given `--yes`.
+
+`new` creates the Issue with **no labels**, on purpose: a raw ten-second capture
+has to reach the grooming routine untriaged, or it skips the spec step the
+pipeline is built around. Everything else about an Issue's lifecycle — triaging,
+sizing, bundling, closing — belongs to the grooming routine or to the PR that
+implements the work.
 
 Work selected from an Issue uses the Issue number at the front of its identity:
 

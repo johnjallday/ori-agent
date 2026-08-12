@@ -460,25 +460,27 @@ lists every open Issue before prompting for another view.
 ./scripts/devops.sh backlog            # label: backlog
 ./scripts/devops.sh proposals          # label: feature-proposal
 ./scripts/devops.sh view <number>      # one Issue in full
+./scripts/devops.sh new <title>        # capture, confirm-gated
 ./scripts/devops.sh answer <n> <text>  # comment, confirm-gated
 ./scripts/devops.sh approve <n>        # add `approved`, confirm-gated
 ~~~
 
 In a terminal, the colorful picker accepts `↑/↓` or `j/k` to select an Issue,
-`←/→` or `h/l` for those five list views, `Enter` to inspect it, `c` to answer
-its open questions, `o` to approve it, `r` to refresh, and `q` to quit. In a pipe
-or redirected shell, the line REPL accepts `1/a`, `2/d`, `3/b`, `4/f`, and `5/y`,
-plus `v <number>`, `c <number> <text>`, and `ok <number>`. Lists include every
-author and only open Issues. Filters are literal labels; no Project board or rank
-participates.
+`←/→` or `h/l` for those five list views, `Enter` to inspect it, `n` to capture a
+new Issue, `c` to answer its open questions, `o` to approve it, `r` to refresh,
+and `q` to quit. In a pipe or redirected shell, the line REPL accepts `1/a`,
+`2/d`, `3/b`, `4/f`, and `5/y`, plus `v <number>`, `n <title>`,
+`c <number> <text>`, and `ok <number>`. Lists include every author and only open
+Issues. Filters are literal labels; no Project board or rank participates.
 
-Reads never mutate. The write commands cover the two things only a human does
-here — answering a spec's open questions, and setting `approved`, the one label
-the grooming routine may never write. Both confirm first, and refuse without a
-terminal unless given `--yes`.
+Reads never mutate. The write commands cover the three things only a human does
+here — capturing an idea, answering a spec's open questions, and setting
+`approved`, the one label the grooming routine may never write. All confirm
+first, and refuse without a terminal unless given `--yes`. A captured Issue gets
+no labels: it must reach the grooming routine untriaged so the spec step runs.
 
-The command runs `gh issue list`, `gh issue view`, `gh issue comment`, or
-`gh issue edit` directly from its checkout.
+The command runs `gh issue list`, `gh issue view`, `gh issue create`,
+`gh issue comment`, or `gh issue edit` directly from its checkout.
 The terminal picker fetches the complete open-Issue index once and filters it
 locally until `r` refreshes it; it does not persist a cache, source `wt`, invoke
 the Herdr helper, or define a JSON contract. Agents that need structured data
