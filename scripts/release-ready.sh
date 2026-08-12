@@ -21,7 +21,7 @@
 set -euo pipefail
 
 # ── tunables (override via env) ───────────────────────────────────────────────
-MIN_PRS="${RELEASE_MIN_PRS:-5}"          # >= this many merged PRs since last tag → ready
+MIN_PRS="${RELEASE_MIN_PRS:-10}"         # >= this many merged PRs since last tag → ready
 BASE_BRANCH="${RELEASE_BASE_BRANCH:-dev}"
 FORCE_RELEASE="${FORCE_RELEASE:-false}"  # bypass the cadence threshold (CI-green still required)
 
