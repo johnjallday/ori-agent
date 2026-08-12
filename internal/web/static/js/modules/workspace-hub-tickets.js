@@ -1832,6 +1832,28 @@
     return load();
   }
 
+  /**
+   * Puts the cursor in the create form and preselects a capture state.
+   *
+   * This is where an "Add to Backlog" affordance from another surface lands:
+   * the user asked to capture something, so they should arrive typing rather
+   * than hunting for the field (FR-19, FR-80).
+   */
+  function focusCreate(state) {
+    init();
+    const wanted = String(state || '')
+      .trim()
+      .toLowerCase();
+    if (CAPTURE_STATES.includes(wanted) && typeof document !== 'undefined') {
+      const choice = document.querySelector(
+        `input[name="hubTicketCreateState"][value="${wanted}"]`
+      );
+      if (choice) choice.checked = true;
+    }
+    const title = view.elements.formTitle;
+    if (title && typeof title.focus === 'function') title.focus();
+  }
+
   /** Reflects the active state filters onto the chips, including aria-pressed. */
   function paintFilterChips() {
     const bar = view.elements.filterBar;
@@ -1868,6 +1890,7 @@
     transitionOptions,
     BOARD_COLUMNS,
     setFilterState,
+    focusCreate,
     // View surface, exported so the page's view toggle and realtime refresh
     // can drive it without reaching into module internals.
     init,

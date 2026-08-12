@@ -4232,7 +4232,56 @@ export class WorkspaceCommandView {
     return this.backlogDrawerItems().find(it => String((it.task || it).id || '') === id) || null;
   }
 
+  /**
+   * RETIRED: the Backlog drawer was the second editable Backlog surface, and
+   * every way in now lands on the canonical Tickets destination instead
+   * (tasks/prd-workspace-ticket-management.md FR-81, FR-82).
+   *
+   * The redirect lives here rather than at each call site on purpose: every
+   * opener — the panel's ▸ button, a rail item, the Map's zone action, the
+   * "+N more" link, quick capture — already funnels through this method, so
+   * one change retires all of them and none can be missed.
+   *
+   * Its rendering and mutation methods below are now unreachable. They are
+   * left in place rather than deleted because removing the legacy Backlog
+   * surface wholesale is the separate breaking-change project the PRD
+   * describes; this change removes it from the user's reach, which is what
+   * FR-82 actually asks for.
+   */
   openBacklogDrawer(trigger, opts) {
+    const options = opts || {};
+    // Selecting a specific item opens that ticket; otherwise open the Backlog
+    // list. Either way the user ends up in the one place backlog work is
+    // managed.
+    const tickets = typeof window === 'undefined' ? null : window.WorkspaceHubTickets;
+    if (tickets && typeof tickets.setFilterState === 'function') {
+      this.openStatModal('tickets', trigger || null);
+      const selectId = options.selectId ? String(options.selectId) : '';
+      void Promise.resolve(tickets.setFilterState('backlog'))
+        .then(() => {
+          if (selectId && typeof tickets.openDetail === 'function') {
+            return tickets.openDetail(this.workspaceId(), selectId);
+          }
+          // An "Add to Backlog" affordance asked to CAPTURE, so land the user
+          // in the create form already typing rather than in a list.
+          if (options.openCapture && typeof tickets.focusCreate === 'function') {
+            tickets.focusCreate('backlog');
+          }
+          return undefined;
+        })
+        .catch(() => {
+          /* the tickets surface renders its own error state */
+        });
+      return;
+    }
+
+    // No canonical surface available (the module failed to load): fall through
+    // to the legacy drawer rather than leaving the button dead.
+    this.openLegacyBacklogDrawer(trigger, options);
+  }
+
+  /** The pre-Ticket Backlog drawer. Reachable only as a fallback; see above. */
+  openLegacyBacklogDrawer(trigger, opts) {
     const options = opts || {};
     this.backlogDrawerTrigger = trigger || null;
     // Close the Map's Quest Board window so the drawer never opens beneath it
