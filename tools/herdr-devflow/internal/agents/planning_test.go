@@ -547,6 +547,48 @@ func TestExecuteIssuePlanRecreatesTheTabWhenTheRecordedOneIsClosed(t *testing.T)
 	}
 }
 
+// TestPlanningSessionCannotSeedOrOverrideFeatureHandoffKind proves AR18/AR31:
+// a planning session's fixed "codex" kind must never leak into an ordinary
+// feature handoff for a same-named feature. Feature handoff never reads
+// PlanningSessions at all, so this is true by construction; the test pins
+// that down as an explicit regression rather than an implicit property.
+func TestPlanningSessionCannotSeedOrOverrideFeatureHandoffKind(t *testing.T) {
+	t.Parallel()
+	devPath := t.TempDir()
+	client := newFakeHerdr(devPath)
+	store := newMemoryStore()
+
+	planner := newPlanningService(client, store, devPath, &fakeIssues{issue: readyIssue(342, "shared name", RoutePlanned)})
+	plan, err := planner.BuildIssuePlan(context.Background(), IssuePlanRequest{IssueNumber: 342, DevWorktreePath: devPath})
+	if err != nil {
+		t.Fatalf("BuildIssuePlan() error = %v", err)
+	}
+	if _, err := planner.ExecuteIssuePlan(context.Background(), plan); err != nil {
+		t.Fatalf("ExecuteIssuePlan() error = %v", err)
+	}
+	state, _ := store.Load()
+	if state.PlanningSessions["repo-123456:342"].Planner.Kind != "codex" {
+		t.Fatalf("fixture is invalid: expected a recorded codex planner, got %#v", state.PlanningSessions["repo-123456:342"])
+	}
+
+	// A feature happens to share the same slug the planning session derived.
+	// Its own handoff must still resolve to the configured default kind
+	// (claude), never the planning session's codex.
+	feature := newService(client, store, devPath)
+	result, err := feature.Handoff(context.Background(), HandoffRequest{FeatureName: plan.Slug, WorktreePath: devPath, Branch: "feature/bridge"})
+	if err != nil {
+		t.Fatalf("Handoff() error = %v", err)
+	}
+	if result.Primary.Kind != "claude" {
+		t.Fatalf("feature handoff kind = %q, want claude (the planning session's codex kind must not leak)", result.Primary.Kind)
+	}
+	after, _ := store.Load()
+	featureRecord := after.Features["repo-123456:"+plan.Slug]
+	if featureRecord.Handoff.PrimaryKind != "claude" {
+		t.Fatalf("stored feature handoff kind = %q, want claude", featureRecord.Handoff.PrimaryKind)
+	}
+}
+
 func TestPlanningBootstrapPromptNamesArtifactsForbidsImplementationAndOmitsIssueBody(t *testing.T) {
 	t.Parallel()
 	plan := IssuePlan{

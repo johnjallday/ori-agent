@@ -712,6 +712,7 @@ function wt_herd {
 function wt_plan_reset {
   typeset -g WT_PLAN_FEATURE="" WT_PLAN_BRANCH="" WT_PLAN_TARGET=""
   typeset -g WT_PLAN_DEV="" WT_PLAN_PRD="" WT_PLAN_TASKS="" WT_PLAN_TASKS_STATE="none"
+  typeset -g WT_PLAN_ISSUE_SNAPSHOT=""
   typeset -g WT_PLAN_KIND="" WT_PLAN_KIND_DISPLAY="" WT_PLAN_START_AGENT=1 WT_PLAN_COPY_DOCS=1 WT_PLAN_PROMPT=1
   typeset -g WT_PLAN_WORKSPACE="" WT_PLAN_WORKSPACE_STATE=""
 }
@@ -772,8 +773,17 @@ function wt_plan_render {
 
   if [[ -n "$WT_PLAN_PRD" ]]; then
     printf '  %-14s %s\n' "PRD" "$WT_PLAN_PRD"
+  elif (( WT_PLAN_COPY_DOCS )); then
+    # wt start selected a feature with a task list but no PRD (a
+    # size:quick/size:planned Issue plan): honest, never "ad-hoc" and never a
+    # PRD path that does not exist (AR28).
+    printf '  %-14s %s\n' "PRD" "${WT_C_DIM}none (task-list-sized)${WT_C_RESET}"
   else
     printf '  %-14s %s\n' "PRD" "${WT_C_DIM}none (ad-hoc)${WT_C_RESET}"
+  fi
+
+  if [[ -n "$WT_PLAN_ISSUE_SNAPSHOT" ]]; then
+    printf '  %-14s %s\n' "Issue snapshot" "$WT_PLAN_ISSUE_SNAPSHOT"
   fi
 
   case "$WT_PLAN_TASKS_STATE" in
@@ -840,10 +850,15 @@ function wt_start_execute {
   fi
   WT_PLAN_TARGET="$WT_PROVISIONED_TARGET"
 
-  if (( WT_PLAN_COPY_DOCS )) && [[ -n "$WT_PLAN_PRD" ]]; then
-    echo "Copying PRD and task list into new worktree..."
+  # Each planning artifact is copied independently of the others (AR29): a
+  # task-list-only feature has no PRD to gate the copy on, and an Issue
+  # snapshot from `wt plan` is copied whenever one exists, regardless of
+  # whether a PRD or task list accompanies it.
+  if (( WT_PLAN_COPY_DOCS )) && [[ -n "$WT_PLAN_PRD" || -n "$WT_PLAN_ISSUE_SNAPSHOT" || "$WT_PLAN_TASKS_STATE" != "none" ]]; then
+    echo "Copying planning documents into new worktree..."
     mkdir -p "$WT_PLAN_TARGET/tasks"
-    cp "$WT_PLAN_PRD" "$WT_PLAN_TARGET/tasks/"
+    [[ -n "$WT_PLAN_PRD" ]] && cp "$WT_PLAN_PRD" "$WT_PLAN_TARGET/tasks/"
+    [[ -n "$WT_PLAN_ISSUE_SNAPSHOT" ]] && cp "$WT_PLAN_ISSUE_SNAPSHOT" "$WT_PLAN_TARGET/tasks/"
     if [[ "$WT_PLAN_TASKS_STATE" == "present" && -n "$WT_PLAN_TASKS" ]]; then
       cp "$WT_PLAN_TASKS" "$WT_PLAN_TARGET/tasks/"
     elif [[ "$WT_PLAN_TASKS_STATE" == "generate" ]]; then
@@ -1011,9 +1026,14 @@ function wt_dispatch {
     wt_repl
     ;;
   start)
-    # PRD-driven creation, in four phases: resolve → plan → confirm → execute.
-    # Only wt_start_execute mutates anything, so declining below leaves Git and
-    # Herdr exactly as they were.
+    # PRD-and/or-task-list-driven creation, in four phases: resolve → plan →
+    # confirm → execute. Only wt_start_execute mutates anything, so declining
+    # below leaves Git and Herdr exactly as they were.
+    #
+    # A feature is startable with a PRD, a task list, or both: `wt plan`
+    # produces task-list-only features for size:quick/size:planned Issues (no
+    # PRD at all), and those are exactly as startable as the original
+    # PRD-driven shape.
     wt_color_init
     wt_plan_reset
 
@@ -1033,16 +1053,26 @@ function wt_dispatch {
     # local_options reverts it on return so the caller's shell is untouched.
     setopt local_options bareglobqual
 
-    local -a prd_files
-    local f
+    # Candidate features are the union of prd-*.md and tasks-*.md stems, so a
+    # task-list-only feature is listed exactly once alongside PRD-driven ones
+    # (FR-26).
+    local -a candidate_features
+    local f feat
     for f in "$tasks_dir"/prd-*.md(N); do
-      prd_files+=("${f:t}")
+      feat="${f:t}"; feat="${feat#prd-}"; feat="${feat%.md}"
+      candidate_features+=("$feat")
+    done
+    for f in "$tasks_dir"/tasks-*.md(N); do
+      feat="${f:t}"; feat="${feat#tasks-}"; feat="${feat%.md}"
+      if (( ! ${candidate_features[(Ie)$feat]} )); then
+        candidate_features+=("$feat")
+      fi
     done
 
     local chosen no_herdr primary_kind assume_yes
     if ! wt_parse_create_flags "wt start" \
       "Usage: wt start [feature] [--kind KIND] [--no-herdr] [--yes]" \
-      "PRD/feature name" "${@:2}"; then
+      "PRD/task-list feature name" "${@:2}"; then
       return 1
     fi
     chosen="$WT_PARSE_NAME"
@@ -1064,24 +1094,33 @@ function wt_dispatch {
     fi
 
     if [[ -z "$chosen" ]]; then
-      if [[ ${#prd_files[@]} -eq 0 ]]; then
-        echo "No PRDs found in $tasks_dir (expected prd-*.md)."
-        echo "Create a PRD there first, then re-run 'wt start'."
+      if [[ ${#candidate_features[@]} -eq 0 ]]; then
+        echo "No PRDs or task lists found in $tasks_dir (expected prd-*.md or tasks-*.md)."
+        echo "Create one there first (or run 'wt plan --issue <N>'), then re-run 'wt start'."
         echo "For work that does not need one: wt new <name>"
         return 1
       fi
       if ! wt_plan_is_interactive; then
-        echo "wt start needs a PRD name when there is no terminal to choose from."
+        echo "wt start needs a feature name when there is no terminal to choose from."
         echo "Usage: wt start <feature> [--kind KIND] [--no-herdr]"
         return 1
       fi
-      echo "Select a PRD to start (from ${WT_C_CYAN}$tasks_dir${WT_C_RESET}):"
+      echo "Select a feature to start (from ${WT_C_CYAN}$tasks_dir${WT_C_RESET}):"
       local i
-      for i in {1..${#prd_files[@]}}; do
-        local feat="${prd_files[$i]#prd-}"; feat="${feat%.md}"
-        local has_tasks="  ${WT_C_DIM}(no task list yet)${WT_C_RESET}"
-        [[ -f "$tasks_dir/tasks-$feat.md" ]] && has_tasks=""
-        echo "  $i) ${prd_files[$i]}${has_tasks}"
+      for i in {1..${#candidate_features[@]}}; do
+        feat="${candidate_features[$i]}"
+        local row_label starter_note=""
+        if [[ -f "$tasks_dir/prd-$feat.md" ]]; then
+          row_label="prd-$feat.md"
+        else
+          row_label="tasks-$feat.md  ${WT_C_DIM}(task-list-sized, no PRD)${WT_C_RESET}"
+        fi
+        if [[ -f "$tasks_dir/tasks-$feat.md" ]] && grep -qF 'ori-devflow: planning-starter' "$tasks_dir/tasks-$feat.md" 2>/dev/null; then
+          starter_note="  ${WT_C_YELLOW}(planning incomplete)${WT_C_RESET}"
+        elif [[ ! -f "$tasks_dir/tasks-$feat.md" && -f "$tasks_dir/prd-$feat.md" ]]; then
+          starter_note="  ${WT_C_DIM}(no task list yet)${WT_C_RESET}"
+        fi
+        echo "  $i) ${row_label}${starter_note}"
       done
       echo "  q) Quit"
       echo
@@ -1093,31 +1132,50 @@ function wt_dispatch {
       if [[ "$choice" == "q" || -z "$choice" ]]; then
         return 0
       fi
-      if ! [[ "$choice" =~ ^[0-9]+$ ]] || (( choice < 1 || choice > ${#prd_files[@]} )); then
+      if ! [[ "$choice" =~ ^[0-9]+$ ]] || (( choice < 1 || choice > ${#candidate_features[@]} )); then
         echo "Invalid choice"
         return 1
       fi
-      chosen="${prd_files[$choice]}"
+      chosen="${candidate_features[$choice]}"
     else
-      # Accept "prd-foo.md", "prd-foo", or "foo".
-      [[ "$chosen" == *.md ]] || chosen="$chosen.md"
-      [[ "$chosen" == prd-* ]] || chosen="prd-$chosen"
-      if [[ ! -f "$tasks_dir/$chosen" ]]; then
-        echo "PRD not found: $tasks_dir/$chosen"
+      # Accept "prd-foo.md", "tasks-foo.md", "foo.md", or plain "foo".
+      chosen="${chosen%.md}"
+      chosen="${chosen#prd-}"
+      chosen="${chosen#tasks-}"
+      if [[ ! -f "$tasks_dir/prd-$chosen.md" && ! -f "$tasks_dir/tasks-$chosen.md" ]]; then
+        echo "No PRD or task list found for '$chosen' in $tasks_dir"
+        echo "  expected prd-$chosen.md and/or tasks-$chosen.md"
         return 1
       fi
     fi
 
-    WT_PLAN_FEATURE="${chosen#prd-}"; WT_PLAN_FEATURE="${WT_PLAN_FEATURE%.md}"
+    WT_PLAN_FEATURE="$chosen"
     WT_PLAN_BRANCH="feature/$WT_PLAN_FEATURE"
     WT_PLAN_TARGET="$(wt_new_worktree_dir)/$WT_PLAN_FEATURE"
-    WT_PLAN_PRD="$tasks_dir/$chosen"
     WT_PLAN_COPY_DOCS=1
 
+    if [[ -f "$tasks_dir/prd-$WT_PLAN_FEATURE.md" ]]; then
+      WT_PLAN_PRD="$tasks_dir/prd-$WT_PLAN_FEATURE.md"
+    fi
+    if [[ -f "$tasks_dir/issue-$WT_PLAN_FEATURE.md" ]]; then
+      WT_PLAN_ISSUE_SNAPSHOT="$tasks_dir/issue-$WT_PLAN_FEATURE.md"
+    fi
+
     if [[ -f "$tasks_dir/tasks-$WT_PLAN_FEATURE.md" ]]; then
+      # AR27: a task list still carrying the wt-plan starter marker is not a
+      # real plan yet. Refuse to create an implementation worktree until
+      # Codex has replaced it — implementing against the starter would mean
+      # coding against instructions that say "read the Issue and write the
+      # real plan", not a plan at all.
+      if grep -qF 'ori-devflow: planning-starter' "$tasks_dir/tasks-$WT_PLAN_FEATURE.md" 2>/dev/null; then
+        echo "${WT_C_YELLOW}$WT_PLAN_FEATURE's task list is still a planning starter.${WT_C_RESET}"
+        echo "Codex has not finished planning tasks/tasks-$WT_PLAN_FEATURE.md yet."
+        echo "Finish planning first, then re-run 'wt start $WT_PLAN_FEATURE'."
+        return 1
+      fi
       WT_PLAN_TASKS="$tasks_dir/tasks-$WT_PLAN_FEATURE.md"
       WT_PLAN_TASKS_STATE="present"
-    elif wt_plan_is_interactive; then
+    elif [[ -n "$WT_PLAN_PRD" ]] && wt_plan_is_interactive; then
       # Previously this printed a note and carried on, so a feature could get
       # all the way to a running agent before anyone noticed it had no plan.
       echo

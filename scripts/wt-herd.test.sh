@@ -235,6 +235,73 @@ rg -q "will be created as the agent's first task" "$fixture_root/generate-output
 rg -q "replace this file with a real task" "$target_root/tasks/tasks-planless.md"
 rg -q "^- \[ \] 1\.1 " "$target_root/tasks/tasks-planless.md"
 
+# AR26-AR29: wt start also accepts a feature that has ONLY a task list — no
+# PRD at all — the exact shape `wt plan` produces for size:quick/planned
+# Issues. A task list still carrying the wt-plan starter marker is refused
+# (AR27); a real one is accepted, rendered honestly as task-list-sized
+# (AR28), and its Issue snapshot is copied independently of everything else
+# (AR29).
+print -r -- '# Tasks: onlytasks
+
+<!-- ori-devflow: planning-starter; do not implement until Codex replaces this file -->
+
+- [ ] 1.1 Read the Issue and generate the real tasks.' > "$dev_root/tasks/tasks-onlytasks.md"
+
+rm -f "$fixture_root/decline-mutations"
+starter_refused_status=0
+wt start onlytasks --yes > "$fixture_root/starter-refused-output" 2>&1 || starter_refused_status=$?
+[[ "$starter_refused_status" == "1" ]]
+rg -q "still a planning starter" "$fixture_root/starter-refused-output"
+[[ ! -f "$fixture_root/decline-mutations" ]]
+
+# Once Codex has replaced the starter with a real, detailed task list, wt
+# start accepts it with no PRD at all.
+print -r -- '# Tasks: onlytasks
+
+- [ ] 1.1 Real work, no PRD needed.' > "$dev_root/tasks/tasks-onlytasks.md"
+print -r -- '# Issue #555: onlytasks
+
+<!-- ori-devflow: issue-snapshot; issue=555 -->
+
+body' > "$dev_root/tasks/issue-onlytasks.md"
+
+rm -f "$fixture_root/decline-mutations"
+wt start onlytasks --yes > "$fixture_root/tasklist-only-output" 2>&1
+rg -q "PRD .*none \(task-list-sized\)" "$fixture_root/tasklist-only-output"
+if rg -q "PRD .*none \(ad-hoc\)" "$fixture_root/tasklist-only-output"; then
+  print -r -- "a task-list-only feature was rendered as ad-hoc" >&2
+  exit 1
+fi
+rg -q "Issue snapshot .*issue-onlytasks.md" "$fixture_root/tasklist-only-output"
+rg -q "provision" "$fixture_root/decline-mutations"
+rg -q "handoff --feature onlytasks --worktree $target_root --branch feature/onlytasks" "$fixture_root/decline-mutations"
+[[ -f "$target_root/tasks/tasks-onlytasks.md" ]]
+[[ -f "$target_root/tasks/issue-onlytasks.md" ]]
+[[ ! -f "$target_root/tasks/prd-onlytasks.md" ]]
+rg -q "Real work, no PRD needed" "$target_root/tasks/tasks-onlytasks.md"
+
+# Named resolution accepts "onlytasks", "tasks-onlytasks", and
+# "tasks-onlytasks.md" interchangeably — each reaches the same confirmation
+# summary instead of "No PRD or task list found". Declining costs nothing,
+# so no worktree needs to be re-provisioned between these checks.
+for alias_name in tasks-onlytasks tasks-onlytasks.md; do
+  alias_output="$fixture_root/alias-output"
+  wt start "$alias_name" <<< "n" > "$alias_output" 2>&1
+  if rg -q "No PRD or task list found" "$alias_output"; then
+    print -r -- "wt start did not resolve the alias '$alias_name'" >&2
+    exit 1
+  fi
+  rg -q "Feature .*onlytasks" "$alias_output"
+done
+
+# Guided (bare) wt start lists a task-list-only feature exactly once,
+# distinguished from PRD-driven ones, without duplicating it.
+wt start <<< "q" > "$fixture_root/guided-listing-output" 2>&1
+rg -q "tasks-onlytasks.md" "$fixture_root/guided-listing-output"
+rg -q "task-list-sized, no PRD" "$fixture_root/guided-listing-output"
+onlytasks_rows="$(rg -c "tasks-onlytasks.md" "$fixture_root/guided-listing-output")"
+[[ "$onlytasks_rows" == "1" ]]
+
 # FR-22/23: wt new runs the same flow. The only differences allowed are the
 # planning documents and the bootstrap prompt.
 rm -f "$fixture_root/decline-mutations"
@@ -293,7 +360,7 @@ parser_cases=(
   "start x --kind a --kind b|wt start accepts --kind only once"
   "start --bogus|Unknown wt start option: --bogus"
   "start --bogus|Usage: wt start [feature] [--kind KIND] [--no-herdr] [--yes]"
-  "start one two|wt start accepts one PRD/feature name (got: one and two)"
+  "start one two|wt start accepts one PRD/task-list feature name (got: one and two)"
   "start x --kind codex --no-herdr|wt start --kind cannot be combined with --no-herdr"
   "new x --kind|wt new --kind requires a Herdr agent kind"
   "new x --kind|Usage: wt new <name> [--kind KIND] [--no-herdr] [--yes]"
