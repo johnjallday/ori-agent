@@ -1717,20 +1717,35 @@
    */
   async function openDeepLinkedTicket() {
     if (typeof window === 'undefined' || !window.location) return;
-    let ticketId = '';
+    let params;
     try {
-      ticketId = new URLSearchParams(window.location.search).get('ticket') || '';
+      params = new URLSearchParams(window.location.search);
     } catch {
       return;
     }
-    if (!ticketId) return;
+
+    const ticketId = params.get('ticket') || '';
+    // `?tickets=<state>` opens the destination filtered to one state — the
+    // shape every "Backlog", "Needs review", or count shortcut links to, so a
+    // panel showing a number can hand the user the list behind it (FR-65,
+    // FR-80, FR-81).
+    const stateFilter = (params.get('tickets') || '').trim().toLowerCase();
 
     const studioId = currentStudioId();
     if (!studioId) return;
+    if (!ticketId && !stateFilter) return;
+
+    if (stateFilter && stateFilter !== 'all') {
+      if (TICKET_STATES.some(state => state.id === stateFilter)) {
+        view.filters.states = [stateFilter];
+        paintFilterChips();
+      }
+    }
 
     // Load the list first so closing detail returns to a populated view rather
     // than an empty one.
     await load();
+    if (!ticketId) return;
     try {
       await openDetail(studioId, ticketId);
     } catch {
@@ -1798,6 +1813,25 @@
     paintFilterChips();
   }
 
+  /**
+   * Applies one state filter and reloads — the entry point a count shortcut
+   * calls (FR-65, FR-80). Passing 'all' or nothing clears the filter.
+   *
+   * Exported rather than reached into: other surfaces drive the destination
+   * through this, so they cannot develop their own idea of what "the Backlog
+   * view" means.
+   */
+  function setFilterState(state) {
+    init();
+    const wanted = String(state || '')
+      .trim()
+      .toLowerCase();
+    view.filters.states =
+      wanted && wanted !== 'all' && TICKET_STATES.some(item => item.id === wanted) ? [wanted] : [];
+    paintFilterChips();
+    return load();
+  }
+
   /** Reflects the active state filters onto the chips, including aria-pressed. */
   function paintFilterChips() {
     const bar = view.elements.filterBar;
@@ -1833,6 +1867,7 @@
     stateMeta,
     transitionOptions,
     BOARD_COLUMNS,
+    setFilterState,
     // View surface, exported so the page's view toggle and realtime refresh
     // can drive it without reaching into module internals.
     init,

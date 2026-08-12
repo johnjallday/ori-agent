@@ -351,16 +351,33 @@ export class WorkspaceCommandView {
    */
   applyTicketDeepLink() {
     if (this._ticketDeepLinkApplied || typeof window === 'undefined') return;
-    let ticketId = '';
+    let params;
     try {
-      ticketId = new URLSearchParams(window.location.search).get('ticket') || '';
+      params = new URLSearchParams(window.location.search);
     } catch {
       return;
     }
-    if (!ticketId) return;
+    // Either shape opens the destination: `?ticket=<id>` for one ticket,
+    // `?tickets=<state>` for a filtered list behind a count.
+    if (!params.get('ticket') && !params.get('tickets')) return;
 
     this._ticketDeepLinkApplied = true;
     this.openStatModal('tickets', null);
+  }
+
+  /**
+   * Opens the Tickets destination filtered to one canonical state (FR-65,
+   * FR-80, FR-81).
+   *
+   * This is what a count shortcut does: a panel that shows "Backlog 3" hands
+   * the user the three tickets behind the number, in the surface where they
+   * are actually managed — rather than being a third place to manage them.
+   */
+  openTicketsFiltered(state, trigger) {
+    const tickets = typeof window === 'undefined' ? null : window.WorkspaceHubTickets;
+    this.openStatModal('tickets', trigger || null);
+    if (!tickets || typeof tickets.setFilterState !== 'function') return;
+    tickets.setFilterState(state);
   }
 
   applyBootURLState() {
@@ -4167,6 +4184,12 @@ export class WorkspaceCommandView {
       '</span></div>' +
       '<div class="ws-cmd-panel-tools">' +
       '<button type="button" class="ws-cmd-panel-action is-icon-only" data-cmd-backlog-add aria-label="Add to Backlog" title="Add to Backlog">+</button>' +
+      // Shortcut into the canonical destination, filtered to Backlog
+      // (tasks/prd-workspace-ticket-management.md FR-65, FR-80, FR-81).
+      // This panel is a COUNT and a way in; the Tickets destination is where
+      // backlog work is actually managed. Two editable backlog surfaces is
+      // how the Backlog and Task views drifted apart in the first place.
+      '<button type="button" class="ws-cmd-panel-action is-icon-only" data-cmd-open-tickets="backlog" aria-label="View backlog in Tickets" title="View backlog in Tickets">◉</button>' +
       '<button type="button" class="ws-cmd-panel-more" data-cmd-open-backlog-drawer aria-label="Open Backlog" title="Open Backlog">▸</button>' +
       '</div></div>' +
       '<div class="ws-cmd-panel-body">' +
@@ -7443,6 +7466,17 @@ export class WorkspaceCommandView {
         this.openBacklogDrawer(backlogAddBtn, { openCapture: true });
         return;
       }
+      // Map-window count shortcuts into the Tickets destination. The Details
+      // rail has its own handler in bindRail; both route through the same
+      // openTicketsFiltered so the two entry points cannot diverge.
+      const mapOpenTickets = event.target.closest('[data-cmd-open-tickets]');
+      if (mapOpenTickets) {
+        this.openTicketsFiltered(
+          mapOpenTickets.getAttribute('data-cmd-open-tickets'),
+          mapOpenTickets
+        );
+        return;
+      }
       const backlogDrawerBtn = event.target.closest('[data-cmd-open-backlog-drawer]');
       if (backlogDrawerBtn) {
         this.openBacklogDrawer(backlogDrawerBtn);
@@ -8710,6 +8744,14 @@ export class WorkspaceCommandView {
     const root = this.container && this.container.querySelector('.ws-cmd-rail');
     if (!root) return;
     root.addEventListener('click', event => {
+      // Count shortcuts into the canonical Tickets destination, filtered to
+      // one state (FR-65, FR-80, FR-81). Checked before the Backlog handlers
+      // below so a shortcut inside the Backlog panel is not swallowed by them.
+      const openTickets = event.target.closest('[data-cmd-open-tickets]');
+      if (openTickets) {
+        this.openTicketsFiltered(openTickets.getAttribute('data-cmd-open-tickets'), openTickets);
+        return;
+      }
       const backlogAdd = event.target.closest('[data-cmd-backlog-add]');
       if (backlogAdd) {
         this.openBacklogDrawer(backlogAdd, { openCapture: true });
