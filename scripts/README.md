@@ -106,30 +106,53 @@ Source it (don't execute) so `cd` affects your current shell.
 
 ### `scripts/devops.sh` — open Issues by workflow label
 
-One read-only command covers the human issue workflow:
+One command covers the human issue workflow:
 
 ```bash
-./scripts/devops.sh                 # list every open Issue, then start the REPL
-./scripts/devops.sh all             # every open Issue, one-shot
-./scripts/devops.sh decisions       # label: needs-decision
-./scripts/devops.sh backlog         # label: backlog
-./scripts/devops.sh proposals       # label: feature-proposal
-./scripts/devops.sh view <number>   # one Issue in full
+./scripts/devops.sh                    # list every open Issue, then start the REPL
+./scripts/devops.sh ready              # what you can actually pick up now
+./scripts/devops.sh all                # every open Issue, one-shot
+./scripts/devops.sh decisions          # label: needs-decision
+./scripts/devops.sh backlog            # label: backlog
+./scripts/devops.sh proposals          # label: feature-proposal
+./scripts/devops.sh view <number>      # one Issue in full
+./scripts/devops.sh answer <n> <text>  # post a comment (confirm-gated)
+./scripts/devops.sh approve <n>        # add the approved label (confirm-gated)
+./scripts/devops.sh unapprove <n>      # remove it again
 ```
 
+`ready` is the view worth living in: feature proposals plus backlog Issues that
+are neither already covered by a proposal (`bundled`) nor already chosen
+(`approved`). It exists so the same work never appears twice — once as a bundle
+and again as its members.
+
 In a terminal, the colorful picker uses `↑/↓` or `j/k` to select an Issue,
-`←/→` or `h/l` to change views, `Enter` to inspect it, `r` to refresh, and `q`
-to quit. In a pipe or redirected shell, the line REPL remains available: use
-`1/a`, `2/d`, `3/b`, or `4/f` to change views and `v <number>` to inspect an
-Issue. The default and `all` view include every author; closed Issues stay out
-of lists.
+`←/→` or `h/l` to change views, `Enter` to inspect it, `c` to answer its open
+questions, `o` to approve it, `r` to refresh, and `q` to quit. In a pipe or
+redirected shell, the line REPL remains available: use `1/a`, `2/d`, `3/b`,
+`4/f`, or `5/y` to change views, `v <number>` to inspect, `c <number> <text>` to
+answer, and `ok <number>` to approve. The default and `all` view include every
+author; closed Issues stay out of lists.
+
+Every row shows the Issue's `size:*` label in its own column, so a long label
+list can never truncate away the signal that says whether to open a PRD first.
+
+**Writes.** `answer`, `approve` and `unapprove` are the only mutating commands.
+Each prints what it will do and asks for confirmation; without a terminal they
+refuse unless given `--yes`, so a pipe can never post by accident. `approved` is
+the pipeline's single human gate — the grooming routine is forbidden from
+writing it — which is why setting it belongs here. Label changes use
+`--add-label`/`--remove-label` rather than a labels array write, so an Issue's
+other labels cannot be dropped.
 
 One-shot and line-REPL views are direct `gh issue list` calls. The terminal
 picker fetches the complete open-Issue index once, then filters it locally until
-`r` refreshes it. There is no ProjectV2 query, Herdr helper, persisted cache,
-local fallback, custom formatter, or Ori-owned JSON contract. Empty label views
-say so explicitly. GitHub failures retain `gh`'s non-zero exit status instead
-of looking like an empty backlog.
+`r` refreshes it. Because that local filter has to agree with the labels `gh`
+applies server-side, `scripts/devops-cli.test.sh` unit-tests the matcher against
+the same fixtures the integration tests use. There is no ProjectV2 query, Herdr
+helper, persisted cache, local fallback, custom formatter, or Ori-owned JSON
+contract. Empty label views say so explicitly. GitHub failures retain `gh`'s
+non-zero exit status instead of looking like an empty backlog.
 
 The product backlog is GitHub Issues. There is no backlog file to maintain,
 sync, or prune, and no backlog commit ever lands on `dev`.

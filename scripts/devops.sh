@@ -1,9 +1,19 @@
 #!/usr/bin/env bash
-# A small, read-only REPL for this repository's open GitHub Issues.
+# A small REPL for this repository's open GitHub Issues.
 #
-# The default view is deliberately the GitHub CLI's own issue table. Filters
+# The list views are deliberately the GitHub CLI's own issue table. Filters
 # issue a fresh `gh issue list` call instead of maintaining a second cache,
 # parser, JSON contract, or Project board model inside Ori.
+#
+# The keyboard picker is the one place that parses JSON, because it needs an
+# in-memory index to move between views without re-querying. Its filtering must
+# therefore agree with the label filters `gh` applies server-side; the tests
+# cover both paths against the same fixtures.
+#
+# Writes are limited to two actions, both confirm-gated: answering an Issue's
+# open questions with a comment, and toggling the `approved` label. `approved`
+# is the pipeline's only human gate, so it is never written by the grooming
+# agent - only from here, or by hand on github.com.
 set -uo pipefail
 
 readonly issue_limit=1000
@@ -24,31 +34,123 @@ print_usage() {
 Usage:
   ./scripts/devops.sh
   ./scripts/devops.sh all
+  ./scripts/devops.sh ready
   ./scripts/devops.sh decisions
   ./scripts/devops.sh backlog
   ./scripts/devops.sh proposals
   ./scripts/devops.sh view <issue-number>
+  ./scripts/devops.sh answer <issue-number> <text...> [--yes]
+  ./scripts/devops.sh approve <issue-number> [--yes]
+  ./scripts/devops.sh unapprove <issue-number> [--yes]
 
 With no arguments in a terminal, the script opens a keyboard-driven Issue picker.
 In a pipe or redirected shell, it lists every open Issue and starts the line REPL.
 One-shot commands print their result and exit.
+
+`ready` is what you can actually pick up now: feature proposals plus backlog
+Issues that are neither already covered by a proposal (`bundled`) nor already
+chosen (`approved`).
+
+answer/approve/unapprove write to GitHub. They prompt for confirmation on a
+terminal, and require --yes when stdin is not a terminal.
 EOF
 }
 
 print_menu() {
   printf '\n%s\n' \
-    "[1/a] All  [2/d] Needs my decision  [3/b] Backlog  [4/f] Feature proposals  [v #] View  [q] Quit"
+    "[1/a] All  [2/d] Needs my decision  [3/b] Backlog  [4/f] Proposals  [5/y] Ready  [v #] View  [c #] Answer  [ok #] Approve  [q] Quit"
+}
+
+# Labels arrive from `gh` as a ", "-joined string. Split on commas and trim so a
+# label matches wherever it sits in the list - substring-matching the joined
+# string only ever matched the FIRST label, which silently hid every Issue whose
+# target label was not listed first (e.g. `type:fix, backlog, size:quick`).
+# A label containing a literal comma would still split wrongly; GitHub allows it
+# but this repository has none, and the alternative is a second machine-readable
+# field in every template.
+labels_contain() {
+  local haystack="$1" needle="$2" label
+  local old_ifs="$IFS"
+  IFS=','
+  # Intentional word splitting on commas.
+  # shellcheck disable=SC2086
+  set -- $haystack
+  IFS="$old_ifs"
+  for label in "$@"; do
+    label="${label#"${label%%[![:space:]]*}"}"
+    label="${label%"${label##*[![:space:]]}"}"
+    if [[ "$label" == "$needle" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+# The one place that knows what "ready to build" means, shared by the picker and
+# the one-shot search so the two can never drift.
+labels_are_ready() {
+  local labels="$1"
+  if labels_contain "$labels" "approved"; then
+    return 1
+  fi
+  if labels_contain "$labels" "feature-proposal"; then
+    return 0
+  fi
+  if labels_contain "$labels" "backlog" && ! labels_contain "$labels" "bundled"; then
+    return 0
+  fi
+  return 1
+}
+
+size_label_of() {
+  local labels="$1"
+  for candidate in size:quick size:planned size:prd; do
+    if labels_contain "$labels" "$candidate"; then
+      printf '%s' "${candidate#size:}"
+      return 0
+    fi
+  done
+  printf '%s' ""
+}
+
+# Labels worth showing next to a title once size has its own column and the
+# filter itself is implied by the view.
+other_labels_of() {
+  local haystack="$1" label first=1
+  local old_ifs="$IFS"
+  IFS=','
+  # shellcheck disable=SC2086
+  set -- $haystack
+  IFS="$old_ifs"
+  for label in "$@"; do
+    label="${label#"${label%%[![:space:]]*}"}"
+    label="${label%"${label##*[![:space:]]}"}"
+    case "$label" in
+      ""|size:*) continue ;;
+    esac
+    if [[ "$first" -eq 1 ]]; then
+      printf '%s' "$label"
+      first=0
+    else
+      printf ', %s' "$label"
+    fi
+  done
 }
 
 list_issues() {
   local filter="$1"
-  local heading label output status
+  local heading label search output status
   local -a args
 
   label=""
+  search=""
   case "$filter" in
     all)
       heading="Open issues"
+      ;;
+    ready)
+      heading="Ready to build"
+      search="label:backlog,feature-proposal -label:bundled -label:approved"
       ;;
     decisions)
       heading="Issues needing my decision"
@@ -72,6 +174,9 @@ list_issues() {
   if [[ -n "$label" ]]; then
     args+=(--label "$label")
   fi
+  if [[ -n "$search" ]]; then
+    args+=(--search "$search")
+  fi
 
   printf '\n%s\n\n' "$heading"
   if output="$(gh "${args[@]}")"; then
@@ -79,6 +184,8 @@ list_issues() {
       printf '%s\n' "$output"
     elif [[ -n "$label" ]]; then
       printf 'No open issues labeled %s.\n' "$label"
+    elif [[ "$filter" == ready ]]; then
+      printf 'Nothing ready to build.\n'
     else
       printf 'No open issues.\n'
     fi
@@ -97,6 +204,86 @@ view_issue() {
   gh issue view "$1" --comments
 }
 
+# Confirmation is required for every write. On a terminal we ask; without one we
+# insist on --yes, so a pipe can never post to GitHub by accident.
+confirm_write() {
+  local prompt="$1" assume_yes="$2" reply
+
+  if [[ "$assume_yes" -eq 1 ]]; then
+    return 0
+  fi
+  if [[ ! -t 0 ]]; then
+    printf '%s\n' "refusing to write without a terminal; pass --yes to confirm" >&2
+    return 2
+  fi
+  printf '%s [y/N] ' "$prompt"
+  IFS= read -r reply || return 1
+  [[ "$reply" == y || "$reply" == Y ]]
+}
+
+answer_issue() {
+  local assume_yes=0
+  local -a rest=()
+  local argument number body
+
+  for argument in "$@"; do
+    if [[ "$argument" == "--yes" ]]; then
+      assume_yes=1
+    else
+      rest+=("$argument")
+    fi
+  done
+
+  if [[ "${#rest[@]}" -lt 2 || ! "${rest[0]}" =~ ^[1-9][0-9]*$ ]]; then
+    printf '%s\n' "answer requires an Issue number and comment text" >&2
+    return 2
+  fi
+  number="${rest[0]}"
+  body="${rest[*]:1}"
+  if [[ -z "${body// /}" ]]; then
+    printf '%s\n' "answer requires non-empty comment text" >&2
+    return 2
+  fi
+
+  printf '\nWill comment on #%s:\n  %s\n' "$number" "$body"
+  confirm_write "Post this comment?" "$assume_yes" || return $?
+  gh issue comment "$number" --body "$body"
+}
+
+set_approved() {
+  local action="$1"
+  shift
+  local assume_yes=0
+  local -a rest=()
+  local argument number flag
+
+  for argument in "$@"; do
+    if [[ "$argument" == "--yes" ]]; then
+      assume_yes=1
+    else
+      rest+=("$argument")
+    fi
+  done
+
+  if [[ "${#rest[@]}" -ne 1 || ! "${rest[0]}" =~ ^[1-9][0-9]*$ ]]; then
+    printf '%s requires one positive Issue number\n' "$action" >&2
+    return 2
+  fi
+  number="${rest[0]}"
+
+  if [[ "$action" == approve ]]; then
+    flag="--add-label"
+    printf '\nWill add the approved label to #%s.\n' "$number"
+  else
+    flag="--remove-label"
+    printf '\nWill remove the approved label from #%s.\n' "$number"
+  fi
+  confirm_write "Apply this label change?" "$assume_yes" || return $?
+  # --add-label/--remove-label are additive; unlike a labels array write they
+  # cannot drop the Issue's other labels.
+  gh issue edit "$number" "$flag" approved
+}
+
 run_one_shot() {
   local command="$1"
   shift
@@ -105,6 +292,10 @@ run_one_shot() {
     all)
       [[ $# -eq 0 ]] || return 2
       list_issues all
+      ;;
+    ready)
+      [[ $# -eq 0 ]] || return 2
+      list_issues ready
       ;;
     decisions|decision)
       [[ $# -eq 0 ]] || return 2
@@ -121,6 +312,15 @@ run_one_shot() {
     view)
       view_issue "$@"
       ;;
+    answer)
+      answer_issue "$@"
+      ;;
+    approve)
+      set_approved approve "$@"
+      ;;
+    unapprove)
+      set_approved unapprove "$@"
+      ;;
     help|-h|--help)
       [[ $# -eq 0 ]] || return 2
       print_usage
@@ -133,22 +333,26 @@ run_one_shot() {
   esac
 }
 
-filter_label() {
+filter_title() {
   case "$1" in
-    all) printf '%s' "" ;;
-    decisions) printf '%s' "needs-decision" ;;
-    backlog) printf '%s' "backlog" ;;
-    proposals) printf '%s' "feature-proposal" ;;
+    all) printf '%s' "All open issues" ;;
+    ready) printf '%s' "Ready to build" ;;
+    decisions) printf '%s' "Needs my decision" ;;
+    backlog) printf '%s' "Backlog" ;;
+    proposals) printf '%s' "Feature proposals" ;;
     *) return 2 ;;
   esac
 }
 
-filter_title() {
-  case "$1" in
-    all) printf '%s' "All open issues" ;;
-    decisions) printf '%s' "Needs my decision" ;;
-    backlog) printf '%s' "Backlog" ;;
-    proposals) printf '%s' "Feature proposals" ;;
+row_matches_filter() {
+  local filter="$1" labels="$2"
+
+  case "$filter" in
+    all) return 0 ;;
+    ready) labels_are_ready "$labels" ;;
+    decisions) labels_contain "$labels" "needs-decision" ;;
+    backlog) labels_contain "$labels" "backlog" ;;
+    proposals) labels_contain "$labels" "feature-proposal" ;;
     *) return 2 ;;
   esac
 }
@@ -177,7 +381,7 @@ truncate() {
   fi
 }
 
-declare -a picker_filters=(all decisions backlog proposals)
+declare -a picker_filters=(ready all decisions backlog proposals)
 declare -a all_issue_numbers=()
 declare -a all_issue_titles=()
 declare -a all_issue_labels=()
@@ -219,15 +423,14 @@ load_picker_index() {
 }
 
 apply_picker_filter() {
-  local filter="$1" label index
+  local filter="$1" index
 
   issue_numbers=()
   issue_titles=()
   issue_labels=()
   issue_updates=()
-  label="$(filter_label "$filter")" || return 2
   for index in "${!all_issue_numbers[@]}"; do
-    if [[ -z "$label" || ",${all_issue_labels[$index]}," == *",$label,"* ]]; then
+    if row_matches_filter "$filter" "${all_issue_labels[$index]}"; then
       issue_numbers+=("${all_issue_numbers[$index]}")
       issue_titles+=("${all_issue_titles[$index]}")
       issue_labels+=("${all_issue_labels[$index]}")
@@ -238,7 +441,9 @@ apply_picker_filter() {
 
 render_picker() {
   local filter_index="$1" selected_index="$2" count="$3"
-  local current_filter="${picker_filters[$filter_index]}" index marker title labels updated
+  local current_filter="${picker_filters[$filter_index]}" index marker title labels size updated
+  local id id_width row labels_cell
+  local -r title_width=56 size_width=7 labels_width=28
 
   printf '\033[H\033[2J'
   style '1;36' 'Ori DevOps'
@@ -266,21 +471,57 @@ render_picker() {
     style '2' 'No matching open issues.'
     printf '\n'
   else
+    # Every column is padded to a fixed width so the rows line up. Padding is
+    # applied to the plain text BEFORE style() wraps it, because ANSI colour
+    # codes are bytes printf would otherwise count toward the field width.
+    id_width=0
+    for ((index = 0; index < count; index++)); do
+      id="#${issue_numbers[$index]}"
+      if [[ "${#id}" -gt "$id_width" ]]; then
+        id_width="${#id}"
+      fi
+    done
+
     for ((index = 0; index < count; index++)); do
       marker=' '
-      title="#${issue_numbers[$index]} $(truncate "${issue_titles[$index]}" 68)"
-      labels="${issue_labels[$index]}"
+      id="#${issue_numbers[$index]}"
+      title="$(truncate "${issue_titles[$index]}" "$title_width")"
+      size="$(size_label_of "${issue_labels[$index]}")"
+      labels="$(other_labels_of "${issue_labels[$index]}")"
       updated="${issue_updates[$index]:0:10}"
+
+      # The selection highlight covers the whole id+title block, so it has to be
+      # one already-padded string rather than several styled fragments.
       if [[ "$index" -eq "$selected_index" ]]; then
         marker='›'
-        style '1;30;47' "$marker $title"
+      fi
+      row="$(printf '%s %-*s %-*s' "$marker" "$id_width" "$id" "$title_width" "$title")"
+      if [[ "$index" -eq "$selected_index" ]]; then
+        style '1;30;47' "$row"
       else
-        printf '%s %s' "$marker" "$title"
+        printf '%s' "$row"
       fi
+
+      # Size gets its own fixed column so it can never be truncated away by a
+      # long label list - it is the signal that says whether to write a PRD.
+      printf '  '
+      if [[ -n "$size" ]]; then
+        case "$size" in
+          quick) style '1;32' "$(printf '%-*s' "$size_width" "$size")" ;;
+          planned) style '1;33' "$(printf '%-*s' "$size_width" "$size")" ;;
+          *) style '1;31' "$(printf '%-*s' "$size_width" "$size")" ;;
+        esac
+      else
+        style '2' "$(printf '%-*s' "$size_width" '-')"
+      fi
+
+      labels_cell=""
       if [[ -n "$labels" ]]; then
-        printf '  '
-        style '35' "[$(truncate "$labels" 28)]"
+        labels_cell="[$(truncate "$labels" $((labels_width - 2)))]"
       fi
+      printf '  '
+      style '35' "$(printf '%-*s' "$labels_width" "$labels_cell")"
+
       printf '  '
       style '2' "$updated"
       printf '\n'
@@ -288,7 +529,7 @@ render_picker() {
   fi
 
   printf '\n'
-  style '2' '↑/↓ or j/k select  •  ←/→ or h/l change view  •  Enter open  •  r refresh  •  q quit'
+  style '2' '↑/↓ or j/k select  •  ←/→ or h/l change view  •  Enter open  •  c answer  •  o approve  •  r refresh  •  q quit'
   printf '\n'
 }
 
@@ -316,16 +557,35 @@ enter_picker_screen() {
   printf '\033[?1049h\033[?25l'
 }
 
-open_picker_issue() {
-  local issue_number="$1"
+# Every full-screen escape hatch shares this shape: drop out of the alternate
+# screen and canonical-mode-off, run the interaction, then go back.
+with_normal_terminal() {
   restore_terminal
   trap - EXIT INT TERM
   printf '\n'
-  view_issue "$issue_number"
+  "$@"
   printf '\nPress Enter to return to the Issue picker.'
   IFS= read -r _
   enter_picker_screen
   trap restore_terminal EXIT INT TERM
+}
+
+prompt_answer_issue() {
+  local issue_number="$1" body
+
+  printf 'Answer #%s (e.g. "1B, 2A"); empty line cancels.\n' "$issue_number"
+  printf 'answer> '
+  IFS= read -r body || return 0
+  if [[ -z "${body// /}" ]]; then
+    printf 'Cancelled.\n'
+    return 0
+  fi
+  answer_issue "$issue_number" "$body"
+}
+
+prompt_approve_issue() {
+  local issue_number="$1"
+  set_approved approve "$issue_number"
 }
 
 run_picker() {
@@ -363,9 +623,24 @@ run_picker() {
       2) filter_index=1; selected_index=0; reload=1 ;;
       3) filter_index=2; selected_index=0; reload=1 ;;
       4) filter_index=3; selected_index=0; reload=1 ;;
+      5) filter_index=4; selected_index=0; reload=1 ;;
+      c)
+        if [[ "$count" -gt 0 ]]; then
+          with_normal_terminal prompt_answer_issue "${issue_numbers[$selected_index]}"
+          load_picker_index || true
+          apply_picker_filter "${picker_filters[$filter_index]}"
+        fi
+        ;;
+      o)
+        if [[ "$count" -gt 0 ]]; then
+          with_normal_terminal prompt_approve_issue "${issue_numbers[$selected_index]}"
+          load_picker_index || true
+          apply_picker_filter "${picker_filters[$filter_index]}"
+        fi
+        ;;
       ''|$'\r'|$'\n')
         if [[ "$count" -gt 0 ]]; then
-          open_picker_issue "${issue_numbers[$selected_index]}"
+          with_normal_terminal view_issue "${issue_numbers[$selected_index]}"
         fi
         ;;
     esac
@@ -377,6 +652,12 @@ run_picker() {
     fi
   done
 }
+
+# Sourcing the script exposes its pure helpers for unit tests without running
+# the REPL. Nothing above this line touches GitHub.
+if [[ -n "${DEVOPS_SOURCE_ONLY:-}" ]]; then
+  return 0 2>/dev/null || exit 0
+fi
 
 if [[ $# -gt 0 ]]; then
   run_one_shot "$@"
@@ -452,12 +733,41 @@ while true; do
       current_filter="proposals"
       list_issues "$current_filter"
       ;;
+    5|y|ready)
+      if [[ -n "$argument" || -n "$extra" ]]; then
+        printf '%s\n' "ready takes no arguments" >&2
+        continue
+      fi
+      current_filter="ready"
+      list_issues "$current_filter"
+      ;;
     v|view)
       if [[ -n "$extra" ]]; then
         printf '%s\n' "view requires one positive Issue number" >&2
         continue
       fi
       view_issue "$argument"
+      ;;
+    c|comment|answer)
+      if [[ -z "$argument" || -z "$extra" ]]; then
+        printf '%s\n' "answer requires an Issue number and comment text" >&2
+        continue
+      fi
+      answer_issue "$argument" "$extra"
+      ;;
+    ok|approve)
+      if [[ -n "$extra" ]]; then
+        printf '%s\n' "approve requires one positive Issue number" >&2
+        continue
+      fi
+      set_approved approve "$argument"
+      ;;
+    unapprove)
+      if [[ -n "$extra" ]]; then
+        printf '%s\n' "unapprove requires one positive Issue number" >&2
+        continue
+      fi
+      set_approved unapprove "$argument"
       ;;
     h|help|'?')
       print_usage

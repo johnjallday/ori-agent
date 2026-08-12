@@ -39,22 +39,32 @@ For the PRD and task-list workflows below, create planning artifacts in this dev
 
 ## Feature Naming: Issue Number First
 
-Ideas are captured as GitHub Issues. `./scripts/devops.sh` is the read-only human
+Ideas are captured as GitHub Issues. `./scripts/devops.sh` is the human
 interface: with no arguments in a terminal it opens a colorful Issue picker;
 one-shot commands expose the same views to scripts and agents.
 
-| Command | Reads |
+| Command | Does |
 |---|---|
-| `./scripts/devops.sh` or `./scripts/devops.sh all` | every open Issue |
-| `./scripts/devops.sh decisions` | open Issues labeled `needs-decision` |
-| `./scripts/devops.sh backlog` | open Issues labeled `backlog` |
-| `./scripts/devops.sh proposals` | open Issues labeled `feature-proposal` |
-| `./scripts/devops.sh view <n>` | one Issue in full |
+| `./scripts/devops.sh` or `./scripts/devops.sh all` | reads every open Issue |
+| `./scripts/devops.sh ready` | reads what is pickable now: proposals + backlog that is neither `bundled` nor `approved` |
+| `./scripts/devops.sh decisions` | reads open Issues labeled `needs-decision` |
+| `./scripts/devops.sh backlog` | reads open Issues labeled `backlog` |
+| `./scripts/devops.sh proposals` | reads open Issues labeled `feature-proposal` |
+| `./scripts/devops.sh view <n>` | reads one Issue in full |
+| `./scripts/devops.sh answer <n> <text>` | **writes** a comment, confirm-gated |
+| `./scripts/devops.sh approve <n>` / `unapprove <n>` | **writes** the `approved` label, confirm-gated |
 
-The script delegates directly to `gh issue list` and `gh issue view`. Its filters
-are literal GitHub labels, not Project columns, and every read is fresh. The REPL
-does not create, label, comment on, close, rank, or otherwise mutate an Issue.
-Use `gh issue create` for capture and GitHub itself for lifecycle changes.
+The script delegates directly to `gh issue list`, `gh issue view`,
+`gh issue comment` and `gh issue edit`. Its filters are literal GitHub labels,
+not Project columns, and every read is fresh.
+
+Reads never mutate. The three write commands exist because they are the two
+things only a human does in this pipeline: answering a spec's open questions,
+and setting `approved` — the single gate the grooming routine is forbidden from
+touching. They confirm before writing and refuse without a terminal unless given
+`--yes`. Everything else about an Issue's lifecycle — creating, closing,
+triaging, sizing, bundling — belongs to `gh issue create`, the grooming routine,
+or the PR that implements the work.
 
 Work selected from an Issue uses the Issue number at the front of its identity:
 

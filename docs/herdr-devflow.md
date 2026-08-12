@@ -449,25 +449,36 @@ binding diagnostics and feature history that the deliberately smaller
 
 ## Issues and the backlog
 
-`./scripts/devops.sh` is the repository's small, read-only Issue REPL. With no
-arguments it lists every open Issue before prompting for another view.
+`./scripts/devops.sh` is the repository's small Issue REPL. With no arguments it
+lists every open Issue before prompting for another view.
 
 ~~~bash
-./scripts/devops.sh                 # all open Issues, then the REPL
-./scripts/devops.sh all             # all open Issues, one-shot
-./scripts/devops.sh decisions       # label: needs-decision
-./scripts/devops.sh backlog         # label: backlog
-./scripts/devops.sh proposals       # label: feature-proposal
-./scripts/devops.sh view <number>   # one Issue in full
+./scripts/devops.sh                    # all open Issues, then the REPL
+./scripts/devops.sh ready              # proposals + unbundled, unapproved backlog
+./scripts/devops.sh all                # all open Issues, one-shot
+./scripts/devops.sh decisions          # label: needs-decision
+./scripts/devops.sh backlog            # label: backlog
+./scripts/devops.sh proposals          # label: feature-proposal
+./scripts/devops.sh view <number>      # one Issue in full
+./scripts/devops.sh answer <n> <text>  # comment, confirm-gated
+./scripts/devops.sh approve <n>        # add `approved`, confirm-gated
 ~~~
 
 In a terminal, the colorful picker accepts `↑/↓` or `j/k` to select an Issue,
-`←/→` or `h/l` for those four list views, `Enter` to inspect it, `r` to refresh,
-and `q` to quit. In a pipe or redirected shell, the line REPL accepts `1/a`,
-`2/d`, `3/b`, and `4/f`, plus `v <number>`. Lists include every author and only
-open Issues. Filters are literal labels; no Project board or rank participates.
+`←/→` or `h/l` for those five list views, `Enter` to inspect it, `c` to answer
+its open questions, `o` to approve it, `r` to refresh, and `q` to quit. In a pipe
+or redirected shell, the line REPL accepts `1/a`, `2/d`, `3/b`, `4/f`, and `5/y`,
+plus `v <number>`, `c <number> <text>`, and `ok <number>`. Lists include every
+author and only open Issues. Filters are literal labels; no Project board or rank
+participates.
 
-The command runs `gh issue list` or `gh issue view` directly from its checkout.
+Reads never mutate. The write commands cover the two things only a human does
+here — answering a spec's open questions, and setting `approved`, the one label
+the grooming routine may never write. Both confirm first, and refuse without a
+terminal unless given `--yes`.
+
+The command runs `gh issue list`, `gh issue view`, `gh issue comment`, or
+`gh issue edit` directly from its checkout.
 The terminal picker fetches the complete open-Issue index once and filters it
 locally until `r` refreshes it; it does not persist a cache, source `wt`, invoke
 the Herdr helper, or define a JSON contract. Agents that need structured data
