@@ -5829,8 +5829,10 @@ body.modal-open .hub-support-chat {
 /* ==========================================================================
    Tickets (tasks/prd-workspace-ticket-management.md)
 
-   The canonical destination for durable workspace work. Mounted into the
-   Command view's Tickets modal from the shared-hosts block.
+   The canonical destination for durable workspace work. It is a third view
+   mode beside Details and Map — a full-width surface that sits next to the
+   command container and is shown or hidden by view mode, not a modal and not
+   a relocated panel.
 
    State is never communicated by color alone: every state chip carries its
    own text label and its own border weight/style, so the surface stays

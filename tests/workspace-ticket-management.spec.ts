@@ -58,7 +58,8 @@ async function openTickets(page: Page, studioId: string) {
     document.querySelectorAll('.modal-backdrop').forEach(el => el.remove());
     document.body.classList.remove('modal-open');
   });
-  await page.click('[data-cmd-section="tickets"]');
+  // Tickets is a view mode beside Details and Map, not a modal.
+  await page.click('[data-cmd-view-mode="tickets"]');
   await page.waitForSelector('#hubTicketsList', { state: 'visible', timeout: 10000 });
   await page.waitForTimeout(600);
 }

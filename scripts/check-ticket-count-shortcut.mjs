@@ -33,7 +33,9 @@ const clearOverlays = () =>
 
 const shown = () =>
   page.evaluate(() => ({
-    modalOpen: Boolean(document.querySelector('.ws-cmd-modal:not([hidden])')),
+    ticketsViewActive: Boolean(
+      document.querySelector('#workspace-detail-tickets-surface:not([hidden])')
+    ),
     activeChips: [...document.querySelectorAll('#hubTicketsFilters .ticket-filter-chip')]
       .filter(chip => chip.getAttribute('aria-pressed') === 'true')
       .map(chip => chip.textContent.trim()),

@@ -99,6 +99,151 @@
         {{template "components/workspaces/setup-wizard-modal.tmpl" .}}
         <!-- Command view mount point — populated by workspace-command.js when the Command view is active. -->
         <div id="workspaceCommandView" class="ws-cmd" role="region" aria-label="Workspace command view" hidden></div>
+        <!--
+          Tickets: the canonical destination for durable workspace work
+          (tasks/prd-workspace-ticket-management.md).
+
+          A VIEW, not a panel: it sits beside the command view and is shown or
+          hidden by view mode (Details | Map | Tickets). It deliberately does
+          NOT live inside #workspaceCommandView, because that container is
+          rebuilt with innerHTML on every render — which is why the task Board
+          and config panels have to be relocated in and out, and why a missed
+          restore can orphan them. Nothing here moves.
+
+          Everything below is server-backed: workspace-hub-tickets.js fills the
+          list and detail from the canonical Ticket API and renders nothing on
+          failure but an error state.
+        -->
+        <div id="workspace-detail-tickets-surface" class="hub-tickets-container" hidden>
+          <div class="hub-tickets-header">
+            <div class="hub-tickets-title-row">
+              <h3 class="hub-tickets-title">Tickets</h3>
+              <span class="hub-tickets-count" id="hubTicketsCount">0 tickets</span>
+              <!-- List and Board render the SAME loaded tickets, so
+                   switching never re-queries and the two views cannot
+                   show different data (FR-58). -->
+              <div class="hub-tickets-view-switch" role="tablist" aria-label="Ticket view">
+                <button type="button" class="hub-tickets-view-btn is-active" id="hubTicketsViewList" role="tab" aria-selected="true" aria-controls="hubTicketsList">List</button>
+                <button type="button" class="hub-tickets-view-btn" id="hubTicketsViewBoard" role="tab" aria-selected="false" aria-controls="hubTicketsBoard">Board</button>
+              </div>
+            </div>
+            <button id="hubTicketsRefreshBtn" class="modern-btn modern-btn-secondary modern-btn-sm" type="button" title="Refresh tickets">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z"/>
+              </svg>
+              <span>Refresh</span>
+            </button>
+          </div>
+
+          <p class="hub-tickets-status" id="hubTicketsStatus" role="status" aria-live="polite" hidden></p>
+          <!-- Announces state changes to assistive technology. Visually
+               hidden but never display:none — a hidden live region is
+               not announced at all (FR-129). -->
+          <p class="hub-tickets-live" id="hubTicketsLiveRegion" role="status" aria-live="polite"></p>
+
+          <!--
+            Filters. Every control here re-queries the SERVER (FR-65 to
+            FR-68); nothing is filtered in the browser, so a rolled-up
+            parent never has to download a descendant tree to show a
+            handful of rows.
+          -->
+          <div class="hub-tickets-controls">
+            <div class="hub-tickets-filters" id="hubTicketsFilters" role="group" aria-label="Filter tickets by state">
+              <button type="button" class="ticket-filter-chip is-active" data-ticket-state-filter="all" aria-pressed="true">All</button>
+              <button type="button" class="ticket-filter-chip" data-ticket-state-filter="backlog" aria-pressed="false">Backlog</button>
+              <button type="button" class="ticket-filter-chip" data-ticket-state-filter="ready" aria-pressed="false">Ready</button>
+              <button type="button" class="ticket-filter-chip" data-ticket-state-filter="in_progress" aria-pressed="false">In Progress</button>
+              <button type="button" class="ticket-filter-chip" data-ticket-state-filter="review" aria-pressed="false">Review</button>
+              <button type="button" class="ticket-filter-chip" data-ticket-state-filter="done" aria-pressed="false">Done</button>
+              <button type="button" class="ticket-filter-chip" data-ticket-state-filter="cancelled" aria-pressed="false">Cancelled</button>
+            </div>
+
+            <div class="hub-tickets-controls-row">
+              <label class="hub-tickets-control">
+                <span class="hub-tickets-control-label">Search</span>
+                <input type="search" class="form-control form-control-sm" id="hubTicketsSearch" placeholder="Title, description, or #number">
+              </label>
+
+              <label class="hub-tickets-control">
+                <span class="hub-tickets-control-label">Sort</span>
+                <select class="form-select form-select-sm" id="hubTicketsSort">
+                  <option value="">Manual order</option>
+                  <option value="priority">Priority</option>
+                  <option value="due_date">Due date</option>
+                  <option value="created">Created</option>
+                  <option value="updated">Updated</option>
+                  <option value="number">Ticket number</option>
+                </select>
+              </label>
+
+              <label class="hub-tickets-toggle">
+                <input type="checkbox" id="hubTicketsRollUp">
+                <span>Include sub-workspaces</span>
+              </label>
+
+              <!-- Done and Cancelled tickets stay in the default view
+                   for 14 days, then move here. Nothing is deleted. -->
+              <label class="hub-tickets-toggle">
+                <input type="checkbox" id="hubTicketsArchive">
+                <span>Archive only</span>
+              </label>
+            </div>
+          </div>
+
+          <form class="hub-ticket-create" id="hubTicketCreateForm">
+            <label class="hub-ticket-create-label" for="hubTicketCreateTitle">Title</label>
+            <input type="text" class="form-control" id="hubTicketCreateTitle" name="title" placeholder="What needs doing?" required maxlength="300">
+
+            <label class="hub-ticket-create-label" for="hubTicketCreateDescription">Description <span class="hub-ticket-create-optional">(optional, Markdown)</span></label>
+            <textarea class="form-control" id="hubTicketCreateDescription" name="description" rows="2" placeholder="Context, links, acceptance criteria…"></textarea>
+
+            <!--
+              The Backlog/Ready choice is explicit and required (FR-19).
+              Nothing is pre-selected: "captured an idea" and "committed
+              to doing this" are different decisions, and defaulting one
+              would make them indistinguishable afterwards.
+            -->
+            <fieldset class="hub-ticket-create-state">
+              <legend class="hub-ticket-create-label">Where does this go?</legend>
+              <label class="hub-ticket-state-choice">
+                <input type="radio" name="hubTicketCreateState" value="backlog" required>
+                <span class="hub-ticket-state-choice-label">Add to Backlog</span>
+                <span class="hub-ticket-state-choice-hint">Captured for later. Cannot be assigned, scheduled, or run.</span>
+              </label>
+              <label class="hub-ticket-state-choice">
+                <input type="radio" name="hubTicketCreateState" value="ready">
+                <span class="hub-ticket-state-choice-label">Create Ready</span>
+                <span class="hub-ticket-state-choice-hint">Committed work. Stays idle until you start it.</span>
+              </label>
+            </fieldset>
+
+            <button type="submit" class="modern-btn modern-btn-primary modern-btn-sm hub-ticket-create-submit">Create ticket</button>
+          </form>
+
+          <div class="hub-tickets-body">
+            <ul class="hub-tickets-list" id="hubTicketsList" aria-label="Tickets"></ul>
+            <!--
+              The Ticket Board. Columns are FIXED and derived from
+              canonical Ticket state (FR-43 to FR-46) — there is no
+              column editor, because a user-defined column would be a
+              second lifecycle vocabulary. Existing custom board
+              configuration is left untouched on the workspace for
+              migration diagnostics and rollback.
+            -->
+            <div class="ticket-board" id="hubTicketsBoard" aria-label="Ticket board" hidden></div>
+            <div class="hub-tickets-empty" id="hubTicketsEmpty">
+              <p>No tickets yet. Create one above to get started.</p>
+            </div>
+          </div>
+
+          <aside class="hub-ticket-detail" id="hubTicketDetail" aria-labelledby="hubTicketDetailTitle" hidden>
+            <div class="hub-ticket-detail-header">
+              <h4 class="hub-ticket-detail-title" id="hubTicketDetailTitle"></h4>
+              <button type="button" class="modern-btn modern-btn-secondary modern-btn-sm" id="hubTicketDetailClose" aria-label="Close ticket detail">×</button>
+            </div>
+            <div class="hub-ticket-detail-body" id="hubTicketDetailBody"></div>
+          </aside>
+        </div>
         <!-- Workspace Detail View -->
         <!-- Shared hosts: live DOM the Command view mounts into its panels
              (Systems tabs, Find Tools, Detachment members, task Board).
@@ -1033,150 +1178,6 @@
                   </div>
                 </div>
 
-                <!--
-                  Tickets: the canonical destination for durable workspace work
-                  (tasks/prd-workspace-ticket-management.md).
-
-                  Lives here in the shared-hosts block and is relocated into
-                  the Command view's Tickets modal by syncTicketsSurface, the
-                  same way the task Board and config panels work. There is one
-                  node, not a copy per surface, so a second editable Ticket
-                  list cannot drift out of sync with this one.
-
-                  Everything below is server-backed: workspace-hub-tickets.js
-                  fills the list and detail from the canonical Ticket API and
-                  renders nothing on failure but an error state.
-                -->
-                <div id="workspace-detail-tickets-surface" class="hub-tickets-container" hidden>
-                  <div class="hub-tickets-header">
-                    <div class="hub-tickets-title-row">
-                      <h3 class="hub-tickets-title">Tickets</h3>
-                      <span class="hub-tickets-count" id="hubTicketsCount">0 tickets</span>
-                      <!-- List and Board render the SAME loaded tickets, so
-                           switching never re-queries and the two views cannot
-                           show different data (FR-58). -->
-                      <div class="hub-tickets-view-switch" role="tablist" aria-label="Ticket view">
-                        <button type="button" class="hub-tickets-view-btn is-active" id="hubTicketsViewList" role="tab" aria-selected="true" aria-controls="hubTicketsList">List</button>
-                        <button type="button" class="hub-tickets-view-btn" id="hubTicketsViewBoard" role="tab" aria-selected="false" aria-controls="hubTicketsBoard">Board</button>
-                      </div>
-                    </div>
-                    <button id="hubTicketsRefreshBtn" class="modern-btn modern-btn-secondary modern-btn-sm" type="button" title="Refresh tickets">
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-                        <path d="M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z"/>
-                      </svg>
-                      <span>Refresh</span>
-                    </button>
-                  </div>
-
-                  <p class="hub-tickets-status" id="hubTicketsStatus" role="status" aria-live="polite" hidden></p>
-                  <!-- Announces state changes to assistive technology. Visually
-                       hidden but never display:none — a hidden live region is
-                       not announced at all (FR-129). -->
-                  <p class="hub-tickets-live" id="hubTicketsLiveRegion" role="status" aria-live="polite"></p>
-
-                  <!--
-                    Filters. Every control here re-queries the SERVER (FR-65 to
-                    FR-68); nothing is filtered in the browser, so a rolled-up
-                    parent never has to download a descendant tree to show a
-                    handful of rows.
-                  -->
-                  <div class="hub-tickets-controls">
-                    <div class="hub-tickets-filters" id="hubTicketsFilters" role="group" aria-label="Filter tickets by state">
-                      <button type="button" class="ticket-filter-chip is-active" data-ticket-state-filter="all" aria-pressed="true">All</button>
-                      <button type="button" class="ticket-filter-chip" data-ticket-state-filter="backlog" aria-pressed="false">Backlog</button>
-                      <button type="button" class="ticket-filter-chip" data-ticket-state-filter="ready" aria-pressed="false">Ready</button>
-                      <button type="button" class="ticket-filter-chip" data-ticket-state-filter="in_progress" aria-pressed="false">In Progress</button>
-                      <button type="button" class="ticket-filter-chip" data-ticket-state-filter="review" aria-pressed="false">Review</button>
-                      <button type="button" class="ticket-filter-chip" data-ticket-state-filter="done" aria-pressed="false">Done</button>
-                      <button type="button" class="ticket-filter-chip" data-ticket-state-filter="cancelled" aria-pressed="false">Cancelled</button>
-                    </div>
-
-                    <div class="hub-tickets-controls-row">
-                      <label class="hub-tickets-control">
-                        <span class="hub-tickets-control-label">Search</span>
-                        <input type="search" class="form-control form-control-sm" id="hubTicketsSearch" placeholder="Title, description, or #number">
-                      </label>
-
-                      <label class="hub-tickets-control">
-                        <span class="hub-tickets-control-label">Sort</span>
-                        <select class="form-select form-select-sm" id="hubTicketsSort">
-                          <option value="">Manual order</option>
-                          <option value="priority">Priority</option>
-                          <option value="due_date">Due date</option>
-                          <option value="created">Created</option>
-                          <option value="updated">Updated</option>
-                          <option value="number">Ticket number</option>
-                        </select>
-                      </label>
-
-                      <label class="hub-tickets-toggle">
-                        <input type="checkbox" id="hubTicketsRollUp">
-                        <span>Include sub-workspaces</span>
-                      </label>
-
-                      <!-- Done and Cancelled tickets stay in the default view
-                           for 14 days, then move here. Nothing is deleted. -->
-                      <label class="hub-tickets-toggle">
-                        <input type="checkbox" id="hubTicketsArchive">
-                        <span>Archive only</span>
-                      </label>
-                    </div>
-                  </div>
-
-                  <form class="hub-ticket-create" id="hubTicketCreateForm">
-                    <label class="hub-ticket-create-label" for="hubTicketCreateTitle">Title</label>
-                    <input type="text" class="form-control" id="hubTicketCreateTitle" name="title" placeholder="What needs doing?" required maxlength="300">
-
-                    <label class="hub-ticket-create-label" for="hubTicketCreateDescription">Description <span class="hub-ticket-create-optional">(optional, Markdown)</span></label>
-                    <textarea class="form-control" id="hubTicketCreateDescription" name="description" rows="2" placeholder="Context, links, acceptance criteria…"></textarea>
-
-                    <!--
-                      The Backlog/Ready choice is explicit and required (FR-19).
-                      Nothing is pre-selected: "captured an idea" and "committed
-                      to doing this" are different decisions, and defaulting one
-                      would make them indistinguishable afterwards.
-                    -->
-                    <fieldset class="hub-ticket-create-state">
-                      <legend class="hub-ticket-create-label">Where does this go?</legend>
-                      <label class="hub-ticket-state-choice">
-                        <input type="radio" name="hubTicketCreateState" value="backlog" required>
-                        <span class="hub-ticket-state-choice-label">Add to Backlog</span>
-                        <span class="hub-ticket-state-choice-hint">Captured for later. Cannot be assigned, scheduled, or run.</span>
-                      </label>
-                      <label class="hub-ticket-state-choice">
-                        <input type="radio" name="hubTicketCreateState" value="ready">
-                        <span class="hub-ticket-state-choice-label">Create Ready</span>
-                        <span class="hub-ticket-state-choice-hint">Committed work. Stays idle until you start it.</span>
-                      </label>
-                    </fieldset>
-
-                    <button type="submit" class="modern-btn modern-btn-primary modern-btn-sm hub-ticket-create-submit">Create ticket</button>
-                  </form>
-
-                  <div class="hub-tickets-body">
-                    <ul class="hub-tickets-list" id="hubTicketsList" aria-label="Tickets"></ul>
-                    <!--
-                      The Ticket Board. Columns are FIXED and derived from
-                      canonical Ticket state (FR-43 to FR-46) — there is no
-                      column editor, because a user-defined column would be a
-                      second lifecycle vocabulary. Existing custom board
-                      configuration is left untouched on the workspace for
-                      migration diagnostics and rollback.
-                    -->
-                    <div class="ticket-board" id="hubTicketsBoard" aria-label="Ticket board" hidden></div>
-                    <div class="hub-tickets-empty" id="hubTicketsEmpty">
-                      <p>No tickets yet. Create one above to get started.</p>
-                    </div>
-                  </div>
-
-                  <aside class="hub-ticket-detail" id="hubTicketDetail" aria-labelledby="hubTicketDetailTitle" hidden>
-                    <div class="hub-ticket-detail-header">
-                      <h4 class="hub-ticket-detail-title" id="hubTicketDetailTitle"></h4>
-                      <button type="button" class="modern-btn modern-btn-secondary modern-btn-sm" id="hubTicketDetailClose" aria-label="Close ticket detail">×</button>
-                    </div>
-                    <div class="hub-ticket-detail-body" id="hubTicketDetailBody"></div>
-                  </aside>
-                </div>
 
             <div class="modern-card workspace-detail-panel workspace-detail-panel-members is-expandable" id="workspace-detail-members-panel" role="button" tabindex="0" aria-haspopup="dialog" aria-expanded="false" aria-label="Open Members panel" hidden>
               <button class="workspace-detail-panel-close" type="button" title="Close" aria-label="Close expanded panel">

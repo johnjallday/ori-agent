@@ -49,8 +49,10 @@ if ((await opener.count()) > 0) {
     JSON.stringify(
       await page.evaluate(() => ({
         legacyDrawerOpen: Boolean(window.workspaceCommand?.backlogDrawerOpen),
-        ticketsModalOpen: Boolean(document.querySelector('.ws-cmd-modal:not([hidden])')),
-        statSection: window.workspaceCommand?.statModalSection,
+        ticketsViewActive: Boolean(
+          document.querySelector('#workspace-detail-tickets-surface:not([hidden])')
+        ),
+        viewMode: window.workspaceCommand?.viewMode,
         activeChips: [...document.querySelectorAll('#hubTicketsFilters .ticket-filter-chip')]
           .filter(c => c.getAttribute('aria-pressed') === 'true')
           .map(c => c.textContent.trim()),

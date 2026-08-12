@@ -4,9 +4,9 @@
  *
  *   node scripts/check-ticket-deep-link.mjs <workspaceUrlWithTicketParam>
  *
- * A deep link has to actually LAND somewhere: the Tickets surface lives inside
- * a modal that is closed by default, so a link that merely told the module
- * which ticket to show would be a silent no-op.
+ * A deep link has to actually LAND somewhere: Tickets is a view mode that is
+ * NOT the default one, so a link that merely told the module which ticket to
+ * show — without switching the view — would be a silent no-op.
  */
 import { chromium } from 'playwright';
 
@@ -25,11 +25,12 @@ await page.goto(url, { waitUntil: 'domcontentloaded' });
 await page.waitForTimeout(4000);
 
 const landed = await page.evaluate(() => {
-  const modal = document.querySelector('.ws-cmd-modal');
+  const surface = document.getElementById('workspace-detail-tickets-surface');
   const detail = document.getElementById('hubTicketDetail');
+  const tab = document.querySelector('[data-cmd-view-mode="tickets"]');
   return {
-    ticketsModalOpen: Boolean(modal && !modal.hidden),
-    modalTitle: modal?.querySelector('.ws-cmd-modal-title')?.textContent?.trim() || '',
+    ticketsViewActive: Boolean(surface && !surface.hidden),
+    viewTabSelected: tab?.getAttribute('aria-pressed') || tab?.className || '',
     detailVisible: Boolean(detail && !detail.hidden),
     detailTitle: document.getElementById('hubTicketDetailTitle')?.textContent?.trim() || '',
     detailRows: [...document.querySelectorAll('#hubTicketDetailBody .ticket-detail-row')]
@@ -41,7 +42,7 @@ const landed = await page.evaluate(() => {
 console.log(JSON.stringify(landed, null, 2));
 console.log(
   'deep link landed on the ticket:',
-  landed.ticketsModalOpen && landed.detailVisible && !/Loading|Could not/.test(landed.detailTitle)
+  landed.ticketsViewActive && landed.detailVisible && !/Loading|Could not/.test(landed.detailTitle)
     ? 'yes'
     : 'NO'
 );

@@ -34,7 +34,11 @@ import {
 const LEGACY_STORAGE_KEY = 'oriWorkspaceDetailView';
 const VIEW_MODE_STORAGE_KEY = 'oriWorkspaceCommandViewMode';
 const AGENT_TAB_KEYS = ['overview', 'tasks', 'loadout', 'recent'];
-const COMMAND_VIEW_MODES = ['details', 'map'];
+// Tickets is a first-class view, not a panel inside one
+// (tasks/prd-workspace-ticket-management.md FR-65): it is the destination
+// where durable work is managed, so it sits beside Details and Map rather than
+// one click deeper inside a modal.
+const COMMAND_VIEW_MODES = ['details', 'map', 'tickets'];
 
 function escapeHtml(value) {
   return String(value == null ? '' : value).replace(/[&<>"']/g, function (c) {
@@ -89,6 +93,10 @@ export class WorkspaceCommandView {
       this.readCommandViewModePreference()
     );
     this.activeRailSection = '';
+    // Whether the Tickets view has fetched since it was last entered. Reset on
+    // leaving, so re-entry always shows current data without every unrelated
+    // re-render re-fetching. See syncTicketsView.
+    this.ticketsViewLoaded = false;
     this.activeMapWindow = '';
     this.mapInventoryOpen = false;
     this.mapInventorySection = '';
@@ -338,12 +346,12 @@ export class WorkspaceCommandView {
    * truly stale link still eventually gets dropped per FR91.
    */
   /**
-   * Opens the Tickets modal when the URL carries `?ticket=<stable id>`
+   * Switches to the Tickets view when the URL carries `?ticket=<stable id>`
    * (tasks/prd-workspace-ticket-management.md FR-83, FR-84).
    *
-   * The Tickets surface lives inside this modal, so a deep link that only
-   * told the module which ticket to show would be a silent no-op — the panel
-   * it renders into is closed. Opening the section is what makes the link
+   * Tickets is not the default view mode, so a deep link that only told the
+   * module which ticket to show would be a silent no-op — the surface it
+   * renders into is hidden. Switching the view is what makes the link
    * actually land somewhere.
    *
    * The ticket module itself reads the same parameter and opens detail once
@@ -362,7 +370,7 @@ export class WorkspaceCommandView {
     if (!params.get('ticket') && !params.get('tickets')) return;
 
     this._ticketDeepLinkApplied = true;
-    this.openStatModal('tickets', null);
+    this.setCommandViewMode('tickets', { focus: false });
   }
 
   /**
@@ -373,9 +381,9 @@ export class WorkspaceCommandView {
    * the user the three tickets behind the number, in the surface where they
    * are actually managed — rather than being a third place to manage them.
    */
-  openTicketsFiltered(state, trigger) {
+  openTicketsFiltered(state) {
     const tickets = typeof window === 'undefined' ? null : window.WorkspaceHubTickets;
-    this.openStatModal('tickets', trigger || null);
+    this.setCommandViewMode('tickets', { focus: false });
     if (!tickets || typeof tickets.setFilterState !== 'function') return;
     tickets.setFilterState(state);
   }
@@ -755,7 +763,8 @@ export class WorkspaceCommandView {
   commandViewSwitchHTML() {
     const modes = [
       { key: 'details', label: 'Details' },
-      { key: 'map', label: 'Map' }
+      { key: 'map', label: 'Map' },
+      { key: 'tickets', label: 'Tickets' }
     ];
     return (
       '<div class="ws-cmd-view-switch" role="group" aria-label="Workspace view">' +
@@ -985,6 +994,11 @@ export class WorkspaceCommandView {
    * reset the user's scroll position.
    */
   async refreshTicketCount() {
+    // While the Tickets view is open, the view itself is the count: it shows
+    // "N tickets" from the fetch it just made. Counting again here would mean
+    // two list requests per render for one number the user can already read.
+    // Leaving the view re-renders, which refreshes the tile.
+    if (this.viewMode === 'tickets') return;
     const tickets = typeof window !== 'undefined' ? window.WorkspaceHubTickets : null;
     const studioId = this.workspaceId();
     if (!tickets || !studioId) return;
@@ -993,7 +1007,7 @@ export class WorkspaceCommandView {
       this.ticketCount = result.count;
     } catch (_error) {
       // A failed count leaves the placeholder rather than showing a wrong
-      // number; the Tickets modal surfaces the real error when opened.
+      // number; the Tickets view surfaces the real error when opened.
       return;
     }
     if (!this.container || typeof this.container.querySelector !== 'function') return;
@@ -1163,20 +1177,28 @@ export class WorkspaceCommandView {
     const mode = this.opsModeLabel();
     const stats = this.computeStats();
 
+    // Tickets renders NOTHING inside this container. Its surface is real DOM
+    // with bound listeners living beside the container, and this container is
+    // rebuilt with innerHTML on every render — which is exactly why the Board
+    // and config panels have to be relocated in and out. Keeping Tickets
+    // outside avoids that dance entirely, and with it the orphaning risk of
+    // forgetting to restore a moved node.
     const body =
-      this.viewMode === 'map'
-        ? this.renderOperationsMap()
-        : '<div class="ws-cmd-layout">' +
-          '<main class="ws-cmd-main">' +
-          this.renderMissionPanel() +
-          '<section class="ws-cmd-garrison">' +
-          this.renderGarrison() +
-          '</section>' +
-          '</main>' +
-          '<aside class="ws-cmd-rail">' +
-          this.renderRail() +
-          '</aside>' +
-          '</div>';
+      this.viewMode === 'tickets'
+        ? ''
+        : this.viewMode === 'map'
+          ? this.renderOperationsMap()
+          : '<div class="ws-cmd-layout">' +
+            '<main class="ws-cmd-main">' +
+            this.renderMissionPanel() +
+            '<section class="ws-cmd-garrison">' +
+            this.renderGarrison() +
+            '</section>' +
+            '</main>' +
+            '<aside class="ws-cmd-rail">' +
+            this.renderRail() +
+            '</aside>' +
+            '</div>';
 
     this.container.innerHTML = this.commandBarHTML(ws, name, mode, stats) + body;
 
@@ -1185,10 +1207,11 @@ export class WorkspaceCommandView {
     this.bindMissionPanel();
     if (this.viewMode === 'map') {
       this.bindOperationsMap();
-    } else {
+    } else if (this.viewMode !== 'tickets') {
       this.bindGarrison();
       this.bindRail();
     }
+    this.syncTicketsView();
     this.mountCommandTagInput();
     this.syncMissionPanel();
     this.syncSharedSurfaces();
@@ -1412,7 +1435,14 @@ export class WorkspaceCommandView {
     root.addEventListener('click', event => {
       const sectionBtn = event.target.closest('[data-cmd-section]');
       if (!sectionBtn) return;
-      this.openStatModal(sectionBtn.getAttribute('data-cmd-section'), sectionBtn);
+      const section = sectionBtn.getAttribute('data-cmd-section');
+      // Tickets is a view mode, not a stat modal, so its tile switches the
+      // view rather than opening a panel over it.
+      if (section === 'tickets') {
+        this.setCommandViewMode('tickets', { focus: false });
+        return;
+      }
+      this.openStatModal(section, sectionBtn);
     });
   }
 
@@ -1469,11 +1499,6 @@ export class WorkspaceCommandView {
         return { title: 'Agents', addLabel: '＋ Add Agent' };
       case 'tasks':
         return { title: this.taskModalShowAll ? 'Tasks' : 'Open Tasks', addLabel: '＋ Add Task' };
-      case 'tickets':
-        // The create form lives inside the Tickets surface itself, because
-        // creating a Ticket requires an explicit Backlog/Ready choice (FR-19)
-        // that a bare "＋ Add" header button cannot express.
-        return { title: 'Tickets', addLabel: '' };
       case 'mcp':
         return { title: 'MCP Servers', addLabel: '＋ Add MCP' };
       case 'skills':
@@ -1525,7 +1550,6 @@ export class WorkspaceCommandView {
     const wasBoard = this.taskModalBoardMode;
     const wasConfig = this.sectionUsesConfigSurface(this.statModalSection);
     const wasTools = this.statModalSection === 'tools';
-    const wasTickets = this.statModalSection === 'tickets';
     this.statModalSection = '';
     this.statModalTrigger = null;
     this.taskModalBoardMode = false;
@@ -1542,12 +1566,6 @@ export class WorkspaceCommandView {
     }
     if (wasTools) {
       this.releaseToolsModalSurface();
-    }
-    // Hand the live Tickets node back to the hidden hosts block, and refresh
-    // the stat tile so a ticket created in the modal is reflected immediately.
-    if (wasTickets) {
-      this.restoreSharedSurface('tickets');
-      Promise.resolve(this.refreshTicketCount()).catch(() => {});
     }
     if (this.statModalEl) this.statModalEl.hidden = true;
     this.setCommandBackgroundInert(false);
@@ -1657,44 +1675,46 @@ export class WorkspaceCommandView {
     if (panel.classList) panel.classList.toggle('is-config', isConfig);
     panel.innerHTML = this.statModalHTML(this.statModalSection);
     this.syncBoardSurface();
-    this.syncTicketsSurface();
     this.syncConfigModalSurface();
     this.syncToolsModalSurface();
     this.mountTaskFilterBar();
   }
 
-  // Mount the live Tickets surface into the open Tickets modal, mirroring
-  // syncBoardSurface. The surface is a single relocated node, not a copy, so
-  // there is only ever one Ticket create form and one list in the document —
-  // a second editable copy is exactly how two surfaces drift apart.
-  syncTicketsSurface() {
-    const open =
-      this.statModalSection === 'tickets' && this.statModalEl && !this.statModalEl.hidden;
-    if (!open) {
-      this.restoreSharedSurface('tickets');
+  /**
+   * Shows or hides the Tickets view.
+   *
+   * Tickets is a view MODE, not a relocated panel: its surface is real DOM
+   * with bound listeners that lives beside the command container and is simply
+   * shown or hidden. Nothing is moved, so nothing can be orphaned by a missed
+   * restore — the failure this page's shared-surface pattern invites.
+   */
+  syncTicketsView() {
+    if (typeof document === 'undefined') return;
+    const surface = document.getElementById('workspace-detail-tickets-surface');
+    if (!surface) return;
+
+    const active = this.viewMode === 'tickets';
+    surface.hidden = !active;
+    if (surface.style) surface.style.display = active ? '' : 'none';
+    if (!active) {
+      this.ticketsViewLoaded = false;
       return;
     }
-    const host = this.statModalEl.querySelector('[data-cmd-tickets-host]');
-    if (!host) return;
 
-    const surface = this.mountSharedSurface('tickets', '#workspace-detail-tickets-surface', host);
-    if (!surface) {
-      host.innerHTML = '<div class="ws-cmd-modal-empty">Tickets are unavailable.</div>';
-      return;
-    }
-    surface.hidden = false;
-    if (surface.style) surface.style.display = '';
-
-    // The Tickets module owns its own loading, empty, and error states and
-    // fetches fresh on every open, so the modal can never show a record the
-    // server no longer has.
+    // Load on ENTRY only. This runs from render(), which fires again on every
+    // workspace refresh — including the one a ticket transition triggers — so
+    // reloading unconditionally turned a single board move into five list
+    // fetches, throwing away the user's scroll and filter work each time. The
+    // Tickets module refreshes itself after its own mutations; entering the
+    // view is the only moment this owns.
+    if (this.ticketsViewLoaded) return;
     const tickets = typeof window !== 'undefined' ? window.WorkspaceHubTickets : null;
-    if (tickets) {
-      tickets.init();
-      Promise.resolve(tickets.load()).catch(() => {
-        /* the module renders its own error state */
-      });
-    }
+    if (!tickets) return;
+    this.ticketsViewLoaded = true;
+    tickets.init();
+    Promise.resolve(tickets.load()).catch(() => {
+      /* the module renders its own error state */
+    });
   }
 
   // Mount the live Workspace config surface into the open MCP/Skills stat modal, showing
@@ -1890,21 +1910,6 @@ export class WorkspaceCommandView {
     if (!meta) return '';
     if (section === 'watchtower') return this.watchtowerPanelHTML();
     if (section === 'calendar-ops') return this.calendarOpsPanelHTML();
-    // Tickets renders as an empty host; the live surface is relocated into it
-    // by syncTicketsSurface, the same way the Board and config panels work.
-    if (section === 'tickets') {
-      return (
-        '<header class="ws-cmd-modal-head">' +
-        '<h3 class="ws-cmd-modal-title">' +
-        escapeHtml(meta.title) +
-        '</h3>' +
-        '<div class="ws-cmd-modal-head-actions">' +
-        '<button type="button" class="ws-cmd-modal-close" data-cmd-modal-action="close" aria-label="Close tickets">×</button>' +
-        '</div>' +
-        '</header>' +
-        '<div class="ws-cmd-modal-body" data-cmd-tickets-host></div>'
-      );
-    }
     // The Tools modal groups every capability provider (MCP, Skills, Plugins) plus the
     // Find Tools discovery flow behind one tabbed surface.
     if (section === 'tools') {
@@ -4255,7 +4260,7 @@ export class WorkspaceCommandView {
     // managed.
     const tickets = typeof window === 'undefined' ? null : window.WorkspaceHubTickets;
     if (tickets && typeof tickets.setFilterState === 'function') {
-      this.openStatModal('tickets', trigger || null);
+      this.setCommandViewMode('tickets', { focus: false });
       const selectId = options.selectId ? String(options.selectId) : '';
       void Promise.resolve(tickets.setFilterState('backlog'))
         .then(() => {
@@ -7520,10 +7525,7 @@ export class WorkspaceCommandView {
       // openTicketsFiltered so the two entry points cannot diverge.
       const mapOpenTickets = event.target.closest('[data-cmd-open-tickets]');
       if (mapOpenTickets) {
-        this.openTicketsFiltered(
-          mapOpenTickets.getAttribute('data-cmd-open-tickets'),
-          mapOpenTickets
-        );
+        this.openTicketsFiltered(mapOpenTickets.getAttribute('data-cmd-open-tickets'));
         return;
       }
       const backlogDrawerBtn = event.target.closest('[data-cmd-open-backlog-drawer]');
@@ -8594,9 +8596,6 @@ export class WorkspaceCommandView {
     this.restoreSharedSurface('tools');
     this.restoreSharedSurface('members');
     this.restoreSharedSurface('board');
-    // Tickets is a relocated node like the others: without this it would be
-    // left inside a torn-down modal and vanish from the document.
-    this.restoreSharedSurface('tickets');
   }
 
   showConfigTab(tab) {
@@ -8798,7 +8797,7 @@ export class WorkspaceCommandView {
       // below so a shortcut inside the Backlog panel is not swallowed by them.
       const openTickets = event.target.closest('[data-cmd-open-tickets]');
       if (openTickets) {
-        this.openTicketsFiltered(openTickets.getAttribute('data-cmd-open-tickets'), openTickets);
+        this.openTicketsFiltered(openTickets.getAttribute('data-cmd-open-tickets'));
         return;
       }
       const backlogAdd = event.target.closest('[data-cmd-backlog-add]');
