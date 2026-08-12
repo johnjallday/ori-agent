@@ -17,7 +17,8 @@ func TestNormalizePatchRejectsUnsafeGeometry(t *testing.T) {
 		{"infinite coordinate", SetPositions(map[string]Point{"ws": {X: math.Inf(1), Y: 0}}), ErrInvalidCoordinate},
 		{"beyond safe world", SetPositions(map[string]Point{"ws": {X: MaxCoordinate + 1, Y: 0}}), ErrInvalidCoordinate},
 		{"zoom too far in", SetViewport(Viewport{Zoom: MaxZoom + 0.1}), ErrInvalidZoom},
-		{"zoom too far out", SetViewport(Viewport{Zoom: MinZoom - 0.1}), ErrInvalidZoom},
+		{"zoom too far out", SetViewport(Viewport{Zoom: MinZoom - 0.01}), ErrInvalidZoom},
+		{"zoom not finite", SetViewport(Viewport{Zoom: math.NaN()}), ErrInvalidZoom},
 		{"empty node id", SetPositions(map[string]Point{"  ": {X: 0, Y: 0}}), ErrInvalidNodeID},
 		{"reserved hq site", SetPositions(map[string]Point{ReservedHQSiteID: {X: 0, Y: 0}}), ErrInvalidNodeID},
 		{"oversized node id", SetPositions(map[string]Point{strings.Repeat("x", MaxNodeIDLength+1): {X: 0, Y: 0}}), ErrInvalidNodeID},
@@ -112,6 +113,54 @@ func TestSanitizersDegradeInsteadOfFailing(t *testing.T) {
 	}
 	if _, ok := SanitizeViewport(Viewport{Zoom: 99}); ok {
 		t.Error("an out-of-range stored zoom must not read as usable")
+	}
+	// A camera Fit All framed a wide layout with is a camera the map has to be
+	// able to reopen on (#307).
+	if viewport, ok := SanitizeViewport(Viewport{Zoom: MinZoom}); !ok || viewport.Zoom != MinZoom {
+		t.Errorf("a fitted %v viewport = %v, %v; want it preserved", MinZoom, viewport, ok)
+	}
+	if _, ok := SanitizeViewport(Viewport{Zoom: MinZoom / 2}); ok {
+		t.Error("but the floor still holds: a zoom below it is not usable state")
+	}
+}
+
+// The stored range has to cover everything the map can reach, framed or
+// gestured, or the view a user deliberately left the map on is rejected on save
+// and snaps back on reload (#307).
+func TestZoomRangeCoversEveryReachableView(t *testing.T) {
+	if MinZoom != 0.1 {
+		t.Fatalf("MinZoom = %v, want the 10%% floor the client clamps to", MinZoom)
+	}
+
+	cases := []struct {
+		name string
+		zoom float64
+		want bool
+	}{
+		{"the floor", MinZoom, true},
+		{"just below the floor", MinZoom - 0.001, false},
+		{"a fitted wide layout", 0.26, true},
+		{"the old 50% floor", 0.5, true},
+		{"an ordinary view", DefaultZoom, true},
+		{"the ceiling", MaxZoom, true},
+		{"above the ceiling", MaxZoom + 0.001, false},
+		{"not a number", math.NaN(), false},
+		{"infinite", math.Inf(1), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			viewport := Viewport{CenterX: 12, CenterY: -8, Zoom: tc.zoom}
+			if got := viewport.IsValid(); got != tc.want {
+				t.Errorf("Viewport{Zoom: %v}.IsValid() = %v, want %v", tc.zoom, got, tc.want)
+			}
+			_, err := NormalizePatch(Patch{Operations: []Operation{SetViewport(viewport)}})
+			if tc.want && err != nil {
+				t.Errorf("NormalizePatch rejected a storable zoom %v: %v", tc.zoom, err)
+			}
+			if !tc.want && !errors.Is(err, ErrInvalidZoom) {
+				t.Errorf("NormalizePatch(%v) error = %v, want ErrInvalidZoom", tc.zoom, err)
+			}
+		})
 	}
 }
 

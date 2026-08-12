@@ -165,6 +165,8 @@ func TestPatchLayoutRejectsMalformedInput(t *testing.T) {
 		{"non-finite coordinate", `{"operations":[{"op":"set_positions","positions":{"ws-a":{"x":1e400,"y":0}}}]}`},
 		{"out of range coordinate", `{"operations":[{"op":"set_positions","positions":{"ws-a":{"x":99999999,"y":0}}}]}`},
 		{"zoom out of range", `{"operations":[{"op":"set_viewport","viewport":{"center_x":0,"center_y":0,"zoom":42}}]}`},
+		{"zoom below the framing floor", `{"operations":[{"op":"set_viewport","viewport":{"center_x":0,"center_y":0,"zoom":0.05}}]}`},
+		{"zoom not a number", `{"operations":[{"op":"set_viewport","viewport":{"center_x":0,"center_y":0,"zoom":1e400}}]}`},
 		{"reserved node id", `{"operations":[{"op":"set_positions","positions":{"__personal_hq_site__":{"x":0,"y":0}}}]}`},
 	}
 	for _, tc := range cases {
@@ -175,6 +177,30 @@ func TestPatchLayoutRejectsMalformedInput(t *testing.T) {
 			resp, _ := do(t, server, http.MethodPatch, tc.body)
 			if resp.StatusCode != http.StatusBadRequest {
 				t.Fatalf("status = %d, want 400", resp.StatusCode)
+			}
+		})
+	}
+}
+
+// A camera Fit All framed a wide layout with has to survive the round trip it
+// is saved through, or the view snaps back to 50% on the next load (#307).
+func TestPatchLayoutAcceptsAFittedWideViewport(t *testing.T) {
+	cases := []struct {
+		name string
+		zoom string
+	}{
+		{"the framing floor", "0.1"},
+		{"a fitted wide layout", "0.3"},
+		{"the interactive floor", "0.5"},
+		{"the ceiling", "2"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			server := newTestServer(t, &realValidationService{}, fakeUserProvider{id: "local"})
+			resp, body := do(t, server, http.MethodPatch,
+				`{"operations":[{"op":"set_viewport","viewport":{"center_x":900,"center_y":420,"zoom":`+tc.zoom+`}}]}`)
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("status = %d, want 200 for zoom %s: %v", resp.StatusCode, tc.zoom, body)
 			}
 		})
 	}

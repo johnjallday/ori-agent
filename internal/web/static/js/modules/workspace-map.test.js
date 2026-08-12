@@ -990,6 +990,9 @@ function loadMapWithFetch(fetchImpl, windowExtras = {}, consoleImpl) {
       setTimeout,
       clearTimeout,
       fetch: fetchImpl,
+      // hasHQFocusIntent parses the query string with it, for the tests that
+      // pass a location through windowExtras.
+      URLSearchParams,
       console: consoleImpl || { error() {}, warn() {}, log() {} }
     },
     { filename: 'workspace-map.js' }
@@ -1151,14 +1154,24 @@ test('button and keyboard zoom keep the viewport centre fixed (FR-39)', () => {
   assert.equal(after.zoom, 1.25);
 });
 
-test('zoom is clamped to the usable 50%–200% range (FR-38)', () => {
+// --- one floor, shared by framing and gestures (#307) ----------------------
+//
+// The floor was 50% until Fit All had to frame a map wider than two viewports.
+// Lowering it for framing alone would have left the camera somewhere the user
+// could not zoom back out of by hand, so gestures reach the same 10%.
+
+test('zoom is clamped to the usable 10%–200% range (FR-38, #307)', () => {
   const cam = loadCamera();
-  assert.equal(cam.limits.min, 0.5);
+  assert.equal(cam.limits.min, 0.1, 'a stray coordinate must not render the map as a dot');
   assert.equal(cam.limits.max, 2);
   assert.equal(cam.clampZoom(50), 2);
-  assert.equal(cam.clampZoom(0.01), 0.5);
+  assert.equal(cam.clampZoom(0.3), 0.3, 'a fitted wide view is kept, not snapped up');
+  assert.equal(cam.clampZoom(0.1), 0.1);
+  assert.equal(cam.clampZoom(0.01), 0.1, 'and the floor still holds');
   assert.equal(cam.clampZoom(Number.NaN), 1, 'a corrupt zoom opens at 100%, not at nothing');
+  assert.equal(cam.clampZoom(Number.POSITIVE_INFINITY), 1);
   assert.equal(cam.zoomAroundCenter({ centerX: 0, centerY: 0, zoom: 2 }, 4).zoom, 2);
+  assert.equal(cam.zoomAroundCenter({ centerX: 0, centerY: 0, zoom: 0.1 }, 0.25).zoom, 0.1);
 });
 
 test('Fit All frames the whole content with padding (FR-40)', () => {
@@ -1172,6 +1185,60 @@ test('Fit All frames the whole content with padding (FR-40)', () => {
   const bottomRight = cam.worldToScreen({ x: bounds.maxX, y: bounds.maxY }, fitted, VIEWPORT);
   assert.ok(topLeft.x >= 0 && topLeft.y >= 0, 'content starts inside the viewport');
   assert.ok(bottomRight.x <= VIEWPORT.width && bottomRight.y <= VIEWPORT.height);
+});
+
+test('Fit All frames a map wider than two viewports below 50% (#307)', () => {
+  const cam = loadCamera();
+  // 6000 world units across a 1000px viewport: 50% shows a sixth of it.
+  const bounds = { minX: 0, minY: 0, maxX: 6000, maxY: 1200 };
+  const fitted = cam.fitBounds(bounds, VIEWPORT, 48);
+  assert.ok(Number.isFinite(fitted.zoom), 'zoom stays a real number');
+  assert.ok(fitted.zoom < 0.5, 'fitted at ' + fitted.zoom + ', which is not below the old clamp');
+  assert.ok(fitted.zoom >= 0.1, 'and never past the framing floor');
+  assert.equal(fitted.fitsEverything, true, 'this layout does fit — it just needed the room');
+
+  const topLeft = cam.worldToScreen({ x: bounds.minX, y: bounds.minY }, fitted, VIEWPORT);
+  const bottomRight = cam.worldToScreen({ x: bounds.maxX, y: bounds.maxY }, fitted, VIEWPORT);
+  assert.ok(topLeft.x >= 0 && topLeft.y >= 0, 'the far corners are on screen');
+  assert.ok(bottomRight.x <= VIEWPORT.width && bottomRight.y <= VIEWPORT.height);
+});
+
+test('an extreme layout stops at the 10% floor and reports that it did (#307)', () => {
+  const cam = loadCamera();
+  const fitted = cam.fitBounds({ minX: 0, minY: 0, maxX: 400000, maxY: 200 }, VIEWPORT, 48);
+  assert.equal(fitted.zoom, 0.1, 'the floor holds');
+  assert.equal(
+    fitted.fitsEverything,
+    false,
+    'and Fit All knows it did not manage to show everything'
+  );
+});
+
+test('a gesture can keep going out from a fitted view, down to the floor (#307)', () => {
+  const cam = loadCamera();
+  const fitted = { centerX: 0, centerY: 0, zoom: 0.3 };
+
+  const outward = cam.zoomAroundCenter(fitted, 1 / 1.25);
+  assert.ok(Math.abs(outward.zoom - 0.24) < 1e-9, 'Zoom Out keeps going past the fitted value');
+  const inward = cam.zoomAroundCenter(fitted, 1.25);
+  assert.ok(Math.abs(inward.zoom - 0.375) < 1e-9, 'and Zoom In steps inward from it');
+
+  // The wheel obeys the same one floor, and stops there.
+  assert.equal(cam.zoomAroundPoint(fitted, VIEWPORT, { x: 820, y: 140 }, 0.1).zoom, 0.1);
+  assert.equal(cam.zoomAroundCenter({ centerX: 0, centerY: 0, zoom: 0.12 }, 1 / 1.25).zoom, 0.1);
+});
+
+test('a fitted sub-50% camera survives every non-zoom camera action (#307)', () => {
+  const cam = loadCamera();
+  const world = { minX: -8000, minY: -8000, maxX: 8000, maxY: 8000 };
+
+  const panned = cam.clampCamera({ centerX: 1200, centerY: -640, zoom: 0.3 }, world);
+  assert.equal(panned.zoom, 0.3, 'panning is not a zoom');
+  assert.equal(cam.centerOn({ centerX: 0, centerY: 0, zoom: 0.3 }, { x: 900, y: 400 }).zoom, 0.3);
+
+  // The tolerant fallbacks are unchanged for state that is not a valid camera.
+  assert.equal(cam.clampCamera({ centerX: 0, centerY: 0, zoom: Number.NaN }, world).zoom, 1);
+  assert.equal(cam.clampCamera({ centerX: 0, centerY: 0, zoom: 0.001 }, world).zoom, 0.1);
 });
 
 test('Center Selected moves the view, not the record (FR-41)', () => {
@@ -1618,6 +1685,300 @@ test('camera saves are debounced and best-effort (FR-44, FR-108)', async () => {
   const kept = map.getLayoutState().positions['ws-1'];
   assert.equal(kept.x, 100);
   assert.equal(kept.y, 100);
+});
+
+// --- a wide layout, fitted, panned, saved and reopened (#307) ---------------
+//
+// The pure tests above pin the maths; this one proves the whole path holds
+// together, because every previous attempt to fit a wide map failed somewhere
+// between the clamp, the save and the reload rather than in the arithmetic.
+
+// A layout spread wider than two 1000px viewports, which is exactly the case
+// the old 50% floor could not frame.
+const WIDE_POSITIONS = {
+  'ws-1': { x: 0, y: 0 },
+  'ws-2': { x: 6000, y: 900 }
+};
+
+test('Fit All frames a wide layout below 50%, and it survives being used (#307)', async () => {
+  const patches = [];
+  const map = loadMapWithFetch((url, init) => {
+    if (init && init.method === 'PATCH') {
+      patches.push(JSON.parse(init.body));
+      return jsonResponse({ schema_version: 1, revision: 2, positions: WIDE_POSITIONS });
+    }
+    return jsonResponse({ schema_version: 1, revision: 1, positions: WIDE_POSITIONS });
+  });
+  const harness = createCameraHarness({ tiles: ['ws-1', 'ws-2'] });
+  mountWithCamera(map, harness, [
+    { id: 'ws-1', name: 'Alpha' },
+    { id: 'ws-2', name: 'Beta' }
+  ]);
+  await flush();
+
+  const live = harness.container.querySelector('[data-map-live]');
+  harness.fire('keydown', { key: 'f', preventDefault() {} });
+  const fitted = map.getCamera();
+  assert.ok(fitted.zoom < 0.5, 'Fit All stopped at ' + fitted.zoom + ' instead of framing the map');
+  assert.ok(fitted.zoom >= 0.1, 'but not past the floor');
+  assert.equal(live.textContent, 'Showing every workspace', 'and it says what it actually did');
+  assert.equal(
+    harness.container.querySelector('[data-map-zoom-readout]').textContent,
+    Math.round(fitted.zoom * 100) + '%',
+    'the readout is truthful below 50%'
+  );
+  assert.equal(
+    harness.container.querySelector('[data-map-zoom-out]').disabled,
+    false,
+    'and the user can still zoom out by hand from a fitted view'
+  );
+
+  // A non-zoom camera action must not change the fitted zoom.
+  harness.fire('keydown', { key: 'ArrowRight', preventDefault() {} });
+  const panned = map.getCamera();
+  assert.equal(panned.zoom, fitted.zoom, 'panning kept the fitted zoom');
+  assert.ok(panned.centerX > fitted.centerX, 'and did pan');
+
+  // Zoom In steps inward from the fitted value rather than jumping to 50%.
+  harness.container.querySelector('[data-map-zoom-in]').click();
+  const zoomedIn = map.getCamera();
+  assert.ok(zoomedIn.zoom > panned.zoom && zoomedIn.zoom < 0.5, 'in from ' + panned.zoom);
+
+  harness.fire('keydown', { key: 'f', preventDefault() {} });
+  await new Promise(resolve => setTimeout(resolve, 750));
+  await flush();
+
+  const viewportOps = patches
+    .flatMap(patch => patch.operations)
+    .filter(op => op.op === 'set_viewport');
+  assert.ok(viewportOps.length >= 1, 'the fitted camera was saved');
+  const saved = viewportOps[viewportOps.length - 1].viewport;
+  assert.ok(saved.zoom < 0.5 && saved.zoom >= 0.1, 'saved zoom: ' + saved.zoom);
+
+  // Reopening the map restores that camera rather than snapping to 50%.
+  const reopened = loadMapWithFetch(() =>
+    jsonResponse({
+      schema_version: 1,
+      revision: 3,
+      positions: WIDE_POSITIONS,
+      viewport: { center_x: saved.center_x, center_y: saved.center_y, zoom: saved.zoom }
+    })
+  );
+  const second = createCameraHarness({ tiles: ['ws-1', 'ws-2'] });
+  mountWithCamera(reopened, second, [
+    { id: 'ws-1', name: 'Alpha' },
+    { id: 'ws-2', name: 'Beta' }
+  ]);
+  await flush();
+  assert.equal(reopened.getCamera().zoom, saved.zoom, 'the saved sub-50% view came back');
+});
+
+test('a layout too wide even for the floor says so instead of claiming success (#307)', async () => {
+  const map = loadMapWithFetch(() =>
+    jsonResponse({
+      schema_version: 1,
+      positions: { 'ws-1': { x: 0, y: 0 }, 'ws-2': { x: 400000, y: 0 } }
+    })
+  );
+  const harness = createCameraHarness({ tiles: ['ws-1', 'ws-2'] });
+  mountWithCamera(map, harness, [
+    { id: 'ws-1', name: 'Alpha' },
+    { id: 'ws-2', name: 'Beta' }
+  ]);
+  await flush();
+
+  harness.fire('keydown', { key: 'f', preventDefault() {} });
+  assert.equal(map.getCamera().zoom, 0.1, 'it went as far out as it may');
+  assert.match(
+    harness.container.querySelector('[data-map-live]').textContent,
+    /still off-screen/,
+    'and the announcement stays honest about what is not visible'
+  );
+});
+
+// --- first paint with nothing but the reserved HQ site (#329) ---------------
+//
+// A brand-new profile has no workspaces, so the only thing on its map is the
+// reserved Personal HQ landmark. The camera's first-paint guard used to count
+// only nodes and districts as content, leaving the view at its hard-coded
+// default — which put the landmark low and right of centre, with its caption
+// behind the control strip.
+
+const HQ_MISSING = { valid: false, hq_onboarding_state: 'unseen' };
+const DEFAULT_CAMERA = { centerX: 0, centerY: 0, zoom: 1 };
+// The cockpit's map is a panel, not a page: at Home's real height the reserved
+// site's anchor falls behind the control strip under the default camera, which
+// is the shape of the reported bug. A taller canvas hides it by accident.
+const HQ_VIEWPORT = { width: 1000, height: 460 };
+
+// Where the reserved site actually lands, from the same placement the mount
+// uses.
+function hqAnchor(map) {
+  return map.computeWorldLayout([], { hqSite: true }).hqSite;
+}
+
+// clearOf reports whether a cell is fully inside the part of the canvas the
+// floating control strip does not cover.
+function clearOf(map, cell, cam, viewport = HQ_VIEWPORT) {
+  const topLeft = map.camera.worldToScreen({ x: cell.x, y: cell.y }, cam, viewport);
+  const bottomRight = map.camera.worldToScreen({ x: cell.x + 176, y: cell.y + 170 }, cam, viewport);
+  return (
+    topLeft.x >= 0 &&
+    topLeft.y >= 0 &&
+    bottomRight.x <= viewport.width &&
+    // 76px of floating control strip along the bottom.
+    bottomRight.y <= viewport.height - 76
+  );
+}
+
+const hqHarness = () => createCameraHarness(HQ_VIEWPORT);
+
+test('a zero-workspace profile frames its reserved HQ landmark (#329)', async () => {
+  const map = loadMapWithFetch(() => jsonResponse({ schema_version: 1, positions: {} }));
+  map.setHQStatus(HQ_MISSING);
+  const harness = hqHarness();
+  mountWithCamera(map, harness, []);
+  await flush();
+
+  const cam = map.getCamera();
+  assert.notDeepEqual({ ...cam }, DEFAULT_CAMERA, 'the camera never framed anything');
+  assert.equal(cam.zoom, 1, 'and the opening view still does not zoom past 100%');
+  assert.ok(
+    clearOf(map, hqAnchor(map), cam),
+    'the HQ landmark is not fully clear of the control strip: ' + JSON.stringify(cam)
+  );
+});
+
+test('a map with only the New Workspace pad still waits for content (#329)', async () => {
+  const map = loadMapWithFetch(() => jsonResponse({ schema_version: 1, positions: {} }));
+  const harness = hqHarness();
+  mountWithCamera(map, harness, []);
+  await flush();
+
+  assert.deepEqual(
+    { ...map.getCamera() },
+    DEFAULT_CAMERA,
+    'framing the bare create pad would lock the camera onto an empty corner'
+  );
+
+  // And the one-time initialization was not spent: content arriving later
+  // still gets framed.
+  map.setHQStatus(HQ_MISSING);
+  await flush();
+  assert.notDeepEqual({ ...map.getCamera() }, DEFAULT_CAMERA, 'the late site was framed');
+});
+
+test('the HQ site arriving after the first mount frames the camera exactly once (#329)', async () => {
+  const map = loadMapWithFetch(() => jsonResponse({ schema_version: 1, positions: {} }));
+  const harness = hqHarness();
+  mountWithCamera(map, harness, []);
+  await flush();
+
+  // personal-hq-onboarding.js resolves the status and re-mounts us.
+  map.setHQStatus(HQ_MISSING);
+  await flush();
+  const framed = map.getCamera();
+  assert.ok(clearOf(map, hqAnchor(map), framed), 'the late site was framed clear of the strip');
+
+  // The user then moves the camera. A later status refresh must not undo that.
+  harness.fire('keydown', { key: 'ArrowRight', preventDefault() {} });
+  const moved = map.getCamera();
+  assert.notDeepEqual({ ...moved }, { ...framed }, 'the pan moved the camera');
+  map.setHQStatus({ valid: false, hq_onboarding_state: 'skipped' });
+  await flush();
+  assert.deepEqual({ ...map.getCamera() }, { ...moved }, 'a refresh must not refit the view');
+});
+
+test('a saved camera still wins over framing the reserved site (#329, FR-45)', async () => {
+  const map = loadMapWithFetch(() =>
+    jsonResponse({
+      schema_version: 1,
+      positions: {},
+      viewport: { center_x: 512, center_y: 384, zoom: 1.25 }
+    })
+  );
+  map.setHQStatus(HQ_MISSING);
+  const harness = hqHarness();
+  mountWithCamera(map, harness, []);
+  await flush();
+
+  assert.deepEqual({ ...map.getCamera() }, { centerX: 512, centerY: 384, zoom: 1.25 });
+});
+
+test('a reserved site does not frame the camera before the layout lands (#329)', async () => {
+  // The layout request is left unresolved: until it answers, saved anchors may
+  // still arrive and move everything, so framing now would frame the wrong
+  // world and then be spent.
+  let release;
+  const map = loadMapWithFetch(
+    () => new Promise(resolve => (release = () => resolve(jsonResponse({ positions: {} }))))
+  );
+  map.setHQStatus(HQ_MISSING);
+  const harness = hqHarness();
+  mountWithCamera(map, harness, []);
+  await flush();
+  assert.deepEqual({ ...map.getCamera() }, DEFAULT_CAMERA, 'framed while still loading');
+
+  release();
+  await flush();
+  mountWithCamera(map, harness, []);
+  await flush();
+  assert.notDeepEqual({ ...map.getCamera() }, DEFAULT_CAMERA, 'and framed once it settled');
+});
+
+test('framing the reserved site changes the camera and nothing else (#329)', async () => {
+  const map = loadMapWithFetch(() => jsonResponse({ schema_version: 1, positions: {} }));
+  map.setHQStatus(HQ_MISSING);
+  const harness = hqHarness();
+  mountWithCamera(map, harness, []);
+  await flush();
+
+  // The landmark's own anchor is placement, not camera state: it is exactly
+  // where it would be if the camera had never moved.
+  const anchor = hqAnchor(map);
+  const rendered = harness.container.innerHTML.split('data-hq-site')[1] || '';
+  assert.match(
+    rendered,
+    new RegExp('left:' + anchor.x + 'px;top:' + anchor.y + 'px'),
+    'the reserved site moved on the map, which framing must never do'
+  );
+  assert.deepEqual(
+    Object.keys(map.getLayoutState().positions),
+    [],
+    'and nothing was written for it'
+  );
+  assert.equal(map.getSelectedId(), '', 'framing is not a selection');
+
+  // The placement engine is untouched: same anchors, same world, whether or
+  // not the camera decided to frame them.
+  const layout = map.computeWorldLayout([], { hqSite: true });
+  assert.deepEqual({ x: layout.hqSite.x, y: layout.hqSite.y }, { x: anchor.x, y: anchor.y });
+  assert.ok(layout.pad && Number.isFinite(layout.pad.x), 'the create pad still has its anchor');
+  assert.ok(
+    layout.bounds.maxX > layout.bounds.minX && layout.bounds.maxY > layout.bounds.minY,
+    'and the world still has real bounds'
+  );
+});
+
+test('focus intent still selects and announces the reserved site it frames (#322, #329)', async () => {
+  const announced = [];
+  const map = loadMapWithFetch(() => jsonResponse({ schema_version: 1, positions: {} }), {
+    location: { search: '?focus=personal-hq', pathname: '/' }
+  });
+  map.setHQStatus(HQ_MISSING);
+  const harness = hqHarness();
+  map.mount(harness.container, {
+    workspaces: [],
+    hideChrome: true,
+    selectOnly: true,
+    noAutoSelect: true,
+    onSelectHQSite: view => announced.push(view)
+  });
+  await flush();
+
+  assert.equal(map.getSelectedId(), '__personal_hq_site__', 'the focus intent still selects');
+  assert.equal(announced.length, 1, 'and the host was still told exactly once');
+  assert.ok(clearOf(map, hqAnchor(map), map.getCamera()), 'while the camera framed it clear');
 });
 
 // ---------------------------------------------------------------------------

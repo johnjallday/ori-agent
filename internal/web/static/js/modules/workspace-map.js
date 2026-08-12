@@ -55,11 +55,20 @@
   // Storing a scroll offset instead would tie the saved view to the container
   // it was saved from, so the same layout would open somewhere else on a
   // different window size or on the other Map surface.
-  var MIN_ZOOM = 0.5;
+  //
+  // Zoom bottoms out at 10% (#307). The old 50% floor was set for legibility —
+  // below it a building is a smudge — but it made Fit All a liar on any map
+  // spread wider than two viewports, and it left the camera somewhere the user
+  // could not zoom back out of by hand. One floor, applied to framing and to
+  // gestures alike, keeps "show me everything" honest and keeps every view the
+  // map can reach a view the user can also get to. 10% is low enough for a very
+  // wide arrangement and still stops one stray coordinate from rendering the
+  // whole map as a dot.
+  var MIN_ZOOM = 0.1;
   var MAX_ZOOM = 2;
   var DEFAULT_ZOOM = 1;
   // One press of Zoom In/Out. Small enough to feel like a step, large enough
-  // that crossing the 50%–200% range does not take a dozen presses.
+  // that crossing the range does not take a dozen presses.
   var ZOOM_STEP = 1.25;
   // Wheel-zoom sensitivity, applied per normalized wheel notch.
   var WHEEL_ZOOM_RATE = 0.0022;
@@ -125,11 +134,16 @@
     return { x: x, y: y };
   }
 
+  // A stored camera is usable or it is not. Zoom outside the range the map can
+  // actually restore is treated as unreadable rather than clamped into range,
+  // so an unusable saved view opens on a fitted one instead of on an arbitrary
+  // rescue of it (FR-45).
   function safeViewport(raw) {
     if (!raw || typeof raw !== 'object') return null;
     var center = safePoint({ x: raw.center_x, y: raw.center_y });
     var zoom = Number(raw.zoom);
-    if (!center || !isFinite(zoom) || zoom <= 0) return null;
+    if (!center || !isFinite(zoom)) return null;
+    if (zoom < MIN_ZOOM || zoom > MAX_ZOOM) return null;
     return { centerX: center.x, centerY: center.y, zoom: zoom };
   }
 
@@ -889,6 +903,12 @@
   // lets pointer-centred zoom, Fit All, and clamping be asserted exactly rather
   // than eyeballed in a browser (FR-123).
 
+  /**
+   * The one zoom clamp: framing, gestures, the opening view, a restored saved
+   * camera, and every non-zoom action that carries a zoom along all land here
+   * (FR-38). Sharing it is the point — a camera Fit All can reach is one a
+   * gesture can leave, and one the server will store.
+   */
   function clampZoom(zoom) {
     if (typeof zoom !== 'number' || !isFinite(zoom)) return DEFAULT_ZOOM;
     return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom));
@@ -931,20 +951,35 @@
    * centre would make the map drift every time someone pressed Zoom In.
    */
   function zoomAroundCenter(cam, factor) {
-    return { centerX: cam.centerX, centerY: cam.centerY, zoom: clampZoom(cam.zoom * factor) };
+    return {
+      centerX: cam.centerX,
+      centerY: cam.centerY,
+      zoom: clampZoom(cam.zoom * factor)
+    };
   }
 
-  /** The camera that frames everything in `bounds` with padding (FR-40). */
+  /**
+   * The camera that frames everything in `bounds` with padding (FR-40).
+   *
+   * `fitsEverything` reports whether the framing floor was room enough. It is
+   * decided here, where the zoom the content actually needs is known, because
+   * the resulting camera cannot answer it: a fit that lands exactly on the
+   * floor and a fit that was cut off by it look identical afterwards, and Fit
+   * All's announcement is the difference between "showing every workspace" and
+   * telling someone to go looking (#307).
+   */
   function fitBounds(bounds, viewport, padding) {
     var pad = typeof padding === 'number' ? padding : FIT_PADDING;
     var width = Math.max(1, bounds.maxX - bounds.minX);
     var height = Math.max(1, bounds.maxY - bounds.minY);
     var usableWidth = Math.max(1, (viewport.width || DEFAULT_VIEWPORT.width) - pad * 2);
     var usableHeight = Math.max(1, (viewport.height || DEFAULT_VIEWPORT.height) - pad * 2);
+    var required = Math.min(usableWidth / width, usableHeight / height);
     return {
       centerX: (bounds.minX + bounds.maxX) / 2,
       centerY: (bounds.minY + bounds.maxY) / 2,
-      zoom: clampZoom(Math.min(usableWidth / width, usableHeight / height))
+      zoom: clampZoom(required),
+      fitsEverything: isFinite(required) && required >= MIN_ZOOM
     };
   }
 
@@ -960,6 +995,10 @@
    * what makes it possible to build near an edge (FR-11) — but not further, so
    * it is never possible to end up in empty space with no content in any
    * direction and no idea which way to go back.
+   *
+   * The zoom it carries is only sanity-checked, never adjusted: a pan is not a
+   * zoom, and a camera Fit All framed at 26% must still be at 26% after one
+   * (#307).
    */
   function clampCamera(cam, world) {
     return {
@@ -1061,14 +1100,33 @@
     if (layoutState.status === 'loading') return;
     var stored = layoutState.viewport;
     if (stored) {
-      camera = { centerX: stored.centerX, centerY: stored.centerY, zoom: clampZoom(stored.zoom) };
+      camera = {
+        centerX: stored.centerX,
+        centerY: stored.centerY,
+        // A saved camera is very often a saved Fit All, so reopening a wide map
+        // must restore the fitted zoom rather than clamp it away (#307).
+        zoom: clampZoom(stored.zoom)
+      };
       cameraReady = true;
       return;
     }
     // Wait for something worth framing. The first mount can happen before the
     // workspace list arrives, and framing the bare create pad would lock the
     // camera onto an empty corner that every later refresh then inherits.
-    if (!lastWorldLayout.nodes.length && !lastWorldLayout.districts.length) return;
+    //
+    // The reserved Personal HQ site counts. It is the whole map on a profile
+    // that has no workspaces yet, and leaving the camera at its hard-coded
+    // default there put the landmark low and right of centre with its caption
+    // behind the control strip — a first impression of the product with the
+    // one thing on screen half-hidden (#329). The create pad still does not
+    // count: it is an affordance, not content.
+    if (
+      !lastWorldLayout.nodes.length &&
+      !lastWorldLayout.districts.length &&
+      !lastWorldLayout.hqSite
+    ) {
+      return;
+    }
     var canvas = container && container.querySelector && container.querySelector('.ws-map-canvas');
     var fitted = fitBounds(lastWorldLayout.bounds, framedViewport(canvas));
     // Fit All zooms in when there is little content; the opening view does not.
@@ -2946,13 +3004,7 @@
       // Framing actions. Same calls and same announcements as the control
       // cluster, so the two cannot drift apart.
       case 'fit':
-        fitAll(container);
-        announce(
-          container,
-          camera.zoom <= MIN_ZOOM + 0.0001
-            ? 'Zoomed out as far as the map goes. Some workspaces are still off-screen — pan to reach them.'
-            : 'Showing every workspace'
-        );
+        announce(container, fitAllAnnouncement(fitAll(container)));
         break;
       case 'center':
         var anchor = selectedNodeAnchor();
@@ -3439,13 +3491,7 @@
         // that action never lost.
         case 'f':
         case 'F':
-          fitAll(container);
-          announce(
-            container,
-            camera.zoom <= MIN_ZOOM + 0.0001
-              ? 'Zoomed out as far as the map goes. Some workspaces are still off-screen — pan to reach them.'
-              : 'Showing every workspace'
-          );
+          announce(container, fitAllAnnouncement(fitAll(container)));
           break;
         case 'ArrowLeft':
           setCamera(
@@ -3502,13 +3548,26 @@
     };
   }
 
+  // fitAll returns what it managed to do, so the two routes that offer it —
+  // the canvas menu and the keyboard — can announce the same thing without
+  // each re-deriving it from the resulting camera and drifting apart.
   function fitAll(container) {
-    if (!lastWorldLayout) return;
+    if (!lastWorldLayout) return null;
     var canvas = container.querySelector('[data-ws-map-viewport]');
-    setCamera(
-      liftAboveControls(fitBounds(lastWorldLayout.bounds, framedViewport(canvas))),
-      container
-    );
+    var fitted = fitBounds(lastWorldLayout.bounds, framedViewport(canvas));
+    setCamera(liftAboveControls(fitted), container);
+    return fitted;
+  }
+
+  // What Fit All says afterwards. Framing far enough out to show everything is
+  // the ordinary case now (#307); the limitation message is reserved for the
+  // layout so wide that even the framing floor could not contain it, where
+  // claiming success would send someone looking for a workspace that is not on
+  // screen.
+  function fitAllAnnouncement(result) {
+    return result && result.fitsEverything === false
+      ? 'Zoomed out as far as the map goes. Some workspaces are still off-screen — pan to reach them.'
+      : 'Showing every workspace';
   }
 
   // Reset View restores the default framing — the content, centred, at 100%.
