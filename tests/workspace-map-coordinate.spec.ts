@@ -630,11 +630,10 @@ test.describe('Coordinate Workspace Map', () => {
   });
 
   test.describe('a layout wider than two viewports (#307)', () => {
-    // Fit All promised to show every workspace but stopped at the interactive 50%
-    // floor, so a spread-out map was quietly framed as a subset. These drive the
-    // real fix through a browser: the framing floor, the interaction rules that
-    // did not change, and the save/restore round trip that makes a fitted view
-    // survive a reload.
+    // Fit All promised to show every workspace but stopped at the old 50% floor,
+    // so a spread-out map was quietly framed as a subset. These drive the real
+    // fix through a browser: the 10% floor, the buttons that now reach it, and
+    // the save/restore round trip that makes a fitted view survive a reload.
 
     // The cockpit's map is a panel inside Home, so its height follows the
     // window's. At the project's default 1280x720 that panel is ~264px tall and
@@ -648,7 +647,7 @@ test.describe('Coordinate Workspace Map', () => {
 
     /** A span that needs well under 50% to fit, and well over the 10% floor. */
     const WIDE_SPAN = 3000;
-    /** Wide enough that even the 10% framing floor cannot contain it. */
+    /** Wide enough that even the 10% floor cannot contain it. */
     const IMPOSSIBLE_SPAN = 400000;
 
     const readLayout = async (page: Page) =>
@@ -706,8 +705,19 @@ test.describe('Coordinate Workspace Map', () => {
         await patchLayout(page, [{ op: 'set_positions', positions }]);
         await body(ids);
       } finally {
-        const restore: unknown[] = [{ op: 'restore_positions', positions: before.positions || {} }];
-        if (before.viewport) restore.push({ op: 'set_viewport', viewport: before.viewport });
+        const restore: unknown[] = [
+          { op: 'restore_positions', positions: before.positions || {} },
+          // The camera has to go back too, not just the anchors. Leaving a
+          // fitted 26% view behind hands the next test in this serial file a
+          // map zoomed most of the way out — which is how the keyboard-move
+          // test below started failing while its own behavior was fine. There
+          // is no "clear viewport" operation, so a sandbox that had none
+          // stored gets the documented default rather than these leftovers.
+          {
+            op: 'set_viewport',
+            viewport: before.viewport || { center_x: 0, center_y: 0, zoom: 1 }
+          }
+        ];
         await page.request.patch('/api/workspace-map/layout', { data: { operations: restore } });
       }
     }
@@ -759,10 +769,19 @@ test.describe('Coordinate Workspace Map', () => {
         await expect(page.locator('[data-map-zoom-readout]')).toHaveText(
           `${Math.round(fitted.zoom * 100)}%`
         );
-        // Zoom Out has nothing further out to offer, and says so rather than
-        // silently yanking the fitted view back in.
-        await expect(page.locator('[data-map-zoom-out]')).toBeDisabled();
+        // A fitted view is not a dead end: the same floor applies to the
+        // buttons, so the user can still zoom out by hand from here.
+        const zoomOut = page.locator('[data-map-zoom-out]');
+        await expect(zoomOut).toBeEnabled();
+        await zoomOut.click();
+        await page.waitForTimeout(200);
+        const zoomedOut = await cameraOf(page);
+        expect(zoomedOut.zoom, 'Zoom Out kept going past the fitted value').toBeLessThan(
+          fitted.zoom
+        );
+        expect(zoomedOut.zoom).toBeGreaterThanOrEqual(0.1);
 
+        await frameFromMenu(page, 'fit');
         await page.locator('[data-map-zoom-in]').click();
         await page.waitForTimeout(200);
         const zoomedIn = await cameraOf(page);
@@ -775,21 +794,21 @@ test.describe('Coordinate Workspace Map', () => {
       });
     });
 
-    test('an ordinary layout still cannot be zoomed below 50% by hand (#307, FR-38)', async ({
-      page
-    }) => {
+    test('zooming out by hand bottoms out at 10%, not before (#307, FR-38)', async ({ page }) => {
       await ensureWorkspace(page);
       await openMap(page);
       await frameFromMenu(page, 'reset-view');
       expect((await cameraOf(page)).zoom).toBe(1);
 
+      // The old floor was 50%, which left a fitted wide view somewhere the user
+      // could not zoom out of by hand. One floor now, and the button reaches it.
       const zoomOut = page.locator('[data-map-zoom-out]');
-      for (let press = 0; press < 8; press += 1) {
+      for (let press = 0; press < 20; press += 1) {
         if (await zoomOut.isDisabled()) break;
         await zoomOut.click();
-        await page.waitForTimeout(120);
+        await page.waitForTimeout(100);
       }
-      expect((await cameraOf(page)).zoom, 'the interactive floor is unchanged').toBe(0.5);
+      expect((await cameraOf(page)).zoom, 'the floor a gesture may reach').toBe(0.1);
       await expect(zoomOut).toBeDisabled();
       await frameFromMenu(page, 'reset-view');
     });
@@ -851,7 +870,7 @@ test.describe('Coordinate Workspace Map', () => {
         await openMap(page);
         await frameFromMenu(page, 'fit');
 
-        expect((await cameraOf(page)).zoom, 'the framing floor holds').toBe(0.1);
+        expect((await cameraOf(page)).zoom, 'the floor holds').toBe(0.1);
         expect(
           await liveText(page),
           'claiming success here would send someone hunting for a workspace that is not on screen'

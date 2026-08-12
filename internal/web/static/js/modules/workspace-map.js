@@ -56,20 +56,19 @@
   // it was saved from, so the same layout would open somewhere else on a
   // different window size or on the other Map surface.
   //
-  // Zoom has two floors, deliberately. MIN_INTERACTIVE_ZOOM is as far out as a
-  // wheel, button or key may take the camera: below it buildings stop being
-  // readable, so a gesture that lands there is almost always an accident
-  // (FR-38). Framing is the other case — Fit All's whole promise is that it
-  // shows everything (FR-40), and a map spread wider than two viewports simply
-  // cannot be shown at 50%. So framing, and the saved camera a framing action
-  // produces, may go out to MIN_FRAME_ZOOM instead (#307). That floor exists so
-  // one stray coordinate cannot render the whole map as a dot.
-  var MIN_INTERACTIVE_ZOOM = 0.5;
-  var MIN_FRAME_ZOOM = 0.1;
+  // Zoom bottoms out at 10% (#307). The old 50% floor was set for legibility —
+  // below it a building is a smudge — but it made Fit All a liar on any map
+  // spread wider than two viewports, and it left the camera somewhere the user
+  // could not zoom back out of by hand. One floor, applied to framing and to
+  // gestures alike, keeps "show me everything" honest and keeps every view the
+  // map can reach a view the user can also get to. 10% is low enough for a very
+  // wide arrangement and still stops one stray coordinate from rendering the
+  // whole map as a dot.
+  var MIN_ZOOM = 0.1;
   var MAX_ZOOM = 2;
   var DEFAULT_ZOOM = 1;
   // One press of Zoom In/Out. Small enough to feel like a step, large enough
-  // that crossing the 50%–200% range does not take a dozen presses.
+  // that crossing the range does not take a dozen presses.
   var ZOOM_STEP = 1.25;
   // Wheel-zoom sensitivity, applied per normalized wheel notch.
   var WHEEL_ZOOM_RATE = 0.0022;
@@ -136,16 +135,15 @@
   }
 
   // A stored camera is usable or it is not. Zoom outside the range the map can
-  // actually restore — including anything further out than the framing floor —
-  // is treated as unreadable rather than clamped into range, so an unusable
-  // saved view opens on a fitted one instead of on an arbitrary rescue of it
-  // (FR-45).
+  // actually restore is treated as unreadable rather than clamped into range,
+  // so an unusable saved view opens on a fitted one instead of on an arbitrary
+  // rescue of it (FR-45).
   function safeViewport(raw) {
     if (!raw || typeof raw !== 'object') return null;
     var center = safePoint({ x: raw.center_x, y: raw.center_y });
     var zoom = Number(raw.zoom);
     if (!center || !isFinite(zoom)) return null;
-    if (zoom < MIN_FRAME_ZOOM || zoom > MAX_ZOOM) return null;
+    if (zoom < MIN_ZOOM || zoom > MAX_ZOOM) return null;
     return { centerX: center.x, centerY: center.y, zoom: zoom };
   }
 
@@ -906,34 +904,14 @@
   // than eyeballed in a browser (FR-123).
 
   /**
-   * The clamp for a camera that was framed rather than gestured: Fit All, the
-   * opening view, a restored saved camera, and every non-zoom action that
-   * carries one of those zooms along (#307). It is also the widest range the
-   * server will store, so a camera that survives this clamp is a camera that
-   * can be saved.
+   * The one zoom clamp: framing, gestures, the opening view, a restored saved
+   * camera, and every non-zoom action that carries a zoom along all land here
+   * (FR-38). Sharing it is the point — a camera Fit All can reach is one a
+   * gesture can leave, and one the server will store.
    */
-  function clampFrameZoom(zoom) {
+  function clampZoom(zoom) {
     if (typeof zoom !== 'number' || !isFinite(zoom)) return DEFAULT_ZOOM;
-    return Math.min(MAX_ZOOM, Math.max(MIN_FRAME_ZOOM, zoom));
-  }
-
-  /**
-   * How far out a gesture may go from where the camera already is.
-   *
-   * Ordinarily that is the interactive floor. Once Fit All has framed a wide
-   * map further out than that, the current zoom becomes its own floor: zooming
-   * out has nothing left to offer, but the alternative — snapping back to 50%
-   * — would throw away the view the user just asked for, on a press that was
-   * supposed to move the camera outward.
-   */
-  function interactiveZoomFloor(currentZoom) {
-    return Math.min(MIN_INTERACTIVE_ZOOM, clampFrameZoom(currentZoom));
-  }
-
-  /** The clamp for wheel, button and keyboard zoom (FR-38). */
-  function clampInteractiveZoom(zoom, currentZoom) {
-    if (typeof zoom !== 'number' || !isFinite(zoom)) return DEFAULT_ZOOM;
-    return Math.min(MAX_ZOOM, Math.max(interactiveZoomFloor(currentZoom), zoom));
+    return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom));
   }
 
   /** Convert a point in viewport CSS pixels into world units. */
@@ -958,7 +936,7 @@
    * pulled toward the cursor rather than sliding out from under it.
    */
   function zoomAroundPoint(cam, viewport, screenPoint, factor) {
-    var zoom = clampInteractiveZoom(cam.zoom * factor, cam.zoom);
+    var zoom = clampZoom(cam.zoom * factor);
     var world = screenToWorld(screenPoint, cam, viewport);
     return {
       centerX: world.x - (screenPoint.x - viewport.width / 2) / zoom,
@@ -976,7 +954,7 @@
     return {
       centerX: cam.centerX,
       centerY: cam.centerY,
-      zoom: clampInteractiveZoom(cam.zoom * factor, cam.zoom)
+      zoom: clampZoom(cam.zoom * factor)
     };
   }
 
@@ -1000,8 +978,8 @@
     return {
       centerX: (bounds.minX + bounds.maxX) / 2,
       centerY: (bounds.minY + bounds.maxY) / 2,
-      zoom: clampFrameZoom(required),
-      fitsEverything: isFinite(required) && required >= MIN_FRAME_ZOOM
+      zoom: clampZoom(required),
+      fitsEverything: isFinite(required) && required >= MIN_ZOOM
     };
   }
 
@@ -1018,17 +996,15 @@
    * it is never possible to end up in empty space with no content in any
    * direction and no idea which way to go back.
    *
-   * The zoom it carries is only sanity-checked against the framing range, not
-   * the interactive one: a pan is not a zoom, and a camera Fit All framed at
-   * 30% must still be at 30% after it (#307). Refusing a gesture that would
-   * leave the interactive range is the job of the zoom helpers above, which
-   * know which direction the press was asking for.
+   * The zoom it carries is only sanity-checked, never adjusted: a pan is not a
+   * zoom, and a camera Fit All framed at 26% must still be at 26% after one
+   * (#307).
    */
   function clampCamera(cam, world) {
     return {
       centerX: Math.min(Math.max(cam.centerX, world.minX), world.maxX),
       centerY: Math.min(Math.max(cam.centerY, world.minY), world.maxY),
-      zoom: clampFrameZoom(cam.zoom)
+      zoom: clampZoom(cam.zoom)
     };
   }
 
@@ -1060,7 +1036,7 @@
     var world = lastWorldLayout ? lastWorldLayout.world : null;
     camera = world
       ? clampCamera(next, world)
-      : { centerX: next.centerX, centerY: next.centerY, zoom: clampFrameZoom(next.zoom) };
+      : { centerX: next.centerX, centerY: next.centerY, zoom: clampZoom(next.zoom) };
     applyCamera(container);
     scheduleCameraSave();
   }
@@ -1127,10 +1103,9 @@
       camera = {
         centerX: stored.centerX,
         centerY: stored.centerY,
-        // The framing range, not the interactive one: a saved camera is very
-        // often a saved Fit All, and reopening a wide map must not snap the
-        // view the user left it on back to 50% (#307).
-        zoom: clampFrameZoom(stored.zoom)
+        // A saved camera is very often a saved Fit All, so reopening a wide map
+        // must restore the fitted zoom rather than clamp it away (#307).
+        zoom: clampZoom(stored.zoom)
       };
       cameraReady = true;
       return;
@@ -3433,10 +3408,7 @@
     var zoomIn = container.querySelector('[data-map-zoom-in]');
     var zoomOut = container.querySelector('[data-map-zoom-out]');
     if (zoomIn) zoomIn.disabled = camera.zoom >= MAX_ZOOM - 0.0001;
-    // Below 50% the floor is wherever Fit All left the camera, so Zoom Out
-    // reads as spent there too — rather than as a button that responds by
-    // yanking the fitted view back in (#307).
-    if (zoomOut) zoomOut.disabled = camera.zoom <= interactiveZoomFloor(camera.zoom) + 0.0001;
+    if (zoomOut) zoomOut.disabled = camera.zoom <= MIN_ZOOM + 0.0001;
     // Center Selected has no button to keep in step any more; the canvas menu
     // computes its own disabled state from selectedNodeAnchor() each time it
     // opens, which cannot go stale.
@@ -4755,8 +4727,7 @@
     // Pure camera math (FR-123). Exported so pointer-centred zoom, framing, and
     // clamping can be asserted exactly rather than eyeballed.
     camera: {
-      clampInteractiveZoom: clampInteractiveZoom,
-      clampFrameZoom: clampFrameZoom,
+      clampZoom: clampZoom,
       screenToWorld: screenToWorld,
       worldToScreen: worldToScreen,
       zoomAroundPoint: zoomAroundPoint,
@@ -4764,16 +4735,7 @@
       fitBounds: fitBounds,
       centerOn: centerOn,
       clampCamera: clampCamera,
-      // `min` is the interactive floor, kept under its original name because
-      // that is the limit a user meets. `frameMin` is the separate floor Fit
-      // All and a saved camera may reach (#307).
-      limits: {
-        min: MIN_INTERACTIVE_ZOOM,
-        interactiveMin: MIN_INTERACTIVE_ZOOM,
-        frameMin: MIN_FRAME_ZOOM,
-        max: MAX_ZOOM,
-        step: ZOOM_STEP
-      }
+      limits: { min: MIN_ZOOM, max: MAX_ZOOM, step: ZOOM_STEP }
     },
     getCamera: function () {
       return { centerX: camera.centerX, centerY: camera.centerY, zoom: camera.zoom };

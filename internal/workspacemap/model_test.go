@@ -17,7 +17,7 @@ func TestNormalizePatchRejectsUnsafeGeometry(t *testing.T) {
 		{"infinite coordinate", SetPositions(map[string]Point{"ws": {X: math.Inf(1), Y: 0}}), ErrInvalidCoordinate},
 		{"beyond safe world", SetPositions(map[string]Point{"ws": {X: MaxCoordinate + 1, Y: 0}}), ErrInvalidCoordinate},
 		{"zoom too far in", SetViewport(Viewport{Zoom: MaxZoom + 0.1}), ErrInvalidZoom},
-		{"zoom too far out", SetViewport(Viewport{Zoom: MinPersistedZoom - 0.01}), ErrInvalidZoom},
+		{"zoom too far out", SetViewport(Viewport{Zoom: MinZoom - 0.01}), ErrInvalidZoom},
 		{"zoom not finite", SetViewport(Viewport{Zoom: math.NaN()}), ErrInvalidZoom},
 		{"empty node id", SetPositions(map[string]Point{"  ": {X: 0, Y: 0}}), ErrInvalidNodeID},
 		{"reserved hq site", SetPositions(map[string]Point{ReservedHQSiteID: {X: 0, Y: 0}}), ErrInvalidNodeID},
@@ -116,20 +116,20 @@ func TestSanitizersDegradeInsteadOfFailing(t *testing.T) {
 	}
 	// A camera Fit All framed a wide layout with is a camera the map has to be
 	// able to reopen on (#307).
-	if viewport, ok := SanitizeViewport(Viewport{Zoom: MinPersistedZoom}); !ok || viewport.Zoom != MinPersistedZoom {
-		t.Errorf("a fitted %v viewport = %v, %v; want it preserved", MinPersistedZoom, viewport, ok)
+	if viewport, ok := SanitizeViewport(Viewport{Zoom: MinZoom}); !ok || viewport.Zoom != MinZoom {
+		t.Errorf("a fitted %v viewport = %v, %v; want it preserved", MinZoom, viewport, ok)
 	}
-	if _, ok := SanitizeViewport(Viewport{Zoom: MinPersistedZoom / 2}); ok {
+	if _, ok := SanitizeViewport(Viewport{Zoom: MinZoom / 2}); ok {
 		t.Error("but the floor still holds: a zoom below it is not usable state")
 	}
 }
 
-// The persisted range is wider than the interactive one on purpose: Fit All may
-// frame further out than a gesture may reach, and the camera it produces has to
-// survive a save and a reload (#307).
-func TestPersistedZoomRangeCoversFramingAndInteraction(t *testing.T) {
-	if MinPersistedZoom >= MinInteractiveZoom {
-		t.Fatalf("MinPersistedZoom = %v must be further out than MinInteractiveZoom = %v", MinPersistedZoom, MinInteractiveZoom)
+// The stored range has to cover everything the map can reach, framed or
+// gestured, or the view a user deliberately left the map on is rejected on save
+// and snaps back on reload (#307).
+func TestZoomRangeCoversEveryReachableView(t *testing.T) {
+	if MinZoom != 0.1 {
+		t.Fatalf("MinZoom = %v, want the 10%% floor the client clamps to", MinZoom)
 	}
 
 	cases := []struct {
@@ -137,10 +137,10 @@ func TestPersistedZoomRangeCoversFramingAndInteraction(t *testing.T) {
 		zoom float64
 		want bool
 	}{
-		{"the framing floor", MinPersistedZoom, true},
-		{"just below the framing floor", MinPersistedZoom - 0.001, false},
-		{"a fitted wide layout", 0.3, true},
-		{"the interactive floor", MinInteractiveZoom, true},
+		{"the floor", MinZoom, true},
+		{"just below the floor", MinZoom - 0.001, false},
+		{"a fitted wide layout", 0.26, true},
+		{"the old 50% floor", 0.5, true},
 		{"an ordinary view", DefaultZoom, true},
 		{"the ceiling", MaxZoom, true},
 		{"above the ceiling", MaxZoom + 0.001, false},

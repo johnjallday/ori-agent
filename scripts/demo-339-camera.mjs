@@ -59,7 +59,7 @@ const anchors = () =>
   page.evaluate(() =>
     [...document.querySelectorAll('.ws-map-tile[data-ws-id]')]
       .map(el => ({
-        id: el.getAttribute('data-ws-id').slice(0, 8),
+        id: el.getAttribute('data-ws-id'),
         x: Math.round(parseFloat(el.style.left || '0')),
         y: Math.round(parseFloat(el.style.top || '0'))
       }))
@@ -127,7 +127,8 @@ if (!fresh) {
   await page.waitForTimeout(700);
 
   const baseline = await anchors();
-  console.log('buildings on the map:', baseline.length, JSON.stringify(baseline));
+  const short = rows => rows.map(row => ({ ...row, id: row.id.slice(0, 8) }));
+  console.log('buildings on the map:', baseline.length, JSON.stringify(short(baseline)));
   console.log('opening camera:      ', await camera());
   await shot('01-opened');
 
@@ -164,8 +165,10 @@ if (!fresh) {
   );
 
   // Center Selected is the other non-zoom camera action, and the one most
-  // likely to quietly re-clamp the zoom.
-  await page.locator('.ws-map-tile[data-ws-id]').first().click();
+  // likely to quietly re-clamp the zoom. Selected through the cockpit's own
+  // API rather than by clicking: on a wide map at 26% the building this wants
+  // is often outside the viewport, which is the very thing Center fixes.
+  await page.evaluate(id => window.OriHomeCockpit.select(id), baseline[0].id);
   await page.waitForTimeout(200);
   await menuAction('center');
   const centered = await camera();
@@ -182,6 +185,23 @@ if (!fresh) {
   await page.locator('[data-map-zoom-in]').click();
   await page.waitForTimeout(200);
   console.log('after Zoom In:       ', await camera());
+
+  // A fitted view is not a dead end: the buttons share the framing floor, so
+  // the user can keep zooming out by hand from wherever Fit All landed.
+  await menuAction('fit');
+  const beforeOut = await camera();
+  if (!(await page.locator('[data-map-zoom-out]').isDisabled())) {
+    await page.locator('[data-map-zoom-out]').click();
+    await page.waitForTimeout(200);
+    const out = await camera();
+    console.log(
+      'hand Zoom Out from fitted:',
+      Math.round(beforeOut.zoom * 100) + '% ->',
+      Math.round(out.zoom * 100) + '%'
+    );
+  } else {
+    console.log('hand Zoom Out from fitted: already at the floor, button disabled');
+  }
 
   await menuAction('fit');
   const refitted = await camera();

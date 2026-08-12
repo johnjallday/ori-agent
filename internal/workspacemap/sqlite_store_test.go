@@ -238,7 +238,7 @@ func TestApplyViewportAndPreferences(t *testing.T) {
 func TestApplyKeepsAFittedWideViewport(t *testing.T) {
 	store, _ := newTestStore(t)
 	ctx := context.Background()
-	fitted := Viewport{CenterX: 3000, CenterY: 480, Zoom: MinPersistedZoom}
+	fitted := Viewport{CenterX: 3000, CenterY: 480, Zoom: MinZoom}
 
 	if _, err := store.Apply(ctx, "local", Patch{Operations: []Operation{SetViewport(fitted)}}); err != nil {
 		t.Fatalf("Apply: %v", err)

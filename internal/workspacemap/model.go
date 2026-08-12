@@ -38,26 +38,18 @@ const (
 	MaxCoordinate = 1_000_000.0
 )
 
-// Zoom range. There are two of them, and only one of them is this package's to
-// enforce.
+// Zoom clamp (FR-38). Usable between 10% and 200%.
 //
-// MinInteractiveZoom is the UI's contract: as far out as a wheel, button or key
-// may take the camera, because below it a building stops being readable
-// (FR-38). It is recorded here as documentation of what the client does — the
-// server never sees a gesture, so it cannot and must not enforce it.
-//
-// MinPersistedZoom is what a *stored* camera may be, and it is deliberately
-// further out. Fit All's promise is that it shows everything (FR-40), and a
-// layout spread wider than two viewports cannot be shown at 50%, so framing
-// goes out to 10% and the camera it produces has to be storable — otherwise
-// the view a user deliberately left the map on is rejected on save and snaps
-// back on reload (#307). The floor exists so one stray coordinate cannot
-// persist a camera that renders the whole map as a dot.
+// The floor was 50% until #307. Fit All's promise is that it shows everything
+// (FR-40), and a layout spread wider than two viewports cannot be shown at
+// 50%, so the map now frames — and lets a user zoom — out to 10%. The camera
+// that produces has to be storable, or the view a user deliberately left the
+// map on is rejected on save and snaps back on reload. 10% is still a floor:
+// one stray coordinate must not persist a camera that renders the map as a dot.
 const (
-	MinInteractiveZoom = 0.5
-	MinPersistedZoom   = 0.1
-	MaxZoom            = 2.0
-	DefaultZoom        = 1.0
+	MinZoom     = 0.1
+	MaxZoom     = 2.0
+	DefaultZoom = 1.0
 )
 
 // SnapStep is the one logical snap step, in world units, shared by candidate
@@ -165,7 +157,7 @@ func (v Viewport) IsValid() bool {
 	return isFinite(v.CenterX) && isFinite(v.CenterY) && isFinite(v.Zoom) &&
 		v.CenterX >= MinCoordinate && v.CenterX <= MaxCoordinate &&
 		v.CenterY >= MinCoordinate && v.CenterY <= MaxCoordinate &&
-		v.Zoom >= MinPersistedZoom && v.Zoom <= MaxZoom
+		v.Zoom >= MinZoom && v.Zoom <= MaxZoom
 }
 
 // Bounds is an axis-aligned world-space rectangle. It describes content extent
@@ -521,8 +513,8 @@ func normalizeViewport(v Viewport) (Viewport, error) {
 	if err != nil {
 		return Viewport{}, err
 	}
-	if v.Zoom < MinPersistedZoom || v.Zoom > MaxZoom {
-		return Viewport{}, fmt.Errorf("%w: %g outside [%g, %g]", ErrInvalidZoom, v.Zoom, MinPersistedZoom, MaxZoom)
+	if v.Zoom < MinZoom || v.Zoom > MaxZoom {
+		return Viewport{}, fmt.Errorf("%w: %g outside [%g, %g]", ErrInvalidZoom, v.Zoom, MinZoom, MaxZoom)
 	}
 	return Viewport{CenterX: center.X, CenterY: center.Y, Zoom: roundZoom(v.Zoom)}, nil
 }

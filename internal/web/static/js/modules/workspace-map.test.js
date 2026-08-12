@@ -1154,38 +1154,24 @@ test('button and keyboard zoom keep the viewport centre fixed (FR-39)', () => {
   assert.equal(after.zoom, 1.25);
 });
 
-test('interactive zoom is clamped to the usable 50%–200% range (FR-38)', () => {
-  const cam = loadCamera();
-  assert.equal(cam.limits.min, 0.5, 'the interactive floor is what a gesture may reach');
-  assert.equal(cam.limits.interactiveMin, 0.5);
-  assert.equal(cam.limits.max, 2);
-  assert.equal(cam.clampInteractiveZoom(50, 1), 2);
-  assert.equal(cam.clampInteractiveZoom(0.01, 1), 0.5);
-  assert.equal(
-    cam.clampInteractiveZoom(Number.NaN, 1),
-    1,
-    'a corrupt zoom opens at 100%, not at nothing'
-  );
-  assert.equal(cam.zoomAroundCenter({ centerX: 0, centerY: 0, zoom: 2 }, 4).zoom, 2);
-  assert.equal(cam.zoomAroundCenter({ centerX: 0, centerY: 0, zoom: 0.5 }, 0.25).zoom, 0.5);
-});
-
-// --- two floors, one camera (#307) -----------------------------------------
+// --- one floor, shared by framing and gestures (#307) ----------------------
 //
-// Framing and gesturing are different contracts and always were: Fit All's job
-// is to show everything, and a map wider than two viewports cannot be shown at
-// 50%. These pin the two apart so neither can quietly acquire the other's
-// limit.
+// The floor was 50% until Fit All had to frame a map wider than two viewports.
+// Lowering it for framing alone would have left the camera somewhere the user
+// could not zoom back out of by hand, so gestures reach the same 10%.
 
-test('framing may go further out than a gesture, down to a bounded 10% floor (#307)', () => {
+test('zoom is clamped to the usable 10%–200% range (FR-38, #307)', () => {
   const cam = loadCamera();
-  assert.equal(cam.limits.frameMin, 0.1, 'a stray coordinate must not render the map as a dot');
-  assert.equal(cam.clampFrameZoom(0.3), 0.3, 'a fitted sub-50% zoom is kept, not snapped up');
-  assert.equal(cam.clampFrameZoom(0.1), 0.1);
-  assert.equal(cam.clampFrameZoom(0.01), 0.1, 'and the floor still holds');
-  assert.equal(cam.clampFrameZoom(50), 2, 'the 200% ceiling is shared');
-  assert.equal(cam.clampFrameZoom(Number.NaN), 1, 'a corrupt zoom still opens at 100%');
-  assert.equal(cam.clampFrameZoom(Number.POSITIVE_INFINITY), 1);
+  assert.equal(cam.limits.min, 0.1, 'a stray coordinate must not render the map as a dot');
+  assert.equal(cam.limits.max, 2);
+  assert.equal(cam.clampZoom(50), 2);
+  assert.equal(cam.clampZoom(0.3), 0.3, 'a fitted wide view is kept, not snapped up');
+  assert.equal(cam.clampZoom(0.1), 0.1);
+  assert.equal(cam.clampZoom(0.01), 0.1, 'and the floor still holds');
+  assert.equal(cam.clampZoom(Number.NaN), 1, 'a corrupt zoom opens at 100%, not at nothing');
+  assert.equal(cam.clampZoom(Number.POSITIVE_INFINITY), 1);
+  assert.equal(cam.zoomAroundCenter({ centerX: 0, centerY: 0, zoom: 2 }, 4).zoom, 2);
+  assert.equal(cam.zoomAroundCenter({ centerX: 0, centerY: 0, zoom: 0.1 }, 0.25).zoom, 0.1);
 });
 
 test('Fit All frames the whole content with padding (FR-40)', () => {
@@ -1228,26 +1214,18 @@ test('an extreme layout stops at the 10% floor and reports that it did (#307)', 
   );
 });
 
-test('a gesture from a fitted sub-50% view holds that zoom instead of leaving it (#307)', () => {
+test('a gesture can keep going out from a fitted view, down to the floor (#307)', () => {
   const cam = loadCamera();
   const fitted = { centerX: 0, centerY: 0, zoom: 0.3 };
 
-  assert.equal(
-    cam.zoomAroundCenter(fitted, 1 / 1.25).zoom,
-    0.3,
-    'Zoom Out cannot move further out than Fit All already did'
-  );
-  assert.equal(
-    cam.zoomAroundPoint(fitted, VIEWPORT, { x: 820, y: 140 }, 0.5).zoom,
-    0.3,
-    'and neither can the wheel'
-  );
-
+  const outward = cam.zoomAroundCenter(fitted, 1 / 1.25);
+  assert.ok(Math.abs(outward.zoom - 0.24) < 1e-9, 'Zoom Out keeps going past the fitted value');
   const inward = cam.zoomAroundCenter(fitted, 1.25);
-  assert.ok(Math.abs(inward.zoom - 0.375) < 1e-9, 'Zoom In steps inward from the fitted value');
+  assert.ok(Math.abs(inward.zoom - 0.375) < 1e-9, 'and Zoom In steps inward from it');
 
-  // Once back inside the ordinary range the ordinary floor applies again.
-  assert.equal(cam.zoomAroundCenter({ centerX: 0, centerY: 0, zoom: 0.6 }, 1 / 1.25).zoom, 0.5);
+  // The wheel obeys the same one floor, and stops there.
+  assert.equal(cam.zoomAroundPoint(fitted, VIEWPORT, { x: 820, y: 140 }, 0.1).zoom, 0.1);
+  assert.equal(cam.zoomAroundCenter({ centerX: 0, centerY: 0, zoom: 0.12 }, 1 / 1.25).zoom, 0.1);
 });
 
 test('a fitted sub-50% camera survives every non-zoom camera action (#307)', () => {
@@ -1742,7 +1720,7 @@ test('Fit All frames a wide layout below 50%, and it survives being used (#307)'
   harness.fire('keydown', { key: 'f', preventDefault() {} });
   const fitted = map.getCamera();
   assert.ok(fitted.zoom < 0.5, 'Fit All stopped at ' + fitted.zoom + ' instead of framing the map');
-  assert.ok(fitted.zoom >= 0.1, 'but not past the framing floor');
+  assert.ok(fitted.zoom >= 0.1, 'but not past the floor');
   assert.equal(live.textContent, 'Showing every workspace', 'and it says what it actually did');
   assert.equal(
     harness.container.querySelector('[data-map-zoom-readout]').textContent,
@@ -1751,11 +1729,11 @@ test('Fit All frames a wide layout below 50%, and it survives being used (#307)'
   );
   assert.equal(
     harness.container.querySelector('[data-map-zoom-out]').disabled,
-    true,
-    'and Zoom Out offers nothing further out'
+    false,
+    'and the user can still zoom out by hand from a fitted view'
   );
 
-  // A non-zoom camera action must not snap the fitted view back to 50%.
+  // A non-zoom camera action must not change the fitted zoom.
   harness.fire('keydown', { key: 'ArrowRight', preventDefault() {} });
   const panned = map.getCamera();
   assert.equal(panned.zoom, fitted.zoom, 'panning kept the fitted zoom');
