@@ -170,7 +170,9 @@ func (h *LLMTaskHandler) getProviderForModel(model string) string {
 	}
 
 	if localProvider := llm.FindLocalProviderByModel(h.llmFactory, trimmedModel); localProvider != "" {
-		logger.Info("Model found in local provider, using local provider", logger.Fields{
+		// Debug, not Info: this runs on every scheduler poll tick (default 10s) for
+		// every assigned task, not just when a task actually starts executing.
+		logger.Debug("Model found in local provider, using local provider", logger.Fields{
 			"model":    trimmedModel,
 			"provider": localProvider,
 		})
