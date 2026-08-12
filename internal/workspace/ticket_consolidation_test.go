@@ -135,6 +135,109 @@ func TestBacklogService_CaptureStatesAreDistinguishable(t *testing.T) {
 	}
 }
 
+// FR-7/FR-96: a legacy mutation must move CANONICAL state, not only the legacy
+// projection.
+//
+// This is a regression test for a real divergence: BacklogService.Promote used
+// to set Status=pending while leaving TicketState=backlog, so legacy consumers
+// saw the item promoted and canonical consumers still saw it in Backlog — two
+// answers to "what state is this in", which is exactly the dual authority this
+// feature removes. Found by cross-checking the two APIs against one record on
+// a live server.
+func TestBacklogService_PromoteMovesCanonicalState(t *testing.T) {
+	store := newBacklogTestStore(t)
+	legacy := NewBacklogService(store)
+	tickets := NewTicketService(store)
+	ws := newBacklogTestWorkspace(t, store, "Alpha")
+
+	captured, err := legacy.Create(BacklogCreateInput{
+		WorkspaceID: ws.ID, Description: "promote me through the legacy door",
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	promoted, err := legacy.Promote(ws.ID, captured.ID)
+	if err != nil {
+		t.Fatalf("Promote: %v", err)
+	}
+
+	// Both views must agree.
+	if promoted.TicketState != TicketStateReady {
+		t.Fatalf("canonical TicketState = %q, want ready", promoted.TicketState)
+	}
+	if promoted.CanonicalState() != TicketStateReady {
+		t.Fatalf("CanonicalState = %q, want ready", promoted.CanonicalState())
+	}
+	if promoted.Status != TaskStatusPending {
+		t.Fatalf("legacy Status = %q, want pending", promoted.Status)
+	}
+
+	ticket, err := tickets.Get(ws.ID, captured.ID)
+	if err != nil {
+		t.Fatalf("canonical Get: %v", err)
+	}
+	if ticket.State != TicketStateReady {
+		t.Fatalf("the canonical API still reports %q after a legacy promote", ticket.State)
+	}
+	// The transition is audited like any other, not silently applied.
+	if len(ticket.StateHistory) != 2 {
+		t.Fatalf("a legacy promote must be recorded in history, got %+v", ticket.StateHistory)
+	}
+	if !ticket.AwaitingExecutionIntent {
+		t.Fatalf("promoted work must remain quiescent (FR-24)")
+	}
+	// And the item leaves the legacy Backlog projection too.
+	items, err := legacy.List(ws.ID, false)
+	if err != nil {
+		t.Fatalf("legacy List: %v", err)
+	}
+	for _, item := range items {
+		if item.Task.ID == captured.ID {
+			t.Fatalf("a promoted item still appears in the legacy Backlog list")
+		}
+	}
+}
+
+// FR-60/FR-91: a legacy reorder must move the canonical rank too, or the two
+// lists order differently.
+func TestBacklogService_ReorderMovesCanonicalRank(t *testing.T) {
+	store := newBacklogTestStore(t)
+	legacy := NewBacklogService(store)
+	tickets := NewTicketService(store)
+	ws := newBacklogTestWorkspace(t, store, "Alpha")
+
+	ids := make([]string, 0, 3)
+	for _, title := range []string{"first", "second", "third"} {
+		task, err := legacy.Create(BacklogCreateInput{WorkspaceID: ws.ID, Description: title})
+		if err != nil {
+			t.Fatalf("Create %s: %v", title, err)
+		}
+		ids = append(ids, task.ID)
+	}
+
+	reversed := []string{ids[2], ids[1], ids[0]}
+	if _, err := legacy.Reorder(ws.ID, reversed); err != nil {
+		t.Fatalf("Reorder: %v", err)
+	}
+
+	page, err := tickets.Search(TicketQuery{
+		WorkspaceID: ws.ID, States: []TicketState{TicketStateBacklog},
+	})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(page.Tickets) != 3 {
+		t.Fatalf("got %d tickets, want 3", len(page.Tickets))
+	}
+	for i, wantID := range reversed {
+		if page.Tickets[i].ID != wantID {
+			t.Fatalf("canonical order does not match the legacy reorder at %d: %q vs %q",
+				i, page.Tickets[i].ID, wantID)
+		}
+	}
+}
+
 // FR-101: workspace counts must distinguish canonical states and count each
 // Ticket exactly once.
 func TestTicketService_StateCountsAreExactlyOncePerTicket(t *testing.T) {

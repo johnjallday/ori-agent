@@ -278,7 +278,7 @@ func (s *BacklogService) Get(workspaceID, taskID string) (*BacklogItemView, erro
 	if err != nil {
 		return nil, err
 	}
-	if task.Status != TaskStatusBacklog {
+	if task.CanonicalState() != TicketStateBacklog {
 		return nil, fmt.Errorf("item %s is not in Backlog", taskID)
 	}
 	return &BacklogItemView{Task: *task, OwningWorkspaceID: ws.ID, OwningWorkspaceName: ws.Name}, nil
@@ -323,7 +323,9 @@ func localBacklogItemViews(ws *Workspace) []BacklogItemView {
 	defer ws.mu.RUnlock()
 	out := make([]BacklogItemView, 0, 4)
 	for _, t := range ws.Tasks {
-		if t.Status != TaskStatusBacklog {
+		// Canonical state, so this legacy projection and the canonical List
+		// can never disagree about what is in Backlog (FR-7).
+		if t.CanonicalState() != TicketStateBacklog {
 			continue
 		}
 		if t.ParentTaskID != "" {
@@ -387,7 +389,9 @@ func (s *BacklogService) Update(workspaceID, taskID string, input BacklogUpdateI
 	var updated Task
 	err := s.store.Update(workspaceID, func(ws *Workspace) error {
 		return ws.MutateTask(taskID, func(t *Task) error {
-			if t.Status != TaskStatusBacklog {
+			// Canonical state, not the legacy field: an unmigrated record must
+			// be gated the same way (FR-7, FR-103).
+			if t.CanonicalState() != TicketStateBacklog {
 				return fmt.Errorf("item %s is not in Backlog", taskID)
 			}
 			if input.Description != nil {
@@ -417,6 +421,9 @@ func (s *BacklogService) Update(workspaceID, taskID string, input BacklogUpdateI
 				}
 				t.ReferenceURL = url
 			}
+			// Bump the concurrency token so a canonical editor holding an
+			// older version cannot silently overwrite this edit (FR-93).
+			touchTicket(t)
 			updated = *t
 			return nil
 		})
@@ -446,10 +453,16 @@ func (s *BacklogService) Reorder(workspaceID string, orderedIDs []string) ([]Tas
 			seen[id] = true
 			rank := int64(i)
 			if err := ws.MutateTask(id, func(t *Task) error {
-				if t.Status != TaskStatusBacklog {
+				if t.CanonicalState() != TicketStateBacklog {
 					return fmt.Errorf("item %s is not in Backlog", id)
 				}
 				t.BacklogRank = rank
+				// Keep the canonical rank in step. Writing only BacklogRank
+				// left the legacy list reordered while the canonical List and
+				// Board — which sort on StateRank — kept the old order. The
+				// canonical space is 1-based; see nextTicketRank.
+				t.StateRank = rank + 1
+				touchTicket(t)
 				return nil
 			}); err != nil {
 				return err
@@ -493,7 +506,7 @@ func (s *BacklogService) Delete(workspaceID, taskID string) error {
 		if err != nil {
 			return err
 		}
-		if t.Status != TaskStatusBacklog {
+		if t.CanonicalState() != TicketStateBacklog {
 			return fmt.Errorf("item %s is not in Backlog", taskID)
 		}
 		return ws.DeleteTask(taskID)
@@ -514,34 +527,33 @@ func (s *BacklogService) Delete(workspaceID, taskID string) error {
 // run, or schedule action. Promoting an item already at Ready-or-later is a
 // no-op that returns the current item unchanged rather than erroring, so a
 // repeated client call or a race with another promotion is safe.
+// Like Create, this is now a COMPATIBILITY ADAPTER over the canonical Ticket
+// service (tasks/prd-workspace-ticket-management.md FR-96).
+//
+// It previously moved only the LEGACY status, which left the record saying two
+// different things: legacy consumers saw `pending` while canonical consumers
+// still saw `backlog`. That is precisely the dual lifecycle authority this
+// feature exists to remove, so promotion goes through TicketService.Promote —
+// which records the transition in history, assigns a destination rank, and
+// keeps the legacy status as a projection of the canonical state.
 func (s *BacklogService) Promote(workspaceID, taskID string) (*Task, error) {
-	var result Task
-	alreadyPromoted := false
-	err := s.store.Update(workspaceID, func(ws *Workspace) error {
-		return ws.MutateTask(taskID, func(t *Task) error {
-			if t.Status != TaskStatusBacklog {
-				alreadyPromoted = true
-				result = *t
-				return nil
-			}
-			if err := t.SetStatus(TaskStatusPending); err != nil {
-				return fmt.Errorf("cannot promote item to Ready: %w", err)
-			}
-			t.BacklogRank = 0
-			t.AwaitingExecutionIntent = true
-			result = *t
-			return nil
-		})
-	})
+	ticket, err := s.tickets().Promote(workspaceID, taskID, 0)
+	if err != nil {
+		return nil, fmt.Errorf("cannot promote item to Ready: %w", err)
+	}
+
+	ws, err := s.store.Get(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	result, err := ws.GetTask(ticket.ID)
 	if err != nil {
 		return nil, err
 	}
 
-	if !alreadyPromoted {
-		s.publish(EventTaskBacklogPromoted, result.WorkspaceID, result.ID, result)
-		s.renderAfterMutation(result.WorkspaceID)
-	}
-	return &result, nil
+	s.publish(EventTaskBacklogPromoted, result.WorkspaceID, result.ID, *result)
+	s.renderAfterMutation(result.WorkspaceID)
+	return result, nil
 }
 
 func (s *BacklogService) publish(eventType EventType, workspaceID, taskID string, data any) {
