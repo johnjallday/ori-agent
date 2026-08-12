@@ -315,6 +315,15 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 
 	b.workspaceStore = ws
 
+	// Evolve persisted Tasks into canonical Tickets, once, before anything
+	// reads them (tasks/prd-workspace-ticket-management.md FR-105, FR-106).
+	//
+	// Each workspace migrates in its own transaction, so one failure leaves
+	// the others migrated and the failing one untouched. It is idempotent and
+	// version-gated: on every subsequent boot this is a no-op that cannot
+	// renumber anything.
+	runTicketMigration(ws)
+
 	// Set workspace store on chat handler (uses SyncStore when available)
 	b.chatHandler.SetWorkspaceStore(ws)
 

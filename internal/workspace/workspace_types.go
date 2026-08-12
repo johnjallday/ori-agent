@@ -142,6 +142,11 @@ type Workspace struct {
 	Layout           *CanvasLayout          `json:"layout,omitempty"` // Canvas layout (positions of tasks and agents)
 	Status           WorkspaceStatus        `json:"status"`
 	Version          int64                  `json:"version,omitempty"` // monotonic, bumped on every Save; used to detect lost writes
+	// TicketMigrationVersion records that this workspace's legacy Task records
+	// have been evolved in place into canonical Tickets (FR-106). It makes the
+	// migration idempotent and restart-safe: a workspace already at the
+	// current version is skipped, so a second run can never renumber.
+	TicketMigrationVersion int `json:"ticket_migration_version,omitempty"`
 	// TicketSequence is the high-water mark of workspace-local Ticket numbers
 	// (FR-140). It only ever increases: allocation reserves the next value
 	// inside the same store.Update transaction that persists the Ticket, so a
