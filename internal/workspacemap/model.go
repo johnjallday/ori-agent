@@ -38,9 +38,16 @@ const (
 	MaxCoordinate = 1_000_000.0
 )
 
-// Zoom clamp (FR-38). V1 zoom is usable between 50% and 200%.
+// Zoom clamp (FR-38). Usable between 10% and 200%.
+//
+// The floor was 50% until #307. Fit All's promise is that it shows everything
+// (FR-40), and a layout spread wider than two viewports cannot be shown at
+// 50%, so the map now frames — and lets a user zoom — out to 10%. The camera
+// that produces has to be storable, or the view a user deliberately left the
+// map on is rejected on save and snaps back on reload. 10% is still a floor:
+// one stray coordinate must not persist a camera that renders the map as a dot.
 const (
-	MinZoom     = 0.5
+	MinZoom     = 0.1
 	MaxZoom     = 2.0
 	DefaultZoom = 1.0
 )
@@ -145,7 +152,7 @@ func DefaultViewport() Viewport {
 }
 
 // IsValid reports whether the viewport is finite, inside the world bounds, and
-// within the supported zoom clamp.
+// within the persisted zoom range.
 func (v Viewport) IsValid() bool {
 	return isFinite(v.CenterX) && isFinite(v.CenterY) && isFinite(v.Zoom) &&
 		v.CenterX >= MinCoordinate && v.CenterX <= MaxCoordinate &&

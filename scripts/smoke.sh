@@ -9,21 +9,37 @@
 # analyzer, so it prompts no matter how many rules exist. A script is one
 # stable token. Put the shell in here, not in the tool call.
 #
-# This worktree's feature: the GitHub Ops workspace template.
+# This worktree's feature: Workspace Map camera framing (#339 = #307 + #329).
 #
 # Usage:
-#   ./scripts/smoke.sh serve [--port N]         # build + run an isolated demo server
-#   ./scripts/smoke.sh github [--port N]        # connection status
-#   ./scripts/smoke.sh github-connect <token-file> [--port N]
-#   ./scripts/smoke.sh github-disconnect [--port N]
+#   ./scripts/smoke.sh serve [--port N] [--sandbox NAME] [--wipe]
+#                                               # build + run an isolated demo server
+#   ./scripts/smoke.sh wide [--span N] [--count N]
+#                                               # seed a map too wide to fit at 50%
+#   ./scripts/smoke.sh layout [--port N]        # print stored anchors + camera
+#   ./scripts/smoke.sh viewport <zoom> [--port N]
+#                                               # PATCH a camera; prints the status
+#   ./scripts/smoke.sh reset-layout [--port N]  # drop every stored anchor + camera
 #
 # Options:
-#   --port N   server port (default 8931, or $SMOKE_PORT)
+#   --port N       server port (default 8931, or $SMOKE_PORT)
+#   --sandbox NAME which throwaway profile to serve (default "demo"). A second
+#                  name gives a genuinely fresh profile, which the zero-
+#                  workspace Personal HQ path needs.
+#   --wipe         delete that sandbox before serving, so "fresh" really is
+#   --span N       world units between the first and last building (default 9000)
+#   --count N      how many workspaces the wide fixture creates (default 3)
 
 set -uo pipefail
 
 PORT="${SMOKE_PORT:-8931}"
+SPAN="${SMOKE_SPAN:-9000}"
+COUNT="${SMOKE_COUNT:-3}"
+SANDBOX_NAME="${SMOKE_SANDBOX:-demo}"
+WIPE=0
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+WORK="${TMPDIR:-/tmp}"
+WORK="${WORK%/}"
 
 die() {
   echo "smoke: $*" >&2
@@ -31,7 +47,7 @@ die() {
 }
 
 usage() {
-  echo "usage: ./scripts/smoke.sh {serve|github|github-connect <token-file>|github-disconnect|wizard <owner/repo>} [--port N]"
+  echo "usage: ./scripts/smoke.sh {serve|wide|layout|viewport <zoom>|reset-layout} [--port N] [--span N] [--count N]"
 }
 
 # require_server fails loudly rather than letting every check below report a
@@ -39,36 +55,6 @@ usage() {
 require_server() {
   curl -sf -o /dev/null "http://localhost:$PORT/" ||
     die "no server on port $PORT - start one with: ./scripts/smoke.sh serve --port $PORT"
-}
-
-# show pretty-prints selected fields from a JSON body on stdin. The python is
-# kept here, in a file, precisely so no caller has to inline it.
-show() {
-  python3 -c '
-import json, sys
-
-fields = sys.argv[1:]
-try:
-    doc = json.load(sys.stdin)
-except json.JSONDecodeError:
-    print("  (non-JSON response)")
-    sys.exit(0)
-
-
-def dig(node, path):
-    for part in path.split("."):
-        if not isinstance(node, dict):
-            return None
-        node = node.get(part)
-    return node
-
-
-for field in fields:
-    value = dig(doc, field)
-    if isinstance(value, (dict, list)):
-        value = json.dumps(value, sort_keys=True)
-    print(f"  {field}: {value}")
-' "$@"
 }
 
 # smoke_serve builds this worktree and runs it against a throwaway sandbox.
@@ -81,11 +67,16 @@ for field in fields:
 # `mktemp -d`, which fails silently under the agent sandbox and yields an
 # empty path - which would land real state in the worktree.
 smoke_serve() {
-  local sandbox="${TMPDIR:-/tmp}"
-  sandbox="${sandbox%/}/ori-demo-$(basename "$REPO_ROOT")"
+  local sandbox="$WORK/ori-$SANDBOX_NAME-$(basename "$REPO_ROOT")"
 
   echo "building $REPO_ROOT ..."
   (cd "$REPO_ROOT" && go build -o bin/ori-agent ./cmd/server) || die "build failed"
+
+  # Only ever under $TMPDIR, and only a path this script composed itself.
+  if ((WIPE)) && [[ "$sandbox" == "$WORK/ori-"* ]]; then
+    echo "wiping $sandbox"
+    rm -rf "$sandbox"
+  fi
 
   mkdir -p "$sandbox" || die "could not create $sandbox"
   echo "sandbox: $sandbox"
@@ -95,94 +86,141 @@ smoke_serve() {
   HOME="$sandbox" ORI_DATA_DIR="$sandbox" PORT="$PORT" exec "$REPO_ROOT/bin/ori-agent"
 }
 
-smoke_github_status() {
-  require_server
-  echo "=== GET /api/connections/github/status ==="
-  curl -s "http://localhost:$PORT/api/connections/github/status" |
-    show connected login token_type scopes error error_category
-}
-
-# smoke_github_connect reads the token from a FILE rather than an argument so
-# the credential never appears in a command line, a process list, or a shell
-# history entry.
-smoke_github_connect() {
-  local token_file="$1"
-  [[ -f "$token_file" ]] || die "token file not found: $token_file"
-  require_server
-
-  local token
-  token="$(tr -d '\r\n' <"$token_file")"
-  [[ -n "$token" ]] || die "token file is empty: $token_file"
-
-  echo "=== POST /api/connections/github/connect ==="
-  python3 -c 'import json,sys; print(json.dumps({"token": sys.argv[1]}))' "$token" >"$token_file.body"
-  curl -s -X POST "http://localhost:$PORT/api/connections/github/connect" \
-    -H 'Content-Type: application/json' \
-    --data-binary "@$token_file.body" |
-    show connected login token_type scopes error message
-  rm -f "$token_file.body"
-}
-
-smoke_github_disconnect() {
-  require_server
-  echo "=== POST /api/connections/github/disconnect ==="
-  curl -s -X POST "http://localhost:$PORT/api/connections/github/disconnect" |
-    show connected error message
-}
-
-# smoke_wizard creates a GitHub Ops workspace and walks its Setup Wizard,
-# printing each step's readiness. Takes the repo to bind, e.g. owner/name.
-smoke_wizard() {
-  local repo="$1"
+# smoke_wide seeds the layout Fit All could not frame before #307: buildings
+# spread further apart than two viewports, so fitting them requires a zoom
+# below the interactive 50% floor.
+smoke_wide() {
   require_server
   local base="http://localhost:$PORT"
+  local ids=()
 
-  echo "=== create workspace from the github-ops blueprint ==="
-  curl -s -X POST "$base/api/workspaces" \
-    -H 'Content-Type: application/json' \
-    -d "{\"name\":\"GitHub Ops Demo $(date +%H%M%S)\",\"template_id\":\"github-ops\"}" \
-    -o "$TMPDIR/ws.json"
-  local ws
-  ws="$(python3 -c '
+  # Reuse what is already there. Re-running the fixture at a different span is
+  # the normal case while demoing, and creating three more workspaces every
+  # time leaves a map nobody asked for.
+  curl -s "$base/api/workspaces" -o "$WORK/ori-wide-list.json"
+  local existing
+  existing="$(WIDE_FILE="$WORK/ori-wide-list.json" WIDE_COUNT="$COUNT" python3 -c '
 import json, os
-d = json.load(open(os.path.join(os.environ["TMPDIR"], "ws.json")))
-w = d.get("workspace") or d.get("folder") or d
-print(w.get("id", ""))
+doc = json.load(open(os.environ["WIDE_FILE"]))
+items = doc.get("workspaces") if isinstance(doc, dict) else doc
+items = items or []
+ids = [w.get("id") for w in items if isinstance(w, dict) and w.get("id") and w.get("kind") != "group"]
+print(" ".join(ids[: int(os.environ["WIDE_COUNT"])]))
+' 2>/dev/null)"
+  rm -f "$WORK/ori-wide-list.json"
+  local id
+  for id in $existing; do
+    ids+=("$id")
+  done
+  ((${#ids[@]} == 0)) || echo "=== reusing ${#ids[@]} existing workspaces ==="
+
+  echo "=== creating $((COUNT - ${#ids[@]})) workspaces ==="
+  local i=${#ids[@]}
+  while ((i < COUNT)); do
+    curl -s -X POST "$base/api/workspaces" \
+      -H 'Content-Type: application/json' \
+      -d "{\"name\":\"Wide $i $(date +%H%M%S)\"}" \
+      -o "$WORK/ori-wide-ws.json"
+    id="$(WIDE_FILE="$WORK/ori-wide-ws.json" python3 -c '
+import json, os
+doc = json.load(open(os.environ["WIDE_FILE"]))
+ws = doc.get("workspace") or doc.get("folder") or doc
+print(ws.get("id", ""))
 ')"
-  [[ -n "$ws" ]] || die "workspace was not created: $(head -c 300 "$TMPDIR/ws.json")"
-  echo "  workspace: $ws"
+    [[ -n "$id" ]] || die "workspace $i was not created: $(head -c 300 "$WORK/ori-wide-ws.json")"
+    echo "  $id"
+    ids+=("$id")
+    i=$((i + 1))
+  done
 
   echo
-  echo "=== open the wizard ==="
-  curl -s -X POST "$base/api/workspaces/$ws/setup-wizard/open" -o /dev/null
-  show_wizard "$base" "$ws"
+  echo "=== spreading them $SPAN world units apart ==="
+  WIDE_IDS="${ids[*]}" WIDE_SPAN="$SPAN" python3 -c '
+import json, os
 
-  echo
-  echo "=== confirm the repository step with $repo ==="
-  curl -s -X POST "$base/api/workspaces/$ws/setup-wizard/steps/repository/confirm" \
+ids = os.environ["WIDE_IDS"].split()
+span = float(os.environ["WIDE_SPAN"])
+step = span / max(1, len(ids) - 1) if len(ids) > 1 else 0
+positions = {}
+for index, node in enumerate(ids):
+    # A diagonal spread, so the fit is constrained on both axes rather than
+    # only horizontally.
+    positions[node] = {"x": round(index * step, 3), "y": round(index * step / 4, 3)}
+print(json.dumps({"operations": [{"op": "set_positions", "positions": positions}]}))
+' >"$WORK/ori-wide-patch.json"
+  curl -s -X PATCH "$base/api/workspace-map/layout" \
     -H 'Content-Type: application/json' \
-    -d "{\"option\":\"$repo\"}" -o /dev/null
-  show_wizard "$base" "$ws"
+    --data-binary "@$WORK/ori-wide-patch.json" \
+    -o "$WORK/ori-wide-result.json"
+  rm -f "$WORK/ori-wide-patch.json" "$WORK/ori-wide-ws.json"
+  show_layout_file "$WORK/ori-wide-result.json" result
+  rm -f "$WORK/ori-wide-result.json"
 
   echo
-  echo "workspace id: $ws"
+  echo "open http://localhost:$PORT/ and use the canvas right-click menu -> Fit all"
 }
 
-show_wizard() {
-  local base="$1" ws="$2"
-  curl -s "$base/api/workspaces/$ws/setup-wizard" -o "$TMPDIR/wiz.json"
-  python3 -c '
-import json, os
-d = json.load(open(os.path.join(os.environ["TMPDIR"], "wiz.json")))
-w = d.get("setup") or d.get("setup_wizard") or d
-print("  overall state:", w.get("state"))
-for s in w.get("steps", []):
-    print("  [%-9s] %-12s %s" % (s.get("status", "?"), s.get("id"), s.get("summary", "")))
-    if s.get("error_category"):
-        print("               category: %s" % s["error_category"])
-    for o in (s.get("options") or [])[:4]:
-        mark = "*" if o.get("selected") else " "
-        print("             %s %s — %s" % (mark, o.get("id"), o.get("description", "")))
+smoke_layout() {
+  require_server
+  echo "=== GET /api/workspace-map/layout ==="
+  curl -s "http://localhost:$PORT/api/workspace-map/layout" -o "$WORK/ori-layout.json"
+  show_layout_file "$WORK/ori-layout.json" layout
+  rm -f "$WORK/ori-layout.json"
+}
+
+# smoke_viewport proves the server's own validation of a framing-floor camera,
+# which is the half of #307 no browser click can show.
+smoke_viewport() {
+  local zoom="$1"
+  require_server
+  echo "=== PATCH set_viewport zoom=$zoom ==="
+  local status
+  status="$(curl -s -o "$WORK/ori-viewport.json" -w '%{http_code}' \
+    -X PATCH "http://localhost:$PORT/api/workspace-map/layout" \
+    -H 'Content-Type: application/json' \
+    -d "{\"operations\":[{\"op\":\"set_viewport\",\"viewport\":{\"center_x\":4500,\"center_y\":1100,\"zoom\":$zoom}}]}")"
+  echo "  HTTP $status"
+  show_layout_file "$WORK/ori-viewport.json" result
+  rm -f "$WORK/ori-viewport.json"
+}
+
+smoke_reset_layout() {
+  require_server
+  echo "=== DELETE /api/workspace-map/layout ==="
+  curl -s -X DELETE "http://localhost:$PORT/api/workspace-map/layout" -o "$WORK/ori-reset.json"
+  show_layout_file "$WORK/ori-reset.json" result
+  rm -f "$WORK/ori-reset.json"
+}
+
+# show_layout_file pretty-prints a layout or patch-result body. The python is
+# kept here, in a file, precisely so no caller has to inline it.
+show_layout_file() {
+  LAYOUT_FILE="$1" LAYOUT_KEY="$2" python3 -c '
+import json, os, sys
+
+try:
+    doc = json.load(open(os.environ["LAYOUT_FILE"]))
+except (json.JSONDecodeError, FileNotFoundError):
+    print("  (non-JSON response)")
+    sys.exit(0)
+
+if doc.get("error"):
+    print("  error:", doc["error"])
+body = doc.get(os.environ["LAYOUT_KEY"]) or doc
+positions = body.get("positions") or {}
+print("  revision:", body.get("revision"))
+print("  anchors: ", len(positions))
+xs = [p.get("x", 0) for p in positions.values()]
+ys = [p.get("y", 0) for p in positions.values()]
+if xs:
+    print("  span:     x %.0f..%.0f  y %.0f..%.0f" % (min(xs), max(xs), min(ys), max(ys)))
+viewport = body.get("viewport")
+if viewport:
+    print("  camera:   center (%.1f, %.1f) at %.0f%%" % (
+        viewport.get("center_x", 0), viewport.get("center_y", 0),
+        viewport.get("zoom", 0) * 100))
+else:
+    print("  camera:   none stored")
 '
 }
 
@@ -194,6 +232,26 @@ main() {
         [[ $# -ge 2 ]] || die "--port needs a value"
         PORT="$2"
         shift 2
+        ;;
+      --span)
+        [[ $# -ge 2 ]] || die "--span needs a value"
+        SPAN="$2"
+        shift 2
+        ;;
+      --count)
+        [[ $# -ge 2 ]] || die "--count needs a value"
+        COUNT="$2"
+        shift 2
+        ;;
+      --sandbox)
+        [[ $# -ge 2 ]] || die "--sandbox needs a value"
+        [[ "$2" =~ ^[A-Za-z0-9_-]+$ ]] || die "--sandbox expects a plain name, got '$2'"
+        SANDBOX_NAME="$2"
+        shift 2
+        ;;
+      --wipe)
+        WIPE=1
+        shift
         ;;
       -h | --help)
         usage
@@ -215,25 +273,21 @@ main() {
     serve)
       smoke_serve
       ;;
-    github)
-      smoke_github_status
+    wide)
+      smoke_wide
       ;;
-    github-connect)
+    layout)
+      smoke_layout
+      ;;
+    viewport)
       [[ ${#args[@]} -eq 2 ]] || {
         usage
         exit 2
       }
-      smoke_github_connect "${args[1]}"
+      smoke_viewport "${args[1]}"
       ;;
-    github-disconnect)
-      smoke_github_disconnect
-      ;;
-    wizard)
-      [[ ${#args[@]} -eq 2 ]] || {
-        usage
-        exit 2
-      }
-      smoke_wizard "${args[1]}"
+    reset-layout)
+      smoke_reset_layout
       ;;
     *)
       die "unknown check: ${args[0]}"

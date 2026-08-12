@@ -232,6 +232,27 @@ func TestApplyViewportAndPreferences(t *testing.T) {
 	}
 }
 
+// A wide layout can only be fitted below the interactive floor, so that camera
+// has to round-trip like any other — including through the tolerant read, which
+// must not mistake a legitimately-fitted view for corrupt state (#307).
+func TestApplyKeepsAFittedWideViewport(t *testing.T) {
+	store, _ := newTestStore(t)
+	ctx := context.Background()
+	fitted := Viewport{CenterX: 3000, CenterY: 480, Zoom: MinZoom}
+
+	if _, err := store.Apply(ctx, "local", Patch{Operations: []Operation{SetViewport(fitted)}}); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	layout, err := store.Load(ctx, "local")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if layout.Viewport == nil || *layout.Viewport != fitted {
+		t.Errorf("viewport = %+v, want %+v kept rather than discarded", layout.Viewport, fitted)
+	}
+}
+
 func TestLoadDropsOnlyCorruptEntries(t *testing.T) {
 	store, db := newTestStore(t)
 	ctx := context.Background()

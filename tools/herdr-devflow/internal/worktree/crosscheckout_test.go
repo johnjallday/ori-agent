@@ -8,14 +8,12 @@ import (
 )
 
 // TestLinkedWorktreesResolveOneRepositoryIdentity characterizes the resolution
-// every repository-scoped command already depends on, and which the GitHub
-// Issue backlog is about to depend on for a different reason.
+// every repository-scoped command already depends on.
 //
 // A source checkout and each linked worktree are separate directories with
 // separate working trees, but they are one repository: they share a common Git
-// directory, and therefore one stable repository identity. `./scripts/devops/issue.sh` must
-// select the same GitHub repository from any of them, so the property is
-// pinned here before the backlog command starts relying on it.
+// directory, and therefore one stable repository identity. The property is
+// pinned here for every worktree-aware bridge operation.
 func TestLinkedWorktreesResolveOneRepositoryIdentity(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git is not available")

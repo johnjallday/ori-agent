@@ -60,7 +60,7 @@ func BuildInventory(input Input) ([]Feature, []Finding) {
 	}
 	// A row exists because something real exists: a plan, a checkout, a bridge
 	// record, a live agent, or a branch on GitHub. An unselected idea is not a
-	// feature — it is an Issue, and `./scripts/devops/issue.sh` is where those are read.
+	// feature — it is an Issue, and `./scripts/devops.sh` is where those are read.
 	for slug := range input.Checkouts.Features {
 		add(slug, SourceWorktree)
 	}
