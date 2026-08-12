@@ -50,6 +50,7 @@ one-shot commands expose the same views to scripts and agents.
 | `./scripts/devops.sh decisions` | reads open Issues labeled `needs-decision` |
 | `./scripts/devops.sh backlog` | reads open Issues labeled `backlog` |
 | `./scripts/devops.sh proposals` | reads open Issues labeled `feature-proposal` |
+| `./scripts/devops.sh status` | reads which group each task list is on, and whether its branch has a worktree — local only |
 | `./scripts/devops.sh view <n>` | reads one Issue in full |
 | `./scripts/devops.sh new <title>` | **writes** a new unlabelled Issue, confirm-gated |
 | `./scripts/devops.sh answer <n> <text>` | **writes** a comment, confirm-gated |
@@ -70,6 +71,13 @@ has to reach the grooming routine untriaged, or it skips the spec step the
 pipeline is built around. Everything else about an Issue's lifecycle — triaging,
 sizing, bundling, closing — belongs to the grooming routine or to the PR that
 implements the work.
+
+`status` and the picker's in-flight column resolve an Issue to work-in-progress
+through the naming convention above: branch `fix/339-slug` and task file
+`tasks/tasks-339-slug.md`. Both are read from local git and disk — never from
+Herdr, which `scripts/wt-herd.test.sh` enforces — so the check is instant,
+offline, and reflects checkbox ticks before they are committed. Task files are
+gitignored and shared out of the dev worktree's `tasks/`; they are never pushed.
 
 Work selected from an Issue uses the Issue number at the front of its identity:
 

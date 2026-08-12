@@ -91,6 +91,87 @@ check "picker all view includes everything" \
 check "picker proposals view is exact" \
   "$(row_matches_filter proposals "feature-proposal" && echo yes || echo no)" "yes"
 
+# ---------------------------------------------------------------------------
+# In-flight status. Parent groups are the top-level `- [ ]` lines; sub-tasks are
+# indented, so an anchored match must not count them.
+# ---------------------------------------------------------------------------
+cat > "$fixture_root/tasks-777-sample.md" <<'MD'
+## Tasks
+
+- [x] 0.0 Create feature branch
+  - [x] 0.1 a sub-task that must not be counted as a group
+- [x] 1.0 First group
+  - [ ] 1.1 an unchecked sub-task inside a done group
+- [ ] 2.0 Second group
+  - [ ] 2.1 another sub-task
+MD
+check "task groups count parents only" \
+  "$(task_groups_of_file "$fixture_root/tasks-777-sample.md")" "2/3"
+
+cat > "$fixture_root/tasks-778-none.md" <<'MD'
+# A PRD with no checkboxes at all
+MD
+check "a file with no groups reports nothing" \
+  "$(task_groups_of_file "$fixture_root/tasks-778-none.md")" ""
+
+# A branch is registered under its Issue number AND its full slug, so features
+# predating the number-first convention still resolve.
+flight_numbers=()
+flight_states=()
+remember_branch_flight "fix/339-workspace-map-camera-framing" branch
+check "branch resolves by issue number" "$(flight_state_of 339)" "branch"
+check "branch resolves by slug" \
+  "$(flight_state_of "339-workspace-map-camera-framing")" "branch"
+
+flight_numbers=()
+flight_states=()
+remember_branch_flight "feature/workspace-ticket-management" worktree
+check "a numberless branch resolves by slug" \
+  "$(flight_state_of "workspace-ticket-management")" "worktree"
+check "an unknown key resolves to nothing" "$(flight_state_of 12345)" ""
+
+# A checked-out worktree is the stronger signal and must never be downgraded to
+# a bare branch, whichever order the two sources are read in.
+flight_numbers=()
+flight_states=()
+remember_branch_flight "fix/339-slug" worktree
+remember_branch_flight "fix/339-slug" branch
+check "worktree survives a later branch record" "$(flight_state_of 339)" "worktree"
+
+flight_numbers=()
+flight_states=()
+remember_branch_flight "fix/339-slug" branch
+remember_branch_flight "fix/339-slug" worktree
+check "branch is upgraded to worktree" "$(flight_state_of 339)" "worktree"
+
+flight_numbers=()
+flight_states=()
+remember_branch_flight "dev" worktree
+check "a branch with no type prefix is ignored" "$(flight_state_of dev)" ""
+
+# The picker cell puts progress first - "which group am I on" is the question
+# the column exists to answer.
+tasks_dir="$fixture_root"
+flight_numbers=()
+flight_states=()
+remember_branch_flight "fix/777-sample" worktree
+check "cell shows progress then worktree" "$(flight_cell_of 777)" "2/3 wt"
+
+flight_numbers=()
+flight_states=()
+remember_branch_flight "fix/777-sample" branch
+check "cell shows progress then branch" "$(flight_cell_of 777)" "2/3 br"
+
+flight_numbers=()
+flight_states=()
+remember_branch_flight "fix/888-nolist" worktree
+check "cell falls back to location alone" "$(flight_cell_of 888)" "wt"
+
+flight_numbers=()
+flight_states=()
+check "cell is empty when nothing is in flight" "$(flight_cell_of 999)" ""
+tasks_dir=""
+
 if [[ "$failures" -ne 0 ]]; then
   printf '%s unit assertion(s) failed\n' "$failures" >&2
   exit 1
@@ -248,6 +329,13 @@ if grep -Eq -- '--author|api[[:space:]]+graphql|project' "$gh_calls"; then
   exit 1
 fi
 
+# `status` is entirely local: it reads git and the filesystem, and must never
+# reach GitHub. That is what makes it usable offline and instant.
+: > "$gh_calls"
+"$script" status > "$fixture_root/status-output"
+grep -Fq "In flight" "$fixture_root/status-output"
+assert_no_github "status"
+
 # Viewing remains read-only.
 : > "$gh_calls"
 "$script" view 334 > "$fixture_root/view-output"
@@ -330,7 +418,7 @@ if grep -Eq -- '--add-label[[:space:]]*$|labels' "$gh_calls"; then
 fi
 
 # Invalid invocations fail before contacting GitHub.
-for invalid in "view" "view nope" "view 0" "view 334 extra" "all extra" "ready extra" "unknown" "answer" "answer 334" "answer nope text" "approve" "approve nope" "approve 334 extra" "new" "new --yes" "new title --body"; do
+for invalid in "view" "view nope" "view 0" "view 334 extra" "all extra" "ready extra" "unknown" "answer" "answer 334" "answer nope text" "approve" "approve nope" "approve 334 extra" "new" "new --yes" "new title --body" "status extra"; do
   : > "$gh_calls"
   status=0
   # Intentional word splitting turns each fixture into an argument vector.

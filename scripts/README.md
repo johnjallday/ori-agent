@@ -115,6 +115,7 @@ One command covers the human issue workflow:
 ./scripts/devops.sh decisions          # label: needs-decision
 ./scripts/devops.sh backlog            # label: backlog
 ./scripts/devops.sh proposals          # label: feature-proposal
+./scripts/devops.sh status             # which group each task list is on
 ./scripts/devops.sh view <number>      # one Issue in full
 ./scripts/devops.sh new <title>        # capture an Issue (confirm-gated)
 ./scripts/devops.sh answer <n> <text>  # post a comment (confirm-gated)
@@ -138,6 +139,33 @@ of lists.
 
 Every row shows the Issue's `size:*` label in its own column, so a long label
 list can never truncate away the signal that says whether to open a PRD first.
+
+**In-flight status.** A second column shows whether work has already started and
+how far it has got — `2/7 wt` means two of seven task-list groups are done and a
+worktree is checked out; `br` means only a branch exists. `./scripts/devops.sh
+status` prints the same thing for every task list at once:
+
+```
+  0/8     worktree           workspace-ticket-management
+  3/3     branch    #339     339-workspace-map-camera-framing
+  5/6     -                  build-my-hq-button-fix
+```
+
+This is **entirely local** — plain `git worktree list`, `git branch`, and the
+task files on disk. It is deliberately *not* a Herdr integration:
+`scripts/wt-herd.test.sh` asserts this script never reaches for the devflow
+bridge, which is the whole point of the REPL having replaced that helper. The
+Issue-number-first convention already encodes the link in the branch name
+(`fix/339-slug`) and the task file (`tasks-339-slug.md`), so no network, no
+second contract, and no `wt` dependency is needed. Branches predating that
+convention still resolve, by slug.
+
+Task files are gitignored and live in one place, the dev worktree's `tasks/`, so
+progress is read from disk rather than from anything pushed. That is
+deliberately fresher: checkboxes get ticked while you work, but a pushed copy
+would only update when you commit. It also means the numbers are exactly as
+honest as the file — a shipped feature whose boxes were never ticked will read
+`0/6`.
 
 **Writes.** `new`, `answer`, `approve` and `unapprove` are the only mutating
 commands. Each prints what it will do and asks for confirmation; without a

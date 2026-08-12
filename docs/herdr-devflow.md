@@ -459,6 +459,7 @@ lists every open Issue before prompting for another view.
 ./scripts/devops.sh decisions          # label: needs-decision
 ./scripts/devops.sh backlog            # label: backlog
 ./scripts/devops.sh proposals          # label: feature-proposal
+./scripts/devops.sh status             # which group each task list is on
 ./scripts/devops.sh view <number>      # one Issue in full
 ./scripts/devops.sh new <title>        # capture, confirm-gated
 ./scripts/devops.sh answer <n> <text>  # comment, confirm-gated
@@ -479,8 +480,23 @@ here — capturing an idea, answering a spec's open questions, and setting
 first, and refuse without a terminal unless given `--yes`. A captured Issue gets
 no labels: it must reach the grooming routine untriaged so the spec step runs.
 
+`status`, and the picker's in-flight column, are the one part of the REPL that
+overlaps this document's subject — and they deliberately do **not** call Herdr.
+`scripts/wt-herd.test.sh` fails if `scripts/devops.sh` so much as mentions
+`wt_herd`, `herdr-devflow`, or the retired bootstrap, because shedding that
+dependency is why the REPL exists. Instead they read `git worktree list`,
+`git branch --all`, and the task files on disk, resolving an Issue to work via
+the naming convention: branch `fix/339-slug`, task file `tasks-339-slug.md`.
+Branches predating the number-first convention resolve by slug.
+
+Task files are gitignored and shared out of the dev worktree's `tasks/`, never
+pushed, so progress reflects ticked checkboxes immediately rather than at the
+next commit. `wt status` remains the richer, Herdr-backed feature/delivery
+snapshot; `devops.sh status` is the cheap local glance.
+
 The command runs `gh issue list`, `gh issue view`, `gh issue create`,
-`gh issue comment`, or `gh issue edit` directly from its checkout.
+`gh issue comment`, or `gh issue edit` directly from its checkout. `status`
+contacts GitHub not at all.
 The terminal picker fetches the complete open-Issue index once and filters it
 locally until `r` refreshes it; it does not persist a cache, source `wt`, invoke
 the Herdr helper, or define a JSON contract. Agents that need structured data

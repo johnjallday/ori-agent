@@ -38,6 +38,7 @@ Usage:
   ./scripts/devops.sh decisions
   ./scripts/devops.sh backlog
   ./scripts/devops.sh proposals
+  ./scripts/devops.sh status
   ./scripts/devops.sh view <issue-number>
   ./scripts/devops.sh new <title...> [--body <text>] [--yes]
   ./scripts/devops.sh answer <issue-number> <text...> [--yes]
@@ -51,6 +52,11 @@ One-shot commands print their result and exit.
 `ready` is what you can actually pick up now: feature proposals plus backlog
 Issues that are neither already covered by a proposal (`bundled`) nor already
 chosen (`approved`).
+
+`status` answers "what am I part-way through": every task list on disk with its
+done/total parent groups, and whether its branch has a worktree checked out. It
+is entirely local - no network, no Herdr - and reads the dev worktree's
+gitignored tasks/, so ticked checkboxes show up before you commit them.
 
 new/answer/approve/unapprove write to GitHub. They prompt for confirmation on a
 terminal, and require --yes when stdin is not a terminal. A new Issue is created
@@ -138,6 +144,208 @@ other_labels_of() {
       printf ', %s' "$label"
     fi
   done
+}
+
+# ---------------------------------------------------------------------------
+# In-flight status, from plain git and the filesystem.
+#
+# Deliberately NOT a Herdr integration: scripts/wt-herd.test.sh asserts this
+# file never reaches for the devflow bridge, which is the whole point of the
+# REPL replacing that helper. The Issue-number-first convention already encodes
+# the link in a branch name (`fix/339-slug`) and a task file
+# (`tasks/tasks-339-slug.md`), so local git answers "am I implementing this?"
+# with no network and no second contract.
+#
+# Task files are gitignored and live in ONE place - the dev worktree's tasks/ -
+# so progress is read from disk. That is deliberately fresher than anything
+# pushed: checkboxes get ticked while you work, a pushed copy only at commit.
+# ---------------------------------------------------------------------------
+
+tasks_dir=""
+
+resolve_tasks_dir() {
+  local line path
+
+  tasks_dir=""
+  # The dev worktree owns tasks/. Find it rather than assuming a path, so this
+  # works from any worktree and from a plain clone.
+  path=""
+  while IFS= read -r line; do
+    case "$line" in
+      "worktree "*) path="${line#worktree }" ;;
+      "branch refs/heads/dev")
+        if [[ -d "$path/tasks" ]]; then
+          tasks_dir="$path/tasks"
+          return 0
+        fi
+        ;;
+    esac
+  done < <(git worktree list --porcelain 2>/dev/null)
+
+  if [[ -d "$repo_root/tasks" ]]; then
+    tasks_dir="$repo_root/tasks"
+  fi
+}
+
+# Parallel arrays rather than an associative array: this has to run under the
+# bash 3.2 that ships with macOS, which has no `declare -A`.
+flight_numbers=()
+flight_states=()
+
+remember_flight() {
+  local number="$1" state="$2" index
+  for index in ${flight_numbers[@]+"${!flight_numbers[@]}"}; do
+    if [[ "${flight_numbers[$index]}" == "$number" ]]; then
+      # worktree beats branch; never downgrade a stronger signal.
+      if [[ "${flight_states[$index]}" != "worktree" ]]; then
+        flight_states[$index]="$state"
+      fi
+      return 0
+    fi
+  done
+  flight_numbers+=("$number")
+  flight_states+=("$state")
+}
+
+# Register a branch under BOTH keys it can be looked up by: its Issue number
+# (`fix/339-slug` -> `339`) and its full slug (`339-slug`, or plain
+# `workspace-ticket-management` for branches that predate the number-first
+# convention). The picker looks up by number; `status` looks up by task-file
+# slug, and those older features have no number to match on.
+remember_branch_flight() {
+  local branch="$1" state="$2" slug
+
+  case "$branch" in
+    */*) slug="${branch#*/}" ;;
+    *) return 0 ;;
+  esac
+  [[ -n "$slug" ]] || return 0
+
+  remember_flight "$slug" "$state"
+  if [[ "$slug" =~ ^([0-9]+)- ]]; then
+    remember_flight "${BASH_REMATCH[1]}" "$state"
+  fi
+}
+
+load_flight_index() {
+  local line branch
+
+  flight_numbers=()
+  flight_states=()
+
+  while IFS= read -r line; do
+    case "$line" in
+      "branch refs/heads/"*)
+        remember_branch_flight "${line#branch refs/heads/}" worktree
+        ;;
+    esac
+  done < <(git worktree list --porcelain 2>/dev/null)
+
+  while IFS= read -r branch; do
+    remember_branch_flight "${branch#origin/}" branch
+  done < <(git branch --all --format='%(refname:short)' 2>/dev/null)
+}
+
+flight_state_of() {
+  local number="$1" index
+  for index in ${flight_numbers[@]+"${!flight_numbers[@]}"}; do
+    if [[ "${flight_numbers[$index]}" == "$number" ]]; then
+      printf '%s' "${flight_states[$index]}"
+      return 0
+    fi
+  done
+  printf '%s' ""
+}
+
+# "<done>/<total>" over the task list's PARENT groups - the top-level `- [ ]`
+# lines. Sub-tasks are indented, so an anchored match counts groups only.
+task_groups_of_file() {
+  local file="$1" done total
+
+  done="$(grep -c '^- \[[xX]\]' "$file" 2>/dev/null)" || done=0
+  total="$(grep -c '^- \[[ xX]\]' "$file" 2>/dev/null)" || total=0
+  if [[ "${total:-0}" -le 0 ]]; then
+    printf '%s' ""
+    return 0
+  fi
+  printf '%s/%s' "${done:-0}" "$total"
+}
+
+task_progress_of_issue() {
+  local number="$1" file
+
+  [[ -n "$tasks_dir" ]] || { printf '%s' ""; return 0; }
+  for file in "$tasks_dir"/tasks-"$number"-*.md; do
+    [[ -f "$file" ]] || continue
+    task_groups_of_file "$file"
+    return 0
+  done
+  printf '%s' ""
+}
+
+# One short cell. Progress leads, because "which group am I on" is the question
+# this column exists to answer; where the branch lives is the qualifier.
+#   2/7 wt  - task list 2 of 7 groups done, worktree checked out
+#   2/7 br  - same, but only a branch exists
+#   wt / br - work started with no task list
+flight_cell_of() {
+  local number="$1" state progress short=""
+
+  state="$(flight_state_of "$number")"
+  progress="$(task_progress_of_issue "$number")"
+  case "$state" in
+    worktree) short="wt" ;;
+    branch) short="br" ;;
+  esac
+
+  if [[ -n "$progress" && -n "$short" ]]; then
+    printf '%s %s' "$progress" "$short"
+  elif [[ -n "$progress" ]]; then
+    printf '%s' "$progress"
+  else
+    printf '%s' "$short"
+  fi
+}
+
+list_status() {
+  local file slug progress state number rows=0
+
+  resolve_tasks_dir
+  load_flight_index
+
+  if [[ -z "$tasks_dir" ]]; then
+    printf '\nNo tasks/ directory found in any worktree.\n'
+    return 0
+  fi
+
+  printf '\nIn flight  %s\n\n' "$tasks_dir"
+  for file in "$tasks_dir"/tasks-*.md; do
+    [[ -f "$file" ]] || continue
+    slug="${file##*/}"
+    slug="${slug#tasks-}"
+    slug="${slug%.md}"
+    progress="$(task_groups_of_file "$file")"
+    number=""
+    if [[ "$slug" =~ ^([0-9]+)- ]]; then
+      number="${BASH_REMATCH[1]}"
+    fi
+    # Slug first: it also covers features whose branch carries no Issue number.
+    state="$(flight_state_of "$slug")"
+    if [[ -z "$state" && -n "$number" ]]; then
+      state="$(flight_state_of "$number")"
+    fi
+    printf '  %-7s %-9s %-8s %s\n' \
+      "${progress:--}" \
+      "${state:--}" \
+      "${number:+#$number}" \
+      "$slug"
+    rows=$((rows + 1))
+  done
+
+  if [[ "$rows" -eq 0 ]]; then
+    printf '  no task lists yet\n'
+  fi
+  printf '\ngroups done/total  •  where the branch is  •  Issue  •  feature\n'
 }
 
 list_issues() {
@@ -347,6 +555,10 @@ run_one_shot() {
       [[ $# -eq 0 ]] || return 2
       list_issues ready
       ;;
+    status)
+      [[ $# -eq 0 ]] || return 2
+      list_status
+      ;;
     decisions|decision)
       [[ $# -eq 0 ]] || return 2
       list_issues decisions
@@ -458,6 +670,13 @@ load_picker_index() {
   issue_labels=()
   issue_updates=()
   picker_error=""
+
+  # Local, so it is refreshed on every load rather than cached across the
+  # session: a worktree can appear or a checkbox get ticked while the picker is
+  # open, and re-reading costs nothing.
+  resolve_tasks_dir
+  load_flight_index
+
   args=(issue list --state open --limit "$issue_limit")
   args+=(--json number,title,labels,updatedAt --template '{{range .}}{{printf "%v\t%s\t" .number .title}}{{range $i,$label := .labels}}{{if $i}}, {{end}}{{.name}}{{end}}{{printf "\t%s\n" .updatedAt}}{{end}}')
 
@@ -495,8 +714,8 @@ apply_picker_filter() {
 render_picker() {
   local filter_index="$1" selected_index="$2" count="$3"
   local current_filter="${picker_filters[$filter_index]}" index marker title labels size updated
-  local id id_width row labels_cell
-  local -r title_width=56 size_width=7 labels_width=28
+  local id id_width row labels_cell flight
+  local -r title_width=52 size_width=7 flight_width=8 labels_width=26
 
   printf '\033[H\033[2J'
   style '1;36' 'Ori DevOps'
@@ -566,6 +785,17 @@ render_picker() {
         esac
       else
         style '2' "$(printf '%-*s' "$size_width" '-')"
+      fi
+
+      # Where the work already is: a checked-out worktree or an existing branch,
+      # plus how far through its task list. Entirely local; see the block above
+      # list_issues for why this is not a Herdr call.
+      flight="$(flight_cell_of "${issue_numbers[$index]}")"
+      printf '  '
+      if [[ -n "$flight" ]]; then
+        style '1;36' "$(printf '%-*s' "$flight_width" "$flight")"
+      else
+        style '2' "$(printf '%-*s' "$flight_width" '')"
       fi
 
       labels_cell=""
