@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/config"
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/github"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/herdr"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/model"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/worktree"
@@ -62,6 +63,13 @@ type Inspector interface {
 	Inspect(context.Context, string, string, string) (worktree.GitWorktree, error)
 }
 
+// IssueFetcher performs one fresh, read-only GitHub Issue lookup. It exists so
+// issue-planning tests can inject a fixture instead of shelling out to `gh`,
+// the same way Herdr and the worktree inspector are injected above.
+type IssueFetcher interface {
+	GetIssue(ctx context.Context, number int) (github.Issue, error)
+}
+
 type inspectorFunc func(context.Context, string, string, string) (worktree.GitWorktree, error)
 
 func (f inspectorFunc) Inspect(ctx context.Context, path, branch, commonDir string) (worktree.GitWorktree, error) {
@@ -75,7 +83,10 @@ type Service struct {
 	Client       Herdr
 	Store        StateStore
 	Inspector    Inspector
-	Now          func() time.Time
+	// Issues is consulted only by issue-planning operations (see planning.go).
+	// Feature handoff never reads GitHub, so this is nil in every other path.
+	Issues IssueFetcher
+	Now    func() time.Time
 }
 
 type HandoffRequest struct {

@@ -1,9 +1,14 @@
 package overview
 
 import (
+	"context"
 	"slices"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/herdr"
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/model"
 )
 
 // eligibleAgent is a roster row that meets every structural requirement, so a
@@ -227,4 +232,53 @@ func TestEligibilityNeverConsultsClaudeForAStructurallyIneligibleAgent(t *testin
 	if consulted {
 		t.Fatal("the Claude usage adapter was consulted about a Codex agent")
 	}
+}
+
+// TestPlanningSessionsProduceNoBridgeDerivedFeatureOrAgentEvidence proves the
+// AR25 boundary at the mechanism that would actually leak one: a bridge
+// state holding only an issue-scoped Codex planning session — never a
+// Feature — yields no bridge feature slugs, and therefore can never surface
+// as an Overnight-eligible, continuable, or PR-owning agent through this
+// package's roster machinery. A planner is a live Codex process at most;
+// this asserts it is never a *managed* one.
+func TestPlanningSessionsProduceNoBridgeDerivedFeatureOrAgentEvidence(t *testing.T) {
+	state := model.NewBridgeState()
+	state.PlanningSessions["repo-1:342"] = model.PlanningSession{
+		RepositoryID: "repo-1",
+		IssueNumber:  342,
+		Slug:         "342-ready-issue-codex-planning",
+		WorktreePath: "/tmp/ori-agent-dev",
+		Stage:        model.PlanningPrompted,
+		Planner:      model.RoleAgent{Name: "ori-repo1-issue342-planner", Kind: "codex"},
+	}
+	if len(state.Features) != 0 {
+		t.Fatalf("fixture is invalid: expected no Features, got %#v", state.Features)
+	}
+
+	slugs := BridgeSlugs(state)
+	if len(slugs) != 0 {
+		t.Fatalf("BridgeSlugs() = %v, want none: a planning session must never read as a managed feature slug", slugs)
+	}
+
+	evidence := CollectAgents(context.Background(), fakePlanningAgentCollector{}, fakePlanningBridgeReader{state: state}, time.Now())
+	if len(evidence.Bridge.Features) != 0 {
+		t.Fatalf("collected bridge evidence carries Features: %#v", evidence.Bridge.Features)
+	}
+	if len(evidence.Bridge.PlanningSessions) != 1 {
+		t.Fatal("the planning session itself should still be readable on the raw evidence, just never treated as a feature")
+	}
+}
+
+type fakePlanningBridgeReader struct{ state model.BridgeState }
+
+func (f fakePlanningBridgeReader) Load() (model.BridgeState, error) { return f.state, nil }
+
+type fakePlanningAgentCollector struct{}
+
+func (fakePlanningAgentCollector) AgentListInfo(context.Context) ([]herdr.AgentInfo, error) {
+	return nil, nil
+}
+
+func (fakePlanningAgentCollector) WorkspaceListInfo(context.Context) ([]herdr.WorkspaceInfo, error) {
+	return nil, nil
 }

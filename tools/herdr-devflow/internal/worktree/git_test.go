@@ -44,6 +44,78 @@ func TestInspectLinkedGitWorktreeProvesPathBranchAndRepository(t *testing.T) {
 	}
 }
 
+// TestInspectLinkedGitWorktreeAcceptsTheDevPlanningCheckout proves the exact
+// provenance `wt plan` relies on: a linked ori-agent-dev worktree checked out
+// on branch "dev" is accepted, while a source checkout on the same branch, a
+// different branch, a nested path inside it, and a detached checkout are all
+// rejected. InspectLinkedGitWorktree already accepts an arbitrary expected
+// branch, so this is a regression test for that existing contract rather
+// than new production code.
+func TestInspectLinkedGitWorktreeAcceptsTheDevPlanningCheckout(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not available")
+	}
+	repo := filepath.Join(t.TempDir(), "repo")
+	runGit(t, "", "init", "-b", "main", repo)
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("fixture\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", "README.md")
+	runGit(t, repo, "-c", "user.name=Ori Test", "-c", "user.email=ori@example.test", "commit", "-m", "fixture")
+
+	devPath := filepath.Join(filepath.Dir(repo), "ori-agent-dev")
+	runGit(t, repo, "worktree", "add", "-b", "dev", devPath, "main")
+	other := filepath.Join(filepath.Dir(repo), "other-worktree")
+	runGit(t, repo, "worktree", "add", "-b", "feature/other", other)
+
+	paths, err := Resolve(repo, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := InspectLinkedGitWorktree(context.Background(), devPath, "dev", paths.GitCommonDir)
+	if err != nil {
+		t.Fatalf("the canonical dev planning worktree was rejected: %v", err)
+	}
+	// got.Path is canonicalized (macOS resolves /var -> /private/var); compare
+	// its basename rather than the exact string, matching how the sibling test
+	// above only asserts branch/common-dir/source rather than the raw path.
+	if got.Branch != "dev" || filepath.Base(got.Path) != "ori-agent-dev" || got.CommonDir != paths.GitCommonDir {
+		t.Fatalf("InspectLinkedGitWorktree(dev) = %#v", got)
+	}
+
+	if _, err := InspectLinkedGitWorktree(context.Background(), repo, "dev", paths.GitCommonDir); err == nil {
+		t.Fatal("accepted the repository source checkout as the dev planning worktree")
+	}
+	if _, err := InspectLinkedGitWorktree(context.Background(), other, "dev", paths.GitCommonDir); err == nil {
+		t.Fatal("accepted a worktree on a different branch as the dev planning worktree")
+	}
+	nested := filepath.Join(devPath, "tasks")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := InspectLinkedGitWorktree(context.Background(), nested, "dev", paths.GitCommonDir); err == nil {
+		t.Fatal("accepted a nested path inside the dev worktree instead of its root")
+	}
+
+	detached := filepath.Join(filepath.Dir(repo), "detached")
+	runGit(t, repo, "worktree", "add", "--detach", detached, "main")
+	if _, err := InspectLinkedGitWorktree(context.Background(), detached, "dev", paths.GitCommonDir); err == nil {
+		t.Fatal("accepted a detached checkout as the dev planning worktree")
+	}
+
+	otherRepo := filepath.Join(t.TempDir(), "other-repo")
+	runGit(t, "", "init", "-b", "dev", otherRepo)
+	if err := os.WriteFile(filepath.Join(otherRepo, "README.md"), []byte("fixture\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, otherRepo, "add", "README.md")
+	runGit(t, otherRepo, "-c", "user.name=Ori Test", "-c", "user.email=ori@example.test", "commit", "-m", "fixture")
+	if _, err := InspectLinkedGitWorktree(context.Background(), otherRepo, "dev", paths.GitCommonDir); err == nil {
+		t.Fatal("accepted a dev checkout from a different repository")
+	}
+}
+
 func runGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	if dir != "" {

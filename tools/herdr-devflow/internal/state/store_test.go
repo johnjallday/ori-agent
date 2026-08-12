@@ -213,3 +213,67 @@ func TestUnknownRunStateLoadsRatherThanBeingDropped(t *testing.T) {
 		t.Fatalf("an unrecognized state = %q was treated as finished", run.State)
 	}
 }
+
+// TestLoadAcceptsAStateFileWrittenBeforePlanningSessions is the same
+// backward-compatibility contract as runs: a state file written before Issue
+// planning existed has no planning_sessions key, and must keep loading with
+// an empty (not nil) map rather than being migrated or rejected.
+func TestLoadAcceptsAStateFileWrittenBeforePlanningSessions(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	legacy := `{"version":1,"features":{"repo:alpha":{"feature":{"repository_id":"repo","name":"alpha"},"workspace_id":"w1","updated_at":"2026-07-20T10:00:00Z"}}}`
+	if err := os.WriteFile(filepath.Join(dir, FileName), []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := New(dir).Load()
+	if err != nil {
+		t.Fatalf("a state file without planning_sessions failed to load: %v", err)
+	}
+	if len(loaded.Features) != 1 {
+		t.Fatalf("features = %#v, want the legacy record preserved", loaded.Features)
+	}
+	if loaded.PlanningSessions == nil {
+		t.Fatal("planning_sessions was left nil, so a caller adding one would panic")
+	}
+	if len(loaded.PlanningSessions) != 0 {
+		t.Fatalf("planning_sessions = %#v, want none invented", loaded.PlanningSessions)
+	}
+}
+
+// TestPlanningSessionsRoundTripAndStayOutOfFeatures is the additive-state
+// contract AR19 requires: a planning session lives in its own map, keyed by
+// repository+Issue, and never becomes a Features entry.
+func TestPlanningSessionsRoundTripAndStayOutOfFeatures(t *testing.T) {
+	t.Parallel()
+	store := New(t.TempDir())
+	want := model.NewBridgeState()
+	want.PlanningSessions["repo-1:342"] = model.PlanningSession{
+		RepositoryID: "repo-1",
+		IssueNumber:  342,
+		Slug:         "342-ready-issue-codex-planning",
+		WorktreePath: "/tmp/ori-agent-dev",
+		Stage:        model.PlanningPrompted,
+		Prompted:     true,
+	}
+	if err := store.Save(want); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, ok := loaded.PlanningSessions["repo-1:342"]
+	if !ok || session.IssueNumber != 342 || session.Slug != "342-ready-issue-codex-planning" || session.Stage != model.PlanningPrompted {
+		t.Fatalf("planning session = %#v, ok=%v", session, ok)
+	}
+	if len(loaded.Features) != 0 {
+		t.Fatalf("a planning session must never appear in Features: %#v", loaded.Features)
+	}
+	info, err := os.Stat(store.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("state mode = %v, want 0600: a planning session names a live Codex process", info.Mode().Perm())
+	}
+}

@@ -634,6 +634,226 @@ wt ls > /dev/null
 wt help > /dev/null
 [[ ! -f "$fixture_root/herdr-free-calls" ]]
 
+# --- wt plan --issue <N> [--yes] -------------------------------------------
+#
+# Shell-wiring layer: argument validation and the exact call handed to the
+# bridge, with wt_herd stubbed so no Go binary or GitHub read is needed. AR1:
+# a malformed, duplicate, missing, or unknown argument must fail before the
+# bridge is ever reached.
+function wt_get_dev_worktree { print -r -- "$dev_root" }
+function wt_herd {
+  print -r -- "$*" >> "$fixture_root/plan-calls"
+  return 0
+}
+
+rm -f "$fixture_root/plan-calls"
+plan_status=0
+for bad_plan_args in "" "--issue" "--issue 0" "--issue -5" "--issue abc" \
+                     "--issue 1 --issue 2" "--issue 1 --bogus" "--yes"; do
+  plan_status=0
+  wt plan ${=bad_plan_args} > /dev/null 2>&1 || plan_status=$?
+  if [[ "$plan_status" != "1" ]]; then
+    print -r -- "wt plan '$bad_plan_args' exited $plan_status, want 1" >&2
+    exit 1
+  fi
+done
+if [[ -f "$fixture_root/plan-calls" ]]; then
+  print -r -- "a rejected wt plan invocation still reached the bridge: $(<"$fixture_root/plan-calls")" >&2
+  exit 1
+fi
+
+# A valid invocation resolves the dev worktree via the same lookup wt start
+# uses, and forwards exactly one call with arguments as separate words —
+# never through eval, so a title or label containing shell metacharacters is
+# data the helper reads, not syntax this shell runs.
+wt plan --issue 342 > /dev/null
+[[ "$(<"$fixture_root/plan-calls")" == "issue-plan --issue 342 --worktree $dev_root" ]]
+
+rm -f "$fixture_root/plan-calls"
+wt plan --issue 342 --yes > /dev/null
+[[ "$(<"$fixture_root/plan-calls")" == "issue-plan --issue 342 --worktree $dev_root --yes" ]]
+
+rm -f "$fixture_root/plan-calls"
+wt help > "$fixture_root/plan-help-output" 2>&1
+rg -q -- "wt plan --issue" "$fixture_root/plan-help-output"
+[[ ! -f "$fixture_root/plan-calls" ]]
+
+# --- wt plan against the real bridge ----------------------------------------
+#
+# A fully disposable repository, separate from this checkout: the helper's
+# worktree validation requires --worktree to be a linked worktree of the same
+# repository as --repo-root, and this checkout's own "dev" branch is already
+# checked out elsewhere on this machine, so a second checkout of literal
+# branch "dev" has to live in its own repository entirely. The Go binary is
+# invoked directly (the same --repo-root override the pre-existing FR-38/
+# disabled-bridge tests above already use), bypassing wt plan's shell layer,
+# which the block above already proved constructs the right call.
+# An earlier wt done fixture shadows `git` with a call-recording stub for the
+# rest of this script (see the `function git` block above); restore the real
+# binary before creating a genuine repository below.
+unfunction git 2>/dev/null || true
+
+issue_repo="$fixture_root/issue-plan-repo"
+issue_dev="$fixture_root/issue-plan-dev"
+mkdir -p "$issue_repo"
+git init -q -b main "$issue_repo"
+print -r -- "fixture" > "$issue_repo/README.md"
+git -C "$issue_repo" add README.md
+git -C "$issue_repo" -c user.name="Ori Test" -c user.email="ori@example.test" commit -q -m fixture
+git -C "$issue_repo" worktree add -q -b dev "$issue_dev" main
+mkdir -p "$issue_repo/.herdr"
+cp "$repo_root/.herdr/devflow.toml" "$issue_repo/.herdr/devflow.toml"
+
+# The hostile Issue body lives in its own file rather than embedded in the
+# fake gh script below: this heredoc is quoted, so the backticks, `$(...)`,
+# quotes, and tab it contains are written to disk completely inert, with no
+# shell escaping to get wrong at any layer.
+fake_gh_body_file="$fixture_root/fake-gh-body.txt"
+cat > "$fake_gh_body_file" <<'HOSTILE_BODY'
+line one
+line two with `code` and $(rm -rf /) and "quotes" and --leading-dash
+	tabbed line
+HOSTILE_BODY
+
+issue_gh_bin="$fixture_root/issue-plan-bin"
+mkdir -p "$issue_gh_bin"
+cat > "$issue_gh_bin/gh" <<'FAKE_GH'
+#!/usr/bin/env bash
+# Fake gh for the wt plan end-to-end fixture: answers exactly the one
+# `gh issue view <n> --json ...` invocation issue-plan makes. Every field is
+# built from plain, unquoted environment values and escaped for JSON here,
+# so the outer fixture never has to hand-embed escaped JSON literals.
+json_escape() {
+  local s="$1"
+  s="${s//\\/\\\\}"
+  s="${s//\"/\\\"}"
+  s="${s//$'\n'/\\n}"
+  s="${s//$'\t'/\\t}"
+  s="${s//$'\r'/\\r}"
+  printf '%s' "$s"
+}
+if [[ "$1" == "issue" && "$2" == "view" ]]; then
+  number="$3"
+  body_raw="line one"
+  if [[ -n "${FAKE_GH_BODY_FILE:-}" && -f "$FAKE_GH_BODY_FILE" ]]; then
+    body_raw="$(cat "$FAKE_GH_BODY_FILE")"
+  fi
+  title="$(json_escape "${FAKE_GH_TITLE:-Ready issue codex planning}")"
+  body="$(json_escape "$body_raw")"
+  state="${FAKE_GH_STATE:-OPEN}"
+
+  labels_json=""
+  old_ifs="$IFS"
+  IFS=','
+  for label in ${FAKE_GH_LABELS:-backlog,size:planned}; do
+    [[ -n "$label" ]] || continue
+    [[ -n "$labels_json" ]] && labels_json="$labels_json,"
+    labels_json="$labels_json{\"name\":\"$(json_escape "$label")\"}"
+  done
+  IFS="$old_ifs"
+
+  comments_json=""
+  if [[ "${FAKE_GH_NO_COMMENTS:-}" != "1" ]]; then
+    comment_body="a hostile comment with \`code\`"
+    comments_json="{\"author\":{\"login\":\"johnjallday\"},\"body\":\"$(json_escape "$comment_body")\",\"createdAt\":\"2026-08-12T14:09:12Z\"}"
+  fi
+
+  printf '{"number":%s,"title":"%s","body":"%s","url":"https://example.invalid/issues/%s","state":"%s","labels":[%s],"comments":[%s]}\n' \
+    "$number" "$title" "$body" "$number" "$state" "$labels_json" "$comments_json"
+  exit 0
+fi
+echo "fake gh: unhandled invocation: $*" >&2
+exit 1
+FAKE_GH
+chmod +x "$issue_gh_bin/gh"
+
+function issue_plan_direct {
+  local issue="$1" extra_arg="${2:-}"
+  local -a call
+  call=(--repo-root "$issue_repo" issue-plan --issue "$issue" --worktree "$issue_dev" --yes)
+  [[ -n "$extra_arg" ]] && call+=("$extra_arg")
+  HERDR_DEVFLOW_USE_SOURCE=1 \
+  PATH="$issue_gh_bin:$PATH" \
+  HERDR_DEVFLOW_HOME="$fixture_root/issue-plan-runtime" \
+  HERDR_BIN_PATH="$fixture_root/no-such-herdr" \
+  FAKE_GH_BODY_FILE="$fake_gh_body_file" \
+    bash "$repo_root/scripts/herdr-devflow.sh" "${call[@]}"
+}
+
+# Happy path: one fresh read, eligibility passes, the snapshot and starter
+# checklist are written atomically, hostile Issue content survives verbatim
+# as inert text, the starter's first item requests parent tasks and "Go",
+# and — since no Herdr is reachable here — the command still exits 0 with the
+# planning files intact (AR8-AR13, AR22-AR24).
+happy_status=0
+issue_plan_direct 934 > "$fixture_root/issue-plan-happy" 2>&1 || happy_status=$?
+if [[ "$happy_status" != "0" ]]; then
+  print -r -- "issue-plan happy path exited $happy_status: $(<"$fixture_root/issue-plan-happy")" >&2
+  exit 1
+fi
+rg -q "Herdr executable was not found" "$fixture_root/issue-plan-happy"
+snapshot_path="$issue_dev/tasks/issue-934-ready-issue-codex-planning.md"
+starter_path="$issue_dev/tasks/tasks-934-ready-issue-codex-planning.md"
+[[ -f "$snapshot_path" ]]
+[[ -f "$starter_path" ]]
+rg -q "ori-devflow: issue-snapshot; issue=934" "$snapshot_path"
+rg -Fq '`code`' "$snapshot_path"
+rg -Fq '$(rm -rf /)' "$snapshot_path"
+rg -Fq -- '--leading-dash' "$snapshot_path"
+rg -q "ori-devflow: planning-starter" "$starter_path"
+rg -q '1\.1 Read `AGENTS.md`' "$starter_path"
+rg -q 'Wait for "Go"' "$starter_path"
+rg -q 'Do not start implementing' "$starter_path"
+
+# Idempotent rerun: neither file's content changes, and the command still
+# reports readiness rather than erroring on an already-planned Issue.
+before_snapshot_sum="$(shasum -a 256 "$snapshot_path")"
+before_starter_sum="$(shasum -a 256 "$starter_path")"
+rerun_status=0
+issue_plan_direct 934 > "$fixture_root/issue-plan-rerun" 2>&1 || rerun_status=$?
+[[ "$rerun_status" == "0" ]]
+rg -q "resumed" "$fixture_root/issue-plan-rerun"
+[[ "$(shasum -a 256 "$snapshot_path")" == "$before_snapshot_sum" ]]
+[[ "$(shasum -a 256 "$starter_path")" == "$before_starter_sum" ]]
+
+# Ineligible Issues fail closed and create nothing: closed, approved,
+# missing size, and duplicate size, each its own Issue number so a rejected
+# case can never be confused with the happy path's artifacts.
+ineligible_status=0
+FAKE_GH_STATE="CLOSED" issue_plan_direct 101 > "$fixture_root/issue-plan-closed" 2>&1 || ineligible_status=$?
+[[ "$ineligible_status" == "1" ]]
+[[ ! -e "$issue_dev/tasks/issue-101-ready-issue-codex-planning.md" ]]
+
+ineligible_status=0
+FAKE_GH_LABELS="backlog,approved,size:planned" \
+  issue_plan_direct 102 > "$fixture_root/issue-plan-approved" 2>&1 || ineligible_status=$?
+[[ "$ineligible_status" == "1" ]]
+[[ ! -e "$issue_dev/tasks/issue-102-ready-issue-codex-planning.md" ]]
+
+ineligible_status=0
+FAKE_GH_LABELS="backlog" \
+  issue_plan_direct 103 > "$fixture_root/issue-plan-no-size" 2>&1 || ineligible_status=$?
+[[ "$ineligible_status" == "1" ]]
+[[ ! -e "$issue_dev/tasks/issue-103-ready-issue-codex-planning.md" ]]
+
+ineligible_status=0
+FAKE_GH_LABELS="backlog,size:quick,size:prd" \
+  issue_plan_direct 104 > "$fixture_root/issue-plan-dup-size" 2>&1 || ineligible_status=$?
+[[ "$ineligible_status" == "1" ]]
+[[ ! -e "$issue_dev/tasks/issue-104-ready-issue-codex-planning.md" ]]
+if [[ -e "$issue_dev/tasks" ]] && [[ "$(ls "$issue_dev/tasks" | wc -l | tr -d ' ')" != "2" ]]; then
+  print -r -- "an ineligible Issue left files behind: $(ls "$issue_dev/tasks")" >&2
+  exit 1
+fi
+
+# size:prd routes to a PRD-first starter that asks clarifying questions
+# before generating tasks, rather than the tasks-first starter above.
+FAKE_GH_LABELS="backlog,size:prd" issue_plan_direct 105 > /dev/null
+prd_starter="$issue_dev/tasks/tasks-105-ready-issue-codex-planning.md"
+[[ -f "$prd_starter" ]]
+rg -q 'Ask only the 3-5' "$prd_starter"
+rg -q 'tasks/prd-105-ready-issue-codex-planning.md' "$prd_starter"
+
 # The remaining Herdr-free commands mutate Git or GitHub, so they are asserted
 # structurally instead of by running them: no dispatcher branch below may
 # reach for the bridge.

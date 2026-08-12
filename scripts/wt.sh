@@ -5,7 +5,8 @@
 #   source scripts/wt.sh    # Load the function (cd works directly)
 #   wt                      # Interactive REPL (type: go, status, start, ...)
 #   wt go                   # One-shot worktree picker (navigate + cd)
-#   wt start [prd] [--kind KIND] [--no-herdr] # Create a worktree from a PRD in the dev tasks/ folder
+#   wt plan --issue <N> [--yes]  # Start Codex planning a Ready Issue in the dev worktree
+#   wt start [prd] [--kind KIND] [--no-herdr] # Create a worktree from a PRD or task list in the dev tasks/ folder
 #   wt new <name>           # Create a clean worktree (no PRD/tasks)
 #   wt pr [name]            # Push branch and open a PR against dev
 #   wt done [name] [--herdr-override] # Archive tasks back to dev, then remove worktree+branch
@@ -453,7 +454,7 @@ function wt_repl {
   # current shell (wt is sourced), so cd/start still change the shell's dir; the
   # prompt shows the current directory's basename so you can see where you are.
   wt_color_init
-  echo "wt REPL - commands: go, status, start, new, pr, done, cd, ls, rm, demo, herd, help  (q to quit)"
+  echo "wt REPL - commands: go, status, plan, start, new, pr, done, cd, ls, rm, demo, herd, help  (q to quit)"
   local line
   local -a words
   while true; do
@@ -587,6 +588,82 @@ function wt_status_worktrees {
   done
   echo
   echo "Compared against: ${WT_C_CYAN}$BASE_BRANCH${WT_C_RESET}"
+}
+
+# --- Issue planning -----------------------------------------------------
+#
+# wt plan --issue <N> starts a Codex planning session for one Ready GitHub
+# Issue in the dev worktree. It is a distinct lifecycle stage from wt start:
+# planning happens in ori-agent-dev and never creates a branch, a worktree, or
+# an implementation agent. Everything past argument parsing — the fresh
+# GitHub read, eligibility, identity, artifact-state resolution, rendering,
+# confirmation, and the actual writes/Herdr calls — happens in the Go helper,
+# the same way wt status delegates its rendering. This function only
+# validates arguments and resolves the exact dev worktree to plan in.
+function wt_plan_issue_usage {
+  echo "Usage: wt plan --issue <positive-integer> [--yes]"
+}
+
+function wt_plan_issue {
+  local issue="" assume_yes=0
+  local -a args
+  args=("$@")
+  local arg index=1
+  while (( index <= ${#args[@]} )); do
+    arg="${args[$index]}"
+    case "$arg" in
+      --issue)
+        index=$(( index + 1 ))
+        if (( index > ${#args[@]} )); then
+          echo "wt plan --issue requires a positive Issue number"
+          wt_plan_issue_usage
+          return 1
+        fi
+        if [[ -n "$issue" ]]; then
+          echo "wt plan accepts --issue only once"
+          return 1
+        fi
+        if [[ ! "${args[$index]}" =~ ^[1-9][0-9]*$ ]]; then
+          echo "wt plan --issue requires a positive Issue number"
+          wt_plan_issue_usage
+          return 1
+        fi
+        issue="${args[$index]}"
+        ;;
+      --yes|-y)
+        assume_yes=1
+        ;;
+      *)
+        echo "Unknown wt plan argument: $arg"
+        wt_plan_issue_usage
+        return 1
+        ;;
+    esac
+    index=$(( index + 1 ))
+  done
+
+  if [[ -z "$issue" ]]; then
+    echo "wt plan requires --issue <positive-integer>"
+    wt_plan_issue_usage
+    return 1
+  fi
+
+  local dev_path
+  dev_path="$(wt_get_dev_worktree)"
+  if [[ -z "$dev_path" ]]; then
+    echo "Could not find $BASE_BRANCH worktree"
+    return 1
+  fi
+
+  # Arguments are forwarded as separate words, never through eval, so the
+  # Issue number (already validated above as digits-only) and the resolved
+  # worktree path are the only values reaching the helper's argument vector.
+  local -a plan_args
+  plan_args=(issue-plan --issue "$issue" --worktree "$dev_path")
+  if (( assume_yes )); then
+    plan_args+=(--yes)
+  fi
+  wt_herd "${plan_args[@]}"
 }
 
 function wt_devflow {
@@ -1099,6 +1176,10 @@ function wt_dispatch {
     shift
     wt_herd "$@"
     ;;
+  plan)
+    shift
+    wt_plan_issue "$@"
+    ;;
   new)
     # Ad-hoc creation, through the same four phases as wt start. The only
     # differences are the ones FR-23 allows: no planning documents are copied,
@@ -1510,7 +1591,12 @@ function wt_dispatch {
     echo "Usage: wt [command] [args]"
     echo "  wt               - Interactive REPL (bare 'wt'; type commands, q to quit)"
     echo "  wt go            - One-shot worktree picker (navigate + cd)"
-    echo "  wt start [prd] [--kind KIND] [--no-herdr] - Create worktree from a PRD in the dev tasks/ folder"
+    echo "  wt plan --issue <N> [--yes] - Start a Codex planning session for a Ready GitHub"
+    echo "                     Issue in the dev worktree (PRD-first or tasks-first by size)."
+    echo "                     Writes tasks/issue-<feature>.md and a starter checklist there;"
+    echo "                     never touches the Issue on GitHub. Run 'wt start <feature>' once"
+    echo "                     Codex has replaced the starter with a real plan."
+    echo "  wt start [prd] [--kind KIND] [--no-herdr] - Create worktree from a PRD or task list in the dev tasks/ folder"
     echo "  wt new <name> [--kind KIND] [--no-herdr] [--yes] - Ad-hoc worktree (feature/<name>, or <type>/<name>)"
     echo "                     Same guided flow as wt start, minus the planning documents."
     echo "                     --no-herdr on either: bare Git worktree, no Herdr tab or agent."
