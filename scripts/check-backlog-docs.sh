@@ -28,7 +28,7 @@ typeset -a historical
 historical=(
   "docs/feature-discovery/reports/"   # dated discovery reports, written at the time
   "scripts/check-backlog-docs.sh"     # this file
-  "scripts/issue-cli.test.sh"         # asserts the file, its commands, and `wt backlog` are gone
+  "scripts/devops-cli.test.sh"        # asserts the retired commands and helper are gone
   "scripts/wt-herd.test.sh"           # asserts no backlog commit is ever created
   "tools/herdr-devflow/internal/overview/types.go"        # schema-version note
   "tools/herdr-devflow/internal/overview/sanitize_test.go" # writes one, proves it is ignored
@@ -78,6 +78,16 @@ while IFS=: read -r match_path line text; do
 done < <(rg -n --no-heading "(wt backlog|backlog\.sh) (sync|prune|promote|ship|drop)" \
   --glob '!node_modules' --glob '!.git' --glob '!tasks/' . 2>/dev/null || true)
 
+# The three wrapper names and their Go-helper bootstrap were removed in favor
+# of one direct-gh script. Current instructions must not send anyone back to
+# those paths; tests and historical reports may still name them as retired.
+while IFS=: read -r match_path line text; do
+  is_historical "$match_path" && continue
+  print -r -- "$match_path:$line references a retired DevOps entrypoint: $text" >&2
+  failed=1
+done < <(rg -n --no-heading 'scripts/devops/(issue|backlog|ready)\.sh|scripts/lib/devflow-bootstrap\.sh' \
+  --glob '!node_modules' --glob '!.git' --glob '!tasks/' . 2>/dev/null || true)
+
 # The retention setting went with the file.
 while IFS=: read -r match_path line text; do
   is_historical "$match_path" && continue
@@ -86,16 +96,16 @@ while IFS=: read -r match_path line text; do
 done < <(rg -n --no-heading "WT_BACKLOG_RETENTION_DAYS" \
   --glob '!node_modules' --glob '!.git' --glob '!tasks/' . 2>/dev/null || true)
 
-# Instructions to reach the backlog through `wt`. It is ./scripts/devops/ now:
-# its own executables, so an agent — which cannot source a zsh function — can run
-# them. A doc still saying `wt backlog` sends a reader to a signpost.
+# Instructions to reach the backlog through `wt`. It is ./scripts/devops.sh now,
+# a standalone executable an agent can run without sourcing this zsh function.
+# A doc still saying `wt backlog` sends a reader to a signpost.
 #
 # The signposts themselves are the exception. They name the command they replace
 # because that is their entire job, so a line that also names the replacement is
 # a correction rather than an instruction.
 while IFS=: read -r match_path line text; do
   is_historical "$match_path" && continue
-  [[ "$text" == *"moved to ./scripts/devops/backlog.sh"* ]] && continue
+  [[ "$text" == *"moved to ./scripts/devops.sh"* ]] && continue
   print -r -- "$match_path:$line tells a reader to run wt backlog: $text" >&2
   failed=1
 done < <(rg -n --no-heading "wt backlog" \

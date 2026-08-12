@@ -48,17 +48,20 @@ Read `docs/features/*.md` (13+ plan docs incl. `AI_FEATURES_ROADMAP.md`, `create
 classify as shipped / partially shipped / not started by spot-checking the code it describes.
 Partially-shipped plans with recent momentum are prime candidates.
 
-### E. User backlog (open GitHub Issues authored by the repository owner)
+### E. User backlog (all open GitHub Issues)
 
 John's own captured ideas — the highest-signal source. Read them fresh at the start of every
 run:
 
 ```bash
-./scripts/devops/issue.sh --json          # open Issues in this repository authored by the current gh user
-./scripts/devops/issue.sh view <number>   # one Issue's full body, when the title is not enough
+gh issue list --state open --limit 1000 --json number,title,author,labels,url,createdAt,updatedAt
+gh issue view <number> --json number,title,body,author,labels,url,createdAt,updatedAt,comments
 ```
 
-**Read Issues, not the board.** The two board commands each read one column and so each narrow this source: `./scripts/devops/ready.sh` shows only the Issues a grooming agent has already researched, and `./scripts/devops/backlog.sh` only those it has not reached yet. Discovery scores *every* open Issue, including the ones nobody has looked at, which are exactly the ones most likely to be missed. Using either board command here would narrow this source silently and produce a shortlist that looks complete while omitting the newest ideas.
+**Read the unfiltered Issue list.** `./scripts/devops.sh` offers convenient
+`needs-decision`, `backlog`, and `feature-proposal` label views for a human, but
+discovery scores *every* open Issue, including unlabelled ones. Starting from a
+filtered view would silently omit the newest or not-yet-triaged ideas.
 
 Treat **every** open Issue as a candidate and score it with the same rubric. An Issue counts
 even when it has no label, no milestone, no assignee, no Project, and no acceptance criteria —

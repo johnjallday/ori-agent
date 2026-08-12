@@ -104,57 +104,107 @@ Source it (don't execute) so `cd` affects your current shell.
 `wt demo` removes its exact sandbox when the demo exits. Set
 `ORI_KEEP_DEMO_SANDBOX=1` when the sandbox needs to be retained for debugging.
 
-### `scripts/devops/` — the Issues, and the board built from them
+### `scripts/devops.sh` — open Issues by workflow label
 
-Three executables, one question each:
+One command covers the human issue workflow:
 
 ```bash
-./scripts/devops/issue.sh                     # the open GitHub Issues you authored
-./scripts/devops/issue.sh --all               # every author's open Issues in this repository
-./scripts/devops/issue.sh view <number>       # one Issue in full, including its body
-./scripts/devops/issue.sh add "<title>"       # capture an idea as a new Issue
-
-./scripts/devops/backlog.sh                   # the board's Backlog column: captured, not yet groomed
-./scripts/devops/ready.sh                     # the board's Ready column: groomed and buildable, ranked
+./scripts/devops.sh                    # list every open Issue, then start the REPL
+./scripts/devops.sh ready              # what you can actually pick up now
+./scripts/devops.sh all                # every open Issue, one-shot
+./scripts/devops.sh decisions          # label: needs-decision
+./scripts/devops.sh backlog            # label: backlog
+./scripts/devops.sh proposals          # label: feature-proposal
+./scripts/devops.sh status             # which group each task list is on
+./scripts/devops.sh view <number>      # one Issue in full
+./scripts/devops.sh new <title>        # capture an Issue (confirm-gated)
+./scripts/devops.sh answer <n> <text>  # post a comment (confirm-gated)
+./scripts/devops.sh approve <n>        # add the approved label (confirm-gated)
+./scripts/devops.sh unapprove <n>      # remove it again
 ```
 
-`issue.sh` is the record — your words, plus the grooming agent's spec comment.
-The other two read one column each of the ProjectV2 linked to this repository,
-and never write: ranking belongs to the grooming agent and lifecycle to GitHub's
-own workflows.
+`ready` is the view worth living in: feature proposals plus backlog Issues that
+are neither already covered by a proposal (`bundled`) nor already chosen
+(`approved`). It exists so the same work never appears twice — once as a bundle
+and again as its members.
 
-**Each command is named after the column it reads.** `backlog.sh` shows exactly
-what GitHub labels `Backlog`, so its count always matches the number on the
-board's own column header. That equivalence is the point: an earlier version of
-this command was named `backlog` while reading `Ready`, which meant the four
-cards actually sitting in Backlog appeared in no command at all.
+In a terminal, the colorful picker uses `↑/↓` or `j/k` to select an Issue,
+`←/→` or `h/l` to change views, `Enter` to inspect it, `n` to capture a new
+Issue, `c` to answer its open questions, `o` to approve it, `r` to refresh, and
+`q` to quit. In a pipe or redirected shell, the line REPL remains available: use
+`1/a`, `2/d`, `3/b`, `4/f`, or `5/y` to change views, `v <number>` to inspect,
+`n <title>` to capture, `c <number> <text>` to answer, and `ok <number>` to
+approve. The default and `all` view include every author; closed Issues stay out
+of lists.
 
-`Ready` means buildable, not approved — choosing what to build stays with you.
+Every row shows the Issue's `size:*` label in its own column, so a long label
+list can never truncate away the signal that says whether to open a PRD first.
 
-Each is its own executable, so nothing has to be sourced first — one stable
-token a human or an agent can run from any checkout of this repository. They
-need `gh` authenticated; they do not need Herdr installed, running, or healthy.
+**In-flight status.** A second column shows whether work has already started and
+how far it has got — `2/7 wt` means two of seven task-list groups are done and a
+worktree is checked out; `br` means only a branch exists. `./scripts/devops.sh
+status` prints the same thing for every task list at once:
 
-They run the first helper they find, preferring an already-built one over
-compiling: `$HERDR_DEVFLOW_BINARY`, then `bin/herdr-devflow` in the checkout,
-then the installed runtime helper (`$HERDR_DEVFLOW_HOME`, or
-`<user config dir>/herdr/ori-devflow`), then `go run`. If one answers
-`unknown command "ready"`, the helper answering it is older than the command —
-build the checkout's own with
-`go build -o bin/herdr-devflow ./tools/herdr-devflow/cmd/herdr-devflow`, or run
-`wt herd setup` to reinstall the runtime copy.
+```
+  0/8     worktree           workspace-ticket-management
+  3/3     branch    #339     339-workspace-map-camera-framing
+  5/6     -                  build-my-hq-button-fix
+```
+
+This is **entirely local** — plain `git worktree list`, `git branch`, and the
+task files on disk. It is deliberately *not* a Herdr integration:
+`scripts/wt-herd.test.sh` asserts this script never reaches for the devflow
+bridge, which is the whole point of the REPL having replaced that helper. The
+Issue-number-first convention already encodes the link in the branch name
+(`fix/339-slug`) and the task file (`tasks-339-slug.md`), so no network, no
+second contract, and no `wt` dependency is needed. Branches predating that
+convention still resolve, by slug.
+
+Task files are gitignored and live in one place, the dev worktree's `tasks/`, so
+progress is read from disk rather than from anything pushed. That is
+deliberately fresher: checkboxes get ticked while you work, but a pushed copy
+would only update when you commit. It also means the numbers are exactly as
+honest as the file — a shipped feature whose boxes were never ticked will read
+`0/6`.
+
+**Writes.** `new`, `answer`, `approve` and `unapprove` are the only mutating
+commands. Each prints what it will do and asks for confirmation; without a
+terminal they refuse unless given `--yes`, so a pipe can never write by
+accident.
+
+`new` exists because capture is supposed to take ten seconds — a title is
+enough, and the grooming routine researches and specs it on its next run. **It
+deliberately applies no labels.** Adding `backlog` here would skip the spec step
+the whole pipeline is built around, and `needs-decision` would assert a spec
+exists when none does. Titles are passed through verbatim, so an ampersand stays
+an ampersand rather than becoming a literal `&amp;`.
+
+`approved` is the pipeline's single human gate — the grooming routine is
+forbidden from writing it — which is why setting it belongs here. Label changes
+use `--add-label`/`--remove-label` rather than a labels array write, so an
+Issue's other labels cannot be dropped.
+
+One-shot and line-REPL views are direct `gh issue list` calls. The terminal
+picker fetches the complete open-Issue index once, then filters it locally until
+`r` refreshes it. Because that local filter has to agree with the labels `gh`
+applies server-side, `scripts/devops-cli.test.sh` unit-tests the matcher against
+the same fixtures the integration tests use. There is no ProjectV2 query, Herdr
+helper, persisted cache, local fallback, custom formatter, or Ori-owned JSON
+contract. Empty label views say so explicitly. GitHub failures retain `gh`'s
+non-zero exit status instead of looking like an empty backlog.
 
 The product backlog is GitHub Issues. There is no backlog file to maintain,
 sync, or prune, and no backlog commit ever lands on `dev`.
 
-Every invocation queries GitHub fresh — there is no cache and no local fallback,
-so an unavailable GitHub is reported as a failure rather than as an empty
-backlog. `--json` emits a schema-versioned envelope for scripting. `add` creates
-the Issue and nothing else: no label, assignee, milestone, Project, browser, or
-editor.
+Capture and machine-readable reads use the GitHub CLI directly:
 
-Exit codes: `0` the operation completed (an empty backlog is a completed
-listing), `1` GitHub could not answer, `2` invalid arguments.
+```bash
+gh issue create --title "<title>" --body "<optional context>"
+gh issue list --state open --limit 1000 --json number,title,author,labels,url,createdAt,updatedAt
+```
+
+The script exits `0` after a completed operation, `2` for invalid arguments,
+and otherwise preserves the failed `gh` command's status.
 
 New Issue-backed work uses the Issue number in its identity —
 `<issue-number>-<slug>`, for example `292-coordinate-based-map` — so a PRD,
@@ -177,7 +227,8 @@ wt status --worktrees          # the legacy Git-only worktree table
 planning artifacts, feature worktrees, local Git, GitHub pull requests, and live
 Herdr agents on the exact feature slug. It is read-only: it never writes
 planning files, Git, GitHub, bridge, or Herdr state. It describes selected and
-executing work; unselected ideas live in `./scripts/devops/issue.sh`.
+executing work; unselected ideas live in GitHub Issues and are listed by
+`./scripts/devops.sh`.
 
 Exit codes: `0` complete, `1` incomplete (a required source, normally GitHub,
 was unavailable — the board still prints every local fact it observed), `2`

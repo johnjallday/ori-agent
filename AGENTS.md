@@ -39,17 +39,45 @@ For the PRD and task-list workflows below, create planning artifacts in this dev
 
 ## Feature Naming: Issue Number First
 
-Ideas are captured as GitHub Issues and read back through three commands in `scripts/devops/`, each named for exactly what it reads:
+Ideas are captured as GitHub Issues. `./scripts/devops.sh` is the human
+interface: with no arguments in a terminal it opens a colorful Issue picker;
+one-shot commands expose the same views to scripts and agents.
 
-| Command | Reads | Answers |
-|---|---|---|
-| `./scripts/devops/issue.sh` | GitHub Issues — `list`, `view <n>`, `add "<title>"` | "what have I captured?" |
-| `./scripts/devops/backlog.sh` | the linked project board's `Backlog` column | "what is waiting to be groomed?" |
-| `./scripts/devops/ready.sh` | the linked project board's `Ready` column, ranked | "what should I work on?" |
+| Command | Does |
+|---|---|
+| `./scripts/devops.sh` or `./scripts/devops.sh all` | reads every open Issue |
+| `./scripts/devops.sh ready` | reads what is pickable now: proposals + backlog that is neither `bundled` nor `approved` |
+| `./scripts/devops.sh decisions` | reads open Issues labeled `needs-decision` |
+| `./scripts/devops.sh backlog` | reads open Issues labeled `backlog` |
+| `./scripts/devops.sh proposals` | reads open Issues labeled `feature-proposal` |
+| `./scripts/devops.sh status` | reads which group each task list is on, and whether its branch has a worktree — local only |
+| `./scripts/devops.sh view <n>` | reads one Issue in full |
+| `./scripts/devops.sh new <title>` | **writes** a new unlabelled Issue, confirm-gated |
+| `./scripts/devops.sh answer <n> <text>` | **writes** a comment, confirm-gated |
+| `./scripts/devops.sh approve <n>` / `unapprove <n>` | **writes** the `approved` label, confirm-gated |
 
-Issues are the record: your capture, plus the grooming agent's spec comment, which `./scripts/devops/issue.sh view` prints under the body. The board adds what an Issue cannot express — an ordering and a "researched enough to build" state — and is resolved from whichever ProjectV2 is linked to this repository, so exactly one must be. `Ready` means buildable, not approved; choosing what to build stays with you.
+The script delegates directly to `gh issue list`, `gh issue view`,
+`gh issue create`, `gh issue comment` and `gh issue edit`. Its filters are
+literal GitHub labels, not Project columns, and every read is fresh.
 
-Each board command shows exactly the column GitHub labels with that name, so its count always matches the board's own column header. Nothing reads "the board" as a whole: a command that showed one column while named after another is precisely the trap this split removed.
+Reads never mutate. The write commands exist because they are the three things
+only a human does in this pipeline: capturing an idea, answering a spec's open
+questions, and setting `approved` — the single gate the grooming routine is
+forbidden from touching. They confirm before writing and refuse without a
+terminal unless given `--yes`.
+
+`new` creates the Issue with **no labels**, on purpose: a raw ten-second capture
+has to reach the grooming routine untriaged, or it skips the spec step the
+pipeline is built around. Everything else about an Issue's lifecycle — triaging,
+sizing, bundling, closing — belongs to the grooming routine or to the PR that
+implements the work.
+
+`status` and the picker's in-flight column resolve an Issue to work-in-progress
+through the naming convention above: branch `fix/339-slug` and task file
+`tasks/tasks-339-slug.md`. Both are read from local git and disk — never from
+Herdr, which `scripts/wt-herd.test.sh` enforces — so the check is instant,
+offline, and reflects checkbox ticks before they are committed. Task files are
+gitignored and shared out of the dev worktree's `tasks/`; they are never pushed.
 
 Work selected from an Issue uses the Issue number at the front of its identity:
 
