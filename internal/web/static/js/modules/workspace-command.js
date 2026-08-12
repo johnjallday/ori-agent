@@ -1002,6 +1002,12 @@ export class WorkspaceCommandView {
     const tickets = typeof window !== 'undefined' ? window.WorkspaceHubTickets : null;
     const studioId = this.workspaceId();
     if (!tickets || !studioId) return;
+    // render() runs many times while a workspace page boots as data arrives,
+    // and each pass lands here. Without this, one page load issues a dozen
+    // identical list requests for a single number. One in flight is enough;
+    // the next render paints whatever it resolves to.
+    if (this.ticketCountInFlight) return;
+    this.ticketCountInFlight = true;
     try {
       const result = await tickets.api.list(studioId);
       this.ticketCount = result.count;
@@ -1009,6 +1015,10 @@ export class WorkspaceCommandView {
       // A failed count leaves the placeholder rather than showing a wrong
       // number; the Tickets view surfaces the real error when opened.
       return;
+    } finally {
+      // Always clear, including on the failure path — a stuck flag would
+      // silently retire the count for the rest of the session.
+      this.ticketCountInFlight = false;
     }
     if (!this.container || typeof this.container.querySelector !== 'function') return;
     const tile = this.container.querySelector('[data-cmd-section="tickets"] .ws-v');

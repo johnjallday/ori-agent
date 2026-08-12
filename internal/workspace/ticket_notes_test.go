@@ -29,7 +29,7 @@ func (f *fakeNoteLookup) LookupNote(_ context.Context, noteID string) (TicketNot
 	return ref, nil
 }
 
-func newNoteLinkedService(t *testing.T) (*TicketService, Store, *Workspace, *fakeNoteLookup) {
+func newNoteLinkedService(t *testing.T) (*TicketService, *Workspace, *fakeNoteLookup) {
 	t.Helper()
 	svc, store := newTicketTestService(t)
 	ws := newTicketTestWorkspace(t, store, "Alpha")
@@ -39,12 +39,12 @@ func newNoteLinkedService(t *testing.T) (*TicketService, Store, *Workspace, *fak
 		TicketNoteRef{ID: "note-foreign", Title: "Someone else's note", WorkspaceID: "ws-other"},
 	)
 	svc.SetNoteLookup(notes)
-	return svc, store, ws, notes
+	return svc, ws, notes
 }
 
 // FR-17/FR-77: linking is explicit, structured, and idempotent.
 func TestTicketService_LinkNote(t *testing.T) {
-	svc, _, ws, _ := newNoteLinkedService(t)
+	svc, ws, _ := newNoteLinkedService(t)
 	ticket := mustCreateTicket(t, svc, TicketCreateInput{
 		WorkspaceID: ws.ID, State: TicketStateReady, Title: "needs research",
 	})
@@ -99,7 +99,7 @@ func TestTicketService_LinkNote(t *testing.T) {
 
 // FR-18: unlinking removes the reference and nothing else.
 func TestTicketService_UnlinkNote(t *testing.T) {
-	svc, _, ws, notes := newNoteLinkedService(t)
+	svc, ws, notes := newNoteLinkedService(t)
 	ctx := context.Background()
 	ticket := mustCreateTicket(t, svc, TicketCreateInput{
 		WorkspaceID: ws.ID, State: TicketStateReady, Title: "linked work",
@@ -133,7 +133,7 @@ func TestTicketService_UnlinkNote(t *testing.T) {
 // FR-75/FR-78: the reverse direction is derived from the same structured
 // relationship, so the two views cannot disagree.
 func TestTicketService_TicketsLinkedToNote(t *testing.T) {
-	svc, _, ws, _ := newNoteLinkedService(t)
+	svc, ws, _ := newNoteLinkedService(t)
 	ctx := context.Background()
 
 	a := mustCreateTicket(t, svc, TicketCreateInput{
@@ -178,7 +178,7 @@ func TestTicketService_TicketsLinkedToNote(t *testing.T) {
 // FR-73 through FR-76: creating from a Note is a reviewed decision that
 // preserves the Note and copies its content only once.
 func TestTicketService_CreateTicketFromNote(t *testing.T) {
-	svc, _, ws, notes := newNoteLinkedService(t)
+	svc, ws, notes := newNoteLinkedService(t)
 	ctx := context.Background()
 
 	ticket, err := svc.CreateTicketFromNote(ctx, ws.ID, "note-1", TicketCreateInput{
@@ -236,7 +236,7 @@ func TestTicketService_CreateTicketFromNote(t *testing.T) {
 // FR-76: prefill is a ONE-TIME copy. Editing either side never rewrites the
 // other — there is no synchronization anywhere in this path.
 func TestTicketService_NoteAndTicketBodiesStayIndependent(t *testing.T) {
-	svc, _, ws, notes := newNoteLinkedService(t)
+	svc, ws, notes := newNoteLinkedService(t)
 	ctx := context.Background()
 
 	ticket, err := svc.CreateTicketFromNote(ctx, ws.ID, "note-1", TicketCreateInput{
@@ -280,7 +280,7 @@ func TestTicketService_NoteAndTicketBodiesStayIndependent(t *testing.T) {
 // FR-18/FR-72: deleting a Ticket unlinks but never deletes a Note, and a Note
 // that disappears leaves the Ticket intact.
 func TestTicketService_DeletionIsIndependentInBothDirections(t *testing.T) {
-	svc, _, ws, notes := newNoteLinkedService(t)
+	svc, ws, notes := newNoteLinkedService(t)
 	ctx := context.Background()
 
 	t.Run("deleting a ticket keeps the note", func(t *testing.T) {
@@ -380,7 +380,7 @@ func TestTaskPreparedContext_LinkedNotesAreIdentityOnly(t *testing.T) {
 
 // FR-98: link and unlink publish their own canonical events.
 func TestTicketService_NoteLinkEvents(t *testing.T) {
-	svc, _, ws, _ := newNoteLinkedService(t)
+	svc, ws, _ := newNoteLinkedService(t)
 	bus := NewEventBus(32, 32)
 	svc.SetEventBus(bus)
 	ctx := context.Background()
