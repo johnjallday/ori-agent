@@ -3,7 +3,9 @@ package workspaceplan
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -574,6 +576,69 @@ func TestAutosaveSnapshotsArePrunedToTheRetainedCount(t *testing.T) {
 	}
 	if len(snapshots) != MaxDraftSnapshots {
 		t.Errorf("snapshots = %d, want the retained %d", len(snapshots), MaxDraftSnapshots)
+	}
+}
+
+// Two sessions autosaving the same draft: exactly one write wins per revision,
+// and the losers are told their view is stale rather than silently overwriting
+// each other (FR-30).
+func TestConcurrentAutosavesResolveToOneWinnerPerRevision(t *testing.T) {
+	ctx := context.Background()
+	service, _ := newDraftingService(t, &scriptedModel{})
+	plan := mustCreatePlan(t, ctx, service)
+
+	const editors = 8
+	var (
+		wg     sync.WaitGroup
+		mu     sync.Mutex
+		won    int
+		stale  int
+		others []error
+	)
+
+	wg.Add(editors)
+	for i := range editors {
+		go func(i int) {
+			defer wg.Done()
+			_, err := service.Edit(ctx, "ws-1", plan.ID, EditInput{
+				Objective:        fmt.Sprintf("Objective from editor %d", i),
+				ExpectedRevision: 0, // every session loaded revision 0
+				Snapshot:         true,
+			})
+			mu.Lock()
+			defer mu.Unlock()
+			switch {
+			case err == nil:
+				won++
+			case errors.Is(err, ErrStaleDraft):
+				stale++
+			default:
+				others = append(others, err)
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	if len(others) > 0 {
+		t.Fatalf("unexpected errors: %v", others)
+	}
+	if won != 1 {
+		t.Errorf("successful writes = %d, want exactly 1", won)
+	}
+	if stale != editors-1 {
+		t.Errorf("stale rejections = %d, want %d", stale, editors-1)
+	}
+
+	// The surviving draft is one editor's, whole — not a blend of several.
+	final, err := service.Get(ctx, "ws-1", plan.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if !strings.HasPrefix(final.Objective, "Objective from editor ") {
+		t.Errorf("final objective = %q, want one editor's write intact", final.Objective)
+	}
+	if final.DraftRevision != 1 {
+		t.Errorf("draft revision = %d, want 1 after a single accepted write", final.DraftRevision)
 	}
 }
 

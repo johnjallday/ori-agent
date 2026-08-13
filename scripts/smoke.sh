@@ -126,10 +126,96 @@ smoke_plans() {
   echo "--- Workspace Plans smoke passed ---"
 }
 
+smoke_drafting() {
+  local ws="$1"
+  [[ -n "$ws" ]] || fail "usage: smoke.sh drafting <base-url> <workspace-id>"
+
+  echo "--- Plan drafting, editing, and recovery ($ws) ---"
+
+  local plan
+  plan=$(curl -s -X POST "$BASE_URL/api/workspaces/$ws/plans" \
+    -H 'Content-Type: application/json' \
+    -d '{"request":"Plan the reporting migration"}' | json_field id)
+  [[ -n "$plan" ]] || fail "plan creation returned no id"
+  local base="$BASE_URL/api/workspaces/$ws/plans/$plan"
+
+  # A manual edit needs no model at all (FR-58).
+  local saved
+  saved=$(curl -s -X PATCH "$base/draft" -H 'Content-Type: application/json' -d '{
+    "objective":"Migrate reporting safely",
+    "revision":0,
+    "autosave":true,
+    "content":{"execution":{"mode":"step_through"},
+      "groups":[{"id":"grp-1","title":"Prepare","items":[
+        {"id":"itm-1","description":"Snapshot staging"},
+        {"id":"itm-2","description":"Verify checksums","depends_on":["itm-1"]}]}]}
+  }')
+  [[ "$(echo "$saved" | json_field objective)" == "Migrate reporting safely" ]] ||
+    fail "manual draft edit did not persist"
+  [[ "$(echo "$saved" | json_field draft_revision)" == "1" ]] ||
+    fail "draft revision did not advance"
+  echo "ok   manual draft edit saved without a model"
+
+  # A stale write is refused and carries recovery context (FR-30, FR-151).
+  local conflict
+  conflict=$(curl -s -X PATCH "$base/draft" -H 'Content-Type: application/json' \
+    -d '{"objective":"Stale write","revision":0}')
+  [[ "$(echo "$conflict" | json_field code)" == "stale_draft" ]] ||
+    fail "a stale write was accepted: $conflict"
+  [[ "$(echo "$conflict" | json_field details.current_revision)" == "1" ]] ||
+    fail "conflict did not carry the winning revision"
+  echo "ok   stale write refused with recovery context"
+
+  # Recovery points exist and are restorable.
+  local snapshot
+  snapshot=$(curl -s "$base/snapshots" | json_field snapshots.0.id)
+  [[ -n "$snapshot" ]] || fail "no recovery snapshot was recorded"
+  expect_status 200 POST "$base/snapshots/$snapshot/recover" '{"actor":"smoke"}'
+  echo "ok   autosave snapshot recovered"
+
+  # A dangling dependency is refused even in a work-in-progress draft.
+  local broken
+  broken=$(curl -s -o /dev/null -w '%{http_code}' -X PATCH "$base/draft" \
+    -H 'Content-Type: application/json' -d '{
+      "objective":"Broken","revision":3,
+      "content":{"execution":{"mode":"step_through"},
+        "groups":[{"id":"grp-1","title":"Prepare","items":[
+          {"id":"itm-1","description":"x","depends_on":["itm-missing"]}]}]}}')
+  [[ "$broken" == "422" ]] || fail "a dangling dependency was accepted (status $broken)"
+  echo "ok   dangling dependency refused"
+
+  # Revision disclosure reports what would be replaced, without changing it.
+  local disclosure
+  disclosure=$(curl -s "$base/revision?section=grp-1")
+  [[ -n "$(echo "$disclosure" | json_field disclosure)" ]] ||
+    fail "revision disclosure returned nothing: $disclosure"
+  echo "ok   revision disclosure available"
+
+  # Generation is unavailable in this sandbox (no model configured), and that
+  # must read as its own condition rather than as a failure (FR-58).
+  local generate
+  generate=$(curl -s -X POST "$base/draft" -H 'Content-Type: application/json' -d '{}')
+  local code
+  code=$(echo "$generate" | json_field code)
+  if [[ "$code" == "model_unavailable" ]]; then
+    echo "ok   generation reports model_unavailable distinctly"
+  elif [[ -n "$(echo "$generate" | json_field id)" ]]; then
+    echo "ok   generation produced a draft (a model is configured)"
+  else
+    fail "unexpected generate response: $generate"
+  fi
+
+  expect_status 405 GET "$base/draft"
+  expect_status 200 DELETE "$base"
+
+  echo "--- Plan drafting smoke passed ---"
+}
+
 case "${1:-}" in
 plans) smoke_plans "${3:-}" ;;
+drafting) smoke_drafting "${3:-}" ;;
 *)
-  echo "usage: $0 plans <base-url> <workspace-id>" >&2
+  echo "usage: $0 {plans|drafting} <base-url> <workspace-id>" >&2
   exit 2
   ;;
 esac
