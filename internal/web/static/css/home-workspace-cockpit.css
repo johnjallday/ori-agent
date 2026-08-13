@@ -292,6 +292,10 @@
      #292 FR-31). The theatre itself no longer scrolls — the camera moves. */
   min-height: 320px;
   overflow: hidden;
+  /* Cockpit mode has no theatre title strip, so its canvas can own the full
+     panel. This also lets pointer events pass through the empty-action
+     overlay's non-button space directly to the map. */
+  padding: 0;
 }
 .cockpit-map .ws-map-layout.is-cockpit .ws-map-theatre .ws-map-canvas {
   min-height: 0;
@@ -324,6 +328,17 @@
 .cockpit-map .cockpit-empty-map-actions > button:focus-visible {
   outline: 2px solid var(--hc-signal);
   outline-offset: 2px;
+}
+
+/* On a narrow screen, the HQ landmark, creation group, and two map-control
+   clusters cannot truthfully share a 320px canvas without covering each other.
+   Give this one first-run state vertical room instead of shrinking controls or
+   hiding content; populated Map and Tree sizing remains unchanged. */
+@media (max-width: 700px) {
+  .home-cockpit[data-state="empty-map"] .cockpit-area-body,
+  .home-cockpit[data-state="empty-map"] .cockpit-map {
+    min-height: 520px;
+  }
 }
 
 .cockpit-area-status:empty {

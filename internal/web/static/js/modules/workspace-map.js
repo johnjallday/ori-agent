@@ -2172,6 +2172,30 @@
     if (create && typeof create.click === 'function') create.click();
   }
 
+  function bindCockpitEmptyActions(container) {
+    var buttons = container.querySelectorAll('.cockpit-empty-map-actions button');
+    buttons.forEach(function (button) {
+      button.addEventListener('click', function () {
+        var modal = document.getElementById('addFolderModal');
+        if (!modal) return;
+        var entryPoint = button.getAttribute('data-workspace-entry-point');
+        modal.addEventListener(
+          'hidden.bs.modal',
+          function restoreEmptyActionFocus() {
+            // A late HQ response may remount the Map while the modal is open.
+            // Resolve the current button by its stable contract rather than
+            // focusing a detached trigger from the previous canvas.
+            var current = container.querySelector(
+              '.cockpit-empty-map-actions [data-workspace-entry-point="' + entryPoint + '"]'
+            );
+            if (current && current.focus) current.focus();
+          },
+          { once: true }
+        );
+      });
+    });
+  }
+
   function bindCreate(container) {
     var els = container.querySelectorAll('[data-ws-map-create]');
     Array.prototype.forEach.call(els, function (el) {
@@ -4650,6 +4674,7 @@
       state
     );
     bindCreate(container);
+    bindCockpitEmptyActions(container);
     bindTiles(container, workspaces, state);
     bindContextMenu(container, workspaces, state);
     bindHQSite(container, state);
