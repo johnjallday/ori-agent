@@ -2,11 +2,13 @@ package server
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
@@ -141,10 +143,19 @@ func (s *Server) Shutdown() {
 	}
 }
 
-// HTTPServer returns a fully configured http.Server
+// HTTPServer returns a fully configured http.Server.
+//
+// Background services (task executor, schedulers, directory sync) start from
+// the returned server's BaseContext hook rather than here, because BaseContext
+// fires once the listener is open and about to accept. Starting them here
+// instead meant the first batch of tasks began executing while the port was
+// still closed: work ran, spent tokens, and touched files before the user
+// could load the UI to see or cancel any of it. Deferring to BaseContext keeps
+// the ordering honest for both entry points — cmd/server, which serves from a
+// goroutine, and the menubar controller, which blocks on ListenAndServe and so
+// could not have reordered the calls itself.
 func (s *Server) HTTPServer(addr string) *http.Server {
-	// Start background services
-	s.Start()
+	var startOnce sync.Once
 
 	return &http.Server{
 		Addr:              addr,
@@ -153,6 +164,13 @@ func (s *Server) HTTPServer(addr string) *http.Server {
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      6 * time.Minute,
 		IdleTimeout:       90 * time.Second,
+		BaseContext: func(net.Listener) context.Context {
+			// Serve calls this once per listener before accepting. Start in a
+			// goroutine so a slow workspace scan can't stall the accept loop;
+			// the Once guards a server that is served more than once.
+			startOnce.Do(func() { go s.Start() })
+			return context.Background()
+		},
 	}
 }
 

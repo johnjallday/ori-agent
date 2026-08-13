@@ -90,7 +90,7 @@ func TestCleanupOrphanedTasks_ResetsInProgress(t *testing.T) {
 		PollInterval:  time.Hour, // we drive cleanup directly, no polling needed
 		MaxConcurrent: 5,
 	})
-	te.cleanupOrphanedTasks()
+	te.reconcileTasksAtBoot()
 
 	got, err := store.Get(ws.ID)
 	if err != nil {
@@ -138,7 +138,7 @@ func TestCleanupOrphanedTasks_SkipsTrashedWorkspaceWithoutRecreatingFolder(t *te
 		PollInterval:  time.Hour,
 		MaxConcurrent: 5,
 	})
-	te.cleanupOrphanedTasks()
+	te.reconcileTasksAtBoot()
 
 	got, err := primary.Get(ws.ID)
 	if err != nil {
@@ -180,7 +180,7 @@ func TestCleanupOrphanedTasks_AtomicAgainstConcurrentMutation(t *testing.T) {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		te.cleanupOrphanedTasks()
+		te.reconcileTasksAtBoot()
 	}()
 	go func() {
 		defer wg.Done()
@@ -220,6 +220,133 @@ func TestCleanupOrphanedTasks_AtomicAgainstConcurrentMutation(t *testing.T) {
 	}
 }
 
+// TestReconcileTasksAtBoot_HoldsPreexistingBacklog verifies that work merely
+// queued when the previous process ended is demoted to Pending rather than
+// auto-running the instant the server comes back, matching how an interrupted
+// in-progress task has always been treated.
+func TestReconcileTasksAtBoot_HoldsPreexistingBacklog(t *testing.T) {
+	store := newExecutorTestStore(t)
+	now := time.Now()
+	ws := newWorkspaceWithTasks(t, []Task{
+		{ID: "queued", To: "agent-a", Status: TaskStatusAssigned},
+		{ID: "orphan", To: "agent-a", Status: TaskStatusInProgress, StartedAt: &now},
+		{ID: "done", To: "agent-a", Status: TaskStatusCompleted},
+		{ID: "waiting", To: "agent-a", Status: TaskStatusPending},
+	})
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	te := NewTaskExecutor(store, &fakeTaskHandler{}, ExecutorConfig{
+		PollInterval:  time.Hour,
+		MaxConcurrent: 5,
+	})
+	te.reconcileTasksAtBoot()
+
+	got, err := store.Get(ws.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	want := map[string]TaskStatus{
+		"queued":  TaskStatusPending, // held: no fresh intent behind it
+		"orphan":  TaskStatusPending, // reset: died mid-run
+		"done":    TaskStatusCompleted,
+		"waiting": TaskStatusPending,
+	}
+	for _, task := range got.Tasks {
+		if task.Status != want[task.ID] {
+			t.Errorf("task %s status = %q, want %q", task.ID, task.Status, want[task.ID])
+		}
+	}
+}
+
+// TestReconcileTasksAtBoot_ResumeBacklogOptOut verifies unattended deployments
+// can keep the old auto-resume behavior, where a restart picks the queue back
+// up with nobody watching.
+func TestReconcileTasksAtBoot_ResumeBacklogOptOut(t *testing.T) {
+	store := newExecutorTestStore(t)
+	ws := newWorkspaceWithTasks(t, []Task{
+		{ID: "queued", To: "agent-a", Status: TaskStatusAssigned},
+	})
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	te := NewTaskExecutor(store, &fakeTaskHandler{}, ExecutorConfig{
+		PollInterval:  time.Hour,
+		MaxConcurrent: 5,
+	})
+	te.resumeBacklog = true // ORI_TASK_RESUME_BACKLOG=true
+	te.reconcileTasksAtBoot()
+
+	got, err := store.Get(ws.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	task, err := got.GetTask("queued")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if task.Status != TaskStatusAssigned {
+		t.Errorf("status = %q, want %q (backlog should stay auto-runnable)", task.Status, TaskStatusAssigned)
+	}
+}
+
+// TestCheckAndExecuteTasks_BootRampLimitsFirstCycles verifies a server booting
+// next to a full queue admits tasks gradually instead of opening maxConcurrent
+// LLM calls in the same instant.
+func TestCheckAndExecuteTasks_BootRampLimitsFirstCycles(t *testing.T) {
+	store := newExecutorTestStore(t)
+	tasks := make([]Task, 0, 8)
+	for i := 0; i < 8; i++ {
+		tasks = append(tasks, Task{
+			ID:     "task-" + string(rune('a'+i)),
+			To:     "agent-a",
+			Status: TaskStatusAssigned,
+		})
+	}
+	ws := newWorkspaceWithTasks(t, tasks)
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	release := make(chan struct{})
+	handler := &fakeTaskHandler{block: release}
+	te := NewTaskExecutor(store, handler, ExecutorConfig{
+		PollInterval:  time.Hour,
+		MaxConcurrent: len(tasks),
+	})
+	t.Cleanup(func() {
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+		te.Stop()
+	})
+
+	// First cycle admits bootAdmissionRamp[0], not all 8.
+	te.checkAndExecuteTasks()
+	waitForRunningCount(t, te, bootAdmissionRamp[0])
+
+	// Second cycle tops up to the next ramp step.
+	te.checkAndExecuteTasks()
+	waitForRunningCount(t, te, bootAdmissionRamp[0]+bootAdmissionRamp[1])
+}
+
+// waitForRunningCount waits for the executor to reach exactly want running
+// tasks, then confirms it holds there rather than overshooting.
+func waitForRunningCount(t *testing.T, te *TaskExecutor, want int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && te.GetRunningTaskCount() < want {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if got := te.GetRunningTaskCount(); got != want {
+		t.Fatalf("running tasks = %d, want %d", got, want)
+	}
+}
+
 // TestCheckAndExecuteTasks_SingleClaimPerTask exercises the claim path under
 // concurrent invocations of checkAndExecuteTasks. With the existing
 // runningTasks-map check inside te.mu.Lock, the same task ID must never be
@@ -247,6 +374,9 @@ func TestCheckAndExecuteTasks_SingleClaimPerTask(t *testing.T) {
 		PollInterval:  time.Hour,
 		MaxConcurrent: len(tasks),
 	})
+	// This test is about claim exclusivity, not admission pacing: fast-forward
+	// past the boot ramp so every candidate is admissible in one cycle.
+	te.cycle = len(bootAdmissionRamp)
 	// Drain in-flight goroutines before t.TempDir cleanup runs. We close
 	// `release` first so blocked handlers exit, then Stop waits.
 	t.Cleanup(func() {

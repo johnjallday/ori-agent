@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -27,6 +28,14 @@ type TaskExecutor struct {
 
 	providerResolver TaskProviderResolver // optional; overrides taskHandler assertion
 	evolutionAwarder TaskXPAwarder        // optional; awards XP for completed tasks
+
+	autoStart     bool // false = never poll for work (ORI_TASK_AUTOSTART=false)
+	resumeBacklog bool // true = auto-run the pre-boot backlog (ORI_TASK_RESUME_BACKLOG=true)
+
+	// cycle counts completed poll cycles to drive the boot admission ramp.
+	// Guarded by mu: the poll loop is single-goroutine, but checkAndExecuteTasks
+	// is also called directly and concurrently by tests.
+	cycle int
 
 	mu           sync.RWMutex
 	runningTasks map[string]*taskExecution
@@ -142,6 +151,20 @@ type ExecutorConfig struct {
 	LocalTimeoutMultiplier int           // Multiplies the default timeout for local providers (0 = default)
 }
 
+// envBool reads a boolean environment variable, returning def when unset or
+// unparseable.
+func envBool(name string, def bool) bool {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return def
+	}
+	v, err := strconv.ParseBool(raw)
+	if err != nil {
+		return def
+	}
+	return v
+}
+
 // NewTaskExecutor creates a new task executor
 func NewTaskExecutor(store Store, handler TaskHandler, config ExecutorConfig) *TaskExecutor {
 	if config.PollInterval == 0 {
@@ -160,9 +183,18 @@ func NewTaskExecutor(store Store, handler TaskHandler, config ExecutorConfig) *T
 		pollInterval:           config.PollInterval,
 		maxConcurrent:          config.MaxConcurrent,
 		localTimeoutMultiplier: config.LocalTimeoutMultiplier,
-		runningTasks:           make(map[string]*taskExecution),
-		runningByKey:           make(map[string]int),
-		stopChan:               make(chan struct{}),
+		// ORI_TASK_AUTOSTART=false stops the executor polling for work at all,
+		// so a development restart doesn't re-run the queue. The manual RUN
+		// path (orchestrationhttp's execute endpoint) does not go through the
+		// executor and keeps working either way.
+		autoStart: envBool("ORI_TASK_AUTOSTART", true),
+		// ORI_TASK_RESUME_BACKLOG=true restores the pre-boot backlog to
+		// auto-running, for unattended deployments where a restart should pick
+		// the queue back up with nobody watching. See reconcileTasksAtBoot.
+		resumeBacklog: envBool("ORI_TASK_RESUME_BACKLOG", false),
+		runningTasks:  make(map[string]*taskExecution),
+		runningByKey:  make(map[string]int),
+		stopChan:      make(chan struct{}),
 	}
 }
 
@@ -173,60 +205,97 @@ func (te *TaskExecutor) SetEventBus(eventBus *EventBus) {
 
 // Start begins the task executor polling loop
 func (te *TaskExecutor) Start() {
-	logger.Debug("Task executor started", logger.Fields{"max_concurrent": te.maxConcurrent, "poll_interval": te.pollInterval})
+	// Reconcile persisted task state against the fact that a new process just
+	// booted, before anything can claim work.
+	te.reconcileTasksAtBoot()
 
-	// Clean up orphaned tasks before starting
-	te.cleanupOrphanedTasks()
+	if !te.autoStart {
+		logger.Info("Task auto-execution disabled (ORI_TASK_AUTOSTART=false); tasks run only via an explicit RUN", nil)
+		return
+	}
+
+	logger.Debug("Task executor started", logger.Fields{"max_concurrent": te.maxConcurrent, "poll_interval": te.pollInterval})
 
 	te.wg.Add(1)
 	go te.pollLoop()
 }
 
-// cleanupOrphanedTasks resets tasks that were left in "in_progress" state
-// from a previous server run.
+// reconcileTasksAtBoot brings persisted task state in line with the fact that a
+// new server process just started. It runs once, before the poll loop, and
+// makes two transitions — both to Pending, and both for the same reason: work
+// that was mid-flight or merely queued when the previous process ended carries
+// no fresh intent, so it waits for an explicit RUN instead of firing the
+// instant the server comes back.
 //
-// Per-workspace mutation runs inside Store.Update so the read-modify-save
-// is serialized against other instances and against in-flight handlers
-// touching the same workspace. The previous implementation did Get →
-// mutate → Save without per-workspace locking, which on multi-instance
-// deployments could (a) clobber a concurrent mutation between the Get and
-// the Save, and (b) let two boot-time cleanups race each other.
-func (te *TaskExecutor) cleanupOrphanedTasks() {
+//  1. in_progress -> pending: the previous process died mid-run (orphan).
+//  2. assigned -> pending: queued work that predates this process. No
+//     timestamp check is needed to identify it — nothing in this process has
+//     had the chance to assign anything yet, so every assigned task visible
+//     here was assigned by an earlier one. Work assigned later (by the
+//     scheduler, a trigger, or a coordinator) is never seen by this pass and
+//     auto-runs normally. Set ORI_TASK_RESUME_BACKLOG=true to keep the old
+//     auto-resume behavior on unattended deployments.
+//
+// Holding the backlog matches what the interrupted-task path already did, and
+// what the surrounding startup code already believes: workspace file
+// maintenance waits on IsWorkspaceRootConfirmed, and a local->cloud fallback
+// waits on an explicit opt-in, both to avoid acting unasked at boot.
+//
+// Per-workspace mutation runs inside Store.Update so the read-modify-save is
+// serialized against other instances and against in-flight handlers touching
+// the same workspace. The previous implementation did Get → mutate → Save
+// without per-workspace locking, which on multi-instance deployments could
+// (a) clobber a concurrent mutation between the Get and the Save, and (b) let
+// two boot-time cleanups race each other. Both transitions share one Update so
+// boot costs one write per workspace, not two.
+func (te *TaskExecutor) reconcileTasksAtBoot() {
 	workspaces, err := te.workspaceStore.ListActive()
 	if err != nil {
-		logger.Error("Failed to list workspaces for orphaned task cleanup", logger.Fields{"error": err})
+		logger.Error("Failed to list workspaces for boot task reconciliation", logger.Fields{"error": err})
 		return
 	}
 
+	holdBacklog := !te.resumeBacklog
 	totalReset := 0
+	totalHeld := 0
 	for _, ws := range workspaces {
 		if ws == nil {
 			continue
 		}
 
 		current, err := te.workspaceStore.Get(ws.ID)
-		if err != nil || !hasInProgressTasks(current) {
+		if err != nil || !hasBootReconcilableTasks(current, holdBacklog) {
 			continue
 		}
 
 		resetCount := 0
+		heldCount := 0
 		if err := te.workspaceStore.Update(ws.ID, func(fresh *Workspace) error {
 			if fresh.Status != StatusActive {
 				return errSkipOrphanCleanup
 			}
 			for i := range fresh.Tasks {
 				task := &fresh.Tasks[i]
-				if task.Status != TaskStatusInProgress {
-					continue
+				switch task.Status {
+				case TaskStatusInProgress:
+					if err := task.SetStatus(TaskStatusPending); err != nil {
+						logger.Error("Orphan cleanup transition rejected", logger.Fields{"task_id": task.ID, "error": err})
+						continue
+					}
+					task.StartedAt = nil
+					resetCount++
+				case TaskStatusAssigned:
+					if !holdBacklog {
+						continue
+					}
+					if err := task.SetStatus(TaskStatusPending); err != nil {
+						logger.Error("Backlog hold transition rejected", logger.Fields{"task_id": task.ID, "error": err})
+						continue
+					}
+					heldCount++
 				}
-				if err := task.SetStatus(TaskStatusPending); err != nil {
-					logger.Error("Orphan cleanup transition rejected", logger.Fields{"task_id": task.ID, "error": err})
-					continue
-				}
-				task.StartedAt = nil
-				resetCount++
 			}
-			if resetCount == 0 {
+			if resetCount == 0 && heldCount == 0 {
 				return errSkipOrphanCleanup
 			}
 			return nil
@@ -234,27 +303,38 @@ func (te *TaskExecutor) cleanupOrphanedTasks() {
 			if errors.Is(err, errSkipOrphanCleanup) {
 				continue
 			}
-			logger.Error("Failed to clean orphaned tasks in workspace", logger.Fields{"workspace_id": ws.ID, "err": err})
+			logger.Error("Failed to reconcile tasks in workspace", logger.Fields{"workspace_id": ws.ID, "err": err})
 			continue
 		}
-		if resetCount > 0 {
+		if resetCount > 0 || heldCount > 0 {
 			totalReset += resetCount
-			logger.Debug("Reset orphaned tasks in workspace", logger.Fields{"count": resetCount, "workspace_id": ws.ID})
+			totalHeld += heldCount
+			logger.Debug("Reconciled tasks in workspace", logger.Fields{"reset": resetCount, "held": heldCount, "workspace_id": ws.ID})
 		}
 	}
 
 	if totalReset > 0 {
-		logger.Info("Cleaned up orphaned task(s) across all workspaces", logger.Fields{"task_id": totalReset})
+		logger.Info("Reset orphaned task(s) left in progress by the previous run", logger.Fields{"tasks": totalReset})
+	}
+	if totalHeld > 0 {
+		logger.Info("Queued task(s) held for an explicit RUN instead of auto-running at boot", logger.Fields{"tasks": totalHeld})
 	}
 }
 
-func hasInProgressTasks(ws *Workspace) bool {
+// hasBootReconcilableTasks reports whether ws holds any task the boot pass
+// would move, so an untouched workspace is never rewritten.
+func hasBootReconcilableTasks(ws *Workspace, holdBacklog bool) bool {
 	if ws == nil || ws.Status != StatusActive {
 		return false
 	}
 	for i := range ws.Tasks {
-		if ws.Tasks[i].Status == TaskStatusInProgress {
+		switch ws.Tasks[i].Status {
+		case TaskStatusInProgress:
 			return true
+		case TaskStatusAssigned:
+			if holdBacklog {
+				return true
+			}
 		}
 	}
 	return false
@@ -304,6 +384,28 @@ type taskCandidate struct {
 	profile TaskProviderProfile
 }
 
+// bootAdmissionRamp caps admissions for the first few poll cycles so a server
+// that comes up next to a full queue doesn't open maxConcurrent LLM calls in
+// the same instant. Boot is the worst moment for a thundering herd: workspace
+// migrations have just written to disk, MCP connectors are still cold, and
+// several tasks racing to start the same one is what the MCP start-race
+// tolerance in getMCPToolsForServer exists to absorb. After the ramp the
+// executor admits freely, bounded only by maxConcurrent.
+var bootAdmissionRamp = []int{1, 2, 4}
+
+// admissionLimitForCycle consumes one ramp step and returns the max tasks
+// admissible this cycle, or 0 for no per-cycle cap.
+func (te *TaskExecutor) admissionLimitForCycle() int {
+	te.mu.Lock()
+	defer te.mu.Unlock()
+	cycle := te.cycle
+	te.cycle++
+	if cycle < len(bootAdmissionRamp) {
+		return bootAdmissionRamp[cycle]
+	}
+	return 0
+}
+
 // checkAndExecuteTasks checks for assigned tasks and executes those that fit the
 // global and per-provider concurrency limits.
 func (te *TaskExecutor) checkAndExecuteTasks() {
@@ -339,7 +441,14 @@ func (te *TaskExecutor) checkAndExecuteTasks() {
 		return candidates[i].profile.OrderKey < candidates[j].profile.OrderKey
 	})
 
+	admitted := 0
+	admissionLimit := te.admissionLimitForCycle()
+
 	for _, c := range candidates {
+		if admissionLimit > 0 && admitted >= admissionLimit {
+			logger.Debug("Boot admission ramp reached for this cycle, deferring task", logger.Fields{"limit": admissionLimit, "task_id": c.task.ID})
+			break
+		}
 		te.mu.Lock()
 		if _, running := te.runningTasks[c.task.ID]; running {
 			te.mu.Unlock()
@@ -372,6 +481,7 @@ func (te *TaskExecutor) checkAndExecuteTasks() {
 		}
 		te.mu.Unlock()
 
+		admitted++
 		te.executeTask(c.ws, c.task, c.profile)
 	}
 }
