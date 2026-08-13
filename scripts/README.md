@@ -94,6 +94,8 @@ The full release flow is documented in `docs/RELEASE_CHECKLIST.md`.
 ```bash
 source scripts/wt.sh   # load the function
 wt                     # interactive: pick a worktree to navigate
+wt plan --issue <N>    # start Codex planning a Ready Issue in the dev worktree
+wt start <feature>     # create a worktree from a PRD and/or task list
 wt new <name>          # create a worktree
 wt rm <name>           # remove a worktree
 wt ls                  # list worktrees
@@ -103,6 +105,45 @@ Source it (don't execute) so `cd` affects your current shell.
 
 `wt demo` removes its exact sandbox when the demo exits. Set
 `ORI_KEEP_DEMO_SANDBOX=1` when the sandbox needs to be retained for debugging.
+
+#### `wt plan --issue <N>` — plan a Ready Issue
+
+Planning and implementation are separate stages. `wt plan` handles the first:
+it reads the Issue once, writes a snapshot plus a size-routed starter
+checklist into `ori-agent-dev/tasks/`, and starts a **Codex** session there to
+finish the plan. `wt start` handles the second, on Claude.
+
+```bash
+wt plan --issue 342          # show the plan, then ask before writing anything
+wt plan --issue 342 --yes    # same plan, no prompt
+```
+
+| Issue size | What Codex is told to do first |
+|---|---|
+| `size:quick`, `size:planned` | Generate parent tasks, wait for `Go`, then expand them — no PRD |
+| `size:prd` | Ask 3–5 clarifying questions, write the PRD, *then* generate parent tasks |
+
+It accepts only an open Issue that currently matches the same Ready semantics
+`./scripts/devops.sh ready` uses and carries exactly one `size:*` label;
+anything else stops before writing a file. It never comments on, labels, or
+otherwise changes the Issue. Re-running on the same Issue resumes: an existing
+PRD or a real (non-starter) task list is never replaced.
+
+If Herdr is unavailable, the planning files are still written and the command
+prints the exact retry — they are never rolled back.
+
+The feature slug is `<issue-number>-<title-slug>`, and the number comes first
+because it cannot change. Renaming the Issue mid-planning reuses the existing
+slug rather than deriving a second identity.
+
+#### `wt start` accepts a task list without a PRD
+
+`wt start <feature>` starts anything with a PRD, a detailed task list, or
+both — `size:quick`/`size:planned` work legitimately has no PRD. It copies
+whichever of the Issue snapshot, PRD, and task list exist, independently.
+
+It refuses while the task list is still `wt plan`'s planning starter: that
+file is an instruction to Codex to write the plan, not a plan to implement.
 
 ### `scripts/devops.sh` — open Issues by workflow label
 
@@ -130,8 +171,9 @@ and again as its members.
 
 In a terminal, the colorful picker uses `↑/↓` or `j/k` to select an Issue,
 `←/→` or `h/l` to change views, `Enter` to inspect it, `n` to capture a new
-Issue, `c` to answer its open questions, `o` to approve it, `r` to refresh, and
-`q` to quit. In a pipe or redirected shell, the line REPL remains available: use
+Issue, `c` to answer its open questions, `o` to approve it, `s` to print its
+planning command, `r` to refresh, and `q` to quit. In a pipe or redirected
+shell, the line REPL remains available: use
 `1/a`, `2/d`, `3/b`, `4/f`, or `5/y` to change views, `v <number>` to inspect,
 `n <title>` to capture, `c <number> <text>` to answer, and `ok <number>` to
 approve. The default and `all` view include every author; closed Issues stay out
@@ -139,6 +181,15 @@ of lists.
 
 Every row shows the Issue's `size:*` label in its own column, so a long label
 list can never truncate away the signal that says whether to open a PRD first.
+
+**Planning key.** In the Ready view, `s` prints exactly
+`wt plan --issue <N>` for the selected row — the command that starts Codex
+planning that Issue (see `wt plan` above). The picker only *prints* it: it
+never sources or runs `wt`, copies to a clipboard, makes another GitHub
+request, or changes anything. `wt` is a sourced zsh function and this script
+is a separate bash process, so printing is also the only thing that could
+work. The key is a no-op with a clear message outside the Ready view or on an
+empty list.
 
 **In-flight status.** A second column shows whether work has already started and
 how far it has got — `2/7 wt` means two of seven task-list groups are done and a

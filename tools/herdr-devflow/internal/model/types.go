@@ -28,6 +28,14 @@ const (
 	ErrSchedulerUnsupported ErrorCode = "scheduler_unsupported"
 	ErrWakeUnavailable      ErrorCode = "wake_unavailable"
 	ErrStateCorrupt         ErrorCode = "state_corrupt"
+	// ErrGitHubUnavailable covers every `gh issue view` failure: missing CLI,
+	// unauthenticated, network, rate limit, or an Issue GitHub will not show
+	// this credential. The sanitized detail names which one.
+	ErrGitHubUnavailable ErrorCode = "github_unavailable"
+	// ErrIssueIneligible means the fetched Issue was read successfully but does
+	// not currently qualify for planning: closed, not Ready, or missing/duplicate
+	// size label.
+	ErrIssueIneligible ErrorCode = "issue_ineligible"
 )
 
 // StageError adds an operation stage and an operator-safe recovery command to
@@ -180,6 +188,15 @@ type BridgeState struct {
 	// purpose: a state file written before Overnight Runs existed simply has no
 	// key here, and must keep loading rather than being migrated or rejected.
 	Runs map[string]OvernightRun `json:"runs,omitempty"`
+	// PlanningSessions are issue-scoped Codex planning sessions, keyed by
+	// "<repository_id>:<issue_number>". This is deliberately its own map and
+	// never a FeatureState: a planning session has no PRD-driven feature
+	// identity yet, and code that walks Features to find roles, continuation
+	// targets, Overnight participants, or wt done candidates must never
+	// stumble onto a planner by accident. The field is additive, exactly like
+	// Runs: a state file written before this feature existed has no key here
+	// and keeps loading unmodified.
+	PlanningSessions map[string]PlanningSession `json:"planning_sessions,omitempty"`
 }
 
 type FeatureState struct {
@@ -233,8 +250,48 @@ const (
 
 func NewBridgeState() BridgeState {
 	return BridgeState{
-		Version:  StateVersion,
-		Features: make(map[string]FeatureState),
-		Runs:     make(map[string]OvernightRun),
+		Version:          StateVersion,
+		Features:         make(map[string]FeatureState),
+		Runs:             make(map[string]OvernightRun),
+		PlanningSessions: make(map[string]PlanningSession),
 	}
+}
+
+// PlanningStage tracks how far one issue-scoped planning session has
+// progressed placing and prompting its Codex planner. It mirrors
+// HandoffStage's shape but is its own type: a planning session is not a
+// feature handoff, and the two must never be assignable to one another by
+// accident.
+type PlanningStage string
+
+const (
+	PlanningRecorded     PlanningStage = "recorded"
+	PlanningTabCreated   PlanningStage = "tab_created"
+	PlanningAgentStarted PlanningStage = "agent_started"
+	PlanningReady        PlanningStage = "ready"
+	PlanningPrompted     PlanningStage = "prompted"
+)
+
+// PlanningSession is one issue-scoped Codex planning session in
+// ori-agent-dev. It is deliberately not a Feature or FeatureState: a
+// planning session has no PRD-backed feature role, is never selectable for
+// Overnight Runs, continuations, PR delivery, or `wt done`, and generic code
+// that iterates BridgeState.Features must never observe one.
+type PlanningSession struct {
+	RepositoryID string `json:"repository_id"`
+	// IssueNumber is the durable identity: the slug may be re-derived after a
+	// title rename, but the Issue number never changes.
+	IssueNumber int    `json:"issue_number"`
+	Slug        string `json:"slug"`
+	// WorktreePath is the canonical ori-agent-dev checkout this session plans
+	// in. It is recorded so a later invocation can detect a mismatched dev
+	// worktree instead of silently placing a second planner in the wrong tree.
+	WorktreePath string        `json:"worktree_path"`
+	TabID        string        `json:"tab_id,omitempty"`
+	RootPaneID   string        `json:"root_pane_id,omitempty"`
+	Planner      RoleAgent     `json:"planner,omitempty"`
+	Stage        PlanningStage `json:"stage,omitempty"`
+	Prompted     bool          `json:"prompted,omitempty"`
+	CreatedAt    time.Time     `json:"created_at"`
+	UpdatedAt    time.Time     `json:"updated_at"`
 }

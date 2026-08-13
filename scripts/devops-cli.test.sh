@@ -91,6 +91,23 @@ check "picker all view includes everything" \
 check "picker proposals view is exact" \
   "$(row_matches_filter proposals "feature-proposal" && echo yes || echo no)" "yes"
 
+# print_plan_command is the picker's `s` key: format only, no GitHub read, no
+# `wt` invocation, no clipboard, safe on an empty or non-Ready view.
+check "plan command prints for a selected Ready row" \
+  "$(print_plan_command ready 3 934 2>/dev/null)" "wt plan --issue 934"
+check "plan command refuses a non-Ready view" \
+  "$(print_plan_command all 3 934 >/dev/null 2>&1 && echo yes || echo no)" "no"
+check "plan command refuses an empty Ready view" \
+  "$(print_plan_command ready 0 "" >/dev/null 2>&1 && echo yes || echo no)" "no"
+check "plan command refuses a non-numeric issue number" \
+  "$(print_plan_command ready 3 abc >/dev/null 2>&1 && echo yes || echo no)" "no"
+check "plan command refuses zero" \
+  "$(print_plan_command ready 3 0 >/dev/null 2>&1 && echo yes || echo no)" "no"
+check "plan command refuses a negative-looking issue number" \
+  "$(print_plan_command ready 3 -5 >/dev/null 2>&1 && echo yes || echo no)" "no"
+check "a rejected plan command explains itself on stderr" \
+  "$(print_plan_command all 3 934 2>&1 >/dev/null)" "Switch to the Ready view to print a planning command."
+
 # ---------------------------------------------------------------------------
 # In-flight status. Parent groups are the top-level `- [ ]` lines; sub-tasks are
 # indented, so an anchored match must not count them.
@@ -469,5 +486,38 @@ grep -Fq "simulated GitHub failure" "$fixture_root/failure-output"
 : > "$gh_calls"
 (cd "$fixture_root" && "$script" all > /dev/null)
 assert_call $'CALL\tissue\tlist\t--state\topen\t--limit\t1000'
+
+# ---------------------------------------------------------------------------
+# The picker's `s` key.
+#
+# run_picker only runs on a real TTY (it enters the alternate screen and puts
+# the terminal in raw mode), so the key itself is asserted structurally rather
+# than by driving a pseudo-terminal: the branch must route through the same
+# with_normal_terminal escape hatch every other full-screen action uses, and
+# must hand print_plan_command the CURRENT view plus the SELECTED row's
+# immutable Issue number — never a position, a title, or a stale filter name.
+# print_plan_command's own behaviour is covered exhaustively by the pure unit
+# assertions above.
+# ---------------------------------------------------------------------------
+if ! grep -Fq 'with_normal_terminal print_plan_command "${picker_filters[$filter_index]}" "$count" "${issue_numbers[$selected_index]:-}"' "$script"; then
+  printf 'the picker s key is not wired to print_plan_command with the current view and selected Issue number\n' >&2
+  exit 1
+fi
+if ! grep -Fq 's plan' "$script"; then
+  printf 'the picker footer does not document the s key\n' >&2
+  exit 1
+fi
+# The action must not reload the index: printing a command is not a reason to
+# re-query GitHub, and a reload would also reset the selection the user is
+# standing on.
+s_branch="$(awk '/^      s\)$/{inside=1} inside{print} inside && /^        ;;$/{exit}' "$script")"
+if [[ -z "$s_branch" ]]; then
+  printf 'could not read the picker s) branch\n' >&2
+  exit 1
+fi
+if grep -Eq 'load_picker_index|apply_picker_filter|reload=1' <<< "$s_branch"; then
+  printf 'the s key re-queries GitHub or resets the view: %s\n' "$s_branch" >&2
+  exit 1
+fi
 
 printf '%s\n' "devops.sh tests passed"

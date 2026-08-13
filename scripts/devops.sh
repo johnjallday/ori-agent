@@ -58,6 +58,11 @@ done/total parent groups, and whether its branch has a worktree checked out. It
 is entirely local - no network, no Herdr - and reads the dev worktree's
 gitignored tasks/, so ticked checkboxes show up before you commit them.
 
+In the picker's Ready view, pressing `s` on a selected row prints exactly
+`wt plan --issue <N>` - the command that starts Codex planning that Issue in
+the dev worktree. The picker only prints it: it never runs `wt`, sources it,
+copies to a clipboard, or reads GitHub again.
+
 new/answer/approve/unapprove write to GitHub. They prompt for confirmation on a
 terminal, and require --yes when stdin is not a terminal. A new Issue is created
 with no labels - capture takes ten seconds and the grooming routine specs it.
@@ -812,7 +817,7 @@ render_picker() {
   fi
 
   printf '\n'
-  style '2' '↑/↓ or j/k select  •  ←/→ or h/l change view  •  Enter open  •  n new  •  c answer  •  o approve  •  r refresh  •  q quit'
+  style '2' '↑/↓ or j/k select  •  ←/→ or h/l change view  •  Enter open  •  n new  •  c answer  •  o approve  •  s plan  •  r refresh  •  q quit'
   printf '\n'
 }
 
@@ -869,6 +874,26 @@ prompt_answer_issue() {
 prompt_approve_issue() {
   local issue_number="$1"
   set_approved approve "$issue_number"
+}
+
+# print_plan_command prints exactly `wt plan --issue <N>` for a selected
+# Ready row, or a clear explanation on stderr and a non-zero exit when there
+# is nothing to print. Pure: it performs no I/O beyond stdout/stderr, makes
+# no GitHub request, copies nothing to a clipboard, sources no other script,
+# and never guesses a row from a stale view or an Issue's position in the
+# list — the number is the row's immutable identity, passed in directly.
+print_plan_command() {
+  local view="$1" count="$2" issue_number="$3"
+
+  if [[ "$view" != "ready" ]]; then
+    printf 'Switch to the Ready view to print a planning command.\n' >&2
+    return 1
+  fi
+  if [[ "$count" -le 0 || -z "$issue_number" || ! "$issue_number" =~ ^[1-9][0-9]*$ ]]; then
+    printf 'No Ready row is selected.\n' >&2
+    return 1
+  fi
+  printf 'wt plan --issue %s\n' "$issue_number"
 }
 
 prompt_create_issue() {
@@ -939,6 +964,12 @@ run_picker() {
         with_normal_terminal prompt_create_issue
         load_picker_index || true
         apply_picker_filter "${picker_filters[$filter_index]}"
+        ;;
+      s)
+        # Prints the planning command only; it never sources wt, invokes the
+        # bridge, executes the printed text, copies to a clipboard, or reads
+        # GitHub again. Safe on an empty or non-Ready view.
+        with_normal_terminal print_plan_command "${picker_filters[$filter_index]}" "$count" "${issue_numbers[$selected_index]:-}"
         ;;
       ''|$'\r'|$'\n')
         if [[ "$count" -gt 0 ]]; then

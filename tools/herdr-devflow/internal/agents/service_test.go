@@ -454,7 +454,7 @@ func TestContinuationPromptIsPlanningAwareWithoutEmbeddingTaskContents(t *testin
 	for _, want := range []string{
 		"scheduled continuation",
 		"Read and follow: " + filepath.Join(path, "AGENTS.md"),
-		filepath.Join(path, "tasks", "prd-bridge.md"),
+		"PRD: none (task-list-sized)",
 		filepath.Join(path, "tasks", "tasks-bridge.md"),
 		"Next incomplete checklist item: 2.1 Deliver the scheduled continuation",
 		"wt done bridge",
@@ -462,6 +462,12 @@ func TestContinuationPromptIsPlanningAwareWithoutEmbeddingTaskContents(t *testin
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("ContinuationPrompt() missing %q:\n%s", want, prompt)
 		}
+	}
+	// No prd-bridge.md was written into this fixture; the prompt must not
+	// name one as though it existed (AR30's boundary applies to scheduled
+	// continuations as well as the initial bootstrap prompt).
+	if strings.Contains(prompt, filepath.Join(path, "tasks", "prd-bridge.md")) {
+		t.Fatalf("ContinuationPrompt() named a PRD that does not exist:\n%s", prompt)
 	}
 }
 
@@ -719,14 +725,49 @@ func TestScopedAgentNameAndBootstrapPromptAreSafeAndSpecific(t *testing.T) {
 	if err != nil || left == right || len(left) > 32 || !strings.HasPrefix(left, "ori-") {
 		t.Fatalf("scoped names = %q, %q, err=%v", left, right, err)
 	}
+	// No PRD or task list exists on disk at this path: the prompt must say so
+	// honestly rather than naming a prd-bridge.md that was never written
+	// (AR30) — a task-list-only feature must never look PRD-backed.
 	prompt := BootstrapPrompt(model.Feature{Name: "bridge", Path: "/tmp/bridge"}, "builder")
-	for _, want := range []string{"tasks/prd-bridge.md", "tasks/tasks-bridge.md", "wt pr", "wt done bridge", "[ ] to [x]"} {
+	for _, want := range []string{"tasks/tasks-bridge.md", "wt pr", "wt done bridge", "[ ] to [x]", "PRD: none (task-list-sized)"} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("BootstrapPrompt missing %q: %s", want, prompt)
 		}
 	}
+	if strings.Contains(prompt, "tasks/prd-bridge.md") {
+		t.Fatalf("BootstrapPrompt named a PRD that does not exist: %s", prompt)
+	}
 	if !strings.Contains(prompt, "No detailed task list was found") {
 		t.Fatalf("BootstrapPrompt should safely describe a missing task list: %s", prompt)
+	}
+}
+
+// TestBootstrapPromptNamesAnExistingPRDAndIssueSnapshot is the other half of
+// AR30: when a PRD (and an Issue snapshot from wt plan) genuinely exist in
+// the worktree, the prompt names them by their real path.
+func TestBootstrapPromptNamesAnExistingPRDAndIssueSnapshot(t *testing.T) {
+	t.Parallel()
+	path := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(path, "tasks"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(path, "tasks", "prd-bridge.md"), []byte("# PRD\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(path, "tasks", "issue-bridge.md"), []byte("# Issue\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	prompt := BootstrapPrompt(model.Feature{Name: "bridge", Path: path}, "builder")
+	for _, want := range []string{
+		"PRD: " + filepath.Join(path, "tasks", "prd-bridge.md"),
+		"Issue snapshot: " + filepath.Join(path, "tasks", "issue-bridge.md"),
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("BootstrapPrompt missing %q: %s", want, prompt)
+		}
+	}
+	if strings.Contains(prompt, "task-list-sized") {
+		t.Fatalf("BootstrapPrompt called a PRD-backed feature task-list-sized: %s", prompt)
 	}
 }
 
