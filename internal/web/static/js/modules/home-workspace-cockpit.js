@@ -1135,21 +1135,25 @@ export function workspaceAreaState({
       canRetry: true
     };
   }
-  if (!Array.isArray(workspaces) || workspaces.length === 0) {
-    // FR114 keeps a misleading OPERATIONAL map off an empty account — but the
-    // unbuilt HQ landmark is not operational data, it is the invitation to
-    // build one, and it is the only place Build My HQ lives. Hiding the map for
-    // a brand-new profile hid that invitation from precisely the people Mission
-    // 01 is aimed at (#322). The map already draws its canvas whenever the site
-    // shows (see shellHTML in workspace-map.js); this keeps the two agreeing.
-    if (hqSite) return { state: 'ready', message: '', canRetry: false };
-    return { state: 'empty', message: 'No workspaces yet.', canRetry: false };
+  if (!Array.isArray(workspaces)) {
+    return {
+      state: 'error',
+      message: 'Workspaces could not be loaded.',
+      detail: 'The workspace response was invalid.',
+      canRetry: true
+    };
+  }
+  if (workspaces.length === 0) {
+    // Issue #320 narrows FR114: an authoritative empty list may render a real,
+    // buildingless canvas because there is no operational state to misread.
+    // The reserved Personal HQ site remains truthful content when available.
+    return { state: 'empty-map', message: '', canRetry: false, hqSiteVisible: hqSite };
   }
   return { state: 'ready', message: '', canRetry: false };
 }
 
 export function renderWorkspaceAreaStatusHTML(status) {
-  if (!status || status.state === 'ready') return '';
+  if (!status || status.state === 'ready' || status.state === 'empty-map') return '';
   if (status.state === 'onboarding-loading' || status.state === 'onboarding-required') {
     return `<div class="cockpit-area-message" data-state="${status.state}">${escapeHtml(status.message)}</div>`;
   }
@@ -1176,17 +1180,7 @@ export function renderWorkspaceAreaStatusHTML(status) {
       '</div>'
     );
   }
-  // Empty: never render a misleading operational map (FR114).
-  return (
-    '<div class="cockpit-area-message" data-state="empty">' +
-    `<p class="cockpit-area-message-text">${escapeHtml(status.message)}</p>` +
-    '<p class="cockpit-area-message-detail">Create your first workspace, or import a folder you already work in.</p>' +
-    '<div class="cockpit-area-message-actions">' +
-    '<button type="button" class="modern-btn modern-btn-primary" data-bs-toggle="modal" data-bs-target="#addFolderModal" data-workspace-import-mode="false" data-workspace-entry-point="home_cockpit_create">New Workspace</button>' +
-    '<button type="button" class="modern-btn modern-btn-secondary" data-bs-toggle="modal" data-bs-target="#addFolderModal" data-workspace-import-mode="true" data-workspace-entry-point="home_cockpit_import">Import Folder</button>' +
-    '</div>' +
-    '</div>'
-  );
+  return '';
 }
 
 // ---------------------------------------------------------------------------
@@ -1323,8 +1317,10 @@ import {
       }
     }
     root.dataset.state = status.state;
-    // The map is only meaningful once there is something truthful to draw.
-    if (els.map) els.map.hidden = state.view !== VIEW_MAP || status.state !== 'ready';
+    // An authoritative empty list is truthful map state: render the canvas,
+    // while every pending, failed, or malformed state continues to fail closed.
+    const mapRenderable = status.state === 'ready' || status.state === 'empty-map';
+    if (els.map) els.map.hidden = state.view !== VIEW_MAP || !mapRenderable;
     if (els.filters) els.filters.hidden = status.state !== 'ready' || state.view !== VIEW_MAP;
     return status;
   }
@@ -1391,6 +1387,9 @@ import {
       selectOnly: true,
       hideChrome: true,
       noAutoSelect: true,
+      // Explicit Home-only contract. The shared Map keeps its legacy empty
+      // prompt unless its cockpit host opts into a real buildingless canvas.
+      emptyPresentation: state.flattened.length === 0 ? 'canvas' : 'legacy',
       onSelect: id => selectItem(id, { fromMap: true }),
       onOpen: id => openItem(id),
       onSelectHQSite: view => selectHQSite(view),
@@ -2213,7 +2212,10 @@ import {
         const response = await fetch('/api/workspaces?tree=true');
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
-        state.tree = Array.isArray(data.folders) ? data.folders : [];
+        if (!data || !Array.isArray(data.folders)) {
+          throw new Error('Workspace tree response is invalid');
+        }
+        state.tree = data.folders;
         state.flattened = flattenWorkspaceTree(state.tree);
         state.metadata = buildMapMetadata(state.flattened, state.tree);
         state.error = null;

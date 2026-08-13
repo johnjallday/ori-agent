@@ -476,10 +476,10 @@ test('escapeHtml neutralizes every HTML-significant character', () => {
 // Workspace-area states (FR110, FR112-FR114, FR120)
 // ---------------------------------------------------------------------------
 
-test('workspaceAreaState distinguishes loading, error, empty, and ready (FR120)', () => {
+test('workspaceAreaState distinguishes loading, error, authoritative empty, and ready (FR120)', () => {
   assert.equal(workspaceAreaState({ loading: true, workspaces: [] }).state, 'loading');
   assert.equal(workspaceAreaState({ error: new Error('boom'), workspaces: [] }).state, 'error');
-  assert.equal(workspaceAreaState({ workspaces: [] }).state, 'empty');
+  assert.equal(workspaceAreaState({ workspaces: [] }).state, 'empty-map');
   assert.equal(workspaceAreaState({ workspaces: [{ id: 'a' }] }).state, 'ready');
   // Loading wins over a stale error so a refresh is never shown as broken.
   assert.equal(
@@ -506,11 +506,10 @@ test('hqSiteVisible mirrors the map: a status that is not a valid HQ has a site 
   assert.equal(hqSiteVisible(undefined), false);
 });
 
-test('workspaceAreaState: zero workspaces still renders the map when the HQ site shows (#322)', () => {
-  assert.equal(workspaceAreaState({ workspaces: [], hqSiteVisible: true }).state, 'ready');
-  assert.equal(workspaceAreaState({ workspaces: [], hqSiteVisible: false }).state, 'empty');
-  // Omitting the flag entirely must behave exactly as before.
-  assert.equal(workspaceAreaState({ workspaces: [] }).state, 'empty');
+test('workspaceAreaState: authoritative zero workspaces renders the map with or without the HQ site (#320)', () => {
+  assert.equal(workspaceAreaState({ workspaces: [], hqSiteVisible: true }).state, 'empty-map');
+  assert.equal(workspaceAreaState({ workspaces: [], hqSiteVisible: false }).state, 'empty-map');
+  assert.equal(workspaceAreaState({ workspaces: [] }).state, 'empty-map');
   // A populated account is ready either way — the site never makes it emptier.
   assert.equal(
     workspaceAreaState({ workspaces: [{ id: 'a' }], hqSiteVisible: true }).state,
@@ -606,9 +605,13 @@ test('workspaceAreaState makes an unknown onboarding status retryable without ex
   assert.doesNotMatch(html, /Foreign Workspace|New Workspace|Import Folder/);
 });
 
-test('workspaceAreaState treats a non-array payload as empty, never as ready', () => {
-  assert.equal(workspaceAreaState({ workspaces: null }).state, 'empty');
-  assert.equal(workspaceAreaState({ workspaces: undefined }).state, 'empty');
+test('workspaceAreaState treats a non-array payload as a retryable failure, never authoritative empty', () => {
+  for (const workspaces of [null, undefined, {}]) {
+    const status = workspaceAreaState({ workspaces });
+    assert.equal(status.state, 'error');
+    assert.equal(status.canRetry, true);
+    assert.match(renderWorkspaceAreaStatusHTML(status), /data-cockpit-retry/);
+  }
 });
 
 test('a failed workspace load offers Retry (FR113)', () => {
@@ -620,14 +623,10 @@ test('a failed workspace load offers Retry (FR113)', () => {
   assert.match(html, /HTTP 500/);
 });
 
-test('the empty state offers New Workspace and Import Folder, not a bare empty map (FR114)', () => {
-  const html = renderWorkspaceAreaStatusHTML(workspaceAreaState({ workspaces: [] }));
-  assert.match(html, /New Workspace/);
-  assert.match(html, /Import Folder/);
-  // Both reuse the existing create/import modal contract (FR105).
-  assert.match(html, /data-bs-target="#addFolderModal"/);
-  assert.match(html, /data-workspace-import-mode="true"/);
-  assert.match(html, /data-workspace-import-mode="false"/);
+test('the authoritative empty state leaves the status host clear for the real Map (#320)', () => {
+  const status = workspaceAreaState({ workspaces: [] });
+  assert.equal(status.state, 'empty-map');
+  assert.equal(renderWorkspaceAreaStatusHTML(status), '');
 });
 
 test('the ready state renders no status message at all', () => {

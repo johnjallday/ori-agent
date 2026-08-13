@@ -816,6 +816,48 @@ test('cockpit mode renders no second topbar or overview panel (FR15)', () => {
   assert.match(container.innerHTML, /is-cockpit/);
 });
 
+test('the Home-only empty presentation renders a real blank canvas without legacy copy or selection', () => {
+  const map = loadMapForMount();
+  const { container } = createMapHarness();
+  map.mount(container, {
+    workspaces: [],
+    hideChrome: true,
+    selectOnly: true,
+    noAutoSelect: true,
+    emptyPresentation: 'canvas'
+  });
+  assert.match(container.innerHTML, /data-ws-map-viewport/);
+  assert.doesNotMatch(container.innerHTML, /No workspaces yet/);
+  assert.doesNotMatch(container.innerHTML, /data-ws-map-create/);
+  assert.equal(map.getSelectedId(), '');
+});
+
+test('the Home empty canvas remounts cleanly when a real workspace arrives', () => {
+  const map = loadMapForMount();
+  const { container } = createMapHarness({ tiles: ['ws-1'] });
+  const common = {
+    hideChrome: true,
+    selectOnly: true,
+    noAutoSelect: true,
+    emptyPresentation: 'canvas'
+  };
+  map.mount(container, { ...common, workspaces: [] });
+  assert.equal((container.innerHTML.match(/data-ws-map-viewport/g) || []).length, 1);
+  map.mount(container, { ...common, workspaces: [{ id: 'ws-1', name: 'Alpha' }] });
+  assert.equal((container.innerHTML.match(/data-ws-map-viewport/g) || []).length, 1);
+  assert.match(container.innerHTML, /data-ws-id="ws-1"/);
+  assert.doesNotMatch(container.innerHTML, /No workspaces yet/);
+  assert.equal(map.getSelectedId(), '');
+});
+
+test('the shared Map keeps its legacy zero-workspace fallback by default', () => {
+  const map = loadMapForMount();
+  const { container } = createMapHarness();
+  map.mount(container, { workspaces: [], hideChrome: true, noAutoSelect: true });
+  assert.match(container.innerHTML, /No workspaces yet — build your first one/);
+  assert.match(container.innerHTML, /data-ws-map-create/);
+});
+
 test('the launcher keeps its topbar and overview when chrome is not suppressed', () => {
   const map = loadMapForMount();
   const { container } = createMapHarness({ tiles: ['ws-1'] });

@@ -840,7 +840,7 @@
     //    neither is a workspace, so neither may occupy a workspace ID in the
     //    saved layout (FR-30).
     var hqSite = opts.hqSite ? placer.next() : null;
-    var pad = placer.next();
+    var pad = opts.createPad === false ? null : placer.next();
 
     var bounds = worldBounds(nodes, districts, hqSite, pad);
     return {
@@ -1476,7 +1476,8 @@
     var layout = computeWorldLayout(workspaces, {
       positions: layoutState.positions,
       viewport: opts.viewport,
-      hqSite: site.show
+      hqSite: site.show,
+      createPad: opts.createPad
     });
     // Nodes carry their raw world coordinates into the DOM; the world layer's
     // camera transform is the only thing standing between world space and the
@@ -1511,8 +1512,12 @@
       parts.push(hqSiteHTML(toLayer(layout.hqSite), selectedId, layout.nodes.length, site));
     }
     // Keep the ordinary create affordance after all real and reserved sites.
-    var pad = toLayer(layout.pad);
-    parts.push(padHTML(pad.left, pad.top));
+    // The Home cockpit's authoritative empty presentation supplies its own
+    // create/import overlay, so it explicitly omits this otherwise-global pad.
+    if (layout.pad) {
+      var pad = toLayer(layout.pad);
+      parts.push(padHTML(pad.left, pad.top));
+    }
     // No candidate marker: build is not a mode any more, so there is no
     // in-between state to preview. Right-click is the coordinate.
 
@@ -2010,9 +2015,17 @@
 
   function shellHTML(stats, workspaces, selectedId, viewport, options) {
     var site = hqSiteView(hqStatus);
+    var authoritativeEmpty =
+      options &&
+      options.emptyPresentation === 'canvas' &&
+      Array.isArray(workspaces) &&
+      workspaces.length === 0;
     var canvas =
-      (Array.isArray(workspaces) && workspaces.length > 0) || site.show
-        ? canvasHTML(workspaces, selectedId, { viewport: viewport }).html
+      (Array.isArray(workspaces) && workspaces.length > 0) || site.show || authoritativeEmpty
+        ? canvasHTML(workspaces, selectedId, {
+            viewport: viewport,
+            createPad: authoritativeEmpty ? false : undefined
+          }).html
         : emptyCanvasHTML();
     // Cockpit mode: the workspace-area header and the persistent context rail
     // already own the title, the stat readout, New Workspace, and the selected
