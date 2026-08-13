@@ -121,8 +121,7 @@ func (a *App) issuePlan(ctx context.Context, opts options, args []string) int {
 			a.writeResult(true, map[string]any{"status": "complete", "plan": issuePlanPayload(plan), "next_step": "wt start " + plan.Slug})
 			return 0
 		}
-		agents.RenderIssuePlanSummary(a.stdout, plan)
-		fmt.Fprintln(a.stdout, "\nPlanning for this Issue is already complete. Nothing was changed.")
+		a.planPrint("%s\nPlanning for this Issue is already complete. Nothing was changed.\n", agents.IssuePlanSummary(plan))
 		return 0
 	}
 
@@ -131,8 +130,8 @@ func (a *App) issuePlan(ctx context.Context, opts options, args []string) int {
 		return 0
 	}
 
-	agents.RenderIssuePlanSummary(a.stdout, plan)
-	fmt.Fprintln(a.stdout, "\n! marks steps that are not undone by declining later: writing tasks/issue-"+plan.Slug+".md and tasks/tasks-"+plan.Slug+".md, and starting a Codex planner.")
+	a.planPrint("%s\n! marks steps that are not undone by declining later: writing tasks/issue-%s.md and tasks/tasks-%s.md, and starting a Codex planner.\n",
+		agents.IssuePlanSummary(plan), plan.Slug, plan.Slug)
 
 	if !parsed.yes {
 		approved, err := a.confirmIssuePlan()
@@ -141,7 +140,7 @@ func (a *App) issuePlan(ctx context.Context, opts options, args []string) int {
 			return 1
 		}
 		if !approved {
-			fmt.Fprintln(a.stdout, "Nothing was changed.")
+			a.planPrint("Nothing was changed.\n")
 			return 0
 		}
 	}
@@ -161,11 +160,19 @@ func (a *App) issuePlan(ctx context.Context, opts options, args []string) int {
 	return 0
 }
 
+// planPrint writes one piece of human output for this command. A CLI's
+// terminal write failing is not actionable — there is nowhere left to report
+// it — so the error is dropped deliberately, once, here, rather than being
+// ignored silently at every call site.
+func (a *App) planPrint(format string, args ...any) {
+	_, _ = fmt.Fprintf(a.stdout, format, args...)
+}
+
 func (a *App) confirmIssuePlan() (bool, error) {
 	if a.stdin == nil {
 		return false, errors.New("no input is available to confirm on")
 	}
-	fmt.Fprint(a.stdout, "\nProceed? [y/N] ")
+	a.planPrint("\nProceed? [y/N] ")
 	reader := bufio.NewReader(a.stdin)
 	line, err := reader.ReadString('\n')
 	if err != nil && strings.TrimSpace(line) == "" {
@@ -177,26 +184,26 @@ func (a *App) confirmIssuePlan() (bool, error) {
 
 func renderIssuePlanResult(a *App, result agents.IssuePlanResult) {
 	if result.SnapshotWritten {
-		fmt.Fprintf(a.stdout, "\nWrote %s\n", result.Plan.SnapshotPath)
+		a.planPrint("\nWrote %s\n", result.Plan.SnapshotPath)
 	}
 	if result.StarterWritten {
-		fmt.Fprintf(a.stdout, "Wrote %s\n", result.Plan.TaskListPath)
+		a.planPrint("Wrote %s\n", result.Plan.TaskListPath)
 	}
 	if result.Degraded {
-		fmt.Fprintf(a.stdout, "\nThe planning files are ready; %s\n", result.DegradedMessage)
+		a.planPrint("\nThe planning files are ready; %s\n", result.DegradedMessage)
 		if result.DegradedRecovery != "" {
-			fmt.Fprintf(a.stdout, "  Retry: %s\n", result.DegradedRecovery)
+			a.planPrint("  Retry: %s\n", result.DegradedRecovery)
 		}
 		return
 	}
-	fmt.Fprintf(a.stdout, "\nCodex planner: %s\n", result.Planner.Name)
+	a.planPrint("\nCodex planner: %s\n", result.Planner.Name)
 	if result.PromptDelivered {
-		fmt.Fprintln(a.stdout, "Planning prompt delivered.")
+		a.planPrint("Planning prompt delivered.\n")
 	} else if result.PromptSkipped {
-		fmt.Fprintln(a.stdout, "Planning prompt already delivered; resumed the existing session.")
+		a.planPrint("Planning prompt already delivered; resumed the existing session.\n")
 	}
 	for _, warning := range result.Warnings {
-		fmt.Fprintf(a.stdout, "Warning: %s\n", warning)
+		a.planPrint("Warning: %s\n", warning)
 	}
 }
 

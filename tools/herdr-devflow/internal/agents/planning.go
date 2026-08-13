@@ -22,7 +22,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -570,52 +569,59 @@ func PlanningBootstrapPrompt(plan IssuePlan) string {
 	return strings.Join(lines, "\n")
 }
 
-// RenderIssuePlanSummary writes the pre-confirmation summary AR9 requires:
-// the Issue, its size, the planning step, the feature slug, the snapshot
-// path, PRD/task-list state, the exact dev worktree path, the Codex planner,
-// and the focused Herdr destination or its degradation. Nothing here mutates
-// anything; it is safe to call before, or instead of, confirmation.
-func RenderIssuePlanSummary(w io.Writer, plan IssuePlan) {
-	fmt.Fprintf(w, "\nIssue         #%d %s\n", plan.IssueNumber, plan.Title)
-	fmt.Fprintf(w, "Size          size:%s\n", plan.Route)
-	fmt.Fprintf(w, "Feature       %s\n", plan.Slug)
-	fmt.Fprintf(w, "Dev worktree  %s\n", plan.DevWorktreePath)
+// IssuePlanSummary builds the pre-confirmation summary AR9 requires: the
+// Issue, its size, the planning step, the feature slug, the snapshot path,
+// PRD/task-list state, the exact dev worktree path, the Codex planner, and
+// the focused Herdr destination or its degradation.
+//
+// It returns the text rather than writing it. Nothing here mutates anything,
+// so it is safe to call before — or instead of — confirmation, and a test can
+// assert the exact summary without supplying a writer.
+func IssuePlanSummary(plan IssuePlan) string {
+	var b strings.Builder
+	line := func(format string, args ...any) { fmt.Fprintf(&b, format, args...) }
+
+	line("\nIssue         #%d %s\n", plan.IssueNumber, plan.Title)
+	line("Size          size:%s\n", plan.Route)
+	line("Feature       %s\n", plan.Slug)
+	line("Dev worktree  %s\n", plan.DevWorktreePath)
 	if plan.writeSnapshot {
-		fmt.Fprintf(w, "Snapshot      %s  (new)\n", plan.SnapshotPath)
+		line("Snapshot      %s  (new)\n", plan.SnapshotPath)
 	} else {
-		fmt.Fprintf(w, "Snapshot      %s  (already exists, resumed)\n", plan.SnapshotPath)
+		line("Snapshot      %s  (already exists, resumed)\n", plan.SnapshotPath)
 	}
 	switch plan.ArtifactState {
 	case IssueArtifactNone:
-		fmt.Fprintf(w, "Task list     %s  (new planning starter)\n", plan.TaskListPath)
+		line("Task list     %s  (new planning starter)\n", plan.TaskListPath)
 		if plan.PRDPath != "" {
-			fmt.Fprintf(w, "PRD           %s  (Codex writes this first)\n", plan.PRDPath)
+			line("PRD           %s  (Codex writes this first)\n", plan.PRDPath)
 		}
 	case IssueArtifactResume:
-		fmt.Fprintf(w, "Task list     %s  (planning starter already exists, resumed)\n", plan.TaskListPath)
+		line("Task list     %s  (planning starter already exists, resumed)\n", plan.TaskListPath)
 		if plan.PRDPath != "" {
-			fmt.Fprintf(w, "PRD           %s  (Codex writes this first)\n", plan.PRDPath)
+			line("PRD           %s  (Codex writes this first)\n", plan.PRDPath)
 		}
 	case IssueArtifactPRDExists:
-		fmt.Fprintf(w, "PRD           %s  (already exists)\n", plan.PRDPath)
-		fmt.Fprintf(w, "Task list     %s  (new planning starter, skips straight to task planning)\n", plan.TaskListPath)
+		line("PRD           %s  (already exists)\n", plan.PRDPath)
+		line("Task list     %s  (new planning starter, skips straight to task planning)\n", plan.TaskListPath)
 	case IssueArtifactComplete:
-		fmt.Fprintf(w, "Task list     %s  (already a detailed plan — nothing to do)\n", plan.TaskListPath)
-		fmt.Fprintf(w, "Next step     wt start %s\n", plan.Slug)
-		return
+		line("Task list     %s  (already a detailed plan — nothing to do)\n", plan.TaskListPath)
+		line("Next step     wt start %s\n", plan.Slug)
+		return b.String()
 	}
-	fmt.Fprintf(w, "Planner       %s  (started in a new tab, given the planning bootstrap prompt)\n", plan.PlannerKind)
+	line("Planner       %s  (started in a new tab, given the planning bootstrap prompt)\n", plan.PlannerKind)
 	switch plan.WorkspaceState {
 	case "ready":
-		fmt.Fprintf(w, "Herdr tab     in workspace %s (whichever is focused when this runs)\n", plan.WorkspaceLabel)
+		line("Herdr tab     in workspace %s (whichever is focused when this runs)\n", plan.WorkspaceLabel)
 	case "disabled":
-		fmt.Fprint(w, "Herdr tab     bridge disabled — planning files only, no Codex session\n")
+		b.WriteString("Herdr tab     bridge disabled — planning files only, no Codex session\n")
 	default:
-		fmt.Fprint(w, "Herdr tab     Herdr unreachable — planning files only, retry later\n")
+		b.WriteString("Herdr tab     Herdr unreachable — planning files only, retry later\n")
 	}
 	for _, warning := range plan.Warnings {
-		fmt.Fprintf(w, "Warning       %s\n", warning)
+		line("Warning       %s\n", warning)
 	}
+	return b.String()
 }
 
 // --- Eligibility -------------------------------------------------------
@@ -907,7 +913,11 @@ func taskListIsPlanningStarter(path string) (bool, error) {
 }
 
 func writeFileAtomic(dir, path, content string) error {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	// 0750, not 0755: planning artifacts are local working documents in a
+	// developer's own checkout, and nothing needs world access to them.
+	// MkdirAll leaves an existing directory's mode alone, so this only
+	// applies when wt plan creates tasks/ for the first time.
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return err
 	}
 	temp, err := os.CreateTemp(dir, ".plan-*.tmp")
