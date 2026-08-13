@@ -958,6 +958,27 @@ if rg -q 'wt_herd|herdr-devflow|devflow_exec|devflow-bootstrap' "$devops_entrypo
   print -r -- "scripts/devops.sh reaches for the Herdr bridge" >&2
   exit 1
 fi
+# The Ready picker's `s` key prints `wt plan --issue <N>` as inert text. That
+# is the ONLY way `wt` may appear in this file: sourcing it, invoking it, or
+# executing the printed string would recreate exactly the DevOps-to-Herdr
+# coupling the checks above exist to prevent (AR34-AR35). devops.sh is a bash
+# process and `wt` is a sourced zsh function, so an invocation could not work
+# anyway — it would just fail confusingly instead of printing something the
+# user can paste.
+# Matched against code only: comment lines and the quoted usage text are
+# stripped first, so documenting `wt plan --issue <N>` in prose stays legal
+# while an actual invocation does not.
+devops_code="$(rg -v '^\s*#' "$devops_entrypoint" | rg -v '^\s*`?wt plan')"
+if print -r -- "$devops_code" | rg -q 'source\s+\S*wt\.sh|^\s*\.\s+\S*wt\.sh|^\s*wt\s+plan|\$\(\s*wt\s|eval\s'; then
+  print -r -- "scripts/devops.sh sources, invokes, or evaluates wt; it may only PRINT the command" >&2
+  exit 1
+fi
+# A clipboard dependency was explicitly ruled out: it is per-platform, fails
+# silently in a pipe, and makes the printed command unverifiable.
+if rg -q 'pbcopy|xclip|xsel|wl-copy|clip\.exe' "$devops_entrypoint"; then
+  print -r -- "scripts/devops.sh grew a clipboard dependency" >&2
+  exit 1
+fi
 if [[ -e "$repo_root/scripts/lib/devflow-bootstrap.sh" ]]; then
   print -r -- "the retired DevOps-to-Herdr bootstrap still exists" >&2
   exit 1

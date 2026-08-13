@@ -2,9 +2,9 @@ package app
 
 // This file is the `wt herd issue-plan` command: the Go half of
 // `wt plan --issue <N>`. `wt.sh` resolves the exact ori-agent-dev worktree
-// and forwards it here as separate arguments — never through eval — so a
-// title, label, or Issue body containing shell metacharacters is data this
-// command reads, never syntax it runs.
+// and forwards it here as separate argument words, never as a shell string,
+// so a title, label, or Issue body containing shell metacharacters is data
+// this command reads rather than syntax anything runs.
 //
 // Confirmation happens here, not in the shell, the same way `wt herd
 // overnight start` confirms its own plan: BuildIssuePlan performs the one
