@@ -60,6 +60,41 @@
             </dl>
           </section>
 
+          <section id="plan-clarifications-section" class="plan-card" aria-labelledby="plan-clarifications-heading" hidden>
+            <h2 id="plan-clarifications-heading" class="plan-card-title">Clarifications</h2>
+            <ul id="plan-clarifications-list" class="plan-clarification-list"></ul>
+          </section>
+
+          <!-- The typed task editor. Every control is a real button with a
+               label, so reordering never depends on dragging and the whole
+               editor is keyboard operable (FR-160). -->
+          <section class="plan-card" aria-labelledby="plan-editor-heading">
+            <div class="plan-editor-head">
+              <h2 id="plan-editor-heading" class="plan-card-title">Tasks</h2>
+              <div class="plan-editor-meta">
+                <span id="plan-save-state" class="plan-save-state" data-state="saved" data-tone="neutral">✓ All changes saved</span>
+                <button type="button" id="plan-add-group" class="plan-editor-btn">Add task group</button>
+                <button type="button" id="plan-save" class="plan-editor-btn plan-editor-btn-primary">Save draft</button>
+              </div>
+            </div>
+
+            <!-- A conflict keeps both versions and asks the user to choose;
+                 it is not a retryable error (FR-30, FR-151). -->
+            <div id="plan-conflict-panel" class="plan-conflict-panel" role="alertdialog" aria-labelledby="plan-conflict-heading" hidden>
+              <h3 id="plan-conflict-heading" class="plan-conflict-title">This plan changed while you were editing</h3>
+              <p id="plan-conflict-summary"></p>
+              <div class="plan-conflict-actions">
+                <button type="button" id="plan-conflict-keep-mine" class="plan-editor-btn">Keep my changes</button>
+                <button type="button" id="plan-conflict-discard" class="plan-editor-btn">Discard mine and load theirs</button>
+              </div>
+            </div>
+
+            <div id="plan-editor-groups" class="plan-editor-groups"></div>
+            <p id="plan-editor-empty" class="plan-editor-empty" hidden>
+              No task groups yet. Add one, or ask Ori to draft the plan.
+            </p>
+          </section>
+
           <section id="plan-activity-card" class="plan-card" aria-labelledby="plan-activity-heading">
             <h2 id="plan-activity-heading" class="plan-card-title">Activity</h2>
             <ol id="plan-activity-list" class="plan-activity-list"></ol>
@@ -194,6 +229,186 @@
       display: grid;
       gap: 0.35rem;
       font-size: 0.9rem;
+    }
+
+    .plan-clarification-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: grid;
+      gap: 0.6rem;
+    }
+
+    .plan-clarification-prompt {
+      margin: 0 0 0.2rem;
+      font-weight: 600;
+    }
+
+    .plan-clarification-state {
+      margin: 0;
+      font-size: 0.85rem;
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+      color: var(--bs-secondary-color, #6c757d);
+    }
+
+    .plan-clarification-required {
+      border: 1px solid var(--bs-border-color, #dee2e6);
+      border-radius: 999px;
+      padding: 0 0.5rem;
+    }
+
+    .plan-editor-head {
+      display: flex;
+      gap: 0.75rem;
+      align-items: baseline;
+      justify-content: space-between;
+      flex-wrap: wrap;
+    }
+
+    .plan-editor-meta {
+      display: flex;
+      gap: 0.5rem;
+      align-items: center;
+      flex-wrap: wrap;
+      font-size: 0.85rem;
+    }
+
+    /* The save state always reads as an icon plus a word, so it is never
+       communicated by color alone (FR-162). */
+    .plan-save-state {
+      border: 1px solid var(--bs-border-color, #dee2e6);
+      border-radius: 999px;
+      padding: 0.1rem 0.6rem;
+      white-space: nowrap;
+    }
+
+    .plan-save-state[data-tone='attention'] { border-color: #fd7e14; color: #8a4b00; }
+    .plan-save-state[data-tone='info'] { border-color: #0d6efd; color: #084298; }
+    .plan-save-state[data-tone='danger'] { border-color: #dc3545; color: #842029; }
+
+    .plan-editor-btn {
+      border: 1px solid var(--bs-border-color, #dee2e6);
+      background: var(--bs-body-bg, #fff);
+      border-radius: 0.5rem;
+      padding: 0.3rem 0.7rem;
+      cursor: pointer;
+      font: inherit;
+    }
+
+    .plan-editor-btn-primary {
+      background: var(--bs-primary, #0d6efd);
+      border-color: var(--bs-primary, #0d6efd);
+      color: #fff;
+    }
+
+    .plan-editor-btn:focus-visible,
+    .plan-item-actions button:focus-visible,
+    .plan-group-actions button:focus-visible {
+      outline: 2px solid var(--bs-primary, #0d6efd);
+      outline-offset: 2px;
+    }
+
+    .plan-conflict-panel {
+      border: 1px solid #dc3545;
+      border-radius: 0.5rem;
+      padding: 0.75rem 0.9rem;
+      margin: 0.75rem 0;
+    }
+
+    .plan-conflict-title {
+      font-size: 0.95rem;
+      margin: 0 0 0.35rem;
+    }
+
+    .plan-conflict-actions {
+      display: flex;
+      gap: 0.5rem;
+      margin-top: 0.5rem;
+      flex-wrap: wrap;
+    }
+
+    .plan-editor-groups {
+      display: grid;
+      gap: 0.9rem;
+      margin-top: 0.9rem;
+    }
+
+    .plan-group {
+      border: 1px solid var(--bs-border-color, #dee2e6);
+      border-radius: 0.5rem;
+      padding: 0.75rem 0.9rem;
+    }
+
+    .plan-group-head {
+      display: flex;
+      gap: 0.5rem;
+      justify-content: space-between;
+      align-items: baseline;
+      flex-wrap: wrap;
+    }
+
+    .plan-group-title {
+      font-size: 0.95rem;
+      margin: 0;
+    }
+
+    .plan-group-actions,
+    .plan-item-actions {
+      display: flex;
+      gap: 0.35rem;
+      flex-wrap: wrap;
+    }
+
+    .plan-group-actions button,
+    .plan-item-actions button {
+      border: 1px solid var(--bs-border-color, #dee2e6);
+      background: var(--bs-body-bg, #fff);
+      border-radius: 0.4rem;
+      padding: 0.15rem 0.5rem;
+      font-size: 0.8rem;
+      cursor: pointer;
+    }
+
+    .plan-group-actions button[disabled],
+    .plan-item-actions button[disabled] {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .plan-group-outcome {
+      margin: 0.35rem 0 0;
+      font-size: 0.85rem;
+      color: var(--bs-secondary-color, #6c757d);
+    }
+
+    .plan-item-list {
+      margin: 0.6rem 0 0;
+      padding-left: 1.2rem;
+      display: grid;
+      gap: 0.6rem;
+    }
+
+    .plan-item-description {
+      margin: 0;
+    }
+
+    .plan-item-assignee {
+      margin: 0.15rem 0 0;
+      font-size: 0.8rem;
+      color: var(--bs-secondary-color, #6c757d);
+    }
+
+    .plan-item-warning {
+      margin: 0.25rem 0 0;
+      font-size: 0.8rem;
+      color: #842029;
+    }
+
+    .plan-editor-empty {
+      margin: 0.75rem 0 0;
+      color: var(--bs-secondary-color, #6c757d);
     }
 
     .plan-loading,

@@ -180,6 +180,7 @@ export default defineConfig([
       'internal/web/static/js/modules/workspace-bulk-actions.js',
       'internal/web/static/js/modules/workspace-plan.js',
       'internal/web/static/js/modules/workspace-plan-detail.js',
+      'internal/web/static/js/modules/workspace-plan-editor.js',
     ],
     languageOptions: {
       sourceType: 'module'
