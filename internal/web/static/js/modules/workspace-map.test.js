@@ -829,7 +829,35 @@ test('the Home-only empty presentation renders a real blank canvas without legac
   assert.match(container.innerHTML, /data-ws-map-viewport/);
   assert.doesNotMatch(container.innerHTML, /No workspaces yet/);
   assert.doesNotMatch(container.innerHTML, /data-ws-map-create/);
+  assert.equal((container.innerHTML.match(/cockpit-empty-map-actions/g) || []).length, 1);
+  assert.match(container.innerHTML, /role="group" aria-label="Create or import a workspace"/);
+  assert.match(
+    container.innerHTML,
+    /data-workspace-import-mode="false" data-workspace-entry-point="home_cockpit_create">New Workspace/
+  );
+  assert.match(
+    container.innerHTML,
+    /data-workspace-import-mode="true" data-workspace-entry-point="home_cockpit_import">Import Folder/
+  );
   assert.equal(map.getSelectedId(), '');
+});
+
+test('the zero-workspace actions survive a late Personal HQ landmark remount exactly once', () => {
+  const map = loadMapForMount();
+  const { container } = createMapHarness();
+  map.mount(container, {
+    workspaces: [],
+    hideChrome: true,
+    selectOnly: true,
+    noAutoSelect: true,
+    emptyPresentation: 'canvas'
+  });
+  map.setHQStatus({ valid: false, hq_onboarding_state: 'not_started' });
+  assert.match(container.innerHTML, /data-hq-site/);
+  assert.equal((container.innerHTML.match(/cockpit-empty-map-actions/g) || []).length, 1);
+  assert.equal((container.innerHTML.match(/>New Workspace<\/button>/g) || []).length, 1);
+  assert.equal((container.innerHTML.match(/>Import Folder<\/button>/g) || []).length, 1);
+  assert.doesNotMatch(container.innerHTML, /No workspaces yet/);
 });
 
 test('the Home empty canvas remounts cleanly when a real workspace arrives', () => {
@@ -846,7 +874,7 @@ test('the Home empty canvas remounts cleanly when a real workspace arrives', () 
   map.mount(container, { ...common, workspaces: [{ id: 'ws-1', name: 'Alpha' }] });
   assert.equal((container.innerHTML.match(/data-ws-map-viewport/g) || []).length, 1);
   assert.match(container.innerHTML, /data-ws-id="ws-1"/);
-  assert.doesNotMatch(container.innerHTML, /No workspaces yet/);
+  assert.doesNotMatch(container.innerHTML, /No workspaces yet|cockpit-empty-map-actions/);
   assert.equal(map.getSelectedId(), '');
 });
 

@@ -2013,6 +2013,15 @@
     );
   }
 
+  function cockpitEmptyActionsHTML() {
+    return (
+      '<div class="cockpit-empty-map-actions" role="group" aria-label="Create or import a workspace">' +
+      '<button type="button" class="modern-btn modern-btn-primary" data-bs-toggle="modal" data-bs-target="#addFolderModal" data-workspace-import-mode="false" data-workspace-entry-point="home_cockpit_create">New Workspace</button>' +
+      '<button type="button" class="modern-btn modern-btn-secondary" data-bs-toggle="modal" data-bs-target="#addFolderModal" data-workspace-import-mode="true" data-workspace-entry-point="home_cockpit_import">Import Folder</button>' +
+      '</div>'
+    );
+  }
+
   function shellHTML(stats, workspaces, selectedId, viewport, options) {
     var site = hqSiteView(hqStatus);
     var authoritativeEmpty =
@@ -2037,6 +2046,7 @@
         '<section class="ws-map-theatre">' +
         '<div class="ws-map-compass">N<b>▲</b></div>' +
         canvas +
+        (authoritativeEmpty ? cockpitEmptyActionsHTML() : '') +
         '</section>' +
         '</div>' +
         selBarHTML() +
