@@ -82,6 +82,100 @@ test.describe('Home onboarding workspace gate', () => {
     expect(workspaceDerivedRequests).toEqual([]);
   });
 
+  test('authoritative empty renders the real Map and routes both canvas actions', async ({
+    page
+  }) => {
+    let populated = false;
+    const seeded = {
+      id: 'arrived-after-empty',
+      name: 'Arrived workspace',
+      kind: 'workspace',
+      children: []
+    };
+    await skipOnboarding(page);
+    await page.route('**/api/workspaces?tree=true', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ folders: populated ? [seeded] : [] })
+      })
+    );
+    await page.route('**/api/personal-hq/status', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ status: { valid: true, workspace_id: 'existing-hq' } })
+      })
+    );
+
+    await page.goto('/');
+
+    await expect(page.locator('#homeCockpit')).toHaveAttribute('data-state', 'empty-map');
+    await expect(page.locator('#cockpitMap')).toBeVisible();
+    await expect(page.locator('.ws-map-canvas[data-ws-map-viewport]')).toHaveCount(1);
+    await expect(page.locator('.ws-map-tile[data-ws-id]')).toHaveCount(0);
+    await expect(page.getByText('No workspaces yet.', { exact: true })).toHaveCount(0);
+    await expect(page.getByText(/No workspaces yet — build your first one/)).toHaveCount(0);
+
+    const actions = page.locator('.cockpit-empty-map-actions');
+    await expect(actions).toHaveCount(1);
+    const create = actions.getByRole('button', { name: 'New Workspace' });
+    const importFolder = actions.getByRole('button', { name: 'Import Folder' });
+    await create.click();
+    await expect(page.locator('#addFolderModal')).toBeVisible();
+    await expect(page.locator('#addFolderModal')).toHaveAttribute('data-import-mode', 'false');
+    expect(await page.evaluate(() => (window as any).sessionManager?.importEntryPoint)).toBe(
+      'home_cockpit_create'
+    );
+    await page.locator('#addFolderModal [data-bs-dismiss="modal"]').first().click();
+    await expect(page.locator('#addFolderModal')).toBeHidden();
+
+    await importFolder.click();
+    await expect(page.locator('#addFolderModal')).toBeVisible();
+    await expect(page.locator('#addFolderModal')).toHaveAttribute('data-import-mode', 'true');
+    expect(await page.evaluate(() => (window as any).sessionManager?.importEntryPoint)).toBe(
+      'home_cockpit_import'
+    );
+    await page.locator('#addFolderModal [data-bs-dismiss="modal"]').first().click();
+    await expect(page.locator('#addFolderModal')).toBeHidden();
+
+    await page.getByRole('button', { name: 'Tree' }).click();
+    await expect(actions).toBeHidden();
+    await expect(page.locator('#cockpitTree')).toContainText('No workspaces yet');
+    await page.getByRole('button', { name: 'Map' }).click();
+
+    populated = true;
+    await page.evaluate(() => window.dispatchEvent(new Event('ori:workspaces-changed')));
+    await expect(page.locator(`.ws-map-tile[data-ws-id="${seeded.id}"]`)).toBeVisible();
+    await expect(actions).toHaveCount(0);
+    await expect(page.locator('.ws-map-canvas[data-ws-map-viewport]')).toHaveCount(1);
+  });
+
+  test('a late Personal HQ response preserves one empty action group and one canvas', async ({
+    page
+  }) => {
+    await skipOnboarding(page);
+    await page.route('**/api/workspaces?tree=true', route =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: '{"folders":[]}' })
+    );
+    await page.route('**/api/personal-hq/status', async route => {
+      await new Promise(resolve => setTimeout(resolve, 150));
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ status: { valid: false, hq_onboarding_state: 'unseen' } })
+      });
+    });
+
+    await page.goto('/');
+
+    await expect(page.locator('[data-hq-site]')).toBeVisible();
+    await expect(page.locator('.cockpit-empty-map-actions')).toHaveCount(1);
+    await expect(page.locator('.ws-map-canvas[data-ws-map-viewport]')).toHaveCount(1);
+    await page.locator('[data-hq-site]').click();
+    await expect(page.getByRole('button', { name: /Build My HQ/i })).toBeVisible();
+  });
+
   test('completed onboarding hydrates and renders the seeded workspace Map', async ({ page }) => {
     const seeded = {
       id: 'onboarding-gate-seeded',
