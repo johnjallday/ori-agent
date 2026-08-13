@@ -7,13 +7,46 @@ Ori Agent is a Go application with an embedded web UI. `cmd/server` contains the
 Use `make deps` to download and tidy modules. `make build` creates `bin/ori-agent`; `make menubar` creates `bin/ori-menubar`; `make all` builds both. For local work, run `make run-dev PORT=8765`, or `make run PORT=8765` to build first. `make clean` removes build and coverage artifacts. Frontend checks use `npm run lint`, `npm run format:check`, and `npm run test:smoke`.
 
 ## Coding Style & Naming Conventions
-Keep Go code `gofmt` clean with `make fmt`; run `make vet` and `make lint` for static checks. Use idiomatic Go mixedCaps names and package-focused filenames such as `agent_store.go` or `llm_factory.go`. Frontend code in `internal/web/static` uses ESLint and Prettier through npm scripts. Runtime config files such as `settings.json` and `agents.json` use snake_case keys.
+Keep Go code `gofmt` clean with `make fmt`; run `make vet` and `make lint-new` for static checks. Use idiomatic Go mixedCaps names and package-focused filenames such as `agent_store.go` or `llm_factory.go`. Frontend code in `internal/web/static` uses ESLint and Prettier through npm scripts. Runtime config files such as `settings.json` and `agents.json` use snake_case keys.
 
 ## Testing Guidelines
 `make test-unit` runs fast Go tests with `-short`; `make test` runs the main suite; `make test-coverage` writes `coverage/coverage.html`. JS module tests run with `make test-js`; Playwright smoke tests run with `npm run test:smoke`. Integration, e2e, and user suites may require `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `USE_OLLAMA=true`. Name tests after observable behavior, for example `TestProviderIntegration_WithRetries`.
 
 ## Commit & Pull Request Guidelines
-Recent history uses Conventional Commit-style subjects such as `feat(workspace): ...` and `chore(config): ...`. Keep commits focused and reference issues or PRs with `#123` when relevant. Pull requests should explain motivation, summarize touched paths, list validation commands, and include screenshots or terminal output for UI, CLI, or workflow changes. Run `make test` plus affected JS, integration, e2e, or smoke suites before review.
+Recent history uses Conventional Commit-style subjects such as `feat(workspace): ...` and `chore(config): ...`. Keep commits focused and reference issues or PRs with `#123` when relevant. Pull requests should explain motivation, summarize touched paths, list validation commands, and include screenshots or terminal output for UI, CLI, or workflow changes.
+
+### Before opening a PR
+
+Run all four. `make test` alone is not enough — it runs no linter and no
+security scanner, so a branch can be fully green locally and still fail CI:
+
+```bash
+make test                          # the main Go suite
+make lint-new                      # golangci-lint, ratcheted against origin/dev
+gosec ./path/to/changed/pkg/...    # scoped to what you touched — see below
+make test-js                       # plus affected JS, integration, e2e, or smoke suites
+```
+
+**Both static checks are ratcheted, and both have a large pre-existing
+baseline. Scope them to your change or they are pure noise.**
+
+`make lint-new` runs `--new-from-merge-base=origin/dev`, exactly the gate CI
+applies: only issues your branch introduces. Do **not** use `make lint` as a
+pre-PR gate — it lints the whole tree including the legacy baseline
+(currently ~214 findings: errcheck 141, staticcheck 30, unparam 43), so it
+fails on a spotless branch and tells you nothing about your change. This is
+also why the codebase is full of unchecked `fmt.Fprintf` calls: they predate
+the ratchet. New ones are still rejected.
+
+`gosec` has **no make target** and is not part of `make test`. CI runs it as a
+GitHub Action that reports only "new alerts in code changed by this pull
+request". A bare `gosec ./...` reports the whole repository (currently ~306
+findings) and is not a gate — always scope it to the packages you changed,
+where the target is zero. Install it once with
+`go install github.com/securego/gosec/v2/cmd/gosec@latest`. Common findings
+here are G301/G302 (directory and file permissions — prefer `0750` and
+`0600`) and G304 (file read built from a composed path; annotate with a
+`#nosec G304` comment stating why the path is trusted).
 
 ## Security & Configuration Tips
 Never commit API keys or local state. Load provider credentials through environment variables or ignored local config, and use `make check-env` before running provider-backed agents. Keep generated binaries, coverage output, and workspace state out of commits unless explicitly required.
