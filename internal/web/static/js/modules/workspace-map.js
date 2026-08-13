@@ -840,7 +840,7 @@
     //    neither is a workspace, so neither may occupy a workspace ID in the
     //    saved layout (FR-30).
     var hqSite = opts.hqSite ? placer.next() : null;
-    var pad = placer.next();
+    var pad = opts.createPad === false ? null : placer.next();
 
     var bounds = worldBounds(nodes, districts, hqSite, pad);
     return {
@@ -1476,7 +1476,8 @@
     var layout = computeWorldLayout(workspaces, {
       positions: layoutState.positions,
       viewport: opts.viewport,
-      hqSite: site.show
+      hqSite: site.show,
+      createPad: opts.createPad
     });
     // Nodes carry their raw world coordinates into the DOM; the world layer's
     // camera transform is the only thing standing between world space and the
@@ -1511,8 +1512,12 @@
       parts.push(hqSiteHTML(toLayer(layout.hqSite), selectedId, layout.nodes.length, site));
     }
     // Keep the ordinary create affordance after all real and reserved sites.
-    var pad = toLayer(layout.pad);
-    parts.push(padHTML(pad.left, pad.top));
+    // The Home cockpit's authoritative empty presentation supplies its own
+    // create/import overlay, so it explicitly omits this otherwise-global pad.
+    if (layout.pad) {
+      var pad = toLayer(layout.pad);
+      parts.push(padHTML(pad.left, pad.top));
+    }
     // No candidate marker: build is not a mode any more, so there is no
     // in-between state to preview. Right-click is the coordinate.
 
@@ -2008,11 +2013,28 @@
     );
   }
 
+  function cockpitEmptyActionsHTML() {
+    return (
+      '<div class="cockpit-empty-map-actions" role="group" aria-label="Create or import a workspace">' +
+      '<button type="button" class="modern-btn modern-btn-primary" data-bs-toggle="modal" data-bs-target="#addFolderModal" data-workspace-import-mode="false" data-workspace-entry-point="home_cockpit_create">New Workspace</button>' +
+      '<button type="button" class="modern-btn modern-btn-secondary" data-bs-toggle="modal" data-bs-target="#addFolderModal" data-workspace-import-mode="true" data-workspace-entry-point="home_cockpit_import">Import Folder</button>' +
+      '</div>'
+    );
+  }
+
   function shellHTML(stats, workspaces, selectedId, viewport, options) {
     var site = hqSiteView(hqStatus);
+    var authoritativeEmpty =
+      options &&
+      options.emptyPresentation === 'canvas' &&
+      Array.isArray(workspaces) &&
+      workspaces.length === 0;
     var canvas =
-      (Array.isArray(workspaces) && workspaces.length > 0) || site.show
-        ? canvasHTML(workspaces, selectedId, { viewport: viewport }).html
+      (Array.isArray(workspaces) && workspaces.length > 0) || site.show || authoritativeEmpty
+        ? canvasHTML(workspaces, selectedId, {
+            viewport: viewport,
+            createPad: authoritativeEmpty ? false : undefined
+          }).html
         : emptyCanvasHTML();
     // Cockpit mode: the workspace-area header and the persistent context rail
     // already own the title, the stat readout, New Workspace, and the selected
@@ -2024,6 +2046,7 @@
         '<section class="ws-map-theatre">' +
         '<div class="ws-map-compass">N<b>▲</b></div>' +
         canvas +
+        (authoritativeEmpty ? cockpitEmptyActionsHTML() : '') +
         '</section>' +
         '</div>' +
         selBarHTML() +
@@ -2147,6 +2170,30 @@
       document.getElementById('cockpitCreateWorkspaceBtn') ||
       document.getElementById('launcherCreateWorkspaceBtn');
     if (create && typeof create.click === 'function') create.click();
+  }
+
+  function bindCockpitEmptyActions(container) {
+    var buttons = container.querySelectorAll('.cockpit-empty-map-actions button');
+    buttons.forEach(function (button) {
+      button.addEventListener('click', function () {
+        var modal = document.getElementById('addFolderModal');
+        if (!modal) return;
+        var entryPoint = button.getAttribute('data-workspace-entry-point');
+        modal.addEventListener(
+          'hidden.bs.modal',
+          function restoreEmptyActionFocus() {
+            // A late HQ response may remount the Map while the modal is open.
+            // Resolve the current button by its stable contract rather than
+            // focusing a detached trigger from the previous canvas.
+            var current = container.querySelector(
+              '.cockpit-empty-map-actions [data-workspace-entry-point="' + entryPoint + '"]'
+            );
+            if (current && current.focus) current.focus();
+          },
+          { once: true }
+        );
+      });
+    });
   }
 
   function bindCreate(container) {
@@ -4627,6 +4674,7 @@
       state
     );
     bindCreate(container);
+    bindCockpitEmptyActions(container);
     bindTiles(container, workspaces, state);
     bindContextMenu(container, workspaces, state);
     bindHQSite(container, state);

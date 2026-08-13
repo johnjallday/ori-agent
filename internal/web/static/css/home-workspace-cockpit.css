@@ -292,9 +292,53 @@
      #292 FR-31). The theatre itself no longer scrolls — the camera moves. */
   min-height: 320px;
   overflow: hidden;
+  /* Cockpit mode has no theatre title strip, so its canvas can own the full
+     panel. This also lets pointer events pass through the empty-action
+     overlay's non-button space directly to the map. */
+  padding: 0;
 }
 .cockpit-map .ws-map-layout.is-cockpit .ws-map-theatre .ws-map-canvas {
   min-height: 0;
+}
+
+/* Issue #320: zero workspaces is still a real Map. Keep its two useful next
+   steps attached to the canvas without turning the rest of this overlay into
+   a pointer-blocking sheet. The top-left placement stays clear of the compass,
+   bottom control clusters, and the centrally framed Personal HQ landmark. */
+.cockpit-map .cockpit-empty-map-actions {
+  position: absolute;
+  top: 14px;
+  left: 16px;
+  z-index: 8;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-width: calc(100% - 88px);
+  padding: 6px;
+  border: 1px solid var(--hc-line);
+  background: color-mix(in srgb, var(--hc-panel-raised) 92%, transparent);
+  box-shadow: var(--hc-shadow);
+  pointer-events: none;
+}
+
+.cockpit-map .cockpit-empty-map-actions > button {
+  pointer-events: auto;
+}
+
+.cockpit-map .cockpit-empty-map-actions > button:focus-visible {
+  outline: 2px solid var(--hc-signal);
+  outline-offset: 2px;
+}
+
+/* On a narrow screen, the HQ landmark, creation group, and two map-control
+   clusters cannot truthfully share a 320px canvas without covering each other.
+   Give this one first-run state vertical room instead of shrinking controls or
+   hiding content; populated Map and Tree sizing remains unchanged. */
+@media (max-width: 700px) {
+  .home-cockpit[data-state="empty-map"] .cockpit-area-body,
+  .home-cockpit[data-state="empty-map"] .cockpit-map {
+    min-height: 520px;
+  }
 }
 
 .cockpit-area-status:empty {

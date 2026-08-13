@@ -215,10 +215,12 @@ test.describe('Home First Run', () => {
     await expect(page.locator('body.home-command-page')).toBeVisible();
     await expect(page.locator('#homeAssistantCard')).toHaveAttribute('data-first-run', 'true');
     await expect(page.locator('#homeCockpit')).toBeVisible();
-    const emptyState = page.locator('#cockpitWorkspaceStatus [data-state="empty"]');
-    await expect(emptyState).toContainText('No workspaces yet.');
-    await expect(emptyState.getByRole('button', { name: 'New Workspace' })).toBeVisible();
-    await expect(emptyState.getByRole('button', { name: 'Import Folder' })).toBeVisible();
+    await expect(page.locator('#homeCockpit')).toHaveAttribute('data-state', 'empty-map');
+    await expect(page.locator('#cockpitMap')).toBeVisible();
+    await expect(page.getByText('No workspaces yet.', { exact: true })).toHaveCount(0);
+    const emptyActions = page.locator('.cockpit-empty-map-actions');
+    await expect(emptyActions.getByRole('button', { name: 'New Workspace' })).toBeVisible();
+    await expect(emptyActions.getByRole('button', { name: 'Import Folder' })).toBeVisible();
     await expect(page.locator('#homeAssistantInput')).toHaveAttribute(
       'placeholder',
       'Plan a product launch…'
@@ -229,7 +231,8 @@ test.describe('Home First Run', () => {
 
     await page.goto('/workspaces');
     await expect(page.locator('#addFolderModal')).toBeHidden();
-    await expect(page.locator('#cockpitWorkspaceStatus [data-state="empty"]')).toBeVisible();
+    await expect(page.locator('#homeCockpit')).toHaveAttribute('data-state', 'empty-map');
+    await expect(page.locator('.cockpit-empty-map-actions')).toBeVisible();
   });
 
   test('keeps the command-strip interaction contract on home', async ({ page }) => {
