@@ -106,6 +106,10 @@ const (
 	CodeExecutionConflict       = ErrorCode("execution_conflict")
 	CodeNotDeletable            = ErrorCode("plan_not_deletable")
 	CodeArchived                = ErrorCode("plan_archived")
+	// CodeModelUnavailable reports that generation is unavailable right now.
+	// It is distinct from a failure: everything that does not need a model
+	// still works, so the UI disables only the generate controls (FR-58).
+	CodeModelUnavailable = ErrorCode("model_unavailable")
 	// CodeInternal is the fallback for an error with no stable mapping. It
 	// never carries the underlying message to the client.
 	CodeInternal = ErrorCode("internal_error")
@@ -137,6 +141,7 @@ var codeBySentinel = []struct {
 	{ErrExecutionConflict, CodeExecutionConflict},
 	{ErrPlanNotDeletable, CodeNotDeletable},
 	{ErrPlanArchived, CodeArchived},
+	{ErrModelUnavailable, CodeModelUnavailable},
 }
 
 // CodeFor maps an error to its stable API code, or CodeInternal when the error

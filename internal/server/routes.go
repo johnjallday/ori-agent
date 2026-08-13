@@ -829,6 +829,13 @@ func registerWorkspacePlanRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/activity", s.Handlers.WorkspacePlans.GetPlanActivity)
 		mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/archive", s.Handlers.WorkspacePlans.ArchivePlan)
 		mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/reopen", s.Handlers.WorkspacePlans.ReopenPlan)
+		// Drafting: PATCH/PUT saves a user's edit under an optimistic revision
+		// token; POST asks the planner to draft or to ask questions. Neither
+		// creates work (FR-29, FR-30).
+		mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/draft", s.Handlers.WorkspacePlans.PlanDraft)
+		mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/clarifications/{clarificationID}", s.Handlers.WorkspacePlans.AnswerClarification)
+		mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/snapshots", s.Handlers.WorkspacePlans.DraftSnapshots)
+		mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/snapshots/{snapshotID}/recover", s.Handlers.WorkspacePlans.RecoverDraftSnapshot)
 	}
 }
 

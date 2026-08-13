@@ -1,6 +1,8 @@
 package workspaceplan
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -21,11 +23,32 @@ import (
 //     parsing prose (FR-166).
 type Handler struct {
 	service *Service
+	// resolveGuidance and resolveAvailability supply the workspace context the
+	// planner needs. They are optional: without them the API still works, with
+	// no workspace-specific guidance and no assignment checking.
+	resolveGuidance     GuidanceResolver
+	resolveAvailability AvailabilityResolver
 }
+
+// GuidanceResolver returns the model-guidance half of a workspace's planning
+// settings (FR-125).
+type GuidanceResolver func(ctx context.Context, workspaceID string) GuidanceInput
+
+// AvailabilityResolver returns the agents and capabilities a workspace actually
+// has, so the planner is never asked to guess (FR-46).
+type AvailabilityResolver func(ctx context.Context, workspaceID string) ValidationContext
 
 // NewHandler returns the Plan API handler.
 func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
+}
+
+// SetGuidanceResolver attaches the workspace planning-guidance lookup.
+func (h *Handler) SetGuidanceResolver(resolve GuidanceResolver) { h.resolveGuidance = resolve }
+
+// SetAvailabilityResolver attaches the workspace agent/capability lookup.
+func (h *Handler) SetAvailabilityResolver(resolve AvailabilityResolver) {
+	h.resolveAvailability = resolve
 }
 
 // planResponse is the wire shape of a Plan. It is written explicitly rather
@@ -313,6 +336,271 @@ func (h *Handler) DeletePlan(w http.ResponseWriter, r *http.Request) {
 	orihttp.Success(w, map[string]any{"deleted": true, "plan_id": planID})
 }
 
+// PlanDraft dispatches /api/workspaces/{workspaceID}/plans/{planID}/draft.
+//
+// Registered without a method for the same reason as the other Plan routes:
+// the app's /api/workspaces/ catch-all matches every verb, so a method-scoped
+// pattern would let a wrong verb answer 200 with unrelated JSON.
+func (h *Handler) PlanDraft(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodPatch, http.MethodPut:
+		h.UpdateDraft(w, r)
+	case http.MethodPost:
+		h.GenerateDraft(w, r)
+	default:
+		orihttp.MethodNotAllowed(w)
+	}
+}
+
+// UpdateDraft handles PATCH /api/workspaces/{workspaceID}/plans/{planID}/draft.
+//
+// It carries an optimistic revision token. A stale write is refused with a
+// conflict payload that includes the current revision and content, so the
+// editor can offer recover-or-discard rather than losing the user's work
+// (FR-30).
+//
+// Saving a draft has no side effects: no Task, artifact, approval, or execution
+// follows from it (FR-29).
+func (h *Handler) UpdateDraft(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethods(w, r, http.MethodPatch, http.MethodPut) {
+		return
+	}
+	workspaceID, planID := requireWorkspaceAndPlanID(w, r)
+	if workspaceID == "" || planID == "" {
+		return
+	}
+
+	var req struct {
+		Title     string      `json:"title,omitempty"`
+		Objective string      `json:"objective"`
+		Content   PlanContent `json:"content"`
+		Intent    string      `json:"intent,omitempty"`
+		Actor     string      `json:"actor,omitempty"`
+		// Revision is the draft revision the editor loaded.
+		Revision int64 `json:"revision"`
+		// Autosave records a recovery point before writing (FR-30).
+		Autosave bool `json:"autosave,omitempty"`
+	}
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+
+	plan, err := h.service.Edit(r.Context(), workspaceID, planID, EditInput{
+		Title:            req.Title,
+		Objective:        req.Objective,
+		Content:          req.Content,
+		Intent:           RevisionIntent(strings.TrimSpace(req.Intent)),
+		Actor:            req.Actor,
+		ExpectedRevision: req.Revision,
+		Snapshot:         req.Autosave,
+	})
+	if err != nil {
+		h.writeDraftError(w, r, workspaceID, planID, err)
+		return
+	}
+	orihttp.Success(w, newPlanResponse(plan))
+}
+
+// writeDraftError adds the losing editor's recovery context to a stale-write
+// conflict. Telling someone their save failed without showing them what won,
+// or what they were about to write, is how edits get lost (FR-151).
+func (h *Handler) writeDraftError(w http.ResponseWriter, r *http.Request, workspaceID, planID string, err error) {
+	if !errors.Is(err, ErrStaleDraft) {
+		writeError(w, err)
+		return
+	}
+
+	details := map[string]any{}
+	if current, getErr := h.service.Get(r.Context(), workspaceID, planID); getErr == nil {
+		details["current_revision"] = current.DraftRevision
+		details["current"] = newPlanResponse(current)
+	}
+	if snapshots, snapErr := h.service.Snapshots(r.Context(), workspaceID, planID); snapErr == nil && len(snapshots) > 0 {
+		details["recoverable_snapshots"] = snapshots
+	}
+
+	_ = orihttp.RespondAPIError(w, http.StatusConflict,
+		orihttp.NewAPIError(string(CodeStaleDraft), err.Error()).WithDetails(details))
+}
+
+// GenerateDraft handles POST /api/workspaces/{workspaceID}/plans/{planID}/draft.
+//
+// The planner either drafts or asks questions; either way nothing is approved
+// and no work is created (FR-20, FR-22, FR-23).
+func (h *Handler) GenerateDraft(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+	workspaceID, planID := requireWorkspaceAndPlanID(w, r)
+	if workspaceID == "" || planID == "" {
+		return
+	}
+
+	var req struct {
+		Actor              string   `json:"actor,omitempty"`
+		AllowClarification bool     `json:"allow_clarification,omitempty"`
+		Sections           []string `json:"sections,omitempty"`
+		Revision           int64    `json:"revision"`
+	}
+	if r.ContentLength > 0 && !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+
+	plan, err := h.service.Draft(r.Context(), workspaceID, planID, DraftingOptions{
+		Actor:              req.Actor,
+		AllowClarification: req.AllowClarification,
+		Sections:           req.Sections,
+		ExpectedRevision:   req.Revision,
+		Guidance:           h.guidance(r.Context(), workspaceID),
+		Validation:         h.availability(r.Context(), workspaceID),
+	})
+	if err != nil {
+		writeGenerationError(w, err)
+		return
+	}
+	orihttp.Success(w, newPlanResponse(plan))
+}
+
+// writeGenerationError reports a failed generation with the issues that made it
+// fail, so the editor can show what is wrong rather than only that something is
+// (FR-45). Model unavailability is reported distinctly, because it disables
+// only the generate controls (FR-58).
+func writeGenerationError(w http.ResponseWriter, err error) {
+	if errors.Is(err, ErrModelUnavailable) {
+		_ = orihttp.RespondAPIError(w, http.StatusServiceUnavailable,
+			orihttp.NewAPIError(string(CodeModelUnavailable), err.Error()))
+		return
+	}
+
+	var genErr *GenerationError
+	if errors.As(err, &genErr) && len(genErr.Issues) > 0 {
+		_ = orihttp.RespondAPIError(w, http.StatusUnprocessableEntity,
+			orihttp.NewAPIError(string(CodeValidationFailed), genErr.Error()).
+				WithDetails(map[string]any{
+					"issues":   genErr.Issues,
+					"attempts": genErr.Attempts,
+				}))
+		return
+	}
+	writeError(w, err)
+}
+
+// AnswerClarification handles
+// POST /api/workspaces/{workspaceID}/plans/{planID}/clarifications/{clarificationID}.
+func (h *Handler) AnswerClarification(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+	workspaceID, planID := requireWorkspaceAndPlanID(w, r)
+	if workspaceID == "" || planID == "" {
+		return
+	}
+	clarificationID := strings.TrimSpace(r.PathValue("clarificationID"))
+	if clarificationID == "" {
+		orihttp.BadRequest(w, "clarificationID is required")
+		return
+	}
+
+	var req struct {
+		Answer     string `json:"answer,omitempty"`
+		Skip       bool   `json:"skip,omitempty"`
+		SkipReason string `json:"skip_reason,omitempty"`
+		Actor      string `json:"actor,omitempty"`
+	}
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+
+	plan, err := h.service.Answer(r.Context(), workspaceID, planID, clarificationID, AnswerInput{
+		Answer:     req.Answer,
+		Skip:       req.Skip,
+		SkipReason: req.SkipReason,
+		Actor:      req.Actor,
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	orihttp.Success(w, newPlanResponse(plan))
+}
+
+// DraftSnapshots handles
+// GET /api/workspaces/{workspaceID}/plans/{planID}/snapshots and
+// POST .../snapshots/{snapshotID}/recover.
+func (h *Handler) DraftSnapshots(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodGet) {
+		return
+	}
+	workspaceID, planID := requireWorkspaceAndPlanID(w, r)
+	if workspaceID == "" || planID == "" {
+		return
+	}
+
+	snapshots, err := h.service.Snapshots(r.Context(), workspaceID, planID)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	orihttp.Success(w, map[string]any{
+		"plan_id":   planID,
+		"snapshots": snapshots,
+		// Stating the policy alongside the data keeps the UI from inventing
+		// its own retention story (FR-30).
+		"retained":    MaxDraftSnapshots,
+		"retain_days": int(DraftSnapshotTTL.Hours() / 24),
+	})
+}
+
+// RecoverDraftSnapshot handles
+// POST /api/workspaces/{workspaceID}/plans/{planID}/snapshots/{snapshotID}/recover.
+func (h *Handler) RecoverDraftSnapshot(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+	workspaceID, planID := requireWorkspaceAndPlanID(w, r)
+	if workspaceID == "" || planID == "" {
+		return
+	}
+	snapshotID := strings.TrimSpace(r.PathValue("snapshotID"))
+	if snapshotID == "" {
+		orihttp.BadRequest(w, "snapshotID is required")
+		return
+	}
+
+	var req struct {
+		Actor string `json:"actor,omitempty"`
+	}
+	if r.ContentLength > 0 && !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+
+	plan, err := h.service.RecoverSnapshot(r.Context(), workspaceID, planID, snapshotID, req.Actor)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	orihttp.Success(w, newPlanResponse(plan))
+}
+
+// guidance and availability resolve the workspace context the planner needs.
+// They are wired by the server; without them generation still runs, but with
+// no workspace-specific guidance and no assignment checking — which is why
+// validation treats a nil availability list as "not checked" rather than as
+// "nothing is available".
+func (h *Handler) guidance(ctx context.Context, workspaceID string) GuidanceInput {
+	if h.resolveGuidance == nil {
+		return GuidanceInput{}
+	}
+	return h.resolveGuidance(ctx, workspaceID)
+}
+
+func (h *Handler) availability(ctx context.Context, workspaceID string) ValidationContext {
+	if h.resolveAvailability == nil {
+		return ValidationContext{}
+	}
+	return h.resolveAvailability(ctx, workspaceID)
+}
+
 func requireWorkspaceID(w http.ResponseWriter, r *http.Request) string {
 	workspaceID := strings.TrimSpace(r.PathValue("workspaceID"))
 	if workspaceID == "" {
@@ -362,6 +650,8 @@ func statusForCode(code ErrorCode) int {
 		return http.StatusForbidden
 	case CodeValidationFailed, CodeLimitExceeded, CodeUnavailableCapability, CodeUnsafePath:
 		return http.StatusUnprocessableEntity
+	case CodeModelUnavailable:
+		return http.StatusServiceUnavailable
 	default:
 		return http.StatusInternalServerError
 	}

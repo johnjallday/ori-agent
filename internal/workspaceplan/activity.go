@@ -77,6 +77,13 @@ const (
 	// ActivityArchived and ActivityReopened record History placement.
 	ActivityArchived ActivityKind = "archived"
 	ActivityReopened ActivityKind = "reopened"
+	// ActivityClarificationAsked and ActivityClarificationAnswered record one
+	// round of questions and the answers a user authored (FR-23, FR-25).
+	ActivityClarificationAsked    ActivityKind = "clarification_asked"
+	ActivityClarificationAnswered ActivityKind = "clarification_answered"
+	// ActivityDraftRecovered records an autosave recovery point being restored
+	// into the working draft (FR-30).
+	ActivityDraftRecovered ActivityKind = "draft_recovered"
 )
 
 // NewActivityID returns a stable ID for one lifecycle history entry.

@@ -13,19 +13,32 @@ import (
 // patterns, so the tests exercise path extraction the way the server does
 // rather than a hand-rolled request.
 func newTestAPI(t *testing.T) (*httptest.Server, *Service) {
+	return newTestAPIWithModel(t, nil)
+}
+
+// newTestAPIWithModel mounts the Plan API on the same route patterns the server
+// registers, so the tests exercise path extraction and method dispatch the way
+// production does.
+func newTestAPIWithModel(t *testing.T, model PlanModel) (*httptest.Server, *Service) {
 	t.Helper()
 
-	service := NewService(NewMemoryStore())
+	opts := []ServiceOption{}
+	if model != nil {
+		opts = append(opts, WithGenerator(NewGenerator(model)))
+	}
+	service := NewService(NewMemoryStore(), opts...)
 	handler := NewHandler(service)
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /api/workspaces/{workspaceID}/plans", handler.CreatePlan)
-	mux.HandleFunc("GET /api/workspaces/{workspaceID}/plans", handler.ListPlans)
-	mux.HandleFunc("GET /api/workspaces/{workspaceID}/plans/{planID}", handler.GetPlan)
-	mux.HandleFunc("DELETE /api/workspaces/{workspaceID}/plans/{planID}", handler.DeletePlan)
-	mux.HandleFunc("GET /api/workspaces/{workspaceID}/plans/{planID}/activity", handler.GetPlanActivity)
-	mux.HandleFunc("POST /api/workspaces/{workspaceID}/plans/{planID}/archive", handler.ArchivePlan)
-	mux.HandleFunc("POST /api/workspaces/{workspaceID}/plans/{planID}/reopen", handler.ReopenPlan)
+	mux.HandleFunc("/api/workspaces/{workspaceID}/plans", handler.PlanCollection)
+	mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}", handler.PlanItem)
+	mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/activity", handler.GetPlanActivity)
+	mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/archive", handler.ArchivePlan)
+	mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/reopen", handler.ReopenPlan)
+	mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/draft", handler.PlanDraft)
+	mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/clarifications/{clarificationID}", handler.AnswerClarification)
+	mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/snapshots", handler.DraftSnapshots)
+	mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/snapshots/{snapshotID}/recover", handler.RecoverDraftSnapshot)
 
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
@@ -275,6 +288,272 @@ func TestAPIActivityReturnsLifecycleHistory(t *testing.T) {
 	last := entries[1].(map[string]any)
 	if last["to"] != string(StatusNeedsInput) || last["reason"] != "missing environment" {
 		t.Errorf("activity entry = %v", last)
+	}
+}
+
+// --- Drafting API (FR-29, FR-30) ------------------------------------------
+
+func TestAPIDraftSaveUsesOptimisticConcurrency(t *testing.T) {
+	server, _ := newTestAPI(t)
+
+	_, created := doJSON(t, server, http.MethodPost, "/api/workspaces/ws-1/plans", `{"request":"Plan A"}`)
+	planID, _ := created["id"].(string)
+	draftPath := "/api/workspaces/ws-1/plans/" + planID + "/draft"
+
+	status, saved := doJSON(t, server, http.MethodPatch, draftPath,
+		`{"objective":"First objective","revision":0,"content":{"execution":{"mode":"step_through"}}}`)
+	if status != http.StatusOK {
+		t.Fatalf("first save status = %d (%v)", status, saved)
+	}
+	if saved["objective"] != "First objective" {
+		t.Errorf("objective = %v", saved["objective"])
+	}
+	if saved["draft_revision"] != float64(1) {
+		t.Errorf("draft_revision = %v, want 1", saved["draft_revision"])
+	}
+
+	// A stale editor is refused, and told enough to recover rather than only
+	// that it failed (FR-30, FR-151).
+	status, conflict := doJSON(t, server, http.MethodPatch, draftPath,
+		`{"objective":"Second objective","revision":0}`)
+	if status != http.StatusConflict {
+		t.Fatalf("stale save status = %d, want 409 (%v)", status, conflict)
+	}
+	if conflict["code"] != string(CodeStaleDraft) {
+		t.Errorf("code = %v, want %s", conflict["code"], CodeStaleDraft)
+	}
+	details, _ := conflict["details"].(map[string]any)
+	if details == nil || details["current_revision"] != float64(1) {
+		t.Errorf("conflict does not carry the winning revision: %v", conflict["details"])
+	}
+	if _, ok := details["current"]; !ok {
+		t.Error("conflict does not carry the current plan for recovery")
+	}
+}
+
+// Saving a draft creates nothing: no version, no approval, no task (FR-29).
+func TestAPIDraftSaveHasNoSideEffects(t *testing.T) {
+	server, service := newTestAPI(t)
+	ctx := context.Background()
+
+	_, created := doJSON(t, server, http.MethodPost, "/api/workspaces/ws-1/plans", `{"request":"Plan A"}`)
+	planID, _ := created["id"].(string)
+
+	if status, _ := doJSON(t, server, http.MethodPatch, "/api/workspaces/ws-1/plans/"+planID+"/draft",
+		`{"objective":"Objective","revision":0,"content":{"execution":{"mode":"step_through"}}}`); status != http.StatusOK {
+		t.Fatalf("save status = %d", status)
+	}
+
+	versions, err := service.Store().ListVersions(ctx, "ws-1", planID)
+	if err != nil || len(versions) != 0 {
+		t.Errorf("versions = %d (%v), want 0", len(versions), err)
+	}
+	approvals, err := service.Store().ListApprovals(ctx, "ws-1", planID)
+	if err != nil || len(approvals) != 0 {
+		t.Errorf("approvals = %d (%v), want 0", len(approvals), err)
+	}
+	plan, err := service.Get(ctx, "ws-1", planID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if len(plan.TaskLinks) != 0 || plan.Status != StatusDraft {
+		t.Errorf("saving a draft produced work: status=%q links=%d", plan.Status, len(plan.TaskLinks))
+	}
+}
+
+// Generation being unavailable is reported distinctly, so the UI can disable
+// only the generate controls (FR-58).
+func TestAPIReportsModelUnavailabilityDistinctly(t *testing.T) {
+	server, _ := newTestAPI(t) // no generator
+
+	_, created := doJSON(t, server, http.MethodPost, "/api/workspaces/ws-1/plans", `{"request":"Plan A"}`)
+	planID, _ := created["id"].(string)
+
+	status, body := doJSON(t, server, http.MethodPost, "/api/workspaces/ws-1/plans/"+planID+"/draft", `{}`)
+	if status != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503 (%v)", status, body)
+	}
+	if body["code"] != string(CodeModelUnavailable) {
+		t.Errorf("code = %v, want %s", body["code"], CodeModelUnavailable)
+	}
+}
+
+// A generation that cannot validate returns the issues, so the editor can show
+// what is wrong (FR-45).
+func TestAPIGenerationFailureReturnsItsIssues(t *testing.T) {
+	invalid := `{"objective":"","groups":[]}`
+	server, _ := newTestAPIWithModel(t, &scriptedModel{responses: []string{invalid, invalid, invalid}})
+
+	_, created := doJSON(t, server, http.MethodPost, "/api/workspaces/ws-1/plans", `{"request":"Plan A"}`)
+	planID, _ := created["id"].(string)
+
+	status, body := doJSON(t, server, http.MethodPost, "/api/workspaces/ws-1/plans/"+planID+"/draft", `{}`)
+	if status != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422 (%v)", status, body)
+	}
+	if body["code"] != string(CodeValidationFailed) {
+		t.Errorf("code = %v, want %s", body["code"], CodeValidationFailed)
+	}
+	details, _ := body["details"].(map[string]any)
+	issues, _ := details["issues"].([]any)
+	if len(issues) == 0 {
+		t.Errorf("failure carries no issues: %v", body["details"])
+	}
+}
+
+func TestAPIGeneratesADraft(t *testing.T) {
+	server, _ := newTestAPIWithModel(t, &scriptedModel{responses: []string{validDraftResponse}})
+
+	_, created := doJSON(t, server, http.MethodPost, "/api/workspaces/ws-1/plans", `{"request":"Plan A"}`)
+	planID, _ := created["id"].(string)
+
+	status, drafted := doJSON(t, server, http.MethodPost, "/api/workspaces/ws-1/plans/"+planID+"/draft", `{}`)
+	if status != http.StatusOK {
+		t.Fatalf("status = %d (%v)", status, drafted)
+	}
+	if drafted["objective"] != "Migrate reporting safely" {
+		t.Errorf("objective = %v", drafted["objective"])
+	}
+	if drafted["status"] != string(StatusDraft) {
+		t.Errorf("status = %v, want draft", drafted["status"])
+	}
+}
+
+func TestAPIAnswersAndSkipsClarifications(t *testing.T) {
+	server, _ := newTestAPIWithModel(t, &scriptedModel{responses: []string{clarificationResponse}})
+
+	_, created := doJSON(t, server, http.MethodPost, "/api/workspaces/ws-1/plans", `{"request":"Plan A"}`)
+	planID, _ := created["id"].(string)
+
+	status, waiting := doJSON(t, server, http.MethodPost,
+		"/api/workspaces/ws-1/plans/"+planID+"/draft", `{"allow_clarification":true}`)
+	if status != http.StatusOK {
+		t.Fatalf("draft status = %d (%v)", status, waiting)
+	}
+	if waiting["status"] != string(StatusNeedsInput) {
+		t.Fatalf("status = %v, want needs_input", waiting["status"])
+	}
+
+	draft, _ := waiting["draft"].(map[string]any)
+	questions, _ := draft["clarifications"].([]any)
+	if len(questions) != 2 {
+		t.Fatalf("questions = %d, want 2", len(questions))
+	}
+
+	var requiredID, optionalID string
+	for _, raw := range questions {
+		question, _ := raw.(map[string]any)
+		id, _ := question["id"].(string)
+		if required, _ := question["required"].(bool); required {
+			requiredID = id
+		} else {
+			optionalID = id
+		}
+	}
+
+	// A required question cannot be skipped (FR-28).
+	status, refused := doJSON(t, server, http.MethodPost,
+		"/api/workspaces/ws-1/plans/"+planID+"/clarifications/"+requiredID, `{"skip":true}`)
+	if status != http.StatusUnprocessableEntity {
+		t.Errorf("skipping a required question status = %d, want 422 (%v)", status, refused)
+	}
+
+	if status, body := doJSON(t, server, http.MethodPost,
+		"/api/workspaces/ws-1/plans/"+planID+"/clarifications/"+optionalID,
+		`{"skip":true,"skip_reason":"no deadline"}`); status != http.StatusOK {
+		t.Fatalf("skip status = %d (%v)", status, body)
+	}
+
+	status, released := doJSON(t, server, http.MethodPost,
+		"/api/workspaces/ws-1/plans/"+planID+"/clarifications/"+requiredID,
+		`{"answer":"Staging only"}`)
+	if status != http.StatusOK {
+		t.Fatalf("answer status = %d (%v)", status, released)
+	}
+	if released["status"] != string(StatusDraft) {
+		t.Errorf("status = %v, want draft once required questions are answered", released["status"])
+	}
+}
+
+func TestAPIListsAndRecoversDraftSnapshots(t *testing.T) {
+	server, _ := newTestAPI(t)
+
+	_, created := doJSON(t, server, http.MethodPost, "/api/workspaces/ws-1/plans", `{"request":"Plan A"}`)
+	planID, _ := created["id"].(string)
+	draftPath := "/api/workspaces/ws-1/plans/" + planID + "/draft"
+
+	if status, _ := doJSON(t, server, http.MethodPatch, draftPath,
+		`{"objective":"First","revision":0,"autosave":true,"content":{"execution":{"mode":"step_through"}}}`); status != http.StatusOK {
+		t.Fatalf("first save failed")
+	}
+	if status, _ := doJSON(t, server, http.MethodPatch, draftPath,
+		`{"objective":"Second","revision":1,"autosave":true,"content":{"execution":{"mode":"step_through"}}}`); status != http.StatusOK {
+		t.Fatalf("second save failed")
+	}
+
+	status, listed := doJSON(t, server, http.MethodGet,
+		"/api/workspaces/ws-1/plans/"+planID+"/snapshots", "")
+	if status != http.StatusOK {
+		t.Fatalf("snapshots status = %d (%v)", status, listed)
+	}
+	snapshots, _ := listed["snapshots"].([]any)
+	if len(snapshots) != 2 {
+		t.Fatalf("snapshots = %d, want 2", len(snapshots))
+	}
+	// The retention policy travels with the data so the UI does not invent one.
+	if listed["retained"] != float64(MaxDraftSnapshots) || listed["retain_days"] != float64(30) {
+		t.Errorf("retention policy = retained:%v days:%v", listed["retained"], listed["retain_days"])
+	}
+
+	// A snapshot captures the draft as it was BEFORE a save, so the newest one
+	// holds the state the last edit replaced — recovering it is an undo. The
+	// current draft is kept separately, which is what "the latest draft plus
+	// ten recovery snapshots" means (FR-30).
+	newest, _ := snapshots[0].(map[string]any)
+	snapshotID, _ := newest["id"].(string)
+	if newest["objective"] != "First" {
+		t.Fatalf("newest snapshot objective = %v, want the state the last save replaced", newest["objective"])
+	}
+
+	status, recovered := doJSON(t, server, http.MethodPost,
+		"/api/workspaces/ws-1/plans/"+planID+"/snapshots/"+snapshotID+"/recover", `{"actor":"jj"}`)
+	if status != http.StatusOK {
+		t.Fatalf("recover status = %d (%v)", status, recovered)
+	}
+	if recovered["objective"] != "First" {
+		t.Errorf("recovered objective = %v, want the snapshot's content", recovered["objective"])
+	}
+
+	// Recovering is itself undoable: the draft it replaced became a snapshot.
+	_, after := doJSON(t, server, http.MethodGet, "/api/workspaces/ws-1/plans/"+planID+"/snapshots", "")
+	afterSnapshots, _ := after["snapshots"].([]any)
+	if len(afterSnapshots) != 3 {
+		t.Fatalf("snapshots after recovery = %d, want 3", len(afterSnapshots))
+	}
+	restorable, _ := afterSnapshots[0].(map[string]any)
+	if restorable["objective"] != "Second" {
+		t.Errorf("newest snapshot after recovery = %v, want the replaced draft", restorable["objective"])
+	}
+}
+
+func TestAPIDraftingRoutesRejectWrongMethods(t *testing.T) {
+	server, _ := newTestAPI(t)
+
+	_, created := doJSON(t, server, http.MethodPost, "/api/workspaces/ws-1/plans", `{"request":"Plan A"}`)
+	planID, _ := created["id"].(string)
+	base := "/api/workspaces/ws-1/plans/" + planID
+
+	for _, tc := range []struct{ method, path string }{
+		{http.MethodGet, base + "/draft"},
+		{http.MethodDelete, base + "/draft"},
+		{http.MethodGet, base + "/clarifications/clr-1"},
+		{http.MethodPost, base + "/snapshots"},
+		{http.MethodGet, base + "/snapshots/snap-1/recover"},
+	} {
+		status, body := doJSON(t, server, tc.method, tc.path, "")
+		if status != http.StatusMethodNotAllowed {
+			t.Errorf("%s %s status = %d, want 405 (%v)", tc.method, tc.path, status, body)
+		}
 	}
 }
 

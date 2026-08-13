@@ -22,6 +22,9 @@ type Service struct {
 	// optional: with no source, a Plan reads without progress rather than with
 	// a persisted copy of execution state (FR-12).
 	progress ProgressSource
+	// generator proposes Plan content. It is optional: without it every
+	// non-generating operation still works (FR-58, FR-177).
+	generator *Generator
 }
 
 // ProgressSource computes a Plan's progress from the linked Tasks and Runs.
@@ -48,6 +51,11 @@ func WithClock(now func() time.Time) ServiceOption {
 // WithProgressSource attaches the derived-progress provider.
 func WithProgressSource(source ProgressSource) ServiceOption {
 	return func(s *Service) { s.progress = source }
+}
+
+// WithGenerator attaches the planner used for drafting and clarification.
+func WithGenerator(generator *Generator) ServiceOption {
+	return func(s *Service) { s.generator = generator }
 }
 
 // NewService returns a Plan lifecycle service over the given store.

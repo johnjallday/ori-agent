@@ -514,7 +514,14 @@ func (b *ServerBuilder) initializeHandlers() {
 		b.workspacePlanStore = workspaceplan.NewMemoryStore()
 	}
 	b.workspacePlanService = workspaceplan.NewService(b.workspacePlanStore)
+	// The planner resolves its provider per call, so changing the configured
+	// model takes effect without a restart. A resolver that cannot produce a
+	// structured-output provider disables generation only: editing, review,
+	// and approval keep working (FR-58, FR-177).
+	b.workspacePlanService.SetGenerator(workspaceplan.NewGenerator(
+		workspaceplan.NewLLMPlanModel(b.resolvePlanningProvider)))
 	b.workspacePlanHandler = workspaceplan.NewHandler(b.workspacePlanService)
+	b.workspacePlanHandler.SetAvailabilityResolver(b.resolvePlanAvailability)
 	logger.Info("Workspace Plans initialized", logger.Fields{
 		"durable": b.sessionStore != nil,
 	})
