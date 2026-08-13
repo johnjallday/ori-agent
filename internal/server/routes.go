@@ -39,6 +39,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	registerReviewRoutes(mux, s)
 	registerCLIAgentRoutes(mux, s)
 	registerWorkspaceRunRoutes(mux, s)
+	registerWorkspacePlanRoutes(mux, s)
 	registerTicketRoutes(mux, s)
 	registerTriggerRoutes(mux, s)
 	registerWorkspaceMemoryRoutes(mux, s)
@@ -805,6 +806,29 @@ func registerWorkspaceRunRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/runs/{runID}/reject", s.Handlers.WorkspaceRuns.RejectRun)
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/runs/{runID}/artifacts", s.Handlers.WorkspaceRuns.ListArtifacts)
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/runs/{runID}/trace", s.Handlers.WorkspaceRuns.ListTrace)
+	}
+}
+
+// registerWorkspacePlanRoutes registers the canonical Workspace Plan API
+// (tasks/prd-workspace-planning-policy.md FR-164).
+//
+// Workspace identity is in the path on every route, so the handler never has to
+// trust a body-supplied studio_id and a Plan ID alone can never reach a record
+// (FR-163, FR-167, FR-168).
+func registerWorkspacePlanRoutes(mux *http.ServeMux, s *Server) {
+	// =============================================================================
+	// Workspace Plans API Endpoints
+	// =============================================================================
+	// Registered without methods on purpose. `/api/workspaces/` above is a
+	// catch-all that matches every method, so a method-scoped pattern would let
+	// a wrong verb fall through to it and answer with an unrelated 200 payload
+	// instead of 405. Each handler owns its own method check.
+	if s.Handlers.WorkspacePlans != nil {
+		mux.HandleFunc("/api/workspaces/{workspaceID}/plans", s.Handlers.WorkspacePlans.PlanCollection)
+		mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}", s.Handlers.WorkspacePlans.PlanItem)
+		mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/activity", s.Handlers.WorkspacePlans.GetPlanActivity)
+		mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/archive", s.Handlers.WorkspacePlans.ArchivePlan)
+		mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/reopen", s.Handlers.WorkspacePlans.ReopenPlan)
 	}
 }
 

@@ -80,6 +80,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/workspacecapabilityhttp"
 	"github.com/johnjallday/ori-agent/internal/workspacemap"
 	"github.com/johnjallday/ori-agent/internal/workspacemaphttp"
+	"github.com/johnjallday/ori-agent/internal/workspaceplan"
 	"github.com/johnjallday/ori-agent/internal/workspacerun"
 )
 
@@ -244,6 +245,12 @@ type ServerBuilder struct {
 	workspaceRunService   *workspacerun.Service
 	workspaceRunHandler   *workspacerun.Handler
 	workspaceRunExecutors *workspacerun.ExecutorRegistry
+
+	// Workspace Planning Workflow — durable Plans, review, approval, and the
+	// materialization of approved work into existing Tasks and Runs.
+	workspacePlanStore   workspaceplan.Store
+	workspacePlanService *workspaceplan.Service
+	workspacePlanHandler *workspaceplan.Handler
 
 	// Skills (local + external)
 	skillsManager *skills.Manager
@@ -530,6 +537,7 @@ func (b *ServerBuilder) createDomainFacades() {
 		CLIAgents:             b.cliAgentHandler,
 		CLIAgentRegistry:      b.cliAgentRegistry,
 		WorkspaceRuns:         b.workspaceRunHandler,
+		WorkspacePlans:        b.workspacePlanHandler,
 		ActionCenter:          b.actionCenterHandler,
 		Plugin:                b.pluginHandler,
 		// initializeMissionBridge (which builds the trigger handler) runs

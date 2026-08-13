@@ -1,0 +1,231 @@
+{{define "workspace-plan"}}
+<!DOCTYPE html>
+<html data-bs-theme="light">
+{{template "head.tmpl" .}}
+
+<body class="bg-light">
+  {{template "navbar.tmpl" .}}
+
+  <div class="main-content-wrapper">
+    {{template "sidebar.tmpl" .}}
+
+    <div class="main-content">
+      <!-- The canonical Plan surface. Task detail, Run detail, and chat all
+           deep-link here rather than rendering a second editor (FR-148,
+           FR-149). -->
+      <div
+        id="workspacePlanPageRoot"
+        class="plan-page-shell"
+        data-workspace-id="{{.Extra.WorkspaceID}}"
+        data-plan-id="{{.Extra.PlanID}}"
+      >
+        <section class="plan-hero">
+          <div class="plan-hero-copy">
+            <div class="plan-breadcrumbs">
+              <a href="/" class="plan-breadcrumb-link">Home</a>
+              <span aria-hidden="true">/</span>
+              <a href="/workspaces/{{.Extra.WorkspaceID}}" class="plan-breadcrumb-link">Workspace</a>
+              <span aria-hidden="true">/</span>
+              <a href="/workspaces/{{.Extra.WorkspaceID}}/plans" class="plan-breadcrumb-link">Plans</a>
+              <span aria-hidden="true">/</span>
+              <span id="plan-breadcrumb-title">Plan</span>
+            </div>
+            <h1 id="plan-title" class="plan-title">Plan</h1>
+            <p id="plan-objective" class="plan-objective"></p>
+          </div>
+          <div class="plan-hero-meta">
+            <span id="plan-status-badge" class="plan-status" data-tone="neutral">
+              <span class="plan-status-icon" aria-hidden="true">•</span>
+              <span class="plan-status-label">Loading</span>
+            </span>
+            <span id="plan-version-label" class="plan-version-label"></span>
+          </div>
+        </section>
+
+        <p id="plan-detail-status" class="plan-detail-status" role="status" aria-live="polite" hidden></p>
+
+        <div id="plan-loading" class="plan-loading">Loading plan…</div>
+        <div id="plan-missing" class="plan-empty" hidden>Plan not found in this workspace.</div>
+
+        <main id="plan-content" class="plan-content" hidden>
+          <section class="plan-card" aria-labelledby="plan-overview-heading">
+            <h2 id="plan-overview-heading" class="plan-card-title">Overview</h2>
+            <dl class="plan-overview">
+              <dt>Original request</dt>
+              <dd id="plan-original-request" class="plan-original-request"></dd>
+              <dt>Next action</dt>
+              <dd id="plan-next-action"></dd>
+              <dt>Progress</dt>
+              <dd id="plan-progress"></dd>
+            </dl>
+          </section>
+
+          <section id="plan-activity-card" class="plan-card" aria-labelledby="plan-activity-heading">
+            <h2 id="plan-activity-heading" class="plan-card-title">Activity</h2>
+            <ol id="plan-activity-list" class="plan-activity-list"></ol>
+          </section>
+        </main>
+      </div>
+    </div>
+  </div>
+
+  <style>
+    .plan-page-shell {
+      padding: 1.5rem 2rem 3rem;
+      max-width: 960px;
+      margin: 0 auto;
+    }
+
+    .plan-hero {
+      display: flex;
+      gap: 1rem;
+      align-items: flex-start;
+      justify-content: space-between;
+      margin-bottom: 1.25rem;
+    }
+
+    .plan-breadcrumbs {
+      display: flex;
+      gap: 0.4rem;
+      align-items: center;
+      font-size: 0.85rem;
+      color: var(--bs-secondary-color, #6c757d);
+      margin-bottom: 0.5rem;
+    }
+
+    .plan-breadcrumb-link {
+      color: inherit;
+      text-decoration: none;
+    }
+
+    .plan-breadcrumb-link:hover,
+    .plan-breadcrumb-link:focus-visible {
+      text-decoration: underline;
+    }
+
+    .plan-title {
+      font-size: 1.6rem;
+      margin: 0 0 0.35rem;
+    }
+
+    .plan-objective {
+      margin: 0;
+      max-width: 65ch;
+      color: var(--bs-secondary-color, #6c757d);
+    }
+
+    .plan-hero-meta {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 0.35rem;
+      font-size: 0.85rem;
+    }
+
+    .plan-status {
+      display: inline-flex;
+      gap: 0.35rem;
+      align-items: center;
+      white-space: nowrap;
+      border: 1px solid var(--bs-border-color, #dee2e6);
+      border-radius: 999px;
+      padding: 0.1rem 0.6rem;
+    }
+
+    .plan-status[data-tone='attention'] { border-color: #fd7e14; color: #8a4b00; }
+    .plan-status[data-tone='info'] { border-color: #0d6efd; color: #084298; }
+    .plan-status[data-tone='active'] { border-color: #0dcaf0; color: #055160; }
+    .plan-status[data-tone='success'] { border-color: #198754; color: #0f5132; }
+    .plan-status[data-tone='danger'] { border-color: #dc3545; color: #842029; }
+
+    .plan-detail-status {
+      margin: 0 0 1rem;
+      padding: 0.6rem 0.85rem;
+      border-radius: 0.5rem;
+      border: 1px solid var(--bs-border-color, #dee2e6);
+      background: var(--bs-body-bg, #fff);
+    }
+
+    .plan-detail-status[data-tone='error'] {
+      border-color: #dc3545;
+      color: #842029;
+    }
+
+    .plan-content {
+      display: grid;
+      gap: 1rem;
+    }
+
+    .plan-card {
+      border: 1px solid var(--bs-border-color, #dee2e6);
+      border-radius: 0.75rem;
+      background: var(--bs-body-bg, #fff);
+      padding: 1rem 1.15rem;
+    }
+
+    .plan-card-title {
+      font-size: 1.05rem;
+      margin: 0 0 0.75rem;
+    }
+
+    .plan-overview {
+      display: grid;
+      grid-template-columns: minmax(9rem, auto) 1fr;
+      gap: 0.4rem 1rem;
+      margin: 0;
+    }
+
+    .plan-overview dt {
+      color: var(--bs-secondary-color, #6c757d);
+      font-weight: 600;
+    }
+
+    .plan-overview dd {
+      margin: 0;
+    }
+
+    .plan-original-request {
+      white-space: pre-wrap;
+    }
+
+    .plan-activity-list {
+      margin: 0;
+      padding-left: 1.1rem;
+      display: grid;
+      gap: 0.35rem;
+      font-size: 0.9rem;
+    }
+
+    .plan-loading,
+    .plan-empty {
+      color: var(--bs-secondary-color, #6c757d);
+    }
+
+    @media (max-width: 720px) {
+      .plan-page-shell { padding: 1rem; }
+      .plan-hero { flex-direction: column; }
+      .plan-hero-meta { align-items: flex-start; }
+      .plan-overview { grid-template-columns: 1fr; }
+    }
+  </style>
+
+  <script type="module">
+    import { WorkspacePlanPage } from '/js/modules/workspace-plan-detail.js';
+
+    document.addEventListener('DOMContentLoaded', async () => {
+      const workspaceId = "{{.Extra.WorkspaceID}}";
+      const planId = "{{.Extra.PlanID}}";
+      if (!workspaceId || !planId) {
+        return;
+      }
+      const page = new WorkspacePlanPage(workspaceId, planId);
+      try {
+        await page.init();
+      } catch (error) {
+        console.error('Failed to initialize workspace plan page:', error);
+      }
+    });
+  </script>
+</body>
+</html>
+{{end}}

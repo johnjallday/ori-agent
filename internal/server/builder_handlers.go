@@ -72,6 +72,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/workspacecapabilityhttp"
 	"github.com/johnjallday/ori-agent/internal/workspacemap"
 	"github.com/johnjallday/ori-agent/internal/workspacemaphttp"
+	"github.com/johnjallday/ori-agent/internal/workspaceplan"
 	"github.com/johnjallday/ori-agent/internal/workspacerun"
 )
 
@@ -501,6 +502,20 @@ func (b *ServerBuilder) initializeHandlers() {
 	b.workspaceRunHandler = workspacerun.NewHandler(b.workspaceRunStore, b.workspaceRunService)
 	b.registerWorkspaceRunTaskValidationMirror()
 	logger.Info("Workspace Runs initialized", logger.Fields{
+		"durable": b.sessionStore != nil,
+	})
+
+	// Workspace Planning Workflow. Plans are durable when a database is
+	// available and in-memory otherwise, matching how Runs degrade: the API
+	// stays usable in a database-less build rather than disappearing.
+	if b.sessionStore != nil {
+		b.workspacePlanStore = workspaceplan.NewSQLiteStore(b.sessionStore.DB())
+	} else {
+		b.workspacePlanStore = workspaceplan.NewMemoryStore()
+	}
+	b.workspacePlanService = workspaceplan.NewService(b.workspacePlanStore)
+	b.workspacePlanHandler = workspaceplan.NewHandler(b.workspacePlanService)
+	logger.Info("Workspace Plans initialized", logger.Fields{
 		"durable": b.sessionStore != nil,
 	})
 

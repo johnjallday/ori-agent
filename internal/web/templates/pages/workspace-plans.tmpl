@@ -1,0 +1,324 @@
+{{define "workspace-plans"}}
+<!DOCTYPE html>
+<html data-bs-theme="light">
+{{template "head.tmpl" .}}
+
+<body class="bg-light">
+  {{template "navbar.tmpl" .}}
+
+  <div class="main-content-wrapper">
+    {{template "sidebar.tmpl" .}}
+
+    <div class="main-content">
+      <div
+        id="workspacePlansPageRoot"
+        class="plans-page-shell"
+        data-workspace-id="{{.Extra.WorkspaceID}}"
+      >
+        <section class="plans-hero">
+          <div class="plans-hero-copy">
+            <div class="plans-breadcrumbs">
+              <a href="/" class="plans-breadcrumb-link">Home</a>
+              <span aria-hidden="true">/</span>
+              <a href="/workspaces/{{.Extra.WorkspaceID}}" class="plans-breadcrumb-link">Workspace</a>
+              <span aria-hidden="true">/</span>
+              <span>Plans</span>
+            </div>
+            <h1 class="plans-title">Plans</h1>
+            <p class="plans-subtitle">
+              A plan is proposed work you review and approve before anything is created or run.
+              Creating a task directly skips that review and starts from an already-decided unit of work.
+            </p>
+          </div>
+          <div class="plans-hero-actions">
+            <button type="button" id="plan-refresh" class="plans-icon-btn" title="Refresh plans">
+              <span aria-hidden="true">↻</span>
+              <span class="visually-hidden">Refresh plans</span>
+            </button>
+          </div>
+        </section>
+
+        <!-- Announced politely so a screen-reader user hears load, creation,
+             and failure outcomes without the focus being stolen (FR-161). -->
+        <p id="plan-status" class="plans-status" role="status" aria-live="polite" hidden></p>
+
+        <!-- Planning off: history stays readable and Settings is one link away.
+             Nothing here turns planning on (FR-159). -->
+        <section id="plan-disabled-banner" class="plans-disabled-banner" hidden>
+          <h2 class="plans-disabled-title">Structured planning is off for this workspace</h2>
+          <p>
+            Existing plans below stay readable. To draft new ones, turn on structured planning in
+            Workspace Settings.
+          </p>
+          <a class="plans-settings-link" href="/workspaces/{{.Extra.WorkspaceID}}?panel=settings">
+            Open Workspace Settings
+          </a>
+        </section>
+
+        <section id="plan-create-panel" class="plans-create-panel" hidden>
+          <h2 class="plans-section-title">Start a plan</h2>
+          <form id="plan-create-form" class="plans-create-form">
+            <label class="plans-create-label" for="plan-create-request">
+              What would you like planned?
+            </label>
+            <textarea
+              id="plan-create-request"
+              class="plans-create-input"
+              rows="3"
+              placeholder="Describe the outcome you want. Ori will draft a plan for you to review."
+            ></textarea>
+            <p class="plans-create-hint">
+              Creating a plan does not create tasks or start work. You approve an exact version first.
+            </p>
+            <button type="submit" class="plans-create-btn">Create plan</button>
+          </form>
+        </section>
+
+        <section class="plans-section" aria-labelledby="plan-active-heading">
+          <h2 id="plan-active-heading" class="plans-section-title">Active</h2>
+          <ul id="plan-active-list" class="plans-list"></ul>
+          <p id="plan-active-empty" class="plans-empty" hidden>
+            No active plans. A plan is for work worth reviewing before it starts —
+            for anything already decided, create a task directly from the workspace.
+          </p>
+        </section>
+
+        <section id="plan-history-section" class="plans-section" aria-labelledby="plan-history-heading" hidden>
+          <h2 id="plan-history-heading" class="plans-section-title">History</h2>
+          <ul id="plan-history-list" class="plans-list"></ul>
+          <p id="plan-history-empty" class="plans-empty" hidden>Nothing in history yet.</p>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <style>
+    .plans-page-shell {
+      padding: 1.5rem 2rem 3rem;
+      max-width: 960px;
+      margin: 0 auto;
+    }
+
+    .plans-hero {
+      display: flex;
+      gap: 1rem;
+      align-items: flex-start;
+      justify-content: space-between;
+      margin-bottom: 1.25rem;
+    }
+
+    .plans-breadcrumbs {
+      display: flex;
+      gap: 0.4rem;
+      align-items: center;
+      font-size: 0.85rem;
+      color: var(--bs-secondary-color, #6c757d);
+      margin-bottom: 0.5rem;
+    }
+
+    .plans-breadcrumb-link {
+      color: inherit;
+      text-decoration: none;
+    }
+
+    .plans-breadcrumb-link:hover,
+    .plans-breadcrumb-link:focus-visible {
+      text-decoration: underline;
+    }
+
+    .plans-title {
+      font-size: 1.75rem;
+      margin: 0 0 0.35rem;
+    }
+
+    .plans-subtitle {
+      margin: 0;
+      max-width: 60ch;
+      color: var(--bs-secondary-color, #6c757d);
+    }
+
+    .plans-icon-btn {
+      border: 1px solid var(--bs-border-color, #dee2e6);
+      background: var(--bs-body-bg, #fff);
+      border-radius: 0.5rem;
+      padding: 0.4rem 0.6rem;
+      cursor: pointer;
+    }
+
+    .plans-status {
+      margin: 0 0 1rem;
+      padding: 0.6rem 0.85rem;
+      border-radius: 0.5rem;
+      border: 1px solid var(--bs-border-color, #dee2e6);
+      background: var(--bs-body-bg, #fff);
+    }
+
+    .plans-status[data-tone='error'] {
+      border-color: #dc3545;
+      color: #842029;
+    }
+
+    .plans-disabled-banner,
+    .plans-create-panel {
+      border: 1px solid var(--bs-border-color, #dee2e6);
+      border-radius: 0.75rem;
+      background: var(--bs-body-bg, #fff);
+      padding: 1rem 1.15rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .plans-disabled-title,
+    .plans-section-title {
+      font-size: 1.05rem;
+      margin: 0 0 0.5rem;
+    }
+
+    .plans-settings-link {
+      display: inline-block;
+      margin-top: 0.35rem;
+    }
+
+    .plans-create-form {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+
+    .plans-create-input {
+      width: 100%;
+      border: 1px solid var(--bs-border-color, #dee2e6);
+      border-radius: 0.5rem;
+      padding: 0.6rem;
+      font: inherit;
+    }
+
+    .plans-create-hint {
+      margin: 0;
+      font-size: 0.85rem;
+      color: var(--bs-secondary-color, #6c757d);
+    }
+
+    .plans-create-btn {
+      align-self: flex-start;
+      border: none;
+      border-radius: 0.5rem;
+      padding: 0.5rem 1rem;
+      background: var(--bs-primary, #0d6efd);
+      color: #fff;
+      cursor: pointer;
+    }
+
+    .plans-section {
+      margin-bottom: 2rem;
+    }
+
+    .plans-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: grid;
+      gap: 0.75rem;
+    }
+
+    .plans-empty {
+      margin: 0;
+      color: var(--bs-secondary-color, #6c757d);
+      max-width: 60ch;
+    }
+
+    .plan-card {
+      border: 1px solid var(--bs-border-color, #dee2e6);
+      border-radius: 0.75rem;
+      background: var(--bs-body-bg, #fff);
+    }
+
+    .plan-card-link {
+      display: block;
+      padding: 0.9rem 1.1rem;
+      color: inherit;
+      text-decoration: none;
+    }
+
+    .plan-card-link:focus-visible {
+      outline: 2px solid var(--bs-primary, #0d6efd);
+      outline-offset: 2px;
+      border-radius: 0.75rem;
+    }
+
+    .plan-card-head {
+      display: flex;
+      gap: 0.75rem;
+      align-items: baseline;
+      justify-content: space-between;
+    }
+
+    .plan-card-title {
+      font-size: 1rem;
+      margin: 0;
+    }
+
+    /* Every status shows an icon and a word, so the state never depends on
+       color alone (FR-162). */
+    .plan-status {
+      display: inline-flex;
+      gap: 0.35rem;
+      align-items: center;
+      white-space: nowrap;
+      font-size: 0.85rem;
+      border: 1px solid var(--bs-border-color, #dee2e6);
+      border-radius: 999px;
+      padding: 0.1rem 0.6rem;
+    }
+
+    .plan-status[data-tone='attention'] { border-color: #fd7e14; color: #8a4b00; }
+    .plan-status[data-tone='info'] { border-color: #0d6efd; color: #084298; }
+    .plan-status[data-tone='active'] { border-color: #0dcaf0; color: #055160; }
+    .plan-status[data-tone='success'] { border-color: #198754; color: #0f5132; }
+    .plan-status[data-tone='danger'] { border-color: #dc3545; color: #842029; }
+
+    .plan-card-version,
+    .plan-card-progress {
+      margin: 0.35rem 0 0;
+      font-size: 0.9rem;
+      color: var(--bs-secondary-color, #6c757d);
+    }
+
+    .plan-card-foot {
+      display: flex;
+      gap: 0.75rem;
+      justify-content: space-between;
+      margin-top: 0.6rem;
+      font-size: 0.85rem;
+    }
+
+    .plan-card-next {
+      font-weight: 600;
+    }
+
+    @media (max-width: 720px) {
+      .plans-page-shell { padding: 1rem; }
+      .plans-hero { flex-direction: column; }
+      .plan-card-head { flex-direction: column; align-items: flex-start; }
+      .plan-card-foot { flex-direction: column; gap: 0.25rem; }
+    }
+  </style>
+
+  <script type="module">
+    import { WorkspacePlansPage } from '/js/modules/workspace-plan.js';
+
+    document.addEventListener('DOMContentLoaded', async () => {
+      const workspaceId = "{{.Extra.WorkspaceID}}";
+      if (!workspaceId) {
+        return;
+      }
+      const page = new WorkspacePlansPage(workspaceId);
+      try {
+        await page.init();
+      } catch (error) {
+        console.error('Failed to initialize workspace plans page:', error);
+      }
+    });
+  </script>
+</body>
+</html>
+{{end}}

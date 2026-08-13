@@ -505,6 +505,28 @@ func (s *Server) handleWorkspacesRoutes(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Workspace Plans: /workspaces/{id}/plans[/{planId}].
+	//
+	// These two routes are canonical. Task detail, Run detail, and chat all
+	// deep-link here rather than rendering their own Plan editor, so there is
+	// exactly one surface where a Plan can be reviewed, edited, and approved
+	// (PRD FR-145, FR-148, FR-149).
+	//
+	// A malformed descendant path falls through to the workspace rather than
+	// rendering an empty Plan page for an ID that was never valid.
+	if len(parts) >= 2 && parts[1] == "plans" {
+		if len(parts) == 2 {
+			s.serveWorkspacePlans(w, workspaceID)
+			return
+		}
+		if len(parts) == 3 && strings.TrimSpace(parts[2]) != "" {
+			s.serveWorkspacePlan(w, workspaceID, parts[2])
+			return
+		}
+		http.Redirect(w, r, "/workspaces/"+url.PathEscape(workspaceID)+"/plans", http.StatusSeeOther)
+		return
+	}
+
 	// Workspace notes app: /workspaces/{id}/notes[/noteId].
 	if len(parts) >= 2 && parts[1] == "notes" {
 		if len(parts) == 2 {
@@ -566,6 +588,31 @@ func (s *Server) serveFocusedNotePage(w http.ResponseWriter, noteID string) {
 	data.Extra["NoteID"] = noteID
 	data.Extra["NotePageMode"] = "focused"
 	s.renderAndWritePage(w, "note-page", data)
+}
+
+// serveWorkspacePlans renders the canonical Plans destination for a workspace:
+// Active and History, plus creation when planning is enabled (FR-145, FR-146).
+func (s *Server) serveWorkspacePlans(w http.ResponseWriter, workspaceID string) {
+	data := s.prepareBasePageData("workspaces")
+	data.Title = "Plans - Ori Agent"
+	data.BrandText = "Ori Agent"
+	data.ShowSidebarToggle = true
+	data.Extra["WorkspaceID"] = workspaceID
+	s.renderAndWritePage(w, "workspace-plans", data)
+}
+
+// serveWorkspacePlan renders one Plan's canonical detail route. The page loads
+// the Plan through the workspace-scoped API, so a Plan ID from another
+// workspace renders "not found" rather than another workspace's content
+// (FR-163, FR-167).
+func (s *Server) serveWorkspacePlan(w http.ResponseWriter, workspaceID, planID string) {
+	data := s.prepareBasePageData("workspaces")
+	data.Title = "Plan - Ori Agent"
+	data.BrandText = "Ori Agent"
+	data.ShowSidebarToggle = true
+	data.Extra["WorkspaceID"] = workspaceID
+	data.Extra["PlanID"] = planID
+	s.renderAndWritePage(w, "workspace-plan", data)
 }
 
 // serveWorkspaceDetail renders the workspace detail page for every workspace

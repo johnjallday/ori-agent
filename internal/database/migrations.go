@@ -10,7 +10,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 38
+const schemaVersion = 39
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -141,6 +141,8 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 		return db.migration037RunToolboxSnapshot(ctx)
 	case 38:
 		return db.migration038WorkspaceMapLayouts(ctx)
+	case 39:
+		return db.migration039WorkspacePlans(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
@@ -1417,6 +1419,224 @@ func (db *DB) migration038WorkspaceMapLayouts(ctx context.Context) error {
 	for _, stmt := range statements {
 		if _, err := db.ExecContext(ctx, stmt); err != nil {
 			return fmt.Errorf("failed to create workspace map layout schema: %w", err)
+		}
+	}
+	return nil
+}
+
+// migration039WorkspacePlans creates the Workspace Planning Workflow schema:
+// the durable Plan record with its mutable working draft, immutable review
+// versions, clarification questions and authored answers, approval records,
+// Plan-to-Task and Plan-to-Run provenance, lifecycle activity, and autosave
+// recovery snapshots (PRD FR-1 through FR-17).
+//
+// Three structural decisions are load-bearing rather than stylistic:
+//
+//   - Clarification answers live in their own table, not inside the draft JSON.
+//     Regenerating a draft rewrites draft_json wholesale, so keeping authored
+//     answers out of that blob is what makes "a later model summary cannot
+//     overwrite the user's answer" true by construction rather than by care
+//     (FR-25).
+//   - Autosave recovery snapshots live in their own table, separate from
+//     immutable review versions, so recovery points can be pruned to ten
+//     without ever touching review history and can never be miscounted toward
+//     the 50-version limit (FR-30, FR-31).
+//   - A partial unique index on (plan_id, version, role, group_id, item_id)
+//     makes a duplicate Task tree impossible at the storage layer, not just in
+//     the materializer: a retried or concurrent approval consumption cannot
+//     write a second link for the same approved item (FR-91, FR-178).
+//     Follow-up links are excluded because corrective work deliberately adds a
+//     second Task for an item whose original is immutable (FR-78).
+//
+// Nothing here stores Task execution state, Run traces, or Run artifacts. Those
+// records stay authoritative in their own tables and are referenced by ID only
+// (FR-11, FR-12).
+func (db *DB) migration039WorkspacePlans(ctx context.Context) error {
+	statements := []string{
+		`CREATE TABLE IF NOT EXISTS workspace_plans (
+			id TEXT PRIMARY KEY,
+			workspace_id TEXT NOT NULL,
+			title TEXT NOT NULL DEFAULT '',
+			original_request TEXT NOT NULL DEFAULT '',
+			objective TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL,
+			draft_json TEXT NOT NULL DEFAULT '{}',
+			draft_revision INTEGER NOT NULL DEFAULT 0,
+			draft_intent TEXT NOT NULL DEFAULT '',
+			current_version INTEGER NOT NULL DEFAULT 0,
+			approved_version INTEGER NOT NULL DEFAULT 0,
+			superseded_by_plan_id TEXT NOT NULL DEFAULT '',
+			supersedes_plan_id TEXT NOT NULL DEFAULT '',
+			origin_json TEXT NOT NULL DEFAULT '{}',
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL,
+			last_activity_at DATETIME NOT NULL,
+			archived_at DATETIME,
+			archive_reason TEXT NOT NULL DEFAULT '',
+			FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+		)`,
+		// Immutable review snapshots. content_json, content_hash, and
+		// policy_snapshot_json are written once and never updated; only the
+		// review decision columns are filled in later (FR-31, FR-32, FR-144).
+		`CREATE TABLE IF NOT EXISTS workspace_plan_versions (
+			plan_id TEXT NOT NULL,
+			version INTEGER NOT NULL,
+			workspace_id TEXT NOT NULL,
+			title TEXT NOT NULL DEFAULT '',
+			objective TEXT NOT NULL DEFAULT '',
+			content_json TEXT NOT NULL,
+			content_hash TEXT NOT NULL,
+			policy_snapshot_json TEXT NOT NULL DEFAULT '{}',
+			intent TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL,
+			created_at DATETIME NOT NULL,
+			created_by_json TEXT NOT NULL DEFAULT '{}',
+			decided_at DATETIME,
+			decided_by TEXT NOT NULL DEFAULT '',
+			decision_reason TEXT NOT NULL DEFAULT '',
+			PRIMARY KEY (plan_id, version),
+			FOREIGN KEY (plan_id) REFERENCES workspace_plans(id) ON DELETE CASCADE
+		)`,
+		// Clarification questions and the answers the user authored (FR-24).
+		// The answer columns are only ever written by the answer path.
+		`CREATE TABLE IF NOT EXISTS workspace_plan_clarifications (
+			id TEXT PRIMARY KEY,
+			plan_id TEXT NOT NULL,
+			workspace_id TEXT NOT NULL,
+			prompt TEXT NOT NULL,
+			detail TEXT NOT NULL DEFAULT '',
+			options_json TEXT NOT NULL DEFAULT '[]',
+			required INTEGER NOT NULL DEFAULT 0,
+			status TEXT NOT NULL,
+			round INTEGER NOT NULL DEFAULT 0,
+			ordinal INTEGER NOT NULL DEFAULT 0,
+			answer TEXT NOT NULL DEFAULT '',
+			answered_by TEXT NOT NULL DEFAULT '',
+			answered_at DATETIME,
+			skip_reason TEXT NOT NULL DEFAULT '',
+			created_at DATETIME NOT NULL,
+			FOREIGN KEY (plan_id) REFERENCES workspace_plans(id) ON DELETE CASCADE
+		)`,
+		// Approval records. They survive restart and are consumable exactly
+		// once for their declared effect (FR-70, FR-71, FR-72).
+		`CREATE TABLE IF NOT EXISTS workspace_plan_approvals (
+			id TEXT PRIMARY KEY,
+			plan_id TEXT NOT NULL,
+			workspace_id TEXT NOT NULL,
+			version INTEGER NOT NULL,
+			content_hash TEXT NOT NULL,
+			effect TEXT NOT NULL,
+			user_id TEXT NOT NULL DEFAULT '',
+			user_name TEXT NOT NULL DEFAULT '',
+			idempotency_key TEXT NOT NULL,
+			created_at DATETIME NOT NULL,
+			consumed_at DATETIME,
+			consumed_result_json TEXT,
+			invalidated_at DATETIME,
+			invalidated_reason TEXT NOT NULL DEFAULT '',
+			FOREIGN KEY (plan_id) REFERENCES workspace_plans(id) ON DELETE CASCADE
+		)`,
+		// Plan-to-Task provenance. The Task record itself remains the only
+		// authority on that Task's state (FR-9, FR-10, FR-11).
+		`CREATE TABLE IF NOT EXISTS workspace_plan_task_links (
+			plan_id TEXT NOT NULL,
+			task_id TEXT NOT NULL,
+			workspace_id TEXT NOT NULL,
+			version INTEGER NOT NULL,
+			approval_id TEXT NOT NULL DEFAULT '',
+			group_id TEXT NOT NULL DEFAULT '',
+			item_id TEXT NOT NULL DEFAULT '',
+			role TEXT NOT NULL,
+			created_at DATETIME NOT NULL,
+			replaced_by_task_id TEXT NOT NULL DEFAULT '',
+			retired_at DATETIME,
+			retired_reason TEXT NOT NULL DEFAULT '',
+			PRIMARY KEY (plan_id, task_id),
+			FOREIGN KEY (plan_id) REFERENCES workspace_plans(id) ON DELETE CASCADE
+		)`,
+		// Plan-to-Run provenance. Run status, traces, artifacts, and results
+		// stay on the Run record (FR-11, FR-100).
+		`CREATE TABLE IF NOT EXISTS workspace_plan_run_links (
+			plan_id TEXT NOT NULL,
+			run_id TEXT NOT NULL,
+			workspace_id TEXT NOT NULL,
+			version INTEGER NOT NULL,
+			group_id TEXT NOT NULL DEFAULT '',
+			item_id TEXT NOT NULL DEFAULT '',
+			task_id TEXT NOT NULL DEFAULT '',
+			created_at DATETIME NOT NULL,
+			PRIMARY KEY (plan_id, run_id),
+			FOREIGN KEY (plan_id) REFERENCES workspace_plans(id) ON DELETE CASCADE
+		)`,
+		// Append-only lifecycle history: validated status transitions plus the
+		// approval audit events that do not change status (FR-15, FR-80).
+		`CREATE TABLE IF NOT EXISTS workspace_plan_activity (
+			id TEXT PRIMARY KEY,
+			plan_id TEXT NOT NULL,
+			workspace_id TEXT NOT NULL,
+			sequence INTEGER NOT NULL,
+			kind TEXT NOT NULL,
+			from_status TEXT NOT NULL DEFAULT '',
+			to_status TEXT NOT NULL DEFAULT '',
+			source TEXT NOT NULL,
+			actor TEXT NOT NULL DEFAULT '',
+			actor_id TEXT NOT NULL DEFAULT '',
+			reason TEXT NOT NULL DEFAULT '',
+			version INTEGER NOT NULL DEFAULT 0,
+			approval_id TEXT NOT NULL DEFAULT '',
+			task_id TEXT NOT NULL DEFAULT '',
+			run_id TEXT NOT NULL DEFAULT '',
+			created_at DATETIME NOT NULL,
+			UNIQUE(plan_id, sequence),
+			FOREIGN KEY (plan_id) REFERENCES workspace_plans(id) ON DELETE CASCADE
+		)`,
+		// Autosave recovery points for the working draft. Deliberately not
+		// review versions (FR-30).
+		`CREATE TABLE IF NOT EXISTS workspace_plan_draft_snapshots (
+			id TEXT PRIMARY KEY,
+			plan_id TEXT NOT NULL,
+			workspace_id TEXT NOT NULL,
+			draft_revision INTEGER NOT NULL,
+			title TEXT NOT NULL DEFAULT '',
+			objective TEXT NOT NULL DEFAULT '',
+			content_json TEXT NOT NULL,
+			created_at DATETIME NOT NULL,
+			FOREIGN KEY (plan_id) REFERENCES workspace_plans(id) ON DELETE CASCADE
+		)`,
+		// Active/History listing and the retention sweep both read by
+		// workspace, archive state, and recency (FR-16, FR-146).
+		`CREATE INDEX IF NOT EXISTS idx_workspace_plans_workspace_activity
+			ON workspace_plans(workspace_id, archived_at, last_activity_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_workspace_plans_workspace_status
+			ON workspace_plans(workspace_id, status)`,
+		`CREATE INDEX IF NOT EXISTS idx_workspace_plan_versions_plan
+			ON workspace_plan_versions(plan_id, version DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_workspace_plan_clarifications_plan
+			ON workspace_plan_clarifications(plan_id, round, ordinal)`,
+		`CREATE INDEX IF NOT EXISTS idx_workspace_plan_approvals_plan_version
+			ON workspace_plan_approvals(plan_id, version)`,
+		// One approval per idempotency key: a retried approval request replays
+		// the original record instead of creating a second one (FR-73).
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_workspace_plan_approvals_idempotency
+			ON workspace_plan_approvals(plan_id, idempotency_key)`,
+		// Reverse lookups: Task and Run detail resolve their originating Plan
+		// without scanning (FR-10, FR-148).
+		`CREATE INDEX IF NOT EXISTS idx_workspace_plan_task_links_task
+			ON workspace_plan_task_links(task_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_workspace_plan_run_links_run
+			ON workspace_plan_run_links(run_id)`,
+		// The duplicate-Task backstop described above (FR-91, FR-178).
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_workspace_plan_task_links_materialized
+			ON workspace_plan_task_links(plan_id, version, role, group_id, item_id)
+			WHERE role <> 'follow_up'`,
+		`CREATE INDEX IF NOT EXISTS idx_workspace_plan_activity_plan_sequence
+			ON workspace_plan_activity(plan_id, sequence)`,
+		`CREATE INDEX IF NOT EXISTS idx_workspace_plan_draft_snapshots_plan
+			ON workspace_plan_draft_snapshots(plan_id, created_at DESC)`,
+	}
+	for _, stmt := range statements {
+		if _, err := db.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("failed to create workspace plan schema: %w", err)
 		}
 	}
 	return nil

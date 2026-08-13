@@ -1165,6 +1165,294 @@ func TestMigration038UpgradesFromPriorSchema(t *testing.T) {
 	}
 }
 
+// TestMigration039CreatesWorkspacePlanSchema proves a fresh database gets every
+// Plan table the Workspace Planning Workflow persists (PRD FR-1, FR-16).
+func TestMigration039CreatesWorkspacePlanSchema(t *testing.T) {
+	ctx := context.Background()
+
+	db, err := Open(ctx, &Config{Path: ":memory:", WALMode: false})
+	if err != nil {
+		t.Fatalf("Failed to open database: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	for _, table := range []string{
+		"workspace_plans",
+		"workspace_plan_versions",
+		"workspace_plan_clarifications",
+		"workspace_plan_approvals",
+		"workspace_plan_task_links",
+		"workspace_plan_run_links",
+		"workspace_plan_activity",
+		"workspace_plan_draft_snapshots",
+	} {
+		exists, err := db.tableExists(ctx, table)
+		if err != nil {
+			t.Fatalf("tableExists(%s): %v", table, err)
+		}
+		if !exists {
+			t.Errorf("fresh database is missing %s", table)
+		}
+	}
+
+	for _, index := range []string{
+		"idx_workspace_plans_workspace_activity",
+		"idx_workspace_plan_versions_plan",
+		"idx_workspace_plan_approvals_idempotency",
+		"idx_workspace_plan_task_links_task",
+		"idx_workspace_plan_task_links_materialized",
+		"idx_workspace_plan_run_links_run",
+		"idx_workspace_plan_activity_plan_sequence",
+	} {
+		var name string
+		if err := db.QueryRowContext(ctx,
+			"SELECT name FROM sqlite_master WHERE type='index' AND name=?", index).Scan(&name); err != nil {
+			t.Errorf("index %s does not exist: %v", index, err)
+		}
+	}
+}
+
+// TestMigration039PlanRecordsFollowTheWorkspace proves Plans use the existing
+// workspace-deletion policy rather than inventing their own: a permanently
+// deleted workspace takes exactly its own Plans and their dependent rows with
+// it, and leaves every other workspace's Plans alone (FR-17).
+func TestMigration039PlanRecordsFollowTheWorkspace(t *testing.T) {
+	ctx := context.Background()
+
+	db, err := Open(ctx, &Config{Path: ":memory:", WALMode: false})
+	if err != nil {
+		t.Fatalf("Failed to open database: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	for _, id := range []string{"ws-keep", "ws-drop"} {
+		if _, err := db.ExecContext(ctx, `
+			INSERT INTO workspaces (id, name, created_at, updated_at)
+			VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+		`, id, id); err != nil {
+			t.Fatalf("seed workspace %s: %v", id, err)
+		}
+		if _, err := db.ExecContext(ctx, `
+			INSERT INTO workspace_plans (id, workspace_id, status, created_at, updated_at, last_activity_at)
+			VALUES (?, ?, 'draft', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+		`, "plan-"+id, id); err != nil {
+			t.Fatalf("seed plan for %s: %v", id, err)
+		}
+		if _, err := db.ExecContext(ctx, `
+			INSERT INTO workspace_plan_versions
+				(plan_id, version, workspace_id, content_json, content_hash, status, created_at)
+			VALUES (?, 1, ?, '{}', 'hash', 'in_review', CURRENT_TIMESTAMP)
+		`, "plan-"+id, id); err != nil {
+			t.Fatalf("seed version for %s: %v", id, err)
+		}
+	}
+
+	if _, err := db.ExecContext(ctx, `DELETE FROM workspaces WHERE id = 'ws-drop'`); err != nil {
+		t.Fatalf("delete workspace: %v", err)
+	}
+
+	var remainingPlan string
+	if err := db.QueryRowContext(ctx, `SELECT id FROM workspace_plans`).Scan(&remainingPlan); err != nil {
+		t.Fatalf("read remaining plan: %v", err)
+	}
+	if remainingPlan != "plan-ws-keep" {
+		t.Errorf("remaining plan = %q, want plan-ws-keep", remainingPlan)
+	}
+
+	var remainingVersions int
+	if err := db.QueryRowContext(ctx,
+		`SELECT COUNT(1) FROM workspace_plan_versions`).Scan(&remainingVersions); err != nil {
+		t.Fatalf("count remaining versions: %v", err)
+	}
+	if remainingVersions != 1 {
+		t.Errorf("remaining plan versions = %d, want 1 (the deleted workspace's version must cascade)", remainingVersions)
+	}
+}
+
+// TestMigration039RejectsDuplicateMaterializedTaskLinks proves the storage-level
+// backstop against a duplicate Task tree: the same approved Plan item cannot be
+// linked to two Tasks, however many times an approval is retried or raced
+// (FR-91, FR-178, SM-2). Corrective follow-up links are deliberately exempt,
+// because they add a second Task for an item whose original is immutable
+// (FR-78).
+func TestMigration039RejectsDuplicateMaterializedTaskLinks(t *testing.T) {
+	ctx := context.Background()
+
+	db, err := Open(ctx, &Config{Path: ":memory:", WALMode: false})
+	if err != nil {
+		t.Fatalf("Failed to open database: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO workspaces (id, name, created_at, updated_at)
+		VALUES ('ws-1', 'Alpha', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO workspace_plans (id, workspace_id, status, created_at, updated_at, last_activity_at)
+		VALUES ('plan-1', 'ws-1', 'approved', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`); err != nil {
+		t.Fatalf("seed plan: %v", err)
+	}
+
+	insertLink := func(taskID, role string) error {
+		_, err := db.ExecContext(ctx, `
+			INSERT INTO workspace_plan_task_links
+				(plan_id, task_id, workspace_id, version, approval_id, group_id, item_id, role, created_at)
+			VALUES ('plan-1', ?, 'ws-1', 1, 'apr-1', 'grp-1', 'itm-1', ?, CURRENT_TIMESTAMP)
+		`, taskID, role)
+		return err
+	}
+
+	if err := insertLink("task-1", "item"); err != nil {
+		t.Fatalf("first materialized link: %v", err)
+	}
+	if err := insertLink("task-2", "item"); err == nil {
+		t.Error("a second Task for the same approved Plan item was accepted; the unique index must reject it")
+	}
+	// The same item may gain a corrective follow-up Task, because the original
+	// Task stays immutable rather than being rewritten.
+	if err := insertLink("task-3", "follow_up"); err != nil {
+		t.Errorf("follow-up link rejected: %v", err)
+	}
+}
+
+// TestMigration039RejectsDuplicateApprovalIdempotencyKeys proves a retried
+// approval request cannot create a second approval record for the same Plan
+// (FR-73, FR-178).
+func TestMigration039RejectsDuplicateApprovalIdempotencyKeys(t *testing.T) {
+	ctx := context.Background()
+
+	db, err := Open(ctx, &Config{Path: ":memory:", WALMode: false})
+	if err != nil {
+		t.Fatalf("Failed to open database: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO workspaces (id, name, created_at, updated_at)
+		VALUES ('ws-1', 'Alpha', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO workspace_plans (id, workspace_id, status, created_at, updated_at, last_activity_at)
+		VALUES ('plan-1', 'ws-1', 'in_review', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`); err != nil {
+		t.Fatalf("seed plan: %v", err)
+	}
+
+	insertApproval := func(id string) error {
+		_, err := db.ExecContext(ctx, `
+			INSERT INTO workspace_plan_approvals
+				(id, plan_id, workspace_id, version, content_hash, effect, idempotency_key, created_at)
+			VALUES (?, 'plan-1', 'ws-1', 1, 'hash-1', 'create_tasks', 'key-1', CURRENT_TIMESTAMP)
+		`, id)
+		return err
+	}
+
+	if err := insertApproval("apr-1"); err != nil {
+		t.Fatalf("first approval: %v", err)
+	}
+	if err := insertApproval("apr-2"); err == nil {
+		t.Error("a duplicate approval idempotency key was accepted; the unique index must reject it")
+	}
+}
+
+// TestMigration039UpgradesFromPriorSchema proves an existing database gains the
+// Plan tables without its workspace data being touched.
+func TestMigration039UpgradesFromPriorSchema(t *testing.T) {
+	ctx := context.Background()
+
+	tmpDir, err := os.MkdirTemp("", "ori-db-migration-039-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp directory: %v", err)
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	dbPath := filepath.Join(tmpDir, "test.db")
+	legacyDB, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("Failed to open legacy database: %v", err)
+	}
+	if _, err := legacyDB.ExecContext(ctx, `
+		CREATE TABLE schema_migrations (
+			version INTEGER PRIMARY KEY,
+			applied_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)
+	`); err != nil {
+		t.Fatalf("Failed to create schema_migrations: %v", err)
+	}
+	if _, err := legacyDB.ExecContext(ctx, `INSERT INTO schema_migrations (version) VALUES (38)`); err != nil {
+		t.Fatalf("Failed to seed schema version 38: %v", err)
+	}
+	if _, err := legacyDB.ExecContext(ctx, `
+		CREATE TABLE workspaces (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			parent_id TEXT,
+			layout TEXT,
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL,
+			status TEXT DEFAULT 'active'
+		)
+	`); err != nil {
+		t.Fatalf("Failed to create legacy workspaces table: %v", err)
+	}
+	if _, err := legacyDB.ExecContext(ctx, `
+		INSERT INTO workspaces (id, name, parent_id, layout, created_at, updated_at, status)
+		VALUES ('ws-legacy', 'Alpha', 'grp-1', '{"pan":{"x":4}}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'active')
+	`); err != nil {
+		t.Fatalf("Failed to seed legacy workspace: %v", err)
+	}
+	if err := legacyDB.Close(); err != nil {
+		t.Fatalf("Failed to close legacy database: %v", err)
+	}
+
+	db, err := Open(ctx, &Config{Path: dbPath, WALMode: false})
+	if err != nil {
+		t.Fatalf("Failed to reopen migrated database: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	exists, err := db.tableExists(ctx, "workspace_plans")
+	if err != nil {
+		t.Fatalf("tableExists: %v", err)
+	}
+	if !exists {
+		t.Fatal("upgraded database is missing workspace_plans")
+	}
+
+	var name, parent, layout string
+	if err := db.QueryRowContext(ctx, `
+		SELECT name, parent_id, layout FROM workspaces WHERE id = 'ws-legacy'
+	`).Scan(&name, &parent, &layout); err != nil {
+		t.Fatalf("query workspace after upgrade: %v", err)
+	}
+	if name != "Alpha" || parent != "grp-1" || layout != `{"pan":{"x":4}}` {
+		t.Errorf("migration altered workspace data: name=%q parent=%q layout=%q", name, parent, layout)
+	}
+}
+
+// TestMigration039IsIdempotentOnAlreadyMigratedSchema proves re-running the
+// migration body against a database that already has the Plan schema succeeds
+// rather than failing startup.
+func TestMigration039IsIdempotentOnAlreadyMigratedSchema(t *testing.T) {
+	ctx := context.Background()
+
+	db, err := Open(ctx, &Config{Path: ":memory:", WALMode: false})
+	if err != nil {
+		t.Fatalf("Failed to open database: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	if err := db.migration039WorkspacePlans(ctx); err != nil {
+		t.Fatalf("re-running migration 39 failed: %v", err)
+	}
+}
+
 // TestMigration034IsIdempotentOnAlreadyMigratedSchema proves the duplicate-column
 // guard: re-running migration 34 against a workspaces table that already has the
 // column must succeed rather than fail the whole startup (PRD FR-145 isolation).

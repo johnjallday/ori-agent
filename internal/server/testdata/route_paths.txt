@@ -224,6 +224,11 @@
 /api/workspaces/x/mission
 /api/workspaces/x/notes
 /api/workspaces/x/output-dir
+/api/workspaces/x/plans
+/api/workspaces/x/plans/x
+/api/workspaces/x/plans/x/activity
+/api/workspaces/x/plans/x/archive
+/api/workspaces/x/plans/x/reopen
 /api/workspaces/x/rename
 /api/workspaces/x/stores
 /api/workspaces/x/tasks
