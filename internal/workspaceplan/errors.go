@@ -110,6 +110,10 @@ const (
 	// It is distinct from a failure: everything that does not need a model
 	// still works, so the UI disables only the generate controls (FR-58).
 	CodeModelUnavailable = ErrorCode("model_unavailable")
+	// CodeRevisionNeedsConfirmation reports that a targeted revision would
+	// discard user-authored content or break a dependency, and is waiting for
+	// the user to see the disclosure (FR-56).
+	CodeRevisionNeedsConfirmation = ErrorCode("revision_needs_confirmation")
 	// CodeInternal is the fallback for an error with no stable mapping. It
 	// never carries the underlying message to the client.
 	CodeInternal = ErrorCode("internal_error")

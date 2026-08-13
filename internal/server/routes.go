@@ -833,6 +833,9 @@ func registerWorkspacePlanRoutes(mux *http.ServeMux, s *Server) {
 		// token; POST asks the planner to draft or to ask questions. Neither
 		// creates work (FR-29, FR-30).
 		mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/draft", s.Handlers.WorkspacePlans.PlanDraft)
+		// GET discloses what a revision would replace; POST performs it. The
+		// user sees the collateral before it happens (FR-56).
+		mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/revision", s.Handlers.WorkspacePlans.PlanRevision)
 		mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/clarifications/{clarificationID}", s.Handlers.WorkspacePlans.AnswerClarification)
 		mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/snapshots", s.Handlers.WorkspacePlans.DraftSnapshots)
 		mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/snapshots/{snapshotID}/recover", s.Handlers.WorkspacePlans.RecoverDraftSnapshot)

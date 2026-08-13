@@ -231,6 +231,7 @@
 /api/workspaces/x/plans/x/clarifications/x
 /api/workspaces/x/plans/x/draft
 /api/workspaces/x/plans/x/reopen
+/api/workspaces/x/plans/x/revision
 /api/workspaces/x/plans/x/snapshots
 /api/workspaces/x/plans/x/snapshots/x/recover
 /api/workspaces/x/rename

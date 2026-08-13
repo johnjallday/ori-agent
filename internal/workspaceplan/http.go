@@ -485,6 +485,84 @@ func writeGenerationError(w http.ResponseWriter, err error) {
 	writeError(w, err)
 }
 
+// PlanRevision dispatches /api/workspaces/{workspaceID}/plans/{planID}/revision.
+//
+// GET discloses what a revision would replace without changing anything; POST
+// performs it. Splitting them is the point: the user sees the collateral before
+// it happens, not after (FR-56).
+func (h *Handler) PlanRevision(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		h.DiscloseRevision(w, r)
+	case http.MethodPost:
+		h.RevisePlan(w, r)
+	default:
+		orihttp.MethodNotAllowed(w)
+	}
+}
+
+// DiscloseRevision handles GET .../revision?section=…
+func (h *Handler) DiscloseRevision(w http.ResponseWriter, r *http.Request) {
+	workspaceID, planID := requireWorkspaceAndPlanID(w, r)
+	if workspaceID == "" || planID == "" {
+		return
+	}
+
+	disclosure, err := h.service.DiscloseRevisionFor(
+		r.Context(), workspaceID, planID, r.URL.Query()["section"])
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	orihttp.Success(w, map[string]any{
+		"plan_id":            planID,
+		"disclosure":         disclosure,
+		"needs_confirmation": disclosure.NeedsConfirmation(),
+		"revisable_sections": AllSections(),
+	})
+}
+
+// RevisePlan handles POST .../revision.
+func (h *Handler) RevisePlan(w http.ResponseWriter, r *http.Request) {
+	workspaceID, planID := requireWorkspaceAndPlanID(w, r)
+	if workspaceID == "" || planID == "" {
+		return
+	}
+
+	var req struct {
+		Sections  []string `json:"sections,omitempty"`
+		Confirmed bool     `json:"confirmed,omitempty"`
+		Actor     string   `json:"actor,omitempty"`
+		Revision  int64    `json:"revision"`
+	}
+	if r.ContentLength > 0 && !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+
+	plan, err := h.service.Revise(r.Context(), workspaceID, planID, ReviseInput{
+		Sections:         req.Sections,
+		Confirmed:        req.Confirmed,
+		Actor:            req.Actor,
+		ExpectedRevision: req.Revision,
+		Guidance:         h.guidance(r.Context(), workspaceID),
+		Validation:       h.availability(r.Context(), workspaceID),
+	})
+	if err != nil {
+		// A revision awaiting confirmation is not a failure; it is the
+		// disclosure the user has to see first (FR-56).
+		var required *RevisionRequiredError
+		if errors.As(err, &required) {
+			_ = orihttp.RespondAPIError(w, http.StatusConflict,
+				orihttp.NewAPIError(string(CodeRevisionNeedsConfirmation), required.Error()).
+					WithDetails(map[string]any{"disclosure": required.Disclosure}))
+			return
+		}
+		writeGenerationError(w, err)
+		return
+	}
+	orihttp.Success(w, newPlanResponse(plan))
+}
+
 // AnswerClarification handles
 // POST /api/workspaces/{workspaceID}/plans/{planID}/clarifications/{clarificationID}.
 func (h *Handler) AnswerClarification(w http.ResponseWriter, r *http.Request) {
