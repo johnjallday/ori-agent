@@ -1619,7 +1619,13 @@ func (h *LLMTaskHandler) getMCPToolsForServer(serverName string) ([]toolapi.Tool
 		return nil, err
 	}
 
-	if startErr := h.mcpRegistry.StartServer(serverName); startErr != nil {
+	// Two tasks in the same workspace can both see "not running" and race to
+	// start the shared server: the loser's StartServer calls fails with
+	// "already running", not because starting genuinely failed but because the
+	// winner already brought it up. That's not an error — the server is ready,
+	// so fall through to fetch its tools same as the winner does (mirrors
+	// downloadsjanitor's isAlreadyRunning tolerance for the identical race).
+	if startErr := h.mcpRegistry.StartServer(serverName); startErr != nil && !isMCPServerAlreadyRunningError(startErr) {
 		return nil, fmt.Errorf("failed to start MCP server %q: %w", serverName, startErr)
 	}
 
@@ -1636,4 +1642,14 @@ func isMCPServerNotRunningError(err error) bool {
 		return false
 	}
 	return strings.Contains(strings.ToLower(err.Error()), "is not running")
+}
+
+// isMCPServerAlreadyRunningError reports a StartServer call that lost a race
+// to another concurrent caller starting the same server — not a real
+// failure, see the comment at its call site in getMCPToolsForServer.
+func isMCPServerAlreadyRunningError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "already running")
 }
