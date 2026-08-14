@@ -421,10 +421,18 @@ func TestHandleWorkspaceImportDesignatesOnlyOnTheNormalizedMarker(t *testing.T) 
 			case !tc.wantDesignate && len(designator.calls) != 0:
 				t.Fatalf("expected no designation attempt for designation %q, got %#v", tc.designation, designator.calls)
 			}
+			// The recording designator projects nothing, so disk shows exactly
+			// what import persisted: the marker stripped pending designation on
+			// the marked path, and every other value carried through untouched.
+			wantDisk := strings.TrimSpace(tc.designation)
 			if tc.wantDesignate {
 				if got := designator.calls[0]; got.userID != userprofile.LocalUserID || got.workspaceID != workspaceID {
 					t.Fatalf("expected Designate(%q, %q), got %#v", userprofile.LocalUserID, workspaceID, got)
 				}
+				wantDisk = ""
+			}
+			if got := diskDesignation(t, fileStore, workspaceID); got != wantDisk {
+				t.Fatalf("expected local workspace.json designation %q, got %q", wantDisk, got)
 			}
 		})
 	}

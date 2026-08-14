@@ -375,8 +375,12 @@ func (h *Handler) restoreImportedWorkspace(ctx context.Context, folderPath strin
 	// import *intent*, never authority: the designation lives on the local
 	// user's profile record, so the copied marker is stripped here and only
 	// written back once the authoritative service accepts it below (#290).
+	// Only the recognized marker is touched; any other value the snapshot
+	// carries is persisted exactly as it is today.
 	importedRootIsPersonalHQ := session.NormalizeWorkspaceDesignation(rootWorkspace.Designation) == session.WorkspaceDesignationPersonalHQ
-	rootWorkspace.Designation = ""
+	if importedRootIsPersonalHQ {
+		rootWorkspace.Designation = ""
+	}
 
 	if trimmedName := strings.TrimSpace(req.Name); trimmedName != "" {
 		rootWorkspace.Name = trimmedName
