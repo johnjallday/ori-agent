@@ -81,6 +81,50 @@ func TestLifecycleEventsCarryNoPlanContent(t *testing.T) {
 	}
 }
 
+// panickingPublisher is a subscriber that is broken in the worst available way.
+type panickingPublisher struct{ called bool }
+
+func (p *panickingPublisher) PublishPlanEvent(context.Context, PlanEvent) {
+	p.called = true
+	panic("subscriber exploded")
+}
+
+// A broken subscriber must not be able to stop a plan from moving.
+//
+// The event is a notification ABOUT something that already happened and is
+// already durable. Letting delivery fail the operation would mean a slow or
+// crashing listener could block approvals — the tail wagging the dog (FR-172).
+func TestABrokenSubscriberDoesNotFailTheLifecycle(t *testing.T) {
+	ctx := context.Background()
+	service := reviewService(t)
+	publisher := &panickingPublisher{}
+	service.SetEventPublisher(publisher)
+
+	plan := newReviewablePlan(t, ctx, service, reviewableContent())
+
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			t.Fatalf("a broken subscriber propagated its panic into the lifecycle: %v", recovered)
+		}
+	}()
+
+	if _, err := service.RequestReview(ctx, "ws-1", plan.ID, ReviewInput{Actor: "jj"}); err != nil {
+		t.Fatalf("a broken subscriber failed the transition: %v", err)
+	}
+	if !publisher.called {
+		t.Error("the publisher was never called; the test proved nothing")
+	}
+
+	// And the state change is durable regardless.
+	reread, err := service.Get(ctx, "ws-1", plan.ID)
+	if err != nil {
+		t.Fatalf("read plan: %v", err)
+	}
+	if reread.Status != StatusInReview {
+		t.Errorf("status = %q, want in_review despite the broken subscriber", reread.Status)
+	}
+}
+
 // A build with no publisher is quiet, not broken.
 func TestPublishingIsOptional(t *testing.T) {
 	ctx := context.Background()

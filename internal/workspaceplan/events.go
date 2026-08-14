@@ -73,13 +73,24 @@ func (s *Service) SetEventPublisher(publisher PlanEventPublisher) {
 
 // publishEvent emits one lifecycle event, if anything is listening.
 //
-// Publishing never fails a lifecycle operation. A subscriber that is slow or
-// broken must not be able to stop a Plan from being approved; the event is a
-// notification about something that already happened.
+// Publishing never fails a lifecycle operation, and that includes a subscriber
+// that panics. The event is a notification ABOUT something that already
+// happened and is already durable; letting delivery fail the call would mean a
+// crashing listener could block approvals — the tail wagging the dog (FR-172).
+//
+// The recover is deliberate rather than defensive habit. Subscribers are
+// registered by other packages and run inline on this goroutine, so without it
+// one bad listener takes down whatever transition it was watching.
 func (s *Service) publishEvent(ctx context.Context, event PlanEvent) {
 	if s == nil || s.events == nil {
 		return
 	}
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			log.Printf("workspaceplan: event subscriber panicked delivering %s for plan %s: %v",
+				event.Type, event.PlanID, recovered)
+		}
+	}()
 	s.events.PublishPlanEvent(ctx, event)
 }
 
