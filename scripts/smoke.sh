@@ -922,12 +922,91 @@ smoke_boundary() {
   echo "--- Planning boundary smoke passed ---"
 }
 
+smoke_hardening() {
+  local ws="$1"
+  [[ -n "$ws" ]] || fail "usage: smoke.sh hardening <base-url> <workspace-id>"
+
+  echo "--- Lifecycle hardening ($ws) ---"
+
+  # Diagnostics: a read-only capability report with no plan content in it.
+  local diag
+  diag=$(curl -s "$BASE_URL/api/workspaces/$ws/plan-diagnostics")
+  [[ "$(echo "$diag" | json_field components.materializer)" == "True" ]] ||
+    fail "diagnostics report materialization as unwired: $diag"
+  [[ "$(echo "$diag" | json_field components.execution_slot)" == "True" ]] ||
+    fail "diagnostics report the execution slot as unwired"
+  [[ -n "$(echo "$diag" | json_field limits.max_versions)" ]] ||
+    fail "diagnostics carry no limits"
+  echo "ok   diagnostics report every wired component and the limits"
+
+  # Reading and editing work without a model. Only generation needs one.
+  local offline
+  offline=$(echo "$diag" | python3 -c 'import sys,json;print(",".join(json.load(sys.stdin)["offline_capable"]))')
+  case "$offline" in
+  *approve*) ;;
+  *) fail "approval is not listed as usable offline: $offline" ;;
+  esac
+  echo "ok   approval and execution are usable without a model"
+
+  # A credential in plan content is REFUSED, not stored and redacted later.
+  local plan rejected
+  plan=$(curl -s -X POST "$BASE_URL/api/workspaces/$ws/plans" \
+    -H 'Content-Type: application/json' -d '{"request":"Hardening demo"}' | json_field id)
+  rejected=$(curl -s -o /dev/null -w '%{http_code}' -X PATCH \
+    "$BASE_URL/api/workspaces/$ws/plans/$plan/draft" \
+    -H 'Content-Type: application/json' -d '{
+      "objective":"Deploy the service","revision":0,
+      "content":{"execution":{"mode":"step_through"},
+        "groups":[{"id":"grp-1","title":"Deploy","items":[
+          {"id":"itm-1","description":"Use sk-abcdefghijklmnopqrstuvwxyz012345 for the API"}]}]}}')
+  [[ "$rejected" == "422" ]] || fail "content carrying an API key was accepted (status $rejected)"
+  echo "ok   content carrying a credential is refused"
+
+  # The same text WITHOUT a credential shape is fine — the check matches
+  # shapes, not words.
+  expect_status 200 PATCH "$BASE_URL/api/workspaces/$ws/plans/$plan/draft" '{
+    "objective":"Deploy the service","revision":0,
+    "content":{"execution":{"mode":"step_through"},
+      "groups":[{"id":"grp-1","title":"Deploy","items":[
+        {"id":"itm-1","description":"Rotate the API key and the database password"}]}]}}'
+  echo "ok   ordinary text mentioning credentials is accepted"
+
+  # Cancelling moves a plan to History immediately, without losing it.
+  local hash approval cancelled archived
+  hash=$(curl -s -X POST "$BASE_URL/api/workspaces/$ws/plans/$plan/versions" \
+    -H 'Content-Type: application/json' -d '{}' | json_field content_hash)
+  approval=$(curl -s -X POST "$BASE_URL/api/workspaces/$ws/plans/$plan/approvals" \
+    -H 'Content-Type: application/json' \
+    -d "{\"version\":1,\"content_hash\":\"$hash\",\"effect\":\"create_tasks\",\"user_name\":\"smoke\",\"idempotency_key\":\"harden-1\"}" |
+    json_field id)
+  curl -s -X POST "$BASE_URL/api/workspaces/$ws/plans/$plan/materialize" \
+    -H 'Content-Type: application/json' -d "{\"approval_id\":\"$approval\"}" > /dev/null
+  cancelled=$(curl -s -X POST "$BASE_URL/api/workspaces/$ws/plans/$plan/execution" \
+    -H 'Content-Type: application/json' -d '{"action":"cancel","reason":"demo"}')
+  [[ "$(echo "$cancelled" | json_field status)" == "cancelled" ]] ||
+    fail "cancel did not cancel: $cancelled"
+
+  archived=$(curl -s "$BASE_URL/api/workspaces/$ws/plans/$plan" | json_field archived_at)
+  [[ -n "$archived" ]] || fail "a cancelled plan stayed in the active list"
+  echo "ok   cancelling moves the plan to history immediately"
+
+  # And it is still readable, with its versions and approvals intact.
+  local versions
+  versions=$(curl -s "$BASE_URL/api/workspaces/$ws/plans/$plan/versions" |
+    python3 -c 'import sys,json;print(len(json.load(sys.stdin)["versions"]))')
+  [[ "$versions" -ge 1 ]] || fail "archiving lost the plan's versions"
+  echo "ok   history keeps every version and approval"
+
+  echo "--- Hardening smoke passed ---"
+}
+
 case "${1:-}" in
 seed) seed_demo ;;
 slot) smoke_slot "${3:-}" ;;
 reconcile) smoke_reconcile "${3:-}" ;;
 policy) smoke_policy "${3:-}" ;;
 boundary) smoke_boundary "${3:-}" ;;
+hardening) smoke_hardening "${3:-}" ;;
 plans) smoke_plans "${3:-}" ;;
 drafting) smoke_drafting "${3:-}" ;;
 review) smoke_review "${3:-}" ;;
@@ -936,7 +1015,7 @@ execution) smoke_execution "${3:-}" ;;
 *)
   echo "usage:" >&2
   echo "  $0 seed <base-url>                       # seed plans and print URLs to review" >&2
-  echo "  $0 {plans|drafting|review|materialize|execution|slot|reconcile|policy|boundary} <base-url> <workspace-id>" >&2
+  echo "  $0 {plans|drafting|review|materialize|execution|slot|reconcile|policy|boundary|hardening} <base-url> <workspace-id>" >&2
   exit 2
   ;;
 esac

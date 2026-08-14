@@ -1293,6 +1293,61 @@ func (h *Handler) PlanReconcileConfirm(w http.ResponseWriter, r *http.Request) {
 	orihttp.Success(w, confirmation)
 }
 
+// PlanDiagnostics handles GET .../plan-diagnostics — a read-only report of what
+// the planning subsystem can actually do in this workspace (FR-175, FR-176).
+//
+// It answers the question a support conversation always starts with: is this
+// broken, or is it configured this way? Every dependency reports whether it is
+// wired, so "materialization is not configured" is visible here instead of
+// being discovered when an approval produces nothing.
+//
+// It carries no Plan content and no prompts — only capability facts — so it is
+// safe to read and safe to paste into a bug report (FR-174).
+func (h *Handler) PlanDiagnostics(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodGet) {
+		return
+	}
+	workspaceID := requireWorkspaceID(w, r)
+	if workspaceID == "" {
+		return
+	}
+
+	// Everything that does not need a model keeps working, and this says so
+	// explicitly rather than leaving the UI to infer it from a failure
+	// (FR-177).
+	generationAvailable := h.service != nil && h.service.GenerationAvailable()
+
+	orihttp.Success(w, map[string]any{
+		"workspace_id": workspaceID,
+		"components": map[string]bool{
+			"store":          h.service != nil,
+			"materializer":   h.materializer != nil,
+			"executor":       h.executor != nil,
+			"execution_slot": h.slots != nil,
+			"reconciler":     h.reconciler != nil,
+			"auto_runner":    h.auto != nil,
+			"policy":         h.resolvePolicy != nil,
+			"guidance":       h.resolveGuidance != nil,
+			"availability":   h.resolveAvailability != nil,
+		},
+		// Reading, editing, reviewing, and approving a Plan need no model. Only
+		// generation does, and naming that boundary here keeps the UI from
+		// disabling more than it has to when a provider is down.
+		"generation_available": generationAvailable,
+		"offline_capable": []string{
+			"read", "edit", "review", "approve", "materialize", "execute",
+		},
+		"limits": map[string]int{
+			"max_versions":  MaxReviewVersions,
+			"max_snapshots": MaxDraftSnapshots,
+		},
+		"retention": map[string]string{
+			"inactive_plans":  InactiveRetention.String(),
+			"draft_snapshots": DraftSnapshotTTL.String(),
+		},
+	})
+}
+
 // PlanForTask handles GET /api/workspaces/{workspaceID}/plan-for-task/{taskID}.
 //
 // This is the reverse half of the Plan-to-Task link: Task detail asks "which

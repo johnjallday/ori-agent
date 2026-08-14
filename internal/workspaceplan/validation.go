@@ -59,6 +59,10 @@ const (
 	IssueUnavailableAssignee   ValidationCode = "unavailable_assignee"
 	IssueUnavailableCapability ValidationCode = "unavailable_capability"
 	IssueUnsafeArtifactPath    ValidationCode = "unsafe_artifact_path"
+	// IssueCredentialInContent marks content carrying something shaped like a
+	// credential. It is refused rather than redacted: an immutable version can
+	// only hide a token after the fact, never remove it (FR-170).
+	IssueCredentialInContent ValidationCode = "credential_in_content"
 )
 
 // ValidationResult is the outcome of validating candidate Plan content.
@@ -235,6 +239,12 @@ func ValidatePlanContent(objective string, content PlanContent, vctx ValidationC
 			"unsupported execution mode %q; supported modes are %q and %q",
 			content.Execution.Mode, ExecutionStepThrough, ExecutionAuto)
 	}
+
+	// Credentials are refused here rather than stored and redacted later.
+	// Validation is the last point before content can become an immutable
+	// version, and after that redaction can only hide a token, never remove it
+	// (FR-170).
+	result.Issues = append(result.Issues, credentialIssues(FindCredentials(objective, content))...)
 
 	return result
 }

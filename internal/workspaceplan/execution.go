@@ -599,7 +599,19 @@ func (e *Executor) Cancel(ctx context.Context, workspaceID, planID, reason, acto
 			return nil, err
 		}
 	}
-	return cancelled, nil
+
+	// Cancelled Plans go to History immediately (FR-16). Leaving one in the
+	// active list would make "active" mean "not deleted" rather than "still
+	// going", and the list is the thing a user scans to see what is going.
+	// Archiving is a placement: every version, approval, and link survives it.
+	archived, err := e.service.Archive(ctx, workspaceID, planID, reason, actor)
+	if err != nil {
+		// The cancellation itself succeeded and is the important half. A Plan
+		// that stays visible is a cosmetic problem; failing here would report
+		// the cancel as failed when it was not.
+		return cancelled, nil
+	}
+	return archived, nil
 }
 
 func (e *Executor) cancelTask(workspaceID, taskID string) error {

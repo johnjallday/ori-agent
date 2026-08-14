@@ -109,8 +109,11 @@ func NewStatusChange(plan *Plan, to Status, source TransitionSource, actor, reas
 		To:          to,
 		Source:      source,
 		Actor:       actor,
-		Reason:      reason,
-		CreatedAt:   time.Now().UTC(),
+		// The reason is prose somebody wrote about what happened. Refusing it
+		// would block a legitimate state change over its explanation, so it is
+		// redacted on the way in instead (FR-171).
+		Reason:    RedactCredentials(reason),
+		CreatedAt: time.Now().UTC(),
 	}
 }
 
@@ -123,8 +126,11 @@ func NewActivity(plan *Plan, kind ActivityKind, source TransitionSource, actor, 
 		Kind:        kind,
 		Source:      source,
 		Actor:       actor,
-		Reason:      reason,
-		CreatedAt:   time.Now().UTC(),
+		// The reason is prose somebody wrote about what happened. Refusing it
+		// would block a legitimate state change over its explanation, so it is
+		// redacted on the way in instead (FR-171).
+		Reason:    RedactCredentials(reason),
+		CreatedAt: time.Now().UTC(),
 	}
 }
 

@@ -183,6 +183,21 @@ func (s *Service) List(ctx context.Context, workspaceID string, filter ListFilte
 	if err != nil {
 		return nil, err
 	}
+
+	// Retention is applied here, on access, rather than by a sweep. Listing a
+	// workspace's plans already touches every row that could have aged out, so
+	// doing it here needs no scheduler and cannot silently stop running
+	// (FR-16).
+	if archived := s.ArchiveInactive(ctx, workspaceID, plans); archived > 0 && filter.Scope == ScopeActive {
+		// Something just left the active list. Re-reading is cheaper than
+		// filtering in place and guarantees the caller sees the same list the
+		// next read would produce.
+		plans, err = s.store.ListPlans(ctx, workspaceID, filter)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	for _, plan := range plans {
 		s.attachProgress(ctx, plan)
 	}
@@ -316,6 +331,17 @@ func (s *Service) Activity(ctx context.Context, workspaceID, planID string, limi
 // lifecycle (drafting, review, materialization, execution). It is deliberately
 // not a way for handlers to bypass the lifecycle rules above.
 func (s *Service) Store() Store { return s.store }
+
+// GenerationAvailable reports whether a model can be reached to propose
+// content right now.
+//
+// It is deliberately separate from "planning works". Reading, editing,
+// reviewing, approving, materializing, and executing a Plan all need no model;
+// only drafting does. Conflating them would disable a whole page because a
+// provider is down (FR-58, FR-177).
+func (s *Service) GenerationAvailable() bool {
+	return s != nil && s.generator != nil && s.generator.Available()
+}
 
 // Now returns the service clock, so layered services share one notion of time.
 func (s *Service) Now() time.Time { return s.now() }

@@ -864,6 +864,10 @@ func registerWorkspacePlanRoutes(mux *http.ServeMux, s *Server) {
 		// the answer is about the workspace: one plan runs, the rest queue
 		// (FR-106, FR-107).
 		mux.HandleFunc("/api/workspaces/{workspaceID}/plan-execution-slot", s.Handlers.WorkspacePlans.WorkspaceExecutionSlot)
+		// Read-only capability report: what planning can actually do here, and
+		// which dependencies are wired. No plan content, no prompts — safe to
+		// paste into a bug report (FR-175, FR-176).
+		mux.HandleFunc("/api/workspaces/{workspaceID}/plan-diagnostics", s.Handlers.WorkspacePlans.PlanDiagnostics)
 		mux.HandleFunc("/api/workspaces/{workspaceID}/plan-for-task/{taskID}", s.Handlers.WorkspacePlans.PlanForTask)
 		mux.HandleFunc("/api/workspaces/{workspaceID}/plan-for-run/{runID}", s.Handlers.WorkspacePlans.PlanForRun)
 		// GET discloses what a revision would replace; POST performs it. The
