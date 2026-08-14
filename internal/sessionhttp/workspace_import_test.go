@@ -12,8 +12,44 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
+	"github.com/johnjallday/ori-agent/internal/personalhq"
 	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
 )
+
+// recordingDesignator captures every automatic Personal HQ designation attempt
+// the import path makes, so tests can assert both that a marked export
+// designates and — just as importantly — that unmarked imports never call in.
+type recordingDesignator struct {
+	calls []designateCall
+	err   error
+}
+
+type designateCall struct {
+	userID      string
+	workspaceID string
+}
+
+func (d *recordingDesignator) Designate(_ context.Context, userID, workspaceID string) (*personalhq.Status, error) {
+	d.calls = append(d.calls, designateCall{userID: userID, workspaceID: workspaceID})
+	if d.err != nil {
+		return nil, d.err
+	}
+	return &personalhq.Status{UserID: userID, WorkspaceID: workspaceID, Valid: true}, nil
+}
+
+func TestPersonalHQDesignatorWiringIsNilSafeAndObservable(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+
+	if handler.PersonalHQDesignatorWired() {
+		t.Fatalf("expected a freshly constructed handler to report no Personal HQ designator")
+	}
+
+	handler.SetPersonalHQDesignator(&recordingDesignator{})
+	if !handler.PersonalHQDesignatorWired() {
+		t.Fatalf("expected PersonalHQDesignatorWired to report the injected designator")
+	}
+}
 
 func TestHandleWorkspaceImportCreatesWorkspaceWithDirectoryReference(t *testing.T) {
 	handler, cleanup := createTestHandler(t)
