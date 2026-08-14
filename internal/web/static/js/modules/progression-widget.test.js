@@ -5,6 +5,7 @@ import {
   completedCount,
   resolvedCount,
   tierInsignia,
+  compactSummaryView,
   firstMissionView,
   tierQuestRows,
   questRowState,
@@ -60,6 +61,90 @@ test('tierInsignia zero-pads a positive tier number', () => {
 test('tierInsignia falls back to an em dash for an invalid tier', () => {
   assert.equal(tierInsignia(0), '—');
   assert.equal(tierInsignia(undefined), '—');
+});
+
+// ===========================================================================
+// compactSummaryView — the always-available Quests header button (Issue #334)
+// ===========================================================================
+
+test('compactSummaryView: nothing to show yet stays invisible rather than rendering an empty summary', () => {
+  assert.deepEqual(compactSummaryView(null), { visible: false, text: '' });
+  assert.deepEqual(compactSummaryView({ tiers: [] }), { visible: false, text: '' });
+});
+
+test('compactSummaryView: pending — no quest resolved yet', () => {
+  const status = {
+    current_tier: 1,
+    tiers: [tier({ tier: 1, quests: [quest({ status: 'available' }), quest({ id: 'q2' })] })]
+  };
+  const view = compactSummaryView(status);
+  assert.equal(view.visible, true);
+  assert.equal(view.allComplete, false);
+  assert.equal(view.resolved, 0);
+  assert.equal(view.total, 2);
+  assert.equal(view.text, 'Tier 1 · 0/2');
+});
+
+test('compactSummaryView: partial — some but not all quests resolved', () => {
+  const status = {
+    current_tier: 2,
+    tiers: [
+      tier({
+        tier: 2,
+        quests: [quest({ status: 'completed' }), quest({ id: 'q2', status: 'available' })]
+      })
+    ]
+  };
+  const view = compactSummaryView(status);
+  assert.equal(view.resolved, 1);
+  assert.equal(view.total, 2);
+  assert.equal(view.text, 'Tier 2 · 1/2');
+});
+
+test('compactSummaryView: a skipped optional quest counts toward resolved, distinguishing it from pending', () => {
+  const status = {
+    current_tier: 2,
+    tiers: [
+      tier({
+        tier: 2,
+        quests: [
+          quest({ status: 'completed' }),
+          quest({ id: 'hq', status: 'skipped', optional: true })
+        ]
+      })
+    ]
+  };
+  const view = compactSummaryView(status);
+  assert.equal(view.resolved, 2, 'a skip resolves the quest for summary purposes, same as resolvedCount');
+  assert.equal(view.total, 2);
+  assert.equal(view.text, 'Tier 2 · 2/2');
+});
+
+test('compactSummaryView: tier-complete (but not the last tier) still reads as a tier summary, not all-complete', () => {
+  const status = {
+    current_tier: 1,
+    total_tiers: 3,
+    tiers: [tier({ tier: 1, complete: true, quests: [quest({ status: 'completed' })] })]
+  };
+  const view = compactSummaryView(status);
+  assert.equal(view.allComplete, false);
+  assert.equal(view.text, 'Tier 1 · 1/1');
+});
+
+test('compactSummaryView: all-complete shows one compact congratulatory summary', () => {
+  const status = { all_complete: true, total_count: 9, resolved_count: 9, tiers: [] };
+  const view = compactSummaryView(status);
+  assert.equal(view.visible, true);
+  assert.equal(view.allComplete, true);
+  assert.equal(view.text, 'All complete');
+});
+
+test('compactSummaryView text never resembles the bare-number Updates attention badge', () => {
+  const status = { current_tier: 1, tiers: [tier({ tier: 1, quests: [quest()] })] };
+  const view = compactSummaryView(status);
+  // The Updates badge renders a bare count ("3"); Quests must always carry
+  // words alongside its numbers so the two are never visually interchangeable.
+  assert.doesNotMatch(view.text, /^\d+$/);
 });
 
 test('firstMissionView exposes the HQ quest before its tier unlocks', () => {

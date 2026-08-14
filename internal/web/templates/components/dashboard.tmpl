@@ -108,6 +108,26 @@
             <span class="cockpit-flyout-toggle__label">Updates</span>
             <span class="cockpit-flyout-toggle__count" data-cockpit-rail-toggle-count hidden></span>
           </button>
+          <!--
+            Quests: Progression's always-available compact entry point,
+            immediately beside Updates (Issue #334). Starts hidden — there is
+            nothing truthful to summarize before the first successful
+            GET /api/progression — and progression-widget.js reveals it once
+            valid tier/all-complete data loads. Progress, not attention: its
+            summary is inline text in the signal color family, never the red
+            count pill Updates uses (FR28), so the two are never confused.
+          -->
+          <button
+            type="button"
+            class="cockpit-flyout-toggle cockpit-flyout-toggle--quests"
+            id="cockpitQuestsToggle"
+            aria-expanded="false"
+            aria-controls="cockpitQuestsFlyout"
+            aria-label="Show Quests"
+            hidden>
+            <span class="cockpit-flyout-toggle__label">Quests</span>
+            <span class="cockpit-flyout-toggle__summary" data-role="quests-summary"></span>
+          </button>
           <!-- Mutually exclusive Map/Tree toggle. aria-pressed carries the
                active view; the visible labels carry it without color (FR24). -->
           <div class="cockpit-view-toggle" role="group" aria-label="Workspace view">
@@ -244,11 +264,9 @@
       </div>
 
       <!--
-        Quests: Progression's own flyout, reserved here so its DOM host is
-        stable from the first commit even though its header trigger and
-        open/close wiring do not land until Group 2 of Issue #334. Never
-        placed inside #cockpitMap, whose workspace-map.js mount replaces its
-        inner HTML on refresh.
+        Quests: Progression's own flyout, anchored to #cockpitQuestsToggle
+        above (Issue #334). Never placed inside #cockpitMap, whose
+        workspace-map.js mount replaces its inner HTML on refresh.
       -->
       <div id="cockpitQuestsFlyout" class="cockpit-flyout cockpit-flyout--quests"
            data-cockpit-flyout="quests" role="region" aria-labelledby="cockpitQuestsFlyoutTitle" hidden>

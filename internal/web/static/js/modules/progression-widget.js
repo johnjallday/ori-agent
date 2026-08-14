@@ -1,15 +1,30 @@
-// progression-widget.js — the onboarding quest-log widget on the home page.
+// progression-widget.js — the Quests flyout content, driven by Progression.
 //
 // Fetches GET /api/progression, renders the current tier's quests + progress,
-// and shows a toast when a quest (or a whole tier) newly completes. Dismissible
-// (POST /api/progression/dismiss) with a restore affordance, and lets an
-// optional quest be Skipped (POST /api/progression/skip) without dismissing
-// the whole widget. Purely additive: no-op on pages without the #questLog
-// element.
+// and shows a toast when a quest (or a whole tier) newly completes. Lets an
+// optional quest be Skipped (POST /api/progression/skip) without disturbing
+// the rest. Purely additive: no-op on pages without the #questLog element.
+//
+// Issue #334: the compact #cockpitQuestsToggle header button is this
+// widget's own always-available entry point — home-workspace-cockpit.js owns
+// opening/closing the #cockpitQuestsFlyout it sits beside (one shared header
+// panel state for Updates/Quests/Quick Capture), while this module owns
+// everything inside: the compact summary text, the full tier content, and
+// quest actions. The two coordinate through the narrow window.OriHomeCockpit
+// seam rather than a direct import, matching how this module already reads
+// #questLog's DOM instead of exporting a controller.
+//
+// The server-side `dismissed` field and its /api/progression/dismiss
+// endpoint stay wired for backward compatibility (a prior collapsed value
+// must never hide the compact trigger — FR33), but no longer gate anything
+// here: a fresh Home load is compact-only because the FLYOUT starts closed,
+// not because content is dismissed. Collapsing now closes the flyout instead
+// of persisting a dismissed preference (FR34: no new persisted preference is
+// required, and none is added).
 //
 // Pure helpers are exported (loaded as type="module") so progression-widget.test.js
-// can exercise the optional/skipped-quest rendering and toast-suppression
-// decisions without a DOM.
+// can exercise the compact-summary, optional/skipped-quest rendering, and
+// toast-suppression decisions without a DOM.
 
 import { loadOnboardingStatus, onboardingGateDecision } from './onboarding-gate.js';
 
@@ -37,6 +52,36 @@ export function resolvedCount(tier) {
 export function tierInsignia(tier) {
   const value = Number(tier);
   return Number.isFinite(value) && value > 0 ? String(value).padStart(2, '0') : '—';
+}
+
+/**
+ * The compact summary shown on the always-available Quests header button
+ * (FR27-FR28, Issue #334).
+ *
+ * `visible: false` means there is nothing truthful to show yet (onboarding
+ * gate not open, fetch not landed, or a malformed/empty response) — the
+ * caller keeps the trigger hidden rather than showing an empty summary.
+ * Deliberately a tier/resolved-count reading distinct in both shape and
+ * wording from the Updates attention badge's bare number, so achievement
+ * progress and items-needing-attention can never be confused (FR28).
+ */
+export function compactSummaryView(status) {
+  if (!status) return { visible: false, text: '' };
+  if (status.all_complete) {
+    return { visible: true, allComplete: true, text: 'All complete' };
+  }
+  const current = currentTier(status);
+  if (!current) return { visible: false, text: '' };
+  const resolved = resolvedCount(current);
+  const total = (current.quests || []).length;
+  return {
+    visible: true,
+    allComplete: false,
+    tier: status.current_tier,
+    resolved,
+    total,
+    text: `Tier ${status.current_tier} · ${resolved}/${total}`
+  };
 }
 
 export const FIRST_MISSION_QUEST_ID = 't2-build-hq';
@@ -148,6 +193,7 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete) {
 
   let widget = null;
   let restore = null;
+  let trigger = null; // #cockpitQuestsToggle — the always-available compact entry point.
   let knownCompleted = null; // Set of completed quest IDs; null until first load.
   let knownTierComplete = {}; // tier number -> bool, from the previous render.
   let latestStatus = null;
@@ -156,8 +202,20 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete) {
     return widget ? widget.querySelector(`[data-role="${role}"]`) : null;
   }
 
-  function restoreEl(role) {
-    return restore ? restore.querySelector(`[data-role="${role}"]`) : null;
+  /**
+   * Reveal/hide the compact trigger and keep its summary text current.
+   *
+   * Never touches the flyout's own open/closed state — that is
+   * home-workspace-cockpit.js's `panel` state alone (FR35: a refresh updates
+   * the compact summary and any open flyout in place, never opening/closing
+   * either).
+   */
+  function updateTrigger(status) {
+    if (!trigger) return;
+    const view = compactSummaryView(status);
+    trigger.hidden = !view.visible;
+    const summary = trigger.querySelector('[data-role="quests-summary"]');
+    if (summary) summary.textContent = view.visible ? view.text : '';
   }
 
   async function fetchStatus() {
@@ -202,22 +260,6 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete) {
 
     const meter = bar.closest('[role="progressbar"]');
     if (meter) meter.setAttribute('aria-valuenow', String(Math.max(0, Math.min(100, percent))));
-  }
-
-  function renderRestoreBadge(status, current) {
-    const resolved = status.all_complete ? status.resolved_count : resolvedCount(current);
-    const total = status.all_complete ? status.total_count : (current?.quests || []).length;
-    const tierLabel = status.all_complete ? 'All tiers complete' : `Tier ${status.current_tier}`;
-
-    const insignia = restoreEl('restore-insignia');
-    const tier = restoreEl('restore-tier');
-    const progress = restoreEl('restore-progress');
-    const meter = restoreEl('restore-meter');
-    if (insignia)
-      insignia.textContent = status.all_complete ? '✓' : tierInsignia(status.current_tier);
-    if (tier) tier.textContent = tierLabel;
-    if (progress) progress.textContent = `${resolved}/${total}`;
-    if (meter) meter.style.width = `${total > 0 ? Math.round((resolved / total) * 100) : 0}%`;
   }
 
   async function skipQuest(questID, button) {
@@ -314,12 +356,14 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete) {
 
     const current = currentTier(status);
 
-    if (status.dismissed) {
-      renderRestoreBadge(status, current);
-      widget.hidden = true;
-      if (restore) restore.hidden = false;
-      return;
-    }
+    // The compact trigger's visibility/summary is driven by the SAME status
+    // every branch below renders from — Issue #334 retired `dismissed` as a
+    // gate on either (FR31-FR34): the flyout's open/closed state now lives
+    // entirely in home-workspace-cockpit.js's panel state, so this widget
+    // only ever decides whether it HAS truthful content to show.
+    updateTrigger(status);
+    // #questLogRestore is retired UI (Issue #334) — kept in the template only
+    // for id stability, never shown.
     if (restore) restore.hidden = true;
 
     // All quests complete: compact congratulatory state.
@@ -374,38 +418,28 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete) {
     }
   }
 
+  /**
+   * The quest log's own "Collapse" control now closes the Quests flyout
+   * (FR31) instead of persisting a dismissed preference — home-workspace-
+   * cockpit.js owns the flyout's open/closed state, so this widget reaches
+   * it through the narrow window.OriHomeCockpit seam rather than a direct
+   * import. Falls back to a no-op where that seam is absent (e.g. a page
+   * without the cockpit, or a unit test with no DOM wiring).
+   */
   function wireControls() {
     const dismissBtn = el('dismiss');
     if (dismissBtn) {
-      dismissBtn.addEventListener('click', async () => {
-        const optimistic = latestStatus ? { ...latestStatus, dismissed: true } : null;
-        if (optimistic) render(optimistic);
-        try {
-          const status = await postJSON('/api/progression/dismiss', { dismissed: true });
-          render(status);
-        } catch (_) {
-          if (latestStatus) render({ ...latestStatus, dismissed: false });
-        }
+      dismissBtn.addEventListener('click', () => {
+        const cockpit = window.OriHomeCockpit;
+        if (cockpit && typeof cockpit.closeHeaderPanel === 'function') cockpit.closeHeaderPanel();
       });
-    }
-    if (restore) {
-      const restoreBtn = restore.querySelector('[data-role="restore"]');
-      if (restoreBtn) {
-        restoreBtn.addEventListener('click', async () => {
-          try {
-            const status = await postJSON('/api/progression/dismiss', { dismissed: false });
-            render(status);
-          } catch (_) {
-            /* ignore */
-          }
-        });
-      }
     }
   }
 
   function init() {
     widget = document.getElementById('questLog');
     restore = document.getElementById('questLogRestore');
+    trigger = document.getElementById('cockpitQuestsToggle');
     if (!widget) return; // Not the home page.
 
     wireControls();

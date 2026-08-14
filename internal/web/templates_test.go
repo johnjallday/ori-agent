@@ -416,8 +416,12 @@ func TestRenderHomeCockpitShell(t *testing.T) {
 		`cockpit-flyout-toggle__label">Updates<`,
 		`id="cockpitUpdatesFlyout"`,
 		`id="cockpitUpdatesFlyoutBody"`,
-		// Quests: the flyout host is reserved from Group 1; its trigger lands in
-		// Group 2 (Issue #334).
+		// Quests: Progression's always-available compact entry point, adjacent
+		// to Updates (Issue #334 FR26-FR40).
+		`id="cockpitQuestsToggle"`,
+		`aria-controls="cockpitQuestsFlyout"`,
+		`cockpit-flyout-toggle__label">Quests<`,
+		`data-role="quests-summary"`,
 		`id="cockpitQuestsFlyout"`,
 		// Ask Ori activity lives in the rail as an embedded panel (FR96).
 		`data-home-assistant-surface="panel"`,

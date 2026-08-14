@@ -2484,7 +2484,11 @@ import {
     clearSelection,
     showSummary,
     leaveSummary,
-    openCapture: () => setCaptureOpen(true)
+    openCapture: () => setCaptureOpen(true),
+    // Narrow seam for progression-widget.js's own "Collapse" control to close
+    // whichever header disclosure (Updates/Quests/Quick Capture) is open,
+    // without either module importing the other (Issue #334).
+    closeHeaderPanel: () => closePanel()
   };
 
   function canHydrateWorkspaceData() {
