@@ -17,7 +17,6 @@ type OpenAIMetadata struct {
 	DefaultPrompt    string   `json:"default_prompt,omitempty"`
 	Tools            []string `json:"tools,omitempty"`
 	MCPServers       []string `json:"mcp_servers,omitempty"`
-	PlanningProfile  bool     `json:"planning_profile,omitempty"`
 	Raw              any      `json:"raw,omitempty"`
 }
 
@@ -63,7 +62,6 @@ func parseOpenAIMetadata(raw map[string]any) *OpenAIMetadata {
 
 	deps := getMap(raw, "dependencies", "requires")
 	ui := getMap(raw, "interface", "ui", "metadata")
-	capabilities := getMap(raw, "capabilities", "features")
 
 	meta := &OpenAIMetadata{
 		DisplayName:      getString(raw, "display_name", "displayName", "name", "title"),
@@ -73,7 +71,6 @@ func parseOpenAIMetadata(raw map[string]any) *OpenAIMetadata {
 		DefaultPrompt:    getString(raw, "default_prompt", "defaultPrompt", "prompt", "system_prompt", "systemPrompt", "instructions"),
 		Tools:            getStringSlice(raw, "tools", "tool_names", "toolNames", "allowed_tools", "allowed-tools"),
 		MCPServers:       getStringSlice(raw, "mcp_servers", "mcpServers", "required_mcp_servers", "required-mcp-servers"),
-		PlanningProfile:  getBool(raw, "planning_profile", "planningProfile", "workspace_planning", "workspacePlanning"),
 	}
 
 	if ui != nil {
@@ -92,9 +89,6 @@ func parseOpenAIMetadata(raw map[string]any) *OpenAIMetadata {
 		if meta.DefaultPrompt == "" {
 			meta.DefaultPrompt = getString(ui, "default_prompt", "defaultPrompt", "prompt", "system_prompt", "systemPrompt", "instructions")
 		}
-		if !meta.PlanningProfile {
-			meta.PlanningProfile = getBool(ui, "planning_profile", "planningProfile", "workspace_planning", "workspacePlanning")
-		}
 	}
 
 	if len(meta.Tools) == 0 && deps != nil {
@@ -102,9 +96,6 @@ func parseOpenAIMetadata(raw map[string]any) *OpenAIMetadata {
 	}
 	if len(meta.MCPServers) == 0 && deps != nil {
 		meta.MCPServers = getStringSlice(deps, "mcp_servers", "mcpServers", "required_mcp_servers", "required-mcp-servers")
-	}
-	if !meta.PlanningProfile && capabilities != nil {
-		meta.PlanningProfile = getBool(capabilities, "planning_profile", "planningProfile", "workspace_planning", "workspacePlanning")
 	}
 
 	return meta

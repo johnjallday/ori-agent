@@ -11277,44 +11277,20 @@ export class WorkspaceDetailPage {
     return matchingPreset || 'custom';
   }
 
-  toWorkspacePlanningSkillConfig(settings = {}) {
-    const normalized = this.normalizeWorkspaceSettings(settings);
-    return {
-      profile_type: 'workspace_planning',
-      mode: normalized.planning.mode,
-      write_prd: normalized.planning.write_prd,
-      write_task_list: normalized.planning.write_task_list,
-      tasks_dir: normalized.planning.tasks_dir,
-      clarification_mode: normalized.planning.clarification_mode,
-      sync_workspace_tasks: normalized.workflow.sync_plans_to_tasks,
-      default_execution_mode: normalized.planning.default_execution_mode,
-      require_branch: normalized.planning.require_branch
-    };
-  }
-
   buildWorkspaceSettingsEffectiveBehavior(settings = {}) {
     const normalized = this.normalizeWorkspaceSettings(settings);
-    const effective = {
+
+    // Enabling planning no longer synthesizes a `workspace-planning` skill
+    // binding here, matching the server. It used to hand the settings to a
+    // model as prompt config, which made an enforced-sounding screen depend on
+    // a paragraph being read. Planning is compiled now (FR-181, FR-183).
+    return {
       workflow: { ...normalized.workflow },
       planning: { ...normalized.planning },
       task_markdown: { ...normalized.task_markdown },
       summary: this.getWorkspaceSettingsSummaryItems(normalized),
       managed_skills: []
     };
-
-    if (normalized.planning.enabled) {
-      effective.managed_skills = [
-        {
-          skill_name: 'workspace-planning',
-          source: 'settings',
-          active: true,
-          reason: 'planning.enabled',
-          config: this.toWorkspacePlanningSkillConfig(normalized)
-        }
-      ];
-    }
-
-    return effective;
   }
 
   getWorkspaceSettingsSummaryItems(settings = {}) {
@@ -11580,20 +11556,12 @@ export class WorkspaceDetailPage {
           .map(skill => {
             const skillName =
               String(skill?.skill_name || skill?.skillName || '').trim() || 'unknown-skill';
-            const displayName =
-              skillName === 'workspace-planning' ? 'Structured planning' : skillName;
+            const displayName = skillName;
             const source = String(skill?.source || '').trim() || 'settings';
             const reason = String(skill?.reason || '').trim();
-            const planningSummary =
-              skillName === 'workspace-planning'
-                ? this.getWorkspacePlanningSummary(
-                    skill?.config || this.toWorkspacePlanningSkillConfig(normalized)
-                  )
-                : '';
-            const detail =
-              skillName === 'workspace-planning'
-                ? planningSummary || 'Controlled by workspace settings'
-                : [source, reason].filter(Boolean).join(' • ');
+            // No special case for a planning skill any more: planning is not a
+            // settings-managed skill, so any entry here is an ordinary one.
+            const detail = [source, reason].filter(Boolean).join(' • ');
 
             return `
             <div class="workspace-detail-settings-managed-entry">
@@ -11834,15 +11802,30 @@ export class WorkspaceDetailPage {
     return this.pluginsManager.render();
   }
 
-  // Planning-config helpers live with the skills manager since they shape the
-  // workspace_planning skill binding, but the host still calls them from
-  // workspace-settings normalization and the config summary panel.
+  // Planning enum clamping for the SETTINGS form.
+  //
+  // This used to delegate to the skills manager, back when planning config was
+  // a skill binding. It is workspace settings now, so the clamping lives with
+  // the settings that use it rather than with skills, which no longer carry
+  // planning policy at all (FR-181).
   normalizeWorkspacePlanningConfig(config = {}) {
-    return this.skillsManager.normalizeWorkspacePlanningConfig(config);
-  }
+    const allowed = {
+      mode: ['feature', 'bugfix', 'refactor', 'investigation'],
+      clarification_mode: ['minimal', 'standard', 'deep'],
+      default_execution_mode: ['auto', 'step_through']
+    };
+    const defaults = {
+      mode: 'feature',
+      clarification_mode: 'standard',
+      default_execution_mode: 'step_through'
+    };
 
-  getWorkspacePlanningSummary(config = {}) {
-    return this.skillsManager.getWorkspacePlanningSummary(config);
+    const normalized = {};
+    for (const [field, values] of Object.entries(allowed)) {
+      const candidate = String(config?.[field] || '').trim();
+      normalized[field] = values.includes(candidate) ? candidate : defaults[field];
+    }
+    return normalized;
   }
 
   getAgentInstanceIdsForName(agentName) {

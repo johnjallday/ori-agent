@@ -38,7 +38,6 @@ type ResolvedSkill struct {
 	AllowedTools       []string
 	DisallowedTools    []string
 	RequiredMCPServers []string
-	PlanningProfile    bool
 	Config             map[string]any
 	Model              string
 	Color              string

@@ -433,7 +433,6 @@ func (m *Manager) loadSkillEntry(skillPath, defaultName, source, skillDir string
 			skill.ValidationErrors = append(skill.ValidationErrors, fmt.Sprintf("openai.yaml: %v", err))
 		} else if meta != nil {
 			skill.OpenAIMetadata = meta
-			skill.PlanningProfile = meta.PlanningProfile
 			if len(skill.AllowedTools) == 0 && len(meta.Tools) > 0 {
 				skill.AllowedTools = meta.Tools
 			}

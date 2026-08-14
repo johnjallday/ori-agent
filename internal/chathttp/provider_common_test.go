@@ -94,9 +94,8 @@ func TestBuildSystemPromptWithResolvedPlanningSkillSettings(t *testing.T) {
 		Agent: &agent.Agent{},
 		EffectiveSkills: []workspace.ResolvedSkill{
 			{
-				Name:            "workspace-planning",
-				Prompt:          "Plan work before executing it.",
-				PlanningProfile: true,
+				Name:   "workspace-planning",
+				Prompt: "Plan work before executing it.",
 				Config: map[string]any{
 					"profile_type":           "workspace_planning",
 					"mode":                   "feature",
@@ -114,17 +113,26 @@ func TestBuildSystemPromptWithResolvedPlanningSkillSettings(t *testing.T) {
 
 	result := h.buildSystemPromptWithSkills(ag, "workspace-manager", "default prompt")
 
+	// The skill's prompt still reaches the agent: skills remain context.
 	if !strings.Contains(result, "## workspace-planning") {
-		t.Fatalf("expected workspace planning skill header, got %q", result)
+		t.Fatalf("expected the skill header, got %q", result)
 	}
-	if !strings.Contains(result, "### Workspace Binding Settings") {
-		t.Fatalf("expected workspace binding settings section, got %q", result)
+	if !strings.Contains(result, "Plan work before executing it.") {
+		t.Fatalf("expected the skill prompt, got %q", result)
 	}
-	if !strings.Contains(result, "Save planning files under: tasks") {
-		t.Fatalf("expected tasks dir hint, got %q", result)
-	}
-	if !strings.Contains(result, "Default workspace task execution mode: step_through") {
-		t.Fatalf("expected execution mode hint, got %q", result)
+
+	// Its CONFIG does not. Serializing planning settings into the prompt made
+	// them read like policy while being a paragraph a model could ignore;
+	// those controls are compiled now (FR-181, FR-182).
+	for _, leaked := range []string{
+		"Workspace Binding Settings",
+		"Save planning files under",
+		"Default workspace task execution mode",
+		"require_branch",
+	} {
+		if strings.Contains(result, leaked) {
+			t.Errorf("skill config leaked into the prompt as policy (%q): %q", leaked, result)
+		}
 	}
 }
 
