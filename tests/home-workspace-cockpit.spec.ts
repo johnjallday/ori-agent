@@ -620,3 +620,219 @@ test.describe('Home workspace cockpit', () => {
     await expect(page.locator('#cockpitCaptureBtn')).toBeVisible();
   });
 });
+
+/**
+ * Group 3 (Issue #334): Updates, Quests, and Quick Capture share ONE
+ * transient header-panel state, entirely separate from the context rail's
+ * own (selection/Summary/Ask Ori) state. These tests exercise the seams
+ * between the two — mutual exclusion among the three triggers, stability
+ * across Map/Tree and selection changes, and coexistence with the rail.
+ */
+test.describe('Header disclosure coordination', () => {
+  test.beforeEach(async ({ page }) => {
+    await skipOnboarding(page);
+    await page.route('**/api/progression', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          current_tier: 1,
+          total_tiers: 3,
+          total_count: 2,
+          tiers: [
+            {
+              tier: 1,
+              name: 'First contact',
+              quests: [
+                { id: 'coord-q1', title: 'Say hello to Ori', status: 'pending' },
+                { id: 'coord-q2', title: 'Create a workspace', status: 'pending' }
+              ]
+            }
+          ]
+        })
+      })
+    );
+  });
+
+  test('Updates, Quests, and Quick Capture are mutually exclusive and never clear Quick Capture\'s draft (FR8-FR9)', async ({
+    page
+  }) => {
+    await ensureWorkspace(page);
+    await page.goto('/');
+    await page.locator('#cockpitQuestsToggle').waitFor({ state: 'visible' });
+
+    const updatesBtn = page.locator('#cockpitRailToggle');
+    const questsBtn = page.locator('#cockpitQuestsToggle');
+    const captureBtn = page.locator('#cockpitCaptureBtn');
+    const updatesFlyout = page.locator('#cockpitUpdatesFlyout');
+    const questsFlyout = page.locator('#cockpitQuestsFlyout');
+    const capturePanel = page.locator('#cockpitCapturePanel');
+
+    await updatesBtn.click();
+    await expect(updatesFlyout).toBeVisible();
+    await expect(questsFlyout).toBeHidden();
+    await expect(capturePanel).toBeHidden();
+
+    // Opening Quests closes Updates (FR8).
+    await questsBtn.click();
+    await expect(questsFlyout).toBeVisible();
+    await expect(updatesFlyout).toBeHidden();
+    await expect(updatesBtn).toHaveAttribute('aria-expanded', 'false');
+
+    // Opening Quick Capture closes Quests (FR9), and the reverse.
+    await captureBtn.click();
+    await expect(capturePanel).toBeVisible();
+    await expect(questsFlyout).toBeHidden();
+    await page.locator('#cockpitCaptureTitle').fill('Draft that must survive');
+
+    await updatesBtn.click();
+    await expect(updatesFlyout).toBeVisible();
+    await expect(capturePanel).toBeHidden();
+
+    // Reopening Quick Capture must not have lost the draft (FR9).
+    await captureBtn.click();
+    await expect(capturePanel).toBeVisible();
+    await expect(page.locator('#cockpitCaptureTitle')).toHaveValue('Draft that must survive');
+  });
+
+  test('the same-trigger toggle and Escape close their panel and return focus to the trigger', async ({
+    page
+  }) => {
+    await ensureWorkspace(page);
+    await page.goto('/');
+    const questsBtn = page.locator('#cockpitQuestsToggle');
+    await questsBtn.waitFor({ state: 'visible' });
+
+    await questsBtn.click();
+    await expect(page.locator('#cockpitQuestsFlyout')).toBeVisible();
+    // FR7: activating the SAME trigger again closes it.
+    await questsBtn.click();
+    await expect(page.locator('#cockpitQuestsFlyout')).toBeHidden();
+    await expect(questsBtn).toBeFocused();
+
+    await questsBtn.click();
+    await expect(page.locator('#cockpitQuestsFlyout')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#cockpitQuestsFlyout')).toBeHidden();
+    await expect(questsBtn).toBeFocused();
+  });
+
+  test('Escape closes an open flyout first, and needs a second press to clear a selection underneath it', async ({
+    page
+  }) => {
+    await ensureWorkspace(page);
+    await page.goto('/');
+    await page.locator('.ws-map-tile[data-ws-id]').first().click();
+    await expect(page.locator('#cockpitRailContext')).toBeVisible();
+
+    await page.locator('#cockpitRailToggle').click();
+    await expect(page.locator('#cockpitUpdatesFlyout')).toBeVisible();
+
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#cockpitUpdatesFlyout')).toBeHidden();
+    // The selection/context rail is untouched by the first Escape.
+    await expect(page.locator('#cockpitRailContext')).toBeVisible();
+    await expect(page.locator('#homeCockpit')).toHaveAttribute('data-rail-open', 'true');
+
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#homeCockpit')).toHaveAttribute('data-rail-open', 'false');
+  });
+
+  test('an open flyout survives a Map/Tree view switch without ever auto-opening on its own', async ({
+    page
+  }) => {
+    await ensureWorkspace(page);
+    await page.goto('/');
+    await page.locator('#cockpitQuestsToggle').waitFor({ state: 'visible' });
+
+    await page.locator('#cockpitQuestsToggle').click();
+    await expect(page.locator('#cockpitQuestsFlyout')).toBeVisible();
+
+    await page.locator('[data-cockpit-view="tree"]').click();
+    await expect(page.locator('#cockpitTree')).toBeVisible();
+    await expect(page.locator('#cockpitQuestsFlyout')).toBeVisible();
+    await expect(page.locator('[data-role="progress-count"]')).toHaveText('0/2');
+
+    await page.locator('[data-cockpit-view="map"]').click();
+    await expect(page.locator('#cockpitMap')).toBeVisible();
+    await expect(page.locator('#cockpitQuestsFlyout')).toBeVisible();
+
+    // Closing, then switching views again, must never reopen it on its own.
+    await page.locator('#cockpitQuestsToggle').click();
+    await expect(page.locator('#cockpitQuestsFlyout')).toBeHidden();
+    await page.locator('[data-cockpit-view="tree"]').click();
+    await expect(page.locator('#cockpitQuestsFlyout')).toBeHidden();
+  });
+
+  test('changing the selected workspace while Updates is open never closes it or loses the new selection', async ({
+    page
+  }) => {
+    const first = await ensureWorkspace(page);
+    const res = await page.request.post('/api/workspaces', {
+      data: { name: `Cockpit coordination ${Date.now()}`, workspace_preset: 'general' }
+    });
+    const second = (await res.json())?.folder?.id;
+
+    await page.goto('/');
+    await page.locator(`.ws-map-tile[data-ws-id="${first}"]`).click();
+    await expect(page.locator('#cockpitRailContext')).toContainText(await titleOf(page, first));
+
+    await page.locator('#cockpitRailToggle').click();
+    await expect(page.locator('#cockpitUpdatesFlyout')).toBeVisible();
+
+    // Reselect via Tree rather than the Map: on a map with many accumulated
+    // sites, an auto-placed tile can legitimately land underneath the
+    // top-anchored flyout, which is expected overlay behavior (FR21) rather
+    // than something this test should fight. Tree's row list is unaffected.
+    await page.locator('[data-cockpit-view="tree"]').click();
+    await expect(page.locator('#cockpitUpdatesFlyout')).toBeVisible();
+    await page.locator(`[data-tree-row="${second}"]`).click();
+    await expect(page.locator('#cockpitUpdatesFlyout')).toBeVisible();
+    await expect(page.locator(`.ws-map-tile[data-ws-id="${second}"]`)).toHaveClass(/is-selected/);
+    await expect(page.locator(`.ws-map-tile[data-ws-id="${first}"]`)).not.toHaveClass(/is-selected/);
+  });
+
+  test('Summary and an open flyout coexist; closing the flyout reveals Summary unchanged', async ({
+    page
+  }) => {
+    await ensureWorkspace(page);
+    await page.goto('/');
+    await page.locator('.ws-map-tile[data-ws-id]').first().waitFor();
+
+    await page.locator('#cockpitSummaryBtn').click();
+    await expect(page.locator('[data-rail-panel="summary"]')).toBeVisible();
+
+    await page.locator('#cockpitQuestsToggle').click();
+    await expect(page.locator('#cockpitQuestsFlyout')).toBeVisible();
+    // Opening a flyout must not disturb the rail's own state (FR29, FR41).
+    await expect(page.locator('[data-rail-panel="summary"]')).toBeVisible();
+    await expect(page.locator('#homeCockpit')).toHaveAttribute('data-rail-open', 'true');
+
+    await page.locator('#cockpitQuestsToggle').click();
+    await expect(page.locator('#cockpitQuestsFlyout')).toBeHidden();
+    await expect(page.locator('[data-rail-panel="summary"]')).toBeVisible();
+  });
+
+  test('a background workspace refresh updates Updates in place without moving focus or closing it', async ({
+    page
+  }) => {
+    await ensureWorkspace(page);
+    await page.goto('/');
+    await page.locator('#cockpitRailToggle').click();
+    await expect(page.locator('#cockpitUpdatesFlyout')).toBeVisible();
+    await page.locator('#cockpitRailToggle').focus();
+
+    await page.evaluate(() => window.dispatchEvent(new Event('ori:workspaces-changed')));
+    await page.waitForTimeout(150);
+
+    await expect(page.locator('#cockpitUpdatesFlyout')).toBeVisible();
+    await expect(page.locator('#cockpitRailToggle')).toBeFocused();
+  });
+});
+
+async function titleOf(page: Page, id: string): Promise<string> {
+  const name = await page
+    .locator(`.ws-map-tile[data-ws-id="${id}"] .ws-map-tile-name`)
+    .textContent();
+  return (name || '').trim();
+}

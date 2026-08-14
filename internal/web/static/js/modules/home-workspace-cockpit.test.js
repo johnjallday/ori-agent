@@ -1322,3 +1322,34 @@ test('panelTriggerId: closing a panel restores focus to the button that owns it 
 test('panelTriggerId: no panel open means no focus restoration target', () => {
   assert.equal(panelTriggerId(PANEL_NONE), '');
 });
+
+// ===========================================================================
+// Header panel / context rail independence (Issue #334, Group 3)
+//
+// togglePanelState and contextRailShouldBeOpen take entirely separate inputs
+// (state.panel vs. state.railState) and neither reads the other — that
+// separation of inputs IS the guarantee that a header disclosure and a real
+// context selection can never drift into contradicting each other. These
+// tests walk the full transition matrix to document it.
+// ===========================================================================
+
+test('togglePanelState: a full walk through every trigger never leaves more than one panel value at a time', () => {
+  const trail = [PANEL_UPDATES, PANEL_QUESTS, PANEL_QUESTS, PANEL_CAPTURE, PANEL_UPDATES, PANEL_UPDATES];
+  const expected = [PANEL_UPDATES, PANEL_QUESTS, PANEL_NONE, PANEL_CAPTURE, PANEL_UPDATES, PANEL_NONE];
+  let panel = PANEL_NONE;
+  const observed = trail.map(requested => {
+    panel = togglePanelState(panel, requested);
+    return panel;
+  });
+  assert.deepEqual(observed, expected);
+});
+
+test('contextRailShouldBeOpen is unaffected by which header panel (if any) is open', () => {
+  // The context rail's open/closed decision takes ONLY railState — proving it
+  // returns the same answer regardless of a hypothetical concurrent panel
+  // value documents that the two state machines cannot influence each other.
+  for (const panel of [PANEL_NONE, PANEL_UPDATES, PANEL_QUESTS, PANEL_CAPTURE]) {
+    assert.equal(contextRailShouldBeOpen(RAIL_TODAY), false, `panel=${panel}`);
+    assert.equal(contextRailShouldBeOpen(RAIL_WORKSPACE), true, `panel=${panel}`);
+  }
+});
