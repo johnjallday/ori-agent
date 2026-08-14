@@ -108,6 +108,15 @@ check "plan command refuses a negative-looking issue number" \
 check "a rejected plan command explains itself on stderr" \
   "$(print_plan_command all 3 934 2>&1 >/dev/null)" "Switch to the Ready view to print a planning command."
 
+# Decisions carry a stable marker so grooming can distinguish them from an
+# ordinary comment. Rationale is optional and remains plain user-authored text.
+check "decision comment has a marker" \
+  "$(format_decision_comment "1B, 2A")" \
+  $'<!-- ori-decision -->\n\n**Answers:** 1B, 2A'
+check "decision comment includes rationale" \
+  "$(format_decision_comment "1B, 2A" "Preserves existing JSON consumers")" \
+  $'<!-- ori-decision -->\n\n**Answers:** 1B, 2A\n\n**Rationale:** Preserves existing JSON consumers'
+
 # ---------------------------------------------------------------------------
 # In-flight status. Parent groups are the top-level `- [ ]` lines; sub-tasks are
 # indented, so an anchored match must not count them.
@@ -189,6 +198,48 @@ flight_states=()
 check "cell is empty when nothing is in flight" "$(flight_cell_of 999)" ""
 tasks_dir=""
 
+# The picker's :edit path supports a conventional editor command with arguments
+# and returns multiline Markdown without printing it through command substitution.
+fake_editor="$fixture_root/fake-editor"
+cat > "$fake_editor" <<'SH'
+#!/bin/sh
+for target in "$@"; do :; done
+printf '## Context\n\nMultiline detail.' > "$target"
+SH
+chmod +x "$fake_editor"
+VISUAL="$fake_editor --wait"
+edit_issue_body
+unset VISUAL
+check "editor body survives" "$edited_issue_body" $'## Context\n\nMultiline detail.'
+
+# Prompt helpers are tested with their write functions stubbed: this exercises
+# the actual title/body and answers/rationale collection without needing a pty.
+prompt_capture="$fixture_root/prompt-capture"
+create_issue() {
+  printf '%s\n' "$@" > "$prompt_capture"
+}
+printf 'Map contrast\nDashed borders disappear\n' | prompt_create_issue > /dev/null
+check "picker new passes an inline body" "$(<"$prompt_capture")" \
+  $'Map contrast\n--body\nDashed borders disappear'
+printf 'Fast capture\n\n' | prompt_create_issue > /dev/null
+check "picker new keeps body optional" "$(<"$prompt_capture")" "Fast capture"
+
+view_issue() {
+  printf 'viewed #%s\n' "$1"
+}
+decide_issue() {
+  printf '%s\n' "$@" > "$prompt_capture"
+  decision_recorded=1
+}
+decision_recorded=0
+printf 'c\n1B, 2A\nPreserves existing callers\n\n' | \
+  prompt_open_issue 334 > "$fixture_root/prompt-decision-output"
+grep -Fq '[c] Decide' "$fixture_root/prompt-decision-output"
+view_count="$(grep -Fc 'viewed #334' "$fixture_root/prompt-decision-output")"
+check "opened Issue refreshes after a decision" "$view_count" "2"
+check "opened Issue decision passes rationale" "$(<"$prompt_capture")" \
+  $'334\n1B, 2A\n--rationale\nPreserves existing callers'
+
 if [[ "$failures" -ne 0 ]]; then
   printf '%s unit assertion(s) failed\n' "$failures" >&2
   exit 1
@@ -200,6 +251,7 @@ fi
 fake_bin="$fixture_root/bin"
 mkdir -p "$fake_bin"
 gh_calls="$fixture_root/gh-calls"
+gh_body="$fixture_root/gh-body"
 
 cat > "$fake_bin/gh" <<'SH'
 #!/bin/sh
@@ -263,9 +315,23 @@ case "$1 $2" in
     fi
     ;;
   "issue comment")
+    previous=""
+    for argument in "$@"; do
+      if [ "$previous" = "--body" ]; then
+        printf '%s' "$argument" > "$GH_BODY"
+      fi
+      previous="$argument"
+    done
     printf 'commented on #%s\n' "$3"
     ;;
   "issue create")
+    previous=""
+    for argument in "$@"; do
+      if [ "$previous" = "--body" ]; then
+        printf '%s' "$argument" > "$GH_BODY"
+      fi
+      previous="$argument"
+    done
     printf 'https://github.com/johnjallday/ori-agent/issues/999\n'
     ;;
   "issue edit")
@@ -281,6 +347,7 @@ chmod +x "$fake_bin/gh"
 
 export PATH="$fake_bin:$PATH"
 export GH_CALLS="$gh_calls"
+export GH_BODY="$gh_body"
 
 assert_call() {
   local expected="$1"
@@ -364,13 +431,13 @@ assert_call $'CALL\tissue\tview\t334\t--comments'
 # refuse BEFORE contacting GitHub - a pipe can never post by accident.
 : > "$gh_calls"
 status=0
-"$script" answer 334 "1B, 2A" < /dev/null > /dev/null 2> "$fixture_root/answer-refused" || status=$?
+"$script" decide 334 "1B, 2A" < /dev/null > /dev/null 2> "$fixture_root/decision-refused" || status=$?
 if [[ "$status" -ne 2 ]]; then
-  printf 'unconfirmed answer exited %s, want 2\n' "$status" >&2
+  printf 'unconfirmed decision exited %s, want 2\n' "$status" >&2
   exit 1
 fi
-grep -Fq "pass --yes to confirm" "$fixture_root/answer-refused"
-assert_no_github "an unconfirmed answer"
+grep -Fq "pass --yes to confirm" "$fixture_root/decision-refused"
+assert_no_github "an unconfirmed decision"
 
 : > "$gh_calls"
 status=0
@@ -381,11 +448,26 @@ if [[ "$status" -ne 2 ]]; then
 fi
 assert_no_github "an unconfirmed approve"
 
-# With --yes the write goes through, and the comment body survives as one
-# argument rather than being split on spaces.
+# With --yes the write goes through. The body carries a machine-recognizable
+# marker and optional rationale, while no label write is attempted here.
 : > "$gh_calls"
-"$script" answer 334 "1B, 2A" --yes > /dev/null
-assert_call $'CALL\tissue\tcomment\t334\t--body\t1B, 2A'
+: > "$gh_body"
+"$script" decide 334 "1B, 2A" --rationale "Preserves JSON consumers" --yes > "$fixture_root/decision-output"
+grep -Fq $'CALL\tissue\tcomment\t334\t--body\t<!-- ori-decision -->' "$gh_calls"
+check "posted decision body" "$(<"$gh_body")" \
+  $'<!-- ori-decision -->\n\n**Answers:** 1B, 2A\n\n**Rationale:** Preserves JSON consumers'
+grep -Fq "will remain in Needs my decision" "$fixture_root/decision-output"
+if grep -Fq $'issue\tedit' "$gh_calls"; then
+  printf 'recording a decision changed labels: %s\n' "$(cat "$gh_calls")" >&2
+  exit 1
+fi
+
+# `answer` remains a backwards-compatible alias for the guided decision write.
+: > "$gh_calls"
+: > "$gh_body"
+"$script" answer 334 "1A" --yes > /dev/null
+check "answer alias posts a decision" "$(<"$gh_body")" \
+  $'<!-- ori-decision -->\n\n**Answers:** 1A'
 
 # Capture is confirm-gated like every other write.
 : > "$gh_calls"
@@ -413,6 +495,26 @@ fi
 "$script" new "Map zoom is jumpy" --body "happens at 30% zoom" --yes > /dev/null
 assert_call $'CALL\tissue\tcreate\t--title\tMap zoom is jumpy\t--body\thappens at 30% zoom'
 
+# Bodies can come from a Markdown file or stdin. They are read once before the
+# preview, then passed verbatim as one argument to gh.
+cat > "$fixture_root/issue-body.md" <<'MD'
+## What happened
+
+Zoom jumps at 30%.
+MD
+: > "$gh_calls"
+: > "$gh_body"
+"$script" new "Map zoom is jumpy" --body-file "$fixture_root/issue-body.md" --yes > /dev/null
+if ! cmp -s "$fixture_root/issue-body.md" "$gh_body"; then
+  printf 'multiline body file changed while being posted\n' >&2
+  exit 1
+fi
+
+: > "$gh_calls"
+: > "$gh_body"
+printf 'captured from stdin' | "$script" new "Map zoom is jumpy" --body-file - --yes > /dev/null
+check "stdin body survives" "$(<"$gh_body")" "captured from stdin"
+
 # An ampersand must survive verbatim; HTML-escaping it here would leave a
 # literal &amp; in the Issue title forever.
 : > "$gh_calls"
@@ -435,7 +537,7 @@ if grep -Eq -- '--add-label[[:space:]]*$|labels' "$gh_calls"; then
 fi
 
 # Invalid invocations fail before contacting GitHub.
-for invalid in "view" "view nope" "view 0" "view 334 extra" "all extra" "ready extra" "unknown" "answer" "answer 334" "answer nope text" "approve" "approve nope" "approve 334 extra" "new" "new --yes" "new title --body" "status extra"; do
+for invalid in "view" "view nope" "view 0" "view 334 extra" "all extra" "ready extra" "unknown" "decide" "decide 334" "decide nope text" "decide 334 1A --rationale" "answer" "answer 334" "approve" "approve nope" "approve 334 extra" "new" "new --yes" "new title --body" "new title --body-file" "new title --body-file /missing" "new title --body text --body-file /missing" "status extra"; do
   : > "$gh_calls"
   status=0
   # Intentional word splitting turns each fixture into an argument vector.
@@ -488,6 +590,35 @@ grep -Fq "simulated GitHub failure" "$fixture_root/failure-output"
 assert_call $'CALL\tissue\tlist\t--state\topen\t--limit\t1000'
 
 # ---------------------------------------------------------------------------
+# Picker-only interactions are wired structurally because run_picker requires a
+# real TTY. Enter and c must share the opened-Issue session (c starts its Decide
+# action), `?` must expose help, and number shortcuts must match the line REPL.
+# ---------------------------------------------------------------------------
+if ! grep -Fq 'with_normal_terminal_session prompt_open_issue "${issue_numbers[$selected_index]}" c' "$script"; then
+  printf 'the picker c key does not enter Decide within the opened Issue\n' >&2
+  exit 1
+fi
+if ! grep -Fqx '          with_normal_terminal_session prompt_open_issue "${issue_numbers[$selected_index]}"' "$script"; then
+  printf 'the picker Enter key does not open the interactive Issue view\n' >&2
+  exit 1
+fi
+if ! grep -Fq 'with_normal_terminal print_picker_help' "$script"; then
+  printf 'the picker ? key does not show help\n' >&2
+  exit 1
+fi
+for mapping in \
+  '1) filter_index=1' \
+  '2) filter_index=2' \
+  '3) filter_index=3' \
+  '4) filter_index=4' \
+  '5) filter_index=0'; do
+  if ! grep -Fq "$mapping" "$script"; then
+    printf 'picker shortcut mapping is missing: %s\n' "$mapping" >&2
+    exit 1
+  fi
+done
+
+# ---------------------------------------------------------------------------
 # The picker's `s` key.
 #
 # run_picker only runs on a real TTY (it enters the alternate screen and puts
@@ -517,6 +648,11 @@ if [[ -z "$s_branch" ]]; then
 fi
 if grep -Eq 'load_picker_index|apply_picker_filter|reload=1' <<< "$s_branch"; then
   printf 'the s key re-queries GitHub or resets the view: %s\n' "$s_branch" >&2
+  exit 1
+fi
+
+if [[ "$failures" -ne 0 ]]; then
+  printf '%s assertion(s) failed\n' "$failures" >&2
   exit 1
 fi
 

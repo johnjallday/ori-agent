@@ -7,18 +7,18 @@ at a time, harvesting product gaps as backlog entries while doing it.
 `#dogfood` in its title or body. The loop's job is to feed itself.
 
 ```bash
-gh issue create --title "#dogfood <the friction, in one line>" --body "<what you were doing>"
-./scripts/devops.sh                 # every open Issue, then the label-filter REPL
+./scripts/devops.sh new "#dogfood <the friction, in one line>" --body "<what you were doing>"
+./scripts/devops.sh                 # picker: inspect, decide, capture, or approve
 ./scripts/devops.sh view <number>   # the full idea before deciding anything
 ```
 
 Capture it while you are annoyed, not later. One line is enough; the body is optional and the
 Issue needs no label, milestone, assignee, or Project to count.
 
-**Selecting the day's work stays manual.** `./scripts/devops.sh` reads Issues and filters
-them by workflow label; `gh issue create` captures. Choosing what to do next and changing
-labels is done by hand in GitHub. That is deliberate: the selection workflow gets designed
-after enough days of doing it manually to know what it should be.
+**Selecting the day's work stays manual.** `./scripts/devops.sh` captures and reads Issues,
+filters them by workflow label, records marked answers to open questions, and owns the explicit
+`approved` gate. The grooming routine still owns triage, sizing, and bundling; recording a
+decision does not silently perform those transitions.
 
 **Safety rule:** Cowork stays the fallback at every stage. Dogfooding must never block real
 development. A stage's Ori version becomes the default only when it meets its graduation

@@ -90,8 +90,8 @@ one-shot commands expose the same views to scripts and agents.
 | `./scripts/devops.sh proposals` | reads open Issues labeled `feature-proposal` |
 | `./scripts/devops.sh status` | reads which group each task list is on, and whether its branch has a worktree — local only |
 | `./scripts/devops.sh view <n>` | reads one Issue in full |
-| `./scripts/devops.sh new <title>` | **writes** a new unlabelled Issue, confirm-gated |
-| `./scripts/devops.sh answer <n> <text>` | **writes** a comment, confirm-gated |
+| `./scripts/devops.sh new <title> [--body <text> \| --body-file <path\|->]` | **writes** a new unlabelled Issue with optional context, confirm-gated |
+| `./scripts/devops.sh decide <n> <answers> [--rationale <text>]` | **writes** a marked decision comment, confirm-gated (`answer` is an alias) |
 | `./scripts/devops.sh approve <n>` / `unapprove <n>` | **writes** the `approved` label, confirm-gated |
 
 The script delegates directly to `gh issue list`, `gh issue view`,
@@ -104,11 +104,20 @@ questions, and setting `approved` — the single gate the grooming routine is
 forbidden from touching. They confirm before writing and refuse without a
 terminal unless given `--yes`.
 
-`new` creates the Issue with **no labels**, on purpose: a raw ten-second capture
-has to reach the grooming routine untriaged, or it skips the spec step the
-pipeline is built around. Everything else about an Issue's lifecycle — triaging,
-sizing, bundling, closing — belongs to the grooming routine or to the PR that
-implements the work.
+`new` accepts an optional one-line body in the picker (`:edit` opens `$VISUAL`
+or `$EDITOR` for multiline Markdown), `--body` text, or `--body-file` input. It
+still creates the Issue with **no labels**, on purpose: a raw capture has to
+reach the grooming routine untriaged, or it skips the spec step the pipeline is
+built around.
+
+`decide` records answers in a comment marked `<!-- ori-decision -->`. In the
+picker, the opened Issue owns the interaction: its `c` action asks for choices
+such as `1B, 2A` and an optional rationale, then refreshes so the persisted
+answer is visible; list-level `c` shortcuts into that action. It deliberately
+leaves `needs-decision` in place until the grooming routine reads the answer and
+performs triage. Everything else
+about an Issue's lifecycle — triaging, sizing, bundling, closing — belongs to
+that routine or to the PR that implements the work.
 
 `status` and the picker's in-flight column resolve an Issue to work-in-progress
 through the naming convention above: branch `fix/339-slug` and task file

@@ -509,19 +509,26 @@ lists every open Issue before prompting for another view.
 ./scripts/devops.sh proposals          # label: feature-proposal
 ./scripts/devops.sh status             # which group each task list is on
 ./scripts/devops.sh view <number>      # one Issue in full
-./scripts/devops.sh new <title>        # capture, confirm-gated
-./scripts/devops.sh answer <n> <text>  # comment, confirm-gated
+./scripts/devops.sh new <title>                    # quick title-only capture
+./scripts/devops.sh new <title> --body <text>      # optional inline context
+./scripts/devops.sh new <title> --body-file <path|-> # Markdown file or stdin
+./scripts/devops.sh decide <n> <answers> [--rationale <why>] # marked decision
+./scripts/devops.sh answer <n> <answers>             # alias for decide
 ./scripts/devops.sh approve <n>        # add `approved`, confirm-gated
 ~~~
 
 In a terminal, the colorful picker accepts `↑/↓` or `j/k` to select an Issue,
-`←/→` or `h/l` for those five list views, `Enter` to inspect it, `n` to capture a
-new Issue, `c` to answer its open questions, `o` to approve it, `s` to print its
-planning command, `r` to refresh, and `q` to quit. In a pipe or redirected
-shell, the line REPL accepts `1/a`, `2/d`, `3/b`, `4/f`, and `5/y`, plus
-`v <number>`, `n <title>`, `c <number> <text>`, and `ok <number>`. Lists include
-every author and only open Issues. Filters are literal labels; no Project board
-or rank participates.
+`←/→` or `h/l` for those five list views, and `1`–`5` in the same order as the
+line REPL. `Enter` opens an Issue with an action bar where `c` decides, `r`
+refreshes the detail, and Enter returns to the list; the list's `c` key opens
+that same Issue directly at its decision answers. `n` captures one with an
+optional body, `o` approves it, `s` prints its planning command, list-level `r`
+refreshes, `?` shows help, and `q` quits. `:edit` at the body prompt opens
+`$VISUAL` or `$EDITOR` for multiline Markdown. In a pipe or redirected shell,
+the line REPL accepts `1/a`, `2/d`, `3/b`, `4/f`, and
+`5/y`, plus `v <number>`, `n <title>`, `c <number> <answers>`, and `ok <number>`.
+Lists include every author and only open Issues. Filters are literal labels; no
+Project board or rank participates.
 
 The `s` key is the one link from this REPL to the planning flow above, and it
 is deliberately the weakest possible one: in the Ready view it *prints*
@@ -534,6 +541,14 @@ here — capturing an idea, answering a spec's open questions, and setting
 `approved`, the one label the grooming routine may never write. All confirm
 first, and refuse without a terminal unless given `--yes`. A captured Issue gets
 no labels: it must reach the grooming routine untriaged so the spec step runs.
+Its optional body can come from an inline prompt, `$VISUAL`/`$EDITOR`, a file,
+or stdin.
+
+`decide` (and its `answer` alias) posts `<!-- ori-decision -->` plus the selected
+answers and optional rationale. In the picker this happens within the opened
+Issue, which refreshes after posting so the persisted answer is visible. It
+deliberately leaves `needs-decision` in place: the grooming routine reads that
+marked comment and owns the later triage and sizing transition.
 
 `status`, and the picker's in-flight column, are the one part of the REPL that
 overlaps this document's subject — and they deliberately do **not** call Herdr.
@@ -555,10 +570,11 @@ contacts GitHub not at all.
 The terminal picker fetches the complete open-Issue index once and filters it
 locally until `r` refreshes it; it does not persist a cache, source `wt`, invoke
 the Herdr helper, or define a JSON contract. Agents that need structured data
-should use `gh issue list --json` directly. Capture likewise remains the GitHub
-CLI's job:
+should use `gh issue list --json` directly. Capture remains a thin wrapper over the GitHub CLI, and either surface is valid:
 
 ~~~bash
+./scripts/devops.sh new "<title>" --body "<optional context>"
+./scripts/devops.sh new "<title>" --body-file notes.md
 gh issue create --title "<title>" --body "<optional context>"
 gh issue list --state open --limit 1000 --json number,title,author,labels,url,createdAt,updatedAt
 ~~~

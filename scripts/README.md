@@ -158,8 +158,11 @@ One command covers the human issue workflow:
 ./scripts/devops.sh proposals          # label: feature-proposal
 ./scripts/devops.sh status             # which group each task list is on
 ./scripts/devops.sh view <number>      # one Issue in full
-./scripts/devops.sh new <title>        # capture an Issue (confirm-gated)
-./scripts/devops.sh answer <n> <text>  # post a comment (confirm-gated)
+./scripts/devops.sh new <title>                         # quick title-only capture
+./scripts/devops.sh new <title> --body <text>           # optional inline context
+./scripts/devops.sh new <title> --body-file <path|->     # Markdown file or stdin
+./scripts/devops.sh decide <n> <answers> [--rationale <why>] # marked decision
+./scripts/devops.sh answer <n> <answers>                   # alias for decide
 ./scripts/devops.sh approve <n>        # add the approved label (confirm-gated)
 ./scripts/devops.sh unapprove <n>      # remove it again
 ```
@@ -170,12 +173,18 @@ are neither already covered by a proposal (`bundled`) nor already chosen
 and again as its members.
 
 In a terminal, the colorful picker uses `↑/↓` or `j/k` to select an Issue,
-`←/→` or `h/l` to change views, `Enter` to inspect it, `n` to capture a new
-Issue, `c` to answer its open questions, `o` to approve it, `s` to print its
-planning command, `r` to refresh, and `q` to quit. In a pipe or redirected
-shell, the line REPL remains available: use
-`1/a`, `2/d`, `3/b`, `4/f`, or `5/y` to change views, `v <number>` to inspect,
-`n <title>` to capture, `c <number> <text>` to answer, and `ok <number>` to
+`←/→` or `h/l` to change views, and the same `1`–`5` view order shown by the
+line REPL. `Enter` opens an Issue and keeps you there with an action bar:
+`c` records a decision, `r` refreshes the opened Issue, and Enter returns to the
+list. The list's `c` key is a shortcut that opens the same Issue directly at its
+decision answers. `n` captures a new Issue with an optional body, `o` approves
+it, `s` prints its planning command, `r` refreshes the list, `?` shows help, and
+`q` quits. At the new-Issue body prompt, a blank line keeps capture title-only
+and `:edit` opens `$VISUAL` or `$EDITOR` for multiline Markdown.
+
+In a pipe or redirected shell, the line REPL remains available: use `1/a`,
+`2/d`, `3/b`, `4/f`, or `5/y` to change views, `v <number>` to inspect,
+`n <title>` to capture, `c <number> <answers>` to decide, and `ok <number>` to
 approve. The default and `all` view include every author; closed Issues stay out
 of lists.
 
@@ -218,17 +227,27 @@ would only update when you commit. It also means the numbers are exactly as
 honest as the file — a shipped feature whose boxes were never ticked will read
 `0/6`.
 
-**Writes.** `new`, `answer`, `approve` and `unapprove` are the only mutating
-commands. Each prints what it will do and asks for confirmation; without a
-terminal they refuse unless given `--yes`, so a pipe can never write by
-accident.
+**Writes.** `new`, `decide`, `approve` and `unapprove` are the only mutating
+commands; `answer` is a backwards-compatible alias for `decide`. Each prints
+what it will do and asks for confirmation; without a terminal they refuse unless
+given `--yes`, so a pipe can never write by accident.
 
 `new` exists because capture is supposed to take ten seconds — a title is
-enough, and the grooming routine researches and specs it on its next run. **It
-deliberately applies no labels.** Adding `backlog` here would skip the spec step
-the whole pipeline is built around, and `needs-decision` would assert a spec
-exists when none does. Titles are passed through verbatim, so an ampersand stays
-an ampersand rather than becoming a literal `&amp;`.
+enough, and the grooming routine researches and specs it on its next run. An
+optional body can come from the picker, `--body <text>`, `--body-file <path>`, or
+stdin with `--body-file -`. **The command deliberately applies no labels.**
+Adding `backlog` here would skip the spec step the whole pipeline is built
+around, and `needs-decision` would assert a spec exists when none does. Titles
+and bodies are passed through verbatim, so an ampersand stays an ampersand
+rather than becoming a literal `&amp;`.
+
+`decide` records choices such as `1B, 2A` plus an optional rationale in a comment
+marked `<!-- ori-decision -->`. The opened Issue owns this interaction: its
+`c` action collects the answers in place, posts them, and refreshes the Issue so
+the recorded comment is visible before returning to the list. The list's `c`
+key enters that same action directly. Recording the answer does **not** remove
+`needs-decision`: grooming owns triage and sizing, so the row remains until that
+routine processes the marked comment.
 
 `approved` is the pipeline's single human gate — the grooming routine is
 forbidden from writing it — which is why setting it belongs here. Label changes
@@ -247,9 +266,12 @@ non-zero exit status instead of looking like an empty backlog.
 The product backlog is GitHub Issues. There is no backlog file to maintain,
 sync, or prune, and no backlog commit ever lands on `dev`.
 
-Capture and machine-readable reads use the GitHub CLI directly:
+The same capture paths are available directly through `gh`, and agents that
+need machine-readable reads should use its JSON output:
 
 ```bash
+./scripts/devops.sh new "<title>" --body "<optional context>"
+./scripts/devops.sh new "<title>" --body-file notes.md
 gh issue create --title "<title>" --body "<optional context>"
 gh issue list --state open --limit 1000 --json number,title,author,labels,url,createdAt,updatedAt
 ```
