@@ -196,7 +196,6 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete) {
   let trigger = null; // #cockpitQuestsToggle — the always-available compact entry point.
   let knownCompleted = null; // Set of completed quest IDs; null until first load.
   let knownTierComplete = {}; // tier number -> bool, from the previous render.
-  let latestStatus = null;
 
   function el(role) {
     return widget ? widget.querySelector(`[data-role="${role}"]`) : null;
@@ -352,7 +351,6 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete) {
 
   function render(status) {
     if (!widget) return;
-    latestStatus = status;
 
     const current = currentTier(status);
 

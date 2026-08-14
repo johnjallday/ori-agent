@@ -1334,8 +1334,22 @@ test('panelTriggerId: no panel open means no focus restoration target', () => {
 // ===========================================================================
 
 test('togglePanelState: a full walk through every trigger never leaves more than one panel value at a time', () => {
-  const trail = [PANEL_UPDATES, PANEL_QUESTS, PANEL_QUESTS, PANEL_CAPTURE, PANEL_UPDATES, PANEL_UPDATES];
-  const expected = [PANEL_UPDATES, PANEL_QUESTS, PANEL_NONE, PANEL_CAPTURE, PANEL_UPDATES, PANEL_NONE];
+  const trail = [
+    PANEL_UPDATES,
+    PANEL_QUESTS,
+    PANEL_QUESTS,
+    PANEL_CAPTURE,
+    PANEL_UPDATES,
+    PANEL_UPDATES
+  ];
+  const expected = [
+    PANEL_UPDATES,
+    PANEL_QUESTS,
+    PANEL_NONE,
+    PANEL_CAPTURE,
+    PANEL_UPDATES,
+    PANEL_NONE
+  ];
   let panel = PANEL_NONE;
   const observed = trail.map(requested => {
     panel = togglePanelState(panel, requested);

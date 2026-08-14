@@ -223,11 +223,7 @@
   max-height: min(70vh, 560px);
   margin-top: 8px;
   border: 1px solid var(--hc-line);
-  background: linear-gradient(
-    160deg,
-    var(--hc-panel-raised),
-    var(--hc-panel)
-  );
+  background: linear-gradient(160deg, var(--hc-panel-raised), var(--hc-panel));
   box-shadow: var(--hc-shadow);
 }
 

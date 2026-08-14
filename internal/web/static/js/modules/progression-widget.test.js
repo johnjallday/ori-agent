@@ -115,7 +115,11 @@ test('compactSummaryView: a skipped optional quest counts toward resolved, disti
     ]
   };
   const view = compactSummaryView(status);
-  assert.equal(view.resolved, 2, 'a skip resolves the quest for summary purposes, same as resolvedCount');
+  assert.equal(
+    view.resolved,
+    2,
+    'a skip resolves the quest for summary purposes, same as resolvedCount'
+  );
   assert.equal(view.total, 2);
   assert.equal(view.text, 'Tier 2 · 2/2');
 });

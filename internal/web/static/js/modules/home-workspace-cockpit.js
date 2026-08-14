@@ -1837,7 +1837,8 @@ import {
     }
     if (els.questsFlyout) els.questsFlyout.hidden = !openQuests;
 
-    if (els.captureBtn) els.captureBtn.setAttribute('aria-expanded', openCapture ? 'true' : 'false');
+    if (els.captureBtn)
+      els.captureBtn.setAttribute('aria-expanded', openCapture ? 'true' : 'false');
     if (els.capturePanel) els.capturePanel.hidden = !openCapture;
   }
 

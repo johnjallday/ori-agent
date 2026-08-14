@@ -830,6 +830,100 @@ test.describe('Header disclosure coordination', () => {
   });
 });
 
+/**
+ * Group 4 (Issue #334): responsive, accessible, and regression hardening —
+ * narrow-width sheet presentation, keyboard reachability, and confirming
+ * neither control leaked outside the Home cockpit header.
+ */
+test.describe('Responsive and regression hardening', () => {
+  test.beforeEach(async ({ page }) => {
+    await skipOnboarding(page);
+  });
+
+  test('at a narrow width Updates becomes a full-width sheet without horizontal overflow, and stays dismissible', async ({
+    page
+  }) => {
+    await ensureWorkspace(page);
+    await page.setViewportSize({ width: 480, height: 800 });
+    await page.goto('/');
+    await page.locator('.ws-map-tile[data-ws-id]').first().waitFor();
+
+    await page.locator('#cockpitRailToggle').click();
+    const flyout = page.locator('#cockpitUpdatesFlyout');
+    await expect(flyout).toBeVisible();
+
+    const layout = await page.evaluate(() => ({
+      pageWidth: document.documentElement.scrollWidth,
+      viewportWidth: window.innerWidth
+    }));
+    expect(layout.pageWidth).toBeLessThanOrEqual(layout.viewportWidth + 1);
+
+    // The close control must stay reachable and dismiss the sheet.
+    const close = page.locator('#cockpitUpdatesFlyout [data-cockpit-flyout-close]');
+    await expect(close).toBeVisible();
+    await close.click();
+    await expect(flyout).toBeHidden();
+  });
+
+  test('neither Updates nor Quests appears in global navigation, a workspace tile, or the Personal HQ landmark', async ({
+    page
+  }) => {
+    await ensureWorkspace(page);
+    await page.goto('/');
+    await page.locator('.ws-map-tile[data-ws-id]').first().waitFor();
+
+    // Exactly one of each, both inside the Home cockpit header — never
+    // duplicated into the navbar, a workspace tile, or a group/HQ landmark
+    // (FR5).
+    await expect(page.locator('#cockpitRailToggle')).toHaveCount(1);
+    await expect(page.locator('.cockpit-area-header-zone #cockpitRailToggle')).toHaveCount(1);
+    await expect(page.locator('.ori-navbar-links [id="cockpitRailToggle"]')).toHaveCount(0);
+    await expect(page.locator('.ws-map-tile [id="cockpitRailToggle"]')).toHaveCount(0);
+    await expect(page.locator('[data-hq-site] [id="cockpitRailToggle"]')).toHaveCount(0);
+    await expect(page.locator('.ori-navbar-links [id="cockpitQuestsToggle"]')).toHaveCount(0);
+    await expect(page.locator('.ws-map-tile [id="cockpitQuestsToggle"]')).toHaveCount(0);
+  });
+
+  test('the shared /workspaces Map never renders either header control', async ({ page }) => {
+    // /workspaces redirects to Home, so this confirms the redirect target is
+    // the only place these controls exist — there is no separate, older Map
+    // surface that could carry a stale copy.
+    await page.goto('/workspaces');
+    await expect(page).toHaveURL(/\/(\?.*)?$/);
+    await expect(page.locator('#cockpitRailToggle')).toHaveCount(1);
+    await expect(page.locator('#cockpitQuestsToggle')).toHaveCount(1);
+  });
+
+  test('Updates and Quests are keyboard-reachable in document order after the guide and before the view toggle', async ({
+    page
+  }) => {
+    await ensureWorkspace(page);
+    await page.goto('/');
+    await page.locator('.ws-map-tile[data-ws-id]').first().waitFor();
+
+    const order = await page.evaluate(() => {
+      const ids = ['oriGuideMapTrigger', 'cockpitRailToggle', 'cockpitQuestsToggle', 'cockpitViewMap'];
+      return ids.map(id => {
+        const el = document.getElementById(id);
+        if (!el) return -1;
+        // Position among all elements, to compare relative document order.
+        return Array.from(document.querySelectorAll('*')).indexOf(el);
+      });
+    });
+    const [guide, updates, quests, viewToggle] = order;
+    expect(guide).toBeGreaterThan(-1);
+    expect(updates).toBeGreaterThan(guide);
+    expect(quests).toBeGreaterThan(updates);
+    expect(viewToggle).toBeGreaterThan(quests);
+
+    // And genuinely Tab-reachable: focusing the guide, then Tab, lands on
+    // Updates next (FR53 — logical DOM order backs a logical focus order).
+    await page.locator('#oriGuideMapTrigger').focus();
+    await page.keyboard.press('Tab');
+    await expect(page.locator('#cockpitRailToggle')).toBeFocused();
+  });
+});
+
 async function titleOf(page: Page, id: string): Promise<string> {
   const name = await page
     .locator(`.ws-map-tile[data-ws-id="${id}"] .ws-map-tile-name`)

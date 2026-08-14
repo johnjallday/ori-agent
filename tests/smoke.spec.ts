@@ -507,7 +507,7 @@ test.describe('Home First Run', () => {
     }
   });
 
-  test('keeps the optional Daily Brief in its own row without overlapping Operations', async ({
+  test('keeps the optional Daily Brief inside the Updates flyout, below the command strip', async ({
     page
   }) => {
     await page.setViewportSize({ width: 1512, height: 805 });
@@ -532,28 +532,29 @@ test.describe('Home First Run', () => {
       element.hidden = false;
     });
 
-    // The Daily Brief used to sit in its own row between the command strip and
-    // the Operations Board. It now lives INSIDE the cockpit's Today rail, so
-    // "below the command strip and above Operations" is no longer the shape to
-    // assert. What still matters: it is a Today section, it sits below Ask Ori,
-    // and it never overlaps the workspace area (PRD FR75, FR15).
+    // The Daily Brief used to sit in its own row between the command strip
+    // and the Operations Board, then a Today section inside the cockpit
+    // rail. It now lives inside the Updates flyout (Issue #334), opened here
+    // explicitly since forcing the section's own `hidden` off does not reveal
+    // it through a still-closed ancestor flyout. What still matters: it is an
+    // Updates section, positioned below the command strip. It DOES overlap
+    // the workspace area underneath it now — that is the point of the
+    // flyout being an overlay rather than a side column (PRD FR21, FR75).
+    await page.locator('#cockpitRailToggle').click();
     const layout = await page.evaluate(() => {
       const command = document.getElementById('homeAssistantCard')?.getBoundingClientRect();
       const brief = document.getElementById('homeDailyBrief')?.getBoundingClientRect();
-      const area = document.querySelector('.cockpit-workspace-area')?.getBoundingClientRect();
       return {
         commandBottom: command?.bottom || 0,
         briefTop: brief?.top || 0,
-        briefLeft: brief?.left || 0,
-        areaRight: area?.right || 0,
-        inTodayRail: !!document.getElementById('homeDailyBrief')?.closest('#cockpitRailToday')
+        inUpdatesFlyout: !!document
+          .getElementById('homeDailyBrief')
+          ?.closest('#cockpitUpdatesFlyoutBody')
       };
     });
 
-    expect(layout.inTodayRail).toBe(true);
+    expect(layout.inUpdatesFlyout).toBe(true);
     expect(layout.briefTop).toBeGreaterThanOrEqual(layout.commandBottom);
-    // Beside the workspace area, not on top of it.
-    expect(layout.briefLeft).toBeGreaterThanOrEqual(layout.areaRight - 1);
   });
 
   test('Quests starts compact and opens/collapses without persisting an open state (Issue #334)', async ({

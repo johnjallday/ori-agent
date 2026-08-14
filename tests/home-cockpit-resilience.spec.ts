@@ -86,15 +86,11 @@ test.describe('Home cockpit resilience', () => {
     // FR113: a bounded, retryable error — not a blank cockpit.
     await expect(page.locator('[data-cockpit-retry]')).toBeVisible();
     await expect(page.locator('#homeAssistantInput')).toBeEnabled();
-    // The rail opens on demand, so what FR113 needs here is that it is still
-    // REACHABLE while the list is failing — a broken fetch must not take the
-    // rest of the cockpit down with it. Only click when it is actually closed:
-    // a blind click would close a rail the fixture had already opened.
-    const cockpit = page.locator('#homeCockpit');
-    if ((await cockpit.getAttribute('data-rail-open')) !== 'true') {
-      await page.locator('#cockpitRailToggle').click();
-    }
-    await expect(page.locator('#cockpitRailToday')).toBeVisible();
+    // Updates (Issue #334) must still be reachable while the workspace list
+    // is failing — a broken fetch must not take the rest of the header down
+    // with it.
+    await page.locator('#cockpitRailToggle').click();
+    await expect(page.locator('#cockpitUpdatesFlyout')).toBeVisible();
 
     // Retry recovers rather than requiring a reload.
     fail = false;
@@ -211,7 +207,10 @@ test.describe('Home cockpit resilience', () => {
     await page.evaluate(() => window.OriHomeCockpit?.refreshQuietly?.());
     await page.waitForTimeout(1200);
 
-    await expect(page.locator('#cockpitRailToday')).toBeVisible();
+    // Today has no rail content of its own now (Issue #334) — returning to it
+    // closes the rail. #cockpitRailLive lives OUTSIDE the rail specifically so
+    // this notice is still heard even though its container just closed.
+    await expect(page.locator('#homeCockpit')).toHaveAttribute('data-rail-open', 'false');
     await expect(page.locator('#cockpitRailLive')).toContainText(/no longer available/i);
   });
 });

@@ -279,7 +279,13 @@
         </header>
         <div class="cockpit-flyout-body">
           <!-- Populated by progression-widget.js from GET /api/progression. -->
-          <div id="questLog" class="quest-log" hidden aria-live="polite">
+          <!-- Not aria-live: render() rewrites tier-name/progress-count/quest
+               rows on every 20s poll even when nothing changed, and a live
+               region announces a textContent rewrite regardless of whether
+               the string actually differs — which would reannounce this
+               whole panel every poll while it is open (FR54). Real
+               completions still announce, through the existing toast. -->
+          <div id="questLog" class="quest-log" hidden>
             <div class="quest-log-inner">
               <header class="quest-log-header">
                 <span class="quest-log-insignia" data-role="tier-insignia" aria-hidden="true">01</span>

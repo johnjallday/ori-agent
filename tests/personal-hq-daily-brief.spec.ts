@@ -52,6 +52,9 @@ test.describe.serial('Personal HQ onboarding and Daily Brief', () => {
     expect(res.ok()).toBeTruthy();
     await page.goto('/');
 
+    // Issue #334: Mission 01 lives inside the Quests flyout now, closed by
+    // default — open it to reach the real content.
+    await page.locator('#cockpitQuestsToggle').click();
     const mission = page.locator('[data-role="first-mission"]');
     await expect(mission).toBeVisible();
     await expect(mission).toContainText('Build My HQ');
@@ -169,6 +172,8 @@ test.describe.serial('Personal HQ onboarding and Daily Brief', () => {
     const rootResponse = await page.request.get('/api/settings/workspace-root');
     expect(rootResponse.ok()).toBeTruthy();
     expect((await rootResponse.json()).confirmed).toBe(true);
+    // Issue #334: Daily Brief lives inside the Updates flyout now.
+    await page.locator('#cockpitRailToggle').click();
     await expect(page.locator('#homeDailyBrief')).toBeVisible();
     await expect(page.locator('#homeHQResume')).toHaveCount(0);
 
@@ -196,6 +201,8 @@ test.describe.serial('Personal HQ onboarding and Daily Brief', () => {
     page
   }) => {
     await page.goto('/');
+    // Issue #334: Daily Brief lives inside the Updates flyout now.
+    await page.locator('#cockpitRailToggle').click();
     await expect(page.locator('#homeDailyBrief')).toBeVisible();
     const bodyBefore = await page.locator('#homeDailyBriefBody').innerText();
 
@@ -214,8 +221,10 @@ test.describe.serial('Personal HQ onboarding and Daily Brief', () => {
 
   test('Brief settings modal opens scoped to the HQ and shows recent history', async ({ page }) => {
     await page.goto('/');
+    // Issue #334: Daily Brief lives inside the Updates flyout now.
+    await page.locator('#cockpitRailToggle').click();
     // Secondary brief actions live behind the header's overflow disclosure;
-    // only Refresh keeps permanent space in the rail.
+    // only Refresh keeps permanent space in the flyout.
     await page.locator('#homeDailyBriefMenu > summary').click();
     await page.locator('#homeDailyBriefSettingsBtn').click();
     await expect(page.locator('#homeDailyBriefSettingsModal')).toBeVisible();
