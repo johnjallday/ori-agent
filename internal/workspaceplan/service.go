@@ -25,6 +25,9 @@ type Service struct {
 	// generator proposes Plan content. It is optional: without it every
 	// non-generating operation still works (FR-58, FR-177).
 	generator *Generator
+	// events publishes redacted lifecycle notifications. Optional: without it
+	// nothing is announced, which is a quiet build rather than a broken one.
+	events PlanEventPublisher
 }
 
 // ProgressSource computes a Plan's progress from the linked Tasks and Runs.
@@ -250,9 +253,12 @@ func (s *Service) Transition(ctx context.Context, workspaceID, planID string, in
 	change.RunID = input.RunID
 	change.CreatedAt = s.now()
 
-	if err := s.store.SetPlanStatus(ctx, workspaceID, planID, input.To, change); err != nil {
+	// The write and its announcement travel together, so a state nobody was
+	// told about is not a thing that can happen (FR-172).
+	if err := s.setStatus(ctx, workspaceID, planID, input.To, change); err != nil {
 		return nil, err
 	}
+
 	return s.Get(ctx, workspaceID, planID)
 }
 

@@ -102,7 +102,7 @@ func (s *Service) RequestReview(ctx context.Context, workspaceID, planID string,
 	change.Kind = ActivityReviewRequested
 	change.Version = version.Number
 	change.CreatedAt = now
-	if err := s.store.SetPlanStatus(ctx, workspaceID, planID, StatusInReview, change); err != nil {
+	if err := s.setStatus(ctx, workspaceID, planID, StatusInReview, change); err != nil {
 		return nil, err
 	}
 	return version, nil
