@@ -28,6 +28,9 @@ type Handler struct {
 	// no workspace-specific guidance and no assignment checking.
 	resolveGuidance     GuidanceResolver
 	resolveAvailability AvailabilityResolver
+	// materializer spends approvals. It is optional so the API still serves
+	// reads and drafting in a build with no task store wired.
+	materializer *Materializer
 }
 
 // GuidanceResolver returns the model-guidance half of a workspace's planning
@@ -50,6 +53,9 @@ func (h *Handler) SetGuidanceResolver(resolve GuidanceResolver) { h.resolveGuida
 func (h *Handler) SetAvailabilityResolver(resolve AvailabilityResolver) {
 	h.resolveAvailability = resolve
 }
+
+// SetMaterializer attaches the service that spends approvals.
+func (h *Handler) SetMaterializer(materializer *Materializer) { h.materializer = materializer }
 
 // planResponse is the wire shape of a Plan. It is written explicitly rather
 // than by serializing the domain type directly, so adding an internal field
@@ -680,6 +686,48 @@ func (h *Handler) PlanApprovals(w http.ResponseWriter, r *http.Request) {
 	default:
 		orihttp.MethodNotAllowed(w)
 	}
+}
+
+// PlanMaterialize handles POST .../materialize — spend an approval and create
+// the work it authorized (FR-81).
+//
+// It is separate from approval on purpose. Approval is the user's decision and
+// is recorded durably; materialization is the effect, and separating them is
+// what lets a retry replay the original result instead of doing the work twice
+// (FR-72, FR-73, FR-99).
+func (h *Handler) PlanMaterialize(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+	workspaceID, planID := requireWorkspaceAndPlanID(w, r)
+	if workspaceID == "" || planID == "" {
+		return
+	}
+	if h.materializer == nil {
+		writeError(w, fmt.Errorf("%w: materialization is not configured", ErrValidation))
+		return
+	}
+
+	var req struct {
+		ApprovalID string `json:"approval_id"`
+	}
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+	if strings.TrimSpace(req.ApprovalID) == "" {
+		writeError(w, fmt.Errorf("%w: approval_id is required", ErrValidation))
+		return
+	}
+
+	result, err := h.materializer.Materialize(r.Context(), workspaceID, planID, MaterializeInput{
+		ApprovalID: req.ApprovalID,
+		Validation: h.availability(r.Context(), workspaceID),
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	orihttp.Success(w, result)
 }
 
 // PlanReviseApproved handles POST .../revise-approved — start a new working

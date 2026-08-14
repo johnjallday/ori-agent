@@ -242,6 +242,39 @@ func NextStatuses(from Status) []Status {
 	return next
 }
 
+// ValidateApprovalTransition authorizes an approval transition with a real,
+// consumed approval record rather than with a claimed source.
+//
+// This exists because materialization is compiled service code that acts ON a
+// user's decision: the user approved, and moving the Plan to approved is the
+// consequence of spending that approval. Letting the materializer simply claim
+// SourceUser would weaken the guarantee to "any code that says it is a user".
+// Requiring the approval record itself makes it stronger — the transition needs
+// evidence, not an assertion (FR-59, FR-94).
+func ValidateApprovalTransition(from, to Status, approval *Approval, planID string, version int) error {
+	if !RequiresUserApproval(from, to) {
+		return ValidateTransition(from, to, SourceService)
+	}
+	if approval == nil {
+		return fmt.Errorf("%w: %s to %s requires an approval record", ErrApprovalAuthority, from, to)
+	}
+	if approval.PlanID != planID || approval.Version != version {
+		return fmt.Errorf("%w: the approval does not belong to this plan version", ErrApprovalMismatch)
+	}
+	// Only a spent approval authorizes the move. An approval that exists but
+	// has not been consumed has not yet caused anything.
+	if !approval.Consumed() {
+		return fmt.Errorf("%w: the approval has not been consumed", ErrApprovalAuthority)
+	}
+	if approval.Invalidated() {
+		return fmt.Errorf("%w: the approval was invalidated", ErrApprovalMismatch)
+	}
+	if !CanTransition(from, to) {
+		return fmt.Errorf("%w: %s cannot move to %s", ErrInvalidTransition, from, to)
+	}
+	return nil
+}
+
 // ValidateTransition checks one proposed status change against the transition
 // table and the approval-source invariant. It is the single gate every
 // lifecycle mutation passes through (FR-14).

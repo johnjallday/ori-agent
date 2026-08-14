@@ -522,6 +522,10 @@ func (b *ServerBuilder) initializeHandlers() {
 		workspaceplan.NewLLMPlanModel(b.resolvePlanningProvider)))
 	b.workspacePlanHandler = workspaceplan.NewHandler(b.workspacePlanService)
 	b.workspacePlanHandler.SetAvailabilityResolver(b.resolvePlanAvailability)
+	// The materializer is NOT built here: b.workspaceStore is still nil at this
+	// phase, and capturing it now would leave materialization permanently
+	// disabled with no error to show for it. It is wired in
+	// attachWorkspacePlanMaterializer once the store exists.
 	logger.Info("Workspace Plans initialized", logger.Fields{
 		"durable": b.sessionStore != nil,
 	})

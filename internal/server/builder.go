@@ -248,9 +248,10 @@ type ServerBuilder struct {
 
 	// Workspace Planning Workflow — durable Plans, review, approval, and the
 	// materialization of approved work into existing Tasks and Runs.
-	workspacePlanStore   workspaceplan.Store
-	workspacePlanService *workspaceplan.Service
-	workspacePlanHandler *workspaceplan.Handler
+	workspacePlanStore        workspaceplan.Store
+	workspacePlanService      *workspaceplan.Service
+	workspacePlanHandler      *workspaceplan.Handler
+	workspacePlanMaterializer *workspaceplan.Materializer
 
 	// Skills (local + external)
 	skillsManager *skills.Manager

@@ -289,12 +289,103 @@ smoke_review() {
   echo "--- Plan review smoke passed ---"
 }
 
+# plan_task_count reports how many of a workspace's tasks were created by ONE
+# plan. It reads the workspace detail rather than a tasks endpoint, because the
+# tasks ARE the workspace's tasks — there is no separate plan task store to
+# query (FR-11).
+#
+# Counting by plan id rather than by "has plan provenance" keeps the script
+# rerunnable against a sandbox that already holds tasks from an earlier plan.
+plan_task_count() {
+  curl -s "$BASE_URL/api/workspaces/$1" | python3 -c '
+import sys, json
+plan_id = sys.argv[1]
+d = json.load(sys.stdin)
+ws = d.get("workspace", d)
+tasks = ws.get("tasks") or []
+print(sum(1 for t in tasks
+          if ((t.get("context") or {}).get("workspace_plan") or {}).get("plan_id") == plan_id))' "$2"
+}
+
+smoke_materialize() {
+  local ws="$1"
+  [[ -n "$ws" ]] || fail "usage: smoke.sh materialize <base-url> <workspace-id>"
+
+  echo "--- Plan materialization ($ws) ---"
+
+  local plan
+  plan=$(curl -s -X POST "$BASE_URL/api/workspaces/$ws/plans" \
+    -H 'Content-Type: application/json' \
+    -d '{"request":"Plan the reporting migration"}' | json_field id)
+  [[ -n "$plan" ]] || fail "plan creation returned no id"
+  local base="$BASE_URL/api/workspaces/$ws/plans/$plan"
+
+  curl -s -X PATCH "$base/draft" -H 'Content-Type: application/json' -d '{
+    "objective":"Migrate reporting safely","revision":0,
+    "content":{"execution":{"mode":"step_through"},
+      "artifacts":[{"id":"art-1","kind":"prd","path":"tasks/prd-smoke.md","enabled":true}],
+      "groups":[
+        {"id":"grp-1","title":"Prepare","items":[
+          {"id":"itm-1","description":"Snapshot staging"},
+          {"id":"itm-2","description":"Verify checksums","depends_on":["itm-1"]}]},
+        {"id":"grp-2","title":"Cut over","depends_on":["grp-1"],"items":[
+          {"id":"itm-3","description":"Switch traffic"}]}]}}' > /dev/null
+
+  local version hash
+  version=$(curl -s -X POST "$base/versions" -H 'Content-Type: application/json' -d '{"actor":"smoke"}')
+  hash=$(echo "$version" | json_field content_hash)
+  [[ -n "$hash" ]] || fail "version has no content hash"
+
+  local approval
+  approval=$(curl -s -X POST "$base/approvals" -H 'Content-Type: application/json' \
+    -d "{\"version\":1,\"content_hash\":\"$hash\",\"effect\":\"create_tasks\",\"user_name\":\"smoke\",\"idempotency_key\":\"m1\"}" |
+    json_field id)
+  [[ -n "$approval" ]] || fail "approval returned no id"
+  echo "ok   approved version 1"
+
+  # Materialize: three groups/items become a real task tree.
+  local first
+  first=$(curl -s -X POST "$base/materialize" -H 'Content-Type: application/json' \
+    -d "{\"approval_id\":\"$approval\"}")
+  local created
+  created=$(echo "$first" | python3 -c 'import sys,json;print(len(json.load(sys.stdin).get("task_ids",[])))')
+  [[ "$created" == "5" ]] || fail "materialized $created tasks, want 5 (2 groups + 3 items): $first"
+  echo "ok   materialized 5 tasks"
+
+  # The tasks are real workspace tasks, not a plan-private copy.
+  local tasks
+  tasks=$(plan_task_count "$ws" "$plan")
+  [[ "$tasks" == "5" ]] || fail "workspace shows $tasks plan-created tasks, want 5"
+  echo "ok   tasks are real workspace tasks carrying plan provenance"
+
+  # The plan reached approved and links back to its tasks, both directions.
+  local status links
+  status=$(curl -s "$base" | json_field status)
+  [[ "$status" == "approved" ]] || fail "plan status = $status, want approved"
+  links=$(curl -s "$base" | python3 -c 'import sys,json;print(len(json.load(sys.stdin).get("task_links",[])))')
+  [[ "$links" == "5" ]] || fail "plan has $links task links, want 5"
+  echo "ok   plan approved with bidirectional task provenance"
+
+  # Retrying the same approval replays rather than duplicating (FR-73, SM-2).
+  local retry replayed
+  retry=$(curl -s -X POST "$base/materialize" -H 'Content-Type: application/json' \
+    -d "{\"approval_id\":\"$approval\"}")
+  replayed=$(echo "$retry" | json_field replayed)
+  [[ "$replayed" == "True" ]] || fail "the retry did not replay: $retry"
+  tasks=$(plan_task_count "$ws" "$plan")
+  [[ "$tasks" == "5" ]] || fail "the retry duplicated work: $tasks tasks"
+  echo "ok   retried materialization replayed without duplicating"
+
+  echo "--- Plan materialization smoke passed ---"
+}
+
 case "${1:-}" in
 plans) smoke_plans "${3:-}" ;;
 drafting) smoke_drafting "${3:-}" ;;
 review) smoke_review "${3:-}" ;;
+materialize) smoke_materialize "${3:-}" ;;
 *)
-  echo "usage: $0 {plans|drafting|review} <base-url> <workspace-id>" >&2
+  echo "usage: $0 {plans|drafting|review|materialize} <base-url> <workspace-id>" >&2
   exit 2
   ;;
 esac

@@ -47,6 +47,26 @@ export function clarificationLine(question) {
 // lost tab costs a sentence rather than a session.
 export const AUTOSAVE_DELAY_MS = 4000;
 
+// materializedMessage says what was created AND what happens next.
+//
+// Both halves matter. "Created 3 tasks" alone leaves the user guessing whether
+// anything is now running, which is exactly the question the approval label
+// was careful to answer (FR-64, FR-65).
+export function materializedMessage(result) {
+  const tasks = result?.task_ids?.length || 0;
+  const files = result?.artifact_paths?.length || 0;
+
+  const created = result?.replayed
+    ? `This approval was already used. It created ${tasks} task(s)`
+    : `Created ${tasks} task(s)`;
+  const withFiles = files > 0 ? `${created} and ${files} file(s)` : created;
+  const next = result?.start_execution
+    ? 'Eligible tasks will start automatically.'
+    : 'Nothing starts until you start it.';
+
+  return `${withFiles}. ${next}`;
+}
+
 // approvalButtonLabel returns the exact wording the primary action must carry.
 // It comes from the server's contract rather than being derived here, so the
 // label and the behavior behind it cannot drift apart (FR-64, FR-65).
@@ -145,6 +165,9 @@ export class WorkspacePlanPage {
     // contract is the loaded review contract. Approval binds to the version
     // and hash it carries, so it is held rather than re-derived.
     this.contract = null;
+    // materialization is the last result of spending an approval, including a
+    // failure, so the panel can offer a retry.
+    this.materialization = null;
     // availableAgents stays null until the roster is known. Null means "not
     // checked"; an empty array means "this workspace has no agents". Treating
     // the first as the second would flag every assignment as unavailable.
@@ -205,6 +228,13 @@ export class WorkspacePlanPage {
     const reject = this.el('#plan-reject');
     if (reject) {
       reject.addEventListener('click', () => void this.decide('reject'));
+    }
+    const retry = this.el('#plan-materialization-retry');
+    if (retry) {
+      retry.addEventListener('click', () => {
+        const approvalID = retry.dataset.approvalId;
+        if (approvalID) void this.materialize(approvalID);
+      });
     }
   }
 
@@ -497,12 +527,11 @@ export class WorkspacePlanPage {
           idempotency_key: this.approvalKey()
         })
       });
-      this.announce(
-        this.contract.starts_execution
-          ? `Approved version ${this.contract.version}. Work will start once tasks are created.`
-          : `Approved version ${this.contract.version}. Tasks will be created; nothing starts until you start it.`
-      );
-      await this.reload();
+      // Approving records the decision; spending it is the separate step that
+      // creates the work. Doing both here keeps the user's single click
+      // meaning what the button said it meant, and the message that lands
+      // describes what actually happened rather than what was about to.
+      await this.materialize(approval.id);
       return approval;
     } catch (error) {
       if (error.code === 'approval_mismatch' || error.code === 'stale_version') {
@@ -525,6 +554,79 @@ export class WorkspacePlanPage {
   approvalKey() {
     if (!this.contract) return '';
     return `${this.planId}:${this.contract.version}:${this.contract.content_hash}`;
+  }
+
+  // materialize spends an approval and creates the work it authorized.
+  //
+  // A failure here is recoverable by design: the approval stays usable, so the
+  // panel offers a retry rather than sending the user back to re-approve
+  // something they already approved (FR-99).
+  async materialize(approvalID) {
+    try {
+      const result = await this.request(`${this.basePath()}/materialize`, {
+        method: 'POST',
+        body: JSON.stringify({ approval_id: approvalID })
+      });
+      this.materialization = { ...result, approval_id: approvalID, error: null };
+      this.announce(materializedMessage(result));
+      await this.reload();
+      return result;
+    } catch (error) {
+      this.materialization = { approval_id: approvalID, error: error.message, task_ids: [] };
+      this.renderMaterialization();
+      this.announce(`Could not create the approved work: ${error.message}`, 'error');
+      return null;
+    }
+  }
+
+  // renderMaterialization reports what an approval produced, linking to the
+  // tasks and files rather than restating their state — the Task and Run
+  // records remain the truth about how that work is going (FR-11).
+  renderMaterialization() {
+    const panel = this.el('#plan-materialization-panel');
+    if (!panel) return;
+    const state = this.materialization;
+    panel.hidden = !state;
+    if (!state) return;
+
+    const summary = this.el('#plan-materialization-summary');
+    if (summary) {
+      if (state.error) {
+        summary.textContent = `Could not create the approved work: ${state.error}`;
+      } else {
+        const files = state.artifact_paths?.length
+          ? ` and ${state.artifact_paths.length} file(s)`
+          : '';
+        summary.textContent = state.replayed
+          ? `This approval had already been used. It created ${state.task_ids.length} task(s)${files}.`
+          : `Created ${state.task_ids.length} task(s)${files}.`;
+      }
+    }
+
+    const links = this.el('#plan-materialization-tasks');
+    if (links) {
+      links.innerHTML = (state.task_ids || [])
+        .map(
+          id =>
+            `<li><a href="/workspaces/${escapeHtml(this.workspaceId)}/task/${escapeHtml(id)}">${escapeHtml(id)}</a></li>`
+        )
+        .join('');
+    }
+
+    const files = this.el('#plan-materialization-artifacts');
+    if (files) {
+      const paths = state.artifact_paths || [];
+      files.hidden = paths.length === 0;
+      files.innerHTML = paths.map(path => `<li>${escapeHtml(path)}</li>`).join('');
+    }
+
+    // The retry is offered only when something actually failed; a successful
+    // materialization has nothing to retry.
+    const retry = this.el('#plan-materialization-retry');
+    if (retry) {
+      retry.hidden = !state.error;
+      retry.dataset.approvalId = state.approval_id || '';
+    }
   }
 
   async decide(decision, reason = '', actor = '') {
@@ -629,6 +731,7 @@ export class WorkspacePlanPage {
     this.renderClarifications(plan);
     this.renderEditor();
     this.renderSaveState();
+    this.renderMaterialization();
   }
 
   renderClarifications(plan) {

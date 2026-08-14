@@ -15,6 +15,31 @@ import (
 // settings and the agent roster change while the server runs, and a Plan
 // drafted after such a change should reflect it without a restart.
 
+// attachWorkspacePlanMaterializer wires materialization once the workspace
+// store exists.
+//
+// This runs late on purpose. Handlers are constructed in an earlier phase, when
+// b.workspaceStore is still nil; building the materializer there would capture
+// that nil and leave every materialization refused with "not configured" — a
+// silent no-op rather than a visible failure. The store's identity is captured
+// here, after it is real.
+func (b *ServerBuilder) attachWorkspacePlanMaterializer() {
+	if b.workspacePlanHandler == nil || b.workspacePlanService == nil || b.workspaceStore == nil {
+		return
+	}
+
+	b.workspacePlanMaterializer = workspaceplan.NewMaterializer(
+		b.workspacePlanService,
+		b.workspaceStore,
+		// Artifacts are written into the workspace's own files root, and the
+		// writer re-checks containment there rather than trusting the path it
+		// was handed (FR-97).
+		workspaceplan.WithArtifactWriter(
+			workspaceplan.NewFileArtifactWriter(b.workspaceStore.GetFilesPath)),
+	)
+	b.workspacePlanHandler.SetMaterializer(b.workspacePlanMaterializer)
+}
+
 // resolvePlanningProvider returns the provider and model to plan with.
 //
 // Planning uses the configured system model: it is a structured-output task

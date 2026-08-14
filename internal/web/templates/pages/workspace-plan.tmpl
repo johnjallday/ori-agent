@@ -123,6 +123,20 @@
             </div>
           </section>
 
+          <!-- What an approval produced. It links to the tasks and files
+               rather than restating their state: the task records remain the
+               truth about how that work is going (FR-11). -->
+          <section id="plan-materialization-panel" class="plan-card"
+                   aria-labelledby="plan-materialization-heading" hidden>
+            <h2 id="plan-materialization-heading" class="plan-card-title">Created work</h2>
+            <p id="plan-materialization-summary" class="plan-materialization-summary"></p>
+            <ul id="plan-materialization-tasks" class="plan-materialization-list"></ul>
+            <ul id="plan-materialization-artifacts" class="plan-materialization-list" hidden></ul>
+            <button type="button" id="plan-materialization-retry" class="plan-editor-btn" hidden>
+              Retry creating the approved work
+            </button>
+          </section>
+
           <section id="plan-compare-panel" class="plan-card" aria-labelledby="plan-compare-heading" hidden>
             <h2 id="plan-compare-heading" class="plan-card-title">What changed</h2>
             <ul id="plan-compare-list" class="plan-compare-list"></ul>
@@ -522,6 +536,18 @@
     .plan-approve-btn[disabled] {
       opacity: 0.5;
       cursor: not-allowed;
+    }
+
+    .plan-materialization-summary {
+      margin: 0 0 0.5rem;
+    }
+
+    .plan-materialization-list {
+      margin: 0 0 0.75rem;
+      padding-left: 1.1rem;
+      display: grid;
+      gap: 0.2rem;
+      font-size: 0.85rem;
     }
 
     .plan-loading,

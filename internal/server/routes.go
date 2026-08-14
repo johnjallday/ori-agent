@@ -842,6 +842,11 @@ func registerWorkspacePlanRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/decision", s.Handlers.WorkspacePlans.PlanDecision)
 		mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/approvals", s.Handlers.WorkspacePlans.PlanApprovals)
 		mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/revise-approved", s.Handlers.WorkspacePlans.PlanReviseApproved)
+		// Materialization is separate from approval: approval is the user's
+		// decision, this spends it. Separating them is what lets a retry
+		// replay the original result rather than doing the work twice
+		// (FR-72, FR-73).
+		mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/materialize", s.Handlers.WorkspacePlans.PlanMaterialize)
 		// GET discloses what a revision would replace; POST performs it. The
 		// user sees the collateral before it happens (FR-56).
 		mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/revision", s.Handlers.WorkspacePlans.PlanRevision)

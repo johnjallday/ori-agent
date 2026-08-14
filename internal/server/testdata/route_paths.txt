@@ -233,6 +233,7 @@
 /api/workspaces/x/plans/x/compare
 /api/workspaces/x/plans/x/decision
 /api/workspaces/x/plans/x/draft
+/api/workspaces/x/plans/x/materialize
 /api/workspaces/x/plans/x/reopen
 /api/workspaces/x/plans/x/revise-approved
 /api/workspaces/x/plans/x/revision

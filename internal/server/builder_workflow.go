@@ -327,6 +327,10 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 	// Set workspace store on chat handler (uses SyncStore when available)
 	b.chatHandler.SetWorkspaceStore(ws)
 
+	// Plan materialization writes tasks through this store, so it can only be
+	// wired now that the store exists.
+	b.attachWorkspacePlanMaterializer()
+
 	// Ori Guide reads workspace names to resolve a destination the user asked
 	// for by name. Read-only; the guide has no write path.
 	b.oriGuideHandler.SetWorkspaceStore(ws)

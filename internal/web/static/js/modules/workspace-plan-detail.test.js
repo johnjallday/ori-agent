@@ -6,6 +6,7 @@ import {
   approvalButtonLabel,
   clarificationLine,
   diffSummary,
+  materializedMessage,
   WorkspacePlanPage
 } from './workspace-plan-detail.js';
 
@@ -22,6 +23,11 @@ function el(extra = {}) {
 }
 
 const SELECTORS = [
+  '#plan-materialization-panel',
+  '#plan-materialization-summary',
+  '#plan-materialization-tasks',
+  '#plan-materialization-artifacts',
+  '#plan-materialization-retry',
   '#plan-review-panel',
   '#plan-review-version',
   '#plan-review-objective',
@@ -594,6 +600,9 @@ test('approving sends the reviewed version and hash', async () => {
       sent = JSON.parse(options.body);
       return jsonResponse({ id: 'apr_1' }, true, 201);
     }
+    if (url.endsWith('/materialize') && options.method === 'POST') {
+      return jsonResponse({ task_ids: ['task-a'], start_execution: false });
+    }
     if (url.endsWith('/activity')) return jsonResponse({ activity: [] });
     return jsonResponse(planFixture());
   };
@@ -604,9 +613,28 @@ test('approving sends the reviewed version and hash', async () => {
   assert.equal(sent.content_hash, 'hash-abc');
   assert.equal(sent.effect, 'create_tasks');
   assert.ok(sent.idempotency_key.includes('hash-abc'), sent.idempotency_key);
+  // The message that lands describes what actually happened, and still
+  // answers the question the button's label was careful about.
   assert.match(
     doc.elements['#plan-detail-status'].textContent,
-    /nothing starts until you start it/
+    /Nothing starts until you start it/
+  );
+});
+
+// "Created 3 tasks" alone leaves the user guessing whether anything is now
+// running — the question the approval label existed to answer (FR-64, FR-65).
+test('the materialization message says what was created and what happens next', () => {
+  assert.equal(
+    materializedMessage({ task_ids: ['a', 'b'], start_execution: false }),
+    'Created 2 task(s). Nothing starts until you start it.'
+  );
+  assert.equal(
+    materializedMessage({ task_ids: ['a'], artifact_paths: ['x.md'], start_execution: true }),
+    'Created 1 task(s) and 1 file(s). Eligible tasks will start automatically.'
+  );
+  assert.match(
+    materializedMessage({ task_ids: ['a'], replayed: true }),
+    /^This approval was already used\. It created 1 task\(s\)\./
   );
 });
 
@@ -619,12 +647,15 @@ test('an auto approval says work will start', async () => {
     if (url.endsWith('/approvals') && options.method === 'POST') {
       return jsonResponse({ id: 'apr_1' }, true, 201);
     }
+    if (url.endsWith('/materialize') && options.method === 'POST') {
+      return jsonResponse({ task_ids: ['task-a'], start_execution: true });
+    }
     if (url.endsWith('/activity')) return jsonResponse({ activity: [] });
     return jsonResponse(planFixture());
   };
 
   await page.approve();
-  assert.match(doc.elements['#plan-detail-status'].textContent, /Work will start/);
+  assert.match(doc.elements['#plan-detail-status'].textContent, /start automatically/);
 });
 
 // A stale approval reloads the real current version rather than retrying
@@ -719,6 +750,117 @@ test('approving without a loaded contract asks for the review first', async () =
   const result = await page.approve();
   assert.equal(result, null);
   assert.match(doc.elements['#plan-detail-status'].textContent, /Load the review before approving/);
+});
+
+// --- Materialization -------------------------------------------------------
+
+test('materializing reports the work it created and links to it', async () => {
+  const { page, doc } = makePage();
+  await page.reload();
+
+  page.fetchImpl = async (url, options = {}) => {
+    if (url.endsWith('/materialize') && options.method === 'POST') {
+      return jsonResponse({
+        task_ids: ['task-a', 'task-b'],
+        artifact_paths: ['tasks/prd.md'],
+        replayed: false
+      });
+    }
+    if (url.endsWith('/activity')) return jsonResponse({ activity: [] });
+    return jsonResponse(planFixture());
+  };
+
+  await page.materialize('apr-1');
+
+  assert.equal(doc.elements['#plan-materialization-panel'].hidden, false);
+  assert.match(doc.elements['#plan-materialization-summary'].textContent, /Created 2 task\(s\)/);
+  assert.match(doc.elements['#plan-materialization-summary'].textContent, /1 file\(s\)/);
+  // It links to the tasks rather than restating their state (FR-11).
+  assert.match(
+    doc.elements['#plan-materialization-tasks'].innerHTML,
+    /workspaces\/ws-1\/task\/task-a/
+  );
+  assert.equal(doc.elements['#plan-materialization-artifacts'].hidden, false);
+  assert.match(doc.elements['#plan-materialization-artifacts'].innerHTML, /tasks\/prd\.md/);
+  // Nothing failed, so nothing is offered to retry.
+  assert.equal(doc.elements['#plan-materialization-retry'].hidden, true);
+});
+
+test('a replayed materialization says the approval was already used', async () => {
+  const { page, doc } = makePage();
+  await page.reload();
+
+  page.fetchImpl = async (url, options = {}) => {
+    if (url.endsWith('/materialize') && options.method === 'POST') {
+      return jsonResponse({ task_ids: ['task-a'], replayed: true });
+    }
+    if (url.endsWith('/activity')) return jsonResponse({ activity: [] });
+    return jsonResponse(planFixture());
+  };
+
+  await page.materialize('apr-1');
+  assert.match(doc.elements['#plan-materialization-summary'].textContent, /already been used/);
+});
+
+// A failed materialization keeps the approval usable, so the panel offers a
+// retry rather than sending the user back to re-approve (FR-99).
+test('a failed materialization offers a retry', async () => {
+  const { page, doc } = makePage();
+  await page.reload();
+
+  let attempts = 0;
+  page.fetchImpl = async (url, options = {}) => {
+    if (url.endsWith('/materialize') && options.method === 'POST') {
+      attempts += 1;
+      if (attempts === 1) {
+        return jsonResponse({ code: 'internal_error', message: 'disk full' }, false, 500);
+      }
+      return jsonResponse({ task_ids: ['task-a'], replayed: false });
+    }
+    if (url.endsWith('/activity')) return jsonResponse({ activity: [] });
+    return jsonResponse(planFixture());
+  };
+
+  await page.materialize('apr-1');
+
+  assert.match(doc.elements['#plan-materialization-summary'].textContent, /disk full/);
+  assert.equal(doc.elements['#plan-materialization-retry'].hidden, false);
+  assert.equal(doc.elements['#plan-materialization-retry'].dataset.approvalId, 'apr-1');
+  assert.match(
+    doc.elements['#plan-detail-status'].textContent,
+    /Could not create the approved work/
+  );
+
+  // Retrying with the same approval succeeds.
+  await page.materialize('apr-1');
+  assert.equal(doc.elements['#plan-materialization-retry'].hidden, true);
+  assert.match(doc.elements['#plan-materialization-summary'].textContent, /Created 1 task\(s\)/);
+});
+
+// Approving and spending the approval are one user gesture: the button said it
+// would create tasks, so it creates them.
+test('approving materializes the approved work', async () => {
+  let materialized = null;
+  const { page } = makePage();
+  await page.reload();
+
+  page.contract = contractFixture();
+  page.fetchImpl = async (url, options = {}) => {
+    if (url.endsWith('/approvals') && options.method === 'POST') {
+      return jsonResponse({ id: 'apr-9' }, true, 201);
+    }
+    if (url.endsWith('/materialize') && options.method === 'POST') {
+      materialized = JSON.parse(options.body);
+      return jsonResponse({ task_ids: ['task-a'], replayed: false });
+    }
+    if (url.endsWith('/activity')) return jsonResponse({ activity: [] });
+    return jsonResponse(planFixture());
+  };
+
+  await page.approve({ name: 'jj' });
+
+  assert.ok(materialized, 'approving did not create the approved work');
+  assert.equal(materialized.approval_id, 'apr-9');
 });
 
 test('a missing plan renders the not-found state', async () => {
