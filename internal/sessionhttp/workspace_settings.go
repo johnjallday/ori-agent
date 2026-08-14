@@ -86,11 +86,37 @@ func (h *Handler) getWorkspaceSettings(w http.ResponseWriter, r *http.Request, i
 	settings := workspacesettings.Extract(workspace.SharedData)
 	effective := workspacesettings.BuildEffectiveBehavior(settings)
 	orihttp.WriteJSON(w, map[string]any{
-		"workspace_id":         workspace.ID,
-		"settings":             settings,
-		"effective_behavior":   effective,
+		"workspace_id":       workspace.ID,
+		"settings":           settings,
+		"effective_behavior": effective,
+		// A workspace upgraded from the old design is told once that its
+		// planning binding is no longer honored. Detection reads the binding's
+		// name and id only — never its values, because nothing is migrated
+		// (FR-185, FR-186).
+		"legacy_planning_notice": workspacesettings.DetectLegacyPlanningBinding(
+			workspace.SharedData, h.workspaceSkillBindings(workspace.SharedData)),
 		"task_markdown_status": h.taskMarkdownSyncStatus(workspace.ID, settings),
 	})
+}
+
+// workspaceSkillBindings pulls the raw binding maps out of shared data.
+//
+// They are read as raw maps rather than through a typed model because the only
+// fields anything here touches are the skill name and the binding id. Decoding
+// the config into a struct would create the very affordance this release is
+// removing.
+func (h *Handler) workspaceSkillBindings(sharedData map[string]any) []map[string]any {
+	raw, present := sharedData["skill_bindings"].([]any)
+	if !present {
+		return nil
+	}
+	bindings := make([]map[string]any, 0, len(raw))
+	for _, entry := range raw {
+		if binding, ok := entry.(map[string]any); ok {
+			bindings = append(bindings, binding)
+		}
+	}
+	return bindings
 }
 
 func (h *Handler) updateWorkspaceSettings(w http.ResponseWriter, r *http.Request, id string) {
@@ -110,6 +136,27 @@ func (h *Handler) updateWorkspaceSettings(w http.ResponseWriter, r *http.Request
 		_ = orihttp.RespondBadRequest(w, err.Error())
 		return
 	}
+
+	// Saving settings is when the inactive legacy planning binding is discarded
+	// — the moment the user has engaged with the app-owned settings and cannot
+	// be surprised by it disappearing. ONLY that binding goes; every other one
+	// is untouched, including a workspace-planning binding with no config,
+	// which is an ordinary binding somebody made deliberately (FR-187).
+	discardedLegacyBinding := false
+	if bindings := h.workspaceSkillBindings(sharedData); len(bindings) > 0 {
+		if kept, discarded := workspacesettings.DiscardLegacyPlanningBinding(bindings); discarded {
+			remaining := make([]any, 0, len(kept))
+			for _, binding := range kept {
+				remaining = append(remaining, binding)
+			}
+			sharedData["skill_bindings"] = remaining
+			discardedLegacyBinding = true
+		}
+	}
+	// The notice is acknowledged either way: the user has now seen the settings
+	// screen, so repeating it would be nagging about something already handled.
+	sharedData = workspacesettings.AcknowledgeLegacyPlanningNotice(sharedData)
+
 	workspace.SharedData = sharedData
 	workspace.UpdatedAt = settings.UpdatedAt
 
@@ -131,11 +178,12 @@ func (h *Handler) updateWorkspaceSettings(w http.ResponseWriter, r *http.Request
 	effective := workspacesettings.BuildEffectiveBehavior(settings)
 	w.Header().Set("Content-Type", "application/json")
 	if encErr := json.NewEncoder(w).Encode(map[string]any{
-		"success":              true,
-		"workspace_id":         workspace.ID,
-		"settings":             settings,
-		"effective_behavior":   effective,
-		"task_markdown_status": h.taskMarkdownSyncStatus(workspace.ID, settings),
+		"success":                   true,
+		"workspace_id":              workspace.ID,
+		"settings":                  settings,
+		"effective_behavior":        effective,
+		"discarded_legacy_planning": discardedLegacyBinding,
+		"task_markdown_status":      h.taskMarkdownSyncStatus(workspace.ID, settings),
 	}); encErr != nil {
 		logger.Error("Failed to encode workspace settings response", logger.Fields{"error": encErr})
 	}
