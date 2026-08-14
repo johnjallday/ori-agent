@@ -8,13 +8,155 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/personalhq"
+	"github.com/johnjallday/ori-agent/internal/session"
+	"github.com/johnjallday/ori-agent/internal/userprofile"
 	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
 )
+
+// personalHQImportHarness wires the real Personal HQ service against the same
+// in-memory database and folder store the handler uses, so import tests
+// exercise the production designation path end to end rather than a fake.
+type personalHQImportHarness struct {
+	handler   *Handler
+	fileStore *agentworkspace.FileStore
+	service   *personalhq.Service
+}
+
+func newPersonalHQImportHarness(t *testing.T) (*personalHQImportHarness, func()) {
+	t.Helper()
+
+	handler, cleanup := createTestHandler(t)
+	fileStore, err := agentworkspace.NewFileStore(t.TempDir())
+	if err != nil {
+		cleanup()
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	handler.SetWorkspaceStore(fileStore)
+
+	// Same wiring the server performs, in the same order: the service reads
+	// workspaces through the session store, projects designations onto
+	// workspace.json through the handler, and resolves that canonical
+	// projection through the folder store.
+	service := personalhq.NewService(userprofile.NewSQLiteStore(handler.store.DB()), handler.store)
+	service.SetDesignationSyncer(handler)
+	service.SetDesignationReader(fileStore)
+	handler.SetPersonalHQDesignator(service)
+
+	return &personalHQImportHarness{handler: handler, fileStore: fileStore, service: service},
+		func() {
+			_ = fileStore.Close()
+			cleanup()
+		}
+}
+
+// status resolves the authoritative Personal HQ record for the local user.
+func (h *personalHQImportHarness) status(t *testing.T) *personalhq.Status {
+	t.Helper()
+	status, err := h.service.Status(context.Background(), userprofile.LocalUserID)
+	if err != nil {
+		t.Fatalf("personal hq status: %v", err)
+	}
+	return status
+}
+
+// importFolder drives the ordinary Import Folder endpoint — never the explicit
+// Import HQ action — and returns the decoded response.
+func (h *personalHQImportHarness) importFolder(t *testing.T, path string) (int, map[string]any) {
+	t.Helper()
+	payload, err := json.Marshal(map[string]any{"path": path})
+	if err != nil {
+		t.Fatalf("encode import payload: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/import", bytes.NewBuffer(payload))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	h.handler.HandleWorkspaces(w, req)
+
+	resp := map[string]any{}
+	if w.Body.Len() > 0 {
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode import response (status %d): %v", w.Code, err)
+		}
+	}
+	return w.Code, resp
+}
+
+// writeExportedWorkspaceFixture writes a disposable exported workspace root,
+// with the secure permissions this repo's gosec gate expects.
+func writeExportedWorkspaceFixture(t *testing.T, dir string, ws *agentworkspace.Workspace) string {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		t.Fatalf("create exported workspace fixture %s: %v", dir, err)
+	}
+	data, err := ws.ToJSON()
+	if err != nil {
+		t.Fatalf("encode exported workspace %s: %v", ws.ID, err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, agentworkspace.WorkspaceConfigFile), data, 0o600); err != nil {
+		t.Fatalf("write exported workspace.json for %s: %v", ws.ID, err)
+	}
+	return dir
+}
+
+// exportedWorkspaceFixture builds an ordinary exported workspace carrying the
+// given designation verbatim, so tests can supply marked, unmarked, and
+// unsupported values without inferring identity from the name or kind.
+func exportedWorkspaceFixture(id, name, designation string) *agentworkspace.Workspace {
+	now := time.Now()
+	return &agentworkspace.Workspace{
+		ID:          id,
+		Name:        name,
+		FolderSlug:  agentworkspace.Slugify(name),
+		Designation: designation,
+		Status:      agentworkspace.StatusActive,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+}
+
+// diskDesignation reads the designation straight out of the local copied
+// workspace.json, the canonical store for the projection.
+func diskDesignation(t *testing.T, fileStore *agentworkspace.FileStore, workspaceID string) string {
+	t.Helper()
+	folderPath, err := fileStore.GetFolderPath(workspaceID)
+	if err != nil {
+		t.Fatalf("GetFolderPath(%s): %v", workspaceID, err)
+	}
+	raw, err := os.ReadFile(filepath.Join(folderPath, agentworkspace.WorkspaceConfigFile)) // #nosec G304 -- test-owned temporary workspace folder
+	if err != nil {
+		t.Fatalf("read local workspace.json for %s: %v", workspaceID, err)
+	}
+	ws, err := agentworkspace.FromJSON(raw)
+	if err != nil {
+		t.Fatalf("decode local workspace.json for %s: %v", workspaceID, err)
+	}
+	return strings.TrimSpace(ws.Designation)
+}
+
+// hydratedDesignation reads the workspace back through the ordinary workspace
+// detail endpoint, proving a stale SQLite-only object cannot hide the result.
+func hydratedDesignation(t *testing.T, handler *Handler, workspaceID string) string {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+workspaceID, nil)
+	w := httptest.NewRecorder()
+	handler.HandleWorkspaces(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 reading workspace %s, got %d: %s", workspaceID, w.Code, w.Body.String())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode workspace %s: %v", workspaceID, err)
+	}
+	designation, _ := payload["designation"].(string)
+	return designation
+}
 
 // recordingDesignator captures every automatic Personal HQ designation attempt
 // the import path makes, so tests can assert both that a marked export
@@ -48,6 +190,89 @@ func TestPersonalHQDesignatorWiringIsNilSafeAndObservable(t *testing.T) {
 	handler.SetPersonalHQDesignator(&recordingDesignator{})
 	if !handler.PersonalHQDesignatorWired() {
 		t.Fatalf("expected PersonalHQDesignatorWired to report the injected designator")
+	}
+}
+
+func TestHandleWorkspaceImportRestoresExportedPersonalHQDesignation(t *testing.T) {
+	harness, cleanup := newPersonalHQImportHarness(t)
+	defer cleanup()
+
+	if status := harness.status(t); status.HasDesignation() || status.Valid {
+		t.Fatalf("expected no personal hq before import, got %#v", status)
+	}
+
+	fixture := exportedWorkspaceFixture("ws-imported-hq", "Command Center", string(session.WorkspaceDesignationPersonalHQ))
+	exportRoot := writeExportedWorkspaceFixture(t, filepath.Join(t.TempDir(), "command-center-export"), fixture)
+
+	code, resp := harness.importFolder(t, exportRoot)
+	if code != http.StatusCreated {
+		t.Fatalf("expected 201 for marked exported workspace import, got %d: %#v", code, resp)
+	}
+	if restored, _ := resp["restored_from_config"].(bool); !restored {
+		t.Fatalf("expected restored_from_config=true, got %#v", resp["restored_from_config"])
+	}
+	folder, ok := resp["folder"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected folder object in response, got %#v", resp)
+	}
+	if got := folder["id"]; got != fixture.ID {
+		t.Fatalf("expected restored workspace id %q, got %#v", fixture.ID, got)
+	}
+	if got, _ := folder["designation"].(string); got != string(session.WorkspaceDesignationPersonalHQ) {
+		t.Fatalf("expected import response designation %q, got %#v", session.WorkspaceDesignationPersonalHQ, folder["designation"])
+	}
+
+	// The authoritative record — a workspace.json marker alone is not one.
+	status := harness.status(t)
+	if !status.Valid || status.WorkspaceID != fixture.ID {
+		t.Fatalf("expected imported workspace %q to be the valid personal hq, got %#v", fixture.ID, status)
+	}
+
+	// The canonical folder projection, written through the existing syncer.
+	if got := diskDesignation(t, harness.fileStore, fixture.ID); got != string(session.WorkspaceDesignationPersonalHQ) {
+		t.Fatalf("expected local workspace.json designation %q, got %q", session.WorkspaceDesignationPersonalHQ, got)
+	}
+	if got := hydratedDesignation(t, harness.handler, fixture.ID); got != string(session.WorkspaceDesignationPersonalHQ) {
+		t.Fatalf("expected hydrated workspace read to report %q, got %q", session.WorkspaceDesignationPersonalHQ, got)
+	}
+}
+
+func TestHandleWorkspaceImportSkipsDesignationWhenRestoreFails(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+
+	fileStore, err := agentworkspace.NewFileStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	defer func() { _ = fileStore.Close() }()
+	handler.SetWorkspaceStore(fileStore)
+
+	designator := &recordingDesignator{}
+	handler.SetPersonalHQDesignator(designator)
+
+	// A config the restore cannot decode: the import fails before anything is
+	// durable, so designation must never be attempted.
+	exportRoot := filepath.Join(t.TempDir(), "broken-export")
+	if err := os.MkdirAll(exportRoot, 0o750); err != nil {
+		t.Fatalf("create broken export fixture: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(exportRoot, agentworkspace.WorkspaceConfigFile), []byte(`{"id": "ws-broken", "designation":`), 0o600); err != nil {
+		t.Fatalf("write broken workspace.json: %v", err)
+	}
+
+	payload, _ := json.Marshal(map[string]any{"path": exportRoot})
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/import", bytes.NewBuffer(payload))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.HandleWorkspaces(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500 for an undecodable exported workspace, got %d: %s", w.Code, w.Body.String())
+	}
+	if len(designator.calls) != 0 {
+		t.Fatalf("expected no designation attempt after a failed restore, got %#v", designator.calls)
 	}
 }
 
