@@ -471,14 +471,112 @@ for link in d.get("task_links", []):
   echo "--- Plan execution smoke passed ---"
 }
 
+# seed_demo creates one workspace holding a plan in each state worth LOOKING at,
+# then prints the URLs. It exists for human browser verification: the automated
+# checks above prove behaviour, but nobody has seen these pages render.
+seed_demo() {
+  echo "--- Seeding plans for browser review ---"
+
+  # Confirm the workspace root so created workspaces reach the database rather
+  # than sitting in staging (a fresh sandbox starts unconfirmed).
+  curl -s -X POST "$BASE_URL/api/settings/workspace-root" \
+    -H 'Content-Type: application/json' \
+    -d "{\"workspace_root\":\"$HOME/Ori Workspaces\"}" > /dev/null
+
+  local ws
+  ws=$(curl -s -X POST "$BASE_URL/api/workspaces" \
+    -H 'Content-Type: application/json' \
+    -d "{\"name\":\"Plan Review $(date +%H%M%S)\"}" | workspace_id)
+  [[ -n "$ws" ]] || fail "could not create a workspace"
+
+  # Structured planning on, so the create panel shows.
+  curl -s -X PATCH "$BASE_URL/api/workspaces/$ws/settings" \
+    -H 'Content-Type: application/json' -d '{"planning":{"enabled":true}}' > /dev/null
+
+  # 1. A draft with a real task tree and a dependency — the editor surface.
+  local draft
+  draft=$(seed_plan "$ws" "Migrate the reporting database" "step_through")
+  echo "  draft plan:      $draft"
+
+  # 2. A plan in review — the approval contract, step-through labelling.
+  local review
+  review=$(seed_plan "$ws" "Add audit logging to the billing service" "step_through")
+  curl -s -X POST "$BASE_URL/api/workspaces/$ws/plans/$review/versions" \
+    -H 'Content-Type: application/json' -d '{"actor":"demo"}' > /dev/null
+  echo "  in review:       $review"
+
+  # 3. An AUTO plan in review — this one's button must read "Approve and Start"
+  #    and warn that work begins.
+  local auto
+  auto=$(seed_plan "$ws" "Nightly index rebuild" "auto")
+  curl -s -X POST "$BASE_URL/api/workspaces/$ws/plans/$auto/versions" \
+    -H 'Content-Type: application/json' -d '{"actor":"demo"}' > /dev/null
+  echo "  in review (auto): $auto"
+
+  # 4. An approved + materialized plan — created work, task links, provenance.
+  local approved hash approval
+  approved=$(seed_plan "$ws" "Publish the Q3 status report" "step_through")
+  hash=$(curl -s -X POST "$BASE_URL/api/workspaces/$ws/plans/$approved/versions" \
+    -H 'Content-Type: application/json' -d '{"actor":"demo"}' | json_field content_hash)
+  approval=$(curl -s -X POST "$BASE_URL/api/workspaces/$ws/plans/$approved/approvals" \
+    -H 'Content-Type: application/json' \
+    -d "{\"version\":1,\"content_hash\":\"$hash\",\"effect\":\"create_tasks\",\"user_name\":\"demo\",\"idempotency_key\":\"seed\"}" |
+    json_field id)
+  curl -s -X POST "$BASE_URL/api/workspaces/$ws/plans/$approved/materialize" \
+    -H 'Content-Type: application/json' -d "{\"approval_id\":\"$approval\"}" > /dev/null
+  echo "  approved:        $approved"
+
+  # 5. An archived plan — the History section.
+  local archived
+  archived=$(seed_plan "$ws" "Retire the legacy export job" "step_through")
+  curl -s -X POST "$BASE_URL/api/workspaces/$ws/plans/$archived/archive" \
+    -H 'Content-Type: application/json' -d '{"reason":"superseded"}' > /dev/null
+  echo "  archived:        $archived"
+
+  echo
+  echo "Open these:"
+  echo "  Plans list      $BASE_URL/workspaces/$ws/plans"
+  echo "  Draft (editor)  $BASE_URL/workspaces/$ws/plans/$draft"
+  echo "  In review       $BASE_URL/workspaces/$ws/plans/$review"
+  echo "  In review (auto)$BASE_URL/workspaces/$ws/plans/$auto"
+  echo "  Approved        $BASE_URL/workspaces/$ws/plans/$approved"
+  echo
+}
+
+# seed_plan creates one plan with a two-task group and a dependency between the
+# tasks, so the editor has something with structure to render.
+seed_plan() {
+  local ws="$1" request="$2" mode="$3"
+  local plan
+  plan=$(curl -s -X POST "$BASE_URL/api/workspaces/$ws/plans" \
+    -H 'Content-Type: application/json' \
+    -d "{\"request\":\"$request\"}" | json_field id)
+  curl -s -X PATCH "$BASE_URL/api/workspaces/$ws/plans/$plan/draft" \
+    -H 'Content-Type: application/json' -d "{
+      \"objective\":\"$request\",\"revision\":0,
+      \"content\":{\"execution\":{\"mode\":\"$mode\"},
+        \"in_scope\":[\"the reporting tables\"],
+        \"non_goals\":[\"anything touching billing\"],
+        \"groups\":[
+          {\"id\":\"grp-1\",\"title\":\"Prepare\",\"outcome\":\"A verified copy exists\",\"items\":[
+            {\"id\":\"itm-1\",\"description\":\"Snapshot the current state\",\"expected_result\":\"Checksums match\"},
+            {\"id\":\"itm-2\",\"description\":\"Verify the snapshot\",\"depends_on\":[\"itm-1\"]}]},
+          {\"id\":\"grp-2\",\"title\":\"Cut over\",\"depends_on\":[\"grp-1\"],\"items\":[
+            {\"id\":\"itm-3\",\"description\":\"Switch traffic to the new path\"}]}]}}" > /dev/null
+  echo "$plan"
+}
+
 case "${1:-}" in
+seed) seed_demo ;;
 plans) smoke_plans "${3:-}" ;;
 drafting) smoke_drafting "${3:-}" ;;
 review) smoke_review "${3:-}" ;;
 materialize) smoke_materialize "${3:-}" ;;
 execution) smoke_execution "${3:-}" ;;
 *)
-  echo "usage: $0 {plans|drafting|review|materialize|execution} <base-url> <workspace-id>" >&2
+  echo "usage:" >&2
+  echo "  $0 seed <base-url>                       # seed plans and print URLs to review" >&2
+  echo "  $0 {plans|drafting|review|materialize|execution} <base-url> <workspace-id>" >&2
   exit 2
   ;;
 esac
