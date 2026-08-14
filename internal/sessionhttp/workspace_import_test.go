@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -358,6 +359,195 @@ func TestHandleWorkspaceImportPreservesExistingPersonalHQOnConflict(t *testing.T
 	}
 	if got := diskDesignation(t, harness.fileStore, current.ID); got != "" {
 		t.Fatalf("expected the previous hq folder to be cleared by the explicit replacement, got %q", got)
+	}
+}
+
+func TestHandleWorkspaceImportDesignatesOnlyOnTheNormalizedMarker(t *testing.T) {
+	hqTemplate := &agentworkspace.TemplateProvenance{
+		TemplateID:   "personal-hq",
+		TemplateName: "Personal HQ",
+		Builtin:      true,
+	}
+
+	cases := []struct {
+		name          string
+		designation   string
+		workspaceName string
+		provenance    *agentworkspace.TemplateProvenance
+		wantDesignate bool
+	}{
+		{name: "unmarked export", designation: "", workspaceName: "Research"},
+		{name: "whitespace only", designation: "   ", workspaceName: "Research"},
+		{name: "unsupported value", designation: "hq", workspaceName: "Research"},
+		{name: "padded unsupported value", designation: "  headquarters  ", workspaceName: "Research"},
+		{name: "hq-sounding name", designation: "", workspaceName: "Personal HQ"},
+		{name: "personal hq template provenance", designation: "", workspaceName: "Research", provenance: hqTemplate},
+		{name: "padded marker", designation: "  personal_hq  ", workspaceName: "Research", wantDesignate: true},
+	}
+
+	for i, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			handler, cleanup := createTestHandler(t)
+			defer cleanup()
+
+			fileStore, err := agentworkspace.NewFileStore(t.TempDir())
+			if err != nil {
+				t.Fatalf("NewFileStore: %v", err)
+			}
+			defer func() { _ = fileStore.Close() }()
+			handler.SetWorkspaceStore(fileStore)
+
+			designator := &recordingDesignator{}
+			handler.SetPersonalHQDesignator(designator)
+
+			workspaceID := fmt.Sprintf("ws-designation-case-%d", i)
+			fixture := exportedWorkspaceFixture(workspaceID, tc.workspaceName, tc.designation)
+			fixture.TemplateProvenance = tc.provenance
+			exportRoot := writeExportedWorkspaceFixture(t, filepath.Join(t.TempDir(), "export"), fixture)
+
+			payload, _ := json.Marshal(map[string]any{"path": exportRoot})
+			req := httptest.NewRequest(http.MethodPost, "/api/workspaces/import", bytes.NewBuffer(payload))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			handler.HandleWorkspaces(w, req)
+
+			if w.Code != http.StatusCreated {
+				t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+			}
+
+			switch {
+			case tc.wantDesignate && len(designator.calls) != 1:
+				t.Fatalf("expected exactly one designation attempt, got %#v", designator.calls)
+			case !tc.wantDesignate && len(designator.calls) != 0:
+				t.Fatalf("expected no designation attempt for designation %q, got %#v", tc.designation, designator.calls)
+			}
+			if tc.wantDesignate {
+				if got := designator.calls[0]; got.userID != userprofile.LocalUserID || got.workspaceID != workspaceID {
+					t.Fatalf("expected Designate(%q, %q), got %#v", userprofile.LocalUserID, workspaceID, got)
+				}
+			}
+		})
+	}
+}
+
+func TestHandleWorkspaceImportPlainFolderNeverDesignates(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+
+	fileStore, err := agentworkspace.NewFileStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	defer func() { _ = fileStore.Close() }()
+	handler.SetWorkspaceStore(fileStore)
+
+	designator := &recordingDesignator{}
+	handler.SetPersonalHQDesignator(designator)
+
+	importDir := filepath.Join(t.TempDir(), "plain-folder")
+	if err := os.MkdirAll(importDir, 0o750); err != nil {
+		t.Fatalf("create plain folder: %v", err)
+	}
+
+	payload, _ := json.Marshal(map[string]any{"path": importDir, "entry_point": "workspace_hub_import"})
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/import", bytes.NewBuffer(payload))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handler.HandleWorkspaces(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201 for plain folder import, got %d: %s", w.Code, w.Body.String())
+	}
+	if len(designator.calls) != 0 {
+		t.Fatalf("expected a plain folder import to never designate, got %#v", designator.calls)
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if _, ok := resp["restored_from_config"]; ok {
+		t.Fatalf("expected the plain-folder response shape to be unchanged, got %#v", resp)
+	}
+	if _, ok := resp["directory"].(map[string]any); !ok {
+		t.Fatalf("expected the plain-folder response to still carry the directory object, got %#v", resp)
+	}
+	folder, _ := resp["folder"].(map[string]any)
+	workspaceID, _ := folder["id"].(string)
+	if workspaceID == "" {
+		t.Fatalf("expected workspace id in response, got %#v", resp)
+	}
+	if got, _ := folder["designation"].(string); got != "" {
+		t.Fatalf("expected a plain-folder import to stay undesignated, got %q", got)
+	}
+
+	stored, err := handler.store.GetWorkspace(context.Background(), workspaceID)
+	if err != nil {
+		t.Fatalf("load imported workspace: %v", err)
+	}
+	normalizedPath, err := normalizeImportPath(importDir)
+	if err != nil {
+		t.Fatalf("normalize import path: %v", err)
+	}
+	refs, err := decodeDirectoryReferences(stored.DirectoryReferencesJSON)
+	if err != nil {
+		t.Fatalf("decode directory references: %v", err)
+	}
+	if len(refs) != 1 || filepath.Clean(refs[0].Path) != filepath.Clean(normalizedPath) {
+		t.Fatalf("expected the scaffolded directory reference for %q, got %#v", normalizedPath, refs)
+	}
+	bindings, err := decodeWorkspaceMCPBindings(stored.MCPBindingsJSON)
+	if err != nil {
+		t.Fatalf("decode mcp bindings: %v", err)
+	}
+	if len(bindings) != 1 || !workspaceBindingHasRoot(bindings[0].Config, normalizedPath) {
+		t.Fatalf("expected the workspace-files binding for %q, got %#v", normalizedPath, bindings)
+	}
+	if _, ok := stored.SharedData["folder_import"]; !ok {
+		t.Fatalf("expected folder_import metadata to survive, got %#v", stored.SharedData)
+	}
+}
+
+func TestHandleWorkspaceImportMarkedExportWithoutDesignatorDoesNotLie(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+
+	fileStore, err := agentworkspace.NewFileStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	defer func() { _ = fileStore.Close() }()
+	handler.SetWorkspaceStore(fileStore)
+
+	if handler.PersonalHQDesignatorWired() {
+		t.Fatalf("this test requires the degraded, unwired handler")
+	}
+
+	fixture := exportedWorkspaceFixture("ws-degraded-hq", "Degraded HQ", string(session.WorkspaceDesignationPersonalHQ))
+	exportRoot := writeExportedWorkspaceFixture(t, filepath.Join(t.TempDir(), "degraded-export"), fixture)
+
+	payload, _ := json.Marshal(map[string]any{"path": exportRoot})
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/import", bytes.NewBuffer(payload))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	// Nil dependency: importing must still succeed rather than panic, and the
+	// copied marker must not survive as a projection no record backs.
+	handler.HandleWorkspaces(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201 without a designator, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	folder, _ := resp["folder"].(map[string]any)
+	if got, _ := folder["designation"].(string); got != "" {
+		t.Fatalf("expected no designation without a designator, got %q", got)
+	}
+	if got := diskDesignation(t, fileStore, fixture.ID); got != "" {
+		t.Fatalf("expected the imported folder projection to be empty without a designator, got %q", got)
 	}
 }
 
