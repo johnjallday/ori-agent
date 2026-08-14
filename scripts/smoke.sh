@@ -379,13 +379,106 @@ smoke_materialize() {
   echo "--- Plan materialization smoke passed ---"
 }
 
+smoke_execution() {
+  local ws="$1"
+  [[ -n "$ws" ]] || fail "usage: smoke.sh execution <base-url> <workspace-id>"
+
+  echo "--- Plan execution ($ws) ---"
+
+  local plan
+  plan=$(curl -s -X POST "$BASE_URL/api/workspaces/$ws/plans" \
+    -H 'Content-Type: application/json' \
+    -d '{"request":"Plan the execution demo"}' | json_field id)
+  [[ -n "$plan" ]] || fail "plan creation returned no id"
+  local base="$BASE_URL/api/workspaces/$ws/plans/$plan"
+
+  curl -s -X PATCH "$base/draft" -H 'Content-Type: application/json' -d '{
+    "objective":"Run the demo safely","revision":0,
+    "content":{"execution":{"mode":"step_through"},
+      "groups":[{"id":"grp-1","title":"Prepare","items":[
+        {"id":"itm-1","description":"First step"},
+        {"id":"itm-2","description":"Second step","depends_on":["itm-1"]}]}]}}' > /dev/null
+
+  local hash approval
+  hash=$(curl -s -X POST "$base/versions" -H 'Content-Type: application/json' -d '{}' | json_field content_hash)
+  approval=$(curl -s -X POST "$base/approvals" -H 'Content-Type: application/json' \
+    -d "{\"version\":1,\"content_hash\":\"$hash\",\"effect\":\"create_tasks\",\"user_name\":\"smoke\",\"idempotency_key\":\"e1\"}" |
+    json_field id)
+  curl -s -X POST "$base/materialize" -H 'Content-Type: application/json' \
+    -d "{\"approval_id\":\"$approval\"}" > /dev/null
+
+  # Approval created tasks and started nothing (FR-102).
+  local status progress
+  status=$(curl -s "$base" | json_field status)
+  [[ "$status" == "approved" ]] || fail "status after materialize = $status, want approved"
+  progress=$(curl -s "$base" | json_field progress.running)
+  [[ "$progress" == "0" ]] || fail "step_through started $progress task(s) on approval"
+  echo "ok   approval created tasks and started nothing"
+
+  # Progress is derived from real tasks: one ready, one blocked behind it.
+  local ready blocked
+  ready=$(curl -s "$base" | json_field progress.ready)
+  blocked=$(curl -s "$base" | json_field progress.blocked)
+  [[ "$ready" == "1" && "$blocked" == "1" ]] ||
+    fail "derived progress = ready:$ready blocked:$blocked, want 1/1"
+  echo "ok   progress derived from real task state (1 ready, 1 blocked)"
+
+  # Pause and resume.
+  expect_status 200 POST "$base/execution" '{"action":"pause","reason":"checking something"}'
+  status=$(curl -s "$base" | json_field status)
+  [[ "$status" == "paused" ]] || fail "status after pause = $status"
+  expect_status 200 POST "$base/execution" '{"action":"resume"}'
+  echo "ok   paused and resumed"
+
+  # A cancel preview names the affected work before it happens (FR-154).
+  local queued
+  queued=$(curl -s "$base/cancel-preview" |
+    python3 -c 'import sys,json;print(len(json.load(sys.stdin).get("queued",[])))')
+  [[ "$queued" == "2" ]] || fail "cancel preview lists $queued queued task(s), want 2"
+  echo "ok   cancel preview names affected work"
+
+  # Skipping approved work requires a reason (FR-115).
+  local taskid
+  taskid=$(curl -s "$base" | python3 -c '
+import sys, json
+d = json.load(sys.stdin)
+for link in d.get("task_links", []):
+    if link.get("role") == "item":
+        print(link["task_id"])
+        break')
+  [[ -n "$taskid" ]] || fail "no item task link found"
+  local noreason
+  noreason=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$base/execution" \
+    -H 'Content-Type: application/json' -d "{\"action\":\"skip\",\"task_id\":\"$taskid\"}")
+  [[ "$noreason" == "422" ]] || fail "skipping without a reason returned $noreason, want 422"
+  echo "ok   skipping approved work requires a reason"
+
+  # The reverse lookup answers "which plan produced this task?" (FR-10).
+  local related
+  related=$(curl -s "$BASE_URL/api/workspaces/$ws/plan-for-task/$taskid")
+  [[ "$(echo "$related" | json_field plan_id)" == "$plan" ]] ||
+    fail "reverse lookup did not resolve the plan: $related"
+  [[ "$(echo "$related" | json_field url)" == "/workspaces/$ws/plans/$plan" ]] ||
+    fail "reverse lookup did not return the canonical route: $related"
+  echo "ok   task resolves back to its plan via the canonical route"
+
+  # Cancelling stops the plan and leaves history alone (FR-112).
+  expect_status 200 POST "$base/execution" '{"action":"cancel","reason":"demo over"}'
+  status=$(curl -s "$base" | json_field status)
+  [[ "$status" == "cancelled" ]] || fail "status after cancel = $status"
+  echo "ok   cancelled"
+
+  echo "--- Plan execution smoke passed ---"
+}
+
 case "${1:-}" in
 plans) smoke_plans "${3:-}" ;;
 drafting) smoke_drafting "${3:-}" ;;
 review) smoke_review "${3:-}" ;;
 materialize) smoke_materialize "${3:-}" ;;
+execution) smoke_execution "${3:-}" ;;
 *)
-  echo "usage: $0 {plans|drafting|review|materialize} <base-url> <workspace-id>" >&2
+  echo "usage: $0 {plans|drafting|review|materialize|execution} <base-url> <workspace-id>" >&2
   exit 2
   ;;
 esac

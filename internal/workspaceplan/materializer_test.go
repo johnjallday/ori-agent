@@ -35,14 +35,22 @@ func (f *fakeTaskWriter) Get(id string) (*workspace.Workspace, error) {
 	return f.workspace, nil
 }
 
-func (f *fakeTaskWriter) Save(ws *workspace.Workspace) error {
+// Update models the real store's canonical read-modify-write: it holds the
+// lock across the whole callback. A fake that did not would let a concurrency
+// test pass against code that is broken in production.
+func (f *fakeTaskWriter) Update(id string, fn func(*workspace.Workspace) error) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.workspace == nil || f.workspace.ID != id {
+		return fmt.Errorf("workspace %s not found", id)
+	}
+	if err := fn(f.workspace); err != nil {
+		return err
+	}
 	if f.failSave != nil {
 		return f.failSave
 	}
 	f.saves++
-	f.workspace = ws
 	return nil
 }
 

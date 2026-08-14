@@ -847,6 +847,16 @@ func registerWorkspacePlanRoutes(mux *http.ServeMux, s *Server) {
 		// replay the original result rather than doing the work twice
 		// (FR-72, FR-73).
 		mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/materialize", s.Handlers.WorkspacePlans.PlanMaterialize)
+		// Execution: start, retry, pause, resume, skip, cancel, complete, fail.
+		// One route keeps the supervision verbs together and behind the same
+		// ownership checks (FR-100, FR-108 through FR-121).
+		mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/execution", s.Handlers.WorkspacePlans.PlanExecution)
+		mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/cancel-preview", s.Handlers.WorkspacePlans.PlanCancelPreview)
+		// Reverse lookups: Task and Run detail ask which plan produced them and
+		// get a compact summary that deep-links to the canonical plan route,
+		// never a second editor (FR-10, FR-148, FR-149).
+		mux.HandleFunc("/api/workspaces/{workspaceID}/plan-for-task/{taskID}", s.Handlers.WorkspacePlans.PlanForTask)
+		mux.HandleFunc("/api/workspaces/{workspaceID}/plan-for-run/{runID}", s.Handlers.WorkspacePlans.PlanForRun)
 		// GET discloses what a revision would replace; POST performs it. The
 		// user sees the collateral before it happens (FR-56).
 		mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/revision", s.Handlers.WorkspacePlans.PlanRevision)

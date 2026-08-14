@@ -226,8 +226,12 @@
 /api/workspaces/x/output-dir
 /api/workspaces/x/plans
 /api/workspaces/x/plans/x
+/api/workspaces/x/plan-for-run/x
+/api/workspaces/x/plan-for-task/x
 /api/workspaces/x/plans/x/activity
 /api/workspaces/x/plans/x/approvals
+/api/workspaces/x/plans/x/cancel-preview
+/api/workspaces/x/plans/x/execution
 /api/workspaces/x/plans/x/archive
 /api/workspaces/x/plans/x/clarifications/x
 /api/workspaces/x/plans/x/compare

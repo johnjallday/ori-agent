@@ -34,12 +34,17 @@ import (
 // already exist; the retry finds them, links idempotently, and consumes. No
 // duplicates, no orphans (FR-89, FR-90).
 
-// TaskWriter is the workspace persistence the materializer needs. It is
-// narrowed to what is actually used so a test can supply a fake without
-// standing up the whole workspace store.
+// TaskWriter is the workspace persistence the materializer needs.
+//
+// Update rather than Get+Save is deliberate, and it is the difference between
+// correct and nearly-correct here. Materialization has to check whether its
+// deterministic Tasks already exist and add the missing ones as ONE atomic
+// step: with a separate read and write, two concurrent materializations both
+// see "not present" and both add the same IDs. The workspace store's Update
+// holds its lock across the whole read-modify-write (FR-89, FR-178).
 type TaskWriter interface {
 	Get(id string) (*workspace.Workspace, error)
-	Save(ws *workspace.Workspace) error
+	Update(id string, fn func(*workspace.Workspace) error) error
 }
 
 // ArtifactWriter writes a rendered planning artifact into the workspace.
@@ -270,45 +275,47 @@ func (m *Materializer) commitTasks(workspaceID string, compiled []CompiledTask) 
 		return nil, fmt.Errorf("%w: no task store is configured", ErrValidation)
 	}
 
-	ws, err := m.tasks.Get(workspaceID)
-	if err != nil {
-		return nil, err
-	}
-	if ws == nil {
-		return nil, fmt.Errorf("%w: %s", ErrWorkspaceNotFound, workspaceID)
-	}
-
-	existing := make(map[string]struct{}, len(ws.Tasks))
-	for _, task := range ws.Tasks {
-		existing[task.ID] = struct{}{}
-	}
-
 	taskIDs := make([]string, 0, len(compiled))
-	pending := make([]workspace.Task, 0, len(compiled))
 	for _, entry := range compiled {
 		taskIDs = append(taskIDs, entry.Task.ID)
-		if _, already := existing[entry.Task.ID]; already {
-			continue
+	}
+
+	// The whole check-and-add happens inside the store's lock. Doing the check
+	// outside it lets two concurrent materializations both conclude the Tasks
+	// are missing and both add them — which the graph validator catches as
+	// duplicate IDs, failing an operation that should have simply been a
+	// no-op for the second caller (FR-89, FR-178).
+	err := m.tasks.Update(workspaceID, func(ws *workspace.Workspace) error {
+		if ws == nil {
+			return fmt.Errorf("%w: %s", ErrWorkspaceNotFound, workspaceID)
 		}
-		pending = append(pending, entry.Task)
-	}
 
-	if len(pending) == 0 {
-		// Everything already exists: a retry after a crash between commit and
-		// consume. Nothing to write, and the IDs are still the answer.
-		return taskIDs, nil
-	}
+		existing := make(map[string]struct{}, len(ws.Tasks))
+		for _, task := range ws.Tasks {
+			existing[task.ID] = struct{}{}
+		}
 
-	// AddTasks validates the batch as a whole and restores the workspace if
-	// the graph is invalid, so a partial tree cannot survive (FR-89).
-	if err := ws.AddTasks(pending); err != nil {
+		pending := make([]workspace.Task, 0, len(compiled))
+		for _, entry := range compiled {
+			if _, already := existing[entry.Task.ID]; already {
+				continue
+			}
+			pending = append(pending, entry.Task)
+		}
+		if len(pending) == 0 {
+			// Everything already exists: either a retry after a crash between
+			// commit and consume, or a concurrent caller that got here first.
+			// Both are fine, and the IDs are still the answer.
+			return nil
+		}
+
+		// AddTasks validates the batch as a whole and restores the workspace
+		// if the graph is invalid, so a partial tree cannot survive (FR-89).
+		return ws.AddTasks(pending)
+	})
+	if err != nil {
+		// Never claim tasks were created when the write did not land (FR-99).
 		return nil, err
-	}
-	if err := m.tasks.Save(ws); err != nil {
-		// The in-memory workspace was mutated but not persisted. Reporting the
-		// failure is the whole point: never claim tasks were created when the
-		// write did not land (FR-99).
-		return nil, fmt.Errorf("persist plan tasks: %w", err)
 	}
 	return taskIDs, nil
 }

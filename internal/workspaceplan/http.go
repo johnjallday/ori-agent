@@ -31,6 +31,8 @@ type Handler struct {
 	// materializer spends approvals. It is optional so the API still serves
 	// reads and drafting in a build with no task store wired.
 	materializer *Materializer
+	// executor supervises approved work through the existing Run machinery.
+	executor *Executor
 }
 
 // GuidanceResolver returns the model-guidance half of a workspace's planning
@@ -56,6 +58,9 @@ func (h *Handler) SetAvailabilityResolver(resolve AvailabilityResolver) {
 
 // SetMaterializer attaches the service that spends approvals.
 func (h *Handler) SetMaterializer(materializer *Materializer) { h.materializer = materializer }
+
+// SetExecutor attaches the service that supervises approved work.
+func (h *Handler) SetExecutor(executor *Executor) { h.executor = executor }
 
 // planResponse is the wire shape of a Plan. It is written explicitly rather
 // than by serializing the domain type directly, so adding an internal field
@@ -971,6 +976,236 @@ func (h *Handler) availability(ctx context.Context, workspaceID string) Validati
 		return ValidationContext{}
 	}
 	return h.resolveAvailability(ctx, workspaceID)
+}
+
+// --- Execution (FR-100 through FR-121) -------------------------------------
+
+// PlanExecution dispatches .../execution — start, pause, resume, retry, skip,
+// cancel, complete, and fail.
+//
+// One route with a named action keeps the supervision verbs together, and keeps
+// every one of them going through the same ownership and method checks.
+func (h *Handler) PlanExecution(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+	workspaceID, planID := requireWorkspaceAndPlanID(w, r)
+	if workspaceID == "" || planID == "" {
+		return
+	}
+	if h.executor == nil {
+		writeError(w, fmt.Errorf("%w: execution is not configured", ErrValidation))
+		return
+	}
+
+	var req struct {
+		Action string `json:"action"`
+		Actor  string `json:"actor,omitempty"`
+		TaskID string `json:"task_id,omitempty"`
+		Reason string `json:"reason,omitempty"`
+	}
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+
+	ctx := r.Context()
+	switch strings.TrimSpace(strings.ToLower(req.Action)) {
+	case "start":
+		result, err := h.executor.Start(ctx, workspaceID, planID, StartInput{
+			Actor: req.Actor, TaskID: req.TaskID,
+		})
+		h.writeExecutionResult(w, result, err)
+
+	case "retry":
+		if strings.TrimSpace(req.TaskID) == "" {
+			writeError(w, fmt.Errorf("%w: retry requires a task_id", ErrValidation))
+			return
+		}
+		result, err := h.executor.Retry(ctx, workspaceID, planID, req.TaskID, req.Actor)
+		h.writeExecutionResult(w, result, err)
+
+	case "pause":
+		result, err := h.executor.Pause(ctx, workspaceID, planID, PauseInput{
+			Actor: req.Actor, Reason: req.Reason,
+		})
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		orihttp.Success(w, result)
+
+	case "resume":
+		plan, err := h.executor.Resume(ctx, workspaceID, planID, req.Actor)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		orihttp.Success(w, newPlanResponse(plan))
+
+	case "skip":
+		if strings.TrimSpace(req.TaskID) == "" {
+			writeError(w, fmt.Errorf("%w: skip requires a task_id", ErrValidation))
+			return
+		}
+		plan, err := h.executor.Skip(ctx, workspaceID, planID, req.TaskID, SkipInput{
+			Actor: req.Actor, Reason: req.Reason,
+		})
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		orihttp.Success(w, newPlanResponse(plan))
+
+	case "cancel":
+		plan, err := h.executor.Cancel(ctx, workspaceID, planID, req.Reason, req.Actor)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		orihttp.Success(w, newPlanResponse(plan))
+
+	case "complete":
+		report, err := h.executor.Complete(ctx, workspaceID, planID, req.Actor)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		orihttp.Success(w, report)
+
+	case "fail":
+		plan, err := h.executor.Fail(ctx, workspaceID, planID, req.Reason, req.Actor)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		orihttp.Success(w, newPlanResponse(plan))
+
+	default:
+		writeError(w, fmt.Errorf(
+			"%w: unsupported action %q; expected start, retry, pause, resume, skip, cancel, complete, or fail",
+			ErrValidation, req.Action))
+	}
+}
+
+func (h *Handler) writeExecutionResult(w http.ResponseWriter, result *StartResult, err error) {
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	orihttp.Success(w, result)
+}
+
+// PlanCancelPreview handles GET .../cancel-preview — what cancelling would
+// affect, before it happens (FR-111, FR-154).
+func (h *Handler) PlanCancelPreview(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodGet) {
+		return
+	}
+	workspaceID, planID := requireWorkspaceAndPlanID(w, r)
+	if workspaceID == "" || planID == "" {
+		return
+	}
+	if h.executor == nil {
+		writeError(w, fmt.Errorf("%w: execution is not configured", ErrValidation))
+		return
+	}
+
+	preview, err := h.executor.PreviewCancel(r.Context(), workspaceID, planID)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	orihttp.Success(w, preview)
+}
+
+// PlanForTask handles GET /api/workspaces/{workspaceID}/plan-for-task/{taskID}.
+//
+// This is the reverse half of the Plan-to-Task link: Task detail asks "which
+// plan produced me?" and gets a compact answer that deep-links to the canonical
+// Plan route rather than duplicating its editor (FR-10, FR-148).
+func (h *Handler) PlanForTask(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodGet) {
+		return
+	}
+	workspaceID := requireWorkspaceID(w, r)
+	if workspaceID == "" {
+		return
+	}
+	taskID := strings.TrimSpace(r.PathValue("taskID"))
+	if taskID == "" {
+		orihttp.BadRequest(w, "taskID is required")
+		return
+	}
+
+	link, err := h.service.Store().PlanForTask(r.Context(), workspaceID, taskID)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	h.writeRelatedPlan(w, r, workspaceID, link.PlanID, map[string]any{
+		"task_id":     link.TaskID,
+		"group_id":    link.GroupID,
+		"item_id":     link.ItemID,
+		"role":        link.Role,
+		"approval_id": link.ApprovalID,
+	}, link.Version)
+}
+
+// PlanForRun handles GET /api/workspaces/{workspaceID}/plan-for-run/{runID}.
+func (h *Handler) PlanForRun(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodGet) {
+		return
+	}
+	workspaceID := requireWorkspaceID(w, r)
+	if workspaceID == "" {
+		return
+	}
+	runID := strings.TrimSpace(r.PathValue("runID"))
+	if runID == "" {
+		orihttp.BadRequest(w, "runID is required")
+		return
+	}
+
+	link, err := h.service.Store().PlanForRun(r.Context(), workspaceID, runID)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	h.writeRelatedPlan(w, r, workspaceID, link.PlanID, map[string]any{
+		"run_id":   link.RunID,
+		"task_id":  link.TaskID,
+		"group_id": link.GroupID,
+		"item_id":  link.ItemID,
+	}, link.Version)
+}
+
+// writeRelatedPlan renders the compact related-Plan summary Task and Run detail
+// show. It is deliberately small: a link and enough context to know what this
+// work belongs to, never a second copy of the Plan (FR-148, FR-149).
+func (h *Handler) writeRelatedPlan(w http.ResponseWriter, r *http.Request, workspaceID, planID string, provenance map[string]any, version int) {
+	plan, err := h.service.Get(r.Context(), workspaceID, planID)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+
+	summary := map[string]any{
+		"plan_id":      plan.ID,
+		"studio_id":    plan.WorkspaceID,
+		"title":        plan.Title,
+		"objective":    plan.Objective,
+		"status":       plan.Status,
+		"status_label": plan.Status.Label(),
+		"plan_version": version,
+		"provenance":   provenance,
+		// The canonical route is returned rather than built by the client, so
+		// every entry point lands on the same surface (FR-145, FR-149).
+		"url": fmt.Sprintf("/workspaces/%s/plans/%s", plan.WorkspaceID, plan.ID),
+	}
+	if plan.Progress != nil {
+		summary["progress"] = plan.Progress
+	}
+	orihttp.Success(w, summary)
 }
 
 func requireWorkspaceID(w http.ResponseWriter, r *http.Request) string {

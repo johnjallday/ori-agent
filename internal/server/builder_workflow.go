@@ -458,9 +458,17 @@ func (b *ServerBuilder) initializeTaskExecution() {
 			oriExecutor.SetWorkspaceFolderResolver(b.workspaceFileStore)
 		}
 		b.workspaceRunExecutors.Register(workspacerun.ExecutorKindOriAgent, oriExecutor)
-		b.runBackedTaskHandler = workspacerun.NewTaskRunBridge(b.workspaceRunStore, b.workspaceRunService, b.workspaceStore)
-		taskExecutionHandler = b.runBackedTaskHandler
+		bridge := workspacerun.NewTaskRunBridge(b.workspaceRunStore, b.workspaceRunService, b.workspaceStore)
+		b.runBackedTaskHandler = bridge
+		// Kept as the concrete type as well, because plan execution dispatches
+		// through it directly rather than through the TaskHandler interface.
+		b.workspaceRunBridge = bridge
+		taskExecutionHandler = bridge
 	}
+
+	// Plan execution dispatches through the bridge above and mutates tasks
+	// through the workspace store, so it can only be wired once both exist.
+	b.attachWorkspacePlanExecutor()
 
 	b.taskExecutor = workspace.NewTaskExecutor(b.workspaceStore, taskExecutionHandler, workspace.ExecutorConfig{
 		PollInterval:  10 * time.Second,

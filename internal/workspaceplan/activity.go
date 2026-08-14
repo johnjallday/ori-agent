@@ -84,6 +84,12 @@ const (
 	// ActivityDraftRecovered records an autosave recovery point being restored
 	// into the working draft (FR-30).
 	ActivityDraftRecovered ActivityKind = "draft_recovered"
+	// ActivityTaskSkipped records a user's decision to proceed without an
+	// approved task, with the reason they gave (FR-115).
+	ActivityTaskSkipped ActivityKind = "task_skipped"
+	// ActivityCompleted records a plan finishing, with or without exceptions
+	// (FR-119, FR-121).
+	ActivityCompleted ActivityKind = "completed"
 )
 
 // NewActivityID returns a stable ID for one lifecycle history entry.

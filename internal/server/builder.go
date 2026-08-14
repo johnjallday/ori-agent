@@ -252,6 +252,10 @@ type ServerBuilder struct {
 	workspacePlanService      *workspaceplan.Service
 	workspacePlanHandler      *workspaceplan.Handler
 	workspacePlanMaterializer *workspaceplan.Materializer
+	workspacePlanExecutor     *workspaceplan.Executor
+	// workspaceRunBridge adapts Tasks onto Runs. Plan execution dispatches
+	// through it so plan work produces ordinary Run records.
+	workspaceRunBridge *workspacerun.TaskRunBridge
 
 	// Skills (local + external)
 	skillsManager *skills.Manager

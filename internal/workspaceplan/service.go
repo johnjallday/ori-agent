@@ -319,3 +319,7 @@ func (s *Service) Store() Store { return s.store }
 
 // Now returns the service clock, so layered services share one notion of time.
 func (s *Service) Now() time.Time { return s.now() }
+
+// SetProgressSource attaches the derived-progress provider after construction,
+// for callers whose task store only exists later in startup.
+func (s *Service) SetProgressSource(source ProgressSource) { s.progress = source }

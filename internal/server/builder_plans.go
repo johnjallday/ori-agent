@@ -3,9 +3,12 @@ package server
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/llm"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 	"github.com/johnjallday/ori-agent/internal/workspaceplan"
+	"github.com/johnjallday/ori-agent/internal/workspacerun"
 )
 
 // Wiring for the Workspace Planning Workflow's two lookups: which model to
@@ -38,6 +41,77 @@ func (b *ServerBuilder) attachWorkspacePlanMaterializer() {
 			workspaceplan.NewFileArtifactWriter(b.workspaceStore.GetFilesPath)),
 	)
 	b.workspacePlanHandler.SetMaterializer(b.workspacePlanMaterializer)
+}
+
+// planTaskDispatcher starts a plan's Task through the existing Task-to-Run
+// bridge.
+//
+// Plan execution decides WHICH task runs next; the bridge decides how a task
+// runs. Keeping that boundary means plan-dispatched work produces exactly the
+// same Run records as any other task, with the same traces and results
+// (FR-100).
+type planTaskDispatcher struct {
+	bridge *workspacerun.TaskRunBridge
+}
+
+func (d planTaskDispatcher) DispatchTask(ctx context.Context, workspaceID string, task workspace.Task) (string, error) {
+	if d.bridge == nil {
+		return "", fmt.Errorf("workspace run bridge is not configured")
+	}
+	// An unassigned task has no agent to run it. Picking one here would be an
+	// assignment nobody approved, so it is refused with something the user can
+	// act on (FR-86).
+	agent := strings.TrimSpace(task.To)
+	if agent == "" {
+		return "", fmt.Errorf("task %q has no assignee; assign it before starting", task.Description)
+	}
+
+	result, err := d.bridge.ExecuteTaskRun(ctx, agent, task)
+	if err != nil {
+		return result.RunID, err
+	}
+	return result.RunID, nil
+}
+
+// planTaskMutator applies plan-driven task changes through the workspace
+// store's canonical update path, so a cancel or retry goes through the same
+// locking and persistence as every other task mutation (FR-112).
+type planTaskMutator struct {
+	store workspace.Store
+}
+
+func (m planTaskMutator) MutateTask(workspaceID, taskID string, fn func(*workspace.Task) error) error {
+	if m.store == nil {
+		return fmt.Errorf("workspace store is not configured")
+	}
+	return m.store.Update(workspaceID, func(ws *workspace.Workspace) error {
+		return ws.MutateTask(taskID, fn)
+	})
+}
+
+// attachWorkspacePlanExecutor wires plan execution once the workspace store and
+// run bridge exist. Like the materializer, it must run after those are real
+// rather than during handler construction.
+func (b *ServerBuilder) attachWorkspacePlanExecutor() {
+	if b.workspacePlanHandler == nil || b.workspacePlanService == nil || b.workspaceStore == nil {
+		return
+	}
+
+	// Progress is derived from live task state every time a plan is read, so
+	// the plan never carries a stale copy of how its work is going (FR-12).
+	b.workspacePlanService.SetProgressSource(workspaceplan.NewTaskProgressSource(b.workspaceStore))
+
+	options := []workspaceplan.ExecutorOption{
+		workspaceplan.WithTaskMutator(planTaskMutator{store: b.workspaceStore}),
+	}
+	if b.workspaceRunBridge != nil {
+		options = append(options, workspaceplan.WithDispatcher(
+			planTaskDispatcher{bridge: b.workspaceRunBridge}))
+	}
+
+	b.workspacePlanExecutor = workspaceplan.NewExecutor(
+		b.workspacePlanService, b.workspaceStore, options...)
+	b.workspacePlanHandler.SetExecutor(b.workspacePlanExecutor)
 }
 
 // resolvePlanningProvider returns the provider and model to plan with.
