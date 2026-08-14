@@ -1000,6 +1000,67 @@ smoke_hardening() {
   echo "--- Hardening smoke passed ---"
 }
 
+smoke_packaged() {
+  local ws="$1"
+  [[ -n "$ws" ]] || fail "usage: smoke.sh packaged <base-url> <workspace-id>"
+
+  echo "--- Packaged-app independence ($ws) ---"
+  echo "     (run this against a server started OUTSIDE the repository,"
+  echo "      with an isolated HOME and no .agents directory)"
+
+  # The whole planning lifecycle must work with no repository skill in reach.
+  local plan base
+  plan=$(curl -s -X POST "$BASE_URL/api/workspaces/$ws/plans" \
+    -H 'Content-Type: application/json' \
+    -d '{"request":"Packaged independence check"}' | json_field id)
+  [[ -n "$plan" ]] || fail "could not create a plan"
+  base="$BASE_URL/api/workspaces/$ws/plans/$plan"
+  echo "ok   created a plan"
+
+  # Manual drafting: no model, no skill.
+  expect_status 200 PATCH "$base/draft" '{
+    "objective":"Prove planning is self-contained","revision":0,
+    "content":{"execution":{"mode":"step_through"},
+      "groups":[{"id":"grp-1","title":"Check","items":[
+        {"id":"itm-1","description":"Confirm the plan lifecycle needs no repository skill"}]}]}}'
+
+  local hash approval
+  hash=$(curl -s -X POST "$base/versions" -H 'Content-Type: application/json' -d '{}' | json_field content_hash)
+  [[ -n "$hash" ]] || fail "review snapshot produced no content hash"
+  echo "ok   review version snapshotted"
+
+  approval=$(curl -s -X POST "$base/approvals" -H 'Content-Type: application/json' \
+    -d "{\"version\":1,\"content_hash\":\"$hash\",\"effect\":\"create_tasks\",\"user_name\":\"smoke\",\"idempotency_key\":\"packaged-1\"}" |
+    json_field id)
+  [[ -n "$approval" ]] || fail "approval was refused"
+  expect_status 200 POST "$base/materialize" "{\"approval_id\":\"$approval\"}"
+  echo "ok   approved and materialized with no repository skill in reach"
+
+  # Diagnostics confirm the lifecycle is wired and that only generation needs
+  # a model.
+  local diag
+  diag=$(curl -s "$BASE_URL/api/workspaces/$ws/plan-diagnostics")
+  [[ "$(echo "$diag" | json_field components.materializer)" == "True" ]] ||
+    fail "materialization is unwired in the packaged build: $diag"
+  echo "ok   diagnostics report a wired planning subsystem"
+
+  # No planning skill is installed or resolvable.
+  local skills
+  skills=$(curl -s "$BASE_URL/api/skills" | python3 -c 'import sys,json
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    print(""); raise SystemExit
+items = d.get("skills") if isinstance(d, dict) else d
+print(",".join(str(s.get("name","")) for s in (items or [])))')
+  case "$skills" in
+  *workspace-planning*) fail "the legacy planning skill is installed: $skills" ;;
+  esac
+  echo "ok   no workspace-planning skill is installed"
+
+  echo "--- Packaged independence smoke passed ---"
+}
+
 case "${1:-}" in
 seed) seed_demo ;;
 slot) smoke_slot "${3:-}" ;;
@@ -1007,6 +1068,7 @@ reconcile) smoke_reconcile "${3:-}" ;;
 policy) smoke_policy "${3:-}" ;;
 boundary) smoke_boundary "${3:-}" ;;
 hardening) smoke_hardening "${3:-}" ;;
+packaged) smoke_packaged "${3:-}" ;;
 plans) smoke_plans "${3:-}" ;;
 drafting) smoke_drafting "${3:-}" ;;
 review) smoke_review "${3:-}" ;;
@@ -1015,7 +1077,7 @@ execution) smoke_execution "${3:-}" ;;
 *)
   echo "usage:" >&2
   echo "  $0 seed <base-url>                       # seed plans and print URLs to review" >&2
-  echo "  $0 {plans|drafting|review|materialize|execution|slot|reconcile|policy|boundary|hardening} <base-url> <workspace-id>" >&2
+  echo "  $0 {plans|drafting|review|materialize|execution|slot|reconcile|policy|boundary|hardening|packaged} <base-url> <workspace-id>" >&2
   exit 2
   ;;
 esac
