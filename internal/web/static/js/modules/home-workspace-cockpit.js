@@ -862,7 +862,7 @@ export function renderGroupRailHTML(view) {
     '<div class="cockpit-rail-panel" data-rail-panel="group">' +
     '<header class="cockpit-rail-head">' +
     '<button type="button" class="cockpit-rail-back" data-cockpit-rail-back>' +
-    '<span aria-hidden="true">&#8592;</span> Today</button>' +
+    '<span aria-hidden="true">&#8592;</span> Back</button>' +
     '<div class="cockpit-rail-identity">' +
     `<h3 class="cockpit-rail-title">${escapeHtml(view.name)}</h3>` +
     '<p class="cockpit-rail-badges">' +
@@ -961,7 +961,7 @@ export function renderWorkspaceRailHTML(view) {
     '<div class="cockpit-rail-panel" data-rail-panel="workspace">' +
     '<header class="cockpit-rail-head">' +
     '<button type="button" class="cockpit-rail-back" data-cockpit-rail-back>' +
-    '<span aria-hidden="true">&#8592;</span> Today</button>' +
+    '<span aria-hidden="true">&#8592;</span> Back</button>' +
     '<div class="cockpit-rail-identity">' +
     `<h3 class="cockpit-rail-title">${escapeHtml(view.name)}</h3>` +
     '<p class="cockpit-rail-badges">' +
@@ -1894,7 +1894,7 @@ import {
         '<div class="cockpit-rail-panel" data-rail-panel="personal-hq">' +
           '<header class="cockpit-rail-head">' +
           '<button type="button" class="cockpit-rail-back" data-cockpit-rail-back>' +
-          '<span aria-hidden="true">&#8592;</span> Today</button>' +
+          '<span aria-hidden="true">&#8592;</span> Back</button>' +
           '</header>' +
           (window.OriWorkspaceMap ? window.OriWorkspaceMap.hqOverviewHTML(state.hqSiteView) : '') +
           '</div>'
