@@ -45,6 +45,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/notehttp"
 	"github.com/johnjallday/ori-agent/internal/onboarding"
 	"github.com/johnjallday/ori-agent/internal/onboardinghttp"
+	"github.com/johnjallday/ori-agent/internal/orchestration"
 	"github.com/johnjallday/ori-agent/internal/orchestrationhttp"
 	"github.com/johnjallday/ori-agent/internal/personalhq"
 	"github.com/johnjallday/ori-agent/internal/personalhqhttp"
@@ -264,6 +265,9 @@ type ServerBuilder struct {
 	// workspacePlanPolicy resolves a workspace's effective planning policy and
 	// what its folder can actually enforce.
 	workspacePlanPolicy *workspacepolicy.Resolver
+	// multiAgentOrchestrator is retained so wiring tests can assert the plan
+	// drafter was attached.
+	multiAgentOrchestrator *orchestration.Orchestrator
 	// workspaceRunBridge adapts Tasks onto Runs. Plan execution dispatches
 	// through it so plan work produces ordinary Run records.
 	workspaceRunBridge *workspacerun.TaskRunBridge

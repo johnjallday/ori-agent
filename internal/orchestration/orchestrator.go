@@ -27,6 +27,10 @@ type Orchestrator struct {
 	configManager  *config.Manager
 	eventBus       *workspace.EventBus
 	gateway        *gateway.Service
+	// planDrafter opens durable Plans for proposed work. Optional: without it
+	// the orchestrator still reports what it wanted, it just cannot create the
+	// record the user would approve.
+	planDrafter PlanDrafter
 }
 
 // NewOrchestrator creates a new orchestrator
@@ -211,6 +215,10 @@ type CollaborativeResult struct {
 	PendingPlanID        string                      `json:"pending_plan_id,omitempty"`
 	PlannerDecision      *types.PlannerDecision      `json:"planner_decision,omitempty"`
 	DynamicAgentRequests []types.DynamicAgentRequest `json:"dynamic_agent_requests,omitempty"`
+	// PlanID is the durable Plan opened for proposed work that cannot run yet.
+	// It is where the user reviews and approves; PendingPlanID above is only
+	// the record of which agents the proposal wanted.
+	PlanID string `json:"plan_id,omitempty"`
 }
 
 // ExecuteCollaborativeTask coordinates multiple agents to complete a task

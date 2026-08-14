@@ -873,11 +873,61 @@ print("%s|%s" % (approval["enabled"] and approval["available"], "starts automati
   echo "--- Planning policy smoke passed ---"
 }
 
+smoke_boundary() {
+  local ws="$1"
+  [[ -n "$ws" ]] || fail "usage: smoke.sh boundary <base-url> <workspace-id>"
+
+  echo "--- Planning entry-point boundary ($ws) ---"
+
+  # A durable Plan created from a request is reviewable at the canonical route,
+  # and it is a DRAFT: nothing was approved by proposing it.
+  local plan status
+  plan=$(curl -s -X POST "$BASE_URL/api/workspaces/$ws/plans" \
+    -H 'Content-Type: application/json' \
+    -d '{"request":"Migrate reporting across three services","source":"chat"}' | json_field id)
+  [[ -n "$plan" ]] || fail "no plan was created"
+  status=$(curl -s "$BASE_URL/api/workspaces/$ws/plans/$plan" | json_field status)
+  [[ "$status" == "draft" ]] || fail "a proposed plan arrived as '$status', want draft"
+  echo "ok   a proposed plan lands as a draft, approving nothing"
+
+  # Its origin records that chat asked for it, so the audit trail says where
+  # the work came from.
+  local origin
+  origin=$(curl -s "$BASE_URL/api/workspaces/$ws/plans/$plan" | json_field origin.kind)
+  [[ "$origin" == "chat" ]] || fail "origin kind = '$origin', want chat"
+  echo "ok   the plan records that chat opened it"
+
+  # The canonical route serves it. One surface, one link.
+  expect_status 200 GET "$BASE_URL/api/workspaces/$ws/plans/$plan"
+
+  # Approval is the only path to tasks: an unapproved plan materializes nothing.
+  local materialized
+  materialized=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+    "$BASE_URL/api/workspaces/$ws/plans/$plan/materialize" \
+    -H 'Content-Type: application/json' -d '{"approval_id":"made-up"}')
+  [[ "$materialized" != "200" ]] || fail "an invented approval created work"
+  echo "ok   work cannot be created without a real approval (status $materialized)"
+
+  # Dynamic-agent approval no longer resumes execution.
+  local resume
+  resume=$(curl -s -X POST "$BASE_URL/api/orchestration/dynamic-agents/approve" \
+    -H 'Content-Type: application/json' \
+    -d "{\"workspace_id\":\"$ws\",\"request_id\":\"nope\",\"approve\":true}")
+  case "$resume" in
+  *'"resume_result":null'* | *"not found"* | *"error"*) ;;
+  *) fail "dynamic-agent approval returned a resume result: $resume" ;;
+  esac
+  echo "ok   approving a dynamic agent does not resume execution"
+
+  echo "--- Planning boundary smoke passed ---"
+}
+
 case "${1:-}" in
 seed) seed_demo ;;
 slot) smoke_slot "${3:-}" ;;
 reconcile) smoke_reconcile "${3:-}" ;;
 policy) smoke_policy "${3:-}" ;;
+boundary) smoke_boundary "${3:-}" ;;
 plans) smoke_plans "${3:-}" ;;
 drafting) smoke_drafting "${3:-}" ;;
 review) smoke_review "${3:-}" ;;
@@ -886,7 +936,7 @@ execution) smoke_execution "${3:-}" ;;
 *)
   echo "usage:" >&2
   echo "  $0 seed <base-url>                       # seed plans and print URLs to review" >&2
-  echo "  $0 {plans|drafting|review|materialize|execution|slot|reconcile|policy} <base-url> <workspace-id>" >&2
+  echo "  $0 {plans|drafting|review|materialize|execution|slot|reconcile|policy|boundary} <base-url> <workspace-id>" >&2
   exit 2
   ;;
 esac

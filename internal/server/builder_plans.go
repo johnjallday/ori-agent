@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/llm"
+	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 	"github.com/johnjallday/ori-agent/internal/workspaceplan"
 	"github.com/johnjallday/ori-agent/internal/workspacepolicy"
@@ -130,6 +131,60 @@ func (o chatPlanOpener) OpenPlan(ctx context.Context, workspaceID, request, acto
 	})
 	if err != nil {
 		return "", err
+	}
+	return plan.ID, nil
+}
+
+// orchestratorPlanDrafter turns planner output into a durable Plan draft.
+//
+// The orchestrator proposes; this writes the proposal down where a person can
+// read and approve it. Nothing here approves anything: the Plan lands as a
+// draft, and the only path to Tasks is still a consumed approval on Plan
+// Detail (FR-59, FR-149).
+type orchestratorPlanDrafter struct {
+	service *workspaceplan.Service
+	agents  func(ctx context.Context, workspaceID string) workspaceplan.ValidationContext
+}
+
+func (d orchestratorPlanDrafter) DraftPlan(ctx context.Context, workspaceID, request string, output *types.PlannerOutput) (string, error) {
+	if d.service == nil {
+		return "", fmt.Errorf("workspace planning is not configured")
+	}
+
+	// The roster is read here so a suggested agent that does not exist becomes
+	// a required capability rather than an assignment nobody approved.
+	var available []string
+	if d.agents != nil {
+		available = d.agents(ctx, workspaceID).AvailableAgents
+	}
+	conversion, err := workspaceplan.FromPlannerOutput(request, output, available)
+	if err != nil {
+		return "", err
+	}
+
+	plan, err := d.service.Create(ctx, workspaceID, workspaceplan.CreateInput{
+		Request: request,
+		Origin: workspaceplan.Origin{
+			Kind:  workspaceplan.OriginOrchestration,
+			Actor: "orchestrator",
+		},
+	})
+	if err != nil {
+		return "", err
+	}
+
+	objective := strings.TrimSpace(output.Rationale)
+	if objective == "" {
+		objective = request
+	}
+	if _, err := d.service.Store().UpdatePlanDraft(ctx, workspaceID, plan.ID, plan.DraftRevision,
+		workspaceplan.DraftUpdate{
+			Title:     plan.Title,
+			Objective: objective,
+			Content:   conversion.Content,
+			UpdatedAt: d.service.Now(),
+		}); err != nil {
+		return plan.ID, err
 	}
 	return plan.ID, nil
 }

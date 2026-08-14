@@ -123,6 +123,12 @@ func TestServerBuilder_Build_Integration(t *testing.T) {
 	if builder.workspacePlanPreflight() == nil {
 		t.Error("plan execution preflight not wired; enforced preconditions cannot be checked")
 	}
+	// The orchestrator must be able to write proposed multi-agent work down as
+	// a durable Plan. Without the drafter it falls back to the ephemeral stash,
+	// and the user has nothing versioned to approve.
+	if builder.multiAgentOrchestrator == nil || !builder.multiAgentOrchestrator.HasPlanDrafter() {
+		t.Error("orchestrator plan drafter not wired; proposed work would have no durable plan")
+	}
 	// The shared Setup Wizard is wired in the same phase and for the same
 	// reason: its state lives in the workspace's canonical folder record. An
 	// unwired wizard makes every blueprint's setup unreachable.
