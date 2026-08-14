@@ -243,7 +243,7 @@ func TestStartExplainsWhenThereIsNothingToDo(t *testing.T) {
 func TestStartRefusesAPlanThatIsNotApproved(t *testing.T) {
 	ctx := context.Background()
 	service := reviewService(t)
-	writer := newFakeTaskWriter("ws-1")
+	writer := newFakeTaskWriter()
 	executor := NewExecutor(service, writer, WithDispatcher(&fakeDispatcher{}))
 	plan := newReviewablePlan(t, ctx, service, reviewableContent())
 
@@ -770,6 +770,324 @@ func TestProgressDistinguishesWaitingForTheSlot(t *testing.T) {
 	}
 	if unblocked.Ready != 1 || unblocked.WaitingForSlot != 0 {
 		t.Errorf("progress = %+v, want the task counted as ready", unblocked)
+	}
+}
+
+// --- Execution slot integration (FR-106, FR-107, SM-15) --------------------
+
+// executableWithSlots materializes two plans in one workspace, both sharing a
+// slot coordinator, so contention can be exercised end to end.
+func executableWithSlots(t *testing.T, ctx context.Context) (
+	*Service, *Executor, *fakeTaskWriter, *SlotCoordinator, *Plan, *Plan) {
+	t.Helper()
+
+	service := reviewService(t)
+	writer := newFakeTaskWriter()
+	materializer := NewMaterializer(service, writer)
+	slots := NewSlotCoordinator(NewMemorySlotStore())
+
+	makePlan := func(key string) *Plan {
+		plan := newReviewablePlan(t, ctx, service, reviewableContent())
+		version, err := service.RequestReview(ctx, "ws-1", plan.ID, ReviewInput{Actor: "jj"})
+		if err != nil {
+			t.Fatalf("request review: %v", err)
+		}
+		approval, err := service.Approve(ctx, "ws-1", plan.ID, ApprovalRequest{
+			Version: version.Number, ContentHash: version.ContentHash,
+			Effect: EffectCreateTasks, UserName: "jj", IdempotencyKey: key,
+		})
+		if err != nil {
+			t.Fatalf("approve: %v", err)
+		}
+		if _, err := materializer.Materialize(ctx, "ws-1", plan.ID,
+			MaterializeInput{ApprovalID: approval.ID}); err != nil {
+			t.Fatalf("materialize: %v", err)
+		}
+		refreshed, err := service.Get(ctx, "ws-1", plan.ID)
+		if err != nil {
+			t.Fatalf("get: %v", err)
+		}
+		return refreshed
+	}
+
+	first := makePlan("key-1")
+	second := makePlan("key-2")
+
+	executor := NewExecutor(service, writer,
+		WithDispatcher(&fakeDispatcher{}),
+		WithTaskMutator(&fakeMutator{writer: writer}),
+		WithSlots(slots))
+	service.progress = NewTaskProgressSource(writer, WithSlotReporter(slots))
+
+	return service, executor, writer, slots, first, second
+}
+
+// Two approved plans in one workspace: one runs, the other waits visibly
+// (FR-106, FR-107).
+func TestOnlyOnePlanExecutesPerWorkspace(t *testing.T) {
+	ctx := context.Background()
+	service, executor, _, slots, first, second := executableWithSlots(t, ctx)
+
+	started, err := executor.Start(ctx, "ws-1", first.ID, StartInput{Actor: "jj"})
+	if err != nil {
+		t.Fatalf("start first: %v", err)
+	}
+	if !started.Started {
+		t.Fatalf("the first plan did not start: %s", started.Reason)
+	}
+
+	queued, err := executor.Start(ctx, "ws-1", second.ID, StartInput{Actor: "jj"})
+	if err != nil {
+		t.Fatalf("start second: %v", err)
+	}
+	if queued.Started {
+		t.Fatal("two plans started in one workspace")
+	}
+	// Waiting is explained, with a position rather than a bare refusal.
+	if !strings.Contains(queued.Reason, "another plan is executing") {
+		t.Errorf("reason = %q", queued.Reason)
+	}
+	if !strings.Contains(queued.Reason, "1st in line") {
+		t.Errorf("reason does not give a position: %q", queued.Reason)
+	}
+	// And the progress says waiting, not ready — the work is fine, the
+	// workspace is busy.
+	if queued.Progress.WaitingForSlot == 0 {
+		t.Errorf("progress = %+v, want the ready work counted as waiting", queued.Progress)
+	}
+
+	holder, err := slots.Holder(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("holder: %v", err)
+	}
+	if holder != first.ID {
+		t.Errorf("holder = %q, want the first plan", holder)
+	}
+
+	// The second plan is still merely approved; it was not marked executing.
+	stillApproved, err := service.Get(ctx, "ws-1", second.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if stillApproved.Status != StatusApproved {
+		t.Errorf("waiting plan status = %q, want approved", stillApproved.Status)
+	}
+}
+
+// Pausing with nothing in flight releases the slot, and the waiting plan can
+// then take it (FR-108, FR-110).
+func TestPausingHandsTheSlotToTheWaitingPlan(t *testing.T) {
+	ctx := context.Background()
+	_, executor, _, slots, first, second := executableWithSlots(t, ctx)
+
+	if _, err := executor.Start(ctx, "ws-1", first.ID, StartInput{}); err != nil {
+		t.Fatalf("start first: %v", err)
+	}
+	if _, err := executor.Start(ctx, "ws-1", second.ID, StartInput{}); err != nil {
+		t.Fatalf("queue second: %v", err)
+	}
+
+	paused, err := executor.Pause(ctx, "ws-1", first.ID, PauseInput{Actor: "jj"})
+	if err != nil {
+		t.Fatalf("pause: %v", err)
+	}
+	if !paused.SlotReleased {
+		t.Fatal("the slot was not released even though nothing was in flight")
+	}
+
+	took, err := executor.Start(ctx, "ws-1", second.ID, StartInput{})
+	if err != nil {
+		t.Fatalf("start second after release: %v", err)
+	}
+	if !took.Started {
+		t.Fatalf("the waiting plan could not take the released slot: %s", took.Reason)
+	}
+	holder, _ := slots.Holder(ctx, "ws-1")
+	if holder != second.ID {
+		t.Errorf("holder = %q, want the second plan", holder)
+	}
+}
+
+// Pausing while work is in flight does NOT release the slot: another plan
+// starting beside a running agent is the overlap the slot prevents (FR-108).
+func TestPausingHoldsTheSlotWhileWorkIsInFlight(t *testing.T) {
+	ctx := context.Background()
+	_, executor, writer, slots, first, second := executableWithSlots(t, ctx)
+
+	if _, err := executor.Start(ctx, "ws-1", first.ID, StartInput{}); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	snapshot := taskIDByDescription(t, writer, "Snapshot staging")
+	setTaskStatus(t, writer, snapshot, workspace.TaskStatusInProgress)
+
+	paused, err := executor.Pause(ctx, "ws-1", first.ID, PauseInput{Actor: "jj"})
+	if err != nil {
+		t.Fatalf("pause: %v", err)
+	}
+	if paused.SlotReleased {
+		t.Fatal("the slot was released while an agent was mid-action")
+	}
+
+	holder, _ := slots.Holder(ctx, "ws-1")
+	if holder != first.ID {
+		t.Errorf("holder = %q, want the paused plan to keep the slot", holder)
+	}
+	blocked, err := executor.Start(ctx, "ws-1", second.ID, StartInput{})
+	if err != nil {
+		t.Fatalf("start second: %v", err)
+	}
+	if blocked.Started {
+		t.Error("a second plan started while the first still had work in flight")
+	}
+}
+
+// Resuming rejoins the queue rather than displacing whoever started meanwhile
+// (FR-110).
+func TestResumeRejoinsTheQueueRatherThanDisplacing(t *testing.T) {
+	ctx := context.Background()
+	_, executor, _, slots, first, second := executableWithSlots(t, ctx)
+
+	if _, err := executor.Start(ctx, "ws-1", first.ID, StartInput{}); err != nil {
+		t.Fatalf("start first: %v", err)
+	}
+	if _, err := executor.Pause(ctx, "ws-1", first.ID, PauseInput{Actor: "jj"}); err != nil {
+		t.Fatalf("pause: %v", err)
+	}
+	// The second plan takes the free slot while the first is paused.
+	if _, err := executor.Start(ctx, "ws-1", second.ID, StartInput{}); err != nil {
+		t.Fatalf("start second: %v", err)
+	}
+
+	if _, err := executor.Resume(ctx, "ws-1", first.ID, "jj"); err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+
+	// Resuming did not take the slot back.
+	holder, _ := slots.Holder(ctx, "ws-1")
+	if holder != second.ID {
+		t.Errorf("holder = %q, want the plan that started meanwhile to keep it", holder)
+	}
+	waiting, err := slots.WaitingForSlot(ctx, "ws-1", first.ID)
+	if err != nil {
+		t.Fatalf("waiting: %v", err)
+	}
+	if !waiting {
+		t.Error("the resumed plan did not rejoin the queue")
+	}
+}
+
+// Completing gives the workspace back.
+func TestCompletingReleasesTheSlot(t *testing.T) {
+	ctx := context.Background()
+	_, executor, writer, slots, first, _ := executableWithSlots(t, ctx)
+
+	if _, err := executor.Start(ctx, "ws-1", first.ID, StartInput{}); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	for _, task := range writer.tasks() {
+		setTaskStatus(t, writer, task.ID, workspace.TaskStatusCompleted)
+	}
+	if _, err := executor.Complete(ctx, "ws-1", first.ID, "jj"); err != nil {
+		t.Fatalf("complete: %v", err)
+	}
+
+	holder, err := slots.Holder(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("holder: %v", err)
+	}
+	if holder != "" {
+		t.Errorf("holder = %q, want the slot free after completion", holder)
+	}
+}
+
+// Cancelling releases the slot and stops waiting for it.
+func TestCancellingReleasesAndDequeues(t *testing.T) {
+	ctx := context.Background()
+	_, executor, _, slots, first, second := executableWithSlots(t, ctx)
+
+	if _, err := executor.Start(ctx, "ws-1", first.ID, StartInput{}); err != nil {
+		t.Fatalf("start first: %v", err)
+	}
+	if _, err := executor.Start(ctx, "ws-1", second.ID, StartInput{}); err != nil {
+		t.Fatalf("queue second: %v", err)
+	}
+
+	// The waiting plan is cancelled: it should stop waiting.
+	if _, err := executor.Cancel(ctx, "ws-1", second.ID, "not needed", "jj"); err != nil {
+		t.Fatalf("cancel waiting plan: %v", err)
+	}
+	if waiting, _ := slots.WaitingForSlot(ctx, "ws-1", second.ID); waiting {
+		t.Error("a cancelled plan is still queued for the slot")
+	}
+
+	// The holder is cancelled: the slot frees.
+	if _, err := executor.Cancel(ctx, "ws-1", first.ID, "not needed", "jj"); err != nil {
+		t.Fatalf("cancel holder: %v", err)
+	}
+	if holder, _ := slots.Holder(ctx, "ws-1"); holder != "" {
+		t.Errorf("holder = %q, want the slot free", holder)
+	}
+}
+
+// Many callers racing to start different plans in one workspace resolve to one
+// execution (SM-15).
+func TestConcurrentStartsResolveToOneExecutingPlan(t *testing.T) {
+	ctx := context.Background()
+	_, executor, _, slots, first, second := executableWithSlots(t, ctx)
+
+	var (
+		wg      sync.WaitGroup
+		mu      sync.Mutex
+		started []string
+	)
+	for _, plan := range []*Plan{first, second} {
+		for range 4 {
+			wg.Add(1)
+			go func(planID string) {
+				defer wg.Done()
+				result, err := executor.Start(ctx, "ws-1", planID, StartInput{})
+				if err != nil || result == nil || !result.Started {
+					return
+				}
+				mu.Lock()
+				defer mu.Unlock()
+				started = append(started, planID)
+			}(plan.ID)
+		}
+	}
+	wg.Wait()
+
+	// Several starts of the SAME plan may succeed (each dispatches a different
+	// eligible task); what must never happen is both plans executing.
+	distinct := map[string]struct{}{}
+	for _, planID := range started {
+		distinct[planID] = struct{}{}
+	}
+	if len(distinct) > 1 {
+		t.Errorf("plans executing = %v, want at most 1", distinct)
+	}
+
+	holder, err := slots.Holder(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("holder: %v", err)
+	}
+	if holder == "" && len(started) > 0 {
+		t.Error("work started without anyone holding the slot")
+	}
+}
+
+// A build with no slot wired still runs plans: the slot restricts concurrency,
+// it is not a prerequisite for running at all.
+func TestExecutionWorksWithoutASlotCoordinator(t *testing.T) {
+	ctx := context.Background()
+	_, executor, _, _, plan := executable(t, ctx)
+
+	result, err := executor.Start(ctx, "ws-1", plan.ID, StartInput{})
+	if err != nil {
+		t.Fatalf("start without slots: %v", err)
+	}
+	if !result.Started {
+		t.Errorf("a plan could not start without a slot coordinator: %s", result.Reason)
 	}
 }
 

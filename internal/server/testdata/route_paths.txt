@@ -226,6 +226,7 @@
 /api/workspaces/x/output-dir
 /api/workspaces/x/plans
 /api/workspaces/x/plans/x
+/api/workspaces/x/plan-execution-slot
 /api/workspaces/x/plan-for-run/x
 /api/workspaces/x/plan-for-task/x
 /api/workspaces/x/plans/x/activity

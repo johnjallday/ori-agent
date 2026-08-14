@@ -22,8 +22,16 @@ type fakeTaskWriter struct {
 	failSave  error
 }
 
-func newFakeTaskWriter(workspaceID string) *fakeTaskWriter {
-	return &fakeTaskWriter{workspace: &workspace.Workspace{ID: workspaceID}}
+// testWorkspaceID is the one workspace these tests operate in. Cross-workspace
+// isolation is covered by the store contract, which builds its own IDs.
+const (
+	testWorkspaceID = "ws-1"
+	// testPlanID is the plan the store-contract seeds attach to.
+	testPlanID = "plan-1"
+)
+
+func newFakeTaskWriter() *fakeTaskWriter {
+	return &fakeTaskWriter{workspace: &workspace.Workspace{ID: testWorkspaceID}}
 }
 
 func (f *fakeTaskWriter) Get(id string) (*workspace.Workspace, error) {
@@ -120,7 +128,7 @@ func materializable(t *testing.T, ctx context.Context, content PlanContent, opts
 	t.Helper()
 
 	service := reviewService(t)
-	writer := newFakeTaskWriter("ws-1")
+	writer := newFakeTaskWriter()
 	materializer := NewMaterializer(service, writer, opts...)
 
 	plan := newReviewablePlan(t, ctx, service, content)
@@ -534,7 +542,7 @@ func TestMaterializeRefusesAnUnsafeArtifactPathBeforeWriting(t *testing.T) {
 	}}
 
 	service := reviewService(t)
-	writer := newFakeTaskWriter("ws-1")
+	writer := newFakeTaskWriter()
 	artifacts := newFakeArtifactWriter()
 	materializer := NewMaterializer(service, writer, WithArtifactWriter(artifacts))
 
@@ -719,7 +727,7 @@ func TestMaterializeReportsWhetherExecutionShouldStart(t *testing.T) {
 	auto := reviewableContent()
 	auto.Execution.Mode = ExecutionAuto
 	service := reviewService(t)
-	writer := newFakeTaskWriter("ws-1")
+	writer := newFakeTaskWriter()
 	autoMaterializer := NewMaterializer(service, writer)
 	autoPlan := newReviewablePlan(t, ctx, service, auto)
 	version, err := service.RequestReview(ctx, "ws-1", autoPlan.ID, ReviewInput{Actor: "jj"})

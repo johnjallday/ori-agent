@@ -855,6 +855,10 @@ func registerWorkspacePlanRoutes(mux *http.ServeMux, s *Server) {
 		// Reverse lookups: Task and Run detail ask which plan produced them and
 		// get a compact summary that deep-links to the canonical plan route,
 		// never a second editor (FR-10, FR-148, FR-149).
+		// Who is executing and who is waiting. A workspace-level read, because
+		// the answer is about the workspace: one plan runs, the rest queue
+		// (FR-106, FR-107).
+		mux.HandleFunc("/api/workspaces/{workspaceID}/plan-execution-slot", s.Handlers.WorkspacePlans.WorkspaceExecutionSlot)
 		mux.HandleFunc("/api/workspaces/{workspaceID}/plan-for-task/{taskID}", s.Handlers.WorkspacePlans.PlanForTask)
 		mux.HandleFunc("/api/workspaces/{workspaceID}/plan-for-run/{runID}", s.Handlers.WorkspacePlans.PlanForRun)
 		// GET discloses what a revision would replace; POST performs it. The

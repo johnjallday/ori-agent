@@ -10,7 +10,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 39
+const schemaVersion = 40
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -143,6 +143,8 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 		return db.migration038WorkspaceMapLayouts(ctx)
 	case 39:
 		return db.migration039WorkspacePlans(ctx)
+	case 40:
+		return db.migration040WorkspacePlanExecutionSlot(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
@@ -1637,6 +1639,66 @@ func (db *DB) migration039WorkspacePlans(ctx context.Context) error {
 	for _, stmt := range statements {
 		if _, err := db.ExecContext(ctx, stmt); err != nil {
 			return fmt.Errorf("failed to create workspace plan schema: %w", err)
+		}
+	}
+	return nil
+}
+
+// migration040WorkspacePlanExecutionSlot creates the workspace execution slot:
+// the arbitration that lets exactly one Plan run at a time in a workspace while
+// other approved Plans wait visibly (PRD FR-106, FR-107).
+//
+// The single-executing-Plan rule is a PRIMARY KEY, not a check. One row per
+// workspace in workspace_plan_execution_slots means a second Plan physically
+// cannot hold the slot, however many processes race for it — the database
+// refuses the insert rather than application code remembering to look first.
+//
+// `generation` is a fencing token. A worker that acquired the slot, stalled,
+// and woke up after the lease moved on still holds the old generation, so its
+// writes are refused. Without it, a slow worker could dispatch work for a Plan
+// that no longer owns the slot — the classic distributed-lease failure, and one
+// that a timestamp alone does not prevent.
+//
+// The queue is a separate table because waiting is not owning: a queued Plan
+// has no claim on anything, and modelling it as a weaker kind of ownership
+// invites code that treats it as one.
+func (db *DB) migration040WorkspacePlanExecutionSlot(ctx context.Context) error {
+	statements := []string{
+		`CREATE TABLE IF NOT EXISTS workspace_plan_execution_slots (
+			workspace_id TEXT PRIMARY KEY,
+			plan_id TEXT NOT NULL,
+			generation INTEGER NOT NULL DEFAULT 1,
+			owner TEXT NOT NULL DEFAULT '',
+			acquired_at DATETIME NOT NULL,
+			heartbeat_at DATETIME NOT NULL,
+			FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
+			FOREIGN KEY (plan_id) REFERENCES workspace_plans(id) ON DELETE CASCADE
+		)`,
+		`CREATE TABLE IF NOT EXISTS workspace_plan_execution_queue (
+			workspace_id TEXT NOT NULL,
+			plan_id TEXT NOT NULL,
+			queued_at DATETIME NOT NULL,
+			PRIMARY KEY (workspace_id, plan_id),
+			FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
+			FOREIGN KEY (plan_id) REFERENCES workspace_plans(id) ON DELETE CASCADE
+		)`,
+		// generation is monotonic per workspace and survives release, so a
+		// stale worker's token can never be reissued to a later holder.
+		`CREATE TABLE IF NOT EXISTS workspace_plan_execution_generations (
+			workspace_id TEXT PRIMARY KEY,
+			generation INTEGER NOT NULL DEFAULT 0,
+			FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+		)`,
+		// Queue order is first-come, and reading it is the "you are Nth in
+		// line" the UI shows (FR-107).
+		`CREATE INDEX IF NOT EXISTS idx_workspace_plan_execution_queue_order
+			ON workspace_plan_execution_queue(workspace_id, queued_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_workspace_plan_execution_slots_plan
+			ON workspace_plan_execution_slots(plan_id)`,
+	}
+	for _, stmt := range statements {
+		if _, err := db.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("failed to create workspace plan execution slot schema: %w", err)
 		}
 	}
 	return nil

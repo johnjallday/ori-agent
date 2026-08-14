@@ -1453,6 +1453,142 @@ func TestMigration039IsIdempotentOnAlreadyMigratedSchema(t *testing.T) {
 	}
 }
 
+// TestMigration040CreatesTheExecutionSlotSchema proves a fresh database gets
+// the slot, its queue, and the generation counter (PRD FR-106).
+func TestMigration040CreatesTheExecutionSlotSchema(t *testing.T) {
+	ctx := context.Background()
+
+	db, err := Open(ctx, &Config{Path: ":memory:", WALMode: false})
+	if err != nil {
+		t.Fatalf("Failed to open database: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	for _, table := range []string{
+		"workspace_plan_execution_slots",
+		"workspace_plan_execution_queue",
+		"workspace_plan_execution_generations",
+	} {
+		exists, err := db.tableExists(ctx, table)
+		if err != nil {
+			t.Fatalf("tableExists(%s): %v", table, err)
+		}
+		if !exists {
+			t.Errorf("fresh database is missing %s", table)
+		}
+	}
+}
+
+// TestMigration040AdmitsOneExecutingPlanPerWorkspace proves the arbitration is
+// structural: the single-executing-plan rule is a PRIMARY KEY, so a second
+// plan physically cannot hold the slot however many processes race (FR-106).
+func TestMigration040AdmitsOneExecutingPlanPerWorkspace(t *testing.T) {
+	ctx := context.Background()
+
+	db, err := Open(ctx, &Config{Path: ":memory:", WALMode: false})
+	if err != nil {
+		t.Fatalf("Failed to open database: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO workspaces (id, name, created_at, updated_at)
+		VALUES ('ws-1', 'Alpha', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	for _, id := range []string{"plan-a", "plan-b"} {
+		if _, err := db.ExecContext(ctx, `
+			INSERT INTO workspace_plans (id, workspace_id, status, created_at, updated_at, last_activity_at)
+			VALUES (?, 'ws-1', 'approved', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+		`, id); err != nil {
+			t.Fatalf("seed plan %s: %v", id, err)
+		}
+	}
+
+	acquire := func(planID string) error {
+		_, err := db.ExecContext(ctx, `
+			INSERT INTO workspace_plan_execution_slots
+				(workspace_id, plan_id, generation, owner, acquired_at, heartbeat_at)
+			VALUES ('ws-1', ?, 1, 'test', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+		`, planID)
+		return err
+	}
+
+	if err := acquire("plan-a"); err != nil {
+		t.Fatalf("first acquire: %v", err)
+	}
+	if err := acquire("plan-b"); err == nil {
+		t.Error("a second plan took the workspace's execution slot")
+	}
+
+	// A different workspace is unaffected: one plan per WORKSPACE, not one
+	// globally.
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO workspaces (id, name, created_at, updated_at)
+		VALUES ('ws-2', 'Beta', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`); err != nil {
+		t.Fatalf("seed second workspace: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO workspace_plans (id, workspace_id, status, created_at, updated_at, last_activity_at)
+		VALUES ('plan-c', 'ws-2', 'approved', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`); err != nil {
+		t.Fatalf("seed third plan: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO workspace_plan_execution_slots
+			(workspace_id, plan_id, generation, owner, acquired_at, heartbeat_at)
+		VALUES ('ws-2', 'plan-c', 1, 'test', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`); err != nil {
+		t.Errorf("a second workspace was blocked by the first: %v", err)
+	}
+}
+
+// The slot and queue follow the plan and the workspace: deleting either takes
+// its arbitration state with it rather than leaving a slot held by nothing.
+func TestMigration040SlotFollowsThePlan(t *testing.T) {
+	ctx := context.Background()
+
+	db, err := Open(ctx, &Config{Path: ":memory:", WALMode: false})
+	if err != nil {
+		t.Fatalf("Failed to open database: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO workspaces (id, name, created_at, updated_at)
+		VALUES ('ws-1', 'Alpha', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO workspace_plans (id, workspace_id, status, created_at, updated_at, last_activity_at)
+		VALUES ('plan-a', 'ws-1', 'approved', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`); err != nil {
+		t.Fatalf("seed plan: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO workspace_plan_execution_slots
+			(workspace_id, plan_id, generation, owner, acquired_at, heartbeat_at)
+		VALUES ('ws-1', 'plan-a', 1, 'test', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`); err != nil {
+		t.Fatalf("acquire: %v", err)
+	}
+
+	if _, err := db.ExecContext(ctx, `DELETE FROM workspace_plans WHERE id = 'plan-a'`); err != nil {
+		t.Fatalf("delete plan: %v", err)
+	}
+	var held int
+	if err := db.QueryRowContext(ctx,
+		`SELECT COUNT(1) FROM workspace_plan_execution_slots`).Scan(&held); err != nil {
+		t.Fatalf("count slots: %v", err)
+	}
+	if held != 0 {
+		t.Error("deleting a plan left its execution slot held")
+	}
+}
+
 // TestMigration034IsIdempotentOnAlreadyMigratedSchema proves the duplicate-column
 // guard: re-running migration 34 against a workspaces table that already has the
 // column must succeed rather than fail the whole startup (PRD FR-145 isolation).

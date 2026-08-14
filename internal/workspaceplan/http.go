@@ -33,6 +33,10 @@ type Handler struct {
 	materializer *Materializer
 	// executor supervises approved work through the existing Run machinery.
 	executor *Executor
+	// slots answers who is executing and who is waiting.
+	slots *SlotCoordinator
+	// auto drives automatic Plans after a successful materialization.
+	auto *AutoRunner
 }
 
 // GuidanceResolver returns the model-guidance half of a workspace's planning
@@ -61,6 +65,14 @@ func (h *Handler) SetMaterializer(materializer *Materializer) { h.materializer =
 
 // SetExecutor attaches the service that supervises approved work.
 func (h *Handler) SetExecutor(executor *Executor) { h.executor = executor }
+
+// SetSlots attaches the workspace execution-slot coordinator.
+func (h *Handler) SetSlots(slots *SlotCoordinator) { h.slots = slots }
+
+// SetAutoRunner attaches automatic execution. Without it, an automatic Plan
+// still materializes its Tasks; they simply wait to be started by hand, which
+// is a visible degradation rather than a silent one.
+func (h *Handler) SetAutoRunner(auto *AutoRunner) { h.auto = auto }
 
 // planResponse is the wire shape of a Plan. It is written explicitly rather
 // than by serializing the domain type directly, so adding an internal field
@@ -732,6 +744,22 @@ func (h *Handler) PlanMaterialize(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+
+	// Automatic dispatch begins here and nowhere else. StartExecution mirrors
+	// the effect of the approval that was just spent, so only an Approve and
+	// Start for this exact version can reach it — and a replayed
+	// materialization does not start a second run, because Launch refuses a
+	// Plan already running (FR-103).
+	if result.StartExecution && h.auto != nil {
+		launch, err := h.auto.Launch(r.Context(), workspaceID, planID, result.Actor)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		result.Launched = launch.Launched
+		result.LaunchReason = launch.Reason
+	}
+
 	orihttp.Success(w, result)
 }
 
@@ -1093,6 +1121,51 @@ func (h *Handler) writeExecutionResult(w http.ResponseWriter, result *StartResul
 		return
 	}
 	orihttp.Success(w, result)
+}
+
+// WorkspaceExecutionSlot handles GET
+// /api/workspaces/{workspaceID}/plan-execution-slot — who is executing and who
+// is waiting (FR-107).
+//
+// It is a workspace-level read rather than a plan-level one because the answer
+// is about the workspace: one plan runs, the rest queue.
+func (h *Handler) WorkspaceExecutionSlot(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodGet) {
+		return
+	}
+	workspaceID := requireWorkspaceID(w, r)
+	if workspaceID == "" {
+		return
+	}
+	if h.slots == nil {
+		// No arbitration configured means no plan is ever queued, which is a
+		// truthful answer rather than an error.
+		orihttp.Success(w, map[string]any{"studio_id": workspaceID, "queue": []any{}})
+		return
+	}
+
+	holder, err := h.slots.Holder(r.Context(), workspaceID)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	queue, err := h.slots.store.Queue(r.Context(), workspaceID)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	if queue == nil {
+		queue = []QueueEntry{}
+	}
+
+	orihttp.Success(w, map[string]any{
+		"studio_id":      workspaceID,
+		"executing_plan": holder,
+		"queue":          queue,
+		"queue_length":   len(queue),
+		"max_concurrent": 1,
+		"slot_available": holder == "",
+	})
 }
 
 // PlanCancelPreview handles GET .../cancel-preview — what cancelling would

@@ -89,6 +89,19 @@ func (m planTaskMutator) MutateTask(workspaceID, taskID string, fn func(*workspa
 	})
 }
 
+// workspacePlanSlotStore returns durable slot arbitration when a database is
+// available, and in-memory arbitration otherwise.
+//
+// The in-memory fallback still enforces one plan per workspace; it just does
+// not survive a restart. Degrading to "no arbitration" would be worse than
+// degrading to "arbitration that forgets".
+func (b *ServerBuilder) workspacePlanSlotStore() workspaceplan.SlotStore {
+	if b.sessionStore != nil {
+		return workspaceplan.NewSQLiteSlotStore(b.sessionStore.DB())
+	}
+	return workspaceplan.NewMemorySlotStore()
+}
+
 // attachWorkspacePlanExecutor wires plan execution once the workspace store and
 // run bridge exist. Like the materializer, it must run after those are real
 // rather than during handler construction.
@@ -97,12 +110,32 @@ func (b *ServerBuilder) attachWorkspacePlanExecutor() {
 		return
 	}
 
+	// One plan executes per workspace. The slot sits ABOVE the task executor:
+	// standalone tasks keep their own scheduler, global maximum, and provider
+	// limits entirely untouched (FR-100, FR-106).
+	slots := workspaceplan.NewSlotCoordinator(
+		b.workspacePlanSlotStore(),
+		workspaceplan.WithSlotOwner("ori-server"),
+	)
+	b.workspacePlanSlots = slots
+
 	// Progress is derived from live task state every time a plan is read, so
 	// the plan never carries a stale copy of how its work is going (FR-12).
-	b.workspacePlanService.SetProgressSource(workspaceplan.NewTaskProgressSource(b.workspaceStore))
+	b.workspacePlanService.SetProgressSource(
+		workspaceplan.NewTaskProgressSource(b.workspaceStore,
+			workspaceplan.WithSlotReporter(slots)))
 
 	options := []workspaceplan.ExecutorOption{
 		workspaceplan.WithTaskMutator(planTaskMutator{store: b.workspaceStore}),
+		workspaceplan.WithSlots(slots),
+		// Gates read the live roster on every dispatch, not a snapshot: an
+		// agent removed mid-plan must stop the next step, not the one after
+		// the server restarts (FR-118).
+		//
+		// No precondition checker is wired yet, so a Plan that names an
+		// enforced precondition stops automatic dispatch at it and hands the
+		// step back to the user. That is the fail-closed direction.
+		workspaceplan.WithGates(nil, b.resolvePlanAvailability),
 	}
 	if b.workspaceRunBridge != nil {
 		options = append(options, workspaceplan.WithDispatcher(
@@ -112,6 +145,13 @@ func (b *ServerBuilder) attachWorkspacePlanExecutor() {
 	b.workspacePlanExecutor = workspaceplan.NewExecutor(
 		b.workspacePlanService, b.workspaceStore, options...)
 	b.workspacePlanHandler.SetExecutor(b.workspacePlanExecutor)
+	b.workspacePlanHandler.SetSlots(slots)
+
+	// Automatic execution runs in the background, so it outlives the request
+	// that started it and must be stopped explicitly at shutdown.
+	b.workspacePlanAuto = workspaceplan.NewAutoRunner(b.workspacePlanExecutor)
+	b.workspacePlanHandler.SetAutoRunner(b.workspacePlanAuto)
+	b.server.workspacePlanAuto = b.workspacePlanAuto
 }
 
 // resolvePlanningProvider returns the provider and model to plan with.

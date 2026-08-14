@@ -253,6 +253,13 @@ type ServerBuilder struct {
 	workspacePlanHandler      *workspaceplan.Handler
 	workspacePlanMaterializer *workspaceplan.Materializer
 	workspacePlanExecutor     *workspaceplan.Executor
+	// workspacePlanSlots arbitrates which plan executes in a workspace. It
+	// sits above the task executor and leaves standalone task scheduling
+	// entirely alone (FR-100, FR-106).
+	workspacePlanSlots *workspaceplan.SlotCoordinator
+	// workspacePlanAuto drives approved automatic plans. Its loops outlive the
+	// requests that start them, so the server stops it during shutdown.
+	workspacePlanAuto *workspaceplan.AutoRunner
 	// workspaceRunBridge adapts Tasks onto Runs. Plan execution dispatches
 	// through it so plan work produces ordinary Run records.
 	workspaceRunBridge *workspacerun.TaskRunBridge

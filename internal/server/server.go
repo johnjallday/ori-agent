@@ -20,6 +20,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/privateservices"
 	web "github.com/johnjallday/ori-agent/internal/web"
 	"github.com/johnjallday/ori-agent/internal/workspace"
+	"github.com/johnjallday/ori-agent/internal/workspaceplan"
 )
 
 // Server holds all the dependencies and state for the HTTP server
@@ -34,6 +35,11 @@ type Server struct {
 	Handlers    *HandlerFacade
 
 	desktopOpener platform.DesktopOpener
+
+	// workspacePlanAuto drives approved automatic Plans. Its loops are not
+	// owned by any request, so shutdown has to stop them explicitly or a
+	// closing process keeps dispatching work.
+	workspacePlanAuto *workspaceplan.AutoRunner
 }
 
 func (s *Server) resolvedDesktopOpener() platform.DesktopOpener {
@@ -124,7 +130,13 @@ func isStaleWorkspaceManagerAgent(ag *agent.Agent) bool {
 
 // Shutdown gracefully shuts down background services
 func (s *Server) Shutdown() {
-	// Stop background services
+	// Stop background services. Automatic plan execution goes first: it
+	// dispatches THROUGH the task machinery, so stopping it before that
+	// machinery means nothing is queuing new work into a service that is
+	// already closing.
+	if s.workspacePlanAuto != nil {
+		s.workspacePlanAuto.Stop()
+	}
 	if s.Workflow != nil {
 		s.Workflow.Shutdown()
 	}

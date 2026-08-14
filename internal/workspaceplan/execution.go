@@ -39,6 +39,15 @@ type Executor struct {
 	// workspace's own safe transition rules rather than writing status
 	// directly (FR-112).
 	mutate TaskMutator
+	// slots arbitrates which Plan may execute in this workspace. Optional:
+	// without it a Plan starts whenever asked (FR-106).
+	slots *SlotCoordinator
+	// checker and availability decide the gates in front of a dispatch. They
+	// live here rather than on the automatic runner so manual and automatic
+	// dispatch cannot drift into two different opinions about what is allowed
+	// to run (FR-105, FR-118).
+	checker      PreconditionChecker
+	availability func(ctx context.Context, workspaceID string) ValidationContext
 }
 
 // TaskMutator applies a change to one Task through the workspace's own
@@ -67,6 +76,61 @@ func WithDispatcher(dispatcher TaskDispatcher) ExecutorOption {
 // WithTaskMutator attaches the Task mutation path.
 func WithTaskMutator(mutator TaskMutator) ExecutorOption {
 	return func(e *Executor) { e.mutate = mutator }
+}
+
+// WithSlots attaches the workspace execution slot.
+//
+// Without it a Plan starts whenever asked, which is the right behavior for a
+// build with no arbitration wired — the slot restricts concurrency, it is not
+// a prerequisite for running at all.
+func WithSlots(slots *SlotCoordinator) ExecutorOption {
+	return func(e *Executor) { e.slots = slots }
+}
+
+// WithGates attaches gate evaluation: the compiled enforcement adapters and the
+// live agent/capability lookup.
+//
+// A nil checker is not "no preconditions" — it makes every enforced
+// precondition fail closed, because a Plan approved on the promise of a check
+// must not run where nothing can perform it (FR-105).
+func WithGates(
+	checker PreconditionChecker,
+	availability func(context.Context, string) ValidationContext,
+) ExecutorOption {
+	return func(e *Executor) {
+		e.checker = checker
+		e.availability = availability
+	}
+}
+
+// Gates returns everything standing between one Task and its dispatch.
+//
+// Gates come from the version the Task was approved under. A Plan with no
+// approved version has no gates to read, and no Task either — nothing was
+// materialized — so the empty result is the correct one rather than a hole.
+func (e *Executor) Gates(ctx context.Context, plan *Plan, task workspace.Task) ([]Gate, error) {
+	if plan.ApprovedVersion <= 0 {
+		return nil, nil
+	}
+	version, err := e.service.Store().GetVersion(
+		ctx, plan.WorkspaceID, plan.ID, plan.ApprovedVersion)
+	if err != nil {
+		return nil, err
+	}
+
+	availability := ValidationContext{}
+	if e.availability != nil {
+		availability = e.availability(ctx, plan.WorkspaceID)
+	}
+
+	return EvaluateGates(ctx, e.checker, GateInput{
+		WorkspaceID:  plan.WorkspaceID,
+		Plan:         plan,
+		Content:      version.Content,
+		ItemID:       itemIDForTask(plan, task.ID),
+		TaskID:       task.ID,
+		Availability: availability,
+	})
 }
 
 // StartInput asks a Plan to begin, or to take its next step.
@@ -123,6 +187,41 @@ func (e *Executor) Start(ctx context.Context, workspaceID, planID string, input 
 			Progress: progress,
 			Reason:   noStartReason(progress),
 		}, nil
+	}
+
+	// A blocking gate stops a manual start too. This is a deliberate user
+	// action, but no click makes an absent agent exist: dispatching anyway
+	// would move the same failure into the Run record and cost a slot claim on
+	// the way (FR-118).
+	gates, err := e.Gates(ctx, plan, task)
+	if err != nil {
+		return nil, err
+	}
+	if blocking := blockingGates(gates); len(blocking) > 0 {
+		return nil, fmt.Errorf("%w: %s", ErrUnavailableCapability, GateSummary(blocking))
+	}
+
+	// Take the workspace's execution slot before dispatching. The claim
+	// happens here rather than at approval because approving does not start
+	// work — holding the slot from approval would block other plans on
+	// something that may never run (FR-106).
+	if e.slots != nil {
+		claim, err := e.slots.Claim(ctx, workspaceID, planID)
+		if err != nil {
+			return nil, err
+		}
+		if !claim.Owned() {
+			// Waiting is visible, not an error: the plan is queued and the
+			// caller is told what it waits behind (FR-107).
+			progress := DeriveProgress(plan, ws.Tasks)
+			progress.WaitingForSlot = progress.Ready
+			progress.Ready = 0
+			return &StartResult{
+				PlanID:   planID,
+				Progress: progress,
+				Reason:   waitingReason(claim),
+			}, nil
+		}
 	}
 
 	// The Plan moves to executing before the Run starts, so a Plan is never
@@ -185,6 +284,36 @@ func (e *Executor) selectTask(plan *Plan, tasks []workspace.Task, taskID string)
 		}
 	}
 	return workspace.Task{}, false
+}
+
+// waitingReason says what a queued Plan is waiting behind and where it stands,
+// rather than only that it is waiting (FR-107).
+func waitingReason(claim *ClaimResult) string {
+	position := 0
+	if claim.Waiting != nil {
+		position = claim.Waiting.Position
+	}
+	if claim.HolderPlanID != "" {
+		return fmt.Sprintf(
+			"another plan is executing in this workspace; this plan is %s in line",
+			ordinal(position))
+	}
+	return fmt.Sprintf("waiting for the workspace execution slot (%s in line)", ordinal(position))
+}
+
+func ordinal(position int) string {
+	switch position {
+	case 0:
+		return "next"
+	case 1:
+		return "1st"
+	case 2:
+		return "2nd"
+	case 3:
+		return "3rd"
+	default:
+		return fmt.Sprintf("%dth", position)
+	}
 }
 
 // noStartReason explains why a start did nothing, so the UI can say something
@@ -279,12 +408,43 @@ func (e *Executor) Pause(ctx context.Context, workspaceID, planID string, input 
 		return nil, err
 	}
 
+	// The slot is released only once nothing is in flight. Releasing while an
+	// agent is mid-action would let a second Plan start beside it, which is
+	// exactly the overlap the slot exists to prevent (FR-108).
+	released := len(running) == 0
+	if released {
+		if err := e.releaseSlot(ctx, workspaceID, planID); err != nil {
+			return nil, err
+		}
+	}
+
 	return &PauseResult{
 		PlanID:       planID,
 		StillRunning: taskRefs(running),
-		SlotReleased: len(running) == 0,
+		SlotReleased: released,
 		Progress:     DeriveProgress(paused, ws.Tasks),
 	}, nil
+}
+
+// releaseSlot gives up the workspace slot and, when another Plan is waiting,
+// leaves it free for that Plan's next start.
+func (e *Executor) releaseSlot(ctx context.Context, workspaceID, planID string) error {
+	if e.slots == nil {
+		return nil
+	}
+	lease, err := e.slots.store.CurrentLease(ctx, workspaceID)
+	if err != nil {
+		return err
+	}
+	// Releasing a slot this Plan does not hold is a no-op, not an error: a
+	// Plan that never started has nothing to give up.
+	if lease == nil || lease.PlanID != planID {
+		return nil
+	}
+	if _, err := e.slots.Release(ctx, workspaceID, planID, lease.Generation); err != nil {
+		return err
+	}
+	return nil
 }
 
 // Resume returns a paused Plan to executing (FR-110).
@@ -314,6 +474,15 @@ func (e *Executor) Resume(ctx context.Context, workspaceID, planID, actor string
 			return nil, fmt.Errorf(
 				"%w: %d task(s) failed and nothing else can start. Retry, reassign, skip, or revise first",
 				ErrInvalidTransition, len(failed))
+		}
+	}
+
+	// Resuming rejoins the queue rather than displacing the current holder: a
+	// paused plan gave up its turn, and taking it back by force would stop
+	// whoever started in the meantime (FR-110).
+	if e.slots != nil {
+		if _, err := e.slots.Enqueue(ctx, workspaceID, planID); err != nil {
+			return nil, err
 		}
 	}
 
@@ -414,9 +583,23 @@ func (e *Executor) Cancel(ctx context.Context, workspaceID, planID, reason, acto
 	if strings.TrimSpace(reason) == "" {
 		reason = "cancelled by the user"
 	}
-	return e.service.Transition(ctx, workspaceID, planID, TransitionInput{
+	cancelled, err := e.service.Transition(ctx, workspaceID, planID, TransitionInput{
 		To: StatusCancelled, Source: SourceUser, Actor: actor, Reason: reason,
 	})
+	if err != nil {
+		return nil, err
+	}
+
+	// A cancelled Plan holds nothing and waits for nothing.
+	if err := e.releaseSlot(ctx, workspaceID, planID); err != nil {
+		return nil, err
+	}
+	if e.slots != nil {
+		if err := e.slots.Dequeue(ctx, workspaceID, planID); err != nil {
+			return nil, err
+		}
+	}
+	return cancelled, nil
 }
 
 func (e *Executor) cancelTask(workspaceID, taskID string) error {
@@ -629,6 +812,11 @@ func (e *Executor) Complete(ctx context.Context, workspaceID, planID, actor stri
 		To: StatusCompleted, Source: SourceUser, Actor: actor,
 		Reason: completionReason(report),
 	}); err != nil {
+		return nil, err
+	}
+
+	// A finished Plan gives the workspace back, so whatever is queued can run.
+	if err := e.releaseSlot(ctx, workspaceID, planID); err != nil {
 		return nil, err
 	}
 	return report, nil

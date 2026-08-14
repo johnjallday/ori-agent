@@ -125,6 +125,16 @@ type MaterializeResult struct {
 	// StartExecution mirrors the approval's declared effect, so the caller
 	// knows whether to dispatch without re-deriving it (FR-103).
 	StartExecution bool `json:"start_execution"`
+	// Actor is the approving user. Automatic execution is attributed to them
+	// rather than to whoever happened to send the materialize request: the
+	// approval is what authorized the work, so it is whose name belongs on it
+	// (FR-79, FR-87).
+	Actor string `json:"actor,omitempty"`
+	// Launched and LaunchReason report what automatic execution did. A false
+	// Launched with a reason is the honest answer for an automatic Plan that
+	// materialized but could not begin — it never looks like it started.
+	Launched     bool   `json:"launched"`
+	LaunchReason string `json:"launch_reason,omitempty"`
 }
 
 // Materialize spends an approval and creates the work it authorized.
@@ -248,6 +258,7 @@ func (m *Materializer) Materialize(ctx context.Context, workspaceID, planID stri
 		TaskIDs:        taskIDs,
 		ArtifactPaths:  pathsOf(staged),
 		StartExecution: approval.Effect.StartsExecution(),
+		Actor:          approval.UserName,
 	}, nil
 }
 
@@ -257,6 +268,7 @@ func replayResult(plan *Plan, approval *Approval) *MaterializeResult {
 		Version:        approval.Version,
 		Replayed:       true,
 		StartExecution: approval.Effect.StartsExecution(),
+		Actor:          approval.UserName,
 	}
 	if approval.ConsumedResult != nil {
 		result.TaskIDs = approval.ConsumedResult.TaskIDs

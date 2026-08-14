@@ -66,11 +66,11 @@ func seedTestWorkspace(t *testing.T, ctx context.Context, db *database.DB, id st
 	}
 }
 
-func testPlan(workspaceID, planID string) *Plan {
+func testPlan(planID string) *Plan {
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	return &Plan{
 		ID:              planID,
-		WorkspaceID:     workspaceID,
+		WorkspaceID:     testWorkspaceID,
 		Title:           "Ship the thing",
 		OriginalRequest: "Please plan how we ship the thing.",
 		Objective:       "Ship the thing safely",
@@ -100,7 +100,7 @@ func testPlan(workspaceID, planID string) *Plan {
 func TestStoreCreateGetListRoundTrip(t *testing.T) {
 	forEachStore(t, func(t *testing.T, ctx context.Context, store Store, seed func(string)) {
 		seed("ws-1")
-		plan := testPlan("ws-1", "plan-1")
+		plan := testPlan("plan-1")
 		if err := store.CreatePlan(ctx, plan); err != nil {
 			t.Fatalf("create plan: %v", err)
 		}
@@ -140,7 +140,7 @@ func TestStoreScopesEveryReadToTheOwningWorkspace(t *testing.T) {
 	forEachStore(t, func(t *testing.T, ctx context.Context, store Store, seed func(string)) {
 		seed("ws-1")
 		seed("ws-2")
-		if err := store.CreatePlan(ctx, testPlan("ws-1", "plan-1")); err != nil {
+		if err := store.CreatePlan(ctx, testPlan("plan-1")); err != nil {
 			t.Fatalf("create plan: %v", err)
 		}
 
@@ -171,7 +171,7 @@ func TestStoreDependentReadsRejectUnknownAndCrossWorkspacePlans(t *testing.T) {
 	forEachStore(t, func(t *testing.T, ctx context.Context, store Store, seed func(string)) {
 		seed("ws-1")
 		seed("ws-2")
-		if err := store.CreatePlan(ctx, testPlan("ws-1", "plan-1")); err != nil {
+		if err := store.CreatePlan(ctx, testPlan("plan-1")); err != nil {
 			t.Fatalf("create plan: %v", err)
 		}
 
@@ -214,7 +214,7 @@ func TestStoreDependentReadsRejectUnknownAndCrossWorkspacePlans(t *testing.T) {
 func TestStoreDraftWritesUseOptimisticConcurrency(t *testing.T) {
 	forEachStore(t, func(t *testing.T, ctx context.Context, store Store, seed func(string)) {
 		seed("ws-1")
-		if err := store.CreatePlan(ctx, testPlan("ws-1", "plan-1")); err != nil {
+		if err := store.CreatePlan(ctx, testPlan("plan-1")); err != nil {
 			t.Fatalf("create plan: %v", err)
 		}
 
@@ -256,7 +256,7 @@ func TestStoreDraftWritesUseOptimisticConcurrency(t *testing.T) {
 func TestStoreDraftWriteCannotOverwriteAnAuthoredAnswer(t *testing.T) {
 	forEachStore(t, func(t *testing.T, ctx context.Context, store Store, seed func(string)) {
 		seed("ws-1")
-		plan := testPlan("ws-1", "plan-1")
+		plan := testPlan("plan-1")
 		plan.Draft.Clarifications = []Clarification{{
 			ID:        "clr-1",
 			Prompt:    "Which environment?",
@@ -329,7 +329,7 @@ func TestStoreDraftWriteCannotOverwriteAnAuthoredAnswer(t *testing.T) {
 func TestStoreRecordsSkippedClarifications(t *testing.T) {
 	forEachStore(t, func(t *testing.T, ctx context.Context, store Store, seed func(string)) {
 		seed("ws-1")
-		plan := testPlan("ws-1", "plan-1")
+		plan := testPlan("plan-1")
 		plan.Draft.Clarifications = []Clarification{{
 			ID:        "clr-1",
 			Prompt:    "Any deadline?",
@@ -368,7 +368,7 @@ func TestStoreRecordsSkippedClarifications(t *testing.T) {
 func TestStoreArchiveReopenAndListScopes(t *testing.T) {
 	forEachStore(t, func(t *testing.T, ctx context.Context, store Store, seed func(string)) {
 		seed("ws-1")
-		if err := store.CreatePlan(ctx, testPlan("ws-1", "plan-1")); err != nil {
+		if err := store.CreatePlan(ctx, testPlan("plan-1")); err != nil {
 			t.Fatalf("create plan: %v", err)
 		}
 
@@ -407,11 +407,11 @@ func TestStoreArchiveReopenAndListScopes(t *testing.T) {
 func TestStoreArchivePreservesVersionsApprovalsAndLinks(t *testing.T) {
 	forEachStore(t, func(t *testing.T, ctx context.Context, store Store, seed func(string)) {
 		seed("ws-1")
-		if err := store.CreatePlan(ctx, testPlan("ws-1", "plan-1")); err != nil {
+		if err := store.CreatePlan(ctx, testPlan("plan-1")); err != nil {
 			t.Fatalf("create plan: %v", err)
 		}
-		version := seedVersion(t, ctx, store, "ws-1", "plan-1", "hash-1")
-		approval := seedApproval(t, ctx, store, "ws-1", "plan-1", version.Number, "hash-1", "key-1")
+		version := seedVersion(t, ctx, store, "plan-1", "hash-1")
+		approval := seedApproval(t, ctx, store, version)
 		if err := store.LinkTasks(ctx, "ws-1", "plan-1", []TaskLink{{
 			PlanID: "plan-1", WorkspaceID: "ws-1", TaskID: "task-1",
 			Version: version.Number, ApprovalID: approval.ID,
@@ -447,7 +447,7 @@ func TestStoreArchivePreservesVersionsApprovalsAndLinks(t *testing.T) {
 func TestStoreHardDeleteOnlyForPlansWithNoEffects(t *testing.T) {
 	forEachStore(t, func(t *testing.T, ctx context.Context, store Store, seed func(string)) {
 		seed("ws-1")
-		if err := store.CreatePlan(ctx, testPlan("ws-1", "plan-clean")); err != nil {
+		if err := store.CreatePlan(ctx, testPlan("plan-clean")); err != nil {
 			t.Fatalf("create clean plan: %v", err)
 		}
 		if err := store.DeletePlan(ctx, "ws-1", "plan-clean"); err != nil {
@@ -457,10 +457,10 @@ func TestStoreHardDeleteOnlyForPlansWithNoEffects(t *testing.T) {
 			t.Errorf("plan still readable after delete: %v", err)
 		}
 
-		if err := store.CreatePlan(ctx, testPlan("ws-1", "plan-linked")); err != nil {
+		if err := store.CreatePlan(ctx, testPlan("plan-linked")); err != nil {
 			t.Fatalf("create linked plan: %v", err)
 		}
-		version := seedVersion(t, ctx, store, "ws-1", "plan-linked", "hash-1")
+		version := seedVersion(t, ctx, store, "plan-linked", "hash-1")
 		if err := store.LinkTasks(ctx, "ws-1", "plan-linked", []TaskLink{{
 			PlanID: "plan-linked", WorkspaceID: "ws-1", TaskID: "task-1",
 			Version: version.Number, GroupID: "grp-1", ItemID: "itm-1",
@@ -482,12 +482,12 @@ func TestStoreHardDeleteOnlyForPlansWithNoEffects(t *testing.T) {
 func TestStoreVersionNumbersAreMonotonicAndImmutable(t *testing.T) {
 	forEachStore(t, func(t *testing.T, ctx context.Context, store Store, seed func(string)) {
 		seed("ws-1")
-		if err := store.CreatePlan(ctx, testPlan("ws-1", "plan-1")); err != nil {
+		if err := store.CreatePlan(ctx, testPlan("plan-1")); err != nil {
 			t.Fatalf("create plan: %v", err)
 		}
 
-		first := seedVersion(t, ctx, store, "ws-1", "plan-1", "hash-1")
-		second := seedVersion(t, ctx, store, "ws-1", "plan-1", "hash-2")
+		first := seedVersion(t, ctx, store, "plan-1", "hash-1")
+		second := seedVersion(t, ctx, store, "plan-1", "hash-2")
 		if first.Number != 1 || second.Number != 2 {
 			t.Fatalf("version numbers = %d, %d; want 1, 2", first.Number, second.Number)
 		}
@@ -517,13 +517,13 @@ func TestStoreVersionNumbersAreMonotonicAndImmutable(t *testing.T) {
 func TestStoreApprovalCreationIsIdempotent(t *testing.T) {
 	forEachStore(t, func(t *testing.T, ctx context.Context, store Store, seed func(string)) {
 		seed("ws-1")
-		if err := store.CreatePlan(ctx, testPlan("ws-1", "plan-1")); err != nil {
+		if err := store.CreatePlan(ctx, testPlan("plan-1")); err != nil {
 			t.Fatalf("create plan: %v", err)
 		}
-		version := seedVersion(t, ctx, store, "ws-1", "plan-1", "hash-1")
+		version := seedVersion(t, ctx, store, "plan-1", "hash-1")
 
-		first := seedApproval(t, ctx, store, "ws-1", "plan-1", version.Number, "hash-1", "key-1")
-		second := seedApproval(t, ctx, store, "ws-1", "plan-1", version.Number, "hash-1", "key-1")
+		first := seedApproval(t, ctx, store, version)
+		second := seedApproval(t, ctx, store, version)
 		if first.ID != second.ID {
 			t.Errorf("retried approval created a second record: %s vs %s", first.ID, second.ID)
 		}
@@ -543,11 +543,11 @@ func TestStoreApprovalCreationIsIdempotent(t *testing.T) {
 func TestStoreApprovalIsConsumableExactlyOnce(t *testing.T) {
 	forEachStore(t, func(t *testing.T, ctx context.Context, store Store, seed func(string)) {
 		seed("ws-1")
-		if err := store.CreatePlan(ctx, testPlan("ws-1", "plan-1")); err != nil {
+		if err := store.CreatePlan(ctx, testPlan("plan-1")); err != nil {
 			t.Fatalf("create plan: %v", err)
 		}
-		version := seedVersion(t, ctx, store, "ws-1", "plan-1", "hash-1")
-		approval := seedApproval(t, ctx, store, "ws-1", "plan-1", version.Number, "hash-1", "key-1")
+		version := seedVersion(t, ctx, store, "plan-1", "hash-1")
+		approval := seedApproval(t, ctx, store, version)
 
 		const racers = 8
 		var (
@@ -602,11 +602,11 @@ func TestStoreApprovalIsConsumableExactlyOnce(t *testing.T) {
 func TestStoreInvalidatedApprovalCannotBeConsumed(t *testing.T) {
 	forEachStore(t, func(t *testing.T, ctx context.Context, store Store, seed func(string)) {
 		seed("ws-1")
-		if err := store.CreatePlan(ctx, testPlan("ws-1", "plan-1")); err != nil {
+		if err := store.CreatePlan(ctx, testPlan("plan-1")); err != nil {
 			t.Fatalf("create plan: %v", err)
 		}
-		version := seedVersion(t, ctx, store, "ws-1", "plan-1", "hash-1")
-		approval := seedApproval(t, ctx, store, "ws-1", "plan-1", version.Number, "hash-1", "key-1")
+		version := seedVersion(t, ctx, store, "plan-1", "hash-1")
+		approval := seedApproval(t, ctx, store, version)
 
 		if err := store.InvalidateApprovals(ctx, "ws-1", "plan-1", version.Number, "scope changed", time.Now().UTC()); err != nil {
 			t.Fatalf("invalidate approvals: %v", err)
@@ -623,7 +623,7 @@ func TestStoreInvalidatedApprovalCannotBeConsumed(t *testing.T) {
 func TestStoreTaskLinkageIsIdempotentExceptForFollowUps(t *testing.T) {
 	forEachStore(t, func(t *testing.T, ctx context.Context, store Store, seed func(string)) {
 		seed("ws-1")
-		if err := store.CreatePlan(ctx, testPlan("ws-1", "plan-1")); err != nil {
+		if err := store.CreatePlan(ctx, testPlan("plan-1")); err != nil {
 			t.Fatalf("create plan: %v", err)
 		}
 
@@ -660,7 +660,7 @@ func TestStoreTaskLinkageIsIdempotentExceptForFollowUps(t *testing.T) {
 func TestStoreReverseLookupsResolveTheOriginatingPlan(t *testing.T) {
 	forEachStore(t, func(t *testing.T, ctx context.Context, store Store, seed func(string)) {
 		seed("ws-1")
-		if err := store.CreatePlan(ctx, testPlan("ws-1", "plan-1")); err != nil {
+		if err := store.CreatePlan(ctx, testPlan("plan-1")); err != nil {
 			t.Fatalf("create plan: %v", err)
 		}
 		now := time.Now().UTC()
@@ -702,7 +702,7 @@ func TestStoreReverseLookupsResolveTheOriginatingPlan(t *testing.T) {
 func TestStoreActivityIsAppendOnlyAndSequenced(t *testing.T) {
 	forEachStore(t, func(t *testing.T, ctx context.Context, store Store, seed func(string)) {
 		seed("ws-1")
-		plan := testPlan("ws-1", "plan-1")
+		plan := testPlan("plan-1")
 		if err := store.CreatePlan(ctx, plan); err != nil {
 			t.Fatalf("create plan: %v", err)
 		}
@@ -744,10 +744,10 @@ func TestStoreActivityIsAppendOnlyAndSequenced(t *testing.T) {
 func TestStoreDraftSnapshotsPruneWithoutTouchingVersions(t *testing.T) {
 	forEachStore(t, func(t *testing.T, ctx context.Context, store Store, seed func(string)) {
 		seed("ws-1")
-		if err := store.CreatePlan(ctx, testPlan("ws-1", "plan-1")); err != nil {
+		if err := store.CreatePlan(ctx, testPlan("plan-1")); err != nil {
 			t.Fatalf("create plan: %v", err)
 		}
-		seedVersion(t, ctx, store, "ws-1", "plan-1", "hash-1")
+		seedVersion(t, ctx, store, "plan-1", "hash-1")
 
 		base := time.Now().UTC().Add(-time.Hour)
 		for i := range 14 {
@@ -786,7 +786,7 @@ func TestStoreDraftSnapshotsPruneWithoutTouchingVersions(t *testing.T) {
 func TestStoreDraftSnapshotsExpireByAge(t *testing.T) {
 	forEachStore(t, func(t *testing.T, ctx context.Context, store Store, seed func(string)) {
 		seed("ws-1")
-		if err := store.CreatePlan(ctx, testPlan("ws-1", "plan-1")); err != nil {
+		if err := store.CreatePlan(ctx, testPlan("plan-1")); err != nil {
 			t.Fatalf("create plan: %v", err)
 		}
 
@@ -823,7 +823,7 @@ func TestStoreDraftSnapshotsExpireByAge(t *testing.T) {
 func TestStoreReturnsClones(t *testing.T) {
 	forEachStore(t, func(t *testing.T, ctx context.Context, store Store, seed func(string)) {
 		seed("ws-1")
-		plan := testPlan("ws-1", "plan-1")
+		plan := testPlan("plan-1")
 		if err := store.CreatePlan(ctx, plan); err != nil {
 			t.Fatalf("create plan: %v", err)
 		}
@@ -872,7 +872,7 @@ func TestSQLiteStoreSurvivesRestart(t *testing.T) {
 		seedTestWorkspace(t, ctx, db, "ws-1")
 
 		store := NewSQLiteStore(db)
-		plan := testPlan("ws-1", "plan-1")
+		plan := testPlan("plan-1")
 		plan.Draft.Clarifications = []Clarification{{
 			ID: "clr-1", Prompt: "Which environment?", Required: true,
 			Status: ClarificationOpen, CreatedAt: time.Now().UTC(),
@@ -885,8 +885,8 @@ func TestSQLiteStoreSurvivesRestart(t *testing.T) {
 		}); err != nil {
 			t.Fatalf("answer clarification: %v", err)
 		}
-		version := seedVersion(t, ctx, store, "ws-1", "plan-1", "hash-1")
-		approval := seedApproval(t, ctx, store, "ws-1", "plan-1", version.Number, "hash-1", "key-1")
+		version := seedVersion(t, ctx, store, "plan-1", "hash-1")
+		approval := seedApproval(t, ctx, store, version)
 		if err := store.ConsumeApproval(ctx, "ws-1", "plan-1", approval.ID, ApprovalResult{
 			TaskIDs: []string{"task-1"}, CompletedAt: time.Now().UTC(),
 		}, time.Now().UTC()); err != nil {
@@ -945,11 +945,11 @@ func TestSQLiteStoreSurvivesRestart(t *testing.T) {
 	}
 }
 
-func seedVersion(t *testing.T, ctx context.Context, store Store, workspaceID, planID, hash string) *Version {
+func seedVersion(t *testing.T, ctx context.Context, store Store, planID, hash string) *Version {
 	t.Helper()
 	version, err := store.CreateVersion(ctx, &Version{
 		PlanID:      planID,
-		WorkspaceID: workspaceID,
+		WorkspaceID: testWorkspaceID,
 		Title:       "Ship the thing",
 		Objective:   "Ship the thing safely",
 		Content:     PlanContent{Execution: ExecutionPolicy{Mode: ExecutionStepThrough}},
@@ -964,17 +964,20 @@ func seedVersion(t *testing.T, ctx context.Context, store Store, workspaceID, pl
 	return version
 }
 
-func seedApproval(t *testing.T, ctx context.Context, store Store, workspaceID, planID string, version int, hash, key string) *Approval {
+func seedApproval(t *testing.T, ctx context.Context, store Store, version *Version) *Approval {
 	t.Helper()
+	// The approval takes its version and hash FROM the version it approves.
+	// Passing them separately would let a test seed an approval that could not
+	// exist, and pass against a store that should have rejected it.
 	approval, err := store.CreateApproval(ctx, &Approval{
-		PlanID:         planID,
-		WorkspaceID:    workspaceID,
-		Version:        version,
-		ContentHash:    hash,
+		PlanID:         testPlanID,
+		WorkspaceID:    testWorkspaceID,
+		Version:        version.Number,
+		ContentHash:    version.ContentHash,
 		Effect:         EffectCreateTasks,
 		UserID:         "user-1",
 		UserName:       "jj",
-		IdempotencyKey: key,
+		IdempotencyKey: "key-1",
 		CreatedAt:      time.Now().UTC(),
 	})
 	if err != nil {

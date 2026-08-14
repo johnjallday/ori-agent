@@ -545,8 +545,12 @@ seed_demo() {
 
 # seed_plan creates one plan with a two-task group and a dependency between the
 # tasks, so the editor has something with structure to render.
+#
+# The fourth argument assigns every item to one agent. Leave it empty to seed
+# unassigned work: that is a legitimate plan, but it cannot be started, because
+# an unassigned step is a capability gate rather than something to dispatch.
 seed_plan() {
-  local ws="$1" request="$2" mode="$3"
+  local ws="$1" request="$2" mode="$3" assignee="${4:-}"
   local plan
   plan=$(curl -s -X POST "$BASE_URL/api/workspaces/$ws/plans" \
     -H 'Content-Type: application/json' \
@@ -559,15 +563,129 @@ seed_plan() {
         \"non_goals\":[\"anything touching billing\"],
         \"groups\":[
           {\"id\":\"grp-1\",\"title\":\"Prepare\",\"outcome\":\"A verified copy exists\",\"items\":[
-            {\"id\":\"itm-1\",\"description\":\"Snapshot the current state\",\"expected_result\":\"Checksums match\"},
-            {\"id\":\"itm-2\",\"description\":\"Verify the snapshot\",\"depends_on\":[\"itm-1\"]}]},
+            {\"id\":\"itm-1\",\"description\":\"Snapshot the current state\",\"assignee\":\"$assignee\",\"expected_result\":\"Checksums match\"},
+            {\"id\":\"itm-2\",\"description\":\"Verify the snapshot\",\"assignee\":\"$assignee\",\"depends_on\":[\"itm-1\"]}]},
           {\"id\":\"grp-2\",\"title\":\"Cut over\",\"depends_on\":[\"grp-1\"],\"items\":[
-            {\"id\":\"itm-3\",\"description\":\"Switch traffic to the new path\"}]}]}}" > /dev/null
+            {\"id\":\"itm-3\",\"description\":\"Switch traffic to the new path\",\"assignee\":\"$assignee\"}]}]}}" > /dev/null
   echo "$plan"
+}
+
+# ensure_agent puts one agent in the workspace, so plan items have somebody to
+# be assigned to. Both calls are idempotent enough to rerun.
+ensure_agent() {
+  local ws="$1" name="$2"
+  curl -s -X POST "$BASE_URL/api/agents" -H 'Content-Type: application/json' \
+    -d "{\"name\":\"$name\"}" > /dev/null
+  curl -s -X POST "$BASE_URL/api/workspaces/$ws/agents" -H 'Content-Type: application/json' \
+    -d "{\"agent_name\":\"$name\"}" > /dev/null
+}
+
+# approve_and_materialize drives a plan from draft to created tasks, returning
+# nothing. Used by the slot smoke, which needs two ready-to-run plans.
+approve_and_materialize() {
+  local ws="$1" plan="$2" key="$3"
+  local base="$BASE_URL/api/workspaces/$ws/plans/$plan"
+  local hash approval
+  hash=$(curl -s -X POST "$base/versions" -H 'Content-Type: application/json' -d '{}' | json_field content_hash)
+  approval=$(curl -s -X POST "$base/approvals" -H 'Content-Type: application/json' \
+    -d "{\"version\":1,\"content_hash\":\"$hash\",\"effect\":\"create_tasks\",\"user_name\":\"smoke\",\"idempotency_key\":\"$key\"}" |
+    json_field id)
+  curl -s -X POST "$base/materialize" -H 'Content-Type: application/json' \
+    -d "{\"approval_id\":\"$approval\"}" > /dev/null
+}
+
+smoke_slot() {
+  local ws="$1"
+  [[ -n "$ws" ]] || fail "usage: smoke.sh slot <base-url> <workspace-id>"
+
+  echo "--- Workspace execution slot ($ws) ---"
+
+  # Two approved plans in ONE workspace, both with runnable work.
+  ensure_agent "$ws" "builder"
+  local first second
+  first=$(seed_plan "$ws" "Slot demo: first plan" "step_through" "builder")
+  second=$(seed_plan "$ws" "Slot demo: second plan" "step_through" "builder")
+  approve_and_materialize "$ws" "$first" "slot-1"
+  approve_and_materialize "$ws" "$second" "slot-2"
+  echo "ok   two approved plans in one workspace"
+
+  local firstBase="$BASE_URL/api/workspaces/$ws/plans/$first"
+  local secondBase="$BASE_URL/api/workspaces/$ws/plans/$second"
+
+  # The first start takes the slot. Dispatch may fail (the demo sandbox has no
+  # agent), but the slot claim is what this checks.
+  curl -s -X POST "$firstBase/execution" -H 'Content-Type: application/json' \
+    -d '{"action":"start","actor":"smoke"}' > /dev/null
+
+  local holder
+  holder=$(curl -s "$BASE_URL/api/workspaces/$ws/plan-execution-slot" | json_field executing_plan)
+  [[ "$holder" == "$first" ]] || fail "slot holder = '$holder', want the first plan"
+  echo "ok   the first plan holds the workspace slot"
+
+  # The second start does NOT run; it queues, and says what it waits behind.
+  local queued reason
+  queued=$(curl -s -X POST "$secondBase/execution" -H 'Content-Type: application/json' \
+    -d '{"action":"start","actor":"smoke"}')
+  [[ "$(echo "$queued" | json_field started)" == "False" ]] ||
+    fail "a second plan started in the same workspace: $queued"
+  reason=$(echo "$queued" | json_field reason)
+  case "$reason" in
+  *"another plan is executing"*) ;;
+  *) fail "waiting reason = '$reason'" ;;
+  esac
+  echo "ok   the second plan waits visibly ($reason)"
+
+  # The queue is inspectable.
+  local depth
+  depth=$(curl -s "$BASE_URL/api/workspaces/$ws/plan-execution-slot" | json_field queue_length)
+  [[ "$depth" == "1" ]] || fail "queue length = $depth, want 1"
+  echo "ok   queue depth reported"
+
+  # Pausing with nothing in flight releases the slot to the waiting plan.
+  expect_status 200 POST "$firstBase/execution" '{"action":"pause","reason":"handing over"}'
+  curl -s -X POST "$secondBase/execution" -H 'Content-Type: application/json' \
+    -d '{"action":"start","actor":"smoke"}' > /dev/null
+  holder=$(curl -s "$BASE_URL/api/workspaces/$ws/plan-execution-slot" | json_field executing_plan)
+  [[ "$holder" == "$second" ]] || fail "after handover the holder = '$holder', want the second plan"
+  echo "ok   pausing handed the slot to the waiting plan"
+
+  # Resuming rejoins the queue rather than displacing the new holder.
+  expect_status 200 POST "$firstBase/execution" '{"action":"resume"}'
+  holder=$(curl -s "$BASE_URL/api/workspaces/$ws/plan-execution-slot" | json_field executing_plan)
+  [[ "$holder" == "$second" ]] || fail "resuming displaced the holder: '$holder'"
+  echo "ok   resuming rejoined the queue without displacing the holder"
+
+  # A standalone Task — one no Plan materialized — is untouched by all of this.
+  # The Plan slot sits ABOVE the Task executor, so an unrelated task neither
+  # takes the slot nor joins the queue behind it (FR-100).
+  local beforeQueue standalone afterHolder afterQueue
+  beforeQueue=$(curl -s "$BASE_URL/api/workspaces/$ws/plan-execution-slot" | json_field queue_length)
+  standalone=$(curl -s -X POST "$BASE_URL/api/workspaces/$ws/tasks" \
+    -H 'Content-Type: application/json' \
+    -d '{"description":"Unrelated standalone task","to":"builder","from":"smoke"}' |
+    json_field task.id)
+  [[ -n "$standalone" ]] || fail "could not create a standalone task"
+
+  afterHolder=$(curl -s "$BASE_URL/api/workspaces/$ws/plan-execution-slot" | json_field executing_plan)
+  afterQueue=$(curl -s "$BASE_URL/api/workspaces/$ws/plan-execution-slot" | json_field queue_length)
+  [[ "$afterHolder" == "$second" ]] || fail "a standalone task disturbed the slot holder: '$afterHolder'"
+  [[ "$afterQueue" == "$beforeQueue" ]] ||
+    fail "a standalone task joined the plan queue ($beforeQueue -> $afterQueue)"
+  echo "ok   a standalone task runs outside plan arbitration"
+
+  # Cancelling the holder frees the slot.
+  expect_status 200 POST "$secondBase/execution" '{"action":"cancel","reason":"demo over"}'
+  local free
+  free=$(curl -s "$BASE_URL/api/workspaces/$ws/plan-execution-slot" | json_field slot_available)
+  [[ "$free" == "True" ]] || fail "the slot was not freed by cancelling the holder"
+  echo "ok   cancelling the holder freed the slot"
+
+  echo "--- Execution slot smoke passed ---"
 }
 
 case "${1:-}" in
 seed) seed_demo ;;
+slot) smoke_slot "${3:-}" ;;
 plans) smoke_plans "${3:-}" ;;
 drafting) smoke_drafting "${3:-}" ;;
 review) smoke_review "${3:-}" ;;
@@ -576,7 +694,7 @@ execution) smoke_execution "${3:-}" ;;
 *)
   echo "usage:" >&2
   echo "  $0 seed <base-url>                       # seed plans and print URLs to review" >&2
-  echo "  $0 {plans|drafting|review|materialize|execution} <base-url> <workspace-id>" >&2
+  echo "  $0 {plans|drafting|review|materialize|execution|slot} <base-url> <workspace-id>" >&2
   exit 2
   ;;
 esac
