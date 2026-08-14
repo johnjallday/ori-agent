@@ -26,6 +26,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/userprofile"
 	"github.com/johnjallday/ori-agent/internal/workflowhttp"
 	"github.com/johnjallday/ori-agent/internal/workspace"
+	"github.com/johnjallday/ori-agent/internal/workspacepolicy"
 	"github.com/johnjallday/ori-agent/internal/workspacerun"
 )
 
@@ -340,6 +341,15 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 	// store orchestration reads from, not just the raw folder store.
 	if b.sessionHandler != nil {
 		b.sessionHandler.SetWorkspaceTaskStore(ws)
+	}
+
+	// Effective planning policy needs the store to read settings and to find
+	// the folder whose version control the enforced controls are about. Like
+	// the plan materializer and executor, it is wired here rather than during
+	// handler construction, when the store is still nil.
+	b.workspacePlanPolicy = workspacepolicy.NewResolver(ws)
+	if b.sessionHandler != nil {
+		b.sessionHandler.SetPlanningPolicyResolver(b.workspacePlanPolicy)
 	}
 
 	// Now that the workspace store (SyncStore) exists, wire REAPER readiness /

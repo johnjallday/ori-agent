@@ -4,11 +4,14 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 	"github.com/johnjallday/ori-agent/internal/workspaceplan"
+	"github.com/johnjallday/ori-agent/internal/workspacepolicy"
 	"github.com/johnjallday/ori-agent/internal/workspacerun"
+	"github.com/johnjallday/ori-agent/internal/workspacesettings"
 )
 
 // Wiring for the Workspace Planning Workflow's two lookups: which model to
@@ -100,6 +103,89 @@ func (m planTaskMutator) MutateTask(workspaceID, taskID string, fn func(*workspa
 	})
 }
 
+// workspacePlanPreflight returns the compiled enforcement behind a Plan's
+// execution preconditions.
+//
+// Returning nil when policy resolution is unavailable is deliberate and it
+// fails CLOSED: with no checker, workspaceplan treats every enforced
+// precondition as unverifiable and stops automatic dispatch at it. A plan that
+// named a precondition then waits for a person instead of running on an
+// unchecked promise.
+func (b *ServerBuilder) workspacePlanPreflight() workspaceplan.PreconditionChecker {
+	if b.workspacePlanPolicy == nil {
+		return nil
+	}
+	// The repository-inspection recorder is not wired yet, so that control
+	// fails closed on its own inside the preflight. Branch enforcement — the
+	// half that has a real check behind it — works now.
+	return workspacepolicy.NewPreflight(b.workspacePlanPolicy.Policy, nil)
+}
+
+// resolvePlanGuidance returns the ADVISORY half of a workspace's planning
+// policy: what the planner is asked for.
+//
+// Nothing here is checked after the fact, which is exactly why it is kept in
+// its own function feeding its own resolver. A field that reached both this and
+// the policy snapshot would be presented to the user as enforced while being,
+// in fact, a sentence in a prompt (FR-124, FR-125, FR-129).
+func (b *ServerBuilder) resolvePlanGuidance(ctx context.Context, workspaceID string) workspaceplan.GuidanceInput {
+	if b.workspacePlanPolicy == nil {
+		return workspaceplan.GuidanceInput{}
+	}
+	policy, _ := b.workspacePlanPolicy.Policy(ctx, workspaceID)
+	return workspaceplan.GuidanceInput{
+		Style:              policy.Guidance.Style,
+		ClarificationDepth: policy.Guidance.ClarificationDepth,
+		PreferredArtifacts: policy.Guidance.PreferredArtifacts,
+		DetailLevel:        policy.Guidance.DetailLevel,
+	}
+}
+
+// resolvePlanPolicy returns the ENFORCED half, as the snapshot a review version
+// records.
+//
+// Only controls that are actually active are recorded as enforced. A control
+// the user enabled in a workspace that cannot honor it is reported in
+// Unavailable instead, so a later audit can explain the plan's behavior without
+// having to reconstruct which workspace it ran in (FR-127, FR-144).
+func (b *ServerBuilder) resolvePlanPolicy(ctx context.Context, workspaceID string) workspaceplan.PolicySnapshot {
+	if b.workspacePlanPolicy == nil {
+		return workspaceplan.PolicySnapshot{}
+	}
+	policy, _ := b.workspacePlanPolicy.Policy(ctx, workspaceID)
+
+	snapshot := workspaceplan.PolicySnapshot{
+		Profile:     policy.Profile,
+		Preset:      policy.Preset,
+		Enforced:    policy.ActiveControls(),
+		Unavailable: policy.UnavailableControls(),
+		CapturedAt:  time.Now().UTC(),
+	}
+	if mode, found := policy.Control(workspacesettings.ControlExecutionMode); found && mode.Active() {
+		snapshot.ExecutionMode = workspaceplan.ExecutionMode(
+			executionModeFor(ctx, b, workspaceID))
+	}
+	return snapshot
+}
+
+// executionModeFor reads the workspace's default execution mode. It is a
+// separate lookup because the mode is a setting value, not a boolean control,
+// and squeezing it into the on/off control map would lose it.
+func executionModeFor(_ context.Context, b *ServerBuilder, workspaceID string) string {
+	if b.workspaceStore == nil {
+		return string(workspaceplan.ExecutionStepThrough)
+	}
+	ws, err := b.workspaceStore.Get(workspaceID)
+	if err != nil || ws == nil {
+		return string(workspaceplan.ExecutionStepThrough)
+	}
+	mode := workspacesettings.Extract(ws.SharedData).Planning.DefaultExecutionMode
+	if mode == string(workspaceplan.ExecutionAuto) {
+		return mode
+	}
+	return string(workspaceplan.ExecutionStepThrough)
+}
+
 // workspacePlanSlotStore returns durable slot arbitration when a database is
 // available, and in-memory arbitration otherwise.
 //
@@ -143,10 +229,10 @@ func (b *ServerBuilder) attachWorkspacePlanExecutor() {
 		// agent removed mid-plan must stop the next step, not the one after
 		// the server restarts (FR-118).
 		//
-		// No precondition checker is wired yet, so a Plan that names an
-		// enforced precondition stops automatic dispatch at it and hands the
-		// step back to the user. That is the fail-closed direction.
-		workspaceplan.WithGates(nil, b.resolvePlanAvailability),
+		// The precondition checker resolves the workspace's effective policy
+		// at check time too, so a branch switched in a terminal takes effect on
+		// the next dispatch rather than at the next restart (FR-136).
+		workspaceplan.WithGates(b.workspacePlanPreflight(), b.resolvePlanAvailability),
 	}
 	if b.workspaceRunBridge != nil {
 		options = append(options, workspaceplan.WithDispatcher(
@@ -157,6 +243,13 @@ func (b *ServerBuilder) attachWorkspacePlanExecutor() {
 		b.workspacePlanService, b.workspaceStore, options...)
 	b.workspacePlanHandler.SetExecutor(b.workspacePlanExecutor)
 	b.workspacePlanHandler.SetSlots(slots)
+
+	// Guidance and enforced policy are wired HERE rather than during handler
+	// construction, for the same reason as everything else in this function:
+	// b.workspacePlanPolicy does not exist until the workspace store does. Two
+	// separate setters keep the halves separate all the way to the handler.
+	b.workspacePlanHandler.SetGuidanceResolver(b.resolvePlanGuidance)
+	b.workspacePlanHandler.SetPolicyResolver(b.resolvePlanPolicy)
 
 	// Automatic execution runs in the background, so it outlives the request
 	// that started it and must be stopped explicitly at shutdown.

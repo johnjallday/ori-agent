@@ -10,6 +10,12 @@ import { WorkspaceDirectoryExplorer } from './workspace-detail-directory-explore
 import { WorkspaceMCPManager } from './workspace-detail-mcp.js';
 import { WorkspaceNativeMCPManager } from './workspace-native-mcp.js';
 import { WorkspaceSkillsManager } from './workspace-detail-skills.js';
+import {
+  enforcedLine,
+  enforcedState,
+  guidanceLines,
+  policySummary
+} from './workspace-planning-policy.js';
 import { WorkspacePluginsManager } from './workspace-detail-plugins.js';
 import { WorkspaceMemoryManager } from './workspace-detail-memory.js';
 import { WorkspaceFileModalManager } from './workspace-detail-file-modal.js';
@@ -248,6 +254,10 @@ export class WorkspaceDetailPage {
     this.memoryManager = new WorkspaceMemoryManager(this);
     this.workspaceSettings = null;
     this.workspaceSettingsEffectiveBehavior = null;
+    // The server-computed planning policy. Null until loaded; the settings
+    // section says so rather than rendering an empty enforced list, which would
+    // read as "nothing is enforced here".
+    this.workspacePlanningPolicy = null;
     this.workspaceTaskMarkdownStatus = null;
     this.workspaceConfigExpanded = false;
     // Per-task activity tracking: taskId -> { at: number, label: string }.
@@ -1095,6 +1105,8 @@ export class WorkspaceDetailPage {
       mcpList: document.getElementById('workspace-detail-mcp-list'),
       settingsSummary: document.getElementById('workspace-detail-settings-summary'),
       settingsManagedSkills: document.getElementById('workspace-detail-settings-managed-skills'),
+      settingsGuidance: document.getElementById('workspace-detail-settings-guidance'),
+      settingsEnforced: document.getElementById('workspace-detail-settings-enforced'),
       intentForm: document.getElementById('workspace-detail-intent-form'),
       intentDescriptionInput: document.getElementById('workspace-detail-intent-description'),
       intentSystemsInput: document.getElementById('workspace-detail-intent-systems'),
@@ -2247,6 +2259,11 @@ export class WorkspaceDetailPage {
         typeof this.workspace.task_markdown_status === 'object'
           ? this.workspace.task_markdown_status
           : null;
+      // The effective planning policy is its own request because availability
+      // depends on the workspace's folder, which the workspace payload does not
+      // describe. It is not awaited: the settings section renders empty for a
+      // moment rather than holding the whole page on a filesystem check.
+      void this.loadWorkspacePlanningPolicy();
       if (
         window.OriAskRouting &&
         typeof window.OriAskRouting.refreshWorkspaceIdentity === 'function'
@@ -11587,6 +11604,66 @@ export class WorkspaceDetailPage {
           })
           .join('');
       }
+    }
+
+    this.renderWorkspacePlanningPolicy();
+  }
+
+  // renderWorkspacePlanningPolicy draws the two halves of the planning policy.
+  //
+  // The policy comes from the server rather than being derived from the form,
+  // because availability is a fact about this workspace's folder that the
+  // browser cannot know. Deriving it here would let the screen claim a branch
+  // check in a workspace that has no repository (FR-127, FR-128).
+  renderWorkspacePlanningPolicy() {
+    const policy = this.workspacePlanningPolicy;
+
+    if (this.elements.settingsGuidance) {
+      const lines = guidanceLines(policy?.guidance);
+      this.elements.settingsGuidance.innerHTML =
+        lines.length === 0
+          ? '<li>No planning guidance is configured.</li>'
+          : lines.map(line => `<li>${this.escapeHtml(line)}</li>`).join('');
+    }
+
+    if (this.elements.settingsEnforced) {
+      const controls = policy?.enforced || [];
+      this.elements.settingsEnforced.innerHTML =
+        controls.length === 0
+          ? `<li>${this.escapeHtml(policySummary(policy))}</li>`
+          : controls
+              .map(control => {
+                // data-state carries the state as text so it is available to
+                // assistive technology and to CSS, rather than being encoded
+                // only in a color.
+                const state = enforcedState(control);
+                return (
+                  `<li class="workspace-detail-settings-policy-item" data-state="${this.escapeHtml(state)}">` +
+                  `${this.escapeHtml(enforcedLine(control))}</li>`
+                );
+              })
+              .join('');
+    }
+  }
+
+  // loadWorkspacePlanningPolicy fetches the effective policy. A preset argument
+  // previews one without saving it (FR-142).
+  async loadWorkspacePlanningPolicy(preset = '') {
+    if (!this.workspaceId) return null;
+    const query = preset ? `?preset=${encodeURIComponent(preset)}` : '';
+    try {
+      const response = await fetch(
+        `/api/workspaces/${encodeURIComponent(this.workspaceId)}/planning-policy${query}`
+      );
+      if (!response.ok) return null;
+      const payload = await response.json();
+      this.workspacePlanningPolicy = payload?.policy || null;
+      this.renderWorkspacePlanningPolicy();
+      return this.workspacePlanningPolicy;
+    } catch {
+      // A policy that cannot be read leaves the previous render in place rather
+      // than blanking the section: stale-but-labelled beats empty.
+      return null;
     }
   }
 

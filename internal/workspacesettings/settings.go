@@ -251,23 +251,22 @@ func BuildEffectiveBehavior(settings Settings) EffectiveBehavior {
 		summary = append(summary, fmt.Sprintf("Markdown task map: %s", settings.TaskMarkdown.Path))
 	}
 
-	behavior := EffectiveBehavior{
+	// No managed planning skill is synthesized here any more.
+	//
+	// Enabling structured planning used to inject a `workspace-planning` skill
+	// binding carrying these settings as prompt config. That made the settings
+	// screen's promises depend on a model reading instructions: a "required"
+	// control was, in fact, a paragraph. Planning lifecycle, approval,
+	// materialization, and execution gates are compiled now (FR-123, FR-126),
+	// and the effective policy in policy.go is the honest description of them.
+	//
+	// ManagedSkills stays on the type because other settings-managed workflows
+	// may still use it; planning simply no longer does.
+	return EffectiveBehavior{
 		Workflow: settings.Workflow,
 		Planning: settings.Planning,
 		Summary:  summary,
 	}
-	if settings.Planning.Enabled {
-		behavior.ManagedSkills = []ManagedSkill{
-			{
-				SkillName: "workspace-planning",
-				Source:    "settings",
-				Active:    true,
-				Reason:    "planning.enabled",
-				Config:    ToPlanningSkillConfig(settings),
-			},
-		}
-	}
-	return behavior
 }
 
 func boolLabel(value bool) string {

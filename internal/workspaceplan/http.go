@@ -39,6 +39,8 @@ type Handler struct {
 	auto *AutoRunner
 	// reconciler previews and confirms what a revision does to prior work.
 	reconciler *Reconciler
+	// resolvePolicy supplies the enforced policy snapshotted onto a version.
+	resolvePolicy PolicyResolver
 }
 
 // GuidanceResolver returns the model-guidance half of a workspace's planning
@@ -48,6 +50,16 @@ type GuidanceResolver func(ctx context.Context, workspaceID string) GuidanceInpu
 // AvailabilityResolver returns the agents and capabilities a workspace actually
 // has, so the planner is never asked to guess (FR-46).
 type AvailabilityResolver func(ctx context.Context, workspaceID string) ValidationContext
+
+// PolicyResolver returns the ENFORCED half of a workspace's planning policy as
+// it stands right now.
+//
+// It is deliberately separate from GuidanceResolver. Guidance reaches the model
+// and nothing else; a policy snapshot reaches the compiled lifecycle checks and
+// never the model. Two resolvers rather than one shared blob is what makes it
+// impossible for a guidance field to arrive somewhere enforcement is read
+// (FR-124, FR-129).
+type PolicyResolver func(ctx context.Context, workspaceID string) PolicySnapshot
 
 // NewHandler returns the Plan API handler.
 func NewHandler(service *Service) *Handler {
@@ -78,6 +90,10 @@ func (h *Handler) SetAutoRunner(auto *AutoRunner) { h.auto = auto }
 
 // SetReconciler attaches revision reconciliation.
 func (h *Handler) SetReconciler(reconciler *Reconciler) { h.reconciler = reconciler }
+
+// SetPolicyResolver attaches the enforced-policy lookup snapshotted onto each
+// review version.
+func (h *Handler) SetPolicyResolver(resolve PolicyResolver) { h.resolvePolicy = resolve }
 
 // planResponse is the wire shape of a Plan. It is written explicitly rather
 // than by serializing the domain type directly, so adding an internal field
@@ -550,6 +566,11 @@ func (h *Handler) PlanVersions(w http.ResponseWriter, r *http.Request) {
 			Actor:      req.Actor,
 			Intent:     RevisionIntent(strings.TrimSpace(req.Intent)),
 			Validation: h.availability(r.Context(), workspaceID),
+			// The enforced policy is snapshotted onto the version here, at the
+			// moment it becomes immutable. Later settings changes do not reach
+			// back into it: a plan approved under one policy keeps behaving
+			// that way until somebody revises it (FR-143, FR-144).
+			Policy: h.policy(r.Context(), workspaceID),
 		})
 		if err != nil {
 			writeError(w, err)
@@ -1002,6 +1023,16 @@ func (h *Handler) guidance(ctx context.Context, workspaceID string) GuidanceInpu
 		return GuidanceInput{}
 	}
 	return h.resolveGuidance(ctx, workspaceID)
+}
+
+// policy returns the enforced policy to snapshot. An empty snapshot is the
+// honest answer for a build with no resolver: it records that nothing was
+// enforced, rather than inventing controls that never ran.
+func (h *Handler) policy(ctx context.Context, workspaceID string) PolicySnapshot {
+	if h.resolvePolicy == nil {
+		return PolicySnapshot{}
+	}
+	return h.resolvePolicy(ctx, workspaceID)
 }
 
 func (h *Handler) availability(ctx context.Context, workspaceID string) ValidationContext {

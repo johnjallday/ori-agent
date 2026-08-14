@@ -113,16 +113,21 @@ func TestValidateTaskMarkdownPath(t *testing.T) {
 	}
 }
 
-func TestBuildEffectiveBehaviorIncludesPlanningManagedSkill(t *testing.T) {
+// Enabling planning must not synthesize a managed skill.
+//
+// The old behavior turned an enforced-sounding settings screen into a prompt: a
+// `workspace-planning` skill was injected carrying these settings as config,
+// and whether they held depended on a model reading them. Planning lifecycle,
+// approval, and execution gates are compiled now, and BuildEffectivePolicy is
+// the honest description (FR-123, FR-126).
+func TestBuildEffectiveBehaviorSynthesizesNoPlanningSkill(t *testing.T) {
 	settings := PresetDefaultsForProfile("software_project", "planner")
 	effective := BuildEffectiveBehavior(settings)
-	if len(effective.ManagedSkills) != 1 {
-		t.Fatalf("expected one managed skill, got %#v", effective.ManagedSkills)
+	if len(effective.ManagedSkills) != 0 {
+		t.Fatalf("planning synthesized a managed skill: %#v", effective.ManagedSkills)
 	}
-	if effective.ManagedSkills[0].SkillName != "workspace-planning" {
-		t.Fatalf("expected workspace-planning managed skill, got %#v", effective.ManagedSkills[0])
-	}
-	if effective.ManagedSkills[0].Config["sync_workspace_tasks"] != true {
-		t.Fatalf("expected sync_workspace_tasks true, got %#v", effective.ManagedSkills[0].Config["sync_workspace_tasks"])
+	// The settings themselves are still reported; only the skill is gone.
+	if !effective.Planning.Enabled {
+		t.Error("planner preset did not report planning as enabled")
 	}
 }

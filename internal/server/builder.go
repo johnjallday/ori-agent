@@ -81,6 +81,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/workspacemap"
 	"github.com/johnjallday/ori-agent/internal/workspacemaphttp"
 	"github.com/johnjallday/ori-agent/internal/workspaceplan"
+	"github.com/johnjallday/ori-agent/internal/workspacepolicy"
 	"github.com/johnjallday/ori-agent/internal/workspacerun"
 )
 
@@ -260,6 +261,9 @@ type ServerBuilder struct {
 	// workspacePlanAuto drives approved automatic plans. Its loops outlive the
 	// requests that start them, so the server stops it during shutdown.
 	workspacePlanAuto *workspaceplan.AutoRunner
+	// workspacePlanPolicy resolves a workspace's effective planning policy and
+	// what its folder can actually enforce.
+	workspacePlanPolicy *workspacepolicy.Resolver
 	// workspaceRunBridge adapts Tasks onto Runs. Plan execution dispatches
 	// through it so plan work produces ordinary Run records.
 	workspaceRunBridge *workspacerun.TaskRunBridge

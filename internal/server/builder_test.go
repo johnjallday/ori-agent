@@ -112,6 +112,17 @@ func TestServerBuilder_Build_Integration(t *testing.T) {
 	if server.Handlers.Session == nil || !server.Handlers.Session.ReaperSetupWired() {
 		t.Error("REAPER setup (resolver/preview/repair) not wired onto the session handler")
 	}
+	// Planning policy resolution must exist BEFORE the plan executor is built,
+	// because the executor captures the preflight checker at construction. If
+	// the ordering regresses, gate evaluation silently loses its checker and
+	// every enforced precondition degrades to "cannot verify" — a plan that
+	// should run stops, and the cause is invisible.
+	if builder.workspacePlanPolicy == nil {
+		t.Error("planning policy resolver not wired")
+	}
+	if builder.workspacePlanPreflight() == nil {
+		t.Error("plan execution preflight not wired; enforced preconditions cannot be checked")
+	}
 	// The shared Setup Wizard is wired in the same phase and for the same
 	// reason: its state lives in the workspace's canonical folder record. An
 	// unwired wizard makes every blueprint's setup unreachable.

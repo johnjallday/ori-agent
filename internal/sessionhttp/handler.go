@@ -19,6 +19,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/workspace"
+	"github.com/johnjallday/ori-agent/internal/workspacepolicy"
 )
 
 // Handler handles session-related HTTP requests.
@@ -61,6 +62,12 @@ type Handler struct {
 	reaperReconciler   *pluginworkspace.Reconciler
 	reaperRepairer     *reapersetup.Repairer
 
+	// planningPolicy resolves a workspace's effective planning policy and what
+	// its folder can actually enforce. Injected by the server; nil in a build
+	// with no workspace store, where every filesystem-backed control correctly
+	// reports itself unavailable rather than claiming enforcement.
+	planningPolicy *workspacepolicy.Resolver
+
 	// rescanMu serializes disk reconciles so concurrent rescan requests
 	// (e.g. several hub tabs loading at once) don't run overlapping filesystem
 	// walks; lastRescanAt backs the cooldown for background-initiated rescans.
@@ -90,6 +97,11 @@ func (h *Handler) SetWorkspaceStore(ws *workspace.FileStore) {
 // store orchestration uses so claimed tasks are visible to task reads.
 func (h *Handler) SetWorkspaceTaskStore(ws workspace.Store) {
 	h.workspaceTaskStore = ws
+}
+
+// SetPlanningPolicyResolver attaches effective-planning-policy resolution.
+func (h *Handler) SetPlanningPolicyResolver(resolver *workspacepolicy.Resolver) {
+	h.planningPolicy = resolver
 }
 
 // SetWorkspaceRootResolver sets the resolver used to determine the default

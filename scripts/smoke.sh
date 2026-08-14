@@ -813,10 +813,71 @@ print(sum(1 for l in links if l.get("retired_at")))')
   echo "--- Reconciliation smoke passed ---"
 }
 
+smoke_policy() {
+  local ws="$1"
+  [[ -n "$ws" ]] || fail "usage: smoke.sh policy <base-url> <workspace-id>"
+
+  echo "--- Planning policy ($ws) ---"
+  local base="$BASE_URL/api/workspaces/$ws/planning-policy"
+
+  # The two halves are separate groups on the wire.
+  local payload
+  payload=$(curl -s "$base")
+  [[ -n "$(echo "$payload" | json_field policy.guidance.style)" ]] ||
+    fail "policy has no guidance style: $payload"
+  [[ -n "$(echo "$payload" | json_field policy.enforced.0.key)" ]] ||
+    fail "policy has no enforced controls: $payload"
+  echo "ok   guidance and enforcement are separate groups"
+
+  # Approval is enforced and no preset turns it off.
+  local approval
+  approval=$(curl -s "$base" | python3 -c 'import sys,json
+for c in json.load(sys.stdin)["policy"]["enforced"]:
+    if c["key"] == "plan_approval":
+        print("enabled" if (c["enabled"] and c["available"]) else "off")')
+  [[ "$approval" == "enabled" ]] || fail "plan approval is not enforced by default"
+  echo "ok   plan approval is enforced"
+
+  # Outside a repository, branch enforcement reports itself unavailable WITH a
+  # machine-readable reason rather than silently claiming to work.
+  local branch
+  branch=$(curl -s "$base?preset=planner" | python3 -c 'import sys,json
+for c in json.load(sys.stdin)["policy"]["enforced"]:
+    if c["key"] == "safe_branch":
+        print("%s|%s|%s" % (c["available"], c.get("reason",""), bool(c.get("detail"))))')
+  case "$branch" in
+  "False|not_a_repository|True" | "False|no_workspace_folder|True") ;;
+  *) fail "branch enforcement outside a repo reported: $branch" ;;
+  esac
+  echo "ok   branch enforcement is unavailable outside a repository, with a reason"
+
+  # Autonomous selects automatic execution and KEEPS approval.
+  local auto
+  auto=$(curl -s "$base?preset=autonomous" | python3 -c 'import sys,json
+p = json.load(sys.stdin)["policy"]
+controls = {c["key"]: c for c in p["enforced"]}
+approval = controls["plan_approval"]
+mode = controls["execution_mode"]
+print("%s|%s" % (approval["enabled"] and approval["available"], "starts automatically" in mode["description"]))')
+  [[ "$auto" == "True|True" ]] ||
+    fail "Autonomous preview reported approval/automatic = $auto"
+  echo "ok   Autonomous starts automatically and still requires approval"
+
+  # Previewing a preset does not save it.
+  local savedPreset
+  savedPreset=$(curl -s "$BASE_URL/api/workspaces/$ws/settings" | json_field settings.preset)
+  [[ "$savedPreset" != "autonomous" ]] ||
+    fail "previewing a preset saved it"
+  echo "ok   previewing a preset changed nothing"
+
+  echo "--- Planning policy smoke passed ---"
+}
+
 case "${1:-}" in
 seed) seed_demo ;;
 slot) smoke_slot "${3:-}" ;;
 reconcile) smoke_reconcile "${3:-}" ;;
+policy) smoke_policy "${3:-}" ;;
 plans) smoke_plans "${3:-}" ;;
 drafting) smoke_drafting "${3:-}" ;;
 review) smoke_review "${3:-}" ;;
@@ -825,7 +886,7 @@ execution) smoke_execution "${3:-}" ;;
 *)
   echo "usage:" >&2
   echo "  $0 seed <base-url>                       # seed plans and print URLs to review" >&2
-  echo "  $0 {plans|drafting|review|materialize|execution|slot|reconcile} <base-url> <workspace-id>" >&2
+  echo "  $0 {plans|drafting|review|materialize|execution|slot|reconcile|policy} <base-url> <workspace-id>" >&2
   exit 2
   ;;
 esac
