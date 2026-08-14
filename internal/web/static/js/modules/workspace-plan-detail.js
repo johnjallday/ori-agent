@@ -14,6 +14,7 @@ import {
   statusMeta,
   versionLabel
 } from './workspace-plan.js';
+import { POLL_INTERVAL_MS, primaryBlocker, shouldPoll } from './workspace-plan-blockers.js';
 import {
   addGroup,
   addItem,
@@ -224,6 +225,9 @@ export class WorkspacePlanPage {
     // the first as the second would flag every assignment as unavailable.
     this.availableAgents = null;
     this.autosaveTimer = null;
+    // pollTimer refreshes a plan whose work can still move. Null when nothing
+    // can change, so a finished plan stops costing requests.
+    this.pollTimer = null;
     this.setTimeoutImpl = options.setTimeout || ((fn, ms) => setTimeout(fn, ms));
     this.clearTimeoutImpl = options.clearTimeout || (id => clearTimeout(id));
   }
@@ -639,6 +643,54 @@ export class WorkspacePlanPage {
     }
   }
 
+  // renderBlocker shows the single most blocking reason, or hides the panel.
+  //
+  // One blocker, not a list. Several can apply at once, and showing all of them
+  // asks the user to work out which to try first — which is exactly the job the
+  // precedence order already did (FR-156).
+  renderBlocker(plan) {
+    const panel = this.el('#plan-blocker');
+    if (!panel) return;
+
+    const blocker = primaryBlocker(plan);
+    panel.hidden = !blocker;
+    if (!blocker) return;
+
+    const reason = this.el('#plan-blocker-reason');
+    if (reason) reason.textContent = blocker.reason;
+
+    const action = this.el('#plan-blocker-action');
+    if (action) {
+      action.textContent = blocker.action.label;
+      // A blocker whose action points nowhere still explains itself; hiding the
+      // link beats rendering one that goes to the current page.
+      const href = blocker.action.href;
+      action.hidden = !href;
+      if (href) action.setAttribute('href', href);
+    }
+  }
+
+  // startProgressPolling refreshes a plan whose progress can still change.
+  //
+  // Bounded, and only while something can move: a finished plan never changes
+  // again, and a page left open overnight polling it forever becomes a
+  // load-bearing source of traffic (FR-155).
+  startProgressPolling(plan) {
+    this.stopProgressPolling();
+    if (!shouldPoll(plan)) return;
+
+    this.pollTimer = this.setTimeoutImpl(() => {
+      void this.reload();
+    }, POLL_INTERVAL_MS);
+  }
+
+  stopProgressPolling() {
+    if (this.pollTimer) {
+      this.clearTimeoutImpl(this.pollTimer);
+      this.pollTimer = null;
+    }
+  }
+
   // loadReconciliation fetches what approving this revision would do to work
   // that already exists.
   //
@@ -880,6 +932,8 @@ export class WorkspacePlanPage {
     this.renderEditor();
     this.renderSaveState();
     this.renderMaterialization();
+    this.renderBlocker(plan);
+    this.startProgressPolling(plan);
   }
 
   renderClarifications(plan) {

@@ -48,6 +48,20 @@
         <div id="plan-missing" class="plan-empty" hidden>Plan not found in this workspace.</div>
 
         <main id="plan-content" class="plan-content" hidden>
+          <!--
+            What is stopping this plan, and the one thing to do about it.
+
+            It sits above the overview because it is the answer to the question
+            somebody opening a stuck plan already has. role="alert" rather than
+            a live region: a blocker appearing is the reason they came, and it
+            should be announced rather than waited for (FR-156, FR-159).
+          -->
+          <section id="plan-blocker" class="plan-card plan-blocker" role="alert" hidden>
+            <h2 id="plan-blocker-heading" class="plan-card-title">Waiting on you</h2>
+            <p id="plan-blocker-reason" class="plan-blocker-reason"></p>
+            <a id="plan-blocker-action" class="plan-editor-btn plan-editor-btn-primary" href="#"></a>
+          </section>
+
           <section class="plan-card" aria-labelledby="plan-overview-heading">
             <h2 id="plan-overview-heading" class="plan-card-title">Overview</h2>
             <dl class="plan-overview">
