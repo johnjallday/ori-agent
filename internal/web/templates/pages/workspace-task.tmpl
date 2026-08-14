@@ -91,6 +91,20 @@
             </label>
             <div id="workspace-task-hero-actions" class="workspace-task-page-hero-actions"></div>
           </div>
+          <!--
+            Where this task came from, when a Plan created it.
+
+            Read-only and one link deep: it answers "which plan, and which part
+            of it" and sends you to the one canonical surface. Editing,
+            reviewing, and approving live there and nowhere else — a second
+            place to approve from is the duplication this feature removes
+            (FR-148, FR-149).
+
+            Hidden by default because most tasks are created directly and have
+            no plan behind them; an empty panel would imply something is
+            missing.
+          -->
+          <div id="workspace-task-related-plan" class="workspace-related-plan" hidden></div>
         </section>
 
         <!-- The full-width "Action Required" banner was retired: when a task is

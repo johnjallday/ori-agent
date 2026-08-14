@@ -183,6 +183,7 @@ export default defineConfig([
       'internal/web/static/js/modules/workspace-plan-editor.js',
       'internal/web/static/js/modules/workspace-planning-policy.js',
       'internal/web/static/js/modules/workspace-plan-blockers.js',
+      'internal/web/static/js/modules/workspace-related-plan.js',
     ],
     languageOptions: {
       sourceType: 'module'
