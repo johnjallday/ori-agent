@@ -378,6 +378,33 @@ export function signalCounts(workspaces, scheduleIndex, now) {
   return counts;
 }
 
+/**
+ * The Updates badge's count and visibility (FR15-FR17).
+ *
+ * Aggregate workspace attention only — Progression/onboarding state is never
+ * a valid input here, which is what keeps the badge from drifting back into
+ * meaning "something in the old Today rail wants you" (Issue #334). Hidden
+ * at zero rather than showing a "0" (mirrors the old rail-toggle count).
+ */
+export function updatesBadgeView(flattened, scheduleIndex) {
+  const counts = signalCounts(flattened, scheduleIndex);
+  const attention = counts ? counts[SIGNAL_ATTENTION] : null;
+  const count = typeof attention === 'number' ? attention : 0;
+  return { count, visible: count > 0 };
+}
+
+/**
+ * Whether the CONTEXT rail should be open, from its own state alone.
+ *
+ * A real selection (workspace/group/HQ site, Summary, Ask Ori) opens it; a
+ * bare Today never does — not for attention, not for Progression, not for
+ * anything else (FR41-FR47). Updates/Quests are separate overlays with their
+ * own `panel` state (see togglePanelState) and never factor in here.
+ */
+export function contextRailShouldBeOpen(railState) {
+  return railState !== RAIL_TODAY;
+}
+
 /** Apply the active filter, returning the ids that should stay prominent. */
 export function filterWorkspaceIds(workspaces, signal, scheduleIndex, now) {
   if (!signal) return null; // null = no filter, everything is prominent
@@ -636,6 +663,51 @@ export const RAIL_WORKSPACE = 'workspace';
 export const RAIL_GROUP = 'group';
 export const RAIL_SUMMARY = 'summary';
 export const RAIL_ASK = 'ask-ori';
+
+// ---------------------------------------------------------------------------
+// Header disclosure ("panel") state — Updates / Quests / Quick Capture
+// ---------------------------------------------------------------------------
+//
+// One explicit state machine for the three header-owned transient
+// disclosures (Issue #334). They are siblings, not independent booleans:
+// opening one always closes whichever of the other two was open, so the three
+// controls can never drift into contradictory `hidden`/`aria-expanded`
+// states. This is deliberately separate from `railState`/contextRailShouldBeOpen()
+// above, which governs the CONTEXT rail (a selected workspace/group/HQ site,
+// Summary, or Ask Ori) — a real context selection and a manually opened
+// flyout can be visible at the same time without disturbing each other.
+
+export const PANEL_NONE = 'none';
+export const PANEL_UPDATES = 'updates';
+export const PANEL_QUESTS = 'quests';
+export const PANEL_CAPTURE = 'capture';
+
+/**
+ * The next panel state for activating `requested` from `current`.
+ *
+ * Activating the ALREADY-open panel closes it (FR7); activating any other
+ * panel replaces whichever was open, which is what gives the three triggers
+ * their mutual exclusion for free — there is only ever one open value to
+ * begin with (FR8-FR9).
+ */
+export function togglePanelState(current, requested) {
+  return current === requested ? PANEL_NONE : requested;
+}
+
+/**
+ * Which header trigger owns focus-restoration for a given panel (FR11).
+ *
+ * Closing a flyout from inside it or with Escape returns focus to the
+ * element that opened it; this is the pure lookup that decision goes
+ * through, kept separate from the DOM `.focus()` call so it is testable
+ * without a document.
+ */
+export function panelTriggerId(panel) {
+  if (panel === PANEL_UPDATES) return 'cockpitRailToggle';
+  if (panel === PANEL_QUESTS) return 'cockpitQuestsToggle';
+  if (panel === PANEL_CAPTURE) return 'cockpitCaptureBtn';
+  return '';
+}
 
 /**
  * How the rail should describe Ask Ori's current target workspace (FR97).
@@ -1221,14 +1293,23 @@ import {
     viewButtons: Array.from(document.querySelectorAll('[data-cockpit-view]')),
     filters: document.getElementById('cockpitSignalFilters'),
     rail: document.getElementById('cockpitRail'),
-    railToggle: document.getElementById('cockpitRailToggle'),
-    railToggleCount: document.querySelector('[data-cockpit-rail-toggle-count]'),
-    railToday: document.getElementById('cockpitRailToday'),
     railContext: document.getElementById('cockpitRailContext'),
     railLive: document.getElementById('cockpitRailLive'),
     summaryBtn: document.getElementById('cockpitSummaryBtn'),
+    // Updates: the header trigger keeps the retired "Today" toggle's id for
+    // compatibility (PRD FR2); its flyout and body are new (Issue #334).
+    railToggle: document.getElementById('cockpitRailToggle'),
+    railToggleCount: document.querySelector('[data-cockpit-rail-toggle-count]'),
+    updatesFlyout: document.getElementById('cockpitUpdatesFlyout'),
+    updatesBody: document.getElementById('cockpitUpdatesFlyoutBody'),
+    updatesClose: document.querySelector('#cockpitUpdatesFlyout [data-cockpit-flyout-close]'),
     todayAttention: document.getElementById('cockpitTodayAttention'),
     todayScheduled: document.getElementById('cockpitTodayScheduled'),
+    // Quests: the flyout host exists from Group 1 (its content is
+    // progression-widget.js's own DOM); the trigger button lands in Group 2.
+    questsToggle: document.getElementById('cockpitQuestsToggle'),
+    questsFlyout: document.getElementById('cockpitQuestsFlyout'),
+    questsClose: document.querySelector('#cockpitQuestsFlyout [data-cockpit-flyout-close]'),
     captureBtn: document.getElementById('cockpitCaptureBtn'),
     capturePanel: document.getElementById('cockpitCapturePanel'),
     captureForm: document.getElementById('cockpitCaptureForm'),
@@ -1257,12 +1338,15 @@ import {
     signal: '',
     selectedId: '',
     railState: RAIL_TODAY,
-    // Whether the rail is open is DERIVED, not a sixth rail state: a selection
-    // opens it, quiet Today leaves it closed, and this holds the user's own
-    // override. null = follow the derivation, true/false = the user said so.
-    // Kept separate from railState so opening the rail can never disturb which
-    // panel it is showing.
-    railUserToggle: null,
+    // Whether the CONTEXT rail is open is now fully derived from railState: a
+    // real selection (workspace/group/HQ/Summary/Ask Ori) opens it, Today
+    // always leaves it closed (Issue #334 — Today's content no longer lives
+    // in the rail, so there is nothing left to manually show there).
+    //
+    // The header's own transient disclosures (Updates/Quests/Quick Capture)
+    // are a SEPARATE piece of state, `panel` below — see applyPanelState()
+    // and applyPanelState().
+    panel: PANEL_NONE,
     hqSiteView: null,
     // The workspace/group context to restore when Summary or Ask Ori closes
     // (FR91, FR100).
@@ -1612,17 +1696,14 @@ import {
    * Return to Today.
    *
    * Clearing the active item must NOT clear Map signal filters or Tree
-   * management state — those are separate, deliberately sticky concerns (FR61).
+   * management state — those are separate, deliberately sticky concerns
+   * (FR61). Today has no rail content of its own now (Issue #334), so
+   * returning to it always closes the context rail (FR45).
    */
-  function clearSelection({ keepRailOpen = true } = {}) {
+  function clearSelection() {
     if (!state.selectedId && state.railState === RAIL_TODAY) return;
     state.hqSiteView = null;
     state.priorContext = null;
-    // Backing out of a selection returns to Today; it does not dismiss the rail.
-    // The user was reading the rail a moment ago, and collapsing it under them
-    // would make Escape feel like it closed two things at once. Only the rail's
-    // own toggle closes the rail, which is why it opts out here.
-    if (keepRailOpen) state.railUserToggle = true;
     selectItem('');
   }
 
@@ -1705,89 +1786,94 @@ import {
 
   // ---- rail openness (derived) ----
   //
-  // The rail is not entitled to a third of the window for saying "a quiet day".
-  // It earns its space when it has something to show:
-  //
-  //   1. anything other than Today is showing — a workspace, group, the HQ
-  //      site, Summary or Ask Ori. Selecting always opens, which is also what
-  //      keeps the select-then-open contract (and its Playwright assertions on
-  //      [data-cockpit-rail-open]) true;
-  //   2. Today itself needs the user — something is flagged for attention;
-  //   3. the user opened it themselves, which outranks 1 and 2 either way.
-
-  function railAttentionCount() {
-    const counts = signalCounts(state.flattened, state.scheduleIndex);
-    const attention = counts ? counts[SIGNAL_ATTENTION] : null;
-    return typeof attention === 'number' ? attention : 0;
-  }
-
-  /**
-   * Whether onboarding still has a step to offer.
-   *
-   * Mission 01 ("Build My HQ") is the first thing a new user is meant to do,
-   * and it lives in Today. A closed rail would hide the only call to action on
-   * a first run — the same class of dead-end as #322, where Home shipped with
-   * that button unreachable. progression-widget.js owns #questLog and emits no
-   * event, so its `hidden` attribute is the signal.
-   */
-  function railHasOnboardingWork() {
-    const quest = document.getElementById('questLog');
-    return !!quest && !quest.hidden;
-  }
-
-  function railShouldBeOpen() {
-    if (state.railUserToggle !== null) return state.railUserToggle;
-    if (state.railState !== RAIL_TODAY) return true;
-    return railAttentionCount() > 0 || railHasOnboardingWork();
-  }
-
-  /**
-   * The quest log renders asynchronously from its own fetch, well after the
-   * first rail render, so its arrival has to re-open the rail. An explicit
-   * close still wins: applyRailOpen reads railUserToggle first.
-   */
-  function watchProgressionForRail() {
-    const quest = document.getElementById('questLog');
-    if (!quest || typeof MutationObserver !== 'function') return;
-    new MutationObserver(() => applyRailOpen()).observe(quest, {
-      attributes: true,
-      attributeFilter: ['hidden']
-    });
-  }
+  // The context rail is not entitled to a third of the window for saying "a
+  // quiet day" (Issue #334). It earns its space for exactly one reason now:
+  // something other than Today is showing — a workspace, group, the HQ site,
+  // Summary, or Ask Ori. A bare Today never opens it, and neither does
+  // workspace attention or Progression state; those live in Updates/Quests,
+  // which are their own overlays entirely outside this rail (FR41-FR47).
 
   function applyRailOpen() {
-    const open = railShouldBeOpen();
+    const open = contextRailShouldBeOpen(state.railState);
     root.dataset.railOpen = open ? 'true' : 'false';
     if (els.rail) els.rail.hidden = !open;
+  }
+
+  // ---- Updates badge (FR15-FR17) ----
+  //
+  // Purely informational: the same aggregate attention count the rail used to
+  // carry, still hidden at zero, but it never opens anything on its own now —
+  // opening Updates is the trigger button's job alone (applyPanelState).
+
+  function updateUpdatesBadge() {
+    if (!els.railToggleCount) return;
+    const badge = updatesBadgeView(state.flattened, state.scheduleIndex);
+    els.railToggleCount.textContent = badge.visible ? String(badge.count) : '';
+    els.railToggleCount.hidden = !badge.visible;
+  }
+
+  // ---- header disclosure panel: Updates / Quests / Quick Capture ----
+  //
+  // One explicit `state.panel` value (see PANEL_* / togglePanelState above)
+  // drives all three header-owned transient disclosures, so they can never
+  // disagree about which one is open (FR7-FR9). Deliberately independent of
+  // `railState`/contextRailShouldBeOpen(): a selected workspace and an open
+  // flyout coexist without disturbing each other (FR22, FR29, FR41-FR46).
+
+  function applyPanelState() {
+    const openUpdates = state.panel === PANEL_UPDATES;
+    const openQuests = state.panel === PANEL_QUESTS;
+    const openCapture = state.panel === PANEL_CAPTURE;
+
     if (els.railToggle) {
-      els.railToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
-      els.railToggle.setAttribute(
-        'aria-label',
-        open ? 'Hide the Today panel' : 'Show the Today panel'
-      );
+      els.railToggle.setAttribute('aria-expanded', openUpdates ? 'true' : 'false');
+      els.railToggle.setAttribute('aria-label', openUpdates ? 'Hide Updates' : 'Show Updates');
     }
-    // The badge is the only reason to look at a closed rail, so it carries the
-    // attention count and disappears at zero rather than showing a "0".
-    if (els.railToggleCount) {
-      const count = railAttentionCount();
-      els.railToggleCount.textContent = count > 0 ? String(count) : '';
-      els.railToggleCount.hidden = count === 0;
+    if (els.updatesFlyout) els.updatesFlyout.hidden = !openUpdates;
+
+    if (els.questsToggle) {
+      els.questsToggle.setAttribute('aria-expanded', openQuests ? 'true' : 'false');
+      els.questsToggle.setAttribute('aria-label', openQuests ? 'Hide Quests' : 'Show Quests');
+    }
+    if (els.questsFlyout) els.questsFlyout.hidden = !openQuests;
+
+    if (els.captureBtn) els.captureBtn.setAttribute('aria-expanded', openCapture ? 'true' : 'false');
+    if (els.capturePanel) els.capturePanel.hidden = !openCapture;
+  }
+
+  function focusPanelTrigger(panel) {
+    const id = panelTriggerId(panel);
+    const trigger = id && document.getElementById(id);
+    if (trigger) trigger.focus();
+  }
+
+  /** Open `target`, idempotently — calling it again while already open just refocuses. */
+  function openPanel(target, { focus = true } = {}) {
+    if (state.panel === target) {
+      if (focus && target === PANEL_CAPTURE && els.captureTitle) els.captureTitle.focus();
+      return;
+    }
+    state.panel = target;
+    applyPanelState();
+    if (target === PANEL_CAPTURE) {
+      refreshCaptureAvailability();
+      if (focus && els.captureTitle) els.captureTitle.focus();
     }
   }
 
-  function toggleRail() {
-    const open = railShouldBeOpen();
-    if (open && state.railState !== RAIL_TODAY) {
-      // Closing while a context panel is showing would leave a selected
-      // workspace with nowhere to see it. Drop back to Today first, so
-      // reopening lands somewhere coherent.
-      clearSelection({ keepRailOpen: false });
-      state.railUserToggle = false;
-      applyRailOpen();
-      return;
-    }
-    state.railUserToggle = !open;
-    applyRailOpen();
+  /** Close whichever panel is open, returning focus to its trigger. */
+  function closePanel({ focus = true } = {}) {
+    const prior = state.panel;
+    if (prior === PANEL_NONE) return;
+    state.panel = PANEL_NONE;
+    applyPanelState();
+    if (focus) focusPanelTrigger(prior);
+  }
+
+  /** Activating a trigger: open it, or close it if it is the one already open (FR7). */
+  function togglePanel(target) {
+    if (togglePanelState(state.panel, target) === PANEL_NONE) closePanel();
+    else openPanel(target);
   }
 
   function renderRail({ announceChange = true } = {}) {
@@ -1821,14 +1907,13 @@ import {
       if (state.selectedId) {
         // The selected item vanished under us (deleted or now inaccessible):
         // return to Today and say so rather than showing a stale rail (FR73).
+        // The rail itself still closes (Today has no rail content of its own
+        // now — FR42/FR45); `announce()` writes to #cockpitRailLive, which
+        // lives OUTSIDE the rail specifically so this notice is still heard
+        // by assistive tech even though its container just closed.
         state.selectedId = '';
         state.railState = RAIL_TODAY;
         state.priorContext = null;
-        // Keep the rail open. The user was reading this workspace a moment ago,
-        // and the explanation below is only useful if it lands somewhere they
-        // can still see — closing the rail here would delete the context AND
-        // the notice that says why.
-        state.railUserToggle = true;
         showTodayPanel();
         announce('The selected workspace is no longer available. Showing Today.');
         return;
@@ -1849,12 +1934,10 @@ import {
   /**
    * Swap the rail to its context panel.
    *
-   * Today is HIDDEN, never destroyed: the Daily Brief, Calendar, progression,
-   * and Personal HQ modules own DOM inside it, and re-rendering the rail must
-   * not tear their state down (FR72).
+   * Today has no rail content of its own anymore (Issue #334 moved it into
+   * Updates/Quests), so this only ever shows/hides the one context panel.
    */
   function showContextPanel(html) {
-    if (els.railToday) els.railToday.hidden = true;
     els.railContext.hidden = false;
     els.railContext.innerHTML = html;
     bindRailCommon();
@@ -1863,7 +1946,6 @@ import {
   }
 
   function showTodayPanel() {
-    if (els.railToday) els.railToday.hidden = false;
     els.railContext.hidden = true;
     els.railContext.innerHTML = '';
     updateRailFooter();
@@ -1908,7 +1990,6 @@ import {
             : null;
       }
       state.railState = RAIL_ASK;
-      if (els.railToday) els.railToday.hidden = true;
       if (els.railContext) els.railContext.hidden = true;
       // Ask Ori activity is never worth showing in a rail the user cannot see.
       applyRailOpen();
@@ -1958,7 +2039,7 @@ import {
     };
   }
 
-  // ---- Today: immediate work (FR75, FR87) ----
+  // ---- Today (now Updates): immediate work (FR75, FR87) ----
 
   function renderToday() {
     if (els.todayAttention) {
@@ -1969,18 +2050,23 @@ import {
         scheduledTodayItems(state.flattened, state.scheduleIndex)
       );
     }
+    // The Updates badge carries the same attention count as the section above
+    // it, so it is refreshed on the same beat rather than a separate pass.
+    updateUpdatesBadge();
   }
 
   /**
-   * A Today action that names a workspace selects it before any navigation, so
-   * the Map/Tree context follows what the user just acted on (FR80).
+   * An Updates action that names a workspace selects it before any
+   * navigation, so the Map/Tree context follows what the user just acted on
+   * (FR80).
    *
-   * One delegated listener on the rail covers every Today source, including the
-   * ones other modules render into it (Daily Brief, Calendar Ops, activity).
+   * One delegated listener on the flyout body covers every Updates source,
+   * including the ones other modules render into it (Daily Brief, Calendar
+   * Ops, Activity).
    */
   function wireTodaySelection() {
-    if (!els.railToday) return;
-    els.railToday.addEventListener('click', e => {
+    if (!els.updatesBody) return;
+    els.updatesBody.addEventListener('click', e => {
       const target = e.target;
       if (!target || !target.closest) return;
       const selector = target.closest('[data-cockpit-select]');
@@ -2005,16 +2091,15 @@ import {
 
   // ---- Quick Capture (FR101-FR104) ----
 
+  /**
+   * Public Quick Capture open/close, kept for callers outside this module
+   * (window.OriHomeCockpit.openCapture). Routes through the shared header
+   * disclosure state so Quick Capture keeps participating in Updates/Quests
+   * mutual exclusion (FR9) instead of forking its own open/closed flag.
+   */
   function setCaptureOpen(open) {
-    if (!els.capturePanel || !els.captureBtn) return;
-    els.capturePanel.hidden = !open;
-    els.captureBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
-    if (open) {
-      refreshCaptureAvailability();
-      if (els.captureTitle) els.captureTitle.focus();
-    } else if (els.captureBtn) {
-      els.captureBtn.focus();
-    }
+    if (open) openPanel(PANEL_CAPTURE);
+    else closePanel();
   }
 
   function refreshCaptureAvailability() {
@@ -2206,7 +2291,7 @@ import {
     if (!canHydrateWorkspaceData()) return null;
     if (state.inFlight) return state.inFlight;
     const railScroll = els.railContext ? els.railContext.scrollTop : 0;
-    const todayScroll = els.railToday ? els.railToday.scrollTop : 0;
+    const updatesScroll = els.updatesBody ? els.updatesBody.scrollTop : 0;
     state.inFlight = (async () => {
       try {
         const response = await fetch('/api/workspaces?tree=true');
@@ -2232,7 +2317,7 @@ import {
         renderToday();
         renderRail({ announceChange: false });
         if (els.railContext) els.railContext.scrollTop = railScroll;
-        if (els.railToday) els.railToday.scrollTop = todayScroll;
+        if (els.updatesBody) els.updatesBody.scrollTop = updatesScroll;
       }
     })();
     return state.inFlight;
@@ -2301,10 +2386,13 @@ import {
     });
   });
 
-  if (els.railToggle) {
-    els.railToggle.addEventListener('click', () => toggleRail());
-  }
-  watchProgressionForRail();
+  // Updates / Quests / Quick Capture: three triggers sharing one panel state
+  // (FR7-FR9). The Quests trigger does not exist in the template until Group
+  // 2 lands; the null-guard keeps this wiring correct either way.
+  if (els.railToggle) els.railToggle.addEventListener('click', () => togglePanel(PANEL_UPDATES));
+  if (els.updatesClose) els.updatesClose.addEventListener('click', () => closePanel());
+  if (els.questsToggle) els.questsToggle.addEventListener('click', () => togglePanel(PANEL_QUESTS));
+  if (els.questsClose) els.questsClose.addEventListener('click', () => closePanel());
 
   if (els.summaryBtn) {
     els.summaryBtn.addEventListener('click', () =>
@@ -2312,13 +2400,9 @@ import {
     );
   }
 
-  if (els.captureBtn) {
-    els.captureBtn.addEventListener('click', () =>
-      setCaptureOpen(els.capturePanel ? els.capturePanel.hidden : true)
-    );
-  }
+  if (els.captureBtn) els.captureBtn.addEventListener('click', () => togglePanel(PANEL_CAPTURE));
   if (els.captureForm) els.captureForm.addEventListener('submit', submitCapture);
-  if (els.captureCancel) els.captureCancel.addEventListener('click', () => setCaptureOpen(false));
+  if (els.captureCancel) els.captureCancel.addEventListener('click', () => closePanel());
 
   // Personal HQ provisioning can complete while Home is open; re-read the
   // status so Quick Capture stops explaining a requirement already met.
@@ -2345,17 +2429,24 @@ import {
 
   document.addEventListener('keydown', e => {
     if (e.key !== 'Escape') return;
-    // Escape only reaches the rail when nothing higher-priority owns it (FR128).
+    // Escape only reaches the rail/flyouts when nothing higher-priority owns
+    // it (FR128).
     if (document.querySelector('.modal.show')) return;
     const target = e.target;
-    // Quick Capture owns Escape while it is open, INCLUDING while focus sits in
-    // its own fields — otherwise the editable-field guard below would swallow
-    // the key and leave the panel stuck open (FR128).
-    if (els.capturePanel && !els.capturePanel.hidden) {
-      if (!target || !target.closest || target.closest('#cockpitCapturePanel')) {
-        setCaptureOpen(false);
-        return;
-      }
+    // Whichever header panel is open owns Escape, INCLUDING while focus sits
+    // in its own fields — otherwise the editable-field guard below would
+    // swallow the key and leave the panel stuck open (FR10, FR128).
+    const openPanelEl =
+      state.panel === PANEL_UPDATES
+        ? els.updatesFlyout
+        : state.panel === PANEL_QUESTS
+          ? els.questsFlyout
+          : state.panel === PANEL_CAPTURE
+            ? els.capturePanel
+            : null;
+    if (openPanelEl && (!target || !target.closest || target.closest(`#${openPanelEl.id}`))) {
+      closePanel();
+      return;
     }
     if (
       target &&
@@ -2363,8 +2454,8 @@ import {
     ) {
       return;
     }
-    if (els.capturePanel && !els.capturePanel.hidden) {
-      setCaptureOpen(false);
+    if (openPanelEl) {
+      closePanel();
       return;
     }
     if (state.railState === RAIL_SUMMARY) {
@@ -2433,5 +2524,6 @@ import {
   }
 
   applyView(state.view, { pushUrl: false });
+  applyPanelState();
   void initializeWorkspaceHydration();
 })();

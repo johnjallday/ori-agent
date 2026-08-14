@@ -49,6 +49,15 @@
        views (FR14/FR92). -->
   <div class="home-cockpit" id="homeCockpit" data-view="map" data-state="loading" data-rail-open="false">
     <section class="cockpit-workspace-area" id="cockpitWorkspaceArea" aria-labelledby="cockpitWorkspaceAreaTitle">
+      <!--
+        Wraps the header AND the two flyouts below so they share one
+        positioning context (Issue #334). The wrapper — not the header alone
+        — is what occupies the grid's header row; position: relative lives
+        here rather than on the <header>, because the flyouts are the
+        header's DOM SIBLINGS, not its descendants, and an absolutely
+        positioned element's containing block must be an ancestor.
+      -->
+      <div class="cockpit-area-header-zone">
       <header class="cockpit-area-header">
         <div class="cockpit-area-heading">
           <span class="cockpit-area-eyebrow">Workspaces</span>
@@ -80,21 +89,24 @@
             <span class="cockpit-map-ori__role">App Guide</span>
           </button>
           <!--
-            The rail's own switch. The rail is closed by default and opens on
-            demand (a selection, something needing attention, or this button),
-            so there has to be one obvious way back to it. The badge carries the
-            attention count and is empty at zero — a closed rail with nothing
-            waiting should look calm, not like a dismissed notification.
+            Updates: a manual, non-modal flyout for the day's non-Progression
+            content — attention, scheduled work, Daily Brief, Calendar,
+            Activity, and Personal HQ mounts (Issue #334). The id is kept from
+            the retired "Today" rail toggle for compatibility, but its target
+            and semantics now describe the Updates flyout, never the context
+            rail. The badge carries the same aggregate attention count as
+            before and is empty at zero — but it is informational only now: a
+            positive count never opens this on its own.
           -->
           <button
             type="button"
-            class="cockpit-rail-toggle"
+            class="cockpit-flyout-toggle"
             id="cockpitRailToggle"
             aria-expanded="false"
-            aria-controls="cockpitRail"
-            aria-label="Show the Today panel">
-            <span class="cockpit-rail-toggle__label">Today</span>
-            <span class="cockpit-rail-toggle__count" data-cockpit-rail-toggle-count hidden></span>
+            aria-controls="cockpitUpdatesFlyout"
+            aria-label="Show Updates">
+            <span class="cockpit-flyout-toggle__label">Updates</span>
+            <span class="cockpit-flyout-toggle__count" data-cockpit-rail-toggle-count hidden></span>
           </button>
           <!-- Mutually exclusive Map/Tree toggle. aria-pressed carries the
                active view; the visible labels carry it without color (FR24). -->
@@ -121,140 +133,133 @@
         </div>
       </header>
 
-      <!-- Quick Capture. Writes to the designated Personal HQ's backlog through
-           the existing backlog contract — never a second inbox (FR102).
+      <!--
+        Updates: a bounded, non-modal overlay anchored to its header trigger
+        (Issue #334). It is never a layout column — position lives entirely in
+        CSS against the header above it, so opening or closing this never
+        changes the measured width of the Map/Tree workspace area below.
 
-           It follows its button out of the rail: a disclosure panel has to live
-           where the control that opens it lives, or opening it would reveal a
-           form inside a hidden rail. -->
-      <div id="cockpitCapturePanel" class="cockpit-capture" hidden>
-        <form id="cockpitCaptureForm" class="cockpit-capture-form">
-          <label class="cockpit-capture-label" for="cockpitCaptureTitle">Capture to your HQ backlog</label>
-          <input type="text" id="cockpitCaptureTitle" class="modern-input" maxlength="300" required
-                 autocomplete="off" placeholder="What's on your mind?">
-          <label class="visually-hidden" for="cockpitCaptureDetails">Optional details</label>
-          <textarea id="cockpitCaptureDetails" class="modern-input cockpit-capture-details" rows="2"
-                    maxlength="2000" placeholder="Optional details"></textarea>
-          <div class="cockpit-capture-actions">
-            <button type="submit" id="cockpitCaptureSave" class="modern-btn modern-btn-primary modern-btn-sm">Save</button>
-            <button type="button" id="cockpitCaptureCancel" class="modern-btn modern-btn-secondary modern-btn-sm">Cancel</button>
-          </div>
-          <p id="cockpitCaptureStatus" class="cockpit-capture-status" role="status" aria-live="polite"></p>
-        </form>
-      </div>
-      <!-- Map-only signal filters. Single-select and keyboard-operable; counts
-           come from the same authoritative state Map and Summary read, and an
-           unavailable count renders as an em dash rather than a fake 0
-           (FR31-FR34). Populated by home-workspace-cockpit.js. -->
-      <div id="cockpitSignalFilters" class="cockpit-signal-filters" role="group" aria-label="Filter workspaces by signal" hidden></div>
+        Its sections are independently mounted and independently degradable —
+        one failing source never blocks the others or the workspace area.
+      -->
+      <div id="cockpitUpdatesFlyout" class="cockpit-flyout" data-cockpit-flyout="updates"
+           role="region" aria-labelledby="cockpitUpdatesFlyoutTitle" hidden>
+        <header class="cockpit-flyout-head">
+          <h2 id="cockpitUpdatesFlyoutTitle" class="cockpit-flyout-title">Updates</h2>
+          <button type="button" class="cockpit-flyout-close" data-cockpit-flyout-close
+                  aria-label="Close Updates">
+            <span aria-hidden="true">&times;</span>
+          </button>
+        </header>
+        <div id="cockpitUpdatesFlyoutBody" class="cockpit-flyout-body">
+          <!-- Immediate work first: what needs attention and what is scheduled
+               today outrank recent activity (FR87). Rendered by
+               home-workspace-cockpit.js from the SAME shared state Map, Tree,
+               and Summary read — no extra fetch (FR111). -->
+          <section id="cockpitTodayAttention" class="cockpit-today-section" aria-label="Needs attention"></section>
+          <section id="cockpitTodayScheduled" class="cockpit-today-section" aria-label="Scheduled today"></section>
 
-      <div class="cockpit-area-body">
-        <!-- Map and Tree occupy the SAME layout slot; activating one hides the
-             other, never a drawer or overlay (FR18). -->
-        <div id="cockpitMap" class="ws-map cockpit-map" role="region" aria-label="Workspace map" hidden></div>
-        <div id="cockpitTree" class="cockpit-tree" role="region" aria-label="Workspace tree" hidden></div>
-        <div id="cockpitWorkspaceStatus" class="cockpit-area-status" role="status" aria-live="polite"></div>
-      </div>
-    </section>
-
-    <!--
-      Closed until something earns it: home-workspace-cockpit.js opens the rail
-      on a selection, on an attention count, or when the user asks for it. The
-      closed state is declared here rather than left to the first render, so the
-      map does not start full-width and then get shoved sideways a frame later.
-    -->
-    <aside class="cockpit-rail" id="cockpitRail" aria-label="Context" hidden>
-      <!-- Polite rail announcements; never re-reads the whole rail (FR130). -->
-      <div id="cockpitRailLive" class="visually-hidden" role="status" aria-live="polite"></div>
-
-      <!-- Today: the default rail state on a bare Home load (FR74). Its
-           sections are independently mounted and independently degradable, so
-           one failing source never blocks the others or the workspace area
-           (FR75/FR85/FR113). -->
-      <div id="cockpitRailToday" class="cockpit-rail-body" data-rail-state="today">
-        <!-- Immediate work first: what needs attention and what is scheduled
-             today outrank recent activity and optional onboarding (FR87).
-             Rendered by home-workspace-cockpit.js from the SAME shared state
-             Map, Tree, and Summary read — no extra fetch (FR111). -->
-        <section id="cockpitTodayAttention" class="cockpit-today-section" aria-label="Needs attention"></section>
-        <section id="cockpitTodayScheduled" class="cockpit-today-section" aria-label="Scheduled today"></section>
-
-    <!-- Daily Brief: the primary Home orientation region once a valid Personal
-         HQ is designated (PRD FR97). Hidden entirely with no HQ — no hidden
-         brief store is created and no workspace is silently selected (FR69).
-         Populated/wired by home-daily-brief.js. -->
-    <section id="homeDailyBrief" class="home-daily-brief" data-state="loading" aria-labelledby="homeDailyBriefTitle" hidden>
-      <header class="home-daily-brief-header">
-        <div class="home-daily-brief-heading">
-          <span class="home-daily-brief-eyebrow">Daily Brief</span>
-          <h2 id="homeDailyBriefTitle" class="home-daily-brief-title">Today</h2>
-          <p id="homeDailyBriefMeta" class="home-daily-brief-meta"></p>
-        </div>
-        <!-- Refresh is the only action that earns permanent space in a ~320px
-             rail; Open My HQ and Brief settings live one disclosure away. A
-             native <details> rather than a JS menu, so it costs no script and
-             stays keyboard- and screen-reader-operable for free. -->
-        <div class="home-daily-brief-actions">
-          <button type="button" id="homeDailyBriefRefreshBtn" class="modern-btn modern-btn-primary modern-btn-sm">Refresh</button>
-          <details class="home-daily-brief-menu" id="homeDailyBriefMenu">
-            <summary class="home-daily-brief-menu-toggle" aria-label="More Daily Brief actions" title="More actions">
-              <span aria-hidden="true">&#8943;</span>
-            </summary>
-            <div class="home-daily-brief-menu-panel">
-              <a id="homeDailyBriefOpenHQ" href="/" class="home-daily-brief-menu-item">Open My HQ</a>
-              <button type="button" id="homeDailyBriefSettingsBtn" class="home-daily-brief-menu-item">Brief settings</button>
+          <!-- Daily Brief: the primary Home orientation region once a valid
+               Personal HQ is designated. Hidden entirely with no HQ — no
+               hidden brief store is created and no workspace is silently
+               selected. Populated/wired by home-daily-brief.js. -->
+          <section id="homeDailyBrief" class="home-daily-brief" data-state="loading" aria-labelledby="homeDailyBriefTitle" hidden>
+            <header class="home-daily-brief-header">
+              <div class="home-daily-brief-heading">
+                <span class="home-daily-brief-eyebrow">Daily Brief</span>
+                <h2 id="homeDailyBriefTitle" class="home-daily-brief-title">Today</h2>
+                <p id="homeDailyBriefMeta" class="home-daily-brief-meta"></p>
+              </div>
+              <!-- Refresh is the only action that earns permanent space in a
+                   ~320px flyout; Open My HQ and Brief settings live one
+                   disclosure away. A native <details> rather than a JS menu,
+                   so it costs no script and stays keyboard- and
+                   screen-reader-operable for free. -->
+              <div class="home-daily-brief-actions">
+                <button type="button" id="homeDailyBriefRefreshBtn" class="modern-btn modern-btn-primary modern-btn-sm">Refresh</button>
+                <details class="home-daily-brief-menu" id="homeDailyBriefMenu">
+                  <summary class="home-daily-brief-menu-toggle" aria-label="More Daily Brief actions" title="More actions">
+                    <span aria-hidden="true">&#8943;</span>
+                  </summary>
+                  <div class="home-daily-brief-menu-panel">
+                    <a id="homeDailyBriefOpenHQ" href="/" class="home-daily-brief-menu-item">Open My HQ</a>
+                    <button type="button" id="homeDailyBriefSettingsBtn" class="home-daily-brief-menu-item">Brief settings</button>
+                  </div>
+                </details>
+              </div>
+            </header>
+            <div id="homeDailyBriefBanner" class="home-daily-brief-banner" role="status" aria-live="polite" hidden></div>
+            <div id="homeDailyBriefBody" class="home-daily-brief-body" aria-live="polite">
+              <div class="home-daily-brief-placeholder">Loading your Daily Brief…</div>
             </div>
-          </details>
-        </div>
-      </header>
-      <div id="homeDailyBriefBanner" class="home-daily-brief-banner" role="status" aria-live="polite" hidden></div>
-      <div id="homeDailyBriefBody" class="home-daily-brief-body" aria-live="polite">
-        <div class="home-daily-brief-placeholder">Loading your Daily Brief…</div>
-      </div>
-    </section>
+          </section>
 
-    <!-- Calendar Ops portal: a second, independent Home orientation region
-         (task 7.3) -- a bounded read of today's calendar, separate from
-         Daily Brief in both data source and lifecycle (FR54: never adds a
-         live Calendar Ops call to Daily Brief generation). Populated/wired
-         by home-calendar-ops-portal.js; a fetch failure hides the whole
-         section rather than surfacing a broken widget (FR51). -->
-    <section id="homeCalendarOpsPortal" class="home-daily-brief home-calendar-ops-portal" data-state="loading" aria-labelledby="homeCalendarOpsPortalTitle" hidden>
-      <header class="home-daily-brief-header">
-        <div class="home-daily-brief-heading">
-          <span class="home-daily-brief-eyebrow">Calendar</span>
-          <h2 id="homeCalendarOpsPortalTitle" class="home-daily-brief-title">Today</h2>
-        </div>
-        <div class="home-daily-brief-actions">
-          <a id="homeCalendarOpsPortalOpen" href="/" class="modern-btn modern-btn-primary modern-btn-sm" hidden>Open Calendar Ops</a>
-        </div>
-      </header>
-      <div id="homeCalendarOpsPortalBody" class="home-daily-brief-body" aria-live="polite">
-        <div class="home-daily-brief-placeholder">Loading your calendar…</div>
-      </div>
-    </section>
+          <!-- Calendar Ops portal: a second, independent Home orientation
+               region — a bounded read of today's calendar, separate from
+               Daily Brief in both data source and lifecycle. Populated/wired
+               by home-calendar-ops-portal.js; a fetch failure hides the whole
+               section rather than surfacing a broken widget. -->
+          <section id="homeCalendarOpsPortal" class="home-daily-brief home-calendar-ops-portal" data-state="loading" aria-labelledby="homeCalendarOpsPortalTitle" hidden>
+            <header class="home-daily-brief-header">
+              <div class="home-daily-brief-heading">
+                <span class="home-daily-brief-eyebrow">Calendar</span>
+                <h2 id="homeCalendarOpsPortalTitle" class="home-daily-brief-title">Today</h2>
+              </div>
+              <div class="home-daily-brief-actions">
+                <a id="homeCalendarOpsPortalOpen" href="/" class="modern-btn modern-btn-primary modern-btn-sm" hidden>Open Calendar Ops</a>
+              </div>
+            </header>
+            <div id="homeCalendarOpsPortalBody" class="home-daily-brief-body" aria-live="polite">
+              <div class="home-daily-brief-placeholder">Loading your calendar…</div>
+            </div>
+          </section>
 
-        <!-- Recent activity moved out of the retired Operations Board row into
-             Today, keeping its existing endpoint and lifecycle (FR81/FR84).
+          <!-- Recent activity keeps its existing endpoint and lifecycle. -->
+          <section id="homeRecentActivity" class="home-section home-section-activity" aria-labelledby="homeRecentActivityTitle">
+            <header class="home-section-header">
+              <h2 id="homeRecentActivityTitle" class="home-section-title">Activity</h2>
+            </header>
+            <div class="home-section-body" data-role="content" aria-live="polite">
+              <div class="home-section-placeholder" data-role="placeholder">Loading activity…</div>
+            </div>
+          </section>
 
-             The "Upcoming" section that used to sit here was a second rendering
-             of the SAME /api/orchestration/scheduled-tasks/upcoming data that
-             "Scheduled today" above already shows — two fetches of one endpoint
-             stacked in one column. "Scheduled today" is the survivor: it is
-             time-bounded and marks overdue runs. -->
-        <section id="homeRecentActivity" class="home-section home-section-activity" aria-labelledby="homeRecentActivityTitle">
-          <header class="home-section-header">
-            <h2 id="homeRecentActivityTitle" class="home-section-title">Activity</h2>
-          </header>
-          <div class="home-section-body" data-role="content" aria-live="polite">
-            <div class="home-section-placeholder" data-role="placeholder">Loading activity…</div>
+          <!-- Optional Personal HQ mounts. Each is a separate mount so a
+               failure in one is isolated from the others, from Map/Tree, and
+               from creation. -->
+          <div class="home-hq-mounts">
+            <!-- Shown by personal-hq-onboarding.js only when a valid designated
+                 HQ is behind the current provisioning version. -->
+            <div id="hqUpgradeMount" class="hq-upgrade-mount" hidden></div>
+            <!-- Email connect/grant/repair card for a valid designated HQ. -->
+            <div id="hqEmailMount" class="hq-email-mount" hidden></div>
+            <!-- Confirm-gated reply review: drafts the Inbox agent prepared. -->
+            <div id="hqMailReviewMount" class="hq-reply-mount" hidden></div>
+            <!-- Bounded due/stale follow-ups with quick actions. -->
+            <div id="hqFollowUpMount" class="hq-followup-mount" hidden></div>
+            <!-- End-of-day journal launcher + editor. -->
+            <div id="hqJournalMount" class="hq-journal-mount" hidden></div>
           </div>
-        </section>
+        </div>
+      </div>
 
-        <!-- Onboarding progression stays a compact Today section and keeps its
-             existing state and actions (FR86). Optional guidance must never
-             outrank immediate work, so it renders last (FR87). -->
-        <div class="home-progression-zone" aria-label="Onboarding progression">
+      <!--
+        Quests: Progression's own flyout, reserved here so its DOM host is
+        stable from the first commit even though its header trigger and
+        open/close wiring do not land until Group 2 of Issue #334. Never
+        placed inside #cockpitMap, whose workspace-map.js mount replaces its
+        inner HTML on refresh.
+      -->
+      <div id="cockpitQuestsFlyout" class="cockpit-flyout cockpit-flyout--quests"
+           data-cockpit-flyout="quests" role="region" aria-labelledby="cockpitQuestsFlyoutTitle" hidden>
+        <header class="cockpit-flyout-head">
+          <h2 id="cockpitQuestsFlyoutTitle" class="cockpit-flyout-title">Quests</h2>
+          <button type="button" class="cockpit-flyout-close" data-cockpit-flyout-close
+                  aria-label="Close Quests">
+            <span aria-hidden="true">&times;</span>
+          </button>
+        </header>
+        <div class="cockpit-flyout-body">
           <!-- Populated by progression-widget.js from GET /api/progression. -->
           <div id="questLog" class="quest-log" hidden aria-live="polite">
             <div class="quest-log-inner">
@@ -301,27 +306,63 @@
             </button>
           </div>
         </div>
-
-        <!-- Optional Personal HQ mounts. They live in Today because that is
-             the HQ context (FR115), and each is a separate mount so a failure
-             in one is isolated from the others, from Map/Tree, and from
-             creation (FR116). Below the cockpit they squeezed the workspace
-             area; in the rail they scroll with the rest of Today. -->
-        <div class="home-hq-mounts">
-          <!-- Shown by personal-hq-onboarding.js only when a valid designated
-               HQ is behind the current provisioning version. -->
-          <div id="hqUpgradeMount" class="hq-upgrade-mount" hidden></div>
-          <!-- Email connect/grant/repair card for a valid designated HQ. -->
-          <div id="hqEmailMount" class="hq-email-mount" hidden></div>
-          <!-- Confirm-gated reply review: drafts the Inbox agent prepared. -->
-          <div id="hqMailReviewMount" class="hq-reply-mount" hidden></div>
-          <!-- Bounded due/stale follow-ups with quick actions. -->
-          <div id="hqFollowUpMount" class="hq-followup-mount" hidden></div>
-          <!-- End-of-day journal launcher + editor. -->
-          <div id="hqJournalMount" class="hq-journal-mount" hidden></div>
-        </div>
+      </div>
       </div>
 
+      <!-- Quick Capture. Writes to the designated Personal HQ's backlog through
+           the existing backlog contract — never a second inbox (FR102).
+
+           It follows its button out of the rail: a disclosure panel has to live
+           where the control that opens it lives, or opening it would reveal a
+           form inside a hidden rail. -->
+      <div id="cockpitCapturePanel" class="cockpit-capture" hidden>
+        <form id="cockpitCaptureForm" class="cockpit-capture-form">
+          <label class="cockpit-capture-label" for="cockpitCaptureTitle">Capture to your HQ backlog</label>
+          <input type="text" id="cockpitCaptureTitle" class="modern-input" maxlength="300" required
+                 autocomplete="off" placeholder="What's on your mind?">
+          <label class="visually-hidden" for="cockpitCaptureDetails">Optional details</label>
+          <textarea id="cockpitCaptureDetails" class="modern-input cockpit-capture-details" rows="2"
+                    maxlength="2000" placeholder="Optional details"></textarea>
+          <div class="cockpit-capture-actions">
+            <button type="submit" id="cockpitCaptureSave" class="modern-btn modern-btn-primary modern-btn-sm">Save</button>
+            <button type="button" id="cockpitCaptureCancel" class="modern-btn modern-btn-secondary modern-btn-sm">Cancel</button>
+          </div>
+          <p id="cockpitCaptureStatus" class="cockpit-capture-status" role="status" aria-live="polite"></p>
+        </form>
+      </div>
+      <!-- Map-only signal filters. Single-select and keyboard-operable; counts
+           come from the same authoritative state Map and Summary read, and an
+           unavailable count renders as an em dash rather than a fake 0
+           (FR31-FR34). Populated by home-workspace-cockpit.js. -->
+      <div id="cockpitSignalFilters" class="cockpit-signal-filters" role="group" aria-label="Filter workspaces by signal" hidden></div>
+
+      <div class="cockpit-area-body">
+        <!-- Map and Tree occupy the SAME layout slot; activating one hides the
+             other, never a drawer or overlay (FR18). -->
+        <div id="cockpitMap" class="ws-map cockpit-map" role="region" aria-label="Workspace map" hidden></div>
+        <div id="cockpitTree" class="cockpit-tree" role="region" aria-label="Workspace tree" hidden></div>
+        <div id="cockpitWorkspaceStatus" class="cockpit-area-status" role="status" aria-live="polite"></div>
+      </div>
+    </section>
+
+    <!--
+      Closed until something earns it: home-workspace-cockpit.js opens the rail
+      only for a real selection — a workspace, group, Personal HQ site,
+      Summary, or Ask Ori activity (Issue #334). A bare Home load, workspace
+      attention, and Progression state never open it; Updates and Quests are
+      their own overlays entirely outside this rail. The closed state is
+      declared here rather than left to the first render, so the map does not
+      start full-width and then get shoved sideways a frame later.
+    -->
+    <!-- Polite rail announcements; never re-reads the whole rail (FR130).
+         Kept OUTSIDE the rail on purpose: a rail transition can close the
+         aside in the same tick it announces why (e.g. a selected workspace
+         vanishing), and an aria-live region inside a hidden ancestor is
+         removed from the accessibility tree before assistive tech can read
+         it. -->
+    <div id="cockpitRailLive" class="visually-hidden" role="status" aria-live="polite"></div>
+
+    <aside class="cockpit-rail" id="cockpitRail" aria-label="Context" hidden>
       <!-- Selected workspace/group context, and the Summary rail state. A
            sibling panel rather than a re-render of Today, so swapping rail
            states never destroys the DOM the Daily Brief, Calendar, and
