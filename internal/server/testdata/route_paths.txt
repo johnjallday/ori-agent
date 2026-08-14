@@ -326,3 +326,4 @@
 /api/workspaces/x/setup-wizard/complete
 /api/workspaces/x/setup-wizard/steps/folder/confirm
 /api/workspaces/x/setup-wizard/steps/folder/skip
+/api/workspaces/x/plans/x/reconcile

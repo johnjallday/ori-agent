@@ -63,6 +63,19 @@ type CompileInput struct {
 	ApprovalID string
 	ApprovedBy string
 	Now        time.Time
+	// Carry maps a Plan-local group or item ID to the Task that already exists
+	// for it, for a revision that retains prior work (FR-76).
+	//
+	// A carried element compiles to NOTHING: no Task and no link. The link from
+	// the version that created it stays live and keeps representing that work,
+	// which is the honest record — the Task came from version 1, and version 2
+	// did not change it. Emitting a second link for the new version would leave
+	// two live links for one item and make "which version does this Task belong
+	// to" unanswerable.
+	//
+	// The Task IDs still matter here, because other items depend on carried
+	// work and their input edges must point at the Task that actually exists.
+	Carry map[string]string
 }
 
 // CompileTaskTree turns an approved version into the Task tree it describes.
@@ -94,9 +107,11 @@ func CompileTaskTree(input CompileInput) ([]CompiledTask, error) {
 	groupTaskIDs := make(map[string]string, len(content.Groups))
 	itemTaskIDs := make(map[string]string, content.ActionableItemCount())
 	for _, group := range content.Groups {
-		groupTaskIDs[group.ID] = DeterministicTaskID(plan.ID, version.Number, LinkRoleGroup, group.ID, "")
+		groupTaskIDs[group.ID] = carriedOr(input.Carry, group.ID,
+			DeterministicTaskID(plan.ID, version.Number, LinkRoleGroup, group.ID, ""))
 		for _, item := range group.Items {
-			itemTaskIDs[item.ID] = DeterministicTaskID(plan.ID, version.Number, LinkRoleItem, group.ID, item.ID)
+			itemTaskIDs[item.ID] = carriedOr(input.Carry, item.ID,
+				DeterministicTaskID(plan.ID, version.Number, LinkRoleItem, group.ID, item.ID))
 		}
 	}
 
@@ -139,15 +154,17 @@ func CompileTaskTree(input CompileInput) ([]CompiledTask, error) {
 			}
 		}
 
-		compiled = append(compiled, CompiledTask{
-			Task: groupTask,
-			Link: TaskLink{
-				PlanID: plan.ID, WorkspaceID: plan.WorkspaceID,
-				Version: version.Number, ApprovalID: input.ApprovalID,
-				GroupID: group.ID, TaskID: groupTask.ID,
-				Role: LinkRoleGroup, CreatedAt: now,
-			},
-		})
+		if _, carried := input.Carry[group.ID]; !carried {
+			compiled = append(compiled, CompiledTask{
+				Task: groupTask,
+				Link: TaskLink{
+					PlanID: plan.ID, WorkspaceID: plan.WorkspaceID,
+					Version: version.Number, ApprovalID: input.ApprovalID,
+					GroupID: group.ID, TaskID: groupTask.ID,
+					Role: LinkRoleGroup, CreatedAt: now,
+				},
+			})
+		}
 
 		for itemIndex, item := range group.Items {
 			itemProvenance := provenance
@@ -182,6 +199,9 @@ func CompileTaskTree(input CompileInput) ([]CompiledTask, error) {
 				}
 			}
 
+			if _, carried := input.Carry[item.ID]; carried {
+				continue
+			}
 			compiled = append(compiled, CompiledTask{
 				Task: itemTask,
 				Link: TaskLink{
@@ -195,6 +215,15 @@ func CompileTaskTree(input CompileInput) ([]CompiledTask, error) {
 	}
 
 	return compiled, nil
+}
+
+// carriedOr returns the existing Task ID for a retained element, or the
+// deterministic ID for work that is about to be created.
+func carriedOr(carry map[string]string, id, fallback string) string {
+	if taskID, found := carry[id]; found && taskID != "" {
+		return taskID
+	}
+	return fallback
 }
 
 // planTaskSource marks a Task as created by the planning workflow rather than

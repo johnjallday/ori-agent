@@ -852,6 +852,11 @@ func registerWorkspacePlanRoutes(mux *http.ServeMux, s *Server) {
 		// ownership checks (FR-100, FR-108 through FR-121).
 		mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/execution", s.Handlers.WorkspacePlans.PlanExecution)
 		mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/cancel-preview", s.Handlers.WorkspacePlans.PlanCancelPreview)
+		// Reconciliation: what a revision does to the work its earlier approval
+		// created, and the separate confirmation of that exact preview. GET and
+		// POST share a route because the confirmation is OF the preview
+		// (FR-77, FR-154).
+		mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/reconcile", s.Handlers.WorkspacePlans.PlanReconcile)
 		// Reverse lookups: Task and Run detail ask which plan produced them and
 		// get a compact summary that deep-links to the canonical plan route,
 		// never a second editor (FR-10, FR-148, FR-149).

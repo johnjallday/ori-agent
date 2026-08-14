@@ -37,6 +37,8 @@ type Handler struct {
 	slots *SlotCoordinator
 	// auto drives automatic Plans after a successful materialization.
 	auto *AutoRunner
+	// reconciler previews and confirms what a revision does to prior work.
+	reconciler *Reconciler
 }
 
 // GuidanceResolver returns the model-guidance half of a workspace's planning
@@ -73,6 +75,9 @@ func (h *Handler) SetSlots(slots *SlotCoordinator) { h.slots = slots }
 // still materializes its Tasks; they simply wait to be started by hand, which
 // is a visible degradation rather than a silent one.
 func (h *Handler) SetAutoRunner(auto *AutoRunner) { h.auto = auto }
+
+// SetReconciler attaches revision reconciliation.
+func (h *Handler) SetReconciler(reconciler *Reconciler) { h.reconciler = reconciler }
 
 // planResponse is the wire shape of a Plan. It is written explicitly rather
 // than by serializing the domain type directly, so adding an internal field
@@ -1191,6 +1196,72 @@ func (h *Handler) PlanCancelPreview(w http.ResponseWriter, r *http.Request) {
 	orihttp.Success(w, preview)
 }
 
+// PlanReconcile dispatches .../reconcile.
+//
+// GET previews what a revision would do to the work its earlier approval
+// created; POST records the user's confirmation of one exact preview. They are
+// the same resource because the preview is what the confirmation is OF: a
+// confirmation that named nothing, or named a preview the server never
+// produced, would authorize whatever the state happened to be (FR-77, FR-154).
+func (h *Handler) PlanReconcile(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		h.PlanReconcilePreview(w, r)
+	case http.MethodPost:
+		h.PlanReconcileConfirm(w, r)
+	default:
+		orihttp.MethodNotAllowed(w)
+	}
+}
+
+// PlanReconcilePreview handles GET .../reconcile.
+func (h *Handler) PlanReconcilePreview(w http.ResponseWriter, r *http.Request) {
+	workspaceID, planID := requireWorkspaceAndPlanID(w, r)
+	if workspaceID == "" || planID == "" {
+		return
+	}
+	if h.reconciler == nil {
+		writeError(w, fmt.Errorf("%w: reconciliation is not configured", ErrValidation))
+		return
+	}
+
+	preview, err := h.reconciler.Preview(r.Context(), workspaceID, planID)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	orihttp.Success(w, preview)
+}
+
+// PlanReconcileConfirm handles POST .../reconcile.
+func (h *Handler) PlanReconcileConfirm(w http.ResponseWriter, r *http.Request) {
+	workspaceID, planID := requireWorkspaceAndPlanID(w, r)
+	if workspaceID == "" || planID == "" {
+		return
+	}
+	if h.reconciler == nil {
+		writeError(w, fmt.Errorf("%w: reconciliation is not configured", ErrValidation))
+		return
+	}
+
+	var req struct {
+		Token string `json:"token"`
+		Actor string `json:"actor,omitempty"`
+	}
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+
+	confirmation, err := h.reconciler.Confirm(r.Context(), workspaceID, planID, ConfirmInput{
+		Token: req.Token, Actor: req.Actor,
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	orihttp.Success(w, confirmation)
+}
+
 // PlanForTask handles GET /api/workspaces/{workspaceID}/plan-for-task/{taskID}.
 //
 // This is the reverse half of the Plan-to-Task link: Task detail asks "which
@@ -1319,10 +1390,12 @@ func writeError(w http.ResponseWriter, err error) {
 
 func statusForCode(code ErrorCode) int {
 	switch code {
-	case CodeNotFound, CodeWorkspaceNotFound, CodeVersionNotFound, CodeApprovalNotFound:
+	case CodeNotFound, CodeWorkspaceNotFound, CodeVersionNotFound, CodeApprovalNotFound,
+		CodeReconcileNotFound:
 		return http.StatusNotFound
 	case CodeConflict, CodeStaleDraft, CodeStaleVersion, CodeApprovalConsumed,
-		CodeMaterializationConflict, CodeExecutionConflict, CodeNotDeletable:
+		CodeMaterializationConflict, CodeExecutionConflict, CodeNotDeletable,
+		CodeReconcileConsumed, CodeStalePreview:
 		return http.StatusConflict
 	case CodeInvalidTransition, CodeApprovalMismatch, CodeArchived:
 		return http.StatusConflict

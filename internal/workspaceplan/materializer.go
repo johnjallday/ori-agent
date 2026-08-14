@@ -18,21 +18,28 @@ import (
 // racing it, without ever producing two Task trees or reporting success over a
 // failed write.
 //
-//	1. Replay check   — if this version already materialized, return that result
-//	2. Revalidate     — assignees and capabilities, as they are right now
-//	3. Compile        — deterministic Task IDs, no side effects
-//	4. Stage artifacts— render and path-check, write nothing
-//	5. Commit tasks   — through the workspace's validated batch add
-//	6. Link           — Plan-to-Task provenance, both directions
-//	7. Write artifacts— only after tasks committed
-//	8. Consume        — atomically spend the approval and record the result
-//	9. Approve        — move the Plan, only now that everything is durable
+//	 1. Replay check   — if this version already materialized, return that result
+//	 2. Revalidate     — assignees and capabilities, as they are right now
+//	 3. Reconcile auth — a revision needs a confirmed, unspent preview
+//	 4. Compile        — deterministic Task IDs, no side effects
+//	 5. Stage artifacts— render and path-check, write nothing
+//	 6. Reconcile      — cancel and retire superseded work, spend the confirmation
+//	 7. Commit tasks   — through the workspace's validated batch add
+//	 8. Link           — Plan-to-Task provenance, both directions
+//	 9. Write artifacts— only after tasks committed
+//	10. Consume        — atomically spend the approval and record the result
+//	11. Approve        — move the Plan, only now that everything is durable
 //
-// Deterministic Task IDs are what make a retry safe: step 3 computes the same
-// IDs every time, so step 5 recognizes existing work rather than duplicating it
-// (FR-91). A crash between 5 and 8 leaves an unconsumed approval and Tasks that
+// Deterministic Task IDs are what make a retry safe: step 4 computes the same
+// IDs every time, so step 7 recognizes existing work rather than duplicating it
+// (FR-91). A crash between 7 and 10 leaves an unconsumed approval and Tasks that
 // already exist; the retry finds them, links idempotently, and consumes. No
 // duplicates, no orphans (FR-89, FR-90).
+//
+// Reconciliation splits across steps 3 and 6 for the same reason. Checking the
+// authorization early means a revision that was never confirmed fails before
+// anything is written; spending it late, immediately before the new Tasks
+// appear, means the cancelled work and its replacement are never both live.
 
 // TaskWriter is the workspace persistence the materializer needs.
 //
@@ -72,6 +79,11 @@ type Materializer struct {
 	// deterministic and application-owned rather than model-written, so an
 	// approved plan always produces the same document (FR-96).
 	renderer ArtifactRenderer
+	// reconciler handles a version that revises already-approved work.
+	// Optional: without it a revision is REFUSED rather than materialized as
+	// if it were a first approval, because materializing it that way would
+	// duplicate every retained Task (FR-76).
+	reconciler *Reconciler
 }
 
 // NewMaterializer returns a materializer over the given services.
@@ -100,6 +112,64 @@ func WithArtifactWriter(writer ArtifactWriter) MaterializerOption {
 // WithArtifactRenderer replaces the deterministic artifact renderer.
 func WithArtifactRenderer(renderer ArtifactRenderer) MaterializerOption {
 	return func(m *Materializer) { m.renderer = renderer }
+}
+
+// WithReconciler attaches revision reconciliation.
+func WithReconciler(reconciler *Reconciler) MaterializerOption {
+	return func(m *Materializer) { m.reconciler = reconciler }
+}
+
+// authorizeRevision decides whether a version that revises approved work may
+// materialize, and returns the preview describing what it will do.
+//
+// A first approval returns (nil, nil, nil): there is no prior work to reconcile
+// against, so there is nothing to authorize beyond the approval itself.
+func (m *Materializer) authorizeRevision(ctx context.Context, plan *Plan, version *Version) (*ReconcilePreview, *Reconciliation, error) {
+	if plan.ApprovedVersion == 0 || version.Number <= plan.ApprovedVersion {
+		return nil, nil, nil
+	}
+	if m.reconciler == nil {
+		return nil, nil, fmt.Errorf(
+			"%w: this version revises approved work, and reconciliation is not configured",
+			ErrValidation)
+	}
+	return m.reconciler.Authorize(ctx, plan.WorkspaceID, plan.ID)
+}
+
+// carryFromPreview turns a preview into the compiler's carry map: the Plan
+// elements whose Tasks already exist and must not be created again.
+//
+// EVERY group with a live link is carried, unconditionally. A group Task is a
+// container identified by its Plan-local group ID, so there is never a reason
+// to hold two of them: whatever changed inside the group — items added,
+// cancelled, or replaced — the container is the same container.
+//
+// An earlier version of this made a group "fresh" whenever any of its items was
+// not carried, which meant dropping one item from a group produced a SECOND
+// group Task. Its retained children stayed parented to the original, so the new
+// one arrived empty and stayed that way. A group genuinely new in the revision
+// has no link at all, so it is simply absent here and the compiler creates it.
+func carryFromPreview(plan *Plan, preview *ReconcilePreview) map[string]string {
+	if preview == nil {
+		return nil
+	}
+
+	carry := make(map[string]string)
+	for _, link := range plan.TaskLinks {
+		if link.RetiredAt == nil && link.Role == LinkRoleGroup && link.GroupID != "" {
+			carry[link.GroupID] = link.TaskID
+		}
+	}
+
+	for _, entry := range preview.Entries {
+		// Only retained work keeps its Task. Created, replaced, and follow-up
+		// work is compiled fresh; immutable work is not in the revised content
+		// at all, so it is never compiled either way.
+		if entry.Disposition == DispositionRetained && entry.TaskID != "" {
+			carry[entry.ItemID] = entry.TaskID
+		}
+	}
+	return carry
 }
 
 // MaterializeInput identifies the approval to spend.
@@ -178,17 +248,29 @@ func (m *Materializer) Materialize(ctx context.Context, workspaceID, planID stri
 
 	now := m.service.Now()
 
-	// 3. Compile. Pure: nothing is written yet.
+	// 3. Reconcile, when this version revises already-approved work. The
+	//    authorization is checked HERE rather than at the route, because a
+	//    confirmation validated earlier and acted on later is exactly the stale
+	//    authorization the preview token exists to prevent (FR-77).
+	preview, confirmation, err := m.authorizeRevision(ctx, plan, version)
+	if err != nil {
+		return nil, err
+	}
+
+	// 4. Compile. Pure: nothing is written yet. Retained work is carried
+	//    rather than recompiled, so an additive revision adds and changes
+	//    nothing else (FR-76).
 	compiled, err := CompileTaskTree(CompileInput{
 		Plan: plan, Version: version,
 		ApprovalID: approval.ID, ApprovedBy: approval.UserName,
-		Now: now,
+		Now:   now,
+		Carry: carryFromPreview(plan, preview),
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	// 4. Stage artifacts: render and path-check before anything is committed,
+	// 5. Stage artifacts: render and path-check before anything is committed,
 	//    so an unsafe path fails the whole materialization rather than leaving
 	//    Tasks behind (FR-97, FR-98).
 	staged, err := m.stageArtifacts(plan, version)
@@ -196,14 +278,23 @@ func (m *Materializer) Materialize(ctx context.Context, workspaceID, planID stri
 		return nil, err
 	}
 
-	// 5. Commit tasks through the workspace's own validated batch add, which
+	// 6. Cancel and retire what the confirmed reconciliation covers, BEFORE new
+	//    Tasks exist. Doing it after would leave a window where the replaced
+	//    Task and its replacement are both live and both eligible to run.
+	if confirmation != nil {
+		if err := m.reconciler.Apply(ctx, workspaceID, planID, preview, confirmation); err != nil {
+			return nil, err
+		}
+	}
+
+	// 7. Commit tasks through the workspace's own validated batch add, which
 	//    checks the whole graph and rolls the batch back on failure (FR-92).
 	taskIDs, err := m.commitTasks(plan.WorkspaceID, compiled)
 	if err != nil {
 		return nil, fmt.Errorf("materialize plan tasks: %w", err)
 	}
 
-	// 6. Link. Idempotent by the store's unique index, so a racing retry
+	// 8. Link. Idempotent by the store's unique index, so a racing retry
 	//    writes nothing new (FR-91).
 	links := make([]TaskLink, 0, len(compiled))
 	for _, entry := range compiled {
@@ -213,7 +304,7 @@ func (m *Materializer) Materialize(ctx context.Context, workspaceID, planID stri
 		return nil, fmt.Errorf("link plan tasks: %w", err)
 	}
 
-	// 7. Artifacts last, because they are the only effect that cannot be
+	// 9. Artifacts last, because they are the only effect that cannot be
 	//    rolled back by the Task path.
 	written, err := m.writeArtifacts(ctx, plan.WorkspaceID, staged)
 	if err != nil {
@@ -223,7 +314,7 @@ func (m *Materializer) Materialize(ctx context.Context, workspaceID, planID stri
 		return nil, err
 	}
 
-	// 8. Consume. This is the mutual exclusion: two callers reaching here both
+	// 10. Consume. This is the mutual exclusion: two callers reaching here both
 	//    issue the conditional update, exactly one wins, and the loser replays
 	//    the winner's result (FR-72, FR-178).
 	result := ApprovalResult{
@@ -246,7 +337,7 @@ func (m *Materializer) Materialize(ctx context.Context, workspaceID, planID stri
 		return nil, err
 	}
 
-	// 9. Only now is the Plan approved. Reaching this status means the work
+	// 11. Only now is the Plan approved. Reaching this status means the work
 	//    exists and is durable (FR-94).
 	if err := m.markApproved(ctx, plan, version, approval, now); err != nil {
 		return nil, err

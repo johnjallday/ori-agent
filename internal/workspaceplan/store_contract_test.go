@@ -33,6 +33,118 @@ func forEachStore(t *testing.T, run func(t *testing.T, ctx context.Context, stor
 	})
 }
 
+// --- Reconciliation confirmations (FR-77) ----------------------------------
+
+// Confirming the same preview twice records one decision. Both stores enforce
+// it, one by scanning and one by a unique index; a suite that only ran against
+// the fake would prove nothing about the index that actually ships.
+func TestStoreReconciliationIsIdempotent(t *testing.T) {
+	forEachStore(t, func(t *testing.T, ctx context.Context, store Store, seed func(string)) {
+		seed("ws-1")
+		if err := store.CreatePlan(ctx, testPlan("plan-1")); err != nil {
+			t.Fatalf("create plan: %v", err)
+		}
+
+		first := seedReconciliation(t, ctx, store)
+		second := seedReconciliation(t, ctx, store)
+		if first.ID != second.ID {
+			t.Errorf("re-confirming recorded a second decision: %s vs %s", first.ID, second.ID)
+		}
+
+		records, err := store.ListReconciliations(ctx, "ws-1", "plan-1")
+		if err != nil {
+			t.Fatalf("list reconciliations: %v", err)
+		}
+		if len(records) != 1 {
+			t.Errorf("reconciliations = %d, want 1", len(records))
+		}
+	})
+}
+
+// A confirmation is spendable exactly once, which is what stops a retried
+// materialization from cancelling a second round of work.
+func TestStoreReconciliationIsSingleUse(t *testing.T) {
+	forEachStore(t, func(t *testing.T, ctx context.Context, store Store, seed func(string)) {
+		seed("ws-1")
+		if err := store.CreatePlan(ctx, testPlan("plan-1")); err != nil {
+			t.Fatalf("create plan: %v", err)
+		}
+		seedReconciliation(t, ctx, store)
+
+		now := time.Now().UTC()
+		if err := store.ConsumeReconciliation(ctx, "ws-1", "plan-1", "token-1", now); err != nil {
+			t.Fatalf("first consume: %v", err)
+		}
+		err := store.ConsumeReconciliation(ctx, "ws-1", "plan-1", "token-1", now)
+		if !errors.Is(err, ErrReconciliationConsumed) {
+			t.Errorf("second consume = %v, want already consumed", err)
+		}
+
+		// The record survives being spent: it is the audit trail of what the
+		// user agreed to, not a lock to be released.
+		record, err := store.GetReconciliation(ctx, "ws-1", "plan-1", "token-1")
+		if err != nil {
+			t.Fatalf("get reconciliation: %v", err)
+		}
+		if !record.Applied() {
+			t.Error("a consumed reconciliation does not report itself as applied")
+		}
+		if len(record.Entries) != 1 {
+			t.Errorf("entries = %d; the preview the user saw was not retained", len(record.Entries))
+		}
+	})
+}
+
+// An unknown token reads as missing, and so does one from another workspace.
+func TestStoreReconciliationIsScopedToItsWorkspace(t *testing.T) {
+	forEachStore(t, func(t *testing.T, ctx context.Context, store Store, seed func(string)) {
+		seed("ws-1")
+		seed("ws-2")
+		if err := store.CreatePlan(ctx, testPlan("plan-1")); err != nil {
+			t.Fatalf("create plan: %v", err)
+		}
+		seedReconciliation(t, ctx, store)
+
+		if _, err := store.GetReconciliation(ctx, "ws-1", "plan-1", "nope"); !errors.Is(err, ErrReconciliationNotFound) {
+			t.Errorf("unknown token = %v, want not found", err)
+		}
+		// A Plan in another workspace reads as a missing PLAN, not as a
+		// missing confirmation: the caller is not entitled to learn that the
+		// plan exists somewhere else (FR-163, FR-167).
+		if _, err := store.GetReconciliation(ctx, "ws-2", "plan-1", "token-1"); !errors.Is(err, ErrPlanNotFound) {
+			t.Errorf("cross-workspace read = %v, want plan not found", err)
+		}
+		if err := store.ConsumeReconciliation(ctx, "ws-2", "plan-1", "token-1", time.Now().UTC()); !errors.Is(err, ErrPlanNotFound) {
+			t.Errorf("cross-workspace consume = %v, want plan not found", err)
+		}
+	})
+}
+
+func seedReconciliation(t *testing.T, ctx context.Context, store Store) *Reconciliation {
+	t.Helper()
+	record, err := store.RecordReconciliation(ctx, &Reconciliation{
+		PlanID:      testPlanID,
+		WorkspaceID: testWorkspaceID,
+		Token:       "token-1",
+		FromVersion: 1,
+		ToVersion:   2,
+		Intent:      RevisionCorrective,
+		Entries: []ReconcileEntry{{
+			Disposition: DispositionCancel,
+			ItemID:      "itm-1",
+			TaskID:      "task-1",
+			Description: "Snapshot staging",
+			Reason:      "dropped from the revision",
+		}},
+		ConfirmedBy: "jj",
+		ConfirmedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("record reconciliation: %v", err)
+	}
+	return record
+}
+
 // openFileTestDB opens a file-backed database, which is the only way to prove
 // something survives a restart: an :memory: database dies with its connection.
 func openFileTestDB(t *testing.T, ctx context.Context, path string) *database.DB {

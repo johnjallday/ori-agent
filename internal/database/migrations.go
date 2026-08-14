@@ -10,7 +10,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 40
+const schemaVersion = 41
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -145,6 +145,8 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 		return db.migration039WorkspacePlans(ctx)
 	case 40:
 		return db.migration040WorkspacePlanExecutionSlot(ctx)
+	case 41:
+		return db.migration041WorkspacePlanReconciliations(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
@@ -1699,6 +1701,52 @@ func (db *DB) migration040WorkspacePlanExecutionSlot(ctx context.Context) error 
 	for _, stmt := range statements {
 		if _, err := db.ExecContext(ctx, stmt); err != nil {
 			return fmt.Errorf("failed to create workspace plan execution slot schema: %w", err)
+		}
+	}
+	return nil
+}
+
+// migration041WorkspacePlanReconciliations records the user's confirmation of
+// one exact reconciliation preview (PRD FR-77, FR-116).
+//
+// A corrective revision can cancel Tasks the earlier approval created. That is
+// a second decision on top of approving the revised plan, and it is recorded
+// separately so the audit trail can show what the user was told they were
+// cancelling — `entries` holds the preview verbatim rather than something
+// recomputed later, when the state it described has already moved.
+//
+// `token` is a hash of the exact state the preview was computed from, including
+// every linked Task's status. The unique index on (plan_id, token) makes a
+// re-confirmation idempotent, and `applied_at` makes it single-use: together
+// they mean a double-clicked confirm cannot cancel two rounds of work.
+//
+// Rows are never deleted. A confirmation that was applied is history; one that
+// was superseded is the record of a decision the user made and then moved past.
+func (db *DB) migration041WorkspacePlanReconciliations(ctx context.Context) error {
+	statements := []string{
+		`CREATE TABLE IF NOT EXISTS workspace_plan_reconciliations (
+			id TEXT PRIMARY KEY,
+			plan_id TEXT NOT NULL,
+			workspace_id TEXT NOT NULL,
+			token TEXT NOT NULL,
+			from_version INTEGER NOT NULL,
+			to_version INTEGER NOT NULL,
+			intent TEXT NOT NULL DEFAULT '',
+			entries TEXT NOT NULL DEFAULT '[]',
+			confirmed_by TEXT NOT NULL DEFAULT '',
+			confirmed_at DATETIME NOT NULL,
+			applied_at DATETIME,
+			FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
+			FOREIGN KEY (plan_id) REFERENCES workspace_plans(id) ON DELETE CASCADE
+		)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_workspace_plan_reconciliations_token
+			ON workspace_plan_reconciliations(plan_id, token)`,
+		`CREATE INDEX IF NOT EXISTS idx_workspace_plan_reconciliations_plan
+			ON workspace_plan_reconciliations(workspace_id, plan_id, confirmed_at DESC)`,
+	}
+	for _, stmt := range statements {
+		if _, err := db.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("failed to create workspace plan reconciliation schema: %w", err)
 		}
 	}
 	return nil

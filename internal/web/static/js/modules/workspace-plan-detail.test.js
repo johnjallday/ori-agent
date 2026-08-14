@@ -7,6 +7,9 @@ import {
   clarificationLine,
   diffSummary,
   materializedMessage,
+  reconcileLine,
+  reconcileRunsNote,
+  reconcileSummary,
   WorkspacePlanPage
 } from './workspace-plan-detail.js';
 
@@ -56,7 +59,14 @@ const SELECTORS = [
   '#plan-save-state',
   '#plan-conflict-panel',
   '#plan-conflict-summary',
-  '#plan-detail-status'
+  '#plan-detail-status',
+  '#plan-reconcile-panel',
+  '#plan-reconcile-summary',
+  '#plan-reconcile-list',
+  '#plan-reconcile-runs',
+  '#plan-reconcile-actions',
+  '#plan-reconcile-confirm',
+  '#plan-reconcile-status'
 ];
 
 function fakeDocument() {
@@ -104,7 +114,11 @@ function jsonResponse(body, ok = true, status = 200) {
 
 // makePage wires a page against canned responses and a controllable clock, so
 // autosave can be tested without waiting.
-function makePage({ plan = planFixture(), activity = [], onSave } = {}) {
+//
+// reconcile defaults to the answer the server gives for a plan that is not a
+// revision — a refusal, not an empty preview. Defaulting to a preview would let
+// every unrelated test accidentally exercise the reconciliation panel.
+function makePage({ plan = planFixture(), activity = [], onSave, reconcile, onConfirm } = {}) {
   const doc = fakeDocument();
   const timers = [];
 
@@ -117,6 +131,16 @@ function makePage({ plan = planFixture(), activity = [], onSave } = {}) {
     clearTimeout: () => {},
     fetch: async (url, options = {}) => {
       if (url.endsWith('/activity')) return jsonResponse({ activity });
+      if (url.endsWith('/reconcile')) {
+        if (options.method === 'POST') {
+          return onConfirm
+            ? onConfirm(JSON.parse(options.body))
+            : jsonResponse({ id: 'rec-1', token: reconcile?.token });
+        }
+        return reconcile
+          ? jsonResponse(reconcile)
+          : jsonResponse({ code: 'invalid_transition' }, false, 409);
+      }
       if (url.endsWith('/draft') && options.method === 'PATCH') {
         return onSave ? onSave(JSON.parse(options.body)) : jsonResponse(plan);
       }
@@ -861,6 +885,146 @@ test('approving materializes the approved work', async () => {
 
   assert.ok(materialized, 'approving did not create the approved work');
   assert.equal(materialized.approval_id, 'apr-9');
+});
+
+// --- Reconciliation (FR-77, FR-154) ----------------------------------------
+
+// correctivePreview is what the server returns for a revision that cancels
+// unstarted work and leaves completed work alone.
+function correctivePreview(overrides = {}) {
+  return {
+    plan_id: 'plan_1',
+    from_version: 1,
+    to_version: 2,
+    intent: 'corrective',
+    requires_confirmation: true,
+    token: 'tok-1',
+    summary: { cancel: 1, immutable: 1, retained: 1 },
+    affected_run_ids: ['run-1'],
+    entries: [
+      {
+        disposition: 'retained',
+        item_id: 'itm-1',
+        task_id: 'task-1',
+        description: 'Snapshot staging',
+        reason: 'unchanged by this revision'
+      },
+      {
+        disposition: 'cancel',
+        item_id: 'itm-2',
+        task_id: 'task-2',
+        description: 'Verify checksums',
+        reason: 'dropped from the revision and not started, so it is cancelled',
+        run_ids: ['run-1']
+      },
+      {
+        disposition: 'immutable',
+        item_id: 'itm-3',
+        task_id: 'task-3',
+        description: 'Archive the old tables',
+        status: 'completed',
+        reason: 'already completed, so it is left alone'
+      }
+    ],
+    ...overrides
+  };
+}
+
+test('the reconciliation summary leads with what will be cancelled', () => {
+  const summary = reconcileSummary(correctivePreview());
+  assert.ok(
+    summary.startsWith('1 existing task(s) will be cancelled'),
+    `summary buried the cancellation: ${summary}`
+  );
+});
+
+test('a reconciliation entry says what happens, to what, and why', () => {
+  const line = reconcileLine(correctivePreview().entries[1]);
+  assert.ok(line.startsWith('Will be cancelled: Verify checksums'), line);
+  assert.ok(line.includes('not started'), `the reason is missing: ${line}`);
+});
+
+test('completed work reads as left alone rather than as cancelled', () => {
+  const line = reconcileLine(correctivePreview().entries[2]);
+  assert.ok(line.startsWith('Left alone:'), line);
+});
+
+test('affected runs are disclosed with a promise that records are kept', () => {
+  assert.match(reconcileRunsNote(correctivePreview()), /1 run\(s\).*kept/);
+  assert.equal(reconcileRunsNote({ affected_run_ids: [] }), '');
+});
+
+test('a corrective revision shows the panel and offers a confirmation', async () => {
+  const { page, doc } = makePage({ reconcile: correctivePreview() });
+
+  await page.reload();
+
+  assert.equal(doc.elements['#plan-reconcile-panel'].hidden, false);
+  assert.equal(doc.elements['#plan-reconcile-actions'].hidden, false);
+  assert.match(doc.elements['#plan-reconcile-list'].innerHTML, /Verify checksums/);
+  assert.equal(doc.elements['#plan-reconcile-runs'].hidden, false);
+});
+
+// An additive revision cancels nothing, so there is no second decision to make.
+// Showing a confirm button anyway would train the user to click past the one
+// that matters.
+test('an additive revision shows the panel without a confirmation', async () => {
+  const preview = correctivePreview({
+    intent: 'additive',
+    requires_confirmation: false,
+    summary: { created: 1, retained: 2 },
+    affected_run_ids: []
+  });
+  const { page, doc } = makePage({ reconcile: preview });
+
+  await page.reload();
+
+  assert.equal(doc.elements['#plan-reconcile-panel'].hidden, false);
+  assert.equal(doc.elements['#plan-reconcile-actions'].hidden, true);
+  assert.match(doc.elements['#plan-reconcile-status'].textContent, /only adds work/);
+});
+
+test('a plan that is not a revision hides the panel entirely', async () => {
+  const { page, doc } = makePage();
+
+  await page.reload();
+
+  assert.equal(doc.elements['#plan-reconcile-panel'].hidden, true);
+});
+
+test('confirming sends the token from the preview on screen', async () => {
+  let sent = null;
+  const { page } = makePage({
+    reconcile: correctivePreview(),
+    onConfirm: body => {
+      sent = body;
+      return jsonResponse({ id: 'rec-1', token: body.token });
+    }
+  });
+
+  await page.reload();
+  await page.confirmReconciliation();
+
+  assert.deepEqual(sent, { token: 'tok-1' });
+});
+
+// A refused confirmation leaves the reason on screen rather than a stale
+// preview that no longer describes what would happen.
+test('a stale confirmation surfaces the reason', async () => {
+  const { page, doc } = makePage({
+    reconcile: correctivePreview(),
+    onConfirm: () =>
+      jsonResponse(
+        { code: 'stale_preview', message: 'work changed since this preview was shown' },
+        false,
+        409
+      )
+  });
+
+  await page.reload();
+  await page.confirmReconciliation();
+
+  assert.match(doc.elements['#plan-reconcile-status'].textContent, /work changed/);
 });
 
 test('a missing plan renders the not-found state', async () => {

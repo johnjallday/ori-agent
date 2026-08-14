@@ -30,6 +30,7 @@ type planRecord struct {
 	runLinks       []RunLink
 	activity       []Activity
 	snapshots      []*DraftSnapshot
+	reconciles     []*Reconciliation
 	sequence       int64
 }
 
@@ -595,6 +596,98 @@ func (s *MemoryStore) RetireTaskLink(_ context.Context, workspaceID, planID, tas
 		return nil
 	}
 	return fmt.Errorf("%w: task link %s", ErrPlanNotFound, taskID)
+}
+
+func (s *MemoryStore) RecordReconciliation(_ context.Context, reconciliation *Reconciliation) (*Reconciliation, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	record, err := s.lookup(reconciliation.WorkspaceID, reconciliation.PlanID)
+	if err != nil {
+		return nil, err
+	}
+	// Re-confirming the same preview returns the original decision. A double
+	// click is one confirmation, not two.
+	for _, existing := range record.reconciles {
+		if existing.Token == reconciliation.Token {
+			return cloneReconciliation(existing), nil
+		}
+	}
+
+	stored := cloneReconciliation(reconciliation)
+	if stored.ID == "" {
+		stored.ID = newUUID()
+	}
+	record.reconciles = append(record.reconciles, stored)
+	return cloneReconciliation(stored), nil
+}
+
+func (s *MemoryStore) GetReconciliation(_ context.Context, workspaceID, planID, token string) (*Reconciliation, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	record, err := s.lookup(workspaceID, planID)
+	if err != nil {
+		return nil, err
+	}
+	for _, existing := range record.reconciles {
+		if existing.Token == token {
+			return cloneReconciliation(existing), nil
+		}
+	}
+	return nil, ErrReconciliationNotFound
+}
+
+func (s *MemoryStore) ConsumeReconciliation(_ context.Context, workspaceID, planID, token string, at time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	record, err := s.lookup(workspaceID, planID)
+	if err != nil {
+		return err
+	}
+	for _, existing := range record.reconciles {
+		if existing.Token != token {
+			continue
+		}
+		if existing.AppliedAt != nil {
+			return ErrReconciliationConsumed
+		}
+		applied := at
+		existing.AppliedAt = &applied
+		return nil
+	}
+	return ErrReconciliationNotFound
+}
+
+func (s *MemoryStore) ListReconciliations(_ context.Context, workspaceID, planID string) ([]*Reconciliation, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	record, err := s.lookup(workspaceID, planID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*Reconciliation, 0, len(record.reconciles))
+	for i := len(record.reconciles) - 1; i >= 0; i-- {
+		out = append(out, cloneReconciliation(record.reconciles[i]))
+	}
+	return out, nil
+}
+
+// cloneReconciliation copies a record so a caller cannot reach into the store's
+// state by holding the pointer it was handed.
+func cloneReconciliation(in *Reconciliation) *Reconciliation {
+	if in == nil {
+		return nil
+	}
+	out := *in
+	out.Entries = append([]ReconcileEntry(nil), in.Entries...)
+	if in.AppliedAt != nil {
+		applied := *in.AppliedAt
+		out.AppliedAt = &applied
+	}
+	return &out
 }
 
 func (s *MemoryStore) PlanForTask(_ context.Context, workspaceID, taskID string) (*TaskLink, error) {

@@ -831,6 +831,139 @@ func (s *SQLiteStore) RetireTaskLink(ctx context.Context, workspaceID, planID, t
 	return database.CheckRowsAffectedWithError(result, "workspace_plan_task_link", ErrPlanNotFound)
 }
 
+func (s *SQLiteStore) RecordReconciliation(ctx context.Context, reconciliation *Reconciliation) (*Reconciliation, error) {
+	if err := s.requirePlan(ctx, reconciliation.WorkspaceID, reconciliation.PlanID); err != nil {
+		return nil, err
+	}
+	stored := *reconciliation
+	if stored.ID == "" {
+		stored.ID = newUUID()
+	}
+
+	// The unique index on (plan_id, token) makes a re-confirmation a no-op, so
+	// a double click records one decision. The read that follows returns
+	// whichever record won, which is the one the caller must act on.
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO workspace_plan_reconciliations
+			(id, plan_id, workspace_id, token, from_version, to_version, intent,
+			 entries, confirmed_by, confirmed_at, applied_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(plan_id, token) DO NOTHING
+	`, stored.ID, stored.PlanID, stored.WorkspaceID, stored.Token,
+		stored.FromVersion, stored.ToVersion, string(stored.Intent),
+		mustJSON(stored.Entries), stored.ConfirmedBy, stored.ConfirmedAt,
+		nullableTime(stored.AppliedAt))
+	if err != nil {
+		return nil, fmt.Errorf("record plan reconciliation: %w", err)
+	}
+	return s.GetReconciliation(ctx, stored.WorkspaceID, stored.PlanID, stored.Token)
+}
+
+func (s *SQLiteStore) GetReconciliation(ctx context.Context, workspaceID, planID, token string) (*Reconciliation, error) {
+	// The plan check comes first so a Plan in another workspace reads as a
+	// missing Plan, exactly as every other dependent read does. Without it,
+	// this query would quietly return "no such confirmation" for a Plan the
+	// caller was never allowed to see — the same answer for two different
+	// facts (FR-163).
+	if err := s.requirePlan(ctx, workspaceID, planID); err != nil {
+		return nil, err
+	}
+	row := s.db.QueryRowContext(ctx, `
+		SELECT `+reconciliationColumns+`
+		FROM workspace_plan_reconciliations
+		WHERE workspace_id = ? AND plan_id = ? AND token = ?
+	`, workspaceID, planID, token)
+	return scanReconciliationRow(row)
+}
+
+func (s *SQLiteStore) ConsumeReconciliation(ctx context.Context, workspaceID, planID, token string, at time.Time) error {
+	if err := s.requirePlan(ctx, workspaceID, planID); err != nil {
+		return err
+	}
+	// The applied_at IS NULL predicate is the mutual exclusion: two callers
+	// racing to apply the same confirmation both issue this update and exactly
+	// one changes a row.
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE workspace_plan_reconciliations
+		SET applied_at = ?
+		WHERE workspace_id = ? AND plan_id = ? AND token = ? AND applied_at IS NULL
+	`, at, workspaceID, planID, token)
+	if err != nil {
+		return fmt.Errorf("consume plan reconciliation: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("consume plan reconciliation: %w", err)
+	}
+	if affected == 0 {
+		// Nothing changed: either the record is gone or somebody else spent it.
+		// Distinguishing the two matters, because one is a bad request and the
+		// other is a lost race the caller should treat as already done.
+		if _, err := s.GetReconciliation(ctx, workspaceID, planID, token); err != nil {
+			return err
+		}
+		return ErrReconciliationConsumed
+	}
+	return nil
+}
+
+func (s *SQLiteStore) ListReconciliations(ctx context.Context, workspaceID, planID string) ([]*Reconciliation, error) {
+	if err := s.requirePlan(ctx, workspaceID, planID); err != nil {
+		return nil, err
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT `+reconciliationColumns+`
+		FROM workspace_plan_reconciliations
+		WHERE workspace_id = ? AND plan_id = ?
+		ORDER BY confirmed_at DESC, id DESC
+	`, workspaceID, planID)
+	if err != nil {
+		return nil, fmt.Errorf("list plan reconciliations: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []*Reconciliation
+	for rows.Next() {
+		record, err := scanReconciliationRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list plan reconciliations: %w", err)
+	}
+	return out, nil
+}
+
+const reconciliationColumns = `
+	id, plan_id, workspace_id, token, from_version, to_version, intent,
+	entries, confirmed_by, confirmed_at, applied_at`
+
+func scanReconciliationRow(row rowScanner) (*Reconciliation, error) {
+	var (
+		record    Reconciliation
+		intent    string
+		entries   string
+		appliedAt sql.NullTime
+	)
+	err := row.Scan(&record.ID, &record.PlanID, &record.WorkspaceID, &record.Token,
+		&record.FromVersion, &record.ToVersion, &intent, &entries,
+		&record.ConfirmedBy, &record.ConfirmedAt, &appliedAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, ErrReconciliationNotFound
+		}
+		return nil, fmt.Errorf("scan plan reconciliation: %w", err)
+	}
+	record.Intent = RevisionIntent(intent)
+	record.AppliedAt = nullTimePtr(appliedAt)
+	if err := decodeJSON(entries, &record.Entries); err != nil {
+		return nil, err
+	}
+	return &record, nil
+}
+
 const taskLinkColumns = `
 	plan_id, task_id, workspace_id, version, approval_id, group_id, item_id, role,
 	created_at, replaced_by_task_id, retired_at, retired_reason`

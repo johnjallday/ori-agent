@@ -580,6 +580,35 @@ ensure_agent() {
     -d "{\"agent_name\":\"$name\"}" > /dev/null
 }
 
+# version_hash reads the content hash of one version BY NUMBER.
+#
+# Indexing the version list by position is a trap: it is ordered oldest-first,
+# so v[0] is version 1 forever. Approving with the wrong hash is refused, and
+# the refusal is easy to miss if the caller does not check.
+version_hash() {
+  local base="$1" number="$2"
+  curl -s "$base/versions" | python3 -c 'import sys,json
+want = int(sys.argv[1])
+for version in json.load(sys.stdin)["versions"]:
+    if version["version"] == want:
+        print(version["content_hash"])
+        break' "$number"
+}
+
+# approve_version approves one exact version and fails loudly if the approval
+# was refused, so a later step never runs against work that was never approved.
+approve_version() {
+  local base="$1" number="$2" key="$3"
+  local hash response approval
+  hash=$(version_hash "$base" "$number")
+  [[ -n "$hash" ]] || fail "no content hash for version $number"
+  response=$(curl -s -X POST "$base/approvals" -H 'Content-Type: application/json' \
+    -d "{\"version\":$number,\"content_hash\":\"$hash\",\"effect\":\"create_tasks\",\"user_name\":\"smoke\",\"idempotency_key\":\"$key\"}")
+  approval=$(echo "$response" | json_field id)
+  [[ -n "$approval" ]] || fail "approving version $number was refused: $response"
+  echo "$approval"
+}
+
 # approve_and_materialize drives a plan from draft to created tasks, returning
 # nothing. Used by the slot smoke, which needs two ready-to-run plans.
 approve_and_materialize() {
@@ -683,9 +712,111 @@ smoke_slot() {
   echo "--- Execution slot smoke passed ---"
 }
 
+smoke_reconcile() {
+  local ws="$1"
+  [[ -n "$ws" ]] || fail "usage: smoke.sh reconcile <base-url> <workspace-id>"
+
+  echo "--- Revision reconciliation ($ws) ---"
+  ensure_agent "$ws" "builder"
+
+  local plan base
+  plan=$(seed_plan "$ws" "Reconcile demo" "step_through" "builder")
+  base="$BASE_URL/api/workspaces/$ws/plans/$plan"
+  approve_and_materialize "$ws" "$plan" "reconcile-v1"
+
+  local firstTasks
+  firstTasks=$(curl -s "$base" | python3 -c 'import sys,json;print(len(json.load(sys.stdin).get("task_links") or []))')
+  [[ "$firstTasks" -gt 0 ]] || fail "version 1 created no task links"
+  echo "ok   version 1 materialized ($firstTasks links)"
+
+  # --- Additive revision: adds one step, disturbs nothing -------------------
+  curl -s -X POST "$base/revise-approved" -H 'Content-Type: application/json' \
+    -d '{"intent":"additive","actor":"smoke"}' > /dev/null
+  local revision
+  revision=$(curl -s "$base" | json_field draft_revision)
+  curl -s -X PATCH "$base/draft" -H 'Content-Type: application/json' -d "{
+    \"objective\":\"Reconcile demo\",\"revision\":$revision,
+    \"content\":{\"execution\":{\"mode\":\"step_through\"},
+      \"groups\":[
+        {\"id\":\"grp-1\",\"title\":\"Prepare\",\"outcome\":\"A verified copy exists\",\"items\":[
+          {\"id\":\"itm-1\",\"description\":\"Snapshot the current state\",\"assignee\":\"builder\"},
+          {\"id\":\"itm-2\",\"description\":\"Verify the snapshot\",\"assignee\":\"builder\",\"depends_on\":[\"itm-1\"]},
+          {\"id\":\"itm-4\",\"description\":\"Publish the checksum report\",\"assignee\":\"builder\"}]},
+        {\"id\":\"grp-2\",\"title\":\"Cut over\",\"depends_on\":[\"grp-1\"],\"items\":[
+          {\"id\":\"itm-3\",\"description\":\"Switch traffic to the new path\",\"assignee\":\"builder\"}]}]}}" > /dev/null
+  curl -s -X POST "$base/versions" -H 'Content-Type: application/json' -d '{"intent":"additive"}' > /dev/null
+
+  local preview needsConfirm created cancelled
+  preview=$(curl -s "$base/reconcile")
+  needsConfirm=$(echo "$preview" | json_field requires_confirmation)
+  [[ "$needsConfirm" == "False" ]] || fail "an additive revision demanded a confirmation"
+  created=$(echo "$preview" | json_field summary.created)
+  cancelled=$(echo "$preview" | json_field summary.cancel)
+  [[ "$created" == "1" ]] || fail "additive preview created = $created, want 1"
+  [[ -z "$cancelled" || "$cancelled" == "0" ]] || fail "additive preview would cancel $cancelled task(s)"
+  echo "ok   additive preview: adds 1, cancels nothing, needs no confirmation"
+
+  # --- Corrective revision: drops an unstarted step -------------------------
+  # Approve the additive version first so the corrective one revises it.
+  local approval
+  approval=$(approve_version "$base" 2 "reconcile-v2")
+  expect_status 200 POST "$base/materialize" "{\"approval_id\":\"$approval\"}"
+
+  local approved
+  approved=$(curl -s "$base" | json_field approved_version)
+  [[ "$approved" == "2" ]] || fail "approved version = $approved after materializing v2"
+  echo "ok   additive revision materialized and is now the approved version"
+
+  curl -s -X POST "$base/revise-approved" -H 'Content-Type: application/json' \
+    -d '{"intent":"corrective","actor":"smoke"}' > /dev/null
+  revision=$(curl -s "$base" | json_field draft_revision)
+  curl -s -X PATCH "$base/draft" -H 'Content-Type: application/json' -d "{
+    \"objective\":\"Reconcile demo\",\"revision\":$revision,
+    \"content\":{\"execution\":{\"mode\":\"step_through\"},
+      \"groups\":[
+        {\"id\":\"grp-1\",\"title\":\"Prepare\",\"outcome\":\"A verified copy exists\",\"items\":[
+          {\"id\":\"itm-1\",\"description\":\"Snapshot the current state\",\"assignee\":\"builder\"},
+          {\"id\":\"itm-2\",\"description\":\"Verify the snapshot\",\"assignee\":\"builder\",\"depends_on\":[\"itm-1\"]}]},
+        {\"id\":\"grp-2\",\"title\":\"Cut over\",\"depends_on\":[\"grp-1\"],\"items\":[
+          {\"id\":\"itm-3\",\"description\":\"Switch traffic to the new path\",\"assignee\":\"builder\"}]}]}}" > /dev/null
+  curl -s -X POST "$base/versions" -H 'Content-Type: application/json' -d '{"intent":"corrective"}' > /dev/null
+
+  preview=$(curl -s "$base/reconcile")
+  needsConfirm=$(echo "$preview" | json_field requires_confirmation)
+  [[ "$needsConfirm" == "True" ]] || fail "a corrective revision did not require a confirmation: $preview"
+  cancelled=$(echo "$preview" | json_field summary.cancel)
+  [[ "$cancelled" == "1" ]] || fail "corrective preview cancel = $cancelled, want the dropped step"
+  echo "ok   corrective preview: 1 unstarted step to cancel, confirmation required"
+
+  # A confirmation must name the exact preview it accepts.
+  local bad
+  bad=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$base/reconcile" \
+    -H 'Content-Type: application/json' -d '{"token":"invented"}')
+  [[ "$bad" == "409" ]] || fail "an invented token was accepted (status $bad)"
+  echo "ok   an invented confirmation token is refused"
+
+  local token
+  token=$(echo "$preview" | json_field token)
+  expect_status 200 POST "$base/reconcile" "{\"token\":\"$token\",\"actor\":\"smoke\"}"
+
+  approval=$(approve_version "$base" 3 "reconcile-v3")
+  expect_status 200 POST "$base/materialize" "{\"approval_id\":\"$approval\"}"
+
+  # The dropped work is cancelled, not deleted, and its link is retired.
+  local retired
+  retired=$(curl -s "$base" | python3 -c 'import sys,json
+links = json.load(sys.stdin).get("task_links") or []
+print(sum(1 for l in links if l.get("retired_at")))')
+  [[ "$retired" -ge 1 ]] || fail "no task link was retired by the corrective revision"
+  echo "ok   the superseded task link is retired, not deleted"
+
+  echo "--- Reconciliation smoke passed ---"
+}
+
 case "${1:-}" in
 seed) seed_demo ;;
 slot) smoke_slot "${3:-}" ;;
+reconcile) smoke_reconcile "${3:-}" ;;
 plans) smoke_plans "${3:-}" ;;
 drafting) smoke_drafting "${3:-}" ;;
 review) smoke_review "${3:-}" ;;
@@ -694,7 +825,7 @@ execution) smoke_execution "${3:-}" ;;
 *)
   echo "usage:" >&2
   echo "  $0 seed <base-url>                       # seed plans and print URLs to review" >&2
-  echo "  $0 {plans|drafting|review|materialize|execution|slot} <base-url> <workspace-id>" >&2
+  echo "  $0 {plans|drafting|review|materialize|execution|slot|reconcile} <base-url> <workspace-id>" >&2
   exit 2
   ;;
 esac

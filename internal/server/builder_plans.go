@@ -31,9 +31,20 @@ func (b *ServerBuilder) attachWorkspacePlanMaterializer() {
 		return
 	}
 
+	// Reconciliation is built first because the materializer consults it: a
+	// version that revises approved work must not be materialized as though it
+	// were a first approval, which would duplicate every retained Task.
+	reconciler := workspaceplan.NewReconciler(
+		b.workspacePlanService,
+		b.workspaceStore,
+		planTaskMutator{store: b.workspaceStore},
+	)
+	b.workspacePlanHandler.SetReconciler(reconciler)
+
 	b.workspacePlanMaterializer = workspaceplan.NewMaterializer(
 		b.workspacePlanService,
 		b.workspaceStore,
+		workspaceplan.WithReconciler(reconciler),
 		// Artifacts are written into the workspace's own files root, and the
 		// writer re-checks containment there rather than trusting the path it
 		// was handed (FR-97).

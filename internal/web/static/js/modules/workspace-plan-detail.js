@@ -114,6 +114,57 @@ export function diffSummary(diff) {
   return lines.length > 0 ? lines : ['No approval-relevant changes'];
 }
 
+// DISPOSITION_LABELS says what happens to one piece of existing work, in the
+// words a user would use. The disposition keys are the server's; the wording is
+// the UI's, so a schema value never leaks onto the screen (FR-162).
+const DISPOSITION_LABELS = {
+  retained: 'Kept',
+  created: 'New',
+  cancel: 'Will be cancelled',
+  replace: 'Will be cancelled and recreated',
+  immutable: 'Left alone',
+  follow_up: 'Follow-up work added'
+};
+
+// reconcileLine renders one entry of the preview: what happens, to what, and
+// why. The reason comes from the server so the screen cannot claim a different
+// justification than the one the decision was made on.
+export function reconcileLine(entry) {
+  const label = DISPOSITION_LABELS[entry?.disposition] || 'Unchanged';
+  const description = entry?.description || entry?.item_id || 'this step';
+  const reason = entry?.reason ? ` — ${entry.reason}` : '';
+  return `${label}: ${description}${reason}`;
+}
+
+// reconcileSummary states the headline in counts, leading with what is lost.
+//
+// Cancellations come first because they are the part a user can regret. A
+// summary that opened with "3 new tasks" would bury the sentence that actually
+// needs reading.
+export function reconcileSummary(preview) {
+  if (!preview) return '';
+
+  const summary = preview.summary || {};
+  const cancelled = (summary.cancel || 0) + (summary.replace || 0);
+  const parts = [];
+  if (cancelled > 0) parts.push(`${cancelled} existing task(s) will be cancelled`);
+  if (summary.immutable > 0) parts.push(`${summary.immutable} already ran and are left alone`);
+  if (summary.follow_up > 0) parts.push(`${summary.follow_up} follow-up task(s) will be added`);
+  if (summary.created > 0) parts.push(`${summary.created} new task(s) will be created`);
+  if (summary.retained > 0) parts.push(`${summary.retained} kept as-is`);
+
+  if (parts.length === 0) return 'This revision changes no existing work.';
+  return `${parts.join(', ')}.`;
+}
+
+// reconcileRunsNote names the Runs attached to work that is about to be
+// cancelled, so a cancellation never quietly discards a run's results (FR-154).
+export function reconcileRunsNote(preview) {
+  const runs = preview?.affected_run_ids || [];
+  if (runs.length === 0) return '';
+  return `${runs.length} run(s) are attached to the affected work. Their records are kept.`;
+}
+
 function groupChangeLine(change) {
   if (change.kind === 'moved') {
     return `Group moved: ${change.title} (position ${change.from_index + 1} → ${change.to_index + 1})`;
@@ -236,6 +287,11 @@ export class WorkspacePlanPage {
         if (approvalID) void this.materialize(approvalID);
       });
     }
+
+    const confirmReconcile = this.el('#plan-reconcile-confirm');
+    if (confirmReconcile) {
+      confirmReconcile.addEventListener('click', () => void this.confirmReconciliation());
+    }
   }
 
   handleEditorAction(event) {
@@ -308,6 +364,10 @@ export class WorkspacePlanPage {
         activity: []
       }));
       this.render(plan, activity.activity || []);
+      // Reconciliation is loaded after the plan renders rather than as part of
+      // it: most plans are not revisions, so this request usually 4xxs, and
+      // waiting on it would delay the page everyone else sees.
+      await this.loadReconciliation();
     } catch (error) {
       this.renderMissing(error);
     }
@@ -575,6 +635,94 @@ export class WorkspacePlanPage {
       this.materialization = { approval_id: approvalID, error: error.message, task_ids: [] };
       this.renderMaterialization();
       this.announce(`Could not create the approved work: ${error.message}`, 'error');
+      return null;
+    }
+  }
+
+  // loadReconciliation fetches what approving this revision would do to work
+  // that already exists.
+  //
+  // A plan with nothing to reconcile answers with an error rather than an empty
+  // preview, and that is not a failure worth showing: most plans are not
+  // revisions. The panel simply stays hidden.
+  async loadReconciliation() {
+    this.reconciliation = null;
+    try {
+      this.reconciliation = await this.request(`${this.basePath()}/reconcile`);
+    } catch {
+      this.reconciliation = null;
+    }
+    this.renderReconciliation();
+  }
+
+  // renderReconciliation shows the affected work before the approval, not after.
+  //
+  // The confirm button appears only when the server says a separate
+  // confirmation is required. Rendering it for an additive revision would ask
+  // for a decision that has no consequence, and train the user to click past
+  // the one that does (FR-77, FR-154).
+  renderReconciliation() {
+    const panel = this.el('#plan-reconcile-panel');
+    if (!panel) return;
+    const preview = this.reconciliation;
+    panel.hidden = !preview;
+    if (!preview) return;
+
+    const summary = this.el('#plan-reconcile-summary');
+    if (summary) summary.textContent = reconcileSummary(preview);
+
+    const list = this.el('#plan-reconcile-list');
+    if (list) {
+      list.innerHTML = (preview.entries || [])
+        .map(
+          entry =>
+            `<li class="plan-reconcile-item plan-reconcile-${escapeHtml(entry.disposition || '')}">` +
+            `${escapeHtml(reconcileLine(entry))}</li>`
+        )
+        .join('');
+    }
+
+    const runs = this.el('#plan-reconcile-runs');
+    if (runs) {
+      const note = reconcileRunsNote(preview);
+      runs.textContent = note;
+      runs.hidden = note === '';
+    }
+
+    const actions = this.el('#plan-reconcile-actions');
+    if (actions) actions.hidden = !preview.requires_confirmation;
+
+    const status = this.el('#plan-reconcile-status');
+    if (status && !preview.requires_confirmation) {
+      status.textContent = 'This revision only adds work, so no extra confirmation is needed.';
+    }
+  }
+
+  // confirmReconciliation records acceptance of the exact preview on screen.
+  //
+  // The token comes from the preview the user is looking at. If work moved
+  // since it was drawn, the server refuses and the panel reloads to show what
+  // is true now — which is the whole point of confirming a preview rather than
+  // confirming an intention (FR-77).
+  async confirmReconciliation() {
+    const preview = this.reconciliation;
+    if (!preview?.token) return null;
+
+    try {
+      const confirmation = await this.request(`${this.basePath()}/reconcile`, {
+        method: 'POST',
+        body: JSON.stringify({ token: preview.token })
+      });
+      this.announce('Confirmed. Approving this version will now apply these changes.');
+      await this.loadReconciliation();
+      return confirmation;
+    } catch (error) {
+      const status = this.el('#plan-reconcile-status');
+      if (status) status.textContent = error.message;
+      this.announce(`Could not confirm: ${error.message}`, 'error');
+      // Reload so the panel shows the state that refused the confirmation,
+      // rather than leaving the stale preview on screen next to its own error.
+      await this.loadReconciliation();
       return null;
     }
   }

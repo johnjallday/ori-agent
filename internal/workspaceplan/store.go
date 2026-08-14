@@ -108,6 +108,23 @@ type Store interface {
 	PlanForTask(ctx context.Context, workspaceID, taskID string) (*TaskLink, error)
 	PlanForRun(ctx context.Context, workspaceID, runID string) (*RunLink, error)
 
+	// RecordReconciliation stores a user's confirmation of one exact
+	// reconciliation preview. Re-confirming the same token returns the
+	// original record rather than a second one, so a retried click cannot
+	// authorize a second reconciliation (FR-77).
+	RecordReconciliation(ctx context.Context, reconciliation *Reconciliation) (*Reconciliation, error)
+	// GetReconciliation returns a confirmation by its preview token, or
+	// ErrReconciliationNotFound.
+	GetReconciliation(ctx context.Context, workspaceID, planID, token string) (*Reconciliation, error)
+	// ConsumeReconciliation marks a confirmation as spent. It fails with
+	// ErrReconciliationConsumed if it was already applied, which is what makes
+	// a confirmation single-use under a concurrent retry.
+	ConsumeReconciliation(ctx context.Context, workspaceID, planID, token string, at time.Time) error
+	// ListReconciliations returns a Plan's confirmation history, newest first.
+	// Applied and unapplied records both stay: the record of what was agreed
+	// is history, not bookkeeping to clean up (FR-116).
+	ListReconciliations(ctx context.Context, workspaceID, planID string) ([]*Reconciliation, error)
+
 	// AppendActivity writes one append-only history entry and returns it with
 	// its assigned sequence (FR-15, FR-80).
 	AppendActivity(ctx context.Context, activity Activity) (Activity, error)

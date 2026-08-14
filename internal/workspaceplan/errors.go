@@ -50,6 +50,19 @@ var (
 	// for its declared materialization and execution effect (FR-72).
 	ErrApprovalConsumed = errors.New("plan approval has already been consumed")
 
+	// ErrReconciliationNotFound is returned when no confirmation exists for a
+	// preview token — including the case where the state moved and the token
+	// the caller holds now describes a preview that was never confirmed.
+	ErrReconciliationNotFound = errors.New("plan reconciliation confirmation not found")
+	// ErrReconciliationConsumed is returned when a confirmation has already
+	// been applied (FR-77).
+	ErrReconciliationConsumed = errors.New("plan reconciliation has already been applied")
+	// ErrStalePreview is returned when work changed after a reconciliation
+	// preview was shown. The preview described cancelling Tasks whose state has
+	// since moved, so acting on it could cancel work that has since started
+	// (FR-77).
+	ErrStalePreview = errors.New("plan reconciliation preview is out of date")
+
 	// ErrValidation is returned when Plan content fails typed validation
 	// (FR-41, FR-42).
 	ErrValidation = errors.New("plan content is not valid")
@@ -98,6 +111,9 @@ const (
 	CodeStaleVersion            = ErrorCode("stale_version")
 	CodeApprovalMismatch        = ErrorCode("approval_mismatch")
 	CodeApprovalConsumed        = ErrorCode("approval_consumed")
+	CodeReconcileNotFound       = ErrorCode("reconciliation_not_found")
+	CodeReconcileConsumed       = ErrorCode("reconciliation_consumed")
+	CodeStalePreview            = ErrorCode("stale_preview")
 	CodeValidationFailed        = ErrorCode("validation_failed")
 	CodeLimitExceeded           = ErrorCode("limit_exceeded")
 	CodeUnavailableCapability   = ErrorCode("unavailable_capability")
@@ -137,6 +153,9 @@ var codeBySentinel = []struct {
 	{ErrStaleVersion, CodeStaleVersion},
 	{ErrApprovalMismatch, CodeApprovalMismatch},
 	{ErrApprovalConsumed, CodeApprovalConsumed},
+	{ErrReconciliationNotFound, CodeReconcileNotFound},
+	{ErrReconciliationConsumed, CodeReconcileConsumed},
+	{ErrStalePreview, CodeStalePreview},
 	{ErrValidation, CodeValidationFailed},
 	{ErrLimitExceeded, CodeLimitExceeded},
 	{ErrUnavailableCapability, CodeUnavailableCapability},
