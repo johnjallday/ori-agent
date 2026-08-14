@@ -140,6 +140,37 @@ func diskDesignation(t *testing.T, fileStore *agentworkspace.FileStore, workspac
 	return strings.TrimSpace(ws.Designation)
 }
 
+// listedPersonalHQIDs returns every workspace the ordinary list read reports as
+// the Personal HQ, so tests can prove a second one never appears.
+func listedPersonalHQIDs(t *testing.T, handler *Handler) []string {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces", nil)
+	w := httptest.NewRecorder()
+	handler.HandleWorkspaces(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 listing workspaces, got %d: %s", w.Code, w.Body.String())
+	}
+	var payload struct {
+		Workspaces []session.Workspace `json:"workspaces"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode workspace list: %v", err)
+	}
+
+	var designated []string
+	var walk func(items []session.Workspace)
+	walk = func(items []session.Workspace) {
+		for i := range items {
+			if items[i].IsPersonalHQ() {
+				designated = append(designated, items[i].ID)
+			}
+			walk(items[i].Children)
+		}
+	}
+	walk(payload.Workspaces)
+	return designated
+}
+
 // hydratedDesignation reads the workspace back through the ordinary workspace
 // detail endpoint, proving a stale SQLite-only object cannot hide the result.
 func hydratedDesignation(t *testing.T, handler *Handler, workspaceID string) string {
@@ -234,6 +265,99 @@ func TestHandleWorkspaceImportRestoresExportedPersonalHQDesignation(t *testing.T
 	}
 	if got := hydratedDesignation(t, harness.handler, fixture.ID); got != string(session.WorkspaceDesignationPersonalHQ) {
 		t.Fatalf("expected hydrated workspace read to report %q, got %q", session.WorkspaceDesignationPersonalHQ, got)
+	}
+}
+
+func TestHandleWorkspaceImportPreservesExistingPersonalHQOnConflict(t *testing.T) {
+	harness, cleanup := newPersonalHQImportHarness(t)
+	defer cleanup()
+
+	// The current HQ, established the ordinary way: import a marked export
+	// while nothing is designated.
+	current := exportedWorkspaceFixture("ws-current-hq", "Current HQ", string(session.WorkspaceDesignationPersonalHQ))
+	currentRoot := writeExportedWorkspaceFixture(t, filepath.Join(t.TempDir(), "current-hq-export"), current)
+	if code, resp := harness.importFolder(t, currentRoot); code != http.StatusCreated {
+		t.Fatalf("expected 201 establishing the current hq, got %d: %#v", code, resp)
+	}
+	if status := harness.status(t); !status.Valid || status.WorkspaceID != current.ID {
+		t.Fatalf("expected %q to be the current hq before the conflict, got %#v", current.ID, harness.status(t))
+	}
+
+	// A second export that also claims to be an HQ.
+	incoming := exportedWorkspaceFixture("ws-incoming-hq", "Incoming HQ", string(session.WorkspaceDesignationPersonalHQ))
+	incomingRoot := writeExportedWorkspaceFixture(t, filepath.Join(t.TempDir(), "incoming-hq-export"), incoming)
+
+	code, resp := harness.importFolder(t, incomingRoot)
+	if code != http.StatusCreated {
+		t.Fatalf("expected the conflicting import to still succeed with 201, got %d: %#v", code, resp)
+	}
+	if restored, _ := resp["restored_from_config"].(bool); !restored {
+		t.Fatalf("expected restored_from_config=true on conflict, got %#v", resp["restored_from_config"])
+	}
+	folder, ok := resp["folder"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected folder object in response, got %#v", resp)
+	}
+	if got := folder["id"]; got != incoming.ID {
+		t.Fatalf("expected imported workspace id %q, got %#v", incoming.ID, got)
+	}
+	if got, _ := folder["designation"].(string); got != "" {
+		t.Fatalf("expected the conflicting import to respond undesignated, got %q", got)
+	}
+
+	// The authoritative designation never moved.
+	status := harness.status(t)
+	if !status.Valid || status.WorkspaceID != current.ID {
+		t.Fatalf("expected the original hq %q to survive the conflict, got %#v", current.ID, status)
+	}
+
+	// Exactly one workspace carries the projection, on disk and through reads.
+	if got := diskDesignation(t, harness.fileStore, current.ID); got != string(session.WorkspaceDesignationPersonalHQ) {
+		t.Fatalf("expected the original hq folder to stay marked, got %q", got)
+	}
+	if got := diskDesignation(t, harness.fileStore, incoming.ID); got != "" {
+		t.Fatalf("expected the imported folder to stay unmarked locally, got %q", got)
+	}
+	if got := hydratedDesignation(t, harness.handler, incoming.ID); got != "" {
+		t.Fatalf("expected hydrated read of the imported workspace to be undesignated, got %q", got)
+	}
+	if designated := listedPersonalHQIDs(t, harness.handler); len(designated) != 1 || designated[0] != current.ID {
+		t.Fatalf("expected exactly one designated workspace (%q) in list reads, got %#v", current.ID, designated)
+	}
+
+	// The rest of the restore is untouched by the refused designation.
+	restored, err := harness.handler.store.GetWorkspace(context.Background(), incoming.ID)
+	if err != nil {
+		t.Fatalf("expected the imported workspace to be stored: %v", err)
+	}
+	if restored.Name != incoming.Name {
+		t.Fatalf("expected imported workspace name %q, got %q", incoming.Name, restored.Name)
+	}
+	localFolder, err := harness.fileStore.GetFolderPath(incoming.ID)
+	if err != nil {
+		t.Fatalf("GetFolderPath(%s): %v", incoming.ID, err)
+	}
+	refs, err := decodeDirectoryReferences(restored.DirectoryReferencesJSON)
+	if err != nil {
+		t.Fatalf("decode directory references: %v", err)
+	}
+	if len(refs) != 1 || cleanWorkspaceSyncPath(refs[0].Path) != cleanWorkspaceSyncPath(localFolder) {
+		t.Fatalf("expected the imported workspace's directory reference rebased onto %q, got %#v", localFolder, refs)
+	}
+
+	// AR7: the imported workspace stays eligible, so the existing explicit
+	// "use as my HQ" action — the only caller of Replace — still works.
+	if _, err := harness.service.Replace(context.Background(), userprofile.LocalUserID, incoming.ID); err != nil {
+		t.Fatalf("expected the explicit replace action to accept the imported workspace: %v", err)
+	}
+	if status := harness.status(t); !status.Valid || status.WorkspaceID != incoming.ID {
+		t.Fatalf("expected the explicit replacement to move the hq to %q, got %#v", incoming.ID, status)
+	}
+	if got := diskDesignation(t, harness.fileStore, incoming.ID); got != string(session.WorkspaceDesignationPersonalHQ) {
+		t.Fatalf("expected the explicitly designated folder to be marked, got %q", got)
+	}
+	if got := diskDesignation(t, harness.fileStore, current.ID); got != "" {
+		t.Fatalf("expected the previous hq folder to be cleared by the explicit replacement, got %q", got)
 	}
 }
 
