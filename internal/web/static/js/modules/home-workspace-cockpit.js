@@ -1916,11 +1916,11 @@ import {
         state.railState = RAIL_TODAY;
         state.priorContext = null;
         showTodayPanel();
-        announce('The selected workspace is no longer available. Showing Today.');
+        announce('The selected workspace is no longer available. Returned to the workspace map.');
         return;
       }
       showTodayPanel();
-      if (announceChange) announce('Showing Today.');
+      if (announceChange) announce('Selection cleared. Returned to the workspace map.');
       return;
     }
 
