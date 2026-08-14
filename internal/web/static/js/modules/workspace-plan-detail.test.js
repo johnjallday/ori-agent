@@ -1,7 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { activityLine, clarificationLine, WorkspacePlanPage } from './workspace-plan-detail.js';
+import {
+  activityLine,
+  approvalButtonLabel,
+  clarificationLine,
+  diffSummary,
+  WorkspacePlanPage
+} from './workspace-plan-detail.js';
 
 function el(extra = {}) {
   return {
@@ -16,6 +22,15 @@ function el(extra = {}) {
 }
 
 const SELECTORS = [
+  '#plan-review-panel',
+  '#plan-review-version',
+  '#plan-review-objective',
+  '#plan-review-counts',
+  '#plan-review-effects',
+  '#plan-review-blockers',
+  '#plan-approve',
+  '#plan-compare-panel',
+  '#plan-compare-list',
   '#plan-loading',
   '#plan-missing',
   '#plan-content',
@@ -419,6 +434,291 @@ test('reloading does not replace an editor with unsaved changes', async () => {
 
   assert.equal(page.editor.content.groups.length, before, 'a reload discarded unsaved work');
   assert.equal(page.editor.state, 'unsaved');
+});
+
+// --- Review and approval ---------------------------------------------------
+
+// A side-effecting approval never hides behind a generic label (FR-64, FR-65).
+test('the approval button is labelled by what it does', () => {
+  assert.equal(
+    approvalButtonLabel({ action_label: 'Approve and Start', starts_execution: true }),
+    'Approve and Start'
+  );
+  assert.equal(
+    approvalButtonLabel({ action_label: 'Approve and Create Tasks' }),
+    'Approve and Create Tasks'
+  );
+  // A contract with no label is a bug, not a reason to render a bare
+  // "Approve" over an action that starts agents.
+  assert.equal(approvalButtonLabel({ starts_execution: true }), 'Approve and Start');
+  assert.equal(approvalButtonLabel({}), 'Approve and Create Tasks');
+  assert.equal(approvalButtonLabel(null), 'Approve and Create Tasks');
+});
+
+// The diff says what happened, not only that something did (FR-36).
+test('diffSummary distinguishes added, removed, moved, and modified', () => {
+  const lines = diffSummary({
+    objective: { before: 'Old', after: 'New' },
+    in_scope: [{ kind: 'added', value: 'archival' }],
+    groups: [{ kind: 'moved', title: 'Prepare', from_index: 1, to_index: 0 }],
+    items: [
+      { kind: 'added', description: 'A new task' },
+      { kind: 'removed', description: 'A dropped task' },
+      { kind: 'modified', description: 'A changed task', fields: ['assignee'] },
+      {
+        kind: 'moved',
+        description: 'A reordered task',
+        from_index: 0,
+        to_index: 1,
+        group_id: 'grp-1',
+        from_group_id: 'grp-1'
+      }
+    ],
+    execution: { before: 'step_through', after: 'auto' },
+    preconditions: [{ kind: 'added', value: 'safe_branch' }]
+  }).join('\n');
+
+  assert.match(lines, /Objective changed to “New”/);
+  assert.match(lines, /Scope added: archival/);
+  assert.match(lines, /Group moved: Prepare \(position 2 → 1\)/);
+  assert.match(lines, /Task added: A new task/);
+  assert.match(lines, /Task removed: A dropped task/);
+  assert.match(lines, /Task modified: A changed task \(assignee\)/);
+  assert.match(lines, /Task reordered: A reordered task/);
+  assert.match(lines, /Execution mode changed from step_through to auto/);
+  assert.match(lines, /Enforced precondition added: safe_branch/);
+});
+
+test('diffSummary reports an identical comparison plainly', () => {
+  assert.deepEqual(diffSummary({ identical: true }), ['No approval-relevant changes']);
+  assert.deepEqual(diffSummary(null), ['No approval-relevant changes']);
+});
+
+test('an item moving between groups reads differently from a reorder', () => {
+  const across = diffSummary({
+    items: [
+      { kind: 'moved', description: 'Switch traffic', group_id: 'grp-1', from_group_id: 'grp-2' }
+    ]
+  })[0];
+  assert.match(across, /moved to another group/);
+});
+
+function contractFixture(overrides = {}) {
+  return {
+    plan_id: 'plan_1',
+    version: 2,
+    content_hash: 'hash-abc',
+    objective: 'Migrate reporting safely',
+    task_count: 2,
+    group_count: 1,
+    dependency_count: 1,
+    unassigned: 1,
+    effect: 'create_tasks',
+    action_label: 'Approve and Create Tasks',
+    starts_execution: false,
+    approvable: true,
+    blockers: [],
+    effects: [
+      'Create 2 workspace task(s) in 1 group(s)',
+      'Nothing starts running until you start it'
+    ],
+    ...overrides
+  };
+}
+
+test('the review contract renders every effect approval authorizes', async () => {
+  const contract = contractFixture();
+  const { page, doc } = makePage();
+  await page.reload();
+
+  page.fetchImpl = async () => jsonResponse(contract);
+  await page.loadReviewContract(2);
+
+  assert.equal(doc.elements['#plan-review-panel'].hidden, false);
+  assert.equal(doc.elements['#plan-review-version'].textContent, 'Version 2');
+  assert.match(doc.elements['#plan-review-counts'].textContent, /2 task\(s\) in 1 group\(s\)/);
+  assert.match(doc.elements['#plan-review-effects'].innerHTML, /Create 2 workspace task\(s\)/);
+  assert.equal(doc.elements['#plan-approve'].textContent, 'Approve and Create Tasks');
+  assert.equal(doc.elements['#plan-approve'].disabled, false);
+  assert.equal(doc.elements['#plan-review-blockers'].hidden, true);
+});
+
+// A blocked approval is disabled with a reason rather than failing on click
+// (FR-48).
+test('blockers disable the approval action and say why', async () => {
+  const contract = contractFixture({
+    approvable: false,
+    blockers: ['Agent "builder" is no longer available; reassign that task or leave it unassigned']
+  });
+  const { page, doc } = makePage();
+  await page.reload();
+
+  page.fetchImpl = async () => jsonResponse(contract);
+  await page.loadReviewContract(2);
+
+  assert.equal(doc.elements['#plan-approve'].disabled, true);
+  assert.equal(doc.elements['#plan-review-blockers'].hidden, false);
+  assert.match(doc.elements['#plan-review-blockers'].innerHTML, /no longer available/);
+});
+
+test('an auto plan warns that approval starts work', async () => {
+  const contract = contractFixture({
+    action_label: 'Approve and Start',
+    starts_execution: true,
+    effect: 'create_tasks_and_start',
+    effects: [
+      'Create 2 workspace task(s) in 1 group(s)',
+      'Start running eligible tasks automatically'
+    ]
+  });
+  const { page, doc } = makePage();
+  await page.reload();
+
+  page.fetchImpl = async () => jsonResponse(contract);
+  await page.loadReviewContract(2);
+
+  assert.equal(doc.elements['#plan-approve'].textContent, 'Approve and Start');
+  assert.equal(doc.elements['#plan-approve'].dataset.startsExecution, 'true');
+  assert.match(doc.elements['#plan-review-effects'].innerHTML, /Start running/);
+});
+
+// Approval binds to the exact version and hash the contract carried (FR-61).
+test('approving sends the reviewed version and hash', async () => {
+  let sent = null;
+  const { page, doc } = makePage();
+  await page.reload();
+
+  page.contract = contractFixture();
+  page.fetchImpl = async (url, options = {}) => {
+    if (url.endsWith('/approvals') && options.method === 'POST') {
+      sent = JSON.parse(options.body);
+      return jsonResponse({ id: 'apr_1' }, true, 201);
+    }
+    if (url.endsWith('/activity')) return jsonResponse({ activity: [] });
+    return jsonResponse(planFixture());
+  };
+
+  await page.approve({ name: 'jj' });
+
+  assert.equal(sent.version, 2);
+  assert.equal(sent.content_hash, 'hash-abc');
+  assert.equal(sent.effect, 'create_tasks');
+  assert.ok(sent.idempotency_key.includes('hash-abc'), sent.idempotency_key);
+  assert.match(
+    doc.elements['#plan-detail-status'].textContent,
+    /nothing starts until you start it/
+  );
+});
+
+test('an auto approval says work will start', async () => {
+  const { page, doc } = makePage();
+  await page.reload();
+
+  page.contract = contractFixture({ starts_execution: true, effect: 'create_tasks_and_start' });
+  page.fetchImpl = async (url, options = {}) => {
+    if (url.endsWith('/approvals') && options.method === 'POST') {
+      return jsonResponse({ id: 'apr_1' }, true, 201);
+    }
+    if (url.endsWith('/activity')) return jsonResponse({ activity: [] });
+    return jsonResponse(planFixture());
+  };
+
+  await page.approve();
+  assert.match(doc.elements['#plan-detail-status'].textContent, /Work will start/);
+});
+
+// A stale approval reloads the real current version rather than retrying
+// against one that moved (FR-69).
+test('a stale approval reloads instead of retrying', async () => {
+  let reloaded = false;
+  const { page, doc } = makePage();
+  await page.reload();
+
+  page.contract = contractFixture();
+  page.fetchImpl = async (url, options = {}) => {
+    if (url.endsWith('/approvals') && options.method === 'POST') {
+      return jsonResponse(
+        { code: 'approval_mismatch', message: 'this plan changed since you reviewed it.' },
+        false,
+        409
+      );
+    }
+    if (url.endsWith('/activity')) return jsonResponse({ activity: [] });
+    if (url.includes('/versions/')) return jsonResponse(contractFixture({ version: 3 }));
+    reloaded = true;
+    return jsonResponse({ ...planFixture(), current_version: 3 });
+  };
+
+  const result = await page.approve();
+
+  assert.equal(result, null);
+  assert.ok(reloaded, 'a stale approval did not reload the plan');
+  assert.match(doc.elements['#plan-detail-status'].textContent, /changed since you reviewed it/);
+  assert.equal(page.contract.version, 3, 'the reviewer was not moved to the current version');
+});
+
+test('requesting changes clears the review panel and says the version is kept', async () => {
+  const { page, doc } = makePage();
+  await page.reload();
+
+  page.contract = contractFixture();
+  page.fetchImpl = async (url, options = {}) => {
+    if (url.endsWith('/decision') && options.method === 'POST') {
+      return jsonResponse({ ...planFixture(), status: 'draft' });
+    }
+    if (url.endsWith('/activity')) return jsonResponse({ activity: [] });
+    return jsonResponse(planFixture());
+  };
+
+  await page.decide('request_changes', 'too wide');
+
+  assert.equal(page.contract, null);
+  assert.equal(doc.elements['#plan-review-panel'].hidden, true);
+  assert.match(doc.elements['#plan-detail-status'].textContent, /reviewed version is kept/);
+});
+
+test('rejecting says the version stays in history', async () => {
+  const { page, doc } = makePage();
+  await page.reload();
+
+  page.contract = contractFixture();
+  page.fetchImpl = async (url, options = {}) => {
+    if (url.endsWith('/decision') && options.method === 'POST') {
+      return jsonResponse({ ...planFixture(), status: 'draft' });
+    }
+    if (url.endsWith('/activity')) return jsonResponse({ activity: [] });
+    return jsonResponse(planFixture());
+  };
+
+  await page.decide('reject', 'wrong approach');
+  assert.match(doc.elements['#plan-detail-status'].textContent, /kept in the plan’s history/);
+});
+
+test('comparing versions renders the change summary', async () => {
+  const { page, doc } = makePage();
+  await page.reload();
+
+  page.fetchImpl = async () =>
+    jsonResponse({
+      from: 1,
+      to: 2,
+      items: [{ kind: 'added', description: 'A new task' }]
+    });
+
+  await page.compareVersions(1, 2);
+
+  assert.equal(doc.elements['#plan-compare-panel'].hidden, false);
+  assert.match(doc.elements['#plan-compare-list'].innerHTML, /Task added: A new task/);
+});
+
+test('approving without a loaded contract asks for the review first', async () => {
+  const { page, doc } = makePage();
+  await page.reload();
+  page.contract = null;
+
+  const result = await page.approve();
+  assert.equal(result, null);
+  assert.match(doc.elements['#plan-detail-status'].textContent, /Load the review before approving/);
 });
 
 test('a missing plan renders the not-found state', async () => {

@@ -833,6 +833,15 @@ func registerWorkspacePlanRoutes(mux *http.ServeMux, s *Server) {
 		// token; POST asks the planner to draft or to ask questions. Neither
 		// creates work (FR-29, FR-30).
 		mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/draft", s.Handlers.WorkspacePlans.PlanDraft)
+		// Review and approval. The version routes snapshot and read immutable
+		// versions; approvals bind to one exact version and its content hash,
+		// and this is the only route that can grant one (FR-31, FR-59, FR-70).
+		mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/versions", s.Handlers.WorkspacePlans.PlanVersions)
+		mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/versions/{version}", s.Handlers.WorkspacePlans.PlanVersion)
+		mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/compare", s.Handlers.WorkspacePlans.PlanCompare)
+		mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/decision", s.Handlers.WorkspacePlans.PlanDecision)
+		mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/approvals", s.Handlers.WorkspacePlans.PlanApprovals)
+		mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/revise-approved", s.Handlers.WorkspacePlans.PlanReviseApproved)
 		// GET discloses what a revision would replace; POST performs it. The
 		// user sees the collateral before it happens (FR-56).
 		mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/revision", s.Handlers.WorkspacePlans.PlanRevision)

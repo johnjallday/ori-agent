@@ -341,6 +341,16 @@ func (s *Service) Edit(ctx context.Context, workspaceID, planID string, input Ed
 	if plan.Status.Terminal() {
 		return nil, fmt.Errorf("%w: a %s plan cannot be edited", ErrInvalidTransition, plan.Status)
 	}
+	// A version under review is read-only until the reviewer chooses to edit
+	// it, and choosing to edit means requesting changes — which retains the
+	// reviewed version and returns the plan to draft. Allowing a quiet edit
+	// here would let the draft drift away from the version someone is looking
+	// at (FR-37, FR-152).
+	if plan.Status == StatusInReview {
+		return nil, fmt.Errorf(
+			"%w: version %d is under review. Request changes first — the reviewed version is kept",
+			ErrInvalidTransition, plan.CurrentVersion)
+	}
 
 	content := markUserEdits(plan.Draft, input.Content)
 	// An unspecified execution mode means "leave it as it is", not "reset it".

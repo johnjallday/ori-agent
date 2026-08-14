@@ -485,6 +485,252 @@ func writeGenerationError(w http.ResponseWriter, err error) {
 	writeError(w, err)
 }
 
+// PlanVersions dispatches /api/workspaces/{workspaceID}/plans/{planID}/versions.
+//
+// GET lists retained versions; POST snapshots the current draft as a new
+// immutable one (FR-31, FR-35).
+func (h *Handler) PlanVersions(w http.ResponseWriter, r *http.Request) {
+	workspaceID, planID := requireWorkspaceAndPlanID(w, r)
+	if workspaceID == "" || planID == "" {
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		versions, err := h.service.Versions(r.Context(), workspaceID, planID)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		orihttp.Success(w, map[string]any{
+			"plan_id":  planID,
+			"versions": versions,
+			// Stating the cap alongside the data keeps the UI from guessing
+			// when to warn about it (FR-31).
+			"max_versions": MaxReviewVersions,
+		})
+
+	case http.MethodPost:
+		var req struct {
+			Actor  string `json:"actor,omitempty"`
+			Intent string `json:"intent,omitempty"`
+		}
+		if r.ContentLength > 0 && !orihttp.ParseJSONBody(w, r, &req) {
+			return
+		}
+		version, err := h.service.RequestReview(r.Context(), workspaceID, planID, ReviewInput{
+			Actor:      req.Actor,
+			Intent:     RevisionIntent(strings.TrimSpace(req.Intent)),
+			Validation: h.availability(r.Context(), workspaceID),
+		})
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		orihttp.Created(w, version)
+
+	default:
+		orihttp.MethodNotAllowed(w)
+	}
+}
+
+// PlanVersion handles GET .../versions/{version} — the read-only review
+// contract for one exact version (FR-62, FR-152).
+func (h *Handler) PlanVersion(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodGet) {
+		return
+	}
+	workspaceID, planID := requireWorkspaceAndPlanID(w, r)
+	if workspaceID == "" || planID == "" {
+		return
+	}
+	number, ok := requireVersionNumber(w, r, "version")
+	if !ok {
+		return
+	}
+
+	contract, err := h.service.BuildReviewContract(
+		r.Context(), workspaceID, planID, number, h.availability(r.Context(), workspaceID))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	orihttp.Success(w, contract)
+}
+
+// PlanCompare handles GET .../compare?from=N&to=M (FR-35, FR-36).
+func (h *Handler) PlanCompare(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodGet) {
+		return
+	}
+	workspaceID, planID := requireWorkspaceAndPlanID(w, r)
+	if workspaceID == "" || planID == "" {
+		return
+	}
+
+	from, ok := requireVersionQuery(w, r, "from")
+	if !ok {
+		return
+	}
+	to, ok := requireVersionQuery(w, r, "to")
+	if !ok {
+		return
+	}
+
+	diff, err := h.service.Compare(r.Context(), workspaceID, planID, from, to)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	orihttp.Success(w, diff)
+}
+
+// PlanDecision handles POST .../decision — request changes or reject, both of
+// which retain the reviewed version (FR-37, FR-66, FR-67).
+func (h *Handler) PlanDecision(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+	workspaceID, planID := requireWorkspaceAndPlanID(w, r)
+	if workspaceID == "" || planID == "" {
+		return
+	}
+
+	var req struct {
+		Decision string `json:"decision"`
+		Version  int    `json:"version,omitempty"`
+		Reason   string `json:"reason,omitempty"`
+		Actor    string `json:"actor,omitempty"`
+	}
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+
+	input := DecisionInput{Actor: req.Actor, Version: req.Version, Reason: req.Reason}
+	var (
+		plan *Plan
+		err  error
+	)
+	switch strings.TrimSpace(strings.ToLower(req.Decision)) {
+	case "request_changes":
+		plan, err = h.service.RequestChanges(r.Context(), workspaceID, planID, input)
+	case "reject":
+		plan, err = h.service.Reject(r.Context(), workspaceID, planID, input)
+	default:
+		writeError(w, fmt.Errorf(
+			"%w: decision must be request_changes or reject", ErrValidation))
+		return
+	}
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	orihttp.Success(w, newPlanResponse(plan))
+}
+
+// PlanApprovals dispatches .../approvals.
+//
+// GET returns the approval history; POST records a user's approval of one exact
+// version. Approval is a user action and this is the only route to it (FR-59,
+// FR-70, FR-79).
+func (h *Handler) PlanApprovals(w http.ResponseWriter, r *http.Request) {
+	workspaceID, planID := requireWorkspaceAndPlanID(w, r)
+	if workspaceID == "" || planID == "" {
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		approvals, err := h.service.Approvals(r.Context(), workspaceID, planID)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		orihttp.Success(w, map[string]any{"plan_id": planID, "approvals": approvals})
+
+	case http.MethodPost:
+		var req struct {
+			Version     int    `json:"version"`
+			ContentHash string `json:"content_hash"`
+			Effect      string `json:"effect"`
+			UserID      string `json:"user_id,omitempty"`
+			UserName    string `json:"user_name,omitempty"`
+			// IdempotencyKey lets a retried request return the original
+			// approval rather than a second one (FR-73).
+			IdempotencyKey string `json:"idempotency_key"`
+		}
+		if !orihttp.ParseJSONBody(w, r, &req) {
+			return
+		}
+
+		approval, err := h.service.Approve(r.Context(), workspaceID, planID, ApprovalRequest{
+			Version:        req.Version,
+			ContentHash:    req.ContentHash,
+			Effect:         ApprovalEffect(strings.TrimSpace(req.Effect)),
+			UserID:         req.UserID,
+			UserName:       req.UserName,
+			IdempotencyKey: req.IdempotencyKey,
+		})
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		orihttp.Created(w, approval)
+
+	default:
+		orihttp.MethodNotAllowed(w)
+	}
+}
+
+// PlanReviseApproved handles POST .../revise-approved — start a new working
+// draft from an approved Plan, classified as additive, corrective, or
+// superseding (FR-38, FR-39).
+func (h *Handler) PlanReviseApproved(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+	workspaceID, planID := requireWorkspaceAndPlanID(w, r)
+	if workspaceID == "" || planID == "" {
+		return
+	}
+
+	var req struct {
+		Intent string `json:"intent"`
+		Actor  string `json:"actor,omitempty"`
+	}
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+
+	plan, err := h.service.EditApproved(r.Context(), workspaceID, planID,
+		RevisionIntent(strings.TrimSpace(req.Intent)), req.Actor)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	orihttp.Success(w, newPlanResponse(plan))
+}
+
+func requireVersionNumber(w http.ResponseWriter, r *http.Request, name string) (int, bool) {
+	raw := strings.TrimSpace(r.PathValue(name))
+	number, err := strconv.Atoi(raw)
+	if err != nil || number < 1 {
+		orihttp.BadRequest(w, name+" must be a positive version number")
+		return 0, false
+	}
+	return number, true
+}
+
+func requireVersionQuery(w http.ResponseWriter, r *http.Request, name string) (int, bool) {
+	raw := strings.TrimSpace(r.URL.Query().Get(name))
+	number, err := strconv.Atoi(raw)
+	if err != nil || number < 1 {
+		orihttp.BadRequest(w, name+" must be a positive version number")
+		return 0, false
+	}
+	return number, true
+}
+
 // PlanRevision dispatches /api/workspaces/{workspaceID}/plans/{planID}/revision.
 //
 // GET discloses what a revision would replace without changing anything; POST

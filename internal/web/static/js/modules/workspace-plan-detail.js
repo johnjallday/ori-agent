@@ -47,6 +47,75 @@ export function clarificationLine(question) {
 // lost tab costs a sentence rather than a session.
 export const AUTOSAVE_DELAY_MS = 4000;
 
+// approvalButtonLabel returns the exact wording the primary action must carry.
+// It comes from the server's contract rather than being derived here, so the
+// label and the behavior behind it cannot drift apart (FR-64, FR-65).
+export function approvalButtonLabel(contract) {
+  const label = String(contract?.action_label || '').trim();
+  if (label) return label;
+  // A contract with no label is a bug, not a reason to render a generic
+  // "Approve" over an action that might start agents (PRD 6.3).
+  return contract?.starts_execution ? 'Approve and Start' : 'Approve and Create Tasks';
+}
+
+// diffSummary turns a version comparison into one line per change, saying what
+// happened rather than only that something did (FR-36).
+export function diffSummary(diff) {
+  if (!diff || diff.identical) return ['No approval-relevant changes'];
+
+  const lines = [];
+  if (diff.objective) {
+    lines.push(`Objective changed to “${diff.objective.after}”`);
+  }
+  for (const change of diff.in_scope || []) {
+    lines.push(`Scope ${change.kind}: ${change.value}`);
+  }
+  for (const change of diff.non_goals || []) {
+    lines.push(`Non-goal ${change.kind}: ${change.value}`);
+  }
+  for (const change of diff.groups || []) {
+    lines.push(groupChangeLine(change));
+  }
+  for (const change of diff.items || []) {
+    lines.push(itemChangeLine(change));
+  }
+  for (const change of diff.artifacts || []) {
+    lines.push(`Artifact ${change.kind}: ${change.label}${fieldSuffix(change.fields)}`);
+  }
+  for (const change of diff.validations || []) {
+    lines.push(`Validation ${change.kind}: ${change.label}${fieldSuffix(change.fields)}`);
+  }
+  if (diff.execution) {
+    lines.push(`Execution mode changed from ${diff.execution.before} to ${diff.execution.after}`);
+  }
+  for (const change of diff.preconditions || []) {
+    lines.push(`Enforced precondition ${change.kind}: ${change.value}`);
+  }
+  return lines.length > 0 ? lines : ['No approval-relevant changes'];
+}
+
+function groupChangeLine(change) {
+  if (change.kind === 'moved') {
+    return `Group moved: ${change.title} (position ${change.from_index + 1} → ${change.to_index + 1})`;
+  }
+  return `Group ${change.kind}: ${change.title}${fieldSuffix(change.fields)}`;
+}
+
+function itemChangeLine(change) {
+  if (change.kind === 'moved') {
+    const across = change.from_group_id && change.from_group_id !== change.group_id;
+    return across
+      ? `Task moved to another group: ${change.description}`
+      : `Task reordered: ${change.description} (position ${change.from_index + 1} → ${change.to_index + 1})`;
+  }
+  return `Task ${change.kind}: ${change.description}${fieldSuffix(change.fields)}`;
+}
+
+function fieldSuffix(fields) {
+  if (!fields || fields.length === 0) return '';
+  return ` (${fields.join(', ')})`;
+}
+
 // activityLine renders one lifecycle history entry. Transitions read as a move
 // between two named states; audit entries read as what happened (FR-15, FR-80).
 export function activityLine(entry) {
@@ -73,6 +142,9 @@ export class WorkspacePlanPage {
       options.fetch || (typeof fetch !== 'undefined' ? fetch.bind(globalThis) : null);
     this.plan = null;
     this.editor = null;
+    // contract is the loaded review contract. Approval binds to the version
+    // and hash it carries, so it is held rather than re-derived.
+    this.contract = null;
     // availableAgents stays null until the roster is known. Null means "not
     // checked"; an empty array means "this workspace has no agents". Treating
     // the first as the second would flag every assignment as unavailable.
@@ -116,6 +188,23 @@ export class WorkspacePlanPage {
     const discard = this.el('#plan-conflict-discard');
     if (discard) {
       discard.addEventListener('click', () => void this.discardConflict());
+    }
+
+    const requestReview = this.el('#plan-request-review');
+    if (requestReview) {
+      requestReview.addEventListener('click', () => void this.requestReview());
+    }
+    const approve = this.el('#plan-approve');
+    if (approve) {
+      approve.addEventListener('click', () => void this.approve());
+    }
+    const requestChanges = this.el('#plan-request-changes');
+    if (requestChanges) {
+      requestChanges.addEventListener('click', () => void this.decide('request_changes'));
+    }
+    const reject = this.el('#plan-reject');
+    if (reject) {
+      reject.addEventListener('click', () => void this.decide('reject'));
     }
   }
 
@@ -309,6 +398,177 @@ export class WorkspacePlanPage {
       this.announce(`Could not save: ${error.message}`, 'error');
       return null;
     }
+  }
+
+  // --- Review and approval -------------------------------------------------
+
+  // requestReview snapshots the current draft as an immutable version and
+  // loads its review contract.
+  async requestReview(actor = '') {
+    try {
+      const version = await this.request(`${this.basePath()}/versions`, {
+        method: 'POST',
+        body: JSON.stringify({ actor })
+      });
+      this.announce(`Version ${version.version} is ready for review`);
+      await this.reload();
+      await this.loadReviewContract(version.version);
+      return version;
+    } catch (error) {
+      this.announce(`Could not request review: ${error.message}`, 'error');
+      return null;
+    }
+  }
+
+  // loadReviewContract fetches everything the user must see before approving.
+  // The contract is rendered as-is; the page never composes its own summary of
+  // effects, because a summary that drifts from the behavior is worse than no
+  // summary (FR-62, FR-63).
+  async loadReviewContract(version) {
+    try {
+      const contract = await this.request(`${this.basePath()}/versions/${version}`);
+      this.contract = contract;
+      this.renderReviewContract(contract);
+      return contract;
+    } catch (error) {
+      this.announce(`Could not load the review: ${error.message}`, 'error');
+      return null;
+    }
+  }
+
+  renderReviewContract(contract) {
+    const panel = this.el('#plan-review-panel');
+    if (panel) panel.hidden = !contract;
+    if (!contract) return;
+
+    this.setText('#plan-review-version', `Version ${contract.version}`);
+    this.setText('#plan-review-objective', contract.objective || '');
+    this.setText(
+      '#plan-review-counts',
+      `${contract.task_count} task(s) in ${contract.group_count} group(s) · ` +
+        `${contract.dependency_count} dependency(ies) · ${contract.unassigned} unassigned`
+    );
+
+    const effects = this.el('#plan-review-effects');
+    if (effects) {
+      effects.innerHTML = (contract.effects || [])
+        .map(effect => `<li>${escapeHtml(effect)}</li>`)
+        .join('');
+    }
+
+    // The primary action says what it does. A side-effecting approval never
+    // hides behind a generic label (FR-64, FR-65).
+    const approve = this.el('#plan-approve');
+    if (approve) {
+      approve.textContent = approvalButtonLabel(contract);
+      approve.disabled = !contract.approvable;
+      approve.dataset.startsExecution = String(Boolean(contract.starts_execution));
+    }
+
+    // Blockers disable the action with a reason rather than letting it fail on
+    // click (FR-48).
+    const blockers = this.el('#plan-review-blockers');
+    if (blockers) {
+      const list = contract.blockers || [];
+      blockers.hidden = list.length === 0;
+      blockers.innerHTML = list.map(reason => `<li>${escapeHtml(reason)}</li>`).join('');
+    }
+  }
+
+  // approve binds to the exact version and hash the contract carried. The
+  // server rejects it if either moved, which is what makes "the version you
+  // read is the version you approved" true (FR-61, FR-69).
+  async approve(user = {}) {
+    if (!this.contract) {
+      this.announce('Load the review before approving', 'error');
+      return null;
+    }
+    try {
+      const approval = await this.request(`${this.basePath()}/approvals`, {
+        method: 'POST',
+        body: JSON.stringify({
+          version: this.contract.version,
+          content_hash: this.contract.content_hash,
+          effect: this.contract.effect,
+          user_id: user.id || '',
+          user_name: user.name || '',
+          // One key per contract view, so a double-click replays the original
+          // approval instead of creating a second one (FR-73).
+          idempotency_key: this.approvalKey()
+        })
+      });
+      this.announce(
+        this.contract.starts_execution
+          ? `Approved version ${this.contract.version}. Work will start once tasks are created.`
+          : `Approved version ${this.contract.version}. Tasks will be created; nothing starts until you start it.`
+      );
+      await this.reload();
+      return approval;
+    } catch (error) {
+      if (error.code === 'approval_mismatch' || error.code === 'stale_version') {
+        // The plan moved under the reviewer. Reload so they read the real
+        // current version rather than retrying against a stale one.
+        this.announce(`${error.message} Reloading the current version…`, 'error');
+        await this.reload();
+        if (this.plan?.current_version) {
+          await this.loadReviewContract(this.plan.current_version);
+        }
+        return null;
+      }
+      this.announce(`Could not approve: ${error.message}`, 'error');
+      return null;
+    }
+  }
+
+  // approvalKey is stable for one contract view, so retrying the same approval
+  // is idempotent while a genuinely new review gets its own key.
+  approvalKey() {
+    if (!this.contract) return '';
+    return `${this.planId}:${this.contract.version}:${this.contract.content_hash}`;
+  }
+
+  async decide(decision, reason = '', actor = '') {
+    try {
+      const plan = await this.request(`${this.basePath()}/decision`, {
+        method: 'POST',
+        body: JSON.stringify({ decision, reason, actor, version: this.contract?.version || 0 })
+      });
+      this.contract = null;
+      const panel = this.el('#plan-review-panel');
+      if (panel) panel.hidden = true;
+      this.announce(
+        decision === 'reject'
+          ? 'Version rejected. It is kept in the plan’s history.'
+          : 'Changes requested. The reviewed version is kept and the plan is editable again.'
+      );
+      this.plan = plan;
+      await this.reload();
+      return plan;
+    } catch (error) {
+      this.announce(`Could not record the decision: ${error.message}`, 'error');
+      return null;
+    }
+  }
+
+  async compareVersions(from, to) {
+    try {
+      const diff = await this.request(`${this.basePath()}/compare?from=${from}&to=${to}`);
+      this.renderDiff(diff);
+      return diff;
+    } catch (error) {
+      this.announce(`Could not compare versions: ${error.message}`, 'error');
+      return null;
+    }
+  }
+
+  renderDiff(diff) {
+    const panel = this.el('#plan-compare-panel');
+    if (panel) panel.hidden = false;
+    const list = this.el('#plan-compare-list');
+    if (!list) return;
+    list.innerHTML = diffSummary(diff)
+      .map(line => `<li>${escapeHtml(line)}</li>`)
+      .join('');
   }
 
   // discardConflict abandons the user's version in favour of the one that won.

@@ -74,7 +74,8 @@
               <div class="plan-editor-meta">
                 <span id="plan-save-state" class="plan-save-state" data-state="saved" data-tone="neutral">✓ All changes saved</span>
                 <button type="button" id="plan-add-group" class="plan-editor-btn">Add task group</button>
-                <button type="button" id="plan-save" class="plan-editor-btn plan-editor-btn-primary">Save draft</button>
+                <button type="button" id="plan-save" class="plan-editor-btn">Save draft</button>
+                <button type="button" id="plan-request-review" class="plan-editor-btn plan-editor-btn-primary">Request review</button>
               </div>
             </div>
 
@@ -93,6 +94,38 @@
             <p id="plan-editor-empty" class="plan-editor-empty" hidden>
               No task groups yet. Add one, or ask Ori to draft the plan.
             </p>
+          </section>
+
+          <!-- The approval contract. It reads like what it is: a statement of
+               the next side effects, with the primary action labelled by what
+               it actually does (PRD 6.3, FR-63, FR-64). -->
+          <section id="plan-review-panel" class="plan-card plan-review-panel"
+                   aria-labelledby="plan-review-heading" hidden>
+            <div class="plan-review-head">
+              <h2 id="plan-review-heading" class="plan-card-title">Review and approve</h2>
+              <span id="plan-review-version" class="plan-review-version"></span>
+            </div>
+
+            <p id="plan-review-objective" class="plan-review-objective"></p>
+            <p id="plan-review-counts" class="plan-review-counts"></p>
+
+            <h3 class="plan-review-subheading">Approving this version will:</h3>
+            <ul id="plan-review-effects" class="plan-review-effects"></ul>
+
+            <ul id="plan-review-blockers" class="plan-review-blockers" hidden></ul>
+
+            <div class="plan-review-actions">
+              <button type="button" id="plan-approve" class="plan-editor-btn plan-approve-btn">
+                Approve and Create Tasks
+              </button>
+              <button type="button" id="plan-request-changes" class="plan-editor-btn">Request changes</button>
+              <button type="button" id="plan-reject" class="plan-editor-btn">Reject</button>
+            </div>
+          </section>
+
+          <section id="plan-compare-panel" class="plan-card" aria-labelledby="plan-compare-heading" hidden>
+            <h2 id="plan-compare-heading" class="plan-card-title">What changed</h2>
+            <ul id="plan-compare-list" class="plan-compare-list"></ul>
           </section>
 
           <section id="plan-activity-card" class="plan-card" aria-labelledby="plan-activity-heading">
@@ -409,6 +442,86 @@
     .plan-editor-empty {
       margin: 0.75rem 0 0;
       color: var(--bs-secondary-color, #6c757d);
+    }
+
+    .plan-review-panel {
+      border-color: var(--bs-primary, #0d6efd);
+    }
+
+    .plan-review-head {
+      display: flex;
+      gap: 0.75rem;
+      align-items: baseline;
+      justify-content: space-between;
+      flex-wrap: wrap;
+    }
+
+    .plan-review-version {
+      font-size: 0.85rem;
+      border: 1px solid var(--bs-border-color, #dee2e6);
+      border-radius: 999px;
+      padding: 0.1rem 0.6rem;
+      white-space: nowrap;
+    }
+
+    .plan-review-objective {
+      margin: 0.35rem 0 0;
+      font-weight: 600;
+    }
+
+    .plan-review-counts {
+      margin: 0.2rem 0 0.75rem;
+      font-size: 0.85rem;
+      color: var(--bs-secondary-color, #6c757d);
+    }
+
+    .plan-review-subheading {
+      font-size: 0.9rem;
+      margin: 0 0 0.35rem;
+    }
+
+    .plan-review-effects,
+    .plan-compare-list {
+      margin: 0 0 0.75rem;
+      padding-left: 1.1rem;
+      display: grid;
+      gap: 0.25rem;
+      font-size: 0.9rem;
+    }
+
+    .plan-review-blockers {
+      margin: 0 0 0.75rem;
+      padding-left: 1.1rem;
+      display: grid;
+      gap: 0.25rem;
+      font-size: 0.9rem;
+      color: #842029;
+    }
+
+    .plan-review-actions {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+
+    /* The approval action is deliberately not a generic green button: its
+       label states the effect, and it is disabled when something blocks it
+       (PRD 6.3). */
+    .plan-approve-btn {
+      background: var(--bs-primary, #0d6efd);
+      border-color: var(--bs-primary, #0d6efd);
+      color: #fff;
+      font-weight: 600;
+    }
+
+    .plan-approve-btn[data-starts-execution='true'] {
+      background: #b45309;
+      border-color: #b45309;
+    }
+
+    .plan-approve-btn[disabled] {
+      opacity: 0.5;
+      cursor: not-allowed;
     }
 
     .plan-loading,

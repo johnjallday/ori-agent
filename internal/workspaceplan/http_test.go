@@ -3,6 +3,7 @@ package workspaceplan
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -39,6 +40,13 @@ func newTestAPIWithModel(t *testing.T, model PlanModel) (*httptest.Server, *Serv
 	mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/clarifications/{clarificationID}", handler.AnswerClarification)
 	mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/snapshots", handler.DraftSnapshots)
 	mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/snapshots/{snapshotID}/recover", handler.RecoverDraftSnapshot)
+	mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/versions", handler.PlanVersions)
+	mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/versions/{version}", handler.PlanVersion)
+	mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/compare", handler.PlanCompare)
+	mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/decision", handler.PlanDecision)
+	mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/approvals", handler.PlanApprovals)
+	mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/revise-approved", handler.PlanReviseApproved)
+	mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/revision", handler.PlanRevision)
 
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
@@ -549,6 +557,275 @@ func TestAPIDraftingRoutesRejectWrongMethods(t *testing.T) {
 		{http.MethodGet, base + "/clarifications/clr-1"},
 		{http.MethodPost, base + "/snapshots"},
 		{http.MethodGet, base + "/snapshots/snap-1/recover"},
+	} {
+		status, body := doJSON(t, server, tc.method, tc.path, "")
+		if status != http.StatusMethodNotAllowed {
+			t.Errorf("%s %s status = %d, want 405 (%v)", tc.method, tc.path, status, body)
+		}
+	}
+}
+
+// --- Review and approval API (FR-59 through FR-79) -------------------------
+
+// seedReviewablePlan creates a plan through the API whose draft is complete
+// enough to become a version.
+func seedReviewablePlan(t *testing.T, server *httptest.Server, mode ExecutionMode) string {
+	t.Helper()
+
+	_, created := doJSON(t, server, http.MethodPost, "/api/workspaces/ws-1/plans", `{"request":"Plan A"}`)
+	planID, _ := created["id"].(string)
+
+	body := fmt.Sprintf(`{
+	  "objective":"Migrate reporting safely",
+	  "revision":0,
+	  "content":{
+	    "execution":{"mode":%q},
+	    "groups":[{"id":"grp-1","title":"Prepare","items":[
+	      {"id":"itm-1","description":"Snapshot staging"},
+	      {"id":"itm-2","description":"Verify checksums","depends_on":["itm-1"]}]}]}
+	}`, mode)
+	if status, resp := doJSON(t, server, http.MethodPatch,
+		"/api/workspaces/ws-1/plans/"+planID+"/draft", body); status != http.StatusOK {
+		t.Fatalf("seed draft status = %d (%v)", status, resp)
+	}
+	return planID
+}
+
+func TestAPIReviewApprovalRoundTrip(t *testing.T) {
+	server, _ := newTestAPI(t)
+	planID := seedReviewablePlan(t, server, ExecutionStepThrough)
+	base := "/api/workspaces/ws-1/plans/" + planID
+
+	status, version := doJSON(t, server, http.MethodPost, base+"/versions", `{"actor":"jj"}`)
+	if status != http.StatusCreated {
+		t.Fatalf("request review status = %d (%v)", status, version)
+	}
+	number := int(version["version"].(float64))
+	hash, _ := version["content_hash"].(string)
+	if number != 1 || hash == "" {
+		t.Fatalf("version = %d hash = %q", number, hash)
+	}
+
+	// The review contract states the exact version, its hash, and every effect.
+	status, contract := doJSON(t, server, http.MethodGet, fmt.Sprintf("%s/versions/%d", base, number), "")
+	if status != http.StatusOK {
+		t.Fatalf("contract status = %d (%v)", status, contract)
+	}
+	if contract["content_hash"] != hash {
+		t.Errorf("contract hash = %v, want %q", contract["content_hash"], hash)
+	}
+	if contract["action_label"] != "Approve and Create Tasks" {
+		t.Errorf("action label = %v", contract["action_label"])
+	}
+	if contract["starts_execution"] != false {
+		t.Errorf("starts_execution = %v, want false for step_through", contract["starts_execution"])
+	}
+	if contract["approvable"] != true {
+		t.Errorf("contract is not approvable: %v", contract["blockers"])
+	}
+
+	// Approving binds to that exact hash.
+	status, approval := doJSON(t, server, http.MethodPost, base+"/approvals", fmt.Sprintf(
+		`{"version":%d,"content_hash":%q,"effect":"create_tasks","user_name":"jj","idempotency_key":"key-1"}`,
+		number, hash))
+	if status != http.StatusCreated {
+		t.Fatalf("approve status = %d (%v)", status, approval)
+	}
+	if approval["content_hash"] != hash {
+		t.Errorf("approval hash = %v", approval["content_hash"])
+	}
+
+	// The approval appears in history (FR-79).
+	_, history := doJSON(t, server, http.MethodGet, base+"/approvals", "")
+	approvals, _ := history["approvals"].([]any)
+	if len(approvals) != 1 {
+		t.Errorf("approval history = %d, want 1", len(approvals))
+	}
+}
+
+// An auto plan's approval says it will start work (FR-64).
+func TestAPIReviewContractLabelsAnAutoPlanAsStarting(t *testing.T) {
+	server, _ := newTestAPI(t)
+	planID := seedReviewablePlan(t, server, ExecutionAuto)
+	base := "/api/workspaces/ws-1/plans/" + planID
+
+	_, version := doJSON(t, server, http.MethodPost, base+"/versions", `{}`)
+	number := int(version["version"].(float64))
+
+	_, contract := doJSON(t, server, http.MethodGet, fmt.Sprintf("%s/versions/%d", base, number), "")
+	if contract["action_label"] != "Approve and Start" {
+		t.Errorf("action label = %v, want Approve and Start", contract["action_label"])
+	}
+	if contract["starts_execution"] != true {
+		t.Errorf("starts_execution = %v, want true", contract["starts_execution"])
+	}
+}
+
+// A stale browser tab cannot approve: the hash it holds no longer matches
+// (FR-68, FR-69).
+func TestAPIRejectsAStaleApproval(t *testing.T) {
+	server, _ := newTestAPI(t)
+	planID := seedReviewablePlan(t, server, ExecutionStepThrough)
+	base := "/api/workspaces/ws-1/plans/" + planID
+
+	_, version := doJSON(t, server, http.MethodPost, base+"/versions", `{}`)
+	number := int(version["version"].(float64))
+
+	status, body := doJSON(t, server, http.MethodPost, base+"/approvals", fmt.Sprintf(
+		`{"version":%d,"content_hash":"stale-hash","effect":"create_tasks","idempotency_key":"key-1"}`,
+		number))
+	if status != http.StatusConflict {
+		t.Fatalf("stale approval status = %d, want 409 (%v)", status, body)
+	}
+	if body["code"] != string(CodeApprovalMismatch) {
+		t.Errorf("code = %v, want %s", body["code"], CodeApprovalMismatch)
+	}
+}
+
+// A client cannot ask for more than the version declares (FR-63).
+func TestAPIRejectsAnApprovalEffectTheVersionDoesNotDeclare(t *testing.T) {
+	server, _ := newTestAPI(t)
+	planID := seedReviewablePlan(t, server, ExecutionStepThrough)
+	base := "/api/workspaces/ws-1/plans/" + planID
+
+	_, version := doJSON(t, server, http.MethodPost, base+"/versions", `{}`)
+	number := int(version["version"].(float64))
+	hash, _ := version["content_hash"].(string)
+
+	status, body := doJSON(t, server, http.MethodPost, base+"/approvals", fmt.Sprintf(
+		`{"version":%d,"content_hash":%q,"effect":"create_tasks_and_start","idempotency_key":"key-1"}`,
+		number, hash))
+	if status != http.StatusConflict {
+		t.Fatalf("status = %d, want 409 (%v)", status, body)
+	}
+	if body["code"] != string(CodeApprovalMismatch) {
+		t.Errorf("code = %v", body["code"])
+	}
+}
+
+func TestAPIRequestChangesAndRejectRetainTheVersion(t *testing.T) {
+	server, _ := newTestAPI(t)
+	planID := seedReviewablePlan(t, server, ExecutionStepThrough)
+	base := "/api/workspaces/ws-1/plans/" + planID
+
+	doJSON(t, server, http.MethodPost, base+"/versions", `{}`)
+	status, plan := doJSON(t, server, http.MethodPost, base+"/decision",
+		`{"decision":"request_changes","reason":"too wide"}`)
+	if status != http.StatusOK {
+		t.Fatalf("request changes status = %d (%v)", status, plan)
+	}
+	if plan["status"] != string(StatusDraft) {
+		t.Errorf("status = %v, want draft", plan["status"])
+	}
+
+	_, listed := doJSON(t, server, http.MethodGet, base+"/versions", "")
+	versions, _ := listed["versions"].([]any)
+	if len(versions) != 1 {
+		t.Fatalf("versions = %d, want the reviewed one retained", len(versions))
+	}
+	retained, _ := versions[0].(map[string]any)
+	if retained["status"] != string(VersionChangesRequested) {
+		t.Errorf("version status = %v", retained["status"])
+	}
+	if listed["max_versions"] != float64(MaxReviewVersions) {
+		t.Errorf("max_versions = %v", listed["max_versions"])
+	}
+
+	// An unknown decision is refused rather than guessed at.
+	if status, _ := doJSON(t, server, http.MethodPost, base+"/decision",
+		`{"decision":"approve"}`); status != http.StatusUnprocessableEntity {
+		t.Errorf("unknown decision status = %d, want 422", status)
+	}
+}
+
+func TestAPIComparesTwoVersions(t *testing.T) {
+	server, _ := newTestAPI(t)
+	planID := seedReviewablePlan(t, server, ExecutionStepThrough)
+	base := "/api/workspaces/ws-1/plans/" + planID
+
+	doJSON(t, server, http.MethodPost, base+"/versions", `{}`)
+	doJSON(t, server, http.MethodPost, base+"/decision", `{"decision":"request_changes"}`)
+
+	// Change the plan, then snapshot a second version.
+	if status, resp := doJSON(t, server, http.MethodPatch, base+"/draft", `{
+	  "objective":"Migrate reporting safely",
+	  "revision":1,
+	  "content":{"execution":{"mode":"step_through"},
+	    "groups":[{"id":"grp-1","title":"Prepare","items":[
+	      {"id":"itm-1","description":"Snapshot staging","assignee":"builder"}]}]}
+	}`); status != http.StatusOK {
+		t.Fatalf("second draft status = %d (%v)", status, resp)
+	}
+	doJSON(t, server, http.MethodPost, base+"/versions", `{}`)
+
+	status, diff := doJSON(t, server, http.MethodGet, base+"/compare?from=1&to=2", "")
+	if status != http.StatusOK {
+		t.Fatalf("compare status = %d (%v)", status, diff)
+	}
+	if diff["identical"] == true {
+		t.Error("two different versions compared as identical")
+	}
+	items, _ := diff["items"].([]any)
+	if len(items) == 0 {
+		t.Fatalf("compare reported no item changes: %v", diff)
+	}
+
+	// A malformed comparison is refused rather than defaulted.
+	if status, _ := doJSON(t, server, http.MethodGet, base+"/compare?from=abc&to=2", ""); status != http.StatusBadRequest {
+		t.Errorf("bad compare status = %d, want 400", status)
+	}
+}
+
+func TestAPIReviseApprovedRequiresAnIntent(t *testing.T) {
+	server, service := newTestAPI(t)
+	ctx := context.Background()
+	planID := seedReviewablePlan(t, server, ExecutionStepThrough)
+	base := "/api/workspaces/ws-1/plans/" + planID
+
+	_, version := doJSON(t, server, http.MethodPost, base+"/versions", `{}`)
+	number := int(version["version"].(float64))
+	hash, _ := version["content_hash"].(string)
+	doJSON(t, server, http.MethodPost, base+"/approvals", fmt.Sprintf(
+		`{"version":%d,"content_hash":%q,"effect":"create_tasks","idempotency_key":"key-1"}`, number, hash))
+
+	// Move the plan to approved the way materialization would.
+	if err := service.Store().SetVersionDecision(ctx, "ws-1", planID, number,
+		VersionApproved, "jj", "", service.Now()); err != nil {
+		t.Fatalf("mark approved: %v", err)
+	}
+	if _, err := service.Transition(ctx, "ws-1", planID, TransitionInput{
+		To: StatusApproved, Source: SourceUser, Actor: "jj",
+	}); err != nil {
+		t.Fatalf("transition: %v", err)
+	}
+
+	if status, body := doJSON(t, server, http.MethodPost, base+"/revise-approved",
+		`{"intent":""}`); status != http.StatusUnprocessableEntity {
+		t.Errorf("unclassified revision status = %d, want 422 (%v)", status, body)
+	}
+
+	status, revised := doJSON(t, server, http.MethodPost, base+"/revise-approved",
+		`{"intent":"additive","actor":"jj"}`)
+	if status != http.StatusOK {
+		t.Fatalf("revise status = %d (%v)", status, revised)
+	}
+	if revised["status"] != string(StatusDraft) || revised["draft_intent"] != string(RevisionAdditive) {
+		t.Errorf("revision = %v / %v", revised["status"], revised["draft_intent"])
+	}
+}
+
+func TestAPIReviewRoutesRejectWrongMethods(t *testing.T) {
+	server, _ := newTestAPI(t)
+	planID := seedReviewablePlan(t, server, ExecutionStepThrough)
+	base := "/api/workspaces/ws-1/plans/" + planID
+
+	for _, tc := range []struct{ method, path string }{
+		{http.MethodDelete, base + "/versions"},
+		{http.MethodPost, base + "/versions/1"},
+		{http.MethodPost, base + "/compare"},
+		{http.MethodGet, base + "/decision"},
+		{http.MethodDelete, base + "/approvals"},
+		{http.MethodGet, base + "/revise-approved"},
 	} {
 		status, body := doJSON(t, server, tc.method, tc.path, "")
 		if status != http.StatusMethodNotAllowed {

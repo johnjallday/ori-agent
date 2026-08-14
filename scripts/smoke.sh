@@ -211,11 +211,90 @@ smoke_drafting() {
   echo "--- Plan drafting smoke passed ---"
 }
 
+smoke_review() {
+  local ws="$1"
+  [[ -n "$ws" ]] || fail "usage: smoke.sh review <base-url> <workspace-id>"
+
+  echo "--- Plan review and approval ($ws) ---"
+
+  local plan
+  plan=$(curl -s -X POST "$BASE_URL/api/workspaces/$ws/plans" \
+    -H 'Content-Type: application/json' \
+    -d '{"request":"Plan the reporting migration"}' | json_field id)
+  [[ -n "$plan" ]] || fail "plan creation returned no id"
+  local base="$BASE_URL/api/workspaces/$ws/plans/$plan"
+
+  curl -s -X PATCH "$base/draft" -H 'Content-Type: application/json' -d '{
+    "objective":"Migrate reporting safely","revision":0,
+    "content":{"execution":{"mode":"step_through"},
+      "groups":[{"id":"grp-1","title":"Prepare","items":[
+        {"id":"itm-1","description":"Snapshot staging"},
+        {"id":"itm-2","description":"Verify checksums","depends_on":["itm-1"]}]}]}}' > /dev/null
+
+  # Snapshot an immutable version.
+  local version hash
+  version=$(curl -s -X POST "$base/versions" -H 'Content-Type: application/json' -d '{"actor":"smoke"}')
+  local number
+  number=$(echo "$version" | json_field version)
+  hash=$(echo "$version" | json_field content_hash)
+  [[ "$number" == "1" ]] || fail "first version number = $number"
+  [[ -n "$hash" ]] || fail "version has no content hash"
+  echo "ok   version 1 snapshotted with a content hash"
+
+  # The review contract states the exact version and every effect.
+  local contract label starts
+  contract=$(curl -s "$base/versions/1")
+  label=$(echo "$contract" | json_field action_label)
+  starts=$(echo "$contract" | json_field starts_execution)
+  [[ "$label" == "Approve and Create Tasks" ]] || fail "action label = '$label'"
+  [[ "$starts" == "False" ]] || fail "step_through plan claims it starts execution: $starts"
+  [[ "$(echo "$contract" | json_field content_hash)" == "$hash" ]] ||
+    fail "contract hash does not match the version"
+  echo "ok   review contract labels the action by its effect"
+
+  # A stale hash cannot approve (FR-69).
+  local stale
+  stale=$(curl -s -X POST "$base/approvals" -H 'Content-Type: application/json' \
+    -d "{\"version\":1,\"content_hash\":\"stale\",\"effect\":\"create_tasks\",\"idempotency_key\":\"k1\"}")
+  [[ "$(echo "$stale" | json_field code)" == "approval_mismatch" ]] ||
+    fail "a stale hash was accepted: $stale"
+  echo "ok   stale approval refused"
+
+  # Asking for more than the version declares is refused (FR-63).
+  local overreach
+  overreach=$(curl -s -X POST "$base/approvals" -H 'Content-Type: application/json' \
+    -d "{\"version\":1,\"content_hash\":\"$hash\",\"effect\":\"create_tasks_and_start\",\"idempotency_key\":\"k2\"}")
+  [[ "$(echo "$overreach" | json_field code)" == "approval_mismatch" ]] ||
+    fail "an undeclared effect was accepted: $overreach"
+  echo "ok   undeclared approval effect refused"
+
+  # The real approval, and a retry that must replay it (FR-73).
+  local first second
+  first=$(curl -s -X POST "$base/approvals" -H 'Content-Type: application/json' \
+    -d "{\"version\":1,\"content_hash\":\"$hash\",\"effect\":\"create_tasks\",\"user_name\":\"smoke\",\"idempotency_key\":\"k3\"}" |
+    json_field id)
+  [[ -n "$first" ]] || fail "approval returned no id"
+  second=$(curl -s -X POST "$base/approvals" -H 'Content-Type: application/json' \
+    -d "{\"version\":1,\"content_hash\":\"$hash\",\"effect\":\"create_tasks\",\"user_name\":\"smoke\",\"idempotency_key\":\"k3\"}" |
+    json_field id)
+  [[ "$first" == "$second" ]] || fail "a retried approval created a second record: $first vs $second"
+  echo "ok   approval recorded and idempotent on retry"
+
+  local approvals
+  approvals=$(curl -s "$base/approvals" |
+    python3 -c 'import sys,json;print(len(json.load(sys.stdin)["approvals"]))')
+  [[ "$approvals" == "1" ]] || fail "approval history = $approvals, want 1"
+  echo "ok   approval appears once in history"
+
+  echo "--- Plan review smoke passed ---"
+}
+
 case "${1:-}" in
 plans) smoke_plans "${3:-}" ;;
 drafting) smoke_drafting "${3:-}" ;;
+review) smoke_review "${3:-}" ;;
 *)
-  echo "usage: $0 {plans|drafting} <base-url> <workspace-id>" >&2
+  echo "usage: $0 {plans|drafting|review} <base-url> <workspace-id>" >&2
   exit 2
   ;;
 esac

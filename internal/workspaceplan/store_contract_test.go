@@ -33,6 +33,18 @@ func forEachStore(t *testing.T, run func(t *testing.T, ctx context.Context, stor
 	})
 }
 
+// openFileTestDB opens a file-backed database, which is the only way to prove
+// something survives a restart: an :memory: database dies with its connection.
+func openFileTestDB(t *testing.T, ctx context.Context, path string) *database.DB {
+	t.Helper()
+	db, err := database.Open(ctx, &database.Config{Path: path, WALMode: false})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	return db
+}
+
 func openPlanTestDB(t *testing.T, ctx context.Context) *database.DB {
 	t.Helper()
 	db, err := database.Open(ctx, &database.Config{InMemory: true, WALMode: false})
