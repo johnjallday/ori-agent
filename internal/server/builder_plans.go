@@ -103,6 +103,37 @@ func (m planTaskMutator) MutateTask(workspaceID, taskID string, fn func(*workspa
 	})
 }
 
+// chatPlanOpener lets chat start a durable Plan without handing it the plan
+// service.
+//
+// It exposes exactly one operation. Chat routes work into a Plan and links to
+// it; every other verb — edit, review, compare, approve — stays on Plan Detail,
+// and the narrowness of this type is what makes that a fact rather than a
+// convention (FR-19, FR-149).
+type chatPlanOpener struct {
+	service *workspaceplan.Service
+}
+
+func (o chatPlanOpener) OpenPlan(ctx context.Context, workspaceID, request, actor string) (string, error) {
+	if o.service == nil {
+		return "", fmt.Errorf("workspace planning is not configured")
+	}
+	plan, err := o.service.Create(ctx, workspaceID, workspaceplan.CreateInput{
+		// The request is stored exactly as the user typed it, because the
+		// clarifying and drafting that follow are about THAT sentence (FR-21).
+		Request: request,
+		Origin: workspaceplan.Origin{
+			Kind:      workspaceplan.OriginChat,
+			Actor:     actor,
+			AgentName: actor,
+		},
+	})
+	if err != nil {
+		return "", err
+	}
+	return plan.ID, nil
+}
+
 // workspacePlanPreflight returns the compiled enforcement behind a Plan's
 // execution preconditions.
 //
@@ -243,6 +274,11 @@ func (b *ServerBuilder) attachWorkspacePlanExecutor() {
 		b.workspacePlanService, b.workspaceStore, options...)
 	b.workspacePlanHandler.SetExecutor(b.workspacePlanExecutor)
 	b.workspacePlanHandler.SetSlots(slots)
+
+	// Chat can now open a durable Plan for work it must not approve inline.
+	if b.chatHandler != nil {
+		b.chatHandler.SetPlanOpener(chatPlanOpener{service: b.workspacePlanService})
+	}
 
 	// Guidance and enforced policy are wired HERE rather than during handler
 	// construction, for the same reason as everything else in this function:

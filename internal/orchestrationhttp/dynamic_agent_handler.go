@@ -106,22 +106,29 @@ func (h *DynamicAgentHandler) DynamicAgentApprovalHandler(w http.ResponseWriter,
 		})
 	}
 
-	resumeResult := any(nil)
-	if req.Approve && ws.PendingPlan != nil && h.orchestrator != nil {
-		if allApproved(ws, ws.PendingPlan.ID) {
-			result, err := h.orchestrator.ResumePendingPlan(r.Context(), ws.ID)
-			if err == nil {
-				resumeResult = result
-			}
-		}
+	// Approving a dynamic agent approves THE AGENT. It no longer resumes the
+	// pending plan's execution.
+	//
+	// Those are two decisions, and merging them meant one click created an
+	// agent and ran a multi-agent workflow with no durable Plan behind it: no
+	// version, no content hash, no record of what was authorized. A user who
+	// meant "yes, that agent may exist" got work they never reviewed. Multi-
+	// agent execution now goes through a Plan approval like everything else
+	// (FR-59, FR-60, FR-149).
+	response := map[string]any{
+		"success":      true,
+		"workspace_id": ws.ID,
+		"request_id":   req.RequestID,
+		// Retained for clients that read it; always nil now.
+		"resume_result": nil,
+	}
+	if req.Approve && ws.PendingPlan != nil && allApproved(ws, ws.PendingPlan.ID) {
+		response["requires_plan"] = true
+		response["plan_reason"] = "Every agent this work needs is approved. " +
+			"Open a plan to review and approve the work itself."
 	}
 
-	orihttp.WriteJSON(w, map[string]any{
-		"success":       true,
-		"workspace_id":  ws.ID,
-		"request_id":    req.RequestID,
-		"resume_result": resumeResult,
-	})
+	orihttp.WriteJSON(w, response)
 }
 
 func allApproved(ws *workspace.Workspace, planID string) bool {

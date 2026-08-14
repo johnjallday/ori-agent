@@ -1494,21 +1494,26 @@ function formatActionReceiptsForChat(receipts) {
     .join('\n\n');
 }
 
+// formatActionPlanForChat renders the inline Action Preview.
+//
+// It reads action_preview, falling back to the legacy action_plan key so a
+// browser holding a cached page keeps working through the rename. The preview
+// carries exactly ONE action now; the numbered-list rendering is gone with it,
+// because a numbered list is what made an ephemeral preview look like a plan.
 function formatActionPlanForChat(data) {
-  const plan = data?.action_plan;
+  const preview = data?.action_preview || data?.action_plan;
   const fallback =
-    typeof data?.response === 'string' ? data.response : 'Action plan is ready for approval.';
-  if (!plan || !Array.isArray(plan.steps) || plan.steps.length === 0) {
+    typeof data?.response === 'string' ? data.response : 'This action is ready for approval.';
+  if (!preview || !Array.isArray(preview.steps) || preview.steps.length === 0) {
     return fallback;
   }
 
-  const lines = plan.steps.map((step, idx) => {
-    const title = step?.title ? String(step.title) : `Step ${idx + 1}`;
-    const details = step?.details ? `\n   ${String(step.details)}` : '';
-    return `${idx + 1}. ${title}${details}`;
-  });
+  const step = preview.steps[0];
+  const title = step?.title ? String(step.title) : 'Run the requested action';
+  const details = step?.details ? `\n${String(step.details)}` : '';
+  const summary = preview.summary || 'Approve to run it, or cancel.';
 
-  return `**Planned Next Actions**\n${lines.join('\n')}\n\n${plan.summary || 'Approve to execute, or edit/cancel.'}`;
+  return `**Next action**\n${title}${details}\n\n${summary}`;
 }
 
 function renderActionPlanControls(planId, originalMessage) {
