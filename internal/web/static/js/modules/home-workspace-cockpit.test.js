@@ -10,8 +10,19 @@ import assert from 'node:assert/strict';
 import {
   VIEW_MAP,
   VIEW_TREE,
+  RAIL_TODAY,
   RAIL_GROUP,
   RAIL_WORKSPACE,
+  RAIL_SUMMARY,
+  RAIL_ASK,
+  PANEL_NONE,
+  PANEL_UPDATES,
+  PANEL_QUESTS,
+  PANEL_CAPTURE,
+  togglePanelState,
+  panelTriggerId,
+  updatesBadgeView,
+  contextRailShouldBeOpen,
   parseViewFromQuery,
   searchForView,
   readCount,
@@ -1234,4 +1245,125 @@ test('askTargetDescription says nothing when there is no target at all', () => {
   assert.deepEqual(askTargetDescription(), { state: 'none', text: '' });
   // A nameless workspace is not a target worth announcing.
   assert.equal(askTargetDescription({ selected: { name: '  ' } }).state, 'none');
+});
+
+// ===========================================================================
+// Updates badge + Quests/context-rail header disclosure state (Issue #334)
+// ===========================================================================
+
+test('updatesBadgeView hides at zero attention rather than showing a 0 (FR15)', () => {
+  const flattened = [{ id: 'a', kind: 'workspace', needs_attention_count: 0 }];
+  const badge = updatesBadgeView(flattened, null);
+  assert.equal(badge.count, 0);
+  assert.equal(badge.visible, false);
+});
+
+test('updatesBadgeView carries the real aggregate attention count when positive (FR15)', () => {
+  // The count is how many WORKSPACES need attention, matching the retired
+  // rail toggle's badge — not a sum of each workspace's own attention count.
+  const flattened = [
+    { id: 'a', kind: 'workspace', needs_attention_count: 2 },
+    { id: 'b', kind: 'workspace', needs_attention_count: 1 },
+    { id: 'c', kind: 'workspace', needs_attention_count: 0 }
+  ];
+  const badge = updatesBadgeView(flattened, null);
+  assert.equal(badge.count, 2);
+  assert.equal(badge.visible, true);
+});
+
+test('updatesBadgeView never lets an unavailable source read as a fabricated 0', () => {
+  // No workspace here reports an attention field at all, so the underlying
+  // signal is unknown — the badge must still resolve to a real (hidden) 0
+  // rather than throwing, and must never invent a positive count.
+  const badge = updatesBadgeView([{ id: 'a', kind: 'workspace' }], null);
+  assert.equal(badge.count, 0);
+  assert.equal(badge.visible, false);
+});
+
+test('contextRailShouldBeOpen: a bare Today state always stays closed, never for attention or Progression (FR41-FR42)', () => {
+  // The point of this test is what contextRailShouldBeOpen does NOT take as
+  // input: unlike the retired railShouldBeOpen, it has no attention count or
+  // Progression/#questLog signal to consult in the first place.
+  assert.equal(contextRailShouldBeOpen(RAIL_TODAY), false);
+});
+
+test('contextRailShouldBeOpen: a real selection opens the rail (FR43-FR44)', () => {
+  assert.equal(contextRailShouldBeOpen(RAIL_WORKSPACE), true);
+  assert.equal(contextRailShouldBeOpen(RAIL_GROUP), true);
+  assert.equal(contextRailShouldBeOpen(RAIL_SUMMARY), true);
+  assert.equal(contextRailShouldBeOpen(RAIL_ASK), true);
+});
+
+test('togglePanelState: activating a closed trigger opens only that panel (FR7)', () => {
+  assert.equal(togglePanelState(PANEL_NONE, PANEL_UPDATES), PANEL_UPDATES);
+  assert.equal(togglePanelState(PANEL_NONE, PANEL_QUESTS), PANEL_QUESTS);
+  assert.equal(togglePanelState(PANEL_NONE, PANEL_CAPTURE), PANEL_CAPTURE);
+});
+
+test('togglePanelState: activating the SAME open trigger closes it (FR7)', () => {
+  assert.equal(togglePanelState(PANEL_UPDATES, PANEL_UPDATES), PANEL_NONE);
+  assert.equal(togglePanelState(PANEL_QUESTS, PANEL_QUESTS), PANEL_NONE);
+  assert.equal(togglePanelState(PANEL_CAPTURE, PANEL_CAPTURE), PANEL_NONE);
+});
+
+test('togglePanelState: activating a DIFFERENT trigger replaces whichever was open (FR8-FR9)', () => {
+  assert.equal(togglePanelState(PANEL_UPDATES, PANEL_QUESTS), PANEL_QUESTS);
+  assert.equal(togglePanelState(PANEL_QUESTS, PANEL_UPDATES), PANEL_UPDATES);
+  assert.equal(togglePanelState(PANEL_UPDATES, PANEL_CAPTURE), PANEL_CAPTURE);
+  assert.equal(togglePanelState(PANEL_CAPTURE, PANEL_QUESTS), PANEL_QUESTS);
+});
+
+test('panelTriggerId: closing a panel restores focus to the button that owns it (FR11)', () => {
+  assert.equal(panelTriggerId(PANEL_UPDATES), 'cockpitRailToggle');
+  assert.equal(panelTriggerId(PANEL_QUESTS), 'cockpitQuestsToggle');
+  assert.equal(panelTriggerId(PANEL_CAPTURE), 'cockpitCaptureBtn');
+});
+
+test('panelTriggerId: no panel open means no focus restoration target', () => {
+  assert.equal(panelTriggerId(PANEL_NONE), '');
+});
+
+// ===========================================================================
+// Header panel / context rail independence (Issue #334, Group 3)
+//
+// togglePanelState and contextRailShouldBeOpen take entirely separate inputs
+// (state.panel vs. state.railState) and neither reads the other — that
+// separation of inputs IS the guarantee that a header disclosure and a real
+// context selection can never drift into contradicting each other. These
+// tests walk the full transition matrix to document it.
+// ===========================================================================
+
+test('togglePanelState: a full walk through every trigger never leaves more than one panel value at a time', () => {
+  const trail = [
+    PANEL_UPDATES,
+    PANEL_QUESTS,
+    PANEL_QUESTS,
+    PANEL_CAPTURE,
+    PANEL_UPDATES,
+    PANEL_UPDATES
+  ];
+  const expected = [
+    PANEL_UPDATES,
+    PANEL_QUESTS,
+    PANEL_NONE,
+    PANEL_CAPTURE,
+    PANEL_UPDATES,
+    PANEL_NONE
+  ];
+  let panel = PANEL_NONE;
+  const observed = trail.map(requested => {
+    panel = togglePanelState(panel, requested);
+    return panel;
+  });
+  assert.deepEqual(observed, expected);
+});
+
+test('contextRailShouldBeOpen is unaffected by which header panel (if any) is open', () => {
+  // The context rail's open/closed decision takes ONLY railState — proving it
+  // returns the same answer regardless of a hypothetical concurrent panel
+  // value documents that the two state machines cannot influence each other.
+  for (const panel of [PANEL_NONE, PANEL_UPDATES, PANEL_QUESTS, PANEL_CAPTURE]) {
+    assert.equal(contextRailShouldBeOpen(RAIL_TODAY), false, `panel=${panel}`);
+    assert.equal(contextRailShouldBeOpen(RAIL_WORKSPACE), true, `panel=${panel}`);
+  }
 });

@@ -55,6 +55,15 @@
   box-shadow: var(--hc-shadow);
 }
 
+/* Wraps .cockpit-area-header AND the two flyouts below it (dashboard.tmpl),
+   occupying the grid's header row in the header's place. position: relative
+   lives HERE rather than on the header itself, because the flyouts are the
+   header's DOM siblings, not its descendants — an absolutely positioned
+   element's containing block must be an ancestor (Issue #334, FR22/FR29). */
+.cockpit-area-header-zone {
+  position: relative;
+}
+
 .cockpit-area-header {
   display: flex;
   flex-wrap: wrap;
@@ -127,9 +136,12 @@
   outline-offset: -2px;
 }
 
-/* The rail's switch. Shaped like the view toggle it sits beside, but a single
-   button rather than a pair — the rail is open or it is not. */
-.cockpit-rail-toggle {
+/* Updates/Quests: shaped like the view toggle they sit beside, but each is
+   its own button rather than a pair — a flyout is open or it is not
+   (Issue #334). `.cockpit-rail-toggle*` class names are retired; the id
+   `#cockpitRailToggle` stays on the Updates button for compatibility (see
+   dashboard.tmpl), but nothing here keys off it anymore. */
+.cockpit-flyout-toggle {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -144,21 +156,23 @@
   cursor: pointer;
 }
 
-.cockpit-rail-toggle[aria-expanded="true"] {
+.cockpit-flyout-toggle[aria-expanded="true"] {
   background: color-mix(in srgb, var(--hc-signal) 18%, var(--hc-panel));
   color: var(--hc-ink);
   box-shadow: inset 0 -2px 0 var(--hc-signal);
 }
 
-.cockpit-rail-toggle:focus-visible {
+.cockpit-flyout-toggle:focus-visible {
   outline: 2px solid var(--hc-signal);
   outline-offset: -2px;
 }
 
-/* The count is the whole reason to notice a closed rail, so it reads as a
-   count and not as decoration. Hidden at zero by the JS rather than rendered
-   as "0" (FR131: never color alone — the number itself carries the meaning). */
-.cockpit-rail-toggle__count {
+/* The count is the whole reason to look at a closed Updates trigger, so it
+   reads as a count and not as decoration. Hidden at zero by the JS rather
+   than rendered as "0" (FR131: never color alone — the number itself carries
+   the meaning). It is informational only: nothing here — or in the JS —
+   opens the flyout because of it (FR16). */
+.cockpit-flyout-toggle__count {
   min-width: 16px;
   padding: 0 4px;
   border-radius: 8px;
@@ -170,8 +184,154 @@
   text-align: center;
 }
 
-.cockpit-rail-toggle__count[hidden] {
+.cockpit-flyout-toggle__count[hidden] {
   display: none;
+}
+
+/* Quests' compact summary is progress, not an alert — distinct shape from the
+   Updates count above so the two meanings never look interchangeable
+   (FR28, design considerations). Its trigger uses the signal color family
+   instead of the alert color the badge above uses. */
+.cockpit-flyout-toggle--quests .cockpit-flyout-toggle__summary {
+  color: var(--hc-signal);
+  font-weight: 700;
+}
+
+.cockpit-flyout-toggle--quests .cockpit-flyout-toggle__summary:empty {
+  display: none;
+}
+
+/* --------------------------------------------------------------------------
+ * Updates / Quests flyouts (Issue #334)
+ *
+ * Bounded, non-modal overlays anchored to `.cockpit-area-header`
+ * (position: relative, above). They never reserve a layout column or grid
+ * track — opening or closing one is pure CSS, so the Map/Tree workspace
+ * area's measured width is identical whether either is open (FR22, FR29).
+ * No backdrop, no focus trap: the rest of Home stays interactive underneath
+ * (FR23).
+ * ----------------------------------------------------------------------- */
+
+.cockpit-flyout {
+  position: absolute;
+  top: 100%;
+  right: 14px;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  width: min(380px, calc(100% - 28px));
+  max-height: min(70vh, 560px);
+  margin-top: 8px;
+  border: 1px solid var(--hc-line);
+  background: linear-gradient(160deg, var(--hc-panel-raised), var(--hc-panel));
+  box-shadow: var(--hc-shadow);
+}
+
+.cockpit-flyout[hidden] {
+  display: none;
+}
+
+/* Roughly a quarter to a third of the cockpit at desktop widths, and never
+   wider than it needs to be to stay readable (FR49). */
+@container cockpit (min-width: 640px) {
+  .cockpit-flyout {
+    width: clamp(320px, 30cqi, 420px);
+  }
+}
+
+/* Below that, become a full-width sheet anchored under the header row rather
+   than a squeezed desktop-width panel — still dismissible, never full-page
+   (FR50). */
+@container cockpit (max-width: 639.98px) {
+  .cockpit-flyout {
+    right: 0;
+    left: 0;
+    width: auto;
+    margin: 8px 14px 0;
+  }
+}
+
+@supports not (container-type: inline-size) {
+  @media (max-width: 700px) {
+    .cockpit-flyout {
+      right: 0;
+      left: 0;
+      width: auto;
+      margin: 8px 14px 0;
+    }
+  }
+}
+
+.cockpit-flyout-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--hc-line);
+}
+
+.cockpit-flyout-title {
+  margin: 0;
+  color: var(--hc-ink);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.cockpit-flyout-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--hc-line);
+  background: transparent;
+  color: var(--hc-ink-dim);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.cockpit-flyout-close:hover,
+.cockpit-flyout-close:focus-visible {
+  border-color: var(--hc-signal);
+  color: var(--hc-signal);
+  outline: 0;
+}
+
+/* Real content — Daily Brief, Calendar, Activity, quest log — can run long;
+   it scrolls INSIDE the flyout rather than growing it past the viewport
+   (FR24). */
+.cockpit-flyout-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  padding: 12px;
+  overflow-y: auto;
+}
+
+.cockpit-flyout-body > * {
+  flex: 0 0 auto;
+}
+
+/* Same reason as the retired `.cockpit-rail-body .home-section` rule: these
+   carry `min-height: 0` / `overflow: hidden` from a grid-track ancestor
+   elsewhere in the app, which would silently truncate them here. The flyout
+   body takes the scrolling instead. */
+.cockpit-flyout-body .home-section,
+.cockpit-flyout-body .home-daily-brief,
+.cockpit-flyout-body .quest-log {
+  min-height: auto;
+  overflow: visible;
+}
+
+.cockpit-flyout-body .home-section-body,
+.cockpit-flyout-body .quest-log-list {
+  overflow: visible;
 }
 
 /* --------------------------------------------------------------------------
@@ -419,21 +579,10 @@
   flex: 0 0 auto;
 }
 
-/* These carry `min-height: 0` and `overflow: hidden` from the Operations
-   Board, where they were sized by a grid track. In the rail that combination
-   silently truncates them, so the rail must let them be their content height
-   and take the scrolling itself. */
-.cockpit-rail-body .home-section,
-.cockpit-rail-body .home-daily-brief,
-.cockpit-rail-body .quest-log {
-  min-height: auto;
-  overflow: visible;
-}
-
-.cockpit-rail-body .home-section-body,
-.cockpit-rail-body .quest-log-list {
-  overflow: visible;
-}
+/* .home-section / .home-daily-brief / .quest-log no longer render inside
+   `.cockpit-rail-body` — Issue #334 moved that content into the Updates and
+   Quests flyouts (see `.cockpit-flyout-body .home-section` etc. above), which
+   is where their equivalent min-height/overflow rules now live. */
 
 /* .cockpit-rail-footer is gone. It held Add to backlog and Summary, which now
    live in the workspace-area header — the rail closes, and FR88/FR101 want
