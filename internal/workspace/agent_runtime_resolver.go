@@ -140,7 +140,10 @@ func (r *AgentRuntimeResolver) resolveAgentRuntime(agentName, workspaceID, nodeI
 		}
 	}
 	if baseAgent == nil {
-		if globalAgent, ok := r.agentStore.GetAgent(agentName); ok && globalAgent != nil {
+		// Resolved, not looked up exactly: a workspace roster or task assignment
+		// persisted before the identity migration still names the assistant by a
+		// retired name, and it must keep running (FR57).
+		if globalAgent, _, ok := store.ResolveAgent(r.agentStore, agentName); ok {
 			baseAgent = globalAgent
 		}
 	}

@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -125,7 +126,10 @@ func (b *MissionBridge) TriggerMissionRunOpts(ctx context.Context, workspaceID s
 	// is still useful, though less personalized).
 	var basePrompt string
 	if b.agents != nil {
-		if ag, ok := b.agents.GetAgent(agentName); ok && ag != nil {
+		// Resolved so an entry-agent reference stored under a retired assistant
+		// name still contributes its prompt instead of silently falling back to
+		// the less personalized mission framing alone (FR57).
+		if ag, _, ok := store.ResolveAgent(b.agents, agentName); ok {
 			basePrompt = ag.Settings.SystemPrompt
 		}
 	}

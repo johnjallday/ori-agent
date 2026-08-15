@@ -7,6 +7,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/store"
+	"github.com/johnjallday/ori-agent/internal/systemassistant"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -25,7 +26,11 @@ type workspaceEntryLookup interface {
 type executionAgentSource string
 
 const (
-	assistantExecutionAgentName                               = "Ori"
+	// assistantExecutionAgentName is the global fallback partner outside any
+	// workspace. It read "Ori" long after the assistant had been renamed away
+	// from that — a stale copy of an identity that now lives in one shared
+	// contract precisely so this cannot drift again.
+	assistantExecutionAgentName                               = systemassistant.CanonicalName
 	executionAgentSourceSessionBinding   executionAgentSource = "session_binding"
 	executionAgentSourceRequestOverride  executionAgentSource = "request_override"
 	executionAgentSourceWorkspaceEntry   executionAgentSource = "workspace_entry"
@@ -62,7 +67,9 @@ func (r executionAgentResolution) isAssistantMode() bool {
 	if r.Source == executionAgentSourceAssistantDefault {
 		return true
 	}
-	return strings.EqualFold(strings.TrimSpace(r.Name), assistantExecutionAgentName)
+	// A record still carrying a retired name is the same assistant, so it must
+	// take the same path rather than being treated as an ordinary agent.
+	return systemassistant.IsKnownName(r.Name)
 }
 
 // isWorkspaceEntryDefault reports whether the resolution defaulted to the
@@ -76,8 +83,9 @@ func agentExists(agentStore store.Store, agentName string) bool {
 		return true
 	}
 
-	ag, ok := agentStore.GetAgent(strings.TrimSpace(agentName))
-	return ok && ag != nil
+	// Resolved rather than looked up exactly, so a session or roster row written
+	// before the identity migration still finds the assistant (FR57).
+	return store.AgentExists(agentStore, agentName)
 }
 
 // resolveWorkspaceEntryAgentName returns the workspace's entry agent name when
@@ -173,9 +181,12 @@ func resolveExecutionAgentName(
 		return executionAgentResolution{Source: executionAgentSourceUnavailable}
 	}
 
-	if assistant, ok := agentStore.GetAgent(assistantExecutionAgentName); ok && assistant != nil {
+	// Resolve rather than look up exactly: on an install that has not migrated
+	// yet the assistant is still on disk under a retired name, and answering
+	// "unavailable" there would break global chat for no reason.
+	if _, resolved, ok := store.ResolveAgent(agentStore, assistantExecutionAgentName); ok {
 		return executionAgentResolution{
-			Name:   assistantExecutionAgentName,
+			Name:   resolved,
 			Source: executionAgentSourceAssistantDefault,
 		}
 	}

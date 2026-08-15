@@ -9,6 +9,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/store"
+	"github.com/johnjallday/ori-agent/internal/systemassistant"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -283,11 +284,11 @@ func TestServerBuilder_InitializeStorage_EnsuresAssistantFromSystemModel(t *test
 		t.Fatalf("initializeStorage failed: %v", err)
 	}
 
-	// "Ori" now names the app guide; the working system assistant is Workspace
-	// Manager (see internal/agenthttp/system_assistant.go).
-	ag, ok := builder.st.GetAgent("Workspace Manager")
+	// One identity: the guide and the working assistant are both Ask Ori now
+	// (Issue #350). A fresh install must never create a legacy record first.
+	ag, ok := builder.st.GetAgent(systemassistant.CanonicalName)
 	if !ok || ag == nil {
-		t.Fatalf("expected system assistant agent to be created")
+		t.Fatalf("expected system assistant agent to be created, got %v", builder.st.ListAgents())
 	}
 	if ag.Settings.Provider != "claude_code" {
 		t.Fatalf("expected system assistant provider claude_code, got %q", ag.Settings.Provider)
@@ -296,7 +297,7 @@ func TestServerBuilder_InitializeStorage_EnsuresAssistantFromSystemModel(t *test
 		t.Fatalf("expected system assistant model sonnet, got %q", ag.Settings.Model)
 	}
 
-	if _, err := os.Stat(filepath.Join(tempDir, "agents", "Workspace Manager", "agent_settings.json")); err != nil {
+	if _, err := os.Stat(filepath.Join(tempDir, "agents", systemassistant.CanonicalName, "agent_settings.json")); err != nil {
 		t.Fatalf("expected persisted system assistant settings: %v", err)
 	}
 }

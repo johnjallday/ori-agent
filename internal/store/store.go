@@ -38,6 +38,19 @@ type Store interface {
 	Save() error
 }
 
+// AgentRenamer is an optional capability: a store that can move an agent record
+// together with all of its on-disk sidecar state under a new name.
+//
+// It is deliberately not part of Store. Only the real file-backed store can move
+// folders, and widening Store would force every in-memory test double to
+// implement a filesystem operation it has no notion of. Callers type-assert and
+// fall back to a non-destructive copy when the capability is absent.
+type AgentRenamer interface {
+	// RenameAgent moves oldName to newName. It must not overwrite an existing
+	// agent, and must leave the source intact when it returns an error.
+	RenameAgent(oldName, newName string) error
+}
+
 // FirstAgentName returns the first available agent name from the store.
 func FirstAgentName(s Store) string {
 	if s == nil {

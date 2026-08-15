@@ -9,6 +9,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/store"
+	"github.com/johnjallday/ori-agent/internal/systemassistant"
 	"github.com/johnjallday/ori-agent/internal/types"
 )
 
@@ -84,9 +85,12 @@ type templateAgentOverride struct {
 // blankWorkspaceEntryAgentName is the reusable entry agent seeded for the Blank
 // blueprint. Like every other template's entry agent (e.g. "Reaper Producer"),
 // it is a normal global agent reused on name-match across blank workspaces.
-const blankWorkspaceEntryAgentName = "Workspace Manager"
+//
+// A new blank workspace must never mint a record under a retired name (FR59), so
+// this tracks the canonical identity rather than restating it.
+const blankWorkspaceEntryAgentName = systemassistant.CanonicalName
 
-const blankWorkspaceEntryPrompt = "You are the workspace manager. Act as the default front door for this workspace: " +
+const blankWorkspaceEntryPrompt = "You are this workspace's front door: " +
 	"clarify user intent, answer directly when the request only needs shared context, and break work into " +
 	"tasks for specialists when needed."
 

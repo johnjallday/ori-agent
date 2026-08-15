@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/johnjallday/ori-agent/internal/systemassistant"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -116,9 +117,15 @@ func (h *Handler) maybeAutoEnableMCPForPrompt(
 	}
 }
 
+// isSystemAssistantForPreflight reports whether the request is running as the
+// system assistant.
+//
+// This check had silently drifted: it still listed only the pre-2026 names, so
+// after the assistant was renamed to "Workspace Manager" it stopped recognizing
+// the assistant at all. Sharing the one identity contract is what prevents the
+// next rename from doing the same (FR49).
 func isSystemAssistantForPreflight(agentName string) bool {
-	normalized := strings.ToLower(strings.TrimSpace(agentName))
-	return normalized == "ori" || normalized == "__assistant__"
+	return systemassistant.IsKnownName(agentName)
 }
 
 func detectMCPAutoRequirement(prompt string) *mcpAutoRequirement {
