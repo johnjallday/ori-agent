@@ -784,7 +784,32 @@ export class WorkspaceCommandView {
           );
         })
         .join('') +
+      this.plansLinkHTML() +
       '</div>'
+    );
+  }
+
+  // Plans is a LINK, not a fourth view mode.
+  //
+  // The other three swap what this page renders. Plans has its own canonical
+  // pages — /workspaces/{id}/plans and .../plans/{planId} — because a plan is
+  // reviewed, edited, and approved on exactly one surface, and giving it an
+  // in-page mode here would be the second surface this feature exists to
+  // prevent (FR-145, FR-148, FR-149).
+  //
+  // It sits in the same switch so it is where someone looks for a workspace
+  // destination, and it is an <a> so middle-click, cmd-click, and "copy link
+  // address" all behave the way a link should.
+  plansLinkHTML() {
+    const workspaceId = this.page?.workspaceId;
+    if (!workspaceId) return '';
+
+    return (
+      '<a class="ws-cmd-view-btn ws-cmd-view-link" href="/workspaces/' +
+      encodeURIComponent(workspaceId) +
+      '/plans">' +
+      escapeHtml('Plans') +
+      '</a>'
     );
   }
 

@@ -2223,6 +2223,36 @@ test('Operations Map inventory derives counts from existing page data', () => {
   assert.equal(counts.systems, 3);
 });
 
+// Plans must be REACHABLE from the workspace, not just routable.
+//
+// The pages and routes existed for several groups while nothing in the UI
+// linked to them — you had to type the URL. Green tests and a working route
+// are not the same thing as a destination somebody can find, which is exactly
+// the failure the per-group demo checkpoint exists to catch.
+test('the workspace view switch offers Plans as a real link', () => {
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    viewMode: 'details',
+    page: { workspaceId: 'ws-1', notes: [], schedules: [], sessions: [] }
+  });
+
+  const switcher = commandView.commandViewSwitchHTML();
+  assert.match(switcher, /href="\/workspaces\/ws-1\/plans"/);
+  assert.match(switcher, />Plans</);
+  // An anchor, not a button: middle-click, cmd-click, and "copy link address"
+  // must behave the way a link does.
+  assert.match(switcher, /<a class="ws-cmd-view-btn ws-cmd-view-link"/);
+});
+
+// Without a workspace id there is no honest link to build, so none is rendered
+// rather than one pointing at /workspaces//plans.
+test('the Plans link is omitted when the workspace id is unknown', () => {
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, { viewMode: 'details', page: {} });
+
+  assert.ok(!commandView.commandViewSwitchHTML().includes('/plans'));
+});
+
 test('Operations Map controls expose accessible pressed and dialog state', () => {
   const commandView = Object.create(WorkspaceCommandView.prototype);
   Object.assign(commandView, {
