@@ -219,6 +219,22 @@ func ApplyPatch(sharedData map[string]any, patch map[string]any) (map[string]any
 	}
 	if presetValue := strings.TrimSpace(stringValue(patch["preset"])); presetValue != "" {
 		base = toMap(PresetDefaultsForProfile(profileValue, presetValue))
+	} else if rawProfileValue != "" {
+		// The profile changed and the patch named no preset.
+		//
+		// If the stored preset is still the PREVIOUS profile's default, it was
+		// never a choice — it was a default — so the new profile's default
+		// applies. A workspace switched to Software Project must land on
+		// Planner, or FR-134's "retains Planner as its default" is only true
+		// for workspaces created that way.
+		//
+		// A preset the user actually picked is left alone: re-deriving it would
+		// silently undo their choice because they edited a different field.
+		storedPreset := strings.TrimSpace(stringValue(base["preset"]))
+		previousDefault := defaultPresetForProfile(inferProfile(base))
+		if storedPreset == "" || storedPreset == previousDefault {
+			base = toMap(PresetDefaultsForProfile(profileValue, ""))
+		}
 	}
 	merged := mergeMaps(base, patch)
 	settings := decode(merged)
