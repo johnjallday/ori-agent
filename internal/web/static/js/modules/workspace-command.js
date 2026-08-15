@@ -427,7 +427,12 @@ export class WorkspaceCommandView {
       this.agentSelectionInitialized = true;
       this.persistAgentKey(state.agent);
     }
-    if (state.panel === 'tasks') {
+    if (state.panel === 'settings') {
+      // Held until after render() below: the Manager Settings modal mounts the
+      // shared config surface into the container, and opening it here would
+      // mount into markup that render() is about to replace.
+      this._pendingSettingsPanel = true;
+    } else if (state.panel === 'tasks') {
       this.taskDrawerOpen = true;
       if (state.task) this.taskDrawerSelectedId = state.task;
     } else if (state.panel === 'backlog') {
@@ -454,6 +459,12 @@ export class WorkspaceCommandView {
         this.renderBacklogDrawerBody();
       }
     }
+    if (this._pendingSettingsPanel) {
+      this._pendingSettingsPanel = false;
+      // Opened after render() so the shared config surface mounts into the
+      // container that actually survives.
+      this.openStatModal('settings', null);
+    }
     // Normalize the URL to the sanitized state without adding a history entry.
     this.syncURLState({ replace: true });
   }
@@ -465,7 +476,17 @@ export class WorkspaceCommandView {
       // stays clean (no ?mode=details noise) and only an explicit `map` needs
       // to survive reload/sharing.
       mode: this.viewMode === 'map' ? 'map' : null,
-      panel: this.taskDrawerOpen ? 'tasks' : this.backlogDrawerOpen ? 'backlog' : '',
+      // `settings` is last: it names an open modal, so a drawer underneath it
+      // still owns the URL. It is reported at all so that the Plans page's
+      // "Open Workspace Settings" link survives a reload instead of
+      // normalizing itself away the moment it arrives.
+      panel: this.taskDrawerOpen
+        ? 'tasks'
+        : this.backlogDrawerOpen
+          ? 'backlog'
+          : this.statModalSection === 'settings'
+            ? 'settings'
+            : '',
       task: this.taskDrawerOpen
         ? this.taskDrawerSelectedId
         : this.backlogDrawerOpen

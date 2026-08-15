@@ -20,7 +20,12 @@
 
 export const MODE = Object.freeze({ MAP: 'map', DETAILS: 'details' });
 const VALID_MODES = new Set([MODE.MAP, MODE.DETAILS]);
-const VALID_PANELS = new Set(['tasks', 'backlog']);
+// `settings` opens the Manager Settings surface. It is here because the Plans
+// page links to it: a workspace with structured planning off needs to say
+// where to turn it on, and a link that gets sanitized away lands the user on
+// the workspace with a confusing "some link details were out of date" toast
+// and no settings in sight.
+const VALID_PANELS = new Set(['tasks', 'backlog', 'settings']);
 
 /** Parse a query string (with or without a leading `?`) into raw URL state. */
 export function parseWorkspaceURLState(search) {

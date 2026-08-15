@@ -1226,6 +1226,47 @@ test('stat clicks open the in-place manager modal without leaving Command view',
   assert.equal(commandView.detailedView.hidden, true);
 });
 
+// The Plans page's "Open Workspace Settings" link is the only route a user has
+// from "structured planning is off" to the toggle that turns it on. It has to
+// land on the settings surface, and the modal has to open AFTER render() —
+// opening it first mounts the shared config surface into markup render() then
+// throws away, which looks identical to the link doing nothing.
+test('panel=settings opens Manager Settings, after the view has rendered', () => {
+  const sequence = [];
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    viewMode: 'details',
+    taskDrawerOpen: false,
+    backlogDrawerOpen: false,
+    statModalSection: '',
+    _urlBootState: { panel: 'settings' },
+    page: { workspaceId: 'workspace-1', tasks: [] },
+    urlStateContext: () => ({
+      validTaskIds: [],
+      validBacklogIds: [],
+      validAgentKeys: [],
+      validRunTaskIds: []
+    }),
+    applyTicketDeepLink() {},
+    render() {
+      sequence.push('render');
+    },
+    openStatModal(section) {
+      sequence.push('open:' + section);
+      this.statModalSection = section;
+    },
+    syncURLState() {
+      sequence.push('sync');
+    }
+  });
+
+  commandView.applyBootURLState();
+
+  assert.deepEqual(sequence, ['render', 'open:settings', 'sync']);
+  // Nothing was sanitized away, so no "link details were out of date" toast.
+  assert.equal(commandView.currentURLState().panel, 'settings');
+});
+
 test('rail more toggles command-local management without leaving Command view', () => {
   const railRoot = makeListenerRoot();
   const renders = [];

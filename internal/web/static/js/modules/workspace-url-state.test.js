@@ -89,6 +89,17 @@ test('sanitizeWorkspaceURLState drops an unknown panel value', () => {
   assert.deepEqual(dropped, ['panel']);
 });
 
+// The Plans page tells a workspace with structured planning off where to turn
+// it on, and links there with ?panel=settings. When `settings` was not a valid
+// panel the param was sanitized away, so the link landed on the workspace with
+// a "some link details were out of date and were ignored" toast and no
+// settings anywhere in view — the exact dead end this pins shut.
+test('sanitizeWorkspaceURLState accepts panel=settings (the Plans page deep link)', () => {
+  const { state, dropped } = sanitizeWorkspaceURLState({ panel: 'settings' }, {});
+  assert.equal(state.panel, 'settings');
+  assert.deepEqual(dropped, []);
+});
+
 test('sanitizeWorkspaceURLState allows panel=tasks with no task id (drawer opens without a restored preview)', () => {
   const { state, dropped } = sanitizeWorkspaceURLState({ panel: 'tasks' }, { validTaskIds: [] });
   assert.equal(state.panel, 'tasks');
