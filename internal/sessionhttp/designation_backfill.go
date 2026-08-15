@@ -2,11 +2,14 @@ package sessionhttp
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/personalhq"
 	"github.com/johnjallday/ori-agent/internal/session"
+	"github.com/johnjallday/ori-agent/internal/userprofile"
 )
 
 // SetWorkspaceDesignation writes the workspace-side projection of a personalhq
@@ -74,6 +77,23 @@ func (h *Handler) BackfillWorkspaceDesignations(ctx context.Context, designated 
 		return err
 	}
 
+	// A profile holding no designation at all is not authority to erase the
+	// workspace tree's own marker. The folder tree is shared across data dirs
+	// — every git worktree and dev build gets its own database but the same
+	// ~/Ori Workspaces — so an empty record almost always means "this database
+	// has not met this workspace yet", not "the user has no HQ". Clearing here
+	// destroyed the only portable evidence of the designation. Adopt it
+	// instead, which is also what makes a fresh worktree recognize the HQ.
+	//
+	// A deliberate Clear() empties the projection as part of the same
+	// transition, so there is normally nothing left for this to re-adopt; a
+	// Clear whose projection write failed is the one case that now resurrects
+	// rather than settles, which is the accepted trade for not destroying a
+	// valid marker on every worktree start.
+	if len(designated) == 0 {
+		return h.adoptPersonalHQFromFolders(ctx, ids)
+	}
+
 	checked, healed := 0, 0
 	for _, id := range ids {
 		ws, err := h.workspaceStore.Get(id)
@@ -106,5 +126,64 @@ func (h *Handler) BackfillWorkspaceDesignations(ctx context.Context, designated 
 	if checked > 0 {
 		logger.Info("Workspace designation backfill complete", logger.Fields{"checked": checked, "healed": healed})
 	}
+	return nil
+}
+
+// adoptPersonalHQFromFolders restores a Personal HQ designation this database
+// has never recorded from the canonical marker the workspace folder already
+// carries, so a workspace tree shared across data dirs (worktrees, dev builds,
+// a reinstall, a restored backup) keeps one HQ identity instead of silently
+// losing it.
+//
+// It adopts only an unambiguous claim: exactly one non-group workspace marked
+// personal_hq. Several claims mean the tree itself is inconsistent, which a
+// startup path must report rather than resolve by guessing. Adoption goes
+// through the authoritative service, so the one-HQ model, eligibility rules,
+// and projection sync all still apply. Every failure is non-fatal — startup
+// must not depend on it.
+func (h *Handler) adoptPersonalHQFromFolders(ctx context.Context, ids []string) error {
+	if h == nil || h.workspaceStore == nil {
+		return nil
+	}
+
+	candidates := make([]string, 0, 1)
+	for _, id := range ids {
+		ws, err := h.workspaceStore.Get(id)
+		if err != nil || ws == nil {
+			continue
+		}
+		if session.NormalizeWorkspaceKind(ws.Kind) == session.WorkspaceKindGroup {
+			continue // groups can never be an HQ (personalhq.ErrGroupNotEligible)
+		}
+		if session.NormalizeWorkspaceDesignation(ws.Designation) == session.WorkspaceDesignationPersonalHQ {
+			candidates = append(candidates, id)
+		}
+	}
+
+	switch {
+	case len(candidates) == 0:
+		return nil
+	case len(candidates) > 1:
+		logger.Warn("Skipping personal hq adoption: more than one workspace claims the designation", logger.Fields{
+			"workspace_ids": candidates,
+		})
+		return nil
+	case h.personalHQDesignator == nil:
+		// Nothing to adopt with, but the marker is left intact so a later
+		// start with the dependency wired can still recover it.
+		return nil
+	}
+
+	if _, err := h.personalHQDesignator.Designate(ctx, userprofile.LocalUserID, candidates[0]); err != nil {
+		if errors.Is(err, personalhq.ErrAlreadyDesignated) {
+			return nil
+		}
+		logger.Warn("Failed to adopt personal hq from workspace folder", logger.Fields{
+			"workspace_id": candidates[0], "error": err,
+		})
+		return nil
+	}
+
+	logger.Info("Adopted personal hq from workspace folder", logger.Fields{"workspace_id": candidates[0]})
 	return nil
 }

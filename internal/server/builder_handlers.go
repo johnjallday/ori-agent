@@ -201,6 +201,11 @@ func (b *ServerBuilder) initializeHandlers() {
 		// one provisioning path (task 2.9).
 		personalHQUpgrade := personalhq.NewUpgradeCoordinator(b.personalHQService, sessionStore, b.sessionHandler)
 		b.personalHQHandler = personalhqhttp.NewHandler(b.personalHQService, personalHQSetup, personalHQUpgrade, b.userProvider)
+		// Workspace import needs the authoritative service too: an exported
+		// workspace.json can carry a personal_hq marker, and the folder-side
+		// projection alone is not a designation (Issue #290). Only Designate
+		// is exposed, so an import never replaces an existing HQ.
+		b.sessionHandler.SetPersonalHQDesignator(b.personalHQService)
 		// The workspace stores are constructed in a later phase. Passing the
 		// method value keeps Watchtower reads live once those stores are ready.
 		b.personalHQHandler.SetWatchtowerSources(b.watchtowerSnapshotSources)
