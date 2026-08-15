@@ -10944,8 +10944,17 @@ export class WorkspaceDetailPage {
     }
   }
 
-  initializeWorkspaceConfigExpansion() {
-    this.setWorkspaceConfigExpanded(false);
+  // Re-applies whatever expansion state the card is already in. This runs on
+  // every settings render — including every field change — so it must not
+  // force a state. It used to collapse unconditionally, which slammed the card
+  // shut mid-edit on the Details page and, in the Command view's Manager
+  // Settings modal, left an empty box: there the card IS the modal body and
+  // its own header/toggle is hidden, so a collapse has nothing left to show
+  // and no control to undo it. The card ships collapsed from the template
+  // (`is-collapsed` + `hidden` content) and `workspaceConfigExpanded` starts
+  // false to match, so nothing here is needed to establish the initial state.
+  syncWorkspaceConfigExpansion() {
+    this.setWorkspaceConfigExpanded(this.workspaceConfigExpanded === true);
   }
 
   toggleWorkspaceConfigExpanded() {
@@ -10978,7 +10987,7 @@ export class WorkspaceDetailPage {
       this.elements.configReferenceChip.textContent = `Refs: ${referenceCount}`;
     }
 
-    this.initializeWorkspaceConfigExpansion();
+    this.syncWorkspaceConfigExpansion();
   }
 
   // ── Workspace Settings Methods ───────────────────────────────────────

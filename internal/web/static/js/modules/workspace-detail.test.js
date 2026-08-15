@@ -1221,3 +1221,70 @@ test('addAgentWorkspaceCapability reuses an existing enabled binding without a P
   assert.equal(fetched, false, 'no binding is created when one already exists enabled');
   assert.deepEqual(enableCalls, [['skill', 'Atlas', 'sk-existing', true]]);
 });
+
+function makeClassList(initial = []) {
+  const classes = new Set(initial);
+  return {
+    add: name => classes.add(name),
+    remove: name => classes.delete(name),
+    contains: name => classes.has(name),
+    toggle: (name, force) => {
+      if (force === true) classes.add(name);
+      else if (force === false) classes.delete(name);
+      else if (classes.has(name)) classes.delete(name);
+      else classes.add(name);
+    }
+  };
+}
+
+function makeConfigCardPage() {
+  const page = new WorkspaceDetailPage('workspace-1');
+  page.elements = {
+    configPanel: { classList: makeClassList(['is-collapsed']) },
+    configContent: { hidden: true },
+    configToggleBtn: {
+      attrs: {},
+      setAttribute(name, value) {
+        this.attrs[name] = value;
+      }
+    },
+    configToggleLabel: { textContent: 'Show Configuration' }
+  };
+  page.tasks = [];
+  return page;
+}
+
+// Changing any settings field re-renders the config summary, which used to
+// collapse the configuration card unconditionally. On the Details page that
+// slams the card shut mid-edit. Inside the Command view's Manager Settings
+// modal it is worse: the card IS the modal body and its own header/toggle is
+// hidden there, so collapsing left an empty box with no control to reopen it —
+// reported as "when I try to enable structured planning nothing loads up".
+test('changing a settings field leaves an expanded configuration card open', () => {
+  const page = makeConfigCardPage();
+
+  // What the Manager Settings modal does when it mounts the card.
+  page.setWorkspaceConfigExpanded(true);
+  assert.equal(page.elements.configContent.hidden, false, 'setup: card should start open');
+
+  page.renderWorkspaceConfigSummary();
+
+  assert.equal(
+    page.elements.configContent.hidden,
+    false,
+    'a settings render collapsed the card out from under the user'
+  );
+  assert.equal(page.elements.configPanel.classList.contains('is-collapsed'), false);
+  assert.equal(page.elements.configToggleLabel.textContent, 'Hide Configuration');
+});
+
+// The other half: a render must not force the card OPEN either. It ships
+// collapsed from the template and stays that way until the user asks for it.
+test('a settings render leaves a collapsed configuration card collapsed', () => {
+  const page = makeConfigCardPage();
+
+  page.renderWorkspaceConfigSummary();
+
+  assert.equal(page.elements.configContent.hidden, true);
+  assert.equal(page.elements.configPanel.classList.contains('is-collapsed'), true);
+});
