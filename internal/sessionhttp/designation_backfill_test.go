@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/johnjallday/ori-agent/internal/userprofile"
 	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -82,21 +83,106 @@ func TestBackfillHealsMissingDesignation(t *testing.T) {
 	}
 }
 
-func TestBackfillClearsUnbackedDesignation(t *testing.T) {
+func TestBackfillPreservesDesignationWhenProfileHasNoHQ(t *testing.T) {
 	handler, fileStore := newDesignationTestHandler(t)
 	ctx := context.Background()
-	staleID := createTestWorkspace(t, handler, "Stale HQ")
+	markedID := createTestWorkspace(t, handler, "Shared HQ")
 
-	// Seed a stale designation with no backing record.
-	if err := handler.SetWorkspaceDesignation(ctx, staleID, "personal_hq"); err != nil {
-		t.Fatalf("seed stale designation: %v", err)
+	if err := handler.SetWorkspaceDesignation(ctx, markedID, "personal_hq"); err != nil {
+		t.Fatalf("seed designation: %v", err)
 	}
+
+	// An empty record set is the signature of a database that has never seen
+	// this shared workspace tree (a fresh worktree or dev data dir), not of a
+	// user without an HQ. Erasing here destroyed the portable marker.
+	if err := handler.BackfillWorkspaceDesignations(ctx, map[string]bool{}); err != nil {
+		t.Fatalf("backfill: %v", err)
+	}
+	if got := designationOf(t, fileStore, markedID); got != "personal_hq" {
+		t.Fatalf("backfill must not erase the folder marker when the profile has no HQ, got %q", got)
+	}
+}
+
+func TestBackfillAdoptsFolderDesignationWhenProfileHasNoHQ(t *testing.T) {
+	handler, fileStore := newDesignationTestHandler(t)
+	ctx := context.Background()
+	markedID := createTestWorkspace(t, handler, "Shared HQ")
+	plainID := createTestWorkspace(t, handler, "Plain")
+
+	if err := handler.SetWorkspaceDesignation(ctx, markedID, "personal_hq"); err != nil {
+		t.Fatalf("seed designation: %v", err)
+	}
+
+	designator := &recordingDesignator{}
+	handler.SetPersonalHQDesignator(designator)
 
 	if err := handler.BackfillWorkspaceDesignations(ctx, map[string]bool{}); err != nil {
 		t.Fatalf("backfill: %v", err)
 	}
+
+	if len(designator.calls) != 1 {
+		t.Fatalf("expected the marked workspace to be adopted once, got %#v", designator.calls)
+	}
+	if got := designator.calls[0]; got.userID != userprofile.LocalUserID || got.workspaceID != markedID {
+		t.Fatalf("expected Designate(%q, %q), got %#v", userprofile.LocalUserID, markedID, got)
+	}
+	if got := designationOf(t, fileStore, plainID); got != "" {
+		t.Fatalf("adoption must not touch an unmarked workspace, got %q", got)
+	}
+}
+
+func TestBackfillSkipsAdoptionWhenSeveralWorkspacesClaimHQ(t *testing.T) {
+	handler, fileStore := newDesignationTestHandler(t)
+	ctx := context.Background()
+	firstID := createTestWorkspace(t, handler, "Claim One")
+	secondID := createTestWorkspace(t, handler, "Claim Two")
+
+	for _, id := range []string{firstID, secondID} {
+		if err := handler.SetWorkspaceDesignation(ctx, id, "personal_hq"); err != nil {
+			t.Fatalf("seed designation for %s: %v", id, err)
+		}
+	}
+
+	designator := &recordingDesignator{}
+	handler.SetPersonalHQDesignator(designator)
+
+	if err := handler.BackfillWorkspaceDesignations(ctx, map[string]bool{}); err != nil {
+		t.Fatalf("backfill: %v", err)
+	}
+
+	// Ambiguous trees are reported, never resolved by guessing — and nothing
+	// is erased while the ambiguity stands.
+	if len(designator.calls) != 0 {
+		t.Fatalf("expected no adoption from an ambiguous tree, got %#v", designator.calls)
+	}
+	for _, id := range []string{firstID, secondID} {
+		if got := designationOf(t, fileStore, id); got != "personal_hq" {
+			t.Fatalf("expected %s to keep its marker, got %q", id, got)
+		}
+	}
+}
+
+func TestBackfillStillClearsStaleDesignationWhenProfileHasAnHQ(t *testing.T) {
+	handler, fileStore := newDesignationTestHandler(t)
+	ctx := context.Background()
+	currentID := createTestWorkspace(t, handler, "Current HQ")
+	staleID := createTestWorkspace(t, handler, "Stale HQ")
+
+	for _, id := range []string{currentID, staleID} {
+		if err := handler.SetWorkspaceDesignation(ctx, id, "personal_hq"); err != nil {
+			t.Fatalf("seed designation for %s: %v", id, err)
+		}
+	}
+
+	// With a real record present, the record still wins in both directions.
+	if err := handler.BackfillWorkspaceDesignations(ctx, map[string]bool{currentID: true}); err != nil {
+		t.Fatalf("backfill: %v", err)
+	}
+	if got := designationOf(t, fileStore, currentID); got != "personal_hq" {
+		t.Fatalf("expected the backed HQ to keep its marker, got %q", got)
+	}
 	if got := designationOf(t, fileStore, staleID); got != "" {
-		t.Fatalf("backfill should clear unbacked designation, got %q", got)
+		t.Fatalf("expected the unbacked marker to be cleared, got %q", got)
 	}
 }
 
