@@ -295,55 +295,38 @@ function guideEls() {
   };
 }
 
-test('a handoff fills the work surface but never submits it', () => {
+// Issue #350 removed the separate work surface. A handoff no longer travels
+// anywhere: the composer that receives it is the one already open on this page.
+test('a handoff fills the universal composer but never submits it', () => {
   const els = guideEls();
-  let submitted = false;
-  els.homeAssistantInput = makeElement('homeAssistantInput', {
-    form: {
-      submit() {
-        submitted = true;
-      }
-    }
-  });
   const { guide } = load({ route: '/', elements: els });
 
   const ok = guide._handoff('summarize the launch notes');
   assert.equal(ok, true);
-  assert.equal(els.homeAssistantInput.value, 'summarize the launch notes');
-  assert.ok(
-    els.homeAssistantInput.focused,
-    'the work surface should be focused for the user to send'
-  );
-  assert.equal(submitted, false, 'the guide must never submit the work surface');
+  assert.equal(els.oriGuideInput.value, 'summarize the launch notes');
+  assert.ok(els.oriGuideInput.focused, 'the composer should be focused for the user to send');
 });
 
-test('a handoff away from Home routes there rather than pretending it worked', () => {
+// The property that mattered about the old handoff — it never runs anything on
+// the user's behalf — still holds, and now holds without a navigation at all.
+test('a handoff off Home stays on the page instead of navigating to Home', () => {
   const els = guideEls();
   const ctx = load({ route: '/agents', elements: els });
+
   const ok = ctx.guide._handoff('do the thing');
-  assert.equal(ok, false);
-  assert.equal(ctx.sandbox.window.location.href, '/');
+  assert.equal(ok, true, 'the panel is present on every page, so there is nowhere to send them');
+  assert.equal(els.oriGuideInput.value, 'do the thing');
+  assert.notEqual(
+    ctx.sandbox.window.location.href,
+    '/',
+    'a handoff must no longer yank the user to Home'
+  );
 });
 
-// The request survives the navigation instead of making the user retype it.
-test('a handoff from another page parks the request for Home to pick up', () => {
-  const ctx = load({ route: '/agents', elements: guideEls() });
-  ctx.guide._handoff('summarize the launch notes');
-
-  assert.equal(ctx.sandbox._session[ctx.guide.HANDOFF_KEY], 'summarize the launch notes');
-});
-
-test('Home consumes a parked handoff once, without submitting it', () => {
+// A request parked by an older build (which still navigated) must not be lost
+// when that user upgrades mid-flight.
+test('a handoff parked by an older build is restored into the composer once', () => {
   const els = guideEls();
-  let submitted = false;
-  els.homeAssistantInput = makeElement('homeAssistantInput', {
-    form: {
-      submit() {
-        submitted = true;
-      }
-    }
-  });
-
   const ctx = load({
     route: '/',
     elements: els,
@@ -351,24 +334,21 @@ test('Home consumes a parked handoff once, without submitting it', () => {
   });
 
   // init() runs on load and drains the parked request.
-  assert.equal(els.homeAssistantInput.value, 'summarize the launch notes');
-  assert.ok(els.homeAssistantInput.focused);
-  assert.equal(submitted, false, 'a carried-over handoff must not auto-submit either');
+  assert.equal(els.oriGuideInput.value, 'summarize the launch notes');
 
   // Drained, so a later reload does not resurrect it.
   assert.equal(ctx.sandbox._session[ctx.guide.HANDOFF_KEY], undefined);
 });
 
-// The user's words are their own: parking them in the URL would put them in
-// history, the address bar, and any referrer.
-test('a parked handoff never travels through the URL', () => {
+// The user's words are their own: they must never reach history, the address
+// bar, or a referrer.
+test('a handoff never travels through the URL', () => {
   const ctx = load({ route: '/agents', elements: guideEls() });
   ctx.guide._handoff('something private');
-  assert.equal(ctx.sandbox.window.location.href, '/');
   assert.ok(!String(ctx.sandbox.window.location.href).includes('something'));
 });
 
-test('storage being unavailable degrades to a plain navigation', () => {
+test('storage being unavailable never breaks a handoff', () => {
   const els = guideEls();
   const ctx = load({ route: '/agents', elements: els });
   ctx.sandbox.window.sessionStorage = {
@@ -383,9 +363,8 @@ test('storage being unavailable degrades to a plain navigation', () => {
     }
   };
 
-  // Nothing thrown; the user simply retypes on the other side.
   assert.doesNotThrow(() => ctx.guide._handoff('do the thing'));
-  assert.equal(ctx.sandbox.window.location.href, '/');
+  assert.equal(els.oriGuideInput.value, 'do the thing');
 });
 
 /* ---- stale coachmarks across route changes (FR-43) ---------------------------- */
@@ -602,4 +581,226 @@ test('a superseded failure does not overwrite a newer answer', async () => {
 
   assert.match(els.oriGuideReply.innerHTML, /GOOD ANSWER/);
   assert.notEqual(els.oriGuideReply.dataset.status, 'unavailable');
+});
+
+/* ---- universal panel: page context (FR16-FR21, FR46) -------------------------- */
+
+test('context is derived from the page path for every workspace surface', () => {
+  const { guide } = load();
+  const cases = [
+    ['/', 'home', '', ''],
+    ['/workspaces', 'workspace_hub', '', ''],
+    ['/workspaces/launch', 'workspace_detail', 'launch', ''],
+    ['/workspaces/launch/canvas', 'workspace_canvas', 'launch', ''],
+    ['/workspaces/launch/tasks/t-42', 'workspace_task', 'launch', 't-42'],
+    ['/agents', 'app', '', '']
+  ];
+  for (const [path, surface, workspaceId, taskId] of cases) {
+    const ctx = guide._contextFromRoute(path);
+    assert.equal(ctx.surface, surface, `${path} surface`);
+    assert.equal(ctx.workspaceId, workspaceId, `${path} workspace`);
+    assert.equal(ctx.taskId, taskId, `${path} task`);
+  }
+});
+
+test('the submitted context carries the normalized surface and a known origin', () => {
+  const { guide } = load({ route: '/workspaces/launch/tasks/t-42' });
+  const ctx = guide._collectContext();
+  assert.equal(ctx.surface, 'workspace_task');
+  assert.equal(ctx.page_path, '/workspaces/launch/tasks/t-42');
+  assert.equal(ctx.workspace_id, 'launch');
+  assert.equal(ctx.task_id, 't-42');
+  assert.equal(ctx.origin, 'ask_ori_panel');
+});
+
+// A page-supplied workspace fills a gap the URL left. It must never override the
+// workspace the user is demonstrably looking at (FR18).
+test('page-supplied context never overrides a workspace the URL already names', () => {
+  const { guide } = load({ route: '/workspaces/launch' });
+  guide.setContext({ workspaceId: 'other-workspace' });
+  assert.equal(guide._collectContext().workspace_id, 'launch');
+});
+
+test('page-supplied context fills the gap on a page without one', () => {
+  const { guide } = load({ route: '/' });
+  assert.equal(guide._collectContext().workspace_id, '');
+  guide.setContext({ workspaceId: 'selected-on-map' });
+  assert.equal(guide._collectContext().workspace_id, 'selected-on-map');
+  // Clearing the selection clears the hint rather than stranding it.
+  guide.setContext({ workspaceId: '' });
+  assert.equal(guide._collectContext().workspace_id, '');
+});
+
+test('the visible context label names the current target', () => {
+  const { guide } = load({ route: '/workspaces/launch' });
+  assert.equal(guide._contextLabel(guide._collectContext()), 'Workspace: launch');
+
+  const hub = load({ route: '/workspaces' });
+  assert.equal(hub.guide._contextLabel(hub.guide._collectContext()), 'All workspaces');
+
+  const task = load({ route: '/workspaces/launch/tasks/t-42' });
+  assert.equal(task.guide._contextLabel(task.guide._collectContext()), 'Task: t-42');
+});
+
+test('the context label is repainted into the header', () => {
+  const els = guideEls();
+  els.oriGuideContext = makeElement('oriGuideContext');
+  const { guide } = load({ route: '/workspaces/launch', elements: els });
+  guide._refreshContextLabel();
+  assert.equal(els.oriGuideContext.textContent, 'Workspace: launch');
+});
+
+/* ---- universal panel: intent dispatch (FR22-FR27) ----------------------------- */
+
+// The guide owns navigation and says so itself; the client never guesses with a
+// keyword list of its own.
+test('a navigation answer is not escalated to routing', () => {
+  const { guide } = load();
+  assert.equal(guide._needsWorkRouting({ status: 'answered', topic_key: 'workspaces' }), false);
+});
+
+test('a work request and an honest miss both escalate to routing', () => {
+  const { guide } = load();
+  assert.equal(
+    guide._needsWorkRouting({ status: 'answered', topic_key: 'workspace-manager' }),
+    true,
+    'the guide identifying work must escalate'
+  );
+  assert.equal(
+    guide._needsWorkRouting({ status: 'unknown' }),
+    true,
+    'an honest miss must escalate rather than render as "I do not know"'
+  );
+});
+
+test('a navigation question uses only the read-only guide endpoint', async () => {
+  const els = guideEls();
+  const ctx = load({ route: '/', elements: els });
+  const calls = [];
+  ctx.sandbox.fetch = url => {
+    calls.push(url);
+    return Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({ status: 'answered', topic_key: 'workspaces', answer: 'Here' })
+    });
+  };
+
+  await ctx.guide.ask('where do workspaces live');
+
+  assert.deepEqual(calls, ['/api/ori-guide']);
+  assert.match(els.oriGuideReply.innerHTML, /Here/);
+});
+
+test('a work request escalates to routing and shows where it is going', async () => {
+  const els = guideEls();
+  const ctx = load({ route: '/workspaces/launch', elements: els });
+  const calls = [];
+  let routedBody = null;
+  ctx.sandbox.fetch = (url, opts) => {
+    calls.push(url);
+    if (url === '/api/ori-guide') {
+      return Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve({ status: 'answered', topic_key: 'workspace-manager', answer: 'work' })
+      });
+    }
+    routedBody = JSON.parse(opts.body);
+    return Promise.resolve({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          intent: 'travel_planning',
+          intent_label: 'travel planning',
+          matched_agent: 'Travel Planner'
+        })
+    });
+  };
+
+  await ctx.guide.ask('plan the launch party');
+
+  assert.deepEqual(calls, ['/api/ori-guide', '/api/home-assistant/route']);
+  assert.equal(routedBody.context.workspace_id, 'launch', 'routing must receive the page context');
+  assert.match(els.oriGuideReply.innerHTML, /travel planning/);
+  assert.match(els.oriGuideReply.innerHTML, /Travel Planner/);
+  // Classification is not execution (FR35).
+  assert.match(els.oriGuideReply.innerHTML, /Nothing has run yet/);
+});
+
+test('a failed routing call says routing failed rather than faking a guide answer', async () => {
+  const els = guideEls();
+  const ctx = load({ route: '/', elements: els });
+  ctx.sandbox.fetch = url => {
+    if (url === '/api/ori-guide') {
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ status: 'unknown', answer: 'I do not have an answer' })
+      });
+    }
+    return Promise.resolve({ ok: false, status: 503, json: () => Promise.resolve({}) });
+  };
+
+  await ctx.guide.ask('do something complicated');
+
+  // It falls back to the guide's own honest miss, never to a fabricated result.
+  assert.match(els.oriGuideReply.innerHTML, /I do not have an answer/);
+});
+
+// FR26: navigation must keep working when no model is configured. The guide path
+// is deterministic, so an unconfigured model cannot take it down.
+test('a navigation answer still renders when routing is unavailable entirely', async () => {
+  const els = guideEls();
+  const ctx = load({ route: '/', elements: els });
+  ctx.sandbox.fetch = url => {
+    if (url === '/api/ori-guide') {
+      return Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve({ status: 'answered', topic_key: 'agents', answer: 'Agents live here' })
+      });
+    }
+    return Promise.reject(new Error('no model configured'));
+  };
+
+  await ctx.guide.ask('where are my agents');
+  assert.match(els.oriGuideReply.innerHTML, /Agents live here/);
+});
+
+/* ---- universal panel: close and reopen (FR13/FR45) ---------------------------- */
+
+test('closing keeps the draft and reopening restores it', () => {
+  const els = guideEls();
+  const { guide } = load({ route: '/', elements: els });
+
+  guide.open();
+  els.oriGuideInput.value = 'half-written request';
+  guide.close();
+  assert.equal(els.oriGuideInput.value, 'half-written request', 'the draft must survive a close');
+
+  els.oriGuideInput.value = '';
+  guide.open();
+  assert.equal(els.oriGuideInput.value, 'half-written request');
+});
+
+test('reopening does not re-greet over a reply the user came back to read', async () => {
+  const els = guideEls();
+  const ctx = load({ route: '/', elements: els });
+  let asks = 0;
+  ctx.sandbox.fetch = () => {
+    asks += 1;
+    return Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({ status: 'answered', topic_key: 'agents', answer: 'kept' })
+    });
+  };
+
+  ctx.guide.open();
+  await ctx.guide.ask('where are my agents');
+  const afterAsk = asks;
+
+  ctx.guide.close();
+  ctx.guide.open();
+
+  assert.equal(asks, afterAsk, 'reopening must not fire another request');
+  assert.match(els.oriGuideReply.innerHTML, /kept/);
 });

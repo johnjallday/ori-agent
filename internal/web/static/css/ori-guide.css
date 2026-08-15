@@ -1,13 +1,13 @@
 /*
- * Ori Guide — launcher and panel.
+ * Ask Ori — the one launcher and panel, on every authenticated page.
  *
- * The guide is visually distinct from the Home command box on purpose: that box
- * is Workspace Manager and it does real work, while this is navigation and
- * explanation. Warm paper tones and the character portrait mark the guide;
- * the work surface keeps the app's operational styling (PRD FR-27/FR-81).
+ * This used to be styled to look deliberately unlike the Home command box,
+ * because that box was a second assistant that did the real work. Issue #350
+ * merged them, so the warm paper tones and character portrait now mark the
+ * single assistance surface rather than one half of a pair.
  *
  * Wide layouts get a non-blocking panel so the destination Ori is describing
- * stays visible; narrow layouts get a bottom sheet (FR-79).
+ * stays visible; narrow layouts get a bottom sheet (FR66/FR67).
  */
 
 /*
@@ -103,13 +103,16 @@
   font-weight: 700;
 }
 
-/* The role is stated on the launcher itself, so a user knows this is a guide
-   before opening it (FR-22). */
-.ori-guide__launcher-role {
+/* Busy state, so running work is visible from the launcher without adding a
+   second place to type (FR14). */
+.ori-guide__launcher-status {
   font-size: 11px;
   letter-spacing: 0.04em;
-  text-transform: uppercase;
   opacity: 0.75;
+}
+
+.ori-guide__launcher-status[hidden] {
+  display: none;
 }
 
 /* ---- panel ------------------------------------------------------------------- */
@@ -148,12 +151,16 @@
   line-height: 1.2;
 }
 
-.ori-guide__role {
+/* The contextual subtitle: what Ask Ori is pointed at right now. Not uppercased
+   like the old role line was — it carries a real value (a workspace or task
+   name), not a fixed label (FR4/FR64). */
+.ori-guide__context {
   margin: 0;
-  font-size: 11px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  opacity: 0.75;
+  font-size: 12px;
+  opacity: 0.8;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .ori-guide__close {
@@ -169,16 +176,50 @@
   cursor: pointer;
 }
 
-/* The boundary statement is part of the panel, not a tooltip: it has to be
-   readable before the user asks anything (FR-22/FR-27). */
-.ori-guide__boundary {
+/* The ordered record of this conversation. Bounded height so a long exchange
+   scrolls inside the panel instead of growing it off-screen (FR40). */
+.ori-guide__activity {
   margin: 0 0 12px;
-  padding: 9px 11px;
-  border-left: 3px solid var(--ori-accent);
-  border-radius: 0 8px 8px 0;
-  background: var(--ori-paper);
+  padding: 0;
+  max-height: 180px;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.ori-guide__activity[hidden] {
+  display: none;
+}
+
+.ori-guide__activity-entry {
+  margin: 0 0 6px;
+  padding: 7px 10px;
+  border-radius: 8px;
   font-size: 12.5px;
   line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.ori-guide__activity-entry--you {
+  background: var(--ori-paper);
+  border-left: 3px solid var(--ori-accent);
+}
+
+.ori-guide__activity-entry--ori {
+  opacity: 0.85;
+}
+
+/* Where a routed request is going, shown before anything consequential runs
+   (FR34/FR86). */
+.ori-guide__routing {
+  margin: 0 0 6px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.ori-guide__target {
+  margin: 0 0 6px;
+  font-size: 12.5px;
+  opacity: 0.9;
 }
 
 .ori-guide__form {

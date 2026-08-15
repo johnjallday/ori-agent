@@ -11,6 +11,11 @@ import { installLocalCdn } from './helpers/offline-cdn';
 // axe is scoped to the guide's own root so pre-existing chrome (navbar,
 // sidebar) cannot mask a regression introduced here — the same approach the
 // roster suite uses.
+//
+// These run against /agents rather than Home. Home hides the floating launcher
+// and uses the map character as its single entry point (#332), so asserting on
+// #oriGuideLauncher there had been failing since that change; /agents is an
+// authenticated page where the shared launcher itself is the way in.
 
 const baseUrl = process.env.PLAYWRIGHT_BASE_URL || process.env.BASE_URL || 'http://localhost:8765';
 
@@ -56,7 +61,7 @@ for (const theme of ['light', 'dark']) {
   test(`ori guide accessibility (${theme})`, async ({ page }) => {
     await preparePage(page, { theme });
     await page.setViewportSize({ width: 1440, height: 950 });
-    await page.goto(`${baseUrl}/`, { waitUntil: 'domcontentloaded' });
+    await page.goto(`${baseUrl}/agents`, { waitUntil: 'domcontentloaded' });
     await expect(page.locator('#oriGuideLauncher')).toBeVisible();
 
     await page.addScriptTag({ url: 'https://cdn.jsdelivr.net/npm/axe-core@4.10.3/axe.min.js' });
@@ -88,7 +93,7 @@ for (const theme of ['light', 'dark']) {
 
 test('the guide is fully operable without a pointer', async ({ page }) => {
   await preparePage(page);
-  await page.goto(`${baseUrl}/`, { waitUntil: 'domcontentloaded' });
+  await page.goto(`${baseUrl}/agents`, { waitUntil: 'domcontentloaded' });
   await expect(page.locator('#oriGuideLauncher')).toBeVisible();
 
   // Open, ask, and close using only the keyboard (FR-115).
@@ -108,7 +113,7 @@ test('the guide is fully operable without a pointer', async ({ page }) => {
 
 test('no guide control is pointer-only', async ({ page }) => {
   await preparePage(page);
-  await page.goto(`${baseUrl}/`, { waitUntil: 'domcontentloaded' });
+  await page.goto(`${baseUrl}/agents`, { waitUntil: 'domcontentloaded' });
   await openAndAsk(page, 'what is an agent');
 
   // Every interactive element inside the panel must be focusable. Walking Tab
@@ -168,7 +173,7 @@ test('the panel is usable at 200% zoom without horizontal page scroll', async ({
   await preparePage(page);
   // 200% zoom at a 1280 logical width behaves like a 640px viewport.
   await page.setViewportSize({ width: 640, height: 720 });
-  await page.goto(`${baseUrl}/`, { waitUntil: 'domcontentloaded' });
+  await page.goto(`${baseUrl}/agents`, { waitUntil: 'domcontentloaded' });
   await openAndAsk(page, 'what is a workspace');
 
   await expect(page.locator('#oriGuideSend')).toBeVisible();
@@ -183,7 +188,7 @@ test('the panel is usable at 200% zoom without horizontal page scroll', async ({
 test('the narrow sheet keeps its actions reachable', async ({ page }) => {
   await preparePage(page);
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto(`${baseUrl}/`, { waitUntil: 'domcontentloaded' });
+  await page.goto(`${baseUrl}/agents`, { waitUntil: 'domcontentloaded' });
   await openAndAsk(page, 'what is a vault');
 
   const action = page.locator('.ori-guide__action').first();

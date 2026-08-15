@@ -91,6 +91,7 @@ func TestGuideMarkupHasOneOfEachControl(t *testing.T) {
 	for _, id := range []string{
 		`id="oriGuideLauncher"`, `id="oriGuidePanel"`, `id="oriGuideInput"`,
 		`id="oriGuideSend"`, `id="oriGuideForm"`, `id="oriGuideReply"`, `id="oriGuideClose"`,
+		`id="oriGuideContext"`, `id="oriGuideActivity"`,
 	} {
 		if got := strings.Count(body, id); got != 1 {
 			t.Errorf("%s appears %d times, want 1", id, got)
@@ -98,14 +99,65 @@ func TestGuideMarkupHasOneOfEachControl(t *testing.T) {
 	}
 }
 
-// The boundary has to be stated in the markup, not left to the model: it is what
-// tells a user this is a guide before they ask it to do work (FR-22/FR-27).
-func TestGuideMarkupStatesTheBoundaryUpFront(t *testing.T) {
+// One composer, not one per intent. A user must never have to choose a
+// guide-versus-work surface, or a Task/Ask/Note mode, before typing (FR5/FR23).
+func TestUniversalPanelHasExactlyOneComposer(t *testing.T) {
 	body := readTemplate(t, "templates/components/ori-guide.tmpl")
-	for _, phrase := range []string{"App Guide", "not a work agent", "Workspace Manager"} {
-		if !strings.Contains(body, phrase) {
-			t.Errorf("guide markup should state %q before any question is asked", phrase)
+	if got := strings.Count(body, "<form"); got != 1 {
+		t.Errorf("panel has %d forms, want exactly 1 composer", got)
+	}
+	if got := strings.Count(body, `type="text"`) + strings.Count(body, "<textarea"); got != 1 {
+		t.Errorf("panel has %d text inputs, want exactly 1", got)
+	}
+}
+
+// Issue #350: Ask Ori is the identity. The panel must not reintroduce the old
+// "this is only a guide, the real work happens elsewhere" boundary, and must not
+// name any of the retired surfaces (FR3/FR61).
+func TestUniversalPanelPresentsOneIdentityWithContext(t *testing.T) {
+	body := readTemplate(t, "templates/components/ori-guide.tmpl")
+
+	if !strings.Contains(body, `id="oriGuideTitle">Ask Ori<`) {
+		t.Error("the panel heading must be Ask Ori")
+	}
+
+	// Comments explaining the migration may name the retired surfaces; rendered
+	// copy may not. Strip the comments before checking.
+	rendered := stripHTMLComments(body)
+	for _, retired := range []string{
+		"Workspace Manager", "Workspace Assistant", "Workspaces Assistant",
+		"Task Assistant", "App Guide", "not a work agent",
+	} {
+		if strings.Contains(rendered, retired) {
+			t.Errorf("rendered panel copy still contains the retired label %q", retired)
 		}
+	}
+}
+
+// The composer has to invite both halves of what Ask Ori now does, or users will
+// keep assuming it is navigation-only (FR65).
+func TestComposerInvitesQuestionsAndWork(t *testing.T) {
+	body := readTemplate(t, "templates/components/ori-guide.tmpl")
+	if !strings.Contains(body, "Ask a question or describe what you want done") {
+		t.Error("composer placeholder should invite both questions and work")
+	}
+}
+
+func stripHTMLComments(body string) string {
+	var out strings.Builder
+	rest := body
+	for {
+		start := strings.Index(rest, "<!--")
+		if start < 0 {
+			out.WriteString(rest)
+			return out.String()
+		}
+		out.WriteString(rest[:start])
+		end := strings.Index(rest[start:], "-->")
+		if end < 0 {
+			return out.String()
+		}
+		rest = rest[start+end+3:]
 	}
 }
 
