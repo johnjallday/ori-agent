@@ -46,6 +46,11 @@ func (s *Store) Load() (model.BridgeState, error) {
 	if state.Runs == nil {
 		state.Runs = make(map[string]model.OvernightRun)
 	}
+	// Same reasoning for PlanningSessions, added later still: a state file
+	// written before issue planning existed simply has no key here.
+	if state.PlanningSessions == nil {
+		state.PlanningSessions = make(map[string]model.PlanningSession)
+	}
 	return state, nil
 }
 
@@ -61,6 +66,9 @@ func (s *Store) Save(state model.BridgeState) error {
 	}
 	if state.Runs == nil {
 		state.Runs = make(map[string]model.OvernightRun)
+	}
+	if state.PlanningSessions == nil {
+		state.PlanningSessions = make(map[string]model.PlanningSession)
 	}
 	if err := os.MkdirAll(s.dir, 0700); err != nil {
 		return fmt.Errorf("create state directory: %w", err)

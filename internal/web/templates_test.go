@@ -366,9 +366,12 @@ func TestRenderAgentsCodexDetailPage(t *testing.T) {
 
 // TestRenderHomeCockpitShell confirms the Home page renders the Map-first
 // cockpit shell: one workspace area holding Map and Tree as peer views in the
-// same slot, one persistent context rail with a Today panel and a sibling
-// context panel, and the mounts the cockpit coordinator binds to.
-// PRD FR14-FR21, FR74.
+// same slot, one persistent context rail for a real selection/Summary/Ask Ori,
+// and the header-anchored Updates/Quests flyouts the cockpit coordinator binds
+// to. Issue #334 retired the rail's own "Today" panel — its non-Progression
+// content now lives in the Updates flyout, and Progression in the Quests
+// flyout, both outside #cockpitRail.
+// PRD FR14-FR21, FR74; Issue #334 FR1-FR25.
 func TestRenderHomeCockpitShell(t *testing.T) {
 	r := NewTemplateRenderer()
 	if err := r.LoadTemplates(); err != nil {
@@ -397,7 +400,6 @@ func TestRenderHomeCockpitShell(t *testing.T) {
 		`id="cockpitTree"`,
 		`id="cockpitWorkspaceStatus"`,
 		`id="cockpitRail"`,
-		`id="cockpitRailToday"`,
 		`id="cockpitRailContext"`,
 		`id="cockpitRailLive"`,
 		// Mutually exclusive Map/Tree control (FR17, FR24).
@@ -408,6 +410,19 @@ func TestRenderHomeCockpitShell(t *testing.T) {
 		`id="cockpitSummaryBtn"`,
 		`id="cockpitCaptureBtn"`,
 		`id="cockpitCapturePanel"`,
+		// Updates: header-anchored flyout, never a rail column (Issue #334 FR1-FR25).
+		`id="cockpitRailToggle"`,
+		`aria-controls="cockpitUpdatesFlyout"`,
+		`cockpit-flyout-toggle__label">Updates<`,
+		`id="cockpitUpdatesFlyout"`,
+		`id="cockpitUpdatesFlyoutBody"`,
+		// Quests: Progression's always-available compact entry point, adjacent
+		// to Updates (Issue #334 FR26-FR40).
+		`id="cockpitQuestsToggle"`,
+		`aria-controls="cockpitQuestsFlyout"`,
+		`cockpit-flyout-toggle__label">Quests<`,
+		`data-role="quests-summary"`,
+		`id="cockpitQuestsFlyout"`,
 		// Ask Ori activity lives in the rail as an embedded panel (FR96).
 		`data-home-assistant-surface="panel"`,
 		`id="homeAssistantThinkingModal"`,
@@ -419,7 +434,9 @@ func TestRenderHomeCockpitShell(t *testing.T) {
 		// Creation reuses the existing modal contract (FR105).
 		`id="cockpitCreateWorkspaceBtn"`,
 		`data-bs-target="#addFolderModal"`,
-		// Today's sources survive the migration (FR77, FR81, FR82, FR84, FR86).
+		// Today's sources survive both migrations — into the rail (FR77, FR81,
+		// FR82, FR84, FR86) and then out of it into the Updates flyout
+		// (Issue #334) — with the same element ids throughout.
 		`id="homeDailyBrief"`,
 		`id="homeCalendarOpsPortal"`,
 		`id="homeRecentActivity"`,
@@ -452,6 +469,10 @@ func TestRenderHomeCockpitShell(t *testing.T) {
 		`aria-label="Operations board"`,
 		`id="cockpitRailViewBtn"`,
 		`id="homeUpcomingTasks"`,
+		// Issue #334: the rail's own "Today" panel is retired — its content now
+		// lives in the Updates/Quests flyouts, never inside #cockpitRail.
+		`id="cockpitRailToday"`,
+		`cockpit-flyout-toggle__label">Today<`,
 	} {
 		if strings.Contains(html, gone) {
 			t.Errorf("rendered Home page still contains retired element %q", gone)

@@ -542,6 +542,21 @@ test.describe('Workspace Manager keeps its own identity', () => {
       }, id);
       expect(topmost, `${id} is covered by ${topmost}`).toBe('clickable');
     }
+
+    // Quests (Issue #334) is optional — hidden until valid Progression data
+    // loads — so it gets its own wait rather than joining the always-visible
+    // loop above.
+    const questsToggle = page.locator('#cockpitQuestsToggle');
+    if (await questsToggle.isVisible()) {
+      const topmost = await page.evaluate(() => {
+        const el = document.getElementById('cockpitQuestsToggle');
+        if (!el) return 'missing';
+        const r = el.getBoundingClientRect();
+        const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+        return el.contains(hit) || el === hit ? 'clickable' : (hit?.className ?? 'unknown');
+      });
+      expect(topmost, `#cockpitQuestsToggle is covered by ${topmost}`).toBe('clickable');
+    }
   });
 
   test('Cmd/Ctrl+J still focuses the work surface, not the guide', async ({ page }) => {

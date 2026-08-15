@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/config"
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/github"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/herdr"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/model"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/worktree"
@@ -62,6 +63,13 @@ type Inspector interface {
 	Inspect(context.Context, string, string, string) (worktree.GitWorktree, error)
 }
 
+// IssueFetcher performs one fresh, read-only GitHub Issue lookup. It exists so
+// issue-planning tests can inject a fixture instead of shelling out to `gh`,
+// the same way Herdr and the worktree inspector are injected above.
+type IssueFetcher interface {
+	GetIssue(ctx context.Context, number int) (github.Issue, error)
+}
+
 type inspectorFunc func(context.Context, string, string, string) (worktree.GitWorktree, error)
 
 func (f inspectorFunc) Inspect(ctx context.Context, path, branch, commonDir string) (worktree.GitWorktree, error) {
@@ -75,7 +83,10 @@ type Service struct {
 	Client       Herdr
 	Store        StateStore
 	Inspector    Inspector
-	Now          func() time.Time
+	// Issues is consulted only by issue-planning operations (see planning.go).
+	// Feature handoff never reads GitHub, so this is nil in every other path.
+	Issues IssueFetcher
+	Now    func() time.Time
 }
 
 type HandoffRequest struct {
@@ -795,25 +806,54 @@ func ScopedAgentName(repositoryID, feature, role string) (string, error) {
 	return name, nil
 }
 
-func BootstrapPrompt(feature model.Feature, role string) string {
+// agentsInstructionFor names AGENTS.md only when it actually exists in the
+// worktree, rather than asserting a path unconditionally.
+func agentsInstructionFor(feature model.Feature) string {
+	agentsPath := filepath.Join(feature.Path, "AGENTS.md")
+	if _, err := os.Stat(agentsPath); err == nil {
+		return "Read and follow: " + agentsPath
+	}
+	return "Read and follow any applicable AGENTS.md instructions in this worktree before editing."
+}
+
+// planningReferenceLines names only the planning artifacts that actually
+// exist in the feature's worktree. A task-list-only feature (size:quick or
+// size:planned Issue planning, no PRD) must never have a prompt claim a PRD
+// exists just because handoff always constructs that path string; the task
+// checklist line stays unconditional because nextIncompleteTask already
+// reports honestly when no task list exists at all.
+func planningReferenceLines(feature model.Feature) []string {
+	issuePath := filepath.Join(feature.Path, "tasks", "issue-"+feature.Name+".md")
 	prdPath := filepath.Join(feature.Path, "tasks", "prd-"+feature.Name+".md")
 	taskPath := filepath.Join(feature.Path, "tasks", "tasks-"+feature.Name+".md")
-	nextTask := nextIncompleteTask(taskPath)
-	agentsPath := filepath.Join(feature.Path, "AGENTS.md")
-	agentsInstruction := "Read and follow any applicable AGENTS.md instructions in this worktree before editing."
-	if _, err := os.Stat(agentsPath); err == nil {
-		agentsInstruction = "Read and follow: " + agentsPath
+
+	var lines []string
+	if _, err := os.Stat(issuePath); err == nil {
+		lines = append(lines, "Issue snapshot: "+issuePath)
 	}
+	if _, err := os.Stat(prdPath); err == nil {
+		lines = append(lines, "PRD: "+prdPath)
+	} else {
+		lines = append(lines, "PRD: none (task-list-sized) — follow the detailed task checklist below.")
+	}
+	lines = append(lines,
+		"Task checklist: "+taskPath,
+		"Next incomplete checklist item: "+nextIncompleteTask(taskPath),
+	)
+	return lines
+}
+
+func BootstrapPrompt(feature model.Feature, role string) string {
 	lines := []string{
 		"You are the primary " + role + " for Ori feature " + feature.Name + ".",
 		"Work only in this Git worktree: " + feature.Path,
-		agentsInstruction,
-		"PRD: " + prdPath,
-		"Task checklist: " + taskPath,
-		"Next incomplete checklist item: " + nextTask,
-		"Begin working on that task. As each sub-task is completed, update the checklist from [ ] to [x].",
-		"Do not create or remove Git worktrees. When the feature is ready, use the existing wt pr workflow; after merge, use wt done " + feature.Name + ".",
+		agentsInstructionFor(feature),
 	}
+	lines = append(lines, planningReferenceLines(feature)...)
+	lines = append(lines,
+		"Begin working on that task. As each sub-task is completed, update the checklist from [ ] to [x].",
+		"Do not create or remove Git worktrees. When the feature is ready, use the existing wt pr workflow; after merge, use wt done "+feature.Name+".",
+	)
 	return strings.Join(lines, "\n")
 }
 
@@ -821,25 +861,17 @@ func BootstrapPrompt(feature model.Feature, role string) string {
 // delivery. It names only local planning paths and never embeds task file
 // contents in the persisted prompt.
 func ContinuationPrompt(feature model.Feature, role string) string {
-	prdPath := filepath.Join(feature.Path, "tasks", "prd-"+feature.Name+".md")
-	taskPath := filepath.Join(feature.Path, "tasks", "tasks-"+feature.Name+".md")
-	nextTask := nextIncompleteTask(taskPath)
-	agentsPath := filepath.Join(feature.Path, "AGENTS.md")
-	agentsInstruction := "Read and follow any applicable AGENTS.md instructions in this worktree before editing."
-	if _, err := os.Stat(agentsPath); err == nil {
-		agentsInstruction = "Read and follow: " + agentsPath
-	}
 	lines := []string{
 		"This is a scheduled continuation for the managed " + role + " role on Ori feature " + feature.Name + ".",
 		"Work only in this Git worktree: " + feature.Path,
-		agentsInstruction,
+		agentsInstructionFor(feature),
 		"Re-read the planning artifacts before making changes.",
-		"PRD: " + prdPath,
-		"Task checklist: " + taskPath,
-		"Next incomplete checklist item: " + nextTask,
-		"Continue safely from that task. Update the checklist from [ ] to [x] only after completing each sub-task.",
-		"Do not create or remove Git worktrees. Use the existing wt pr and wt done " + feature.Name + " lifecycle when the feature is ready.",
 	}
+	lines = append(lines, planningReferenceLines(feature)...)
+	lines = append(lines,
+		"Continue safely from that task. Update the checklist from [ ] to [x] only after completing each sub-task.",
+		"Do not create or remove Git worktrees. Use the existing wt pr and wt done "+feature.Name+" lifecycle when the feature is ready.",
+	)
 	return strings.Join(lines, "\n")
 }
 

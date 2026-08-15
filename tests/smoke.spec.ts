@@ -215,10 +215,12 @@ test.describe('Home First Run', () => {
     await expect(page.locator('body.home-command-page')).toBeVisible();
     await expect(page.locator('#homeAssistantCard')).toHaveAttribute('data-first-run', 'true');
     await expect(page.locator('#homeCockpit')).toBeVisible();
-    const emptyState = page.locator('#cockpitWorkspaceStatus [data-state="empty"]');
-    await expect(emptyState).toContainText('No workspaces yet.');
-    await expect(emptyState.getByRole('button', { name: 'New Workspace' })).toBeVisible();
-    await expect(emptyState.getByRole('button', { name: 'Import Folder' })).toBeVisible();
+    await expect(page.locator('#homeCockpit')).toHaveAttribute('data-state', 'empty-map');
+    await expect(page.locator('#cockpitMap')).toBeVisible();
+    await expect(page.getByText('No workspaces yet.', { exact: true })).toHaveCount(0);
+    const emptyActions = page.locator('.cockpit-empty-map-actions');
+    await expect(emptyActions.getByRole('button', { name: 'New Workspace' })).toBeVisible();
+    await expect(emptyActions.getByRole('button', { name: 'Import Folder' })).toBeVisible();
     await expect(page.locator('#homeAssistantInput')).toHaveAttribute(
       'placeholder',
       'Plan a product launch…'
@@ -229,7 +231,8 @@ test.describe('Home First Run', () => {
 
     await page.goto('/workspaces');
     await expect(page.locator('#addFolderModal')).toBeHidden();
-    await expect(page.locator('#cockpitWorkspaceStatus [data-state="empty"]')).toBeVisible();
+    await expect(page.locator('#homeCockpit')).toHaveAttribute('data-state', 'empty-map');
+    await expect(page.locator('.cockpit-empty-map-actions')).toBeVisible();
   });
 
   test('keeps the command-strip interaction contract on home', async ({ page }) => {
@@ -360,6 +363,14 @@ test.describe('Home First Run', () => {
 
     await page.goto('/');
 
+    // Issue #334: Progression is compact-only until the Quests trigger is
+    // activated — Mission 01 lives inside that flyout now, not an
+    // auto-opened rail.
+    const questsTrigger = page.locator('#cockpitQuestsToggle');
+    await expect(questsTrigger).toBeVisible();
+    await expect(questsTrigger).toHaveAttribute('aria-expanded', 'false');
+    await questsTrigger.click();
+
     const mission = page.locator('[data-role="first-mission"]');
     await expect(mission).toBeVisible();
     await expect(mission).toContainText('Mission 01');
@@ -477,6 +488,8 @@ test.describe('Home First Run', () => {
     // single workspace overview now (PRD FR22).
     await expect(page.locator('#cockpitMap')).toBeVisible();
     await expect(page.locator('[data-role="workspace-card"]')).toHaveCount(0);
+    // Issue #334: open Quests to reach the real quest content.
+    await page.locator('#cockpitQuestsToggle').click();
     await expect(page.locator('#questLog')).toBeVisible();
 
     for (const [width, height] of [
@@ -494,7 +507,7 @@ test.describe('Home First Run', () => {
     }
   });
 
-  test('keeps the optional Daily Brief in its own row without overlapping Operations', async ({
+  test('keeps the optional Daily Brief inside the Updates flyout, below the command strip', async ({
     page
   }) => {
     await page.setViewportSize({ width: 1512, height: 805 });
@@ -519,31 +532,34 @@ test.describe('Home First Run', () => {
       element.hidden = false;
     });
 
-    // The Daily Brief used to sit in its own row between the command strip and
-    // the Operations Board. It now lives INSIDE the cockpit's Today rail, so
-    // "below the command strip and above Operations" is no longer the shape to
-    // assert. What still matters: it is a Today section, it sits below Ask Ori,
-    // and it never overlaps the workspace area (PRD FR75, FR15).
+    // The Daily Brief used to sit in its own row between the command strip
+    // and the Operations Board, then a Today section inside the cockpit
+    // rail. It now lives inside the Updates flyout (Issue #334), opened here
+    // explicitly since forcing the section's own `hidden` off does not reveal
+    // it through a still-closed ancestor flyout. What still matters: it is an
+    // Updates section, positioned below the command strip. It DOES overlap
+    // the workspace area underneath it now — that is the point of the
+    // flyout being an overlay rather than a side column (PRD FR21, FR75).
+    await page.locator('#cockpitRailToggle').click();
     const layout = await page.evaluate(() => {
       const command = document.getElementById('homeAssistantCard')?.getBoundingClientRect();
       const brief = document.getElementById('homeDailyBrief')?.getBoundingClientRect();
-      const area = document.querySelector('.cockpit-workspace-area')?.getBoundingClientRect();
       return {
         commandBottom: command?.bottom || 0,
         briefTop: brief?.top || 0,
-        briefLeft: brief?.left || 0,
-        areaRight: area?.right || 0,
-        inTodayRail: !!document.getElementById('homeDailyBrief')?.closest('#cockpitRailToday')
+        inUpdatesFlyout: !!document
+          .getElementById('homeDailyBrief')
+          ?.closest('#cockpitUpdatesFlyoutBody')
       };
     });
 
-    expect(layout.inTodayRail).toBe(true);
+    expect(layout.inUpdatesFlyout).toBe(true);
     expect(layout.briefTop).toBeGreaterThanOrEqual(layout.commandBottom);
-    // Beside the workspace area, not on top of it.
-    expect(layout.briefLeft).toBeGreaterThanOrEqual(layout.areaRight - 1);
   });
 
-  test('collapses the quest log to a progress badge and restores it', async ({ page }) => {
+  test('Quests starts compact and opens/collapses without persisting an open state (Issue #334)', async ({
+    page
+  }) => {
     const status = {
       current_tier: 1,
       total_tiers: 3,
@@ -566,8 +582,6 @@ test.describe('Home First Run', () => {
         }
       ]
     };
-    const dismisses: boolean[] = [];
-    let dismissed = false;
     await page.route('**/api/onboarding/status', async route => {
       await route.fulfill({
         status: 200,
@@ -575,47 +589,295 @@ test.describe('Home First Run', () => {
         body: JSON.stringify({ needs_onboarding: false, completed: true, skipped: true })
       });
     });
-    await page.route('**/api/progression/dismiss', async route => {
-      const request = route.request().postDataJSON();
-      dismissed = Boolean(request.dismissed);
-      dismisses.push(dismissed);
+    await page.route('**/api/progression', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ ...status, dismissed })
+        body: JSON.stringify(status)
+      });
+    });
+
+    await page.goto('/');
+
+    // FR27/FR32: compact-only on a fresh load, with a real tier/count summary.
+    const trigger = page.locator('#cockpitQuestsToggle');
+    await expect(trigger).toBeVisible();
+    await expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    await expect(trigger).toContainText('Tier 1');
+    await expect(trigger).toContainText('1/2');
+    await expect(page.locator('#cockpitQuestsFlyout')).toBeHidden();
+
+    await trigger.click();
+    await expect(page.locator('#cockpitQuestsFlyout')).toBeVisible();
+    await expect(page.locator('#questLog')).toBeVisible();
+    await expect(page.locator('[data-role="progress-count"]')).toHaveText('1/2');
+
+    // FR31: the quest log's own Collapse control closes the flyout and
+    // returns focus to the compact trigger — it no longer persists a
+    // dismissed preference server-side.
+    const collapse = page.locator('[data-role="dismiss"]');
+    await collapse.focus();
+    await expect(collapse).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('#cockpitQuestsFlyout')).toBeHidden();
+    await expect(trigger).toBeFocused();
+    await expect(trigger).toHaveAttribute('aria-expanded', 'false');
+
+    // Reopening shows the exact same real content again — nothing was lost.
+    await trigger.click();
+    await expect(page.locator('[data-role="progress-count"]')).toHaveText('1/2');
+  });
+
+  test('a prior server-side dismissed value never hides the compact Quests trigger (FR33)', async ({
+    page
+  }) => {
+    await page.route('**/api/onboarding/status', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ needs_onboarding: false, completed: true, skipped: true })
       });
     });
     await page.route('**/api/progression', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ ...status, dismissed })
+        body: JSON.stringify({
+          current_tier: 1,
+          total_tiers: 2,
+          total_count: 1,
+          dismissed: true,
+          tiers: [
+            {
+              tier: 1,
+              name: 'First contact',
+              quests: [{ id: 'q1', title: 'Say hello', status: 'pending' }]
+            }
+          ]
+        })
       });
     });
 
     await page.goto('/');
-    await expect(page.locator('#questLog')).toBeVisible();
-    await expect(page.locator('[data-role="progress-count"]')).toHaveText('1/2');
 
-    const collapse = page.locator('[data-role="dismiss"]');
-    await collapse.focus();
-    await expect(collapse).toBeFocused();
-    await page.keyboard.press('Enter');
-    await expect(page.locator('#questLog')).toBeHidden();
-    await expect(page.locator('#questLogRestore')).toBeVisible();
-    await expect(page.locator('[data-role="restore-progress"]')).toHaveText('1/2');
-
-    await page.reload();
-    await expect(page.locator('#questLog')).toBeHidden();
-    await expect(page.locator('#questLogRestore')).toBeVisible();
-
-    const restore = page.locator('[data-role="restore"]');
-    await restore.focus();
-    await expect(restore).toBeFocused();
-    await page.keyboard.press('Enter');
+    const trigger = page.locator('#cockpitQuestsToggle');
+    await expect(trigger).toBeVisible();
+    await expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    await trigger.click();
     await expect(page.locator('#questLog')).toBeVisible();
     await expect(page.locator('#questLogRestore')).toBeHidden();
-    expect(dismisses).toEqual([true, false]);
+  });
+
+  test('Skip resolves an optional quest and offers Resume without dismissing the flyout', async ({
+    page
+  }) => {
+    let skipped = false;
+    const questBase = {
+      id: 'skip-hq',
+      title: 'Build My HQ',
+      status: 'available',
+      optional: true,
+      action_url: '/workspaces?view=map&focus=personal-hq',
+      action_label: 'Build My HQ'
+    };
+    await page.route('**/api/onboarding/status', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ needs_onboarding: false, completed: true, skipped: true })
+      });
+    });
+    await page.route('**/api/progression/skip', async route => {
+      skipped = true;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          current_tier: 2,
+          total_tiers: 2,
+          total_count: 1,
+          tiers: [
+            { tier: 2, name: 'Establish a Base', quests: [{ ...questBase, status: 'skipped' }] }
+          ]
+        })
+      });
+    });
+    await page.route('**/api/progression', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          current_tier: 2,
+          total_tiers: 2,
+          total_count: 1,
+          tiers: [{ tier: 2, name: 'Establish a Base', quests: [skipped ? { ...questBase, status: 'skipped' } : questBase] }]
+        })
+      });
+    });
+
+    await page.goto('/');
+    await page.locator('#cockpitQuestsToggle').click();
+    const row = page.locator('.quest-item', { hasText: 'Build My HQ' });
+    await row.getByRole('button', { name: /^Skip/ }).click();
+
+    await expect(row).toContainText('Skipped');
+    await expect(row.getByRole('link', { name: 'Build My HQ' })).toBeVisible();
+    await expect(row.getByRole('button', { name: /^Skip/ })).toHaveCount(0);
+    // A skip is a resolution, not a dismissal — the flyout stays open.
+    await expect(page.locator('#cockpitQuestsFlyout')).toBeVisible();
+  });
+
+  test('the all-complete state shows a compact congratulatory summary and expands to the real content', async ({
+    page
+  }) => {
+    await page.route('**/api/onboarding/status', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ needs_onboarding: false, completed: true, skipped: true })
+      });
+    });
+    await page.route('**/api/progression', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          current_tier: 6,
+          total_tiers: 6,
+          total_count: 9,
+          resolved_count: 9,
+          all_complete: true,
+          tiers: []
+        })
+      });
+    });
+
+    await page.goto('/');
+
+    const trigger = page.locator('#cockpitQuestsToggle');
+    await expect(trigger).toContainText('All complete');
+    await expect(trigger).not.toHaveText(/^\d+$/);
+
+    await trigger.click();
+    await expect(page.locator('[data-role="tier-name"]')).toHaveText('All quests complete');
+    await expect(page.locator('[data-role="progress-count"]')).toHaveText('9/9');
+  });
+
+  test('a failed Progression response fails quietly and leaves Updates/Map fully usable (FR39)', async ({
+    page
+  }) => {
+    await page.route('**/api/onboarding/status', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ needs_onboarding: false, completed: true, skipped: true })
+      });
+    });
+    await page.route('**/api/progression', async route => {
+      await route.fulfill({ status: 500, contentType: 'application/json', body: '{}' });
+    });
+
+    await page.goto('/');
+
+    await expect(page.locator('#cockpitQuestsToggle')).toBeHidden();
+    // Nothing else on Home is blocked by the failure.
+    await expect(page.locator('#cockpitMap')).toBeVisible();
+    const updates = page.locator('#cockpitRailToggle');
+    await expect(updates).toBeVisible();
+    await updates.click();
+    await expect(page.locator('#cockpitUpdatesFlyout')).toBeVisible();
+  });
+
+  test('Progression stays gated with the rest of workspace hydration until onboarding consent allows it (FR38)', async ({
+    page
+  }) => {
+    let progressionRequests = 0;
+    await page.route('**/api/onboarding/status', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          needs_onboarding: true,
+          current_step: 0,
+          completed: false,
+          skipped: false,
+          steps_completed: [],
+          user_name: '',
+          assistant_name: 'Ori'
+        })
+      });
+    });
+    await page.route('**/api/progression', async route => {
+      progressionRequests += 1;
+      await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+    });
+
+    await page.goto('/');
+
+    await expect(page.locator('#onboardingModal')).toBeVisible();
+    await expect(page.locator('#cockpitQuestsToggle')).toBeHidden();
+    expect(progressionRequests).toBe(0);
+  });
+
+  test('a poll refresh updates the compact summary and an open flyout in place, toasts once, and never duplicates the trigger', async ({
+    page
+  }) => {
+    const tierOf = quests => ({
+      current_tier: 1,
+      total_tiers: 2,
+      total_count: 2,
+      all_complete: false,
+      tiers: [{ tier: 1, name: 'First contact', quests }]
+    });
+    const pending = tierOf([
+      { id: 'poll-q1', title: 'Say hello to Ori', status: 'completed' },
+      { id: 'poll-q2', title: 'Create a workspace', status: 'pending' }
+    ]);
+    const bothDone = tierOf([
+      { id: 'poll-q1', title: 'Say hello to Ori', status: 'completed' },
+      { id: 'poll-q2', title: 'Create a workspace', status: 'completed' }
+    ]);
+    let calls = 0;
+    await page.route('**/api/onboarding/status', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ needs_onboarding: false, completed: true, skipped: true })
+      });
+    });
+    await page.route('**/api/progression', async route => {
+      calls += 1;
+      // The FIRST load already carries poll-q1 as completed — Issue #334/FR36:
+      // a historical completion must never toast on initial load.
+      const status = calls === 1 ? pending : bothDone;
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(status) });
+    });
+
+    await page.goto('/');
+    const trigger = page.locator('#cockpitQuestsToggle');
+    await expect(trigger).toContainText('1/2');
+    await expect(page.locator('#toastContainer .toast')).toHaveCount(0);
+
+    await trigger.click();
+    await expect(page.locator('#cockpitQuestsFlyout')).toBeVisible();
+
+    // Force the next poll (20s is too slow for a test) via the same
+    // visibilitychange hook the module already listens for.
+    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    await expect(page.locator('#toastContainer .toast-title')).toHaveText('Quest complete');
+    await expect(page.locator('#toastContainer .toast-message')).toHaveText('Create a workspace');
+    // The refresh updated content in place — the flyout stayed open and the
+    // summary now reflects both quests resolved.
+    await expect(page.locator('#cockpitQuestsFlyout')).toBeVisible();
+    await expect(trigger).toContainText('2/2');
+
+    // A cockpit-level refresh (e.g. after a workspace mutation) must not
+    // duplicate the trigger/flyout or re-toast an already-known completion.
+    await page.evaluate(() => window.dispatchEvent(new Event('ori:workspaces-changed')));
+    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    await expect(page.locator('#toastContainer .toast')).toHaveCount(1);
+    await expect(page.locator('#cockpitQuestsToggle')).toHaveCount(1);
+    await expect(page.locator('#cockpitQuestsFlyout')).toHaveCount(1);
   });
 
   test('stacks bridge zones below desktop width without horizontal overflow', async ({ page }) => {
@@ -654,33 +916,21 @@ test.describe('Home First Run', () => {
 
     await page.goto('/');
     await expect(page.locator('#homeCockpit')).toBeVisible();
-    await expect(page.locator('#questLog')).toBeVisible();
 
-    // Progression used to be a sibling stacked below the Operations Board. It
-    // is now a Today section inside the cockpit's rail, so "below the board" is
-    // no longer the shape. What still matters below desktop width: the page
-    // never scrolls horizontally, and the cockpit stacks workspace area above
-    // context rail (PRD FR134, FR135).
-    const layout = await page.evaluate(() => {
-      const area = document.querySelector('.cockpit-workspace-area')?.getBoundingClientRect();
-      const rail = document.getElementById('cockpitRail')?.getBoundingClientRect();
-      const progression = document.querySelector('.home-progression-zone')?.getBoundingClientRect();
-      return {
-        pageWidth: document.documentElement.scrollWidth,
-        viewportWidth: window.innerWidth,
-        areaTop: area?.top || 0,
-        railTop: rail?.top || 0,
-        progressionInRail: !!document
-          .querySelector('.home-progression-zone')
-          ?.closest('#cockpitRailToday'),
-        progressionRendered: !!progression
-      };
-    });
+    // Progression used to be a sibling stacked below the Operations Board,
+    // then a Today section inside the cockpit's rail; it is now its own
+    // Quests flyout, opened here explicitly rather than auto-opened
+    // (Issue #334 — general workspace-area/context-rail stacking at narrow
+    // widths is covered by home-workspace-cockpit.spec.ts). What still
+    // matters below desktop width: the page never scrolls horizontally with
+    // the flyout open, even with real quest content (PRD FR135).
+    await page.locator('#cockpitQuestsToggle').click();
+    await expect(page.locator('#questLog')).toBeVisible();
+    const layout = await page.evaluate(() => ({
+      pageWidth: document.documentElement.scrollWidth,
+      viewportWidth: window.innerWidth
+    }));
     expect(layout.pageWidth).toBeLessThanOrEqual(layout.viewportWidth + 1);
-    expect(layout.railTop).toBeGreaterThan(layout.areaTop);
-    if (layout.progressionRendered) {
-      expect(layout.progressionInRail).toBe(true);
-    }
   });
 });
 

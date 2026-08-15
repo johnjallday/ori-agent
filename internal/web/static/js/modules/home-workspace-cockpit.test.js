@@ -10,8 +10,19 @@ import assert from 'node:assert/strict';
 import {
   VIEW_MAP,
   VIEW_TREE,
+  RAIL_TODAY,
   RAIL_GROUP,
   RAIL_WORKSPACE,
+  RAIL_SUMMARY,
+  RAIL_ASK,
+  PANEL_NONE,
+  PANEL_UPDATES,
+  PANEL_QUESTS,
+  PANEL_CAPTURE,
+  togglePanelState,
+  panelTriggerId,
+  updatesBadgeView,
+  contextRailShouldBeOpen,
   parseViewFromQuery,
   searchForView,
   readCount,
@@ -476,10 +487,10 @@ test('escapeHtml neutralizes every HTML-significant character', () => {
 // Workspace-area states (FR110, FR112-FR114, FR120)
 // ---------------------------------------------------------------------------
 
-test('workspaceAreaState distinguishes loading, error, empty, and ready (FR120)', () => {
+test('workspaceAreaState distinguishes loading, error, authoritative empty, and ready (FR120)', () => {
   assert.equal(workspaceAreaState({ loading: true, workspaces: [] }).state, 'loading');
   assert.equal(workspaceAreaState({ error: new Error('boom'), workspaces: [] }).state, 'error');
-  assert.equal(workspaceAreaState({ workspaces: [] }).state, 'empty');
+  assert.equal(workspaceAreaState({ workspaces: [] }).state, 'empty-map');
   assert.equal(workspaceAreaState({ workspaces: [{ id: 'a' }] }).state, 'ready');
   // Loading wins over a stale error so a refresh is never shown as broken.
   assert.equal(
@@ -506,11 +517,10 @@ test('hqSiteVisible mirrors the map: a status that is not a valid HQ has a site 
   assert.equal(hqSiteVisible(undefined), false);
 });
 
-test('workspaceAreaState: zero workspaces still renders the map when the HQ site shows (#322)', () => {
-  assert.equal(workspaceAreaState({ workspaces: [], hqSiteVisible: true }).state, 'ready');
-  assert.equal(workspaceAreaState({ workspaces: [], hqSiteVisible: false }).state, 'empty');
-  // Omitting the flag entirely must behave exactly as before.
-  assert.equal(workspaceAreaState({ workspaces: [] }).state, 'empty');
+test('workspaceAreaState: authoritative zero workspaces renders the map with or without the HQ site (#320)', () => {
+  assert.equal(workspaceAreaState({ workspaces: [], hqSiteVisible: true }).state, 'empty-map');
+  assert.equal(workspaceAreaState({ workspaces: [], hqSiteVisible: false }).state, 'empty-map');
+  assert.equal(workspaceAreaState({ workspaces: [] }).state, 'empty-map');
   // A populated account is ready either way — the site never makes it emptier.
   assert.equal(
     workspaceAreaState({ workspaces: [{ id: 'a' }], hqSiteVisible: true }).state,
@@ -606,9 +616,13 @@ test('workspaceAreaState makes an unknown onboarding status retryable without ex
   assert.doesNotMatch(html, /Foreign Workspace|New Workspace|Import Folder/);
 });
 
-test('workspaceAreaState treats a non-array payload as empty, never as ready', () => {
-  assert.equal(workspaceAreaState({ workspaces: null }).state, 'empty');
-  assert.equal(workspaceAreaState({ workspaces: undefined }).state, 'empty');
+test('workspaceAreaState treats a non-array payload as a retryable failure, never authoritative empty', () => {
+  for (const workspaces of [null, undefined, {}]) {
+    const status = workspaceAreaState({ workspaces });
+    assert.equal(status.state, 'error');
+    assert.equal(status.canRetry, true);
+    assert.match(renderWorkspaceAreaStatusHTML(status), /data-cockpit-retry/);
+  }
 });
 
 test('a failed workspace load offers Retry (FR113)', () => {
@@ -620,14 +634,10 @@ test('a failed workspace load offers Retry (FR113)', () => {
   assert.match(html, /HTTP 500/);
 });
 
-test('the empty state offers New Workspace and Import Folder, not a bare empty map (FR114)', () => {
-  const html = renderWorkspaceAreaStatusHTML(workspaceAreaState({ workspaces: [] }));
-  assert.match(html, /New Workspace/);
-  assert.match(html, /Import Folder/);
-  // Both reuse the existing create/import modal contract (FR105).
-  assert.match(html, /data-bs-target="#addFolderModal"/);
-  assert.match(html, /data-workspace-import-mode="true"/);
-  assert.match(html, /data-workspace-import-mode="false"/);
+test('the authoritative empty state leaves the status host clear for the real Map (#320)', () => {
+  const status = workspaceAreaState({ workspaces: [] });
+  assert.equal(status.state, 'empty-map');
+  assert.equal(renderWorkspaceAreaStatusHTML(status), '');
 });
 
 test('the ready state renders no status message at all', () => {
@@ -1235,4 +1245,125 @@ test('askTargetDescription says nothing when there is no target at all', () => {
   assert.deepEqual(askTargetDescription(), { state: 'none', text: '' });
   // A nameless workspace is not a target worth announcing.
   assert.equal(askTargetDescription({ selected: { name: '  ' } }).state, 'none');
+});
+
+// ===========================================================================
+// Updates badge + Quests/context-rail header disclosure state (Issue #334)
+// ===========================================================================
+
+test('updatesBadgeView hides at zero attention rather than showing a 0 (FR15)', () => {
+  const flattened = [{ id: 'a', kind: 'workspace', needs_attention_count: 0 }];
+  const badge = updatesBadgeView(flattened, null);
+  assert.equal(badge.count, 0);
+  assert.equal(badge.visible, false);
+});
+
+test('updatesBadgeView carries the real aggregate attention count when positive (FR15)', () => {
+  // The count is how many WORKSPACES need attention, matching the retired
+  // rail toggle's badge — not a sum of each workspace's own attention count.
+  const flattened = [
+    { id: 'a', kind: 'workspace', needs_attention_count: 2 },
+    { id: 'b', kind: 'workspace', needs_attention_count: 1 },
+    { id: 'c', kind: 'workspace', needs_attention_count: 0 }
+  ];
+  const badge = updatesBadgeView(flattened, null);
+  assert.equal(badge.count, 2);
+  assert.equal(badge.visible, true);
+});
+
+test('updatesBadgeView never lets an unavailable source read as a fabricated 0', () => {
+  // No workspace here reports an attention field at all, so the underlying
+  // signal is unknown — the badge must still resolve to a real (hidden) 0
+  // rather than throwing, and must never invent a positive count.
+  const badge = updatesBadgeView([{ id: 'a', kind: 'workspace' }], null);
+  assert.equal(badge.count, 0);
+  assert.equal(badge.visible, false);
+});
+
+test('contextRailShouldBeOpen: a bare Today state always stays closed, never for attention or Progression (FR41-FR42)', () => {
+  // The point of this test is what contextRailShouldBeOpen does NOT take as
+  // input: unlike the retired railShouldBeOpen, it has no attention count or
+  // Progression/#questLog signal to consult in the first place.
+  assert.equal(contextRailShouldBeOpen(RAIL_TODAY), false);
+});
+
+test('contextRailShouldBeOpen: a real selection opens the rail (FR43-FR44)', () => {
+  assert.equal(contextRailShouldBeOpen(RAIL_WORKSPACE), true);
+  assert.equal(contextRailShouldBeOpen(RAIL_GROUP), true);
+  assert.equal(contextRailShouldBeOpen(RAIL_SUMMARY), true);
+  assert.equal(contextRailShouldBeOpen(RAIL_ASK), true);
+});
+
+test('togglePanelState: activating a closed trigger opens only that panel (FR7)', () => {
+  assert.equal(togglePanelState(PANEL_NONE, PANEL_UPDATES), PANEL_UPDATES);
+  assert.equal(togglePanelState(PANEL_NONE, PANEL_QUESTS), PANEL_QUESTS);
+  assert.equal(togglePanelState(PANEL_NONE, PANEL_CAPTURE), PANEL_CAPTURE);
+});
+
+test('togglePanelState: activating the SAME open trigger closes it (FR7)', () => {
+  assert.equal(togglePanelState(PANEL_UPDATES, PANEL_UPDATES), PANEL_NONE);
+  assert.equal(togglePanelState(PANEL_QUESTS, PANEL_QUESTS), PANEL_NONE);
+  assert.equal(togglePanelState(PANEL_CAPTURE, PANEL_CAPTURE), PANEL_NONE);
+});
+
+test('togglePanelState: activating a DIFFERENT trigger replaces whichever was open (FR8-FR9)', () => {
+  assert.equal(togglePanelState(PANEL_UPDATES, PANEL_QUESTS), PANEL_QUESTS);
+  assert.equal(togglePanelState(PANEL_QUESTS, PANEL_UPDATES), PANEL_UPDATES);
+  assert.equal(togglePanelState(PANEL_UPDATES, PANEL_CAPTURE), PANEL_CAPTURE);
+  assert.equal(togglePanelState(PANEL_CAPTURE, PANEL_QUESTS), PANEL_QUESTS);
+});
+
+test('panelTriggerId: closing a panel restores focus to the button that owns it (FR11)', () => {
+  assert.equal(panelTriggerId(PANEL_UPDATES), 'cockpitRailToggle');
+  assert.equal(panelTriggerId(PANEL_QUESTS), 'cockpitQuestsToggle');
+  assert.equal(panelTriggerId(PANEL_CAPTURE), 'cockpitCaptureBtn');
+});
+
+test('panelTriggerId: no panel open means no focus restoration target', () => {
+  assert.equal(panelTriggerId(PANEL_NONE), '');
+});
+
+// ===========================================================================
+// Header panel / context rail independence (Issue #334, Group 3)
+//
+// togglePanelState and contextRailShouldBeOpen take entirely separate inputs
+// (state.panel vs. state.railState) and neither reads the other — that
+// separation of inputs IS the guarantee that a header disclosure and a real
+// context selection can never drift into contradicting each other. These
+// tests walk the full transition matrix to document it.
+// ===========================================================================
+
+test('togglePanelState: a full walk through every trigger never leaves more than one panel value at a time', () => {
+  const trail = [
+    PANEL_UPDATES,
+    PANEL_QUESTS,
+    PANEL_QUESTS,
+    PANEL_CAPTURE,
+    PANEL_UPDATES,
+    PANEL_UPDATES
+  ];
+  const expected = [
+    PANEL_UPDATES,
+    PANEL_QUESTS,
+    PANEL_NONE,
+    PANEL_CAPTURE,
+    PANEL_UPDATES,
+    PANEL_NONE
+  ];
+  let panel = PANEL_NONE;
+  const observed = trail.map(requested => {
+    panel = togglePanelState(panel, requested);
+    return panel;
+  });
+  assert.deepEqual(observed, expected);
+});
+
+test('contextRailShouldBeOpen is unaffected by which header panel (if any) is open', () => {
+  // The context rail's open/closed decision takes ONLY railState — proving it
+  // returns the same answer regardless of a hypothetical concurrent panel
+  // value documents that the two state machines cannot influence each other.
+  for (const panel of [PANEL_NONE, PANEL_UPDATES, PANEL_QUESTS, PANEL_CAPTURE]) {
+    assert.equal(contextRailShouldBeOpen(RAIL_TODAY), false, `panel=${panel}`);
+    assert.equal(contextRailShouldBeOpen(RAIL_WORKSPACE), true, `panel=${panel}`);
+  }
 });

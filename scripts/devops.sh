@@ -10,10 +10,10 @@
 # therefore agree with the label filters `gh` applies server-side; the tests
 # cover both paths against the same fixtures.
 #
-# Writes are limited to two actions, both confirm-gated: answering an Issue's
-# open questions with a comment, and toggling the `approved` label. `approved`
-# is the pipeline's only human gate, so it is never written by the grooming
-# agent - only from here, or by hand on github.com.
+# Writes are deliberately limited and confirm-gated: capturing an Issue,
+# recording answers to its open questions, and toggling the `approved` label.
+# `approved` is the pipeline's only human gate, so it is never written by the
+# grooming agent - only from here, or by hand on github.com.
 set -uo pipefail
 
 readonly issue_limit=1000
@@ -40,8 +40,9 @@ Usage:
   ./scripts/devops.sh proposals
   ./scripts/devops.sh status
   ./scripts/devops.sh view <issue-number>
-  ./scripts/devops.sh new <title...> [--body <text>] [--yes]
-  ./scripts/devops.sh answer <issue-number> <text...> [--yes]
+  ./scripts/devops.sh new <title...> [--body <text> | --body-file <path|->] [--yes]
+  ./scripts/devops.sh decide <issue-number> <answers...> [--rationale <text>] [--yes]
+  ./scripts/devops.sh answer <issue-number> <answers...> [--rationale <text>] [--yes]
   ./scripts/devops.sh approve <issue-number> [--yes]
   ./scripts/devops.sh unapprove <issue-number> [--yes]
 
@@ -58,16 +59,29 @@ done/total parent groups, and whether its branch has a worktree checked out. It
 is entirely local - no network, no Herdr - and reads the dev worktree's
 gitignored tasks/, so ticked checkboxes show up before you commit them.
 
-new/answer/approve/unapprove write to GitHub. They prompt for confirmation on a
-terminal, and require --yes when stdin is not a terminal. A new Issue is created
-with no labels - capture takes ten seconds and the grooming routine specs it.
+In the picker, Enter opens an Issue with its own action bar; press `c` there to
+answer its open questions, or use the list's `c` shortcut to open directly at
+those answers. `n` accepts an optional one-line body; enter `:edit` to use
+VISUAL or EDITOR for multiline Markdown. For one-shot capture, `--body-file -`
+reads the body from stdin.
+
+In the picker's Ready view, pressing `s` on a selected row prints exactly
+`wt plan --issue <N>` - the command that starts Codex planning that Issue in
+the dev worktree. The picker only prints it: it never runs `wt`, sources it,
+copies to a clipboard, or reads GitHub again.
+
+new/decide/approve/unapprove write to GitHub. They prompt for confirmation on
+a terminal, and require --yes when stdin is not a terminal. `answer` remains a
+backwards-compatible alias for `decide`. A new Issue is created with no labels -
+capture takes ten seconds and the grooming routine specs it. A recorded decision
+keeps `needs-decision` until that routine processes the answer.
 EOF
 }
 
 print_menu() {
   printf '\n%s\n' \
     "[1/a] All  [2/d] Needs my decision  [3/b] Backlog  [4/f] Proposals  [5/y] Ready" \
-    "[v #] View  [n title] New  [c # text] Answer  [ok #] Approve  [q] Quit"
+    "[v #] View  [n title] New  [c # choices] Decide  [ok #] Approve  [q] Quit"
 }
 
 # Labels arrive from `gh` as a ", "-joined string. Split on commas and trim so a
@@ -432,33 +446,77 @@ confirm_write() {
   [[ "$reply" == y || "$reply" == Y ]]
 }
 
-answer_issue() {
-  local assume_yes=0
+print_indented() {
+  local value="$1" line
+  while IFS= read -r line; do
+    printf '  %s\n' "$line"
+  done <<< "$value"
+}
+
+# A stable marker lets the grooming routine distinguish a deliberate decision
+# from an unrelated follow-up comment without trying to infer intent from prose.
+format_decision_comment() {
+  local answers="$1" rationale="${2:-}"
+
+  printf '<!-- ori-decision -->\n\n**Answers:** %s' "$answers"
+  if [[ "$rationale" =~ [^[:space:]] ]]; then
+    printf '\n\n**Rationale:** %s' "$rationale"
+  fi
+}
+
+decision_recorded=0
+decide_issue() {
+  local assume_yes=0 expecting_rationale=0 rationale=""
+
+  decision_recorded=0
   local -a rest=()
-  local argument number body
+  local argument number answers body
 
   for argument in "$@"; do
-    if [[ "$argument" == "--yes" ]]; then
-      assume_yes=1
-    else
-      rest+=("$argument")
+    if [[ "$expecting_rationale" -eq 1 ]]; then
+      rationale="$argument"
+      expecting_rationale=0
+      continue
     fi
+    case "$argument" in
+      --yes) assume_yes=1 ;;
+      --rationale) expecting_rationale=1 ;;
+      *) rest+=("$argument") ;;
+    esac
   done
 
+  if [[ "$expecting_rationale" -eq 1 ]]; then
+    printf '%s\n' "--rationale requires text" >&2
+    return 2
+  fi
   if [[ "${#rest[@]}" -lt 2 || ! "${rest[0]}" =~ ^[1-9][0-9]*$ ]]; then
-    printf '%s\n' "answer requires an Issue number and comment text" >&2
+    printf '%s\n' "decide requires an Issue number and answers" >&2
     return 2
   fi
   number="${rest[0]}"
-  body="${rest[*]:1}"
-  if [[ -z "${body// /}" ]]; then
-    printf '%s\n' "answer requires non-empty comment text" >&2
+  answers="${rest[*]:1}"
+  if [[ ! "$answers" =~ [^[:space:]] ]]; then
+    printf '%s\n' "decide requires non-empty answers" >&2
+    return 2
+  fi
+  if [[ -n "$rationale" && ! "$rationale" =~ [^[:space:]] ]]; then
+    printf '%s\n' "--rationale requires non-empty text" >&2
     return 2
   fi
 
-  printf '\nWill comment on #%s:\n  %s\n' "$number" "$body"
-  confirm_write "Post this comment?" "$assume_yes" || return $?
-  gh issue comment "$number" --body "$body"
+  body="$(format_decision_comment "$answers" "$rationale")"
+  printf '\nWill record this decision on #%s:\n' "$number"
+  print_indented "$body"
+  printf 'The needs-decision label stays until the grooming routine processes it.\n'
+  confirm_write "Post this decision?" "$assume_yes" || return $?
+  gh issue comment "$number" --body "$body" || return $?
+  decision_recorded=1
+  printf 'Decision recorded. It will remain in Needs my decision until grooming triages it.\n'
+}
+
+# Kept for callers that learned the original command name.
+answer_issue() {
+  decide_issue "$@"
 }
 
 # Capture is meant to take ten seconds: a title is enough, and the grooming
@@ -466,25 +524,48 @@ answer_issue() {
 # NO labels - applying `backlog` here would skip the spec step the whole
 # pipeline is built around, and `needs-decision` would assert a spec exists.
 create_issue() {
-  local assume_yes=0 expecting_body=0
+  local assume_yes=0 expecting="" body_set=0 body_file_set=0
   local -a rest=()
-  local argument title body=""
+  local argument title body="" body_file="" status
 
   for argument in "$@"; do
-    if [[ "$expecting_body" -eq 1 ]]; then
-      body="$argument"
-      expecting_body=0
+    if [[ -n "$expecting" ]]; then
+      if [[ "$expecting" == body ]]; then
+        body="$argument"
+      else
+        body_file="$argument"
+      fi
+      expecting=""
       continue
     fi
     case "$argument" in
       --yes) assume_yes=1 ;;
-      --body) expecting_body=1 ;;
+      --body)
+        if [[ "$body_set" -eq 1 ]]; then
+          printf '%s\n' "--body may only be provided once" >&2
+          return 2
+        fi
+        body_set=1
+        expecting="body"
+        ;;
+      --body-file)
+        if [[ "$body_file_set" -eq 1 ]]; then
+          printf '%s\n' "--body-file may only be provided once" >&2
+          return 2
+        fi
+        body_file_set=1
+        expecting="body-file"
+        ;;
       *) rest+=("$argument") ;;
     esac
   done
 
-  if [[ "$expecting_body" -eq 1 ]]; then
-    printf '%s\n' "--body requires text" >&2
+  if [[ -n "$expecting" ]]; then
+    printf '%s requires text\n' "--${expecting}" >&2
+    return 2
+  fi
+  if [[ "$body_set" -eq 1 && "$body_file_set" -eq 1 ]]; then
+    printf '%s\n' "use either --body or --body-file, not both" >&2
     return 2
   fi
   if [[ "${#rest[@]}" -eq 0 ]]; then
@@ -492,19 +573,37 @@ create_issue() {
     return 2
   fi
   title="${rest[*]}"
-  if [[ -z "${title// /}" ]]; then
+  if [[ ! "$title" =~ [^[:space:]] ]]; then
     printf '%s\n' "new requires a non-empty title" >&2
     return 2
   fi
 
-  printf '\nWill create an Issue titled:\n  %s\n' "$title"
-  if [[ -n "$body" ]]; then
-    printf 'with body:\n  %s\n' "$body"
+  if [[ "$body_file_set" -eq 1 ]]; then
+    if [[ "$body_file" == - ]]; then
+      body="$(cat || exit $?; printf x)"
+    elif [[ ! -f "$body_file" || ! -r "$body_file" ]]; then
+      printf 'cannot read Issue body file: %s\n' "$body_file" >&2
+      return 2
+    else
+      body="$(cat < "$body_file" || exit $?; printf x)"
+    fi
+    status=$?
+    [[ "$status" -eq 0 ]] || return "$status"
+    # The sentinel prevents command substitution from stripping trailing
+    # newlines; remove only the byte we appended after the read.
+    body="${body%x}"
+  fi
+
+  printf '\nWill create an Issue titled:\n'
+  print_indented "$title"
+  if [[ "$body" =~ [^[:space:]] ]]; then
+    printf 'with body:\n'
+    print_indented "$body"
   fi
   printf 'It gets no labels; the grooming routine specs and triages it next run.\n'
   confirm_write "Create this Issue?" "$assume_yes" || return $?
-  # Pass the title through verbatim. GitHub stores it as given, so escaping an
-  # ampersand here would leave a literal `&amp;` in the title forever.
+  # Pass the title and body through verbatim. GitHub stores them as given, so
+  # escaping an ampersand here would leave a literal `&amp;` in the Issue.
   gh issue create --title "$title" --body "$body"
 }
 
@@ -574,8 +673,8 @@ run_one_shot() {
     view)
       view_issue "$@"
       ;;
-    answer)
-      answer_issue "$@"
+    decide|answer)
+      decide_issue "$@"
       ;;
     new|create)
       create_issue "$@"
@@ -812,7 +911,9 @@ render_picker() {
   fi
 
   printf '\n'
-  style '2' '↑/↓ or j/k select  •  ←/→ or h/l change view  •  Enter open  •  n new  •  c answer  •  o approve  •  r refresh  •  q quit'
+  style '2' '↑/↓ or j/k select  •  ←/→ or h/l change view  •  Enter open Issue  •  c open + decide  •  n new'
+  printf '\n'
+  style '2' 'o approve  •  s plan  •  r refresh  •  ? help  •  q quit'
   printf '\n'
 }
 
@@ -853,17 +954,96 @@ with_normal_terminal() {
   trap restore_terminal EXIT INT TERM
 }
 
-prompt_answer_issue() {
-  local issue_number="$1" body
+# Issue detail owns its own action prompt, so unlike the simple output helper
+# above it returns to the picker as soon as that prompt chooses Back.
+with_normal_terminal_session() {
+  local status
 
-  printf 'Answer #%s (e.g. "1B, 2A"); empty line cancels.\n' "$issue_number"
-  printf 'answer> '
-  IFS= read -r body || return 0
-  if [[ -z "${body// /}" ]]; then
+  restore_terminal
+  trap - EXIT INT TERM
+  printf '\n'
+  "$@"
+  status=$?
+  enter_picker_screen
+  trap restore_terminal EXIT INT TERM
+  return "$status"
+}
+
+print_picker_help() {
+  cat <<'EOF'
+Picker keys
+
+  ↑/↓, j/k      Select an Issue
+  ←/→, h/l      Change view
+  1..5          All, Decisions, Backlog, Proposals, Ready
+  Enter         Open the selected Issue; c decides within that view
+  c             Open the selected Issue directly at its decision prompt
+  n             Capture a new Issue with an optional body
+  o             Add the approved label
+  s             Print the selected Ready Issue's wt plan command
+  r             Refresh from GitHub
+  ?             Show this help
+  q             Quit
+
+Writes always show a preview and ask for confirmation. Recorded decisions leave
+the needs-decision label in place until the grooming routine processes them.
+EOF
+}
+
+prompt_decision_answers() {
+  local issue_number="$1" answers rationale
+
+  decision_recorded=0
+  printf '\nRecord a decision for #%s (e.g. "1B, 2A"); empty answers cancel.\n' "$issue_number"
+  printf 'answers> '
+  IFS= read -r answers || return 0
+  if [[ ! "$answers" =~ [^[:space:]] ]]; then
     printf 'Cancelled.\n'
     return 0
   fi
-  answer_issue "$issue_number" "$body"
+  printf 'rationale (optional)> '
+  IFS= read -r rationale || return 0
+  if [[ "$rationale" =~ [^[:space:]] ]]; then
+    decide_issue "$issue_number" "$answers" --rationale "$rationale"
+  else
+    decide_issue "$issue_number" "$answers"
+  fi
+}
+
+# The opened Issue is an interaction, not a dead-end view. Enter reaches this
+# action bar; the picker's c key passes an initial c to skip straight to answers.
+prompt_open_issue() {
+  local issue_number="$1" action="${2:-}"
+
+  view_issue "$issue_number" || return $?
+  while true; do
+    if [[ -z "$action" ]]; then
+      printf '\n[c] Decide  [r] Refresh  [Enter] Back\n'
+      printf 'issue> '
+      IFS= read -r action || return 0
+    fi
+
+    case "$action" in
+      c|decide)
+        prompt_decision_answers "$issue_number" || true
+        if [[ "$decision_recorded" -eq 1 ]]; then
+          printf '\nUpdated Issue:\n\n'
+          view_issue "$issue_number" || return $?
+          decision_recorded=0
+        fi
+        ;;
+      r|refresh)
+        view_issue "$issue_number" || return $?
+        ;;
+      ""|b|back|q|quit)
+        return 0
+        ;;
+      *)
+        printf 'Unknown Issue action: %s\n' "$action" >&2
+        ;;
+    esac
+    action=""
+  done
 }
 
 prompt_approve_issue() {
@@ -871,17 +1051,78 @@ prompt_approve_issue() {
   set_approved approve "$issue_number"
 }
 
-prompt_create_issue() {
-  local title
+# print_plan_command prints exactly `wt plan --issue <N>` for a selected
+# Ready row, or a clear explanation on stderr and a non-zero exit when there
+# is nothing to print. Pure: it performs no I/O beyond stdout/stderr, makes
+# no GitHub request, copies nothing to a clipboard, sources no other script,
+# and never guesses a row from a stale view or an Issue's position in the
+# list — the number is the row's immutable identity, passed in directly.
+print_plan_command() {
+  local view="$1" count="$2" issue_number="$3"
 
-  printf 'Capture a new Issue. A title is enough; empty line cancels.\n'
+  if [[ "$view" != "ready" ]]; then
+    printf 'Switch to the Ready view to print a planning command.\n' >&2
+    return 1
+  fi
+  if [[ "$count" -le 0 || -z "$issue_number" || ! "$issue_number" =~ ^[1-9][0-9]*$ ]]; then
+    printf 'No Ready row is selected.\n' >&2
+    return 1
+  fi
+  printf 'wt plan --issue %s\n' "$issue_number"
+}
+
+edited_issue_body=""
+edit_issue_body() {
+  local editor="${VISUAL:-${EDITOR:-}}" file status
+  local -a editor_args=()
+
+  edited_issue_body=""
+  if [[ -z "$editor" ]]; then
+    printf 'Set VISUAL or EDITOR to use :edit.\n' >&2
+    return 2
+  fi
+  file="$(mktemp "${TMPDIR:-/tmp}/ori-issue-body.XXXXXX")" || return $?
+  chmod 600 "$file" || { rm -f -- "$file"; return 1; }
+
+  # Splitting supports common values such as "code --wait" while avoiding eval.
+  # Editor paths containing spaces should be supplied through a wrapper script.
+  read -r -a editor_args <<< "$editor"
+  "${editor_args[@]}" "$file"
+  status=$?
+  if [[ "$status" -ne 0 ]]; then
+    rm -f -- "$file"
+    printf 'Editor exited with status %s.\n' "$status" >&2
+    return "$status"
+  fi
+  edited_issue_body="$(cat < "$file"; printf x)"
+  edited_issue_body="${edited_issue_body%x}"
+  rm -f -- "$file"
+}
+
+prompt_create_issue() {
+  local title body
+
+  printf 'Capture a new Issue. Empty title cancels.\n'
   printf 'title> '
   IFS= read -r title || return 0
-  if [[ -z "${title// /}" ]]; then
+  if [[ ! "$title" =~ [^[:space:]] ]]; then
     printf 'Cancelled.\n'
     return 0
   fi
-  create_issue "$title"
+
+  printf 'Optional one-line body; enter :edit for multiline Markdown; blank skips.\n'
+  printf 'body> '
+  IFS= read -r body || return 0
+  if [[ "$body" == :edit ]]; then
+    edit_issue_body || return $?
+    body="$edited_issue_body"
+  fi
+
+  if [[ "$body" =~ [^[:space:]] ]]; then
+    create_issue "$title" --body "$body"
+  else
+    create_issue "$title"
+  fi
 }
 
 run_picker() {
@@ -915,16 +1156,17 @@ run_picker() {
         selected_index=0
         reload=1
         ;;
-      1) filter_index=0; selected_index=0; reload=1 ;;
-      2) filter_index=1; selected_index=0; reload=1 ;;
-      3) filter_index=2; selected_index=0; reload=1 ;;
-      4) filter_index=3; selected_index=0; reload=1 ;;
-      5) filter_index=4; selected_index=0; reload=1 ;;
+      # Match the line REPL: 1 All, 2 Decisions, 3 Backlog, 4 Proposals,
+      # 5 Ready. The picker's array starts with Ready because it is the default.
+      1) filter_index=1; selected_index=0; reload=1 ;;
+      2) filter_index=2; selected_index=0; reload=1 ;;
+      3) filter_index=3; selected_index=0; reload=1 ;;
+      4) filter_index=4; selected_index=0; reload=1 ;;
+      5) filter_index=0; selected_index=0; reload=1 ;;
       c)
         if [[ "$count" -gt 0 ]]; then
-          with_normal_terminal prompt_answer_issue "${issue_numbers[$selected_index]}"
-          load_picker_index || true
-          apply_picker_filter "${picker_filters[$filter_index]}"
+          # c is a shortcut into the opened Issue's own Decide action.
+          with_normal_terminal_session prompt_open_issue "${issue_numbers[$selected_index]}" c
         fi
         ;;
       o)
@@ -940,9 +1182,18 @@ run_picker() {
         load_picker_index || true
         apply_picker_filter "${picker_filters[$filter_index]}"
         ;;
+      s)
+        # Prints the planning command only; it never sources wt, invokes the
+        # bridge, executes the printed text, copies to a clipboard, or reads
+        # GitHub again. Safe on an empty or non-Ready view.
+        with_normal_terminal print_plan_command "${picker_filters[$filter_index]}" "$count" "${issue_numbers[$selected_index]:-}"
+        ;;
+      '?')
+        with_normal_terminal print_picker_help
+        ;;
       ''|$'\r'|$'\n')
         if [[ "$count" -gt 0 ]]; then
-          with_normal_terminal view_issue "${issue_numbers[$selected_index]}"
+          with_normal_terminal_session prompt_open_issue "${issue_numbers[$selected_index]}"
         fi
         ;;
     esac
@@ -1057,12 +1308,12 @@ while true; do
       fi
       create_issue "$argument" ${extra:+"$extra"}
       ;;
-    c|comment|answer)
+    c|comment|answer|decide)
       if [[ -z "$argument" || -z "$extra" ]]; then
-        printf '%s\n' "answer requires an Issue number and comment text" >&2
+        printf '%s\n' "decide requires an Issue number and answers" >&2
         continue
       fi
-      answer_issue "$argument" "$extra"
+      decide_issue "$argument" "$extra"
       ;;
     ok|approve)
       if [[ -n "$extra" ]]; then

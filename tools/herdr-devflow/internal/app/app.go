@@ -247,6 +247,8 @@ func (a *App) Run(ctx context.Context, args []string) int {
 		return a.handoff(ctx, opts, commandArgs, false)
 	case "retry":
 		return a.handoff(ctx, opts, commandArgs, true)
+	case "issue-plan":
+		return a.issuePlan(ctx, opts, commandArgs)
 	case "add":
 		return a.addAgent(ctx, opts, commandArgs)
 	case "prompt":
