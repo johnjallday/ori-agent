@@ -498,6 +498,112 @@ async function installFixtureRoutes(page: Page) {
       await json(route, { proposals: [] });
       return;
     }
+    // Every workspace page reads its effective planning policy on load. These
+    // scenes' workspaces are fictional and have no folder on disk, so the
+    // accurate mock is the real handler's answer for zero capabilities:
+    // general/guided with planning off, and the folder-backed controls
+    // reporting themselves unavailable rather than claiming enforcement
+    // nothing performs. Planning being off keeps the scene identical to
+    // before the Plans workflow existed.
+    if (/^\/api\/workspaces\/[^/]+\/planning-policy$/.test(url.pathname)) {
+      await json(route, {
+        workspace_id: README_SCENES.workspace_command.workspace_id,
+        previewed_preset: '',
+        capabilities: { has_folder: false, is_repository: false, current_branch: '' },
+        policy: {
+          version: 1,
+          profile: 'general',
+          preset: 'guided',
+          planning_enabled: false,
+          guidance: {
+            style: 'feature',
+            clarification_depth: 'standard',
+            preferred_artifacts: ['prd', 'task_list', 'note'],
+            detail_level: 'standard',
+            tone: 'practical'
+          },
+          enforced: [
+            {
+              key: 'artifact_write',
+              label: 'Write planning documents',
+              description:
+                'Approved plans render their documents into the workspace, checked to stay inside it.',
+              enabled: true,
+              available: false,
+              reason: 'no_workspace_folder',
+              detail: 'This workspace has no folder to write documents into.'
+            },
+            {
+              key: 'destructive_confirmation',
+              label: 'Confirm destructive actions',
+              description:
+                'An action that deletes or overwrites stops for your confirmation first.',
+              enabled: true,
+              available: true
+            },
+            {
+              key: 'execution_mode',
+              label: 'Execution mode',
+              description:
+                'Approved work waits for you to start each step. Approval is still required either way.',
+              enabled: true,
+              available: true
+            },
+            {
+              key: 'handoff_confirmation',
+              label: 'Confirm specialist handoffs',
+              description: 'Handing work to a specialist agent stops for your confirmation first.',
+              enabled: true,
+              available: true
+            },
+            {
+              key: 'note_creation',
+              label: 'Save outputs as notes',
+              description: 'Useful results are written to workspace notes.',
+              enabled: true,
+              available: true
+            },
+            {
+              key: 'plan_approval',
+              label: 'Explicit plan approval',
+              description:
+                'No tasks, files, or runs are created until you approve one exact plan version.',
+              enabled: true,
+              available: true
+            },
+            {
+              key: 'repo_scan',
+              label: 'Repository inspection before code work',
+              description:
+                'Code-oriented execution does not begin until the repository inspection step has completed.',
+              enabled: false,
+              available: false,
+              reason: 'no_workspace_folder',
+              detail: 'This workspace has no folder, so there is no repository to inspect.'
+            },
+            {
+              key: 'safe_branch',
+              label: 'Branch precondition',
+              description:
+                'Code execution is blocked on a disallowed branch, and reports the current branch and what to do about it.',
+              enabled: true,
+              available: false,
+              reason: 'no_workspace_folder',
+              detail: 'This workspace has no folder, so there is no repository to inspect.'
+            },
+            {
+              key: 'task_materialization',
+              label: 'Approval creates the tasks',
+              description:
+                'Approved plan items become workspace tasks, with the approval recorded on each one.',
+              enabled: true,
+              available: true
+            }
+          ]
+        }
+      });
+      return;
+    }
     if (/^\/api\/workspaces\/[^/]+\/setup-wizard$/.test(url.pathname)) {
       await json(route, {
         success: true,
