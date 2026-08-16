@@ -123,7 +123,7 @@
       preferredPlugins: [],
       preferredTypes: ['general', 'tool-calling', 'research'],
       defaultType: 'general',
-      suggestedName: 'Task Assistant',
+      suggestedName: 'Task Specialist',
       tags: ['tasks', 'assistant']
     },
     app_introspection: {
@@ -1637,10 +1637,7 @@
     button.classList.toggle('modern-btn-primary', active);
     button.classList.toggle('modern-btn-secondary', !active);
     button.setAttribute('aria-pressed', active ? 'true' : 'false');
-    button.setAttribute(
-      'title',
-      active ? 'Reopen Workspace Manager activity' : 'Open Workspace Manager activity'
-    );
+    button.setAttribute('title', active ? 'Reopen Ask Ori activity' : 'Open Ask Ori activity');
 
     var label = button.querySelector('[data-home-assistant-launcher-label]');
     if (label) {
@@ -1654,7 +1651,7 @@
         embeddedPanel && !homeScopedPanel
           ? homeAssistantState.busy
             ? 'Assistant Working'
-            : 'Workspace Assistant'
+            : 'Ask Ori'
           : homeAssistantState.busy
             ? 'Live Activity'
             : 'Task Activity';
@@ -1794,7 +1791,7 @@
     if (!routeContext) {
       return document.querySelector('#homeAssistantCard[data-first-run="true"]')
         ? 'Plan a product launch…'
-        : 'Give Workspace Manager something to do…';
+        : 'Ask a question or describe what you want done';
     }
     var displayName = getWorkspaceHomeAssistantDisplayName();
     var workspaceMode = getWorkspacePromptMode();
@@ -1812,7 +1809,7 @@
     }
     return document.querySelector('#homeAssistantCard[data-first-run="true"]')
       ? 'Plan a product launch…'
-      : 'Give Workspace Manager something to do…';
+      : 'Ask a question or describe what you want done';
   }
 
   function renderHomeAssistantWorkspaceIdentity(routeContext) {
@@ -7054,7 +7051,7 @@
       plan.actions.push({
         type: 'create_agent',
         desiredAgentName:
-          requirement.defaultAgentName || (intent && intent.suggestedName) || 'Task Assistant',
+          requirement.defaultAgentName || (intent && intent.suggestedName) || 'Task Specialist',
         desiredAgentType:
           requirement.preferredAgentType || (intent && intent.defaultType) || 'tool-calling'
       });
@@ -7203,7 +7200,7 @@
     var seedName =
       requirement && requirement.defaultAgentName
         ? requirement.defaultAgentName
-        : (intent && intent.suggestedName) || 'Task Assistant';
+        : (intent && intent.suggestedName) || 'Task Specialist';
     var description = buildAutoConfigDescription(prompt, intent || HOME_INTENTS.general_task);
     var autoConfig = await maybeLoadAutoConfig(description);
     var agentName = buildUniqueAgentName(
@@ -7843,10 +7840,10 @@
   }
 
   function buildUniqueAgentName(baseName, existingNames) {
-    var sanitized = String(baseName || 'Task Assistant')
+    var sanitized = String(baseName || 'Task Specialist')
       .replace(/[^a-zA-Z0-9 _-]/g, '')
       .trim();
-    if (!sanitized) sanitized = 'Task Assistant';
+    if (!sanitized) sanitized = 'Task Specialist';
     var lowerNames = Object.create(null);
     for (var i = 0; i < existingNames.length; i++) {
       lowerNames[normalizeToken(existingNames[i])] = true;

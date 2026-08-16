@@ -27,6 +27,19 @@
   // ever gaining a mutation path (FR22/FR27).
   var GUIDE_WORK_TOPIC = 'workspace-manager';
 
+  // Explicit power-user overrides. Ordinary requests never need them — intent is
+  // inferred — but where one is typed it must win outright (FR24).
+  //
+  // These have to bypass the guide entirely rather than merely being escalated
+  // after it: "/ask what is a workspace" matches the guide's own workspace
+  // topic, so asking the guide first would answer it as navigation and silently
+  // discard the override.
+  var EXPLICIT_COMMAND_RE = /^\/(task|ask|note)\b/i;
+
+  function isExplicitCommand(text) {
+    return EXPLICIT_COMMAND_RE.test(String(text || '').trim());
+  }
+
   // The action types this controller will render. Anything else is dropped and
   // never becomes a control.
   var ALLOWED_ACTIONS = {
@@ -240,12 +253,40 @@
   }
 
   // The seam page modules use to contribute context they alone know about.
+  // Drops an in-flight request whose answer would now be read against a
+  // different workspace.
+  //
+  // Request sequencing alone does not cover this: the sequence only advances
+  // when a NEWER request is made, so a reply for workspace A that lands after
+  // the user switched to workspace B would render as actionable B content
+  // (FR17/FR46). Changing target invalidates the question that was asked about
+  // the old one.
+  function invalidateInFlightForContextChange(previousWorkspaceID) {
+    var nextWorkspaceID = collectContext().workspace_id;
+    if (previousWorkspaceID === nextWorkspaceID) return;
+    if (!state.pending) return;
+
+    state.seq += 1; // any reply already in flight is now stale
+    setPending(false, false);
+    if (state.els) {
+      state.els.reply.dataset.status = 'context-changed';
+      state.els.reply.innerHTML =
+        '<p class="ori-guide__answer">The workspace changed while I was working, ' +
+        'so I stopped rather than answer about a different one. Ask again here.</p>';
+    }
+    emit('context-invalidated', { from: previousWorkspaceID, to: nextWorkspaceID });
+  }
+
   function setContext(partial) {
     var next = partial || {};
+    var previousWorkspaceID = collectContext().workspace_id;
+
     if ('workspaceId' in next) pageContext.workspaceId = String(next.workspaceId || '');
     if ('taskId' in next) pageContext.taskId = String(next.taskId || '');
     if ('sessionId' in next) pageContext.sessionId = String(next.sessionId || '');
     if ('label' in next) pageContext.label = String(next.label || '');
+
+    invalidateInFlightForContextChange(previousWorkspaceID);
     refreshContextLabel();
     emit('context', { surface: collectContext().surface });
   }
@@ -503,6 +544,26 @@
     });
   }
 
+  // Reports a delegated request that failed, without making the caller wait on
+  // it.
+  //
+  // ask() must not return the controller's promise: a fulfilment path can stay
+  // unsettled indefinitely (an unanswered confirmation), and awaiting that would
+  // hang every caller — including the panel's own request bookkeeping.
+  function reportWorkFailure(promise, seq, reason) {
+    promise.catch(function () {
+      if (seq !== state.seq) return;
+      var failedEls = state.els;
+      if (failedEls) {
+        failedEls.reply.dataset.status = 'unavailable';
+        failedEls.reply.innerHTML =
+          '<p class="ori-guide__answer">I could not finish that just now. ' +
+          'Check the activity below — nothing runs without your confirmation.</p>';
+      }
+      emit('fallback', { reason: reason });
+    });
+  }
+
   function showActivityHost(visible) {
     var els = state.els;
     if (!els || !els.activityHost) return;
@@ -538,6 +599,28 @@
       recordActivity('you', question);
     }
 
+    // An explicit command goes straight to the work controller: the user has
+    // already said what they want, so nothing may reinterpret it (FR24).
+    if (!silent && question && isExplicitCommand(question)) {
+      if (hasWorkController()) {
+        reportWorkFailure(delegateWork(question, seq), seq, 'explicit-command-failed');
+        setPending(false, silent);
+        return Promise.resolve();
+      }
+
+      // The commands operate on a workspace, and this page has no work
+      // controller — say so rather than silently answering something else.
+      setPending(false, silent);
+      if (state.els) {
+        state.els.reply.dataset.status = 'unavailable';
+        state.els.reply.innerHTML =
+          '<p class="ori-guide__answer">That command works inside a workspace. ' +
+          'Open a workspace and try it there.</p>';
+      }
+      emit('fallback', { reason: 'explicit-command-unavailable' });
+      return Promise.resolve();
+    }
+
     return fetch(ENDPOINT, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -556,24 +639,13 @@
           // Where the full work controller exists, it does the real thing:
           // planning, agent selection, confirmations, workspace sessions.
           if (hasWorkController()) {
-            var handed = delegateWork(question, seq);
             // The panel's own turn is over once the request is handed over; the
             // activity host owns the busy state from here. Holding the composer
             // disabled until a confirmation is answered would lock the user out
             // of the very panel they need to answer it in.
+            reportWorkFailure(delegateWork(question, seq), seq, 'work-controller-failed');
             setPending(false, silent);
-
-            return handed.catch(function () {
-              if (seq !== state.seq) return;
-              var failedEls = state.els;
-              if (failedEls) {
-                failedEls.reply.dataset.status = 'unavailable';
-                failedEls.reply.innerHTML =
-                  '<p class="ori-guide__answer">I could not finish that just now. ' +
-                  'Check the activity below — nothing runs without your confirmation.</p>';
-              }
-              emit('fallback', { reason: 'work-controller-failed' });
-            });
+            return Promise.resolve();
           }
 
           return routeWork(question, seq)
@@ -935,6 +1007,7 @@
     _contextLabel: contextLabel,
     _needsWorkRouting: needsWorkRouting,
     _hasWorkController: hasWorkController,
+    _isExplicitCommand: isExplicitCommand,
     _refreshContextLabel: refreshContextLabel,
     _state: state,
     _validateAction: validateAction,

@@ -804,3 +804,174 @@ test('reopening does not re-greet over a reply the user came back to read', asyn
   assert.equal(asks, afterAsk, 'reopening must not fire another request');
   assert.match(els.oriGuideReply.innerHTML, /kept/);
 });
+
+/* ---- explicit overrides (FR24) ------------------------------------------------- */
+
+test('explicit commands are recognized, ordinary prompts are not', () => {
+  const { guide } = load();
+  for (const text of ['/task ship it', '/ask what is this', '/note buy milk', '  /NOTE x  ']) {
+    assert.equal(guide._isExplicitCommand(text), true, `${text} should be an explicit command`);
+  }
+  for (const text of [
+    'task: ship it',
+    'ask about the launch',
+    'note that this is fine',
+    'what/ask means',
+    ''
+  ]) {
+    assert.equal(guide._isExplicitCommand(text), false, `${text} should not be a command`);
+  }
+});
+
+// The bug this guards: "/ask what is a workspace" matches the guide's own
+// workspace topic, so asking the guide first answered it as navigation and
+// silently discarded the override.
+test('an explicit command bypasses the guide entirely', async () => {
+  const els = guideEls();
+  const ctx = load({ route: '/workspaces/launch', elements: els });
+  const calls = [];
+  ctx.sandbox.fetch = url => {
+    calls.push(url);
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+  };
+
+  const submitted = [];
+  ctx.sandbox.window.OriAskRouting = {
+    submit: (prompt, options) => {
+      submitted.push({ prompt, options });
+      return Promise.resolve({ handled: true });
+    }
+  };
+
+  await ctx.guide.ask('/ask what is a workspace');
+
+  assert.deepEqual(calls, [], 'no guide or route request should be made');
+  assert.equal(submitted.length, 1);
+  assert.equal(
+    submitted[0].prompt,
+    '/ask what is a workspace',
+    'the command must pass through intact'
+  );
+  assert.equal(submitted[0].options.routeContext.workspace_id, 'launch');
+});
+
+test('an explicit command off a workspace page explains instead of guessing', async () => {
+  const els = guideEls();
+  const ctx = load({ route: '/agents', elements: els });
+  const calls = [];
+  ctx.sandbox.fetch = url => {
+    calls.push(url);
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+  };
+
+  await ctx.guide.ask('/note remember this');
+
+  assert.deepEqual(calls, [], 'it must not fall back to the guide');
+  assert.equal(els.oriGuideReply.dataset.status, 'unavailable');
+  assert.match(els.oriGuideReply.innerHTML, /inside a workspace/);
+});
+
+/* ---- work delegation (FR31/FR36) ----------------------------------------------- */
+
+test('work is handed to the existing controller with the page context', async () => {
+  const els = guideEls();
+  const ctx = load({ route: '/workspaces/launch', elements: els });
+  ctx.sandbox.fetch = () =>
+    Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({ status: 'answered', topic_key: 'workspace-manager' })
+    });
+
+  const submitted = [];
+  ctx.sandbox.window.OriAskRouting = {
+    submit: (prompt, options) => {
+      submitted.push({ prompt, options });
+      return Promise.resolve({ handled: true });
+    }
+  };
+
+  await ctx.guide.ask('plan the launch');
+
+  assert.equal(submitted.length, 1);
+  assert.equal(submitted[0].prompt, 'plan the launch');
+  assert.equal(submitted[0].options.routeContext.workspace_id, 'launch');
+  // The controller renders into the panel's own activity host, so it must not
+  // also pop its old modal.
+  assert.equal(submitted[0].options.openThinkingModal, false);
+  assert.equal(els.oriGuideReply.dataset.status, 'delegated');
+});
+
+// Handing over must not wait on completion: a confirmation may sit unanswered
+// indefinitely, and the composer is where the user answers it.
+test('delegation acknowledges immediately and leaves the composer usable', async () => {
+  const els = guideEls();
+  const ctx = load({ route: '/workspaces/launch', elements: els });
+  ctx.sandbox.fetch = () =>
+    Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({ status: 'answered', topic_key: 'workspace-manager' })
+    });
+
+  // A controller that never settles, like a pending confirmation.
+  ctx.sandbox.window.OriAskRouting = { submit: () => new ctx.sandbox.Promise(() => {}) };
+
+  await ctx.guide.ask('do something that needs confirming');
+
+  assert.equal(els.oriGuideReply.dataset.status, 'delegated');
+  assert.equal(els.oriGuideSend.disabled, false, 'the composer must stay usable');
+});
+
+/* ---- context races (FR17/FR46) -------------------------------------------------- */
+
+test('switching workspace mid-flight drops the answer for the old one', async () => {
+  const els = guideEls();
+  const ctx = load({ route: '/', elements: els });
+
+  let resolveGuide;
+  ctx.sandbox.fetch = () =>
+    new ctx.sandbox.Promise(resolve => {
+      resolveGuide = resolve;
+    });
+
+  ctx.guide.setContext({ workspaceId: 'workspace-a' });
+  const pending = ctx.guide.ask('what is in here');
+
+  // The user selects a different workspace before the answer lands.
+  ctx.guide.setContext({ workspaceId: 'workspace-b' });
+  assert.equal(els.oriGuideReply.dataset.status, 'context-changed');
+
+  resolveGuide({
+    ok: true,
+    json: () => Promise.resolve({ status: 'answered', answer: 'ABOUT WORKSPACE A' })
+  });
+  await pending;
+
+  assert.ok(
+    !els.oriGuideReply.innerHTML.includes('ABOUT WORKSPACE A'),
+    'a reply about the previous workspace must not render against the new one'
+  );
+});
+
+test('a context change that keeps the same workspace does not disturb a request', async () => {
+  const els = guideEls();
+  const ctx = load({ route: '/workspaces/launch', elements: els });
+
+  let resolveGuide;
+  ctx.sandbox.fetch = () =>
+    new ctx.sandbox.Promise(resolve => {
+      resolveGuide = resolve;
+    });
+
+  const pending = ctx.guide.ask('what is in here');
+  // Only the label changes; the target is the same workspace.
+  ctx.guide.setContext({ label: 'Workspace: Launch' });
+  assert.notEqual(els.oriGuideReply.dataset.status, 'context-changed');
+
+  resolveGuide({
+    ok: true,
+    json: () => Promise.resolve({ status: 'answered', answer: 'STILL VALID' })
+  });
+  await pending;
+
+  assert.match(els.oriGuideReply.innerHTML, /STILL VALID/);
+});
