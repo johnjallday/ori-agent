@@ -568,12 +568,39 @@
   background: rgba(232, 134, 77, 0.04);
   border-radius: 16px;
 }
+/* The district header (#346 FR-139).
+   One strip that names the group, states its size, and carries its three
+   separate controls: select, move, and more. It sits ON the frame's top edge so
+   the frame still reads as one boundary rather than a box with a label floating
+   beside it. */
+.ws-map-district-header {
+  position: absolute;
+  /* Wholly ABOVE the frame's top edge, never overlapping it. The header it
+     replaced was a 10px tag that could sit half-in; this one carries
+     finger-sized Move and More controls, and inside the frame those would cover
+     the status flags of the district's own first row of buildings. */
+  bottom: 100%;
+  left: 12px;
+  right: 10px;
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  padding-bottom: 3px;
+  /* The strip spans the frame, but only its controls may take pointer input —
+     an invisible bar across the top of a district would swallow drags and
+     right-clicks aimed at the map underneath it (FR-157). */
+  pointer-events: none;
+}
+.ws-map-district-header > * {
+  pointer-events: auto;
+}
 /* Sentence case: this is clickable AND it renders a user-authored group name,
    which uppercase flattened. Names keep their author's casing. */
 .ws-map-district-tag {
-  position: absolute;
-  top: -11px;
-  left: 16px;
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  min-width: 0;
   border: 1px solid rgba(232, 134, 77, 0.35);
   background: var(--ws-bg-2);
   color: var(--ws-keeper);
@@ -581,7 +608,20 @@
   font-family: var(--ws-font-mono);
   font-size: 10px;
   letter-spacing: 0.3px;
-  padding: 2px 9px;
+  padding: 3px 9px;
+}
+/* A long user-authored name truncates rather than pushing Move and More off the
+   frame or forcing the header wider than the district (FR-134). */
+.ws-map-district-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 22ch;
+}
+.ws-map-district-count {
+  flex: none;
+  opacity: 0.72;
+  font-size: 9px;
 }
 .ws-map-district-tag:hover {
   background: rgba(232, 134, 77, 0.12);
@@ -590,13 +630,13 @@
   outline: 2px solid var(--ws-keeper);
   outline-offset: 2px;
 }
-/* The cluster drag handle. Separate from the label so selecting a group and
-   moving everything in it are unmistakably different gestures, and sized for a
-   finger at any zoom (#292 FR-85, FR-118). */
-.ws-map-district-handle {
-  position: absolute;
-  top: -11px;
-  right: 10px;
+/* The cluster drag handle and the overflow control. Separate from the label so
+   selecting a group, moving everything in it, and reaching its actions are
+   three unmistakably different gestures, and each sized for a finger at any
+   zoom (#292 FR-85, FR-118). */
+.ws-map-district-handle,
+.ws-map-district-more {
+  flex: none;
   min-width: 44px;
   min-height: 44px;
   display: grid;
@@ -604,15 +644,23 @@
   border: 1px solid rgba(232, 134, 77, 0.35);
   background: var(--ws-bg-2);
   color: var(--ws-keeper);
-  cursor: grab;
-  touch-action: none;
   font-size: 14px;
   line-height: 1;
 }
-.ws-map-district-handle:hover {
+.ws-map-district-handle {
+  margin-left: auto;
+  cursor: grab;
+  touch-action: none;
+}
+.ws-map-district-more {
+  cursor: pointer;
+}
+.ws-map-district-handle:hover,
+.ws-map-district-more:hover {
   background: rgba(232, 134, 77, 0.12);
 }
-.ws-map-district-handle:focus-visible {
+.ws-map-district-handle:focus-visible,
+.ws-map-district-more:focus-visible {
   outline: 2px solid var(--ws-keeper);
   outline-offset: 2px;
 }

@@ -1482,14 +1482,7 @@ import {
       // code Tree runs, so the two views cannot diverge.
       onDeleteWorkspace: id => void deleteWorkspaceAction(id, bulkContext()),
       onDeleteWorkspaces: ids => void deleteWorkspacesAction(ids, bulkContext()),
-      onGroupWorkspaces: ids =>
-        void createGroupAction(ids, bulkContext()).then(groupId => {
-          // Grouped workspaces still exist, so the map's own prune-on-mount
-          // cannot drop them from the checked set — clear it explicitly.
-          if (groupId && typeof window.OriWorkspaceMap.clearMultiSelection === 'function') {
-            window.OriWorkspaceMap.clearMultiSelection();
-          }
-        })
+      onGroupWorkspaces: ids => void groupFromMap(ids)
     });
     // A re-mount rebuilds the tiles, so the active filter must be reapplied.
     applyFilterToMap();
@@ -1558,6 +1551,44 @@ import {
    * the equivalent context itself. Both feed the same undo stack, so an item
    * trashed from either view is restorable by the same Undo (FR52).
    */
+  /**
+   * Group a Map selection (#346 FR-13 – FR-22, FR-28).
+   *
+   * The hierarchy mutation is the same shared one Tree runs — this only adds the
+   * Map's before and after. Before: pin the coordinates of any selected
+   * workspace that has never been placed by hand, so grouping cannot make it
+   * jump to a different automatic cell. After: select and frame the district the
+   * hierarchy actually produced, using the members it actually placed.
+   */
+  async function groupFromMap(ids) {
+    const map = window.OriWorkspaceMap;
+    const anchors =
+      map && typeof map.captureGroupingAnchors === 'function'
+        ? map.captureGroupingAnchors(ids)
+        : {};
+
+    const outcome = await createGroupAction(ids, bulkContext());
+    if (!outcome || !outcome.groupId) return;
+
+    // createGroupAction has already refreshed shared state, so the new group is
+    // in state.flattened and the Map can resolve its district.
+    if (map && typeof map.adoptNewGroup === 'function') {
+      const pinned = {};
+      // Only the members the hierarchy really placed changed islands; a member
+      // that failed to move is still where it was (FR-28).
+      outcome.placed.forEach(id => {
+        if (anchors[id]) pinned[id] = anchors[id];
+      });
+      await map.adoptNewGroup(outcome.groupId, pinned);
+    } else if (map && typeof map.clearMultiSelection === 'function') {
+      map.clearMultiSelection();
+    }
+
+    // One selection change, through the one shared path, so the Map highlight
+    // and the context rail cannot disagree (FR-21).
+    selectItem(outcome.groupId);
+  }
+
   function bulkContext() {
     return {
       rows: state.flattened,

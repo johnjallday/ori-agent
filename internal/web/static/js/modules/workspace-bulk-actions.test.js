@@ -135,12 +135,100 @@ test('a failed reparent still reports that the group exists', async () => {
     }
   });
 
-  await createGroupFrom(['w3'], h.ctx);
+  const result = await createGroupFrom(['w3'], h.ctx);
 
   assert.equal(h.toasted.length, 1, 'the user is told');
-  assert.match(h.toasted[0].message, /boom/);
+  assert.match(h.toasted[0].message, /could not be moved/);
   assert.equal(h.toasted[0].variant, 'error');
   assert.ok(h.changedCount() > 0, 'state is refreshed so the half-done group is visible');
+  assert.equal(result.groupId, 'g2', 'and the caller still learns the group exists');
+  assert.deepEqual(result.failed, ['w3']);
+});
+
+// ---------------------------------------------------------------------------
+// Grouping outcome (#346 FR-13, FR-14, FR-28)
+//
+// The Map needs more than "did it work": it has to frame exactly the members
+// the authoritative hierarchy actually placed in the new group, and it must be
+// able to say truthfully when only some of them moved.
+// ---------------------------------------------------------------------------
+
+const CREATED_G2 = {
+  ok: true,
+  status: 201,
+  json: () => Promise.resolve({ folder: { id: 'g2' } })
+};
+
+test('a successful group reports its id and every member the hierarchy placed (#346 FR-28)', async () => {
+  const h = ctxFor({
+    responses: { 'POST /api/workspaces': CREATED_G2, default: { ok: true, status: 204 } }
+  });
+
+  const result = await createGroupFrom(['w1', 'w3'], h.ctx);
+
+  assert.equal(result.groupId, 'g2');
+  assert.equal(result.name, 'New group');
+  assert.deepEqual(result.placed.sort(), ['w1', 'w3']);
+  assert.deepEqual(result.failed, []);
+  assert.equal(result.partial, false);
+});
+
+test('a partly failed group reports which members actually moved (#346 FR-28)', async () => {
+  const h = ctxFor({
+    responses: {
+      'POST /api/workspaces': CREATED_G2,
+      default: (url, init) =>
+        init.method === 'PATCH' && String(url).endsWith('w3')
+          ? { ok: false, status: 500, text: () => Promise.resolve('boom') }
+          : { ok: true, status: 204 }
+    }
+  });
+
+  const result = await createGroupFrom(['w1', 'w3'], h.ctx);
+
+  assert.equal(result.groupId, 'g2', 'the group still exists and is still reported');
+  assert.deepEqual(result.placed, ['w1']);
+  assert.deepEqual(result.failed, ['w3']);
+  assert.equal(result.partial, true);
+  assert.equal(h.toasted.length, 1, 'the partial outcome is surfaced');
+  assert.match(h.toasted[0].message, /1 of 2|could not be moved/i);
+});
+
+test('a failed group creation reports nothing created and moves nobody (#346 FR-27)', async () => {
+  const h = ctxFor({
+    responses: {
+      'POST /api/workspaces': { ok: false, status: 500, text: () => Promise.resolve('nope') },
+      default: { ok: true, status: 204 }
+    }
+  });
+
+  const result = await createGroupFrom(['w1', 'w3'], h.ctx);
+
+  assert.equal(result, null);
+  assert.equal(
+    h.calls.filter(c => c.method === 'PATCH').length,
+    0,
+    'nothing is reparented when there is no group to reparent into'
+  );
+});
+
+test('grouping never touches the Map layout or a coordinate (#346 FR-13, FR-14)', async () => {
+  const h = ctxFor({
+    responses: { 'POST /api/workspaces': CREATED_G2, default: { ok: true, status: 204 } }
+  });
+
+  await createGroupFrom(['w1', 'w3'], h.ctx);
+
+  assert.equal(
+    h.calls.filter(c => String(c.url).includes('workspace-map')).length,
+    0,
+    'the hierarchy mutation must not repack, snap, or relocate anything'
+  );
+  const bodies = h.calls.map(c => JSON.stringify(c.body || {}));
+  assert.ok(
+    !bodies.some(body => body.includes('"x"') || body.includes('"y"')),
+    'no coordinate is proposed by the grouping flow'
+  );
 });
 
 // ---------------------------------------------------------------------------

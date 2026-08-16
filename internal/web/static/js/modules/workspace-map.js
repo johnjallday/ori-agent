@@ -1643,20 +1643,48 @@
     );
   }
 
+  // How a district states its size in words. "Unavailable" is deliberately
+  // distinct from a truthful zero: a group that has not reported its contents
+  // must not claim to be empty (#346 FR-107).
+  function districtCountLabel(count) {
+    if (typeof count !== 'number' || !isFinite(count) || count < 0) return 'Count unavailable';
+    if (count === 0) return 'No workspaces';
+    return count === 1 ? '1 workspace' : count + ' workspaces';
+  }
+
+  /**
+   * An expanded district and its header (#346 FR-139 – FR-145).
+   *
+   * The header replaces the detached `▢ Name · Group` tag and the `⤧` glyph that
+   * preceded it. Both were unlabelled in every sense that mattered: the tag
+   * claimed a click would "Open" the group when on Home a click only selects it,
+   * and the glyph gave a screen reader a symbol with no name and a sighted user
+   * no idea it was a drag handle.
+   *
+   * The three controls stay separate on purpose. Selecting a group, moving
+   * everything inside it, and reaching its actions are three different
+   * intentions, and making the whole header draggable would collapse the first
+   * two into one gesture (FR-144, design §6).
+   */
   function districtHTML(d, selectedId) {
     var ws = d.ws || {};
     // A selected GROUP must keep its highlight across a re-mount, not only
     // until the next applySelection call (PRD FR58).
     var isSel = !!selectedId && ws.id === selectedId;
-    // Elastic bounds computed by computeWorldLayout from the group's anchor and
-    // its members' anchors. The outline is presentation only — it grows around
-    // a member that moved and never claims that geometry changed membership
-    // (FR-84, FR-8).
+    // The effective frame resolved by computeWorldLayout. It is presentation
+    // only — it grows around a member that moved and never claims that geometry
+    // changed membership (#346 FR-29, FR-8).
     var left = Number(d.left) || 0;
     var top = Number(d.top) || 0;
     var width = Number(d.width) || CELL_W;
     var height = Number(d.height) || CELL_H;
-    var label = (ws.name || 'Group') + ' group';
+    var name = ws.name || 'Group';
+    var label = name + ' group';
+    var countLabel = districtCountLabel(d.memberCount);
+    // Home selects on click and opens on Enter, so the control cannot promise
+    // "Open" as its only meaning. It names the group and its state instead, and
+    // aria-pressed carries the selection (FR-141, FR-143).
+    var selectLabel = name + ' group, ' + countLabel;
     return (
       '<div class="ws-map-district" role="group" aria-label="' +
       escapeHtml(label) +
@@ -1673,6 +1701,7 @@
       'px;height:' +
       height +
       'px">' +
+      '<div class="ws-map-district-header">' +
       '<button type="button" class="ws-map-district-tag' +
       (isSel ? ' is-selected' : '') +
       '" data-ws-id="' +
@@ -1681,11 +1710,21 @@
       'aria-pressed="' +
       (isSel ? 'true' : 'false') +
       '" ' +
+      // The full name stays available to assistive technology even when the
+      // visible label truncates (FR-135).
+      'title="' +
+      escapeHtml(name) +
+      '" ' +
       'aria-label="' +
-      escapeHtml('Open ' + label) +
-      '">▢ ' +
-      escapeHtml(ws.name || 'Group') +
-      ' · Group</button>' +
+      escapeHtml(selectLabel) +
+      '">' +
+      '<span class="ws-map-district-name">' +
+      escapeHtml(name) +
+      '</span>' +
+      '<span class="ws-map-district-count">' +
+      escapeHtml(countLabel) +
+      '</span>' +
+      '</button>' +
       // A separate, touch-sized handle for cluster movement. Dragging the label
       // would make "select this group" and "move everything in it" the same
       // gesture, and every existing group action — select, overview, open,
@@ -1693,8 +1732,21 @@
       '<button type="button" class="ws-map-district-handle" data-group-drag="' +
       escapeHtml(ws.id) +
       '" aria-label="' +
-      escapeHtml('Move the ' + (ws.name || 'group') + ' district and its workspaces') +
-      '" title="Move this district">⤧</button>' +
+      escapeHtml('Move group: ' + name) +
+      '" title="' +
+      escapeHtml('Move group: ' + name) +
+      '"><span class="ws-map-district-grip" aria-hidden="true">⠿</span></button>' +
+      // The overflow control opens the same menu right-click does, so a pointer
+      // user who never right-clicks and a keyboard user both reach the group's
+      // actions (FR-139, FR-149).
+      '<button type="button" class="ws-map-district-more" data-group-menu="' +
+      escapeHtml(ws.id) +
+      '" aria-haspopup="menu" aria-expanded="false" aria-label="' +
+      escapeHtml('Actions for ' + label) +
+      '" title="' +
+      escapeHtml('Actions for ' + name) +
+      '"><span aria-hidden="true">⋯</span></button>' +
+      '</div>' +
       '</div>'
     );
   }
@@ -1749,7 +1801,8 @@
             left: placed.left,
             top: placed.top,
             width: district.width,
-            height: district.height
+            height: district.height,
+            memberCount: district.memberCount
           },
           selectedId
         )
@@ -2640,7 +2693,12 @@
     });
     var districts = container.querySelectorAll('.ws-map-district-tag[data-ws-id]');
     Array.prototype.forEach.call(districts, function (el) {
-      el.classList.toggle('is-selected', el.getAttribute('data-ws-id') === id);
+      var sel = el.getAttribute('data-ws-id') === id;
+      el.classList.toggle('is-selected', sel);
+      // The selected state has to update in place, not only on the next full
+      // render: a screen reader reading the control it just activated must hear
+      // the new state, and the class alone is invisible to it (#346 FR-143).
+      el.setAttribute('aria-pressed', sel ? 'true' : 'false');
     });
     var selected = findWs(workspaces, id);
     // The map's own overview panel is absent in cockpit mode — the persistent
@@ -3476,6 +3534,36 @@
         true
       );
     });
+
+    // The district header's overflow control. It opens the very same menu the
+    // right-click and Shift+F10 paths open, so the three routes cannot offer
+    // different actions or different validation (#346 FR-156).
+    var overflows = container.querySelectorAll('[data-group-menu]');
+    Array.prototype.forEach.call(overflows, function (button) {
+      if (!button || typeof button.addEventListener !== 'function') return;
+      button.addEventListener('click', function (event) {
+        if (dragState || clusterDrag) return;
+        var groupId = button.getAttribute('data-group-menu');
+        var target = {
+          type: 'district',
+          id: groupId,
+          ws: findWs(workspaces, groupId),
+          element: button
+        };
+        if (!contextMenuItemsFor(target).length) return;
+        if (event.preventDefault) event.preventDefault();
+        if (event.stopPropagation) event.stopPropagation();
+        openMenuForTarget(
+          container,
+          workspaces,
+          options,
+          target,
+          anchorForElement(button),
+          event,
+          true
+        );
+      });
+    });
   }
 
   function bindTiles(container, workspaces, options) {
@@ -3894,6 +3982,135 @@
         zoom: DEFAULT_ZOOM
       }),
       container
+    );
+  }
+
+  // ---------- grouping handoff (#346 FR-13 – FR-22, FR-27, FR-28) ----------
+  //
+  // Grouping is a HIERARCHY mutation, owned by workspace-bulk-actions.js and
+  // shared with Tree. The Map adds two things around it and nothing else: it
+  // pins the coordinates of the workspaces about to be grouped, and afterwards
+  // it selects and frames the district the hierarchy actually produced. No part
+  // of this sends a parent or an order index through the layout API — it has no
+  // field for either (FR-98).
+
+  /**
+   * The drawn anchors of records that are about to be grouped but have never
+   * been placed by hand.
+   *
+   * Grouping does not move anything, but it does change what *automatic*
+   * placement would produce: a workspace that was its own island becomes a
+   * member of a group island, so its seeded cell changes and an unplaced
+   * building would appear to jump on the next render. Pinning its current
+   * coordinate first is what makes "grouping preserves every selected
+   * workspace's exact world coordinate" true for unplaced records too (FR-13).
+   *
+   * Records the user has already placed are skipped: their saved anchor already
+   * says where they are, and rewriting it would be a pointless write.
+   */
+  function captureGroupingAnchors(ids) {
+    var wanted = Object.create(null);
+    (Array.isArray(ids) ? ids : []).forEach(function (id) {
+      if (id) wanted[id] = true;
+    });
+    var anchors = Object.create(null);
+    if (!lastWorldLayout) return anchors;
+    lastWorldLayout.nodes.forEach(function (node) {
+      if (!wanted[node.id] || node.saved) return;
+      anchors[node.id] = { x: node.x, y: node.y };
+    });
+    return anchors;
+  }
+
+  /**
+   * Is the whole district already on screen? Used to keep the camera still
+   * unless it actually has to move (FR-22).
+   */
+  function districtFullyVisible(district, container) {
+    var canvas = container && container.querySelector('[data-ws-map-viewport]');
+    var viewport = framedViewport(canvas).full;
+    if (!viewport.width || !viewport.height) return false;
+    var topLeft = worldToScreen({ x: district.x, y: district.y }, camera, viewport);
+    var bottomRight = worldToScreen(
+      { x: district.x + district.width, y: district.y + district.height },
+      camera,
+      viewport
+    );
+    return (
+      topLeft.x >= 0 &&
+      topLeft.y >= 0 &&
+      bottomRight.x <= viewport.width &&
+      bottomRight.y <= viewport.height - CONTROL_STRIP_HEIGHT
+    );
+  }
+
+  /**
+   * Frame a district without changing the zoom the user chose (FR-22).
+   * Returns whether the camera actually moved.
+   */
+  function focusGroupDistrict(groupId, container) {
+    var district = renderedDistrict(groupId);
+    if (!district || !container) return false;
+    if (districtFullyVisible(district, container)) return false;
+    setCamera(centerOn(camera, district), container);
+    return true;
+  }
+
+  /**
+   * Adopt a group the hierarchy just created.
+   *
+   * `placed` is the authoritative member list — the workspaces the workspace
+   * store actually reparented, not the ones the click asked for — so a run where
+   * only some reparents succeeded frames only what really moved (FR-28).
+   *
+   * Nothing about the district's *presentation* is written here. A new group is
+   * expanded, automatically sized, and default-looking (FR-18 – FR-20), which is
+   * exactly the record the layout deliberately does not store, and its frame is
+   * derived from its members on every render. So the compact district is a
+   * property of the model rather than of a write that could fail. The one write
+   * this makes is the coordinate pin above, and its failure is survivable: the
+   * group and its membership are already committed, the district still renders
+   * tight and automatic, and the caller is told plainly (FR-27).
+   */
+  function adoptNewGroup(groupId, anchors, options) {
+    var opts = options || {};
+    var container = (lastMount && lastMount.container) || opts.container || null;
+    // The grouped workspaces still exist, so mount()'s prune-on-refresh cannot
+    // drop them from the checked set — clear it explicitly (FR-21).
+    multiSelected = Object.create(null);
+
+    var pinned = Object.keys(anchors || {});
+    var write =
+      pinned.length && layoutState.status === 'ready'
+        ? patchLayout([{ op: 'set_positions', positions: anchors }])
+        : Promise.resolve(null);
+
+    return write.then(
+      function () {
+        settleLayout();
+        if (container) focusGroupDistrict(groupId, container);
+        return { groupId: groupId, pinned: pinned, saved: true };
+      },
+      function () {
+        // Membership stands; only the coordinate pin failed. Say so, and hand
+        // back a retry that reuses the exact anchors we meant to save.
+        settleLayout();
+        if (container) {
+          focusGroupDistrict(groupId, container);
+          announce(
+            container,
+            'The group was created, but the positions of its workspaces could not be saved. They may move to automatic placement.'
+          );
+        }
+        return {
+          groupId: groupId,
+          pinned: pinned,
+          saved: false,
+          retry: function () {
+            return adoptNewGroup(groupId, anchors, options);
+          }
+        };
+      }
     );
   }
 
@@ -5061,6 +5278,11 @@
       multiSelected = Object.create(null);
       if (lastMount && lastMount.container) updateSelBar(lastMount.container);
     },
+    // The Map's half of the grouping flow (#346). The host still runs the one
+    // shared hierarchy mutation; these only pin coordinates beforehand and
+    // select/frame the resulting district afterwards.
+    captureGroupingAnchors: captureGroupingAnchors,
+    adoptNewGroup: adoptNewGroup,
     setSelectedId: function (container, workspaces, id, options) {
       if (!container) {
         selectedId = id || '';
@@ -5133,6 +5355,7 @@
       closeContextMenu({ restoreFocus: false });
     },
     tileHTML: tileHTML,
+    districtHTML: districtHTML,
     overviewBodyHTML: overviewBodyHTML,
     selBarHTML: selBarHTML,
     hqSiteView: hqSiteView,

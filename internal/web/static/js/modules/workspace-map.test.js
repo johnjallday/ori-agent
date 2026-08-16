@@ -770,6 +770,90 @@ test('tileHTML advertises select-vs-open affordance via aria-pressed and aria-la
   assert.match(selected, /Selected — activate to open/);
 });
 
+// ---------------------------------------------------------------------------
+// District header (#346 FR-139 – FR-145)
+// ---------------------------------------------------------------------------
+
+function districtMarkup(overrides = {}, selectedId = '') {
+  const { districtHTML } = loadOriWorkspaceMap();
+  return districtHTML(
+    {
+      ws: { id: 'g1', name: 'Campaign Ops' },
+      left: 100,
+      top: 100,
+      width: 400,
+      height: 300,
+      memberCount: 3,
+      ...overrides
+    },
+    selectedId
+  );
+}
+
+test('the district header names the group and states a truthful count (#346 FR-139, FR-140)', () => {
+  const html = districtMarkup();
+  assert.match(html, /ws-map-district-header/);
+  assert.match(html, /<span class="ws-map-district-name">Campaign Ops<\/span>/);
+  assert.match(html, /<span class="ws-map-district-count">3 workspaces<\/span>/);
+  // The replaced presentation is gone: no decorative box glyph, no "· Group"
+  // suffix, no unnamed ⤧ control.
+  assert.ok(!html.includes('▢'), 'the detached tag glyph is gone');
+  assert.ok(!html.includes('· Group'), 'the cryptic suffix is gone');
+  assert.ok(!html.includes('⤧'), 'the unnamed move glyph is gone');
+});
+
+test('the district count distinguishes one, none, and unavailable (#346 FR-106, FR-107)', () => {
+  assert.match(districtMarkup({ memberCount: 1 }), /1 workspace</);
+  assert.match(districtMarkup({ memberCount: 0 }), /No workspaces</);
+  // An unreported count must not claim to be a truthful zero.
+  assert.match(districtMarkup({ memberCount: undefined }), /Count unavailable</);
+});
+
+test('the header keeps select, move, and actions as three named controls (#346 FR-144, FR-145)', () => {
+  const html = districtMarkup();
+  assert.match(html, /aria-label="Campaign Ops group, 3 workspaces"/);
+  assert.match(html, /aria-label="Move group: Campaign Ops"/);
+  assert.match(html, /aria-label="Actions for Campaign Ops group"/);
+  assert.match(html, /data-group-menu="g1"/);
+  assert.match(html, /aria-haspopup="menu"/);
+  // The select control does not claim a click opens the group — on Home it
+  // selects (FR-141).
+  assert.ok(!/aria-label="Open Campaign Ops/.test(html));
+});
+
+test('the district select control carries selection state in place (#346 FR-143)', () => {
+  assert.match(districtMarkup({}, ''), /aria-pressed="false"/);
+  const selected = districtMarkup({}, 'g1');
+  assert.match(selected, /aria-pressed="true"/);
+  assert.match(selected, /ws-map-district-tag is-selected/);
+});
+
+test('selecting a district updates aria-pressed without a re-render (#346 FR-143)', async () => {
+  const { map, harness } = await mountedWithDistrict({ m1: { x: 152, y: 152 } });
+  const tag = harness.district('grp');
+  assert.ok(tag, 'the district is mounted');
+
+  map.setSelectedId(harness.container, [{ id: 'grp', kind: 'group', name: 'Ops' }], 'grp');
+  const districtTag = harness.districtTag('grp');
+  assert.equal(districtTag.getAttribute('aria-pressed'), 'true');
+
+  map.setSelectedId(harness.container, [{ id: 'grp', kind: 'group', name: 'Ops' }], '');
+  assert.equal(districtTag.getAttribute('aria-pressed'), 'false');
+});
+
+test('a hostile group name is escaped everywhere it appears (#346 FR-136)', () => {
+  const html = districtMarkup({ ws: { id: 'g1', name: '<img src=x onerror=alert(1)>"' } });
+  assert.ok(!html.includes('<img'), 'no raw markup reaches the district');
+  assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;/, 'the name renders as text');
+  // The trailing quote must not be able to close an attribute and start a new
+  // one — it appears escaped in every attribute the name lands in.
+  assert.equal(
+    (html.match(/&lt;img src=x onerror=alert\(1\)&gt;&quot;/g) || []).length,
+    8,
+    'every place the name appears — aria-labels, titles, and the visible span — carries it escaped'
+  );
+});
+
 test('overviewBodyHTML renders entry agent, roster, and tool/skill counts from enriched fields', () => {
   const { overviewBodyHTML } = loadOriWorkspaceMap();
   const html = overviewBodyHTML({
@@ -1706,6 +1790,7 @@ function createCameraHarness({ width = 1000, height = 600, tiles = [], districts
   // use the same shape.
   const makeNode = (id, { attribute = 'data-ws-id', classes: extraClasses = [] } = {}) => {
     const own = {};
+    const attrs = {};
     const tileClasses = new Set(extraClasses.length ? extraClasses : ['ws-map-tile']);
     const el = {
       style: { left: '', top: '' },
@@ -1715,10 +1800,12 @@ function createCameraHarness({ width = 1000, height = 600, tiles = [], districts
         contains: c => tileClasses.has(c),
         toggle: (c, on) => (on ? tileClasses.add(c) : tileClasses.delete(c))
       },
-      getAttribute: name => (name === attribute ? id : null),
+      getAttribute: name => (name === attribute ? id : name in attrs ? attrs[name] : null),
       // applyHQSelection asks every tile whether it is the reserved HQ site.
       hasAttribute: name => name === attribute,
-      setAttribute: () => {},
+      setAttribute: (name, value) => {
+        attrs[name] = String(value);
+      },
       // updateSelBar reads each tile's corner checkbox to mirror the checked
       // state onto aria-checked.
       querySelector: () => ({ setAttribute: () => {} }),
@@ -1751,6 +1838,11 @@ function createCameraHarness({ width = 1000, height = 600, tiles = [], districts
   );
   const handleEls = districts.map(id =>
     makeNode(id, { attribute: 'data-group-drag', classes: ['ws-map-district-handle'] })
+  );
+  // The district header's select/name control. Separate from the outline, and
+  // attribute-recording, so aria-pressed updates can be asserted (#346 FR-143).
+  const districtTagEls = districts.map(id =>
+    makeNode(id, { attribute: 'data-ws-id', classes: ['ws-map-district-tag'] })
   );
 
   const canvas = {
@@ -1890,6 +1982,11 @@ function createCameraHarness({ width = 1000, height = 600, tiles = [], districts
     isConnected: true,
     querySelectorAll: sel => {
       if (sel.includes('data-group-drag')) return handleEls;
+      if (sel.includes('ws-map-district-tag')) {
+        // The multi-select and selection sweeps ask for tiles and district tags
+        // together; applySelection asks for the tags alone.
+        return sel.includes('ws-map-tile') ? [...tileEls, ...districtTagEls] : districtTagEls;
+      }
       if (sel.includes('ws-map-tile')) return tileEls;
       return [];
     },
@@ -1919,7 +2016,9 @@ function createCameraHarness({ width = 1000, height = 600, tiles = [], districts
     set: value => {
       html = value;
       Object.keys(listeners).forEach(type => delete listeners[type]);
-      [...tileEls, ...districtEls, ...handleEls].forEach(el => el.resetListeners());
+      [...tileEls, ...districtEls, ...handleEls, ...districtTagEls].forEach(el =>
+        el.resetListeners()
+      );
     }
   });
 
@@ -1932,6 +2031,7 @@ function createCameraHarness({ width = 1000, height = 600, tiles = [], districts
     menu: menuHost,
     tile: id => tileEls.find(el => el.id === id),
     district: id => districtEls.find(el => el.id === id),
+    districtTag: id => districtTagEls.find(el => el.id === id),
     handle: id => handleEls.find(el => el.id === id),
     fire: (type, event) => (listeners[type] || []).forEach(fn => fn(event)),
     hasListener: type => !!(listeners[type] && listeners[type].length)
@@ -3049,6 +3149,179 @@ test('a keyboard move over an occupied footprint shows a blocked indicator too, 
   assert.equal(tile.classList.contains('is-blocked'), false, 'nothing lingers after cancelling');
   assert.equal(banner.classList.contains('is-blocked'), false);
   assert.equal(patches.length, 0);
+});
+
+// ---------------------------------------------------------------------------
+// The grouping handoff (#346 FR-13 – FR-22, FR-27)
+//
+// The Map pins the coordinates of unplaced workspaces before the hierarchy
+// mutation, then selects and frames the district the hierarchy produced. It
+// never proposes a parent or an order index.
+// ---------------------------------------------------------------------------
+
+async function mountedForGrouping({ patchResponse } = {}) {
+  const patches = [];
+  const map = loadMapWithFetch((url, init) => {
+    if (init && init.method === 'PATCH') {
+      patches.push(JSON.parse(init.body));
+      if (patchResponse === 'fail') return Promise.resolve({ ok: false, status: 500 });
+      return Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            result: { schema_version: 1, revision: 3, positions: {}, snap_to_grid: true }
+          })
+      });
+    }
+    return jsonResponse({
+      schema_version: 1,
+      revision: 1,
+      snap_to_grid: true,
+      // Only `placed` has been arranged by hand; `loose` is on automatic
+      // placement, which is the record grouping would otherwise move.
+      positions: { placed: { x: 152, y: 152 } }
+    });
+  });
+  const harness = createCameraHarness({ tiles: ['placed', 'loose'], districts: [] });
+  map.mount(harness.container, {
+    workspaces: [
+      { id: 'placed', name: 'Placed' },
+      { id: 'loose', name: 'Loose' }
+    ],
+    hideChrome: true,
+    selectOnly: true,
+    noAutoSelect: true
+  });
+  await flush();
+  return { map, harness, patches };
+}
+
+test('grouping pins only the coordinates automatic placement would move (#346 FR-13)', async () => {
+  const { map } = await mountedForGrouping();
+  const anchors = map.captureGroupingAnchors(['placed', 'loose']);
+
+  assert.ok(!('placed' in anchors), 'a hand-placed workspace already has a saved anchor');
+  assert.ok(anchors.loose, 'an unplaced workspace is pinned so grouping cannot move it');
+  assert.ok(Number.isFinite(anchors.loose.x) && Number.isFinite(anchors.loose.y));
+});
+
+test('adopting a new group saves the pinned anchors and nothing else (#346 FR-14, FR-98)', async () => {
+  const { map, patches } = await mountedForGrouping();
+  const anchors = map.captureGroupingAnchors(['loose']);
+
+  const result = await map.adoptNewGroup('g-new', anchors);
+
+  assert.equal(result.saved, true);
+  assert.equal(patches.length, 1, 'one write, for the coordinate pin only');
+  assert.equal(patches[0].operations.length, 1);
+  assert.equal(patches[0].operations[0].op, 'set_positions');
+  const body = JSON.stringify(patches[0]);
+  assert.equal(body.includes('parent'), false, 'the layout API cannot express membership');
+  assert.equal(body.includes('order_index'), false);
+  // A new group is expanded, automatic, and default-looking, which is exactly
+  // the record that is never stored — so nothing about presentation is written
+  // (FR-18 – FR-20, FR-193).
+  assert.equal(body.includes('set_group_'), false);
+  assert.equal(body.includes('sizing_mode'), false);
+});
+
+test('a group with nothing to pin writes nothing at all (#346 FR-193)', async () => {
+  const { map, patches } = await mountedForGrouping();
+  const result = await map.adoptNewGroup('g-new', {});
+  assert.equal(result.saved, true);
+  assert.equal(patches.length, 0, 'grouping already-placed workspaces needs no layout write');
+});
+
+test('a failed coordinate pin keeps the group and offers a real retry (#346 FR-27)', async () => {
+  const { map, patches } = await mountedForGrouping({ patchResponse: 'fail' });
+  const anchors = map.captureGroupingAnchors(['loose']);
+
+  const result = await map.adoptNewGroup('g-new', anchors);
+
+  assert.equal(result.saved, false);
+  assert.equal(result.groupId, 'g-new', 'membership stands — only the pin failed');
+  assert.equal(typeof result.retry, 'function', 'the failure is retryable');
+  assert.equal(patches.length, 1);
+
+  const retried = await result.retry();
+  assert.equal(retried.saved, false, 'the retry reuses the same intended anchors');
+  assert.equal(patches.length, 2);
+  assert.deepEqual(patches[1], patches[0], 'and sends exactly the same write');
+});
+
+test('adopting a new group clears the prior multi-selection (#346 FR-21)', async () => {
+  const { map, harness } = await mountedForGrouping();
+  harness.tile('placed').fire('click', { metaKey: true, preventDefault() {} });
+  harness.tile('loose').fire('click', { metaKey: true, preventDefault() {} });
+
+  await map.adoptNewGroup('g-new', {});
+
+  // The grouped workspaces still exist, so mount()'s prune cannot drop them.
+  const bar = harness.control('[data-ws-map-selbar]');
+  assert.ok(!bar || !/2 selected/.test(bar.innerHTML || ''), 'the checked set was cleared');
+});
+
+async function mountedWithDistrict(memberPositions, extraWorkspaces = []) {
+  const map = loadMapWithFetch((url, init) => {
+    if (init && init.method === 'PATCH') {
+      return Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            result: { schema_version: 1, revision: 3, positions: {}, snap_to_grid: true }
+          })
+      });
+    }
+    return jsonResponse({
+      schema_version: 1,
+      revision: 1,
+      snap_to_grid: true,
+      positions: memberPositions
+    });
+  });
+  const harness = createCameraHarness({
+    tiles: ['m1', ...extraWorkspaces.map(ws => ws.id)],
+    districts: ['grp']
+  });
+  map.mount(harness.container, {
+    workspaces: [
+      { id: 'grp', kind: 'group', name: 'Ops' },
+      { id: 'm1', parent_id: 'grp', name: 'M1' },
+      ...extraWorkspaces
+    ],
+    hideChrome: true,
+    selectOnly: true,
+    noAutoSelect: true
+  });
+  await flush();
+  harness.fire('keydown', { key: '0', preventDefault() {} }); // Reset view: 100%
+  return { map, harness };
+}
+
+test('framing a new district keeps the zoom the user chose (#346 FR-22)', async () => {
+  // A distant outsider drags the content bounds, so Reset view leaves the
+  // camera halfway between the two and the new district off-screen.
+  const { map } = await mountedWithDistrict({ m1: { x: 152, y: 152 }, far: { x: 9000, y: 9000 } }, [
+    { id: 'far', name: 'Far' }
+  ]);
+  const before = map.getCamera();
+
+  await map.adoptNewGroup('grp', {});
+  const after = map.getCamera();
+
+  assert.equal(after.zoom, before.zoom, 'framing a group is not a zoom');
+  assert.notEqual(after.centerX, before.centerX, 'an off-screen district is brought into view');
+  assert.ok(after.centerX < before.centerX, 'and the camera moved toward it');
+});
+
+test('a district already on screen does not move the camera at all (#346 FR-22, FR-171)', async () => {
+  const { map } = await mountedWithDistrict({ m1: { x: 152, y: 152 } });
+  const before = map.getCamera();
+
+  await map.adoptNewGroup('grp', {});
+  const after = map.getCamera();
+
+  assert.deepEqual({ ...after }, { ...before }, 'the minimum adjustment is none');
 });
 
 // ---------------------------------------------------------------------------
