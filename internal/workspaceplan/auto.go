@@ -328,11 +328,24 @@ func (r *AutoRunner) finish(ctx context.Context, plan *Plan, tasks []workspace.T
 }
 
 // report logs a failure a background loop cannot return to anyone.
+//
+// The message is flattened to a single line first. It interpolates plan content
+// the user wrote — a title carrying a newline would otherwise forge an extra
+// log entry, and TrimSpace only removes the ends, never the interior.
 func (r *AutoRunner) report(planID, format string, args ...any) {
-	message := fmt.Sprintf(format, args...)
+	message := singleLine(fmt.Sprintf(format, args...))
 	if r.logger != nil {
-		r.logger.Printf("workspaceplan auto %s: %s", planID, message)
+		r.logger.Printf("workspaceplan auto %s: %s", singleLine(planID), message)
 		return
 	}
-	log.Printf("workspaceplan auto %s: %s", planID, strings.TrimSpace(message))
+	// #nosec G706 -- both values are flattened by singleLine above; gosec's
+	// taint analysis does not follow the sanitizer through the helper.
+	log.Printf("workspaceplan auto %s: %s", singleLine(planID), message)
+}
+
+// singleLine collapses newlines and carriage returns so a logged value cannot
+// span more than the one line it was given.
+func singleLine(value string) string {
+	replaced := strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ").Replace(value)
+	return strings.TrimSpace(replaced)
 }

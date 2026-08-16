@@ -33,9 +33,18 @@ func (w *FileArtifactWriter) WriteArtifact(_ context.Context, workspaceID, relat
 	if err != nil {
 		return err
 	}
+	// #nosec G301 G703 -- 0755 matches the permissions used for every other
+	// user-facing workspace folder (see workspace/backlog_markdown_synchronizer.go
+	// and sessionhttp/workspace_handler_sync.go); target came from resolve(),
+	// which normalizes the path, re-checks containment against the
+	// symlink-evaluated root, and re-checks it again against the resolved
+	// parent -- gosec's taint analysis cannot follow through that helper.
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 		return fmt.Errorf("create artifact directory: %w", err)
 	}
+	// #nosec G306 G703 -- 0644 keeps plan artifacts (PRDs, task lists, notes)
+	// openable in the user's own editor like every other workspace file;
+	// target is containment-checked by resolve() as above.
 	if err := os.WriteFile(target, content, 0o644); err != nil {
 		return fmt.Errorf("write artifact: %w", err)
 	}
@@ -49,6 +58,8 @@ func (w *FileArtifactWriter) RemoveArtifact(_ context.Context, workspaceID, rela
 	if err != nil {
 		return err
 	}
+	// #nosec G703 -- target is containment-checked by resolve() (normalize,
+	// symlink-evaluated root, re-checked resolved parent) before any removal.
 	if err := os.Remove(target); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("remove artifact: %w", err)
 	}

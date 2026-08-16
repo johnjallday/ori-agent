@@ -2,6 +2,7 @@ package workspaceplan
 
 import (
 	"context"
+	"log"
 	"strings"
 	"testing"
 
@@ -428,4 +429,28 @@ func approveVersion(
 		t.Fatalf("approve: %v", err)
 	}
 	return version, approval
+}
+
+// A background runner logs plan content the user wrote. A title carrying a
+// newline must not be able to forge a second log entry, which is what a bare
+// TrimSpace allowed: it only strips the ends, never the interior.
+func TestReportedValuesCannotForgeALogLine(t *testing.T) {
+	logged := &strings.Builder{}
+	runner := &AutoRunner{logger: log.New(logged, "", 0)}
+
+	runner.report(
+		"plan-1\nworkspaceplan auto plan-1: forged plan id",
+		"draft %q failed",
+		"Ship it\nworkspaceplan auto plan-1: forged message",
+	)
+
+	output := strings.TrimSuffix(logged.String(), "\n")
+	if strings.Contains(output, "\n") {
+		t.Errorf("report emitted more than one line:\n%s", output)
+	}
+	// The content is still reported, just flattened — sanitizing must not
+	// silently swallow the diagnostic.
+	if !strings.Contains(output, "forged message") {
+		t.Errorf("report dropped the message content: %q", output)
+	}
 }

@@ -80,6 +80,10 @@ func resolveGitDir(folderPath string) (string, bool) {
 	if !filepath.IsAbs(pointer) {
 		pointer = filepath.Join(folderPath, pointer)
 	}
+	// #nosec G703 -- read-only existence probe, no open and no write. pointer is
+	// the gitdir: target the workspace's own .git file declares, which is how
+	// git worktrees and submodules legitimately point elsewhere; the result is
+	// used only to answer "is this a repository".
 	if info, err := os.Stat(pointer); err != nil || !info.IsDir() {
 		return "", false
 	}

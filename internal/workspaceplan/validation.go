@@ -62,6 +62,8 @@ const (
 	// IssueCredentialInContent marks content carrying something shaped like a
 	// credential. It is refused rather than redacted: an immutable version can
 	// only hide a token after the fact, never remove it (FR-170).
+	// #nosec G101 -- this is the NAME of the rule that refuses credentials, not
+	// a credential: the value is the literal string "credential_in_content".
 	IssueCredentialInContent ValidationCode = "credential_in_content"
 )
 
