@@ -1,0 +1,68 @@
+{{define "ask-ori-activity.tmpl"}}
+<!--
+  Ask Ori work activity — the render targets for routing, planning,
+  confirmations, and the workspace conversation.
+
+  These element ids and the data-home-assistant-surface="panel" contract are
+  kept exactly as dashboard.js expects them. That is deliberate: all existing
+  routing, planning, confirmation, automation-mode, timeout, error, and Task
+  Activity behaviour is preserved unchanged, and only its location moves.
+
+  Before Issue #350 this markup existed three times — in dashboard.tmpl for
+  Home, support-chat.tmpl for the workspace hub/detail/task pages, and inline in
+  workspace-canvas.tmpl — one copy per page, each with its own composer beside
+  it. They are mutually exclusive per page, so consolidating them meant moving
+  all three at once: the universal panel is mounted on every page, so the moment
+  it carries these ids, any surviving copy would be a duplicate id on that page.
+
+  The composer that feeds this lives in the universal panel above; there is no
+  second input here, and no Task/Ask/Note mode switch — intent is inferred
+  (FR5/FR23).
+-->
+<section id="homeAssistantThinkingModal" class="ask-ori-activity is-idle"
+         data-home-assistant-surface="panel" data-home-assistant-panel-scope="universal"
+         aria-labelledby="homeAssistantThinkingModalLabel" hidden>
+  <header class="ask-ori-activity__head">
+    <h3 id="homeAssistantThinkingModalLabel" class="ask-ori-activity__title">Ask Ori</h3>
+    <div id="homeAssistantThinkingStatus" class="ask-ori-activity__status" role="status" aria-live="polite">
+      <span id="homeAssistantThinkingSpinner" class="spinner-border spinner-border-sm me-2 d-none" aria-hidden="true"></span>
+      <span>Ready.</span>
+    </div>
+    <!-- The resolved target, visible before anything consequential runs (FR41). -->
+    <p id="cockpitAskTarget" class="ask-ori-activity__target" role="status" aria-live="polite"></p>
+  </header>
+
+  <div id="homeAssistantRoutingSummary" class="home-assistant-routing-summary d-none"></div>
+  <div id="homeAssistantPlanning" class="home-assistant-planning d-none mt-3"></div>
+  <div id="homeAssistantInlineReply" class="home-assistant-inline-reply d-none mt-3"></div>
+  <div id="homeAssistantActions" class="d-flex flex-wrap gap-2 mt-3 d-none"></div>
+
+  <section id="homeAssistantConversationSection" class="home-assistant-conversation-section mt-3 is-empty">
+    <div class="home-assistant-conversation-section-header">
+      <div>
+        <div class="home-assistant-conversation-section-eyebrow">Conversation History</div>
+        <div id="homeAssistantConversationSummary" class="home-assistant-conversation-section-copy">
+          Progress updates will appear here after you send a request.
+        </div>
+      </div>
+      <button id="homeAssistantConversationToggleBtn" type="button" class="modern-btn modern-btn-secondary modern-btn-sm" hidden>
+        Hide Conversation
+      </button>
+    </div>
+    <div id="homeAssistantConversation" class="home-assistant-conversation p-3" role="log" aria-live="polite">
+      <div class="home-assistant-thinking-placeholder">
+        Progress updates will appear here after you send a request.
+      </div>
+    </div>
+  </section>
+</section>
+
+<!--
+  Kept for dashboard.js, which reads the workspace identity and quick prompts
+  from these ids. The identity is the resolved entry agent for the current
+  workspace, not a second product name.
+-->
+<div id="homeAssistantCard" class="ask-ori-work-card" hidden>
+  <span id="homeAssistantIdentityName" class="ask-ori-work-identity"></span>
+</div>
+{{end}}

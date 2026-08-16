@@ -423,14 +423,17 @@ func TestRenderHomeCockpitShell(t *testing.T) {
 		`cockpit-flyout-toggle__label">Quests<`,
 		`data-role="quests-summary"`,
 		`id="cockpitQuestsFlyout"`,
-		// Ask Ori activity lives in the rail as an embedded panel (FR96).
+		// Ask Ori's work activity reaches Home through the one universal panel
+		// rather than a Home-only rail state (Issue #350 FR39/FR68). The element
+		// ids and the panel surface contract are unchanged, so all existing
+		// routing, planning, and confirmation behaviour still applies.
 		`data-home-assistant-surface="panel"`,
 		`id="homeAssistantThinkingModal"`,
 		`id="homeAssistantRoutingSummary"`,
 		`id="homeAssistantConversation"`,
-		// Ask Ori stays above the cockpit in both views (FR14, FR92).
 		`id="homeAssistantCard"`,
-		`id="homeAssistantInput"`,
+		// The one composer, from the universal panel.
+		`id="oriGuideInput"`,
 		// Creation reuses the existing modal contract (FR105).
 		`id="cockpitCreateWorkspaceBtn"`,
 		`data-bs-target="#addFolderModal"`,
@@ -468,6 +471,14 @@ func TestRenderHomeCockpitShell(t *testing.T) {
 		`class="home-command-layout"`,
 		`aria-label="Operations board"`,
 		`id="cockpitRailViewBtn"`,
+		// Home's own command strip, retired by Issue #350: a second composer
+		// beside the global Ask Ori launcher. Its input, send button, kicker,
+		// and suggested chips all moved into the one universal panel.
+		`id="homeAssistantInput"`,
+		`id="homeAssistantForm"`,
+		`id="homeAssistantSendBtn"`,
+		`home-command-strip`,
+		`home-command-kicker`,
 		`id="homeUpcomingTasks"`,
 		// Issue #334: the rail's own "Today" panel is retired — its content now
 		// lives in the Updates/Quests flyouts, never inside #cockpitRail.

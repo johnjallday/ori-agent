@@ -92,6 +92,11 @@
       id="oriGuideReply"
       role="status"
       aria-live="polite"></div>
+
+    <!-- The work-path render targets. Real planning, confirmations, and the
+         workspace conversation land here through the existing controller, in
+         the same panel as the question that started them (FR39). -->
+    {{template "ask-ori-activity.tmpl" .}}
   </section>
 </div>
 {{end}}

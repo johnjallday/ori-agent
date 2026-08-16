@@ -125,6 +125,10 @@ test('no guide control is pointer-only', async ({ page }) => {
     const bad = [];
     for (const el of controls) {
       if (el.disabled) continue;
+      // Only controls the user is actually being offered. The panel hosts the
+      // work-activity region, whose controls stay hidden until there is work to
+      // show; an unrendered button is not a pointer-only control.
+      if (el.hidden || el.closest('[hidden]') || el.offsetParent === null) continue;
       if (el.getAttribute('tabindex') === '-1') {
         bad.push(el.id || el.className);
         continue;

@@ -2260,6 +2260,19 @@ export class WorkspaceDetailPage {
           origin: 'ask_ori'
         });
       }
+
+      // Give Ask Ori the workspace's real name. The panel can derive the id
+      // from the URL on its own, but only this page knows what the id is
+      // called — and a user confirming work needs to recognize the target,
+      // not read a UUID (FR4/FR41).
+      if (window.OriGuide && typeof window.OriGuide.setContext === 'function') {
+        const workspaceName = String(this.workspace?.name || '').trim();
+        const onCanvas = Boolean(window.location?.pathname?.includes('/canvas'));
+        window.OriGuide.setContext({
+          workspaceId: this.workspaceId,
+          label: workspaceName ? (onCanvas ? 'Canvas: ' : 'Workspace: ') + workspaceName : ''
+        });
+      }
       await this.renderWorkspaceInfo();
       this.syncProjectActionState();
       this.renderWorkspaceMCPBindings();
@@ -2395,7 +2408,7 @@ export class WorkspaceDetailPage {
           'This workspace has no Commander assigned. Create one so chats, routing, and task orchestration have a default manager.',
         action: 'entry_agent',
         actionLabel: 'Create Commander',
-        agentName: defaults.seedName || 'Workspace Manager',
+        agentName: defaults.seedName || 'Workspace Commander',
         meta: [workspaceName, 'No Commander']
       });
     }
@@ -5502,7 +5515,7 @@ export class WorkspaceDetailPage {
       ? workspaceName.toLowerCase().endsWith(' manager')
         ? workspaceName
         : workspaceName + ' Manager'
-      : 'Workspace Manager';
+      : 'Workspace Commander';
     const agentName = String(options?.seedName || '').trim() || fallbackAgentName;
     const systemPrompt =
       `You are the workspace manager for "${workspaceName || 'this workspace'}". ` +

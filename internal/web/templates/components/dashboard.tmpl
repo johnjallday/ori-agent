@@ -1,48 +1,12 @@
 <!-- Ori Dashboard — Command Bridge -->
 <div class="home-command-bridge" data-first-run="{{if .Extra.IsFirstRun}}true{{else}}false{{end}}">
   <!--
-    Workspace Manager: the surface that plans, routes, and runs real work. It
-    was labelled "Ask Ori" until the cozy-character-experience feature, which
-    reserves the Ori name for the navigation guide. Element IDs are unchanged on
-    purpose — the rename is presentation, and every existing behaviour, handler,
-    and test binding still applies (PRD FR-81/FR-82).
+    Home's command strip used to sit here: a second composer, labelled
+    Workspace Manager, beside the global Ask Ori launcher. Issue #350 retired
+    it — its composer, suggested prompts, and activity rail are all in the one
+    universal Ask Ori panel now, which is mounted on every page rather than
+    just this one (FR6/FR68). The layout space it reserved is reclaimed with it.
   -->
-  <section id="homeAssistantCard" class="modern-card home-command-strip" data-first-run="{{if .Extra.IsFirstRun}}true{{else}}false{{end}}" aria-label="Workspace Manager">
-    <div class="home-command-strip-main">
-      <!-- The strip names itself. It used to say "COMMAND", which is a mode, not
-           a who — leaving Workspace Manager identified only by the placeholder
-           and the visually-hidden label while Ori's guide launcher names itself
-           on every page. A user comparing the two surfaces has to be able to see
-           which one does work (FR-27/FR-81–FR-83). -->
-      <div class="home-command-kicker">
-        <span class="home-command-kicker-led" aria-hidden="true"></span>
-        WORKSPACE MANAGER{{if .Extra.IsFirstRun}} · FIRST COMMAND{{end}}
-        <span class="home-command-shortcut" aria-hidden="true">⌘J</span>
-      </div>
-      <form id="homeAssistantForm" class="home-assistant-form home-command-form">
-        <span class="home-command-prompt" aria-hidden="true">&gt;</span>
-        <label for="homeAssistantInput" class="visually-hidden">Workspace Manager — describe work to run</label>
-        <input id="homeAssistantInput" type="text" class="modern-input home-command-input" maxlength="800"
-               name="home_assistant_prompt"
-               autocomplete="off"
-               placeholder="{{if .Extra.IsFirstRun}}Plan a product launch…{{else}}Give Workspace Manager something to do…{{end}}">
-        <button id="homeAssistantSendBtn" type="submit" class="modern-btn modern-btn-primary home-assistant-send-btn home-command-execute">Ask</button>
-      </form>
-      <!-- Suggested prompt chips populate the input but never auto-submit. -->
-      <div class="home-prompt-chips home-command-chips" role="group" aria-label="Suggested commands">
-        {{if .Extra.IsFirstRun}}
-        <button type="button" class="home-prompt-chip" data-prompt="Create a workspace for a project I'm working on">Create a workspace</button>
-        <button type="button" class="home-prompt-chip" data-prompt="Help me organize a research project">Organize research</button>
-        <button type="button" class="home-prompt-chip" data-prompt="Plan a product launch">Plan a launch</button>
-        {{else}}
-        <button type="button" class="home-prompt-chip" data-prompt="Draft a weekly digest from my notes">Draft a weekly digest</button>
-        <button type="button" class="home-prompt-chip" data-prompt="Summarize this week's task activity">Summarize activity</button>
-        <button type="button" class="home-prompt-chip" data-prompt="What should I work on today?">What should I work on?</button>
-        {{end}}
-      </div>
-    </div>
-  </section>
-
   <!-- The Map-first workspace cockpit: one primary workspace area (Map or Tree
        as mutually exclusive peer views) plus one persistent context rail
        (PRD FR15-FR21). The Ask Ori command bridge above stays visible in both
@@ -394,54 +358,11 @@
       <div id="cockpitRailContext" class="cockpit-rail-body" data-rail-state="context" hidden></div>
 
       <!--
-        Ask Ori activity, in the rail rather than a blocking modal (FR96).
-
-        dashboard.js already supports an embedded activity surface — the same
-        one the workspace hub's support chat uses — selected by
-        data-home-assistant-surface="panel". Keeping that contract and these
-        exact element ids means all existing routing, planning, confirmation,
-        automation-mode, timeout, error, and Task Activity reopen behavior is
-        preserved unchanged (FR95, FR99); only the presentation moves. In panel
-        mode dashboard.js shows/hides via a class instead of bootstrap.Modal,
-        so there is no backdrop and Map/Tree stay interactive (FR6, FR92).
+        Ask Ori's activity used to be duplicated here as a rail state. It now
+        lives once, inside the universal panel, so a request made from Home
+        shows its routing, planning, and confirmations in the same place as a
+        request made from any other page (FR39/FR68).
       -->
-      <section id="homeAssistantThinkingModal" class="cockpit-rail-body cockpit-ask-activity is-idle"
-               data-home-assistant-surface="panel" data-home-assistant-panel-scope="home"
-               data-rail-state="ask-ori"
-               aria-labelledby="homeAssistantThinkingModalLabel">
-        <header class="cockpit-ask-head">
-          <button type="button" class="cockpit-rail-back" data-cockpit-ask-back>
-            <span aria-hidden="true">&#8592;</span> Back</button>
-          <h3 id="homeAssistantThinkingModalLabel" class="cockpit-rail-title">Workspace Manager</h3>
-          <div id="homeAssistantThinkingStatus" class="cockpit-ask-status" role="status" aria-live="polite">
-            <span id="homeAssistantThinkingSpinner" class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
-            <span>Analyzing your request…</span>
-          </div>
-          <p id="cockpitAskTarget" class="cockpit-ask-target" role="status" aria-live="polite"></p>
-        </header>
-        <div id="homeAssistantRoutingSummary" class="home-assistant-routing-summary d-none"></div>
-        <div id="homeAssistantPlanning" class="home-assistant-planning d-none mt-3"></div>
-        <div id="homeAssistantInlineReply" class="home-assistant-inline-reply d-none mt-3"></div>
-        <div id="homeAssistantActions" class="d-flex flex-wrap gap-2 mt-3 d-none"></div>
-        <section id="homeAssistantConversationSection" class="home-assistant-conversation-section mt-3">
-          <div class="home-assistant-conversation-section-header">
-            <div>
-              <div class="home-assistant-conversation-section-eyebrow">Conversation History</div>
-              <div id="homeAssistantConversationSummary" class="home-assistant-conversation-section-copy">
-                Progress updates and manager notes will appear here after you send a task.
-              </div>
-            </div>
-            <button id="homeAssistantConversationToggleBtn" type="button" class="modern-btn modern-btn-secondary modern-btn-sm" hidden>
-              Hide Conversation
-            </button>
-          </div>
-          <div id="homeAssistantConversation" class="home-assistant-conversation p-3">
-            <div class="home-assistant-thinking-placeholder">
-              Progress updates will appear here after you send a task.
-            </div>
-          </div>
-        </section>
-      </section>
 
       <!-- The rail footer that used to sit here held Add to backlog and
            Summary. Both moved into the workspace-area header when the rail

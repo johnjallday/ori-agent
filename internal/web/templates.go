@@ -74,7 +74,7 @@ func (tr *TemplateRenderer) LoadTemplates() error {
 		"templates/layout/theme-init.tmpl",
 		"templates/components/sidebar.tmpl",
 		"templates/components/workspace-hub.tmpl",
-		"templates/components/support-chat.tmpl",
+		"templates/components/ask-ori-activity.tmpl",
 		"templates/components/dashboard.tmpl",
 		"templates/components/session-modals.tmpl",
 		"templates/components/search-palette.tmpl",

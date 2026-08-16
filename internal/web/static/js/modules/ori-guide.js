@@ -447,6 +447,68 @@
     return String(resp.status || '') === 'unknown';
   }
 
+  // Whether the full work controller is on this page.
+  //
+  // dashboard.js owns the real planning, task-creation, agent-selection,
+  // confirmation, and workspace-session flows, and renders them into the
+  // activity host inside this panel. Where it is loaded we hand off to it
+  // rather than reimplementing any of that here (FR31/FR36).
+  function hasWorkController() {
+    return Boolean(
+      typeof window !== 'undefined' &&
+      window.OriAskRouting &&
+      typeof window.OriAskRouting.submit === 'function'
+    );
+  }
+
+  // Hands a work request to the existing controller with this page's context.
+  //
+  // It renders into the activity host below the composer, so the request and
+  // everything it produces stay in one panel (FR39).
+  function delegateWork(question, seq) {
+    var ctx = collectContext();
+
+    // Acknowledge the handoff immediately, before awaiting the controller.
+    //
+    // Some fulfilment paths — a specialist handoff, a confirmation the user has
+    // to answer — deliberately do not settle for a long time, and one of them
+    // may never settle at all if the user walks away. Feedback that waits on
+    // completion therefore leaves the panel looking like the request vanished.
+    // The activity host below renders the real progress as it arrives.
+    showActivityHost(true);
+    var els = state.els;
+    if (els) {
+      els.reply.dataset.status = 'delegated';
+      els.reply.innerHTML =
+        '<p class="ori-guide__routing">' +
+        esc('Working on it' + (ctx.workspace_id ? ' in ' + contextLabel(ctx) : '') + '.') +
+        '</p><p class="ori-guide__answer ori-guide__answer--note">' +
+        'Anything consequential still asks you to confirm below.</p>';
+    }
+
+    emit('routed', {
+      intent: 'delegated',
+      workspace: ctx.workspace_id ? 'present' : 'absent',
+      via: 'work-controller'
+    });
+
+    return Promise.resolve(
+      window.OriAskRouting.submit(question, {
+        routeContext: ctx,
+        openThinkingModal: false
+      })
+    ).then(function () {
+      if (seq !== state.seq) return null;
+      return true;
+    });
+  }
+
+  function showActivityHost(visible) {
+    var els = state.els;
+    if (!els || !els.activityHost) return;
+    els.activityHost.hidden = !visible;
+  }
+
   // Escalates a non-navigation request to the routing contract.
   //
   // Routing only classifies and plans; it does not execute. Whatever comes back
@@ -491,6 +553,29 @@
         // A real question the guide did not own goes to routing instead of being
         // rendered as "I don't know" (FR22/FR38).
         if (!silent && question && needsWorkRouting(resp)) {
+          // Where the full work controller exists, it does the real thing:
+          // planning, agent selection, confirmations, workspace sessions.
+          if (hasWorkController()) {
+            var handed = delegateWork(question, seq);
+            // The panel's own turn is over once the request is handed over; the
+            // activity host owns the busy state from here. Holding the composer
+            // disabled until a confirmation is answered would lock the user out
+            // of the very panel they need to answer it in.
+            setPending(false, silent);
+
+            return handed.catch(function () {
+              if (seq !== state.seq) return;
+              var failedEls = state.els;
+              if (failedEls) {
+                failedEls.reply.dataset.status = 'unavailable';
+                failedEls.reply.innerHTML =
+                  '<p class="ori-guide__answer">I could not finish that just now. ' +
+                  'Check the activity below — nothing runs without your confirmation.</p>';
+              }
+              emit('fallback', { reason: 'work-controller-failed' });
+            });
+          }
+
           return routeWork(question, seq)
             .then(function (routed) {
               if (routed === null || seq !== state.seq) return;
@@ -786,7 +871,9 @@
       close: document.getElementById('oriGuideClose'),
       context: document.getElementById('oriGuideContext'),
       activity: document.getElementById('oriGuideActivity'),
-      launcherStatus: document.getElementById('oriGuideLauncherStatus')
+      launcherStatus: document.getElementById('oriGuideLauncherStatus'),
+      // The work controller's render target, hidden until there is work to show.
+      activityHost: document.getElementById('homeAssistantThinkingModal')
     };
 
     refreshContextLabel();
@@ -847,6 +934,7 @@
     _contextFromRoute: contextFromRoute,
     _contextLabel: contextLabel,
     _needsWorkRouting: needsWorkRouting,
+    _hasWorkController: hasWorkController,
     _refreshContextLabel: refreshContextLabel,
     _state: state,
     _validateAction: validateAction,

@@ -506,9 +506,11 @@ async function loadAgents() {
     }
     const data = await response.json();
     const sessionAgent = window.sessionManager?.getActiveSession?.()?.agent_name;
-    const assistantAgent = (data.agents || []).find(
-      agent => getAgentDisplayName(agent) === 'Workspace Manager'
-    );
+    // Canonical first, retired name as a fallback for a not-yet-migrated record
+    // (Issue #350 FR57).
+    const assistantAgent =
+      (data.agents || []).find(agent => getAgentDisplayName(agent) === 'Ask Ori') ||
+      (data.agents || []).find(agent => getAgentDisplayName(agent) === 'Workspace Manager');
     const selected = sessionAgent || defaultAgentName || getAgentDisplayName(assistantAgent);
     populateAgentSelect(data.agents || [], selected);
   } catch (error) {

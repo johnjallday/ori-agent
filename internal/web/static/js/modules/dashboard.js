@@ -133,7 +133,7 @@
       preferredPlugins: [],
       preferredTypes: ['general'],
       defaultType: 'general',
-      suggestedName: 'Workspace Manager',
+      suggestedName: 'Ask Ori',
       tags: ['activity', 'introspection']
     },
     app_navigation: {
@@ -143,7 +143,7 @@
       preferredPlugins: [],
       preferredTypes: ['general'],
       defaultType: 'general',
-      suggestedName: 'Workspace Manager',
+      suggestedName: 'Ask Ori',
       tags: ['navigation']
     }
   };
@@ -1404,7 +1404,7 @@
     var label = els.identityName ? String(els.identityName.textContent || '').trim() : '';
     if (label) return label;
     if (homeAssistantState.workspaceEntryAgentName) return getWorkspaceHomeAssistantDisplayName();
-    return 'Workspace Manager';
+    return 'Ask Ori';
   }
 
   function syncHomeAssistantModalHeading() {
@@ -1727,7 +1727,7 @@
   }
 
   function getWorkspaceHomeAssistantDisplayName() {
-    return String(homeAssistantState.workspaceEntryAgentName || '').trim() || 'Workspace Manager';
+    return String(homeAssistantState.workspaceEntryAgentName || '').trim() || 'Ask Ori';
   }
 
   function normalizeWorkspacePromptMode(mode) {
@@ -8361,7 +8361,7 @@
   }
 
   function formatWorkspaceManagerFailure(error, workspaceManagerLabel) {
-    var label = String(workspaceManagerLabel || 'Workspace Manager').trim() || 'Workspace Manager';
+    var label = String(workspaceManagerLabel || 'Ask Ori').trim() || 'Ask Ori';
     var stage = normalizeToken((error && error.homeAssistantStage) || (error && error.stage));
     var status = Number((error && error.status) || 0);
     var url = String((error && error.url) || '').trim();

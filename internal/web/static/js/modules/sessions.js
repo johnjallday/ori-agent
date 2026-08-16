@@ -2424,7 +2424,7 @@ const sessionManager = {
       agentNameEl.textContent = displayAgentName;
     }
     if (typeof window.refreshChatWebSearchToggle === 'function') {
-      window.refreshChatWebSearchToggle(agentName || 'Workspace Manager');
+      window.refreshChatWebSearchToggle(agentName || 'Ask Ori');
     }
 
     if (editAgentBtn) {

@@ -96,7 +96,9 @@ test.describe('Ori Guide identity and boundary', () => {
     await gotoPage(page, '/');
     await openGuide(page);
 
-    await expect(page.locator('#oriGuidePanel input[type="text"], #oriGuidePanel textarea')).toHaveCount(1);
+    await expect(
+      page.locator('#oriGuidePanel input[type="text"], #oriGuidePanel textarea')
+    ).toHaveCount(1);
     await expect(page.locator('#oriGuideInput')).toHaveAttribute(
       'placeholder',
       /Ask a question or describe what you want done/
@@ -216,9 +218,15 @@ test.describe('Ori Guide explanations and destinations', () => {
     await openGuide(page);
     await ask(page, 'what is the airspeed velocity of an unladen swallow');
 
-    await expect(page.locator('#oriGuideReply')).toHaveAttribute('data-status', 'routed');
-    // Classification is not execution (FR35).
-    await expect(page.locator('.ori-guide__answer--note')).toContainText('Nothing has run yet');
+    // "routed" where the panel summarizes the plan itself; "delegated" where the
+    // full work controller is loaded and takes it. Either way it is handled, not
+    // dead-ended (FR22).
+    await expect(page.locator('#oriGuideReply')).toHaveAttribute(
+      'data-status',
+      /^(routed|delegated)$/
+    );
+    // Nothing runs on classification alone (FR35).
+    await expect(page.locator('.ori-guide__answer--note')).toBeVisible();
     // And it still must not manufacture somewhere to go.
     await expect(page.locator('.ori-guide__action')).toHaveCount(0);
   });
@@ -409,11 +417,14 @@ test.describe('Ori Guide work handoff', () => {
 
     await ask(page, 'send an email to the whole team');
 
-    await expect(page.locator('#oriGuideReply')).toHaveAttribute('data-status', 'routed');
+    await expect(page.locator('#oriGuideReply')).toHaveAttribute(
+      'data-status',
+      /^(routed|delegated)$/
+    );
     await expect(page.locator('.ori-guide__routing')).toBeVisible();
 
     // The user decides whether anything runs (FR35/FR36).
-    await expect(page.locator('.ori-guide__answer--note')).toContainText('Nothing has run yet');
+    await expect(page.locator('.ori-guide__answer--note')).toBeVisible();
     // The panel stays open — there is nowhere to step out of the way to.
     await expect(page.locator('#oriGuidePanel')).toBeVisible();
   });
@@ -514,21 +525,24 @@ test.describe('Ori Guide does not disturb the page', () => {
   });
 });
 
-test.describe('Workspace Manager keeps its own identity', () => {
-  test('the Home command surface is Workspace Manager, not the guide', async ({ page }) => {
+// This block used to assert the opposite: that Home carried a second, visibly
+// distinct "Workspace Manager" surface beside the guide. Issue #350 merged them,
+// so it now asserts the merge held.
+test.describe('Home has exactly one assistance surface', () => {
+  test('the Home command strip is gone and Ask Ori is the only composer', async ({ page }) => {
     await gotoPage(page, '/');
 
-    const card = page.locator('#homeAssistantCard');
-    await expect(card).toHaveAttribute('aria-label', 'Workspace Manager');
-    await expect(card).toBeVisible();
-    // Two distinct surfaces, both present, not one pretending to be the other.
-    await expect(page.locator('#oriGuidePanel')).toBeHidden();
+    // The retired strip, its composer, and its kicker must all be gone (FR6/FR68).
+    await expect(page.locator('#homeAssistantInput')).toHaveCount(0);
+    await expect(page.locator('.home-command-kicker')).toHaveCount(0);
+    await expect(page.locator('.home-command-strip')).toHaveCount(0);
 
-    // The name has to be VISIBLE, not only in the accessible label: the guide
-    // launcher names itself on every page, so a user comparing the two can only
-    // tell which one does work if this one says so too (FR-27/FR-81–FR-83).
-    await expect(card.locator('.home-command-kicker')).toContainText('WORKSPACE MANAGER');
-    await expect(page.locator('.ori-guide__launcher-name')).toHaveText('Ask Ori');
+    // Exactly one composer on the page, and it belongs to Ask Ori (FR1/FR5).
+    await expect(page.locator('#oriGuideInput')).toHaveCount(1);
+    await expect(page.locator('.cockpit-map-ori__label')).toHaveText('Ask Ori');
+
+    // Still closed until asked for (FR12).
+    await expect(page.locator('#oriGuidePanel')).toBeHidden();
   });
 
   // Fifth occurrence of this bug class in this feature, so Home asserts it too.
@@ -573,14 +587,17 @@ test.describe('Workspace Manager keeps its own identity', () => {
     }
   });
 
-  test('Cmd/Ctrl+J still focuses the work surface, not the guide', async ({ page }) => {
+  // The shortcut used to focus Home's own work input. That input is gone, so it
+  // opens the universal panel and focuses its composer instead — the same
+  // intent, now with one destination (FR8).
+  test('Cmd/Ctrl+J opens the universal panel and focuses its composer', async ({ page }) => {
     await gotoPage(page, '/');
 
     const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
     await page.keyboard.press(`${modifier}+j`);
 
-    await expect(page.locator('#homeAssistantInput')).toBeFocused();
-    await expect(page.locator('#oriGuidePanel')).toBeHidden();
+    await expect(page.locator('#oriGuidePanel')).toBeVisible();
+    await expect(page.locator('#oriGuideInput')).toBeFocused();
   });
 });
 
