@@ -376,6 +376,26 @@ assert_no_github() {
   fi
 }
 
+# A bare `grep -Fq` under `set -e` aborts the run with no output at all, which
+# leaves a future failure with nothing to read. These say what was expected.
+assert_output_has() {
+  local context="$1" file="$2" expected="$3"
+  if ! grep -Fq "$expected" "$file"; then
+    printf '%s did not report %s\n  actual output:\n%s\n' \
+      "$context" "$expected" "$(cat "$file")" >&2
+    exit 1
+  fi
+}
+
+assert_output_lacks() {
+  local context="$1" file="$2" unexpected="$3"
+  if grep -Fq "$unexpected" "$file"; then
+    printf '%s unexpectedly reported %s\n  actual output:\n%s\n' \
+      "$context" "$unexpected" "$(cat "$file")" >&2
+    exit 1
+  fi
+}
+
 # Deciding now needs one live label READ before it can refuse, so the boundary
 # that matters is "no GitHub WRITE", not "no GitHub contact". Reads stay free;
 # comment/edit/create are the calls that change something on github.com.
@@ -476,17 +496,14 @@ if [[ "$status" -eq 0 ]]; then
   printf 'deciding a non-needs-decision Issue succeeded\n' >&2
   exit 1
 fi
-grep -Fq "#320 is not needs-decision" "$fixture_root/decision-ineligible-error"
-if grep -Fq "Will record this decision" "$fixture_root/decision-ineligible"; then
-  printf 'an ineligible decision printed a preview: %s\n' "$(cat "$fixture_root/decision-ineligible")" >&2
-  exit 1
-fi
+assert_output_has "an ineligible decision" \
+  "$fixture_root/decision-ineligible-error" "#320 is not needs-decision"
+assert_output_lacks "an ineligible decision" \
+  "$fixture_root/decision-ineligible" "Will record this decision"
 # The generic "pass --yes" refusal would mean the attempt reached confirm_write,
 # i.e. that it was stopped by the wrong gate.
-if grep -Fq "pass --yes to confirm" "$fixture_root/decision-ineligible-error"; then
-  printf 'an ineligible decision reached the confirmation gate\n' >&2
-  exit 1
-fi
+assert_output_lacks "an ineligible decision" \
+  "$fixture_root/decision-ineligible-error" "pass --yes to confirm"
 check "an ineligible decision reads labels exactly once" "$(count_label_reads 320)" "1"
 check "an ineligible decision makes no other call" "$(count_gh_calls)" "1"
 assert_no_github_write "an ineligible decision"
@@ -500,7 +517,8 @@ if [[ "$status" -eq 0 ]]; then
   printf 'a prefix-alike label unlocked a decision\n' >&2
   exit 1
 fi
-grep -Fq "#321 is not needs-decision" "$fixture_root/decision-prefix"
+assert_output_has "a prefix-alike label" \
+  "$fixture_root/decision-prefix" "#321 is not needs-decision"
 assert_no_github_write "a decision on a prefix-alike label"
 
 # Writes are confirm-gated. Eligibility is established first, so a valid attempt
@@ -529,11 +547,12 @@ if [[ "$status" -ne 7 ]]; then
   printf 'a failed label lookup exited %s, want 7\n' "$status" >&2
   exit 1
 fi
-grep -Fq "could not read labels for #334" "$fixture_root/decision-lookup-error"
-if grep -Fq "is not needs-decision" "$fixture_root/decision-lookup-error"; then
-  printf 'a failed label lookup was reported as ordinary ineligibility\n' >&2
-  exit 1
-fi
+assert_output_has "a failed label lookup" \
+  "$fixture_root/decision-lookup-error" "could not read labels for #334"
+# Distinguishable from ordinary ineligibility: a network error is not a verdict
+# about the Issue's labels.
+assert_output_lacks "a failed label lookup" \
+  "$fixture_root/decision-lookup-error" "is not needs-decision"
 if [[ -s "$fixture_root/decision-lookup-failed" ]]; then
   printf 'a failed label lookup printed a preview: %s\n' "$(cat "$fixture_root/decision-lookup-failed")" >&2
   exit 1
@@ -541,8 +560,10 @@ fi
 check "a failed label lookup makes exactly one call" "$(count_gh_calls)" "1"
 assert_no_github_write "a failed label lookup"
 
-# Blank answers are a local validation failure and must still stop before the
-# eligibility read - an empty decision is never worth a round trip.
+# Blank arguments are local validation failures and must still stop before the
+# eligibility read - an empty decision is never worth a round trip. The
+# whitespace-only cases cannot go in the word-split table below, which would
+# collapse them into a missing argument instead.
 : > "$gh_calls"
 status=0
 "$script" decide 334 "   " --yes > /dev/null 2>&1 || status=$?
@@ -551,6 +572,15 @@ if [[ "$status" -ne 2 ]]; then
   exit 1
 fi
 assert_no_github "a blank-answer decision"
+
+: > "$gh_calls"
+status=0
+"$script" decide 334 "1A" --rationale "   " --yes > /dev/null 2>&1 || status=$?
+if [[ "$status" -ne 2 ]]; then
+  printf 'a blank-rationale decision exited %s, want 2\n' "$status" >&2
+  exit 1
+fi
+assert_no_github "a blank-rationale decision"
 
 : > "$gh_calls"
 status=0
@@ -597,7 +627,8 @@ if [[ "$status" -eq 0 ]]; then
   printf 'the answer alias decided a non-needs-decision Issue\n' >&2
   exit 1
 fi
-grep -Fq "#320 is not needs-decision" "$fixture_root/answer-ineligible"
+assert_output_has "the answer alias" \
+  "$fixture_root/answer-ineligible" "#320 is not needs-decision"
 assert_no_github_write "an ineligible answer alias"
 
 # Capture is confirm-gated like every other write.
@@ -712,14 +743,16 @@ fi
 : > "$gh_calls"
 printf 'c 320 1A\nq\n' | "$script" \
   > "$fixture_root/repl-ineligible" 2> "$fixture_root/repl-ineligible-error"
-grep -Fq "#320 is not needs-decision" "$fixture_root/repl-ineligible-error"
+assert_output_has "a REPL decision on an ineligible Issue" \
+  "$fixture_root/repl-ineligible-error" "#320 is not needs-decision"
 check "a REPL decision on an ineligible Issue reads labels once" "$(count_label_reads 320)" "1"
 assert_no_github_write "a REPL decision on an ineligible Issue"
 
 : > "$gh_calls"
 printf 'c 334 1A\nq\n' | "$script" \
   > "$fixture_root/repl-eligible" 2> "$fixture_root/repl-eligible-error"
-grep -Fq "pass --yes to confirm" "$fixture_root/repl-eligible-error"
+assert_output_has "an eligible REPL decision" \
+  "$fixture_root/repl-eligible-error" "pass --yes to confirm"
 check "a REPL decision on an eligible Issue reads labels once" "$(count_label_reads 334)" "1"
 assert_no_github_write "an unconfirmed REPL decision"
 
