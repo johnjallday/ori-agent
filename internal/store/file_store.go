@@ -284,7 +284,10 @@ func (s *fileStore) RenameAgent(oldName, newName string) error {
 	// The folder is only moved when it exists; a record can legitimately live in
 	// memory before anything has forced a save.
 	if _, err := os.Stat(oldFolder); err == nil {
-		if err := os.MkdirAll(filepath.Dir(newFolder), 0o755); err != nil {
+		// 0o750, not the 0o755 the older writes in this file use: an agent folder
+		// holds the agent's prompt and its per-agent skill state, which no other
+		// user on the machine needs to read.
+		if err := os.MkdirAll(filepath.Dir(newFolder), 0o750); err != nil {
 			return err
 		}
 		if err := os.Rename(oldFolder, newFolder); err != nil {
