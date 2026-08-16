@@ -590,12 +590,17 @@ same when invoked from a nested directory or another current working directory.
 GitHub call preserves `gh`'s status.
 
 **Removed, and not coming back as a local file:** `sync` and `prune` (GitHub is
-live and keeps its own history). **Not implemented
-yet, deliberately:** any command that changes an Issue's state — promote, ship,
-drop, close, select — and any Project operation. `wt start`, `wt pr`, and
-`wt done` do not read, update, or close an Issue either. Daily selection stays
-manual in GitHub until enough of it has been done by hand to know what the
-command should be.
+live and keeps its own history). `scripts/devops.sh` still has no promote,
+ship, drop, close, select, or Project operation; daily selection stays manual
+in GitHub.
+
+Delivery has one deliberately narrow state transition: after an exact PR to
+`dev` merges, `wt done` closes the one Issue explicitly attached by
+`tasks/issue-<feature>.md`. The generated marker must agree with the
+number-first feature identity; a numeric-looking slug, PR prose, and Issue body
+text are never treated as attachments. `wt start` and `wt pr` still do not
+update the Issue. `wt done --keep-issue-open` skips this transition for an
+intentional exception.
 
 New Issue-backed work uses `<issue-number>-<slug>` as its feature identity; see
 "Feature Naming: Issue Number First" in `AGENTS.md`.
@@ -823,12 +828,21 @@ this required a schema bump.
 
 ## Guarded cleanup
 
-wt done calls the bridge guard before task archival, dirty checks, or Git
-worktree removal:
+wt done calls the bridge guard before task archival, dirty checks, attached
+Issue closure, or Git worktree removal:
 
 ~~~bash
-wt done herdr-devflow-bridge
+wt done 292-coordinate-based-map
+wt done 292-coordinate-based-map --keep-issue-open # intentional exception
 ~~~
+
+After the guard passes, Issue-backed cleanup verifies the fixed generated
+header in `tasks/issue-<feature>.md`, the matching number-first identity, and a
+merged PR for the exact branch targeting `dev`. It then closes an open Issue as
+`completed` with a comment naming the merged PR. An already-closed Issue is
+idempotent. A GitHub read/write failure stops before worktree removal so the
+command is safely retryable; `--keep-issue-open` bypasses Issue inspection and
+mutation. Work without the exact snapshot remains ordinary ad-hoc cleanup.
 
 The guard blocks cleanup when **any** agent resolved by path in this
 worktree — managed or unmanaged — is `working` or `blocked`, or when a

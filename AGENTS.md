@@ -115,9 +115,10 @@ picker, the opened Issue owns the interaction: its `c` action asks for choices
 such as `1B, 2A` and an optional rationale, then refreshes so the persisted
 answer is visible; list-level `c` shortcuts into that action. It deliberately
 leaves `needs-decision` in place until the grooming routine reads the answer and
-performs triage. Everything else
-about an Issue's lifecycle — triaging, sizing, bundling, closing — belongs to
-that routine or to the PR that implements the work.
+performs triage. Everything else about an Issue's lifecycle — triaging,
+sizing, and bundling — belongs to that routine. Delivery owns closing:
+`wt done` closes the exact attached Issue only after its implementation PR has
+merged to `dev`.
 
 `status` and the picker's in-flight column resolve an Issue to work-in-progress
 through the naming convention above: branch `fix/339-slug` and task file
@@ -152,7 +153,7 @@ Ready Issue on GitHub
   → wt plan --issue N        Codex plans in ori-agent-dev  (never implements)
   → wt start <feature>       Claude implements in its own worktree
   → wt pr → squash-merge     one PR to dev
-  → wt done <feature>        archive the checklist, remove the worktree
+  → wt done <feature>        close its attached Issue, archive the checklist, clean up
 ```
 
 `wt plan --issue <N>` is the planning stage. It reads the Issue once through
@@ -345,7 +346,7 @@ Update the file after completing each sub-task, not just after completing an ent
 
 ## Delivery Checkpoints
 
-By default, one PRD and task list maps to one feature worktree, one branch, and one PR targeting `dev`. Keep commits conventional and focused. Include a `Commit: "<conventional message>"` sub-task after every parent group that is a tested, reviewable milestone. The final parent group must end with `Open PR → squash-merge to dev` (using `wt pr` when authorized) and `Run wt done [feature-name] after merge` to archive the completed checklist back to the dev worktree and clean up the feature worktree.
+By default, one PRD and task list maps to one feature worktree, one branch, and one PR targeting `dev`. Keep commits conventional and focused. Include a `Commit: "<conventional message>"` sub-task after every parent group that is a tested, reviewable milestone. The final parent group must end with `Open PR → squash-merge to dev` (using `wt pr` when authorized) and `Run wt done [feature-name] after merge` to close an explicitly attached Issue as completed, archive the completed checklist back to the dev worktree, and clean up the feature worktree. Ad-hoc work has no Issue attachment and is unchanged; use `--keep-issue-open` only for an intentional exception.
 
 ## Slicing & Build Order
 

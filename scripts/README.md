@@ -285,6 +285,30 @@ task list, worktree, branch, and pull request can be joined on an exact number
 instead of a title that may change. Existing features whose slugs have no
 number remain valid and are never renamed.
 
+### `wt done` — finish delivery and clean up
+
+```bash
+wt done 292-coordinate-based-map
+wt done 292-coordinate-based-map --keep-issue-open # intentional exception
+```
+
+For Issue-backed work, `wt done` treats the exact
+`tasks/issue-<feature>.md` snapshot created by `wt plan` as the attachment. It
+requires the generated header marker to agree with the number-first feature
+slug and a merged PR for the exact branch targeting `dev`. An open attached
+Issue is closed as `completed` with a comment linking the merged PR; an already
+closed Issue is left unchanged. This explicit transition is necessary because
+delivery PRs target `dev`, not the repository's default branch, so GitHub
+closing keywords do not complete the Issue at that merge. A number-looking slug
+without the snapshot is never enough to infer an Issue, so ad-hoc and legacy
+cleanup keeps working.
+
+Issue inspection or closure failures preserve the feature worktree so the same
+command can be retried. `--keep-issue-open` is the explicit escape hatch for a
+feature whose Issue must intentionally remain open; it skips all Issue reads
+and writes. The Herdr guard still runs before archival, Issue closure, or Git
+removal, and `--herdr-override` retains its separate safety meaning.
+
 ### `wt status` — feature overview
 
 ```bash
