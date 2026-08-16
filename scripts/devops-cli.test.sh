@@ -231,6 +231,13 @@ decide_issue() {
   printf '%s\n' "$@" > "$prompt_capture"
   decision_recorded=1
 }
+# Stubbed so the action bar's eligibility read stays local: the fake `gh` is not
+# on PATH until the integration section, and a unit test must never reach the
+# network.
+stub_labels="needs-decision"
+issue_labels_of() {
+  printf '%s\n' "$stub_labels"
+}
 decision_recorded=0
 printf 'c\n1B, 2A\nPreserves existing callers\n\n' | \
   prompt_open_issue 334 > "$fixture_root/prompt-decision-output"
@@ -239,6 +246,37 @@ view_count="$(grep -Fc 'viewed #334' "$fixture_root/prompt-decision-output")"
 check "opened Issue refreshes after a decision" "$view_count" "2"
 check "opened Issue decision passes rationale" "$(<"$prompt_capture")" \
   $'334\n1B, 2A\n--rationale\nPreserves existing callers'
+
+# The action bar is drawn for ONE known Issue, so unlike the picker's shared
+# footer it can drop Decide where nothing is pending. #353-style Issues
+# (`backlog`, spec says "Open questions: None") must not be offered the action.
+stub_labels="backlog, size:planned"
+: > "$prompt_capture"
+decision_recorded=0
+printf 'c\n\n' | prompt_open_issue 353 > "$fixture_root/prompt-ineligible-output" \
+  2> "$fixture_root/prompt-ineligible-error"
+check "an ineligible Issue is not offered Decide" \
+  "$(grep -Fc '[c] Decide' "$fixture_root/prompt-ineligible-output" || true)" "0"
+check "an ineligible Issue still offers the other actions" \
+  "$(grep -Fc '[r] Refresh  [Enter] Back' "$fixture_root/prompt-ineligible-output" || true)" "2"
+# Typing c anyway (or arriving from the picker's c key) is refused locally,
+# without collecting answers the write would only reject.
+grep -Fq '#353 is not needs-decision' "$fixture_root/prompt-ineligible-error"
+check "an ineligible Issue collects no answers" "$(<"$prompt_capture")" ""
+check "an ineligible Issue does not prompt for answers" \
+  "$(grep -Fc 'Record a decision' "$fixture_root/prompt-ineligible-output" || true)" "0"
+check "an ineligible Issue records nothing" "$decision_recorded" "0"
+
+# The picker's c key opens the Issue with an initial c action; an eligible Issue
+# must still skip straight to answers rather than redrawing the bar.
+stub_labels="type:fix, needs-decision"
+: > "$prompt_capture"
+decision_recorded=0
+printf '1A\n\n\n' | prompt_open_issue 334 c > "$fixture_root/prompt-picker-c-output"
+check "the picker c key still reaches answers on an eligible Issue" \
+  "$(<"$prompt_capture")" $'334\n1A'
+
+stub_labels="needs-decision"
 
 if [[ "$failures" -ne 0 ]]; then
   printf '%s unit assertion(s) failed\n' "$failures" >&2

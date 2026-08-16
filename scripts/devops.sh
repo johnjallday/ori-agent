@@ -429,6 +429,14 @@ view_issue() {
   gh issue view "$1" --comments
 }
 
+# The one place that reads a single Issue's current labels, in the ", "-joined
+# shape labels_contain expects. Shared by the decision guard and the opened-Issue
+# action bar so the action offered and the action allowed can never disagree.
+issue_labels_of() {
+  gh issue view "$1" --json labels \
+    --template '{{range $index, $label := .labels}}{{if $index}}, {{end}}{{$label.name}}{{end}}'
+}
+
 # Confirmation is required for every write. On a terminal we ask; without one we
 # insist on --yes, so a pipe can never post to GitHub by accident.
 confirm_write() {
@@ -514,9 +522,7 @@ decide_issue() {
   # relabels Issues while the picker is open. A read that fails must fail closed
   # and keep its own status, so a network error is never mistaken for an Issue
   # that simply is not needs-decision.
-  labels="$(gh issue view "$number" --json labels \
-    --template '{{range $index, $label := .labels}}{{if $index}}, {{end}}{{$label.name}}{{end}}')" ||
-    label_status=$?
+  labels="$(issue_labels_of "$number")" || label_status=$?
   if [[ "$label_status" -ne 0 ]]; then
     printf 'could not read labels for #%s; not deciding.\n' "$number" >&2
     return "$label_status"
@@ -1034,19 +1040,43 @@ prompt_decision_answers() {
 
 # The opened Issue is an interaction, not a dead-end view. Enter reaches this
 # action bar; the picker's c key passes an initial c to skip straight to answers.
+#
+# Unlike the picker's footer - one line shared by every row - this bar is drawn
+# for one known Issue, so it can offer Decide only where a decision is actually
+# pending. An Issue whose spec says "Open questions: None" has nothing to decide,
+# and showing the action there just invites a rejected write.
 prompt_open_issue() {
-  local issue_number="$1" action="${2:-}"
+  local issue_number="$1" action="${2:-}" labels can_decide=1
 
   view_issue "$issue_number" || return $?
+  # A failed lookup deliberately leaves Decide on offer: decide_issue re-reads
+  # and fails closed, so the worst case is a clear refusal, whereas hiding the
+  # action on a transient network error would look like the Issue changed.
+  if labels="$(issue_labels_of "$issue_number")"; then
+    labels_contain "$labels" "needs-decision" || can_decide=0
+  fi
+
   while true; do
     if [[ -z "$action" ]]; then
-      printf '\n[c] Decide  [r] Refresh  [Enter] Back\n'
+      if [[ "$can_decide" -eq 1 ]]; then
+        printf '\n[c] Decide  [r] Refresh  [Enter] Back\n'
+      else
+        printf '\n[r] Refresh  [Enter] Back\n'
+      fi
       printf 'issue> '
       IFS= read -r action || return 0
     fi
 
     case "$action" in
       c|decide)
+        if [[ "$can_decide" -eq 0 ]]; then
+          # Reached from the picker's c key, which cannot know the row is
+          # ineligible until the Issue is opened. Say so instead of collecting
+          # answers that decide_issue would only refuse.
+          printf '#%s is not needs-decision; nothing to decide.\n' "$issue_number" >&2
+          action=""
+          continue
+        fi
         prompt_decision_answers "$issue_number" || true
         if [[ "$decision_recorded" -eq 1 ]]; then
           printf '\nUpdated Issue:\n\n'
