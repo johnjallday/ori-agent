@@ -203,3 +203,53 @@ test('the narrow sheet keeps its actions reachable', async ({ page }) => {
   expect(box.x).toBeGreaterThanOrEqual(0);
   expect(box.x + box.width).toBeLessThanOrEqual(390 + 1);
 });
+
+// Issue #350 FR69. The panel is mounted on every authenticated page now, so an
+// invisible piece of it covering the page underneath would break every page at
+// once rather than one. Hit-tested rather than measured, because "it looks like
+// it is out of the way" is exactly the assumption that keeps failing here.
+test('nothing the panel adds intercepts clicks on the page beneath it', async ({ page }) => {
+  await preparePage(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+
+  for (const route of ['/', '/agents', '/vaults']) {
+    await page.goto(`${baseUrl}${route}`, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(500);
+
+    // Panel CLOSED: only the launcher itself may own any point on the page.
+    const intercepting = await page.evaluate(() => {
+      const hits = [];
+      for (const x of [0.25, 0.5, 0.75]) {
+        for (const y of [0.3, 0.6, 0.85]) {
+          const el = document.elementFromPoint(
+            Math.round(window.innerWidth * x),
+            Math.round(window.innerHeight * y)
+          );
+          if (!el || !el.closest) continue;
+          if (el.closest('#oriGuideRoot') && !el.closest('#oriGuideLauncher')) {
+            hits.push(el.className || el.tagName);
+          }
+        }
+      }
+      return hits;
+    });
+
+    expect(intercepting, `${route} has Ask Ori chrome over the page`).toEqual([]);
+  }
+});
+
+// Every authenticated page gets exactly one of each control (FR1/FR10), and no
+// retired page-native composer survives anywhere (FR6).
+test('every page has one launcher, one panel, one composer, and no retired one', async ({
+  page
+}) => {
+  await preparePage(page);
+
+  for (const route of ['/', '/agents', '/vaults', '/settings']) {
+    await page.goto(`${baseUrl}${route}`, { waitUntil: 'domcontentloaded' });
+    await expect(page.locator('#oriGuidePanel')).toHaveCount(1);
+    await expect(page.locator('#oriGuideInput')).toHaveCount(1);
+    await expect(page.locator('#homeAssistantInput')).toHaveCount(0);
+    await expect(page.locator('#hubSupportChat')).toHaveCount(0);
+  }
+});

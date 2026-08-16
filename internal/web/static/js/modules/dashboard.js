@@ -1744,19 +1744,16 @@
     return 'Create Task';
   }
 
+  // The send button used to wrap its text in a .hub-support-chat-send-label
+  // span, which went with the support-chat widget (Issue #350). The button's own
+  // text is the label now.
   function getHomeAssistantSendButtonLabel(button) {
     if (!button) return '';
-    var label = button.querySelector('.hub-support-chat-send-label');
-    return String(label ? label.textContent : button.textContent || '').trim();
+    return String(button.textContent || '').trim();
   }
 
   function setHomeAssistantSendButtonLabel(button, text) {
     if (!button) return;
-    var label = button.querySelector('.hub-support-chat-send-label');
-    if (label) {
-      label.textContent = text;
-      return;
-    }
     button.textContent = text;
   }
 
