@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -428,11 +429,30 @@ func (h *Handler) reconcileWorkspacesFromDisk(ctx context.Context, reload bool) 
 
 	h.rescanMu.Lock()
 	defer func() {
-		if err == nil {
-			h.lastRescanAt = time.Now()
-		}
+		h.finishReconcileLocked(err)
 		h.rescanMu.Unlock()
 	}()
+
+	return h.reconcileWorkspacesFromDiskLocked(ctx, reload)
+}
+
+// finishReconcileLocked records a successful reconcile for the background
+// cooldown. Callers must hold h.rescanMu.
+func (h *Handler) finishReconcileLocked(err error) {
+	if err == nil {
+		h.lastRescanAt = time.Now()
+	}
+}
+
+// reconcileWorkspacesFromDiskLocked is the single reconcile implementation
+// shared by startup, the explicit Rescan endpoint, and live workspace-root
+// application. Callers must hold h.rescanMu; the live-root path holds it across
+// the folder-store re-point as well, so a rescan can never observe a
+// half-switched store.
+func (h *Handler) reconcileWorkspacesFromDiskLocked(ctx context.Context, reload bool) (stats workspaceReconcileStats, warnings []string, err error) {
+	if h.workspaceStore == nil {
+		return stats, nil, nil
+	}
 
 	// Refresh the file-store cache + index from disk; physical layout wins.
 	if reload {
@@ -443,7 +463,8 @@ func (h *Handler) reconcileWorkspacesFromDisk(ctx context.Context, reload bool) 
 
 	warnings = make([]string, 0)
 	diskWorkspaces := h.workspaceStore.CachedWorkspaces()
-	for id, diskWS := range diskWorkspaces {
+	for _, id := range orderWorkspacesParentFirst(diskWorkspaces) {
+		diskWS := diskWorkspaces[id]
 		sessionWS, getErr := h.store.GetWorkspace(ctx, id)
 		if getErr == session.ErrWorkspaceNotFound {
 			// CachedWorkspaces returns metadata-only structs (item 2.0); Get reads
@@ -508,6 +529,51 @@ func (h *Handler) reconcileWorkspacesFromDisk(ctx context.Context, reload bool) 
 	warnings = append(warnings, sweepWarnings...)
 
 	return stats, warnings, nil
+}
+
+// orderWorkspacesParentFirst orders disk workspaces so a parent is always
+// reconciled before its children. The session store enforces a parent_id
+// foreign key, so creating a nested workspace before its group is rejected —
+// and because Go randomizes map iteration, that failure would otherwise strike
+// intermittently when a root containing groups is scanned for the first time.
+// Workspaces whose parent is not part of the set (a group that failed to load,
+// or a stale reference) are still attempted, after the ones that can be ordered.
+func orderWorkspacesParentFirst(diskWorkspaces map[string]*agentworkspace.Workspace) []string {
+	ids := make([]string, 0, len(diskWorkspaces))
+	for id := range diskWorkspaces {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+
+	ordered := make([]string, 0, len(ids))
+	emitted := make(map[string]bool, len(ids))
+	for len(ordered) < len(ids) {
+		progressed := false
+		for _, id := range ids {
+			if emitted[id] {
+				continue
+			}
+			if parentID := diskWorkspaces[id].ParentID; parentID != "" && !emitted[parentID] {
+				if _, known := diskWorkspaces[parentID]; known {
+					continue // wait for the parent to be emitted first
+				}
+			}
+			ordered = append(ordered, id)
+			emitted[id] = true
+			progressed = true
+		}
+		if !progressed {
+			// A parent cycle, only reachable from hand-edited files: emit the
+			// remainder in a stable order rather than spinning.
+			for _, id := range ids {
+				if !emitted[id] {
+					ordered = append(ordered, id)
+					emitted[id] = true
+				}
+			}
+		}
+	}
+	return ordered
 }
 
 // sweepMissingWorkspaces marks folder-managed session workspaces as missing when
@@ -631,6 +697,71 @@ func (h *Handler) ReconcileWorkspacesFromDisk(ctx context.Context) error {
 		})
 	}
 	return nil
+}
+
+// WorkspaceRootRefresh summarizes a live workspace-root application: what the
+// newly active root added, re-grouped, hid, or brought back into view.
+type WorkspaceRootRefresh struct {
+	Imported   int
+	Reparented int
+	Orphaned   int
+	Restored   int
+	Warnings   []string
+}
+
+// ApplyWorkspaceRoot re-points the live folder store at root and reconciles the
+// session store against it, producing the same visible workspace set a restart
+// against that root would produce. Nothing on disk is moved, copied, or deleted,
+// and no unrelated startup maintenance is replayed.
+//
+// The folder-store re-point and the reconcile are performed under the same
+// rescanMu the explicit Rescan endpoint uses, so the two can never interleave.
+// SetBasePath has already loaded the target root's cache, so the reconcile does
+// not walk the tree a second time.
+//
+// A build with no folder store reports an empty refresh rather than failing: the
+// directory is still persisted for the next start.
+func (h *Handler) ApplyWorkspaceRoot(ctx context.Context, root string) (refresh WorkspaceRootRefresh, err error) {
+	if h == nil || h.workspaceStore == nil {
+		return WorkspaceRootRefresh{Warnings: []string{}}, nil
+	}
+	if strings.TrimSpace(root) == "" {
+		return WorkspaceRootRefresh{}, fmt.Errorf("workspace directory is required")
+	}
+
+	h.rescanMu.Lock()
+	defer func() {
+		h.finishReconcileLocked(err)
+		h.rescanMu.Unlock()
+	}()
+
+	if _, err = h.workspaceStore.SetBasePath(root); err != nil {
+		return WorkspaceRootRefresh{}, err
+	}
+
+	stats, warnings, err := h.reconcileWorkspacesFromDiskLocked(ctx, false)
+	if err != nil {
+		return WorkspaceRootRefresh{}, err
+	}
+	if warnings == nil {
+		warnings = []string{}
+	}
+
+	logger.Info("Workspace directory applied without restart", logger.Fields{
+		"imported":   stats.Imported,
+		"reparented": stats.Reparented,
+		"orphaned":   stats.Orphaned,
+		"restored":   stats.Restored,
+		"warnings":   len(warnings),
+	})
+
+	return WorkspaceRootRefresh{
+		Imported:   stats.Imported,
+		Reparented: stats.Reparented,
+		Orphaned:   stats.Orphaned,
+		Restored:   stats.Restored,
+		Warnings:   warnings,
+	}, nil
 }
 
 func workspaceFolderExists(path string) (bool, error) {

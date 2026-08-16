@@ -38,7 +38,27 @@ type Handler struct {
 	llmFactory              *llm.Factory
 	utilitySettingsReloader func()
 	vaultRootUpdater        func(string) error
+	workspaceRootUpdater    func(string) (WorkspaceRootRefresh, error)
 	macWakeService          macWakeService
+}
+
+// WorkspaceRootRefresh reports what applying a saved Workspace Directory to the
+// running process actually changed, so callers can describe the refresh instead
+// of guessing. The counts mirror the existing disk-reconcile vocabulary used by
+// the Rescan endpoint.
+type WorkspaceRootRefresh struct {
+	// Imported counts workspaces found under the new root and newly recorded.
+	Imported int `json:"imported"`
+	// Reparented counts workspaces whose grouping changed to match disk.
+	Reparented int `json:"reparented"`
+	// Orphaned counts workspaces hidden because they do not exist under the
+	// active root (their folders are left untouched).
+	Orphaned int `json:"orphaned"`
+	// Restored counts previously hidden workspaces that the active root brings
+	// back into view.
+	Restored int `json:"restored"`
+	// Warnings holds non-fatal problems encountered while refreshing.
+	Warnings []string `json:"warnings"`
 }
 
 func NewHandler(store store.Store, configManager *config.Manager, clientFactory *client.Factory, llmFactory *llm.Factory) *Handler {
@@ -58,6 +78,14 @@ func (h *Handler) SetUtilitySettingsReloader(fn func()) {
 // SetVaultRootUpdater sets a callback invoked after vault root settings are saved.
 func (h *Handler) SetVaultRootUpdater(fn func(string) error) {
 	h.vaultRootUpdater = fn
+}
+
+// SetWorkspaceRootUpdater sets the callback that applies a saved Workspace
+// Directory to the running process, mirroring SetVaultRootUpdater. The full
+// server always wires it; when it is unset (focused tests, builds without a
+// folder store) the save still persists and simply reports no refresh.
+func (h *Handler) SetWorkspaceRootUpdater(fn func(string) (WorkspaceRootRefresh, error)) {
+	h.workspaceRootUpdater = fn
 }
 
 // SetMacWakeService wires the macOS wake scheduling service used by settings.
@@ -257,6 +285,26 @@ func (h *Handler) WorkspaceRootSettingsHandler(w http.ResponseWriter, r *http.Re
 			return
 		}
 
+		// Apply the directory to the running process before reporting success,
+		// the same ordering VaultRootSettingsHandler uses. Without this the
+		// setting persists but the live workspace store keeps serving the root
+		// the process booted with, which is exactly the restart-required bug.
+		refresh := WorkspaceRootRefresh{Warnings: []string{}}
+		if h.workspaceRootUpdater != nil {
+			applied, err := h.workspaceRootUpdater(effectiveRoot)
+			if err != nil {
+				// The path is already persisted; a restart would pick it up.
+				// Say so rather than claiming a rollback that did not happen.
+				settingsLog.Warn("Failed to apply workspace directory to the running process", logger.Fields{"error": err.Error()})
+				orihttp.RespondErrorWithErr(w, http.StatusBadRequest, "Workspace directory was saved but could not be applied without a restart", err)
+				return
+			}
+			refresh = applied
+			if refresh.Warnings == nil {
+				refresh.Warnings = []string{}
+			}
+		}
+
 		orihttp.WriteJSON(w, map[string]any{
 			"success":                  true,
 			"workspace_root":           configured,
@@ -264,6 +312,7 @@ func (h *Handler) WorkspaceRootSettingsHandler(w http.ResponseWriter, r *http.Re
 			"default_workspace_root":   config.DefaultWorkspaceRoot(),
 			"source":                   config.WorkspaceRootSource(configured),
 			"confirmed":                true,
+			"refresh":                  refresh,
 		})
 
 	default:

@@ -582,6 +582,33 @@ func (b *ServerBuilder) initializeHandlers() {
 	}
 }
 
+// wireWorkspaceRootUpdater lets a saved Workspace Directory take effect in the
+// running process, the same way SetVaultRootUpdater already does for the vault
+// root. The settings handler owns the persistence half; this callback owns the
+// live half: re-point the folder store at the new root and reconcile the session
+// store against it, so pre-existing workspaces there appear without a restart.
+//
+// Like wireReaperSetup, it must run AFTER the folder store exists (Phase 18);
+// during initializeHandlers (Phase 17) the session handler has no folder store
+// yet and the callback would apply roots to nothing.
+//
+// The session handler's context is deliberately Background: the reconcile writes
+// to the session store, and a client that disconnects mid-save must not abandon
+// it half-applied.
+func (b *ServerBuilder) wireWorkspaceRootUpdater() {
+	if b.settingsHandler == nil || b.sessionHandler == nil {
+		return
+	}
+	sessionHandler := b.sessionHandler
+	b.settingsHandler.SetWorkspaceRootUpdater(func(root string) (settingshttp.WorkspaceRootRefresh, error) {
+		refresh, err := sessionHandler.ApplyWorkspaceRoot(context.Background(), root)
+		if err != nil {
+			return settingshttp.WorkspaceRootRefresh{}, err
+		}
+		return settingshttp.WorkspaceRootRefresh(refresh), nil
+	})
+}
+
 // wireReaperSetup wires the normalized REAPER readiness resolver, pre-create
 // preview lister, shared reconciler, and repairer onto the session handler so the
 // create modal, workspace UI, and repair all read one truthful model backed by

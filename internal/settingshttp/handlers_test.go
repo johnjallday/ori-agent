@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -814,6 +815,187 @@ func TestWorkspaceRootSettingsHandler_Post_ClearFallsBackToDefault(t *testing.T)
 	}
 	if resp.EffectiveWorkspaceRoot != config.DefaultWorkspaceRoot() {
 		t.Fatalf("Expected default effective root %q, got %q", config.DefaultWorkspaceRoot(), resp.EffectiveWorkspaceRoot)
+	}
+}
+
+// workspaceRootPostResponse is the full POST payload including the refresh
+// block added so callers can report what the live application changed.
+type workspaceRootPostResponse struct {
+	Success                bool                 `json:"success"`
+	WorkspaceRoot          string               `json:"workspace_root"`
+	EffectiveWorkspaceRoot string               `json:"effective_workspace_root"`
+	Source                 string               `json:"source"`
+	Confirmed              bool                 `json:"confirmed"`
+	Refresh                WorkspaceRootRefresh `json:"refresh"`
+}
+
+func postWorkspaceRoot(t *testing.T, handler *Handler, root string) *httptest.ResponseRecorder {
+	t.Helper()
+	body, err := json.Marshal(map[string]string{"workspace_root": root})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/settings/workspace-root", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	handler.WorkspaceRootSettingsHandler(rec, req)
+	return rec
+}
+
+func TestWorkspaceRootSettingsHandler_Post_AppliesRootToRunningProcess(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("WORKSPACE_DIR", "")
+	configManager := config.NewManager(filepath.Join(tmpDir, "settings.json"))
+	_ = configManager.Load()
+
+	handler := NewHandler(nil, configManager, nil, llm.NewFactory())
+
+	var appliedRoots []string
+	handler.SetWorkspaceRootUpdater(func(root string) (WorkspaceRootRefresh, error) {
+		appliedRoots = append(appliedRoots, root)
+		return WorkspaceRootRefresh{
+			Imported:   2,
+			Reparented: 1,
+			Orphaned:   3,
+			Restored:   4,
+			Warnings:   []string{"Failed to load Notes"},
+		}, nil
+	})
+
+	customRoot := filepath.Join(tmpDir, "custom-workspaces")
+	rec := postWorkspaceRoot(t, handler, customRoot)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+
+	if len(appliedRoots) != 1 {
+		t.Fatalf("expected the updater to run exactly once, got %d calls", len(appliedRoots))
+	}
+	if appliedRoots[0] != customRoot {
+		t.Fatalf("updater got root %q, want the effective root %q", appliedRoots[0], customRoot)
+	}
+
+	var resp workspaceRootPostResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !resp.Success || resp.EffectiveWorkspaceRoot != customRoot {
+		t.Fatalf("unexpected response: %+v", resp)
+	}
+	if resp.Refresh.Imported != 2 || resp.Refresh.Reparented != 1 || resp.Refresh.Orphaned != 3 || resp.Refresh.Restored != 4 {
+		t.Fatalf("refresh counts = %+v, want imported 2 / reparented 1 / orphaned 3 / restored 4", resp.Refresh)
+	}
+	if len(resp.Refresh.Warnings) != 1 || resp.Refresh.Warnings[0] != "Failed to load Notes" {
+		t.Fatalf("refresh warnings = %v", resp.Refresh.Warnings)
+	}
+
+	// The directory is still persisted, exactly as before.
+	reloaded := config.NewManager(filepath.Join(tmpDir, "settings.json"))
+	_ = reloaded.Load()
+	if got := reloaded.GetWorkspaceRoot(); got != customRoot {
+		t.Fatalf("persisted workspace root = %q, want %q", got, customRoot)
+	}
+}
+
+func TestWorkspaceRootSettingsHandler_Post_ClearAppliesEffectiveRoot(t *testing.T) {
+	tmpDir := t.TempDir()
+	envRoot := filepath.Join(tmpDir, "env-workspaces")
+	t.Setenv("WORKSPACE_DIR", envRoot)
+	configManager := config.NewManager(filepath.Join(tmpDir, "settings.json"))
+	_ = configManager.Load()
+	if err := configManager.SetWorkspaceRoot(filepath.Join(tmpDir, "custom-workspaces")); err != nil {
+		t.Fatalf("SetWorkspaceRoot: %v", err)
+	}
+
+	handler := NewHandler(nil, configManager, nil, llm.NewFactory())
+
+	var appliedRoot string
+	handler.SetWorkspaceRootUpdater(func(root string) (WorkspaceRootRefresh, error) {
+		appliedRoot = root
+		return WorkspaceRootRefresh{Imported: 1}, nil
+	})
+
+	rec := postWorkspaceRoot(t, handler, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+
+	// Clearing a custom root must apply the effective root, not an empty string.
+	if appliedRoot != envRoot {
+		t.Fatalf("updater got root %q, want the effective environment root %q", appliedRoot, envRoot)
+	}
+
+	var resp workspaceRootPostResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.WorkspaceRoot != "" || resp.EffectiveWorkspaceRoot != envRoot {
+		t.Fatalf("unexpected cleared response: %+v", resp)
+	}
+	if resp.Refresh.Imported != 1 {
+		t.Fatalf("refresh = %+v, want the cleared root's refresh result", resp.Refresh)
+	}
+}
+
+func TestWorkspaceRootSettingsHandler_Post_UpdaterFailureIsNotReportedAsSuccess(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("WORKSPACE_DIR", "")
+	configManager := config.NewManager(filepath.Join(tmpDir, "settings.json"))
+	_ = configManager.Load()
+
+	handler := NewHandler(nil, configManager, nil, llm.NewFactory())
+	handler.SetWorkspaceRootUpdater(func(string) (WorkspaceRootRefresh, error) {
+		return WorkspaceRootRefresh{Imported: 9}, errors.New("index is locked")
+	})
+
+	rec := postWorkspaceRoot(t, handler, filepath.Join(tmpDir, "custom-workspaces"))
+	if rec.Code == http.StatusOK {
+		t.Fatalf("expected a non-success status when the root cannot be applied, got 200: %s", rec.Body.String())
+	}
+
+	body := rec.Body.String()
+	var resp map[string]any
+	if err := json.Unmarshal([]byte(body), &resp); err != nil {
+		t.Fatalf("decode %s: %v", body, err)
+	}
+	if success, ok := resp["success"].(bool); ok && success {
+		t.Fatal("a failed live application must not report success")
+	}
+	if _, ok := resp["refresh"]; ok {
+		t.Fatalf("a failed live application must not report refresh counts: %v", resp)
+	}
+	if !strings.Contains(body, "index is locked") {
+		t.Fatalf("expected the underlying failure to be surfaced, got %s", body)
+	}
+}
+
+func TestWorkspaceRootSettingsHandler_Post_WithoutUpdaterStillSucceeds(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("WORKSPACE_DIR", "")
+	configManager := config.NewManager(filepath.Join(tmpDir, "settings.json"))
+	_ = configManager.Load()
+
+	// No updater wired: focused tests and builds without a folder store must
+	// still be able to save a directory.
+	handler := NewHandler(nil, configManager, nil, llm.NewFactory())
+
+	customRoot := filepath.Join(tmpDir, "custom-workspaces")
+	rec := postWorkspaceRoot(t, handler, customRoot)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp workspaceRootPostResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !resp.Success {
+		t.Fatal("expected success without an updater")
+	}
+	if resp.Refresh.Imported != 0 || resp.Refresh.Orphaned != 0 || resp.Refresh.Restored != 0 || resp.Refresh.Reparented != 0 {
+		t.Fatalf("expected a zeroed refresh without an updater, got %+v", resp.Refresh)
+	}
+	if resp.Refresh.Warnings == nil {
+		t.Fatal("warnings should serialize as an empty list, not null")
 	}
 }
 

@@ -207,6 +207,16 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 		}
 		if b.sessionHandler != nil {
 			b.sessionHandler.SetWorkspaceStore(fileStore)
+			// A saved Workspace Directory must take effect in this process, not
+			// only on the next start. Wire it here (Phase 18) rather than with
+			// the other settings callbacks (Phase 17), where the folder store
+			// does not exist yet and the callback would capture nil.
+			//
+			// Wired regardless of startup-maintenance consent: on first run the
+			// live store is pointed at the unconfirmed staging root, and this is
+			// exactly the callback that re-points it the moment onboarding or
+			// Build My HQ confirms a real directory.
+			b.wireWorkspaceRootUpdater()
 			if startupMaintenanceApproved {
 				// Disk is the source of truth for grouping: reconcile the session
 				// store's structure with the on-disk layout once at startup so
