@@ -307,7 +307,18 @@ case "$1 $2" in
     esac
     ;;
   "issue view")
-    if [ "${4:-}" = "--comments" ]; then
+    if [ "${4:-}" = "--json" ]; then
+      # The eligibility lookup. Each fixture Issue has one fixed label set, so a
+      # decision test asserts eligibility rather than list ordering: 334 carries
+      # needs-decision in a NON-first position, 320 is plain backlog, 321 is a
+      # prefix-alike that must not qualify, and anything else is unlabelled.
+      case "$3" in
+        334) printf 'type:fix, needs-decision, size:quick\n' ;;
+        320) printf 'backlog, size:quick\n' ;;
+        321) printf 'needs-decision-later\n' ;;
+        *) printf '\n' ;;
+      esac
+    elif [ "${4:-}" = "--comments" ]; then
       printf 'Issue #%s detail\n' "$3"
       printf 'Issue #%s decision comment\n' "$3"
     else
@@ -363,6 +374,31 @@ assert_no_github() {
     printf '%s contacted GitHub: %s\n' "$context" "$(cat "$gh_calls")" >&2
     exit 1
   fi
+}
+
+# Deciding now needs one live label READ before it can refuse, so the boundary
+# that matters is "no GitHub WRITE", not "no GitHub contact". Reads stay free;
+# comment/edit/create are the calls that change something on github.com.
+assert_no_github_write() {
+  local context="$1"
+  if grep -Eq -- $'issue\t(comment|edit|create)' "$gh_calls"; then
+    printf '%s wrote to GitHub: %s\n' "$context" "$(cat "$gh_calls")" >&2
+    exit 1
+  fi
+}
+
+count_label_reads() {
+  grep -Fc $'CALL\tissue\tview\t'"$1"$'\t--json\tlabels' "$gh_calls" || true
+}
+
+# A recorded body is multiline, so its continuation lines land in the transcript
+# too. Only the anchored CALL lines are calls.
+count_gh_calls() {
+  grep -c '^CALL' "$gh_calls" || true
+}
+
+gh_call_sequence() {
+  awk '/^CALL/ {printf "%s %s;", $2, $3}' "$gh_calls"
 }
 
 # With no arguments in a non-TTY, the command lists every open Issue before
@@ -427,8 +463,49 @@ grep -Fq "Issue #334 detail" "$fixture_root/view-output"
 grep -Fq "Issue #334 decision comment" "$fixture_root/view-output"
 assert_call $'CALL\tissue\tview\t334\t--comments'
 
-# Writes are confirm-gated. Without a terminal and without --yes they must
-# refuse BEFORE contacting GitHub - a pipe can never post by accident.
+# A decision is only meaningful on an Issue that is actually waiting for one.
+# #320 is plain backlog, so the attempt is rejected on the target's LIVE labels
+# before the preview, before the confirmation gate, and before any write. The
+# guard lives in decide_issue(), so it is checked ahead of --yes rather than
+# being something --yes can skip past.
+: > "$gh_calls"
+status=0
+"$script" decide 320 "1B, 2A" < /dev/null \
+  > "$fixture_root/decision-ineligible" 2> "$fixture_root/decision-ineligible-error" || status=$?
+if [[ "$status" -eq 0 ]]; then
+  printf 'deciding a non-needs-decision Issue succeeded\n' >&2
+  exit 1
+fi
+grep -Fq "#320 is not needs-decision" "$fixture_root/decision-ineligible-error"
+if grep -Fq "Will record this decision" "$fixture_root/decision-ineligible"; then
+  printf 'an ineligible decision printed a preview: %s\n' "$(cat "$fixture_root/decision-ineligible")" >&2
+  exit 1
+fi
+# The generic "pass --yes" refusal would mean the attempt reached confirm_write,
+# i.e. that it was stopped by the wrong gate.
+if grep -Fq "pass --yes to confirm" "$fixture_root/decision-ineligible-error"; then
+  printf 'an ineligible decision reached the confirmation gate\n' >&2
+  exit 1
+fi
+check "an ineligible decision reads labels exactly once" "$(count_label_reads 320)" "1"
+check "an ineligible decision makes no other call" "$(count_gh_calls)" "1"
+assert_no_github_write "an ineligible decision"
+
+# Eligibility is exact, not a prefix match: `needs-decision-later` is a
+# different label and must not unlock the write, even with --yes.
+: > "$gh_calls"
+status=0
+"$script" decide 321 "1A" --yes > /dev/null 2> "$fixture_root/decision-prefix" || status=$?
+if [[ "$status" -eq 0 ]]; then
+  printf 'a prefix-alike label unlocked a decision\n' >&2
+  exit 1
+fi
+grep -Fq "#321 is not needs-decision" "$fixture_root/decision-prefix"
+assert_no_github_write "a decision on a prefix-alike label"
+
+# Writes are confirm-gated. Eligibility is established first, so a valid attempt
+# on a genuinely needs-decision Issue reads its labels and then refuses BEFORE
+# any GitHub WRITE - a pipe can never post by accident.
 : > "$gh_calls"
 status=0
 "$script" decide 334 "1B, 2A" < /dev/null > /dev/null 2> "$fixture_root/decision-refused" || status=$?
@@ -437,7 +514,43 @@ if [[ "$status" -ne 2 ]]; then
   exit 1
 fi
 grep -Fq "pass --yes to confirm" "$fixture_root/decision-refused"
-assert_no_github "an unconfirmed decision"
+check "an unconfirmed decision reads labels exactly once" "$(count_label_reads 334)" "1"
+check "an unconfirmed decision makes no other call" "$(count_gh_calls)" "1"
+assert_no_github_write "an unconfirmed decision"
+
+# A label lookup that fails must fail closed: the original status survives, the
+# message is distinguishable from ordinary ineligibility, and nothing is
+# previewed, prompted for, or written.
+: > "$gh_calls"
+status=0
+GH_FAIL=1 "$script" decide 334 "1A" --yes \
+  > "$fixture_root/decision-lookup-failed" 2> "$fixture_root/decision-lookup-error" || status=$?
+if [[ "$status" -ne 7 ]]; then
+  printf 'a failed label lookup exited %s, want 7\n' "$status" >&2
+  exit 1
+fi
+grep -Fq "could not read labels for #334" "$fixture_root/decision-lookup-error"
+if grep -Fq "is not needs-decision" "$fixture_root/decision-lookup-error"; then
+  printf 'a failed label lookup was reported as ordinary ineligibility\n' >&2
+  exit 1
+fi
+if [[ -s "$fixture_root/decision-lookup-failed" ]]; then
+  printf 'a failed label lookup printed a preview: %s\n' "$(cat "$fixture_root/decision-lookup-failed")" >&2
+  exit 1
+fi
+check "a failed label lookup makes exactly one call" "$(count_gh_calls)" "1"
+assert_no_github_write "a failed label lookup"
+
+# Blank answers are a local validation failure and must still stop before the
+# eligibility read - an empty decision is never worth a round trip.
+: > "$gh_calls"
+status=0
+"$script" decide 334 "   " --yes > /dev/null 2>&1 || status=$?
+if [[ "$status" -ne 2 ]]; then
+  printf 'a blank-answer decision exited %s, want 2\n' "$status" >&2
+  exit 1
+fi
+assert_no_github "a blank-answer decision"
 
 : > "$gh_calls"
 status=0
@@ -461,13 +574,31 @@ if grep -Fq $'issue\tedit' "$gh_calls"; then
   printf 'recording a decision changed labels: %s\n' "$(cat "$gh_calls")" >&2
   exit 1
 fi
+# The whole transcript, in order: establish eligibility, then post. Nothing else.
+check "an eligible decision reads labels exactly once" "$(count_label_reads 334)" "1"
+check "an eligible decision makes exactly two calls" "$(count_gh_calls)" "2"
+check "the label read precedes the decision comment" \
+  "$(gh_call_sequence)" "issue view;issue comment;"
 
-# `answer` remains a backwards-compatible alias for the guided decision write.
+# `answer` remains a backwards-compatible alias for the guided decision write,
+# and inherits the same eligibility read rather than carrying its own copy.
 : > "$gh_calls"
 : > "$gh_body"
 "$script" answer 334 "1A" --yes > /dev/null
 check "answer alias posts a decision" "$(<"$gh_body")" \
   $'<!-- ori-decision -->\n\n**Answers:** 1A'
+check "answer alias reads labels exactly once" "$(count_label_reads 334)" "1"
+check "answer alias makes exactly two calls" "$(count_gh_calls)" "2"
+
+: > "$gh_calls"
+status=0
+"$script" answer 320 "1A" --yes > /dev/null 2> "$fixture_root/answer-ineligible" || status=$?
+if [[ "$status" -eq 0 ]]; then
+  printf 'the answer alias decided a non-needs-decision Issue\n' >&2
+  exit 1
+fi
+grep -Fq "#320 is not needs-decision" "$fixture_root/answer-ineligible"
+assert_no_github_write "an ineligible answer alias"
 
 # Capture is confirm-gated like every other write.
 : > "$gh_calls"
@@ -574,6 +705,24 @@ if [[ "$decision_count" -ne 2 ]]; then
   exit 1
 fi
 
+# Every entry point funnels through decide_issue(), so the REPL's own decide
+# command inherits the guard without a second implementation: an ineligible
+# Issue is rejected on eligibility, an eligible one gets as far as the existing
+# confirmation gate, and neither writes.
+: > "$gh_calls"
+printf 'c 320 1A\nq\n' | "$script" \
+  > "$fixture_root/repl-ineligible" 2> "$fixture_root/repl-ineligible-error"
+grep -Fq "#320 is not needs-decision" "$fixture_root/repl-ineligible-error"
+check "a REPL decision on an ineligible Issue reads labels once" "$(count_label_reads 320)" "1"
+assert_no_github_write "a REPL decision on an ineligible Issue"
+
+: > "$gh_calls"
+printf 'c 334 1A\nq\n' | "$script" \
+  > "$fixture_root/repl-eligible" 2> "$fixture_root/repl-eligible-error"
+grep -Fq "pass --yes to confirm" "$fixture_root/repl-eligible-error"
+check "a REPL decision on an eligible Issue reads labels once" "$(count_label_reads 334)" "1"
+assert_no_github_write "an unconfirmed REPL decision"
+
 # A GitHub failure stays a failure instead of being rendered as an empty list.
 : > "$gh_calls"
 status=0
@@ -588,6 +737,43 @@ grep -Fq "simulated GitHub failure" "$fixture_root/failure-output"
 : > "$gh_calls"
 (cd "$fixture_root" && "$script" all > /dev/null)
 assert_call $'CALL\tissue\tlist\t--state\topen\t--limit\t1000'
+
+# decision_recorded is the flag the opened-Issue action bar reads to decide
+# whether to re-display the Issue. A rejected or failed decision must leave it
+# at 0, or the UI would refresh as though something had been recorded. The real
+# decide_issue is exercised here against the fake gh, not the stub used above.
+decision_recorded_after() {
+  local mode="$1"
+  shift
+  (
+    set +e
+    if [[ "$mode" == fail ]]; then
+      export GH_FAIL=1
+    fi
+    # Re-sourced because the unit section above replaced decide_issue with a
+    # stub. The script's readonly declarations are already set in this shell, so
+    # their harmless re-assignment warnings are discarded.
+    DEVOPS_SOURCE_ONLY=1 source "$script" > /dev/null 2>&1
+    decide_issue "$@" > /dev/null 2>&1
+    printf '%s' "$decision_recorded"
+  )
+}
+
+: > "$gh_calls"
+check "an ineligible decision records nothing" \
+  "$(decision_recorded_after ok 320 "1A" --yes)" "0"
+: > "$gh_calls"
+check "a failed label lookup records nothing" \
+  "$(decision_recorded_after fail 334 "1A" --yes)" "0"
+: > "$gh_calls"
+check "an unconfirmed decision records nothing" \
+  "$(decision_recorded_after ok 334 "1A" < /dev/null)" "0"
+: > "$gh_calls"
+check "an invalid decision records nothing" \
+  "$(decision_recorded_after ok 334 --yes)" "0"
+: > "$gh_calls"
+check "an eligible decision records the write" \
+  "$(decision_recorded_after ok 334 "1A" --yes)" "1"
 
 # ---------------------------------------------------------------------------
 # Picker-only interactions are wired structurally because run_picker requires a

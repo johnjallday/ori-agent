@@ -470,7 +470,7 @@ decide_issue() {
 
   decision_recorded=0
   local -a rest=()
-  local argument number answers body
+  local argument number answers body labels label_status=0
 
   for argument in "$@"; do
     if [[ "$expecting_rationale" -eq 1 ]]; then
@@ -502,6 +502,28 @@ decide_issue() {
   if [[ -n "$rationale" && ! "$rationale" =~ [^[:space:]] ]]; then
     printf '%s\n' "--rationale requires non-empty text" >&2
     return 2
+  fi
+
+  # Only an Issue that is actually waiting for a decision can receive one. Every
+  # entry point - the picker's c key, the opened-Issue action bar, the line
+  # REPL, and the one-shot command - funnels through here, so this single gate
+  # covers all four and none of them needs its own copy.
+  #
+  # The labels are read live rather than taken from the picker's cached row: the
+  # row can be minutes old by the time c is pressed, and the grooming routine
+  # relabels Issues while the picker is open. A read that fails must fail closed
+  # and keep its own status, so a network error is never mistaken for an Issue
+  # that simply is not needs-decision.
+  labels="$(gh issue view "$number" --json labels \
+    --template '{{range $index, $label := .labels}}{{if $index}}, {{end}}{{$label.name}}{{end}}')" ||
+    label_status=$?
+  if [[ "$label_status" -ne 0 ]]; then
+    printf 'could not read labels for #%s; not deciding.\n' "$number" >&2
+    return "$label_status"
+  fi
+  if ! labels_contain "$labels" "needs-decision"; then
+    printf '#%s is not needs-decision; nothing to decide.\n' "$number" >&2
+    return 1
   fi
 
   body="$(format_decision_comment "$answers" "$rationale")"
