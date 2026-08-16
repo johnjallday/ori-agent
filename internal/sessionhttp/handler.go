@@ -12,6 +12,7 @@ import (
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/personalhq"
 	"github.com/johnjallday/ori-agent/internal/pluginworkspace"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/reapersetup"
@@ -68,11 +69,30 @@ type Handler struct {
 	// reports itself unavailable rather than claiming enforcement.
 	planningPolicy *workspacepolicy.Resolver
 
+	// personalHQDesignator lets workspace import re-register an exported
+	// workspace's Personal HQ marker with the authoritative service. Injected
+	// by the server; nil in minimal handlers, where import simply skips
+	// designation. See PersonalHQDesignator.
+	personalHQDesignator PersonalHQDesignator
+
 	// rescanMu serializes disk reconciles so concurrent rescan requests
 	// (e.g. several hub tabs loading at once) don't run overlapping filesystem
 	// walks; lastRescanAt backs the cooldown for background-initiated rescans.
 	rescanMu     sync.Mutex
 	lastRescanAt time.Time
+}
+
+// PersonalHQDesignator is the narrow Personal HQ capability workspace import
+// needs: designate a workspace as the user's Personal HQ when they do not
+// already have a valid one. personalhq.Service satisfies it.
+//
+// Only Designate is exposed, on purpose. Replace, Clear, and the onboarding
+// transitions stay out of reach of the import path so a folder carrying a
+// personal_hq marker can never silently switch, drop, or complete onboarding
+// for an existing HQ — the service answers ErrAlreadyDesignated instead, and
+// import treats that as a non-destructive no-op (Issue #290, decision 1A).
+type PersonalHQDesignator interface {
+	Designate(ctx context.Context, userID, workspaceID string) (*personalhq.Status, error)
 }
 
 // SystemModelReader exposes the configured system model used as the default
@@ -150,6 +170,26 @@ func (h *Handler) SetReaperSetup(resolver *reapersetup.Resolver, lister reaperse
 // plugin_missing).
 func (h *Handler) ReaperSetupWired() bool {
 	return h.reaperResolver != nil && h.reaperPluginLister != nil && h.reaperRepairer != nil
+}
+
+// SetPersonalHQDesignator injects the Personal HQ designation capability used
+// by workspace import to restore an exported workspace's personal_hq marker on
+// this machine. The server supplies it because the profile store lives there.
+// Optional and nil-safe: without it, imports behave exactly as they did before
+// (the marker is dropped), so minimal handlers and tests never panic.
+func (h *Handler) SetPersonalHQDesignator(designator PersonalHQDesignator) {
+	if h == nil {
+		return
+	}
+	h.personalHQDesignator = designator
+}
+
+// PersonalHQDesignatorWired reports whether the Personal HQ designation
+// dependency has been injected. Used by build wiring tests to catch the
+// regression where a production build leaves it nil and every reimported HQ
+// silently lands as an ordinary workspace (Issue #290).
+func (h *Handler) PersonalHQDesignatorWired() bool {
+	return h != nil && h.personalHQDesignator != nil
 }
 
 // SetTemplatesRootResolver sets the resolver used to locate the project

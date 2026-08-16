@@ -129,6 +129,14 @@ func TestServerBuilder_Build_Integration(t *testing.T) {
 	if builder.multiAgentOrchestrator == nil || !builder.multiAgentOrchestrator.HasPlanDrafter() {
 		t.Error("orchestrator plan drafter not wired; proposed work would have no durable plan")
 	}
+	// Workspace import restores an exported workspace's personal_hq marker
+	// through the authoritative Personal HQ service. Unwired, the marker is
+	// silently dropped and a reimported HQ lands as an ordinary workspace
+	// (Issue #290) — the import path itself stays nil-safe, so only this
+	// build-level check can catch the regression.
+	if server.Handlers.Session == nil || !server.Handlers.Session.PersonalHQDesignatorWired() {
+		t.Error("Personal HQ designator not wired onto the session handler")
+	}
 	// The shared Setup Wizard is wired in the same phase and for the same
 	// reason: its state lives in the workspace's canonical folder record. An
 	// unwired wizard makes every blueprint's setup unreachable.

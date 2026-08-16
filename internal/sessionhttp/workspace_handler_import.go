@@ -15,7 +15,9 @@ import (
 	"github.com/google/uuid"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/personalhq"
 	"github.com/johnjallday/ori-agent/internal/session"
+	"github.com/johnjallday/ori-agent/internal/userprofile"
 	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
 	"github.com/johnjallday/ori-agent/internal/workspacesettings"
 )
@@ -368,6 +370,18 @@ func (h *Handler) restoreImportedWorkspace(ctx context.Context, folderPath strin
 	}
 
 	rootWorkspace := importTree[0].Workspace
+
+	// An exported workspace.json can say it was its owner's Personal HQ. That is
+	// import *intent*, never authority: the designation lives on the local
+	// user's profile record, so the copied marker is stripped here and only
+	// written back once the authoritative service accepts it below (#290).
+	// Only the recognized marker is touched; any other value the snapshot
+	// carries is persisted exactly as it is today.
+	importedRootIsPersonalHQ := session.NormalizeWorkspaceDesignation(rootWorkspace.Designation) == session.WorkspaceDesignationPersonalHQ
+	if importedRootIsPersonalHQ {
+		rootWorkspace.Designation = ""
+	}
+
 	if trimmedName := strings.TrimSpace(req.Name); trimmedName != "" {
 		rootWorkspace.Name = trimmedName
 	}
@@ -511,7 +525,50 @@ func (h *Handler) restoreImportedWorkspace(ctx context.Context, folderPath strin
 	if err != nil {
 		return nil, warning, fmt.Errorf("load restored root workspace %s: %w", rootWorkspace.ID, err)
 	}
+
+	// The restore is durable and the root now resolves through the same store
+	// the Personal HQ service reads, so it is safe to offer the imported marker
+	// to the authoritative service. Everything past this point is a bounded
+	// follow-up: the workspace is imported either way.
+	if importedRootIsPersonalHQ {
+		h.designateImportedPersonalHQ(ctx, rootWorkspace.ID)
+		// Designation has no SQLite column, so the object read above cannot
+		// show the result. Re-read the canonical folder record the syncer just
+		// wrote, which also reports an undesignated workspace after a conflict.
+		rootSessionWorkspace = h.hydrateWorkspaceMetadataFromFileStore(rootSessionWorkspace)
+	}
+
 	return rootSessionWorkspace, warning, nil
+}
+
+// designateImportedPersonalHQ offers an imported workspace to the authoritative
+// Personal HQ service, restoring the marker its exported workspace.json carried
+// (#290). It never reports failure to the caller: the workspace is already
+// durably imported, so a refused or failed designation leaves an ordinary
+// undesignated workspace rather than rolling anything back.
+//
+// Designate — never Replace: a user who already has a valid HQ keeps it, and
+// the imported workspace stays eligible for the existing explicit "use as my
+// HQ" action (decision 1A).
+func (h *Handler) designateImportedPersonalHQ(ctx context.Context, workspaceID string) {
+	if h == nil || h.personalHQDesignator == nil {
+		return
+	}
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" {
+		return
+	}
+
+	_, err := h.personalHQDesignator.Designate(ctx, userprofile.LocalUserID, workspaceID)
+	switch {
+	case err == nil:
+		logger.Info("Imported workspace restored as personal hq", logger.Fields{"workspace_id": workspaceID})
+	case errors.Is(err, personalhq.ErrAlreadyDesignated):
+		// Expected, not a failure: the existing HQ wins and the import stands.
+		logger.Info("Imported workspace kept undesignated: a personal hq is already designated", logger.Fields{"workspace_id": workspaceID})
+	default:
+		logger.Warn("Failed to restore imported workspace as personal hq", logger.Fields{"workspace_id": workspaceID, "error": err})
+	}
 }
 
 func loadWorkspaceImportTree(folderPath string, parentID string) ([]workspaceImportItem, error) {
