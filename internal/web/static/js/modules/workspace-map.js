@@ -33,12 +33,28 @@
   // same logical coordinates on Home and on /workspaces, at any window size
   // (FR-19, FR-21).
   var FALLBACK_COLS = 5;
-  // The district outline is drawn around its members with this much slack, and a
-  // group's own anchor sits at the outline's corner rather than on a member's
-  // cell — otherwise an empty group and its first member would want the same
-  // point (FR-82, FR-84).
-  var DISTRICT_PAD_X = 12;
-  var DISTRICT_PAD_Y = 6;
+  // A building's visible footprint inside its cell. The cell pitch above leaves
+  // a gutter; this is the part a district frame has to enclose.
+  var MEMBER_W = CELL_W - 8;
+  var MEMBER_H = CELL_H - 10;
+  // The district frame is drawn around its members with this much slack on every
+  // side, and a group's own anchor sits at the frame's corner rather than on a
+  // member's cell — otherwise an empty group and its first member would want the
+  // same point (FR-82, FR-84).
+  //
+  // The padding is deliberately *half the cell gutter* (#346). An automatic
+  // frame around one grid-aligned member is then exactly one cell — so it
+  // reaches the neighbouring cell's edge and stops. Edges that touch without
+  // sharing area are allowed (FR-80), which means the default arrangement
+  // produces no false-containment conflicts at all, while any larger padding
+  // would make every district overlap its neighbour the moment it was drawn.
+  var DISTRICT_PAD_X = (CELL_W - MEMBER_W) / 2;
+  var DISTRICT_PAD_Y = (CELL_H - MEMBER_H) / 2;
+  // The documented minimum district (FR-43): one cell, which is the size an
+  // empty group renders at and the floor a manual resize clamps to. Mirrored by
+  // MinFrameWidth/MinFrameHeight in internal/workspacemap/presentation.go.
+  var DISTRICT_MIN_W = CELL_W;
+  var DISTRICT_MIN_H = CELL_H;
   // Safe world bounds, mirroring internal/workspacemap/model.go. A coordinate
   // outside them is treated as unreadable and the record falls back to
   // automatic placement rather than being drawn somewhere impossible (FR-12).
@@ -112,6 +128,12 @@
     // still navigable, but nothing can be saved (FR-105).
     status: 'idle',
     positions: Object.create(null),
+    // Per-group district presentation, keyed by immutable group id: the
+    // rectangle the user sized by hand, whether the district is collapsed, and
+    // which curated accent and theme it wears (#346 FR-173). A group absent from
+    // here renders with DEFAULT_PRESENTATION, so an older layout that has no
+    // district records at all reads as compact automatic districts.
+    groups: Object.create(null),
     viewport: null,
     snapToGrid: true,
     revision: 0,
@@ -147,6 +169,93 @@
     return { centerX: center.x, centerY: center.y, zoom: zoom };
   }
 
+  // ---------- district presentation (#346) ----------
+  //
+  // Accent and theme are curated, app-defined identifiers, never CSS. The
+  // catalogs below are the only values that ever reach a class name, so a
+  // record written by a newer build — or a hostile one — falls back to the
+  // default instead of being interpolated into a stylesheet (FR-125, FR-194).
+  // They mirror accentCatalog/themeCatalog in
+  // internal/workspacemap/presentation.go, which validates every write.
+  var DISTRICT_ACCENTS = ['default', 'beacon', 'moss', 'orchid', 'slate', 'tide'];
+  var DISTRICT_THEMES = ['default', 'blueprint', 'terrace'];
+  var DEFAULT_ACCENT = 'default';
+  var DEFAULT_THEME = 'default';
+
+  function safeAccent(value) {
+    return DISTRICT_ACCENTS.indexOf(value) === -1 ? DEFAULT_ACCENT : value;
+  }
+  function safeTheme(value) {
+    return DISTRICT_THEMES.indexOf(value) === -1 ? DEFAULT_THEME : value;
+  }
+
+  // safeFrame is the read-side rectangle guard. A frame is usable whole or not
+  // at all: half a rectangle is not a frame, so anything missing, non-finite,
+  // non-positive, below the documented minimum, or reaching outside the safe
+  // world drops the custom frame entirely and that district falls back to
+  // automatic sizing, which is always drawable (FR-44, FR-45, FR-192).
+  function safeFrame(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    var x = Number(raw.x);
+    var y = Number(raw.y);
+    var width = Number(raw.width);
+    var height = Number(raw.height);
+    if (!isSafeCoordinate(x) || !isSafeCoordinate(y)) return null;
+    if (!isFinite(width) || !isFinite(height)) return null;
+    if (width < DISTRICT_MIN_W || height < DISTRICT_MIN_H) return null;
+    if (!isSafeCoordinate(x + width) || !isSafeCoordinate(y + height)) return null;
+    return { x: x, y: y, width: width, height: height };
+  }
+
+  // The presentation a district with no saved record renders as: automatic
+  // sizing, expanded, default appearance (FR-18 – FR-20, FR-31, FR-101).
+  function defaultPresentation() {
+    return {
+      sizingMode: 'auto',
+      frame: null,
+      collapsed: false,
+      accent: DEFAULT_ACCENT,
+      theme: DEFAULT_THEME
+    };
+  }
+
+  // safePresentation normalizes one stored district record. Every facet degrades
+  // on its own, so an unknown accent costs that district its colour and nothing
+  // else, and one corrupt record never disturbs a sibling (FR-192).
+  function safePresentation(raw) {
+    var record = defaultPresentation();
+    if (!raw || typeof raw !== 'object') return record;
+    record.collapsed = raw.collapsed === true;
+    record.accent = safeAccent(raw.accent);
+    record.theme = safeTheme(raw.theme);
+    if (raw.sizing_mode === 'custom' || raw.sizingMode === 'custom') {
+      var frame = safeFrame(raw.frame);
+      if (frame) {
+        record.sizingMode = 'custom';
+        record.frame = frame;
+      }
+    }
+    return record;
+  }
+
+  // Read one district's presentation out of the shared layout state.
+  function presentationFor(groupId) {
+    return (groupId && layoutState.groups[groupId]) || defaultPresentation();
+  }
+
+  // A district that carries nothing but defaults is indistinguishable from one
+  // with no record at all, and is stored as neither.
+  function isDefaultPresentation(record) {
+    return (
+      !!record &&
+      record.sizingMode === 'auto' &&
+      !record.frame &&
+      !record.collapsed &&
+      record.accent === DEFAULT_ACCENT &&
+      record.theme === DEFAULT_THEME
+    );
+  }
+
   // applyLayoutPayload degrades per field, never wholesale: one unreadable
   // anchor costs that building its saved spot and nothing else, and an
   // unreadable camera opens on the default view without hiding valid buildings
@@ -160,6 +269,15 @@
       if (point) positions[id] = point;
     });
     layoutState.positions = positions;
+
+    var groups = Object.create(null);
+    var rawGroups = (payload && payload.groups) || {};
+    Object.keys(rawGroups).forEach(function (id) {
+      if (!id || id === HQ_SITE_ID) return;
+      groups[id] = safePresentation(rawGroups[id]);
+    });
+    layoutState.groups = groups;
+
     layoutState.viewport = safeViewport(payload && payload.viewport);
     layoutState.snapToGrid =
       payload && typeof payload.snap_to_grid === 'boolean' ? payload.snap_to_grid : true;
@@ -243,6 +361,17 @@
         Object.keys(result.positions || {}).forEach(function (id) {
           var point = safePoint(result.positions[id]);
           if (point) layoutState.positions[id] = point;
+        });
+        // Districts reconcile from the canonical record the server returned —
+        // including the facets this request did not mention — so the client
+        // never merges a fragment into state it may already have wrong (#346
+        // FR-190). A record that came back at every default is dropped rather
+        // than stored, matching how the server stops storing it.
+        Object.keys(result.groups || {}).forEach(function (id) {
+          if (!id || id === HQ_SITE_ID) return;
+          var record = safePresentation(result.groups[id]);
+          if (isDefaultPresentation(record)) delete layoutState.groups[id];
+          else layoutState.groups[id] = record;
         });
         return result;
       });
@@ -724,9 +853,21 @@
     grid.districts.forEach(function (district) {
       present[district.id] = true;
     });
+    // A populated district's frame comes from its members, so its own stored
+    // anchor is not part of the layout any more (#346 FR-16, FR-25). Dropping it
+    // here rather than only at draw time is what keeps a stale anchor out of
+    // fallbackOrigin and out of the cell scan too — otherwise a group anchor
+    // left far below the arranged content would still push new records, the
+    // Personal HQ site, and the New Workspace pad down there, and Fit all would
+    // still zoom out to reach them.
+    var populatedGroups = Object.create(null);
+    grid.tiles.forEach(function (tile) {
+      if (tile.groupId) populatedGroups[tile.groupId] = true;
+    });
+
     var saved = Object.create(null);
     Object.keys(savedInput).forEach(function (id) {
-      if (!present[id]) return;
+      if (!present[id] || populatedGroups[id]) return;
       var point = safePoint(savedInput[id]);
       if (point) saved[id] = point;
     });
@@ -740,8 +881,13 @@
 
     // 2. Group anchors first: a member's automatic placement may want to sit
     //    near its district, which needs the district's anchor to exist.
+    //
+    //    Only an EMPTY district needs one. A populated district resolves its
+    //    frame from its members, so handing it a fallback cell would claim
+    //    space nothing draws in and shift every automatic placement after it.
     var districtAnchors = Object.create(null);
     grid.districts.forEach(function (district) {
+      if (populatedGroups[district.id]) return;
       var anchor = saved[district.id];
       if (anchor) {
         // A saved district still occupies a cell, so claim the one it covers.
@@ -799,39 +945,46 @@
       };
     });
 
-    // 4. District outlines are elastic presentation derived from the anchors
-    //    above. They never rewrite a member's coordinate; a member dragged past
-    //    the old edge simply makes the outline grow (FR-84).
+    // 4. District frames. Each district resolves ONE effective frame, and its
+    //    top-left corner is both the visible outline and the logical anchor —
+    //    there is no second hidden anchor that can enlarge what is drawn (#346
+    //    FR-29, FR-46). A populated automatic district follows only its members,
+    //    so a stale or fallback group anchor sitting far from them can no longer
+    //    stretch the outline across empty world and drag Fit all out with it
+    //    (FR-16, FR-25).
     var membersByGroup = Object.create(null);
     nodes.forEach(function (node) {
       if (!node.groupId) return;
       (membersByGroup[node.groupId] = membersByGroup[node.groupId] || []).push(node);
     });
+    var presentations = opts.groupPresentations || null;
     var districts = grid.districts.map(function (district) {
-      var anchor = districtAnchors[district.id];
+      var record = presentations
+        ? safePresentation(presentations[district.id])
+        : presentationFor(district.id);
       var members = membersByGroup[district.id] || [];
-      var minX = anchor.x;
-      var minY = anchor.y;
-      var maxX = anchor.x + CELL_W - 8;
-      var maxY = anchor.y + CELL_H - 10;
-      members.forEach(function (member) {
-        var left = member.x - DISTRICT_PAD_X;
-        var top = member.y - DISTRICT_PAD_Y;
-        if (left < minX) minX = left;
-        if (top < minY) minY = top;
-        if (member.x + CELL_W - 8 > maxX) maxX = member.x + CELL_W - 8;
-        if (member.y + CELL_H - 10 > maxY) maxY = member.y + CELL_H - 10;
+      var frame = effectiveDistrictFrame({
+        anchor: districtAnchors[district.id],
+        members: members,
+        presentation: record
       });
       return {
         id: district.id,
         ws: district.ws,
-        anchorX: anchor.x,
-        anchorY: anchor.y,
-        x: minX,
-        y: minY,
-        width: Math.max(CELL_W - 8, maxX - minX),
-        height: Math.max(CELL_H - 10, maxY - minY),
-        saved: !!saved[district.id]
+        // The frame's corner IS the anchor (FR-17, FR-46).
+        anchorX: frame.x,
+        anchorY: frame.y,
+        x: frame.x,
+        y: frame.y,
+        width: frame.width,
+        height: frame.height,
+        sizingMode: record.sizingMode,
+        customFrame: record.frame,
+        collapsed: record.collapsed,
+        accent: record.accent,
+        theme: record.theme,
+        memberCount: members.length,
+        saved: !!savedInput[district.id]
       };
     });
 
@@ -851,6 +1004,95 @@
       bounds: bounds,
       world: expandWorld(bounds, viewport)
     };
+  }
+
+  // ---------- district effective frames (#346 FR-29 – FR-51) ----------
+
+  /**
+   * memberBounds is the padded rectangle a district's current members require.
+   *
+   * This is the floor for every frame: no district may be smaller than this, or
+   * it would be visibly clipping a workspace it claims to contain (FR-76).
+   * Returns null for an empty group, which has no contents to follow.
+   */
+  function memberBounds(members) {
+    if (!members || !members.length) return null;
+    var minX = Infinity;
+    var minY = Infinity;
+    var maxX = -Infinity;
+    var maxY = -Infinity;
+    members.forEach(function (member) {
+      if (member.x < minX) minX = member.x;
+      if (member.y < minY) minY = member.y;
+      if (member.x + MEMBER_W > maxX) maxX = member.x + MEMBER_W;
+      if (member.y + MEMBER_H > maxY) maxY = member.y + MEMBER_H;
+    });
+    return {
+      x: minX - DISTRICT_PAD_X,
+      y: minY - DISTRICT_PAD_Y,
+      width: maxX - minX + DISTRICT_PAD_X * 2,
+      height: maxY - minY + DISTRICT_PAD_Y * 2
+    };
+  }
+
+  // unionFrames returns the smallest rectangle containing both.
+  function unionFrames(a, b) {
+    if (!a) return b;
+    if (!b) return a;
+    var minX = Math.min(a.x, b.x);
+    var minY = Math.min(a.y, b.y);
+    var maxX = Math.max(a.x + a.width, b.x + b.width);
+    var maxY = Math.max(a.y + a.height, b.y + b.height);
+    return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+  }
+
+  // clampFrameToWorld keeps a resolved frame finite and inside the documented
+  // safe world (FR-44). It is a last guard, not a sizing rule: every input it
+  // sees has already been validated, so in practice it only fires for a member
+  // parked at the very edge of the world.
+  function clampFrameToWorld(frame) {
+    var width = Math.max(DISTRICT_MIN_W, Math.min(frame.width, MAX_COORD - MIN_COORD));
+    var height = Math.max(DISTRICT_MIN_H, Math.min(frame.height, MAX_COORD - MIN_COORD));
+    var x = Math.min(Math.max(frame.x, MIN_COORD), MAX_COORD - width);
+    var y = Math.min(Math.max(frame.y, MIN_COORD), MAX_COORD - height);
+    return { x: x, y: y, width: width, height: height };
+  }
+
+  /**
+   * The one effective-frame rule, pure and viewport-independent (FR-51).
+   *
+   *   populated + auto   → the tight padded box around the rendered members.
+   *                        Nothing else contributes, so an unrelated group
+   *                        anchor cannot enlarge it (FR-32, FR-25).
+   *   empty + auto       → a minimum-size district at the group's own valid
+   *                        saved or deterministic fallback anchor (FR-24).
+   *   custom             → the union of the user's saved minimum rectangle and
+   *                        whatever its members currently require, so it expands
+   *                        for an outward member (FR-36) but never shrinks on
+   *                        its own when one moves back in (FR-37).
+   *
+   * @param {{anchor: {x:number,y:number}, members: Array, presentation: object}} input
+   */
+  function effectiveDistrictFrame(input) {
+    var members = memberBounds(input.members);
+    var record = input.presentation || defaultPresentation();
+    var frame;
+    if (record.sizingMode === 'custom' && record.frame) {
+      frame = unionFrames(record.frame, members);
+    } else if (members) {
+      frame = members;
+    } else {
+      var anchor = input.anchor || { x: 0, y: 0 };
+      frame = { x: anchor.x, y: anchor.y, width: DISTRICT_MIN_W, height: DISTRICT_MIN_H };
+    }
+    // Never below the documented minimum, whatever the contents (FR-43).
+    frame = {
+      x: frame.x,
+      y: frame.y,
+      width: Math.max(DISTRICT_MIN_W, frame.width),
+      height: Math.max(DISTRICT_MIN_H, frame.height)
+    };
+    return clampFrameToWorld(frame);
   }
 
   // worldBounds is the tight box around everything currently drawn. It grows
@@ -983,9 +1225,18 @@
     };
   }
 
-  /** Look at one node without moving it (FR-41). */
+  /**
+   * Look at one node without moving it (FR-41).
+   *
+   * `point` may carry its own width/height. A district is centred by its
+   * effective frame rather than by a building-sized box at its corner, so
+   * Center selected on a large district looks at the district rather than at
+   * its top-left tile (#346 FR-47).
+   */
   function centerOn(cam, point) {
-    return { centerX: point.x + CELL_W / 2, centerY: point.y + CELL_H / 2, zoom: cam.zoom };
+    var width = typeof point.width === 'number' && isFinite(point.width) ? point.width : CELL_W;
+    var height = typeof point.height === 'number' && isFinite(point.height) ? point.height : CELL_H;
+    return { centerX: point.x + width / 2, centerY: point.y + height / 2, zoom: cam.zoom };
   }
 
   /**
@@ -3461,8 +3712,10 @@
     // opens, which cannot go stale.
   }
 
-  // selectedNodeAnchor finds the world anchor of whatever is selected, whether
-  // that is a building or a group district.
+  // selectedNodeAnchor finds the world box of whatever is selected, whether that
+  // is a building or a group district. A district reports its whole effective
+  // frame so Center selected frames the district, not a tile-sized patch of its
+  // corner (#346 FR-47).
   function selectedNodeAnchor() {
     if (!selectedId || !lastWorldLayout) return null;
     var node = null;
@@ -3470,10 +3723,22 @@
       if (candidate.id === selectedId) node = { x: candidate.x, y: candidate.y };
     });
     if (node) return node;
+    var district = renderedDistrict(selectedId);
+    if (district) {
+      return { x: district.x, y: district.y, width: district.width, height: district.height };
+    }
+    return null;
+  }
+
+  // renderedDistrict returns the district record currently drawn for a group id,
+  // which is where its effective frame lives.
+  function renderedDistrict(id) {
+    if (!id || !lastWorldLayout) return null;
+    var found = null;
     lastWorldLayout.districts.forEach(function (district) {
-      if (district.id === selectedId) node = { x: district.anchorX, y: district.anchorY };
+      if (district.id === id) found = district;
     });
-    return node;
+    return found;
   }
 
   function bindCameraControls(container) {
@@ -3650,16 +3915,17 @@
 
   /** The anchor a node is currently committed to, saved or automatic. */
   function committedAnchor(id) {
+    // A district is anchored by the corner of its effective frame, which is
+    // checked first because a populated automatic district's stored point means
+    // nothing any more — it is not what was drawn (#346 FR-17, FR-46).
+    var district = renderedDistrict(id);
+    if (district) return { x: district.x, y: district.y };
     var saved = layoutState.positions[id];
     if (saved) return { x: saved.x, y: saved.y };
     if (!lastWorldLayout) return null;
     var found = null;
     lastWorldLayout.nodes.forEach(function (node) {
       if (node.id === id) found = { x: node.x, y: node.y };
-    });
-    if (found) return found;
-    lastWorldLayout.districts.forEach(function (district) {
-      if (district.id === id) found = { x: district.anchorX, y: district.anchorY };
     });
     return found;
   }
@@ -3957,6 +4223,28 @@
   }
 
   /**
+   * The point a district drag snaps against.
+   *
+   * Not the frame corner. A district's corner is its top-left member inset by
+   * the district padding (#346), so it sits half a gutter off the grid by
+   * construction — snapping *it* to the grid would push every member off the
+   * grid instead of onto it. The promise "with snapping on, a dragged district
+   * lands on the grid" is really about its buildings, so the top-left member
+   * anchor is what gets snapped and the frame follows by the same delta. An
+   * empty district has no members to speak for it and snaps by its own corner.
+   */
+  function clusterSnapOrigin(members, frameCorner) {
+    if (!members || !members.length) return frameCorner;
+    var x = Infinity;
+    var y = Infinity;
+    members.forEach(function (member) {
+      if (member.origin.x < x) x = member.origin.x;
+      if (member.origin.y < y) y = member.origin.y;
+    });
+    return { x: x, y: y };
+  }
+
+  /**
    * Would this delta drop a cluster member on top of a building outside it?
    *
    * Overlap, not just exact-anchor equality, counts as a collision here too
@@ -4060,6 +4348,7 @@
         var groupId = handle.getAttribute('data-group-drag');
         var origin = committedAnchor(groupId);
         if (!groupId || !origin) return;
+        var members = clusterMembers(container, groupId);
         clusterDrag = {
           groupId: groupId,
           handle: handle,
@@ -4068,7 +4357,8 @@
           startY: event.clientY,
           districtEl: container.querySelector('.ws-map-district[data-group-id="' + groupId + '"]'),
           districtOrigin: origin,
-          members: clusterMembers(container, groupId),
+          snapOrigin: clusterSnapOrigin(members, origin),
+          members: members,
           delta: { x: 0, y: 0 },
           moved: false
         };
@@ -4093,18 +4383,29 @@
         }
         if (event.preventDefault) event.preventDefault();
         var raw = { x: dx / camera.zoom, y: dy / camera.zoom };
+        var snapOrigin = clusterDrag.snapOrigin;
         var snappedTarget = snapPoint(
-          { x: clusterDrag.districtOrigin.x + raw.x, y: clusterDrag.districtOrigin.y + raw.y },
+          { x: snapOrigin.x + raw.x, y: snapOrigin.y + raw.y },
           !!event.altKey
         );
         clusterDrag.delta = {
-          x: snappedTarget.x - clusterDrag.districtOrigin.x,
-          y: snappedTarget.y - clusterDrag.districtOrigin.y
+          x: snappedTarget.x - snapOrigin.x,
+          y: snappedTarget.y - snapOrigin.y
         };
         previewCluster(clusterDrag, clusterDrag.delta);
         var blocked = clusterCollides(clusterDrag.groupId, clusterDrag.members, clusterDrag.delta);
         setClusterBlocked(clusterDrag, blocked);
-        setDragReadout(container, snappedTarget, blocked ? MOVE_BLOCKED_INSTRUCTION : undefined);
+        // The readout describes where the district itself lands, which is the
+        // thing being dragged, even though the grid snap was taken from its
+        // top-left member.
+        setDragReadout(
+          container,
+          {
+            x: clusterDrag.districtOrigin.x + clusterDrag.delta.x,
+            y: clusterDrag.districtOrigin.y + clusterDrag.delta.y
+          },
+          blocked ? MOVE_BLOCKED_INSTRUCTION : undefined
+        );
       });
 
       function finish(event, cancelled) {
@@ -4769,9 +5070,26 @@
     },
     computeLayout: computeMapLayout,
     // The coordinate engine: saved anchors, deterministic fallback placement,
-    // elastic districts, content bounds, and world sizing, all pure so they can
-    // be asserted without a browser (FR-123).
+    // district effective frames, content bounds, and world sizing, all pure so
+    // they can be asserted without a browser (FR-123).
     computeWorldLayout: computeWorldLayout,
+    // The one district geometry, exported so frame assertions are written
+    // against the implementation's padding rather than against copied numbers
+    // that silently drift from it (#346 FR-43).
+    districtGeometry: {
+      padX: DISTRICT_PAD_X,
+      padY: DISTRICT_PAD_Y,
+      memberWidth: MEMBER_W,
+      memberHeight: MEMBER_H,
+      minWidth: DISTRICT_MIN_W,
+      minHeight: DISTRICT_MIN_H
+    },
+    // The curated, app-defined preset catalogs. They are identifiers, never CSS
+    // (FR-125), and the server validates writes against the same lists.
+    districtAccents: DISTRICT_ACCENTS.slice(),
+    districtThemes: DISTRICT_THEMES.slice(),
+    // Pure district frame math (FR-123).
+    effectiveDistrictFrame: effectiveDistrictFrame,
     // Pure camera math (FR-123). Exported so pointer-centred zoom, framing, and
     // clamping can be asserted exactly rather than eyeballed.
     camera: {

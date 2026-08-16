@@ -499,3 +499,373 @@ func TestPositionsSurviveTrashAndVanishOnPermanentDelete(t *testing.T) {
 		t.Errorf("sibling anchor = %+v, want {22 22} undisturbed", got)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Group district presentation (#346 FR-173 – FR-193)
+// ---------------------------------------------------------------------------
+
+func testFrame() Frame { return Frame{X: 300, Y: 200, Width: 900, Height: 700} }
+
+func TestGroupPresentationRoundTrips(t *testing.T) {
+	store, db := newTestStore(t)
+	ctx := context.Background()
+	seedWorkspace(t, db, "grp-a")
+
+	result, err := store.Apply(ctx, "local", Patch{Operations: []Operation{
+		SetGroupFrame("grp-a", testFrame()),
+	}})
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	committed, ok := result.Groups["grp-a"]
+	if !ok {
+		t.Fatal("the accepted write did not report the district it committed (FR-190)")
+	}
+	if committed.SizingMode != SizingModeCustom {
+		t.Errorf("sizing mode = %q, want custom (FR-42)", committed.SizingMode)
+	}
+	if committed.Frame == nil || *committed.Frame != testFrame() {
+		t.Errorf("committed frame = %+v, want %+v", committed.Frame, testFrame())
+	}
+	if committed.Accent != DefaultAccent || committed.Theme != DefaultTheme || committed.Collapsed {
+		t.Errorf("a resize changed unrelated facets: %+v", committed)
+	}
+
+	layout, err := store.Load(ctx, "local")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	stored := layout.Groups["grp-a"]
+	if stored.Frame == nil || *stored.Frame != testFrame() || stored.SizingMode != SizingModeCustom {
+		t.Errorf("reloaded district = %+v, want the saved custom frame", stored)
+	}
+}
+
+// Each operation changes one facet and leaves the others exactly as stored. This
+// is the whole point of separate verbs: a tab that resizes cannot re-assert a
+// collapse state or an accent it read ten minutes ago (FR-178).
+func TestGroupPresentationOperationsArePartial(t *testing.T) {
+	store, db := newTestStore(t)
+	ctx := context.Background()
+	seedWorkspace(t, db, "grp-a")
+
+	if _, err := store.Apply(ctx, "local", Patch{Operations: []Operation{
+		SetGroupFrame("grp-a", testFrame()),
+		SetGroupAppearance("grp-a", "moss", "blueprint"),
+		SetGroupCollapsed("grp-a", true),
+	}}); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	// Collapsing preserved the expanded frame (FR-114) and the appearance.
+	layout, err := store.Load(ctx, "local")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	record := layout.Groups["grp-a"]
+	if !record.Collapsed || record.Frame == nil || *record.Frame != testFrame() ||
+		record.Accent != "moss" || record.Theme != "blueprint" {
+		t.Fatalf("district after three partial ops = %+v", record)
+	}
+
+	// Fit to contents discards the minimum rectangle and nothing else (FR-41).
+	result, err := store.Apply(ctx, "local", Patch{Operations: []Operation{FitGroupToContents("grp-a")}})
+	if err != nil {
+		t.Fatalf("Apply fit: %v", err)
+	}
+	fitted := result.Groups["grp-a"]
+	if fitted.SizingMode != SizingModeAuto || fitted.Frame != nil {
+		t.Errorf("after fit = %+v, want auto with no stored frame", fitted)
+	}
+	if !fitted.Collapsed || fitted.Accent != "moss" || fitted.Theme != "blueprint" {
+		t.Errorf("fit disturbed collapse or appearance: %+v", fitted)
+	}
+
+	// Use default appearance restores presets without touching geometry or
+	// collapse (FR-137).
+	result, err = store.Apply(ctx, "local", Patch{Operations: []Operation{ResetGroupAppearance("grp-a")}})
+	if err != nil {
+		t.Fatalf("Apply reset appearance: %v", err)
+	}
+	reset := result.Groups["grp-a"]
+	if reset.Accent != DefaultAccent || reset.Theme != DefaultTheme {
+		t.Errorf("appearance not reset: %+v", reset)
+	}
+	if !reset.Collapsed {
+		t.Error("appearance reset must not expand the district")
+	}
+}
+
+// A district that drifts back to every default stops being stored, so an
+// abandoned customization does not consume the per-layout bound.
+func TestGroupPresentationDroppedWhenFullyDefault(t *testing.T) {
+	store, db := newTestStore(t)
+	ctx := context.Background()
+	seedWorkspace(t, db, "grp-a")
+
+	if _, err := store.Apply(ctx, "local", Patch{Operations: []Operation{
+		SetGroupFrame("grp-a", testFrame()),
+		FitGroupToContents("grp-a"),
+	}}); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	var rows int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(1) FROM workspace_map_group_presentations WHERE user_id = 'local'
+	`).Scan(&rows); err != nil {
+		t.Fatalf("count districts: %v", err)
+	}
+	if rows != 0 {
+		t.Errorf("stored districts = %d, want 0 once every facet is back to default", rows)
+	}
+
+	layout, err := store.Load(ctx, "local")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if _, present := layout.Groups["grp-a"]; present {
+		t.Error("an all-default district must read as absent, not as a stored record")
+	}
+}
+
+// One corrupt row costs that district its saved presentation and nothing else
+// (FR-192). A hostile preset identifier never survives the read (FR-194).
+func TestLoadDegradesOneCorruptDistrictOnly(t *testing.T) {
+	store, db := newTestStore(t)
+	ctx := context.Background()
+	seedWorkspace(t, db, "grp-bad", "grp-good")
+
+	if _, err := store.Apply(ctx, "local", Patch{Operations: []Operation{
+		SetGroupFrame("grp-bad", testFrame()),
+		SetGroupFrame("grp-good", testFrame()),
+		SetGroupAppearance("grp-good", "tide", "terrace"),
+	}}); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		UPDATE workspace_map_group_presentations
+		SET frame_width = 'wide', accent = 'url(https://evil.example/x.css)', theme = '<script>', sizing_mode = 'elastic'
+		WHERE group_id = 'grp-bad'
+	`); err != nil {
+		t.Fatalf("corrupt district: %v", err)
+	}
+
+	layout, err := store.Load(ctx, "local")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if _, present := layout.Groups["grp-bad"]; present {
+		t.Errorf("a fully corrupt district should read as absent/default, got %+v", layout.Groups["grp-bad"])
+	}
+	good := layout.Groups["grp-good"]
+	if good.Frame == nil || *good.Frame != testFrame() || good.Accent != "tide" || good.Theme != "terrace" {
+		t.Errorf("sibling district lost its valid presentation: %+v", good)
+	}
+}
+
+// A corrupt row is repaired only by the next write that touches it — the read
+// itself must leave the stored bytes alone (FR-193).
+func TestLoadNeverRepairsACorruptDistrict(t *testing.T) {
+	store, db := newTestStore(t)
+	ctx := context.Background()
+	seedWorkspace(t, db, "grp-a")
+
+	if _, err := store.Apply(ctx, "local", Patch{Operations: []Operation{
+		SetGroupFrame("grp-a", testFrame()),
+	}}); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		UPDATE workspace_map_group_presentations SET accent = 'not-a-preset' WHERE group_id = 'grp-a'
+	`); err != nil {
+		t.Fatalf("corrupt district: %v", err)
+	}
+
+	if _, err := store.Load(ctx, "local"); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	var accent string
+	if err := db.QueryRowContext(ctx, `
+		SELECT accent FROM workspace_map_group_presentations WHERE group_id = 'grp-a'
+	`).Scan(&accent); err != nil {
+		t.Fatalf("read accent: %v", err)
+	}
+	if accent != "not-a-preset" {
+		t.Errorf("the read rewrote stored bytes: accent = %q", accent)
+	}
+}
+
+func TestGroupPresentationIsPerUser(t *testing.T) {
+	store, db := newTestStore(t)
+	ctx := context.Background()
+	seedWorkspace(t, db, "grp-a")
+
+	if _, err := store.Apply(ctx, "local", Patch{Operations: []Operation{
+		SetGroupCollapsed("grp-a", true),
+	}}); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	other, err := store.Load(ctx, "someone-else")
+	if err != nil {
+		t.Fatalf("Load other user: %v", err)
+	}
+	if len(other.Groups) != 0 {
+		t.Errorf("another user sees %d districts, want 0 (FR-3)", len(other.Groups))
+	}
+}
+
+// A district write bumps exactly one revision, the same as any other accepted
+// patch, so stale-tab ordering covers presentation too (FR-189).
+func TestGroupPresentationBumpsOneRevision(t *testing.T) {
+	store, db := newTestStore(t)
+	ctx := context.Background()
+	seedWorkspace(t, db, "grp-a", "ws-a")
+
+	result, err := store.Apply(ctx, "local", Patch{Operations: []Operation{
+		SetPositions(map[string]Point{"ws-a": {X: 10, Y: 10}}),
+		SetGroupFrame("grp-a", testFrame()),
+		SetGroupCollapsed("grp-a", true),
+	}})
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if result.Revision != 1 {
+		t.Errorf("revision = %d, want 1 for one patch regardless of operation count", result.Revision)
+	}
+}
+
+// A rejected operation rolls the whole patch back: no half-applied district, no
+// consumed revision (FR-97).
+func TestGroupPresentationPatchIsAtomic(t *testing.T) {
+	store, db := newTestStore(t)
+	ctx := context.Background()
+	seedWorkspace(t, db, "grp-a")
+
+	_, err := store.Apply(ctx, "local", Patch{Operations: []Operation{
+		SetGroupFrame("grp-a", testFrame()),
+		SetGroupAppearance("grp-a", "not-a-preset", ""),
+	}})
+	if err == nil {
+		t.Fatal("an unsupported preset must fail the patch")
+	}
+	if !errors.Is(err, ErrUnsupportedPreset) {
+		t.Errorf("error = %v, want ErrUnsupportedPreset", err)
+	}
+
+	layout, err := store.Load(ctx, "local")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(layout.Groups) != 0 {
+		t.Errorf("districts after rejected patch = %v, want none stored", layout.Groups)
+	}
+	if layout.Revision != 0 {
+		t.Errorf("revision after rejected patch = %d, want 0", layout.Revision)
+	}
+}
+
+// The district lifecycle follows its group exactly as an anchor follows its
+// workspace: trash retains, permanent deletion cleans up (FR-183).
+func TestGroupPresentationLifecycleFollowsTheGroup(t *testing.T) {
+	store, db := newTestStore(t)
+	ctx := context.Background()
+	seedWorkspace(t, db, "grp-a", "grp-b")
+
+	if _, err := store.Apply(ctx, "local", Patch{Operations: []Operation{
+		SetGroupFrame("grp-a", testFrame()),
+		SetGroupFrame("grp-b", testFrame()),
+	}}); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	if _, err := db.ExecContext(ctx, `UPDATE workspaces SET status = 'trashed' WHERE id = 'grp-a'`); err != nil {
+		t.Fatalf("trash group: %v", err)
+	}
+	layout, err := store.Load(ctx, "local")
+	if err != nil {
+		t.Fatalf("Load after trash: %v", err)
+	}
+	if _, present := layout.Groups["grp-a"]; !present {
+		t.Error("a trashed group must keep its district for restore")
+	}
+
+	if _, err := db.ExecContext(ctx, `DELETE FROM workspaces WHERE id = 'grp-a'`); err != nil {
+		t.Fatalf("delete group: %v", err)
+	}
+	layout, err = store.Load(ctx, "local")
+	if err != nil {
+		t.Fatalf("Load after delete: %v", err)
+	}
+	if _, present := layout.Groups["grp-a"]; present {
+		t.Error("a permanently deleted group kept its district")
+	}
+	if _, present := layout.Groups["grp-b"]; !present {
+		t.Error("the sibling district was collateral damage")
+	}
+}
+
+// An existing schema-version-1 layout gains districts without losing anything it
+// already stored (FR-175).
+func TestGroupPresentationUpgradesVersionOneLayout(t *testing.T) {
+	store, db := newTestStore(t)
+	ctx := context.Background()
+	seedWorkspace(t, db, "ws-a", "grp-a")
+
+	if _, err := store.Apply(ctx, "local", Patch{Operations: []Operation{
+		SetPositions(map[string]Point{"ws-a": {X: 76, Y: 38}}),
+		SetViewport(Viewport{CenterX: 100, CenterY: 200, Zoom: 1.5}),
+		SetSnapToGrid(false),
+	}}); err != nil {
+		t.Fatalf("Apply legacy layout: %v", err)
+	}
+
+	before, err := store.Load(ctx, "local")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(before.Groups) != 0 {
+		t.Errorf("a layout with no district rows must read as %v districts, got %v", 0, before.Groups)
+	}
+
+	if _, err := store.Apply(ctx, "local", Patch{Operations: []Operation{
+		SetGroupCollapsed("grp-a", true),
+	}}); err != nil {
+		t.Fatalf("Apply district: %v", err)
+	}
+	after, err := store.Load(ctx, "local")
+	if err != nil {
+		t.Fatalf("Load after district write: %v", err)
+	}
+	if after.Positions["ws-a"] != (Point{X: 76, Y: 38}) {
+		t.Errorf("positions disturbed: %+v", after.Positions)
+	}
+	if after.Viewport == nil || after.Viewport.Zoom != 1.5 {
+		t.Errorf("viewport disturbed: %+v", after.Viewport)
+	}
+	if after.SnapToGrid {
+		t.Error("snap preference disturbed")
+	}
+	if !after.Groups["grp-a"].Collapsed {
+		t.Error("the district did not persist")
+	}
+}
+
+func TestGroupPresentationRejectsUndersizedFrame(t *testing.T) {
+	store, db := newTestStore(t)
+	ctx := context.Background()
+	seedWorkspace(t, db, "grp-a")
+
+	for _, frame := range []Frame{
+		{X: 0, Y: 0, Width: MinFrameWidth - 1, Height: MinFrameHeight},
+		{X: 0, Y: 0, Width: MinFrameWidth, Height: MinFrameHeight - 1},
+		{X: 0, Y: 0, Width: -400, Height: 400},
+		{X: MaxCoordinate - 10, Y: 0, Width: 400, Height: 400},
+	} {
+		if _, err := store.Apply(ctx, "local", Patch{Operations: []Operation{
+			SetGroupFrame("grp-a", frame),
+		}}); !errors.Is(err, ErrInvalidFrame) {
+			t.Errorf("frame %+v: error = %v, want ErrInvalidFrame", frame, err)
+		}
+	}
+}

@@ -124,7 +124,77 @@ func (s *SQLiteStore) Load(ctx context.Context, userID string) (Layout, error) {
 		return Layout{}, err
 	}
 	layout.Positions = positions
+
+	groups, err := s.loadGroupPresentations(ctx, userID)
+	if err != nil {
+		return Layout{}, err
+	}
+	layout.Groups = groups
 	return layout, nil
+}
+
+// loadGroupPresentations reads every district this user has customized.
+//
+// Each row is sanitized on its own. An unreadable column, an unknown sizing
+// mode, an unusable rectangle, or a preset identifier this build does not know
+// costs that district that one facet — the rest of the row, and every other
+// district, survives (#346 FR-192, FR-194). A row that sanitizes back to nothing
+// but defaults is dropped from the returned map rather than reported, because
+// "absent" and "all defaults" must render identically (FR-31, FR-101).
+func (s *SQLiteStore) loadGroupPresentations(ctx context.Context, userID string) (map[string]GroupPresentation, error) {
+	groups := map[string]GroupPresentation{}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT group_id, sizing_mode, frame_x, frame_y, frame_width, frame_height, collapsed, accent, theme
+		FROM workspace_map_group_presentations
+		WHERE user_id = ?
+	`, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read workspace map group presentations: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	for rows.Next() {
+		var (
+			id           string
+			modeRaw      any
+			xRaw         any
+			yRaw         any
+			widthRaw     any
+			heightRaw    any
+			collapsedRaw any
+			accentRaw    any
+			themeRaw     any
+		)
+		if err := rows.Scan(&id, &modeRaw, &xRaw, &yRaw, &widthRaw, &heightRaw, &collapsedRaw, &accentRaw, &themeRaw); err != nil {
+			// One unreadable row is one district on safe defaults, not a lost
+			// map. Keep reading.
+			continue
+		}
+		groupID, err := NormalizeNodeID(id)
+		if err != nil {
+			continue
+		}
+		record := GroupPresentation{
+			SizingMode: SizingMode(stringValue(modeRaw)),
+			Accent:     stringValue(accentRaw),
+			Theme:      stringValue(themeRaw),
+		}
+		if collapsed, ok := boolValue(collapsedRaw); ok {
+			record.Collapsed = collapsed
+		}
+		if frame, ok := readFrame(xRaw, yRaw, widthRaw, heightRaw); ok {
+			record.Frame = &frame
+		}
+		sanitized := SanitizeGroupPresentation(record)
+		if sanitized.IsDefault() {
+			continue
+		}
+		groups[groupID] = sanitized
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to read workspace map group presentations: %w", err)
+	}
+	return groups, nil
 }
 
 func (s *SQLiteStore) loadPositions(ctx context.Context, userID string) (map[string]Point, error) {
@@ -223,6 +293,7 @@ func (s *SQLiteStore) Apply(ctx context.Context, userID string, patch Patch) (Re
 			SchemaVersion: SchemaVersion,
 			Revision:      state.revision,
 			Positions:     state.committed,
+			Groups:        state.committedGroups,
 			Viewport:      state.viewport,
 			SnapToGrid:    state.snapToGrid,
 		}
@@ -245,6 +316,9 @@ type layoutState struct {
 	// committed accumulates the anchors this patch actually stored, which is
 	// what the response reports back — not the user's whole layout.
 	committed map[string]Point
+	// committedGroups accumulates the districts this patch touched, each as the
+	// whole canonical record now stored (#346 FR-190).
+	committedGroups map[string]GroupPresentation
 }
 
 // beginLayout makes sure the user has a layout row and returns its current
@@ -279,7 +353,11 @@ func (s *SQLiteStore) beginLayout(ctx context.Context, tx *sql.Tx, userID string
 		return nil, fmt.Errorf("%w: stored layout reports version %v", ErrUnsupportedSchemaVersion, schemaVersionRaw)
 	}
 
-	state := &layoutState{snapToGrid: DefaultSnapToGrid, committed: map[string]Point{}}
+	state := &layoutState{
+		snapToGrid:      DefaultSnapToGrid,
+		committed:       map[string]Point{},
+		committedGroups: map[string]GroupPresentation{},
+	}
 	if revision, ok := intValue(revisionRaw); ok && revision > 0 {
 		state.revision = revision
 	}
@@ -357,8 +435,143 @@ func (s *SQLiteStore) applyOperation(ctx context.Context, tx *sql.Tx, userID str
 		return s.writePositions(ctx, tx, userID, now, op.Positions, state)
 
 	default:
+		if op.Kind.isGroupPresentation() {
+			return s.applyGroupPresentation(ctx, tx, userID, now, op, state)
+		}
 		return fmt.Errorf("%w: unknown operation %q", ErrInvalidPatch, op.Kind)
 	}
+}
+
+// applyGroupPresentation folds one district operation into that district's
+// single stored row.
+//
+// Every kind reads the current record first, changes only its own facet, and
+// writes the whole row back. That read-modify-write is what makes the operations
+// genuinely partial: a tab that resizes a district cannot also re-assert a
+// collapse state or an accent it read ten minutes ago, because it never sends
+// them (#346 FR-178). A record that ends up at every default is deleted rather
+// than stored, so an abandoned customization does not count against the bound.
+func (s *SQLiteStore) applyGroupPresentation(ctx context.Context, tx *sql.Tx, userID string, now time.Time, op Operation, state *layoutState) error {
+	current, err := s.readGroupPresentation(ctx, tx, userID, op.GroupID)
+	if err != nil {
+		return err
+	}
+
+	switch op.Kind {
+	case OpSetGroupFrame:
+		frame := *op.Frame
+		current.SizingMode = SizingModeCustom
+		current.Frame = &frame
+	case OpFitGroupToContents:
+		// Fit to contents discards the stored minimum and nothing else: not a
+		// member coordinate, not the collapse state, not the appearance (FR-41).
+		current.SizingMode = SizingModeAuto
+		current.Frame = nil
+	case OpSetGroupCollapsed:
+		// The expanded frame is deliberately preserved across a collapse
+		// (FR-114), so expanding restores the exact rectangle (FR-116).
+		current.Collapsed = *op.Collapsed
+	case OpSetGroupAppearance:
+		if op.Accent != "" {
+			current.Accent = op.Accent
+		}
+		if op.Theme != "" {
+			current.Theme = op.Theme
+		}
+	case OpResetGroupAppearance:
+		current.Accent = DefaultAccent
+		current.Theme = DefaultTheme
+	default:
+		return fmt.Errorf("%w: unknown group operation %q", ErrInvalidPatch, op.Kind)
+	}
+
+	if err := s.writeGroupPresentation(ctx, tx, userID, now, op.GroupID, current); err != nil {
+		return err
+	}
+	// The response carries the whole canonical record, including the facets this
+	// operation did not mention, so the client reconciles one district rather
+	// than merging a fragment into state it may already have wrong (FR-190).
+	state.committedGroups[op.GroupID] = current
+	return nil
+}
+
+// readGroupPresentation returns the district's stored record, or the documented
+// safe default when it has none. Reading inside the transaction is what makes
+// concurrent facet updates compose instead of clobbering each other.
+func (s *SQLiteStore) readGroupPresentation(ctx context.Context, tx *sql.Tx, userID, groupID string) (GroupPresentation, error) {
+	var (
+		modeRaw      any
+		xRaw         any
+		yRaw         any
+		widthRaw     any
+		heightRaw    any
+		collapsedRaw any
+		accentRaw    any
+		themeRaw     any
+	)
+	err := tx.QueryRowContext(ctx, `
+		SELECT sizing_mode, frame_x, frame_y, frame_width, frame_height, collapsed, accent, theme
+		FROM workspace_map_group_presentations
+		WHERE user_id = ? AND group_id = ?
+	`, userID, groupID).Scan(&modeRaw, &xRaw, &yRaw, &widthRaw, &heightRaw, &collapsedRaw, &accentRaw, &themeRaw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return DefaultGroupPresentation(), nil
+	}
+	if err != nil {
+		return GroupPresentation{}, fmt.Errorf("failed to read district for %q: %w", groupID, err)
+	}
+
+	record := GroupPresentation{
+		SizingMode: SizingMode(stringValue(modeRaw)),
+		Accent:     stringValue(accentRaw),
+		Theme:      stringValue(themeRaw),
+	}
+	if collapsed, ok := boolValue(collapsedRaw); ok {
+		record.Collapsed = collapsed
+	}
+	if frame, ok := readFrame(xRaw, yRaw, widthRaw, heightRaw); ok {
+		record.Frame = &frame
+	}
+	// A corrupt stored row is repaired to safe defaults by the very next write
+	// that touches it, which is the only moment this package is allowed to
+	// rewrite it (FR-39, FR-193).
+	return SanitizeGroupPresentation(record), nil
+}
+
+func (s *SQLiteStore) writeGroupPresentation(ctx context.Context, tx *sql.Tx, userID string, now time.Time, groupID string, record GroupPresentation) error {
+	if record.IsDefault() {
+		if _, err := tx.ExecContext(ctx, `
+			DELETE FROM workspace_map_group_presentations WHERE user_id = ? AND group_id = ?
+		`, userID, groupID); err != nil {
+			return fmt.Errorf("failed to clear district for %q: %w", groupID, err)
+		}
+		return nil
+	}
+
+	var frameX, frameY, frameWidth, frameHeight any
+	if record.Frame != nil {
+		frameX, frameY = record.Frame.X, record.Frame.Y
+		frameWidth, frameHeight = record.Frame.Width, record.Frame.Height
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO workspace_map_group_presentations
+			(user_id, group_id, sizing_mode, frame_x, frame_y, frame_width, frame_height, collapsed, accent, theme, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(user_id, group_id) DO UPDATE SET
+			sizing_mode = excluded.sizing_mode,
+			frame_x = excluded.frame_x,
+			frame_y = excluded.frame_y,
+			frame_width = excluded.frame_width,
+			frame_height = excluded.frame_height,
+			collapsed = excluded.collapsed,
+			accent = excluded.accent,
+			theme = excluded.theme,
+			updated_at = excluded.updated_at
+	`, userID, groupID, string(record.SizingMode), frameX, frameY, frameWidth, frameHeight,
+		boolToInt(record.Collapsed), record.Accent, record.Theme, now, now); err != nil {
+		return fmt.Errorf("failed to save district for %q: %w", groupID, err)
+	}
+	return nil
 }
 
 func (s *SQLiteStore) writePositions(ctx context.Context, tx *sql.Tx, userID string, now time.Time, positions map[string]Point, state *layoutState) error {
@@ -442,6 +655,16 @@ func (s *SQLiteStore) enforceLayoutSize(ctx context.Context, tx *sql.Tx, userID 
 	if count > MaxPositionsPerLayout {
 		return fmt.Errorf("%w: %d stored positions exceeds %d", ErrPatchTooLarge, count, MaxPositionsPerLayout)
 	}
+
+	var districts int
+	if err := tx.QueryRowContext(ctx, `
+		SELECT COUNT(1) FROM workspace_map_group_presentations WHERE user_id = ?
+	`, userID).Scan(&districts); err != nil {
+		return fmt.Errorf("failed to count workspace map districts: %w", err)
+	}
+	if districts > MaxGroupPresentationsPerLayout {
+		return fmt.Errorf("%w: %d stored districts exceeds %d", ErrPatchTooLarge, districts, MaxGroupPresentationsPerLayout)
+	}
 	return nil
 }
 
@@ -464,6 +687,26 @@ func (s *SQLiteStore) writeLayout(ctx context.Context, tx *sql.Tx, userID string
 		return fmt.Errorf("failed to save workspace map layout: %w", err)
 	}
 	return nil
+}
+
+// readFrame rebuilds a district rectangle from four nullable columns. Like the
+// camera, all four must be present and usable together: half a rectangle is not
+// a frame, so a missing or corrupt component drops the whole custom frame and
+// the district falls back to automatic sizing, which is always drawable
+// (#346 FR-192).
+func readFrame(xRaw, yRaw, widthRaw, heightRaw any) (Frame, bool) {
+	x, xOK := floatValue(xRaw)
+	y, yOK := floatValue(yRaw)
+	width, widthOK := floatValue(widthRaw)
+	height, heightOK := floatValue(heightRaw)
+	if !xOK || !yOK || !widthOK || !heightOK {
+		return Frame{}, false
+	}
+	frame, err := NormalizeFrame(Frame{X: x, Y: y, Width: width, Height: height})
+	if err != nil {
+		return Frame{}, false
+	}
+	return frame, true
 }
 
 // readViewport rebuilds a camera from three nullable columns. All three must be
@@ -556,6 +799,20 @@ func parseInt(raw string) (int64, bool) {
 		return 0, false
 	}
 	return parsed, true
+}
+
+// stringValue converts a SQLite column into a trimmed string. Anything that is
+// not text reads as empty, which the preset catalogs then reject in favour of
+// the default — an unknown identifier must never reach the stylesheet (FR-194).
+func stringValue(value any) string {
+	switch v := value.(type) {
+	case string:
+		return strings.TrimSpace(v)
+	case []byte:
+		return strings.TrimSpace(string(v))
+	default:
+		return ""
+	}
 }
 
 func boolValue(value any) (bool, bool) {

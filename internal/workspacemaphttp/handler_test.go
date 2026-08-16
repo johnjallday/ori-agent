@@ -293,3 +293,183 @@ func TestBlankCurrentUserFallsBackToLocal(t *testing.T) {
 		t.Errorf("user = %q, want the local single user", service.lastUserID)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Group district presentation over the existing endpoint (#346 FR-176)
+// ---------------------------------------------------------------------------
+
+func TestGetLayoutIncludesGroupDistricts(t *testing.T) {
+	frame := workspacemap.Frame{X: 300, Y: 200, Width: 900, Height: 700}
+	service := &fakeService{layout: workspacemap.Layout{
+		SchemaVersion: workspacemap.SchemaVersion,
+		Revision:      2,
+		Positions:     map[string]workspacemap.Point{},
+		Groups: map[string]workspacemap.GroupPresentation{
+			"grp-a": {
+				SizingMode: workspacemap.SizingModeCustom,
+				Frame:      &frame,
+				Collapsed:  true,
+				Accent:     "moss",
+				Theme:      "blueprint",
+			},
+		},
+		SnapToGrid: true,
+	}}
+	server := newTestServer(t, service, fakeUserProvider{id: "local"})
+
+	resp, body := do(t, server, http.MethodGet, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	layout, _ := body["layout"].(map[string]any)
+	groups, ok := layout["groups"].(map[string]any)
+	if !ok {
+		t.Fatalf("response carries no groups object: %v", layout)
+	}
+	district, ok := groups["grp-a"].(map[string]any)
+	if !ok {
+		t.Fatalf("groups has no grp-a: %v", groups)
+	}
+	if district["sizing_mode"] != "custom" || district["collapsed"] != true ||
+		district["accent"] != "moss" || district["theme"] != "blueprint" {
+		t.Errorf("district = %v, want the stored presentation", district)
+	}
+	rect, ok := district["frame"].(map[string]any)
+	if !ok {
+		t.Fatalf("district carries no frame: %v", district)
+	}
+	if rect["x"] != float64(300) || rect["width"] != float64(900) {
+		t.Errorf("frame = %v, want the saved rectangle", rect)
+	}
+}
+
+func TestPatchAcceptsDistrictOperations(t *testing.T) {
+	service := &fakeService{result: workspacemap.Result{Revision: 9}}
+	server := newTestServer(t, service, fakeUserProvider{id: "local"})
+
+	resp, _ := do(t, server, http.MethodPatch, `{"operations":[
+		{"op":"set_group_frame","group_id":"grp-a","frame":{"x":10,"y":20,"width":400,"height":300}},
+		{"op":"set_group_collapsed","group_id":"grp-a","collapsed":true},
+		{"op":"set_group_appearance","group_id":"grp-a","accent":"moss","theme":"blueprint"},
+		{"op":"fit_group_to_contents","group_id":"grp-a"},
+		{"op":"reset_group_appearance","group_id":"grp-a"}
+	]}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if len(service.lastPatch.Operations) != 5 {
+		t.Fatalf("operations = %d, want 5", len(service.lastPatch.Operations))
+	}
+	first := service.lastPatch.Operations[0]
+	if first.Kind != workspacemap.OpSetGroupFrame || first.Frame == nil || first.Frame.Width != 400 {
+		t.Errorf("first operation = %+v, want the decoded frame", first)
+	}
+	if collapsed := service.lastPatch.Operations[1].Collapsed; collapsed == nil || !*collapsed {
+		t.Errorf("collapsed operation lost its value: %+v", service.lastPatch.Operations[1])
+	}
+}
+
+func TestPatchReturnsCanonicalDistrictResult(t *testing.T) {
+	frame := workspacemap.Frame{X: 0, Y: 0, Width: 400, Height: 300}
+	service := &fakeService{result: workspacemap.Result{
+		SchemaVersion: workspacemap.SchemaVersion,
+		Revision:      12,
+		Positions:     map[string]workspacemap.Point{},
+		Groups: map[string]workspacemap.GroupPresentation{
+			"grp-a": {SizingMode: workspacemap.SizingModeCustom, Frame: &frame, Accent: "default", Theme: "default"},
+		},
+	}}
+	server := newTestServer(t, service, fakeUserProvider{id: "local"})
+
+	resp, body := do(t, server, http.MethodPatch,
+		`{"operations":[{"op":"set_group_frame","group_id":"grp-a","frame":{"x":0,"y":0,"width":400,"height":300}}]}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	result, _ := body["result"].(map[string]any)
+	if result["revision"] != float64(12) {
+		t.Errorf("revision = %v, want 12 so the client can order writes", result["revision"])
+	}
+	groups, ok := result["groups"].(map[string]any)
+	if !ok {
+		t.Fatalf("result carries no committed districts: %v", result)
+	}
+	if _, ok := groups["grp-a"].(map[string]any); !ok {
+		t.Errorf("committed districts = %v, want grp-a", groups)
+	}
+}
+
+// A misspelled or invented key on a district operation is refused whole rather
+// than half-applied (FR-180).
+func TestPatchRejectsUnknownOperationFields(t *testing.T) {
+	service := &fakeService{}
+	server := newTestServer(t, service, fakeUserProvider{id: "local"})
+
+	resp, body := do(t, server, http.MethodPatch,
+		`{"operations":[{"op":"set_group_frame","group_id":"grp-a","frame":{"x":0,"y":0,"width":400,"height":300},"colour":"red"}]}`)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (%v)", resp.StatusCode, body)
+	}
+	if service.lastPatch.Operations != nil {
+		t.Error("a rejected payload must never reach the service")
+	}
+}
+
+func TestPatchRejectsOversizedOperationList(t *testing.T) {
+	service := &fakeService{}
+	server := newTestServer(t, service, fakeUserProvider{id: "local"})
+
+	operations := make([]string, workspacemap.MaxOperationsPerPatch+1)
+	for i := range operations {
+		operations[i] = `{"op":"fit_group_to_contents","group_id":"grp-a"}`
+	}
+	resp, _ := do(t, server, http.MethodPatch, `{"operations":[`+strings.Join(operations, ",")+`]}`)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	if service.lastPatch.Operations != nil {
+		t.Error("an oversized patch must never reach the service")
+	}
+}
+
+func TestPatchMapsDistrictDomainErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		want int
+	}{
+		{"unsupported preset", workspacemap.ErrUnsupportedPreset, http.StatusBadRequest},
+		{"invalid frame", workspacemap.ErrInvalidFrame, http.StatusBadRequest},
+		{"ineligible group", workspacemap.ErrGroupNotEligible, http.StatusBadRequest},
+		// A group owned by someone else is reported as missing, so the API never
+		// confirms another user's record exists.
+		{"missing group", workspacemap.ErrNodeNotFound, http.StatusNotFound},
+		{"foreign group", workspacemap.ErrNodeNotOwned, http.StatusNotFound},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			service := &fakeService{applyErr: tc.err}
+			server := newTestServer(t, service, fakeUserProvider{id: "local"})
+			resp, _ := do(t, server, http.MethodPatch,
+				`{"operations":[{"op":"set_group_collapsed","group_id":"grp-a","collapsed":true}]}`)
+			if resp.StatusCode != tc.want {
+				t.Errorf("status = %d, want %d", resp.StatusCode, tc.want)
+			}
+		})
+	}
+}
+
+// The district endpoint is the same current-user endpoint as everything else:
+// a caller-supplied user_id is refused rather than ignored (FR-4, FR-98).
+func TestPatchDistrictRefusesCallerSuppliedUser(t *testing.T) {
+	service := &fakeService{}
+	server := newTestServer(t, service, fakeUserProvider{id: "local"})
+
+	resp, _ := do(t, server, http.MethodPatch,
+		`{"user_id":"alice","operations":[{"op":"set_group_collapsed","group_id":"grp-a","collapsed":true}]}`)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	if service.lastPatch.Operations != nil {
+		t.Error("a request naming another user must never reach the service")
+	}
+}

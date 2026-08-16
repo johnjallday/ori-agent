@@ -15,8 +15,11 @@
 package workspacemaphttp
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -88,8 +91,9 @@ func (h *Handler) PatchLayout(w http.ResponseWriter, r *http.Request) {
 		// UserID exists in this struct only so a client that supplies one is
 		// told plainly that it is refused, rather than having it silently
 		// ignored and believing it targeted someone else's layout (FR-98).
-		UserID     string                   `json:"user_id,omitempty"`
-		Operations []workspacemap.Operation `json:"operations"`
+		UserID string `json:"user_id,omitempty"`
+		// Operations stay raw until each one is decoded strictly below.
+		Operations []json.RawMessage `json:"operations"`
 	}
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
@@ -99,7 +103,12 @@ func (h *Handler) PatchLayout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := h.service.Apply(r.Context(), userID, workspacemap.Patch{Operations: req.Operations})
+	operations, ok := decodeOperations(w, req.Operations)
+	if !ok {
+		return
+	}
+
+	result, err := h.service.Apply(r.Context(), userID, workspacemap.Patch{Operations: operations})
 	if err != nil {
 		h.respondError(w, err, "Failed to save the workspace map layout")
 		return
@@ -108,6 +117,36 @@ func (h *Handler) PatchLayout(w http.ResponseWriter, r *http.Request) {
 		"success": true,
 		"result":  result,
 	})
+}
+
+// decodeOperations turns the raw operation array into typed operations, one
+// strictly-decoded object at a time.
+//
+// Strict decoding is the point. encoding/json ignores keys it does not
+// recognise, so `{"op":"set_group_frame","frame":{...},"colour":"red"}` would
+// otherwise be accepted and silently do only part of what the caller wrote — and
+// a misspelled field on a district operation is exactly the case where "applied
+// most of it" is worse than a refusal (#346 FR-180). The operation count is
+// bounded before any decoding so a hostile body cannot buy unbounded work with a
+// huge array of tiny objects (FR-182).
+func decodeOperations(w http.ResponseWriter, raw []json.RawMessage) ([]workspacemap.Operation, bool) {
+	if len(raw) > workspacemap.MaxOperationsPerPatch {
+		_ = orihttp.RespondBadRequest(w, fmt.Sprintf(
+			"a layout patch carries at most %d operations", workspacemap.MaxOperationsPerPatch))
+		return nil, false
+	}
+	operations := make([]workspacemap.Operation, 0, len(raw))
+	for i, item := range raw {
+		var op workspacemap.Operation
+		decoder := json.NewDecoder(bytes.NewReader(item))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&op); err != nil {
+			_ = orihttp.RespondBadRequest(w, fmt.Sprintf("operation %d: %s", i, err.Error()))
+			return nil, false
+		}
+		operations = append(operations, op)
+	}
+	return operations, true
 }
 
 // ResetLayout handles DELETE /api/workspace-map/layout.
@@ -163,7 +202,14 @@ func (h *Handler) respondError(w http.ResponseWriter, err error, fallback string
 		errors.Is(err, workspacemap.ErrInvalidCoordinate),
 		errors.Is(err, workspacemap.ErrInvalidZoom),
 		errors.Is(err, workspacemap.ErrInvalidNodeID),
+		errors.Is(err, workspacemap.ErrInvalidFrame),
+		errors.Is(err, workspacemap.ErrUnsupportedPreset),
 		errors.Is(err, workspacemap.ErrPatchTooLarge):
+		_ = orihttp.RespondBadRequest(w, err.Error())
+	case errors.Is(err, workspacemap.ErrGroupNotEligible):
+		// The record exists and is the user's — it simply is not something the
+		// Map draws a district for, which is a client-side mistake worth naming
+		// rather than a missing resource (FR-181).
 		_ = orihttp.RespondBadRequest(w, err.Error())
 	case errors.Is(err, workspacemap.ErrNodeNotFound),
 		errors.Is(err, workspacemap.ErrNodeNotOwned):

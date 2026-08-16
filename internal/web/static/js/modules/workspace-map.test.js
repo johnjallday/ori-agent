@@ -279,6 +279,358 @@ test('an empty group still renders as a selectable minimum-size district (FR-83)
   assert.equal(layout.nodes.length, 0, 'a group is a district, never a building tile');
 });
 
+// ---------------------------------------------------------------------------
+// District effective frames (#346 FR-29 – FR-51)
+//
+// The old outline was the union of an invisible group anchor and its members,
+// so a group created after the map was arranged — whose fallback anchor lands a
+// row below the lowest saved workspace while its members sit near the top —
+// drew a district spanning that whole empty gap, and dragged Fit all's bounds
+// out with it. A district now resolves ONE effective frame: members decide it in
+// `auto` mode, a saved minimum rectangle unions with them in `custom` mode, and
+// the group's own anchor only matters when the group is empty.
+// ---------------------------------------------------------------------------
+
+function districtsById(layout) {
+  const map = {};
+  layout.districts.forEach(d => {
+    map[d.id] = d;
+  });
+  return map;
+}
+
+// The one-cell geometry every frame assertion below is written against, read
+// from the module so a deliberate change to district padding updates the tests
+// with the implementation rather than silently drifting from it.
+function districtGeometry() {
+  return loadOriWorkspaceMap().districtGeometry;
+}
+
+test('a populated district frames its members and ignores a stale far group anchor (#346 FR-16, FR-25)', () => {
+  const computeWorldLayout = loadWorldLayout();
+  const geo = districtGeometry();
+  const wss = [
+    { id: 'g', kind: 'group', name: 'Marketing' },
+    { id: 'm1', parent_id: 'g' },
+    { id: 'm2', parent_id: 'g' }
+  ];
+  const layout = computeWorldLayout(wss, {
+    positions: {
+      m1: { x: 400, y: 400 },
+      m2: { x: 576, y: 400 },
+      // The group's own anchor was left far below its members by an earlier
+      // layout. It must not stretch the district one unit.
+      g: { x: 400, y: 5000 }
+    }
+  });
+
+  const district = districtsById(layout).g;
+  assert.equal(district.sizingMode, 'auto');
+  assert.equal(district.y, 400 - geo.padY, 'top edge is the topmost member, padded');
+  assert.equal(district.x, 400 - geo.padX);
+  assert.equal(district.height, geo.memberHeight + geo.padY * 2, 'one member row tall, not 4600');
+  assert.equal(district.width, 576 - 400 + geo.memberWidth + geo.padX * 2);
+  assert.ok(
+    layout.bounds.maxY < 2000,
+    'the stale anchor no longer drags the content bounds — Fit all stays useful'
+  );
+});
+
+test('a populated district ignores its automatic fallback anchor too (#346 FR-16, FR-23)', () => {
+  const computeWorldLayout = loadWorldLayout();
+  const geo = districtGeometry();
+  // No saved anchor for the group at all: this is the freshly-created group and
+  // the legacy/imported group. Its fallback anchor is handed out a row below the
+  // arranged content, which is exactly what used to inflate the outline.
+  const layout = computeWorldLayout(
+    [
+      { id: 'g', kind: 'group', name: 'Marketing' },
+      { id: 'm1', parent_id: 'g' },
+      { id: 'm2', parent_id: 'g' }
+    ],
+    { positions: { m1: { x: 400, y: 400 }, m2: { x: 576, y: 400 } } }
+  );
+
+  const district = districtsById(layout).g;
+  assert.equal(district.x, 400 - geo.padX);
+  assert.equal(district.y, 400 - geo.padY);
+  assert.equal(district.height, geo.memberHeight + geo.padY * 2);
+});
+
+test("a district's effective frame is its logical anchor (#346 FR-17, FR-46)", () => {
+  const computeWorldLayout = loadWorldLayout();
+  const layout = computeWorldLayout(
+    [
+      { id: 'g', kind: 'group', name: 'G' },
+      { id: 'm1', parent_id: 'g' }
+    ],
+    { positions: { m1: { x: 900, y: 700 }, g: { x: -4000, y: -4000 } } }
+  );
+  const district = districtsById(layout).g;
+  assert.equal(district.anchorX, district.x, 'no second invisible anchor');
+  assert.equal(district.anchorY, district.y);
+});
+
+test('an empty district uses its saved anchor at the documented minimum size (#346 FR-24, FR-43)', () => {
+  const computeWorldLayout = loadWorldLayout();
+  const geo = districtGeometry();
+  const layout = computeWorldLayout([{ id: 'g', kind: 'group', name: 'Empty' }], {
+    positions: { g: { x: 800, y: 900 } }
+  });
+  const district = districtsById(layout).g;
+  assert.equal(district.x, 800);
+  assert.equal(district.y, 900);
+  assert.equal(district.width, geo.minWidth);
+  assert.equal(district.height, geo.minHeight);
+  assert.equal(district.sizingMode, 'auto');
+});
+
+test('a custom minimum frame survives members moving inward and never auto-shrinks (#346 FR-34, FR-37)', () => {
+  const computeWorldLayout = loadWorldLayout();
+  const wss = [
+    { id: 'g', kind: 'group', name: 'Roomy' },
+    { id: 'm1', parent_id: 'g' },
+    { id: 'm2', parent_id: 'g' }
+  ];
+  const frame = { x: 300, y: 300, width: 900, height: 700 };
+  const presentations = { g: { sizing_mode: 'custom', frame: frame } };
+
+  const spread = computeWorldLayout(wss, {
+    positions: { m1: { x: 400, y: 400 }, m2: { x: 900, y: 800 } },
+    groupPresentations: presentations
+  });
+  const tight = computeWorldLayout(wss, {
+    // Both members pulled into one corner: the reserved room stays reserved.
+    positions: { m1: { x: 400, y: 400 }, m2: { x: 576, y: 400 } },
+    groupPresentations: presentations
+  });
+
+  [spread, tight].forEach(layout => {
+    const district = districtsById(layout).g;
+    assert.equal(district.sizingMode, 'custom');
+    assert.deepEqual(
+      { x: district.x, y: district.y, width: district.width, height: district.height },
+      frame
+    );
+  });
+});
+
+test('a custom frame expands to the union required by an outward member (#346 FR-35, FR-36)', () => {
+  const computeWorldLayout = loadWorldLayout();
+  const geo = districtGeometry();
+  const layout = computeWorldLayout(
+    [
+      { id: 'g', kind: 'group', name: 'Roomy' },
+      { id: 'm1', parent_id: 'g' },
+      { id: 'm2', parent_id: 'g' }
+    ],
+    {
+      positions: { m1: { x: 400, y: 400 }, m2: { x: 2000, y: 400 } },
+      groupPresentations: {
+        g: { sizing_mode: 'custom', frame: { x: 300, y: 300, width: 400, height: 400 } }
+      }
+    }
+  );
+  const district = districtsById(layout).g;
+  assert.equal(district.sizingMode, 'custom', 'expanding does not discard the custom mode');
+  assert.equal(district.x, 300, 'the saved minimum still owns the left edge');
+  assert.equal(district.y, 300);
+  assert.equal(
+    district.x + district.width,
+    2000 + geo.memberWidth + geo.padX,
+    'the right edge grew to contain the outlying member'
+  );
+  assert.ok(
+    district.y + district.height >= 400 + geo.memberHeight + geo.padY,
+    'the bottom edge contains the member row'
+  );
+  // Spread into this realm before comparing: the module runs in a vm context,
+  // so its plain objects have a different Object.prototype than ours.
+  assert.deepEqual(
+    { ...district.customFrame },
+    { x: 300, y: 300, width: 400, height: 400 },
+    'the stored minimum is reported unchanged — the read never rewrites it'
+  );
+});
+
+test('an unusable custom frame degrades that district to auto, not the whole map (#346 FR-44, FR-45, FR-192)', () => {
+  const computeWorldLayout = loadWorldLayout();
+  const geo = districtGeometry();
+  const wss = [
+    { id: 'g1', kind: 'group', name: 'Bad' },
+    { id: 'a', parent_id: 'g1' },
+    { id: 'g2', kind: 'group', name: 'Good' },
+    { id: 'b', parent_id: 'g2' }
+  ];
+  const positions = { a: { x: 400, y: 400 }, b: { x: 1200, y: 400 } };
+  const good = { x: 1100, y: 300, width: 500, height: 400 };
+
+  [
+    { x: 300, y: 300, width: 0, height: 400 },
+    { x: 300, y: 300, width: -900, height: 400 },
+    { x: 300, y: 300, width: Number.NaN, height: 400 },
+    { x: 300, y: 300, width: 400 },
+    { x: 9e9, y: 300, width: 400, height: 400 },
+    { x: 300, y: 300, width: 9e9, height: 400 },
+    'not a frame at all'
+  ].forEach(badFrame => {
+    const layout = computeWorldLayout(wss, {
+      positions: positions,
+      groupPresentations: {
+        g1: { sizing_mode: 'custom', frame: badFrame },
+        g2: { sizing_mode: 'custom', frame: good }
+      }
+    });
+    const districts = districtsById(layout);
+    assert.equal(districts.g1.sizingMode, 'auto', 'the unusable frame falls back to auto sizing');
+    assert.equal(districts.g1.customFrame, null);
+    assert.equal(districts.g1.x, 400 - geo.padX, 'and still frames its member tightly');
+    assert.equal(districts.g1.width, geo.memberWidth + geo.padX * 2);
+    assert.deepEqual(
+      {
+        x: districts.g2.x,
+        y: districts.g2.y,
+        width: districts.g2.width,
+        height: districts.g2.height
+      },
+      good,
+      'the sibling district keeps its valid saved frame'
+    );
+  });
+});
+
+test('every effective frame is finite and inside the safe world (#346 FR-44)', () => {
+  const computeWorldLayout = loadWorldLayout();
+  const layout = computeWorldLayout(
+    [
+      { id: 'g', kind: 'group', name: 'G' },
+      { id: 'm', parent_id: 'g' },
+      { id: 'e', kind: 'group', name: 'Empty' }
+    ],
+    { positions: { m: { x: 999000, y: -999000 } } }
+  );
+  layout.districts.forEach(d => {
+    [d.x, d.y, d.width, d.height].forEach(value => {
+      assert.ok(Number.isFinite(value), 'frame component is finite');
+    });
+    assert.ok(d.width > 0 && d.height > 0);
+    assert.ok(d.x >= -1000000 && d.x + d.width <= 1000000, 'frame stays inside the safe world');
+    assert.ok(d.y >= -1000000 && d.y + d.height <= 1000000);
+  });
+});
+
+test('district presentation defaults are safe when a record is missing or unknown (#346 FR-31, FR-101, FR-127)', () => {
+  const computeWorldLayout = loadWorldLayout();
+  const wss = [
+    { id: 'g', kind: 'group', name: 'G' },
+    { id: 'm', parent_id: 'g' }
+  ];
+  const positions = { m: { x: 400, y: 400 } };
+
+  const missing = districtsById(computeWorldLayout(wss, { positions })).g;
+  assert.equal(missing.sizingMode, 'auto');
+  assert.equal(missing.collapsed, false);
+  assert.equal(missing.accent, 'default');
+  assert.equal(missing.theme, 'default');
+
+  const nonsense = districtsById(
+    computeWorldLayout(wss, {
+      positions,
+      groupPresentations: {
+        g: {
+          sizing_mode: 'elastic',
+          collapsed: 'yes please',
+          accent: 'url(https://evil.example/x.css)',
+          theme: '"><script>alert(1)</script>'
+        }
+      }
+    })
+  ).g;
+  assert.equal(nonsense.sizingMode, 'auto', 'an unknown sizing mode falls back to auto');
+  assert.equal(nonsense.collapsed, false);
+  assert.equal(nonsense.accent, 'default', 'an unknown accent falls back, never reaches CSS');
+  assert.equal(nonsense.theme, 'default');
+});
+
+test('effective frames are identical regardless of API order and viewport width (#346 FR-51)', () => {
+  const computeWorldLayout = loadWorldLayout();
+  const wss = [
+    { id: 'g1', kind: 'group', name: 'One' },
+    { id: 'm1', parent_id: 'g1' },
+    { id: 'm2', parent_id: 'g1' },
+    { id: 'g2', kind: 'group', name: 'Two' },
+    { id: 'm3', parent_id: 'g2' },
+    { id: 'solo' }
+  ];
+  const options = {
+    positions: { m1: { x: 400, y: 400 }, m2: { x: 576, y: 570 }, m3: { x: 1400, y: 400 } },
+    groupPresentations: {
+      g2: { sizing_mode: 'custom', frame: { x: 1300, y: 300, width: 600, height: 600 } }
+    }
+  };
+  function frames(layout) {
+    const map = {};
+    layout.districts.forEach(d => {
+      map[d.id] = { x: d.x, y: d.y, width: d.width, height: d.height, sizingMode: d.sizingMode };
+    });
+    return map;
+  }
+
+  const forward = computeWorldLayout(wss, { ...options, viewport: { width: 1600, height: 900 } });
+  const reversed = computeWorldLayout([...wss].reverse(), {
+    ...options,
+    viewport: { width: 380, height: 640 }
+  });
+  assert.deepEqual(frames(forward), frames(reversed));
+});
+
+test('a stale group anchor no longer drags Fit all out (#346 FR-48, success metric 1)', () => {
+  const computeWorldLayout = loadWorldLayout();
+  const wss = [
+    { id: 'g', kind: 'group', name: 'Marketing' },
+    { id: 'm1', parent_id: 'g' },
+    { id: 'm2', parent_id: 'g' }
+  ];
+  const members = { m1: { x: 400, y: 400 }, m2: { x: 576, y: 400 } };
+  const tidy = computeWorldLayout(wss, { positions: members });
+  const stale = computeWorldLayout(wss, {
+    positions: { ...members, g: { x: 400, y: 40000 } }
+  });
+  assert.deepEqual(
+    {
+      minX: tidy.bounds.minX,
+      minY: tidy.bounds.minY,
+      maxX: tidy.bounds.maxX,
+      maxY: tidy.bounds.maxY
+    },
+    {
+      minX: stale.bounds.minX,
+      minY: stale.bounds.minY,
+      maxX: stale.bounds.maxX,
+      maxY: stale.bounds.maxY
+    },
+    'content bounds are identical with and without the unrelated group anchor'
+  );
+});
+
+test('Center selected frames a district by its effective frame (#346 FR-47)', () => {
+  const { camera, computeWorldLayout, districtGeometry: geo } = loadOriWorkspaceMap();
+  const layout = computeWorldLayout(
+    [
+      { id: 'g', kind: 'group', name: 'Big' },
+      { id: 'm1', parent_id: 'g' },
+      { id: 'm2', parent_id: 'g' }
+    ],
+    { positions: { m1: { x: 0, y: 0 }, m2: { x: 1000, y: 800 } } }
+  );
+  const district = layout.districts[0];
+  const centered = camera.centerOn({ centerX: 0, centerY: 0, zoom: 1 }, district);
+  assert.equal(centered.centerX, district.x + district.width / 2);
+  assert.equal(centered.centerY, district.y + district.height / 2);
+  // Not the tile-sized box at its corner, which is what a hidden anchor gave.
+  assert.notEqual(centered.centerX, district.x + geo.minWidth / 2);
+});
+
 test('content bounds grow around placed content with a viewport of margin (FR-10, FR-11)', () => {
   const computeWorldLayout = loadWorldLayout();
   const viewport = { width: 1000, height: 700 };
@@ -2707,6 +3059,14 @@ test('a keyboard move over an occupied footprint shows a blocked indicator too, 
 // parent.
 // ---------------------------------------------------------------------------
 
+// Where the cluster fixture's district is drawn: its frame is derived from its
+// members, so the corner is the top-left member (152,152) inset by the district
+// padding — not the group's own saved anchor (#346 FR-16, FR-46).
+function clusterDistrictCorner() {
+  const geo = districtGeometry();
+  return { x: 152 - geo.padX, y: 152 - geo.padY };
+}
+
 async function mountedCluster({ patchResponse } = {}) {
   const patches = [];
   const map = loadMapWithFetch((url, init) => {
@@ -2790,12 +3150,14 @@ test('dragging the district handle moves the whole cluster by one delta (FR-86)'
   const op = patches[0].operations[0];
   assert.equal(op.op, 'translate_group');
   assert.equal(op.group_id, 'grp');
-  // The group's anchor snaps to the grid like any other placement, so the delta
-  // is whatever carries (100,100) to the nearest grid point past the drag —
-  // (190,152) — rather than the raw pointer distance.
+  // Snapping is taken from the district's top-left MEMBER, not from the frame
+  // corner — the corner sits half a gutter off the grid by construction, so
+  // snapping it would push the buildings off the grid instead of onto it
+  // (#346). child-a sits on (152,152), which is already a grid point, and the
+  // 76x38 drag is two grid steps by one, so the delta is the drag itself.
   assert.deepEqual(
     { ...op.delta },
-    { x: 90, y: 52 },
+    { x: 76, y: 38 },
     'the server is sent a delta, not coordinates'
   );
   // FR-8: nothing in a cluster move can express membership.
@@ -2883,7 +3245,7 @@ test('a cluster move that would land on an outside building is refused, not reso
   assert.equal(moves.length, 0, 'the collision blocked the commit');
   assert.deepEqual(
     { ...harness.district('grp').at() },
-    { x: 100, y: 100 },
+    clusterDistrictCorner(),
     'the district returned'
   );
   assert.deepEqual({ ...harness.tile('child-a').at() }, { x: 152, y: 152 });
@@ -2913,7 +3275,7 @@ test('a cluster move that would only overlap an outside building is refused too 
   assert.equal(moves.length, 0, 'an overlapping-but-distinct anchor is still a collision');
   assert.deepEqual(
     { ...harness.district('grp').at() },
-    { x: 100, y: 100 },
+    clusterDistrictCorner(),
     'the district returned'
   );
   assert.deepEqual({ ...harness.tile('child-a').at() }, { x: 152, y: 152 });
@@ -2930,7 +3292,7 @@ test('a failed cluster save restores every anchor together (FR-87)', async () =>
   await flush();
 
   assert.equal(patches.length, 1, 'it was attempted');
-  assert.deepEqual({ ...harness.district('grp').at() }, { x: 100, y: 100 });
+  assert.deepEqual({ ...harness.district('grp').at() }, clusterDistrictCorner());
   assert.deepEqual({ ...harness.tile('child-a').at() }, { x: 152, y: 152 });
   assert.deepEqual({ ...harness.tile('child-b').at() }, { x: 380, y: 152 });
 });
@@ -3013,11 +3375,24 @@ test('a Tree reparent keeps absolute coordinates and only redraws the district (
   assert.deepEqual(anchorsById(before).mover, { x: 500, y: 400 });
   assert.deepEqual(anchorsById(after).mover, { x: 500, y: 400 });
 
-  // Only the district presentation changed: the outline that now contains it.
+  // Only the district presentation changed: the frame that now contains it.
   const districtAfter = after.districts.find(d => d.id === 'other');
   assert.ok(districtAfter.x <= 500 && districtAfter.y <= 400, 'the new district grew around it');
+  assert.ok(
+    districtAfter.x + districtAfter.width >= 500 && districtAfter.y + districtAfter.height >= 400,
+    'and reaches the far edge of the workspace it gained'
+  );
+  // The group it left is empty now, so it falls back to a minimum-size district
+  // at its own anchor and no longer reaches the workspace at all (#346 FR-24).
   const oldDistrictAfter = after.districts.find(d => d.id === 'grp');
-  assert.ok(oldDistrictAfter.width < districtAfter.width, 'the old district shrank back');
+  assert.ok(
+    oldDistrictAfter.x + oldDistrictAfter.width < 500,
+    'the old district no longer reaches the workspace that left it'
+  );
+  assert.ok(
+    before.districts.find(d => d.id === 'grp').x <= 500,
+    'and it did contain that workspace before the reparent'
+  );
 });
 
 // ---------------------------------------------------------------------------

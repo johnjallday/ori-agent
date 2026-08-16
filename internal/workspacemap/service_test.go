@@ -177,6 +177,118 @@ func TestServiceResetClearsOnlyPositions(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// District eligibility (#346 FR-181)
+// ---------------------------------------------------------------------------
+
+func groupRecord(id, parentID string) *workspace.Workspace {
+	return &workspace.Workspace{ID: id, Name: id, Kind: "group", OwnerUserID: "local", ParentID: parentID}
+}
+
+func districtOps(groupID string) []Operation {
+	return []Operation{
+		SetGroupFrame(groupID, Frame{X: 0, Y: 0, Width: 400, Height: 400}),
+		FitGroupToContents(groupID),
+		SetGroupCollapsed(groupID, true),
+		SetGroupAppearance(groupID, "moss", "blueprint"),
+		ResetGroupAppearance(groupID),
+	}
+}
+
+func TestServiceAcceptsTopLevelGroupDistrict(t *testing.T) {
+	service, _ := newTestService(t, map[string]*workspace.Workspace{
+		"grp-top": groupRecord("grp-top", ""),
+	})
+	seedServiceWorkspace(t, service, "grp-top")
+
+	for _, op := range districtOps("grp-top") {
+		if _, err := service.Apply(context.Background(), "local", Patch{Operations: []Operation{op}}); err != nil {
+			t.Fatalf("Apply %s: %v", op.Kind, err)
+		}
+	}
+}
+
+// A group whose parent is an ordinary workspace still renders as its own
+// top-level district on the Map, so it stays eligible.
+func TestServiceAcceptsGroupUnderOrdinaryWorkspace(t *testing.T) {
+	service, _ := newTestService(t, map[string]*workspace.Workspace{
+		"grp-a":     groupRecord("grp-a", "ws-parent"),
+		"ws-parent": {ID: "ws-parent", Name: "Parent", OwnerUserID: "local"},
+	})
+	seedServiceWorkspace(t, service, "grp-a")
+
+	if _, err := service.Apply(context.Background(), "local", Patch{Operations: []Operation{
+		SetGroupCollapsed("grp-a", true),
+	}}); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+}
+
+func TestServiceRejectsIneligibleDistrictTargets(t *testing.T) {
+	records := map[string]*workspace.Workspace{
+		"ws-plain":  {ID: "ws-plain", Name: "Plain", OwnerUserID: "local"},
+		"grp-outer": groupRecord("grp-outer", ""),
+		"grp-inner": groupRecord("grp-inner", "grp-outer"),
+		"grp-alice": {ID: "grp-alice", Name: "Alice", Kind: "group", OwnerUserID: "alice"},
+	}
+
+	for _, tc := range []struct {
+		name    string
+		groupID string
+		want    error
+	}{
+		// V1 draws no nested district frames (FR-10).
+		{"nested group", "grp-inner", ErrGroupNotEligible},
+		// An ordinary workspace is a building, not a district (FR-9).
+		{"ordinary workspace", "ws-plain", ErrGroupNotEligible},
+		{"missing group", "grp-ghost", ErrNodeNotFound},
+		// Reported as missing rather than forbidden, so the API never confirms
+		// another user's group exists.
+		{"another user's group", "grp-alice", ErrNodeNotOwned},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			service, _ := newTestService(t, records)
+			seedServiceWorkspace(t, service, "ws-plain", "grp-outer", "grp-inner")
+
+			for _, op := range districtOps(tc.groupID) {
+				_, err := service.Apply(context.Background(), "local", Patch{Operations: []Operation{op}})
+				if !errors.Is(err, tc.want) {
+					t.Fatalf("Apply %s: error = %v, want %v", op.Kind, err, tc.want)
+				}
+			}
+
+			// Nothing was stored, and no workspace row was touched.
+			layout, err := service.Load(context.Background(), "local")
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if len(layout.Groups) != 0 {
+				t.Errorf("districts after rejected operations = %v, want none", layout.Groups)
+			}
+		})
+	}
+}
+
+// A district operation must leave every workspace semantic field byte-identical:
+// resizing, collapsing, or recolouring is presentation, never hierarchy
+// (FR-5, FR-62).
+func TestServiceDistrictOperationsLeaveHierarchyUnchanged(t *testing.T) {
+	record := groupRecord("grp-a", "")
+	record.OrderIndex = 3
+	record.UpdatedAt = time.Date(2026, 2, 3, 4, 5, 6, 0, time.UTC)
+	before := semanticFields(record)
+
+	service, _ := newTestService(t, map[string]*workspace.Workspace{"grp-a": record})
+	seedServiceWorkspace(t, service, "grp-a")
+
+	if _, err := service.Apply(context.Background(), "local", Patch{Operations: districtOps("grp-a")}); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if after := semanticFields(record); !reflect.DeepEqual(after, before) {
+		t.Errorf("district operations changed the group record: got %+v, want %+v", after, before)
+	}
+}
+
 // seedServiceWorkspace inserts the workspace rows the position foreign key
 // requires for a service built on the real SQLite store.
 func seedServiceWorkspace(t *testing.T, service *Service, ids ...string) {
