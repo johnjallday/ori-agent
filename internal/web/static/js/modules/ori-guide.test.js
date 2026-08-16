@@ -805,6 +805,188 @@ test('reopening does not re-greet over a reply the user came back to read', asyn
   assert.match(els.oriGuideReply.innerHTML, /kept/);
 });
 
+/* ---- acceptance matrix (FR16-FR39) ---------------------------------------------- */
+
+// One representative case per fulfilment family, driven through the single
+// composer. The point is not to re-test each backend — they have their own
+// suites — but to prove that one composer reaches each of them, and that the
+// safe/ambiguous cases stay safe.
+function matrixSandbox({ route = '/', guide = {}, routed = {}, elements } = {}) {
+  const els = elements || guideEls();
+  const ctx = load({ route, elements: els });
+  const seen = { guide: 0, route: 0, payloads: [] };
+
+  ctx.sandbox.fetch = (url, opts) => {
+    if (url === '/api/ori-guide') {
+      seen.guide += 1;
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ status: 'unknown', ...guide })
+      });
+    }
+    seen.route += 1;
+    seen.payloads.push(JSON.parse(opts.body));
+    return Promise.resolve({ ok: true, json: () => Promise.resolve(routed) });
+  };
+
+  return { ctx, els, seen };
+}
+
+const MATRIX = [
+  {
+    name: 'navigation/setup stays on the read-only guide path',
+    route: '/',
+    guide: { status: 'answered', topic_key: 'agents', answer: 'Agents live here' },
+    expect: ({ els, seen }) => {
+      assert.equal(seen.route, 0, 'navigation must not reach the routing contract');
+      assert.equal(els.oriGuideReply.dataset.status, 'answered');
+    }
+  },
+  {
+    name: 'direct utility routes and names its agent',
+    route: '/',
+    routed: {
+      intent: 'utility_direct',
+      intent_label: 'daily utility',
+      matched_agent: 'Utility Assistant'
+    },
+    expect: ({ els }) => {
+      assert.match(els.oriGuideReply.innerHTML, /daily utility/);
+      assert.match(els.oriGuideReply.innerHTML, /Utility Assistant/);
+    }
+  },
+  {
+    name: 'specialist handoff names the specialist without running it',
+    route: '/',
+    routed: {
+      intent: 'email_check',
+      intent_label: 'email triage',
+      matched_agent: 'Email Assistant',
+      routing_policy: 'specialist_required'
+    },
+    expect: ({ els }) => {
+      assert.match(els.oriGuideReply.innerHTML, /Email Assistant/);
+      assert.match(els.oriGuideReply.innerHTML, /Nothing has run yet/);
+    }
+  },
+  {
+    name: 'personal calendar routes to its own agent',
+    route: '/',
+    routed: {
+      intent: 'calendar_check',
+      intent_label: 'calendar or schedule',
+      matched_agent: 'Calendar Ops'
+    },
+    expect: ({ els }) => assert.match(els.oriGuideReply.innerHTML, /Calendar Ops/)
+  },
+  {
+    name: 'app launch routes without inventing a destination',
+    route: '/',
+    routed: {
+      intent: 'app_launch',
+      intent_label: 'app launch',
+      suggested_agent_name: 'Desktop Launcher'
+    },
+    expect: ({ els }) => assert.match(els.oriGuideReply.innerHTML, /Desktop Launcher/)
+  },
+  {
+    name: 'workspace creation offers a way to create rather than guessing one',
+    route: '/',
+    routed: {
+      intent: 'workspace_create',
+      intent_label: 'workspace creation',
+      workspace_recommended: true,
+      workspace_resolution: { state: 'no_fit' }
+    },
+    expect: ({ els }) => {
+      assert.match(els.oriGuideReply.innerHTML, /Choose or create a workspace/);
+      assert.match(els.oriGuideReply.innerHTML, /href="\/workspaces"/);
+    }
+  },
+  {
+    name: 'an ambiguous target offers the candidates instead of picking one',
+    route: '/',
+    routed: {
+      intent: 'general_task',
+      intent_label: 'general task',
+      workspace_recommended: true,
+      workspace_resolution: {
+        state: 'ambiguous',
+        candidates: [
+          { id: 'launch', name: 'Launch' },
+          { id: 'research', name: 'Research' }
+        ]
+      }
+    },
+    expect: ({ els }) => {
+      assert.match(els.oriGuideReply.innerHTML, /More than one workspace/);
+      assert.match(els.oriGuideReply.innerHTML, /Open Launch/);
+      assert.match(els.oriGuideReply.innerHTML, /Open Research/);
+      // It must not claim a target it has not got.
+      assert.ok(!els.oriGuideReply.innerHTML.includes('Target:'));
+    }
+  },
+  {
+    name: 'a confidently resolved workspace is named before anything runs',
+    route: '/',
+    routed: {
+      intent: 'general_task',
+      intent_label: 'general task',
+      workspace_recommended: true,
+      workspace_resolution: {
+        state: 'confident',
+        selected_workspace_id: 'launch',
+        selected_workspace_name: 'Launch'
+      }
+    },
+    expect: ({ els }) => assert.match(els.oriGuideReply.innerHTML, /Target:.*Launch/)
+  },
+  {
+    name: 'a workspace page request carries and shows its own context',
+    route: '/workspaces/launch',
+    routed: { intent: 'general_task', intent_label: 'general task' },
+    expect: ({ els, seen }) => {
+      assert.equal(seen.payloads[0].context.workspace_id, 'launch');
+      assert.equal(seen.payloads[0].context.surface, 'workspace_detail');
+      assert.match(els.oriGuideReply.innerHTML, /Target:/);
+    }
+  },
+  {
+    name: 'a task page carries its task id',
+    route: '/workspaces/launch/tasks/t-42',
+    routed: { intent: 'general_task', intent_label: 'general task' },
+    expect: ({ seen }) => {
+      assert.equal(seen.payloads[0].context.task_id, 't-42');
+      assert.equal(seen.payloads[0].context.surface, 'workspace_task');
+    }
+  }
+];
+
+for (const row of MATRIX) {
+  test(`acceptance matrix: ${row.name}`, async () => {
+    const harness = matrixSandbox({ route: row.route, guide: row.guide, routed: row.routed });
+    await harness.ctx.guide.ask('do the thing');
+    row.expect(harness);
+  });
+}
+
+// Whatever the family, classification alone never mutates anything: the panel
+// only ever renders navigate actions it has validated (FR27/FR35).
+test('no routed outcome produces a mutating control', async () => {
+  for (const row of MATRIX) {
+    const harness = matrixSandbox({ route: row.route, guide: row.guide, routed: row.routed });
+    await harness.ctx.guide.ask('do the thing');
+    const html = harness.els.oriGuideReply.innerHTML;
+    for (const forbidden of [
+      'data-ori-action="delete"',
+      'data-ori-action="run"',
+      'data-ori-action="execute"'
+    ]) {
+      assert.ok(!html.includes(forbidden), `${row.name} rendered ${forbidden}`);
+    }
+  }
+});
+
 /* ---- explicit overrides (FR24) ------------------------------------------------- */
 
 test('explicit commands are recognized, ordinary prompts are not', () => {

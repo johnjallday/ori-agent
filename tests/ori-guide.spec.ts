@@ -333,7 +333,7 @@ test.describe('Ori Guide dynamic destinations', () => {
     await ask(page, `where is my ${name} workspace`);
 
     const action = page.locator('.ori-guide__action', { hasText: name });
-    await expect(action).toHaveAttribute('href', `/workspace/${id}`);
+    await expect(action).toHaveAttribute('href', `/workspaces/${id}`);
   });
 
   test('a workspace that does not exist yields no destination', async ({ page }) => {

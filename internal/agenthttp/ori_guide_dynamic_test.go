@@ -54,7 +54,7 @@ func TestNamingARealWorkspaceOffersToOpenIt(t *testing.T) {
 	if len(resp.Actions) != 1 {
 		t.Fatalf("expected one destination, got %d: %+v", len(resp.Actions), resp.Actions)
 	}
-	if got := resp.Actions[0].Href; got != "/workspace/abc123" {
+	if got := resp.Actions[0].Href; got != "/workspaces/abc123" {
 		t.Errorf("expected the resolved id in the href, got %q", got)
 	}
 	if !strings.Contains(resp.Answer, "Launch Planning") {
@@ -69,7 +69,7 @@ func TestNamingAWorkspaceThatDoesNotExistOffersNothing(t *testing.T) {
 	resp := askGuide(t, h, "open my Imaginary Q9 workspace", "/")
 
 	for _, a := range resp.Actions {
-		if strings.HasPrefix(a.Href, "/workspace/") {
+		if strings.HasPrefix(a.Href, "/workspaces/") {
 			t.Errorf("invented a workspace destination: %+v", a)
 		}
 	}
@@ -101,7 +101,7 @@ func TestLongerWorkspaceNameSubsumesTheShorterOne(t *testing.T) {
 	if len(resp.Actions) != 1 {
 		t.Fatalf("expected one destination, got %d: %+v", len(resp.Actions), resp.Actions)
 	}
-	if resp.Actions[0].Href != "/workspace/b2" {
+	if resp.Actions[0].Href != "/workspaces/b2" {
 		t.Errorf("expected the longer match, got %q", resp.Actions[0].Href)
 	}
 }
@@ -111,7 +111,7 @@ func TestVeryShortWorkspaceNamesDoNotMatch(t *testing.T) {
 	h := guideWithWorkspaces(ws("a1", "Q3"))
 	resp := askGuide(t, h, "what is a workspace", "/")
 	for _, a := range resp.Actions {
-		if strings.HasPrefix(a.Href, "/workspace/") {
+		if strings.HasPrefix(a.Href, "/workspaces/") {
 			t.Errorf("a two-character name should not have matched: %+v", a)
 		}
 	}
@@ -129,7 +129,7 @@ func TestWorkRequestNamingAWorkspaceStillHandsOff(t *testing.T) {
 		if a.Type == GuideActionHandoff {
 			found = true
 		}
-		if strings.HasPrefix(a.Href, "/workspace/") {
+		if strings.HasPrefix(a.Href, "/workspaces/") {
 			t.Errorf("a deletion request must not offer to open the workspace: %+v", a)
 		}
 	}
@@ -211,7 +211,7 @@ func TestUnsafeWorkspaceIDsAreNotLinked(t *testing.T) {
 			h := guideWithWorkspaces(ws(id, "Escape Hatch Workspace"))
 			resp := askGuide(t, h, "open Escape Hatch Workspace", "/")
 			for _, a := range resp.Actions {
-				if strings.HasPrefix(a.Href, "/workspace/") {
+				if strings.HasPrefix(a.Href, "/workspaces/") {
 					t.Errorf("unsafe id %q was linked as %q", id, a.Href)
 				}
 			}

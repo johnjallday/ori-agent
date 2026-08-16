@@ -1,19 +1,26 @@
 /*
- * Ori Guide controller — the app's setup-and-navigation helper.
+ * Ask Ori controller — the one assistance surface, on every authenticated page.
  *
- * Ori helps you find things, understand Ori's own concepts, and get set up. It
- * does not do work: a work request comes back as a handoff to Workspace
- * Manager, with the user's text prefilled and *not* submitted (PRD FR-40/FR-84).
+ * It answers questions AND takes work. There used to be two surfaces for that,
+ * and users had to know which was which before typing; Issue #350 merged them.
+ * Intent is inferred rather than chosen:
  *
- * Everything rendered here is either escaped text or a typed action validated
- * against a client-side allowlist. The server's action union cannot express a
- * mutation, and this controller additionally refuses any action type it does
- * not recognise — so a compromised or buggy response cannot widen what the
- * guide can do (FR-36/FR-49).
+ *   1. Ask the guide. It answers navigation and setup deterministically, with
+ *      no model, and identifies a work request as such itself.
+ *   2. Anything it does not own — a work request, or an honest miss — escalates
+ *      to the routing contract, or straight to the full work controller where
+ *      that is loaded (dashboard.js owns planning, agent selection,
+ *      confirmations, and workspace sessions; none of it is reimplemented here).
+ *   3. An explicit /task, /ask, or /note bypasses step 1 entirely, so an
+ *      override is never reinterpreted as navigation.
  *
- * Opening and closing the guide is presentation only. It never clears Map/Tree
- * selection, checked agents, filters, or form drafts, because it does not touch
- * them (FR-25).
+ * Automatic routing is not automatic authorization. Everything rendered here is
+ * escaped text or a typed action validated against a client-side allowlist; the
+ * guide's action union still cannot express a mutation, and every existing
+ * confirmation still applies (FR27/FR35/FR36).
+ *
+ * Opening and closing is presentation only. It never clears Map/Tree selection,
+ * checked agents, filters, or form drafts, and never cancels submitted work.
  */
 (function () {
   'use strict';
@@ -392,6 +399,39 @@
   // Renders a routed (non-navigation) result: a human-readable summary of where
   // the request is going, plus the target, so the user sees the chosen workspace
   // or agent before anything consequential happens (FR34/FR86).
+  // Builds the choices offered when a request needs a workspace it does not
+  // have.
+  //
+  // These are ordinary validated navigate actions — the same allowlist every
+  // other action goes through — so offering a choice cannot widen what the panel
+  // is able to do. Picking one takes the user to that workspace, where the
+  // request can be made in a context that is visible to them (FR32/FR33).
+  function workspaceChoiceActions(routed) {
+    var resolution = routed && routed.workspace_resolution;
+    var actions = [];
+
+    var candidates = (resolution && resolution.candidates) || [];
+    for (var i = 0; i < candidates.length && actions.length < 3; i++) {
+      var candidate = candidates[i];
+      if (!candidate || !candidate.id) continue;
+      actions.push({
+        type: 'navigate',
+        label: 'Open ' + String(candidate.name || candidate.id),
+        href: '/workspaces/' + encodeURIComponent(String(candidate.id))
+      });
+    }
+
+    // Nothing fit, so the honest next step is making somewhere for it to live.
+    if (!actions.length && routed && routed.workspace_recommended) {
+      actions.push({
+        type: 'navigate',
+        label: 'Choose or create a workspace',
+        href: '/workspaces'
+      });
+    }
+    return actions;
+  }
+
   function renderRouted(routed, guideResp) {
     var els = state.els;
     if (!els) return;
@@ -399,31 +439,62 @@
     var label = String(routed.intent_label || 'work request');
     var target = String(routed.matched_agent || routed.suggested_agent_name || '');
     var ctx = collectContext();
+    var resolution = routed.workspace_resolution || null;
+    var resolutionState = String((resolution && resolution.state) || '');
+    var needsTarget = routed.workspace_recommended && !ctx.workspace_id;
 
     var summary = 'I read that as a ' + label + '.';
-    if (routed.workspace_recommended && !ctx.workspace_id) {
+    if (needsTarget && resolutionState === 'ambiguous') {
+      summary += ' More than one workspace could be the right home for it, so I have not picked.';
+    } else if (needsTarget) {
       summary += ' It needs a workspace — pick one, or create one, and I will take it from there.';
     } else if (target) {
       summary += ' ' + target + ' is the best fit for it.';
     }
 
-    state.actions = [];
+    // Validate the offered choices through the same gate as any other action, so
+    // a malformed or unexpected candidate never becomes a control.
+    var choices = [];
+    var raw = workspaceChoiceActions(routed);
+    for (var i = 0; i < raw.length; i++) {
+      var valid = validateAction(raw[i]);
+      if (valid) choices.push(valid);
+    }
+    state.actions = choices;
+
     var html =
       '<p class="ori-guide__routing" data-routing-intent="' +
       esc(String(routed.intent || '')) +
+      '" data-workspace-state="' +
+      esc(resolutionState) +
       '">' +
       esc(summary) +
       '</p>';
 
+    // The chosen target has to be visible before anything consequential runs —
+    // whether it came from the page or from resolving a name in the request
+    // (FR34/FR86).
+    var resolvedName = String((resolution && resolution.selected_workspace_name) || '');
     if (ctx.workspace_id) {
       html +=
         '<p class="ori-guide__target">Target: <strong>' + esc(contextLabel(ctx)) + '</strong></p>';
+    } else if (resolvedName && resolutionState === 'confident') {
+      html +=
+        '<p class="ori-guide__target">Target: <strong>Workspace: ' +
+        esc(resolvedName) +
+        '</strong></p>';
     }
 
     // Routing plans; it does not run. Say so, so nobody reads a routing summary
     // as work already underway (FR35).
     html +=
       '<p class="ori-guide__answer ori-guide__answer--note">' + 'Nothing has run yet.' + '</p>';
+
+    if (choices.length) {
+      html += '<div class="ori-guide__actions">';
+      for (var j = 0; j < choices.length; j++) html += actionHTML(choices[j], j);
+      html += '</div>';
+    }
 
     els.reply.innerHTML = html;
     els.reply.dataset.status = 'routed';
@@ -436,6 +507,8 @@
       intent: String(routed.intent || ''),
       policy: String(routed.routing_policy || ''),
       workspace: ctx.workspace_id ? 'present' : 'absent',
+      workspaceState: resolutionState,
+      choices: choices.length,
       guideStatus: String((guideResp && guideResp.status) || '')
     });
   }

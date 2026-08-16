@@ -95,9 +95,13 @@ func resolveWorkspaceDestinations(store workspace.Store, question string) []dyna
 			continue
 		}
 		matches = append(matches, dynamicMatch{
-			ID:    ws.ID,
-			Name:  name,
-			Href:  "/workspace/" + url.PathEscape(ws.ID),
+			ID:   ws.ID,
+			Name: name,
+			// The route is /workspaces/{id}; the singular form 404s. The client's
+			// same-origin check passes either way — it validates the shape of a
+			// path, not that the path exists — so nothing caught this until the
+			// link was actually followed.
+			Href:  "/workspaces/" + url.PathEscape(ws.ID),
 			Label: "Open " + name,
 		})
 	}
