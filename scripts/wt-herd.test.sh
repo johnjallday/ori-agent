@@ -436,7 +436,7 @@ function wt_herd_cleanup_preflight {
 
 function gh {
   # Records the question and answers with a merged pull-request number. The
-  # recording is what proves cleanup asks GitHub nothing else.
+  # unnumbered fixture has no Issue snapshot, so it must need no Issue calls.
   print -r -- "$*" >> "$fixture_root/gh-calls"
   print -r -- "42"
 }
@@ -487,7 +487,7 @@ wt done bridge <<< "n" > "$fixture_root/done-success-output" 2>&1 || done_status
 
 # The merged pull request is looked up for this exact branch, so cleanup is not
 # discarding unmerged work.
-rg -q "pr list --head feature/bridge --state merged" "$fixture_root/gh-calls"
+rg -q "pr list --head feature/bridge --base dev --state merged" "$fixture_root/gh-calls"
 # Herdr safety is still consulted, and it ran before anything was removed.
 [[ "$(<"$fixture_root/cleanup-calls")" == "$target_root 0" ]]
 # The completed task list is archived back to dev, which is the record of what
@@ -535,14 +535,185 @@ if [[ -e "$dev_root/BACKLOG.md" ]]; then
   exit 1
 fi
 
-# Nor does either end touch an Issue. Linking delivery to Issue state is a
-# contract this version deliberately does not have, so the only thing cleanup
-# may ask GitHub is which pull request merged.
-rg -q "^pr list --head feature/bridge --state merged" "$fixture_root/gh-calls"
-if rg -qv "^pr list " "$fixture_root/gh-calls"; then
-  print -r -- "wt done asked GitHub something beyond the merged-PR lookup: $(<"$fixture_root/gh-calls")" >&2
+# An ad-hoc/legacy feature has no exact Issue snapshot, so it remains entirely
+# outside the Issue lifecycle.
+rg -q "^pr list --head feature/bridge --base dev --state merged" "$fixture_root/gh-calls"
+if rg -q "^issue " "$fixture_root/gh-calls"; then
+  print -r -- "wt done inferred an Issue without an attachment: $(<"$fixture_root/gh-calls")" >&2
   exit 1
 fi
+
+# Issue-backed cleanup uses the generated snapshot header as the sole explicit
+# attachment, closes the primary Issue after a confirmed merged PR, and records
+# the PR that delivered it.
+issue_feature="292-coordinate-based-map"
+issue_branch="feature/$issue_feature"
+issue_snapshot="$target_root/tasks/issue-$issue_feature.md"
+cat > "$issue_snapshot" <<'ISSUE'
+# Issue #292: Coordinate based map
+
+<!-- ori-devflow: issue-snapshot; issue=292 -->
+
+## Body
+Requirements supplied by the Issue.
+ISSUE
+print -r -- "# completed numbered tasks" > "$target_root/tasks/tasks-$issue_feature.md"
+
+function wt_resolve_worktree_branch {
+  print -r -- "$issue_branch"
+}
+
+typeset -g FAKE_MERGED_PR="77" FAKE_PR_STATUS=0 FAKE_ISSUE_STATE="OPEN"
+typeset -g FAKE_ISSUE_VIEW_STATUS=0 FAKE_ISSUE_CLOSE_STATUS=0
+function gh {
+  print -r -- "$*" >> "$fixture_root/gh-calls"
+  case "$1 $2" in
+    "pr list")
+      (( FAKE_PR_STATUS == 0 )) || return "$FAKE_PR_STATUS"
+      print -r -- "$FAKE_MERGED_PR"
+      ;;
+    "issue view")
+      (( FAKE_ISSUE_VIEW_STATUS == 0 )) || return "$FAKE_ISSUE_VIEW_STATUS"
+      print -r -- "$FAKE_ISSUE_STATE"
+      ;;
+    "issue close")
+      return "$FAKE_ISSUE_CLOSE_STATUS"
+      ;;
+    *)
+      print -r -- "unexpected fake gh call: $*" >&2
+      return 99
+      ;;
+  esac
+}
+
+rm -f "$fixture_root/git-calls" "$fixture_root/gh-calls"
+wt done "$issue_feature" <<< "n" > "$fixture_root/done-issue-open-output" 2>&1
+rg -q "^pr list --head $issue_branch --base dev --state merged" "$fixture_root/gh-calls"
+rg -q "^issue view 292 --json state --jq .state$" "$fixture_root/gh-calls"
+rg -qF "issue close 292 --reason completed --comment Delivered by PR #77." "$fixture_root/gh-calls"
+rg -q "Closed attached Issue #292" "$fixture_root/done-issue-open-output"
+rg -q "worktree remove $target_root --force" "$fixture_root/git-calls"
+
+# Rerunning after a partial cleanup, or closing manually first, is idempotent:
+# CLOSED is accepted without another close write.
+FAKE_ISSUE_STATE="CLOSED"
+rm -f "$fixture_root/git-calls" "$fixture_root/gh-calls"
+wt done "$issue_feature" <<< "n" > "$fixture_root/done-issue-closed-output" 2>&1
+rg -q "issue view 292" "$fixture_root/gh-calls"
+if rg -q "^issue close " "$fixture_root/gh-calls"; then
+  print -r -- "wt done tried to close an already-closed Issue" >&2
+  exit 1
+fi
+rg -q "already closed; leaving it unchanged" "$fixture_root/done-issue-closed-output"
+rg -q "worktree remove $target_root --force" "$fixture_root/git-calls"
+
+# A failed Issue read or close aborts before the worktree is removed, so the
+# exact same wt done command can safely be retried.
+FAKE_ISSUE_STATE="OPEN"
+FAKE_ISSUE_VIEW_STATUS=8
+rm -f "$fixture_root/git-calls" "$fixture_root/gh-calls"
+issue_failure_status=0
+wt done "$issue_feature" > "$fixture_root/done-issue-view-failed-output" 2>&1 || issue_failure_status=$?
+[[ "$issue_failure_status" == "1" ]]
+if rg -q "worktree remove" "$fixture_root/git-calls"; then
+  print -r -- "wt done removed the worktree after the Issue read failed" >&2
+  exit 1
+fi
+rg -q "worktree preserved" "$fixture_root/done-issue-view-failed-output"
+
+FAKE_ISSUE_VIEW_STATUS=0
+FAKE_ISSUE_CLOSE_STATUS=7
+rm -f "$fixture_root/git-calls" "$fixture_root/gh-calls"
+issue_failure_status=0
+wt done "$issue_feature" > "$fixture_root/done-issue-close-failed-output" 2>&1 || issue_failure_status=$?
+[[ "$issue_failure_status" == "1" ]]
+if rg -q "worktree remove" "$fixture_root/git-calls"; then
+  print -r -- "wt done removed the worktree after Issue closure failed" >&2
+  exit 1
+fi
+rg -q "Could not close attached Issue #292" "$fixture_root/done-issue-close-failed-output"
+FAKE_ISSUE_CLOSE_STATUS=0
+
+# A failed merged-PR lookup is also fatal for attached work; otherwise a network
+# outage could silently turn delivery into local cleanup only.
+FAKE_PR_STATUS=9
+rm -f "$fixture_root/git-calls" "$fixture_root/gh-calls"
+issue_failure_status=0
+wt done "$issue_feature" > "$fixture_root/done-pr-read-failed-output" 2>&1 || issue_failure_status=$?
+[[ "$issue_failure_status" == "1" ]]
+[[ ! -e "$fixture_root/git-calls" ]]
+if rg -q "^issue " "$fixture_root/gh-calls"; then
+  print -r -- "wt done touched the Issue without confirming the merged PR" >&2
+  exit 1
+fi
+rg -q "worktree preserved" "$fixture_root/done-pr-read-failed-output"
+FAKE_PR_STATUS=0
+
+# A successful query that confirms there is no merged PR keeps the existing
+# explicit override path, but never closes the Issue on that unsafe path.
+FAKE_MERGED_PR=""
+rm -f "$fixture_root/git-calls" "$fixture_root/gh-calls"
+printf 'y\nn\n' | wt done "$issue_feature" > "$fixture_root/done-no-merged-pr-output" 2>&1
+if rg -q "^issue " "$fixture_root/gh-calls"; then
+  print -r -- "wt done touched the Issue without a merged PR" >&2
+  exit 1
+fi
+rg -q "Issue #292 was not changed because no merged PR was confirmed" "$fixture_root/done-no-merged-pr-output"
+rg -q "worktree remove $target_root --force" "$fixture_root/git-calls"
+FAKE_MERGED_PR="77"
+
+# Only the fixed generated header is trusted. A marker copied into the
+# untrusted Issue body cannot redirect cleanup, and an identity mismatch fails
+# before either GitHub or Git is mutated.
+cat > "$issue_snapshot" <<'ISSUE'
+# Issue #292: Coordinate based map
+
+not-a-generated-marker
+
+## Body
+<!-- ori-devflow: issue-snapshot; issue=292 -->
+ISSUE
+rm -f "$fixture_root/git-calls" "$fixture_root/gh-calls"
+invalid_snapshot_status=0
+wt done "$issue_feature" > "$fixture_root/done-invalid-snapshot-output" 2>&1 || invalid_snapshot_status=$?
+[[ "$invalid_snapshot_status" == "1" ]]
+[[ ! -e "$fixture_root/gh-calls" ]]
+[[ ! -e "$fixture_root/git-calls" ]]
+rg -q "no valid generated marker on line 3" "$fixture_root/done-invalid-snapshot-output"
+
+cat > "$issue_snapshot" <<'ISSUE'
+# Issue #999: Wrong feature
+
+<!-- ori-devflow: issue-snapshot; issue=999 -->
+ISSUE
+rm -f "$fixture_root/git-calls" "$fixture_root/gh-calls"
+invalid_snapshot_status=0
+wt done "$issue_feature" > "$fixture_root/done-mismatched-snapshot-output" 2>&1 || invalid_snapshot_status=$?
+[[ "$invalid_snapshot_status" == "1" ]]
+[[ ! -e "$fixture_root/gh-calls" ]]
+[[ ! -e "$fixture_root/git-calls" ]]
+rg -q "Issue #999 does not match feature '$issue_feature'" "$fixture_root/done-mismatched-snapshot-output"
+
+# --keep-issue-open is the deliberate recovery/exception path. It bypasses even
+# a malformed attachment, performs no Issue read or write, and keeps cleanup.
+rm -f "$fixture_root/git-calls" "$fixture_root/gh-calls"
+wt done "$issue_feature" --keep-issue-open <<< "n" > "$fixture_root/done-keep-issue-output" 2>&1
+if rg -q "^issue " "$fixture_root/gh-calls"; then
+  print -r -- "--keep-issue-open still touched the Issue" >&2
+  exit 1
+fi
+rg -q "Keeping the attached Issue open" "$fixture_root/done-keep-issue-output"
+rg -q "worktree remove $target_root --force" "$fixture_root/git-calls"
+
+# Restore the original fixture identities for the remaining lifecycle checks.
+rm -f "$issue_snapshot" "$target_root/tasks/tasks-$issue_feature.md"
+function wt_resolve_worktree_branch {
+  print -r -- "feature/bridge"
+}
+function gh {
+  print -r -- "$*" >> "$fixture_root/gh-calls"
+  print -r -- "42"
+}
 
 # The whole lifecycle just ran for a feature named `bridge` — a slug with no
 # Issue number in it. New work is named `<issue-number>-<slug>` now, but nothing
@@ -553,9 +724,11 @@ rg -q "worktree remove $target_root --force" "$fixture_root/git-calls"
 [[ -f "$dev_root/tasks/prd-bridge.md" ]]
 [[ -f "$dev_root/tasks/tasks-bridge.md" ]]
 
-# And an issue-number-first slug is just as ordinary: the number is part of the
-# name, not a special case the flow has to understand.
+# A number-first slug remains ordinary during start. Even during cleanup, the
+# number alone is not an attachment: without the exact snapshot, no Issue call
+# is allowed.
 > "$fixture_root/herd-calls"
+rm -f "$dev_root/tasks/issue-292-coordinate-based-map.md"
 print -r -- "# numbered PRD" > "$dev_root/tasks/prd-292-coordinate-based-map.md"
 print -r -- "## Tasks" > "$dev_root/tasks/tasks-292-coordinate-based-map.md"
 wt start 292-coordinate-based-map --yes > "$fixture_root/numbered-output" 2>&1
@@ -564,6 +737,21 @@ rg -q "Branch .*feature/292-coordinate-based-map" "$fixture_root/numbered-output
 rg -q "^handoff --feature 292-coordinate-based-map --worktree $target_root --branch feature/292-coordinate-based-map" \
   "$fixture_root/herd-calls"
 [[ -f "$target_root/tasks/prd-292-coordinate-based-map.md" ]]
+[[ ! -f "$target_root/tasks/issue-292-coordinate-based-map.md" ]]
+
+function wt_resolve_worktree_branch {
+  print -r -- "feature/292-coordinate-based-map"
+}
+rm -f "$fixture_root/git-calls" "$fixture_root/gh-calls"
+wt done 292-coordinate-based-map <<< "n" > "$fixture_root/done-number-only-output" 2>&1
+if rg -q "^issue " "$fixture_root/gh-calls"; then
+  print -r -- "wt done inferred Issue #292 from the slug alone" >&2
+  exit 1
+fi
+rg -q "worktree remove $target_root --force" "$fixture_root/git-calls"
+function wt_resolve_worktree_branch {
+  print -r -- "feature/bridge"
+}
 
 # The cleanup addition must not perturb the existing read-only worktree views.
 function wt_load_merged_set {

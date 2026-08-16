@@ -9,7 +9,7 @@
 #   wt start [prd] [--kind KIND] [--no-herdr] # Create a worktree from a PRD or task list in the dev tasks/ folder
 #   wt new <name>           # Create a clean worktree (no PRD/tasks)
 #   wt pr [name]            # Push branch and open a PR against dev
-#   wt done [name] [--herdr-override] # Archive tasks back to dev, then remove worktree+branch
+#   wt done [name] [--keep-issue-open] [--herdr-override] # Finish attached Issue, archive tasks, and clean up
 #   wt rm [name]            # Remove worktree and its branch
 #   wt ls                   # List worktrees
 #   wt status               # Feature-first overview of every feature in the repo
@@ -1020,6 +1020,74 @@ function wt_done_herdr_guard {
   fi
 }
 
+# Resolve the one Issue explicitly attached by `wt plan`. The generated marker
+# is always the third line of the exact issue-<feature>.md snapshot; reading only
+# that header keeps the untrusted Issue body and comments from supplying a fake
+# attachment. The number-first feature identity is a second, independent check
+# before wt done is allowed to mutate GitHub.
+function wt_done_resolve_attached_issue {
+  typeset -g WT_DONE_ISSUE_NUMBER=""
+  local target_path="$1" feature="$2"
+  local snapshot="$target_path/tasks/issue-$feature.md"
+  local marker marker_pattern='^<!-- ori-devflow: issue-snapshot; issue=([1-9][0-9]*) -->$'
+  local -a match mbegin mend
+
+  if [[ ! -f "$snapshot" ]]; then
+    echo "Refusing wt done: attached Issue snapshot is not a regular file: $snapshot"
+    echo "Fix the snapshot, or use --keep-issue-open to clean up without changing GitHub."
+    return 1
+  fi
+  if ! marker="$(sed -n '3p' "$snapshot" 2>/dev/null)"; then
+    echo "Refusing wt done: could not read attached Issue snapshot: $snapshot"
+    echo "Fix the snapshot, or use --keep-issue-open to clean up without changing GitHub."
+    return 1
+  fi
+  if [[ ! "$marker" =~ "$marker_pattern" ]]; then
+    echo "Refusing wt done: attached Issue snapshot has no valid generated marker on line 3: $snapshot"
+    echo "Fix the snapshot, or use --keep-issue-open to clean up without changing GitHub."
+    return 1
+  fi
+
+  WT_DONE_ISSUE_NUMBER="${match[1]}"
+  if [[ "$feature" != ${WT_DONE_ISSUE_NUMBER}-* ]]; then
+    echo "Refusing wt done: Issue #$WT_DONE_ISSUE_NUMBER does not match feature '$feature'."
+    echo "Fix the snapshot/feature identity, or use --keep-issue-open to clean up without changing GitHub."
+    WT_DONE_ISSUE_NUMBER=""
+    return 1
+  fi
+}
+
+# Close only the primary Issue attached above, and only after this branch has a
+# confirmed merged PR. Failure is fatal while the worktree still exists, making
+# the operation safely retryable. An already-closed Issue is idempotent.
+function wt_done_close_attached_issue {
+  local issue_number="$1" merged_num="$2" issue_state
+  if ! issue_state="$(gh issue view "$issue_number" --json state --jq '.state')"; then
+    echo "Could not inspect attached Issue #$issue_number; worktree preserved."
+    echo "Retry when GitHub is available, or use --keep-issue-open intentionally."
+    return 1
+  fi
+
+  case "$issue_state" in
+    OPEN)
+      echo "Closing attached Issue #$issue_number as completed..."
+      if ! gh issue close "$issue_number" --reason completed --comment "Delivered by PR #$merged_num."; then
+        echo "Could not close attached Issue #$issue_number; worktree preserved."
+        echo "Retry when GitHub is available, or use --keep-issue-open intentionally."
+        return 1
+      fi
+      echo "Closed attached Issue #$issue_number."
+      ;;
+    CLOSED)
+      echo "Attached Issue #$issue_number is already closed; leaving it unchanged."
+      ;;
+    *)
+      echo "Could not safely interpret attached Issue #$issue_number state '$issue_state'; worktree preserved."
+      return 1
+      ;;
+  esac
+}
+
 function wt_dispatch {
   case "$1" in
   repl)
@@ -1342,18 +1410,22 @@ function wt_dispatch {
     (cd "$target_path" && gh pr create --base "$BASE_BRANCH" --head "$branch" --fill)
     ;;
   done)
-    # Post-merge cleanup: archive the (completed) task list back to dev, remove
-    # the worktree + local/remote branch, then rebase the dev worktree onto
-    # origin/dev. Meant to run after the feature's PR has been squash-merged.
-    local name="" target_path branch merged_num="" herdr_override=0 done_arg
+    # Post-merge completion: close an explicitly attached Issue, archive the
+    # completed task list back to dev, remove the worktree + local/remote branch,
+    # then rebase dev onto origin/dev. Run only after the PR is squash-merged.
+    local name="" target_path branch merged_num="" herdr_override=0 keep_issue_open=0 done_arg
+    local issue_snapshot="" issue_snapshot_present=0 issue_number="" merged_lookup_failed=0
     for done_arg in "${@:2}"; do
       case "$done_arg" in
         --herdr-override)
           herdr_override=1
           ;;
+        --keep-issue-open)
+          keep_issue_open=1
+          ;;
         --*)
           echo "Unknown wt done option: $done_arg"
-          echo "Usage: wt done [name] [--herdr-override]"
+          echo "Usage: wt done [name] [--keep-issue-open] [--herdr-override]"
           return 1
           ;;
         *)
@@ -1387,28 +1459,52 @@ function wt_dispatch {
       return 1
     fi
 
-    # Best-effort merged check so we don't discard unmerged work by accident.
+    # Presence of this exact snapshot is the opt-in attachment contract. A
+    # number-looking slug alone is never enough to close an Issue.
+    issue_snapshot="$target_path/tasks/issue-$name.md"
+    if [[ -e "$issue_snapshot" || -L "$issue_snapshot" ]]; then
+      issue_snapshot_present=1
+      if (( ! keep_issue_open )); then
+        if ! wt_done_resolve_attached_issue "$target_path" "$name"; then
+          return 1
+        fi
+        issue_number="$WT_DONE_ISSUE_NUMBER"
+      fi
+    fi
+
+    # Best-effort for ad-hoc work remains backward compatible. Issue-backed
+    # work is stricter: without --keep-issue-open, a failed GitHub lookup cannot
+    # silently turn final delivery into local cleanup only.
     if command -v gh >/dev/null 2>&1; then
-      merged_num="$(gh pr list --head "$branch" --state merged --limit 1 \
-                 --json number --jq '.[0].number' 2>/dev/null)"
-      if [[ -z "$merged_num" ]]; then
+      if ! merged_num="$(gh pr list --head "$branch" --base "$BASE_BRANCH" --state merged --limit 1 \
+                         --json number --jq '.[0].number' 2>/dev/null)"; then
+        merged_lookup_failed=1
+      fi
+      if (( merged_lookup_failed )); then
+        if (( issue_snapshot_present && ! keep_issue_open )); then
+          echo "Could not verify a merged PR for Issue-backed feature '$name'; worktree preserved."
+          echo "Retry when GitHub is available, or use --keep-issue-open intentionally."
+          return 1
+        fi
+        echo "Warning: could not verify whether a PR for '$branch' merged."
+        read "cont?Continue cleaning up anyway? [y/N]: "
+        [[ "$cont" == y* ]] || { echo "Aborted"; return 0; }
+      elif [[ -z "$merged_num" ]]; then
         echo "Warning: no merged PR found for '$branch'."
         read "cont?Continue cleaning up anyway? [y/N]: "
         [[ "$cont" == y* ]] || { echo "Aborted"; return 0; }
       fi
-    fi
-
-    # Do this after merged-PR resolution but before every existing mutation:
-    # task archival, dirty confirmation, and Git removal.
-    if ! wt_done_herdr_guard "$target_path" "$herdr_override"; then
+    elif (( issue_snapshot_present && ! keep_issue_open )); then
+      echo "gh CLI is required to finish attached Issue #$issue_number; worktree preserved."
+      echo "Install/authenticate gh, or use --keep-issue-open intentionally."
       return 1
     fi
 
-    # Nothing is retired anywhere else. The merged pull request is the record
-    # that this shipped, and GitHub already has it; writing a second one on dev
-    # only created a copy that could disagree. Closing the Issue is deliberately
-    # not done here either — that contract is not designed yet, and guessing it
-    # would close Issues nobody asked to close.
+    # Do this after merged-PR and Issue-attachment resolution but before every
+    # mutation: task archival, dirty confirmation, Issue closure, and Git removal.
+    if ! wt_done_herdr_guard "$target_path" "$herdr_override"; then
+      return 1
+    fi
 
     # Archive tasks/ (with ticked checkboxes) back into the dev worktree.
     if [[ -d "$target_path/tasks" ]]; then
@@ -1425,6 +1521,16 @@ function wt_dispatch {
       echo "$dirty"
       read "force?Remove anyway (discards these changes)? [y/N]: "
       [[ "$force" == y* ]] || { echo "Aborted"; return 1; }
+    fi
+
+    if (( issue_snapshot_present )); then
+      if (( keep_issue_open )); then
+        echo "Keeping the attached Issue open (--keep-issue-open)."
+      elif [[ -z "$merged_num" ]]; then
+        echo "Attached Issue #$issue_number was not changed because no merged PR was confirmed."
+      elif ! wt_done_close_attached_issue "$issue_number" "$merged_num"; then
+        return 1
+      fi
     fi
 
     git worktree remove "$target_path" --force || return 1
@@ -1661,7 +1767,10 @@ function wt_dispatch {
     echo "                     Herdr is optional throughout; if it is missing or unhealthy the"
     echo "                     worktree is still created and 'wt herd retry' resumes the rest."
     echo "  wt pr [name]     - Push branch and open a PR against $BASE_BRANCH"
-    echo "  wt done [name] [--herdr-override] - Guarded archive/remove/rebase cleanup"
+    echo "  wt done [name] [--keep-issue-open] [--herdr-override]"
+    echo "                     Close an explicitly attached Issue after merge, archive tasks,"
+    echo "                     then perform guarded remove/rebase cleanup. --keep-issue-open"
+    echo "                     skips the GitHub mutation for an intentional exception."
     echo "                     Closes the feature's Herdr tab only; the workspace and its"
     echo "                     sibling tabs survive. Features created before tab-scoped"
     echo "                     cleanup have their workspace left open for you to close."
