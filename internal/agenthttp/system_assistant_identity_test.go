@@ -1,6 +1,10 @@
 package agenthttp
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"testing"
@@ -266,5 +270,58 @@ func TestFreshInstallCarriesTheProtectedMarker(t *testing.T) {
 	}
 	if !systemassistant.HasProtectedMarker(created.Metadata.Tags) {
 		t.Fatalf("fresh assistant is missing the protected marker: %v", created.Metadata.Tags)
+	}
+}
+
+// FR57: a client that has not reloaded since the rename, a bookmark, or a stored
+// workspace reference still asks for the assistant by its retired name. The
+// lookup has to resolve it rather than answering 404 — every unit test here
+// passed while this endpoint was stranding exactly those callers, and only
+// rehearsing a migrated install over real HTTP surfaced it.
+func TestAgentLookupResolvesARetiredName(t *testing.T) {
+	st := renameTestStore(t)
+	if err := ensureSystemAssistantAgent(st); err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+
+	h := &Handler{State: st}
+
+	for _, name := range append([]string{systemassistant.CanonicalName}, systemassistant.LegacyNames...) {
+		req := httptest.NewRequest(http.MethodGet, "/api/agents?name="+url.QueryEscape(name), nil)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("GET ?name=%q -> %d, want 200", name, rec.Code)
+			continue
+		}
+		// The response reports the canonical identity, so anything that writes the
+		// value back moves forward rather than re-persisting a retired name.
+		var body map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if got := body["name"]; got != systemassistant.CanonicalName {
+			t.Errorf("GET ?name=%q reported name=%v, want %q",
+				name, got, systemassistant.CanonicalName)
+		}
+	}
+}
+
+// Compatibility applies to the protected identity only: an unrelated missing
+// agent must still be missing (FR56).
+func TestAgentLookupDoesNotInventAgents(t *testing.T) {
+	st := renameTestStore(t)
+	if err := ensureSystemAssistantAgent(st); err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+
+	h := &Handler{State: st}
+	req := httptest.NewRequest(http.MethodGet, "/api/agents?name=Nope", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("GET ?name=Nope -> %d, want 404", rec.Code)
 	}
 }
