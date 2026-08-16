@@ -58,6 +58,7 @@ import {
   rosterState,
   groupAggregates,
   groupRailView,
+  groupMapLayoutView,
   renderGroupRailHTML,
   summaryView,
   renderSummaryRailHTML,
@@ -946,6 +947,94 @@ test('the group rail escapes hostile group content', () => {
   const html = renderGroupRailHTML(groupRailView(findWorkspace(rows, '<x>'), rows));
   assert.doesNotMatch(html, /<script/i);
   assert.doesNotMatch(html, /<img/i);
+});
+
+// ---------------------------------------------------------------------------
+// The rail's Map layout section (#346 FR-151 – FR-155)
+// ---------------------------------------------------------------------------
+
+const AUTO_DISTRICT = {
+  id: 'g1',
+  sizingMode: 'auto',
+  collapsed: false,
+  accent: 'default',
+  theme: 'default',
+  memberCount: 2,
+  readOnly: false
+};
+
+test('the Map layout section states the sizing mode in words (#346 FR-152)', () => {
+  const auto = groupMapLayoutView(AUTO_DISTRICT, { view: VIEW_MAP });
+  assert.equal(auto.sizingMode, 'auto');
+  assert.match(auto.sizingLabel, /Automatic size/);
+
+  const custom = groupMapLayoutView({ ...AUTO_DISTRICT, sizingMode: 'custom' }, { view: VIEW_MAP });
+  assert.equal(custom.sizingMode, 'custom');
+  assert.match(custom.sizingLabel, /Custom size/);
+  // Not a chip alone: the words appear in the rendered rail too.
+  const rows = groupFixture();
+  const html = renderGroupRailHTML(
+    groupRailView(findWorkspace(rows, 'g1'), rows, {
+      view: VIEW_MAP,
+      district: { ...AUTO_DISTRICT, sizingMode: 'custom' }
+    })
+  );
+  assert.match(html, /Custom size/);
+});
+
+test('Fit to contents is offered only when there is a custom size to discard (#346 FR-148)', () => {
+  assert.equal(groupMapLayoutView(AUTO_DISTRICT, { view: VIEW_MAP }).canFit, false);
+  assert.equal(
+    groupMapLayoutView({ ...AUTO_DISTRICT, sizingMode: 'custom' }, { view: VIEW_MAP }).canFit,
+    true
+  );
+});
+
+test('a read-only or collapsed district disables layout actions truthfully (#346 FR-148, FR-115)', () => {
+  const readOnly = groupMapLayoutView({ ...AUTO_DISTRICT, readOnly: true }, { view: VIEW_MAP });
+  assert.equal(readOnly.canResize, false);
+  assert.equal(readOnly.canFit, false);
+  assert.match(readOnly.readOnlyNote, /cannot be saved/);
+
+  const collapsed = groupMapLayoutView(
+    { ...AUTO_DISTRICT, collapsed: true, sizingMode: 'custom' },
+    { view: VIEW_MAP }
+  );
+  assert.equal(collapsed.canResize, false, 'a collapsed district has no frame to size');
+  assert.equal(collapsed.canFit, false);
+});
+
+test('Tree hides the Map-only layout controls rather than showing them dead (#346 FR-154)', () => {
+  assert.equal(groupMapLayoutView(AUTO_DISTRICT, { view: VIEW_TREE }), null);
+
+  const rows = groupFixture();
+  const html = renderGroupRailHTML(
+    groupRailView(findWorkspace(rows, 'g1'), rows, { view: VIEW_TREE, district: AUTO_DISTRICT })
+  );
+  assert.doesNotMatch(html, /data-rail-map-layout/);
+  assert.doesNotMatch(html, /Resize group/);
+  // Open Group is untouched by any of this (FR-155).
+  assert.match(html, /Open Group/);
+});
+
+test('a group with no district drawn shows no Map layout section (#346 FR-151)', () => {
+  assert.equal(groupMapLayoutView(null, { view: VIEW_MAP }), null);
+  const rows = groupFixture();
+  const html = renderGroupRailHTML(groupRailView(findWorkspace(rows, 'g1'), rows));
+  assert.doesNotMatch(html, /data-rail-map-layout/);
+});
+
+test('the Map layout section says it changes presentation, not membership (#346 FR-153)', () => {
+  const rows = groupFixture();
+  const html = renderGroupRailHTML(
+    groupRailView(findWorkspace(rows, 'g1'), rows, { view: VIEW_MAP, district: AUTO_DISTRICT })
+  );
+  assert.match(html, /data-rail-map-layout/);
+  assert.match(html, /never change which workspaces are in it/);
+  assert.match(html, /data-cockpit-group-resize/);
+  assert.match(html, /data-cockpit-group-fit/);
+  // Open Group still leads the panel (FR-155).
+  assert.ok(html.indexOf('Open Group') < html.indexOf('Map layout'));
 });
 
 // ---------------------------------------------------------------------------

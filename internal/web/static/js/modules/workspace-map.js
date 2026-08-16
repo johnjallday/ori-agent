@@ -1095,6 +1095,169 @@
     return clampFrameToWorld(frame);
   }
 
+  // ---------- district resizing, pure (#346 FR-52 – FR-82) ----------
+  //
+  // All eight handles, the member minimum, the documented minimum, the safe
+  // world, snapping, and the collision rule are decided here and nowhere else.
+  // Pointer, keyboard, context-menu, and rail paths all call these, which is
+  // what stops four surfaces from developing four different answers (FR-156).
+
+  // The eight resize handles, in a stable order: four corners and four edges.
+  var RESIZE_HANDLES = ['n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw'];
+
+  // Human names, used for accessible labels and blocked-state copy (FR-69).
+  var RESIZE_HANDLE_LABELS = {
+    n: 'top edge',
+    s: 'bottom edge',
+    e: 'right edge',
+    w: 'left edge',
+    ne: 'top-right corner',
+    nw: 'top-left corner',
+    se: 'bottom-right corner',
+    sw: 'bottom-left corner'
+  };
+
+  /**
+   * Do two rectangles share area?
+   *
+   * Strictly: rectangles that merely touch are NOT overlapping (FR-80). That is
+   * what makes the default arrangement conflict-free — an automatic frame around
+   * a grid-aligned member is exactly one cell, so it reaches its neighbour's
+   * edge and stops.
+   */
+  function rectsOverlap(a, b) {
+    return (
+      a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height
+    );
+  }
+
+  /**
+   * Would this frame claim something that is not in the group?
+   *
+   * A district frame is a membership boundary, so a rectangle drawn around an
+   * unrelated workspace — or across another district — is the Map telling a lie
+   * about the hierarchy. Both are refused (FR-78, FR-79); the group's own
+   * members never conflict with their own frame.
+   *
+   * @returns {{blocked: boolean, reason: string, name: string}}
+   */
+  function frameConflict(frame, groupId, layout) {
+    var world = layout || lastWorldLayout;
+    if (!world || !frame) return { blocked: false, reason: '', name: '' };
+
+    var hit = null;
+    world.nodes.forEach(function (node) {
+      if (hit || node.groupId === groupId) return;
+      var footprint = { x: node.x, y: node.y, width: MEMBER_W, height: MEMBER_H };
+      if (rectsOverlap(frame, footprint)) {
+        hit = {
+          blocked: true,
+          reason: 'workspace',
+          name: (node.ws && node.ws.name) || 'a workspace'
+        };
+      }
+    });
+    if (hit) return hit;
+
+    world.districts.forEach(function (district) {
+      if (hit || district.id === groupId) return;
+      if (rectsOverlap(frame, district)) {
+        hit = {
+          blocked: true,
+          reason: 'district',
+          name: (district.ws && district.ws.name) || 'another group'
+        };
+      }
+    });
+    return hit || { blocked: false, reason: '', name: '' };
+  }
+
+  /**
+   * Apply a resize gesture to a frame.
+   *
+   * Only the dragged edges move; the opposite edge or corner is pinned
+   * (FR-58, FR-59). The result is clamped rather than refused: a resize pushed
+   * past its members stops *at* them, so the gesture stays continuous and no
+   * member is ever hidden or clipped (FR-77).
+   *
+   * @param {{x:number,y:number,width:number,height:number}} frame committed frame
+   * @param {string} handle one of RESIZE_HANDLES
+   * @param {{x:number,y:number}} delta world-space pointer delta
+   * @param {{snap?: boolean, contentBounds?: object}} [options]
+   * @returns {{frame: object, clamped: boolean, changed: boolean}}
+   */
+  function resizeFrame(frame, handle, delta, options) {
+    var opts = options || {};
+    var snap = !!opts.snap;
+    var content = opts.contentBounds || null;
+    var h = String(handle || '');
+    var move = delta || { x: 0, y: 0 };
+
+    // A gesture that has not moved is not a resize. Without this, snapping
+    // would pull an already-off-grid edge onto the grid on pointer-DOWN, so a
+    // click that never dragged would resize the district (FR-64).
+    if (!move.x && !move.y) {
+      return {
+        frame: { x: frame.x, y: frame.y, width: frame.width, height: frame.height },
+        clamped: false,
+        changed: false
+      };
+    }
+
+    var left = frame.x;
+    var top = frame.y;
+    var right = frame.x + frame.width;
+    var bottom = frame.y + frame.height;
+    var clamped = false;
+
+    function place(value) {
+      return snap ? snapValue(value) : value;
+    }
+    function clampTo(value, limit, towardMax) {
+      var limited = towardMax ? Math.max(value, limit) : Math.min(value, limit);
+      if (limited !== value) clamped = true;
+      return limited;
+    }
+
+    if (h.indexOf('w') !== -1) {
+      // The west edge may not pass the leftmost member, may not squeeze the
+      // frame below its minimum, and may not leave the safe world.
+      var westLimit = right - DISTRICT_MIN_W;
+      if (content) westLimit = Math.min(westLimit, content.x);
+      left = clampTo(place(left + move.x), westLimit, false);
+      left = clampTo(left, MIN_COORD, true);
+    }
+    if (h.indexOf('e') !== -1) {
+      var eastLimit = left + DISTRICT_MIN_W;
+      if (content) eastLimit = Math.max(eastLimit, content.x + content.width);
+      right = clampTo(place(right + move.x), eastLimit, true);
+      right = clampTo(right, MAX_COORD, false);
+    }
+    if (h.indexOf('n') !== -1) {
+      var northLimit = bottom - DISTRICT_MIN_H;
+      if (content) northLimit = Math.min(northLimit, content.y);
+      top = clampTo(place(top + move.y), northLimit, false);
+      top = clampTo(top, MIN_COORD, true);
+    }
+    if (h.indexOf('s') !== -1) {
+      var southLimit = top + DISTRICT_MIN_H;
+      if (content) southLimit = Math.max(southLimit, content.y + content.height);
+      bottom = clampTo(place(bottom + move.y), southLimit, true);
+      bottom = clampTo(bottom, MAX_COORD, false);
+    }
+
+    var next = { x: left, y: top, width: right - left, height: bottom - top };
+    return {
+      frame: next,
+      clamped: clamped,
+      changed:
+        next.x !== frame.x ||
+        next.y !== frame.y ||
+        next.width !== frame.width ||
+        next.height !== frame.height
+    };
+  }
+
   // worldBounds is the tight box around everything currently drawn. It grows
   // automatically as content is placed further out, and it never adjusts a
   // coordinate to fit (FR-10).
@@ -1319,6 +1482,9 @@
       canvas.style.setProperty('--ws-map-grid-y', (translateY % grid) + 'px');
     }
     updateCameraControls(container);
+    // The resize overlay is screen-space, so the camera moving under it is
+    // exactly when it has to be re-placed (#346 FR-55).
+    positionResizeOverlay(container);
   }
 
   // scheduleCameraSave persists the settled camera, debounced. A pan is
@@ -1837,11 +2003,50 @@
         ' data-ws-map-viewport>' +
         '<div class="ws-map-world">' +
         parts.join('') +
-        '</div></div>' +
+        '</div>' +
+        // The resize overlay lives OUTSIDE the world layer on purpose. Inside
+        // it, the camera transform would scale the handles with the map, so at
+        // 10% zoom a 44px target would be 4px of screen (#346 FR-55, FR-56).
+        // Here it is screen-space, and worldToScreen re-places it on every
+        // render, camera change, and viewport resize.
+        resizeOverlayHTML() +
+        '</div>' +
         cameraControlsHTML(),
       empty: layout.nodes.length === 0,
       layout: layout
     };
+  }
+
+  /**
+   * The selected district's resize overlay (#346 FR-52 – FR-57).
+   *
+   * Rendered empty and hidden; positionResizeOverlay fills it in when an
+   * expanded district is selected and the layout is writable. An unselected
+   * district shows no handles and no permanent toolbar (FR-53).
+   *
+   * Only the handles themselves take pointer input — the box between them is
+   * inert, so panning, selecting, and right-clicking the map underneath a
+   * selected district all still work (FR-157).
+   */
+  function resizeOverlayHTML() {
+    var handles = RESIZE_HANDLES.map(function (handle) {
+      return (
+        '<button type="button" class="ws-map-resize-handle ws-map-resize-' +
+        handle +
+        '" data-resize-handle="' +
+        handle +
+        '" tabindex="-1" aria-label=""><span class="ws-map-resize-dot" aria-hidden="true"></span>' +
+        '</button>'
+      );
+    }).join('');
+    return (
+      '<div class="ws-map-resize-overlay" data-ws-map-resize hidden>' +
+      '<div class="ws-map-resize-box" data-ws-map-resize-box>' +
+      handles +
+      '</div>' +
+      '<div class="ws-map-resize-readout" data-ws-map-resize-readout hidden></div>' +
+      '</div>'
+    );
   }
 
   /**
@@ -2713,6 +2918,10 @@
     // control's enabled state has to follow the selection rather than waiting
     // for the next camera change (FR-41).
     updateCameraControls(container);
+    // Resize handles appear only on the selected expanded district, so a
+    // selection change is what shows or hides them (#346 FR-52, FR-53).
+    if (resizeState && resizeState.groupId !== id) cancelResize();
+    positionResizeOverlay(container);
     if (options && typeof options.onSelect === 'function') {
       options.onSelect(id, selected || null);
     }
@@ -2916,17 +3125,39 @@
   // A group district. Districts cannot be multi-selected, so this menu is
   // always single-target, and its delete runs the same host callback (and the
   // same group_only confirm) the rail's Delete group runs.
+  //
+  // The layout actions sit between Open and Delete, so the destructive item
+  // stays visually separated from the non-destructive ones (#346 FR-147), and
+  // each carries a truthful disabled state rather than being hidden — a missing
+  // item tells the user nothing about why (FR-148).
   function districtMenuItems(ws) {
-    return [
-      { label: 'Open group', action: 'open' },
-      menuDivider(),
-      {
-        label: isGroup(ws) ? 'Delete group' : 'Delete workspace',
-        action: 'delete',
-        variant: 'danger',
-        disabled: isMapReadOnly()
-      }
-    ];
+    var groupId = (ws && ws.id) || '';
+    var district = renderedDistrict(groupId);
+    var readOnly = isMapReadOnly();
+    var collapsed = !!(district && district.collapsed);
+    var items = [{ label: 'Open group', action: 'open' }, menuDivider()];
+    // Resize and Fit are meaningless on a collapsed district: there is no frame
+    // on screen to size (FR-115).
+    items.push({
+      label: 'Resize group',
+      action: 'resize-group',
+      disabled: readOnly || collapsed || !district
+    });
+    items.push({
+      label: 'Fit to contents',
+      action: 'fit-group',
+      // Fitting an already-automatic district would consume a revision to
+      // change nothing.
+      disabled: readOnly || collapsed || !district || district.sizingMode !== 'custom'
+    });
+    items.push(menuDivider());
+    items.push({
+      label: isGroup(ws) ? 'Delete group' : 'Delete workspace',
+      action: 'delete',
+      variant: 'danger',
+      disabled: readOnly
+    });
+    return items;
   }
 
   // The reserved Personal HQ site. The conditions mirror hqOverviewHTML exactly:
@@ -3300,6 +3531,15 @@
       case 'open-backlog':
         announce(container, 'Opening the Backlog for ' + name);
         openWorkspace(id, { panel: 'backlog' });
+        break;
+      // District layout actions (#346 FR-146). They run the same controller the
+      // direct handles and the Home rail run, so all three surfaces validate,
+      // persist, announce, and fail identically (FR-156).
+      case 'resize-group':
+        startGroupResize(container, id);
+        break;
+      case 'fit-group':
+        void fitGroupToContents(container, id);
         break;
       case 'open-setup':
         announce(container, 'Opening Setup for ' + name);
@@ -3985,6 +4225,379 @@
     );
   }
 
+  // ---------- district resizing, wired (#346 FR-52 – FR-75) ----------
+  //
+  // One state machine serves the pointer and the keyboard. Both produce a
+  // preview, both validate through the same collision evaluator, and both
+  // commit through the same single PATCH — so "resize by dragging" and "resize
+  // by arrow keys" cannot end up meaning different things.
+
+  var resizeState = null;
+
+  /** Is a district resizable right now? (FR-52, FR-115, FR-148) */
+  function canResizeDistrict(groupId) {
+    if (isMapReadOnly()) return false;
+    var district = renderedDistrict(groupId);
+    return !!district && !district.collapsed;
+  }
+
+  /** The padded rectangle a district's current members require (FR-76). */
+  function districtContentBounds(groupId) {
+    if (!lastWorldLayout) return null;
+    var members = lastWorldLayout.nodes.filter(function (node) {
+      return node.groupId === groupId;
+    });
+    return memberBounds(members);
+  }
+
+  function resizeOverlayEls(container) {
+    if (!container || typeof container.querySelector !== 'function') return null;
+    var overlay = container.querySelector('[data-ws-map-resize]');
+    if (!overlay) return null;
+    return {
+      overlay: overlay,
+      box: container.querySelector('[data-ws-map-resize-box]'),
+      readout: container.querySelector('[data-ws-map-resize-readout]')
+    };
+  }
+
+  /**
+   * Put the overlay over the selected district, in screen space.
+   *
+   * Called on render, on every camera change, and on viewport resize. When
+   * nothing resizable is selected the overlay is hidden outright rather than
+   * left as an invisible rectangle over the map (FR-53, FR-157).
+   */
+  function positionResizeOverlay(container) {
+    var els = resizeOverlayEls(container);
+    if (!els) return;
+    var groupId = selectedId;
+    var district = canResizeDistrict(groupId) ? renderedDistrict(groupId) : null;
+    if (!district) {
+      els.overlay.hidden = true;
+      return;
+    }
+    var frame = resizeState && resizeState.groupId === groupId ? resizeState.preview : district;
+    var canvas = container.querySelector('[data-ws-map-viewport]');
+    var viewport = framedViewport(canvas).full;
+    var topLeft = worldToScreen({ x: frame.x, y: frame.y }, camera, viewport);
+    var size = { width: frame.width * camera.zoom, height: frame.height * camera.zoom };
+
+    els.overlay.hidden = false;
+    if (els.box && els.box.style) {
+      els.box.style.left = topLeft.x + 'px';
+      els.box.style.top = topLeft.y + 'px';
+      els.box.style.width = size.width + 'px';
+      els.box.style.height = size.height + 'px';
+    }
+    var name = (district.ws && district.ws.name) || 'group';
+    var handles = container.querySelectorAll('[data-resize-handle]');
+    Array.prototype.forEach.call(handles, function (handle) {
+      var edge = handle.getAttribute('data-resize-handle');
+      // An accurate name for each handle: which group, and which edge or corner
+      // it changes (FR-69).
+      handle.setAttribute(
+        'aria-label',
+        'Resize ' + name + ' group: ' + (RESIZE_HANDLE_LABELS[edge] || edge)
+      );
+      handle.setAttribute('tabindex', '0');
+    });
+  }
+
+  /** The concise width×height and snap-state readout (FR-67, FR-68). */
+  function resizeReadout(state) {
+    var frame = state.preview;
+    var size = Math.round(frame.width) + ' × ' + Math.round(frame.height);
+    var snapping = state.snapBypassed || !layoutState.snapToGrid ? 'free' : 'snapped';
+    if (state.conflict && state.conflict.blocked) {
+      return size + ' · blocked by ' + state.conflict.name;
+    }
+    if (state.clamped) return size + ' · smallest that fits its workspaces';
+    return size + ' · ' + snapping;
+  }
+
+  function paintResize(container, state) {
+    var els = resizeOverlayEls(container);
+    if (!els) return;
+    positionResizeOverlay(container);
+    var blocked = !!(state.conflict && state.conflict.blocked);
+    if (els.box && els.box.classList) {
+      els.box.classList.toggle('is-resizing', true);
+      // Blocked and clamped are different states and read differently: blocked
+      // is refused, clamped is the honest floor. Neither relies on colour —
+      // the border style changes and the readout says which (FR-81, FR-163).
+      els.box.classList.toggle('is-blocked', blocked);
+      els.box.classList.toggle('is-clamped', !blocked && !!state.clamped);
+    }
+    if (els.readout) {
+      els.readout.hidden = false;
+      els.readout.textContent = resizeReadout(state);
+    }
+  }
+
+  function clearResizePaint(container) {
+    var els = resizeOverlayEls(container);
+    if (!els) return;
+    if (els.box && els.box.classList) {
+      els.box.classList.remove('is-resizing');
+      els.box.classList.remove('is-blocked');
+      els.box.classList.remove('is-clamped');
+    }
+    if (els.readout) {
+      els.readout.hidden = true;
+      els.readout.textContent = '';
+    }
+  }
+
+  /**
+   * Begin a resize gesture.
+   *
+   * `mode` is 'pointer' or 'keyboard'; the geometry is identical either way, and
+   * only how the delta arrives differs (FR-70).
+   */
+  function beginResize(container, groupId, handle, mode) {
+    if (!canResizeDistrict(groupId)) return null;
+    var district = renderedDistrict(groupId);
+    if (!district) return null;
+    resizeState = {
+      container: container,
+      groupId: groupId,
+      handle: handle,
+      mode: mode,
+      // The frame the gesture started from, and the one Escape restores (FR-65).
+      origin: { x: district.x, y: district.y, width: district.width, height: district.height },
+      preview: { x: district.x, y: district.y, width: district.width, height: district.height },
+      contentBounds: districtContentBounds(groupId),
+      snapBypassed: false,
+      clamped: false,
+      changed: false,
+      conflict: { blocked: false, reason: '', name: '' },
+      // Announcements are bounded: start, blocked-state changes, commit,
+      // cancel, and failure — never one per pointer move (FR-162).
+      announcedBlocked: false,
+      initiator: null
+    };
+    announce(
+      container,
+      'Resizing ' +
+        ((district.ws && district.ws.name) || 'group') +
+        ' — ' +
+        (mode === 'keyboard'
+          ? 'arrow keys to size, Enter to save, Escape to put it back.'
+          : 'release to save, or press Escape to put it back.')
+    );
+    return resizeState;
+  }
+
+  /** Apply a delta to the active gesture and repaint its preview. */
+  function updateResize(delta, options) {
+    if (!resizeState) return;
+    var opts = options || {};
+    if (typeof opts.snapBypassed === 'boolean') resizeState.snapBypassed = opts.snapBypassed;
+    var result = resizeFrame(resizeState.origin, resizeState.handle, delta, {
+      snap: layoutState.snapToGrid && !resizeState.snapBypassed,
+      contentBounds: resizeState.contentBounds
+    });
+    resizeState.preview = result.frame;
+    resizeState.clamped = result.clamped;
+    resizeState.changed = result.changed;
+    resizeState.conflict = frameConflict(result.frame, resizeState.groupId, lastWorldLayout);
+    paintResize(resizeState.container, resizeState);
+
+    // Only a *change* in blocked state is announced, not every move (FR-162).
+    if (resizeState.conflict.blocked !== resizeState.announcedBlocked) {
+      resizeState.announcedBlocked = resizeState.conflict.blocked;
+      if (resizeState.conflict.blocked) {
+        announce(
+          resizeState.container,
+          'Blocked — this would draw the group around ' + resizeState.conflict.name + '.'
+        );
+      }
+    }
+  }
+
+  /** End a gesture without saving, restoring the committed frame (FR-65). */
+  function cancelResize(message) {
+    if (!resizeState) return;
+    var state = resizeState;
+    resizeState = null;
+    clearResizePaint(state.container);
+    positionResizeOverlay(state.container);
+    restoreResizeFocus(state);
+    if (message) announce(state.container, message);
+  }
+
+  function restoreResizeFocus(state) {
+    // Focus goes back to whatever started the gesture, unless it is gone
+    // (FR-75).
+    var target = state.initiator;
+    if (target && typeof target.focus === 'function') {
+      target.focus();
+      return;
+    }
+    var handle = resizeHandleEl(state.container, state.handle);
+    if (handle && typeof handle.focus === 'function') handle.focus();
+  }
+
+  /** One overlay per container, so the handle lookup is unambiguous. */
+  function resizeHandleEl(container, edge) {
+    if (!container || typeof container.querySelector !== 'function') return null;
+    return container.querySelector('[data-resize-handle="' + edge + '"]');
+  }
+
+  /**
+   * Commit a resize.
+   *
+   * Exactly one bounded PATCH for a changed, valid release (FR-63); nothing at
+   * all for an unchanged one (FR-64) or a blocked one (FR-82). A failure puts
+   * the committed frame back, keeps the selection, and offers a real retry
+   * (FR-66).
+   */
+  function commitResize() {
+    if (!resizeState) return Promise.resolve(false);
+    var state = resizeState;
+    resizeState = null;
+    var container = state.container;
+    clearResizePaint(container);
+
+    if (state.conflict && state.conflict.blocked) {
+      positionResizeOverlay(container);
+      restoreResizeFocus(state);
+      announce(
+        container,
+        'Resize refused — it would have drawn the group around ' + state.conflict.name + '.'
+      );
+      return Promise.resolve(false);
+    }
+    if (!state.changed) {
+      positionResizeOverlay(container);
+      restoreResizeFocus(state);
+      return Promise.resolve(false);
+    }
+    return applyGroupFrame(container, state.groupId, state.preview).then(function (ok) {
+      restoreResizeFocus(state);
+      return ok;
+    });
+  }
+
+  // ---------- the one district action surface (#346 FR-156) ----------
+  //
+  // Direct handles, the group context menu, and the Home Map-layout rail all
+  // call these. One implementation means one validation rule, one persistence
+  // path, one announcement, and one failure behaviour, whichever surface the
+  // user reached for.
+
+  /** Store a user-chosen minimum rectangle (FR-42). */
+  function applyGroupFrame(container, groupId, frame) {
+    return patchLayout([
+      {
+        op: 'set_group_frame',
+        group_id: groupId,
+        frame: { x: frame.x, y: frame.y, width: frame.width, height: frame.height }
+      }
+    ])
+      .then(function () {
+        settleLayout();
+        notifyDistrictChanged(groupId);
+        announce(container, 'Group size saved.');
+        return true;
+      })
+      .catch(function () {
+        // The canonical committed frame is whatever the server still holds, so
+        // simply repainting from unchanged local state restores it.
+        settleLayout();
+        announceRetryableFailure(
+          container,
+          'That group size could not be saved. The group is back at its last saved size.',
+          function () {
+            return applyGroupFrame(container, groupId, frame);
+          }
+        );
+        return false;
+      });
+  }
+
+  /**
+   * Enter keyboard resize mode without requiring focus on a small edge target
+   * (FR-74).
+   *
+   * This is the route the context menu and the Home rail use. It selects the
+   * district first — a resize with nothing selected has no overlay to drive —
+   * then focuses the bottom-right handle, which is the one a user reaching for
+   * "make this bigger" expects.
+   */
+  function startGroupResize(container, groupId) {
+    if (!canResizeDistrict(groupId)) {
+      announce(container, 'That group cannot be resized right now.');
+      return false;
+    }
+    if (selectedId !== groupId && lastMount) {
+      applySelection(container, lastMount.state.workspaces || [], groupId, lastMount.state);
+    }
+    positionResizeOverlay(container);
+    // The bottom-right corner: the one a user reaching for "make this bigger"
+    // expects, and the one that grows without moving the district's anchor.
+    var handle = resizeHandleEl(container, 'se');
+    var state = beginResize(container, groupId, 'se', 'keyboard');
+    if (!state) return false;
+    state.initiator = handle;
+    state.step = { x: 0, y: 0 };
+    if (handle && typeof handle.focus === 'function') handle.focus();
+    return true;
+  }
+
+  /** Return a district to automatic sizing (FR-40, FR-41). */
+  function fitGroupToContents(container, groupId) {
+    return patchLayout([{ op: 'fit_group_to_contents', group_id: groupId }])
+      .then(function () {
+        settleLayout();
+        notifyDistrictChanged(groupId);
+        announce(container, 'Group fitted to its workspaces.');
+        return true;
+      })
+      .catch(function () {
+        settleLayout();
+        announceRetryableFailure(
+          container,
+          'Fit to contents could not be saved. Nothing changed.',
+          function () {
+            return fitGroupToContents(container, groupId);
+          }
+        );
+        return false;
+      });
+  }
+
+  /**
+   * Tell the host a district's presentation changed (#346 FR-152).
+   *
+   * The Home rail states the sizing mode in words, and a rail that still reads
+   * "Automatic size" after a committed resize is simply wrong. The rail owns its
+   * own rendering, so the Map reports the change rather than reaching into it.
+   */
+  function notifyDistrictChanged(groupId) {
+    var state = lastMount && lastMount.state;
+    if (state && typeof state.onDistrictChanged === 'function') {
+      state.onDistrictChanged(groupId);
+    }
+  }
+
+  // The last failed district action, so a surface can offer a real retry rather
+  // than a button that reruns a guess (FR-66).
+  var lastDistrictFailure = null;
+
+  function announceRetryableFailure(container, message, retry) {
+    lastDistrictFailure = { message: message, retry: retry };
+    announce(container, message + ' Choose Retry to try again.');
+  }
+
+  function retryLastDistrictAction() {
+    var failure = lastDistrictFailure;
+    if (!failure) return Promise.resolve(false);
+    lastDistrictFailure = null;
+    return failure.retry();
+  }
+
   // ---------- grouping handoff (#346 FR-13 – FR-22, FR-27, FR-28) ----------
   //
   // Grouping is a HIERARCHY mutation, owned by workspace-bulk-actions.js and
@@ -4553,6 +5166,124 @@
         return false;
       });
   }
+
+  /**
+   * Pointer and keyboard resizing, bound to the screen-space handles.
+   *
+   * Pointer capture keeps the gesture alive when the pointer outruns the handle,
+   * and every exit — up, cancel, Escape — releases it, so the map can never be
+   * left stuck mid-resize (FR-65). Nothing persists on pointer-move: the whole
+   * gesture is one preview and one PATCH (FR-60, FR-63).
+   */
+  function bindResizeHandles(container) {
+    var handles = container.querySelectorAll('[data-resize-handle]');
+    Array.prototype.forEach.call(handles, function (handle) {
+      if (!handle || typeof handle.addEventListener !== 'function') return;
+      var edge = handle.getAttribute('data-resize-handle');
+
+      handle.addEventListener('pointerdown', function (event) {
+        if (event.button != null && event.button !== 0) return;
+        var state = beginResize(container, selectedId, edge, 'pointer');
+        if (!state) return;
+        state.pointerId = event.pointerId;
+        state.startX = event.clientX;
+        state.startY = event.clientY;
+        state.initiator = handle;
+        if (handle.setPointerCapture) handle.setPointerCapture(event.pointerId);
+        if (event.stopPropagation) event.stopPropagation();
+        // Suppress text selection and page scrolling for this gesture only
+        // (FR-166).
+        if (event.preventDefault) event.preventDefault();
+      });
+
+      handle.addEventListener('pointermove', function (event) {
+        if (!resizeState || resizeState.mode !== 'pointer') return;
+        if (resizeState.initiator !== handle) return;
+        if (event.pointerId !== resizeState.pointerId) return;
+        if (event.preventDefault) event.preventDefault();
+        updateResize(
+          {
+            x: (event.clientX - resizeState.startX) / camera.zoom,
+            y: (event.clientY - resizeState.startY) / camera.zoom
+          },
+          // Option on Apple platforms, Alt elsewhere — one gesture, and the
+          // saved snap preference is untouched (FR-62).
+          { snapBypassed: !!event.altKey }
+        );
+      });
+
+      function releasePointer() {
+        if (
+          handle.releasePointerCapture &&
+          handle.hasPointerCapture &&
+          resizeState &&
+          handle.hasPointerCapture(resizeState.pointerId)
+        ) {
+          handle.releasePointerCapture(resizeState.pointerId);
+        }
+      }
+
+      handle.addEventListener('pointerup', function (event) {
+        if (!resizeState || resizeState.mode !== 'pointer') return;
+        if (resizeState.initiator !== handle) return;
+        if (event && event.pointerId != null && event.pointerId !== resizeState.pointerId) return;
+        releasePointer();
+        void commitResize();
+      });
+
+      handle.addEventListener('pointercancel', function () {
+        if (!resizeState || resizeState.initiator !== handle) return;
+        releasePointer();
+        cancelResize('Resize cancelled.');
+      });
+
+      // Keyboard resizing from a focused handle (FR-70 – FR-73).
+      handle.addEventListener('keydown', function (event) {
+        if (!event) return;
+        var key = event.key;
+        if (!resizeState || resizeState.initiator !== handle) {
+          if (key !== 'Enter' && key !== ' ' && key !== 'Spacebar') return;
+          var started = beginResize(container, selectedId, edge, 'keyboard');
+          if (!started) return;
+          started.initiator = handle;
+          started.step = { x: 0, y: 0 };
+          if (event.preventDefault) event.preventDefault();
+          return;
+        }
+        if (key === 'Escape') {
+          if (event.preventDefault) event.preventDefault();
+          if (event.stopPropagation) event.stopPropagation();
+          cancelResize('Resize cancelled. The group is back at its saved size.');
+          return;
+        }
+        if (key === 'Enter') {
+          if (event.preventDefault) event.preventDefault();
+          void commitResize();
+          return;
+        }
+        var direction = ARROW_DIRECTIONS[key];
+        if (!direction) return;
+        if (event.preventDefault) event.preventDefault();
+        // One snap step, or one world unit when snapping is bypassed; Shift
+        // moves four normal steps (FR-71, FR-72).
+        var bypass = !!event.altKey;
+        var unit = layoutState.snapToGrid && !bypass ? SNAP_STEP : 1;
+        var magnitude = unit * (event.shiftKey ? 4 : 1);
+        resizeState.step = {
+          x: resizeState.step.x + direction.x * magnitude,
+          y: resizeState.step.y + direction.y * magnitude
+        };
+        updateResize(resizeState.step, { snapBypassed: bypass });
+      });
+    });
+  }
+
+  var ARROW_DIRECTIONS = {
+    ArrowLeft: { x: -1, y: 0 },
+    ArrowRight: { x: 1, y: 0 },
+    ArrowUp: { x: 0, y: -1 },
+    ArrowDown: { x: 0, y: 1 }
+  };
 
   function bindDistrictDrag(container) {
     var handles = container.querySelectorAll('[data-group-drag]');
@@ -5208,6 +5939,7 @@
     bindSnapControl(container);
     bindTileDrag(container);
     bindDistrictDrag(container);
+    bindResizeHandles(container);
     bindResetLayout(container);
     // Focus returns to the record it was on before a committed move or a
     // refresh re-rendered the map (FR-117).
@@ -5283,6 +6015,41 @@
     // select/frame the resulting district afterwards.
     captureGroupingAnchors: captureGroupingAnchors,
     adoptNewGroup: adoptNewGroup,
+    /**
+     * A read-only snapshot of one district as currently drawn (#346 FR-151).
+     *
+     * The Home rail renders Map-layout controls from this rather than keeping
+     * its own copy of district state, so the rail and the district can never
+     * disagree about whether a group is custom-sized or collapsed.
+     */
+    getDistrictView: function (groupId) {
+      var district = renderedDistrict(groupId);
+      if (!district) return null;
+      return {
+        id: district.id,
+        sizingMode: district.sizingMode,
+        collapsed: district.collapsed,
+        accent: district.accent,
+        theme: district.theme,
+        memberCount: district.memberCount,
+        readOnly: isMapReadOnly()
+      };
+    },
+    // The district action controller. The context menu and the Home rail call
+    // exactly these, which is what keeps every surface on one validation,
+    // persistence, announcement, and failure path (#346 FR-156).
+    districtActions: {
+      resize: function (groupId) {
+        return startGroupResize((lastMount && lastMount.container) || null, groupId);
+      },
+      fitToContents: function (groupId) {
+        return fitGroupToContents((lastMount && lastMount.container) || null, groupId);
+      },
+      retryLastFailure: retryLastDistrictAction,
+      hasRetry: function () {
+        return !!lastDistrictFailure;
+      }
+    },
     setSelectedId: function (container, workspaces, id, options) {
       if (!container) {
         selectedId = id || '';
@@ -5312,6 +6079,15 @@
     districtThemes: DISTRICT_THEMES.slice(),
     // Pure district frame math (FR-123).
     effectiveDistrictFrame: effectiveDistrictFrame,
+    // The one resize geometry and the one collision rule, shared by the pointer,
+    // keyboard, context-menu, and rail paths (#346 FR-156).
+    districtResize: {
+      handles: RESIZE_HANDLES.slice(),
+      handleLabels: Object.assign({}, RESIZE_HANDLE_LABELS),
+      resizeFrame: resizeFrame,
+      rectsOverlap: rectsOverlap,
+      frameConflict: frameConflict
+    },
     // Pure camera math (FR-123). Exported so pointer-centred zoom, framing, and
     // clamping can be asserted exactly rather than eyeballed.
     camera: {

@@ -684,6 +684,153 @@
   cursor: not-allowed;
 }
 
+/* ---------------------------------------------------------------------------
+   District resize overlay (#346 FR-52 – FR-57, FR-81)
+
+   Deliberately OUTSIDE .ws-map-world: the world layer carries the camera
+   transform, so handles rendered inside it would shrink with the map and a 44px
+   target would be 4px of screen at 10% zoom. Here everything is screen space
+   and JS re-places the box on every camera change.
+   --------------------------------------------------------------------------- */
+.ws-map-resize-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  /* Only the handles take input. The rectangle between them must stay inert or
+     it would swallow every pan, click, and right-click aimed at the map under a
+     selected district (FR-157). */
+  pointer-events: none;
+}
+.ws-map-resize-overlay[hidden] {
+  display: none;
+}
+.ws-map-resize-box {
+  position: absolute;
+  border: 1.5px solid var(--ws-keeper);
+  border-radius: 16px;
+  pointer-events: none;
+}
+/* The handles: a small visible marker inside a finger-sized invisible target,
+   so the frame stays legible while the thing you grab is 44×44 at any zoom
+   (FR-56, design §"Keep resize markers visually small"). */
+.ws-map-resize-handle {
+  position: absolute;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  background: none;
+  display: grid;
+  place-items: center;
+  pointer-events: auto;
+  touch-action: none;
+}
+.ws-map-resize-dot {
+  width: 11px;
+  height: 11px;
+  border: 1.5px solid var(--ws-keeper);
+  border-radius: 3px;
+  background: var(--ws-bg-2);
+}
+.ws-map-resize-handle:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: -6px;
+}
+/* Corners sit on the corner; edges sit at the middle of their side. Each is
+   centred on its own edge, so the visible marker lines up with the frame. */
+.ws-map-resize-n,
+.ws-map-resize-s {
+  left: 50%;
+  transform: translateX(-50%);
+}
+.ws-map-resize-e,
+.ws-map-resize-w {
+  top: 50%;
+  transform: translateY(-50%);
+}
+.ws-map-resize-n,
+.ws-map-resize-ne,
+.ws-map-resize-nw {
+  top: -22px;
+}
+.ws-map-resize-s,
+.ws-map-resize-se,
+.ws-map-resize-sw {
+  bottom: -22px;
+}
+.ws-map-resize-w,
+.ws-map-resize-nw,
+.ws-map-resize-sw {
+  left: -22px;
+}
+.ws-map-resize-e,
+.ws-map-resize-ne,
+.ws-map-resize-se {
+  right: -22px;
+}
+/* Directional cursors (FR-57). */
+.ws-map-resize-n,
+.ws-map-resize-s {
+  cursor: ns-resize;
+}
+.ws-map-resize-e,
+.ws-map-resize-w {
+  cursor: ew-resize;
+}
+.ws-map-resize-ne,
+.ws-map-resize-sw {
+  cursor: nesw-resize;
+}
+.ws-map-resize-nw,
+.ws-map-resize-se {
+  cursor: nwse-resize;
+}
+/* State on the frame, never colour alone: solid while resizing, dashed-thick
+   when clamped at the member minimum, doubled when blocked (FR-81, FR-163). */
+.ws-map-resize-box.is-resizing {
+  border-width: 2px;
+}
+.ws-map-resize-box.is-clamped {
+  border-style: dashed;
+  border-width: 2.5px;
+}
+.ws-map-resize-box.is-blocked {
+  border-style: double;
+  border-width: 4px;
+  border-color: var(--ws-danger, #d9534f);
+}
+.ws-map-resize-box.is-blocked .ws-map-resize-handle {
+  cursor: not-allowed;
+}
+/* The width × height and snap-state readout. Anchored to the control strip so
+   it never leaves the viewport when a frame edge is off-screen (FR-167). */
+.ws-map-resize-readout {
+  position: absolute;
+  left: 50%;
+  bottom: 84px;
+  transform: translateX(-50%);
+  max-width: min(90%, 420px);
+  padding: 4px 10px;
+  border: 1px solid var(--ws-keeper);
+  background: var(--ws-bg-2);
+  color: var(--ws-ink, inherit);
+  font-family: var(--ws-font-mono);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+.ws-map-resize-readout[hidden] {
+  display: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ws-map-resize-box,
+  .ws-map-resize-handle {
+    transition: none;
+  }
+}
+
 /* building tile */
 .ws-map-tile {
   position: absolute;

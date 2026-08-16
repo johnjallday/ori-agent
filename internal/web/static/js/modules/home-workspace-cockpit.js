@@ -598,7 +598,39 @@ export function groupAggregates(group, flattened) {
   };
 }
 
-export function groupRailView(group, flattened) {
+/**
+ * The rail's Map-layout section for a selected group (#346 FR-151 – FR-154).
+ *
+ * Returns null when the section must not be shown at all — which is the whole
+ * point of the `view` argument. In Tree, a "Resize group" control would imply
+ * that Tree rows resize, so Tree hides these rather than showing them dead
+ * (FR-154). A group with no district drawn (Map not mounted yet) has nothing to
+ * describe either.
+ *
+ * @param {object|null} district the Map's own snapshot, from getDistrictView
+ * @param {{view?: string}} [options]
+ */
+export function groupMapLayoutView(district, options = {}) {
+  if (!district) return null;
+  if (options.view && options.view !== VIEW_MAP) return null;
+  const custom = district.sizingMode === 'custom';
+  const readOnly = !!district.readOnly;
+  return {
+    sizingMode: custom ? 'custom' : 'auto',
+    // The mode is stated in words, not carried by a highlighted chip alone
+    // (FR-152).
+    sizingLabel: custom
+      ? 'Custom size — the size you chose, expanding only to keep its workspaces inside'
+      : 'Automatic size — follows its workspaces',
+    canResize: !readOnly && !district.collapsed,
+    // Fitting a district that is already automatic would change nothing.
+    canFit: !readOnly && !district.collapsed && custom,
+    readOnly,
+    readOnlyNote: readOnly ? 'Map layout cannot be saved right now.' : ''
+  };
+}
+
+export function groupRailView(group, flattened, options = {}) {
   const ws = group || {};
   const aggregates = groupAggregates(ws, flattened);
   return {
@@ -607,6 +639,7 @@ export function groupRailView(group, flattened) {
     name: String(ws.name || 'Untitled group'),
     description: String(ws.description || '').trim(),
     aggregates,
+    mapLayout: groupMapLayoutView(options.district || null, { view: options.view }),
     openHref: ws.id ? `/workspaces/${encodeURIComponent(ws.id)}` : ''
   };
 }
@@ -884,7 +917,41 @@ export function renderGroupRailHTML(view) {
     '</div>' +
     '<p class="cockpit-rail-note">Totals cover every workspace inside this group. ' +
     'A group holds workspaces; it does not run work itself.</p>' +
+    mapLayoutSectionHTML(view.mapLayout) +
     '</div>'
+  );
+}
+
+/**
+ * The Map-layout section of the selected-group rail (#346 FR-151 – FR-153).
+ *
+ * It sits AFTER the aggregates and the Open Group action on purpose: Open Group
+ * stays the primary navigation action and is not displaced by layout controls
+ * (FR-155). The note is not decoration — a panel of sizing controls under a
+ * group is exactly where a user might expect resizing to mean "change what is
+ * in it", and it never does (FR-153).
+ */
+function mapLayoutSectionHTML(layout) {
+  if (!layout) return '';
+  const disabled = attr => (attr ? '' : ' disabled');
+  return (
+    '<section class="cockpit-rail-section cockpit-rail-maplayout" data-rail-map-layout>' +
+    '<h4 class="cockpit-rail-section-title">Map layout</h4>' +
+    `<p class="cockpit-rail-maplayout-mode" data-rail-sizing-mode="${escapeHtml(layout.sizingMode)}">${escapeHtml(layout.sizingLabel)}</p>` +
+    '<div class="cockpit-rail-maplayout-actions">' +
+    '<button type="button" class="modern-btn cockpit-rail-maplayout-btn" data-cockpit-group-resize' +
+    disabled(layout.canResize) +
+    '>Resize group</button>' +
+    '<button type="button" class="modern-btn cockpit-rail-maplayout-btn" data-cockpit-group-fit' +
+    disabled(layout.canFit) +
+    '>Fit to contents</button>' +
+    '</div>' +
+    (layout.readOnlyNote
+      ? `<p class="cockpit-rail-empty">${escapeHtml(layout.readOnlyNote)}</p>`
+      : '') +
+    '<p class="cockpit-rail-note">Size and appearance change only how this group looks on your ' +
+    'Map. They never change which workspaces are in it.</p>' +
+    '</section>'
   );
 }
 
@@ -1482,7 +1549,13 @@ import {
       // code Tree runs, so the two views cannot diverge.
       onDeleteWorkspace: id => void deleteWorkspaceAction(id, bulkContext()),
       onDeleteWorkspaces: ids => void deleteWorkspacesAction(ids, bulkContext()),
-      onGroupWorkspaces: ids => void groupFromMap(ids)
+      onGroupWorkspaces: ids => void groupFromMap(ids),
+      // A committed resize or fit changes what the rail's Map layout section
+      // says about this group, so the rail re-renders from the Map's new
+      // snapshot rather than keeping stale copy (#346 FR-152).
+      onDistrictChanged: groupId => {
+        if (groupId && groupId === state.selectedId) renderRail({ announceChange: false });
+      }
     });
     // A re-mount rebuilds the tiles, so the active filter must be reapplied.
     applyFilterToMap();
@@ -1788,8 +1861,40 @@ import {
     renderRail({ announceChange: true });
   }
 
+  /** The Map's snapshot of one district, or null when the Map cannot say. */
+  function mapDistrictView(groupId) {
+    const map = window.OriWorkspaceMap;
+    if (!map || typeof map.getDistrictView !== 'function') return null;
+    return map.getDistrictView(groupId);
+  }
+
+  /**
+   * The rail's Map-layout controls (#346 FR-151, FR-156).
+   *
+   * They call the Map's own district action controller — the same one the
+   * district context menu calls — so the rail cannot develop its own validation,
+   * persistence, or failure behaviour.
+   */
+  function bindMapLayoutActions() {
+    const actions = (window.OriWorkspaceMap && window.OriWorkspaceMap.districtActions) || null;
+    if (!actions) return;
+    const resize = els.railContext.querySelector('[data-cockpit-group-resize]');
+    if (resize) {
+      resize.addEventListener('click', () => actions.resize(state.selectedId));
+    }
+    const fit = els.railContext.querySelector('[data-cockpit-group-fit]');
+    if (fit) {
+      fit.addEventListener('click', () =>
+        Promise.resolve(actions.fitToContents(state.selectedId)).then(() =>
+          renderRail({ announceChange: false })
+        )
+      );
+    }
+  }
+
   function bindRailCommon() {
     if (!els.railContext) return;
+    bindMapLayoutActions();
     const back = els.railContext.querySelector('[data-cockpit-rail-back]');
     if (back) {
       back.addEventListener('click', () =>
@@ -1957,7 +2062,14 @@ import {
 
     showContextPanel(
       isGroupWorkspace(item)
-        ? renderGroupRailHTML(groupRailView(item, state.flattened))
+        ? renderGroupRailHTML(
+            groupRailView(item, state.flattened, {
+              view: state.view,
+              // The Map owns district state; the rail reads a snapshot of it
+              // rather than keeping a second copy that could drift (#346).
+              district: mapDistrictView(item.id)
+            })
+          )
         : renderWorkspaceRailHTML(workspaceRailView(item))
     );
     if (announceChange) announce(`${item.name} selected.`);

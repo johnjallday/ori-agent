@@ -10,12 +10,21 @@
 # plugin store is sandboxed too. $TMPDIR is used rather than `mktemp -d`, which
 # agent sandboxes deny silently.
 #
-# Usage: ./scripts/demo-346.sh [port]
+# Usage: ./scripts/demo-346.sh [port] [--fresh]
+#
+# --fresh starts in a brand-new timestamped sandbox. Use it for demos that drive
+# the camera by framing actions: Fit all frames EVERYTHING, so fixtures left by
+# earlier runs push the zoom to the 10% floor and leave the district too small
+# to drive. A new directory is used rather than deleting the old one, so nothing
+# here can ever remove a path it did not create.
 set -euo pipefail
 
 PORT="${1:-8947}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 SANDBOX="${ORI_DEMO_346_DIR:-/private/tmp/claude-502/smoke-346}"
+if [[ "${2:-}" == "--fresh" ]]; then
+  SANDBOX="/private/tmp/claude-502/smoke-346-$(date +%s)"
+fi
 
 echo "Building ${ROOT} ..."
 (cd "${ROOT}" && go build -o bin/ori-agent ./cmd/server)

@@ -1568,3 +1568,42 @@ body.home-command-page .ori-guide__launcher {
   max-height: 40vh;
   overflow-y: auto;
 }
+
+/* ---------------------------------------------------------------------------
+   The selected group's Map layout section (#346 FR-151, FR-168)
+   --------------------------------------------------------------------------- */
+.cockpit-rail-maplayout {
+  border-top: 1px solid var(--hc-line, rgba(0, 0, 0, 0.12));
+  padding-top: 12px;
+  margin-top: 12px;
+}
+
+/* The sizing mode is text, not a coloured chip, so it survives being read
+   aloud and being seen without colour (FR-152, FR-163). */
+.cockpit-rail-maplayout-mode {
+  margin: 0 0 10px;
+  color: var(--hc-ink);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+/* Wraps rather than scrolling sideways, so every action stays reachable at a
+   narrow rail width without horizontal scrolling (FR-168, FR-169). */
+.cockpit-rail-maplayout-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.cockpit-rail-maplayout-btn {
+  flex: 1 1 auto;
+  min-width: 8rem;
+  min-height: 36px;
+}
+
+/* Disabled reads as unavailable-with-a-reason, not as decoration: the note
+   beneath says why (FR-148). */
+.cockpit-rail-maplayout-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}

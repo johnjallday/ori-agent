@@ -584,6 +584,178 @@ test('effective frames are identical regardless of API order and viewport width 
   assert.deepEqual(frames(forward), frames(reversed));
 });
 
+// ---------------------------------------------------------------------------
+// District resizing, pure (#346 FR-52 – FR-82)
+//
+// The geometry of a resize is decided here, once, so pointer, keyboard,
+// context-menu, and rail paths cannot drift into four different answers.
+// ---------------------------------------------------------------------------
+
+function districtResize() {
+  return loadOriWorkspaceMap().districtResize;
+}
+
+const START = { x: 400, y: 400, width: 600, height: 500 };
+
+test('dragging an edge moves only that edge (#346 FR-58)', () => {
+  const { resizeFrame } = districtResize();
+  const opts = { snap: false };
+
+  const east = resizeFrame(START, 'e', { x: 100, y: 100 }, opts).frame;
+  assert.deepEqual({ ...east }, { x: 400, y: 400, width: 700, height: 500 });
+
+  const west = resizeFrame(START, 'w', { x: -100, y: 100 }, opts).frame;
+  assert.deepEqual({ ...west }, { x: 300, y: 400, width: 700, height: 500 });
+
+  const south = resizeFrame(START, 's', { x: 100, y: 120 }, opts).frame;
+  assert.deepEqual({ ...south }, { x: 400, y: 400, width: 600, height: 620 });
+
+  const north = resizeFrame(START, 'n', { x: 100, y: -120 }, opts).frame;
+  assert.deepEqual({ ...north }, { x: 400, y: 280, width: 600, height: 620 });
+});
+
+test('dragging a corner moves its two edges and pins the opposite corner (#346 FR-59)', () => {
+  const { resizeFrame } = districtResize();
+  const opts = { snap: false };
+
+  const se = resizeFrame(START, 'se', { x: 100, y: 120 }, opts).frame;
+  assert.deepEqual({ ...se }, { x: 400, y: 400, width: 700, height: 620 });
+
+  const nw = resizeFrame(START, 'nw', { x: -100, y: -120 }, opts).frame;
+  assert.deepEqual({ ...nw }, { x: 300, y: 280, width: 700, height: 620 });
+  assert.equal(nw.x + nw.width, START.x + START.width, 'the opposite corner did not move');
+  assert.equal(nw.y + nw.height, START.y + START.height);
+
+  const ne = resizeFrame(START, 'ne', { x: 60, y: -60 }, opts).frame;
+  assert.equal(ne.x, START.x, 'the west edge is pinned');
+  assert.equal(ne.y + ne.height, START.y + START.height, 'the south edge is pinned');
+
+  const sw = resizeFrame(START, 'sw', { x: -60, y: 60 }, opts).frame;
+  assert.equal(sw.x + sw.width, START.x + START.width, 'the east edge is pinned');
+  assert.equal(sw.y, START.y, 'the north edge is pinned');
+});
+
+test('every one of the eight handles is supported (#346 FR-54)', () => {
+  const { resizeFrame, handles } = districtResize();
+  assert.deepEqual([...handles].sort(), ['e', 'n', 'ne', 'nw', 's', 'se', 'sw', 'w']);
+  handles.forEach(handle => {
+    const out = resizeFrame(START, handle, { x: 40, y: 40 }, { snap: false });
+    assert.ok(out.frame.width > 0 && out.frame.height > 0, handle + ' produced a real rectangle');
+  });
+});
+
+test('a resize stops at the rectangle its members require (#346 FR-76, FR-77)', () => {
+  const { resizeFrame } = districtResize();
+  // Members need x 500–900, y 500–800 inside the frame.
+  const contentBounds = { x: 500, y: 500, width: 400, height: 300 };
+
+  const shrunk = resizeFrame(START, 'e', { x: -400, y: 0 }, { snap: false, contentBounds });
+  assert.equal(
+    shrunk.frame.x + shrunk.frame.width,
+    900,
+    'clamped at the members, not through them'
+  );
+  assert.equal(shrunk.clamped, true, 'and says it clamped, so the UI can explain why');
+
+  const fromWest = resizeFrame(START, 'w', { x: 400, y: 0 }, { snap: false, contentBounds });
+  assert.equal(fromWest.frame.x, 500, 'the west edge stops at the leftmost member');
+
+  // A resize that does not reach the members is not reported as clamped.
+  const roomy = resizeFrame(START, 'e', { x: 50, y: 0 }, { snap: false, contentBounds });
+  assert.equal(roomy.clamped, false);
+});
+
+test('a resize never goes below the documented minimum district (#346 FR-43)', () => {
+  const { resizeFrame } = districtResize();
+  const geo = districtGeometry();
+  const out = resizeFrame(START, 'se', { x: -5000, y: -5000 }, { snap: false });
+  assert.equal(out.frame.width, geo.minWidth);
+  assert.equal(out.frame.height, geo.minHeight);
+  assert.equal(out.clamped, true);
+});
+
+test('a resize stays inside the safe world (#346 FR-44)', () => {
+  const { resizeFrame } = districtResize();
+  const out = resizeFrame(START, 'se', { x: 1e9, y: 1e9 }, { snap: false });
+  assert.ok(out.frame.x + out.frame.width <= 1000000);
+  assert.ok(out.frame.y + out.frame.height <= 1000000);
+  assert.ok(Number.isFinite(out.frame.width) && Number.isFinite(out.frame.height));
+});
+
+test('snapping lands resized edges on the shared grid, and Alt bypasses it (#346 FR-61, FR-62)', () => {
+  const { resizeFrame } = districtResize();
+  const step = loadOriWorkspaceMap().snapStep;
+  // 1000 + 30 = 1030; the nearest grid line is 1026 (27 × 38).
+  const snapped = resizeFrame(START, 'e', { x: 30, y: 0 }, { snap: true });
+  assert.equal((snapped.frame.x + snapped.frame.width) % step, 0, 'the moved edge is on the grid');
+
+  const free = resizeFrame(START, 'e', { x: 30, y: 0 }, { snap: false });
+  assert.equal(free.frame.x + free.frame.width, 1030, 'bypassing snapping keeps the exact edge');
+  // Bypassing is per gesture: the fixed edge is untouched either way.
+  assert.equal(snapped.frame.x, 400);
+  assert.equal(free.frame.x, 400);
+});
+
+test('an unchanged gesture reports no change, so nothing is persisted (#346 FR-64)', () => {
+  const { resizeFrame } = districtResize();
+  const out = resizeFrame(START, 'e', { x: 0, y: 0 }, { snap: false });
+  assert.deepEqual({ ...out.frame }, { ...START });
+  assert.equal(out.changed, false);
+
+  const moved = resizeFrame(START, 'e', { x: 38, y: 0 }, { snap: false });
+  assert.equal(moved.changed, true);
+});
+
+test('touching rectangles are not a collision; shared area is (#346 FR-78 – FR-80)', () => {
+  const { rectsOverlap } = districtResize();
+  const base = { x: 0, y: 0, width: 100, height: 100 };
+  assert.equal(
+    rectsOverlap(base, { x: 100, y: 0, width: 100, height: 100 }),
+    false,
+    'edge contact'
+  );
+  assert.equal(rectsOverlap(base, { x: 0, y: 100, width: 100, height: 100 }), false);
+  assert.equal(rectsOverlap(base, { x: 99, y: 0, width: 100, height: 100 }), true, 'shared area');
+  assert.equal(rectsOverlap(base, { x: 20, y: 20, width: 10, height: 10 }), true, 'contained');
+});
+
+test('a frame that would enclose a non-member or another district is blocked (#346 FR-78, FR-79)', () => {
+  const computeWorldLayout = loadWorldLayout();
+  const { frameConflict } = districtResize();
+  const layout = computeWorldLayout(
+    [
+      { id: 'g1', kind: 'group', name: 'One' },
+      { id: 'm1', parent_id: 'g1' },
+      { id: 'g2', kind: 'group', name: 'Two' },
+      { id: 'm2', parent_id: 'g2' },
+      { id: 'solo' }
+    ],
+    {
+      positions: {
+        m1: { x: 400, y: 400 },
+        m2: { x: 1600, y: 400 },
+        solo: { x: 1000, y: 400 }
+      }
+    }
+  );
+
+  const clear = frameConflict({ x: 300, y: 300, width: 400, height: 400 }, 'g1', layout);
+  assert.equal(clear.blocked, false);
+
+  // Reaching across the unrelated workspace would claim it is inside the group.
+  const overWorkspace = frameConflict({ x: 300, y: 300, width: 900, height: 400 }, 'g1', layout);
+  assert.equal(overWorkspace.blocked, true);
+  assert.equal(overWorkspace.reason, 'workspace');
+
+  // Reaching across the other district would claim its members too.
+  const overDistrict = frameConflict({ x: 300, y: 300, width: 1500, height: 400 }, 'g1', layout);
+  assert.equal(overDistrict.blocked, true);
+
+  // A group's own members never block its own frame.
+  const overOwnMember = frameConflict({ x: 380, y: 380, width: 400, height: 400 }, 'g1', layout);
+  assert.equal(overOwnMember.blocked, false);
+});
+
 test('a stale group anchor no longer drags Fit all out (#346 FR-48, success metric 1)', () => {
   const computeWorldLayout = loadWorldLayout();
   const wss = [
@@ -1844,6 +2016,12 @@ function createCameraHarness({ width = 1000, height = 600, tiles = [], districts
   const districtTagEls = districts.map(id =>
     makeNode(id, { attribute: 'data-ws-id', classes: ['ws-map-district-tag'] })
   );
+  // The screen-space resize handles (#346 FR-52 – FR-75). They live outside the
+  // world layer, so unlike the district they are never re-created by a camera
+  // change — one stub each for the whole harness.
+  const resizeHandleEls = ['n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw'].map(edge =>
+    makeNode(edge, { attribute: 'data-resize-handle', classes: ['ws-map-resize-handle'] })
+  );
 
   const canvas = {
     clientWidth: width,
@@ -1981,6 +2159,7 @@ function createCameraHarness({ width = 1000, height = 600, tiles = [], districts
     hidden: false,
     isConnected: true,
     querySelectorAll: sel => {
+      if (sel.includes('data-resize-handle')) return resizeHandleEls;
       if (sel.includes('data-group-drag')) return handleEls;
       if (sel.includes('ws-map-district-tag')) {
         // The multi-select and selection sweeps ask for tiles and district tags
@@ -1998,7 +2177,15 @@ function createCameraHarness({ width = 1000, height = 600, tiles = [], districts
       if (tileMatch) return tileEls.find(el => el.id === tileMatch[1]) || null;
       const districtMatch = sel.match(/ws-map-district\[data-group-id="([^"]+)"\]/);
       if (districtMatch) return districtEls.find(el => el.id === districtMatch[1]) || null;
-      if (sel.includes('data-map-') || sel.includes('data-ws-selbar')) return control(sel);
+      const resizeMatch = sel.match(/data-resize-handle="([^"]+)"/);
+      if (resizeMatch) return resizeHandleEls.find(el => el.id === resizeMatch[1]) || null;
+      if (
+        sel.includes('data-map-') ||
+        sel.includes('data-ws-selbar') ||
+        sel.includes('data-ws-map-resize')
+      ) {
+        return control(sel);
+      }
       return null;
     }
   };
@@ -2016,8 +2203,8 @@ function createCameraHarness({ width = 1000, height = 600, tiles = [], districts
     set: value => {
       html = value;
       Object.keys(listeners).forEach(type => delete listeners[type]);
-      [...tileEls, ...districtEls, ...handleEls, ...districtTagEls].forEach(el =>
-        el.resetListeners()
+      [...tileEls, ...districtEls, ...handleEls, ...districtTagEls, ...resizeHandleEls].forEach(
+        el => el.resetListeners()
       );
     }
   });
@@ -2033,6 +2220,7 @@ function createCameraHarness({ width = 1000, height = 600, tiles = [], districts
     district: id => districtEls.find(el => el.id === id),
     districtTag: id => districtTagEls.find(el => el.id === id),
     handle: id => handleEls.find(el => el.id === id),
+    resizeHandle: edge => resizeHandleEls.find(el => el.id === edge),
     fire: (type, event) => (listeners[type] || []).forEach(fn => fn(event)),
     hasListener: type => !!(listeners[type] && listeners[type].length)
   };
@@ -3325,6 +3513,252 @@ test('a district already on screen does not move the camera at all (#346 FR-22, 
 });
 
 // ---------------------------------------------------------------------------
+// Resizing a district, wired (#346 FR-52 – FR-75)
+// ---------------------------------------------------------------------------
+
+async function mountedForResize({ patchResponse } = {}) {
+  const patches = [];
+  const map = loadMapWithFetch((url, init) => {
+    if (init && init.method === 'PATCH') {
+      patches.push(JSON.parse(init.body));
+      if (patchResponse === 'fail') return Promise.resolve({ ok: false, status: 500 });
+      return Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            result: { schema_version: 1, revision: 3, positions: {}, snap_to_grid: true }
+          })
+      });
+    }
+    return jsonResponse({
+      schema_version: 1,
+      revision: 1,
+      snap_to_grid: true,
+      positions: { m1: { x: 152, y: 152 }, outsider: { x: 1520, y: 152 } }
+    });
+  });
+  const harness = createCameraHarness({ tiles: ['m1', 'outsider'], districts: ['grp'] });
+  map.mount(harness.container, {
+    workspaces: [
+      { id: 'grp', kind: 'group', name: 'Ops' },
+      { id: 'm1', parent_id: 'grp', name: 'M1' },
+      { id: 'outsider', name: 'Outside' }
+    ],
+    hideChrome: true,
+    selectOnly: true,
+    noAutoSelect: true
+  });
+  await flush();
+  harness.fire('keydown', { key: '0', preventDefault() {} }); // 100% zoom
+  return { map, harness, patches };
+}
+
+test('resize handles appear only for a selected expanded district (#346 FR-52, FR-53)', async () => {
+  const { map, harness } = await mountedForResize();
+  const overlay = harness.control('[data-ws-map-resize]');
+
+  assert.equal(overlay.hidden, true, 'nothing selected — no handles');
+
+  map.setSelectedId(harness.container, [{ id: 'grp', kind: 'group', name: 'Ops' }], 'grp');
+  assert.equal(overlay.hidden, false, 'the selected district exposes its handles');
+
+  map.setSelectedId(harness.container, [{ id: 'grp', kind: 'group', name: 'Ops' }], '');
+  assert.equal(overlay.hidden, true, 'deselecting takes them away again');
+});
+
+test('a pointer resize previews without saving and commits once on release (#346 FR-60, FR-63)', async () => {
+  const { map, harness, patches } = await mountedForResize();
+  map.setSelectedId(harness.container, [{ id: 'grp', kind: 'group', name: 'Ops' }], 'grp');
+
+  const handle = harness.resizeHandle('se');
+  handle.fire('pointerdown', {
+    button: 0,
+    pointerId: 1,
+    clientX: 0,
+    clientY: 0,
+    preventDefault() {}
+  });
+  handle.fire('pointermove', { pointerId: 1, clientX: 76, clientY: 38, preventDefault() {} });
+  assert.equal(patches.length, 0, 'a preview is not a save');
+
+  handle.fire('pointerup', { pointerId: 1 });
+  await flush();
+
+  assert.equal(patches.length, 1, 'exactly one bounded update');
+  const op = patches[0].operations[0];
+  assert.equal(op.op, 'set_group_frame');
+  assert.equal(op.group_id, 'grp');
+  assert.ok(op.frame.width > 0 && op.frame.height > 0);
+  assert.equal(JSON.stringify(patches[0]).includes('parent'), false);
+});
+
+test('a resize that changes nothing sends nothing (#346 FR-64)', async () => {
+  const { map, harness, patches } = await mountedForResize();
+  map.setSelectedId(harness.container, [{ id: 'grp', kind: 'group', name: 'Ops' }], 'grp');
+
+  const handle = harness.resizeHandle('e');
+  handle.fire('pointerdown', {
+    button: 0,
+    pointerId: 1,
+    clientX: 0,
+    clientY: 0,
+    preventDefault() {}
+  });
+  handle.fire('pointermove', { pointerId: 1, clientX: 0, clientY: 0, preventDefault() {} });
+  handle.fire('pointerup', { pointerId: 1 });
+  await flush();
+
+  assert.equal(patches.length, 0);
+});
+
+test('Escape during a keyboard resize restores the frame and writes nothing (#346 FR-65, FR-73)', async () => {
+  const { map, harness, patches } = await mountedForResize();
+  map.setSelectedId(harness.container, [{ id: 'grp', kind: 'group', name: 'Ops' }], 'grp');
+  const box = harness.control('[data-ws-map-resize-box]');
+  const before = box.style.width;
+
+  const handle = harness.resizeHandle('se');
+  handle.fire('keydown', { key: 'Enter', preventDefault() {} }); // enter resize mode
+  handle.fire('keydown', { key: 'ArrowRight', preventDefault() {} });
+  assert.notEqual(box.style.width, before, 'the preview grew');
+
+  handle.fire('keydown', { key: 'Escape', preventDefault() {}, stopPropagation() {} });
+  await flush();
+
+  assert.equal(patches.length, 0, 'a cancelled resize writes nothing');
+  assert.equal(box.style.width, before, 'and the committed frame is back');
+});
+
+test('keyboard resize steps by one snap step, and Shift by four (#346 FR-71, FR-72)', async () => {
+  const { map, harness, patches } = await mountedForResize();
+  const step = map.snapStep;
+  map.setSelectedId(harness.container, [{ id: 'grp', kind: 'group', name: 'Ops' }], 'grp');
+
+  const handle = harness.resizeHandle('e');
+  handle.fire('keydown', { key: 'Enter', preventDefault() {} });
+  handle.fire('keydown', { key: 'ArrowRight', preventDefault() {} });
+  handle.fire('keydown', { key: 'ArrowRight', shiftKey: true, preventDefault() {} });
+  handle.fire('keydown', { key: 'Enter', preventDefault() {} });
+  await flush();
+
+  assert.equal(patches.length, 1);
+  const geo = map.districtGeometry;
+  const frame = patches[0].operations[0].frame;
+  // Five steps of growth (one, then four with Shift), with the resized edge
+  // landing on the grid — the frame's own corner is a member inset, which is
+  // deliberately off-grid, so only the moved edge is grid-aligned (FR-61).
+  assert.equal((frame.x + frame.width) % step, 0, 'the resized edge is on the grid');
+  assert.ok(frame.width > geo.minWidth + step * 4, 'and it grew by about five steps');
+  assert.ok(frame.width < geo.minWidth + step * 7);
+  assert.equal(frame.height, geo.minHeight, 'the untouched axis did not move');
+});
+
+test('a resize that would enclose an outsider is blocked and saves nothing (#346 FR-78, FR-82)', async () => {
+  const { map, harness, patches } = await mountedForResize();
+  map.setSelectedId(harness.container, [{ id: 'grp', kind: 'group', name: 'Ops' }], 'grp');
+  const box = harness.control('[data-ws-map-resize-box]');
+
+  const handle = harness.resizeHandle('e');
+  handle.fire('pointerdown', {
+    button: 0,
+    pointerId: 1,
+    clientX: 0,
+    clientY: 0,
+    preventDefault() {}
+  });
+  // Far enough east to reach the outsider parked at x = 1520.
+  handle.fire('pointermove', { pointerId: 1, clientX: 1600, clientY: 0, preventDefault() {} });
+
+  assert.equal(box.classList.contains('is-blocked'), true, 'the blocked state shows during drag');
+  const readout = harness.control('[data-ws-map-resize-readout]');
+  assert.match(readout.textContent, /blocked by Outside/, 'and says why, not just in red');
+
+  handle.fire('pointerup', { pointerId: 1 });
+  await flush();
+  assert.equal(patches.length, 0, 'a blocked release sends no request');
+  assert.equal(box.classList.contains('is-blocked'), false, 'nothing lingers after release');
+});
+
+test('a resize cannot shrink through its own members (#346 FR-77)', async () => {
+  const { map, harness, patches } = await mountedForResize();
+  map.setSelectedId(harness.container, [{ id: 'grp', kind: 'group', name: 'Ops' }], 'grp');
+
+  const handle = harness.resizeHandle('e');
+  handle.fire('pointerdown', {
+    button: 0,
+    pointerId: 1,
+    clientX: 0,
+    clientY: 0,
+    preventDefault() {}
+  });
+  handle.fire('pointermove', { pointerId: 1, clientX: -900, clientY: 0, preventDefault() {} });
+
+  const readout = harness.control('[data-ws-map-resize-readout]');
+  assert.match(readout.textContent, /smallest that fits its workspaces/);
+
+  handle.fire('pointerup', { pointerId: 1 });
+  await flush();
+  // Clamped at the member minimum is the frame it already had, so nothing to
+  // save.
+  assert.equal(patches.length, 0);
+});
+
+test('a failed frame save restores the committed frame and offers a retry (#346 FR-66)', async () => {
+  const { map, harness, patches } = await mountedForResize({ patchResponse: 'fail' });
+  map.setSelectedId(harness.container, [{ id: 'grp', kind: 'group', name: 'Ops' }], 'grp');
+
+  const handle = harness.resizeHandle('se');
+  handle.fire('pointerdown', {
+    button: 0,
+    pointerId: 1,
+    clientX: 0,
+    clientY: 0,
+    preventDefault() {}
+  });
+  handle.fire('pointermove', { pointerId: 1, clientX: 76, clientY: 38, preventDefault() {} });
+  handle.fire('pointerup', { pointerId: 1 });
+  await flush();
+
+  assert.equal(patches.length, 1, 'it was attempted');
+  assert.equal(map.districtActions.hasRetry(), true, 'and a real retry is available');
+  await map.districtActions.retryLastFailure();
+  await flush();
+  assert.equal(patches.length, 2, 'the retry re-sent the same intended frame');
+  assert.deepEqual(patches[1], patches[0]);
+});
+
+test('Resize group enters keyboard mode without touching a handle (#346 FR-74)', async () => {
+  const { map, harness, patches } = await mountedForResize();
+  map.setSelectedId(harness.container, [{ id: 'grp', kind: 'group', name: 'Ops' }], 'grp');
+
+  assert.equal(map.districtActions.resize('grp'), true);
+  const handle = harness.resizeHandle('se');
+  assert.equal(handle.focused, true, 'focus moved to a resize handle for the arrow keys');
+
+  handle.fire('keydown', { key: 'ArrowRight', preventDefault() {} });
+  handle.fire('keydown', { key: 'Enter', preventDefault() {} });
+  await flush();
+  assert.equal(patches.length, 1, 'and Enter commits it');
+});
+
+test('Fit to contents returns the district to automatic sizing (#346 FR-40)', async () => {
+  const { map, harness, patches } = await mountedForResize();
+  map.setSelectedId(harness.container, [{ id: 'grp', kind: 'group', name: 'Ops' }], 'grp');
+
+  await map.districtActions.fitToContents('grp');
+  await flush();
+
+  assert.equal(patches.length, 1);
+  assert.deepEqual(
+    { ...patches[0].operations[0] },
+    {
+      op: 'fit_group_to_contents',
+      group_id: 'grp'
+    }
+  );
+});
+
+// ---------------------------------------------------------------------------
 // Moving districts (#292 FR-81 – FR-94)
 //
 // A cluster move is one delta applied to the group and every visible
@@ -4523,7 +4957,7 @@ const hqTarget = () => sel => (sel.includes('data-hq-site') ? { focus() {} } : n
 
 const canvasTarget = () => sel => (sel.includes('ws-map-canvas') ? { focus() {} } : null);
 
-test('a group district offers Open group and a danger Delete group', () => {
+test('a group district offers Open, the layout actions, and a danger Delete group', () => {
   const map = loadOriWorkspaceMap();
   map._setLayoutForTest({ positions: {} }, 'ready');
   const items = map.contextMenuItemsFor({
@@ -4532,10 +4966,42 @@ test('a group district offers Open group and a danger Delete group', () => {
     ws: { id: 'grp-1', kind: 'group', name: 'Ops' }
   });
   const actions = Array.from(items.filter(item => !item.divider).map(item => item.action));
-  assert.deepEqual(actions, ['open', 'delete']);
+  assert.deepEqual(actions, ['open', 'resize-group', 'fit-group', 'delete']);
   assert.equal(items[0].label, 'Open group');
   assert.equal(items[items.length - 1].label, 'Delete group');
   assert.equal(items[items.length - 1].variant, 'danger');
+  // Destructive stays separated from the layout actions by a divider (#346
+  // FR-147).
+  assert.equal(items[items.length - 2].divider, true);
+});
+
+test('district layout actions are disabled truthfully, never hidden (#346 FR-148)', async () => {
+  const { map } = await mountedWithDistrict({ m1: { x: 152, y: 152 } });
+  const itemsFor = () =>
+    map.contextMenuItemsFor({
+      type: 'district',
+      id: 'grp',
+      ws: { id: 'grp', kind: 'group', name: 'Ops' }
+    });
+
+  const byAction = items => Object.fromEntries(items.map(i => [i.action, i]));
+
+  // An automatic district can be resized, but fitting it would change nothing.
+  let items = byAction(itemsFor());
+  assert.equal(items['resize-group'].disabled, false);
+  assert.equal(items['fit-group'].disabled, true, 'already automatic');
+
+  // A district with no frame drawn at all cannot be resized.
+  const orphan = map.contextMenuItemsFor({
+    type: 'district',
+    id: 'not-drawn',
+    ws: { id: 'not-drawn', kind: 'group', name: 'Ghost' }
+  });
+  assert.equal(byAction(orphan)['resize-group'].disabled, true);
+  assert.ok(
+    orphan.some(item => item.action === 'resize-group'),
+    'the action is still listed, so its unavailability is explained rather than silent'
+  );
 });
 
 test('the HQ site mirrors the rail: build and import always, clear only when repairing', () => {
