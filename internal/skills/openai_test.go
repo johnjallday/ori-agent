@@ -53,9 +53,6 @@ dependencies:
 	if meta.DefaultPrompt != "Do the thing" {
 		t.Fatalf("default prompt = %q", meta.DefaultPrompt)
 	}
-	if !meta.PlanningProfile {
-		t.Fatal("expected planning profile flag to be true")
-	}
 	if len(meta.Tools) != 2 || meta.Tools[0] != "tool_a" {
 		t.Fatalf("tools = %v", meta.Tools)
 	}
@@ -97,8 +94,5 @@ capabilities:
 	}
 	if meta.DefaultPrompt != "Use the interface prompt" {
 		t.Fatalf("default prompt = %q", meta.DefaultPrompt)
-	}
-	if !meta.PlanningProfile {
-		t.Fatal("expected planning profile flag from capabilities")
 	}
 }

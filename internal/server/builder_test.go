@@ -112,6 +112,23 @@ func TestServerBuilder_Build_Integration(t *testing.T) {
 	if server.Handlers.Session == nil || !server.Handlers.Session.ReaperSetupWired() {
 		t.Error("REAPER setup (resolver/preview/repair) not wired onto the session handler")
 	}
+	// Planning policy resolution must exist BEFORE the plan executor is built,
+	// because the executor captures the preflight checker at construction. If
+	// the ordering regresses, gate evaluation silently loses its checker and
+	// every enforced precondition degrades to "cannot verify" — a plan that
+	// should run stops, and the cause is invisible.
+	if builder.workspacePlanPolicy == nil {
+		t.Error("planning policy resolver not wired")
+	}
+	if builder.workspacePlanPreflight() == nil {
+		t.Error("plan execution preflight not wired; enforced preconditions cannot be checked")
+	}
+	// The orchestrator must be able to write proposed multi-agent work down as
+	// a durable Plan. Without the drafter it falls back to the ephemeral stash,
+	// and the user has nothing versioned to approve.
+	if builder.multiAgentOrchestrator == nil || !builder.multiAgentOrchestrator.HasPlanDrafter() {
+		t.Error("orchestrator plan drafter not wired; proposed work would have no durable plan")
+	}
 	// Workspace import restores an exported workspace's personal_hq marker
 	// through the authoritative Personal HQ service. Unwired, the marker is
 	// silently dropped and a reimported HQ lands as an ordinary workspace

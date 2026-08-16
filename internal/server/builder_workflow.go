@@ -26,6 +26,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/userprofile"
 	"github.com/johnjallday/ori-agent/internal/workflowhttp"
 	"github.com/johnjallday/ori-agent/internal/workspace"
+	"github.com/johnjallday/ori-agent/internal/workspacepolicy"
 	"github.com/johnjallday/ori-agent/internal/workspacerun"
 )
 
@@ -327,6 +328,10 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 	// Set workspace store on chat handler (uses SyncStore when available)
 	b.chatHandler.SetWorkspaceStore(ws)
 
+	// Plan materialization writes tasks through this store, so it can only be
+	// wired now that the store exists.
+	b.attachWorkspacePlanMaterializer()
+
 	// Ori Guide reads workspace names to resolve a destination the user asked
 	// for by name. Read-only; the guide has no write path.
 	b.oriGuideHandler.SetWorkspaceStore(ws)
@@ -336,6 +341,15 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 	// store orchestration reads from, not just the raw folder store.
 	if b.sessionHandler != nil {
 		b.sessionHandler.SetWorkspaceTaskStore(ws)
+	}
+
+	// Effective planning policy needs the store to read settings and to find
+	// the folder whose version control the enforced controls are about. Like
+	// the plan materializer and executor, it is wired here rather than during
+	// handler construction, when the store is still nil.
+	b.workspacePlanPolicy = workspacepolicy.NewResolver(ws)
+	if b.sessionHandler != nil {
+		b.sessionHandler.SetPlanningPolicyResolver(b.workspacePlanPolicy)
 	}
 
 	// Now that the workspace store (SyncStore) exists, wire REAPER readiness /
@@ -454,9 +468,17 @@ func (b *ServerBuilder) initializeTaskExecution() {
 			oriExecutor.SetWorkspaceFolderResolver(b.workspaceFileStore)
 		}
 		b.workspaceRunExecutors.Register(workspacerun.ExecutorKindOriAgent, oriExecutor)
-		b.runBackedTaskHandler = workspacerun.NewTaskRunBridge(b.workspaceRunStore, b.workspaceRunService, b.workspaceStore)
-		taskExecutionHandler = b.runBackedTaskHandler
+		bridge := workspacerun.NewTaskRunBridge(b.workspaceRunStore, b.workspaceRunService, b.workspaceStore)
+		b.runBackedTaskHandler = bridge
+		// Kept as the concrete type as well, because plan execution dispatches
+		// through it directly rather than through the TaskHandler interface.
+		b.workspaceRunBridge = bridge
+		taskExecutionHandler = bridge
 	}
+
+	// Plan execution dispatches through the bridge above and mutates tasks
+	// through the workspace store, so it can only be wired once both exist.
+	b.attachWorkspacePlanExecutor()
 
 	b.taskExecutor = workspace.NewTaskExecutor(b.workspaceStore, taskExecutionHandler, workspace.ExecutorConfig{
 		PollInterval:  10 * time.Second,
@@ -495,6 +517,17 @@ func (b *ServerBuilder) initializeOrchestration() error {
 	}
 
 	orch := orchestration.NewOrchestrator(b.st, b.workspaceStore, history, communicator, b.llmFactory, b.configManager, b.eventBus)
+	b.multiAgentOrchestrator = orch
+
+	// Proposed multi-agent work becomes a durable Plan draft rather than an
+	// ephemeral stash on the workspace, so the thing the user approves is a
+	// versioned record (FR-59, FR-149).
+	if b.workspacePlanService != nil {
+		orch.SetPlanDrafter(orchestratorPlanDrafter{
+			service: b.workspacePlanService,
+			agents:  b.resolvePlanAvailability,
+		})
+	}
 
 	// Wire gateway to orchestrator if initialized
 	if b.gateway != nil {

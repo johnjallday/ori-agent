@@ -81,6 +81,9 @@ func (h *Handler) HandleWorkspaces(w http.ResponseWriter, r *http.Request) {
 		case "settings":
 			h.handleWorkspaceSettings(w, r, id)
 			return
+		case "planning-policy":
+			h.handleWorkspacePlanningPolicy(w, r, id)
+			return
 		case "agents":
 			h.handleWorkspaceAgents(w, r, id, parts)
 			return

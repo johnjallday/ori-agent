@@ -714,6 +714,35 @@
                           <div id="workspace-detail-settings-managed-skills" class="workspace-detail-settings-summary-copy">No settings-managed workflows active.</div>
                         </div>
                       </div>
+                      <!--
+                        Planning policy, split into what the model is ASKED for
+                        and what compiled code CHECKS.
+
+                        The two sections are separate cards rather than one list
+                        because the difference is the point: a guidance line is
+                        a preference nothing verifies, and an enforced line is a
+                        check that runs. Mixing them taught users that the
+                        workspace would refuse things it happily does
+                        (FR-124, FR-128, FR-129).
+                      -->
+                      <div class="col-12">
+                        <div class="workspace-detail-settings-managed-card">
+                          <div class="workspace-detail-settings-summary-title">Model Guidance</div>
+                          <p class="workspace-detail-settings-field-hint">
+                            Preferences passed to the planner. These shape what it proposes; they are not checked afterwards.
+                          </p>
+                          <ul id="workspace-detail-settings-guidance" class="workspace-detail-settings-summary-copy"></ul>
+                        </div>
+                      </div>
+                      <div class="col-12">
+                        <div class="workspace-detail-settings-managed-card">
+                          <div class="workspace-detail-settings-summary-title">Enforced Workflow Policy</div>
+                          <p class="workspace-detail-settings-field-hint">
+                            Checks Ori performs itself. Each one blocks the work it names.
+                          </p>
+                          <ul id="workspace-detail-settings-enforced" class="workspace-detail-settings-summary-copy" aria-live="polite"></ul>
+                        </div>
+                      </div>
                     </div>
                     <div class="workspace-detail-settings-actions">
                       <button type="submit" class="btn btn-primary" id="workspace-detail-settings-save">Save Settings</button>

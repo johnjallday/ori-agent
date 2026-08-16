@@ -180,6 +180,15 @@
   outline: 2px solid var(--ws-faction);
   outline-offset: 2px;
 }
+/* Plans is an anchor rather than a button: it navigates to its own canonical
+   page instead of swapping this one. It sits in the same switch so it reads as
+   a workspace destination, so it inherits the button styling and only needs
+   the anchor defaults reset. */
+.ws-cmd-view-link {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
 .ws-cmd-crest {
   width: 50px;
   height: 50px;

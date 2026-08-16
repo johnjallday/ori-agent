@@ -1226,6 +1226,47 @@ test('stat clicks open the in-place manager modal without leaving Command view',
   assert.equal(commandView.detailedView.hidden, true);
 });
 
+// The Plans page's "Open Workspace Settings" link is the only route a user has
+// from "structured planning is off" to the toggle that turns it on. It has to
+// land on the settings surface, and the modal has to open AFTER render() —
+// opening it first mounts the shared config surface into markup render() then
+// throws away, which looks identical to the link doing nothing.
+test('panel=settings opens Manager Settings, after the view has rendered', () => {
+  const sequence = [];
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    viewMode: 'details',
+    taskDrawerOpen: false,
+    backlogDrawerOpen: false,
+    statModalSection: '',
+    _urlBootState: { panel: 'settings' },
+    page: { workspaceId: 'workspace-1', tasks: [] },
+    urlStateContext: () => ({
+      validTaskIds: [],
+      validBacklogIds: [],
+      validAgentKeys: [],
+      validRunTaskIds: []
+    }),
+    applyTicketDeepLink() {},
+    render() {
+      sequence.push('render');
+    },
+    openStatModal(section) {
+      sequence.push('open:' + section);
+      this.statModalSection = section;
+    },
+    syncURLState() {
+      sequence.push('sync');
+    }
+  });
+
+  commandView.applyBootURLState();
+
+  assert.deepEqual(sequence, ['render', 'open:settings', 'sync']);
+  // Nothing was sanitized away, so no "link details were out of date" toast.
+  assert.equal(commandView.currentURLState().panel, 'settings');
+});
+
 test('rail more toggles command-local management without leaving Command view', () => {
   const railRoot = makeListenerRoot();
   const renders = [];
@@ -2221,6 +2262,36 @@ test('Operations Map inventory derives counts from existing page data', () => {
   assert.equal(counts.files, 1);
   // Memory, Triggers, Capabilities.
   assert.equal(counts.systems, 3);
+});
+
+// Plans must be REACHABLE from the workspace, not just routable.
+//
+// The pages and routes existed for several groups while nothing in the UI
+// linked to them — you had to type the URL. Green tests and a working route
+// are not the same thing as a destination somebody can find, which is exactly
+// the failure the per-group demo checkpoint exists to catch.
+test('the workspace view switch offers Plans as a real link', () => {
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    viewMode: 'details',
+    page: { workspaceId: 'ws-1', notes: [], schedules: [], sessions: [] }
+  });
+
+  const switcher = commandView.commandViewSwitchHTML();
+  assert.match(switcher, /href="\/workspaces\/ws-1\/plans"/);
+  assert.match(switcher, />Plans</);
+  // An anchor, not a button: middle-click, cmd-click, and "copy link address"
+  // must behave the way a link does.
+  assert.match(switcher, /<a class="ws-cmd-view-btn ws-cmd-view-link"/);
+});
+
+// Without a workspace id there is no honest link to build, so none is rendered
+// rather than one pointing at /workspaces//plans.
+test('the Plans link is omitted when the workspace id is unknown', () => {
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, { viewMode: 'details', page: {} });
+
+  assert.ok(!commandView.commandViewSwitchHTML().includes('/plans'));
 });
 
 test('Operations Map controls expose accessible pressed and dialog state', () => {

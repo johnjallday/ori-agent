@@ -1598,4 +1598,239 @@ Trigger failures (mission disabled, watched folder removed, run-creation error) 
 
 ---
 
+## Workspace Plans
+
+A **Plan** is the durable, versioned record of work Ori intends to do: it moves
+from clarification through drafting, review, explicit approval, materialization
+into Tasks, execution, and completion. Compiled Ori code owns every lifecycle
+transition — a model may propose content and nothing else.
+
+The one rule worth learning first: **an approval is the only thing that creates
+work.** No preset, confirmation mode, chat message, skill, or agent output
+substitutes for it.
+
+### Lifecycle statuses
+
+```
+draft → needs_input → draft → in_review → approved → executing → completed
+                                       ↘ (rejected / changes requested) → draft
+                                         executing → paused → executing
+                                         any → cancelled / failed
+```
+
+- `draft` — being written. Nothing exists yet.
+- `needs_input` — waiting on the user's answers to clarifying questions.
+- `in_review` — an immutable version is snapshotted and awaiting a decision.
+- `approved` — an approval was consumed; Tasks exist.
+- `executing` / `paused` — work is running, or stopped at a safe point.
+- `completed` / `failed` / `cancelled` — terminal.
+
+Cancelled Plans move to History immediately. Inactive `draft` and `needs_input`
+Plans move to History after 30 days. **Archiving is a placement, never a
+deletion** — versions, approvals, Task links, and history all survive it.
+
+### Plans
+
+```
+GET    /api/workspaces/{workspaceID}/plans?scope=active|history|all
+POST   /api/workspaces/{workspaceID}/plans
+GET    /api/workspaces/{workspaceID}/plans/{planID}
+DELETE /api/workspaces/{workspaceID}/plans/{planID}
+POST   /api/workspaces/{workspaceID}/plans/{planID}/archive
+POST   /api/workspaces/{workspaceID}/plans/{planID}/reopen
+```
+
+`DELETE` hard-deletes **only** a Plan that was never approved and has no linked
+Tasks, Runs, or artifacts. Anything else returns `plan_not_deletable`; archive
+it instead. Materialized work is never silently removed.
+
+### Drafting and clarification
+
+```
+PATCH  /api/workspaces/{workspaceID}/plans/{planID}/draft
+GET    /api/workspaces/{workspaceID}/plans/{planID}/revision?section=<id>
+POST   /api/workspaces/{workspaceID}/plans/{planID}/clarifications/{questionID}
+GET    /api/workspaces/{workspaceID}/plans/{planID}/snapshots
+POST   /api/workspaces/{workspaceID}/plans/{planID}/snapshots/{snapshotID}/recover
+```
+
+`PATCH .../draft` takes a `revision` for optimistic concurrency. A stale write
+returns `stale_draft` **with the winning revision**, so the client can offer
+recovery rather than silently losing an edit. Editing needs no model.
+
+Autosave snapshots are pruned to the latest 10 and 30 days. They are recovery
+points, never review versions.
+
+### Review, approval, and materialization
+
+```
+GET    /api/workspaces/{workspaceID}/plans/{planID}/versions
+POST   /api/workspaces/{workspaceID}/plans/{planID}/versions      # snapshot for review
+GET    /api/workspaces/{workspaceID}/plans/{planID}/versions/{n}
+GET    /api/workspaces/{workspaceID}/plans/{planID}/compare?from=1&to=2
+POST   /api/workspaces/{workspaceID}/plans/{planID}/decision      # request_changes | reject
+GET    /api/workspaces/{workspaceID}/plans/{planID}/approvals
+POST   /api/workspaces/{workspaceID}/plans/{planID}/approvals
+POST   /api/workspaces/{workspaceID}/plans/{planID}/materialize
+```
+
+An approval binds to one exact `version` **and** its `content_hash`. If the
+version, hash, workspace, or declared effect no longer matches, it is refused.
+
+**Approval effects** — the label the user sees is the behavior they get:
+
+| Effect | Button | What it does |
+|---|---|---|
+| `create_tasks` | Approve and Create Tasks | Creates the Tasks. Starts nothing. |
+| `create_tasks_and_start` | Approve and Start | Creates the Tasks and begins automatic execution. |
+
+Approval and materialization are separate calls on purpose: a retried
+materialization **replays** the original result rather than doing the work
+twice. Task IDs are deterministic, so a crash mid-materialization is safe to
+retry.
+
+Maximum 50 review versions per Plan. The 51st is refused with split/supersede
+guidance — history is never evicted.
+
+### Revision and reconciliation
+
+```
+POST   /api/workspaces/{workspaceID}/plans/{planID}/revise-approved   # intent: additive|corrective|superseding
+GET    /api/workspaces/{workspaceID}/plans/{planID}/reconcile         # preview
+POST   /api/workspaces/{workspaceID}/plans/{planID}/reconcile         # confirm one exact preview
+```
+
+The preview reports what approving a revision would do to work the earlier
+approval created: `retained`, `created`, `cancel`, `replace`, `immutable`,
+`follow_up`. It carries a `token` hashing both versions **and every linked
+Task's status**; a confirmation whose token no longer matches is refused with
+`stale_preview`, because a Task may have started since.
+
+An additive revision cancels nothing and needs no separate confirmation.
+Corrective and superseding revisions do. Work that already ran is never
+cancelled — it gets follow-up work beside it.
+
+### Execution
+
+```
+POST   /api/workspaces/{workspaceID}/plans/{planID}/execution
+GET    /api/workspaces/{workspaceID}/plans/{planID}/cancel-preview
+GET    /api/workspaces/{workspaceID}/plan-execution-slot
+```
+
+`execution` takes an `action`: `start`, `retry`, `pause`, `resume`, `skip`,
+`cancel`, `complete`, `fail`.
+
+**One Plan executes per workspace.** A competing Plan queues visibly and is told
+what it waits behind and its position. Pausing stops future dispatch
+immediately but releases the slot only once in-flight work reaches a safe stop;
+resuming rejoins the queue rather than displacing the current holder.
+
+Standalone Tasks — the ones no Plan materialized — keep their own scheduler,
+global maximum, and provider limits. The slot sits above the Task executor and
+does not touch them.
+
+### Reverse lookups
+
+```
+GET    /api/workspaces/{workspaceID}/plan-for-task/{taskID}
+GET    /api/workspaces/{workspaceID}/plan-for-run/{runID}
+```
+
+Returns a compact summary plus a canonical `url`. Build links from that field
+rather than composing the route, so every entry point lands on the same
+surface.
+
+### Policy and diagnostics
+
+```
+GET    /api/workspaces/{workspaceID}/planning-policy[?preset=<name>]
+GET    /api/workspaces/{workspaceID}/plan-diagnostics
+```
+
+`planning-policy` splits into two groups, and the split is a truth claim:
+
+- **`guidance`** — style, clarification depth, preferred artifacts, tone. These
+  are *asked* of the planner. Nothing verifies them, and the UI must not
+  describe them with "required", "guaranteed", or "will".
+- **`enforced`** — each control names a compiled adapter that actually runs.
+  Every one reports `enabled` (the user's setting) and `available` (whether
+  this workspace can honor it) as **separate facts**, plus a machine-readable
+  `reason` when unavailable.
+
+Enforced control keys: `plan_approval`, `task_materialization`,
+`execution_mode`, `repo_scan`, `safe_branch`, `handoff_confirmation`,
+`artifact_write`, `note_creation`, `destructive_confirmation`.
+
+Unavailable reasons: `not_a_repository`, `no_workspace_folder`,
+`not_applicable_to_profile`.
+
+The `preset` query previews a preset **without saving it**, running the same
+computation against the same workspace capabilities.
+
+`plan-diagnostics` reports which components are wired and whether generation is
+available. Reading, editing, reviewing, approving, materializing, and executing
+all work **offline**; only drafting needs a model.
+
+#### Profile defaults
+
+| Profile | Default preset | Planning | Notes |
+|---|---|---|---|
+| General | Guided | disabled | Enabling assumes no repository, PRD, task list, or branch |
+| Research | Guided | disabled | Enabling selects investigation style, deep clarification, no branch |
+| Software Project | Planner | enabled | Repo inspection, PRD + task list, `step_through` |
+
+A branch precondition is enforced **only** in a recognized version-controlled
+repository. Autonomous may select automatic execution but retains approval and
+every invariant safety gate.
+
+### Error codes
+
+Every failure carries a stable `code` alongside its message:
+
+| Code | HTTP | Meaning |
+|---|---|---|
+| `plan_not_found` | 404 | Unknown Plan, or one owned by another workspace |
+| `plan_version_not_found` | 404 | Unknown version |
+| `plan_approval_not_found` | 404 | Unknown approval |
+| `reconciliation_not_found` | 404 | A revision needs a confirmed reconciliation first |
+| `stale_draft` | 409 | Draft revision moved; carries the winning revision |
+| `stale_version` | 409 | Decision targeted a superseded version |
+| `stale_preview` | 409 | Work changed since the reconciliation preview |
+| `approval_mismatch` | 409 | Version, hash, workspace, or effect no longer matches |
+| `approval_consumed` | 409 | Already spent; retry replays its result |
+| `reconciliation_consumed` | 409 | Confirmation already applied |
+| `invalid_transition` | 409 | Not a legal status edge |
+| `materialization_conflict` | 409 | Another caller is materializing |
+| `execution_conflict` | 409 | Another Plan holds the workspace slot |
+| `plan_not_deletable` | 409 | Has approvals, Tasks, Runs, or artifacts |
+| `approval_authority_required` | 403 | Only an explicit user action may approve |
+| `validation_failed` | 422 | Typed content validation |
+| `credential_in_content` | 422 | Content carries something shaped like a credential |
+| `limit_exceeded` | 422 | Over a hard bound; content is never truncated |
+| `unavailable_capability` | 422 | A required agent or capability is missing |
+| `unsafe_path` | 422 | Artifact path escapes the workspace |
+| `model_unavailable` | 503 | Generation only; everything else still works |
+
+### Action Preview (not a Plan)
+
+Chat may preview **one immediate action** the user already named — a `/tool`
+command or a single routed utility tool — and approve it inline. Its ID is
+prefixed `preview_`, never `plan_`.
+
+Anything that creates Tasks, carries dependencies, spans agents, or hands off to
+a specialist is Plan work: chat opens a durable Plan and returns its canonical
+link instead. Read-only requests and flows with their own confirmation (mail
+send, destructive-action confirmation) stay as they are.
+
+### Legacy planning skill
+
+The repository-local `workspace-planning` skill and its `planning_profile`
+contract are **removed**. A workspace upgraded from that design may still carry
+the binding; its values have **zero effect** and are not migrated. The settings
+endpoint reports a one-time `legacy_planning_notice`, and the next settings save
+discards that binding only — unrelated skill bindings are untouched.
+
+---
+
 This API reference provides complete documentation for integrating with Ori Agent programmatically. For additional help or examples, refer to the main [README](README.md) or check the web interface implementation in the `internal/web/` directory.

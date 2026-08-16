@@ -57,6 +57,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/workspace"
 	"github.com/johnjallday/ori-agent/internal/workspacecapabilityhttp"
 	"github.com/johnjallday/ori-agent/internal/workspacemaphttp"
+	"github.com/johnjallday/ori-agent/internal/workspaceplan"
 	"github.com/johnjallday/ori-agent/internal/workspacerun"
 )
 
@@ -153,6 +154,10 @@ type HandlerFacade struct {
 	CLIAgents        *cliagenthttp.Handler
 	CLIAgentRegistry *cliagent.CLIAgentRegistry
 	WorkspaceRuns    *workspacerun.Handler
+	// WorkspacePlans serves the canonical Plan API. Plans are workspace
+	// workflow state, so the handler lives beside Runs rather than inside the
+	// Skills catalog (PRD section 6.1).
+	WorkspacePlans   *workspaceplan.Handler
 	ActionCenter     *actioncenterhttp.Handler
 	Triggers         *triggerhttp.Handler
 	WorkspaceMemory  *memoryhttp.Handler

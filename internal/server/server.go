@@ -20,6 +20,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/privateservices"
 	web "github.com/johnjallday/ori-agent/internal/web"
 	"github.com/johnjallday/ori-agent/internal/workspace"
+	"github.com/johnjallday/ori-agent/internal/workspaceplan"
 )
 
 // Server holds all the dependencies and state for the HTTP server
@@ -34,6 +35,11 @@ type Server struct {
 	Handlers    *HandlerFacade
 
 	desktopOpener platform.DesktopOpener
+
+	// workspacePlanAuto drives approved automatic Plans. Its loops are not
+	// owned by any request, so shutdown has to stop them explicitly or a
+	// closing process keeps dispatching work.
+	workspacePlanAuto *workspaceplan.AutoRunner
 }
 
 func (s *Server) resolvedDesktopOpener() platform.DesktopOpener {
@@ -124,7 +130,13 @@ func isStaleWorkspaceManagerAgent(ag *agent.Agent) bool {
 
 // Shutdown gracefully shuts down background services
 func (s *Server) Shutdown() {
-	// Stop background services
+	// Stop background services. Automatic plan execution goes first: it
+	// dispatches THROUGH the task machinery, so stopping it before that
+	// machinery means nothing is queuing new work into a service that is
+	// already closing.
+	if s.workspacePlanAuto != nil {
+		s.workspacePlanAuto.Stop()
+	}
 	if s.Workflow != nil {
 		s.Workflow.Shutdown()
 	}
@@ -505,6 +517,28 @@ func (s *Server) handleWorkspacesRoutes(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Workspace Plans: /workspaces/{id}/plans[/{planId}].
+	//
+	// These two routes are canonical. Task detail, Run detail, and chat all
+	// deep-link here rather than rendering their own Plan editor, so there is
+	// exactly one surface where a Plan can be reviewed, edited, and approved
+	// (PRD FR-145, FR-148, FR-149).
+	//
+	// A malformed descendant path falls through to the workspace rather than
+	// rendering an empty Plan page for an ID that was never valid.
+	if len(parts) >= 2 && parts[1] == "plans" {
+		if len(parts) == 2 {
+			s.serveWorkspacePlans(w, workspaceID)
+			return
+		}
+		if len(parts) == 3 && strings.TrimSpace(parts[2]) != "" {
+			s.serveWorkspacePlan(w, workspaceID, parts[2])
+			return
+		}
+		http.Redirect(w, r, "/workspaces/"+url.PathEscape(workspaceID)+"/plans", http.StatusSeeOther)
+		return
+	}
+
 	// Workspace notes app: /workspaces/{id}/notes[/noteId].
 	if len(parts) >= 2 && parts[1] == "notes" {
 		if len(parts) == 2 {
@@ -566,6 +600,31 @@ func (s *Server) serveFocusedNotePage(w http.ResponseWriter, noteID string) {
 	data.Extra["NoteID"] = noteID
 	data.Extra["NotePageMode"] = "focused"
 	s.renderAndWritePage(w, "note-page", data)
+}
+
+// serveWorkspacePlans renders the canonical Plans destination for a workspace:
+// Active and History, plus creation when planning is enabled (FR-145, FR-146).
+func (s *Server) serveWorkspacePlans(w http.ResponseWriter, workspaceID string) {
+	data := s.prepareBasePageData("workspaces")
+	data.Title = "Plans - Ori Agent"
+	data.BrandText = "Ori Agent"
+	data.ShowSidebarToggle = true
+	data.Extra["WorkspaceID"] = workspaceID
+	s.renderAndWritePage(w, "workspace-plans", data)
+}
+
+// serveWorkspacePlan renders one Plan's canonical detail route. The page loads
+// the Plan through the workspace-scoped API, so a Plan ID from another
+// workspace renders "not found" rather than another workspace's content
+// (FR-163, FR-167).
+func (s *Server) serveWorkspacePlan(w http.ResponseWriter, workspaceID, planID string) {
+	data := s.prepareBasePageData("workspaces")
+	data.Title = "Plan - Ori Agent"
+	data.BrandText = "Ori Agent"
+	data.ShowSidebarToggle = true
+	data.Extra["WorkspaceID"] = workspaceID
+	data.Extra["PlanID"] = planID
+	s.renderAndWritePage(w, "workspace-plan", data)
 }
 
 // serveWorkspaceDetail renders the workspace detail page for every workspace

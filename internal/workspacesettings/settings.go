@@ -219,6 +219,22 @@ func ApplyPatch(sharedData map[string]any, patch map[string]any) (map[string]any
 	}
 	if presetValue := strings.TrimSpace(stringValue(patch["preset"])); presetValue != "" {
 		base = toMap(PresetDefaultsForProfile(profileValue, presetValue))
+	} else if rawProfileValue != "" {
+		// The profile changed and the patch named no preset.
+		//
+		// If the stored preset is still the PREVIOUS profile's default, it was
+		// never a choice — it was a default — so the new profile's default
+		// applies. A workspace switched to Software Project must land on
+		// Planner, or FR-134's "retains Planner as its default" is only true
+		// for workspaces created that way.
+		//
+		// A preset the user actually picked is left alone: re-deriving it would
+		// silently undo their choice because they edited a different field.
+		storedPreset := strings.TrimSpace(stringValue(base["preset"]))
+		previousDefault := defaultPresetForProfile(inferProfile(base))
+		if storedPreset == "" || storedPreset == previousDefault {
+			base = toMap(PresetDefaultsForProfile(profileValue, ""))
+		}
 	}
 	merged := mergeMaps(base, patch)
 	settings := decode(merged)
@@ -251,23 +267,22 @@ func BuildEffectiveBehavior(settings Settings) EffectiveBehavior {
 		summary = append(summary, fmt.Sprintf("Markdown task map: %s", settings.TaskMarkdown.Path))
 	}
 
-	behavior := EffectiveBehavior{
+	// No managed planning skill is synthesized here any more.
+	//
+	// Enabling structured planning used to inject a `workspace-planning` skill
+	// binding carrying these settings as prompt config. That made the settings
+	// screen's promises depend on a model reading instructions: a "required"
+	// control was, in fact, a paragraph. Planning lifecycle, approval,
+	// materialization, and execution gates are compiled now (FR-123, FR-126),
+	// and the effective policy in policy.go is the honest description of them.
+	//
+	// ManagedSkills stays on the type because other settings-managed workflows
+	// may still use it; planning simply no longer does.
+	return EffectiveBehavior{
 		Workflow: settings.Workflow,
 		Planning: settings.Planning,
 		Summary:  summary,
 	}
-	if settings.Planning.Enabled {
-		behavior.ManagedSkills = []ManagedSkill{
-			{
-				SkillName: "workspace-planning",
-				Source:    "settings",
-				Active:    true,
-				Reason:    "planning.enabled",
-				Config:    ToPlanningSkillConfig(settings),
-			},
-		}
-	}
-	return behavior
 }
 
 func boolLabel(value bool) string {

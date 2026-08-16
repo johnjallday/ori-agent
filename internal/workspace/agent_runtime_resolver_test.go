@@ -516,10 +516,9 @@ func TestResolveEffectiveSkills_PreservesPlanningConfig(t *testing.T) {
 	skillResolver := &stubSkillResolver{
 		skills: map[string]ResolvedSkill{
 			"workspace-planning": {
-				Name:            "workspace-planning",
-				Prompt:          "Plan work before execution.",
-				PlanningProfile: true,
-				Enabled:         true,
+				Name:    "workspace-planning",
+				Prompt:  "Plan work before execution.",
+				Enabled: true,
 			},
 		},
 	}
@@ -534,15 +533,22 @@ func TestResolveEffectiveSkills_PreservesPlanningConfig(t *testing.T) {
 	if len(resolved.EffectiveSkills) != 1 {
 		t.Fatalf("expected 1 effective skill, got %d", len(resolved.EffectiveSkills))
 	}
-	if !resolved.EffectiveSkills[0].PlanningProfile {
-		t.Fatal("expected planning profile to be preserved")
-	}
+	// A skill's config still resolves. Only the planning-profile CONTRACT is
+	// gone: config is ordinary skill data now, with no special meaning to the
+	// planning workflow (FR-181).
 	if got := resolved.EffectiveSkills[0].Config["tasks_dir"]; got != "tasks" {
 		t.Fatalf("expected tasks_dir config to be preserved, got %#v", got)
 	}
 }
 
-func TestResolveEffectiveSkills_UsesWorkspaceSettingsManagedPlanningSkill(t *testing.T) {
+// Enabling structured planning must NOT synthesize a skill binding.
+//
+// It used to: turning planning on injected a `workspace-planning` skill
+// carrying the settings as prompt config, which made the settings screen's
+// enforced-sounding controls depend on a model reading a paragraph. Planning is
+// compiled now, and the workspace's effective policy describes it (FR-123,
+// FR-126).
+func TestResolveEffectiveSkills_PlanningSettingsSynthesizeNoSkill(t *testing.T) {
 	ws := &Workspace{
 		ID: "ws-managed-planning",
 		SharedData: map[string]any{
@@ -568,10 +574,9 @@ func TestResolveEffectiveSkills_UsesWorkspaceSettingsManagedPlanningSkill(t *tes
 	skillResolver := &stubSkillResolver{
 		skills: map[string]ResolvedSkill{
 			"workspace-planning": {
-				Name:            "workspace-planning",
-				Prompt:          "Plan work before execution.",
-				PlanningProfile: true,
-				Enabled:         true,
+				Name:    "workspace-planning",
+				Prompt:  "Plan work before execution.",
+				Enabled: true,
 			},
 		},
 	}
@@ -583,18 +588,16 @@ func TestResolveEffectiveSkills_UsesWorkspaceSettingsManagedPlanningSkill(t *tes
 	if err != nil {
 		t.Fatalf("ResolveAgentForWorkspace() error = %v", err)
 	}
-	if len(resolved.EffectiveSkills) != 1 {
-		t.Fatalf("expected one settings-managed planning skill, got %d", len(resolved.EffectiveSkills))
-	}
-	if resolved.EffectiveSkills[0].Name != "workspace-planning" {
-		t.Fatalf("expected workspace-planning, got %#v", resolved.EffectiveSkills[0])
-	}
-	if got := resolved.EffectiveSkills[0].Config["tasks_dir"]; got != "plans" {
-		t.Fatalf("expected tasks_dir plans from workspace settings, got %#v", got)
+	if len(resolved.EffectiveSkills) != 0 {
+		t.Fatalf("planning settings synthesized %d skill(s): %+v",
+			len(resolved.EffectiveSkills), resolved.EffectiveSkills)
 	}
 }
 
-func TestResolveEffectiveSkills_ManualBindingOverridesWorkspaceSettingsManagedSkill(t *testing.T) {
+// A skill the user bound by hand still resolves. Removing the synthesis must
+// not remove the ability to bind that skill deliberately — that is the user's
+// choice, and it carries their config rather than the settings screen's.
+func TestResolveEffectiveSkills_ManualPlanningBindingStillResolves(t *testing.T) {
 	ws := &Workspace{
 		ID: "ws-managed-planning-override",
 		SharedData: map[string]any{
@@ -631,10 +634,9 @@ func TestResolveEffectiveSkills_ManualBindingOverridesWorkspaceSettingsManagedSk
 	skillResolver := &stubSkillResolver{
 		skills: map[string]ResolvedSkill{
 			"workspace-planning": {
-				Name:            "workspace-planning",
-				Prompt:          "Plan work before execution.",
-				PlanningProfile: true,
-				Enabled:         true,
+				Name:    "workspace-planning",
+				Prompt:  "Plan work before execution.",
+				Enabled: true,
 			},
 		},
 	}
@@ -647,10 +649,10 @@ func TestResolveEffectiveSkills_ManualBindingOverridesWorkspaceSettingsManagedSk
 		t.Fatalf("ResolveAgentForWorkspace() error = %v", err)
 	}
 	if len(resolved.EffectiveSkills) != 1 {
-		t.Fatalf("expected one planning skill, got %d", len(resolved.EffectiveSkills))
+		t.Fatalf("expected the manually bound planning skill, got %d", len(resolved.EffectiveSkills))
 	}
 	if got := resolved.EffectiveSkills[0].Config["tasks_dir"]; got != "manual-plans" {
-		t.Fatalf("expected manual workspace binding config to win, got %#v", got)
+		t.Fatalf("expected the manual binding's config, got %#v", got)
 	}
 }
 

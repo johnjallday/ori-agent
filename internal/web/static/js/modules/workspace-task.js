@@ -11,6 +11,7 @@ import { taskSkillDraftMethods } from './workspace-task-skill-draft.js';
 import { taskResultActionsMethods } from './workspace-task-result-actions.js';
 import { showCanvasAgentPicker } from './agent-canvas-dialogs.js';
 import { resolveTaskState, PRESENTATION_STATE } from './task-presentation.js';
+import { fetchRelatedPlan, renderRelatedPlan } from './workspace-related-plan.js';
 
 const escapeTaskHtml =
   window.escapeHtml ||
@@ -1373,6 +1374,11 @@ export class WorkspaceTaskPage {
       if (!workspaceTask) {
         this.tasks = this.task ? [this.task] : [];
       }
+
+      // Where this task came from, when a Plan created it. Not awaited: most
+      // tasks have no plan, and the page should not wait on a lookup that
+      // usually returns nothing.
+      void this.loadRelatedPlan();
 
       this.workspaceRuns = await this.fetchWorkspaceRunsForTask(this.task).catch(() => []);
       this.currentRun = this.findWorkspaceRun(this.task?.current_run_id);
@@ -2903,6 +2909,17 @@ export class WorkspaceTaskPage {
     };
     collect(String(t.id || '').trim());
     return JSON.stringify(stamps);
+  }
+
+  // loadRelatedPlan shows which Plan created this task, when one did.
+  //
+  // A failure or a missing link both render nothing: a task created directly
+  // is the ordinary case, not an error worth reporting (FR-148).
+  async loadRelatedPlan() {
+    const related = await fetchRelatedPlan(this.workspaceId, 'task', this.taskId);
+    renderRelatedPlan(document.getElementById('workspace-task-related-plan'), related, value =>
+      escapeHtml(String(value ?? ''))
+    );
   }
 
   renderHero(statusInfo) {

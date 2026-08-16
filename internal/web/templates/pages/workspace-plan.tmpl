@@ -1,0 +1,623 @@
+{{define "workspace-plan"}}
+<!DOCTYPE html>
+<html data-bs-theme="light">
+{{template "head.tmpl" .}}
+
+<body class="bg-light">
+  {{template "navbar.tmpl" .}}
+
+  <div class="main-content-wrapper">
+    {{template "sidebar.tmpl" .}}
+
+    <div class="main-content">
+      <!-- The canonical Plan surface. Task detail, Run detail, and chat all
+           deep-link here rather than rendering a second editor (FR-148,
+           FR-149). -->
+      <div
+        id="workspacePlanPageRoot"
+        class="plan-page-shell"
+        data-workspace-id="{{.Extra.WorkspaceID}}"
+        data-plan-id="{{.Extra.PlanID}}"
+      >
+        <section class="plan-hero">
+          <div class="plan-hero-copy">
+            <div class="plan-breadcrumbs">
+              <a href="/" class="plan-breadcrumb-link">Home</a>
+              <span aria-hidden="true">/</span>
+              <a href="/workspaces/{{.Extra.WorkspaceID}}" class="plan-breadcrumb-link">Workspace</a>
+              <span aria-hidden="true">/</span>
+              <a href="/workspaces/{{.Extra.WorkspaceID}}/plans" class="plan-breadcrumb-link">Plans</a>
+              <span aria-hidden="true">/</span>
+              <span id="plan-breadcrumb-title">Plan</span>
+            </div>
+            <h1 id="plan-title" class="plan-title">Plan</h1>
+            <p id="plan-objective" class="plan-objective"></p>
+          </div>
+          <div class="plan-hero-meta">
+            <span id="plan-status-badge" class="plan-status" data-tone="neutral">
+              <span class="plan-status-icon" aria-hidden="true">•</span>
+              <span class="plan-status-label">Loading</span>
+            </span>
+            <span id="plan-version-label" class="plan-version-label"></span>
+          </div>
+        </section>
+
+        <p id="plan-detail-status" class="plan-detail-status" role="status" aria-live="polite" hidden></p>
+
+        <div id="plan-loading" class="plan-loading">Loading plan…</div>
+        <div id="plan-missing" class="plan-empty" hidden>Plan not found in this workspace.</div>
+
+        <main id="plan-content" class="plan-content" hidden>
+          <!--
+            What is stopping this plan, and the one thing to do about it.
+
+            It sits above the overview because it is the answer to the question
+            somebody opening a stuck plan already has. role="alert" rather than
+            a live region: a blocker appearing is the reason they came, and it
+            should be announced rather than waited for (FR-156, FR-159).
+          -->
+          <section id="plan-blocker" class="plan-card plan-blocker" role="alert" hidden>
+            <h2 id="plan-blocker-heading" class="plan-card-title">Waiting on you</h2>
+            <p id="plan-blocker-reason" class="plan-blocker-reason"></p>
+            <a id="plan-blocker-action" class="plan-editor-btn plan-editor-btn-primary" href="#"></a>
+          </section>
+
+          <section class="plan-card" aria-labelledby="plan-overview-heading">
+            <h2 id="plan-overview-heading" class="plan-card-title">Overview</h2>
+            <dl class="plan-overview">
+              <dt>Original request</dt>
+              <dd id="plan-original-request" class="plan-original-request"></dd>
+              <dt>Next action</dt>
+              <dd id="plan-next-action"></dd>
+              <dt>Progress</dt>
+              <dd id="plan-progress"></dd>
+            </dl>
+          </section>
+
+          <section id="plan-clarifications-section" class="plan-card" aria-labelledby="plan-clarifications-heading" hidden>
+            <h2 id="plan-clarifications-heading" class="plan-card-title">Clarifications</h2>
+            <ul id="plan-clarifications-list" class="plan-clarification-list"></ul>
+          </section>
+
+          <!-- The typed task editor. Every control is a real button with a
+               label, so reordering never depends on dragging and the whole
+               editor is keyboard operable (FR-160). -->
+          <section class="plan-card" aria-labelledby="plan-editor-heading">
+            <div class="plan-editor-head">
+              <h2 id="plan-editor-heading" class="plan-card-title">Tasks</h2>
+              <div class="plan-editor-meta">
+                <span id="plan-save-state" class="plan-save-state" data-state="saved" data-tone="neutral">✓ All changes saved</span>
+                <button type="button" id="plan-add-group" class="plan-editor-btn">Add task group</button>
+                <button type="button" id="plan-save" class="plan-editor-btn">Save draft</button>
+                <button type="button" id="plan-request-review" class="plan-editor-btn plan-editor-btn-primary">Request review</button>
+              </div>
+            </div>
+
+            <!-- A conflict keeps both versions and asks the user to choose;
+                 it is not a retryable error (FR-30, FR-151). -->
+            <div id="plan-conflict-panel" class="plan-conflict-panel" role="alertdialog" aria-labelledby="plan-conflict-heading" hidden>
+              <h3 id="plan-conflict-heading" class="plan-conflict-title">This plan changed while you were editing</h3>
+              <p id="plan-conflict-summary"></p>
+              <div class="plan-conflict-actions">
+                <button type="button" id="plan-conflict-keep-mine" class="plan-editor-btn">Keep my changes</button>
+                <button type="button" id="plan-conflict-discard" class="plan-editor-btn">Discard mine and load theirs</button>
+              </div>
+            </div>
+
+            <div id="plan-editor-groups" class="plan-editor-groups"></div>
+            <p id="plan-editor-empty" class="plan-editor-empty" hidden>
+              No task groups yet. Add one, or ask Ori to draft the plan.
+            </p>
+          </section>
+
+          <!-- The approval contract. It reads like what it is: a statement of
+               the next side effects, with the primary action labelled by what
+               it actually does (PRD 6.3, FR-63, FR-64). -->
+          <section id="plan-review-panel" class="plan-card plan-review-panel"
+                   aria-labelledby="plan-review-heading" hidden>
+            <div class="plan-review-head">
+              <h2 id="plan-review-heading" class="plan-card-title">Review and approve</h2>
+              <span id="plan-review-version" class="plan-review-version"></span>
+            </div>
+
+            <p id="plan-review-objective" class="plan-review-objective"></p>
+            <p id="plan-review-counts" class="plan-review-counts"></p>
+
+            <h3 class="plan-review-subheading">Approving this version will:</h3>
+            <ul id="plan-review-effects" class="plan-review-effects"></ul>
+
+            <ul id="plan-review-blockers" class="plan-review-blockers" hidden></ul>
+
+            <div class="plan-review-actions">
+              <button type="button" id="plan-approve" class="plan-editor-btn plan-approve-btn">
+                Approve and Create Tasks
+              </button>
+              <button type="button" id="plan-request-changes" class="plan-editor-btn">Request changes</button>
+              <button type="button" id="plan-reject" class="plan-editor-btn">Reject</button>
+            </div>
+          </section>
+
+          <!-- What an approval produced. It links to the tasks and files
+               rather than restating their state: the task records remain the
+               truth about how that work is going (FR-11). -->
+          <section id="plan-materialization-panel" class="plan-card"
+                   aria-labelledby="plan-materialization-heading" hidden>
+            <h2 id="plan-materialization-heading" class="plan-card-title">Created work</h2>
+            <p id="plan-materialization-summary" class="plan-materialization-summary"></p>
+            <ul id="plan-materialization-tasks" class="plan-materialization-list"></ul>
+            <ul id="plan-materialization-artifacts" class="plan-materialization-list" hidden></ul>
+            <button type="button" id="plan-materialization-retry" class="plan-editor-btn" hidden>
+              Retry creating the approved work
+            </button>
+          </section>
+
+          <!--
+            Reconciliation: what approving this revision does to the work the
+            earlier approval already created. It sits above Created work because
+            it is about work that already exists, and a user should read what is
+            about to be cancelled before reading what was made.
+
+            aria-live is polite rather than assertive: the panel appears as a
+            consequence of the user's own navigation, so it should be announced
+            without interrupting what they are reading (FR-159, FR-160).
+          -->
+          <section id="plan-reconcile-panel" class="plan-card"
+                   aria-labelledby="plan-reconcile-heading" hidden>
+            <h2 id="plan-reconcile-heading" class="plan-card-title">Effect on existing work</h2>
+            <p id="plan-reconcile-summary" class="plan-reconcile-summary" aria-live="polite"></p>
+            <ul id="plan-reconcile-list" class="plan-reconcile-list"></ul>
+            <p id="plan-reconcile-runs" class="plan-reconcile-runs" hidden></p>
+            <div id="plan-reconcile-actions" class="plan-reconcile-actions" hidden>
+              <button type="button" id="plan-reconcile-confirm" class="plan-editor-btn plan-editor-btn-primary">
+                Confirm these changes to existing work
+              </button>
+            </div>
+            <p id="plan-reconcile-status" class="plan-reconcile-status" role="status"></p>
+          </section>
+
+          <section id="plan-compare-panel" class="plan-card" aria-labelledby="plan-compare-heading" hidden>
+            <h2 id="plan-compare-heading" class="plan-card-title">What changed</h2>
+            <ul id="plan-compare-list" class="plan-compare-list"></ul>
+          </section>
+
+          <section id="plan-activity-card" class="plan-card" aria-labelledby="plan-activity-heading">
+            <h2 id="plan-activity-heading" class="plan-card-title">Activity</h2>
+            <ol id="plan-activity-list" class="plan-activity-list"></ol>
+          </section>
+        </main>
+      </div>
+    </div>
+  </div>
+
+  <style>
+    .plan-page-shell {
+      padding: 1.5rem 2rem 3rem;
+      max-width: 960px;
+      margin: 0 auto;
+    }
+
+    .plan-hero {
+      display: flex;
+      gap: 1rem;
+      align-items: flex-start;
+      justify-content: space-between;
+      margin-bottom: 1.25rem;
+    }
+
+    .plan-breadcrumbs {
+      display: flex;
+      gap: 0.4rem;
+      align-items: center;
+      font-size: 0.85rem;
+      color: var(--bs-secondary-color, #6c757d);
+      margin-bottom: 0.5rem;
+    }
+
+    .plan-breadcrumb-link {
+      color: inherit;
+      text-decoration: none;
+    }
+
+    .plan-breadcrumb-link:hover,
+    .plan-breadcrumb-link:focus-visible {
+      text-decoration: underline;
+    }
+
+    .plan-title {
+      font-size: 1.6rem;
+      margin: 0 0 0.35rem;
+    }
+
+    .plan-objective {
+      margin: 0;
+      max-width: 65ch;
+      color: var(--bs-secondary-color, #6c757d);
+    }
+
+    .plan-hero-meta {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 0.35rem;
+      font-size: 0.85rem;
+    }
+
+    .plan-status {
+      display: inline-flex;
+      gap: 0.35rem;
+      align-items: center;
+      white-space: nowrap;
+      border: 1px solid var(--bs-border-color, #dee2e6);
+      border-radius: 999px;
+      padding: 0.1rem 0.6rem;
+    }
+
+    .plan-status[data-tone='attention'] { border-color: #fd7e14; color: #8a4b00; }
+    .plan-status[data-tone='info'] { border-color: #0d6efd; color: #084298; }
+    .plan-status[data-tone='active'] { border-color: #0dcaf0; color: #055160; }
+    .plan-status[data-tone='success'] { border-color: #198754; color: #0f5132; }
+    .plan-status[data-tone='danger'] { border-color: #dc3545; color: #842029; }
+
+    .plan-detail-status {
+      margin: 0 0 1rem;
+      padding: 0.6rem 0.85rem;
+      border-radius: 0.5rem;
+      border: 1px solid var(--bs-border-color, #dee2e6);
+      background: var(--bs-body-bg, #fff);
+    }
+
+    .plan-detail-status[data-tone='error'] {
+      border-color: #dc3545;
+      color: #842029;
+    }
+
+    .plan-content {
+      display: grid;
+      gap: 1rem;
+    }
+
+    .plan-card {
+      border: 1px solid var(--bs-border-color, #dee2e6);
+      border-radius: 0.75rem;
+      background: var(--bs-body-bg, #fff);
+      padding: 1rem 1.15rem;
+    }
+
+    .plan-card-title {
+      font-size: 1.05rem;
+      margin: 0 0 0.75rem;
+    }
+
+    .plan-overview {
+      display: grid;
+      grid-template-columns: minmax(9rem, auto) 1fr;
+      gap: 0.4rem 1rem;
+      margin: 0;
+    }
+
+    .plan-overview dt {
+      color: var(--bs-secondary-color, #6c757d);
+      font-weight: 600;
+    }
+
+    .plan-overview dd {
+      margin: 0;
+    }
+
+    .plan-original-request {
+      white-space: pre-wrap;
+    }
+
+    .plan-activity-list {
+      margin: 0;
+      padding-left: 1.1rem;
+      display: grid;
+      gap: 0.35rem;
+      font-size: 0.9rem;
+    }
+
+    .plan-clarification-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: grid;
+      gap: 0.6rem;
+    }
+
+    .plan-clarification-prompt {
+      margin: 0 0 0.2rem;
+      font-weight: 600;
+    }
+
+    .plan-clarification-state {
+      margin: 0;
+      font-size: 0.85rem;
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+      color: var(--bs-secondary-color, #6c757d);
+    }
+
+    .plan-clarification-required {
+      border: 1px solid var(--bs-border-color, #dee2e6);
+      border-radius: 999px;
+      padding: 0 0.5rem;
+    }
+
+    .plan-editor-head {
+      display: flex;
+      gap: 0.75rem;
+      align-items: baseline;
+      justify-content: space-between;
+      flex-wrap: wrap;
+    }
+
+    .plan-editor-meta {
+      display: flex;
+      gap: 0.5rem;
+      align-items: center;
+      flex-wrap: wrap;
+      font-size: 0.85rem;
+    }
+
+    /* The save state always reads as an icon plus a word, so it is never
+       communicated by color alone (FR-162). */
+    .plan-save-state {
+      border: 1px solid var(--bs-border-color, #dee2e6);
+      border-radius: 999px;
+      padding: 0.1rem 0.6rem;
+      white-space: nowrap;
+    }
+
+    .plan-save-state[data-tone='attention'] { border-color: #fd7e14; color: #8a4b00; }
+    .plan-save-state[data-tone='info'] { border-color: #0d6efd; color: #084298; }
+    .plan-save-state[data-tone='danger'] { border-color: #dc3545; color: #842029; }
+
+    .plan-editor-btn {
+      border: 1px solid var(--bs-border-color, #dee2e6);
+      background: var(--bs-body-bg, #fff);
+      border-radius: 0.5rem;
+      padding: 0.3rem 0.7rem;
+      cursor: pointer;
+      font: inherit;
+    }
+
+    .plan-editor-btn-primary {
+      background: var(--bs-primary, #0d6efd);
+      border-color: var(--bs-primary, #0d6efd);
+      color: #fff;
+    }
+
+    .plan-editor-btn:focus-visible,
+    .plan-item-actions button:focus-visible,
+    .plan-group-actions button:focus-visible {
+      outline: 2px solid var(--bs-primary, #0d6efd);
+      outline-offset: 2px;
+    }
+
+    .plan-conflict-panel {
+      border: 1px solid #dc3545;
+      border-radius: 0.5rem;
+      padding: 0.75rem 0.9rem;
+      margin: 0.75rem 0;
+    }
+
+    .plan-conflict-title {
+      font-size: 0.95rem;
+      margin: 0 0 0.35rem;
+    }
+
+    .plan-conflict-actions {
+      display: flex;
+      gap: 0.5rem;
+      margin-top: 0.5rem;
+      flex-wrap: wrap;
+    }
+
+    .plan-editor-groups {
+      display: grid;
+      gap: 0.9rem;
+      margin-top: 0.9rem;
+    }
+
+    .plan-group {
+      border: 1px solid var(--bs-border-color, #dee2e6);
+      border-radius: 0.5rem;
+      padding: 0.75rem 0.9rem;
+    }
+
+    .plan-group-head {
+      display: flex;
+      gap: 0.5rem;
+      justify-content: space-between;
+      align-items: baseline;
+      flex-wrap: wrap;
+    }
+
+    .plan-group-title {
+      font-size: 0.95rem;
+      margin: 0;
+    }
+
+    .plan-group-actions,
+    .plan-item-actions {
+      display: flex;
+      gap: 0.35rem;
+      flex-wrap: wrap;
+    }
+
+    .plan-group-actions button,
+    .plan-item-actions button {
+      border: 1px solid var(--bs-border-color, #dee2e6);
+      background: var(--bs-body-bg, #fff);
+      border-radius: 0.4rem;
+      padding: 0.15rem 0.5rem;
+      font-size: 0.8rem;
+      cursor: pointer;
+    }
+
+    .plan-group-actions button[disabled],
+    .plan-item-actions button[disabled] {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .plan-group-outcome {
+      margin: 0.35rem 0 0;
+      font-size: 0.85rem;
+      color: var(--bs-secondary-color, #6c757d);
+    }
+
+    .plan-item-list {
+      margin: 0.6rem 0 0;
+      padding-left: 1.2rem;
+      display: grid;
+      gap: 0.6rem;
+    }
+
+    .plan-item-description {
+      margin: 0;
+    }
+
+    .plan-item-assignee {
+      margin: 0.15rem 0 0;
+      font-size: 0.8rem;
+      color: var(--bs-secondary-color, #6c757d);
+    }
+
+    .plan-item-warning {
+      margin: 0.25rem 0 0;
+      font-size: 0.8rem;
+      color: #842029;
+    }
+
+    .plan-editor-empty {
+      margin: 0.75rem 0 0;
+      color: var(--bs-secondary-color, #6c757d);
+    }
+
+    .plan-review-panel {
+      border-color: var(--bs-primary, #0d6efd);
+    }
+
+    .plan-review-head {
+      display: flex;
+      gap: 0.75rem;
+      align-items: baseline;
+      justify-content: space-between;
+      flex-wrap: wrap;
+    }
+
+    .plan-review-version {
+      font-size: 0.85rem;
+      border: 1px solid var(--bs-border-color, #dee2e6);
+      border-radius: 999px;
+      padding: 0.1rem 0.6rem;
+      white-space: nowrap;
+    }
+
+    .plan-review-objective {
+      margin: 0.35rem 0 0;
+      font-weight: 600;
+    }
+
+    .plan-review-counts {
+      margin: 0.2rem 0 0.75rem;
+      font-size: 0.85rem;
+      color: var(--bs-secondary-color, #6c757d);
+    }
+
+    .plan-review-subheading {
+      font-size: 0.9rem;
+      margin: 0 0 0.35rem;
+    }
+
+    .plan-review-effects,
+    .plan-compare-list {
+      margin: 0 0 0.75rem;
+      padding-left: 1.1rem;
+      display: grid;
+      gap: 0.25rem;
+      font-size: 0.9rem;
+    }
+
+    .plan-review-blockers {
+      margin: 0 0 0.75rem;
+      padding-left: 1.1rem;
+      display: grid;
+      gap: 0.25rem;
+      font-size: 0.9rem;
+      color: #842029;
+    }
+
+    .plan-review-actions {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+
+    /* The approval action is deliberately not a generic green button: its
+       label states the effect, and it is disabled when something blocks it
+       (PRD 6.3). */
+    .plan-approve-btn {
+      background: var(--bs-primary, #0d6efd);
+      border-color: var(--bs-primary, #0d6efd);
+      color: #fff;
+      font-weight: 600;
+    }
+
+    .plan-approve-btn[data-starts-execution='true'] {
+      background: #b45309;
+      border-color: #b45309;
+    }
+
+    .plan-approve-btn[disabled] {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .plan-materialization-summary {
+      margin: 0 0 0.5rem;
+    }
+
+    .plan-materialization-list {
+      margin: 0 0 0.75rem;
+      padding-left: 1.1rem;
+      display: grid;
+      gap: 0.2rem;
+      font-size: 0.85rem;
+    }
+
+    .plan-loading,
+    .plan-empty {
+      color: var(--bs-secondary-color, #6c757d);
+    }
+
+    @media (max-width: 720px) {
+      .plan-page-shell { padding: 1rem; }
+      .plan-hero { flex-direction: column; }
+      .plan-hero-meta { align-items: flex-start; }
+      .plan-overview { grid-template-columns: 1fr; }
+    }
+  </style>
+
+  <script type="module">
+    import { WorkspacePlanPage } from '/js/modules/workspace-plan-detail.js';
+
+    document.addEventListener('DOMContentLoaded', async () => {
+      const workspaceId = "{{.Extra.WorkspaceID}}";
+      const planId = "{{.Extra.PlanID}}";
+      if (!workspaceId || !planId) {
+        return;
+      }
+      const page = new WorkspacePlanPage(workspaceId, planId);
+      try {
+        await page.init();
+      } catch (error) {
+        console.error('Failed to initialize workspace plan page:', error);
+      }
+    });
+  </script>
+</body>
+</html>
+{{end}}

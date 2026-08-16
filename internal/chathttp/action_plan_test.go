@@ -2,10 +2,10 @@ package chathttp
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
@@ -56,31 +56,35 @@ func TestChatHandler_PlanBeforeAction_PreviewsUtilityRoute(t *testing.T) {
 		t.Fatalf("expected non-empty action_plan_id")
 	}
 
-	plan, ok := resp["action_plan"].(map[string]any)
+	preview, ok := resp["action_preview"].(map[string]any)
 	if !ok {
-		t.Fatalf("expected action_plan object, got %T", resp["action_plan"])
+		t.Fatalf("expected action_preview object, got %T", resp["action_preview"])
 	}
-	if mode, _ := plan["route_mode"].(string); mode != string(UtilityRouteDirect) {
+	if mode, _ := preview["route_mode"].(string); mode != string(UtilityRouteDirect) {
 		t.Fatalf("expected route_mode %q, got %q", UtilityRouteDirect, mode)
 	}
-	steps, ok := plan["steps"].([]any)
-	if !ok || len(steps) == 0 {
-		t.Fatalf("expected at least one plan step, got %#v", plan["steps"])
+	// Exactly one. A preview carrying several steps is the shape that let
+	// multi-agent work be approved from a chat bubble (FR-20).
+	steps, ok := preview["steps"].([]any)
+	if !ok || len(steps) != 1 {
+		t.Fatalf("expected exactly one previewed action, got %#v", preview["steps"])
 	}
 }
 
-func TestBuildChatActionPlan_UsesAssistantTerminology(t *testing.T) {
-	h := newActionPlanTestHandler(t)
-
-	plan, _ := h.buildChatActionPlan(context.Background(), "say hi", UtilityRouteDecision{}, "", 0)
-	if plan == nil {
-		t.Fatal("expected action plan")
+// A preview ID must not look like a durable Plan ID. The old implementation
+// used the same "plan_" prefix workspaceplan uses, so an ID in a log or a
+// support question was ambiguous between a record that survives and one that
+// does not.
+func TestActionPreviewIDCannotBeMistakenForAPlan(t *testing.T) {
+	preview, err := directToolPreview("run it", &DirectToolCommand{ToolName: "get_time"})
+	if err != nil {
+		t.Fatalf("preview: %v", err)
 	}
-	if len(plan.Steps) == 0 {
-		t.Fatal("expected at least one plan step")
+	if strings.HasPrefix(preview.ID, "plan_") {
+		t.Errorf("preview id %q uses the durable Plan prefix", preview.ID)
 	}
-	if got := plan.Steps[0].Title; got != "Ask the Assistant to answer" {
-		t.Fatalf("expected Assistant wording, got %q", got)
+	if !strings.HasPrefix(preview.ID, "preview_") {
+		t.Errorf("preview id %q is not identifiable as a preview", preview.ID)
 	}
 }
 

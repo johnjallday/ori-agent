@@ -68,6 +68,10 @@ type Handler struct {
 	runtimeResolver       chatRuntimeResolver
 	toolCallStore         session.ToolCallStore
 	calendarOpsPreference chatCalendarOpsPreference
+	// planOpener starts a durable Plan for chat requests that need one. It is
+	// deliberately one method wide: chat may open a plan and link to it, never
+	// edit, review, or approve one (FR-19, FR-149).
+	planOpener PlanOpener
 
 	// Project-template tool dependencies (optional; see SetProjectTemplateDeps)
 	templatesRootResolver func() string
@@ -194,6 +198,13 @@ func (h *Handler) SetUserProfileDeps(store userprofile.UserStore, provider userp
 func (h *Handler) SetProjectTemplateDeps(templatesRootResolver func() string, eventBus *workspace.EventBus) {
 	h.templatesRootResolver = templatesRootResolver
 	h.workspaceEventBus = eventBus
+}
+
+// SetPlanOpener enables chat to start a durable Plan for requests that need
+// one. Without it, chat still explains that a plan is required; it just cannot
+// create it on the user's behalf.
+func (h *Handler) SetPlanOpener(opener PlanOpener) {
+	h.planOpener = opener
 }
 
 // publishMessageSent emits a message.sent event when the user sends a chat
@@ -1032,20 +1043,58 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.PlanBeforeAction && approvedActionPlanID == "" {
-		actionPlan, planDecision := h.buildChatActionPlan(ctx, q, routeDecision, req.MultiAgentMode, req.MultiAgentThreshold)
-		response := attachPlannerDecision(attachRouteMetadata(map[string]any{
-			"response":           formatActionPlanMessage(actionPlan),
-			"requires_approval":  true,
-			"approval_type":      "action_plan",
-			"action_plan_id":     actionPlan.ID,
-			"action_plan":        actionPlan,
-			"plan_before_action": true,
-		}, chatRouteMetadata{
-			Mode:   actionPlan.RouteMode,
-			Reason: "awaiting action plan approval",
-		}), planDecision)
-		writeJSONResponse(w, response)
-		return
+		classification, planDecision := h.classifyChatRequest(
+			ctx, q, routeDecision, req.MultiAgentMode, req.MultiAgentThreshold)
+
+		// Plan work never gets an inline approval. Chat points at the canonical
+		// Plan surface instead, where the version, the diff, and the exact
+		// effects of approving are all visible (FR-19, FR-149).
+		if classification.Route == RoutePlan {
+			payload := map[string]any{
+				"response":           planRequiredMessage(classification),
+				"requires_approval":  false,
+				"requires_plan":      true,
+				"plan_reason":        classification.Reason,
+				"plan_triggers":      classification.Triggers,
+				"plan_before_action": true,
+			}
+			// Opening the Plan here saves the user a step, but a failure is not
+			// fatal: the message already says a plan is needed, and reporting
+			// "I could not create it" beats swallowing the reason.
+			if planID, workspaceID := h.openPlanForChat(ctx, normalizedRouteContext, q); planID != "" {
+				payload["plan_id"] = planID
+				payload["plan_url"] = planLink(workspaceID, planID)
+			}
+			writeJSONResponse(w, attachPlannerDecision(attachRouteMetadata(payload, chatRouteMetadata{
+				Mode:   string(routeDecision.Mode),
+				Reason: "this request needs a durable plan",
+			}), planDecision))
+			return
+		}
+
+		if classification.Route == RouteActionPreview {
+			preview, err := utilityToolPreview(q, routeDecision)
+			if err != nil {
+				orihttp.InternalError(w, err.Error())
+				return
+			}
+			writeJSONResponse(w, attachPlannerDecision(attachRouteMetadata(map[string]any{
+				"response":          formatActionPreviewMessage(preview),
+				"requires_approval": true,
+				// approval_type stays "action_plan" for now so existing clients
+				// keep working; the payload beside it is the renamed shape.
+				"approval_type":      "action_plan",
+				"action_plan_id":     preview.ID,
+				"action_preview_id":  preview.ID,
+				"action_preview":     preview,
+				"plan_before_action": true,
+			}, chatRouteMetadata{
+				Mode:   preview.RouteMode,
+				Reason: "awaiting action approval",
+			}), planDecision))
+			return
+		}
+		// RouteDirect falls through: an ordinary reply needs no preview at all.
 	}
 
 	// Utility-direct requests bypass planner/delegation and execute native tools immediately.
@@ -1249,17 +1298,24 @@ func (h *Handler) handleDirectToolCommand(w http.ResponseWriter, r *http.Request
 	}
 
 	if req.PlanBeforeAction && approvedActionPlanID == "" {
-		plan := buildDirectToolActionPlan(q, cmd)
+		// A `/tool` command is the canonical immediate action: the user named
+		// exactly one tool, so there is nothing to plan.
+		preview, err := directToolPreview(q, cmd)
+		if err != nil {
+			orihttp.InternalError(w, err.Error())
+			return
+		}
 		response := attachRouteMetadata(map[string]any{
-			"response":           formatActionPlanMessage(plan),
+			"response":           formatActionPreviewMessage(preview),
 			"requires_approval":  true,
 			"approval_type":      "action_plan",
-			"action_plan_id":     plan.ID,
-			"action_plan":        plan,
+			"action_plan_id":     preview.ID,
+			"action_preview_id":  preview.ID,
+			"action_preview":     preview,
 			"plan_before_action": true,
 		}, chatRouteMetadata{
 			Mode:   routeModeDirectTool,
-			Reason: "awaiting action plan approval",
+			Reason: "awaiting action approval",
 		})
 		writeJSONResponse(w, response)
 		return

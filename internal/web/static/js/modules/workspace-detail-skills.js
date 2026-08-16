@@ -3,9 +3,12 @@
  *
  * Owns workspace-scoped skill binding management: loading the available
  * skill catalog, the binding modal (add/edit/delete), agent-access matrix,
- * planning-skill config (mode, clarification, tasks dir, default execution,
- * branch requirements, PRD/task-list flags), and rendering the skill binding
- * cards in the workspace detail page.
+ * and rendering the skill binding cards in the workspace detail page.
+ *
+ * It used to own planning-skill config too — mode, clarification depth, tasks
+ * dir, branch requirements. Those read as policy while being config a model
+ * might or might not honor, and they are compiled now and live in the
+ * workspace's Planning Settings (FR-181, FR-182).
  *
  * Extracted from workspace-detail.js. Instantiated by WorkspaceDetailPage,
  * which provides workspace data, workspaceId, escapeHtml, normalizeAgentName,
@@ -58,15 +61,12 @@ export class WorkspaceSkillsManager {
         const skillName = String(binding?.skill_name || binding?.skillName || '').trim();
         const config =
           binding?.config && typeof binding.config === 'object' ? { ...binding.config } : {};
-        const skillDefinition = this.getAvailableWorkspaceSkill(skillName);
         return {
           id: String(binding?.id || '').trim(),
           skillName,
           enabled: binding?.enabled !== false,
           trusted: binding?.trusted === true,
-          config,
-          planningProfile:
-            skillDefinition?.planningProfile === true || this.isWorkspacePlanningConfig(config)
+          config
         };
       })
       .filter(binding => binding.id && binding.skillName)
@@ -103,81 +103,6 @@ export class WorkspaceSkillsManager {
             .toLowerCase() === normalizedSkillName
       ) || null
     );
-  }
-
-  getDefaultWorkspacePlanningConfig() {
-    return {
-      profile_type: 'workspace_planning',
-      mode: 'feature',
-      write_prd: true,
-      write_task_list: true,
-      tasks_dir: 'tasks',
-      clarification_mode: 'standard',
-      sync_workspace_tasks: true,
-      default_execution_mode: 'step_through',
-      require_branch: true
-    };
-  }
-
-  isWorkspacePlanningConfig(config) {
-    if (!config || typeof config !== 'object' || Array.isArray(config)) {
-      return false;
-    }
-    if (String(config.profile_type || '').trim() === 'workspace_planning') {
-      return true;
-    }
-    const planningKeys = [
-      'mode',
-      'write_prd',
-      'write_task_list',
-      'tasks_dir',
-      'clarification_mode',
-      'sync_workspace_tasks',
-      'default_execution_mode',
-      'require_branch'
-    ];
-    return planningKeys.some(key => Object.prototype.hasOwnProperty.call(config, key));
-  }
-
-  normalizeWorkspacePlanningConfig(config = {}) {
-    const defaults = this.getDefaultWorkspacePlanningConfig();
-    const normalized = {
-      ...defaults,
-      ...(config && typeof config === 'object' && !Array.isArray(config) ? config : {})
-    };
-
-    normalized.profile_type = 'workspace_planning';
-    normalized.mode = ['feature', 'bugfix', 'refactor', 'investigation'].includes(
-      String(normalized.mode || '').trim()
-    )
-      ? String(normalized.mode).trim()
-      : defaults.mode;
-    normalized.tasks_dir = String(normalized.tasks_dir || '').trim() || defaults.tasks_dir;
-    normalized.clarification_mode = ['minimal', 'standard', 'deep'].includes(
-      String(normalized.clarification_mode || '').trim()
-    )
-      ? String(normalized.clarification_mode).trim()
-      : defaults.clarification_mode;
-    normalized.default_execution_mode = ['auto', 'step_through'].includes(
-      String(normalized.default_execution_mode || '').trim()
-    )
-      ? String(normalized.default_execution_mode).trim()
-      : defaults.default_execution_mode;
-    normalized.write_prd = normalized.write_prd !== false;
-    normalized.write_task_list = normalized.write_task_list !== false;
-    normalized.sync_workspace_tasks = normalized.sync_workspace_tasks !== false;
-    normalized.require_branch = normalized.require_branch !== false;
-    return normalized;
-  }
-
-  getWorkspacePlanningSummary(config = {}) {
-    if (!this.isWorkspacePlanningConfig(config)) return '';
-    const normalized = this.normalizeWorkspacePlanningConfig(config);
-    const outputs = [];
-    if (normalized.write_prd) outputs.push('PRD');
-    if (normalized.write_task_list) outputs.push('tasks');
-    if (outputs.length === 0) outputs.push('no files');
-    return `${normalized.mode} planning, ${outputs.join(' + ')}, ${normalized.default_execution_mode}, ${normalized.tasks_dir}`;
   }
 
   getWorkspaceSkillAgentAccessEntry(agentInstanceId) {
@@ -390,9 +315,7 @@ export class WorkspaceSkillsManager {
         .map(skill => ({
           name: String(skill?.name || '').trim(),
           description: String(skill?.description || '').trim(),
-          enabled: skill?.enabled !== false,
-          planningProfile:
-            skill?.planning_profile === true || skill?.openai_metadata?.planning_profile === true
+          enabled: skill?.enabled !== false
         }))
         .filter(skill => skill.name)
         .filter(skill => {
@@ -466,12 +389,7 @@ export class WorkspaceSkillsManager {
         normalizedSelected && name.toLowerCase() === normalizedSelected.toLowerCase()
           ? ' selected'
           : '';
-      const planning = skill?.planningProfile === true;
-      const label = unavailable
-        ? `${name} (not currently available)`
-        : planning
-          ? `${name} (planning profile)`
-          : name;
+      const label = unavailable ? `${name} (not currently available)` : name;
       options.push(
         `<option value="${this.host.escapeHtml(name)}"${selected}>${this.host.escapeHtml(label)}</option>`
       );
@@ -550,87 +468,16 @@ export class WorkspaceSkillsManager {
     this.host.elements.skillAgentAccessSummary.textContent = `${selectedCount} of ${checkboxes.length} selected`;
   }
 
-  populateWorkspacePlanningSettings(config = {}) {
-    const normalized = this.normalizeWorkspacePlanningConfig(config);
-    if (this.host.elements.skillPlanningModeInput) {
-      this.host.elements.skillPlanningModeInput.value = normalized.mode;
-    }
-    if (this.host.elements.skillPlanningClarificationModeInput) {
-      this.host.elements.skillPlanningClarificationModeInput.value = normalized.clarification_mode;
-    }
-    if (this.host.elements.skillPlanningTasksDirInput) {
-      this.host.elements.skillPlanningTasksDirInput.value = normalized.tasks_dir;
-    }
-    if (this.host.elements.skillPlanningDefaultExecutionInput) {
-      this.host.elements.skillPlanningDefaultExecutionInput.value =
-        normalized.default_execution_mode;
-    }
-    if (this.host.elements.skillPlanningWritePRDInput) {
-      this.host.elements.skillPlanningWritePRDInput.checked = normalized.write_prd !== false;
-    }
-    if (this.host.elements.skillPlanningWriteTaskListInput) {
-      this.host.elements.skillPlanningWriteTaskListInput.checked =
-        normalized.write_task_list !== false;
-    }
-    if (this.host.elements.skillPlanningSyncTasksInput) {
-      this.host.elements.skillPlanningSyncTasksInput.checked =
-        normalized.sync_workspace_tasks !== false;
-    }
-    if (this.host.elements.skillPlanningRequireBranchInput) {
-      this.host.elements.skillPlanningRequireBranchInput.checked =
-        normalized.require_branch !== false;
-    }
-  }
-
-  shouldShowWorkspacePlanningSettings(selectedSkillName = '', existingConfig = {}) {
-    const normalizedSkillName = String(selectedSkillName || '').trim();
-    if (normalizedSkillName) {
-      const selectedSkill = this.getAvailableWorkspaceSkill(normalizedSkillName);
-      if (selectedSkill) {
-        return selectedSkill.planningProfile === true;
-      }
-    }
-    return this.isWorkspacePlanningConfig(existingConfig);
-  }
-
+  // Selecting a skill no longer reveals planning-policy fields.
+  //
+  // The binding modal used to grow a "planning settings" section for any skill
+  // flagged as a planning profile — mode, tasks dir, require branch. Those read
+  // as policy while being config a model might read, and they are compiled now
+  // and live in Workspace Settings (FR-182).
   handleWorkspaceSkillSelectionChange() {
-    const selectedSkillName = String(this.host.elements.skillNameSelect?.value || '').trim();
-    const existingBinding = this.activeWorkspaceSkillBindingId
-      ? this.getWorkspaceSkillBinding(this.activeWorkspaceSkillBindingId)
-      : null;
-    const shouldShowPlanning = this.shouldShowWorkspacePlanningSettings(
-      selectedSkillName,
-      existingBinding?.config || {}
-    );
-
     if (this.host.elements.skillPlanningFields) {
-      this.host.elements.skillPlanningFields.classList.toggle('d-none', !shouldShowPlanning);
+      this.host.elements.skillPlanningFields.classList.add('d-none');
     }
-
-    if (shouldShowPlanning) {
-      const sourceConfig = this.isWorkspacePlanningConfig(existingBinding?.config)
-        ? existingBinding.config
-        : this.getDefaultWorkspacePlanningConfig();
-      this.populateWorkspacePlanningSettings(sourceConfig);
-    }
-  }
-
-  buildWorkspacePlanningConfig() {
-    return this.normalizeWorkspacePlanningConfig({
-      profile_type: 'workspace_planning',
-      mode: String(this.host.elements.skillPlanningModeInput?.value || '').trim(),
-      write_prd: this.host.elements.skillPlanningWritePRDInput?.checked !== false,
-      write_task_list: this.host.elements.skillPlanningWriteTaskListInput?.checked !== false,
-      tasks_dir: String(this.host.elements.skillPlanningTasksDirInput?.value || '').trim(),
-      clarification_mode: String(
-        this.host.elements.skillPlanningClarificationModeInput?.value || ''
-      ).trim(),
-      sync_workspace_tasks: this.host.elements.skillPlanningSyncTasksInput?.checked !== false,
-      default_execution_mode: String(
-        this.host.elements.skillPlanningDefaultExecutionInput?.value || ''
-      ).trim(),
-      require_branch: this.host.elements.skillPlanningRequireBranchInput?.checked !== false
-    });
   }
 
   resetWorkspaceSkillModal() {
@@ -660,7 +507,6 @@ export class WorkspaceSkillsManager {
     if (this.host.elements.skillTrustedInput) {
       this.host.elements.skillTrustedInput.checked = false;
     }
-    this.populateWorkspacePlanningSettings(this.getDefaultWorkspacePlanningConfig());
     if (this.host.elements.skillPlanningFields) {
       this.host.elements.skillPlanningFields.classList.add('d-none');
     }
@@ -736,9 +582,6 @@ export class WorkspaceSkillsManager {
         ? existingBinding.trusted === true
         : false;
     }
-    this.populateWorkspacePlanningSettings(
-      existingBinding?.config || this.getDefaultWorkspacePlanningConfig()
-    );
     if (this.host.elements.skillSubmitBtn) {
       this.host.elements.skillSubmitBtn.textContent = existingBinding
         ? 'Save Changes'
@@ -888,10 +731,6 @@ export class WorkspaceSkillsManager {
     this.setWorkspaceSkillModalSubmitting(true);
 
     try {
-      const selectedSkill = this.getAvailableWorkspaceSkill(skillName);
-      const planningProfile =
-        selectedSkill?.planningProfile === true ||
-        this.shouldShowWorkspacePlanningSettings(skillName);
       const enabled = this.host.elements.skillEnabledInput?.checked !== false;
       const trusted = this.host.elements.skillTrustedInput?.checked === true;
       const selectedAgentInstanceIds = this.getWorkspaceSkillSelectedAgentInstanceIDs();
@@ -899,7 +738,10 @@ export class WorkspaceSkillsManager {
         skill_name: skillName,
         enabled,
         trusted,
-        config: planningProfile ? this.buildWorkspacePlanningConfig() : {}
+        // Bindings carry no config from this form any more. Planning policy is
+        // compiled and lives in Workspace Settings; a skill binding is a
+        // binding (FR-182).
+        config: {}
       };
 
       if (this.activeWorkspaceSkillMode !== 'edit') {
@@ -985,9 +827,7 @@ export class WorkspaceSkillsManager {
         const skillName = String(binding?.skillName || '').trim() || 'unknown';
         const isDisabled = binding?.enabled === false;
         const isTrusted = binding?.trusted === true;
-        const isPlanning = binding?.planningProfile === true;
         const agentNames = this.getWorkspaceSkillAgentNamesForBinding(binding.id);
-        const planningSummary = this.getWorkspacePlanningSummary(binding?.config || {});
         const accessSummary = isDisabled
           ? 'Disabled for this workspace'
           : agentNames.length > 0
@@ -1004,11 +844,7 @@ export class WorkspaceSkillsManager {
 
         const chips = [
           `<span class="workspace-detail-mcp-chip status${isDisabled ? ' is-disabled' : ''}">${isDisabled ? 'Disabled' : 'Enabled'}</span>`,
-          isPlanning ? `<span class="workspace-detail-mcp-chip source">Planning</span>` : '',
           isTrusted ? `<span class="workspace-detail-mcp-chip source">Trusted</span>` : '',
-          planningSummary
-            ? `<span class="workspace-detail-mcp-chip source">${this.host.escapeHtml(planningSummary)}</span>`
-            : '',
           `<span class="workspace-detail-mcp-chip access">${this.host.escapeHtml(accessLabel)}</span>`
         ]
           .filter(Boolean)

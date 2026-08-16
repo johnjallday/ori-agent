@@ -39,6 +39,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	registerReviewRoutes(mux, s)
 	registerCLIAgentRoutes(mux, s)
 	registerWorkspaceRunRoutes(mux, s)
+	registerWorkspacePlanRoutes(mux, s)
 	registerTicketRoutes(mux, s)
 	registerTriggerRoutes(mux, s)
 	registerWorkspaceMemoryRoutes(mux, s)
@@ -805,6 +806,76 @@ func registerWorkspaceRunRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/runs/{runID}/reject", s.Handlers.WorkspaceRuns.RejectRun)
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/runs/{runID}/artifacts", s.Handlers.WorkspaceRuns.ListArtifacts)
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/runs/{runID}/trace", s.Handlers.WorkspaceRuns.ListTrace)
+	}
+}
+
+// registerWorkspacePlanRoutes registers the canonical Workspace Plan API
+// (tasks/prd-workspace-planning-policy.md FR-164).
+//
+// Workspace identity is in the path on every route, so the handler never has to
+// trust a body-supplied studio_id and a Plan ID alone can never reach a record
+// (FR-163, FR-167, FR-168).
+func registerWorkspacePlanRoutes(mux *http.ServeMux, s *Server) {
+	// =============================================================================
+	// Workspace Plans API Endpoints
+	// =============================================================================
+	// Registered without methods on purpose. `/api/workspaces/` above is a
+	// catch-all that matches every method, so a method-scoped pattern would let
+	// a wrong verb fall through to it and answer with an unrelated 200 payload
+	// instead of 405. Each handler owns its own method check.
+	if s.Handlers.WorkspacePlans != nil {
+		mux.HandleFunc("/api/workspaces/{workspaceID}/plans", s.Handlers.WorkspacePlans.PlanCollection)
+		mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}", s.Handlers.WorkspacePlans.PlanItem)
+		mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/activity", s.Handlers.WorkspacePlans.GetPlanActivity)
+		mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/archive", s.Handlers.WorkspacePlans.ArchivePlan)
+		mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/reopen", s.Handlers.WorkspacePlans.ReopenPlan)
+		// Drafting: PATCH/PUT saves a user's edit under an optimistic revision
+		// token; POST asks the planner to draft or to ask questions. Neither
+		// creates work (FR-29, FR-30).
+		mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/draft", s.Handlers.WorkspacePlans.PlanDraft)
+		// Review and approval. The version routes snapshot and read immutable
+		// versions; approvals bind to one exact version and its content hash,
+		// and this is the only route that can grant one (FR-31, FR-59, FR-70).
+		mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/versions", s.Handlers.WorkspacePlans.PlanVersions)
+		mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/versions/{version}", s.Handlers.WorkspacePlans.PlanVersion)
+		mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/compare", s.Handlers.WorkspacePlans.PlanCompare)
+		mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/decision", s.Handlers.WorkspacePlans.PlanDecision)
+		mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/approvals", s.Handlers.WorkspacePlans.PlanApprovals)
+		mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/revise-approved", s.Handlers.WorkspacePlans.PlanReviseApproved)
+		// Materialization is separate from approval: approval is the user's
+		// decision, this spends it. Separating them is what lets a retry
+		// replay the original result rather than doing the work twice
+		// (FR-72, FR-73).
+		mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/materialize", s.Handlers.WorkspacePlans.PlanMaterialize)
+		// Execution: start, retry, pause, resume, skip, cancel, complete, fail.
+		// One route keeps the supervision verbs together and behind the same
+		// ownership checks (FR-100, FR-108 through FR-121).
+		mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/execution", s.Handlers.WorkspacePlans.PlanExecution)
+		mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/cancel-preview", s.Handlers.WorkspacePlans.PlanCancelPreview)
+		// Reconciliation: what a revision does to the work its earlier approval
+		// created, and the separate confirmation of that exact preview. GET and
+		// POST share a route because the confirmation is OF the preview
+		// (FR-77, FR-154).
+		mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/reconcile", s.Handlers.WorkspacePlans.PlanReconcile)
+		// Reverse lookups: Task and Run detail ask which plan produced them and
+		// get a compact summary that deep-links to the canonical plan route,
+		// never a second editor (FR-10, FR-148, FR-149).
+		// Who is executing and who is waiting. A workspace-level read, because
+		// the answer is about the workspace: one plan runs, the rest queue
+		// (FR-106, FR-107).
+		mux.HandleFunc("/api/workspaces/{workspaceID}/plan-execution-slot", s.Handlers.WorkspacePlans.WorkspaceExecutionSlot)
+		// Read-only capability report: what planning can actually do here, and
+		// which dependencies are wired. No plan content, no prompts — safe to
+		// paste into a bug report (FR-175, FR-176).
+		mux.HandleFunc("/api/workspaces/{workspaceID}/plan-diagnostics", s.Handlers.WorkspacePlans.PlanDiagnostics)
+		mux.HandleFunc("/api/workspaces/{workspaceID}/plan-for-task/{taskID}", s.Handlers.WorkspacePlans.PlanForTask)
+		mux.HandleFunc("/api/workspaces/{workspaceID}/plan-for-run/{runID}", s.Handlers.WorkspacePlans.PlanForRun)
+		// GET discloses what a revision would replace; POST performs it. The
+		// user sees the collateral before it happens (FR-56).
+		mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/revision", s.Handlers.WorkspacePlans.PlanRevision)
+		mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/clarifications/{clarificationID}", s.Handlers.WorkspacePlans.AnswerClarification)
+		mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/snapshots", s.Handlers.WorkspacePlans.DraftSnapshots)
+		mux.HandleFunc("/api/workspaces/{workspaceID}/plans/{planID}/snapshots/{snapshotID}/recover", s.Handlers.WorkspacePlans.RecoverDraftSnapshot)
 	}
 }
 

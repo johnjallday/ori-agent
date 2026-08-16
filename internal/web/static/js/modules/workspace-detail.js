@@ -10,6 +10,12 @@ import { WorkspaceDirectoryExplorer } from './workspace-detail-directory-explore
 import { WorkspaceMCPManager } from './workspace-detail-mcp.js';
 import { WorkspaceNativeMCPManager } from './workspace-native-mcp.js';
 import { WorkspaceSkillsManager } from './workspace-detail-skills.js';
+import {
+  enforcedLine,
+  enforcedState,
+  guidanceLines,
+  policySummary
+} from './workspace-planning-policy.js';
 import { WorkspacePluginsManager } from './workspace-detail-plugins.js';
 import { WorkspaceMemoryManager } from './workspace-detail-memory.js';
 import { WorkspaceFileModalManager } from './workspace-detail-file-modal.js';
@@ -248,6 +254,10 @@ export class WorkspaceDetailPage {
     this.memoryManager = new WorkspaceMemoryManager(this);
     this.workspaceSettings = null;
     this.workspaceSettingsEffectiveBehavior = null;
+    // The server-computed planning policy. Null until loaded; the settings
+    // section says so rather than rendering an empty enforced list, which would
+    // read as "nothing is enforced here".
+    this.workspacePlanningPolicy = null;
     this.workspaceTaskMarkdownStatus = null;
     this.workspaceConfigExpanded = false;
     // Per-task activity tracking: taskId -> { at: number, label: string }.
@@ -1095,6 +1105,8 @@ export class WorkspaceDetailPage {
       mcpList: document.getElementById('workspace-detail-mcp-list'),
       settingsSummary: document.getElementById('workspace-detail-settings-summary'),
       settingsManagedSkills: document.getElementById('workspace-detail-settings-managed-skills'),
+      settingsGuidance: document.getElementById('workspace-detail-settings-guidance'),
+      settingsEnforced: document.getElementById('workspace-detail-settings-enforced'),
       intentForm: document.getElementById('workspace-detail-intent-form'),
       intentDescriptionInput: document.getElementById('workspace-detail-intent-description'),
       intentSystemsInput: document.getElementById('workspace-detail-intent-systems'),
@@ -2247,6 +2259,11 @@ export class WorkspaceDetailPage {
         typeof this.workspace.task_markdown_status === 'object'
           ? this.workspace.task_markdown_status
           : null;
+      // The effective planning policy is its own request because availability
+      // depends on the workspace's folder, which the workspace payload does not
+      // describe. It is not awaited: the settings section renders empty for a
+      // moment rather than holding the whole page on a filesystem check.
+      void this.loadWorkspacePlanningPolicy();
       if (
         window.OriAskRouting &&
         typeof window.OriAskRouting.refreshWorkspaceIdentity === 'function'
@@ -10927,8 +10944,17 @@ export class WorkspaceDetailPage {
     }
   }
 
-  initializeWorkspaceConfigExpansion() {
-    this.setWorkspaceConfigExpanded(false);
+  // Re-applies whatever expansion state the card is already in. This runs on
+  // every settings render — including every field change — so it must not
+  // force a state. It used to collapse unconditionally, which slammed the card
+  // shut mid-edit on the Details page and, in the Command view's Manager
+  // Settings modal, left an empty box: there the card IS the modal body and
+  // its own header/toggle is hidden, so a collapse has nothing left to show
+  // and no control to undo it. The card ships collapsed from the template
+  // (`is-collapsed` + `hidden` content) and `workspaceConfigExpanded` starts
+  // false to match, so nothing here is needed to establish the initial state.
+  syncWorkspaceConfigExpansion() {
+    this.setWorkspaceConfigExpanded(this.workspaceConfigExpanded === true);
   }
 
   toggleWorkspaceConfigExpanded() {
@@ -10961,7 +10987,7 @@ export class WorkspaceDetailPage {
       this.elements.configReferenceChip.textContent = `Refs: ${referenceCount}`;
     }
 
-    this.initializeWorkspaceConfigExpansion();
+    this.syncWorkspaceConfigExpansion();
   }
 
   // ── Workspace Settings Methods ───────────────────────────────────────
@@ -11260,44 +11286,20 @@ export class WorkspaceDetailPage {
     return matchingPreset || 'custom';
   }
 
-  toWorkspacePlanningSkillConfig(settings = {}) {
-    const normalized = this.normalizeWorkspaceSettings(settings);
-    return {
-      profile_type: 'workspace_planning',
-      mode: normalized.planning.mode,
-      write_prd: normalized.planning.write_prd,
-      write_task_list: normalized.planning.write_task_list,
-      tasks_dir: normalized.planning.tasks_dir,
-      clarification_mode: normalized.planning.clarification_mode,
-      sync_workspace_tasks: normalized.workflow.sync_plans_to_tasks,
-      default_execution_mode: normalized.planning.default_execution_mode,
-      require_branch: normalized.planning.require_branch
-    };
-  }
-
   buildWorkspaceSettingsEffectiveBehavior(settings = {}) {
     const normalized = this.normalizeWorkspaceSettings(settings);
-    const effective = {
+
+    // Enabling planning no longer synthesizes a `workspace-planning` skill
+    // binding here, matching the server. It used to hand the settings to a
+    // model as prompt config, which made an enforced-sounding screen depend on
+    // a paragraph being read. Planning is compiled now (FR-181, FR-183).
+    return {
       workflow: { ...normalized.workflow },
       planning: { ...normalized.planning },
       task_markdown: { ...normalized.task_markdown },
       summary: this.getWorkspaceSettingsSummaryItems(normalized),
       managed_skills: []
     };
-
-    if (normalized.planning.enabled) {
-      effective.managed_skills = [
-        {
-          skill_name: 'workspace-planning',
-          source: 'settings',
-          active: true,
-          reason: 'planning.enabled',
-          config: this.toWorkspacePlanningSkillConfig(normalized)
-        }
-      ];
-    }
-
-    return effective;
   }
 
   getWorkspaceSettingsSummaryItems(settings = {}) {
@@ -11563,20 +11565,12 @@ export class WorkspaceDetailPage {
           .map(skill => {
             const skillName =
               String(skill?.skill_name || skill?.skillName || '').trim() || 'unknown-skill';
-            const displayName =
-              skillName === 'workspace-planning' ? 'Structured planning' : skillName;
+            const displayName = skillName;
             const source = String(skill?.source || '').trim() || 'settings';
             const reason = String(skill?.reason || '').trim();
-            const planningSummary =
-              skillName === 'workspace-planning'
-                ? this.getWorkspacePlanningSummary(
-                    skill?.config || this.toWorkspacePlanningSkillConfig(normalized)
-                  )
-                : '';
-            const detail =
-              skillName === 'workspace-planning'
-                ? planningSummary || 'Controlled by workspace settings'
-                : [source, reason].filter(Boolean).join(' • ');
+            // No special case for a planning skill any more: planning is not a
+            // settings-managed skill, so any entry here is an ordinary one.
+            const detail = [source, reason].filter(Boolean).join(' • ');
 
             return `
             <div class="workspace-detail-settings-managed-entry">
@@ -11587,6 +11581,66 @@ export class WorkspaceDetailPage {
           })
           .join('');
       }
+    }
+
+    this.renderWorkspacePlanningPolicy();
+  }
+
+  // renderWorkspacePlanningPolicy draws the two halves of the planning policy.
+  //
+  // The policy comes from the server rather than being derived from the form,
+  // because availability is a fact about this workspace's folder that the
+  // browser cannot know. Deriving it here would let the screen claim a branch
+  // check in a workspace that has no repository (FR-127, FR-128).
+  renderWorkspacePlanningPolicy() {
+    const policy = this.workspacePlanningPolicy;
+
+    if (this.elements.settingsGuidance) {
+      const lines = guidanceLines(policy?.guidance);
+      this.elements.settingsGuidance.innerHTML =
+        lines.length === 0
+          ? '<li>No planning guidance is configured.</li>'
+          : lines.map(line => `<li>${this.escapeHtml(line)}</li>`).join('');
+    }
+
+    if (this.elements.settingsEnforced) {
+      const controls = policy?.enforced || [];
+      this.elements.settingsEnforced.innerHTML =
+        controls.length === 0
+          ? `<li>${this.escapeHtml(policySummary(policy))}</li>`
+          : controls
+              .map(control => {
+                // data-state carries the state as text so it is available to
+                // assistive technology and to CSS, rather than being encoded
+                // only in a color.
+                const state = enforcedState(control);
+                return (
+                  `<li class="workspace-detail-settings-policy-item" data-state="${this.escapeHtml(state)}">` +
+                  `${this.escapeHtml(enforcedLine(control))}</li>`
+                );
+              })
+              .join('');
+    }
+  }
+
+  // loadWorkspacePlanningPolicy fetches the effective policy. A preset argument
+  // previews one without saving it (FR-142).
+  async loadWorkspacePlanningPolicy(preset = '') {
+    if (!this.workspaceId) return null;
+    const query = preset ? `?preset=${encodeURIComponent(preset)}` : '';
+    try {
+      const response = await fetch(
+        `/api/workspaces/${encodeURIComponent(this.workspaceId)}/planning-policy${query}`
+      );
+      if (!response.ok) return null;
+      const payload = await response.json();
+      this.workspacePlanningPolicy = payload?.policy || null;
+      this.renderWorkspacePlanningPolicy();
+      return this.workspacePlanningPolicy;
+    } catch {
+      // A policy that cannot be read leaves the previous render in place rather
+      // than blanking the section: stale-but-labelled beats empty.
+      return null;
     }
   }
 
@@ -11757,15 +11811,30 @@ export class WorkspaceDetailPage {
     return this.pluginsManager.render();
   }
 
-  // Planning-config helpers live with the skills manager since they shape the
-  // workspace_planning skill binding, but the host still calls them from
-  // workspace-settings normalization and the config summary panel.
+  // Planning enum clamping for the SETTINGS form.
+  //
+  // This used to delegate to the skills manager, back when planning config was
+  // a skill binding. It is workspace settings now, so the clamping lives with
+  // the settings that use it rather than with skills, which no longer carry
+  // planning policy at all (FR-181).
   normalizeWorkspacePlanningConfig(config = {}) {
-    return this.skillsManager.normalizeWorkspacePlanningConfig(config);
-  }
+    const allowed = {
+      mode: ['feature', 'bugfix', 'refactor', 'investigation'],
+      clarification_mode: ['minimal', 'standard', 'deep'],
+      default_execution_mode: ['auto', 'step_through']
+    };
+    const defaults = {
+      mode: 'feature',
+      clarification_mode: 'standard',
+      default_execution_mode: 'step_through'
+    };
 
-  getWorkspacePlanningSummary(config = {}) {
-    return this.skillsManager.getWorkspacePlanningSummary(config);
+    const normalized = {};
+    for (const [field, values] of Object.entries(allowed)) {
+      const candidate = String(config?.[field] || '').trim();
+      normalized[field] = values.includes(candidate) ? candidate : defaults[field];
+    }
+    return normalized;
   }
 
   getAgentInstanceIdsForName(agentName) {

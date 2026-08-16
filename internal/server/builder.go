@@ -45,6 +45,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/notehttp"
 	"github.com/johnjallday/ori-agent/internal/onboarding"
 	"github.com/johnjallday/ori-agent/internal/onboardinghttp"
+	"github.com/johnjallday/ori-agent/internal/orchestration"
 	"github.com/johnjallday/ori-agent/internal/orchestrationhttp"
 	"github.com/johnjallday/ori-agent/internal/personalhq"
 	"github.com/johnjallday/ori-agent/internal/personalhqhttp"
@@ -80,6 +81,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/workspacecapabilityhttp"
 	"github.com/johnjallday/ori-agent/internal/workspacemap"
 	"github.com/johnjallday/ori-agent/internal/workspacemaphttp"
+	"github.com/johnjallday/ori-agent/internal/workspaceplan"
+	"github.com/johnjallday/ori-agent/internal/workspacepolicy"
 	"github.com/johnjallday/ori-agent/internal/workspacerun"
 )
 
@@ -244,6 +247,30 @@ type ServerBuilder struct {
 	workspaceRunService   *workspacerun.Service
 	workspaceRunHandler   *workspacerun.Handler
 	workspaceRunExecutors *workspacerun.ExecutorRegistry
+
+	// Workspace Planning Workflow — durable Plans, review, approval, and the
+	// materialization of approved work into existing Tasks and Runs.
+	workspacePlanStore        workspaceplan.Store
+	workspacePlanService      *workspaceplan.Service
+	workspacePlanHandler      *workspaceplan.Handler
+	workspacePlanMaterializer *workspaceplan.Materializer
+	workspacePlanExecutor     *workspaceplan.Executor
+	// workspacePlanSlots arbitrates which plan executes in a workspace. It
+	// sits above the task executor and leaves standalone task scheduling
+	// entirely alone (FR-100, FR-106).
+	workspacePlanSlots *workspaceplan.SlotCoordinator
+	// workspacePlanAuto drives approved automatic plans. Its loops outlive the
+	// requests that start them, so the server stops it during shutdown.
+	workspacePlanAuto *workspaceplan.AutoRunner
+	// workspacePlanPolicy resolves a workspace's effective planning policy and
+	// what its folder can actually enforce.
+	workspacePlanPolicy *workspacepolicy.Resolver
+	// multiAgentOrchestrator is retained so wiring tests can assert the plan
+	// drafter was attached.
+	multiAgentOrchestrator *orchestration.Orchestrator
+	// workspaceRunBridge adapts Tasks onto Runs. Plan execution dispatches
+	// through it so plan work produces ordinary Run records.
+	workspaceRunBridge *workspacerun.TaskRunBridge
 
 	// Skills (local + external)
 	skillsManager *skills.Manager
@@ -530,6 +557,7 @@ func (b *ServerBuilder) createDomainFacades() {
 		CLIAgents:             b.cliAgentHandler,
 		CLIAgentRegistry:      b.cliAgentRegistry,
 		WorkspaceRuns:         b.workspaceRunHandler,
+		WorkspacePlans:        b.workspacePlanHandler,
 		ActionCenter:          b.actionCenterHandler,
 		Plugin:                b.pluginHandler,
 		// initializeMissionBridge (which builds the trigger handler) runs

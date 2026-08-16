@@ -42,19 +42,45 @@ func TestAppendSkillPromptsFromResolved_NoSkillsReturnsBaseUnchanged(t *testing.
 	}
 }
 
-func TestAppendSkillPromptsFromResolved_PlanningProfileSettings(t *testing.T) {
+// A skill's config no longer reaches the prompt (FR-181, FR-182).
+//
+// The old "Workspace Binding Settings" block serialized planning config —
+// write_prd, require_branch, default_execution_mode — into the system prompt.
+// It read like policy and was a paragraph a model could ignore. Those controls
+// are compiled now; a skill carrying config gets no special prompt treatment.
+func TestAppendSkillPromptsFromResolved_ConfigIsNotRenderedAsPolicy(t *testing.T) {
 	base := "BASE"
 	skills := []ResolvedSkill{{
-		Name:            "workspace-planning",
-		PlanningProfile: true,
-		Config:          map[string]any{"mode": "feature", "write_prd": true},
+		Name:   "workspace-planning",
+		Config: map[string]any{"mode": "feature", "write_prd": true},
 	}}
 
 	out := AppendSkillPromptsFromResolved(base, skills)
-	if !strings.Contains(out, "Workspace Binding Settings") {
-		t.Errorf("expected planning binding settings section, got: %q", out)
+	if strings.Contains(out, "Workspace Binding Settings") {
+		t.Errorf("skill config was rendered as policy: %q", out)
 	}
-	if !strings.Contains(out, "Planning mode: feature") {
-		t.Errorf("expected planning mode line in output")
+	if strings.Contains(out, "write_prd") || strings.Contains(out, "Planning mode") {
+		t.Errorf("skill config leaked into the prompt: %q", out)
+	}
+	// A config-only skill with no prompt contributes nothing at all.
+	if out != base {
+		t.Errorf("a skill with no prompt changed the base prompt: %q", out)
+	}
+}
+
+// A skill's PROMPT still reaches the agent. Skills remain context and
+// capability; only their authority to declare policy is gone (FR-190).
+func TestAppendSkillPromptsFromResolved_PromptsStillReachTheAgent(t *testing.T) {
+	out := AppendSkillPromptsFromResolved("BASE", []ResolvedSkill{{
+		Name:   "file-janitor",
+		Prompt: "Tidy downloads before filing them.",
+		Config: map[string]any{"mode": "feature"},
+	}})
+
+	if !strings.Contains(out, "file-janitor") {
+		t.Errorf("the skill name is missing: %q", out)
+	}
+	if !strings.Contains(out, "Tidy downloads before filing them.") {
+		t.Errorf("the skill prompt is missing: %q", out)
 	}
 }
