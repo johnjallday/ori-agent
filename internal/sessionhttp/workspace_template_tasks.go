@@ -29,6 +29,12 @@ const (
 	taskContextSetupWizardCompletedAt = "setup_wizard_completed_at"
 )
 
+const (
+	legacyReaperSetupTaskDescription = "Help with the REAPER setup choices"
+	legacyReaperSetupTaskDetails     = "Optional help while the Setup Wizard is open. The wizard owns setup: it asks how Ori should work with REAPER — file only, or Ori-assisted — and, for the assisted path, walks through installing and enabling the plugin, attaching it, assigning a compatible CLI agent, and the two native-access permissions. Your job here is to explain what each choice means. Be exact about the limit: even when every prerequisite is in place, that means Ori is *configured* to attempt live control, not that REAPER is running, the project is open, or Web Remote is reachable. Do not install, enable, or grant anything for the user, and do not claim setup is complete. Ori completes this task by itself once setup passes."
+	legacyReaperSetupSupersededNote  = "Superseded by the blueprint's deterministic runtime setup. No agent ran for this task."
+)
+
 // setupWizardCompletionNote is the system-authored result recorded on a setup
 // task the wizard satisfied. It says who completed it and how, so the task's
 // history does not read as though an agent did work it never did.
@@ -276,6 +282,58 @@ func isNilPointer(v any) bool {
 		return value.IsNil()
 	default:
 		return false
+	}
+}
+
+// SupersedeLegacyReaperSetupHelpTask deterministically closes only the exact
+// untouched pending setup-help task shipped by Reaper Song before runtime
+// setup. User-edited, started, completed, failed, or historical tasks are left
+// byte-for-byte alone. Replays are no-ops and no agent/model path is reachable.
+func (h *Handler) SupersedeLegacyReaperSetupHelpTask(workspaceID string) {
+	if h == nil || strings.TrimSpace(workspaceID) == "" {
+		return
+	}
+	store := h.taskMutationStore()
+	if store == nil {
+		return
+	}
+	var supersededTaskID string
+	err := store.Update(strings.TrimSpace(workspaceID), func(ws *agentworkspace.Workspace) error {
+		if ws == nil || !ws.IsFromTemplate(reapersetup.ReaperSongTemplateID) {
+			return errTemplateSetupNoChange
+		}
+		for i := range ws.Tasks {
+			task := &ws.Tasks[i]
+			if task.Status != agentworkspace.TaskStatusPending ||
+				task.Description != legacyReaperSetupTaskDescription ||
+				task.Details != legacyReaperSetupTaskDetails ||
+				task.Context[taskContextTemplateID] != reapersetup.ReaperSongTemplateID ||
+				task.Context[taskContextTemplateStarterTask] != true ||
+				task.Context[taskContextTemplateSetup] != true ||
+				task.StartedAt != nil || task.CompletedAt != nil || strings.TrimSpace(task.Result) != "" ||
+				strings.TrimSpace(task.Error) != "" || task.ExecutionCount != 0 || len(task.ExecutionHistory) != 0 ||
+				len(task.ExecutionTrace) != 0 || strings.TrimSpace(task.CurrentRunID) != "" {
+				continue
+			}
+			if _, consumed := task.Context[taskContextSetupConsumedAt]; consumed {
+				continue
+			}
+			now := time.Now().UTC()
+			task.Status = agentworkspace.TaskStatusCompleted
+			task.CompletedAt = &now
+			task.Result = legacyReaperSetupSupersededNote
+			task.Context[taskContextSetupWizardCompletedAt] = now.Format(time.RFC3339)
+			supersededTaskID = task.ID
+			return nil
+		}
+		return errTemplateSetupNoChange
+	})
+	if err != nil && !errors.Is(err, errTemplateSetupNoChange) {
+		logger.Warn("Failed to supersede legacy REAPER setup task", logger.Fields{"workspace_id": workspaceID, "error": err})
+		return
+	}
+	if supersededTaskID != "" {
+		logger.Info("Superseded legacy REAPER setup task", logger.Fields{"workspace_id": workspaceID, "task_id": supersededTaskID})
 	}
 }
 

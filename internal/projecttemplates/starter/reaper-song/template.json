@@ -1,10 +1,10 @@
 {
   "name": "Reaper Song",
-  "description": "A minimal REAPER project seeded with a single .rpp file named after your project, created at 120 BPM and ready to adjust in chat.",
+  "description": "A REAPER project scaffolded at 120 BPM for immediate project-file work, with optional verified live control after setup.",
   "icon": "🎵",
   "behavior_profile": "general",
   "builtin": true,
-  "builtin_version": 7,
+  "builtin_version": 8,
   "tools": {
     "plugins": [
       "reaper-plugin"
@@ -23,17 +23,12 @@
   ],
   "starter_tasks": [
     {
-      "description": "Help with the REAPER setup choices",
-      "details": "Optional help while the Setup Wizard is open. The wizard owns setup: it asks how Ori should work with REAPER — file only, or Ori-assisted — and, for the assisted path, walks through installing and enabling the plugin, attaching it, assigning a compatible CLI agent, and the two native-access permissions. Your job here is to explain what each choice means. Be exact about the limit: even when every prerequisite is in place, that means Ori is *configured* to attempt live control, not that REAPER is running, the project is open, or Web Remote is reachable. Do not install, enable, or grant anything for the user, and do not claim setup is complete. Ori completes this task by itself once setup passes.",
-      "setup": true
-    },
-    {
       "description": "Adjust the new REAPER session to the user's preferences",
       "details": "## Created defaults\nThe project scaffold already created the workspace's one authoritative REAPER session file, `<project name>.rpp`, in the workspace project folder. It is set to 120 BPM in 4/4, with no tracks yet. Treat that existing scaffolded file as the song project and never create or initialize a second .rpp file.\n\n## Questions to ask\nTell the user what was created, then ask whether they want to change:\n- Tempo (BPM)\n- Musical key\nIf they are happy with the defaults, confirm and finish without changing anything.\n\n## Validation\n- Tempo must be between 40 and 240 BPM. If the user asks for something outside that range, say why and ask again.\n- Accept any conventional key spelling (e.g. \"A minor\", \"F# major\").\n\n## How to apply changes\nPrefer the reaper-session-setup skill only after live REAPER state and the required control interface are verified. An operating-system open request only asks the default application to open the project file; it does not prove that REAPER has finished opening it or that Web Remote is ready. If live control cannot be verified, say what is unavailable and ask the user to open or wait for REAPER, or enable the required Web Remote interface. Do not claim that live changes were applied.\n\nBefore falling back to direct file edits, explain that live REAPER state could not be verified and ask for the user's explicit confirmation. If they confirm, edit only the existing authoritative .rpp file (the tempo lives on its `TEMPO <bpm> 4 4` line), never create another project, and clearly describe the result as a file change rather than a verified live-session change. Record the chosen key in your summary (and in the session notes if asked) — the .rpp format has no key field.\n\n## When to do this\nThis is normal post-setup work, not part of setup. It is never completed automatically: adjusting tempo, key, tracks, or arrangement is something you actually do with the user, and reporting it as done because setup finished would be false."
     },
     {
       "description": "Sketch the song's arrangement",
-      "details": "Outline sections (intro, verse, chorus, bridge...) with rough bar counts, then ask the agent to add named markers or empty tracks for each section."
+      "details": "Plan sections such as intro, verse, chorus, and bridge with rough bar counts; this planning work remains available while REAPER is offline. If the user asks to apply the plan as named markers or empty tracks, use verified live control only after a fresh preflight succeeds. If live control is unavailable and a safe direct project-file edit is supported, explain that the result will be a file change rather than a verified live-session change and continue only after the user's explicit confirmation."
     }
   ],
   "agents": [
@@ -48,36 +43,59 @@
       }
     }
   ],
-  "tagline": "A minimal REAPER project at 120 BPM.",
+  "tagline": "Project-file work now; optional verified live control.",
+  "runtime_requirements": {
+    "schema_version": 1,
+    "operating_modes": [
+      {
+        "id": "file_only",
+        "label": "File-only",
+        "description": "Work immediately with the scaffolded REAPER project file. Live REAPER control is not configured or tested."
+      },
+      {
+        "id": "ori_assisted",
+        "label": "Ori-assisted REAPER",
+        "description": "Add live REAPER control after the local prerequisites and a project-specific connection test pass.",
+        "requires": [
+          "reaper_live_control"
+        ]
+      }
+    ],
+    "requirements": [
+      {
+        "key": "reaper_live_control",
+        "label": "Local REAPER control",
+        "description": "Configure REAPER, Web Remote, the trusted Ori runner, the REAPER plugin, a compatible CLI agent, and explicit local access; then pass a project-specific connection test.",
+        "disclosure": "The selected agent may contact REAPER over loopback and read and write the dedicated Ori REAPER runner directory without Ori's per-call confirmation while executing approved workspace tasks. Trusted runner scripts execute inside REAPER and can change the open project; Ori uses REAPER's undo mechanism where supported. You can revoke REAPER access from this workspace's live-control setup.",
+        "adapter": "reaper_live_control"
+      }
+    ]
+  },
   "setup_wizard": {
     "version": 1,
     "title": "Set up Reaper Song",
     "steps": [
       {
         "id": "mode",
-        "kind": "plugin_readiness",
-        "requirement_key": "reaper-plugin",
-        "adapter": "reaper_song",
+        "kind": "runtime_mode",
         "required": true,
         "title": "Choose how Ori works with REAPER",
-        "description": "Two supported answers. You can change your mind later.",
-        "disclosure": "File only means Ori edits the one project file this workspace scaffolded and nothing else — no plugin, no permissions, no control of a running REAPER. Ori-assisted adds the REAPER plugin, a compatible CLI agent, and two permissions you grant one at a time; each is an explicit step and nothing is installed or enabled without you choosing it."
+        "description": "File-only and Ori-assisted REAPER are both supported. You can change modes later."
       },
       {
-        "id": "readiness",
-        "kind": "readiness",
-        "adapter": "reaper_song",
+        "id": "live-control",
+        "kind": "runtime_readiness",
+        "requirement_key": "reaper_live_control",
         "required": true,
-        "title": "Check what Ori has",
-        "description": "The prerequisites for the mode you chose."
+        "title": "Set up local REAPER control",
+        "description": "File-only needs no local setup. Ori-assisted requires every listed prerequisite and a successful connection test."
       },
       {
         "id": "summary",
         "kind": "summary",
-        "adapter": "reaper_song",
         "required": true,
-        "title": "Reaper Song is ready",
-        "description": "What Ori can do from here, and what it has not verified."
+        "title": "Review Reaper Song setup",
+        "description": "Confirm the selected mode and what Ori has or has not verified."
       }
     ]
   }

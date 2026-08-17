@@ -36,6 +36,13 @@ func TestMigrationCannotActOnADomain(t *testing.T) {
 		"GetSetupWizardProgress": true, "SetSetupWizardProgress": true,
 		"IsEmpty": true, "TrimSpace": true, "timestamp": true, "eligible": true,
 		"blueprints": true, "Ready": true,
+		// The compiled runtime upgrade may snapshot inert contract data and the
+		// selected mode. Its planner receives only defensive values (no store,
+		// workspace handle, or domain service), and it cannot create a grant.
+		"runtimeMigrationBlueprint": true, "migrateRuntimeSnapshot": true,
+		"CloneRuntimeRequirementsContract": true, "RuntimeMigration": true,
+		"NormalizeRuntimeIdentifier": true, "runtimeMigrationProgress": true,
+		"GetRuntimeState": true, "SetRuntimeState": true,
 	}
 	ast.Inspect(file, func(node ast.Node) bool {
 		call, ok := node.(*ast.CallExpr)

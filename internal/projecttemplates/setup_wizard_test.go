@@ -492,10 +492,10 @@ func TestValidSetupWizardAdapters_CoversTheFourMigratedBlueprints(t *testing.T) 
 }
 
 // TestShippedBlueprintsDeclareRunnableWizards is the cross-check none of the
-// per-blueprint tests can make: every adapter this build allows is actually
+// per-blueprint tests can make: every current adapter this build allows is
 // used by a shipped blueprint, and every shipped wizard names an adapter this
-// build implements. A typo on either side produces a workspace whose setup
-// nobody can finish, and it would otherwise only show up in a browser.
+// build implements. The legacy reaper_song adapter remains authorable only so
+// older custom manifests keep loading; the built-in now uses runtime steps.
 func TestShippedBlueprintsDeclareRunnableWizards(t *testing.T) {
 	libDir := filepath.Join(t.TempDir(), "templates")
 	if err := EnsureLibrary(libDir); err != nil {
@@ -542,6 +542,9 @@ func TestShippedBlueprintsDeclareRunnableWizards(t *testing.T) {
 		}
 	}
 	for _, adapter := range ValidSetupWizardAdapters {
+		if adapter == "reaper_song" {
+			continue
+		}
 		if !used[adapter] {
 			t.Errorf("adapter %q is allowed but no shipped blueprint uses it", adapter)
 		}
