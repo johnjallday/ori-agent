@@ -2424,7 +2424,7 @@ const sessionManager = {
       agentNameEl.textContent = displayAgentName;
     }
     if (typeof window.refreshChatWebSearchToggle === 'function') {
-      window.refreshChatWebSearchToggle(agentName || 'Workspace Manager');
+      window.refreshChatWebSearchToggle(agentName || 'Ask Ori');
     }
 
     if (editAgentBtn) {
@@ -4756,7 +4756,9 @@ const sessionManager = {
     const roster = view ? view.roster : [];
 
     if (heading) {
-      heading.textContent = roster.length === 1 ? 'Workspace Assistant' : 'Workspace Team';
+      // "Workspace Assistant" is a retired product label (Issue #350); this
+      // heading describes the roster, so it says what the roster is.
+      heading.textContent = roster.length === 1 ? 'Entry Assistant' : 'Workspace Team';
     }
     if (teamSummary) teamSummary.textContent = this.workspaceTeamSummaryText(view);
     if (summary) summary.innerHTML = this.renderWorkspaceReceipt(view, selectedTemplate, name);

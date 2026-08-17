@@ -26,7 +26,7 @@
     workspace_manager: {
       routes: ['/'],
       selector: '#homeAssistantInput',
-      label: 'Workspace Manager command box'
+      label: 'Ask Ori composer'
     },
     quick_capture: {
       routes: ['/'],

@@ -171,7 +171,15 @@ func (h *Handler) handleGet(w http.ResponseWriter, r *http.Request) {
 
 	// If specific agent requested, return its details
 	if agentName != "" {
-		agent, ok := h.State.GetAgent(agentName)
+		// Resolved rather than looked up exactly. A stored workspace reference, a
+		// bookmark, or a client that has not reloaded since the rename still asks
+		// for the assistant by its retired name, and answering 404 there strands
+		// every one of them (FR57). The response reports the canonical name, so
+		// new writes move forward.
+		agent, resolvedName, ok := store.ResolveAgent(h.State, agentName)
+		if ok && agent != nil {
+			agentName = resolvedName
+		}
 		if !ok || agent == nil {
 			// Check if it's a CLI agent
 			if resp, found := h.getCLIAgentDetail(agentName); found {

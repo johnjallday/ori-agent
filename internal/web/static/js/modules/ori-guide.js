@@ -1,24 +1,51 @@
 /*
- * Ori Guide controller — the app's setup-and-navigation helper.
+ * Ask Ori controller — the one assistance surface, on every authenticated page.
  *
- * Ori helps you find things, understand Ori's own concepts, and get set up. It
- * does not do work: a work request comes back as a handoff to Workspace
- * Manager, with the user's text prefilled and *not* submitted (PRD FR-40/FR-84).
+ * It answers questions AND takes work. There used to be two surfaces for that,
+ * and users had to know which was which before typing; Issue #350 merged them.
+ * Intent is inferred rather than chosen:
  *
- * Everything rendered here is either escaped text or a typed action validated
- * against a client-side allowlist. The server's action union cannot express a
- * mutation, and this controller additionally refuses any action type it does
- * not recognise — so a compromised or buggy response cannot widen what the
- * guide can do (FR-36/FR-49).
+ *   1. Ask the guide. It answers navigation and setup deterministically, with
+ *      no model, and identifies a work request as such itself.
+ *   2. Anything it does not own — a work request, or an honest miss — escalates
+ *      to the routing contract, or straight to the full work controller where
+ *      that is loaded (dashboard.js owns planning, agent selection,
+ *      confirmations, and workspace sessions; none of it is reimplemented here).
+ *   3. An explicit /task, /ask, or /note bypasses step 1 entirely, so an
+ *      override is never reinterpreted as navigation.
  *
- * Opening and closing the guide is presentation only. It never clears Map/Tree
- * selection, checked agents, filters, or form drafts, because it does not touch
- * them (FR-25).
+ * Automatic routing is not automatic authorization. Everything rendered here is
+ * escaped text or a typed action validated against a client-side allowlist; the
+ * guide's action union still cannot express a mutation, and every existing
+ * confirmation still applies (FR27/FR35/FR36).
+ *
+ * Opening and closing is presentation only. It never clears Map/Tree selection,
+ * checked agents, filters, or form drafts, and never cancels submitted work.
  */
 (function () {
   'use strict';
 
   var ENDPOINT = '/api/ori-guide';
+  var ROUTE_ENDPOINT = '/api/home-assistant/route';
+
+  // The guide answers navigation deterministically and without a model. Anything
+  // it identifies as work, or honestly cannot answer, escalates to the routing
+  // contract instead — which is how one composer serves both without the guide
+  // ever gaining a mutation path (FR22/FR27).
+  var GUIDE_WORK_TOPIC = 'workspace-manager';
+
+  // Explicit power-user overrides. Ordinary requests never need them — intent is
+  // inferred — but where one is typed it must win outright (FR24).
+  //
+  // These have to bypass the guide entirely rather than merely being escalated
+  // after it: "/ask what is a workspace" matches the guide's own workspace
+  // topic, so asking the guide first would answer it as navigation and silently
+  // discard the override.
+  var EXPLICIT_COMMAND_RE = /^\/(task|ask|note)\b/i;
+
+  function isExplicitCommand(text) {
+    return EXPLICIT_COMMAND_RE.test(String(text || '').trim());
+  }
 
   // The action types this controller will render. Anything else is dropped and
   // never becomes a control.
@@ -40,6 +67,10 @@
     coachmarkEl: null,
     coachmarkRoute: '',
     actions: [],
+    // Survives close/reopen: closing the panel is presentation only and must
+    // never cancel submitted work or lose what the user had typed (FR13/FR45).
+    activity: [],
+    draft: '',
     els: null
   };
 
@@ -123,7 +154,7 @@
     if (type === 'handoff') {
       return {
         type: type,
-        label: String(action.label || 'Open Workspace Manager'),
+        label: String(action.label || 'Send this as work'),
         handoffText: String(action.handoff_text || action.handoffText || '')
       };
     }
@@ -137,6 +168,134 @@
     } catch (err) {
       return '/';
     }
+  }
+
+  /* ---- page context ------------------------------------------------------------ */
+
+  // Context a page module supplies that the URL cannot: Home's Map/Tree
+  // selection, an open session, a friendlier label for the current target.
+  // It is a hint only — the server still decides what any request is allowed to
+  // touch (FR17).
+  var pageContext = { workspaceId: '', taskId: '', sessionId: '', label: '' };
+
+  // Derives surface/workspace/task from the path so a page that supplies nothing
+  // still gets correct context. Shapes:
+  //   /                                  home
+  //   /workspaces                        workspace hub
+  //   /workspaces/{id}                   workspace detail
+  //   /workspaces/{id}/canvas            workspace canvas
+  //   /workspaces/{id}/tasks/{taskId}    workspace task
+  function contextFromRoute(route) {
+    var path = String(route || '/');
+    var out = { surface: 'app', workspaceId: '', taskId: '' };
+
+    if (path === '/' || path === '') {
+      out.surface = 'home';
+      return out;
+    }
+    if (path === '/workspaces' || path === '/workspaces/') {
+      out.surface = 'workspace_hub';
+      return out;
+    }
+    if (path.indexOf('/workspaces/') !== 0) {
+      return out;
+    }
+
+    var parts = path.slice('/workspaces/'.length).split('/').filter(Boolean);
+    if (!parts.length) return out;
+
+    out.workspaceId = decodeURIComponent(parts[0]);
+    out.surface = 'workspace_detail';
+    if (parts[1] === 'canvas') {
+      out.surface = 'workspace_canvas';
+    } else if (parts[1] === 'tasks' && parts[2]) {
+      out.surface = 'workspace_task';
+      out.taskId = decodeURIComponent(parts[2]);
+    }
+    return out;
+  }
+
+  // The normalized context sent with every submission. A page-supplied workspace
+  // only fills a gap the URL left; it never overrides the workspace the user is
+  // demonstrably looking at (FR18).
+  function collectContext() {
+    var route = currentRoute();
+    var derived = contextFromRoute(route);
+    return {
+      surface: derived.surface,
+      page_path: route,
+      workspace_id: derived.workspaceId || String(pageContext.workspaceId || ''),
+      task_id: derived.taskId || String(pageContext.taskId || ''),
+      session_id: String(pageContext.sessionId || ''),
+      origin: 'ask_ori_panel'
+    };
+  }
+
+  function contextLabel(ctx) {
+    if (pageContext.label) return String(pageContext.label);
+    switch (ctx.surface) {
+      case 'home':
+        return ctx.workspace_id ? 'Workspace: ' + ctx.workspace_id : 'Home';
+      case 'workspace_hub':
+        return 'All workspaces';
+      case 'workspace_detail':
+        return 'Workspace: ' + ctx.workspace_id;
+      case 'workspace_canvas':
+        return 'Canvas: ' + ctx.workspace_id;
+      case 'workspace_task':
+        return 'Task: ' + (ctx.task_id || ctx.workspace_id);
+      default:
+        return 'All workspaces';
+    }
+  }
+
+  // Repaints the visible context. Called before a request is accepted so a stale
+  // workspace or task is never submitted invisibly (FR46).
+  function refreshContextLabel() {
+    var els = state.els;
+    if (!els || !els.context) return collectContext();
+    var ctx = collectContext();
+    els.context.textContent = contextLabel(ctx);
+    return ctx;
+  }
+
+  // The seam page modules use to contribute context they alone know about.
+  // Drops an in-flight request whose answer would now be read against a
+  // different workspace.
+  //
+  // Request sequencing alone does not cover this: the sequence only advances
+  // when a NEWER request is made, so a reply for workspace A that lands after
+  // the user switched to workspace B would render as actionable B content
+  // (FR17/FR46). Changing target invalidates the question that was asked about
+  // the old one.
+  function invalidateInFlightForContextChange(previousWorkspaceID) {
+    var nextWorkspaceID = collectContext().workspace_id;
+    if (previousWorkspaceID === nextWorkspaceID) return;
+    if (!state.pending) return;
+
+    state.seq += 1; // any reply already in flight is now stale
+    setPending(false, false);
+    if (state.els) {
+      state.els.reply.dataset.status = 'context-changed';
+      state.els.reply.innerHTML =
+        '<p class="ori-guide__answer">The workspace changed while I was working, ' +
+        'so I stopped rather than answer about a different one. Ask again here.</p>';
+    }
+    emit('context-invalidated', { from: previousWorkspaceID, to: nextWorkspaceID });
+  }
+
+  function setContext(partial) {
+    var next = partial || {};
+    var previousWorkspaceID = collectContext().workspace_id;
+
+    if ('workspaceId' in next) pageContext.workspaceId = String(next.workspaceId || '');
+    if ('taskId' in next) pageContext.taskId = String(next.taskId || '');
+    if ('sessionId' in next) pageContext.sessionId = String(next.sessionId || '');
+    if ('label' in next) pageContext.label = String(next.label || '');
+
+    invalidateInFlightForContextChange(previousWorkspaceID);
+    refreshContextLabel();
+    emit('context', { surface: collectContext().surface });
   }
 
   /* ---- rendering --------------------------------------------------------------- */
@@ -215,6 +374,145 @@
     els.reply.dataset.topic = String(resp.topic_key || '');
   }
 
+  /* ---- activity ---------------------------------------------------------------- */
+
+  // One ordered record of the conversation: what was asked, and what came back
+  // (FR40). Deliberately not a live region — the reply below it is what gets
+  // announced, so a screen reader is not re-read the whole transcript on every
+  // update (FR73).
+  function recordActivity(kind, text) {
+    // State first, and unconditionally: the panel's own "have we greeted yet"
+    // and restore-on-reopen behaviour keys off this, so it must not depend on
+    // whether the optional activity element happens to be present.
+    state.activity.push({ kind: kind, text: String(text || '') });
+
+    var els = state.els;
+    if (!els || !els.activity || typeof document.createElement !== 'function') return;
+    var entry = document.createElement('li');
+    entry.className = 'ori-guide__activity-entry ori-guide__activity-entry--' + kind;
+    entry.textContent = String(text || '');
+    els.activity.appendChild(entry);
+    els.activity.hidden = false;
+    els.activity.scrollTop = els.activity.scrollHeight;
+  }
+
+  // Renders a routed (non-navigation) result: a human-readable summary of where
+  // the request is going, plus the target, so the user sees the chosen workspace
+  // or agent before anything consequential happens (FR34/FR86).
+  // Builds the choices offered when a request needs a workspace it does not
+  // have.
+  //
+  // These are ordinary validated navigate actions — the same allowlist every
+  // other action goes through — so offering a choice cannot widen what the panel
+  // is able to do. Picking one takes the user to that workspace, where the
+  // request can be made in a context that is visible to them (FR32/FR33).
+  function workspaceChoiceActions(routed) {
+    var resolution = routed && routed.workspace_resolution;
+    var actions = [];
+
+    var candidates = (resolution && resolution.candidates) || [];
+    for (var i = 0; i < candidates.length && actions.length < 3; i++) {
+      var candidate = candidates[i];
+      if (!candidate || !candidate.id) continue;
+      actions.push({
+        type: 'navigate',
+        label: 'Open ' + String(candidate.name || candidate.id),
+        href: '/workspaces/' + encodeURIComponent(String(candidate.id))
+      });
+    }
+
+    // Nothing fit, so the honest next step is making somewhere for it to live.
+    if (!actions.length && routed && routed.workspace_recommended) {
+      actions.push({
+        type: 'navigate',
+        label: 'Choose or create a workspace',
+        href: '/workspaces'
+      });
+    }
+    return actions;
+  }
+
+  function renderRouted(routed, guideResp) {
+    var els = state.els;
+    if (!els) return;
+
+    var label = String(routed.intent_label || 'work request');
+    var target = String(routed.matched_agent || routed.suggested_agent_name || '');
+    var ctx = collectContext();
+    var resolution = routed.workspace_resolution || null;
+    var resolutionState = String((resolution && resolution.state) || '');
+    var needsTarget = routed.workspace_recommended && !ctx.workspace_id;
+
+    var summary = 'I read that as a ' + label + '.';
+    if (needsTarget && resolutionState === 'ambiguous') {
+      summary += ' More than one workspace could be the right home for it, so I have not picked.';
+    } else if (needsTarget) {
+      summary += ' It needs a workspace — pick one, or create one, and I will take it from there.';
+    } else if (target) {
+      summary += ' ' + target + ' is the best fit for it.';
+    }
+
+    // Validate the offered choices through the same gate as any other action, so
+    // a malformed or unexpected candidate never becomes a control.
+    var choices = [];
+    var raw = workspaceChoiceActions(routed);
+    for (var i = 0; i < raw.length; i++) {
+      var valid = validateAction(raw[i]);
+      if (valid) choices.push(valid);
+    }
+    state.actions = choices;
+
+    var html =
+      '<p class="ori-guide__routing" data-routing-intent="' +
+      esc(String(routed.intent || '')) +
+      '" data-workspace-state="' +
+      esc(resolutionState) +
+      '">' +
+      esc(summary) +
+      '</p>';
+
+    // The chosen target has to be visible before anything consequential runs —
+    // whether it came from the page or from resolving a name in the request
+    // (FR34/FR86).
+    var resolvedName = String((resolution && resolution.selected_workspace_name) || '');
+    if (ctx.workspace_id) {
+      html +=
+        '<p class="ori-guide__target">Target: <strong>' + esc(contextLabel(ctx)) + '</strong></p>';
+    } else if (resolvedName && resolutionState === 'confident') {
+      html +=
+        '<p class="ori-guide__target">Target: <strong>Workspace: ' +
+        esc(resolvedName) +
+        '</strong></p>';
+    }
+
+    // Routing plans; it does not run. Say so, so nobody reads a routing summary
+    // as work already underway (FR35).
+    html +=
+      '<p class="ori-guide__answer ori-guide__answer--note">' + 'Nothing has run yet.' + '</p>';
+
+    if (choices.length) {
+      html += '<div class="ori-guide__actions">';
+      for (var j = 0; j < choices.length; j++) html += actionHTML(choices[j], j);
+      html += '</div>';
+    }
+
+    els.reply.innerHTML = html;
+    els.reply.dataset.status = 'routed';
+    els.reply.dataset.topic = '';
+    // The reply below already shows this turn in full. Repeating it in the
+    // activity log renders the same sentence twice on screen; the log's job is
+    // the record of what was asked, not a second copy of the current answer.
+
+    emit('routed', {
+      intent: String(routed.intent || ''),
+      policy: String(routed.routing_policy || ''),
+      workspace: ctx.workspace_id ? 'present' : 'absent',
+      workspaceState: resolutionState,
+      choices: choices.length,
+      guideStatus: String((guideResp && guideResp.status) || '')
+    });
+  }
+
   // `silent` marks the request the panel fires for itself when it opens.
   //
   // That request must not disable the send control: a browser will not submit a
@@ -230,7 +528,16 @@
     }
     els.panel.dataset.state = pending ? 'pending' : 'ready';
     if (pending && !silent) {
-      els.reply.innerHTML = '<p class="ori-guide__answer is-pending">Looking…</p>';
+      els.reply.innerHTML = '<p class="ori-guide__answer is-pending">Working…</p>';
+    }
+    // The launcher shows that something is running even while the panel is
+    // closed, without becoming a second place to type (FR14).
+    if (els.launcherStatus && !silent) {
+      els.launcherStatus.hidden = !pending;
+      els.launcherStatus.textContent = pending ? 'Working…' : '';
+    }
+    if (els.launcher) {
+      els.launcher.dataset.busy = pending ? 'true' : 'false';
     }
   }
 
@@ -243,10 +550,149 @@
   // they typed faster than the panel's own opening request returned. Sequencing
   // instead means the latest question always wins and stale replies are
   // ignored, which is the property that actually matters.
+  // Whether the guide's reply means "this was not a navigation question".
+  //
+  // The guide recognises a work request itself and answers with a handoff, and
+  // reports an honest miss as `unknown`. Both are escalation signals, so the
+  // client never has to guess at intent with its own keyword list.
+  function needsWorkRouting(resp) {
+    if (!resp) return false;
+    if (String(resp.topic_key || '') === GUIDE_WORK_TOPIC) return true;
+    return String(resp.status || '') === 'unknown';
+  }
+
+  // Whether the full work controller is on this page.
+  //
+  // dashboard.js owns the real planning, task-creation, agent-selection,
+  // confirmation, and workspace-session flows, and renders them into the
+  // activity host inside this panel. Where it is loaded we hand off to it
+  // rather than reimplementing any of that here (FR31/FR36).
+  function hasWorkController() {
+    return Boolean(
+      typeof window !== 'undefined' &&
+      window.OriAskRouting &&
+      typeof window.OriAskRouting.submit === 'function'
+    );
+  }
+
+  // Hands a work request to the existing controller with this page's context.
+  //
+  // It renders into the activity host below the composer, so the request and
+  // everything it produces stay in one panel (FR39).
+  function delegateWork(question, seq) {
+    var ctx = collectContext();
+
+    // Acknowledge the handoff immediately, before awaiting the controller.
+    //
+    // Some fulfilment paths — a specialist handoff, a confirmation the user has
+    // to answer — deliberately do not settle for a long time, and one of them
+    // may never settle at all if the user walks away. Feedback that waits on
+    // completion therefore leaves the panel looking like the request vanished.
+    // The activity host below renders the real progress as it arrives.
+    showActivityHost(true);
+    var els = state.els;
+    if (els) {
+      els.reply.dataset.status = 'delegated';
+      els.reply.innerHTML =
+        '<p class="ori-guide__routing">' +
+        esc('Working on it' + (ctx.workspace_id ? ' in ' + contextLabel(ctx) : '') + '.') +
+        '</p><p class="ori-guide__answer ori-guide__answer--note">' +
+        'Anything consequential still asks you to confirm below.</p>';
+    }
+
+    emit('routed', {
+      intent: 'delegated',
+      workspace: ctx.workspace_id ? 'present' : 'absent',
+      via: 'work-controller'
+    });
+
+    return Promise.resolve(
+      window.OriAskRouting.submit(question, {
+        routeContext: ctx,
+        openThinkingModal: false
+      })
+    ).then(function () {
+      if (seq !== state.seq) return null;
+      return true;
+    });
+  }
+
+  // Reports a delegated request that failed, without making the caller wait on
+  // it.
+  //
+  // ask() must not return the controller's promise: a fulfilment path can stay
+  // unsettled indefinitely (an unanswered confirmation), and awaiting that would
+  // hang every caller — including the panel's own request bookkeeping.
+  function reportWorkFailure(promise, seq, reason) {
+    promise.catch(function () {
+      if (seq !== state.seq) return;
+      var failedEls = state.els;
+      if (failedEls) {
+        failedEls.reply.dataset.status = 'unavailable';
+        failedEls.reply.innerHTML =
+          '<p class="ori-guide__answer">I could not finish that just now. ' +
+          'Check the activity below — nothing runs without your confirmation.</p>';
+      }
+      emit('fallback', { reason: reason });
+    });
+  }
+
+  function showActivityHost(visible) {
+    var els = state.els;
+    if (!els || !els.activityHost) return;
+    els.activityHost.hidden = !visible;
+  }
+
+  // Escalates a non-navigation request to the routing contract.
+  //
+  // Routing only classifies and plans; it does not execute. Whatever comes back
+  // is rendered as a summary plus the same validated actions, so a classification
+  // can never become a state change on its own (FR35).
+  function routeWork(question, seq) {
+    return fetch(ROUTE_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: question, context: collectContext() })
+    })
+      .then(function (r) {
+        if (!r.ok) throw new Error('route ' + r.status);
+        return r.json();
+      })
+      .then(function (routed) {
+        if (seq !== state.seq) return null; // superseded
+        return routed;
+      });
+  }
+
   function ask(question, options) {
     var silent = !!(options && options.silent);
     var seq = ++state.seq;
     setPending(true, silent);
+    if (!silent && question) {
+      recordActivity('you', question);
+    }
+
+    // An explicit command goes straight to the work controller: the user has
+    // already said what they want, so nothing may reinterpret it (FR24).
+    if (!silent && question && isExplicitCommand(question)) {
+      if (hasWorkController()) {
+        reportWorkFailure(delegateWork(question, seq), seq, 'explicit-command-failed');
+        setPending(false, silent);
+        return Promise.resolve();
+      }
+
+      // The commands operate on a workspace, and this page has no work
+      // controller — say so rather than silently answering something else.
+      setPending(false, silent);
+      if (state.els) {
+        state.els.reply.dataset.status = 'unavailable';
+        state.els.reply.innerHTML =
+          '<p class="ori-guide__answer">That command works inside a workspace. ' +
+          'Open a workspace and try it there.</p>';
+      }
+      emit('fallback', { reason: 'explicit-command-unavailable' });
+      return Promise.resolve();
+    }
 
     return fetch(ENDPOINT, {
       method: 'POST',
@@ -259,6 +705,38 @@
       })
       .then(function (resp) {
         if (seq !== state.seq) return; // superseded
+
+        // A real question the guide did not own goes to routing instead of being
+        // rendered as "I don't know" (FR22/FR38).
+        if (!silent && question && needsWorkRouting(resp)) {
+          // Where the full work controller exists, it does the real thing:
+          // planning, agent selection, confirmations, workspace sessions.
+          if (hasWorkController()) {
+            // The panel's own turn is over once the request is handed over; the
+            // activity host owns the busy state from here. Holding the composer
+            // disabled until a confirmation is answered would lock the user out
+            // of the very panel they need to answer it in.
+            reportWorkFailure(delegateWork(question, seq), seq, 'work-controller-failed');
+            setPending(false, silent);
+            return Promise.resolve();
+          }
+
+          return routeWork(question, seq)
+            .then(function (routed) {
+              if (routed === null || seq !== state.seq) return;
+              setPending(false, silent);
+              renderRouted(routed, resp);
+            })
+            .catch(function () {
+              if (seq !== state.seq) return;
+              // Routing is what failed, so say so and offer the guide's own
+              // answer rather than pretending the request was navigation.
+              setPending(false, silent);
+              render(resp);
+              emit('fallback', { reason: 'route-unavailable' });
+            });
+        }
+
         setPending(false, silent);
         render(resp);
         // The topic *key* only — never the question the user typed.
@@ -361,10 +839,20 @@
     }
   }
 
-  // Opens the real Home work surface and fills in the user's own words. It
-  // deliberately stops there: the user presses send, so nothing is ever routed
-  // or executed on their behalf (FR-40/FR-84).
+  // Prefills the work request without submitting it: the user presses send, so
+  // nothing is ever routed or executed on their behalf (FR36).
+  //
+  // The universal composer is the target now. There is no separate work surface
+  // to travel to, so a handoff no longer navigates anywhere — which also means
+  // it can no longer strand the request on a page that lacks the old Home input.
   function handoff(text) {
+    var els = state.els;
+    if (els && els.input) {
+      prefillWorkSurface(els.input, text);
+      emit('handoff', { onHome: true, inPanel: true });
+      return true;
+    }
+
     var input = document.getElementById('homeAssistantInput');
     if (input) {
       close();
@@ -397,6 +885,14 @@
     }
     if (!text) return;
 
+    // Parked by an older build that still navigated to Home. Restore it into the
+    // universal composer as a draft so the request is not lost mid-upgrade.
+    state.draft = String(text);
+    if (state.els && state.els.input) {
+      prefillWorkSurface(state.els.input, text);
+      return;
+    }
+
     var input = document.getElementById('homeAssistantInput');
     if (input) prefillWorkSurface(input, text);
   }
@@ -412,9 +908,20 @@
     if (!els) return;
     els.panel.hidden = false;
     els.launcher.setAttribute('aria-expanded', 'true');
-    els.input.value = '';
-    // Silent: this is the panel greeting itself, not a question the user asked.
-    ask('', { silent: true });
+
+    // Restore rather than reset: reopening must bring back the draft and the
+    // reply that were there, not throw away work in progress (FR45).
+    els.input.value = state.draft || '';
+    refreshContextLabel();
+
+    // Only greet on a genuinely fresh panel. Re-greeting would wipe a reply the
+    // user reopened specifically to read, and would fire a request for a
+    // question nobody asked.
+    if (!state.activity.length && !state.pending) {
+      // Silent: this is the panel greeting itself, not a question the user asked.
+      ask('', { silent: true });
+    }
+
     // Focus the input rather than the close button: the user opened this to ask
     // something.
     if (typeof els.input.focus === 'function') els.input.focus();
@@ -428,6 +935,9 @@
 
     var els = state.els;
     if (!els) return;
+    // Keep the draft. Closing is presentation only: it never cancels a submitted
+    // request, and it must not silently discard what the user was typing (FR13).
+    state.draft = String((els.input && els.input.value) || '');
     els.panel.hidden = true;
     els.launcher.setAttribute('aria-expanded', 'false');
 
@@ -503,8 +1013,15 @@
       send: document.getElementById('oriGuideSend'),
       form: document.getElementById('oriGuideForm'),
       reply: document.getElementById('oriGuideReply'),
-      close: document.getElementById('oriGuideClose')
+      close: document.getElementById('oriGuideClose'),
+      context: document.getElementById('oriGuideContext'),
+      activity: document.getElementById('oriGuideActivity'),
+      launcherStatus: document.getElementById('oriGuideLauncherStatus'),
+      // The work controller's render target, hidden until there is work to show.
+      activityHost: document.getElementById('homeAssistantThinkingModal')
     };
+
+    refreshContextLabel();
 
     launcher.addEventListener('click', function () {
       toggle(launcher);
@@ -524,6 +1041,9 @@
     panel.addEventListener('click', onTopicClick);
     document.addEventListener('keydown', onKeydown);
     window.addEventListener('popstate', clearCoachmarkIfRouteChanged);
+    // A route change must repaint the visible context before the next request is
+    // accepted, so a stale workspace or task is never submitted invisibly (FR46).
+    window.addEventListener('popstate', refreshContextLabel);
 
     // A work request made on another page is prefilled here, once, without
     // being submitted.
@@ -546,10 +1066,23 @@
     close: close,
     toggle: toggle,
     ask: ask,
+    // The seam page modules use to contribute context the URL cannot carry.
+    setContext: setContext,
     isOpen: function () {
       return state.open;
     },
+    isPending: function () {
+      return state.pending;
+    },
     // Test seams.
+    _collectContext: collectContext,
+    _contextFromRoute: contextFromRoute,
+    _contextLabel: contextLabel,
+    _needsWorkRouting: needsWorkRouting,
+    _hasWorkController: hasWorkController,
+    _isExplicitCommand: isExplicitCommand,
+    _refreshContextLabel: refreshContextLabel,
+    _state: state,
     _validateAction: validateAction,
     _isSafeHref: isSafeHref,
     _handoff: handoff,

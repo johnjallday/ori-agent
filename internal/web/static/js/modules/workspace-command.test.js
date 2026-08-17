@@ -508,8 +508,12 @@ test('detailed view is deleted; shared hosts and goal modal survive in the templ
   assert.match(template, /aria-labelledby="workspace-detail-goal-modal-title"/);
   assert.match(template, /id="workspace-detail-goal-modal-form"/);
 
-  // The floating assistant is unconditional now (flag removed).
-  assert.match(template, /{{template "support-chat.tmpl" \.}}/);
+  // The page-local floating assistant is gone: this page gets the one universal
+  // Ask Ori panel from the navbar instead (Issue #350 FR6/FR76). It must not
+  // mount a second composer of its own.
+  assert.equal(template.includes('support-chat.tmpl'), false);
+  assert.equal(template.includes('hubSupportChat'), false);
+  assert.equal(template.includes('id="homeAssistantInput"'), false);
   assert.equal(template.includes('WorkspaceFloatingAssistantEnabled'), false);
 });
 

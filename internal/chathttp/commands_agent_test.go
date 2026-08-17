@@ -107,7 +107,7 @@ func TestHandleAgentStatus_UsesAssistantTerminology(t *testing.T) {
 	if !strings.Contains(response, "Assistant Status") {
 		t.Fatalf("expected Assistant status heading, got %q", response)
 	}
-	if !strings.Contains(response, "Execution Agent:** Assistant (`Ori`)") {
+	if !strings.Contains(response, "Execution Agent:** Assistant (`"+assistantExecutionAgentName+"`)") {
 		t.Fatalf("expected Assistant execution agent label, got %q", response)
 	}
 	if strings.Contains(response, "Current Agent") {
@@ -129,7 +129,7 @@ func TestHandleSkillsList_UsesAssistantRuntime(t *testing.T) {
 	})
 
 	response := decodeSystemCommandResponse(t, rr)
-	if !strings.Contains(response, "These skills are available to Assistant via `Ori`.") {
+	if !strings.Contains(response, "These skills are available to Assistant via `"+assistantExecutionAgentName+"`.") {
 		t.Fatalf("expected Assistant runtime context, got %q", response)
 	}
 	if !strings.Contains(response, "mail-helper") {

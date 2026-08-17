@@ -7,6 +7,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/store"
+	"github.com/johnjallday/ori-agent/internal/systemassistant"
 )
 
 // AgentSnapshotStore decorates a workspace Store so that every Save() also
@@ -396,20 +397,15 @@ func WipeNonAllowlistedAgentSnapshots(workspaces Store, agents store.Store, allo
 	}
 }
 
-// isSystemAgentName mirrors agenthttp.isSystemAssistantAgent without taking
-// the import dependency. Update both in lockstep if the canonical name
-// changes.
+// isSystemAgentName reports whether a snapshot belongs to the system assistant
+// under its canonical name or any supported legacy one.
 //
-// The legacy names are still recognized because a snapshot written before the
-// rename can outlive the migration of the agent store itself.
+// Both are recognized because a snapshot written before a rename can outlive the
+// migration of the agent store itself. This used to be a hand-maintained copy of
+// the name list kept "in lockstep" by comment; it now shares the one contract so
+// it cannot drift again (FR49).
 func isSystemAgentName(name string) bool {
-	trimmed := strings.TrimSpace(name)
-	for _, known := range []string{"Workspace Manager", "Ori", "__assistant__"} {
-		if strings.EqualFold(trimmed, known) {
-			return true
-		}
-	}
-	return false
+	return systemassistant.IsKnownName(name)
 }
 
 // agentDefinitionEquivalent reports whether two agents share the same core

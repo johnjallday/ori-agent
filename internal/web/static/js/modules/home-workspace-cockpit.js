@@ -2033,11 +2033,28 @@ import {
    */
   function publishRouteContext() {
     const selected = findWorkspace(state.flattened, state.selectedId);
+    const workspaceId = selected && !isGroupWorkspace(selected) ? selected.id : '';
+    const workspaceName = selected ? selected.name : '';
+
     window.oriHomeRouteContext = {
-      workspace_id: selected && !isGroupWorkspace(selected) ? selected.id : '',
-      workspace_name: selected ? selected.name : '',
+      workspace_id: workspaceId,
+      workspace_name: workspaceName,
       origin: 'ask_ori'
     };
+
+    // Home's URL never names the selected workspace, so this is the only way Ask
+    // Ori can know what the user is pointing at (Issue #350 FR18). It is a hint:
+    // the panel treats an explicitly named workspace as the stronger signal, and
+    // the server still decides what any request may touch.
+    //
+    // Clearing the selection clears the hint too, rather than leaving Ask Ori
+    // aimed at a workspace the user has navigated away from.
+    if (window.OriGuide && typeof window.OriGuide.setContext === 'function') {
+      window.OriGuide.setContext({
+        workspaceId,
+        label: workspaceId && workspaceName ? `Workspace: ${workspaceName}` : ''
+      });
+    }
   }
 
   // ---- Today (now Updates): immediate work (FR75, FR87) ----

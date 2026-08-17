@@ -151,28 +151,30 @@ func defaultRoleForAgentType(agentType string) types.AgentRole {
 	}
 }
 
-func (s *fileStore) initializeNewAgentSkillsStateUnlocked(agentName string) error {
-	if strings.TrimSpace(agentName) == "" {
-		return fmt.Errorf("agent name is required")
-	}
-
-	baseDir := filepath.Dir(s.path)
-	var agentsDir string
+// agentsDir resolves the directory that holds one folder per agent.
+//
+// s.path may already point inside an agents/ tree (in which case that tree is
+// the answer) or at a plain index file beside it. Both shapes are in the wild,
+// so every caller has to resolve the same way.
+func (s *fileStore) agentsDir() string {
 	if strings.Contains(s.path, "/agents/") || strings.Contains(s.path, "\\agents\\") {
 		agentsDirIndex := strings.LastIndex(s.path, "/agents/")
 		if agentsDirIndex == -1 {
 			agentsDirIndex = strings.LastIndex(s.path, "\\agents\\")
 		}
 		if agentsDirIndex != -1 {
-			agentsDir = s.path[:agentsDirIndex+7]
-		} else {
-			agentsDir = filepath.Join(baseDir, "agents")
+			return s.path[:agentsDirIndex+7] // +7 to include "/agents"
 		}
-	} else {
-		agentsDir = filepath.Join(baseDir, "agents")
+	}
+	return filepath.Join(filepath.Dir(s.path), "agents")
+}
+
+func (s *fileStore) initializeNewAgentSkillsStateUnlocked(agentName string) error {
+	if strings.TrimSpace(agentName) == "" {
+		return fmt.Errorf("agent name is required")
 	}
 
-	skillsStatePath := filepath.Join(agentsDir, agentName, "skills_state.json")
+	skillsStatePath := filepath.Join(s.agentsDir(), agentName, "skills_state.json")
 	if _, err := os.Stat(skillsStatePath); err == nil {
 		return nil
 	} else if !os.IsNotExist(err) {
@@ -227,31 +229,87 @@ func (s *fileStore) DeleteAgent(name string) error {
 	delete(s.agents, name)
 
 	// Delete the agent folder from filesystem
-	baseDir := filepath.Dir(s.path)
-	var agentsDir string
-	if strings.Contains(s.path, "/agents/") || strings.Contains(s.path, "\\agents\\") {
-		// Path already contains agents directory structure
-		// Find the agents directory and get its parent + "agents"
-		agentsDirIndex := strings.LastIndex(s.path, "/agents/")
-		if agentsDirIndex == -1 {
-			agentsDirIndex = strings.LastIndex(s.path, "\\agents\\")
-		}
-		if agentsDirIndex != -1 {
-			agentsDir = s.path[:agentsDirIndex+7] // +7 to include "/agents"
-		} else {
-			agentsDir = filepath.Join(baseDir, "agents")
-		}
-	} else {
-		// Path is something like config.json, need to create agents subdir
-		agentsDir = filepath.Join(baseDir, "agents")
-	}
-	agentFolder := filepath.Join(agentsDir, name)
+	agentFolder := filepath.Join(s.agentsDir(), name)
 	if err := os.RemoveAll(agentFolder); err != nil && !os.IsNotExist(err) {
 		// Log error but don't fail the operation since agent is already removed from memory
 		logger.Verbosef("Warning: failed to remove agent folder %s: %v", agentFolder, err)
 	}
 
 	return s.saveUnlocked()
+}
+
+// RenameAgent moves an agent record and its entire on-disk folder to a new name.
+//
+// This exists because the obvious spelling — SetAgent(newName, record) followed
+// by DeleteAgent(oldName) — is lossy. SetAgent only carries the in-memory
+// agent.Agent, while the agent folder also holds skills_state.json and the
+// per-agent skills/ tree; DeleteAgent then os.RemoveAll's all of it. Moving the
+// folder keeps every sidecar, including ones added after this code was written.
+//
+// It refuses to overwrite an existing agent: resolving a name collision is the
+// caller's decision, and it must not be made destructively (FR55/FR60).
+func (s *fileStore) RenameAgent(oldName, newName string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	oldName = strings.TrimSpace(oldName)
+	newName = strings.TrimSpace(newName)
+	if oldName == "" || newName == "" {
+		return fmt.Errorf("both the current and new agent name are required")
+	}
+
+	record, exists := s.agents[oldName]
+	if !exists {
+		return fmt.Errorf("agent %q not found", oldName)
+	}
+	if oldName == newName {
+		return nil
+	}
+	if _, taken := s.agents[newName]; taken {
+		return fmt.Errorf("agent %q already exists", newName)
+	}
+
+	agentsDir := s.agentsDir()
+	oldFolder := filepath.Join(agentsDir, oldName)
+	newFolder := filepath.Join(agentsDir, newName)
+
+	// Never merge into an existing folder — a stale directory under the target
+	// name would silently mix two agents' sidecars.
+	if _, err := os.Stat(newFolder); err == nil {
+		return fmt.Errorf("agent folder %q already exists", newFolder)
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+
+	// The folder is only moved when it exists; a record can legitimately live in
+	// memory before anything has forced a save.
+	if _, err := os.Stat(oldFolder); err == nil {
+		// 0o750, not the 0o755 the older writes in this file use: an agent folder
+		// holds the agent's prompt and its per-agent skill state, which no other
+		// user on the machine needs to read.
+		if err := os.MkdirAll(filepath.Dir(newFolder), 0o750); err != nil {
+			return err
+		}
+		if err := os.Rename(oldFolder, newFolder); err != nil {
+			return fmt.Errorf("move agent folder: %w", err)
+		}
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+
+	s.agents[newName] = record
+	delete(s.agents, oldName)
+
+	if err := s.saveUnlocked(); err != nil {
+		return err
+	}
+
+	// Verify the destination is durable before reporting success, so a caller
+	// running a migration knows the move actually landed (FR60).
+	if _, err := os.Stat(filepath.Join(newFolder, "agent_settings.json")); err != nil {
+		return fmt.Errorf("verify migrated agent %q: %w", newName, err)
+	}
+	return nil
 }
 
 func (s *fileStore) ClearAgents() error {
@@ -319,24 +377,7 @@ func (s *fileStore) saveUnlocked() error {
 	}
 
 	// Create agents directory - handle case where path already includes agents/
-	baseDir := filepath.Dir(s.path)
-	var agentsDir string
-	if strings.Contains(s.path, "/agents/") || strings.Contains(s.path, "\\agents\\") {
-		// Path already contains agents directory structure
-		// Find the agents directory and get its parent + "agents"
-		agentsDirIndex := strings.LastIndex(s.path, "/agents/")
-		if agentsDirIndex == -1 {
-			agentsDirIndex = strings.LastIndex(s.path, "\\agents\\")
-		}
-		if agentsDirIndex != -1 {
-			agentsDir = s.path[:agentsDirIndex+7] // +7 to include "/agents"
-		} else {
-			agentsDir = filepath.Join(baseDir, "agents")
-		}
-	} else {
-		// Path is something like config.json, need to create agents subdir
-		agentsDir = filepath.Join(baseDir, "agents")
-	}
+	agentsDir := s.agentsDir()
 	if err := os.MkdirAll(agentsDir, 0o755); err != nil {
 		return err
 	}
@@ -458,24 +499,7 @@ func (s *fileStore) load() error {
 	}
 
 	// Load individual agent files from agents/ directory (nested structure)
-	baseDir := filepath.Dir(s.path)
-	var agentsDir string
-	if strings.Contains(s.path, "/agents/") || strings.Contains(s.path, "\\agents\\") {
-		// Path already contains agents directory structure
-		// Find the agents directory and get its parent + "agents"
-		agentsDirIndex := strings.LastIndex(s.path, "/agents/")
-		if agentsDirIndex == -1 {
-			agentsDirIndex = strings.LastIndex(s.path, "\\agents\\")
-		}
-		if agentsDirIndex != -1 {
-			agentsDir = s.path[:agentsDirIndex+7] // +7 to include "/agents"
-		} else {
-			agentsDir = filepath.Join(baseDir, "agents")
-		}
-	} else {
-		// Path is something like config.json, need to create agents subdir
-		agentsDir = filepath.Join(baseDir, "agents")
-	}
+	agentsDir := s.agentsDir()
 	if _, err := os.Stat(agentsDir); err == nil {
 		// agents/ directory exists, check for nested structure
 		entries, err := os.ReadDir(agentsDir)

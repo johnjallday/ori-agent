@@ -105,8 +105,8 @@ var guideTopics = []GuideTopic{
 	{
 		Key:   "home",
 		Label: "Home",
-		Explanation: "Home is your workspace map. It shows every workspace you can open, " +
-			"what needs attention today, and a command box for handing work to Workspace Manager.",
+		Explanation: "Home is your workspace map. It shows every workspace you can open and " +
+			"what needs attention today. Ask Ori is available on every page for questions and work alike.",
 		NavKey:  "home",
 		Aliases: []string{"home", "dashboard", "the map", "workspace map", "start page"},
 	},
@@ -123,17 +123,22 @@ var guideTopics = []GuideTopic{
 		Key:   "agent",
 		Label: "Agent",
 		Explanation: "An agent is a configured worker: a model, a system prompt, a set of tools, and " +
-			"the workspaces it belongs to. Agents do the actual work — I only help you find and understand things.",
+			"the workspaces it belongs to. When you describe work here, I route it to the right agent and " +
+			"ask you to confirm anything consequential.",
 		NavKey:    "agents",
 		Coachmark: CoachmarkNewAgent,
 		Aliases:   []string{"agent", "agents", "what is an agent", "workers"},
 	},
 	{
+		// The topic key stays "workspace-manager" on purpose: the controller uses
+		// it as the signal that a request is work rather than navigation, and the
+		// aliases keep answering for users who still call it by its old name.
+		// Only the rendered copy changed (FR61/FR62).
 		Key:   "workspace-manager",
-		Label: "Workspace Manager",
-		Explanation: "Workspace Manager is the working assistant on Home. It plans work, routes it to the " +
-			"right agent or workspace, and asks you to confirm anything consequential. That is where real work goes — " +
-			"I hand requests to it rather than doing them myself.",
+		Label: "Getting work done",
+		Explanation: "Ask Ori plans work, routes it to the right agent or workspace, and asks you to " +
+			"confirm anything consequential. Describe what you want done in the same box you ask questions in — " +
+			"nothing runs until you say so.",
 		NavKey:    "home",
 		Coachmark: CoachmarkWorkspaceManger,
 		Aliases: []string{

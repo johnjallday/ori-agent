@@ -208,8 +208,10 @@ var (
 		PreferredPlugins: []string{},
 		PreferredTypes:   []string{"general", "tool-calling"},
 		DefaultType:      "general",
-		SuggestedName:    "Workspace Assistant",
-		MinScore:         4,
+		// Not "Workspace Assistant": that is one of the labels Issue #350 retires,
+		// and this string is offered to the user as a name to create (FR61).
+		SuggestedName: "Workspace Builder",
+		MinScore:      4,
 	}
 	homeAssistantAppLaunchIntent = homeAssistantIntent{
 		Key:              "app_launch",
@@ -228,8 +230,10 @@ var (
 		PreferredPlugins: []string{},
 		PreferredTypes:   []string{"general", "tool-calling", "research"},
 		DefaultType:      "general",
-		SuggestedName:    "Task Assistant",
-		MinScore:         3,
+		// Not "Task Assistant": another retired label, and this one surfaces in the
+		// panel's routing summary for every unmatched request (FR61).
+		SuggestedName: "Task Specialist",
+		MinScore:      3,
 	}
 	// homeAssistantAppIntrospectionIntent matches questions about the user's own
 	// Ori data (activity/summary/recap over tasks, sessions, workspaces, usage).

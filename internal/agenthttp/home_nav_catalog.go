@@ -28,7 +28,7 @@ var homeNavCatalog = []HomeNavEntry{
 		Key:         "home",
 		Label:       "Home",
 		Href:        "/",
-		Description: "The workspace map, with Workspace Manager, recent workspaces, upcoming tasks, and recent activity.",
+		Description: "The workspace map, with recent workspaces, upcoming tasks, and recent activity.",
 		Aliases:     []string{"home", "dashboard", "start page", "main page"},
 	},
 	{

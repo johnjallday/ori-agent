@@ -99,7 +99,12 @@ class CommandBar {
       });
 
       const sessionAgent = window.sessionManager?.getActiveSession?.()?.agent_name;
-      const assistantAgent = agents.find(agent => agent.name === 'Workspace Manager')?.name || '';
+      // The retired name is still accepted so a not-yet-migrated record resolves
+      // (Issue #350 FR57); the canonical one is preferred.
+      const assistantAgent =
+        agents.find(agent => agent.name === 'Ask Ori')?.name ||
+        agents.find(agent => agent.name === 'Workspace Manager')?.name ||
+        '';
       if (sessionAgent) {
         this.agentSelect.value = sessionAgent;
       } else if (assistantAgent) {

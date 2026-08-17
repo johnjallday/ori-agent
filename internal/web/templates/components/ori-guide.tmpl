@@ -1,14 +1,19 @@
 {{define "ori-guide.tmpl"}}
 <!--
-  Ori Guide — the app's setup-and-navigation helper.
+  Ask Ori — the one assistance surface, mounted once for every authenticated page.
 
-  Deliberately separate from the Home command box, which is Workspace Manager
-  and is where real work goes. The boundary copy below is stated before the user
-  can type anything, so the difference is clear on first exposure rather than
-  discovered afterwards (PRD FR-22/FR-27).
+  It used to be deliberately separate from the Home command box, which was a
+  second assistant called Workspace Manager. That split made users learn an
+  internal product distinction before they could decide where to type, so
+  Issue #350 merged them: one launcher, one panel, one composer, and automatic
+  routing behind it.
+
+  Automatic routing is not automatic authorization. Navigation still goes
+  through the structurally read-only guide contract, and work still goes through
+  the existing planning, confirmation, and agent paths (FR27/FR36).
 
   The panel is non-modal on wide layouts so the destination Ori is describing
-  stays visible behind it (FR-79).
+  stays visible behind it (FR66).
 -->
 <div class="ori-guide" id="oriGuideRoot">
   <button
@@ -17,7 +22,7 @@
     id="oriGuideLauncher"
     aria-expanded="false"
     aria-controls="oriGuidePanel"
-    aria-label="Ask Ori — app guide">
+    aria-label="Ask Ori">
     <img
       class="ori-guide__sprite"
       src="/characters/ori-guide/sprite.svg"
@@ -27,7 +32,9 @@
       decoding="async">
     <span class="ori-guide__launcher-text">
       <span class="ori-guide__launcher-name">Ask Ori</span>
-      <span class="ori-guide__launcher-role">App Guide</span>
+      <!-- Busy/attention state lives on the launcher so running work is visible
+           without creating a second prompt entry point (FR14). -->
+      <span class="ori-guide__launcher-status" id="oriGuideLauncherStatus" hidden></span>
     </span>
   </button>
 
@@ -47,41 +54,49 @@
         height="40"
         decoding="async">
       <div class="ori-guide__ident">
-        <h2 class="ori-guide__title" id="oriGuideTitle">Ori</h2>
-        <p class="ori-guide__role">App Guide</p>
+        <h2 class="ori-guide__title" id="oriGuideTitle">Ask Ori</h2>
+        <!-- Context, not a competing role name. Conveyed as text so it does not
+             depend on color alone (FR64). Filled in by the controller from the
+             current page, workspace, or task. -->
+        <p class="ori-guide__context" id="oriGuideContext">All workspaces</p>
       </div>
       <button
         type="button"
         class="ori-guide__close"
         id="oriGuideClose"
-        aria-label="Close Ori">&times;</button>
+        aria-label="Close Ask Ori">&times;</button>
     </header>
 
-    <p class="ori-guide__boundary">
-      I help you find your way around Ori and get set up. I am not a work agent —
-      your agents do the work, and I will hand a request to Workspace Manager
-      rather than run it myself.
-    </p>
+    <!-- The ordered record of this conversation: prompts, routing summaries,
+         confirmations, and outcomes in the order they happened (FR40). It is not
+         a live region — the bounded status line below is what gets announced, so
+         a screen reader is never read the whole transcript again (FR73). -->
+    <ol class="ori-guide__activity" id="oriGuideActivity" hidden></ol>
 
     <form class="ori-guide__form" id="oriGuideForm">
-      <label class="visually-hidden" for="oriGuideInput">Ask Ori where something is</label>
+      <label class="visually-hidden" for="oriGuideInput">Ask a question or describe what you want done</label>
       <input
         type="text"
         class="ori-guide__input"
         id="oriGuideInput"
-        maxlength="400"
+        maxlength="2000"
         autocomplete="off"
-        placeholder="Where do I…?">
-      <button type="submit" class="ori-guide__send" id="oriGuideSend">Ask</button>
+        placeholder="Ask a question or describe what you want done">
+      <button type="submit" class="ori-guide__send" id="oriGuideSend">Send</button>
     </form>
 
     <!-- aria-live so an answer arriving without a focus change is still
-         announced (FR-116). -->
+         announced (FR70). -->
     <div
       class="ori-guide__reply"
       id="oriGuideReply"
       role="status"
       aria-live="polite"></div>
+
+    <!-- The work-path render targets. Real planning, confirmations, and the
+         workspace conversation land here through the existing controller, in
+         the same panel as the question that started them (FR39). -->
+    {{template "ask-ori-activity.tmpl" .}}
   </section>
 </div>
 {{end}}

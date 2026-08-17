@@ -278,9 +278,9 @@ func TestHomeAssistantRoute_UtilityPromptUsesExistingAssistant(t *testing.T) {
 	}
 
 	client := &http.Client{Timeout: 10 * time.Second}
-	// The Workspace Manager is intentionally not auto-created without a
-	// configured system model. Configure one through the public API inside this
-	// test's owned runtime profile so the normal creation path is exercised.
+	// Ask Ori is intentionally not auto-created without a configured system
+	// model. Configure one through the public API inside this test's owned
+	// runtime profile so the normal creation path is exercised.
 	configureSystemModel(t, client)
 
 	payload, _ := json.Marshal(map[string]string{

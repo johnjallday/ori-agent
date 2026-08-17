@@ -114,7 +114,9 @@
       if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return;
       if (e.key !== 'j' && e.key !== 'J') return;
 
-      const input = document.getElementById('homeAssistantInput');
+      // Home's own composer was retired by Issue #350; the shortcut now opens
+      // the one universal Ask Ori panel rather than a page-local input (FR8).
+      const input = document.getElementById('oriGuideInput');
       if (!input) return;
 
       const target = e.target;
@@ -127,6 +129,9 @@
 
       e.preventDefault();
       fireTTFA('cmd-j');
+      if (window.OriGuide && typeof window.OriGuide.open === 'function') {
+        window.OriGuide.open();
+      }
       input.focus();
       try {
         const len = input.value.length;

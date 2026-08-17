@@ -11,9 +11,15 @@ let visibleAgentCount = 3;
 let availableProviders = []; // Cache for available providers and models
 let systemModelPreferencePromise = null;
 let cachedSystemModelPreference = null;
-// The working system assistant. Renamed from "Ori" when that name was reserved
-// for the app guide, which is a character identity rather than an agent record.
-const SYSTEM_ASSISTANT_AGENT_NAME = 'Workspace Manager';
+// The protected system assistant. One identity: the guide and the working
+// assistant merged under "Ask Ori" (Issue #350). This must match the canonical
+// name in internal/systemassistant — the backend migrates existing records to
+// it, so a stale literal here becomes a 404 on every agent lookup.
+const SYSTEM_ASSISTANT_AGENT_NAME = 'Ask Ori';
+
+// Previously-canonical names, still recognized so a persisted reference or a
+// half-upgraded page keeps resolving (FR50/FR57).
+const SYSTEM_ASSISTANT_LEGACY_NAMES = ['Workspace Manager', 'Ori', '__assistant__'];
 const AGENT_CREATION_SKILL_CATALOG_AGENT = '__ori_agent_create_catalog__';
 const agentCreationCapabilityState = {
   mcpServers: [],
@@ -1637,11 +1643,14 @@ function getAgentStatus(agent) {
 }
 
 function isSystemAssistantAgentName(agentName) {
-  return (
-    String(agentName || '')
-      .trim()
-      .toLowerCase() === SYSTEM_ASSISTANT_AGENT_NAME.toLowerCase()
-  );
+  const normalized = String(agentName || '')
+    .trim()
+    .toLowerCase();
+  if (!normalized) return false;
+  if (normalized === SYSTEM_ASSISTANT_AGENT_NAME.toLowerCase()) return true;
+  // A record still carrying a retired name is the same assistant, so protection
+  // and ordering must recognize it until migration has run (FR57).
+  return SYSTEM_ASSISTANT_LEGACY_NAMES.some(name => name.toLowerCase() === normalized);
 }
 
 // Built-in CLI agents (Claude Code, Codex, Gemini CLI) are projected from the

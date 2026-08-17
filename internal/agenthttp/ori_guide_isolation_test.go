@@ -121,7 +121,7 @@ func TestOneUnreadableRecordDoesNotHideTheReadableOnes(t *testing.T) {
 	resp := askGuide(t, h, "open my Launch Planning workspace", "/")
 	found := false
 	for _, a := range resp.Actions {
-		if a.Href == "/workspace/ok1" {
+		if a.Href == "/workspaces/ok1" {
 			found = true
 		}
 	}
@@ -134,7 +134,7 @@ func TestOneUnreadableRecordDoesNotHideTheReadableOnes(t *testing.T) {
 // canonical location to report.
 func TestAnUnknownRouteStillAnswers(t *testing.T) {
 	h := newGuide()
-	for _, route := range []string{"/nowhere", "/workspace/does-not-exist", "/a/b/c/d"} {
+	for _, route := range []string{"/nowhere", "/workspaces/does-not-exist", "/a/b/c/d"} {
 		resp := askGuide(t, h, "what is an agent", route)
 		if resp.Status != "answered" {
 			t.Errorf("route %q broke the answer: %q", route, resp.Status)

@@ -81,25 +81,10 @@
             </div>
           </div>
 
-          <!-- Workspace Entry Prompt Bar -->
-          <div id="homeAssistantCard" class="modern-card p-2 mb-3">
-            <form id="homeAssistantForm" class="home-assistant-workspace-form d-flex align-items-center gap-2">
-              <div class="d-none d-md-flex align-items-center gap-2 px-2" style="color: var(--text-secondary); font-size: 0.82rem; white-space: nowrap;">
-                <span id="homeAssistantIdentityName" style="font-weight: 600; color: var(--text-primary); display: inline-block; max-width: 180px; overflow: hidden; text-overflow: ellipsis;" title="Workspace Manager">Workspace Manager</span>
-                <span style="opacity: 0.6;">Canvas</span>
-              </div>
-              <div id="homeAssistantWorkspaceModeSwitch" class="home-assistant-workspace-mode-switch" role="group" aria-label="Workspace prompt mode">
-                <button type="button" class="home-assistant-workspace-mode-btn is-active" data-home-workspace-mode="task" aria-pressed="true">Task</button>
-                <button type="button" class="home-assistant-workspace-mode-btn" data-home-workspace-mode="ask" aria-pressed="false">Ask</button>
-                <button type="button" class="home-assistant-workspace-mode-btn" data-home-workspace-mode="note" aria-pressed="false">Note</button>
-              </div>
-              <input id="homeAssistantInput" type="text" class="modern-input flex-grow-1" maxlength="800"
-                     placeholder="Create a task for Workspace Manager from this canvas..."
-                     aria-label="Workspace manager prompt"
-                     style="min-height: 42px;">
-              <button id="homeAssistantSendBtn" type="submit" class="modern-btn modern-btn-primary home-assistant-send-btn">Create Task</button>
-            </form>
-          </div>
+          <!-- The canvas prompt bar was retired here (Issue #350). It was a
+               third copy of the same composer, with its own Task/Ask/Note mode
+               switch; the one universal Ask Ori panel carries the canvas
+               context instead, and the vertical space is reclaimed. -->
 
           <div class="row g-3">
             <!-- Canvas Area -->
@@ -648,48 +633,10 @@
   <!-- Include chat area (required for chat handoff from Ask Ori) -->
   {{template "chat-area.tmpl" .}}
 
-  <!-- Workspace Entry Thinking Modal -->
-  <div class="modal fade" id="homeAssistantThinkingModal" tabindex="-1"
-       aria-labelledby="homeAssistantThinkingModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
-      <div class="modal-content home-thinking-modal-content">
-        <div class="modal-header home-thinking-modal-header">
-          <div>
-            <h5 id="homeAssistantThinkingModalLabel" class="modal-title">Workspace Manager is working</h5>
-            <div id="homeAssistantThinkingStatus" class="home-thinking-modal-status" role="status" aria-live="polite">
-              <span id="homeAssistantThinkingSpinner" class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
-              <span>Analyzing your request...</span>
-            </div>
-          </div>
-          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-        </div>
-        <div class="modal-body">
-          <div id="homeAssistantRoutingSummary" class="home-assistant-routing-summary d-none"></div>
-          <div id="homeAssistantPlanning" class="home-assistant-planning d-none mt-3"></div>
-          <div id="homeAssistantInlineReply" class="home-assistant-inline-reply d-none mt-3"></div>
-          <div id="homeAssistantActions" class="d-flex flex-wrap gap-2 mt-3 d-none"></div>
-          <section id="homeAssistantConversationSection" class="home-assistant-conversation-section mt-3">
-            <div class="home-assistant-conversation-section-header">
-              <div>
-                <div class="home-assistant-conversation-section-eyebrow">Conversation History</div>
-                <div id="homeAssistantConversationSummary" class="home-assistant-conversation-section-copy">
-                  Progress updates and manager notes will appear here after you send a message.
-                </div>
-              </div>
-              <button id="homeAssistantConversationToggleBtn" type="button" class="modern-btn modern-btn-secondary modern-btn-sm" hidden>
-                Hide Conversation
-              </button>
-            </div>
-            <div id="homeAssistantConversation" class="home-assistant-conversation home-assistant-conversation-modal p-3">
-              <div class="home-assistant-thinking-placeholder">
-                Progress updates will appear here after you send a message.
-              </div>
-            </div>
-          </section>
-        </div>
-      </div>
-    </div>
-  </div>
+  <!-- The canvas working modal was retired here (Issue #350). Routing,
+       planning, confirmations, and the conversation now render inside the one
+       universal Ask Ori panel, so canvas work is no longer shown behind a
+       blocking modal that covered the canvas it came from. -->
 
   <!-- Shared Modals (Add Agent, Marketplace, etc.) -->
   {{template "modals.tmpl" .}}
@@ -749,6 +696,11 @@
         if (response.ok) {
           const workspace = await response.json();
           document.getElementById('canvas-workspace-name').textContent = workspace.name || 'Unnamed Workspace';
+          // Give Ask Ori the canvas's workspace name, so its context reads
+          // "Canvas: Launch" rather than a UUID (Issue #350 FR4).
+          if (window.OriGuide && typeof window.OriGuide.setContext === 'function' && workspace.name) {
+            window.OriGuide.setContext({ workspaceId: workspaceId, label: 'Canvas: ' + workspace.name });
+          }
         }
       } catch (error) {
         console.error('Failed to load workspace info:', error);

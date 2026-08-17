@@ -11,6 +11,11 @@ import { installLocalCdn } from './helpers/offline-cdn';
 // axe is scoped to the guide's own root so pre-existing chrome (navbar,
 // sidebar) cannot mask a regression introduced here — the same approach the
 // roster suite uses.
+//
+// These run against /agents rather than Home. Home hides the floating launcher
+// and uses the map character as its single entry point (#332), so asserting on
+// #oriGuideLauncher there had been failing since that change; /agents is an
+// authenticated page where the shared launcher itself is the way in.
 
 const baseUrl = process.env.PLAYWRIGHT_BASE_URL || process.env.BASE_URL || 'http://localhost:8765';
 
@@ -56,7 +61,7 @@ for (const theme of ['light', 'dark']) {
   test(`ori guide accessibility (${theme})`, async ({ page }) => {
     await preparePage(page, { theme });
     await page.setViewportSize({ width: 1440, height: 950 });
-    await page.goto(`${baseUrl}/`, { waitUntil: 'domcontentloaded' });
+    await page.goto(`${baseUrl}/agents`, { waitUntil: 'domcontentloaded' });
     await expect(page.locator('#oriGuideLauncher')).toBeVisible();
 
     await page.addScriptTag({ url: 'https://cdn.jsdelivr.net/npm/axe-core@4.10.3/axe.min.js' });
@@ -88,7 +93,7 @@ for (const theme of ['light', 'dark']) {
 
 test('the guide is fully operable without a pointer', async ({ page }) => {
   await preparePage(page);
-  await page.goto(`${baseUrl}/`, { waitUntil: 'domcontentloaded' });
+  await page.goto(`${baseUrl}/agents`, { waitUntil: 'domcontentloaded' });
   await expect(page.locator('#oriGuideLauncher')).toBeVisible();
 
   // Open, ask, and close using only the keyboard (FR-115).
@@ -108,7 +113,7 @@ test('the guide is fully operable without a pointer', async ({ page }) => {
 
 test('no guide control is pointer-only', async ({ page }) => {
   await preparePage(page);
-  await page.goto(`${baseUrl}/`, { waitUntil: 'domcontentloaded' });
+  await page.goto(`${baseUrl}/agents`, { waitUntil: 'domcontentloaded' });
   await openAndAsk(page, 'what is an agent');
 
   // Every interactive element inside the panel must be focusable. Walking Tab
@@ -120,6 +125,10 @@ test('no guide control is pointer-only', async ({ page }) => {
     const bad = [];
     for (const el of controls) {
       if (el.disabled) continue;
+      // Only controls the user is actually being offered. The panel hosts the
+      // work-activity region, whose controls stay hidden until there is work to
+      // show; an unrendered button is not a pointer-only control.
+      if (el.hidden || el.closest('[hidden]') || el.offsetParent === null) continue;
       if (el.getAttribute('tabindex') === '-1') {
         bad.push(el.id || el.className);
         continue;
@@ -168,7 +177,7 @@ test('the panel is usable at 200% zoom without horizontal page scroll', async ({
   await preparePage(page);
   // 200% zoom at a 1280 logical width behaves like a 640px viewport.
   await page.setViewportSize({ width: 640, height: 720 });
-  await page.goto(`${baseUrl}/`, { waitUntil: 'domcontentloaded' });
+  await page.goto(`${baseUrl}/agents`, { waitUntil: 'domcontentloaded' });
   await openAndAsk(page, 'what is a workspace');
 
   await expect(page.locator('#oriGuideSend')).toBeVisible();
@@ -183,7 +192,7 @@ test('the panel is usable at 200% zoom without horizontal page scroll', async ({
 test('the narrow sheet keeps its actions reachable', async ({ page }) => {
   await preparePage(page);
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto(`${baseUrl}/`, { waitUntil: 'domcontentloaded' });
+  await page.goto(`${baseUrl}/agents`, { waitUntil: 'domcontentloaded' });
   await openAndAsk(page, 'what is a vault');
 
   const action = page.locator('.ori-guide__action').first();
@@ -193,4 +202,54 @@ test('the narrow sheet keeps its actions reachable', async ({ page }) => {
   const box = await action.boundingBox();
   expect(box.x).toBeGreaterThanOrEqual(0);
   expect(box.x + box.width).toBeLessThanOrEqual(390 + 1);
+});
+
+// Issue #350 FR69. The panel is mounted on every authenticated page now, so an
+// invisible piece of it covering the page underneath would break every page at
+// once rather than one. Hit-tested rather than measured, because "it looks like
+// it is out of the way" is exactly the assumption that keeps failing here.
+test('nothing the panel adds intercepts clicks on the page beneath it', async ({ page }) => {
+  await preparePage(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+
+  for (const route of ['/', '/agents', '/vaults']) {
+    await page.goto(`${baseUrl}${route}`, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(500);
+
+    // Panel CLOSED: only the launcher itself may own any point on the page.
+    const intercepting = await page.evaluate(() => {
+      const hits = [];
+      for (const x of [0.25, 0.5, 0.75]) {
+        for (const y of [0.3, 0.6, 0.85]) {
+          const el = document.elementFromPoint(
+            Math.round(window.innerWidth * x),
+            Math.round(window.innerHeight * y)
+          );
+          if (!el || !el.closest) continue;
+          if (el.closest('#oriGuideRoot') && !el.closest('#oriGuideLauncher')) {
+            hits.push(el.className || el.tagName);
+          }
+        }
+      }
+      return hits;
+    });
+
+    expect(intercepting, `${route} has Ask Ori chrome over the page`).toEqual([]);
+  }
+});
+
+// Every authenticated page gets exactly one of each control (FR1/FR10), and no
+// retired page-native composer survives anywhere (FR6).
+test('every page has one launcher, one panel, one composer, and no retired one', async ({
+  page
+}) => {
+  await preparePage(page);
+
+  for (const route of ['/', '/agents', '/vaults', '/settings']) {
+    await page.goto(`${baseUrl}${route}`, { waitUntil: 'domcontentloaded' });
+    await expect(page.locator('#oriGuidePanel')).toHaveCount(1);
+    await expect(page.locator('#oriGuideInput')).toHaveCount(1);
+    await expect(page.locator('#homeAssistantInput')).toHaveCount(0);
+    await expect(page.locator('#hubSupportChat')).toHaveCount(0);
+  }
 });

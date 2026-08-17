@@ -274,7 +274,13 @@ func (h *DashboardHandler) GetAgentDetail(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	ag, ok := h.State.GetAgent(agentName)
+	// Resolved rather than looked up exactly, so a bookmark, a stored workspace
+	// reference, or a client that has not reloaded since the rename still finds
+	// the system assistant instead of a 404 (FR57).
+	ag, resolvedName, ok := store.ResolveAgent(h.State, agentName)
+	if ok && ag != nil {
+		agentName = resolvedName
+	}
 	if !ok || ag == nil {
 		// Check if it's a CLI agent
 		if h.cliAgentRegistry != nil {

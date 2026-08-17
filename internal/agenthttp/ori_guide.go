@@ -199,11 +199,14 @@ func (h *GuideHandler) answer(question, route string) GuideResponse {
 	if isWorkRequest(question) {
 		resp.Status = "answered"
 		resp.TopicKey = "workspace-manager"
-		resp.Answer = "That is work rather than navigation, so a working agent should handle it. " +
-			"I can open Workspace Manager with your request ready to send — you stay in control of whether it runs."
+		// The topic key stays "workspace-manager": it is the client's signal that
+		// this is work rather than navigation, and renaming it would break that
+		// dispatch. Only the copy is user-visible (FR62).
+		resp.Answer = "That is work rather than navigation, so I will route it to the right agent. " +
+			"You stay in control of whether it runs."
 		resp.Actions = []GuideAction{{
 			Type:        GuideActionHandoff,
-			Label:       "Open Workspace Manager",
+			Label:       "Send this as work",
 			HandoffText: question,
 		}}
 		return resp
