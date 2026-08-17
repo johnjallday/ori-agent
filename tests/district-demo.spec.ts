@@ -4,8 +4,11 @@ import { test, expect, Page } from '@playwright/test';
  * Issue #346 group-1 demo: a populated district stays compact even when the
  * group's own saved anchor was left far from its members.
  *
- * Not part of CI. Run against the isolated demo server seeded by
- * ./scripts/seed-346-demo.sh:
+ * Not part of CI, and it needs a FRESH demo sandbox holding only its own
+ * fixture: it asserts a Fit all zoom, and other fixtures in the same sandbox
+ * push that to the 10% floor for reasons unrelated to this district.
+ *   ./scripts/demo-346.sh 8947 --fresh
+ *   ./scripts/seed-346-demo.sh 8947
  *   ./scripts/e2e.sh --port 8947 tests/district-demo.spec.ts
  *
  * It captures the evidence for the group's Demo: checkpoint on both Map
@@ -70,7 +73,10 @@ for (const surface of [
     expect(facts.district!.sizingMode).toBe('auto');
 
     // And Fit all's content bounds are not dragged down to the stale anchor.
-    expect(facts.bounds.maxY).toBeLessThan(1500);
+    // Stated relative to that anchor rather than as a fixed number: the sandbox
+    // may hold other fixtures, and what matters is that this one contributes
+    // nothing to the bounds.
+    expect(facts.bounds.maxY).toBeLessThan(facts.staleAnchor!.y - 1000);
 
     // Drive the real Fit all from the canvas context menu, so the screenshot
     // shows the camera a user would actually get rather than the opening view.
