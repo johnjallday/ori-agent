@@ -683,6 +683,29 @@
 .ws-map-district.is-blocked .ws-map-district-handle {
   cursor: not-allowed;
 }
+/* A hierarchy change made elsewhere has left this frame around a workspace that
+   is not in the group (#346 FR-88). Dotted — distinct from dashed (ordinary),
+   solid (dragging), and doubled (a blocked gesture) — so the four states are
+   told apart by shape, not only by colour (FR-163). */
+.ws-map-district.is-conflicted {
+  border-style: dotted;
+  border-width: 2.5px;
+  border-color: var(--ws-amber, #c98a2e);
+}
+.ws-map-district-conflict {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 6px;
+  margin: 0;
+  padding: 4px 8px;
+  border: 1px solid var(--ws-amber, #c98a2e);
+  background: var(--ws-bg-2);
+  color: var(--ws-ink, inherit);
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  line-height: 1.35;
+}
 
 /* ---------------------------------------------------------------------------
    District resize overlay (#346 FR-52 – FR-57, FR-81)

@@ -639,7 +639,42 @@ func (s *SQLiteStore) translateGroup(ctx context.Context, tx *sql.Tx, userID str
 		}
 		translated[memberID] = moved
 	}
-	return s.writePositions(ctx, tx, userID, now, translated, state)
+	if err := s.writePositions(ctx, tx, userID, now, translated, state); err != nil {
+		return err
+	}
+	return s.translateGroupFrame(ctx, tx, userID, now, op.GroupID, delta, state)
+}
+
+// translateGroupFrame carries a district's saved minimum rectangle along with
+// the cluster it belongs to (#346 FR-91, FR-184).
+//
+// It runs inside the same transaction as the member anchors, which is the whole
+// point: a district whose buildings moved but whose reserved room did not would
+// be a frame that no longer sits where its contents do, and there is no valid
+// intermediate state in which that is true. Only a *custom* frame has anything
+// to translate — an automatic district's rectangle is derived from the members
+// that just moved, so it follows them for free (FR-92).
+func (s *SQLiteStore) translateGroupFrame(ctx context.Context, tx *sql.Tx, userID string, now time.Time, groupID string, delta Point, state *layoutState) error {
+	current, err := s.readGroupPresentation(ctx, tx, userID, groupID)
+	if err != nil {
+		return err
+	}
+	if current.SizingMode != SizingModeCustom || current.Frame == nil {
+		return nil
+	}
+	moved, err := NormalizeFrame(current.Frame.Translate(delta))
+	if err != nil {
+		// The cluster keeps its relative geometry or none of it moves; a frame
+		// clamped into range while its members translated freely would shear the
+		// district away from its contents.
+		return fmt.Errorf("group %q frame: %w", groupID, err)
+	}
+	current.Frame = &moved
+	if err := s.writeGroupPresentation(ctx, tx, userID, now, groupID, current); err != nil {
+		return err
+	}
+	state.committedGroups[groupID] = current
+	return nil
 }
 
 // enforceLayoutSize keeps one user's stored anchors inside the documented bound

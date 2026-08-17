@@ -851,6 +851,137 @@ func TestGroupPresentationUpgradesVersionOneLayout(t *testing.T) {
 	}
 }
 
+// A district's saved minimum travels with the cluster it belongs to, inside the
+// same transaction as its member anchors (#346 FR-91, FR-184).
+func TestTranslateGroupCarriesTheCustomFrame(t *testing.T) {
+	store, db := newTestStore(t)
+	ctx := context.Background()
+	seedWorkspace(t, db, "grp-a", "ws-a")
+	store.SetDescendantResolver(fixedResolver{"grp-a": {"grp-a", "ws-a"}})
+
+	if _, err := store.Apply(ctx, "local", Patch{Operations: []Operation{
+		SetPositions(map[string]Point{"ws-a": {X: 400, Y: 400}}),
+		SetGroupFrame("grp-a", Frame{X: 300, Y: 300, Width: 600, Height: 500}),
+	}}); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	result, err := store.Apply(ctx, "local", Patch{Operations: []Operation{
+		TranslateGroup("grp-a", Point{X: 100, Y: -50}),
+	}})
+	if err != nil {
+		t.Fatalf("Apply translate: %v", err)
+	}
+
+	committed, ok := result.Groups["grp-a"]
+	if !ok || committed.Frame == nil {
+		t.Fatalf("the move did not report the district it translated: %+v", result.Groups)
+	}
+	want := Frame{X: 400, Y: 250, Width: 600, Height: 500}
+	if *committed.Frame != want {
+		t.Errorf("frame = %+v, want %+v (same size, one delta)", *committed.Frame, want)
+	}
+
+	layout, err := store.Load(ctx, "local")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := layout.Positions["ws-a"]; got != (Point{X: 500, Y: 350}) {
+		t.Errorf("member = %+v, want the same delta as its frame", got)
+	}
+	if stored := layout.Groups["grp-a"]; stored.Frame == nil || *stored.Frame != want {
+		t.Errorf("stored frame = %+v, want %+v", stored.Frame, want)
+	}
+}
+
+// An automatic district has nothing to translate: its rectangle is derived from
+// the members that just moved (#346 FR-92).
+func TestTranslateGroupLeavesAnAutomaticDistrictAlone(t *testing.T) {
+	store, db := newTestStore(t)
+	ctx := context.Background()
+	seedWorkspace(t, db, "grp-a", "ws-a")
+	store.SetDescendantResolver(fixedResolver{"grp-a": {"grp-a", "ws-a"}})
+
+	if _, err := store.Apply(ctx, "local", Patch{Operations: []Operation{
+		SetPositions(map[string]Point{"ws-a": {X: 400, Y: 400}}),
+		SetGroupCollapsed("grp-a", true),
+	}}); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if _, err := store.Apply(ctx, "local", Patch{Operations: []Operation{
+		TranslateGroup("grp-a", Point{X: 100, Y: 0}),
+	}}); err != nil {
+		t.Fatalf("Apply translate: %v", err)
+	}
+
+	layout, err := store.Load(ctx, "local")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	record := layout.Groups["grp-a"]
+	if record.Frame != nil {
+		t.Errorf("an automatic district gained a stored frame: %+v", record.Frame)
+	}
+	if !record.Collapsed {
+		t.Error("and the move must not disturb its other facets")
+	}
+}
+
+// The frame and the anchors land together or not at all: a translation that
+// would push the frame out of the safe world rolls the whole move back
+// (#346 FR-95, FR-96).
+func TestTranslateGroupRollsBackWhenTheFrameCannotFollow(t *testing.T) {
+	store, db := newTestStore(t)
+	ctx := context.Background()
+	seedWorkspace(t, db, "grp-a", "ws-a")
+	store.SetDescendantResolver(fixedResolver{"grp-a": {"grp-a", "ws-a"}})
+
+	frame := Frame{X: MaxCoordinate - 1000, Y: 0, Width: 600, Height: 500}
+	if _, err := store.Apply(ctx, "local", Patch{Operations: []Operation{
+		SetPositions(map[string]Point{"ws-a": {X: 0, Y: 0}}),
+		SetGroupFrame("grp-a", frame),
+	}}); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	before, err := store.Load(ctx, "local")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	// The member could move, but the frame's far edge would leave the world.
+	if _, err := store.Apply(ctx, "local", Patch{Operations: []Operation{
+		TranslateGroup("grp-a", Point{X: 900, Y: 0}),
+	}}); err == nil {
+		t.Fatal("expected the translation to be refused")
+	}
+
+	after, err := store.Load(ctx, "local")
+	if err != nil {
+		t.Fatalf("Load after refusal: %v", err)
+	}
+	if after.Positions["ws-a"] != before.Positions["ws-a"] {
+		t.Errorf("the member moved without its frame: %+v", after.Positions["ws-a"])
+	}
+	if stored := after.Groups["grp-a"]; stored.Frame == nil || *stored.Frame != frame {
+		t.Errorf("stored frame = %+v, want it untouched at %+v", stored.Frame, frame)
+	}
+	if after.Revision != before.Revision {
+		t.Errorf("a refused move consumed a revision: %d → %d", before.Revision, after.Revision)
+	}
+}
+
+// fixedResolver answers group membership from a fixed table, so store tests can
+// exercise translation without the workspace hierarchy.
+type fixedResolver map[string][]string
+
+func (f fixedResolver) GroupNodeIDs(_ context.Context, groupID string) ([]string, error) {
+	ids, ok := f[groupID]
+	if !ok {
+		return nil, fmt.Errorf("%w: %q", ErrNodeNotFound, groupID)
+	}
+	return ids, nil
+}
+
 func TestGroupPresentationRejectsUndersizedFrame(t *testing.T) {
 	store, db := newTestStore(t)
 	ctx := context.Background()

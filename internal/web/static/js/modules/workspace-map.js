@@ -988,6 +988,17 @@
       };
     });
 
+    // A hierarchy change made in Tree or another tab is authoritative: a
+    // workspace reparented into this group can land its frame across an
+    // unrelated building, and the Map's job then is to show what is actually
+    // true and say the layout needs attention — not to quietly move something
+    // to make the picture tidy (#346 FR-87 – FR-89). Marking it is a read-only
+    // observation; nothing here writes.
+    districts.forEach(function (district) {
+      var conflict = frameConflict(district, district.id, { nodes: nodes, districts: districts });
+      district.conflict = conflict.blocked ? conflict : null;
+    });
+
     // 5. The reserved Personal HQ site and the New Workspace pad get stable
     //    automatic anchors from the same scan, but they are never persisted:
     //    neither is a workspace, so neither may occupy a workspace ID in the
@@ -1255,6 +1266,43 @@
         next.y !== frame.y ||
         next.width !== frame.width ||
         next.height !== frame.height
+    };
+  }
+
+  /**
+   * What a custom district's stored minimum has to become for a member move
+   * (#346 FR-35, FR-36, FR-38, FR-39).
+   *
+   * Only `custom` districts have a stored minimum to reconcile. An automatic one
+   * follows its members on every render, so a move needs no frame write at all —
+   * which is what keeps the ordinary case a single-operation patch.
+   *
+   * The result is the union of the stored minimum and what the members need
+   * *after* the move. It never shrinks: a member pulled inward, removed,
+   * trashed, or reparented away leaves the reserved room exactly as the user
+   * chose it (FR-37).
+   *
+   * @param {object} district a rendered district
+   * @param {Array} members the district's rendered member nodes
+   * @param {string} memberId the member being moved
+   * @param {{x:number,y:number}} point where it is going
+   * @returns {{frame: object, changed: boolean}|null} null when there is nothing to reconcile
+   */
+  function reconcileCustomFrame(district, members, memberId, point) {
+    if (!district || district.sizingMode !== 'custom' || !district.customFrame) return null;
+    var moved = (members || []).map(function (member) {
+      return member.id === memberId ? { x: point.x, y: point.y } : { x: member.x, y: member.y };
+    });
+    var required = memberBounds(moved);
+    var next = unionFrames(district.customFrame, required);
+    var stored = district.customFrame;
+    return {
+      frame: next,
+      changed:
+        next.x !== stored.x ||
+        next.y !== stored.y ||
+        next.width !== stored.width ||
+        next.height !== stored.height
     };
   }
 
@@ -1847,13 +1895,19 @@
     var name = ws.name || 'Group';
     var label = name + ' group';
     var countLabel = districtCountLabel(d.memberCount);
+    // A district whose frame has ended up around something that is not in it —
+    // always because the hierarchy changed underneath it, never because of
+    // anything the user did on the Map (#346 FR-88).
+    var conflict = d.conflict || null;
     // Home selects on click and opens on Enter, so the control cannot promise
     // "Open" as its only meaning. It names the group and its state instead, and
     // aria-pressed carries the selection (FR-141, FR-143).
     var selectLabel = name + ' group, ' + countLabel;
     return (
-      '<div class="ws-map-district" role="group" aria-label="' +
-      escapeHtml(label) +
+      '<div class="ws-map-district' +
+      (conflict ? ' is-conflicted' : '') +
+      '" role="group" aria-label="' +
+      escapeHtml(conflict ? label + ', needs layout attention' : label) +
       '" ' +
       'data-group-id="' +
       escapeHtml(ws.id) +
@@ -1913,6 +1967,17 @@
       escapeHtml('Actions for ' + name) +
       '"><span aria-hidden="true">⋯</span></button>' +
       '</div>' +
+      // Explanatory text, not a colour: it names what the frame has ended up
+      // around and what the user can do about it (FR-88, FR-163).
+      (conflict
+        ? '<p class="ws-map-district-conflict" role="status">' +
+          escapeHtml(
+            'This group’s outline now reaches ' +
+              conflict.name +
+              ', which is not in it. Move or resize the group, or move its workspaces.'
+          ) +
+          '</p>'
+        : '') +
       '</div>'
     );
   }
@@ -4854,10 +4919,71 @@
    * where it was, keeps focus and selection, and says so with a retry
    * (FR-71).
    */
-  function commitMove(container, id, el, point, previous) {
+  /**
+   * The operations one member move has to commit.
+   *
+   * Usually just the anchor. When the member belongs to a custom-sized district
+   * and the move pushes past one of its edges, the reconciled minimum rectangle
+   * rides along in the SAME patch, so the coordinate and the frame that has to
+   * contain it are one accepted layout change rather than two that can half-fail
+   * (#346 FR-38).
+   *
+   * Returns null when the move is refused: expanding the frame across a
+   * workspace outside the group, or across another district, would make the Map
+   * claim a membership that does not exist, and that is blocked before save
+   * rather than saved and explained afterwards (FR-83).
+   */
+  function memberMoveOperations(id, point) {
     var positions = {};
     positions[id] = { x: point.x, y: point.y };
-    return patchLayout([{ op: 'set_positions', positions: positions }])
+    var operations = [{ op: 'set_positions', positions: positions }];
+
+    var node = null;
+    if (lastWorldLayout) {
+      lastWorldLayout.nodes.forEach(function (candidate) {
+        if (candidate.id === id) node = candidate;
+      });
+    }
+    if (!node || !node.groupId) return { operations: operations, conflict: null };
+
+    var district = renderedDistrict(node.groupId);
+    var members = lastWorldLayout.nodes.filter(function (candidate) {
+      return candidate.groupId === node.groupId;
+    });
+    var reconciled = reconcileCustomFrame(district, members, id, point);
+    if (!reconciled || !reconciled.changed) return { operations: operations, conflict: null };
+
+    var conflict = frameConflict(reconciled.frame, node.groupId, lastWorldLayout);
+    if (conflict.blocked) return { operations: null, conflict: conflict };
+
+    operations.push({
+      op: 'set_group_frame',
+      group_id: node.groupId,
+      frame: {
+        x: reconciled.frame.x,
+        y: reconciled.frame.y,
+        width: reconciled.frame.width,
+        height: reconciled.frame.height
+      }
+    });
+    return { operations: operations, conflict: null };
+  }
+
+  function commitMove(container, id, el, point, previous) {
+    var plan = memberMoveOperations(id, point);
+    if (!plan.operations) {
+      // Blocked before save: nothing moved, nothing was asked of the server.
+      placeElement(el, previous);
+      if (el && el.focus) el.focus();
+      announce(
+        container,
+        'That move is blocked — its group would have to grow around ' +
+          plan.conflict.name +
+          ', which is not in it.'
+      );
+      return Promise.resolve(false);
+    }
+    return patchLayout(plan.operations)
       .then(function (result) {
         var committed = (result && result.positions && result.positions[id]) || point;
         placeElement(el, committed);
@@ -5097,12 +5223,27 @@
         occupied.push(committedAnchor(node.id) || { x: node.x, y: node.y });
       });
     }
-    return members.some(function (member) {
+    var buriesBuilding = members.some(function (member) {
       var candidate = { x: member.origin.x + delta.x, y: member.origin.y + delta.y };
       return occupied.some(function (anchor) {
         return footprintsOverlap(candidate, anchor);
       });
     });
+    if (buriesBuilding) return true;
+
+    // The frame travels with the cluster, so it has to be checked where it is
+    // going too (#346 FR-84). A district whose buildings all land in clear space
+    // can still arrive with its outline drawn around someone else's workspace,
+    // and that outline is a claim about membership.
+    var district = renderedDistrict(groupId);
+    if (!district) return false;
+    var translated = {
+      x: district.x + delta.x,
+      y: district.y + delta.y,
+      width: district.width,
+      height: district.height
+    };
+    return frameConflict(translated, groupId, lastWorldLayout).blocked;
   }
 
   function previewCluster(state, delta) {
@@ -6079,6 +6220,7 @@
     districtThemes: DISTRICT_THEMES.slice(),
     // Pure district frame math (FR-123).
     effectiveDistrictFrame: effectiveDistrictFrame,
+    reconcileCustomFrame: reconcileCustomFrame,
     // The one resize geometry and the one collision rule, shared by the pointer,
     // keyboard, context-menu, and rail paths (#346 FR-156).
     districtResize: {

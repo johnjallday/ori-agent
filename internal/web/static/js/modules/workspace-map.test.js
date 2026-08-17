@@ -756,6 +756,88 @@ test('a frame that would enclose a non-member or another district is blocked (#3
   assert.equal(overOwnMember.blocked, false);
 });
 
+// ---------------------------------------------------------------------------
+// Custom frames and movement (#346 FR-35 – FR-39, FR-83 – FR-89)
+// ---------------------------------------------------------------------------
+
+function customDistrictLayout(positions, frame) {
+  const computeWorldLayout = loadWorldLayout();
+  return computeWorldLayout(
+    [
+      { id: 'g', kind: 'group', name: 'Roomy' },
+      { id: 'm1', parent_id: 'g' },
+      { id: 'm2', parent_id: 'g' },
+      { id: 'solo', name: 'Outside' }
+    ],
+    {
+      positions,
+      groupPresentations: { g: { sizing_mode: 'custom', frame } }
+    }
+  );
+}
+
+test('a member moving outward expands the custom minimum; inward never shrinks it (#346 FR-36, FR-37)', () => {
+  const map = loadOriWorkspaceMap();
+  const frame = { x: 300, y: 300, width: 600, height: 500 };
+  const positions = { m1: { x: 400, y: 400 }, m2: { x: 600, y: 400 }, solo: { x: 4000, y: 4000 } };
+  const layout = customDistrictLayout(positions, frame);
+  const district = districtsById(layout).g;
+  const members = layout.nodes.filter(n => n.groupId === 'g');
+
+  const outward = map.reconcileCustomFrame(district, members, 'm2', { x: 1400, y: 400 });
+  assert.equal(outward.changed, true);
+  assert.equal(outward.frame.x, 300, 'the far edge grows; the near edge is untouched');
+  assert.ok(outward.frame.x + outward.frame.width > 1400);
+
+  const inward = map.reconcileCustomFrame(district, members, 'm2', { x: 420, y: 420 });
+  assert.equal(inward.changed, false, 'pulling a member in reserves the same room as before');
+  assert.deepEqual({ ...inward.frame }, frame);
+});
+
+test('an automatic district has no stored minimum to reconcile (#346 FR-32)', () => {
+  const map = loadOriWorkspaceMap();
+  const layout = map.computeWorldLayout(
+    [
+      { id: 'g', kind: 'group', name: 'Auto' },
+      { id: 'm1', parent_id: 'g' }
+    ],
+    { positions: { m1: { x: 400, y: 400 } } }
+  );
+  const district = districtsById(layout).g;
+  const members = layout.nodes.filter(n => n.groupId === 'g');
+  assert.equal(
+    map.reconcileCustomFrame(district, members, 'm1', { x: 900, y: 900 }),
+    null,
+    'an automatic frame follows its members already — a move needs no frame write'
+  );
+});
+
+test('a district reports a hierarchy-made conflict without repairing it (#346 FR-87 – FR-89)', () => {
+  const positions = { m1: { x: 400, y: 400 }, m2: { x: 600, y: 400 }, solo: { x: 700, y: 400 } };
+  // A custom frame wide enough to reach the unrelated workspace: exactly what a
+  // Tree reparent or another tab can produce while the Map is open.
+  const layout = customDistrictLayout(positions, { x: 300, y: 300, width: 900, height: 400 });
+  const district = districtsById(layout).g;
+
+  assert.ok(district.conflict, 'the district is marked as needing layout attention');
+  assert.equal(district.conflict.reason, 'workspace');
+  assert.equal(district.conflict.name, 'Outside');
+
+  // The truth is still rendered: the frame is not shrunk, and nothing moved.
+  assert.equal(district.width, 900, 'the real frame is drawn, not a tidied one');
+  const anchors = anchorsById(layout);
+  assert.deepEqual(anchors.solo, { x: 700, y: 400 }, 'the unrelated workspace was not moved');
+  assert.deepEqual(anchors.m1, { x: 400, y: 400 });
+});
+
+test('a district with no conflict reports none (#346 FR-88)', () => {
+  const layout = customDistrictLayout(
+    { m1: { x: 400, y: 400 }, m2: { x: 600, y: 400 }, solo: { x: 4000, y: 4000 } },
+    { x: 300, y: 300, width: 600, height: 400 }
+  );
+  assert.equal(districtsById(layout).g.conflict, null);
+});
+
 test('a stale group anchor no longer drags Fit all out (#346 FR-48, success metric 1)', () => {
   const computeWorldLayout = loadWorldLayout();
   const wss = [
@@ -3756,6 +3838,131 @@ test('Fit to contents returns the district to automatic sizing (#346 FR-40)', as
       group_id: 'grp'
     }
   );
+});
+
+// ---------------------------------------------------------------------------
+// Movement against a custom frame (#346 FR-38, FR-83, FR-84)
+// ---------------------------------------------------------------------------
+
+async function mountedWithCustomFrame({ frame, positions, patchResponse } = {}) {
+  const patches = [];
+  const map = loadMapWithFetch((url, init) => {
+    if (init && init.method === 'PATCH') {
+      patches.push(JSON.parse(init.body));
+      if (patchResponse === 'fail') return Promise.resolve({ ok: false, status: 500 });
+      return Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            result: { schema_version: 1, revision: 5, positions: {}, snap_to_grid: true }
+          })
+      });
+    }
+    return jsonResponse({
+      schema_version: 1,
+      revision: 1,
+      snap_to_grid: false,
+      positions,
+      groups: { grp: { sizing_mode: 'custom', frame, collapsed: false } }
+    });
+  });
+  const harness = createCameraHarness({ tiles: ['m1', 'outsider'], districts: ['grp'] });
+  map.mount(harness.container, {
+    workspaces: [
+      { id: 'grp', kind: 'group', name: 'Ops' },
+      { id: 'm1', parent_id: 'grp', name: 'M1' },
+      { id: 'outsider', name: 'Outside' }
+    ],
+    hideChrome: true,
+    selectOnly: true,
+    noAutoSelect: true
+  });
+  await flush();
+  harness.fire('keydown', { key: '0', preventDefault() {} });
+  return { map, harness, patches };
+}
+
+test('moving a member past a custom edge saves the anchor and the frame together (#346 FR-38)', async () => {
+  const { harness, patches } = await mountedWithCustomFrame({
+    frame: { x: 300, y: 300, width: 400, height: 400 },
+    positions: { m1: { x: 380, y: 380 }, outsider: { x: 4000, y: 4000 } }
+  });
+
+  const tile = harness.tile('m1');
+  tile.fire('pointerdown', tilePointer(0, 0));
+  tile.fire('pointermove', tilePointer(500, 0));
+  tile.fire('pointerup', tilePointer(500, 0));
+  await flush();
+
+  assert.equal(patches.length, 1, 'one accepted layout change, not two');
+  const ops = patches[0].operations;
+  assert.equal(ops.length, 2);
+  assert.equal(ops[0].op, 'set_positions');
+  assert.equal(ops[1].op, 'set_group_frame');
+  assert.equal(ops[1].group_id, 'grp');
+  assert.ok(
+    ops[1].frame.x + ops[1].frame.width >= 880,
+    'the frame grew to contain the member it now holds'
+  );
+  assert.equal(ops[1].frame.x, 300, 'and only the edge it had to cross moved');
+});
+
+test('moving a member inside the custom frame writes no frame at all (#346 FR-37)', async () => {
+  const { harness, patches } = await mountedWithCustomFrame({
+    frame: { x: 300, y: 300, width: 900, height: 800 },
+    positions: { m1: { x: 380, y: 380 }, outsider: { x: 4000, y: 4000 } }
+  });
+
+  const tile = harness.tile('m1');
+  tile.fire('pointerdown', tilePointer(0, 0));
+  tile.fire('pointermove', tilePointer(100, 100));
+  tile.fire('pointerup', tilePointer(100, 100));
+  await flush();
+
+  assert.equal(patches.length, 1);
+  assert.equal(patches[0].operations.length, 1, 'the reserved room already contained it');
+  assert.equal(patches[0].operations[0].op, 'set_positions');
+});
+
+test('a member move that would grow its group over an outsider is blocked (#346 FR-83)', async () => {
+  const { harness, patches } = await mountedWithCustomFrame({
+    frame: { x: 300, y: 300, width: 400, height: 400 },
+    // The outsider sits just east of the frame: growing to reach the member's
+    // destination would draw the group around it.
+    positions: { m1: { x: 380, y: 380 }, outsider: { x: 900, y: 380 } }
+  });
+
+  const tile = harness.tile('m1');
+  tile.fire('pointerdown', tilePointer(0, 0));
+  tile.fire('pointermove', tilePointer(700, 0));
+  tile.fire('pointerup', tilePointer(700, 0));
+  await flush();
+
+  assert.equal(patches.length, 0, 'blocked before save — nothing was asked of the server');
+  assert.deepEqual({ ...tile.at() }, { x: 380, y: 380 }, 'the member is back where it was');
+});
+
+test('a district move is refused when the frame would land on an outsider (#346 FR-84)', async () => {
+  const { harness, patches } = await mountedWithCustomFrame({
+    // A frame far wider than its single member, so the members can all land in
+    // clear space while the outline still arrives around someone else.
+    frame: { x: 300, y: 300, width: 800, height: 400 },
+    positions: { m1: { x: 320, y: 320 }, outsider: { x: 1400, y: 320 } }
+  });
+
+  const handle = harness.handle('grp');
+  handle.fire('pointerdown', tilePointer(0, 0));
+  handle.fire('pointermove', tilePointer(400, 0));
+  const district = harness.district('grp');
+  assert.equal(
+    district.classList.contains('is-blocked'),
+    true,
+    'the outline reaching the outsider is a collision even though no tile lands on it'
+  );
+
+  handle.fire('pointerup', tilePointer(400, 0));
+  await flush();
+  assert.equal(patches.length, 0, 'and nothing was saved');
 });
 
 // ---------------------------------------------------------------------------
