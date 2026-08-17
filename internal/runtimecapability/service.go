@@ -154,6 +154,65 @@ func (s *Service) EvaluateTaskCapability(workspaceID, capability string) (bool, 
 	return true, nil
 }
 
+// EvaluateTaskCapabilityForTask validates the exact assigned workspace-agent
+// instance before the ordinary durable/live preflight. This keeps a grant for
+// one agent from letting a differently assigned task reach provider
+// construction and fail only while its CLI scope is being assembled.
+func (s *Service) EvaluateTaskCapabilityForTask(workspaceID string, task workspace.Task, capability string) (bool, *workspace.TaskBlockedError) {
+	key := workspace.NormalizeRuntimeIdentifier(capability)
+	if key == "" || s == nil || s.store == nil {
+		return false, nil
+	}
+	ws, contract, mode, err := s.loadSelected(workspaceID)
+	if err != nil || contract == nil {
+		return s.EvaluateTaskCapability(workspaceID, capability)
+	}
+	requirement, required := selectedRequirement(contract, mode, key)
+	if !required {
+		return s.EvaluateTaskCapability(workspaceID, capability)
+	}
+	chooseAgentAction := &Action{Token: "choose_runtime_agent", Code: "choose_runtime_agent", Label: "Choose compatible agent"}
+	grantAction := &Action{Token: "grant_runtime_access", Code: "grant_runtime_access", Label: "Grant runtime access"}
+	if requirement.Adapter == "reaper_live_control" {
+		chooseAgentAction = &Action{Token: "choose_reaper_agent", Code: "choose_reaper_agent", Label: "Choose compatible agent"}
+		grantAction = &Action{Token: "grant_reaper_access", Code: "grant_reaper_access", Label: "Grant REAPER access"}
+	}
+	instance, found := findTaskAgentInstance(ws, task)
+	if !found {
+		return true, runtimeTaskBlocked(workspaceID, &Blocker{
+			RequirementKey: key,
+			ReasonCode:     ReasonTaskAgentRequired,
+			Summary:        "Choose a compatible workspace agent before starting this runtime task.",
+			Action:         chooseAgentAction,
+		})
+	}
+	if !ws.GetRuntimeState().HasActiveRuntimeGrant(key, instance.ID) {
+		return true, runtimeTaskBlocked(workspaceID, &Blocker{
+			RequirementKey: key,
+			ReasonCode:     ReasonTaskGrantRequired,
+			Summary:        "The assigned workspace agent does not have access to this runtime capability.",
+			Action:         grantAction,
+		})
+	}
+	adapter, registered := s.registry.Lookup(requirement.Adapter)
+	if !registered {
+		return s.EvaluateTaskCapability(workspaceID, capability)
+	}
+	if authorizer, ok := adapter.(GrantAuthorizer); ok {
+		if err := authorizer.ValidateGrant(context.Background(), GrantValidationRequest{
+			WorkspaceID: workspaceID, Mode: mode, Requirement: requirement, Agent: instance,
+		}); err != nil {
+			return true, runtimeTaskBlocked(workspaceID, &Blocker{
+				RequirementKey: key,
+				ReasonCode:     ReasonTaskAgentRequired,
+				Summary:        "The assigned workspace agent cannot use this runtime capability safely.",
+				Action:         chooseAgentAction,
+			})
+		}
+	}
+	return s.EvaluateTaskCapability(workspaceID, capability)
+}
+
 // ResolveTaskExecutionScope returns authority only for runtime keys this task
 // actually declares, granted to this exact agent in the selected mode. It
 // revalidates adapter-owned roots immediately before invocation. Ordinary tasks,
@@ -611,6 +670,27 @@ func resolveSelectedMode(contract *workspace.RuntimeRequirementsContract, state 
 	return contract.ImplicitMode()
 }
 
+func findTaskAgentInstance(ws *workspace.Workspace, task workspace.Task) (workspace.AgentInstance, bool) {
+	if ws == nil {
+		return workspace.AgentInstance{}, false
+	}
+	assignedNodeID := strings.TrimSpace(task.AssignedNodeID)
+	assignedName := strings.TrimSpace(task.To)
+	var matches []workspace.AgentInstance
+	for _, instance := range ws.AgentInstances {
+		if assignedNodeID != "" && strings.TrimSpace(instance.NodeID) == assignedNodeID {
+			return instance, true
+		}
+		if assignedName != "" && strings.EqualFold(strings.TrimSpace(instance.Name), assignedName) {
+			matches = append(matches, instance)
+		}
+	}
+	if len(matches) == 1 {
+		return matches[0], true
+	}
+	return workspace.AgentInstance{}, false
+}
+
 func findAgentInstance(ws *workspace.Workspace, agentInstanceID string) (workspace.AgentInstance, bool) {
 	if ws == nil {
 		return workspace.AgentInstance{}, false
@@ -815,6 +895,7 @@ func runtimeTaskBlocked(workspaceID string, blocker *Blocker) *workspace.TaskBlo
 		}
 	}
 	return &workspace.TaskBlockedError{
+		CapabilityKey:    workspace.NormalizeRuntimeIdentifier(blocker.RequirementKey),
 		ReasonCode:       safeCode(blocker.ReasonCode),
 		Reason:           reason,
 		Question:         reason,

@@ -321,6 +321,33 @@ test('repair gating applies to a failed task too, not just waiting_for_choice', 
   assert.notEqual(pres.primaryAction.id, 'retry');
 });
 
+test('REAPER blockers expose one exact repair and never a useless Retry', () => {
+  const cases = [
+    ['runtime_mode_not_enabled', 'review_runtime_setup', 'Review live-control setup'],
+    ['reaper_offline', 'open_check_reaper', 'Open or check REAPER'],
+    ['wrong_project', 'open_correct_project', 'Open the workspace project'],
+    ['verification_timeout', 'check_reaper_connection', 'Check REAPER connection']
+  ];
+  cases.forEach(([reasonCode, code, label]) => {
+    const task = {
+      status: 'waiting_for_choice',
+      to: 'Reaper Producer',
+      context: {
+        human_loop: {
+          state: 'waiting_for_choice',
+          reason_code: reasonCode,
+          repair: { code, label, url: '/workspaces/song?runtime_setup=1' }
+        }
+      }
+    };
+    const presentation = resolveTaskPresentation(task);
+    assert.equal(presentation.primaryAction.id, 'repair');
+    assert.equal(presentation.primaryAction.code, code);
+    assert.equal(presentation.primaryAction.label, label);
+    assert.deepEqual(presentation.secondaryActions, []);
+  });
+});
+
 test('an ordinary failed task still offers Retry', () => {
   const pres = resolveTaskPresentation({ id: 'task-x', status: 'failed', to: 'Coder' });
   assert.equal(pres.primaryAction.id, 'retry');

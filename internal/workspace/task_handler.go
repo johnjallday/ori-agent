@@ -267,6 +267,14 @@ func (h *LLMTaskHandler) runTaskOnProvider(ctx context.Context, providerName, re
 	if err != nil {
 		return "", fmt.Errorf("failed to get LLM provider: %w", err)
 	}
+	if task.RuntimeExecution != nil && (!task.RuntimeExecution.FileOnly || strings.TrimSpace(task.RuntimeExecution.WorkspaceRoot) == "" || !providerSupportsNativeMCP(provider)) {
+		return "", &TaskBlockedError{
+			ReasonCode: "file_fallback_unavailable",
+			Reason:     "The selected agent cannot run the confined project-file fallback safely.",
+			Question:   "Choose a compatible CLI agent or review live-control setup.",
+			Repair:     &TaskRepairAction{Code: "choose_reaper_agent", Label: "Choose compatible agent"},
+		}
+	}
 	modelName := h.normalizeModelForProvider(providerName, requestedModel)
 
 	// Local providers get the compact system-prompt tier (WS5). Skills are injected
@@ -292,6 +300,10 @@ func (h *LLMTaskHandler) runTaskOnProvider(ctx context.Context, providerName, re
 	// Convert agent tools (MCP + workspace) to LLM format. Needed before budgeting
 	// because tool schemas consume the context window too.
 	tools := h.convertAgentToolsToLLMTools(ag, task)
+	if task.RuntimeExecution != nil && task.RuntimeExecution.DisableTools {
+		tools = nil
+		taskSystemPrompt += "\n\nThis run is an explicitly confirmed file-only fallback. The current directory is a confined staging folder containing only the authoritative project file. Edit only that existing file, create no other files, and describe the result as a project-file change—not a verified live-session change."
+	}
 
 	// Capability-aware tool exposure (WS4). A provider that supports neither the
 	// internal tool loop nor native MCP is offered no tools and told so; local
@@ -400,6 +412,9 @@ func (h *LLMTaskHandler) executeTaskConversation(
 	tools []llm.Tool,
 ) (string, error) {
 	conversation := append([]llm.Message(nil), messages...)
+	if task.RuntimeExecution != nil && task.RuntimeExecution.DisableTools {
+		tools = nil
+	}
 	var lastToolSummary string
 	toolResultFollowups := 0
 	successfulToolCalls := map[string]bool{}
@@ -488,7 +503,17 @@ func (h *LLMTaskHandler) executeTaskConversation(
 		// and exact MCP subset. It never toggles or inherits the broad setting.
 		nativeMCPActive := false
 		runtimeScopeActive := false
-		if providerSupportsNativeMCP(provider) && h.executionScopeResolver != nil && len(task.RequiredCapabilities) > 0 {
+		if task.RuntimeExecution != nil {
+			chatReq.WorkspaceID = task.WorkspaceID
+			chatReq.ExecutionScope = &llm.CLIExecutionScope{
+				WorkspaceRoot:  task.RuntimeExecution.WorkspaceRoot,
+				NetworkPosture: llm.CLINetworkDisabled,
+			}
+			chatReq.MCPServers = nil
+			runtimeScopeActive = true
+			nativeMCPActive = true
+		}
+		if !runtimeScopeActive && providerSupportsNativeMCP(provider) && h.executionScopeResolver != nil && len(task.RequiredCapabilities) > 0 {
 			agentInstanceID := h.taskAgentInstanceID(task, agentName)
 			if agentInstanceID != "" && h.workspaceStore != nil {
 				scope, scopeErr := h.executionScopeResolver.ResolveTaskExecutionScope(

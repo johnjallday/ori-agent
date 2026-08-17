@@ -2,6 +2,8 @@ package workspace
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -102,6 +104,33 @@ func TestExecuteTaskConversation_RuntimeScopeDoesNotRequireBroadNativeMCP(t *tes
 	}
 	if scopeResolver.calls != 1 || scopeResolver.workspaceID != ws.ID || scopeResolver.agentID != "agent-1" || len(scopeResolver.capabilities) != 1 {
 		t.Fatalf("scope resolver inputs = %+v", scopeResolver)
+	}
+}
+
+func TestExecuteTaskConversation_FileFallbackUsesOnlyConfinedRoot(t *testing.T) {
+	stage := t.TempDir()
+	if err := os.WriteFile(filepath.Join(stage, "song.rpp"), []byte("project"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store := NewInMemoryStore()
+	if err := store.Save(&Workspace{ID: "ws-fallback", Status: StatusActive, AllowNativeMCPCLI: true}); err != nil {
+		t.Fatal(err)
+	}
+	resolver := &stubExecutionScopeResolver{scope: &llm.CLIExecutionScope{WorkspaceRoot: "/must-not-be-used"}}
+	handler := &LLMTaskHandler{workspaceStore: store, executionScopeResolver: resolver}
+	provider := &fakeNativeProvider{caps: llm.ProviderCapabilities{SupportsNativeMCP: true}}
+	task := Task{
+		WorkspaceID:      "ws-fallback",
+		RuntimeExecution: &TaskRuntimeExecution{WorkspaceRoot: stage, DisableTools: true, FileOnly: true, Filename: "song.rpp"},
+	}
+	if _, err := handler.executeTaskConversation(context.Background(), provider, "codex", "model", 0, nativeMCPAgent(true), "reaper", task, []llm.Message{llm.NewUserMessage("edit the file")}, []llm.Tool{{Name: "unrelated"}}); err != nil {
+		t.Fatal(err)
+	}
+	if !provider.called || provider.gotReq.ExecutionScope == nil || provider.gotReq.ExecutionScope.WorkspaceRoot != stage || provider.gotReq.ExecutionScope.NetworkPosture != llm.CLINetworkDisabled {
+		t.Fatalf("fallback scope = %+v", provider.gotReq.ExecutionScope)
+	}
+	if len(provider.gotReq.Tools) != 0 || len(provider.gotReq.MCPServers) != 0 || provider.gotReq.WorkspaceDir != "" || resolver.calls != 0 {
+		t.Fatalf("fallback inherited tools or broader scope: tools=%v mcp=%v dir=%q resolver=%d", provider.gotReq.Tools, provider.gotReq.MCPServers, provider.gotReq.WorkspaceDir, resolver.calls)
 	}
 }
 

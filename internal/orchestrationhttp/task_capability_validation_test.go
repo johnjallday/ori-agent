@@ -87,12 +87,17 @@ func TestCreateTaskRoundTripsDeclaredRuntimeKey(t *testing.T) {
 	}
 	registry, _ := runtimecapability.NewBuiltinRegistry()
 	validator := runtimecapability.NewService(store, registry)
-	recorder := createCapabilityTask(t, store, validator, `{"workspace_id":"ws-runtime","description":"Live task","required_capabilities":[" REAPER_LIVE_CONTROL ","reaper_live_control"]}`)
+	recorder := createCapabilityTask(t, store, validator, `{"workspace_id":"ws-runtime","description":"Live task","required_capabilities":[" REAPER_LIVE_CONTROL ","reaper_live_control"],"file_fallback_for":["reaper_live_control"]}`)
 	if recorder.Code != http.StatusCreated {
 		t.Fatalf("declared runtime key = %d: %s", recorder.Code, recorder.Body.String())
 	}
 	stored, _ := store.Get(ws.ID)
-	if len(stored.Tasks) != 1 || len(stored.Tasks[0].RequiredCapabilities) != 1 || stored.Tasks[0].RequiredCapabilities[0] != "reaper_live_control" {
+	if len(stored.Tasks) != 1 || len(stored.Tasks[0].RequiredCapabilities) != 1 || stored.Tasks[0].RequiredCapabilities[0] != "reaper_live_control" || len(stored.Tasks[0].FileFallbackFor) != 1 {
 		t.Fatalf("runtime task key did not normalize/round-trip: %+v", stored.Tasks)
+	}
+
+	invalid := createCapabilityTask(t, store, validator, `{"workspace_id":"ws-runtime","description":"Invalid fallback","file_fallback_for":["reaper_live_control"]}`)
+	if invalid.Code != http.StatusBadRequest {
+		t.Fatalf("fallback without matching requirement = %d: %s", invalid.Code, invalid.Body.String())
 	}
 }

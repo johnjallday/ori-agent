@@ -60,6 +60,7 @@ type TaskRepairAction struct {
 }
 
 type TaskBlockedError struct {
+	CapabilityKey    string
 	ReasonCode       string
 	Reason           string
 	Question         string
@@ -114,6 +115,46 @@ func taskBlockedChoiceIDExists(choices []TaskBlockedChoice, id string) bool {
 	}
 	for _, choice := range choices {
 		if strings.ToLower(strings.TrimSpace(choice.ID)) == target {
+			return true
+		}
+	}
+	return false
+}
+
+// AddFileFallbackChoice returns a detached blocked error with an explicit
+// file-only workflow choice. It never removes the exact repair action: users
+// can either repair live control or knowingly choose the different file result.
+func AddFileFallbackChoice(blocked *TaskBlockedError) *TaskBlockedError {
+	if blocked == nil {
+		return nil
+	}
+	clone := *blocked
+	clone.SuggestedActions = append([]string(nil), blocked.SuggestedActions...)
+	if !containsBlockedAction(clone.SuggestedActions, "continue_with_instruction") {
+		clone.SuggestedActions = append(clone.SuggestedActions, "continue_with_instruction")
+	}
+	if blocked.Repair != nil {
+		repair := *blocked.Repair
+		clone.Repair = &repair
+	}
+	clone.WorkflowStep = &TaskBlockedWorkflowStep{
+		StepType: "ask_choice",
+		Title:    "Choose how to continue",
+		Summary:  "Live REAPER state is not verified. You can repair live control or explicitly make a project-file change instead.",
+		Choices: []TaskBlockedChoice{{
+			ID:          "use_file_fallback",
+			Label:       "Use project-file fallback",
+			Description: "Run in a confined staging folder and promote only the authoritative .rpp file. This is not a verified live-session change.",
+			Number:      "F",
+		}},
+		FreeTextAllowed: false,
+	}
+	return &clone
+}
+
+func containsBlockedAction(actions []string, target string) bool {
+	for _, action := range actions {
+		if strings.EqualFold(strings.TrimSpace(action), target) {
 			return true
 		}
 	}

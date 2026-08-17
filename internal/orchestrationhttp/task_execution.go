@@ -37,6 +37,29 @@ type clarificationQuestionBlock struct {
 	Options  []workspace.TaskBlockedFieldOption
 }
 
+func capabilitiesWithout(capabilities []string, excluded string) []string {
+	excluded = workspace.NormalizeRuntimeIdentifier(excluded)
+	out := make([]string, 0, len(capabilities))
+	for _, capability := range workspace.NormalizeCapabilityKeys(capabilities) {
+		if capability != excluded {
+			out = append(out, capability)
+		}
+	}
+	return out
+}
+
+func fileFallbackBlocked(capability string) *workspace.TaskBlockedError {
+	return &workspace.TaskBlockedError{
+		CapabilityKey: capability,
+		ReasonCode:    "file_fallback_unavailable",
+		Reason:        "The confined project-file fallback could not be prepared or promoted safely. The workspace project was not changed.",
+		Question:      "Review the workspace project before choosing how to continue.",
+		Repair: &workspace.TaskRepairAction{
+			Code: "review_runtime_setup", Label: "Review live-control setup",
+		},
+	}
+}
+
 // TaskResultsHandler retrieves results from one or more tasks
 // GET /api/orchestration/task-results?task_ids=id1,id2,id3
 func (th *TaskHandler) TaskResultsHandler(w http.ResponseWriter, r *http.Request) {
@@ -453,6 +476,14 @@ func (th *TaskHandler) handleAssistTask(w http.ResponseWriter, r *http.Request) 
 		delete(task.Context, "user_assist_message")
 	}
 
+	if selectedChoice != nil && selectedChoice.ID == "use_file_fallback" {
+		capability, _ := humanLoop["capability_key"].(string)
+		if action != "continue_with_instruction" || !blockedWorkflowOffersChoice(humanLoop["workflow_step"], selectedChoice.ID) || !task.ApproveRuntimeFileFallback(capability, blockID, time.Now().UTC()) {
+			orihttp.BadRequest(w, "project-file fallback is not available for this blocked task")
+			return
+		}
+	}
+
 	switch action {
 	case "mark_failed":
 		now := time.Now()
@@ -794,11 +825,28 @@ func (th *TaskHandler) executeTaskWithDependencies(ws *workspace.Workspace, task
 		return "", fmt.Errorf("task %s has no assigned agent", task.Description)
 	}
 
-	// Connection preconditions come first: a task that needs a mailbox cannot be
-	// helped by running it, so block with the exact repair rather than spending a
-	// model call to discover the same thing (FR 34, 35).
-	if th.capabilityGate != nil && len(task.RequiredCapabilities) > 0 {
-		if blocked := th.capabilityGate.CheckTaskCapabilities(ws.ID, task.RequiredCapabilities); blocked != nil {
+	// Connection preconditions come first: a task that needs a mailbox or live
+	// runtime cannot be helped by running it, so block before a Run/provider/model
+	// exists. A server-recorded one-shot file fallback removes only its exact
+	// live capability; every other declared capability is still checked.
+	fallbackCapability := task.ApprovedRuntimeFileFallback()
+	capabilitiesToCheck := task.RequiredCapabilities
+	if fallbackCapability != "" {
+		capabilitiesToCheck = capabilitiesWithout(task.RequiredCapabilities, fallbackCapability)
+	}
+	if th.capabilityGate != nil && len(capabilitiesToCheck) > 0 {
+		var blocked *workspace.TaskBlockedError
+		if scoped, ok := th.capabilityGate.(workspace.TaskScopedCapabilityGate); ok {
+			gateTask := *task
+			gateTask.RequiredCapabilities = capabilitiesToCheck
+			blocked = scoped.CheckTaskCapabilitiesForTask(ws.ID, gateTask)
+		} else {
+			blocked = th.capabilityGate.CheckTaskCapabilities(ws.ID, capabilitiesToCheck)
+		}
+		if blocked != nil {
+			if task.AllowsFileFallback(blocked.CapabilityKey) {
+				blocked = workspace.AddFileFallbackChoice(blocked)
+			}
 			if err := th.markTaskBlocked(ws, task, blocked, manual, map[string]any{
 				"precondition": "capability",
 			}); err != nil {
@@ -806,6 +854,28 @@ func (th *TaskHandler) executeTaskWithDependencies(ws *workspace.Workspace, task
 			}
 			return "", blocked
 		}
+	}
+
+	var fallbackRun workspace.TaskFileFallbackRun
+	if fallbackCapability != "" {
+		if th.fileFallback == nil {
+			blocked := fileFallbackBlocked(fallbackCapability)
+			if err := th.markTaskBlocked(ws, task, blocked, manual, map[string]any{"precondition": "file_fallback"}); err != nil {
+				return "", err
+			}
+			return "", blocked
+		}
+		prepared, err := th.fileFallback.PrepareTaskFileFallback(context.Background(), ws.ID, *task, fallbackCapability)
+		if err != nil {
+			blocked := fileFallbackBlocked(fallbackCapability)
+			if saveErr := th.markTaskBlocked(ws, task, blocked, manual, map[string]any{"precondition": "file_fallback"}); saveErr != nil {
+				return "", saveErr
+			}
+			return "", blocked
+		}
+		fallbackRun = prepared
+		defer fallbackRun.Abort()
+		task.ConsumeRuntimeFileFallbackApproval()
 	}
 
 	if len(task.InputTaskIDs) > 0 {
@@ -877,6 +947,9 @@ func (th *TaskHandler) executeTaskWithDependencies(ws *workspace.Workspace, task
 	}
 
 	taskForExecution := *task
+	if fallbackRun != nil {
+		taskForExecution = fallbackRun.PreparedTask()
+	}
 	var inputResults []string
 	if len(task.InputTaskIDs) > 0 {
 		logger.Debug("Task has input task IDs", logger.Fields{"task_id": task.ID, "input_task_count": len(task.InputTaskIDs), "input_task_ids": task.InputTaskIDs})
@@ -927,6 +1000,14 @@ func (th *TaskHandler) executeTaskWithDependencies(ws *workspace.Workspace, task
 		result, execErr = th.executeTaskWithStructuredSteps(ctx, ws, task, taskForExecution, manual)
 	} else {
 		result, execErr = th.executeTaskIteratively(ctx, ws, task, taskForExecution, manual)
+	}
+
+	if execErr == nil && fallbackRun != nil {
+		if err := fallbackRun.Commit(); err != nil {
+			execErr = fileFallbackBlocked(fallbackCapability)
+		} else {
+			result = "Completed as an explicitly confirmed project-file change; live REAPER state was not verified.\n\n" + strings.TrimSpace(result)
+		}
 	}
 
 	var awaitingErr *taskExecutionAwaitingStepError
@@ -1076,13 +1157,21 @@ func (th *TaskHandler) markTaskBlocked(ws *workspace.Workspace, task *workspace.
 	}
 
 	now := time.Now()
+	preflightOnly := extra["precondition"] == "capability" || extra["precondition"] == "file_fallback"
 	// Re-blocking an already-blocked task is a legitimate outcome: the user
 	// retried before the precondition was actually repaired. The status machine
 	// rejects waiting_for_choice → waiting_for_choice, so skip the transition and
 	// go straight to refreshing the reason — otherwise the task would keep
 	// showing the STALE block while the real one went unrecorded.
 	if task.Status != workspace.TaskStatusWaitingForChoice {
-		if err := task.SetStatus(workspace.TaskStatusWaitingForChoice); err != nil {
+		if preflightOnly {
+			// Capability preflight intentionally runs before a Run starts. The
+			// ordinary lifecycle reaches WaitingForChoice only from InProgress,
+			// so this server-owned pre-run intervention uses the same explicit
+			// override as other manual/system lifecycle decisions without first
+			// manufacturing a misleading running state.
+			task.ForceStatus(workspace.TaskStatusWaitingForChoice)
+		} else if err := task.SetStatus(workspace.TaskStatusWaitingForChoice); err != nil {
 			return fmt.Errorf("cannot mark task waiting for choice: %w", err)
 		}
 	}
@@ -1094,7 +1183,9 @@ func (th *TaskHandler) markTaskBlocked(ws *workspace.Workspace, task *workspace.
 	if task.StartedAt != nil && !task.StartedAt.IsZero() {
 		startedAt = *task.StartedAt
 	}
-	workspace.RecordTaskExecution(task, "blocked", blockedExecutionSummary(blockedErr), startedAt, now.Sub(startedAt))
+	if !preflightOnly {
+		workspace.RecordTaskExecution(task, "blocked", blockedExecutionSummary(blockedErr), startedAt, now.Sub(startedAt))
+	}
 
 	humanLoop := buildTaskBlockedContext(task, blockedErr, extra)
 	if err := ws.UpdateTask(*task); err != nil {
@@ -1137,8 +1228,10 @@ func (th *TaskHandler) markTaskBlocked(ws *workspace.Workspace, task *workspace.
 			"status":  task.Status,
 		}))
 
-		workspace.RecordTaskExecutionTraceFromEventBus(task, th.eventBus, ws.ID, task.ID, startedAt, now)
-		if len(task.ExecutionTrace) > 0 {
+		if !preflightOnly {
+			workspace.RecordTaskExecutionTraceFromEventBus(task, th.eventBus, ws.ID, task.ID, startedAt, now)
+		}
+		if !preflightOnly && len(task.ExecutionTrace) > 0 {
 			if err := ws.UpdateTask(*task); err != nil {
 				logger.Error("Failed to persist blocked task execution trace", logger.Fields{"task_id": task.ID, "error": err})
 			} else if err := workspace.CanonicalUpdate(th.workspaceStore, ws.ID, func(fresh *workspace.Workspace) error {
@@ -1187,6 +1280,9 @@ func buildTaskBlockedContext(task *workspace.Task, blockedErr *workspace.TaskBlo
 		"updated_at":  time.Now().UTC().Format(time.RFC3339),
 	}
 	if blockedErr != nil {
+		if capability := workspace.NormalizeRuntimeIdentifier(blockedErr.CapabilityKey); capability != "" {
+			humanLoop["capability_key"] = capability
+		}
 		if reason := strings.TrimSpace(blockedErr.Reason); reason != "" {
 			humanLoop["reason"] = reason
 		}
@@ -1214,6 +1310,36 @@ func buildTaskBlockedContext(task *workspace.Task, blockedErr *workspace.TaskBlo
 
 	task.Context["human_loop"] = humanLoop
 	return humanLoop
+}
+
+func blockedWorkflowOffersChoice(raw any, choiceID string) bool {
+	choiceID = strings.TrimSpace(choiceID)
+	if choiceID == "" {
+		return false
+	}
+	switch step := raw.(type) {
+	case *workspace.TaskBlockedWorkflowStep:
+		if step == nil {
+			return false
+		}
+		for _, choice := range step.Choices {
+			if strings.TrimSpace(choice.ID) == choiceID {
+				return true
+			}
+		}
+	case workspace.TaskBlockedWorkflowStep:
+		return blockedWorkflowOffersChoice(&step, choiceID)
+	case map[string]any:
+		choices, _ := step["choices"].([]any)
+		for _, candidate := range choices {
+			choice, _ := candidate.(map[string]any)
+			id, _ := choice["id"].(string)
+			if strings.TrimSpace(id) == choiceID {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func normalizeTaskAssistChoice(choiceID, choiceLabel, choiceNumber string) *workspace.TaskBlockedChoice {

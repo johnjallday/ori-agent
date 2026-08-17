@@ -73,6 +73,7 @@ func (h *Handler) seedTemplateStarterTasks(workspaceID string, tpl projecttempla
 				// execution can stop before spending a model call on work the
 				// workspace is not connected for.
 				RequiredCapabilities: agentworkspace.NormalizeCapabilityKeys(st.Requires),
+				FileFallbackFor:      agentworkspace.NormalizeCapabilityKeys(st.FileFallbackFor),
 				Context: map[string]any{
 					taskContextTemplateID:          tpl.ID,
 					taskContextTemplateStarterTask: true,

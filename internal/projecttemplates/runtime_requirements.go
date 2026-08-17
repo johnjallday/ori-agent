@@ -122,6 +122,7 @@ func normalizeRuntimeRequirements(raw json.RawMessage) (*RuntimeRequirementsCont
 // planning, citations, toolbox vocabulary) retain their existing behavior.
 func validateRuntimeStarterTaskReferences(tasks []StarterTask, contract *RuntimeRequirementsContract) error {
 	for _, task := range tasks {
+		required := workspace.NormalizeCapabilityKeys(task.Requires)
 		for _, rawKey := range task.Requires {
 			key := workspace.NormalizeRuntimeIdentifier(rawKey)
 			if key == "" || !slices.Contains(ValidRuntimeRequirementAdapters, key) {
@@ -132,6 +133,18 @@ func validateRuntimeStarterTaskReferences(tasks []StarterTask, contract *Runtime
 			}
 			if _, declared := contract.Requirement(key); !declared {
 				return fmt.Errorf("%w: starter task %q references undeclared runtime requirement %q", ErrInvalidRuntimeRequirements, task.Description, key)
+			}
+		}
+		for _, rawKey := range task.FileFallbackFor {
+			key := workspace.NormalizeRuntimeIdentifier(rawKey)
+			if key == "" || !slices.Contains(required, key) {
+				return fmt.Errorf("%w: starter task %q file fallback %q must also be a required capability", ErrInvalidRuntimeRequirements, task.Description, rawKey)
+			}
+			if !slices.Contains(ValidRuntimeRequirementAdapters, key) || contract == nil {
+				return fmt.Errorf("%w: starter task %q file fallback %q is not a declared runtime requirement", ErrInvalidRuntimeRequirements, task.Description, key)
+			}
+			if _, declared := contract.Requirement(key); !declared {
+				return fmt.Errorf("%w: starter task %q file fallback references undeclared runtime requirement %q", ErrInvalidRuntimeRequirements, task.Description, key)
 			}
 		}
 	}

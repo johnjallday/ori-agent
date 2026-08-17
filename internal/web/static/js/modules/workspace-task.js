@@ -1143,11 +1143,13 @@ export class WorkspaceTaskPage {
       assistQuestion: document.getElementById('workspace-task-assist-question'),
       assistFormWrap: document.getElementById('workspace-task-assist-form-wrap'),
       assistFormFields: document.getElementById('workspace-task-assist-form-fields'),
+      assistExtra: document.getElementById('workspace-task-assist-extra'),
       assistMessage: document.getElementById('workspace-task-assist-message'),
       assistAgent: document.getElementById('workspace-task-assist-agent'),
       assistMoreActions: document.querySelector('.workspace-task-assist-more-actions'),
       assistSwitchWrap: document.querySelector('.workspace-task-assist-switch'),
       assistRetryBtn: document.getElementById('workspace-task-assist-retry'),
+      assistRepair: document.getElementById('workspace-task-assist-repair'),
       assistContinueBtn: document.getElementById('workspace-task-assist-continue'),
       assistSwitchBtn: document.getElementById('workspace-task-assist-switch'),
       assistFailBtn: document.getElementById('workspace-task-assist-fail')
@@ -2700,6 +2702,8 @@ export class WorkspaceTaskPage {
           blocked.response,
           blocked.workflowStep?.id,
           blocked.workflowStep?.stepType,
+          blocked.workflowStep?.summary,
+          blocked.workflowStep?.freeTextAllowed,
           blocked.currentAgent,
           blocked.suggestedActions,
           blocked.selectedChoiceId
@@ -9382,7 +9386,8 @@ export class WorkspaceTaskPage {
     if (this.elements.assistKnown) {
       this.elements.assistKnown.textContent =
         summarizeText(
-          this.currentBlockedTask?.response ||
+          workflowStep?.summary ||
+            this.currentBlockedTask?.response ||
             this.currentBlockedTask?.reason ||
             'The task is paused waiting on your input.',
           190
@@ -9402,6 +9407,13 @@ export class WorkspaceTaskPage {
     if (this.elements.assistQuestion) {
       this.elements.assistQuestion.textContent = this.currentBlockedTask?.question || '';
     }
+    if (this.elements.assistRepair) {
+      const repair = this.currentBlockedTask?.repair;
+      this.elements.assistRepair.hidden = !repair;
+      this.elements.assistRepair.textContent = repair?.label || 'Review setup';
+      this.elements.assistRepair.setAttribute('aria-label', repair?.label || 'Review setup');
+      this.elements.assistRepair.setAttribute('href', repair?.url || '#');
+    }
     if (this.elements.assistContinueBtn) {
       const primaryLabel = this.getAssistPrimaryActionLabel(workflowStep);
       this.elements.assistContinueBtn.textContent = primaryLabel;
@@ -9410,8 +9422,12 @@ export class WorkspaceTaskPage {
         'continue_with_instruction'
       );
     }
+    if (this.elements.assistExtra) {
+      this.elements.assistExtra.hidden = workflowStep?.freeTextAllowed === false;
+    }
     if (this.elements.assistMessage) {
       this.elements.assistMessage.placeholder = this.getAssistMessagePlaceholder(workflowStep);
+      if (workflowStep?.freeTextAllowed === false) this.elements.assistMessage.value = '';
     }
     if (this.elements.assistRetryBtn) {
       this.elements.assistRetryBtn.hidden = !this.isAssistActionSuggested('retry');
@@ -9451,10 +9467,15 @@ export class WorkspaceTaskPage {
       Array.isArray(workflowStep.choices) &&
       workflowStep.choices.length > 0
     ) {
-      return `Choose 1 of ${workflowStep.choices.length} next-step options or add your own guidance.`;
+      return workflowStep.freeTextAllowed === false
+        ? `Choose 1 of ${workflowStep.choices.length} next-step options.`
+        : `Choose 1 of ${workflowStep.choices.length} next-step options or add your own guidance.`;
     }
     if (this.currentBlockedTask?.question) {
       return summarizeText(this.currentBlockedTask.question, 180);
+    }
+    if (this.currentBlockedTask?.repair) {
+      return this.currentBlockedTask.reason || 'Complete the setup action shown below.';
     }
     return 'Add the missing detail the agent asked for.';
   }
@@ -9467,7 +9488,12 @@ export class WorkspaceTaskPage {
       return 'Continue sends your answers and any extra guidance back to the assigned agent.';
     }
     if (workflowStep?.stepType === 'ask_choice') {
-      return 'Pick the best path, optionally add guidance, then continue the task.';
+      return workflowStep.freeTextAllowed === false
+        ? 'Pick the path, then continue the task.'
+        : 'Pick the best path, optionally add guidance, then continue the task.';
+    }
+    if (this.currentBlockedTask?.repair) {
+      return `Use ${this.currentBlockedTask.repair.label}; Retry stays unavailable until a fresh preflight passes.`;
     }
     return 'Retry, continue with guidance, switch agents, or mark the task failed.';
   }
@@ -9477,9 +9503,8 @@ export class WorkspaceTaskPage {
       return 'Send Answers';
     }
     if (workflowStep?.stepType === 'ask_choice') {
-      return this.currentBlockedTask?.selectedChoiceId
-        ? 'Continue With Selected Path'
-        : 'Send Choice Or Guidance';
+      if (this.currentBlockedTask?.selectedChoiceId) return 'Continue With Selected Path';
+      return workflowStep.freeTextAllowed === false ? 'Choose a Path' : 'Send Choice Or Guidance';
     }
     if (this.currentBlockedTask?.question) {
       return 'Send Guidance';
@@ -10147,6 +10172,11 @@ export class WorkspaceTaskPage {
     ].forEach(button => {
       if (button) button.disabled = disabled;
     });
+    this.elements.assistFormFields
+      ?.querySelectorAll('button, input, select, textarea')
+      .forEach(control => {
+        control.disabled = disabled;
+      });
   }
 
   async deleteTask() {
@@ -10344,9 +10374,14 @@ export class WorkspaceTaskPage {
       action === 'continue_with_instruction' &&
       workflowStep?.stepType === 'ask_choice' &&
       !selectedChoiceId &&
-      !message
+      (workflowStep.freeTextAllowed === false || !message)
     ) {
-      this.notify('warning', 'Choose a next step or add guidance before continuing.');
+      this.notify(
+        'warning',
+        workflowStep.freeTextAllowed === false
+          ? 'Choose a next step before continuing.'
+          : 'Choose a next step or add guidance before continuing.'
+      );
       return;
     }
 

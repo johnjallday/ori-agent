@@ -379,7 +379,7 @@ func TestNewTemplate_RuntimeStarterTaskReferencesFailClosedWithoutADeclaration(t
 		"name":"Valid Runtime Task",
 		"agents":[{"name":"Lead"}],
 		"starter_tasks":[
-			{"description":"Control REAPER","requires":["reaper_live_control"]},
+			{"description":"Control REAPER","requires":["reaper_live_control"],"file_fallback_for":["reaper_live_control"]},
 			{"description":"Plan arrangement","requires":["planning"]}
 		],
 		"runtime_requirements":{
@@ -388,8 +388,22 @@ func TestNewTemplate_RuntimeStarterTaskReferencesFailClosedWithoutADeclaration(t
 			"requirements":[{"key":"reaper_live_control","label":"REAPER","description":"Configure it.","adapter":"reaper_live_control"}]
 		}
 	}`)
-	if valid.RuntimeRequirementsError != "" || !valid.HasRuntimeRequirements() || len(valid.StarterTasks) != 2 {
+	if valid.RuntimeRequirementsError != "" || !valid.HasRuntimeRequirements() || len(valid.StarterTasks) != 2 || len(valid.StarterTasks[0].FileFallbackFor) != 1 {
 		t.Fatalf("declared runtime task reference was rejected: %+v / %q", valid.RuntimeRequirements, valid.RuntimeRequirementsError)
+	}
+
+	invalidFallback := loadTemplateWithManifest(t, `{
+		"name":"Invalid Fallback",
+		"agents":[{"name":"Lead"}],
+		"starter_tasks":[{"description":"Control REAPER","file_fallback_for":["reaper_live_control"]}],
+		"runtime_requirements":{
+			"schema_version":1,
+			"operating_modes":[{"id":"assisted","label":"Assisted","description":"Use live control.","requires":["reaper_live_control"]}],
+			"requirements":[{"key":"reaper_live_control","label":"REAPER","description":"Configure it.","adapter":"reaper_live_control"}]
+		}
+	}`)
+	if !invalidFallback.HasInvalidRuntimeRequirements() || !strings.Contains(invalidFallback.RuntimeRequirementsError, "must also be a required capability") {
+		t.Fatalf("undeclared task fallback did not fail closed: %q", invalidFallback.RuntimeRequirementsError)
 	}
 }
 

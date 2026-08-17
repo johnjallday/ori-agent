@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -102,6 +103,30 @@ func TestCreateWorkspaceSeedsStarterTasksServerSide(t *testing.T) {
 	// No consumed marker at seed time: first open must find it unconsumed.
 	if _, present := setupTask.Context["template_setup_autostart_consumed_at"]; present {
 		t.Fatalf("setup task must not be consumed at seed time: %+v", setupTask.Context)
+	}
+}
+
+func TestSeedTemplateStarterTaskPreservesExplicitFileFallback(t *testing.T) {
+	store := agentworkspace.NewInMemoryStore()
+	handler := New(nil)
+	handler.SetWorkspaceTaskStore(store)
+	ws := agentworkspace.NewWorkspace(agentworkspace.CreateWorkspaceParams{Name: "Fallback", Agents: []string{"Producer"}})
+	if err := store.Save(ws); err != nil {
+		t.Fatal(err)
+	}
+	_, err := handler.seedTemplateStarterTasks(ws.ID, projecttemplates.Template{ID: "runtime", StarterTasks: []projecttemplates.StarterTask{{
+		Description: "Adjust session", Requires: []string{"reaper_live_control"}, FileFallbackFor: []string{"reaper_live_control"},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved, err := store.Get(ws.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tasks := saved.Tasks
+	if len(tasks) != 1 || len(tasks[0].RequiredCapabilities) != 1 || len(tasks[0].FileFallbackFor) != 1 || tasks[0].FileFallbackFor[0] != "reaper_live_control" {
+		t.Fatalf("seeded fallback task = %+v", tasks)
 	}
 }
 
