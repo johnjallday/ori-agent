@@ -8,6 +8,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/config"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
+	"github.com/johnjallday/ori-agent/internal/reapersetup"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/systemassistant"
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -152,6 +153,11 @@ func TestServerBuilder_Build_Integration(t *testing.T) {
 	}
 	if builder.taskCapabilityGate == nil {
 		t.Error("composite task capability gate not wired")
+	}
+	if adapter, ok := builder.runtimeCapabilityRegistry.Lookup(reapersetup.ReaperLiveControlCapability); !ok {
+		t.Error("REAPER runtime adapter is not registered")
+	} else if _, ok := adapter.(*reapersetup.RuntimeAdapter); !ok {
+		t.Errorf("REAPER runtime adapter = %T, want compiled platform adapter", adapter)
 	}
 	// The reset handler must be confined to the same resolved data directory
 	// every other store uses, not the process working directory. A cwd

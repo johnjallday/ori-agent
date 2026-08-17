@@ -16,6 +16,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/pluginworkspace"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/reapersetup"
+	"github.com/johnjallday/ori-agent/internal/runtimecapability"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
@@ -62,6 +63,7 @@ type Handler struct {
 	reaperPluginLister reapersetup.PluginLister
 	reaperReconciler   *pluginworkspace.Reconciler
 	reaperRepairer     *reapersetup.Repairer
+	reaperRuntime      reaperRuntimeService
 
 	// planningPolicy resolves a workspace's effective planning policy and what
 	// its folder can actually enforce. Injected by the server; nil in a build
@@ -161,6 +163,18 @@ func (h *Handler) SetReaperSetup(resolver *reapersetup.Resolver, lister reaperse
 	h.reaperPluginLister = lister
 	h.reaperReconciler = reconciler
 	h.reaperRepairer = repairer
+}
+
+type reaperRuntimeService interface {
+	Status(context.Context, string) (runtimecapability.Status, error)
+	Recheck(context.Context, string) (runtimecapability.Status, error)
+	Verify(context.Context, string, string) (runtimecapability.Status, error)
+}
+
+func (h *Handler) SetReaperRuntimeService(service reaperRuntimeService) {
+	if h != nil {
+		h.reaperRuntime = service
+	}
 }
 
 // ReaperSetupWired reports whether the REAPER readiness resolver, preview lister,

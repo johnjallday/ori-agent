@@ -17,6 +17,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/plugin"
 	"github.com/johnjallday/ori-agent/internal/pluginworkspace"
+	"github.com/johnjallday/ori-agent/internal/runtimecapability"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -96,6 +97,11 @@ type Readiness struct {
 	// REAPER/Web Remote/runner are live. Only the setup agent verifies that at
 	// execution time.
 	LiveVerification string `json:"live_verification"`
+
+	// Runtime is the generalized durable/live status when this workspace has a
+	// persisted reaper_live_control contract. Legacy callers can keep reading
+	// the fields above while newer callers migrate to this authoritative model.
+	Runtime *runtimecapability.Status `json:"runtime,omitempty"`
 }
 
 // workspaceReader is the read surface the resolver needs (satisfied by the
@@ -105,21 +111,21 @@ type workspaceReader interface {
 	GetWorkspaceAgent(workspaceID, agentName string) (*agent.Agent, bool, error)
 }
 
-// pluginInspector reports plugin attachment without mutating anything (satisfied
-// by *pluginworkspace.Reconciler).
-type pluginInspector interface {
+// PluginInspector reports plugin attachment without mutating anything
+// (satisfied by *pluginworkspace.Reconciler).
+type PluginInspector interface {
 	Inspect(workspaceID string, plugins []string) ([]pluginworkspace.PluginResult, error)
 }
 
 // Resolver computes readiness for a workspace.
 type Resolver struct {
 	store   workspaceReader
-	plugins pluginInspector
+	plugins PluginInspector
 }
 
 // NewResolver builds a readiness resolver over the workspace store and the shared
 // plugin reconciler.
-func NewResolver(store workspaceReader, plugins pluginInspector) *Resolver {
+func NewResolver(store workspaceReader, plugins PluginInspector) *Resolver {
 	return &Resolver{store: store, plugins: plugins}
 }
 
