@@ -654,6 +654,66 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
     applyWorkspaceRootState(data);
   }
 
+  // describeWorkspaceRootRefresh turns the server's refresh result into one
+  // honest sentence about what saving a directory actually changed. Saving a
+  // directory now applies it live, so "saved" alone would under-report a save
+  // that added, hid, or brought back workspaces.
+  //
+  // Kept in step with the identical helper in workspace-hub.js — both editors
+  // POST the same endpoint and must describe the outcome the same way.
+  function describeWorkspaceRootRefresh(refresh, savedLabel) {
+    const result = refresh || {};
+    const count = value => {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+    };
+    const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+
+    const imported = count(result.imported);
+    const restored = count(result.restored);
+    const hidden = count(result.orphaned);
+    const regrouped = count(result.reparented);
+
+    const parts = [];
+    if (imported > 0) parts.push(plural(imported, 'workspace added', 'workspaces added'));
+    if (restored > 0) parts.push(plural(restored, 'workspace restored', 'workspaces restored'));
+    if (hidden > 0) parts.push(plural(hidden, 'workspace hidden', 'workspaces hidden'));
+    if (regrouped > 0)
+      parts.push(plural(regrouped, 'workspace re-grouped', 'workspaces re-grouped'));
+
+    const warnings = Array.isArray(result.warnings) ? result.warnings.filter(Boolean) : [];
+    let message = parts.length
+      ? `${savedLabel} ${parts.join(', ')}.`
+      : `${savedLabel} Your workspace list is unchanged.`;
+
+    if (hidden > 0) {
+      // Deliberately not the Rescan wording ("folder missing on disk"): these
+      // folders are exactly where they always were. They belong to a directory
+      // that is no longer the active one.
+      message += ' Hidden workspaces stay on disk and return if you switch back.';
+    }
+    if (warnings.length > 0) {
+      message += ` ${plural(warnings.length, 'warning', 'warnings')}: ${warnings.join('; ')}`;
+    }
+
+    return { message, level: warnings.length > 0 ? 'warning' : 'success' };
+  }
+
+  // readWorkspaceRootError pulls the human-readable reason out of an error
+  // response. The API answers with a JSON envelope, which reads as raw braces
+  // in a toast if it is passed through verbatim.
+  async function readWorkspaceRootError(response) {
+    const body = (await response.text()) || '';
+    try {
+      const parsed = JSON.parse(body);
+      const message = String(parsed?.error || parsed?.message || '').trim();
+      if (message) return message;
+    } catch {
+      // Not JSON — the raw body is the best message available.
+    }
+    return body.trim() || 'Failed to save workspace directory';
+  }
+
   async function saveWorkspaceRoot(workspaceRoot) {
     const response = await fetch('/api/settings/workspace-root', {
       method: 'POST',
@@ -664,7 +724,7 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
     });
 
     if (!response.ok) {
-      throw new Error((await response.text()) || 'Failed to save workspace directory');
+      throw new Error(await readWorkspaceRootError(response));
     }
 
     const data = await response.json();
@@ -703,8 +763,9 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
   saveBtn?.addEventListener('click', async function () {
     setButtonLoading(saveBtn, true, 'Saving...');
     try {
-      await saveWorkspaceRoot(input.value.trim());
-      notify('Workspace directory saved.', 'success');
+      const saved = await saveWorkspaceRoot(input.value.trim());
+      const outcome = describeWorkspaceRootRefresh(saved?.refresh, 'Workspace directory saved.');
+      notify(outcome.message, outcome.level);
     } catch (error) {
       console.error('Failed to save workspace directory:', error);
       notify('Failed to save workspace directory: ' + error.message, 'error');
@@ -720,8 +781,12 @@ document.getElementById('systemDiagnosticsBtn')?.addEventListener('click', async
 
     setButtonLoading(resetBtn, true, 'Clearing...');
     try {
-      await saveWorkspaceRoot('');
-      notify('Custom workspace directory cleared.', 'success');
+      const saved = await saveWorkspaceRoot('');
+      const outcome = describeWorkspaceRootRefresh(
+        saved?.refresh,
+        'Custom workspace directory cleared.'
+      );
+      notify(outcome.message, outcome.level);
     } catch (error) {
       console.error('Failed to clear workspace directory:', error);
       notify('Failed to clear workspace directory: ' + error.message, 'error');

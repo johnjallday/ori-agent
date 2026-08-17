@@ -2765,3 +2765,142 @@ test.describe('Home Workspace Routing', () => {
     await expect.poll(() => chatCalls).toBe(1);
   });
 });
+
+test.describe('Settings Workspace Directory', () => {
+  // Saving a directory now applies it to the running app (Issue #353), so the
+  // Settings control has to report what that actually changed rather than a
+  // bare "saved".
+  async function installWorkspaceRootRoutes(
+    page,
+    { refresh, failSave = false, saveDelayMs = 0 } = {}
+  ) {
+    // Settings is only reachable past onboarding; its modal would otherwise
+    // sit over the page and swallow every click.
+    await page.route('**/api/onboarding/status', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          needs_onboarding: false,
+          current_step: 3,
+          completed: true,
+          skipped: false,
+          steps_completed: [0, 1, 2],
+          user_name: 'Smoke Tester',
+          assistant_name: 'Ori'
+        })
+      });
+    });
+    await page.route('**/api/settings/workspace-root', async route => {
+      if (route.request().method() !== 'POST') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            workspace_root: '/tmp/ori-root-a',
+            effective_workspace_root: '/tmp/ori-root-a',
+            default_workspace_root: '/tmp/ori-default',
+            source: 'settings',
+            confirmed: true
+          })
+        });
+        return;
+      }
+
+      if (saveDelayMs > 0) {
+        await new Promise(resolve => setTimeout(resolve, saveDelayMs));
+      }
+
+      if (failSave) {
+        await route.fulfill({
+          status: 400,
+          contentType: 'application/json',
+          body: JSON.stringify({ error: 'Unable to use workspace directory' })
+        });
+        return;
+      }
+
+      const requested = route.request().postDataJSON().workspace_root;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: true,
+          workspace_root: requested,
+          effective_workspace_root: requested,
+          default_workspace_root: '/tmp/ori-default',
+          source: 'settings',
+          confirmed: true,
+          refresh
+        })
+      });
+    });
+  }
+
+  test('reports the live refresh after a save, without the missing-folder wording', async ({
+    page
+  }) => {
+    await installWorkspaceRootRoutes(page, {
+      refresh: { imported: 2, reparented: 0, orphaned: 1, restored: 0, warnings: [] },
+      saveDelayMs: 300
+    });
+    await page.goto('/settings');
+
+    const input = page.locator('#workspaceRootInput');
+    await expect(input).toHaveValue('/tmp/ori-root-a');
+
+    await input.fill('/tmp/ori-root-b');
+    const saveBtn = page.locator('#saveWorkspaceRootBtn');
+    await saveBtn.click();
+
+    // The control announces that it is working and cannot be double-submitted.
+    await expect(saveBtn).toBeDisabled();
+    await expect(saveBtn).toContainText('Saving...');
+
+    const toast = page.locator('#toastContainer .toast').first();
+    await expect(toast).toContainText('2 workspaces added');
+    await expect(toast).toContainText('1 workspace hidden');
+    // Those folders are exactly where they were — this is not the Rescan case.
+    await expect(toast).not.toContainText('missing on disk');
+    await expect(saveBtn).toBeEnabled();
+    await expect(page.locator('#workspaceRootStatusDetails')).toContainText('/tmp/ori-root-b');
+  });
+
+  test('surfaces refresh warnings instead of a clean success', async ({ page }) => {
+    await installWorkspaceRootRoutes(page, {
+      refresh: {
+        imported: 1,
+        reparented: 0,
+        orphaned: 0,
+        restored: 0,
+        warnings: ['Failed to import Notes']
+      }
+    });
+    await page.goto('/settings');
+
+    await page.locator('#workspaceRootInput').fill('/tmp/ori-root-b');
+    await page.locator('#saveWorkspaceRootBtn').click();
+
+    const toast = page.locator('#toastContainer .toast').first();
+    await expect(toast).toContainText('1 warning: Failed to import Notes');
+  });
+
+  test('a rejected directory leaves the editor usable and claims no success', async ({ page }) => {
+    await installWorkspaceRootRoutes(page, { failSave: true });
+    await page.goto('/settings');
+
+    const input = page.locator('#workspaceRootInput');
+    await input.fill('/tmp/ori-not-a-directory');
+    const saveBtn = page.locator('#saveWorkspaceRootBtn');
+    await saveBtn.click();
+
+    const toast = page.locator('#toastContainer .toast').first();
+    await expect(toast).toContainText('Failed to save workspace directory');
+    await expect(toast).not.toContainText('workspace list is unchanged');
+
+    // Still editable, still submittable, and the draft is intact.
+    await expect(saveBtn).toBeEnabled();
+    await expect(input).toBeEditable();
+    await expect(input).toHaveValue('/tmp/ori-not-a-directory');
+  });
+});

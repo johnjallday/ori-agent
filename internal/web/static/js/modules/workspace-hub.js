@@ -681,6 +681,78 @@
     syncLauncherWorkspaceRootEditorControls();
   }
 
+  // describeWorkspaceRootRefresh turns the server's refresh result into one
+  // honest sentence about what saving a directory actually changed. Saving a
+  // directory now applies it live, so "saved" alone would under-report a save
+  // that added, hid, or brought back workspaces.
+  //
+  // Kept in step with the identical helper in settings-page.js — both editors
+  // POST the same endpoint and must describe the outcome the same way.
+  function describeWorkspaceRootRefresh(refresh, savedLabel) {
+    const result = refresh || {};
+    const count = value => {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+    };
+    const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+
+    const imported = count(result.imported);
+    const restored = count(result.restored);
+    const hidden = count(result.orphaned);
+    const regrouped = count(result.reparented);
+
+    const parts = [];
+    if (imported > 0) parts.push(plural(imported, 'workspace added', 'workspaces added'));
+    if (restored > 0) parts.push(plural(restored, 'workspace restored', 'workspaces restored'));
+    if (hidden > 0) parts.push(plural(hidden, 'workspace hidden', 'workspaces hidden'));
+    if (regrouped > 0)
+      parts.push(plural(regrouped, 'workspace re-grouped', 'workspaces re-grouped'));
+
+    const warnings = Array.isArray(result.warnings) ? result.warnings.filter(Boolean) : [];
+    let message = parts.length
+      ? `${savedLabel} ${parts.join(', ')}.`
+      : `${savedLabel} Your workspace list is unchanged.`;
+
+    if (hidden > 0) {
+      // Deliberately not the Rescan wording ("folder missing on disk"): these
+      // folders are exactly where they always were. They belong to a directory
+      // that is no longer the active one.
+      message += ' Hidden workspaces stay on disk and return if you switch back.';
+    }
+    if (warnings.length > 0) {
+      message += ` ${plural(warnings.length, 'warning', 'warnings')}: ${warnings.join('; ')}`;
+    }
+
+    return { message, level: warnings.length > 0 ? 'warning' : 'success' };
+  }
+
+  // reportWorkspaceRootListRefreshFailure covers the half-done case: the
+  // directory did apply, only the follow-up list read failed. Saying "saved"
+  // would imply the list below is showing the new directory, so the editor
+  // stays open with the draft intact and the message names the next action.
+  function reportWorkspaceRootListRefreshFailure() {
+    if (window.Toast) {
+      window.Toast.error(
+        'Workspace directory saved, but the workspace list could not be reloaded. Use Refresh to see it.'
+      );
+    }
+  }
+
+  // readWorkspaceRootError pulls the human-readable reason out of an error
+  // response. The API answers with a JSON envelope, which reads as raw braces
+  // in a toast if it is passed through verbatim.
+  async function readWorkspaceRootError(response) {
+    const body = (await response.text()) || '';
+    try {
+      const parsed = JSON.parse(body);
+      const message = String(parsed?.error || parsed?.message || '').trim();
+      if (message) return message;
+    } catch {
+      // Not JSON — the raw body is the best message available.
+    }
+    return body.trim() || 'Failed to save workspace directory';
+  }
+
   async function saveLauncherWorkspaceRoot(workspaceRoot) {
     const response = await fetch('/api/settings/workspace-root', {
       method: 'POST',
@@ -691,7 +763,7 @@
     });
 
     if (!response.ok) {
-      throw new Error((await response.text()) || 'Failed to save workspace directory');
+      throw new Error(await readWorkspaceRootError(response));
     }
 
     const data = await response.json();
@@ -4351,7 +4423,13 @@
   }
 
   /**
-   * Load all workspaces
+   * Load all workspaces.
+   *
+   * Returns whether the list was actually refreshed. Failures stay non-fatal
+   * (the launcher is still shown), but a caller that just changed the workspace
+   * directory needs to know the list it is about to report on is real.
+   *
+   * @returns {Promise<boolean>}
    */
   async function loadWorkspaces() {
     const state = window.WorkspaceHubState.getState();
@@ -4375,9 +4453,11 @@
 
       // Always show the launcher - workspace details are now on separate pages
       showLauncher();
+      return true;
     } catch (error) {
       console.error('Workspace hub failed to load workspaces:', error);
       showLauncher();
+      return false;
     }
   }
 
@@ -4689,10 +4769,21 @@
       const nextValue = String(elements.launcherWorkspaceRootInput?.value || '').trim();
       setLauncherWorkspaceRootButtonLoading(elements.launcherWorkspaceRootSaveBtn, true, 'Saving…');
       try {
-        await saveLauncherWorkspaceRoot(nextValue);
+        const saved = await saveLauncherWorkspaceRoot(nextValue);
+        // The POST already applied and reconciled the directory, so the list
+        // just needs re-reading — no second /api/workspaces/rescan.
+        if (!(await loadWorkspaces())) {
+          reportWorkspaceRootListRefreshFailure();
+          return;
+        }
         setLauncherWorkspaceRootEditorOpen(false);
-        if (window.Toast) window.Toast.success('Workspace directory saved.');
+        const outcome = describeWorkspaceRootRefresh(saved?.refresh, 'Workspace directory saved.');
+        if (window.Toast) {
+          const notify = window.Toast[outcome.level] || window.Toast.success;
+          notify.call(window.Toast, outcome.message);
+        }
       } catch (error) {
+        // Leave the editor open with the draft intact so the path can be fixed.
         console.error('Failed to save workspace directory:', error);
         if (window.Toast)
           window.Toast.error('Failed to save workspace directory: ' + error.message);
@@ -4726,9 +4817,20 @@
           'Clearing…'
         );
         try {
-          await saveLauncherWorkspaceRoot('');
+          const saved = await saveLauncherWorkspaceRoot('');
+          if (!(await loadWorkspaces())) {
+            reportWorkspaceRootListRefreshFailure();
+            return;
+          }
           setLauncherWorkspaceRootEditorOpen(false);
-          if (window.Toast) window.Toast.success('Custom workspace directory cleared.');
+          const outcome = describeWorkspaceRootRefresh(
+            saved?.refresh,
+            'Custom workspace directory cleared.'
+          );
+          if (window.Toast) {
+            const notify = window.Toast[outcome.level] || window.Toast.success;
+            notify.call(window.Toast, outcome.message);
+          }
         } catch (error) {
           console.error('Failed to clear workspace directory:', error);
           if (window.Toast)
@@ -5074,6 +5176,7 @@
     getVisibleLauncherTreeRows,
     normalizeLauncherView,
     bindLauncherInteractions,
+    describeWorkspaceRootRefresh,
     clearLauncherTagFilters,
     collectLauncherTags,
     filterWorkspaceTreeByTags,
