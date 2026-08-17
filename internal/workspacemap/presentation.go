@@ -223,6 +223,68 @@ func SanitizeGroupPresentation(p GroupPresentation) GroupPresentation {
 	return clean
 }
 
+// GroupGeometry is the geometry half of one district's presentation: what a
+// reset clears and an Undo puts back (#346 FR-186, FR-187).
+//
+// Appearance is not here on purpose. Reset preserves accents and themes, so a
+// geometry snapshot has no business carrying them — and if it did, an Undo
+// taken before a colour change would silently revert that colour.
+type GroupGeometry struct {
+	SizingMode SizingMode `json:"sizing_mode"`
+	Frame      *Frame     `json:"frame,omitempty"`
+	Collapsed  bool       `json:"collapsed"`
+}
+
+// IsDefault reports whether the geometry is what an un-customized district has,
+// and therefore whether it is worth storing at all.
+func (g GroupGeometry) IsDefault() bool {
+	return g.SizingMode != SizingModeCustom && g.Frame == nil && !g.Collapsed
+}
+
+// Geometry extracts the resettable half of a presentation record.
+func (p GroupPresentation) Geometry() GroupGeometry {
+	return GroupGeometry{SizingMode: p.SizingMode, Frame: p.Frame, Collapsed: p.Collapsed}
+}
+
+// WithGeometry returns the record with its geometry replaced and its appearance
+// left exactly as it is.
+func (p GroupPresentation) WithGeometry(geometry GroupGeometry) GroupPresentation {
+	p.SizingMode = geometry.SizingMode
+	p.Frame = geometry.Frame
+	p.Collapsed = geometry.Collapsed
+	return p
+}
+
+// ClearGeometry returns the record a reset leaves behind: automatic sizing, no
+// stored rectangle, expanded — and the user's chosen accent and theme intact.
+func (p GroupPresentation) ClearGeometry() GroupPresentation {
+	return p.WithGeometry(GroupGeometry{SizingMode: SizingModeAuto})
+}
+
+// NormalizeGroupGeometry validates one snapshot entry for a write.
+func NormalizeGroupGeometry(g GroupGeometry) (GroupGeometry, error) {
+	clean := GroupGeometry{SizingMode: SizingModeAuto, Collapsed: g.Collapsed}
+	if g.SizingMode != "" && !g.SizingMode.IsValid() {
+		return GroupGeometry{}, fmt.Errorf("%w: unknown sizing mode %q", ErrInvalidPatch, g.SizingMode)
+	}
+	if g.SizingMode == SizingModeCustom {
+		if g.Frame == nil {
+			return GroupGeometry{}, fmt.Errorf("%w: custom sizing requires a frame", ErrInvalidFrame)
+		}
+		frame, err := NormalizeFrame(*g.Frame)
+		if err != nil {
+			return GroupGeometry{}, err
+		}
+		clean.SizingMode = SizingModeCustom
+		clean.Frame = &frame
+	} else if g.Frame != nil {
+		// A rectangle with automatic sizing is an ambiguous payload, not a
+		// harmless extra: it is unclear whether the caller meant to keep it.
+		return GroupGeometry{}, fmt.Errorf("%w: automatic sizing does not accept a frame", ErrInvalidPatch)
+	}
+	return clean, nil
+}
+
 // NormalizeFrame validates a district rectangle and returns it rounded for
 // storage. Like NormalizePoint it refuses rather than clamps: silently resizing
 // a district the user did not resize is worse than telling them the gesture was

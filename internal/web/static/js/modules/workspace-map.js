@@ -374,7 +374,16 @@
       .then(function (data) {
         var result = (data && data.result) || null;
         if (!result) throw new Error('workspace map layout save returned nothing');
-        if (typeof result.revision === 'number') layoutState.revision = result.revision;
+
+        // Revisions are server-issued and monotonic, so a response that carries
+        // an older one is the answer to a question a newer write has already
+        // superseded. Applying it would roll local state backwards — the
+        // classic out-of-order-response bug — so it is accepted as a completed
+        // request and dropped as a source of truth (#346 FR-189).
+        var revision = typeof result.revision === 'number' ? result.revision : null;
+        if (revision !== null && revision < layoutState.revision) return result;
+        if (revision !== null) layoutState.revision = revision;
+
         if (typeof result.snap_to_grid === 'boolean') layoutState.snapToGrid = result.snap_to_grid;
         var viewport = safeViewport(result.viewport);
         if (viewport) layoutState.viewport = viewport;
@@ -5973,13 +5982,29 @@
       return;
     }
     var count = Object.keys(layoutState.positions).length;
+    // The copy has to name everything this clears, now that it clears more than
+    // anchors — and everything it does not, so nobody avoids Reset layout for
+    // fear of losing the colours they picked (#346 FR-186).
+    var districts = Object.keys(layoutState.groups).filter(function (id) {
+      var record = layoutState.groups[id];
+      return record.sizingMode === 'custom' || record.collapsed;
+    }).length;
     var message =
       'Reset the map layout?\n\n' +
-      'Every workspace and district goes back to an automatic position. ' +
+      'Every workspace and district goes back to an automatic position and size, and any ' +
+      'collapsed group is reopened. ' +
       'Nothing is deleted, renamed, regrouped or reordered — only where things sit on your map changes. ' +
-      'Your Snap to Grid setting is kept, and you can undo this during this session.' +
+      'Your group colours and themes, and your Snap to Grid setting, are kept, and you can undo ' +
+      'this during this session.' +
       (count
         ? '\n\n' + count + ' saved position' + (count === 1 ? '' : 's') + ' will be cleared.'
+        : '') +
+      (districts
+        ? (count ? ' ' : '\n\n') +
+          districts +
+          ' district' +
+          (districts === 1 ? '' : 's') +
+          ' will return to automatic sizing.'
         : '');
     if (
       typeof window !== 'undefined' &&
@@ -5990,44 +6015,88 @@
     }
 
     // Snapshot before asking the server, so Undo restores exactly what was
-    // there rather than whatever survived the reset.
-    var snapshot = {};
-    Object.keys(layoutState.positions).forEach(function (id) {
-      snapshot[id] = { x: layoutState.positions[id].x, y: layoutState.positions[id].y };
-    });
+    // there rather than whatever survived the reset. Since #346 a layout is
+    // more than anchors: the districts' custom rectangles, sizing modes, and
+    // collapsed states are cleared too, so they have to be remembered too or
+    // Undo would return the buildings and leave every district automatic and
+    // open (FR-187).
+    var snapshot = captureGeometrySnapshot();
 
     deleteLayout()
       .then(function () {
         undoSnapshot = snapshot;
         layoutState.positions = Object.create(null);
+        // Appearance is deliberately untouched by a reset, so only the geometry
+        // half of each stored record is cleared locally (FR-186).
+        Object.keys(layoutState.groups).forEach(function (id) {
+          var record = layoutState.groups[id];
+          record.sizingMode = 'auto';
+          record.frame = null;
+          record.collapsed = false;
+          if (isDefaultPresentation(record)) delete layoutState.groups[id];
+        });
         announce(
           container,
-          'Layout reset. Every workspace is at an automatic position; nothing else changed. Undo reset is available.'
+          'Layout reset. Every workspace and district is back to an automatic position and size; ' +
+            'your colours, themes, and Snap to Grid setting are unchanged. Undo reset is available.'
         );
         settleLayout();
         fitAll(lastMount ? lastMount.container : container);
       })
       .catch(function () {
-        // A failed reset changes nothing, and says so (FR-112).
+        // A failed reset changes nothing, and says so (FR-112, FR-188).
         announce(container, 'The layout could not be reset. Everything is still where it was.');
       });
+  }
+
+  /** The exact geometry a reset is about to clear (#346 FR-187). */
+  function captureGeometrySnapshot() {
+    var positions = {};
+    Object.keys(layoutState.positions).forEach(function (id) {
+      positions[id] = { x: layoutState.positions[id].x, y: layoutState.positions[id].y };
+    });
+    var groups = {};
+    Object.keys(layoutState.groups).forEach(function (id) {
+      var record = layoutState.groups[id];
+      // Appearance is not captured: a reset never takes it away, so an Undo has
+      // nothing to put back — and carrying it would let an Undo silently revert
+      // a colour chosen after the reset.
+      var geometry = { sizing_mode: record.sizingMode, collapsed: record.collapsed };
+      if (record.sizingMode === 'custom' && record.frame) {
+        geometry.frame = {
+          x: record.frame.x,
+          y: record.frame.y,
+          width: record.frame.width,
+          height: record.frame.height
+        };
+      }
+      groups[id] = geometry;
+    });
+    return { positions: positions, groups: groups };
   }
 
   function undoReset(container) {
     if (!undoSnapshot) return;
     var snapshot = undoSnapshot;
-    patchLayout([{ op: 'restore_positions', positions: snapshot }])
+    patchLayout([
+      { op: 'restore_geometry', positions: snapshot.positions, groups: snapshot.groups }
+    ])
       .then(function () {
         undoSnapshot = null;
-        Object.keys(snapshot).forEach(function (id) {
-          layoutState.positions[id] = snapshot[id];
+        Object.keys(snapshot.positions).forEach(function (id) {
+          layoutState.positions[id] = snapshot.positions[id];
         });
-        announce(container, 'Reset undone. Every workspace is back where it was.');
+        announce(container, 'Reset undone. Every workspace and district is back the way it was.');
         settleLayout();
+        // Reset framed the automatic layout on its way out, so without this the
+        // restored arrangement lands wherever that camera is still looking —
+        // usually at empty world. An Undo that appears to have done nothing is
+        // indistinguishable from one that failed.
+        fitAll(lastMount ? lastMount.container : container);
       })
       .catch(function () {
         // The post-reset state is still valid and still saved; only the undo
-        // failed, so the offer stays (FR-112).
+        // failed, so the offer stays (FR-112, FR-188).
         announce(
           container,
           'That could not be undone. The reset layout is unchanged — try Undo reset again.'
@@ -6566,14 +6635,32 @@
     // the /workspaces launcher can reflect "positions cannot be saved right
     // now" without each keeping its own copy (FR-4, FR-105).
     getLayoutState: function () {
+      var groups = Object.create(null);
+      Object.keys(layoutState.groups).forEach(function (id) {
+        groups[id] = Object.assign({}, layoutState.groups[id]);
+      });
       return {
         status: layoutState.status,
         revision: layoutState.revision,
         snapToGrid: layoutState.snapToGrid,
         readOnly: layoutState.status !== 'ready',
         positions: Object.assign(Object.create(null), layoutState.positions),
+        groups: groups,
         viewport: layoutState.viewport ? Object.assign({}, layoutState.viewport) : null
       };
+    },
+    // Test-only seams for the reset/undo lifecycle, so the geometry snapshot
+    // and the local clear can be asserted without driving window.confirm.
+    _captureGeometrySnapshotForTest: captureGeometrySnapshot,
+    _resetLayoutForTest: function () {
+      Object.keys(layoutState.groups).forEach(function (id) {
+        var record = layoutState.groups[id];
+        record.sizingMode = 'auto';
+        record.frame = null;
+        record.collapsed = false;
+        if (isDefaultPresentation(record)) delete layoutState.groups[id];
+      });
+      layoutState.positions = Object.create(null);
     },
     // Test-only seam for the persisted layout, so coordinate behavior can be
     // asserted without a network round-trip.

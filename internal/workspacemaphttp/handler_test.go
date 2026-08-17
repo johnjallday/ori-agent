@@ -432,6 +432,51 @@ func TestPatchRejectsOversizedOperationList(t *testing.T) {
 	}
 }
 
+func TestPatchAcceptsGeometryRestore(t *testing.T) {
+	service := &fakeService{result: workspacemap.Result{Revision: 14}}
+	server := newTestServer(t, service, fakeUserProvider{id: "local"})
+
+	resp, _ := do(t, server, http.MethodPatch, `{"operations":[{
+		"op":"restore_geometry",
+		"positions":{"ws-a":{"x":10,"y":20}},
+		"groups":{"grp-a":{"sizing_mode":"custom","frame":{"x":0,"y":0,"width":400,"height":400},"collapsed":true}}
+	}]}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	op := service.lastPatch.Operations[0]
+	if op.Kind != workspacemap.OpRestoreGeometry {
+		t.Fatalf("kind = %q, want restore_geometry", op.Kind)
+	}
+	geometry, ok := op.Groups["grp-a"]
+	if !ok || geometry.Frame == nil || !geometry.Collapsed {
+		t.Errorf("decoded snapshot = %+v", op.Groups)
+	}
+	if op.Positions["ws-a"] != (workspacemap.Point{X: 10, Y: 20}) {
+		t.Errorf("decoded positions = %+v", op.Positions)
+	}
+}
+
+// A geometry snapshot carries geometry. An appearance field in it is an
+// ambiguous payload — an Undo has no business repainting anything (#346
+// FR-180, FR-187).
+func TestPatchRejectsAppearanceInAGeometrySnapshot(t *testing.T) {
+	service := &fakeService{}
+	server := newTestServer(t, service, fakeUserProvider{id: "local"})
+
+	resp, _ := do(t, server, http.MethodPatch, `{"operations":[{
+		"op":"restore_geometry",
+		"positions":{},
+		"groups":{"grp-a":{"sizing_mode":"auto","collapsed":false,"accent":"moss"}}
+	}]}`)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	if service.lastPatch.Operations != nil {
+		t.Error("a rejected snapshot must never reach the service")
+	}
+}
+
 func TestPatchMapsDistrictDomainErrors(t *testing.T) {
 	for _, tc := range []struct {
 		name string

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -980,6 +981,246 @@ func (f fixedResolver) GroupNodeIDs(_ context.Context, groupID string) ([]string
 		return nil, fmt.Errorf("%w: %q", ErrNodeNotFound, groupID)
 	}
 	return ids, nil
+}
+
+// ---------------------------------------------------------------------------
+// Reset and Undo over geometry (#346 FR-186 – FR-188)
+// ---------------------------------------------------------------------------
+
+// customizedLayout seeds one user with anchors, a custom-framed district, a
+// collapsed one, and an accent/theme on each — everything a reset has an
+// opinion about.
+func customizedLayout(t *testing.T, store *SQLiteStore, db *database.DB) {
+	t.Helper()
+	ctx := context.Background()
+	seedWorkspace(t, db, "ws-a", "ws-b", "grp-a", "grp-b")
+	if _, err := store.Apply(ctx, "local", Patch{Operations: []Operation{
+		SetPositions(map[string]Point{"ws-a": {X: 100, Y: 100}, "ws-b": {X: 400, Y: 400}}),
+		SetGroupFrame("grp-a", Frame{X: 300, Y: 300, Width: 600, Height: 500}),
+		SetGroupAppearance("grp-a", "moss", "blueprint"),
+		SetGroupCollapsed("grp-b", true),
+		SetGroupAppearance("grp-b", "tide", ""),
+		SetSnapToGrid(false),
+		SetViewport(Viewport{CenterX: 10, CenterY: 20, Zoom: 1.5}),
+	}}); err != nil {
+		t.Fatalf("seed customized layout: %v", err)
+	}
+}
+
+func TestResetClearsGeometryAndKeepsAppearance(t *testing.T) {
+	store, db := newTestStore(t)
+	ctx := context.Background()
+	customizedLayout(t, store, db)
+
+	if _, err := store.Apply(ctx, "local", Patch{Operations: []Operation{Reset()}}); err != nil {
+		t.Fatalf("Apply reset: %v", err)
+	}
+
+	layout, err := store.Load(ctx, "local")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(layout.Positions) != 0 {
+		t.Errorf("positions after reset = %v, want none", layout.Positions)
+	}
+	a := layout.Groups["grp-a"]
+	if a.SizingMode != SizingModeAuto || a.Frame != nil {
+		t.Errorf("grp-a geometry survived the reset: %+v", a)
+	}
+	if a.Accent != "moss" || a.Theme != "blueprint" {
+		t.Errorf("grp-a lost its appearance: %+v — reset is not a repaint", a)
+	}
+	b := layout.Groups["grp-b"]
+	if b.Collapsed {
+		t.Error("grp-b stayed collapsed through a reset")
+	}
+	if b.Accent != "tide" {
+		t.Errorf("grp-b lost its accent: %+v", b)
+	}
+	// The preferences a reset must not touch (FR-110, FR-186).
+	if layout.SnapToGrid {
+		t.Error("reset changed the snap preference")
+	}
+	if layout.Viewport == nil || layout.Viewport.Zoom != 1.5 {
+		t.Errorf("reset changed the camera: %+v", layout.Viewport)
+	}
+}
+
+func TestRestoreGeometryPutsTheExactLayoutBack(t *testing.T) {
+	store, db := newTestStore(t)
+	ctx := context.Background()
+	customizedLayout(t, store, db)
+
+	before, err := store.Load(ctx, "local")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	snapshot := map[string]GroupGeometry{}
+	for id, record := range before.Groups {
+		snapshot[id] = record.Geometry()
+	}
+
+	if _, err := store.Apply(ctx, "local", Patch{Operations: []Operation{Reset()}}); err != nil {
+		t.Fatalf("Apply reset: %v", err)
+	}
+	if _, err := store.Apply(ctx, "local", Patch{Operations: []Operation{
+		RestoreGeometry(before.Positions, snapshot),
+	}}); err != nil {
+		t.Fatalf("Apply restore: %v", err)
+	}
+
+	after, err := store.Load(ctx, "local")
+	if err != nil {
+		t.Fatalf("Load after restore: %v", err)
+	}
+	if !reflect.DeepEqual(after.Positions, before.Positions) {
+		t.Errorf("positions = %+v, want %+v", after.Positions, before.Positions)
+	}
+	for id, want := range before.Groups {
+		got := after.Groups[id]
+		if got.SizingMode != want.SizingMode || got.Collapsed != want.Collapsed {
+			t.Errorf("%s geometry = %+v, want %+v", id, got, want)
+		}
+		if (got.Frame == nil) != (want.Frame == nil) ||
+			(got.Frame != nil && *got.Frame != *want.Frame) {
+			t.Errorf("%s frame = %+v, want %+v", id, got.Frame, want.Frame)
+		}
+		if got.Accent != want.Accent || got.Theme != want.Theme {
+			t.Errorf("%s appearance changed across reset+undo: %+v", id, got)
+		}
+	}
+}
+
+// An Undo reproduces the layout as it WAS, so a district customized after the
+// reset is cleared rather than merged into (#346 FR-187).
+func TestRestoreGeometryClearsDistrictsAbsentFromTheSnapshot(t *testing.T) {
+	store, db := newTestStore(t)
+	ctx := context.Background()
+	seedWorkspace(t, db, "grp-a", "grp-b")
+
+	if _, err := store.Apply(ctx, "local", Patch{Operations: []Operation{
+		SetGroupFrame("grp-a", Frame{X: 0, Y: 0, Width: 400, Height: 400}),
+	}}); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	snapshot := map[string]GroupGeometry{
+		"grp-a": {SizingMode: SizingModeCustom, Frame: &Frame{X: 0, Y: 0, Width: 400, Height: 400}},
+	}
+	if _, err := store.Apply(ctx, "local", Patch{Operations: []Operation{Reset()}}); err != nil {
+		t.Fatalf("Apply reset: %v", err)
+	}
+	// Something new happens after the reset...
+	if _, err := store.Apply(ctx, "local", Patch{Operations: []Operation{
+		SetGroupCollapsed("grp-b", true),
+		SetGroupAppearance("grp-b", "moss", ""),
+	}}); err != nil {
+		t.Fatalf("Apply post-reset change: %v", err)
+	}
+	// ...and the Undo puts back the layout that existed before the reset.
+	if _, err := store.Apply(ctx, "local", Patch{Operations: []Operation{
+		RestoreGeometry(map[string]Point{}, snapshot),
+	}}); err != nil {
+		t.Fatalf("Apply restore: %v", err)
+	}
+
+	layout, err := store.Load(ctx, "local")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if layout.Groups["grp-b"].Collapsed {
+		t.Error("a district absent from the snapshot kept post-reset geometry")
+	}
+	if layout.Groups["grp-b"].Accent != "moss" {
+		t.Error("but its appearance is not the snapshot's business and must survive")
+	}
+	if layout.Groups["grp-a"].SizingMode != SizingModeCustom {
+		t.Error("the snapshot's own district was not restored")
+	}
+}
+
+func TestRestoreGeometryRejectsAmbiguousSnapshots(t *testing.T) {
+	frame := Frame{X: 0, Y: 0, Width: 400, Height: 400}
+	for name, groups := range map[string]map[string]GroupGeometry{
+		"custom without a frame": {"g": {SizingMode: SizingModeCustom}},
+		"auto with a frame":      {"g": {SizingMode: SizingModeAuto, Frame: &frame}},
+		"unknown sizing mode":    {"g": {SizingMode: SizingMode("elastic")}},
+		"undersized frame": {
+			"g": {SizingMode: SizingModeCustom, Frame: &Frame{X: 0, Y: 0, Width: 4, Height: 4}},
+		},
+	} {
+		if _, err := NormalizeOperation(RestoreGeometry(map[string]Point{}, groups)); err == nil {
+			t.Errorf("%s: expected a rejection", name)
+		}
+	}
+}
+
+// Reading is not writing (#346 FR-193). Selecting, centering, fitting,
+// filtering, switching surfaces, and a hierarchy refresh all come down to
+// repeated Loads on this side, and none of them may consume a revision or
+// touch a stored byte.
+func TestRepeatedLoadsNeverWrite(t *testing.T) {
+	store, db := newTestStore(t)
+	ctx := context.Background()
+	customizedLayout(t, store, db)
+
+	before, err := store.Load(ctx, "local")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	var updatedBefore string
+	if err := db.QueryRowContext(ctx, `
+		SELECT updated_at FROM workspace_map_group_presentations WHERE group_id = 'grp-a'
+	`).Scan(&updatedBefore); err != nil {
+		t.Fatalf("read district timestamp: %v", err)
+	}
+
+	for i := range 5 {
+		if _, err := store.Load(ctx, "local"); err != nil {
+			t.Fatalf("Load %d: %v", i, err)
+		}
+	}
+
+	after, err := store.Load(ctx, "local")
+	if err != nil {
+		t.Fatalf("Load after: %v", err)
+	}
+	if after.Revision != before.Revision {
+		t.Errorf("revision moved on a read: %d → %d", before.Revision, after.Revision)
+	}
+	var updatedAfter string
+	if err := db.QueryRowContext(ctx, `
+		SELECT updated_at FROM workspace_map_group_presentations WHERE group_id = 'grp-a'
+	`).Scan(&updatedAfter); err != nil {
+		t.Fatalf("read district timestamp after: %v", err)
+	}
+	if updatedAfter != updatedBefore {
+		t.Errorf("a read rewrote a district row: %q → %q", updatedBefore, updatedAfter)
+	}
+}
+
+// A user who has never touched the map gets defaults from a read, and still has
+// no stored row afterwards (#346 FR-193).
+func TestLoadingAnUntouchedMapCreatesNothing(t *testing.T) {
+	store, db := newTestStore(t)
+	ctx := context.Background()
+	seedWorkspace(t, db, "grp-a")
+
+	layout, err := store.Load(ctx, "local")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(layout.Groups) != 0 {
+		t.Errorf("districts = %v, want none", layout.Groups)
+	}
+	var rows int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(1) FROM workspace_map_group_presentations
+	`).Scan(&rows); err != nil {
+		t.Fatalf("count districts: %v", err)
+	}
+	if rows != 0 {
+		t.Errorf("stored districts after a read = %d, want 0", rows)
+	}
 }
 
 func TestGroupPresentationRejectsUndersizedFrame(t *testing.T) {

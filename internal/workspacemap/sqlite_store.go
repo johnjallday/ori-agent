@@ -420,10 +420,29 @@ func (s *SQLiteStore) applyOperation(ctx context.Context, tx *sql.Tx, userID str
 		`, userID); err != nil {
 			return fmt.Errorf("failed to reset workspace map positions: %w", err)
 		}
-		// Reset clears anchors only. The snap preference and the camera are
-		// deliberately left alone (FR-110).
+		// Reset clears the user's ARRANGEMENT: anchors, custom rectangles,
+		// custom sizing, and collapsed districts. The snap preference, the
+		// camera, and every chosen accent and theme are deliberately left alone
+		// (FR-110, #346 FR-186) — a colour is not part of an arrangement, and
+		// having to pick six of them again would make Reset layout a thing users
+		// learn to fear.
+		if err := s.clearGroupGeometry(ctx, tx, userID, now, state); err != nil {
+			return err
+		}
 		state.committed = map[string]Point{}
 		return nil
+
+	case OpRestoreGeometry:
+		if _, err := tx.ExecContext(ctx, `
+			DELETE FROM workspace_map_positions WHERE user_id = ?
+		`, userID); err != nil {
+			return fmt.Errorf("failed to clear workspace map positions: %w", err)
+		}
+		state.committed = map[string]Point{}
+		if err := s.writePositions(ctx, tx, userID, now, op.Positions, state); err != nil {
+			return err
+		}
+		return s.restoreGroupGeometry(ctx, tx, userID, now, op.Groups, state)
 
 	case OpRestorePositions:
 		if _, err := tx.ExecContext(ctx, `
@@ -492,6 +511,90 @@ func (s *SQLiteStore) applyGroupPresentation(ctx context.Context, tx *sql.Tx, us
 	// operation did not mention, so the client reconciles one district rather
 	// than merging a fragment into state it may already have wrong (FR-190).
 	state.committedGroups[op.GroupID] = current
+	return nil
+}
+
+// storedGroupIDs lists the districts this user currently has a record for.
+func (s *SQLiteStore) storedGroupIDs(ctx context.Context, tx *sql.Tx, userID string) ([]string, error) {
+	rows, err := tx.QueryContext(ctx, `
+		SELECT group_id FROM workspace_map_group_presentations WHERE user_id = ?
+	`, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list workspace map districts: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			continue
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to list workspace map districts: %w", err)
+	}
+	return ids, nil
+}
+
+// clearGroupGeometry returns every district to automatic, expanded sizing while
+// leaving its accent and theme exactly as the user chose them (#346 FR-186).
+//
+// It is a read-modify-write per row rather than a DELETE, precisely because a
+// DELETE would take the appearance with it.
+func (s *SQLiteStore) clearGroupGeometry(ctx context.Context, tx *sql.Tx, userID string, now time.Time, state *layoutState) error {
+	ids, err := s.storedGroupIDs(ctx, tx, userID)
+	if err != nil {
+		return err
+	}
+	for _, groupID := range ids {
+		current, err := s.readGroupPresentation(ctx, tx, userID, groupID)
+		if err != nil {
+			return err
+		}
+		cleared := current.ClearGeometry()
+		if err := s.writeGroupPresentation(ctx, tx, userID, now, groupID, cleared); err != nil {
+			return err
+		}
+		state.committedGroups[groupID] = cleared
+	}
+	return nil
+}
+
+// restoreGroupGeometry applies an exact geometry snapshot.
+//
+// Districts absent from the snapshot are cleared, the same way anchors absent
+// from a restore are removed — an Undo has to reproduce the layout as it was,
+// not merge into whatever is there now. Appearance is preserved throughout,
+// because a reset never took it away (FR-187).
+func (s *SQLiteStore) restoreGroupGeometry(ctx context.Context, tx *sql.Tx, userID string, now time.Time, snapshot map[string]GroupGeometry, state *layoutState) error {
+	ids, err := s.storedGroupIDs(ctx, tx, userID)
+	if err != nil {
+		return err
+	}
+	seen := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		seen[id] = true
+	}
+	for groupID := range snapshot {
+		seen[groupID] = true
+	}
+
+	for groupID := range seen {
+		current, err := s.readGroupPresentation(ctx, tx, userID, groupID)
+		if err != nil {
+			return err
+		}
+		geometry, restored := snapshot[groupID]
+		if !restored {
+			geometry = GroupGeometry{SizingMode: SizingModeAuto}
+		}
+		next := current.WithGeometry(geometry)
+		if err := s.writeGroupPresentation(ctx, tx, userID, now, groupID, next); err != nil {
+			return err
+		}
+		state.committedGroups[groupID] = next
+	}
 	return nil
 }
 

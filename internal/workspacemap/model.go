@@ -281,7 +281,22 @@ const (
 	// pre-reset layout back as one unit, without a permanent history table
 	// (FR-112). Unlike OpSetPositions it does not merge: anchors absent from
 	// the snapshot are removed.
+	//
+	// It restores anchors ONLY. Since #346 a layout also has district geometry,
+	// and an Undo that put the buildings back while leaving every district
+	// automatic and expanded would not be the layout the user had. Use
+	// OpRestoreGeometry for that; this kind stays for callers that genuinely
+	// mean "anchors, nothing else".
 	OpRestorePositions OpKind = "restore_positions"
+	// OpRestoreGeometry replaces the whole layout GEOMETRY with an exact
+	// snapshot, atomically: node anchors, custom frames, sizing modes, and
+	// collapsed states together (#346 FR-187).
+	//
+	// Appearance is deliberately absent. Reset never cleared an accent or a
+	// theme, so an Undo of it has nothing to put back, and carrying appearance
+	// in the snapshot would let a stale Undo silently revert a colour the user
+	// chose after the reset (FR-186).
+	OpRestoreGeometry OpKind = "restore_geometry"
 
 	// --- group district presentation (#346 FR-173, FR-178) ---
 	//
@@ -353,6 +368,10 @@ type Operation struct {
 	// "leave this one alone" rather than "clear it".
 	Accent string `json:"accent,omitempty"`
 	Theme  string `json:"theme,omitempty"`
+	// Groups carries the district geometry snapshot for OpRestoreGeometry,
+	// keyed by group ID. Districts absent from it are reset, exactly as anchors
+	// absent from Positions are removed.
+	Groups map[string]GroupGeometry `json:"groups,omitempty"`
 }
 
 // SetPositions builds a merge operation for one or more dropped nodes.
@@ -383,6 +402,15 @@ func Reset() Operation {
 // RestorePositions builds the atomic exact-restore operation used by Undo.
 func RestorePositions(positions map[string]Point) Operation {
 	return Operation{Kind: OpRestorePositions, Positions: positions}
+}
+
+// RestoreGeometry builds the atomic exact-restore operation used by Undo after
+// a reset: anchors and district geometry together, appearance untouched.
+func RestoreGeometry(positions map[string]Point, groups map[string]GroupGeometry) Operation {
+	if groups == nil {
+		groups = map[string]GroupGeometry{}
+	}
+	return Operation{Kind: OpRestoreGeometry, Positions: positions, Groups: groups}
 }
 
 // SetGroupFrame builds the operation a committed manual resize sends.
@@ -531,6 +559,37 @@ func NormalizeOperation(op Operation) (Operation, error) {
 			return Operation{}, err
 		}
 		return Operation{Kind: OpReset}, nil
+
+	case OpRestoreGeometry:
+		if err := allowFields(op, "positions", "groups"); err != nil {
+			return Operation{}, err
+		}
+		positions, err := normalizePositions(op.Positions)
+		if err != nil {
+			return Operation{}, err
+		}
+		if len(op.Groups) > MaxGroupPresentationsPerLayout {
+			return Operation{}, fmt.Errorf("%w: %d districts exceeds %d",
+				ErrPatchTooLarge, len(op.Groups), MaxGroupPresentationsPerLayout)
+		}
+		groups := make(map[string]GroupGeometry, len(op.Groups))
+		for rawID, geometry := range op.Groups {
+			groupID, err := NormalizeNodeID(rawID)
+			if err != nil {
+				return Operation{}, err
+			}
+			if _, duplicate := groups[groupID]; duplicate {
+				return Operation{}, fmt.Errorf("%w: duplicate group id %q", ErrInvalidPatch, groupID)
+			}
+			clean, err := NormalizeGroupGeometry(geometry)
+			if err != nil {
+				return Operation{}, fmt.Errorf("group %q: %w", groupID, err)
+			}
+			groups[groupID] = clean
+		}
+		// An empty restore is meaningful — it is the state a reset produces —
+		// so unlike OpSetPositions there is no "requires at least one" rule.
+		return Operation{Kind: op.Kind, Positions: positions, Groups: groups}, nil
 
 	case OpSetGroupFrame:
 		if err := allowFields(op, "group_id", "frame"); err != nil {
@@ -717,6 +776,7 @@ func presentFields(op Operation) map[string]bool {
 		"collapsed":    op.Collapsed != nil,
 		"accent":       strings.TrimSpace(op.Accent) != "",
 		"theme":        strings.TrimSpace(op.Theme) != "",
+		"groups":       op.Groups != nil,
 	}
 }
 

@@ -4741,7 +4741,7 @@ async function mountedReset({ confirm = true, deleteFails = false, undoFails = f
       if (method === 'PATCH') {
         if (undoFails) return Promise.resolve({ ok: false, status: 500 });
         const body = JSON.parse(init.body);
-        const restore = body.operations.find(op => op.op === 'restore_positions');
+        const restore = body.operations.find(op => op.op === 'restore_geometry');
         return Promise.resolve({
           ok: true,
           json: () =>
@@ -4806,9 +4806,14 @@ test('Undo restores the exact pre-reset position set atomically (FR-112)', async
   harness.control('[data-map-undo-reset]').click();
   await flush();
 
-  const restore = calls.find(c => c.body && c.body.operations[0].op === 'restore_positions');
+  const restore = calls.find(c => c.body && c.body.operations[0].op === 'restore_geometry');
   assert.ok(restore, 'undo uses the atomic exact-restore operation');
   assert.deepEqual(Object.keys(restore.body.operations[0].positions).sort(), ['ws-1', 'ws-2']);
+  // Geometry rides along with the anchors, appearance deliberately does not
+  // (#346 FR-187).
+  assert.ok(restore.body.operations[0].groups, 'district geometry is part of the snapshot');
+  assert.equal(JSON.stringify(restore.body).includes('accent'), false);
+  assert.equal(JSON.stringify(restore.body).includes('theme'), false);
   const after = map.getLayoutState().positions;
   assert.equal(after['ws-1'].x, before['ws-1'].x);
   assert.equal(after['ws-2'].y, before['ws-2'].y);
@@ -4837,6 +4842,134 @@ test('a failed Undo keeps the post-reset state and keeps offering the retry (FR-
 
   assert.equal(Object.keys(map.getLayoutState().positions).length, 0, 'still reset');
   assert.equal(map.hasUndoableReset(), true, 'the undo offer survives a failed attempt');
+});
+
+// ---------------------------------------------------------------------------
+// Lifecycle: geometry-aware reset, revision ordering, read-only degradation
+// (#346 FR-186 – FR-193)
+// ---------------------------------------------------------------------------
+
+test('Reset clears district geometry and keeps appearance (#346 FR-186)', async () => {
+  const { map, patches } = await mountedCollapsible();
+  await map.districtActions.setAppearance('grp', { accent: 'moss', theme: 'blueprint' });
+  await map.districtActions.setCollapsed('grp', true);
+  await flush();
+  assert.equal(map.getDistrictView('grp').collapsed, true);
+
+  map._resetLayoutForTest();
+  const after = map.getLayoutState();
+  assert.equal(after.groups.grp.collapsed, false, 'collapse is arrangement, and is cleared');
+  assert.equal(after.groups.grp.sizingMode, 'auto');
+  assert.equal(after.groups.grp.accent, 'moss', 'a chosen colour is not an arrangement');
+  assert.equal(after.groups.grp.theme, 'blueprint');
+  assert.ok(patches.length >= 2);
+});
+
+test('the Undo snapshot carries geometry but never appearance (#346 FR-187)', async () => {
+  const { map } = await mountedCollapsible();
+  await map.districtActions.setAppearance('grp', { accent: 'tide' });
+  await map.districtActions.setCollapsed('grp', true);
+  await flush();
+
+  const snapshot = map._captureGeometrySnapshotForTest();
+  assert.deepEqual({ ...snapshot.groups.grp }, { sizing_mode: 'auto', collapsed: true });
+  assert.equal(JSON.stringify(snapshot).includes('tide'), false);
+  assert.equal(JSON.stringify(snapshot).includes('accent'), false);
+});
+
+test('a stale response cannot roll newer local state backwards (#346 FR-189)', async () => {
+  let revision = 20;
+  const map = loadMapWithFetch((url, init) => {
+    if (init && init.method === 'PATCH') {
+      const answer = revision;
+      return Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            result: {
+              schema_version: 1,
+              revision: answer,
+              positions: {},
+              groups: {
+                grp: {
+                  sizing_mode: 'auto',
+                  collapsed: answer < 20,
+                  accent: 'default',
+                  theme: 'default'
+                }
+              },
+              snap_to_grid: true
+            }
+          })
+      });
+    }
+    return jsonResponse({ schema_version: 1, revision: 1, snap_to_grid: true, positions: {} });
+  });
+  const harness = createCameraHarness({ tiles: [], districts: ['grp'] });
+  map.mount(harness.container, {
+    workspaces: [{ id: 'grp', kind: 'group', name: 'Ops' }],
+    hideChrome: true,
+    selectOnly: true,
+    noAutoSelect: true
+  });
+  await flush();
+
+  // A newer write lands first...
+  await map.districtActions.setCollapsed('grp', false);
+  await flush();
+  assert.equal(map.getLayoutState().revision, 20);
+
+  // ...then an older one answers late. Its revision says it was superseded.
+  revision = 12;
+  await map.districtActions.setCollapsed('grp', true);
+  await flush();
+
+  assert.equal(map.getLayoutState().revision, 20, 'the revision never goes backwards');
+  assert.equal(
+    map.getDistrictView('grp').collapsed,
+    false,
+    'and neither does the district it would have changed'
+  );
+});
+
+test('an unavailable layout still renders safe districts and refuses to mutate (#346 FR-191)', async () => {
+  const map = loadMapWithFetch(() => Promise.resolve({ ok: false, status: 503 }));
+  const harness = createCameraHarness({ tiles: ['m1'], districts: ['grp'] });
+  map.mount(harness.container, {
+    workspaces: [
+      { id: 'grp', kind: 'group', name: 'Ops' },
+      { id: 'm1', parent_id: 'grp', name: 'M1' }
+    ],
+    hideChrome: true,
+    selectOnly: true,
+    noAutoSelect: true
+  });
+  await flush();
+
+  const state = map.getLayoutState();
+  assert.equal(state.readOnly, true);
+
+  // The district is still drawn, still selectable, still openable — compact,
+  // expanded, default-looking.
+  const view = map.getDistrictView('grp');
+  assert.ok(view, 'the district renders from safe defaults');
+  assert.equal(view.sizingMode, 'auto');
+  assert.equal(view.collapsed, false);
+  assert.equal(view.accent, 'default');
+  assert.equal(view.readOnly, true);
+
+  // Every mutating control reports itself unavailable rather than pretending.
+  const items = map.contextMenuItemsFor({
+    type: 'district',
+    id: 'grp',
+    ws: { id: 'grp', kind: 'group', name: 'Ops' }
+  });
+  const byAction = Object.fromEntries(items.filter(i => !i.divider).map(i => [i.action, i]));
+  ['collapse-group', 'resize-group', 'fit-group', 'delete'].forEach(action =>
+    assert.equal(byAction[action].disabled, true, `${action} is disabled while read-only`)
+  );
+  assert.equal(byAction.open.disabled, undefined, 'but navigation still works');
+  assert.equal(map.districtActions.resize('grp'), false, 'and resizing is refused outright');
 });
 
 test('merely reading the map never writes a coordinate (FR-23)', async () => {

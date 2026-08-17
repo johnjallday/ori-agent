@@ -116,6 +116,14 @@ func (s *Service) authorizeNodes(userID string, patch Patch) error {
 				return err
 			}
 		}
+		// A geometry restore names districts as well as anchors, and each one
+		// must be an owned, eligible group like any other district write
+		// (#346 FR-181).
+		for id := range op.Groups {
+			if err := s.authorizeDistrict(userID, id, districts); err != nil {
+				return err
+			}
+		}
 		switch {
 		case op.Kind == OpTranslateGroup:
 			if err := s.authorizeNode(userID, op.GroupID, checked); err != nil {
