@@ -333,6 +333,18 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Unusable-runtime-contract gate: a template whose runtime_requirements block
+	// cannot be honored is refused before workspace files, agents, tasks,
+	// plugins, or permissions are changed. Treating an invalid declaration as
+	// absent would silently turn a requirement-bearing mode into an ungated one.
+	if templateResolved && resolvedTemplate.HasInvalidRuntimeRequirements() {
+		_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{
+			"error":                      fmt.Sprintf("This blueprint's runtime requirements are unusable, so no workspace was created. Fix its template.json: %s", resolvedTemplate.RuntimeRequirementsError),
+			"runtime_requirements_error": resolvedTemplate.RuntimeRequirementsError,
+		})
+		return
+	}
+
 	// Unusable-setup-wizard gate: a template whose `setup_wizard` block could not
 	// be understood is refused outright rather than created without its setup.
 	// The author declared steps that grant folder access, connect accounts, or
@@ -878,9 +890,10 @@ func (h *Handler) persistCreateWorkspaceTemplateProvenance(wsID string, tmpl pro
 		return
 	}
 	// Built-ins always record provenance. A user template records it too when it
-	// declares a setup wizard: the wizard snapshot *is* the workspace's setup, so
-	// without it the blueprint's declared steps would simply never be asked.
-	if !tmpl.Builtin && !tmpl.HasSetupWizard() {
+	// declares a setup wizard or runtime contract: those snapshots *are* the
+	// workspace's setup contract, so without provenance the blueprint's declared
+	// requirements would silently disappear after creation.
+	if !tmpl.Builtin && !tmpl.HasSetupWizard() && !tmpl.HasRuntimeRequirements() {
 		return
 	}
 	prov := &agentworkspace.TemplateProvenance{
@@ -903,6 +916,7 @@ func (h *Handler) persistCreateWorkspaceTemplateProvenance(wsID string, tmpl pro
 		CapabilityRequirements: tmpl.CapabilityRequirements,
 		Plugins:                tmpl.Tools.Plugins,
 		PluginSources:          tmpl.Tools.PluginSources,
+		RuntimeRequirements:    tmpl.RuntimeRequirements,
 		SetupWizard:            tmpl.SetupWizard,
 	}
 	// Provenance and the blueprint's declared capability installs are written in

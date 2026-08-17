@@ -1,0 +1,17 @@
+{
+  "name": "Classic Custom Blueprint",
+  "description": "A compatibility fixture with no runtime contract.",
+  "tags": [
+    "fixture"
+  ],
+  "agents": [
+    {
+      "name": "Classic Lead"
+    }
+  ],
+  "starter_tasks": [
+    {
+      "description": "Review the classic fixture"
+    }
+  ]
+}

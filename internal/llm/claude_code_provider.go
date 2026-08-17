@@ -68,7 +68,7 @@ func (p *ClaudeCodeProvider) DefaultModels() []string {
 // Chat sends a chat request via the Claude CLI.
 func (p *ClaudeCodeProvider) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
 	prompt := buildClaudeCodePrompt(req.SystemPrompt, req.Messages)
-	nat, err := p.prepareNativeMCP(req.MCPServers, req.WorkspaceID, req.WorkspaceDir)
+	nat, err := p.prepareNativeMCP(req.MCPServers, req.WorkspaceID, req.WorkspaceDir, req.ExecutionScope)
 	if err != nil {
 		return nil, err
 	}
@@ -91,7 +91,7 @@ func (p *ClaudeCodeProvider) StreamChat(ctx context.Context, req ChatRequest) (S
 // ChatWithStructuredOutput sends a chat request with a JSON schema using the Claude CLI.
 func (p *ClaudeCodeProvider) ChatWithStructuredOutput(ctx context.Context, req StructuredOutputRequest) (*ChatResponse, error) {
 	prompt := buildClaudeCodePrompt(req.SystemPrompt, req.Messages)
-	nat, err := p.prepareNativeMCP(req.MCPServers, req.WorkspaceID, req.WorkspaceDir)
+	nat, err := p.prepareNativeMCP(req.MCPServers, req.WorkspaceID, req.WorkspaceDir, req.ExecutionScope)
 	if err != nil {
 		return nil, err
 	}
@@ -108,8 +108,12 @@ func (p *ClaudeCodeProvider) ChatWithStructuredOutput(ctx context.Context, req S
 
 // claudeNativeMCP holds the resolved native-MCP execution context for a run.
 type claudeNativeMCP struct {
-	ConfigPath   string // path passed to --mcp-config
-	WorkspaceDir string // working dir / --add-dir scope (may be empty)
+	ConfigPath              string // path passed to --mcp-config
+	WorkspaceDir            string // working directory / primary writable root
+	AdditionalWritableRoots []string
+	AllowedMCPServers       []string
+	NetworkPosture          CLINetworkPosture
+	Scoped                  bool // capability scope, distinct from broad native-MCP
 }
 
 // prepareNativeMCP resolves the elevated execution context. A non-empty
@@ -117,11 +121,25 @@ type claudeNativeMCP struct {
 // full toolset (auto-approved, confined to the workspace) even when there are
 // no MCP servers — a skill-only agent acts via the CLI's own tools (Bash/Read/
 // Write). The per-workspace --mcp-config is added only when MCP servers exist.
-func (p *ClaudeCodeProvider) prepareNativeMCP(specs []MCPServerSpec, workspaceID, workspaceDir string) (*claudeNativeMCP, error) {
+func (p *ClaudeCodeProvider) prepareNativeMCP(specs []MCPServerSpec, workspaceID, workspaceDir string, executionScope *CLIExecutionScope) (*claudeNativeMCP, error) {
 	if strings.TrimSpace(workspaceID) == "" {
+		if executionScope != nil {
+			return nil, fmt.Errorf("scoped Claude Code execution requires a workspace id")
+		}
 		return nil, nil
 	}
 	nat := &claudeNativeMCP{WorkspaceDir: workspaceDir}
+	if executionScope != nil {
+		normalized, err := normalizeCLIExecutionScope(executionScope)
+		if err != nil {
+			return nil, err
+		}
+		nat.WorkspaceDir = normalized.WorkspaceRoot
+		nat.AdditionalWritableRoots = append([]string(nil), normalized.AdditionalWritableRoots...)
+		nat.AllowedMCPServers = append([]string(nil), normalized.AllowedMCPServers...)
+		nat.NetworkPosture = normalized.NetworkPosture
+		nat.Scoped = true
+	}
 	if len(specs) > 0 && p.mcpStore != nil {
 		configPath, err := p.mcpStore.EnsureClaudeConfig(workspaceID, specs)
 		if err != nil {
@@ -184,16 +202,43 @@ func buildClaudeArgs(model, prompt string, schema any, nat *claudeNativeMCP) ([]
 	}
 
 	if nat != nil {
-		// Elevated run: enable the full toolset, auto-approve tool calls
-		// (headless), and confine writes to the workspace folder. A
-		// per-workspace --mcp-config is added only when MCP servers were resolved
-		// (a skill-only agent acts via the CLI's own tools).
-		args = append(args, "--permission-mode", "bypassPermissions")
-		if strings.TrimSpace(nat.ConfigPath) != "" {
-			args = append(args, "--mcp-config", nat.ConfigPath)
-		}
-		if nat.WorkspaceDir != "" {
-			args = append(args, "--add-dir", nat.WorkspaceDir)
+		if nat.Scoped {
+			// Characterized Claude Code 2.1.233 behavior: acceptEdits confines
+			// Read/Write/Edit to cwd + documented --add-dir roots and denies a
+			// sibling. Bash/WebFetch are omitted, so prompts cannot turn the local
+			// helper posture into unrestricted filesystem or network authority.
+			args = append(args,
+				"--permission-mode", "acceptEdits",
+				"--setting-sources", "", // no user/project/local hooks or permission files
+				"--tools", "Read,Write,Edit",
+			)
+			if len(nat.AllowedMCPServers) > 0 {
+				allowed := make([]string, 0, len(nat.AllowedMCPServers))
+				for _, server := range nat.AllowedMCPServers {
+					allowed = append(allowed, "mcp__"+server+"__*")
+				}
+				args = append(args, "--allowedTools", strings.Join(allowed, ","))
+			}
+			args = append(args, "--strict-mcp-config")
+			if strings.TrimSpace(nat.ConfigPath) != "" {
+				args = append(args, "--mcp-config", nat.ConfigPath)
+			}
+			for _, root := range nat.AdditionalWritableRoots {
+				args = append(args, "--add-dir", root)
+			}
+			// Terminates variadic --add-dir parsing even when no model/schema flag
+			// follows, and avoids persisting scoped task sessions.
+			args = append(args, "--no-session-persistence")
+		} else {
+			// Legacy broad native-MCP behavior remains distinct. A capability grant
+			// never toggles or enters this path.
+			args = append(args, "--permission-mode", "bypassPermissions")
+			if strings.TrimSpace(nat.ConfigPath) != "" {
+				args = append(args, "--mcp-config", nat.ConfigPath)
+			}
+			if nat.WorkspaceDir != "" {
+				args = append(args, "--add-dir", nat.WorkspaceDir)
+			}
 		}
 	} else {
 		// Text-only run (unchanged): no tools, no MCP.
@@ -220,6 +265,9 @@ func (p *ClaudeCodeProvider) runClaudeExec(ctx context.Context, model, prompt st
 		return "", err
 	}
 
+	// #nosec G204 -- cliPath comes from exec.LookPath("claude") and every scoped
+	// filesystem/tool argument is canonicalized and allowlisted above; exec
+	// receives an argv slice directly and never invokes a shell.
 	cmd := exec.CommandContext(ctx, p.cliPath, args...)
 	if nat != nil && nat.WorkspaceDir != "" {
 		cmd.Dir = nat.WorkspaceDir

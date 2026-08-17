@@ -22,6 +22,61 @@ function loadSessionManager(fetchImpl = async () => ({ ok: true, json: async () 
   return window.sessionManager;
 }
 
+class PreviewElement {
+  constructor(tag = 'div') {
+    this.tagName = String(tag).toUpperCase();
+    this.hidden = false;
+    this.className = '';
+    this.children = [];
+    this._text = '';
+  }
+  set textContent(value) {
+    this._text = String(value ?? '');
+    this.children = [];
+  }
+  get textContent() {
+    return this._text + this.children.map(child => child.textContent).join('');
+  }
+  appendChild(child) {
+    this.children.push(child);
+    return child;
+  }
+}
+
+function loadSessionManagerWithSetupPreview() {
+  const elements = new Map();
+  for (const id of [
+    'workspaceSetupPreview',
+    'workspaceSetupPreviewList',
+    'workspaceSetupPreviewNote',
+    'workspaceSetupPreviewEyebrow',
+    'workspaceSetupPreviewTitle'
+  ]) {
+    elements.set(id, new PreviewElement(id === 'workspaceSetupPreviewList' ? 'ul' : 'div'));
+  }
+  const calls = [];
+  const document = {
+    addEventListener() {},
+    getElementById: id => elements.get(id) || null,
+    createElement: tag => new PreviewElement(tag)
+  };
+  const window = {};
+  vm.runInNewContext(
+    source,
+    {
+      window,
+      document,
+      fetch: async (...args) => {
+        calls.push(args);
+        return { ok: true, json: async () => ({}) };
+      },
+      console
+    },
+    { filename: 'sessions.js' }
+  );
+  return { manager: window.sessionManager, elements, calls };
+}
+
 // loadSessionManagerWithModal adds just enough DOM for showAddWorkspaceModal:
 // the modal element it reads and a Bootstrap stub that records the show call.
 function loadSessionManagerWithModal() {
@@ -55,6 +110,81 @@ function loadSessionManagerWithModal() {
   );
   return { manager: window.sessionManager, modalElement, shown };
 }
+
+test('runtime contract review lists modes, immediate behavior, and post-create setup without probes', () => {
+  const { manager, elements, calls } = loadSessionManagerWithSetupPreview();
+  const template = {
+    id: 'fixture-runtime',
+    runtime_requirements: {
+      schema_version: 1,
+      operating_modes: [
+        {
+          id: 'limited',
+          label: 'File-only',
+          description: 'Edit the project files.',
+          requires: []
+        },
+        {
+          id: 'assisted',
+          label: 'Assisted',
+          description: 'Work with project files while live control is configured.',
+          requires: ['local_control']
+        }
+      ],
+      requirements: [
+        {
+          key: 'local_control',
+          label: '<b>Local control</b>',
+          description: 'Configure the external application.',
+          disclosure: 'The selected agent receives narrow local access.',
+          adapter: 'fixture_runtime'
+        }
+      ]
+    }
+  };
+
+  assert.equal(manager.usesGenericBlueprintSetupPreview(template), true);
+  manager.renderSetupPreview(template);
+
+  const panel = elements.get('workspaceSetupPreview');
+  const list = elements.get('workspaceSetupPreviewList');
+  assert.equal(panel.hidden, false);
+  assert.equal(
+    elements.get('workspaceSetupPreviewEyebrow').textContent,
+    'Supported operating modes'
+  );
+  assert.equal(
+    elements.get('workspaceSetupPreviewTitle').textContent,
+    'What works now and what needs setup'
+  );
+  assert.equal(list.children.length, 2);
+  assert.match(list.children[0].textContent, /File-only/);
+  assert.match(list.children[0].textContent, /Works immediatelyEdit the project files\./);
+  assert.match(list.children[0].textContent, /Setup after creationNo additional runtime setup\./);
+  assert.match(list.children[1].textContent, /Assisted/);
+  assert.match(list.children[1].textContent, /Setup after creation<b>Local control<\/b>/);
+  assert.match(list.children[1].textContent, /Configure the external application\./);
+  assert.match(list.children[1].textContent, /narrow local access/);
+  assert.match(elements.get('workspaceSetupPreviewNote').textContent, /preview only/i);
+  assert.equal(calls.length, 0, 'rendering creation disclosure must make no probe request');
+});
+
+test('runtime review hides for a no-contract blueprint and fails visibly for an invalid contract', () => {
+  const { manager, elements } = loadSessionManagerWithSetupPreview();
+  manager.renderSetupPreview({ id: 'plain' });
+  assert.equal(elements.get('workspaceSetupPreview').hidden, true);
+  assert.equal(manager.usesGenericBlueprintSetupPreview({ id: 'reaper-song' }), false);
+
+  const broken = {
+    id: 'broken',
+    runtime_requirements_error: 'invalid runtime requirements: unknown adapter'
+  };
+  assert.equal(manager.usesGenericBlueprintSetupPreview(broken), true);
+  manager.renderSetupPreview(broken);
+  assert.equal(elements.get('workspaceSetupPreview').hidden, false);
+  assert.match(elements.get('workspaceSetupPreviewList').textContent, /cannot be read/i);
+  assert.match(elements.get('workspaceSetupPreviewList').textContent, /unknown adapter/i);
+});
 
 test('a Map-origin create flags the existing modal rather than opening a second form (#292 FR-51)', () => {
   const { manager, modalElement, shown } = loadSessionManagerWithModal();

@@ -177,9 +177,12 @@ type StructuredOutputRequest struct {
 	// alongside MCPServers.
 	WorkspaceID string
 
-	// WorkspaceDir confines a native-MCP CLI run to the workspace folder; set
-	// only alongside MCPServers.
+	// WorkspaceDir confines a legacy broad native-MCP CLI run.
 	WorkspaceDir string
+
+	// ExecutionScope carries server-authorized per-task runtime capability
+	// authority. System-model/parsing calls always leave it nil.
+	ExecutionScope *CLIExecutionScope
 }
 
 // GenerateSchema creates a JSON schema from a Go struct type for use with structured outputs

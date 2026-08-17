@@ -122,6 +122,55 @@ func exportedWorkspaceFixture(id, name, designation string) *agentworkspace.Work
 	}
 }
 
+func TestHandleWorkspaceImportPreservesRuntimeContractSnapshotAndState(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+
+	fileStore, err := agentworkspace.NewFileStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	defer func() { _ = fileStore.Close() }()
+	handler.SetWorkspaceStore(fileStore)
+
+	fixture := exportedWorkspaceFixture("ws-runtime-import", "Runtime Import", "")
+	fixture.SetTemplateProvenance(&agentworkspace.TemplateProvenance{
+		TemplateID: "runtime-template",
+		RuntimeRequirements: &agentworkspace.RuntimeRequirementsContract{
+			SchemaVersion: agentworkspace.RuntimeRequirementsSchemaVersion,
+			OperatingModes: []agentworkspace.RuntimeOperatingMode{
+				{ID: "limited", Label: "Limited", Description: "Use files."},
+				{ID: "assisted", Label: "Assisted", Description: "Use live control.", Requires: []string{"runtime"}},
+			},
+			Requirements: []agentworkspace.RuntimeRequirement{{Key: "runtime", Label: "Runtime", Description: "Configure it.", Adapter: "reaper_live_control"}},
+		},
+	})
+	fixture.SetRuntimeState(&agentworkspace.WorkspaceRuntimeState{SelectedModeID: "limited"})
+	exportRoot := writeExportedWorkspaceFixture(t, filepath.Join(t.TempDir(), "export"), fixture)
+
+	payload, _ := json.Marshal(map[string]any{"path": exportRoot})
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/import", bytes.NewBuffer(payload))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handler.HandleWorkspaces(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	imported, err := fileStore.Get(fixture.ID)
+	if err != nil {
+		t.Fatalf("load imported workspace: %v", err)
+	}
+	contract := imported.RuntimeRequirementsSnapshot()
+	if contract == nil || !contract.StructurallyValid() || contract.OperatingModes[1].Requires[0] != "runtime" {
+		t.Fatalf("portable runtime contract was lost on import: %+v", contract)
+	}
+	state := imported.GetRuntimeState()
+	if state == nil || state.SelectedModeID != "limited" {
+		t.Fatalf("portable selected mode was lost on import: %+v", state)
+	}
+}
+
 // diskDesignation reads the designation straight out of the local copied
 // workspace.json, the canonical store for the projection.
 func diskDesignation(t *testing.T, fileStore *agentworkspace.FileStore, workspaceID string) string {

@@ -124,6 +124,47 @@ func TestTemplateProvenance_SetupWizardSnapshotIsIsolated(t *testing.T) {
 	}
 }
 
+func TestTemplateProvenance_RuntimeRequirementsSnapshotIsIsolated(t *testing.T) {
+	ws := NewWorkspace(CreateWorkspaceParams{Name: "Runtime"})
+	source := &TemplateProvenance{
+		TemplateID:          "runtime-demo",
+		RuntimeRequirements: validWorkspaceRuntimeContract(),
+	}
+	ws.SetTemplateProvenance(source)
+
+	// A later source-blueprint edit cannot rewrite the workspace snapshot.
+	source.RuntimeRequirements.OperatingModes[1].Requires[0] = "changed"
+	source.RuntimeRequirements.Requirements[0].Adapter = "changed"
+	stored := ws.RuntimeRequirementsSnapshot()
+	if stored == nil || stored.OperatingModes[1].Requires[0] != "reaper_live_control" || stored.Requirements[0].Adapter != "reaper_live_control" {
+		t.Fatalf("source mutation reached runtime snapshot: %+v", stored)
+	}
+	if !ws.HasRuntimeRequirements() {
+		t.Fatal("valid snapshotted runtime contract should be reported")
+	}
+
+	// Reads are detached as well.
+	stored.OperatingModes[1].Requires[0] = "changed-again"
+	stored.Requirements[0].Label = "Changed"
+	again := ws.RuntimeRequirementsSnapshot()
+	if again.OperatingModes[1].Requires[0] != "reaper_live_control" || again.Requirements[0].Label != "Local REAPER control" {
+		t.Fatalf("runtime snapshot accessor exposed workspace-owned data: %+v", again)
+	}
+
+	data, err := json.Marshal(ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded Workspace
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	decodedContract := decoded.RuntimeRequirementsSnapshot()
+	if decodedContract == nil || !decodedContract.StructurallyValid() || decodedContract.Requirements[0].Key != "reaper_live_control" {
+		t.Fatalf("runtime snapshot did not survive workspace JSON: %s / %+v", data, decodedContract)
+	}
+}
+
 func TestWorkspace_SetupWizardAccessors(t *testing.T) {
 	ws := NewWorkspace(CreateWorkspaceParams{Name: "Plain"})
 	if ws.HasSetupWizard() || ws.SetupWizardSnapshot() != nil {

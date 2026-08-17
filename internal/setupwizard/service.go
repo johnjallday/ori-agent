@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/runtimecapability"
 
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -29,10 +30,19 @@ type Store interface {
 // already ready by the time it runs, and re-running it must be harmless.
 type CompletionHook func(ctx context.Context, workspaceID string)
 
+// RuntimeService is the narrow generalized runtime surface setup consumes. Mode
+// choice and readiness remain authoritative runtime state; Setup Wizard only
+// projects them into its ordered lifecycle.
+type RuntimeService interface {
+	Status(context.Context, string) (runtimecapability.Status, error)
+	SelectMode(context.Context, string, string) (runtimecapability.Status, error)
+}
+
 // Service owns setup-wizard lifecycle and readiness for every workspace.
 type Service struct {
 	store    Store
 	registry *Registry
+	runtime  RuntimeService
 	now      func() time.Time
 	onReady  CompletionHook
 	// blueprints backfills workspaces created before their blueprint declared a
@@ -54,6 +64,15 @@ func (s *Service) SetCompletionHook(hook CompletionHook) {
 		return
 	}
 	s.onReady = hook
+}
+
+// SetRuntimeService projects operating-mode choice and runtime readiness into
+// runtime_mode/runtime_readiness steps. Nil leaves those steps honestly
+// unavailable.
+func (s *Service) SetRuntimeService(runtime RuntimeService) {
+	if s != nil {
+		s.runtime = runtime
+	}
 }
 
 // Status is the projected setup state of one workspace: the wizard as the
@@ -124,11 +143,12 @@ type StepStatus struct {
 	CompletedAt *time.Time `json:"completed_at,omitempty"`
 	// Directory/Capability/Plugin echo the requirement the step references, so
 	// the dialog can label it without re-reading the template.
-	DirectoryLabel   string `json:"directory_label,omitempty"`
-	DirectorySuggest string `json:"directory_suggested_path,omitempty"`
-	DirectoryAccess  string `json:"directory_access_disclosure,omitempty"`
-	CapabilityKey    string `json:"capability_key,omitempty"`
-	PluginName       string `json:"plugin_name,omitempty"`
+	DirectoryLabel        string `json:"directory_label,omitempty"`
+	DirectorySuggest      string `json:"directory_suggested_path,omitempty"`
+	DirectoryAccess       string `json:"directory_access_disclosure,omitempty"`
+	CapabilityKey         string `json:"capability_key,omitempty"`
+	RuntimeRequirementKey string `json:"runtime_requirement_key,omitempty"`
+	PluginName            string `json:"plugin_name,omitempty"`
 }
 
 // Ready reports whether every required step currently passes.
@@ -225,6 +245,40 @@ func (s *Service) Confirm(ctx context.Context, workspaceID, stepID string, actio
 	step, ok := resolved.wizard.Step(strings.TrimSpace(stepID))
 	if !ok {
 		return Status{}, fmt.Errorf("%w: %q", ErrUnknownStep, stepID)
+	}
+
+	if step.Kind == workspace.SetupStepKindRuntimeMode {
+		if s.runtime == nil {
+			return Status{}, fmt.Errorf("%w: runtime mode service", ErrUnknownAdapter)
+		}
+		option := workspace.NormalizeRuntimeIdentifier(action.Option)
+		if option == "" {
+			return Status{}, fmt.Errorf("%w: step %q requires an operating mode", ErrInvalidAction, step.ID)
+		}
+		before, statusErr := s.runtime.Status(ctx, workspaceID)
+		if statusErr != nil {
+			return Status{}, statusErr
+		}
+		available := false
+		for _, mode := range before.Modes {
+			if mode.ID == option {
+				available = true
+				break
+			}
+		}
+		if !available {
+			return Status{}, fmt.Errorf("%w: step %q does not offer option %q", ErrInvalidAction, step.ID, option)
+		}
+		if before.SelectedModeID != option {
+			if _, selectErr := s.runtime.SelectMode(ctx, workspaceID, option); selectErr != nil {
+				return Status{}, selectErr
+			}
+		}
+		return s.refresh(ctx, workspaceID, func(t *transition, progress *workspace.SetupWizardProgress) error {
+			t.acknowledged = step.ID
+			t.chosenOption = option
+			return nil
+		})
 	}
 
 	adapter, err := s.adapterFor(step)
@@ -434,7 +488,24 @@ func (s *Service) evaluateSteps(ctx context.Context, workspaceID string, resolve
 	// step that asks a question and the steps that must honor the answer are
 	// different steps.
 	selections := recordedSelections(progress)
+	var (
+		runtimeStatus runtimecapability.Status
+		runtimeErr    error
+		runtimeRead   bool
+	)
 	for _, step := range resolved.wizard.Steps {
+		if step.Kind == workspace.SetupStepKindRuntimeMode || step.Kind == workspace.SetupStepKindRuntimeReadiness {
+			if !runtimeRead {
+				runtimeRead = true
+				if s.runtime == nil {
+					runtimeErr = errors.New("runtime capability service is unavailable")
+				} else {
+					runtimeStatus, runtimeErr = s.runtime.Status(ctx, workspaceID)
+				}
+			}
+			out[step.ID] = runtimeStepReadiness(step, runtimeStatus, runtimeErr)
+			continue
+		}
 		adapter, err := s.adapterFor(step)
 		if err != nil {
 			// A step whose adapter is not wired in this build is blocked, never
@@ -466,6 +537,60 @@ func (s *Service) evaluateSteps(ctx context.Context, workspaceID string, resolve
 		out[step.ID] = readiness
 	}
 	return out
+}
+
+func runtimeStepReadiness(step workspace.SetupWizardStep, status runtimecapability.Status, err error) StepReadiness {
+	if err != nil || !status.Applicable {
+		return StepReadiness{
+			Blocked:       true,
+			Summary:       "Runtime setup is unavailable in this build.",
+			ErrorCategory: ErrorCategoryUnavailable,
+		}
+	}
+	if step.Kind == workspace.SetupStepKindRuntimeMode {
+		options := make([]StepOption, 0, len(status.Modes))
+		for _, mode := range status.Modes {
+			options = append(options, StepOption{
+				ID: mode.ID, Label: mode.Label, Description: mode.Description,
+				Selected: mode.ID == status.SelectedModeID,
+			})
+		}
+		readiness := StepReadiness{Ready: status.SelectedModeID != "", Options: options}
+		if readiness.Ready {
+			readiness.Summary = "Operating mode selected."
+		} else {
+			readiness.Summary = "Choose how this workspace should operate."
+		}
+		return readiness
+	}
+
+	key := workspace.NormalizeRuntimeIdentifier(step.RequirementKey)
+	for _, requirement := range status.Requirements {
+		if requirement.Key != key {
+			continue
+		}
+		ready := requirement.DurableState == runtimecapability.DurableConfigured
+		category := ""
+		if !ready {
+			category = ErrorCategoryNotConfigured
+			if requirement.ReasonCode == runtimecapability.ReasonAdapterUnavailable || requirement.ReasonCode == runtimecapability.ReasonCheckFailed {
+				category = ErrorCategoryUnavailable
+			}
+		}
+		return StepReadiness{
+			Ready:         ready,
+			Blocked:       !ready && requirement.ReasonCode != "",
+			Summary:       requirement.Summary,
+			ErrorCategory: category,
+		}
+	}
+	if status.SelectedModeID == "" {
+		return StepReadiness{Summary: "Choose an operating mode first."}
+	}
+	// A declared requirement absent from the selected mode is deliberately not
+	// applicable (for example live control in File-only mode), so this step is
+	// complete without probing or granting anything.
+	return StepReadiness{Ready: true, Summary: "Not required in the selected operating mode."}
 }
 
 // applyChoices records an option the user picked on this call, so the adapters
@@ -528,6 +653,14 @@ func (s *Service) derive(t *transition, progress *workspace.SetupWizardProgress,
 		record.SelectedOption = prior.SelectedOption
 		if t.acknowledged == step.ID && t.chosenOption != "" {
 			record.SelectedOption = t.chosenOption
+		}
+		if step.Kind == workspace.SetupStepKindRuntimeMode {
+			for _, option := range verdict.Options {
+				if option.Selected {
+					record.SelectedOption = option.ID
+					break
+				}
+			}
 		}
 		if status == workspace.SetupStepStatusComplete || status == workspace.SetupStepStatusOptionalSkipped {
 			if record.CompletedAt == nil {
@@ -628,6 +761,9 @@ func progressChanged(previous, next *workspace.SetupWizardProgress) bool {
 		if prior.StepID != step.StepID || workspace.NormalizeSetupStepStatus(prior.Status) != workspace.NormalizeSetupStepStatus(step.Status) {
 			return true
 		}
+		if prior.SelectedOption != step.SelectedOption {
+			return true
+		}
 		if (prior.CompletedAt == nil) != (step.CompletedAt == nil) {
 			return true
 		}
@@ -695,6 +831,9 @@ func (s *Service) status(workspaceID string, resolved resolvedWizard, progress *
 		if request.Capability != nil {
 			projected.CapabilityKey = request.Capability.Key
 		}
+		if request.RuntimeRequirement != nil {
+			projected.RuntimeRequirementKey = request.RuntimeRequirement.Key
+		}
 		projected.PluginName = request.Plugin
 		status.Steps = append(status.Steps, projected)
 	}
@@ -723,7 +862,7 @@ func stepAction(step workspace.SetupWizardStep, status string) string {
 	case workspace.SetupStepStatusComplete, workspace.SetupStepStatusOptionalSkipped:
 		return ""
 	}
-	if step.Kind == workspace.SetupStepKindReadiness {
+	if step.Kind == workspace.SetupStepKindReadiness || step.Kind == workspace.SetupStepKindRuntimeReadiness {
 		return StepActionRecheck
 	}
 	return StepActionConfirm

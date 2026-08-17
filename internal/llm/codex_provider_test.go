@@ -231,6 +231,58 @@ func TestBuildCodexArgs_NativeMCP(t *testing.T) {
 	}
 }
 
+func TestBuildCodexArgs_RuntimeCapabilityScope(t *testing.T) {
+	nat := &codexNativeMCP{
+		WorkspaceDir: "/workspace", AdditionalWritableRoots: []string{"/runner"},
+		NetworkPosture: CLINetworkCapabilityLocal, Scoped: true,
+	}
+	args := buildCodexArgs("gpt-5.5", "medium", "", "/tmp/out.txt", nat)
+	joined := strings.Join(args, " ")
+	for _, want := range []string{
+		"--sandbox workspace-write",
+		`approval_policy="never"`,
+		"sandbox_workspace_write.network_access=false",
+		"--ignore-user-config",
+		"--ignore-rules",
+		"--ephemeral",
+		"--add-dir /runner",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("scoped args missing %q in %q", want, joined)
+		}
+	}
+	for _, forbidden := range []string{"network_access=true", "danger-full-access", "dangerously-bypass"} {
+		if strings.Contains(joined, forbidden) {
+			t.Errorf("scoped args contain %q: %q", forbidden, joined)
+		}
+	}
+	if strings.Contains(joined, "--profile") {
+		t.Errorf("skill-only scoped run should not need a profile: %q", joined)
+	}
+}
+
+func TestPrepareCodexRuntimeScopeCanonicalizesRootsWithoutMCPProfile(t *testing.T) {
+	base := t.TempDir()
+	workspaceDir := filepath.Join(base, "workspace")
+	runnerDir := filepath.Join(base, "runner")
+	for _, dir := range []string{workspaceDir, runnerDir} {
+		if err := os.Mkdir(dir, 0o750); err != nil {
+			t.Fatal(err)
+		}
+	}
+	provider := &CodexProvider{mcpStore: newCLIMCPConfigStoreAt(t.TempDir(), t.TempDir())}
+	nat, err := provider.prepareNativeMCP(nil, "ws-1", "", &CLIExecutionScope{
+		WorkspaceRoot: workspaceDir, AdditionalWritableRoots: []string{runnerDir},
+		NetworkPosture: CLINetworkCapabilityLocal,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if nat == nil || !nat.Scoped || nat.ProfileName != "" || nat.WorkspaceDir == "" || len(nat.AdditionalWritableRoots) != 1 {
+		t.Fatalf("prepared scoped skill-only run = %+v", nat)
+	}
+}
+
 // TestBuildCodexArgs_SkillOnlyNoProfile covers a skill-only agent (opted in, no
 // MCP servers): elevated posture (workspace-write + network + auto-approve) but
 // NO --profile.

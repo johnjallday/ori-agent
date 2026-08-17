@@ -1721,6 +1721,110 @@ body.workspace-page .workspace-setup-card {
   margin-top: 2px;
 }
 
+.workspace-setup-preview-head h3 {
+  margin: 2px 0 0;
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+.workspace-setup-preview-item {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.workspace-setup-preview-label,
+.workspace-setup-preview-detail,
+.workspace-runtime-requirement-disclosure {
+  display: block;
+}
+
+.workspace-setup-preview-label {
+  color: var(--text-primary);
+  font-weight: 650;
+}
+
+.workspace-setup-preview-badge {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  padding: 1px 7px;
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.workspace-setup-preview-badge.is-required {
+  border-color: color-mix(in srgb, var(--accent-primary, #1f6b4e) 55%, var(--border-color));
+  color: var(--text-primary);
+}
+
+.workspace-runtime-mode-preview {
+  list-style: none;
+  margin-left: -16px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 10px;
+  background: color-mix(in srgb, var(--bg-secondary) 82%, transparent);
+}
+
+.workspace-runtime-mode-preview + .workspace-runtime-mode-preview {
+  margin-top: 8px;
+}
+
+.workspace-runtime-mode-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.workspace-runtime-preview-kicker {
+  display: block;
+  margin-top: 8px;
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.workspace-runtime-requirement-list {
+  display: grid;
+  gap: 6px;
+  margin: 5px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.workspace-runtime-requirement {
+  min-width: 0;
+  border-left: 2px solid var(--border-color);
+  padding-left: 8px;
+}
+
+.workspace-runtime-requirement-label {
+  display: block;
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.workspace-runtime-requirement-disclosure {
+  margin-top: 3px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.workspace-setup-preview-note {
+  margin: 8px 0 0;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
 .workspace-bootstrap-review-layout {
   display: flex;
   flex-direction: column;

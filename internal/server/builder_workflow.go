@@ -371,6 +371,7 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 	// After the domain services above: the capability registry binds their
 	// runtimes, and the wizard registers their adapters.
 	b.wireWorkspaceCapabilities()
+	b.wireRuntimeCapabilities()
 	b.wireSetupWizard()
 	// The coordinate map resolves node ownership through the composed workspace
 	// store, so it wires here for the same reason (#292 FR-99).
@@ -440,6 +441,7 @@ func (b *ServerBuilder) initializeTaskExecution() {
 		runtimeResolver.SetSkillResolver(newSkillResolverAdapter(b.skillsManager))
 	}
 	b.runtimeResolver = runtimeResolver
+	b.wireRuntimeGrantFoundation()
 
 	// Make every existing agent's implicit capability set explicit before the
 	// resolver serves its first request (PRD FR-28–FR-35). This runs here
@@ -456,6 +458,7 @@ func (b *ServerBuilder) initializeTaskExecution() {
 	// The Janitor's mover needs the runtime resolver, which only exists here.
 	b.wireDownloadsJanitorMover()
 	b.taskHandler.SetRuntimeResolver(runtimeResolver)
+	b.taskHandler.SetExecutionScopeResolver(b.runtimeCapabilityService)
 	b.chatHandler.SetRuntimeResolver(runtimeResolver)
 	if b.calendarOpsHandler != nil {
 		b.chatHandler.SetCalendarOpsPreference(b.calendarOpsHandler)
@@ -585,12 +588,20 @@ func (b *ServerBuilder) initializeOrchestration() error {
 		handler.SetTicketNoteLookup(session.NewTicketNoteLookup(b.sessionStore))
 	}
 
-	// Stop a task whose declared connection preconditions are unmet before its
-	// run starts (FR 34, 35). The evaluator was built in Phase 18; the task
-	// sub-handler only exists now.
+	// Stop a task whose declared connection/runtime preconditions are unmet
+	// before its run starts. Evaluators explicitly claim keys, so Email keeps its
+	// existing behavior, runtime requirements compose beside it, and ordinary
+	// planning/toolbox vocabulary remains ungated.
+	gate := workspace.NewCompositeTaskCapabilityGate()
 	if b.emailReadiness != nil {
-		handler.SetTaskCapabilityGate(b.emailReadiness)
+		gate.Register(b.emailReadiness)
 	}
+	if b.runtimeCapabilityService != nil {
+		gate.Register(b.runtimeCapabilityService)
+		handler.SetTaskCapabilityValidator(b.runtimeCapabilityService)
+	}
+	b.taskCapabilityGate = gate
+	handler.SetTaskCapabilityGate(gate)
 
 	// Template-setup first-open auto-start runs seeded tasks through the same
 	// execution path as the manual execute endpoint.

@@ -182,6 +182,21 @@ func TestNewTemplate_InvalidWizardFailsClosed(t *testing.T) {
 			contains: "must name a directory_requirements key",
 		},
 		{
+			name:     "undeclared runtime requirement reference",
+			wizard:   `{"version": 1, "title": "T", "steps": [{"id": "s", "kind": "runtime_readiness", "requirement_key": "missing", "required": true}]}`,
+			contains: "does not declare in runtime_requirements.requirements",
+		},
+		{
+			name:     "runtime step cannot override adapter",
+			wizard:   `{"version": 1, "title": "T", "steps": [{"id": "s", "kind": "runtime_readiness", "requirement_key": "runtime", "adapter": "reaper_song", "required": true}]}`,
+			contains: "takes no adapter",
+		},
+		{
+			name:     "runtime mode cannot override service",
+			wizard:   `{"version": 1, "title": "T", "steps": [{"id": "s", "kind": "runtime_mode", "adapter": "reaper_song", "required": true}]}`,
+			contains: "runtime service owns mode selection",
+		},
+		{
 			name:     "reference on a kind that takes none",
 			wizard:   `{"version": 1, "title": "T", "steps": [{"id": "s", "kind": "readiness", "adapter": "downloads_janitor", "requirement_key": "downloads-root", "required": true}]}`,
 			contains: "takes no requirement_key",
@@ -257,6 +272,7 @@ func TestNewTemplate_InvalidWizardFailsClosed(t *testing.T) {
 				"name": "Demo",
 				"description": "Still loads",
 				"tools": {"plugins": ["reaper-plugin"]},
+				"runtime_requirements": {"schema_version": 1, "operating_modes": [{"id":"default","label":"Default","description":"Use runtime.","requires":["runtime"]}], "requirements": [{"key":"runtime","label":"Runtime","description":"Configure it.","adapter":"reaper_live_control"}]},
 				"capability_requirements": [{"key": "calendar"}],
 				"directory_requirements": [{"key": "downloads-root", "label": "Downloads folder"}],
 				"starter_tasks": [{"description": "Do the thing"}],
@@ -309,6 +325,11 @@ func TestValidateSetupWizard_AcceptsEveryAllowlistedKind(t *testing.T) {
 		[]AutomationRecipe{{DirectoryKey: "downloads-root", Watch: &WatchRecipe{Events: []string{"create"}}}},
 		[]CapabilityRequirement{{Key: "calendar"}, {Key: "email"}},
 		[]string{"reaper-plugin"},
+		&RuntimeRequirementsContract{
+			SchemaVersion:  RuntimeRequirementsSchemaVersion,
+			OperatingModes: []RuntimeOperatingMode{{ID: "assisted", Label: "Assisted", Description: "Use runtime.", Requires: []string{"reaper_live_control"}}},
+			Requirements:   []RuntimeRequirement{{Key: "reaper_live_control", Label: "REAPER", Description: "Control REAPER.", Adapter: "reaper_live_control"}},
+		},
 	)
 	required := true
 	steps := []setupWizardStepDecl{
@@ -319,6 +340,8 @@ func TestValidateSetupWizard_AcceptsEveryAllowlistedKind(t *testing.T) {
 		{ID: "mailbox", Kind: "account_link", RequirementKey: "email", Adapter: "email_ops", Required: &required},
 		{ID: "plugin", Kind: "plugin_readiness", RequirementKey: "reaper-plugin", Adapter: "reaper_song", Required: &required},
 		{ID: "readiness", Kind: "readiness", Adapter: "downloads_janitor", Required: &required},
+		{ID: "runtime-mode", Kind: "runtime_mode", Required: &required},
+		{ID: "runtime", Kind: "runtime_readiness", RequirementKey: "reaper_live_control", Required: &required},
 		{ID: "summary", Kind: "summary", Required: &required},
 	}
 	if len(steps) != len(workspace.ValidSetupStepKinds()) {

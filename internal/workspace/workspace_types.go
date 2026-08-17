@@ -196,6 +196,11 @@ type Workspace struct {
 	// always nil for a workspace whose blueprint declares no wizard.
 	SetupWizardProgress *SetupWizardProgress `json:"setup_wizard_progress,omitempty"`
 
+	// RuntimeState records the user's operating-mode choice, durable runtime
+	// configuration/verification history, and explicit capability grants. Live
+	// connectivity is always evaluated afresh and is never persisted here.
+	RuntimeState *WorkspaceRuntimeState `json:"runtime_state,omitempty"`
+
 	// Mission fields — workspace-level proactive goal carried out by the entry
 	// agent (Workspace Manager) on cadence. All fields are optional; a workspace
 	// with MissionEnabled = false (the zero value) behaves exactly as before.

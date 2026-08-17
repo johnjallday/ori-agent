@@ -17,6 +17,8 @@ func TestValidSetupStepKinds_IsTheVersion1Allowlist(t *testing.T) {
 		"account_link",
 		"plugin_readiness",
 		"readiness",
+		"runtime_mode",
+		"runtime_readiness",
 		"summary",
 	}
 	got := ValidSetupStepKinds()
@@ -69,6 +71,8 @@ func TestSetupStepKindSpecs_ReferenceAndAdapterRules(t *testing.T) {
 		{SetupStepKindAccountLink, SetupStepReferenceCapability, true, true},
 		{SetupStepKindPluginReadiness, SetupStepReferencePlugin, true, true},
 		{SetupStepKindReadiness, SetupStepReferenceNone, false, true},
+		{SetupStepKindRuntimeMode, SetupStepReferenceNone, false, false},
+		{SetupStepKindRuntimeReadiness, SetupStepReferenceRuntimeRequirement, true, false},
 		{SetupStepKindSummary, SetupStepReferenceNone, false, false},
 	}
 	if len(cases) != len(ValidSetupStepKinds()) {
@@ -122,6 +126,11 @@ func TestSetupWizardStep_ReferenceScopeComesFromKind(t *testing.T) {
 	if !ok || ref.Scope != SetupStepReferencePlugin {
 		t.Fatalf("plugin_readiness reference = %+v, ok=%v; want plugin scope", ref, ok)
 	}
+
+	ref, ok = SetupWizardStep{Kind: SetupStepKindRuntimeReadiness, RequirementKey: " REAPER_LIVE_CONTROL "}.Reference()
+	if !ok || ref.Scope != SetupStepReferenceRuntimeRequirement || ref.Key != "reaper_live_control" {
+		t.Fatalf("runtime_readiness reference = %+v, ok=%v; want runtime requirement scope", ref, ok)
+	}
 }
 
 func TestSetupWizardStep_ReferenceRefusesToGuess(t *testing.T) {
@@ -131,7 +140,7 @@ func TestSetupWizardStep_ReferenceRefusesToGuess(t *testing.T) {
 		t.Fatal("an unknown kind must resolve no reference")
 	}
 	// Kinds that take no reference ignore a stray key.
-	for _, kind := range []string{SetupStepKindReadiness, SetupStepKindSummary} {
+	for _, kind := range []string{SetupStepKindReadiness, SetupStepKindRuntimeMode, SetupStepKindSummary} {
 		if _, ok := (SetupWizardStep{Kind: kind, RequirementKey: "downloads-root"}).Reference(); ok {
 			t.Fatalf("kind %q must resolve no reference", kind)
 		}

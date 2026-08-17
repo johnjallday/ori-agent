@@ -54,10 +54,55 @@ type ChatRequest struct {
 	// alongside MCPServers (native-MCP task execution).
 	WorkspaceID string
 
-	// WorkspaceDir is the workspace folder a native-MCP CLI run is confined to
-	// (working directory + sandbox scope). Optional; empty leaves the run
-	// unconfined. Set only alongside MCPServers.
+	// WorkspaceDir is the legacy broad native-MCP workspace folder. Runtime
+	// capability execution uses ExecutionScope instead so its additional roots
+	// and network posture cannot be inferred from this older opt-in.
 	WorkspaceDir string
+
+	// ExecutionScope is provider-neutral, server-authorized CLI authority for
+	// this one task invocation. It is populated only after task preflight and
+	// grant resolution; prompts, template data, browser bodies, and model output
+	// never supply it. Providers defensively clone/canonicalize it before use.
+	ExecutionScope *CLIExecutionScope
+}
+
+// CLINetworkPosture describes what local connectivity a scoped CLI task needs.
+// Capability-local means general shell network remains disabled: loopback is
+// reached only through a compiled capability-owned MCP/helper operation. This
+// avoids turning one REAPER grant into unrestricted prompt-controlled egress.
+type CLINetworkPosture string
+
+const (
+	CLINetworkDisabled        CLINetworkPosture = "disabled"
+	CLINetworkCapabilityLocal CLINetworkPosture = "capability_local"
+)
+
+// CLIExecutionScope carries the minimum provider-neutral authority resolved by
+// trusted server code for one CLI task. AdditionalWritableRoots are canonical,
+// capability-owned directories in addition to WorkspaceRoot. CapabilityKeys
+// records why each scope exists for safe audit/translation; it grants nothing
+// by itself.
+type CLIExecutionScope struct {
+	WorkspaceRoot           string
+	AdditionalWritableRoots []string
+	NetworkPosture          CLINetworkPosture
+	CapabilityKeys          []string
+	// AllowedMCPServers is the exact logical server subset this capability may
+	// expose. Empty grants no MCP server; it never means all.
+	AllowedMCPServers []string
+}
+
+// CloneCLIExecutionScope returns a detached copy so provider preparation cannot
+// retain or mutate caller-owned root/capability slices.
+func CloneCLIExecutionScope(scope *CLIExecutionScope) *CLIExecutionScope {
+	if scope == nil {
+		return nil
+	}
+	clone := *scope
+	clone.AdditionalWritableRoots = append([]string(nil), scope.AdditionalWritableRoots...)
+	clone.CapabilityKeys = append([]string(nil), scope.CapabilityKeys...)
+	clone.AllowedMCPServers = append([]string(nil), scope.AllowedMCPServers...)
+	return &clone
 }
 
 // MCPServerSpec is a resolved MCP server definition handed to a native-MCP

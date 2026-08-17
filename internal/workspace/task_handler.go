@@ -58,10 +58,18 @@ type LLMTaskHandler struct {
 	mcpRegistry      mcpRegistry
 	// nativeMCPExecTimeout bounds a native-MCP CLI task run (which runs its own
 	// multi-tool agent loop). Zero falls back to defaultNativeMCPExecTimeout.
-	nativeMCPExecTimeout time.Duration
-	runtimeResolver      *AgentRuntimeResolver
-	workspaceToolsFn     WorkspaceToolFactory
-	utilityTools         UtilityToolProvider
+	nativeMCPExecTimeout   time.Duration
+	runtimeResolver        *AgentRuntimeResolver
+	executionScopeResolver TaskExecutionScopeResolver
+	workspaceToolsFn       WorkspaceToolFactory
+	utilityTools           UtilityToolProvider
+}
+
+// TaskExecutionScopeResolver supplies a server-authorized, one-invocation CLI
+// scope after runtime preflight. Prompt/model/browser data has no path to this
+// interface.
+type TaskExecutionScopeResolver interface {
+	ResolveTaskExecutionScope(context.Context, string, string, []string, string) (*llm.CLIExecutionScope, error)
 }
 
 type mcpRegistry interface {
@@ -149,6 +157,12 @@ func (h *LLMTaskHandler) effectiveNativeMCPExecTimeout() time.Duration {
 // SetRuntimeResolver configures workspace-aware runtime MCP resolution for task execution.
 func (h *LLMTaskHandler) SetRuntimeResolver(resolver *AgentRuntimeResolver) {
 	h.runtimeResolver = resolver
+}
+
+func (h *LLMTaskHandler) SetExecutionScopeResolver(resolver TaskExecutionScopeResolver) {
+	if h != nil {
+		h.executionScopeResolver = resolver
+	}
 }
 
 // SetContextStore configures optional workspace note/session summaries for task prompts.
@@ -468,20 +482,50 @@ func (h *LLMTaskHandler) executeTaskConversation(
 		if len(requestTools) == 0 && taskResponseSchema != nil {
 			chatReq.ResponseSchema = taskResponseSchema
 		}
-		// CLI agents (Claude Code / Codex), once opted in, run with an elevated
-		// sandboxed posture: workspace-write filesystem + localhost network +
-		// auto-approved tools, confined to the workspace folder. This applies
-		// whether the agent acts via bound MCP servers OR via skills + the CLI's
-		// own shell (e.g. driving REAPER's Web Remote over localhost) — so the
-		// posture is gated on the opt-in, not on whether MCP servers are bound.
-		// SupportsTools stays false for these providers (requestTools ignored).
+		// Capability-scoped CLI authority is distinct from the legacy broad
+		// native-MCP opt-in. A granted runtime task gets only its canonical
+		// workspace root, capability-owned additional roots, local-helper posture,
+		// and exact MCP subset. It never toggles or inherits the broad setting.
 		nativeMCPActive := false
-		if providerSupportsNativeMCP(provider) && h.nativeMCPAllowed(task.WorkspaceID, ag) {
+		runtimeScopeActive := false
+		if providerSupportsNativeMCP(provider) && h.executionScopeResolver != nil && len(task.RequiredCapabilities) > 0 {
+			agentInstanceID := h.taskAgentInstanceID(task, agentName)
+			if agentInstanceID != "" && h.workspaceStore != nil {
+				scope, scopeErr := h.executionScopeResolver.ResolveTaskExecutionScope(
+					ctx,
+					task.WorkspaceID,
+					agentInstanceID,
+					task.RequiredCapabilities,
+					h.workspaceStore.GetFilesPath(task.WorkspaceID),
+				)
+				if scopeErr != nil {
+					return "", &TaskBlockedError{
+						ReasonCode: "runtime_execution_scope_unavailable",
+						Reason:     "The runtime capability grant could not be applied safely.",
+						Question:   "Review runtime setup before retrying this task.",
+						Repair: &TaskRepairAction{
+							Code: "review_runtime_setup", Label: "Review runtime setup",
+							URL: "/workspaces/" + task.WorkspaceID + "?runtime_setup=1",
+						},
+					}
+				}
+				if scope != nil {
+					chatReq.WorkspaceID = task.WorkspaceID
+					chatReq.ExecutionScope = llm.CloneCLIExecutionScope(scope)
+					chatReq.MCPServers = filterNativeMCPSpecs(h.resolveNativeMCPSpecs(ag), scope.AllowedMCPServers)
+					runtimeScopeActive = true
+					nativeMCPActive = true
+				}
+			}
+		}
+
+		// Preserve the existing broad native-MCP path for unrelated opted-in
+		// tasks. It is never consulted once a capability-scoped grant applies.
+		if !runtimeScopeActive && providerSupportsNativeMCP(provider) && h.nativeMCPAllowed(task.WorkspaceID, ag) {
 			chatReq.WorkspaceID = task.WorkspaceID
 			if h.workspaceStore != nil {
 				chatReq.WorkspaceDir = h.workspaceStore.GetFilesPath(task.WorkspaceID)
 			}
-			// MCP servers are optional — a skill-only agent has none.
 			if specs := h.resolveNativeMCPSpecs(ag); len(specs) > 0 {
 				chatReq.MCPServers = specs
 			}
@@ -1427,6 +1471,40 @@ func (h *LLMTaskHandler) findTool(ag *resolvedTaskAgent, task Task, toolName str
 	}
 
 	return nil, false
+}
+
+func (h *LLMTaskHandler) taskAgentInstanceID(task Task, agentName string) string {
+	if h == nil || h.workspaceStore == nil {
+		return ""
+	}
+	ws, err := h.workspaceStore.Get(task.WorkspaceID)
+	if err != nil || ws == nil {
+		return ""
+	}
+	instance, found := ws.FindAgentInstance(agentName, task.AssignedNodeID)
+	if !found || instance == nil {
+		return ""
+	}
+	return strings.TrimSpace(instance.ID)
+}
+
+func filterNativeMCPSpecs(specs []llm.MCPServerSpec, allowed []string) []llm.MCPServerSpec {
+	if len(specs) == 0 || len(allowed) == 0 {
+		return nil
+	}
+	allow := make(map[string]bool, len(allowed))
+	for _, name := range allowed {
+		if name = strings.ToLower(strings.TrimSpace(name)); name != "" {
+			allow[name] = true
+		}
+	}
+	var out []llm.MCPServerSpec
+	for _, spec := range specs {
+		if allow[strings.ToLower(strings.TrimSpace(spec.Name))] {
+			out = append(out, spec)
+		}
+	}
+	return out
 }
 
 // nativeMCPAllowed reports whether native-MCP CLI execution is permitted for

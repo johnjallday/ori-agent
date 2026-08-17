@@ -326,6 +326,14 @@ type Template struct {
 	// AutomationRecipes are the watchers/daily runs to install once the matching
 	// directory requirement has been confirmed. Inert until setup completes.
 	AutomationRecipes []AutomationRecipe `json:"automation_recipes,omitempty"`
+	// RuntimeRequirements is the optional, versioned operating-mode/runtime
+	// contract this blueprint declares. It contains inert labels, stable keys,
+	// references, and compiled adapter IDs only. An unusable declaration yields
+	// nil plus RuntimeRequirementsError so creation can fail closed.
+	RuntimeRequirements *RuntimeRequirementsContract `json:"runtime_requirements,omitempty"`
+	// RuntimeRequirementsError is the actionable diagnostic for a declared
+	// runtime contract that could not be understood or safely resolved.
+	RuntimeRequirementsError string `json:"runtime_requirements_error,omitempty"`
 	// SetupWizard is the optional ordered setup flow a workspace created from
 	// this template runs after creation. Normalized and fully validated, or nil
 	// — a declaration that could not be understood yields nil plus
@@ -365,6 +373,19 @@ type CapabilityInstall struct {
 	// Source records which flow to attribute the install to. Defaults to the
 	// blueprint source when empty.
 	Source string `json:"source,omitempty"`
+}
+
+// HasRuntimeRequirements reports whether the template declares a usable
+// runtime contract. A malformed declaration is not treated as absent; callers
+// must also check HasInvalidRuntimeRequirements and refuse creation.
+func (t Template) HasRuntimeRequirements() bool {
+	return t.RuntimeRequirements != nil && t.RuntimeRequirements.StructurallyValid()
+}
+
+// HasInvalidRuntimeRequirements reports whether a runtime_requirements block
+// was present but could not be honored in full.
+func (t Template) HasInvalidRuntimeRequirements() bool {
+	return strings.TrimSpace(t.RuntimeRequirementsError) != ""
 }
 
 // HasSetupWizard reports whether the template declares a usable setup wizard.
@@ -416,6 +437,10 @@ type manifest struct {
 	Capabilities           []CapabilityInstall     `json:"capabilities,omitempty"`
 	DirectoryRequirements  []DirectoryRequirement  `json:"directory_requirements,omitempty"`
 	AutomationRecipes      []AutomationRecipe      `json:"automation_recipes,omitempty"`
+	// RuntimeRequirements is raw for the same fail-closed isolation as the
+	// setup wizard below: one malformed runtime block must not erase unrelated
+	// blueprint identity, files, tasks, or agents.
+	RuntimeRequirements json.RawMessage `json:"runtime_requirements,omitempty"`
 	// SetupWizard is held raw so a malformed wizard fails only the wizard: were
 	// it typed here, one bad step would fail the whole manifest decode and the
 	// template would silently lose its name, tasks, and agents too.
@@ -473,14 +498,28 @@ func newTemplate(path string) Template {
 	t.Capabilities = capabilities
 	t.DirectoryRequirements = normalizeDirectoryRequirements(m.DirectoryRequirements)
 	t.AutomationRecipes = normalizeAutomationRecipes(m.AutomationRecipes, t.DirectoryRequirements)
+	runtimeRequirements, runtimeRequirementsErr := normalizeRuntimeRequirements(m.RuntimeRequirements)
+	if runtimeRequirementsErr == nil {
+		runtimeRequirementsErr = validateRuntimeStarterTaskReferences(t.StarterTasks, runtimeRequirements)
+	}
+	t.RuntimeRequirements = runtimeRequirements
+	if runtimeRequirementsErr != nil {
+		// All-or-nothing applies to cross-references too. A valid declaration
+		// paired with an undeclared runtime task key is not a usable contract.
+		t.RuntimeRequirements = nil
+	}
 	// The wizard is resolved last: its steps may only reference requirements
 	// this same manifest declares, so every other declaration must be
 	// normalized first.
-	setupWizard, setupWizardErr := normalizeSetupWizard(m.SetupWizard, templateSetupWizardScope(t.DirectoryRequirements, t.AutomationRecipes, t.CapabilityRequirements, t.Tools.Plugins))
+	setupWizard, setupWizardErr := normalizeSetupWizard(m.SetupWizard, templateSetupWizardScope(t.DirectoryRequirements, t.AutomationRecipes, t.CapabilityRequirements, t.Tools.Plugins, t.RuntimeRequirements))
 	t.SetupWizard = setupWizard
 	t.Warnings = append(manifestWarnings(m, t.Agents), capabilityWarnings...)
 	if projectEntryErr != nil {
 		t.Warnings = append(t.Warnings, fmt.Sprintf("template.json project_entry is ignored: %v", projectEntryErr))
+	}
+	if runtimeRequirementsErr != nil {
+		t.RuntimeRequirementsError = runtimeRequirementsErr.Error()
+		t.Warnings = append(t.Warnings, fmt.Sprintf("template.json runtime_requirements is unusable and blocks workspace creation: %v", runtimeRequirementsErr))
 	}
 	if setupWizardErr != nil {
 		t.SetupWizardError = setupWizardErr.Error()

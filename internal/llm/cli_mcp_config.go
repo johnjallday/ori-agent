@@ -12,6 +12,8 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
+const maxCLIAdditionalWritableRoots = 8
+
 // CLIAgentPosture is the resolved autonomy posture applied to native-MCP CLI
 // runs. Defaults match PRD req #15: a workspace-scoped sandbox with full access
 // inside it and no approval prompts. (Task 5.4 centralizes policy resolution;
@@ -27,6 +29,82 @@ type CLIAgentPosture struct {
 // auto-approved.
 func DefaultCLIAgentPosture() CLIAgentPosture {
 	return CLIAgentPosture{CodexSandbox: "workspace-write", CodexApproval: "never"}
+}
+
+// normalizeCLIExecutionScope is the provider boundary's final defensive check.
+// Server code already canonicalizes roots, but a direct provider caller cannot
+// use a relative, missing, symlinked, duplicate, or unbounded root to widen the
+// CLI sandbox.
+func normalizeCLIExecutionScope(scope *CLIExecutionScope) (*CLIExecutionScope, error) {
+	if scope == nil {
+		return nil, nil
+	}
+	canonicalWorkspace, err := canonicalCLIRoot(scope.WorkspaceRoot)
+	if err != nil {
+		return nil, fmt.Errorf("invalid CLI execution workspace root")
+	}
+	if len(scope.AdditionalWritableRoots) > maxCLIAdditionalWritableRoots {
+		return nil, fmt.Errorf("too many CLI additional writable roots")
+	}
+	normalized := &CLIExecutionScope{WorkspaceRoot: canonicalWorkspace}
+	seenRoots := map[string]bool{canonicalWorkspace: true}
+	for _, root := range scope.AdditionalWritableRoots {
+		canonical, rootErr := canonicalCLIRoot(root)
+		if rootErr != nil {
+			return nil, fmt.Errorf("invalid CLI additional writable root")
+		}
+		if !seenRoots[canonical] {
+			seenRoots[canonical] = true
+			normalized.AdditionalWritableRoots = append(normalized.AdditionalWritableRoots, canonical)
+		}
+	}
+	sort.Strings(normalized.AdditionalWritableRoots)
+	switch scope.NetworkPosture {
+	case "", CLINetworkDisabled:
+		normalized.NetworkPosture = CLINetworkDisabled
+	case CLINetworkCapabilityLocal:
+		normalized.NetworkPosture = CLINetworkCapabilityLocal
+	default:
+		return nil, fmt.Errorf("unsupported CLI network posture")
+	}
+	normalized.CapabilityKeys = normalizeScopeTokens(scope.CapabilityKeys)
+	normalized.AllowedMCPServers = normalizeScopeTokens(scope.AllowedMCPServers)
+	return normalized, nil
+}
+
+func canonicalCLIRoot(root string) (string, error) {
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return "", fmt.Errorf("root is empty")
+	}
+	absolute, err := filepath.Abs(root)
+	if err != nil {
+		return "", err
+	}
+	info, err := os.Lstat(absolute)
+	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return "", fmt.Errorf("root is unavailable")
+	}
+	canonical, err := filepath.EvalSymlinks(absolute)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Clean(canonical), nil
+}
+
+func normalizeScopeTokens(values []string) []string {
+	seen := make(map[string]bool, len(values))
+	var out []string
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // CLIMCPConfigStore writes and locates persistent per-workspace MCP config for

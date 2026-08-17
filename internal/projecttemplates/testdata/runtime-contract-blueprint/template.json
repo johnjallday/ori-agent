@@ -1,0 +1,37 @@
+{
+  "name": "External App Review",
+  "description": "A non-REAPER fixture that demonstrates portable runtime modes.",
+  "agents": [
+    {
+      "name": "Review Lead",
+      "role": "Coordinator"
+    }
+  ],
+  "runtime_requirements": {
+    "schema_version": 1,
+    "operating_modes": [
+      {
+        "id": "document_only",
+        "label": "Document-only",
+        "description": "Draft and review the workspace document files."
+      },
+      {
+        "id": "connected_review",
+        "label": "Connected review",
+        "description": "Keep drafting files while local review access is configured.",
+        "requires": [
+          "local_review_control"
+        ]
+      }
+    ],
+    "requirements": [
+      {
+        "key": "local_review_control",
+        "label": "Local review control",
+        "description": "Connect the approved local review application after creation.",
+        "disclosure": "Ori will ask before granting the selected agent narrowly scoped local access.",
+        "adapter": "reaper_live_control"
+      }
+    ]
+  }
+}

@@ -38,6 +38,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/privateservices"
 	"github.com/johnjallday/ori-agent/internal/progressionhttp"
 	"github.com/johnjallday/ori-agent/internal/reviewhttp"
+	"github.com/johnjallday/ori-agent/internal/runtimecapabilityhttp"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/sessionhttp"
 	"github.com/johnjallday/ori-agent/internal/settingshttp"
@@ -174,9 +175,12 @@ type HandlerFacade struct {
 	// SetupWizard serves the shared blueprint Setup Wizard for every
 	// wizard-enabled workspace, whichever blueprint it came from.
 	SetupWizard *setupwizardhttp.Handler
-	User        *userhttp.Handler
-	PersonalHQ  *personalhqhttp.Handler
-	DailyBrief  *dailybriefhttp.Handler
+	// RuntimeCapabilities serves operating modes, durable/live status, exact
+	// actions, verification, and capability-scoped grant delegation.
+	RuntimeCapabilities *runtimecapabilityhttp.Handler
+	User                *userhttp.Handler
+	PersonalHQ          *personalhqhttp.Handler
+	DailyBrief          *dailybriefhttp.Handler
 	// OriGuide serves the setup-and-navigation guide. It is deliberately a
 	// separate handler from the Home work surface: its action type cannot
 	// express a mutation and it holds no dependency capable of performing one.

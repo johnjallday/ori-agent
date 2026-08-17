@@ -169,7 +169,12 @@ test.describe('Blueprint Setup Wizard', () => {
     await page.goto('/workspaces');
     // The create launcher lives in a toolbar the Map view can collapse; click it
     // through the DOM so this test is about the preview, not about chrome.
-    await page.evaluate(() => document.getElementById('launcherCreateWorkspaceBtn')?.click());
+    await page.evaluate(() =>
+      (
+        document.getElementById('launcherCreateWorkspaceBtn') ||
+        document.getElementById('cockpitCreateWorkspaceBtn')
+      )?.click()
+    );
     await expect(page.locator('#addFolderModal')).toBeVisible({ timeout: 15000 });
     const card = page.locator(`[data-template-id="${TEMPLATE_ID}"]`).first();
     await expect(card).toBeVisible({ timeout: 15000 });
@@ -179,6 +184,9 @@ test.describe('Blueprint Setup Wizard', () => {
     await page.locator('#wizardNextBtn').click();
     await page.locator('#folderNameInput').fill(`Preview Only ${Date.now().toString(36)}`);
     await page.locator('#wizardNextBtn').click();
+    await expect(page.locator('#wizardStep3')).toBeVisible();
+    await page.locator('#wizardNextBtn').click();
+    await expect(page.locator('#wizardStep4')).toBeVisible();
 
     const preview = page.locator('#workspaceSetupPreview');
     await expect(preview).toBeVisible({ timeout: 15000 });

@@ -1,6 +1,7 @@
 package sessionhttp
 
 import (
+	"context"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -194,6 +195,126 @@ func TestCreateWorkspace_SnapshotsSetupWizardIntoProvenance(t *testing.T) {
 	after := folderWorkspace(t, handler, wsID).GetTemplateProvenance()
 	if after.SetupWizard.Title != "Set up the workspace" {
 		t.Fatalf("editing the blueprint rewrote an existing workspace's setup: %+v", after.SetupWizard)
+	}
+}
+
+func writeRuntimeRequirementTemplate(t *testing.T, libDir, modeLabel string) {
+	t.Helper()
+	dir := filepath.Join(libDir, "runtime-template")
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{
+		"name":"Runtime Template",
+		"agents":[{"name":"Runtime Lead"}],
+		"runtime_requirements":{
+			"schema_version":1,
+			"operating_modes":[
+				{"id":"limited","label":"Limited","description":"Use files."},
+				{"id":"assisted","label":"` + modeLabel + `","description":"Use live control.","requires":["runtime"]}
+			],
+			"requirements":[{"key":"runtime","label":"Runtime","description":"Configure local runtime.","adapter":"reaper_live_control"}]
+		}
+	}`
+	if err := os.WriteFile(filepath.Join(dir, "template.json"), []byte(manifest), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "seed.txt"), []byte("seed"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCreateWorkspace_SnapshotsCustomRuntimeRequirementsIntoProvenance(t *testing.T) {
+	handler, _, _, cleanup := templateTestEnv(t)
+	defer cleanup()
+
+	libDir := handler.templatesRootResolver()
+	writeRuntimeRequirementTemplate(t, libDir, "Assisted")
+	w, resp := postCreateWorkspace(t, handler, `{"name":"Runtime WS","template_id":"runtime-template"}`)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	folder, _ := resp["folder"].(map[string]any)
+	wsID, _ := folder["id"].(string)
+	if wsID == "" {
+		t.Fatal("missing workspace id")
+	}
+
+	workspace := folderWorkspace(t, handler, wsID)
+	provenance := workspace.GetTemplateProvenance()
+	if provenance == nil || provenance.RuntimeRequirements == nil {
+		t.Fatalf("custom runtime blueprint did not persist provenance: %+v", provenance)
+	}
+	if provenance.RuntimeRequirements.OperatingModes[1].Label != "Assisted" || provenance.RuntimeRequirements.Requirements[0].Adapter != "reaper_live_control" {
+		t.Fatalf("runtime snapshot changed during creation: %+v", provenance.RuntimeRequirements)
+	}
+
+	// Editing the source blueprint later cannot rewrite this workspace's copy.
+	writeRuntimeRequirementTemplate(t, libDir, "Rewritten")
+	after := folderWorkspace(t, handler, wsID).RuntimeRequirementsSnapshot()
+	if after == nil || after.OperatingModes[1].Label != "Assisted" {
+		t.Fatalf("source blueprint edit reached existing workspace: %+v", after)
+	}
+}
+
+func TestCreateWorkspace_RefusesTemplateWithUnusableRuntimeRequirementsBeforeMutation(t *testing.T) {
+	handler, baseDir, _, cleanup := templateTestEnv(t)
+	defer cleanup()
+
+	libDir := handler.templatesRootResolver()
+	dir := filepath.Join(libDir, "broken-runtime")
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{
+		"name":"Broken Runtime",
+		"agents":[{"name":"Must Not Be Seeded"}],
+		"starter_tasks":[{"description":"Must not exist"}],
+		"tools":{"plugins":["reaper-plugin"]},
+		"runtime_requirements":{
+			"schema_version":1,
+			"operating_modes":[{"id":"assisted","label":"Assisted","description":"Use runtime.","requires":["missing"]}],
+			"requirements":[]
+		}
+	}`
+	if err := os.WriteFile(filepath.Join(dir, "template.json"), []byte(manifest), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "seed.txt"), []byte("must not copy"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	beforeFolders, err := os.ReadDir(baseDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeWorkspaces, err := handler.store.ListWorkspaces(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	w, resp := postCreateWorkspace(t, handler, `{"name":"Broken Runtime WS","template_id":"broken-runtime"}`)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d: %s", w.Code, w.Body.String())
+	}
+	message, _ := resp["error"].(string)
+	if !strings.Contains(message, "runtime requirements") || !strings.Contains(message, "missing") {
+		t.Fatalf("error must explain the invalid contract: %q", message)
+	}
+	if diagnostic, _ := resp["runtime_requirements_error"].(string); !strings.Contains(diagnostic, "undeclared runtime requirement") {
+		t.Fatalf("missing actionable runtime diagnostic: %q", diagnostic)
+	}
+
+	afterFolders, err := os.ReadDir(baseDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	afterWorkspaces, err := handler.store.ListWorkspaces(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(afterFolders) != len(beforeFolders) || len(afterWorkspaces) != len(beforeWorkspaces) {
+		t.Fatalf("refused runtime blueprint mutated workspace state: folders %d -> %d, records %d -> %d", len(beforeFolders), len(afterFolders), len(beforeWorkspaces), len(afterWorkspaces))
 	}
 }
 

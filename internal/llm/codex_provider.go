@@ -77,7 +77,7 @@ func (p *CodexProvider) DefaultModels() []string {
 // Chat sends a chat request via the Codex CLI.
 func (p *CodexProvider) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
 	prompt := buildCodexPrompt(req.SystemPrompt, req.Messages)
-	nat, err := p.prepareNativeMCP(req.MCPServers, req.WorkspaceID, req.WorkspaceDir)
+	nat, err := p.prepareNativeMCP(req.MCPServers, req.WorkspaceID, req.WorkspaceDir, req.ExecutionScope)
 	if err != nil {
 		return nil, err
 	}
@@ -100,7 +100,7 @@ func (p *CodexProvider) StreamChat(ctx context.Context, req ChatRequest) (Stream
 // ChatWithStructuredOutput sends a chat request with a JSON schema using Codex CLI.
 func (p *CodexProvider) ChatWithStructuredOutput(ctx context.Context, req StructuredOutputRequest) (*ChatResponse, error) {
 	prompt := buildCodexPrompt(req.SystemPrompt, req.Messages)
-	nat, err := p.prepareNativeMCP(req.MCPServers, req.WorkspaceID, req.WorkspaceDir)
+	nat, err := p.prepareNativeMCP(req.MCPServers, req.WorkspaceID, req.WorkspaceDir, req.ExecutionScope)
 	if err != nil {
 		return nil, err
 	}
@@ -117,8 +117,11 @@ func (p *CodexProvider) ChatWithStructuredOutput(ctx context.Context, req Struct
 
 // codexNativeMCP holds the resolved elevated-posture execution context for a run.
 type codexNativeMCP struct {
-	ProfileName  string // codex --profile name (per-workspace MCP profile; empty when no MCP servers)
-	WorkspaceDir string // working dir / workspace-write sandbox scope (may be empty)
+	ProfileName             string // codex --profile name (per-workspace MCP profile; empty when no MCP servers)
+	WorkspaceDir            string // working dir / workspace-write primary root
+	AdditionalWritableRoots []string
+	NetworkPosture          CLINetworkPosture
+	Scoped                  bool // capability scope, distinct from broad native-MCP
 }
 
 // prepareNativeMCP resolves the elevated execution context. A non-empty
@@ -127,11 +130,24 @@ type codexNativeMCP struct {
 // when there are no MCP servers — a skill-only agent that drives tooling via the
 // CLI's own shell still needs to write files and reach localhost. The
 // per-workspace --profile is generated only when MCP servers are present.
-func (p *CodexProvider) prepareNativeMCP(specs []MCPServerSpec, workspaceID, workspaceDir string) (*codexNativeMCP, error) {
+func (p *CodexProvider) prepareNativeMCP(specs []MCPServerSpec, workspaceID, workspaceDir string, executionScope *CLIExecutionScope) (*codexNativeMCP, error) {
 	if strings.TrimSpace(workspaceID) == "" {
+		if executionScope != nil {
+			return nil, fmt.Errorf("scoped codex execution requires a workspace id")
+		}
 		return nil, nil
 	}
 	nat := &codexNativeMCP{WorkspaceDir: workspaceDir}
+	if executionScope != nil {
+		normalized, err := normalizeCLIExecutionScope(executionScope)
+		if err != nil {
+			return nil, err
+		}
+		nat.WorkspaceDir = normalized.WorkspaceRoot
+		nat.AdditionalWritableRoots = append([]string(nil), normalized.AdditionalWritableRoots...)
+		nat.NetworkPosture = normalized.NetworkPosture
+		nat.Scoped = true
+	}
 	if len(specs) > 0 && p.mcpStore != nil {
 		profileName, err := p.mcpStore.EnsureCodexProfile(workspaceID, specs, DefaultCLIAgentPosture())
 		if err != nil {
@@ -189,15 +205,26 @@ func buildCodexArgs(model, reasoningEffort, schemaPath, outPath string, nat *cod
 	}
 
 	if nat != nil {
-		// Elevated run: workspace-scoped writable sandbox, auto-approved
-		// (headless), with localhost/network access so the agent can drive local
-		// services (e.g. REAPER's Web Remote) via its own shell. A per-workspace
-		// --profile is added only when MCP servers were resolved.
+		// Both native postures use Codex's documented workspace-write sandbox and
+		// headless approval. Capability scope additionally uses the documented
+		// --add-dir roots. General shell network stays disabled there; the
+		// capability_local posture reaches loopback only through an exact trusted
+		// MCP/helper operation, never arbitrary curl from a prompt.
+		networkAccess := "true" // legacy broad native-MCP behavior
+		if nat.Scoped {
+			networkAccess = "false"
+		}
 		args = append(args,
 			"--sandbox", "workspace-write",
 			"-c", `approval_policy="never"`,
-			"-c", "sandbox_workspace_write.network_access=true",
+			"-c", "sandbox_workspace_write.network_access="+networkAccess,
 		)
+		if nat.Scoped {
+			args = append(args, "--ignore-user-config", "--ignore-rules", "--ephemeral")
+			for _, root := range nat.AdditionalWritableRoots {
+				args = append(args, "--add-dir", root)
+			}
+		}
 		if strings.TrimSpace(nat.ProfileName) != "" {
 			args = append(args, "--profile", nat.ProfileName)
 		}
@@ -251,6 +278,9 @@ func (p *CodexProvider) runCodexExec(ctx context.Context, model, prompt, reasoni
 
 	args := buildCodexArgs(model, reasoningEffort, schemaPath, tmpOutPath, nat)
 
+	// #nosec G204 -- cliPath comes from exec.LookPath("codex") and every scoped
+	// filesystem/network argument is canonicalized and allowlisted above; exec
+	// receives an argv slice directly and never invokes a shell.
 	cmd := exec.CommandContext(ctx, p.cliPath, args...)
 	if nat != nil && nat.WorkspaceDir != "" {
 		cmd.Dir = nat.WorkspaceDir
