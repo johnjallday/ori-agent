@@ -429,15 +429,17 @@ func (s *FileStore) RebindExistingFolder(ws *Workspace, folderPath string) error
 		return fmt.Errorf("failed to reload workspace after rebind: %w", err)
 	}
 
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Root-relative under the same lock the mapping is stored under, so a
+	// concurrent root switch cannot record a path relative to the old root.
 	storedPath := normalizedPath
 	if s.isInsideRoot(normalizedPath) {
 		if relPath, relErr := filepath.Rel(s.basePath, normalizedPath); relErr == nil {
 			storedPath = relPath
 		}
 	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	s.cacheMeta(freshWS)
 	s.idToPath[ws.ID] = storedPath
@@ -590,8 +592,12 @@ func preserveUnmirroredWorkspaceFields(target *Workspace, existing *Workspace) {
 	}
 }
 
-// BasePath returns the default workspace root directory.
+// BasePath returns the default workspace root directory. Read under the lock so
+// a caller can never observe a root that SetBasePath is mid-way through
+// replacing.
 func (s *FileStore) BasePath() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return s.basePath
 }
 
@@ -607,14 +613,21 @@ func (s *FileStore) GetFolderWorkspace(id string) (*Workspace, error) {
 // from a lean cache entry; it refreshes the metadata cache as a side effect. Returns
 // a deep clone so callers may safely mutate the result.
 func (s *FileStore) Get(id string) (*Workspace, error) {
+	// Resolve the folder under the same lock that produced the mapping: a
+	// concurrent SetBasePath must never pair a previous-root cache entry with
+	// the new root.
 	s.mu.RLock()
 	slug, ok := s.idToPath[id]
+	folder := ""
+	if ok {
+		folder = s.resolveFolder(slug)
+	}
 	s.mu.RUnlock()
 	if !ok {
 		return nil, fmt.Errorf("workspace %s not found", id)
 	}
 
-	configPath := filepath.Join(s.resolveFolder(slug), WorkspaceConfigFile)
+	configPath := filepath.Join(folder, WorkspaceConfigFile)
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -1240,6 +1253,8 @@ func (s *FileStore) ClearAll() {
 
 // Close releases resources held by the FileStore, including the index database.
 func (s *FileStore) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.index != nil {
 		return s.index.Close()
 	}
@@ -1265,8 +1280,11 @@ func (s *FileStore) SaveWorkspaceAgent(workspaceID, agentName string, ag *agent.
 	return writeWorkspaceAgent(folder, agentName, ag)
 }
 
-// GetIndex returns the global workspace index (may be nil).
+// GetIndex returns the root-scoped workspace index (may be nil). Read under the
+// lock: SetBasePath swaps in the target root's index and closes the old handle.
 func (s *FileStore) GetIndex() *Index {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return s.index
 }
 
@@ -1379,6 +1397,156 @@ func (s *FileStore) Reload() error {
 		logger.Warn("Failed to rebuild workspace index during reload", logger.Fields{"error": err.Error()})
 	}
 	return nil
+}
+
+// RootChange describes the live state a SetBasePath call replaced. It gives
+// callers enough to reconcile their own mirrors (e.g. the session store) against
+// the new root without re-walking the old one.
+type RootChange struct {
+	// PreviousRoot is the absolute root the store served before the call.
+	PreviousRoot string
+	// PreviousFolders maps workspace ID → the absolute folder path the store
+	// resolved for it under PreviousRoot, captured atomically with the switch.
+	// Empty when Switched is false.
+	PreviousFolders map[string]string
+	// Switched reports whether the root actually changed. False means the
+	// requested root was already active and the store reloaded in place.
+	Switched bool
+}
+
+// SetBasePath re-points the live store at a different workspace root, replacing
+// basePath, the metadata cache, the ID→path map, and the root-scoped index as
+// one consistent state. This is the live equivalent of restarting the process
+// against that root: the target tree is scanned with the same recursive
+// workspace.json and physical-grouping rules NewFileStore uses, and nothing on
+// disk is moved, copied, renamed, or deleted under either root.
+//
+// The target root is fully prepared before anything is published, so a
+// preparation failure (unusable path, unreadable tree) leaves the current root,
+// cache, and index untouched and usable. The previous root's index handle is
+// released after the swap.
+//
+// Re-applying the currently active root is not a no-op: it performs a real
+// Reload so folders that arrived out of band are discovered, reusing the
+// already-open index instead of rebuilding a second handle on the same database.
+func (s *FileStore) SetBasePath(newBasePath string) (RootChange, error) {
+	target, err := normalizeWorkspaceRootPath(newBasePath)
+	if err != nil {
+		return RootChange{}, err
+	}
+
+	s.mu.RLock()
+	current := s.basePath
+	s.mu.RUnlock()
+
+	if sameWorkspaceRoot(current, target) {
+		if err := s.Reload(); err != nil {
+			return RootChange{}, err
+		}
+		return RootChange{PreviousRoot: current}, nil
+	}
+
+	// Prepare the target root off-lock and in a scratch store, so any failure
+	// below returns without having touched the live state.
+	if err := os.MkdirAll(target, 0o750); err != nil {
+		return RootChange{}, fmt.Errorf("failed to create workspace directory: %w", err)
+	}
+	info, err := os.Stat(target)
+	if err != nil {
+		return RootChange{}, fmt.Errorf("failed to access workspace directory: %w", err)
+	}
+	if !info.IsDir() {
+		return RootChange{}, fmt.Errorf("workspace directory %q is not a directory", target)
+	}
+
+	staged := &FileStore{
+		basePath: target,
+		cache:    make(map[string]*Workspace),
+		idToPath: make(map[string]string),
+	}
+	if err := staged.loadCache(); err != nil {
+		return RootChange{}, fmt.Errorf("failed to load workspace cache: %w", err)
+	}
+	// A missing index is degraded but usable — NewFileStore treats it the same
+	// way — so an index failure must not abandon an otherwise-loaded root.
+	if idx, idxErr := NewIndex(target); idxErr != nil {
+		logger.Warn("Failed to open workspace index for new root, continuing without it",
+			logger.Fields{"error": idxErr.Error()})
+	} else {
+		staged.index = idx
+		if err := staged.rebuildIndexFromCache(); err != nil {
+			logger.Warn("Failed to rebuild workspace index for new root", logger.Fields{"error": err.Error()})
+		}
+	}
+
+	s.mu.Lock()
+	change := RootChange{
+		PreviousRoot:    s.basePath,
+		PreviousFolders: s.folderPathsLocked(),
+		Switched:        true,
+	}
+	previousIndex := s.index
+	s.basePath = staged.basePath
+	s.cache = staged.cache
+	s.idToPath = staged.idToPath
+	s.index = staged.index
+	// Release the previous root's handle inside the critical section: every
+	// internal index user runs under s.mu, so closing here means none of them
+	// can be holding the old handle when it goes away.
+	if previousIndex != nil {
+		if err := previousIndex.Close(); err != nil {
+			logger.Warn("Failed to close previous workspace index", logger.Fields{"error": err.Error()})
+		}
+	}
+	s.mu.Unlock()
+
+	logger.Info("Workspace root switched", logger.Fields{
+		"previous_workspaces": len(change.PreviousFolders),
+		"loaded_workspaces":   len(staged.cache),
+	})
+
+	return change, nil
+}
+
+// folderPathsLocked snapshots the absolute folder path of every registered
+// workspace. Callers must hold s.mu.
+func (s *FileStore) folderPathsLocked() map[string]string {
+	paths := make(map[string]string, len(s.idToPath))
+	for id, relPath := range s.idToPath {
+		paths[id] = s.resolveFolder(relPath)
+	}
+	return paths
+}
+
+// normalizeWorkspaceRootPath cleans a caller-supplied root into an absolute path.
+func normalizeWorkspaceRootPath(path string) (string, error) {
+	trimmed := strings.TrimSpace(path)
+	if trimmed == "" {
+		return "", errors.New("workspace root path is required")
+	}
+	abs, err := filepath.Abs(trimmed)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve workspace root: %w", err)
+	}
+	return filepath.Clean(abs), nil
+}
+
+// sameWorkspaceRoot reports whether two paths address the same root directory.
+// Symlinks are resolved where possible so a store built against /var/folders/…
+// recognizes the same directory presented as /private/var/folders/….
+func sameWorkspaceRoot(a, b string) bool {
+	return canonicalWorkspaceRoot(a) == canonicalWorkspaceRoot(b)
+}
+
+func canonicalWorkspaceRoot(path string) string {
+	cleaned := filepath.Clean(strings.TrimSpace(path))
+	if abs, err := filepath.Abs(cleaned); err == nil {
+		cleaned = abs
+	}
+	if resolved, err := filepath.EvalSymlinks(cleaned); err == nil {
+		return resolved
+	}
+	return cleaned
 }
 
 // rebuildIndexFromCache repopulates the index from the in-memory cache, which

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -428,14 +429,55 @@ func (h *Handler) reconcileWorkspacesFromDisk(ctx context.Context, reload bool) 
 
 	h.rescanMu.Lock()
 	defer func() {
-		if err == nil {
-			h.lastRescanAt = time.Now()
-		}
+		h.finishReconcileLocked(err)
 		h.rescanMu.Unlock()
 	}()
 
+	return h.reconcileWorkspacesFromDiskLocked(ctx, workspaceReconcileOptions{reload: reload})
+}
+
+// workspaceReconcileOptions selects how one reconcile pass behaves. The zero
+// value is the ordinary same-root pass used by startup and explicit Rescan.
+type workspaceReconcileOptions struct {
+	// reload re-walks the folder tree before reconciling. On-demand rescans set
+	// it so out-of-band changes are picked up; startup and live-root
+	// application do not, because the cache was just loaded from disk.
+	reload bool
+	// previousRoot is the workspace root a live switch just replaced, already
+	// normalized. Empty for an ordinary same-root pass.
+	previousRoot string
+	// previousFolders maps workspace ID → the absolute folder path the store
+	// resolved for it under previousRoot. It is what lets the sweep tell a
+	// workspace that was managed by the old root apart from an explicitly
+	// imported or recovery-located folder that merely sits somewhere else.
+	previousFolders map[string]string
+}
+
+// isRootSwitch reports whether this pass follows a genuine root change.
+func (o workspaceReconcileOptions) isRootSwitch() bool {
+	return o.previousRoot != ""
+}
+
+// finishReconcileLocked records a successful reconcile for the background
+// cooldown. Callers must hold h.rescanMu.
+func (h *Handler) finishReconcileLocked(err error) {
+	if err == nil {
+		h.lastRescanAt = time.Now()
+	}
+}
+
+// reconcileWorkspacesFromDiskLocked is the single reconcile implementation
+// shared by startup, the explicit Rescan endpoint, and live workspace-root
+// application. Callers must hold h.rescanMu; the live-root path holds it across
+// the folder-store re-point as well, so a rescan can never observe a
+// half-switched store.
+func (h *Handler) reconcileWorkspacesFromDiskLocked(ctx context.Context, opts workspaceReconcileOptions) (stats workspaceReconcileStats, warnings []string, err error) {
+	if h.workspaceStore == nil {
+		return stats, nil, nil
+	}
+
 	// Refresh the file-store cache + index from disk; physical layout wins.
-	if reload {
+	if opts.reload {
 		if err := h.workspaceStore.Reload(); err != nil {
 			return stats, nil, err
 		}
@@ -443,7 +485,8 @@ func (h *Handler) reconcileWorkspacesFromDisk(ctx context.Context, reload bool) 
 
 	warnings = make([]string, 0)
 	diskWorkspaces := h.workspaceStore.CachedWorkspaces()
-	for id, diskWS := range diskWorkspaces {
+	for _, id := range orderWorkspacesParentFirst(diskWorkspaces) {
+		diskWS := diskWorkspaces[id]
 		sessionWS, getErr := h.store.GetWorkspace(ctx, id)
 		if getErr == session.ErrWorkspaceNotFound {
 			// CachedWorkspaces returns metadata-only structs (item 2.0); Get reads
@@ -503,17 +546,103 @@ func (h *Handler) reconcileWorkspacesFromDisk(ctx context.Context, reload bool) 
 	// workspaces whose folder is no longer on disk are marked missing so they
 	// drop out of listings. Chat history is preserved on the hidden row and the
 	// sync-status / cleanup flow can recover or remove it.
-	orphaned, sweepWarnings := h.sweepMissingWorkspaces(ctx, diskWorkspaces)
+	orphaned, sweepWarnings := h.sweepMissingWorkspaces(ctx, diskWorkspaces, opts)
 	stats.Orphaned = orphaned
 	warnings = append(warnings, sweepWarnings...)
 
 	return stats, warnings, nil
 }
 
+// orderWorkspacesParentFirst orders disk workspaces so a parent is always
+// reconciled before its children. The session store enforces a parent_id
+// foreign key, so creating a nested workspace before its group is rejected —
+// and because Go randomizes map iteration, that failure would otherwise strike
+// intermittently when a root containing groups is scanned for the first time.
+// Workspaces whose parent is not part of the set (a group that failed to load,
+// or a stale reference) are still attempted, after the ones that can be ordered.
+func orderWorkspacesParentFirst(diskWorkspaces map[string]*agentworkspace.Workspace) []string {
+	ids := make([]string, 0, len(diskWorkspaces))
+	for id := range diskWorkspaces {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+
+	ordered := make([]string, 0, len(ids))
+	emitted := make(map[string]bool, len(ids))
+	for len(ordered) < len(ids) {
+		progressed := false
+		for _, id := range ids {
+			if emitted[id] {
+				continue
+			}
+			if parentID := diskWorkspaces[id].ParentID; parentID != "" && !emitted[parentID] {
+				if _, known := diskWorkspaces[parentID]; known {
+					continue // wait for the parent to be emitted first
+				}
+			}
+			ordered = append(ordered, id)
+			emitted[id] = true
+			progressed = true
+		}
+		if !progressed {
+			// A parent cycle, only reachable from hand-edited files: emit the
+			// remainder in a stable order rather than spinning.
+			for _, id := range ids {
+				if !emitted[id] {
+					ordered = append(ordered, id)
+					emitted[id] = true
+				}
+			}
+		}
+	}
+	return ordered
+}
+
+// pathWithinRoot reports whether path lies strictly inside root. Containment is
+// computed with filepath.Rel rather than a string prefix so a sibling directory
+// whose name merely starts with the root's ("…/Roots" vs "…/Root") is not
+// mistaken for a child.
+func pathWithinRoot(root, path string) bool {
+	cleanRoot := cleanWorkspaceSyncPath(root)
+	cleanPath := cleanWorkspaceSyncPath(path)
+	if cleanRoot == "" || cleanPath == "" {
+		return false
+	}
+	rel, err := filepath.Rel(cleanRoot, cleanPath)
+	if err != nil {
+		return false
+	}
+	if rel == "." || rel == ".." {
+		return false
+	}
+	return !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
+}
+
+// leftBehindByRootSwitch reports whether a session workspace was a workspace of
+// the root a live switch just replaced, and so should stop being listed even
+// though its folder is still sitting on disk under that old root.
+//
+// Explicit folder imports are excluded wherever they live: their visibility is
+// owned by the import flow, not by which directory happens to be active. So are
+// workspaces the store had registered by an absolute path outside the previous
+// root (recovery-located folders), and rows the previous root never held at all
+// (legacy database-only workspaces).
+func leftBehindByRootSwitch(opts workspaceReconcileOptions, ws session.Workspace) bool {
+	if !opts.isRootSwitch() || isFolderImportedWorkspace(ws) {
+		return false
+	}
+	folder, ok := opts.previousFolders[ws.ID]
+	if !ok {
+		return false
+	}
+	return pathWithinRoot(opts.previousRoot, folder)
+}
+
 // sweepMissingWorkspaces marks folder-managed session workspaces as missing when
-// their backing folder is gone from disk or has been recreated as a different
-// workspace (same path, different ID). Returns the number of workspaces marked.
-func (h *Handler) sweepMissingWorkspaces(ctx context.Context, diskWorkspaces map[string]*agentworkspace.Workspace) (int, []string) {
+// their backing folder is gone from disk, has been recreated as a different
+// workspace (same path, different ID), or — after a live root switch — belongs
+// to the root that was just replaced. Returns the number of workspaces marked.
+func (h *Handler) sweepMissingWorkspaces(ctx context.Context, diskWorkspaces map[string]*agentworkspace.Workspace, opts workspaceReconcileOptions) (int, []string) {
 	sessionWorkspaces, listErr := h.store.ListWorkspaces(ctx)
 	if listErr != nil {
 		return 0, []string{"Failed to list workspaces for missing-folder sweep"}
@@ -540,22 +669,38 @@ func (h *Handler) sweepMissingWorkspaces(ctx context.Context, diskWorkspaces map
 		}
 
 		path, managed := h.syncManagedWorkspacePath(*sessionWS)
-		if !managed {
-			continue // legacy DB-only workspace; nothing on disk to compare
-		}
 
-		exists, statErr := workspaceFolderExists(path)
-		if statErr != nil {
-			continue // unreadable path: leave the workspace alone
-		}
-		if exists {
-			// The folder is still there but this ID is not in the disk cache:
-			// either the folder now belongs to a different workspace (deleted
-			// and recreated externally — mark the stale row missing), or it
-			// lives outside the workspaces root (located/imported — leave it).
-			diskID := h.workspaceIDOnDisk(path)
-			if diskID == "" || diskID == sessionWS.ID {
-				continue
+		// A live root switch is the one case where a folder that is still on
+		// disk must stop being listed: it belongs to the root the user just
+		// navigated away from. Nothing is deleted — the folder, the chat
+		// history, and the tasks all stay exactly as they are, and selecting
+		// that root again brings the workspace back.
+		leftBehind := leftBehindByRootSwitch(opts, *sessionWS)
+
+		switch {
+		case leftBehind:
+			if !managed {
+				// The row carries no directory reference to fall back on, but
+				// the switch knows precisely which folder it occupied.
+				path = opts.previousFolders[sessionWS.ID]
+			}
+		case !managed:
+			continue // legacy DB-only workspace; nothing on disk to compare
+		default:
+			exists, statErr := workspaceFolderExists(path)
+			if statErr != nil {
+				continue // unreadable path: leave the workspace alone
+			}
+			if exists {
+				// The folder is still there but this ID is not in the disk
+				// cache: either the folder now belongs to a different workspace
+				// (deleted and recreated externally — mark the stale row
+				// missing), or it lives outside the workspaces root
+				// (located/imported — leave it).
+				diskID := h.workspaceIDOnDisk(path)
+				if diskID == "" || diskID == sessionWS.ID {
+					continue
+				}
 			}
 		}
 
@@ -565,11 +710,18 @@ func (h *Handler) sweepMissingWorkspaces(ctx context.Context, diskWorkspaces map
 			warnings = append(warnings, fmt.Sprintf("Failed to mark %s as missing", sessionWS.Name))
 			continue
 		}
-		logger.Info("Workspace folder missing from disk; hiding workspace", logger.Fields{
-			"workspace_id": sessionWS.ID,
-			"name":         sessionWS.Name,
-			"path":         path,
-		})
+		if leftBehind {
+			logger.Info("Workspace belongs to the previous workspace directory; hiding workspace", logger.Fields{
+				"workspace_id": sessionWS.ID,
+				"name":         sessionWS.Name,
+			})
+		} else {
+			logger.Info("Workspace folder missing from disk; hiding workspace", logger.Fields{
+				"workspace_id": sessionWS.ID,
+				"name":         sessionWS.Name,
+				"path":         path,
+			})
+		}
 		orphaned++
 	}
 
@@ -631,6 +783,82 @@ func (h *Handler) ReconcileWorkspacesFromDisk(ctx context.Context) error {
 		})
 	}
 	return nil
+}
+
+// WorkspaceRootRefresh summarizes a live workspace-root application: what the
+// newly active root added, re-grouped, hid, or brought back into view.
+type WorkspaceRootRefresh struct {
+	Imported   int
+	Reparented int
+	Orphaned   int
+	Restored   int
+	Warnings   []string
+}
+
+// ApplyWorkspaceRoot re-points the live folder store at root and reconciles the
+// session store against it, producing the same visible workspace set a restart
+// against that root would produce. Nothing on disk is moved, copied, or deleted,
+// and no unrelated startup maintenance is replayed.
+//
+// The folder-store re-point and the reconcile are performed under the same
+// rescanMu the explicit Rescan endpoint uses, so the two can never interleave.
+// SetBasePath has already loaded the target root's cache, so the reconcile does
+// not walk the tree a second time.
+//
+// A build with no folder store reports an empty refresh rather than failing: the
+// directory is still persisted for the next start.
+func (h *Handler) ApplyWorkspaceRoot(ctx context.Context, root string) (refresh WorkspaceRootRefresh, err error) {
+	if h == nil || h.workspaceStore == nil {
+		return WorkspaceRootRefresh{Warnings: []string{}}, nil
+	}
+	if strings.TrimSpace(root) == "" {
+		return WorkspaceRootRefresh{}, fmt.Errorf("workspace directory is required")
+	}
+
+	h.rescanMu.Lock()
+	defer func() {
+		h.finishReconcileLocked(err)
+		h.rescanMu.Unlock()
+	}()
+
+	change, err := h.workspaceStore.SetBasePath(root)
+	if err != nil {
+		return WorkspaceRootRefresh{}, err
+	}
+
+	// SetBasePath has already loaded the target root's cache, so the reconcile
+	// must not walk it again. On a genuine change it also reports which folders
+	// the previous root held, which is how the sweep tells a workspace left
+	// behind by the switch from one that was explicitly imported from elsewhere.
+	opts := workspaceReconcileOptions{reload: false}
+	if change.Switched {
+		opts.previousRoot = change.PreviousRoot
+		opts.previousFolders = change.PreviousFolders
+	}
+
+	stats, warnings, err := h.reconcileWorkspacesFromDiskLocked(ctx, opts)
+	if err != nil {
+		return WorkspaceRootRefresh{}, err
+	}
+	if warnings == nil {
+		warnings = []string{}
+	}
+
+	logger.Info("Workspace directory applied without restart", logger.Fields{
+		"imported":   stats.Imported,
+		"reparented": stats.Reparented,
+		"orphaned":   stats.Orphaned,
+		"restored":   stats.Restored,
+		"warnings":   len(warnings),
+	})
+
+	return WorkspaceRootRefresh{
+		Imported:   stats.Imported,
+		Reparented: stats.Reparented,
+		Orphaned:   stats.Orphaned,
+		Restored:   stats.Restored,
+		Warnings:   warnings,
+	}, nil
 }
 
 func workspaceFolderExists(path string) (bool, error) {

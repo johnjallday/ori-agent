@@ -1061,8 +1061,258 @@ print(",".join(str(s.get("name","")) for s in (items or [])))')
   echo "--- Packaged independence smoke passed ---"
 }
 
+# ---------------------------------------------------------------------------
+# Issue #353 — live Workspace Directory refresh
+#
+#   ./scripts/smoke.sh rootswitch <base-url> <fixture-dir>
+#
+# Drives Manual Test Guide steps 1-8 against a running isolated demo server.
+# <fixture-dir> must be a disposable directory inside the demo sandbox; two
+# roots are created under it and are the only paths this check ever writes to.
+# ---------------------------------------------------------------------------
+
+# seed_workspace_folder writes a workspace folder straight onto disk, the way a
+# workspace directory carried from another machine already looks before Ori has
+# ever been pointed at it. Nothing here goes through the app.
+seed_workspace_folder() {
+  local parent="$1" id="$2" name="$3" slug="$4" kind="${5:-}"
+  mkdir -p "$parent/$slug/files" "$parent/$slug/notes"
+  chmod 0750 "$parent/$slug"
+  ID="$id" NAME="$name" SLUG="$slug" KIND="$kind" python3 -c '
+import json, os, datetime
+now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+ws = {
+    "id": os.environ["ID"],
+    "name": os.environ["NAME"],
+    "folder_slug": os.environ["SLUG"],
+    "status": "active",
+    "created_at": now,
+    "updated_at": now,
+    "shared_data": {},
+    "messages": [],
+    "tasks": [],
+}
+if os.environ.get("KIND"):
+    ws["kind"] = os.environ["KIND"]
+print(json.dumps(ws, indent=2))' >"$parent/$slug/workspace.json"
+  chmod 0600 "$parent/$slug/workspace.json"
+}
+
+# set_workspace_root POSTs a directory and echoes the whole response.
+set_workspace_root() {
+  curl -s -X POST "$BASE_URL/api/settings/workspace-root" \
+    -H 'Content-Type: application/json' \
+    -d "$(ROOT="$1" python3 -c 'import json,os;print(json.dumps({"workspace_root":os.environ["ROOT"]}))')"
+}
+
+# workspace_names lists the names the app currently shows, one entry per listed
+# workspace. The endpoint repeats the same set under a legacy "folders" key, so
+# only one array is read — otherwise every workspace would look duplicated.
+workspace_names() {
+  curl -s "$BASE_URL/api/workspaces" | python3 -c 'import sys,json
+d = json.load(sys.stdin)
+items = d.get("workspaces")
+if items is None:
+    items = d.get("folders") or []
+print(",".join(sorted(str(w.get("name","")) for w in items)))'
+}
+
+# expect_listed_once guards against a root switch duplicating a workspace row.
+expect_listed_once() {
+  local names count
+  names=$(workspace_names)
+  count=$(NAMES="$names" WANT="$1" python3 -c 'import os
+print(os.environ["NAMES"].split(",").count(os.environ["WANT"]))')
+  [[ "$count" == "1" ]] || fail "expected \"$1\" listed exactly once, got $count (listing: $names)"
+  echo "ok   \"$1\" is listed exactly once"
+}
+
+expect_visible() {
+  local names
+  names=$(workspace_names)
+  case ",$names," in
+  *",$1,"*) echo "ok   \"$1\" is visible" ;;
+  *) fail "expected \"$1\" to be visible, listing was: $names" ;;
+  esac
+}
+
+expect_hidden() {
+  local names
+  names=$(workspace_names)
+  case ",$names," in
+  *",$1,"*) fail "expected \"$1\" to be hidden, listing was: $names" ;;
+  *) echo "ok   \"$1\" is hidden" ;;
+  esac
+}
+
+smoke_rootswitch() {
+  local fixtures="$1"
+  [[ -n "$fixtures" ]] || fail "usage: smoke.sh rootswitch <base-url> <fixture-dir>"
+
+  # Every identity carries a run tag so the check is rerunnable against a
+  # sandbox that already holds an earlier run's workspaces.
+  local run="${SMOKE_RUN:-$(date +%H%M%S)-$$}"
+  local root_a="$fixtures/root-a-$run" root_b="$fixtures/root-b-$run"
+  mkdir -p "$root_a" "$root_b"
+  chmod 0750 "$root_a" "$root_b"
+
+  local a_name="A Only $run" b_name="B Only $run" g_name="B Group $run" c_name="B Child $run"
+
+  echo "--- Step 1: establish Root A ---"
+  local resp
+  resp=$(set_workspace_root "$root_a")
+  [[ "$(echo "$resp" | json_field success)" == "True" ]] || fail "saving Root A failed: $resp"
+  echo "ok   Root A saved (refresh: $(echo "$resp" | json_field refresh.imported) imported)"
+
+  local a_only
+  a_only=$(curl -s -X POST "$BASE_URL/api/workspaces" \
+    -H 'Content-Type: application/json' \
+    -d "$(NAME="$a_name" python3 -c 'import json,os;print(json.dumps({"name":os.environ["NAME"]}))')" | workspace_id)
+  [[ -n "$a_only" ]] || fail "could not create \"$a_name\" under Root A"
+  expect_visible "$a_name"
+
+  echo "--- Step 2: Root B is pre-populated on disk, then made live ---"
+  seed_workspace_folder "$root_b" "smoke-353-b-only-$run" "$b_name" "b-only"
+  seed_workspace_folder "$root_b" "smoke-353-b-group-$run" "$g_name" "b-group" "group"
+  seed_workspace_folder "$root_b/b-group/sub-workspaces" "smoke-353-b-child-$run" "$c_name" "b-child"
+
+  # Snapshot both trees: a root switch must never move, copy, rewrite, or
+  # delete a workspace folder under either root.
+  local digest_a_before digest_b_before
+  digest_a_before=$(tree_digest "$root_a")
+  digest_b_before=$(tree_digest "$root_b")
+
+  resp=$(set_workspace_root "$root_b")
+  [[ "$(echo "$resp" | json_field success)" == "True" ]] || fail "saving Root B failed: $resp"
+  local imported
+  imported=$(echo "$resp" | json_field refresh.imported)
+  [[ "$imported" == "3" ]] || fail "refresh.imported = $imported, want 3 (response: $resp)"
+  echo "ok   Root B applied live: imported=$imported hidden=$(echo "$resp" | json_field refresh.orphaned)"
+
+  # No restart, no manual Rescan: the pre-existing folders are simply there.
+  expect_listed_once "$b_name"
+  expect_listed_once "$g_name"
+  expect_listed_once "$c_name"
+  expect_hidden "$a_name"
+
+  echo "--- Step 3: switch back to Root A ---"
+  resp=$(set_workspace_root "$root_a")
+  local restored hidden
+  restored=$(echo "$resp" | json_field refresh.restored)
+  hidden=$(echo "$resp" | json_field refresh.orphaned)
+  [[ "$restored" == "1" ]] || fail "refresh.restored = $restored, want 1 (response: $resp)"
+  [[ "$hidden" == "3" ]] || fail "refresh.orphaned = $hidden, want 3 (response: $resp)"
+  expect_listed_once "$a_name"
+  expect_hidden "$b_name"
+  echo "ok   switching back restored=$restored hidden=$hidden"
+
+  echo "--- Step 4: switch to Root B again ---"
+  resp=$(set_workspace_root "$root_b")
+  restored=$(echo "$resp" | json_field refresh.restored)
+  [[ "$restored" == "3" ]] || fail "refresh.restored = $restored, want 3 (response: $resp)"
+  expect_listed_once "$b_name"
+  expect_listed_once "$c_name"
+  expect_hidden "$a_name"
+
+  echo "--- Step 5: same-root save discovers an out-of-band folder ---"
+  seed_workspace_folder "$root_b" "smoke-353-b-extra-$run" "B Extra $run" "b-extra"
+  resp=$(set_workspace_root "$root_b")
+  imported=$(echo "$resp" | json_field refresh.imported)
+  [[ "$imported" == "1" ]] || fail "same-root save imported = $imported, want 1 (response: $resp)"
+  expect_listed_once "B Extra $run"
+  # ...and exactly once: saving the same root again adds nothing.
+  resp=$(set_workspace_root "$root_b")
+  imported=$(echo "$resp" | json_field refresh.imported)
+  [[ "$imported" == "0" ]] || fail "repeat save imported = $imported, want 0 (response: $resp)"
+  echo "ok   out-of-band folder discovered exactly once"
+
+  # The ordinary Rescan button still works and still honors its own cooldown.
+  local rescan
+  rescan=$(curl -s -X POST "$BASE_URL/api/workspaces/rescan")
+  [[ "$(echo "$rescan" | json_field success)" == "True" ]] || fail "explicit rescan failed: $rescan"
+  rescan=$(curl -s -X POST "$BASE_URL/api/workspaces/rescan?background=1")
+  [[ "$(echo "$rescan" | json_field skipped)" == "True" ]] ||
+    fail "background rescan should be skipped inside the cooldown: $rescan"
+  echo "ok   explicit Rescan unchanged, background cooldown intact"
+
+  echo "--- Step 6: an explicit folder import outside both roots is unaffected ---"
+  # A plain project directory (no workspace.json) is linked where it lives and
+  # carries shared_data.folder_import. Its visibility belongs to the import
+  # flow, not to whichever directory happens to be active.
+  #
+  # Importing an *exported workspace* folder — one that does contain a
+  # workspace.json — is a different, unchanged flow: it copies the folder into
+  # the active root, so it legitimately becomes a workspace of that root.
+  local ext="$fixtures/external-$run/linked-project"
+  mkdir -p "$ext"
+  chmod 0750 "$ext"
+  : >"$ext/README.md"
+  local import_resp
+  import_resp=$(curl -s -X POST "$BASE_URL/api/workspaces/import" \
+    -H 'Content-Type: application/json' \
+    -d "$(P="$ext" N="External $run" python3 -c 'import json,os;print(json.dumps({"path":os.environ["P"],"name":os.environ["N"]}))')")
+  [[ "$(echo "$import_resp" | json_field success)" == "True" ]] || fail "folder import failed: $import_resp"
+  expect_listed_once "External $run"
+  set_workspace_root "$root_a" >/dev/null
+  expect_listed_once "External $run"
+  set_workspace_root "$root_b" >/dev/null
+  expect_listed_once "External $run"
+  [[ -f "$ext/README.md" ]] || fail "the linked folder was moved off its original path"
+  [[ ! -d "$root_b/linked-project" ]] || fail "the linked folder was copied into the active root"
+  echo "ok   linked folder import survived A->B->A in place"
+
+  echo "--- Step 7: clearing the custom directory applies the default root ---"
+  resp=$(set_workspace_root "")
+  [[ "$(echo "$resp" | json_field success)" == "True" ]] || fail "clearing the directory failed: $resp"
+  local effective
+  effective=$(echo "$resp" | json_field effective_workspace_root)
+  [[ -n "$effective" ]] || fail "cleared save reported no effective root: $resp"
+  [[ "$effective" != "$root_b" ]] || fail "clearing left the custom root active: $resp"
+  expect_hidden "$b_name"
+  echo "ok   cleared to the effective default root: $effective"
+
+  echo "--- Step 8: an invalid directory is refused and the live root survives ---"
+  set_workspace_root "$root_b" >/dev/null
+  local blocker="$fixtures/not-a-directory-$run"
+  : >"$blocker"
+  local status
+  status=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE_URL/api/settings/workspace-root" \
+    -H 'Content-Type: application/json' \
+    -d "$(ROOT="$blocker" python3 -c 'import json,os;print(json.dumps({"workspace_root":os.environ["ROOT"]}))')")
+  [[ "$status" != "200" ]] || fail "a file was accepted as a workspace directory"
+  expect_listed_once "$b_name"
+  echo "ok   invalid directory refused (HTTP $status), Root B still live"
+
+  echo "--- Step 9: disk integrity ---"
+  # Root A must be byte-identical: nothing under it was read, rewritten, or
+  # removed by any of the switches. Root B legitimately gained the out-of-band
+  # folder seeded in step 5, so it is compared against that expectation.
+  [[ "$(tree_digest "$root_a")" == "$digest_a_before" ]] ||
+    fail "Root A changed on disk across the switches"
+  echo "ok   Root A is byte-identical after every switch"
+  local added
+  added=$(comm -13 <(echo "$digest_b_before" | awk '{print $2}' | sort) \
+    <(tree_digest "$root_b" | awk '{print $2}' | sort) | tr '\n' ' ')
+  case "$added" in
+  *b-extra*) echo "ok   Root B gained only the folder seeded in step 5: $added" ;;
+  "") echo "ok   Root B is unchanged on disk" ;;
+  *) fail "Root B gained unexpected files: $added" ;;
+  esac
+
+  echo "--- Root switch smoke passed (run tag: $run) ---"
+}
+
+# tree_digest prints a stable checksum per file under a root, so before/after
+# comparison proves a root switch moved, copied, rewrote, or deleted nothing.
+# The store-owned index cache is excluded: its bytes change on every open.
+tree_digest() {
+  (cd "$1" && find . -type f ! -name 'index.db*' -print0 | sort -z |
+    xargs -0 shasum 2>/dev/null | sed "s|  \./|  |")
+}
+
 case "${1:-}" in
 seed) seed_demo ;;
+rootswitch) smoke_rootswitch "${3:-}" ;;
 slot) smoke_slot "${3:-}" ;;
 reconcile) smoke_reconcile "${3:-}" ;;
 policy) smoke_policy "${3:-}" ;;

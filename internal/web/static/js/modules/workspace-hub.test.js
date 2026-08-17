@@ -30,6 +30,9 @@ function createClassList() {
 
 function createElement(id = '') {
   const attributes = new Map();
+  // Listeners are recorded so a test can drive a real control (the workspace
+  // directory editor's Save/Reset buttons) instead of calling internals.
+  const listeners = new Map();
   return {
     id,
     classList: createClassList(),
@@ -40,9 +43,16 @@ function createElement(id = '') {
     style: {},
     textContent: '',
     value: '',
-    addEventListener: () => {},
+    listeners,
+    dispatch: (type, event = {}) => {
+      const handler = listeners.get(type);
+      if (!handler) throw new Error(`no ${type} listener registered on #${id}`);
+      return handler(event);
+    },
+    addEventListener: (type, handler) => listeners.set(type, handler),
     blur: () => {},
     focus: () => {},
+    select: () => {},
     querySelector: () => null,
     querySelectorAll: () => [],
     removeAttribute: name => attributes.delete(name),
@@ -172,6 +182,27 @@ function loadWorkspaceHub(overrides = {}) {
   const workspaceTags = createElement('hubWorkspaceTags');
   const mapMounts = [];
 
+  // Workspace Directory editor controls (Issue #353). Registered for every
+  // load so the launcher's root editor behaves the way the real page does.
+  const workspaceRootElements = {};
+  for (const id of [
+    'launcherWorkspaceRootPath',
+    'launcherWorkspaceRootSummary',
+    'launcherWorkspaceRootMeta',
+    'launcherWorkspaceRootBadge',
+    'launcherWorkspaceRootEditBtn',
+    'launcherWorkspaceRootEditor',
+    'launcherWorkspaceRootInput',
+    'launcherWorkspaceRootBrowseBtn',
+    'launcherWorkspaceRootSaveBtn',
+    'launcherWorkspaceRootResetBtn',
+    'launcherWorkspaceRootCancelBtn'
+  ]) {
+    const element = createElement(id);
+    workspaceRootElements[id] = element;
+    elements.set(id, element);
+  }
+
   if (!overrides.omitHubEl) elements.set('workspaceHub', hubEl);
   elements.set('launcherGrid', launcherGrid);
   elements.set('launcherEmptyState', launcherEmpty);
@@ -195,10 +226,15 @@ function loadWorkspaceHub(overrides = {}) {
 
   const storage = new Map(Object.entries(overrides.localStorage || {}));
   const sessionStorageMap = new Map();
+  const toasts = [];
   const window = {
     CSS: { escape: value => String(value).replace(/"/g, '\\"') },
     EventBus: overrides.EventBus || null,
-    Toast: { error: () => {}, success: () => {} },
+    Toast: {
+      error: message => toasts.push({ level: 'error', message }),
+      success: message => toasts.push({ level: 'success', message }),
+      warning: message => toasts.push({ level: 'warning', message })
+    },
     WorkspaceHubFiles: {
       bindFileUploadEvents: () => {},
       clearFileAttachmentState: () => {},
@@ -289,6 +325,9 @@ function loadWorkspaceHub(overrides = {}) {
   };
 
   const context = {
+    // The workspace-root read is time-boxed with an AbortController, so the
+    // context needs one for the directory editor to load at all.
+    AbortController,
     bootstrap: {},
     clearTimeout,
     console: overrides.console || console,
@@ -324,7 +363,9 @@ function loadWorkspaceHub(overrides = {}) {
     documentListeners,
     state,
     storage,
+    toasts,
     window,
+    workspaceRootElements,
     workspaceTags
   };
 }
@@ -1240,4 +1281,256 @@ test('launcher tree root drop target moves workspace to top level', async () => 
 
   const movedWorkspace = patches.find(patch => patch.url.endsWith('/api/workspaces/workspace-1'));
   assert.equal(movedWorkspace.body.parent_id, '');
+});
+
+// --- Workspace Directory editor (Issue #353) --------------------------------
+
+// loadWorkspaceRootEditor wires the launcher with a scripted workspace-root
+// endpoint so a Save/Reset click can be driven end to end and every request the
+// module makes is recorded in order.
+async function loadWorkspaceRootEditor({
+  configuredRoot = '/roots/current',
+  refresh = {},
+  savePostOk = true,
+  listOk = true
+} = {}) {
+  const requests = [];
+  const harness = loadWorkspaceHub({
+    state: { workspaces: [] },
+    fetch: async (url, options = {}) => {
+      const method = options.method || 'GET';
+      const target = String(url);
+      requests.push({ method, url: target, body: options.body ? JSON.parse(options.body) : null });
+
+      if (target.includes('/api/settings/workspace-root')) {
+        if (method === 'POST') {
+          if (!savePostOk) {
+            return { ok: false, text: async () => 'workspace directory is not a directory' };
+          }
+          return {
+            ok: true,
+            json: async () => ({
+              success: true,
+              workspace_root: JSON.parse(options.body).workspace_root,
+              effective_workspace_root: JSON.parse(options.body).workspace_root || '/roots/default',
+              source: JSON.parse(options.body).workspace_root ? 'settings' : 'default',
+              confirmed: true,
+              refresh
+            })
+          };
+        }
+        return {
+          ok: true,
+          json: async () => ({
+            workspace_root: configuredRoot,
+            effective_workspace_root: configuredRoot,
+            default_workspace_root: '/roots/default',
+            source: 'settings',
+            confirmed: true
+          })
+        };
+      }
+
+      if (target.includes('/api/workspaces?tree=true')) {
+        if (!listOk) return { ok: false, text: async () => 'boom' };
+        return { ok: true, json: async () => ({ folders: [] }) };
+      }
+
+      return { ok: true, json: async () => ({}), text: async () => '' };
+    }
+  });
+
+  harness.helpers.bindLauncherInteractions();
+  // The module reads the current directory on load; let that settle so a test
+  // drives the editor from the same state a user would see.
+  await settle();
+  requests.length = 0;
+
+  // Open the editor the way the user does, so the draft is treated as theirs
+  // and is not overwritten by a background directory read.
+  const openEditor = () =>
+    harness.workspaceRootElements.launcherWorkspaceRootEditBtn.dispatch('click');
+
+  return { ...harness, requests, openEditor };
+}
+
+const settle = () => new Promise(resolve => setTimeout(resolve, 20));
+
+test('describeWorkspaceRootRefresh reports each outcome without the Rescan missing-folder wording', () => {
+  const { helpers } = loadWorkspaceHub();
+  const describe = helpers.describeWorkspaceRootRefresh;
+
+  const unchanged = describe({ imported: 0, warnings: [] }, 'Workspace directory saved.');
+  assert.equal(unchanged.message, 'Workspace directory saved. Your workspace list is unchanged.');
+  assert.equal(unchanged.level, 'success');
+
+  const changed = describe(
+    { imported: 2, restored: 1, orphaned: 3, reparented: 1, warnings: [] },
+    'Workspace directory saved.'
+  );
+  assert.match(changed.message, /2 workspaces added/);
+  assert.match(changed.message, /1 workspace restored/);
+  assert.match(changed.message, /3 workspaces hidden/);
+  assert.match(changed.message, /1 workspace re-grouped/);
+  assert.match(changed.message, /Hidden workspaces stay on disk and return if you switch back\./);
+  // Those folders are still exactly where they were, so the Rescan phrasing
+  // for a genuinely vanished folder must not be reused here.
+  assert.doesNotMatch(changed.message, /missing on disk/i);
+
+  const warned = describe(
+    { imported: 1, warnings: ['Failed to import Notes'] },
+    'Workspace directory saved.'
+  );
+  assert.equal(warned.level, 'warning');
+  assert.match(warned.message, /1 warning: Failed to import Notes/);
+
+  // A response from an older server with no refresh block still reads cleanly.
+  assert.equal(
+    describe(undefined, 'Custom workspace directory cleared.').message,
+    'Custom workspace directory cleared. Your workspace list is unchanged.'
+  );
+});
+
+test('saving the workspace directory posts once, reloads the list, and never calls rescan', async () => {
+  const { workspaceRootElements, requests, toasts, openEditor } = await loadWorkspaceRootEditor({
+    refresh: { imported: 2, orphaned: 1, warnings: [] }
+  });
+
+  openEditor();
+  workspaceRootElements.launcherWorkspaceRootInput.value = '  /roots/next  ';
+  await workspaceRootElements.launcherWorkspaceRootSaveBtn.dispatch('click');
+  await settle();
+
+  const posts = requests.filter(
+    request => request.method === 'POST' && request.url.includes('/api/settings/workspace-root')
+  );
+  assert.equal(posts.length, 1, 'the directory must be saved exactly once');
+  assert.equal(posts[0].body.workspace_root, '/roots/next', 'the draft is trimmed before saving');
+
+  const postIndex = requests.indexOf(posts[0]);
+  const reload = requests
+    .slice(postIndex + 1)
+    .find(request => request.url.includes('/api/workspaces?tree=true'));
+  assert.ok(reload, 'the workspace list must be reloaded after the save');
+
+  // The POST already applied and reconciled the directory server-side.
+  assert.equal(
+    requests.filter(request => request.url.includes('/api/workspaces/rescan')).length,
+    0,
+    'a redundant rescan must not be issued'
+  );
+
+  assert.equal(workspaceRootElements.launcherWorkspaceRootEditor.hidden, true, 'editor closes');
+  assert.deepEqual(toasts.at(-1), {
+    level: 'success',
+    message:
+      'Workspace directory saved. 2 workspaces added, 1 workspace hidden. ' +
+      'Hidden workspaces stay on disk and return if you switch back.'
+  });
+});
+
+test('a workspace directory refresh with warnings is reported as a warning, not a clean success', async () => {
+  const { workspaceRootElements, toasts, openEditor } = await loadWorkspaceRootEditor({
+    refresh: { imported: 1, warnings: ['Failed to import Notes'] }
+  });
+
+  openEditor();
+  workspaceRootElements.launcherWorkspaceRootInput.value = '/roots/next';
+  await workspaceRootElements.launcherWorkspaceRootSaveBtn.dispatch('click');
+  await settle();
+
+  assert.equal(toasts.at(-1).level, 'warning');
+  assert.match(toasts.at(-1).message, /1 warning: Failed to import Notes/);
+});
+
+test('clearing the workspace directory reloads the list and summarizes the refresh', async () => {
+  const { workspaceRootElements, requests, toasts, openEditor } = await loadWorkspaceRootEditor({
+    refresh: { restored: 2, orphaned: 1, warnings: [] }
+  });
+
+  openEditor();
+  await workspaceRootElements.launcherWorkspaceRootResetBtn.dispatch('click');
+  await settle();
+
+  const posts = requests.filter(
+    request => request.method === 'POST' && request.url.includes('/api/settings/workspace-root')
+  );
+  assert.equal(posts.length, 1);
+  assert.equal(posts[0].body.workspace_root, '', 'clearing sends an empty directory');
+  assert.ok(
+    requests
+      .slice(requests.indexOf(posts[0]) + 1)
+      .some(request => request.url.includes('/api/workspaces?tree=true')),
+    'the workspace list must be reloaded after clearing'
+  );
+  assert.equal(
+    requests.filter(request => request.url.includes('/api/workspaces/rescan')).length,
+    0
+  );
+  assert.equal(toasts.at(-1).level, 'success');
+  assert.match(toasts.at(-1).message, /Custom workspace directory cleared\. 2 workspaces restored/);
+});
+
+test('a failed workspace directory save keeps the editor open and reports no success', async () => {
+  const { workspaceRootElements, requests, toasts, openEditor } = await loadWorkspaceRootEditor({
+    savePostOk: false
+  });
+
+  openEditor();
+  workspaceRootElements.launcherWorkspaceRootInput.value = '/roots/not-a-directory';
+  await workspaceRootElements.launcherWorkspaceRootSaveBtn.dispatch('click');
+  await settle();
+
+  assert.equal(
+    workspaceRootElements.launcherWorkspaceRootEditor.hidden,
+    false,
+    'the editor must stay open so the path can be corrected'
+  );
+  assert.equal(
+    workspaceRootElements.launcherWorkspaceRootInput.value,
+    '/roots/not-a-directory',
+    'the draft must be preserved'
+  );
+  assert.equal(toasts.at(-1).level, 'error');
+  assert.match(toasts.at(-1).message, /Failed to save workspace directory/);
+  assert.ok(
+    !toasts.some(toast => toast.level === 'success'),
+    'a failed save must never report success'
+  );
+
+  // A save that never applied must not claim to have reloaded anything.
+  const posts = requests.filter(
+    request => request.method === 'POST' && request.url.includes('/api/settings/workspace-root')
+  );
+  assert.equal(
+    requests
+      .slice(requests.indexOf(posts[0]) + 1)
+      .filter(request => request.url.includes('/api/workspaces?tree=true')).length,
+    0,
+    'no list reload after a failed save'
+  );
+});
+
+test('a failed list refresh after a successful save stays recoverable', async () => {
+  const { workspaceRootElements, toasts, openEditor } = await loadWorkspaceRootEditor({
+    listOk: false,
+    refresh: { imported: 1, warnings: [] }
+  });
+
+  openEditor();
+  workspaceRootElements.launcherWorkspaceRootInput.value = '/roots/next';
+  await workspaceRootElements.launcherWorkspaceRootSaveBtn.dispatch('click');
+  await settle();
+
+  assert.equal(
+    workspaceRootElements.launcherWorkspaceRootEditor.hidden,
+    false,
+    'the editor stays open so the user has somewhere to retry from'
+  );
+  assert.equal(toasts.at(-1).level, 'error');
+  assert.match(toasts.at(-1).message, /could not be reloaded/);
+  assert.ok(
+    !toasts.some(toast => toast.level === 'success'),
+    'a list that never refreshed must not be reported as a completed refresh'
+  );
 });
