@@ -62,6 +62,10 @@ const (
 	// blueprint's prerequisites currently hold. It carries no reference of its
 	// own; the named Setup Wizard adapter owns the question.
 	SetupStepKindReadiness = "readiness"
+	// SetupStepKindRuntimeMode presents the operating modes from the persisted
+	// runtime contract and records the user's authoritative choice through the
+	// runtime service, not through inferred setup progress.
+	SetupStepKindRuntimeMode = "runtime_mode"
 	// SetupStepKindRuntimeReadiness evaluates one abstract runtime requirement
 	// from the same blueprint's persisted runtime contract. The requirement owns
 	// the compiled runtime adapter key; this step cannot redirect it.
@@ -124,6 +128,7 @@ var setupStepKindSpecs = []SetupStepKindSpec{
 	{Kind: SetupStepKindAccountLink, ReferenceScope: SetupStepReferenceCapability, RequiresReference: true, RequiresAdapter: true},
 	{Kind: SetupStepKindPluginReadiness, ReferenceScope: SetupStepReferencePlugin, RequiresReference: true, RequiresAdapter: true},
 	{Kind: SetupStepKindReadiness, ReferenceScope: SetupStepReferenceNone, RequiresAdapter: true},
+	{Kind: SetupStepKindRuntimeMode, ReferenceScope: SetupStepReferenceNone},
 	{Kind: SetupStepKindRuntimeReadiness, ReferenceScope: SetupStepReferenceRuntimeRequirement, RequiresReference: true},
 	{Kind: SetupStepKindSummary, ReferenceScope: SetupStepReferenceNone},
 }

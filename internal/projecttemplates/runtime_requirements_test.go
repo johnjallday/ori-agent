@@ -365,6 +365,34 @@ func TestNewTemplate_RuntimeRequirementTextIsBoundedAndRemainsText(t *testing.T)
 	}
 }
 
+func TestNewTemplate_RuntimeStarterTaskReferencesFailClosedWithoutADeclaration(t *testing.T) {
+	invalid := loadTemplateWithManifest(t, `{
+		"name":"Invalid Runtime Task",
+		"agents":[{"name":"Lead"}],
+		"starter_tasks":[{"description":"Control REAPER","requires":["reaper_live_control"]}]
+	}`)
+	if !invalid.HasInvalidRuntimeRequirements() || invalid.RuntimeRequirements != nil || !strings.Contains(invalid.RuntimeRequirementsError, "declares no runtime_requirements") {
+		t.Fatalf("undeclared runtime task reference did not fail closed: %+v / %q", invalid.RuntimeRequirements, invalid.RuntimeRequirementsError)
+	}
+
+	valid := loadTemplateWithManifest(t, `{
+		"name":"Valid Runtime Task",
+		"agents":[{"name":"Lead"}],
+		"starter_tasks":[
+			{"description":"Control REAPER","requires":["reaper_live_control"]},
+			{"description":"Plan arrangement","requires":["planning"]}
+		],
+		"runtime_requirements":{
+			"schema_version":1,
+			"operating_modes":[{"id":"assisted","label":"Assisted","description":"Use live control.","requires":["reaper_live_control"]}],
+			"requirements":[{"key":"reaper_live_control","label":"REAPER","description":"Configure it.","adapter":"reaper_live_control"}]
+		}
+	}`)
+	if valid.RuntimeRequirementsError != "" || !valid.HasRuntimeRequirements() || len(valid.StarterTasks) != 2 {
+		t.Fatalf("declared runtime task reference was rejected: %+v / %q", valid.RuntimeRequirements, valid.RuntimeRequirementsError)
+	}
+}
+
 func TestUpdateManifest_RuntimeRequirementsRoundTripAndTriState(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "demo", ManifestFileName), `{"name":"Demo","agents":[{"name":"Lead"}],"custom_key":"kept"}`)
@@ -409,6 +437,25 @@ func TestUpdateManifest_RuntimeRequirementsRoundTripAndTriState(t *testing.T) {
 	}
 	if cleared.RuntimeRequirements != nil || cleared.HasRuntimeRequirements() {
 		t.Fatalf("runtime contract was not cleared: %+v", cleared.RuntimeRequirements)
+	}
+}
+
+func TestUpdateManifest_RuntimeTaskReferenceNeverPartiallySaves(t *testing.T) {
+	dir := t.TempDir()
+	manifestPath := filepath.Join(dir, "demo", ManifestFileName)
+	original := `{"name":"Demo","agents":[{"name":"Lead"}]}`
+	writeFile(t, manifestPath, original)
+	tasks := []StarterTask{{Description: "Control REAPER", Requires: []string{"reaper_live_control"}}}
+	_, err := UpdateManifest(dir, "demo", "Changed", "", nil, &ManifestEdit{StarterTasks: &tasks})
+	if !errors.Is(err, ErrInvalidRuntimeRequirements) {
+		t.Fatalf("undeclared runtime task save error = %v", err)
+	}
+	after, readErr := os.ReadFile(manifestPath)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if string(after) != original {
+		t.Fatalf("rejected runtime task edit changed template.json: %s", after)
 	}
 }
 

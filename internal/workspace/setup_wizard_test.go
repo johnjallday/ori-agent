@@ -17,6 +17,7 @@ func TestValidSetupStepKinds_IsTheVersion1Allowlist(t *testing.T) {
 		"account_link",
 		"plugin_readiness",
 		"readiness",
+		"runtime_mode",
 		"runtime_readiness",
 		"summary",
 	}
@@ -70,6 +71,7 @@ func TestSetupStepKindSpecs_ReferenceAndAdapterRules(t *testing.T) {
 		{SetupStepKindAccountLink, SetupStepReferenceCapability, true, true},
 		{SetupStepKindPluginReadiness, SetupStepReferencePlugin, true, true},
 		{SetupStepKindReadiness, SetupStepReferenceNone, false, true},
+		{SetupStepKindRuntimeMode, SetupStepReferenceNone, false, false},
 		{SetupStepKindRuntimeReadiness, SetupStepReferenceRuntimeRequirement, true, false},
 		{SetupStepKindSummary, SetupStepReferenceNone, false, false},
 	}
@@ -138,7 +140,7 @@ func TestSetupWizardStep_ReferenceRefusesToGuess(t *testing.T) {
 		t.Fatal("an unknown kind must resolve no reference")
 	}
 	// Kinds that take no reference ignore a stray key.
-	for _, kind := range []string{SetupStepKindReadiness, SetupStepKindSummary} {
+	for _, kind := range []string{SetupStepKindReadiness, SetupStepKindRuntimeMode, SetupStepKindSummary} {
 		if _, ok := (SetupWizardStep{Kind: kind, RequirementKey: "downloads-root"}).Reference(); ok {
 			t.Fatalf("kind %q must resolve no reference", kind)
 		}

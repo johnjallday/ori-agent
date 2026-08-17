@@ -353,6 +353,9 @@ func validateSetupStepDecl(id string, step setupWizardStepDecl, scope setupWizar
 	if spec.ReferenceScope == workspace.SetupStepReferenceRuntimeRequirement && adapter != "" {
 		return fmt.Errorf("%w: step %q of kind %q takes no adapter; its runtime requirement owns the compiled adapter key", ErrInvalidSetupWizard, id, spec.Kind)
 	}
+	if spec.Kind == workspace.SetupStepKindRuntimeMode && adapter != "" {
+		return fmt.Errorf("%w: step %q of kind %q takes no adapter; the runtime service owns mode selection", ErrInvalidSetupWizard, id, spec.Kind)
+	}
 	if adapter == "" {
 		if spec.RequiresAdapter {
 			return fmt.Errorf("%w: step %q of kind %q must name a registered adapter", ErrInvalidSetupWizard, id, spec.Kind)

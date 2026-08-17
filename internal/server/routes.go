@@ -46,6 +46,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	registerDownloadsJanitorRoutes(mux, s)
 	registerWorkspaceCapabilityRoutes(mux, s)
 	registerWorkspaceMapRoutes(mux, s)
+	registerRuntimeCapabilityRoutes(mux, s)
 	registerSetupWizardRoutes(mux, s)
 	registerExternalAgentRoutes(mux, s)
 	registerSkillsRoutes(mux, s)
@@ -1059,6 +1060,15 @@ func registerWorkspaceMapRoutes(mux *http.ServeMux, s *Server) {
 	// Workspace Map Layout Endpoints (current user)
 	// =============================================================================
 	s.Handlers.WorkspaceMap.Register(mux)
+}
+
+// registerRuntimeCapabilityRoutes registers the one generalized operating-mode,
+// status, action, verification, and grant-delegation surface.
+func registerRuntimeCapabilityRoutes(mux *http.ServeMux, s *Server) {
+	if s.Handlers.RuntimeCapabilities == nil {
+		return
+	}
+	s.Handlers.RuntimeCapabilities.Register(mux)
 }
 
 // registerSetupWizardRoutes registers the workspace-scoped blueprint Setup

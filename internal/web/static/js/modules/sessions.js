@@ -5121,6 +5121,8 @@ const sessionManager = {
         return 'Prepare a plugin';
       case 'readiness':
         return 'Readiness check';
+      case 'runtime_mode':
+        return 'Choose an operating mode';
       case 'runtime_readiness':
         return 'Check a runtime requirement';
       case 'summary':

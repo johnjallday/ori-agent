@@ -244,37 +244,38 @@ func vaultRepairLabel(outcome connections.VaultOutcome) string {
 	}
 }
 
-// CheckTaskCapabilities implements workspace.TaskCapabilityGate: it stops a task
-// whose declared capabilities are not connected BEFORE a run starts, so a
-// mail-dependent task never burns a model call on work it cannot do (FR 34, 35).
-//
-// A task declaring no capabilities is never gated, which is every task that
-// existed before this feature.
-func (e *emailReadinessEvaluator) CheckTaskCapabilities(workspaceID string, capabilities []string) *workspace.TaskBlockedError {
-	if e == nil {
-		return nil
+// EvaluateTaskCapability claims only the existing abstract email key. Ordinary
+// toolbox/planning keys remain unclaimed, while the composite gate can register
+// other runtime evaluators without adding domain conditionals here.
+func (e *emailReadinessEvaluator) EvaluateTaskCapability(workspaceID, capability string) (bool, *workspace.TaskBlockedError) {
+	if e == nil || strings.ToLower(strings.TrimSpace(capability)) != workspace.CapabilityEmail {
+		return false, nil
 	}
+	readiness := e.Evaluate(context.Background(), workspaceID)
+	if readiness.Ready {
+		return true, nil
+	}
+	return true, &workspace.TaskBlockedError{
+		ReasonCode:       readiness.Reason,
+		Reason:           readiness.Message,
+		Question:         readiness.Message,
+		SuggestedActions: emailRepairActions(readiness),
+		Repair: &workspace.TaskRepairAction{
+			Code:  readiness.Action,
+			Label: readiness.ActionLabel,
+			URL:   readiness.ActionURL,
+		},
+	}
+}
+
+// CheckTaskCapabilities retains the legacy direct-gate surface for callers and
+// tests outside server wiring. Production registers this evaluator behind the
+// composite; behavior and reason/action codes are identical.
+func (e *emailReadinessEvaluator) CheckTaskCapabilities(workspaceID string, capabilities []string) *workspace.TaskBlockedError {
 	for _, key := range workspace.NormalizeCapabilityKeys(capabilities) {
-		if key != workspace.CapabilityEmail {
-			// Unknown capability keys are not this gate's business; a future gate
-			// can claim them. Silently allowing is correct here because the key
-			// carries no meaning this build can act on.
-			continue
-		}
-		readiness := e.Evaluate(context.Background(), workspaceID)
-		if readiness.Ready {
-			continue
-		}
-		return &workspace.TaskBlockedError{
-			ReasonCode:       readiness.Reason,
-			Reason:           readiness.Message,
-			Question:         readiness.Message,
-			SuggestedActions: emailRepairActions(readiness),
-			Repair: &workspace.TaskRepairAction{
-				Code:  readiness.Action,
-				Label: readiness.ActionLabel,
-				URL:   readiness.ActionURL,
-			},
+		claimed, blocked := e.EvaluateTaskCapability(workspaceID, key)
+		if claimed && blocked != nil {
+			return blocked
 		}
 	}
 	return nil

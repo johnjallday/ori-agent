@@ -91,19 +91,20 @@ func (c *HandlerConfig) Validate() error {
 type Handler struct {
 	// taskCapabilityGate is remembered here so it survives being set before the
 	// task sub-handler is constructed (the server wires it across build phases).
-	taskCapabilityGate  workspace.TaskCapabilityGate
-	agentStore          store.Store
-	workspaceStore      workspace.Store
-	sessionStore        SessionStore
-	communicator        *agentcomm.Communicator
-	orchestrator        *orchestration.Orchestrator
-	templateManager     *templates.TemplateManager
-	eventBus            *workspace.EventBus
-	notificationService *workspace.NotificationService
-	taskHandler         workspace.TaskHandler
-	fileWatcher         *filewatcher.Watcher
-	directorySync       *workspace.DirectorySyncManager
-	folderStore         *workspace.FileStore
+	taskCapabilityGate      workspace.TaskCapabilityGate
+	taskCapabilityValidator workspace.TaskCapabilityValidator
+	agentStore              store.Store
+	workspaceStore          workspace.Store
+	sessionStore            SessionStore
+	communicator            *agentcomm.Communicator
+	orchestrator            *orchestration.Orchestrator
+	templateManager         *templates.TemplateManager
+	eventBus                *workspace.EventBus
+	notificationService     *workspace.NotificationService
+	taskHandler             workspace.TaskHandler
+	fileWatcher             *filewatcher.Watcher
+	directorySync           *workspace.DirectorySyncManager
+	folderStore             *workspace.FileStore
 
 	// Sub-handlers for modular organization
 	workspaceHandler    *WorkspaceHandler
@@ -196,6 +197,7 @@ func (h *Handler) initializeSubHandlers() {
 	if h.taskHandler != nil {
 		h.taskHandlerSub = NewTaskHandler(h.workspaceStore, h.communicator, h.taskHandler, h.eventBus)
 		h.taskHandlerSub.SetCapabilityGate(h.taskCapabilityGate)
+		h.taskHandlerSub.SetCapabilityValidator(h.taskCapabilityValidator)
 	}
 }
 
@@ -304,11 +306,22 @@ func (h *Handler) SetTaskCapabilityGate(gate workspace.TaskCapabilityGate) {
 	}
 }
 
+func (h *Handler) SetTaskCapabilityValidator(validator workspace.TaskCapabilityValidator) {
+	if h == nil {
+		return
+	}
+	h.taskCapabilityValidator = validator
+	if h.taskHandlerSub != nil {
+		h.taskHandlerSub.SetCapabilityValidator(validator)
+	}
+}
+
 // initializeTaskHandlerLegacy initializes the task handler if all dependencies are available (legacy)
 func (h *Handler) initializeTaskHandlerLegacy() {
 	if h.eventBus != nil && h.taskHandler != nil && h.taskHandlerSub == nil {
 		h.taskHandlerSub = NewTaskHandler(h.workspaceStore, h.communicator, h.taskHandler, h.eventBus)
 		h.taskHandlerSub.SetCapabilityGate(h.taskCapabilityGate)
+		h.taskHandlerSub.SetCapabilityValidator(h.taskCapabilityValidator)
 	}
 }
 

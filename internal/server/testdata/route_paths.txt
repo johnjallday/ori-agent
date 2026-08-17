@@ -319,6 +319,12 @@
 /api/workspaces/x/directories/x/files
 /api/workspaces/x/directories/x/files/y
 /api/workspaces/x/agents/x
+/api/workspaces/x/runtime-capabilities
+/api/workspaces/x/runtime-capabilities/mode
+/api/workspaces/x/runtime-capabilities/recheck
+/api/workspaces/x/runtime-capabilities/requirements/runtime/actions/configure_runtime
+/api/workspaces/x/runtime-capabilities/requirements/runtime/verify
+/api/workspaces/x/runtime-capabilities/requirements/runtime/grants
 /api/workspaces/x/setup-wizard
 /api/workspaces/x/setup-wizard/open
 /api/workspaces/x/setup-wizard/dismiss

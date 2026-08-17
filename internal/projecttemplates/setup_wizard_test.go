@@ -192,6 +192,11 @@ func TestNewTemplate_InvalidWizardFailsClosed(t *testing.T) {
 			contains: "takes no adapter",
 		},
 		{
+			name:     "runtime mode cannot override service",
+			wizard:   `{"version": 1, "title": "T", "steps": [{"id": "s", "kind": "runtime_mode", "adapter": "reaper_song", "required": true}]}`,
+			contains: "runtime service owns mode selection",
+		},
+		{
 			name:     "reference on a kind that takes none",
 			wizard:   `{"version": 1, "title": "T", "steps": [{"id": "s", "kind": "readiness", "adapter": "downloads_janitor", "requirement_key": "downloads-root", "required": true}]}`,
 			contains: "takes no requirement_key",
@@ -335,6 +340,7 @@ func TestValidateSetupWizard_AcceptsEveryAllowlistedKind(t *testing.T) {
 		{ID: "mailbox", Kind: "account_link", RequirementKey: "email", Adapter: "email_ops", Required: &required},
 		{ID: "plugin", Kind: "plugin_readiness", RequirementKey: "reaper-plugin", Adapter: "reaper_song", Required: &required},
 		{ID: "readiness", Kind: "readiness", Adapter: "downloads_janitor", Required: &required},
+		{ID: "runtime-mode", Kind: "runtime_mode", Required: &required},
 		{ID: "runtime", Kind: "runtime_readiness", RequirementKey: "reaper_live_control", Required: &required},
 		{ID: "summary", Kind: "summary", Required: &required},
 	}

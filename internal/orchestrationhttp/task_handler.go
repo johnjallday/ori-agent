@@ -58,8 +58,11 @@ type TaskHandler struct {
 	// capabilityGate checks a task's declared connection preconditions before a
 	// run starts. Nil disables the check, which is the pre-feature behavior.
 	capabilityGate workspace.TaskCapabilityGate
-	runningMu      sync.Mutex
-	runningCancels map[string]context.CancelFunc
+	// capabilityValidator rejects unsupported explicitly-runtime keys before a
+	// new task record is written while leaving ordinary planning keys alone.
+	capabilityValidator workspace.TaskCapabilityValidator
+	runningMu           sync.Mutex
+	runningCancels      map[string]context.CancelFunc
 }
 
 // SetCapabilityGate wires the connection-precondition check used before task
@@ -67,6 +70,12 @@ type TaskHandler struct {
 func (th *TaskHandler) SetCapabilityGate(gate workspace.TaskCapabilityGate) {
 	if th != nil {
 		th.capabilityGate = gate
+	}
+}
+
+func (th *TaskHandler) SetCapabilityValidator(validator workspace.TaskCapabilityValidator) {
+	if th != nil {
+		th.capabilityValidator = validator
 	}
 }
 
@@ -273,6 +282,7 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 		WakeLeadMinutes        int                            `json:"wake_lead_minutes"`
 		WakeFallbackPolicy     string                         `json:"wake_fallback_policy"`
 		ResultStorage          *workspace.ResultStorageConfig `json:"result_storage"`
+		RequiredCapabilities   []string                       `json:"required_capabilities"`
 	}
 
 	if !orihttp.ParseJSONBody(w, r, &req) {
@@ -311,6 +321,13 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 		logger.Error("Error getting workspace", logger.Fields{"error": err, "workspace_id": req.WorkspaceID})
 		orihttp.RespondErrorWithErr(w, http.StatusNotFound, "Workspace not found", err)
 		return
+	}
+	requiredCapabilities := workspace.NormalizeCapabilityKeys(req.RequiredCapabilities)
+	if th.capabilityValidator != nil {
+		if err := th.capabilityValidator.ValidateTaskCapabilities(req.WorkspaceID, requiredCapabilities); err != nil {
+			orihttp.BadRequest(w, err.Error())
+			return
+		}
 	}
 	outputSpec, outputSpecErrors := workspace.NormalizeTaskOutputSpec(req.OutputSpec)
 	if len(outputSpecErrors) > 0 {
@@ -354,6 +371,7 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 		WakeLeadMinutes:        normalizeWakeLeadMinutes(req.WakeLeadMinutes),
 		WakeFallback:           normalizeWakeFallbackPolicy(req.WakeFallbackPolicy),
 		ResultStorage:          req.ResultStorage,
+		RequiredCapabilities:   requiredCapabilities,
 	}
 	if task.OutputSpec != nil {
 		task.OutputSchema = task.OutputSpec.Schema

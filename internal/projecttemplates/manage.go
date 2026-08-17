@@ -419,6 +419,7 @@ func UpdateManifest(libDir, id, name, description string, tags *[]string, edit *
 	// hand-edited malformed declaration must never receive a successful save,
 	// and no partial normalized subset is written. Import and duplicate use this
 	// same UpdateManifest path after checking their source contracts.
+	var effectiveRuntimeContract *RuntimeRequirementsContract
 	if value, declared := raw["runtime_requirements"]; declared {
 		encoded, err := json.Marshal(value)
 		if err != nil {
@@ -431,8 +432,19 @@ func UpdateManifest(libDir, id, name, description string, tags *[]string, edit *
 		if contract == nil {
 			delete(raw, "runtime_requirements")
 		} else {
+			effectiveRuntimeContract = contract
 			raw["runtime_requirements"] = contract
 		}
+	}
+	var effectiveStarterTasks []StarterTask
+	if value, present := raw["starter_tasks"]; present {
+		encoded, err := json.Marshal(value)
+		if err != nil || json.Unmarshal(encoded, &effectiveStarterTasks) != nil {
+			return Template{}, fmt.Errorf("%w: starter_tasks could not be validated against runtime requirements", ErrInvalidRuntimeRequirements)
+		}
+	}
+	if err := validateRuntimeStarterTaskReferences(effectiveStarterTasks, effectiveRuntimeContract); err != nil {
+		return Template{}, err
 	}
 
 	// Legacy cleanup: the intake-era `onboarding` block is ignored at runtime,

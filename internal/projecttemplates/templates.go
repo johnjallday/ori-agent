@@ -499,7 +499,15 @@ func newTemplate(path string) Template {
 	t.DirectoryRequirements = normalizeDirectoryRequirements(m.DirectoryRequirements)
 	t.AutomationRecipes = normalizeAutomationRecipes(m.AutomationRecipes, t.DirectoryRequirements)
 	runtimeRequirements, runtimeRequirementsErr := normalizeRuntimeRequirements(m.RuntimeRequirements)
+	if runtimeRequirementsErr == nil {
+		runtimeRequirementsErr = validateRuntimeStarterTaskReferences(t.StarterTasks, runtimeRequirements)
+	}
 	t.RuntimeRequirements = runtimeRequirements
+	if runtimeRequirementsErr != nil {
+		// All-or-nothing applies to cross-references too. A valid declaration
+		// paired with an undeclared runtime task key is not a usable contract.
+		t.RuntimeRequirements = nil
+	}
 	// The wizard is resolved last: its steps may only reference requirements
 	// this same manifest declares, so every other declaration must be
 	// normalized first.

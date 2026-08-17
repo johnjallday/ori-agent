@@ -1,6 +1,9 @@
 package workspace
 
-import "strings"
+import (
+	"errors"
+	"strings"
+)
 
 // Task-level capability preconditions.
 //
@@ -51,6 +54,68 @@ const (
 // workspace binding — none of which the workspace domain knows about.
 type TaskCapabilityGate interface {
 	CheckTaskCapabilities(workspaceID string, capabilities []string) *TaskBlockedError
+}
+
+var ErrInvalidRuntimeTaskCapability = errors.New("invalid runtime task capability")
+
+// TaskCapabilityValidator rejects an explicitly runtime-scoped key at task
+// write time when the workspace contract cannot support it. Unclaimed ordinary
+// planning/toolbox keys remain valid.
+type TaskCapabilityValidator interface {
+	ValidateTaskCapabilities(workspaceID string, capabilities []string) error
+}
+
+// TaskCapabilityEvaluator claims and evaluates one normalized capability at a
+// time. claimed=false is not success; it means this evaluator has no runtime
+// meaning for the key and the composite should ask the next evaluator. This is
+// how ordinary planning/toolbox capabilities remain outside execution gating.
+type TaskCapabilityEvaluator interface {
+	EvaluateTaskCapability(workspaceID, capability string) (claimed bool, blocked *TaskBlockedError)
+}
+
+// CompositeTaskCapabilityGate checks task capabilities in declaration order and
+// evaluators in registration order. The first claimed blocker wins, giving the
+// UI one exact next action. Keys no evaluator claims preserve legacy behavior.
+type CompositeTaskCapabilityGate struct {
+	evaluators []TaskCapabilityEvaluator
+}
+
+func NewCompositeTaskCapabilityGate(evaluators ...TaskCapabilityEvaluator) *CompositeTaskCapabilityGate {
+	gate := &CompositeTaskCapabilityGate{}
+	for _, evaluator := range evaluators {
+		gate.Register(evaluator)
+	}
+	return gate
+}
+
+// Register appends a compiled evaluator. Nil evaluators are ignored so optional
+// server dependencies can be wired without a nil panic.
+func (g *CompositeTaskCapabilityGate) Register(evaluator TaskCapabilityEvaluator) {
+	if g == nil || evaluator == nil {
+		return
+	}
+	g.evaluators = append(g.evaluators, evaluator)
+}
+
+func (g *CompositeTaskCapabilityGate) CheckTaskCapabilities(workspaceID string, capabilities []string) *TaskBlockedError {
+	if g == nil {
+		return nil
+	}
+	for _, capability := range NormalizeCapabilityKeys(capabilities) {
+		for _, evaluator := range g.evaluators {
+			claimed, blocked := evaluator.EvaluateTaskCapability(workspaceID, capability)
+			if !claimed {
+				continue
+			}
+			if blocked != nil {
+				return blocked
+			}
+			// One evaluator owns a key. A second evaluator can never reinterpret a
+			// successful claim with different domain behavior.
+			break
+		}
+	}
+	return nil
 }
 
 // NormalizeCapabilityKeys trims, lower-cases, drops blanks, and de-duplicates a

@@ -115,6 +115,29 @@ func normalizeRuntimeRequirements(raw json.RawMessage) (*RuntimeRequirementsCont
 	return contract, nil
 }
 
+// validateRuntimeStarterTaskReferences distinguishes runtime capability keys
+// from ordinary planning/toolbox keys without claiming every capability-like
+// word. A key that names a compiled runtime adapter is explicitly runtime and
+// must be declared by this blueprint's own contract. Other keys (email,
+// planning, citations, toolbox vocabulary) retain their existing behavior.
+func validateRuntimeStarterTaskReferences(tasks []StarterTask, contract *RuntimeRequirementsContract) error {
+	for _, task := range tasks {
+		for _, rawKey := range task.Requires {
+			key := workspace.NormalizeRuntimeIdentifier(rawKey)
+			if key == "" || !slices.Contains(ValidRuntimeRequirementAdapters, key) {
+				continue
+			}
+			if contract == nil {
+				return fmt.Errorf("%w: starter task %q references runtime requirement %q, but the blueprint declares no runtime_requirements contract", ErrInvalidRuntimeRequirements, task.Description, key)
+			}
+			if _, declared := contract.Requirement(key); !declared {
+				return fmt.Errorf("%w: starter task %q references undeclared runtime requirement %q", ErrInvalidRuntimeRequirements, task.Description, key)
+			}
+		}
+	}
+	return nil
+}
+
 func validateRuntimeRequirements(declaration *runtimeRequirementsDecl) error {
 	if declaration == nil {
 		return nil

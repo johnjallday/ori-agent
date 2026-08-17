@@ -51,6 +51,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/reapersetup"
 	"github.com/johnjallday/ori-agent/internal/review"
 	"github.com/johnjallday/ori-agent/internal/reviewhttp"
+	"github.com/johnjallday/ori-agent/internal/runtimecapability"
+	"github.com/johnjallday/ori-agent/internal/runtimecapabilityhttp"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/sessionfiles"
 	"github.com/johnjallday/ori-agent/internal/sessionhttp"
@@ -796,6 +798,30 @@ func (b *ServerBuilder) backfillLegacyCapabilities(registry *workspacecapability
 	}
 }
 
+// wireRuntimeCapabilities constructs the generalized runtime contract service
+// before Setup Wizard and orchestration consume it. The built-in registry
+// reserves every authorable adapter key with honest unavailable behavior until
+// its platform implementation is registered in a later delivery seam.
+func (b *ServerBuilder) wireRuntimeCapabilities() {
+	if b.workspaceStore == nil {
+		return
+	}
+	folders, ok := b.workspaceStore.(runtimecapability.Store)
+	if !ok {
+		logger.Warn("Runtime capabilities not wired: workspace store lacks canonical folder access", logger.Fields{})
+		return
+	}
+	registry, err := runtimecapability.NewBuiltinRegistry()
+	if err != nil {
+		logger.Warn("Runtime capability registry unavailable", logger.Fields{"category": "registry_initialization_failed"})
+		return
+	}
+	service := runtimecapability.NewService(folders, registry)
+	b.runtimeCapabilityRegistry = registry
+	b.runtimeCapabilityService = service
+	b.runtimeCapabilityHandler = runtimecapabilityhttp.NewHandler(service, b.workspaceStore, b.userProvider)
+}
+
 // wireSetupWizard constructs the shared blueprint Setup Wizard: its compiled
 // adapter registry, the lifecycle service, and the workspace-scoped HTTP
 // handler. It runs in the workspace-store phase (18) for the same reason as
@@ -849,6 +875,7 @@ func (b *ServerBuilder) wireSetupWizard() {
 		}
 	}
 	service := setupwizard.NewService(folders, registry)
+	service.SetRuntimeService(b.runtimeCapabilityService)
 	service.SetBlueprintLookup(b.blueprintWizardLookup())
 	b.setupWizardService = service
 	b.setupWizardHandler = setupwizardhttp.NewHandler(service, b.workspaceStore, b.userProvider)

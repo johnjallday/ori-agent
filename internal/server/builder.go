@@ -56,6 +56,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/progressionhttp"
 	"github.com/johnjallday/ori-agent/internal/reapersetup"
 	"github.com/johnjallday/ori-agent/internal/reviewhttp"
+	"github.com/johnjallday/ori-agent/internal/runtimecapability"
+	"github.com/johnjallday/ori-agent/internal/runtimecapabilityhttp"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/sessionfiles"
 	"github.com/johnjallday/ori-agent/internal/sessionhttp"
@@ -336,6 +338,14 @@ type ServerBuilder struct {
 	setupWizardService  *setupwizard.Service
 	setupWizardRegistry *setupwizard.Registry
 	setupWizardHandler  *setupwizardhttp.Handler
+
+	// Generalized blueprint runtime requirements: one compiled adapter registry,
+	// one canonical workspace service, one HTTP surface, and the composite gate
+	// consulted before task execution.
+	runtimeCapabilityRegistry *runtimecapability.Registry
+	runtimeCapabilityService  *runtimecapability.Service
+	runtimeCapabilityHandler  *runtimecapabilityhttp.Handler
+	taskCapabilityGate        *workspace.CompositeTaskCapabilityGate
 	// reaperResolver is the normalized REAPER readiness resolver, held so the
 	// Setup Wizard's adapter reads the same one the panel and repair flow use.
 	reaperResolver *reapersetup.Resolver
@@ -554,6 +564,7 @@ func (b *ServerBuilder) createDomainFacades() {
 		WorkspaceCapabilities: b.workspaceCapabilityHandler,
 		WorkspaceMap:          b.workspaceMapHandler,
 		SetupWizard:           b.setupWizardHandler,
+		RuntimeCapabilities:   b.runtimeCapabilityHandler,
 		CLIAgents:             b.cliAgentHandler,
 		CLIAgentRegistry:      b.cliAgentRegistry,
 		WorkspaceRuns:         b.workspaceRunHandler,

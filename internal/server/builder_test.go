@@ -147,6 +147,12 @@ func TestServerBuilder_Build_Integration(t *testing.T) {
 	if builder.setupWizardService == nil || builder.setupWizardRegistry == nil {
 		t.Error("Setup Wizard service/registry not wired")
 	}
+	if server.Handlers.RuntimeCapabilities == nil || builder.runtimeCapabilityService == nil || builder.runtimeCapabilityRegistry == nil {
+		t.Error("runtime capability handler/service/registry not wired")
+	}
+	if builder.taskCapabilityGate == nil {
+		t.Error("composite task capability gate not wired")
+	}
 	// The reset handler must be confined to the same resolved data directory
 	// every other store uses, not the process working directory. A cwd
 	// value here would mean a reset previewed/executed from a different
