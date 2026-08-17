@@ -16,7 +16,7 @@ import (
 // seedDiskWorkspace writes a workspace folder into root without going through
 // the handler, the way a pre-existing workspace directory already looks on disk
 // before Ori is ever pointed at it.
-func seedDiskWorkspace(t *testing.T, root, id, name, kind, parentID string) string {
+func seedDiskWorkspace(t *testing.T, root, id, name, kind, parentID string) {
 	t.Helper()
 
 	store, err := agentworkspace.NewFileStore(root)
@@ -38,11 +38,9 @@ func seedDiskWorkspace(t *testing.T, root, id, name, kind, parentID string) stri
 	if err := store.Save(ws); err != nil {
 		t.Fatalf("seed %s in %s: %v", id, root, err)
 	}
-	folder, err := store.GetFolderPath(id)
-	if err != nil {
+	if _, err := store.GetFolderPath(id); err != nil {
 		t.Fatalf("seed folder path %s: %v", id, err)
 	}
-	return folder
 }
 
 // TestApplyWorkspaceRoot_ImportsPreExistingTargetRootWorkspaces is the core of
