@@ -57,6 +57,8 @@ const (
 	ReasonUnsupportedSnapshot    = "unsupported_snapshot"
 	ReasonModeNotEnabled         = "runtime_mode_not_enabled"
 	ReasonRequirementUnsupported = "runtime_requirement_unsupported"
+	ReasonTaskAgentRequired      = "runtime_task_agent_required"
+	ReasonTaskGrantRequired      = "runtime_task_grant_required"
 )
 
 // Action is one exact user-facing repair projected by an adapter. Token is a

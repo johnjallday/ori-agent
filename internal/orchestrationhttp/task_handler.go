@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -61,6 +62,7 @@ type TaskHandler struct {
 	// capabilityValidator rejects unsupported explicitly-runtime keys before a
 	// new task record is written while leaving ordinary planning keys alone.
 	capabilityValidator workspace.TaskCapabilityValidator
+	fileFallback        workspace.TaskFileFallbackPreparer
 	runningMu           sync.Mutex
 	runningCancels      map[string]context.CancelFunc
 }
@@ -76,6 +78,12 @@ func (th *TaskHandler) SetCapabilityGate(gate workspace.TaskCapabilityGate) {
 func (th *TaskHandler) SetCapabilityValidator(validator workspace.TaskCapabilityValidator) {
 	if th != nil {
 		th.capabilityValidator = validator
+	}
+}
+
+func (th *TaskHandler) SetFileFallbackPreparer(preparer workspace.TaskFileFallbackPreparer) {
+	if th != nil {
+		th.fileFallback = preparer
 	}
 }
 
@@ -283,6 +291,7 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 		WakeFallbackPolicy     string                         `json:"wake_fallback_policy"`
 		ResultStorage          *workspace.ResultStorageConfig `json:"result_storage"`
 		RequiredCapabilities   []string                       `json:"required_capabilities"`
+		FileFallbackFor        []string                       `json:"file_fallback_for"`
 	}
 
 	if !orihttp.ParseJSONBody(w, r, &req) {
@@ -323,6 +332,13 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	requiredCapabilities := workspace.NormalizeCapabilityKeys(req.RequiredCapabilities)
+	fileFallbackFor := workspace.NormalizeCapabilityKeys(req.FileFallbackFor)
+	for _, capability := range fileFallbackFor {
+		if !slices.Contains(requiredCapabilities, capability) {
+			orihttp.BadRequest(w, "file_fallback_for must reference a required capability")
+			return
+		}
+	}
 	if th.capabilityValidator != nil {
 		if err := th.capabilityValidator.ValidateTaskCapabilities(req.WorkspaceID, requiredCapabilities); err != nil {
 			orihttp.BadRequest(w, err.Error())
@@ -372,6 +388,7 @@ func (th *TaskHandler) handleCreateTask(w http.ResponseWriter, r *http.Request) 
 		WakeFallback:           normalizeWakeFallbackPolicy(req.WakeFallbackPolicy),
 		ResultStorage:          req.ResultStorage,
 		RequiredCapabilities:   requiredCapabilities,
+		FileFallbackFor:        fileFallbackFor,
 	}
 	if task.OutputSpec != nil {
 		task.OutputSchema = task.OutputSpec.Schema

@@ -348,7 +348,8 @@ type ServerBuilder struct {
 	taskCapabilityGate        *workspace.CompositeTaskCapabilityGate
 	// reaperResolver is the normalized REAPER readiness resolver, held so the
 	// Setup Wizard's adapter reads the same one the panel and repair flow use.
-	reaperResolver *reapersetup.Resolver
+	reaperResolver        *reapersetup.Resolver
+	reaperPluginInspector reapersetup.PluginInspector
 	// downloadsJanitorSetupAdapter is held so the watcher lifecycle can be
 	// attached to it once the automation service exists (a later phase).
 	downloadsJanitorSetupAdapter *downloadsjanitor.SetupAdapter

@@ -1,9 +1,11 @@
 package sessionhttp
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
@@ -11,6 +13,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/pluginworkspace"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/reapersetup"
+	"github.com/johnjallday/ori-agent/internal/runtimecapability"
 	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -159,6 +162,78 @@ func TestUnsatisfiedRequiredPlugins(t *testing.T) {
 	// Template declares no plugins: never blocks.
 	if missing, disabled := h.unsatisfiedRequiredPlugins(projecttemplates.ToolDefaults{}); len(missing)+len(disabled) != 0 {
 		t.Fatalf("no declared plugins should never block")
+	}
+}
+
+type fakeReaperRuntime struct {
+	status      runtimecapability.Status
+	statusCalls int
+	rechecks    int
+	verifies    int
+	verifiedKey string
+}
+
+func (f *fakeReaperRuntime) Status(context.Context, string) (runtimecapability.Status, error) {
+	f.statusCalls++
+	return f.status, nil
+}
+func (f *fakeReaperRuntime) Recheck(context.Context, string) (runtimecapability.Status, error) {
+	f.rechecks++
+	return f.status, nil
+}
+func (f *fakeReaperRuntime) Verify(_ context.Context, _ string, key string) (runtimecapability.Status, error) {
+	f.verifies++
+	f.verifiedKey = key
+	return f.status, nil
+}
+
+func TestReaperCompatibilityRoutesProjectRuntimeAndRejectOpenBodies(t *testing.T) {
+	h, store := reaperSetupHandler(t, nil)
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Song"})
+	ws.SetTemplateProvenance(&workspace.TemplateProvenance{TemplateID: reapersetup.ReaperSongTemplateID})
+	if err := store.Save(ws); err != nil {
+		t.Fatal(err)
+	}
+	runtime := &fakeReaperRuntime{status: runtimecapability.Status{WorkspaceID: ws.ID, Applicable: true, DurableState: runtimecapability.DurableConfigured, LiveState: runtimecapability.LiveOffline}}
+	h.SetReaperRuntimeService(runtime)
+
+	statusRecorder := httptest.NewRecorder()
+	h.handleReaperReadiness(statusRecorder, httptest.NewRequest(http.MethodGet, "/api/workspaces/"+ws.ID+"/reaper-setup", nil), ws.ID)
+	var readiness reapersetup.Readiness
+	if err := json.Unmarshal(statusRecorder.Body.Bytes(), &readiness); err != nil {
+		t.Fatal(err)
+	}
+	if readiness.Runtime == nil || readiness.Runtime.LiveState != runtimecapability.LiveOffline || runtime.statusCalls != 1 {
+		t.Fatalf("compatibility status = %+v", readiness.Runtime)
+	}
+
+	bad := httptest.NewRecorder()
+	h.handleReaperRuntimeTransition(bad, httptest.NewRequest(http.MethodPost, "/api/workspaces/"+ws.ID+"/reaper-setup/recheck", strings.NewReader(`{"port":2307}`)), ws.ID, false)
+	if bad.Code != http.StatusBadRequest || runtime.rechecks != 0 {
+		t.Fatalf("open body status=%d rechecks=%d", bad.Code, runtime.rechecks)
+	}
+
+	recheck := httptest.NewRecorder()
+	h.handleReaperRuntimeTransition(recheck, httptest.NewRequest(http.MethodPost, "/api/workspaces/"+ws.ID+"/reaper-setup/recheck", nil), ws.ID, false)
+	verify := httptest.NewRecorder()
+	h.handleReaperRuntimeTransition(verify, httptest.NewRequest(http.MethodPost, "/api/workspaces/"+ws.ID+"/reaper-setup/verify", nil), ws.ID, true)
+	if recheck.Code != http.StatusOK || verify.Code != http.StatusOK || runtime.rechecks != 1 || runtime.verifies != 1 || runtime.verifiedKey != reapersetup.ReaperLiveControlCapability {
+		t.Fatalf("recheck=%d verify=%d key=%q codes=%d/%d", runtime.rechecks, runtime.verifies, runtime.verifiedKey, recheck.Code, verify.Code)
+	}
+}
+
+func TestReaperCompatibilityRoutesHideForeignWorkspace(t *testing.T) {
+	h, store := reaperSetupHandler(t, nil)
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Foreign"})
+	ws.OwnerUserID = "another-user"
+	if err := store.Save(ws); err != nil {
+		t.Fatal(err)
+	}
+	h.SetReaperRuntimeService(&fakeReaperRuntime{})
+	recorder := httptest.NewRecorder()
+	h.handleReaperRuntimeTransition(recorder, httptest.NewRequest(http.MethodPost, "/api/workspaces/"+ws.ID+"/reaper-setup/recheck", nil), ws.ID, false)
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("status=%d", recorder.Code)
 	}
 }
 

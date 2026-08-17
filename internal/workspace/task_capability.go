@@ -1,8 +1,10 @@
 package workspace
 
 import (
+	"context"
 	"errors"
 	"strings"
+	"time"
 )
 
 // Task-level capability preconditions.
@@ -20,6 +22,8 @@ import (
 // CapabilityEmail is the mailbox capability: the workspace must have a healthy,
 // linked email account before mail-dependent work can run.
 const CapabilityEmail = "email"
+
+const runtimeFileFallbackApprovalKey = "runtime_file_fallback_approval"
 
 // Stable blocked-reason codes for an unmet connection precondition. They are
 // machine codes, safe to log and to switch on in the UI, and they never name a
@@ -73,6 +77,19 @@ type TaskCapabilityEvaluator interface {
 	EvaluateTaskCapability(workspaceID, capability string) (claimed bool, blocked *TaskBlockedError)
 }
 
+// TaskScopedCapabilityEvaluator can additionally validate the exact assigned
+// agent before provider construction. Runtime grants are agent-scoped, while
+// account capabilities such as Email can keep using TaskCapabilityEvaluator.
+type TaskScopedCapabilityEvaluator interface {
+	EvaluateTaskCapabilityForTask(workspaceID string, task Task, capability string) (claimed bool, blocked *TaskBlockedError)
+}
+
+// TaskScopedCapabilityGate is the optional richer preflight used by task
+// execution. Legacy callers and evaluators retain CheckTaskCapabilities.
+type TaskScopedCapabilityGate interface {
+	CheckTaskCapabilitiesForTask(workspaceID string, task Task) *TaskBlockedError
+}
+
 // CompositeTaskCapabilityGate checks task capabilities in declaration order and
 // evaluators in registration order. The first claimed blocker wins, giving the
 // UI one exact next action. Keys no evaluator claims preserve legacy behavior.
@@ -118,6 +135,31 @@ func (g *CompositeTaskCapabilityGate) CheckTaskCapabilities(workspaceID string, 
 	return nil
 }
 
+func (g *CompositeTaskCapabilityGate) CheckTaskCapabilitiesForTask(workspaceID string, task Task) *TaskBlockedError {
+	if g == nil {
+		return nil
+	}
+	for _, capability := range NormalizeCapabilityKeys(task.RequiredCapabilities) {
+		for _, evaluator := range g.evaluators {
+			var claimed bool
+			var blocked *TaskBlockedError
+			if scoped, ok := evaluator.(TaskScopedCapabilityEvaluator); ok {
+				claimed, blocked = scoped.EvaluateTaskCapabilityForTask(workspaceID, task, capability)
+			} else {
+				claimed, blocked = evaluator.EvaluateTaskCapability(workspaceID, capability)
+			}
+			if !claimed {
+				continue
+			}
+			if blocked != nil {
+				return blocked
+			}
+			break
+		}
+	}
+	return nil
+}
+
 // NormalizeCapabilityKeys trims, lower-cases, drops blanks, and de-duplicates a
 // capability list while preserving order.
 func NormalizeCapabilityKeys(keys []string) []string {
@@ -144,6 +186,97 @@ func NormalizeCapabilityKeys(keys []string) []string {
 }
 
 // RequiresCapability reports whether a task declares the given capability.
+// AllowsFileFallback reports whether task authoring explicitly declared a
+// project-file fallback for this required capability. It grants nothing and
+// does not mean the user has chosen that path.
+func (t *Task) AllowsFileFallback(key string) bool {
+	if t == nil {
+		return false
+	}
+	target := NormalizeRuntimeIdentifier(key)
+	if target == "" || !t.RequiresCapability(target) {
+		return false
+	}
+	for _, candidate := range t.FileFallbackFor {
+		if NormalizeRuntimeIdentifier(candidate) == target {
+			return true
+		}
+	}
+	return false
+}
+
+// ApproveRuntimeFileFallback records one explicit user decision made through a
+// server-validated blocked workflow. The approval is consumed before the next
+// provider invocation, so a rerun never silently inherits it.
+func (t *Task) ApproveRuntimeFileFallback(capability, blockID string, approvedAt time.Time) bool {
+	if t == nil || !t.AllowsFileFallback(capability) || strings.TrimSpace(blockID) == "" {
+		return false
+	}
+	if t.Context == nil {
+		t.Context = map[string]any{}
+	}
+	if approvedAt.IsZero() {
+		approvedAt = time.Now().UTC()
+	}
+	t.Context[runtimeFileFallbackApprovalKey] = map[string]any{
+		"capability":  NormalizeRuntimeIdentifier(capability),
+		"block_id":    strings.TrimSpace(blockID),
+		"approved_at": approvedAt.UTC().Format(time.RFC3339),
+	}
+	return true
+}
+
+// ApprovedRuntimeFileFallback returns the pending exact capability, if any.
+func (t *Task) ApprovedRuntimeFileFallback() string {
+	if t == nil || t.Context == nil {
+		return ""
+	}
+	raw, ok := t.Context[runtimeFileFallbackApprovalKey]
+	if !ok {
+		return ""
+	}
+	var capability, blockID, approvedAt string
+	switch value := raw.(type) {
+	case map[string]any:
+		capability, _ = value["capability"].(string)
+		blockID, _ = value["block_id"].(string)
+		approvedAt, _ = value["approved_at"].(string)
+	case map[string]string:
+		capability = value["capability"]
+		blockID = value["block_id"]
+		approvedAt = value["approved_at"]
+	default:
+		return ""
+	}
+	capability = NormalizeRuntimeIdentifier(capability)
+	if capability == "" || strings.TrimSpace(blockID) == "" || strings.TrimSpace(approvedAt) == "" || !t.AllowsFileFallback(capability) {
+		return ""
+	}
+	if _, err := time.Parse(time.RFC3339, approvedAt); err != nil {
+		return ""
+	}
+	return capability
+}
+
+func (t *Task) ConsumeRuntimeFileFallbackApproval() {
+	if t != nil && t.Context != nil {
+		delete(t.Context, runtimeFileFallbackApprovalKey)
+	}
+}
+
+// TaskFileFallbackRun owns a staging directory containing only the
+// authoritative project file. Commit promotes that one file after successful
+// model execution; Abort removes staging without touching the workspace.
+type TaskFileFallbackRun interface {
+	PreparedTask() Task
+	Commit() error
+	Abort()
+}
+
+type TaskFileFallbackPreparer interface {
+	PrepareTaskFileFallback(context.Context, string, Task, string) (TaskFileFallbackRun, error)
+}
+
 func (t *Task) RequiresCapability(key string) bool {
 	if t == nil {
 		return false

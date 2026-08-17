@@ -1,13 +1,18 @@
 package sessionhttp
 
 import (
+	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/reapersetup"
+	"github.com/johnjallday/ori-agent/internal/runtimecapability"
+	"github.com/johnjallday/ori-agent/internal/userprofile"
 )
 
 // unsatisfiedRequiredPlugins reports the template-declared plugins that are not
@@ -65,16 +70,24 @@ func (h *Handler) handleReaperReadiness(w http.ResponseWriter, r *http.Request, 
 		orihttp.BadRequest(w, "workspace ID is required")
 		return
 	}
-	if h.reaperResolver == nil {
-		// Plugins unavailable: report an unidentified, file-only-safe result so the
-		// UI simply renders no REAPER surface rather than erroring.
-		orihttp.WriteJSON(w, reapersetup.Readiness{LiveVerification: "not_checked", ProjectMode: "file_only"})
+	if !h.reaperWorkspaceOwned(workspaceID) {
+		orihttp.NotFound(w, "workspace not found")
 		return
 	}
-	readiness, err := h.reaperResolver.Resolve(workspaceID)
-	if err != nil {
-		orihttp.InternalError(w, err.Error())
-		return
+	readiness := reapersetup.Readiness{LiveVerification: "not_checked", ProjectMode: "file_only"}
+	if h.reaperResolver != nil {
+		resolved, err := h.reaperResolver.Resolve(workspaceID)
+		if err != nil {
+			orihttp.InternalError(w, "REAPER setup could not be checked")
+			return
+		}
+		readiness = resolved
+	}
+	if h.reaperRuntime != nil {
+		status, err := h.reaperRuntime.Status(r.Context(), workspaceID)
+		if err == nil && status.Applicable {
+			readiness.Runtime = &status
+		}
 	}
 	orihttp.WriteJSON(w, readiness)
 }
@@ -90,6 +103,10 @@ func (h *Handler) handleReaperRepair(w http.ResponseWriter, r *http.Request, wor
 	workspaceID = strings.TrimSpace(workspaceID)
 	if workspaceID == "" {
 		orihttp.BadRequest(w, "workspace ID is required")
+		return
+	}
+	if !h.reaperWorkspaceOwned(workspaceID) {
+		orihttp.NotFound(w, "workspace not found")
 		return
 	}
 	if h.reaperRepairer == nil {
@@ -108,10 +125,8 @@ func (h *Handler) handleReaperRepair(w http.ResponseWriter, r *http.Request, wor
 		var req struct {
 			ConfirmEnable bool `json:"confirm_enable"`
 		}
-		// Body is optional; decode leniently and default to no-confirm without
-		// erroring on an empty/absent body.
-		if r.Body != nil {
-			_ = json.NewDecoder(r.Body).Decode(&req)
+		if !decodeOptionalClosedReaperBody(w, r, &req) {
+			return
 		}
 		result, err := h.reaperRepairer.Apply(workspaceID, req.ConfirmEnable)
 		if err != nil {
@@ -122,6 +137,78 @@ func (h *Handler) handleReaperRepair(w http.ResponseWriter, r *http.Request, wor
 	default:
 		_ = orihttp.RespondMethodNotAllowed(w)
 	}
+}
+
+// handleReaperRuntimeTransition preserves the legacy REAPER route while newer
+// callers migrate to /runtime-capabilities. It accepts no caller-supplied path,
+// port, command, script, or project and delegates to the same compiled runtime
+// service as the generalized endpoint.
+func (h *Handler) handleReaperRuntimeTransition(w http.ResponseWriter, r *http.Request, workspaceID string, verify bool) {
+	if r.Method != http.MethodPost {
+		_ = orihttp.RespondMethodNotAllowed(w)
+		return
+	}
+	if !decodeOptionalClosedReaperBody(w, r, &struct{}{}) {
+		return
+	}
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" || !h.reaperWorkspaceOwned(workspaceID) {
+		orihttp.NotFound(w, "workspace not found")
+		return
+	}
+	if h.reaperRuntime == nil {
+		orihttp.ServiceUnavailable(w, "REAPER runtime checks are unavailable")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
+	defer cancel()
+	var (
+		status runtimecapability.Status
+		err    error
+	)
+	if verify {
+		status, err = h.reaperRuntime.Verify(ctx, workspaceID, reapersetup.ReaperLiveControlCapability)
+	} else {
+		status, err = h.reaperRuntime.Recheck(ctx, workspaceID)
+	}
+	if err != nil {
+		orihttp.Conflict(w, "REAPER runtime check did not complete. Check the current setup status and try its next action.")
+		return
+	}
+	orihttp.WriteJSON(w, map[string]any{"success": true, "runtime": status})
+}
+
+func (h *Handler) reaperWorkspaceOwned(workspaceID string) bool {
+	if h == nil || h.workspaceTaskStore == nil {
+		return false
+	}
+	ws, err := h.workspaceTaskStore.Get(strings.TrimSpace(workspaceID))
+	if err != nil || ws == nil {
+		return false
+	}
+	owner := strings.TrimSpace(ws.OwnerUserID)
+	return owner == "" || strings.EqualFold(owner, userprofile.LocalUserID)
+}
+
+func decodeOptionalClosedReaperBody(w http.ResponseWriter, r *http.Request, target any) bool {
+	if r.Body == nil || r.Body == http.NoBody {
+		return true
+	}
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 4<<10))
+	if err != nil {
+		orihttp.BadRequest(w, "invalid request body")
+		return false
+	}
+	if strings.TrimSpace(string(body)) == "" {
+		return true
+	}
+	decoder := json.NewDecoder(strings.NewReader(string(body)))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil || decoder.Decode(&struct{}{}) != io.EOF {
+		orihttp.BadRequest(w, "invalid request body")
+		return false
+	}
+	return true
 }
 
 // GetReaperCreatePreview serves GET /api/reaper-setup/preview: the pre-create

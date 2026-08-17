@@ -19,6 +19,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/orchestration"
 	"github.com/johnjallday/ori-agent/internal/orchestration/templates"
 	"github.com/johnjallday/ori-agent/internal/orchestrationhttp"
+	"github.com/johnjallday/ori-agent/internal/reapersetup"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/toolapi"
 	"github.com/johnjallday/ori-agent/internal/trigger"
@@ -602,6 +603,9 @@ func (b *ServerBuilder) initializeOrchestration() error {
 	}
 	b.taskCapabilityGate = gate
 	handler.SetTaskCapabilityGate(gate)
+	if b.workspaceFileStore != nil {
+		handler.SetTaskFileFallbackPreparer(reapersetup.NewFileFallbackPreparer(b.workspaceFileStore))
+	}
 
 	// Template-setup first-open auto-start runs seeded tasks through the same
 	// execution path as the manual execute endpoint.

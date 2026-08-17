@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
@@ -20,9 +21,10 @@ import (
 )
 
 const (
-	maxBodySize      = 4 << 10
-	maxTokenLength   = workspace.MaxRuntimeIdentifierLength
-	maxAgentIDLength = 128
+	maxBodySize              = 4 << 10
+	maxTokenLength           = workspace.MaxRuntimeIdentifierLength
+	maxAgentIDLength         = 128
+	runtimeTransitionTimeout = 12 * time.Second
 )
 
 type WorkspaceLookup interface {
@@ -88,7 +90,9 @@ func (h *Handler) Recheck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.run(w, r, func(ctx context.Context, workspaceID string) (runtimecapability.Status, error) {
-		return h.service.Recheck(ctx, workspaceID)
+		bounded, cancel := context.WithTimeout(ctx, runtimeTransitionTimeout)
+		defer cancel()
+		return h.service.Recheck(bounded, workspaceID)
 	})
 }
 
@@ -114,7 +118,9 @@ func (h *Handler) Verify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.run(w, r, func(ctx context.Context, workspaceID string) (runtimecapability.Status, error) {
-		return h.service.Verify(ctx, workspaceID, requirementKey)
+		bounded, cancel := context.WithTimeout(ctx, runtimeTransitionTimeout)
+		defer cancel()
+		return h.service.Verify(bounded, workspaceID, requirementKey)
 	})
 }
 

@@ -69,6 +69,10 @@ type StarterTask struct {
 	// declares it here so execution stops with an actionable repair instead of
 	// spending a model call on work it cannot do. Empty means no precondition.
 	Requires []string `json:"requires,omitempty"`
+	// FileFallbackFor declares which required runtime capabilities may be
+	// satisfied by an explicitly confirmed project-file change. Declaration is
+	// not authorization; task execution still stops for a user choice first.
+	FileFallbackFor []string `json:"file_fallback_for,omitempty"`
 }
 
 // ErrInvalidStarterTasks reports a starter-task edit that violates the setup
@@ -562,10 +566,11 @@ func normalizeStarterTasks(tasks []StarterTask) []StarterTask {
 		setup := task.Setup && !haveSetup
 		haveSetup = haveSetup || setup
 		out = append(out, StarterTask{
-			Description: desc,
-			Details:     strings.TrimSpace(task.Details),
-			Setup:       setup,
-			Requires:    normalizeOperationNames(task.Requires),
+			Description:     desc,
+			Details:         strings.TrimSpace(task.Details),
+			Setup:           setup,
+			Requires:        normalizeOperationNames(task.Requires),
+			FileFallbackFor: normalizeOperationNames(task.FileFallbackFor),
 		})
 	}
 	if len(out) == 0 {

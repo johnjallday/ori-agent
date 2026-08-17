@@ -631,6 +631,7 @@ func (b *ServerBuilder) wireReaperSetup() {
 	// Held for the Setup Wizard's REAPER adapter, which reads the same resolver
 	// the readiness panel and the repair flow do.
 	b.reaperResolver = resolver
+	b.reaperPluginInspector = reconciler
 }
 
 // wireCalendarOpsSetup constructs the Calendar Ops guided-setup handler. Like
@@ -801,7 +802,7 @@ func (b *ServerBuilder) backfillLegacyCapabilities(registry *workspacecapability
 // wireRuntimeCapabilities constructs the generalized runtime contract service
 // before Setup Wizard and orchestration consume it. The built-in registry
 // reserves every authorable adapter key with honest unavailable behavior until
-// its platform implementation is registered in a later delivery seam.
+// task-execution wiring can bind its trusted agent resolver and platform probe.
 func (b *ServerBuilder) wireRuntimeCapabilities() {
 	if b.workspaceStore == nil {
 		return
@@ -821,6 +822,9 @@ func (b *ServerBuilder) wireRuntimeCapabilities() {
 	b.runtimeCapabilityService = service
 	b.runtimeCapabilityHandler = runtimecapabilityhttp.NewHandler(service, b.workspaceStore, b.userProvider)
 	b.runtimeCapabilityHandler.SetGrantDelegator(service)
+	if b.sessionHandler != nil {
+		b.sessionHandler.SetReaperRuntimeService(service)
+	}
 }
 
 // wireSetupWizard constructs the shared blueprint Setup Wizard: its compiled

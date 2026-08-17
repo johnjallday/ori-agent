@@ -26,12 +26,16 @@ func (r runtimeGrantAgentResolver) ProviderForAgent(_ context.Context, workspace
 }
 
 func (b *ServerBuilder) wireRuntimeGrantFoundation() {
-	if b == nil || b.runtimeCapabilityRegistry == nil || b.runtimeResolver == nil {
+	if b == nil || b.runtimeCapabilityRegistry == nil || b.runtimeResolver == nil || b.reaperPluginInspector == nil || b.workspaceFileStore == nil {
 		return
 	}
-	adapter := reapersetup.NewRuntimeFoundationAdapter(
+	roots := reapersetup.NewRunnerRootResolver()
+	adapter := reapersetup.NewRuntimeAdapter(
+		b.workspaceFileStore,
+		b.reaperPluginInspector,
 		runtimeGrantAgentResolver{resolver: b.runtimeResolver},
-		reapersetup.NewRunnerRootResolver(),
+		roots,
+		reapersetup.NewPlatformProbeSet(roots),
 	)
 	if err := b.runtimeCapabilityRegistry.Replace(adapter); err != nil {
 		// The key was reserved during registry construction; failure means a

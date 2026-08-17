@@ -93,6 +93,7 @@ type Handler struct {
 	// task sub-handler is constructed (the server wires it across build phases).
 	taskCapabilityGate      workspace.TaskCapabilityGate
 	taskCapabilityValidator workspace.TaskCapabilityValidator
+	taskFileFallback        workspace.TaskFileFallbackPreparer
 	agentStore              store.Store
 	workspaceStore          workspace.Store
 	sessionStore            SessionStore
@@ -198,6 +199,7 @@ func (h *Handler) initializeSubHandlers() {
 		h.taskHandlerSub = NewTaskHandler(h.workspaceStore, h.communicator, h.taskHandler, h.eventBus)
 		h.taskHandlerSub.SetCapabilityGate(h.taskCapabilityGate)
 		h.taskHandlerSub.SetCapabilityValidator(h.taskCapabilityValidator)
+		h.taskHandlerSub.SetFileFallbackPreparer(h.taskFileFallback)
 	}
 }
 
@@ -316,12 +318,23 @@ func (h *Handler) SetTaskCapabilityValidator(validator workspace.TaskCapabilityV
 	}
 }
 
+func (h *Handler) SetTaskFileFallbackPreparer(preparer workspace.TaskFileFallbackPreparer) {
+	if h == nil {
+		return
+	}
+	h.taskFileFallback = preparer
+	if h.taskHandlerSub != nil {
+		h.taskHandlerSub.SetFileFallbackPreparer(preparer)
+	}
+}
+
 // initializeTaskHandlerLegacy initializes the task handler if all dependencies are available (legacy)
 func (h *Handler) initializeTaskHandlerLegacy() {
 	if h.eventBus != nil && h.taskHandler != nil && h.taskHandlerSub == nil {
 		h.taskHandlerSub = NewTaskHandler(h.workspaceStore, h.communicator, h.taskHandler, h.eventBus)
 		h.taskHandlerSub.SetCapabilityGate(h.taskCapabilityGate)
 		h.taskHandlerSub.SetCapabilityValidator(h.taskCapabilityValidator)
+		h.taskHandlerSub.SetFileFallbackPreparer(h.taskFileFallback)
 	}
 }
 

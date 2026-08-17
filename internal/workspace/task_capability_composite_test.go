@@ -54,6 +54,28 @@ func TestCompositeTaskCapabilityGateIgnoresUnclaimedPlanningCapabilities(t *test
 	}
 }
 
+type scopedCapabilityEvaluator struct {
+	recordingCapabilityEvaluator
+	taskNode string
+}
+
+func (e *scopedCapabilityEvaluator) EvaluateTaskCapabilityForTask(workspaceID string, task Task, capability string) (bool, *TaskBlockedError) {
+	e.taskNode = task.AssignedNodeID
+	return e.EvaluateTaskCapability(workspaceID, capability)
+}
+
+func TestCompositeTaskCapabilityGateUsesExactAssignedTaskContext(t *testing.T) {
+	evaluator := &scopedCapabilityEvaluator{recordingCapabilityEvaluator: recordingCapabilityEvaluator{claims: map[string]*TaskBlockedError{"runtime": nil}}}
+	gate := NewCompositeTaskCapabilityGate(evaluator)
+	task := Task{AssignedNodeID: "agent-node-2", RequiredCapabilities: []string{"runtime"}}
+	if blocked := gate.CheckTaskCapabilitiesForTask("ws-task", task); blocked != nil {
+		t.Fatalf("task preflight blocked: %+v", blocked)
+	}
+	if evaluator.taskNode != "agent-node-2" || len(evaluator.seen) != 1 {
+		t.Fatalf("scoped evaluator did not receive exact task: node=%q seen=%+v", evaluator.taskNode, evaluator.seen)
+	}
+}
+
 func TestCompositeTaskCapabilityGateUsesTaskRequirementOrderForFirstBlocker(t *testing.T) {
 	evaluator := &recordingCapabilityEvaluator{claims: map[string]*TaskBlockedError{
 		"first":  {ReasonCode: "first", Reason: "First repair."},

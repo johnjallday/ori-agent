@@ -94,9 +94,9 @@ func (a unavailableAdapter) EvaluateDurable(context.Context, EvaluationRequest) 
 }
 
 // NewBuiltinRegistry returns every runtime adapter ID this build accepts at
-// authoring time. The REAPER implementation lands behind the same stable ID in
-// the next delivery seam; until then the compiled unavailable adapter provides
-// honest fail-closed behavior.
+// authoring time. The unavailable reservation fails closed until server wiring
+// replaces it with the compiled platform implementation; minimal/test builders
+// that omit that wiring therefore remain honest rather than assuming readiness.
 func NewBuiltinRegistry() (*Registry, error) {
 	registry := NewRegistry()
 	for _, adapter := range []Adapter{
