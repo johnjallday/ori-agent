@@ -379,12 +379,16 @@ const sessionManager = {
         this.updateWizardRecap(template);
         void this.refreshTemplateAgentPlan();
         this.refreshWorkspaceReview();
-        // The blueprint-specific REAPER card is only shown for a Reaper Song
-        // blueprint that has not yet declared a setup wizard. Once it does, the
-        // generic preview above describes its requirements and the workspace's
-        // own Setup Wizard performs them — one setup surface, not two.
-        if (template?.setup_wizard?.steps?.length) window.ReaperSetupCard?.hide?.();
-        else window.ReaperSetupCard?.showForTemplate?.(template);
+        // Runtime-aware blueprints use the generic disclosure below. Never probe
+        // or mutate an external app while the user is only reviewing creation,
+        // and never show a competing REAPER-only setup card for the same
+        // contract. The legacy card remains only for an older Reaper blueprint
+        // that declares neither the generalized contract nor a Setup Wizard.
+        if (this.usesGenericBlueprintSetupPreview(template)) {
+          window.ReaperSetupCard?.hide?.();
+        } else {
+          window.ReaperSetupCard?.showForTemplate?.(template);
+        }
       });
 
     document.getElementById('templateAgentReviewToggle')?.addEventListener('change', event => {
@@ -4908,6 +4912,17 @@ const sessionManager = {
     return parts.join(' · ');
   },
 
+  // Runtime-aware and wizard-aware blueprints use one generic disclosure. The
+  // return value also suppresses the legacy REAPER pre-create card, guaranteeing
+  // selection itself triggers no domain preview/probe call.
+  usesGenericBlueprintSetupPreview(template) {
+    return Boolean(
+      template?.runtime_requirements ||
+      template?.runtime_requirements_error ||
+      template?.setup_wizard?.steps?.length
+    );
+  },
+
   /**
    * Renders the blueprint's setup requirements in the review step.
    *
@@ -4921,32 +4936,149 @@ const sessionManager = {
     const panel = document.getElementById('workspaceSetupPreview');
     const list = document.getElementById('workspaceSetupPreviewList');
     const note = document.getElementById('workspaceSetupPreviewNote');
+    const eyebrow = document.getElementById('workspaceSetupPreviewEyebrow');
+    const title = document.getElementById('workspaceSetupPreviewTitle');
     if (!panel || !list || !note) return;
 
+    const runtime = template?.runtime_requirements || null;
+    const runtimeInvalid = String(template?.runtime_requirements_error || '').trim();
     const steps = template?.setup_wizard?.steps || [];
-    const invalid = String(template?.setup_wizard_error || '').trim();
+    const wizardInvalid = String(template?.setup_wizard_error || '').trim();
     list.textContent = '';
 
-    if (invalid) {
-      // A blueprint whose setup cannot be read is refused at creation; saying
-      // so here beats a 409 the user cannot act on.
+    const renderInvalid = (kind, diagnostic) => {
       panel.hidden = false;
+      if (eyebrow) eyebrow.textContent = 'Blueprint needs attention';
+      if (title) title.textContent = `${kind} cannot be read`;
       const item = document.createElement('li');
       item.className = 'workspace-setup-preview-item is-error';
-      item.textContent = `This blueprint's setup cannot be read, so a workspace cannot be created from it: ${invalid}`;
+      item.textContent = `This blueprint's ${kind.toLowerCase()} cannot be read, so a workspace cannot be created from it: ${diagnostic}`;
       list.appendChild(item);
       note.textContent = 'Fix the blueprint\u2019s template.json, then try again.';
+    };
+
+    if (runtimeInvalid) {
+      renderInvalid('Runtime requirements', runtimeInvalid);
+      return;
+    }
+    if (wizardInvalid) {
+      renderInvalid('Setup', wizardInvalid);
+      return;
+    }
+
+    if (runtime) {
+      const modes = Array.isArray(runtime.operating_modes) ? runtime.operating_modes : [];
+      const requirements = Array.isArray(runtime.requirements) ? runtime.requirements : [];
+      const requirementsByKey = new Map(
+        requirements.map(requirement => [
+          String(requirement?.key || '')
+            .trim()
+            .toLowerCase(),
+          requirement
+        ])
+      );
+
+      panel.hidden = false;
+      if (eyebrow) eyebrow.textContent = 'Supported operating modes';
+      if (title) title.textContent = 'What works now and what needs setup';
+
+      if (!modes.length) {
+        const item = document.createElement('li');
+        item.className = 'workspace-setup-preview-item is-error';
+        item.textContent =
+          'This blueprint declares a runtime contract with no usable operating modes.';
+        list.appendChild(item);
+        note.textContent = 'Fix the blueprint\u2019s template.json, then try again.';
+        return;
+      }
+
+      modes.forEach(mode => {
+        const item = document.createElement('li');
+        item.className = 'workspace-setup-preview-item workspace-runtime-mode-preview';
+
+        const header = document.createElement('div');
+        header.className = 'workspace-runtime-mode-head';
+        const label = document.createElement('span');
+        label.className = 'workspace-setup-preview-label';
+        label.textContent = String(mode?.label || mode?.id || 'Operating mode').trim();
+        header.appendChild(label);
+        const badge = document.createElement('span');
+        badge.className = 'workspace-setup-preview-badge';
+        badge.textContent = 'Mode';
+        header.appendChild(badge);
+        item.appendChild(header);
+
+        const immediateLabel = document.createElement('span');
+        immediateLabel.className = 'workspace-runtime-preview-kicker';
+        immediateLabel.textContent = 'Works immediately';
+        item.appendChild(immediateLabel);
+        const immediate = document.createElement('span');
+        immediate.className = 'workspace-setup-preview-detail';
+        immediate.textContent = String(mode?.description || '').trim();
+        item.appendChild(immediate);
+
+        const setupLabel = document.createElement('span');
+        setupLabel.className = 'workspace-runtime-preview-kicker';
+        setupLabel.textContent = 'Setup after creation';
+        item.appendChild(setupLabel);
+
+        const references = Array.isArray(mode?.requires) ? mode.requires : [];
+        if (!references.length) {
+          const none = document.createElement('span');
+          none.className = 'workspace-setup-preview-detail';
+          none.textContent = 'No additional runtime setup.';
+          item.appendChild(none);
+        } else {
+          const requirementList = document.createElement('ul');
+          requirementList.className = 'workspace-runtime-requirement-list';
+          references.forEach(rawKey => {
+            const key = String(rawKey || '')
+              .trim()
+              .toLowerCase();
+            const requirement = requirementsByKey.get(key);
+            const requirementItem = document.createElement('li');
+            requirementItem.className = 'workspace-runtime-requirement';
+            const requirementLabel = document.createElement('span');
+            requirementLabel.className = 'workspace-runtime-requirement-label';
+            requirementLabel.textContent = String(
+              requirement?.label || key || 'Requirement'
+            ).trim();
+            requirementItem.appendChild(requirementLabel);
+            const description = String(requirement?.description || '').trim();
+            if (description) {
+              const requirementDetail = document.createElement('span');
+              requirementDetail.className = 'workspace-setup-preview-detail';
+              requirementDetail.textContent = description;
+              requirementItem.appendChild(requirementDetail);
+            }
+            const disclosure = String(requirement?.disclosure || '').trim();
+            if (disclosure) {
+              const requirementDisclosure = document.createElement('span');
+              requirementDisclosure.className = 'workspace-runtime-requirement-disclosure';
+              requirementDisclosure.textContent = disclosure;
+              requirementItem.appendChild(requirementDisclosure);
+            }
+            requirementList.appendChild(requirementItem);
+          });
+          item.appendChild(requirementList);
+        }
+        list.appendChild(item);
+      });
+      note.textContent =
+        'This is a preview only. Nothing is checked, connected, installed, launched, tested, or granted during creation.';
       return;
     }
 
     if (!steps.length) {
-      // A blueprint with no wizard shows no empty setup panel at all.
+      // A blueprint with neither contract nor wizard shows no empty setup panel.
       panel.hidden = true;
       note.textContent = '';
       return;
     }
 
     panel.hidden = false;
+    if (eyebrow) eyebrow.textContent = 'After you create it';
+    if (title) title.textContent = 'Setup this blueprint will ask for';
     steps.forEach(step => {
       const item = document.createElement('li');
       item.className = 'workspace-setup-preview-item';
@@ -4989,6 +5121,8 @@ const sessionManager = {
         return 'Prepare a plugin';
       case 'readiness':
         return 'Readiness check';
+      case 'runtime_readiness':
+        return 'Check a runtime requirement';
       case 'summary':
         return 'Summary';
       default:

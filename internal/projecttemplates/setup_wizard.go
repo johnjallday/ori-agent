@@ -99,21 +99,23 @@ type setupWizardStepDecl struct {
 // everything the *same manifest* declares, and nothing else. A step cannot
 // reach a directory, capability, or plugin the blueprint has not asked for.
 type setupWizardScope struct {
-	directories  map[string]bool
-	automated    map[string]bool
-	capabilities map[string]bool
-	plugins      map[string]bool
+	directories         map[string]bool
+	automated           map[string]bool
+	capabilities        map[string]bool
+	plugins             map[string]bool
+	runtimeRequirements map[string]bool
 }
 
 // templateSetupWizardScope builds the reference scope from a template's other
 // declarations. Callers pass the *normalized* requirements so key casing
 // matches what a step's reference resolves to.
-func templateSetupWizardScope(dirs []DirectoryRequirement, recipes []AutomationRecipe, caps []CapabilityRequirement, plugins []string) setupWizardScope {
+func templateSetupWizardScope(dirs []DirectoryRequirement, recipes []AutomationRecipe, caps []CapabilityRequirement, plugins []string, runtimeContracts ...*RuntimeRequirementsContract) setupWizardScope {
 	scope := setupWizardScope{
-		directories:  make(map[string]bool, len(dirs)),
-		automated:    make(map[string]bool, len(recipes)),
-		capabilities: make(map[string]bool, len(caps)),
-		plugins:      make(map[string]bool, len(plugins)),
+		directories:         make(map[string]bool, len(dirs)),
+		automated:           make(map[string]bool, len(recipes)),
+		capabilities:        make(map[string]bool, len(caps)),
+		plugins:             make(map[string]bool, len(plugins)),
+		runtimeRequirements: make(map[string]bool),
 	}
 	for _, dir := range dirs {
 		scope.directories[strings.ToLower(strings.TrimSpace(dir.Key))] = true
@@ -127,6 +129,17 @@ func templateSetupWizardScope(dirs []DirectoryRequirement, recipes []AutomationR
 	for _, name := range plugins {
 		scope.plugins[strings.ToLower(strings.TrimSpace(name))] = true
 	}
+	for _, contract := range runtimeContracts {
+		if contract == nil {
+			continue
+		}
+		for _, requirement := range contract.Requirements {
+			key := workspace.NormalizeRuntimeIdentifier(requirement.Key)
+			if key != "" {
+				scope.runtimeRequirements[key] = true
+			}
+		}
+	}
 	return scope
 }
 
@@ -139,6 +152,8 @@ func (s setupWizardScope) has(scope workspace.SetupStepReferenceScope, key strin
 		return s.capabilities[key]
 	case workspace.SetupStepReferencePlugin:
 		return s.plugins[key]
+	case workspace.SetupStepReferenceRuntimeRequirement:
+		return s.runtimeRequirements[key]
 	default:
 		return false
 	}
@@ -154,6 +169,8 @@ func referenceNoun(scope workspace.SetupStepReferenceScope) string {
 		return "capability_requirements"
 	case workspace.SetupStepReferencePlugin:
 		return "tools.plugins"
+	case workspace.SetupStepReferenceRuntimeRequirement:
+		return "runtime_requirements.requirements"
 	default:
 		return "requirement"
 	}
@@ -333,6 +350,9 @@ func validateSetupStepDecl(id string, step setupWizardStepDecl, scope setupWizar
 	}
 
 	adapter := strings.ToLower(strings.TrimSpace(step.Adapter))
+	if spec.ReferenceScope == workspace.SetupStepReferenceRuntimeRequirement && adapter != "" {
+		return fmt.Errorf("%w: step %q of kind %q takes no adapter; its runtime requirement owns the compiled adapter key", ErrInvalidSetupWizard, id, spec.Kind)
+	}
 	if adapter == "" {
 		if spec.RequiresAdapter {
 			return fmt.Errorf("%w: step %q of kind %q must name a registered adapter", ErrInvalidSetupWizard, id, spec.Kind)

@@ -124,11 +124,12 @@ type StepStatus struct {
 	CompletedAt *time.Time `json:"completed_at,omitempty"`
 	// Directory/Capability/Plugin echo the requirement the step references, so
 	// the dialog can label it without re-reading the template.
-	DirectoryLabel   string `json:"directory_label,omitempty"`
-	DirectorySuggest string `json:"directory_suggested_path,omitempty"`
-	DirectoryAccess  string `json:"directory_access_disclosure,omitempty"`
-	CapabilityKey    string `json:"capability_key,omitempty"`
-	PluginName       string `json:"plugin_name,omitempty"`
+	DirectoryLabel        string `json:"directory_label,omitempty"`
+	DirectorySuggest      string `json:"directory_suggested_path,omitempty"`
+	DirectoryAccess       string `json:"directory_access_disclosure,omitempty"`
+	CapabilityKey         string `json:"capability_key,omitempty"`
+	RuntimeRequirementKey string `json:"runtime_requirement_key,omitempty"`
+	PluginName            string `json:"plugin_name,omitempty"`
 }
 
 // Ready reports whether every required step currently passes.
@@ -695,6 +696,9 @@ func (s *Service) status(workspaceID string, resolved resolvedWizard, progress *
 		if request.Capability != nil {
 			projected.CapabilityKey = request.Capability.Key
 		}
+		if request.RuntimeRequirement != nil {
+			projected.RuntimeRequirementKey = request.RuntimeRequirement.Key
+		}
 		projected.PluginName = request.Plugin
 		status.Steps = append(status.Steps, projected)
 	}
@@ -723,7 +727,7 @@ func stepAction(step workspace.SetupWizardStep, status string) string {
 	case workspace.SetupStepStatusComplete, workspace.SetupStepStatusOptionalSkipped:
 		return ""
 	}
-	if step.Kind == workspace.SetupStepKindReadiness {
+	if step.Kind == workspace.SetupStepKindReadiness || step.Kind == workspace.SetupStepKindRuntimeReadiness {
 		return StepActionRecheck
 	}
 	return StepActionConfirm

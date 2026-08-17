@@ -76,6 +76,7 @@ func (s *Server) handleProjectTemplateUpdate(w http.ResponseWriter, r *http.Requ
 		CapabilityRequirements *[]projecttemplates.CapabilityRequirement `json:"capability_requirements"`
 		DirectoryRequirements  *[]projecttemplates.DirectoryRequirement  `json:"directory_requirements"`
 		AutomationRecipes      *[]projecttemplates.AutomationRecipe      `json:"automation_recipes"`
+		RuntimeRequirements    json.RawMessage                           `json:"runtime_requirements"`
 	}
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
@@ -105,6 +106,7 @@ func (s *Server) handleProjectTemplateUpdate(w http.ResponseWriter, r *http.Requ
 		CapabilityRequirements: req.CapabilityRequirements,
 		DirectoryRequirements:  req.DirectoryRequirements,
 		AutomationRecipes:      req.AutomationRecipes,
+		RuntimeRequirements:    req.RuntimeRequirements,
 	}
 	tpl, err := projecttemplates.UpdateManifest(resolveTemplatesRoot(s.Core.ConfigManager), r.PathValue("templateID"), req.Name, req.Description, req.Tags, edit)
 	if err != nil {
@@ -374,7 +376,8 @@ func (s *Server) respondProjectTemplateError(w http.ResponseWriter, err error) {
 		_ = orihttp.RespondNotFound(w, err.Error())
 	case errors.Is(err, projecttemplates.ErrInvalidTemplateName), errors.Is(err, projecttemplates.ErrInvalidPath), errors.Is(err, projecttemplates.ErrInvalidPromptVariable),
 		errors.Is(err, projecttemplates.ErrInvalidStarterTasks), errors.Is(err, projecttemplates.ErrInvalidProjectEntry), errors.Is(err, projecttemplates.ErrRosterRequired),
-		errors.Is(err, projecttemplates.ErrInvalidCapabilityRequirements), errors.Is(err, projecttemplates.ErrInvalidDirectoryRequirements), errors.Is(err, projecttemplates.ErrInvalidAutomationRecipes):
+		errors.Is(err, projecttemplates.ErrInvalidCapabilityRequirements), errors.Is(err, projecttemplates.ErrInvalidDirectoryRequirements), errors.Is(err, projecttemplates.ErrInvalidAutomationRecipes),
+		errors.Is(err, projecttemplates.ErrInvalidRuntimeRequirements):
 		_ = orihttp.RespondBadRequest(w, err.Error())
 	case errors.Is(err, projecttemplates.ErrTemplateExists), errors.Is(err, projecttemplates.ErrFileExists):
 		_ = orihttp.RespondConflict(w, err.Error())

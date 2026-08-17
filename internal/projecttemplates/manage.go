@@ -1,6 +1,7 @@
 package projecttemplates
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -34,6 +35,9 @@ func ImportFolder(libDir, srcPath, displayName string) (Template, error) {
 	src, err := LoadFolder(srcPath)
 	if err != nil {
 		return Template{}, err
+	}
+	if src.HasInvalidRuntimeRequirements() {
+		return Template{}, fmt.Errorf("%w: imported blueprint runtime_requirements is unusable: %s", ErrInvalidRuntimeRequirements, src.RuntimeRequirementsError)
 	}
 
 	absLib, err := filepath.Abs(libDir)
@@ -133,6 +137,9 @@ func Duplicate(libDir, id, newName string) (Template, error) {
 	src, err := FindLibraryTemplate(libDir, id)
 	if err != nil {
 		return Template{}, err
+	}
+	if src.HasInvalidRuntimeRequirements() {
+		return Template{}, fmt.Errorf("%w: source blueprint runtime_requirements is unusable: %s", ErrInvalidRuntimeRequirements, src.RuntimeRequirementsError)
 	}
 
 	absLib, err := filepath.Abs(strings.TrimSpace(libDir))
@@ -262,6 +269,11 @@ type ManifestEdit struct {
 	CapabilityRequirements *[]CapabilityRequirement
 	DirectoryRequirements  *[]DirectoryRequirement
 	AutomationRecipes      *[]AutomationRecipe
+	// RuntimeRequirements is tri-state raw JSON: nil preserves the current
+	// declaration, JSON null clears it, and an object replaces it only after
+	// strict all-or-nothing validation. Keeping it raw lets the validator reject
+	// unknown/behavior-bearing fields instead of json.Unmarshal dropping them.
+	RuntimeRequirements json.RawMessage
 }
 
 // UpdateManifest writes display metadata into a library template's
@@ -385,6 +397,41 @@ func UpdateManifest(libDir, id, name, description string, tags *[]string, edit *
 				}
 				raw["project_entry"] = entry
 			}
+		}
+		if edit.RuntimeRequirements != nil {
+			trimmed := bytes.TrimSpace(edit.RuntimeRequirements)
+			if bytes.Equal(trimmed, []byte("null")) {
+				delete(raw, "runtime_requirements")
+			} else {
+				// Store the raw value only in memory for now. The effective-block
+				// validation below runs before os.WriteFile and replaces this value
+				// with the normalized contract on success.
+				var value any
+				if err := json.Unmarshal(trimmed, &value); err != nil {
+					return Template{}, fmt.Errorf("%w: runtime_requirements must be an object: %v", ErrInvalidRuntimeRequirements, err)
+				}
+				raw["runtime_requirements"] = value
+			}
+		}
+	}
+
+	// Validate the effective block even for an unrelated metadata edit. A
+	// hand-edited malformed declaration must never receive a successful save,
+	// and no partial normalized subset is written. Import and duplicate use this
+	// same UpdateManifest path after checking their source contracts.
+	if value, declared := raw["runtime_requirements"]; declared {
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			return Template{}, fmt.Errorf("%w: failed to encode runtime_requirements: %v", ErrInvalidRuntimeRequirements, err)
+		}
+		contract, err := normalizeRuntimeRequirements(encoded)
+		if err != nil {
+			return Template{}, err
+		}
+		if contract == nil {
+			delete(raw, "runtime_requirements")
+		} else {
+			raw["runtime_requirements"] = contract
 		}
 	}
 

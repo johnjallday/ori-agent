@@ -138,9 +138,13 @@ type StepRequest struct {
 	// Automation is the automation the blueprint requested for that directory,
 	// when it requested any.
 	Automation *workspace.AutomationRecipe
-	// Capability is the capability requirement the step references, when its
-	// kind resolves in the capability namespace.
+	// Capability is the connector capability requirement the step references,
+	// when its kind resolves in the legacy capability namespace.
 	Capability *workspace.CapabilityRequirement
+	// RuntimeRequirement is the abstract runtime requirement resolved from the
+	// same persisted blueprint contract. Its Adapter remains a compiled lookup
+	// key; the step and client cannot override it.
+	RuntimeRequirement *workspace.RuntimeRequirement
 	// Plugin is the declared plugin name the step references, and PluginSource
 	// the install source the blueprint declared for it (empty when none).
 	Plugin       string

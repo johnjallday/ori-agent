@@ -333,6 +333,65 @@ func TestSyncStore_SavePreservesSetupWizardProgressFromStalePrimaryWorkspace(t *
 	}
 }
 
+func TestSyncStore_SavePreservesRuntimeStateFromStalePrimaryWorkspace(t *testing.T) {
+	primary := NewInMemoryStore()
+	fileSync, err := NewFileStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = fileSync.Close() }()
+
+	store := NewSyncStore(primary, fileSync)
+	ws := newTestWorkspace("ws-runtime-state-sync", "Runtime State Sync")
+	if err := store.Save(ws); err != nil {
+		t.Fatal(err)
+	}
+
+	verified := time.Date(2026, 2, 1, 12, 0, 0, 0, time.UTC)
+	canonicalWorkspace, err := fileSync.Get(ws.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonicalWorkspace.SetRuntimeState(&WorkspaceRuntimeState{
+		SelectedModeID: "assisted",
+		RequirementStates: []RuntimeRequirementState{{
+			RequirementKey:     "reaper_live_control",
+			ConfigurationState: RuntimeConfigurationConfigured,
+			FirstVerifiedAt:    &verified,
+		}},
+	})
+	if err := fileSync.Save(canonicalWorkspace); err != nil {
+		t.Fatal(err)
+	}
+
+	staleWorkspace, err := primary.Get(ws.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if staleWorkspace.GetRuntimeState() != nil {
+		t.Fatal("precondition: stale primary copy should have no runtime state")
+	}
+	staleWorkspace.Tasks = append(staleWorkspace.Tasks, Task{ID: "after-runtime", Status: TaskStatusPending})
+	if err := store.Save(staleWorkspace); err != nil {
+		t.Fatal(err)
+	}
+
+	diskWorkspace, err := fileSync.Get(ws.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := diskWorkspace.GetRuntimeState()
+	if state == nil || state.SelectedModeID != "assisted" || len(state.RequirementStates) != 1 || state.RequirementStates[0].ConfigurationState != RuntimeConfigurationConfigured {
+		t.Fatalf("canonical runtime state was clobbered: %+v", state)
+	}
+	if state.RequirementStates[0].FirstVerifiedAt == nil || !state.RequirementStates[0].FirstVerifiedAt.Equal(verified) {
+		t.Fatalf("verification history was not preserved: %+v", state)
+	}
+	if len(diskWorkspace.Tasks) != 1 || diskWorkspace.Tasks[0].ID != "after-runtime" {
+		t.Fatalf("task update was not written through: %+v", diskWorkspace.Tasks)
+	}
+}
+
 // TestSyncStore_SavePreservesInstalledCapabilitiesFromStalePrimaryWorkspace is
 // the FR-144 guard for capability installs: "a stale workspace snapshot must not
 // silently erase a capability install or its directory reference". Unlike

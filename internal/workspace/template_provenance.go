@@ -41,6 +41,11 @@ type TemplateProvenance struct {
 	// asked for; recording installs, enables, and attaches nothing.
 	Plugins       []string          `json:"plugins,omitempty"`
 	PluginSources map[string]string `json:"plugin_sources,omitempty"`
+	// RuntimeRequirements is the normalized operating-mode/runtime contract the
+	// blueprint declared at creation time. It is a deep snapshot: later edits to
+	// the source blueprint cannot add authority, remove a requirement, or change
+	// the user's setup contract for this workspace.
+	RuntimeRequirements *RuntimeRequirementsContract `json:"runtime_requirements,omitempty"`
 	// SetupWizard is the normalized setup flow the template declared, captured
 	// as it read at creation time. It is a snapshot, not a reference: editing
 	// or updating the source blueprint afterwards must not change what an
@@ -85,7 +90,26 @@ func cloneTemplateProvenanceInto(dst *TemplateProvenance, src *TemplateProvenanc
 	dst.CapabilityRequirements = cloneCapabilityRequirements(src.CapabilityRequirements)
 	dst.Plugins = append([]string(nil), src.Plugins...)
 	dst.PluginSources = clonePluginSources(src.PluginSources)
+	dst.RuntimeRequirements = CloneRuntimeRequirementsContract(src.RuntimeRequirements)
 	dst.SetupWizard = CloneSetupWizard(src.SetupWizard)
+}
+
+// RuntimeRequirementsSnapshot returns a defensive copy of the runtime contract
+// recorded at creation time, or nil when the blueprint declared none.
+func (w *Workspace) RuntimeRequirementsSnapshot() *RuntimeRequirementsContract {
+	p := w.GetTemplateProvenance()
+	if p == nil {
+		return nil
+	}
+	return p.RuntimeRequirements
+}
+
+// HasRuntimeRequirements reports whether the workspace carries a structurally
+// valid runtime-contract snapshot. A non-nil but unsupported snapshot remains
+// distinguishable through RuntimeRequirementsSnapshot and must fail closed.
+func (w *Workspace) HasRuntimeRequirements() bool {
+	contract := w.RuntimeRequirementsSnapshot()
+	return contract != nil && contract.StructurallyValid()
 }
 
 // SetupWizardSnapshot returns a copy of the setup wizard recorded for the

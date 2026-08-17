@@ -56,8 +56,8 @@ func (s *SyncStore) GetFolderWorkspace(workspaceID string) (*Workspace, error) {
 // the disk sync is best-effort.
 func (s *SyncStore) Save(ws *Workspace) error {
 	if s.fileSync != nil && ws != nil && ws.Status != StatusTrashed && ws.Status != StatusMissing {
-		// ProjectPath, Designation, TemplateProvenance, and SetupWizardProgress
-		// are canonical workspace.json fields not represented by the SQLite
+		// ProjectPath, Designation, TemplateProvenance, SetupWizardProgress, and
+		// RuntimeState are canonical workspace.json fields not represented by the SQLite
 		// workspace table. A workspace fetched from SQLite (the primary store's
 		// Get) therefore always carries these as zero values, and must not erase
 		// values written directly to the folder store by an unrelated
@@ -92,7 +92,7 @@ func (s *SyncStore) Save(ws *Workspace) error {
 		// a Goal the user cleared — is authoritative; only a record that
 		// predates the column has none, and that is the single case where the
 		// canonical workspace.json should refill it.
-		if ws.ProjectPath == "" || ws.Designation == "" || ws.TemplateProvenance == nil || ws.SetupWizardProgress == nil ||
+		if ws.ProjectPath == "" || ws.Designation == "" || ws.TemplateProvenance == nil || ws.SetupWizardProgress == nil || ws.RuntimeState == nil ||
 			capabilitiesMissing(ws) || toolboxStateMissing(ws) || missionStateMissing(ws) {
 			if diskWorkspace, err := s.fileSync.Get(ws.ID); err == nil && diskWorkspace != nil {
 				if ws.ProjectPath == "" {
@@ -105,7 +105,10 @@ func (s *SyncStore) Save(ws *Workspace) error {
 					ws.TemplateProvenance = diskWorkspace.TemplateProvenance
 				}
 				if ws.SetupWizardProgress == nil {
-					ws.SetupWizardProgress = diskWorkspace.SetupWizardProgress
+					ws.SetupWizardProgress = CloneSetupWizardProgress(diskWorkspace.SetupWizardProgress)
+				}
+				if ws.RuntimeState == nil {
+					ws.RuntimeState = CloneWorkspaceRuntimeState(diskWorkspace.RuntimeState)
 				}
 				if capabilitiesMissing(ws) {
 					ws.InstalledCapabilities = CloneInstalledCapabilities(diskWorkspace.InstalledCapabilities)

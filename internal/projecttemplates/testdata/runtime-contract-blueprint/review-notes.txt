@@ -1,0 +1,1 @@
+Fixture content for a non-REAPER runtime-contract blueprint.

@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/config"
+	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 )
 
 func TestHandleProjectTemplates(t *testing.T) {
@@ -151,6 +152,92 @@ func TestProjectTemplateManagementRoutes(t *testing.T) {
 	}
 	if _, err := os.Lstat(filepath.Join(libDir, "imported-pack")); !os.IsNotExist(err) {
 		t.Fatalf("template still present after delete (err=%v)", err)
+	}
+}
+
+func TestHandleProjectTemplateUpdateRuntimeRequirementsRoundTrip(t *testing.T) {
+	libDir := t.TempDir()
+	templateDir := filepath.Join(libDir, "runtime-demo")
+	if err := os.MkdirAll(templateDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(templateDir, projecttemplates.ManifestFileName)
+	if err := os.WriteFile(manifestPath, []byte(`{"name":"Runtime Demo","agents":[{"name":"Lead"}],"custom_key":"kept"}`), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	s := newTemplateRoutesServer(t, libDir)
+
+	callUpdate := func(body string) *httptest.ResponseRecorder {
+		t.Helper()
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPut, "/api/project-templates/runtime-demo", bytes.NewBufferString(body))
+		req.SetPathValue("templateID", "runtime-demo")
+		s.handleProjectTemplateUpdate(w, req)
+		return w
+	}
+
+	valid := `{
+		"name":"Runtime Demo",
+		"runtime_requirements":{
+			"schema_version":1,
+			"operating_modes":[
+				{"id":"limited","label":"Limited","description":"Use files."},
+				{"id":"assisted","label":"Assisted","description":"Use live control.","requires":["runtime"]}
+			],
+			"requirements":[{"key":"runtime","label":"Runtime","description":"Configure it.","adapter":"reaper_live_control"}]
+		}
+	}`
+	w := callUpdate(valid)
+	if w.Code != http.StatusOK {
+		t.Fatalf("valid update: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var response struct {
+		Template struct {
+			RuntimeRequirements *projecttemplates.RuntimeRequirementsContract `json:"runtime_requirements"`
+		} `json:"template"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Template.RuntimeRequirements == nil || len(response.Template.RuntimeRequirements.OperatingModes) != 2 || response.Template.RuntimeRequirements.Requirements[0].Adapter != "reaper_live_control" {
+		t.Fatalf("update response lost public runtime metadata: %s", w.Body.String())
+	}
+
+	// The list API returns the same normalized contract.
+	list := httptest.NewRecorder()
+	s.handleProjectTemplates(list, httptest.NewRequest(http.MethodGet, "/api/project-templates", nil))
+	if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), `"runtime_requirements"`) || !strings.Contains(list.Body.String(), `"operating_modes"`) {
+		t.Fatalf("list response lost runtime metadata: %d %s", list.Code, list.Body.String())
+	}
+
+	before, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	invalid := `{
+		"name":"Must not persist",
+		"runtime_requirements":{
+			"schema_version":1,
+			"operating_modes":[{"id":"limited","label":"Limited","description":"Use files."}],
+			"requirements":[],
+			"command":"run"
+		}
+	}`
+	w = callUpdate(invalid)
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "invalid runtime requirements") || !strings.Contains(w.Body.String(), "unknown field") {
+		t.Fatalf("invalid update: expected actionable 400, got %d: %s", w.Code, w.Body.String())
+	}
+	after, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(after, before) {
+		t.Fatalf("invalid HTTP update partially saved template.json:\nbefore %s\nafter %s", before, after)
+	}
+
+	w = callUpdate(`{"name":"Runtime Demo","runtime_requirements":null}`)
+	if w.Code != http.StatusOK || strings.Contains(w.Body.String(), `"runtime_requirements"`) {
+		t.Fatalf("explicit null did not clear runtime contract: %d %s", w.Code, w.Body.String())
 	}
 }
 

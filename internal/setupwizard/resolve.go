@@ -94,6 +94,11 @@ func referenceResolves(provenance *workspace.TemplateProvenance, ref workspace.S
 				return true
 			}
 		}
+	case workspace.SetupStepReferenceRuntimeRequirement:
+		if provenance.RuntimeRequirements != nil {
+			_, found := provenance.RuntimeRequirements.Requirement(ref.Key)
+			return found
+		}
 	}
 	return false
 }
@@ -142,6 +147,13 @@ func (r resolvedWizard) request(workspaceID string, step workspace.SetupWizardSt
 			if strings.EqualFold(strings.TrimSpace(name), ref.Key) {
 				req.PluginSource = source
 				break
+			}
+		}
+	case workspace.SetupStepReferenceRuntimeRequirement:
+		if r.provenance.RuntimeRequirements != nil {
+			if runtimeRequirement, found := r.provenance.RuntimeRequirements.Requirement(ref.Key); found {
+				requirement := runtimeRequirement
+				req.RuntimeRequirement = &requirement
 			}
 		}
 	}
