@@ -100,8 +100,27 @@ test('#346 dropping a workspace into a district moves it into that group', async
   );
   await page.screenshot({ path: 'test-results/346-drop-target.png' });
 
-  // FR-6a: releasing commits it.
+  // FR-6g: releasing asks rather than commits. The panel names both sides and
+  // the district it is talking about stays lit behind it.
   await page.mouse.up();
+  const confirm = page.locator('[data-ws-map-drop-confirm]');
+  await expect(confirm).toBeVisible();
+  await expect(confirm).toContainText(`Move Drop Loose ${tag} into Drop Group ${tag}?`);
+  await expect(district).toHaveClass(/is-drop-target/);
+  await page.screenshot({ path: 'test-results/346-drop-confirm.png' });
+  expect(await parentOf(page, loose)).toBe('', 'nothing is written while it is still asking');
+
+  // Escape declines, and declining is not a failure: the move stands.
+  await page.keyboard.press('Escape');
+  await expect(confirm).toBeHidden();
+  await page.waitForTimeout(400);
+  expect(await parentOf(page, loose)).toBe('', 'declining changes no group');
+
+  // Do it again and say yes.
+  await dragBy(page, page.locator(`.ws-map-tile[data-ws-id="${loose}"]`), -40, 0, false);
+  await page.mouse.up();
+  await expect(confirm).toBeVisible();
+  await confirm.getByRole('button', { name: 'Move into group' }).click();
   await page.waitForTimeout(900);
 
   expect(await parentOf(page, loose)).toBe(group, 'it is now in the group');
@@ -109,15 +128,18 @@ test('#346 dropping a workspace into a district moves it into that group', async
   await expect(district.locator('.ws-map-district-count')).toHaveText('2 workspaces');
   await page.screenshot({ path: 'test-results/346-drop-joined.png' });
 
-  // FR-6d: moving it again INSIDE the same district is a reposition only.
+  // FR-6d: moving it again INSIDE the same district is a reposition only — and
+  // it must not ask, because nothing about its membership would change.
   const before = await parentOf(page, loose);
   await dragBy(page, page.locator(`.ws-map-tile[data-ws-id="${loose}"]`), 40, 40);
   await page.waitForTimeout(700);
+  await expect(confirm).toBeHidden();
   expect(await parentOf(page, loose)).toBe(before);
 
   // FR-7: dragging it well clear does NOT remove it from the group — removal
   // stays in Tree, because a frame follows its own members.
   await dragBy(page, page.locator(`.ws-map-tile[data-ws-id="${loose}"]`), 0, 900);
   await page.waitForTimeout(700);
+  await expect(confirm).toBeHidden();
   expect(await parentOf(page, loose)).toBe(group, 'dragging out is not a removal gesture');
 });

@@ -577,23 +577,28 @@
   --ws-district-accent: 232, 134, 77;
 }
 .ws-map-district.ws-map-accent-beacon,
-.ws-map-resize-overlay.ws-map-accent-beacon {
+.ws-map-resize-overlay.ws-map-accent-beacon,
+.ws-map-drop-confirm.ws-map-accent-beacon {
   --ws-district-accent: 74, 124, 178;
 }
 .ws-map-district.ws-map-accent-moss,
-.ws-map-resize-overlay.ws-map-accent-moss {
+.ws-map-resize-overlay.ws-map-accent-moss,
+.ws-map-drop-confirm.ws-map-accent-moss {
   --ws-district-accent: 92, 138, 86;
 }
 .ws-map-district.ws-map-accent-orchid,
-.ws-map-resize-overlay.ws-map-accent-orchid {
+.ws-map-resize-overlay.ws-map-accent-orchid,
+.ws-map-drop-confirm.ws-map-accent-orchid {
   --ws-district-accent: 148, 96, 162;
 }
 .ws-map-district.ws-map-accent-slate,
-.ws-map-resize-overlay.ws-map-accent-slate {
+.ws-map-resize-overlay.ws-map-accent-slate,
+.ws-map-drop-confirm.ws-map-accent-slate {
   --ws-district-accent: 106, 118, 128;
 }
 .ws-map-district.ws-map-accent-tide,
-.ws-map-resize-overlay.ws-map-accent-tide {
+.ws-map-resize-overlay.ws-map-accent-tide,
+.ws-map-drop-confirm.ws-map-accent-tide {
   --ws-district-accent: 58, 140, 140;
 }
 
@@ -761,6 +766,65 @@
 }
 .ws-map-district.is-dragging .ws-map-district-handle {
   cursor: grabbing;
+}
+
+/* The drop confirmation (#346 FR-6g). Positioned in viewport coordinates by
+   placeMenu, exactly like the context menu, so it must not inherit the world
+   layer's transform — its host sits outside the theatre for that reason.
+   Borrows the menu's surface tokens rather than inventing a second panel
+   look. */
+.ws-map-drop-confirm {
+  /* The same default as a district, so the panel is never colourless while the
+     accent classes above swap it to match the group being joined. */
+  --ws-district-accent: 232, 134, 77;
+  position: fixed;
+  z-index: 10001;
+  max-width: 300px;
+  padding: 14px 16px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  box-shadow: var(--shadow-lg);
+}
+.ws-map-drop-confirm-title {
+  margin: 0 0 6px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.ws-map-drop-confirm-body {
+  margin: 0 0 12px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+.ws-map-drop-confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.ws-map-drop-confirm-actions button {
+  /* 44px targets, like every other map control (FR-56). */
+  min-height: 44px;
+  padding: 0 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.ws-map-drop-confirm-go {
+  border: 1px solid rgb(var(--ws-district-accent));
+  background: rgb(var(--ws-district-accent));
+  color: #fff;
+}
+.ws-map-drop-confirm-no {
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+.ws-map-drop-confirm-actions button:focus-visible {
+  outline: 2px solid rgb(var(--ws-district-accent));
+  outline-offset: 2px;
 }
 /* Would this delta bury a building outside the district? Same red-solid
    signal as .ws-map-tile.is-blocked below, sized for a border instead of an

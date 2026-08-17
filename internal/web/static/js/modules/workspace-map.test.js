@@ -2127,13 +2127,13 @@ test('tiles are spaced so a row cannot collide with the row below it', () => {
 // dropped rather than painted over whatever is there now.
 // ---------------------------------------------------------------------------
 
-function loadMapWithFetch(fetchImpl, windowExtras = {}, consoleImpl) {
+function loadMapWithFetch(fetchImpl, windowExtras = {}, consoleImpl, documentImpl) {
   const window = { addEventListener() {}, ...windowExtras };
   vm.runInNewContext(
     source,
     {
       window,
-      document: { getElementById: () => null },
+      document: documentImpl || { getElementById: () => null },
       setTimeout,
       clearTimeout,
       fetch: fetchImpl,
@@ -2629,6 +2629,77 @@ function createCameraHarness({ width = 1000, height = 600, tiles = [], districts
     return host;
   })();
 
+  // The drop confirmation's host (#346 FR-6g). Same shape as menuHost: the map
+  // writes the panel's markup in and then works with what it finds there, so
+  // the stub parses it back into elements that can be focused and clicked.
+  const confirmHost = (() => {
+    let hostHTML = '';
+    let panel = null;
+
+    const makeButton = answer => {
+      const button = {
+        answer,
+        focused: false,
+        getAttribute: name => (name === 'data-drop-confirm' ? answer : null),
+        focus: () => {
+          if (panel) panel.buttons.forEach(other => (other.focused = false));
+          button.focused = true;
+        },
+        // The dismissal listeners run on the document and identify their target
+        // by walking up from it, exactly as a real click would.
+        closest: sel => {
+          if (sel.includes('data-drop-confirm')) return button;
+          if (sel.includes('ws-map-drop-confirm')) return panel;
+          return null;
+        }
+      };
+      return button;
+    };
+
+    const makePanel = value => {
+      const panelClasses = new Set();
+      const answers = [];
+      const pattern = /data-drop-confirm="([^"]*)"/g;
+      let match;
+      while ((match = pattern.exec(value))) answers.push(match[1]);
+      return {
+        buttons: answers.map(makeButton),
+        style: {},
+        classList: {
+          add: c => panelClasses.add(c),
+          remove: c => panelClasses.delete(c),
+          contains: c => panelClasses.has(c),
+          toggle: (c, on) => (on ? panelClasses.add(c) : panelClasses.delete(c))
+        },
+        classes: panelClasses,
+        text: value
+          .replace(/<[^>]*>/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim(),
+        querySelectorAll: sel => (sel.includes('data-drop-confirm') ? panel.buttons : []),
+        getBoundingClientRect: () => ({ left: 0, top: 0, width: 0, height: 0 })
+      };
+    };
+
+    const host = {
+      style: {},
+      querySelector: sel => (sel.includes('data-ws-map-drop-confirm') ? panel : null),
+      panel: () => panel,
+      isOpen: () => !!panel,
+      text: () => (panel ? panel.text : ''),
+      button: answer => (panel ? panel.buttons.find(b => b.answer === answer) || null : null),
+      focused: () => (panel ? panel.buttons.find(b => b.focused) || null : null)
+    };
+    Object.defineProperty(host, 'innerHTML', {
+      get: () => hostHTML,
+      set: value => {
+        hostHTML = value;
+        panel = value && value.includes('data-ws-map-drop-confirm') ? makePanel(value) : null;
+      }
+    });
+    return host;
+  })();
+
   const container = {
     clientWidth: width,
     clientHeight: height,
@@ -2652,6 +2723,7 @@ function createCameraHarness({ width = 1000, height = 600, tiles = [], districts
       if (sel.includes('ws-map-canvas') || sel.includes('ws-map-viewport')) return canvas;
       if (sel.includes('ws-map-world')) return world;
       if (sel.includes('data-ws-map-menu-host')) return menuHost;
+      if (sel.includes('data-ws-map-confirm-host')) return confirmHost;
       const tileMatch = sel.match(/ws-map-tile\[data-ws-id="([^"]+)"\]/);
       if (tileMatch) return tileEls.find(el => el.id === tileMatch[1]) || null;
       const districtMatch = sel.match(/ws-map-district\[data-group-id="([^"]+)"\]/);
@@ -2695,6 +2767,7 @@ function createCameraHarness({ width = 1000, height = 600, tiles = [], districts
     classes,
     control,
     menu: menuHost,
+    confirm: confirmHost,
     tile: id => tileEls.find(el => el.id === id),
     district: id => districtEls.find(el => el.id === id),
     districtTag: id => districtTagEls.find(el => el.id === id),
@@ -4397,38 +4470,68 @@ test('hidden descendants travel with a collapsed district (#346 FR-113)', async 
 // Drop-to-group, wired (#346 FR-6a)
 // ---------------------------------------------------------------------------
 
+// A document that records its listeners, so the confirmation's Escape and
+// click-away routes can be driven without a browser.
+function recordingDocument() {
+  const bound = {};
+  return {
+    getElementById: () => null,
+    addEventListener: (type, fn) => {
+      (bound[type] = bound[type] || []).push(fn);
+    },
+    removeEventListener: (type, fn) => {
+      bound[type] = (bound[type] || []).filter(other => other !== fn);
+    },
+    fire: (type, event = {}) =>
+      (bound[type] || []).slice().forEach(fn => fn({ preventDefault() {}, ...event })),
+    bound: type => (bound[type] || []).length
+  };
+}
+
 async function mountedForDrop({ reparentFails = false } = {}) {
   const calls = [];
-  const map = loadMapWithFetch((url, init) => {
-    const method = (init && init.method) || 'GET';
-    calls.push({
-      url: String(url),
-      method,
-      body: init && init.body ? JSON.parse(init.body) : null
-    });
-    if (String(url).includes('/api/workspaces/')) {
-      if (reparentFails) return Promise.resolve({ ok: false, status: 500 });
-      return Promise.resolve({ ok: true, json: () => Promise.resolve({ success: true }) });
-    }
-    if (method === 'PATCH') {
-      return Promise.resolve({
-        ok: true,
-        json: () =>
-          Promise.resolve({
-            result: { schema_version: 1, revision: 4, positions: {}, snap_to_grid: false }
-          })
+  const doc = recordingDocument();
+  const map = loadMapWithFetch(
+    (url, init) => {
+      const method = (init && init.method) || 'GET';
+      calls.push({
+        url: String(url),
+        method,
+        body: init && init.body ? JSON.parse(init.body) : null
       });
-    }
-    return jsonResponse({
-      schema_version: 1,
-      revision: 1,
-      snap_to_grid: false,
-      positions: { m1: { x: 300, y: 300 }, solo: { x: 2000, y: 2000 } },
-      groups: {
-        g2: { sizing_mode: 'custom', frame: { x: 1000, y: 300, width: 600, height: 500 } }
+      if (String(url).includes('/api/workspaces/')) {
+        if (reparentFails) return Promise.resolve({ ok: false, status: 500 });
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ success: true }) });
       }
-    });
-  });
+      if (method === 'PATCH') {
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              result: { schema_version: 1, revision: 4, positions: {}, snap_to_grid: false }
+            })
+        });
+      }
+      return jsonResponse({
+        schema_version: 1,
+        revision: 1,
+        snap_to_grid: false,
+        positions: { m1: { x: 300, y: 300 }, solo: { x: 2000, y: 2000 } },
+        groups: {
+          // Deliberately not the default accent: the confirmation has to wear
+          // the colour of the district it is asking about (#346 FR-129).
+          g2: {
+            sizing_mode: 'custom',
+            accent: 'orchid',
+            frame: { x: 1000, y: 300, width: 600, height: 500 }
+          }
+        }
+      });
+    },
+    undefined,
+    undefined,
+    doc
+  );
   const harness = createCameraHarness({ tiles: ['m1', 'solo'], districts: ['g1', 'g2'] });
   map.mount(harness.container, {
     workspaces: [
@@ -4443,17 +4546,28 @@ async function mountedForDrop({ reparentFails = false } = {}) {
   });
   await flush();
   harness.fire('keydown', { key: '0', preventDefault() {} });
-  return { map, harness, calls };
+  return { map, harness, calls, doc };
 }
 
-test('dropping a workspace inside a district moves it into that group (#346 FR-6a)', async () => {
-  const { harness, calls } = await mountedForDrop();
+/** Drag `solo` from (2000,2000) into Beta's frame at (1000,300)-(1600,800). */
+function dragSoloIntoBeta(harness) {
   const tile = harness.tile('solo');
-
-  // From (2000,2000) into Beta's frame at (1000,300)-(1600,800).
   tile.fire('pointerdown', tilePointer(0, 0));
   tile.fire('pointermove', tilePointer(-800, -1600));
   tile.fire('pointerup', tilePointer(-800, -1600));
+}
+
+const reparentCalls = calls => calls.filter(c => c.url.includes('/api/workspaces/solo'));
+
+test('dropping a workspace inside a district moves it into that group (#346 FR-6a)', async () => {
+  const { harness, calls, doc } = await mountedForDrop();
+
+  dragSoloIntoBeta(harness);
+  await flushDeep();
+
+  // Nothing is written until the question is answered (FR-6g).
+  assert.equal(reparentCalls(calls).length, 0, 'the drop asks before it reparents');
+  doc.fire('pointerdown', { target: harness.confirm.button('join') });
   await flushDeep();
 
   const reparent = calls.find(c => c.url.includes('/api/workspaces/solo'));
@@ -4469,11 +4583,10 @@ test('dropping a workspace inside a district moves it into that group (#346 FR-6
 });
 
 test('the coordinate is saved before the membership, so a failure is partial (#346 FR-6a)', async () => {
-  const { harness, calls } = await mountedForDrop({ reparentFails: true });
-  const tile = harness.tile('solo');
-  tile.fire('pointerdown', tilePointer(0, 0));
-  tile.fire('pointermove', tilePointer(-800, -1600));
-  tile.fire('pointerup', tilePointer(-800, -1600));
+  const { harness, calls, doc } = await mountedForDrop({ reparentFails: true });
+  dragSoloIntoBeta(harness);
+  await flushDeep();
+  doc.fire('pointerdown', { target: harness.confirm.button('join') });
   await flushDeep();
 
   const order = calls.filter(c => c.method === 'PATCH').map(c => c.url);
@@ -4489,6 +4602,100 @@ test('the coordinate is saved before the membership, so a failure is partial (#3
     /could not be added to Beta.*still in its previous group/,
     'and the partial outcome is reported as what it is'
   );
+});
+
+// ---------------------------------------------------------------------------
+// The drop confirmation (#346 FR-6g)
+//
+// Joining a group is the one Map gesture with no Map-side undo, so it asks
+// first. These pin down that every route out of the question that is not an
+// explicit yes leaves the hierarchy alone.
+// ---------------------------------------------------------------------------
+
+test('the confirmation names both workspaces and says what cannot be undone (#346 FR-6g)', async () => {
+  const { harness } = await mountedForDrop();
+  dragSoloIntoBeta(harness);
+  await flushDeep();
+
+  assert.equal(harness.confirm.isOpen(), true);
+  const text = harness.confirm.text();
+  assert.match(text, /Move Solo into Beta\?/, 'both sides of the move are named');
+  assert.match(text, /Only Tree can take a workspace back out/, 'and the one-way door is stated');
+
+  // The district it is talking about stays lit, and the panel wears that
+  // district's own colour rather than a fixed one.
+  assert.equal(harness.district('g2').classList.contains('is-drop-target'), true);
+  assert.equal(
+    harness.confirm.panel().classList.contains('ws-map-accent-orchid'),
+    true,
+    'a violet group is not asked about in the default amber'
+  );
+
+  // Focus lands on the affirmative button, so the keyboard route is one key.
+  assert.equal(harness.confirm.focused().answer, 'join');
+});
+
+test('declining keeps the coordinate and changes no group (#346 FR-6g)', async () => {
+  const { harness, calls, doc } = await mountedForDrop();
+  dragSoloIntoBeta(harness);
+  await flushDeep();
+
+  doc.fire('pointerdown', { target: harness.confirm.button('decline') });
+  await flushDeep();
+
+  assert.equal(reparentCalls(calls).length, 0, 'no hierarchy was written');
+  assert.equal(harness.confirm.isOpen(), false, 'and the question is gone');
+  assert.equal(
+    harness.district('g2').classList.contains('is-drop-target'),
+    false,
+    'the highlight goes with it'
+  );
+  // The move itself still happened: declining is not a failure and must not be
+  // reported as one.
+  assert.ok(calls.find(c => c.url.includes('workspace-map') && c.method === 'PATCH'));
+  assert.match(String(harness.control('[data-map-live]').textContent), /stays out of Beta/);
+  assert.equal(harness.tile('solo').focused, true, 'focus returns to what was moved');
+});
+
+test('Escape declines, because an unanswered question is not a yes (#346 FR-6g)', async () => {
+  const { harness, calls, doc } = await mountedForDrop();
+  dragSoloIntoBeta(harness);
+  await flushDeep();
+
+  doc.fire('keydown', { key: 'Escape' });
+  await flushDeep();
+
+  assert.equal(harness.confirm.isOpen(), false);
+  assert.equal(reparentCalls(calls).length, 0);
+});
+
+test('clicking away from the confirmation declines it (#346 FR-6g)', async () => {
+  const { harness, calls, doc } = await mountedForDrop();
+  dragSoloIntoBeta(harness);
+  await flushDeep();
+
+  // Somewhere else on the map entirely.
+  doc.fire('pointerdown', { target: { closest: () => null } });
+  await flushDeep();
+
+  assert.equal(harness.confirm.isOpen(), false);
+  assert.equal(reparentCalls(calls).length, 0);
+});
+
+test('the confirmation answers once, however many times it is clicked (#346 FR-6g)', async () => {
+  const { harness, calls, doc } = await mountedForDrop();
+  dragSoloIntoBeta(harness);
+  await flushDeep();
+
+  const join = harness.confirm.button('join');
+  doc.fire('pointerdown', { target: join });
+  // A double-click, or a stray second event on the way out.
+  doc.fire('pointerdown', { target: join });
+  await flushDeep();
+
+  assert.equal(reparentCalls(calls).length, 1, 'exactly one reparent');
+  assert.equal(doc.bound('keydown'), 0, 'and the listeners are gone with the panel');
+  assert.equal(doc.bound('pointerdown'), 0);
 });
 
 test('a drop that changes nothing sends no hierarchy request (#346 FR-6a)', async () => {

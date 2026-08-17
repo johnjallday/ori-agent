@@ -1445,10 +1445,15 @@
     var rejection = dropRejectionReason(workspaces, id, target.id);
     if (rejection) return { kind: 'none', reason: rejection };
 
+    var moving = findWs(workspaces, id);
     return {
       kind: 'join',
       groupId: target.id,
-      name: (target.ws && target.ws.name) || 'that group'
+      name: (target.ws && target.ws.name) || 'that group',
+      // Carried on the intent rather than looked up later: this is resolved
+      // while the drag's own workspace list is still in hand, and the
+      // confirmation needs to name both sides of the move.
+      movingName: (moving && moving.name) || 'this workspace'
     };
   }
 
@@ -2837,7 +2842,8 @@
         '</section>' +
         '</div>' +
         selBarHTML() +
-        menuHostHTML()
+        menuHostHTML() +
+        confirmHostHTML()
       );
     }
     return (
@@ -2883,7 +2889,8 @@
       // The context menu's host, for the same reason: the menu is positioned in
       // viewport coordinates, so it must sit outside both the theatre's
       // clip-path and the world layer's pan/zoom transform.
-      menuHostHTML()
+      menuHostHTML() +
+      confirmHostHTML()
     );
   }
 
@@ -3348,6 +3355,13 @@
 
   function menuHostHTML() {
     return '<div class="ws-map-menu-host" data-ws-map-menu-host></div>';
+  }
+
+  // The drop confirmation's host. Separate from the menu's because the two can
+  // never be open at once but do not share a lifetime: closing the menu must
+  // not take a pending confirmation with it.
+  function confirmHostHTML() {
+    return '<div class="ws-map-menu-host" data-ws-map-confirm-host></div>';
   }
 
   // Single workspace tile. Every entry mirrors a control the Overview rail
@@ -5376,8 +5390,10 @@
         // the survivable one: a failed reparent leaves a workspace that moved
         // but did not change groups, which is a state the user can see and
         // repeat. The reverse would leave it in a new group at its old spot.
+        // ...and the membership is asked about before it is written. This is
+        // the only Map gesture with no Map-side undo (FR-6g).
         if (intent && intent.kind === 'join') {
-          return joinGroupOnDrop(container, id, intent, committed);
+          return confirmJoinOnDrop(container, id, el, intent, committed);
         }
         announce(container, 'Moved to ' + formatCoordinate(committed));
         settleLayout();
@@ -5396,6 +5412,266 @@
         );
         return false;
       });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Drop confirmation (#346 FR-6g)
+  //
+  // A drop that changes which group a workspace belongs to asks first. It is the
+  // one Map gesture with no Map-side undo — a frame follows its own members, so
+  // nothing on this surface can take a workspace back out again, and the user
+  // would have to go to Tree to reverse an accident.
+  //
+  // The panel is the map's own, not window.confirm, for the same reason the
+  // context menu is: a native modal seizing focus the instant the mouse comes up
+  // reads as an error, and it cannot show which district it is talking about.
+  // ---------------------------------------------------------------------------
+
+  // The one open confirmation. Never more than one: it is opened by a pointer
+  // release, and a release cannot overlap another.
+  var dropConfirmState = null;
+
+  function dropConfirmHTML(spec) {
+    return (
+      '<div class="ws-map-drop-confirm" data-ws-map-drop-confirm role="dialog" ' +
+      'aria-labelledby="wsMapDropConfirmTitle" aria-describedby="wsMapDropConfirmBody">' +
+      '<p class="ws-map-drop-confirm-title" id="wsMapDropConfirmTitle">Move ' +
+      escapeHtml(spec.wsName) +
+      ' into ' +
+      escapeHtml(spec.groupName) +
+      '?</p>' +
+      '<p class="ws-map-drop-confirm-body" id="wsMapDropConfirmBody">' +
+      'It stays where you dropped it either way. Only Tree can take a workspace ' +
+      'back out of a group.</p>' +
+      '<div class="ws-map-drop-confirm-actions">' +
+      '<button type="button" class="ws-map-drop-confirm-go" data-drop-confirm="join">' +
+      'Move into group</button>' +
+      '<button type="button" class="ws-map-drop-confirm-no" data-drop-confirm="decline">' +
+      'Keep it out</button>' +
+      '</div>' +
+      '</div>'
+    );
+  }
+
+  /**
+   * Ask before the reparent, and answer nothing until the user does.
+   *
+   * @returns {boolean} false when there is nowhere to render it, which the
+   * caller must treat as "do not join" rather than as consent.
+   */
+  function openDropConfirm(container, spec) {
+    closeDropConfirm({ restoreFocus: false });
+    if (!container || typeof container.querySelector !== 'function') return false;
+    var host = container.querySelector('[data-ws-map-confirm-host]');
+    if (!host) return false;
+    host.innerHTML = dropConfirmHTML(spec);
+    var panel =
+      typeof host.querySelector === 'function'
+        ? host.querySelector('[data-ws-map-drop-confirm]')
+        : null;
+    if (!panel) {
+      host.innerHTML = '';
+      return false;
+    }
+
+    dropConfirmState = {
+      container: container,
+      host: host,
+      panel: panel,
+      groupId: spec.groupId,
+      onConfirm: spec.onConfirm,
+      onDecline: spec.onDecline,
+      // Focus goes back to the workspace that was dropped, so a keyboard user
+      // is returned to the thing they were moving rather than to the page top.
+      restoreFocusTo: spec.el || null,
+      settled: false,
+      teardown: []
+    };
+
+    // The district stays lit while the question is on screen: the panel names
+    // the group in words, and the highlight says which rectangle that is.
+    markDropTarget(container, spec.groupId);
+    // ...and the panel wears that district's colour, so a violet group is never
+    // asked about in the default amber (the same fix the resize overlay needed).
+    wearDistrictAccent(container, panel, spec.groupId);
+    placeMenu(panel, anchorForElement(spec.el));
+    bindDropConfirmInteractions();
+    focusDropConfirmButton(0);
+    return true;
+  }
+
+  /**
+   * Give `el` the accent of the district it is about (#346 FR-129).
+   *
+   * Same reasoning as the resize overlay: a panel that talks about a violet
+   * group while wearing the default amber reads as being about something else.
+   */
+  function wearDistrictAccent(container, el, groupId) {
+    if (!el || !el.classList) return;
+    var accent = safeAccent(presentationFor(groupId).accent);
+    DISTRICT_ACCENTS.forEach(function (id) {
+      el.classList.toggle('ws-map-accent-' + id, id === accent);
+    });
+  }
+
+  function dropConfirmButtons() {
+    var state = dropConfirmState;
+    if (!state || typeof state.panel.querySelectorAll !== 'function') return [];
+    return Array.prototype.slice.call(state.panel.querySelectorAll('[data-drop-confirm]'));
+  }
+
+  function focusDropConfirmButton(index) {
+    var buttons = dropConfirmButtons();
+    var el = buttons[index];
+    if (el && typeof el.focus === 'function') el.focus();
+  }
+
+  /**
+   * Answer the question exactly once.
+   *
+   * Every dismissal route lands here, and everything that is not an explicit
+   * "Move into group" is a decline — an unanswered question must never be read
+   * as a yes.
+   */
+  function settleDropConfirm(answer) {
+    var state = dropConfirmState;
+    if (!state || state.settled) return;
+    state.settled = true;
+    var confirmed = answer === 'join';
+    var onConfirm = state.onConfirm;
+    var onDecline = state.onDecline;
+    closeDropConfirm({ restoreFocus: true });
+    if (confirmed) {
+      if (typeof onConfirm === 'function') onConfirm();
+    } else if (typeof onDecline === 'function') {
+      onDecline();
+    }
+  }
+
+  function closeDropConfirm(options) {
+    var state = dropConfirmState;
+    if (!state) return;
+    dropConfirmState = null;
+    state.teardown.forEach(function (undo) {
+      if (typeof undo === 'function') undo();
+    });
+    if (state.host) state.host.innerHTML = '';
+    markDropTarget(state.container, '');
+    var restore = options && options.restoreFocus;
+    if (restore && state.restoreFocusTo && typeof state.restoreFocusTo.focus === 'function') {
+      state.restoreFocusTo.focus();
+    }
+  }
+
+  /**
+   * Keyboard and pointer routes out of the panel.
+   *
+   * Escape and a click on the map behind it both decline, because the safe
+   * reading of "went away without choosing" is that no group changed. Tab wraps
+   * between the two buttons so focus cannot wander onto the map underneath
+   * while a question is still open.
+   */
+  function bindDropConfirmInteractions() {
+    var state = dropConfirmState;
+    if (!state) return;
+
+    var onKeyDown = function (event) {
+      if (!dropConfirmState) return;
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        settleDropConfirm('decline');
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      var buttons = dropConfirmButtons();
+      if (buttons.length < 2) return;
+      var at = buttons.indexOf(event.target);
+      // Only the ends need handling; the middle is the browser's own business.
+      if (event.shiftKey && at === 0) {
+        event.preventDefault();
+        focusDropConfirmButton(buttons.length - 1);
+      } else if (!event.shiftKey && at === buttons.length - 1) {
+        event.preventDefault();
+        focusDropConfirmButton(0);
+      }
+    };
+
+    var onClick = function (event) {
+      if (!dropConfirmState) return;
+      var target = event.target;
+      var button =
+        target && typeof target.closest === 'function'
+          ? target.closest('[data-drop-confirm]')
+          : null;
+      if (button) {
+        event.preventDefault();
+        settleDropConfirm(button.getAttribute('data-drop-confirm'));
+        return;
+      }
+      // A click anywhere else dismisses it, which is a decline.
+      if (
+        target &&
+        typeof target.closest === 'function' &&
+        target.closest('[data-ws-map-drop-confirm]')
+      ) {
+        return;
+      }
+      settleDropConfirm('decline');
+    };
+
+    if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+      document.addEventListener('keydown', onKeyDown, true);
+      document.addEventListener('pointerdown', onClick, true);
+      state.teardown.push(function () {
+        document.removeEventListener('keydown', onKeyDown, true);
+        document.removeEventListener('pointerdown', onClick, true);
+      });
+    }
+  }
+
+  /**
+   * Put the question on screen and resolve with what the user chose.
+   *
+   * The coordinate is already saved by the time this runs, so declining is not
+   * a failure and is not reported as one: it leaves exactly the state a drop on
+   * open ground would have left.
+   */
+  function confirmJoinOnDrop(container, id, el, intent, committed) {
+    return new Promise(function (resolve) {
+      var opened = openDropConfirm(container, {
+        el: el,
+        groupId: intent.groupId,
+        groupName: intent.name,
+        wsName: intent.movingName || 'this workspace',
+        onConfirm: function () {
+          resolve(joinGroupOnDrop(container, id, intent, committed));
+        },
+        onDecline: function () {
+          announce(
+            container,
+            'Moved to ' + formatCoordinate(committed) + '. It stays out of ' + intent.name + '.'
+          );
+          settleLayout();
+          resolve(false);
+        }
+      });
+      if (opened) {
+        announce(
+          container,
+          'Moved to ' +
+            formatCoordinate(committed) +
+            '. Confirm whether to move it into ' +
+            intent.name +
+            '.'
+        );
+        return;
+      }
+      // Nothing to render into. The move stands; the membership question goes
+      // unasked, and an unasked question is never a yes.
+      announce(container, 'Moved to ' + formatCoordinate(committed));
+      settleLayout();
+      resolve(false);
+    });
   }
 
   /**
