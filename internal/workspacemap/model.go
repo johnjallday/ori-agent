@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 	"time"
 )
@@ -62,6 +63,21 @@ const SnapStep = 38.0
 // (FR-57).
 const DefaultSnapToGrid = true
 
+// District frame geometry (#346 FR-43, FR-44). A group district resolves one
+// effective world-space rectangle; only a user-chosen *minimum* rectangle is
+// ever stored, and it must be large enough to hold the district header and an
+// empty-group presentation.
+//
+// The minimums mirror one map cell in internal/web/static/js/modules/workspace-map.js
+// (CELL_W x CELL_H). They are duplicated rather than derived because the server
+// must be able to refuse an impossible rectangle without knowing anything about
+// the client's rendering, and a silent drift between the two is caught by the
+// browser tests that assert an empty district is exactly one cell.
+const (
+	MinFrameWidth  = 176.0
+	MinFrameHeight = 170.0
+)
+
 // Bounded input sizes (FR-100). A patch is a partial update, so these caps are
 // generous for real use and still keep a malformed or hostile request from
 // turning into unbounded work or an unbounded stored record.
@@ -75,6 +91,10 @@ const (
 	// MaxPositionsPerLayout caps how many anchors one user's stored layout may
 	// hold in total.
 	MaxPositionsPerLayout = 5000
+	// MaxGroupPresentationsPerLayout caps how many group districts one user may
+	// have customized presentation for (#346 FR-182). A district exists only for
+	// a top-level group, so this is far above any realistic hierarchy.
+	MaxGroupPresentationsPerLayout = 1000
 	// MaxRequestBytes caps the decoded size of one layout request body.
 	MaxRequestBytes = 1 << 20
 	// MaxNodeIDLength caps an individual node identifier.
@@ -105,6 +125,13 @@ var (
 	// ErrUnsupportedSchemaVersion marks a stored record written by a layout
 	// format this build does not read.
 	ErrUnsupportedSchemaVersion = errors.New("unsupported workspace map schema version")
+	// ErrInvalidFrame marks a district rectangle that is missing, non-finite,
+	// non-positive, below the documented minimum, or outside the safe world.
+	ErrInvalidFrame = errors.New("invalid workspace map group frame")
+	// ErrUnsupportedPreset marks an accent or theme identifier that is not in
+	// this build's curated catalog. Presets are app-defined identifiers, never
+	// caller-supplied CSS (#346 FR-125, FR-194).
+	ErrUnsupportedPreset = errors.New("unsupported workspace map district preset")
 )
 
 // Point is one node's anchor in world space (FR-3). A workspace or group is
@@ -192,18 +219,27 @@ type Layout struct {
 	SchemaVersion int              `json:"schema_version"`
 	Revision      int64            `json:"revision"`
 	Positions     map[string]Point `json:"positions"`
-	Viewport      *Viewport        `json:"viewport,omitempty"`
-	SnapToGrid    bool             `json:"snap_to_grid"`
-	UpdatedAt     time.Time        `json:"updated_at,omitzero"`
+	// Groups carries per-group district presentation, keyed by immutable group
+	// ID (#346 FR-173). A group absent from this map renders with
+	// DefaultGroupPresentation, so an existing schema-version-1 layout — which
+	// has no group rows at all — upgrades to compact automatic districts with no
+	// migration of its positions, viewport, snap preference, or revision
+	// (FR-175).
+	Groups     map[string]GroupPresentation `json:"groups"`
+	Viewport   *Viewport                    `json:"viewport,omitempty"`
+	SnapToGrid bool                         `json:"snap_to_grid"`
+	UpdatedAt  time.Time                    `json:"updated_at,omitzero"`
 }
 
 // NewLayout returns the layout a user starts with before they have moved
-// anything: no saved anchors, no saved camera, snapping enabled (FR-57).
+// anything: no saved anchors, no saved districts, no saved camera, snapping
+// enabled (FR-57).
 func NewLayout() Layout {
 	return Layout{
 		SchemaVersion: SchemaVersion,
 		Revision:      0,
 		Positions:     map[string]Point{},
+		Groups:        map[string]GroupPresentation{},
 		SnapToGrid:    DefaultSnapToGrid,
 	}
 }
@@ -245,8 +281,62 @@ const (
 	// pre-reset layout back as one unit, without a permanent history table
 	// (FR-112). Unlike OpSetPositions it does not merge: anchors absent from
 	// the snapshot are removed.
+	//
+	// It restores anchors ONLY. Since #346 a layout also has district geometry,
+	// and an Undo that put the buildings back while leaving every district
+	// automatic and expanded would not be the layout the user had. Use
+	// OpRestoreGeometry for that; this kind stays for callers that genuinely
+	// mean "anchors, nothing else".
 	OpRestorePositions OpKind = "restore_positions"
+	// OpRestoreGeometry replaces the whole layout GEOMETRY with an exact
+	// snapshot, atomically: node anchors, custom frames, sizing modes, and
+	// collapsed states together (#346 FR-187).
+	//
+	// Appearance is deliberately absent. Reset never cleared an accent or a
+	// theme, so an Undo of it has nothing to put back, and carrying appearance
+	// in the snapshot would let a stale Undo silently revert a colour the user
+	// chose after the reset (FR-186).
+	OpRestoreGeometry OpKind = "restore_geometry"
+
+	// --- group district presentation (#346 FR-173, FR-178) ---
+	//
+	// Each of these targets exactly one group and changes exactly one facet of
+	// its presentation. They are separate verbs rather than one "save the
+	// district" call for the same reason the position ops are partial: a tab
+	// that resized a district must not also re-assert a collapse state or an
+	// accent it read ten minutes ago.
+
+	// OpSetGroupFrame stores a user-chosen minimum rectangle and switches the
+	// district to custom sizing (FR-42).
+	OpSetGroupFrame OpKind = "set_group_frame"
+	// OpFitGroupToContents returns a district to automatic sizing and discards
+	// its stored minimum rectangle. It changes nothing else — not a member
+	// coordinate, not the camera, not the collapse state, not the appearance
+	// (FR-40, FR-41).
+	OpFitGroupToContents OpKind = "fit_group_to_contents"
+	// OpSetGroupCollapsed stores whether the district renders as a compact
+	// summary. The expanded frame is preserved while collapsed (FR-114).
+	OpSetGroupCollapsed OpKind = "set_group_collapsed"
+	// OpSetGroupAppearance stores a curated accent and/or district theme.
+	OpSetGroupAppearance OpKind = "set_group_appearance"
+	// OpResetGroupAppearance restores the default accent and theme without
+	// touching geometry, sizing mode, collapse state, members, or coordinates
+	// (FR-137).
+	OpResetGroupAppearance OpKind = "reset_group_appearance"
 )
+
+// groupPresentationKinds is the set of operations that address one group's
+// district presentation. They share validation and, in the store, share the
+// single per-group row they write.
+func (k OpKind) isGroupPresentation() bool {
+	switch k {
+	case OpSetGroupFrame, OpFitGroupToContents, OpSetGroupCollapsed,
+		OpSetGroupAppearance, OpResetGroupAppearance:
+		return true
+	default:
+		return false
+	}
+}
 
 // Operation is one explicit partial change. The Kind field selects which of the
 // remaining fields carry meaning; Validate rejects a payload that sets fields
@@ -262,11 +352,26 @@ type Operation struct {
 	// SnapToGrid carries the snap preference for OpSetPreferences. It is a
 	// pointer so "not mentioned" stays distinguishable from "set to false".
 	SnapToGrid *bool `json:"snap_to_grid,omitempty"`
-	// GroupID names the group whose cluster OpTranslateGroup moves.
+	// GroupID names the group OpTranslateGroup moves, or whose district
+	// presentation a group operation changes.
 	GroupID string `json:"group_id,omitempty"`
 	// Delta is the world-space offset OpTranslateGroup applies to the group
 	// anchor and to every visible descendant anchor.
 	Delta *Point `json:"delta,omitempty"`
+	// Frame carries the user-chosen minimum rectangle for OpSetGroupFrame.
+	Frame *Frame `json:"frame,omitempty"`
+	// Collapsed carries the target state for OpSetGroupCollapsed. It is a
+	// pointer so "not mentioned" stays distinguishable from "set to false".
+	Collapsed *bool `json:"collapsed,omitempty"`
+	// Accent and Theme carry curated preset identifiers for
+	// OpSetGroupAppearance. At least one must be present; an empty string means
+	// "leave this one alone" rather than "clear it".
+	Accent string `json:"accent,omitempty"`
+	Theme  string `json:"theme,omitempty"`
+	// Groups carries the district geometry snapshot for OpRestoreGeometry,
+	// keyed by group ID. Districts absent from it are reset, exactly as anchors
+	// absent from Positions are removed.
+	Groups map[string]GroupGeometry `json:"groups,omitempty"`
 }
 
 // SetPositions builds a merge operation for one or more dropped nodes.
@@ -299,6 +404,41 @@ func RestorePositions(positions map[string]Point) Operation {
 	return Operation{Kind: OpRestorePositions, Positions: positions}
 }
 
+// RestoreGeometry builds the atomic exact-restore operation used by Undo after
+// a reset: anchors and district geometry together, appearance untouched.
+func RestoreGeometry(positions map[string]Point, groups map[string]GroupGeometry) Operation {
+	if groups == nil {
+		groups = map[string]GroupGeometry{}
+	}
+	return Operation{Kind: OpRestoreGeometry, Positions: positions, Groups: groups}
+}
+
+// SetGroupFrame builds the operation a committed manual resize sends.
+func SetGroupFrame(groupID string, frame Frame) Operation {
+	return Operation{Kind: OpSetGroupFrame, GroupID: groupID, Frame: &frame}
+}
+
+// FitGroupToContents builds the Fit to contents operation.
+func FitGroupToContents(groupID string) Operation {
+	return Operation{Kind: OpFitGroupToContents, GroupID: groupID}
+}
+
+// SetGroupCollapsed builds the collapse/expand operation.
+func SetGroupCollapsed(groupID string, collapsed bool) Operation {
+	return Operation{Kind: OpSetGroupCollapsed, GroupID: groupID, Collapsed: &collapsed}
+}
+
+// SetGroupAppearance builds an accent and/or theme operation. An empty string
+// leaves that facet unchanged.
+func SetGroupAppearance(groupID, accent, theme string) Operation {
+	return Operation{Kind: OpSetGroupAppearance, GroupID: groupID, Accent: accent, Theme: theme}
+}
+
+// ResetGroupAppearance builds the Use default appearance operation.
+func ResetGroupAppearance(groupID string) Operation {
+	return Operation{Kind: OpResetGroupAppearance, GroupID: groupID}
+}
+
 // Patch is one bounded partial update. Operations apply in order within a
 // single transaction and produce a single new revision (FR-97).
 type Patch struct {
@@ -311,12 +451,18 @@ type Patch struct {
 //
 // Positions holds only the anchors this write committed, not the whole layout.
 // After OpReset it is empty; after OpRestorePositions it is the restored set.
+//
+// Groups likewise holds only the districts this write touched, each as the
+// canonical record now stored — including the facets the operation did not
+// mention, so the client reconciles one whole district rather than merging a
+// fragment into a state it may already have wrong (FR-190).
 type Result struct {
-	SchemaVersion int              `json:"schema_version"`
-	Revision      int64            `json:"revision"`
-	Positions     map[string]Point `json:"positions"`
-	Viewport      *Viewport        `json:"viewport,omitempty"`
-	SnapToGrid    bool             `json:"snap_to_grid"`
+	SchemaVersion int                          `json:"schema_version"`
+	Revision      int64                        `json:"revision"`
+	Positions     map[string]Point             `json:"positions"`
+	Groups        map[string]GroupPresentation `json:"groups,omitempty"`
+	Viewport      *Viewport                    `json:"viewport,omitempty"`
+	SnapToGrid    bool                         `json:"snap_to_grid"`
 }
 
 // NormalizePatch validates a decoded patch and returns a normalized copy safe to
@@ -347,8 +493,7 @@ func NormalizePatch(patch Patch) (Patch, error) {
 func NormalizeOperation(op Operation) (Operation, error) {
 	switch op.Kind {
 	case OpSetPositions, OpRestorePositions:
-		if err := rejectFields(op, "viewport", op.Viewport != nil, "snap_to_grid", op.SnapToGrid != nil,
-			"group_id", strings.TrimSpace(op.GroupID) != "", "delta", op.Delta != nil); err != nil {
+		if err := allowFields(op, "positions"); err != nil {
 			return Operation{}, err
 		}
 		positions, err := normalizePositions(op.Positions)
@@ -363,8 +508,7 @@ func NormalizeOperation(op Operation) (Operation, error) {
 		return Operation{Kind: op.Kind, Positions: positions}, nil
 
 	case OpSetViewport:
-		if err := rejectFields(op, "positions", len(op.Positions) > 0, "snap_to_grid", op.SnapToGrid != nil,
-			"group_id", strings.TrimSpace(op.GroupID) != "", "delta", op.Delta != nil); err != nil {
+		if err := allowFields(op, "viewport"); err != nil {
 			return Operation{}, err
 		}
 		if op.Viewport == nil {
@@ -377,8 +521,7 @@ func NormalizeOperation(op Operation) (Operation, error) {
 		return Operation{Kind: op.Kind, Viewport: &viewport}, nil
 
 	case OpSetPreferences:
-		if err := rejectFields(op, "positions", len(op.Positions) > 0, "viewport", op.Viewport != nil,
-			"group_id", strings.TrimSpace(op.GroupID) != "", "delta", op.Delta != nil); err != nil {
+		if err := allowFields(op, "snap_to_grid"); err != nil {
 			return Operation{}, err
 		}
 		if op.SnapToGrid == nil {
@@ -388,8 +531,7 @@ func NormalizeOperation(op Operation) (Operation, error) {
 		return Operation{Kind: op.Kind, SnapToGrid: &snap}, nil
 
 	case OpTranslateGroup:
-		if err := rejectFields(op, "positions", len(op.Positions) > 0, "viewport", op.Viewport != nil,
-			"snap_to_grid", op.SnapToGrid != nil); err != nil {
+		if err := allowFields(op, "group_id", "delta"); err != nil {
 			return Operation{}, err
 		}
 		groupID, err := NormalizeNodeID(op.GroupID)
@@ -413,12 +555,112 @@ func NormalizeOperation(op Operation) (Operation, error) {
 		return Operation{Kind: op.Kind, GroupID: groupID, Delta: &delta}, nil
 
 	case OpReset:
-		if err := rejectFields(op, "positions", len(op.Positions) > 0, "viewport", op.Viewport != nil,
-			"snap_to_grid", op.SnapToGrid != nil, "group_id", strings.TrimSpace(op.GroupID) != "",
-			"delta", op.Delta != nil); err != nil {
+		if err := allowFields(op); err != nil {
 			return Operation{}, err
 		}
 		return Operation{Kind: OpReset}, nil
+
+	case OpRestoreGeometry:
+		if err := allowFields(op, "positions", "groups"); err != nil {
+			return Operation{}, err
+		}
+		positions, err := normalizePositions(op.Positions)
+		if err != nil {
+			return Operation{}, err
+		}
+		if len(op.Groups) > MaxGroupPresentationsPerLayout {
+			return Operation{}, fmt.Errorf("%w: %d districts exceeds %d",
+				ErrPatchTooLarge, len(op.Groups), MaxGroupPresentationsPerLayout)
+		}
+		groups := make(map[string]GroupGeometry, len(op.Groups))
+		for rawID, geometry := range op.Groups {
+			groupID, err := NormalizeNodeID(rawID)
+			if err != nil {
+				return Operation{}, err
+			}
+			if _, duplicate := groups[groupID]; duplicate {
+				return Operation{}, fmt.Errorf("%w: duplicate group id %q", ErrInvalidPatch, groupID)
+			}
+			clean, err := NormalizeGroupGeometry(geometry)
+			if err != nil {
+				return Operation{}, fmt.Errorf("group %q: %w", groupID, err)
+			}
+			groups[groupID] = clean
+		}
+		// An empty restore is meaningful — it is the state a reset produces —
+		// so unlike OpSetPositions there is no "requires at least one" rule.
+		return Operation{Kind: op.Kind, Positions: positions, Groups: groups}, nil
+
+	case OpSetGroupFrame:
+		if err := allowFields(op, "group_id", "frame"); err != nil {
+			return Operation{}, err
+		}
+		groupID, err := NormalizeNodeID(op.GroupID)
+		if err != nil {
+			return Operation{}, err
+		}
+		if op.Frame == nil {
+			return Operation{}, fmt.Errorf("%w: %s requires frame", ErrInvalidPatch, op.Kind)
+		}
+		frame, err := NormalizeFrame(*op.Frame)
+		if err != nil {
+			return Operation{}, err
+		}
+		return Operation{Kind: op.Kind, GroupID: groupID, Frame: &frame}, nil
+
+	case OpFitGroupToContents, OpResetGroupAppearance:
+		if err := allowFields(op, "group_id"); err != nil {
+			return Operation{}, err
+		}
+		groupID, err := NormalizeNodeID(op.GroupID)
+		if err != nil {
+			return Operation{}, err
+		}
+		return Operation{Kind: op.Kind, GroupID: groupID}, nil
+
+	case OpSetGroupCollapsed:
+		if err := allowFields(op, "group_id", "collapsed"); err != nil {
+			return Operation{}, err
+		}
+		groupID, err := NormalizeNodeID(op.GroupID)
+		if err != nil {
+			return Operation{}, err
+		}
+		if op.Collapsed == nil {
+			return Operation{}, fmt.Errorf("%w: %s requires collapsed", ErrInvalidPatch, op.Kind)
+		}
+		collapsed := *op.Collapsed
+		return Operation{Kind: op.Kind, GroupID: groupID, Collapsed: &collapsed}, nil
+
+	case OpSetGroupAppearance:
+		if err := allowFields(op, "group_id", "accent", "theme"); err != nil {
+			return Operation{}, err
+		}
+		groupID, err := NormalizeNodeID(op.GroupID)
+		if err != nil {
+			return Operation{}, err
+		}
+		normalized := Operation{Kind: op.Kind, GroupID: groupID}
+		if strings.TrimSpace(op.Accent) != "" {
+			accent, err := NormalizeAccent(op.Accent)
+			if err != nil {
+				return Operation{}, err
+			}
+			normalized.Accent = accent
+		}
+		if strings.TrimSpace(op.Theme) != "" {
+			theme, err := NormalizeTheme(op.Theme)
+			if err != nil {
+				return Operation{}, err
+			}
+			normalized.Theme = theme
+		}
+		// "Change nothing" is a caller mistake, not a no-op to store: it would
+		// still consume a revision and tell the client something was committed.
+		if normalized.Accent == "" && normalized.Theme == "" {
+			return Operation{}, fmt.Errorf("%w: %s requires accent or theme", ErrInvalidPatch, op.Kind)
+		}
+		return normalized, nil
 
 	default:
 		return Operation{}, fmt.Errorf("%w: unknown operation %q", ErrInvalidPatch, op.Kind)
@@ -519,13 +761,42 @@ func normalizeViewport(v Viewport) (Viewport, error) {
 	return Viewport{CenterX: center.X, CenterY: center.Y, Zoom: roundZoom(v.Zoom)}, nil
 }
 
-// rejectFields fails an operation that carries a field belonging to a different
-// operation kind. Pairs are (field name, present) in order.
-func rejectFields(op Operation, pairs ...any) error {
-	for i := 0; i+1 < len(pairs); i += 2 {
-		name, _ := pairs[i].(string)
-		present, _ := pairs[i+1].(bool)
-		if present {
+// presentFields reports which optional fields an operation actually carries.
+// Every optional field on Operation is listed here exactly once, so a field
+// added to the struct without being claimed by some kind is refused by default
+// rather than silently accepted everywhere (FR-180).
+func presentFields(op Operation) map[string]bool {
+	return map[string]bool{
+		"positions":    len(op.Positions) > 0,
+		"viewport":     op.Viewport != nil,
+		"snap_to_grid": op.SnapToGrid != nil,
+		"group_id":     strings.TrimSpace(op.GroupID) != "",
+		"delta":        op.Delta != nil,
+		"frame":        op.Frame != nil,
+		"collapsed":    op.Collapsed != nil,
+		"accent":       strings.TrimSpace(op.Accent) != "",
+		"theme":        strings.TrimSpace(op.Theme) != "",
+		"groups":       op.Groups != nil,
+	}
+}
+
+// allowFields fails an operation that carries a field belonging to a different
+// operation kind. An ambiguous payload is refused whole rather than applied in
+// part, so a caller never gets half of what its JSON appeared to ask for.
+func allowFields(op Operation, allowed ...string) error {
+	permitted := make(map[string]bool, len(allowed))
+	for _, name := range allowed {
+		permitted[name] = true
+	}
+	present := presentFields(op)
+	names := make([]string, 0, len(present))
+	for name := range present {
+		names = append(names, name)
+	}
+	// Sorted so the same malformed payload always names the same field first.
+	sort.Strings(names)
+	for _, name := range names {
+		if present[name] && !permitted[name] {
 			return fmt.Errorf("%w: %s does not accept %s", ErrInvalidPatch, op.Kind, name)
 		}
 	}

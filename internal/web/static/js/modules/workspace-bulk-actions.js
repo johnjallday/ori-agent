@@ -263,6 +263,16 @@ export async function deleteWorkspaces(ids, ctx) {
  *
  * The selection is reduced to top-level ids first — see topLevelIds for why a
  * nested child must not be reparented out of a parent that is moving too.
+ *
+ * Returns the outcome rather than a bare id (#346 FR-28). The Map draws the new
+ * district around exactly the members the *authoritative hierarchy* placed in
+ * the group, so "it worked" is not enough information: a run where two of three
+ * reparents succeeded has to frame two workspaces and say so. `null` means
+ * nothing was created at all — a cancelled name, or a failed create — and is
+ * the only case where no group exists afterwards.
+ *
+ * @returns {Promise<null | {groupId: string, name: string, placed: string[],
+ *   failed: string[], partial: boolean}>}
  */
 export async function createGroupFrom(memberIds, ctx) {
   const members = topLevelIds(memberIds, ctxRows(ctx));
@@ -270,6 +280,7 @@ export async function createGroupFrom(memberIds, ctx) {
   if (!name || !String(name).trim()) return null;
   const trimmed = String(name).trim();
 
+  let groupId = '';
   try {
     const res = await ctxFetch(ctx)('/api/workspaces', {
       method: 'POST',
@@ -278,31 +289,41 @@ export async function createGroupFrom(memberIds, ctx) {
     });
     if (!res.ok) throw new Error(await errorText(res, 'Failed to create group'));
     const body = await res.json().catch(() => ({}));
-    const groupId = body && body.folder && body.folder.id;
-
-    if (groupId && members.length) {
-      const responses = await Promise.all(
-        members.map((id, index) =>
-          ctxFetch(ctx)(`/api/workspaces/${encodeURIComponent(id)}`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ parent_id: groupId, order_index: index + 1 })
-          })
-        )
-      );
-      const failed = responses.find(response => !response.ok);
-      // The group exists either way, so say so rather than reporting a clean
-      // failure that leaves an empty group behind with no explanation.
-      if (failed)
-        throw new Error(await errorText(failed, 'Group created, but moving items failed'));
-    }
-
-    announce(ctx, `Group "${trimmed}" created.`);
-    await changed(ctx);
-    return groupId || null;
+    groupId = (body && body.folder && body.folder.id) || '';
+    if (!groupId) throw new Error('Failed to create group');
   } catch (err) {
+    // No group, no members moved: this is the one clean failure.
     fail(ctx, err, 'Failed to create group.');
     await changed(ctx);
     return null;
   }
+
+  // Each reparent is reported on its own. Throwing on the first failure used to
+  // discard which of the others had succeeded, which is exactly the fact a
+  // truthful partial report — and a correctly framed district — needs.
+  const placed = [];
+  const failed = [];
+  const responses = await Promise.all(
+    members.map((id, index) =>
+      ctxFetch(ctx)(`/api/workspaces/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ parent_id: groupId, order_index: index + 1 })
+      })
+        .then(response => ({ id, ok: !!(response && response.ok) }))
+        // A network error is a member that did not move, not a lost group.
+        .catch(() => ({ id, ok: false }))
+    )
+  );
+  responses.forEach(outcome => (outcome.ok ? placed : failed).push(outcome.id));
+
+  if (failed.length) {
+    const message = `Group "${trimmed}" created, but ${failed.length} of ${members.length} workspaces could not be moved into it.`;
+    announce(ctx, message);
+    toast(ctx, message, 'error');
+  } else {
+    announce(ctx, `Group "${trimmed}" created.`);
+  }
+  await changed(ctx);
+  return { groupId, name: trimmed, placed, failed, partial: failed.length > 0 };
 }

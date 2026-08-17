@@ -895,4 +895,232 @@ test.describe('Coordinate Workspace Map', () => {
     // Leave the sandbox as we found it.
     await page.locator('[data-map-snap]').click();
   });
+
+  // -------------------------------------------------------------------------
+  // Group districts (#346)
+  //
+  // These cover what a DOM harness cannot: real pointer geometry against a
+  // screen-space overlay that must stay finger-sized while the world scales
+  // underneath it, and the zoom range those targets have to survive.
+  // -------------------------------------------------------------------------
+  test.describe('group districts (#346)', () => {
+    // Serial: every test seeds a fixture into the ONE shared demo server and
+    // picks its row from how many already exist. Run in parallel, two workers
+    // read the same count and stack their districts on each other.
+    test.describe.configure({ mode: 'serial' });
+
+    /**
+     * A group with two members, on a row of its own.
+     *
+     * Each test in this block seeds its own fixture into the same sandbox, so a
+     * fixed coordinate would stack every district on the last one — producing
+     * genuine (and correctly reported) containment conflicts that have nothing
+     * to do with what is being tested.
+     */
+    async function seedDistrict(page: Page) {
+      const tag = String(Date.now()).slice(-6);
+      const existing = await listWorkspaces(page);
+      const row = existing.filter(ws => String(ws.name || '').startsWith('District A ')).length;
+      const make = async (name: string, kind = 'workspace') => {
+        const res = await page.request.post('/api/workspaces', { data: { name, kind } });
+        return (await res.json()).folder.id;
+      };
+      const group = await make(`District ${tag}`, 'group');
+      const a = await make(`District A ${tag}`);
+      const b = await make(`District B ${tag}`);
+      for (const id of [a, b]) {
+        await page.request.put(`/api/workspaces/${id}`, { data: { parent_id: group } });
+      }
+      const y = 380 + row * 570;
+      await page.request.patch('/api/workspace-map/layout', {
+        data: {
+          operations: [
+            { op: 'set_positions', positions: { [a]: { x: 380, y }, [b]: { x: 608, y } } }
+          ]
+        }
+      });
+      return { group, a, b, tag, y };
+    }
+
+    const districtOf = (page: Page, group: string) =>
+      page.locator(`.ws-map-district[data-group-id="${group}"]`);
+
+    /**
+     * Select the district, retrying across the cockpit's hydration remounts.
+     *
+     * Frames everything first: the sandbox is shared with every other spec in
+     * this file, and a camera one of them left behind can put the fixture
+     * outside the canvas entirely, where no click can reach it.
+     */
+    async function selectDistrict(page: Page, group: string) {
+      const district = districtOf(page, group);
+      await district.waitFor({ timeout: 15000 });
+      await frameFromMenu(page, 'fit');
+      await expect(async () => {
+        await frameFromMenu(page, 'fit');
+        await district.locator('.ws-map-district-tag').click({ force: true });
+        await expect(page.locator('[data-ws-map-resize]')).toBeVisible({ timeout: 1500 });
+      }).toPass({ timeout: 20000 });
+    }
+
+    async function zoomTo(page: Page, target: number) {
+      // The camera's own buttons, so the spec exercises the real clamp rather
+      // than poking module state.
+      for (let i = 0; i < 40; i += 1) {
+        const zoom = (await cameraOf(page)).zoom;
+        if (Math.abs(zoom - target) < 0.02) return zoom;
+        await page.locator(zoom < target ? '[data-map-zoom-in]' : '[data-map-zoom-out]').click();
+        await page.waitForTimeout(40);
+        const next = (await cameraOf(page)).zoom;
+        if (next === zoom) return next; // clamped
+      }
+      return (await cameraOf(page)).zoom;
+    }
+
+    test('a populated district is compact and never spans to a stale anchor (FR-16, FR-25)', async ({
+      page
+    }) => {
+      const { group, y } = await seedDistrict(page);
+      // A group anchor left far below its members, as group creation used to
+      // produce. It must not stretch the district by a single unit.
+      await page.request.patch('/api/workspace-map/layout', {
+        data: {
+          operations: [{ op: 'set_positions', positions: { [group]: { x: 380, y: y + 6000 } } }]
+        }
+      });
+      await openMap(page);
+
+      const district = districtOf(page, group);
+      await district.waitFor();
+      const frame = await district.evaluate(el => ({
+        y: parseFloat((el as HTMLElement).style.top),
+        height: parseFloat((el as HTMLElement).style.height)
+      }));
+      expect(frame.y).toBeLessThan(y + 20);
+      expect(frame.height).toBeLessThan(400);
+    });
+
+    test('resize handles keep a 44px target from 10% through 200% zoom (FR-56)', async ({
+      page
+    }) => {
+      const { group } = await seedDistrict(page);
+      await openMap(page);
+      await districtOf(page, group).waitFor();
+      await selectDistrict(page, group);
+
+      for (const target of [0.1, 1, 2]) {
+        const zoom = await zoomTo(page, target);
+        for (const edge of ['n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw']) {
+          const box = await page.locator(`[data-resize-handle="${edge}"]`).boundingBox();
+          expect(box, `${edge} has a box at ${zoom}x`).not.toBeNull();
+          expect(box!.width, `${edge} width at ${zoom}x`).toBeGreaterThanOrEqual(44);
+          expect(box!.height, `${edge} height at ${zoom}x`).toBeGreaterThanOrEqual(44);
+        }
+      }
+    });
+
+    test('the resize overlay never intercepts map gestures aimed past it (FR-157)', async ({
+      page
+    }) => {
+      const { group } = await seedDistrict(page);
+      await openMap(page);
+      await districtOf(page, group).waitFor();
+      await selectDistrict(page, group);
+
+      // The overlay spans the whole canvas. A point inside it but away from any
+      // handle must hit the map, not the overlay.
+      const canvas = (await page.locator('[data-ws-map-viewport]').boundingBox())!;
+      const probe = await page.evaluate(
+        point => {
+          const el = document.elementFromPoint(point.x, point.y);
+          return el ? el.className : 'none';
+        },
+        { x: canvas.x + canvas.width / 2, y: canvas.y + canvas.height / 2 }
+      );
+      expect(String(probe)).not.toContain('ws-map-resize-overlay');
+      expect(String(probe)).not.toContain('ws-map-resize-box');
+    });
+
+    test('the district header stays clear of the resize handles (FR-157)', async ({ page }) => {
+      const { group } = await seedDistrict(page);
+      await openMap(page);
+      await districtOf(page, group).waitFor();
+      await selectDistrict(page, group);
+      await zoomTo(page, 1);
+
+      // Every header control must be the topmost thing at its own centre —
+      // a resize target sitting over it would silently swallow the click.
+      for (const attr of ['data-group-collapse', 'data-group-drag', 'data-group-menu']) {
+        const control = districtOf(page, group).locator(`[${attr}]`);
+        const box = await control.boundingBox();
+        if (!box) continue; // off-screen at this camera; the rail covers it (FR-167)
+        const owner = await page.evaluate(
+          point => {
+            const el = document.elementFromPoint(point.x, point.y);
+            return el ? (el.closest('button')?.getAttribute('data-resize-handle') ?? 'ok') : 'none';
+          },
+          { x: box.x + box.width / 2, y: box.y + box.height / 2 }
+        );
+        expect(owner, `${attr} is covered by a resize handle`).not.toMatch(/^[ns]?[ew]?$/);
+      }
+    });
+
+    test('collapse hides descendants, tightens Fit all, and survives a reload (FR-104, FR-112)', async ({
+      page
+    }) => {
+      const { group, a } = await seedDistrict(page);
+      await openMap(page);
+      await districtOf(page, group).waitFor();
+
+      await frameFromMenu(page, 'fit');
+      const openZoom = (await cameraOf(page)).zoom;
+
+      // Select, centre, and zoom to 100% first, so the header control is
+      // genuinely on screen at a usable size — clicking it is then also proof
+      // that it is reachable (FR-167). Fit all frames every fixture in the
+      // sandbox, which can leave the camera at the 10% floor where a district's
+      // controls are sub-pixel.
+      await selectDistrict(page, group);
+      await frameFromMenu(page, 'center');
+      await zoomTo(page, 1);
+      await districtOf(page, group).locator('[data-group-collapse]').click();
+      await page.waitForTimeout(600);
+
+      await expect(page.locator(`.ws-map-tile[data-ws-id="${a}"]`)).toHaveCount(0);
+      await expect(districtOf(page, group)).toHaveClass(/is-collapsed/);
+
+      await frameFromMenu(page, 'fit');
+      expect(
+        (await cameraOf(page)).zoom,
+        'Fit all frames less content once the members are hidden'
+      ).toBeGreaterThanOrEqual(openZoom);
+
+      await page.reload();
+      await districtOf(page, group).waitFor();
+      await expect(districtOf(page, group)).toHaveClass(/is-collapsed/);
+
+      // Leave the sandbox usable for the next spec.
+      await selectDistrict(page, group).catch(() => {});
+      await frameFromMenu(page, 'center');
+      await zoomTo(page, 1);
+      await districtOf(page, group).locator('[data-group-collapse]').click({ force: true });
+      await page.waitForTimeout(400);
+    });
+
+    test('a district page never scrolls sideways at a narrow width (FR-169)', async ({ page }) => {
+      const { group } = await seedDistrict(page);
+      await page.setViewportSize({ width: 420, height: 820 });
+      await openMap(page);
+      await districtOf(page, group).waitFor();
+      await selectDistrict(page, group).catch(() => {});
+
+      const overflow = await page.evaluate(() => ({
+        scroll: document.documentElement.scrollWidth,
+        client: document.documentElement.clientWidth
+      }));
+      expect(overflow.scroll, 'a selected district must not widen the page').toBeLessThanOrEqual(
+        overflow.client + 1
+      );
+    });
+  });
 });

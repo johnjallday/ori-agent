@@ -560,68 +560,271 @@
   border: 0;
 }
 
+/* ---------------------------------------------------------------------------
+   District accents and themes (#346 FR-121 – FR-133)
+
+   Two bounded axes, both driven by class names the app owns. Accent sets ONE
+   custom property; theme decides how that property is used. Nothing here is
+   supplied by a workspace, a user, or a request — an unknown identifier never
+   reaches this file because the renderer resolves it against the catalog first.
+
+   Scope is deliberate: every rule below is inside .ws-map-district. Buildings,
+   agent characters, Personal HQ, the terrain, and application chrome are all
+   out of reach of a district's appearance (FR-128).
+   --------------------------------------------------------------------------- */
+.ws-map-district {
+  /* The default accent, and the fallback for anything unrecognised. */
+  --ws-district-accent: 232, 134, 77;
+}
+.ws-map-district.ws-map-accent-beacon,
+.ws-map-resize-overlay.ws-map-accent-beacon,
+.ws-map-drop-confirm.ws-map-accent-beacon {
+  --ws-district-accent: 74, 124, 178;
+}
+.ws-map-district.ws-map-accent-moss,
+.ws-map-resize-overlay.ws-map-accent-moss,
+.ws-map-drop-confirm.ws-map-accent-moss {
+  --ws-district-accent: 92, 138, 86;
+}
+.ws-map-district.ws-map-accent-orchid,
+.ws-map-resize-overlay.ws-map-accent-orchid,
+.ws-map-drop-confirm.ws-map-accent-orchid {
+  --ws-district-accent: 148, 96, 162;
+}
+.ws-map-district.ws-map-accent-slate,
+.ws-map-resize-overlay.ws-map-accent-slate,
+.ws-map-drop-confirm.ws-map-accent-slate {
+  --ws-district-accent: 106, 118, 128;
+}
+.ws-map-district.ws-map-accent-tide,
+.ws-map-resize-overlay.ws-map-accent-tide,
+.ws-map-drop-confirm.ws-map-accent-tide {
+  --ws-district-accent: 58, 140, 140;
+}
+
 /* district (group) zone */
 .ws-map-district {
   position: absolute;
   z-index: 3;
-  border: 1.4px dashed rgba(232, 134, 77, 0.35);
-  background: rgba(232, 134, 77, 0.04);
+  border: 1.4px dashed rgba(var(--ws-district-accent), 0.42);
+  background: rgba(var(--ws-district-accent), 0.05);
   border-radius: 16px;
+}
+
+/* Themes differ in SHAPE as well as colour, so two districts remain
+   distinguishable to someone who cannot see the difference between their
+   accents (FR-130, FR-163). */
+.ws-map-district.ws-map-theme-blueprint {
+  border-style: solid;
+  border-width: 1px;
+  border-radius: 4px;
+  /* A code-native hatch — no bitmap, no remote asset (FR-124). */
+  background-image:
+    linear-gradient(rgba(var(--ws-district-accent), 0.1) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(var(--ws-district-accent), 0.1) 1px, transparent 1px);
+  background-size: 19px 19px;
+}
+.ws-map-district.ws-map-theme-terrace {
+  border-style: solid;
+  border-width: 2px;
+  border-radius: 22px;
+  background: rgba(var(--ws-district-accent), 0.1);
+}
+/* The district header (#346 FR-139).
+   One strip that names the group, states its size, and carries its three
+   separate controls: select, move, and more. It sits ON the frame's top edge so
+   the frame still reads as one boundary rather than a box with a label floating
+   beside it. */
+.ws-map-district-header {
+  position: absolute;
+  /* Wholly ABOVE the frame's top edge, never overlapping it. The header it
+     replaced was a 10px tag that could sit half-in; this one carries
+     finger-sized Move and More controls, and inside the frame those would cover
+     the status flags of the district's own first row of buildings. */
+  bottom: 100%;
+  left: 12px;
+  right: 10px;
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  /* Clears the top row of resize handles, which sits just inside the frame's
+     top edge (see .ws-map-resize-n below). */
+  padding-bottom: 6px;
+  /* The strip spans the frame, but only its controls may take pointer input —
+     an invisible bar across the top of a district would swallow drags and
+     right-clicks aimed at the map underneath it (FR-157). */
+  pointer-events: none;
+}
+.ws-map-district-header > * {
+  pointer-events: auto;
 }
 /* Sentence case: this is clickable AND it renders a user-authored group name,
    which uppercase flattened. Names keep their author's casing. */
 .ws-map-district-tag {
-  position: absolute;
-  top: -11px;
-  left: 16px;
-  border: 1px solid rgba(232, 134, 77, 0.35);
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  min-width: 0;
+  border: 1px solid rgba(var(--ws-district-accent), 0.42);
   background: var(--ws-bg-2);
-  color: var(--ws-keeper);
+  color: rgb(var(--ws-district-accent));
   cursor: pointer;
   font-family: var(--ws-font-mono);
   font-size: 10px;
   letter-spacing: 0.3px;
-  padding: 2px 9px;
+  padding: 3px 9px;
+}
+/* A long user-authored name truncates rather than pushing Move and More off the
+   frame or forcing the header wider than the district (FR-134). */
+.ws-map-district-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 22ch;
+}
+.ws-map-district-count {
+  flex: none;
+  opacity: 0.72;
+  font-size: 9px;
 }
 .ws-map-district-tag:hover {
-  background: rgba(232, 134, 77, 0.12);
+  background: rgba(var(--ws-district-accent), 0.14);
 }
 .ws-map-district-tag:focus-visible {
-  outline: 2px solid var(--ws-keeper);
+  outline: 2px solid rgb(var(--ws-district-accent));
   outline-offset: 2px;
 }
-/* The cluster drag handle. Separate from the label so selecting a group and
-   moving everything in it are unmistakably different gestures, and sized for a
-   finger at any zoom (#292 FR-85, FR-118). */
-.ws-map-district-handle {
-  position: absolute;
-  top: -11px;
-  right: 10px;
+/* The cluster drag handle and the overflow control. Separate from the label so
+   selecting a group, moving everything in it, and reaching its actions are
+   three unmistakably different gestures, and each sized for a finger at any
+   zoom (#292 FR-85, FR-118). */
+.ws-map-district-handle,
+.ws-map-district-more,
+.ws-map-district-collapse {
+  flex: none;
   min-width: 44px;
   min-height: 44px;
   display: grid;
   place-items: center;
-  border: 1px solid rgba(232, 134, 77, 0.35);
+  border: 1px solid rgba(var(--ws-district-accent), 0.42);
   background: var(--ws-bg-2);
-  color: var(--ws-keeper);
-  cursor: grab;
-  touch-action: none;
+  color: rgb(var(--ws-district-accent));
   font-size: 14px;
   line-height: 1;
 }
-.ws-map-district-handle:hover {
-  background: rgba(232, 134, 77, 0.12);
+.ws-map-district-handle {
+  margin-left: auto;
+  cursor: grab;
+  touch-action: none;
 }
-.ws-map-district-handle:focus-visible {
-  outline: 2px solid var(--ws-keeper);
+.ws-map-district-more,
+.ws-map-district-collapse {
+  cursor: pointer;
+}
+/* Collapse sits left of Move, so the header reads name → collapse → move →
+   more: identity first, then the three separate intentions (#346 FR-139). */
+.ws-map-district-collapse {
+  margin-left: auto;
+}
+.ws-map-district-collapse + .ws-map-district-handle {
+  margin-left: 0;
+}
+.ws-map-district-handle:hover,
+.ws-map-district-more:hover,
+.ws-map-district-collapse:hover {
+  background: rgba(var(--ws-district-accent), 0.14);
+}
+.ws-map-district-handle:focus-visible,
+.ws-map-district-more:focus-visible,
+.ws-map-district-collapse:focus-visible {
+  outline: 2px solid rgb(var(--ws-district-accent));
   outline-offset: 2px;
+}
+
+/* A collapsed district: the same group, compact (#346 FR-106, FR-117). A solid
+   filled surface rather than the dashed outline of an expanded one, so "this
+   group is closed" is a shape difference and not only a size difference
+   (FR-163). */
+.ws-map-district.is-collapsed {
+  border-style: solid;
+  background: rgba(var(--ws-district-accent), 0.12);
 }
 .ws-map-district.is-dragging {
   border-style: solid;
-  border-color: var(--ws-keeper);
+  border-color: rgb(var(--ws-district-accent));
+}
+/* Releasing here would put the dragged workspace INTO this group (#346
+   FR-6a). A filled surface plus a solid rule, matching what Tree's
+   `.cockpit-tree-row.is-drop-into` already means, so the same gesture reads the
+   same way in both views. The drag readout says it in words as well — a
+   membership change must never rest on a colour alone (FR-163). */
+.ws-map-district.is-drop-target {
+  border-style: solid;
+  border-width: 2px;
+  border-color: rgb(var(--ws-district-accent));
+  background: rgba(var(--ws-district-accent), 0.16);
 }
 .ws-map-district.is-dragging .ws-map-district-handle {
   cursor: grabbing;
+}
+
+/* The drop confirmation (#346 FR-6g). Positioned in viewport coordinates by
+   placeMenu, exactly like the context menu, so it must not inherit the world
+   layer's transform — its host sits outside the theatre for that reason.
+   Borrows the menu's surface tokens rather than inventing a second panel
+   look. */
+.ws-map-drop-confirm {
+  /* The same default as a district, so the panel is never colourless while the
+     accent classes above swap it to match the group being joined. */
+  --ws-district-accent: 232, 134, 77;
+  position: fixed;
+  z-index: 10001;
+  max-width: 300px;
+  padding: 14px 16px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  box-shadow: var(--shadow-lg);
+}
+.ws-map-drop-confirm-title {
+  margin: 0 0 6px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.ws-map-drop-confirm-body {
+  margin: 0 0 12px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+.ws-map-drop-confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.ws-map-drop-confirm-actions button {
+  /* 44px targets, like every other map control (FR-56). */
+  min-height: 44px;
+  padding: 0 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.ws-map-drop-confirm-go {
+  border: 1px solid rgb(var(--ws-district-accent));
+  background: rgb(var(--ws-district-accent));
+  color: #fff;
+}
+.ws-map-drop-confirm-no {
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+.ws-map-drop-confirm-actions button:focus-visible {
+  outline: 2px solid rgb(var(--ws-district-accent));
+  outline-offset: 2px;
 }
 /* Would this delta bury a building outside the district? Same red-solid
    signal as .ws-map-tile.is-blocked below, sized for a border instead of an
@@ -634,6 +837,186 @@
 }
 .ws-map-district.is-blocked .ws-map-district-handle {
   cursor: not-allowed;
+}
+/* A hierarchy change made elsewhere has left this frame around a workspace that
+   is not in the group (#346 FR-88). Dotted — distinct from dashed (ordinary),
+   solid (dragging), and doubled (a blocked gesture) — so the four states are
+   told apart by shape, not only by colour (FR-163). */
+.ws-map-district.is-conflicted {
+  border-style: dotted;
+  border-width: 2.5px;
+  border-color: var(--ws-amber, #c98a2e);
+}
+.ws-map-district-conflict {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 6px;
+  margin: 0;
+  padding: 4px 8px;
+  border: 1px solid var(--ws-amber, #c98a2e);
+  background: var(--ws-bg-2);
+  color: var(--ws-ink, inherit);
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+/* ---------------------------------------------------------------------------
+   District resize overlay (#346 FR-52 – FR-57, FR-81)
+
+   Deliberately OUTSIDE .ws-map-world: the world layer carries the camera
+   transform, so handles rendered inside it would shrink with the map and a 44px
+   target would be 4px of screen at 10% zoom. Here everything is screen space
+   and JS re-places the box on every camera change.
+   --------------------------------------------------------------------------- */
+.ws-map-resize-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  /* The selected district's accent, set by positionResizeOverlay. Defaults to
+     the Keeper amber so the overlay is never colourless. */
+  --ws-district-accent: 232, 134, 77;
+  /* Only the handles take input. The rectangle between them must stay inert or
+     it would swallow every pan, click, and right-click aimed at the map under a
+     selected district (FR-157). */
+  pointer-events: none;
+}
+.ws-map-resize-overlay[hidden] {
+  display: none;
+}
+.ws-map-resize-box {
+  position: absolute;
+  border: 1.5px solid rgb(var(--ws-district-accent));
+  border-radius: 16px;
+  pointer-events: none;
+}
+/* The handles: a small visible marker inside a finger-sized invisible target,
+   so the frame stays legible while the thing you grab is 44×44 at any zoom
+   (FR-56, design §"Keep resize markers visually small"). */
+.ws-map-resize-handle {
+  position: absolute;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  background: none;
+  display: grid;
+  place-items: center;
+  pointer-events: auto;
+  touch-action: none;
+}
+.ws-map-resize-dot {
+  width: 11px;
+  height: 11px;
+  border: 1.5px solid rgb(var(--ws-district-accent));
+  border-radius: 3px;
+  background: var(--ws-bg-2);
+}
+.ws-map-resize-handle:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: -6px;
+}
+/* Corners sit on the corner; edges sit at the middle of their side. Each is
+   centred on its own edge, so the visible marker lines up with the frame. */
+.ws-map-resize-n,
+.ws-map-resize-s {
+  left: 50%;
+  transform: translateX(-50%);
+}
+.ws-map-resize-e,
+.ws-map-resize-w {
+  top: 50%;
+  transform: translateY(-50%);
+}
+/* The top row sits just INSIDE the frame rather than straddling its edge.
+   A district's header — name, collapse, move, more — hangs directly above that
+   edge, and a 44px target centred on it would cover those controls whenever the
+   district is selected, silently swallowing their clicks (#346 FR-157). The
+   marker is pinned to the top of the box so it still reads as sitting on the
+   edge. */
+.ws-map-resize-n,
+.ws-map-resize-ne,
+.ws-map-resize-nw {
+  top: -4px;
+  align-items: flex-start;
+}
+.ws-map-resize-s,
+.ws-map-resize-se,
+.ws-map-resize-sw {
+  bottom: -22px;
+}
+.ws-map-resize-w,
+.ws-map-resize-nw,
+.ws-map-resize-sw {
+  left: -22px;
+}
+.ws-map-resize-e,
+.ws-map-resize-ne,
+.ws-map-resize-se {
+  right: -22px;
+}
+/* Directional cursors (FR-57). */
+.ws-map-resize-n,
+.ws-map-resize-s {
+  cursor: ns-resize;
+}
+.ws-map-resize-e,
+.ws-map-resize-w {
+  cursor: ew-resize;
+}
+.ws-map-resize-ne,
+.ws-map-resize-sw {
+  cursor: nesw-resize;
+}
+.ws-map-resize-nw,
+.ws-map-resize-se {
+  cursor: nwse-resize;
+}
+/* State on the frame, never colour alone: solid while resizing, dashed-thick
+   when clamped at the member minimum, doubled when blocked (FR-81, FR-163). */
+.ws-map-resize-box.is-resizing {
+  border-width: 2px;
+}
+.ws-map-resize-box.is-clamped {
+  border-style: dashed;
+  border-width: 2.5px;
+}
+.ws-map-resize-box.is-blocked {
+  border-style: double;
+  border-width: 4px;
+  border-color: var(--ws-danger, #d9534f);
+}
+.ws-map-resize-box.is-blocked .ws-map-resize-handle {
+  cursor: not-allowed;
+}
+/* The width × height and snap-state readout. Anchored to the control strip so
+   it never leaves the viewport when a frame edge is off-screen (FR-167). */
+.ws-map-resize-readout {
+  position: absolute;
+  left: 50%;
+  bottom: 84px;
+  transform: translateX(-50%);
+  max-width: min(90%, 420px);
+  padding: 4px 10px;
+  border: 1px solid rgb(var(--ws-district-accent));
+  background: var(--ws-bg-2);
+  color: var(--ws-ink, inherit);
+  font-family: var(--ws-font-mono);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+.ws-map-resize-readout[hidden] {
+  display: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ws-map-resize-box,
+  .ws-map-resize-handle {
+    transition: none;
+  }
 }
 
 /* building tile */

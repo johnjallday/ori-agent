@@ -58,6 +58,7 @@ import {
   rosterState,
   groupAggregates,
   groupRailView,
+  groupMapLayoutView,
   renderGroupRailHTML,
   summaryView,
   renderSummaryRailHTML,
@@ -946,6 +947,198 @@ test('the group rail escapes hostile group content', () => {
   const html = renderGroupRailHTML(groupRailView(findWorkspace(rows, '<x>'), rows));
   assert.doesNotMatch(html, /<script/i);
   assert.doesNotMatch(html, /<img/i);
+});
+
+// ---------------------------------------------------------------------------
+// The rail's Map layout section (#346 FR-151 – FR-155)
+// ---------------------------------------------------------------------------
+
+const AUTO_DISTRICT = {
+  id: 'g1',
+  sizingMode: 'auto',
+  collapsed: false,
+  accent: 'default',
+  theme: 'default',
+  memberCount: 2,
+  readOnly: false
+};
+
+test('the Map layout section states the sizing mode in words (#346 FR-152)', () => {
+  const auto = groupMapLayoutView(AUTO_DISTRICT, { view: VIEW_MAP });
+  assert.equal(auto.sizingMode, 'auto');
+  assert.match(auto.sizingLabel, /Automatic size/);
+
+  const custom = groupMapLayoutView({ ...AUTO_DISTRICT, sizingMode: 'custom' }, { view: VIEW_MAP });
+  assert.equal(custom.sizingMode, 'custom');
+  assert.match(custom.sizingLabel, /Custom size/);
+  // Not a chip alone: the words appear in the rendered rail too.
+  const rows = groupFixture();
+  const html = renderGroupRailHTML(
+    groupRailView(findWorkspace(rows, 'g1'), rows, {
+      view: VIEW_MAP,
+      district: { ...AUTO_DISTRICT, sizingMode: 'custom' }
+    })
+  );
+  assert.match(html, /Custom size/);
+});
+
+test('Fit to contents is offered only when there is a custom size to discard (#346 FR-148)', () => {
+  assert.equal(groupMapLayoutView(AUTO_DISTRICT, { view: VIEW_MAP }).canFit, false);
+  assert.equal(
+    groupMapLayoutView({ ...AUTO_DISTRICT, sizingMode: 'custom' }, { view: VIEW_MAP }).canFit,
+    true
+  );
+});
+
+test('a read-only or collapsed district disables layout actions truthfully (#346 FR-148, FR-115)', () => {
+  const readOnly = groupMapLayoutView({ ...AUTO_DISTRICT, readOnly: true }, { view: VIEW_MAP });
+  assert.equal(readOnly.canResize, false);
+  assert.equal(readOnly.canFit, false);
+  assert.match(readOnly.readOnlyNote, /cannot be saved/);
+
+  const collapsed = groupMapLayoutView(
+    { ...AUTO_DISTRICT, collapsed: true, sizingMode: 'custom' },
+    { view: VIEW_MAP }
+  );
+  assert.equal(collapsed.canResize, false, 'a collapsed district has no frame to size');
+  assert.equal(collapsed.canFit, false);
+});
+
+test('Tree hides the Map-only layout controls rather than showing them dead (#346 FR-154)', () => {
+  assert.equal(groupMapLayoutView(AUTO_DISTRICT, { view: VIEW_TREE }), null);
+
+  const rows = groupFixture();
+  const html = renderGroupRailHTML(
+    groupRailView(findWorkspace(rows, 'g1'), rows, { view: VIEW_TREE, district: AUTO_DISTRICT })
+  );
+  assert.doesNotMatch(html, /data-rail-map-layout/);
+  assert.doesNotMatch(html, /Resize group/);
+  // Open Group is untouched by any of this (FR-155).
+  assert.match(html, /Open Group/);
+});
+
+test('the rail offers Collapse, then Expand, with matching aria-expanded (#346 FR-102, FR-110)', () => {
+  const open = groupMapLayoutView(AUTO_DISTRICT, { view: VIEW_MAP });
+  assert.equal(open.collapsed, false);
+  assert.equal(open.collapseLabel, 'Collapse group');
+
+  const shut = groupMapLayoutView({ ...AUTO_DISTRICT, collapsed: true }, { view: VIEW_MAP });
+  assert.equal(shut.collapseLabel, 'Expand group');
+
+  const rows = groupFixture();
+  const html = collapsed =>
+    renderGroupRailHTML(
+      groupRailView(findWorkspace(rows, 'g1'), rows, {
+        view: VIEW_MAP,
+        district: { ...AUTO_DISTRICT, collapsed }
+      })
+    );
+  assert.match(html(false), /data-cockpit-group-collapse aria-expanded="true"/);
+  assert.match(html(false), />Collapse group</);
+  assert.match(html(true), /data-cockpit-group-collapse aria-expanded="false"/);
+  assert.match(html(true), />Expand group</);
+});
+
+test('a read-only map disables collapse along with the rest (#346 FR-148)', () => {
+  const readOnly = groupMapLayoutView({ ...AUTO_DISTRICT, readOnly: true }, { view: VIEW_MAP });
+  assert.equal(readOnly.canCollapse, false);
+});
+
+const CATALOGS = {
+  accents: [
+    { id: 'default', label: 'Keeper amber' },
+    { id: 'moss', label: 'Moss green' }
+  ],
+  themes: [
+    { id: 'default', label: 'Standard district', hint: 'Dashed outline' },
+    { id: 'blueprint', label: 'Blueprint', hint: 'Solid rule with a grid hatch' }
+  ]
+};
+
+test('the rail offers named accent and theme choices, not bare swatches (#346 FR-130)', () => {
+  const rows = groupFixture();
+  const html = renderGroupRailHTML(
+    groupRailView(findWorkspace(rows, 'g1'), rows, {
+      view: VIEW_MAP,
+      district: { ...AUTO_DISTRICT, ...CATALOGS }
+    })
+  );
+  assert.match(html, /data-rail-appearance="accent"/);
+  assert.match(html, /data-rail-appearance="theme"/);
+  assert.match(html, />Moss green</, 'every option carries its human name');
+  assert.match(html, />Blueprint</);
+  assert.match(html, /Solid rule with a grid hatch/, 'and a theme says how it differs in shape');
+  // The current choice is checked, so the rail states it rather than implying it.
+  assert.match(html, /value="default"[^>]*checked/);
+});
+
+test('appearance choices are identifiers from the catalog only (#346 FR-125)', () => {
+  const rows = groupFixture();
+  const html = renderGroupRailHTML(
+    groupRailView(findWorkspace(rows, 'g1'), rows, {
+      view: VIEW_MAP,
+      district: {
+        ...AUTO_DISTRICT,
+        accents: [{ id: 'moss', label: '<img src=x onerror=alert(1)>' }],
+        themes: []
+      }
+    })
+  );
+  assert.ok(!html.includes('<img'), 'a hostile label is escaped, never rendered');
+  assert.match(html, /value="moss"/);
+});
+
+test('Use default appearance appears only when there is something to reset (#346 FR-137)', () => {
+  const rows = groupFixture();
+  const html = district =>
+    renderGroupRailHTML(
+      groupRailView(findWorkspace(rows, 'g1'), rows, { view: VIEW_MAP, district })
+    );
+  assert.doesNotMatch(html({ ...AUTO_DISTRICT, ...CATALOGS }), /appearance-reset/);
+  assert.match(
+    html({ ...AUTO_DISTRICT, ...CATALOGS, accent: 'moss' }),
+    /data-cockpit-group-appearance-reset/
+  );
+  assert.match(
+    html({ ...AUTO_DISTRICT, ...CATALOGS, theme: 'blueprint' }),
+    /data-cockpit-group-appearance-reset/
+  );
+});
+
+test('a read-only map disables appearance choices too (#346 FR-148)', () => {
+  const view = groupMapLayoutView(
+    { ...AUTO_DISTRICT, ...CATALOGS, readOnly: true },
+    { view: VIEW_MAP }
+  );
+  assert.equal(view.canChangeAppearance, false);
+  const rows = groupFixture();
+  const html = renderGroupRailHTML(
+    groupRailView(findWorkspace(rows, 'g1'), rows, {
+      view: VIEW_MAP,
+      district: { ...AUTO_DISTRICT, ...CATALOGS, readOnly: true }
+    })
+  );
+  assert.match(html, /data-cockpit-group-accent disabled|disabled data-cockpit-group-accent/);
+});
+
+test('a group with no district drawn shows no Map layout section (#346 FR-151)', () => {
+  assert.equal(groupMapLayoutView(null, { view: VIEW_MAP }), null);
+  const rows = groupFixture();
+  const html = renderGroupRailHTML(groupRailView(findWorkspace(rows, 'g1'), rows));
+  assert.doesNotMatch(html, /data-rail-map-layout/);
+});
+
+test('the Map layout section says it changes presentation, not membership (#346 FR-153)', () => {
+  const rows = groupFixture();
+  const html = renderGroupRailHTML(
+    groupRailView(findWorkspace(rows, 'g1'), rows, { view: VIEW_MAP, district: AUTO_DISTRICT })
+  );
+  assert.match(html, /data-rail-map-layout/);
+  assert.match(html, /never change which workspaces are in it/);
+  assert.match(html, /data-cockpit-group-resize/);
+  assert.match(html, /data-cockpit-group-fit/);
+  // Open Group still leads the panel (FR-155).
+  assert.ok(html.indexOf('Open Group') < html.indexOf('Map layout'));
 });
 
 // ---------------------------------------------------------------------------

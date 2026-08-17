@@ -1568,3 +1568,118 @@ body.home-command-page .ori-guide__launcher {
   max-height: 40vh;
   overflow-y: auto;
 }
+
+/* ---------------------------------------------------------------------------
+   The selected group's Map layout section (#346 FR-151, FR-168)
+   --------------------------------------------------------------------------- */
+.cockpit-rail-maplayout {
+  border-top: 1px solid var(--hc-line, rgba(0, 0, 0, 0.12));
+  padding-top: 12px;
+  margin-top: 12px;
+}
+
+/* The sizing mode is text, not a coloured chip, so it survives being read
+   aloud and being seen without colour (FR-152, FR-163). */
+.cockpit-rail-maplayout-mode {
+  margin: 0 0 10px;
+  color: var(--hc-ink);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+/* Wraps rather than scrolling sideways, so every action stays reachable at a
+   narrow rail width without horizontal scrolling (FR-168, FR-169). */
+.cockpit-rail-maplayout-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.cockpit-rail-maplayout-btn {
+  flex: 1 1 auto;
+  min-width: 8rem;
+  min-height: 36px;
+}
+
+/* Disabled reads as unavailable-with-a-reason, not as decoration: the note
+   beneath says why (FR-148). */
+.cockpit-rail-maplayout-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* Named appearance choices (#346 FR-130). Every option carries its own visible
+   text, so the list is usable without seeing the swatch beside it. */
+.cockpit-rail-appearance {
+  margin: 12px 0 0;
+  padding: 0;
+  border: 0;
+}
+
+.cockpit-rail-appearance-legend {
+  padding: 0;
+  margin-bottom: 6px;
+  color: var(--hc-ink-faint);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+
+.cockpit-rail-appearance-option {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 3px 0;
+  font-size: 12px;
+  line-height: 1.35;
+  cursor: pointer;
+}
+
+.cockpit-rail-appearance-option:has(input:disabled) {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* A swatch beside the name, never instead of it. */
+.cockpit-rail-appearance-option .cockpit-rail-appearance-label::before {
+  content: "";
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-right: 6px;
+  border: 1px solid rgba(0, 0, 0, 0.25);
+  border-radius: 2px;
+  background: rgb(var(--cockpit-swatch, 232, 134, 77));
+  vertical-align: baseline;
+}
+
+.cockpit-rail-accent-default {
+  --cockpit-swatch: 232, 134, 77;
+}
+.cockpit-rail-accent-beacon {
+  --cockpit-swatch: 74, 124, 178;
+}
+.cockpit-rail-accent-moss {
+  --cockpit-swatch: 92, 138, 86;
+}
+.cockpit-rail-accent-orchid {
+  --cockpit-swatch: 148, 96, 162;
+}
+.cockpit-rail-accent-slate {
+  --cockpit-swatch: 106, 118, 128;
+}
+.cockpit-rail-accent-tide {
+  --cockpit-swatch: 58, 140, 140;
+}
+
+/* Themes are shapes, not colours, so they get no swatch — their one-line hint
+   describes the difference instead. */
+.cockpit-rail-appearance[data-rail-appearance="theme"] .cockpit-rail-appearance-label::before {
+  display: none;
+}
+
+.cockpit-rail-appearance-hint {
+  color: var(--hc-ink-faint);
+  font-size: 11px;
+}

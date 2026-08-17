@@ -10,7 +10,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 41
+const schemaVersion = 42
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -147,6 +147,8 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 		return db.migration040WorkspacePlanExecutionSlot(ctx)
 	case 41:
 		return db.migration041WorkspacePlanReconciliations(ctx)
+	case 42:
+		return db.migration042WorkspaceMapGroupPresentations(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
@@ -1423,6 +1425,63 @@ func (db *DB) migration038WorkspaceMapLayouts(ctx context.Context) error {
 	for _, stmt := range statements {
 		if _, err := db.ExecContext(ctx, stmt); err != nil {
 			return fmt.Errorf("failed to create workspace map layout schema: %w", err)
+		}
+	}
+	return nil
+}
+
+// migration042WorkspaceMapGroupPresentations adds the current user's per-group
+// district presentation: the rectangle they sized by hand, whether the district
+// is collapsed, and which curated accent and theme it wears (#346 FR-173).
+//
+// It is a third table rather than columns on workspace_map_positions or a JSON
+// blob on workspace_map_layouts, for the same reasons migration 38 split
+// positions from the layout header. A district is not a point — it has a width,
+// a height, a sizing mode, a collapse state, and two preset identifiers, and
+// bolting those onto the anchor row would give every ordinary building six
+// columns that can only ever be NULL for it (PRD Technical Considerations,
+// FR-177). Keeping it out of a blob is what lets one corrupt district degrade to
+// safe defaults while every other district keeps its saved presentation
+// (FR-192), and what lets a single resize update one row instead of rewriting
+// every group the user has ever customized (FR-178).
+//
+// Frame columns are nullable REALs because "no custom rectangle" is the ordinary
+// state: an automatic district recomputes its frame from its members on every
+// render, so there is nothing to store, and storing one would turn a read into a
+// write (FR-193). sizing_mode carries the intent so a row with a NULL frame is
+// unambiguous rather than being inferred.
+//
+// Both foreign keys cascade. A permanently deleted group takes its presentation
+// with it (FR-183) while a *trashed* group keeps its row, matching how a trashed
+// workspace keeps its anchor for restore. Nothing here references parent_id or
+// order_index: this table has no vocabulary for hierarchy (FR-5).
+func (db *DB) migration042WorkspaceMapGroupPresentations(ctx context.Context) error {
+	statements := []string{
+		`CREATE TABLE IF NOT EXISTS workspace_map_group_presentations (
+			user_id TEXT NOT NULL,
+			group_id TEXT NOT NULL,
+			sizing_mode TEXT NOT NULL DEFAULT 'auto',
+			frame_x REAL,
+			frame_y REAL,
+			frame_width REAL,
+			frame_height REAL,
+			collapsed INTEGER NOT NULL DEFAULT 0,
+			accent TEXT NOT NULL DEFAULT 'default',
+			theme TEXT NOT NULL DEFAULT 'default',
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL,
+			PRIMARY KEY (user_id, group_id),
+			FOREIGN KEY (user_id) REFERENCES workspace_map_layouts(user_id) ON DELETE CASCADE,
+			FOREIGN KEY (group_id) REFERENCES workspaces(id) ON DELETE CASCADE
+		)`,
+		// Indexed for the workspace-side cascade and the permanent-deletion
+		// cleanup path, which look a district up by group rather than by user.
+		`CREATE INDEX IF NOT EXISTS idx_workspace_map_group_presentations_group
+			ON workspace_map_group_presentations(group_id)`,
+	}
+	for _, stmt := range statements {
+		if _, err := db.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("failed to create workspace map group presentation schema: %w", err)
 		}
 	}
 	return nil

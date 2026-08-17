@@ -33,12 +33,28 @@
   // same logical coordinates on Home and on /workspaces, at any window size
   // (FR-19, FR-21).
   var FALLBACK_COLS = 5;
-  // The district outline is drawn around its members with this much slack, and a
-  // group's own anchor sits at the outline's corner rather than on a member's
-  // cell — otherwise an empty group and its first member would want the same
-  // point (FR-82, FR-84).
-  var DISTRICT_PAD_X = 12;
-  var DISTRICT_PAD_Y = 6;
+  // A building's visible footprint inside its cell. The cell pitch above leaves
+  // a gutter; this is the part a district frame has to enclose.
+  var MEMBER_W = CELL_W - 8;
+  var MEMBER_H = CELL_H - 10;
+  // The district frame is drawn around its members with this much slack on every
+  // side, and a group's own anchor sits at the frame's corner rather than on a
+  // member's cell — otherwise an empty group and its first member would want the
+  // same point (FR-82, FR-84).
+  //
+  // The padding is deliberately *half the cell gutter* (#346). An automatic
+  // frame around one grid-aligned member is then exactly one cell — so it
+  // reaches the neighbouring cell's edge and stops. Edges that touch without
+  // sharing area are allowed (FR-80), which means the default arrangement
+  // produces no false-containment conflicts at all, while any larger padding
+  // would make every district overlap its neighbour the moment it was drawn.
+  var DISTRICT_PAD_X = (CELL_W - MEMBER_W) / 2;
+  var DISTRICT_PAD_Y = (CELL_H - MEMBER_H) / 2;
+  // The documented minimum district (FR-43): one cell, which is the size an
+  // empty group renders at and the floor a manual resize clamps to. Mirrored by
+  // MinFrameWidth/MinFrameHeight in internal/workspacemap/presentation.go.
+  var DISTRICT_MIN_W = CELL_W;
+  var DISTRICT_MIN_H = CELL_H;
   // Safe world bounds, mirroring internal/workspacemap/model.go. A coordinate
   // outside them is treated as unreadable and the record falls back to
   // automatic placement rather than being drawn somewhere impossible (FR-12).
@@ -112,6 +128,12 @@
     // still navigable, but nothing can be saved (FR-105).
     status: 'idle',
     positions: Object.create(null),
+    // Per-group district presentation, keyed by immutable group id: the
+    // rectangle the user sized by hand, whether the district is collapsed, and
+    // which curated accent and theme it wears (#346 FR-173). A group absent from
+    // here renders with DEFAULT_PRESENTATION, so an older layout that has no
+    // district records at all reads as compact automatic districts.
+    groups: Object.create(null),
     viewport: null,
     snapToGrid: true,
     revision: 0,
@@ -147,6 +169,113 @@
     return { centerX: center.x, centerY: center.y, zoom: zoom };
   }
 
+  // ---------- district presentation (#346) ----------
+  //
+  // Accent and theme are curated, app-defined identifiers, never CSS. The
+  // catalogs below are the only values that ever reach a class name, so a
+  // record written by a newer build — or a hostile one — falls back to the
+  // default instead of being interpolated into a stylesheet (FR-125, FR-194).
+  // They mirror accentCatalog/themeCatalog in
+  // internal/workspacemap/presentation.go, which validates every write.
+  // Named, not unlabelled colour dots: a district is identified by its name and
+  // its shape as well as its colour, and a screen reader has to be able to say
+  // which one is chosen (FR-130, design §"Accent choices should be named").
+  var DISTRICT_ACCENT_CATALOG = [
+    { id: 'default', label: 'Keeper amber' },
+    { id: 'beacon', label: 'Beacon blue' },
+    { id: 'moss', label: 'Moss green' },
+    { id: 'orchid', label: 'Orchid violet' },
+    { id: 'slate', label: 'Slate grey' },
+    { id: 'tide', label: 'Tide teal' }
+  ];
+  var DISTRICT_THEME_CATALOG = [
+    { id: 'default', label: 'Standard district', hint: 'Dashed outline, faint fill' },
+    { id: 'blueprint', label: 'Blueprint', hint: 'Solid rule with a grid hatch' },
+    { id: 'terrace', label: 'Terrace', hint: 'Rounded surface with a header band' }
+  ];
+  var DISTRICT_ACCENTS = DISTRICT_ACCENT_CATALOG.map(function (entry) {
+    return entry.id;
+  });
+  var DISTRICT_THEMES = DISTRICT_THEME_CATALOG.map(function (entry) {
+    return entry.id;
+  });
+  var DEFAULT_ACCENT = 'default';
+  var DEFAULT_THEME = 'default';
+
+  function safeAccent(value) {
+    return DISTRICT_ACCENTS.indexOf(value) === -1 ? DEFAULT_ACCENT : value;
+  }
+  function safeTheme(value) {
+    return DISTRICT_THEMES.indexOf(value) === -1 ? DEFAULT_THEME : value;
+  }
+
+  // safeFrame is the read-side rectangle guard. A frame is usable whole or not
+  // at all: half a rectangle is not a frame, so anything missing, non-finite,
+  // non-positive, below the documented minimum, or reaching outside the safe
+  // world drops the custom frame entirely and that district falls back to
+  // automatic sizing, which is always drawable (FR-44, FR-45, FR-192).
+  function safeFrame(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    var x = Number(raw.x);
+    var y = Number(raw.y);
+    var width = Number(raw.width);
+    var height = Number(raw.height);
+    if (!isSafeCoordinate(x) || !isSafeCoordinate(y)) return null;
+    if (!isFinite(width) || !isFinite(height)) return null;
+    if (width < DISTRICT_MIN_W || height < DISTRICT_MIN_H) return null;
+    if (!isSafeCoordinate(x + width) || !isSafeCoordinate(y + height)) return null;
+    return { x: x, y: y, width: width, height: height };
+  }
+
+  // The presentation a district with no saved record renders as: automatic
+  // sizing, expanded, default appearance (FR-18 – FR-20, FR-31, FR-101).
+  function defaultPresentation() {
+    return {
+      sizingMode: 'auto',
+      frame: null,
+      collapsed: false,
+      accent: DEFAULT_ACCENT,
+      theme: DEFAULT_THEME
+    };
+  }
+
+  // safePresentation normalizes one stored district record. Every facet degrades
+  // on its own, so an unknown accent costs that district its colour and nothing
+  // else, and one corrupt record never disturbs a sibling (FR-192).
+  function safePresentation(raw) {
+    var record = defaultPresentation();
+    if (!raw || typeof raw !== 'object') return record;
+    record.collapsed = raw.collapsed === true;
+    record.accent = safeAccent(raw.accent);
+    record.theme = safeTheme(raw.theme);
+    if (raw.sizing_mode === 'custom' || raw.sizingMode === 'custom') {
+      var frame = safeFrame(raw.frame);
+      if (frame) {
+        record.sizingMode = 'custom';
+        record.frame = frame;
+      }
+    }
+    return record;
+  }
+
+  // Read one district's presentation out of the shared layout state.
+  function presentationFor(groupId) {
+    return (groupId && layoutState.groups[groupId]) || defaultPresentation();
+  }
+
+  // A district that carries nothing but defaults is indistinguishable from one
+  // with no record at all, and is stored as neither.
+  function isDefaultPresentation(record) {
+    return (
+      !!record &&
+      record.sizingMode === 'auto' &&
+      !record.frame &&
+      !record.collapsed &&
+      record.accent === DEFAULT_ACCENT &&
+      record.theme === DEFAULT_THEME
+    );
+  }
+
   // applyLayoutPayload degrades per field, never wholesale: one unreadable
   // anchor costs that building its saved spot and nothing else, and an
   // unreadable camera opens on the default view without hiding valid buildings
@@ -160,6 +289,15 @@
       if (point) positions[id] = point;
     });
     layoutState.positions = positions;
+
+    var groups = Object.create(null);
+    var rawGroups = (payload && payload.groups) || {};
+    Object.keys(rawGroups).forEach(function (id) {
+      if (!id || id === HQ_SITE_ID) return;
+      groups[id] = safePresentation(rawGroups[id]);
+    });
+    layoutState.groups = groups;
+
     layoutState.viewport = safeViewport(payload && payload.viewport);
     layoutState.snapToGrid =
       payload && typeof payload.snap_to_grid === 'boolean' ? payload.snap_to_grid : true;
@@ -236,13 +374,33 @@
       .then(function (data) {
         var result = (data && data.result) || null;
         if (!result) throw new Error('workspace map layout save returned nothing');
-        if (typeof result.revision === 'number') layoutState.revision = result.revision;
+
+        // Revisions are server-issued and monotonic, so a response that carries
+        // an older one is the answer to a question a newer write has already
+        // superseded. Applying it would roll local state backwards — the
+        // classic out-of-order-response bug — so it is accepted as a completed
+        // request and dropped as a source of truth (#346 FR-189).
+        var revision = typeof result.revision === 'number' ? result.revision : null;
+        if (revision !== null && revision < layoutState.revision) return result;
+        if (revision !== null) layoutState.revision = revision;
+
         if (typeof result.snap_to_grid === 'boolean') layoutState.snapToGrid = result.snap_to_grid;
         var viewport = safeViewport(result.viewport);
         if (viewport) layoutState.viewport = viewport;
         Object.keys(result.positions || {}).forEach(function (id) {
           var point = safePoint(result.positions[id]);
           if (point) layoutState.positions[id] = point;
+        });
+        // Districts reconcile from the canonical record the server returned —
+        // including the facets this request did not mention — so the client
+        // never merges a fragment into state it may already have wrong (#346
+        // FR-190). A record that came back at every default is dropped rather
+        // than stored, matching how the server stops storing it.
+        Object.keys(result.groups || {}).forEach(function (id) {
+          if (!id || id === HQ_SITE_ID) return;
+          var record = safePresentation(result.groups[id]);
+          if (isDefaultPresentation(record)) delete layoutState.groups[id];
+          else layoutState.groups[id] = record;
         });
         return result;
       });
@@ -724,9 +882,21 @@
     grid.districts.forEach(function (district) {
       present[district.id] = true;
     });
+    // A populated district's frame comes from its members, so its own stored
+    // anchor is not part of the layout any more (#346 FR-16, FR-25). Dropping it
+    // here rather than only at draw time is what keeps a stale anchor out of
+    // fallbackOrigin and out of the cell scan too — otherwise a group anchor
+    // left far below the arranged content would still push new records, the
+    // Personal HQ site, and the New Workspace pad down there, and Fit all would
+    // still zoom out to reach them.
+    var populatedGroups = Object.create(null);
+    grid.tiles.forEach(function (tile) {
+      if (tile.groupId) populatedGroups[tile.groupId] = true;
+    });
+
     var saved = Object.create(null);
     Object.keys(savedInput).forEach(function (id) {
-      if (!present[id]) return;
+      if (!present[id] || populatedGroups[id]) return;
       var point = safePoint(savedInput[id]);
       if (point) saved[id] = point;
     });
@@ -740,8 +910,13 @@
 
     // 2. Group anchors first: a member's automatic placement may want to sit
     //    near its district, which needs the district's anchor to exist.
+    //
+    //    Only an EMPTY district needs one. A populated district resolves its
+    //    frame from its members, so handing it a fallback cell would claim
+    //    space nothing draws in and shift every automatic placement after it.
     var districtAnchors = Object.create(null);
     grid.districts.forEach(function (district) {
+      if (populatedGroups[district.id]) return;
       var anchor = saved[district.id];
       if (anchor) {
         // A saved district still occupies a cell, so claim the one it covers.
@@ -799,43 +974,90 @@
       };
     });
 
-    // 4. District outlines are elastic presentation derived from the anchors
-    //    above. They never rewrite a member's coordinate; a member dragged past
-    //    the old edge simply makes the outline grow (FR-84).
+    // 4. District frames. Each district resolves ONE effective frame, and its
+    //    top-left corner is both the visible outline and the logical anchor —
+    //    there is no second hidden anchor that can enlarge what is drawn (#346
+    //    FR-29, FR-46). A populated automatic district follows only its members,
+    //    so a stale or fallback group anchor sitting far from them can no longer
+    //    stretch the outline across empty world and drag Fit all out with it
+    //    (FR-16, FR-25).
     var membersByGroup = Object.create(null);
     nodes.forEach(function (node) {
       if (!node.groupId) return;
       (membersByGroup[node.groupId] = membersByGroup[node.groupId] || []).push(node);
     });
+    var presentations = opts.groupPresentations || null;
     var districts = grid.districts.map(function (district) {
-      var anchor = districtAnchors[district.id];
+      var record = presentations
+        ? safePresentation(presentations[district.id])
+        : presentationFor(district.id);
       var members = membersByGroup[district.id] || [];
-      var minX = anchor.x;
-      var minY = anchor.y;
-      var maxX = anchor.x + CELL_W - 8;
-      var maxY = anchor.y + CELL_H - 10;
-      members.forEach(function (member) {
-        var left = member.x - DISTRICT_PAD_X;
-        var top = member.y - DISTRICT_PAD_Y;
-        if (left < minX) minX = left;
-        if (top < minY) minY = top;
-        if (member.x + CELL_W - 8 > maxX) maxX = member.x + CELL_W - 8;
-        if (member.y + CELL_H - 10 > maxY) maxY = member.y + CELL_H - 10;
+      // A collapsed district resolves its expanded frame anyway: its corner is
+      // where the summary sits, and expanding has to restore exactly the
+      // rectangle that was there before (#346 FR-114, FR-116).
+      var frame = effectiveDistrictFrame({
+        anchor: districtAnchors[district.id],
+        members: members,
+        presentation: record
       });
+      var box = record.collapsed
+        ? { x: frame.x, y: frame.y, width: DISTRICT_MIN_W, height: DISTRICT_MIN_H }
+        : frame;
       return {
         id: district.id,
         ws: district.ws,
-        anchorX: anchor.x,
-        anchorY: anchor.y,
-        x: minX,
-        y: minY,
-        width: Math.max(CELL_W - 8, maxX - minX),
-        height: Math.max(CELL_H - 10, maxY - minY),
-        saved: !!saved[district.id]
+        // The frame's corner IS the anchor (FR-17, FR-46).
+        anchorX: box.x,
+        anchorY: box.y,
+        x: box.x,
+        y: box.y,
+        width: box.width,
+        height: box.height,
+        // The frame the district returns to when it is expanded again.
+        expandedFrame: frame,
+        sizingMode: record.sizingMode,
+        customFrame: record.frame,
+        collapsed: record.collapsed,
+        accent: record.accent,
+        theme: record.theme,
+        memberCount: members.length,
+        saved: !!savedInput[district.id]
       };
     });
 
-    // 5. The reserved Personal HQ site and the New Workspace pad get stable
+    // 5. Hidden descendants. A collapsed district's members keep their
+    //    coordinates and their membership — they simply stop being drawn
+    //    (#346 FR-104). Dropping them from `nodes` here is what makes them
+    //    unfocusable, un-clickable, un-right-clickable, and absent from Fit
+    //    all's bounds all at once, rather than each of those being a separate
+    //    rule that could be forgotten (FR-105, FR-112).
+    var collapsedGroups = Object.create(null);
+    districts.forEach(function (district) {
+      if (district.collapsed) collapsedGroups[district.id] = true;
+    });
+    var hiddenNodes = nodes.filter(function (node) {
+      return node.groupId && collapsedGroups[node.groupId];
+    });
+    if (hiddenNodes.length) {
+      nodes = nodes.filter(function (node) {
+        return !(node.groupId && collapsedGroups[node.groupId]);
+      });
+    }
+
+    // A hierarchy change made in Tree or another tab is authoritative: a
+    // workspace reparented into this group can land its frame across an
+    // unrelated building, and the Map's job then is to show what is actually
+    // true and say the layout needs attention — not to quietly move something
+    // to make the picture tidy (#346 FR-87 – FR-89). Marking it is a read-only
+    // observation; nothing here writes. It runs against the VISIBLE nodes: a
+    // building hidden inside a collapsed district is not something a frame can
+    // be seen to enclose (FR-78).
+    districts.forEach(function (district) {
+      var conflict = frameConflict(district, district.id, { nodes: nodes, districts: districts });
+      district.conflict = conflict.blocked ? conflict : null;
+    });
+
+    // 6. The reserved Personal HQ site and the New Workspace pad get stable
     //    automatic anchors from the same scan, but they are never persisted:
     //    neither is a workspace, so neither may occupy a workspace ID in the
     //    saved layout (FR-30).
@@ -845,12 +1067,423 @@
     var bounds = worldBounds(nodes, districts, hqSite, pad);
     return {
       nodes: nodes,
+      // Kept for the movement path, which has to translate hidden descendants
+      // atomically with the collapsed district they belong to (FR-113).
+      hiddenNodes: hiddenNodes,
       districts: districts,
       hqSite: hqSite,
       pad: pad,
       bounds: bounds,
       world: expandWorld(bounds, viewport)
     };
+  }
+
+  // ---------- district effective frames (#346 FR-29 – FR-51) ----------
+
+  /**
+   * memberBounds is the padded rectangle a district's current members require.
+   *
+   * This is the floor for every frame: no district may be smaller than this, or
+   * it would be visibly clipping a workspace it claims to contain (FR-76).
+   * Returns null for an empty group, which has no contents to follow.
+   */
+  function memberBounds(members) {
+    if (!members || !members.length) return null;
+    var minX = Infinity;
+    var minY = Infinity;
+    var maxX = -Infinity;
+    var maxY = -Infinity;
+    members.forEach(function (member) {
+      if (member.x < minX) minX = member.x;
+      if (member.y < minY) minY = member.y;
+      if (member.x + MEMBER_W > maxX) maxX = member.x + MEMBER_W;
+      if (member.y + MEMBER_H > maxY) maxY = member.y + MEMBER_H;
+    });
+    return {
+      x: minX - DISTRICT_PAD_X,
+      y: minY - DISTRICT_PAD_Y,
+      width: maxX - minX + DISTRICT_PAD_X * 2,
+      height: maxY - minY + DISTRICT_PAD_Y * 2
+    };
+  }
+
+  // unionFrames returns the smallest rectangle containing both.
+  function unionFrames(a, b) {
+    if (!a) return b;
+    if (!b) return a;
+    var minX = Math.min(a.x, b.x);
+    var minY = Math.min(a.y, b.y);
+    var maxX = Math.max(a.x + a.width, b.x + b.width);
+    var maxY = Math.max(a.y + a.height, b.y + b.height);
+    return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+  }
+
+  // clampFrameToWorld keeps a resolved frame finite and inside the documented
+  // safe world (FR-44). It is a last guard, not a sizing rule: every input it
+  // sees has already been validated, so in practice it only fires for a member
+  // parked at the very edge of the world.
+  function clampFrameToWorld(frame) {
+    var width = Math.max(DISTRICT_MIN_W, Math.min(frame.width, MAX_COORD - MIN_COORD));
+    var height = Math.max(DISTRICT_MIN_H, Math.min(frame.height, MAX_COORD - MIN_COORD));
+    var x = Math.min(Math.max(frame.x, MIN_COORD), MAX_COORD - width);
+    var y = Math.min(Math.max(frame.y, MIN_COORD), MAX_COORD - height);
+    return { x: x, y: y, width: width, height: height };
+  }
+
+  /**
+   * The one effective-frame rule, pure and viewport-independent (FR-51).
+   *
+   *   populated + auto   → the tight padded box around the rendered members.
+   *                        Nothing else contributes, so an unrelated group
+   *                        anchor cannot enlarge it (FR-32, FR-25).
+   *   empty + auto       → a minimum-size district at the group's own valid
+   *                        saved or deterministic fallback anchor (FR-24).
+   *   custom             → the union of the user's saved minimum rectangle and
+   *                        whatever its members currently require, so it expands
+   *                        for an outward member (FR-36) but never shrinks on
+   *                        its own when one moves back in (FR-37).
+   *
+   * @param {{anchor: {x:number,y:number}, members: Array, presentation: object}} input
+   */
+  function effectiveDistrictFrame(input) {
+    var members = memberBounds(input.members);
+    var record = input.presentation || defaultPresentation();
+    var frame;
+    if (record.sizingMode === 'custom' && record.frame) {
+      frame = unionFrames(record.frame, members);
+    } else if (members) {
+      frame = members;
+    } else {
+      var anchor = input.anchor || { x: 0, y: 0 };
+      frame = { x: anchor.x, y: anchor.y, width: DISTRICT_MIN_W, height: DISTRICT_MIN_H };
+    }
+    // Never below the documented minimum, whatever the contents (FR-43).
+    frame = {
+      x: frame.x,
+      y: frame.y,
+      width: Math.max(DISTRICT_MIN_W, frame.width),
+      height: Math.max(DISTRICT_MIN_H, frame.height)
+    };
+    return clampFrameToWorld(frame);
+  }
+
+  // ---------- district resizing, pure (#346 FR-52 – FR-82) ----------
+  //
+  // All eight handles, the member minimum, the documented minimum, the safe
+  // world, snapping, and the collision rule are decided here and nowhere else.
+  // Pointer, keyboard, context-menu, and rail paths all call these, which is
+  // what stops four surfaces from developing four different answers (FR-156).
+
+  // The eight resize handles, in a stable order: four corners and four edges.
+  var RESIZE_HANDLES = ['n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw'];
+
+  // Human names, used for accessible labels and blocked-state copy (FR-69).
+  var RESIZE_HANDLE_LABELS = {
+    n: 'top edge',
+    s: 'bottom edge',
+    e: 'right edge',
+    w: 'left edge',
+    ne: 'top-right corner',
+    nw: 'top-left corner',
+    se: 'bottom-right corner',
+    sw: 'bottom-left corner'
+  };
+
+  /**
+   * Do two rectangles share area?
+   *
+   * Strictly: rectangles that merely touch are NOT overlapping (FR-80). That is
+   * what makes the default arrangement conflict-free — an automatic frame around
+   * a grid-aligned member is exactly one cell, so it reaches its neighbour's
+   * edge and stops.
+   */
+  function rectsOverlap(a, b) {
+    return (
+      a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height
+    );
+  }
+
+  /**
+   * Would this frame claim something that is not in the group?
+   *
+   * A district frame is a membership boundary, so a rectangle drawn around an
+   * unrelated workspace — or across another district — is the Map telling a lie
+   * about the hierarchy. Both are refused (FR-78, FR-79); the group's own
+   * members never conflict with their own frame.
+   *
+   * @returns {{blocked: boolean, reason: string, name: string}}
+   */
+  function frameConflict(frame, groupId, layout) {
+    var world = layout || lastWorldLayout;
+    if (!world || !frame) return { blocked: false, reason: '', name: '' };
+
+    var hit = null;
+    world.nodes.forEach(function (node) {
+      if (hit || node.groupId === groupId) return;
+      var footprint = { x: node.x, y: node.y, width: MEMBER_W, height: MEMBER_H };
+      if (rectsOverlap(frame, footprint)) {
+        hit = {
+          blocked: true,
+          reason: 'workspace',
+          name: (node.ws && node.ws.name) || 'a workspace'
+        };
+      }
+    });
+    if (hit) return hit;
+
+    world.districts.forEach(function (district) {
+      if (hit || district.id === groupId) return;
+      if (rectsOverlap(frame, district)) {
+        hit = {
+          blocked: true,
+          reason: 'district',
+          name: (district.ws && district.ws.name) || 'another group'
+        };
+      }
+    });
+    return hit || { blocked: false, reason: '', name: '' };
+  }
+
+  /**
+   * Apply a resize gesture to a frame.
+   *
+   * Only the dragged edges move; the opposite edge or corner is pinned
+   * (FR-58, FR-59). The result is clamped rather than refused: a resize pushed
+   * past its members stops *at* them, so the gesture stays continuous and no
+   * member is ever hidden or clipped (FR-77).
+   *
+   * @param {{x:number,y:number,width:number,height:number}} frame committed frame
+   * @param {string} handle one of RESIZE_HANDLES
+   * @param {{x:number,y:number}} delta world-space pointer delta
+   * @param {{snap?: boolean, contentBounds?: object}} [options]
+   * @returns {{frame: object, clamped: boolean, changed: boolean}}
+   */
+  function resizeFrame(frame, handle, delta, options) {
+    var opts = options || {};
+    var snap = !!opts.snap;
+    var content = opts.contentBounds || null;
+    var h = String(handle || '');
+    var move = delta || { x: 0, y: 0 };
+
+    // A gesture that has not moved is not a resize. Without this, snapping
+    // would pull an already-off-grid edge onto the grid on pointer-DOWN, so a
+    // click that never dragged would resize the district (FR-64).
+    if (!move.x && !move.y) {
+      return {
+        frame: { x: frame.x, y: frame.y, width: frame.width, height: frame.height },
+        clamped: false,
+        changed: false
+      };
+    }
+
+    var left = frame.x;
+    var top = frame.y;
+    var right = frame.x + frame.width;
+    var bottom = frame.y + frame.height;
+    var clamped = false;
+
+    function place(value) {
+      return snap ? snapValue(value) : value;
+    }
+    function clampTo(value, limit, towardMax) {
+      var limited = towardMax ? Math.max(value, limit) : Math.min(value, limit);
+      if (limited !== value) clamped = true;
+      return limited;
+    }
+
+    if (h.indexOf('w') !== -1) {
+      // The west edge may not pass the leftmost member, may not squeeze the
+      // frame below its minimum, and may not leave the safe world.
+      var westLimit = right - DISTRICT_MIN_W;
+      if (content) westLimit = Math.min(westLimit, content.x);
+      left = clampTo(place(left + move.x), westLimit, false);
+      left = clampTo(left, MIN_COORD, true);
+    }
+    if (h.indexOf('e') !== -1) {
+      var eastLimit = left + DISTRICT_MIN_W;
+      if (content) eastLimit = Math.max(eastLimit, content.x + content.width);
+      right = clampTo(place(right + move.x), eastLimit, true);
+      right = clampTo(right, MAX_COORD, false);
+    }
+    if (h.indexOf('n') !== -1) {
+      var northLimit = bottom - DISTRICT_MIN_H;
+      if (content) northLimit = Math.min(northLimit, content.y);
+      top = clampTo(place(top + move.y), northLimit, false);
+      top = clampTo(top, MIN_COORD, true);
+    }
+    if (h.indexOf('s') !== -1) {
+      var southLimit = top + DISTRICT_MIN_H;
+      if (content) southLimit = Math.max(southLimit, content.y + content.height);
+      bottom = clampTo(place(bottom + move.y), southLimit, true);
+      bottom = clampTo(bottom, MAX_COORD, false);
+    }
+
+    var next = { x: left, y: top, width: right - left, height: bottom - top };
+    return {
+      frame: next,
+      clamped: clamped,
+      changed:
+        next.x !== frame.x ||
+        next.y !== frame.y ||
+        next.width !== frame.width ||
+        next.height !== frame.height
+    };
+  }
+
+  /**
+   * What a custom district's stored minimum has to become for a member move
+   * (#346 FR-35, FR-36, FR-38, FR-39).
+   *
+   * Only `custom` districts have a stored minimum to reconcile. An automatic one
+   * follows its members on every render, so a move needs no frame write at all —
+   * which is what keeps the ordinary case a single-operation patch.
+   *
+   * The result is the union of the stored minimum and what the members need
+   * *after* the move. It never shrinks: a member pulled inward, removed,
+   * trashed, or reparented away leaves the reserved room exactly as the user
+   * chose it (FR-37).
+   *
+   * @param {object} district a rendered district
+   * @param {Array} members the district's rendered member nodes
+   * @param {string} memberId the member being moved
+   * @param {{x:number,y:number}} point where it is going
+   * @returns {{frame: object, changed: boolean}|null} null when there is nothing to reconcile
+   */
+  function reconcileCustomFrame(district, members, memberId, point) {
+    if (!district || district.sizingMode !== 'custom' || !district.customFrame) return null;
+    var moved = (members || []).map(function (member) {
+      return member.id === memberId ? { x: point.x, y: point.y } : { x: member.x, y: member.y };
+    });
+    var required = memberBounds(moved);
+    var next = unionFrames(district.customFrame, required);
+    var stored = district.customFrame;
+    return {
+      frame: next,
+      changed:
+        next.x !== stored.x ||
+        next.y !== stored.y ||
+        next.width !== stored.width ||
+        next.height !== stored.height
+    };
+  }
+
+  /**
+   * Which district would a dropped workspace land inside? (#346 FR-6a)
+   *
+   * Evaluated against the frames as they stand BEFORE the drop, which is what
+   * makes the question well-posed: a member dragged past its own group's edge
+   * is outside that frame at the moment of release, even though the frame would
+   * grow to follow it afterwards.
+   *
+   * A collapsed district is not a drop target. Its members are not on screen, so
+   * "inside it" is not something a user can see or aim at — dropping onto a
+   * compact summary would be a guess, not a gesture.
+   *
+   * Smallest match wins. Districts do not nest visually in V1, but a stale
+   * hierarchy refresh can leave two frames overlapping, and the tighter one is
+   * the one the pointer is most plausibly aiming at.
+   *
+   * @returns {object|null} the district, or null when the point is on open ground
+   */
+  /** The middle of a workspace whose stored top-left anchor is `point`. */
+  function memberCenter(point) {
+    if (!point) return null;
+    return { x: point.x + MEMBER_W / 2, y: point.y + MEMBER_H / 2 };
+  }
+
+  function districtAtPoint(point, layout) {
+    var world = layout || lastWorldLayout;
+    if (!world || !point) return null;
+    var best = null;
+    world.districts.forEach(function (district) {
+      if (district.collapsed) return;
+      var inside =
+        point.x >= district.x &&
+        point.x <= district.x + district.width &&
+        point.y >= district.y &&
+        point.y <= district.y + district.height;
+      if (!inside) return;
+      var area = district.width * district.height;
+      if (!best || area < best.area) best = { district: district, area: area };
+    });
+    return best ? best.district : null;
+  }
+
+  /**
+   * What a drop at `point` means for the dragged workspace's membership.
+   *
+   * `join` is the only membership change a Map drop can produce. Dropping onto
+   * open ground is deliberately NOT "leave your group": an automatic frame
+   * follows its members and a custom frame expands to hold them, so a member
+   * sits inside its own frame by construction — and the only way out is to drag
+   * a few pixels past an edge. Silently un-grouping a workspace on a nudge that
+   * small is not a gesture anyone opts into. Removal stays in Tree (FR-7).
+   *
+   * @returns {{kind: 'none'|'join', groupId?: string, name?: string, reason?: string}}
+   */
+  function dropMembershipIntent(id, point, workspaces, layout) {
+    var world = layout || lastWorldLayout;
+    // Aim from the middle of the workspace, not from its top-left anchor. The
+    // anchor is where the tile is *stored*; its centre is where it *looks like
+    // it is*. Testing the anchor makes the gesture lopsided — a tile covering a
+    // frame's top-left corner would not join, while one hanging off the
+    // bottom-right by all but a pixel would.
+    var target = districtAtPoint(memberCenter(point), world);
+    if (!target) return { kind: 'none' };
+    if (target.id === id) return { kind: 'none' };
+
+    // Already in it: this is a reposition, not a join.
+    var node = null;
+    (world.nodes || []).forEach(function (candidate) {
+      if (candidate.id === id) node = candidate;
+    });
+    if (node && node.groupId === target.id) return { kind: 'none' };
+
+    // A group may not be dropped into itself or into its own descendant. Tree
+    // owns that rule; the Map asks Tree's own validator rather than inventing a
+    // second one that could disagree with it.
+    var rejection = dropRejectionReason(workspaces, id, target.id);
+    if (rejection) return { kind: 'none', reason: rejection };
+
+    var moving = findWs(workspaces, id);
+    return {
+      kind: 'join',
+      groupId: target.id,
+      name: (target.ws && target.ws.name) || 'that group',
+      // Carried on the intent rather than looked up later: this is resolved
+      // while the drag's own workspace list is still in hand, and the
+      // confirmation needs to name both sides of the move.
+      movingName: (moving && moving.name) || 'this workspace'
+    };
+  }
+
+  /**
+   * Why this reparent is not allowed, or '' when it is.
+   *
+   * Mirrors home-workspace-tree.js's moveRejectionReason. It is duplicated
+   * rather than imported because workspace-map.js is a plain deferred script,
+   * not a module — the two are kept in step by
+   * `map and tree refuse the same reparents` in workspace-map.test.js.
+   */
+  function dropRejectionReason(workspaces, movingId, targetParentId) {
+    var rows = Array.isArray(workspaces) ? workspaces : [];
+    var byId = Object.create(null);
+    rows.forEach(function (row) {
+      if (row && row.id) byId[row.id] = row;
+    });
+    if (targetParentId === movingId) return 'A group cannot be moved into itself.';
+    // Walk up from the target: if the moving item is an ancestor, this would
+    // make a cycle. `seen` guards malformed data rather than trusting it.
+    var seen = Object.create(null);
+    var cursor = byId[targetParentId];
+    while (cursor && cursor.parent_id && !seen[cursor.parent_id]) {
+      if (cursor.parent_id === movingId) {
+        return 'A group cannot be moved into something inside it.';
+      }
+      seen[cursor.parent_id] = true;
+      cursor = byId[cursor.parent_id];
+    }
+    return '';
   }
 
   // worldBounds is the tight box around everything currently drawn. It grows
@@ -983,9 +1616,18 @@
     };
   }
 
-  /** Look at one node without moving it (FR-41). */
+  /**
+   * Look at one node without moving it (FR-41).
+   *
+   * `point` may carry its own width/height. A district is centred by its
+   * effective frame rather than by a building-sized box at its corner, so
+   * Center selected on a large district looks at the district rather than at
+   * its top-left tile (#346 FR-47).
+   */
   function centerOn(cam, point) {
-    return { centerX: point.x + CELL_W / 2, centerY: point.y + CELL_H / 2, zoom: cam.zoom };
+    var width = typeof point.width === 'number' && isFinite(point.width) ? point.width : CELL_W;
+    var height = typeof point.height === 'number' && isFinite(point.height) ? point.height : CELL_H;
+    return { centerX: point.x + width / 2, centerY: point.y + height / 2, zoom: cam.zoom };
   }
 
   /**
@@ -1068,6 +1710,9 @@
       canvas.style.setProperty('--ws-map-grid-y', (translateY % grid) + 'px');
     }
     updateCameraControls(container);
+    // The resize overlay is screen-space, so the camera moving under it is
+    // exactly when it has to be re-placed (#346 FR-55).
+    positionResizeOverlay(container);
   }
 
   // scheduleCameraSave persists the settled camera, debounced. A pan is
@@ -1392,23 +2037,70 @@
     );
   }
 
+  // How a district states its size in words. "Unavailable" is deliberately
+  // distinct from a truthful zero: a group that has not reported its contents
+  // must not claim to be empty (#346 FR-107).
+  function districtCountLabel(count) {
+    if (typeof count !== 'number' || !isFinite(count) || count < 0) return 'Count unavailable';
+    if (count === 0) return 'No workspaces';
+    return count === 1 ? '1 workspace' : count + ' workspaces';
+  }
+
+  /**
+   * An expanded district and its header (#346 FR-139 – FR-145).
+   *
+   * The header replaces the detached `▢ Name · Group` tag and the `⤧` glyph that
+   * preceded it. Both were unlabelled in every sense that mattered: the tag
+   * claimed a click would "Open" the group when on Home a click only selects it,
+   * and the glyph gave a screen reader a symbol with no name and a sighted user
+   * no idea it was a drag handle.
+   *
+   * The three controls stay separate on purpose. Selecting a group, moving
+   * everything inside it, and reaching its actions are three different
+   * intentions, and making the whole header draggable would collapse the first
+   * two into one gesture (FR-144, design §6).
+   */
   function districtHTML(d, selectedId) {
     var ws = d.ws || {};
     // A selected GROUP must keep its highlight across a re-mount, not only
     // until the next applySelection call (PRD FR58).
     var isSel = !!selectedId && ws.id === selectedId;
-    // Elastic bounds computed by computeWorldLayout from the group's anchor and
-    // its members' anchors. The outline is presentation only — it grows around
-    // a member that moved and never claims that geometry changed membership
-    // (FR-84, FR-8).
+    // The effective frame resolved by computeWorldLayout. It is presentation
+    // only — it grows around a member that moved and never claims that geometry
+    // changed membership (#346 FR-29, FR-8).
     var left = Number(d.left) || 0;
     var top = Number(d.top) || 0;
     var width = Number(d.width) || CELL_W;
     var height = Number(d.height) || CELL_H;
-    var label = (ws.name || 'Group') + ' group';
+    var name = ws.name || 'Group';
+    var label = name + ' group';
+    var countLabel = districtCountLabel(d.memberCount);
+    // A district whose frame has ended up around something that is not in it —
+    // always because the hierarchy changed underneath it, never because of
+    // anything the user did on the Map (#346 FR-88).
+    var conflict = d.conflict || null;
+    // A collapsed district is the same group in a compact state, not a new kind
+    // of thing: the same header, the same three controls, the same identity —
+    // just without its buildings drawn (#346 FR-106, FR-117).
+    var collapsed = !!d.collapsed;
+    // Home selects on click and opens on Enter, so the control cannot promise
+    // "Open" as its only meaning. It names the group and its state instead, and
+    // aria-pressed carries the selection (FR-141, FR-143).
+    var selectLabel = name + ' group, ' + countLabel;
+    // Preset CLASSES, never inline style. The identifier is validated against
+    // the catalog first, so an unknown or hostile one becomes the default and
+    // can never be interpolated into a rule (#346 FR-125, FR-194).
+    var accent = safeAccent(d.accent);
+    var theme = safeTheme(d.theme);
     return (
-      '<div class="ws-map-district" role="group" aria-label="' +
-      escapeHtml(label) +
+      '<div class="ws-map-district ws-map-accent-' +
+      accent +
+      ' ws-map-theme-' +
+      theme +
+      (collapsed ? ' is-collapsed' : '') +
+      (conflict ? ' is-conflicted' : '') +
+      '" role="group" aria-label="' +
+      escapeHtml(conflict ? label + ', needs layout attention' : label) +
       '" ' +
       'data-group-id="' +
       escapeHtml(ws.id) +
@@ -1422,6 +2114,7 @@
       'px;height:' +
       height +
       'px">' +
+      '<div class="ws-map-district-header">' +
       '<button type="button" class="ws-map-district-tag' +
       (isSel ? ' is-selected' : '') +
       '" data-ws-id="' +
@@ -1430,20 +2123,75 @@
       'aria-pressed="' +
       (isSel ? 'true' : 'false') +
       '" ' +
+      // The full name stays available to assistive technology even when the
+      // visible label truncates (FR-135).
+      'title="' +
+      escapeHtml(name) +
+      '" ' +
       'aria-label="' +
-      escapeHtml('Open ' + label) +
-      '">▢ ' +
-      escapeHtml(ws.name || 'Group') +
-      ' · Group</button>' +
+      escapeHtml(selectLabel) +
+      '">' +
+      '<span class="ws-map-district-name">' +
+      escapeHtml(name) +
+      '</span>' +
+      '<span class="ws-map-district-count">' +
+      escapeHtml(countLabel) +
+      '</span>' +
+      '</button>' +
+      // Collapse is its own control with its own accurate label, distinct from
+      // selecting, opening, moving, and deleting the group (#346 FR-109,
+      // FR-145). aria-expanded lives here rather than on the outline because
+      // this is the control that changes it (FR-110).
+      '<button type="button" class="ws-map-district-collapse" data-group-collapse="' +
+      escapeHtml(ws.id) +
+      '" aria-expanded="' +
+      (collapsed ? 'false' : 'true') +
+      '" aria-label="' +
+      escapeHtml((collapsed ? 'Expand group: ' : 'Collapse group: ') + name) +
+      '" title="' +
+      escapeHtml(collapsed ? 'Expand group' : 'Collapse group') +
+      '"><span aria-hidden="true">' +
+      (collapsed ? '▸' : '▾') +
+      '</span></button>' +
       // A separate, touch-sized handle for cluster movement. Dragging the label
       // would make "select this group" and "move everything in it" the same
       // gesture, and every existing group action — select, overview, open,
       // delete, Tree management — has to stay reachable (FR-85, FR-94).
+      //
+      // The ⤧ glyph is the map's established symbol for this and stays. What
+      // made it cryptic was never the symbol — it was that the control had no
+      // name at all, so a screen reader read a bare character and a hover said
+      // nothing about what would move. The name is what FR-140 asked for, and
+      // the name is what changed.
       '<button type="button" class="ws-map-district-handle" data-group-drag="' +
       escapeHtml(ws.id) +
       '" aria-label="' +
-      escapeHtml('Move the ' + (ws.name || 'group') + ' district and its workspaces') +
-      '" title="Move this district">⤧</button>' +
+      escapeHtml('Move group: ' + name) +
+      '" title="' +
+      escapeHtml('Move group: ' + name) +
+      '"><span class="ws-map-district-grip" aria-hidden="true">⤧</span></button>' +
+      // The overflow control opens the same menu right-click does, so a pointer
+      // user who never right-clicks and a keyboard user both reach the group's
+      // actions (FR-139, FR-149).
+      '<button type="button" class="ws-map-district-more" data-group-menu="' +
+      escapeHtml(ws.id) +
+      '" aria-haspopup="menu" aria-expanded="false" aria-label="' +
+      escapeHtml('Actions for ' + label) +
+      '" title="' +
+      escapeHtml('Actions for ' + name) +
+      '"><span aria-hidden="true">⋯</span></button>' +
+      '</div>' +
+      // Explanatory text, not a colour: it names what the frame has ended up
+      // around and what the user can do about it (FR-88, FR-163).
+      (conflict
+        ? '<p class="ws-map-district-conflict" role="status">' +
+          escapeHtml(
+            'This group’s outline now reaches ' +
+              conflict.name +
+              ', which is not in it. Move or resize the group, or move its workspaces.'
+          ) +
+          '</p>'
+        : '') +
       '</div>'
     );
   }
@@ -1498,7 +2246,12 @@
             left: placed.left,
             top: placed.top,
             width: district.width,
-            height: district.height
+            height: district.height,
+            memberCount: district.memberCount,
+            collapsed: district.collapsed,
+            conflict: district.conflict,
+            accent: district.accent,
+            theme: district.theme
           },
           selectedId
         )
@@ -1533,11 +2286,50 @@
         ' data-ws-map-viewport>' +
         '<div class="ws-map-world">' +
         parts.join('') +
-        '</div></div>' +
+        '</div>' +
+        // The resize overlay lives OUTSIDE the world layer on purpose. Inside
+        // it, the camera transform would scale the handles with the map, so at
+        // 10% zoom a 44px target would be 4px of screen (#346 FR-55, FR-56).
+        // Here it is screen-space, and worldToScreen re-places it on every
+        // render, camera change, and viewport resize.
+        resizeOverlayHTML() +
+        '</div>' +
         cameraControlsHTML(),
       empty: layout.nodes.length === 0,
       layout: layout
     };
+  }
+
+  /**
+   * The selected district's resize overlay (#346 FR-52 – FR-57).
+   *
+   * Rendered empty and hidden; positionResizeOverlay fills it in when an
+   * expanded district is selected and the layout is writable. An unselected
+   * district shows no handles and no permanent toolbar (FR-53).
+   *
+   * Only the handles themselves take pointer input — the box between them is
+   * inert, so panning, selecting, and right-clicking the map underneath a
+   * selected district all still work (FR-157).
+   */
+  function resizeOverlayHTML() {
+    var handles = RESIZE_HANDLES.map(function (handle) {
+      return (
+        '<button type="button" class="ws-map-resize-handle ws-map-resize-' +
+        handle +
+        '" data-resize-handle="' +
+        handle +
+        '" tabindex="-1" aria-label=""><span class="ws-map-resize-dot" aria-hidden="true"></span>' +
+        '</button>'
+      );
+    }).join('');
+    return (
+      '<div class="ws-map-resize-overlay" data-ws-map-resize hidden>' +
+      '<div class="ws-map-resize-box" data-ws-map-resize-box>' +
+      handles +
+      '</div>' +
+      '<div class="ws-map-resize-readout" data-ws-map-resize-readout hidden></div>' +
+      '</div>'
+    );
   }
 
   /**
@@ -2050,7 +2842,8 @@
         '</section>' +
         '</div>' +
         selBarHTML() +
-        menuHostHTML()
+        menuHostHTML() +
+        confirmHostHTML()
       );
     }
     return (
@@ -2096,7 +2889,8 @@
       // The context menu's host, for the same reason: the menu is positioned in
       // viewport coordinates, so it must sit outside both the theatre's
       // clip-path and the world layer's pan/zoom transform.
-      menuHostHTML()
+      menuHostHTML() +
+      confirmHostHTML()
     );
   }
 
@@ -2389,7 +3183,12 @@
     });
     var districts = container.querySelectorAll('.ws-map-district-tag[data-ws-id]');
     Array.prototype.forEach.call(districts, function (el) {
-      el.classList.toggle('is-selected', el.getAttribute('data-ws-id') === id);
+      var sel = el.getAttribute('data-ws-id') === id;
+      el.classList.toggle('is-selected', sel);
+      // The selected state has to update in place, not only on the next full
+      // render: a screen reader reading the control it just activated must hear
+      // the new state, and the class alone is invisible to it (#346 FR-143).
+      el.setAttribute('aria-pressed', sel ? 'true' : 'false');
     });
     var selected = findWs(workspaces, id);
     // The map's own overview panel is absent in cockpit mode — the persistent
@@ -2404,6 +3203,10 @@
     // control's enabled state has to follow the selection rather than waiting
     // for the next camera change (FR-41).
     updateCameraControls(container);
+    // Resize handles appear only on the selected expanded district, so a
+    // selection change is what shows or hides them (#346 FR-52, FR-53).
+    if (resizeState && resizeState.groupId !== id) cancelResize();
+    positionResizeOverlay(container);
     if (options && typeof options.onSelect === 'function') {
       options.onSelect(id, selected || null);
     }
@@ -2554,6 +3357,13 @@
     return '<div class="ws-map-menu-host" data-ws-map-menu-host></div>';
   }
 
+  // The drop confirmation's host. Separate from the menu's because the two can
+  // never be open at once but do not share a lifetime: closing the menu must
+  // not take a pending confirmation with it.
+  function confirmHostHTML() {
+    return '<div class="ws-map-menu-host" data-ws-map-confirm-host></div>';
+  }
+
   // Single workspace tile. Every entry mirrors a control the Overview rail
   // already renders, including the rail's own "Delete group" wording for a
   // group and its condition for the Setup entry point.
@@ -2607,17 +3417,53 @@
   // A group district. Districts cannot be multi-selected, so this menu is
   // always single-target, and its delete runs the same host callback (and the
   // same group_only confirm) the rail's Delete group runs.
+  //
+  // The layout actions sit between Open and Delete, so the destructive item
+  // stays visually separated from the non-destructive ones (#346 FR-147), and
+  // each carries a truthful disabled state rather than being hidden — a missing
+  // item tells the user nothing about why (FR-148).
   function districtMenuItems(ws) {
-    return [
-      { label: 'Open group', action: 'open' },
-      menuDivider(),
-      {
-        label: isGroup(ws) ? 'Delete group' : 'Delete workspace',
-        action: 'delete',
-        variant: 'danger',
-        disabled: isMapReadOnly()
-      }
-    ];
+    var groupId = (ws && ws.id) || '';
+    var district = renderedDistrict(groupId);
+    var readOnly = isMapReadOnly();
+    var collapsed = !!(district && district.collapsed);
+    var items = [{ label: 'Open group', action: 'open' }, menuDivider()];
+    items.push({
+      label: collapsed ? 'Expand group' : 'Collapse group',
+      action: collapsed ? 'expand-group' : 'collapse-group',
+      disabled: readOnly || !district
+    });
+    // Resize and Fit are meaningless on a collapsed district: there is no frame
+    // on screen to size (FR-115).
+    items.push({
+      label: 'Resize group',
+      action: 'resize-group',
+      disabled: readOnly || collapsed || !district
+    });
+    items.push({
+      label: 'Fit to contents',
+      action: 'fit-group',
+      // Fitting an already-automatic district would consume a revision to
+      // change nothing.
+      disabled: readOnly || collapsed || !district || district.sizingMode !== 'custom'
+    });
+    // Offered only when there is a customization to undo, so the menu does not
+    // carry a permanently dead entry (FR-137, FR-146).
+    if (district && (district.accent !== DEFAULT_ACCENT || district.theme !== DEFAULT_THEME)) {
+      items.push({
+        label: 'Use default appearance',
+        action: 'reset-appearance',
+        disabled: readOnly
+      });
+    }
+    items.push(menuDivider());
+    items.push({
+      label: isGroup(ws) ? 'Delete group' : 'Delete workspace',
+      action: 'delete',
+      variant: 'danger',
+      disabled: readOnly
+    });
+    return items;
   }
 
   // The reserved Personal HQ site. The conditions mirror hqOverviewHTML exactly:
@@ -2992,6 +3838,24 @@
         announce(container, 'Opening the Backlog for ' + name);
         openWorkspace(id, { panel: 'backlog' });
         break;
+      // District layout actions (#346 FR-146). They run the same controller the
+      // direct handles and the Home rail run, so all three surfaces validate,
+      // persist, announce, and fail identically (FR-156).
+      case 'resize-group':
+        startGroupResize(container, id);
+        break;
+      case 'fit-group':
+        void fitGroupToContents(container, id);
+        break;
+      case 'collapse-group':
+        void setGroupCollapsed(container, id, true);
+        break;
+      case 'expand-group':
+        void setGroupCollapsed(container, id, false);
+        break;
+      case 'reset-appearance':
+        void resetGroupAppearance(container, id);
+        break;
       case 'open-setup':
         announce(container, 'Opening Setup for ' + name);
         openWorkspace(id, { setup: true });
@@ -3224,6 +4088,52 @@
         event,
         true
       );
+    });
+
+    // The district header's collapse control (#346 FR-102).
+    var collapsers = container.querySelectorAll('[data-group-collapse]');
+    Array.prototype.forEach.call(collapsers, function (button) {
+      if (!button || typeof button.addEventListener !== 'function') return;
+      button.addEventListener('click', function (event) {
+        if (event.preventDefault) event.preventDefault();
+        if (event.stopPropagation) event.stopPropagation();
+        var groupId = button.getAttribute('data-group-collapse');
+        if (isMapReadOnly()) {
+          announce(container, 'The map layout cannot be saved right now.');
+          return;
+        }
+        void setGroupCollapsed(container, groupId, button.getAttribute('aria-expanded') === 'true');
+      });
+    });
+
+    // The district header's overflow control. It opens the very same menu the
+    // right-click and Shift+F10 paths open, so the three routes cannot offer
+    // different actions or different validation (#346 FR-156).
+    var overflows = container.querySelectorAll('[data-group-menu]');
+    Array.prototype.forEach.call(overflows, function (button) {
+      if (!button || typeof button.addEventListener !== 'function') return;
+      button.addEventListener('click', function (event) {
+        if (dragState || clusterDrag) return;
+        var groupId = button.getAttribute('data-group-menu');
+        var target = {
+          type: 'district',
+          id: groupId,
+          ws: findWs(workspaces, groupId),
+          element: button
+        };
+        if (!contextMenuItemsFor(target).length) return;
+        if (event.preventDefault) event.preventDefault();
+        if (event.stopPropagation) event.stopPropagation();
+        openMenuForTarget(
+          container,
+          workspaces,
+          options,
+          target,
+          anchorForElement(button),
+          event,
+          true
+        );
+      });
     });
   }
 
@@ -3461,8 +4371,10 @@
     // opens, which cannot go stale.
   }
 
-  // selectedNodeAnchor finds the world anchor of whatever is selected, whether
-  // that is a building or a group district.
+  // selectedNodeAnchor finds the world box of whatever is selected, whether that
+  // is a building or a group district. A district reports its whole effective
+  // frame so Center selected frames the district, not a tile-sized patch of its
+  // corner (#346 FR-47).
   function selectedNodeAnchor() {
     if (!selectedId || !lastWorldLayout) return null;
     var node = null;
@@ -3470,10 +4382,22 @@
       if (candidate.id === selectedId) node = { x: candidate.x, y: candidate.y };
     });
     if (node) return node;
+    var district = renderedDistrict(selectedId);
+    if (district) {
+      return { x: district.x, y: district.y, width: district.width, height: district.height };
+    }
+    return null;
+  }
+
+  // renderedDistrict returns the district record currently drawn for a group id,
+  // which is where its effective frame lives.
+  function renderedDistrict(id) {
+    if (!id || !lastWorldLayout) return null;
+    var found = null;
     lastWorldLayout.districts.forEach(function (district) {
-      if (district.id === selectedId) node = { x: district.anchorX, y: district.anchorY };
+      if (district.id === id) found = district;
     });
-    return node;
+    return found;
   }
 
   function bindCameraControls(container) {
@@ -3505,6 +4429,16 @@
     // Keyboard equivalents for every camera gesture, so navigating the map
     // never requires a pointer (FR-115).
     canvas.addEventListener('keydown', function (event) {
+      // An active resize owns Escape before anything else does (#346 FR-165).
+      // Bound here as well as on the handle because a POINTER resize does not
+      // require the handle to still hold focus, and "Escape cancels what I am
+      // doing" must not depend on where focus happens to be.
+      if (event.key === 'Escape' && resizeState) {
+        if (event.preventDefault) event.preventDefault();
+        if (event.stopPropagation) event.stopPropagation();
+        cancelResize('Resize cancelled. The group is back at its saved size.');
+        return;
+      }
       // Keyboard Move owns the arrow keys while it is active: they move the
       // building, not the camera (FR-78).
       if (handleMoveKey(container, event)) {
@@ -3632,6 +4566,629 @@
     );
   }
 
+  // ---------- district resizing, wired (#346 FR-52 – FR-75) ----------
+  //
+  // One state machine serves the pointer and the keyboard. Both produce a
+  // preview, both validate through the same collision evaluator, and both
+  // commit through the same single PATCH — so "resize by dragging" and "resize
+  // by arrow keys" cannot end up meaning different things.
+
+  var resizeState = null;
+
+  /** Is a district resizable right now? (FR-52, FR-115, FR-148) */
+  function canResizeDistrict(groupId) {
+    if (isMapReadOnly()) return false;
+    var district = renderedDistrict(groupId);
+    return !!district && !district.collapsed;
+  }
+
+  /** The padded rectangle a district's current members require (FR-76). */
+  function districtContentBounds(groupId) {
+    if (!lastWorldLayout) return null;
+    var members = lastWorldLayout.nodes.filter(function (node) {
+      return node.groupId === groupId;
+    });
+    return memberBounds(members);
+  }
+
+  function resizeOverlayEls(container) {
+    if (!container || typeof container.querySelector !== 'function') return null;
+    var overlay = container.querySelector('[data-ws-map-resize]');
+    if (!overlay) return null;
+    return {
+      overlay: overlay,
+      box: container.querySelector('[data-ws-map-resize-box]'),
+      readout: container.querySelector('[data-ws-map-resize-readout]')
+    };
+  }
+
+  /**
+   * Put the overlay over the selected district, in screen space.
+   *
+   * Called on render, on every camera change, and on viewport resize. When
+   * nothing resizable is selected the overlay is hidden outright rather than
+   * left as an invisible rectangle over the map (FR-53, FR-157).
+   */
+  function positionResizeOverlay(container) {
+    var els = resizeOverlayEls(container);
+    if (!els) return;
+    var groupId = selectedId;
+    var district = canResizeDistrict(groupId) ? renderedDistrict(groupId) : null;
+    if (!district) {
+      els.overlay.hidden = true;
+      return;
+    }
+    var frame = resizeState && resizeState.groupId === groupId ? resizeState.preview : district;
+    var canvas = container.querySelector('[data-ws-map-viewport]');
+    var viewport = framedViewport(canvas).full;
+    var topLeft = worldToScreen({ x: frame.x, y: frame.y }, camera, viewport);
+    var size = { width: frame.width * camera.zoom, height: frame.height * camera.zoom };
+
+    els.overlay.hidden = false;
+    // The overlay belongs to one district, so it wears that district's accent
+    // rather than a fixed colour — a violet group with an amber selection
+    // rectangle reads as two different things (#346 FR-129). Blocked and error
+    // states still override it, because those must never be theme-coloured
+    // (FR-86).
+    if (els.overlay.classList) {
+      DISTRICT_ACCENTS.forEach(function (id) {
+        els.overlay.classList.toggle('ws-map-accent-' + id, id === safeAccent(district.accent));
+      });
+    }
+    if (els.box && els.box.style) {
+      els.box.style.left = topLeft.x + 'px';
+      els.box.style.top = topLeft.y + 'px';
+      els.box.style.width = size.width + 'px';
+      els.box.style.height = size.height + 'px';
+    }
+    var name = (district.ws && district.ws.name) || 'group';
+    var handles = container.querySelectorAll('[data-resize-handle]');
+    Array.prototype.forEach.call(handles, function (handle) {
+      var edge = handle.getAttribute('data-resize-handle');
+      // An accurate name for each handle: which group, and which edge or corner
+      // it changes (FR-69).
+      handle.setAttribute(
+        'aria-label',
+        'Resize ' + name + ' group: ' + (RESIZE_HANDLE_LABELS[edge] || edge)
+      );
+      handle.setAttribute('tabindex', '0');
+    });
+  }
+
+  /** The concise width×height and snap-state readout (FR-67, FR-68). */
+  function resizeReadout(state) {
+    var frame = state.preview;
+    var size = Math.round(frame.width) + ' × ' + Math.round(frame.height);
+    var snapping = state.snapBypassed || !layoutState.snapToGrid ? 'free' : 'snapped';
+    if (state.conflict && state.conflict.blocked) {
+      return size + ' · blocked by ' + state.conflict.name;
+    }
+    if (state.clamped) return size + ' · smallest that fits its workspaces';
+    return size + ' · ' + snapping;
+  }
+
+  function paintResize(container, state) {
+    var els = resizeOverlayEls(container);
+    if (!els) return;
+    positionResizeOverlay(container);
+    var blocked = !!(state.conflict && state.conflict.blocked);
+    if (els.box && els.box.classList) {
+      els.box.classList.toggle('is-resizing', true);
+      // Blocked and clamped are different states and read differently: blocked
+      // is refused, clamped is the honest floor. Neither relies on colour —
+      // the border style changes and the readout says which (FR-81, FR-163).
+      els.box.classList.toggle('is-blocked', blocked);
+      els.box.classList.toggle('is-clamped', !blocked && !!state.clamped);
+    }
+    if (els.readout) {
+      els.readout.hidden = false;
+      els.readout.textContent = resizeReadout(state);
+    }
+  }
+
+  function clearResizePaint(container) {
+    var els = resizeOverlayEls(container);
+    if (!els) return;
+    if (els.box && els.box.classList) {
+      els.box.classList.remove('is-resizing');
+      els.box.classList.remove('is-blocked');
+      els.box.classList.remove('is-clamped');
+    }
+    if (els.readout) {
+      els.readout.hidden = true;
+      els.readout.textContent = '';
+    }
+  }
+
+  /**
+   * Begin a resize gesture.
+   *
+   * `mode` is 'pointer' or 'keyboard'; the geometry is identical either way, and
+   * only how the delta arrives differs (FR-70).
+   */
+  function beginResize(container, groupId, handle, mode) {
+    if (!canResizeDistrict(groupId)) return null;
+    var district = renderedDistrict(groupId);
+    if (!district) return null;
+    resizeState = {
+      container: container,
+      groupId: groupId,
+      handle: handle,
+      mode: mode,
+      // The frame the gesture started from, and the one Escape restores (FR-65).
+      origin: { x: district.x, y: district.y, width: district.width, height: district.height },
+      preview: { x: district.x, y: district.y, width: district.width, height: district.height },
+      contentBounds: districtContentBounds(groupId),
+      snapBypassed: false,
+      clamped: false,
+      changed: false,
+      conflict: { blocked: false, reason: '', name: '' },
+      // Announcements are bounded: start, blocked-state changes, commit,
+      // cancel, and failure — never one per pointer move (FR-162).
+      announcedBlocked: false,
+      initiator: null
+    };
+    announce(
+      container,
+      'Resizing ' +
+        ((district.ws && district.ws.name) || 'group') +
+        ' — ' +
+        (mode === 'keyboard'
+          ? 'arrow keys to size, Enter to save, Escape to put it back.'
+          : 'release to save, or press Escape to put it back.')
+    );
+    return resizeState;
+  }
+
+  /** Apply a delta to the active gesture and repaint its preview. */
+  function updateResize(delta, options) {
+    if (!resizeState) return;
+    var opts = options || {};
+    if (typeof opts.snapBypassed === 'boolean') resizeState.snapBypassed = opts.snapBypassed;
+    var result = resizeFrame(resizeState.origin, resizeState.handle, delta, {
+      snap: layoutState.snapToGrid && !resizeState.snapBypassed,
+      contentBounds: resizeState.contentBounds
+    });
+    resizeState.preview = result.frame;
+    resizeState.clamped = result.clamped;
+    resizeState.changed = result.changed;
+    resizeState.conflict = frameConflict(result.frame, resizeState.groupId, lastWorldLayout);
+    paintResize(resizeState.container, resizeState);
+
+    // Only a *change* in blocked state is announced, not every move (FR-162).
+    if (resizeState.conflict.blocked !== resizeState.announcedBlocked) {
+      resizeState.announcedBlocked = resizeState.conflict.blocked;
+      if (resizeState.conflict.blocked) {
+        announce(
+          resizeState.container,
+          'Blocked — this would draw the group around ' + resizeState.conflict.name + '.'
+        );
+      }
+    }
+  }
+
+  /** End a gesture without saving, restoring the committed frame (FR-65). */
+  function cancelResize(message) {
+    if (!resizeState) return;
+    var state = resizeState;
+    resizeState = null;
+    clearResizePaint(state.container);
+    positionResizeOverlay(state.container);
+    restoreResizeFocus(state);
+    if (message) announce(state.container, message);
+  }
+
+  function restoreResizeFocus(state) {
+    // Focus goes back to whatever started the gesture, unless it is gone
+    // (FR-75).
+    var target = state.initiator;
+    if (target && typeof target.focus === 'function') {
+      target.focus();
+      return;
+    }
+    var handle = resizeHandleEl(state.container, state.handle);
+    if (handle && typeof handle.focus === 'function') handle.focus();
+  }
+
+  /** One overlay per container, so the handle lookup is unambiguous. */
+  function resizeHandleEl(container, edge) {
+    if (!container || typeof container.querySelector !== 'function') return null;
+    return container.querySelector('[data-resize-handle="' + edge + '"]');
+  }
+
+  /**
+   * Commit a resize.
+   *
+   * Exactly one bounded PATCH for a changed, valid release (FR-63); nothing at
+   * all for an unchanged one (FR-64) or a blocked one (FR-82). A failure puts
+   * the committed frame back, keeps the selection, and offers a real retry
+   * (FR-66).
+   */
+  function commitResize() {
+    if (!resizeState) return Promise.resolve(false);
+    var state = resizeState;
+    resizeState = null;
+    var container = state.container;
+    clearResizePaint(container);
+
+    if (state.conflict && state.conflict.blocked) {
+      positionResizeOverlay(container);
+      restoreResizeFocus(state);
+      announce(
+        container,
+        'Resize refused — it would have drawn the group around ' + state.conflict.name + '.'
+      );
+      return Promise.resolve(false);
+    }
+    if (!state.changed) {
+      positionResizeOverlay(container);
+      restoreResizeFocus(state);
+      return Promise.resolve(false);
+    }
+    return applyGroupFrame(container, state.groupId, state.preview).then(function (ok) {
+      restoreResizeFocus(state);
+      return ok;
+    });
+  }
+
+  // ---------- the one district action surface (#346 FR-156) ----------
+  //
+  // Direct handles, the group context menu, and the Home Map-layout rail all
+  // call these. One implementation means one validation rule, one persistence
+  // path, one announcement, and one failure behaviour, whichever surface the
+  // user reached for.
+
+  /** Store a user-chosen minimum rectangle (FR-42). */
+  function applyGroupFrame(container, groupId, frame) {
+    return patchLayout([
+      {
+        op: 'set_group_frame',
+        group_id: groupId,
+        frame: { x: frame.x, y: frame.y, width: frame.width, height: frame.height }
+      }
+    ])
+      .then(function () {
+        settleLayout();
+        notifyDistrictChanged(groupId);
+        announce(container, 'Group size saved.');
+        return true;
+      })
+      .catch(function () {
+        // The canonical committed frame is whatever the server still holds, so
+        // simply repainting from unchanged local state restores it.
+        settleLayout();
+        announceRetryableFailure(
+          container,
+          'That group size could not be saved. The group is back at its last saved size.',
+          function () {
+            return applyGroupFrame(container, groupId, frame);
+          }
+        );
+        return false;
+      });
+  }
+
+  /**
+   * Enter keyboard resize mode without requiring focus on a small edge target
+   * (FR-74).
+   *
+   * This is the route the context menu and the Home rail use. It selects the
+   * district first — a resize with nothing selected has no overlay to drive —
+   * then focuses the bottom-right handle, which is the one a user reaching for
+   * "make this bigger" expects.
+   */
+  function startGroupResize(container, groupId) {
+    if (!canResizeDistrict(groupId)) {
+      announce(container, 'That group cannot be resized right now.');
+      return false;
+    }
+    if (selectedId !== groupId && lastMount) {
+      applySelection(container, lastMount.state.workspaces || [], groupId, lastMount.state);
+    }
+    positionResizeOverlay(container);
+    // The bottom-right corner: the one a user reaching for "make this bigger"
+    // expects, and the one that grows without moving the district's anchor.
+    var handle = resizeHandleEl(container, 'se');
+    var state = beginResize(container, groupId, 'se', 'keyboard');
+    if (!state) return false;
+    state.initiator = handle;
+    state.step = { x: 0, y: 0 };
+    if (handle && typeof handle.focus === 'function') handle.focus();
+    return true;
+  }
+
+  /**
+   * Collapse or expand a district (#346 FR-102, FR-103).
+   *
+   * Collapsing prunes any of the group's members from the visible multi-select
+   * set first: a checked building that is about to stop being drawn would leave
+   * the action bar claiming a selection the user can no longer see or clear
+   * (FR-105). The group's own selection is deliberately kept.
+   */
+  function setGroupCollapsed(container, groupId, collapsed) {
+    if (collapsed && lastWorldLayout) {
+      lastWorldLayout.nodes.forEach(function (node) {
+        if (node.groupId === groupId) delete multiSelected[node.id];
+      });
+      // The action bar has to stop claiming those workspaces immediately, not
+      // after the round-trip: they are about to disappear from the map, and a
+      // count the user cannot reconcile with what they can see is worse than a
+      // slightly early one.
+      if (container) updateSelBar(container);
+    }
+    // A collapsed district has no frame on screen to size, so any resize in
+    // flight ends rather than being left pointing at something invisible.
+    if (collapsed && resizeState && resizeState.groupId === groupId) cancelResize();
+
+    return patchLayout([{ op: 'set_group_collapsed', group_id: groupId, collapsed: !!collapsed }])
+      .then(function () {
+        settleLayout();
+        notifyDistrictChanged(groupId);
+        announce(
+          container,
+          collapsed
+            ? 'Group collapsed. Its workspaces are hidden on the map, not removed.'
+            : 'Group expanded.'
+        );
+        return true;
+      })
+      .catch(function () {
+        settleLayout();
+        announceRetryableFailure(
+          container,
+          collapsed
+            ? 'That group could not be collapsed. It is still open.'
+            : 'That group could not be expanded. It is still collapsed.',
+          function () {
+            return setGroupCollapsed(container, groupId, collapsed);
+          }
+        );
+        return false;
+      });
+  }
+
+  /**
+   * Choose a curated accent and/or district theme (#346 FR-121, FR-126).
+   *
+   * Only identifiers travel — never a colour, never a rule, never a URL. The
+   * server validates them against the same catalog, and an unknown one is
+   * refused rather than stored, so nothing a client can invent ever reaches a
+   * stylesheet (FR-125, FR-194).
+   */
+  function setGroupAppearance(container, groupId, choice) {
+    var operation = { op: 'set_group_appearance', group_id: groupId };
+    if (choice && choice.accent) operation.accent = choice.accent;
+    if (choice && choice.theme) operation.theme = choice.theme;
+    if (!operation.accent && !operation.theme) return Promise.resolve(false);
+
+    return patchLayout([operation])
+      .then(function () {
+        settleLayout();
+        notifyDistrictChanged(groupId);
+        announce(container, 'Group appearance updated.');
+        return true;
+      })
+      .catch(function () {
+        settleLayout();
+        announceRetryableFailure(
+          container,
+          'That appearance could not be saved. The group looks the way it did.',
+          function () {
+            return setGroupAppearance(container, groupId, choice);
+          }
+        );
+        return false;
+      });
+  }
+
+  /**
+   * Restore the default accent and theme (#346 FR-137).
+   *
+   * Appearance only: geometry, sizing mode, collapse state, members, and
+   * coordinates are all left exactly as they are.
+   */
+  function resetGroupAppearance(container, groupId) {
+    return patchLayout([{ op: 'reset_group_appearance', group_id: groupId }])
+      .then(function () {
+        settleLayout();
+        notifyDistrictChanged(groupId);
+        announce(container, 'Group appearance reset to the default.');
+        return true;
+      })
+      .catch(function () {
+        settleLayout();
+        announceRetryableFailure(
+          container,
+          'That appearance could not be reset. The group looks the way it did.',
+          function () {
+            return resetGroupAppearance(container, groupId);
+          }
+        );
+        return false;
+      });
+  }
+
+  /** Return a district to automatic sizing (FR-40, FR-41). */
+  function fitGroupToContents(container, groupId) {
+    return patchLayout([{ op: 'fit_group_to_contents', group_id: groupId }])
+      .then(function () {
+        settleLayout();
+        notifyDistrictChanged(groupId);
+        announce(container, 'Group fitted to its workspaces.');
+        return true;
+      })
+      .catch(function () {
+        settleLayout();
+        announceRetryableFailure(
+          container,
+          'Fit to contents could not be saved. Nothing changed.',
+          function () {
+            return fitGroupToContents(container, groupId);
+          }
+        );
+        return false;
+      });
+  }
+
+  /**
+   * Tell the host a district's presentation changed (#346 FR-152).
+   *
+   * The Home rail states the sizing mode in words, and a rail that still reads
+   * "Automatic size" after a committed resize is simply wrong. The rail owns its
+   * own rendering, so the Map reports the change rather than reaching into it.
+   */
+  function notifyDistrictChanged(groupId) {
+    var state = lastMount && lastMount.state;
+    if (state && typeof state.onDistrictChanged === 'function') {
+      state.onDistrictChanged(groupId);
+    }
+  }
+
+  // The last failed district action, so a surface can offer a real retry rather
+  // than a button that reruns a guess (FR-66).
+  var lastDistrictFailure = null;
+
+  function announceRetryableFailure(container, message, retry) {
+    lastDistrictFailure = { message: message, retry: retry };
+    announce(container, message + ' Choose Retry to try again.');
+  }
+
+  function retryLastDistrictAction() {
+    var failure = lastDistrictFailure;
+    if (!failure) return Promise.resolve(false);
+    lastDistrictFailure = null;
+    return failure.retry();
+  }
+
+  // ---------- grouping handoff (#346 FR-13 – FR-22, FR-27, FR-28) ----------
+  //
+  // Grouping is a HIERARCHY mutation, owned by workspace-bulk-actions.js and
+  // shared with Tree. The Map adds two things around it and nothing else: it
+  // pins the coordinates of the workspaces about to be grouped, and afterwards
+  // it selects and frames the district the hierarchy actually produced. No part
+  // of this sends a parent or an order index through the layout API — it has no
+  // field for either (FR-98).
+
+  /**
+   * The drawn anchors of records that are about to be grouped but have never
+   * been placed by hand.
+   *
+   * Grouping does not move anything, but it does change what *automatic*
+   * placement would produce: a workspace that was its own island becomes a
+   * member of a group island, so its seeded cell changes and an unplaced
+   * building would appear to jump on the next render. Pinning its current
+   * coordinate first is what makes "grouping preserves every selected
+   * workspace's exact world coordinate" true for unplaced records too (FR-13).
+   *
+   * Records the user has already placed are skipped: their saved anchor already
+   * says where they are, and rewriting it would be a pointless write.
+   */
+  function captureGroupingAnchors(ids) {
+    var wanted = Object.create(null);
+    (Array.isArray(ids) ? ids : []).forEach(function (id) {
+      if (id) wanted[id] = true;
+    });
+    var anchors = Object.create(null);
+    if (!lastWorldLayout) return anchors;
+    lastWorldLayout.nodes.forEach(function (node) {
+      if (!wanted[node.id] || node.saved) return;
+      anchors[node.id] = { x: node.x, y: node.y };
+    });
+    return anchors;
+  }
+
+  /**
+   * Is the whole district already on screen? Used to keep the camera still
+   * unless it actually has to move (FR-22).
+   */
+  function districtFullyVisible(district, container) {
+    var canvas = container && container.querySelector('[data-ws-map-viewport]');
+    var viewport = framedViewport(canvas).full;
+    if (!viewport.width || !viewport.height) return false;
+    var topLeft = worldToScreen({ x: district.x, y: district.y }, camera, viewport);
+    var bottomRight = worldToScreen(
+      { x: district.x + district.width, y: district.y + district.height },
+      camera,
+      viewport
+    );
+    return (
+      topLeft.x >= 0 &&
+      topLeft.y >= 0 &&
+      bottomRight.x <= viewport.width &&
+      bottomRight.y <= viewport.height - CONTROL_STRIP_HEIGHT
+    );
+  }
+
+  /**
+   * Frame a district without changing the zoom the user chose (FR-22).
+   * Returns whether the camera actually moved.
+   */
+  function focusGroupDistrict(groupId, container) {
+    var district = renderedDistrict(groupId);
+    if (!district || !container) return false;
+    if (districtFullyVisible(district, container)) return false;
+    setCamera(centerOn(camera, district), container);
+    return true;
+  }
+
+  /**
+   * Adopt a group the hierarchy just created.
+   *
+   * `placed` is the authoritative member list — the workspaces the workspace
+   * store actually reparented, not the ones the click asked for — so a run where
+   * only some reparents succeeded frames only what really moved (FR-28).
+   *
+   * Nothing about the district's *presentation* is written here. A new group is
+   * expanded, automatically sized, and default-looking (FR-18 – FR-20), which is
+   * exactly the record the layout deliberately does not store, and its frame is
+   * derived from its members on every render. So the compact district is a
+   * property of the model rather than of a write that could fail. The one write
+   * this makes is the coordinate pin above, and its failure is survivable: the
+   * group and its membership are already committed, the district still renders
+   * tight and automatic, and the caller is told plainly (FR-27).
+   */
+  function adoptNewGroup(groupId, anchors, options) {
+    var opts = options || {};
+    var container = (lastMount && lastMount.container) || opts.container || null;
+    // The grouped workspaces still exist, so mount()'s prune-on-refresh cannot
+    // drop them from the checked set — clear it explicitly (FR-21).
+    multiSelected = Object.create(null);
+
+    var pinned = Object.keys(anchors || {});
+    var write =
+      pinned.length && layoutState.status === 'ready'
+        ? patchLayout([{ op: 'set_positions', positions: anchors }])
+        : Promise.resolve(null);
+
+    return write.then(
+      function () {
+        settleLayout();
+        if (container) focusGroupDistrict(groupId, container);
+        return { groupId: groupId, pinned: pinned, saved: true };
+      },
+      function () {
+        // Membership stands; only the coordinate pin failed. Say so, and hand
+        // back a retry that reuses the exact anchors we meant to save.
+        settleLayout();
+        if (container) {
+          focusGroupDistrict(groupId, container);
+          announce(
+            container,
+            'The group was created, but the positions of its workspaces could not be saved. They may move to automatic placement.'
+          );
+        }
+        return {
+          groupId: groupId,
+          pinned: pinned,
+          saved: false,
+          retry: function () {
+            return adoptNewGroup(groupId, anchors, options);
+          }
+        };
+      }
+    );
+  }
+
   // ---------- moving buildings ----------
   //
   // A drag is a state machine, not a click handler. It only becomes a drag once
@@ -3650,16 +5207,17 @@
 
   /** The anchor a node is currently committed to, saved or automatic. */
   function committedAnchor(id) {
+    // A district is anchored by the corner of its effective frame, which is
+    // checked first because a populated automatic district's stored point means
+    // nothing any more — it is not what was drawn (#346 FR-17, FR-46).
+    var district = renderedDistrict(id);
+    if (district) return { x: district.x, y: district.y };
     var saved = layoutState.positions[id];
     if (saved) return { x: saved.x, y: saved.y };
     if (!lastWorldLayout) return null;
     var found = null;
     lastWorldLayout.nodes.forEach(function (node) {
       if (node.id === id) found = { x: node.x, y: node.y };
-    });
-    if (found) return found;
-    lastWorldLayout.districts.forEach(function (district) {
-      if (district.id === id) found = { x: district.anchorX, y: district.anchorY };
     });
     return found;
   }
@@ -3758,14 +5316,85 @@
    * where it was, keeps focus and selection, and says so with a retry
    * (FR-71).
    */
-  function commitMove(container, id, el, point, previous) {
+  /**
+   * The operations one member move has to commit.
+   *
+   * Usually just the anchor. When the member belongs to a custom-sized district
+   * and the move pushes past one of its edges, the reconciled minimum rectangle
+   * rides along in the SAME patch, so the coordinate and the frame that has to
+   * contain it are one accepted layout change rather than two that can half-fail
+   * (#346 FR-38).
+   *
+   * Returns null when the move is refused: expanding the frame across a
+   * workspace outside the group, or across another district, would make the Map
+   * claim a membership that does not exist, and that is blocked before save
+   * rather than saved and explained afterwards (FR-83).
+   */
+  function memberMoveOperations(id, point) {
     var positions = {};
     positions[id] = { x: point.x, y: point.y };
-    return patchLayout([{ op: 'set_positions', positions: positions }])
+    var operations = [{ op: 'set_positions', positions: positions }];
+
+    var node = null;
+    if (lastWorldLayout) {
+      lastWorldLayout.nodes.forEach(function (candidate) {
+        if (candidate.id === id) node = candidate;
+      });
+    }
+    if (!node || !node.groupId) return { operations: operations, conflict: null };
+
+    var district = renderedDistrict(node.groupId);
+    var members = lastWorldLayout.nodes.filter(function (candidate) {
+      return candidate.groupId === node.groupId;
+    });
+    var reconciled = reconcileCustomFrame(district, members, id, point);
+    if (!reconciled || !reconciled.changed) return { operations: operations, conflict: null };
+
+    var conflict = frameConflict(reconciled.frame, node.groupId, lastWorldLayout);
+    if (conflict.blocked) return { operations: null, conflict: conflict };
+
+    operations.push({
+      op: 'set_group_frame',
+      group_id: node.groupId,
+      frame: {
+        x: reconciled.frame.x,
+        y: reconciled.frame.y,
+        width: reconciled.frame.width,
+        height: reconciled.frame.height
+      }
+    });
+    return { operations: operations, conflict: null };
+  }
+
+  function commitMove(container, id, el, point, previous, intent) {
+    var plan = memberMoveOperations(id, point);
+    if (!plan.operations) {
+      // Blocked before save: nothing moved, nothing was asked of the server.
+      placeElement(el, previous);
+      if (el && el.focus) el.focus();
+      announce(
+        container,
+        'That move is blocked — its group would have to grow around ' +
+          plan.conflict.name +
+          ', which is not in it.'
+      );
+      return Promise.resolve(false);
+    }
+    return patchLayout(plan.operations)
       .then(function (result) {
         var committed = (result && result.positions && result.positions[id]) || point;
         placeElement(el, committed);
         pendingFocusId = id;
+        // The coordinate is saved first and the membership second, because they
+        // are two different APIs and cannot share a transaction. This order is
+        // the survivable one: a failed reparent leaves a workspace that moved
+        // but did not change groups, which is a state the user can see and
+        // repeat. The reverse would leave it in a new group at its old spot.
+        // ...and the membership is asked about before it is written. This is
+        // the only Map gesture with no Map-side undo (FR-6g).
+        if (intent && intent.kind === 'join') {
+          return confirmJoinOnDrop(container, id, el, intent, committed);
+        }
         announce(container, 'Moved to ' + formatCoordinate(committed));
         settleLayout();
         return true;
@@ -3785,7 +5414,345 @@
       });
   }
 
-  function bindTileDrag(container) {
+  // ---------------------------------------------------------------------------
+  // Drop confirmation (#346 FR-6g)
+  //
+  // A drop that changes which group a workspace belongs to asks first. It is the
+  // one Map gesture with no Map-side undo — a frame follows its own members, so
+  // nothing on this surface can take a workspace back out again, and the user
+  // would have to go to Tree to reverse an accident.
+  //
+  // The panel is the map's own, not window.confirm, for the same reason the
+  // context menu is: a native modal seizing focus the instant the mouse comes up
+  // reads as an error, and it cannot show which district it is talking about.
+  // ---------------------------------------------------------------------------
+
+  // The one open confirmation. Never more than one: it is opened by a pointer
+  // release, and a release cannot overlap another.
+  var dropConfirmState = null;
+
+  function dropConfirmHTML(spec) {
+    return (
+      '<div class="ws-map-drop-confirm" data-ws-map-drop-confirm role="dialog" ' +
+      'aria-labelledby="wsMapDropConfirmTitle" aria-describedby="wsMapDropConfirmBody">' +
+      '<p class="ws-map-drop-confirm-title" id="wsMapDropConfirmTitle">Move ' +
+      escapeHtml(spec.wsName) +
+      ' into ' +
+      escapeHtml(spec.groupName) +
+      '?</p>' +
+      '<p class="ws-map-drop-confirm-body" id="wsMapDropConfirmBody">' +
+      'It stays where you dropped it either way. Only Tree can take a workspace ' +
+      'back out of a group.</p>' +
+      '<div class="ws-map-drop-confirm-actions">' +
+      '<button type="button" class="ws-map-drop-confirm-go" data-drop-confirm="join">' +
+      'Move into group</button>' +
+      '<button type="button" class="ws-map-drop-confirm-no" data-drop-confirm="decline">' +
+      'Keep it out</button>' +
+      '</div>' +
+      '</div>'
+    );
+  }
+
+  /**
+   * Ask before the reparent, and answer nothing until the user does.
+   *
+   * @returns {boolean} false when there is nowhere to render it, which the
+   * caller must treat as "do not join" rather than as consent.
+   */
+  function openDropConfirm(container, spec) {
+    closeDropConfirm({ restoreFocus: false });
+    if (!container || typeof container.querySelector !== 'function') return false;
+    var host = container.querySelector('[data-ws-map-confirm-host]');
+    if (!host) return false;
+    host.innerHTML = dropConfirmHTML(spec);
+    var panel =
+      typeof host.querySelector === 'function'
+        ? host.querySelector('[data-ws-map-drop-confirm]')
+        : null;
+    if (!panel) {
+      host.innerHTML = '';
+      return false;
+    }
+
+    dropConfirmState = {
+      container: container,
+      host: host,
+      panel: panel,
+      groupId: spec.groupId,
+      onConfirm: spec.onConfirm,
+      onDecline: spec.onDecline,
+      // Focus goes back to the workspace that was dropped, so a keyboard user
+      // is returned to the thing they were moving rather than to the page top.
+      restoreFocusTo: spec.el || null,
+      settled: false,
+      teardown: []
+    };
+
+    // The district stays lit while the question is on screen: the panel names
+    // the group in words, and the highlight says which rectangle that is.
+    markDropTarget(container, spec.groupId);
+    // ...and the panel wears that district's colour, so a violet group is never
+    // asked about in the default amber (the same fix the resize overlay needed).
+    wearDistrictAccent(container, panel, spec.groupId);
+    placeMenu(panel, anchorForElement(spec.el));
+    bindDropConfirmInteractions();
+    focusDropConfirmButton(0);
+    return true;
+  }
+
+  /**
+   * Give `el` the accent of the district it is about (#346 FR-129).
+   *
+   * Same reasoning as the resize overlay: a panel that talks about a violet
+   * group while wearing the default amber reads as being about something else.
+   */
+  function wearDistrictAccent(container, el, groupId) {
+    if (!el || !el.classList) return;
+    var accent = safeAccent(presentationFor(groupId).accent);
+    DISTRICT_ACCENTS.forEach(function (id) {
+      el.classList.toggle('ws-map-accent-' + id, id === accent);
+    });
+  }
+
+  function dropConfirmButtons() {
+    var state = dropConfirmState;
+    if (!state || typeof state.panel.querySelectorAll !== 'function') return [];
+    return Array.prototype.slice.call(state.panel.querySelectorAll('[data-drop-confirm]'));
+  }
+
+  function focusDropConfirmButton(index) {
+    var buttons = dropConfirmButtons();
+    var el = buttons[index];
+    if (el && typeof el.focus === 'function') el.focus();
+  }
+
+  /**
+   * Answer the question exactly once.
+   *
+   * Every dismissal route lands here, and everything that is not an explicit
+   * "Move into group" is a decline — an unanswered question must never be read
+   * as a yes.
+   */
+  function settleDropConfirm(answer) {
+    var state = dropConfirmState;
+    if (!state || state.settled) return;
+    state.settled = true;
+    var confirmed = answer === 'join';
+    var onConfirm = state.onConfirm;
+    var onDecline = state.onDecline;
+    closeDropConfirm({ restoreFocus: true });
+    if (confirmed) {
+      if (typeof onConfirm === 'function') onConfirm();
+    } else if (typeof onDecline === 'function') {
+      onDecline();
+    }
+  }
+
+  function closeDropConfirm(options) {
+    var state = dropConfirmState;
+    if (!state) return;
+    dropConfirmState = null;
+    state.teardown.forEach(function (undo) {
+      if (typeof undo === 'function') undo();
+    });
+    if (state.host) state.host.innerHTML = '';
+    markDropTarget(state.container, '');
+    var restore = options && options.restoreFocus;
+    if (restore && state.restoreFocusTo && typeof state.restoreFocusTo.focus === 'function') {
+      state.restoreFocusTo.focus();
+    }
+  }
+
+  /**
+   * Keyboard and pointer routes out of the panel.
+   *
+   * Escape and a click on the map behind it both decline, because the safe
+   * reading of "went away without choosing" is that no group changed. Tab wraps
+   * between the two buttons so focus cannot wander onto the map underneath
+   * while a question is still open.
+   */
+  function bindDropConfirmInteractions() {
+    var state = dropConfirmState;
+    if (!state) return;
+
+    var onKeyDown = function (event) {
+      if (!dropConfirmState) return;
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        settleDropConfirm('decline');
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      var buttons = dropConfirmButtons();
+      if (buttons.length < 2) return;
+      var at = buttons.indexOf(event.target);
+      // Only the ends need handling; the middle is the browser's own business.
+      if (event.shiftKey && at === 0) {
+        event.preventDefault();
+        focusDropConfirmButton(buttons.length - 1);
+      } else if (!event.shiftKey && at === buttons.length - 1) {
+        event.preventDefault();
+        focusDropConfirmButton(0);
+      }
+    };
+
+    var onClick = function (event) {
+      if (!dropConfirmState) return;
+      var target = event.target;
+      var button =
+        target && typeof target.closest === 'function'
+          ? target.closest('[data-drop-confirm]')
+          : null;
+      if (button) {
+        event.preventDefault();
+        settleDropConfirm(button.getAttribute('data-drop-confirm'));
+        return;
+      }
+      // A click anywhere else dismisses it, which is a decline.
+      if (
+        target &&
+        typeof target.closest === 'function' &&
+        target.closest('[data-ws-map-drop-confirm]')
+      ) {
+        return;
+      }
+      settleDropConfirm('decline');
+    };
+
+    if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+      document.addEventListener('keydown', onKeyDown, true);
+      document.addEventListener('pointerdown', onClick, true);
+      state.teardown.push(function () {
+        document.removeEventListener('keydown', onKeyDown, true);
+        document.removeEventListener('pointerdown', onClick, true);
+      });
+    }
+  }
+
+  /**
+   * Put the question on screen and resolve with what the user chose.
+   *
+   * The coordinate is already saved by the time this runs, so declining is not
+   * a failure and is not reported as one: it leaves exactly the state a drop on
+   * open ground would have left.
+   */
+  function confirmJoinOnDrop(container, id, el, intent, committed) {
+    return new Promise(function (resolve) {
+      var opened = openDropConfirm(container, {
+        el: el,
+        groupId: intent.groupId,
+        groupName: intent.name,
+        wsName: intent.movingName || 'this workspace',
+        onConfirm: function () {
+          resolve(joinGroupOnDrop(container, id, intent, committed));
+        },
+        onDecline: function () {
+          announce(
+            container,
+            'Moved to ' + formatCoordinate(committed) + '. It stays out of ' + intent.name + '.'
+          );
+          settleLayout();
+          resolve(false);
+        }
+      });
+      if (opened) {
+        announce(
+          container,
+          'Moved to ' +
+            formatCoordinate(committed) +
+            '. Confirm whether to move it into ' +
+            intent.name +
+            '.'
+        );
+        return;
+      }
+      // Nothing to render into. The move stands; the membership question goes
+      // unasked, and an unasked question is never a yes.
+      announce(container, 'Moved to ' + formatCoordinate(committed));
+      settleLayout();
+      resolve(false);
+    });
+  }
+
+  /**
+   * Reparent a workspace that was dropped inside a district (#346 FR-6a).
+   *
+   * This is the ONE place the Map writes hierarchy, and it does not do so
+   * through the layout API — that API has no vocabulary for a parent and keeps
+   * none. It calls the same workspace endpoint Tree's drag-and-drop calls, so
+   * both views produce byte-identical mutations and neither can develop its own
+   * idea of what "move into a group" means.
+   *
+   * The move has already been saved by the time this runs, so a failure here is
+   * partial rather than total: the workspace is where the user put it, and only
+   * the membership did not change. That is reported as what it is.
+   */
+  function joinGroupOnDrop(container, id, intent, committed) {
+    if (typeof fetch !== 'function') return Promise.resolve(false);
+    return fetch('/api/workspaces/' + encodeURIComponent(id), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ parent_id: intent.groupId })
+    })
+      .then(function (response) {
+        if (!response || !response.ok) throw new Error('reparent failed');
+        announce(
+          container,
+          'Moved to ' + formatCoordinate(committed) + ' and added to ' + intent.name + '.'
+        );
+        // Membership is the host's data, not the Map's: it reloads the tree and
+        // re-mounts, which is what redraws the district around its new member.
+        notifyHierarchyChanged();
+        return true;
+      })
+      .catch(function () {
+        announce(
+          container,
+          'Moved to ' +
+            formatCoordinate(committed) +
+            ', but it could not be added to ' +
+            intent.name +
+            '. It is still in its previous group.'
+        );
+        settleLayout();
+        return false;
+      });
+  }
+
+  /**
+   * Highlight the district a release would drop into (#346 FR-6a).
+   *
+   * Exactly one at a time, and cleared when the answer is "no group" — a
+   * highlight left behind after the pointer moves out would promise a
+   * membership change that is no longer going to happen.
+   */
+  function markDropTarget(container, groupId) {
+    if (!container || typeof container.querySelectorAll !== 'function') return;
+    var districts = container.querySelectorAll('.ws-map-district[data-group-id]');
+    Array.prototype.forEach.call(districts, function (el) {
+      if (!el.classList) return;
+      el.classList.toggle(
+        'is-drop-target',
+        !!groupId && el.getAttribute('data-group-id') === groupId
+      );
+    });
+  }
+
+  /** Tell the host that workspace hierarchy changed underneath it. */
+  function notifyHierarchyChanged() {
+    var state = lastMount && lastMount.state;
+    if (state && typeof state.onHierarchyChanged === 'function') {
+      state.onHierarchyChanged();
+      return;
+    }
+    // Every surface already listens for this; it is how Tree's own mutations
+    // reach the rest of the page.
+    if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+      window.dispatchEvent(new Event('ori:workspaces-changed'));
+    }
+  }
+
+  function bindTileDrag(container, workspaces) {
     var tiles = container.querySelectorAll('.ws-map-tile[data-ws-id]');
     Array.prototype.forEach.call(tiles, function (el) {
       if (!el || typeof el.addEventListener !== 'function') return;
@@ -3836,10 +5803,22 @@
         placeElement(el, dragState.candidate);
         var blocked = wouldOverlapOccupied(dragState.candidate, dragState.id);
         if (el.classList) el.classList.toggle('is-blocked', blocked);
+        // Show what releasing here would MEAN, not just where it would land. A
+        // drop that changes which group a workspace belongs to must never be a
+        // surprise discovered afterwards (#346 FR-6a).
+        var intent = blocked
+          ? { kind: 'none' }
+          : dropMembershipIntent(dragState.id, dragState.candidate, workspaces, lastWorldLayout);
+        markDropTarget(container, intent.kind === 'join' ? intent.groupId : '');
+        dragState.intent = intent;
         setDragReadout(
           container,
           dragState.candidate,
-          blocked ? MOVE_BLOCKED_INSTRUCTION : undefined
+          blocked
+            ? MOVE_BLOCKED_INSTRUCTION
+            : intent.kind === 'join'
+              ? 'Release to move this workspace into ' + intent.name + '.'
+              : undefined
         );
       });
 
@@ -3859,6 +5838,10 @@
           el.classList.remove('is-dragging');
           el.classList.remove('is-blocked');
         }
+        // Every exit path clears it — up, cancel, Escape — so a district can
+        // never be left advertising a drop that already happened or was
+        // abandoned.
+        markDropTarget(container, '');
         setDragReadout(container, null);
         if (!state.moved) return;
         // A gesture that became a drag must not also read as a click (FR-66).
@@ -3873,7 +5856,10 @@
           placeElement(el, target);
           announce(container, 'That spot was taken; moved to the nearest free one.');
         }
-        commitMove(container, state.id, el, target, state.origin);
+        // Resolve membership against the frames as they stand NOW, before the
+        // move is committed and they follow the workspace (#346 FR-6a).
+        var intent = dropMembershipIntent(state.id, target, workspaces, lastWorldLayout);
+        commitMove(container, state.id, el, target, state.origin, intent);
       }
 
       el.addEventListener('pointerup', function (event) {
@@ -3941,19 +5927,57 @@
 
   var clusterDrag = null;
 
-  /** The group's members as currently drawn, with their live anchors. */
+  /**
+   * The group's members, with their live anchors.
+   *
+   * Hidden descendants of a collapsed district are included (with no element to
+   * preview). They still have to travel with the district and still have to be
+   * checked for where they land, even though nothing is drawn for them —
+   * otherwise collapsing a group would be a way to move buildings onto other
+   * buildings without the Map noticing (#346 FR-113, and task 5.7's
+   * "hidden descendant footprints").
+   */
   function clusterMembers(container, groupId) {
     if (!lastWorldLayout) return [];
     var members = [];
-    lastWorldLayout.nodes.forEach(function (node) {
+    var visit = function (node, hidden) {
       if (node.groupId !== groupId) return;
       members.push({
         id: node.id,
-        el: container.querySelector('.ws-map-tile[data-ws-id="' + node.id + '"]'),
+        hidden: hidden,
+        el: hidden ? null : container.querySelector('.ws-map-tile[data-ws-id="' + node.id + '"]'),
         origin: committedAnchor(node.id) || { x: node.x, y: node.y }
       });
+    };
+    lastWorldLayout.nodes.forEach(function (node) {
+      visit(node, false);
+    });
+    (lastWorldLayout.hiddenNodes || []).forEach(function (node) {
+      visit(node, true);
     });
     return members;
+  }
+
+  /**
+   * The point a district drag snaps against.
+   *
+   * Not the frame corner. A district's corner is its top-left member inset by
+   * the district padding (#346), so it sits half a gutter off the grid by
+   * construction — snapping *it* to the grid would push every member off the
+   * grid instead of onto it. The promise "with snapping on, a dragged district
+   * lands on the grid" is really about its buildings, so the top-left member
+   * anchor is what gets snapped and the frame follows by the same delta. An
+   * empty district has no members to speak for it and snaps by its own corner.
+   */
+  function clusterSnapOrigin(members, frameCorner) {
+    if (!members || !members.length) return frameCorner;
+    var x = Infinity;
+    var y = Infinity;
+    members.forEach(function (member) {
+      if (member.origin.x < x) x = member.origin.x;
+      if (member.origin.y < y) y = member.origin.y;
+    });
+    return { x: x, y: y };
   }
 
   /**
@@ -3979,12 +6003,27 @@
         occupied.push(committedAnchor(node.id) || { x: node.x, y: node.y });
       });
     }
-    return members.some(function (member) {
+    var buriesBuilding = members.some(function (member) {
       var candidate = { x: member.origin.x + delta.x, y: member.origin.y + delta.y };
       return occupied.some(function (anchor) {
         return footprintsOverlap(candidate, anchor);
       });
     });
+    if (buriesBuilding) return true;
+
+    // The frame travels with the cluster, so it has to be checked where it is
+    // going too (#346 FR-84). A district whose buildings all land in clear space
+    // can still arrive with its outline drawn around someone else's workspace,
+    // and that outline is a claim about membership.
+    var district = renderedDistrict(groupId);
+    if (!district) return false;
+    var translated = {
+      x: district.x + delta.x,
+      y: district.y + delta.y,
+      width: district.width,
+      height: district.height
+    };
+    return frameConflict(translated, groupId, lastWorldLayout).blocked;
   }
 
   function previewCluster(state, delta) {
@@ -4049,6 +6088,124 @@
       });
   }
 
+  /**
+   * Pointer and keyboard resizing, bound to the screen-space handles.
+   *
+   * Pointer capture keeps the gesture alive when the pointer outruns the handle,
+   * and every exit — up, cancel, Escape — releases it, so the map can never be
+   * left stuck mid-resize (FR-65). Nothing persists on pointer-move: the whole
+   * gesture is one preview and one PATCH (FR-60, FR-63).
+   */
+  function bindResizeHandles(container) {
+    var handles = container.querySelectorAll('[data-resize-handle]');
+    Array.prototype.forEach.call(handles, function (handle) {
+      if (!handle || typeof handle.addEventListener !== 'function') return;
+      var edge = handle.getAttribute('data-resize-handle');
+
+      handle.addEventListener('pointerdown', function (event) {
+        if (event.button != null && event.button !== 0) return;
+        var state = beginResize(container, selectedId, edge, 'pointer');
+        if (!state) return;
+        state.pointerId = event.pointerId;
+        state.startX = event.clientX;
+        state.startY = event.clientY;
+        state.initiator = handle;
+        if (handle.setPointerCapture) handle.setPointerCapture(event.pointerId);
+        if (event.stopPropagation) event.stopPropagation();
+        // Suppress text selection and page scrolling for this gesture only
+        // (FR-166).
+        if (event.preventDefault) event.preventDefault();
+      });
+
+      handle.addEventListener('pointermove', function (event) {
+        if (!resizeState || resizeState.mode !== 'pointer') return;
+        if (resizeState.initiator !== handle) return;
+        if (event.pointerId !== resizeState.pointerId) return;
+        if (event.preventDefault) event.preventDefault();
+        updateResize(
+          {
+            x: (event.clientX - resizeState.startX) / camera.zoom,
+            y: (event.clientY - resizeState.startY) / camera.zoom
+          },
+          // Option on Apple platforms, Alt elsewhere — one gesture, and the
+          // saved snap preference is untouched (FR-62).
+          { snapBypassed: !!event.altKey }
+        );
+      });
+
+      function releasePointer() {
+        if (
+          handle.releasePointerCapture &&
+          handle.hasPointerCapture &&
+          resizeState &&
+          handle.hasPointerCapture(resizeState.pointerId)
+        ) {
+          handle.releasePointerCapture(resizeState.pointerId);
+        }
+      }
+
+      handle.addEventListener('pointerup', function (event) {
+        if (!resizeState || resizeState.mode !== 'pointer') return;
+        if (resizeState.initiator !== handle) return;
+        if (event && event.pointerId != null && event.pointerId !== resizeState.pointerId) return;
+        releasePointer();
+        void commitResize();
+      });
+
+      handle.addEventListener('pointercancel', function () {
+        if (!resizeState || resizeState.initiator !== handle) return;
+        releasePointer();
+        cancelResize('Resize cancelled.');
+      });
+
+      // Keyboard resizing from a focused handle (FR-70 – FR-73).
+      handle.addEventListener('keydown', function (event) {
+        if (!event) return;
+        var key = event.key;
+        if (!resizeState || resizeState.initiator !== handle) {
+          if (key !== 'Enter' && key !== ' ' && key !== 'Spacebar') return;
+          var started = beginResize(container, selectedId, edge, 'keyboard');
+          if (!started) return;
+          started.initiator = handle;
+          started.step = { x: 0, y: 0 };
+          if (event.preventDefault) event.preventDefault();
+          return;
+        }
+        if (key === 'Escape') {
+          if (event.preventDefault) event.preventDefault();
+          if (event.stopPropagation) event.stopPropagation();
+          cancelResize('Resize cancelled. The group is back at its saved size.');
+          return;
+        }
+        if (key === 'Enter') {
+          if (event.preventDefault) event.preventDefault();
+          void commitResize();
+          return;
+        }
+        var direction = ARROW_DIRECTIONS[key];
+        if (!direction) return;
+        if (event.preventDefault) event.preventDefault();
+        // One snap step, or one world unit when snapping is bypassed; Shift
+        // moves four normal steps (FR-71, FR-72).
+        var bypass = !!event.altKey;
+        var unit = layoutState.snapToGrid && !bypass ? SNAP_STEP : 1;
+        var magnitude = unit * (event.shiftKey ? 4 : 1);
+        resizeState.step = {
+          x: resizeState.step.x + direction.x * magnitude,
+          y: resizeState.step.y + direction.y * magnitude
+        };
+        updateResize(resizeState.step, { snapBypassed: bypass });
+      });
+    });
+  }
+
+  var ARROW_DIRECTIONS = {
+    ArrowLeft: { x: -1, y: 0 },
+    ArrowRight: { x: 1, y: 0 },
+    ArrowUp: { x: 0, y: -1 },
+    ArrowDown: { x: 0, y: 1 }
+  };
+
   function bindDistrictDrag(container) {
     var handles = container.querySelectorAll('[data-group-drag]');
     Array.prototype.forEach.call(handles, function (handle) {
@@ -4060,6 +6217,7 @@
         var groupId = handle.getAttribute('data-group-drag');
         var origin = committedAnchor(groupId);
         if (!groupId || !origin) return;
+        var members = clusterMembers(container, groupId);
         clusterDrag = {
           groupId: groupId,
           handle: handle,
@@ -4068,7 +6226,8 @@
           startY: event.clientY,
           districtEl: container.querySelector('.ws-map-district[data-group-id="' + groupId + '"]'),
           districtOrigin: origin,
-          members: clusterMembers(container, groupId),
+          snapOrigin: clusterSnapOrigin(members, origin),
+          members: members,
           delta: { x: 0, y: 0 },
           moved: false
         };
@@ -4093,18 +6252,29 @@
         }
         if (event.preventDefault) event.preventDefault();
         var raw = { x: dx / camera.zoom, y: dy / camera.zoom };
+        var snapOrigin = clusterDrag.snapOrigin;
         var snappedTarget = snapPoint(
-          { x: clusterDrag.districtOrigin.x + raw.x, y: clusterDrag.districtOrigin.y + raw.y },
+          { x: snapOrigin.x + raw.x, y: snapOrigin.y + raw.y },
           !!event.altKey
         );
         clusterDrag.delta = {
-          x: snappedTarget.x - clusterDrag.districtOrigin.x,
-          y: snappedTarget.y - clusterDrag.districtOrigin.y
+          x: snappedTarget.x - snapOrigin.x,
+          y: snappedTarget.y - snapOrigin.y
         };
         previewCluster(clusterDrag, clusterDrag.delta);
         var blocked = clusterCollides(clusterDrag.groupId, clusterDrag.members, clusterDrag.delta);
         setClusterBlocked(clusterDrag, blocked);
-        setDragReadout(container, snappedTarget, blocked ? MOVE_BLOCKED_INSTRUCTION : undefined);
+        // The readout describes where the district itself lands, which is the
+        // thing being dragged, even though the grid snap was taken from its
+        // top-left member.
+        setDragReadout(
+          container,
+          {
+            x: clusterDrag.districtOrigin.x + clusterDrag.delta.x,
+            y: clusterDrag.districtOrigin.y + clusterDrag.delta.y
+          },
+          blocked ? MOVE_BLOCKED_INSTRUCTION : undefined
+        );
       });
 
       function finish(event, cancelled) {
@@ -4323,13 +6493,29 @@
       return;
     }
     var count = Object.keys(layoutState.positions).length;
+    // The copy has to name everything this clears, now that it clears more than
+    // anchors — and everything it does not, so nobody avoids Reset layout for
+    // fear of losing the colours they picked (#346 FR-186).
+    var districts = Object.keys(layoutState.groups).filter(function (id) {
+      var record = layoutState.groups[id];
+      return record.sizingMode === 'custom' || record.collapsed;
+    }).length;
     var message =
       'Reset the map layout?\n\n' +
-      'Every workspace and district goes back to an automatic position. ' +
+      'Every workspace and district goes back to an automatic position and size, and any ' +
+      'collapsed group is reopened. ' +
       'Nothing is deleted, renamed, regrouped or reordered — only where things sit on your map changes. ' +
-      'Your Snap to Grid setting is kept, and you can undo this during this session.' +
+      'Your group colours and themes, and your Snap to Grid setting, are kept, and you can undo ' +
+      'this during this session.' +
       (count
         ? '\n\n' + count + ' saved position' + (count === 1 ? '' : 's') + ' will be cleared.'
+        : '') +
+      (districts
+        ? (count ? ' ' : '\n\n') +
+          districts +
+          ' district' +
+          (districts === 1 ? '' : 's') +
+          ' will return to automatic sizing.'
         : '');
     if (
       typeof window !== 'undefined' &&
@@ -4340,44 +6526,88 @@
     }
 
     // Snapshot before asking the server, so Undo restores exactly what was
-    // there rather than whatever survived the reset.
-    var snapshot = {};
-    Object.keys(layoutState.positions).forEach(function (id) {
-      snapshot[id] = { x: layoutState.positions[id].x, y: layoutState.positions[id].y };
-    });
+    // there rather than whatever survived the reset. Since #346 a layout is
+    // more than anchors: the districts' custom rectangles, sizing modes, and
+    // collapsed states are cleared too, so they have to be remembered too or
+    // Undo would return the buildings and leave every district automatic and
+    // open (FR-187).
+    var snapshot = captureGeometrySnapshot();
 
     deleteLayout()
       .then(function () {
         undoSnapshot = snapshot;
         layoutState.positions = Object.create(null);
+        // Appearance is deliberately untouched by a reset, so only the geometry
+        // half of each stored record is cleared locally (FR-186).
+        Object.keys(layoutState.groups).forEach(function (id) {
+          var record = layoutState.groups[id];
+          record.sizingMode = 'auto';
+          record.frame = null;
+          record.collapsed = false;
+          if (isDefaultPresentation(record)) delete layoutState.groups[id];
+        });
         announce(
           container,
-          'Layout reset. Every workspace is at an automatic position; nothing else changed. Undo reset is available.'
+          'Layout reset. Every workspace and district is back to an automatic position and size; ' +
+            'your colours, themes, and Snap to Grid setting are unchanged. Undo reset is available.'
         );
         settleLayout();
         fitAll(lastMount ? lastMount.container : container);
       })
       .catch(function () {
-        // A failed reset changes nothing, and says so (FR-112).
+        // A failed reset changes nothing, and says so (FR-112, FR-188).
         announce(container, 'The layout could not be reset. Everything is still where it was.');
       });
+  }
+
+  /** The exact geometry a reset is about to clear (#346 FR-187). */
+  function captureGeometrySnapshot() {
+    var positions = {};
+    Object.keys(layoutState.positions).forEach(function (id) {
+      positions[id] = { x: layoutState.positions[id].x, y: layoutState.positions[id].y };
+    });
+    var groups = {};
+    Object.keys(layoutState.groups).forEach(function (id) {
+      var record = layoutState.groups[id];
+      // Appearance is not captured: a reset never takes it away, so an Undo has
+      // nothing to put back — and carrying it would let an Undo silently revert
+      // a colour chosen after the reset.
+      var geometry = { sizing_mode: record.sizingMode, collapsed: record.collapsed };
+      if (record.sizingMode === 'custom' && record.frame) {
+        geometry.frame = {
+          x: record.frame.x,
+          y: record.frame.y,
+          width: record.frame.width,
+          height: record.frame.height
+        };
+      }
+      groups[id] = geometry;
+    });
+    return { positions: positions, groups: groups };
   }
 
   function undoReset(container) {
     if (!undoSnapshot) return;
     var snapshot = undoSnapshot;
-    patchLayout([{ op: 'restore_positions', positions: snapshot }])
+    patchLayout([
+      { op: 'restore_geometry', positions: snapshot.positions, groups: snapshot.groups }
+    ])
       .then(function () {
         undoSnapshot = null;
-        Object.keys(snapshot).forEach(function (id) {
-          layoutState.positions[id] = snapshot[id];
+        Object.keys(snapshot.positions).forEach(function (id) {
+          layoutState.positions[id] = snapshot.positions[id];
         });
-        announce(container, 'Reset undone. Every workspace is back where it was.');
+        announce(container, 'Reset undone. Every workspace and district is back the way it was.');
         settleLayout();
+        // Reset framed the automatic layout on its way out, so without this the
+        // restored arrangement lands wherever that camera is still looking —
+        // usually at empty world. An Undo that appears to have done nothing is
+        // indistinguishable from one that failed.
+        fitAll(lastMount ? lastMount.container : container);
       })
       .catch(function () {
         // The post-reset state is still valid and still saved; only the undo
-        // failed, so the offer stays (FR-112).
+        // failed, so the offer stays (FR-112, FR-188).
         announce(
           container,
           'That could not be undone. The reset layout is unchanged — try Undo reset again.'
@@ -4688,8 +6918,9 @@
     bindViewportWheel(container);
     bindCameraControls(container);
     bindSnapControl(container);
-    bindTileDrag(container);
+    bindTileDrag(container, workspaces);
     bindDistrictDrag(container);
+    bindResizeHandles(container);
     bindResetLayout(container);
     // Focus returns to the record it was on before a committed move or a
     // refresh re-rendered the map (FR-117).
@@ -4760,6 +6991,63 @@
       multiSelected = Object.create(null);
       if (lastMount && lastMount.container) updateSelBar(lastMount.container);
     },
+    // The Map's half of the grouping flow (#346). The host still runs the one
+    // shared hierarchy mutation; these only pin coordinates beforehand and
+    // select/frame the resulting district afterwards.
+    captureGroupingAnchors: captureGroupingAnchors,
+    adoptNewGroup: adoptNewGroup,
+    /**
+     * A read-only snapshot of one district as currently drawn (#346 FR-151).
+     *
+     * The Home rail renders Map-layout controls from this rather than keeping
+     * its own copy of district state, so the rail and the district can never
+     * disagree about whether a group is custom-sized or collapsed.
+     */
+    getDistrictView: function (groupId) {
+      var district = renderedDistrict(groupId);
+      if (!district) return null;
+      return {
+        id: district.id,
+        sizingMode: district.sizingMode,
+        collapsed: district.collapsed,
+        accent: district.accent,
+        theme: district.theme,
+        memberCount: district.memberCount,
+        readOnly: isMapReadOnly(),
+        // The catalogs travel with the snapshot so the rail renders named
+        // choices without keeping its own copy of the identifiers (#346 FR-125).
+        accents: DISTRICT_ACCENT_CATALOG.map(function (entry) {
+          return { id: entry.id, label: entry.label };
+        }),
+        themes: DISTRICT_THEME_CATALOG.map(function (entry) {
+          return { id: entry.id, label: entry.label, hint: entry.hint };
+        })
+      };
+    },
+    // The district action controller. The context menu and the Home rail call
+    // exactly these, which is what keeps every surface on one validation,
+    // persistence, announcement, and failure path (#346 FR-156).
+    districtActions: {
+      resize: function (groupId) {
+        return startGroupResize((lastMount && lastMount.container) || null, groupId);
+      },
+      fitToContents: function (groupId) {
+        return fitGroupToContents((lastMount && lastMount.container) || null, groupId);
+      },
+      setCollapsed: function (groupId, collapsed) {
+        return setGroupCollapsed((lastMount && lastMount.container) || null, groupId, collapsed);
+      },
+      setAppearance: function (groupId, choice) {
+        return setGroupAppearance((lastMount && lastMount.container) || null, groupId, choice);
+      },
+      resetAppearance: function (groupId) {
+        return resetGroupAppearance((lastMount && lastMount.container) || null, groupId);
+      },
+      retryLastFailure: retryLastDistrictAction,
+      hasRetry: function () {
+        return !!lastDistrictFailure;
+      }
+    },
     setSelectedId: function (container, workspaces, id, options) {
       if (!container) {
         selectedId = id || '';
@@ -4769,9 +7057,48 @@
     },
     computeLayout: computeMapLayout,
     // The coordinate engine: saved anchors, deterministic fallback placement,
-    // elastic districts, content bounds, and world sizing, all pure so they can
-    // be asserted without a browser (FR-123).
+    // district effective frames, content bounds, and world sizing, all pure so
+    // they can be asserted without a browser (FR-123).
     computeWorldLayout: computeWorldLayout,
+    // The one district geometry, exported so frame assertions are written
+    // against the implementation's padding rather than against copied numbers
+    // that silently drift from it (#346 FR-43).
+    districtGeometry: {
+      padX: DISTRICT_PAD_X,
+      padY: DISTRICT_PAD_Y,
+      memberWidth: MEMBER_W,
+      memberHeight: MEMBER_H,
+      minWidth: DISTRICT_MIN_W,
+      minHeight: DISTRICT_MIN_H
+    },
+    // The curated, app-defined preset catalogs. They are identifiers with human
+    // names, never CSS (FR-125), and the server validates writes against the
+    // same lists.
+    districtAccents: DISTRICT_ACCENT_CATALOG.map(function (entry) {
+      return { id: entry.id, label: entry.label };
+    }),
+    districtThemes: DISTRICT_THEME_CATALOG.map(function (entry) {
+      return { id: entry.id, label: entry.label, hint: entry.hint };
+    }),
+    // Pure district frame math (FR-123).
+    effectiveDistrictFrame: effectiveDistrictFrame,
+    reconcileCustomFrame: reconcileCustomFrame,
+    // Drop-to-group resolution (#346 FR-6a): which district a release lands in,
+    // and what that means for membership.
+    districtAtPoint: districtAtPoint,
+    dropMembershipIntent: dropMembershipIntent,
+    // Exposed only so the cycle rule can be checked against Tree's own, which
+    // this module cannot import (it is a plain deferred script, not a module).
+    _dropRejectionReasonForTest: dropRejectionReason,
+    // The one resize geometry and the one collision rule, shared by the pointer,
+    // keyboard, context-menu, and rail paths (#346 FR-156).
+    districtResize: {
+      handles: RESIZE_HANDLES.slice(),
+      handleLabels: Object.assign({}, RESIZE_HANDLE_LABELS),
+      resizeFrame: resizeFrame,
+      rectsOverlap: rectsOverlap,
+      frameConflict: frameConflict
+    },
     // Pure camera math (FR-123). Exported so pointer-centred zoom, framing, and
     // clamping can be asserted exactly rather than eyeballed.
     camera: {
@@ -4815,6 +7142,7 @@
       closeContextMenu({ restoreFocus: false });
     },
     tileHTML: tileHTML,
+    districtHTML: districtHTML,
     overviewBodyHTML: overviewBodyHTML,
     selBarHTML: selBarHTML,
     hqSiteView: hqSiteView,
@@ -4825,14 +7153,32 @@
     // the /workspaces launcher can reflect "positions cannot be saved right
     // now" without each keeping its own copy (FR-4, FR-105).
     getLayoutState: function () {
+      var groups = Object.create(null);
+      Object.keys(layoutState.groups).forEach(function (id) {
+        groups[id] = Object.assign({}, layoutState.groups[id]);
+      });
       return {
         status: layoutState.status,
         revision: layoutState.revision,
         snapToGrid: layoutState.snapToGrid,
         readOnly: layoutState.status !== 'ready',
         positions: Object.assign(Object.create(null), layoutState.positions),
+        groups: groups,
         viewport: layoutState.viewport ? Object.assign({}, layoutState.viewport) : null
       };
+    },
+    // Test-only seams for the reset/undo lifecycle, so the geometry snapshot
+    // and the local clear can be asserted without driving window.confirm.
+    _captureGeometrySnapshotForTest: captureGeometrySnapshot,
+    _resetLayoutForTest: function () {
+      Object.keys(layoutState.groups).forEach(function (id) {
+        var record = layoutState.groups[id];
+        record.sizingMode = 'auto';
+        record.frame = null;
+        record.collapsed = false;
+        if (isDefaultPresentation(record)) delete layoutState.groups[id];
+      });
+      layoutState.positions = Object.create(null);
     },
     // Test-only seam for the persisted layout, so coordinate behavior can be
     // asserted without a network round-trip.

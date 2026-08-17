@@ -904,8 +904,10 @@ function bindTree(container, state, cb, rows) {
   }
 
   async function createGroup(memberIds) {
-    const groupId = await createGroupAction(memberIds, bulkContext());
-    if (groupId) state.bulkSelection.clear();
+    // Tree only needs to know a group exists; the Map is the view that also
+    // frames and selects it (#346).
+    const outcome = await createGroupAction(memberIds, bulkContext());
+    if (outcome && outcome.groupId) state.bulkSelection.clear();
   }
 
   /**

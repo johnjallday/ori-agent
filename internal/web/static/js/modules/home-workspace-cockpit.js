@@ -598,7 +598,52 @@ export function groupAggregates(group, flattened) {
   };
 }
 
-export function groupRailView(group, flattened) {
+/**
+ * The rail's Map-layout section for a selected group (#346 FR-151 – FR-154).
+ *
+ * Returns null when the section must not be shown at all — which is the whole
+ * point of the `view` argument. In Tree, a "Resize group" control would imply
+ * that Tree rows resize, so Tree hides these rather than showing them dead
+ * (FR-154). A group with no district drawn (Map not mounted yet) has nothing to
+ * describe either.
+ *
+ * @param {object|null} district the Map's own snapshot, from getDistrictView
+ * @param {{view?: string}} [options]
+ */
+export function groupMapLayoutView(district, options = {}) {
+  if (!district) return null;
+  if (options.view && options.view !== VIEW_MAP) return null;
+  const custom = district.sizingMode === 'custom';
+  const readOnly = !!district.readOnly;
+  return {
+    collapsed: !!district.collapsed,
+    collapseLabel: district.collapsed ? 'Expand group' : 'Collapse group',
+    canCollapse: !readOnly,
+    sizingMode: custom ? 'custom' : 'auto',
+    // The mode is stated in words, not carried by a highlighted chip alone
+    // (FR-152).
+    sizingLabel: custom
+      ? 'Custom size — the size you chose, expanding only to keep its workspaces inside'
+      : 'Automatic size — follows its workspaces',
+    canResize: !readOnly && !district.collapsed,
+    // Fitting a district that is already automatic would change nothing.
+    canFit: !readOnly && !district.collapsed && custom,
+    // Appearance is meaningful whether a district is open or closed: the
+    // collapsed summary wears the same accent and theme (FR-117).
+    accent: district.accent || 'default',
+    theme: district.theme || 'default',
+    accents: Array.isArray(district.accents) ? district.accents : [],
+    themes: Array.isArray(district.themes) ? district.themes : [],
+    canChangeAppearance: !readOnly,
+    // Offered only when there is a customization to undo (FR-137).
+    customized:
+      (district.accent || 'default') !== 'default' || (district.theme || 'default') !== 'default',
+    readOnly,
+    readOnlyNote: readOnly ? 'Map layout cannot be saved right now.' : ''
+  };
+}
+
+export function groupRailView(group, flattened, options = {}) {
   const ws = group || {};
   const aggregates = groupAggregates(ws, flattened);
   return {
@@ -607,6 +652,7 @@ export function groupRailView(group, flattened) {
     name: String(ws.name || 'Untitled group'),
     description: String(ws.description || '').trim(),
     aggregates,
+    mapLayout: groupMapLayoutView(options.district || null, { view: options.view }),
     openHref: ws.id ? `/workspaces/${encodeURIComponent(ws.id)}` : ''
   };
 }
@@ -884,7 +930,87 @@ export function renderGroupRailHTML(view) {
     '</div>' +
     '<p class="cockpit-rail-note">Totals cover every workspace inside this group. ' +
     'A group holds workspaces; it does not run work itself.</p>' +
+    mapLayoutSectionHTML(view.mapLayout) +
     '</div>'
+  );
+}
+
+/**
+ * The Map-layout section of the selected-group rail (#346 FR-151 – FR-153).
+ *
+ * It sits AFTER the aggregates and the Open Group action on purpose: Open Group
+ * stays the primary navigation action and is not displaced by layout controls
+ * (FR-155). The note is not decoration — a panel of sizing controls under a
+ * group is exactly where a user might expect resizing to mean "change what is
+ * in it", and it never does (FR-153).
+ */
+function mapLayoutSectionHTML(layout) {
+  if (!layout) return '';
+  const disabled = attr => (attr ? '' : ' disabled');
+  return (
+    '<section class="cockpit-rail-section cockpit-rail-maplayout" data-rail-map-layout>' +
+    '<h4 class="cockpit-rail-section-title">Map layout</h4>' +
+    `<p class="cockpit-rail-maplayout-mode" data-rail-sizing-mode="${escapeHtml(layout.sizingMode)}">${escapeHtml(layout.sizingLabel)}</p>` +
+    '<div class="cockpit-rail-maplayout-actions">' +
+    '<button type="button" class="modern-btn cockpit-rail-maplayout-btn" data-cockpit-group-collapse' +
+    ` aria-expanded="${layout.collapsed ? 'false' : 'true'}"` +
+    disabled(layout.canCollapse) +
+    `>${escapeHtml(layout.collapseLabel)}</button>` +
+    '<button type="button" class="modern-btn cockpit-rail-maplayout-btn" data-cockpit-group-resize' +
+    disabled(layout.canResize) +
+    '>Resize group</button>' +
+    '<button type="button" class="modern-btn cockpit-rail-maplayout-btn" data-cockpit-group-fit' +
+    disabled(layout.canFit) +
+    '>Fit to contents</button>' +
+    '</div>' +
+    appearanceHTML(layout) +
+    (layout.readOnlyNote
+      ? `<p class="cockpit-rail-empty">${escapeHtml(layout.readOnlyNote)}</p>`
+      : '') +
+    '<p class="cockpit-rail-note">Size and appearance change only how this group looks on your ' +
+    'Map. They never change which workspaces are in it.</p>' +
+    '</section>'
+  );
+}
+
+/**
+ * Named accent and theme choices (#346 FR-121 – FR-125, FR-130).
+ *
+ * Radio groups rather than unlabelled colour dots: the current choice is stated
+ * in text, every option has a human name a screen reader can read, and the
+ * theme options carry a one-line description of the shape difference — because
+ * districts must stay distinguishable without relying on colour.
+ */
+function appearanceHTML(layout) {
+  if (!layout.accents.length && !layout.themes.length) return '';
+  const disabled = layout.canChangeAppearance ? '' : ' disabled';
+  const group = (name, kind, options, current) =>
+    `<fieldset class="cockpit-rail-appearance" data-rail-appearance="${escapeHtml(kind)}">` +
+    `<legend class="cockpit-rail-appearance-legend">${escapeHtml(name)}</legend>` +
+    options
+      .map(option => {
+        const checked = option.id === current ? ' checked' : '';
+        const hint = option.hint
+          ? ` <span class="cockpit-rail-appearance-hint">${escapeHtml(option.hint)}</span>`
+          : '';
+        return (
+          `<label class="cockpit-rail-appearance-option cockpit-rail-${escapeHtml(kind)}-${escapeHtml(option.id)}">` +
+          `<input type="radio" name="cockpit-district-${escapeHtml(kind)}" value="${escapeHtml(option.id)}"` +
+          `${checked}${disabled} data-cockpit-group-${escapeHtml(kind)}>` +
+          `<span class="cockpit-rail-appearance-label">${escapeHtml(option.label)}</span>${hint}` +
+          '</label>'
+        );
+      })
+      .join('') +
+    '</fieldset>';
+
+  return (
+    group('Accent', 'accent', layout.accents, layout.accent) +
+    group('Theme', 'theme', layout.themes, layout.theme) +
+    (layout.customized
+      ? '<button type="button" class="modern-btn cockpit-rail-maplayout-btn" ' +
+        `data-cockpit-group-appearance-reset${disabled}>Use default appearance</button>`
+      : '')
   );
 }
 
@@ -1482,14 +1608,13 @@ import {
       // code Tree runs, so the two views cannot diverge.
       onDeleteWorkspace: id => void deleteWorkspaceAction(id, bulkContext()),
       onDeleteWorkspaces: ids => void deleteWorkspacesAction(ids, bulkContext()),
-      onGroupWorkspaces: ids =>
-        void createGroupAction(ids, bulkContext()).then(groupId => {
-          // Grouped workspaces still exist, so the map's own prune-on-mount
-          // cannot drop them from the checked set — clear it explicitly.
-          if (groupId && typeof window.OriWorkspaceMap.clearMultiSelection === 'function') {
-            window.OriWorkspaceMap.clearMultiSelection();
-          }
-        })
+      onGroupWorkspaces: ids => void groupFromMap(ids),
+      // A committed resize or fit changes what the rail's Map layout section
+      // says about this group, so the rail re-renders from the Map's new
+      // snapshot rather than keeping stale copy (#346 FR-152).
+      onDistrictChanged: groupId => {
+        if (groupId && groupId === state.selectedId) renderRail({ announceChange: false });
+      }
     });
     // A re-mount rebuilds the tiles, so the active filter must be reapplied.
     applyFilterToMap();
@@ -1558,6 +1683,44 @@ import {
    * the equivalent context itself. Both feed the same undo stack, so an item
    * trashed from either view is restorable by the same Undo (FR52).
    */
+  /**
+   * Group a Map selection (#346 FR-13 – FR-22, FR-28).
+   *
+   * The hierarchy mutation is the same shared one Tree runs — this only adds the
+   * Map's before and after. Before: pin the coordinates of any selected
+   * workspace that has never been placed by hand, so grouping cannot make it
+   * jump to a different automatic cell. After: select and frame the district the
+   * hierarchy actually produced, using the members it actually placed.
+   */
+  async function groupFromMap(ids) {
+    const map = window.OriWorkspaceMap;
+    const anchors =
+      map && typeof map.captureGroupingAnchors === 'function'
+        ? map.captureGroupingAnchors(ids)
+        : {};
+
+    const outcome = await createGroupAction(ids, bulkContext());
+    if (!outcome || !outcome.groupId) return;
+
+    // createGroupAction has already refreshed shared state, so the new group is
+    // in state.flattened and the Map can resolve its district.
+    if (map && typeof map.adoptNewGroup === 'function') {
+      const pinned = {};
+      // Only the members the hierarchy really placed changed islands; a member
+      // that failed to move is still where it was (FR-28).
+      outcome.placed.forEach(id => {
+        if (anchors[id]) pinned[id] = anchors[id];
+      });
+      await map.adoptNewGroup(outcome.groupId, pinned);
+    } else if (map && typeof map.clearMultiSelection === 'function') {
+      map.clearMultiSelection();
+    }
+
+    // One selection change, through the one shared path, so the Map highlight
+    // and the context rail cannot disagree (FR-21).
+    selectItem(outcome.groupId);
+  }
+
   function bulkContext() {
     return {
       rows: state.flattened,
@@ -1658,6 +1821,12 @@ import {
     renderFilters();
     mountMap();
     mountTreeView();
+    // Some rail content belongs to ONE view. The selected group's Map layout
+    // section is Map-only: left standing in Tree it would offer to resize and
+    // collapse rows that do nothing of the kind (#346 FR-154). Re-rendering on
+    // every view change is what keeps the rail's claims true for the view the
+    // user is actually in.
+    if (state.railState === RAIL_GROUP) renderRail({ announceChange: false });
     // The footer shortcut names the OTHER view, so it has to follow every view
     // change — not just the ones that re-render the rail (FR88).
     updateRailFooter();
@@ -1757,8 +1926,69 @@ import {
     renderRail({ announceChange: true });
   }
 
+  /** The Map's snapshot of one district, or null when the Map cannot say. */
+  function mapDistrictView(groupId) {
+    const map = window.OriWorkspaceMap;
+    if (!map || typeof map.getDistrictView !== 'function') return null;
+    return map.getDistrictView(groupId);
+  }
+
+  /**
+   * The rail's Map-layout controls (#346 FR-151, FR-156).
+   *
+   * They call the Map's own district action controller — the same one the
+   * district context menu calls — so the rail cannot develop its own validation,
+   * persistence, or failure behaviour.
+   */
+  function bindMapLayoutActions() {
+    const actions = (window.OriWorkspaceMap && window.OriWorkspaceMap.districtActions) || null;
+    if (!actions) return;
+    const resize = els.railContext.querySelector('[data-cockpit-group-resize]');
+    if (resize) {
+      resize.addEventListener('click', () => actions.resize(state.selectedId));
+    }
+    const fit = els.railContext.querySelector('[data-cockpit-group-fit]');
+    if (fit) {
+      fit.addEventListener('click', () =>
+        Promise.resolve(actions.fitToContents(state.selectedId)).then(() =>
+          renderRail({ announceChange: false })
+        )
+      );
+    }
+    const collapse = els.railContext.querySelector('[data-cockpit-group-collapse]');
+    if (collapse) {
+      collapse.addEventListener('click', () =>
+        Promise.resolve(
+          actions.setCollapsed(state.selectedId, collapse.getAttribute('aria-expanded') === 'true')
+        ).then(() => renderRail({ announceChange: false }))
+      );
+    }
+    // Appearance: only an identifier from the rendered catalog can reach the
+    // action, so nothing a hostile value could be smuggled through (#346
+    // FR-125).
+    ['accent', 'theme'].forEach(kind => {
+      els.railContext.querySelectorAll(`[data-cockpit-group-${kind}]`).forEach(input =>
+        input.addEventListener('change', () => {
+          if (!input.checked) return;
+          void Promise.resolve(
+            actions.setAppearance(state.selectedId, { [kind]: input.value })
+          ).then(() => renderRail({ announceChange: false }));
+        })
+      );
+    });
+    const resetAppearance = els.railContext.querySelector('[data-cockpit-group-appearance-reset]');
+    if (resetAppearance) {
+      resetAppearance.addEventListener('click', () =>
+        Promise.resolve(actions.resetAppearance(state.selectedId)).then(() =>
+          renderRail({ announceChange: false })
+        )
+      );
+    }
+  }
+
   function bindRailCommon() {
     if (!els.railContext) return;
+    bindMapLayoutActions();
     const back = els.railContext.querySelector('[data-cockpit-rail-back]');
     if (back) {
       back.addEventListener('click', () =>
@@ -1926,7 +2156,14 @@ import {
 
     showContextPanel(
       isGroupWorkspace(item)
-        ? renderGroupRailHTML(groupRailView(item, state.flattened))
+        ? renderGroupRailHTML(
+            groupRailView(item, state.flattened, {
+              view: state.view,
+              // The Map owns district state; the rail reads a snapshot of it
+              // rather than keeping a second copy that could drift (#346).
+              district: mapDistrictView(item.id)
+            })
+          )
         : renderWorkspaceRailHTML(workspaceRailView(item))
     );
     if (announceChange) announce(`${item.name} selected.`);

@@ -1165,6 +1165,175 @@ func TestMigration038UpgradesFromPriorSchema(t *testing.T) {
 	}
 }
 
+// TestMigration042CreatesGroupPresentationSchema proves a fresh database gets
+// the district presentation table with its documented defaults, and that the
+// table carries no hierarchy vocabulary at all (#346 FR-5, FR-173).
+func TestMigration042CreatesGroupPresentationSchema(t *testing.T) {
+	ctx := context.Background()
+
+	db, err := Open(ctx, &Config{Path: ":memory:", WALMode: false})
+	if err != nil {
+		t.Fatalf("Failed to open database: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	exists, err := db.tableExists(ctx, "workspace_map_group_presentations")
+	if err != nil {
+		t.Fatalf("tableExists: %v", err)
+	}
+	if !exists {
+		t.Fatal("fresh database is missing workspace_map_group_presentations")
+	}
+
+	// A row inserted with only its keys must read back as the documented safe
+	// default: automatic sizing, no frame, expanded, default appearance
+	// (FR-31, FR-101, FR-127).
+	seedGroupPresentationFixtures(ctx, t, db, "grp-a")
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO workspace_map_group_presentations (user_id, group_id, created_at, updated_at)
+		VALUES ('local', 'grp-a', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`); err != nil {
+		t.Fatalf("insert bare presentation row: %v", err)
+	}
+	var (
+		sizingMode  string
+		collapsed   int
+		accent      string
+		theme       string
+		frameWidth  sql.NullFloat64
+		frameHeight sql.NullFloat64
+	)
+	if err := db.QueryRowContext(ctx, `
+		SELECT sizing_mode, collapsed, accent, theme, frame_width, frame_height
+		FROM workspace_map_group_presentations WHERE user_id = 'local' AND group_id = 'grp-a'
+	`).Scan(&sizingMode, &collapsed, &accent, &theme, &frameWidth, &frameHeight); err != nil {
+		t.Fatalf("read presentation defaults: %v", err)
+	}
+	if sizingMode != "auto" || collapsed != 0 || accent != "default" || theme != "default" {
+		t.Errorf("defaults = %q/%d/%q/%q, want auto/0/default/default", sizingMode, collapsed, accent, theme)
+	}
+	if frameWidth.Valid || frameHeight.Valid {
+		t.Error("an automatic district must store no frame — a read would otherwise have to write one")
+	}
+
+	// No presentation column may name a hierarchy field (FR-5, FR-62).
+	rows, err := db.QueryContext(ctx, `SELECT name FROM pragma_table_info('workspace_map_group_presentations')`)
+	if err != nil {
+		t.Fatalf("inspect presentation columns: %v", err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var column string
+		if err := rows.Scan(&column); err != nil {
+			t.Fatalf("scan column: %v", err)
+		}
+		switch column {
+		case "parent_id", "order_index", "status", "designation":
+			t.Errorf("presentation table exposes hierarchy field %q", column)
+		}
+	}
+}
+
+// TestMigration042PresentationLifecycleFollowsTheGroup proves the same two
+// lifecycle rules migration 38 established for anchors: a trashed group keeps
+// its district presentation for restore, and a permanently deleted one takes
+// exactly its own row with it (#346 FR-183).
+func TestMigration042PresentationLifecycleFollowsTheGroup(t *testing.T) {
+	ctx := context.Background()
+
+	db, err := Open(ctx, &Config{Path: ":memory:", WALMode: false})
+	if err != nil {
+		t.Fatalf("Failed to open database: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	seedGroupPresentationFixtures(ctx, t, db, "grp-keep", "grp-drop")
+	for _, id := range []string{"grp-keep", "grp-drop"} {
+		if _, err := db.ExecContext(ctx, `
+			INSERT INTO workspace_map_group_presentations
+				(user_id, group_id, sizing_mode, frame_x, frame_y, frame_width, frame_height, collapsed, accent, theme, created_at, updated_at)
+			VALUES ('local', ?, 'custom', 10, 20, 400, 300, 1, 'moss', 'blueprint', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+		`, id); err != nil {
+			t.Fatalf("seed presentation %s: %v", id, err)
+		}
+	}
+
+	if _, err := db.ExecContext(ctx, `UPDATE workspaces SET status = 'trashed' WHERE id = 'grp-drop'`); err != nil {
+		t.Fatalf("trash group: %v", err)
+	}
+	var count int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(1) FROM workspace_map_group_presentations`).Scan(&count); err != nil {
+		t.Fatalf("count presentations: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("presentations after trash = %d, want 2 (a trashed group keeps its district)", count)
+	}
+
+	if _, err := db.ExecContext(ctx, `DELETE FROM workspaces WHERE id = 'grp-drop'`); err != nil {
+		t.Fatalf("delete group: %v", err)
+	}
+	var remaining string
+	if err := db.QueryRowContext(ctx, `SELECT group_id FROM workspace_map_group_presentations`).Scan(&remaining); err != nil {
+		t.Fatalf("read remaining presentation: %v", err)
+	}
+	if remaining != "grp-keep" {
+		t.Errorf("remaining district = %q, want grp-keep", remaining)
+	}
+
+	// And the layout-side cascade: dropping the user's layout drops their
+	// districts with it, exactly as it drops their anchors.
+	if _, err := db.ExecContext(ctx, `DELETE FROM workspace_map_layouts WHERE user_id = 'local'`); err != nil {
+		t.Fatalf("delete layout: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(1) FROM workspace_map_group_presentations`).Scan(&count); err != nil {
+		t.Fatalf("count presentations after layout delete: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("presentations after layout delete = %d, want 0", count)
+	}
+}
+
+// TestMigration042PresentationRequiresAnExistingGroup proves the foreign key is
+// live: a district can only exist for a real workspace record, so a corrupt or
+// hostile group_id cannot accumulate orphan presentation rows.
+func TestMigration042PresentationRequiresAnExistingGroup(t *testing.T) {
+	ctx := context.Background()
+
+	db, err := Open(ctx, &Config{Path: ":memory:", WALMode: false})
+	if err != nil {
+		t.Fatalf("Failed to open database: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	seedGroupPresentationFixtures(ctx, t, db)
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO workspace_map_group_presentations (user_id, group_id, created_at, updated_at)
+		VALUES ('local', 'ghost-group', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`); err == nil {
+		t.Fatal("inserting a district for a workspace that does not exist should fail the foreign key")
+	}
+}
+
+// seedGroupPresentationFixtures creates the layout row every district hangs off
+// plus the given group workspaces.
+func seedGroupPresentationFixtures(ctx context.Context, t *testing.T, db *DB, groupIDs ...string) {
+	t.Helper()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO workspace_map_layouts (user_id, schema_version, revision, snap_to_grid, created_at, updated_at)
+		VALUES ('local', 1, 1, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`); err != nil {
+		t.Fatalf("seed layout: %v", err)
+	}
+	for _, id := range groupIDs {
+		if _, err := db.ExecContext(ctx, `
+			INSERT INTO workspaces (id, name, created_at, updated_at)
+			VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+		`, id, id); err != nil {
+			t.Fatalf("seed group %s: %v", id, err)
+		}
+	}
+}
+
 // TestMigration039CreatesWorkspacePlanSchema proves a fresh database gets every
 // Plan table the Workspace Planning Workflow persists (PRD FR-1, FR-16).
 func TestMigration039CreatesWorkspacePlanSchema(t *testing.T) {

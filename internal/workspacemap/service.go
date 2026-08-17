@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -19,6 +20,12 @@ var (
 	// ErrServiceUnavailable means the map service has no workspace lookup or no
 	// layout storage wired.
 	ErrServiceUnavailable = errors.New("workspace map service is not configured")
+	// ErrGroupNotEligible means the target exists and is the user's, but is not
+	// something the Map draws a district for: an ordinary workspace, or a group
+	// nested inside another group. V1 renders one district per *top-level* group
+	// and represents deeper descendants inside it, so there is no second frame
+	// for a nested group to own (#346 FR-9, FR-10, FR-181).
+	ErrGroupNotEligible = errors.New("workspace map group is not eligible for a district")
 )
 
 // WorkspaceLookup resolves the workspace records a layout operation refers to.
@@ -102,14 +109,32 @@ func (s *Service) Reset(ctx context.Context, userID string) (Result, error) {
 // store. Reset carries no references and passes trivially.
 func (s *Service) authorizeNodes(userID string, patch Patch) error {
 	checked := map[string]bool{}
+	districts := map[string]bool{}
 	for _, op := range patch.Operations {
 		for id := range op.Positions {
 			if err := s.authorizeNode(userID, id, checked); err != nil {
 				return err
 			}
 		}
-		if op.Kind == OpTranslateGroup {
+		// A geometry restore names districts as well as anchors, and each one
+		// must be an owned, eligible group like any other district write
+		// (#346 FR-181).
+		for id := range op.Groups {
+			if err := s.authorizeDistrict(userID, id, districts); err != nil {
+				return err
+			}
+		}
+		switch {
+		case op.Kind == OpTranslateGroup:
 			if err := s.authorizeNode(userID, op.GroupID, checked); err != nil {
+				return err
+			}
+		case op.Kind.isGroupPresentation():
+			// A district operation carries more weight than an anchor: it must
+			// point at something the Map actually draws a district for, or a
+			// presentation row would accumulate for a workspace that can never
+			// render one (FR-181).
+			if err := s.authorizeDistrict(userID, op.GroupID, districts); err != nil {
 				return err
 			}
 		}
@@ -121,24 +146,71 @@ func (s *Service) authorizeNode(userID, id string, checked map[string]bool) erro
 	if checked[id] {
 		return nil
 	}
+	if _, err := s.lookupOwned(userID, id); err != nil {
+		return err
+	}
+	checked[id] = true
+	return nil
+}
+
+// authorizeDistrict adds the eligibility rule on top of ownership: the target
+// must be a group, and it must be top-level. Neither check can change anything
+// — the lookup is read-only by construction, so a rejected district operation
+// leaves the workspace record byte-identical (FR-5, FR-6).
+func (s *Service) authorizeDistrict(userID, id string, checked map[string]bool) error {
+	if checked[id] {
+		return nil
+	}
+	record, err := s.lookupOwned(userID, id)
+	if err != nil {
+		return err
+	}
+	if !isGroupRecord(record) {
+		return fmt.Errorf("%w: %q is a workspace, not a group", ErrGroupNotEligible, record.ID)
+	}
+	if parentID := strings.TrimSpace(record.ParentID); parentID != "" {
+		// A parent that is missing or is an ordinary workspace leaves this group
+		// rendering as its own top-level district, which the Map already does —
+		// only a group inside a group is ineligible.
+		if parent, err := s.lookup.Get(parentID); err == nil && parent != nil && isGroupRecord(parent) {
+			return fmt.Errorf("%w: %q is nested inside group %q", ErrGroupNotEligible, record.ID, parentID)
+		}
+	}
+	checked[id] = true
+	return nil
+}
+
+// lookupOwned resolves one node and confirms it is the current user's.
+func (s *Service) lookupOwned(userID, id string) (*workspace.Workspace, error) {
 	if s.lookup == nil {
-		return ErrServiceUnavailable
+		return nil, ErrServiceUnavailable
 	}
 	// NormalizeNodeID has already refused the reserved Personal HQ site, which
 	// is the one node the map draws that is not a workspace (FR-30).
 	nodeID, err := NormalizeNodeID(id)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	record, err := s.lookup.Get(nodeID)
 	if err != nil || record == nil {
-		return fmt.Errorf("%w: %q", ErrNodeNotFound, nodeID)
+		return nil, fmt.Errorf("%w: %q", ErrNodeNotFound, nodeID)
 	}
 	if !ownedBy(record, userID) {
-		return fmt.Errorf("%w: %q", ErrNodeNotOwned, nodeID)
+		return nil, fmt.Errorf("%w: %q", ErrNodeNotOwned, nodeID)
 	}
-	checked[id] = true
-	return nil
+	return record, nil
+}
+
+// groupWorkspaceKind mirrors session.WorkspaceKindGroup ("group"). It is
+// duplicated rather than imported for the same reason the workspace package
+// duplicates it: the map's ownership check must not drag the session package
+// into this dependency graph for one string comparison.
+const groupWorkspaceKind = "group"
+
+// isGroupRecord reports whether a workspace record is a group, and therefore
+// something the Map draws a district for.
+func isGroupRecord(record *workspace.Workspace) bool {
+	return record != nil && strings.TrimSpace(record.Kind) == groupWorkspaceKind
 }
 
 // ownedBy compares a workspace's owner against the current user. An empty owner
