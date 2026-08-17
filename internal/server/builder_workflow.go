@@ -441,6 +441,7 @@ func (b *ServerBuilder) initializeTaskExecution() {
 		runtimeResolver.SetSkillResolver(newSkillResolverAdapter(b.skillsManager))
 	}
 	b.runtimeResolver = runtimeResolver
+	b.wireRuntimeGrantFoundation()
 
 	// Make every existing agent's implicit capability set explicit before the
 	// resolver serves its first request (PRD FR-28–FR-35). This runs here
@@ -457,6 +458,7 @@ func (b *ServerBuilder) initializeTaskExecution() {
 	// The Janitor's mover needs the runtime resolver, which only exists here.
 	b.wireDownloadsJanitorMover()
 	b.taskHandler.SetRuntimeResolver(runtimeResolver)
+	b.taskHandler.SetExecutionScopeResolver(b.runtimeCapabilityService)
 	b.chatHandler.SetRuntimeResolver(runtimeResolver)
 	if b.calendarOpsHandler != nil {
 		b.chatHandler.SetCalendarOpsPreference(b.calendarOpsHandler)

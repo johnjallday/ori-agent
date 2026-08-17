@@ -257,6 +257,9 @@ func (h *Handler) respondError(w http.ResponseWriter, err error) {
 	case errors.Is(err, runtimecapability.ErrVerificationFailed):
 		_ = orihttp.RespondAPIError(w, http.StatusConflict,
 			orihttp.NewAPIError("verification_failed", "Runtime verification did not complete. Check the current requirement and try its next action."))
+	case errors.Is(err, runtimecapability.ErrGrantNotAllowed), errors.Is(err, runtimecapability.ErrAgentNotSupported):
+		_ = orihttp.RespondAPIError(w, http.StatusConflict,
+			orihttp.NewAPIError("grant_not_allowed", "REAPER access cannot be granted to that workspace agent in the current operating mode."))
 	default:
 		logger.Warn("Runtime capability request failed", logger.Fields{"category": "runtime_request_failed"})
 		_ = orihttp.RespondAPIError(w, http.StatusInternalServerError,

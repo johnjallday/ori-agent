@@ -171,6 +171,59 @@ func TestWorkspaceRuntimeState_SetGetClonesAndFailsSafe(t *testing.T) {
 	}
 }
 
+func TestWorkspaceRuntimeGrantsAreExactRevocableAndFailClosed(t *testing.T) {
+	ws := NewWorkspace(CreateWorkspaceParams{Name: "Grants"})
+	if ws.GetRuntimeState() != nil {
+		t.Fatal("new workspace must default every runtime grant off")
+	}
+	grantedAt := time.Date(2026, 2, 1, 12, 0, 0, 0, time.UTC)
+	changed, err := ws.GrantRuntimeCapability(" REAPER_LIVE_CONTROL ", " agent-1 ", grantedAt)
+	if err != nil || !changed {
+		t.Fatalf("grant changed=%v err=%v", changed, err)
+	}
+	state := ws.GetRuntimeState()
+	if !state.HasActiveRuntimeGrant("reaper_live_control", "agent-1") || state.HasActiveRuntimeGrant("reaper_live_control", "agent-2") {
+		t.Fatalf("grant scope is not exact: %+v", state.Grants)
+	}
+	grant, ok := state.RuntimeGrant("reaper_live_control", "agent-1")
+	if !ok || !grant.GrantedAt.Equal(grantedAt) || grant.RevokedAt != nil {
+		t.Fatalf("grant lookup = %+v, %v", grant, ok)
+	}
+	if changed, err := ws.GrantRuntimeCapability("reaper_live_control", "agent-1", grantedAt.Add(time.Hour)); err != nil || changed {
+		t.Fatalf("idempotent grant changed=%v err=%v", changed, err)
+	}
+
+	revokedAt := grantedAt.Add(2 * time.Hour)
+	changed, err = ws.RevokeRuntimeCapability("reaper_live_control", "agent-1", revokedAt)
+	if err != nil || !changed {
+		t.Fatalf("revoke changed=%v err=%v", changed, err)
+	}
+	state = ws.GetRuntimeState()
+	if state.HasActiveRuntimeGrant("reaper_live_control", "agent-1") {
+		t.Fatal("revoked grant remained active")
+	}
+	grant, ok = state.RuntimeGrant("reaper_live_control", "agent-1")
+	if !ok || grant.RevokedAt == nil || !grant.RevokedAt.Equal(revokedAt) {
+		t.Fatalf("revocation timestamp lost: %+v", grant)
+	}
+
+	// Duplicate persistence never authorizes. An explicit grant heals it back to
+	// one canonical active record.
+	state.Grants = append(state.Grants, RuntimeCapabilityGrant{CapabilityKey: "reaper_live_control", AgentInstanceID: "agent-1", GrantedAt: grantedAt})
+	ws.SetRuntimeState(state)
+	if ws.GetRuntimeState().HasActiveRuntimeGrant("reaper_live_control", "agent-1") {
+		t.Fatal("duplicate grant records must fail closed")
+	}
+	regrantedAt := revokedAt.Add(time.Hour)
+	if changed, err := ws.GrantRuntimeCapability("reaper_live_control", "agent-1", regrantedAt); err != nil || !changed {
+		t.Fatalf("regrant changed=%v err=%v", changed, err)
+	}
+	state = ws.GetRuntimeState()
+	if len(state.Grants) != 1 || !state.HasActiveRuntimeGrant("reaper_live_control", "agent-1") || !state.Grants[0].GrantedAt.Equal(regrantedAt) {
+		t.Fatalf("explicit regrant did not heal duplicates: %+v", state.Grants)
+	}
+}
+
 func TestWorkspaceRuntimeState_JSONRoundTrip(t *testing.T) {
 	ws := NewWorkspace(CreateWorkspaceParams{Name: "Runtime"})
 	verified := time.Date(2026, 2, 1, 12, 0, 0, 0, time.UTC)

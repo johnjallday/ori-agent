@@ -37,6 +37,24 @@ func (r *Registry) Register(adapter Adapter) error {
 	return nil
 }
 
+// Replace swaps an already-reserved adapter ID for its compiled platform
+// implementation. It cannot introduce a new key; authoring parity remains
+// fixed by initial registration.
+func (r *Registry) Replace(adapter Adapter) error {
+	if r == nil || adapter == nil {
+		return errors.New("runtime adapter registry or replacement is nil")
+	}
+	id := workspace.NormalizeRuntimeIdentifier(adapter.ID())
+	if id == "" {
+		return errors.New("cannot replace a runtime adapter with an invalid id")
+	}
+	if _, exists := r.adapters[id]; !exists {
+		return fmt.Errorf("runtime adapter %q is not reserved", id)
+	}
+	r.adapters[id] = adapter
+	return nil
+}
+
 func (r *Registry) Lookup(id string) (Adapter, bool) {
 	if r == nil {
 		return nil, false

@@ -208,7 +208,7 @@ func TestRuntimeCapabilityHTTPConfirmedActionAndVerify(t *testing.T) {
 	}
 
 	adapter.configured = false
-	recorder, body = serve(t, handler, http.MethodPost, "/api/workspaces/ws-mine/runtime-capabilities/requirements/fixture/verify", "")
+	recorder, _ = serve(t, handler, http.MethodPost, "/api/workspaces/ws-mine/runtime-capabilities/requirements/fixture/verify", "")
 	if recorder.Code != http.StatusOK || adapter.verifies != 1 {
 		t.Fatalf("verify = %d verifies=%d body=%s", recorder.Code, adapter.verifies, recorder.Body.String())
 	}

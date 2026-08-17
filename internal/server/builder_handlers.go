@@ -820,6 +820,7 @@ func (b *ServerBuilder) wireRuntimeCapabilities() {
 	b.runtimeCapabilityRegistry = registry
 	b.runtimeCapabilityService = service
 	b.runtimeCapabilityHandler = runtimecapabilityhttp.NewHandler(service, b.workspaceStore, b.userProvider)
+	b.runtimeCapabilityHandler.SetGrantDelegator(service)
 }
 
 // wireSetupWizard constructs the shared blueprint Setup Wizard: its compiled

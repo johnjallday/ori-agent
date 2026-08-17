@@ -36,9 +36,101 @@ func (p *fakeNativeProvider) DefaultModels() []string                 { return n
 
 type stubNativeRegistry struct{ servers []mcp.ServerConfig }
 
+type stubExecutionScopeResolver struct {
+	scope        *llm.CLIExecutionScope
+	err          error
+	calls        int
+	workspaceID  string
+	agentID      string
+	capabilities []string
+	workspaceDir string
+}
+
+func (s *stubExecutionScopeResolver) ResolveTaskExecutionScope(_ context.Context, workspaceID, agentID string, capabilities []string, workspaceDir string) (*llm.CLIExecutionScope, error) {
+	s.calls++
+	s.workspaceID = workspaceID
+	s.agentID = agentID
+	s.capabilities = append([]string(nil), capabilities...)
+	s.workspaceDir = workspaceDir
+	return llm.CloneCLIExecutionScope(s.scope), s.err
+}
+
 func (s *stubNativeRegistry) GetToolsForServer(string) ([]toolapi.Tool, error) { return nil, nil }
 func (s *stubNativeRegistry) StartServer(string) error                         { return nil }
 func (s *stubNativeRegistry) ListServers() []mcp.ServerConfig                  { return s.servers }
+
+func TestExecuteTaskConversation_RuntimeScopeDoesNotRequireBroadNativeMCP(t *testing.T) {
+	store := NewInMemoryStore()
+	ws := &Workspace{
+		ID: "ws-runtime-scope", Name: "Runtime", Status: StatusActive,
+		AllowNativeMCPCLI: false,
+		AgentInstances:    []AgentInstance{{ID: "agent-1", Name: "reaper", NodeID: "reaper-1"}},
+	}
+	if err := store.Save(ws); err != nil {
+		t.Fatal(err)
+	}
+	reaperRuntime := "ws:ws-runtime-scope:mcp:reaper-plugin/ori-reaper:b1"
+	otherRuntime := "ws:ws-runtime-scope:mcp:other-plugin:b2"
+	registry := &stubNativeRegistry{servers: []mcp.ServerConfig{
+		{Name: reaperRuntime, Command: "/trusted/reaper-helper"},
+		{Name: otherRuntime, Command: "/unrelated/helper"},
+	}}
+	scopeResolver := &stubExecutionScopeResolver{scope: &llm.CLIExecutionScope{
+		WorkspaceRoot: "/workspace/files", AdditionalWritableRoots: []string{"/trusted/runner"},
+		NetworkPosture: llm.CLINetworkCapabilityLocal, CapabilityKeys: []string{"reaper_live_control"},
+		AllowedMCPServers: []string{"reaper-plugin_ori-reaper"},
+	}}
+	handler := &LLMTaskHandler{workspaceStore: store, mcpRegistry: registry, executionScopeResolver: scopeResolver}
+	provider := &fakeNativeProvider{caps: llm.ProviderCapabilities{SupportsNativeMCP: true}}
+	agent := nativeMCPAgent(false) // broad per-agent native MCP is OFF
+	agent.MCPServers = []string{reaperRuntime, otherRuntime}
+	task := Task{
+		WorkspaceID: "ws-runtime-scope", AssignedNodeID: "reaper-1",
+		RequiredCapabilities: []string{"reaper_live_control"},
+	}
+	if _, err := handler.executeTaskConversation(context.Background(), provider, "codex", "gpt-5.5", 0, agent, "reaper", task, []llm.Message{llm.NewUserMessage("x")}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !provider.called || provider.gotReq.ExecutionScope == nil {
+		t.Fatalf("provider did not receive scoped authority: %+v", provider.gotReq)
+	}
+	if provider.gotReq.WorkspaceDir != "" {
+		t.Fatalf("scoped run inherited legacy broad WorkspaceDir: %q", provider.gotReq.WorkspaceDir)
+	}
+	if len(provider.gotReq.MCPServers) != 1 || provider.gotReq.MCPServers[0].Name != "reaper-plugin_ori-reaper" {
+		t.Fatalf("scoped run exposed unrelated MCP servers: %+v", provider.gotReq.MCPServers)
+	}
+	if scopeResolver.calls != 1 || scopeResolver.workspaceID != ws.ID || scopeResolver.agentID != "agent-1" || len(scopeResolver.capabilities) != 1 {
+		t.Fatalf("scope resolver inputs = %+v", scopeResolver)
+	}
+}
+
+func TestExecuteTaskConversation_RuntimeScopeNeverReachesNonCLIProviderOrUnrelatedTask(t *testing.T) {
+	store := NewInMemoryStore()
+	ws := &Workspace{ID: "ws-no-scope", Status: StatusActive, AgentInstances: []AgentInstance{{ID: "agent-1", Name: "worker", NodeID: "worker-1"}}}
+	if err := store.Save(ws); err != nil {
+		t.Fatal(err)
+	}
+	resolver := &stubExecutionScopeResolver{scope: &llm.CLIExecutionScope{WorkspaceRoot: "/workspace", CapabilityKeys: []string{"runtime"}}}
+	handler := &LLMTaskHandler{workspaceStore: store, executionScopeResolver: resolver}
+	agent := nativeMCPAgent(false)
+
+	nonCLI := &fakeNativeProvider{caps: llm.ProviderCapabilities{SupportsNativeMCP: false}}
+	if _, err := handler.executeTaskConversation(context.Background(), nonCLI, "openai", "model", 0, agent, "worker", Task{WorkspaceID: ws.ID, AssignedNodeID: "worker-1", RequiredCapabilities: []string{"runtime"}}, []llm.Message{llm.NewUserMessage("x")}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if resolver.calls != 0 || nonCLI.gotReq.ExecutionScope != nil {
+		t.Fatalf("non-CLI provider received runtime scope: calls=%d scope=%+v", resolver.calls, nonCLI.gotReq.ExecutionScope)
+	}
+
+	cli := &fakeNativeProvider{caps: llm.ProviderCapabilities{SupportsNativeMCP: true}}
+	if _, err := handler.executeTaskConversation(context.Background(), cli, "codex", "model", 0, agent, "worker", Task{WorkspaceID: ws.ID, AssignedNodeID: "worker-1"}, []llm.Message{llm.NewUserMessage("x")}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if resolver.calls != 0 || cli.gotReq.ExecutionScope != nil {
+		t.Fatalf("unrelated task received runtime scope: calls=%d scope=%+v", resolver.calls, cli.gotReq.ExecutionScope)
+	}
+}
 
 // TestExecuteTaskConversation_NativeMCPWiring proves the end-to-end path:
 // gate (workspace+agent opted in) -> resolve runtime servers -> populate the

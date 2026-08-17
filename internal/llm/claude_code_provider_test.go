@@ -1,6 +1,8 @@
 package llm
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -49,8 +51,66 @@ func TestBuildClaudeArgs_NativeMCP(t *testing.T) {
 	}
 }
 
-// TestBuildClaudeArgs_SkillOnlyNoConfig covers a skill-only agent (opted in, no
-// MCP servers): full toolset + bypassPermissions + workspace confinement, but
+func TestBuildClaudeArgs_RuntimeCapabilityScope(t *testing.T) {
+	nat := &claudeNativeMCP{
+		ConfigPath: "/cfg/runtime.mcp.json", WorkspaceDir: "/workspace",
+		AdditionalWritableRoots: []string{"/runner"},
+		AllowedMCPServers:       []string{"trusted_runtime"},
+		NetworkPosture:          CLINetworkCapabilityLocal,
+		Scoped:                  true,
+	}
+	args, err := buildClaudeArgs("haiku", "do it", nil, nat)
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(args, " ")
+	for _, want := range []string{
+		"--permission-mode acceptEdits",
+		"--setting-sources  --tools Read,Write,Edit",
+		"--strict-mcp-config",
+		"--mcp-config /cfg/runtime.mcp.json",
+		"--add-dir /runner",
+		"--allowedTools mcp__trusted_runtime__*",
+		"--no-session-persistence",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("runtime scope args missing %q in %q", want, joined)
+		}
+	}
+	for _, forbidden := range []string{"bypassPermissions", "Bash", "WebFetch", "dangerously-skip"} {
+		if strings.Contains(joined, forbidden) {
+			t.Errorf("runtime scope contains %q: %q", forbidden, joined)
+		}
+	}
+	if args[len(args)-1] != "do it" {
+		t.Fatalf("prompt was consumed by a variadic option: %q", args[len(args)-1])
+	}
+}
+
+func TestPrepareClaudeRuntimeScopeCanonicalizesRootsWithoutMCPConfig(t *testing.T) {
+	base := t.TempDir()
+	workspaceDir := filepath.Join(base, "workspace")
+	runnerDir := filepath.Join(base, "runner")
+	for _, dir := range []string{workspaceDir, runnerDir} {
+		if err := os.Mkdir(dir, 0o750); err != nil {
+			t.Fatal(err)
+		}
+	}
+	provider := &ClaudeCodeProvider{mcpStore: newCLIMCPConfigStoreAt(t.TempDir(), t.TempDir())}
+	nat, err := provider.prepareNativeMCP(nil, "ws-1", "", &CLIExecutionScope{
+		WorkspaceRoot: workspaceDir, AdditionalWritableRoots: []string{runnerDir},
+		NetworkPosture: CLINetworkCapabilityLocal,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if nat == nil || !nat.Scoped || nat.ConfigPath != "" || nat.WorkspaceDir == "" || len(nat.AdditionalWritableRoots) != 1 {
+		t.Fatalf("prepared scoped skill-only run = %+v", nat)
+	}
+}
+
+// TestBuildClaudeArgs_SkillOnlyNoConfig covers a legacy broad skill-only agent
+// (opted in, no MCP servers): full toolset + bypassPermissions + workspace confinement, but
 // NO --mcp-config.
 func TestBuildClaudeArgs_SkillOnlyNoConfig(t *testing.T) {
 	nat := &claudeNativeMCP{WorkspaceDir: "/ws/files"} // no ConfigPath

@@ -13,14 +13,17 @@ import (
 )
 
 var (
-	ErrNoRuntimeContract   = errors.New("workspace has no runtime requirements")
-	ErrUnsupportedSnapshot = errors.New("unsupported runtime requirements snapshot")
-	ErrUnknownMode         = errors.New("unknown runtime operating mode")
-	ErrModeRequired        = errors.New("runtime operating mode selection required")
-	ErrUnknownRequirement  = errors.New("unknown runtime requirement")
-	ErrUnknownAction       = errors.New("unknown runtime requirement action")
-	ErrUnknownAdapter      = errors.New("unknown runtime adapter")
-	ErrVerificationFailed  = errors.New("runtime verification failed")
+	ErrNoRuntimeContract         = errors.New("workspace has no runtime requirements")
+	ErrUnsupportedSnapshot       = errors.New("unsupported runtime requirements snapshot")
+	ErrUnknownMode               = errors.New("unknown runtime operating mode")
+	ErrModeRequired              = errors.New("runtime operating mode selection required")
+	ErrUnknownRequirement        = errors.New("unknown runtime requirement")
+	ErrUnknownAction             = errors.New("unknown runtime requirement action")
+	ErrUnknownAdapter            = errors.New("unknown runtime adapter")
+	ErrVerificationFailed        = errors.New("runtime verification failed")
+	ErrGrantNotAllowed           = errors.New("runtime capability grant is not allowed")
+	ErrAgentNotSupported         = errors.New("runtime capability agent is not supported")
+	ErrExecutionScopeUnavailable = errors.New("runtime capability execution scope is unavailable")
 )
 
 // Durable setup states are intentionally separate from live availability.
@@ -140,6 +143,51 @@ type LiveChecker interface {
 type ActionConfirmer interface {
 	Adapter
 	ConfirmAction(context.Context, ConfirmedActionRequest) error
+}
+
+// GrantValidationRequest contains only canonical workspace declarations and a
+// stable agent instance. Capability adapters resolve provider/root details from
+// trusted injected services; no path or provider comes from the client.
+type GrantValidationRequest struct {
+	WorkspaceID string
+	Mode        workspace.RuntimeOperatingMode
+	Requirement workspace.RuntimeRequirement
+	Agent       workspace.AgentInstance
+}
+
+// GrantAuthorizer is an optional compiled adapter policy for explicit grants.
+type GrantAuthorizer interface {
+	Adapter
+	ValidateGrant(context.Context, GrantValidationRequest) error
+}
+
+type CapabilityNetworkPosture string
+
+const (
+	CapabilityNetworkDisabled CapabilityNetworkPosture = "disabled"
+	// CapabilityNetworkLocal reaches loopback only through capability-owned
+	// trusted MCP/helper operations; it never enables general shell networking.
+	CapabilityNetworkLocal CapabilityNetworkPosture = "capability_local"
+)
+
+type ExecutionScopeRequest struct {
+	WorkspaceID string
+	Mode        workspace.RuntimeOperatingMode
+	Requirement workspace.RuntimeRequirement
+	Agent       workspace.AgentInstance
+}
+
+type CapabilityExecutionScope struct {
+	AdditionalWritableRoots []string
+	NetworkPosture          CapabilityNetworkPosture
+	AllowedMCPServers       []string
+}
+
+// ExecutionScopeProvider revalidates trusted capability-owned roots and local
+// helper posture immediately before provider invocation.
+type ExecutionScopeProvider interface {
+	Adapter
+	ResolveExecutionScope(context.Context, ExecutionScopeRequest) (CapabilityExecutionScope, error)
 }
 
 // Verifier performs an adapter-owned bounded verification protocol after an

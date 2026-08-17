@@ -5,12 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os"
+	"path/filepath"
 	"reflect"
 	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
 
+	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -149,6 +152,168 @@ func (s *Service) EvaluateTaskCapability(workspaceID, capability string) (bool, 
 		return true, runtimeTaskBlocked(workspaceID, status.FirstBlocker)
 	}
 	return true, nil
+}
+
+// ResolveTaskExecutionScope returns authority only for runtime keys this task
+// actually declares, granted to this exact agent in the selected mode. It
+// revalidates adapter-owned roots immediately before invocation. Ordinary tasks,
+// system-model calls, other agents, and other workspaces receive nil.
+func (s *Service) ResolveTaskExecutionScope(ctx context.Context, workspaceID, agentInstanceID string, capabilities []string, workspaceRoot string) (*llm.CLIExecutionScope, error) {
+	ws, contract, mode, err := s.loadSelected(workspaceID)
+	if err != nil {
+		if errors.Is(err, ErrNoRuntimeContract) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	agentInstance, found := findAgentInstance(ws, agentInstanceID)
+	if !found {
+		return nil, ErrAgentNotSupported
+	}
+	canonicalWorkspace, err := canonicalExecutionRoot(workspaceRoot)
+	if err != nil {
+		return nil, ErrExecutionScopeUnavailable
+	}
+	scope := &llm.CLIExecutionScope{WorkspaceRoot: canonicalWorkspace, NetworkPosture: llm.CLINetworkDisabled}
+	seenRoots := map[string]bool{canonicalWorkspace: true}
+	seenCapabilities := map[string]bool{}
+	seenMCPServers := map[string]bool{}
+
+	for _, key := range workspace.NormalizeCapabilityKeys(capabilities) {
+		if !contractDeclaresRequirement(contract, key) {
+			continue
+		}
+		requirement, required := selectedRequirement(contract, mode, key)
+		if !required || !ws.GetRuntimeState().HasActiveRuntimeGrant(key, agentInstance.ID) {
+			runtimeAuditEvent(EventScopeUseDecision, workspaceID, agentInstance.ID, key, "denied")
+			return nil, ErrExecutionScopeUnavailable
+		}
+		adapter, registered := s.registry.Lookup(requirement.Adapter)
+		if !registered {
+			runtimeAuditEvent(EventScopeUseDecision, workspaceID, agentInstance.ID, key, "denied")
+			return nil, ErrExecutionScopeUnavailable
+		}
+		provider, supported := adapter.(ExecutionScopeProvider)
+		if !supported {
+			runtimeAuditEvent(EventScopeUseDecision, workspaceID, agentInstance.ID, key, "denied")
+			return nil, ErrExecutionScopeUnavailable
+		}
+		capabilityScope, scopeErr := provider.ResolveExecutionScope(ctx, ExecutionScopeRequest{
+			WorkspaceID: workspaceID, Mode: mode, Requirement: requirement, Agent: agentInstance,
+		})
+		if scopeErr != nil {
+			runtimeAuditEvent(EventScopeUseDecision, workspaceID, agentInstance.ID, key, "denied")
+			return nil, ErrExecutionScopeUnavailable
+		}
+		for _, root := range capabilityScope.AdditionalWritableRoots {
+			canonicalRoot, rootErr := canonicalExecutionRoot(root)
+			if rootErr != nil {
+				runtimeAuditEvent(EventScopeUseDecision, workspaceID, agentInstance.ID, key, "denied")
+				return nil, ErrExecutionScopeUnavailable
+			}
+			if !seenRoots[canonicalRoot] {
+				seenRoots[canonicalRoot] = true
+				scope.AdditionalWritableRoots = append(scope.AdditionalWritableRoots, canonicalRoot)
+			}
+		}
+		switch capabilityScope.NetworkPosture {
+		case CapabilityNetworkDisabled:
+		case CapabilityNetworkLocal:
+			scope.NetworkPosture = llm.CLINetworkCapabilityLocal
+		default:
+			runtimeAuditEvent(EventScopeUseDecision, workspaceID, agentInstance.ID, key, "denied")
+			return nil, ErrExecutionScopeUnavailable
+		}
+		for _, server := range capabilityScope.AllowedMCPServers {
+			server = strings.TrimSpace(server)
+			if server != "" && !seenMCPServers[server] {
+				seenMCPServers[server] = true
+				scope.AllowedMCPServers = append(scope.AllowedMCPServers, server)
+			}
+		}
+		if !seenCapabilities[key] {
+			seenCapabilities[key] = true
+			scope.CapabilityKeys = append(scope.CapabilityKeys, key)
+			runtimeAuditEvent(EventScopeUseDecision, workspaceID, agentInstance.ID, key, "allowed")
+		}
+	}
+	if len(scope.CapabilityKeys) == 0 {
+		return nil, nil
+	}
+	return llm.CloneCLIExecutionScope(scope), nil
+}
+
+// Grant validates the selected mode, declared requirement, stable workspace
+// agent, compiled adapter policy, compatible CLI provider, and canonical
+// capability root before recording authority. It changes no broad native-MCP
+// settings and grants no unrelated capability.
+func (s *Service) Grant(ctx context.Context, workspaceID, requirementKey, agentInstanceID string) (Status, error) {
+	outcome := "denied"
+	defer func() { runtimeAuditEvent(EventGrantDecision, workspaceID, agentInstanceID, requirementKey, outcome) }()
+	ws, contract, mode, err := s.loadSelected(workspaceID)
+	if err != nil {
+		return Status{}, err
+	}
+	requirement, found := selectedRequirement(contract, mode, requirementKey)
+	if !found {
+		return Status{}, ErrGrantNotAllowed
+	}
+	agentInstance, found := findAgentInstance(ws, agentInstanceID)
+	if !found {
+		return Status{}, ErrAgentNotSupported
+	}
+	adapter, found := s.registry.Lookup(requirement.Adapter)
+	if !found {
+		return Status{}, ErrUnknownAdapter
+	}
+	authorizer, supported := adapter.(GrantAuthorizer)
+	if !supported {
+		return Status{}, ErrGrantNotAllowed
+	}
+	if err := authorizer.ValidateGrant(ctx, GrantValidationRequest{
+		WorkspaceID: workspaceID, Mode: mode, Requirement: requirement, Agent: agentInstance,
+	}); err != nil {
+		return Status{}, ErrGrantNotAllowed
+	}
+	now := s.now().UTC()
+	if err := s.store.Update(workspaceID, func(current *workspace.Workspace) error {
+		_, grantErr := current.GrantRuntimeCapability(requirement.Key, agentInstance.ID, now)
+		return grantErr
+	}); err != nil {
+		return Status{}, err
+	}
+	outcome = "granted"
+	return s.Status(ctx, workspaceID)
+}
+
+// Revoke removes exact future authority even if mode/provider/root state has
+// since changed. Revocation never deletes runner or workspace files.
+func (s *Service) Revoke(ctx context.Context, workspaceID, requirementKey, agentInstanceID string) (Status, error) {
+	outcome := "denied"
+	defer func() { runtimeAuditEvent(EventRevokeDecision, workspaceID, agentInstanceID, requirementKey, outcome) }()
+	_, contract, _, err := s.load(workspaceID)
+	if err != nil {
+		return Status{}, err
+	}
+	requirement, declared := contract.Requirement(requirementKey)
+	if !declared || strings.TrimSpace(agentInstanceID) == "" {
+		return Status{}, ErrGrantNotAllowed
+	}
+	now := s.now().UTC()
+	revoked := false
+	if err := s.store.Update(workspaceID, func(current *workspace.Workspace) error {
+		changed, revokeErr := current.RevokeRuntimeCapability(requirement.Key, strings.TrimSpace(agentInstanceID), now)
+		revoked = changed
+		return revokeErr
+	}); err != nil {
+		return Status{}, err
+	}
+	if revoked {
+		outcome = "revoked"
+	} else {
+		outcome = "already_revoked"
+	}
+	return s.Status(ctx, workspaceID)
 }
 
 // SelectMode persists an explicit operating-mode choice, then evaluates that
@@ -446,6 +611,31 @@ func resolveSelectedMode(contract *workspace.RuntimeRequirementsContract, state 
 	return contract.ImplicitMode()
 }
 
+func findAgentInstance(ws *workspace.Workspace, agentInstanceID string) (workspace.AgentInstance, bool) {
+	if ws == nil {
+		return workspace.AgentInstance{}, false
+	}
+	agentInstanceID = strings.TrimSpace(agentInstanceID)
+	if agentInstanceID == "" {
+		return workspace.AgentInstance{}, false
+	}
+	var (
+		match workspace.AgentInstance
+		found bool
+	)
+	for _, instance := range ws.AgentInstances {
+		if strings.TrimSpace(instance.ID) != agentInstanceID {
+			continue
+		}
+		if found {
+			return workspace.AgentInstance{}, false
+		}
+		match = instance
+		found = true
+	}
+	return match, found
+}
+
 func contractDeclaresRequirement(contract *workspace.RuntimeRequirementsContract, key string) bool {
 	key = workspace.NormalizeRuntimeIdentifier(key)
 	if contract == nil || key == "" {
@@ -653,6 +843,22 @@ func setVerificationRange(status *Status) {
 	}
 }
 
+func canonicalExecutionRoot(root string) (string, error) {
+	absolute, err := filepath.Abs(strings.TrimSpace(root))
+	if err != nil || strings.TrimSpace(root) == "" {
+		return "", ErrExecutionScopeUnavailable
+	}
+	info, err := os.Lstat(absolute)
+	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return "", ErrExecutionScopeUnavailable
+	}
+	canonical, err := filepath.EvalSymlinks(absolute)
+	if err != nil {
+		return "", ErrExecutionScopeUnavailable
+	}
+	return filepath.Clean(canonical), nil
+}
+
 func safeCode(value string) string {
 	return workspace.NormalizeRuntimeIdentifier(value)
 }
@@ -690,7 +896,7 @@ func sanitizeAction(action *Action) *Action {
 	rawURL := strings.TrimSpace(action.URL)
 	if rawURL != "" && len(rawURL) <= maxActionURLLength {
 		parsed, err := url.Parse(rawURL)
-		if err == nil && parsed.IsAbs() == false && parsed.Host == "" && strings.HasPrefix(parsed.Path, "/") {
+		if err == nil && !parsed.IsAbs() && parsed.Host == "" && strings.HasPrefix(parsed.Path, "/") {
 			out.URL = rawURL
 		}
 	}

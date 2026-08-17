@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"errors"
 	"regexp"
 	"strings"
 	"time"
@@ -283,12 +284,49 @@ type RuntimeCapabilityGrant struct {
 	RevokedAt       *time.Time `json:"revoked_at,omitempty"`
 }
 
+var ErrInvalidRuntimeGrant = errors.New("invalid runtime capability grant")
+
 // Active reports whether this record currently grants its named capability.
 // It deliberately says nothing about whether the capability remains declared,
 // the mode still requires it, or the agent still exists; callers must establish
 // those independent facts before constructing an execution scope.
 func (g RuntimeCapabilityGrant) Active() bool {
 	return NormalizeRuntimeIdentifier(g.CapabilityKey) != "" && strings.TrimSpace(g.AgentInstanceID) != "" && !g.GrantedAt.IsZero() && g.RevokedAt == nil
+}
+
+// RuntimeGrant resolves one exact capability/agent record. Duplicate records
+// fail closed rather than letting whichever duplicate is encountered first
+// decide authority.
+func (s *WorkspaceRuntimeState) RuntimeGrant(capabilityKey, agentInstanceID string) (RuntimeCapabilityGrant, bool) {
+	if s == nil {
+		return RuntimeCapabilityGrant{}, false
+	}
+	capabilityKey = NormalizeRuntimeIdentifier(capabilityKey)
+	agentInstanceID = strings.TrimSpace(agentInstanceID)
+	if capabilityKey == "" || agentInstanceID == "" {
+		return RuntimeCapabilityGrant{}, false
+	}
+	var (
+		match RuntimeCapabilityGrant
+		found bool
+	)
+	for _, grant := range s.Grants {
+		if NormalizeRuntimeIdentifier(grant.CapabilityKey) != capabilityKey || strings.TrimSpace(grant.AgentInstanceID) != agentInstanceID {
+			continue
+		}
+		if found {
+			return RuntimeCapabilityGrant{}, false
+		}
+		match = grant
+		match.RevokedAt = cloneTime(grant.RevokedAt)
+		found = true
+	}
+	return match, found
+}
+
+func (s *WorkspaceRuntimeState) HasActiveRuntimeGrant(capabilityKey, agentInstanceID string) bool {
+	grant, found := s.RuntimeGrant(capabilityKey, agentInstanceID)
+	return found && grant.Active()
 }
 
 // WorkspaceRuntimeState contains only authoritative durable choices and
@@ -339,6 +377,80 @@ func (w *Workspace) GetRuntimeState() *WorkspaceRuntimeState {
 // configuration states, and never turns unknown input into configured. Invalid
 // requirement-state keys are dropped; invalid grant records remain
 // non-authoritative because Active returns false.
+// GrantRuntimeCapability records or renews one exact capability/agent grant.
+// It returns whether durable state changed.
+func (w *Workspace) GrantRuntimeCapability(capabilityKey, agentInstanceID string, grantedAt time.Time) (bool, error) {
+	capabilityKey = NormalizeRuntimeIdentifier(capabilityKey)
+	agentInstanceID = strings.TrimSpace(agentInstanceID)
+	if capabilityKey == "" || agentInstanceID == "" {
+		return false, ErrInvalidRuntimeGrant
+	}
+	if grantedAt.IsZero() {
+		grantedAt = time.Now().UTC()
+	}
+	state := w.GetRuntimeState()
+	if state == nil {
+		state = &WorkspaceRuntimeState{}
+	}
+	var (
+		grants        []RuntimeCapabilityGrant
+		matchingCount int
+		activeMatch   *RuntimeCapabilityGrant
+	)
+	for _, grant := range state.Grants {
+		if NormalizeRuntimeIdentifier(grant.CapabilityKey) == capabilityKey && strings.TrimSpace(grant.AgentInstanceID) == agentInstanceID {
+			matchingCount++
+			if grant.Active() && activeMatch == nil {
+				copy := grant
+				activeMatch = &copy
+			}
+			continue
+		}
+		grants = append(grants, grant)
+	}
+	changed := matchingCount != 1 || activeMatch == nil
+	if !changed {
+		grants = append(grants, *activeMatch)
+	} else {
+		grants = append(grants, RuntimeCapabilityGrant{CapabilityKey: capabilityKey, AgentInstanceID: agentInstanceID, GrantedAt: grantedAt.UTC()})
+	}
+	state.Grants = grants
+	w.SetRuntimeState(state)
+	return changed, nil
+}
+
+// RevokeRuntimeCapability timestamps every matching record so malformed
+// duplicates cannot leave one active. It returns whether an active grant was
+// revoked.
+func (w *Workspace) RevokeRuntimeCapability(capabilityKey, agentInstanceID string, revokedAt time.Time) (bool, error) {
+	capabilityKey = NormalizeRuntimeIdentifier(capabilityKey)
+	agentInstanceID = strings.TrimSpace(agentInstanceID)
+	if capabilityKey == "" || agentInstanceID == "" {
+		return false, ErrInvalidRuntimeGrant
+	}
+	if revokedAt.IsZero() {
+		revokedAt = time.Now().UTC()
+	}
+	state := w.GetRuntimeState()
+	if state == nil {
+		return false, nil
+	}
+	changed := false
+	for i := range state.Grants {
+		grant := &state.Grants[i]
+		if NormalizeRuntimeIdentifier(grant.CapabilityKey) != capabilityKey || strings.TrimSpace(grant.AgentInstanceID) != agentInstanceID || !grant.Active() {
+			continue
+		}
+		revoked := revokedAt.UTC()
+		grant.RevokedAt = &revoked
+		changed = true
+	}
+	if changed {
+		w.SetRuntimeState(state)
+	}
+	return changed, nil
+}
+
 func (w *Workspace) SetRuntimeState(state *WorkspaceRuntimeState) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
