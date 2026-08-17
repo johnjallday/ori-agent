@@ -1607,3 +1607,79 @@ body.home-command-page .ori-guide__launcher {
   opacity: 0.55;
   cursor: not-allowed;
 }
+
+/* Named appearance choices (#346 FR-130). Every option carries its own visible
+   text, so the list is usable without seeing the swatch beside it. */
+.cockpit-rail-appearance {
+  margin: 12px 0 0;
+  padding: 0;
+  border: 0;
+}
+
+.cockpit-rail-appearance-legend {
+  padding: 0;
+  margin-bottom: 6px;
+  color: var(--hc-ink-faint);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+
+.cockpit-rail-appearance-option {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 3px 0;
+  font-size: 12px;
+  line-height: 1.35;
+  cursor: pointer;
+}
+
+.cockpit-rail-appearance-option:has(input:disabled) {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* A swatch beside the name, never instead of it. */
+.cockpit-rail-appearance-option .cockpit-rail-appearance-label::before {
+  content: "";
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-right: 6px;
+  border: 1px solid rgba(0, 0, 0, 0.25);
+  border-radius: 2px;
+  background: rgb(var(--cockpit-swatch, 232, 134, 77));
+  vertical-align: baseline;
+}
+
+.cockpit-rail-accent-default {
+  --cockpit-swatch: 232, 134, 77;
+}
+.cockpit-rail-accent-beacon {
+  --cockpit-swatch: 74, 124, 178;
+}
+.cockpit-rail-accent-moss {
+  --cockpit-swatch: 92, 138, 86;
+}
+.cockpit-rail-accent-orchid {
+  --cockpit-swatch: 148, 96, 162;
+}
+.cockpit-rail-accent-slate {
+  --cockpit-swatch: 106, 118, 128;
+}
+.cockpit-rail-accent-tide {
+  --cockpit-swatch: 58, 140, 140;
+}
+
+/* Themes are shapes, not colours, so they get no swatch — their one-line hint
+   describes the difference instead. */
+.cockpit-rail-appearance[data-rail-appearance="theme"] .cockpit-rail-appearance-label::before {
+  display: none;
+}
+
+.cockpit-rail-appearance-hint {
+  color: var(--hc-ink-faint);
+  font-size: 11px;
+}

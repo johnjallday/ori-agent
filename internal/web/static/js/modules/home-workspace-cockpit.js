@@ -628,6 +628,16 @@ export function groupMapLayoutView(district, options = {}) {
     canResize: !readOnly && !district.collapsed,
     // Fitting a district that is already automatic would change nothing.
     canFit: !readOnly && !district.collapsed && custom,
+    // Appearance is meaningful whether a district is open or closed: the
+    // collapsed summary wears the same accent and theme (FR-117).
+    accent: district.accent || 'default',
+    theme: district.theme || 'default',
+    accents: Array.isArray(district.accents) ? district.accents : [],
+    themes: Array.isArray(district.themes) ? district.themes : [],
+    canChangeAppearance: !readOnly,
+    // Offered only when there is a customization to undo (FR-137).
+    customized:
+      (district.accent || 'default') !== 'default' || (district.theme || 'default') !== 'default',
     readOnly,
     readOnlyNote: readOnly ? 'Map layout cannot be saved right now.' : ''
   };
@@ -953,12 +963,54 @@ function mapLayoutSectionHTML(layout) {
     disabled(layout.canFit) +
     '>Fit to contents</button>' +
     '</div>' +
+    appearanceHTML(layout) +
     (layout.readOnlyNote
       ? `<p class="cockpit-rail-empty">${escapeHtml(layout.readOnlyNote)}</p>`
       : '') +
     '<p class="cockpit-rail-note">Size and appearance change only how this group looks on your ' +
     'Map. They never change which workspaces are in it.</p>' +
     '</section>'
+  );
+}
+
+/**
+ * Named accent and theme choices (#346 FR-121 – FR-125, FR-130).
+ *
+ * Radio groups rather than unlabelled colour dots: the current choice is stated
+ * in text, every option has a human name a screen reader can read, and the
+ * theme options carry a one-line description of the shape difference — because
+ * districts must stay distinguishable without relying on colour.
+ */
+function appearanceHTML(layout) {
+  if (!layout.accents.length && !layout.themes.length) return '';
+  const disabled = layout.canChangeAppearance ? '' : ' disabled';
+  const group = (name, kind, options, current) =>
+    `<fieldset class="cockpit-rail-appearance" data-rail-appearance="${escapeHtml(kind)}">` +
+    `<legend class="cockpit-rail-appearance-legend">${escapeHtml(name)}</legend>` +
+    options
+      .map(option => {
+        const checked = option.id === current ? ' checked' : '';
+        const hint = option.hint
+          ? ` <span class="cockpit-rail-appearance-hint">${escapeHtml(option.hint)}</span>`
+          : '';
+        return (
+          `<label class="cockpit-rail-appearance-option cockpit-rail-${escapeHtml(kind)}-${escapeHtml(option.id)}">` +
+          `<input type="radio" name="cockpit-district-${escapeHtml(kind)}" value="${escapeHtml(option.id)}"` +
+          `${checked}${disabled} data-cockpit-group-${escapeHtml(kind)}>` +
+          `<span class="cockpit-rail-appearance-label">${escapeHtml(option.label)}</span>${hint}` +
+          '</label>'
+        );
+      })
+      .join('') +
+    '</fieldset>';
+
+  return (
+    group('Accent', 'accent', layout.accents, layout.accent) +
+    group('Theme', 'theme', layout.themes, layout.theme) +
+    (layout.customized
+      ? '<button type="button" class="modern-btn cockpit-rail-maplayout-btn" ' +
+        `data-cockpit-group-appearance-reset${disabled}>Use default appearance</button>`
+      : '')
   );
 }
 
@@ -1903,6 +1955,27 @@ import {
         Promise.resolve(
           actions.setCollapsed(state.selectedId, collapse.getAttribute('aria-expanded') === 'true')
         ).then(() => renderRail({ announceChange: false }))
+      );
+    }
+    // Appearance: only an identifier from the rendered catalog can reach the
+    // action, so nothing a hostile value could be smuggled through (#346
+    // FR-125).
+    ['accent', 'theme'].forEach(kind => {
+      els.railContext.querySelectorAll(`[data-cockpit-group-${kind}]`).forEach(input =>
+        input.addEventListener('change', () => {
+          if (!input.checked) return;
+          void Promise.resolve(
+            actions.setAppearance(state.selectedId, { [kind]: input.value })
+          ).then(() => renderRail({ announceChange: false }));
+        })
+      );
+    });
+    const resetAppearance = els.railContext.querySelector('[data-cockpit-group-appearance-reset]');
+    if (resetAppearance) {
+      resetAppearance.addEventListener('click', () =>
+        Promise.resolve(actions.resetAppearance(state.selectedId)).then(() =>
+          renderRail({ announceChange: false })
+        )
       );
     }
   }

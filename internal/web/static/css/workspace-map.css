@@ -560,13 +560,70 @@
   border: 0;
 }
 
+/* ---------------------------------------------------------------------------
+   District accents and themes (#346 FR-121 – FR-133)
+
+   Two bounded axes, both driven by class names the app owns. Accent sets ONE
+   custom property; theme decides how that property is used. Nothing here is
+   supplied by a workspace, a user, or a request — an unknown identifier never
+   reaches this file because the renderer resolves it against the catalog first.
+
+   Scope is deliberate: every rule below is inside .ws-map-district. Buildings,
+   agent characters, Personal HQ, the terrain, and application chrome are all
+   out of reach of a district's appearance (FR-128).
+   --------------------------------------------------------------------------- */
+.ws-map-district {
+  /* The default accent, and the fallback for anything unrecognised. */
+  --ws-district-accent: 232, 134, 77;
+}
+.ws-map-district.ws-map-accent-beacon,
+.ws-map-resize-overlay.ws-map-accent-beacon {
+  --ws-district-accent: 74, 124, 178;
+}
+.ws-map-district.ws-map-accent-moss,
+.ws-map-resize-overlay.ws-map-accent-moss {
+  --ws-district-accent: 92, 138, 86;
+}
+.ws-map-district.ws-map-accent-orchid,
+.ws-map-resize-overlay.ws-map-accent-orchid {
+  --ws-district-accent: 148, 96, 162;
+}
+.ws-map-district.ws-map-accent-slate,
+.ws-map-resize-overlay.ws-map-accent-slate {
+  --ws-district-accent: 106, 118, 128;
+}
+.ws-map-district.ws-map-accent-tide,
+.ws-map-resize-overlay.ws-map-accent-tide {
+  --ws-district-accent: 58, 140, 140;
+}
+
 /* district (group) zone */
 .ws-map-district {
   position: absolute;
   z-index: 3;
-  border: 1.4px dashed rgba(232, 134, 77, 0.35);
-  background: rgba(232, 134, 77, 0.04);
+  border: 1.4px dashed rgba(var(--ws-district-accent), 0.42);
+  background: rgba(var(--ws-district-accent), 0.05);
   border-radius: 16px;
+}
+
+/* Themes differ in SHAPE as well as colour, so two districts remain
+   distinguishable to someone who cannot see the difference between their
+   accents (FR-130, FR-163). */
+.ws-map-district.ws-map-theme-blueprint {
+  border-style: solid;
+  border-width: 1px;
+  border-radius: 4px;
+  /* A code-native hatch — no bitmap, no remote asset (FR-124). */
+  background-image:
+    linear-gradient(rgba(var(--ws-district-accent), 0.1) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(var(--ws-district-accent), 0.1) 1px, transparent 1px);
+  background-size: 19px 19px;
+}
+.ws-map-district.ws-map-theme-terrace {
+  border-style: solid;
+  border-width: 2px;
+  border-radius: 22px;
+  background: rgba(var(--ws-district-accent), 0.1);
 }
 /* The district header (#346 FR-139).
    One strip that names the group, states its size, and carries its three
@@ -603,9 +660,9 @@
   align-items: baseline;
   gap: 7px;
   min-width: 0;
-  border: 1px solid rgba(232, 134, 77, 0.35);
+  border: 1px solid rgba(var(--ws-district-accent), 0.42);
   background: var(--ws-bg-2);
-  color: var(--ws-keeper);
+  color: rgb(var(--ws-district-accent));
   cursor: pointer;
   font-family: var(--ws-font-mono);
   font-size: 10px;
@@ -626,10 +683,10 @@
   font-size: 9px;
 }
 .ws-map-district-tag:hover {
-  background: rgba(232, 134, 77, 0.12);
+  background: rgba(var(--ws-district-accent), 0.14);
 }
 .ws-map-district-tag:focus-visible {
-  outline: 2px solid var(--ws-keeper);
+  outline: 2px solid rgb(var(--ws-district-accent));
   outline-offset: 2px;
 }
 /* The cluster drag handle and the overflow control. Separate from the label so
@@ -644,9 +701,9 @@
   min-height: 44px;
   display: grid;
   place-items: center;
-  border: 1px solid rgba(232, 134, 77, 0.35);
+  border: 1px solid rgba(var(--ws-district-accent), 0.42);
   background: var(--ws-bg-2);
-  color: var(--ws-keeper);
+  color: rgb(var(--ws-district-accent));
   font-size: 14px;
   line-height: 1;
 }
@@ -670,12 +727,12 @@
 .ws-map-district-handle:hover,
 .ws-map-district-more:hover,
 .ws-map-district-collapse:hover {
-  background: rgba(232, 134, 77, 0.12);
+  background: rgba(var(--ws-district-accent), 0.14);
 }
 .ws-map-district-handle:focus-visible,
 .ws-map-district-more:focus-visible,
 .ws-map-district-collapse:focus-visible {
-  outline: 2px solid var(--ws-keeper);
+  outline: 2px solid rgb(var(--ws-district-accent));
   outline-offset: 2px;
 }
 
@@ -685,11 +742,11 @@
    (FR-163). */
 .ws-map-district.is-collapsed {
   border-style: solid;
-  background: rgba(232, 134, 77, 0.1);
+  background: rgba(var(--ws-district-accent), 0.12);
 }
 .ws-map-district.is-dragging {
   border-style: solid;
-  border-color: var(--ws-keeper);
+  border-color: rgb(var(--ws-district-accent));
 }
 .ws-map-district.is-dragging .ws-map-district-handle {
   cursor: grabbing;
@@ -742,6 +799,9 @@
   position: absolute;
   inset: 0;
   z-index: 8;
+  /* The selected district's accent, set by positionResizeOverlay. Defaults to
+     the Keeper amber so the overlay is never colourless. */
+  --ws-district-accent: 232, 134, 77;
   /* Only the handles take input. The rectangle between them must stay inert or
      it would swallow every pan, click, and right-click aimed at the map under a
      selected district (FR-157). */
@@ -752,7 +812,7 @@
 }
 .ws-map-resize-box {
   position: absolute;
-  border: 1.5px solid var(--ws-keeper);
+  border: 1.5px solid rgb(var(--ws-district-accent));
   border-radius: 16px;
   pointer-events: none;
 }
@@ -774,7 +834,7 @@
 .ws-map-resize-dot {
   width: 11px;
   height: 11px;
-  border: 1.5px solid var(--ws-keeper);
+  border: 1.5px solid rgb(var(--ws-district-accent));
   border-radius: 3px;
   background: var(--ws-bg-2);
 }
@@ -864,7 +924,7 @@
   transform: translateX(-50%);
   max-width: min(90%, 420px);
   padding: 4px 10px;
-  border: 1px solid var(--ws-keeper);
+  border: 1px solid rgb(var(--ws-district-accent));
   background: var(--ws-bg-2);
   color: var(--ws-ink, inherit);
   font-family: var(--ws-font-mono);

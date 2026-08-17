@@ -177,8 +177,28 @@
   // default instead of being interpolated into a stylesheet (FR-125, FR-194).
   // They mirror accentCatalog/themeCatalog in
   // internal/workspacemap/presentation.go, which validates every write.
-  var DISTRICT_ACCENTS = ['default', 'beacon', 'moss', 'orchid', 'slate', 'tide'];
-  var DISTRICT_THEMES = ['default', 'blueprint', 'terrace'];
+  // Named, not unlabelled colour dots: a district is identified by its name and
+  // its shape as well as its colour, and a screen reader has to be able to say
+  // which one is chosen (FR-130, design §"Accent choices should be named").
+  var DISTRICT_ACCENT_CATALOG = [
+    { id: 'default', label: 'Keeper amber' },
+    { id: 'beacon', label: 'Beacon blue' },
+    { id: 'moss', label: 'Moss green' },
+    { id: 'orchid', label: 'Orchid violet' },
+    { id: 'slate', label: 'Slate grey' },
+    { id: 'tide', label: 'Tide teal' }
+  ];
+  var DISTRICT_THEME_CATALOG = [
+    { id: 'default', label: 'Standard district', hint: 'Dashed outline, faint fill' },
+    { id: 'blueprint', label: 'Blueprint', hint: 'Solid rule with a grid hatch' },
+    { id: 'terrace', label: 'Terrace', hint: 'Rounded surface with a header band' }
+  ];
+  var DISTRICT_ACCENTS = DISTRICT_ACCENT_CATALOG.map(function (entry) {
+    return entry.id;
+  });
+  var DISTRICT_THEMES = DISTRICT_THEME_CATALOG.map(function (entry) {
+    return entry.id;
+  });
   var DEFAULT_ACCENT = 'default';
   var DEFAULT_THEME = 'default';
 
@@ -1939,8 +1959,16 @@
     // "Open" as its only meaning. It names the group and its state instead, and
     // aria-pressed carries the selection (FR-141, FR-143).
     var selectLabel = name + ' group, ' + countLabel;
+    // Preset CLASSES, never inline style. The identifier is validated against
+    // the catalog first, so an unknown or hostile one becomes the default and
+    // can never be interpolated into a rule (#346 FR-125, FR-194).
+    var accent = safeAccent(d.accent);
+    var theme = safeTheme(d.theme);
     return (
-      '<div class="ws-map-district' +
+      '<div class="ws-map-district ws-map-accent-' +
+      accent +
+      ' ws-map-theme-' +
+      theme +
       (collapsed ? ' is-collapsed' : '') +
       (conflict ? ' is-conflicted' : '') +
       '" role="group" aria-label="' +
@@ -2087,7 +2115,9 @@
             height: district.height,
             memberCount: district.memberCount,
             collapsed: district.collapsed,
-            conflict: district.conflict
+            conflict: district.conflict,
+            accent: district.accent,
+            theme: district.theme
           },
           selectedId
         )
@@ -3274,6 +3304,15 @@
       // change nothing.
       disabled: readOnly || collapsed || !district || district.sizingMode !== 'custom'
     });
+    // Offered only when there is a customization to undo, so the menu does not
+    // carry a permanently dead entry (FR-137, FR-146).
+    if (district && (district.accent !== DEFAULT_ACCENT || district.theme !== DEFAULT_THEME)) {
+      items.push({
+        label: 'Use default appearance',
+        action: 'reset-appearance',
+        disabled: readOnly
+      });
+    }
     items.push(menuDivider());
     items.push({
       label: isGroup(ws) ? 'Delete group' : 'Delete workspace',
@@ -3670,6 +3709,9 @@
         break;
       case 'expand-group':
         void setGroupCollapsed(container, id, false);
+        break;
+      case 'reset-appearance':
+        void resetGroupAppearance(container, id);
         break;
       case 'open-setup':
         announce(container, 'Opening Setup for ' + name);
@@ -4430,6 +4472,16 @@
     var size = { width: frame.width * camera.zoom, height: frame.height * camera.zoom };
 
     els.overlay.hidden = false;
+    // The overlay belongs to one district, so it wears that district's accent
+    // rather than a fixed colour — a violet group with an amber selection
+    // rectangle reads as two different things (#346 FR-129). Blocked and error
+    // states still override it, because those must never be theme-coloured
+    // (FR-86).
+    if (els.overlay.classList) {
+      DISTRICT_ACCENTS.forEach(function (id) {
+        els.overlay.classList.toggle('ws-map-accent-' + id, id === safeAccent(district.accent));
+      });
+    }
     if (els.box && els.box.style) {
       els.box.style.left = topLeft.x + 'px';
       els.box.style.top = topLeft.y + 'px';
@@ -4736,6 +4788,67 @@
             : 'That group could not be expanded. It is still collapsed.',
           function () {
             return setGroupCollapsed(container, groupId, collapsed);
+          }
+        );
+        return false;
+      });
+  }
+
+  /**
+   * Choose a curated accent and/or district theme (#346 FR-121, FR-126).
+   *
+   * Only identifiers travel — never a colour, never a rule, never a URL. The
+   * server validates them against the same catalog, and an unknown one is
+   * refused rather than stored, so nothing a client can invent ever reaches a
+   * stylesheet (FR-125, FR-194).
+   */
+  function setGroupAppearance(container, groupId, choice) {
+    var operation = { op: 'set_group_appearance', group_id: groupId };
+    if (choice && choice.accent) operation.accent = choice.accent;
+    if (choice && choice.theme) operation.theme = choice.theme;
+    if (!operation.accent && !operation.theme) return Promise.resolve(false);
+
+    return patchLayout([operation])
+      .then(function () {
+        settleLayout();
+        notifyDistrictChanged(groupId);
+        announce(container, 'Group appearance updated.');
+        return true;
+      })
+      .catch(function () {
+        settleLayout();
+        announceRetryableFailure(
+          container,
+          'That appearance could not be saved. The group looks the way it did.',
+          function () {
+            return setGroupAppearance(container, groupId, choice);
+          }
+        );
+        return false;
+      });
+  }
+
+  /**
+   * Restore the default accent and theme (#346 FR-137).
+   *
+   * Appearance only: geometry, sizing mode, collapse state, members, and
+   * coordinates are all left exactly as they are.
+   */
+  function resetGroupAppearance(container, groupId) {
+    return patchLayout([{ op: 'reset_group_appearance', group_id: groupId }])
+      .then(function () {
+        settleLayout();
+        notifyDistrictChanged(groupId);
+        announce(container, 'Group appearance reset to the default.');
+        return true;
+      })
+      .catch(function () {
+        settleLayout();
+        announceRetryableFailure(
+          container,
+          'That appearance could not be reset. The group looks the way it did.',
+          function () {
+            return resetGroupAppearance(container, groupId);
           }
         );
         return false;
@@ -6320,7 +6433,15 @@
         accent: district.accent,
         theme: district.theme,
         memberCount: district.memberCount,
-        readOnly: isMapReadOnly()
+        readOnly: isMapReadOnly(),
+        // The catalogs travel with the snapshot so the rail renders named
+        // choices without keeping its own copy of the identifiers (#346 FR-125).
+        accents: DISTRICT_ACCENT_CATALOG.map(function (entry) {
+          return { id: entry.id, label: entry.label };
+        }),
+        themes: DISTRICT_THEME_CATALOG.map(function (entry) {
+          return { id: entry.id, label: entry.label, hint: entry.hint };
+        })
       };
     },
     // The district action controller. The context menu and the Home rail call
@@ -6335,6 +6456,12 @@
       },
       setCollapsed: function (groupId, collapsed) {
         return setGroupCollapsed((lastMount && lastMount.container) || null, groupId, collapsed);
+      },
+      setAppearance: function (groupId, choice) {
+        return setGroupAppearance((lastMount && lastMount.container) || null, groupId, choice);
+      },
+      resetAppearance: function (groupId) {
+        return resetGroupAppearance((lastMount && lastMount.container) || null, groupId);
       },
       retryLastFailure: retryLastDistrictAction,
       hasRetry: function () {
@@ -6364,10 +6491,15 @@
       minWidth: DISTRICT_MIN_W,
       minHeight: DISTRICT_MIN_H
     },
-    // The curated, app-defined preset catalogs. They are identifiers, never CSS
-    // (FR-125), and the server validates writes against the same lists.
-    districtAccents: DISTRICT_ACCENTS.slice(),
-    districtThemes: DISTRICT_THEMES.slice(),
+    // The curated, app-defined preset catalogs. They are identifiers with human
+    // names, never CSS (FR-125), and the server validates writes against the
+    // same lists.
+    districtAccents: DISTRICT_ACCENT_CATALOG.map(function (entry) {
+      return { id: entry.id, label: entry.label };
+    }),
+    districtThemes: DISTRICT_THEME_CATALOG.map(function (entry) {
+      return { id: entry.id, label: entry.label, hint: entry.hint };
+    }),
     // Pure district frame math (FR-123).
     effectiveDistrictFrame: effectiveDistrictFrame,
     reconcileCustomFrame: reconcileCustomFrame,

@@ -971,7 +971,7 @@ test('a collapsed district exposes aria-expanded="false" and a truthful count (#
     ''
   );
   assert.match(shut, /aria-expanded="false"/);
-  assert.match(shut, /ws-map-district is-collapsed/);
+  assert.match(shut, /class="ws-map-district [^"]*is-collapsed/);
   assert.match(shut, /4 workspaces/);
   assert.match(shut, /aria-label="Expand group: Ops"/);
 
@@ -981,6 +981,111 @@ test('a collapsed district exposes aria-expanded="false" and a truthful count (#
   );
   assert.match(open, /aria-expanded="true"/);
   assert.match(open, /aria-label="Collapse group: Ops"/);
+});
+
+// ---------------------------------------------------------------------------
+// Accents and themes (#346 FR-121 – FR-138)
+// ---------------------------------------------------------------------------
+
+test('the curated catalogs meet their documented minimums and are named (#346 FR-122, FR-123, FR-130)', () => {
+  const { districtAccents, districtThemes } = loadOriWorkspaceMap();
+  assert.ok(districtAccents.length >= 6, 'the default plus at least five accents');
+  assert.ok(districtThemes.length >= 3, 'the default plus at least two themes');
+  assert.equal(districtAccents[0].id, 'default');
+  assert.equal(districtThemes[0].id, 'default');
+  [...districtAccents, ...districtThemes].forEach(entry => {
+    assert.ok(entry.label && entry.label.length > 2, `${entry.id} has a human name`);
+    // A stable app identifier: nothing that could carry CSS if it were ever
+    // concatenated into a class or a rule (FR-125).
+    assert.match(entry.id, /^[a-z][a-z0-9-]*$/, `${entry.id} is a safe identifier`);
+  });
+  // Themes describe a shape difference, not only a colour one (FR-130).
+  districtThemes.slice(1).forEach(theme => assert.ok(theme.hint, `${theme.id} explains itself`));
+});
+
+test('a district wears its presets as bounded classes, never inline style (#346 FR-125, FR-194)', () => {
+  const { districtHTML } = loadOriWorkspaceMap();
+  const base = {
+    ws: { id: 'g', name: 'Ops' },
+    left: 0,
+    top: 0,
+    width: 400,
+    height: 300,
+    memberCount: 1
+  };
+
+  const chosen = districtHTML({ ...base, accent: 'moss', theme: 'blueprint' }, '');
+  assert.match(chosen, /class="ws-map-district ws-map-accent-moss ws-map-theme-blueprint/);
+
+  // Anything outside the catalog falls back to the default and cannot reach a
+  // rule, however it is spelled.
+  ['url(https://evil.example/x.css)', 'red;background:url(x)', '<script>', '', null].forEach(
+    hostile => {
+      const html = districtHTML({ ...base, accent: hostile, theme: hostile }, '');
+      assert.match(html, /ws-map-accent-default ws-map-theme-default/);
+      assert.ok(!html.includes('style="left:0px;top:0px;width:400px;height:300px;background'));
+      assert.ok(!/evil\.example/.test(html));
+    }
+  );
+});
+
+test('appearance is offered for reset only once it has been customized (#346 FR-137, FR-146)', async () => {
+  const { map } = await mountedCollapsible();
+  const target = { type: 'district', id: 'grp', ws: { id: 'grp', kind: 'group', name: 'Ops' } };
+  const actions = () => map.contextMenuItemsFor(target).map(i => i.action);
+
+  assert.ok(!actions().includes('reset-appearance'), 'a default district has nothing to reset');
+
+  await map.districtActions.setAppearance('grp', { accent: 'tide' });
+  await flush();
+  assert.ok(actions().includes('reset-appearance'), 'a customized one does');
+});
+
+test('choosing an accent sends only that identifier (#346 FR-121, FR-125)', async () => {
+  const { map, patches } = await mountedCollapsible();
+  await map.districtActions.setAppearance('grp', { accent: 'orchid' });
+  await flush();
+
+  assert.equal(patches.length, 1);
+  assert.deepEqual(
+    { ...patches[0].operations[0] },
+    {
+      op: 'set_group_appearance',
+      group_id: 'grp',
+      accent: 'orchid'
+    }
+  );
+  // An unmentioned theme means "leave it alone", not "clear it".
+  assert.equal(JSON.stringify(patches[0]).includes('theme'), false);
+});
+
+test('Use default appearance changes nothing but the presets (#346 FR-137)', async () => {
+  const { map, patches } = await mountedCollapsible();
+  await map.districtActions.resetAppearance('grp');
+  await flush();
+
+  assert.deepEqual(
+    { ...patches[0].operations[0] },
+    {
+      op: 'reset_group_appearance',
+      group_id: 'grp'
+    }
+  );
+  const body = JSON.stringify(patches[0]);
+  ['frame', 'sizing_mode', 'collapsed', 'set_positions'].forEach(field =>
+    assert.equal(body.includes(field), false, `appearance reset must not carry ${field}`)
+  );
+});
+
+test('a failed appearance change keeps the committed look and offers a retry (#346 FR-119)', async () => {
+  const { map, patches } = await mountedCollapsible({ patchResponse: 'fail' });
+  const ok = await map.districtActions.setAppearance('grp', { theme: 'terrace' });
+  await flush();
+
+  assert.equal(ok, false);
+  assert.equal(map.getDistrictView('grp').theme, 'default');
+  assert.equal(map.districtActions.hasRetry(), true);
+  assert.equal(patches.length, 1);
 });
 
 test('a stale group anchor no longer drags Fit all out (#346 FR-48, success metric 1)', () => {
@@ -3991,15 +4096,48 @@ test('Fit to contents returns the district to automatic sizing (#346 FR-40)', as
 
 async function mountedCollapsible({ collapsed = false, patchResponse } = {}) {
   const patches = [];
+  // The stored district, folded forward by each accepted operation exactly as
+  // the server does — the client reconciles from the canonical record it gets
+  // back, so a fixture that returned nothing would test the wrong thing.
+  const stored = {
+    sizing_mode: 'auto',
+    frame: null,
+    collapsed,
+    accent: 'default',
+    theme: 'default'
+  };
   const map = loadMapWithFetch((url, init) => {
     if (init && init.method === 'PATCH') {
-      patches.push(JSON.parse(init.body));
+      const body = JSON.parse(init.body);
+      patches.push(body);
       if (patchResponse === 'fail') return Promise.resolve({ ok: false, status: 500 });
+      const groups = {};
+      body.operations.forEach(op => {
+        if (!op.group_id) return;
+        if (op.op === 'set_group_collapsed') stored.collapsed = op.collapsed;
+        if (op.op === 'set_group_frame') {
+          stored.sizing_mode = 'custom';
+          stored.frame = op.frame;
+        }
+        if (op.op === 'fit_group_to_contents') {
+          stored.sizing_mode = 'auto';
+          stored.frame = null;
+        }
+        if (op.op === 'set_group_appearance') {
+          if (op.accent) stored.accent = op.accent;
+          if (op.theme) stored.theme = op.theme;
+        }
+        if (op.op === 'reset_group_appearance') {
+          stored.accent = 'default';
+          stored.theme = 'default';
+        }
+        groups[op.group_id] = { ...stored };
+      });
       return Promise.resolve({
         ok: true,
         json: () =>
           Promise.resolve({
-            result: { schema_version: 1, revision: 7, positions: {}, snap_to_grid: true }
+            result: { schema_version: 1, revision: 7, positions: {}, groups, snap_to_grid: true }
           })
       });
     }

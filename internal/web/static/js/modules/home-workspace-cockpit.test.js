@@ -1044,6 +1044,83 @@ test('a read-only map disables collapse along with the rest (#346 FR-148)', () =
   assert.equal(readOnly.canCollapse, false);
 });
 
+const CATALOGS = {
+  accents: [
+    { id: 'default', label: 'Keeper amber' },
+    { id: 'moss', label: 'Moss green' }
+  ],
+  themes: [
+    { id: 'default', label: 'Standard district', hint: 'Dashed outline' },
+    { id: 'blueprint', label: 'Blueprint', hint: 'Solid rule with a grid hatch' }
+  ]
+};
+
+test('the rail offers named accent and theme choices, not bare swatches (#346 FR-130)', () => {
+  const rows = groupFixture();
+  const html = renderGroupRailHTML(
+    groupRailView(findWorkspace(rows, 'g1'), rows, {
+      view: VIEW_MAP,
+      district: { ...AUTO_DISTRICT, ...CATALOGS }
+    })
+  );
+  assert.match(html, /data-rail-appearance="accent"/);
+  assert.match(html, /data-rail-appearance="theme"/);
+  assert.match(html, />Moss green</, 'every option carries its human name');
+  assert.match(html, />Blueprint</);
+  assert.match(html, /Solid rule with a grid hatch/, 'and a theme says how it differs in shape');
+  // The current choice is checked, so the rail states it rather than implying it.
+  assert.match(html, /value="default"[^>]*checked/);
+});
+
+test('appearance choices are identifiers from the catalog only (#346 FR-125)', () => {
+  const rows = groupFixture();
+  const html = renderGroupRailHTML(
+    groupRailView(findWorkspace(rows, 'g1'), rows, {
+      view: VIEW_MAP,
+      district: {
+        ...AUTO_DISTRICT,
+        accents: [{ id: 'moss', label: '<img src=x onerror=alert(1)>' }],
+        themes: []
+      }
+    })
+  );
+  assert.ok(!html.includes('<img'), 'a hostile label is escaped, never rendered');
+  assert.match(html, /value="moss"/);
+});
+
+test('Use default appearance appears only when there is something to reset (#346 FR-137)', () => {
+  const rows = groupFixture();
+  const html = district =>
+    renderGroupRailHTML(
+      groupRailView(findWorkspace(rows, 'g1'), rows, { view: VIEW_MAP, district })
+    );
+  assert.doesNotMatch(html({ ...AUTO_DISTRICT, ...CATALOGS }), /appearance-reset/);
+  assert.match(
+    html({ ...AUTO_DISTRICT, ...CATALOGS, accent: 'moss' }),
+    /data-cockpit-group-appearance-reset/
+  );
+  assert.match(
+    html({ ...AUTO_DISTRICT, ...CATALOGS, theme: 'blueprint' }),
+    /data-cockpit-group-appearance-reset/
+  );
+});
+
+test('a read-only map disables appearance choices too (#346 FR-148)', () => {
+  const view = groupMapLayoutView(
+    { ...AUTO_DISTRICT, ...CATALOGS, readOnly: true },
+    { view: VIEW_MAP }
+  );
+  assert.equal(view.canChangeAppearance, false);
+  const rows = groupFixture();
+  const html = renderGroupRailHTML(
+    groupRailView(findWorkspace(rows, 'g1'), rows, {
+      view: VIEW_MAP,
+      district: { ...AUTO_DISTRICT, ...CATALOGS, readOnly: true }
+    })
+  );
+  assert.match(html, /data-cockpit-group-accent disabled|disabled data-cockpit-group-accent/);
+});
+
 test('a group with no district drawn shows no Map layout section (#346 FR-151)', () => {
   assert.equal(groupMapLayoutView(null, { view: VIEW_MAP }), null);
   const rows = groupFixture();
