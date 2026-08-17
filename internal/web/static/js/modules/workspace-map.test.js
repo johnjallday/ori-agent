@@ -1300,10 +1300,14 @@ test('the district header names the group and states a truthful count (#346 FR-1
   assert.match(html, /<span class="ws-map-district-name">Campaign Ops<\/span>/);
   assert.match(html, /<span class="ws-map-district-count">3 workspaces<\/span>/);
   // The replaced presentation is gone: no decorative box glyph, no "· Group"
-  // suffix, no unnamed ⤧ control.
+  // suffix.
   assert.ok(!html.includes('▢'), 'the detached tag glyph is gone');
   assert.ok(!html.includes('· Group'), 'the cryptic suffix is gone');
-  assert.ok(!html.includes('⤧'), 'the unnamed move glyph is gone');
+  // The ⤧ move symbol STAYS — it is the map's established glyph for this. What
+  // FR-140 called cryptic was the absence of a name, so that is what this
+  // asserts: the glyph is decorative and the control carries the meaning.
+  assert.match(html, /aria-hidden="true">⤧</, 'the move symbol is kept, and hidden from AT');
+  assert.match(html, /aria-label="Move group: Campaign Ops"/, 'the control itself is named');
 });
 
 test('the district count distinguishes one, none, and unavailable (#346 FR-106, FR-107)', () => {

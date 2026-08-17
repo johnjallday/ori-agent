@@ -2038,13 +2038,19 @@
       // would make "select this group" and "move everything in it" the same
       // gesture, and every existing group action — select, overview, open,
       // delete, Tree management — has to stay reachable (FR-85, FR-94).
+      //
+      // The ⤧ glyph is the map's established symbol for this and stays. What
+      // made it cryptic was never the symbol — it was that the control had no
+      // name at all, so a screen reader read a bare character and a hover said
+      // nothing about what would move. The name is what FR-140 asked for, and
+      // the name is what changed.
       '<button type="button" class="ws-map-district-handle" data-group-drag="' +
       escapeHtml(ws.id) +
       '" aria-label="' +
       escapeHtml('Move group: ' + name) +
       '" title="' +
       escapeHtml('Move group: ' + name) +
-      '"><span class="ws-map-district-grip" aria-hidden="true">⠿</span></button>' +
+      '"><span class="ws-map-district-grip" aria-hidden="true">⤧</span></button>' +
       // The overflow control opens the same menu right-click does, so a pointer
       // user who never right-clicks and a keyboard user both reach the group's
       // actions (FR-139, FR-149).
