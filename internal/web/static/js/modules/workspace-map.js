@@ -4295,6 +4295,16 @@
     // Keyboard equivalents for every camera gesture, so navigating the map
     // never requires a pointer (FR-115).
     canvas.addEventListener('keydown', function (event) {
+      // An active resize owns Escape before anything else does (#346 FR-165).
+      // Bound here as well as on the handle because a POINTER resize does not
+      // require the handle to still hold focus, and "Escape cancels what I am
+      // doing" must not depend on where focus happens to be.
+      if (event.key === 'Escape' && resizeState) {
+        if (event.preventDefault) event.preventDefault();
+        if (event.stopPropagation) event.stopPropagation();
+        cancelResize('Resize cancelled. The group is back at its saved size.');
+        return;
+      }
       // Keyboard Move owns the arrow keys while it is active: they move the
       // building, not the camera (FR-78).
       if (handleMoveKey(container, event)) {

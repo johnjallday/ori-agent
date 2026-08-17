@@ -4972,6 +4972,120 @@ test('an unavailable layout still renders safe districts and refuses to mutate (
   assert.equal(map.districtActions.resize('grp'), false, 'and resizing is refused outright');
 });
 
+// ---------------------------------------------------------------------------
+// Accessibility and interaction hardening (#346 FR-158 – FR-172)
+// ---------------------------------------------------------------------------
+
+test('every district control is a semantic button with an accurate name (#346 FR-158, FR-159)', () => {
+  const { districtHTML } = loadOriWorkspaceMap();
+  const html = districtHTML(
+    { ws: { id: 'g', name: 'Ops' }, left: 0, top: 0, width: 400, height: 300, memberCount: 2 },
+    ''
+  );
+
+  // Four controls, all real buttons — no div-with-a-click-handler.
+  const buttons = html.match(/<button type="button"/g) || [];
+  assert.equal(buttons.length, 4, 'select, collapse, move, and more');
+  assert.equal((html.match(/<div[^>]*onclick/g) || []).length, 0);
+
+  // Every icon-only control carries a name; none is left to its glyph.
+  ['data-group-collapse', 'data-group-drag', 'data-group-menu'].forEach(attr => {
+    const control = html.split(attr)[1] || '';
+    assert.match(control.slice(0, 300), /aria-label="[^"]{6,}"/, `${attr} is named`);
+  });
+  // The glyphs themselves are hidden from assistive technology.
+  assert.equal((html.match(/aria-hidden="true"/g) || []).length, 3);
+});
+
+test('resize handles are named for the group and the edge they change (#346 FR-69)', async () => {
+  const { map, harness } = await mountedForResize();
+  map.setSelectedId(harness.container, [{ id: 'grp', kind: 'group', name: 'Ops' }], 'grp');
+
+  const labels = loadOriWorkspaceMap().districtResize.handleLabels;
+  ['n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw'].forEach(edge => {
+    const handle = harness.resizeHandle(edge);
+    const label = handle.getAttribute('aria-label');
+    assert.match(label, /^Resize Ops group: /, `${edge} names its group`);
+    assert.ok(label.endsWith(labels[edge]), `${edge} names its edge: ${label}`);
+    assert.equal(handle.getAttribute('tabindex'), '0', `${edge} is reachable by keyboard`);
+  });
+});
+
+test('Escape cancels an active resize before any broader dismissal (#346 FR-165)', async () => {
+  const { map, harness, patches } = await mountedForResize();
+  map.setSelectedId(harness.container, [{ id: 'grp', kind: 'group', name: 'Ops' }], 'grp');
+
+  const handle = harness.resizeHandle('se');
+  handle.fire('pointerdown', {
+    button: 0,
+    pointerId: 1,
+    clientX: 0,
+    clientY: 0,
+    preventDefault() {}
+  });
+  handle.fire('pointermove', { pointerId: 1, clientX: 90, clientY: 90, preventDefault() {} });
+
+  // Escape arrives at the CANVAS, not the handle — a pointer resize does not
+  // require the handle to still hold focus.
+  let dismissed = false;
+  harness.fire('keydown', {
+    key: 'Escape',
+    preventDefault() {},
+    stopPropagation() {
+      dismissed = true;
+    }
+  });
+  assert.equal(dismissed, true, 'the resize claimed the key rather than letting it through');
+
+  handle.fire('pointerup', { pointerId: 1 });
+  await flush();
+  assert.equal(patches.length, 0, 'a cancelled resize writes nothing');
+});
+
+test('a collapsed district exposes no resize handles to the keyboard (#346 FR-115, FR-164)', async () => {
+  const { map, harness } = await mountedCollapsible({ collapsed: true });
+  map.setSelectedId(harness.container, [{ id: 'grp', kind: 'group', name: 'Ops' }], 'grp');
+
+  const overlay = harness.control('[data-ws-map-resize]');
+  assert.equal(overlay.hidden, true, 'no hidden member controls enter the focus order');
+  assert.equal(map.districtActions.resize('grp'), false, 'and resize mode refuses to start');
+});
+
+test('resize announcements are bounded, not one per pointer move (#346 FR-162)', async () => {
+  const { map, harness } = await mountedForResize();
+  map.setSelectedId(harness.container, [{ id: 'grp', kind: 'group', name: 'Ops' }], 'grp');
+  const live = harness.control('[data-map-live]');
+  const spoken = [];
+  Object.defineProperty(live, 'textContent', {
+    get: () => spoken[spoken.length - 1] || '',
+    set: value => {
+      if (value) spoken.push(value);
+    },
+    configurable: true
+  });
+
+  const handle = harness.resizeHandle('e');
+  handle.fire('pointerdown', {
+    button: 0,
+    pointerId: 1,
+    clientX: 0,
+    clientY: 0,
+    preventDefault() {}
+  });
+  for (let i = 1; i <= 12; i += 1) {
+    handle.fire('pointermove', { pointerId: 1, clientX: i * 8, clientY: 0, preventDefault() {} });
+  }
+  const duringDrag = spoken.length;
+  handle.fire('pointerup', { pointerId: 1 });
+  await flush();
+
+  assert.ok(duringDrag <= 2, `twelve moves produced ${duringDrag} announcements, want at most 2`);
+  assert.ok(
+    spoken.some(line => /Resizing Ops/.test(line)),
+    'the gesture announced its start'
+  );
+});
+
 test('merely reading the map never writes a coordinate (FR-23)', async () => {
   const calls = [];
   const map = loadMapWithFetch((url, init) => {

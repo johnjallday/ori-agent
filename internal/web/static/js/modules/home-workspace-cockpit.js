@@ -1821,6 +1821,12 @@ import {
     renderFilters();
     mountMap();
     mountTreeView();
+    // Some rail content belongs to ONE view. The selected group's Map layout
+    // section is Map-only: left standing in Tree it would offer to resize and
+    // collapse rows that do nothing of the kind (#346 FR-154). Re-rendering on
+    // every view change is what keeps the rail's claims true for the view the
+    // user is actually in.
+    if (state.railState === RAIL_GROUP) renderRail({ announceChange: false });
     // The footer shortcut names the OTHER view, so it has to follow every view
     // change — not just the ones that re-render the rail (FR88).
     updateRailFooter();

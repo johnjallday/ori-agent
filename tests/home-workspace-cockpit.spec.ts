@@ -654,7 +654,7 @@ test.describe('Header disclosure coordination', () => {
     );
   });
 
-  test('Updates, Quests, and Quick Capture are mutually exclusive and never clear Quick Capture\'s draft (FR8-FR9)', async ({
+  test("Updates, Quests, and Quick Capture are mutually exclusive and never clear Quick Capture's draft (FR8-FR9)", async ({
     page
   }) => {
     await ensureWorkspace(page);
@@ -789,7 +789,9 @@ test.describe('Header disclosure coordination', () => {
     await page.locator(`[data-tree-row="${second}"]`).click();
     await expect(page.locator('#cockpitUpdatesFlyout')).toBeVisible();
     await expect(page.locator(`.ws-map-tile[data-ws-id="${second}"]`)).toHaveClass(/is-selected/);
-    await expect(page.locator(`.ws-map-tile[data-ws-id="${first}"]`)).not.toHaveClass(/is-selected/);
+    await expect(page.locator(`.ws-map-tile[data-ws-id="${first}"]`)).not.toHaveClass(
+      /is-selected/
+    );
   });
 
   test('Summary and an open flyout coexist; closing the flyout reveals Summary unchanged', async ({
@@ -902,7 +904,12 @@ test.describe('Responsive and regression hardening', () => {
     await page.locator('.ws-map-tile[data-ws-id]').first().waitFor();
 
     const order = await page.evaluate(() => {
-      const ids = ['oriGuideMapTrigger', 'cockpitRailToggle', 'cockpitQuestsToggle', 'cockpitViewMap'];
+      const ids = [
+        'oriGuideMapTrigger',
+        'cockpitRailToggle',
+        'cockpitQuestsToggle',
+        'cockpitViewMap'
+      ];
       return ids.map(id => {
         const el = document.getElementById(id);
         if (!el) return -1;
@@ -930,3 +937,165 @@ async function titleOf(page: Page, id: string): Promise<string> {
     .textContent();
   return (name || '').trim();
 }
+
+// ---------------------------------------------------------------------------
+// The selected-group rail's Map layout section (#346 FR-150 – FR-156)
+// ---------------------------------------------------------------------------
+
+test.describe('group Map layout rail (#346)', () => {
+  // Serial: every test seeds a fixture into the ONE shared demo server, and
+  // picks its row from how many already exist. Run in parallel, two workers
+  // read the same count and stack their districts on each other — producing
+  // real (and correctly reported) containment conflicts that have nothing to do
+  // with what is being tested.
+  test.describe.configure({ mode: 'serial' });
+
+  test.beforeEach(async ({ page }) => {
+    await skipOnboarding(page);
+  });
+
+  /**
+   * A group with one member, on a row of its own within the sandbox.
+   *
+   * The tag carries a random component as well as a timestamp: these specs run
+   * in parallel workers, and two fixtures created in the same millisecond would
+   * collide on the workspace name and one create would be refused.
+   */
+  async function seedGroup(page: Page) {
+    const tag = `${String(Date.now()).slice(-6)}-${Math.random().toString(36).slice(2, 7)}`;
+    const existing = await (await page.request.get('/api/workspaces')).json();
+    const row = (existing.folders || []).filter((f: { name?: string }) =>
+      String(f.name || '').startsWith('Rail member ')
+    ).length;
+    const make = async (name: string, kind = 'workspace') => {
+      const res = await page.request.post('/api/workspaces', { data: { name, kind } });
+      const body = await res.json();
+      if (!body?.folder?.id) {
+        throw new Error(
+          `create ${name} failed: ${res.status()} ${JSON.stringify(body).slice(0, 200)}`
+        );
+      }
+      return body.folder.id;
+    };
+    const group = await make(`Rail group ${tag}`, 'group');
+    const member = await make(`Rail member ${tag}`);
+    await page.request.put(`/api/workspaces/${member}`, { data: { parent_id: group } });
+    await page.request.patch('/api/workspace-map/layout', {
+      data: {
+        operations: [
+          { op: 'set_positions', positions: { [member]: { x: 380, y: 380 + row * 570 } } }
+        ]
+      }
+    });
+    return { group, member, tag };
+  }
+
+  async function selectGroup(page: Page, group: string) {
+    const district = page.locator(`.ws-map-district[data-group-id="${group}"]`);
+    await district.waitFor({ timeout: 15000 });
+    await expect(async () => {
+      await district.locator('.ws-map-district-tag').click({ force: true });
+      await expect(page.locator('[data-rail-map-layout]')).toBeVisible({ timeout: 1500 });
+    }).toPass({ timeout: 20000 });
+  }
+
+  test('a selected group keeps Open Group and gains Map layout (FR-150, FR-151, FR-155)', async ({
+    page
+  }) => {
+    const { group } = await seedGroup(page);
+    await page.goto('/');
+    await selectGroup(page, group);
+
+    const rail = page.locator('#cockpitRailContext');
+    // The existing group rail is untouched: navigation and aggregates stay.
+    await expect(rail.locator('[data-cockpit-rail-open]')).toHaveText(/Open Group/);
+    await expect(rail).toContainText('Totals cover every workspace inside this group');
+
+    const layout = page.locator('[data-rail-map-layout]');
+    await expect(layout).toBeVisible();
+    await expect(layout).toContainText('Automatic size');
+    await expect(layout).toContainText('never change which workspaces are in it');
+    await expect(page.locator('[data-cockpit-group-resize]')).toBeEnabled();
+    await expect(page.locator('[data-cockpit-group-fit]')).toBeDisabled();
+    await expect(page.locator('[data-cockpit-group-collapse]')).toHaveText('Collapse group');
+
+    // Open Group leads; the layout controls follow it (FR-155).
+    const openTop = (await rail.locator('[data-cockpit-rail-open]').boundingBox())!.y;
+    const layoutTop = (await layout.boundingBox())!.y;
+    expect(layoutTop).toBeGreaterThan(openTop);
+  });
+
+  test('Tree hides the Map-only layout controls (FR-154)', async ({ page }) => {
+    const { group } = await seedGroup(page);
+    await page.goto('/');
+    await selectGroup(page, group);
+    await expect(page.locator('[data-rail-map-layout]')).toBeVisible();
+
+    await page.locator('#cockpitViewTree').click();
+    await page.waitForTimeout(500);
+
+    // The group is still selected and still openable — only the Map-only
+    // controls are gone, rather than shown dead beside Tree rows.
+    await expect(page.locator('#cockpitRailContext')).toContainText('Open Group');
+    await expect(page.locator('[data-rail-map-layout]')).toHaveCount(0);
+
+    await page.locator('#cockpitViewMap').click();
+    await page.waitForTimeout(500);
+  });
+
+  test('the rail and the district menu run the same action (FR-156)', async ({ page }) => {
+    const { group } = await seedGroup(page);
+    await page.goto('/');
+    await selectGroup(page, group);
+
+    // Collapse from the rail...
+    await page.locator('[data-cockpit-group-collapse]').click();
+    await page.waitForTimeout(600);
+    await expect(page.locator(`.ws-map-district[data-group-id="${group}"]`)).toHaveClass(
+      /is-collapsed/
+    );
+    await expect(page.locator('[data-cockpit-group-collapse]')).toHaveText('Expand group');
+    // ...and while collapsed, sizing is truthfully unavailable (FR-115).
+    await expect(page.locator('[data-cockpit-group-resize]')).toBeDisabled();
+    await expect(page.locator('[data-cockpit-group-fit]')).toBeDisabled();
+
+    // ...then expand from the district's own context menu.
+    await page.locator(`.ws-map-district[data-group-id="${group}"] [data-group-menu]`).click({
+      force: true
+    });
+    await page.locator('[data-menu-action="expand-group"]').click();
+    await page.waitForTimeout(600);
+    await expect(page.locator(`.ws-map-district[data-group-id="${group}"]`)).not.toHaveClass(
+      /is-collapsed/
+    );
+    await expect(page.locator('[data-cockpit-group-collapse]')).toHaveText('Collapse group');
+  });
+
+  test('appearance choices are named and reachable at a narrow width (FR-130, FR-168)', async ({
+    page
+  }) => {
+    const { group } = await seedGroup(page);
+    await page.setViewportSize({ width: 430, height: 900 });
+    await page.goto('/');
+    await selectGroup(page, group);
+
+    const accent = page.locator('[data-rail-appearance="accent"]');
+    await expect(accent).toContainText('Moss green');
+    await expect(page.locator('[data-rail-appearance="theme"]')).toContainText('Blueprint');
+
+    // Reachable without horizontal scrolling at a narrow rail width.
+    const overflow = await page.evaluate(() => ({
+      scroll: document.documentElement.scrollWidth,
+      client: document.documentElement.clientWidth
+    }));
+    expect(overflow.scroll).toBeLessThanOrEqual(overflow.client + 1);
+
+    await page.locator('[data-cockpit-group-accent][value="moss"]').check();
+    await page.waitForTimeout(600);
+    await expect(page.locator(`.ws-map-district[data-group-id="${group}"]`)).toHaveClass(
+      /ws-map-accent-moss/
+    );
+    // Use default appearance now has something to undo (FR-137).
+    await expect(page.locator('[data-cockpit-group-appearance-reset]')).toBeVisible();
+  });
+});
