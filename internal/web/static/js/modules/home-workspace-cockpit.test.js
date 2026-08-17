@@ -1017,6 +1017,33 @@ test('Tree hides the Map-only layout controls rather than showing them dead (#34
   assert.match(html, /Open Group/);
 });
 
+test('the rail offers Collapse, then Expand, with matching aria-expanded (#346 FR-102, FR-110)', () => {
+  const open = groupMapLayoutView(AUTO_DISTRICT, { view: VIEW_MAP });
+  assert.equal(open.collapsed, false);
+  assert.equal(open.collapseLabel, 'Collapse group');
+
+  const shut = groupMapLayoutView({ ...AUTO_DISTRICT, collapsed: true }, { view: VIEW_MAP });
+  assert.equal(shut.collapseLabel, 'Expand group');
+
+  const rows = groupFixture();
+  const html = collapsed =>
+    renderGroupRailHTML(
+      groupRailView(findWorkspace(rows, 'g1'), rows, {
+        view: VIEW_MAP,
+        district: { ...AUTO_DISTRICT, collapsed }
+      })
+    );
+  assert.match(html(false), /data-cockpit-group-collapse aria-expanded="true"/);
+  assert.match(html(false), />Collapse group</);
+  assert.match(html(true), /data-cockpit-group-collapse aria-expanded="false"/);
+  assert.match(html(true), />Expand group</);
+});
+
+test('a read-only map disables collapse along with the rest (#346 FR-148)', () => {
+  const readOnly = groupMapLayoutView({ ...AUTO_DISTRICT, readOnly: true }, { view: VIEW_MAP });
+  assert.equal(readOnly.canCollapse, false);
+});
+
 test('a group with no district drawn shows no Map layout section (#346 FR-151)', () => {
   assert.equal(groupMapLayoutView(null, { view: VIEW_MAP }), null);
   const rows = groupFixture();

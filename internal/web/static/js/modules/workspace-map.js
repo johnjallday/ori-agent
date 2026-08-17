@@ -963,21 +963,29 @@
         ? safePresentation(presentations[district.id])
         : presentationFor(district.id);
       var members = membersByGroup[district.id] || [];
+      // A collapsed district resolves its expanded frame anyway: its corner is
+      // where the summary sits, and expanding has to restore exactly the
+      // rectangle that was there before (#346 FR-114, FR-116).
       var frame = effectiveDistrictFrame({
         anchor: districtAnchors[district.id],
         members: members,
         presentation: record
       });
+      var box = record.collapsed
+        ? { x: frame.x, y: frame.y, width: DISTRICT_MIN_W, height: DISTRICT_MIN_H }
+        : frame;
       return {
         id: district.id,
         ws: district.ws,
         // The frame's corner IS the anchor (FR-17, FR-46).
-        anchorX: frame.x,
-        anchorY: frame.y,
-        x: frame.x,
-        y: frame.y,
-        width: frame.width,
-        height: frame.height,
+        anchorX: box.x,
+        anchorY: box.y,
+        x: box.x,
+        y: box.y,
+        width: box.width,
+        height: box.height,
+        // The frame the district returns to when it is expanded again.
+        expandedFrame: frame,
         sizingMode: record.sizingMode,
         customFrame: record.frame,
         collapsed: record.collapsed,
@@ -988,18 +996,39 @@
       };
     });
 
+    // 5. Hidden descendants. A collapsed district's members keep their
+    //    coordinates and their membership — they simply stop being drawn
+    //    (#346 FR-104). Dropping them from `nodes` here is what makes them
+    //    unfocusable, un-clickable, un-right-clickable, and absent from Fit
+    //    all's bounds all at once, rather than each of those being a separate
+    //    rule that could be forgotten (FR-105, FR-112).
+    var collapsedGroups = Object.create(null);
+    districts.forEach(function (district) {
+      if (district.collapsed) collapsedGroups[district.id] = true;
+    });
+    var hiddenNodes = nodes.filter(function (node) {
+      return node.groupId && collapsedGroups[node.groupId];
+    });
+    if (hiddenNodes.length) {
+      nodes = nodes.filter(function (node) {
+        return !(node.groupId && collapsedGroups[node.groupId]);
+      });
+    }
+
     // A hierarchy change made in Tree or another tab is authoritative: a
     // workspace reparented into this group can land its frame across an
     // unrelated building, and the Map's job then is to show what is actually
     // true and say the layout needs attention — not to quietly move something
     // to make the picture tidy (#346 FR-87 – FR-89). Marking it is a read-only
-    // observation; nothing here writes.
+    // observation; nothing here writes. It runs against the VISIBLE nodes: a
+    // building hidden inside a collapsed district is not something a frame can
+    // be seen to enclose (FR-78).
     districts.forEach(function (district) {
       var conflict = frameConflict(district, district.id, { nodes: nodes, districts: districts });
       district.conflict = conflict.blocked ? conflict : null;
     });
 
-    // 5. The reserved Personal HQ site and the New Workspace pad get stable
+    // 6. The reserved Personal HQ site and the New Workspace pad get stable
     //    automatic anchors from the same scan, but they are never persisted:
     //    neither is a workspace, so neither may occupy a workspace ID in the
     //    saved layout (FR-30).
@@ -1009,6 +1038,9 @@
     var bounds = worldBounds(nodes, districts, hqSite, pad);
     return {
       nodes: nodes,
+      // Kept for the movement path, which has to translate hidden descendants
+      // atomically with the collapsed district they belong to (FR-113).
+      hiddenNodes: hiddenNodes,
       districts: districts,
       hqSite: hqSite,
       pad: pad,
@@ -1899,12 +1931,17 @@
     // always because the hierarchy changed underneath it, never because of
     // anything the user did on the Map (#346 FR-88).
     var conflict = d.conflict || null;
+    // A collapsed district is the same group in a compact state, not a new kind
+    // of thing: the same header, the same three controls, the same identity —
+    // just without its buildings drawn (#346 FR-106, FR-117).
+    var collapsed = !!d.collapsed;
     // Home selects on click and opens on Enter, so the control cannot promise
     // "Open" as its only meaning. It names the group and its state instead, and
     // aria-pressed carries the selection (FR-141, FR-143).
     var selectLabel = name + ' group, ' + countLabel;
     return (
       '<div class="ws-map-district' +
+      (collapsed ? ' is-collapsed' : '') +
       (conflict ? ' is-conflicted' : '') +
       '" role="group" aria-label="' +
       escapeHtml(conflict ? label + ', needs layout attention' : label) +
@@ -1945,6 +1982,21 @@
       escapeHtml(countLabel) +
       '</span>' +
       '</button>' +
+      // Collapse is its own control with its own accurate label, distinct from
+      // selecting, opening, moving, and deleting the group (#346 FR-109,
+      // FR-145). aria-expanded lives here rather than on the outline because
+      // this is the control that changes it (FR-110).
+      '<button type="button" class="ws-map-district-collapse" data-group-collapse="' +
+      escapeHtml(ws.id) +
+      '" aria-expanded="' +
+      (collapsed ? 'false' : 'true') +
+      '" aria-label="' +
+      escapeHtml((collapsed ? 'Expand group: ' : 'Collapse group: ') + name) +
+      '" title="' +
+      escapeHtml(collapsed ? 'Expand group' : 'Collapse group') +
+      '"><span aria-hidden="true">' +
+      (collapsed ? '▸' : '▾') +
+      '</span></button>' +
       // A separate, touch-sized handle for cluster movement. Dragging the label
       // would make "select this group" and "move everything in it" the same
       // gesture, and every existing group action — select, overview, open,
@@ -2033,7 +2085,9 @@
             top: placed.top,
             width: district.width,
             height: district.height,
-            memberCount: district.memberCount
+            memberCount: district.memberCount,
+            collapsed: district.collapsed,
+            conflict: district.conflict
           },
           selectedId
         )
@@ -3201,6 +3255,11 @@
     var readOnly = isMapReadOnly();
     var collapsed = !!(district && district.collapsed);
     var items = [{ label: 'Open group', action: 'open' }, menuDivider()];
+    items.push({
+      label: collapsed ? 'Expand group' : 'Collapse group',
+      action: collapsed ? 'expand-group' : 'collapse-group',
+      disabled: readOnly || !district
+    });
     // Resize and Fit are meaningless on a collapsed district: there is no frame
     // on screen to size (FR-115).
     items.push({
@@ -3606,6 +3665,12 @@
       case 'fit-group':
         void fitGroupToContents(container, id);
         break;
+      case 'collapse-group':
+        void setGroupCollapsed(container, id, true);
+        break;
+      case 'expand-group':
+        void setGroupCollapsed(container, id, false);
+        break;
       case 'open-setup':
         announce(container, 'Opening Setup for ' + name);
         openWorkspace(id, { setup: true });
@@ -3838,6 +3903,22 @@
         event,
         true
       );
+    });
+
+    // The district header's collapse control (#346 FR-102).
+    var collapsers = container.querySelectorAll('[data-group-collapse]');
+    Array.prototype.forEach.call(collapsers, function (button) {
+      if (!button || typeof button.addEventListener !== 'function') return;
+      button.addEventListener('click', function (event) {
+        if (event.preventDefault) event.preventDefault();
+        if (event.stopPropagation) event.stopPropagation();
+        var groupId = button.getAttribute('data-group-collapse');
+        if (isMapReadOnly()) {
+          announce(container, 'The map layout cannot be saved right now.');
+          return;
+        }
+        void setGroupCollapsed(container, groupId, button.getAttribute('aria-expanded') === 'true');
+      });
     });
 
     // The district header's overflow control. It opens the very same menu the
@@ -4611,6 +4692,56 @@
     return true;
   }
 
+  /**
+   * Collapse or expand a district (#346 FR-102, FR-103).
+   *
+   * Collapsing prunes any of the group's members from the visible multi-select
+   * set first: a checked building that is about to stop being drawn would leave
+   * the action bar claiming a selection the user can no longer see or clear
+   * (FR-105). The group's own selection is deliberately kept.
+   */
+  function setGroupCollapsed(container, groupId, collapsed) {
+    if (collapsed && lastWorldLayout) {
+      lastWorldLayout.nodes.forEach(function (node) {
+        if (node.groupId === groupId) delete multiSelected[node.id];
+      });
+      // The action bar has to stop claiming those workspaces immediately, not
+      // after the round-trip: they are about to disappear from the map, and a
+      // count the user cannot reconcile with what they can see is worse than a
+      // slightly early one.
+      if (container) updateSelBar(container);
+    }
+    // A collapsed district has no frame on screen to size, so any resize in
+    // flight ends rather than being left pointing at something invisible.
+    if (collapsed && resizeState && resizeState.groupId === groupId) cancelResize();
+
+    return patchLayout([{ op: 'set_group_collapsed', group_id: groupId, collapsed: !!collapsed }])
+      .then(function () {
+        settleLayout();
+        notifyDistrictChanged(groupId);
+        announce(
+          container,
+          collapsed
+            ? 'Group collapsed. Its workspaces are hidden on the map, not removed.'
+            : 'Group expanded.'
+        );
+        return true;
+      })
+      .catch(function () {
+        settleLayout();
+        announceRetryableFailure(
+          container,
+          collapsed
+            ? 'That group could not be collapsed. It is still open.'
+            : 'That group could not be expanded. It is still collapsed.',
+          function () {
+            return setGroupCollapsed(container, groupId, collapsed);
+          }
+        );
+        return false;
+      });
+  }
+
   /** Return a district to automatic sizing (FR-40, FR-41). */
   function fitGroupToContents(container, groupId) {
     return patchLayout([{ op: 'fit_group_to_contents', group_id: groupId }])
@@ -5163,17 +5294,33 @@
 
   var clusterDrag = null;
 
-  /** The group's members as currently drawn, with their live anchors. */
+  /**
+   * The group's members, with their live anchors.
+   *
+   * Hidden descendants of a collapsed district are included (with no element to
+   * preview). They still have to travel with the district and still have to be
+   * checked for where they land, even though nothing is drawn for them —
+   * otherwise collapsing a group would be a way to move buildings onto other
+   * buildings without the Map noticing (#346 FR-113, and task 5.7's
+   * "hidden descendant footprints").
+   */
   function clusterMembers(container, groupId) {
     if (!lastWorldLayout) return [];
     var members = [];
-    lastWorldLayout.nodes.forEach(function (node) {
+    var visit = function (node, hidden) {
       if (node.groupId !== groupId) return;
       members.push({
         id: node.id,
-        el: container.querySelector('.ws-map-tile[data-ws-id="' + node.id + '"]'),
+        hidden: hidden,
+        el: hidden ? null : container.querySelector('.ws-map-tile[data-ws-id="' + node.id + '"]'),
         origin: committedAnchor(node.id) || { x: node.x, y: node.y }
       });
+    };
+    lastWorldLayout.nodes.forEach(function (node) {
+      visit(node, false);
+    });
+    (lastWorldLayout.hiddenNodes || []).forEach(function (node) {
+      visit(node, true);
     });
     return members;
   }
@@ -6185,6 +6332,9 @@
       },
       fitToContents: function (groupId) {
         return fitGroupToContents((lastMount && lastMount.container) || null, groupId);
+      },
+      setCollapsed: function (groupId, collapsed) {
+        return setGroupCollapsed((lastMount && lastMount.container) || null, groupId, collapsed);
       },
       retryLastFailure: retryLastDistrictAction,
       hasRetry: function () {

@@ -616,6 +616,9 @@ export function groupMapLayoutView(district, options = {}) {
   const custom = district.sizingMode === 'custom';
   const readOnly = !!district.readOnly;
   return {
+    collapsed: !!district.collapsed,
+    collapseLabel: district.collapsed ? 'Expand group' : 'Collapse group',
+    canCollapse: !readOnly,
     sizingMode: custom ? 'custom' : 'auto',
     // The mode is stated in words, not carried by a highlighted chip alone
     // (FR-152).
@@ -939,6 +942,10 @@ function mapLayoutSectionHTML(layout) {
     '<h4 class="cockpit-rail-section-title">Map layout</h4>' +
     `<p class="cockpit-rail-maplayout-mode" data-rail-sizing-mode="${escapeHtml(layout.sizingMode)}">${escapeHtml(layout.sizingLabel)}</p>` +
     '<div class="cockpit-rail-maplayout-actions">' +
+    '<button type="button" class="modern-btn cockpit-rail-maplayout-btn" data-cockpit-group-collapse' +
+    ` aria-expanded="${layout.collapsed ? 'false' : 'true'}"` +
+    disabled(layout.canCollapse) +
+    `>${escapeHtml(layout.collapseLabel)}</button>` +
     '<button type="button" class="modern-btn cockpit-rail-maplayout-btn" data-cockpit-group-resize' +
     disabled(layout.canResize) +
     '>Resize group</button>' +
@@ -1888,6 +1895,14 @@ import {
         Promise.resolve(actions.fitToContents(state.selectedId)).then(() =>
           renderRail({ announceChange: false })
         )
+      );
+    }
+    const collapse = els.railContext.querySelector('[data-cockpit-group-collapse]');
+    if (collapse) {
+      collapse.addEventListener('click', () =>
+        Promise.resolve(
+          actions.setCollapsed(state.selectedId, collapse.getAttribute('aria-expanded') === 'true')
+        ).then(() => renderRail({ announceChange: false }))
       );
     }
   }

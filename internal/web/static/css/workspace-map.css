@@ -585,7 +585,9 @@
   display: flex;
   align-items: flex-end;
   gap: 4px;
-  padding-bottom: 3px;
+  /* Clears the top row of resize handles, which sits just inside the frame's
+     top edge (see .ws-map-resize-n below). */
+  padding-bottom: 6px;
   /* The strip spans the frame, but only its controls may take pointer input —
      an invisible bar across the top of a district would swallow drags and
      right-clicks aimed at the map underneath it (FR-157). */
@@ -635,7 +637,8 @@
    three unmistakably different gestures, and each sized for a finger at any
    zoom (#292 FR-85, FR-118). */
 .ws-map-district-handle,
-.ws-map-district-more {
+.ws-map-district-more,
+.ws-map-district-collapse {
   flex: none;
   min-width: 44px;
   min-height: 44px;
@@ -652,17 +655,37 @@
   cursor: grab;
   touch-action: none;
 }
-.ws-map-district-more {
+.ws-map-district-more,
+.ws-map-district-collapse {
   cursor: pointer;
 }
+/* Collapse sits left of Move, so the header reads name → collapse → move →
+   more: identity first, then the three separate intentions (#346 FR-139). */
+.ws-map-district-collapse {
+  margin-left: auto;
+}
+.ws-map-district-collapse + .ws-map-district-handle {
+  margin-left: 0;
+}
 .ws-map-district-handle:hover,
-.ws-map-district-more:hover {
+.ws-map-district-more:hover,
+.ws-map-district-collapse:hover {
   background: rgba(232, 134, 77, 0.12);
 }
 .ws-map-district-handle:focus-visible,
-.ws-map-district-more:focus-visible {
+.ws-map-district-more:focus-visible,
+.ws-map-district-collapse:focus-visible {
   outline: 2px solid var(--ws-keeper);
   outline-offset: 2px;
+}
+
+/* A collapsed district: the same group, compact (#346 FR-106, FR-117). A solid
+   filled surface rather than the dashed outline of an expanded one, so "this
+   group is closed" is a shape difference and not only a size difference
+   (FR-163). */
+.ws-map-district.is-collapsed {
+  border-style: solid;
+  background: rgba(232, 134, 77, 0.1);
 }
 .ws-map-district.is-dragging {
   border-style: solid;
@@ -771,10 +794,17 @@
   top: 50%;
   transform: translateY(-50%);
 }
+/* The top row sits just INSIDE the frame rather than straddling its edge.
+   A district's header — name, collapse, move, more — hangs directly above that
+   edge, and a 44px target centred on it would cover those controls whenever the
+   district is selected, silently swallowing their clicks (#346 FR-157). The
+   marker is pinned to the top of the box so it still reads as sitting on the
+   edge. */
 .ws-map-resize-n,
 .ws-map-resize-ne,
 .ws-map-resize-nw {
-  top: -22px;
+  top: -4px;
+  align-items: flex-start;
 }
 .ws-map-resize-s,
 .ws-map-resize-se,

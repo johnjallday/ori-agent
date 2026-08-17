@@ -838,6 +838,151 @@ test('a district with no conflict reports none (#346 FR-88)', () => {
   assert.equal(districtsById(layout).g.conflict, null);
 });
 
+// ---------------------------------------------------------------------------
+// Collapse and expand (#346 FR-101 – FR-120)
+// ---------------------------------------------------------------------------
+
+function collapsedLayout(overrides = {}) {
+  const computeWorldLayout = loadWorldLayout();
+  return computeWorldLayout(
+    [
+      { id: 'g', kind: 'group', name: 'Ops' },
+      { id: 'm1', parent_id: 'g' },
+      { id: 'm2', parent_id: 'g' },
+      { id: 'solo', name: 'Outside' }
+    ],
+    {
+      positions: { m1: { x: 400, y: 400 }, m2: { x: 900, y: 800 }, solo: { x: 4000, y: 4000 } },
+      groupPresentations: { g: { collapsed: true, ...overrides } }
+    }
+  );
+}
+
+test('a group with no saved preference is expanded (#346 FR-101)', () => {
+  const computeWorldLayout = loadWorldLayout();
+  const layout = computeWorldLayout(
+    [
+      { id: 'g', kind: 'group', name: 'Ops' },
+      { id: 'm1', parent_id: 'g' }
+    ],
+    { positions: { m1: { x: 400, y: 400 } } }
+  );
+  assert.equal(districtsById(layout).g.collapsed, false);
+});
+
+test('a collapsed district renders as a compact summary (#346 FR-106, FR-112)', () => {
+  const geo = districtGeometry();
+  const collapsed = collapsedLayout();
+  const district = districtsById(collapsed).g;
+
+  assert.equal(district.collapsed, true);
+  assert.equal(district.width, geo.minWidth, 'compact, not the size of its contents');
+  assert.equal(district.height, geo.minHeight);
+  assert.equal(district.memberCount, 2, 'and it still counts them truthfully');
+
+  // FR-104/FR-105: descendants are not drawn at all while collapsed.
+  assert.equal(
+    collapsed.nodes.some(n => n.groupId === 'g'),
+    false,
+    'no hidden member is rendered'
+  );
+  assert.ok(
+    collapsed.nodes.some(n => n.id === 'solo'),
+    'unrelated workspaces are untouched'
+  );
+});
+
+test('a collapsed group anchors its summary where its members were (#346 FR-116)', () => {
+  const geo = districtGeometry();
+  const expanded = districtsById(collapsedLayout({ collapsed: false })).g;
+  const collapsed = districtsById(collapsedLayout()).g;
+  assert.equal(collapsed.x, expanded.x, 'the summary stays where the district was');
+  assert.equal(collapsed.y, expanded.y);
+  assert.ok(expanded.width > geo.minWidth, 'and the expanded frame really was larger');
+});
+
+test('Fit all excludes a collapsed district hidden descendants (#346 FR-112)', () => {
+  const computeWorldLayout = loadWorldLayout();
+  // No unrelated workspace here: it would dominate the content bounds and hide
+  // the very difference this asserts.
+  const build = collapsed =>
+    computeWorldLayout(
+      [
+        { id: 'g', kind: 'group', name: 'Ops' },
+        { id: 'm1', parent_id: 'g' },
+        { id: 'm2', parent_id: 'g' }
+      ],
+      {
+        positions: { m1: { x: 400, y: 400 }, m2: { x: 900, y: 800 } },
+        groupPresentations: { g: { collapsed } },
+        hqSite: false,
+        createPad: false
+      }
+    );
+
+  const expanded = build(false);
+  const collapsed = build(true);
+  assert.ok(
+    collapsed.bounds.maxX < expanded.bounds.maxX,
+    'collapsing tightens the content bounds instead of framing invisible tiles'
+  );
+  assert.ok(collapsed.bounds.maxY < expanded.bounds.maxY);
+});
+
+test('a collapsed district keeps its expanded custom frame for later (#346 FR-114, FR-116)', () => {
+  const frame = { x: 300, y: 300, width: 900, height: 700 };
+  const computeWorldLayout = loadWorldLayout();
+  const build = collapsed =>
+    computeWorldLayout(
+      [
+        { id: 'g', kind: 'group', name: 'Ops' },
+        { id: 'm1', parent_id: 'g' }
+      ],
+      {
+        positions: { m1: { x: 400, y: 400 } },
+        groupPresentations: { g: { sizing_mode: 'custom', frame, collapsed } }
+      }
+    );
+
+  const shut = districtsById(build(true)).g;
+  assert.equal(shut.sizingMode, 'custom', 'the mode survives being collapsed');
+  assert.deepEqual({ ...shut.customFrame }, frame, 'and so does the rectangle');
+
+  const open = districtsById(build(false)).g;
+  assert.deepEqual(
+    { x: open.x, y: open.y, width: open.width, height: open.height },
+    frame,
+    'expanding restores exactly the frame that was there before'
+  );
+});
+
+test('a collapsed district exposes aria-expanded="false" and a truthful count (#346 FR-110)', () => {
+  const { districtHTML } = loadOriWorkspaceMap();
+  const shut = districtHTML(
+    {
+      ws: { id: 'g', name: 'Ops' },
+      left: 0,
+      top: 0,
+      width: 176,
+      height: 170,
+      memberCount: 4,
+      collapsed: true
+    },
+    ''
+  );
+  assert.match(shut, /aria-expanded="false"/);
+  assert.match(shut, /ws-map-district is-collapsed/);
+  assert.match(shut, /4 workspaces/);
+  assert.match(shut, /aria-label="Expand group: Ops"/);
+
+  const open = districtHTML(
+    { ws: { id: 'g', name: 'Ops' }, left: 0, top: 0, width: 400, height: 300, memberCount: 4 },
+    ''
+  );
+  assert.match(open, /aria-expanded="true"/);
+  assert.match(open, /aria-label="Collapse group: Ops"/);
+});
+
 test('a stale group anchor no longer drags Fit all out (#346 FR-48, success metric 1)', () => {
   const computeWorldLayout = loadWorldLayout();
   const wss = [
@@ -1103,7 +1248,7 @@ test('a hostile group name is escaped everywhere it appears (#346 FR-136)', () =
   // one — it appears escaped in every attribute the name lands in.
   assert.equal(
     (html.match(/&lt;img src=x onerror=alert\(1\)&gt;&quot;/g) || []).length,
-    8,
+    9,
     'every place the name appears — aria-labels, titles, and the visible span — carries it escaped'
   );
 });
@@ -3841,6 +3986,129 @@ test('Fit to contents returns the district to automatic sizing (#346 FR-40)', as
 });
 
 // ---------------------------------------------------------------------------
+// Collapse, wired (#346 FR-102 – FR-119)
+// ---------------------------------------------------------------------------
+
+async function mountedCollapsible({ collapsed = false, patchResponse } = {}) {
+  const patches = [];
+  const map = loadMapWithFetch((url, init) => {
+    if (init && init.method === 'PATCH') {
+      patches.push(JSON.parse(init.body));
+      if (patchResponse === 'fail') return Promise.resolve({ ok: false, status: 500 });
+      return Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            result: { schema_version: 1, revision: 7, positions: {}, snap_to_grid: true }
+          })
+      });
+    }
+    return jsonResponse({
+      schema_version: 1,
+      revision: 1,
+      snap_to_grid: true,
+      positions: { m1: { x: 152, y: 152 }, m2: { x: 380, y: 152 }, outsider: { x: 1520, y: 152 } },
+      groups: { grp: { collapsed } }
+    });
+  });
+  const harness = createCameraHarness({ tiles: ['m1', 'm2', 'outsider'], districts: ['grp'] });
+  map.mount(harness.container, {
+    workspaces: [
+      { id: 'grp', kind: 'group', name: 'Ops' },
+      { id: 'm1', parent_id: 'grp', name: 'M1' },
+      { id: 'm2', parent_id: 'grp', name: 'M2' },
+      { id: 'outsider', name: 'Outside' }
+    ],
+    hideChrome: true,
+    selectOnly: true,
+    noAutoSelect: true
+  });
+  await flush();
+  harness.fire('keydown', { key: '0', preventDefault() {} }); // Reset view: 100%
+  return { map, harness, patches };
+}
+
+test('the district context menu offers Collapse, then Expand (#346 FR-146)', async () => {
+  const open = await mountedCollapsible();
+  const target = { type: 'district', id: 'grp', ws: { id: 'grp', kind: 'group', name: 'Ops' } };
+  const labels = items => items.filter(i => !i.divider).map(i => i.label);
+  assert.ok(labels(open.map.contextMenuItemsFor(target)).includes('Collapse group'));
+
+  const shut = await mountedCollapsible({ collapsed: true });
+  const shutItems = shut.map.contextMenuItemsFor(target);
+  assert.ok(labels(shutItems).includes('Expand group'));
+  // Resize and Fit are meaningless with no frame on screen (FR-115).
+  const byAction = Object.fromEntries(shutItems.map(i => [i.action, i]));
+  assert.equal(byAction['resize-group'].disabled, true);
+  assert.equal(byAction['fit-group'].disabled, true);
+});
+
+test('collapsing sends one bounded operation and nothing else (#346 FR-103)', async () => {
+  const { map, patches } = await mountedCollapsible();
+  await map.districtActions.setCollapsed('grp', true);
+  await flush();
+
+  assert.equal(patches.length, 1);
+  assert.deepEqual(
+    { ...patches[0].operations[0] },
+    {
+      op: 'set_group_collapsed',
+      group_id: 'grp',
+      collapsed: true
+    }
+  );
+  // Collapsing is presentation: no coordinate and no membership travels with it.
+  const body = JSON.stringify(patches[0]);
+  assert.equal(body.includes('parent'), false);
+  assert.equal(body.includes('set_positions'), false);
+});
+
+test('collapsing clears checked members but keeps the group selected (#346 FR-105)', async () => {
+  const { map, harness } = await mountedCollapsible();
+  harness.tile('m1').fire('click', { metaKey: true, preventDefault() {} });
+  harness.tile('outsider').fire('click', { metaKey: true, preventDefault() {} });
+  map.setSelectedId(harness.container, [{ id: 'grp', kind: 'group', name: 'Ops' }], 'grp');
+
+  await map.districtActions.setCollapsed('grp', true);
+  await flush();
+
+  // The hidden member is gone from the checked set; the unrelated one is not.
+  const count = harness.control('[data-ws-selbar]').querySelector('[data-ws-selbar-count]');
+  assert.match(String(count.textContent), /1 selected/);
+  assert.equal(map.getSelectedId(), 'grp', 'the group itself stays selected');
+});
+
+test('a failed collapse leaves the district open and offers a retry (#346 FR-119)', async () => {
+  const { map, patches } = await mountedCollapsible({ patchResponse: 'fail' });
+  const ok = await map.districtActions.setCollapsed('grp', true);
+  await flush();
+
+  assert.equal(ok, false);
+  assert.equal(patches.length, 1);
+  assert.equal(map.getDistrictView('grp').collapsed, false, 'the committed state is what renders');
+  assert.equal(map.districtActions.hasRetry(), true);
+});
+
+test('hidden descendants travel with a collapsed district (#346 FR-113)', async () => {
+  const { map, harness, patches } = await mountedCollapsible({ collapsed: true });
+  assert.equal(map.getDistrictView('grp').collapsed, true);
+
+  const handle = harness.handle('grp');
+  handle.fire('pointerdown', tilePointer(200, 200));
+  handle.fire('pointermove', tilePointer(276, 238));
+  handle.fire('pointerup', tilePointer(276, 238));
+  await flush();
+
+  assert.equal(patches.length, 1);
+  const op = patches[0].operations[0];
+  assert.equal(op.op, 'translate_group', 'the server resolves and moves every descendant');
+  assert.equal(op.group_id, 'grp');
+  // Snapping still comes from the members — hidden or not, they are what has to
+  // land on the grid.
+  assert.deepEqual({ ...op.delta }, { x: 76, y: 38 });
+});
+
+// ---------------------------------------------------------------------------
 // Movement against a custom frame (#346 FR-38, FR-83, FR-84)
 // ---------------------------------------------------------------------------
 
@@ -5173,7 +5441,7 @@ test('a group district offers Open, the layout actions, and a danger Delete grou
     ws: { id: 'grp-1', kind: 'group', name: 'Ops' }
   });
   const actions = Array.from(items.filter(item => !item.divider).map(item => item.action));
-  assert.deepEqual(actions, ['open', 'resize-group', 'fit-group', 'delete']);
+  assert.deepEqual(actions, ['open', 'collapse-group', 'resize-group', 'fit-group', 'delete']);
   assert.equal(items[0].label, 'Open group');
   assert.equal(items[items.length - 1].label, 'Delete group');
   assert.equal(items[items.length - 1].variant, 'danger');
