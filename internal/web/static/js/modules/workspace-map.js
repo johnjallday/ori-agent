@@ -1367,6 +1367,120 @@
     };
   }
 
+  /**
+   * Which district would a dropped workspace land inside? (#346 FR-6a)
+   *
+   * Evaluated against the frames as they stand BEFORE the drop, which is what
+   * makes the question well-posed: a member dragged past its own group's edge
+   * is outside that frame at the moment of release, even though the frame would
+   * grow to follow it afterwards.
+   *
+   * A collapsed district is not a drop target. Its members are not on screen, so
+   * "inside it" is not something a user can see or aim at — dropping onto a
+   * compact summary would be a guess, not a gesture.
+   *
+   * Smallest match wins. Districts do not nest visually in V1, but a stale
+   * hierarchy refresh can leave two frames overlapping, and the tighter one is
+   * the one the pointer is most plausibly aiming at.
+   *
+   * @returns {object|null} the district, or null when the point is on open ground
+   */
+  /** The middle of a workspace whose stored top-left anchor is `point`. */
+  function memberCenter(point) {
+    if (!point) return null;
+    return { x: point.x + MEMBER_W / 2, y: point.y + MEMBER_H / 2 };
+  }
+
+  function districtAtPoint(point, layout) {
+    var world = layout || lastWorldLayout;
+    if (!world || !point) return null;
+    var best = null;
+    world.districts.forEach(function (district) {
+      if (district.collapsed) return;
+      var inside =
+        point.x >= district.x &&
+        point.x <= district.x + district.width &&
+        point.y >= district.y &&
+        point.y <= district.y + district.height;
+      if (!inside) return;
+      var area = district.width * district.height;
+      if (!best || area < best.area) best = { district: district, area: area };
+    });
+    return best ? best.district : null;
+  }
+
+  /**
+   * What a drop at `point` means for the dragged workspace's membership.
+   *
+   * `join` is the only membership change a Map drop can produce. Dropping onto
+   * open ground is deliberately NOT "leave your group": an automatic frame
+   * follows its members and a custom frame expands to hold them, so a member
+   * sits inside its own frame by construction — and the only way out is to drag
+   * a few pixels past an edge. Silently un-grouping a workspace on a nudge that
+   * small is not a gesture anyone opts into. Removal stays in Tree (FR-7).
+   *
+   * @returns {{kind: 'none'|'join', groupId?: string, name?: string, reason?: string}}
+   */
+  function dropMembershipIntent(id, point, workspaces, layout) {
+    var world = layout || lastWorldLayout;
+    // Aim from the middle of the workspace, not from its top-left anchor. The
+    // anchor is where the tile is *stored*; its centre is where it *looks like
+    // it is*. Testing the anchor makes the gesture lopsided — a tile covering a
+    // frame's top-left corner would not join, while one hanging off the
+    // bottom-right by all but a pixel would.
+    var target = districtAtPoint(memberCenter(point), world);
+    if (!target) return { kind: 'none' };
+    if (target.id === id) return { kind: 'none' };
+
+    // Already in it: this is a reposition, not a join.
+    var node = null;
+    (world.nodes || []).forEach(function (candidate) {
+      if (candidate.id === id) node = candidate;
+    });
+    if (node && node.groupId === target.id) return { kind: 'none' };
+
+    // A group may not be dropped into itself or into its own descendant. Tree
+    // owns that rule; the Map asks Tree's own validator rather than inventing a
+    // second one that could disagree with it.
+    var rejection = dropRejectionReason(workspaces, id, target.id);
+    if (rejection) return { kind: 'none', reason: rejection };
+
+    return {
+      kind: 'join',
+      groupId: target.id,
+      name: (target.ws && target.ws.name) || 'that group'
+    };
+  }
+
+  /**
+   * Why this reparent is not allowed, or '' when it is.
+   *
+   * Mirrors home-workspace-tree.js's moveRejectionReason. It is duplicated
+   * rather than imported because workspace-map.js is a plain deferred script,
+   * not a module — the two are kept in step by
+   * `map and tree refuse the same reparents` in workspace-map.test.js.
+   */
+  function dropRejectionReason(workspaces, movingId, targetParentId) {
+    var rows = Array.isArray(workspaces) ? workspaces : [];
+    var byId = Object.create(null);
+    rows.forEach(function (row) {
+      if (row && row.id) byId[row.id] = row;
+    });
+    if (targetParentId === movingId) return 'A group cannot be moved into itself.';
+    // Walk up from the target: if the moving item is an ancestor, this would
+    // make a cycle. `seen` guards malformed data rather than trusting it.
+    var seen = Object.create(null);
+    var cursor = byId[targetParentId];
+    while (cursor && cursor.parent_id && !seen[cursor.parent_id]) {
+      if (cursor.parent_id === movingId) {
+        return 'A group cannot be moved into something inside it.';
+      }
+      seen[cursor.parent_id] = true;
+      cursor = byId[cursor.parent_id];
+    }
+    return '';
+  }
+
   // worldBounds is the tight box around everything currently drawn. It grows
   // automatically as content is placed further out, and it never adjusts a
   // coordinate to fit (FR-10).
@@ -5238,7 +5352,7 @@
     return { operations: operations, conflict: null };
   }
 
-  function commitMove(container, id, el, point, previous) {
+  function commitMove(container, id, el, point, previous, intent) {
     var plan = memberMoveOperations(id, point);
     if (!plan.operations) {
       // Blocked before save: nothing moved, nothing was asked of the server.
@@ -5257,6 +5371,14 @@
         var committed = (result && result.positions && result.positions[id]) || point;
         placeElement(el, committed);
         pendingFocusId = id;
+        // The coordinate is saved first and the membership second, because they
+        // are two different APIs and cannot share a transaction. This order is
+        // the survivable one: a failed reparent leaves a workspace that moved
+        // but did not change groups, which is a state the user can see and
+        // repeat. The reverse would leave it in a new group at its old spot.
+        if (intent && intent.kind === 'join') {
+          return joinGroupOnDrop(container, id, intent, committed);
+        }
         announce(container, 'Moved to ' + formatCoordinate(committed));
         settleLayout();
         return true;
@@ -5276,7 +5398,85 @@
       });
   }
 
-  function bindTileDrag(container) {
+  /**
+   * Reparent a workspace that was dropped inside a district (#346 FR-6a).
+   *
+   * This is the ONE place the Map writes hierarchy, and it does not do so
+   * through the layout API — that API has no vocabulary for a parent and keeps
+   * none. It calls the same workspace endpoint Tree's drag-and-drop calls, so
+   * both views produce byte-identical mutations and neither can develop its own
+   * idea of what "move into a group" means.
+   *
+   * The move has already been saved by the time this runs, so a failure here is
+   * partial rather than total: the workspace is where the user put it, and only
+   * the membership did not change. That is reported as what it is.
+   */
+  function joinGroupOnDrop(container, id, intent, committed) {
+    if (typeof fetch !== 'function') return Promise.resolve(false);
+    return fetch('/api/workspaces/' + encodeURIComponent(id), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ parent_id: intent.groupId })
+    })
+      .then(function (response) {
+        if (!response || !response.ok) throw new Error('reparent failed');
+        announce(
+          container,
+          'Moved to ' + formatCoordinate(committed) + ' and added to ' + intent.name + '.'
+        );
+        // Membership is the host's data, not the Map's: it reloads the tree and
+        // re-mounts, which is what redraws the district around its new member.
+        notifyHierarchyChanged();
+        return true;
+      })
+      .catch(function () {
+        announce(
+          container,
+          'Moved to ' +
+            formatCoordinate(committed) +
+            ', but it could not be added to ' +
+            intent.name +
+            '. It is still in its previous group.'
+        );
+        settleLayout();
+        return false;
+      });
+  }
+
+  /**
+   * Highlight the district a release would drop into (#346 FR-6a).
+   *
+   * Exactly one at a time, and cleared when the answer is "no group" — a
+   * highlight left behind after the pointer moves out would promise a
+   * membership change that is no longer going to happen.
+   */
+  function markDropTarget(container, groupId) {
+    if (!container || typeof container.querySelectorAll !== 'function') return;
+    var districts = container.querySelectorAll('.ws-map-district[data-group-id]');
+    Array.prototype.forEach.call(districts, function (el) {
+      if (!el.classList) return;
+      el.classList.toggle(
+        'is-drop-target',
+        !!groupId && el.getAttribute('data-group-id') === groupId
+      );
+    });
+  }
+
+  /** Tell the host that workspace hierarchy changed underneath it. */
+  function notifyHierarchyChanged() {
+    var state = lastMount && lastMount.state;
+    if (state && typeof state.onHierarchyChanged === 'function') {
+      state.onHierarchyChanged();
+      return;
+    }
+    // Every surface already listens for this; it is how Tree's own mutations
+    // reach the rest of the page.
+    if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+      window.dispatchEvent(new Event('ori:workspaces-changed'));
+    }
+  }
+
+  function bindTileDrag(container, workspaces) {
     var tiles = container.querySelectorAll('.ws-map-tile[data-ws-id]');
     Array.prototype.forEach.call(tiles, function (el) {
       if (!el || typeof el.addEventListener !== 'function') return;
@@ -5327,10 +5527,22 @@
         placeElement(el, dragState.candidate);
         var blocked = wouldOverlapOccupied(dragState.candidate, dragState.id);
         if (el.classList) el.classList.toggle('is-blocked', blocked);
+        // Show what releasing here would MEAN, not just where it would land. A
+        // drop that changes which group a workspace belongs to must never be a
+        // surprise discovered afterwards (#346 FR-6a).
+        var intent = blocked
+          ? { kind: 'none' }
+          : dropMembershipIntent(dragState.id, dragState.candidate, workspaces, lastWorldLayout);
+        markDropTarget(container, intent.kind === 'join' ? intent.groupId : '');
+        dragState.intent = intent;
         setDragReadout(
           container,
           dragState.candidate,
-          blocked ? MOVE_BLOCKED_INSTRUCTION : undefined
+          blocked
+            ? MOVE_BLOCKED_INSTRUCTION
+            : intent.kind === 'join'
+              ? 'Release to move this workspace into ' + intent.name + '.'
+              : undefined
         );
       });
 
@@ -5350,6 +5562,10 @@
           el.classList.remove('is-dragging');
           el.classList.remove('is-blocked');
         }
+        // Every exit path clears it — up, cancel, Escape — so a district can
+        // never be left advertising a drop that already happened or was
+        // abandoned.
+        markDropTarget(container, '');
         setDragReadout(container, null);
         if (!state.moved) return;
         // A gesture that became a drag must not also read as a click (FR-66).
@@ -5364,7 +5580,10 @@
           placeElement(el, target);
           announce(container, 'That spot was taken; moved to the nearest free one.');
         }
-        commitMove(container, state.id, el, target, state.origin);
+        // Resolve membership against the frames as they stand NOW, before the
+        // move is committed and they follow the workspace (#346 FR-6a).
+        var intent = dropMembershipIntent(state.id, target, workspaces, lastWorldLayout);
+        commitMove(container, state.id, el, target, state.origin, intent);
       }
 
       el.addEventListener('pointerup', function (event) {
@@ -6423,7 +6642,7 @@
     bindViewportWheel(container);
     bindCameraControls(container);
     bindSnapControl(container);
-    bindTileDrag(container);
+    bindTileDrag(container, workspaces);
     bindDistrictDrag(container);
     bindResizeHandles(container);
     bindResetLayout(container);
@@ -6588,6 +6807,13 @@
     // Pure district frame math (FR-123).
     effectiveDistrictFrame: effectiveDistrictFrame,
     reconcileCustomFrame: reconcileCustomFrame,
+    // Drop-to-group resolution (#346 FR-6a): which district a release lands in,
+    // and what that means for membership.
+    districtAtPoint: districtAtPoint,
+    dropMembershipIntent: dropMembershipIntent,
+    // Exposed only so the cycle rule can be checked against Tree's own, which
+    // this module cannot import (it is a plain deferred script, not a module).
+    _dropRejectionReasonForTest: dropRejectionReason,
     // The one resize geometry and the one collision rule, shared by the pointer,
     // keyboard, context-menu, and rail paths (#346 FR-156).
     districtResize: {

@@ -1088,6 +1088,139 @@ test('a failed appearance change keeps the committed look and offers a retry (#3
   assert.equal(patches.length, 1);
 });
 
+// ---------------------------------------------------------------------------
+// Drop-to-group (#346 FR-6a)
+//
+// Dropping a workspace inside a district's frame moves it into that group. This
+// reverses the original FR-6 — see the PRD's amendment note — so these tests
+// pin down exactly which drops mean membership and which are only coordinates.
+// ---------------------------------------------------------------------------
+
+const DROP_WORKSPACES = [
+  { id: 'g1', kind: 'group', name: 'Alpha' },
+  { id: 'g2', kind: 'group', name: 'Beta' },
+  { id: 'm1', parent_id: 'g1' },
+  { id: 'solo' }
+];
+
+function dropLayout(overrides = {}) {
+  const computeWorldLayout = loadWorldLayout();
+  return computeWorldLayout(DROP_WORKSPACES, {
+    positions: { m1: { x: 400, y: 400 }, solo: { x: 2000, y: 2000 } },
+    groupPresentations: {
+      g2: { sizing_mode: 'custom', frame: { x: 1000, y: 300, width: 600, height: 500 } },
+      ...overrides
+    }
+  });
+}
+
+test('a drop inside another group joins it (#346 FR-6a)', () => {
+  const map = loadOriWorkspaceMap();
+  const layout = dropLayout();
+  const intent = map.dropMembershipIntent('solo', { x: 1100, y: 400 }, DROP_WORKSPACES, layout);
+  assert.equal(intent.kind, 'join');
+  assert.equal(intent.groupId, 'g2');
+  assert.equal(intent.name, 'Beta');
+});
+
+test('the drop is aimed from the middle of the workspace, not its corner (#346 FR-6a)', () => {
+  const map = loadOriWorkspaceMap();
+  const layout = dropLayout();
+  // g2's frame is x 1000–1600. Anchors are top-left corners and a workspace is
+  // 168 × 160, so these two cases disagree under the two possible rules and
+  // pin down which one is in force.
+
+  // Overlapping the frame's left edge: the corner is outside, the workspace is
+  // visibly inside. This must join.
+  assert.equal(
+    map.dropMembershipIntent('solo', { x: 940, y: 400 }, DROP_WORKSPACES, layout).kind,
+    'join'
+  );
+
+  // Hanging off the right edge: the corner is inside, but the workspace is
+  // mostly out in the open. This must not.
+  assert.equal(
+    map.dropMembershipIntent('solo', { x: 1550, y: 400 }, DROP_WORKSPACES, layout).kind,
+    'none'
+  );
+});
+
+test('a drop on open ground never removes a workspace from its group (#346 FR-7)', () => {
+  const map = loadOriWorkspaceMap();
+  const layout = dropLayout();
+  // A member dragged clear of every frame. Leaving is Tree's job: a frame
+  // follows its members, so the only way out is a few pixels past an edge, and
+  // un-grouping on a nudge that small is not a gesture anyone opts into.
+  const intent = map.dropMembershipIntent('m1', { x: 5000, y: 5000 }, DROP_WORKSPACES, layout);
+  assert.equal(intent.kind, 'none');
+});
+
+test('a drop inside a workspace own group is a reposition, not a join (#346 FR-6a)', () => {
+  const map = loadOriWorkspaceMap();
+  const layout = dropLayout();
+  const own = districtsById(layout).g1;
+  const intent = map.dropMembershipIntent(
+    'm1',
+    { x: own.x + 10, y: own.y + 10 },
+    DROP_WORKSPACES,
+    layout
+  );
+  assert.equal(intent.kind, 'none');
+});
+
+test('a collapsed district is not a drop target (#346 FR-6a, FR-105)', () => {
+  const map = loadOriWorkspaceMap();
+  const layout = dropLayout({ g2: { collapsed: true } });
+  // Its members are not on screen, so "inside it" is not something a user can
+  // see or aim at.
+  const intent = map.dropMembershipIntent('solo', { x: 1100, y: 400 }, DROP_WORKSPACES, layout);
+  assert.equal(intent.kind, 'none');
+});
+
+test('a group cannot be dropped into itself or its own descendant (#346 FR-6a)', () => {
+  const map = loadOriWorkspaceMap();
+  const nested = [
+    { id: 'outer', kind: 'group', name: 'Outer' },
+    { id: 'inner', kind: 'group', name: 'Inner', parent_id: 'outer' },
+    { id: 'leaf', parent_id: 'inner' }
+  ];
+  const layout = loadWorldLayout()(nested, {
+    positions: { leaf: { x: 400, y: 400 } },
+    groupPresentations: {
+      outer: { sizing_mode: 'custom', frame: { x: 300, y: 300, width: 900, height: 700 } }
+    }
+  });
+  // Dropping Outer inside its own frame is a no-op, not a cycle.
+  assert.equal(map.dropMembershipIntent('outer', { x: 400, y: 400 }, nested, layout).kind, 'none');
+  // And the rule that catches a real cycle is Tree's, asked directly.
+  assert.match(
+    map.dropMembershipIntent('outer', { x: 400, y: 400 }, nested, layout).reason || '',
+    /^$/
+  );
+});
+
+test('map and tree refuse the same reparents (#346 FR-6a)', async () => {
+  const map = loadOriWorkspaceMap();
+  const tree = await import('./home-workspace-tree.js');
+  const rows = [
+    { id: 'outer', kind: 'group', name: 'Outer' },
+    { id: 'inner', kind: 'group', name: 'Inner', parent_id: 'outer' }
+  ];
+  // The Map duplicates Tree's cycle rule because it is a plain script and
+  // cannot import it. This is the test that keeps the two in step.
+  [
+    ['outer', 'outer'],
+    ['outer', 'inner']
+  ].forEach(([moving, target]) => {
+    const mapRefuses = !!map._dropRejectionReasonForTest(rows, moving, target);
+    const treeRefuses = !tree.isMoveAllowed(rows, moving, target);
+    assert.equal(mapRefuses, treeRefuses, `${moving} → ${target} must agree`);
+    assert.equal(mapRefuses, true, `${moving} → ${target} is a cycle and must be refused`);
+  });
+  // And they agree on a legal one.
+  assert.equal(map._dropRejectionReasonForTest(rows, 'inner', ''), '');
+});
+
 test('a stale group anchor no longer drags Fit all out (#346 FR-48, success metric 1)', () => {
   const computeWorldLayout = loadWorldLayout();
   const wss = [
@@ -2022,6 +2155,13 @@ const flush = async () => {
   for (let i = 0; i < 5; i += 1) await Promise.resolve();
 };
 
+// A drop that changes membership chains TWO network round-trips — the layout
+// PATCH, then the workspace PATCH — so it needs more microtask turns than the
+// single-request paths `flush` was written for.
+const flushDeep = async () => {
+  for (let i = 0; i < 40; i += 1) await Promise.resolve();
+};
+
 function leftTopOf(html, wsId) {
   const tile = html.split('data-ws-id="' + wsId + '"')[1] || '';
   const match = tile.match(/style="left:(-?\d+(?:\.\d+)?)px;top:(-?\d+(?:\.\d+)?)px/);
@@ -2496,7 +2636,10 @@ function createCameraHarness({ width = 1000, height = 600, tiles = [], districts
     isConnected: true,
     querySelectorAll: sel => {
       if (sel.includes('data-resize-handle')) return resizeHandleEls;
+      if (sel.includes('data-group-collapse') || sel.includes('data-group-menu')) return [];
       if (sel.includes('data-group-drag')) return handleEls;
+      // The district outlines themselves, which drop-target highlighting walks.
+      if (sel.includes('ws-map-district[data-group-id]')) return districtEls;
       if (sel.includes('ws-map-district-tag')) {
         // The multi-select and selection sweeps ask for tiles and district tags
         // together; applySelection asks for the tags alone.
@@ -4248,6 +4391,164 @@ test('hidden descendants travel with a collapsed district (#346 FR-113)', async 
   // Snapping still comes from the members — hidden or not, they are what has to
   // land on the grid.
   assert.deepEqual({ ...op.delta }, { x: 76, y: 38 });
+});
+
+// ---------------------------------------------------------------------------
+// Drop-to-group, wired (#346 FR-6a)
+// ---------------------------------------------------------------------------
+
+async function mountedForDrop({ reparentFails = false } = {}) {
+  const calls = [];
+  const map = loadMapWithFetch((url, init) => {
+    const method = (init && init.method) || 'GET';
+    calls.push({
+      url: String(url),
+      method,
+      body: init && init.body ? JSON.parse(init.body) : null
+    });
+    if (String(url).includes('/api/workspaces/')) {
+      if (reparentFails) return Promise.resolve({ ok: false, status: 500 });
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ success: true }) });
+    }
+    if (method === 'PATCH') {
+      return Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            result: { schema_version: 1, revision: 4, positions: {}, snap_to_grid: false }
+          })
+      });
+    }
+    return jsonResponse({
+      schema_version: 1,
+      revision: 1,
+      snap_to_grid: false,
+      positions: { m1: { x: 300, y: 300 }, solo: { x: 2000, y: 2000 } },
+      groups: {
+        g2: { sizing_mode: 'custom', frame: { x: 1000, y: 300, width: 600, height: 500 } }
+      }
+    });
+  });
+  const harness = createCameraHarness({ tiles: ['m1', 'solo'], districts: ['g1', 'g2'] });
+  map.mount(harness.container, {
+    workspaces: [
+      { id: 'g1', kind: 'group', name: 'Alpha' },
+      { id: 'g2', kind: 'group', name: 'Beta' },
+      { id: 'm1', parent_id: 'g1', name: 'M1' },
+      { id: 'solo', name: 'Solo' }
+    ],
+    hideChrome: true,
+    selectOnly: true,
+    noAutoSelect: true
+  });
+  await flush();
+  harness.fire('keydown', { key: '0', preventDefault() {} });
+  return { map, harness, calls };
+}
+
+test('dropping a workspace inside a district moves it into that group (#346 FR-6a)', async () => {
+  const { harness, calls } = await mountedForDrop();
+  const tile = harness.tile('solo');
+
+  // From (2000,2000) into Beta's frame at (1000,300)-(1600,800).
+  tile.fire('pointerdown', tilePointer(0, 0));
+  tile.fire('pointermove', tilePointer(-800, -1600));
+  tile.fire('pointerup', tilePointer(-800, -1600));
+  await flushDeep();
+
+  const reparent = calls.find(c => c.url.includes('/api/workspaces/solo'));
+  assert.ok(reparent, 'the workspace endpoint was called');
+  assert.equal(reparent.method, 'PATCH');
+  assert.deepEqual({ ...reparent.body }, { parent_id: 'g2' });
+
+  // The coordinate went through the layout API, the membership did not — the
+  // layout API has no vocabulary for a parent and gains none.
+  const layoutCall = calls.find(c => c.url.includes('workspace-map') && c.method === 'PATCH');
+  assert.ok(layoutCall);
+  assert.equal(JSON.stringify(layoutCall.body).includes('parent'), false);
+});
+
+test('the coordinate is saved before the membership, so a failure is partial (#346 FR-6a)', async () => {
+  const { harness, calls } = await mountedForDrop({ reparentFails: true });
+  const tile = harness.tile('solo');
+  tile.fire('pointerdown', tilePointer(0, 0));
+  tile.fire('pointermove', tilePointer(-800, -1600));
+  tile.fire('pointerup', tilePointer(-800, -1600));
+  await flushDeep();
+
+  const order = calls.filter(c => c.method === 'PATCH').map(c => c.url);
+  assert.ok(
+    order[0].includes('workspace-map'),
+    'the coordinate lands first, so a failed reparent leaves a moved workspace and not a lost one'
+  );
+  assert.ok(order[1].includes('/api/workspaces/solo'));
+
+  const live = harness.control('[data-map-live]');
+  assert.match(
+    String(live.textContent),
+    /could not be added to Beta.*still in its previous group/,
+    'and the partial outcome is reported as what it is'
+  );
+});
+
+test('a drop that changes nothing sends no hierarchy request (#346 FR-6a)', async () => {
+  const { harness, calls } = await mountedForDrop();
+  const tile = harness.tile('solo');
+
+  // A short nudge on open ground: still outside every frame.
+  tile.fire('pointerdown', tilePointer(0, 0));
+  tile.fire('pointermove', tilePointer(40, 40));
+  tile.fire('pointerup', tilePointer(40, 40));
+  await flush();
+
+  assert.equal(
+    calls.filter(c => c.url.includes('/api/workspaces/')).length,
+    0,
+    'moving on open ground is a coordinate and nothing else'
+  );
+});
+
+test('the target district is highlighted while a drop would join it (#346 FR-6a)', async () => {
+  const { harness } = await mountedForDrop();
+  const tile = harness.tile('solo');
+  const beta = harness.district('g2');
+
+  tile.fire('pointerdown', tilePointer(0, 0));
+  tile.fire('pointermove', tilePointer(-800, -1600));
+  assert.equal(beta.classList.contains('is-drop-target'), true, 'it says so before the release');
+
+  const readout = harness.control('[data-map-build-text]');
+  assert.match(
+    String(readout.textContent),
+    /Release to move this workspace into Beta/,
+    'in words, not only as a colour'
+  );
+
+  // Moving back out clears it — a highlight left behind would promise a change
+  // that is no longer going to happen.
+  tile.fire('pointermove', tilePointer(40, 40));
+  assert.equal(beta.classList.contains('is-drop-target'), false);
+
+  tile.fire('pointerup', tilePointer(40, 40));
+  await flush();
+  assert.equal(
+    beta.classList.contains('is-drop-target'),
+    false,
+    'and nothing lingers after a drop'
+  );
+});
+
+test('a cancelled drag joins nothing (#346 FR-6a)', async () => {
+  const { harness, calls } = await mountedForDrop();
+  const tile = harness.tile('solo');
+
+  tile.fire('pointerdown', tilePointer(0, 0));
+  tile.fire('pointermove', tilePointer(-800, -1600));
+  tile.fire('keydown', { key: 'Escape' });
+  await flush();
+
+  assert.equal(calls.filter(c => c.url.includes('/api/workspaces/')).length, 0);
+  assert.equal(harness.district('g2').classList.contains('is-drop-target'), false);
 });
 
 // ---------------------------------------------------------------------------

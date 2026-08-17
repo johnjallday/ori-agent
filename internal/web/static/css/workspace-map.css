@@ -748,6 +748,17 @@
   border-style: solid;
   border-color: rgb(var(--ws-district-accent));
 }
+/* Releasing here would put the dragged workspace INTO this group (#346
+   FR-6a). A filled surface plus a solid rule, matching what Tree's
+   `.cockpit-tree-row.is-drop-into` already means, so the same gesture reads the
+   same way in both views. The drag readout says it in words as well — a
+   membership change must never rest on a colour alone (FR-163). */
+.ws-map-district.is-drop-target {
+  border-style: solid;
+  border-width: 2px;
+  border-color: rgb(var(--ws-district-accent));
+  background: rgba(var(--ws-district-accent), 0.16);
+}
 .ws-map-district.is-dragging .ws-map-district-handle {
   cursor: grabbing;
 }
