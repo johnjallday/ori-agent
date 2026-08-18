@@ -30,6 +30,11 @@ type Store interface {
 // already ready by the time it runs, and re-running it must be harmless.
 type CompletionHook func(ctx context.Context, workspaceID string)
 
+// MigrationHook runs after a compiled blueprint snapshot migration commits. It
+// lets an owning layer supersede obsolete deterministic setup artifacts without
+// giving migration access to task execution or other domain services.
+type MigrationHook func(ctx context.Context, workspaceID string)
+
 // RuntimeService is the narrow generalized runtime surface setup consumes. Mode
 // choice and readiness remain authoritative runtime state; Setup Wizard only
 // projects them into its ordered lifecycle.
@@ -40,11 +45,12 @@ type RuntimeService interface {
 
 // Service owns setup-wizard lifecycle and readiness for every workspace.
 type Service struct {
-	store    Store
-	registry *Registry
-	runtime  RuntimeService
-	now      func() time.Time
-	onReady  CompletionHook
+	store       Store
+	registry    *Registry
+	runtime     RuntimeService
+	now         func() time.Time
+	onReady     CompletionHook
+	onMigration MigrationHook
 	// blueprints backfills workspaces created before their blueprint declared a
 	// wizard. Nil means no workspace is ever migrated.
 	blueprints BlueprintLookup
@@ -64,6 +70,14 @@ func (s *Service) SetCompletionHook(hook CompletionHook) {
 		return
 	}
 	s.onReady = hook
+}
+
+// SetMigrationHook installs the callback fired after a compiled snapshot
+// migration commits. The hook must be idempotent.
+func (s *Service) SetMigrationHook(hook MigrationHook) {
+	if s != nil {
+		s.onMigration = hook
+	}
 }
 
 // SetRuntimeService projects operating-mode choice and runtime readiness into
@@ -753,6 +767,9 @@ func progressChanged(previous, next *workspace.SetupWizardProgress) bool {
 	if (previous.FirstOpenedAt == nil) != (next.FirstOpenedAt == nil) {
 		return true
 	}
+	if previous.MigrationDiagnostic != next.MigrationDiagnostic {
+		return true
+	}
 	if len(previous.Steps) != len(next.Steps) {
 		return true
 	}
@@ -785,6 +802,7 @@ func (s *Service) status(workspaceID string, resolved resolvedWizard, progress *
 		CurrentStepID: progress.CurrentStepID,
 		Dismissed:     progress.IsDismissed(),
 		CompletedAt:   progress.CompletedAt,
+		Diagnostic:    progress.MigrationDiagnostic,
 	}
 	// Auto-open is for setup that has never been shown. A workspace whose setup
 	// regressed is deliberately excluded: `needs_attention` is an invitation to

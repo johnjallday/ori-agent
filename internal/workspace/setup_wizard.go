@@ -413,9 +413,14 @@ type SetupWizardProgress struct {
 	// regression to needs_attention, which is why repair does not reopen the
 	// blueprint's setup help task.
 	CompletedAt *time.Time `json:"completed_at,omitempty"`
+	// MigrationDiagnostic is a bounded safe explanation when a compiled
+	// built-in upgrade could not identify enough prior state to proceed. The
+	// prior snapshot remains authoritative and no setup action is inferred.
+	MigrationDiagnostic string `json:"migration_diagnostic,omitempty"`
 	// MigratedAt is when this workspace was backfilled onto a wizard its
-	// blueprint gained after the workspace already existed. Nil for a workspace
-	// created with one.
+	// blueprint gained after the workspace already existed, or when a compiled
+	// upgrade was first offered but had to preserve ambiguous prior state. Nil
+	// for a workspace created with one.
 	//
 	// It is not cosmetic. A migrated workspace may have been set up by hand long
 	// ago, so its setup must not be presented as untouched, and the dialog must
@@ -486,6 +491,7 @@ func CloneSetupWizardProgress(p *SetupWizardProgress) *SetupWizardProgress {
 	cp.FirstOpenedAt = cloneTime(p.FirstOpenedAt)
 	cp.DismissedAt = cloneTime(p.DismissedAt)
 	cp.CompletedAt = cloneTime(p.CompletedAt)
+	cp.MigratedAt = cloneTime(p.MigratedAt)
 	return &cp
 }
 
@@ -516,6 +522,7 @@ func (w *Workspace) SetSetupWizardProgress(p *SetupWizardProgress) {
 	}
 	cp := CloneSetupWizardProgress(p)
 	cp.State = NormalizeSetupWizardState(cp.State)
+	cp.MigrationDiagnostic = strings.TrimSpace(cp.MigrationDiagnostic)
 	for i := range cp.Steps {
 		cp.Steps[i].Status = NormalizeSetupStepStatus(cp.Steps[i].Status)
 	}

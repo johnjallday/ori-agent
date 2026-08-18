@@ -9,7 +9,7 @@
 // console lives inside the "Calendar" tab of the workspace configuration
 // strip; a compact #calendarConsoleChip in the shared summary strip (which
 // workspace-command.js relocates into Command view) is this module's
-// "station" entry point, mirroring #reaperReadinessChip.
+// "station" entry point in the shared workspace configuration strip.
 //
 // This module never calls an MCP tool directly. Every read/write goes
 // through internal/calendarhttp's CalendarMCPGateway, which owns ownership

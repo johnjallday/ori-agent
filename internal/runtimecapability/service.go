@@ -457,19 +457,61 @@ func (s *Service) Verify(ctx context.Context, workspaceID, requirementKey string
 	}
 	request := evaluationRequest(ws, mode, requirement)
 	result, verifyErr := verifier.Verify(ctx, VerificationRequest{EvaluationRequest: request})
-	if verifyErr != nil || !result.Succeeded {
+	if verifyErr != nil {
 		return Status{}, ErrVerificationFailed
+	}
+	if !result.Succeeded {
+		return s.verificationFailureStatus(ctx, workspaceID, requirement.Key, result)
 	}
 
 	// Ignore the verifier's success assertion until durable state agrees.
 	durable, durableErr := adapter.EvaluateDurable(ctx, request)
-	if durableErr != nil || normalizeDurableState(durable.State) != DurableConfigured {
+	if durableErr != nil {
 		return Status{}, ErrVerificationFailed
+	}
+	if normalizeDurableState(durable.State) != DurableConfigured {
+		return s.Status(ctx, workspaceID)
 	}
 	if err := s.recordVerification(workspaceID, requirement.Key); err != nil {
 		return Status{}, err
 	}
 	return s.Recheck(ctx, workspaceID)
+}
+
+// verificationFailureStatus projects the adapter's bounded, actionable failure
+// into the same status payload as successful transitions. A failed explicit
+// check is an expected runtime observation—not an opaque HTTP/server error—and
+// must show the exact runner, connection, or project repair without persisting
+// transient availability as future authority.
+func (s *Service) verificationFailureStatus(ctx context.Context, workspaceID, requirementKey string, result VerificationResult) (Status, error) {
+	status, err := s.Status(ctx, workspaceID)
+	if err != nil {
+		return Status{}, err
+	}
+	reasonCode := safeCode(result.ReasonCode)
+	if reasonCode == "" {
+		reasonCode = ReasonCheckFailed
+	}
+	summary := safeText(result.Summary, maxSafeSummaryLength)
+	if summary == "" {
+		summary = "This runtime verification did not complete."
+	}
+	liveState := normalizeLiveState(result.LiveState)
+	action := sanitizeAction(result.Action)
+
+	for i := range status.Requirements {
+		if workspace.NormalizeRuntimeIdentifier(status.Requirements[i].Key) != workspace.NormalizeRuntimeIdentifier(requirementKey) {
+			continue
+		}
+		status.Requirements[i].LiveState = liveState
+		status.Requirements[i].ReasonCode = reasonCode
+		status.Requirements[i].Summary = summary
+		status.Requirements[i].Action = action
+		status.FirstBlocker = blockerFromRequirement(status.Requirements[i])
+		break
+	}
+	status.LiveState = liveState
+	return status, nil
 }
 
 func (s *Service) evaluate(ctx context.Context, workspaceID string, checkLive bool) (Status, error) {

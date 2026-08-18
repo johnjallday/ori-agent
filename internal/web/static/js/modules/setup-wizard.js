@@ -78,6 +78,11 @@
 
   let workspaceId = '';
   let status = null;
+  // Fresh generalized runtime status for runtime-aware blueprints. The first
+  // project-specific verification remains explicit. Once it has succeeded,
+  // reloading the workspace performs a new harmless live recheck rather than
+  // reusing a stale Connected result or making the user check manually again.
+  let runtimeStatus = null;
   let currentStepId = '';
   let busy = false;
   let openedOnce = false;
@@ -140,6 +145,56 @@
     return payload?.setup || null;
   }
 
+  async function runtimeApi(path = '', options) {
+    const response = await fetch(
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/runtime-capabilities${path}`,
+      options || {}
+    );
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const error = new Error(
+        payload?.message || payload?.error || 'Runtime status request failed'
+      );
+      error.code = payload?.code || '';
+      throw error;
+    }
+    return payload?.runtime || null;
+  }
+
+  function hasRuntimeSteps() {
+    return (status?.steps || []).some(
+      step => step?.kind === 'runtime_mode' || step?.kind === 'runtime_readiness'
+    );
+  }
+
+  function shouldAutoRecheckRuntime(runtime) {
+    if (
+      !runtime?.applicable ||
+      runtime.selected_mode_id === 'file_only' ||
+      runtime.durable_state !== 'configured' ||
+      String(runtime.live_state || 'not_checked') !== 'not_checked'
+    ) {
+      return false;
+    }
+    const requirement = Array.isArray(runtime.requirements) ? runtime.requirements[0] : null;
+    return Boolean(runtime.first_verified_at || requirement?.first_verified_at);
+  }
+
+  async function refreshRuntime({ live = false } = {}) {
+    if (!workspaceId || !hasRuntimeSteps()) {
+      runtimeStatus = null;
+      return null;
+    }
+    runtimeStatus = await runtimeApi(live ? '/recheck' : '', live ? { method: 'POST' } : undefined);
+    render();
+    return runtimeStatus;
+  }
+
+  function setRuntimeStatus(next) {
+    runtimeStatus = next && next.applicable ? next : null;
+    render();
+  }
+
   function stepById(id) {
     if (!status || !Array.isArray(status.steps)) return null;
     return status.steps.find(step => step.id === id) || null;
@@ -192,6 +247,7 @@
         error.scrollIntoView();
       }
     }
+    if (message && typeof error.focus === 'function') error.focus();
   }
 
   function announce(message) {
@@ -257,6 +313,10 @@
         return 'Prepare the plugin';
       case 'readiness':
         return 'Readiness check';
+      case 'runtime_mode':
+        return 'Choose an operating mode';
+      case 'runtime_readiness':
+        return 'Runtime readiness';
       case 'summary':
         return 'Summary';
       default:
@@ -477,7 +537,7 @@
       return;
     }
     banner.hidden = false;
-    const presentation = bannerPresentation(status);
+    const presentation = bannerPresentation(status, runtimeStatus);
     if (bannerState) {
       bannerState.textContent = presentation.state;
       bannerState.className = `setup-wizard-banner-state setup-wizard-banner-state-${presentation.tone}`;
@@ -495,14 +555,89 @@
       chip.hidden = true;
       return;
     }
-    const presentation = bannerPresentation(status);
+    const presentation = bannerPresentation(status, runtimeStatus);
     chip.hidden = false;
-    chip.textContent = `Setup: ${presentation.state}`;
+    chip.textContent = runtimeStatus?.applicable
+      ? `Live control: ${presentation.state}`
+      : `Setup: ${presentation.state}`;
     chip.setAttribute('aria-label', `${presentation.state} — ${presentation.action}`);
     chip.className = `workspace-detail-config-chip setup-wizard-chip is-${presentation.tone}`;
   }
 
-  function bannerPresentation(current) {
+  function bannerPresentation(current, runtime) {
+    if (runtime?.applicable) {
+      const selected = String(runtime.selected_mode_id || '');
+      if (selected === 'file_only') {
+        return {
+          state: 'File-only',
+          tone: 'ready',
+          detail: 'Project-file work is available. Live REAPER was not configured or tested.',
+          action: 'Review mode'
+        };
+      }
+      const requirement = Array.isArray(runtime.requirements) ? runtime.requirements[0] : null;
+      const live = String(runtime.live_state || requirement?.live_state || 'not_checked');
+      const durable = String(runtime.durable_state || requirement?.durable_state || 'in_progress');
+      if (durable === 'configured') {
+        switch (live) {
+          case 'available':
+            return {
+              state: 'Connected now',
+              tone: 'ready',
+              detail: requirement?.summary || 'REAPER is connected to this workspace project now.',
+              action: 'View live control'
+            };
+          case 'checking':
+            return {
+              state: 'Checking connection',
+              tone: 'ready',
+              detail: 'Refreshing the current REAPER connection for this workspace project…',
+              action: 'View live control'
+            };
+          case 'offline':
+            return {
+              state: 'Configured · REAPER offline',
+              tone: 'ready',
+              detail: requirement?.summary || 'Open REAPER, then check the connection.',
+              action: 'Check REAPER'
+            };
+          case 'wrong_target':
+            return {
+              state: 'Wrong project',
+              tone: 'attention',
+              detail: requirement?.summary || 'Open this workspace’s project in REAPER.',
+              action: 'Fix project'
+            };
+          default:
+            return {
+              state: 'Configured',
+              tone: 'ready',
+              detail: 'Live control is configured. Current connectivity has not been checked.',
+              action: 'Check connection'
+            };
+        }
+      }
+      if (durable === 'needs_attention' || current.state === STATE_NEEDS_ATTENTION) {
+        return {
+          state: 'Needs attention',
+          tone: 'attention',
+          detail:
+            runtime.first_blocker?.summary ||
+            requirement?.summary ||
+            'Live-control setup needs repair.',
+          action: 'Repair live control'
+        };
+      }
+      return {
+        state: 'Setup required',
+        tone: 'required',
+        detail:
+          runtime.first_blocker?.summary ||
+          requirement?.summary ||
+          'Finish local REAPER control setup.',
+        action: 'Continue setup'
+      };
+    }
     if (current.state === STATE_READY) {
       return { state: 'Ready', tone: 'ready', detail: 'Setup is complete.', action: 'View setup' };
     }
@@ -531,11 +666,15 @@
     return {
       step,
       status,
+      runtimeStatus,
       workspaceId,
       setBusy: (value, message) => setBusy(value, message),
       setError: message => setError(message),
       announce: message => announce(message),
       refresh: () => refresh(),
+      refreshRuntime: options => refreshRuntime(options),
+      setRuntimeStatus,
+      runtimeRequest: (path, options) => runtimeApi(path, options),
       confirm: option => confirmStep(step.id, option),
       recheck: () => recheck(),
       // renderDefault lets a renderer registered on a shared kind (readiness,
@@ -573,6 +712,27 @@
     if (!workspaceId) return null;
     try {
       status = await api('', { method: 'GET' });
+      if (hasRuntimeSteps()) {
+        try {
+          const durableRuntime = await runtimeApi();
+          runtimeStatus = durableRuntime;
+          if (shouldAutoRecheckRuntime(durableRuntime)) {
+            runtimeStatus = { ...durableRuntime, live_state: 'checking' };
+            render();
+            try {
+              runtimeStatus = await runtimeApi('/recheck', { method: 'POST' });
+            } catch (liveError) {
+              console.warn('Runtime live recheck failed:', liveError);
+              runtimeStatus = durableRuntime;
+            }
+          }
+        } catch (runtimeError) {
+          console.warn('Runtime status request failed:', runtimeError);
+          runtimeStatus = null;
+        }
+      } else {
+        runtimeStatus = null;
+      }
     } catch (error) {
       console.warn('Setup status request failed:', error);
       return null;
@@ -636,6 +796,13 @@
         }),
       'Applying your choice…'
     );
+    if (result && stepById(stepId)?.kind === 'runtime_mode') {
+      try {
+        await refreshRuntime();
+      } catch (error) {
+        setError(friendlyError(error));
+      }
+    }
     if (result) await advanceIfResolved(stepId);
     return result;
   }
@@ -663,7 +830,10 @@
   }
 
   function announceCompletion() {
-    const message = 'Setup complete — this workspace is ready.';
+    const presentation = bannerPresentation(status, runtimeStatus);
+    const message = runtimeStatus?.applicable
+      ? `${presentation.state} setup complete.`
+      : 'Setup complete — this workspace is ready.';
     if (window.Toast?.success) window.Toast.success(message);
     else if (typeof window.notifyToast === 'function') window.notifyToast(message, 'success');
   }
@@ -773,6 +943,7 @@
   async function refreshOnOpen(stepId) {
     try {
       status = await api('/open', { method: 'POST' });
+      if (hasRuntimeSteps()) runtimeStatus = await runtimeApi();
     } catch (error) {
       console.warn('Could not refresh setup state on open:', error);
       return;
@@ -857,7 +1028,8 @@
 
     const resumeStep = consumeResume();
     const params = new URLSearchParams(window.location?.search || '');
-    const requested = params.get('setup') === '1';
+    const runtimeRequested = params.get('runtime_setup') === '1';
+    const requested = params.get('setup') === '1' || runtimeRequested;
 
     if (resumeStep) {
       // Returning from an external authorization: same workspace, same wizard,
@@ -866,7 +1038,10 @@
       return status;
     }
     if (requested) {
-      openDialog();
+      const runtimeStep = runtimeRequested
+        ? (status.steps || []).find(step => step.kind === 'runtime_readiness')?.id
+        : '';
+      openDialog(runtimeStep);
       return status;
     }
     if (current.auto_open && !openedOnce) {
@@ -883,6 +1058,9 @@
     open: openDialog,
     close: requestClose,
     getStatus: () => status,
+    getRuntimeStatus: () => runtimeStatus,
+    refreshRuntime,
+    setRuntimeStatus,
     registerStepRenderer(kind, renderer) {
       if (!kind || !renderer) return;
       const key = String(kind);
@@ -899,6 +1077,7 @@
       STEP_MARKS,
       STEP_WORDS,
       bannerPresentation,
+      shouldAutoRecheckRuntime,
       primaryLabel,
       primaryBlocked,
       friendlyError

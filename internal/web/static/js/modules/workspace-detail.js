@@ -10592,18 +10592,18 @@ export class WorkspaceDetailPage {
   getAgentProfile(agentName) {
     const key = this.normalizeAgentName(agentName);
     if (!key) return null;
-    const globalProfile = this.agentIndex instanceof Map ? this.agentIndex.get(key) : null;
-    if (globalProfile) return globalProfile;
-    // Fall back to workspace-local agents (entry/manager agents stored in the
-    // workspace's config.json, not the global agent catalog). This is what lets
-    // their model badge show the real model and become editable.
+    // A workspace snapshot is the executable profile for this workspace and
+    // must win over a same-named saved/global agent. Editing the global profile
+    // would leave the attached snapshot unchanged, so capability repair would
+    // appear to save successfully while remaining blocked.
     if (this.workspaceAgentProfiles instanceof Map) {
-      return this.workspaceAgentProfiles.get(key) || null;
+      const workspaceProfile = this.workspaceAgentProfiles.get(key);
+      if (workspaceProfile) return workspaceProfile;
     }
-    return null;
+    return this.agentIndex instanceof Map ? this.agentIndex.get(key) || null : null;
   }
 
-  async openAgentModelModal(encodedAgentName = '') {
+  async openAgentModelModal(encodedAgentName = '', options = {}) {
     let agentName = '';
     try {
       agentName = decodeURIComponent(String(encodedAgentName || ''));
@@ -10611,26 +10611,43 @@ export class WorkspaceDetailPage {
       agentName = String(encodedAgentName || '');
     }
     agentName = String(agentName || '').trim();
-    if (!agentName) return;
+    if (!agentName) return false;
 
-    await Promise.all([this.loadAgentCatalog(true), this.loadProviderCatalog()]);
+    await Promise.all([
+      this.loadAgentCatalog(true),
+      this.loadProviderCatalog(),
+      this.loadWorkspaceAgentSnapshots()
+    ]);
 
     const profile = this.getAgentProfile(agentName);
     if (!profile) {
       if (window.Toast) window.Toast.error('Failed to load agent settings.');
-      return;
+      return false;
     }
     if (!this.agentAllowsModelEditing(profile)) {
       if (window.Toast)
         window.Toast.warning('This agent model cannot be changed from the workspace.');
-      return;
+      return false;
     }
 
+    const allowedProviders = Array.from(
+      new Set(
+        (Array.isArray(options.allowedProviders) ? options.allowedProviders : [])
+          .map(provider =>
+            String(provider || '')
+              .trim()
+              .toLowerCase()
+          )
+          .filter(Boolean)
+      )
+    );
     this.activeAgentModelEdit = {
       agentName,
       agentType: String(profile.type || 'general').trim() || 'general',
       currentModel: String(profile.model || '').trim(),
       currentProvider: String(profile.provider || '').trim(),
+      allowedProviders,
+      selectionHelp: String(options.help || '').trim(),
       // Workspace-local agents persist to the workspace config.json via a
       // workspace-scoped endpoint, and their model picker is not type-filtered.
       isWorkspaceAgent:
@@ -10644,7 +10661,8 @@ export class WorkspaceDetailPage {
       this.elements.agentModelAgentName.textContent = agentName;
     }
     if (this.elements.agentModelTitle) {
-      this.elements.agentModelTitle.textContent = `Change Model for ${agentName}`;
+      this.elements.agentModelTitle.textContent =
+        String(options.title || '').trim() || `Change Model for ${agentName}`;
     }
     if (this.elements.agentModelCurrent) {
       const currentModelLabel = this.activeAgentModelEdit.currentModel || 'Not set';
@@ -10662,7 +10680,9 @@ export class WorkspaceDetailPage {
           : bootstrap.Modal.getInstance(this.elements.agentModelModal) ||
             new bootstrap.Modal(this.elements.agentModelModal);
       modal.show();
+      return true;
     }
+    return false;
   }
 
   populateAgentModelSelect() {
@@ -10679,12 +10699,27 @@ export class WorkspaceDetailPage {
     // Workspace-local agents list every available model (no agent-type filter),
     // so users can pick any model/provider including local ones (lmstudio, ollama).
     const skipTypeFilter = Boolean(editState.isWorkspaceAgent);
+    const allowedProviders = new Set(
+      (Array.isArray(editState.allowedProviders) ? editState.allowedProviders : [])
+        .map(provider =>
+          String(provider || '')
+            .trim()
+            .toLowerCase()
+        )
+        .filter(Boolean)
+    );
 
     select.innerHTML = '';
     let hasOptions = false;
     let selectedFound = false;
 
     (Array.isArray(this.providerCatalog) ? this.providerCatalog : []).forEach(provider => {
+      const providerName = String(provider?.name || '')
+        .trim()
+        .toLowerCase();
+      if (allowedProviders.size && !allowedProviders.has(providerName)) return;
+      if (allowedProviders.size && provider?.available === false) return;
+
       const group = document.createElement('optgroup');
       group.label = String(provider?.display_name || provider?.name || '').trim() || 'Provider';
       let groupHasOptions = false;
@@ -10724,7 +10759,11 @@ export class WorkspaceDetailPage {
       }
     });
 
-    if (currentModel && !selectedFound) {
+    if (
+      currentModel &&
+      !selectedFound &&
+      (!allowedProviders.size || allowedProviders.has(currentProvider.toLowerCase()))
+    ) {
       const currentGroup = document.createElement('optgroup');
       currentGroup.label = 'Current Model';
       const option = document.createElement('option');
@@ -10753,24 +10792,30 @@ export class WorkspaceDetailPage {
     if (!select || !help) return;
 
     const editState = this.activeAgentModelEdit;
+    const guidance = String(editState?.selectionHelp || '').trim();
+    const withGuidance = message => (guidance ? `${guidance} ${message}` : message);
     const selectedOption = select.selectedOptions?.[0] || null;
     const selectedModel = String(select.value || '').trim();
     const selectedProvider = String(selectedOption?.getAttribute('data-provider') || '').trim();
 
     if (!editState || !selectedModel) {
-      help.textContent = 'No compatible models are currently available for this agent type.';
+      help.textContent = withGuidance(
+        'No compatible models are currently available for this agent type.'
+      );
       return;
     }
 
     const currentModel = String(editState.currentModel || '').trim();
     const currentProvider = String(editState.currentProvider || '').trim();
     if (selectedModel === currentModel && selectedProvider === currentProvider) {
-      help.textContent = 'This agent is already using the selected model.';
+      help.textContent = withGuidance('This agent is already using the selected model.');
       return;
     }
 
     const providerLabel = selectedProvider || 'the selected provider';
-    help.textContent = `Save to switch ${editState.agentName} to ${selectedModel} via ${providerLabel}.`;
+    help.textContent = withGuidance(
+      `Save to switch ${editState.agentName} to ${selectedModel} via ${providerLabel}.`
+    );
   }
 
   resetAgentModelModal() {

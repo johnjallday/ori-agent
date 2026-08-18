@@ -32,6 +32,45 @@ func TestPlatformLiveProbeHonorsCancellation(t *testing.T) {
 	}
 }
 
+func TestDetectWebRemoteConfigsCombinesStandardAndPortableCandidates(t *testing.T) {
+	standard := filepath.Join(t.TempDir(), "standard.ini")
+	portable := filepath.Join(t.TempDir(), "portable.ini")
+	if err := os.WriteFile(standard, []byte("csurf_0=HTTP 0 2307 '' 'index.html' 0 ''\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(portable, []byte("csurf_0=HTTP 0 2308 '' 'index.html' 0 ''\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got := detectWebRemoteConfigs([]string{standard, portable})
+	if got.State != ProbeReady || got.Port != 2307 || len(got.Ports) != 2 || got.Ports[0] != 2307 || got.Ports[1] != 2308 {
+		t.Fatalf("combined configs = %+v", got)
+	}
+}
+
+func TestPlatformLiveProbeUsesResponsiveConfiguredInterface(t *testing.T) {
+	stale := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	}))
+	defer stale.Close()
+	live := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("TRANSPORT\t0\t0.0\n"))
+	}))
+	defer live.Close()
+	stalePort, _ := strconv.Atoi(strings.TrimPrefix(stale.URL, "http://127.0.0.1:"))
+	livePort, _ := strconv.Atoi(strings.TrimPrefix(live.URL, "http://127.0.0.1:"))
+
+	probe := &platformProbe{client: http.DefaultClient}
+	got := probe.CheckTransport(context.Background(), WebRemoteObservation{
+		State: ProbeReady,
+		Port:  stalePort,
+		Ports: []int{stalePort, livePort},
+	})
+	if got.State != TransportAvailable || got.Port != livePort {
+		t.Fatalf("multi-interface live probe = %+v, want available port %d", got, livePort)
+	}
+}
+
 func TestPlatformRunnerProbeDistinguishesMissingInvalidAndReady(t *testing.T) {
 	root := t.TempDir()
 	probe := &platformProbe{roots: runtimeTestRoot(root), homeDir: os.UserHomeDir, client: http.DefaultClient}

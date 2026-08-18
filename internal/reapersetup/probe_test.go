@@ -16,9 +16,10 @@ func TestParseWebRemoteConfig(t *testing.T) {
 		state ProbeState
 		port  int
 	}{
-		{name: "HTTP enabled", input: "[reaper]\ncsurf_0=HTTP 1 2307 '' 'index.html' 0 0\n", state: ProbeReady, port: 2307},
+		{name: "real REAPER HTTP encoding", input: "[reaper]\ncsurf_0=HTTP 0 2307 '' 'index.html' 0 ''\n", state: ProbeReady, port: 2307},
+		{name: "alternate HTTP mode", input: "csurf_0=HTTP 1 2308 '' 'index.html' 0 ''\n", state: ProbeReady, port: 2308},
 		{name: "WEBR enabled", input: "csurf_2=WEBR 1 0 3210\n", state: ProbeReady, port: 3210},
-		{name: "disabled", input: "csurf_0=HTTP 0 2307\n", state: ProbeMissing},
+		{name: "WEBR disabled", input: "csurf_2=WEBR 0 0 3210\n", state: ProbeMissing},
 		{name: "default guess is not configuration", input: "lastproject=/music/song.rpp\n", state: ProbeMissing},
 		{name: "bad port", input: "csurf_0=HTTP 1 70000\n", state: ProbeInvalid},
 		{name: "bad enabled flag", input: "csurf_0=HTTP maybe 2307\n", state: ProbeInvalid},
@@ -31,6 +32,11 @@ func TestParseWebRemoteConfig(t *testing.T) {
 				t.Fatalf("got %+v, want state=%s port=%d", got, test.state, test.port)
 			}
 		})
+	}
+
+	multiple := parseWebRemoteConfig([]byte("csurf_0=HTTP 0 2307 '' 'index.html' 0 ''\ncsurf_1=HTTP 0 2308 '' 'index.html' 0 ''\ncsurf_2=HTTP 0 2308 '' 'index.html' 0 ''\n"))
+	if multiple.State != ProbeReady || multiple.Port != 2307 || len(multiple.Ports) != 2 || multiple.Ports[0] != 2307 || multiple.Ports[1] != 2308 {
+		t.Fatalf("multiple configured interfaces = %+v", multiple)
 	}
 
 	oversized := parseWebRemoteConfig([]byte(strings.Repeat("x", maxREAPERConfigBytes+1)))

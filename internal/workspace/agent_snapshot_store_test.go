@@ -43,6 +43,47 @@ func TestAgentSnapshotStore_SaveSnapshotsReferencedAgents(t *testing.T) {
 	}
 }
 
+func TestAgentSnapshotStore_SavePreservesWorkspaceEditedSnapshot(t *testing.T) {
+	primary := NewInMemoryStore()
+	global := &agent.Agent{Type: agent.TypeToolCalling}
+	global.Settings.Model = "global-model"
+	global.Settings.Provider = "ollama"
+	agents := &resolverAgentStoreStub{agents: map[string]*agent.Agent{"Manager": global}}
+	store := NewAgentSnapshotStore(primary, agents)
+
+	ws := &Workspace{
+		ID:             "ws-local-edit",
+		Name:           "Local edit",
+		Status:         StatusActive,
+		AgentInstances: AgentInstancesFromNames("Manager"),
+	}
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("initial Save: %v", err)
+	}
+
+	local := &agent.Agent{Type: agent.TypeToolCalling}
+	local.Settings.Model = "gpt-5.4"
+	local.Settings.Provider = "codex"
+	if err := store.SaveWorkspaceAgent(ws.ID, "Manager", local); err != nil {
+		t.Fatalf("save workspace edit: %v", err)
+	}
+
+	if err := store.Update(ws.ID, func(current *Workspace) error {
+		current.Description = "Routine workspace mutation"
+		return nil
+	}); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	got, ok, err := store.GetWorkspaceAgent(ws.ID, "Manager")
+	if err != nil || !ok || got == nil {
+		t.Fatalf("read workspace snapshot: ok=%v err=%v agent=%+v", ok, err, got)
+	}
+	if got.Settings.Provider != "codex" || got.Settings.Model != "gpt-5.4" {
+		t.Fatalf("workspace edit was overwritten by global snapshot: %+v", got.Settings)
+	}
+}
+
 func TestAgentSnapshotStore_NoGlobalAgentSkipsSnapshot(t *testing.T) {
 	primary := NewInMemoryStore()
 	agents := &resolverAgentStoreStub{agents: map[string]*agent.Agent{}}
@@ -309,6 +350,61 @@ func TestAgentSnapshotStore_AgentWorkSurvivesSetupProgress(t *testing.T) {
 	}
 	if len(got.Tasks) != 1 {
 		t.Fatalf("the unrelated task update was not written through: %+v", got.Tasks)
+	}
+}
+
+func TestAgentSnapshotStore_UpdateHydratesRuntimeStateBeforeRevoke(t *testing.T) {
+	fileStore, err := NewFileStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	defer func() { _ = fileStore.Close() }()
+
+	primary := NewInMemoryStore()
+	store := NewAgentSnapshotStore(NewSyncStore(primary, fileStore), &resolverAgentStoreStub{agents: map[string]*agent.Agent{}})
+	ws := &Workspace{ID: "ws-runtime-revoke", Name: "Runtime Revoke", Status: StatusActive}
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	canonical, err := fileStore.Get(ws.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonical.SetRuntimeState(&WorkspaceRuntimeState{
+		SelectedModeID: "ori_assisted",
+		Grants: []RuntimeCapabilityGrant{{
+			CapabilityKey:   "reaper_live_control",
+			AgentInstanceID: "producer-1",
+			GrantedAt:       time.Date(2026, 8, 18, 13, 0, 0, 0, time.UTC),
+		}},
+	})
+	if err := fileStore.Save(canonical); err != nil {
+		t.Fatal(err)
+	}
+
+	revokedAt := time.Date(2026, 8, 18, 14, 0, 0, 0, time.UTC)
+	if err := store.Update(ws.ID, func(current *Workspace) error {
+		changed, revokeErr := current.RevokeRuntimeCapability("reaper_live_control", "producer-1", revokedAt)
+		if !changed && revokeErr == nil {
+			t.Fatal("active canonical grant was invisible to wrapped Update")
+		}
+		return revokeErr
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := store.GetFolderWorkspace(ws.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := got.GetRuntimeState()
+	if state == nil {
+		t.Fatal("runtime state was lost")
+	}
+	grant, found := state.RuntimeGrant("reaper_live_control", "producer-1")
+	if state.SelectedModeID != "ori_assisted" || !found || grant.Active() || grant.RevokedAt == nil || !grant.RevokedAt.Equal(revokedAt) {
+		t.Fatalf("runtime mode or revocation was lost: %+v", state)
 	}
 }
 

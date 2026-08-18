@@ -392,6 +392,50 @@ func TestSyncStore_SavePreservesRuntimeStateFromStalePrimaryWorkspace(t *testing
 	}
 }
 
+func TestSyncStore_UpdateHydratesRuntimeStateBeforeMutation(t *testing.T) {
+	primary := NewInMemoryStore()
+	fileSync, err := NewFileStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = fileSync.Close() }()
+
+	store := NewSyncStore(primary, fileSync)
+	ws := newTestWorkspace("ws-runtime-update-sync", "Runtime Update Sync")
+	if err := store.Save(ws); err != nil {
+		t.Fatal(err)
+	}
+
+	canonicalWorkspace, err := fileSync.Get(ws.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonicalWorkspace.SetRuntimeState(&WorkspaceRuntimeState{SelectedModeID: "ori_assisted"})
+	if err := fileSync.Save(canonicalWorkspace); err != nil {
+		t.Fatal(err)
+	}
+
+	grantedAt := time.Date(2026, 8, 18, 13, 0, 0, 0, time.UTC)
+	if err := store.Update(ws.ID, func(current *Workspace) error {
+		if state := current.GetRuntimeState(); state == nil || state.SelectedModeID != "ori_assisted" {
+			t.Fatalf("Update callback received stale runtime state: %+v", state)
+		}
+		_, grantErr := current.GrantRuntimeCapability("reaper_live_control", "producer-1", grantedAt)
+		return grantErr
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	diskWorkspace, err := fileSync.Get(ws.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := diskWorkspace.GetRuntimeState()
+	if state == nil || state.SelectedModeID != "ori_assisted" || !state.HasActiveRuntimeGrant("reaper_live_control", "producer-1") {
+		t.Fatalf("runtime mode or grant was lost: %+v", state)
+	}
+}
+
 // TestSyncStore_SavePreservesInstalledCapabilitiesFromStalePrimaryWorkspace is
 // the FR-144 guard for capability installs: "a stale workspace snapshot must not
 // silently erase a capability install or its directory reference". Unlike

@@ -121,6 +121,7 @@ type LiveResult struct {
 // success; Succeeded alone can never mark a workspace configured.
 type VerificationResult struct {
 	Succeeded  bool
+	LiveState  string
 	ReasonCode string
 	Summary    string
 	Action     *Action

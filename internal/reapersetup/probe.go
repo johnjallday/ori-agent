@@ -24,11 +24,14 @@ type ApplicationObservation struct {
 	State ProbeState
 }
 
-// WebRemoteObservation is trusted process-local data. Port is deliberately not
-// part of runtimecapability's public status model and must never be logged.
+// WebRemoteObservation is trusted process-local data. Ports are deliberately
+// not part of runtimecapability's public status model and must never be logged.
+// Port remains the preferred/legacy candidate; Ports carries every bounded,
+// trusted configured interface so live probing can tolerate a stale sibling.
 type WebRemoteObservation struct {
 	State ProbeState
 	Port  int
+	Ports []int
 }
 
 // RunnerObservation contains the canonical exchange root and registered action
@@ -50,6 +53,7 @@ const (
 
 type LiveTransportObservation struct {
 	State string
+	Port  int
 }
 
 const (

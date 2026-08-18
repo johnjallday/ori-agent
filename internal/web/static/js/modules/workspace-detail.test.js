@@ -895,8 +895,20 @@ test('workspace detail agent back face does not render agent level copy', () => 
 
 test('workspace-local agent profile resolves its model and renders an editable badge', () => {
   const page = new WorkspaceDetailPage('workspace-1');
-  // Not in the global catalog; only present as a workspace-local profile.
-  page.agentIndex = new Map();
+  // A same-named saved agent can differ from the workspace's attached
+  // snapshot. The snapshot is what this workspace executes and must win.
+  page.agentIndex = new Map([
+    [
+      'reaperdaw manager',
+      {
+        name: 'ReaperDAW Manager',
+        type: 'orchestration',
+        model: 'global-model',
+        provider: 'openai',
+        source: 'user'
+      }
+    ]
+  ]);
   page.workspaceAgentProfiles = new Map([
     [
       'reaperdaw manager',
@@ -913,6 +925,7 @@ test('workspace-local agent profile resolves its model and renders an editable b
   const profile = page.getAgentProfile('ReaperDAW Manager');
   assert.ok(profile, 'profile resolves from the workspace-local map');
   assert.equal(profile.model, 'google/gemma-4-e4b');
+  assert.notEqual(profile.model, 'global-model');
   assert.equal(profile.source, 'workspace');
 
   const presentation = page.getAgentModelPresentation(profile);
@@ -1029,6 +1042,19 @@ test('workspace-local model picker lists every model; global picker filters by t
       ['claude-opus-4', 'gpt-5.3-codex'],
       'global orchestration picker includes Commander-capable Codex models'
     );
+
+    // A capability repair can narrow an otherwise freely editable workspace
+    // agent to providers that satisfy that capability. The incompatible current
+    // model remains visible in the summary, but is not offered as a valid save.
+    page.activeAgentModelEdit = {
+      agentType: 'orchestration',
+      currentModel: 'google/gemma-4-e4b',
+      currentProvider: 'lmstudio',
+      isWorkspaceAgent: true,
+      allowedProviders: ['codex']
+    };
+    page.populateAgentModelSelect();
+    assert.deepEqual(values(), ['gpt-5.3-codex']);
   } finally {
     global.document.createElement = origCreate;
   }

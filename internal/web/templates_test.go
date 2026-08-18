@@ -61,6 +61,33 @@ func TestRenderWorkspaceDetailSharedHosts(t *testing.T) {
 	}
 }
 
+func TestWorkspaceDetailHasOneRuntimeCapabilityEntryPoint(t *testing.T) {
+	r := NewTemplateRenderer()
+	if err := r.LoadTemplates(); err != nil {
+		t.Fatalf("LoadTemplates failed: %v", err)
+	}
+	html, err := r.RenderTemplate("workspace-detail", TemplateData{
+		Title: "Workspace - Ori Agent",
+		Extra: map[string]any{"WorkspaceID": "runtime-1"},
+	})
+	if err != nil {
+		t.Fatalf("RenderTemplate(workspace-detail) failed: %v", err)
+	}
+	if count := strings.Count(html, `id="setupWizardStatusChip"`); count != 1 {
+		t.Fatalf("authoritative runtime capability entry points = %d, want 1", count)
+	}
+	for _, gone := range []string{
+		`id="reaperReadinessChip"`,
+		`id="reaperReadinessCard"`,
+		`/js/modules/reaper-setup-card.js`,
+		`id="reaperSetupCard"`,
+	} {
+		if strings.Contains(html, gone) {
+			t.Errorf("workspace detail contains duplicate legacy runtime surface %q", gone)
+		}
+	}
+}
+
 // TestRenderTemplatesPage confirms the /templates page renders, carries the
 // master/detail scaffold and lifecycle controls, and highlights its sidebar
 // link when CurrentPage is "templates".
@@ -195,9 +222,9 @@ func TestRenderCreateWorkspaceWizardReviewContract(t *testing.T) {
 		`id="templateBriefing"`,
 		`id="templateBriefingScaffoldRow"`,
 		`id="templateBriefingAddonsRow"`,
-		// Details keeps the mutable pre-create readiness controls (FR29, FR30).
+		// Details keeps the project-open preference. Runtime setup is disclosed
+		// read-only on Review and never blocks creation.
 		`id="projectTemplateOpenAfterCreate"`,
-		`id="reaperSetupCard"`,
 		// Team owns ONE roster plus the inline saved-agent picker, and the
 		// Advanced include-team disclosure now lives here rather than on Details.
 		`id="workspaceTeamLayout"`,
@@ -234,6 +261,9 @@ func TestRenderCreateWorkspaceWizardReviewContract(t *testing.T) {
 		// mutable readiness cards now stay on Details (FR29-FR31).
 		`id="wizardStep3ReviewMount"`,
 		`id="wizardStep4ReviewMount"`,
+		// The duplicate REAPER-specific pre-create card was replaced by the
+		// normalized blueprint setup preview.
+		`id="reaperSetupCard"`,
 		// The picker is permanent inline markup on Team, so it has no close
 		// button and is never opened from a Review-step button.
 		`id="closeExistingAgentRosterBtn"`,

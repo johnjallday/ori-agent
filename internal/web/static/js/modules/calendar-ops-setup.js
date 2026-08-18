@@ -50,7 +50,7 @@
     if (!badge) return;
     badge.textContent = label;
     badge.className =
-      'reaper-setup-badge reaper-setup-badge-' + label.toLowerCase().replace(/[^a-z]+/g, '-');
+      'workspace-setup-badge workspace-setup-badge-' + label.toLowerCase().replace(/[^a-z]+/g, '-');
   }
 
   function el(tag, opts = {}, children = []) {

@@ -893,6 +893,9 @@ func (b *ServerBuilder) wireSetupWizard() {
 		service.SetCompletionHook(func(_ context.Context, workspaceID string) {
 			sessionHandler.CompleteSetupHelpTaskOnWizardReady(workspaceID)
 		})
+		service.SetMigrationHook(func(_ context.Context, workspaceID string) {
+			sessionHandler.SupersedeLegacyReaperSetupHelpTask(workspaceID)
+		})
 	}
 }
 
@@ -914,17 +917,22 @@ func (b *ServerBuilder) blueprintWizardLookup() setupwizard.BlueprintLookup {
 		if err != nil || !tpl.HasSetupWizard() || tpl.HasInvalidSetupWizard() {
 			return setupwizard.Blueprint{}, false
 		}
-		return setupwizard.Blueprint{
+		blueprint := setupwizard.Blueprint{
 			ID:                     tpl.ID,
 			Name:                   tpl.Name,
 			Version:                tpl.BuiltinVersion,
 			Wizard:                 tpl.SetupWizard,
+			RuntimeRequirements:    tpl.RuntimeRequirements,
 			DirectoryRequirements:  tpl.DirectoryRequirements,
 			AutomationRecipes:      tpl.AutomationRecipes,
 			CapabilityRequirements: tpl.CapabilityRequirements,
 			Plugins:                tpl.Tools.Plugins,
 			PluginSources:          tpl.Tools.PluginSources,
-		}, true
+		}
+		if tpl.Builtin && tpl.ID == reapersetup.ReaperSongTemplateID {
+			blueprint.RuntimeMigration = reapersetup.PlanLegacyRuntimeMigration
+		}
+		return blueprint, true
 	}
 }
 

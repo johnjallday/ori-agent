@@ -1,6 +1,7 @@
 package projecttemplates
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -44,11 +45,16 @@ func TestEnsureLibraryMaterializesStarters(t *testing.T) {
 	if reaper.HasOnboarding() {
 		t.Error("reaper starter must not carry the legacy intake onboarding block")
 	}
-	if len(reaper.StarterTasks) == 0 || !reaper.StarterTasks[0].Setup {
-		t.Errorf("reaper starter should lead with a setup starter task: %+v", reaper.StarterTasks)
+	if len(reaper.StarterTasks) != 2 {
+		t.Errorf("reaper starter should retain only two real work tasks: %+v", reaper.StarterTasks)
 	}
-	if reaper.BuiltinVersion < 5 {
-		t.Errorf("reaper starter builtin_version = %d, want at least 5 (declares reaper-plugin + source)", reaper.BuiltinVersion)
+	for _, task := range reaper.StarterTasks {
+		if task.Setup {
+			t.Errorf("reaper runtime setup must not be represented by a starter task: %+v", task)
+		}
+	}
+	if reaper.BuiltinVersion != 8 {
+		t.Errorf("reaper starter builtin_version = %d, want 8 for runtime-contract activation", reaper.BuiltinVersion)
 	}
 	// The manifest declares reaper-plugin under top-level workspace tool defaults
 	// so creation attaches its components when installed.
@@ -97,6 +103,25 @@ func TestEnsureLibraryMaterializesStarters(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "writing-project", "chapters", ".keep")); err != nil {
 		t.Errorf("chapters/.keep missing: %v", err)
+	}
+}
+
+func TestEnsureLibraryMaterializedReaperManifestMatchesCanonicalCopy(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "templates")
+	if err := EnsureLibrary(dir); err != nil {
+		t.Fatalf("EnsureLibrary: %v", err)
+	}
+
+	canonical, err := starterFS.ReadFile("starter/reaper-song/template.json")
+	if err != nil {
+		t.Fatalf("read canonical Reaper manifest: %v", err)
+	}
+	materialized, err := os.ReadFile(filepath.Join(dir, "reaper-song", ManifestFileName))
+	if err != nil {
+		t.Fatalf("read materialized Reaper manifest: %v", err)
+	}
+	if !bytes.Equal(materialized, canonical) {
+		t.Fatal("materialized Reaper template copy differs from the canonical embedded manifest")
 	}
 }
 
@@ -177,7 +202,7 @@ func TestEnsureLibraryRefreshesBuiltinManifestOnVersionBump(t *testing.T) {
 	}
 }
 
-func TestEnsureLibraryRefreshesReaperProjectEntryOnVersionBump(t *testing.T) {
+func TestEnsureLibraryRefreshesReaperRuntimeContractOnVersionBump(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "templates")
 	if err := EnsureLibrary(dir); err != nil {
 		t.Fatalf("EnsureLibrary: %v", err)
@@ -200,8 +225,14 @@ func TestEnsureLibraryRefreshesReaperProjectEntryOnVersionBump(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FindLibraryTemplate: %v", err)
 	}
-	if refreshed.BuiltinVersion < 3 {
-		t.Errorf("reaper builtin_version = %d, want at least 3", refreshed.BuiltinVersion)
+	if refreshed.BuiltinVersion != 8 {
+		t.Errorf("reaper builtin_version = %d, want 8", refreshed.BuiltinVersion)
+	}
+	if !refreshed.HasRuntimeRequirements() || refreshed.RuntimeRequirementsError != "" {
+		t.Fatalf("refreshed Reaper runtime contract = %#v, error %q", refreshed.RuntimeRequirements, refreshed.RuntimeRequirementsError)
+	}
+	if len(refreshed.StarterTasks) != 2 || refreshed.StarterTasks[0].Setup || refreshed.StarterTasks[1].Setup {
+		t.Fatalf("refreshed Reaper starter tasks = %+v", refreshed.StarterTasks)
 	}
 	if refreshed.ProjectEntry == nil || refreshed.ProjectEntry.RelativePath != "{{name}}.rpp" || !refreshed.ProjectEntry.OpenAfterCreateDefault {
 		t.Errorf("refreshed Reaper project entry = %#v", refreshed.ProjectEntry)

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
@@ -103,6 +104,60 @@ func TestCreateWorkspaceSeedsStarterTasksServerSide(t *testing.T) {
 	// No consumed marker at seed time: first open must find it unconsumed.
 	if _, present := setupTask.Context["template_setup_autostart_consumed_at"]; present {
 		t.Fatalf("setup task must not be consumed at seed time: %+v", setupTask.Context)
+	}
+}
+
+func TestCreateReaperWorkspaceSeedsRealWorkWithoutSetupHelpTask(t *testing.T) {
+	handler, _, _, cleanup := templateTestEnv(t)
+	defer cleanup()
+	if err := projecttemplates.EnsureLibrary(handler.templatesRootResolver()); err != nil {
+		t.Fatalf("EnsureLibrary: %v", err)
+	}
+
+	var modelStarts int
+	handler.SetTemplateSetupTaskStarter(func(workspaceID, taskID string) error {
+		modelStarts++
+		return nil
+	})
+	w, resp := postCreateWorkspace(t, handler, `{"name":"Runtime Song","template_id":"reaper-song"}`)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201 without local REAPER prerequisites, got %d: %s", w.Code, w.Body.String())
+	}
+	if got, _ := resp["seeded_starter_tasks"].(float64); got != 2 {
+		t.Fatalf("seeded_starter_tasks = %v, want only the two real work tasks", resp["seeded_starter_tasks"])
+	}
+
+	folder := resp["folder"].(map[string]any)
+	workspaceID := folder["id"].(string)
+	tasks := workspaceTasksFromStore(t, handler, workspaceID)
+	if len(tasks) != 2 {
+		t.Fatalf("seeded tasks = %+v", tasks)
+	}
+	wantDescriptions := []string{
+		"Adjust the new REAPER session to the user's preferences",
+		"Sketch the song's arrangement",
+	}
+	for i, task := range tasks {
+		if task.Description != wantDescriptions[i] {
+			t.Errorf("task %d description = %q, want %q", i, task.Description, wantDescriptions[i])
+		}
+		if task.Context[taskContextTemplateSetup] == true {
+			t.Errorf("real starter work must not be marked as setup: %+v", task)
+		}
+	}
+
+	start := postTemplateSetupStart(t, handler, workspaceID)
+	if start["started"] != false || start["reason"] != "setup_wizard_owned" {
+		t.Fatalf("runtime wizard must own setup without starting a task: %v", start)
+	}
+	handler.CompleteSetupHelpTaskOnWizardReady(workspaceID)
+	for _, task := range workspaceTasksFromStore(t, handler, workspaceID) {
+		if task.Status != agentworkspace.TaskStatusPending {
+			t.Errorf("setup completion changed real starter work: %+v", task)
+		}
+	}
+	if modelStarts != 0 {
+		t.Fatalf("runtime setup must consume zero model starts, got %d", modelStarts)
 	}
 }
 
@@ -490,6 +545,69 @@ func TestTemplateSetupStart_LegacyTemplatesKeepAutoStarting(t *testing.T) {
 	}
 	if len(started) != 1 {
 		t.Fatalf("starter called %d times, want 1", len(started))
+	}
+}
+
+func TestRuntimeMigrationSupersedesOnlyUntouchedLegacyReaperSetupTask(t *testing.T) {
+	store := agentworkspace.NewInMemoryStore()
+	handler := New(nil)
+	handler.SetWorkspaceTaskStore(store)
+	ws := agentworkspace.NewWorkspace(agentworkspace.CreateWorkspaceParams{Name: "Legacy Reaper"})
+	ws.SetTemplateProvenance(&agentworkspace.TemplateProvenance{TemplateID: "reaper-song", Builtin: true, Version: 8})
+	baseContext := func() map[string]any {
+		return map[string]any{
+			taskContextTemplateID:          "reaper-song",
+			taskContextTemplateStarterTask: true,
+			taskContextTemplateSetup:       true,
+		}
+	}
+	ws.Tasks = []agentworkspace.Task{
+		{ID: "untouched", Description: legacyReaperSetupTaskDescription, Details: legacyReaperSetupTaskDetails, Status: agentworkspace.TaskStatusPending, Context: baseContext()},
+		{ID: "edited", Description: legacyReaperSetupTaskDescription, Details: legacyReaperSetupTaskDetails + " User note.", Status: agentworkspace.TaskStatusPending, Context: baseContext()},
+		{ID: "historical", Description: legacyReaperSetupTaskDescription, Details: legacyReaperSetupTaskDetails, Status: agentworkspace.TaskStatusFailed, Context: baseContext(), Error: "kept"},
+		{ID: "real-work", Description: "Adjust the session", Status: agentworkspace.TaskStatusPending, Context: map[string]any{taskContextTemplateID: "reaper-song", taskContextTemplateStarterTask: true}},
+	}
+	if err := store.Save(ws); err != nil {
+		t.Fatal(err)
+	}
+
+	handler.SupersedeLegacyReaperSetupHelpTask(ws.ID)
+	saved, err := store.Get(ws.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var firstCompletedAt *time.Time
+	for _, task := range saved.Tasks {
+		switch task.ID {
+		case "untouched":
+			if task.Status != agentworkspace.TaskStatusCompleted || task.CompletedAt == nil || task.Result != legacyReaperSetupSupersededNote {
+				t.Fatalf("untouched setup task was not superseded: %+v", task)
+			}
+			firstCompletedAt = task.CompletedAt
+		case "edited":
+			if task.Status != agentworkspace.TaskStatusPending || !strings.HasSuffix(task.Details, "User note.") {
+				t.Fatalf("edited setup task changed: %+v", task)
+			}
+		case "historical":
+			if task.Status != agentworkspace.TaskStatusFailed || task.Error != "kept" {
+				t.Fatalf("historical setup task changed: %+v", task)
+			}
+		case "real-work":
+			if task.Status != agentworkspace.TaskStatusPending {
+				t.Fatalf("real starter work changed: %+v", task)
+			}
+		}
+	}
+
+	handler.SupersedeLegacyReaperSetupHelpTask(ws.ID)
+	again, err := store.Get(ws.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, task := range again.Tasks {
+		if task.ID == "untouched" && (task.CompletedAt == nil || !task.CompletedAt.Equal(*firstCompletedAt)) {
+			t.Fatalf("replayed supersede rewrote completion: %+v", task)
+		}
 	}
 }
 

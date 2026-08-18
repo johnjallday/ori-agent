@@ -1,7 +1,9 @@
 package setupwizard
 
 import (
+	"context"
 	"strings"
+	"time"
 
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -20,6 +22,12 @@ type Blueprint struct {
 	Version int
 	Wizard  *workspace.SetupWizard
 
+	// RuntimeRequirements and RuntimeMigration opt a compiled built-in upgrade
+	// into replacing an older wizard snapshot with a validated runtime-aware
+	// snapshot. The planner is server code, never manifest data.
+	RuntimeRequirements *workspace.RuntimeRequirementsContract
+	RuntimeMigration    RuntimeMigrationPlanner
+
 	DirectoryRequirements  []workspace.DirectoryRequirement
 	AutomationRecipes      []workspace.AutomationRecipe
 	CapabilityRequirements []workspace.CapabilityRequirement
@@ -31,6 +39,28 @@ type Blueprint struct {
 // provenance. Returning false means "no wizard for this ID in this build",
 // which leaves the workspace exactly as it is.
 type BlueprintLookup func(templateID string) (Blueprint, bool)
+
+// RuntimeMigrationPlan is the safe output of a compiled built-in migration.
+// A diagnostic leaves the prior snapshot untouched and grants nothing.
+type RuntimeMigrationPlan struct {
+	SelectedModeID string
+	Diagnostic     string
+}
+
+// RuntimeMigrationInput is a defensive, portable view of the legacy evidence a
+// compiled planner may inspect. It intentionally exposes no store or mutable
+// workspace handle and no domain service.
+type RuntimeMigrationInput struct {
+	ProjectPath      string
+	ProjectEntryPath string
+	Provenance       *workspace.TemplateProvenance
+	Progress         *workspace.SetupWizardProgress
+	RuntimeState     *workspace.WorkspaceRuntimeState
+}
+
+// RuntimeMigrationPlanner resolves domain-specific legacy evidence without
+// putting migration hints or executable behavior in template.json.
+type RuntimeMigrationPlanner func(RuntimeMigrationInput, *workspace.RuntimeRequirementsContract) RuntimeMigrationPlan
 
 // SetBlueprintLookup installs the lookup used to backfill workspaces created
 // before their blueprint declared a wizard. Without one, no workspace is ever
@@ -63,6 +93,18 @@ func (s *Service) migrateIfNeeded(ws *workspace.Workspace) bool {
 	if s == nil || s.blueprints == nil || s.store == nil || ws == nil {
 		return false
 	}
+
+	// A runtime-aware built-in migration is explicit and compiled. It may
+	// replace an older wizard snapshot only after its planner proves the prior
+	// mode and authoritative project are unambiguous.
+	if blueprint, ok := s.runtimeMigrationBlueprint(ws); ok {
+		changed, completed := s.migrateRuntimeSnapshot(ws, blueprint)
+		if completed && s.onMigration != nil {
+			s.onMigration(context.Background(), ws.ID)
+		}
+		return changed
+	}
+
 	blueprint, ok := s.eligible(ws)
 	if !ok {
 		return false
@@ -80,31 +122,7 @@ func (s *Service) migrateIfNeeded(ws *workspace.Workspace) bool {
 	migrated := false
 	err := s.store.Update(ws.ID, func(current *workspace.Workspace) error {
 		provenance.SetupWizard = blueprint.Wizard
-		if blueprint.Version > provenance.Version {
-			provenance.Version = blueprint.Version
-		}
-		if strings.TrimSpace(provenance.TemplateName) == "" {
-			provenance.TemplateName = blueprint.Name
-		}
-		// Only absent lists are filled in. A workspace that already recorded its
-		// own requirements keeps them: they are what its existing setup was done
-		// against, and replacing them with today's blueprint would silently
-		// re-point a folder or a capability the user already satisfied.
-		if len(provenance.DirectoryRequirements) == 0 {
-			provenance.DirectoryRequirements = blueprint.DirectoryRequirements
-		}
-		if len(provenance.AutomationRecipes) == 0 {
-			provenance.AutomationRecipes = blueprint.AutomationRecipes
-		}
-		if len(provenance.CapabilityRequirements) == 0 {
-			provenance.CapabilityRequirements = blueprint.CapabilityRequirements
-		}
-		if len(provenance.Plugins) == 0 {
-			provenance.Plugins = blueprint.Plugins
-		}
-		if len(provenance.PluginSources) == 0 {
-			provenance.PluginSources = blueprint.PluginSources
-		}
+		mergeBlueprintSnapshot(provenance, blueprint)
 		current.SetTemplateProvenance(provenance)
 
 		if progress == nil {
@@ -129,6 +147,195 @@ func (s *Service) migrateIfNeeded(ws *workspace.Workspace) bool {
 		return false
 	}
 	return migrated
+}
+
+func (s *Service) runtimeMigrationBlueprint(ws *workspace.Workspace) (Blueprint, bool) {
+	provenance := ws.GetTemplateProvenance()
+	if provenance == nil || !provenance.Builtin || strings.TrimSpace(provenance.TemplateID) == "" {
+		return Blueprint{}, false
+	}
+	blueprint, ok := s.blueprints(provenance.TemplateID)
+	if !ok || blueprint.RuntimeMigration == nil || blueprint.RuntimeRequirements == nil || blueprint.Wizard.IsEmpty() {
+		return Blueprint{}, false
+	}
+	// Equal/newer versions own a current or unsupported snapshot. Never rewrite
+	// them as if they were the known older built-in this migration understands.
+	if blueprint.Version <= provenance.Version {
+		return Blueprint{}, false
+	}
+	return blueprint, true
+}
+
+func (s *Service) migrateRuntimeSnapshot(ws *workspace.Workspace, blueprint Blueprint) (changed, completed bool) {
+	provenance := ws.GetTemplateProvenance()
+	if provenance == nil {
+		return false, false
+	}
+	contract := workspace.CloneRuntimeRequirementsContract(blueprint.RuntimeRequirements)
+	if !contract.StructurallyValid() {
+		return s.recordMigrationDiagnostic(ws, "The updated blueprint's runtime setup is invalid in this build."), false
+	}
+	// A lower-version workspace carrying any runtime snapshot is partial or
+	// hand-edited. Replacing it could discard authority or reinterpret a mode,
+	// so preserve it and fail closed instead.
+	if provenance.RuntimeRequirements != nil {
+		return s.recordMigrationDiagnostic(ws, "This workspace has a partial runtime snapshot that Ori will not replace automatically."), false
+	}
+
+	projectEntry, _ := workspace.GetProjectEntryPath(ws.SharedData)
+	plan := blueprint.RuntimeMigration(RuntimeMigrationInput{
+		ProjectPath:      ws.ProjectPath,
+		ProjectEntryPath: projectEntry,
+		Provenance:       ws.GetTemplateProvenance(),
+		Progress:         ws.GetSetupWizardProgress(),
+		RuntimeState:     ws.GetRuntimeState(),
+	}, contract)
+	plan.SelectedModeID = workspace.NormalizeRuntimeIdentifier(plan.SelectedModeID)
+	if strings.TrimSpace(plan.Diagnostic) != "" {
+		return s.recordMigrationDiagnostic(ws, plan.Diagnostic), false
+	}
+	if _, ok := contract.Mode(plan.SelectedModeID); !ok {
+		return s.recordMigrationDiagnostic(ws, "Ori could not safely identify this workspace's previous operating mode."), false
+	}
+
+	progress := runtimeMigrationProgress(ws.GetSetupWizardProgress(), blueprint.Wizard, plan.SelectedModeID, s.timestamp())
+	state := ws.GetRuntimeState()
+	if state == nil {
+		state = &workspace.WorkspaceRuntimeState{}
+	}
+	state.SelectedModeID = plan.SelectedModeID
+
+	err := s.store.Update(ws.ID, func(current *workspace.Workspace) error {
+		provenance.RuntimeRequirements = contract
+		provenance.SetupWizard = blueprint.Wizard
+		mergeBlueprintSnapshot(provenance, blueprint)
+		current.SetTemplateProvenance(provenance)
+		current.SetRuntimeState(state)
+		current.SetSetupWizardProgress(progress)
+		return nil
+	})
+	if err != nil {
+		// The store update is atomic. A failed/interrupted save retains the old
+		// snapshot and will retry from the same evidence on the next read.
+		return false, false
+	}
+	return true, true
+}
+
+func (s *Service) recordMigrationDiagnostic(ws *workspace.Workspace, diagnostic string) bool {
+	progress := ws.GetSetupWizardProgress()
+	if progress == nil {
+		progress = &workspace.SetupWizardProgress{}
+	}
+	diagnostic = strings.TrimSpace(diagnostic)
+	if len(diagnostic) > 500 {
+		diagnostic = diagnostic[:500]
+	}
+	if progress.MigrationDiagnostic == diagnostic && progress.MigratedAt != nil {
+		return false
+	}
+	now := s.timestamp()
+	progress.MigrationDiagnostic = diagnostic
+	if progress.MigratedAt == nil {
+		stamp := now
+		progress.MigratedAt = &stamp
+	}
+	if progress.CreatedAt.IsZero() {
+		progress.CreatedAt = now
+	}
+	if err := s.store.Update(ws.ID, func(current *workspace.Workspace) error {
+		current.SetSetupWizardProgress(progress)
+		return nil
+	}); err != nil {
+		return false
+	}
+	return true
+}
+
+func runtimeMigrationProgress(previous *workspace.SetupWizardProgress, wizard *workspace.SetupWizard, selectedMode string, now time.Time) *workspace.SetupWizardProgress {
+	progress := workspace.CloneSetupWizardProgress(previous)
+	if progress == nil {
+		progress = &workspace.SetupWizardProgress{}
+	}
+	prior := make(map[string]workspace.SetupStepProgress, len(progress.Steps))
+	for _, step := range progress.Steps {
+		prior[step.StepID] = step
+	}
+	steps := make([]workspace.SetupStepProgress, 0, len(wizard.Steps))
+	for _, definition := range wizard.Steps {
+		record := prior[definition.ID]
+		record.StepID = definition.ID
+		record.UpdatedAt = now
+		switch definition.Kind {
+		case workspace.SetupStepKindRuntimeMode:
+			record.Status = workspace.SetupStepStatusComplete
+			record.SelectedOption = selectedMode
+			if record.CompletedAt == nil {
+				stamp := now
+				record.CompletedAt = &stamp
+			}
+		case workspace.SetupStepKindRuntimeReadiness:
+			// Old Ori-side readiness is not proof of the new harmless end-to-end
+			// verification. The runtime service will derive the exact blocker.
+			record.Status = workspace.SetupStepStatusPending
+			record.CompletedAt = nil
+		case workspace.SetupStepKindSummary:
+			if progress.CompletedAt != nil {
+				record.Status = workspace.SetupStepStatusComplete
+				if record.CompletedAt == nil {
+					record.CompletedAt = cloneTime(progress.CompletedAt)
+				}
+			}
+		}
+		steps = append(steps, record)
+	}
+	progress.Steps = steps
+	progress.WizardVersion = wizard.Version
+	progress.MigrationDiagnostic = ""
+	progress.CurrentStepID = ""
+	if progress.CreatedAt.IsZero() {
+		progress.CreatedAt = now
+	}
+	if progress.MigratedAt == nil {
+		stamp := now
+		progress.MigratedAt = &stamp
+	}
+	progress.UpdatedAt = now
+	return progress
+}
+
+func mergeBlueprintSnapshot(provenance *workspace.TemplateProvenance, blueprint Blueprint) {
+	if blueprint.Version > provenance.Version {
+		provenance.Version = blueprint.Version
+	}
+	if strings.TrimSpace(provenance.TemplateName) == "" {
+		provenance.TemplateName = blueprint.Name
+	}
+	// Only absent lists are filled in. A workspace that already recorded its
+	// own requirements keeps them: replacing them would silently re-point setup.
+	if len(provenance.DirectoryRequirements) == 0 {
+		provenance.DirectoryRequirements = blueprint.DirectoryRequirements
+	}
+	if len(provenance.AutomationRecipes) == 0 {
+		provenance.AutomationRecipes = blueprint.AutomationRecipes
+	}
+	if len(provenance.CapabilityRequirements) == 0 {
+		provenance.CapabilityRequirements = blueprint.CapabilityRequirements
+	}
+	if len(provenance.Plugins) == 0 {
+		provenance.Plugins = blueprint.Plugins
+	}
+	if len(provenance.PluginSources) == 0 {
+		provenance.PluginSources = blueprint.PluginSources
+	}
+}
+
+func cloneTime(value *time.Time) *time.Time {
+	if value == nil {
+		return nil
+	}
+	copy := *value
+	return &copy
 }
 
 // eligible reports the blueprint to backfill this workspace with, if any.

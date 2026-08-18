@@ -13,15 +13,17 @@ import (
 )
 
 type recordingAdapter struct {
-	id          string
-	durable     DurableResult
-	live        LiveResult
-	durableErr  error
-	liveErr     error
-	evaluations []EvaluationRequest
-	liveChecks  []EvaluationRequest
-	actions     []ConfirmedActionRequest
-	verifies    []VerificationRequest
+	id           string
+	durable      DurableResult
+	live         LiveResult
+	durableErr   error
+	liveErr      error
+	evaluations  []EvaluationRequest
+	liveChecks   []EvaluationRequest
+	actions      []ConfirmedActionRequest
+	verifies     []VerificationRequest
+	verification VerificationResult
+	verifyErr    error
 }
 
 func (a *recordingAdapter) ID() string { return a.id }
@@ -39,7 +41,7 @@ func (a *recordingAdapter) ConfirmAction(_ context.Context, request ConfirmedAct
 }
 func (a *recordingAdapter) Verify(_ context.Context, request VerificationRequest) (VerificationResult, error) {
 	a.verifies = append(a.verifies, request)
-	return VerificationResult{Succeeded: true}, nil
+	return a.verification, a.verifyErr
 }
 
 type runtimeStore struct {
@@ -230,6 +232,40 @@ func TestServicePreservesRequirementOrderAndFirstActionableBlocker(t *testing.T)
 	}
 	if len(first.actions)+len(second.actions)+len(first.verifies)+len(second.verifies) != 0 {
 		t.Fatal("reading status invoked a mutating adapter method")
+	}
+}
+
+func TestServiceVerificationFailureReturnsActionableTransientStatus(t *testing.T) {
+	adapter := &recordingAdapter{
+		id: "runtime_adapter",
+		durable: DurableResult{
+			State: DurableConfigured, VerificationRequired: true,
+			ReasonCode: ReasonVerificationRequired, Summary: "Run verification.",
+		},
+		verification: VerificationResult{
+			LiveState: LiveCheckFailed, ReasonCode: "runner_failure", Summary: "The trusted runner did not complete.",
+			Action: &Action{Token: "set_up_runner", Code: "set_up_runner", Label: "Check runner setup"},
+		},
+	}
+	registry := NewRegistry()
+	if err := registry.Register(adapter); err != nil {
+		t.Fatal(err)
+	}
+	contract := contractWithRequirements("runtime")
+	contract.Requirements[0].Adapter = adapter.ID()
+	store := &runtimeStore{ws: runtimeWorkspace(contract)}
+	service := NewService(store, registry)
+
+	status, err := service.Verify(context.Background(), store.ws.ID, "runtime")
+	if err != nil {
+		t.Fatalf("an expected verification failure should return status, not an opaque error: %v", err)
+	}
+	if status.DurableState != DurableInProgress || status.LiveState != LiveCheckFailed || status.FirstBlocker == nil ||
+		status.FirstBlocker.ReasonCode != "runner_failure" || status.FirstBlocker.Action == nil || status.FirstBlocker.Action.Code != "set_up_runner" {
+		t.Fatalf("verification failure status = %+v", status)
+	}
+	if state := store.ws.GetRuntimeState(); state == nil || len(state.RequirementStates) != 1 || state.RequirementStates[0].FirstVerifiedAt != nil {
+		t.Fatalf("failed verification recorded success: %+v", state)
 	}
 }
 

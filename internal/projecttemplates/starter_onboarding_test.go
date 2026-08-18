@@ -8,10 +8,10 @@ import (
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 )
 
-// TestReaperStarterSetupTask pins the converted reaper-song manifest: the
-// intake-era onboarding block is gone, replaced by an agent roster and a
-// single setup starter task ("defaults first, adjust conversationally").
-func TestReaperStarterSetupTask(t *testing.T) {
+// TestReaperStarterRuntimeTasks pins the activated reaper-song manifest: setup
+// is deterministic runtime state, not model work, while the two real song tasks
+// remain available for file-only and assisted work.
+func TestReaperStarterRuntimeTasks(t *testing.T) {
 	libDir := filepath.Join(t.TempDir(), "templates")
 	if err := projecttemplates.EnsureLibrary(libDir); err != nil {
 		t.Fatalf("EnsureLibrary: %v", err)
@@ -27,8 +27,8 @@ func TestReaperStarterSetupTask(t *testing.T) {
 	if len(tpl.Warnings) != 0 {
 		t.Fatalf("reaper-song should load without warnings, got %v", tpl.Warnings)
 	}
-	if tpl.BuiltinVersion < 3 {
-		t.Fatalf("reaper-song builtin_version = %d, want at least 3", tpl.BuiltinVersion)
+	if tpl.BuiltinVersion != 8 {
+		t.Fatalf("reaper-song builtin_version = %d, want 8 for runtime-contract activation", tpl.BuiltinVersion)
 	}
 	if tpl.ProjectEntry == nil || tpl.ProjectEntry.RelativePath != "{{name}}.rpp" || !tpl.ProjectEntry.OpenAfterCreateDefault {
 		t.Fatalf("reaper-song project entry = %#v", tpl.ProjectEntry)
@@ -42,45 +42,29 @@ func TestReaperStarterSetupTask(t *testing.T) {
 		t.Fatalf("entry agent skills = %#v, want reaper-session-setup", tpl.Agents[0].Tools.Skills)
 	}
 
-	// Starter tasks: the setup help task first, then the session adjustment as
-	// normal work.
-	//
-	// These used to be one task, and splitting them is the point (FR-114/115).
-	// The wizard completes its setup task automatically when setup passes — so
-	// whatever that task claims to cover had better be what setup actually did.
-	// Adjusting tempo, key, and arrangement is work someone does with the user;
-	// reporting it as done because a plugin got attached would be a lie the
-	// wizard tells on the agent's behalf.
-	if len(tpl.StarterTasks) != 3 {
-		t.Fatalf("expected 3 starter tasks (setup help, adjust, arrange), got %+v", tpl.StarterTasks)
+	// Setup is represented by runtime mode/readiness steps, never by a starter
+	// task that spends a model call or gets auto-completed. The only retained
+	// starters are real user work and neither is marked as setup.
+	if len(tpl.StarterTasks) != 2 {
+		t.Fatalf("expected exactly 2 real starter tasks (adjust, arrange), got %+v", tpl.StarterTasks)
 	}
-	setup := tpl.StarterTasks[0]
-	if !setup.Setup {
-		t.Fatalf("the first task must be the setup help task: %+v", tpl.StarterTasks[0])
-	}
-	for i, task := range tpl.StarterTasks[1:] {
+	for i, task := range tpl.StarterTasks {
 		if task.Setup {
-			t.Fatalf("task %d must not be a setup task: %+v", i+1, task)
+			t.Fatalf("task %d must not be a setup-help task: %+v", i, task)
+		}
+		if strings.EqualFold(strings.TrimSpace(task.Description), "Help with the REAPER setup choices") {
+			t.Fatalf("legacy setup-help task must not be seeded: %+v", task)
 		}
 	}
-
-	// The setup help task explains the choice and is honest about its ceiling.
-	for _, want := range []string{"file only", "Ori-assisted", "not that REAPER is running"} {
-		if !strings.Contains(setup.Details, want) {
-			t.Errorf("setup help task missing %q: %s", want, setup.Details)
-		}
+	if tpl.StarterTasks[0].Description != "Adjust the new REAPER session to the user's preferences" {
+		t.Fatalf("first real starter task changed: %+v", tpl.StarterTasks[0])
 	}
-	if !strings.Contains(setup.Details, "do not claim setup is complete") {
-		t.Errorf("setup help task must not claim completion it did not perform: %s", setup.Details)
-	}
-	for _, forbidden := range []string{"Tempo (BPM)", "Musical key"} {
-		if strings.Contains(setup.Details, forbidden) {
-			t.Errorf("session work must not live in the auto-completed setup task: %q", forbidden)
-		}
+	if tpl.StarterTasks[1].Description != "Sketch the song's arrangement" {
+		t.Fatalf("second real starter task changed: %+v", tpl.StarterTasks[1])
 	}
 
 	// The adjust task keeps every bit of the truthful project-control guidance.
-	adjust := tpl.StarterTasks[1]
+	adjust := tpl.StarterTasks[0]
 	for _, heading := range []string{"## Created defaults", "## Questions to ask", "## Validation", "## How to apply changes"} {
 		if !strings.Contains(adjust.Details, heading) {
 			t.Errorf("adjust details missing %q heading", heading)
@@ -110,6 +94,24 @@ func TestReaperStarterSetupTask(t *testing.T) {
 		t.Error("adjust task must not silently fall back to direct .rpp edits")
 	}
 
+	arrange := tpl.StarterTasks[1]
+	for _, want := range []string{"plan", "live", "file"} {
+		if !strings.Contains(strings.ToLower(arrange.Details), want) {
+			t.Errorf("arrangement task must distinguish offline planning from applying %s changes: %s", want, arrange.Details)
+		}
+	}
+
+	for _, copy := range []string{tpl.Description, tpl.Tagline} {
+		if strings.Contains(strings.ToLower(copy), "ready to adjust in chat") {
+			t.Errorf("blueprint copy makes an unverified live-control promise: %q", copy)
+		}
+	}
+	for _, want := range []string{"project-file", "verified live control"} {
+		if !strings.Contains(strings.ToLower(tpl.Description+" "+tpl.Tagline), want) {
+			t.Errorf("blueprint copy must distinguish immediate file work from assisted control; missing %q", want)
+		}
+	}
+
 	prompt := tpl.Agents[0].SystemPrompt
 	for _, want := range []string{
 		"only authoritative song project",
@@ -130,12 +132,10 @@ func TestReaperStarterSetupTask(t *testing.T) {
 	}
 }
 
-// TestReaperStarterSetupWizard pins the manifest's wizard declaration: the
-// version 1 mode choice, the two checks behind it, and the plugin the assisted
-// mode needs. The declaration is inert data — what it must get right is naming
-// a registered adapter and a plugin the blueprint actually declares, because a
-// typo in either is a workspace nobody can finish setting up.
-func TestReaperStarterSetupWizard(t *testing.T) {
+// TestReaperStarterRuntimeContract pins the first built-in activation of the
+// generalized contract: exactly two modes, one compiled runtime requirement,
+// and runtime-aware wizard steps that all resolve from the workspace snapshot.
+func TestReaperStarterRuntimeContract(t *testing.T) {
 	libDir := filepath.Join(t.TempDir(), "templates")
 	if err := projecttemplates.EnsureLibrary(libDir); err != nil {
 		t.Fatalf("EnsureLibrary: %v", err)
@@ -151,45 +151,68 @@ func TestReaperStarterSetupWizard(t *testing.T) {
 	if tpl.HasInvalidSetupWizard() {
 		t.Fatalf("reaper-song wizard failed to parse: %v", tpl.SetupWizardError)
 	}
-	if tpl.BuiltinVersion < 7 {
-		t.Fatalf("builtin_version = %d, want at least 7 so existing workspaces refresh", tpl.BuiltinVersion)
+	if tpl.BuiltinVersion != 8 {
+		t.Fatalf("builtin_version = %d, want 8 so installed libraries receive the runtime contract", tpl.BuiltinVersion)
 	}
+	contract := tpl.RuntimeRequirements
+	if contract == nil || !contract.StructurallyValid() {
+		t.Fatalf("reaper-song must declare a valid runtime contract: %#v (%s)", contract, tpl.RuntimeRequirementsError)
+	}
+	if contract.SchemaVersion != projecttemplates.RuntimeRequirementsSchemaVersion {
+		t.Fatalf("runtime schema_version = %d", contract.SchemaVersion)
+	}
+	if len(contract.OperatingModes) != 2 {
+		t.Fatalf("operating modes = %+v, want exactly File-only and Ori-assisted", contract.OperatingModes)
+	}
+	fileOnly, ok := contract.Mode("file_only")
+	if !ok || fileOnly.Label != "File-only" || len(fileOnly.Requires) != 0 {
+		t.Fatalf("file-only mode = %+v, ok=%v", fileOnly, ok)
+	}
+	assisted, ok := contract.Mode("ori_assisted")
+	if !ok || assisted.Label != "Ori-assisted REAPER" || len(assisted.Requires) != 1 || assisted.Requires[0] != "reaper_live_control" {
+		t.Fatalf("assisted mode = %+v, ok=%v", assisted, ok)
+	}
+	if len(contract.Requirements) != 1 {
+		t.Fatalf("runtime requirements = %+v, want exactly reaper_live_control", contract.Requirements)
+	}
+	requirement, ok := contract.Requirement("reaper_live_control")
+	if !ok || requirement.Adapter != "reaper_live_control" {
+		t.Fatalf("reaper_live_control requirement = %+v, ok=%v", requirement, ok)
+	}
+	for _, want := range []string{"loopback", "runner", "selected agent", "without ori's per-call confirmation"} {
+		if !strings.Contains(strings.ToLower(requirement.Disclosure), want) {
+			t.Errorf("REAPER access disclosure missing %q: %s", want, requirement.Disclosure)
+		}
+	}
+
 	wizard := tpl.SetupWizard
 	if wizard.Version != 1 {
 		t.Fatalf("wizard version = %d, want 1", wizard.Version)
 	}
 	if len(wizard.Steps) != 3 {
-		t.Fatalf("expected mode, readiness, and summary steps, got %+v", wizard.Steps)
+		t.Fatalf("expected runtime mode, runtime readiness, and summary steps, got %+v", wizard.Steps)
 	}
-
-	mode := wizard.Steps[0]
-	if mode.Kind != "plugin_readiness" || !mode.Required {
-		t.Fatalf("the mode step must be the required plugin-readiness step: %+v", mode)
-	}
-	if mode.Adapter != "reaper_song" {
-		t.Fatalf("mode adapter = %q, want the registered reaper_song adapter", mode.Adapter)
-	}
-	if mode.RequirementKey != "reaper-plugin" {
-		t.Fatalf("mode requirement_key = %q, want the plugin the manifest declares", mode.RequirementKey)
-	}
-	// The disclosure is where a user learns what the assisted path will ask of
-	// them, before they pick it.
-	for _, want := range []string{"no plugin", "nothing is installed or enabled without you choosing it"} {
-		if !strings.Contains(mode.Disclosure, want) {
-			t.Errorf("mode disclosure missing %q: %s", want, mode.Disclosure)
-		}
-	}
-
+	wantKinds := []string{"runtime_mode", "runtime_readiness", "summary"}
 	for i, step := range wizard.Steps {
-		if step.Adapter != "reaper_song" {
-			t.Errorf("step %d (%s) adapter = %q", i, step.ID, step.Adapter)
+		if step.Kind != wantKinds[i] {
+			t.Errorf("step %d kind = %q, want %q", i, step.Kind, wantKinds[i])
+		}
+		if step.Adapter != "" {
+			t.Errorf("runtime-aware step %d (%s) must resolve through the runtime contract, got legacy adapter %q", i, step.ID, step.Adapter)
 		}
 		if !step.Required {
 			t.Errorf("step %d (%s) must be required: setup is not finished with it outstanding", i, step.ID)
 		}
 	}
-	// The plugin the assisted mode needs is one the blueprint declares, so its
-	// install source resolves without the user hunting for it.
+	if wizard.Steps[1].RequirementKey != "reaper_live_control" {
+		t.Fatalf("runtime readiness requirement_key = %q", wizard.Steps[1].RequirementKey)
+	}
+	if wizard.Steps[0].RequirementKey != "" || wizard.Steps[2].RequirementKey != "" {
+		t.Fatalf("only runtime readiness may name a requirement: %+v", wizard.Steps)
+	}
+
+	// The plugin the assisted mode needs remains declared for the runtime
+	// adapter's explicit install/attach repair actions.
 	if source := tpl.Tools.PluginSources["reaper-plugin"]; source == "" {
 		t.Fatal("reaper-plugin must keep a declared install source")
 	}
