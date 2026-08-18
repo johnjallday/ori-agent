@@ -118,6 +118,7 @@ func (a *RuntimeAdapter) Verify(ctx context.Context, request runtimecapability.V
 	before := a.evaluatePrerequisites(ctx, request.EvaluationRequest)
 	if before.blocked != nil {
 		return runtimecapability.VerificationResult{
+			LiveState:  runtimecapability.LiveNotChecked,
 			ReasonCode: before.blocked.ReasonCode,
 			Summary:    before.blocked.Summary,
 			Action:     before.blocked.Action,
@@ -125,11 +126,12 @@ func (a *RuntimeAdapter) Verify(ctx context.Context, request runtimecapability.V
 	}
 	transport := a.probes.Transport.CheckTransport(ctx, before.web)
 	if live := liveTransportResult(request.WorkspaceID, transport); live != nil {
-		return runtimecapability.VerificationResult{ReasonCode: live.ReasonCode, Summary: live.Summary, Action: live.Action}, nil
+		return runtimecapability.VerificationResult{LiveState: live.State, ReasonCode: live.ReasonCode, Summary: live.Summary, Action: live.Action}, nil
 	}
 	expected, err := AuthoritativeProject(a.source, request.WorkspaceID)
 	if err != nil {
 		return runtimecapability.VerificationResult{
+			LiveState:  runtimecapability.LiveWrongTarget,
 			ReasonCode: ReasonProjectMissing,
 			Summary:    "The workspace's REAPER project is unavailable.",
 			Action:     runtimeAction(request.WorkspaceID, "review_project", "Review workspace project"),
@@ -143,7 +145,7 @@ func (a *RuntimeAdapter) Verify(ctx context.Context, request runtimecapability.V
 	})
 	if verified.State != VerificationSucceeded {
 		live := liveVerificationResult(request.WorkspaceID, verified)
-		return runtimecapability.VerificationResult{ReasonCode: live.ReasonCode, Summary: live.Summary, Action: live.Action}, nil
+		return runtimecapability.VerificationResult{LiveState: live.State, ReasonCode: live.ReasonCode, Summary: live.Summary, Action: live.Action}, nil
 	}
 	// A successful runner response is not enough. Re-evaluate every durable
 	// prerequisite after it completes so a concurrent revoke/removal cannot be
@@ -151,6 +153,7 @@ func (a *RuntimeAdapter) Verify(ctx context.Context, request runtimecapability.V
 	after := a.evaluatePrerequisites(ctx, request.EvaluationRequest)
 	if after.blocked != nil {
 		return runtimecapability.VerificationResult{
+			LiveState:  runtimecapability.LiveNotChecked,
 			ReasonCode: after.blocked.ReasonCode,
 			Summary:    after.blocked.Summary,
 			Action:     after.blocked.Action,
@@ -158,6 +161,7 @@ func (a *RuntimeAdapter) Verify(ctx context.Context, request runtimecapability.V
 	}
 	return runtimecapability.VerificationResult{
 		Succeeded:  true,
+		LiveState:  runtimecapability.LiveAvailable,
 		ReasonCode: "verified",
 		Summary:    "The trusted REAPER connection test completed for this workspace project.",
 	}, nil
@@ -225,15 +229,6 @@ func (a *RuntimeAdapter) evaluatePrerequisites(ctx context.Context, request runt
 		return prerequisiteFailure(request, ReasonWebRemoteInvalid, "Ori could not verify REAPER Web Remote configuration.", runtimeAction(request.WorkspaceID, "check_web_remote", "Check Web Remote"))
 	}
 
-	runner := a.probes.Runner.DetectRunner(ctx)
-	switch runner.State {
-	case ProbeReady:
-	case ProbeMissing:
-		return prerequisiteFailure(request, ReasonRunnerMissing, "The Ori REAPER runner is not registered yet.", runtimeAction(request.WorkspaceID, "set_up_runner", "Set up runner"))
-	default:
-		return prerequisiteFailure(request, ReasonRunnerInvalid, "The Ori REAPER runner registration is not usable.", runtimeAction(request.WorkspaceID, "set_up_runner", "Set up runner"))
-	}
-
 	pluginResults, err := a.plugins.Inspect(request.WorkspaceID, []string{ReaperPluginName})
 	if err != nil || len(pluginResults) == 0 {
 		return prerequisiteFailure(request, runtimecapability.ReasonCheckFailed, "Ori could not check this workspace's REAPER plugin.", runtimeAction(request.WorkspaceID, "review_runtime_setup", "Review live-control setup"))
@@ -246,6 +241,19 @@ func (a *RuntimeAdapter) evaluatePrerequisites(ctx context.Context, request runt
 		return prerequisiteFailure(request, ReasonPluginDisabled, "The REAPER plugin is installed but disabled.", runtimeAction(request.WorkspaceID, "enable_reaper_plugin", "Enable REAPER plugin"))
 	case len(pluginResult.Missing) > 0 || pluginResult.State == pluginworkspace.PluginStateDetached:
 		return prerequisiteFailure(request, ReasonPluginDetached, "The REAPER plugin is not attached to this workspace.", runtimeAction(request.WorkspaceID, "attach_reaper_plugin", "Attach REAPER plugin"))
+	}
+
+	// Runner setup is supplied by the installed plugin, so plugin repair must be
+	// the first actionable blocker when both are absent. Asking someone to load a
+	// runner that has not been installed yet would offer a button that cannot
+	// succeed.
+	runner := a.probes.Runner.DetectRunner(ctx)
+	switch runner.State {
+	case ProbeReady:
+	case ProbeMissing:
+		return prerequisiteFailure(request, ReasonRunnerMissing, "The Ori REAPER runner is not registered yet.", runtimeAction(request.WorkspaceID, "set_up_runner", "Set up runner"))
+	default:
+		return prerequisiteFailure(request, ReasonRunnerInvalid, "The Ori REAPER runner registration is not usable.", runtimeAction(request.WorkspaceID, "set_up_runner", "Set up runner"))
 	}
 
 	ws, err := a.source.GetFolderWorkspace(request.WorkspaceID)

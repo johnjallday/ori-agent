@@ -55,12 +55,25 @@ func (s *AgentSnapshotStore) Save(ws *Workspace) error {
 	return nil
 }
 
-// Update overrides the inherited Store.Update so the wrapper's Save (with the
-// snapshot hook) is invoked at the end of the canonical mutate-then-save flow.
-// Without this override the embedded Store's Update would call the inner's
-// Save directly, skipping snapshotReferencedAgents.
+// Update delegates mutation to the wrapped store so a SyncStore can hydrate
+// folder-only canonical fields before fn runs. Reimplementing Get → fn → Save at
+// this wrapper would start from SQLite's lean projection and make partial
+// mutations (for example revoking one runtime grant) silently no-op or erase the
+// selected mode. Snapshot the resulting agent references after the inner update
+// to retain this decorator's write hook.
 func (s *AgentSnapshotStore) Update(wsID string, fn func(*Workspace) error) error {
-	return CanonicalUpdate(s, wsID, fn)
+	var updated *Workspace
+	if err := s.Store.Update(wsID, func(ws *Workspace) error {
+		if err := fn(ws); err != nil {
+			return err
+		}
+		updated = ws
+		return nil
+	}); err != nil {
+		return err
+	}
+	s.snapshotReferencedAgents(updated)
+	return nil
 }
 
 // SnapshotReferencedAgents writes a snapshot for every agent the workspace

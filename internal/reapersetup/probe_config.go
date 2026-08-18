@@ -19,8 +19,10 @@ const (
 var runnerCommandIDPattern = regexp.MustCompile(`^(?:_[A-Za-z0-9][A-Za-z0-9_-]{1,63}|[1-9][0-9]{0,9})$`)
 
 // parseWebRemoteConfig accepts the two REAPER Web Remote encodings currently
-// written to reaper.ini. A disabled interface is not configured. A malformed
-// enabled entry is invalid rather than silently falling back to a guessed port.
+// written to reaper.ini. In REAPER's HTTP encoding the field before the port is
+// not an enabled flag: a live interface is normally persisted as "HTTP 0 2307".
+// WEBR uses an explicit enabled field. A malformed configured entry is invalid
+// rather than silently falling back to a guessed port.
 func parseWebRemoteConfig(data []byte) WebRemoteObservation {
 	if len(data) == 0 {
 		return WebRemoteObservation{State: ProbeMissing}
@@ -50,21 +52,28 @@ func parseWebRemoteConfig(data []byte) WebRemoteObservation {
 		if len(fields) < 3 {
 			return WebRemoteObservation{State: ProbeInvalid}
 		}
-		enabled, validEnabled := parseREAPEREnabled(fields[1])
-		if !validEnabled {
-			return WebRemoteObservation{State: ProbeInvalid}
-		}
 		portField := fields[2]
-		if strings.EqualFold(fields[0], "WEBR") {
+		if strings.EqualFold(fields[0], "HTTP") {
+			// REAPER currently writes 0 here for an active Web browser
+			// interface. Validate the bounded format, but do not interpret it
+			// as disabled; interface absence is represented by no HTTP row.
+			if fields[1] != "0" && fields[1] != "1" {
+				return WebRemoteObservation{State: ProbeInvalid}
+			}
+		} else {
+			enabled, validEnabled := parseREAPEREnabled(fields[1])
+			if !validEnabled {
+				return WebRemoteObservation{State: ProbeInvalid}
+			}
 			portField = fields[len(fields)-1]
+			if !enabled {
+				foundDisabled = true
+				continue
+			}
 		}
 		port, err := strconv.Atoi(portField)
 		if err != nil || port < 1 || port > 65535 {
 			return WebRemoteObservation{State: ProbeInvalid}
-		}
-		if !enabled {
-			foundDisabled = true
-			continue
 		}
 		return WebRemoteObservation{State: ProbeReady, Port: port}
 	}

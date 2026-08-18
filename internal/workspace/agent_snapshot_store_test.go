@@ -312,6 +312,61 @@ func TestAgentSnapshotStore_AgentWorkSurvivesSetupProgress(t *testing.T) {
 	}
 }
 
+func TestAgentSnapshotStore_UpdateHydratesRuntimeStateBeforeRevoke(t *testing.T) {
+	fileStore, err := NewFileStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	defer func() { _ = fileStore.Close() }()
+
+	primary := NewInMemoryStore()
+	store := NewAgentSnapshotStore(NewSyncStore(primary, fileStore), &resolverAgentStoreStub{agents: map[string]*agent.Agent{}})
+	ws := &Workspace{ID: "ws-runtime-revoke", Name: "Runtime Revoke", Status: StatusActive}
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	canonical, err := fileStore.Get(ws.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonical.SetRuntimeState(&WorkspaceRuntimeState{
+		SelectedModeID: "ori_assisted",
+		Grants: []RuntimeCapabilityGrant{{
+			CapabilityKey:   "reaper_live_control",
+			AgentInstanceID: "producer-1",
+			GrantedAt:       time.Date(2026, 8, 18, 13, 0, 0, 0, time.UTC),
+		}},
+	})
+	if err := fileStore.Save(canonical); err != nil {
+		t.Fatal(err)
+	}
+
+	revokedAt := time.Date(2026, 8, 18, 14, 0, 0, 0, time.UTC)
+	if err := store.Update(ws.ID, func(current *Workspace) error {
+		changed, revokeErr := current.RevokeRuntimeCapability("reaper_live_control", "producer-1", revokedAt)
+		if !changed && revokeErr == nil {
+			t.Fatal("active canonical grant was invisible to wrapped Update")
+		}
+		return revokeErr
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := store.GetFolderWorkspace(ws.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := got.GetRuntimeState()
+	if state == nil {
+		t.Fatal("runtime state was lost")
+	}
+	grant, found := state.RuntimeGrant("reaper_live_control", "producer-1")
+	if state.SelectedModeID != "ori_assisted" || !found || grant.Active() || grant.RevokedAt == nil || !grant.RevokedAt.Equal(revokedAt) {
+		t.Fatalf("runtime mode or revocation was lost: %+v", state)
+	}
+}
+
 // TestAgentSnapshotStore_InstalledCapabilitySurvivesAgentWork exercises the
 // fully wrapped production chain (AgentSnapshotStore over SyncStore over a
 // SQLite-shaped primary + FileStore) against the FR-144 failure mode: an

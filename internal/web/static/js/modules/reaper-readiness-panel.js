@@ -1,556 +1,568 @@
-// reaper-readiness-panel.js — the durable REAPER Setup readiness card on the
-// workspace detail page (Workspace Tools → Plugins), plus a compact
-// setup-needed indicator chip in the config summary.
+// reaper-readiness-panel.js — REAPER's renderer inside the authoritative
+// generalized Setup Wizard surface.
 //
-// It reads one normalized readiness result from
-// GET /api/workspaces/{id}/reaper-setup and renders separate rows for project
-// mode, plugin install/enabled, workspace attachment, setup-agent compatibility,
-// native CLI access, setup-task state, and live REAPER verification — which is
-// always labeled not-yet-checked. It never claims REAPER is connected.
-//
-// Actions (repair, check-again-and-start-setup, deep-links) reuse the existing
-// idempotent backend endpoints and re-fetch readiness after every mutation.
+// There is intentionally no second REAPER card, chip, or status endpoint here.
+// The renderer consumes /runtime-capabilities, returns every transition to the
+// same service, and lets SetupWizard own the one banner/chip/dialog entry point.
 (function () {
   'use strict';
 
-  const els = () => ({
-    card: document.getElementById('reaperReadinessCard'),
-    status: document.getElementById('reaperReadinessStatus'),
-    badge: document.getElementById('reaperReadinessBadge'),
-    rows: document.getElementById('reaperReadinessRows'),
-    actions: document.getElementById('reaperReadinessActions'),
-    chip: document.getElementById('reaperReadinessChip')
-  });
+  const REQUIREMENT = 'reaper_live_control';
+  const DOWNLOAD_URL = 'https://www.reaper.fm/download.php';
 
-  let workspaceId = '';
-  let busy = false;
-
-  function wsId() {
-    return workspaceId || (typeof window !== 'undefined' && window.currentWorkspaceId) || '';
-  }
-
-  function setBadge(badge, label) {
-    if (!badge) return;
-    badge.textContent = label;
-    badge.className =
-      'reaper-setup-badge reaper-setup-badge-' + label.toLowerCase().replace(/[^a-z]+/g, '-');
-  }
-
-  function row(label, value, ok) {
-    const li = document.createElement('li');
-    li.className = 'workspace-detail-reaper-row';
-    const mark = document.createElement('span');
-    mark.className = 'workspace-detail-reaper-row-mark';
-    // Non-color status token in addition to any styling.
-    mark.textContent = ok === true ? '✓' : ok === false ? '•' : '–';
-    mark.setAttribute('aria-hidden', 'true');
-    const l = document.createElement('span');
-    l.className = 'workspace-detail-reaper-row-label';
-    l.textContent = label + ': ';
-    const v = document.createElement('span');
-    v.className = 'workspace-detail-reaper-row-value';
-    v.textContent = value;
-    li.appendChild(mark);
-    li.appendChild(l);
-    li.appendChild(v);
-    return li;
-  }
-
-  function button(label, opts = {}) {
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.className = 'modern-btn ' + (opts.primary ? 'modern-btn-primary' : 'modern-btn-secondary');
-    b.style.fontSize = '12px';
-    b.textContent = label;
-    if (opts.onClick) b.addEventListener('click', opts.onClick);
-    return b;
-  }
-
-  function setBusy(on) {
-    busy = on;
-    const { actions } = els();
-    if (actions)
-      actions.querySelectorAll('button').forEach(b => {
-        b.disabled = on;
-      });
-  }
-
-  // wizardOwnsSetup reports whether this workspace's blueprint declares a setup
-  // wizard. When it does, setup happens there and this card reports rather than
-  // repairs; a workspace from an older blueprint keeps the card's own actions.
-  function wizardOwnsSetup() {
-    const status = window.SetupWizard?.getStatus?.();
-    return !!(status && status.applicable);
-  }
-
-  function openPluginsTab() {
-    // Expand the (collapsed) config panel and switch to the Plugins tab, then
-    // bring the card into view — the readiness card lives inside that tab.
-    document.getElementById('workspace-detail-config-toggle')?.click?.();
-    document.getElementById('workspace-detail-config-plugins-tab')?.click?.();
-    const { card } = els();
-    card?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
-    card?.focus?.();
-  }
-
-  async function post(url, body) {
-    const opts = { method: 'POST' };
-    if (body !== undefined) {
-      opts.headers = { 'Content-Type': 'application/json' };
-      opts.body = JSON.stringify(body);
+  const checks = [
+    {
+      id: 'application',
+      label: 'REAPER application',
+      reasons: ['unsupported_platform', 'reaper_app_missing', 'reaper_app_unknown']
+    },
+    {
+      id: 'web-remote',
+      label: 'Web Remote',
+      reasons: ['web_remote_unconfigured', 'web_remote_invalid']
+    },
+    {
+      id: 'plugin',
+      label: 'REAPER plugin and skills',
+      reasons: ['reaper_plugin_missing', 'reaper_plugin_disabled', 'reaper_plugin_detached']
+    },
+    {
+      id: 'runner',
+      label: 'Ori REAPER runner',
+      reasons: ['runner_missing', 'runner_invalid', 'runner_failure']
+    },
+    {
+      id: 'agent',
+      label: 'Compatible workspace agent',
+      reasons: ['cli_agent_required', 'runtime_task_agent_required']
+    },
+    {
+      id: 'access',
+      label: 'REAPER access',
+      reasons: [
+        'reaper_access_required',
+        'reaper_access_denied',
+        'runner_write_denied',
+        'runtime_task_grant_required'
+      ]
+    },
+    {
+      id: 'verification',
+      label: 'Project-specific connection test',
+      reasons: ['verification_required', 'verification_timeout']
     }
-    const resp = await fetch(url, opts);
-    if (!resp.ok) throw new Error('request failed: ' + resp.status);
-    return resp.json();
+  ];
+
+  let registered = false;
+
+  function el(tag, className, text) {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined) node.textContent = text;
+    return node;
   }
 
-  async function repair(confirmEnable) {
-    if (busy) return;
-    setBusy(true);
+  function button(label, onClick, { primary = false, disabled = false } = {}) {
+    const node = el(
+      'button',
+      `modern-btn ${primary ? 'modern-btn-primary' : 'modern-btn-secondary'}`,
+      label
+    );
+    node.type = 'button';
+    node.disabled = disabled;
+    if (onClick) node.addEventListener('click', onClick);
+    return node;
+  }
+
+  function requirement(status) {
+    return (status?.requirements || []).find(item => item.key === REQUIREMENT) || null;
+  }
+
+  function firstAction(status) {
+    return status?.first_blocker?.action || requirement(status)?.action || null;
+  }
+
+  function firstReason(status) {
+    return String(
+      status?.first_blocker?.reason_code || requirement(status)?.reason_code || ''
+    ).trim();
+  }
+
+  function selectedMode(status) {
+    return String(status?.selected_mode_id || '').trim();
+  }
+
+  function owns(step) {
+    return step?.kind === 'runtime_readiness' && step?.runtime_requirement_key === REQUIREMENT;
+  }
+
+  function statusWord(state) {
+    switch (state) {
+      case 'complete':
+        return { mark: '✓', word: 'Complete', className: 'is-complete' };
+      case 'attention':
+        return { mark: '!', word: 'Needs attention', className: 'is-attention' };
+      default:
+        return { mark: '•', word: 'Waiting', className: 'is-waiting' };
+    }
+  }
+
+  function checklistState(status, check, index) {
+    if (status?.durable_state === 'configured') return 'complete';
+    const reason = firstReason(status);
+    const blockedAt = checks.findIndex(item => item.reasons.includes(reason));
+    if (blockedAt < 0) return index === 0 ? 'attention' : 'waiting';
+    if (index < blockedAt) return 'complete';
+    if (index === blockedAt) return 'attention';
+    return 'waiting';
+  }
+
+  function renderChecklist(host, status) {
+    const list = el('ol', 'reaper-runtime-checklist');
+    checks.forEach((check, index) => {
+      const state = statusWord(checklistState(status, check, index));
+      const item = el('li', `reaper-runtime-check ${state.className}`);
+      const mark = el('span', 'reaper-runtime-check-mark', state.mark);
+      mark.setAttribute('aria-hidden', 'true');
+      const body = el('span', 'reaper-runtime-check-body');
+      body.appendChild(el('span', 'reaper-runtime-check-label', check.label));
+      body.appendChild(el('span', 'reaper-runtime-check-word', state.word));
+      item.appendChild(mark);
+      item.appendChild(body);
+      list.appendChild(item);
+    });
+    host.appendChild(list);
+  }
+
+  function livePresentation(status) {
+    const live = String(status?.live_state || requirement(status)?.live_state || 'not_checked');
+    switch (live) {
+      case 'available':
+        return [
+          '✓',
+          'Connected now',
+          'REAPER is connected to this workspace project now.',
+          'ready'
+        ];
+      case 'offline':
+        return [
+          '•',
+          'REAPER offline',
+          'Setup remains configured. Open REAPER, then check again.',
+          'offline'
+        ];
+      case 'wrong_target':
+        return [
+          '!',
+          'Wrong project',
+          requirement(status)?.summary || 'Open this workspace project in REAPER.',
+          'attention'
+        ];
+      case 'unavailable':
+        return [
+          '!',
+          'Unavailable',
+          requirement(status)?.summary || 'The local REAPER connection is unavailable.',
+          'attention'
+        ];
+      case 'check_failed':
+        return [
+          '!',
+          'Check failed',
+          requirement(status)?.summary || 'Ori could not check REAPER right now.',
+          'attention'
+        ];
+      default:
+        return [
+          '–',
+          'Not checked',
+          'Past verification does not prove REAPER is connected now.',
+          'neutral'
+        ];
+    }
+  }
+
+  function renderLive(host, status) {
+    if (status?.durable_state !== 'configured') return;
+    const [mark, title, detail, tone] = livePresentation(status);
+    const panel = el('section', `reaper-runtime-live is-${tone}`);
+    panel.setAttribute('aria-label', `Current REAPER connection: ${title}`);
+    const heading = el('div', 'reaper-runtime-live-heading');
+    const token = el('span', 'reaper-runtime-live-mark', mark);
+    token.setAttribute('aria-hidden', 'true');
+    heading.appendChild(token);
+    heading.appendChild(el('strong', '', title));
+    panel.appendChild(heading);
+    panel.appendChild(el('p', 'reaper-runtime-live-detail', detail));
+    host.appendChild(panel);
+  }
+
+  function formatTimestamp(value) {
+    if (!value) return '';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+    return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(
+      date
+    );
+  }
+
+  function renderVerificationHistory(host, status) {
+    const first = formatTimestamp(status?.first_verified_at);
+    const last = formatTimestamp(status?.last_verified_at);
+    if (!first && !last) return;
+    const note = el('p', 'reaper-runtime-history');
+    note.textContent = first
+      ? `First verified ${first}${last && last !== first ? ` · Last verified ${last}` : ''}. Current connectivity is checked separately.`
+      : `Last verified ${last}. Current connectivity is checked separately.`;
+    host.appendChild(note);
+  }
+
+  async function transition(ctx, pending, run) {
+    ctx.setError('');
+    ctx.setBusy(true, pending);
     try {
-      const result = await post(
-        '/api/workspaces/' + encodeURIComponent(wsId()) + '/reaper-setup/repair',
-        { confirm_enable: !!confirmEnable }
+      const next = await run();
+      // Setup Wizard's recheck derives setup lifecycle from the newly persisted
+      // runtime state. Release its busy guard first, then restore the richer
+      // live result because setup recheck itself is intentionally durable-only.
+      ctx.setBusy(false, '');
+      await ctx.recheck();
+      ctx.setRuntimeStatus(next);
+      return next;
+    } catch (error) {
+      ctx.setError(
+        error?.message ||
+          'That REAPER setup action did not complete. Follow the next step and check again.'
       );
-      if (result.needs_confirm) {
-        // Ask for explicit confirmation before enabling a disabled plugin.
-        renderConfirm('Enable reaper-plugin and attach its components to this workspace?', () =>
-          repair(true)
-        );
-        return;
-      }
-      if (result.needs_install) {
-        // Plugin missing: run the inline install, then re-check (which will
-        // attach on the next repair once installed+enabled).
-        setBusy(false);
-        installPlugin();
-        return;
-      }
-      await refresh();
-    } catch (_) {
-      renderError('Repair failed. Nothing was changed; you can try again.');
+      return null;
     } finally {
-      setBusy(false);
+      ctx.setBusy(false, '');
     }
   }
 
-  // installPlugin runs the shared inline reaper-plugin install into the card's
-  // actions area, then re-checks readiness (existing workspaces have no
-  // template-declared source, so it resolves a marketplace or takes a paste).
-  function installPlugin() {
-    const { actions } = els();
-    if (!actions) return;
-    if (!window.ReaperPluginInstall) {
+  async function runtimePost(ctx, path, pending, method = 'POST', body) {
+    const options = { method };
+    if (body !== undefined) {
+      options.headers = { 'Content-Type': 'application/json' };
+      options.body = JSON.stringify(body);
+    }
+    return transition(ctx, pending, () => ctx.runtimeRequest(path, options));
+  }
+
+  function instruction(host, title, steps, ctx) {
+    let panel = host.querySelector?.('.reaper-runtime-instruction');
+    if (!panel) {
+      panel = el('section', 'reaper-runtime-instruction');
+      panel.tabIndex = -1;
+      panel.setAttribute('role', 'status');
+      panel.setAttribute('aria-live', 'polite');
+      host.appendChild(panel);
+    }
+    panel.textContent = '';
+    panel.appendChild(el('h4', 'reaper-runtime-instruction-title', title));
+    const list = el('ol', 'reaper-runtime-instruction-list');
+    steps.forEach(step => list.appendChild(el('li', '', step)));
+    panel.appendChild(list);
+    panel.appendChild(
+      button('Check again', () => runtimePost(ctx, '/recheck', 'Checking REAPER setup…'), {
+        primary: true
+      })
+    );
+    panel.focus?.();
+  }
+
+  async function repairPlugin(ctx, code) {
+    if (code === 'install_reaper_plugin') {
+      const host = document.querySelector?.('.reaper-runtime-actions');
+      if (host && window.ReaperPluginInstall) {
+        window.ReaperPluginInstall.begin({
+          host,
+          declaredSource: '',
+          onComplete: async () => {
+            const next = await ctx.refreshRuntime();
+            ctx.setRuntimeStatus(next);
+            await ctx.recheck();
+          },
+          onCancel: () => ctx.refreshRuntime()
+        });
+        return;
+      }
       window.open('/plugins?install=reaper-plugin', '_blank', 'noopener');
       return;
     }
-    window.ReaperPluginInstall.begin({
-      host: actions,
-      declaredSource: '',
-      onComplete: refresh,
-      onCancel: refresh
+    await transition(ctx, 'Updating the REAPER plugin…', async () => {
+      const response = await fetch(
+        `/api/workspaces/${encodeURIComponent(ctx.workspaceId)}/reaper-setup/repair`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ confirm_enable: code === 'enable_reaper_plugin' })
+        }
+      );
+      if (!response.ok) throw new Error('The REAPER plugin could not be updated.');
+      return ctx.runtimeRequest('');
     });
   }
 
-  async function checkAgainAndStartSetup() {
-    if (busy) return;
-    setBusy(true);
+  async function selectedAgentInstance(ctx) {
+    const response = await fetch(`/api/workspaces/${encodeURIComponent(ctx.workspaceId)}`);
+    if (!response.ok) throw new Error('The selected workspace agent could not be read.');
+    const payload = await response.json();
+    const workspace = payload?.workspace || payload;
+    const instances = Array.isArray(workspace?.agent_instances) ? workspace.agent_instances : [];
+    const setupTask = (workspace?.tasks || []).find(task => task?.context?.template_setup === true);
+    const nodeId = String(setupTask?.assigned_node_id || '').trim();
+    if (nodeId) {
+      const byNode = instances.find(instance => String(instance?.node_id || '').trim() === nodeId);
+      if (byNode?.id) return byNode;
+    }
+    const name = String(setupTask?.to || workspace?.entry_agent_name || '')
+      .trim()
+      .toLowerCase();
+    const matches = instances.filter(
+      instance =>
+        String(instance?.name || '')
+          .trim()
+          .toLowerCase() === name
+    );
+    if (matches.length === 1 && matches[0]?.id) return matches[0];
+    throw new Error(
+      'Choose one Codex or Claude Code workspace agent before granting REAPER access.'
+    );
+  }
+
+  async function grant(ctx, revoke = false) {
+    const agent = await selectedAgentInstance(ctx);
+    return runtimePost(
+      ctx,
+      `/requirements/${REQUIREMENT}/grants`,
+      revoke ? 'Revoking REAPER access…' : 'Granting REAPER access…',
+      revoke ? 'DELETE' : 'POST',
+      { agent_instance_id: agent.id }
+    );
+  }
+
+  async function openProject(ctx) {
+    ctx.setBusy(true, 'Asking macOS to open the workspace project…');
     try {
-      await post('/api/workspaces/' + encodeURIComponent(wsId()) + '/template-setup/start');
-      await refresh();
-    } catch (_) {
-      renderError('Could not start setup. Readiness is unchanged; you can try again.');
+      const response = await fetch(
+        `/api/workspaces/${encodeURIComponent(ctx.workspaceId)}/project/open`,
+        { method: 'POST' }
+      );
+      if (!response.ok) throw new Error('The workspace project could not be opened.');
+      ctx.announce(
+        'Open requested. Wait for REAPER to finish opening the project, then choose Check connection.'
+      );
+    } catch (error) {
+      ctx.setError(error?.message || 'The workspace project could not be opened.');
     } finally {
-      setBusy(false);
+      ctx.setBusy(false, '');
     }
   }
 
-  function renderConfirm(message, onConfirm) {
-    const { actions } = els();
-    if (!actions) return;
-    actions.textContent = '';
-    const msg = document.createElement('span');
-    msg.style.cssText = 'font-size:12px;color:var(--text-primary);align-self:center;';
-    msg.textContent = message;
-    actions.appendChild(msg);
-    actions.appendChild(button('Enable & attach', { primary: true, onClick: onConfirm }));
-    actions.appendChild(button('Cancel', { onClick: refresh }));
+  function renderDisclosure(host, text) {
+    if (!text) return;
+    const box = el('aside', 'reaper-runtime-access-disclosure');
+    box.appendChild(el('h4', '', 'Before granting REAPER access'));
+    box.appendChild(el('p', '', text));
+    host.appendChild(box);
   }
 
-  function renderError(message) {
-    const { status, actions, badge } = els();
-    setBadge(badge, 'Error');
-    if (status) status.textContent = message;
-    if (actions) {
-      actions.textContent = '';
-      actions.appendChild(button('Retry', { onClick: refresh }));
-    }
-  }
+  function renderCurrentAction(host, status, ctx) {
+    const action = firstAction(status);
+    const code = String(action?.code || action?.token || '');
+    const requirementStatus = requirement(status);
+    const actions = el('div', 'reaper-runtime-actions');
+    host.appendChild(actions);
 
-  function statusLabel(r) {
-    switch (r.status) {
-      case 'ori_ready':
-        return 'Ready';
-      case 'plugin_missing':
-        return 'File-only';
-      case 'plugin_disabled':
-        return 'Disabled';
-      case 'plugin_detached':
-        return 'Detached';
-      case 'cli_agent_required':
-        return 'Agent';
-      case 'native_cli_access_required':
-        return 'Access';
-      case 'file_only':
-        return 'File-only';
+    const checkConnection = () =>
+      runtimePost(ctx, '/recheck', 'Checking the current REAPER connection…');
+
+    switch (code) {
+      case 'download_reaper': {
+        const link = el('a', 'modern-btn modern-btn-primary', 'Download REAPER');
+        link.href = DOWNLOAD_URL;
+        link.target = '_blank';
+        link.rel = 'noopener';
+        actions.appendChild(link);
+        actions.appendChild(button('Check again', checkConnection));
+        break;
+      }
+      case 'enable_web_remote':
+      case 'check_web_remote':
+        actions.appendChild(
+          button(
+            action?.label || 'Enable Web Remote',
+            () =>
+              instruction(
+                host,
+                'Enable REAPER Web Remote',
+                [
+                  'In REAPER, open Preferences, then Control/OSC/web.',
+                  'Add or enable a Web browser interface bound to this Mac only.',
+                  'Apply the change, leave REAPER open, then check again.'
+                ],
+                ctx
+              ),
+            { primary: true }
+          )
+        );
+        break;
+      case 'set_up_runner':
+        actions.appendChild(
+          button(
+            action?.label || 'Set up runner',
+            () =>
+              instruction(
+                host,
+                'Register the trusted Ori REAPER runner',
+                [
+                  'Open REAPER’s Actions list and choose Load ReaScript.',
+                  'Use the runner supplied by the installed reaper-plugin; do not use model-generated Lua.',
+                  'Run the one-time registration action, then check again.'
+                ],
+                ctx
+              ),
+            { primary: true }
+          )
+        );
+        break;
+      case 'install_reaper_plugin':
+      case 'enable_reaper_plugin':
+      case 'attach_reaper_plugin':
+        actions.appendChild(
+          button(action?.label || 'Update REAPER plugin', () => repairPlugin(ctx, code), {
+            primary: true
+          })
+        );
+        break;
+      case 'choose_reaper_agent':
+      case 'choose_runtime_agent': {
+        const link = el('a', 'modern-btn modern-btn-primary', 'Choose compatible agent');
+        link.href = `/workspaces/${encodeURIComponent(ctx.workspaceId)}?runtime_setup=1#workspace-detail-agents-panel`;
+        actions.appendChild(link);
+        break;
+      }
+      case 'grant_reaper_access':
+      case 'grant_runtime_access':
+        renderDisclosure(host, requirementStatus?.disclosure || '');
+        actions.appendChild(button('Grant REAPER access', () => grant(ctx), { primary: true }));
+        break;
+      case 'test_reaper_connection':
+        actions.appendChild(
+          button(
+            'Test REAPER connection',
+            () =>
+              runtimePost(
+                ctx,
+                `/requirements/${REQUIREMENT}/verify`,
+                'Running the harmless project-specific REAPER test…'
+              ),
+            { primary: true }
+          )
+        );
+        break;
+      case 'open_correct_project':
+      case 'open_check_reaper':
+        actions.appendChild(
+          button(action?.label || 'Open workspace project', () => openProject(ctx), {
+            primary: true
+          })
+        );
+        actions.appendChild(button('Check connection', checkConnection));
+        break;
+      case 'check_reaper_connection':
+      case 'check_reaper_installation':
+        actions.appendChild(
+          button(action?.label || 'Check again', checkConnection, { primary: true })
+        );
+        break;
       default:
-        return 'Setup';
+        if (status?.durable_state === 'configured') {
+          actions.appendChild(button('Check connection', checkConnection, { primary: true }));
+        }
+    }
+
+    if (selectedMode(status) === 'ori_assisted' && status?.durable_state === 'configured') {
+      actions.appendChild(button('Revoke REAPER access', () => grant(ctx, true)));
     }
   }
 
-  function render(r) {
-    const { card, status, badge, rows, actions, chip } = els();
-    if (!card) return;
-
-    if (!r || !r.identified) {
-      card.hidden = true;
-      if (chip) chip.hidden = true;
+  async function render(container, ctx) {
+    if (!owns(ctx.step)) {
+      ctx.renderDefault(container);
       return;
     }
-    card.hidden = false;
-    card.tabIndex = -1;
-
-    setBadge(badge, statusLabel(r));
-    if (status) status.textContent = r.explanation || '';
-
-    // Rows: separate, text-labeled status lines (color is never the only signal).
-    if (rows) {
-      rows.textContent = '';
-      rows.appendChild(
-        row(
-          'Project mode',
-          r.project_mode === 'ori_ready' ? 'Ori is ready to check REAPER' : 'File-only',
-          r.project_mode === 'ori_ready'
-        )
-      );
-      rows.appendChild(
-        row(
-          'Plugin',
-          r.plugin_installed
-            ? r.plugin_enabled
-              ? 'Installed and enabled'
-              : 'Installed but disabled'
-            : 'Not installed',
-          r.plugin_installed && r.plugin_enabled
-        )
-      );
-      rows.appendChild(
-        row(
-          'Workspace attachment',
-          r.plugin_attached
-            ? 'Components attached'
-            : (r.missing_components || []).map(c => c.name).join(', ') || 'Not attached',
-          r.plugin_attached
-        )
-      );
-      rows.appendChild(
-        row(
-          'Setup agent',
-          r.setup_agent
-            ? r.setup_agent +
-                (r.setup_agent_is_cli ? ' (compatible)' : ' (needs Codex or Claude Code)')
-            : 'Not assigned',
-          r.setup_agent_is_cli
-        )
-      );
-      rows.appendChild(
-        row(
-          'Native CLI access',
-          (r.workspace_native_cli_enabled ? 'Workspace on' : 'Workspace off') +
-            ' · ' +
-            (r.agent_native_cli_enabled ? 'Agent on' : 'Agent off'),
-          r.workspace_native_cli_enabled && r.agent_native_cli_enabled
-        )
-      );
-      rows.appendChild(
-        row('Setup task', r.has_pending_setup_task ? 'Pending' : 'None pending', null)
-      );
-      rows.appendChild(
-        row('Live REAPER verification', 'Not checked yet — verified when setup runs', null)
-      );
-    }
-
-    // Actions.
-    if (actions) {
-      actions.textContent = '';
-      if (wizardOwnsSetup()) {
-        // Where a wizard owns this workspace's setup, the card stays a status
-        // surface and stops being a second place to repair things: two entry
-        // points that mutate the same prerequisites is how a user ends up
-        // half-way through both.
-        actions.appendChild(
-          button('Open setup', { primary: true, onClick: () => window.SetupWizard?.open?.() })
-        );
-      } else if (r.status !== 'ori_ready') {
-        actions.appendChild(
-          button('Repair REAPER setup', { primary: true, onClick: () => repair(false) })
-        );
-      }
-      if (!wizardOwnsSetup()) {
-        if (r.status === 'ori_ready' && r.has_pending_setup_task) {
-          actions.appendChild(
-            button('Check again and start setup', {
-              primary: true,
-              onClick: checkAgainAndStartSetup
-            })
-          );
-        }
-        if (!r.plugin_installed) {
-          actions.appendChild(button('Install plugin', { primary: true, onClick: installPlugin }));
-        }
-        if (r.status === 'cli_agent_required' || r.status === 'native_cli_access_required') {
-          actions.appendChild(
-            button('Native CLI access', {
-              onClick: () =>
-                document.getElementById('workspace-detail-config-native-mcp-tab')?.click?.()
-            })
-          );
-        }
-      }
-    }
-
-    // Compact chip: setup-needed vs. compact success.
-    if (chip) {
-      chip.hidden = false;
-      chip.textContent =
-        r.status === 'ori_ready' ? 'REAPER: ready to check' : 'REAPER setup needed';
-      chip.classList.toggle('reaper-setup-chip-ready', r.status === 'ori_ready');
-      chip.setAttribute('aria-label', chip.textContent + '. Open REAPER Setup.');
-    }
-  }
-
-  async function refresh() {
-    const id = wsId();
-    if (!id) return;
-    try {
-      const resp = await fetch('/api/workspaces/' + encodeURIComponent(id) + '/reaper-setup');
-      if (!resp.ok) throw new Error('readiness failed');
-      render(await resp.json());
-    } catch (_) {
-      renderError('Could not load REAPER readiness.');
-    }
-  }
-
-  // ---------- Setup Wizard step ----------
-
-  // The wizard's readiness step and this card describe the same setup, so they
-  // run the same repairs against the same endpoints. What the step adds is
-  // scope: it shows only the prerequisites of the mode the user chose, and only
-  // for the Ori-assisted answer — a file-only workspace has nothing to repair,
-  // and saying so is the whole point of offering that mode.
-  const REAPER_ADAPTER = 'reaper_song';
-
-  function chosenMode(status) {
-    const steps = (status && status.steps) || [];
-    for (const step of steps) {
-      const selected = step.selected_option || '';
-      if (selected === 'file_only' || selected === 'ori_assisted') return selected;
-    }
-    return '';
-  }
-
-  // wizardActions offers each repair the current readiness admits, and re-asks
-  // the server afterwards. Nothing here decides the step passed: every button
-  // ends in ctx.recheck(), and the server's next verdict is what the user sees.
-  function wizardActions(host, readiness, ctx) {
-    const act = async run => {
-      ctx.setBusy(true);
+    let status = ctx.runtimeStatus;
+    if (!status) {
       try {
-        await run();
-        await ctx.recheck();
-      } catch (_) {
-        ctx.setError('That did not go through. Nothing changed — you can try again.');
-      } finally {
-        ctx.setBusy(false);
-      }
-    };
-
-    if (!readiness.plugin_installed) {
-      host.appendChild(
-        button('Install the plugin', {
-          primary: true,
-          onClick: () => {
-            if (!window.ReaperPluginInstall) {
-              ctx.rememberReturn();
-              window.open('/plugins?install=reaper-plugin', '_blank', 'noopener');
-              return;
-            }
-            window.ReaperPluginInstall.begin({
-              host,
-              declaredSource: '',
-              onComplete: () => ctx.recheck(),
-              onCancel: () => ctx.recheck()
-            });
-          }
-        })
-      );
-      return;
-    }
-    if (readiness.status !== 'ori_ready') {
-      // Enabling a disabled plugin is a change the user has to approve, so the
-      // unconfirmed call is sent first and its needs_confirm answer is what
-      // asks them — the same two-step the card uses.
-      host.appendChild(
-        button(readiness.plugin_enabled ? 'Attach to this workspace' : 'Enable and attach', {
-          primary: true,
-          onClick: () =>
-            act(async () => {
-              const result = await post(
-                '/api/workspaces/' + encodeURIComponent(wsId()) + '/reaper-setup/repair',
-                { confirm_enable: false }
-              );
-              if (result && result.needs_confirm) {
-                await post(
-                  '/api/workspaces/' + encodeURIComponent(wsId()) + '/reaper-setup/repair',
-                  { confirm_enable: true }
-                );
-              }
-            })
-        })
-      );
-    }
-    if (
-      readiness.status === 'cli_agent_required' ||
-      readiness.status === 'native_cli_access_required'
-    ) {
-      host.appendChild(
-        button('Open native CLI access', {
-          onClick: () => {
-            // The setting lives behind this dialog, so the wizard steps aside
-            // and records where to come back to.
-            ctx.rememberReturn();
-            window.SetupWizard?.close?.();
-            document.getElementById('workspace-detail-config-toggle')?.click?.();
-            document.getElementById('workspace-detail-config-native-mcp-tab')?.click?.();
-          }
-        })
-      );
-    }
-  }
-
-  async function renderWizardStep(container, ctx) {
-    const step = ctx.step || {};
-    // Registered on a shared kind: every other blueprint's readiness step is
-    // handed straight back to the dialog's own renderer.
-    if (step.adapter !== REAPER_ADAPTER) {
-      ctx.renderDefault(container);
-      return;
-    }
-    if (chosenMode(ctx.status) !== 'ori_assisted') {
-      ctx.renderDefault(container);
-      return;
-    }
-
-    const summary = document.createElement('p');
-    summary.className = 'setup-wizard-step-description';
-    summary.textContent = step.summary || '';
-    container.appendChild(summary);
-
-    const rows = document.createElement('ul');
-    rows.className = 'workspace-detail-reaper-rows';
-    container.appendChild(rows);
-    const actions = document.createElement('div');
-    actions.className = 'setup-wizard-step-actions';
-    container.appendChild(actions);
-
-    let readiness = null;
-    try {
-      const resp = await fetch('/api/workspaces/' + encodeURIComponent(wsId()) + '/reaper-setup');
-      if (!resp.ok) throw new Error('readiness failed');
-      readiness = await resp.json();
-    } catch (_) {
-      rows.appendChild(row('Prerequisites', 'Could not be read just now', false));
-      actions.appendChild(button('Check again', { primary: true, onClick: () => ctx.recheck() }));
-      return;
-    }
-
-    rows.appendChild(
-      row(
-        'Plugin',
-        readiness.plugin_installed
-          ? readiness.plugin_enabled
-            ? 'Installed and enabled'
-            : 'Installed but disabled'
-          : 'Not installed',
-        !!(readiness.plugin_installed && readiness.plugin_enabled)
-      )
-    );
-    rows.appendChild(
-      row(
-        'Workspace attachment',
-        readiness.plugin_attached ? 'Attached' : 'Not attached',
-        !!readiness.plugin_attached
-      )
-    );
-    rows.appendChild(
-      row(
-        'Agent',
-        readiness.setup_agent
-          ? readiness.setup_agent +
-              (readiness.setup_agent_is_cli ? ' (compatible)' : ' (needs Codex or Claude Code)')
-          : 'Not assigned',
-        !!readiness.setup_agent_is_cli
-      )
-    );
-    rows.appendChild(
-      row(
-        'Native CLI access',
-        (readiness.workspace_native_cli_enabled ? 'Workspace on' : 'Workspace off') +
-          ' · ' +
-          (readiness.agent_native_cli_enabled ? 'Agent on' : 'Agent off'),
-        !!(readiness.workspace_native_cli_enabled && readiness.agent_native_cli_enabled)
-      )
-    );
-    // Stated on the step where a user would most easily assume otherwise.
-    rows.appendChild(row('Live REAPER session', 'Not checked here', null));
-
-    wizardActions(actions, readiness, ctx);
-  }
-
-  function registerWizardStep() {
-    const wizard = typeof window !== 'undefined' && window.SetupWizard;
-    if (!wizard || typeof wizard.registerStepRenderer !== 'function') return;
-    wizard.registerStepRenderer('readiness', { render: renderWizardStep });
-  }
-
-  function init(id) {
-    workspaceId = id || wsId();
-    const { chip } = els();
-    chip?.addEventListener?.('click', () => {
-      // The chip points at whatever is actually in charge of setup here.
-      if (wizardOwnsSetup() && window.SetupWizard?.getStatus?.()?.state !== 'ready') {
-        window.SetupWizard?.open?.();
+        status = await ctx.refreshRuntime();
+      } catch (error) {
+        container.appendChild(
+          el(
+            'p',
+            'setup-wizard-error',
+            'Runtime status could not be loaded. Close and reopen setup to try again.'
+          )
+        );
         return;
       }
-      openPluginsTab();
-    });
-    // Deferred scripts run in document order and this one precedes the wizard's,
-    // so registering here alone would silently register nothing. Registration is
-    // idempotent, so it is attempted now and again once every module has run.
-    registerWizardStep();
-    if (typeof document !== 'undefined' && document.readyState !== 'complete') {
-      document.addEventListener('DOMContentLoaded', registerWizardStep, { once: true });
     }
-    void refresh();
+    if (selectedMode(status) !== 'ori_assisted') {
+      const summary = el('section', 'reaper-runtime-file-only');
+      summary.appendChild(el('strong', '', 'File-only'));
+      summary.appendChild(
+        el(
+          'p',
+          '',
+          'Project-file work is available. REAPER, Web Remote, the runner, and live control were not configured or tested.'
+        )
+      );
+      container.appendChild(summary);
+      return;
+    }
+
+    const current = requirement(status);
+    const lead = el(
+      'p',
+      'reaper-runtime-summary',
+      current?.summary || 'Check local REAPER control.'
+    );
+    lead.setAttribute('role', 'status');
+    lead.setAttribute('aria-live', 'polite');
+    container.appendChild(lead);
+    renderChecklist(container, status);
+    renderLive(container, status);
+    renderVerificationHistory(container, status);
+    renderCurrentAction(container, status, ctx);
   }
 
-  if (typeof document !== 'undefined') {
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', () => init(), { once: true });
-    } else {
-      init();
+  const renderer = { owns, render };
+
+  function register() {
+    if (registered || !window.SetupWizard?.registerStepRenderer) return;
+    window.SetupWizard.registerStepRenderer('runtime_readiness', renderer);
+    registered = true;
+  }
+
+  function init() {
+    register();
+    if (!registered && typeof document !== 'undefined') {
+      document.addEventListener('DOMContentLoaded', register, { once: true });
     }
   }
 
-  window.ReaperReadinessPanel = { init, refresh, render, _els: els };
+  window.ReaperReadinessPanel = {
+    init,
+    register,
+    _internals: {
+      checks,
+      checklistState,
+      firstReason,
+      livePresentation,
+      owns,
+      selectedMode
+    }
+  };
+  init();
 })();

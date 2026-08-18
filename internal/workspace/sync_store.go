@@ -92,37 +92,9 @@ func (s *SyncStore) Save(ws *Workspace) error {
 		// a Goal the user cleared — is authoritative; only a record that
 		// predates the column has none, and that is the single case where the
 		// canonical workspace.json should refill it.
-		if ws.ProjectPath == "" || ws.Designation == "" || ws.TemplateProvenance == nil || ws.SetupWizardProgress == nil || ws.RuntimeState == nil ||
-			capabilitiesMissing(ws) || toolboxStateMissing(ws) || missionStateMissing(ws) {
+		if portableWorkspaceStateMissing(ws) {
 			if diskWorkspace, err := s.fileSync.Get(ws.ID); err == nil && diskWorkspace != nil {
-				if ws.ProjectPath == "" {
-					ws.ProjectPath = diskWorkspace.ProjectPath
-				}
-				if ws.Designation == "" {
-					ws.Designation = diskWorkspace.Designation
-				}
-				if ws.TemplateProvenance == nil {
-					ws.TemplateProvenance = diskWorkspace.TemplateProvenance
-				}
-				if ws.SetupWizardProgress == nil {
-					ws.SetupWizardProgress = CloneSetupWizardProgress(diskWorkspace.SetupWizardProgress)
-				}
-				if ws.RuntimeState == nil {
-					ws.RuntimeState = CloneWorkspaceRuntimeState(diskWorkspace.RuntimeState)
-				}
-				if capabilitiesMissing(ws) {
-					ws.InstalledCapabilities = CloneInstalledCapabilities(diskWorkspace.InstalledCapabilities)
-				}
-				if toolboxStateMissing(ws) {
-					ws.Toolboxes = cloneToolboxDefinitions(diskWorkspace.Toolboxes)
-					ws.ToolboxAssignments = cloneToolboxAssignments(diskWorkspace.ToolboxAssignments)
-					ws.ToolboxMigration = diskWorkspace.ToolboxMigration
-					ws.GoalBrief = diskWorkspace.GoalBrief.Clone()
-					ws.GoalToolboxPolicy = diskWorkspace.GoalToolboxPolicy.Clone()
-				}
-				if missionStateMissing(ws) {
-					restoreMissionFromDisk(ws, diskWorkspace)
-				}
+				restorePortableWorkspaceState(ws, diskWorkspace)
 			}
 		}
 		if err := s.fileSync.Save(ws); err != nil {
@@ -133,6 +105,46 @@ func (s *SyncStore) Save(ws *Workspace) error {
 		}
 	}
 	return s.primary.Save(ws)
+}
+
+func portableWorkspaceStateMissing(ws *Workspace) bool {
+	return ws != nil && (ws.ProjectPath == "" || ws.Designation == "" || ws.TemplateProvenance == nil ||
+		ws.SetupWizardProgress == nil || ws.RuntimeState == nil || capabilitiesMissing(ws) ||
+		toolboxStateMissing(ws) || missionStateMissing(ws))
+}
+
+func restorePortableWorkspaceState(ws, diskWorkspace *Workspace) {
+	if ws == nil || diskWorkspace == nil {
+		return
+	}
+	if ws.ProjectPath == "" {
+		ws.ProjectPath = diskWorkspace.ProjectPath
+	}
+	if ws.Designation == "" {
+		ws.Designation = diskWorkspace.Designation
+	}
+	if ws.TemplateProvenance == nil {
+		ws.TemplateProvenance = diskWorkspace.TemplateProvenance
+	}
+	if ws.SetupWizardProgress == nil {
+		ws.SetupWizardProgress = CloneSetupWizardProgress(diskWorkspace.SetupWizardProgress)
+	}
+	if ws.RuntimeState == nil {
+		ws.RuntimeState = CloneWorkspaceRuntimeState(diskWorkspace.RuntimeState)
+	}
+	if capabilitiesMissing(ws) {
+		ws.InstalledCapabilities = CloneInstalledCapabilities(diskWorkspace.InstalledCapabilities)
+	}
+	if toolboxStateMissing(ws) {
+		ws.Toolboxes = cloneToolboxDefinitions(diskWorkspace.Toolboxes)
+		ws.ToolboxAssignments = cloneToolboxAssignments(diskWorkspace.ToolboxAssignments)
+		ws.ToolboxMigration = diskWorkspace.ToolboxMigration
+		ws.GoalBrief = diskWorkspace.GoalBrief.Clone()
+		ws.GoalToolboxPolicy = diskWorkspace.GoalToolboxPolicy.Clone()
+	}
+	if missionStateMissing(ws) {
+		restoreMissionFromDisk(ws, diskWorkspace)
+	}
 }
 
 // capabilitiesMissing reports whether ws carries no capability records AND did
@@ -290,9 +302,27 @@ func (s *SyncStore) Lock(wsID string) func() { return s.primary.Lock(wsID) }
 
 // Update applies fn under the primary's per-workspace lock, then routes the
 // resulting Save through SyncStore.Save (which writes to both primary and the
-// disk sync target).
+// disk sync target). Folder-only state must be restored before fn runs: a
+// mutation such as adding one runtime grant needs to see and preserve the
+// already-selected runtime mode rather than constructing a grant-only state
+// from the lean SQLite projection.
 func (s *SyncStore) Update(wsID string, fn func(*Workspace) error) error {
-	return CanonicalUpdate(s, wsID, fn)
+	unlock := s.Lock(wsID)
+	defer unlock()
+
+	ws, err := s.primary.Get(wsID)
+	if err != nil {
+		return err
+	}
+	if s.fileSync != nil && portableWorkspaceStateMissing(ws) {
+		if diskWorkspace, diskErr := s.fileSync.Get(wsID); diskErr == nil && diskWorkspace != nil {
+			restorePortableWorkspaceState(ws, diskWorkspace)
+		}
+	}
+	if err := fn(ws); err != nil {
+		return err
+	}
+	return s.Save(ws)
 }
 
 // SaveWorkspaceAgent writes the snapshot to the primary store and to disk.

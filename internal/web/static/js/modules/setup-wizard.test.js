@@ -107,7 +107,14 @@ function click(element) {
  * call index), so a test can make the server change its mind between calls —
  * which is the only way a step ever becomes complete.
  */
-function load({ status, routes = {}, pathname = '/workspaces/ws-1', search = '' } = {}) {
+function load({
+  status,
+  routes = {},
+  runtimeStatus = null,
+  runtimeRoutes = {},
+  pathname = '/workspaces/ws-1',
+  search = ''
+} = {}) {
   const elements = {};
   for (const id of ELEMENT_IDS) elements[id] = makeElement(id);
 
@@ -155,10 +162,13 @@ function load({ status, routes = {}, pathname = '/workspaces/ws-1', search = '' 
     },
     fetch: async (url, options) => {
       const method = options?.method || 'GET';
-      const suffix = url.replace(/^\/api\/workspaces\/[^/]+\/setup-wizard/, '') || '';
+      const isRuntime = url.includes('/runtime-capabilities');
+      const suffix = isRuntime
+        ? url.replace(/^\/api\/workspaces\/[^/]+\/runtime-capabilities/, '') || ''
+        : url.replace(/^\/api\/workspaces\/[^/]+\/setup-wizard/, '') || '';
       const key = `${method} ${suffix}`;
-      calls.push({ key, url, body: options?.body });
-      const route = routes[key];
+      calls.push({ key, url, body: options?.body, runtime: isRuntime });
+      const route = (isRuntime ? runtimeRoutes : routes)[key];
       const payload = typeof route === 'function' ? route(calls.length) : route;
       if (payload && payload.__error) {
         return {
@@ -166,7 +176,11 @@ function load({ status, routes = {}, pathname = '/workspaces/ws-1', search = '' 
           json: async () => ({ code: payload.code, message: payload.message })
         };
       }
-      return { ok: true, json: async () => ({ setup: payload ?? status }) };
+      return {
+        ok: true,
+        json: async () =>
+          isRuntime ? { runtime: payload ?? runtimeStatus } : { setup: payload ?? status }
+      };
     }
   };
 
@@ -258,6 +272,88 @@ test('the station chip carries the same state as the banner', async () => {
   });
   await plain.init();
   assert.equal(plainEls.setupWizardStatusChip.hidden, true);
+});
+
+test('runtime-aware banner and single chip distinguish File-only, Configured, Offline, Wrong project, and Connected', async () => {
+  const runtimeWizard = status({
+    state: 'ready',
+    current_step_id: '',
+    steps: [
+      step({
+        id: 'mode',
+        kind: 'runtime_mode',
+        status: 'complete',
+        selected_option: 'ori_assisted'
+      }),
+      step({
+        id: 'live-control',
+        kind: 'runtime_readiness',
+        runtime_requirement_key: 'reaper_live_control',
+        status: 'complete'
+      }),
+      step({ id: 'summary', kind: 'summary', status: 'complete' })
+    ]
+  });
+  const cases = [
+    [
+      {
+        applicable: true,
+        selected_mode_id: 'file_only',
+        durable_state: 'configured',
+        live_state: 'not_applicable'
+      },
+      'File-only'
+    ],
+    [
+      {
+        applicable: true,
+        selected_mode_id: 'ori_assisted',
+        durable_state: 'configured',
+        live_state: 'not_checked'
+      },
+      'Configured'
+    ],
+    [
+      {
+        applicable: true,
+        selected_mode_id: 'ori_assisted',
+        durable_state: 'configured',
+        live_state: 'offline'
+      },
+      'Configured · REAPER offline'
+    ],
+    [
+      {
+        applicable: true,
+        selected_mode_id: 'ori_assisted',
+        durable_state: 'configured',
+        live_state: 'wrong_target'
+      },
+      'Wrong project'
+    ],
+    [
+      {
+        applicable: true,
+        selected_mode_id: 'ori_assisted',
+        durable_state: 'configured',
+        live_state: 'available'
+      },
+      'Connected now'
+    ]
+  ];
+
+  for (const [runtimeStatus, expected] of cases) {
+    const { api, elements, calls } = load({ status: runtimeWizard, runtimeStatus });
+    await api.init();
+    assert.equal(elements.setupWizardBannerState.textContent, expected);
+    assert.equal(elements.setupWizardStatusChip.textContent, `Live control: ${expected}`);
+    assert.equal(
+      calls.filter(call => call.runtime).length,
+      1,
+      'initial status is durable-only and must not make a live recheck'
+    );
+    assert.equal(calls.find(call => call.runtime).key, 'GET ');
+  }
 });
 
 test('a regressed workspace invites repair without ambushing the user', async () => {
@@ -394,6 +490,7 @@ test('an expected failure is explained in plain language with a stable category'
 
   assert.equal(elements.setupWizardError.hidden, false);
   assert.match(elements.setupWizardError.textContent, /unavailable in this build/);
+  assert.equal(elements.setupWizardError.focused, true, 'the actionable error receives focus');
   // The step is unchanged: a failed action must not look like progress.
   assert.equal(elements.setupWizardStepTitle.textContent, 'Choose the folder to tidy');
 });
@@ -476,6 +573,37 @@ test('?setup=1 opens the wizard for an entry point on another page', async () =>
   });
   await api.init();
   assert.equal(elements.setupWizardDialog.showModalCalls, 1);
+});
+
+test('?runtime_setup=1 opens the authoritative runtime requirement step for blocked-task repairs', async () => {
+  const runtimeWizard = status({
+    state: 'ready',
+    current_step_id: '',
+    steps: [
+      step({ id: 'mode', kind: 'runtime_mode', status: 'complete' }),
+      step({
+        id: 'live-control',
+        kind: 'runtime_readiness',
+        title: 'Set up local REAPER control',
+        runtime_requirement_key: 'reaper_live_control',
+        status: 'complete'
+      }),
+      step({ id: 'summary', kind: 'summary', status: 'complete' })
+    ]
+  });
+  const { api, elements } = load({
+    status: runtimeWizard,
+    runtimeStatus: {
+      applicable: true,
+      selected_mode_id: 'ori_assisted',
+      durable_state: 'configured',
+      live_state: 'offline'
+    },
+    search: '?runtime_setup=1&action=open_check_reaper'
+  });
+  await api.init();
+  assert.equal(elements.setupWizardDialog.showModalCalls, 1);
+  assert.equal(elements.setupWizardStepTitle.textContent, 'Set up local REAPER control');
 });
 
 test('the workspace id comes from the URL, not a global set later', async () => {

@@ -379,16 +379,6 @@ const sessionManager = {
         this.updateWizardRecap(template);
         void this.refreshTemplateAgentPlan();
         this.refreshWorkspaceReview();
-        // Runtime-aware blueprints use the generic disclosure below. Never probe
-        // or mutate an external app while the user is only reviewing creation,
-        // and never show a competing REAPER-only setup card for the same
-        // contract. The legacy card remains only for an older Reaper blueprint
-        // that declares neither the generalized contract nor a Setup Wizard.
-        if (this.usesGenericBlueprintSetupPreview(template)) {
-          window.ReaperSetupCard?.hide?.();
-        } else {
-          window.ReaperSetupCard?.showForTemplate?.(template);
-        }
       });
 
     document.getElementById('templateAgentReviewToggle')?.addEventListener('change', event => {
@@ -3740,7 +3730,6 @@ const sessionManager = {
     window.ProjectTemplateCard?.reset?.();
     this.resetTemplateAgentReview();
     this.resetExistingAgentTeam();
-    window.ReaperSetupCard?.hide?.();
     this.updateBehaviorHint();
     // Refresh the folder-slug preview now that the name value is settled (the
     // ProjectTemplateCard reset above may have re-prefilled it).
@@ -4912,17 +4901,6 @@ const sessionManager = {
     return parts.join(' · ');
   },
 
-  // Runtime-aware and wizard-aware blueprints use one generic disclosure. The
-  // return value also suppresses the legacy REAPER pre-create card, guaranteeing
-  // selection itself triggers no domain preview/probe call.
-  usesGenericBlueprintSetupPreview(template) {
-    return Boolean(
-      template?.runtime_requirements ||
-      template?.runtime_requirements_error ||
-      template?.setup_wizard?.steps?.length
-    );
-  },
-
   /**
    * Renders the blueprint's setup requirements in the review step.
    *
@@ -4992,7 +4970,13 @@ const sessionManager = {
         return;
       }
 
+      const immediateMode = modes.find(
+        mode => !Array.isArray(mode?.requires) || mode.requires.length === 0
+      );
+      const sharedImmediate = String(immediateMode?.description || '').trim();
+
       modes.forEach(mode => {
+        const references = Array.isArray(mode?.requires) ? mode.requires : [];
         const item = document.createElement('li');
         item.className = 'workspace-setup-preview-item workspace-runtime-mode-preview';
 
@@ -5014,7 +4998,10 @@ const sessionManager = {
         item.appendChild(immediateLabel);
         const immediate = document.createElement('span');
         immediate.className = 'workspace-setup-preview-detail';
-        immediate.textContent = String(mode?.description || '').trim();
+        immediate.textContent =
+          references.length && sharedImmediate
+            ? `Project-file work remains available: ${sharedImmediate}`
+            : String(mode?.description || '').trim();
         item.appendChild(immediate);
 
         const setupLabel = document.createElement('span');
@@ -5022,7 +5009,6 @@ const sessionManager = {
         setupLabel.textContent = 'Setup after creation';
         item.appendChild(setupLabel);
 
-        const references = Array.isArray(mode?.requires) ? mode.requires : [];
         if (!references.length) {
           const none = document.createElement('span');
           none.className = 'workspace-setup-preview-detail';
@@ -5711,9 +5697,9 @@ const sessionManager = {
           ((Array.isArray(result.missing_plugins) && result.missing_plugins.length) ||
             (Array.isArray(result.disabled_plugins) && result.disabled_plugins.length))
         ) {
-          // Required-plugin gate: the selected template needs plugins installed
-          // and enabled before creation. Surface exactly what to fix and refresh
-          // the REAPER Setup card so its inline Install/Enable actions are shown.
+          // Required-plugin gate: the selected blueprint needs plugins installed
+          // and enabled before creation. Surface exactly what to fix; setup and
+          // mutation controls remain in their authoritative post-create surfaces.
           const parts = [];
           if (result.missing_plugins?.length) {
             parts.push(`Install required plugin(s): ${result.missing_plugins.join(', ')}`);
@@ -5722,7 +5708,6 @@ const sessionManager = {
             parts.push(`Enable required plugin(s): ${result.disabled_plugins.join(', ')}`);
           }
           this.showToast(parts.join(' · ') || 'Required plugins are not ready', 'warning');
-          window.ReaperSetupCard?.refresh?.();
           return;
         }
 
