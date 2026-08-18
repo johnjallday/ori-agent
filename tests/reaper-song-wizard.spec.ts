@@ -192,6 +192,8 @@ test.describe('Reaper Song setup wizard', () => {
   }) => {
     const workspaceId = await createReaperWorkspace(request, 'Reaper State Fixture');
     let setupReady = false;
+    let durableReadsAsNotChecked = false;
+    let automaticLiveRechecks = 0;
     let runtime: any = {
       workspace_id: workspaceId,
       applicable: true,
@@ -287,7 +289,9 @@ test.describe('Reaper Song setup wizard', () => {
       });
     });
     await page.route(`**/api/workspaces/${workspaceId}/runtime-capabilities**`, async route => {
-      if (route.request().url().endsWith('/verify')) {
+      const requestURL = route.request().url();
+      const method = route.request().method();
+      if (requestURL.endsWith('/verify')) {
         setupReady = true;
         runtime = {
           ...runtime,
@@ -302,15 +306,34 @@ test.describe('Reaper Song setup wizard', () => {
               label: 'Local REAPER control',
               durable_state: 'configured',
               live_state: 'available',
+              first_verified_at: '2026-08-17T10:00:00Z',
               summary: 'REAPER is connected to this workspace project now.'
             }
           ]
         };
       }
+      if (method === 'POST' && requestURL.endsWith('/recheck')) {
+        automaticLiveRechecks += 1;
+      }
+      let responseRuntime = runtime;
+      if (
+        durableReadsAsNotChecked &&
+        method === 'GET' &&
+        requestURL.endsWith('/runtime-capabilities')
+      ) {
+        responseRuntime = {
+          ...runtime,
+          live_state: 'not_checked',
+          requirements: runtime.requirements.map((requirement: any) => ({
+            ...requirement,
+            live_state: 'not_checked'
+          }))
+        };
+      }
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ success: true, runtime })
+        body: JSON.stringify({ success: true, runtime: responseRuntime })
       });
     });
 
@@ -319,6 +342,12 @@ test.describe('Reaper Song setup wizard', () => {
     await page.getByRole('button', { name: 'Test REAPER connection' }).click();
     await expect(page.locator('#setupWizardBannerState')).toHaveText('Connected now');
     await expect(page.locator('#setupWizardStepContent')).toContainText('First verified');
+
+    durableReadsAsNotChecked = true;
+    await page.reload();
+    await expect(page.locator('#setupWizardBannerState')).toHaveText('Connected now');
+    expect(automaticLiveRechecks).toBe(1);
+    durableReadsAsNotChecked = false;
 
     runtime = {
       ...runtime,

@@ -350,10 +350,58 @@ test('runtime-aware banner and single chip distinguish File-only, Configured, Of
     assert.equal(
       calls.filter(call => call.runtime).length,
       1,
-      'initial status is durable-only and must not make a live recheck'
+      'without prior verification, initial status must not make a live recheck'
     );
     assert.equal(calls.find(call => call.runtime).key, 'GET ');
   }
+});
+
+test('a previously verified assisted workspace refreshes current connectivity automatically on reload', async () => {
+  const runtimeWizard = status({
+    state: 'ready',
+    current_step_id: '',
+    steps: [
+      step({ id: 'mode', kind: 'runtime_mode', status: 'complete' }),
+      step({ id: 'live-control', kind: 'runtime_readiness', status: 'complete' })
+    ]
+  });
+  const verifiedAt = '2026-08-18T20:54:05Z';
+  const durable = {
+    applicable: true,
+    selected_mode_id: 'ori_assisted',
+    durable_state: 'configured',
+    live_state: 'not_checked',
+    first_verified_at: verifiedAt,
+    last_verified_at: verifiedAt,
+    requirements: [{ key: 'reaper_live_control', first_verified_at: verifiedAt }]
+  };
+  const connected = {
+    ...durable,
+    live_state: 'available',
+    requirements: [
+      {
+        key: 'reaper_live_control',
+        durable_state: 'configured',
+        live_state: 'available',
+        first_verified_at: verifiedAt,
+        summary: 'Local REAPER control prerequisites are configured.'
+      }
+    ]
+  };
+  const { api, elements, calls } = load({
+    status: runtimeWizard,
+    runtimeStatus: durable,
+    runtimeRoutes: { 'POST /recheck': connected }
+  });
+
+  await api.init();
+
+  assert.deepEqual(
+    calls.filter(call => call.runtime).map(call => call.key),
+    ['GET ', 'POST /recheck']
+  );
+  assert.equal(elements.setupWizardBannerState.textContent, 'Connected now');
+  assert.equal(elements.setupWizardStatusChip.textContent, 'Live control: Connected now');
 });
 
 test('a regressed workspace invites repair without ambushing the user', async () => {

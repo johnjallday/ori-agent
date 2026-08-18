@@ -78,9 +78,10 @@
 
   let workspaceId = '';
   let status = null;
-  // Fresh generalized runtime status for runtime-aware blueprints. Durable
-  // status reads do not probe an external app; live results arrive only after
-  // an explicit Check connection action and are never treated as permanent.
+  // Fresh generalized runtime status for runtime-aware blueprints. The first
+  // project-specific verification remains explicit. Once it has succeeded,
+  // reloading the workspace performs a new harmless live recheck rather than
+  // reusing a stale Connected result or making the user check manually again.
   let runtimeStatus = null;
   let currentStepId = '';
   let busy = false;
@@ -164,6 +165,19 @@
     return (status?.steps || []).some(
       step => step?.kind === 'runtime_mode' || step?.kind === 'runtime_readiness'
     );
+  }
+
+  function shouldAutoRecheckRuntime(runtime) {
+    if (
+      !runtime?.applicable ||
+      runtime.selected_mode_id === 'file_only' ||
+      runtime.durable_state !== 'configured' ||
+      String(runtime.live_state || 'not_checked') !== 'not_checked'
+    ) {
+      return false;
+    }
+    const requirement = Array.isArray(runtime.requirements) ? runtime.requirements[0] : null;
+    return Boolean(runtime.first_verified_at || requirement?.first_verified_at);
   }
 
   async function refreshRuntime({ live = false } = {}) {
@@ -573,6 +587,13 @@
               detail: requirement?.summary || 'REAPER is connected to this workspace project now.',
               action: 'View live control'
             };
+          case 'checking':
+            return {
+              state: 'Checking connection',
+              tone: 'ready',
+              detail: 'Refreshing the current REAPER connection for this workspace project…',
+              action: 'View live control'
+            };
           case 'offline':
             return {
               state: 'Configured · REAPER offline',
@@ -693,7 +714,18 @@
       status = await api('', { method: 'GET' });
       if (hasRuntimeSteps()) {
         try {
-          runtimeStatus = await runtimeApi();
+          const durableRuntime = await runtimeApi();
+          runtimeStatus = durableRuntime;
+          if (shouldAutoRecheckRuntime(durableRuntime)) {
+            runtimeStatus = { ...durableRuntime, live_state: 'checking' };
+            render();
+            try {
+              runtimeStatus = await runtimeApi('/recheck', { method: 'POST' });
+            } catch (liveError) {
+              console.warn('Runtime live recheck failed:', liveError);
+              runtimeStatus = durableRuntime;
+            }
+          }
         } catch (runtimeError) {
           console.warn('Runtime status request failed:', runtimeError);
           runtimeStatus = null;
@@ -1045,6 +1077,7 @@
       STEP_MARKS,
       STEP_WORDS,
       bannerPresentation,
+      shouldAutoRecheckRuntime,
       primaryLabel,
       primaryBlocked,
       friendlyError
