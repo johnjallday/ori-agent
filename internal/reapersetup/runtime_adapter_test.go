@@ -64,13 +64,14 @@ func (f fixedRuntimeAgentProvider) ProviderForAgent(context.Context, string, wor
 }
 
 type matrixProbes struct {
-	application ApplicationObservation
-	web         WebRemoteObservation
-	runner      RunnerObservation
-	transport   LiveTransportObservation
-	verify      VerificationObservation
-	appCalls    int
-	verifyCalls int
+	application  ApplicationObservation
+	web          WebRemoteObservation
+	runner       RunnerObservation
+	transport    LiveTransportObservation
+	verify       VerificationObservation
+	appCalls     int
+	verifyCalls  int
+	verifiedPort int
 }
 
 func (p *matrixProbes) DetectApplication(context.Context) ApplicationObservation {
@@ -82,8 +83,9 @@ func (p *matrixProbes) DetectRunner(context.Context) RunnerObservation       { r
 func (p *matrixProbes) CheckTransport(context.Context, WebRemoteObservation) LiveTransportObservation {
 	return p.transport
 }
-func (p *matrixProbes) VerifyProject(context.Context, VerificationTarget) VerificationObservation {
+func (p *matrixProbes) VerifyProject(_ context.Context, target VerificationTarget) VerificationObservation {
 	p.verifyCalls++
+	p.verifiedPort = target.WebRemote.Port
 	return p.verify
 }
 
@@ -296,12 +298,17 @@ func TestRuntimeAdapter_FirstVerificationAndRegressionAreSeparateFromLiveState(t
 func TestRuntimeAdapterVerifyRechecksPrerequisitesBeforeAndAfter(t *testing.T) {
 	adapter, _, _, probes, request := runtimeAdapterFixture(t)
 	request.Persisted.FirstVerifiedAt = nil
+	probes.web.Ports = []int{2307, 2308}
+	probes.transport.Port = 2308
 	got, err := adapter.Verify(context.Background(), runtimecapability.VerificationRequest{EvaluationRequest: request})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !got.Succeeded || probes.verifyCalls != 1 || probes.appCalls < 2 {
 		t.Fatalf("verify = %+v, app calls=%d runner calls=%d", got, probes.appCalls, probes.verifyCalls)
+	}
+	if probes.verifiedPort != 2308 {
+		t.Fatalf("verifier used port %d, want responsive configured port 2308", probes.verifiedPort)
 	}
 }
 

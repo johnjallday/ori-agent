@@ -128,6 +128,9 @@ func (a *RuntimeAdapter) Verify(ctx context.Context, request runtimecapability.V
 	if live := liveTransportResult(request.WorkspaceID, transport); live != nil {
 		return runtimecapability.VerificationResult{LiveState: live.State, ReasonCode: live.ReasonCode, Summary: live.Summary, Action: live.Action}, nil
 	}
+	if transport.Port > 0 {
+		before.web.Port = transport.Port
+	}
 	expected, err := AuthoritativeProject(a.source, request.WorkspaceID)
 	if err != nil {
 		return runtimecapability.VerificationResult{
@@ -346,7 +349,7 @@ func liveTransportResult(workspaceID string, observation LiveTransportObservatio
 	case TransportAvailable:
 		return nil
 	case TransportOffline:
-		return &runtimecapability.LiveResult{State: runtimecapability.LiveOffline, ReasonCode: ReasonReaperOffline, Summary: "REAPER is offline.", Action: runtimeAction(workspaceID, "open_check_reaper", "Open or check REAPER")}
+		return &runtimecapability.LiveResult{State: runtimecapability.LiveOffline, ReasonCode: ReasonReaperOffline, Summary: "Ori could not reach any configured REAPER Web Remote interface.", Action: runtimeAction(workspaceID, "open_check_reaper", "Open or check REAPER")}
 	case TransportMalformed:
 		return &runtimecapability.LiveResult{State: runtimecapability.LiveCheckFailed, ReasonCode: ReasonTransportMalformed, Summary: "REAPER Web Remote returned an unexpected response.", Action: runtimeAction(workspaceID, "check_reaper_connection", "Check REAPER connection")}
 	case TransportUnavailable:

@@ -34,6 +34,11 @@ func TestParseWebRemoteConfig(t *testing.T) {
 		})
 	}
 
+	multiple := parseWebRemoteConfig([]byte("csurf_0=HTTP 0 2307 '' 'index.html' 0 ''\ncsurf_1=HTTP 0 2308 '' 'index.html' 0 ''\ncsurf_2=HTTP 0 2308 '' 'index.html' 0 ''\n"))
+	if multiple.State != ProbeReady || multiple.Port != 2307 || len(multiple.Ports) != 2 || multiple.Ports[0] != 2307 || multiple.Ports[1] != 2308 {
+		t.Fatalf("multiple configured interfaces = %+v", multiple)
+	}
+
 	oversized := parseWebRemoteConfig([]byte(strings.Repeat("x", maxREAPERConfigBytes+1)))
 	if oversized.State != ProbeUnknown {
 		t.Fatalf("oversized state = %s", oversized.State)

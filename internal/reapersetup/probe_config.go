@@ -9,11 +9,12 @@ import (
 )
 
 const (
-	maxREAPERConfigBytes = 2 << 20
-	maxREAPERConfigLines = 8192
-	maxRunnerIDBytes     = 256
-	maxProbeResponse     = 64 << 10
-	maxVerificationInbox = 1 << 20
+	maxREAPERConfigBytes   = 2 << 20
+	maxREAPERConfigLines   = 8192
+	maxRunnerIDBytes       = 256
+	maxProbeResponse       = 64 << 10
+	maxVerificationInbox   = 1 << 20
+	maxWebRemoteInterfaces = 8
 )
 
 var runnerCommandIDPattern = regexp.MustCompile(`^(?:_[A-Za-z0-9][A-Za-z0-9_-]{1,63}|[1-9][0-9]{0,9})$`)
@@ -35,6 +36,8 @@ func parseWebRemoteConfig(data []byte) WebRemoteObservation {
 	scanner.Buffer(make([]byte, 4096), 64<<10)
 	lines := 0
 	foundDisabled := false
+	ports := make([]int, 0, 2)
+	seenPorts := make(map[int]struct{})
 	for scanner.Scan() {
 		lines++
 		if lines > maxREAPERConfigLines {
@@ -75,15 +78,48 @@ func parseWebRemoteConfig(data []byte) WebRemoteObservation {
 		if err != nil || port < 1 || port > 65535 {
 			return WebRemoteObservation{State: ProbeInvalid}
 		}
-		return WebRemoteObservation{State: ProbeReady, Port: port}
+		if _, exists := seenPorts[port]; exists {
+			continue
+		}
+		if len(ports) >= maxWebRemoteInterfaces {
+			return WebRemoteObservation{State: ProbeUnknown}
+		}
+		seenPorts[port] = struct{}{}
+		ports = append(ports, port)
 	}
 	if scanner.Err() != nil {
 		return WebRemoteObservation{State: ProbeUnknown}
+	}
+	if len(ports) > 0 {
+		return WebRemoteObservation{State: ProbeReady, Port: ports[0], Ports: ports}
 	}
 	if foundDisabled {
 		return WebRemoteObservation{State: ProbeMissing}
 	}
 	return WebRemoteObservation{State: ProbeMissing}
+}
+
+func configuredWebRemotePorts(observation WebRemoteObservation) []int {
+	ports := make([]int, 0, len(observation.Ports)+1)
+	seen := make(map[int]struct{}, len(observation.Ports)+1)
+	add := func(port int) {
+		if port < 1 || port > 65535 {
+			return
+		}
+		if _, exists := seen[port]; exists {
+			return
+		}
+		seen[port] = struct{}{}
+		ports = append(ports, port)
+	}
+	add(observation.Port)
+	for _, port := range observation.Ports {
+		add(port)
+	}
+	if len(ports) > maxWebRemoteInterfaces {
+		return nil
+	}
+	return ports
 }
 
 func parseREAPEREnabled(value string) (bool, bool) {

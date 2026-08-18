@@ -224,6 +224,38 @@ test('assisted checklist derives complete/current/waiting states from the author
   assert.doesNotMatch(host.textContent, /Attach REAPER plugin/);
 });
 
+test('an unreachable configured interface highlights Web Remote, not the installed application', async () => {
+  const { renderer, document } = load();
+  const offline = runtime({
+    first_blocker: {
+      requirement_key: 'reaper_live_control',
+      reason_code: 'reaper_offline',
+      summary: 'Ori could not reach any configured REAPER Web Remote interface.',
+      action: {
+        token: 'open_check_reaper',
+        code: 'open_check_reaper',
+        label: 'Open or check REAPER'
+      }
+    },
+    requirements: [
+      {
+        key: 'reaper_live_control',
+        durable_state: 'in_progress',
+        live_state: 'offline',
+        reason_code: 'reaper_offline',
+        summary: 'Ori could not reach any configured REAPER Web Remote interface.'
+      }
+    ]
+  });
+  const { ctx, host } = context(document, offline);
+  await renderer.render(host, ctx);
+
+  const checklist = host.querySelector('.reaper-runtime-checklist');
+  assert.match(checklist.children[0].className, /is-complete/);
+  assert.match(checklist.children[1].className, /is-attention/);
+  assert.doesNotMatch(checklist.children[0].className, /is-attention/);
+});
+
 test('Web Remote and runner blockers show instructions then an honest Check again action', async () => {
   const { renderer, document } = load();
   const { ctx, host, calls } = context(document, runtime());

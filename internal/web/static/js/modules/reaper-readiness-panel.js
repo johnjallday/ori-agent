@@ -20,7 +20,13 @@
     {
       id: 'web-remote',
       label: 'Web Remote',
-      reasons: ['web_remote_unconfigured', 'web_remote_invalid']
+      reasons: [
+        'web_remote_unconfigured',
+        'web_remote_invalid',
+        'reaper_offline',
+        'web_remote_unavailable',
+        'web_remote_malformed'
+      ]
     },
     {
       id: 'plugin',
@@ -50,7 +56,13 @@
     {
       id: 'verification',
       label: 'Project-specific connection test',
-      reasons: ['verification_required', 'verification_timeout']
+      reasons: [
+        'verification_required',
+        'verification_timeout',
+        'wrong_project',
+        'reaper_project_missing',
+        'check_failed'
+      ]
     }
   ];
 
