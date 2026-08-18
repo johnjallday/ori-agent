@@ -460,6 +460,151 @@ test.describe('Reaper Song setup wizard', () => {
     await expect(dialog(page)).toBeHidden();
   });
 
+  test('compatible-agent repair opens the workspace snapshot picker and returns to setup', async ({
+    page,
+    request
+  }) => {
+    const workspaceId = await createReaperWorkspace(request, 'Reaper Agent Repair');
+    const runtime = {
+      workspace_id: workspaceId,
+      applicable: true,
+      contract_version: 1,
+      selected_mode_id: 'ori_assisted',
+      modes: [
+        { id: 'file_only', label: 'File-only', description: 'Use project files.' },
+        {
+          id: 'ori_assisted',
+          label: 'Ori-assisted REAPER',
+          description: 'Use verified live control.',
+          selected: true
+        }
+      ],
+      durable_state: 'in_progress',
+      live_state: 'not_checked',
+      first_blocker: {
+        requirement_key: 'reaper_live_control',
+        reason_code: 'cli_agent_required',
+        summary: 'Choose a Codex or Claude Code workspace agent for local REAPER control.',
+        action: {
+          token: 'choose_reaper_agent',
+          code: 'choose_reaper_agent',
+          label: 'Choose compatible agent'
+        }
+      },
+      requirements: [
+        {
+          key: 'reaper_live_control',
+          durable_state: 'in_progress',
+          live_state: 'not_checked',
+          reason_code: 'cli_agent_required',
+          summary: 'Choose a Codex or Claude Code workspace agent for local REAPER control.'
+        }
+      ]
+    };
+    let agentSave: { model?: string; llm_provider?: string } | null = null;
+    await page.route(`**/api/workspaces/${workspaceId}/runtime-capabilities**`, route => {
+      if (route.request().method() !== 'GET') return route.continue();
+      const projected = agentSave
+        ? {
+            ...runtime,
+            first_blocker: {
+              requirement_key: 'reaper_live_control',
+              reason_code: 'reaper_access_required',
+              summary: 'The selected workspace agent does not have REAPER access.',
+              action: {
+                token: 'grant_reaper_access',
+                code: 'grant_reaper_access',
+                label: 'Grant REAPER access'
+              }
+            },
+            requirements: [
+              {
+                ...runtime.requirements[0],
+                reason_code: 'reaper_access_required',
+                summary: 'The selected workspace agent does not have REAPER access.'
+              }
+            ]
+          }
+        : runtime;
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ runtime: projected })
+      });
+    });
+    page.on('request', request => {
+      if (
+        request.method() === 'PATCH' &&
+        request.url().includes(`/api/workspaces/${workspaceId}/agents/`)
+      ) {
+        agentSave = request.postDataJSON();
+      }
+    });
+    await page.route('**/api/providers', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          providers: [
+            {
+              name: 'codex',
+              display_name: 'OpenAI Codex (CLI)',
+              available: true,
+              models: [
+                { value: 'gpt-5.4', label: 'gpt-5.4', provider: 'codex', type: 'tool-calling' }
+              ]
+            },
+            {
+              name: 'claude_code',
+              display_name: 'Claude Code (CLI)',
+              available: true,
+              models: [
+                { value: 'haiku', label: 'Haiku', provider: 'claude_code', type: 'tool-calling' }
+              ]
+            },
+            {
+              name: 'ollama',
+              display_name: 'Ollama',
+              available: true,
+              models: [
+                { value: 'gemma4:26b', label: 'Gemma', provider: 'ollama', type: 'tool-calling' }
+              ]
+            }
+          ]
+        })
+      })
+    );
+
+    await page.goto(`/workspaces/${workspaceId}`);
+    await expect(dialog(page)).toBeVisible({ timeout: 20000 });
+    await page.getByRole('button', { name: 'Ori-assisted REAPER', exact: true }).click();
+    await page.getByRole('button', { name: 'Choose compatible agent', exact: true }).click();
+
+    const picker = page.locator('#workspace-detail-agent-model-modal');
+    await expect(picker).toBeVisible({ timeout: 15000 });
+    await expect(picker.locator('#workspace-detail-agent-model-title')).toContainText(
+      'Choose a compatible model for Reaper Producer'
+    );
+    const offeredProviders = await picker
+      .locator('#workspace-detail-agent-model-select option')
+      .evaluateAll(options =>
+        options.map(option => option.getAttribute('data-provider')).filter(Boolean)
+      );
+    expect(offeredProviders.length).toBeGreaterThan(0);
+    expect(new Set(offeredProviders)).toEqual(new Set(['codex', 'claude_code']));
+
+    await picker.locator('#workspace-detail-agent-model-select').selectOption('gpt-5.4');
+    await picker.getByRole('button', { name: 'Save Model', exact: true }).click();
+    await expect.poll(() => agentSave?.llm_provider || '').toBe('codex');
+    expect(agentSave?.model).toBe('gpt-5.4');
+    await expect(dialog(page)).toBeVisible({ timeout: 15000 });
+    await expect(page.locator('#setupWizardStepContent')).toContainText(
+      'The selected workspace agent does not have REAPER access'
+    );
+    const agents = await (await request.get(`/api/workspaces/${workspaceId}/agents`)).json();
+    expect(agents.agents[0].provider).toBe('codex');
+  });
+
   test('Ori-assisted shows one authoritative checklist and grants nothing', async ({
     page,
     request

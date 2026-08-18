@@ -32,6 +32,9 @@ class FakeElement {
   addEventListener(type, handler) {
     (this.listeners[type] ||= []).push(handler);
   }
+  removeEventListener(type, handler) {
+    this.listeners[type] = (this.listeners[type] || []).filter(candidate => candidate !== handler);
+  }
   querySelector(selector) {
     if (!selector.startsWith('.')) return null;
     const className = selector.slice(1);
@@ -92,9 +95,11 @@ function runtime(overrides = {}) {
 
 function load({ fetchImpl } = {}) {
   const renderers = new Map();
+  const modelModal = new FakeElement('div');
   const document = {
     readyState: 'complete',
     createElement: tag => new FakeElement(tag),
+    getElementById: id => (id === 'workspace-detail-agent-model-modal' ? modelModal : null),
     addEventListener() {},
     querySelector() {
       return null;
@@ -125,7 +130,7 @@ function load({ fetchImpl } = {}) {
     },
     { filename: 'reaper-readiness-panel.js' }
   );
-  return { window, document, renderer: renderers.get('runtime_readiness') };
+  return { window, document, modelModal, renderer: renderers.get('runtime_readiness') };
 }
 
 function context(document, status, options = {}) {
@@ -274,6 +279,64 @@ test('every compiled blocker projects one specific primary repair without redund
       );
     }
   }
+});
+
+test('compatible-agent repair opens only CLI choices and returns to the runtime step', async () => {
+  const { renderer, document, modelModal, window } = load({
+    fetchImpl: async () => ({
+      ok: true,
+      json: async () => ({
+        workspace: {
+          entry_agent_name: 'Reaper Producer',
+          agent_instances: [{ id: 'agent-1', name: 'Reaper Producer' }],
+          tasks: []
+        }
+      })
+    })
+  });
+  const calls = { close: 0, open: [], model: [] };
+  window.SetupWizard.close = async () => {
+    calls.close += 1;
+  };
+  window.SetupWizard.open = step => calls.open.push(step);
+  window.workspaceDetail = {
+    async openAgentModelModal(agentName, options) {
+      calls.model.push({ agentName, options });
+      return true;
+    }
+  };
+  const needsAgent = runtime({
+    first_blocker: {
+      requirement_key: 'reaper_live_control',
+      reason_code: 'cli_agent_required',
+      summary: 'Choose a Codex or Claude Code workspace agent.',
+      action: {
+        token: 'choose_reaper_agent',
+        code: 'choose_reaper_agent',
+        label: 'Choose compatible agent'
+      }
+    },
+    requirements: [
+      {
+        key: 'reaper_live_control',
+        durable_state: 'in_progress',
+        live_state: 'not_checked',
+        reason_code: 'cli_agent_required',
+        summary: 'Choose a Codex or Claude Code workspace agent.'
+      }
+    ]
+  });
+  const { ctx, host } = context(document, needsAgent);
+  await renderer.render(host, ctx);
+  await click(findButtons(host).find(node => node.textContent === 'Choose compatible agent'));
+
+  assert.equal(calls.close, 1);
+  assert.equal(calls.model[0].agentName, 'Reaper%20Producer');
+  assert.deepEqual(Array.from(calls.model[0].options.allowedProviders), ['codex', 'claude_code']);
+  assert.match(calls.model[0].options.help, /Codex or Claude Code CLI/);
+
+  for (const handler of modelModal.listeners['hidden.bs.modal'] || []) await handler();
+  assert.deepEqual(calls.open, ['live-control']);
 });
 
 test('missing plugin installs from the official repository link', async () => {

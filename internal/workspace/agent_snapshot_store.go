@@ -10,11 +10,12 @@ import (
 	"github.com/johnjallday/ori-agent/internal/systemassistant"
 )
 
-// AgentSnapshotStore decorates a workspace Store so that every Save() also
-// writes workspace-local snapshots of any referenced agents that exist in the
-// global agent store. The snapshots make a workspace folder self-contained for
-// export/import: the entry agent (and any other workspace agents) are restored
-// from the folder when the global registry doesn't know them.
+// AgentSnapshotStore decorates a workspace Store so that Save() backfills
+// missing workspace-local snapshots for referenced agents that exist in the
+// global agent store. Existing snapshots are never overwritten: once attached,
+// the workspace profile is independently editable and is the executable source
+// of truth for that workspace. The snapshots make a workspace folder
+// self-contained for export/import.
 //
 // On read paths the underlying Store's GetWorkspaceAgent is used unchanged, so
 // the snapshot wins precedence at resolution time (see AgentRuntimeResolver).
@@ -45,8 +46,8 @@ func (s *AgentSnapshotStore) GetFolderWorkspace(id string) (*Workspace, error) {
 	return nil, fmt.Errorf("wrapped store does not support GetFolderWorkspace")
 }
 
-// Save persists the workspace, then opportunistically snapshots referenced
-// agents. Snapshot failures are logged but do not fail the Save.
+// Save persists the workspace, then opportunistically backfills missing
+// referenced-agent snapshots. Snapshot failures are logged but do not fail Save.
 func (s *AgentSnapshotStore) Save(ws *Workspace) error {
 	if err := s.Store.Save(ws); err != nil {
 		return err
@@ -76,9 +77,9 @@ func (s *AgentSnapshotStore) Update(wsID string, fn func(*Workspace) error) erro
 	return nil
 }
 
-// SnapshotReferencedAgents writes a snapshot for every agent the workspace
-// references, when a matching global agent definition exists. Exported so the
-// startup migration can call it directly without re-saving the workspace.
+// SnapshotReferencedAgents backfills every missing referenced-agent snapshot
+// when a matching global definition exists. Exported so startup migration can
+// call it directly without re-saving the workspace.
 func (s *AgentSnapshotStore) SnapshotReferencedAgents(ws *Workspace) {
 	s.snapshotReferencedAgents(ws)
 }
@@ -90,6 +91,18 @@ func (s *AgentSnapshotStore) snapshotReferencedAgents(ws *Workspace) {
 	for _, name := range referencedAgentNames(ws) {
 		globalAgent, ok := s.agents.GetAgent(name)
 		if !ok || globalAgent == nil {
+			continue
+		}
+		_, exists, readErr := s.GetWorkspaceAgent(ws.ID, name)
+		if readErr != nil {
+			logger.Warn("Failed to inspect workspace-local agent snapshot", logger.Fields{
+				"workspace_id": ws.ID,
+				"agent":        name,
+				"error":        readErr.Error(),
+			})
+			continue
+		}
+		if exists {
 			continue
 		}
 		if err := s.SaveWorkspaceAgent(ws.ID, name, globalAgent); err != nil {

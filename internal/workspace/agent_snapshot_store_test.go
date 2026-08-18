@@ -43,6 +43,47 @@ func TestAgentSnapshotStore_SaveSnapshotsReferencedAgents(t *testing.T) {
 	}
 }
 
+func TestAgentSnapshotStore_SavePreservesWorkspaceEditedSnapshot(t *testing.T) {
+	primary := NewInMemoryStore()
+	global := &agent.Agent{Type: agent.TypeToolCalling}
+	global.Settings.Model = "global-model"
+	global.Settings.Provider = "ollama"
+	agents := &resolverAgentStoreStub{agents: map[string]*agent.Agent{"Manager": global}}
+	store := NewAgentSnapshotStore(primary, agents)
+
+	ws := &Workspace{
+		ID:             "ws-local-edit",
+		Name:           "Local edit",
+		Status:         StatusActive,
+		AgentInstances: AgentInstancesFromNames("Manager"),
+	}
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("initial Save: %v", err)
+	}
+
+	local := &agent.Agent{Type: agent.TypeToolCalling}
+	local.Settings.Model = "gpt-5.4"
+	local.Settings.Provider = "codex"
+	if err := store.SaveWorkspaceAgent(ws.ID, "Manager", local); err != nil {
+		t.Fatalf("save workspace edit: %v", err)
+	}
+
+	if err := store.Update(ws.ID, func(current *Workspace) error {
+		current.Description = "Routine workspace mutation"
+		return nil
+	}); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	got, ok, err := store.GetWorkspaceAgent(ws.ID, "Manager")
+	if err != nil || !ok || got == nil {
+		t.Fatalf("read workspace snapshot: ok=%v err=%v agent=%+v", ok, err, got)
+	}
+	if got.Settings.Provider != "codex" || got.Settings.Model != "gpt-5.4" {
+		t.Fatalf("workspace edit was overwritten by global snapshot: %+v", got.Settings)
+	}
+}
+
 func TestAgentSnapshotStore_NoGlobalAgentSkipsSnapshot(t *testing.T) {
 	primary := NewInMemoryStore()
 	agents := &resolverAgentStoreStub{agents: map[string]*agent.Agent{}}

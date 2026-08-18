@@ -55,6 +55,7 @@
   ];
 
   let registered = false;
+  let choosingAgent = false;
 
   function el(tag, className, text) {
     const node = document.createElement(tag);
@@ -351,6 +352,46 @@
     );
   }
 
+  async function chooseCompatibleAgent(ctx) {
+    if (choosingAgent) return;
+    choosingAgent = true;
+    ctx.setError('');
+    const modelModal = document.getElementById?.('workspace-detail-agent-model-modal');
+    let reopenSetup = null;
+    try {
+      const agent = await selectedAgentInstance(ctx);
+      if (!modelModal || typeof window.workspaceDetail?.openAgentModelModal !== 'function') {
+        throw new Error('The workspace agent model picker is unavailable on this page.');
+      }
+
+      reopenSetup = () => window.SetupWizard?.open?.(ctx.step?.id);
+      modelModal.addEventListener('hidden.bs.modal', reopenSetup, { once: true });
+      const closed = await window.SetupWizard?.close?.();
+      if (closed === false) {
+        throw new Error('Wait for the current setup action to finish, then try again.');
+      }
+      const opened = await window.workspaceDetail.openAgentModelModal(
+        encodeURIComponent(agent.name),
+        {
+          allowedProviders: ['codex', 'claude_code'],
+          title: `Choose a compatible model for ${agent.name}`,
+          help: 'Choose an OpenAI Codex or Claude Code CLI model for local REAPER control.'
+        }
+      );
+      if (!opened) {
+        throw new Error('Ori could not open compatible agent choices.');
+      }
+    } catch (error) {
+      if (reopenSetup) {
+        modelModal?.removeEventListener?.('hidden.bs.modal', reopenSetup);
+        window.SetupWizard?.open?.(ctx.step?.id);
+      }
+      ctx.setError(error?.message || 'Ori could not open compatible agent choices.');
+    } finally {
+      choosingAgent = false;
+    }
+  }
+
   async function openProject(ctx) {
     ctx.setBusy(true, 'Asking macOS to open the workspace project…');
     try {
@@ -446,12 +487,11 @@
         );
         break;
       case 'choose_reaper_agent':
-      case 'choose_runtime_agent': {
-        const link = el('a', 'modern-btn modern-btn-primary', 'Choose compatible agent');
-        link.href = `/workspaces/${encodeURIComponent(ctx.workspaceId)}?runtime_setup=1#workspace-detail-agents-panel`;
-        actions.appendChild(link);
+      case 'choose_runtime_agent':
+        actions.appendChild(
+          button('Choose compatible agent', () => chooseCompatibleAgent(ctx), { primary: true })
+        );
         break;
-      }
       case 'grant_reaper_access':
       case 'grant_runtime_access':
         renderDisclosure(host, requirementStatus?.disclosure || '');
