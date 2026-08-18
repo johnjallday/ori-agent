@@ -295,6 +295,23 @@ func TestRuntimeAdapter_FirstVerificationAndRegressionAreSeparateFromLiveState(t
 	}
 }
 
+func TestRuntimeAdapterCheckLiveUsesResponsiveConfiguredPort(t *testing.T) {
+	adapter, _, _, probes, request := runtimeAdapterFixture(t)
+	probes.web.Ports = []int{2307, 2308}
+	probes.transport.Port = 2308
+
+	got, err := adapter.CheckLive(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.State != runtimecapability.LiveAvailable {
+		t.Fatalf("live = %+v", got)
+	}
+	if probes.verifiedPort != 2308 {
+		t.Fatalf("live verifier used port %d, want responsive configured port 2308", probes.verifiedPort)
+	}
+}
+
 func TestRuntimeAdapterVerifyRechecksPrerequisitesBeforeAndAfter(t *testing.T) {
 	adapter, _, _, probes, request := runtimeAdapterFixture(t)
 	request.Persisted.FirstVerifiedAt = nil

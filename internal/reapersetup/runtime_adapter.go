@@ -96,6 +96,9 @@ func (a *RuntimeAdapter) CheckLive(ctx context.Context, request runtimecapabilit
 	if result := liveTransportResult(request.WorkspaceID, transport); result != nil {
 		return *result, nil
 	}
+	if transport.Port > 0 {
+		check.web.Port = transport.Port
+	}
 	expected, err := AuthoritativeProject(a.source, request.WorkspaceID)
 	if err != nil {
 		return runtimecapability.LiveResult{
