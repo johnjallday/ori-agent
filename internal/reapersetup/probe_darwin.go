@@ -141,6 +141,29 @@ func detectWebRemoteConfigs(configPaths []string) WebRemoteObservation {
 	return WebRemoteObservation{State: ProbeMissing}
 }
 
+func configuredWebRemotePorts(observation WebRemoteObservation) []int {
+	ports := make([]int, 0, len(observation.Ports)+1)
+	seen := make(map[int]struct{}, len(observation.Ports)+1)
+	add := func(port int) {
+		if port < 1 || port > 65535 {
+			return
+		}
+		if _, exists := seen[port]; exists {
+			return
+		}
+		seen[port] = struct{}{}
+		ports = append(ports, port)
+	}
+	add(observation.Port)
+	for _, port := range observation.Ports {
+		add(port)
+	}
+	if len(ports) > maxWebRemoteInterfaces {
+		return nil
+	}
+	return ports
+}
+
 func (p *platformProbe) DetectRunner(context.Context) RunnerObservation {
 	if p == nil || p.roots == nil {
 		return RunnerObservation{State: ProbeMissing}
