@@ -474,6 +474,14 @@ test.describe('Reaper Song setup wizard', () => {
     await expect(content).toContainText('REAPER application', { timeout: 15000 });
     await expect(content).toContainText('Web Remote');
     await expect(content).toContainText('REAPER plugin and skills');
+    const pluginLink = content.getByRole('link', {
+      name: 'REAPER plugin and skills (opens plugin repository)'
+    });
+    await expect(pluginLink).toHaveAttribute(
+      'href',
+      'https://github.com/johnjallday/reaper-plugin'
+    );
+    await expect(pluginLink).toHaveAttribute('target', '_blank');
     await expect(content).toContainText('Ori REAPER runner');
     await expect(content).toContainText('Compatible workspace agent');
     await expect(content).toContainText('REAPER access');

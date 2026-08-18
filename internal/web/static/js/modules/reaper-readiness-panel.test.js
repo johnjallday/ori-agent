@@ -50,7 +50,8 @@ class FakeElement {
 function findButtons(root) {
   const out = [];
   const visit = node => {
-    if (node.tagName === 'BUTTON' || node.tagName === 'A') out.push(node);
+    const isActionLink = node.tagName === 'A' && node.className.split(/\s+/).includes('modern-btn');
+    if (node.tagName === 'BUTTON' || isActionLink) out.push(node);
     node.children.forEach(visit);
   };
   visit(root);
@@ -205,6 +206,11 @@ test('assisted checklist derives complete/current/waiting states from the author
   assert.match(checklist.children[0].textContent, /REAPER applicationComplete/);
   assert.match(checklist.children[1].textContent, /Web RemoteNeeds attention/);
   assert.match(checklist.children[2].textContent, /REAPER plugin and skillsWaiting/);
+  const pluginLink = checklist.children[2].querySelector('.reaper-runtime-plugin-link');
+  assert.equal(pluginLink.href, 'https://github.com/johnjallday/reaper-plugin');
+  assert.equal(pluginLink.target, '_blank');
+  assert.equal(pluginLink.rel, 'noopener noreferrer');
+  assert.match(pluginLink.attributes['aria-label'], /opens plugin repository/);
   assert.match(checklist.children[3].textContent, /Ori REAPER runnerWaiting/);
   assert.deepEqual(
     findButtons(host).map(node => node.textContent),
@@ -268,6 +274,43 @@ test('every compiled blocker projects one specific primary repair without redund
       );
     }
   }
+});
+
+test('missing plugin installs from the official repository link', async () => {
+  const { renderer, document, window } = load();
+  let installOptions;
+  window.ReaperPluginInstall = {
+    begin(options) {
+      installOptions = options;
+    }
+  };
+  const missingPlugin = runtime({
+    first_blocker: {
+      requirement_key: 'reaper_live_control',
+      reason_code: 'reaper_plugin_missing',
+      summary: 'Install the REAPER plugin and skills.',
+      action: {
+        token: 'install_reaper_plugin',
+        code: 'install_reaper_plugin',
+        label: 'Install REAPER plugin'
+      }
+    },
+    requirements: [
+      {
+        key: 'reaper_live_control',
+        durable_state: 'in_progress',
+        live_state: 'not_checked',
+        reason_code: 'reaper_plugin_missing',
+        summary: 'Install the REAPER plugin and skills.'
+      }
+    ]
+  });
+  const { ctx, host } = context(document, missingPlugin);
+  await renderer.render(host, ctx);
+  await click(findButtons(host).find(node => node.textContent === 'Install REAPER plugin'));
+
+  assert.equal(installOptions.declaredSource, 'https://github.com/johnjallday/reaper-plugin');
+  assert.equal(installOptions.host.className, 'reaper-runtime-actions');
 });
 
 test('grant disclosure is adjacent to the explicit grant and sends only the selected agent id', async () => {

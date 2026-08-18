@@ -9,6 +9,7 @@
 
   const REQUIREMENT = 'reaper_live_control';
   const DOWNLOAD_URL = 'https://www.reaper.fm/download.php';
+  const REAPER_PLUGIN_URL = 'https://github.com/johnjallday/reaper-plugin';
 
   const checks = [
     {
@@ -125,7 +126,16 @@
       const mark = el('span', 'reaper-runtime-check-mark', state.mark);
       mark.setAttribute('aria-hidden', 'true');
       const body = el('span', 'reaper-runtime-check-body');
-      body.appendChild(el('span', 'reaper-runtime-check-label', check.label));
+      if (check.id === 'plugin') {
+        const label = el('a', 'reaper-runtime-check-label reaper-runtime-plugin-link', check.label);
+        label.href = REAPER_PLUGIN_URL;
+        label.target = '_blank';
+        label.rel = 'noopener noreferrer';
+        label.setAttribute('aria-label', `${check.label} (opens plugin repository)`);
+        body.appendChild(label);
+      } else {
+        body.appendChild(el('span', 'reaper-runtime-check-label', check.label));
+      }
       body.appendChild(el('span', 'reaper-runtime-check-word', state.word));
       item.appendChild(mark);
       item.appendChild(body);
@@ -271,13 +281,12 @@
     panel.focus?.();
   }
 
-  async function repairPlugin(ctx, code) {
+  async function repairPlugin(ctx, code, host) {
     if (code === 'install_reaper_plugin') {
-      const host = document.querySelector?.('.reaper-runtime-actions');
       if (host && window.ReaperPluginInstall) {
         window.ReaperPluginInstall.begin({
           host,
-          declaredSource: '',
+          declaredSource: REAPER_PLUGIN_URL,
           onComplete: async () => {
             const next = await ctx.refreshRuntime();
             ctx.setRuntimeStatus(next);
@@ -431,7 +440,7 @@
       case 'enable_reaper_plugin':
       case 'attach_reaper_plugin':
         actions.appendChild(
-          button(action?.label || 'Update REAPER plugin', () => repairPlugin(ctx, code), {
+          button(action?.label || 'Update REAPER plugin', () => repairPlugin(ctx, code, actions), {
             primary: true
           })
         );

@@ -605,6 +605,17 @@
   overflow-wrap: anywhere;
 }
 
+.reaper-runtime-plugin-link {
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, currentColor 55%, transparent);
+  text-underline-offset: 0.18em;
+}
+
+.reaper-runtime-plugin-link:hover,
+.reaper-runtime-plugin-link:focus-visible {
+  text-decoration-color: currentColor;
+}
+
 .reaper-runtime-check-word {
   color: var(--text-secondary, #9aa0a6);
   font-size: 0.72rem;
