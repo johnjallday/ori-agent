@@ -64,14 +64,26 @@ body.home-command-page .home-command-bridge * {
   box-sizing: border-box;
 }
 
-/* Row 1 is the Ask Ori command strip; row 2 is the cockpit, which absorbs all
-   remaining height so Map/Tree and the rail fill the screen. The optional
-   Personal HQ mounts live INSIDE the Today rail rather than as a third row —
-   below the cockpit they squeezed the workspace area whenever an HQ card
-   appeared. */
+/* One row: the cockpit, which absorbs the whole bridge height so Map/Tree and
+   the rail fill the screen. The optional Personal HQ mounts live INSIDE the
+   Today rail rather than as another row — below the cockpit they squeezed the
+   workspace area whenever an HQ card appeared.
+
+   There used to be a leading `auto` row for the Ask Ori command strip. Issue
+   #350 retired that strip (see dashboard.tmpl, which says its layout space is
+   reclaimed), but the row outlived it — and an empty declared row is not
+   harmless here. The cockpit, first in the markup, fell into that `auto` row
+   and sized itself to its own content, which floors the Map at
+   .ws-map-theatre's 320px minimum; the `1fr` row that was meant for it held
+   nothing at all. On a 1200px-tall window that left a 320px map above ~650px
+   of empty page (#365).
+
+   Everything below this point was already built to fill: `.home-cockpit` and
+   `.cockpit-workspace-area` both give their flexible track `minmax(0, 1fr)`,
+   and `.cockpit-map` is `height: 100%`. This row was the one broken link. */
 .home-command-bridge {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   gap: 12px;
   width: min(1680px, 100%);
   margin: 0 auto;

@@ -915,8 +915,7 @@ test('Fit all excludes a collapsed district hidden descendants (#346 FR-112)', (
       {
         positions: { m1: { x: 400, y: 400 }, m2: { x: 900, y: 800 } },
         groupPresentations: { g: { collapsed } },
-        hqSite: false,
-        createPad: false
+        hqSite: false
       }
     );
 
@@ -1352,13 +1351,29 @@ test('hqOverviewHTML offers setup actions, hides Not now after skip, and offers 
   assert.doesNotMatch(repair, /data-hq-action="skip"/);
 });
 
-test('the New Workspace pad gets its own anchor after every real and reserved site', () => {
+// #367: the ordinary New Workspace pad used to take an anchor of its own from
+// the same placement scan. Removing it has to remove the ANCHOR too, not just
+// the markup: an allocated-but-undrawn site would keep pushing Fit all and the
+// opening view out toward a corner nothing is drawn in.
+test('no ordinary create pad is allocated among the real and reserved sites (#367)', () => {
   const computeWorldLayout = loadWorldLayout();
   const layout = computeWorldLayout([{ id: 'a' }, { id: 'b' }], { hqSite: true });
-  const taken = new Set(layout.nodes.map(n => n.x + ',' + n.y));
-  taken.add(layout.hqSite.x + ',' + layout.hqSite.y);
-  assert.ok(layout.pad && Number.isFinite(layout.pad.x));
-  assert.ok(!taken.has(layout.pad.x + ',' + layout.pad.y), 'the pad never sits under a building');
+  assert.equal(layout.pad, undefined, 'the layout no longer carries a pad site at all');
+
+  // One cell, measured from the module rather than hardcoded, so this keeps
+  // holding if the tile size changes.
+  const solo = computeWorldLayout([{ id: 'solo' }], { hqSite: false });
+  const cellW = solo.bounds.maxX - solo.bounds.minX;
+  const cellH = solo.bounds.maxY - solo.bounds.minY;
+
+  // Bounds come from the two workspaces and the reserved HQ site only.
+  const sites = layout.nodes.concat([layout.hqSite]);
+  assert.equal(
+    layout.bounds.maxX,
+    Math.max(...sites.map(s => s.x)) + cellW,
+    'world bounds end at the outermost REAL site, with nothing reserved past it'
+  );
+  assert.equal(layout.bounds.maxY, Math.max(...sites.map(s => s.y)) + cellH);
 });
 
 test('tileHTML meta line reflects enriched agent/task counts with correct pluralization', () => {
@@ -1883,14 +1898,48 @@ test('cockpit mode renders no second topbar or overview panel (FR15)', () => {
   });
   assert.doesNotMatch(container.innerHTML, /ws-map-topbar/);
   assert.doesNotMatch(container.innerHTML, /ws-map-overview/);
-  // Only the TOPBAR's create button is suppressed (the cockpit header carries
-  // it). The in-canvas New Workspace pad stays — FR29 requires the Map itself
-  // to offer an obvious New Workspace site.
+  // The cockpit carries no create affordance of its own at all: not the map
+  // topbar's button (the cockpit's workspace-area header owns that), and since
+  // #367 not an in-canvas pad either. A populated map draws only real sites.
   assert.doesNotMatch(container.innerHTML, /class="ws-map-create"/);
-  assert.match(container.innerHTML, /ws-map-pad[^>]*data-ws-map-create/);
+  assert.doesNotMatch(container.innerHTML, /ws-map-pad/);
+  assert.doesNotMatch(container.innerHTML, /data-ws-map-create/);
   // The theatre — the part that actually draws the sites — is still there.
   assert.match(container.innerHTML, /ws-map-theatre/);
   assert.match(container.innerHTML, /is-cockpit/);
+});
+
+// #367: the same populated map, rendered with its own chrome. The topbar's
+// ⊕ New Workspace is the create affordance the standalone shell has always
+// owned and must keep; the removed pad must not come back alongside it.
+test('populated standalone mode keeps exactly its topbar create action and no in-canvas pad (#367)', () => {
+  const map = loadMapForMount();
+  const { container } = createMapHarness({ tiles: ['ws-1'] });
+  map.mount(container, {
+    workspaces: [{ id: 'ws-1', name: 'Alpha' }],
+    selectOnly: true,
+    noAutoSelect: true
+  });
+  assert.match(container.innerHTML, /ws-map-topbar/);
+  assert.equal(
+    (container.innerHTML.match(/data-ws-map-create/g) || []).length,
+    1,
+    'exactly one create affordance, and it is the topbar button'
+  );
+  assert.match(container.innerHTML, /class="ws-map-create" data-ws-map-create/);
+  assert.doesNotMatch(container.innerHTML, /ws-map-pad/);
+  assert.match(container.innerHTML, /data-ws-id="ws-1"/);
+});
+
+// The true-empty presentation is a different code path (emptyCanvasHTML) and is
+// deliberately untouched by #367: with no workspaces at all there is no map to
+// clutter, and the hero is the only thing on it.
+test('the legacy true-empty map still offers its hero create action (#367)', () => {
+  const map = loadMapForMount();
+  const { container } = createMapHarness();
+  map.mount(container, { workspaces: [], selectOnly: true, noAutoSelect: true });
+  assert.match(container.innerHTML, /ws-map-pad ws-map-pad--hero[^>]*data-ws-map-create/);
+  assert.match(container.innerHTML, /No workspaces yet/);
 });
 
 test('the Home-only empty presentation renders a real blank canvas without legacy copy or selection', () => {
@@ -3111,7 +3160,7 @@ test('a zero-workspace profile frames its reserved HQ landmark (#329)', async ()
   );
 });
 
-test('a map with only the New Workspace pad still waits for content (#329)', async () => {
+test('a map with nothing on it still waits for content (#329)', async () => {
   const map = loadMapWithFetch(() => jsonResponse({ schema_version: 1, positions: {} }));
   const harness = hqHarness();
   mountWithCamera(map, harness, []);
@@ -3120,7 +3169,7 @@ test('a map with only the New Workspace pad still waits for content (#329)', asy
   assert.deepEqual(
     { ...map.getCamera() },
     DEFAULT_CAMERA,
-    'framing the bare create pad would lock the camera onto an empty corner'
+    'framing an empty world would lock the camera onto a corner nothing is drawn in'
   );
 
   // And the one-time initialization was not spent: content arriving later
@@ -3215,7 +3264,14 @@ test('framing the reserved site changes the camera and nothing else (#329)', asy
   // not the camera decided to frame them.
   const layout = map.computeWorldLayout([], { hqSite: true });
   assert.deepEqual({ x: layout.hqSite.x, y: layout.hqSite.y }, { x: anchor.x, y: anchor.y });
-  assert.ok(layout.pad && Number.isFinite(layout.pad.x), 'the create pad still has its anchor');
+  // Since #367 the reserved HQ site is the ONLY thing here — the create pad no
+  // longer pads the world out. It has to produce finite, non-empty bounds by
+  // itself, or framing an HQ-only map would have nothing to frame.
+  assert.equal(layout.pad, undefined);
+  assert.ok(
+    Number.isFinite(layout.bounds.minX) && Number.isFinite(layout.bounds.maxY),
+    'the HQ-only world has finite bounds'
+  );
   assert.ok(
     layout.bounds.maxX > layout.bounds.minX && layout.bounds.maxY > layout.bounds.minY,
     'and the world still has real bounds'
@@ -3447,7 +3503,25 @@ test('a keyboard-opened menu builds at the middle of what the user is looking at
     height: 600
   });
   const snapped = map.snapPoint(centre);
-  assert.deepEqual({ ...saved }, { ...snapped }, 'built at the centre of the view');
+
+  // The centre of the view is where it goes — but a single framed workspace IS
+  // what the camera is centred on, so the snapped centre lands on Alpha's
+  // footprint and FR-72 pushes the new site clear of it. Both rules are
+  // asserted rather than only the one that happened to be visible while an
+  // in-canvas create pad was still widening the framed world (#367).
+  const step = map.snapStep;
+  assert.ok(
+    Math.abs(saved.x - snapped.x) <= 2 * step && Math.abs(saved.y - snapped.y) <= 2 * step,
+    'built next to the centre of the view, not somewhere else entirely: ' + JSON.stringify(saved)
+  );
+  const alpha = map.getLayoutState().positions['ws-1'];
+  const solo = map.computeWorldLayout([{ id: 'solo' }], { hqSite: false });
+  const cellW = solo.bounds.maxX - solo.bounds.minX;
+  const cellH = solo.bounds.maxY - solo.bounds.minY;
+  assert.ok(
+    Math.abs(saved.x - alpha.x) >= cellW || Math.abs(saved.y - alpha.y) >= cellH,
+    'and clear of the workspace it was centred on (FR-72)'
+  );
 });
 
 test('a successful create saves the chosen coordinate exactly once (FR-53)', async () => {
