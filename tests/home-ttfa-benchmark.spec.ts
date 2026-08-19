@@ -153,7 +153,7 @@ function median(values: number[]): number {
  *
  * Both Home shapes are supported by the SAME routine so the two runs stay
  * comparable — it takes whichever path the build under test offers:
- *   - Map-first cockpit: select the site on the Map, then Open Workspace.
+ *   - Map-first cockpit: select the site, then use Open Workspace in context.
  *   - Operations Board (baseline): click the workspace card, or fall through to
  *     the `/workspaces` launcher when the card is not on Home.
  * Anything it cannot find is a real finding, not a harness bug: it means that
@@ -170,7 +170,7 @@ async function runJourney(
   const mapSite = page.locator(`.ws-map-tile[data-ws-id="${target.id}"]`);
   if (await mapSite.count()) {
     await mapSite.first().click();
-    const openAction = page.locator('[data-cockpit-rail-open]');
+    const openAction = page.locator('#cockpitContextModal [data-cockpit-rail-open]');
     await expect(openAction).toBeVisible();
     await openAction.click();
     await page.waitForURL(`**/workspaces/${target.id}`);

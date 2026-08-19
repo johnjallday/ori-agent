@@ -14,7 +14,6 @@ import {
   RAIL_GROUP,
   RAIL_WORKSPACE,
   RAIL_SUMMARY,
-  RAIL_ASK,
   PANEL_NONE,
   PANEL_UPDATES,
   PANEL_QUESTS,
@@ -22,7 +21,7 @@ import {
   togglePanelState,
   panelTriggerId,
   updatesBadgeView,
-  contextRailShouldBeOpen,
+  contextModalShouldShow,
   parseViewFromQuery,
   searchForView,
   readCount,
@@ -1473,18 +1472,28 @@ test('updatesBadgeView never lets an unavailable source read as a fabricated 0',
   assert.equal(badge.visible, false);
 });
 
-test('contextRailShouldBeOpen: a bare Today state always stays closed, never for attention or Progression (FR41-FR42)', () => {
-  // The point of this test is what contextRailShouldBeOpen does NOT take as
-  // input: unlike the retired railShouldBeOpen, it has no attention count or
-  // Progression/#questLog signal to consult in the first place.
-  assert.equal(contextRailShouldBeOpen(RAIL_TODAY), false);
+test('contextModalShouldShow keeps context kind and requested visibility separate', () => {
+  assert.equal(
+    contextModalShouldShow({ railState: RAIL_WORKSPACE, requestedOpen: false }),
+    false,
+    'a dismissed workspace context stays selected without reopening'
+  );
+  assert.equal(contextModalShouldShow({ railState: RAIL_WORKSPACE, requestedOpen: true }), true);
+  assert.equal(contextModalShouldShow({ railState: RAIL_GROUP, requestedOpen: true }), true);
+  assert.equal(contextModalShouldShow({ railState: RAIL_SUMMARY, requestedOpen: true }), true);
 });
 
-test('contextRailShouldBeOpen: a real selection opens the rail (FR43-FR44)', () => {
-  assert.equal(contextRailShouldBeOpen(RAIL_WORKSPACE), true);
-  assert.equal(contextRailShouldBeOpen(RAIL_GROUP), true);
-  assert.equal(contextRailShouldBeOpen(RAIL_SUMMARY), true);
-  assert.equal(contextRailShouldBeOpen(RAIL_ASK), true);
+test('contextModalShouldShow rejects bare, unavailable, and Ask Ori states', () => {
+  assert.equal(contextModalShouldShow({ railState: RAIL_TODAY, requestedOpen: true }), false);
+  assert.equal(contextModalShouldShow({ railState: 'ask-ori', requestedOpen: true }), false);
+  assert.equal(
+    contextModalShouldShow({
+      railState: RAIL_WORKSPACE,
+      requestedOpen: true,
+      targetAvailable: false
+    }),
+    false
+  );
 });
 
 test('togglePanelState: activating a closed trigger opens only that panel (FR7)', () => {
@@ -1517,13 +1526,11 @@ test('panelTriggerId: no panel open means no focus restoration target', () => {
 });
 
 // ===========================================================================
-// Header panel / context rail independence (Issue #334, Group 3)
+// Header panel / context-modal coordination (Issues #334 and #366)
 //
-// togglePanelState and contextRailShouldBeOpen take entirely separate inputs
-// (state.panel vs. state.railState) and neither reads the other — that
-// separation of inputs IS the guarantee that a header disclosure and a real
-// context selection can never drift into contradicting each other. These
-// tests walk the full transition matrix to document it.
+// Header disclosures keep their own single-value state. Opening blocking
+// context closes that state through the DOM controller, while data updates
+// alone can never request modal visibility.
 // ===========================================================================
 
 test('togglePanelState: a full walk through every trigger never leaves more than one panel value at a time', () => {
@@ -1551,12 +1558,12 @@ test('togglePanelState: a full walk through every trigger never leaves more than
   assert.deepEqual(observed, expected);
 });
 
-test('contextRailShouldBeOpen is unaffected by which header panel (if any) is open', () => {
-  // The context rail's open/closed decision takes ONLY railState — proving it
-  // returns the same answer regardless of a hypothetical concurrent panel
-  // value documents that the two state machines cannot influence each other.
+test('context modal visibility requires an explicit request, regardless of header panel data', () => {
   for (const panel of [PANEL_NONE, PANEL_UPDATES, PANEL_QUESTS, PANEL_CAPTURE]) {
-    assert.equal(contextRailShouldBeOpen(RAIL_TODAY), false, `panel=${panel}`);
-    assert.equal(contextRailShouldBeOpen(RAIL_WORKSPACE), true, `panel=${panel}`);
+    assert.equal(
+      contextModalShouldShow({ railState: RAIL_WORKSPACE, requestedOpen: false }),
+      false,
+      `panel=${panel}`
+    );
   }
 });

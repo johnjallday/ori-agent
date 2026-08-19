@@ -863,10 +863,9 @@ test('captures the Workspace Map with Personal HQ and fictional workspaces', asy
   // The Workspace Map is Home's default view now, not a separate launcher page,
   // so this scene captures the canonical route rather than photographing a
   // redirect. It selects a site first: with nothing selected this is the same
-  // picture as `hero`, and the selected-workspace rail is what makes the Map's
-  // select-then-open contract legible in a still image. Selecting also settles
-  // the rail, which made the capture deterministic — capturing Today here was
-  // flaky roughly one run in three on a sub-pixel Calendar Ops shift.
+  // picture as `hero`. Select a site to preserve the Map's selected state, then
+  // dismiss its context modal so the canonical capture remains a full-width,
+  // Map-only scene. Dismissal intentionally keeps selection and camera.
   await captureScene(
     page,
     'workspace-map',
@@ -874,8 +873,16 @@ test('captures the Workspace Map with Personal HQ and fictional workspaces', asy
     '#cockpitMap',
     'Northstar Personal HQ',
     async scenePage => {
-      await scenePage.locator('.ws-map-tile[data-ws-id]').first().click();
-      await expect(scenePage.locator('[data-cockpit-rail-open]')).toBeVisible();
+      const selectedTile = scenePage.locator('.ws-map-tile[data-ws-id]').first();
+      await selectedTile.click();
+      await expect(scenePage.locator('#cockpitContextModal')).toBeVisible();
+      await scenePage.keyboard.press('Escape');
+      await expect(scenePage.locator('#cockpitContextModal')).toBeHidden();
+      // `toBeHidden` can observe Bootstrap's display state just before its
+      // hidden event restores focus and removes the backdrop. Waiting for both
+      // effects keeps the selected-map frame byte-stable on slower CI runners.
+      await expect(selectedTile).toBeFocused();
+      await expect(scenePage.locator('.modal-backdrop')).toHaveCount(0);
     }
   );
   await expect(page.locator('.ws-map-tile.is-hq')).toHaveCount(1);

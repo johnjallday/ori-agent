@@ -6,7 +6,7 @@
 //   - the shared workspace collection (fetched once per refresh cycle, FR111);
 //   - the active Map/Tree view and its `view` query state (FR25/FR26);
 //   - the active workspace/group selection shared by every view (FR57);
-//   - the context-rail state (Today / workspace / group / Summary / Ask Ori);
+//   - selected context (Today / workspace / group / Summary) and its modal visibility;
 //   - the refresh + mutation lifecycle.
 //
 // It deliberately does NOT load workspace-hub.js: mounting the launcher
@@ -394,15 +394,23 @@ export function updatesBadgeView(flattened, scheduleIndex) {
 }
 
 /**
- * Whether the CONTEXT rail should be open, from its own state alone.
+ * Decide whether the blocking context modal may be visible.
  *
- * A real selection (workspace/group/HQ site, Summary, Ask Ori) opens it; a
- * bare Today never does — not for attention, not for Progression, not for
- * anything else (FR41-FR47). Updates/Quests are separate overlays with their
- * own `panel` state (see togglePanelState) and never factor in here.
+ * Context kind and visibility are deliberately separate. A selected workspace
+ * remains selected after dismissal, so background renders cannot infer "show"
+ * merely from `railState`. Ask Ori is independently owned by the universal,
+ * non-modal activity panel and is never valid context-modal content.
  */
-export function contextRailShouldBeOpen(railState) {
-  return railState !== RAIL_TODAY;
+export function contextModalShouldShow({
+  railState,
+  requestedOpen = false,
+  targetAvailable = true
+} = {}) {
+  return (
+    requestedOpen === true &&
+    targetAvailable !== false &&
+    [RAIL_WORKSPACE, RAIL_GROUP, RAIL_SUMMARY].includes(railState)
+  );
 }
 
 /** Apply the active filter, returning the ids that should stay prominent. */
@@ -599,7 +607,7 @@ export function groupAggregates(group, flattened) {
 }
 
 /**
- * The rail's Map-layout section for a selected group (#346 FR-151 – FR-154).
+ * The context modal's Map-layout section for a selected group (#346 FR-151 – FR-154).
  *
  * Returns null when the section must not be shown at all — which is the whole
  * point of the `view` argument. In Tree, a "Resize group" control would imply
@@ -708,7 +716,6 @@ export const RAIL_TODAY = 'today';
 export const RAIL_WORKSPACE = 'workspace';
 export const RAIL_GROUP = 'group';
 export const RAIL_SUMMARY = 'summary';
-export const RAIL_ASK = 'ask-ori';
 
 // ---------------------------------------------------------------------------
 // Header disclosure ("panel") state — Updates / Quests / Quick Capture
@@ -718,10 +725,8 @@ export const RAIL_ASK = 'ask-ori';
 // disclosures (Issue #334). They are siblings, not independent booleans:
 // opening one always closes whichever of the other two was open, so the three
 // controls can never drift into contradictory `hidden`/`aria-expanded`
-// states. This is deliberately separate from `railState`/contextRailShouldBeOpen()
-// above, which governs the CONTEXT rail (a selected workspace/group/HQ site,
-// Summary, or Ask Ori) — a real context selection and a manually opened
-// flyout can be visible at the same time without disturbing each other.
+// states. Context kind remains separate, while Issue #366 coordinates an
+// explicit modal open by closing whichever header disclosure is active.
 
 export const PANEL_NONE = 'none';
 export const PANEL_UPDATES = 'updates';
@@ -788,7 +793,7 @@ export function askTargetDescription({ selected, recommended, routed } = {}) {
 export const HQ_SITE_ID = '__personal_hq_site__';
 
 /**
- * Build the workspace rail's view model.
+ * Build the workspace context view model.
  *
  * Kept separate from the HTML so the decisions (what is shown, what is honestly
  * unavailable, whether Ask Commander is offered) are assertable without parsing
@@ -891,7 +896,7 @@ function aggregateHTML(label, aggregate) {
 }
 
 /**
- * Render the group context rail.
+ * Render group context for the shared modal.
  *
  * A group is a container, not an execution workspace: it gets Open Group and
  * descendant aggregates, and deliberately NO next-move or Ask Commander action
@@ -949,7 +954,7 @@ function mapLayoutSectionHTML(layout) {
   const disabled = attr => (attr ? '' : ' disabled');
   return (
     '<section class="cockpit-rail-section cockpit-rail-maplayout" data-rail-map-layout>' +
-    '<h4 class="cockpit-rail-section-title">Map layout</h4>' +
+    '<h3 class="cockpit-rail-section-title">Map layout</h3>' +
     `<p class="cockpit-rail-maplayout-mode" data-rail-sizing-mode="${escapeHtml(layout.sizingMode)}">${escapeHtml(layout.sizingLabel)}</p>` +
     '<div class="cockpit-rail-maplayout-actions">' +
     '<button type="button" class="modern-btn cockpit-rail-maplayout-btn" data-cockpit-group-collapse' +
@@ -1014,12 +1019,12 @@ function appearanceHTML(layout) {
   );
 }
 
-/** Render the cross-workspace Summary rail state (FR89, FR90). */
+/** Render cross-workspace Summary context (FR89, FR90). */
 export function renderSummaryRailHTML(view) {
   if (!view) return '';
   const listHTML = (title, rows, emptyCopy) =>
     '<section class="cockpit-rail-section">' +
-    `<h4 class="cockpit-rail-section-title">${escapeHtml(title)}</h4>` +
+    `<h3 class="cockpit-rail-section-title">${escapeHtml(title)}</h3>` +
     (rows.length
       ? '<ul class="cockpit-rail-roster">' +
         rows
@@ -1076,7 +1081,7 @@ export function renderSummaryRailHTML(view) {
 }
 
 /**
- * Render the workspace context rail.
+ * Render workspace context for the shared modal.
  *
  * Order follows PRD §6 "Context-Rail Priority": identity and operational state,
  * recommended next move, open/ask actions, metrics, then the compact roster.
@@ -1120,7 +1125,7 @@ export function renderWorkspaceRailHTML(view) {
     metricHTML('Attention', view.status.attention) +
     '</div>' +
     '<section class="cockpit-rail-section" aria-label="Agent roster">' +
-    '<h4 class="cockpit-rail-section-title">Roster</h4>' +
+    '<h3 class="cockpit-rail-section-title">Roster</h3>' +
     rosterHTML(view.rosterState) +
     '</section>' +
     '</div>'
@@ -1387,7 +1392,7 @@ export function renderWorkspaceAreaStatusHTML(status) {
 
 // Tree is a peer VIEW owned by this coordinator: it renders and handles local
 // interaction, and hands every mutation back here so shared state, refresh, and
-// rail context stay single-authority (FR117).
+// modal context stay single-authority (FR117).
 import { mountTree, ancestorIds } from './home-workspace-tree.js';
 import {
   createGroupFrom as createGroupAction,
@@ -1418,7 +1423,8 @@ import {
     areaStatus: document.getElementById('cockpitWorkspaceStatus'),
     viewButtons: Array.from(document.querySelectorAll('[data-cockpit-view]')),
     filters: document.getElementById('cockpitSignalFilters'),
-    rail: document.getElementById('cockpitRail'),
+    contextModal: document.getElementById('cockpitContextModal'),
+    contextModalLabel: document.getElementById('cockpitContextModalLabel'),
     railContext: document.getElementById('cockpitRailContext'),
     railLive: document.getElementById('cockpitRailLive'),
     summaryBtn: document.getElementById('cockpitSummaryBtn'),
@@ -1448,6 +1454,14 @@ import {
     askTarget: document.getElementById('cockpitAskTarget')
   };
 
+  // Dashboard components render inside #main-content, whose z-index creates a
+  // stacking context below Bootstrap's body-level backdrop. Hoist the one
+  // stable context host once so its documented z-index and focus trap work like
+  // every other top-level Bootstrap dialog; Map remounts cannot touch it.
+  if (els.contextModal && els.contextModal.parentElement !== document.body) {
+    document.body.append(els.contextModal);
+  }
+
   // ---- shared state (the single source of truth for every cockpit view) ----
   //
   // FR111/FR117: every view reads from here, and every mutation goes through
@@ -1464,18 +1478,15 @@ import {
     signal: '',
     selectedId: '',
     railState: RAIL_TODAY,
-    // Whether the CONTEXT rail is open is now fully derived from railState: a
-    // real selection (workspace/group/HQ/Summary/Ask Ori) opens it, Today
-    // always leaves it closed (Issue #334 — Today's content no longer lives
-    // in the rail, so there is nothing left to manually show there).
-    //
-    // The header's own transient disclosures (Updates/Quests/Quick Capture)
-    // are a SEPARATE piece of state, `panel` below — see applyPanelState()
-    // and applyPanelState().
+    // Issue #366: selected context and blocking visibility are independent.
+    // Dismissal leaves railState/selectedId intact; only a user selection or
+    // Summary action requests another show. Quiet refreshes only re-render.
+    modalRequested: false,
+    modalVisible: false,
+    lastContextInvoker: null,
     panel: PANEL_NONE,
     hqSiteView: null,
-    // The workspace/group context to restore when Summary or Ask Ori closes
-    // (FR91, FR100).
+    // The workspace/group/HQ context to restore when Summary closes (FR91).
     priorContext: null,
     // Tree management state. Deliberately session-scoped and deliberately NOT
     // cleared by selection changes or by returning to Today (FR55, FR61).
@@ -1584,6 +1595,8 @@ import {
     els.map.dataset.signal = state.signal || '';
   }
 
+  let mapMenuSelectionInProgress = false;
+
   function mountMap() {
     if (!els.map || state.view !== VIEW_MAP) return;
     if (!window.OriWorkspaceMap) return;
@@ -1600,17 +1613,26 @@ import {
       // Explicit Home-only contract. The shared Map keeps its legacy empty
       // prompt unless its cockpit host opts into a real buildingless canvas.
       emptyPresentation: state.flattened.length === 0 ? 'canvas' : 'legacy',
-      onSelect: id => selectItem(id, { fromMap: true }),
+      onSelect: id =>
+        selectItem(id, {
+          fromMap: true,
+          invoker: document.activeElement,
+          openModal: !mapMenuSelectionInProgress
+        }),
       onOpen: id => openItem(id),
-      onSelectHQSite: view => selectHQSite(view),
+      onSelectHQSite: view =>
+        selectHQSite(view, {
+          invoker: document.activeElement,
+          openModal: !mapMenuSelectionInProgress
+        }),
       // Delete and group. The map owns no mutation of its own — it hands the
       // ids back here, and these run the very same workspace-bulk-actions.js
       // code Tree runs, so the two views cannot diverge.
       onDeleteWorkspace: id => void deleteWorkspaceAction(id, bulkContext()),
       onDeleteWorkspaces: ids => void deleteWorkspacesAction(ids, bulkContext()),
       onGroupWorkspaces: ids => void groupFromMap(ids),
-      // A committed resize or fit changes what the rail's Map layout section
-      // says about this group, so the rail re-renders from the Map's new
+      // A committed resize or fit changes what the modal's Map layout section
+      // says about this group, so context re-renders from the Map's new
       // snapshot rather than keeping stale copy (#346 FR-152).
       onDistrictChanged: groupId => {
         if (groupId && groupId === state.selectedId) renderRail({ announceChange: false });
@@ -1644,7 +1666,11 @@ import {
     // happens is an explicit focus intent in the URL (`?focus=personal-hq`).
     // Route it through the normal selection path so the rail actually shows
     // that workspace's context instead of staying on Today (FR107).
-    selectItem(resolved, { fromMap: true });
+    selectItem(resolved, {
+      fromMap: true,
+      openModal: !state.selectedId,
+      announceChange: !state.selectedId
+    });
   }
 
   // ---- Tree peer view ----
@@ -1656,7 +1682,7 @@ import {
     // with, and never steal it when it was not (FR129).
     const hadFocus = !!(document.activeElement && els.tree.contains(document.activeElement));
     mountTree(els.tree, state, {
-      onSelect: id => selectItem(id),
+      onSelect: id => selectItem(id, { invoker: document.activeElement, openModal: true }),
       onOpen: id => openItem(id),
       onRerender: () => mountTreeView(),
       onAnnounce: message => announce(message),
@@ -1717,7 +1743,7 @@ import {
     }
 
     // One selection change, through the one shared path, so the Map highlight
-    // and the context rail cannot disagree (FR-21).
+    // and modal context cannot disagree (FR-21).
     selectItem(outcome.groupId);
   }
 
@@ -1821,24 +1847,40 @@ import {
     renderFilters();
     mountMap();
     mountTreeView();
-    // Some rail content belongs to ONE view. The selected group's Map layout
-    // section is Map-only: left standing in Tree it would offer to resize and
-    // collapse rows that do nothing of the kind (#346 FR-154). Re-rendering on
-    // every view change is what keeps the rail's claims true for the view the
-    // user is actually in.
+    // Group layout controls are Map-only. Re-render the stable context body in
+    // place on view changes without changing modal visibility.
     if (state.railState === RAIL_GROUP) renderRail({ announceChange: false });
-    // The footer shortcut names the OTHER view, so it has to follow every view
-    // change — not just the ones that re-render the rail (FR88).
-    updateRailFooter();
+    updateContextTrigger();
   }
 
-  // ---- selection + rail ----
+  // ---- selection + context modal ----
+
+  function rememberContextInvoker(candidate) {
+    const invoker = candidate && candidate.nodeType === 1 ? candidate : document.activeElement;
+    if (
+      !invoker ||
+      invoker === document.body ||
+      (els.contextModal && els.contextModal.contains(invoker))
+    ) {
+      return;
+    }
+    state.lastContextInvoker = invoker;
+  }
+
+  function contextTargetAvailable() {
+    if (state.railState === RAIL_SUMMARY) return true;
+    if (state.selectedId === HQ_SITE_ID) return true;
+    return !!findWorkspace(state.flattened, state.selectedId);
+  }
 
   /**
-   * Select a workspace OR a group — both share one active-item state, so Map,
-   * Tree, and the rail can never disagree about what is selected (FR57, FR58).
+   * Select a workspace or group through the one Map/Tree authority. Repeating
+   * the active selection is still an explicit request to reopen its modal.
    */
-  function selectItem(id, { fromMap = false } = {}) {
+  function selectItem(
+    id,
+    { fromMap = false, openModal = true, invoker = null, announceChange = true } = {}
+  ) {
     const next = id || '';
     const changed = next !== state.selectedId;
     const item = findWorkspace(state.flattened, next);
@@ -1846,55 +1888,45 @@ import {
     state.railState = next ? (isGroupWorkspace(item) ? RAIL_GROUP : RAIL_WORKSPACE) : RAIL_TODAY;
     state.hqSiteView = null;
     if (next) state.priorContext = { selectedId: next, railState: state.railState };
+    else state.priorContext = null;
     if (!fromMap && els.map && window.OriWorkspaceMap && window.OriWorkspaceMap.setSelectedId) {
       window.OriWorkspaceMap.setSelectedId(els.map, state.flattened, next, {
         metadata: state.metadata
       });
     }
-    renderRail({ announceChange: changed });
-    // Both peer views must show the same active item, whichever one changed it
-    // (FR57, FR58). The map is updated in place above; Tree re-renders so the
-    // active row's highlight and aria-selected follow.
+    renderRail({ announceChange: announceChange && changed });
     if (state.view === VIEW_TREE) mountTreeView();
     publishRouteContext();
     subscribeRealtimeTo(next);
     if (changed && next) fireTTFA(state.view === VIEW_TREE ? 'tree-select' : 'map-select');
+    if (next && openModal) showContextModal({ invoker });
   }
 
-  /**
-   * Return to Today.
-   *
-   * Clearing the active item must NOT clear Map signal filters or Tree
-   * management state — those are separate, deliberately sticky concerns
-   * (FR61). Today has no rail content of its own now (Issue #334), so
-   * returning to it always closes the context rail (FR45).
-   */
-  function clearSelection() {
-    if (!state.selectedId && state.railState === RAIL_TODAY) return;
+  /** Clear selected context while preserving filters, camera, and Tree state. */
+  function clearSelection({ restoreFocus = true } = {}) {
+    if (!state.selectedId && state.railState === RAIL_TODAY) {
+      hideContextModal({ restoreFocus });
+      return;
+    }
     state.hqSiteView = null;
     state.priorContext = null;
-    selectItem('');
+    selectItem('', { openModal: false });
+    hideContextModal({ restoreFocus });
   }
 
-  /**
-   * Select the reserved Personal HQ site.
-   *
-   * The map normally renders the HQ's build/repair/skip choices inside its own
-   * overview panel, which cockpit mode suppresses — so without this the site
-   * would highlight with no affordance at all. The rail renders the SAME markup
-   * the map produces and re-dispatches the same `ori:personal-hq-action` event
-   * personal-hq-onboarding.js already listens for, so there is still exactly one
-   * HQ provisioning UI (PRD FR28, FR79, FR115).
-   */
-  function selectHQSite(view) {
+  /** Route the reserved Personal HQ landmark through the shared modal. */
+  function selectHQSite(view, { openModal = true, invoker = null } = {}) {
     state.selectedId = HQ_SITE_ID;
     state.railState = RAIL_WORKSPACE;
     state.hqSiteView = view || null;
+    state.priorContext = { selectedId: HQ_SITE_ID, railState: RAIL_WORKSPACE };
     renderRail({ announceChange: true });
+    publishRouteContext();
+    if (openModal) showContextModal({ invoker });
   }
 
-  /** Show the cross-workspace Summary, remembering what to come back to. */
-  function showSummary() {
+  /** Show cross-workspace Summary while remembering valid selected context. */
+  function showSummary({ invoker = null } = {}) {
     if (state.railState !== RAIL_SUMMARY) {
       state.priorContext =
         state.selectedId && state.railState !== RAIL_TODAY
@@ -1903,27 +1935,31 @@ import {
     }
     state.railState = RAIL_SUMMARY;
     renderRail({ announceChange: true });
+    showContextModal({ invoker });
   }
 
-  /**
-   * Leave Summary.
-   *
-   * Restores the prior workspace/group context when it is still valid, else
-   * Today — never a stale reference to something that has since been deleted
-   * (FR91).
-   */
-  function leaveSummary() {
+  function priorContextAvailable(prior) {
+    return !!(
+      prior &&
+      (prior.selectedId === HQ_SITE_ID || findWorkspace(state.flattened, prior.selectedId))
+    );
+  }
+
+  /** Restore Summary's prior context, optionally retaining the open dialog. */
+  function leaveSummary({ keepModalOpen = true, announceChange = true } = {}) {
     const prior = state.priorContext;
-    if (prior && findWorkspace(state.flattened, prior.selectedId)) {
+    if (priorContextAvailable(prior)) {
       state.railState = prior.railState;
       state.selectedId = prior.selectedId;
-      renderRail({ announceChange: true });
+      renderRail({ announceChange });
+      if (!keepModalOpen) hideContextModal();
       return;
     }
     state.selectedId = '';
     state.railState = RAIL_TODAY;
     state.priorContext = null;
-    renderRail({ announceChange: true });
+    renderRail({ announceChange });
+    hideContextModal();
   }
 
   /** The Map's snapshot of one district, or null when the Map cannot say. */
@@ -1934,10 +1970,10 @@ import {
   }
 
   /**
-   * The rail's Map-layout controls (#346 FR-151, FR-156).
+   * The modal's Map-layout controls (#346 FR-151, FR-156).
    *
    * They call the Map's own district action controller — the same one the
-   * district context menu calls — so the rail cannot develop its own validation,
+   * district context menu calls — so this surface cannot develop its own validation,
    * persistence, or failure behaviour.
    */
   function bindMapLayoutActions() {
@@ -1986,6 +2022,12 @@ import {
     }
   }
 
+  function handoffAfterContextHide(callback) {
+    if (typeof callback !== 'function') return;
+    pendingContextHandoff = callback;
+    hideContextModal({ restoreFocus: false });
+  }
+
   function bindRailCommon() {
     if (!els.railContext) return;
     bindMapLayoutActions();
@@ -1997,36 +2039,212 @@ import {
     }
     const open = els.railContext.querySelector('[data-cockpit-rail-open]');
     if (open) open.addEventListener('click', () => fireTTFA('open-workspace'));
+    const ask = els.railContext.querySelector('[data-cockpit-rail-ask]');
+    if (ask) {
+      ask.addEventListener('click', () => {
+        publishRouteContext();
+        handoffAfterContextHide(() => {
+          if (window.OriGuide && typeof window.OriGuide.open === 'function') {
+            window.OriGuide.open();
+          }
+        });
+      });
+    }
     els.railContext.querySelectorAll('[data-cockpit-summary-select]').forEach(link =>
       link.addEventListener('click', e => {
         e.preventDefault();
-        selectItem(link.getAttribute('data-cockpit-summary-select'));
+        selectItem(link.getAttribute('data-cockpit-summary-select'), {
+          openModal: false,
+          invoker: link
+        });
       })
     );
     els.railContext.querySelectorAll('[data-hq-action]').forEach(el =>
-      el.addEventListener('click', () =>
-        window.dispatchEvent(
-          new CustomEvent('ori:personal-hq-action', {
-            detail: { action: el.getAttribute('data-hq-action') }
-          })
-        )
-      )
+      el.addEventListener('click', () => {
+        const action = el.getAttribute('data-hq-action');
+        handoffAfterContextHide(() =>
+          window.dispatchEvent(
+            new CustomEvent('ori:personal-hq-action', {
+              detail: { action }
+            })
+          )
+        );
+      })
     );
   }
 
-  // ---- rail openness (derived) ----
-  //
-  // The context rail is not entitled to a third of the window for saying "a
-  // quiet day" (Issue #334). It earns its space for exactly one reason now:
-  // something other than Today is showing — a workspace, group, the HQ site,
-  // Summary, or Ask Ori. A bare Today never opens it, and neither does
-  // workspace attention or Progression state; those live in Updates/Quests,
-  // which are their own overlays entirely outside this rail (FR41-FR47).
+  // ---- context modal lifecycle (Issue #366) ----
 
-  function applyRailOpen() {
-    const open = contextRailShouldBeOpen(state.railState);
-    root.dataset.railOpen = open ? 'true' : 'false';
-    if (els.rail) els.rail.hidden = !open;
+  let contextModalInstance = null;
+  let restoreContextFocusOnHide = true;
+  let hideContextAfterShow = false;
+  let pendingContextHandoff = null;
+
+  function getContextModalInstance() {
+    if (contextModalInstance) return contextModalInstance;
+    if (!els.contextModal || !window.bootstrap || !window.bootstrap.Modal) return null;
+    contextModalInstance =
+      typeof window.bootstrap.Modal.getOrCreateInstance === 'function'
+        ? window.bootstrap.Modal.getOrCreateInstance(els.contextModal)
+        : window.bootstrap.Modal.getInstance(els.contextModal) ||
+          new window.bootstrap.Modal(els.contextModal);
+    return contextModalInstance;
+  }
+
+  function contextTitle() {
+    if (state.railState === RAIL_SUMMARY) return 'Workspace summary';
+    if (state.selectedId === HQ_SITE_ID) return 'Personal HQ';
+    const item = findWorkspace(state.flattened, state.selectedId);
+    return item ? String(item.name || 'Workspace context') : 'Workspace context';
+  }
+
+  function updateContextTrigger() {
+    if (!els.summaryBtn) return;
+    const summaryVisible =
+      state.railState === RAIL_SUMMARY && (state.modalVisible || state.modalRequested);
+    els.summaryBtn.setAttribute('aria-pressed', summaryVisible ? 'true' : 'false');
+    els.summaryBtn.setAttribute('aria-expanded', summaryVisible ? 'true' : 'false');
+    els.summaryBtn.textContent = summaryVisible ? 'Close summary' : 'Summary';
+  }
+
+  function focusContextFallback() {
+    const invoker = state.lastContextInvoker;
+    if (invoker && invoker.isConnected && typeof invoker.focus === 'function') {
+      invoker.focus({ preventScroll: true });
+      return;
+    }
+    const selected = Array.from(
+      document.querySelectorAll('.ws-map-tile[data-ws-id], [data-tree-row]')
+    ).find(
+      node =>
+        node.getAttribute('data-ws-id') === state.selectedId ||
+        node.getAttribute('data-tree-row') === state.selectedId
+    );
+    const fallback =
+      selected ||
+      (state.view === VIEW_TREE ? els.tree : els.map) ||
+      els.viewButtons.find(btn => btn.getAttribute('aria-pressed') === 'true');
+    if (fallback && typeof fallback.focus === 'function') {
+      if (!fallback.hasAttribute('tabindex') && fallback.tagName !== 'BUTTON') {
+        fallback.setAttribute('tabindex', '-1');
+      }
+      fallback.focus({ preventScroll: true });
+    }
+  }
+
+  function showContextModal({ invoker = null } = {}) {
+    rememberContextInvoker(invoker);
+    state.modalRequested = true;
+    const canShow = contextModalShouldShow({
+      railState: state.railState,
+      requestedOpen: state.modalRequested,
+      targetAvailable: contextTargetAvailable()
+    });
+    if (!canShow) {
+      state.modalRequested = false;
+      updateContextTrigger();
+      return;
+    }
+    closePanel({ focus: false });
+    const otherModal = document.querySelector('.modal.show:not(#cockpitContextModal)');
+    if (otherModal && window.bootstrap && window.bootstrap.Modal) {
+      const otherInstance = window.bootstrap.Modal.getOrCreateInstance(otherModal);
+      otherModal.addEventListener(
+        'hidden.bs.modal',
+        () => showContextModal({ invoker: state.lastContextInvoker }),
+        { once: true }
+      );
+      otherInstance.hide();
+      return;
+    }
+    restoreContextFocusOnHide = true;
+    hideContextAfterShow = false;
+    const modal = getContextModalInstance();
+    if (modal) modal.show(state.lastContextInvoker || undefined);
+    updateContextTrigger();
+  }
+
+  function hideContextModal({ restoreFocus = true } = {}) {
+    state.modalRequested = false;
+    restoreContextFocusOnHide = restoreFocus;
+    const modal = getContextModalInstance();
+    if (modal && els.contextModal?.classList.contains('show') && !state.modalVisible) {
+      // Bootstrap ignores hide() while its fade-in transition is active. Queue
+      // the dismissal so a fast Escape immediately after selection is not lost.
+      hideContextAfterShow = true;
+      return;
+    }
+    if (modal && state.modalVisible) {
+      modal.hide();
+      return;
+    }
+    state.modalVisible = false;
+    updateContextTrigger();
+    if (restoreFocus) focusContextFallback();
+    if (pendingContextHandoff) {
+      const handoff = pendingContextHandoff;
+      pendingContextHandoff = null;
+      handoff();
+    }
+  }
+
+  if (els.contextModal) {
+    els.contextModal.addEventListener('show.bs.modal', () => {
+      state.modalRequested = true;
+      updateContextTrigger();
+    });
+    els.contextModal.addEventListener('shown.bs.modal', () => {
+      state.modalVisible = true;
+      if (hideContextAfterShow) {
+        hideContextAfterShow = false;
+        const modal = getContextModalInstance();
+        if (modal) modal.hide();
+        return;
+      }
+      state.modalRequested = true;
+      updateContextTrigger();
+      const initial =
+        els.railContext?.querySelector('[data-cockpit-rail-back]') ||
+        els.contextModal.querySelector('[data-bs-dismiss="modal"]');
+      if (initial && typeof initial.focus === 'function') initial.focus({ preventScroll: true });
+    });
+    els.contextModal.addEventListener('hide.bs.modal', () => {
+      state.modalRequested = false;
+      updateContextTrigger();
+    });
+    els.contextModal.addEventListener('keydown', event => {
+      if (event.key !== 'Escape') return;
+      event.stopPropagation();
+      hideContextModal();
+    });
+    els.contextModal.addEventListener('click', event => {
+      if (event.target === els.contextModal) hideContextModal();
+    });
+    els.contextModal.addEventListener('hidden.bs.modal', () => {
+      state.modalVisible = false;
+      state.modalRequested = false;
+      if (state.railState === RAIL_SUMMARY) {
+        const prior = state.priorContext;
+        if (priorContextAvailable(prior)) {
+          state.railState = prior.railState;
+          state.selectedId = prior.selectedId;
+        } else {
+          state.railState = RAIL_TODAY;
+          state.selectedId = '';
+          state.priorContext = null;
+        }
+        renderRail({ announceChange: false });
+      }
+      updateContextTrigger();
+      if (pendingContextHandoff) {
+        const handoff = pendingContextHandoff;
+        pendingContextHandoff = null;
+        handoff();
+      } else if (restoreContextFocusOnHide) {
+        focusContextFallback();
+      }
+      restoreContextFocusOnHide = true;
+    });
   }
 
   // ---- Updates badge (FR15-FR17) ----
@@ -2047,8 +2265,8 @@ import {
   // One explicit `state.panel` value (see PANEL_* / togglePanelState above)
   // drives all three header-owned transient disclosures, so they can never
   // disagree about which one is open (FR7-FR9). Deliberately independent of
-  // `railState`/contextRailShouldBeOpen(): a selected workspace and an open
-  // flyout coexist without disturbing each other (FR22, FR29, FR41-FR46).
+  // selected context. Opening blocking context closes this transient state;
+  // data refreshes never open either surface.
 
   function applyPanelState() {
     const openUpdates = state.panel === PANEL_UPDATES;
@@ -2110,15 +2328,12 @@ import {
   function renderRail({ announceChange = true } = {}) {
     if (!els.railContext) return;
 
-    // Summary is a rail STATE, not a separate page or tab (FR89-FR91).
     if (state.railState === RAIL_SUMMARY) {
       showContextPanel(renderSummaryRailHTML(summaryView(state.flattened, state.scheduleIndex)));
       if (announceChange) announce('Summary of all workspaces.');
       return;
     }
 
-    // The reserved HQ site is a landmark, not a workspace, so it is resolved
-    // before the workspace lookup.
     if (state.selectedId === HQ_SITE_ID && state.railState !== RAIL_TODAY) {
       showContextPanel(
         '<div class="cockpit-rail-panel" data-rail-panel="personal-hq">' +
@@ -2136,16 +2351,12 @@ import {
     const item = findWorkspace(state.flattened, state.selectedId);
     if (state.railState === RAIL_TODAY || !item) {
       if (state.selectedId) {
-        // The selected item vanished under us (deleted or now inaccessible):
-        // return to Today and say so rather than showing a stale rail (FR73).
-        // The rail itself still closes (Today has no rail content of its own
-        // now — FR42/FR45); `announce()` writes to #cockpitRailLive, which
-        // lives OUTSIDE the rail specifically so this notice is still heard
-        // by assistive tech even though its container just closed.
         state.selectedId = '';
         state.railState = RAIL_TODAY;
         state.priorContext = null;
         showTodayPanel();
+        publishRouteContext();
+        hideContextModal({ restoreFocus: true });
         announce('The selected workspace is no longer available. Returned to the workspace map.');
         return;
       }
@@ -2159,8 +2370,6 @@ import {
         ? renderGroupRailHTML(
             groupRailView(item, state.flattened, {
               view: state.view,
-              // The Map owns district state; the rail reads a snapshot of it
-              // rather than keeping a second copy that could drift (#346).
               district: mapDistrictView(item.id)
             })
           )
@@ -2169,85 +2378,39 @@ import {
     if (announceChange) announce(`${item.name} selected.`);
   }
 
-  /**
-   * Swap the rail to its context panel.
-   *
-   * Today has no rail content of its own anymore (Issue #334 moved it into
-   * Updates/Quests), so this only ever shows/hides the one context panel.
-   */
+  /** Replace content in the one stable modal body without changing visibility. */
   function showContextPanel(html) {
-    els.railContext.hidden = false;
+    const focusableSelector =
+      'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+    const before = Array.from(els.railContext.querySelectorAll(focusableSelector));
+    const focusedIndex = els.railContext.contains(document.activeElement)
+      ? before.indexOf(document.activeElement)
+      : -1;
+    els.railContext.dataset.contextState = state.railState;
     els.railContext.innerHTML = html;
+    if (els.contextModalLabel) els.contextModalLabel.textContent = contextTitle();
     bindRailCommon();
-    updateRailFooter();
-    applyRailOpen();
+    if (focusedIndex >= 0 && state.modalVisible) {
+      const after = Array.from(els.railContext.querySelectorAll(focusableSelector));
+      const target = after[Math.min(focusedIndex, after.length - 1)];
+      if (target && typeof target.focus === 'function') target.focus({ preventScroll: true });
+    }
+    updateContextTrigger();
   }
 
   function showTodayPanel() {
-    els.railContext.hidden = true;
+    els.railContext.dataset.contextState = RAIL_TODAY;
     els.railContext.innerHTML = '';
-    updateRailFooter();
-    applyRailOpen();
+    if (els.contextModalLabel) els.contextModalLabel.textContent = 'Workspace context';
+    updateContextTrigger();
   }
 
-  function updateRailFooter() {
-    if (els.summaryBtn) {
-      const inSummary = state.railState === RAIL_SUMMARY;
-      els.summaryBtn.setAttribute('aria-pressed', inSummary ? 'true' : 'false');
-      els.summaryBtn.textContent = inSummary ? 'Close summary' : 'Summary';
-    }
-  }
-
-  // ---- Ask Ori rail activity (FR92-FR100) ----
+  // ---- Ask Ori activity (universal non-modal owner) ----
   //
-  // dashboard.js owns the routing, planning, confirmation, and recovery logic
-  // and drives the panel's `show` class directly. The cockpit only reacts to
-  // that class: it hides the competing rail panels while activity is showing,
-  // restores the prior context afterwards, and keeps the target-workspace line
-  // honest. No routing decision is made here.
-
-  let askWasActive = false;
-
-  function isAskActive() {
-    return !!(els.askPanel && els.askPanel.classList.contains('show'));
-  }
-
+  // Ask Ori start/finish may refresh its route label, but it never becomes a
+  // context kind and never opens, closes, or reserves space for this modal.
   function syncAskActivity() {
-    const active = isAskActive();
-    if (active === askWasActive) {
-      if (active) renderAskTarget();
-      return;
-    }
-    askWasActive = active;
-    if (active) {
-      // Remember what to come back to (FR100), then yield the rail.
-      if (state.railState !== RAIL_ASK) {
-        state.priorContext =
-          state.selectedId && state.railState !== RAIL_TODAY
-            ? { selectedId: state.selectedId, railState: state.railState }
-            : null;
-      }
-      state.railState = RAIL_ASK;
-      if (els.railContext) els.railContext.hidden = true;
-      // Ask Ori activity is never worth showing in a rail the user cannot see.
-      applyRailOpen();
-      renderAskTarget();
-      announce('Ask Ori activity.');
-      return;
-    }
-    restoreFromAsk();
-  }
-
-  /** Leaving Ask Ori returns to the previous workspace/group context or Today. */
-  function restoreFromAsk() {
-    const prior = state.priorContext;
-    if (prior && findWorkspace(state.flattened, prior.selectedId)) {
-      state.selectedId = prior.selectedId;
-      state.railState = prior.railState;
-    } else {
-      state.railState = RAIL_TODAY;
-    }
-    renderRail({ announceChange: true });
+    renderAskTarget();
   }
 
   function renderAskTarget() {
@@ -2450,6 +2613,20 @@ import {
       renderFilters();
       mountMap();
     }
+    if (state.selectedId === HQ_SITE_ID) {
+      if (!hqSiteVisible(state.hqStatus)) {
+        state.railState = RAIL_TODAY;
+        state.selectedId = '';
+        state.hqSiteView = null;
+        state.priorContext = null;
+        renderRail({ announceChange: false });
+        hideContextModal({ restoreFocus: true });
+        announce('Personal HQ context changed. Returned to the workspace map.');
+      } else {
+        state.hqSiteView = window.OriWorkspaceMap?.getHQSiteView?.() || state.hqSiteView;
+        renderRail({ announceChange: false });
+      }
+    }
   }
 
   function openItem(id) {
@@ -2634,6 +2811,45 @@ import {
 
   // ---- wiring ----
 
+  // District tags may be reconciled after the Map's initial shell binding when
+  // persisted layout arrives. Keep one Home-owned delegated seam on the stable
+  // Map host so those replacement tags still route through select-and-open;
+  // when the Map's direct callback already ran, the state guard prevents a
+  // duplicate transition.
+  if (els.map) {
+    const markMapMenuSelection = () => {
+      mapMenuSelectionInProgress = true;
+      window.setTimeout(() => {
+        mapMenuSelectionInProgress = false;
+      }, 0);
+    };
+    els.map.addEventListener('contextmenu', markMapMenuSelection, true);
+    els.map.addEventListener(
+      'keydown',
+      event => {
+        if (event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey)) {
+          markMapMenuSelection();
+        }
+      },
+      true
+    );
+    els.map.addEventListener(
+      'click',
+      event => {
+        if (event.target?.closest?.('[data-group-menu]')) markMapMenuSelection();
+      },
+      true
+    );
+    els.map.addEventListener('click', event => {
+      if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey) return;
+      const target = event.target?.closest?.('.ws-map-district-tag[data-ws-id]');
+      if (!target) return;
+      const id = target.getAttribute('data-ws-id') || '';
+      if (!id || (state.selectedId === id && state.modalRequested)) return;
+      selectItem(id, { fromMap: true, invoker: target, openModal: true });
+    });
+  }
+
   els.viewButtons.forEach(btn => {
     btn.addEventListener('click', () => {
       applyView(btn.getAttribute('data-cockpit-view'));
@@ -2650,9 +2866,13 @@ import {
   if (els.questsClose) els.questsClose.addEventListener('click', () => closePanel());
 
   if (els.summaryBtn) {
-    els.summaryBtn.addEventListener('click', () =>
-      state.railState === RAIL_SUMMARY ? leaveSummary() : showSummary()
-    );
+    els.summaryBtn.addEventListener('click', () => {
+      if (state.railState === RAIL_SUMMARY && (state.modalVisible || state.modalRequested)) {
+        hideContextModal();
+        return;
+      }
+      showSummary({ invoker: els.summaryBtn });
+    });
   }
 
   if (els.captureBtn) els.captureBtn.addEventListener('click', () => togglePanel(PANEL_CAPTURE));
@@ -2665,28 +2885,48 @@ import {
 
   wireTodaySelection();
 
-  // dashboard.js toggles the panel's `show` class from many code paths
-  // (submit, reopen, timeout, close). Observing the class is the one seam that
-  // catches all of them without reaching into its internals.
+  // Ask Ori's activity panel is observed only to keep its selected-route copy
+  // current. It has no authority over context-modal visibility.
   if (els.askPanel && typeof MutationObserver === 'function') {
     new MutationObserver(syncAskActivity).observe(els.askPanel, {
       attributes: true,
       attributeFilter: ['class']
     });
-    const back = els.askPanel.querySelector('[data-cockpit-ask-back]');
-    if (back) {
-      back.addEventListener('click', () => {
-        els.askPanel.classList.remove('show');
-        syncAskActivity();
-      });
-    }
   }
+
+  // Bootstrap does not support stacked blocking dialogs. If an established
+  // modal is requested while context is visible, settle context first and then
+  // replay that one show through the existing instance.
+  document.addEventListener('show.bs.modal', event => {
+    const target = event.target;
+    if (
+      !target ||
+      target === els.contextModal ||
+      (!state.modalVisible && !state.modalRequested) ||
+      !window.bootstrap ||
+      !window.bootstrap.Modal
+    ) {
+      return;
+    }
+    event.preventDefault();
+    handoffAfterContextHide(() =>
+      window.bootstrap.Modal.getOrCreateInstance(target).show(event.relatedTarget)
+    );
+  });
 
   document.addEventListener('keydown', e => {
     if (e.key !== 'Escape') return;
-    // Escape only reaches the rail/flyouts when nothing higher-priority owns
-    // it (FR128).
-    if (document.querySelector('.modal.show')) return;
+    // A modal owns Escape before any Home disclosure. During Bootstrap's short
+    // show transition focus can still be on the invoking Map tile, so handle
+    // the visible context shell here as well as on the dialog itself.
+    const blockingModal = document.querySelector('.modal.show');
+    if (blockingModal) {
+      if (blockingModal === els.contextModal) {
+        e.preventDefault();
+        hideContextModal();
+      }
+      return;
+    }
     const target = e.target;
     // Whichever header panel is open owns Escape, INCLUDING while focus sits
     // in its own fields — otherwise the editable-field guard below would
@@ -2709,15 +2949,10 @@ import {
     ) {
       return;
     }
-    if (openPanelEl) {
-      closePanel();
-      return;
-    }
-    if (state.railState === RAIL_SUMMARY) {
-      leaveSummary();
-      return;
-    }
-    clearSelection();
+    if (openPanelEl) closePanel();
+    // A dismissed context remains selected. Bootstrap exclusively owns Escape
+    // while its modal is visible; with no disclosure/modal open, Escape is a
+    // no-op rather than a hidden "clear selection" shortcut.
   });
 
   // Every create/import/delete/move/tag/undo path funnels through here, so one

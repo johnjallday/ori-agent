@@ -3,7 +3,7 @@ import { test, expect, Page } from '@playwright/test';
 /**
  * Issue #346 group-2 demo: grouping already-arranged workspaces from Home
  * preserves every coordinate, produces a compact selected district, and tells
- * the same story in the header, the camera, and the context rail.
+ * the same story in the header, the camera, and the shared context modal.
  *
  * Not part of CI. Run against the isolated demo server:
  *   ./scripts/e2e.sh --port 8947 tests/district-grouping-demo.spec.ts
@@ -113,11 +113,14 @@ test('#346 grouping arranged workspaces keeps their coordinates and frames them 
   expect(frame.width).toBeLessThan(500);
   expect(frame.height).toBeLessThan(300);
 
-  // FR-21: the new group is the active selection, in the Map and in the rail.
+  // FR-21: the new group is the active selection in Map and context.
   await expect(district.locator('.ws-map-district-tag')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#cockpitContextModal')).toBeVisible();
   await expect(page.locator('#cockpitRailContext')).toContainText(groupName);
 
   await page.screenshot({ path: 'test-results/346-grouping-home.png' });
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#cockpitContextModal')).toBeHidden();
 
   // A legible capture of the header itself: 100% zoom, centred on the district.
   const canvas = page.locator('[data-ws-map-viewport]');

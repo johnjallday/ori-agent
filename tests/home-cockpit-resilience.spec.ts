@@ -64,10 +64,12 @@ test.describe('Home cockpit resilience', () => {
       // The workspace area still loads and is interactive.
       await expect(page.locator('.ws-map-tile[data-ws-id]').first()).toBeVisible();
       await page.locator('.ws-map-tile[data-ws-id]').first().click();
-      await expect(page.locator('[data-cockpit-rail-open]')).toBeVisible();
+      await expect(page.locator('#cockpitContextModal')).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(page.locator('#cockpitContextModal')).toBeHidden();
 
       // Ask Ori, the view toggle, and Quick Capture all still work.
-      await expect(page.locator('#homeAssistantInput')).toBeEnabled();
+      await expect(page.locator('#oriGuideMapTrigger')).toBeEnabled();
       await expect(page.locator('#cockpitCaptureBtn')).toBeVisible();
       await page.locator('[data-cockpit-view="tree"]').click();
       await expect(page.locator('#cockpitTree')).toBeVisible();
@@ -85,7 +87,7 @@ test.describe('Home cockpit resilience', () => {
 
     // FR113: a bounded, retryable error — not a blank cockpit.
     await expect(page.locator('[data-cockpit-retry]')).toBeVisible();
-    await expect(page.locator('#homeAssistantInput')).toBeEnabled();
+    await expect(page.locator('#oriGuideMapTrigger')).toBeEnabled();
     // Updates (Issue #334) must still be reachable while the workspace list
     // is failing — a broken fetch must not take the rest of the header down
     // with it.
@@ -115,7 +117,7 @@ test.describe('Home cockpit resilience', () => {
     // is that it resolves at all while every optional source is still hanging.
     expect(mapReadyMs).toBeLessThan(10000);
     await page.locator('.ws-map-tile[data-ws-id]').first().click();
-    await expect(page.locator('[data-cockpit-rail-open]')).toBeVisible();
+    await expect(page.locator('#cockpitContextModal')).toBeVisible();
   });
 
   test('repeated view toggles and selections never lose view, filter, or selection', async ({
@@ -131,6 +133,8 @@ test.describe('Home cockpit resilience', () => {
       .first()
       .getAttribute('data-ws-id');
     await page.locator('.ws-map-tile[data-ws-id]').first().click();
+    await expect(page.locator('#cockpitContextModal')).toBeVisible();
+    await page.keyboard.press('Escape');
 
     // FR119/FR122: hammer the view toggle; nothing may drift.
     for (let i = 0; i < 8; i++) {
@@ -165,6 +169,35 @@ test.describe('Home cockpit resilience', () => {
     );
   });
 
+  test('quiet refresh updates open context in place and never resurrects dismissed context', async ({
+    page
+  }) => {
+    const id = await ensureWorkspace(page);
+    await page.goto('/');
+    const tile = page.locator(`.ws-map-tile[data-ws-id="${id}"]`);
+    await tile.click();
+    const modal = page.locator('#cockpitContextModal');
+    await expect(modal).toBeVisible();
+    await page.waitForFunction(() => window.OriHomeCockpit?.getState?.()?.modalVisible === true);
+    const back = page.locator('[data-cockpit-rail-back]');
+    await expect(back).toBeFocused();
+
+    await page.evaluate(() => window.OriHomeCockpit?.refreshQuietly?.());
+    await expect(modal).toBeVisible();
+    await expect(back).toBeFocused();
+    await expect(page.locator('.modal-backdrop.show')).toHaveCount(1);
+
+    await page.keyboard.press('Escape');
+    await expect(modal).toBeHidden();
+    await page.waitForFunction(() => window.OriHomeCockpit?.getState?.()?.modalVisible === false);
+    const before = await page.locator('.ws-map-world').getAttribute('style');
+    await page.evaluate(() => window.OriHomeCockpit?.refreshQuietly?.());
+    await expect(modal).toBeHidden();
+    expect(await page.evaluate(() => window.OriHomeCockpit?.getState?.()?.selectedId)).toBe(id);
+    expect(await page.locator('.ws-map-world').getAttribute('style')).toBe(before);
+    await expect(page.locator('#cockpitMap .ws-map-canvas')).toHaveCount(1);
+  });
+
   test('Tree expansion and bulk selection survive repeated view switches', async ({ page }) => {
     await ensureWorkspace(page);
     await page.goto('/?view=tree');
@@ -188,7 +221,7 @@ test.describe('Home cockpit resilience', () => {
     await expect(page.locator('[data-tree-row][tabindex="0"]')).toHaveCount(1);
   });
 
-  test('a deleted selection returns the rail to Today with an announcement', async ({ page }) => {
+  test('a deleted selection closes context and announces bare Home', async ({ page }) => {
     // Create a throwaway workspace, select it, then delete it out from under
     // the cockpit and force the refresh it would get from a mutation (FR73).
     const res = await page.request.post('/api/workspaces', {
@@ -201,16 +234,16 @@ test.describe('Home cockpit resilience', () => {
     const tile = page.locator(`.ws-map-tile[data-ws-id="${doomed}"]`);
     await tile.waitFor();
     await tile.click();
-    await expect(page.locator('[data-cockpit-rail-open]')).toBeVisible();
+    await expect(page.locator('#cockpitContextModal')).toBeVisible();
 
     await page.request.delete(`/api/workspaces/${doomed}?confirm=true`);
     await page.evaluate(() => window.OriHomeCockpit?.refreshQuietly?.());
     await page.waitForTimeout(1200);
 
-    // Today has no rail content of its own now (Issue #334) — returning to it
-    // closes the rail. #cockpitRailLive lives OUTSIDE the rail specifically so
-    // this notice is still heard even though its container just closed.
-    await expect(page.locator('#homeCockpit')).toHaveAttribute('data-rail-open', 'false');
+    await expect(page.locator('#cockpitContextModal')).toBeHidden();
     await expect(page.locator('#cockpitRailLive')).toContainText(/no longer available/i);
+    const state = await page.evaluate(() => window.OriHomeCockpit?.getState?.());
+    expect(state?.selectedId).toBe('');
+    expect(state?.railState).toBe('today');
   });
 });

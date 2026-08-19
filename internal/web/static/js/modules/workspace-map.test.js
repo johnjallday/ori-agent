@@ -1813,7 +1813,7 @@ test('the setup row states its workspace and action for a screen reader', () => 
 //
 // The Home cockpit mounts this same production Map with select-only pointer
 // semantics and without the map's own topbar/overview chrome, because the
-// workspace-area header and the persistent context rail own those. The legacy
+// workspace-area header and on-demand context modal own those. The legacy
 // /workspaces launcher keeps its original behavior until it redirects to Home.
 // ---------------------------------------------------------------------------
 
