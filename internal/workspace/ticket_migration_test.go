@@ -475,7 +475,10 @@ func TestMigrateWorkspaceTickets_VersionGateSurvivesReload(t *testing.T) {
 		}
 	}
 
-	// Simulate the next boot: migrate again against the persisted state.
+	// Simulate the next boot: migrate again against the persisted state. A
+	// skipped migration must not even save the workspace — Save increments the
+	// monotonic Version, so an unchanged workspace must keep the same value.
+	versionAfterFirstMigration := reloaded.Version
 	results, err := MigrateAllWorkspaceTickets(store)
 	if err != nil {
 		t.Fatalf("second boot migration: %v", err)
@@ -487,6 +490,9 @@ func TestMigrateWorkspaceTickets_VersionGateSurvivesReload(t *testing.T) {
 	final, err := store.Get(ws.ID)
 	if err != nil {
 		t.Fatalf("final reload: %v", err)
+	}
+	if final.Version != versionAfterFirstMigration {
+		t.Fatalf("skipped migration bumped Version from %d to %d", versionAfterFirstMigration, final.Version)
 	}
 	for i := range final.Tasks {
 		task := &final.Tasks[i]

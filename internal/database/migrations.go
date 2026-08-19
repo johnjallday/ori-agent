@@ -10,7 +10,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 42
+const schemaVersion = 43
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -149,6 +149,8 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 		return db.migration041WorkspacePlanReconciliations(ctx)
 	case 42:
 		return db.migration042WorkspaceMapGroupPresentations(ctx)
+	case 43:
+		return db.migration043WorkspaceTicketState(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
@@ -1483,6 +1485,32 @@ func (db *DB) migration042WorkspaceMapGroupPresentations(ctx context.Context) er
 		if _, err := db.ExecContext(ctx, stmt); err != nil {
 			return fmt.Errorf("failed to create workspace map group presentation schema: %w", err)
 		}
+	}
+	return nil
+}
+
+// migration043WorkspaceTicketState persists the two counters that make the
+// Task-to-Ticket migration restart-safe. They previously lived only in
+// workspace.json, while production reads came from SQLite, so every boot saw a
+// zero migration version and rewrote every workspace.
+func (db *DB) migration043WorkspaceTicketState(ctx context.Context) error {
+	exists, err := db.tableExists(ctx, "workspaces")
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+
+	if _, err := db.ExecContext(ctx, `
+		ALTER TABLE workspaces ADD COLUMN ticket_migration_version INTEGER NOT NULL DEFAULT 0
+	`); err != nil && !isDuplicateColumnError(err) {
+		return fmt.Errorf("failed to add workspace ticket_migration_version column: %w", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		ALTER TABLE workspaces ADD COLUMN ticket_sequence INTEGER NOT NULL DEFAULT 0
+	`); err != nil && !isDuplicateColumnError(err) {
+		return fmt.Errorf("failed to add workspace ticket_sequence column: %w", err)
 	}
 	return nil
 }

@@ -154,6 +154,32 @@ func TestWorkspaceStoreAdapter_OwnerUserIDRoundTrip(t *testing.T) {
 	}
 }
 
+func TestWorkspaceStoreAdapter_TicketMigrationStateRoundTrip(t *testing.T) {
+	adapter := &WorkspaceStoreAdapter{}
+	input := &workspace.Workspace{
+		ID:                     "workspace-ticket-migration",
+		Name:                   "Ticket Migration",
+		TicketMigrationVersion: workspace.TicketMigrationVersion,
+		TicketSequence:         42,
+	}
+
+	sessionWS := adapter.toSessionWorkspace(input)
+	if sessionWS.TicketMigrationVersion != workspace.TicketMigrationVersion {
+		t.Fatalf("session ticket migration version = %d, want %d", sessionWS.TicketMigrationVersion, workspace.TicketMigrationVersion)
+	}
+	if sessionWS.TicketSequence != 42 {
+		t.Fatalf("session ticket sequence = %d, want 42", sessionWS.TicketSequence)
+	}
+
+	roundTripped := adapter.toAgentWorkspace(sessionWS)
+	if roundTripped.TicketMigrationVersion != workspace.TicketMigrationVersion {
+		t.Fatalf("round-tripped ticket migration version = %d, want %d", roundTripped.TicketMigrationVersion, workspace.TicketMigrationVersion)
+	}
+	if roundTripped.TicketSequence != 42 {
+		t.Fatalf("round-tripped ticket sequence = %d, want 42", roundTripped.TicketSequence)
+	}
+}
+
 func TestWorkspaceStoreAdapter_AgentInstanceMetadataRoundTrip(t *testing.T) {
 	adapter := &WorkspaceStoreAdapter{}
 	now := time.Now().UTC().Round(time.Second)

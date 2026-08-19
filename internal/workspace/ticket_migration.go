@@ -383,20 +383,26 @@ func MigrateAllWorkspaceTickets(store Store) ([]TicketMigrationResult, error) {
 
 	results := make([]TicketMigrationResult, 0, len(ids))
 	for _, id := range ids {
+		// Store.Update always persists, even when its callback makes no change.
+		// Check the durable gate first so steady-state startups do not rewrite
+		// every workspace.json or bump Version merely to discover there is no
+		// migration work. The callback still checks again under the store lock.
+		existing, err := store.Get(id)
+		if err == nil && !NeedsTicketMigration(existing) {
+			continue
+		}
+		if err != nil {
+			results = append(results, failedTicketMigrationResult(id))
+			continue
+		}
+
 		var result TicketMigrationResult
-		err := store.Update(id, func(ws *Workspace) error {
+		err = store.Update(id, func(ws *Workspace) error {
 			result = MigrateWorkspaceTickets(ws)
 			return nil
 		})
 		if err != nil {
-			results = append(results, TicketMigrationResult{
-				WorkspaceID: id,
-				Findings: []TicketRepairFinding{{
-					Severity: TicketRepairWarning,
-					Field:    "workspace",
-					Summary:  "This workspace could not be migrated and was left unchanged.",
-				}},
-			})
+			results = append(results, failedTicketMigrationResult(id))
 			continue
 		}
 		if !result.Skipped {
@@ -404,4 +410,15 @@ func MigrateAllWorkspaceTickets(store Store) ([]TicketMigrationResult, error) {
 		}
 	}
 	return results, nil
+}
+
+func failedTicketMigrationResult(workspaceID string) TicketMigrationResult {
+	return TicketMigrationResult{
+		WorkspaceID: workspaceID,
+		Findings: []TicketRepairFinding{{
+			Severity: TicketRepairWarning,
+			Field:    "workspace",
+			Summary:  "This workspace could not be migrated and was left unchanged.",
+		}},
+	}
 }
