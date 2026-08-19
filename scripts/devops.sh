@@ -17,6 +17,13 @@
 set -uo pipefail
 
 readonly issue_limit=1000
+# A practical cap on how many merged-into-main PRs `release` will scan looking
+# for ones after the latest release's publish instant. GitHub returns merged
+# PRs newest-first, so the count this Issue actually cares about - PRs merged
+# since the last release - sits well inside this limit for any sane release
+# cadence; it exists to keep one query bounded, not to model an unbounded
+# repository history.
+readonly release_pr_limit=500
 
 script_dir="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 if ! repo_root="$(git -C "$script_dir/.." rev-parse --show-toplevel 2>/dev/null)"; then
@@ -39,6 +46,7 @@ Usage:
   ./scripts/devops.sh backlog
   ./scripts/devops.sh proposals
   ./scripts/devops.sh status
+  ./scripts/devops.sh release
   ./scripts/devops.sh view <issue-number>
   ./scripts/devops.sh new <title...> [--body <text> | --body-file <path|->] [--yes]
   ./scripts/devops.sh decide <issue-number> <answers...> [--rationale <text>] [--yes]
@@ -58,6 +66,13 @@ chosen (`approved`).
 done/total parent groups, and whether its branch has a worktree checked out. It
 is entirely local - no network, no Herdr - and reads the dev worktree's
 gitignored tasks/, so ticked checkboxes show up before you commit them.
+
+`release` answers "what have I not shipped yet": the latest GitHub Release's
+tag and publish time, plus how many PRs have merged into `main` strictly after
+that instant (an exact-timestamp comparison, so a PR merged earlier the same
+day as the release is correctly excluded). It is read-only - two `gh` reads,
+nothing else - and a failed release or PR read exits non-zero with `gh`'s own
+error message rather than reporting a misleading zero count.
 
 In the picker, Enter opens an Issue with its own action bar; press `c` there to
 answer its open questions, or use the list's `c` shortcut to open directly at
@@ -434,6 +449,54 @@ view_issue() {
   gh issue view "$1" --comments
 }
 
+# release_report answers "what have I not shipped yet": the latest GitHub
+# Release's tag and publish instant, plus how many PRs have merged into `main`
+# strictly after that instant. It is read-only - two `gh` reads, nothing more
+# - and every failure it can hit (no release exists, the PR read fails) exits
+# non-zero with `gh`'s own message on stderr rather than being swallowed into
+# an empty-looking report.
+release_report() {
+  local release_line tag published url pr_output
+  local number merged title count=0
+
+  # `gh release view` with no tag defaults to the latest release. Command
+  # substitution does not capture stderr, so a failure here still prints gh's
+  # own error message and this function's non-zero exit propagates it.
+  release_line="$(gh release view --json tagName,publishedAt,url \
+    --template '{{printf "%s\t%s\t%s" .tagName .publishedAt .url}}')" || return $?
+  IFS=$'\t' read -r tag published url <<< "$release_line"
+  if [[ -z "$tag" || -z "$published" ]]; then
+    printf 'could not parse the latest release.\n' >&2
+    return 1
+  fi
+
+  # Newest-first by default, and release_pr_limit is a practical cap on that
+  # scan - see its declaration for why the count this Issue cares about always
+  # sits well inside it.
+  pr_output="$(gh pr list --state merged --base main --limit "$release_pr_limit" \
+    --json number,mergedAt,title \
+    --template '{{range .}}{{printf "%v\t%s\t%s\n" .number .mergedAt .title}}{{end}}')" || return $?
+
+  while IFS=$'\t' read -r number merged title; do
+    [[ -z "$number" ]] && continue
+    # Exact-timestamp comparison, not a date match: a PR merged earlier the
+    # SAME DAY as the release must not count as unreleased just because the
+    # two dates are equal. ISO 8601 UTC timestamps sort lexicographically, so
+    # a plain string compare is exact.
+    if [[ "$merged" > "$published" ]]; then
+      count=$((count + 1))
+    fi
+  done <<< "$pr_output"
+
+  printf 'Latest release: %s (published %s)\n' "$tag" "$published"
+  printf '%s\n\n' "$url"
+  if [[ "$count" -eq 0 ]]; then
+    printf 'No PRs merged into main since %s.\n' "$tag"
+  else
+    printf '%s PR(s) merged into main since %s.\n' "$count" "$tag"
+  fi
+}
+
 # The one place that reads a single Issue's current labels, in the ", "-joined
 # shape labels_contain expects. Shared by the decision guard and the opened-Issue
 # action bar so the action offered and the action allowed can never disagree.
@@ -690,6 +753,10 @@ run_one_shot() {
     status)
       [[ $# -eq 0 ]] || return 2
       list_status
+      ;;
+    release)
+      [[ $# -eq 0 ]] || return 2
+      release_report
       ;;
     decisions|decision)
       [[ $# -eq 0 ]] || return 2

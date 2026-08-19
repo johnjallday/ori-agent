@@ -508,6 +508,7 @@ lists every open Issue before prompting for another view.
 ./scripts/devops.sh backlog            # label: backlog
 ./scripts/devops.sh proposals          # label: feature-proposal
 ./scripts/devops.sh status             # which group each task list is on
+./scripts/devops.sh release            # what has merged to main since the latest release
 ./scripts/devops.sh view <number>      # one Issue in full
 ./scripts/devops.sh new <title>                    # quick title-only capture
 ./scripts/devops.sh new <title> --body <text>      # optional inline context
@@ -564,6 +565,17 @@ dependency is why the REPL exists. Instead they read `git worktree list`,
 `git branch --all`, and the task files on disk, resolving an Issue to work via
 the naming convention: branch `fix/339-slug`, task file `tasks-339-slug.md`.
 Branches predating the number-first convention resolve by slug.
+
+`release` answers a different question than `status`: not "what am I part-way
+through" but "what has merged to `main` since we last shipped." It reads the
+latest GitHub Release's tag and `publishedAt`, then counts PRs merged into
+`main` strictly after that instant — an exact-timestamp comparison, so a PR
+merged earlier the same calendar day as the release is correctly excluded
+rather than double-counted. It is two reads and nothing else: `gh release
+view` and `gh pr list --base main --state merged`, capped at a practical
+result limit since GitHub returns merged PRs newest-first. Either read failing
+— no release exists yet, the PR query errors — exits non-zero with `gh`'s own
+message rather than reporting a misleading zero count.
 
 Task files are gitignored and shared out of the dev worktree's `tasks/`, never
 pushed, so progress reflects ticked checkboxes immediately rather than at the

@@ -449,6 +449,31 @@ case "$1 $2" in
   "issue edit")
     printf 'edited #%s\n' "$3"
     ;;
+  "release view")
+    if [ -n "${GH_RELEASE_NONE:-}" ]; then
+      printf 'no releases found\n' >&2
+      exit 1
+    fi
+    printf 'v0.0.106\t2026-08-15T10:00:00Z\thttps://github.com/johnjallday/ori-agent/releases/tag/v0.0.106\n'
+    ;;
+  "pr list")
+    if [ -n "${GH_FAIL_PR:-}" ]; then
+      printf 'simulated GitHub failure\n' >&2
+      exit 7
+    fi
+    if [ -n "${GH_PR_EMPTY:-}" ]; then
+      exit 0
+    fi
+    # Two PRs merged strictly after the release's publish instant (381, 380);
+    # three that must NOT count - one at the exact same instant (379), one
+    # earlier the SAME DAY (378), and one from a prior day (377). The boundary
+    # is the exact instant, not the calendar date.
+    printf '381\t2026-08-18T12:00:00Z\tanother PR after release\n'
+    printf '380\t2026-08-19T08:00:00Z\tnewest PR after release\n'
+    printf '379\t2026-08-15T10:00:00Z\tsame instant as release, must not count\n'
+    printf '378\t2026-08-15T09:59:59Z\tsame day before release, must not count\n'
+    printf '377\t2026-08-14T09:00:00Z\tbefore release, must not count\n'
+    ;;
   *)
     printf 'unexpected gh invocation: %s\n' "$*" >&2
     exit 99
@@ -576,6 +601,73 @@ fi
 "$script" status > "$fixture_root/status-output"
 grep -Fq "In flight" "$fixture_root/status-output"
 assert_no_github "status"
+
+# `release` reads the latest GitHub Release, then counts PRs merged into
+# `main` strictly after its publish instant. Two calls, both reads.
+: > "$gh_calls"
+"$script" release > "$fixture_root/release-output"
+grep -Fq "Latest release: v0.0.106 (published 2026-08-15T10:00:00Z)" \
+  "$fixture_root/release-output"
+grep -Fq "https://github.com/johnjallday/ori-agent/releases/tag/v0.0.106" \
+  "$fixture_root/release-output"
+# The boundary is exact: only the two PRs strictly after the publish instant
+# count. The same-instant PR, the same-day-but-earlier PR, and the prior-day
+# PR must all be excluded - a date-only comparison would wrongly count two
+# of those three.
+check "release counts only PRs strictly after the publish instant" \
+  "$(grep -Fc 'PR(s) merged into main since v0.0.106' "$fixture_root/release-output" || true)" "1"
+grep -Fq "2 PR(s) merged into main since v0.0.106." "$fixture_root/release-output"
+grep -Fq $'CALL\trelease\tview\t--json\ttagName,publishedAt,url\t--template' \
+  "$gh_calls"
+grep -Fq $'CALL\tpr\tlist\t--state\tmerged\t--base\tmain\t--limit\t500\t--json\tnumber,mergedAt,title' \
+  "$gh_calls"
+check "release makes exactly two calls" "$(count_gh_calls)" "2"
+assert_no_github_write "release"
+
+# Zero matching PRs is reported explicitly, not as a blank line.
+: > "$gh_calls"
+GH_PR_EMPTY=1 "$script" release > "$fixture_root/release-zero-output"
+grep -Fq "No PRs merged into main since v0.0.106." "$fixture_root/release-zero-output"
+
+# Extra arguments are rejected before any GitHub call, like every other
+# one-shot command; covered exhaustively (exit 2, no GitHub contact) by
+# "release extra" in the shared invalid-invocation loop below.
+
+# A failed release read propagates gh's own non-zero status and message, and
+# never reaches the PR read.
+: > "$gh_calls"
+status=0
+GH_RELEASE_NONE=1 "$script" release > "$fixture_root/release-missing-output" \
+  2> "$fixture_root/release-missing-error" || status=$?
+if [[ "$status" -eq 0 ]]; then
+  printf 'a missing release reported success\n' >&2
+  exit 1
+fi
+assert_output_has "a missing release" \
+  "$fixture_root/release-missing-error" "no releases found"
+check "a missing release makes exactly one call" "$(count_gh_calls)" "1"
+if [[ -s "$fixture_root/release-missing-output" ]]; then
+  printf 'a missing release printed a report: %s\n' "$(cat "$fixture_root/release-missing-output")" >&2
+  exit 1
+fi
+
+# A failed PR read (release succeeded) also propagates a clear non-zero
+# failure instead of reporting a misleading zero count.
+: > "$gh_calls"
+status=0
+GH_FAIL_PR=1 "$script" release > "$fixture_root/release-pr-fail-output" \
+  2> "$fixture_root/release-pr-fail-error" || status=$?
+if [[ "$status" -eq 0 ]]; then
+  printf 'a failed PR read reported success\n' >&2
+  exit 1
+fi
+assert_output_has "a failed PR read" \
+  "$fixture_root/release-pr-fail-error" "simulated GitHub failure"
+if grep -Fq "PR(s) merged" "$fixture_root/release-pr-fail-output"; then
+  printf 'a failed PR read still printed a count: %s\n' \
+    "$(cat "$fixture_root/release-pr-fail-output")" >&2
+  exit 1
+fi
 
 # Viewing remains read-only.
 : > "$gh_calls"
@@ -832,7 +924,7 @@ if grep -Eq -- '--add-label[[:space:]]*$|labels' "$gh_calls"; then
 fi
 
 # Invalid invocations fail before contacting GitHub.
-for invalid in "view" "view nope" "view 0" "view 334 extra" "all extra" "ready extra" "unknown" "decide" "decide 334" "decide nope text" "decide 334 1A --rationale" "answer" "answer 334" "approve" "approve nope" "approve 334 extra" "new" "new --yes" "new title --body" "new title --body-file" "new title --body-file /missing" "new title --body text --body-file /missing" "status extra"; do
+for invalid in "view" "view nope" "view 0" "view 334 extra" "all extra" "ready extra" "unknown" "decide" "decide 334" "decide nope text" "decide 334 1A --rationale" "answer" "answer 334" "approve" "approve nope" "approve 334 extra" "new" "new --yes" "new title --body" "new title --body-file" "new title --body-file /missing" "new title --body text --body-file /missing" "status extra" "release extra"; do
   : > "$gh_calls"
   status=0
   # Intentional word splitting turns each fixture into an argument vector.

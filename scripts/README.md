@@ -157,6 +157,7 @@ One command covers the human issue workflow:
 ./scripts/devops.sh backlog            # label: backlog
 ./scripts/devops.sh proposals          # label: feature-proposal
 ./scripts/devops.sh status             # which group each task list is on
+./scripts/devops.sh release            # what has merged to main since the latest release
 ./scripts/devops.sh view <number>      # one Issue in full
 ./scripts/devops.sh new <title>                         # quick title-only capture
 ./scripts/devops.sh new <title> --body <text>           # optional inline context
@@ -235,6 +236,25 @@ deliberately fresher: checkboxes get ticked while you work, but a pushed copy
 would only update when you commit. It also means the numbers are exactly as
 honest as the file — a shipped feature whose boxes were never ticked will read
 `0/6`.
+
+**`release` — what has not shipped yet.** `./scripts/devops.sh release` prints
+the latest GitHub Release's tag and publish time, plus how many PRs have merged
+into `main` strictly after that instant:
+
+```
+Latest release: v0.0.106 (published 2026-08-15T10:00:00Z)
+https://github.com/johnjallday/ori-agent/releases/tag/v0.0.106
+
+2 PR(s) merged into main since v0.0.106.
+```
+
+It is read-only — one `gh release view` and one `gh pr list --base main
+--state merged`, nothing else. The comparison is an **exact timestamp**, not a
+calendar date, so a PR merged earlier the same day as the release correctly
+does *not* count. A release with nothing merged since prints `No PRs merged
+into main since <tag>.` rather than a blank line, and either read failing
+(no release exists, the PR query errors) exits non-zero with `gh`'s own
+message on stderr rather than reporting a misleading zero.
 
 **Writes.** `new`, `decide`, `approve` and `unapprove` are the only mutating
 commands; `answer` is a backwards-compatible alias for `decide`. Each prints

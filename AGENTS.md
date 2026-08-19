@@ -89,6 +89,7 @@ one-shot commands expose the same views to scripts and agents.
 | `./scripts/devops.sh backlog` | reads open Issues labeled `backlog` |
 | `./scripts/devops.sh proposals` | reads open Issues labeled `feature-proposal` |
 | `./scripts/devops.sh status` | reads which group each task list is on, and whether its branch has a worktree — local only |
+| `./scripts/devops.sh release` | reads the latest Release's tag/publish time and counts PRs merged into `main` strictly after it |
 | `./scripts/devops.sh view <n>` | reads one Issue in full |
 | `./scripts/devops.sh new <title> [--body <text> \| --body-file <path\|->]` | **writes** a new unlabelled Issue with optional context, confirm-gated |
 | `./scripts/devops.sh decide <n> <answers> [--rationale <text>]` | **writes** a marked decision comment, confirm-gated (`answer` is an alias) |
@@ -97,6 +98,13 @@ one-shot commands expose the same views to scripts and agents.
 The script delegates directly to `gh issue list`, `gh issue view`,
 `gh issue create`, `gh issue comment` and `gh issue edit`. Its filters are
 literal GitHub labels, not Project columns, and every read is fresh.
+
+`release` additionally delegates to `gh release view` and `gh pr list --base
+main --state merged`. It compares the PR list's `mergedAt` against the
+release's `publishedAt` as an exact timestamp, not a calendar date, so a PR
+merged earlier the same day as the release is correctly excluded. Either read
+failing exits non-zero with `gh`'s own message rather than reporting a
+misleading zero count.
 
 Reads never mutate. The write commands exist because they are the three things
 only a human does in this pipeline: capturing an idea, answering a spec's open
