@@ -380,6 +380,12 @@ type Workspace struct {
 	// Version is a monotonic counter bumped on every save; used to detect lost writes.
 	Version int64 `json:"version,omitempty"`
 
+	// TicketMigrationVersion makes the in-place Task-to-Ticket migration
+	// restart-safe. TicketSequence is the workspace-local Ticket number high-water
+	// mark; both mirror their canonical workspace.Workspace fields.
+	TicketMigrationVersion int   `json:"ticket_migration_version,omitempty"`
+	TicketSequence         int64 `json:"ticket_sequence,omitempty"`
+
 	// Layout stores the visual arrangement of workspace elements on the canvas.
 	Layout *CanvasLayout `json:"layout,omitempty"`
 

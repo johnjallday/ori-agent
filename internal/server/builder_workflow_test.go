@@ -120,12 +120,40 @@ func TestWorkspaceStartupMaintenance_RespectsFirstRunConsent(t *testing.T) {
 			t.Fatalf("Save settings: %v", err)
 		}
 
-		payload := buildWorkspacePayload(t)
+		srv, builder := buildTestServer(t)
+		payload := fetchWorkspacePayload(t, srv)
 		if !workspacePayloadContains(payload, workspaceName) {
 			t.Fatalf("confirmed startup did not import %q: %+v", workspaceName, payload.Workspaces)
 		}
 		if _, err := os.Stat(legacySidecar); !os.IsNotExist(err) {
 			t.Fatalf("confirmed startup did not run legacy maintenance; stat error = %v", err)
+		}
+
+		ids, err := builder.workspaceFileStore.List()
+		if err != nil || len(ids) != 1 {
+			t.Fatalf("folder workspace ids = %v, err = %v; want one", ids, err)
+		}
+		diskWorkspace, err := builder.workspaceFileStore.Get(ids[0])
+		if err != nil {
+			t.Fatalf("read startup workspace from disk: %v", err)
+		}
+		primaryWorkspace, err := builder.workspaceStore.Get(ids[0])
+		if err != nil {
+			t.Fatalf("read startup workspace from primary store: %v", err)
+		}
+		if diskWorkspace.Version != primaryWorkspace.Version {
+			t.Fatalf("startup left disk version %d and primary version %d out of sync", diskWorkspace.Version, primaryWorkspace.Version)
+		}
+		if _, ok := diskWorkspace.SharedData["backlog_markdown_sync"]; !ok {
+			t.Fatal("startup lost the BACKLOG.md sync state from workspace.json")
+		}
+		if _, ok := primaryWorkspace.SharedData["backlog_markdown_sync"]; !ok {
+			t.Fatal("startup did not persist the BACKLOG.md sync state to the primary store")
+		}
+		if diskWorkspace.TicketMigrationVersion != workspace.TicketMigrationVersion ||
+			primaryWorkspace.TicketMigrationVersion != workspace.TicketMigrationVersion {
+			t.Fatalf("ticket migration version did not reach both stores: disk=%d primary=%d",
+				diskWorkspace.TicketMigrationVersion, primaryWorkspace.TicketMigrationVersion)
 		}
 	})
 }

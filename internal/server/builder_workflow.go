@@ -236,7 +236,16 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 				// this feature shipped (PRD workspace-backlog FR68, 99).
 				// Idempotent; non-fatal — a pre-existing unmanaged collision is
 				// left untouched by design, not an error.
-				if written, errs := workspace.BackfillBacklogMarkdownForAllWorkspaces(fileStore); len(errs) > 0 {
+				//
+				// When SQLite is primary, route the synchronizer's SharedData write
+				// through SyncStore. Writing it through fileStore alone advances the
+				// disk Version while SQLite remains stale; the next startup mutation
+				// can then overwrite the freshly-recorded sync state.
+				backlogStore := workspace.Store(fileStore)
+				if b.sessionStore != nil {
+					backlogStore = ws
+				}
+				if written, errs := workspace.BackfillBacklogMarkdownForAllWorkspaces(backlogStore); len(errs) > 0 {
 					logger.Warn("Startup BACKLOG.md backfill had errors", logger.Fields{"written": written, "error_count": len(errs), "first_error": errs[0].Error()})
 				} else {
 					logger.Debug("Startup BACKLOG.md backfill complete", logger.Fields{"written": written})

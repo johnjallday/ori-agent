@@ -352,10 +352,12 @@ func TestSQLiteStore_Workspaces(t *testing.T) {
 
 	// Create workspaces
 	root := &Workspace{
-		ID:    "root-workspace",
-		Name:  "Root",
-		Color: "#ff0000",
-		Tags:  []string{"music", "reaper"},
+		ID:                     "root-workspace",
+		Name:                   "Root",
+		Color:                  "#ff0000",
+		Tags:                   []string{"music", "reaper"},
+		TicketMigrationVersion: 1,
+		TicketSequence:         17,
 		SharedData: map[string]any{
 			"kanban_board": KanbanBoardConfig{
 				Version: 1,
@@ -398,6 +400,9 @@ func TestSQLiteStore_Workspaces(t *testing.T) {
 	if len(got.Tags) != 2 || got.Tags[0] != "music" || got.Tags[1] != "reaper" {
 		t.Fatalf("expected workspace tags to persist, got %#v", got.Tags)
 	}
+	if got.TicketMigrationVersion != 1 || got.TicketSequence != 17 {
+		t.Fatalf("expected ticket migration state (1, 17), got (%d, %d)", got.TicketMigrationVersion, got.TicketSequence)
+	}
 	board, ok := GetWorkspaceKanbanBoardConfig(got)
 	if !ok {
 		t.Fatalf("Expected kanban board config to persist")
@@ -420,6 +425,9 @@ func TestSQLiteStore_Workspaces(t *testing.T) {
 	if len(workspaces[0].Tags) != 2 || workspaces[0].Tags[0] != "music" || workspaces[0].Tags[1] != "reaper" {
 		t.Fatalf("expected listed workspace tags to persist, got %#v", workspaces[0].Tags)
 	}
+	if workspaces[0].TicketMigrationVersion != 1 || workspaces[0].TicketSequence != 17 {
+		t.Fatalf("expected listed ticket migration state (1, 17), got (%d, %d)", workspaces[0].TicketMigrationVersion, workspaces[0].TicketSequence)
+	}
 
 	// Get workspace tree
 	tree, err := store.GetWorkspaceTree(ctx)
@@ -437,6 +445,8 @@ func TestSQLiteStore_Workspaces(t *testing.T) {
 	}
 
 	got.Tags = []string{"writing"}
+	got.TicketMigrationVersion = 2
+	got.TicketSequence = 23
 	got.UpdatedAt = time.Now()
 	if err := store.UpdateWorkspace(ctx, got); err != nil {
 		t.Fatalf("Failed to update workspace tags: %v", err)
@@ -447,6 +457,9 @@ func TestSQLiteStore_Workspaces(t *testing.T) {
 	}
 	if len(updated.Tags) != 1 || updated.Tags[0] != "writing" {
 		t.Fatalf("expected updated workspace tags to persist, got %#v", updated.Tags)
+	}
+	if updated.TicketMigrationVersion != 2 || updated.TicketSequence != 23 {
+		t.Fatalf("expected updated ticket migration state (2, 23), got (%d, %d)", updated.TicketMigrationVersion, updated.TicketSequence)
 	}
 
 	// Get subworkspace IDs

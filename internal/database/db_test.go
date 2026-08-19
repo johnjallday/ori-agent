@@ -1758,6 +1758,61 @@ func TestMigration040SlotFollowsThePlan(t *testing.T) {
 	}
 }
 
+// TestMigration043UpgradesWorkspaceTicketState proves an existing database gets
+// durable Ticket migration counters without altering its workspace rows.
+func TestMigration043UpgradesWorkspaceTicketState(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "migration-043.db")
+
+	legacyDB, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open legacy database: %v", err)
+	}
+	if _, err := legacyDB.ExecContext(ctx, `
+		CREATE TABLE schema_migrations (
+			version INTEGER PRIMARY KEY,
+			applied_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		);
+		INSERT INTO schema_migrations (version) VALUES (42);
+		CREATE TABLE workspaces (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL
+		);
+		INSERT INTO workspaces (id, name, created_at, updated_at)
+		VALUES ('ws-legacy', 'Legacy', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
+	`); err != nil {
+		_ = legacyDB.Close()
+		t.Fatalf("seed legacy database: %v", err)
+	}
+	if err := legacyDB.Close(); err != nil {
+		t.Fatalf("close legacy database: %v", err)
+	}
+
+	db, err := Open(ctx, &Config{Path: dbPath, WALMode: false})
+	if err != nil {
+		t.Fatalf("open migrated database: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	var migrationVersion int
+	var ticketSequence int64
+	if err := db.QueryRowContext(ctx, `
+		SELECT ticket_migration_version, ticket_sequence
+		FROM workspaces WHERE id = 'ws-legacy'
+	`).Scan(&migrationVersion, &ticketSequence); err != nil {
+		t.Fatalf("read migrated ticket state: %v", err)
+	}
+	if migrationVersion != 0 || ticketSequence != 0 {
+		t.Fatalf("legacy defaults = (%d, %d), want (0, 0)", migrationVersion, ticketSequence)
+	}
+
+	if err := db.migration043WorkspaceTicketState(ctx); err != nil {
+		t.Fatalf("re-running migration 43 failed: %v", err)
+	}
+}
+
 // TestMigration034IsIdempotentOnAlreadyMigratedSchema proves the duplicate-column
 // guard: re-running migration 34 against a workspaces table that already has the
 // column must succeed rather than fail the whole startup (PRD FR-145 isolation).
