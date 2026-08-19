@@ -169,7 +169,7 @@ func TestBuildIssuePlanRoutesBySizeAndTouchesNoFiles(t *testing.T) {
 			if issues.calls != 1 {
 				t.Fatalf("GetIssue called %d times, want exactly 1", issues.calls)
 			}
-			if plan.Route != route || plan.Slug != "342-ready-issue-codex-planning" {
+			if plan.Route != route || plan.Slug != "342-ready-issue-codex-planning" || plan.PlannerKind != "pi" {
 				t.Fatalf("plan = %#v", plan)
 			}
 			if !plan.Startable() || plan.ArtifactState != IssueArtifactNone {
@@ -318,6 +318,19 @@ func TestExecuteIssuePlanWritesFilesAndIsIdempotentOnRerun(t *testing.T) {
 	}
 }
 
+func TestTaskListIsPlanningStarterRecognizesLegacyCodexMarker(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "tasks-legacy.md")
+	content := "# Tasks\n\n" + legacyPlanningStarterMarker + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	isStarter, err := taskListIsPlanningStarter(path)
+	if err != nil || !isStarter {
+		t.Fatalf("taskListIsPlanningStarter() = %v, %v; want true for a pending legacy plan", isStarter, err)
+	}
+}
+
 func TestExecuteIssuePlanNeverOverwritesARealTaskList(t *testing.T) {
 	t.Parallel()
 	devPath := t.TempDir()
@@ -369,7 +382,7 @@ func TestExecuteIssuePlanDoesNotOverwriteAnExistingPRD(t *testing.T) {
 		t.Fatalf("plan with existing PRD = %#v", plan)
 	}
 	if strings.Contains(plan.starterContent, "Write `tasks/prd-") {
-		t.Fatalf("starter for an existing PRD must not ask Codex to write the PRD again: %s", plan.starterContent)
+		t.Fatalf("starter for an existing PRD must not ask Pi to write the PRD again: %s", plan.starterContent)
 	}
 	after, err := os.ReadFile(filepath.Join(tasksDir, "prd-342-ready-issue-codex-planning.md"))
 	if err != nil || string(after) != realPRD {
@@ -547,8 +560,52 @@ func TestExecuteIssuePlanRecreatesTheTabWhenTheRecordedOneIsClosed(t *testing.T)
 	}
 }
 
+func TestExecuteIssuePlanMigratesSavedCodexPlannerToPiWithoutClosingItsTab(t *testing.T) {
+	t.Parallel()
+	devPath := t.TempDir()
+	client := newFakeHerdr(devPath)
+	store := newMemoryStore()
+	state := model.NewBridgeState()
+	state.PlanningSessions["repo-123456:342"] = model.PlanningSession{
+		RepositoryID: "repo-123456",
+		IssueNumber:  342,
+		Slug:         "342-shared-name",
+		WorktreePath: devPath,
+		TabID:        "old-tab",
+		RootPaneID:   "old-pane",
+		Planner:      model.RoleAgent{Name: "ori-repo123456-issue342-planner", Kind: "codex"},
+		Stage:        model.PlanningPrompted,
+		Prompted:     true,
+		CreatedAt:    time.Date(2026, time.August, 1, 12, 0, 0, 0, time.UTC),
+	}
+	if err := store.Save(state); err != nil {
+		t.Fatal(err)
+	}
+
+	service := newPlanningService(client, store, devPath, &fakeIssues{issue: readyIssue(342, "shared name", RoutePlanned)})
+	plan, err := service.BuildIssuePlan(context.Background(), IssuePlanRequest{IssueNumber: 342, DevWorktreePath: devPath})
+	if err != nil {
+		t.Fatalf("BuildIssuePlan() error = %v", err)
+	}
+	result, err := service.ExecuteIssuePlan(context.Background(), plan)
+	if err != nil {
+		t.Fatalf("ExecuteIssuePlan() error = %v", err)
+	}
+	if result.Planner.Kind != "pi" || !result.PromptDelivered || result.TabReused {
+		t.Fatalf("migration result = %#v, want a freshly prompted Pi planner", result)
+	}
+	if len(result.Warnings) == 0 || !strings.Contains(result.Warnings[0], "Saved codex planner replaced by Pi") {
+		t.Fatalf("migration warnings = %v", result.Warnings)
+	}
+	after, _ := store.Load()
+	session := after.PlanningSessions["repo-123456:342"]
+	if session.Planner.Kind != "pi" || !session.Prompted || session.TabID == "old-tab" {
+		t.Fatalf("migrated planning session = %#v", session)
+	}
+}
+
 // TestPlanningSessionCannotSeedOrOverrideFeatureHandoffKind proves AR18/AR31:
-// a planning session's fixed "codex" kind must never leak into an ordinary
+// a planning session's fixed "pi" kind must never leak into an ordinary
 // feature handoff for a same-named feature. Feature handoff never reads
 // PlanningSessions at all, so this is true by construction; the test pins
 // that down as an explicit regression rather than an implicit property.
@@ -567,20 +624,20 @@ func TestPlanningSessionCannotSeedOrOverrideFeatureHandoffKind(t *testing.T) {
 		t.Fatalf("ExecuteIssuePlan() error = %v", err)
 	}
 	state, _ := store.Load()
-	if state.PlanningSessions["repo-123456:342"].Planner.Kind != "codex" {
-		t.Fatalf("fixture is invalid: expected a recorded codex planner, got %#v", state.PlanningSessions["repo-123456:342"])
+	if state.PlanningSessions["repo-123456:342"].Planner.Kind != "pi" {
+		t.Fatalf("fixture is invalid: expected a recorded Pi planner, got %#v", state.PlanningSessions["repo-123456:342"])
 	}
 
 	// A feature happens to share the same slug the planning session derived.
 	// Its own handoff must still resolve to the configured default kind
-	// (claude), never the planning session's codex.
+	// (claude), never the planning session's Pi kind.
 	feature := newService(client, store, devPath)
 	result, err := feature.Handoff(context.Background(), HandoffRequest{FeatureName: plan.Slug, WorktreePath: devPath, Branch: "feature/bridge"})
 	if err != nil {
 		t.Fatalf("Handoff() error = %v", err)
 	}
 	if result.Primary.Kind != "claude" {
-		t.Fatalf("feature handoff kind = %q, want claude (the planning session's codex kind must not leak)", result.Primary.Kind)
+		t.Fatalf("feature handoff kind = %q, want claude (the planning session's Pi kind must not leak)", result.Primary.Kind)
 	}
 	after, _ := store.Load()
 	featureRecord := after.Features["repo-123456:"+plan.Slug]

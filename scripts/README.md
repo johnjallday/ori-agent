@@ -94,7 +94,7 @@ The full release flow is documented in `docs/RELEASE_CHECKLIST.md`.
 ```bash
 source scripts/wt.sh   # load the function
 wt                     # interactive: pick a worktree to navigate
-wt plan --issue <N>    # start Codex planning a Ready Issue in the dev worktree
+wt plan --issue <N>    # start Pi planning a Ready Issue in the dev worktree
 wt start <feature>     # create a worktree from a PRD and/or task list
 wt new <name>          # create a worktree
 wt rm <name>           # remove a worktree
@@ -110,7 +110,7 @@ Source it (don't execute) so `cd` affects your current shell.
 
 Planning and implementation are separate stages. `wt plan` handles the first:
 it reads the Issue once, writes a snapshot plus a size-routed starter
-checklist into `ori-agent-dev/tasks/`, and starts a **Codex** session there to
+checklist into `ori-agent-dev/tasks/`, and starts a **Pi** session there to
 finish the plan. `wt start` handles the second, on Claude.
 
 ```bash
@@ -118,7 +118,7 @@ wt plan --issue 342          # show the plan, then ask before writing anything
 wt plan --issue 342 --yes    # same plan, no prompt
 ```
 
-| Issue size | What Codex is told to do first |
+| Issue size | What Pi is told to do first |
 |---|---|
 | `size:quick`, `size:planned` | Generate parent tasks, wait for `Go`, then expand them — no PRD |
 | `size:prd` | Ask 3–5 clarifying questions, write the PRD, *then* generate parent tasks |
@@ -143,7 +143,7 @@ both — `size:quick`/`size:planned` work legitimately has no PRD. It copies
 whichever of the Issue snapshot, PRD, and task list exist, independently.
 
 It refuses while the task list is still `wt plan`'s planning starter: that
-file is an instruction to Codex to write the plan, not a plan to implement.
+file is an instruction to Pi to write the plan, not a plan to implement.
 
 ### `scripts/devops.sh` — open Issues by workflow label
 
@@ -157,7 +157,7 @@ One command covers the human issue workflow:
 ./scripts/devops.sh backlog            # label: backlog
 ./scripts/devops.sh proposals          # label: feature-proposal
 ./scripts/devops.sh status             # which group each task list is on
-./scripts/devops.sh release            # what has merged to main since the latest release
+./scripts/devops.sh release            # what has merged to dev since the latest release
 ./scripts/devops.sh view <number>      # one Issue in full
 ./scripts/devops.sh new <title>                         # quick title-only capture
 ./scripts/devops.sh new <title> --body <text>           # optional inline context
@@ -176,13 +176,13 @@ and again as its members.
 In a terminal, the colorful picker uses `↑/↓` or `j/k` to select an Issue,
 `←/→` or `h/l` to change views, and the same `1`–`5` view order shown by the
 line REPL. `Enter` opens an Issue and keeps you there with an action bar:
-`c` records a decision, `s` prints its planning command, `r` refreshes the
+`c` records a decision, `s` starts its Pi planner, `r` refreshes the
 opened Issue, and Enter returns to the list. Decide and Plan each appear only
 when that Issue's own live labels make them eligible - the bar is drawn for
 one known Issue, so it never offers a write or a command the Issue does not
 actually support. The list's `c` key is a shortcut that opens the same Issue
 directly at its decision answers. `n` captures a new Issue with an optional
-body, `o` approves it, `s` prints the selected Ready row's planning command,
+body, `o` approves it, `s` starts Pi planning for the selected Ready row,
 `r` refreshes the list, `?` shows help, and `q` quits. At the new-Issue body
 prompt, a blank line keeps capture title-only and `:edit` opens `$VISUAL` or
 `$EDITOR` for multiline Markdown.
@@ -196,19 +196,17 @@ of lists.
 Every row shows the Issue's `size:*` label in its own column, so a long label
 list can never truncate away the signal that says whether to open a PRD first.
 
-**Planning key.** In the Ready view, `s` prints exactly
-`wt plan --issue <N>` for the selected row — the command that starts Codex
-planning that Issue (see `wt plan` above). The same `s` is also on the
-opened-Issue action bar (`Enter` on any row), where it reads that Issue's own
-live labels through the same `labels_are_ready` rule the Ready view itself
-uses, so it works from any view - not only rows already sitting in Ready. The
-picker only *prints* it: it never sources or runs `wt`, copies to a
-clipboard, makes another GitHub request, or changes anything. `wt` is a
-sourced zsh function and this script is a separate bash process, so printing
-is also the only thing that could work. The key is a no-op with a clear
-message outside the Ready view or on an empty list; the opened-Issue bar
-gives the same clear refusal for a non-Ready Issue or a label read that
-fails, and never offers `[s] Plan` in the first place when it would refuse.
+**Planning key.** In the Ready view, `s` runs `wt plan --issue <N>` for the
+selected row and launches a Herdr-managed Pi planner after wt shows its normal
+summary and confirmation. The same `s` is also on the opened-Issue action bar
+(`Enter` on any row), where it reads that Issue's own live labels through the
+same `labels_are_ready` rule the Ready view itself uses, so it works from any
+view - not only rows already sitting in Ready. The picker starts the sourced
+zsh `wt` function in a child process; `wt plan` then repeats the live
+eligibility check before writing files or contacting Herdr. The key is a no-op
+with a clear message outside the Ready view or on an empty list; the
+opened-Issue bar gives the same clear refusal for a non-Ready Issue or a label
+read that fails, and never offers `[s] Plan` when it would refuse.
 
 **In-flight status.** A second column shows whether work has already started and
 how far it has got — `2/7 wt` means two of seven task-list groups are done and a
@@ -245,14 +243,21 @@ into `main` strictly after that instant:
 Latest release: v0.0.106 (published 2026-08-15T10:00:00Z)
 https://github.com/johnjallday/ori-agent/releases/tag/v0.0.106
 
-2 PR(s) merged into main since v0.0.106.
+2 PR(s) merged into dev since v0.0.106.
 ```
 
-It is read-only — one `gh release view` and one `gh pr list --base main
---state merged`, nothing else. The comparison is an **exact timestamp**, not a
-calendar date, so a PR merged earlier the same day as the release correctly
-does *not* count. A release with nothing merged since prints `No PRs merged
-into main since <tag>.` rather than a blank line, and either read failing
+The full-screen Issue picker displays the compact count directly below its
+`Ori DevOps` heading and refreshes it when you press `r`. If that refresh
+fails, the banner reports `Release status unavailable` while the Issue list
+remains usable.
+
+It is read-only — one `gh release view` and one `gh pr list --base dev
+--state merged`, nothing else. Feature PRs merge into `dev`; a Release snapshots
+`main`, so those post-release `dev` merges are the unshipped delivery queue. The
+comparison is an **exact timestamp**, not a calendar date, so a PR merged earlier
+the same day as the release correctly does *not* count. A release with nothing
+merged since prints `No PRs merged into dev since <tag>.` rather than a blank
+line, and either read failing
 (no release exists, the PR query errors) exits non-zero with `gh`'s own
 message on stderr rather than reporting a misleading zero.
 

@@ -2,7 +2,7 @@ package agents
 
 // This file is the `wt plan --issue <N>` command family: turning a Ready
 // GitHub Issue into a durable local snapshot, a size-routed planning starter
-// checklist, and an issue-scoped Codex session that begins the repository's
+// checklist, and an issue-scoped Pi session that begins the repository's
 // PRD/task-list workflow — never implementation.
 //
 // It is deliberately kept apart from feature handoff (service.go). A
@@ -38,14 +38,15 @@ import (
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/worktree"
 )
 
-// PlanningStarterMarker identifies a task list written by `wt plan` that
-// Codex has not yet replaced with a real plan. `wt start` refuses to create
-// an implementation worktree while a task list still carries this exact
-// marker (see AR27 in the Issue #342 acceptance contract). It is distinct
-// from wt.sh's older ad-hoc "This checklist is a placeholder" starter, which
-// wt start writes into a brand-new worktree it just created and can never
-// block its own creation.
-const PlanningStarterMarker = "<!-- ori-devflow: planning-starter; do not implement until Codex replaces this file -->"
+// PlanningStarterMarker identifies a task list written by `wt plan` that the
+// planner has not yet replaced with a real plan. `wt start` refuses to create
+// an implementation worktree while a task list still carries this marker (see
+// AR27 in the Issue #342 acceptance contract). The legacy marker remains
+// recognized so pending Codex-era plans cannot be mistaken for implementation
+// checklists after the planner switched to Pi.
+const PlanningStarterMarker = "<!-- ori-devflow: planning-starter; do not implement until the planner replaces this file -->"
+
+const legacyPlanningStarterMarker = "<!-- ori-devflow: planning-starter; do not implement until Codex replaces this file -->"
 
 // IssueRoute is the planning route selected by an Issue's size label.
 type IssueRoute string
@@ -103,11 +104,11 @@ type IssuePlan struct {
 	// PRDPath is set only for the size:prd route.
 	PRDPath string
 	// ExistingPRD is true when PRDPath already exists (the size:prd resume
-	// case): the starter tells Codex to generate tasks directly rather than
+	// case): the starter tells Pi to generate tasks directly rather than
 	// asking clarifying questions again.
 	ExistingPRD   bool
 	ArtifactState IssueArtifactState
-	// PlannerKind is always "codex". It is a field, not a config read, because
+	// PlannerKind is always "pi". It is a field, not a config read, because
 	// AR18 requires the planning operation to never depend on or change the
 	// configured default agent kind.
 	PlannerKind string
@@ -141,7 +142,7 @@ type IssuePlanResult struct {
 	PromptDelivered bool
 	PromptSkipped   bool
 	// Degraded is true when the planning files were written successfully but
-	// the Herdr/Codex half did not complete. The files are never rolled back;
+	// the Herdr/Pi half did not complete. The files are never rolled back;
 	// see wt_herd_handoff's identical contract for feature worktrees.
 	Degraded         bool
 	DegradedStage    string
@@ -199,7 +200,7 @@ func (s *Service) BuildIssuePlan(ctx context.Context, req IssuePlanRequest) (Iss
 		TasksDir:        tasksDir,
 		SnapshotPath:    filepath.Join(tasksDir, "issue-"+slug+".md"),
 		TaskListPath:    filepath.Join(tasksDir, "tasks-"+slug+".md"),
-		PlannerKind:     "codex",
+		PlannerKind:     "pi",
 		issue:           issue,
 	}
 	if route == RoutePRD {
@@ -233,7 +234,7 @@ func (s *Service) BuildIssuePlan(ctx context.Context, req IssuePlanRequest) (Iss
 }
 
 // ExecuteIssuePlan writes the confirmed planning files (if any remain to
-// write) and then places and prompts the Issue's Codex planner. A Herdr/Codex
+// write) and then places and prompts the Issue's Pi planner. A Herdr/Pi
 // failure is reported on the result as Degraded rather than returned as an
 // error: the files above are never rolled back, matching wt_herd_handoff's
 // contract for feature worktrees.
@@ -270,7 +271,7 @@ func (s *Service) executeIssuePlan(ctx context.Context, plan IssuePlan) (IssuePl
 	if s.Client == nil || s.Store == nil || !s.Config.Bridge.Enabled {
 		result.Degraded = true
 		result.DegradedStage = "herdr"
-		result.DegradedMessage = "Ori Herdr Devflow is disabled or unavailable; the planning files are ready without a Codex session."
+		result.DegradedMessage = "Ori Herdr Devflow is disabled or unavailable; the planning files are ready without a Pi session."
 		result.DegradedRecovery = "wt herd doctor, then wt plan --issue " + strconv.Itoa(plan.IssueNumber)
 		return result, nil
 	}
@@ -296,7 +297,7 @@ func (s *Service) planningKey(issueNumber int) string {
 }
 
 // placeAndPromptPlanner records the planning session, places its tab, starts
-// (or reuses) its Codex agent, and delivers the bootstrap prompt. Each
+// (or reuses) its Pi agent, and delivers the bootstrap prompt. Each
 // completed stage is persisted before the next Herdr call, so a retry after a
 // partial failure resumes only the missing stage — the same idempotent
 // recovery contract as feature handoff.
@@ -314,6 +315,19 @@ func (s *Service) placeAndPromptPlanner(ctx context.Context, plan IssuePlan, res
 		return &model.StageError{Stage: "resolve planning session", Code: model.ErrWorktreeInvalid, Message: "this Issue's planning session is already bound to a different dev worktree", Recovery: "inspect the other checkout, or remove its stale planning-session record"}
 	}
 	now := s.now()
+	previousKind := ""
+	if found && session.Planner.Kind != "" && session.Planner.Kind != plan.PlannerKind {
+		// Planning originally shipped with a fixed Codex kind. Do not try to
+		// adopt that process as Pi or stop its tab behind the user's back. Reset
+		// only Ori's issue-scoped binding, then place the new kind in a fresh tab
+		// under a kind-qualified agent name below.
+		previousKind = session.Planner.Kind
+		createdAt := session.CreatedAt
+		if createdAt.IsZero() {
+			createdAt = now
+		}
+		session = model.PlanningSession{RepositoryID: s.RepositoryID, IssueNumber: plan.IssueNumber, CreatedAt: createdAt}
+	}
 	if !found {
 		session = model.PlanningSession{RepositoryID: s.RepositoryID, IssueNumber: plan.IssueNumber, CreatedAt: now}
 	}
@@ -352,8 +366,11 @@ func (s *Service) placeAndPromptPlanner(ctx context.Context, plan IssuePlan, res
 	result.TabID = placement.TabID
 	result.TabReused = placement.Reused
 	result.Warnings = append(result.Warnings, placement.Warnings...)
+	if previousKind != "" {
+		result.Warnings = append(result.Warnings, "Saved "+previousKind+" planner replaced by Pi; its previous Herdr tab was left untouched.")
+	}
 
-	name, err := ScopedAgentName(s.RepositoryID, "issue-"+strconv.Itoa(plan.IssueNumber), "planner")
+	name, err := ScopedAgentName(s.RepositoryID, "issue-"+strconv.Itoa(plan.IssueNumber)+"-"+plan.PlannerKind, "planner")
 	if err != nil {
 		return &model.StageError{Stage: "planner name", Code: model.ErrConfigInvalid, Message: "could not create a safe planner agent name", Recovery: "check the repository and Issue identity", Cause: err}
 	}
@@ -542,7 +559,7 @@ func (s *Service) validateLivePlanner(live herdr.AgentInfo, placement featurePla
 	return roleAgent, nil
 }
 
-// PlanningBootstrapPrompt is the Codex planner's first instruction (AR22). It
+// PlanningBootstrapPrompt is the Pi planner's first instruction (AR22). It
 // names AGENTS.md, the Issue snapshot, the expected PRD path when the route
 // calls for one, the task-list path, the size route, and the next planning
 // action — and explicitly forbids implementation, branch creation, and
@@ -550,7 +567,7 @@ func (s *Service) validateLivePlanner(live herdr.AgentInfo, placement featurePla
 // body or comments: those stay in the snapshot file, referenced by path only.
 func PlanningBootstrapPrompt(plan IssuePlan) string {
 	lines := []string{
-		"You are the Codex planner for Ori Issue #" + strconv.Itoa(plan.IssueNumber) + " (" + plan.Slug + ").",
+		"You are the Pi planner for Ori Issue #" + strconv.Itoa(plan.IssueNumber) + " (" + plan.Slug + ").",
 		"Work only in this Git worktree: " + plan.DevWorktreePath,
 		"Read and follow: " + filepath.Join(plan.DevWorktreePath, "AGENTS.md"),
 		"Issue snapshot: " + plan.SnapshotPath,
@@ -571,7 +588,7 @@ func PlanningBootstrapPrompt(plan IssuePlan) string {
 
 // IssuePlanSummary builds the pre-confirmation summary AR9 requires: the
 // Issue, its size, the planning step, the feature slug, the snapshot path,
-// PRD/task-list state, the exact dev worktree path, the Codex planner, and
+// PRD/task-list state, the exact dev worktree path, the Pi planner, and
 // the focused Herdr destination or its degradation.
 //
 // It returns the text rather than writing it. Nothing here mutates anything,
@@ -594,12 +611,12 @@ func IssuePlanSummary(plan IssuePlan) string {
 	case IssueArtifactNone:
 		line("Task list     %s  (new planning starter)\n", plan.TaskListPath)
 		if plan.PRDPath != "" {
-			line("PRD           %s  (Codex writes this first)\n", plan.PRDPath)
+			line("PRD           %s  (Pi writes this first)\n", plan.PRDPath)
 		}
 	case IssueArtifactResume:
 		line("Task list     %s  (planning starter already exists, resumed)\n", plan.TaskListPath)
 		if plan.PRDPath != "" {
-			line("PRD           %s  (Codex writes this first)\n", plan.PRDPath)
+			line("PRD           %s  (Pi writes this first)\n", plan.PRDPath)
 		}
 	case IssueArtifactPRDExists:
 		line("PRD           %s  (already exists)\n", plan.PRDPath)
@@ -614,7 +631,7 @@ func IssuePlanSummary(plan IssuePlan) string {
 	case "ready":
 		line("Herdr tab     in workspace %s (whichever is focused when this runs)\n", plan.WorkspaceLabel)
 	case "disabled":
-		b.WriteString("Herdr tab     bridge disabled — planning files only, no Codex session\n")
+		b.WriteString("Herdr tab     bridge disabled — planning files only, no Pi session\n")
 	default:
 		b.WriteString("Herdr tab     Herdr unreachable — planning files only, retry later\n")
 	}
@@ -909,7 +926,8 @@ func taskListIsPlanningStarter(path string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return strings.Contains(string(contents), PlanningStarterMarker), nil
+	content := string(contents)
+	return strings.Contains(content, PlanningStarterMarker) || strings.Contains(content, legacyPlanningStarterMarker), nil
 }
 
 func writeFileAtomic(dir, path, content string) error {
@@ -1005,7 +1023,7 @@ func RenderIssueSnapshot(issue github.Issue) string {
 // RenderPlanningStarter produces the size-routed starter checklist. The
 // first unchecked item is what Herdr's bootstrap-prompt convention (and
 // PlanningBootstrapPrompt above) reads as "the next planning action", so its
-// wording is the actual first instruction Codex receives.
+// wording is the actual first instruction Pi receives.
 func RenderPlanningStarter(plan IssuePlan) string {
 	switch {
 	case plan.Route == RoutePRD && plan.ExistingPRD:

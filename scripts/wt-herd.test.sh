@@ -243,7 +243,7 @@ rg -q "^- \[ \] 1\.1 " "$target_root/tasks/tasks-planless.md"
 # (AR29).
 print -r -- '# Tasks: onlytasks
 
-<!-- ori-devflow: planning-starter; do not implement until Codex replaces this file -->
+<!-- ori-devflow: planning-starter; do not implement until the planner replaces this file -->
 
 - [ ] 1.1 Read the Issue and generate the real tasks.' > "$dev_root/tasks/tasks-onlytasks.md"
 
@@ -254,7 +254,7 @@ wt start onlytasks --yes > "$fixture_root/starter-refused-output" 2>&1 || starte
 rg -q "still a planning starter" "$fixture_root/starter-refused-output"
 [[ ! -f "$fixture_root/decline-mutations" ]]
 
-# Once Codex has replaced the starter with a real, detailed task list, wt
+# Once Pi has replaced the starter with a real, detailed task list, wt
 # start accepts it with no PRD at all.
 print -r -- '# Tasks: onlytasks
 
@@ -1146,19 +1146,18 @@ if rg -q 'wt_herd|herdr-devflow|devflow_exec|devflow-bootstrap' "$devops_entrypo
   print -r -- "scripts/devops.sh reaches for the Herdr bridge" >&2
   exit 1
 fi
-# The Ready picker's `s` key prints `wt plan --issue <N>` as inert text. That
-# is the ONLY way `wt` may appear in this file: sourcing it, invoking it, or
-# executing the printed string would recreate exactly the DevOps-to-Herdr
-# coupling the checks above exist to prevent (AR34-AR35). devops.sh is a bash
-# process and `wt` is a sourced zsh function, so an invocation could not work
-# anyway — it would just fail confusingly instead of printing something the
-# user can paste.
-# Matched against code only: comment lines and the quoted usage text are
-# stripped first, so documenting `wt plan --issue <N>` in prose stays legal
-# while an actual invocation does not.
-devops_code="$(rg -v '^\s*#' "$devops_entrypoint" | rg -v '^\s*`?wt plan')"
-if print -r -- "$devops_code" | rg -q 'source\s+\S*wt\.sh|^\s*\.\s+\S*wt\.sh|^\s*wt\s+plan|\$\(\s*wt\s|eval\s'; then
-  print -r -- "scripts/devops.sh sources, invokes, or evaluates wt; it may only PRINT the command" >&2
+# The Ready picker's `s` key now launches planning. devops.sh is bash while wt
+# is a sourced zsh function, so the only permitted bridge is one argument-safe
+# zsh child that sources this checkout's scripts/wt.sh and passes the validated
+# Issue number as a separate word. Direct Herdr calls and eval remain forbidden:
+# wt plan owns the fresh eligibility check, confirmation, files, and Pi launch.
+devops_code="$(rg -v '^\s*#' "$devops_entrypoint")"
+if ! print -r -- "$devops_code" | rg -Fq "zsh -c 'source \"\$1\" && wt plan --issue \"\$2\"' devops-plan \"\$script_dir/wt.sh\" \"\$issue_number\""; then
+  print -r -- "scripts/devops.sh does not launch wt plan through the constrained zsh bridge" >&2
+  exit 1
+fi
+if print -r -- "$devops_code" | rg -q '\beval\b|\$\(\s*wt\s|^\s*wt\s+plan'; then
+  print -r -- "scripts/devops.sh evaluates or invokes wt outside the constrained zsh bridge" >&2
   exit 1
 fi
 # A clipboard dependency was explicitly ruled out: it is per-platform, fails

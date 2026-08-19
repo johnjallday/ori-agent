@@ -10,14 +10,14 @@
 # therefore agree with the label filters `gh` applies server-side; the tests
 # cover both paths against the same fixtures.
 #
-# Writes are deliberately limited and confirm-gated: capturing an Issue,
+# GitHub writes are deliberately limited and confirm-gated: capturing an Issue,
 # recording answers to its open questions, and toggling the `approved` label.
 # `approved` is the pipeline's only human gate, so it is never written by the
 # grooming agent - only from here, or by hand on github.com.
 set -uo pipefail
 
 readonly issue_limit=1000
-# A practical cap on how many merged-into-main PRs `release` will scan looking
+# A practical cap on how many merged-into-dev PRs `release` will scan looking
 # for ones after the latest release's publish instant. GitHub returns merged
 # PRs newest-first, so the count this Issue actually cares about - PRs merged
 # since the last release - sits well inside this limit for any sane release
@@ -68,11 +68,12 @@ is entirely local - no network, no Herdr - and reads the dev worktree's
 gitignored tasks/, so ticked checkboxes show up before you commit them.
 
 `release` answers "what have I not shipped yet": the latest GitHub Release's
-tag and publish time, plus how many PRs have merged into `main` strictly after
+tag and publish time, plus how many PRs have merged into `dev` strictly after
 that instant (an exact-timestamp comparison, so a PR merged earlier the same
-day as the release is correctly excluded). It is read-only - two `gh` reads,
-nothing else - and a failed release or PR read exits non-zero with `gh`'s own
-error message rather than reporting a misleading zero count.
+day as the release is correctly excluded). The keyboard picker shows the same
+count at the top and updates it on `r`. Both are read-only; the one-shot command
+preserves a failed release or PR read as a non-zero exit with `gh`'s own error
+instead of reporting a misleading zero count.
 
 In the picker, Enter opens an Issue with its own action bar; press `c` there to
 answer its open questions, or use the list's `c` shortcut to open directly at
@@ -80,15 +81,12 @@ those answers. `n` accepts an optional one-line body; enter `:edit` to use
 VISUAL or EDITOR for multiline Markdown. For one-shot capture, `--body-file -`
 reads the body from stdin.
 
-In the picker's Ready view, pressing `s` on a selected row prints exactly
-`wt plan --issue <N>` - the command that starts Codex planning that Issue in
-the dev worktree. The picker only prints it: it never runs `wt`, sources it,
-copies to a clipboard, or reads GitHub again.
-
-The opened-Issue action bar (Enter on any row) offers the same `s` once it has
-read that Issue's own live labels and found them Ready by the same
-`labels_are_ready` rule - not just rows already sitting in the Ready view. Any
-other label state, or a label read that fails, is a clear refusal instead.
+In the picker's Ready view, pressing `s` on a selected row starts
+`wt plan --issue <N>`, which shows its normal confirmation summary and launches
+a Herdr-managed Pi planner in the dev worktree. The same `s` is available from
+the opened-Issue action bar (Enter on any row) once that Issue's live labels
+satisfy `labels_are_ready`. Any other label state, or a failed label read, is a
+clear refusal instead.
 
 new/decide/approve/unapprove write to GitHub. They prompt for confirmation on
 a terminal, and require --yes when stdin is not a terminal. `answer` remains a
@@ -449,23 +447,31 @@ view_issue() {
   gh issue view "$1" --comments
 }
 
-# release_report answers "what have I not shipped yet": the latest GitHub
-# Release's tag and publish instant, plus how many PRs have merged into `main`
-# strictly after that instant. It is read-only - two `gh` reads, nothing more
-# - and every failure it can hit (no release exists, the PR read fails) exits
-# non-zero with `gh`'s own message on stderr rather than being swallowed into
-# an empty-looking report.
-release_report() {
-  local release_line tag published url pr_output
-  local number merged title count=0
+# Shared release state for the one-shot report and the picker's compact banner.
+# load_release_status is read-only and always resets these fields first so a
+# failed refresh can never leave stale release data on screen.
+release_tag=""
+release_published=""
+release_url=""
+release_merged_count=0
+
+load_release_status() {
+  local release_line pr_output
+  local number merged title
+
+  release_tag=""
+  release_published=""
+  release_url=""
+  release_merged_count=0
 
   # `gh release view` with no tag defaults to the latest release. Command
-  # substitution does not capture stderr, so a failure here still prints gh's
-  # own error message and this function's non-zero exit propagates it.
+  # substitution does not capture stderr, so callers choose whether failures
+  # stay visible (the one-shot report) or become a compact unavailable banner
+  # (the picker).
   release_line="$(gh release view --json tagName,publishedAt,url \
     --template '{{printf "%s\t%s\t%s" .tagName .publishedAt .url}}')" || return $?
-  IFS=$'\t' read -r tag published url <<< "$release_line"
-  if [[ -z "$tag" || -z "$published" ]]; then
+  IFS=$'\t' read -r release_tag release_published release_url <<< "$release_line"
+  if [[ -z "$release_tag" || -z "$release_published" ]]; then
     printf 'could not parse the latest release.\n' >&2
     return 1
   fi
@@ -473,7 +479,7 @@ release_report() {
   # Newest-first by default, and release_pr_limit is a practical cap on that
   # scan - see its declaration for why the count this Issue cares about always
   # sits well inside it.
-  pr_output="$(gh pr list --state merged --base main --limit "$release_pr_limit" \
+  pr_output="$(gh pr list --state merged --base dev --limit "$release_pr_limit" \
     --json number,mergedAt,title \
     --template '{{range .}}{{printf "%v\t%s\t%s\n" .number .mergedAt .title}}{{end}}')" || return $?
 
@@ -483,17 +489,24 @@ release_report() {
     # SAME DAY as the release must not count as unreleased just because the
     # two dates are equal. ISO 8601 UTC timestamps sort lexicographically, so
     # a plain string compare is exact.
-    if [[ "$merged" > "$published" ]]; then
-      count=$((count + 1))
+    if [[ "$merged" > "$release_published" ]]; then
+      release_merged_count=$((release_merged_count + 1))
     fi
   done <<< "$pr_output"
+}
 
-  printf 'Latest release: %s (published %s)\n' "$tag" "$published"
-  printf '%s\n\n' "$url"
-  if [[ "$count" -eq 0 ]]; then
-    printf 'No PRs merged into main since %s.\n' "$tag"
+# release_report answers "what have I not shipped yet" as a one-shot command.
+# Every GitHub failure stays non-zero with gh's own stderr rather than being
+# swallowed into an empty-looking report.
+release_report() {
+  load_release_status || return $?
+
+  printf 'Latest release: %s (published %s)\n' "$release_tag" "$release_published"
+  printf '%s\n\n' "$release_url"
+  if [[ "$release_merged_count" -eq 0 ]]; then
+    printf 'No PRs merged into dev since %s.\n' "$release_tag"
   else
-    printf '%s PR(s) merged into main since %s.\n' "$count" "$tag"
+    printf '%s PR(s) merged into dev since %s.\n' "$release_merged_count" "$release_tag"
   fi
 }
 
@@ -855,6 +868,27 @@ declare -a issue_titles=()
 declare -a issue_labels=()
 declare -a issue_updates=()
 picker_error=""
+picker_release_summary=""
+picker_release_error=""
+picker_release_count=0
+
+load_picker_release_status() {
+  picker_release_summary=""
+  picker_release_error=""
+  picker_release_count=0
+
+  if ! load_release_status 2>/dev/null; then
+    picker_release_error="Release status unavailable — press r to retry."
+    return 0
+  fi
+
+  picker_release_count="$release_merged_count"
+  case "$release_merged_count" in
+    0) picker_release_summary="No PRs merged into dev since $release_tag." ;;
+    1) picker_release_summary="1 PR merged into dev since $release_tag." ;;
+    *) picker_release_summary="$release_merged_count PRs merged into dev since $release_tag." ;;
+  esac
+}
 
 load_picker_index() {
   local output number title labels updated
@@ -870,11 +904,12 @@ load_picker_index() {
   issue_updates=()
   picker_error=""
 
-  # Local, so it is refreshed on every load rather than cached across the
-  # session: a worktree can appear or a checkbox get ticked while the picker is
-  # open, and re-reading costs nothing.
+  # Local state and release status are refreshed on initial load and explicit
+  # refresh rather than on every render or view change. That keeps the banner
+  # current without turning arrow-key navigation into network traffic.
   resolve_tasks_dir
   load_flight_index
+  load_picker_release_status
 
   args=(issue list --state open --limit "$issue_limit")
   args+=(--json number,title,labels,updatedAt --template '{{range .}}{{printf "%v\t%s\t" .number .title}}{{range $i,$label := .labels}}{{if $i}}, {{end}}{{.name}}{{end}}{{printf "\t%s\n" .updatedAt}}{{end}}')
@@ -920,6 +955,18 @@ render_picker() {
   style '1;36' 'Ori DevOps'
   printf '  '
   style '2' 'open GitHub Issues'
+  printf '\n'
+  style '2' 'Release'
+  printf '  '
+  if [[ -n "$picker_release_summary" ]]; then
+    if [[ "$picker_release_count" -eq 0 ]]; then
+      style '1;32' "$picker_release_summary"
+    else
+      style '1;33' "$picker_release_summary"
+    fi
+  else
+    style '1;31' "${picker_release_error:-Release status loading...}"
+  fi
   printf '\n\n'
   for index in "${!picker_filters[@]}"; do
     if [[ "$index" -eq "$filter_index" ]]; then
@@ -1081,7 +1128,7 @@ Picker keys
   c             Open the selected Issue directly at its decision prompt
   n             Capture a new Issue with an optional body
   o             Add the approved label
-  s             Print the selected Ready Issue's wt plan command
+  s             Start Pi planning for the selected Ready Issue
   r             Refresh from GitHub
   ?             Show this help
   q             Quit
@@ -1125,9 +1172,9 @@ prompt_open_issue() {
   # A failed lookup deliberately leaves Decide on offer: decide_issue re-reads
   # and fails closed, so the worst case is a clear refusal, whereas hiding the
   # action on a transient network error would look like the Issue changed.
-  # Plan is the opposite: labels_are_ready is the ONLY gate on printing a
-  # command a human may paste and run, so a failed read must leave can_plan at
-  # its unready default rather than fail open.
+  # Plan is the opposite: labels_are_ready is the first gate on launching a
+  # planner, so a failed read must leave can_plan at its unready default rather
+  # than fail open. wt plan performs the final fresh eligibility check.
   if labels="$(issue_labels_of "$issue_number")"; then
     labels_contain "$labels" "needs-decision" || can_decide=0
     labels_are_ready "$labels" && can_plan=1
@@ -1161,7 +1208,7 @@ prompt_open_issue() {
         fi
         ;;
       s|plan)
-        print_issue_plan_command "$issue_number" "$can_plan" || true
+        start_issue_plan "$issue_number" "$can_plan" || true
         ;;
       r|refresh)
         view_issue "$issue_number" || return $?
@@ -1182,47 +1229,58 @@ prompt_approve_issue() {
   set_approved approve "$issue_number"
 }
 
-# The one line both planning entry points print. Kept as its own function so
-# the exact wording can never drift between the picker's Ready-view `s` and
-# the opened-Issue action bar's `s`.
-print_wt_plan_command() {
-  printf 'wt plan --issue %s\n' "$1"
+# wt is a sourced zsh function, while this picker is a standalone bash
+# process. Start it in a short-lived zsh child so the existing wt plan flow
+# remains the single owner of eligibility revalidation, confirmation, planning
+# artifacts, Herdr placement, and the Pi bootstrap prompt. The Issue number is
+# validated before it reaches this argument vector and is never evaluated as
+# shell syntax.
+launch_pi_plan() {
+  local issue_number="$1"
+
+  if ! command -v zsh >/dev/null 2>&1; then
+    printf 'Planning requires zsh to run scripts/wt.sh.\n' >&2
+    return 1
+  fi
+  if [[ ! -f "$script_dir/wt.sh" ]]; then
+    printf 'Planning entrypoint not found: %s\n' "$script_dir/wt.sh" >&2
+    return 1
+  fi
+  zsh -c 'source "$1" && wt plan --issue "$2"' devops-plan "$script_dir/wt.sh" "$issue_number"
 }
 
-# print_plan_command prints exactly `wt plan --issue <N>` for a selected
-# Ready row, or a clear explanation on stderr and a non-zero exit when there
-# is nothing to print. Pure: it performs no I/O beyond stdout/stderr, makes
-# no GitHub request, copies nothing to a clipboard, sources no other script,
-# and never guesses a row from a stale view or an Issue's position in the
-# list — the number is the row's immutable identity, passed in directly.
-print_plan_command() {
+# start_plan is the Ready-list `s` key. It refuses stale or malformed picker
+# state locally, then delegates the real operation to wt plan, which performs
+# its own fresh GitHub eligibility check before writing or launching anything.
+start_plan() {
   local view="$1" count="$2" issue_number="$3"
 
   if [[ "$view" != "ready" ]]; then
-    printf 'Switch to the Ready view to print a planning command.\n' >&2
+    printf 'Switch to the Ready view to start planning.\n' >&2
     return 1
   fi
   if [[ "$count" -le 0 || -z "$issue_number" || ! "$issue_number" =~ ^[1-9][0-9]*$ ]]; then
     printf 'No Ready row is selected.\n' >&2
     return 1
   fi
-  print_wt_plan_command "$issue_number"
+  launch_pi_plan "$issue_number"
 }
 
-# print_issue_plan_command mirrors print_plan_command's contract for the
-# opened-Issue action bar, which gates on the Issue's own live labels via
-# labels_are_ready rather than the picker's current filter. can_plan is
-# computed once in prompt_open_issue from a single fresh label read, so a
-# failed read and a non-Ready Issue produce the same clear refusal here.
-# Pure: no GitHub request, no wt invocation, no clipboard, no other script.
-print_issue_plan_command() {
+# start_issue_plan is the opened-Issue action bar equivalent. can_plan was
+# computed from that Issue's live labels, while wt plan still re-reads GitHub
+# so eligibility cannot go stale between opening the Issue and confirming.
+start_issue_plan() {
   local issue_number="$1" can_plan="$2"
 
   if [[ "$can_plan" -ne 1 ]]; then
-    printf '#%s is not Ready; refusing to print a planning command.\n' "$issue_number" >&2
+    printf '#%s is not Ready; refusing to start planning.\n' "$issue_number" >&2
     return 1
   fi
-  print_wt_plan_command "$issue_number"
+  if [[ ! "$issue_number" =~ ^[1-9][0-9]*$ ]]; then
+    printf 'No Ready Issue is selected.\n' >&2
+    return 1
+  fi
+  launch_pi_plan "$issue_number"
 }
 
 edited_issue_body=""
@@ -1337,10 +1395,9 @@ run_picker() {
         apply_picker_filter "${picker_filters[$filter_index]}"
         ;;
       s)
-        # Prints the planning command only; it never sources wt, invokes the
-        # bridge, executes the printed text, copies to a clipboard, or reads
-        # GitHub again. Safe on an empty or non-Ready view.
-        with_normal_terminal print_plan_command "${picker_filters[$filter_index]}" "$count" "${issue_numbers[$selected_index]:-}"
+        # Drop out of the alternate screen while wt shows its confirmation and
+        # launches the Pi planner. Safe on an empty or non-Ready view.
+        with_normal_terminal start_plan "${picker_filters[$filter_index]}" "$count" "${issue_numbers[$selected_index]:-}"
         ;;
       '?')
         with_normal_terminal print_picker_help

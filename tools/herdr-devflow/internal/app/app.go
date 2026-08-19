@@ -1257,6 +1257,7 @@ func (a *App) setup(ctx context.Context, opts options) int {
 		"warnings":     warnings,
 		"integrations": map[string]string{
 			"policy": "not changed by setup",
+			"pi":     "inspect with: herdr integration status; install manually with: herdr integration install pi",
 			"claude": "inspect with: herdr integration status; install manually with: herdr integration install claude",
 			"codex":  "inspect with: herdr integration status; install manually with: herdr integration install codex",
 		},
@@ -2878,9 +2879,9 @@ func (a *App) doctor(ctx context.Context, opts options) int {
 		diagnostics = append(diagnostics, diagnostic{Name: "agent executable", Status: "FAIL", Detail: runtime.config.Primary.Kind + " is not on PATH", Recovery: "install " + runtime.config.Primary.Kind + ", then run wt herd setup"})
 	}
 	if integrationStatus, integrationErr := runtime.herdr.IntegrationStatus(ctx); integrationErr != nil {
-		diagnostics = append(diagnostics, diagnostic{Name: "agent integrations", Status: "WARN", Detail: "could not read current integration status; setup did not change integrations", Recovery: "herdr integration status; herdr integration install claude; herdr integration install codex"})
+		diagnostics = append(diagnostics, diagnostic{Name: "agent integrations", Status: "WARN", Detail: "could not read current integration status; setup did not change integrations", Recovery: "herdr integration status; herdr integration install pi; herdr integration install claude; herdr integration install codex"})
 	} else {
-		diagnostics = append(diagnostics, diagnostic{Name: "agent integrations", Status: "PASS", Detail: integrationStatus, Recovery: "setup never installs or changes integrations; use herdr integration install claude|codex explicitly"})
+		diagnostics = append(diagnostics, diagnostic{Name: "agent integrations", Status: "PASS", Detail: integrationStatus, Recovery: "setup never installs or changes integrations; use herdr integration install pi|claude|codex explicitly"})
 	}
 	if a.goos == "darwin" {
 		home, homeErr := a.userHomeDir()
