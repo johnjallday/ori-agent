@@ -886,9 +886,9 @@
     // anchor is not part of the layout any more (#346 FR-16, FR-25). Dropping it
     // here rather than only at draw time is what keeps a stale anchor out of
     // fallbackOrigin and out of the cell scan too — otherwise a group anchor
-    // left far below the arranged content would still push new records, the
-    // Personal HQ site, and the New Workspace pad down there, and Fit all would
-    // still zoom out to reach them.
+    // left far below the arranged content would still push new records and the
+    // Personal HQ site down there, and Fit all would still zoom out to reach
+    // them.
     var populatedGroups = Object.create(null);
     grid.tiles.forEach(function (tile) {
       if (tile.groupId) populatedGroups[tile.groupId] = true;
@@ -1057,14 +1057,18 @@
       district.conflict = conflict.blocked ? conflict : null;
     });
 
-    // 6. The reserved Personal HQ site and the New Workspace pad get stable
-    //    automatic anchors from the same scan, but they are never persisted:
-    //    neither is a workspace, so neither may occupy a workspace ID in the
-    //    saved layout (FR-30).
+    // 6. The reserved Personal HQ site gets a stable automatic anchor from the
+    //    same scan, but it is never persisted: it is not a workspace, so it may
+    //    not occupy a workspace ID in the saved layout (FR-30).
+    //
+    //    The ordinary New Workspace pad used to take an anchor here too. It was
+    //    removed with #367: creating a workspace is offered by the map topbar
+    //    and by Home's workspace-area header, so the pad was a third copy that
+    //    also had to be placed, drawn, and — worst of all — included in the
+    //    world bounds, pushing Fit all out toward a site nothing is drawn in.
     var hqSite = opts.hqSite ? placer.next() : null;
-    var pad = opts.createPad === false ? null : placer.next();
 
-    var bounds = worldBounds(nodes, districts, hqSite, pad);
+    var bounds = worldBounds(nodes, districts, hqSite);
     return {
       nodes: nodes,
       // Kept for the movement path, which has to translate hidden descendants
@@ -1072,7 +1076,6 @@
       hiddenNodes: hiddenNodes,
       districts: districts,
       hqSite: hqSite,
-      pad: pad,
       bounds: bounds,
       world: expandWorld(bounds, viewport)
     };
@@ -1489,7 +1492,7 @@
   // worldBounds is the tight box around everything currently drawn. It grows
   // automatically as content is placed further out, and it never adjusts a
   // coordinate to fit (FR-10).
-  function worldBounds(nodes, districts, hqSite, pad) {
+  function worldBounds(nodes, districts, hqSite) {
     var minX = Infinity;
     var minY = Infinity;
     var maxX = -Infinity;
@@ -1507,7 +1510,6 @@
       include(district.x, district.y, district.width, district.height);
     });
     if (hqSite) include(hqSite.x, hqSite.y, CELL_W, CELL_H);
-    if (pad) include(pad.x, pad.y, CELL_W, CELL_H);
     if (minX === Infinity) {
       return { minX: 0, minY: 0, maxX: CELL_W, maxY: CELL_H };
     }
@@ -1756,15 +1758,16 @@
       return;
     }
     // Wait for something worth framing. The first mount can happen before the
-    // workspace list arrives, and framing the bare create pad would lock the
-    // camera onto an empty corner that every later refresh then inherits.
+    // workspace list arrives, and framing an empty world would lock the camera
+    // onto a corner nothing is drawn in, which every later refresh inherits.
     //
     // The reserved Personal HQ site counts. It is the whole map on a profile
     // that has no workspaces yet, and leaving the camera at its hard-coded
     // default there put the landmark low and right of centre with its caption
     // behind the control strip — a first impression of the product with the
-    // one thing on screen half-hidden (#329). The create pad still does not
-    // count: it is an affordance, not content.
+    // one thing on screen half-hidden (#329). The create pad used to be the
+    // other thing that explicitly did not count here; since #367 it is not
+    // drawn at all, so only real content and the HQ site can reach this test.
     if (
       !lastWorldLayout.nodes.length &&
       !lastWorldLayout.districts.length &&
@@ -2196,19 +2199,6 @@
     );
   }
 
-  function padHTML(left, top) {
-    return (
-      '<button type="button" class="ws-map-pad" data-ws-map-create ' +
-      'style="left:' +
-      left +
-      'px;top:' +
-      top +
-      'px" aria-label="Create a new workspace">' +
-      '<span class="ws-map-pad-plate">＋</span><span class="ws-map-pad-label">New workspace</span>' +
-      '</button>'
-    );
-  }
-
   /**
    * Draw the world.
    *
@@ -2224,8 +2214,7 @@
     var layout = computeWorldLayout(workspaces, {
       positions: layoutState.positions,
       viewport: opts.viewport,
-      hqSite: site.show,
-      createPad: opts.createPad
+      hqSite: site.show
     });
     // Nodes carry their raw world coordinates into the DOM; the world layer's
     // camera transform is the only thing standing between world space and the
@@ -2264,14 +2253,14 @@
     if (layout.hqSite) {
       parts.push(hqSiteHTML(toLayer(layout.hqSite), selectedId, layout.nodes.length, site));
     }
-    // Keep the ordinary create affordance after all real and reserved sites.
-    // The Home cockpit's authoritative empty presentation supplies its own
-    // create/import overlay, so it explicitly omits this otherwise-global pad.
-    if (layout.pad) {
-      var pad = toLayer(layout.pad);
-      parts.push(padHTML(pad.left, pad.top));
-    }
-    // No candidate marker: build is not a mode any more, so there is no
+    // No ordinary create pad is drawn among the sites (#367). Creating a
+    // workspace belongs to the chrome around the map — the topbar's ⊕ New
+    // Workspace, and Home's workspace-area header — not to a building-shaped
+    // tile competing with real workspaces for a spot in the world. The
+    // zero-workspace presentations keep their own create actions: the legacy
+    // hero in emptyCanvasHTML, and the cockpit's create/import overlay.
+    //
+    // No candidate marker either: build is not a mode any more, so there is no
     // in-between state to preview. Right-click is the coordinate.
 
     var settling = layoutState.status === 'loading' ? ' is-settling' : '';
@@ -2823,10 +2812,7 @@
       workspaces.length === 0;
     var canvas =
       (Array.isArray(workspaces) && workspaces.length > 0) || site.show || authoritativeEmpty
-        ? canvasHTML(workspaces, selectedId, {
-            viewport: viewport,
-            createPad: authoritativeEmpty ? false : undefined
-          }).html
+        ? canvasHTML(workspaces, selectedId, { viewport: viewport }).html
         : emptyCanvasHTML();
     // Cockpit mode: the workspace-area header and the persistent context rail
     // already own the title, the stat readout, New Workspace, and the selected

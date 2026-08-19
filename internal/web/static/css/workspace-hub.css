@@ -2263,8 +2263,12 @@ button.hub-stat[hidden] {
 /* Map view: the map shell already carries identity, stats, and its own
    ⊕ New Workspace affordance, so the legacy title/subtitle and the
    duplicate green Create Workspace button collapse away — leaving one
-   create button in the chrome (the map pad tile) and a slim actions row
-   (Import Folder, view toggle, refresh/rescan/undo). */
+   create button in the chrome (the map topbar's ⊕ New Workspace) and a slim
+   actions row (Import Folder, view toggle, refresh/rescan/undo).
+
+   The in-canvas pad tile that used to be the surviving create button was
+   removed in #367: on a populated map the topbar button here, and Home's
+   workspace-area header action, are the creation paths. */
 #workspaceHub[data-launcher-view="map"] .launcher-title,
 #workspaceHub[data-launcher-view="map"] .launcher-subtitle,
 #workspaceHub[data-launcher-view="map"] #launcherCreateWorkspaceBtn {

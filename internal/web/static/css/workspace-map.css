@@ -1420,7 +1420,11 @@
   clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px);
 }
 
-/* create pad */
+/* Create pad. Since #367 the only pad rendered anywhere is the true-empty
+   map's hero (.ws-map-pad--hero, in emptyCanvasHTML) — the ordinary in-world
+   pad that used to stand among the buildings is gone, so these base rules
+   survive purely as what the hero is built on. The absolute positioning is
+   inert there: .ws-map-canvas--empty centres it with grid `place-items`. */
 .ws-map-pad {
   position: absolute;
   z-index: 4;
@@ -1447,9 +1451,8 @@
   );
   clip-path: polygon(50% 4%, 96% 50%, 50% 96%, 4% 50%);
   transition: 0.15s;
-  /* Tile structs have ~28px of visual headroom above their floor diamond
-     (floor center ≈ 57px down the 92px SVG vs this plate's 30px center);
-     match it so the pad and its label sit on the tiles' baseline grid. */
+  /* Kept the tile baseline offset the in-world pad needed. The hero overrides
+     it to 0 below, since an empty map has no tiles to line up with. */
   margin-top: 28px;
 }
 .ws-map-pad:hover .ws-map-pad-plate {
