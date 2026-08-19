@@ -873,10 +873,16 @@ test('captures the Workspace Map with Personal HQ and fictional workspaces', asy
     '#cockpitMap',
     'Northstar Personal HQ',
     async scenePage => {
-      await scenePage.locator('.ws-map-tile[data-ws-id]').first().click();
+      const selectedTile = scenePage.locator('.ws-map-tile[data-ws-id]').first();
+      await selectedTile.click();
       await expect(scenePage.locator('#cockpitContextModal')).toBeVisible();
       await scenePage.keyboard.press('Escape');
       await expect(scenePage.locator('#cockpitContextModal')).toBeHidden();
+      // `toBeHidden` can observe Bootstrap's display state just before its
+      // hidden event restores focus and removes the backdrop. Waiting for both
+      // effects keeps the selected-map frame byte-stable on slower CI runners.
+      await expect(selectedTile).toBeFocused();
+      await expect(scenePage.locator('.modal-backdrop')).toHaveCount(0);
     }
   );
   await expect(page.locator('.ws-map-tile.is-hq')).toHaveCount(1);
