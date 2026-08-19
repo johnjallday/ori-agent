@@ -426,8 +426,8 @@
   // selectOnlyMode  — PRD FR35/FR36: a pointer click selects and never opens,
   //                   and there is no double-click opening rule. Home sets it;
   //                   the legacy /workspaces launcher does not.
-  // hideChromeMode  — PRD FR15: the cockpit's persistent context rail owns the
-  //                   overview and the workspace-area header owns the title,
+  // hideChromeMode  — Home's on-demand context modal owns the overview and the
+  //                   workspace-area header owns the title,
   //                   stats, and New Workspace action, so the map must not
   //                   render a second copy of either.
   var selectOnlyMode = false;
@@ -2814,7 +2814,7 @@
       (Array.isArray(workspaces) && workspaces.length > 0) || site.show || authoritativeEmpty
         ? canvasHTML(workspaces, selectedId, { viewport: viewport }).html
         : emptyCanvasHTML();
-    // Cockpit mode: the workspace-area header and the persistent context rail
+    // Cockpit mode: the workspace-area header and on-demand context modal
     // already own the title, the stat readout, New Workspace, and the selected
     // workspace's overview (PRD FR15, FR17, FR29, FR62-FR69). Rendering the
     // map's own topbar/overview here would duplicate all four.
@@ -3177,8 +3177,8 @@
       el.setAttribute('aria-pressed', sel ? 'true' : 'false');
     });
     var selected = findWs(workspaces, id);
-    // The map's own overview panel is absent in cockpit mode — the persistent
-    // context rail renders the selection instead, via onSelect.
+    // The map's own overview panel is absent in cockpit mode — Home renders
+    // selection through its stable context modal, via onSelect.
     var body = container.querySelector('.ws-map-overview-body');
     if (body) {
       body.innerHTML = overviewBodyHTML(selected, options);
@@ -3815,7 +3815,7 @@
       case 'open':
         // The map's explicit open: the host's onOpen when it has one (the
         // cockpit records the first action there), else plain navigation, which
-        // is what the rail's Open button does.
+        // is what the context modal's Open button does.
         announce(container, 'Opening ' + name);
         if (options && typeof options.onOpen === 'function') options.onOpen(id);
         else openWorkspace(id);
@@ -6956,13 +6956,13 @@
     unmount: unmount,
     // The map resolves the effective selection during mount (an item may have
     // been deleted since the caller's snapshot). The cockpit reads it back so
-    // its shared selection state and the context rail cannot drift (FR57, FR73).
+    // its shared selection state and context modal cannot drift (FR57, FR73).
     getSelectedId: function () {
       return selectedId;
     },
     // The reserved-HQ-site view derived from the current Personal HQ status.
     // The cockpit needs it to render the site's build/repair/skip choices in
-    // the context rail, since cockpit mode has no map-owned overview panel.
+    // the context modal, since cockpit mode has no map-owned overview panel.
     getHQSiteView: function () {
       return hqSiteView(hqStatus);
     },

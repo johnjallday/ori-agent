@@ -234,17 +234,12 @@ async function ensureWorkspace(page: Page): Promise<string> {
   return (await res.json())?.folder?.id;
 }
 
-/**
- * Open the CONTEXT rail the only way it opens now: a real selection
- * (Issue #334 retired the old rail toggle — `#cockpitRailToggle` opens the
- * Updates flyout instead, and never the rail). No-ops if a fixture already
- * has a selection.
- */
-async function openContextRailViaSelection(page: Page) {
-  const cockpit = page.locator('#homeCockpit');
-  if ((await cockpit.getAttribute('data-rail-open')) === 'true') return;
+/** Open the blocking context modal through the real Map selection path. */
+async function openContextModalViaSelection(page: Page) {
+  const modal = page.locator('#cockpitContextModal');
+  if (await modal.isVisible()) return;
   await page.locator('.ws-map-tile[data-ws-id]').first().click();
-  await expect(cockpit).toHaveAttribute('data-rail-open', 'true');
+  await expect(modal).toBeVisible();
 }
 
 test.describe('Home workspace cockpit', () => {
@@ -258,14 +253,16 @@ test.describe('Home workspace cockpit', () => {
     await ensureWorkspace(page);
     await page.goto('/');
     await expect(page.locator('#homeCockpit')).toBeVisible();
-    await expect(page.locator('#homeAssistantInput')).toBeVisible();
+    await expect(page.locator('#oriGuideMapTrigger')).toBeVisible();
+    await expect(page.locator('#oriGuideInput')).toHaveCount(1);
     await expect(page.locator('#cockpitMap')).toBeVisible();
     await expect(page.locator('#cockpitTree')).toBeHidden();
     await expect(page.locator('[data-cockpit-view="map"]')).toHaveAttribute('aria-pressed', 'true');
 
-    // FR41-FR42: a bare Home load keeps the context rail closed.
-    await expect(page.locator('#homeCockpit')).toHaveAttribute('data-rail-open', 'false');
-    await expect(page.locator('#cockpitRail')).toBeHidden();
+    // Issue #366: bare Home has one dormant modal host and no docked rail.
+    await expect(page.locator('#cockpitContextModal')).toBeHidden();
+    await expect(page.locator('#cockpitContextModal')).toHaveCount(1);
+    await expect(page.locator('#cockpitRail')).toHaveCount(0);
     // FR12: neither header flyout opens itself on load.
     await expect(page.locator('#cockpitUpdatesFlyout')).toBeHidden();
     await expect(page.locator('#cockpitRailToggle')).toHaveAttribute('aria-expanded', 'false');
@@ -287,24 +284,49 @@ test.describe('Home workspace cockpit', () => {
     await expect(page.locator('#homeDashboardSections')).toHaveCount(0);
   });
 
-  test('selecting a workspace opens the context rail and narrows the workspace area; clearing restores full width', async ({
+  test('workspace context opens in a modal, dismisses without clearing, reopens, and Back clears at invariant width', async ({
     page
   }) => {
     await ensureWorkspace(page);
     await page.goto('/');
-    await page.locator('.ws-map-tile[data-ws-id]').first().waitFor();
-    const baseWidth = (await page.locator('.cockpit-workspace-area').boundingBox())!.width;
+    const site = page.locator('.ws-map-tile[data-ws-id]').first();
+    await site.waitFor();
+    const selectedId = await site.getAttribute('data-ws-id');
+    const area = page.locator('.cockpit-workspace-area');
+    const baseWidth = (await area.boundingBox())!.width;
+    const baseCanvasCount = await page.locator('.ws-map-canvas[data-ws-map-viewport]').count();
 
-    await page.locator('.ws-map-tile[data-ws-id]').first().click();
-    await expect(page.locator('#homeCockpit')).toHaveAttribute('data-rail-open', 'true');
+    await site.click();
+    const modal = page.locator('#cockpitContextModal');
+    await expect(modal).toBeVisible();
     await expect(page.locator('#cockpitRailContext')).toBeVisible();
-    const openWidth = (await page.locator('.cockpit-workspace-area').boundingBox())!.width;
-    expect(openWidth).toBeLessThan(baseWidth);
+    expect((await area.boundingBox())!.width).toBe(baseWidth);
 
     await page.keyboard.press('Escape');
-    await expect(page.locator('#homeCockpit')).toHaveAttribute('data-rail-open', 'false');
-    const closedWidth = (await page.locator('.cockpit-workspace-area').boundingBox())!.width;
-    expect(closedWidth).toBe(baseWidth);
+    await expect(modal).toBeHidden();
+    await page.waitForFunction(() => window.OriHomeCockpit?.getState?.()?.modalVisible === false);
+    await expect(page.locator(`.ws-map-tile[data-ws-id="${selectedId}"]`)).toBeFocused();
+    await expect(page.locator(`.ws-map-tile[data-ws-id="${selectedId}"]`)).toHaveClass(
+      /is-selected/
+    );
+    expect((await area.boundingBox())!.width).toBe(baseWidth);
+
+    await page.locator(`.ws-map-tile[data-ws-id="${selectedId}"]`).click();
+    await expect(modal).toBeVisible();
+    await page.waitForFunction(() => window.OriHomeCockpit?.getState?.()?.modalVisible === true);
+    await page.mouse.click(4, 4);
+    await expect(modal).toBeHidden();
+    await page.waitForFunction(() => window.OriHomeCockpit?.getState?.()?.modalVisible === false);
+    await page.locator(`.ws-map-tile[data-ws-id="${selectedId}"]`).click();
+    await expect(modal).toBeVisible();
+    await page.locator('[data-cockpit-rail-back]').click();
+    await expect(modal).toBeHidden();
+    await expect(page.locator(`.ws-map-tile[data-ws-id="${selectedId}"]`)).not.toHaveClass(
+      /is-selected/
+    );
+    expect((await area.boundingBox())!.width).toBe(baseWidth);
+    await expect(page.locator('.ws-map-canvas[data-ws-map-viewport]')).toHaveCount(baseCanvasCount);
+    await expect(page.locator('.modal-backdrop')).toHaveCount(0);
   });
 
   test('Updates trigger exposes accurate ARIA/label and reveals real Update sections when opened', async ({
@@ -368,10 +390,10 @@ test.describe('Home workspace cockpit', () => {
     // flyout on its own.
     await expect(page.locator('#cockpitUpdatesFlyout')).toBeHidden();
     await expect(page.locator('#cockpitRailToggle')).toHaveAttribute('aria-expanded', 'false');
-    await expect(page.locator('#homeCockpit')).toHaveAttribute('data-rail-open', 'false');
+    await expect(page.locator('#cockpitContextModal')).toBeHidden();
   });
 
-  test('opening Updates over a selected workspace does not remount the Map or disturb the selection', async ({
+  test('opening workspace context closes Updates without remounting Map or clearing selection', async ({
     page
   }) => {
     await ensureWorkspace(page);
@@ -383,30 +405,25 @@ test.describe('Home workspace cockpit', () => {
     await page.goto('/');
     const tile = page.locator('.ws-map-tile[data-ws-id]').first();
     await tile.waitFor();
-    await tile.click();
-    await expect(page.locator('#cockpitRailContext')).toBeVisible();
     const selectedId = await tile.getAttribute('data-ws-id');
-    const requestsBeforeOpen = treeRequests;
-
     await page.locator('#cockpitRailToggle').click();
     await expect(page.locator('#cockpitUpdatesFlyout')).toBeVisible();
-    // An overlay flyout must never clear or falsify a real selection (FR22,
-    // FR46) — the same context stays visible underneath it.
-    await expect(page.locator('#cockpitRailContext')).toBeVisible();
+    const requestsBeforeOpen = treeRequests;
+    const canvasCount = await page.locator('#cockpitMap .ws-map-canvas').count();
+
+    await tile.click();
+    await expect(page.locator('#cockpitContextModal')).toBeVisible();
+    await expect(page.locator('#cockpitUpdatesFlyout')).toBeHidden();
     await expect(page.locator(`.ws-map-tile[data-ws-id="${selectedId}"]`)).toHaveClass(
       /is-selected/
     );
     expect(treeRequests).toBe(requestsBeforeOpen);
-
-    await page.locator('#cockpitUpdatesFlyout [data-cockpit-flyout-close]').click();
-    await expect(page.locator('#cockpitUpdatesFlyout')).toBeHidden();
-    await expect(page.locator('#cockpitRailContext')).toBeVisible();
-    await expect(page.locator(`.ws-map-tile[data-ws-id="${selectedId}"]`)).toHaveClass(
-      /is-selected/
-    );
+    await expect(page.locator('#cockpitMap .ws-map-canvas')).toHaveCount(canvasCount);
   });
 
-  test('a Map click selects without navigating, however often it is repeated', async ({ page }) => {
+  test('a Map click selects without navigating and the selected item reopens context', async ({
+    page
+  }) => {
     await ensureWorkspace(page);
     await page.goto('/');
     const site = page.locator('.ws-map-tile[data-ws-id]').first();
@@ -415,13 +432,143 @@ test.describe('Home workspace cockpit', () => {
     await site.click();
     await expect(page.locator('[data-cockpit-rail-open]')).toBeVisible();
     expect(new URL(page.url()).pathname).toBe('/');
+    await page.locator('#cockpitContextModal [data-bs-dismiss="modal"]').click();
+    await expect(page.locator('#cockpitContextModal')).toBeHidden();
 
-    // FR36: repeated clicks and a double-click must not become a hidden open.
     await site.click();
-    await site.click();
-    await site.dblclick();
-    await page.waitForTimeout(400);
+    await expect(page.locator('#cockpitContextModal')).toBeVisible();
     expect(new URL(page.url()).pathname).toBe('/');
+  });
+
+  test('Tree context traps focus and restores it to the invoking row on dismiss', async ({
+    page
+  }) => {
+    const id = await ensureWorkspace(page);
+    await page.goto('/?view=tree');
+    const row = page.locator(`[data-tree-row="${id}"]`);
+    await row.click();
+    const modal = page.locator('#cockpitContextModal');
+    await expect(modal).toBeVisible();
+    await page.waitForFunction(() => window.OriHomeCockpit?.getState?.()?.modalVisible === true);
+    await expect(page.locator('[data-cockpit-rail-back]')).toBeFocused();
+
+    for (let i = 0; i < 8; i += 1) await page.keyboard.press('Tab');
+    expect(
+      await page.evaluate(() =>
+        document.getElementById('cockpitContextModal')?.contains(document.activeElement)
+      )
+    ).toBe(true);
+
+    await page.keyboard.press('Escape');
+    await expect(modal).toBeHidden();
+    await page.waitForFunction(() => window.OriHomeCockpit?.getState?.()?.modalVisible === false);
+    await expect(row).toBeFocused();
+  });
+
+  test('Personal HQ uses the shared modal, preserves selection on dismiss, and dispatches actions once', async ({
+    page
+  }) => {
+    await page.route('**/api/personal-hq/status', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ status: { valid: false, hq_onboarding_state: 'unseen' } })
+      })
+    );
+    await page.goto('/');
+    const site = page.locator('[data-hq-site]');
+    await site.waitFor();
+    await site.click();
+    const modal = page.locator('#cockpitContextModal');
+    await expect(modal).toBeVisible();
+    await expect(page.locator('[data-rail-panel="personal-hq"]')).toBeVisible();
+
+    await page.keyboard.press('Escape');
+    await expect(modal).toBeHidden();
+    await page.waitForFunction(() => window.OriHomeCockpit?.getState?.()?.modalVisible === false);
+    expect(await page.evaluate(() => window.OriHomeCockpit?.getState?.()?.selectedId)).toBe(
+      '__personal_hq_site__'
+    );
+    await site.click();
+    await expect(modal).toBeVisible();
+
+    await page.evaluate(() => {
+      (window as any).__hqActionCount = 0;
+      window.addEventListener('ori:personal-hq-action', () => {
+        (window as any).__hqActionCount += 1;
+      });
+    });
+    await page.locator('[data-hq-action="build"]').click();
+    await expect(modal).toBeHidden();
+    expect(await page.evaluate(() => (window as any).__hqActionCount)).toBe(1);
+    const buildModal = page.locator('#hqBuildModal');
+    await expect(buildModal).toBeVisible();
+    await page.waitForFunction(() =>
+      document.getElementById('hqBuildModal')?.contains(document.activeElement)
+    );
+    await buildModal.locator('[data-bs-dismiss="modal"]').first().click();
+    await expect(buildModal).toBeHidden();
+
+    await site.click();
+    await expect(modal).toBeVisible();
+    await page.locator('[data-cockpit-rail-back]').click();
+    await expect(modal).toBeHidden();
+    expect(await page.evaluate(() => window.OriHomeCockpit?.getState?.()?.selectedId)).toBe('');
+  });
+
+  test('Summary dismissal and Back restore the prior selected workspace truthfully', async ({
+    page
+  }) => {
+    await ensureWorkspace(page);
+    await page.goto('/');
+    const tile = page.locator('.ws-map-tile[data-ws-id]').first();
+    const id = await tile.getAttribute('data-ws-id');
+    await tile.click();
+    await expect(page.locator('#cockpitContextModal')).toBeVisible();
+    await page.waitForFunction(() => window.OriHomeCockpit?.getState?.()?.modalVisible === true);
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#cockpitContextModal')).toBeHidden();
+    await page.waitForFunction(() => window.OriHomeCockpit?.getState?.()?.modalVisible === false);
+
+    const summary = page.locator('#cockpitSummaryBtn');
+    await summary.click();
+    await expect(page.locator('[data-rail-panel="summary"]')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#cockpitContextModal')).toBeHidden();
+    await page.waitForFunction(() => window.OriHomeCockpit?.getState?.()?.modalVisible === false);
+    expect(await page.evaluate(() => window.OriHomeCockpit?.getState?.()?.selectedId)).toBe(id);
+    await expect(summary).toHaveAttribute('aria-expanded', 'false');
+
+    await summary.click();
+    await page.locator('[data-cockpit-rail-back]').click();
+    await expect(page.locator('#cockpitContextModal')).toBeVisible();
+    await expect(page.locator('[data-rail-panel="workspace"]')).toBeVisible();
+    expect(await page.evaluate(() => window.OriHomeCockpit?.getState?.()?.selectedId)).toBe(id);
+  });
+
+  test('another Bootstrap dialog settles context first and leaves one backdrop', async ({
+    page
+  }) => {
+    await ensureWorkspace(page);
+    await page.goto('/');
+    await page.locator('.ws-map-tile[data-ws-id]').first().click();
+    await expect(page.locator('#cockpitContextModal')).toBeVisible();
+
+    await page.evaluate(() => {
+      const target = document.getElementById('addFolderModal');
+      window.bootstrap.Modal.getOrCreateInstance(target).show();
+    });
+    await expect(page.locator('#cockpitContextModal')).toBeHidden();
+    await expect(page.locator('#addFolderModal')).toBeVisible();
+    await expect(page.locator('.modal.show')).toHaveCount(1);
+    await expect(page.locator('.modal-backdrop.show')).toHaveCount(1);
+    await page.waitForFunction(() =>
+      document.getElementById('addFolderModal')?.contains(document.activeElement)
+    );
+    await page.locator('#addFolderModal [data-bs-dismiss="modal"]').first().click();
+    await expect(page.locator('#addFolderModal')).toBeHidden();
+    await expect(page.locator('.modal-backdrop')).toHaveCount(0);
+    await expect(page.locator('body')).not.toHaveClass(/modal-open/);
   });
 
   test('Open Workspace navigates and Enter opens the focused site', async ({ page }) => {
@@ -462,22 +609,21 @@ test.describe('Home workspace cockpit', () => {
     expect(await page.evaluate(() => history.length)).toBe(historyBefore);
   });
 
-  test('Escape returns Home to Today (rail closed) without clearing Map filters', async ({
-    page
-  }) => {
+  test('Escape dismisses context without clearing selection or Map filters', async ({ page }) => {
     await ensureWorkspace(page);
     await page.goto('/');
-    await page.locator('.ws-map-tile[data-ws-id]').first().click();
-    await expect(page.locator('#cockpitRailContext')).toBeVisible();
-
+    const tile = page.locator('.ws-map-tile[data-ws-id]').first();
     await page.locator('[data-cockpit-signal="running"]').click();
+    await tile.click();
+    const selectedId = await tile.getAttribute('data-ws-id');
+    await expect(page.locator('#cockpitContextModal')).toBeVisible();
+
     await page.keyboard.press('Escape');
 
-    // Today has no rail content of its own now (Issue #334) — returning to it
-    // closes the rail entirely rather than showing a Today panel inside it.
-    await expect(page.locator('#homeCockpit')).toHaveAttribute('data-rail-open', 'false');
-    await expect(page.locator('#cockpitRail')).toBeHidden();
-    // FR61: returning to Today clears selection but NOT the signal filter.
+    await expect(page.locator('#cockpitContextModal')).toBeHidden();
+    await expect(page.locator(`.ws-map-tile[data-ws-id="${selectedId}"]`)).toHaveClass(
+      /is-selected/
+    );
     await expect(page.locator('[data-cockpit-signal="running"]')).toHaveAttribute(
       'aria-pressed',
       'true'
@@ -511,25 +657,21 @@ test.describe('Home workspace cockpit', () => {
     expect(page.url()).not.toContain('create=1');
   });
 
-  test('Ask Ori activity renders in the rail, never as a blocking modal', async ({ page }) => {
+  test('Ask Ori stays in its universal non-modal panel and never opens context', async ({
+    page
+  }) => {
     await ensureWorkspace(page);
     await page.goto('/');
     await page.locator('.ws-map-tile[data-ws-id]').first().waitFor();
 
-    await page.locator('#homeAssistantInput').fill('What needs attention today?');
-    await page.locator('#homeAssistantSendBtn').click();
+    await page.locator('#oriGuideMapTrigger').click();
+    await page.locator('#oriGuideInput').fill('What needs attention today?');
+    await page.locator('#oriGuideSend').click();
     await expect(page.locator('#homeAssistantThinkingModal')).toBeVisible();
 
-    // FR96/FR92: no backdrop, and the Map is still the element on top.
+    await expect(page.locator('#cockpitContextModal')).toBeHidden();
     await expect(page.locator('.modal-backdrop')).toHaveCount(0);
     await expect(page.locator('#cockpitMap')).toBeVisible();
-    const mapOnTop = await page.evaluate(() => {
-      const rect = document.getElementById('cockpitMap')?.getBoundingClientRect();
-      if (!rect) return false;
-      const el = document.elementFromPoint(rect.x + rect.width / 2, rect.y + 60);
-      return !!el?.closest('#cockpitMap');
-    });
-    expect(mapOnTop).toBe(true);
   });
 
   test('Tree carries the management toolset with real tree semantics', async ({ page }) => {
@@ -548,7 +690,7 @@ test.describe('Home workspace cockpit', () => {
     await expect(page.locator('[data-tree-move]').first()).toBeVisible();
   });
 
-  test('layout is side-by-side when wide and stacked when narrow, never h-scrolling', async ({
+  test('theatre width stays invariant before, during, and after modal use at supported widths', async ({
     page
   }) => {
     await ensureWorkspace(page);
@@ -557,76 +699,54 @@ test.describe('Home workspace cockpit', () => {
       [1440, 950],
       [1100, 900],
       [900, 900],
-      [600, 900]
+      [430, 900]
     ] as const) {
       await page.setViewportSize({ width, height });
       await page.goto('/');
       await page.locator('.ws-map-tile[data-ws-id]').first().waitFor();
+      const area = page.locator('.cockpit-workspace-area');
+      const before = (await area.boundingBox())!.width;
 
-      // The rail's geometry only exists once it is open, and it opens ONLY on
-      // a real selection now (Issue #334). This test is about where the rail
-      // sits relative to the workspace area, not about when it appears.
-      await openContextRailViaSelection(page);
-      await expect(page.locator('#cockpitRail')).toBeVisible();
+      await openContextModalViaSelection(page);
+      const during = (await area.boundingBox())!.width;
+      await page.keyboard.press('Escape');
+      await expect(page.locator('#cockpitContextModal')).toBeHidden();
+      const after = (await area.boundingBox())!.width;
 
-      const layout = await page.evaluate(() => {
-        const area = document.querySelector('.cockpit-workspace-area')?.getBoundingClientRect();
-        const rail = document.getElementById('cockpitRail')?.getBoundingClientRect();
-        return {
-          areaX: area?.x ?? 0,
-          areaW: area?.width ?? 0,
-          areaY: area?.y ?? 0,
-          railX: rail?.x ?? 0,
-          railW: rail?.width ?? 0,
-          railY: rail?.y ?? 0,
-          pageWidth: document.documentElement.scrollWidth,
-          viewportWidth: window.innerWidth
-        };
-      });
-
-      // FR135: no full-page horizontal scrolling at any supported width.
-      expect(layout.pageWidth, `page scrolls horizontally at ${width}px`).toBeLessThanOrEqual(
-        layout.viewportWidth + 1
+      expect(during).toBe(before);
+      expect(after).toBe(before);
+      const overflow = await page.evaluate(() => ({
+        pageWidth: document.documentElement.scrollWidth,
+        viewportWidth: window.innerWidth
+      }));
+      expect(overflow.pageWidth, `page scrolls horizontally at ${width}px`).toBeLessThanOrEqual(
+        overflow.viewportWidth + 1
       );
-
-      if (width >= 1200) {
-        // FR16: side by side, with the workspace area taking the majority.
-        expect(layout.railX).toBeGreaterThan(layout.areaX + layout.areaW - 5);
-        expect(layout.areaW).toBeGreaterThan(layout.railW);
-      } else if (width <= 900) {
-        // FR134: stacked, workspace area above the context rail.
-        expect(layout.railY).toBeGreaterThan(layout.areaY);
-      }
     }
   });
 
-  test('Add to backlog and Summary are reachable from every rail state', async ({ page }) => {
+  test('Summary header action opens the shared context modal truthfully', async ({ page }) => {
     await ensureWorkspace(page);
     await page.goto('/');
     await page.locator('.ws-map-tile[data-ws-id]').first().waitFor();
 
-    // Today
-    await expect(page.locator('#cockpitCaptureBtn')).toBeVisible();
-    await expect(page.locator('#cockpitSummaryBtn')).toBeVisible();
-
-    // Workspace context
-    await page.locator('.ws-map-tile[data-ws-id]').first().click();
-    await expect(page.locator('#cockpitCaptureBtn')).toBeVisible();
-    await expect(page.locator('#cockpitSummaryBtn')).toBeVisible();
-
-    // Summary
-    await page.locator('#cockpitSummaryBtn').click();
+    const summary = page.locator('#cockpitSummaryBtn');
+    await expect(summary).toHaveAttribute('aria-controls', 'cockpitContextModal');
+    await expect(summary).toHaveAttribute('aria-expanded', 'false');
+    await summary.click();
+    await expect(page.locator('#cockpitContextModal')).toBeVisible();
     await expect(page.locator('[data-rail-panel="summary"]')).toBeVisible();
-    await expect(page.locator('#cockpitCaptureBtn')).toBeVisible();
+    await expect(summary).toHaveAttribute('aria-expanded', 'true');
+    await page.keyboard.press('Escape');
+    await expect(summary).toHaveAttribute('aria-expanded', 'false');
+    await expect(summary).toHaveText('Summary');
   });
 });
 
 /**
  * Group 3 (Issue #334): Updates, Quests, and Quick Capture share ONE
- * transient header-panel state, entirely separate from the context rail's
- * own (selection/Summary/Ask Ori) state. These tests exercise the seams
- * between the two — mutual exclusion among the three triggers, stability
- * across Map/Tree and selection changes, and coexistence with the rail.
+ * transient header-panel state. Issue #366 makes context blocking: an explicit
+ * context open closes any header disclosure without clearing its draft/state.
  */
 test.describe('Header disclosure coordination', () => {
   test.beforeEach(async ({ page }) => {
@@ -693,6 +813,14 @@ test.describe('Header disclosure coordination', () => {
     await captureBtn.click();
     await expect(capturePanel).toBeVisible();
     await expect(page.locator('#cockpitCaptureTitle')).toHaveValue('Draft that must survive');
+
+    // Blocking context closes the disclosure without clearing that draft.
+    await page.locator('.ws-map-tile[data-ws-id]').first().click();
+    await expect(page.locator('#cockpitContextModal')).toBeVisible();
+    await expect(capturePanel).toBeHidden();
+    await page.keyboard.press('Escape');
+    await captureBtn.click();
+    await expect(page.locator('#cockpitCaptureTitle')).toHaveValue('Draft that must survive');
   });
 
   test('the same-trigger toggle and Escape close their panel and return focus to the trigger', async ({
@@ -717,25 +845,24 @@ test.describe('Header disclosure coordination', () => {
     await expect(questsBtn).toBeFocused();
   });
 
-  test('Escape closes an open flyout first, and needs a second press to clear a selection underneath it', async ({
+  test('Escape closes a flyout, while a later modal dismissal preserves selection', async ({
     page
   }) => {
     await ensureWorkspace(page);
     await page.goto('/');
-    await page.locator('.ws-map-tile[data-ws-id]').first().click();
-    await expect(page.locator('#cockpitRailContext')).toBeVisible();
+    const tile = page.locator('.ws-map-tile[data-ws-id]').first();
+    const id = await tile.getAttribute('data-ws-id');
 
     await page.locator('#cockpitRailToggle').click();
     await expect(page.locator('#cockpitUpdatesFlyout')).toBeVisible();
-
     await page.keyboard.press('Escape');
     await expect(page.locator('#cockpitUpdatesFlyout')).toBeHidden();
-    // The selection/context rail is untouched by the first Escape.
-    await expect(page.locator('#cockpitRailContext')).toBeVisible();
-    await expect(page.locator('#homeCockpit')).toHaveAttribute('data-rail-open', 'true');
 
+    await tile.click();
+    await expect(page.locator('#cockpitContextModal')).toBeVisible();
     await page.keyboard.press('Escape');
-    await expect(page.locator('#homeCockpit')).toHaveAttribute('data-rail-open', 'false');
+    await expect(page.locator('#cockpitContextModal')).toBeHidden();
+    await expect(page.locator(`.ws-map-tile[data-ws-id="${id}"]`)).toHaveClass(/is-selected/);
   });
 
   test('an open flyout survives a Map/Tree view switch without ever auto-opening on its own', async ({
@@ -764,7 +891,7 @@ test.describe('Header disclosure coordination', () => {
     await expect(page.locator('#cockpitQuestsFlyout')).toBeHidden();
   });
 
-  test('changing the selected workspace while Updates is open never closes it or loses the new selection', async ({
+  test('selecting workspace context closes Updates and keeps the new selection', async ({
     page
   }) => {
     const first = await ensureWorkspace(page);
@@ -774,45 +901,32 @@ test.describe('Header disclosure coordination', () => {
     const second = (await res.json())?.folder?.id;
 
     await page.goto('/');
-    await page.locator(`.ws-map-tile[data-ws-id="${first}"]`).click();
-    await expect(page.locator('#cockpitRailContext')).toContainText(await titleOf(page, first));
-
     await page.locator('#cockpitRailToggle').click();
     await expect(page.locator('#cockpitUpdatesFlyout')).toBeVisible();
-
-    // Reselect via Tree rather than the Map: on a map with many accumulated
-    // sites, an auto-placed tile can legitimately land underneath the
-    // top-anchored flyout, which is expected overlay behavior (FR21) rather
-    // than something this test should fight. Tree's row list is unaffected.
     await page.locator('[data-cockpit-view="tree"]').click();
-    await expect(page.locator('#cockpitUpdatesFlyout')).toBeVisible();
     await page.locator(`[data-tree-row="${second}"]`).click();
-    await expect(page.locator('#cockpitUpdatesFlyout')).toBeVisible();
+    await expect(page.locator('#cockpitContextModal')).toBeVisible();
+    await expect(page.locator('#cockpitUpdatesFlyout')).toBeHidden();
     await expect(page.locator(`.ws-map-tile[data-ws-id="${second}"]`)).toHaveClass(/is-selected/);
     await expect(page.locator(`.ws-map-tile[data-ws-id="${first}"]`)).not.toHaveClass(
       /is-selected/
     );
   });
 
-  test('Summary and an open flyout coexist; closing the flyout reveals Summary unchanged', async ({
-    page
-  }) => {
+  test('opening Summary closes Quests and never loses its progression state', async ({ page }) => {
     await ensureWorkspace(page);
     await page.goto('/');
-    await page.locator('.ws-map-tile[data-ws-id]').first().waitFor();
-
-    await page.locator('#cockpitSummaryBtn').click();
-    await expect(page.locator('[data-rail-panel="summary"]')).toBeVisible();
-
+    await page.locator('#cockpitQuestsToggle').waitFor({ state: 'visible' });
     await page.locator('#cockpitQuestsToggle').click();
     await expect(page.locator('#cockpitQuestsFlyout')).toBeVisible();
-    // Opening a flyout must not disturb the rail's own state (FR29, FR41).
-    await expect(page.locator('[data-rail-panel="summary"]')).toBeVisible();
-    await expect(page.locator('#homeCockpit')).toHaveAttribute('data-rail-open', 'true');
+    await expect(page.locator('[data-role="progress-count"]')).toHaveText('0/2');
 
-    await page.locator('#cockpitQuestsToggle').click();
+    await page.locator('#cockpitSummaryBtn').click();
+    await expect(page.locator('#cockpitContextModal')).toBeVisible();
     await expect(page.locator('#cockpitQuestsFlyout')).toBeHidden();
-    await expect(page.locator('[data-rail-panel="summary"]')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await page.locator('#cockpitQuestsToggle').click();
+    await expect(page.locator('[data-role="progress-count"]')).toHaveText('0/2');
   });
 
   test('a background workspace refresh updates Updates in place without moving focus or closing it', async ({
@@ -939,10 +1053,10 @@ async function titleOf(page: Page, id: string): Promise<string> {
 }
 
 // ---------------------------------------------------------------------------
-// The selected-group rail's Map layout section (#346 FR-150 – FR-156)
+// The selected-group modal's Map layout section (#346 FR-150 – FR-156)
 // ---------------------------------------------------------------------------
 
-test.describe('group Map layout rail (#346)', () => {
+test.describe('group Map layout context (#346)', () => {
   // Serial: every test seeds a fixture into the ONE shared demo server, and
   // picks its row from how many already exist. Run in parallel, two workers
   // read the same count and stack their districts on each other — producing
@@ -993,10 +1107,10 @@ test.describe('group Map layout rail (#346)', () => {
   async function selectGroup(page: Page, group: string) {
     const district = page.locator(`.ws-map-district[data-group-id="${group}"]`);
     await district.waitFor({ timeout: 15000 });
-    await expect(async () => {
-      await district.locator('.ws-map-district-tag').click({ force: true });
-      await expect(page.locator('[data-rail-map-layout]')).toBeVisible({ timeout: 1500 });
-    }).toPass({ timeout: 20000 });
+    await page.waitForFunction(() => window.OriHomeCockpit?.getState?.()?.loading === false);
+    await district.locator('.ws-map-district-tag').click();
+    await expect(page.locator('#cockpitContextModal')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('[data-rail-map-layout]')).toBeVisible({ timeout: 5000 });
   }
 
   test('a selected group keeps Open Group and gains Map layout (FR-150, FR-151, FR-155)', async ({
@@ -1007,7 +1121,6 @@ test.describe('group Map layout rail (#346)', () => {
     await selectGroup(page, group);
 
     const rail = page.locator('#cockpitRailContext');
-    // The existing group rail is untouched: navigation and aggregates stay.
     await expect(rail.locator('[data-cockpit-rail-open]')).toHaveText(/Open Group/);
     await expect(rail).toContainText('Totals cover every workspace inside this group');
 
@@ -1031,24 +1144,28 @@ test.describe('group Map layout rail (#346)', () => {
     await selectGroup(page, group);
     await expect(page.locator('[data-rail-map-layout]')).toBeVisible();
 
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#cockpitContextModal')).toBeHidden();
     await page.locator('#cockpitViewTree').click();
-    await page.waitForTimeout(500);
+    await page.locator(`[data-tree-row="${group}"]`).click();
 
-    // The group is still selected and still openable — only the Map-only
-    // controls are gone, rather than shown dead beside Tree rows.
+    // Reopened in Tree, the same selected group stays openable while Map-only
+    // controls are omitted.
+    await expect(page.locator('#cockpitContextModal')).toBeVisible();
     await expect(page.locator('#cockpitRailContext')).toContainText('Open Group');
     await expect(page.locator('[data-rail-map-layout]')).toHaveCount(0);
 
+    await page.keyboard.press('Escape');
     await page.locator('#cockpitViewMap').click();
     await page.waitForTimeout(500);
   });
 
-  test('the rail and the district menu run the same action (FR-156)', async ({ page }) => {
+  test('the context modal and district menu run the same action (FR-156)', async ({ page }) => {
     const { group } = await seedGroup(page);
     await page.goto('/');
     await selectGroup(page, group);
 
-    // Collapse from the rail...
+    // Collapse from the context modal...
     await page.locator('[data-cockpit-group-collapse]').click();
     await page.waitForTimeout(600);
     await expect(page.locator(`.ws-map-district[data-group-id="${group}"]`)).toHaveClass(
@@ -1059,15 +1176,20 @@ test.describe('group Map layout rail (#346)', () => {
     await expect(page.locator('[data-cockpit-group-resize]')).toBeDisabled();
     await expect(page.locator('[data-cockpit-group-fit]')).toBeDisabled();
 
-    // ...then expand from the district's own context menu.
-    await page.locator(`.ws-map-district[data-group-id="${group}"] [data-group-menu]`).click({
-      force: true
-    });
-    await page.locator('[data-menu-action="expand-group"]').click();
+    // ...then dismiss context and expand from the district's own menu.
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#cockpitContextModal')).toBeHidden();
+    await page.waitForFunction(() => window.OriHomeCockpit?.getState?.()?.modalVisible === false);
+    await page.locator(`.ws-map-district[data-group-id="${group}"] .ws-map-district-tag`).focus();
+    await page.keyboard.press('Shift+F10');
+    await page.getByRole('menuitem', { name: 'Expand group' }).click();
     await page.waitForTimeout(600);
     await expect(page.locator(`.ws-map-district[data-group-id="${group}"]`)).not.toHaveClass(
       /is-collapsed/
     );
+    await page.locator(`.ws-map-district[data-group-id="${group}"] .ws-map-district-tag`).click({
+      force: true
+    });
     await expect(page.locator('[data-cockpit-group-collapse]')).toHaveText('Collapse group');
   });
 
@@ -1075,7 +1197,7 @@ test.describe('group Map layout rail (#346)', () => {
     page
   }) => {
     const { group } = await seedGroup(page);
-    await page.setViewportSize({ width: 430, height: 900 });
+    await page.setViewportSize({ width: 430, height: 600 });
     await page.goto('/');
     await selectGroup(page, group);
 
@@ -1083,12 +1205,26 @@ test.describe('group Map layout rail (#346)', () => {
     await expect(accent).toContainText('Moss green');
     await expect(page.locator('[data-rail-appearance="theme"]')).toContainText('Blueprint');
 
-    // Reachable without horizontal scrolling at a narrow rail width.
-    const overflow = await page.evaluate(() => ({
-      scroll: document.documentElement.scrollWidth,
-      client: document.documentElement.clientWidth
-    }));
+    // Long controls scroll inside a bounded narrow dialog without page overflow.
+    const overflow = await page.evaluate(() => {
+      const body = document.getElementById('cockpitRailContext');
+      const dialog = document.querySelector('#cockpitContextModal .modal-dialog');
+      const close = document.querySelector('#cockpitContextModal .btn-close');
+      return {
+        scroll: document.documentElement.scrollWidth,
+        client: document.documentElement.clientWidth,
+        bodyScroll: body?.scrollHeight ?? 0,
+        bodyClient: body?.clientHeight ?? 0,
+        dialogRight: dialog?.getBoundingClientRect().right ?? 0,
+        closeWidth: close?.getBoundingClientRect().width ?? 0,
+        closeHeight: close?.getBoundingClientRect().height ?? 0
+      };
+    });
     expect(overflow.scroll).toBeLessThanOrEqual(overflow.client + 1);
+    expect(overflow.bodyScroll).toBeGreaterThan(overflow.bodyClient);
+    expect(overflow.dialogRight).toBeLessThanOrEqual(430);
+    expect(overflow.closeWidth).toBeGreaterThanOrEqual(44);
+    expect(overflow.closeHeight).toBeGreaterThanOrEqual(44);
 
     await page.locator('[data-cockpit-group-accent][value="moss"]').check();
     await page.waitForTimeout(600);
