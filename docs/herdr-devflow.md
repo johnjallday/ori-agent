@@ -33,7 +33,7 @@ directory, then links that stable copy to Herdr. This matters because a feature
 worktree can later be removed by wt done; Herdr is never left linked to files
 inside that removable checkout. Setup is idempotent.
 
-Setup checks the configured executable and reports optional Claude/Codex
+Setup checks the configured executable and reports optional Pi/Claude/Codex
 integration commands, but it never installs, rewrites, or enables an agent
 integration for you. Install or update an integration explicitly with Herdr if
 you choose to use native session restore.
@@ -41,11 +41,11 @@ you choose to use native session restore.
 ## Planning an Issue
 
 `wt plan --issue <N>` is the stage *before* a feature exists. It turns a Ready
-GitHub Issue into planning artifacts in `ori-agent-dev` and starts a **Codex**
+GitHub Issue into planning artifacts in `ori-agent-dev` and starts a **Pi**
 session there to finish the plan. No branch, no worktree, no implementation.
 
 ~~~bash
-wt plan --issue 342          # show the plan, confirm, then write and start Codex
+wt plan --issue 342          # show the plan, confirm, then write and start Pi
 wt plan --issue 342 --yes    # same, without the prompt
 ~~~
 
@@ -59,10 +59,10 @@ of an Issue that cannot change. That separation is the point:
 
 - A planner is never a feature binding, an Overnight Run participant, a
   continuation target, a PR owner, or a `wt done` cleanup target.
-- Its kind is always `codex` and is fixed by the operation. It does not read
+- Its kind is always `pi` and is fixed by the operation. It does not read
   or write `.herdr/devflow.toml`, and it cannot leak into a later feature
   handoff — implementation still starts Herdr's configured Claude primary.
-- A generic live-agent view may still truthfully show the running Codex
+- A generic live-agent view may still truthfully show the running Pi
   process. It is a real process; it is simply not a *managed feature* agent.
 
 **Placement and reuse.** Each Issue gets its own tab in the currently focused
@@ -70,10 +70,12 @@ workspace, labelled `issue-<N>-plan`, and a deterministically named planner.
 Several Issue planners can therefore share `ori-agent-dev` without colliding.
 Re-running the same command resumes: it re-enters the recorded tab, adopts the
 saved planner, and does not resend a confirmed prompt. If the tab was closed
-by hand, it is placed again.
+by hand, it is placed again. A pending planner saved by the former Codex-based
+flow is migrated to a fresh Pi tab; the old Herdr tab is left untouched rather
+than being closed behind the user's back.
 
 **Degradation.** The planning files are written before Herdr is contacted and
-are never rolled back. A Herdr or Codex failure reports the stage that failed
+are never rolled back. A Herdr or Pi failure reports the stage that failed
 and the exact retry, and the command still reports what it did write — it
 never claims a planner started when none did.
 
@@ -508,6 +510,7 @@ lists every open Issue before prompting for another view.
 ./scripts/devops.sh backlog            # label: backlog
 ./scripts/devops.sh proposals          # label: feature-proposal
 ./scripts/devops.sh status             # which group each task list is on
+./scripts/devops.sh release            # what has merged to dev since the latest release
 ./scripts/devops.sh view <number>      # one Issue in full
 ./scripts/devops.sh new <title>                    # quick title-only capture
 ./scripts/devops.sh new <title> --body <text>      # optional inline context
@@ -517,24 +520,32 @@ lists every open Issue before prompting for another view.
 ./scripts/devops.sh approve <n>        # add `approved`, confirm-gated
 ~~~
 
-In a terminal, the colorful picker accepts `↑/↓` or `j/k` to select an Issue,
-`←/→` or `h/l` for those five list views, and `1`–`5` in the same order as the
-line REPL. `Enter` opens an Issue with an action bar where `c` decides, `r`
-refreshes the detail, and Enter returns to the list; the list's `c` key opens
-that same Issue directly at its decision answers. `n` captures one with an
-optional body, `o` approves it, `s` prints its planning command, list-level `r`
-refreshes, `?` shows help, and `q` quits. `:edit` at the body prompt opens
-`$VISUAL` or `$EDITOR` for multiline Markdown. In a pipe or redirected shell,
-the line REPL accepts `1/a`, `2/d`, `3/b`, `4/f`, and
-`5/y`, plus `v <number>`, `n <title>`, `c <number> <answers>`, and `ok <number>`.
-Lists include every author and only open Issues. Filters are literal labels; no
-Project board or rank participates.
+In a terminal, the colorful picker shows the number of PRs merged into `dev`
+since the latest Release directly below its heading; `r` refreshes that banner
+and the Issue data. It accepts `↑/↓` or `j/k` to select an Issue, `←/→` or `h/l`
+for those five list views, and `1`–`5` in the same order as the line REPL.
+`Enter` opens an Issue with an action bar where `c` decides, `s`
+starts Pi planning, `r` refreshes the detail, and Enter returns to the list;
+the list's `c` key opens that same Issue directly at its decision answers.
+Decide and Plan each appear on that bar only when the opened Issue's own live
+labels make them eligible, read fresh every time the Issue opens. `n` captures
+one with an optional body, `o` approves it, `s` starts Pi planning for the
+selected Ready row, list-level `r` refreshes, `?` shows
+help, and `q` quits. `:edit` at the body prompt opens `$VISUAL` or `$EDITOR`
+for multiline Markdown. In a pipe or redirected shell, the line REPL accepts
+`1/a`, `2/d`, `3/b`, `4/f`, and `5/y`, plus `v <number>`, `n <title>`,
+`c <number> <answers>`, and `ok <number>`. Lists include every author and only
+open Issues. Filters are literal labels; no Project board or rank
+participates.
 
-The `s` key is the one link from this REPL to the planning flow above, and it
-is deliberately the weakest possible one: in the Ready view it *prints*
-`wt plan --issue <N>` for the selected row and does nothing else. It does not
-source or run `wt`, execute the printed text, copy to a clipboard, or make
-another GitHub request — `scripts/wt-herd.test.sh` fails if it ever does.
+The `s` key is the direct link from this REPL to the planning flow above. In
+the Ready view, or on the opened Issue's own action bar when its live labels
+satisfy the same eligibility rule as Ready, it runs `wt plan --issue <N>` for
+that Issue. `wt plan` then performs its own fresh eligibility read, shows the
+normal consequence summary and confirmation, writes the planning artifacts,
+and launches the Herdr-managed Pi planner. Off Ready, or on an Issue whose
+labels are not Ready (or could not be read), the key refuses before launching
+anything.
 
 Reads never mutate. The write commands cover the three things only a human does
 here — capturing an idea, answering a spec's open questions, and setting
@@ -559,6 +570,19 @@ dependency is why the REPL exists. Instead they read `git worktree list`,
 the naming convention: branch `fix/339-slug`, task file `tasks-339-slug.md`.
 Branches predating the number-first convention resolve by slug.
 
+`release` answers a different question than `status`: not "what am I part-way
+through" but "what has landed in `dev` since we last shipped." Feature PRs
+target `dev`, while a Release snapshots `main`, so the post-release `dev` merges
+are the unshipped delivery queue. It reads the latest GitHub Release's tag and
+`publishedAt`, then counts PRs merged into `dev` strictly after that instant —
+an exact-timestamp comparison, so a PR merged earlier the same calendar day as
+the release is correctly excluded rather than double-counted. It is two reads
+and nothing else: `gh release view` and `gh pr list --base dev --state merged`,
+capped at a practical result limit since GitHub returns merged PRs newest-first.
+Either read failing — no release exists yet or the PR query errors — exits
+non-zero with `gh`'s own
+message rather than reporting a misleading zero count.
+
 Task files are gitignored and shared out of the dev worktree's `tasks/`, never
 pushed, so progress reflects ticked checkboxes immediately rather than at the
 next commit. `wt status` remains the richer, Herdr-backed feature/delivery
@@ -567,9 +591,11 @@ snapshot; `devops.sh status` is the cheap local glance.
 The command runs `gh issue list`, `gh issue view`, `gh issue create`,
 `gh issue comment`, or `gh issue edit` directly from its checkout. `status`
 contacts GitHub not at all.
-The terminal picker fetches the complete open-Issue index once and filters it
-locally until `r` refreshes it; it does not persist a cache, source `wt`, invoke
-the Herdr helper, or define a JSON contract. Agents that need structured data
+The terminal picker fetches the complete open-Issue index and release count
+once and filters Issues locally until `r` refreshes both. It does not persist a
+cache or define a JSON contract. Its eligible `s` action starts the sourced `wt`
+function in a zsh child so `wt plan` owns the confirmed Herdr/Pi launch; no
+other picker path reaches the bridge. Agents that need structured data
 should use `gh issue list --json` directly. Capture remains a thin wrapper over the GitHub CLI, and either surface is valid:
 
 ~~~bash

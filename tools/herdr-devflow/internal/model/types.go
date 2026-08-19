@@ -188,7 +188,7 @@ type BridgeState struct {
 	// purpose: a state file written before Overnight Runs existed simply has no
 	// key here, and must keep loading rather than being migrated or rejected.
 	Runs map[string]OvernightRun `json:"runs,omitempty"`
-	// PlanningSessions are issue-scoped Codex planning sessions, keyed by
+	// PlanningSessions are issue-scoped Pi planning sessions, keyed by
 	// "<repository_id>:<issue_number>". This is deliberately its own map and
 	// never a FeatureState: a planning session has no PRD-driven feature
 	// identity yet, and code that walks Features to find roles, continuation
@@ -258,7 +258,7 @@ func NewBridgeState() BridgeState {
 }
 
 // PlanningStage tracks how far one issue-scoped planning session has
-// progressed placing and prompting its Codex planner. It mirrors
+// progressed placing and prompting its Pi planner. It mirrors
 // HandoffStage's shape but is its own type: a planning session is not a
 // feature handoff, and the two must never be assignable to one another by
 // accident.
@@ -272,7 +272,7 @@ const (
 	PlanningPrompted     PlanningStage = "prompted"
 )
 
-// PlanningSession is one issue-scoped Codex planning session in
+// PlanningSession is one issue-scoped Pi planning session in
 // ori-agent-dev. It is deliberately not a Feature or FeatureState: a
 // planning session has no PRD-backed feature role, is never selectable for
 // Overnight Runs, continuations, PR delivery, or `wt done`, and generic code

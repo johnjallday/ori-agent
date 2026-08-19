@@ -130,7 +130,7 @@ func (a *App) issuePlan(ctx context.Context, opts options, args []string) int {
 		return 0
 	}
 
-	a.planPrint("%s\n! marks steps that are not undone by declining later: writing tasks/issue-%s.md and tasks/tasks-%s.md, and starting a Codex planner.\n",
+	a.planPrint("%s\n! marks steps that are not undone by declining later: writing tasks/issue-%s.md and tasks/tasks-%s.md, and starting a Pi planner.\n",
 		agents.IssuePlanSummary(plan), plan.Slug, plan.Slug)
 
 	if !parsed.yes {
@@ -196,7 +196,7 @@ func renderIssuePlanResult(a *App, result agents.IssuePlanResult) {
 		}
 		return
 	}
-	a.planPrint("\nCodex planner: %s\n", result.Planner.Name)
+	a.planPrint("\nPi planner: %s\n", result.Planner.Name)
 	if result.PromptDelivered {
 		a.planPrint("Planning prompt delivered.\n")
 	} else if result.PromptSkipped {

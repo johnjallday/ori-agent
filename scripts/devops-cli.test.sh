@@ -91,22 +91,38 @@ check "picker all view includes everything" \
 check "picker proposals view is exact" \
   "$(row_matches_filter proposals "feature-proposal" && echo yes || echo no)" "yes"
 
-# print_plan_command is the picker's `s` key: format only, no GitHub read, no
-# `wt` invocation, no clipboard, safe on an empty or non-Ready view.
-check "plan command prints for a selected Ready row" \
-  "$(print_plan_command ready 3 934 2>/dev/null)" "wt plan --issue 934"
-check "plan command refuses a non-Ready view" \
-  "$(print_plan_command all 3 934 >/dev/null 2>&1 && echo yes || echo no)" "no"
-check "plan command refuses an empty Ready view" \
-  "$(print_plan_command ready 0 "" >/dev/null 2>&1 && echo yes || echo no)" "no"
-check "plan command refuses a non-numeric issue number" \
-  "$(print_plan_command ready 3 abc >/dev/null 2>&1 && echo yes || echo no)" "no"
-check "plan command refuses zero" \
-  "$(print_plan_command ready 3 0 >/dev/null 2>&1 && echo yes || echo no)" "no"
-check "plan command refuses a negative-looking issue number" \
-  "$(print_plan_command ready 3 -5 >/dev/null 2>&1 && echo yes || echo no)" "no"
-check "a rejected plan command explains itself on stderr" \
-  "$(print_plan_command all 3 934 2>&1 >/dev/null)" "Switch to the Ready view to print a planning command."
+# Stub the process boundary for pure gating tests. Separate integration coverage
+# below proves launch_pi_plan invokes the repository's wt function through zsh.
+launch_pi_plan() {
+  printf 'launched Pi for #%s\n' "$1"
+}
+
+# start_plan is the picker's `s` key: launch only for a valid selected Ready
+# row, with no GitHub read of its own and no shell execution for rejected input.
+check "plan starts Pi for a selected Ready row" \
+  "$(start_plan ready 3 934 2>/dev/null)" "launched Pi for #934"
+check "plan refuses a non-Ready view" \
+  "$(start_plan all 3 934 >/dev/null 2>&1 && echo yes || echo no)" "no"
+check "plan refuses an empty Ready view" \
+  "$(start_plan ready 0 "" >/dev/null 2>&1 && echo yes || echo no)" "no"
+check "plan refuses a non-numeric issue number" \
+  "$(start_plan ready 3 abc >/dev/null 2>&1 && echo yes || echo no)" "no"
+check "plan refuses zero" \
+  "$(start_plan ready 3 0 >/dev/null 2>&1 && echo yes || echo no)" "no"
+check "plan refuses a negative-looking issue number" \
+  "$(start_plan ready 3 -5 >/dev/null 2>&1 && echo yes || echo no)" "no"
+check "a rejected plan explains itself on stderr" \
+  "$(start_plan all 3 934 2>&1 >/dev/null)" "Switch to the Ready view to start planning."
+
+# start_issue_plan is the opened-Issue action bar equivalent, gated on the
+# pre-computed live-label result for the one Issue currently open.
+check "issue plan starts Pi for a Ready Issue" \
+  "$(start_issue_plan 353 1 2>/dev/null)" "launched Pi for #353"
+check "issue plan refuses when can_plan is 0" \
+  "$(start_issue_plan 334 0 >/dev/null 2>&1 && echo yes || echo no)" "no"
+check "an issue plan refusal explains itself on stderr" \
+  "$(start_issue_plan 334 0 2>&1 >/dev/null)" \
+  "#334 is not Ready; refusing to start planning."
 
 # Decisions carry a stable marker so grooming can distinguish them from an
 # ordinary comment. Rationale is optional and remains plain user-authored text.
@@ -267,6 +283,57 @@ check "an ineligible Issue does not prompt for answers" \
   "$(grep -Fc 'Record a decision' "$fixture_root/prompt-ineligible-output" || true)" "0"
 check "an ineligible Issue records nothing" "$decision_recorded" "0"
 
+# Plan sits beside Decide on the same action bar and reads the SAME live
+# labels, but through labels_are_ready rather than needs-decision, so the two
+# actions disagree exactly where the underlying rule says they should. #353
+# above is plain `backlog`: not needs-decision, but Ready to build. The bar is
+# redrawn once before the "s" is read and again before the trailing blank
+# line backs out, so its offered actions each appear twice.
+: > "$prompt_capture"
+decision_recorded=0
+printf 's\n\n' | prompt_open_issue 353 > "$fixture_root/prompt-plan-output" \
+  2> "$fixture_root/prompt-plan-error"
+check "a Ready Issue is offered Plan" \
+  "$(grep -Fc '[s] Plan' "$fixture_root/prompt-plan-output" || true)" "2"
+check "a Ready Issue's Plan action starts Pi" \
+  "$(grep -Fc 'launched Pi for #353' "$fixture_root/prompt-plan-output" || true)" "1"
+check "pressing s makes no decision write" "$(<"$prompt_capture")" ""
+check "pressing s records no decision" "$decision_recorded" "0"
+
+# needs-decision alone is the mirror image: eligible for Decide, not for Plan.
+stub_labels="needs-decision"
+: > "$prompt_capture"
+decision_recorded=0
+printf 's\nr\n\n' | prompt_open_issue 334 > "$fixture_root/prompt-plan-ineligible-output" \
+  2> "$fixture_root/prompt-plan-ineligible-error"
+check "a non-Ready Issue is not offered Plan" \
+  "$(grep -Fc '[s] Plan' "$fixture_root/prompt-plan-ineligible-output" || true)" "0"
+grep -Fq '#334 is not Ready; refusing to start planning.' \
+  "$fixture_root/prompt-plan-ineligible-error"
+check "a non-Ready Issue's s does not launch Pi" \
+  "$(grep -Fc 'launched Pi' "$fixture_root/prompt-plan-ineligible-output" || true)" "0"
+# Refresh and Back still work immediately after a refused Plan.
+check "Refresh still works right after a refused Plan" \
+  "$(grep -Fc 'viewed #334' "$fixture_root/prompt-plan-ineligible-output")" "2"
+
+# A label read that fails must default Plan closed, unlike Decide's fail-open
+# default: launching a planner must never fail open. issue_labels_of is restored
+# immediately after.
+issue_labels_of() { return 1; }
+: > "$prompt_capture"
+decision_recorded=0
+printf 's\n\n' | prompt_open_issue 999 > "$fixture_root/prompt-plan-unreadable-output" \
+  2> "$fixture_root/prompt-plan-unreadable-error"
+check "an unreadable label state is not offered Plan" \
+  "$(grep -Fc '[s] Plan' "$fixture_root/prompt-plan-unreadable-output" || true)" "0"
+grep -Fq '#999 is not Ready; refusing to start planning.' \
+  "$fixture_root/prompt-plan-unreadable-error"
+check "an unreadable label state still offers Decide (fails open, unlike Plan)" \
+  "$(grep -Fc '[c] Decide' "$fixture_root/prompt-plan-unreadable-output" || true)" "2"
+issue_labels_of() {
+  printf '%s\n' "$stub_labels"
+}
+
 # The picker's c key opens the Issue with an initial c action; an eligible Issue
 # must still skip straight to answers rather than redrawing the bar.
 stub_labels="type:fix, needs-decision"
@@ -290,6 +357,7 @@ fake_bin="$fixture_root/bin"
 mkdir -p "$fake_bin"
 gh_calls="$fixture_root/gh-calls"
 gh_body="$fixture_root/gh-body"
+wt_calls="$fixture_root/wt-calls"
 
 cat > "$fake_bin/gh" <<'SH'
 #!/bin/sh
@@ -386,6 +454,31 @@ case "$1 $2" in
   "issue edit")
     printf 'edited #%s\n' "$3"
     ;;
+  "release view")
+    if [ -n "${GH_RELEASE_NONE:-}" ]; then
+      printf 'no releases found\n' >&2
+      exit 1
+    fi
+    printf 'v0.0.106\t2026-08-15T10:00:00Z\thttps://github.com/johnjallday/ori-agent/releases/tag/v0.0.106\n'
+    ;;
+  "pr list")
+    if [ -n "${GH_FAIL_PR:-}" ]; then
+      printf 'simulated GitHub failure\n' >&2
+      exit 7
+    fi
+    if [ -n "${GH_PR_EMPTY:-}" ]; then
+      exit 0
+    fi
+    # Two PRs merged strictly after the release's publish instant (381, 380);
+    # three that must NOT count - one at the exact same instant (379), one
+    # earlier the SAME DAY (378), and one from a prior day (377). The boundary
+    # is the exact instant, not the calendar date.
+    printf '381\t2026-08-18T12:00:00Z\tanother PR after release\n'
+    printf '380\t2026-08-19T08:00:00Z\tnewest PR after release\n'
+    printf '379\t2026-08-15T10:00:00Z\tsame instant as release, must not count\n'
+    printf '378\t2026-08-15T09:59:59Z\tsame day before release, must not count\n'
+    printf '377\t2026-08-14T09:00:00Z\tbefore release, must not count\n'
+    ;;
   *)
     printf 'unexpected gh invocation: %s\n' "$*" >&2
     exit 99
@@ -394,9 +487,25 @@ esac
 SH
 chmod +x "$fake_bin/gh"
 
+# launch_pi_plan crosses from bash into the sourced zsh wt function. Record the
+# exact child-process argument vector without loading wt or contacting Herdr.
+cat > "$fake_bin/zsh" <<'SH'
+#!/bin/sh
+{
+  printf 'CALL'
+  for argument in "$@"; do
+    printf '\t%s' "$argument"
+  done
+  printf '\n'
+} >> "$WT_CALLS"
+printf 'Pi planner launched for #%s\n' "$5"
+SH
+chmod +x "$fake_bin/zsh"
+
 export PATH="$fake_bin:$PATH"
 export GH_CALLS="$gh_calls"
 export GH_BODY="$gh_body"
+export WT_CALLS="$wt_calls"
 
 assert_call() {
   local expected="$1"
@@ -513,6 +622,103 @@ fi
 "$script" status > "$fixture_root/status-output"
 grep -Fq "In flight" "$fixture_root/status-output"
 assert_no_github "status"
+
+# `release` reads the latest GitHub Release, then counts PRs merged into
+# `dev` strictly after its publish instant. Two calls, both reads.
+: > "$gh_calls"
+"$script" release > "$fixture_root/release-output"
+grep -Fq "Latest release: v0.0.106 (published 2026-08-15T10:00:00Z)" \
+  "$fixture_root/release-output"
+grep -Fq "https://github.com/johnjallday/ori-agent/releases/tag/v0.0.106" \
+  "$fixture_root/release-output"
+# The boundary is exact: only the two PRs strictly after the publish instant
+# count. The same-instant PR, the same-day-but-earlier PR, and the prior-day
+# PR must all be excluded - a date-only comparison would wrongly count two
+# of those three.
+check "release counts only PRs strictly after the publish instant" \
+  "$(grep -Fc 'PR(s) merged into dev since v0.0.106' "$fixture_root/release-output" || true)" "1"
+grep -Fq "2 PR(s) merged into dev since v0.0.106." "$fixture_root/release-output"
+grep -Fq $'CALL\trelease\tview\t--json\ttagName,publishedAt,url\t--template' \
+  "$gh_calls"
+grep -Fq $'CALL\tpr\tlist\t--state\tmerged\t--base\tdev\t--limit\t500\t--json\tnumber,mergedAt,title' \
+  "$gh_calls"
+check "release makes exactly two calls" "$(count_gh_calls)" "2"
+assert_no_github_write "release"
+
+# Zero matching PRs is reported explicitly, not as a blank line.
+: > "$gh_calls"
+GH_PR_EMPTY=1 "$script" release > "$fixture_root/release-zero-output"
+grep -Fq "No PRs merged into dev since v0.0.106." "$fixture_root/release-zero-output"
+
+# The full-screen picker's top banner reuses the exact same timestamp count.
+# Loading happens once per refresh; rendering itself makes no network call.
+: > "$gh_calls"
+load_picker_release_status
+check "picker release summary uses the exact merged-PR count" \
+  "$picker_release_summary" "2 PRs merged into dev since v0.0.106."
+check "picker release summary retains the numeric count" "$picker_release_count" "2"
+render_picker 0 0 0 > "$fixture_root/picker-release-output"
+grep -Fq "Release  2 PRs merged into dev since v0.0.106." \
+  "$fixture_root/picker-release-output"
+check "picker release refresh makes exactly two reads" "$(count_gh_calls)" "2"
+
+# A banner refresh failure is visible but does not masquerade as zero or make
+# the picker unusable. The one-shot command below still preserves gh's error.
+: > "$gh_calls"
+GH_RELEASE_NONE=1 load_picker_release_status
+check "picker release failure clears stale summary" "$picker_release_summary" ""
+check "picker release failure is actionable" \
+  "$picker_release_error" "Release status unavailable — press r to retry."
+render_picker 0 0 0 > "$fixture_root/picker-release-unavailable-output"
+grep -Fq "Release  Release status unavailable — press r to retry." \
+  "$fixture_root/picker-release-unavailable-output"
+check "failed picker release refresh stops after one read" "$(count_gh_calls)" "1"
+
+: > "$gh_calls"
+GH_RELEASE_NONE=1 load_picker_index
+check "release failure does not mark the Issue index failed" "$picker_error" ""
+check "release failure still loads Issues" "${#all_issue_numbers[@]}" "2"
+check "release failure plus Issue load makes two reads" "$(count_gh_calls)" "2"
+
+# Extra arguments are rejected before any GitHub call, like every other
+# one-shot command; covered exhaustively (exit 2, no GitHub contact) by
+# "release extra" in the shared invalid-invocation loop below.
+
+# A failed release read propagates gh's own non-zero status and message, and
+# never reaches the PR read.
+: > "$gh_calls"
+status=0
+GH_RELEASE_NONE=1 "$script" release > "$fixture_root/release-missing-output" \
+  2> "$fixture_root/release-missing-error" || status=$?
+if [[ "$status" -eq 0 ]]; then
+  printf 'a missing release reported success\n' >&2
+  exit 1
+fi
+assert_output_has "a missing release" \
+  "$fixture_root/release-missing-error" "no releases found"
+check "a missing release makes exactly one call" "$(count_gh_calls)" "1"
+if [[ -s "$fixture_root/release-missing-output" ]]; then
+  printf 'a missing release printed a report: %s\n' "$(cat "$fixture_root/release-missing-output")" >&2
+  exit 1
+fi
+
+# A failed PR read (release succeeded) also propagates a clear non-zero
+# failure instead of reporting a misleading zero count.
+: > "$gh_calls"
+status=0
+GH_FAIL_PR=1 "$script" release > "$fixture_root/release-pr-fail-output" \
+  2> "$fixture_root/release-pr-fail-error" || status=$?
+if [[ "$status" -eq 0 ]]; then
+  printf 'a failed PR read reported success\n' >&2
+  exit 1
+fi
+assert_output_has "a failed PR read" \
+  "$fixture_root/release-pr-fail-error" "simulated GitHub failure"
+if grep -Fq "PR(s) merged" "$fixture_root/release-pr-fail-output"; then
+  printf 'a failed PR read still printed a count: %s\n' \
+    "$(cat "$fixture_root/release-pr-fail-output")" >&2
+  exit 1
+fi
 
 # Viewing remains read-only.
 : > "$gh_calls"
@@ -648,6 +854,43 @@ check "an eligible decision makes exactly two calls" "$(count_gh_calls)" "2"
 check "the label read precedes the decision comment" \
   "$(gh_call_sequence)" "issue view;issue comment;"
 
+# Plan is exercised against the real gh-backed issue_labels_of too, not just
+# the stubbed unit section above: #320 is plain backlog (Ready) and launches wt
+# through zsh after one label read; #334 is needs-decision (not Ready) and is
+# refused before any process launch. Neither path writes to GitHub.
+prompt_open_issue_plan_output() {
+  local issue_number="$1"
+  (
+    set +e
+    # Re-sourced because the unit section above replaced issue_labels_of and
+    # view_issue with stubs; this subshell gets the real gh-backed versions.
+    DEVOPS_SOURCE_ONLY=1 source "$script" > /dev/null 2>&1
+    printf 's\n\n' | prompt_open_issue "$issue_number"
+  )
+}
+
+: > "$gh_calls"
+: > "$wt_calls"
+prompt_open_issue_plan_output 320 > "$fixture_root/prompt-plan-real-output" \
+  2> "$fixture_root/prompt-plan-real-error"
+check "a real Ready Issue's Plan launches Pi" \
+  "$(grep -Fc 'Pi planner launched for #320' "$fixture_root/prompt-plan-real-output" || true)" "1"
+check "a real Ready Issue's Plan invokes wt through zsh" \
+  "$(<"$wt_calls")" \
+  $'CALL\t-c\tsource "$1" && wt plan --issue "$2"\tdevops-plan\t'"$repo_root"$'/scripts/wt.sh\t320'
+check "a real Ready Issue's Plan reads labels exactly once" "$(count_label_reads 320)" "1"
+assert_no_github_write "a real Ready Issue's Plan action"
+
+: > "$gh_calls"
+: > "$wt_calls"
+prompt_open_issue_plan_output 334 > "$fixture_root/prompt-plan-real-ineligible-output" \
+  2> "$fixture_root/prompt-plan-real-ineligible-error"
+grep -Fq '#334 is not Ready; refusing to start planning.' \
+  "$fixture_root/prompt-plan-real-ineligible-error"
+check "a real non-Ready Issue's Plan launches no process" \
+  "$(wc -c < "$wt_calls" | tr -d ' ')" "0"
+assert_no_github_write "a real non-Ready Issue's Plan action"
+
 # `answer` remains a backwards-compatible alias for the guided decision write,
 # and inherits the same eligibility read rather than carrying its own copy.
 : > "$gh_calls"
@@ -737,7 +980,7 @@ if grep -Eq -- '--add-label[[:space:]]*$|labels' "$gh_calls"; then
 fi
 
 # Invalid invocations fail before contacting GitHub.
-for invalid in "view" "view nope" "view 0" "view 334 extra" "all extra" "ready extra" "unknown" "decide" "decide 334" "decide nope text" "decide 334 1A --rationale" "answer" "answer 334" "approve" "approve nope" "approve 334 extra" "new" "new --yes" "new title --body" "new title --body-file" "new title --body-file /missing" "new title --body text --body-file /missing" "status extra"; do
+for invalid in "view" "view nope" "view 0" "view 334 extra" "all extra" "ready extra" "unknown" "decide" "decide 334" "decide nope text" "decide 334 1A --rationale" "answer" "answer 334" "approve" "approve nope" "approve 334 extra" "new" "new --yes" "new title --body" "new title --body-file" "new title --body-file /missing" "new title --body text --body-file /missing" "status extra" "release extra"; do
   : > "$gh_calls"
   status=0
   # Intentional word splitting turns each fixture into an argument vector.
@@ -882,13 +1125,12 @@ done
 # the terminal in raw mode), so the key itself is asserted structurally rather
 # than by driving a pseudo-terminal: the branch must route through the same
 # with_normal_terminal escape hatch every other full-screen action uses, and
-# must hand print_plan_command the CURRENT view plus the SELECTED row's
-# immutable Issue number — never a position, a title, or a stale filter name.
-# print_plan_command's own behaviour is covered exhaustively by the pure unit
-# assertions above.
+# must hand start_plan the CURRENT view plus the SELECTED row's immutable Issue
+# number — never a position, a title, or a stale filter name. start_plan's own
+# behaviour is covered exhaustively by the pure unit assertions above.
 # ---------------------------------------------------------------------------
-if ! grep -Fq 'with_normal_terminal print_plan_command "${picker_filters[$filter_index]}" "$count" "${issue_numbers[$selected_index]:-}"' "$script"; then
-  printf 'the picker s key is not wired to print_plan_command with the current view and selected Issue number\n' >&2
+if ! grep -Fq 'with_normal_terminal start_plan "${picker_filters[$filter_index]}" "$count" "${issue_numbers[$selected_index]:-}"' "$script"; then
+  printf 'the picker s key is not wired to start_plan with the current view and selected Issue number\n' >&2
   exit 1
 fi
 if ! grep -Fq 's plan' "$script"; then

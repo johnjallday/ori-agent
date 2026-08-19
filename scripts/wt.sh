@@ -5,7 +5,7 @@
 #   source scripts/wt.sh    # Load the function (cd works directly)
 #   wt                      # Interactive REPL (type: go, status, start, ...)
 #   wt go                   # One-shot worktree picker (navigate + cd)
-#   wt plan --issue <N> [--yes]  # Start Codex planning a Ready Issue in the dev worktree
+#   wt plan --issue <N> [--yes]  # Start Pi planning a Ready Issue in the dev worktree
 #   wt start [prd] [--kind KIND] [--no-herdr] # Create a worktree from a PRD or task list in the dev tasks/ folder
 #   wt new <name>           # Create a clean worktree (no PRD/tasks)
 #   wt pr [name]            # Push branch and open a PR against dev
@@ -592,7 +592,7 @@ function wt_status_worktrees {
 
 # --- Issue planning -----------------------------------------------------
 #
-# wt plan --issue <N> starts a Codex planning session for one Ready GitHub
+# wt plan --issue <N> starts a Pi planning session for one Ready GitHub
 # Issue in the dev worktree. It is a distinct lifecycle stage from wt start:
 # planning happens in ori-agent-dev and never creates a branch, a worktree, or
 # an implementation agent. Everything past argument parsing — the fresh
@@ -1232,12 +1232,12 @@ function wt_dispatch {
     if [[ -f "$tasks_dir/tasks-$WT_PLAN_FEATURE.md" ]]; then
       # AR27: a task list still carrying the wt-plan starter marker is not a
       # real plan yet. Refuse to create an implementation worktree until
-      # Codex has replaced it — implementing against the starter would mean
+      # Pi has replaced it — implementing against the starter would mean
       # coding against instructions that say "read the Issue and write the
       # real plan", not a plan at all.
       if grep -qF 'ori-devflow: planning-starter' "$tasks_dir/tasks-$WT_PLAN_FEATURE.md" 2>/dev/null; then
         echo "${WT_C_YELLOW}$WT_PLAN_FEATURE's task list is still a planning starter.${WT_C_RESET}"
-        echo "Codex has not finished planning tasks/tasks-$WT_PLAN_FEATURE.md yet."
+        echo "Pi has not finished planning tasks/tasks-$WT_PLAN_FEATURE.md yet."
         echo "Finish planning first, then re-run 'wt start $WT_PLAN_FEATURE'."
         return 1
       fi
@@ -1755,11 +1755,11 @@ function wt_dispatch {
     echo "Usage: wt [command] [args]"
     echo "  wt               - Interactive REPL (bare 'wt'; type commands, q to quit)"
     echo "  wt go            - One-shot worktree picker (navigate + cd)"
-    echo "  wt plan --issue <N> [--yes] - Start a Codex planning session for a Ready GitHub"
+    echo "  wt plan --issue <N> [--yes] - Start a Pi planning session for a Ready GitHub"
     echo "                     Issue in the dev worktree (PRD-first or tasks-first by size)."
     echo "                     Writes tasks/issue-<feature>.md and a starter checklist there;"
     echo "                     never touches the Issue on GitHub. Run 'wt start <feature>' once"
-    echo "                     Codex has replaced the starter with a real plan."
+    echo "                     Pi has replaced the starter with a real plan."
     echo "  wt start [prd] [--kind KIND] [--no-herdr] - Create worktree from a PRD or task list in the dev tasks/ folder"
     echo "  wt new <name> [--kind KIND] [--no-herdr] [--yes] - Ad-hoc worktree (feature/<name>, or <type>/<name>)"
     echo "                     Same guided flow as wt start, minus the planning documents."

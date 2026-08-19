@@ -1,6 +1,6 @@
 ---
 name: setup-herdr
-description: Configure, diagnose, and operate Ori's repository-local Herdr devflow bridge through scripts/wt.sh. Use when the user asks to set up Herdr for Ori, connect wt worktrees to Herdr, choose Claude or Codex agents, repair a Herdr handoff, inspect or prompt managed agents, configure one-time continuations, enable the standalone macOS wake service, or prepare an Overnight Run.
+description: Configure, diagnose, and operate Ori's repository-local Herdr devflow bridge through scripts/wt.sh. Use when the user asks to set up Herdr for Ori, connect wt worktrees to Herdr, choose Pi, Claude, or Codex agents, repair a Herdr handoff, inspect or prompt managed agents, configure one-time continuations, enable the standalone macOS wake service, or prepare an Overnight Run.
 ---
 
 # Set Up Herdr
@@ -28,19 +28,19 @@ Do not search broad home-directory paths for another checkout. If no Ori checkou
 Separate these capabilities instead of treating them as one installation:
 
 1. **Basic bridge** — install or refresh the stable helper, linked Herdr plugin, local state, and macOS continuation dispatcher.
-2. **Agent integration** — inspect or explicitly install Herdr's Claude and/or Codex integration.
+2. **Agent integration** — inspect or explicitly install Herdr's Pi, Claude, and/or Codex integration.
 3. **Feature agents** — hand an existing Ori feature worktree to Herdr, add roles, or repair a saved binding.
 4. **One-time continuation** — schedule one prompt for an existing managed feature and role.
 5. **Wake support** — install and verify the privileged standalone macOS Herdr Wake Service.
 6. **Overnight Run** — supervise an explicitly ordered set of eligible Claude agents within the documented safety boundary.
 
-Ask only for a choice that materially changes the result. Common choices are Claude, Codex, or both for integrations; the exact feature and role; and whether whole-Mac wake or Overnight behavior is wanted.
+Ask only for a choice that materially changes the result. Common choices are Pi, Claude, Codex, or a specific combination for integrations; the exact feature and role; and whether whole-Mac wake or Overnight behavior is wanted.
 
 ## Preserve authorization boundaries
 
 - Run read-only discovery without asking for confirmation.
 - Treat a direct request to "set up Herdr" as authorization for `wt herd setup` after resolving the exact checkout and briefly stating what it changes. Request any platform or sandbox approval the command requires.
-- Do not infer permission to install Claude/Codex integrations, edit `.herdr/devflow.toml`, create a feature worktree, install the root wake service, schedule a prompt, or start an Overnight Run. Obtain explicit intent for each applicable lane.
+- Do not infer permission to install Pi/Claude/Codex integrations, edit `.herdr/devflow.toml`, create a feature worktree, install the root wake service, schedule a prompt, or start an Overnight Run. Obtain explicit intent for each applicable lane.
 - Never type, request, store, or relay an administrator password. A wake installation may invoke the normal macOS authorization UI; the user approves it there.
 - Never invoke `pmset` directly, use `pmset cancelall`, replace the fixed wake owner, or remove foreign wake events.
 - Never guess a pane, workspace, agent, feature, role, schedule, or native-session identifier. Inspect current structured state first.
@@ -84,7 +84,7 @@ Interpret the results carefully:
 4. Preserve the configured primary kind unless the user asks to change it.
 5. Re-run `wt herd doctor`. Use its printed recovery command for each remaining failed check.
 
-Setup never installs Herdr itself and never installs or rewrites a Claude/Codex integration. Do not describe it as doing so.
+Setup never installs Herdr itself and never installs or rewrites a Pi/Claude/Codex integration. Do not describe it as doing so.
 
 ## Configure agent integrations
 
@@ -97,6 +97,7 @@ herdr integration status
 If the requested integration is missing and the user explicitly selected it, run only the matching command:
 
 ```zsh
+herdr integration install pi
 herdr integration install claude
 herdr integration install codex
 ```

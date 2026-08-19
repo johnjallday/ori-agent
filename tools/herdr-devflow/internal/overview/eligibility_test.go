@@ -236,10 +236,10 @@ func TestEligibilityNeverConsultsClaudeForAStructurallyIneligibleAgent(t *testin
 
 // TestPlanningSessionsProduceNoBridgeDerivedFeatureOrAgentEvidence proves the
 // AR25 boundary at the mechanism that would actually leak one: a bridge
-// state holding only an issue-scoped Codex planning session — never a
-// Feature — yields no bridge feature slugs, and therefore can never surface
-// as an Overnight-eligible, continuable, or PR-owning agent through this
-// package's roster machinery. A planner is a live Codex process at most;
+// state holding only an issue-scoped Pi planning session — never a Feature —
+// yields no bridge feature slugs, and therefore can never surface as an
+// Overnight-eligible, continuable, or PR-owning agent through this package's
+// roster machinery. A planner is a live Pi process at most;
 // this asserts it is never a *managed* one.
 func TestPlanningSessionsProduceNoBridgeDerivedFeatureOrAgentEvidence(t *testing.T) {
 	state := model.NewBridgeState()
@@ -249,7 +249,7 @@ func TestPlanningSessionsProduceNoBridgeDerivedFeatureOrAgentEvidence(t *testing
 		Slug:         "342-ready-issue-codex-planning",
 		WorktreePath: "/tmp/ori-agent-dev",
 		Stage:        model.PlanningPrompted,
-		Planner:      model.RoleAgent{Name: "ori-repo1-issue342-planner", Kind: "codex"},
+		Planner:      model.RoleAgent{Name: "ori-repo1-issue342-planner", Kind: "pi"},
 	}
 	if len(state.Features) != 0 {
 		t.Fatalf("fixture is invalid: expected no Features, got %#v", state.Features)
