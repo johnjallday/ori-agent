@@ -117,6 +117,22 @@ await page.waitForTimeout(700);
 report.homeTall = await measure();
 await shot('05-home-cockpit-1200');
 
+// ---- Tree is the Map's peer in the same cockpit slot, and the brief settings
+// dialog is the bridge's other child. Both share the grid row this feature
+// changed, so both are checked rather than assumed.
+await page.click('[data-cockpit-view="tree"]').catch(() => {});
+await page.waitForTimeout(700);
+report.homeTree = await page.evaluate(() => {
+  const tree = document.querySelector('.cockpit-tree');
+  const rect = tree && tree.getBoundingClientRect();
+  return {
+    treeHeight: rect ? Math.round(rect.height) : null,
+    viewportHeight: window.innerHeight,
+    horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1
+  };
+});
+await shot('06-home-tree-1200');
+
 console.log(JSON.stringify(report, null, 2));
 console.log('\nscreenshots written to', outDir);
 await browser.close();
