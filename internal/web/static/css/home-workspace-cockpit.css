@@ -3,13 +3,9 @@
  *
  * Layered on top of home-command.css, which owns the Home page's palette
  * (--hc-*), typography, and panel treatment. This file adds only the cockpit
- * shell: the workspace area / context rail split, the view toggle, and the
- * rail's own surfaces. It reuses the existing tokens rather than introducing a
- * second visual language (PRD §6).
- *
- * The wide/stacked boundary is a 1040px COCKPIT-CONTAINER width, with an
- * ~1100px viewport fallback where container queries are unavailable (FR16,
- * FR134). Both are declared below; the container query wins where supported.
+ * shell: the full-width workspace area, view controls, header flyouts, and
+ * Issue #366's on-demand context modal. It reuses the existing tokens rather
+ * than introducing a second visual language.
  */
 
 /* The container must be an ANCESTOR of what it styles — an element cannot
@@ -23,8 +19,6 @@
 
 .home-cockpit {
   display: grid;
-  /* Stacked by default: Ask Ori (above), workspace area, then context rail.
-     The side-by-side layout is opted into at the boundary below (FR134). */
   grid-template-columns: minmax(0, 1fr);
   gap: 12px;
   min-width: 0;
@@ -432,7 +426,7 @@
 
 /* Cockpit-mode Map. The map keeps its own visual language but drops the
    single-column launcher framing: here the cockpit's workspace-area header
-   already carries the title and New Workspace, and the context rail carries
+   already carries the title and New Workspace, and the context modal carries
    the overview, so the theatre gets the whole slot. */
 .cockpit-map {
   padding: 0 14px 14px;
@@ -535,60 +529,96 @@
 }
 
 /* --------------------------------------------------------------------------
- * Context rail
+ * Workspace context modal (Issue #366)
+ *
+ * Bootstrap owns dialog semantics, focus containment, Escape, backdrop, and
+ * body scrolling. These rules only give this Home-scoped surface the cockpit's
+ * industrial visual language and bound its internal content.
  * ----------------------------------------------------------------------- */
 
-.cockpit-rail {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  min-height: 0;
-  border: 1px solid var(--hc-line);
-  background: linear-gradient(
-    160deg,
-    color-mix(in srgb, var(--hc-panel-raised) 78%, transparent),
-    var(--hc-panel)
-  );
-  box-shadow: var(--hc-shadow);
+.cockpit-context-modal {
+  --bs-modal-width: 640px;
+  --bs-modal-margin: 1rem;
 }
 
-/* The rail scrolls independently when Today has more content than fits
-   (FR76), so the workspace area is never pushed off-screen by it. It also
-   absorbs the leftover height, which keeps the footer pinned to the bottom of
-   the rail instead of floating under a short panel. */
+.cockpit-context-modal .modal-dialog {
+  max-width: min(var(--bs-modal-width), calc(100vw - 2rem));
+}
+
+.cockpit-context-modal__content {
+  max-height: calc(100dvh - 2rem);
+  border: 1px solid var(--hc-line) !important;
+  border-radius: 2px;
+  background: var(--cozy-paper-raised, #fff) !important;
+  color: var(--hc-ink);
+  box-shadow: 0 24px 70px rgb(0 0 0 / 42%) !important;
+  backdrop-filter: none !important;
+}
+
+.cockpit-context-modal__header {
+  gap: 16px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--hc-line) !important;
+  background: var(--cozy-paper, #f4efe3) !important;
+  backdrop-filter: none !important;
+}
+
+.cockpit-context-modal__heading {
+  min-width: 0;
+}
+
+.cockpit-context-modal__title {
+  margin-top: 3px;
+  overflow-wrap: anywhere;
+  color: var(--hc-ink);
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.35px;
+}
+
+.cockpit-context-modal .btn-close {
+  flex: 0 0 auto;
+  opacity: 0.72;
+  filter: var(--hc-modal-close-filter, none);
+}
+
+.cockpit-context-modal .btn-close:hover,
+.cockpit-context-modal .btn-close:focus-visible {
+  opacity: 1;
+}
+
+[data-bs-theme="dark"] .cockpit-context-modal .cockpit-context-modal__content {
+  border-color: var(--hc-line) !important;
+  background: var(--cozy-paper-raised, #303337) !important;
+}
+
+[data-bs-theme="dark"] .cockpit-context-modal .cockpit-context-modal__header {
+  border-bottom-color: var(--hc-line) !important;
+  background: var(--cozy-paper, #26282b) !important;
+}
+
+[data-bs-theme="dark"] .cockpit-context-modal .btn-close {
+  filter: var(--bs-btn-close-white-filter);
+}
+
 .cockpit-rail-body {
   display: flex;
-  flex: 1 1 auto;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
   min-height: 0;
-  padding: 12px;
-  overflow-y: auto;
+  padding: 16px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
-.cockpit-rail-body[hidden] {
-  display: none;
-}
-
-/* Today's sections must keep their natural height and let the RAIL scroll.
-   As flex children they defaulted to `flex: 0 1 auto`, so every section was
-   shrunk below its content — Daily Brief rendered 60px tall over 236px of
-   content — and each one's `overflow: hidden` then clipped the remainder, so
-   the sections visually overlapped each other. */
 .cockpit-rail-body > * {
   flex: 0 0 auto;
 }
 
-/* .home-section / .home-daily-brief / .quest-log no longer render inside
-   `.cockpit-rail-body` — Issue #334 moved that content into the Updates and
-   Quests flyouts (see `.cockpit-flyout-body .home-section` etc. above), which
-   is where their equivalent min-height/overflow rules now live. */
-
-/* .cockpit-rail-footer is gone. It held Add to backlog and Summary, which now
-   live in the workspace-area header — the rail closes, and FR88/FR101 want
-   those two actions in every rail state, not only the open ones. Removing it
-   also retired the --ori-launcher-clearance-y (88px) bottom padding it carried
-   to keep its buttons out from under the fixed Ori launcher. */
+.cockpit-context-modal .cockpit-rail-title {
+  display: none;
+}
 
 .cockpit-rail-panel {
   display: flex;
@@ -609,8 +639,7 @@
   gap: 6px;
 }
 
-/* Sentence case: Back is an action. It also carries a workspace name in some
-   rail states ("← Today"), which uppercase mangled. */
+/* Sentence case: Back is an action; uppercase would obscure its meaning. */
 .cockpit-rail-back {
   align-self: flex-start;
   padding: 2px 0;
@@ -820,54 +849,18 @@
   display: none;
 }
 
-/* --------------------------------------------------------------------------
- * Wide layout — the rail is a collapsible column, not a permanent one (FR16)
- *
- * The rail used to hold minmax(320px, 30%) unconditionally, which spent nearly
- * a third of the window on three cards that, on a quiet day, all say nothing:
- * "nothing needs your attention", "Calendar Ops needs a connector", an empty
- * activity list. The map — the thing the page is for — got what was left.
- *
- * So the column only exists while the rail is open. Closed, the workspace area
- * spans the full width; the map keeps its camera and simply sees more world
- * (workspace-map.js re-centres the transform via watchResize).
- *
- * A collapsible column rather than an overlay drawer on purpose: the map's own
- * zoom and Move/Snap/Reset strip lives along its bottom edge, and a panel
- * floating over it would swallow those clicks — the same bug the fixed Ori
- * launcher needed --ori-launcher-clearance-y to work around.
- * ----------------------------------------------------------------------- */
-
-.cockpit-rail[hidden] {
-  display: none;
-}
-
+/* One theatre track at every width. Opening context is an overlay lifecycle,
+   never a grid-template change or ResizeObserver-triggering width change. */
 @container cockpit (min-width: 1040px) {
-  /* Declare the row. With the rail open, its content gave the row a height and
-     the workspace area stretched to match; closed, the only item left is the
-     workspace area itself, whose implicit auto track sized to content instead
-     of to the space available. The map then collapsed to .ws-map-theatre's
-     320px min-height and left the rest of the panel empty — the same implicit
-     track that flattened the signal filters, one level up. */
   .home-cockpit {
     grid-template-rows: minmax(0, 1fr);
   }
-
-  .home-cockpit[data-rail-open="true"] {
-    grid-template-columns: minmax(0, 1fr) minmax(320px, 30%);
-  }
 }
 
-/* Viewport fallback for engines without container queries. `@supports not`
-   keeps it from double-applying where the container query already won. */
 @supports not (container-type: inline-size) {
   @media (min-width: 1100px) {
     .home-cockpit {
       grid-template-rows: minmax(0, 1fr);
-    }
-
-    .home-cockpit[data-rail-open="true"] {
-      grid-template-columns: minmax(0, 1fr) minmax(320px, 30%);
     }
   }
 }
@@ -901,40 +894,67 @@ body.home-command-page .ori-guide__launcher {
 .home-cockpit a:focus-visible,
 .home-cockpit input:focus-visible,
 .home-cockpit textarea:focus-visible,
-.home-cockpit [tabindex]:focus-visible {
+.home-cockpit [tabindex]:focus-visible,
+.cockpit-context-modal button:focus-visible,
+.cockpit-context-modal a:focus-visible,
+.cockpit-context-modal input:focus-visible,
+.cockpit-context-modal [tabindex]:focus-visible {
   outline: 2px solid var(--hc-signal);
   outline-offset: 2px;
 }
 
 .cockpit-view-btn,
 .cockpit-signal-chip,
-.cockpit-rail-footer button,
 .cockpit-tree-action,
 .cockpit-tree-caret {
   min-height: 24px;
 }
 
-.cockpit-rail-footer button,
 .cockpit-area-controls button {
   min-height: 28px;
 }
 
-/* A short viewport must not push the rail's actions past an unreachable edge:
-   the body scrolls, the footer never becomes a fixed overlay (FR139). */
-@media (max-height: 620px) {
-  .cockpit-rail {
-    max-height: none;
+@media (max-width: 575.98px), (max-height: 620px) {
+  .cockpit-context-modal {
+    --bs-modal-margin: 0.5rem;
   }
 
+  .cockpit-context-modal .modal-dialog {
+    width: auto;
+    max-width: none;
+    min-height: calc(100dvh - 1rem);
+    margin: 0.5rem;
+  }
+
+  .cockpit-context-modal__content {
+    max-height: calc(100dvh - 1rem);
+  }
+
+  .cockpit-context-modal__header,
   .cockpit-rail-body {
-    overflow-y: visible;
+    padding-right: max(12px, env(safe-area-inset-right));
+    padding-left: max(12px, env(safe-area-inset-left));
+  }
+}
+
+@media (pointer: coarse), (max-width: 575.98px) {
+  .cockpit-context-modal button,
+  .cockpit-context-modal a,
+  .cockpit-context-modal input[type="radio"] + span {
+    min-height: 44px;
+  }
+
+  .cockpit-context-modal .btn-close {
+    min-width: 44px;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .home-cockpit *,
   .home-cockpit *::before,
-  .home-cockpit *::after {
+  .home-cockpit *::after,
+  .cockpit-context-modal,
+  .cockpit-context-modal * {
     animation-duration: 0.001ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
@@ -1451,9 +1471,8 @@ body.home-command-page .ori-guide__launcher {
   display: none;
 }
 
-/* Quick Capture is now a row of the workspace area rather than the rail's last
-   panel, so it is bounded by the header above it instead of a border-top
-   against a scrolling body. */
+/* Quick Capture is a workspace-area row beneath the header, separate from
+   blocking context and its independently scrolling body. */
 .cockpit-capture {
   margin: 0 14px;
   padding: 10px 12px;

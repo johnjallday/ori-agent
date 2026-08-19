@@ -8,10 +8,10 @@
     just this one (FR6/FR68). The layout space it reserved is reclaimed with it.
   -->
   <!-- The Map-first workspace cockpit: one primary workspace area (Map or Tree
-       as mutually exclusive peer views) plus one persistent context rail
-       (PRD FR15-FR21). The Ask Ori command bridge above stays visible in both
-       views (FR14/FR92). -->
-  <div class="home-cockpit" id="homeCockpit" data-view="map" data-state="loading" data-rail-open="false">
+       as mutually exclusive peer views). Issue #366 moved selected context to
+       the on-demand modal after this grid, so the theatre always owns the full
+       cockpit width. The Ask Ori command bridge stays visible in both views. -->
+  <div class="home-cockpit" id="homeCockpit" data-view="map" data-state="loading">
     <section class="cockpit-workspace-area" id="cockpitWorkspaceArea" aria-labelledby="cockpitWorkspaceAreaTitle">
       <!--
         Wraps the header AND the two flyouts below so they share one
@@ -98,17 +98,12 @@
             <button type="button" id="cockpitViewMap" class="cockpit-view-btn is-active" data-cockpit-view="map" aria-pressed="true">Map</button>
             <button type="button" id="cockpitViewTree" class="cockpit-view-btn" data-cockpit-view="tree" aria-pressed="false">Tree</button>
           </div>
-          <!--
-            Add to backlog and Summary must be reachable from EVERY rail state
-            (FR88, FR101). They used to sit in the rail's own footer, which was
-            fine while the rail was always on screen — now that it closes, a
-            footer inside it would take both actions with it. The header is the
-            one surface present in every state, open or closed.
-          -->
+          <!-- Add to backlog and Summary stay in the stable header so they are
+               reachable whether context is bare, selected, or dismissed. -->
           <button type="button" id="cockpitCaptureBtn" class="modern-btn modern-btn-secondary modern-btn-sm"
                   aria-expanded="false" aria-controls="cockpitCapturePanel">Add to backlog</button>
           <button type="button" id="cockpitSummaryBtn" class="modern-btn modern-btn-secondary modern-btn-sm"
-                  aria-pressed="false">Summary</button>
+                  aria-pressed="false" aria-expanded="false" aria-controls="cockpitContextModal">Summary</button>
           <button id="cockpitCreateWorkspaceBtn" class="modern-btn modern-btn-primary modern-btn-sm" type="button"
                   data-bs-toggle="modal" data-bs-target="#addFolderModal"
                   data-workspace-import-mode="false" data-workspace-entry-point="home_cockpit_create">
@@ -298,11 +293,8 @@
       </div>
 
       <!-- Quick Capture. Writes to the designated Personal HQ's backlog through
-           the existing backlog contract — never a second inbox (FR102).
-
-           It follows its button out of the rail: a disclosure panel has to live
-           where the control that opens it lives, or opening it would reveal a
-           form inside a hidden rail. -->
+           the existing backlog contract — never a second inbox (FR102). It is
+           a header disclosure, separate from the blocking context modal. -->
       <div id="cockpitCapturePanel" class="cockpit-capture" hidden>
         <form id="cockpitCaptureForm" class="cockpit-capture-form">
           <label class="cockpit-capture-label" for="cockpitCaptureTitle">Capture to your HQ backlog</label>
@@ -327,48 +319,34 @@
       <div class="cockpit-area-body">
         <!-- Map and Tree occupy the SAME layout slot; activating one hides the
              other, never a drawer or overlay (FR18). -->
-        <div id="cockpitMap" class="ws-map cockpit-map" role="region" aria-label="Workspace map" hidden></div>
-        <div id="cockpitTree" class="cockpit-tree" role="region" aria-label="Workspace tree" hidden></div>
+        <div id="cockpitMap" class="ws-map cockpit-map" role="region" aria-label="Workspace map" tabindex="-1" hidden></div>
+        <div id="cockpitTree" class="cockpit-tree" role="region" aria-label="Workspace tree" tabindex="-1" hidden></div>
         <div id="cockpitWorkspaceStatus" class="cockpit-area-status" role="status" aria-live="polite"></div>
       </div>
     </section>
 
-    <!--
-      Closed until something earns it: home-workspace-cockpit.js opens the rail
-      only for a real selection — a workspace, group, Personal HQ site,
-      Summary, or Ask Ori activity (Issue #334). A bare Home load, workspace
-      attention, and Progression state never open it; Updates and Quests are
-      their own overlays entirely outside this rail. The closed state is
-      declared here rather than left to the first render, so the map does not
-      start full-width and then get shoved sideways a frame later.
-    -->
-    <!-- Polite rail announcements; never re-reads the whole rail (FR130).
-         Kept OUTSIDE the rail on purpose: a rail transition can close the
-         aside in the same tick it announces why (e.g. a selected workspace
-         vanishing), and an aria-live region inside a hidden ancestor is
-         removed from the accessibility tree before assistive tech can read
-         it. -->
-    <div id="cockpitRailLive" class="visually-hidden" role="status" aria-live="polite"></div>
+  </div>
+</div>
 
-    <aside class="cockpit-rail" id="cockpitRail" aria-label="Context" hidden>
-      <!-- Selected workspace/group context, and the Summary rail state. A
-           sibling panel rather than a re-render of Today, so swapping rail
-           states never destroys the DOM the Daily Brief, Calendar, and
-           progression modules own (FR72). -->
-      <div id="cockpitRailContext" class="cockpit-rail-body" data-rail-state="context" hidden></div>
-
-      <!--
-        Ask Ori's activity used to be duplicated here as a rail state. It now
-        lives once, inside the universal panel, so a request made from Home
-        shows its routing, planning, and confirmations in the same place as a
-        request made from any other page (FR39/FR68).
-      -->
-
-      <!-- The rail footer that used to sit here held Add to backlog and
-           Summary. Both moved into the workspace-area header when the rail
-           became closable: FR88/FR101 require them in every rail state, and a
-           footer inside a closed rail is in none of them. -->
-    </aside>
+<!-- Workspace context modal (Issue #366). It is outside #homeCockpit and
+       #cockpitMap so Map remounts and modal visibility never alter the theatre
+       grid or destroy this stable host. Bootstrap owns focus containment,
+       Escape, backdrop, and body-scroll cleanup. -->
+  <div id="cockpitRailLive" class="visually-hidden" role="status" aria-live="polite" aria-atomic="true"></div>
+  <div class="modal fade cockpit-context-modal" id="cockpitContextModal" tabindex="-1"
+       aria-labelledby="cockpitContextModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+      <div class="modal-content cockpit-context-modal__content">
+        <div class="modal-header cockpit-context-modal__header">
+          <div class="cockpit-context-modal__heading">
+            <span class="cockpit-area-eyebrow">Workspace context</span>
+            <h2 class="modal-title cockpit-context-modal__title" id="cockpitContextModalLabel">Context</h2>
+          </div>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close context"></button>
+        </div>
+        <div id="cockpitRailContext" class="modal-body cockpit-rail-body" data-context-state="bare"></div>
+      </div>
+    </div>
   </div>
 
   <!-- Brief settings dialog: HQ-owned config + recent history, opened from
@@ -421,5 +399,4 @@
       </div>
     </div>
   </div>
-</div>
 

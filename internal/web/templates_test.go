@@ -395,13 +395,11 @@ func TestRenderAgentsCodexDetailPage(t *testing.T) {
 }
 
 // TestRenderHomeCockpitShell confirms the Home page renders the Map-first
-// cockpit shell: one workspace area holding Map and Tree as peer views in the
-// same slot, one persistent context rail for a real selection/Summary/Ask Ori,
-// and the header-anchored Updates/Quests flyouts the cockpit coordinator binds
-// to. Issue #334 retired the rail's own "Today" panel — its non-Progression
-// content now lives in the Updates flyout, and Progression in the Quests
-// flyout, both outside #cockpitRail.
-// PRD FR14-FR21, FR74; Issue #334 FR1-FR25.
+// cockpit shell: one full-width workspace area holding Map and Tree as peer
+// views, one stable Bootstrap context modal outside the cockpit grid, and the
+// header-anchored Updates/Quests flyouts. Issue #366 retires the docked context
+// rail while preserving its context body hooks inside the modal.
+// PRD FR14-FR21, FR74; Issues #334 and #366.
 func TestRenderHomeCockpitShell(t *testing.T) {
 	r := NewTemplateRenderer()
 	if err := r.LoadTemplates(); err != nil {
@@ -429,7 +427,9 @@ func TestRenderHomeCockpitShell(t *testing.T) {
 		`id="cockpitMap"`,
 		`id="cockpitTree"`,
 		`id="cockpitWorkspaceStatus"`,
-		`id="cockpitRail"`,
+		`id="cockpitContextModal"`,
+		`class="modal-dialog modal-dialog-centered modal-dialog-scrollable"`,
+		`id="cockpitContextModalLabel"`,
 		`id="cockpitRailContext"`,
 		`id="cockpitRailLive"`,
 		// Mutually exclusive Map/Tree control (FR17, FR24).
@@ -510,14 +510,27 @@ func TestRenderHomeCockpitShell(t *testing.T) {
 		`home-command-strip`,
 		`home-command-kicker`,
 		`id="homeUpcomingTasks"`,
-		// Issue #334: the rail's own "Today" panel is retired — its content now
-		// lives in the Updates/Quests flyouts, never inside #cockpitRail.
+		// Issue #334: the rail's own "Today" panel is retired. Issue #366 also
+		// retires the docked shell and its layout-coupled open attribute.
 		`id="cockpitRailToday"`,
+		`id="cockpitRail"`,
+		`data-rail-open=`,
 		`cockpit-flyout-toggle__label">Today<`,
 	} {
 		if strings.Contains(html, gone) {
 			t.Errorf("rendered Home page still contains retired element %q", gone)
 		}
+	}
+
+	for _, id := range []string{"cockpitContextModal", "cockpitContextModalLabel", "cockpitRailContext", "cockpitRailLive"} {
+		if count := strings.Count(html, `id="`+id+`"`); count != 1 {
+			t.Errorf("Home page renders %d copies of stable context id %q; want 1", count, id)
+		}
+	}
+	modalAt := strings.Index(html, `id="cockpitContextModal"`)
+	mapAt := strings.Index(html, `id="cockpitMap"`)
+	if modalAt < mapAt {
+		t.Errorf("context modal must be mounted after the cockpit Map (modalAt=%d mapAt=%d)", modalAt, mapAt)
 	}
 
 	// FR96: Ask Ori activity must NOT be a blocking modal over the cockpit.
