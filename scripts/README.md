@@ -175,12 +175,16 @@ and again as its members.
 In a terminal, the colorful picker uses `↑/↓` or `j/k` to select an Issue,
 `←/→` or `h/l` to change views, and the same `1`–`5` view order shown by the
 line REPL. `Enter` opens an Issue and keeps you there with an action bar:
-`c` records a decision, `r` refreshes the opened Issue, and Enter returns to the
-list. The list's `c` key is a shortcut that opens the same Issue directly at its
-decision answers. `n` captures a new Issue with an optional body, `o` approves
-it, `s` prints its planning command, `r` refreshes the list, `?` shows help, and
-`q` quits. At the new-Issue body prompt, a blank line keeps capture title-only
-and `:edit` opens `$VISUAL` or `$EDITOR` for multiline Markdown.
+`c` records a decision, `s` prints its planning command, `r` refreshes the
+opened Issue, and Enter returns to the list. Decide and Plan each appear only
+when that Issue's own live labels make them eligible - the bar is drawn for
+one known Issue, so it never offers a write or a command the Issue does not
+actually support. The list's `c` key is a shortcut that opens the same Issue
+directly at its decision answers. `n` captures a new Issue with an optional
+body, `o` approves it, `s` prints the selected Ready row's planning command,
+`r` refreshes the list, `?` shows help, and `q` quits. At the new-Issue body
+prompt, a blank line keeps capture title-only and `:edit` opens `$VISUAL` or
+`$EDITOR` for multiline Markdown.
 
 In a pipe or redirected shell, the line REPL remains available: use `1/a`,
 `2/d`, `3/b`, `4/f`, or `5/y` to change views, `v <number>` to inspect,
@@ -193,12 +197,17 @@ list can never truncate away the signal that says whether to open a PRD first.
 
 **Planning key.** In the Ready view, `s` prints exactly
 `wt plan --issue <N>` for the selected row — the command that starts Codex
-planning that Issue (see `wt plan` above). The picker only *prints* it: it
-never sources or runs `wt`, copies to a clipboard, makes another GitHub
-request, or changes anything. `wt` is a sourced zsh function and this script
-is a separate bash process, so printing is also the only thing that could
-work. The key is a no-op with a clear message outside the Ready view or on an
-empty list.
+planning that Issue (see `wt plan` above). The same `s` is also on the
+opened-Issue action bar (`Enter` on any row), where it reads that Issue's own
+live labels through the same `labels_are_ready` rule the Ready view itself
+uses, so it works from any view - not only rows already sitting in Ready. The
+picker only *prints* it: it never sources or runs `wt`, copies to a
+clipboard, makes another GitHub request, or changes anything. `wt` is a
+sourced zsh function and this script is a separate bash process, so printing
+is also the only thing that could work. The key is a no-op with a clear
+message outside the Ready view or on an empty list; the opened-Issue bar
+gives the same clear refusal for a non-Ready Issue or a label read that
+fails, and never offers `[s] Plan` in the first place when it would refuse.
 
 **In-flight status.** A second column shows whether work has already started and
 how far it has got — `2/7 wt` means two of seven task-list groups are done and a

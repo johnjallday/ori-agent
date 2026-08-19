@@ -519,22 +519,28 @@ lists every open Issue before prompting for another view.
 
 In a terminal, the colorful picker accepts `↑/↓` or `j/k` to select an Issue,
 `←/→` or `h/l` for those five list views, and `1`–`5` in the same order as the
-line REPL. `Enter` opens an Issue with an action bar where `c` decides, `r`
-refreshes the detail, and Enter returns to the list; the list's `c` key opens
-that same Issue directly at its decision answers. `n` captures one with an
-optional body, `o` approves it, `s` prints its planning command, list-level `r`
-refreshes, `?` shows help, and `q` quits. `:edit` at the body prompt opens
-`$VISUAL` or `$EDITOR` for multiline Markdown. In a pipe or redirected shell,
-the line REPL accepts `1/a`, `2/d`, `3/b`, `4/f`, and
-`5/y`, plus `v <number>`, `n <title>`, `c <number> <answers>`, and `ok <number>`.
-Lists include every author and only open Issues. Filters are literal labels; no
-Project board or rank participates.
+line REPL. `Enter` opens an Issue with an action bar where `c` decides, `s`
+prints its planning command, `r` refreshes the detail, and Enter returns to
+the list; the list's `c` key opens that same Issue directly at its decision
+answers. Decide and Plan each appear on that bar only when the opened Issue's
+own live labels make them eligible, read fresh every time the Issue opens.
+`n` captures one with an optional body, `o` approves it, `s` prints the
+selected Ready row's planning command, list-level `r` refreshes, `?` shows
+help, and `q` quits. `:edit` at the body prompt opens `$VISUAL` or `$EDITOR`
+for multiline Markdown. In a pipe or redirected shell, the line REPL accepts
+`1/a`, `2/d`, `3/b`, `4/f`, and `5/y`, plus `v <number>`, `n <title>`,
+`c <number> <answers>`, and `ok <number>`. Lists include every author and only
+open Issues. Filters are literal labels; no Project board or rank
+participates.
 
 The `s` key is the one link from this REPL to the planning flow above, and it
-is deliberately the weakest possible one: in the Ready view it *prints*
-`wt plan --issue <N>` for the selected row and does nothing else. It does not
-source or run `wt`, execute the printed text, copy to a clipboard, or make
-another GitHub request — `scripts/wt-herd.test.sh` fails if it ever does.
+is deliberately the weakest possible one: in the Ready view, or on the opened
+Issue's own action bar when its live labels satisfy the same eligibility rule
+as Ready, it *prints* `wt plan --issue <N>` for that Issue and does nothing
+else. Off Ready, or on an Issue whose labels are not Ready (or could not be
+read at all), it refuses with a plain message instead of printing anything. It
+does not source or run `wt`, execute the printed text, copy to a clipboard, or
+make another GitHub request — `scripts/wt-herd.test.sh` fails if it ever does.
 
 Reads never mutate. The write commands cover the three things only a human does
 here — capturing an idea, answering a spec's open questions, and setting

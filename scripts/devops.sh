@@ -70,6 +70,11 @@ In the picker's Ready view, pressing `s` on a selected row prints exactly
 the dev worktree. The picker only prints it: it never runs `wt`, sources it,
 copies to a clipboard, or reads GitHub again.
 
+The opened-Issue action bar (Enter on any row) offers the same `s` once it has
+read that Issue's own live labels and found them Ready by the same
+`labels_are_ready` rule - not just rows already sitting in the Ready view. Any
+other label state, or a label read that fails, is a clear refusal instead.
+
 new/decide/approve/unapprove write to GitHub. They prompt for confirmation on
 a terminal, and require --yes when stdin is not a terminal. `answer` remains a
 backwards-compatible alias for `decide`. A new Issue is created with no labels -
@@ -1004,7 +1009,8 @@ Picker keys
   ↑/↓, j/k      Select an Issue
   ←/→, h/l      Change view
   1..5          All, Decisions, Backlog, Proposals, Ready
-  Enter         Open the selected Issue; c decides within that view
+  Enter         Open the selected Issue; its own action bar offers Decide and
+                Plan when that Issue's live labels make them eligible
   c             Open the selected Issue directly at its decision prompt
   n             Capture a new Issue with an optional body
   o             Add the approved label
@@ -1046,23 +1052,26 @@ prompt_decision_answers() {
 # pending. An Issue whose spec says "Open questions: None" has nothing to decide,
 # and showing the action there just invites a rejected write.
 prompt_open_issue() {
-  local issue_number="$1" action="${2:-}" labels can_decide=1
+  local issue_number="$1" action="${2:-}" labels can_decide=1 can_plan=0 bar
 
   view_issue "$issue_number" || return $?
   # A failed lookup deliberately leaves Decide on offer: decide_issue re-reads
   # and fails closed, so the worst case is a clear refusal, whereas hiding the
   # action on a transient network error would look like the Issue changed.
+  # Plan is the opposite: labels_are_ready is the ONLY gate on printing a
+  # command a human may paste and run, so a failed read must leave can_plan at
+  # its unready default rather than fail open.
   if labels="$(issue_labels_of "$issue_number")"; then
     labels_contain "$labels" "needs-decision" || can_decide=0
+    labels_are_ready "$labels" && can_plan=1
   fi
 
   while true; do
     if [[ -z "$action" ]]; then
-      if [[ "$can_decide" -eq 1 ]]; then
-        printf '\n[c] Decide  [r] Refresh  [Enter] Back\n'
-      else
-        printf '\n[r] Refresh  [Enter] Back\n'
-      fi
+      bar="[r] Refresh  [Enter] Back"
+      [[ "$can_plan" -eq 1 ]] && bar="[s] Plan  $bar"
+      [[ "$can_decide" -eq 1 ]] && bar="[c] Decide  $bar"
+      printf '\n%s\n' "$bar"
       printf 'issue> '
       IFS= read -r action || return 0
     fi
@@ -1084,6 +1093,9 @@ prompt_open_issue() {
           decision_recorded=0
         fi
         ;;
+      s|plan)
+        print_issue_plan_command "$issue_number" "$can_plan" || true
+        ;;
       r|refresh)
         view_issue "$issue_number" || return $?
         ;;
@@ -1103,6 +1115,13 @@ prompt_approve_issue() {
   set_approved approve "$issue_number"
 }
 
+# The one line both planning entry points print. Kept as its own function so
+# the exact wording can never drift between the picker's Ready-view `s` and
+# the opened-Issue action bar's `s`.
+print_wt_plan_command() {
+  printf 'wt plan --issue %s\n' "$1"
+}
+
 # print_plan_command prints exactly `wt plan --issue <N>` for a selected
 # Ready row, or a clear explanation on stderr and a non-zero exit when there
 # is nothing to print. Pure: it performs no I/O beyond stdout/stderr, makes
@@ -1120,7 +1139,23 @@ print_plan_command() {
     printf 'No Ready row is selected.\n' >&2
     return 1
   fi
-  printf 'wt plan --issue %s\n' "$issue_number"
+  print_wt_plan_command "$issue_number"
+}
+
+# print_issue_plan_command mirrors print_plan_command's contract for the
+# opened-Issue action bar, which gates on the Issue's own live labels via
+# labels_are_ready rather than the picker's current filter. can_plan is
+# computed once in prompt_open_issue from a single fresh label read, so a
+# failed read and a non-Ready Issue produce the same clear refusal here.
+# Pure: no GitHub request, no wt invocation, no clipboard, no other script.
+print_issue_plan_command() {
+  local issue_number="$1" can_plan="$2"
+
+  if [[ "$can_plan" -ne 1 ]]; then
+    printf '#%s is not Ready; refusing to print a planning command.\n' "$issue_number" >&2
+    return 1
+  fi
+  print_wt_plan_command "$issue_number"
 }
 
 edited_issue_body=""

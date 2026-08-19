@@ -197,8 +197,12 @@ it is never a feature binding, an Overnight Run participant, a continuation
 target, a PR owner, or a `wt done` cleanup target.
 
 In the `./scripts/devops.sh` picker's Ready view, pressing `s` on a selected
-row prints the `wt plan --issue <N>` command for it. The picker only prints
-the command — it never runs `wt`, and stays entirely Herdr-blind.
+row prints the `wt plan --issue <N>` command for it. The same `s` is also on
+the opened-Issue action bar (`Enter` on any row): it reads that Issue's own
+live labels and offers `[s] Plan` only when they satisfy the same Ready rule,
+so the command is reachable from any view, not only Ready. Any other label
+state — or a label read that fails — is a clear refusal instead. The picker
+only prints the command — it never runs `wt`, and stays entirely Herdr-blind.
 
 
 # Rule: Generating a Product Requirements Document (PRD)

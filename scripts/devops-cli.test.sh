@@ -108,6 +108,18 @@ check "plan command refuses a negative-looking issue number" \
 check "a rejected plan command explains itself on stderr" \
   "$(print_plan_command all 3 934 2>&1 >/dev/null)" "Switch to the Ready view to print a planning command."
 
+# print_issue_plan_command is the opened-Issue action bar's `s` key: same exact
+# wt command, but gated on a pre-computed can_plan flag rather than the
+# picker's view/count, since the opened-Issue bar knows only ONE Issue's own
+# live labels.
+check "issue plan command prints for a Ready Issue" \
+  "$(print_issue_plan_command 353 1 2>/dev/null)" "wt plan --issue 353"
+check "issue plan command refuses when can_plan is 0" \
+  "$(print_issue_plan_command 334 0 >/dev/null 2>&1 && echo yes || echo no)" "no"
+check "an issue plan refusal explains itself on stderr" \
+  "$(print_issue_plan_command 334 0 2>&1 >/dev/null)" \
+  "#334 is not Ready; refusing to print a planning command."
+
 # Decisions carry a stable marker so grooming can distinguish them from an
 # ordinary comment. Rationale is optional and remains plain user-authored text.
 check "decision comment has a marker" \
@@ -266,6 +278,57 @@ check "an ineligible Issue collects no answers" "$(<"$prompt_capture")" ""
 check "an ineligible Issue does not prompt for answers" \
   "$(grep -Fc 'Record a decision' "$fixture_root/prompt-ineligible-output" || true)" "0"
 check "an ineligible Issue records nothing" "$decision_recorded" "0"
+
+# Plan sits beside Decide on the same action bar and reads the SAME live
+# labels, but through labels_are_ready rather than needs-decision, so the two
+# actions disagree exactly where the underlying rule says they should. #353
+# above is plain `backlog`: not needs-decision, but Ready to build. The bar is
+# redrawn once before the "s" is read and again before the trailing blank
+# line backs out, so its offered actions each appear twice.
+: > "$prompt_capture"
+decision_recorded=0
+printf 's\n\n' | prompt_open_issue 353 > "$fixture_root/prompt-plan-output" \
+  2> "$fixture_root/prompt-plan-error"
+check "a Ready Issue is offered Plan" \
+  "$(grep -Fc '[s] Plan' "$fixture_root/prompt-plan-output" || true)" "2"
+check "a Ready Issue's Plan action prints the wt command" \
+  "$(grep -Fc 'wt plan --issue 353' "$fixture_root/prompt-plan-output" || true)" "1"
+check "pressing s makes no decision write" "$(<"$prompt_capture")" ""
+check "pressing s records no decision" "$decision_recorded" "0"
+
+# needs-decision alone is the mirror image: eligible for Decide, not for Plan.
+stub_labels="needs-decision"
+: > "$prompt_capture"
+decision_recorded=0
+printf 's\nr\n\n' | prompt_open_issue 334 > "$fixture_root/prompt-plan-ineligible-output" \
+  2> "$fixture_root/prompt-plan-ineligible-error"
+check "a non-Ready Issue is not offered Plan" \
+  "$(grep -Fc '[s] Plan' "$fixture_root/prompt-plan-ineligible-output" || true)" "0"
+grep -Fq '#334 is not Ready; refusing to print a planning command.' \
+  "$fixture_root/prompt-plan-ineligible-error"
+check "a non-Ready Issue's s prints no command" \
+  "$(grep -Fc 'wt plan --issue' "$fixture_root/prompt-plan-ineligible-output" || true)" "0"
+# Refresh and Back still work immediately after a refused Plan.
+check "Refresh still works right after a refused Plan" \
+  "$(grep -Fc 'viewed #334' "$fixture_root/prompt-plan-ineligible-output")" "2"
+
+# A label read that fails must default Plan closed, unlike Decide's fail-open
+# default: printing a command a human may paste and run is the one place
+# fail-open would be unsafe. issue_labels_of is restored immediately after.
+issue_labels_of() { return 1; }
+: > "$prompt_capture"
+decision_recorded=0
+printf 's\n\n' | prompt_open_issue 999 > "$fixture_root/prompt-plan-unreadable-output" \
+  2> "$fixture_root/prompt-plan-unreadable-error"
+check "an unreadable label state is not offered Plan" \
+  "$(grep -Fc '[s] Plan' "$fixture_root/prompt-plan-unreadable-output" || true)" "0"
+grep -Fq '#999 is not Ready; refusing to print a planning command.' \
+  "$fixture_root/prompt-plan-unreadable-error"
+check "an unreadable label state still offers Decide (fails open, unlike Plan)" \
+  "$(grep -Fc '[c] Decide' "$fixture_root/prompt-plan-unreadable-output" || true)" "2"
+issue_labels_of() {
+  printf '%s\n' "$stub_labels"
+}
 
 # The picker's c key opens the Issue with an initial c action; an eligible Issue
 # must still skip straight to answers rather than redrawing the bar.
@@ -647,6 +710,38 @@ check "an eligible decision reads labels exactly once" "$(count_label_reads 334)
 check "an eligible decision makes exactly two calls" "$(count_gh_calls)" "2"
 check "the label read precedes the decision comment" \
   "$(gh_call_sequence)" "issue view;issue comment;"
+
+# Plan is exercised against the real gh-backed issue_labels_of too, not just
+# the stubbed unit section above: #320 is plain backlog (Ready) and prints
+# exactly the wt command from one label read; #334 is needs-decision (not
+# Ready) and is refused instead. Neither writes to GitHub.
+prompt_open_issue_plan_output() {
+  local issue_number="$1"
+  (
+    set +e
+    # Re-sourced because the unit section above replaced issue_labels_of and
+    # view_issue with stubs; this subshell gets the real gh-backed versions.
+    DEVOPS_SOURCE_ONLY=1 source "$script" > /dev/null 2>&1
+    printf 's\n\n' | prompt_open_issue "$issue_number"
+  )
+}
+
+: > "$gh_calls"
+prompt_open_issue_plan_output 320 > "$fixture_root/prompt-plan-real-output" \
+  2> "$fixture_root/prompt-plan-real-error"
+check "a real Ready Issue's Plan prints the wt command" \
+  "$(grep -Fc 'wt plan --issue 320' "$fixture_root/prompt-plan-real-output" || true)" "1"
+check "a real Ready Issue's Plan reads labels exactly once" "$(count_label_reads 320)" "1"
+assert_no_github_write "a real Ready Issue's Plan action"
+
+: > "$gh_calls"
+prompt_open_issue_plan_output 334 > "$fixture_root/prompt-plan-real-ineligible-output" \
+  2> "$fixture_root/prompt-plan-real-ineligible-error"
+grep -Fq '#334 is not Ready; refusing to print a planning command.' \
+  "$fixture_root/prompt-plan-real-ineligible-error"
+check "a real non-Ready Issue's Plan prints no command" \
+  "$(grep -Fc 'wt plan --issue' "$fixture_root/prompt-plan-real-ineligible-output" || true)" "0"
+assert_no_github_write "a real non-Ready Issue's Plan action"
 
 # `answer` remains a backwards-compatible alias for the guided decision write,
 # and inherits the same eligibility read rather than carrying its own copy.
