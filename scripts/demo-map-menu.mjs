@@ -118,8 +118,8 @@ const frame = async direction => {
 };
 
 // The first tile that a click at its own centre would actually reach. Zooming
-// moves buildings off-screen and Home's context rail overlays the right of the
-// map, so a tile's coordinates are not proof the cursor can land on it —
+// moves buildings off-screen, and the context modal blocks the theatre while it
+// is open, so a tile's coordinates are not proof the cursor can land on it —
 // elementFromPoint is.
 async function visibleTileBox() {
   const size = page.viewportSize();
@@ -660,7 +660,7 @@ try {
   }
 
   // --- the behaviour the menu sits next to --------------------------------
-  console.log('\n--- regression: selection, checkboxes, and the rail ---');
+  console.log('\n--- regression: selection, checkboxes, and context modal ---');
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(base + '/', { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('.ws-map-tile[data-ws-id]', { timeout: 15000 });
@@ -678,9 +678,15 @@ try {
     'and the selection reached the map'
   );
   check(
-    await page.evaluate(() => !!document.querySelector('[data-cockpit-rail-open]')),
-    'the rail still offers its own Open Workspace action'
+    await page.evaluate(
+      () =>
+        document.querySelector('#cockpitContextModal')?.classList.contains('show') &&
+        !!document.querySelector('[data-cockpit-rail-open]')
+    ),
+    'the context modal offers the existing Open Workspace action'
   );
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('#cockpitContextModal:not(.show)');
 
   const checkboxWorks = await page.evaluate(() => {
     const tile = document.querySelector('.ws-map-tile[data-ws-id]');
