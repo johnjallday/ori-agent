@@ -788,8 +788,21 @@ test.describe('Coordinate Workspace Map', () => {
         expect(zoomedIn.zoom, 'Zoom In steps inward from the fitted value').toBeGreaterThan(
           fitted.zoom
         );
-        expect(zoomedIn.zoom, 'without jumping straight back to the ordinary range').toBeLessThan(
-          0.5
+        // Exactly one step, rather than snapping back to the ordinary range.
+        // This used to assert `< 0.5` outright, which quietly depended on the
+        // fitted value sitting more than one step below the floor boundary —
+        // true only while the map was stuck at a 320px height. #372 gave the
+        // map the window, so the same fixture now fits at ~0.40 and one honest
+        // 1.25x step lands just over 0.5. Asserting the step itself is both
+        // viewport-independent and a tighter statement of FR-38.
+        const limits = await page.evaluate(
+          () =>
+            (window as unknown as { OriWorkspaceMap: { camera: { limits: { step: number } } } })
+              .OriWorkspaceMap.camera.limits
+        );
+        expect(zoomedIn.zoom, 'without jumping straight back to the ordinary range').toBeCloseTo(
+          fitted.zoom * limits.step,
+          5
         );
       });
     });
@@ -1120,6 +1133,103 @@ test.describe('Coordinate Workspace Map', () => {
       }));
       expect(overflow.scroll, 'a selected district must not widen the page').toBeLessThanOrEqual(
         overflow.client + 1
+      );
+    });
+  });
+
+  // #372 — the two Workspace Map polish changes. Both are claims about the
+  // rendered page rather than about pure functions, which is why they are here
+  // and not only in workspace-map.test.js.
+  test.describe('viewport fit and create affordances (#372)', () => {
+    test.describe.configure({ mode: 'serial' });
+
+    const theatreHeight = (page: Page) =>
+      page.evaluate(() => {
+        const el = document.querySelector('.ws-map-theatre');
+        return el ? Math.round(el.getBoundingClientRect().height) : 0;
+      });
+
+    test('the map grows with the window instead of sitting at its floor (#365)', async ({
+      page
+    }) => {
+      await ensureWorkspace(page);
+
+      await page.setViewportSize({ width: 1440, height: 800 });
+      await openMap(page);
+      const short = await theatreHeight(page);
+
+      // No reload: this is the live resize path, and the assertion is relative
+      // on purpose. A fixed pixel expectation would encode whatever chrome the
+      // page happens to have above the map today and break on any header edit.
+      await page.setViewportSize({ width: 1440, height: 1200 });
+      await page.waitForTimeout(500);
+      const tall = await theatreHeight(page);
+
+      expect(tall, 'a 400px taller window must make the map taller').toBeGreaterThan(short + 300);
+      expect(short, 'and even the short window must use more than the 320px floor').toBeGreaterThan(
+        400
+      );
+      // It must use the window without overrunning it.
+      expect(tall).toBeLessThanOrEqual(1200);
+      expect(
+        tall / 1200,
+        'the map should own most of the window, not a band across the top'
+      ).toBeGreaterThan(0.6);
+    });
+
+    test('resizing changes what is visible and never where anything is (#365, FR-13)', async ({
+      page
+    }) => {
+      const id = await ensureWorkspace(page);
+      await savePosition(page, id, 342, 266);
+      await page.setViewportSize({ width: 1440, height: 800 });
+      await openMap(page);
+      const before = await anchors(page);
+      const short = await theatreHeight(page);
+
+      await page.setViewportSize({ width: 1440, height: 1200 });
+      await page.waitForTimeout(500);
+
+      expect(await theatreHeight(page), 'the map did resize').toBeGreaterThan(short);
+      expect(await anchors(page), 'but no world anchor moved').toEqual(before);
+    });
+
+    test('a populated map draws no create pad and keeps its real create action (#367)', async ({
+      page
+    }) => {
+      await ensureWorkspace(page);
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await openMap(page);
+
+      await expect(
+        page.locator('.ws-map-world .ws-map-pad'),
+        'the ordinary in-canvas create pad is gone'
+      ).toHaveCount(0);
+      await expect(page.locator('.ws-map-pad:not(.ws-map-pad--hero)')).toHaveCount(0);
+
+      // Removing it must not leave the page with no way to make a workspace:
+      // Home's workspace-area header owns that action in cockpit mode.
+      await expect(
+        page.locator('#cockpitCreateWorkspaceBtn'),
+        'the Home header create action survives'
+      ).toBeVisible();
+    });
+
+    test('the narrow layout still stacks without scrolling sideways (#365)', async ({ page }) => {
+      await ensureWorkspace(page);
+      await page.setViewportSize({ width: 720, height: 900 });
+      await openMap(page);
+
+      const overflow = await page.evaluate(() => ({
+        scroll: document.documentElement.scrollWidth,
+        client: document.documentElement.clientWidth
+      }));
+      expect(
+        overflow.scroll,
+        'the fit-to-viewport rule must not widen the narrow page'
+      ).toBeLessThanOrEqual(overflow.client + 1);
+      expect(await theatreHeight(page), 'and the map keeps a usable height').toBeGreaterThanOrEqual(
+        300
       );
     });
   });
