@@ -11,9 +11,10 @@
 # cover both paths against the same fixtures.
 #
 # GitHub writes are deliberately limited and confirm-gated: capturing an Issue,
-# recording answers to its open questions, and toggling the `approved` label.
-# `approved` is the pipeline's only human gate, so it is never written by the
-# grooming agent - only from here, or by hand on github.com.
+# recording answers to its open questions, adding the `answered` receipt, and
+# toggling the `approved` label. `approved` is the pipeline's only human gate, so
+# it is never written by the grooming agent - only from here, or by hand on
+# github.com.
 set -uo pipefail
 
 readonly issue_limit=1000
@@ -88,11 +89,16 @@ the opened-Issue action bar (Enter on any row) once that Issue's live labels
 satisfy `labels_are_ready`. Any other label state, or a failed label read, is a
 clear refusal instead.
 
+Planning is asynchronous. Return later and press `i` on the selected or opened
+Issue to resolve its completed local task list, choose Claude, Codex, Pi, or a
+worktree without Herdr, and delegate the confirmed start to `wt start`.
+
 new/decide/approve/unapprove write to GitHub. They prompt for confirmation on
 a terminal, and require --yes when stdin is not a terminal. `answer` remains a
 backwards-compatible alias for `decide`. A new Issue is created with no labels -
 capture takes ten seconds and the grooming routine specs it. A recorded decision
-keeps `needs-decision` until that routine processes the answer.
+adds `answered` as a receipt and keeps `needs-decision` until that routine
+processes the answer.
 EOF
 }
 
@@ -287,6 +293,68 @@ flight_state_of() {
     fi
   done
   printf '%s' ""
+}
+
+# Resolve an Issue to the one number-first task list owned by the dev worktree.
+# This is deliberately local: the later `i` action must be useful after an
+# asynchronous planner finishes without refreshing GitHub or consulting Herdr.
+implementation_feature=""
+resolve_implementation_feature() {
+  local issue_number="$1" file slug state
+  local -a matches=()
+
+  implementation_feature=""
+  if [[ ! "$issue_number" =~ ^[1-9][0-9]*$ ]]; then
+    printf 'Start implementation requires a positive Issue number.\n' >&2
+    return 2
+  fi
+
+  resolve_tasks_dir
+  if [[ -n "$tasks_dir" ]]; then
+    for file in "$tasks_dir"/tasks-"$issue_number"-*.md; do
+      [[ -f "$file" ]] || continue
+      matches+=("$file")
+    done
+  fi
+
+  if [[ "${#matches[@]}" -eq 0 ]]; then
+    printf 'No completed local plan found for #%s. Press s to start Pi planning, then return after the planner writes the real task list.\n' "$issue_number" >&2
+    return 1
+  fi
+  if [[ "${#matches[@]}" -gt 1 ]]; then
+    printf 'Multiple task lists match #%s; keep exactly one before starting implementation:\n' "$issue_number" >&2
+    for file in "${matches[@]}"; do
+      printf '  %s\n' "$file" >&2
+    done
+    return 1
+  fi
+
+  file="${matches[0]}"
+  if grep -Fq '<!-- ori-devflow: planning-starter;' "$file"; then
+    printf 'Planning for #%s is not complete: %s is still a planning starter. Return after Pi replaces it with the real task list.\n' "$issue_number" "$file" >&2
+    return 1
+  fi
+
+  slug="${file##*/}"
+  slug="${slug#tasks-}"
+  slug="${slug%.md}"
+  load_flight_index
+  state="$(flight_state_of "$slug")"
+  if [[ -z "$state" ]]; then
+    state="$(flight_state_of "$issue_number")"
+  fi
+  case "$state" in
+    worktree)
+      printf 'Implementation for #%s already has a checked-out worktree (%s). Use that worktree instead of starting another.\n' "$issue_number" "$slug" >&2
+      return 1
+      ;;
+    branch)
+      printf 'Implementation for #%s already has a branch (%s). Resume it instead of starting duplicate work.\n' "$issue_number" "$slug" >&2
+      return 1
+      ;;
+  esac
+
+  implementation_feature="$slug"
 }
 
 # "<done>/<total>" over the task list's PARENT groups - the top-level `- [ ]`
@@ -559,7 +627,7 @@ decide_issue() {
 
   decision_recorded=0
   local -a rest=()
-  local argument number answers body labels label_status=0
+  local argument number answers body labels label_status=0 answered_status=0
 
   for argument in "$@"; do
     if [[ "$expecting_rationale" -eq 1 ]]; then
@@ -616,11 +684,20 @@ decide_issue() {
   body="$(format_decision_comment "$answers" "$rationale")"
   printf '\nWill record this decision on #%s:\n' "$number"
   print_indented "$body"
-  printf 'The needs-decision label stays until the grooming routine processes it.\n'
-  confirm_write "Post this decision?" "$assume_yes" || return $?
+  printf 'After the comment is posted, the answered label is added; needs-decision stays until the grooming routine processes it.\n'
+  confirm_write "Post this decision and mark it answered?" "$assume_yes" || return $?
   gh issue comment "$number" --body "$body" || return $?
   decision_recorded=1
-  printf 'Decision recorded. It will remain in Needs my decision until grooming triages it.\n'
+
+  # The marked comment is the answer of record. `answered` is an additive
+  # receipt for humans and automation, so a failure to apply it must be reported
+  # but must not turn the successfully posted decision into a failed operation.
+  gh issue edit "$number" --add-label answered || answered_status=$?
+  if [[ "$answered_status" -ne 0 ]]; then
+    printf 'Decision recorded, but the answered label could not be added (GitHub exited %s). It will remain in Needs my decision until grooming triages it.\n' "$answered_status" >&2
+    return 0
+  fi
+  printf 'Decision recorded and marked answered. It will remain in Needs my decision until grooming triages it.\n'
 }
 
 # Kept for callers that learned the original command name.
@@ -1060,7 +1137,7 @@ render_picker() {
   printf '\n'
   style '2' '↑/↓ or j/k select  •  ←/→ or h/l change view  •  Enter open Issue  •  c open + decide  •  n new'
   printf '\n'
-  style '2' 'o approve  •  s plan  •  r refresh  •  ? help  •  q quit'
+  style '2' 'o approve  •  s plan  •  i start implementation  •  r refresh  •  ? help  •  q quit'
   printf '\n'
 }
 
@@ -1123,18 +1200,21 @@ Picker keys
   ↑/↓, j/k      Select an Issue
   ←/→, h/l      Change view
   1..5          All, Decisions, Backlog, Proposals, Ready
-  Enter         Open the selected Issue; its own action bar offers Decide and
-                Plan when that Issue's live labels make them eligible
+  Enter         Open the selected Issue; its action bar offers Decide and Plan
+                when eligible, plus Start implementation
   c             Open the selected Issue directly at its decision prompt
   n             Capture a new Issue with an optional body
   o             Add the approved label
-  s             Start Pi planning for the selected Ready Issue
+  s             Start asynchronous Pi planning for the selected Ready Issue
+  i             Start implementation from a completed local plan; choose Claude,
+                Codex, Pi, worktree-only, or cancel
   r             Refresh from GitHub
   ?             Show this help
   q             Quit
 
-Writes always show a preview and ask for confirmation. Recorded decisions leave
-the needs-decision label in place until the grooming routine processes them.
+Writes always show a preview and ask for confirmation. Recorded decisions add
+the answered label as a receipt and leave needs-decision in place until the
+grooming routine processes them.
 EOF
 }
 
@@ -1182,7 +1262,7 @@ prompt_open_issue() {
 
   while true; do
     if [[ -z "$action" ]]; then
-      bar="[r] Refresh  [Enter] Back"
+      bar="[i] Start implementation  [r] Refresh  [Enter] Back"
       [[ "$can_plan" -eq 1 ]] && bar="[s] Plan  $bar"
       [[ "$can_decide" -eq 1 ]] && bar="[c] Decide  $bar"
       printf '\n%s\n' "$bar"
@@ -1209,6 +1289,9 @@ prompt_open_issue() {
         ;;
       s|plan)
         start_issue_plan "$issue_number" "$can_plan" || true
+        ;;
+      i|implement|implementation)
+        start_issue_implementation "$issue_number" || true
         ;;
       r|refresh)
         view_issue "$issue_number" || return $?
@@ -1281,6 +1364,67 @@ start_issue_plan() {
     return 1
   fi
   launch_pi_plan "$issue_number"
+}
+
+implementation_mode=""
+prompt_implementation_agent() {
+  local issue_number="$1" feature="$2" choice
+
+  implementation_mode=""
+  printf '\nStart implementation for #%s (%s).\n' "$issue_number" "$feature"
+  printf '  [1/c] Claude\n'
+  printf '  [2/x] Codex\n'
+  printf '  [3/p] Pi\n'
+  printf '  [4/w] Worktree only (no Herdr handoff)\n'
+  printf '  [Enter/q] Cancel\n'
+  printf 'agent> '
+  IFS= read -r choice || return 0
+  case "$choice" in
+    1|c|C|claude|Claude) implementation_mode="claude" ;;
+    2|x|X|codex|Codex) implementation_mode="codex" ;;
+    3|p|P|pi|Pi) implementation_mode="pi" ;;
+    4|w|W|worktree|worktree-only) implementation_mode="no-herdr" ;;
+    ""|q|Q|cancel|Cancel)
+      printf 'Cancelled.\n'
+      ;;
+    *)
+      printf 'Unknown agent choice; cancelled.\n' >&2
+      ;;
+  esac
+}
+
+# wt remains the owner of plan display, confirmation, worktree creation, and
+# handoff. The child validates the already constrained mode again and receives
+# every value as a separate argument; no Issue-derived text becomes shell code.
+launch_implementation() {
+  local feature="$1" mode="$2"
+
+  case "$mode" in
+    claude|codex|pi|no-herdr) ;;
+    *)
+      printf 'Unsupported implementation mode: %s\n' "$mode" >&2
+      return 2
+      ;;
+  esac
+  if ! command -v zsh >/dev/null 2>&1; then
+    printf 'Starting implementation requires zsh to run scripts/wt.sh.\n' >&2
+    return 1
+  fi
+  if [[ ! -f "$script_dir/wt.sh" ]]; then
+    printf 'Implementation entrypoint not found: %s\n' "$script_dir/wt.sh" >&2
+    return 1
+  fi
+  zsh -c 'source "$1" && if [[ "$3" == no-herdr ]]; then wt start "$2" --no-herdr; else wt start "$2" --kind "$3"; fi' devops-start "$script_dir/wt.sh" "$feature" "$mode"
+}
+
+start_issue_implementation() {
+  local issue_number="$1" feature
+
+  resolve_implementation_feature "$issue_number" || return $?
+  feature="$implementation_feature"
+  prompt_implementation_agent "$issue_number" "$feature"
+  [[ -n "$implementation_mode" ]] || return 0
+  launch_implementation "$feature" "$implementation_mode"
 }
 
 edited_issue_body=""
@@ -1398,6 +1542,13 @@ run_picker() {
         # Drop out of the alternate screen while wt shows its confirmation and
         # launches the Pi planner. Safe on an empty or non-Ready view.
         with_normal_terminal start_plan "${picker_filters[$filter_index]}" "$count" "${issue_numbers[$selected_index]:-}"
+        ;;
+      i)
+        # Planning is asynchronous. Re-read only local artifacts when the owner
+        # returns, then let wt own the selected implementation handoff.
+        if [[ "$count" -gt 0 ]]; then
+          with_normal_terminal start_issue_implementation "${issue_numbers[$selected_index]}"
+        fi
         ;;
       '?')
         with_normal_terminal print_picker_help

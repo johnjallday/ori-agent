@@ -125,10 +125,13 @@ built around.
 `decide` records answers in a comment marked `<!-- ori-decision -->`. In the
 picker, the opened Issue owns the interaction: its `c` action asks for choices
 such as `1B, 2A` and an optional rationale, then refreshes so the persisted
-answer is visible; list-level `c` shortcuts into that action. It deliberately
-leaves `needs-decision` in place until the grooming routine reads the answer and
-performs triage. Everything else about an Issue's lifecycle — triaging,
-sizing, and bundling — belongs to that routine. Delivery owns closing:
+answer is visible; list-level `c` shortcuts into that action. After the comment
+succeeds, the same confirmed operation additively applies `answered` as a
+receipt while deliberately leaving `needs-decision` in place for the grooming
+routine. If that label write fails, the comment remains the answer of record and
+the command reports the partial result without pretending the receipt exists.
+Everything else about an Issue's lifecycle — triaging, sizing, and bundling —
+belongs to that routine. Delivery owns closing:
 `wt done` closes the exact attached Issue only after its implementation PR has
 merged to `dev`, then additionally closes any other Issue that same merged PR's
 body names with `Closes`/`Fixes`/`Resolves #N` — the equivalent of GitHub's own
@@ -165,7 +168,7 @@ The full lifecycle, and which agent owns each stage:
 ```
 Ready Issue on GitHub
   → wt plan --issue N        Pi plans in ori-agent-dev  (never implements)
-  → wt start <feature>       Claude implements in its own worktree
+  → picker i → wt start      chosen agent implements in its own worktree
   → wt pr → squash-merge     one PR to dev
   → wt done <feature>        close its attached Issue, archive the checklist, clean up
 ```
@@ -205,10 +208,11 @@ Rules this stage holds to:
   Implementation begins only when a person runs `wt start <feature>`, which
   refuses to create a worktree while the task list is still the starter.
 
-Implementation then runs on Herdr's configured primary agent — Claude — with
-no kind override. The planning Pi session is a separate record entirely:
-it is never a feature binding, an Overnight Run participant, a continuation
-target, a PR owner, or a `wt done` cleanup target.
+The planning Pi session is a separate record entirely: it is never a feature
+binding, an Overnight Run participant, a continuation target, a PR owner, or a
+`wt done` cleanup target. A bare direct `wt start` still uses Herdr's configured
+Claude primary; the Issue picker instead requires an explicit implementation
+choice.
 
 In the `./scripts/devops.sh` picker's Ready view, pressing `s` on a selected
 row runs `wt plan --issue <N>` for it and launches the Pi planner after wt's
@@ -218,6 +222,15 @@ normal confirmation. The same `s` is also on the opened-Issue action bar
 from any view, not only Ready. Any other label state — or a label read that
 fails — is a clear refusal instead. `wt plan` performs its own fresh eligibility
 check before writing files or contacting Herdr.
+
+Planning is asynchronous; `devops.sh` does not wait or poll it. After Pi replaces
+the starter with a real task list, press `[i] Start implementation` on the
+selected row or opened Issue. This later action resolves exactly one local
+`tasks/tasks-<N>-*.md`, refuses a missing/ambiguous/starter plan or existing
+branch/worktree, and prompts for Claude, Codex, Pi, worktree-only, or cancel. It
+then delegates to `wt start <feature> --kind <kind>` or `--no-herdr`, leaving
+`wt start` responsible for its normal summary, confirmation, worktree creation,
+and handoff.
 
 
 # Planning: PRDs and Task Lists
