@@ -19,6 +19,11 @@
   let consoleOpen = false;
   let consoleTrigger = null;
   let consoleOverlayId = '';
+  let catalog = [];
+  let catalogLoaded = false;
+  let actionRequestInFlight = false;
+  let pendingAction = null;
+  let lastRun = null;
 
   function workspaceIdFromPage() {
     if (workspaceId) return workspaceId;
@@ -32,6 +37,13 @@
   function apiPath() {
     const id = workspaceIdFromPage();
     return id ? '/api/workspaces/' + encodeURIComponent(id) + '/reaper/state' : '';
+  }
+
+  function actionsApiPath(actionId) {
+    const id = workspaceIdFromPage();
+    if (!id) return '';
+    const base = '/api/workspaces/' + encodeURIComponent(id) + '/reaper/actions';
+    return actionId ? base + '/' + encodeURIComponent(actionId) + '/run' : base;
   }
 
   function documentVisible() {
@@ -103,6 +115,88 @@
     } finally {
       requestInFlight = false;
     }
+  }
+
+  async function loadActions() {
+    const path = actionsApiPath();
+    if (!path || typeof fetch !== 'function') return catalog;
+    try {
+      const response = await fetch(path, { headers: { Accept: 'application/json' } });
+      if (!response.ok) throw new Error('catalog request failed');
+      const actions = await response.json();
+      if (!Array.isArray(actions)) throw new Error('invalid catalog');
+      catalog = actions.filter(action => action && action.id && action.label);
+      catalogLoaded = true;
+      if (consoleOpen) renderConsole();
+      return catalog;
+    } catch (_error) {
+      catalogLoaded = true;
+      if (consoleOpen) renderConsole();
+      return catalog;
+    }
+  }
+
+  function catalogAction(actionId) {
+    return catalog.find(action => String(action.id) === String(actionId)) || null;
+  }
+
+  function actionError(payload, response) {
+    if (payload && payload.error_reason) return String(payload.error_reason);
+    if (payload && payload.error) return String(payload.error);
+    return response && response.status === 409
+      ? 'REAPER is not connected. Nothing was run.'
+      : 'REAPER did not run the action.';
+  }
+
+  async function executeAction(action, confirmed) {
+    const path = actionsApiPath(action && action.id);
+    if (!path || actionRequestInFlight || typeof fetch !== 'function') return false;
+    actionRequestInFlight = true;
+    pendingAction = null;
+    lastRun = { outcome: 'running', label: action.label };
+    if (consoleOpen) renderConsole();
+    try {
+      const response = await fetch(path, {
+        method: 'POST',
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirmed: Boolean(confirmed) })
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload.outcome !== 'ok') {
+        lastRun = { outcome: 'error', label: action.label, reason: actionError(payload, response) };
+        if (payload && typeof payload.connected === 'boolean') {
+          lastState = payload;
+          publishIfChanged(payload);
+        }
+        return false;
+      }
+      lastRun = { outcome: 'ok', label: action.label };
+      lastState = payload;
+      publishIfChanged(payload);
+      return true;
+    } catch (_error) {
+      lastRun = {
+        outcome: 'error',
+        label: action.label,
+        reason: 'The action request failed. Nothing else will be attempted.'
+      };
+      return false;
+    } finally {
+      actionRequestInFlight = false;
+      if (consoleOpen) renderConsole();
+    }
+  }
+
+  function requestAction(action) {
+    if (!action || actionRequestInFlight) return false;
+    if (action.needs_confirmation) {
+      pendingAction = action;
+      lastRun = null;
+      if (consoleOpen) renderConsole();
+      return true;
+    }
+    void executeAction(action, false);
+    return true;
   }
 
   function stopPolling() {
@@ -250,6 +344,165 @@
     host.appendChild(header);
   }
 
+  function transportAction(actionId, label, needsConfirmation) {
+    return (
+      catalogAction(actionId) || {
+        id: actionId,
+        label,
+        description: label + ' the current REAPER transport.',
+        source: 'builtin',
+        mutates: Boolean(needsConfirmation),
+        needs_confirmation: Boolean(needsConfirmation)
+      }
+    );
+  }
+
+  function renderTransport(host, state) {
+    const section = el('section', 'reaper-console-transport');
+    const controls = el('div', 'reaper-console-transport-controls');
+    [
+      ['1007', 'Play', false, '▶'],
+      ['1016', 'Stop', false, '■'],
+      ['1013', 'Record', true, '●']
+    ].forEach(([id, label, needsConfirmation, symbol]) => {
+      const action = transportAction(id, label, needsConfirmation);
+      const control = button('', 'reaper-console-transport-btn is-' + label.toLowerCase(), () =>
+        requestAction(action)
+      );
+      control.disabled = actionRequestInFlight;
+      control.setAttribute('aria-label', label + ' in REAPER');
+      control.appendChild(el('span', 'reaper-console-transport-symbol', symbol));
+      control.appendChild(el('span', '', label));
+      if (
+        (id === '1007' && state.play_state === 'playing') ||
+        (id === '1013' && state.play_state === 'recording')
+      ) {
+        control.classList.add('is-active');
+      }
+      controls.appendChild(control);
+    });
+    section.appendChild(controls);
+    const position = el('div', 'reaper-console-transport-position');
+    position.appendChild(el('span', '', String(state.play_state || 'stopped').toUpperCase()));
+    position.appendChild(el('strong', '', state.position || '—'));
+    section.appendChild(position);
+    host.appendChild(section);
+  }
+
+  function renderActionFeedback(host) {
+    if (pendingAction) {
+      const confirmation = el('section', 'reaper-console-confirm');
+      const copy = el('div', '');
+      copy.appendChild(el('strong', '', 'Confirm project change'));
+      copy.appendChild(
+        el('p', '', pendingAction.label + ' can change the open REAPER session. Run it now?')
+      );
+      confirmation.appendChild(copy);
+      const actions = el('div', 'reaper-console-confirm-actions');
+      actions.appendChild(
+        button('Cancel', 'reaper-console-btn is-secondary', () => {
+          pendingAction = null;
+          renderConsole();
+        })
+      );
+      actions.appendChild(
+        button(
+          'Run ' + pendingAction.label,
+          'reaper-console-btn is-primary',
+          () => void executeAction(pendingAction, true)
+        )
+      );
+      confirmation.appendChild(actions);
+      host.appendChild(confirmation);
+    }
+    if (!lastRun) return;
+    const message = el(
+      'div',
+      'reaper-console-run-result is-' + lastRun.outcome,
+      lastRun.outcome === 'running'
+        ? 'Running ' + lastRun.label + '…'
+        : lastRun.outcome === 'ok'
+          ? lastRun.label + ' completed in REAPER.'
+          : lastRun.label + ' failed: ' + lastRun.reason
+    );
+    message.setAttribute('role', 'status');
+    host.appendChild(message);
+  }
+
+  function renderRawCommand(host) {
+    const raw = el('div', 'reaper-console-raw');
+    const copy = el('div', 'reaper-console-raw-copy');
+    copy.appendChild(el('strong', '', 'Raw command ID'));
+    copy.appendChild(el('span', '', 'Decimal or _RS hexadecimal IDs always require confirmation.'));
+    raw.appendChild(copy);
+    const controls = el('div', 'reaper-console-raw-controls');
+    const input = el('input', 'reaper-console-raw-input');
+    input.type = 'text';
+    input.placeholder = '40001 or _RS…';
+    input.maxLength = 96;
+    input.autocomplete = 'off';
+    input.setAttribute('aria-label', 'Raw REAPER command ID');
+    controls.appendChild(input);
+    const run = button('Review', 'reaper-console-btn is-secondary', () => {
+      const id = String(input.value || '').trim();
+      if (!id) {
+        lastRun = { outcome: 'error', label: 'Raw command', reason: 'Enter a command ID first.' };
+        renderConsole();
+        return;
+      }
+      requestAction({
+        id,
+        label: 'Raw command ' + id,
+        description: 'User-entered REAPER command ID.',
+        source: 'raw',
+        mutates: true,
+        needs_confirmation: true
+      });
+    });
+    run.disabled = actionRequestInFlight;
+    controls.appendChild(run);
+    raw.appendChild(controls);
+    host.appendChild(raw);
+  }
+
+  function renderActionGrid(host) {
+    const section = el('section', 'reaper-console-action-catalog');
+    const head = el('div', 'reaper-console-section-head');
+    head.appendChild(el('h3', '', 'Actions'));
+    head.appendChild(el('span', '', catalogLoaded ? catalog.length + ' available' : 'Loading…'));
+    section.appendChild(head);
+    const grid = el('div', 'reaper-console-action-grid');
+    const remaining = catalog.filter(
+      action => !['1007', '1016', '1013'].includes(String(action.id))
+    );
+    if (!catalogLoaded) {
+      grid.appendChild(el('p', 'reaper-console-empty', 'Loading REAPER actions…'));
+    } else if (!remaining.length) {
+      grid.appendChild(el('p', 'reaper-console-empty', 'No additional actions available'));
+    } else {
+      remaining.forEach(action => {
+        const control = button('', 'reaper-console-action-card', () => requestAction(action));
+        control.disabled = actionRequestInFlight;
+        control.setAttribute('aria-label', action.label + ' in REAPER');
+        const title = el('span', 'reaper-console-action-title');
+        title.appendChild(el('strong', '', action.label));
+        title.appendChild(
+          el(
+            'span',
+            'reaper-console-action-risk',
+            action.needs_confirmation ? 'Confirm' : 'One click'
+          )
+        );
+        control.appendChild(title);
+        control.appendChild(el('span', 'reaper-console-action-description', action.description));
+        grid.appendChild(control);
+      });
+    }
+    section.appendChild(grid);
+    host.appendChild(section);
+    renderRawCommand(host);
+  }
+
   function renderOffline(host, state) {
     const panel = el('section', 'reaper-console-offline');
     panel.appendChild(el('span', 'reaper-console-offline-mark', '!'));
@@ -319,9 +572,7 @@
     const readouts = el('dl', 'reaper-console-readouts');
     [
       ['Tempo', tempoLabel(state.tempo)],
-      ['Meter', state.time_signature || '—'],
-      ['Transport', state.play_state || 'stopped'],
-      ['Position', state.position || '—']
+      ['Meter', state.time_signature || '—']
     ].forEach(([label, value]) => {
       const item = el('div', 'reaper-console-readout');
       item.appendChild(el('dt', '', label));
@@ -330,6 +581,9 @@
     });
     project.appendChild(readouts);
     host.appendChild(project);
+    renderTransport(host, state);
+    renderActionFeedback(host);
+    renderActionGrid(host);
     renderTracks(host, state);
   }
 
@@ -385,6 +639,7 @@
     }
     renderConsole();
     void refresh();
+    if (!catalogLoaded) void loadActions();
     return true;
   }
 
@@ -458,6 +713,15 @@
       if (consoleOpen) renderConsole();
     },
     _state: () => lastState,
+    _actions: () => catalog,
+    _setActions: actions => {
+      catalog = Array.isArray(actions) ? actions : [];
+      catalogLoaded = true;
+      if (consoleOpen) renderConsole();
+    },
+    _requestAction: requestAction,
+    _executeAction: executeAction,
+    _lastRun: () => lastRun,
     _polling: () => pollTimer !== null,
     _openSetupFix: openSetupFix,
     _resetForTest: () => {
@@ -470,6 +734,11 @@
       consoleOpen = false;
       consoleTrigger = null;
       consoleOverlayId = '';
+      catalog = [];
+      catalogLoaded = false;
+      actionRequestInFlight = false;
+      pendingAction = null;
+      lastRun = null;
     }
   };
 

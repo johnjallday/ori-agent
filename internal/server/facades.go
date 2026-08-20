@@ -179,7 +179,7 @@ type HandlerFacade struct {
 	// RuntimeCapabilities serves operating modes, durable/live status, exact
 	// actions, verification, and capability-scoped grant delegation.
 	RuntimeCapabilities *runtimecapabilityhttp.Handler
-	// Reaper serves live, workspace-scoped state from REAPER's loopback Web Remote.
+	// Reaper serves live workspace-scoped state and actions through REAPER's loopback Web Remote.
 	Reaper     *reaperhttp.Handler
 	User       *userhttp.Handler
 	PersonalHQ *personalhqhttp.Handler

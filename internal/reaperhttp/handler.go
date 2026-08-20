@@ -1,4 +1,4 @@
-// Package reaperhttp serves workspace-scoped live REAPER state. The handler
+// Package reaperhttp serves workspace-scoped live REAPER state and actions. The handler
 // accepts only a workspace ID; the project path and loopback endpoint are
 // resolved from trusted server-side state.
 package reaperhttp
@@ -26,17 +26,23 @@ type StateReader interface {
 	ReadState(context.Context, reaper.ProjectSource) (reaper.State, error)
 }
 
+type ActionCatalog interface {
+	List() ([]reaper.Action, error)
+	Find(string) (reaper.Action, bool, error)
+}
+
 type Handler struct {
 	store    WorkspaceStore
 	provider userprofile.UserProvider
 	client   StateReader
+	catalog  ActionCatalog
 }
 
-func NewHandler(store WorkspaceStore, provider userprofile.UserProvider, client StateReader) *Handler {
+func NewHandler(store WorkspaceStore, provider userprofile.UserProvider, client StateReader, catalog ActionCatalog) *Handler {
 	if provider == nil {
 		provider = userprofile.LocalUserProvider{}
 	}
-	return &Handler{store: store, provider: provider, client: client}
+	return &Handler{store: store, provider: provider, client: client, catalog: catalog}
 }
 
 func (h *Handler) GetState(w http.ResponseWriter, r *http.Request) {
@@ -44,12 +50,12 @@ func (h *Handler) GetState(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	folderWorkspace, err := h.store.GetFolderWorkspace(ws.ID)
-	if err != nil || folderWorkspace == nil {
+	project, applies, err := h.projectSource(ws.ID)
+	if err != nil {
 		h.respondUnavailable(w)
 		return
 	}
-	if !runtimeSelectsLiveReaper(folderWorkspace) {
+	if !applies {
 		_ = orihttp.RespondSuccess(w, reaper.State{
 			Applies:   false,
 			PlayState: "unknown",
@@ -58,17 +64,7 @@ func (h *Handler) GetState(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	projectPath, err := reapersetup.AuthoritativeProject(h.store, ws.ID)
-	if err != nil {
-		h.respondUnavailable(w)
-		return
-	}
-	entryPath, err := workspace.GetProjectEntryPath(folderWorkspace.SharedData)
-	if err != nil {
-		h.respondUnavailable(w)
-		return
-	}
-	state, err := h.client.ReadState(r.Context(), reaper.ProjectSource{Path: projectPath, EntryPath: entryPath})
+	state, err := h.client.ReadState(r.Context(), project)
 	if err != nil {
 		logger.Warn("Live REAPER state request failed", logger.Fields{"category": "reaper_state_failed"})
 		_ = orihttp.RespondAPIError(w, http.StatusBadGateway,
@@ -77,6 +73,28 @@ func (h *Handler) GetState(w http.ResponseWriter, r *http.Request) {
 	}
 	state.Applies = true
 	_ = orihttp.RespondSuccess(w, state)
+}
+
+func (h *Handler) projectSource(workspaceID string) (reaper.ProjectSource, bool, error) {
+	folderWorkspace, err := h.store.GetFolderWorkspace(workspaceID)
+	if err != nil {
+		return reaper.ProjectSource{}, false, err
+	}
+	if folderWorkspace == nil {
+		return reaper.ProjectSource{}, false, reaper.ErrClientUnavailable
+	}
+	if !runtimeSelectsLiveReaper(folderWorkspace) {
+		return reaper.ProjectSource{}, false, nil
+	}
+	projectPath, err := reapersetup.AuthoritativeProject(h.store, workspaceID)
+	if err != nil {
+		return reaper.ProjectSource{}, true, err
+	}
+	entryPath, err := workspace.GetProjectEntryPath(folderWorkspace.SharedData)
+	if err != nil {
+		return reaper.ProjectSource{}, true, err
+	}
+	return reaper.ProjectSource{Path: projectPath, EntryPath: entryPath}, true, nil
 }
 
 func runtimeSelectsLiveReaper(ws *workspace.Workspace) bool {
