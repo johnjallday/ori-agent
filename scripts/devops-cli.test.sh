@@ -214,6 +214,120 @@ flight_states=()
 check "cell is empty when nothing is in flight" "$(flight_cell_of 999)" ""
 tasks_dir=""
 
+# Starting implementation resolves only the dev worktree's local, number-first
+# task artifacts. Stub the local directory/flight readers inside each subshell
+# so these tests cannot touch GitHub, Herdr, or this checkout's real branches.
+implementation_tasks="$fixture_root/implementation-tasks"
+implementation_side_effects="$fixture_root/implementation-side-effects"
+mkdir -p "$implementation_tasks"
+: > "$implementation_side_effects"
+implementation_fixture_result() {
+  local issue_number="$1" fixture_state="${2:-}"
+  (
+    resolve_tasks_dir() { tasks_dir="$implementation_tasks"; }
+    load_flight_index() { :; }
+    flight_state_of() { printf '%s' "$fixture_state"; }
+    gh() { printf 'github\n' >> "$implementation_side_effects"; return 97; }
+    resolve_implementation_feature "$issue_number" || return $?
+    printf '%s' "$implementation_feature"
+  )
+}
+
+check "implementation resolver rejects an invalid Issue number" \
+  "$(implementation_fixture_result 0 >/dev/null 2>&1 && echo yes || echo no)" "no"
+check "implementation resolver refuses a missing plan" \
+  "$(implementation_fixture_result 777 2>&1 >/dev/null || true)" \
+  "No completed local plan found for #777. Press s to start Pi planning, then return after the planner writes the real task list."
+
+cat > "$implementation_tasks/tasks-777-sample.md" <<'MD'
+## Tasks
+- [ ] 1.0 Real implementation work
+MD
+check "implementation resolver returns the number-first feature slug" \
+  "$(implementation_fixture_result 777 2>/dev/null)" "777-sample"
+
+cat > "$implementation_tasks/tasks-778-starter.md" <<'MD'
+<!-- ori-devflow: planning-starter; do not implement until the planner replaces this file -->
+## Tasks
+MD
+check "implementation resolver refuses a planning starter" \
+  "$(implementation_fixture_result 778 2>&1 >/dev/null || true)" \
+  "Planning for #778 is not complete: $implementation_tasks/tasks-778-starter.md is still a planning starter. Return after Pi replaces it with the real task list."
+
+printf '%s\n' '## Tasks' > "$implementation_tasks/tasks-779-first.md"
+printf '%s\n' '## Tasks' > "$implementation_tasks/tasks-779-second.md"
+multiple_result="$(implementation_fixture_result 779 2>&1 >/dev/null || true)"
+if [[ "$multiple_result" != *"Multiple task lists match #779"* || \
+  "$multiple_result" != *"tasks-779-first.md"* || \
+  "$multiple_result" != *"tasks-779-second.md"* ]]; then
+  printf 'FAIL implementation resolver did not describe every ambiguous artifact:\n%s\n' \
+    "$multiple_result" >&2
+  failures=$((failures + 1))
+fi
+
+printf '%s\n' '## Tasks' > "$implementation_tasks/tasks-780-branch.md"
+check "implementation resolver refuses an existing branch" \
+  "$(implementation_fixture_result 780 branch 2>&1 >/dev/null || true)" \
+  "Implementation for #780 already has a branch (780-branch). Resume it instead of starting duplicate work."
+printf '%s\n' '## Tasks' > "$implementation_tasks/tasks-781-worktree.md"
+check "implementation resolver refuses an existing worktree" \
+  "$(implementation_fixture_result 781 worktree 2>&1 >/dev/null || true)" \
+  "Implementation for #781 already has a checked-out worktree (781-worktree). Use that worktree instead of starting another."
+check "implementation resolver performs no GitHub or Herdr side effect" \
+  "$(wc -c < "$implementation_side_effects" | tr -d ' ')" "0"
+
+implementation_choice_result() {
+  local choice="$1"
+  (
+    prompt_implementation_agent 777 777-sample <<< "$choice" >/dev/null 2>&1
+    printf '%s' "$implementation_mode"
+  )
+}
+check "Claude choice maps to its wt kind" "$(implementation_choice_result 1)" "claude"
+check "Codex choice maps to its wt kind" "$(implementation_choice_result 2)" "codex"
+check "Pi choice maps to its wt kind" "$(implementation_choice_result 3)" "pi"
+check "worktree-only choice maps to no-herdr" "$(implementation_choice_result 4)" "no-herdr"
+check "cancel maps to no launch mode" "$(implementation_choice_result q)" ""
+
+# Drive the full local resolve -> prompt -> launch flow against the same
+# isolated fixture. The launcher is a recorder here; exact zsh vectors are
+# asserted again below once the fake zsh executable is installed.
+implementation_start_calls="$fixture_root/implementation-start-calls"
+implementation_start_fixture() {
+  local issue_number="$1" fixture_state="$2" choice="$3"
+  (
+    resolve_tasks_dir() { tasks_dir="$implementation_tasks"; }
+    load_flight_index() { :; }
+    flight_state_of() { printf '%s' "$fixture_state"; }
+    gh() { printf 'github\n' >> "$implementation_side_effects"; return 97; }
+    launch_implementation() {
+      printf '%s\t%s\n' "$1" "$2" >> "$implementation_start_calls"
+    }
+    start_issue_implementation "$issue_number" <<< "$choice" >/dev/null
+  )
+}
+
+: > "$implementation_start_calls"
+check "the implementation action refuses a planning starter before launch" \
+  "$(implementation_start_fixture 778 "" 1 2>/dev/null && echo yes || echo no)" "no"
+check "a refused planning starter launches nothing" \
+  "$(wc -c < "$implementation_start_calls" | tr -d ' ')" "0"
+
+printf '%s\n' '## Tasks' > "$implementation_tasks/tasks-782-demo.md"
+for implementation_choice_fixture in '1:claude' '2:codex' '3:pi' '4:no-herdr'; do
+  choice="${implementation_choice_fixture%%:*}"
+  expected_mode="${implementation_choice_fixture#*:}"
+  : > "$implementation_start_calls"
+  implementation_start_fixture 782 "" "$choice"
+  check "the implementation action launches $expected_mode" \
+    "$(<"$implementation_start_calls")" $'782-demo\t'"$expected_mode"
+done
+: > "$implementation_start_calls"
+check "the implementation action refuses duplicate work" \
+  "$(implementation_start_fixture 782 worktree 1 2>/dev/null && echo yes || echo no)" "no"
+check "duplicate-work refusal launches nothing" \
+  "$(wc -c < "$implementation_start_calls" | tr -d ' ')" "0"
+
 # The picker's :edit path supports a conventional editor command with arguments
 # and returns multiline Markdown without printing it through command substitution.
 fake_editor="$fixture_root/fake-editor"
@@ -246,6 +360,9 @@ view_issue() {
 decide_issue() {
   printf '%s\n' "$@" > "$prompt_capture"
   decision_recorded=1
+}
+start_issue_implementation() {
+  printf 'started implementation for #%s\n' "$1"
 }
 # Stubbed so the action bar's eligibility read stays local: the fake `gh` is not
 # on PATH until the integration section, and a unit test must never reach the
@@ -299,6 +416,13 @@ check "a Ready Issue's Plan action starts Pi" \
   "$(grep -Fc 'launched Pi for #353' "$fixture_root/prompt-plan-output" || true)" "1"
 check "pressing s makes no decision write" "$(<"$prompt_capture")" ""
 check "pressing s records no decision" "$decision_recorded" "0"
+
+printf 'i\n\n' | prompt_open_issue 353 > "$fixture_root/prompt-implementation-output" \
+  2> "$fixture_root/prompt-implementation-error"
+check "an opened Issue offers Start implementation" \
+  "$(grep -Fc '[i] Start implementation' "$fixture_root/prompt-implementation-output" || true)" "2"
+check "the opened-Issue implementation action uses that Issue number" \
+  "$(grep -Fc 'started implementation for #353' "$fixture_root/prompt-implementation-output" || true)" "1"
 
 # needs-decision alone is the mirror image: eligible for Decide, not for Plan.
 stub_labels="needs-decision"
@@ -507,7 +631,10 @@ cat > "$fake_bin/zsh" <<'SH'
   done
   printf '\n'
 } >> "$WT_CALLS"
-printf 'Pi planner launched for #%s\n' "$5"
+case "$3" in
+  devops-plan) printf 'Pi planner launched for #%s\n' "$5" ;;
+  devops-start) printf 'Implementation start launched for %s with %s\n' "$5" "$6" ;;
+esac
 SH
 chmod +x "$fake_bin/zsh"
 
@@ -576,6 +703,23 @@ count_gh_calls() {
 gh_call_sequence() {
   awk '/^CALL/ {printf "%s %s;", $2, $3}' "$gh_calls"
 }
+
+# The implementation launcher crosses the same bash-to-zsh boundary as Plan.
+# Its constrained child receives the feature and validated mode as separate
+# words, then chooses exactly --kind or --no-herdr inside the child.
+implementation_bridge=$'source "$1" && if [[ "$3" == no-herdr ]]; then wt start "$2" --no-herdr; else wt start "$2" --kind "$3"; fi'
+for implementation_mode_fixture in claude codex pi no-herdr; do
+  : > "$wt_calls"
+  launch_implementation "777-sample" "$implementation_mode_fixture" > /dev/null
+  check "implementation $implementation_mode_fixture uses the exact zsh argument vector" \
+    "$(<"$wt_calls")" \
+    $'CALL\t-c\t'"$implementation_bridge"$'\tdevops-start\t'"$repo_root"$'/scripts/wt.sh\t777-sample\t'"$implementation_mode_fixture"
+done
+: > "$wt_calls"
+check "an unsupported implementation mode is rejected" \
+  "$(launch_implementation 777-sample shell >/dev/null 2>&1 && echo yes || echo no)" "no"
+check "an unsupported implementation mode launches no child" \
+  "$(wc -c < "$wt_calls" | tr -d ' ')" "0"
 
 # With no arguments in a non-TTY, the command lists every open Issue before
 # showing the line prompt. EOF or q exits cleanly, so automated callers cannot
@@ -1207,6 +1351,26 @@ if [[ -z "$s_branch" ]]; then
 fi
 if grep -Eq 'load_picker_index|apply_picker_filter|reload=1' <<< "$s_branch"; then
   printf 'the s key re-queries GitHub or resets the view: %s\n' "$s_branch" >&2
+  exit 1
+fi
+
+# The later `i` action starts from current local planning artifacts in any view.
+# Like Plan it must leave the cached Issue index and selection untouched.
+if ! grep -Fq 'with_normal_terminal start_issue_implementation "${issue_numbers[$selected_index]}"' "$script"; then
+  printf 'the picker i key is not wired to the selected Issue number\n' >&2
+  exit 1
+fi
+if ! grep -Fq 'i start implementation' "$script"; then
+  printf 'the picker footer does not document the i key\n' >&2
+  exit 1
+fi
+i_branch="$(awk '/^      i\)$/{inside=1} inside{print} inside && /^        ;;$/{exit}' "$script")"
+if [[ -z "$i_branch" ]]; then
+  printf 'could not read the picker i) branch\n' >&2
+  exit 1
+fi
+if grep -Eq 'load_picker_index|apply_picker_filter|reload=1|issue_labels_of|\bgh\b' <<< "$i_branch"; then
+  printf 'the i key re-queries GitHub or resets the view: %s\n' "$i_branch" >&2
   exit 1
 fi
 

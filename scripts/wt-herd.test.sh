@@ -1257,18 +1257,25 @@ if rg -q 'wt_herd|herdr-devflow|devflow_exec|devflow-bootstrap' "$devops_entrypo
   print -r -- "scripts/devops.sh reaches for the Herdr bridge" >&2
   exit 1
 fi
-# The Ready picker's `s` key now launches planning. devops.sh is bash while wt
-# is a sourced zsh function, so the only permitted bridge is one argument-safe
-# zsh child that sources this checkout's scripts/wt.sh and passes the validated
-# Issue number as a separate word. Direct Herdr calls and eval remain forbidden:
-# wt plan owns the fresh eligibility check, confirmation, files, and Pi launch.
+# The picker has exactly two bash-to-zsh bridges: `s` delegates planning and
+# the later `i` action delegates implementation. Both source this checkout's wt
+# entrypoint and pass validated values as separate arguments. wt remains the
+# owner of confirmation, files, worktree creation, and Herdr/Pi handoff.
 devops_code="$(rg -v '^\s*#' "$devops_entrypoint")"
 if ! print -r -- "$devops_code" | rg -Fq "zsh -c 'source \"\$1\" && wt plan --issue \"\$2\"' devops-plan \"\$script_dir/wt.sh\" \"\$issue_number\""; then
   print -r -- "scripts/devops.sh does not launch wt plan through the constrained zsh bridge" >&2
   exit 1
 fi
-if print -r -- "$devops_code" | rg -q '\beval\b|\$\(\s*wt\s|^\s*wt\s+plan'; then
-  print -r -- "scripts/devops.sh evaluates or invokes wt outside the constrained zsh bridge" >&2
+if ! print -r -- "$devops_code" | rg -Fq "zsh -c 'source \"\$1\" && if [[ \"\$3\" == no-herdr ]]; then wt start \"\$2\" --no-herdr; else wt start \"\$2\" --kind \"\$3\"; fi' devops-start \"\$script_dir/wt.sh\" \"\$feature\" \"\$mode\""; then
+  print -r -- "scripts/devops.sh does not launch wt start through the constrained zsh bridge" >&2
+  exit 1
+fi
+if [[ "$(print -r -- "$devops_code" | rg -c '^\s*zsh -c ' || true)" != "2" ]]; then
+  print -r -- "scripts/devops.sh must contain only the constrained wt plan and wt start zsh bridges" >&2
+  exit 1
+fi
+if print -r -- "$devops_code" | rg -q '\beval\b|\$\(\s*wt\s|^\s*(source\s+.*wt\.sh|wt\s+(plan|start))'; then
+  print -r -- "scripts/devops.sh evaluates, sources, or invokes wt outside the constrained zsh bridges" >&2
   exit 1
 fi
 # A clipboard dependency was explicitly ruled out: it is per-platform, fails
