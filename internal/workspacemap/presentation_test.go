@@ -76,6 +76,9 @@ func TestCuratedCatalogsMeetTheDocumentedMinimums(t *testing.T) {
 	if !IsSupportedAccent(DefaultAccent) || !IsSupportedTheme(DefaultTheme) {
 		t.Fatal("the defaults must be in their own catalogs")
 	}
+	if got := AccentLabel(DefaultAccent); got != "Ori green" {
+		t.Errorf("default accent label = %q, want Ori green", got)
+	}
 	// Every identifier is a plain app-defined token, never anything that could
 	// be interpolated into a stylesheet (FR-125, FR-194).
 	for _, id := range append(Accents(), Themes()...) {

@@ -4,6 +4,11 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
 const source = readFileSync(new URL('./workspace-map.js', import.meta.url), 'utf8');
+const mapCSS = readFileSync(new URL('../../css/workspace-map.css', import.meta.url), 'utf8');
+const cockpitCSS = readFileSync(
+  new URL('../../css/home-workspace-cockpit.css', import.meta.url),
+  'utf8'
+);
 
 // Load the IIFE in a sandbox and grab the exposed pure layout function.
 function loadComputeLayout() {
@@ -1000,6 +1005,16 @@ test('the curated catalogs meet their documented minimums and are named (#346 FR
   });
   // Themes describe a shape difference, not only a colour one (FR-130).
   districtThemes.slice(1).forEach(theme => assert.ok(theme.hint, `${theme.id} explains itself`));
+});
+
+test('the default district accent is Ori green in the map and appearance picker', () => {
+  const { districtAccents } = loadOriWorkspaceMap();
+  assert.equal(districtAccents.find(accent => accent.id === 'default')?.label, 'Ori green');
+  assert.match(mapCSS, /\.ws-map-district\s*\{[\s\S]*?--ws-district-accent:\s*70,\s*211,\s*154;/);
+  assert.match(
+    cockpitCSS,
+    /\.cockpit-rail-accent-default\s*\{\s*--cockpit-swatch:\s*70,\s*211,\s*154;/
+  );
 });
 
 test('a district wears its presets as bounded classes, never inline style (#346 FR-125, FR-194)', () => {
@@ -5146,7 +5161,7 @@ test('the join confirmation names both workspaces and keeps the committed positi
   assert.equal(
     harness.confirm.panel().classList.contains('ws-map-accent-orchid'),
     true,
-    'a violet group is not asked about in the default amber'
+    'a violet group is not asked about in the default green'
   );
 
   // Focus lands on the affirmative button, so the keyboard route is one key.

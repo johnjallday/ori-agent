@@ -586,8 +586,8 @@
    out of reach of a district's appearance (FR-128).
    --------------------------------------------------------------------------- */
 .ws-map-district {
-  /* The default accent, and the fallback for anything unrecognised. */
-  --ws-district-accent: 232, 134, 77;
+  /* Ori green is the default accent and fallback for anything unrecognised. */
+  --ws-district-accent: 70, 211, 154;
 }
 .ws-map-district.ws-map-accent-beacon,
 .ws-map-resize-overlay.ws-map-accent-beacon,
@@ -804,7 +804,7 @@
 .ws-map-drop-confirm {
   /* The same default as a district, so the panel is never colourless while the
      accent classes above swap it to match the group being joined. */
-  --ws-district-accent: 232, 134, 77;
+  --ws-district-accent: 70, 211, 154;
   position: fixed;
   z-index: 10001;
   width: max-content;
@@ -910,8 +910,8 @@
   inset: 0;
   z-index: 8;
   /* The selected district's accent, set by positionResizeOverlay. Defaults to
-     the Keeper amber so the overlay is never colourless. */
-  --ws-district-accent: 232, 134, 77;
+     Ori green so the overlay is never colourless. */
+  --ws-district-accent: 70, 211, 154;
   /* Only the handles take input. The rectangle between them must stay inert or
      it would swallow every pan, click, and right-click aimed at the map under a
      selected district (FR-157). */

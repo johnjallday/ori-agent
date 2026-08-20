@@ -189,7 +189,7 @@
   // its shape as well as its colour, and a screen reader has to be able to say
   // which one is chosen (FR-130, design §"Accent choices should be named").
   var DISTRICT_ACCENT_CATALOG = [
-    { id: 'default', label: 'Keeper amber' },
+    { id: 'default', label: 'Ori green' },
     { id: 'beacon', label: 'Beacon blue' },
     { id: 'moss', label: 'Moss green' },
     { id: 'orchid', label: 'Orchid violet' },
@@ -5644,7 +5644,7 @@
     if (spec.kind === 'leave') markLeaveSource(container, spec.groupId);
     else markDropTarget(container, spec.groupId);
     // ...and the panel wears that district's colour, so a violet group is never
-    // asked about in the default amber (the same fix the resize overlay needed).
+    // asked about in the default green (the same fix the resize overlay needed).
     wearDistrictAccent(container, panel, spec.groupId);
     placeMenu(panel, anchorForElement(spec.el));
     bindDropConfirmInteractions();
@@ -5656,7 +5656,7 @@
    * Give `el` the accent of the district it is about (#346 FR-129).
    *
    * Same reasoning as the resize overlay: a panel that talks about a violet
-   * group while wearing the default amber reads as being about something else.
+   * group while wearing the default green reads as being about something else.
    */
   function wearDistrictAccent(container, el, groupId) {
     if (!el || !el.classList) return;

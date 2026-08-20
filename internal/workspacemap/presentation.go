@@ -58,7 +58,7 @@ const (
 // app values — a client cannot invent one, and none of them is ever interpolated
 // into CSS as a value; they select a checked-in preset class (FR-125, FR-194).
 var accentCatalog = map[string]string{
-	DefaultAccent: "Keeper amber",
+	DefaultAccent: "Ori green",
 	"moss":        "Moss green",
 	"tide":        "Tide teal",
 	"beacon":      "Beacon blue",

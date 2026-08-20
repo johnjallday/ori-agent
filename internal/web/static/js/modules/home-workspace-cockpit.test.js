@@ -1045,7 +1045,7 @@ test('a read-only map disables collapse along with the rest (#346 FR-148)', () =
 
 const CATALOGS = {
   accents: [
-    { id: 'default', label: 'Keeper amber' },
+    { id: 'default', label: 'Ori green' },
     { id: 'moss', label: 'Moss green' }
   ],
   themes: [
