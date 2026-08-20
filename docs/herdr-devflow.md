@@ -61,7 +61,9 @@ of an Issue that cannot change. That separation is the point:
   continuation target, a PR owner, or a `wt done` cleanup target.
 - Its kind is always `pi` and is fixed by the operation. It does not read
   or write `.herdr/devflow.toml`, and it cannot leak into a later feature
-  handoff — implementation still starts Herdr's configured Claude primary.
+  handoff. A bare `wt start` still uses Herdr's configured Claude primary;
+  the Issue picker's later implementation action passes the owner's explicit
+  Claude, Codex, Pi, or worktree-only choice.
 - A generic live-agent view may still truthfully show the running Pi
   process. It is a real process; it is simply not a *managed feature* agent.
 
@@ -135,6 +137,14 @@ Use wt start <feature> --no-herdr for a one-run opt-out. A successful retry
 completes only missing stages. It does not create a second workspace or primary
 agent, and it does not resend an already confirmed bootstrap prompt unless
 --resend is supplied.
+
+For Issue-backed work, the interactive `./scripts/devops.sh` flow makes this
+choice explicit. Press `s` to start the asynchronous Pi planner, return after it
+has replaced the planning starter, then press `i`. The later action resolves the
+number-first task list locally, prompts for Claude, Codex, Pi, worktree-only, or
+cancel, and invokes the corresponding `wt start --kind <kind>` or `--no-herdr`.
+It never chains to the planner or polls it; `wt start` still owns its normal plan
+summary, confirmation, worktree creation, and handoff.
 
 An ad-hoc feature created with `wt new` has no PRD and no task list, so it gets
 a tab and an agent but **no bootstrap prompt** — there is nothing truthful to
@@ -524,15 +534,17 @@ In a terminal, the colorful picker shows the number of PRs merged into `dev`
 since the latest Release directly below its heading; `r` refreshes that banner
 and the Issue data. It accepts `↑/↓` or `j/k` to select an Issue, `←/→` or `h/l`
 for those five list views, and `1`–`5` in the same order as the line REPL.
-`Enter` opens an Issue with an action bar where `c` decides, `s`
-starts Pi planning, `r` refreshes the detail, and Enter returns to the list;
-the list's `c` key opens that same Issue directly at its decision answers.
-Decide and Plan each appear on that bar only when the opened Issue's own live
-labels make them eligible, read fresh every time the Issue opens. `n` captures
-one with an optional body, `o` approves it, `s` starts Pi planning for the
-selected Ready row, list-level `r` refreshes, `?` shows
-help, and `q` quits. `:edit` at the body prompt opens `$VISUAL` or `$EDITOR`
-for multiline Markdown. In a pipe or redirected shell, the line REPL accepts
+`Enter` opens an Issue with an action bar where `c` decides, `s` starts Pi
+planning, `i` starts implementation from a completed local plan, `r` refreshes
+the detail, and Enter returns to the list; the list's `c` key opens that same
+Issue directly at its decision answers. Decide and Plan each appear on that bar
+only when the opened Issue's own live labels make them eligible, read fresh
+every time the Issue opens; Start implementation is always available so its
+local resolver can explain whether planning is incomplete or work already
+exists. `n` captures one with an optional body, `o` approves it, `s` starts Pi
+planning for the selected Ready row, `i` starts the selected Issue's later
+implementation flow, list-level `r` refreshes, `?` shows help, and `q` quits.
+`:edit` at the body prompt opens `$VISUAL` or `$EDITOR` for multiline Markdown. In a pipe or redirected shell, the line REPL accepts
 `1/a`, `2/d`, `3/b`, `4/f`, and `5/y`, plus `v <number>`, `n <title>`,
 `c <number> <answers>`, and `ok <number>`. Lists include every author and only
 open Issues. Filters are literal labels; no Project board or rank
@@ -547,6 +559,15 @@ and launches the Herdr-managed Pi planner. Off Ready, or on an Issue whose
 labels are not Ready (or could not be read), the key refuses before launching
 anything.
 
+Planning is asynchronous, so `s` never chains to implementation. Return later
+and press `i` on a selected or opened Issue. That action contacts neither GitHub
+nor Herdr while it resolves exactly one `tasks/tasks-<N>-*.md` in the dev
+worktree and refuses a missing or ambiguous artifact, the planning-starter
+marker, or an existing branch/worktree. If ready, it prompts for Claude, Codex,
+Pi, worktree-only, or cancel, then starts an argument-safe zsh child that invokes
+`wt start` with `--kind <kind>` or `--no-herdr`. `wt start` remains the final
+source of truth and displays its own confirmation.
+
 Reads never mutate. The write commands cover the three things only a human does
 here — capturing an idea, answering a spec's open questions, and setting
 `approved`, the one label the grooming routine may never write. All confirm
@@ -556,10 +577,13 @@ Its optional body can come from an inline prompt, `$VISUAL`/`$EDITOR`, a file,
 or stdin.
 
 `decide` (and its `answer` alias) posts `<!-- ori-decision -->` plus the selected
-answers and optional rationale. In the picker this happens within the opened
-Issue, which refreshes after posting so the persisted answer is visible. It
+answers and optional rationale. Only after that comment succeeds, the same
+confirmed operation additively applies the `answered` label as a receipt. It
 deliberately leaves `needs-decision` in place: the grooming routine reads that
-marked comment and owns the later triage and sizing transition.
+marked comment and owns the later triage and sizing transition. If the label
+write fails, the command warns that the receipt is missing but returns the
+successfully posted comment as the answer of record; the opened Issue still
+refreshes so that durable answer is visible.
 
 `status`, and the picker's in-flight column, are the one part of the REPL that
 overlaps this document's subject — and they deliberately do **not** call Herdr.
@@ -593,10 +617,12 @@ The command runs `gh issue list`, `gh issue view`, `gh issue create`,
 contacts GitHub not at all.
 The terminal picker fetches the complete open-Issue index and release count
 once and filters Issues locally until `r` refreshes both. It does not persist a
-cache or define a JSON contract. Its eligible `s` action starts the sourced `wt`
-function in a zsh child so `wt plan` owns the confirmed Herdr/Pi launch; no
-other picker path reaches the bridge. Agents that need structured data
-should use `gh issue list --json` directly. Capture remains a thin wrapper over the GitHub CLI, and either surface is valid:
+cache or define a JSON contract. Its eligible `s` action starts `wt plan` in a
+constrained zsh child; the later local-ready `i` action starts `wt start` in the
+only other constrained child. Neither path calls Herdr directly or evaluates
+Issue text as shell code. Agents that need structured data should use
+`gh issue list --json` directly. Capture remains a thin wrapper over the GitHub
+CLI, and either surface is valid:
 
 ~~~bash
 ./scripts/devops.sh new "<title>" --body "<optional context>"
