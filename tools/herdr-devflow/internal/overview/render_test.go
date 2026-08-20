@@ -80,6 +80,88 @@ func TestRenderCompactNeverEmitsTrailingWhitespace(t *testing.T) {
 	}
 }
 
+func TestRenderCompactHidesHistoryPhasesByDefault(t *testing.T) {
+	active := feature("active", withWorktree("/w/active"))
+	active.Phase = PhaseState{Phase: PhaseImplementing, Confirmed: true}
+	shipped := feature("shipped-thing")
+	shipped.Phase = PhaseState{Phase: PhaseShipped, Confirmed: true}
+	cleanup := feature("cleanup-owed")
+	cleanup.Phase = PhaseState{Phase: PhaseMergedCleanup, Confirmed: true}
+	unknown := feature("mystery")
+	unknown.Phase = PhaseState{Phase: PhaseUnknown, Confirmed: false}
+
+	output := renderToString(t, baseSnapshot(active, shipped, cleanup, unknown))
+	if !strings.Contains(output, "active") {
+		t.Fatalf("active work was hidden by the default filter:\n%s", output)
+	}
+	for _, hidden := range []string{"shipped-thing", "cleanup-owed", "mystery"} {
+		if strings.Contains(output, hidden) {
+			t.Fatalf("history phase %q leaked into the default table:\n%s", hidden, output)
+		}
+	}
+}
+
+func TestRenderCompactAllRestoresHistoryPhases(t *testing.T) {
+	active := feature("active", withWorktree("/w/active"))
+	active.Phase = PhaseState{Phase: PhaseImplementing, Confirmed: true}
+	shipped := feature("shipped-thing")
+	shipped.Phase = PhaseState{Phase: PhaseShipped, Confirmed: true}
+	cleanup := feature("cleanup-owed")
+	cleanup.Phase = PhaseState{Phase: PhaseMergedCleanup, Confirmed: true}
+	unknown := feature("mystery")
+	unknown.Phase = PhaseState{Phase: PhaseUnknown, Confirmed: false}
+
+	var out strings.Builder
+	if err := RenderCompact(&out, baseSnapshot(active, shipped, cleanup, unknown), RenderOptions{NoColor: true, ShowAll: true}); err != nil {
+		t.Fatalf("RenderCompact: %v", err)
+	}
+	output := out.String()
+	for _, want := range []string{"active", "shipped-thing", "cleanup-owed", "mystery"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("--all did not restore %q:\n%s", want, output)
+		}
+	}
+}
+
+func TestRenderCompactAllFilteredIsHonestNotEmpty(t *testing.T) {
+	// A repository whose only features are history must not say "No features
+	// were found" — that would deny features exist at all.
+	shipped := feature("shipped-thing")
+	shipped.Phase = PhaseState{Phase: PhaseShipped, Confirmed: true}
+
+	output := renderToString(t, baseSnapshot(shipped))
+	if strings.Contains(output, "No features were found") {
+		t.Fatalf("an all-history repository claimed to have no features:\n%s", output)
+	}
+	if !strings.Contains(output, "No active features") || !strings.Contains(output, "--all") {
+		t.Fatalf("the filtered-empty case was not explained honestly:\n%s", output)
+	}
+	if !strings.Contains(output, "Snapshot: complete") {
+		t.Fatalf("the footer was dropped when every row was filtered:\n%s", output)
+	}
+}
+
+func TestRenderCompactAllFilteredStillShowsUnscopedAgentsAndFooter(t *testing.T) {
+	// The footer and the "agents outside a feature" summary are both
+	// repository-wide facts, not per-feature ones — filtering every feature
+	// row must not take either of them down with it.
+	shipped := feature("shipped-thing")
+	shipped.Phase = PhaseState{Phase: PhaseShipped, Confirmed: true}
+	snapshot := baseSnapshot(shipped)
+	snapshot.Agents = append(snapshot.Agents, Agent{
+		Kind: "claude", Scope: AgentScopeRepository,
+		Live: Identity{Session: "native-dev"}, Status: AgentWorking, StatusAvailability: AvailabilityAvailable,
+	})
+
+	output := renderToString(t, snapshot)
+	if !strings.Contains(output, "1 agent(s) outside a feature") {
+		t.Fatalf("the all-filtered case dropped the unscoped-agent summary:\n%s", output)
+	}
+	if !strings.Contains(output, "Snapshot: complete") {
+		t.Fatalf("the all-filtered case dropped the footer:\n%s", output)
+	}
+}
+
 func TestRenderCompactDistinguishesEmptyFromDegradedCells(t *testing.T) {
 	noWorktree := feature("planned", withPlan(AvailabilityAvailable, AvailabilityAvailable))
 	noWorktree.Phase = PhaseState{Phase: PhaseReady, Confirmed: true}
@@ -196,8 +278,35 @@ func TestRenderCompactShowsHierarchicalProgress(t *testing.T) {
 	progressed(&row)
 
 	output := renderToString(t, baseSnapshot(row))
-	if !strings.Contains(output, "4/7 milestones · 66/118 subtasks · next 5.1") {
-		t.Fatalf("compact progress was not rendered:\n%s", output)
+	if !strings.Contains(output, "4/7 milestones · 66/118 subtasks · G5 next 5.1") {
+		t.Fatalf("compact progress did not name the active Group:\n%s", output)
+	}
+}
+
+func TestGroupLabelTakesOnlyTheParentOrdinal(t *testing.T) {
+	cases := map[string]string{
+		"8.0": "G8", "5.1": "G5", "": "", "8": "", "a.0": "", ".0": "",
+	}
+	for ordinal, want := range cases {
+		if got := groupLabel(ordinal); got != want {
+			t.Fatalf("groupLabel(%q) = %q, want %q", ordinal, got, want)
+		}
+	}
+}
+
+func TestProgressCellFallsBackSafelyWithNoActiveMilestone(t *testing.T) {
+	// A plan with a next actionable but no ActiveMilestone (or a noncanonical
+	// one) must still read as a truthful "next", never a bogus Group.
+	progress := PlanProgress{
+		Availability: AvailabilityAvailable, MilestonesTotal: 3, MilestonesCompleted: 1,
+		NextActionable: PlanItem{Ordinal: "2.1", Text: "Do the thing"},
+	}
+	cell := progressCell(progress)
+	if strings.Contains(cell, "G") {
+		t.Fatalf("cell = %q, want no Group label without an ActiveMilestone", cell)
+	}
+	if !strings.Contains(cell, "next 2.1") {
+		t.Fatalf("cell = %q, want the next actionable preserved", cell)
 	}
 }
 

@@ -130,7 +130,9 @@ leaves `needs-decision` in place until the grooming routine reads the answer and
 performs triage. Everything else about an Issue's lifecycle — triaging,
 sizing, and bundling — belongs to that routine. Delivery owns closing:
 `wt done` closes the exact attached Issue only after its implementation PR has
-merged to `dev`.
+merged to `dev`, then additionally closes any other Issue that same merged PR's
+body names with `Closes`/`Fixes`/`Resolves #N` — the equivalent of GitHub's own
+closing keywords, which a `dev`-targeted merge does not trigger on its own.
 
 `status` and the picker's in-flight column resolve an Issue to work-in-progress
 through the naming convention above: branch `fix/339-slug` and task file

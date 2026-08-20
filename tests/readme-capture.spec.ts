@@ -786,12 +786,15 @@ async function captureScene(
   const fixture = await installFixtureRoutes(page);
   try {
     await page.goto(route, { waitUntil: 'networkidle' });
-    if (prepare) await prepare(page);
+    // Freeze the page before a scene-specific interaction. The Map preparation
+    // opens and closes a Bootstrap modal; freezing afterwards allowed its body
+    // resize, focus, and hover transitions to land on different Linux frames.
     await page.addStyleTag({
       content:
-        '*,*::before,*::after{animation:none!important;transition:none!important;caret-color:transparent!important;}'
+        '*,*::before,*::after{animation:none!important;transition:none!important;caret-color:transparent!important;scroll-behavior:auto!important;}'
     });
     await page.evaluate(async () => document.fonts.ready);
+    if (prepare) await prepare(page);
     await expect(page.locator(selector)).toBeVisible();
     await expect(page.locator('body')).toContainText(definingText);
     const readinessRoot = page.locator(
@@ -813,6 +816,14 @@ async function captureScene(
     for (const pattern of privatePatterns) expect(visibleText).not.toMatch(pattern);
     expect(fixture.unexpectedRequests, `Unexpected fixture requests for ${id}`).toEqual([]);
     expect(fixture.consoleErrors, `Console errors for ${id}`).toEqual([]);
+    // ResizeObserver callbacks run before paint. Two frames ensure a modal's
+    // restored body width has reached the Map camera before bytes are captured.
+    await page.evaluate(
+      () =>
+        new Promise<void>(resolve =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+        )
+    );
     mkdirSync(rawDirectory, { recursive: true });
     mkdirSync(sidecarDirectory, { recursive: true });
     await page.screenshot({
@@ -879,10 +890,17 @@ test('captures the Workspace Map with Personal HQ and fictional workspaces', asy
       await scenePage.keyboard.press('Escape');
       await expect(scenePage.locator('#cockpitContextModal')).toBeHidden();
       // `toBeHidden` can observe Bootstrap's display state just before its
-      // hidden event restores focus and removes the backdrop. Waiting for both
-      // effects keeps the selected-map frame byte-stable on slower CI runners.
+      // hidden event restores focus and removes the backdrop. Observe the full
+      // lifecycle, then remove pointer/focus pseudo-states from the product
+      // image while retaining the selected workspace itself.
       await expect(selectedTile).toBeFocused();
       await expect(scenePage.locator('.modal-backdrop')).toHaveCount(0);
+      await expect(scenePage.locator('body')).not.toHaveClass(/modal-open/);
+      await expect(selectedTile).toHaveClass(/is-selected/);
+      await scenePage.mouse.move(1, 1);
+      await selectedTile.evaluate(element => (element as HTMLElement).blur());
+      await expect(selectedTile).not.toBeFocused();
+      await expect(scenePage.locator('.ws-map-tile:hover')).toHaveCount(0);
     }
   );
   await expect(page.locator('.ws-map-tile.is-hq')).toHaveCount(1);

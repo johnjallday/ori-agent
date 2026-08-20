@@ -1033,6 +1033,110 @@ func TestStatusUsesOnlyLiveAgentsAndFeatureOverviewStaysSeparate(t *testing.T) {
 	}
 }
 
+// normalizeSnapshotJSON strips fields that legitimately vary between two
+// separate collections of the same repository (generation and observation
+// timestamps) so two snapshots can be compared for feature-set and schema
+// identity rather than byte-for-byte equality.
+func normalizeSnapshotJSON(t *testing.T, raw []byte) string {
+	t.Helper()
+	var decoded any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("normalizeSnapshotJSON: %v: %s", err, raw)
+	}
+	stripVolatileFields(decoded)
+	normalized, err := json.Marshal(decoded)
+	if err != nil {
+		t.Fatalf("normalizeSnapshotJSON marshal: %v", err)
+	}
+	return string(normalized)
+}
+
+func stripVolatileFields(value any) {
+	switch typed := value.(type) {
+	case map[string]any:
+		for _, key := range []string{"generated_at", "observed_at", "last_activity_at"} {
+			delete(typed, key)
+		}
+		for _, nested := range typed {
+			stripVolatileFields(nested)
+		}
+	case []any:
+		for _, nested := range typed {
+			stripVolatileFields(nested)
+		}
+	}
+}
+
+func TestParseOverviewArgsAcceptsAll(t *testing.T) {
+	parsed, err := parseOverviewArgs([]string{"--all"})
+	if err != nil || !parsed.all {
+		t.Fatalf("parseOverviewArgs([--all]) = %#v, %v; want all=true", parsed, err)
+	}
+
+	// --all is accepted alongside every other option, including --json (it
+	// changes nothing there) and --feature (an inactive feature's detail must
+	// stay reachable regardless of the filter).
+	parsed, err = parseOverviewArgs([]string{"--all", "--json", "--watch", "--no-color", "--feature", "bridge"})
+	if err != nil {
+		t.Fatalf("parseOverviewArgs(--all combined): %v", err)
+	}
+	if !parsed.all || !parsed.json || !parsed.watch || !parsed.noColor || parsed.feature != "bridge" {
+		t.Fatalf("parseOverviewArgs(--all combined) = %#v, want every flag preserved", parsed)
+	}
+
+	if _, err := parseOverviewArgs([]string{"--everything"}); err == nil {
+		t.Fatal("parseOverviewArgs accepted an unknown option instead of rejecting it")
+	}
+}
+
+func TestFeatureOverviewAllDoesNotChangeJSON(t *testing.T) {
+	primary, feature := createLinkedFeatureWorktree(t)
+	home := filepath.Join(t.TempDir(), "runtime")
+
+	var output, stderr bytes.Buffer
+	application := New(Dependencies{
+		Stdout:    &output,
+		Stderr:    &stderr,
+		Getwd:     func() (string, error) { return feature, nil },
+		LookupEnv: func(string) (string, bool) { return "", false },
+		Runner:    primaryCheckoutRunner{primary: primary, feature: feature},
+	})
+
+	base := []string{"--repo-root", feature, "--home", home, "--herdr-bin", "fake-herdr", "feature-overview", "--json"}
+	exitWithout := application.Run(context.Background(), base)
+	withoutAll := normalizeSnapshotJSON(t, output.Bytes())
+
+	output.Reset()
+	stderr.Reset()
+	withAllArgs := []string{"--repo-root", feature, "--home", home, "--herdr-bin", "fake-herdr", "feature-overview", "--all", "--json"}
+	exitWithAll := application.Run(context.Background(), withAllArgs)
+	withAll := normalizeSnapshotJSON(t, output.Bytes())
+
+	if exitWithout != exitWithAll {
+		t.Fatalf("--all changed the exit code: without=%d with=%d", exitWithout, exitWithAll)
+	}
+	// Collection timestamps (generated_at, observed_at, ...) legitimately
+	// differ between two separate runs; normalizeSnapshotJSON strips those so
+	// the comparison is about the feature set and schema, per AR4.
+	if withoutAll != withAll {
+		t.Fatalf("--all changed the JSON contract:\nwithout --all: %s\nwith --all:    %s", withoutAll, withAll)
+	}
+	var snapshot overview.Snapshot
+	if err := json.Unmarshal(output.Bytes(), &snapshot); err != nil || len(snapshot.Features) == 0 {
+		t.Fatalf("feature-overview --all --json = %q: %v", output.String(), err)
+	}
+
+	// The default human table must still show the one active feature; the
+	// filter only ever hides history phases, never active work.
+	output.Reset()
+	stderr.Reset()
+	humanArgs := []string{"--repo-root", feature, "--home", home, "--herdr-bin", "fake-herdr", "feature-overview", "--no-color"}
+	application.Run(context.Background(), humanArgs)
+	if !strings.Contains(output.String(), "bridge") {
+		t.Fatalf("default feature-overview output dropped the active feature:\n%s", output.String())
+	}
+}
+
 // primaryCheckoutRunner answers as Herdr does when agents are open in both the
 // repository's primary `dev` checkout and a feature worktree. The primary
 // checkout is not a feature, and its agents are the ones the feature-first
