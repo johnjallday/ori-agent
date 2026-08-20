@@ -11,9 +11,10 @@
 # cover both paths against the same fixtures.
 #
 # GitHub writes are deliberately limited and confirm-gated: capturing an Issue,
-# recording answers to its open questions, and toggling the `approved` label.
-# `approved` is the pipeline's only human gate, so it is never written by the
-# grooming agent - only from here, or by hand on github.com.
+# recording answers to its open questions, adding the `answered` receipt, and
+# toggling the `approved` label. `approved` is the pipeline's only human gate, so
+# it is never written by the grooming agent - only from here, or by hand on
+# github.com.
 set -uo pipefail
 
 readonly issue_limit=1000
@@ -92,7 +93,8 @@ new/decide/approve/unapprove write to GitHub. They prompt for confirmation on
 a terminal, and require --yes when stdin is not a terminal. `answer` remains a
 backwards-compatible alias for `decide`. A new Issue is created with no labels -
 capture takes ten seconds and the grooming routine specs it. A recorded decision
-keeps `needs-decision` until that routine processes the answer.
+adds `answered` as a receipt and keeps `needs-decision` until that routine
+processes the answer.
 EOF
 }
 
@@ -559,7 +561,7 @@ decide_issue() {
 
   decision_recorded=0
   local -a rest=()
-  local argument number answers body labels label_status=0
+  local argument number answers body labels label_status=0 answered_status=0
 
   for argument in "$@"; do
     if [[ "$expecting_rationale" -eq 1 ]]; then
@@ -616,11 +618,20 @@ decide_issue() {
   body="$(format_decision_comment "$answers" "$rationale")"
   printf '\nWill record this decision on #%s:\n' "$number"
   print_indented "$body"
-  printf 'The needs-decision label stays until the grooming routine processes it.\n'
-  confirm_write "Post this decision?" "$assume_yes" || return $?
+  printf 'After the comment is posted, the answered label is added; needs-decision stays until the grooming routine processes it.\n'
+  confirm_write "Post this decision and mark it answered?" "$assume_yes" || return $?
   gh issue comment "$number" --body "$body" || return $?
   decision_recorded=1
-  printf 'Decision recorded. It will remain in Needs my decision until grooming triages it.\n'
+
+  # The marked comment is the answer of record. `answered` is an additive
+  # receipt for humans and automation, so a failure to apply it must be reported
+  # but must not turn the successfully posted decision into a failed operation.
+  gh issue edit "$number" --add-label answered || answered_status=$?
+  if [[ "$answered_status" -ne 0 ]]; then
+    printf 'Decision recorded, but the answered label could not be added (GitHub exited %s). It will remain in Needs my decision until grooming triages it.\n' "$answered_status" >&2
+    return 0
+  fi
+  printf 'Decision recorded and marked answered. It will remain in Needs my decision until grooming triages it.\n'
 }
 
 # Kept for callers that learned the original command name.
@@ -1133,8 +1144,9 @@ Picker keys
   ?             Show this help
   q             Quit
 
-Writes always show a preview and ask for confirmation. Recorded decisions leave
-the needs-decision label in place until the grooming routine processes them.
+Writes always show a preview and ask for confirmation. Recorded decisions add
+the answered label as a receipt and leave needs-decision in place until the
+grooming routine processes them.
 EOF
 }
 

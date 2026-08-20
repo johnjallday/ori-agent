@@ -432,6 +432,10 @@ case "$1 $2" in
     fi
     ;;
   "issue comment")
+    if [ -n "${GH_FAIL_COMMENT:-}" ]; then
+      printf '%s\n' "simulated decision comment failure" >&2
+      exit 8
+    fi
     previous=""
     for argument in "$@"; do
       if [ "$previous" = "--body" ]; then
@@ -452,6 +456,11 @@ case "$1 $2" in
     printf 'https://github.com/johnjallday/ori-agent/issues/999\n'
     ;;
   "issue edit")
+    if [ -n "${GH_FAIL_ANSWERED_LABEL:-}" ] && \
+      [ "${4:-}" = "--add-label" ] && [ "${5:-}" = "answered" ]; then
+      printf '%s\n' "simulated answered-label failure" >&2
+      exit 9
+    fi
     printf 'edited #%s\n' "$3"
     ;;
   "release view")
@@ -770,12 +779,15 @@ assert_no_github_write "a decision on a prefix-alike label"
 # any GitHub WRITE - a pipe can never post by accident.
 : > "$gh_calls"
 status=0
-"$script" decide 334 "1B, 2A" < /dev/null > /dev/null 2> "$fixture_root/decision-refused" || status=$?
+"$script" decide 334 "1B, 2A" < /dev/null \
+  > "$fixture_root/decision-refused-preview" 2> "$fixture_root/decision-refused" || status=$?
 if [[ "$status" -ne 2 ]]; then
   printf 'unconfirmed decision exited %s, want 2\n' "$status" >&2
   exit 1
 fi
 grep -Fq "pass --yes to confirm" "$fixture_root/decision-refused"
+assert_output_has "an unconfirmed decision preview" \
+  "$fixture_root/decision-refused-preview" "the answered label is added; needs-decision stays"
 check "an unconfirmed decision reads labels exactly once" "$(count_label_reads 334)" "1"
 check "an unconfirmed decision makes no other call" "$(count_gh_calls)" "1"
 assert_no_github_write "an unconfirmed decision"
@@ -835,24 +847,64 @@ if [[ "$status" -ne 2 ]]; then
 fi
 assert_no_github "an unconfirmed approve"
 
-# With --yes the write goes through. The body carries a machine-recognizable
-# marker and optional rationale, while no label write is attempted here.
+# With --yes the confirmed write goes through. The body carries a
+# machine-recognizable marker and optional rationale; only after that comment
+# succeeds is the additive answered receipt applied. needs-decision is untouched.
 : > "$gh_calls"
 : > "$gh_body"
 "$script" decide 334 "1B, 2A" --rationale "Preserves JSON consumers" --yes > "$fixture_root/decision-output"
 grep -Fq $'CALL\tissue\tcomment\t334\t--body\t<!-- ori-decision -->' "$gh_calls"
+assert_call $'CALL\tissue\tedit\t334\t--add-label\tanswered'
 check "posted decision body" "$(<"$gh_body")" \
   $'<!-- ori-decision -->\n\n**Answers:** 1B, 2A\n\n**Rationale:** Preserves JSON consumers'
-grep -Fq "will remain in Needs my decision" "$fixture_root/decision-output"
-if grep -Fq $'issue\tedit' "$gh_calls"; then
-  printf 'recording a decision changed labels: %s\n' "$(cat "$gh_calls")" >&2
+grep -Fq "Decision recorded and marked answered" "$fixture_root/decision-output"
+if grep -Fq -- $'--remove-label\tneeds-decision' "$gh_calls"; then
+  printf 'recording a decision removed needs-decision: %s\n' "$(cat "$gh_calls")" >&2
   exit 1
 fi
-# The whole transcript, in order: establish eligibility, then post. Nothing else.
 check "an eligible decision reads labels exactly once" "$(count_label_reads 334)" "1"
-check "an eligible decision makes exactly two calls" "$(count_gh_calls)" "2"
-check "the label read precedes the decision comment" \
+check "an eligible decision makes exactly three calls" "$(count_gh_calls)" "3"
+check "the decision comment precedes the answered receipt" \
+  "$(gh_call_sequence)" "issue view;issue comment;issue edit;"
+
+# A failed comment remains a failed decision and must never attempt the receipt.
+: > "$gh_calls"
+status=0
+GH_FAIL_COMMENT=1 "$script" decide 334 "1A" --yes \
+  > "$fixture_root/decision-comment-failed-output" \
+  2> "$fixture_root/decision-comment-failed-error" || status=$?
+if [[ "$status" -ne 8 ]]; then
+  printf 'a failed decision comment exited %s, want 8\n' "$status" >&2
+  exit 1
+fi
+assert_output_has "a failed decision comment" \
+  "$fixture_root/decision-comment-failed-error" "simulated decision comment failure"
+check "a failed comment stops before the answered receipt" \
   "$(gh_call_sequence)" "issue view;issue comment;"
+if grep -Fq $'issue\tedit' "$gh_calls"; then
+  printf 'a failed decision comment still attempted answered: %s\n' "$(cat "$gh_calls")" >&2
+  exit 1
+fi
+
+# The comment is the answer of record. If its additive receipt fails, report
+# the partial result honestly but return success and leave the UI refresh flag
+# to the decision_recorded assertions below.
+: > "$gh_calls"
+status=0
+GH_FAIL_ANSWERED_LABEL=1 "$script" decide 334 "1A" --yes \
+  > "$fixture_root/decision-label-failed-output" \
+  2> "$fixture_root/decision-label-failed-error" || status=$?
+if [[ "$status" -ne 0 ]]; then
+  printf 'an answered-label failure exited %s, want 0\n' "$status" >&2
+  exit 1
+fi
+assert_output_has "an answered-label failure" \
+  "$fixture_root/decision-label-failed-error" \
+  "Decision recorded, but the answered label could not be added (GitHub exited 9)."
+assert_output_lacks "an answered-label failure" \
+  "$fixture_root/decision-label-failed-output" "marked answered"
+check "an answered-label failure still follows comment ordering" \
+  "$(gh_call_sequence)" "issue view;issue comment;issue edit;"
 
 # Plan is exercised against the real gh-backed issue_labels_of too, not just
 # the stubbed unit section above: #320 is plain backlog (Ready) and launches wt
@@ -899,7 +951,7 @@ assert_no_github_write "a real non-Ready Issue's Plan action"
 check "answer alias posts a decision" "$(<"$gh_body")" \
   $'<!-- ori-decision -->\n\n**Answers:** 1A'
 check "answer alias reads labels exactly once" "$(count_label_reads 334)" "1"
-check "answer alias makes exactly two calls" "$(count_gh_calls)" "2"
+check "answer alias makes exactly three calls" "$(count_gh_calls)" "3"
 
 : > "$gh_calls"
 status=0
@@ -1061,9 +1113,11 @@ decision_recorded_after() {
   shift
   (
     set +e
-    if [[ "$mode" == fail ]]; then
-      export GH_FAIL=1
-    fi
+    case "$mode" in
+      fail) export GH_FAIL=1 ;;
+      comment_fail) export GH_FAIL_COMMENT=1 ;;
+      label_fail) export GH_FAIL_ANSWERED_LABEL=1 ;;
+    esac
     # Re-sourced because the unit section above replaced decide_issue with a
     # stub. The script's readonly declarations are already set in this shell, so
     # their harmless re-assignment warnings are discarded.
@@ -1085,6 +1139,12 @@ check "an unconfirmed decision records nothing" \
 : > "$gh_calls"
 check "an invalid decision records nothing" \
   "$(decision_recorded_after ok 334 --yes)" "0"
+: > "$gh_calls"
+check "a failed decision comment records nothing" \
+  "$(decision_recorded_after comment_fail 334 "1A" --yes)" "0"
+: > "$gh_calls"
+check "an answered-label failure preserves the recorded decision" \
+  "$(decision_recorded_after label_fail 334 "1A" --yes)" "1"
 : > "$gh_calls"
 check "an eligible decision records the write" \
   "$(decision_recorded_after ok 334 "1A" --yes)" "1"
