@@ -123,18 +123,18 @@ func (s *proposalStore) recordRun(workspaceID, id string, result reaper.ScriptRu
 	return cloneProposal(proposal), true
 }
 
-func (s *proposalStore) remove(workspaceID, id string) (ScriptProposal, bool) {
+func (s *proposalStore) remove(workspaceID, id string) bool {
 	if s == nil {
-		return ScriptProposal{}, false
+		return false
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	proposal, found := s.entries[strings.TrimSpace(id)]
 	if !found || proposal.WorkspaceID != strings.TrimSpace(workspaceID) {
-		return ScriptProposal{}, false
+		return false
 	}
 	delete(s.entries, proposal.ID)
-	return cloneProposal(proposal), true
+	return true
 }
 
 func cloneProposal(proposal ScriptProposal) ScriptProposal {
@@ -271,7 +271,7 @@ func (h *Handler) DiscardProposal(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if _, found := h.proposals.remove(ws.ID, r.PathValue("proposalID")); !found {
+	if found := h.proposals.remove(ws.ID, r.PathValue("proposalID")); !found {
 		_ = orihttp.RespondAPIError(w, http.StatusNotFound,
 			orihttp.NewAPIError("reaper_proposal_not_found", "The script proposal was not found."))
 		return

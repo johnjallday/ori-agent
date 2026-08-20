@@ -72,10 +72,10 @@ func NewLibraryAt(root string) *Library {
 }
 
 func (l *Library) Root() (string, error) {
-	return l.resolveRoot(true)
+	return l.resolveRoot()
 }
 
-func (l *Library) resolveRoot(create bool) (string, error) {
+func (l *Library) resolveRoot() (string, error) {
 	if l == nil {
 		return "", ErrLibraryUnavailable
 	}
@@ -94,15 +94,10 @@ func (l *Library) resolveRoot(create bool) (string, error) {
 	if err != nil || libraryPathUsesRunnerRoot(absolute) {
 		return "", ErrLibraryUnsafe
 	}
-	if create {
-		if err := os.MkdirAll(absolute, 0o750); err != nil {
-			return "", ErrLibraryUnavailable
-		}
+	if err := os.MkdirAll(absolute, 0o750); err != nil {
+		return "", ErrLibraryUnavailable
 	}
 	info, err := os.Lstat(absolute) // #nosec G304 -- fixed user library or injected trusted test root
-	if errors.Is(err, os.ErrNotExist) && !create {
-		return absolute, nil
-	}
 	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
 		return "", ErrLibraryUnsafe
 	}
@@ -123,7 +118,7 @@ func libraryPathUsesRunnerRoot(path string) bool {
 }
 
 func (l *Library) List() ([]Script, error) {
-	root, err := l.resolveRoot(true)
+	root, err := l.resolveRoot()
 	if err != nil {
 		return nil, err
 	}
@@ -154,7 +149,7 @@ func (l *Library) List() ([]Script, error) {
 }
 
 func (l *Library) Read(identifier string) (Script, error) {
-	root, err := l.resolveRoot(true)
+	root, err := l.resolveRoot()
 	if err != nil {
 		return Script{}, err
 	}
@@ -214,7 +209,7 @@ func (l *Library) Update(identifier string, input ScriptInput) (Script, error) {
 }
 
 func (l *Library) write(input ScriptInput, create bool) (Script, error) {
-	root, err := l.resolveRoot(true)
+	root, err := l.resolveRoot()
 	if err != nil {
 		return Script{}, err
 	}
@@ -247,7 +242,7 @@ func (l *Library) write(input ScriptInput, create bool) (Script, error) {
 }
 
 func (l *Library) Delete(identifier string) error {
-	root, err := l.resolveRoot(true)
+	root, err := l.resolveRoot()
 	if err != nil {
 		return err
 	}

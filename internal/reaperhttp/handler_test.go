@@ -470,6 +470,43 @@ func TestAgentProposalDraftRunReviewAndSaveLoop(t *testing.T) {
 	}
 }
 
+func TestProposalDiscardIsWorkspaceScopedAndLeavesNoLibraryFile(t *testing.T) {
+	root := t.TempDir()
+	store := &testStore{root: root, workspaces: map[string]*workspace.Workspace{}}
+	mine := reaperHTTPWorkspace(t, root, "mine", userprofile.LocalUserID)
+	other := reaperHTTPWorkspace(t, root, "other", userprofile.LocalUserID)
+	if _, err := mine.GrantRuntimeCapability("reaper_live_control", "agent-1", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	store.workspaces["mine"] = mine
+	store.workspaces["other"] = other
+	library := reaper.NewLibraryAt(filepath.Join(root, "library"))
+	handler := NewHandler(store, testUser(userprofile.LocalUserID), &stateReader{}, nil)
+	handler.SetScriptServices(library, &scriptRunnerStub{})
+	proposal, err := handler.proposeScript("mine", "agent-1", reaper.ScriptInput{
+		Filename: "discard.lua", Name: "Discard me", Description: "Never save this.", Code: "return 1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	handler.Register(mux)
+
+	foreign := httptest.NewRecorder()
+	mux.ServeHTTP(foreign, httptest.NewRequest(http.MethodDelete, "/api/workspaces/other/reaper/script-proposals/"+proposal.ID, nil))
+	if foreign.Code != http.StatusNotFound || len(handler.proposals.list("mine")) != 1 {
+		t.Fatalf("cross-workspace discard = %d %s", foreign.Code, foreign.Body.String())
+	}
+	removed := httptest.NewRecorder()
+	mux.ServeHTTP(removed, httptest.NewRequest(http.MethodDelete, "/api/workspaces/mine/reaper/script-proposals/"+proposal.ID, nil))
+	if removed.Code != http.StatusOK || len(handler.proposals.list("mine")) != 0 {
+		t.Fatalf("discard = %d %s", removed.Code, removed.Body.String())
+	}
+	if scripts, err := library.List(); err != nil || len(scripts) != 0 {
+		t.Fatalf("discard wrote a library artifact: %+v, %v", scripts, err)
+	}
+}
+
 func TestDraftRunRechecksExactAgentGrant(t *testing.T) {
 	root := t.TempDir()
 	store := &testStore{root: root, workspaces: map[string]*workspace.Workspace{}}

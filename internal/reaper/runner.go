@@ -3,7 +3,6 @@ package reaper
 import (
 	"context"
 	"errors"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -137,7 +136,7 @@ func atomicRunnerWrite(root, destination string, data []byte) error {
 		_ = temp.Close()
 		return ErrRunnerUnavailable
 	}
-	if _, err := io.WriteString(temp, string(data)); err != nil {
+	if _, err := temp.Write(data); err != nil {
 		_ = temp.Close()
 		return ErrRunnerUnavailable
 	}
