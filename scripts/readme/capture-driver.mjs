@@ -42,11 +42,15 @@ function imageMetadata(runDirectory, name) {
 
 function assertRepeatable(first, repeat) {
   const repeatByID = new Map(repeat.images.map((image) => [image.id, image]));
+  const mismatches = [];
   for (const image of first.images) {
     const comparison = repeatByID.get(image.id);
     if (!comparison || comparison.sha256 !== image.sha256) {
-      fail(`Same-environment WebP checksum mismatch for ${image.id}; inspect the staged run and recapture.`);
+      mismatches.push(`${image.id} (first=${image.sha256}, repeat=${comparison?.sha256 || 'missing'})`);
     }
+  }
+  if (mismatches.length) {
+    fail(`Same-environment WebP checksum mismatch: ${mismatches.join(', ')}; inspect the staged run and recapture.`);
   }
 }
 
