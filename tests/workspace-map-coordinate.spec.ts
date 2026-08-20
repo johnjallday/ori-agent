@@ -211,7 +211,7 @@ async function enableMapDrag(page: Page) {
   await expect(toggle).toBeEnabled();
   if ((await toggle.getAttribute('aria-pressed')) !== 'true') await toggle.click();
   await expect(toggle).toHaveAttribute('aria-pressed', 'true');
-  await expect(toggle).toHaveText('Drag: on');
+  await expect(toggle).toHaveText('Move: on');
 }
 
 /**
@@ -433,14 +433,15 @@ test.describe('Coordinate Workspace Map', () => {
     expect(positionsAfter, 'no stray position record').toBe(positionsBefore);
   });
 
-  test('Drag starts off and pointer movement leaves a building inert', async ({ page }) => {
+  test('Move starts off and pointer movement leaves a building inert', async ({ page }) => {
     const id = await ownWorkspaceAt(page);
     await openMap(page);
     await centerOnWorkspace(page, id);
 
     const toggle = page.locator('[data-map-drag]');
     await expect(toggle).toHaveAttribute('aria-pressed', 'false');
-    await expect(toggle).toHaveText('Drag: off');
+    await expect(toggle).toHaveText('Move: off');
+    await expect(page.locator('[data-map-move]')).toHaveCount(0);
     const before = (await anchors(page)).find(anchor => anchor.id === id)!;
     const writes: string[] = [];
     page.on('request', request => {
@@ -535,7 +536,9 @@ test.describe('Coordinate Workspace Map', () => {
     await expect(tile).toHaveClass(/is-unsaved/);
   });
 
-  test('a selected building can be moved by keyboard alone (FR-77 – FR-79)', async ({ page }) => {
+  test('Move mode supports keyboard movement without a second control (FR-77 – FR-79)', async ({
+    page
+  }) => {
     const id = await ownWorkspaceAt(page);
     await openMap(page);
     const placedAt = (await anchors(page)).find(a => a.id === id)!;
@@ -554,7 +557,8 @@ test.describe('Coordinate Workspace Map', () => {
     }
     await expect(page.locator('[data-map-drag]')).toHaveAttribute('aria-pressed', 'false');
 
-    await page.click('[data-map-move]');
+    await page.click('[data-map-drag]');
+    await expect(page.locator('.ws-map-canvas')).toBeFocused();
     await page.locator('.ws-map-canvas').press('ArrowRight');
     await page.locator('.ws-map-canvas').press('ArrowDown');
     await page.locator('.ws-map-canvas').press('Enter');

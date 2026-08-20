@@ -144,11 +144,13 @@
   // dropped rather than painted over the current world.
   var layoutRequestSeq = 0;
 
-  // Pointer translation is an explicit, page-local mode (#374). It is off for
-  // every new page session and intentionally does not belong to layout,
-  // settings, or local storage. Keeping it at module scope lets ordinary Map
-  // redraws and Home's Map/Tree hide/show cycle preserve the user's choice.
-  var dragModeEnabled = false;
+  // Moving records is an explicit, page-local mode (#374). It is off for every
+  // new page session and intentionally does not belong to layout, settings, or
+  // local storage. Keeping it at module scope lets ordinary Map redraws and
+  // Home's Map/Tree hide/show cycle preserve the user's choice. Pointer drags
+  // and keyboard arrows share this one visible mode instead of competing
+  // controls; the lower-level drag state keeps its established name.
+  var moveModeEnabled = false;
 
   function isSafeCoordinate(value) {
     return typeof value === 'number' && isFinite(value) && value >= MIN_COORD && value <= MAX_COORD;
@@ -2368,15 +2370,12 @@
       // where you want the workspace and choose Build. One gesture instead of
       // three, and no mode to be stuck in.
       '<button type="button" class="ws-map-ctl ws-map-ctl--wide" data-map-drag aria-pressed="' +
-      (dragModeEnabled ? 'true' : 'false') +
+      (moveModeEnabled ? 'true' : 'false') +
       '"' +
       (readOnly ? ' disabled' : '') +
-      '>Drag: ' +
-      (dragModeEnabled ? 'on' : 'off') +
+      '>Move: ' +
+      (moveModeEnabled ? 'on' : 'off') +
       '</button>' +
-      '<button type="button" class="ws-map-ctl ws-map-ctl--wide" data-map-move' +
-      (readOnly ? ' disabled' : '') +
-      '>Move</button>' +
       '<button type="button" class="ws-map-ctl ws-map-ctl--wide" data-map-snap aria-pressed="' +
       (snapOn ? 'true' : 'false') +
       '"' +
@@ -2441,9 +2440,8 @@
       '<li><b>Zoom</b> — pinch, ' +
       (isApplePlatform() ? '⌘' : 'Ctrl') +
       '+scroll, the + / − buttons, or the + / − keys.</li>' +
-      '<li><b>Pointer drag</b> — turn Drag on first. Drag a building to reposition it, move it into another expanded district, or remove it from its group on open ground; membership changes ask for confirmation.</li>' +
-      '<li><b>Move a district</b> — with Drag on, drag its empty fill, border, or named Move control. Its workspaces move with it; membership never changes.</li>' +
-      '<li><b>Keyboard Move</b> — select a building or district and press Move; use arrow keys, Enter to save, or Escape to cancel. Drag does not need to be on.</li>' +
+      '<li><b>Move</b> — turn Move on, then drag a building or district. Buildings can reposition, join another expanded district, or leave their group on open ground; membership changes ask for confirmation. A district moves with all its workspaces and never changes membership.</li>' +
+      '<li><b>Keyboard move</b> — with Move on, select a building or district and use an arrow key to begin; press Enter to save or Escape to cancel.</li>' +
       '<li><b>Build</b> — right-click empty ground where it should go and choose Build.</li>' +
       '<li><b>Snap</b> — on by default. Hold ' +
       (isApplePlatform() ? 'Option' : 'Alt') +
@@ -4234,18 +4232,18 @@
     if (region) region.textContent = message;
   }
 
-  function updateDragControl(container) {
+  function updateMoveControl(container) {
     if (!container || typeof container.querySelector !== 'function') return;
     var toggle = container.querySelector('[data-map-drag]');
     var writable = layoutState.status === 'ready';
     if (toggle) {
       toggle.disabled = !writable;
       if (toggle.setAttribute) {
-        toggle.setAttribute('aria-pressed', dragModeEnabled ? 'true' : 'false');
+        toggle.setAttribute('aria-pressed', moveModeEnabled ? 'true' : 'false');
       }
-      toggle.textContent = 'Drag: ' + (dragModeEnabled ? 'on' : 'off');
+      toggle.textContent = 'Move: ' + (moveModeEnabled ? 'on' : 'off');
     }
-    var available = writable && dragModeEnabled;
+    var available = writable && moveModeEnabled;
     var canvas = container.querySelector('[data-ws-map-viewport]');
     if (canvas && canvas.classList) {
       canvas.classList.toggle('is-drag-enabled', available);
@@ -4312,32 +4310,43 @@
     setDragReadout(container, null);
   }
 
-  function setDragMode(container, enabled) {
+  function setMoveMode(container, enabled) {
     var next = !!enabled;
-    if (next === dragModeEnabled) {
-      updateDragControl(container);
+    if (next === moveModeEnabled) {
+      updateMoveControl(container);
       return;
     }
-    dragModeEnabled = next;
-    if (!next) cancelPointerTranslations(container);
-    updateDragControl(container);
+    moveModeEnabled = next;
+    if (!next) {
+      cancelPointerTranslations(container);
+      endKeyboardMove(container, false);
+    }
+    updateMoveControl(container);
     announce(
       container,
       next
-        ? 'Drag mode enabled. Workspace and district dragging is available.'
-        : 'Drag mode disabled. Workspace and district dragging is off.'
+        ? 'Move mode enabled. Drag a workspace or district, or use arrow keys with a selection.'
+        : 'Move mode disabled. Workspace and district positions are locked.'
     );
   }
 
-  function bindDragControl(container) {
+  function bindMoveControl(container) {
     var toggle = container.querySelector('[data-map-drag]');
     if (toggle && typeof toggle.addEventListener === 'function') {
       toggle.addEventListener('click', function () {
         if (layoutState.status !== 'ready') return;
-        setDragMode(container, !dragModeEnabled);
+        var next = !moveModeEnabled;
+        setMoveMode(container, next);
+        // The former keyboard-only Move action focused the canvas. Preserve
+        // that direct path when the unified mode is enabled: the first arrow
+        // begins moving the current selection instead of panning the camera.
+        if (next) {
+          var canvas = container.querySelector('[data-ws-map-viewport]');
+          if (canvas && canvas.focus) canvas.focus();
+        }
       });
     }
-    updateDragControl(container);
+    updateMoveControl(container);
   }
 
   // isInteractiveTarget guards empty-space panning. A gesture that starts on a
@@ -4540,11 +4549,6 @@
     // Fit all, Center selected and Reset view have no buttons any more: they are
     // items on the canvas context menu (see runMenuAction), plus the f / 0 keys
     // below. Nothing about what they do changed.
-    on('[data-map-move]', function () {
-      startKeyboardMove(container);
-      var canvasEl = container.querySelector('[data-ws-map-viewport]');
-      if (canvasEl && canvasEl.focus) canvasEl.focus();
-    });
 
     if (!canvas || typeof canvas.addEventListener !== 'function') return;
     // Keyboard equivalents for every camera gesture, so navigating the map
@@ -4560,8 +4564,17 @@
         cancelResize('Resize cancelled. The group is back at its saved size.');
         return;
       }
-      // Keyboard Move owns the arrow keys while it is active: they move the
-      // building, not the camera (FR-78).
+      // Move mode merges pointer and keyboard placement behind one safe-default
+      // control. The first arrow lazily starts a keyboard transaction for the
+      // current selection; without Move mode, arrows keep panning the camera.
+      if (
+        !moveState &&
+        moveModeEnabled &&
+        /^Arrow(?:Left|Right|Up|Down)$/.test(event.key) &&
+        selectedNodeAnchor()
+      ) {
+        startKeyboardMove(container);
+      }
       if (handleMoveKey(container, event)) {
         if (event.preventDefault) event.preventDefault();
         return;
@@ -5931,7 +5944,7 @@
       if (!el || typeof el.addEventListener !== 'function') return;
 
       el.addEventListener('pointerdown', function (event) {
-        if (layoutState.status !== 'ready' || !dragModeEnabled) return;
+        if (layoutState.status !== 'ready' || !moveModeEnabled) return;
         if (event.button != null && event.button !== 0) return;
         // The checkbox and modifier-clicks belong to bulk selection, and must
         // never start a spatial move (FR-76).
@@ -6457,7 +6470,7 @@
         var isSurface = initiator === district;
 
         initiator.addEventListener('pointerdown', function (event) {
-          if (layoutState.status !== 'ready' || !dragModeEnabled) return;
+          if (layoutState.status !== 'ready' || !moveModeEnabled) return;
           if (event.button != null && event.button !== 0) return;
           if (isSurface && event.target !== district) return;
           var origin = committedAnchor(groupId);
@@ -7174,7 +7187,7 @@
     bindViewportPan(container);
     bindViewportWheel(container);
     bindCameraControls(container);
-    bindDragControl(container);
+    bindMoveControl(container);
     bindSnapControl(container);
     bindTileDrag(container, workspaces);
     bindDistrictDrag(container);
@@ -7222,6 +7235,7 @@
     closeContextMenu({ restoreFocus: false });
     settleDropConfirm('decline', { restoreFocus: false, skipRedraw: true });
     cancelPointerTranslations(container);
+    endKeyboardMove(container, false);
     container.innerHTML = '';
     // Clearing lastMount is what makes a layout response still in flight a
     // no-op when it lands: settleLayout has nothing to repaint.

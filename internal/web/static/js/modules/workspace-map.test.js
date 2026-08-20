@@ -2426,7 +2426,7 @@ test('an unavailable layout still draws a usable map, marked read-only (FR-105)'
   assert.match(container.innerHTML, /data-ws-id="ws-1"/);
 });
 
-test('drag mode renders once, starts off, and is disabled until the map is writable', async () => {
+test('one move mode renders, starts off, and is disabled until the map is writable', async () => {
   const state = { workspaces: [{ id: 'ws-1', name: 'Alpha' }] };
 
   const loading = loadMapWithFetch(() => new Promise(() => {}));
@@ -2435,7 +2435,7 @@ test('drag mode renders once, starts off, and is disabled until the map is writa
   assert.equal((loadingHarness.container.innerHTML.match(/data-map-drag/g) || []).length, 1);
   assert.match(
     loadingHarness.container.innerHTML,
-    /data-map-drag[^>]*aria-pressed="false"[^>]*disabled[^>]*>Drag: off<\/button>/
+    /data-map-drag[^>]*aria-pressed="false"[^>]*disabled[^>]*>Move: off<\/button>/
   );
 
   const ready = loadMapWithFetch(() =>
@@ -2447,9 +2447,14 @@ test('drag mode renders once, starts off, and is disabled until the map is writa
   assert.equal((readyHarness.container.innerHTML.match(/data-map-drag/g) || []).length, 1);
   assert.match(
     readyHarness.container.innerHTML,
-    /data-map-drag[^>]*aria-pressed="false"[^>]*>Drag: off<\/button>/
+    /data-map-drag[^>]*aria-pressed="false"[^>]*>Move: off<\/button>/
   );
   assert.doesNotMatch(readyHarness.container.innerHTML, /data-map-drag[^>]*disabled/);
+  assert.doesNotMatch(
+    readyHarness.container.innerHTML,
+    /data-map-move(?:\s|>|=)/,
+    'the separate keyboard Move action is gone'
+  );
 
   ready.mount(readyHarness.container, state);
   assert.equal(
@@ -2464,7 +2469,7 @@ test('drag mode renders once, starts off, and is disabled until the map is writa
   await flush();
   assert.match(
     unavailableHarness.container.innerHTML,
-    /data-map-drag[^>]*aria-pressed="false"[^>]*disabled[^>]*>Drag: off<\/button>/
+    /data-map-drag[^>]*aria-pressed="false"[^>]*disabled[^>]*>Move: off<\/button>/
   );
 });
 
@@ -3020,7 +3025,7 @@ function mountWithCamera(map, harness, workspaces) {
 function enableDragMode(harness) {
   const toggle = harness.control('[data-map-drag]');
   if (toggle.getAttribute('aria-pressed') !== 'true') toggle.click();
-  assert.equal(toggle.getAttribute('aria-pressed'), 'true', 'the test explicitly enabled Drag');
+  assert.equal(toggle.getAttribute('aria-pressed'), 'true', 'the test explicitly enabled Move');
 }
 
 test('a saved camera is restored instead of refitting (FR-43, FR-45)', async () => {
@@ -3828,7 +3833,7 @@ async function mountedDrag(options = {}) {
   return ctx;
 }
 
-test('the drag toggle updates its label, ARIA, cue class, announcement, and cancels a preview', async () => {
+test('the unified Move toggle updates its label, ARIA, cue, announcement, and cancels a preview', async () => {
   const { map, harness, patches } = await mountedDrag({ enableDrag: false });
   const toggle = harness.control('[data-map-drag]');
   const live = harness.control('[data-map-live]');
@@ -3836,14 +3841,14 @@ test('the drag toggle updates its label, ARIA, cue class, announcement, and canc
   const origin = { ...map.getLayoutState().positions['ws-1'] };
 
   assert.equal(toggle.getAttribute('aria-pressed'), 'false');
-  assert.equal(toggle.textContent, 'Drag: off');
+  assert.equal(toggle.textContent, 'Move: off');
   assert.equal(harness.classes.has('is-drag-enabled'), false);
 
   toggle.click();
   assert.equal(toggle.getAttribute('aria-pressed'), 'true');
-  assert.equal(toggle.textContent, 'Drag: on');
+  assert.equal(toggle.textContent, 'Move: on');
   assert.equal(harness.classes.has('is-drag-enabled'), true);
-  assert.match(live.textContent, /Drag mode enabled/);
+  assert.match(live.textContent, /Move mode enabled/);
 
   tile.fire('pointerdown', tilePointer(0, 0));
   tile.fire('pointermove', tilePointer(100, 80));
@@ -3856,12 +3861,12 @@ test('the drag toggle updates its label, ARIA, cue class, announcement, and canc
   assert.equal(harness.control('[data-map-build-banner]').hidden, true);
   assert.equal(harness.classes.has('is-drag-enabled'), false);
   assert.equal(toggle.getAttribute('aria-pressed'), 'false');
-  assert.equal(toggle.textContent, 'Drag: off');
-  assert.match(live.textContent, /Drag mode disabled/);
+  assert.equal(toggle.textContent, 'Move: off');
+  assert.match(live.textContent, /Move mode disabled/);
   assert.equal(patches.length, 0, 'cancelling the preview performs no write');
 });
 
-test('drag mode is page-local across redraw and hide/show lifecycle, then resets in a new session', async () => {
+test('move mode is page-local across redraw and hide/show lifecycle, then resets in a new session', async () => {
   const { map, harness, patches } = await mountedDrag({ enableDrag: false });
   const state = {
     workspaces: [
@@ -3875,7 +3880,7 @@ test('drag mode is page-local across redraw and hide/show lifecycle, then resets
 
   harness.control('[data-map-drag]').click();
   map.mount(harness.container, state);
-  assert.match(harness.container.innerHTML, /data-map-drag[^>]*aria-pressed="true"[^>]*>Drag: on/);
+  assert.match(harness.container.innerHTML, /data-map-drag[^>]*aria-pressed="true"[^>]*>Move: on/);
 
   const tile = harness.tile('ws-1');
   tile.fire('pointerdown', tilePointer(0, 0));
@@ -3891,7 +3896,7 @@ test('drag mode is page-local across redraw and hide/show lifecycle, then resets
   map.mount(harness.container, state);
   assert.match(
     harness.container.innerHTML,
-    /data-map-drag[^>]*aria-pressed="true"[^>]*>Drag: on/,
+    /data-map-drag[^>]*aria-pressed="true"[^>]*>Move: on/,
     'returning to Map in the same page session preserves the choice'
   );
 
@@ -3900,12 +3905,25 @@ test('drag mode is page-local across redraw and hide/show lifecycle, then resets
   await flush();
   assert.match(
     fresh.harness.container.innerHTML,
-    /data-map-drag[^>]*aria-pressed="false"[^>]*>Drag: off/,
+    /data-map-drag[^>]*aria-pressed="false"[^>]*>Move: off/,
     'a newly evaluated module starts a new page session off'
   );
 });
 
-test('drag mode off captures nothing and moves neither tiles nor districts', async () => {
+test('move mode off leaves selected-record arrow keys with camera navigation', async () => {
+  const { map, harness, patches } = await mountedDrag({ enableDrag: false });
+  map.setSelectedId(null, [], 'ws-1');
+  const anchor = { ...harness.tile('ws-1').at() };
+  const cameraBefore = map.getCamera();
+
+  harness.fire('keydown', keyEvent('ArrowRight'));
+
+  assert.deepEqual({ ...harness.tile('ws-1').at() }, anchor, 'the selected workspace stays locked');
+  assert.ok(map.getCamera().centerX > cameraBefore.centerX, 'the same arrow still pans the camera');
+  assert.equal(patches.length, 0, 'an off-mode arrow does not write a record position');
+});
+
+test('move mode off captures nothing and moves neither tiles nor districts', async () => {
   const patches = [];
   const map = loadMapWithFetch((url, init) => {
     if (init && init.method === 'PATCH') {
@@ -4205,11 +4223,11 @@ test('Escape during a drag restores the committed position without saving (FR-79
   assert.equal(patches.length, 0, 'a cancelled move saves nothing');
 });
 
-test('a selected workspace can be moved by keyboard alone (FR-77 – FR-79)', async () => {
+test('the unified mode moves a selected workspace by keyboard alone (FR-77 – FR-79)', async () => {
   const { map, harness, patches } = await mountedDrag({ enableDrag: false });
   map.setSelectedId(null, [], 'ws-1');
 
-  harness.control('[data-map-move]').click();
+  harness.control('[data-map-drag]').click();
   harness.fire('keydown', keyEvent('ArrowRight'));
   harness.fire('keydown', keyEvent('ArrowDown'));
   assert.equal(patches.length, 0, 'stepping around does not save');
@@ -4221,11 +4239,23 @@ test('a selected workspace can be moved by keyboard alone (FR-77 – FR-79)', as
   assert.deepEqual({ ...saves[0].operations[0].positions['ws-1'] }, { x: 380 + 38, y: 228 + 38 });
 });
 
+test('turning Move off cancels a keyboard preview and saves nothing', async () => {
+  const { map, harness, patches } = await mountedDrag();
+  map.setSelectedId(null, [], 'ws-1');
+
+  harness.fire('keydown', keyEvent('ArrowRight'));
+  assert.deepEqual({ ...harness.tile('ws-1').at() }, { x: 418, y: 228 });
+  harness.control('[data-map-drag]').click();
+
+  assert.deepEqual({ ...harness.tile('ws-1').at() }, { x: 380, y: 228 });
+  assert.equal(harness.control('[data-map-drag]').getAttribute('aria-pressed'), 'false');
+  assert.equal(patches.length, 0);
+});
+
 test('Escape during a keyboard move restores and saves nothing (FR-79)', async () => {
   const { map, harness, patches } = await mountedDrag();
   map.setSelectedId(null, [], 'ws-1');
 
-  harness.control('[data-map-move]').click();
   harness.fire('keydown', keyEvent('ArrowLeft'));
   harness.fire('keydown', keyEvent('Escape'));
   await flush();
@@ -4245,7 +4275,6 @@ test('a keyboard move over an occupied footprint shows a blocked indicator too, 
   harness.tile('ws-2').style.left = '760px';
   harness.tile('ws-2').style.top = '228px';
 
-  harness.control('[data-map-move]').click();
   assert.equal(tile.classList.contains('is-blocked'), false, 'starts clear');
   assert.equal(banner.classList.contains('is-blocked'), false);
 
@@ -6042,11 +6071,11 @@ test('a failed cluster save restores every anchor together (FR-87)', async () =>
   assert.deepEqual({ ...harness.tile('child-b').at() }, { x: 380, y: 152 });
 });
 
-test('a selected district moves by keyboard with the same contract (FR-93)', async () => {
+test('a selected district moves by keyboard through the unified mode (FR-93)', async () => {
   const { map, harness, patches } = await mountedCluster({ enableDrag: false });
   map.setSelectedId(null, [], 'grp');
 
-  harness.control('[data-map-move]').click();
+  harness.control('[data-map-drag]').click();
   harness.fire('keydown', keyEvent('ArrowRight'));
   assert.deepEqual(
     { ...harness.tile('child-a').at() },
@@ -6059,7 +6088,6 @@ test('a selected district moves by keyboard with the same contract (FR-93)', asy
   assert.deepEqual({ ...harness.tile('child-a').at() }, { x: 152, y: 152 }, 'Escape restored it');
   assert.equal(patches.length, 0);
 
-  harness.control('[data-map-move]').click();
   harness.fire('keydown', keyEvent('ArrowDown'));
   harness.fire('keydown', keyEvent('Enter'));
   await flush();
@@ -7629,9 +7657,10 @@ test('the help panel does not advertise f, which the app-wide link hints take', 
   assert.doesNotMatch(help, /press f\b/i);
   assert.match(help, /0 resets the view/);
   assert.match(help, /Shift\+F10/, 'and the keyboard route to the menu is documented');
-  assert.match(help, /turn Drag on first/);
-  assert.match(help, /remove it from its group on open ground/);
-  assert.match(help, /Drag does not need to be on/, 'keyboard Move is clearly outside the mode');
+  assert.match(help, /turn Move on/);
+  assert.match(help, /leave their group on open ground/);
+  assert.match(help, /with Move on/);
+  assert.doesNotMatch(help, /Drag does not need to be on/);
   assert.match(help, /right-click empty ground.*choose Build/);
   assert.doesNotMatch(help, /Only Tree can|removal stays in Tree/i);
 });
