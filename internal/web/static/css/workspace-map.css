@@ -714,8 +714,14 @@
 }
 .ws-map-district-handle {
   margin-left: auto;
-  cursor: grab;
+  cursor: default;
   touch-action: none;
+}
+.ws-map-canvas:not(.is-drag-enabled) .ws-map-district-handle {
+  opacity: 0.65;
+}
+.ws-map-canvas.is-drag-enabled .ws-map-district-handle {
+  cursor: grab;
 }
 .ws-map-district-more,
 .ws-map-district-collapse {
@@ -1027,9 +1033,9 @@
   padding: 0;
   border: 0;
   background: none;
-  /* Buildings are grabbable; empty world space is pannable. Two different cues
-     for two different kinds of movement (#292 design §6). */
-  cursor: grab;
+  /* Dragging is opt-in (#374). Off-mode buildings still advertise their
+     ordinary selection action without promising spatial movement. */
+  cursor: pointer;
   touch-action: none;
   display: flex;
   flex-direction: column;
@@ -1040,6 +1046,9 @@
 }
 .ws-map-tile:hover {
   transform: translateY(-4px);
+}
+.ws-map-canvas.is-drag-enabled .ws-map-tile {
+  cursor: grab;
 }
 /* Drag and unsaved states carry a shape and an outline, never colour alone
    (FR-120). */

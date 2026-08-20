@@ -87,6 +87,11 @@ test('#346 dropping a workspace into a district moves it into that group', async
   await page.getByRole('menuitem', { name: 'Fit all' }).click();
   await page.waitForTimeout(300);
 
+  const dragToggle = page.locator('[data-map-drag]');
+  await expect(dragToggle).toHaveAttribute('aria-pressed', 'false');
+  await dragToggle.click();
+  await expect(dragToggle).toHaveAttribute('aria-pressed', 'true');
+
   expect(await parentOf(page, loose)).toBe('', 'it starts outside the group');
 
   const looseTile = page.locator(`.ws-map-tile[data-ws-id="${loose}"]`);

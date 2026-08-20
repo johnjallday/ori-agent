@@ -144,6 +144,12 @@
   // dropped rather than painted over the current world.
   var layoutRequestSeq = 0;
 
+  // Pointer translation is an explicit, page-local mode (#374). It is off for
+  // every new page session and intentionally does not belong to layout,
+  // settings, or local storage. Keeping it at module scope lets ordinary Map
+  // redraws and Home's Map/Tree hide/show cycle preserve the user's choice.
+  var dragModeEnabled = false;
+
   function isSafeCoordinate(value) {
     return typeof value === 'number' && isFinite(value) && value >= MIN_COORD && value <= MAX_COORD;
   }
@@ -2346,6 +2352,13 @@
       // click a spot — and the context menu already knows the spot: right-click
       // where you want the workspace and choose Build. One gesture instead of
       // three, and no mode to be stuck in.
+      '<button type="button" class="ws-map-ctl ws-map-ctl--wide" data-map-drag aria-pressed="' +
+      (dragModeEnabled ? 'true' : 'false') +
+      '"' +
+      (readOnly ? ' disabled' : '') +
+      '>Drag: ' +
+      (dragModeEnabled ? 'on' : 'off') +
+      '</button>' +
       '<button type="button" class="ws-map-ctl ws-map-ctl--wide" data-map-move' +
       (readOnly ? ' disabled' : '') +
       '>Move</button>' +
@@ -4205,6 +4218,102 @@
     if (region) region.textContent = message;
   }
 
+  function updateDragControl(container) {
+    if (!container || typeof container.querySelector !== 'function') return;
+    var toggle = container.querySelector('[data-map-drag]');
+    var writable = layoutState.status === 'ready';
+    if (toggle) {
+      toggle.disabled = !writable;
+      if (toggle.setAttribute) {
+        toggle.setAttribute('aria-pressed', dragModeEnabled ? 'true' : 'false');
+      }
+      toggle.textContent = 'Drag: ' + (dragModeEnabled ? 'on' : 'off');
+    }
+    var canvas = container.querySelector('[data-ws-map-viewport]');
+    if (canvas && canvas.classList) {
+      canvas.classList.toggle('is-drag-enabled', writable && dragModeEnabled);
+    }
+  }
+
+  /**
+   * Cancel pointer-only translations without saving.
+   *
+   * A mode switch or redraw can destroy the elements that own pointer capture.
+   * Restore previews and release capture first, so no stale drag object can
+   * write through a later event from detached DOM (#374 AR5).
+   */
+  function cancelPointerTranslations(container) {
+    var tileState = dragState;
+    dragState = null;
+    if (tileState) {
+      var tile = tileState.el;
+      if (
+        tile &&
+        tile.releasePointerCapture &&
+        tile.hasPointerCapture &&
+        tile.hasPointerCapture(tileState.pointerId)
+      ) {
+        tile.releasePointerCapture(tileState.pointerId);
+      }
+      if (tile && tile.classList) {
+        tile.classList.remove('is-dragging');
+        tile.classList.remove('is-blocked');
+      }
+      if (tileState.moved && tile) placeElement(tile, tileState.origin);
+    }
+
+    var districtState = clusterDrag;
+    clusterDrag = null;
+    if (districtState) {
+      var handle = districtState.handle;
+      if (
+        handle &&
+        handle.releasePointerCapture &&
+        handle.hasPointerCapture &&
+        handle.hasPointerCapture(districtState.pointerId)
+      ) {
+        handle.releasePointerCapture(districtState.pointerId);
+      }
+      if (districtState.districtEl && districtState.districtEl.classList) {
+        districtState.districtEl.classList.remove('is-dragging');
+      }
+      setClusterBlocked(districtState, false);
+      if (districtState.moved) restoreCluster(districtState);
+    }
+
+    suppressClickFor = null;
+    markDropTarget(container, '');
+    setDragReadout(container, null);
+  }
+
+  function setDragMode(container, enabled) {
+    var next = !!enabled;
+    if (next === dragModeEnabled) {
+      updateDragControl(container);
+      return;
+    }
+    dragModeEnabled = next;
+    if (!next) cancelPointerTranslations(container);
+    updateDragControl(container);
+    announce(
+      container,
+      next
+        ? 'Drag mode enabled. Workspace and district dragging is available.'
+        : 'Drag mode disabled. Workspace and district dragging is off.'
+    );
+  }
+
+  function bindDragControl(container) {
+    var toggle = container.querySelector('[data-map-drag]');
+    if (toggle && typeof toggle.addEventListener === 'function') {
+      toggle.addEventListener('click', function () {
+        if (layoutState.status !== 'ready') return;
+        setDragMode(container, !dragModeEnabled);
+      });
+    }
+    updateDragControl(container);
+  }
+
   // isInteractiveTarget guards empty-space panning. A gesture that starts on a
   // building, a group label, a checkbox, a control, or a link belongs to that
   // element, not to the camera (FR-34).
@@ -5744,7 +5853,7 @@
       if (!el || typeof el.addEventListener !== 'function') return;
 
       el.addEventListener('pointerdown', function (event) {
-        if (layoutState.status !== 'ready') return;
+        if (layoutState.status !== 'ready' || !dragModeEnabled) return;
         if (event.button != null && event.button !== 0) return;
         // The checkbox and modifier-clicks belong to bulk selection, and must
         // never start a spatial move (FR-76).
@@ -6198,7 +6307,7 @@
       if (!handle || typeof handle.addEventListener !== 'function') return;
 
       handle.addEventListener('pointerdown', function (event) {
-        if (layoutState.status !== 'ready') return;
+        if (layoutState.status !== 'ready' || !dragModeEnabled) return;
         if (event.button != null && event.button !== 0) return;
         var groupId = handle.getAttribute('data-group-drag');
         var origin = committedAnchor(groupId);
@@ -6876,10 +6985,11 @@
     });
 
     var viewport = measureViewport(container);
-    // The re-render below destroys the menu's host along with everything else.
-    // Closing it first keeps the listeners and the focus-restore target from
-    // outliving the DOM they referred to.
+    // The re-render below destroys interaction hosts and pointer owners. Close
+    // or cancel them first so listeners, capture, and previews cannot outlive
+    // the DOM they referred to.
     closeContextMenu({ restoreFocus: false });
+    cancelPointerTranslations(container);
     lastMount = { container: container, state: state };
 
     container.innerHTML = shellHTML(
@@ -6903,6 +7013,7 @@
     bindViewportPan(container);
     bindViewportWheel(container);
     bindCameraControls(container);
+    bindDragControl(container);
     bindSnapControl(container);
     bindTileDrag(container, workspaces);
     bindDistrictDrag(container);
@@ -6944,6 +7055,7 @@
     if (!container) return;
     stopResizeWatch();
     closeContextMenu({ restoreFocus: false });
+    cancelPointerTranslations(container);
     container.innerHTML = '';
     // Clearing lastMount is what makes a layout response still in flight a
     // no-op when it lands: settleLayout has nothing to repaint.

@@ -2312,6 +2312,48 @@ test('an unavailable layout still draws a usable map, marked read-only (FR-105)'
   assert.match(container.innerHTML, /data-ws-id="ws-1"/);
 });
 
+test('drag mode renders once, starts off, and is disabled until the map is writable', async () => {
+  const state = { workspaces: [{ id: 'ws-1', name: 'Alpha' }] };
+
+  const loading = loadMapWithFetch(() => new Promise(() => {}));
+  const loadingHarness = createCameraHarness({ tiles: ['ws-1'] });
+  loading.mount(loadingHarness.container, state);
+  assert.equal((loadingHarness.container.innerHTML.match(/data-map-drag/g) || []).length, 1);
+  assert.match(
+    loadingHarness.container.innerHTML,
+    /data-map-drag[^>]*aria-pressed="false"[^>]*disabled[^>]*>Drag: off<\/button>/
+  );
+
+  const ready = loadMapWithFetch(() =>
+    jsonResponse({ schema_version: 1, positions: { 'ws-1': { x: 100, y: 100 } } })
+  );
+  const readyHarness = createCameraHarness({ tiles: ['ws-1'] });
+  ready.mount(readyHarness.container, state);
+  await flush();
+  assert.equal((readyHarness.container.innerHTML.match(/data-map-drag/g) || []).length, 1);
+  assert.match(
+    readyHarness.container.innerHTML,
+    /data-map-drag[^>]*aria-pressed="false"[^>]*>Drag: off<\/button>/
+  );
+  assert.doesNotMatch(readyHarness.container.innerHTML, /data-map-drag[^>]*disabled/);
+
+  ready.mount(readyHarness.container, state);
+  assert.equal(
+    (readyHarness.container.innerHTML.match(/data-map-drag/g) || []).length,
+    1,
+    'a remount replaces the control instead of duplicating it'
+  );
+
+  const unavailable = loadMapWithFetch(() => Promise.resolve({ ok: false, status: 503 }));
+  const unavailableHarness = createCameraHarness({ tiles: ['ws-1'] });
+  unavailable.mount(unavailableHarness.container, state);
+  await flush();
+  assert.match(
+    unavailableHarness.container.innerHTML,
+    /data-map-drag[^>]*aria-pressed="false"[^>]*disabled[^>]*>Drag: off<\/button>/
+  );
+});
+
 // ---------------------------------------------------------------------------
 // Camera transforms (#292 FR-31 – FR-46, FR-123)
 //
@@ -2509,9 +2551,15 @@ function createCameraHarness({ width = 1000, height = 600, tiles = [], districts
       addEventListener: (type, fn) => {
         (own[type] = own[type] || []).push(fn);
       },
-      setPointerCapture: () => {},
-      releasePointerCapture: () => {},
-      hasPointerCapture: () => true,
+      setPointerCapture: () => {
+        el.pointerCaptures += 1;
+      },
+      releasePointerCapture: () => {
+        el.pointerReleases += 1;
+      },
+      hasPointerCapture: () => el.pointerCaptures > el.pointerReleases,
+      pointerCaptures: 0,
+      pointerReleases: 0,
       focus: () => {
         el.focused = true;
       },
@@ -2554,7 +2602,8 @@ function createCameraHarness({ width = 1000, height = 600, tiles = [], districts
     classList: {
       add: c => classes.add(c),
       remove: c => classes.delete(c),
-      contains: c => classes.has(c)
+      contains: c => classes.has(c),
+      toggle: (c, on) => (on ? classes.add(c) : classes.delete(c))
     },
     style: { setProperty: (k, v) => (styleProps[k] = v) },
     getBoundingClientRect: () => ({ left: 0, top: 0, width, height }),
@@ -2844,6 +2893,12 @@ function mountWithCamera(map, harness, workspaces) {
     selectOnly: true,
     noAutoSelect: true
   });
+}
+
+function enableDragMode(harness) {
+  const toggle = harness.control('[data-map-drag]');
+  if (toggle.getAttribute('aria-pressed') !== 'true') toggle.click();
+  assert.equal(toggle.getAttribute('aria-pressed'), 'true', 'the test explicitly enabled Drag');
 }
 
 test('a saved camera is restored instead of refitting (FR-43, FR-45)', async () => {
@@ -3640,15 +3695,137 @@ const tilePointer = (x, y, extra = {}) => ({
   ...extra
 });
 
-async function mountedDrag(options) {
+async function mountedDrag(options = {}) {
   const ctx = dragHarness(options);
   mountWithCamera(ctx.map, ctx.harness, [
     { id: 'ws-1', name: 'Alpha' },
     { id: 'ws-2', name: 'Beta' }
   ]);
   await flush();
+  if (options.enableDrag !== false) enableDragMode(ctx.harness);
   return ctx;
 }
+
+test('the drag toggle updates its label, ARIA, cue class, announcement, and cancels a preview', async () => {
+  const { map, harness, patches } = await mountedDrag({ enableDrag: false });
+  const toggle = harness.control('[data-map-drag]');
+  const live = harness.control('[data-map-live]');
+  const tile = harness.tile('ws-1');
+  const origin = { ...map.getLayoutState().positions['ws-1'] };
+
+  assert.equal(toggle.getAttribute('aria-pressed'), 'false');
+  assert.equal(toggle.textContent, 'Drag: off');
+  assert.equal(harness.classes.has('is-drag-enabled'), false);
+
+  toggle.click();
+  assert.equal(toggle.getAttribute('aria-pressed'), 'true');
+  assert.equal(toggle.textContent, 'Drag: on');
+  assert.equal(harness.classes.has('is-drag-enabled'), true);
+  assert.match(live.textContent, /Drag mode enabled/);
+
+  tile.fire('pointerdown', tilePointer(0, 0));
+  tile.fire('pointermove', tilePointer(100, 80));
+  assert.equal(tile.classList.contains('is-dragging'), true);
+
+  toggle.click();
+  assert.deepEqual({ ...tile.at() }, origin, 'turning off restores the uncommitted preview');
+  assert.equal(tile.classList.contains('is-dragging'), false);
+  assert.equal(tile.pointerReleases, 1, 'turning off releases pointer capture');
+  assert.equal(harness.control('[data-map-build-banner]').hidden, true);
+  assert.equal(harness.classes.has('is-drag-enabled'), false);
+  assert.equal(toggle.getAttribute('aria-pressed'), 'false');
+  assert.equal(toggle.textContent, 'Drag: off');
+  assert.match(live.textContent, /Drag mode disabled/);
+  assert.equal(patches.length, 0, 'cancelling the preview performs no write');
+});
+
+test('drag mode is page-local across redraw and hide/show lifecycle, then resets in a new session', async () => {
+  const { map, harness, patches } = await mountedDrag({ enableDrag: false });
+  const state = {
+    workspaces: [
+      { id: 'ws-1', name: 'Alpha' },
+      { id: 'ws-2', name: 'Beta' }
+    ],
+    hideChrome: true,
+    selectOnly: true,
+    noAutoSelect: true
+  };
+
+  harness.control('[data-map-drag]').click();
+  map.mount(harness.container, state);
+  assert.match(harness.container.innerHTML, /data-map-drag[^>]*aria-pressed="true"[^>]*>Drag: on/);
+
+  const tile = harness.tile('ws-1');
+  tile.fire('pointerdown', tilePointer(0, 0));
+  tile.fire('pointermove', tilePointer(100, 80));
+  assert.equal(tile.classList.contains('is-dragging'), true);
+
+  map.unmount(harness.container);
+  assert.equal(tile.classList.contains('is-dragging'), false);
+  assert.equal(tile.pointerReleases, 1, 'teardown releases an active pointer');
+  assert.equal(patches.length, 0, 'teardown never saves a preview');
+  assert.equal(harness.container.innerHTML, '');
+
+  map.mount(harness.container, state);
+  assert.match(
+    harness.container.innerHTML,
+    /data-map-drag[^>]*aria-pressed="true"[^>]*>Drag: on/,
+    'returning to Map in the same page session preserves the choice'
+  );
+
+  const fresh = dragHarness();
+  mountWithCamera(fresh.map, fresh.harness, state.workspaces);
+  await flush();
+  assert.match(
+    fresh.harness.container.innerHTML,
+    /data-map-drag[^>]*aria-pressed="false"[^>]*>Drag: off/,
+    'a newly evaluated module starts a new page session off'
+  );
+});
+
+test('drag mode off captures nothing and moves neither tiles nor districts', async () => {
+  const patches = [];
+  const map = loadMapWithFetch((url, init) => {
+    if (init && init.method === 'PATCH') {
+      patches.push(JSON.parse(init.body));
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ result: {} }) });
+    }
+    return jsonResponse({
+      schema_version: 1,
+      revision: 1,
+      snap_to_grid: false,
+      positions: { grp: { x: 100, y: 100 }, child: { x: 200, y: 200 }, solo: { x: 800, y: 800 } }
+    });
+  });
+  const harness = createCameraHarness({ tiles: ['child', 'solo'], districts: ['grp'] });
+  mountWithCamera(map, harness, [
+    { id: 'grp', kind: 'group', name: 'Ops' },
+    { id: 'child', parent_id: 'grp', name: 'Child' },
+    { id: 'solo', name: 'Solo' }
+  ]);
+  await flush();
+
+  const tile = harness.tile('solo');
+  const tileOrigin = { ...tile.at() };
+  tile.fire('pointerdown', tilePointer(0, 0));
+  tile.fire('pointermove', tilePointer(100, 80));
+  tile.fire('pointerup', tilePointer(100, 80));
+
+  const handle = harness.handle('grp');
+  const districtOrigin = { ...harness.district('grp').at() };
+  handle.fire('pointerdown', tilePointer(0, 0));
+  handle.fire('pointermove', tilePointer(100, 80));
+  handle.fire('pointerup', tilePointer(100, 80));
+  await flush();
+
+  assert.deepEqual({ ...tile.at() }, tileOrigin);
+  assert.deepEqual({ ...harness.district('grp').at() }, districtOrigin);
+  assert.equal(tile.pointerCaptures, 0, 'the tile never captured the pointer');
+  assert.equal(handle.pointerCaptures, 0, 'the district handle never captured the pointer');
+  assert.equal(tile.classList.contains('is-dragging'), false);
+  assert.equal(harness.district('grp').classList.contains('is-dragging'), false);
+  assert.equal(patches.length, 0, 'off mode sends no layout or hierarchy write');
+});
 
 test('a press below the threshold is still a click, not a move (FR-64)', async () => {
   const { harness, patches } = await mountedDrag();
@@ -4388,7 +4565,7 @@ test('Fit to contents returns the district to automatic sizing (#346 FR-40)', as
 // Collapse, wired (#346 FR-102 – FR-119)
 // ---------------------------------------------------------------------------
 
-async function mountedCollapsible({ collapsed = false, patchResponse } = {}) {
+async function mountedCollapsible({ collapsed = false, patchResponse, enableDrag = false } = {}) {
   const patches = [];
   // The stored district, folded forward by each accepted operation exactly as
   // the server does — the client reconciles from the canonical record it gets
@@ -4457,6 +4634,7 @@ async function mountedCollapsible({ collapsed = false, patchResponse } = {}) {
   });
   await flush();
   harness.fire('keydown', { key: '0', preventDefault() {} }); // Reset view: 100%
+  if (enableDrag) enableDragMode(harness);
   return { map, harness, patches };
 }
 
@@ -4522,7 +4700,7 @@ test('a failed collapse leaves the district open and offers a retry (#346 FR-119
 });
 
 test('hidden descendants travel with a collapsed district (#346 FR-113)', async () => {
-  const { map, harness, patches } = await mountedCollapsible({ collapsed: true });
+  const { map, harness, patches } = await mountedCollapsible({ collapsed: true, enableDrag: true });
   assert.equal(map.getDistrictView('grp').collapsed, true);
 
   const handle = harness.handle('grp');
@@ -4620,6 +4798,7 @@ async function mountedForDrop({ reparentFails = false } = {}) {
   });
   await flush();
   harness.fire('keydown', { key: '0', preventDefault() {} });
+  enableDragMode(harness);
   return { map, harness, calls, doc };
 }
 
@@ -4871,6 +5050,7 @@ async function mountedWithCustomFrame({ frame, positions, patchResponse } = {}) 
   });
   await flush();
   harness.fire('keydown', { key: '0', preventDefault() {} });
+  enableDragMode(harness);
   return { map, harness, patches };
 }
 
@@ -4973,7 +5153,7 @@ function clusterDistrictCorner() {
   return { x: 152 - geo.padX, y: 152 - geo.padY };
 }
 
-async function mountedCluster({ patchResponse } = {}) {
+async function mountedCluster({ patchResponse, enableDrag = true } = {}) {
   const patches = [];
   const map = loadMapWithFetch((url, init) => {
     if (init && init.method === 'PATCH') {
@@ -5027,6 +5207,7 @@ async function mountedCluster({ patchResponse } = {}) {
   // more (#317 moved it to the canvas menu); `0` on the canvas is the same
   // action.
   harness.fire('keydown', { key: '0', preventDefault() {} });
+  if (enableDrag) enableDragMode(harness);
   return { map, harness, patches };
 }
 
@@ -5204,7 +5385,7 @@ test('a failed cluster save restores every anchor together (FR-87)', async () =>
 });
 
 test('a selected district moves by keyboard with the same contract (FR-93)', async () => {
-  const { map, harness, patches } = await mountedCluster();
+  const { map, harness, patches } = await mountedCluster({ enableDrag: false });
   map.setSelectedId(null, [], 'grp');
 
   harness.control('[data-map-move]').click();

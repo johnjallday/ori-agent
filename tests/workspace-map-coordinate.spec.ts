@@ -177,6 +177,14 @@ async function openMap(page: Page) {
   await page.waitForTimeout(300);
 }
 
+async function enableMapDrag(page: Page) {
+  const toggle = page.locator('[data-map-drag]');
+  await expect(toggle).toBeEnabled();
+  if ((await toggle.getAttribute('aria-pressed')) !== 'true') await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  await expect(toggle).toHaveText('Drag: on');
+}
+
 /**
  * Open the empty-ground context menu and choose one of its framing actions.
  *
@@ -218,6 +226,13 @@ async function centerOnWorkspace(page: Page, id: string) {
     );
   }, id);
   await page.waitForTimeout(300);
+  // Home opens the selected workspace's context modal. Keep the selection, but
+  // dismiss the modal before opening the canvas menu underneath it.
+  const contextModal = page.locator('#cockpitContextModal');
+  if (await contextModal.isVisible()) {
+    await page.keyboard.press('Escape');
+    await expect(contextModal).toBeHidden();
+  }
   // Nothing selected (a group child can resolve to its district) leaves Center
   // disabled: fall back to framing everything.
   if (!(await frameFromMenu(page, 'center'))) {
@@ -389,12 +404,41 @@ test.describe('Coordinate Workspace Map', () => {
     expect(positionsAfter, 'no stray position record').toBe(positionsBefore);
   });
 
+  test('Drag starts off and pointer movement leaves a building inert', async ({ page }) => {
+    const id = await ownWorkspaceAt(page);
+    await openMap(page);
+    await centerOnWorkspace(page, id);
+
+    const toggle = page.locator('[data-map-drag]');
+    await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+    await expect(toggle).toHaveText('Drag: off');
+    const before = (await anchors(page)).find(anchor => anchor.id === id)!;
+    const writes: string[] = [];
+    page.on('request', request => {
+      if (request.url().includes('/api/workspace-map/layout') && request.method() === 'PATCH') {
+        writes.push(request.postData() || '');
+      }
+    });
+
+    const grab = await grabPointOn(page, id);
+    await page.mouse.move(grab.x, grab.y);
+    await page.mouse.down();
+    await page.mouse.move(grab.x + 140, grab.y + 90, { steps: 15 });
+    await page.mouse.up();
+    await page.waitForTimeout(300);
+
+    expect((await anchors(page)).find(anchor => anchor.id === id)).toEqual(before);
+    expect(writes.filter(body => body.includes('set_positions'))).toHaveLength(0);
+    await expect(page.locator(`.ws-map-tile[data-ws-id="${id}"]`)).not.toHaveClass(/is-dragging/);
+  });
+
   test('dragging a building saves once and survives a reload (FR-63 – FR-70)', async ({ page }) => {
     // A dedicated subject at a far, empty coordinate: nothing else is there, so
     // the drag is testing the drag rather than the sandbox.
     const id = await ownWorkspaceAt(page);
     await openMap(page);
     await centerOnWorkspace(page, id);
+    await enableMapDrag(page);
 
     const writes: string[] = [];
     page.on('request', request => {
@@ -438,6 +482,7 @@ test.describe('Coordinate Workspace Map', () => {
     const id = await ownWorkspaceAt(page);
     await openMap(page);
     await centerOnWorkspace(page, id);
+    await enableMapDrag(page);
     const placedAt = (await anchors(page)).find(a => a.id === id)!;
 
     await page.route(LAYOUT_API, async route => {
@@ -595,6 +640,7 @@ test.describe('Coordinate Workspace Map', () => {
     const id = await ownWorkspaceAt(page);
     await openMap(page);
     await centerOnWorkspace(page, id);
+    await enableMapDrag(page);
 
     // Position writes only. A camera save may also land here — it is debounced
     // and best-effort, and it is not what FR-69 bounds.
