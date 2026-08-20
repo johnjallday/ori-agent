@@ -3936,6 +3936,8 @@ test('drag mode off captures nothing and moves neither tiles nor districts', asy
   assert.deepEqual({ ...tile.at() }, tileOrigin);
   assert.deepEqual({ ...harness.district('grp').at() }, districtOrigin);
   assert.equal(tile.pointerCaptures, 0, 'the tile never captured the pointer');
+  assert.equal(handle.disabled, true, 'the district translation control is truthfully disabled');
+  assert.equal(handle.getAttribute('aria-disabled'), 'true');
   assert.equal(handle.pointerCaptures, 0, 'the district handle never captured the pointer');
   assert.equal(tile.classList.contains('is-dragging'), false);
   assert.equal(harness.district('grp').classList.contains('is-dragging'), false);
@@ -5454,7 +5456,13 @@ async function mountedForResolvedIntent(targetFrame) {
         revision: 1,
         snap_to_grid: false,
         positions: { m1: { x: 300, y: 300 }, blocker: { x: 1000, y: 300 } },
-        groups: { g2: { sizing_mode: 'custom', frame: targetFrame } }
+        groups: {
+          g1: {
+            sizing_mode: 'custom',
+            frame: { x: 250, y: 250, width: 400, height: 400 }
+          },
+          g2: { sizing_mode: 'custom', frame: targetFrame }
+        }
       });
     },
     undefined,
@@ -5763,6 +5771,8 @@ async function mountedCluster({ patchResponse, enableDrag = true } = {}) {
 test('dragging the district handle moves the whole cluster by one delta (FR-86)', async () => {
   const { harness, patches } = await mountedCluster();
   const handle = harness.handle('grp');
+  assert.equal(handle.disabled, false, 'enabling Drag enables the translation control');
+  assert.equal(handle.getAttribute('aria-disabled'), 'false');
   const childA = harness.tile('child-a');
   const childB = harness.tile('child-b');
   const outsider = harness.tile('outsider');

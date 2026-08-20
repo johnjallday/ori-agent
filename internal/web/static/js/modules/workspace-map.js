@@ -4243,9 +4243,17 @@
       }
       toggle.textContent = 'Drag: ' + (dragModeEnabled ? 'on' : 'off');
     }
+    var available = writable && dragModeEnabled;
     var canvas = container.querySelector('[data-ws-map-viewport]');
     if (canvas && canvas.classList) {
-      canvas.classList.toggle('is-drag-enabled', writable && dragModeEnabled);
+      canvas.classList.toggle('is-drag-enabled', available);
+    }
+    if (typeof container.querySelectorAll === 'function') {
+      var handles = container.querySelectorAll('[data-group-drag]');
+      Array.prototype.forEach.call(handles, function (handle) {
+        handle.disabled = !available;
+        if (handle.setAttribute) handle.setAttribute('aria-disabled', available ? 'false' : 'true');
+      });
     }
   }
 
@@ -5446,13 +5454,13 @@
     positions[id] = { x: point.x, y: point.y };
     var operations = [{ op: 'set_positions', positions: positions }];
 
-    // A pending leave is evaluated against the hierarchy it intends to create.
-    // Do not expand or collision-check the source's custom minimum solely to
-    // contain a member that will be removed after confirmation. If the user
-    // declines or the hierarchy write fails, the unchanged saved minimum plus
-    // the retained member make effectiveDistrictFrame render truthful expanded
-    // containment without persisting that temporary expansion (#374 AR15).
-    if (intent && intent.kind === 'leave') {
+    // A pending membership change is evaluated against the hierarchy it intends
+    // to create. Do not expand or collision-check the source's custom minimum
+    // solely to contain a member that will leave it after confirmation. If the
+    // user declines or the hierarchy write fails, the unchanged saved minimum
+    // plus the retained member make effectiveDistrictFrame render truthful
+    // expanded containment without persisting a temporary expansion (#374).
+    if (intent && (intent.kind === 'leave' || intent.kind === 'join')) {
       return { operations: operations, conflict: null };
     }
 

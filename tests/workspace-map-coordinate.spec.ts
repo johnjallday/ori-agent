@@ -518,6 +518,12 @@ test.describe('Coordinate Workspace Map', () => {
       );
     }, id);
     await page.waitForTimeout(300);
+    const contextModal = page.locator('#cockpitContextModal');
+    if (await contextModal.isVisible()) {
+      await page.keyboard.press('Escape');
+      await expect(contextModal).toBeHidden();
+    }
+    await expect(page.locator('[data-map-drag]')).toHaveAttribute('aria-pressed', 'false');
 
     await page.click('[data-map-move]');
     await page.locator('.ws-map-canvas').press('ArrowRight');
