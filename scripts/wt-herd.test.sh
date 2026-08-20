@@ -800,6 +800,16 @@ wt status --feature downloads-janitor --json --no-color > /dev/null
 wt status --feature=downloads-janitor > /dev/null
 [[ "$(<"$fixture_root/overview-calls")" == "feature-overview --feature downloads-janitor" ]]
 
+# --all is the escape hatch that restores full history in the human table; it
+# forwards like every other flag and composes with --json unchanged.
+> "$fixture_root/overview-calls"
+wt status --all > /dev/null
+[[ "$(<"$fixture_root/overview-calls")" == "feature-overview --all" ]]
+
+> "$fixture_root/overview-calls"
+wt status --all --json > /dev/null
+[[ "$(<"$fixture_root/overview-calls")" == "feature-overview --all --json" ]]
+
 # The helper's exit status is the command's exit status: an incomplete
 # snapshot must not be reported to a script as success.
 function wt_herd {
@@ -816,7 +826,7 @@ function wt_herd {
   return 0
 }
 
-for invalid_args in "--bogus" "--feature" "--worktrees --json"; do
+for invalid_args in "--bogus" "--feature" "--worktrees --json" "--worktrees --all"; do
   if wt status ${=invalid_args} > /dev/null 2>&1; then
     print -r -- "wt status accepted invalid arguments: $invalid_args" >&2
     exit 1

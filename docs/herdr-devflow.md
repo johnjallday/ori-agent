@@ -634,16 +634,39 @@ New Issue-backed work uses `<issue-number>-<slug>` as its feature identity; see
 ## Feature overview
 
 ~~~bash
-wt status                          # compact, feature-first overview
-wt status --feature <slug>         # one feature in detail
-wt status --json                   # the complete normalized snapshot
-wt status --watch                  # live board
+wt status                          # compact, active-work-only overview
+wt status --all                    # same table, full history included
+wt status --feature <slug>         # one feature in detail, active or not
+wt status --json                   # the complete normalized snapshot, every feature
+wt status --watch                  # live board, active-only by default
+wt status --all --watch            # live board, full history
 wt status --worktrees              # the legacy Git-only worktree table
 ~~~
 
 `wt status` answers "what features exist in this repository, and where is each
 one" rather than listing Git worktrees. One row per feature, joined on the
 exact slug across every source.
+
+### Active-only by default
+
+The compact table hides `shipped`, `merged_cleanup`, and `unknown` rows by
+default: settled or unplaced work is not what an operator opening `wt status`
+is looking for. `--all` restores every row, and matters in particular for
+`merged_cleanup` — it is the only standing reminder that a `wt done` is still
+owed for that feature.
+
+The filter is display-only and applies to the compact table alone:
+`wt status --json` always emits every feature regardless of `--all` (see
+"JSON contract" below), and `wt status --feature <slug>` still finds an
+inactive feature's full detail. A repository whose only features are history
+prints an explicit "No active features" message rather than claiming to have
+none — `wt status --all` is the pointer back to them.
+
+The PLAN cell also names the active parent Group immediately before the next
+actionable item, taken from the plan's already-computed active milestone (for
+example `6/8 milestones · 150/155 subtasks · G8 next 8.8`). A delivery-only
+row, or one with no active milestone, falls back to the prior wording with no
+Group named.
 
 ### Where the answers come from
 
@@ -833,7 +856,9 @@ unrelated user views or metadata.
 `wt status --json` emits schema version 3 (`overview.Snapshot`). It carries the
 generation and GitHub-check timestamps, repository and baseline identity,
 overall completeness and staleness, one entry per feature, per-source
-availability, and every finding.
+availability, and every finding. This is unaffected by `--all`: the flag
+controls only what the compact human table prints (see "Active-only by
+default" above), and JSON always emits every feature, active or history.
 
 Absent, unknown, unavailable, stale, and a real zero are encoded distinctly and
 must not be collapsed by a consumer. An unparsed plan reports its availability

@@ -346,10 +346,12 @@ removal, and `--herdr-override` retains its separate safety meaning.
 ### `wt status` — feature overview
 
 ```bash
-wt status                      # compact, feature-first overview
-wt status --feature <slug>     # one feature in detail
-wt status --json               # complete normalized snapshot (schema v2)
-wt status --watch              # live board
+wt status                      # compact, active-work-only overview
+wt status --all                # same table, full history included
+wt status --feature <slug>     # one feature in detail, active or not
+wt status --json               # complete normalized snapshot (schema v2), every feature
+wt status --watch              # live board, active-only by default
+wt status --all --watch        # live board, full history
 wt status --no-color           # plain text; NO_COLOR is honored too
 wt status --worktrees          # the legacy Git-only worktree table
 ```
@@ -360,6 +362,15 @@ Herdr agents on the exact feature slug. It is read-only: it never writes
 planning files, Git, GitHub, bridge, or Herdr state. It describes selected and
 executing work; unselected ideas live in GitHub Issues and are listed by
 `./scripts/devops.sh`.
+
+By default the table hides `Shipped`, `Merged (cleanup)`, and `Unknown` rows —
+settled or unplaced work is not what you're looking at right now. `--all`
+restores every row, which matters because `Merged (cleanup)` is the only
+standing reminder that a `wt done` is still owed. The filter is display-only:
+`wt status --json` always emits every feature regardless of `--all`, and
+`wt status --feature <slug>` still finds an inactive feature's full detail.
+The compact PLAN cell also names the active parent Group (for example
+`G8 next 8.8`) immediately before the next actionable item.
 
 Exit codes: `0` complete, `1` incomplete (a required source, normally GitHub,
 was unavailable — the board still prints every local fact it observed), `2`

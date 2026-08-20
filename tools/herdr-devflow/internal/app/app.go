@@ -2012,6 +2012,7 @@ type overviewArgs struct {
 	json    bool
 	noColor bool
 	watch   bool
+	all     bool
 }
 
 func parseOverviewArgs(args []string) (overviewArgs, error) {
@@ -2024,6 +2025,11 @@ func parseOverviewArgs(args []string) (overviewArgs, error) {
 			parsed.noColor = true
 		case "--watch":
 			parsed.watch = true
+		case "--all":
+			// --all restores Shipped, Merged (cleanup), and Unknown rows to the
+			// compact table. It is accepted with --json but changes nothing
+			// there: the JSON contract always emits every feature.
+			parsed.all = true
 		case "--feature":
 			if index+1 >= len(args) {
 				return overviewArgs{}, fmt.Errorf("--feature requires a value")
@@ -2071,7 +2077,7 @@ func (a *App) overview(ctx context.Context, opts options, args []string) int {
 	selectFor := featureSelector(parsed.feature)
 	service := a.overviewService(runtime)
 	if parsed.watch {
-		return a.overviewWatch(ctx, service, selectFor, runtime.config.WatchPollInterval(), parsed.noColor, false)
+		return a.overviewWatch(ctx, service, selectFor, runtime.config.WatchPollInterval(), parsed.noColor, false, parsed.all)
 	}
 	snapshot, err := service.Collect(ctx)
 	if err != nil {
@@ -2083,7 +2089,7 @@ func (a *App) overview(ctx context.Context, opts options, args []string) int {
 		a.writeError(err, opts.json)
 		return 1
 	}
-	if err := a.renderOverview(snapshot, false, selector, opts.json, parsed.noColor); err != nil {
+	if err := a.renderOverview(snapshot, false, selector, opts.json, parsed.noColor, parsed.all); err != nil {
 		a.writeError(err, opts.json)
 		return 1
 	}
@@ -2162,8 +2168,8 @@ func claudeReadiness(usageDir string) overview.ClaudeReadinessFunc {
 // feature renders its detail report; standing in a checkout that implements no
 // feature renders the repository's active work plus every unscoped agent. JSON
 // always emits the normalized snapshot, narrowed the same way the human view is.
-func (a *App) renderOverview(snapshot overview.Snapshot, expanded bool, selector overview.Selector, jsonOutput, noColor bool) error {
-	options := overview.RenderOptions{NoColor: !a.statusColorEnabled(noColor)}
+func (a *App) renderOverview(snapshot overview.Snapshot, expanded bool, selector overview.Selector, jsonOutput, noColor, showAll bool) error {
+	options := overview.RenderOptions{NoColor: !a.statusColorEnabled(noColor), ShowAll: showAll}
 	narrowed := snapshot.Narrow(selector)
 	if selector.Kind == overview.SelectorFeature {
 		found, ok := narrowed.Feature(selector.Feature)
@@ -2189,7 +2195,7 @@ func (a *App) renderOverview(snapshot overview.Snapshot, expanded bool, selector
 // overviewWatch renders the board on the fast local clock. The remote query is
 // separately rate limited inside the service, so a board left open all day
 // re-reads local files often and GitHub rarely.
-func (a *App) overviewWatch(ctx context.Context, service *overview.Service, selectFor selectorFunc, interval time.Duration, noColor, expanded bool) int {
+func (a *App) overviewWatch(ctx context.Context, service *overview.Service, selectFor selectorFunc, interval time.Duration, noColor, expanded, showAll bool) int {
 	colorEnabled := a.statusColorEnabled(noColor)
 	rendered := false
 	emit := func(snapshot overview.Snapshot) {
@@ -2206,7 +2212,7 @@ func (a *App) overviewWatch(ctx context.Context, service *overview.Service, sele
 			fmt.Fprintln(a.stdout, err.Error())
 			return
 		}
-		if err := a.renderOverview(snapshot, expanded, selector, false, noColor); err != nil {
+		if err := a.renderOverview(snapshot, expanded, selector, false, noColor, showAll); err != nil {
 			fmt.Fprintln(a.stdout, err.Error())
 		}
 	}
@@ -3004,7 +3010,10 @@ func (a *App) pluginBoard(ctx context.Context, opts options) int {
 			fmt.Fprint(a.stdout, "\x1b[2J\x1b[H")
 		}
 		rendered = true
-		if err := a.renderOverview(snapshot, true, overview.SelectAll(), opts.json, false); err != nil {
+		// The Herdr board is a standing view of the whole repository, not the
+		// `wt status` quick glance, so it is exempt from the active-only
+		// filter: ShowAll is always true here.
+		if err := a.renderOverview(snapshot, true, overview.SelectAll(), opts.json, false, true); err != nil {
 			fmt.Fprintln(a.stderr, err.Error())
 		}
 	}

@@ -502,7 +502,7 @@ function wt_status {
     --worktrees)
       worktrees=1
       ;;
-    --json | --no-color | --watch)
+    --json | --no-color | --watch | --all)
       forward+=("$arg")
       ;;
     --feature)
@@ -550,12 +550,18 @@ function wt_status {
 }
 
 function wt_status_help {
-  echo "Usage: wt status [--feature <slug>] [--json] [--no-color] [--watch]"
+  echo "Usage: wt status [--feature <slug>] [--json] [--no-color] [--watch] [--all]"
   echo "       wt status --worktrees   # the Git-only worktree table"
   echo
   echo "Feature-first overview of every feature in this repository, joining"
   echo "planning artifacts, worktrees, Git, GitHub, and Herdr."
   echo "Read-only: it never writes planning, Git, GitHub, bridge, or Herdr state."
+  echo
+  echo "By default the table hides Shipped, Merged (cleanup), and Unknown rows"
+  echo "so only active work is on screen. Pass --all to see full history,"
+  echo "including the Merged (cleanup) rows that still owe a 'wt done'."
+  echo "--json always emits every feature, complete history included, whether"
+  echo "or not --all is given; --feature <slug> also finds an inactive feature."
   echo
   echo "Exit codes: 0 complete, 1 incomplete (a required source such as GitHub"
   echo "was unavailable; local facts are still printed), 2 invalid arguments."
