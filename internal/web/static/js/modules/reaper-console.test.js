@@ -197,6 +197,139 @@ test('the console overlay renders current project and track state in place', () 
   consolePanel.close();
 });
 
+test('transport actions run one click, surface outcomes, and update live state', async () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  const play = {
+    id: '1007',
+    label: 'Play',
+    description: 'Start playback.',
+    source: 'builtin',
+    mutates: false,
+    needs_confirmation: false
+  };
+  consolePanel._setActions([play]);
+  consolePanel._setState({
+    applies: true,
+    connected: true,
+    project: 'Song',
+    tempo: 120,
+    time_signature: '4/4',
+    play_state: 'stopped',
+    position: '1.1.00',
+    track_count: 0,
+    tracks: []
+  });
+  consolePanel.open();
+  const requests = [];
+  globalThis.fetch = async (path, options) => {
+    requests.push({ path, options });
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        outcome: 'ok',
+        action_id: '1007',
+        applies: true,
+        connected: true,
+        project: 'Song',
+        tempo: 120,
+        time_signature: '4/4',
+        play_state: 'playing',
+        position: '1.1.00',
+        track_count: 0,
+        tracks: []
+      })
+    };
+  };
+
+  assert.equal(await consolePanel._executeAction(play, false), true);
+  assert.equal(requests.length, 1);
+  assert.match(requests[0].path, /actions\/1007\/run$/);
+  assert.deepEqual(JSON.parse(requests[0].options.body), { confirmed: false });
+  assert.equal(consolePanel._state().play_state, 'playing');
+  assert.equal(consolePanel._lastRun().outcome, 'ok');
+  const host = documentStub.getElementById('reaperConsole');
+  assert.match(host.textContent, /Play completed in REAPER/);
+  consolePanel.close();
+});
+
+test('mutating actions render an explicit confirmation before execution', async () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  const insert = {
+    id: '40001',
+    label: 'Insert new track',
+    description: 'Add a track.',
+    source: 'builtin',
+    mutates: true,
+    needs_confirmation: true
+  };
+  consolePanel._setActions([insert]);
+  consolePanel._setState({
+    applies: true,
+    connected: true,
+    project: 'Song',
+    tempo: 120,
+    play_state: 'stopped',
+    position: '1.1.00',
+    track_count: 0,
+    tracks: []
+  });
+  consolePanel.open();
+  let calls = 0;
+  globalThis.fetch = async (_path, options) => {
+    calls += 1;
+    assert.deepEqual(JSON.parse(options.body), { confirmed: true });
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        outcome: 'ok',
+        action_id: '40001',
+        applies: true,
+        connected: true,
+        project: 'Song',
+        tempo: 120,
+        play_state: 'stopped',
+        position: '1.1.00',
+        track_count: 1,
+        tracks: []
+      })
+    };
+  };
+
+  assert.equal(consolePanel._requestAction(insert), true);
+  assert.equal(calls, 0);
+  const host = documentStub.getElementById('reaperConsole');
+  assert.match(host.textContent, /Confirm project change/);
+  assert.match(host.textContent, /Run Insert new track/);
+  assert.equal(await consolePanel._executeAction(insert, true), true);
+  assert.equal(calls, 1);
+  consolePanel.close();
+});
+
+test('a failed REAPER run is never rendered as success', async () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  const stop = { id: '1016', label: 'Stop', needs_confirmation: false };
+  consolePanel._setActions([stop]);
+  globalThis.fetch = async () => ({
+    ok: false,
+    status: 409,
+    json: async () => ({
+      outcome: 'error',
+      error_reason: 'REAPER is not connected. Nothing was run.',
+      connected: false,
+      reason: 'reaper_unreachable',
+      tracks: []
+    })
+  });
+  assert.equal(await consolePanel._executeAction(stop, false), false);
+  assert.equal(consolePanel._lastRun().outcome, 'error');
+  assert.match(consolePanel._lastRun().reason, /Nothing was run/);
+});
+
 test('Fix setup routes to the existing reaper_live_control wizard step', () => {
   const opened = [];
   globalThis.window.SetupWizard = {

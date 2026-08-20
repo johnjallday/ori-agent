@@ -2,6 +2,7 @@ package reaper
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -85,6 +86,61 @@ func TestClientReadsLiveStateAndProjectMetadata(t *testing.T) {
 	track := got.Tracks[0]
 	if track.Name != "Drums" || !track.Muted || !track.Soloed || !track.Armed || track.PeakLeftDB != -9 || track.PeakRightDB != -8 {
 		t.Fatalf("track = %+v", track)
+	}
+}
+
+func TestClientRunActionTriggersOnceAndReturnsResultingState(t *testing.T) {
+	playState := 0
+	actionCalls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/_/1007":
+			actionCalls++
+			playState = 1
+		case "/_/TRANSPORT":
+			_, _ = w.Write([]byte("TRANSPORT\t" + strconv.Itoa(playState) + "\t0\t0\t1.1.00\t1.1.00\n"))
+		case "/_/TRACK":
+			_, _ = w.Write([]byte("TRACK\t0\tMASTER\t1536\t1\t0\t-1500\t-1500\n"))
+		case "/_/BEATPOS":
+			_, _ = w.Write([]byte("BEATPOS\t0\t0\t0\t0\t0\t4\t4\n"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	port, err := strconv.Atoi(strings.TrimPrefix(server.URL, "http://127.0.0.1:"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	probe := clientProbe{
+		web:       reapersetup.WebRemoteObservation{State: reapersetup.ProbeReady, Port: port},
+		transport: reapersetup.LiveTransportObservation{State: reapersetup.TransportAvailable, Port: port},
+	}
+	client := NewClient(reapersetup.ProbeSet{WebRemote: probe, Transport: probe})
+	client.http = server.Client()
+	project := filepath.Join(t.TempDir(), "Song.rpp")
+	if err := os.WriteFile(project, []byte("<REAPER_PROJECT\nTEMPO 120 4 4\n>\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	state, err := client.RunAction(context.Background(), "1007", ProjectSource{Path: project, EntryPath: "Song.rpp"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if actionCalls != 1 || !state.Connected || state.PlayState != "playing" {
+		t.Fatalf("calls=%d state=%+v", actionCalls, state)
+	}
+}
+
+func TestClientRunActionDoesNotQueueWhenDisconnected(t *testing.T) {
+	probe := clientProbe{
+		web:       reapersetup.WebRemoteObservation{State: reapersetup.ProbeReady, Port: 2307},
+		transport: reapersetup.LiveTransportObservation{State: reapersetup.TransportOffline},
+	}
+	client := NewClient(reapersetup.ProbeSet{WebRemote: probe, Transport: probe})
+	state, err := client.RunAction(context.Background(), "1007", ProjectSource{})
+	if err == nil || !errors.Is(err, ErrActionDisconnected) || state.Reason != "reaper_unreachable" {
+		t.Fatalf("disconnected run = state %+v, err %v", state, err)
 	}
 }
 

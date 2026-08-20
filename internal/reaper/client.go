@@ -25,9 +25,12 @@ const (
 )
 
 var (
-	ErrClientUnavailable = errors.New("REAPER client is unavailable")
-	ErrMalformedResponse = errors.New("REAPER Web Remote returned a malformed response")
-	ErrProjectUnreadable = errors.New("REAPER project metadata is unreadable")
+	ErrClientUnavailable  = errors.New("REAPER client is unavailable")
+	ErrMalformedResponse  = errors.New("REAPER Web Remote returned a malformed response")
+	ErrProjectUnreadable  = errors.New("REAPER project metadata is unreadable")
+	ErrActionDisconnected = errors.New("REAPER is not connected")
+	ErrActionFailed       = errors.New("REAPER action failed")
+	ErrInvalidCommandID   = errors.New("invalid REAPER command id")
 )
 
 // State is the live REAPER state returned to workspace callers. Reason is a
@@ -156,6 +159,33 @@ func (c *Client) ReadState(ctx context.Context, project ProjectSource) (State, e
 	state.Tracks = tracks
 	state.TrackCount = len(tracks)
 	return state, nil
+}
+
+// RunAction triggers one validated REAPER command and then reads the resulting
+// live state. A disconnected session is returned as both a normal State and a
+// typed error so HTTP and agent callers can surface the same truthful outcome.
+// The command is never queued or retried and this path never edits project
+// files as a fallback.
+func (c *Client) RunAction(ctx context.Context, commandID string, project ProjectSource) (State, error) {
+	state := c.emptyState()
+	commandID = strings.TrimSpace(commandID)
+	if !validExecutableCommandID(commandID) {
+		return state, ErrInvalidCommandID
+	}
+	port, reason := c.resolve(ctx)
+	if reason != "" {
+		state.Reason = reason
+		return state, ErrActionDisconnected
+	}
+	if _, err := c.get(ctx, port, commandID); err != nil {
+		state.Reason = "action_failed"
+		return state, fmt.Errorf("%w: %v", ErrActionFailed, err)
+	}
+	result, err := c.ReadState(ctx, project)
+	if err != nil {
+		return result, fmt.Errorf("%w: resulting state unavailable", ErrActionFailed)
+	}
+	return result, nil
 }
 
 func (c *Client) emptyState() State {

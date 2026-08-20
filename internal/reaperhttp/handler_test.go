@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -40,16 +41,27 @@ type testUser string
 func (u testUser) CurrentUserID(context.Context) (string, error) { return string(u), nil }
 
 type stateReader struct {
-	state  reaper.State
-	err    error
-	calls  int
-	source reaper.ProjectSource
+	state       reaper.State
+	err         error
+	calls       int
+	source      reaper.ProjectSource
+	runState    reaper.State
+	runErr      error
+	runCalls    int
+	runActionID string
 }
 
 func (r *stateReader) ReadState(_ context.Context, source reaper.ProjectSource) (reaper.State, error) {
 	r.calls++
 	r.source = source
 	return r.state, r.err
+}
+
+func (r *stateReader) RunAction(_ context.Context, actionID string, source reaper.ProjectSource) (reaper.State, error) {
+	r.runCalls++
+	r.runActionID = actionID
+	r.source = source
+	return r.runState, r.runErr
 }
 
 func reaperHTTPWorkspace(t *testing.T, root, id, owner string) *workspace.Workspace {
@@ -126,6 +138,84 @@ func TestGetStateDoesNotProbeWorkspaceWithoutPersistedLiveRuntimeSelection(t *te
 	recorder, body := serveState(t, handler, "mine")
 	if recorder.Code != http.StatusOK || body["applies"] != false || reader.calls != 0 {
 		t.Fatalf("non-applicable state = %d %#v, calls = %d", recorder.Code, body, reader.calls)
+	}
+}
+
+func TestGetActionsReturnsCuratedCatalog(t *testing.T) {
+	root := t.TempDir()
+	store := &testStore{root: root, workspaces: map[string]*workspace.Workspace{}}
+	store.workspaces["mine"] = reaperHTTPWorkspace(t, root, "mine", userprofile.LocalUserID)
+	handler := NewHandler(store, testUser(userprofile.LocalUserID), &stateReader{})
+	mux := http.NewServeMux()
+	handler.Register(mux)
+	recorder := httptest.NewRecorder()
+	mux.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/workspaces/mine/reaper/actions", nil))
+	var actions []reaper.Action
+	if err := json.Unmarshal(recorder.Body.Bytes(), &actions); err != nil {
+		t.Fatal(err)
+	}
+	if recorder.Code != http.StatusOK || len(actions) != 9 || actions[0].ID != "1007" || actions[0].NeedsConfirmation {
+		t.Fatalf("catalog = %d, %+v", recorder.Code, actions)
+	}
+}
+
+func TestRunActionReturnsResultingStateAndEnforcesConfirmation(t *testing.T) {
+	root := t.TempDir()
+	store := &testStore{root: root, workspaces: map[string]*workspace.Workspace{}}
+	store.workspaces["mine"] = reaperHTTPWorkspace(t, root, "mine", userprofile.LocalUserID)
+	reader := &stateReader{runState: reaper.State{Connected: true, PlayState: "playing", Tracks: []reaper.Track{}}}
+	handler := NewHandler(store, testUser(userprofile.LocalUserID), reader)
+	mux := http.NewServeMux()
+	handler.Register(mux)
+
+	play := httptest.NewRecorder()
+	mux.ServeHTTP(play, httptest.NewRequest(http.MethodPost, "/api/workspaces/mine/reaper/actions/1007/run", nil))
+	var playBody ActionRunResponse
+	if err := json.Unmarshal(play.Body.Bytes(), &playBody); err != nil {
+		t.Fatal(err)
+	}
+	if play.Code != http.StatusOK || playBody.Outcome != "ok" || !playBody.Connected || reader.runCalls != 1 || reader.runActionID != "1007" {
+		t.Fatalf("play = %d %+v, reader=%+v", play.Code, playBody, reader)
+	}
+
+	insert := httptest.NewRecorder()
+	mux.ServeHTTP(insert, httptest.NewRequest(http.MethodPost, "/api/workspaces/mine/reaper/actions/40001/run", nil))
+	var insertBody ActionRunResponse
+	if err := json.Unmarshal(insert.Body.Bytes(), &insertBody); err != nil {
+		t.Fatal(err)
+	}
+	if insert.Code != http.StatusConflict || insertBody.Outcome != "confirmation_required" || reader.runCalls != 1 {
+		t.Fatalf("unconfirmed insert = %d %+v, calls=%d", insert.Code, insertBody, reader.runCalls)
+	}
+
+	confirmed := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/workspaces/mine/reaper/actions/40001/run", strings.NewReader(`{"confirmed":true}`))
+	request.Header.Set("Content-Type", "application/json")
+	mux.ServeHTTP(confirmed, request)
+	if confirmed.Code != http.StatusOK || reader.runCalls != 2 || reader.runActionID != "40001" {
+		t.Fatalf("confirmed insert = %d %s, reader=%+v", confirmed.Code, confirmed.Body.String(), reader)
+	}
+}
+
+func TestRunActionSurfacesDisconnectedOutcomeWithoutSuccess(t *testing.T) {
+	root := t.TempDir()
+	store := &testStore{root: root, workspaces: map[string]*workspace.Workspace{}}
+	store.workspaces["mine"] = reaperHTTPWorkspace(t, root, "mine", userprofile.LocalUserID)
+	reader := &stateReader{
+		runState: reaper.State{Connected: false, Reason: "reaper_unreachable", Tracks: []reaper.Track{}},
+		runErr:   reaper.ErrActionDisconnected,
+	}
+	handler := NewHandler(store, testUser(userprofile.LocalUserID), reader)
+	mux := http.NewServeMux()
+	handler.Register(mux)
+	recorder := httptest.NewRecorder()
+	mux.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/api/workspaces/mine/reaper/actions/1007/run", nil))
+	var body ActionRunResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if recorder.Code != http.StatusConflict || body.Outcome != "error" || body.ErrorReason == "" || body.Connected {
+		t.Fatalf("disconnected run = %d %+v", recorder.Code, body)
 	}
 }
 
