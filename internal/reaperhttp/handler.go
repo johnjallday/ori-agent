@@ -1,4 +1,4 @@
-// Package reaperhttp serves workspace-scoped live REAPER state. The handler
+// Package reaperhttp serves workspace-scoped live REAPER state and actions. The handler
 // accepts only a workspace ID; the project path and loopback endpoint are
 // resolved from trusted server-side state.
 package reaperhttp
@@ -26,17 +26,23 @@ type StateReader interface {
 	ReadState(context.Context, reaper.ProjectSource) (reaper.State, error)
 }
 
+type ActionCatalog interface {
+	List() ([]reaper.Action, error)
+	Find(string) (reaper.Action, bool, error)
+}
+
 type Handler struct {
 	store    WorkspaceStore
 	provider userprofile.UserProvider
 	client   StateReader
+	catalog  ActionCatalog
 }
 
-func NewHandler(store WorkspaceStore, provider userprofile.UserProvider, client StateReader) *Handler {
+func NewHandler(store WorkspaceStore, provider userprofile.UserProvider, client StateReader, catalog ActionCatalog) *Handler {
 	if provider == nil {
 		provider = userprofile.LocalUserProvider{}
 	}
-	return &Handler{store: store, provider: provider, client: client}
+	return &Handler{store: store, provider: provider, client: client, catalog: catalog}
 }
 
 func (h *Handler) GetState(w http.ResponseWriter, r *http.Request) {

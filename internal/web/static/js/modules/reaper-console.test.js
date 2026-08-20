@@ -330,6 +330,47 @@ test('a failed REAPER run is never rendered as success', async () => {
   assert.match(consolePanel._lastRun().reason, /Nothing was run/);
 });
 
+test('registered scripts and the raw command escape hatch share the action surface', () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([
+    {
+      id: '_RSdeadBEEF',
+      label: 'Add arrangement markers',
+      description: 'Registered ReaScript: Add arrangement markers',
+      source: 'registered',
+      mutates: true,
+      needs_confirmation: true
+    }
+  ]);
+  consolePanel._setState({
+    applies: true,
+    connected: true,
+    project: 'Song',
+    tempo: 120,
+    play_state: 'stopped',
+    position: '1.1.00',
+    track_count: 0,
+    tracks: []
+  });
+  consolePanel.open();
+  const host = documentStub.getElementById('reaperConsole');
+  assert.match(host.textContent, /Add arrangement markers/);
+  assert.match(host.textContent, /Raw command ID/);
+  assert.match(host.textContent, /Decimal or _RS hexadecimal IDs always require confirmation/);
+
+  consolePanel._requestAction({
+    id: '40001',
+    label: 'Raw command 40001',
+    source: 'raw',
+    mutates: true,
+    needs_confirmation: true
+  });
+  assert.match(host.textContent, /Confirm project change/);
+  assert.match(host.textContent, /Run Raw command 40001/);
+  consolePanel.close();
+});
+
 test('Fix setup routes to the existing reaper_live_control wizard step', () => {
   const opened = [];
   globalThis.window.SetupWizard = {

@@ -6687,6 +6687,56 @@ button.ws-cmd-rpg-class-card:focus-visible {
   line-height: 1.4;
 }
 
+.reaper-console-raw {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0.25rem 0 1rem;
+  padding: 0.75rem 0.8rem;
+  background: rgba(13, 20, 21, 0.7);
+  border: 1px dashed rgba(173, 192, 184, 0.22);
+}
+
+.reaper-console-raw-copy {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.reaper-console-raw-copy strong {
+  color: rgba(239, 245, 241, 0.84);
+  font-family: var(--ws-font-display, sans-serif);
+  font-size: 0.75rem;
+}
+
+.reaper-console-raw-copy span {
+  color: rgba(173, 192, 184, 0.56);
+  font-family: var(--ws-font-display, sans-serif);
+  font-size: 0.66rem;
+}
+
+.reaper-console-raw-controls {
+  display: flex;
+  flex: 0 1 23rem;
+  gap: 0.45rem;
+}
+
+.reaper-console-raw-input {
+  min-width: 0;
+  flex: 1;
+  padding: 0.55rem 0.65rem;
+  color: #dff7ee;
+  background: #070b0c;
+  border: 1px solid rgba(173, 192, 184, 0.28);
+  border-radius: 2px;
+  font: inherit;
+  font-size: 0.68rem;
+}
+
+.reaper-console-raw-input::placeholder {
+  color: rgba(173, 192, 184, 0.38);
+}
+
 .reaper-console-section-head {
   display: flex;
   align-items: baseline;
@@ -6903,9 +6953,13 @@ button.ws-cmd-rpg-class-card:focus-visible {
   .reaper-console-action-grid {
     grid-template-columns: 1fr;
   }
-  .reaper-console-confirm {
+  .reaper-console-confirm,
+  .reaper-console-raw {
     align-items: stretch;
     flex-direction: column;
+  }
+  .reaper-console-raw-controls {
+    flex-basis: auto;
   }
   .reaper-console-track {
     grid-template-columns: 2rem minmax(0, 1fr);

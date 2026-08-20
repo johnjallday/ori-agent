@@ -7,7 +7,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/reapersetup"
 )
 
-// wireReaperControl constructs the live, read-only REAPER state surface after
+// wireReaperControl constructs the live REAPER state and action surface after
 // the folder-backed workspace store exists. The client owns all loopback target
 // resolution; the HTTP handler receives no endpoint or port from the browser.
 func (b *ServerBuilder) wireReaperControl() {
@@ -21,5 +21,6 @@ func (b *ServerBuilder) wireReaperControl() {
 	}
 	roots := reapersetup.NewRunnerRootResolver()
 	client := reaper.NewClient(reapersetup.NewPlatformProbeSet(roots))
-	b.reaperHandler = reaperhttp.NewHandler(store, b.userProvider, client)
+	catalog := reaper.NewCatalog()
+	b.reaperHandler = reaperhttp.NewHandler(store, b.userProvider, client, catalog)
 }

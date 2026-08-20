@@ -62,6 +62,7 @@ type LLMTaskHandler struct {
 	runtimeResolver        *AgentRuntimeResolver
 	executionScopeResolver TaskExecutionScopeResolver
 	workspaceToolsFn       WorkspaceToolFactory
+	runtimeToolsFn         RuntimeTaskToolFactory
 	utilityTools           UtilityToolProvider
 }
 
@@ -91,6 +92,12 @@ type UtilityToolProvider interface {
 // for use during task execution. Tools are constructed per workspace so the agent can
 // read and update workspace state without forcing the user to paste it into the prompt.
 type WorkspaceToolFactory func(workspaceID, agentName string) []toolapi.Tool
+
+// RuntimeTaskToolFactory returns tools whose authority is tied to the exact
+// task, workspace, and stable agent instance. It is separate from ordinary
+// workspace context tools so a model cannot gain runtime access merely by
+// knowing a workspace ID.
+type RuntimeTaskToolFactory func(task Task, agentName, agentInstanceID string) []toolapi.Tool
 
 type resolvedTaskAgent struct {
 	*agent.Agent
@@ -179,6 +186,12 @@ func (h *LLMTaskHandler) SetUserProfileStore(store userprofile.UserStore) {
 // snapshot embedded in the prompt and cannot fetch full note content on demand.
 func (h *LLMTaskHandler) SetWorkspaceToolFactory(fn WorkspaceToolFactory) {
 	h.workspaceToolsFn = fn
+}
+
+func (h *LLMTaskHandler) SetRuntimeTaskToolFactory(fn RuntimeTaskToolFactory) {
+	if h != nil {
+		h.runtimeToolsFn = fn
+	}
 }
 
 // SetUtilityToolProvider wires native utility tools into task execution. Web
@@ -1286,16 +1299,27 @@ func (h *LLMTaskHandler) convertAgentToolsToLLMTools(ag *resolvedTaskAgent, task
 }
 
 func (h *LLMTaskHandler) getWorkspaceTools(task Task) []toolapi.Tool {
-	if h == nil || h.workspaceToolsFn == nil {
+	if h == nil {
 		return nil
 	}
 	workspaceID := strings.TrimSpace(task.WorkspaceID)
 	if workspaceID == "" {
 		return nil
 	}
-	// task.To is the executing agent; the factory uses it to gate
-	// coordinator-only tools (delegate_task) to the workspace coordinator.
-	return h.workspaceToolsFn(workspaceID, strings.TrimSpace(task.To))
+	agentName := strings.TrimSpace(task.To)
+	var tools []toolapi.Tool
+	if h.workspaceToolsFn != nil {
+		// task.To is the executing agent; the ordinary factory uses it to gate
+		// coordinator-only tools (delegate_task) to the coordinator.
+		tools = append(tools, h.workspaceToolsFn(workspaceID, agentName)...)
+	}
+	if h.runtimeToolsFn != nil {
+		agentInstanceID := h.taskAgentInstanceID(task, agentName)
+		if agentInstanceID != "" {
+			tools = append(tools, h.runtimeToolsFn(task, agentName, agentInstanceID)...)
+		}
+	}
+	return tools
 }
 
 func (h *LLMTaskHandler) getAgentUtilityTools(ag *resolvedTaskAgent) []toolapi.Tool {

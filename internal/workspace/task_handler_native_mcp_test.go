@@ -61,6 +61,48 @@ func (s *stubNativeRegistry) GetToolsForServer(string) ([]toolapi.Tool, error) {
 func (s *stubNativeRegistry) StartServer(string) error                         { return nil }
 func (s *stubNativeRegistry) ListServers() []mcp.ServerConfig                  { return s.servers }
 
+func TestRuntimeTaskToolsRequireDeclaredCapabilityAndExactAgentInstance(t *testing.T) {
+	store := NewInMemoryStore()
+	ws := &Workspace{
+		ID: "ws-reaper-tools", Name: "REAPER", Status: StatusActive,
+		AgentInstances: []AgentInstance{{ID: "agent-1", Name: "reaper", NodeID: "reaper-1"}},
+	}
+	if err := store.Save(ws); err != nil {
+		t.Fatal(err)
+	}
+	handler := &LLMTaskHandler{workspaceStore: store}
+	var gotWorkspace, gotAgent string
+	handler.SetRuntimeTaskToolFactory(func(task Task, _ string, agentInstanceID string) []toolapi.Tool {
+		if !task.RequiresCapability("reaper_live_control") {
+			return nil
+		}
+		gotWorkspace = task.WorkspaceID
+		gotAgent = agentInstanceID
+		return []toolapi.Tool{taskHandlerToolStub{name: "list_reaper_actions"}}
+	})
+
+	unrelated := Task{WorkspaceID: ws.ID, To: "reaper", AssignedNodeID: "reaper-1"}
+	if tools := handler.getWorkspaceTools(unrelated); len(tools) != 0 {
+		t.Fatalf("unrelated task received runtime tools: %v", tools)
+	}
+	// Model arguments never provide the workspace or stable agent ID handed to
+	// the production runtime-tool factory.
+	runtimeTask := Task{
+		WorkspaceID: ws.ID, To: "reaper", AssignedNodeID: "reaper-1",
+		RequiredCapabilities: []string{"reaper_live_control"},
+	}
+	tools := handler.getWorkspaceTools(runtimeTask)
+	if len(tools) != 1 || gotWorkspace != ws.ID || gotAgent != "agent-1" {
+		t.Fatalf("runtime tool scope = tools=%v workspace=%q agent=%q", tools, gotWorkspace, gotAgent)
+	}
+	wrongInstance := runtimeTask
+	wrongInstance.To = "other-agent"
+	wrongInstance.AssignedNodeID = "other-node"
+	if tools := handler.getWorkspaceTools(wrongInstance); len(tools) != 0 {
+		t.Fatalf("unknown instance received runtime tools: %v", tools)
+	}
+}
+
 func TestExecuteTaskConversation_RuntimeScopeDoesNotRequireBroadNativeMCP(t *testing.T) {
 	store := NewInMemoryStore()
 	ws := &Workspace{

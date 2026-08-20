@@ -429,6 +429,42 @@
     host.appendChild(message);
   }
 
+  function renderRawCommand(host) {
+    const raw = el('div', 'reaper-console-raw');
+    const copy = el('div', 'reaper-console-raw-copy');
+    copy.appendChild(el('strong', '', 'Raw command ID'));
+    copy.appendChild(el('span', '', 'Decimal or _RS hexadecimal IDs always require confirmation.'));
+    raw.appendChild(copy);
+    const controls = el('div', 'reaper-console-raw-controls');
+    const input = el('input', 'reaper-console-raw-input');
+    input.type = 'text';
+    input.placeholder = '40001 or _RS…';
+    input.maxLength = 96;
+    input.autocomplete = 'off';
+    input.setAttribute('aria-label', 'Raw REAPER command ID');
+    controls.appendChild(input);
+    const run = button('Review', 'reaper-console-btn is-secondary', () => {
+      const id = String(input.value || '').trim();
+      if (!id) {
+        lastRun = { outcome: 'error', label: 'Raw command', reason: 'Enter a command ID first.' };
+        renderConsole();
+        return;
+      }
+      requestAction({
+        id,
+        label: 'Raw command ' + id,
+        description: 'User-entered REAPER command ID.',
+        source: 'raw',
+        mutates: true,
+        needs_confirmation: true
+      });
+    });
+    run.disabled = actionRequestInFlight;
+    controls.appendChild(run);
+    raw.appendChild(controls);
+    host.appendChild(raw);
+  }
+
   function renderActionGrid(host) {
     const section = el('section', 'reaper-console-action-catalog');
     const head = el('div', 'reaper-console-section-head');
@@ -464,6 +500,7 @@
     }
     section.appendChild(grid);
     host.appendChild(section);
+    renderRawCommand(host);
   }
 
   function renderOffline(host, state) {

@@ -85,6 +85,19 @@ func (b *ServerBuilder) buildWorkspaceToolFactory() workspace.WorkspaceToolFacto
 // builder's stores. Workspace storage and the folder projection are wired in
 // different builder phases, so resolving dependencies only at tool-call time
 // avoids a partially initialized HQ overview.
+func (b *ServerBuilder) buildRuntimeTaskToolFactory() workspace.RuntimeTaskToolFactory {
+	handler := b.reaperHandler
+	if handler == nil {
+		return nil
+	}
+	return func(task workspace.Task, _ string, agentInstanceID string) []toolapi.Tool {
+		if !task.RequiresCapability(reapersetup.ReaperLiveControlCapability) {
+			return nil
+		}
+		return handler.AgentTools(task.WorkspaceID, agentInstanceID)
+	}
+}
+
 func (b *ServerBuilder) hqVisibilityDeps() chathttp.HQVisibilityDeps {
 	return chathttp.HQVisibilityDeps{
 		SnapshotSources: b.watchtowerSnapshotSources,
@@ -480,6 +493,9 @@ func (b *ServerBuilder) initializeTaskExecution() {
 	}
 	if fn := b.buildWorkspaceToolFactory(); fn != nil {
 		b.taskHandler.SetWorkspaceToolFactory(fn)
+	}
+	if fn := b.buildRuntimeTaskToolFactory(); fn != nil {
+		b.taskHandler.SetRuntimeTaskToolFactory(fn)
 	}
 
 	taskExecutionHandler := workspace.TaskHandler(b.taskHandler)

@@ -118,7 +118,7 @@ func TestGetStateRejectsWorkspaceCurrentUserDoesNotOwn(t *testing.T) {
 	store := &testStore{root: root, workspaces: map[string]*workspace.Workspace{}}
 	store.workspaces["theirs"] = reaperHTTPWorkspace(t, root, "theirs", "someone-else")
 	reader := &stateReader{}
-	handler := NewHandler(store, testUser(userprofile.LocalUserID), reader)
+	handler := NewHandler(store, testUser(userprofile.LocalUserID), reader, nil)
 
 	recorder, _ := serveState(t, handler, "theirs")
 	if recorder.Code != http.StatusNotFound || reader.calls != 0 {
@@ -133,7 +133,7 @@ func TestGetStateDoesNotProbeWorkspaceWithoutPersistedLiveRuntimeSelection(t *te
 	ws.SetRuntimeState(&workspace.WorkspaceRuntimeState{SelectedModeID: "file_only"})
 	store.workspaces["mine"] = ws
 	reader := &stateReader{}
-	handler := NewHandler(store, testUser(userprofile.LocalUserID), reader)
+	handler := NewHandler(store, testUser(userprofile.LocalUserID), reader, nil)
 
 	recorder, body := serveState(t, handler, "mine")
 	if recorder.Code != http.StatusOK || body["applies"] != false || reader.calls != 0 {
@@ -145,7 +145,7 @@ func TestGetActionsReturnsCuratedCatalog(t *testing.T) {
 	root := t.TempDir()
 	store := &testStore{root: root, workspaces: map[string]*workspace.Workspace{}}
 	store.workspaces["mine"] = reaperHTTPWorkspace(t, root, "mine", userprofile.LocalUserID)
-	handler := NewHandler(store, testUser(userprofile.LocalUserID), &stateReader{})
+	handler := NewHandler(store, testUser(userprofile.LocalUserID), &stateReader{}, nil)
 	mux := http.NewServeMux()
 	handler.Register(mux)
 	recorder := httptest.NewRecorder()
@@ -159,12 +159,68 @@ func TestGetActionsReturnsCuratedCatalog(t *testing.T) {
 	}
 }
 
+func TestGetActionsIncludesRegisteredReaScripts(t *testing.T) {
+	root := t.TempDir()
+	store := &testStore{root: root, workspaces: map[string]*workspace.Workspace{}}
+	store.workspaces["mine"] = reaperHTTPWorkspace(t, root, "mine", userprofile.LocalUserID)
+	keyboardConfig := filepath.Join(root, "reaper-kb.ini")
+	if err := os.WriteFile(keyboardConfig, []byte(`SCR 4 0 RSdeadBEEF "Custom: Add markers.lua" Scripts/add-markers.lua`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	handler := NewHandler(store, testUser(userprofile.LocalUserID), &stateReader{}, reaper.NewCatalogWithKeyboardConfig(keyboardConfig))
+	mux := http.NewServeMux()
+	handler.Register(mux)
+	recorder := httptest.NewRecorder()
+	mux.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/workspaces/mine/reaper/actions", nil))
+	var actions []reaper.Action
+	if err := json.Unmarshal(recorder.Body.Bytes(), &actions); err != nil {
+		t.Fatal(err)
+	}
+	registered := actions[len(actions)-1]
+	if recorder.Code != http.StatusOK || registered.ID != "_RSdeadBEEF" || registered.Label != "Add markers.lua" || registered.Source != reaper.ActionSourceRegistered {
+		t.Fatalf("registered catalog = %d %+v", recorder.Code, actions)
+	}
+}
+
+func TestRunActionValidatesRawIDBeforeClientAndAlwaysConfirmsIt(t *testing.T) {
+	root := t.TempDir()
+	store := &testStore{root: root, workspaces: map[string]*workspace.Workspace{}}
+	store.workspaces["mine"] = reaperHTTPWorkspace(t, root, "mine", userprofile.LocalUserID)
+	reader := &stateReader{runState: reaper.State{Connected: true, PlayState: "stopped", Tracks: []reaper.Track{}}}
+	handler := NewHandler(store, testUser(userprofile.LocalUserID), reader, nil)
+	mux := http.NewServeMux()
+	handler.Register(mux)
+
+	invalid := httptest.NewRecorder()
+	mux.ServeHTTP(invalid, httptest.NewRequest(http.MethodPost, "/api/workspaces/mine/reaper/actions/not-a-command/run", nil))
+	if invalid.Code != http.StatusBadRequest || reader.runCalls != 0 {
+		t.Fatalf("invalid raw id = %d %s, calls=%d", invalid.Code, invalid.Body.String(), reader.runCalls)
+	}
+
+	unconfirmed := httptest.NewRecorder()
+	mux.ServeHTTP(unconfirmed, httptest.NewRequest(http.MethodPost, "/api/workspaces/mine/reaper/actions/_RSdeadBEEF/run", nil))
+	var body ActionRunResponse
+	if err := json.Unmarshal(unconfirmed.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if unconfirmed.Code != http.StatusConflict || body.Outcome != "confirmation_required" || reader.runCalls != 0 {
+		t.Fatalf("unconfirmed raw = %d %+v, calls=%d", unconfirmed.Code, body, reader.runCalls)
+	}
+
+	confirmed := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/workspaces/mine/reaper/actions/_RSdeadBEEF/run", strings.NewReader(`{"confirmed":true}`))
+	mux.ServeHTTP(confirmed, request)
+	if confirmed.Code != http.StatusOK || reader.runCalls != 1 || reader.runActionID != "_RSdeadBEEF" {
+		t.Fatalf("confirmed raw = %d %s, reader=%+v", confirmed.Code, confirmed.Body.String(), reader)
+	}
+}
+
 func TestRunActionReturnsResultingStateAndEnforcesConfirmation(t *testing.T) {
 	root := t.TempDir()
 	store := &testStore{root: root, workspaces: map[string]*workspace.Workspace{}}
 	store.workspaces["mine"] = reaperHTTPWorkspace(t, root, "mine", userprofile.LocalUserID)
 	reader := &stateReader{runState: reaper.State{Connected: true, PlayState: "playing", Tracks: []reaper.Track{}}}
-	handler := NewHandler(store, testUser(userprofile.LocalUserID), reader)
+	handler := NewHandler(store, testUser(userprofile.LocalUserID), reader, nil)
 	mux := http.NewServeMux()
 	handler.Register(mux)
 
@@ -205,7 +261,7 @@ func TestRunActionSurfacesDisconnectedOutcomeWithoutSuccess(t *testing.T) {
 		runState: reaper.State{Connected: false, Reason: "reaper_unreachable", Tracks: []reaper.Track{}},
 		runErr:   reaper.ErrActionDisconnected,
 	}
-	handler := NewHandler(store, testUser(userprofile.LocalUserID), reader)
+	handler := NewHandler(store, testUser(userprofile.LocalUserID), reader, nil)
 	mux := http.NewServeMux()
 	handler.Register(mux)
 	recorder := httptest.NewRecorder()
@@ -216,6 +272,52 @@ func TestRunActionSurfacesDisconnectedOutcomeWithoutSuccess(t *testing.T) {
 	}
 	if recorder.Code != http.StatusConflict || body.Outcome != "error" || body.ErrorReason == "" || body.Connected {
 		t.Fatalf("disconnected run = %d %+v", recorder.Code, body)
+	}
+}
+
+func TestAgentToolsRequireExactRuntimeGrantAndShareRunPolicy(t *testing.T) {
+	root := t.TempDir()
+	store := &testStore{root: root, workspaces: map[string]*workspace.Workspace{}}
+	ws := reaperHTTPWorkspace(t, root, "mine", userprofile.LocalUserID)
+	store.workspaces["mine"] = ws
+	reader := &stateReader{runState: reaper.State{Connected: true, PlayState: "playing", Tracks: []reaper.Track{}}}
+	handler := NewHandler(store, testUser(userprofile.LocalUserID), reader, nil)
+	tools := handler.AgentTools("mine", "agent-1")
+	if len(tools) != 2 {
+		t.Fatalf("agent tools = %d", len(tools))
+	}
+	if _, err := tools[0].Call(context.Background(), `{}`); !errors.Is(err, ErrAgentRuntimeGrantRequired) {
+		t.Fatalf("list without grant error = %v", err)
+	}
+	if reader.runCalls != 0 {
+		t.Fatal("an ungranted tool reached REAPER")
+	}
+	if _, err := ws.GrantRuntimeCapability("reaper_live_control", "agent-1", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	listed, err := tools[0].Call(context.Background(), `{}`)
+	if err != nil || !strings.Contains(listed, `"id":"1007"`) {
+		t.Fatalf("granted list = %q, %v", listed, err)
+	}
+
+	var runToolIndex int
+	for i, tool := range tools {
+		if tool.Definition().Name == "run_reaper_action" {
+			runToolIndex = i
+		}
+	}
+	unconfirmed, err := tools[runToolIndex].Call(context.Background(), `{"action_id":"40001"}`)
+	if err != nil || !strings.Contains(unconfirmed, `"outcome":"confirmation_required"`) || reader.runCalls != 0 {
+		t.Fatalf("agent confirmation = %q, err=%v, calls=%d", unconfirmed, err, reader.runCalls)
+	}
+	result, err := tools[runToolIndex].Call(context.Background(), `{"action_id":"40001","confirmed":true}`)
+	if err != nil || !strings.Contains(result, `"outcome":"ok"`) || reader.runCalls != 1 {
+		t.Fatalf("agent run = %q, err=%v, calls=%d", result, err, reader.runCalls)
+	}
+
+	otherAgentTools := handler.AgentTools("mine", "agent-2")
+	if _, err := otherAgentTools[0].Call(context.Background(), `{}`); !errors.Is(err, ErrAgentRuntimeGrantRequired) {
+		t.Fatalf("another agent inherited grant: %v", err)
 	}
 }
 
@@ -231,7 +333,7 @@ func TestGetStateReturnsDisconnectedAsSuccessfulLiveState(t *testing.T) {
 		Tracks:    []reaper.Track{},
 		CheckedAt: checkedAt,
 	}}
-	handler := NewHandler(store, testUser(userprofile.LocalUserID), reader)
+	handler := NewHandler(store, testUser(userprofile.LocalUserID), reader, nil)
 
 	recorder, body := serveState(t, handler, "mine")
 	if recorder.Code != http.StatusOK || body["applies"] != true || body["connected"] != false || body["reason"] != "reaper_unreachable" {
