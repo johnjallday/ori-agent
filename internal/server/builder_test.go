@@ -151,6 +151,9 @@ func TestServerBuilder_Build_Integration(t *testing.T) {
 	if server.Handlers.RuntimeCapabilities == nil || builder.runtimeCapabilityService == nil || builder.runtimeCapabilityRegistry == nil {
 		t.Error("runtime capability handler/service/registry not wired")
 	}
+	if server.Handlers.Reaper == nil || builder.reaperHandler == nil {
+		t.Error("live REAPER state handler not wired")
+	}
 	if builder.taskCapabilityGate == nil {
 		t.Error("composite task capability gate not wired")
 	}

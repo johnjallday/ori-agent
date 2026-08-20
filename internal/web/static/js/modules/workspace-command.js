@@ -268,6 +268,7 @@ export class WorkspaceCommandView {
       window.addEventListener('popstate', this.boundPopState);
     }
     this.ensureCapabilityStations();
+    this.ensureReaperStation();
     this.applyBootURLState();
   }
 
@@ -292,6 +293,19 @@ export class WorkspaceCommandView {
     void Promise.resolve(catalog.load()).then(() => {
       if (this.active) this.render();
     });
+  }
+
+  // Live REAPER polling is owned by ReaperConsole, but the command view owns
+  // whether the Map is visible and when its station needs repainting. The event
+  // carries no endpoint or port — only the already-redacted live state.
+  ensureReaperStation() {
+    if (this.boundReaperStateChanged) return;
+    this.boundReaperStateChanged = () => {
+      if (this.active) this.render();
+    };
+    if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+      document.addEventListener('ori:reaper-state-changed', this.boundReaperStateChanged);
+    }
   }
 
   /** Re-render if active — called by the page after its data loads/refreshes. */
@@ -1213,6 +1227,10 @@ export class WorkspaceCommandView {
   }
 
   render() {
+    const reaperConsole = typeof window === 'undefined' ? null : window.ReaperConsole;
+    if (reaperConsole && typeof reaperConsole.setMapVisible === 'function') {
+      reaperConsole.setMapVisible(this.active && this.viewMode === 'map');
+    }
     if (!this.container) return;
     // An active station drag owns the DOM: render() rebuilds it wholesale,
     // which would tear the dragged element out mid-gesture. Skip background
@@ -6007,35 +6025,34 @@ export class WorkspaceCommandView {
   // (FR-93, FR-94). Status text comes from the catalog's derived health, so the
   // station and the catalog can never disagree.
   workspaceStationRegistry() {
+    const stations = [];
     const catalog = typeof window === 'undefined' ? null : window.WorkspaceCapabilities;
-    if (!catalog || typeof catalog.find !== 'function') return [];
-    const item = catalog.find('file-janitor');
-    if (!item || !item.installed || item.available === false) return [];
+    const item =
+      catalog && typeof catalog.find === 'function' ? catalog.find('file-janitor') : null;
+    if (item && item.installed && item.available !== false) {
+      const status = item.status || {};
+      const folder = status.folder_display_name || '';
+      const janitorConsole = typeof window === 'undefined' ? null : window.FileJanitorConsole;
 
-    const status = item.status || {};
-    const folder = status.folder_display_name || '';
-    const janitorConsole = typeof window === 'undefined' ? null : window.FileJanitorConsole;
-
-    // State prefers the console's live derivation over the catalog snapshot.
-    // The catalog is fetched once per page load; the console re-reads on every
-    // scan, approval, and pause, so it is the only source that can say "3 files
-    // ready for review" while the user is looking at the map (FR-95, FR-96).
-    const liveState = () => {
-      const derived =
-        janitorConsole && typeof janitorConsole.stationState === 'function'
-          ? janitorConsole.stationState()
-          : null;
-      if (derived && derived.applies) return derived;
-      return {
-        applies: true,
-        value: status.detail || '',
-        description: status.detail || '',
-        tone: status.state === 'needs_attention' ? 'degraded' : ''
+      // State prefers the console's live derivation over the catalog snapshot.
+      // The catalog is fetched once per page load; the console re-reads on every
+      // scan, approval, and pause, so it is the only source that can say "3 files
+      // ready for review" while the user is looking at the map (FR-95, FR-96).
+      const liveState = () => {
+        const derived =
+          janitorConsole && typeof janitorConsole.stationState === 'function'
+            ? janitorConsole.stationState()
+            : null;
+        if (derived && derived.applies) return derived;
+        return {
+          applies: true,
+          value: status.detail || '',
+          description: status.detail || '',
+          tone: status.state === 'needs_attention' ? 'degraded' : ''
+        };
       };
-    };
 
-    return [
-      {
+      stations.push({
         key: 'file-janitor',
         label: folder ? 'File Janitor · ' + folder : 'File Janitor',
         icon: 'bi-folder-symlink',
@@ -6050,8 +6067,65 @@ export class WorkspaceCommandView {
           }
           if (typeof catalog.onOpen === 'function') catalog.onOpen('file-janitor', trigger);
         }
-      }
-    ];
+      });
+    }
+
+    // REAPER is earned only by the persisted runtime selection and its
+    // snapshotted contract. Names, tags, template IDs, folders, .rpp evidence,
+    // and agent skills are intentionally irrelevant (FR6, FR7).
+    const workspace = (this.page && this.page.workspace) || {};
+    const runtimeState = workspace.runtime_state || {};
+    const contract = workspace.template_provenance?.runtime_requirements || null;
+    const selectedMode = String(runtimeState.selected_mode_id || '');
+    const mode =
+      contract && Array.isArray(contract.operating_modes)
+        ? contract.operating_modes.find(candidate => candidate && candidate.id === selectedMode)
+        : null;
+    const requirements =
+      contract && Array.isArray(contract.requirements) ? contract.requirements : [];
+    const carriesReaperRequirement = requirements.some(
+      requirement => requirement && requirement.key === 'reaper_live_control'
+    );
+    const selectedRequiresReaper =
+      selectedMode === 'ori_assisted' &&
+      mode &&
+      Array.isArray(mode.requires) &&
+      mode.requires.includes('reaper_live_control');
+    const reaperConsole = typeof window === 'undefined' ? null : window.ReaperConsole;
+    // The workspace detail projection may omit folder-only runtime metadata.
+    // In that case the state endpoint performs the same check against the
+    // canonical workspace.json and exposes only the resulting boolean.
+    const endpointApplies =
+      reaperConsole && typeof reaperConsole.applies === 'function' && reaperConsole.applies();
+
+    if ((selectedRequiresReaper && carriesReaperRequirement) || endpointApplies) {
+      stations.push({
+        key: 'reaper',
+        label:
+          reaperConsole && typeof reaperConsole.stationLabel === 'function'
+            ? reaperConsole.stationLabel()
+            : 'REAPER',
+        icon: 'bi-sliders2-vertical',
+        state: () => {
+          if (reaperConsole && typeof reaperConsole.stationState === 'function') {
+            return reaperConsole.stationState();
+          }
+          return {
+            applies: true,
+            value: 'Checking…',
+            description: 'checking the current REAPER connection',
+            tone: 'loading'
+          };
+        },
+        action: trigger => {
+          if (reaperConsole && typeof reaperConsole.open === 'function') {
+            reaperConsole.open({ source: 'map-station', trigger });
+          }
+        }
+      });
+    }
+
+    return stations;
   }
 
   // Every station on this workspace's map, whatever its source. Keyed lookups

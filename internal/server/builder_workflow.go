@@ -374,6 +374,7 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 	// preview / repair. Done here rather than in initializeHandlers because the
 	// store is created in this phase (Phase 18), after the handlers.
 	b.wireReaperSetup()
+	b.wireReaperControl()
 	b.wireCalendarOpsSetup()
 	b.wireDownloadsJanitor()
 	// After the domain services above: the capability registry binds their
