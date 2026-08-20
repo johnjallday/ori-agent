@@ -1,6 +1,6 @@
 // Package reaperhttp serves workspace-scoped live REAPER state. The handler
-// accepts only a workspace ID; the loopback endpoint is resolved from trusted
-// server-side state.
+// accepts only a workspace ID; the project path and loopback endpoint are
+// resolved from trusted server-side state.
 package reaperhttp
 
 import (
@@ -23,7 +23,7 @@ type WorkspaceStore interface {
 }
 
 type StateReader interface {
-	Connected(context.Context) reaper.State
+	ReadState(context.Context, reaper.ProjectSource) (reaper.State, error)
 }
 
 type Handler struct {
@@ -50,10 +50,31 @@ func (h *Handler) GetState(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !runtimeSelectsLiveReaper(folderWorkspace) {
-		_ = orihttp.RespondSuccess(w, reaper.State{Applies: false, CheckedAt: time.Now().UTC()})
+		_ = orihttp.RespondSuccess(w, reaper.State{
+			Applies:   false,
+			PlayState: "unknown",
+			Tracks:    []reaper.Track{},
+			CheckedAt: time.Now().UTC(),
+		})
 		return
 	}
-	state := h.client.Connected(r.Context())
+	projectPath, err := reapersetup.AuthoritativeProject(h.store, ws.ID)
+	if err != nil {
+		h.respondUnavailable(w)
+		return
+	}
+	entryPath, err := workspace.GetProjectEntryPath(folderWorkspace.SharedData)
+	if err != nil {
+		h.respondUnavailable(w)
+		return
+	}
+	state, err := h.client.ReadState(r.Context(), reaper.ProjectSource{Path: projectPath, EntryPath: entryPath})
+	if err != nil {
+		logger.Warn("Live REAPER state request failed", logger.Fields{"category": "reaper_state_failed"})
+		_ = orihttp.RespondAPIError(w, http.StatusBadGateway,
+			orihttp.NewAPIError("reaper_state_failed", "Live REAPER state could not be read."))
+		return
+	}
 	state.Applies = true
 	_ = orihttp.RespondSuccess(w, state)
 }

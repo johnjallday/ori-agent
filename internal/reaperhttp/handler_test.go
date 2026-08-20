@@ -28,21 +28,28 @@ func (s *testStore) Get(id string) (*workspace.Workspace, error) {
 	}
 	return ws, nil
 }
-func (s *testStore) GetFolderWorkspace(id string) (*workspace.Workspace, error) { return s.Get(id) }
-func (s *testStore) GetFolderPath(string) (string, error)                       { return s.root, nil }
+
+func (s *testStore) GetFolderWorkspace(id string) (*workspace.Workspace, error) {
+	return s.Get(id)
+}
+
+func (s *testStore) GetFolderPath(string) (string, error) { return s.root, nil }
 
 type testUser string
 
 func (u testUser) CurrentUserID(context.Context) (string, error) { return string(u), nil }
 
 type stateReader struct {
-	state reaper.State
-	calls int
+	state  reaper.State
+	err    error
+	calls  int
+	source reaper.ProjectSource
 }
 
-func (r *stateReader) Connected(context.Context) reaper.State {
+func (r *stateReader) ReadState(_ context.Context, source reaper.ProjectSource) (reaper.State, error) {
 	r.calls++
-	return r.state
+	r.source = source
+	return r.state, r.err
 }
 
 func reaperHTTPWorkspace(t *testing.T, root, id, owner string) *workspace.Workspace {
@@ -51,7 +58,7 @@ func reaperHTTPWorkspace(t *testing.T, root, id, owner string) *workspace.Worksp
 	if err := os.MkdirAll(projectDir, 0o750); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(projectDir, "song.rpp"), []byte("project"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(projectDir, "song.rpp"), []byte("<REAPER_PROJECT\nTEMPO 120 4 4\n>\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Song"})
@@ -70,7 +77,9 @@ func reaperHTTPWorkspace(t *testing.T, root, id, owner string) *workspace.Worksp
 				{ID: "file_only", Label: "File only", Description: "Use files."},
 				{ID: "ori_assisted", Label: "Assisted", Description: "Use REAPER.", Requires: []string{"reaper_live_control"}},
 			},
-			Requirements: []workspace.RuntimeRequirement{{Key: "reaper_live_control", Label: "REAPER", Description: "Use REAPER.", Adapter: "reaper_live_control"}},
+			Requirements: []workspace.RuntimeRequirement{{
+				Key: "reaper_live_control", Label: "REAPER", Description: "Use REAPER.", Adapter: "reaper_live_control",
+			}},
 		},
 	})
 	ws.SetRuntimeState(&workspace.WorkspaceRuntimeState{SelectedModeID: "ori_assisted"})
@@ -125,11 +134,21 @@ func TestGetStateReturnsDisconnectedAsSuccessfulLiveState(t *testing.T) {
 	store := &testStore{root: root, workspaces: map[string]*workspace.Workspace{}}
 	store.workspaces["mine"] = reaperHTTPWorkspace(t, root, "mine", userprofile.LocalUserID)
 	checkedAt := time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)
-	reader := &stateReader{state: reaper.State{Connected: false, Reason: "reaper_unreachable", CheckedAt: checkedAt}}
+	reader := &stateReader{state: reaper.State{
+		Connected: false,
+		Reason:    "reaper_unreachable",
+		PlayState: "unknown",
+		Tracks:    []reaper.Track{},
+		CheckedAt: checkedAt,
+	}}
 	handler := NewHandler(store, testUser(userprofile.LocalUserID), reader)
 
 	recorder, body := serveState(t, handler, "mine")
 	if recorder.Code != http.StatusOK || body["applies"] != true || body["connected"] != false || body["reason"] != "reaper_unreachable" {
 		t.Fatalf("disconnected state = %d %#v", recorder.Code, body)
+	}
+	wantPath := filepath.Join(root, "project", "song.rpp")
+	if reader.source.Path != wantPath || reader.source.EntryPath != "song.rpp" {
+		t.Fatalf("project source = %+v, want path %q", reader.source, wantPath)
 	}
 }
