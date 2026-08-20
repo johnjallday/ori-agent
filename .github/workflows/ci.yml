@@ -102,6 +102,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    env:
+      README_CAPTURE_CI_RUN_ID: ci-readme-${{ github.run_id }}-${{ github.run_attempt }}
 
     steps:
       - name: Checkout code
@@ -151,22 +153,46 @@ jobs:
           fi
 
       - name: Capture and compare disposable README screenshots
+        id: readme_capture
         shell: bash
         run: |
           set -euo pipefail
-          run_id="ci-readme-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          run_dir="test-results/readme-refresh/${run_id}"
-          cleanup() {
-            bash scripts/readme-refresh.sh cleanup --run-id "$run_id" || true
-          }
-          trap cleanup EXIT
-          if ! bash scripts/readme-refresh.sh capture --run-id "$run_id"; then
+          run_dir="test-results/readme-refresh/${README_CAPTURE_CI_RUN_ID}"
+          if ! bash scripts/readme-refresh.sh capture --run-id "$README_CAPTURE_CI_RUN_ID"; then
             echo "::error::Disposable README capture failed; the command output above includes the failed scene or rule and safe retry command."
             find "$run_dir/logs" -maxdepth 1 -type f -print -exec tail -n 40 {} \; 2>/dev/null || true
             exit 1
           fi
           test -f "$run_dir/comparison/README_CAPTURE_REPORT.md"
           git diff --exit-code -- README.md docs/images docs/readme-screenshots.json
+
+      # A same-environment mismatch is a pixel-level failure. Preserve only the
+      # fictional scene pair, encoder metadata, and logs long enough to inspect
+      # the differing Linux frames; successful runs still upload nothing.
+      - name: Upload failed README capture evidence
+        if: failure() && steps.readme_capture.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: readme-capture-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            test-results/readme-refresh/${{ env.README_CAPTURE_CI_RUN_ID }}/raw/workspace-map.png
+            test-results/readme-refresh/${{ env.README_CAPTURE_CI_RUN_ID }}/raw-repeat/workspace-map.png
+            test-results/readme-refresh/${{ env.README_CAPTURE_CI_RUN_ID }}/proposed/workspace-map.webp
+            test-results/readme-refresh/${{ env.README_CAPTURE_CI_RUN_ID }}/proposed/image-metadata.json
+            test-results/readme-refresh/${{ env.README_CAPTURE_CI_RUN_ID }}/proposed-repeat/workspace-map.webp
+            test-results/readme-refresh/${{ env.README_CAPTURE_CI_RUN_ID }}/proposed-repeat/image-metadata.json
+            test-results/readme-refresh/${{ env.README_CAPTURE_CI_RUN_ID }}/logs/
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Clean up disposable README capture
+        if: always()
+        shell: bash
+        run: |
+          run_dir="test-results/readme-refresh/${README_CAPTURE_CI_RUN_ID}"
+          if [[ -d "$run_dir" ]]; then
+            bash scripts/readme-refresh.sh cleanup --run-id "$README_CAPTURE_CI_RUN_ID"
+          fi
 
   test-unit:
     name: Unit Tests
