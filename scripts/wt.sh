@@ -1063,35 +1063,93 @@ function wt_done_resolve_attached_issue {
   fi
 }
 
-# Close only the primary Issue attached above, and only after this branch has a
-# confirmed merged PR. Failure is fatal while the worktree still exists, making
-# the operation safely retryable. An already-closed Issue is idempotent.
-function wt_done_close_attached_issue {
-  local issue_number="$1" merged_num="$2" issue_state
+# Idempotently close one Issue with the standard delivery attribution. OPEN
+# closes; CLOSED is left unchanged; any other state is not guessed about.
+# Failure is always fatal while the worktree still exists, making the
+# operation safely retryable. `label` names the Issue in output ("attached"
+# for the one primary Issue `wt plan` recorded, "secondary" for one the
+# merged PR body additionally names) so a reader can tell which contract
+# produced the close.
+function wt_done_close_issue {
+  local issue_number="$1" merged_num="$2" label="$3" issue_state
   if ! issue_state="$(gh issue view "$issue_number" --json state --jq '.state')"; then
-    echo "Could not inspect attached Issue #$issue_number; worktree preserved."
+    echo "Could not inspect $label Issue #$issue_number; worktree preserved."
     echo "Retry when GitHub is available, or use --keep-issue-open intentionally."
     return 1
   fi
 
   case "$issue_state" in
     OPEN)
-      echo "Closing attached Issue #$issue_number as completed..."
+      echo "Closing $label Issue #$issue_number as completed..."
       if ! gh issue close "$issue_number" --reason completed --comment "Delivered by PR #$merged_num."; then
-        echo "Could not close attached Issue #$issue_number; worktree preserved."
+        echo "Could not close $label Issue #$issue_number; worktree preserved."
         echo "Retry when GitHub is available, or use --keep-issue-open intentionally."
         return 1
       fi
-      echo "Closed attached Issue #$issue_number."
+      echo "Closed $label Issue #$issue_number."
       ;;
     CLOSED)
-      echo "Attached Issue #$issue_number is already closed; leaving it unchanged."
+      echo "$label Issue #$issue_number is already closed; leaving it unchanged."
       ;;
     *)
-      echo "Could not safely interpret attached Issue #$issue_number state '$issue_state'; worktree preserved."
+      echo "Could not safely interpret $label Issue #$issue_number state '$issue_state'; worktree preserved."
       return 1
       ;;
   esac
+}
+
+# Close only the primary Issue attached by `wt plan`, and only after this
+# branch has a confirmed merged PR.
+function wt_done_close_attached_issue {
+  wt_done_close_issue "$1" "$2" "attached"
+}
+
+# Extract deduplicated Closes/Fixes/Resolves #N Issue references from a PR
+# body, in first-seen order, skipping the primary Issue number. The body is
+# untrusted text from GitHub: it is matched against one fixed regex and never
+# evaluated, sourced, or passed to anything that could interpret it as code.
+function wt_done_secondary_issue_numbers {
+  local body="$1" primary="$2" num
+  local -a numbers
+  typeset -A seen
+  while IFS= read -r num; do
+    [[ -z "$num" ]] && continue
+    [[ "$num" == "$primary" ]] && continue
+    [[ -n "${seen[$num]:-}" ]] && continue
+    seen[$num]=1
+    numbers+=("$num")
+  done < <(print -r -- "$body" \
+    | grep -oiE '\b(closes|fixes|resolves)[[:space:]]+#[0-9]+' \
+    | grep -oE '[0-9]+')
+  print -rl -- "${numbers[@]}"
+}
+
+# After the primary Issue closes, additionally close every OPEN Issue the
+# confirmed merged PR body names with Closes/Fixes/Resolves. This is additive
+# to, never a substitute for, the one trusted primary attachment: a PR body
+# read failure is a visible warning that skips secondary closures without
+# undoing the primary close already performed; a secondary Issue's own
+# state/close failure is fatal, preserving the worktree for retry exactly
+# like a primary failure would.
+function wt_done_close_secondary_issues {
+  local primary_number="$1" merged_num="$2" body num
+  local -a numbers
+
+  if ! body="$(gh pr view "$merged_num" --json body --jq '.body')"; then
+    echo "Could not read PR #$merged_num body; skipping any secondary Issues it may mention."
+    return 0
+  fi
+
+  numbers=("${(@f)$(wt_done_secondary_issue_numbers "$body" "$primary_number")}")
+  # An empty result still round-trips through the newline-array conversion
+  # as one empty element; drop it so nothing found means zero iterations.
+  [[ ${#numbers[@]} -eq 1 && -z "${numbers[1]}" ]] && numbers=()
+
+  for num in "${numbers[@]}"; do
+    if ! wt_done_close_issue "$num" "$merged_num" "secondary"; then
+      return 1
+    fi
+  done
 }
 
 function wt_dispatch {
@@ -1535,6 +1593,8 @@ function wt_dispatch {
       elif [[ -z "$merged_num" ]]; then
         echo "Attached Issue #$issue_number was not changed because no merged PR was confirmed."
       elif ! wt_done_close_attached_issue "$issue_number" "$merged_num"; then
+        return 1
+      elif ! wt_done_close_secondary_issues "$issue_number" "$merged_num"; then
         return 1
       fi
     fi
