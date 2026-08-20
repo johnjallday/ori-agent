@@ -564,6 +564,106 @@ test.describe('Coordinate Workspace Map', () => {
     expect(layout.layout.positions[id]).toEqual({ x: placedAt.x + 38, y: placedAt.y + 38 });
   });
 
+  test('dragging an automatic district handle materializes the cluster instead of snapping back', async ({
+    page
+  }) => {
+    test.setTimeout(60_000);
+    const created = await page.request.post('/api/workspaces', {
+      data: { name: `Automatic drag group ${Date.now()}`, kind: 'group' }
+    });
+    const group = (await created.json())?.folder?.id as string;
+    const childA = await ensureWorkspace(page, `Automatic drag child A ${Date.now()}`);
+    const childB = await ensureWorkspace(page, `Automatic drag child B ${Date.now()}`);
+    for (const child of [childA, childB]) {
+      await page.request.put(`/api/workspaces/${child}`, { data: { parent_id: group } });
+    }
+
+    const beforeLayout = (await (await page.request.get('/api/workspace-map/layout')).json()).layout
+      .positions;
+    for (const id of [group, childA, childB]) {
+      expect(beforeLayout[id], `${id} begins on automatic fallback placement`).toBeUndefined();
+    }
+
+    await openMap(page);
+    await centerOnWorkspace(page, group);
+    await enableMapDrag(page);
+
+    const district = page.locator(`.ws-map-district[data-group-id="${group}"]`);
+    const districtOrigin = await district.evaluate(el => ({
+      x: Number.parseFloat((el as HTMLElement).style.left),
+      y: Number.parseFloat((el as HTMLElement).style.top)
+    }));
+    const renderedTiles = await anchors(page);
+    const renderedBefore: Record<string, { x: number; y: number }> = {
+      [group]: districtOrigin
+    };
+    for (const child of [childA, childB]) {
+      const anchor = renderedTiles.find(candidate => candidate.id === child);
+      expect(anchor, `${child} is rendered inside the automatic district`).toBeTruthy();
+      renderedBefore[child] = { x: anchor!.x, y: anchor!.y };
+    }
+
+    const cameraBefore = await cameraOf(page);
+    const writes: string[] = [];
+    page.on('request', request => {
+      const body = request.postData() || '';
+      if (
+        request.url().includes('/api/workspace-map/layout') &&
+        request.method() === 'PATCH' &&
+        body.includes('translate_group')
+      ) {
+        writes.push(body);
+      }
+    });
+
+    const handle = district.locator('[data-group-drag]');
+    const grab = (await handle.boundingBox())!;
+    const x = grab.x + grab.width / 2;
+    const y = grab.y + grab.height / 2;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x + 150, y + 75, { steps: 15 });
+    await expect(district).toHaveClass(/is-dragging/);
+    expect(writes, 'pointer movement performs no write').toHaveLength(0);
+    await page.mouse.up();
+    await page.waitForTimeout(800);
+
+    expect(writes, 'the drop is one atomic request').toHaveLength(1);
+    const operations = JSON.parse(writes[0]).operations;
+    expect(operations.map((operation: { op: string }) => operation.op)).toEqual([
+      'set_positions',
+      'translate_group'
+    ]);
+    expect(operations[0].positions).toEqual(renderedBefore);
+    expect(operations[1].group_id).toBe(group);
+    expect(operations[1].delta.x !== 0 || operations[1].delta.y !== 0).toBe(true);
+
+    const afterLayout = (await (await page.request.get('/api/workspace-map/layout')).json()).layout
+      .positions;
+    for (const id of [group, childA, childB]) {
+      expect(afterLayout[id], `${id} persisted at its previewed destination`).toEqual({
+        x: renderedBefore[id].x + operations[1].delta.x,
+        y: renderedBefore[id].y + operations[1].delta.y
+      });
+    }
+    expect(await cameraOf(page), 'moving the district never pans the camera').toEqual(cameraBefore);
+    await expect(district).not.toHaveClass(/is-dragging/);
+    const districtAfter = await district.evaluate(el => ({
+      x: Number.parseFloat((el as HTMLElement).style.left),
+      y: Number.parseFloat((el as HTMLElement).style.top)
+    }));
+    expect(districtAfter, 'the district remains where it was dropped after redraw').toEqual({
+      x: districtOrigin.x + operations[1].delta.x,
+      y: districtOrigin.y + operations[1].delta.y
+    });
+
+    const after = await listWorkspaces(page);
+    for (const child of [childA, childB]) {
+      const movedChild = after.find(ws => ws.id === child) as { parent_id?: string };
+      expect(movedChild.parent_id, 'group movement never changes membership').toBe(group);
+    }
+  });
+
   test('dragging a district surface moves its cluster, not the camera or hierarchy', async ({
     page
   }) => {

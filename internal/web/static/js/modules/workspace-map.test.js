@@ -4840,7 +4840,8 @@ test('hidden descendants travel with a collapsed district (#346 FR-113)', async 
   await flush();
 
   assert.equal(patches.length, 1);
-  const op = patches[0].operations[0];
+  assert.deepEqual(Object.keys(patches[0].operations[0].positions), ['grp']);
+  const op = patches[0].operations.find(operation => operation.op === 'translate_group');
   assert.equal(op.op, 'translate_group', 'the server resolves and moves every descendant');
   assert.equal(op.group_id, 'grp');
   // Snapping still comes from the members — hidden or not, they are what has to
@@ -5723,8 +5724,17 @@ function clusterDistrictCorner() {
   return { x: 152 - geo.padX, y: 152 - geo.padY };
 }
 
-async function mountedCluster({ patchResponse, enableDrag = true } = {}) {
+async function mountedCluster({ patchResponse, enableDrag = true, positions } = {}) {
   const patches = [];
+  const initialPositions =
+    positions === undefined
+      ? {
+          grp: { x: 100, y: 100 },
+          'child-a': { x: 152, y: 152 },
+          'child-b': { x: 380, y: 152 },
+          outsider: { x: 900, y: 900 }
+        }
+      : positions;
   const map = loadMapWithFetch((url, init) => {
     if (init && init.method === 'PATCH') {
       const body = JSON.parse(init.body);
@@ -5748,12 +5758,7 @@ async function mountedCluster({ patchResponse, enableDrag = true } = {}) {
       schema_version: 1,
       revision: 1,
       snap_to_grid: true,
-      positions: {
-        grp: { x: 100, y: 100 },
-        'child-a': { x: 152, y: 152 },
-        'child-b': { x: 380, y: 152 },
-        outsider: { x: 900, y: 900 }
-      }
+      positions: initialPositions
     });
   });
   const harness = createCameraHarness({
@@ -5821,6 +5826,57 @@ test('dragging the district handle moves the whole cluster by one delta (FR-86)'
   );
   // FR-8: nothing in a cluster move can express membership.
   assert.equal(JSON.stringify(patches[0]).includes('parent'), false);
+});
+
+test('a handle drag atomically pins an all-automatic cluster before translating it', async () => {
+  const { harness, patches } = await mountedCluster({
+    positions: { outsider: { x: 900, y: 900 } }
+  });
+  const handle = harness.handle('grp');
+
+  handle.fire('pointerdown', tilePointer(200, 200));
+  handle.fire('pointermove', tilePointer(276, 238));
+  handle.fire('pointerup', tilePointer(276, 238));
+  await flush();
+
+  assert.equal(patches.length, 1, 'materialization and translation share one request');
+  const [materialize, translate] = patches[0].operations;
+  assert.equal(materialize.op, 'set_positions');
+  assert.deepEqual(Object.keys(materialize.positions).sort(), ['child-a', 'child-b', 'grp']);
+  Object.values(materialize.positions).forEach(point => {
+    assert.equal(Number.isFinite(point.x) && Number.isFinite(point.y), true);
+  });
+  assert.equal(translate.op, 'translate_group');
+  assert.equal(translate.group_id, 'grp');
+  assert.equal(translate.delta.x !== 0 || translate.delta.y !== 0, true);
+  assert.equal(JSON.stringify(patches[0]).includes('parent'), false);
+});
+
+test('a mixed cluster pins only fallback anchors before translating every member', async () => {
+  const { harness, patches } = await mountedCluster({
+    positions: {
+      'child-a': { x: 152, y: 152 },
+      outsider: { x: 900, y: 900 }
+    }
+  });
+  const handle = harness.handle('grp');
+
+  handle.fire('pointerdown', tilePointer(200, 200));
+  handle.fire('pointermove', tilePointer(276, 238));
+  handle.fire('pointerup', tilePointer(276, 238));
+  await flush();
+
+  assert.equal(patches.length, 1);
+  const [materialize, translate] = patches[0].operations;
+  assert.equal(materialize.op, 'set_positions');
+  assert.deepEqual(Object.keys(materialize.positions).sort(), ['child-b', 'grp']);
+  Object.values(materialize.positions).forEach(point => {
+    assert.equal(Number.isFinite(point.x) && Number.isFinite(point.y), true);
+  });
+  assert.equal(translate.op, 'translate_group');
+  assert.equal(translate.group_id, 'grp');
+  assert.equal(translate.delta.x !== 0 || translate.delta.y !== 0, true);
+  assert.equal('child-a' in materialize.positions, false, 'saved anchors are omitted');
 });
 
 test('dragging empty district surface moves the cluster instead of panning the map', async () => {

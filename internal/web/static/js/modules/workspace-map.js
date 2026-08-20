@@ -6241,17 +6241,48 @@
   }
 
   /**
+   * Materialize only the cluster anchors still using deterministic fallback.
+   *
+   * The server deliberately skips unsaved anchors during translate_group: it
+   * cannot infer whether a fallback should become a user-owned coordinate. A
+   * district drag is that explicit choice, so the client pins the exact anchors
+   * it previewed immediately before translating them in the same transaction.
+   * Anchors this layout snapshot already knows as saved are omitted, avoiding
+   * redundant coordinate rewrites before the server applies the shared delta.
+   */
+  function clusterFallbackAnchors(state) {
+    var positions = {};
+    var pin = function (id, point) {
+      if (!id || !point || layoutState.positions[id]) return;
+      positions[id] = { x: point.x, y: point.y };
+    };
+    pin(state.groupId, state.districtOrigin);
+    (state.members || []).forEach(function (member) {
+      pin(member.id, member.origin);
+    });
+    return positions;
+  }
+
+  /**
    * Commit a cluster move.
    *
-   * The client sends the group and one delta, not a list of coordinates: the
-   * server resolves the district's current members and translates their latest
-   * anchors inside one transaction, so the whole cluster lands or none of it
-   * does (FR-87).
+   * The client sends one atomic patch. Any automatic fallback anchors are
+   * materialized first; then the server resolves the district's current
+   * members and translates their latest saved anchors inside the same
+   * transaction, so the whole cluster lands or none of it does (FR-87).
    */
   function commitClusterMove(container, state, delta) {
-    return patchLayout([
-      { op: 'translate_group', group_id: state.groupId, delta: { x: delta.x, y: delta.y } }
-    ])
+    var operations = [];
+    var fallbackAnchors = clusterFallbackAnchors(state);
+    if (Object.keys(fallbackAnchors).length) {
+      operations.push({ op: 'set_positions', positions: fallbackAnchors });
+    }
+    operations.push({
+      op: 'translate_group',
+      group_id: state.groupId,
+      delta: { x: delta.x, y: delta.y }
+    });
+    return patchLayout(operations)
       .then(function () {
         announce(container, 'District moved. Every workspace kept its place inside it.');
         pendingFocusId = '';
