@@ -141,6 +141,27 @@ func TestRenderCompactAllFilteredIsHonestNotEmpty(t *testing.T) {
 	}
 }
 
+func TestRenderCompactAllFilteredStillShowsUnscopedAgentsAndFooter(t *testing.T) {
+	// The footer and the "agents outside a feature" summary are both
+	// repository-wide facts, not per-feature ones — filtering every feature
+	// row must not take either of them down with it.
+	shipped := feature("shipped-thing")
+	shipped.Phase = PhaseState{Phase: PhaseShipped, Confirmed: true}
+	snapshot := baseSnapshot(shipped)
+	snapshot.Agents = append(snapshot.Agents, Agent{
+		Kind: "claude", Scope: AgentScopeRepository,
+		Live: Identity{Session: "native-dev"}, Status: AgentWorking, StatusAvailability: AvailabilityAvailable,
+	})
+
+	output := renderToString(t, snapshot)
+	if !strings.Contains(output, "1 agent(s) outside a feature") {
+		t.Fatalf("the all-filtered case dropped the unscoped-agent summary:\n%s", output)
+	}
+	if !strings.Contains(output, "Snapshot: complete") {
+		t.Fatalf("the all-filtered case dropped the footer:\n%s", output)
+	}
+}
+
 func TestRenderCompactDistinguishesEmptyFromDegradedCells(t *testing.T) {
 	noWorktree := feature("planned", withPlan(AvailabilityAvailable, AvailabilityAvailable))
 	noWorktree.Phase = PhaseState{Phase: PhaseReady, Confirmed: true}
