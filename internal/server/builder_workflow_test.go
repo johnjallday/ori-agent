@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/config"
+	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -209,6 +210,26 @@ func seedFolderWorkspace(t *testing.T, root, name string) string {
 	return folder
 }
 
+func seedPersonalHQFolderWorkspace(t *testing.T, root, name string) string {
+	t.Helper()
+	store, err := workspace.NewFileStore(root)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	defer func() {
+		if err := store.Close(); err != nil {
+			t.Errorf("close workspace fixture store: %v", err)
+		}
+	}()
+
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: name})
+	ws.Designation = string(session.WorkspaceDesignationPersonalHQ)
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("Save Personal HQ workspace: %v", err)
+	}
+	return ws.ID
+}
+
 func buildTestServer(t *testing.T) (*Server, *ServerBuilder) {
 	t.Helper()
 	builder, err := NewServerBuilder()
@@ -328,6 +349,59 @@ func TestWorkspaceRootSave_AppliesToRunningServer(t *testing.T) {
 	if _, err := os.Stat(legacySidecar); err != nil {
 		t.Fatalf("applying a workspace root replayed startup maintenance: %v", err)
 	}
+}
+
+// TestWorkspaceRootSave_AdoptsPersonalHQWithoutRestart covers the first-run
+// onboarding path: confirming a directory bulk-discovers its workspace folders,
+// so a portable personal_hq marker must be reconciled just as it is at startup.
+func TestWorkspaceRootSave_AdoptsPersonalHQWithoutRestart(t *testing.T) {
+	dataDir := prepareBuilderDataRoot(t)
+	targetRoot := filepath.Join(dataDir, "existing-workspaces")
+	hqID := seedPersonalHQFolderWorkspace(t, targetRoot, "My HQ")
+
+	srv, _ := buildTestServer(t)
+	if status := fetchPersonalHQStatus(t, srv); status.Valid || status.WorkspaceID != "" {
+		t.Fatalf("unconfirmed staging root unexpectedly has a Personal HQ: %+v", status)
+	}
+
+	body, err := json.Marshal(map[string]string{"workspace_root": targetRoot})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/settings/workspace-root", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("workspace-root save status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+
+	status := fetchPersonalHQStatus(t, srv)
+	if !status.Valid || status.WorkspaceID != hqID {
+		t.Fatalf("Personal HQ after live root import = %+v, want valid workspace %q", status, hqID)
+	}
+}
+
+type personalHQStatusPayload struct {
+	WorkspaceID string `json:"workspace_id"`
+	Valid       bool   `json:"valid"`
+}
+
+func fetchPersonalHQStatus(t *testing.T, srv *Server) personalHQStatusPayload {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/api/personal-hq/status", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Personal HQ status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var response struct {
+		Status personalHQStatusPayload `json:"status"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode Personal HQ status: %v", err)
+	}
+	return response.Status
 }
 
 func workspacePayloadContains(payload workspacePayload, name string) bool {

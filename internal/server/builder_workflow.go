@@ -264,10 +264,8 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 				b.personalHQService.SetDesignationSyncer(b.sessionHandler)
 				b.personalHQService.SetDesignationReader(fileStore)
 				if startupMaintenanceApproved {
-					if designated, err := b.personalHQService.DesignatedWorkspaceIDs(context.Background()); err != nil {
-						logger.Warn("Startup designation backfill: failed to resolve designated workspaces", logger.Fields{"error": err.Error()})
-					} else if err := b.sessionHandler.BackfillWorkspaceDesignations(context.Background(), designated); err != nil {
-						logger.Warn("Startup workspace designation backfill failed", logger.Fields{"error": err.Error()})
+					if err := b.reconcileWorkspaceDesignations(context.Background()); err != nil {
+						logger.Warn("Startup workspace designation reconciliation failed", logger.Fields{"error": err.Error()})
 					}
 				}
 			}

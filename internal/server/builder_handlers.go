@@ -584,28 +584,49 @@ func (b *ServerBuilder) initializeHandlers() {
 	}
 }
 
+// reconcileWorkspaceDesignations applies the same Personal HQ reconciliation
+// after startup and after a live workspace-root change. The profile record is
+// authoritative, while an unambiguous personal_hq marker in workspace.json is
+// portable recovery evidence for a fresh data directory.
+func (b *ServerBuilder) reconcileWorkspaceDesignations(ctx context.Context) error {
+	if b == nil || b.personalHQService == nil || b.sessionHandler == nil {
+		return nil
+	}
+	designated, err := b.personalHQService.DesignatedWorkspaceIDs(ctx)
+	if err != nil {
+		return err
+	}
+	return b.sessionHandler.BackfillWorkspaceDesignations(ctx, designated)
+}
+
 // wireWorkspaceRootUpdater lets a saved Workspace Directory take effect in the
 // running process, the same way SetVaultRootUpdater already does for the vault
 // root. The settings handler owns the persistence half; this callback owns the
 // live half: re-point the folder store at the new root and reconcile the session
-// store against it, so pre-existing workspaces there appear without a restart.
+// store against it, so pre-existing workspaces and a portable Personal HQ marker
+// appear without a restart.
 //
 // Like wireReaperSetup, it must run AFTER the folder store exists (Phase 18);
 // during initializeHandlers (Phase 17) the session handler has no folder store
 // yet and the callback would apply roots to nothing.
 //
-// The session handler's context is deliberately Background: the reconcile writes
-// to the session store, and a client that disconnects mid-save must not abandon
-// it half-applied.
+// The session handler's context is deliberately Background: the reconciles write
+// to the session and profile stores, and a client that disconnects mid-save must
+// not abandon them half-applied.
 func (b *ServerBuilder) wireWorkspaceRootUpdater() {
 	if b.settingsHandler == nil || b.sessionHandler == nil {
 		return
 	}
 	sessionHandler := b.sessionHandler
 	b.settingsHandler.SetWorkspaceRootUpdater(func(root string) (settingshttp.WorkspaceRootRefresh, error) {
-		refresh, err := sessionHandler.ApplyWorkspaceRoot(context.Background(), root)
+		ctx := context.Background()
+		refresh, err := sessionHandler.ApplyWorkspaceRoot(ctx, root)
 		if err != nil {
 			return settingshttp.WorkspaceRootRefresh{}, err
+		}
+		if err := b.reconcileWorkspaceDesignations(ctx); err != nil {
+			logger.Warn("Live workspace designation reconciliation failed", logger.Fields{"error": err.Error()})
+			refresh.Warnings = append(refresh.Warnings, "Personal HQ status could not be refreshed")
 		}
 		return settingshttp.WorkspaceRootRefresh(refresh), nil
 	})
