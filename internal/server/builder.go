@@ -54,6 +54,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/privateservices"
 	"github.com/johnjallday/ori-agent/internal/progression"
 	"github.com/johnjallday/ori-agent/internal/progressionhttp"
+	"github.com/johnjallday/ori-agent/internal/reaperhttp"
 	"github.com/johnjallday/ori-agent/internal/reapersetup"
 	"github.com/johnjallday/ori-agent/internal/reviewhttp"
 	"github.com/johnjallday/ori-agent/internal/runtimecapability"
@@ -346,6 +347,7 @@ type ServerBuilder struct {
 	runtimeCapabilityService  *runtimecapability.Service
 	runtimeCapabilityHandler  *runtimecapabilityhttp.Handler
 	taskCapabilityGate        *workspace.CompositeTaskCapabilityGate
+	reaperHandler             *reaperhttp.Handler
 	// reaperResolver is the normalized REAPER readiness resolver, held so the
 	// Setup Wizard's adapter reads the same one the panel and repair flow use.
 	reaperResolver        *reapersetup.Resolver
@@ -566,6 +568,7 @@ func (b *ServerBuilder) createDomainFacades() {
 		WorkspaceMap:          b.workspaceMapHandler,
 		SetupWizard:           b.setupWizardHandler,
 		RuntimeCapabilities:   b.runtimeCapabilityHandler,
+		Reaper:                b.reaperHandler,
 		CLIAgents:             b.cliAgentHandler,
 		CLIAgentRegistry:      b.cliAgentRegistry,
 		WorkspaceRuns:         b.workspaceRunHandler,

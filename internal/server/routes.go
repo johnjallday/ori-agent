@@ -47,6 +47,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	registerWorkspaceCapabilityRoutes(mux, s)
 	registerWorkspaceMapRoutes(mux, s)
 	registerRuntimeCapabilityRoutes(mux, s)
+	registerReaperRoutes(mux, s)
 	registerSetupWizardRoutes(mux, s)
 	registerExternalAgentRoutes(mux, s)
 	registerSkillsRoutes(mux, s)
@@ -1069,6 +1070,16 @@ func registerRuntimeCapabilityRoutes(mux *http.ServeMux, s *Server) {
 		return
 	}
 	s.Handlers.RuntimeCapabilities.Register(mux)
+}
+
+// registerReaperRoutes mounts the live REAPER state surface separately from
+// durable runtime capabilities. Connectivity is current state, never persisted
+// readiness history.
+func registerReaperRoutes(mux *http.ServeMux, s *Server) {
+	if s.Handlers.Reaper == nil {
+		return
+	}
+	s.Handlers.Reaper.Register(mux)
 }
 
 // registerSetupWizardRoutes registers the workspace-scoped blueprint Setup

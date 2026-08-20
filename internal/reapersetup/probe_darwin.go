@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -18,10 +19,11 @@ import (
 const reaperBundleName = "REAPER.app"
 
 type platformProbe struct {
-	roots   RunnerRootResolver
-	homeDir func() (string, error)
-	client  *http.Client
-	mu      sync.Mutex
+	roots          RunnerRootResolver
+	homeDir        func() (string, error)
+	client         *http.Client
+	listeningPorts func(context.Context) []int
+	mu             sync.Mutex
 }
 
 func newPlatformProbe(roots RunnerRootResolver) platformProber {
@@ -36,6 +38,7 @@ func newPlatformProbe(roots RunnerRootResolver) platformProber {
 				return errors.New("redirects are not allowed for REAPER loopback probes")
 			},
 		},
+		listeningPorts: discoverREAPERListeningPorts,
 	}
 }
 
@@ -199,14 +202,33 @@ func (p *platformProbe) CheckTransport(ctx context.Context, web WebRemoteObserva
 	if p == nil || p.client == nil || web.State != ProbeReady {
 		return LiveTransportObservation{State: TransportUnavailable}
 	}
-	ports := configuredWebRemotePorts(web)
-	if len(ports) == 0 {
+	configured := configuredWebRemotePorts(web)
+	if len(configured) == 0 {
 		return LiveTransportObservation{State: TransportUnavailable}
 	}
 
-	// Probe bounded configured interfaces concurrently. A stale interface may
-	// accept TCP and never answer; it must not hide another configured interface
-	// that is serving the current REAPER process.
+	// The ini records the last configuration REAPER wrote on quit. Probe those
+	// bounded candidates first, but do not mistake a refused connection for the
+	// current session being offline: a port changed in Preferences is live
+	// immediately and remains stale on disk until REAPER exits.
+	best := p.checkTransportPorts(ctx, configured)
+	if best.State != TransportOffline || p.listeningPorts == nil || ctx.Err() != nil {
+		return best
+	}
+
+	discoveryCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	discovered := p.listeningPorts(discoveryCtx)
+	cancel()
+	fallback := excludeWebRemotePorts(discovered, configured)
+	if len(fallback) == 0 {
+		return best
+	}
+	return p.checkTransportPorts(ctx, fallback)
+}
+
+func (p *platformProbe) checkTransportPorts(ctx context.Context, ports []int) LiveTransportObservation {
+	// Probe bounded candidates concurrently. A stale interface may accept TCP
+	// and never answer; it must not hide another interface serving REAPER.
 	probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	results := make(chan LiveTransportObservation, len(ports))
@@ -232,6 +254,70 @@ func (p *platformProbe) CheckTransport(ctx context.Context, web WebRemoteObserva
 		}
 	}
 	return best
+}
+
+func excludeWebRemotePorts(candidates, excluded []int) []int {
+	seen := make(map[int]struct{}, len(candidates)+len(excluded))
+	for _, port := range excluded {
+		seen[port] = struct{}{}
+	}
+	ports := make([]int, 0, len(candidates))
+	for _, port := range candidates {
+		if port < 1 || port > 65535 {
+			continue
+		}
+		if _, exists := seen[port]; exists {
+			continue
+		}
+		if len(ports) >= maxWebRemoteInterfaces {
+			break
+		}
+		seen[port] = struct{}{}
+		ports = append(ports, port)
+	}
+	return ports
+}
+
+func discoverREAPERListeningPorts(ctx context.Context) []int {
+	// lsof is a fixed macOS system utility, and every argument is compiled in.
+	// It enumerates only listening TCP sockets owned by a process whose command
+	// begins with REAPER. The output is never logged because even the port is
+	// trusted process-local state.
+	output, err := exec.CommandContext(ctx, "/usr/sbin/lsof", "-nP", "-a", "-c", "REAPER", "-iTCP", "-sTCP:LISTEN", "-Fn").Output()
+	if err != nil || len(output) > maxProbeResponse {
+		return nil
+	}
+	return parseListeningPorts(output)
+}
+
+func parseListeningPorts(output []byte) []int {
+	ports := make([]int, 0, 2)
+	seen := make(map[int]struct{})
+	for _, rawLine := range strings.Split(string(output), "\n") {
+		line := strings.TrimSpace(rawLine)
+		if !strings.HasPrefix(line, "n") {
+			continue
+		}
+		address := strings.TrimSpace(strings.TrimPrefix(line, "n"))
+		separator := strings.LastIndex(address, ":")
+		if separator < 0 || separator == len(address)-1 {
+			continue
+		}
+		portText := strings.Fields(address[separator+1:])[0]
+		port, err := strconv.Atoi(portText)
+		if err != nil || port < 1 || port > 65535 {
+			continue
+		}
+		if _, exists := seen[port]; exists {
+			continue
+		}
+		if len(ports) >= maxWebRemoteInterfaces {
+			break
+		}
+		seen[port] = struct{}{}
+		ports = append(ports, port)
+	}
+	return ports
 }
 
 func (p *platformProbe) checkTransportPort(ctx context.Context, port int) LiveTransportObservation {

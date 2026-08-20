@@ -4110,3 +4110,122 @@ test('the File Janitor station falls back to the catalog snapshot', () => {
     globalThis.window = originalWindow;
   }
 });
+
+function reaperRuntimeWorkspace(selectedMode = 'ori_assisted') {
+  return {
+    id: 'ws-reaper',
+    runtime_state: { selected_mode_id: selectedMode },
+    template_provenance: {
+      runtime_requirements: {
+        schema_version: 1,
+        operating_modes: [
+          { id: 'file_only', requires: [] },
+          { id: 'ori_assisted', requires: ['reaper_live_control'] }
+        ],
+        requirements: [{ key: 'reaper_live_control', adapter: 'reaper_live_control' }]
+      }
+    }
+  };
+}
+
+test('the REAPER station is gated only by the persisted assisted runtime record', () => {
+  const originalWindow = globalThis.window;
+  try {
+    globalThis.window = {
+      ReaperConsole: {
+        stationState: () => ({
+          applies: true,
+          value: '120 BPM · 3 tracks · stopped',
+          description: 'Song — 120 BPM · 3 tracks · stopped',
+          tone: 'clear'
+        })
+      }
+    };
+    const commandView = Object.create(WorkspaceCommandView.prototype);
+    Object.assign(commandView, { page: { workspace: reaperRuntimeWorkspace(), tasks: [] } });
+    const station = commandView.workspaceStationRegistry().find(item => item.key === 'reaper');
+    assert.ok(station);
+    assert.equal(station.state().value, '120 BPM · 3 tracks · stopped');
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('the canonical state endpoint can gate REAPER when the detail projection omits runtime metadata', () => {
+  const originalWindow = globalThis.window;
+  try {
+    globalThis.window = {
+      ReaperConsole: {
+        applies: () => true,
+        stationState: () => ({
+          applies: true,
+          value: '120 BPM · 3 tracks · stopped',
+          description: 'Live state',
+          tone: 'clear'
+        })
+      }
+    };
+    const commandView = Object.create(WorkspaceCommandView.prototype);
+    Object.assign(commandView, { page: { workspace: { id: 'ws-reaper' }, tasks: [] } });
+    assert.equal(
+      commandView.workspaceStationRegistry().some(item => item.key === 'reaper'),
+      true
+    );
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('REAPER-looking names tags folders templates and agents cannot invent a station', () => {
+  const originalWindow = globalThis.window;
+  try {
+    globalThis.window = { ReaperConsole: { stationState: () => ({ applies: true }) } };
+    const commandView = Object.create(WorkspaceCommandView.prototype);
+    Object.assign(commandView, {
+      page: {
+        workspace: {
+          id: 'ws-fake',
+          name: 'REAPER Song',
+          tags: ['reaper'],
+          project_path: 'song.rpp',
+          template_provenance: { template_id: 'reaper-song' },
+          agents: [{ name: 'Reaper Producer' }]
+        },
+        tasks: []
+      }
+    });
+    assert.equal(
+      commandView.workspaceStationRegistry().some(item => item.key === 'reaper'),
+      false
+    );
+
+    commandView.page.workspace = reaperRuntimeWorkspace('file_only');
+    assert.equal(
+      commandView.workspaceStationRegistry().some(item => item.key === 'reaper'),
+      false
+    );
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('pressing the REAPER station opens its console over the map', () => {
+  const originalWindow = globalThis.window;
+  try {
+    const opens = [];
+    globalThis.window = {
+      ReaperConsole: {
+        stationState: () => ({ applies: true, value: 'Connected', description: 'Connected' }),
+        open: options => opens.push(options)
+      }
+    };
+    const commandView = Object.create(WorkspaceCommandView.prototype);
+    Object.assign(commandView, { page: { workspace: reaperRuntimeWorkspace(), tasks: [] } });
+    const trigger = { id: 'reaper-station' };
+    commandView.runHQStationAction('reaper', trigger);
+    assert.equal(opens.length, 1);
+    assert.equal(opens[0].trigger, trigger);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
