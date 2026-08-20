@@ -5828,10 +5828,8 @@ test('dragging the district handle moves the whole cluster by one delta (FR-86)'
   assert.equal(JSON.stringify(patches[0]).includes('parent'), false);
 });
 
-test('a handle drag atomically pins an all-automatic cluster before translating it', async () => {
-  const { harness, patches } = await mountedCluster({
-    positions: { outsider: { x: 900, y: 900 } }
-  });
+test('a handle drag pins every automatic anchor so outsiders do not reflow', async () => {
+  const { harness, patches } = await mountedCluster({ positions: {} });
   const handle = harness.handle('grp');
 
   handle.fire('pointerdown', tilePointer(200, 200));
@@ -5842,7 +5840,12 @@ test('a handle drag atomically pins an all-automatic cluster before translating 
   assert.equal(patches.length, 1, 'materialization and translation share one request');
   const [materialize, translate] = patches[0].operations;
   assert.equal(materialize.op, 'set_positions');
-  assert.deepEqual(Object.keys(materialize.positions).sort(), ['child-a', 'child-b', 'grp']);
+  assert.deepEqual(Object.keys(materialize.positions).sort(), [
+    'child-a',
+    'child-b',
+    'grp',
+    'outsider'
+  ]);
   Object.values(materialize.positions).forEach(point => {
     assert.equal(Number.isFinite(point.x) && Number.isFinite(point.y), true);
   });

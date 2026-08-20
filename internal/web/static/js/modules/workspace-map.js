@@ -6241,25 +6241,46 @@
   }
 
   /**
-   * Materialize only the cluster anchors still using deterministic fallback.
+   * Materialize automatic anchors before translating one cluster.
    *
-   * The server deliberately skips unsaved anchors during translate_group: it
-   * cannot infer whether a fallback should become a user-owned coordinate. A
-   * district drag is that explicit choice, so the client pins the exact anchors
-   * it previewed immediately before translating them in the same transaction.
+   * The moving group and members have to be pinned because the server
+   * deliberately skips unsaved anchors during translate_group. Unrelated
+   * automatic records have to be pinned too: introducing saved cluster anchors
+   * changes the deterministic fallback seed, so leaving outsiders automatic
+   * would make them reflow after redraw even though the gesture never touched
+   * them. One snapshot and one transaction therefore preserve every current
+   * world anchor while the following operation moves only this cluster.
+   *
    * Anchors this layout snapshot already knows as saved are omitted, avoiding
    * redundant coordinate rewrites before the server applies the shared delta.
    */
-  function clusterFallbackAnchors(state) {
+  function clusterMovePins(state) {
     var positions = {};
+    var inCluster = Object.create(null);
+    inCluster[state.groupId] = true;
+    (state.members || []).forEach(function (member) {
+      inCluster[member.id] = true;
+    });
     var pin = function (id, point) {
       if (!id || !point || layoutState.positions[id]) return;
       positions[id] = { x: point.x, y: point.y };
     };
+
     pin(state.groupId, state.districtOrigin);
     (state.members || []).forEach(function (member) {
       pin(member.id, member.origin);
     });
+    if (lastWorldLayout) {
+      lastWorldLayout.nodes.forEach(function (node) {
+        if (!inCluster[node.id]) pin(node.id, node);
+      });
+      (lastWorldLayout.hiddenNodes || []).forEach(function (node) {
+        if (!inCluster[node.id]) pin(node.id, node);
+      });
+      lastWorldLayout.districts.forEach(function (district) {
+        if (!inCluster[district.id]) pin(district.id, district);
+      });
+    }
     return positions;
   }
 
@@ -6273,9 +6294,9 @@
    */
   function commitClusterMove(container, state, delta) {
     var operations = [];
-    var fallbackAnchors = clusterFallbackAnchors(state);
-    if (Object.keys(fallbackAnchors).length) {
-      operations.push({ op: 'set_positions', positions: fallbackAnchors });
+    var pins = clusterMovePins(state);
+    if (Object.keys(pins).length) {
+      operations.push({ op: 'set_positions', positions: pins });
     }
     operations.push({
       op: 'translate_group',

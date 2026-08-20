@@ -564,7 +564,7 @@ test.describe('Coordinate Workspace Map', () => {
     expect(layout.layout.positions[id]).toEqual({ x: placedAt.x + 38, y: placedAt.y + 38 });
   });
 
-  test('dragging an automatic district handle materializes the cluster instead of snapping back', async ({
+  test('dragging an automatic district handle neither snaps back nor pushes outsiders', async ({
     page
   }) => {
     test.setTimeout(60_000);
@@ -574,13 +574,14 @@ test.describe('Coordinate Workspace Map', () => {
     const group = (await created.json())?.folder?.id as string;
     const childA = await ensureWorkspace(page, `Automatic drag child A ${Date.now()}`);
     const childB = await ensureWorkspace(page, `Automatic drag child B ${Date.now()}`);
+    const outsider = await ensureWorkspace(page, `Automatic stationary outsider ${Date.now()}`);
     for (const child of [childA, childB]) {
       await page.request.put(`/api/workspaces/${child}`, { data: { parent_id: group } });
     }
 
     const beforeLayout = (await (await page.request.get('/api/workspace-map/layout')).json()).layout
       .positions;
-    for (const id of [group, childA, childB]) {
+    for (const id of [group, childA, childB, outsider]) {
       expect(beforeLayout[id], `${id} begins on automatic fallback placement`).toBeUndefined();
     }
 
@@ -597,10 +598,10 @@ test.describe('Coordinate Workspace Map', () => {
     const renderedBefore: Record<string, { x: number; y: number }> = {
       [group]: districtOrigin
     };
-    for (const child of [childA, childB]) {
-      const anchor = renderedTiles.find(candidate => candidate.id === child);
-      expect(anchor, `${child} is rendered inside the automatic district`).toBeTruthy();
-      renderedBefore[child] = { x: anchor!.x, y: anchor!.y };
+    for (const id of [childA, childB, outsider]) {
+      const anchor = renderedTiles.find(candidate => candidate.id === id);
+      expect(anchor, `${id} is rendered on the automatic map`).toBeTruthy();
+      renderedBefore[id] = { x: anchor!.x, y: anchor!.y };
     }
 
     const cameraBefore = await cameraOf(page);
@@ -622,7 +623,7 @@ test.describe('Coordinate Workspace Map', () => {
     const y = grab.y + grab.height / 2;
     await page.mouse.move(x, y);
     await page.mouse.down();
-    await page.mouse.move(x + 150, y + 75, { steps: 15 });
+    await page.mouse.move(x, y + 300, { steps: 15 });
     await expect(district).toHaveClass(/is-dragging/);
     expect(writes, 'pointer movement performs no write').toHaveLength(0);
     await page.mouse.up();
@@ -646,6 +647,14 @@ test.describe('Coordinate Workspace Map', () => {
         y: renderedBefore[id].y + operations[1].delta.y
       });
     }
+    expect(afterLayout[outsider], 'the unrelated automatic workspace is pinned in place').toEqual(
+      renderedBefore[outsider]
+    );
+    const outsiderAfter = (await anchors(page)).find(anchor => anchor.id === outsider);
+    expect(outsiderAfter, 'the unrelated workspace does not reflow after redraw').toEqual({
+      id: outsider,
+      ...renderedBefore[outsider]
+    });
     expect(await cameraOf(page), 'moving the district never pans the camera').toEqual(cameraBefore);
     await expect(district).not.toHaveClass(/is-dragging/);
     const districtAfter = await district.evaluate(el => ({
