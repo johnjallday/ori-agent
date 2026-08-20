@@ -55,7 +55,11 @@ func richSnapshot(t *testing.T) Snapshot {
 
 func renderAll(t *testing.T, snapshot Snapshot) (compact, expanded, detail string, payload map[string]any) {
 	t.Helper()
-	options := RenderOptions{NoColor: true}
+	// ShowAll: true because these cross-surface fidelity checks compare a
+	// Shipped feature's values across compact, expanded, detail, and JSON —
+	// they are not testing the active-only filter, so the compact table must
+	// not silently drop the row the other three surfaces still show.
+	options := RenderOptions{NoColor: true, ShowAll: true}
 
 	var compactOut, expandedOut, detailOut strings.Builder
 	if err := RenderCompact(&compactOut, snapshot, options); err != nil {

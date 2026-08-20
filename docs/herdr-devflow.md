@@ -620,13 +620,31 @@ live and keeps its own history). `scripts/devops.sh` still has no promote,
 ship, drop, close, select, or Project operation; daily selection stays manual
 in GitHub.
 
-Delivery has one deliberately narrow state transition: after an exact PR to
-`dev` merges, `wt done` closes the one Issue explicitly attached by
+Delivery has one deliberately narrow primary state transition: after an exact
+PR to `dev` merges, `wt done` closes the one Issue explicitly attached by
 `tasks/issue-<feature>.md`. The generated marker must agree with the
 number-first feature identity; a numeric-looking slug, PR prose, and Issue body
 text are never treated as attachments. `wt start` and `wt pr` still do not
 update the Issue. `wt done --keep-issue-open` skips this transition for an
 intentional exception.
+
+That primary attachment is not the only Issue a delivery PR can close. Once
+the primary closes, `wt done` reads the confirmed merged PR's body once and
+additionally closes every OPEN Issue it names with a case-insensitive
+`Closes`/`Fixes`/`Resolves #N` reference — mirroring what GitHub's own closing
+keywords would do had the PR targeted the repository's default branch instead
+of `dev`. References are deduplicated in first-seen order, the primary Issue
+is never processed a second time even if the body repeats it, and each closed
+secondary gets the same `Delivered by PR #N.` attribution as the primary. This
+is strictly additive to the single trusted attachment, never a second way to
+infer one: with no attachment at all, the PR body is never read, so ad-hoc and
+legacy cleanup still cannot acquire Issue authority it was never given. A
+failed PR-body read is a nonfatal warning after a successful primary close —
+it never undoes that close, cleanup still proceeds, and secondary Issues are
+simply not found that run. A secondary Issue's own state-read or close
+failure is fatal, preserving the worktree for retry exactly like a primary
+failure. `--keep-issue-open` skips every Issue read and write, primary and
+secondary alike, and the PR body is never fetched on that path.
 
 New Issue-backed work uses `<issue-number>-<slug>` as its feature identity; see
 "Feature Naming: Issue Number First" in `AGENTS.md`.
@@ -634,16 +652,39 @@ New Issue-backed work uses `<issue-number>-<slug>` as its feature identity; see
 ## Feature overview
 
 ~~~bash
-wt status                          # compact, feature-first overview
-wt status --feature <slug>         # one feature in detail
-wt status --json                   # the complete normalized snapshot
-wt status --watch                  # live board
+wt status                          # compact, active-work-only overview
+wt status --all                    # same table, full history included
+wt status --feature <slug>         # one feature in detail, active or not
+wt status --json                   # the complete normalized snapshot, every feature
+wt status --watch                  # live board, active-only by default
+wt status --all --watch            # live board, full history
 wt status --worktrees              # the legacy Git-only worktree table
 ~~~
 
 `wt status` answers "what features exist in this repository, and where is each
 one" rather than listing Git worktrees. One row per feature, joined on the
 exact slug across every source.
+
+### Active-only by default
+
+The compact table hides `shipped`, `merged_cleanup`, and `unknown` rows by
+default: settled or unplaced work is not what an operator opening `wt status`
+is looking for. `--all` restores every row, and matters in particular for
+`merged_cleanup` — it is the only standing reminder that a `wt done` is still
+owed for that feature.
+
+The filter is display-only and applies to the compact table alone:
+`wt status --json` always emits every feature regardless of `--all` (see
+"JSON contract" below), and `wt status --feature <slug>` still finds an
+inactive feature's full detail. A repository whose only features are history
+prints an explicit "No active features" message rather than claiming to have
+none — `wt status --all` is the pointer back to them.
+
+The PLAN cell also names the active parent Group immediately before the next
+actionable item, taken from the plan's already-computed active milestone (for
+example `6/8 milestones · 150/155 subtasks · G8 next 8.8`). A delivery-only
+row, or one with no active milestone, falls back to the prior wording with no
+Group named.
 
 ### Where the answers come from
 
@@ -833,7 +874,9 @@ unrelated user views or metadata.
 `wt status --json` emits schema version 3 (`overview.Snapshot`). It carries the
 generation and GitHub-check timestamps, repository and baseline identity,
 overall completeness and staleness, one entry per feature, per-source
-availability, and every finding.
+availability, and every finding. This is unaffected by `--all`: the flag
+controls only what the compact human table prints (see "Active-only by
+default" above), and JSON always emits every feature, active or history.
 
 Absent, unknown, unavailable, stale, and a real zero are encoded distinctly and
 must not be collapsed by a consumer. An unparsed plan reports its availability
@@ -866,9 +909,16 @@ After the guard passes, Issue-backed cleanup verifies the fixed generated
 header in `tasks/issue-<feature>.md`, the matching number-first identity, and a
 merged PR for the exact branch targeting `dev`. It then closes an open Issue as
 `completed` with a comment naming the merged PR. An already-closed Issue is
-idempotent. A GitHub read/write failure stops before worktree removal so the
-command is safely retryable; `--keep-issue-open` bypasses Issue inspection and
-mutation. Work without the exact snapshot remains ordinary ad-hoc cleanup.
+idempotent. Once that primary Issue is settled, it reads the same merged PR's
+body once and closes every OPEN Issue it names with `Closes`/`Fixes`/`Resolves
+#N`, deduplicated and with the primary skipped even if repeated — this is
+`wt done` doing what GitHub's own closing keywords would have done had the PR
+targeted the default branch instead of `dev`. A GitHub read/write failure for
+the primary or a secondary stops before worktree removal so the command is
+safely retryable; a PR-body read failure is a nonfatal warning that leaves the
+primary close standing. `--keep-issue-open` bypasses every Issue inspection
+and mutation, primary and secondary. Work without the exact snapshot remains
+ordinary ad-hoc cleanup, and its merged PR's body is never read.
 
 The guard blocks cleanup when **any** agent resolved by path in this
 worktree — managed or unmanaged — is `working` or `blocked`, or when a

@@ -13,6 +13,11 @@ type RenderOptions struct {
 	// NoColor suppresses styling entirely. It is set by --no-color and by the
 	// NO_COLOR environment variable.
 	NoColor bool
+	// ShowAll restores Shipped, Merged (cleanup), and Unknown rows to
+	// RenderCompact's table. It is set by `wt status --all`. Everything else
+	// (RenderExpanded, RenderDetail, and the JSON contract) is unaffected: the
+	// filter belongs to the compact table only, per Issue #348.
+	ShowAll bool
 }
 
 const (
@@ -39,17 +44,21 @@ func RenderCompact(out io.Writer, snapshot Snapshot, options RenderOptions) erro
 	if len(snapshot.Features) == 0 {
 		return renderEmpty(out, snapshot, options)
 	}
+	features := activeFeatures(snapshot.Features, options)
+	if len(features) == 0 {
+		return renderNoActiveFeatures(out, snapshot, options)
+	}
 	colors := newPalette(options)
 
 	headings := []string{"FEATURE", "PHASE", "PLAN", "GIT", "REMOTE", "AGENT", "ATTENTION"}
-	rows := make([][]string, 0, len(snapshot.Features)+1)
+	rows := make([][]string, 0, len(features)+1)
 	header := make([]string, len(headings))
 	for index, heading := range headings {
 		header[index] = colors.header(heading)
 	}
 	rows = append(rows, header)
 
-	for _, feature := range snapshot.Features {
+	for _, feature := range features {
 		// Terminal history is grouped last by the shared sort and named by the
 		// PHASE column. A blank separator row is deliberately not emitted: it
 		// would pad into a line of trailing whitespace.
@@ -92,15 +101,73 @@ func RenderCompact(out io.Writer, snapshot Snapshot, options RenderOptions) erro
 	}
 	// The table is feature-first by design, so agents belonging to no feature
 	// get one honest summary line rather than being left out of the count.
-	if unscoped := unscopedAgents(snapshot); len(unscoped) > 0 {
-		summary := make([]string, 0, len(unscoped))
-		for _, agent := range unscoped {
-			summary = append(summary, truncate(agentName(agent), 32)+" ("+agent.Scope.Label()+")")
+	if err := renderUnscopedAgentsCompact(out, colors, snapshot); err != nil {
+		return err
+	}
+	return renderFooter(out, snapshot, options)
+}
+
+// isHistoryPhase reports whether a phase is settled work that the default
+// human view hides. Shipped is complete, Merged (cleanup) is only waiting on
+// a `wt done` that has not run yet, and Unknown could not be placed at all —
+// none of the three is something worth looking at right now.
+func isHistoryPhase(phase Phase) bool {
+	switch phase {
+	case PhaseShipped, PhaseMergedCleanup, PhaseUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
+// activeFeatures narrows to the rows worth looking at right now: history
+// phases (see isHistoryPhase) are hidden unless options.ShowAll restores
+// them. This is a display-only filter — it never touches the snapshot itself,
+// so JSON and RenderDetail keep seeing every feature regardless.
+func activeFeatures(features []Feature, options RenderOptions) []Feature {
+	if options.ShowAll {
+		return features
+	}
+	visible := make([]Feature, 0, len(features))
+	for _, feature := range features {
+		if isHistoryPhase(feature.Phase.Phase) {
+			continue
 		}
-		if _, err := fmt.Fprintln(out, colors.paint(
-			strconv.Itoa(len(unscoped))+" agent(s) outside a feature: "+joinBounded(summary), ansiDim)); err != nil {
-			return err
-		}
+		visible = append(visible, feature)
+	}
+	return visible
+}
+
+// renderUnscopedAgentsCompact prints the compact table's one-line summary of
+// agents that belong to no feature. It is shared between the normal table and
+// renderNoActiveFeatures so those agents are never lost behind the filter.
+func renderUnscopedAgentsCompact(out io.Writer, colors palette, snapshot Snapshot) error {
+	unscoped := unscopedAgents(snapshot)
+	if len(unscoped) == 0 {
+		return nil
+	}
+	summary := make([]string, 0, len(unscoped))
+	for _, agent := range unscoped {
+		summary = append(summary, truncate(agentName(agent), 32)+" ("+agent.Scope.Label()+")")
+	}
+	_, err := fmt.Fprintln(out, colors.paint(
+		strconv.Itoa(len(unscoped))+" agent(s) outside a feature: "+joinBounded(summary), ansiDim))
+	return err
+}
+
+// renderNoActiveFeatures explains that every feature in the repository has
+// settled into history, not that the repository has none: renderEmpty's
+// message would be a lie here, and a bare header row with nothing under it
+// would look like a bug rather than a fact.
+func renderNoActiveFeatures(out io.Writer, snapshot Snapshot, options RenderOptions) error {
+	colors := newPalette(options)
+	if _, err := fmt.Fprintf(out,
+		"No active features: all %d feature(s) are history (shipped or merged with cleanup pending). Run wt status --all to see them.\n",
+		len(snapshot.Features)); err != nil {
+		return err
+	}
+	if err := renderUnscopedAgentsCompact(out, colors, snapshot); err != nil {
+		return err
 	}
 	return renderFooter(out, snapshot, options)
 }
@@ -437,12 +504,32 @@ func progressCell(progress PlanProgress) string {
 	switch {
 	case progress.ImplementationComplete && progress.DeliveryCheckpointsRemaining > 0:
 		// Saying "next 7.4" here would imply implementation work remains when
-		// only delivery steps do.
+		// only delivery steps do. Delivery-only wording never names a Group.
 		cell += " · delivery only (" + strconv.Itoa(progress.DeliveryCheckpointsRemaining) + " left)"
 	case progress.NextActionable.Ordinal != "":
-		cell += " · next " + progress.NextActionable.Ordinal
+		cell += " · "
+		if group := groupLabel(progress.ActiveMilestone.Ordinal); group != "" {
+			cell += group + " "
+		}
+		cell += "next " + progress.NextActionable.Ordinal
 	}
 	return cell
+}
+
+// groupLabel names the active parent milestone the way an operator refers to
+// it in conversation: "G8", never a title. It takes only the parent ordinal
+// ("8.0" -> "G8") and returns "" for an empty or noncanonical ordinal, so a
+// malformed or missing ActiveMilestone degrades to the plain "next" wording
+// instead of printing a bogus group.
+func groupLabel(ordinal string) string {
+	parent, _, found := strings.Cut(ordinal, ".")
+	if !found || parent == "" {
+		return ""
+	}
+	if _, err := strconv.Atoi(parent); err != nil {
+		return ""
+	}
+	return "G" + parent
 }
 
 // RenderDetail writes the expanded view for one feature: provenance, planning

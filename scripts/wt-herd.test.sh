@@ -565,6 +565,10 @@ function wt_resolve_worktree_branch {
 
 typeset -g FAKE_MERGED_PR="77" FAKE_PR_STATUS=0 FAKE_ISSUE_STATE="OPEN"
 typeset -g FAKE_ISSUE_VIEW_STATUS=0 FAKE_ISSUE_CLOSE_STATUS=0
+typeset -g FAKE_PR_BODY="" FAKE_PR_VIEW_STATUS=0
+typeset -gA FAKE_ISSUE_STATE_BY_NUM
+typeset -ga FAKE_ISSUE_CLOSE_FAIL_NUMS
+FAKE_ISSUE_CLOSE_FAIL_NUMS=()
 function gh {
   print -r -- "$*" >> "$fixture_root/gh-calls"
   case "$1 $2" in
@@ -572,11 +576,21 @@ function gh {
       (( FAKE_PR_STATUS == 0 )) || return "$FAKE_PR_STATUS"
       print -r -- "$FAKE_MERGED_PR"
       ;;
+    "pr view")
+      # The (untrusted) merged-PR body wt_done_close_secondary_issues parses
+      # for Closes/Fixes/Resolves references. Empty by default, so every
+      # existing single-Issue lifecycle case below closes nothing extra.
+      (( FAKE_PR_VIEW_STATUS == 0 )) || return "$FAKE_PR_VIEW_STATUS"
+      print -r -- "$FAKE_PR_BODY"
+      ;;
     "issue view")
+      local num="$3"
       (( FAKE_ISSUE_VIEW_STATUS == 0 )) || return "$FAKE_ISSUE_VIEW_STATUS"
-      print -r -- "$FAKE_ISSUE_STATE"
+      print -r -- "${FAKE_ISSUE_STATE_BY_NUM[$num]:-$FAKE_ISSUE_STATE}"
       ;;
     "issue close")
+      local num="$3"
+      (( ${FAKE_ISSUE_CLOSE_FAIL_NUMS[(Ie)$num]} == 0 )) || return 1
       return "$FAKE_ISSUE_CLOSE_STATUS"
       ;;
     *)
@@ -606,6 +620,93 @@ if rg -q "^issue close " "$fixture_root/gh-calls"; then
 fi
 rg -q "already closed; leaving it unchanged" "$fixture_root/done-issue-closed-output"
 rg -q "worktree remove $target_root --force" "$fixture_root/git-calls"
+
+# #378: after the primary Issue closes, wt done additionally closes every
+# OPEN Issue the confirmed merged PR body names with Closes/Fixes/Resolves —
+# mixed case, duplicated, and with the primary itself repeated in the body
+# (which must never be closed a second time as a "secondary").
+FAKE_ISSUE_STATE="OPEN"
+FAKE_ISSUE_STATE_BY_NUM=(999 OPEN 1000 OPEN)
+FAKE_PR_BODY="Closes #999. Also FIXES #1000 and resolves #1000 again. Resolves #292 too."
+rm -f "$fixture_root/git-calls" "$fixture_root/gh-calls"
+wt done "$issue_feature" <<< "n" > "$fixture_root/done-secondary-mixed-output" 2>&1
+rg -q "^pr view 77 --json body --jq .body$" "$fixture_root/gh-calls"
+rg -qF "issue close 292 --reason completed --comment Delivered by PR #77." "$fixture_root/gh-calls"
+rg -qF "issue close 999 --reason completed --comment Delivered by PR #77." "$fixture_root/gh-calls"
+rg -qF "issue close 1000 --reason completed --comment Delivered by PR #77." "$fixture_root/gh-calls"
+[[ "$(rg -c '^issue close 1000 ' "$fixture_root/gh-calls")" == "1" ]]
+[[ "$(rg -c '^issue close 292 ' "$fixture_root/gh-calls")" == "1" ]]
+rg -q "Closed secondary Issue #999" "$fixture_root/done-secondary-mixed-output"
+rg -q "Closed secondary Issue #1000" "$fixture_root/done-secondary-mixed-output"
+rg -q "worktree remove $target_root --force" "$fixture_root/git-calls"
+
+# A secondary Issue that is already CLOSED is left unchanged, same as the
+# primary; a still-OPEN secondary in the same PR body still closes.
+FAKE_ISSUE_STATE_BY_NUM=(999 CLOSED 1000 OPEN)
+rm -f "$fixture_root/git-calls" "$fixture_root/gh-calls"
+wt done "$issue_feature" <<< "n" > "$fixture_root/done-secondary-mixed-states-output" 2>&1
+if rg -q "^issue close 999 " "$fixture_root/gh-calls"; then
+  print -r -- "wt done tried to close an already-closed secondary Issue" >&2
+  exit 1
+fi
+rg -qF "issue close 1000 --reason completed --comment Delivered by PR #77." "$fixture_root/gh-calls"
+rg -q "worktree remove $target_root --force" "$fixture_root/git-calls"
+
+# A merged PR body with no closing references closes nothing beyond the
+# primary — the additive contract never invents Issue authority.
+FAKE_PR_BODY="Nothing to see here."
+rm -f "$fixture_root/git-calls" "$fixture_root/gh-calls"
+wt done "$issue_feature" <<< "n" > "$fixture_root/done-secondary-none-output" 2>&1
+[[ "$(rg -c '^issue (view|close) 292 ' "$fixture_root/gh-calls")" == "2" ]]
+if rg -q '^issue (view|close) (999|1000) ' "$fixture_root/gh-calls"; then
+  print -r -- "wt done invented a secondary Issue with no references in the PR body" >&2
+  exit 1
+fi
+rg -q "worktree remove $target_root --force" "$fixture_root/git-calls"
+
+# A malicious-looking PR body is parsed with a fixed regex only, never
+# evaluated: shell metacharacters and command substitutions inside it must
+# never execute, and only genuine #N references are extracted.
+FAKE_ISSUE_STATE_BY_NUM=(999 OPEN 1000 OPEN)
+FAKE_PR_BODY='Closes #999; $(rm -rf /); `id`; resolves #1000 && echo pwned'
+rm -f "$fixture_root/git-calls" "$fixture_root/gh-calls" "$fixture_root/pwned"
+wt done "$issue_feature" <<< "n" > "$fixture_root/done-secondary-hostile-output" 2>&1
+[[ ! -e "$fixture_root/pwned" ]]
+rg -qF "issue close 999 --reason completed --comment Delivered by PR #77." "$fixture_root/gh-calls"
+rg -qF "issue close 1000 --reason completed --comment Delivered by PR #77." "$fixture_root/gh-calls"
+rg -q "worktree remove $target_root --force" "$fixture_root/git-calls"
+
+# A PR-body read failure is a visible nonfatal warning: it never undoes the
+# already-successful primary close, and cleanup still proceeds.
+FAKE_PR_VIEW_STATUS=5
+rm -f "$fixture_root/git-calls" "$fixture_root/gh-calls"
+wt done "$issue_feature" <<< "n" > "$fixture_root/done-secondary-pr-body-failed-output" 2>&1
+rg -qF "issue close 292 --reason completed --comment Delivered by PR #77." "$fixture_root/gh-calls"
+rg -q "Could not read PR #77 body; skipping any secondary Issues it may mention" "$fixture_root/done-secondary-pr-body-failed-output"
+rg -q "worktree remove $target_root --force" "$fixture_root/git-calls"
+FAKE_PR_VIEW_STATUS=0
+
+# A secondary Issue's own state/close failure is fatal, preserving the
+# worktree for retry exactly like a primary failure would.
+FAKE_ISSUE_STATE_BY_NUM=(999 OPEN)
+FAKE_PR_BODY="Closes #999."
+FAKE_ISSUE_CLOSE_FAIL_NUMS=(999)
+rm -f "$fixture_root/git-calls" "$fixture_root/gh-calls"
+issue_failure_status=0
+wt done "$issue_feature" > "$fixture_root/done-secondary-close-failed-output" 2>&1 || issue_failure_status=$?
+[[ "$issue_failure_status" == "1" ]]
+if rg -q "worktree remove" "$fixture_root/git-calls"; then
+  print -r -- "wt done removed the worktree after a secondary Issue close failed" >&2
+  exit 1
+fi
+rg -qF "issue close 292 --reason completed --comment Delivered by PR #77." "$fixture_root/gh-calls"
+rg -q "Could not close secondary Issue #999; worktree preserved" "$fixture_root/done-secondary-close-failed-output"
+FAKE_ISSUE_CLOSE_FAIL_NUMS=()
+
+# Restore the secondary-issue fakes to their no-op defaults for the rest of
+# this lifecycle fixture.
+FAKE_PR_BODY=""
+FAKE_ISSUE_STATE_BY_NUM=()
 
 # A failed Issue read or close aborts before the worktree is removed, so the
 # exact same wt done command can safely be retried.
@@ -800,6 +901,16 @@ wt status --feature downloads-janitor --json --no-color > /dev/null
 wt status --feature=downloads-janitor > /dev/null
 [[ "$(<"$fixture_root/overview-calls")" == "feature-overview --feature downloads-janitor" ]]
 
+# --all is the escape hatch that restores full history in the human table; it
+# forwards like every other flag and composes with --json unchanged.
+> "$fixture_root/overview-calls"
+wt status --all > /dev/null
+[[ "$(<"$fixture_root/overview-calls")" == "feature-overview --all" ]]
+
+> "$fixture_root/overview-calls"
+wt status --all --json > /dev/null
+[[ "$(<"$fixture_root/overview-calls")" == "feature-overview --all --json" ]]
+
 # The helper's exit status is the command's exit status: an incomplete
 # snapshot must not be reported to a script as success.
 function wt_herd {
@@ -816,7 +927,7 @@ function wt_herd {
   return 0
 }
 
-for invalid_args in "--bogus" "--feature" "--worktrees --json"; do
+for invalid_args in "--bogus" "--feature" "--worktrees --json" "--worktrees --all"; do
   if wt status ${=invalid_args} > /dev/null 2>&1; then
     print -r -- "wt status accepted invalid arguments: $invalid_args" >&2
     exit 1
