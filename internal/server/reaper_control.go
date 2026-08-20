@@ -20,7 +20,12 @@ func (b *ServerBuilder) wireReaperControl() {
 		return
 	}
 	roots := reapersetup.NewRunnerRootResolver()
-	client := reaper.NewClient(reapersetup.NewPlatformProbeSet(roots))
+	probes := reapersetup.NewPlatformProbeSet(roots)
+	client := reaper.NewClient(probes)
+	library := reaper.NewLibrary()
 	catalog := reaper.NewCatalog()
-	b.reaperHandler = reaperhttp.NewHandler(store, b.userProvider, client, catalog)
+	catalog.SetLibrary(library)
+	handler := reaperhttp.NewHandler(store, b.userProvider, client, catalog)
+	handler.SetScriptServices(library, reaper.NewRunner(roots, probes, client))
+	b.reaperHandler = handler
 }

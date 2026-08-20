@@ -22,8 +22,13 @@ const (
 // ReaScript index. The keyboard config path is constructed from the current
 // user's fixed REAPER support directory; workspace and browser data cannot
 // influence it.
+type CustomScriptSource interface {
+	List() ([]Script, error)
+}
+
 type Catalog struct {
 	keyboardConfigPath string
+	library            CustomScriptSource
 }
 
 func NewCatalog() *Catalog {
@@ -40,13 +45,33 @@ func NewCatalogWithKeyboardConfig(path string) *Catalog {
 	return &Catalog{keyboardConfigPath: filepath.Clean(strings.TrimSpace(path))}
 }
 
+func (c *Catalog) SetLibrary(library CustomScriptSource) {
+	if c != nil {
+		c.library = library
+	}
+}
+
 func (c *Catalog) List() ([]Action, error) {
 	actions := BuiltinActions()
 	registered, err := c.registeredActions()
 	if err != nil {
 		return nil, err
 	}
-	return append(actions, registered...), nil
+	actions = append(actions, registered...)
+	if c == nil || c.library == nil {
+		return actions, nil
+	}
+	scripts, err := c.library.List()
+	if err != nil {
+		return nil, err
+	}
+	for _, script := range scripts {
+		actions = append(actions, Action{
+			ID: script.ID, Label: script.Name, Description: script.Description,
+			Source: ActionSourceCustom, Mutates: true, NeedsConfirmation: script.NeedsConfirmation,
+		})
+	}
+	return actions, nil
 }
 
 func (c *Catalog) Find(id string) (Action, bool, error) {

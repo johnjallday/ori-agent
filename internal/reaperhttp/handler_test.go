@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/reaper"
+	"github.com/johnjallday/ori-agent/internal/toolapi"
 	"github.com/johnjallday/ori-agent/internal/userprofile"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -39,6 +40,19 @@ func (s *testStore) GetFolderPath(string) (string, error) { return s.root, nil }
 type testUser string
 
 func (u testUser) CurrentUserID(context.Context) (string, error) { return string(u), nil }
+
+type scriptRunnerStub struct {
+	result reaper.ScriptRunResult
+	err    error
+	calls  int
+	lua    string
+}
+
+func (r *scriptRunnerStub) RunScript(_ context.Context, lua string) (reaper.ScriptRunResult, error) {
+	r.calls++
+	r.lua = lua
+	return r.result, r.err
+}
 
 type stateReader struct {
 	state       reaper.State
@@ -275,6 +289,213 @@ func TestRunActionSurfacesDisconnectedOutcomeWithoutSuccess(t *testing.T) {
 	}
 }
 
+func TestScriptCRUDJoinsCatalogAndRunsThroughRunner(t *testing.T) {
+	root := t.TempDir()
+	store := &testStore{root: root, workspaces: map[string]*workspace.Workspace{}}
+	store.workspaces["mine"] = reaperHTTPWorkspace(t, root, "mine", userprofile.LocalUserID)
+	library := reaper.NewLibraryAt(filepath.Join(root, "Ori Scripts", "reaper"))
+	catalog := reaper.NewCatalogWithKeyboardConfig("")
+	catalog.SetLibrary(library)
+	reader := &stateReader{state: reaper.State{Connected: true, PlayState: "stopped", Tracks: []reaper.Track{}}}
+	runner := &scriptRunnerStub{result: reaper.ScriptRunResult{Outcome: "ok"}}
+	handler := NewHandler(store, testUser(userprofile.LocalUserID), reader, catalog)
+	handler.SetScriptServices(library, runner)
+	mux := http.NewServeMux()
+	handler.Register(mux)
+
+	createBody := `{"filename":"band.lua","name":"Add band tracks","description":"Adds band tracks.","needs_confirmation":true,"code":"return 1\\n"}`
+	created := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/workspaces/mine/reaper/scripts", strings.NewReader(createBody))
+	mux.ServeHTTP(created, request)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create = %d %s", created.Code, created.Body.String())
+	}
+
+	listed := httptest.NewRecorder()
+	mux.ServeHTTP(listed, httptest.NewRequest(http.MethodGet, "/api/workspaces/mine/reaper/scripts", nil))
+	var scripts []reaper.Script
+	if err := json.Unmarshal(listed.Body.Bytes(), &scripts); err != nil {
+		t.Fatal(err)
+	}
+	if len(scripts) != 1 || scripts[0].ID != "custom:band.lua" || scripts[0].Code != "" {
+		t.Fatalf("scripts = %+v", scripts)
+	}
+
+	actions := httptest.NewRecorder()
+	mux.ServeHTTP(actions, httptest.NewRequest(http.MethodGet, "/api/workspaces/mine/reaper/actions", nil))
+	var catalogActions []reaper.Action
+	if err := json.Unmarshal(actions.Body.Bytes(), &catalogActions); err != nil {
+		t.Fatal(err)
+	}
+	custom := catalogActions[len(catalogActions)-1]
+	if custom.ID != "custom:band.lua" || custom.Source != reaper.ActionSourceCustom {
+		t.Fatalf("custom action = %+v", custom)
+	}
+
+	unconfirmed := httptest.NewRecorder()
+	mux.ServeHTTP(unconfirmed, httptest.NewRequest(http.MethodPost, "/api/workspaces/mine/reaper/actions/custom:band.lua/run", nil))
+	if unconfirmed.Code != http.StatusConflict || runner.calls != 0 {
+		t.Fatalf("unconfirmed custom = %d %s, calls=%d", unconfirmed.Code, unconfirmed.Body.String(), runner.calls)
+	}
+	confirmed := httptest.NewRecorder()
+	request = httptest.NewRequest(http.MethodPost, "/api/workspaces/mine/reaper/actions/custom:band.lua/run", strings.NewReader(`{"confirmed":true}`))
+	mux.ServeHTTP(confirmed, request)
+	var run ActionRunResponse
+	if err := json.Unmarshal(confirmed.Body.Bytes(), &run); err != nil {
+		t.Fatal(err)
+	}
+	if confirmed.Code != http.StatusOK || run.Outcome != "ok" || runner.calls != 1 || !strings.Contains(runner.lua, "return 1") {
+		t.Fatalf("custom run = %d %+v, runner=%+v", confirmed.Code, run, runner)
+	}
+
+	deleted := httptest.NewRecorder()
+	mux.ServeHTTP(deleted, httptest.NewRequest(http.MethodDelete, "/api/workspaces/mine/reaper/scripts/custom:band.lua", nil))
+	if deleted.Code != http.StatusOK {
+		t.Fatalf("delete = %d %s", deleted.Code, deleted.Body.String())
+	}
+	if _, err := library.Read("band.lua"); !errors.Is(err, reaper.ErrScriptNotFound) {
+		t.Fatalf("deleted script remains: %v", err)
+	}
+}
+
+func TestAgentProposalDraftRunReviewAndSaveLoop(t *testing.T) {
+	root := t.TempDir()
+	store := &testStore{root: root, workspaces: map[string]*workspace.Workspace{}}
+	ws := reaperHTTPWorkspace(t, root, "mine", userprofile.LocalUserID)
+	if _, err := ws.GrantRuntimeCapability("reaper_live_control", "agent-1", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	store.workspaces["mine"] = ws
+	library := reaper.NewLibraryAt(filepath.Join(root, "Ori Scripts", "reaper"))
+	catalog := reaper.NewCatalogWithKeyboardConfig("")
+	catalog.SetLibrary(library)
+	reader := &stateReader{state: reaper.State{Connected: true, Tracks: []reaper.Track{}}}
+	runner := &scriptRunnerStub{result: reaper.ScriptRunResult{Outcome: "error", ErrorText: "attempt to call nil value"}, err: reaper.ErrRunnerFailed}
+	handler := NewHandler(store, testUser(userprofile.LocalUserID), reader, catalog)
+	handler.SetScriptServices(library, runner)
+	tools := handler.AgentTools("mine", "agent-1")
+	var propose toolapi.Tool
+	for _, tool := range tools {
+		if tool.Definition().Name == "propose_reaper_script" {
+			propose = tool
+		}
+		if strings.Contains(tool.Definition().Name, "save") {
+			t.Fatalf("agent received a script save tool: %s", tool.Definition().Name)
+		}
+	}
+	if propose == nil {
+		t.Fatal("proposal tool was not attached")
+	}
+	proposalResult, err := propose.Call(context.Background(), `{"filename":"layout.lua","name":"Build layout","description":"Adds a track layout.","needs_confirmation":true,"code":"reaper.NoSuchFunction()\\n"}`)
+	if err != nil || !strings.Contains(proposalResult, `"outcome":"proposed"`) {
+		t.Fatalf("proposal = %q, %v", proposalResult, err)
+	}
+	proposals := handler.proposals.list("mine")
+	if len(proposals) != 1 || proposals[0].TestedSuccessfully {
+		t.Fatalf("proposals = %+v", proposals)
+	}
+	proposalID := proposals[0].ID
+	if scripts, err := library.List(); err != nil || len(scripts) != 0 {
+		t.Fatalf("draft entered library: %+v, %v", scripts, err)
+	}
+	if actions, err := catalog.List(); err != nil || len(actions) != len(reaper.BuiltinActions()) {
+		t.Fatalf("draft entered catalog: %+v, %v", actions, err)
+	}
+
+	mux := http.NewServeMux()
+	handler.Register(mux)
+	unconfirmed := httptest.NewRecorder()
+	mux.ServeHTTP(unconfirmed, httptest.NewRequest(http.MethodPost, "/api/workspaces/mine/reaper/script-proposals/"+proposalID+"/run", nil))
+	if unconfirmed.Code != http.StatusConflict || runner.calls != 0 {
+		t.Fatalf("unconfirmed draft = %d %s, calls=%d", unconfirmed.Code, unconfirmed.Body.String(), runner.calls)
+	}
+	failed := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/workspaces/mine/reaper/script-proposals/"+proposalID+"/run", strings.NewReader(`{"confirmed":true}`))
+	mux.ServeHTTP(failed, request)
+	var failedRun DraftRunResponse
+	if err := json.Unmarshal(failed.Body.Bytes(), &failedRun); err != nil {
+		t.Fatal(err)
+	}
+	if failed.Code != http.StatusBadGateway || failedRun.ErrorText != "attempt to call nil value" || failedRun.TestedSuccessfully {
+		t.Fatalf("failed draft = %d %+v", failed.Code, failedRun)
+	}
+
+	runner.result = reaper.ScriptRunResult{Outcome: "ok"}
+	runner.err = nil
+	passed := httptest.NewRecorder()
+	request = httptest.NewRequest(http.MethodPost, "/api/workspaces/mine/reaper/script-proposals/"+proposalID+"/run", strings.NewReader(`{"confirmed":true}`))
+	mux.ServeHTTP(passed, request)
+	var passedRun DraftRunResponse
+	if err := json.Unmarshal(passed.Body.Bytes(), &passedRun); err != nil {
+		t.Fatal(err)
+	}
+	if passed.Code != http.StatusOK || !passedRun.TestedSuccessfully {
+		t.Fatalf("passed draft = %d %+v", passed.Code, passedRun)
+	}
+	if scripts, _ := library.List(); len(scripts) != 0 {
+		t.Fatalf("successful draft entered library: %+v", scripts)
+	}
+
+	saveGate := httptest.NewRecorder()
+	mux.ServeHTTP(saveGate, httptest.NewRequest(http.MethodPost, "/api/workspaces/mine/reaper/script-proposals/"+proposalID+"/save", nil))
+	if saveGate.Code != http.StatusConflict || !strings.Contains(saveGate.Body.String(), "every REAPER workspace") {
+		t.Fatalf("save gate = %d %s", saveGate.Code, saveGate.Body.String())
+	}
+	saved := httptest.NewRecorder()
+	request = httptest.NewRequest(http.MethodPost, "/api/workspaces/mine/reaper/script-proposals/"+proposalID+"/save", strings.NewReader(`{"confirmed":true}`))
+	mux.ServeHTTP(saved, request)
+	if saved.Code != http.StatusCreated || !strings.Contains(saved.Body.String(), `"tested_successfully":true`) {
+		t.Fatalf("save = %d %s", saved.Code, saved.Body.String())
+	}
+	if scripts, err := library.List(); err != nil || len(scripts) != 1 || scripts[0].Filename != "layout.lua" {
+		t.Fatalf("saved library = %+v, %v", scripts, err)
+	}
+	if remaining := handler.proposals.list("mine"); len(remaining) != 0 {
+		t.Fatalf("saved proposal was not removed: %+v", remaining)
+	}
+
+	untestedResult, err := propose.Call(context.Background(), `{"filename":"untested.lua","name":"Untested draft","description":"May still be saved.","needs_confirmation":true,"code":"return 2\\n"}`)
+	if err != nil || !strings.Contains(untestedResult, `"tested_successfully":false`) {
+		t.Fatalf("untested proposal = %q, %v", untestedResult, err)
+	}
+	untested := handler.proposals.list("mine")
+	if len(untested) != 1 {
+		t.Fatalf("untested proposals = %+v", untested)
+	}
+	untestedSave := httptest.NewRecorder()
+	request = httptest.NewRequest(http.MethodPost, "/api/workspaces/mine/reaper/script-proposals/"+untested[0].ID+"/save", strings.NewReader(`{"confirmed":true}`))
+	mux.ServeHTTP(untestedSave, request)
+	if untestedSave.Code != http.StatusCreated || !strings.Contains(untestedSave.Body.String(), `"tested_successfully":false`) {
+		t.Fatalf("untested save = %d %s", untestedSave.Code, untestedSave.Body.String())
+	}
+}
+
+func TestDraftRunRechecksExactAgentGrant(t *testing.T) {
+	root := t.TempDir()
+	store := &testStore{root: root, workspaces: map[string]*workspace.Workspace{}}
+	ws := reaperHTTPWorkspace(t, root, "mine", userprofile.LocalUserID)
+	if _, err := ws.GrantRuntimeCapability("reaper_live_control", "agent-1", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	store.workspaces["mine"] = ws
+	handler := NewHandler(store, testUser(userprofile.LocalUserID), &stateReader{}, nil)
+	runner := &scriptRunnerStub{result: reaper.ScriptRunResult{Outcome: "ok"}}
+	handler.SetScriptServices(reaper.NewLibraryAt(filepath.Join(root, "library")), runner)
+	proposal, err := handler.proposeScript("mine", "agent-1", reaper.ScriptInput{
+		Filename: "draft.lua", Name: "Draft", Description: "Test", Code: "return 1", NeedsConfirmation: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ws.RevokeRuntimeCapability("reaper_live_control", "agent-1", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	response, status := handler.runProposal(context.Background(), "mine", proposal.ID, true)
+	if status != http.StatusForbidden || response.Code != "reaper_grant_required" || runner.calls != 0 {
+		t.Fatalf("revoked draft = %d %+v, calls=%d", status, response, runner.calls)
+	}
+}
+
 func TestAgentToolsRequireExactRuntimeGrantAndShareRunPolicy(t *testing.T) {
 	root := t.TempDir()
 	store := &testStore{root: root, workspaces: map[string]*workspace.Workspace{}}
@@ -283,7 +504,7 @@ func TestAgentToolsRequireExactRuntimeGrantAndShareRunPolicy(t *testing.T) {
 	reader := &stateReader{runState: reaper.State{Connected: true, PlayState: "playing", Tracks: []reaper.Track{}}}
 	handler := NewHandler(store, testUser(userprofile.LocalUserID), reader, nil)
 	tools := handler.AgentTools("mine", "agent-1")
-	if len(tools) != 2 {
+	if len(tools) != 3 {
 		t.Fatalf("agent tools = %d", len(tools))
 	}
 	if _, err := tools[0].Call(context.Background(), `{}`); !errors.Is(err, ErrAgentRuntimeGrantRequired) {

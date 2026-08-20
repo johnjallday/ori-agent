@@ -8,6 +8,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/johnjallday/ori-agent/internal/reaper"
 	"github.com/johnjallday/ori-agent/internal/reapersetup"
 	"github.com/johnjallday/ori-agent/internal/toolapi"
 )
@@ -26,6 +27,7 @@ func (h *Handler) AgentTools(workspaceID, agentInstanceID string) []toolapi.Tool
 	return []toolapi.Tool{
 		&listActionsTool{handler: h, workspaceID: workspaceID, agentInstanceID: agentInstanceID},
 		&runActionTool{handler: h, workspaceID: workspaceID, agentInstanceID: agentInstanceID},
+		&proposeScriptTool{handler: h, workspaceID: workspaceID, agentInstanceID: agentInstanceID},
 	}
 }
 
@@ -118,6 +120,55 @@ func (t *runActionTool) Call(ctx context.Context, args string) (string, error) {
 		return result, fmt.Errorf("REAPER action failed: %s", response.ErrorReason)
 	}
 	return result, nil
+}
+
+type proposeScriptTool struct {
+	handler         *Handler
+	workspaceID     string
+	agentInstanceID string
+}
+
+func (t *proposeScriptTool) Definition() toolapi.ToolDefinition {
+	return toolapi.ToolDefinition{
+		Name:        "propose_reaper_script",
+		Description: "Propose readable Lua and metadata for user review. This creates a workspace proposal only; it cannot save to the global script library or add anything to the action catalog.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"filename":           map[string]any{"type": "string", "description": "Safe .lua filename."},
+				"name":               map[string]any{"type": "string", "description": "Human-readable script name."},
+				"description":        map[string]any{"type": "string", "description": "What the script changes."},
+				"needs_confirmation": map[string]any{"type": "boolean", "description": "Whether a draft or saved run needs user confirmation."},
+				"code":               map[string]any{"type": "string", "description": "Complete zero-argument REAPER Lua source."},
+			},
+			"required":             []string{"filename", "name", "description", "needs_confirmation", "code"},
+			"additionalProperties": false,
+		},
+	}
+}
+
+func (t *proposeScriptTool) Call(_ context.Context, args string) (string, error) {
+	if t == nil || t.handler == nil || !t.handler.agentHasLiveControlGrant(t.workspaceID, t.agentInstanceID) {
+		return "", ErrAgentRuntimeGrantRequired
+	}
+	var input reaper.ScriptInput
+	decoder := json.NewDecoder(strings.NewReader(args))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&input); err != nil {
+		return "", errors.New("invalid REAPER script proposal")
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		return "", errors.New("invalid REAPER script proposal")
+	}
+	proposal, err := t.handler.proposeScript(t.workspaceID, t.agentInstanceID, input)
+	if err != nil {
+		return "", err
+	}
+	return marshalToolResult(map[string]any{
+		"outcome": "proposed", "proposal": proposal,
+		"next": "The user can review, run this as a draft, then explicitly save or discard it.",
+	})
 }
 
 func marshalToolResult(value any) (string, error) {

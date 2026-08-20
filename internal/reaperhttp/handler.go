@@ -31,18 +31,40 @@ type ActionCatalog interface {
 	Find(string) (reaper.Action, bool, error)
 }
 
+type ScriptLibrary interface {
+	List() ([]reaper.Script, error)
+	Read(string) (reaper.Script, error)
+	Create(reaper.ScriptInput) (reaper.Script, error)
+	Update(string, reaper.ScriptInput) (reaper.Script, error)
+	Delete(string) error
+}
+
+type ScriptRunner interface {
+	RunScript(context.Context, string) (reaper.ScriptRunResult, error)
+}
+
 type Handler struct {
-	store    WorkspaceStore
-	provider userprofile.UserProvider
-	client   StateReader
-	catalog  ActionCatalog
+	store         WorkspaceStore
+	provider      userprofile.UserProvider
+	client        StateReader
+	catalog       ActionCatalog
+	scriptLibrary ScriptLibrary
+	scriptRunner  ScriptRunner
+	proposals     *proposalStore
 }
 
 func NewHandler(store WorkspaceStore, provider userprofile.UserProvider, client StateReader, catalog ActionCatalog) *Handler {
 	if provider == nil {
 		provider = userprofile.LocalUserProvider{}
 	}
-	return &Handler{store: store, provider: provider, client: client, catalog: catalog}
+	return &Handler{store: store, provider: provider, client: client, catalog: catalog, proposals: newProposalStore()}
+}
+
+func (h *Handler) SetScriptServices(library ScriptLibrary, runner ScriptRunner) {
+	if h != nil {
+		h.scriptLibrary = library
+		h.scriptRunner = runner
+	}
 }
 
 func (h *Handler) GetState(w http.ResponseWriter, r *http.Request) {
