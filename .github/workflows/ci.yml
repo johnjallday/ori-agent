@@ -167,7 +167,7 @@ jobs:
           git diff --exit-code -- README.md docs/images docs/readme-screenshots.json
 
       # A same-environment mismatch is a pixel-level failure. Preserve only the
-      # fictional scene pair, encoder metadata, and logs long enough to inspect
+      # fictional scene pairs, encoder metadata, and logs long enough to inspect
       # the differing Linux frames; successful runs still upload nothing.
       - name: Upload failed README capture evidence
         if: failure() && steps.readme_capture.outcome == 'failure'
@@ -175,11 +175,11 @@ jobs:
         with:
           name: readme-capture-failure-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            test-results/readme-refresh/${{ env.README_CAPTURE_CI_RUN_ID }}/raw/workspace-map.png
-            test-results/readme-refresh/${{ env.README_CAPTURE_CI_RUN_ID }}/raw-repeat/workspace-map.png
-            test-results/readme-refresh/${{ env.README_CAPTURE_CI_RUN_ID }}/proposed/workspace-map.webp
+            test-results/readme-refresh/${{ env.README_CAPTURE_CI_RUN_ID }}/raw/*.png
+            test-results/readme-refresh/${{ env.README_CAPTURE_CI_RUN_ID }}/raw-repeat/*.png
+            test-results/readme-refresh/${{ env.README_CAPTURE_CI_RUN_ID }}/proposed/*.webp
             test-results/readme-refresh/${{ env.README_CAPTURE_CI_RUN_ID }}/proposed/image-metadata.json
-            test-results/readme-refresh/${{ env.README_CAPTURE_CI_RUN_ID }}/proposed-repeat/workspace-map.webp
+            test-results/readme-refresh/${{ env.README_CAPTURE_CI_RUN_ID }}/proposed-repeat/*.webp
             test-results/readme-refresh/${{ env.README_CAPTURE_CI_RUN_ID }}/proposed-repeat/image-metadata.json
             test-results/readme-refresh/${{ env.README_CAPTURE_CI_RUN_ID }}/logs/
           if-no-files-found: warn
