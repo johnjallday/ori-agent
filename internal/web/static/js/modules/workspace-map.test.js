@@ -3744,6 +3744,25 @@ test('a successful create saves the chosen coordinate exactly once (FR-53)', asy
   assert.equal(patches.filter(p => p.operations[0].op === 'set_positions').length, 1);
 });
 
+test('placing a new workspace also pins existing automatic workspaces', async () => {
+  const { map, harness, patches } = buildHarness({
+    layout: { schema_version: 1, revision: 1, positions: {} }
+  });
+  mountWithCamera(map, harness, [{ id: 'ws-1', name: 'Alpha' }]);
+  await flush();
+  const automatic = map.computeWorldLayout([{ id: 'ws-1', name: 'Alpha' }], {
+    positions: {}
+  }).nodes[0];
+
+  buildFromMenu(harness, { x: 600, y: 200 });
+  await map.completeBuild('ws-new');
+  await flush();
+
+  const positions = patches[0].operations[0].positions;
+  assert.deepEqual({ ...positions['ws-1'] }, { x: automatic.x, y: automatic.y });
+  assert.ok(positions['ws-new'], 'the new workspace and prior automatic map share one write');
+});
+
 test('cancelling the modal leaves neither a workspace nor a position (FR-54)', async () => {
   const { map, harness, patches } = buildHarness();
   mountWithCamera(map, harness, [{ id: 'ws-1', name: 'Alpha' }]);
@@ -4035,6 +4054,48 @@ test('a completed drop sends exactly one position update (FR-69, FR-70)', async 
   const state = map.getLayoutState();
   assert.equal(state.positions['ws-1'].x, committed.x);
   assert.equal(state.positions['ws-1'].y, committed.y);
+});
+
+test('moving one automatic workspace pins automatic outsiders before redraw', async () => {
+  const { map, harness, patches } = await mountedDrag({ positions: {} });
+  const tile = harness.tile('ws-1');
+  const outsider = harness.tile('ws-2');
+  const outsiderNode = map
+    .computeWorldLayout(
+      [
+        { id: 'ws-1', name: 'Alpha' },
+        { id: 'ws-2', name: 'Beta' }
+      ],
+      { positions: {} }
+    )
+    .nodes.find(node => node.id === 'ws-2');
+  const outsiderBefore = { x: outsiderNode.x, y: outsiderNode.y };
+  outsider.style.left = outsiderBefore.x + 'px';
+  outsider.style.top = outsiderBefore.y + 'px';
+
+  tile.fire('pointerdown', tilePointer(100, 100));
+  tile.fire('pointermove', tilePointer(100, 480));
+  assert.deepEqual(
+    { ...outsider.at() },
+    outsiderBefore,
+    'preview touches only the chosen workspace'
+  );
+  tile.fire('pointerup', tilePointer(100, 480));
+  await flush();
+
+  assert.equal(patches.length, 1, 'one drop still makes one atomic request');
+  const positions = patches[0].operations[0].positions;
+  assert.deepEqual(Object.keys(positions).sort(), ['ws-1', 'ws-2']);
+  assert.deepEqual(
+    { ...positions['ws-2'] },
+    outsiderBefore,
+    'the automatic outsider is pinned where it was rendered'
+  );
+  assert.deepEqual(
+    { ...outsider.at() },
+    outsiderBefore,
+    'redraw does not make the outsider follow'
+  );
 });
 
 test('the coordinate readout during a move never says "build" (FR-68)', async () => {

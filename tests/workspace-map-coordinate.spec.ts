@@ -568,6 +568,57 @@ test.describe('Coordinate Workspace Map', () => {
     expect(layout.layout.positions[id]).toEqual({ x: placedAt.x + 38, y: placedAt.y + 38 });
   });
 
+  test('moving an automatic workspace does not make another automatic workspace follow', async ({
+    page
+  }) => {
+    const subject = await ensureWorkspace(page, `Automatic move subject ${Date.now()}`);
+    const outsider = await ensureWorkspace(page, `Automatic stationary peer ${Date.now()}`);
+    const beforeLayout = (await (await page.request.get('/api/workspace-map/layout')).json()).layout
+      .positions;
+    expect(beforeLayout[subject], 'the moved workspace begins automatic').toBeUndefined();
+    expect(beforeLayout[outsider], 'the unrelated workspace begins automatic').toBeUndefined();
+
+    await openMap(page);
+    await centerOnWorkspace(page, subject);
+    await enableMapDrag(page);
+    const renderedBefore = await anchors(page);
+    const subjectBefore = renderedBefore.find(anchor => anchor.id === subject)!;
+    const outsiderBefore = renderedBefore.find(anchor => anchor.id === outsider)!;
+    const writes: string[] = [];
+    page.on('request', request => {
+      const body = request.postData() || '';
+      if (
+        request.url().includes('/api/workspace-map/layout') &&
+        request.method() === 'PATCH' &&
+        body.includes('set_positions')
+      ) {
+        writes.push(body);
+      }
+    });
+
+    const tile = page.locator(`.ws-map-tile[data-ws-id="${subject}"]`);
+    const grab = await grabPointOn(page, subject);
+    await page.mouse.move(grab.x, grab.y);
+    await page.mouse.down();
+    await page.mouse.move(grab.x, grab.y + 300, { steps: 15 });
+    expect((await anchors(page)).find(anchor => anchor.id === outsider)).toEqual(outsiderBefore);
+    await page.mouse.up();
+    await page.waitForTimeout(800);
+
+    expect(writes, 'one drop makes one layout request').toHaveLength(1);
+    const positions = JSON.parse(writes[0]).operations[0].positions;
+    expect(positions[outsider], 'the request pins the automatic peer').toEqual({
+      x: outsiderBefore.x,
+      y: outsiderBefore.y
+    });
+    expect(positions[subject]).not.toEqual({ x: subjectBefore.x, y: subjectBefore.y });
+    expect((await anchors(page)).find(anchor => anchor.id === outsider)).toEqual(outsiderBefore);
+    const afterLayout = (await (await page.request.get('/api/workspace-map/layout')).json()).layout
+      .positions;
+    expect(afterLayout[outsider]).toEqual({ x: outsiderBefore.x, y: outsiderBefore.y });
+    await expect(tile).not.toHaveClass(/is-dragging/);
+  });
+
   test('dragging an automatic district handle neither snaps back nor pushes outsiders', async ({
     page
   }) => {

@@ -5366,6 +5366,39 @@
     return Math.abs(a.x - b.x) < CELL_W && Math.abs(a.y - b.y) < CELL_H;
   }
 
+  /**
+   * Snapshot every currently rendered automatic workspace/district anchor.
+   *
+   * Deterministic fallback placement is stable only while the set of saved
+   * anchors is stable. Saving one formerly automatic workspace changes that
+   * seed and can make every remaining automatic workspace reflow after redraw
+   * — which looks like an unrelated workspace followed the one being moved.
+   * Any explicit move therefore materializes the untouched automatic anchors
+   * in the same atomic request. The reserved HQ site is deliberately absent
+   * from nodes/districts and is never persisted.
+   */
+  function automaticLayoutPins() {
+    var positions = {};
+    var pin = function (record) {
+      if (!record || !record.id || layoutState.positions[record.id]) return;
+      positions[record.id] = { x: record.x, y: record.y };
+    };
+    if (!lastWorldLayout) return positions;
+    (lastWorldLayout.nodes || []).forEach(pin);
+    (lastWorldLayout.hiddenNodes || []).forEach(pin);
+    (lastWorldLayout.districts || []).forEach(pin);
+    return positions;
+  }
+
+  function withAutomaticLayoutPins(overrides) {
+    var positions = automaticLayoutPins();
+    Object.keys(overrides || {}).forEach(function (id) {
+      var point = safePoint(overrides[id]);
+      if (id && point) positions[id] = point;
+    });
+    return positions;
+  }
+
   /** Every committed anchor other than `excludeId`'s own. */
   function occupiedAnchors(excludeId) {
     var occupied = [];
@@ -5465,8 +5498,9 @@
    * rather than saved and explained afterwards (FR-83).
    */
   function memberMoveOperations(id, point, intent) {
-    var positions = {};
-    positions[id] = { x: point.x, y: point.y };
+    var moved = {};
+    moved[id] = point;
+    var positions = withAutomaticLayoutPins(moved);
     var operations = [{ op: 'set_positions', positions: positions }];
 
     // A pending membership change is evaluated against the hierarchy it intends
@@ -6268,32 +6302,19 @@
    * redundant coordinate rewrites before the server applies the shared delta.
    */
   function clusterMovePins(state) {
-    var positions = {};
-    var inCluster = Object.create(null);
-    inCluster[state.groupId] = true;
-    (state.members || []).forEach(function (member) {
-      inCluster[member.id] = true;
-    });
+    var positions = automaticLayoutPins();
     var pin = function (id, point) {
       if (!id || !point || layoutState.positions[id]) return;
       positions[id] = { x: point.x, y: point.y };
     };
 
+    // automaticLayoutPins normally contains the whole cluster. Keep the drag
+    // snapshot as a fallback for a partial test/DOM snapshot, and to document
+    // that translate_group requires each unsaved member to exist server-side.
     pin(state.groupId, state.districtOrigin);
     (state.members || []).forEach(function (member) {
       pin(member.id, member.origin);
     });
-    if (lastWorldLayout) {
-      lastWorldLayout.nodes.forEach(function (node) {
-        if (!inCluster[node.id]) pin(node.id, node);
-      });
-      (lastWorldLayout.hiddenNodes || []).forEach(function (node) {
-        if (!inCluster[node.id]) pin(node.id, node);
-      });
-      lastWorldLayout.districts.forEach(function (district) {
-        if (!inCluster[district.id]) pin(district.id, district);
-      });
-    }
     return positions;
   }
 
@@ -7002,8 +7023,9 @@
     // placement resolves collisions through the same rule (FR-72).
     var target = resolveDropAnchor(workspaceId, point);
     point = { x: target.x, y: target.y };
-    var positions = {};
-    positions[workspaceId] = { x: point.x, y: point.y };
+    var built = {};
+    built[workspaceId] = point;
+    var positions = withAutomaticLayoutPins(built);
     return patchLayout([{ op: 'set_positions', positions: positions }])
       .then(function () {
         selectedId = workspaceId;
@@ -7033,8 +7055,9 @@
   function retryFailedPlacement(workspaceId) {
     var point = failedPlacements[workspaceId];
     if (!point) return Promise.resolve(false);
-    var positions = {};
-    positions[workspaceId] = point;
+    var retry = {};
+    retry[workspaceId] = point;
+    var positions = withAutomaticLayoutPins(retry);
     return patchLayout([{ op: 'set_positions', positions: positions }])
       .then(function () {
         delete failedPlacements[workspaceId];
