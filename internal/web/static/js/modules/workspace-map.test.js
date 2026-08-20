@@ -1144,13 +1144,32 @@ test('the drop is aimed from the middle of the workspace, not its corner (#346 F
   );
 });
 
-test('a drop on open ground never removes a workspace from its group (#346 FR-7)', () => {
+test('a grouped workspace dropped on open ground intends to leave its named source group (#374)', () => {
   const map = loadOriWorkspaceMap();
-  const layout = dropLayout();
-  // A member dragged clear of every frame. Leaving is Tree's job: a frame
-  // follows its members, so the only way out is a few pixels past an edge, and
-  // un-grouping on a nudge that small is not a gesture anyone opts into.
-  const intent = map.dropMembershipIntent('m1', { x: 5000, y: 5000 }, DROP_WORKSPACES, layout);
+  const workspaces = DROP_WORKSPACES.map(row =>
+    row.id === 'm1' ? { ...row, name: '<Mover & Co>' } : row
+  );
+  const layout = loadWorldLayout()(workspaces, {
+    positions: { m1: { x: 400, y: 400 }, solo: { x: 2000, y: 2000 } },
+    groupPresentations: {
+      g2: { sizing_mode: 'custom', frame: { x: 1000, y: 300, width: 600, height: 500 } }
+    }
+  });
+  const intent = map.dropMembershipIntent('m1', { x: 5000, y: 5000 }, workspaces, layout);
+  assert.equal(intent.kind, 'leave');
+  assert.equal(intent.groupId, 'g1');
+  assert.equal(intent.name, 'Alpha');
+  assert.equal(intent.movingName, '<Mover & Co>');
+});
+
+test('a top-level workspace dropped on open ground changes coordinates only (#374)', () => {
+  const map = loadOriWorkspaceMap();
+  const intent = map.dropMembershipIntent(
+    'solo',
+    { x: 5000, y: 5000 },
+    DROP_WORKSPACES,
+    dropLayout()
+  );
   assert.equal(intent.kind, 'none');
 });
 
@@ -4740,27 +4759,37 @@ function recordingDocument() {
   };
 }
 
-async function mountedForDrop({ reparentFails = false } = {}) {
+async function mountedForDrop({ reparentFails = false, layoutFails = false } = {}) {
   const calls = [];
+  let hierarchyChanges = 0;
   const doc = recordingDocument();
   const map = loadMapWithFetch(
     (url, init) => {
       const method = (init && init.method) || 'GET';
+      const body = init && init.body ? JSON.parse(init.body) : null;
       calls.push({
         url: String(url),
         method,
-        body: init && init.body ? JSON.parse(init.body) : null
+        rawBody: (init && init.body) || '',
+        body
       });
       if (String(url).includes('/api/workspaces/')) {
         if (reparentFails) return Promise.resolve({ ok: false, status: 500 });
         return Promise.resolve({ ok: true, json: () => Promise.resolve({ success: true }) });
       }
       if (method === 'PATCH') {
+        if (layoutFails) return Promise.resolve({ ok: false, status: 500 });
+        const set = body.operations.find(op => op.op === 'set_positions');
         return Promise.resolve({
           ok: true,
           json: () =>
             Promise.resolve({
-              result: { schema_version: 1, revision: 4, positions: {}, snap_to_grid: false }
+              result: {
+                schema_version: 1,
+                revision: 4,
+                positions: (set && set.positions) || {},
+                snap_to_grid: false
+              }
             })
         });
       }
@@ -4794,12 +4823,15 @@ async function mountedForDrop({ reparentFails = false } = {}) {
     ],
     hideChrome: true,
     selectOnly: true,
-    noAutoSelect: true
+    noAutoSelect: true,
+    onHierarchyChanged: () => {
+      hierarchyChanges += 1;
+    }
   });
   await flush();
   harness.fire('keydown', { key: '0', preventDefault() {} });
   enableDragMode(harness);
-  return { map, harness, calls, doc };
+  return { map, harness, calls, doc, hierarchyChanges: () => hierarchyChanges };
 }
 
 /** Drag `solo` from (2000,2000) into Beta's frame at (1000,300)-(1600,800). */
@@ -4810,7 +4842,16 @@ function dragSoloIntoBeta(harness) {
   tile.fire('pointerup', tilePointer(-800, -1600));
 }
 
+function dragM1OutOfAlpha(harness) {
+  const tile = harness.tile('m1');
+  tile.fire('pointerdown', tilePointer(0, 0));
+  tile.fire('pointermove', tilePointer(-800, -1600));
+  tile.fire('pointerup', tilePointer(-800, -1600));
+}
+
 const reparentCalls = calls => calls.filter(c => c.url.includes('/api/workspaces/solo'));
+const membershipCalls = (calls, id) =>
+  calls.filter(c => c.url.includes('/api/workspaces/' + id) && c.method === 'PATCH');
 
 test('dropping a workspace inside a district moves it into that group (#346 FR-6a)', async () => {
   const { harness, calls, doc } = await mountedForDrop();
@@ -4833,6 +4874,64 @@ test('dropping a workspace inside a district moves it into that group (#346 FR-6
   const layoutCall = calls.find(c => c.url.includes('workspace-map') && c.method === 'PATCH');
   assert.ok(layoutCall);
   assert.equal(JSON.stringify(layoutCall.body).includes('parent'), false);
+});
+
+test('confirmed leave saves the coordinate, clears parent once, and refreshes hierarchy (#374)', async () => {
+  const { harness, calls, doc, hierarchyChanges } = await mountedForDrop();
+  dragM1OutOfAlpha(harness);
+  await flushDeep();
+
+  assert.equal(membershipCalls(calls, 'm1').length, 0, 'release only asks');
+  doc.fire('pointerdown', { target: harness.confirm.button('leave') });
+  await flushDeep();
+
+  const patches = calls.filter(call => call.method === 'PATCH');
+  assert.ok(patches[0].url.includes('/api/workspace-map/layout'));
+  assert.ok(patches[1].url.includes('/api/workspaces/m1'));
+  assert.equal(membershipCalls(calls, 'm1').length, 1);
+  assert.equal(membershipCalls(calls, 'm1')[0].rawBody, '{"parent_id":""}');
+  assert.deepEqual({ ...membershipCalls(calls, 'm1')[0].body }, { parent_id: '' });
+  assert.equal(JSON.stringify(patches[0].body).includes('parent_id'), false);
+  assert.equal(hierarchyChanges(), 1);
+  assert.equal(harness.tile('m1').focused, true);
+  assert.match(harness.control('[data-map-live]').textContent, /removed from Alpha/);
+  assert.equal(harness.confirm.isOpen(), false);
+  assert.equal(harness.district('g1').classList.contains('is-leave-source'), false);
+});
+
+test('a failed leave coordinate save restores the prior position and never asks about membership (#374)', async () => {
+  const { harness, calls } = await mountedForDrop({ layoutFails: true });
+  dragM1OutOfAlpha(harness);
+  await flushDeep();
+
+  assert.deepEqual({ ...harness.tile('m1').at() }, { x: 300, y: 300 });
+  assert.equal(harness.confirm.isOpen(), false);
+  assert.equal(membershipCalls(calls, 'm1').length, 0);
+  assert.match(
+    harness.control('[data-map-live]').textContent,
+    /could not be saved.*back at 300, 300/
+  );
+});
+
+test('a failed leave hierarchy write keeps the coordinate and names the retained group (#374)', async () => {
+  const { map, harness, calls, doc, hierarchyChanges } = await mountedForDrop({
+    reparentFails: true
+  });
+  dragM1OutOfAlpha(harness);
+  await flushDeep();
+  doc.fire('pointerdown', { target: harness.confirm.button('leave') });
+  await flushDeep();
+
+  const coordinate = calls.find(
+    call => call.url.includes('workspace-map') && call.method === 'PATCH'
+  ).body.operations[0].positions.m1;
+  assert.deepEqual({ ...map.getLayoutState().positions.m1 }, { ...coordinate });
+  assert.equal(membershipCalls(calls, 'm1').length, 1);
+  assert.equal(hierarchyChanges(), 0);
+  assert.match(
+    harness.control('[data-map-live]').textContent,
+    /could not be removed from Alpha.*still in Alpha/
+  );
 });
 
 test('the coordinate is saved before the membership, so a failure is partial (#346 FR-6a)', async () => {
@@ -4865,7 +4964,7 @@ test('the coordinate is saved before the membership, so a failure is partial (#3
 // explicit yes leaves the hierarchy alone.
 // ---------------------------------------------------------------------------
 
-test('the confirmation names both workspaces and says what cannot be undone (#346 FR-6g)', async () => {
+test('the join confirmation names both workspaces and keeps the committed position clear (#346 FR-6g)', async () => {
   const { harness } = await mountedForDrop();
   dragSoloIntoBeta(harness);
   await flushDeep();
@@ -4873,7 +4972,8 @@ test('the confirmation names both workspaces and says what cannot be undone (#34
   assert.equal(harness.confirm.isOpen(), true);
   const text = harness.confirm.text();
   assert.match(text, /Move Solo into Beta\?/, 'both sides of the move are named');
-  assert.match(text, /Only Tree can take a workspace back out/, 'and the one-way door is stated');
+  assert.match(text, /position stays where you dropped it/);
+  assert.doesNotMatch(text, /Only Tree can take a workspace back out/);
 
   // The district it is talking about stays lit, and the panel wears that
   // district's own colour rather than a fixed one.
@@ -4886,6 +4986,39 @@ test('the confirmation names both workspaces and says what cannot be undone (#34
 
   // Focus lands on the affirmative button, so the keyboard route is one key.
   assert.equal(harness.confirm.focused().answer, 'join');
+});
+
+test('the leave confirmation names the workspace and source with remove-or-keep choices (#374)', async () => {
+  const { harness, calls } = await mountedForDrop();
+  dragM1OutOfAlpha(harness);
+  await flushDeep();
+
+  assert.equal(harness.confirm.isOpen(), true);
+  const text = harness.confirm.text();
+  assert.match(text, /Remove M1 from Alpha\?/);
+  assert.match(text, /position stays where you dropped it/);
+  assert.match(text, /Remove from group/);
+  assert.match(text, /Keep in group/);
+  assert.doesNotMatch(text, /Only Tree/);
+  assert.equal(harness.confirm.focused().answer, 'leave');
+  assert.equal(harness.district('g1').classList.contains('is-leave-source'), true);
+  assert.equal(harness.district('g1').classList.contains('is-drop-target'), false);
+  assert.equal(membershipCalls(calls, 'm1').length, 0, 'the panel itself writes nothing');
+});
+
+test('Keep in group declines a leave, clears its source state, and restores focus (#374)', async () => {
+  const { harness, calls, doc } = await mountedForDrop();
+  dragM1OutOfAlpha(harness);
+  await flushDeep();
+
+  doc.fire('pointerdown', { target: harness.confirm.button('decline') });
+  await flushDeep();
+
+  assert.equal(membershipCalls(calls, 'm1').length, 0);
+  assert.equal(harness.confirm.isOpen(), false);
+  assert.equal(harness.district('g1').classList.contains('is-leave-source'), false);
+  assert.equal(harness.tile('m1').focused, true);
+  assert.match(harness.control('[data-map-live]').textContent, /stays in Alpha/);
 });
 
 test('declining keeps the coordinate and changes no group (#346 FR-6g)', async () => {
@@ -4951,6 +5084,36 @@ test('the confirmation answers once, however many times it is clicked (#346 FR-6
   assert.equal(doc.bound('pointerdown'), 0);
 });
 
+test('leave confirmation settles once under repeated affirmative input (#374)', async () => {
+  const { harness, calls, doc } = await mountedForDrop();
+  dragM1OutOfAlpha(harness);
+  await flushDeep();
+
+  const leave = harness.confirm.button('leave');
+  doc.fire('pointerdown', { target: leave });
+  doc.fire('pointerdown', { target: leave });
+  await flushDeep();
+
+  assert.equal(membershipCalls(calls, 'm1').length, 1);
+  assert.equal(doc.bound('keydown'), 0);
+  assert.equal(doc.bound('pointerdown'), 0);
+});
+
+test('a missing confirmation host safely keeps leave membership unchanged (#374)', async () => {
+  const { harness, calls } = await mountedForDrop();
+  const querySelector = harness.container.querySelector;
+  harness.container.querySelector = selector =>
+    selector.includes('data-ws-map-confirm-host') ? null : querySelector(selector);
+
+  dragM1OutOfAlpha(harness);
+  await flushDeep();
+
+  assert.equal(harness.confirm.isOpen(), false);
+  assert.equal(membershipCalls(calls, 'm1').length, 0);
+  assert.ok(calls.find(call => call.url.includes('workspace-map') && call.method === 'PATCH'));
+  assert.match(harness.control('[data-map-live]').textContent, /stays in Alpha/);
+});
+
 test('a drop that changes nothing sends no hierarchy request (#346 FR-6a)', async () => {
   const { harness, calls } = await mountedForDrop();
   const tile = harness.tile('solo');
@@ -4996,6 +5159,28 @@ test('the target district is highlighted while a drop would join it (#346 FR-6a)
     false,
     'and nothing lingers after a drop'
   );
+});
+
+test('a grouped workspace previews its named leave outcome and clears it on cancel (#374)', async () => {
+  const { harness, calls } = await mountedForDrop();
+  const tile = harness.tile('m1');
+  const banner = harness.control('[data-map-build-banner]');
+  const readout = harness.control('[data-map-build-text]');
+
+  tile.fire('pointerdown', tilePointer(0, 0));
+  tile.fire('pointermove', tilePointer(-800, -1600));
+
+  assert.match(readout.textContent, /Release to remove this workspace from Alpha/);
+  assert.equal(tile.classList.contains('is-leaving'), true);
+  assert.equal(banner.classList.contains('is-leaving'), true);
+  assert.equal(harness.district('g1').classList.contains('is-drop-target'), false);
+
+  tile.fire('keydown', { key: 'Escape' });
+  await flush();
+  assert.equal(tile.classList.contains('is-leaving'), false);
+  assert.equal(banner.classList.contains('is-leaving'), false);
+  assert.equal(banner.hidden, true);
+  assert.equal(calls.filter(c => c.url.includes('/api/workspaces/')).length, 0);
 });
 
 test('a cancelled drag joins nothing (#346 FR-6a)', async () => {

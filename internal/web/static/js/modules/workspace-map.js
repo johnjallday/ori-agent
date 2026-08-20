@@ -1421,31 +1421,40 @@
   /**
    * What a drop at `point` means for the dragged workspace's membership.
    *
-   * `join` is the only membership change a Map drop can produce. Dropping onto
-   * open ground is deliberately NOT "leave your group": an automatic frame
-   * follows its members and a custom frame expands to hold them, so a member
-   * sits inside its own frame by construction — and the only way out is to drag
-   * a few pixels past an edge. Silently un-grouping a workspace on a nudge that
-   * small is not a gesture anyone opts into. Removal stays in Tree (FR-7).
+   * An eligible expanded district means `join`, unless it is already the
+   * record's current group. Genuinely open ground means `leave` only when the
+   * moving record has a valid group parent. Top-level records stay top-level.
+   * Every name remains raw data here and is escaped at its rendering boundary.
    *
-   * @returns {{kind: 'none'|'join', groupId?: string, name?: string, reason?: string}}
+   * @returns {{kind: 'none'|'join'|'leave', groupId?: string, name?: string, movingName?: string, reason?: string}}
    */
   function dropMembershipIntent(id, point, workspaces, layout) {
     var world = layout || lastWorldLayout;
+    var node = null;
+    (world.nodes || []).forEach(function (candidate) {
+      if (candidate.id === id) node = candidate;
+    });
+    var moving = findWs(workspaces, id);
+
     // Aim from the middle of the workspace, not from its top-left anchor. The
     // anchor is where the tile is *stored*; its centre is where it *looks like
     // it is*. Testing the anchor makes the gesture lopsided — a tile covering a
     // frame's top-left corner would not join, while one hanging off the
     // bottom-right by all but a pixel would.
     var target = districtAtPoint(memberCenter(point), world);
-    if (!target) return { kind: 'none' };
+    if (!target) {
+      var source = node && node.groupId ? findWs(workspaces, node.groupId) : null;
+      if (!source || !isGroup(source)) return { kind: 'none' };
+      return {
+        kind: 'leave',
+        groupId: source.id,
+        name: source.name || 'its current group',
+        movingName: (moving && moving.name) || 'this workspace'
+      };
+    }
     if (target.id === id) return { kind: 'none' };
 
     // Already in it: this is a reposition, not a join.
-    var node = null;
-    (world.nodes || []).forEach(function (candidate) {
-      if (candidate.id === id) node = candidate;
-    });
     if (node && node.groupId === target.id) return { kind: 'none' };
 
     // A group may not be dropped into itself or into its own descendant. Tree
@@ -1454,7 +1463,6 @@
     var rejection = dropRejectionReason(workspaces, id, target.id);
     if (rejection) return { kind: 'none', reason: rejection };
 
-    var moving = findWs(workspaces, id);
     return {
       kind: 'join',
       groupId: target.id,
@@ -4258,6 +4266,7 @@
       if (tile && tile.classList) {
         tile.classList.remove('is-dragging');
         tile.classList.remove('is-blocked');
+        tile.classList.remove('is-leaving');
       }
       if (tileState.moved && tile) placeElement(tile, tileState.origin);
     }
@@ -4283,6 +4292,7 @@
 
     suppressClickFor = null;
     markDropTarget(container, '');
+    markLeaveSource(container, '');
     setDragReadout(container, null);
   }
 
@@ -5487,8 +5497,8 @@
         // repeat. The reverse would leave it in a new group at its old spot.
         // ...and the membership is asked about before it is written. This is
         // the only Map gesture with no Map-side undo (FR-6g).
-        if (intent && intent.kind === 'join') {
-          return confirmJoinOnDrop(container, id, el, intent, committed);
+        if (intent && (intent.kind === 'join' || intent.kind === 'leave')) {
+          return confirmMembershipOnDrop(container, id, el, intent, committed);
         }
         announce(container, 'Moved to ' + formatCoordinate(committed));
         settleLayout();
@@ -5510,12 +5520,11 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Drop confirmation (#346 FR-6g)
+  // Drop confirmation (#346 FR-6g, #374)
   //
-  // A drop that changes which group a workspace belongs to asks first. It is the
-  // one Map gesture with no Map-side undo — a frame follows its own members, so
-  // nothing on this surface can take a workspace back out again, and the user
-  // would have to go to Tree to reverse an accident.
+  // Every drop that changes group membership asks first. Join and leave share
+  // one panel controller so focus, dismissal, escaping, and one-answer ownership
+  // cannot drift between visually symmetric gestures.
   //
   // The panel is the map's own, not window.confirm, for the same reason the
   // context menu is: a native modal seizing focus the instant the mouse comes up
@@ -5527,22 +5536,29 @@
   var dropConfirmState = null;
 
   function dropConfirmHTML(spec) {
+    var leave = spec.kind === 'leave';
     return (
-      '<div class="ws-map-drop-confirm" data-ws-map-drop-confirm role="dialog" ' +
+      '<div class="ws-map-drop-confirm' +
+      (leave ? ' is-leave' : '') +
+      '" data-ws-map-drop-confirm role="dialog" ' +
       'aria-labelledby="wsMapDropConfirmTitle" aria-describedby="wsMapDropConfirmBody">' +
-      '<p class="ws-map-drop-confirm-title" id="wsMapDropConfirmTitle">Move ' +
+      '<p class="ws-map-drop-confirm-title" id="wsMapDropConfirmTitle">' +
+      (leave ? 'Remove ' : 'Move ') +
       escapeHtml(spec.wsName) +
-      ' into ' +
+      (leave ? ' from ' : ' into ') +
       escapeHtml(spec.groupName) +
       '?</p>' +
       '<p class="ws-map-drop-confirm-body" id="wsMapDropConfirmBody">' +
-      'It stays where you dropped it either way. Only Tree can take a workspace ' +
-      'back out of a group.</p>' +
+      'Its position stays where you dropped it.</p>' +
       '<div class="ws-map-drop-confirm-actions">' +
-      '<button type="button" class="ws-map-drop-confirm-go" data-drop-confirm="join">' +
-      'Move into group</button>' +
+      '<button type="button" class="ws-map-drop-confirm-go" data-drop-confirm="' +
+      (leave ? 'leave' : 'join') +
+      '">' +
+      (leave ? 'Remove from group' : 'Move into group') +
+      '</button>' +
       '<button type="button" class="ws-map-drop-confirm-no" data-drop-confirm="decline">' +
-      'Keep it out</button>' +
+      (leave ? 'Keep in group' : 'Keep it out') +
+      '</button>' +
       '</div>' +
       '</div>'
     );
@@ -5574,6 +5590,7 @@
       host: host,
       panel: panel,
       groupId: spec.groupId,
+      confirmAnswer: spec.kind === 'leave' ? 'leave' : 'join',
       onConfirm: spec.onConfirm,
       onDecline: spec.onDecline,
       // Focus goes back to the workspace that was dropped, so a keyboard user
@@ -5583,9 +5600,11 @@
       teardown: []
     };
 
-    // The district stays lit while the question is on screen: the panel names
-    // the group in words, and the highlight says which rectangle that is.
-    markDropTarget(container, spec.groupId);
+    // The involved district stays visually identified while the question is on
+    // screen. Join marks a destination; leave uses a distinct source state so
+    // the Map never implies the workspace is about to join its current group.
+    if (spec.kind === 'leave') markLeaveSource(container, spec.groupId);
+    else markDropTarget(container, spec.groupId);
     // ...and the panel wears that district's colour, so a violet group is never
     // asked about in the default amber (the same fix the resize overlay needed).
     wearDistrictAccent(container, panel, spec.groupId);
@@ -5624,15 +5643,15 @@
   /**
    * Answer the question exactly once.
    *
-   * Every dismissal route lands here, and everything that is not an explicit
-   * "Move into group" is a decline — an unanswered question must never be read
-   * as a yes.
+   * Every dismissal route lands here, and everything that is not the panel's
+   * explicit affirmative answer is a decline — an unanswered question must
+   * never be read as a yes.
    */
   function settleDropConfirm(answer) {
     var state = dropConfirmState;
     if (!state || state.settled) return;
     state.settled = true;
-    var confirmed = answer === 'join';
+    var confirmed = answer === state.confirmAnswer;
     var onConfirm = state.onConfirm;
     var onDecline = state.onDecline;
     closeDropConfirm({ restoreFocus: true });
@@ -5652,6 +5671,7 @@
     });
     if (state.host) state.host.innerHTML = '';
     markDropTarget(state.container, '');
+    markLeaveSource(state.container, '');
     var restore = options && options.restoreFocus;
     if (restore && state.restoreFocusTo && typeof state.restoreFocusTo.focus === 'function') {
       state.restoreFocusTo.focus();
@@ -5731,20 +5751,26 @@
    * a failure and is not reported as one: it leaves exactly the state a drop on
    * open ground would have left.
    */
-  function confirmJoinOnDrop(container, id, el, intent, committed) {
+  function confirmMembershipOnDrop(container, id, el, intent, committed) {
+    var leaving = intent.kind === 'leave';
     return new Promise(function (resolve) {
       var opened = openDropConfirm(container, {
+        kind: intent.kind,
         el: el,
         groupId: intent.groupId,
         groupName: intent.name,
         wsName: intent.movingName || 'this workspace',
         onConfirm: function () {
-          resolve(joinGroupOnDrop(container, id, intent, committed));
+          resolve(changeMembershipOnDrop(container, id, intent, committed));
         },
         onDecline: function () {
           announce(
             container,
-            'Moved to ' + formatCoordinate(committed) + '. It stays out of ' + intent.name + '.'
+            'Moved to ' +
+              formatCoordinate(committed) +
+              (leaving ? '. It stays in ' : '. It stays out of ') +
+              intent.name +
+              '.'
           );
           settleLayout();
           resolve(false);
@@ -5755,48 +5781,57 @@
           container,
           'Moved to ' +
             formatCoordinate(committed) +
-            '. Confirm whether to move it into ' +
+            '. Confirm whether to ' +
+            (leaving ? 'remove it from ' : 'move it into ') +
             intent.name +
             '.'
         );
         return;
       }
-      // Nothing to render into. The move stands; the membership question goes
-      // unasked, and an unasked question is never a yes.
-      announce(container, 'Moved to ' + formatCoordinate(committed));
+      // Nothing to render into. The coordinate stands; the membership question
+      // goes unasked, and an unasked question is never a yes.
+      announce(
+        container,
+        'Moved to ' +
+          formatCoordinate(committed) +
+          (leaving ? '. It stays in ' + intent.name + '.' : '')
+      );
       settleLayout();
       resolve(false);
     });
   }
 
   /**
-   * Reparent a workspace that was dropped inside a district (#346 FR-6a).
+   * Apply the one confirmed hierarchy change produced by a Map drop.
    *
    * This is the ONE place the Map writes hierarchy, and it does not do so
    * through the layout API — that API has no vocabulary for a parent and keeps
-   * none. It calls the same workspace endpoint Tree's drag-and-drop calls, so
-   * both views produce byte-identical mutations and neither can develop its own
-   * idea of what "move into a group" means.
+   * none. It calls the same workspace endpoint Tree uses, with a target id for
+   * join or the same empty parent Tree sends for moving to top level.
    *
-   * The move has already been saved by the time this runs, so a failure here is
-   * partial rather than total: the workspace is where the user put it, and only
-   * the membership did not change. That is reported as what it is.
+   * The coordinate is already saved, so failure here is partial rather than
+   * total: the workspace stays where it was dropped and retains its old group.
    */
-  function joinGroupOnDrop(container, id, intent, committed) {
+  function changeMembershipOnDrop(container, id, intent, committed) {
     if (typeof fetch !== 'function') return Promise.resolve(false);
+    var leaving = intent.kind === 'leave';
     return fetch('/api/workspaces/' + encodeURIComponent(id), {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ parent_id: intent.groupId })
+      body: JSON.stringify({ parent_id: leaving ? '' : intent.groupId })
     })
       .then(function (response) {
         if (!response || !response.ok) throw new Error('reparent failed');
         announce(
           container,
-          'Moved to ' + formatCoordinate(committed) + ' and added to ' + intent.name + '.'
+          'Moved to ' +
+            formatCoordinate(committed) +
+            (leaving ? ' and removed from ' : ' and added to ') +
+            intent.name +
+            '.'
         );
         // Membership is the host's data, not the Map's: it reloads the tree and
-        // re-mounts, which is what redraws the district around its new member.
+        // re-mounts, which is what redraws district membership and counts.
         notifyHierarchyChanged();
         return true;
       })
@@ -5805,9 +5840,11 @@
           container,
           'Moved to ' +
             formatCoordinate(committed) +
-            ', but it could not be added to ' +
+            (leaving ? ', but it could not be removed from ' : ', but it could not be added to ') +
             intent.name +
-            '. It is still in its previous group.'
+            '. It is still in ' +
+            (leaving ? intent.name : 'its previous group') +
+            '.'
         );
         settleLayout();
         return false;
@@ -5828,6 +5865,18 @@
       if (!el.classList) return;
       el.classList.toggle(
         'is-drop-target',
+        !!groupId && el.getAttribute('data-group-id') === groupId
+      );
+    });
+  }
+
+  function markLeaveSource(container, groupId) {
+    if (!container || typeof container.querySelectorAll !== 'function') return;
+    var districts = container.querySelectorAll('.ws-map-district[data-group-id]');
+    Array.prototype.forEach.call(districts, function (el) {
+      if (!el.classList) return;
+      el.classList.toggle(
+        'is-leave-source',
         !!groupId && el.getAttribute('data-group-id') === groupId
       );
     });
@@ -5905,6 +5954,7 @@
           ? { kind: 'none' }
           : dropMembershipIntent(dragState.id, dragState.candidate, workspaces, lastWorldLayout);
         markDropTarget(container, intent.kind === 'join' ? intent.groupId : '');
+        if (el.classList) el.classList.toggle('is-leaving', intent.kind === 'leave');
         dragState.intent = intent;
         setDragReadout(
           container,
@@ -5913,7 +5963,10 @@
             ? MOVE_BLOCKED_INSTRUCTION
             : intent.kind === 'join'
               ? 'Release to move this workspace into ' + intent.name + '.'
-              : undefined
+              : intent.kind === 'leave'
+                ? 'Release to remove this workspace from ' + intent.name + '.'
+                : undefined,
+          intent.kind
         );
       });
 
@@ -5932,6 +5985,7 @@
         if (el.classList) {
           el.classList.remove('is-dragging');
           el.classList.remove('is-blocked');
+          el.classList.remove('is-leaving');
         }
         // Every exit path clears it — up, cancel, Escape — so a district can
         // never be left advertising a drop that already happened or was
@@ -5985,13 +6039,16 @@
   // setDragReadout shows the live candidate coordinate during a move. It shares
   // the banner with Build mode but never its words: a user dragging a building
   // must not be told to "choose where to build" (FR-68).
-  function setDragReadout(container, point, instruction) {
+  function setDragReadout(container, point, instruction, membershipKind) {
     var readout = container.querySelector('[data-map-build-coords]');
     var banner = container.querySelector('[data-map-build-banner]');
     if (!readout || !banner) return;
     if (!point) {
       banner.hidden = true;
-      if (banner.classList) banner.classList.remove('is-blocked');
+      if (banner.classList) {
+        banner.classList.remove('is-blocked');
+        banner.classList.remove('is-leaving');
+      }
       return;
     }
     banner.hidden = false;
@@ -6000,6 +6057,7 @@
     // that already passes MOVE_BLOCKED_INSTRUCTION gets this for free.
     if (banner.classList) {
       banner.classList.toggle('is-blocked', instruction === MOVE_BLOCKED_INSTRUCTION);
+      banner.classList.toggle('is-leaving', membershipKind === 'leave');
     }
     setBannerMode(container, instruction || MOVE_INSTRUCTION, false);
     readout.textContent = candidateLabel(point);

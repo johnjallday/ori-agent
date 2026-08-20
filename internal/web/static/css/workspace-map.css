@@ -487,6 +487,12 @@
 .ws-map-build.is-blocked .ws-map-build-coords {
   color: var(--ws-danger, #d9534f);
 }
+/* Leaving a group is a hierarchy outcome, not an ordinary coordinate move.
+   A double rule distinguishes it before release without relying on colour. */
+.ws-map-build.is-leaving {
+  border-style: double;
+  border-width: 3px;
+}
 /* The build-mode cursor and candidate-site marker are gone with the mode
    itself (#317): there is no in-between state to preview when the right-click
    is the coordinate. */
@@ -769,6 +775,13 @@
   border-width: 2px;
   border-color: rgb(var(--ws-district-accent));
   background: rgba(var(--ws-district-accent), 0.16);
+}
+/* A leave confirmation identifies the source with a doubled boundary, not the
+   filled destination treatment above. The panel also names it in words. */
+.ws-map-district.is-leave-source {
+  border-style: double;
+  border-width: 4px;
+  border-color: rgb(var(--ws-district-accent));
 }
 .ws-map-district.is-dragging .ws-map-district-handle {
   cursor: grabbing;
@@ -1059,6 +1072,10 @@
   outline: 2px dashed var(--ws-faction);
   outline-offset: 4px;
   transition: none;
+}
+.ws-map-tile.is-dragging.is-leaving {
+  outline-style: double;
+  outline-width: 4px;
 }
 .ws-map-tile.is-unsaved {
   outline: 2px dotted var(--ws-danger, #d9534f);
