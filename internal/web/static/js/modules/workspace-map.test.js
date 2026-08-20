@@ -2896,6 +2896,7 @@ function createCameraHarness({ width = 1000, height = 600, tiles = [], districts
     const host = {
       style: {},
       querySelector: sel => (sel.includes('data-ws-map-drop-confirm') ? panel : null),
+      html: () => hostHTML,
       panel: () => panel,
       isOpen: () => !!panel,
       text: () => (panel ? panel.text : ''),
@@ -4190,7 +4191,7 @@ test('Escape during a drag restores the committed position without saving (FR-79
 });
 
 test('a selected workspace can be moved by keyboard alone (FR-77 – FR-79)', async () => {
-  const { map, harness, patches } = await mountedDrag();
+  const { map, harness, patches } = await mountedDrag({ enableDrag: false });
   map.setSelectedId(null, [], 'ws-1');
 
   harness.control('[data-map-move]').click();
@@ -4854,7 +4855,12 @@ function recordingDocument() {
   };
 }
 
-async function mountedForDrop({ reparentFails = false, layoutFails = false } = {}) {
+async function mountedForDrop({
+  reparentFails = false,
+  layoutFails = false,
+  sourceName = 'Alpha',
+  movingName = 'M1'
+} = {}) {
   const calls = [];
   let hierarchyChanges = 0;
   const doc = recordingDocument();
@@ -4911,9 +4917,9 @@ async function mountedForDrop({ reparentFails = false, layoutFails = false } = {
   const harness = createCameraHarness({ tiles: ['m1', 'solo'], districts: ['g1', 'g2'] });
   map.mount(harness.container, {
     workspaces: [
-      { id: 'g1', kind: 'group', name: 'Alpha' },
+      { id: 'g1', kind: 'group', name: sourceName },
       { id: 'g2', kind: 'group', name: 'Beta' },
-      { id: 'm1', parent_id: 'g1', name: 'M1' },
+      { id: 'm1', parent_id: 'g1', name: movingName },
       { id: 'solo', name: 'Solo' }
     ],
     hideChrome: true,
@@ -5103,7 +5109,7 @@ test('the join confirmation names both workspaces and keeps the committed positi
 });
 
 test('the leave confirmation names the workspace and source with remove-or-keep choices (#374)', async () => {
-  const { harness, calls } = await mountedForDrop();
+  const { harness, calls, doc } = await mountedForDrop();
   dragM1OutOfAlpha(harness);
   await flushDeep();
 
@@ -5115,9 +5121,45 @@ test('the leave confirmation names the workspace and source with remove-or-keep 
   assert.match(text, /Keep in group/);
   assert.doesNotMatch(text, /Only Tree/);
   assert.equal(harness.confirm.focused().answer, 'leave');
+  let tabPrevented = false;
+  doc.fire('keydown', {
+    key: 'Tab',
+    target: harness.confirm.button('decline'),
+    preventDefault: () => {
+      tabPrevented = true;
+    }
+  });
+  assert.equal(tabPrevented, true);
+  assert.equal(harness.confirm.focused().answer, 'leave', 'Tab wraps inside the two-button dialog');
   assert.equal(harness.district('g1').classList.contains('is-leave-source'), true);
   assert.equal(harness.district('g1').classList.contains('is-drop-target'), false);
   assert.equal(membershipCalls(calls, 'm1').length, 0, 'the panel itself writes nothing');
+});
+
+test('leave preview and confirmation escape hostile long names at the rendering boundary (#374)', async () => {
+  const movingName = '<img src=x onerror=alert(1)>' + 'M'.repeat(180);
+  const sourceName = '<script>alert("group")</script>' + 'G'.repeat(180);
+  const { harness } = await mountedForDrop({ movingName, sourceName });
+  const tile = harness.tile('m1');
+  tile.fire('pointerdown', tilePointer(0, 0));
+  tile.fire('pointermove', tilePointer(-800, -1600));
+
+  assert.ok(
+    harness.control('[data-map-build-text]').textContent.includes(sourceName),
+    'preview uses textContent rather than interpolated markup'
+  );
+  tile.fire('pointerup', tilePointer(-800, -1600));
+  await flushDeep();
+
+  const html = harness.confirm.html();
+  assert.doesNotMatch(html, /<img|<script/);
+  assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;/);
+  assert.match(html, /&lt;script&gt;alert\(&quot;group&quot;\)&lt;\/script&gt;/);
+  assert.match(
+    html,
+    /aria-labelledby="wsMapDropConfirmTitle" aria-describedby="wsMapDropConfirmBody"/
+  );
+  assert.equal(harness.confirm.isOpen(), true);
 });
 
 test('Keep in group declines a leave, clears its source state, and restores focus (#374)', async () => {
@@ -5198,6 +5240,18 @@ test('the confirmation answers once, however many times it is clicked (#346 FR-6
   assert.equal(doc.bound('pointerdown'), 0);
 });
 
+test('keyboard-generated confirmation click performs the affirmative leave (#374)', async () => {
+  const { harness, calls, doc } = await mountedForDrop();
+  dragM1OutOfAlpha(harness);
+  await flushDeep();
+
+  doc.fire('click', { target: harness.confirm.button('leave') });
+  await flushDeep();
+
+  assert.equal(membershipCalls(calls, 'm1').length, 1);
+  assert.deepEqual({ ...membershipCalls(calls, 'm1')[0].body }, { parent_id: '' });
+});
+
 test('leave confirmation settles once under repeated affirmative input (#374)', async () => {
   const { harness, calls, doc } = await mountedForDrop();
   dragM1OutOfAlpha(harness);
@@ -5206,11 +5260,13 @@ test('leave confirmation settles once under repeated affirmative input (#374)', 
   const leave = harness.confirm.button('leave');
   doc.fire('pointerdown', { target: leave });
   doc.fire('pointerdown', { target: leave });
+  doc.fire('click', { target: leave });
   await flushDeep();
 
   assert.equal(membershipCalls(calls, 'm1').length, 1);
   assert.equal(doc.bound('keydown'), 0);
   assert.equal(doc.bound('pointerdown'), 0);
+  assert.equal(doc.bound('click'), 0);
 });
 
 test('a missing confirmation host safely keeps leave membership unchanged (#374)', async () => {
@@ -5248,11 +5304,13 @@ test('remount and unmount safely decline pending leave state and remove document
   assert.equal(harness.confirm.isOpen(), true);
   assert.equal(doc.bound('keydown'), 1);
   assert.equal(doc.bound('pointerdown'), 1);
+  assert.equal(doc.bound('click'), 1);
 
   map.mount(harness.container, state);
   assert.equal(harness.confirm.isOpen(), false);
   assert.equal(doc.bound('keydown'), 0);
   assert.equal(doc.bound('pointerdown'), 0);
+  assert.equal(doc.bound('click'), 0);
   assert.equal(membershipCalls(calls, 'm1').length, 0);
   assert.equal(harness.district('g1').classList.contains('is-leave-source'), false);
 
@@ -5263,6 +5321,7 @@ test('remount and unmount safely decline pending leave state and remove document
   assert.equal(harness.confirm.isOpen(), false);
   assert.equal(doc.bound('keydown'), 0);
   assert.equal(doc.bound('pointerdown'), 0);
+  assert.equal(doc.bound('click'), 0);
   assert.equal(membershipCalls(calls, 'm1').length, 0);
 });
 
@@ -5329,6 +5388,7 @@ test('a grouped workspace previews its named leave outcome and clears it on canc
 
   tile.fire('keydown', { key: 'Escape' });
   await flush();
+  assert.equal(harness.control('[data-map-drag]').getAttribute('aria-pressed'), 'true');
   assert.equal(tile.classList.contains('is-leaving'), false);
   assert.equal(banner.classList.contains('is-leaving'), false);
   assert.equal(banner.hidden, true);
@@ -7460,6 +7520,11 @@ test('the help panel does not advertise f, which the app-wide link hints take', 
   assert.doesNotMatch(help, /press f\b/i);
   assert.match(help, /0 resets the view/);
   assert.match(help, /Shift\+F10/, 'and the keyboard route to the menu is documented');
+  assert.match(help, /turn Drag on first/);
+  assert.match(help, /remove it from its group on open ground/);
+  assert.match(help, /Drag does not need to be on/, 'keyboard Move is clearly outside the mode');
+  assert.match(help, /right-click empty ground.*choose Build/);
+  assert.doesNotMatch(help, /Only Tree can|removal stays in Tree/i);
 });
 
 test('Shift+F10 on the focused canvas opens the canvas menu (the only keyboard route to Center)', async () => {

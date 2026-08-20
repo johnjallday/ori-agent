@@ -432,6 +432,13 @@
   outline: 2px solid var(--ws-faction);
   outline-offset: 2px;
 }
+/* The pointer-translation mode announces itself in text and with a doubled
+   control boundary, so on/off is not encoded by colour alone. */
+.ws-map-ctl[data-map-drag][aria-pressed="true"] {
+  border-style: double;
+  border-width: 3px;
+  font-weight: 700;
+}
 .ws-map-ctl:disabled {
   opacity: 0.45;
   cursor: not-allowed;
@@ -798,24 +805,31 @@
   --ws-district-accent: 232, 134, 77;
   position: fixed;
   z-index: 10001;
-  max-width: 300px;
+  width: max-content;
+  max-width: min(300px, calc(100vw - 24px));
   padding: 14px 16px;
   background: var(--bg-primary);
   border: 1px solid var(--border-color);
   border-radius: 10px;
   box-shadow: var(--shadow-lg);
 }
+.ws-map-drop-confirm.is-leave {
+  border-style: double;
+  border-width: 3px;
+}
 .ws-map-drop-confirm-title {
   margin: 0 0 6px;
   font-size: 14px;
   font-weight: 600;
   color: var(--text-primary);
+  overflow-wrap: anywhere;
 }
 .ws-map-drop-confirm-body {
   margin: 0 0 12px;
   font-size: 12px;
   line-height: 1.45;
   color: var(--text-secondary);
+  overflow-wrap: anywhere;
 }
 .ws-map-drop-confirm-actions {
   display: flex;
@@ -2164,6 +2178,15 @@
 @media (max-width: 900px) {
   .ws-map-layout {
     grid-template-columns: 1fr;
+  }
+
+  /* The extra Drag control must not collide with the zoom cluster. Placement
+     actions take their own row while retaining 44px touch targets. */
+  .ws-map-actions {
+    left: 16px;
+    right: 16px;
+    bottom: 70px;
+    justify-content: flex-end;
   }
 
   /* Narrow windows: the overview stays in normal flow, stacked below the map,

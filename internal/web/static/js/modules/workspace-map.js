@@ -2439,9 +2439,10 @@
       '<li><b>Zoom</b> — pinch, ' +
       (isApplePlatform() ? '⌘' : 'Ctrl') +
       '+scroll, the + / − buttons, or the + / − keys.</li>' +
-      '<li><b>Move a building</b> — drag it. Select it and press Move to do the same with arrow keys; Enter saves, Escape cancels.</li>' +
-      '<li><b>Move a district</b> — drag the small handle on its outline. Its workspaces move with it; membership never changes.</li>' +
-      '<li><b>Build</b> — press Build, then click an empty spot (or use arrow keys and Enter).</li>' +
+      '<li><b>Pointer drag</b> — turn Drag on first. Drag a building to reposition it, move it into another expanded district, or remove it from its group on open ground; membership changes ask for confirmation.</li>' +
+      '<li><b>Move a district</b> — with Drag on, drag the small handle on its outline. Its workspaces move with it; membership never changes.</li>' +
+      '<li><b>Keyboard Move</b> — select a building or district and press Move; use arrow keys, Enter to save, or Escape to cancel. Drag does not need to be on.</li>' +
+      '<li><b>Build</b> — right-click empty ground where it should go and choose Build.</li>' +
       '<li><b>Snap</b> — on by default. Hold ' +
       (isApplePlatform() ? 'Option' : 'Alt') +
       ' to place freely for one move.</li>' +
@@ -5510,8 +5511,7 @@
         // the survivable one: a failed reparent leaves a workspace that moved
         // but did not change groups, which is a state the user can see and
         // repeat. The reverse would leave it in a new group at its old spot.
-        // ...and the membership is asked about before it is written. This is
-        // the only Map gesture with no Map-side undo (FR-6g).
+        // Every hierarchy-changing drop asks before the second write.
         if (intent && (intent.kind === 'join' || intent.kind === 'leave')) {
           return confirmMembershipOnDrop(container, id, el, intent, committed);
         }
@@ -5583,7 +5583,7 @@
    * Ask before the reparent, and answer nothing until the user does.
    *
    * @returns {boolean} false when there is nowhere to render it, which the
-   * caller must treat as "do not join" rather than as consent.
+   * caller must treat as "do not change membership" rather than as consent.
    */
   function openDropConfirm(container, spec) {
     closeDropConfirm({ restoreFocus: false });
@@ -5752,9 +5752,14 @@
     if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
       document.addEventListener('keydown', onKeyDown, true);
       document.addEventListener('pointerdown', onClick, true);
+      // Native buttons activated with Enter/Space emit click without a pointer.
+      // Share the same settle-once handler so keyboard and pointer answers have
+      // identical confirmation semantics.
+      document.addEventListener('click', onClick, true);
       state.teardown.push(function () {
         document.removeEventListener('keydown', onKeyDown, true);
         document.removeEventListener('pointerdown', onClick, true);
+        document.removeEventListener('click', onClick, true);
       });
     }
   }
@@ -5763,8 +5768,7 @@
    * Put the question on screen and resolve with what the user chose.
    *
    * The coordinate is already saved by the time this runs, so declining is not
-   * a failure and is not reported as one: it leaves exactly the state a drop on
-   * open ground would have left.
+   * a failure: the dropped position stands and the prior membership remains.
    */
   function confirmMembershipOnDrop(container, id, el, intent, committed) {
     var leaving = intent.kind === 'leave';
