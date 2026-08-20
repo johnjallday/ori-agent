@@ -2698,6 +2698,13 @@ function createCameraHarness({ width = 1000, height = 600, tiles = [], districts
   const handleEls = districts.map(id =>
     makeNode(id, { attribute: 'data-group-drag', classes: ['ws-map-district-handle'] })
   );
+  // In production the Move control is a child of its district. Model that
+  // relationship so surface-drag coverage can bind both pointer targets.
+  districtEls.forEach((district, index) => {
+    const fallbackQuery = district.querySelector;
+    district.querySelector = selector =>
+      selector.includes('data-group-drag') ? handleEls[index] : fallbackQuery(selector);
+  });
   // The district header's select/name control. Separate from the outline, and
   // attribute-recording, so aria-pressed updates can be asserted (#346 FR-143).
   const districtTagEls = districts.map(id =>
@@ -3927,10 +3934,15 @@ test('drag mode off captures nothing and moves neither tiles nor districts', asy
   tile.fire('pointerup', tilePointer(100, 80));
 
   const handle = harness.handle('grp');
-  const districtOrigin = { ...harness.district('grp').at() };
+  const district = harness.district('grp');
+  const districtOrigin = { ...district.at() };
   handle.fire('pointerdown', tilePointer(0, 0));
   handle.fire('pointermove', tilePointer(100, 80));
   handle.fire('pointerup', tilePointer(100, 80));
+  const surfacePointer = (x, y) => ({ ...tilePointer(x, y), target: district });
+  district.fire('pointerdown', surfacePointer(0, 0));
+  district.fire('pointermove', surfacePointer(100, 80));
+  district.fire('pointerup', surfacePointer(100, 80));
   await flush();
 
   assert.deepEqual({ ...tile.at() }, tileOrigin);
@@ -3939,6 +3951,7 @@ test('drag mode off captures nothing and moves neither tiles nor districts', asy
   assert.equal(handle.disabled, true, 'the district translation control is truthfully disabled');
   assert.equal(handle.getAttribute('aria-disabled'), 'true');
   assert.equal(handle.pointerCaptures, 0, 'the district handle never captured the pointer');
+  assert.equal(district.pointerCaptures, 0, 'the district surface never captured the pointer');
   assert.equal(tile.classList.contains('is-dragging'), false);
   assert.equal(harness.district('grp').classList.contains('is-dragging'), false);
   assert.equal(patches.length, 0, 'off mode sends no layout or hierarchy write');
@@ -5808,6 +5821,33 @@ test('dragging the district handle moves the whole cluster by one delta (FR-86)'
   );
   // FR-8: nothing in a cluster move can express membership.
   assert.equal(JSON.stringify(patches[0]).includes('parent'), false);
+});
+
+test('dragging empty district surface moves the cluster instead of panning the map', async () => {
+  const { map, harness, patches } = await mountedCluster();
+  const district = harness.district('grp');
+  const childA = harness.tile('child-a');
+  const childB = harness.tile('child-b');
+  const cameraBefore = map.getCamera();
+  const pointer = (x, y) => ({ ...tilePointer(x, y), target: district });
+
+  district.fire('pointerdown', pointer(200, 200));
+  district.fire('pointermove', pointer(276, 238));
+
+  assert.equal(district.classList.contains('is-dragging'), true);
+  assert.deepEqual(childA.at(), { x: 228, y: 190 });
+  assert.deepEqual(childB.at(), { x: 456, y: 190 });
+  assert.deepEqual(map.getCamera(), cameraBefore, 'the district gesture did not pan the camera');
+
+  district.fire('pointerup', pointer(276, 238));
+  await flush();
+
+  assert.equal(patches.length, 1);
+  assert.deepEqual(patches[0].operations[0], {
+    op: 'translate_group',
+    group_id: 'grp',
+    delta: { x: 76, y: 38 }
+  });
 });
 
 test('a cluster drag over an outside footprint shows a blocked indicator that clears when it moves clear (FR-88, FR-73, FR-120)', async () => {

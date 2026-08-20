@@ -2077,10 +2077,12 @@
    * and the glyph gave a screen reader a symbol with no name and a sighted user
    * no idea it was a drag handle.
    *
-   * The three controls stay separate on purpose. Selecting a group, moving
-   * everything inside it, and reaching its actions are three different
-   * intentions, and making the whole header draggable would collapse the first
-   * two into one gesture (FR-144, design §6).
+   * The three header controls stay separate on purpose. Selecting a group,
+   * moving everything inside it, and reaching its actions are three different
+   * intentions, so the label remains a button rather than becoming a drag
+   * target. With Drag enabled, the district's otherwise-empty surface is also
+   * a direct-manipulation target; the named Move control remains the clear,
+   * touch-sized and keyboard-focusable affordance (FR-144, design §6).
    */
   function districtHTML(d, selectedId) {
     var ws = d.ws || {};
@@ -2175,10 +2177,10 @@
       '"><span aria-hidden="true">' +
       (collapsed ? '▸' : '▾') +
       '</span></button>' +
-      // A separate, touch-sized handle for cluster movement. Dragging the label
-      // would make "select this group" and "move everything in it" the same
-      // gesture, and every existing group action — select, overview, open,
-      // delete, Tree management — has to stay reachable (FR-85, FR-94).
+      // A separate, touch-sized handle for cluster movement. The empty district
+      // surface can also be dragged while Drag is on, but the label remains
+      // selection-only and every existing group action — select, overview,
+      // open, delete, Tree management — stays reachable (FR-85, FR-94).
       //
       // The ⤧ glyph is the map's established symbol for this and stays. What
       // made it cryptic was never the symbol — it was that the control had no
@@ -2440,7 +2442,7 @@
       (isApplePlatform() ? '⌘' : 'Ctrl') +
       '+scroll, the + / − buttons, or the + / − keys.</li>' +
       '<li><b>Pointer drag</b> — turn Drag on first. Drag a building to reposition it, move it into another expanded district, or remove it from its group on open ground; membership changes ask for confirmation.</li>' +
-      '<li><b>Move a district</b> — with Drag on, drag the small handle on its outline. Its workspaces move with it; membership never changes.</li>' +
+      '<li><b>Move a district</b> — with Drag on, drag its empty fill, border, or named Move control. Its workspaces move with it; membership never changes.</li>' +
       '<li><b>Keyboard Move</b> — select a building or district and press Move; use arrow keys, Enter to save, or Escape to cancel. Drag does not need to be on.</li>' +
       '<li><b>Build</b> — right-click empty ground where it should go and choose Build.</li>' +
       '<li><b>Snap</b> — on by default. Hold ' +
@@ -6387,120 +6389,136 @@
   };
 
   function bindDistrictDrag(container) {
-    var handles = container.querySelectorAll('[data-group-drag]');
-    Array.prototype.forEach.call(handles, function (handle) {
-      if (!handle || typeof handle.addEventListener !== 'function') return;
+    var districts = container.querySelectorAll('.ws-map-district[data-group-id]');
+    Array.prototype.forEach.call(districts, function (district) {
+      if (!district || typeof district.addEventListener !== 'function') return;
+      var groupId = district.getAttribute('data-group-id');
+      var handle = district.querySelector('[data-group-drag]');
+      // The visible Move button remains the explicit, focusable affordance. The
+      // district itself is a second pointer target so dragging its border or
+      // empty fill moves the group instead of panning the entire map. Child
+      // tiles and header controls remain independent because a surface gesture
+      // starts only when the district itself is the event target.
+      var initiators = handle ? [handle, district] : [district];
 
-      handle.addEventListener('pointerdown', function (event) {
-        if (layoutState.status !== 'ready' || !dragModeEnabled) return;
-        if (event.button != null && event.button !== 0) return;
-        var groupId = handle.getAttribute('data-group-drag');
-        var origin = committedAnchor(groupId);
-        if (!groupId || !origin) return;
-        var members = clusterMembers(container, groupId);
-        clusterDrag = {
-          groupId: groupId,
-          handle: handle,
-          pointerId: event.pointerId,
-          startX: event.clientX,
-          startY: event.clientY,
-          districtEl: container.querySelector('.ws-map-district[data-group-id="' + groupId + '"]'),
-          districtOrigin: origin,
-          snapOrigin: clusterSnapOrigin(members, origin),
-          members: members,
-          delta: { x: 0, y: 0 },
-          moved: false
-        };
-        if (handle.setPointerCapture) handle.setPointerCapture(event.pointerId);
-        if (event.stopPropagation) event.stopPropagation();
-        // Suppress the browser's own drag/selection behaviour so the gesture
-        // moves the district instead of highlighting its label.
-        if (event.preventDefault) event.preventDefault();
-      });
+      initiators.forEach(function (initiator) {
+        var isSurface = initiator === district;
 
-      handle.addEventListener('pointermove', function (event) {
-        if (!clusterDrag || clusterDrag.handle !== handle) return;
-        if (event.pointerId !== clusterDrag.pointerId) return;
-        var dx = event.clientX - clusterDrag.startX;
-        var dy = event.clientY - clusterDrag.startY;
-        if (!clusterDrag.moved) {
-          if (Math.abs(dx) < PAN_THRESHOLD && Math.abs(dy) < PAN_THRESHOLD) return;
-          clusterDrag.moved = true;
-          if (clusterDrag.districtEl && clusterDrag.districtEl.classList) {
-            clusterDrag.districtEl.classList.add('is-dragging');
+        initiator.addEventListener('pointerdown', function (event) {
+          if (layoutState.status !== 'ready' || !dragModeEnabled) return;
+          if (event.button != null && event.button !== 0) return;
+          if (isSurface && event.target !== district) return;
+          var origin = committedAnchor(groupId);
+          if (!groupId || !origin) return;
+          var members = clusterMembers(container, groupId);
+          clusterDrag = {
+            groupId: groupId,
+            handle: initiator,
+            pointerId: event.pointerId,
+            startX: event.clientX,
+            startY: event.clientY,
+            districtEl: district,
+            districtOrigin: origin,
+            snapOrigin: clusterSnapOrigin(members, origin),
+            members: members,
+            delta: { x: 0, y: 0 },
+            moved: false
+          };
+          if (initiator.setPointerCapture) initiator.setPointerCapture(event.pointerId);
+          if (event.stopPropagation) event.stopPropagation();
+          // Suppress the browser's own drag/selection behaviour so the gesture
+          // moves the district instead of highlighting nearby text.
+          if (event.preventDefault) event.preventDefault();
+        });
+
+        initiator.addEventListener('pointermove', function (event) {
+          if (!clusterDrag || clusterDrag.handle !== initiator) return;
+          if (event.pointerId !== clusterDrag.pointerId) return;
+          var dx = event.clientX - clusterDrag.startX;
+          var dy = event.clientY - clusterDrag.startY;
+          if (!clusterDrag.moved) {
+            if (Math.abs(dx) < PAN_THRESHOLD && Math.abs(dy) < PAN_THRESHOLD) return;
+            clusterDrag.moved = true;
+            if (clusterDrag.districtEl && clusterDrag.districtEl.classList) {
+              clusterDrag.districtEl.classList.add('is-dragging');
+            }
           }
-        }
-        if (event.preventDefault) event.preventDefault();
-        var raw = { x: dx / camera.zoom, y: dy / camera.zoom };
-        var snapOrigin = clusterDrag.snapOrigin;
-        var snappedTarget = snapPoint(
-          { x: snapOrigin.x + raw.x, y: snapOrigin.y + raw.y },
-          !!event.altKey
-        );
-        clusterDrag.delta = {
-          x: snappedTarget.x - snapOrigin.x,
-          y: snappedTarget.y - snapOrigin.y
-        };
-        previewCluster(clusterDrag, clusterDrag.delta);
-        var blocked = clusterCollides(clusterDrag.groupId, clusterDrag.members, clusterDrag.delta);
-        setClusterBlocked(clusterDrag, blocked);
-        // The readout describes where the district itself lands, which is the
-        // thing being dragged, even though the grid snap was taken from its
-        // top-left member.
-        setDragReadout(
-          container,
-          {
-            x: clusterDrag.districtOrigin.x + clusterDrag.delta.x,
-            y: clusterDrag.districtOrigin.y + clusterDrag.delta.y
-          },
-          blocked ? MOVE_BLOCKED_INSTRUCTION : undefined
-        );
-      });
-
-      function finish(event, cancelled) {
-        if (!clusterDrag || clusterDrag.handle !== handle) return;
-        if (event && event.pointerId != null && event.pointerId !== clusterDrag.pointerId) return;
-        var state = clusterDrag;
-        clusterDrag = null;
-        if (
-          handle.releasePointerCapture &&
-          handle.hasPointerCapture &&
-          handle.hasPointerCapture(state.pointerId)
-        ) {
-          handle.releasePointerCapture(state.pointerId);
-        }
-        if (state.districtEl && state.districtEl.classList) {
-          state.districtEl.classList.remove('is-dragging');
-        }
-        setClusterBlocked(state, false);
-        setDragReadout(container, null);
-        if (!state.moved) return;
-        if (cancelled) {
-          restoreCluster(state);
-          announce(container, 'District move cancelled.');
-          return;
-        }
-        if (clusterCollides(state.groupId, state.members, state.delta)) {
-          restoreCluster(state);
-          announce(
-            container,
-            'That would land a workspace on top of one outside this district. The district is back where it was.'
+          if (event.preventDefault) event.preventDefault();
+          var raw = { x: dx / camera.zoom, y: dy / camera.zoom };
+          var snapOrigin = clusterDrag.snapOrigin;
+          var snappedTarget = snapPoint(
+            { x: snapOrigin.x + raw.x, y: snapOrigin.y + raw.y },
+            !!event.altKey
           );
-          return;
-        }
-        commitClusterMove(container, state, state.delta);
-      }
+          clusterDrag.delta = {
+            x: snappedTarget.x - snapOrigin.x,
+            y: snappedTarget.y - snapOrigin.y
+          };
+          previewCluster(clusterDrag, clusterDrag.delta);
+          var blocked = clusterCollides(
+            clusterDrag.groupId,
+            clusterDrag.members,
+            clusterDrag.delta
+          );
+          setClusterBlocked(clusterDrag, blocked);
+          // The readout describes where the district itself lands, which is the
+          // thing being dragged, even though the grid snap was taken from its
+          // top-left member.
+          setDragReadout(
+            container,
+            {
+              x: clusterDrag.districtOrigin.x + clusterDrag.delta.x,
+              y: clusterDrag.districtOrigin.y + clusterDrag.delta.y
+            },
+            blocked ? MOVE_BLOCKED_INSTRUCTION : undefined
+          );
+        });
 
-      handle.addEventListener('pointerup', function (event) {
-        finish(event, false);
-      });
-      handle.addEventListener('pointercancel', function (event) {
-        finish(event, true);
-      });
-      handle.addEventListener('keydown', function (event) {
-        if (event.key === 'Escape' && clusterDrag && clusterDrag.handle === handle) {
-          finish(null, true);
+        function finish(event, cancelled) {
+          if (!clusterDrag || clusterDrag.handle !== initiator) return;
+          if (event && event.pointerId != null && event.pointerId !== clusterDrag.pointerId) return;
+          var state = clusterDrag;
+          clusterDrag = null;
+          if (
+            initiator.releasePointerCapture &&
+            initiator.hasPointerCapture &&
+            initiator.hasPointerCapture(state.pointerId)
+          ) {
+            initiator.releasePointerCapture(state.pointerId);
+          }
+          if (state.districtEl && state.districtEl.classList) {
+            state.districtEl.classList.remove('is-dragging');
+          }
+          setClusterBlocked(state, false);
+          setDragReadout(container, null);
+          if (!state.moved) return;
+          if (cancelled) {
+            restoreCluster(state);
+            announce(container, 'District move cancelled.');
+            return;
+          }
+          if (clusterCollides(state.groupId, state.members, state.delta)) {
+            restoreCluster(state);
+            announce(
+              container,
+              'That would land a workspace on top of one outside this district. The district is back where it was.'
+            );
+            return;
+          }
+          commitClusterMove(container, state, state.delta);
         }
+
+        initiator.addEventListener('pointerup', function (event) {
+          finish(event, false);
+        });
+        initiator.addEventListener('pointercancel', function (event) {
+          finish(event, true);
+        });
+        initiator.addEventListener('keydown', function (event) {
+          if (event.key === 'Escape' && clusterDrag && clusterDrag.handle === initiator) {
+            finish(null, true);
+          }
+        });
       });
     });
   }

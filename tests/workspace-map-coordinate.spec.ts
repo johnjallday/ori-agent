@@ -171,6 +171,35 @@ async function grabPointOn(page: Page, id: string): Promise<{ x: number; y: numb
   throw new Error(`no grabbable point on ${id} — it is covered`);
 }
 
+async function districtSurfacePoint(page: Page, groupId: string) {
+  const district = page.locator(`.ws-map-district[data-group-id="${groupId}"]`);
+  const box = (await district.boundingBox())!;
+  const candidates = [
+    [0.5, 0.5],
+    [0.85, 0.82],
+    [0.15, 0.82],
+    [0.85, 0.55],
+    [0.15, 0.55],
+    [0.5, 0.85]
+  ];
+  for (const [fx, fy] of candidates) {
+    const point = { x: box.x + box.width * fx, y: box.y + box.height * fy };
+    const onSurface = await page.evaluate(
+      ([x, y, wanted]) => {
+        const el = document.elementFromPoint(Number(x), Number(y));
+        return (
+          !!el &&
+          el.classList.contains('ws-map-district') &&
+          el.getAttribute('data-group-id') === wanted
+        );
+      },
+      [point.x, point.y, groupId]
+    );
+    if (onSurface) return point;
+  }
+  throw new Error(`no uncovered district surface found for ${groupId}`);
+}
+
 async function openMap(page: Page) {
   await page.goto('/');
   await page.locator('.ws-map-world .ws-map-tile[data-ws-id]').first().waitFor();
@@ -535,51 +564,96 @@ test.describe('Coordinate Workspace Map', () => {
     expect(layout.layout.positions[id]).toEqual({ x: placedAt.x + 38, y: placedAt.y + 38 });
   });
 
-  test('a district moves as one cluster and keeps every parent_id (FR-86, metric 4)', async ({
+  test('dragging a district surface moves its cluster, not the camera or hierarchy', async ({
     page
   }) => {
-    // Creating a group, a child, reparenting, and two saves before the drag adds
-    // up past the default budget on a cold sandbox.
     test.setTimeout(60_000);
-    // A group with one member, both placed, so the cluster geometry is known.
-    const rows = await listWorkspaces(page);
-    let group = rows.find(ws => String((ws as { kind?: string }).kind) === 'group');
-    if (!group) {
-      const created = await page.request.post('/api/workspaces', {
-        data: { name: `Map group ${Date.now()}`, kind: 'group' }
-      });
-      group = (await created.json())?.folder;
+    const currentLayout = await (await page.request.get('/api/workspace-map/layout')).json();
+    const placed = Object.values(currentLayout.layout.positions || {}) as Array<{
+      x: number;
+      y: number;
+    }>;
+    const y = (placed.length ? Math.max(...placed.map(position => position.y)) : 0) + 760;
+    const created = await page.request.post('/api/workspaces', {
+      data: { name: `Surface drag group ${Date.now()}`, kind: 'group' }
+    });
+    const group = (await created.json())?.folder?.id as string;
+    const childA = await ensureWorkspace(page, `Surface drag child A ${Date.now()}`);
+    const childB = await ensureWorkspace(page, `Surface drag child B ${Date.now()}`);
+    for (const child of [childA, childB]) {
+      await page.request.put(`/api/workspaces/${child}`, { data: { parent_id: group } });
     }
-    const child = await ensureWorkspace(page, `Cluster child ${Date.now()}`);
-    await page.request.put(`/api/workspaces/${child}`, { data: { parent_id: group!.id } });
-    await savePosition(page, group!.id, 152, 152);
-    await savePosition(page, child, 228, 228);
-
-    // Exercised through the real endpoint rather than by dragging the handle.
-    // Zoom is clamped at 50%, so on a map whose content spans more than two
-    // viewports there is no guarantee any particular district is on screen —
-    // and what this test is for is the server-side contract: the client sends
-    // one delta, the server resolves the district's members and moves them
-    // together. The pointer and keyboard paths are covered against a
-    // deterministic DOM in workspace-map.test.js.
-    const moved = await page.request.patch('/api/workspace-map/layout', {
+    const seeded = await page.request.patch('/api/workspace-map/layout', {
       data: {
-        operations: [{ op: 'translate_group', group_id: group!.id, delta: { x: 38, y: 38 } }]
+        operations: [
+          {
+            op: 'set_positions',
+            positions: {
+              [group]: { x: 380, y },
+              [childA]: { x: 456, y: y + 76 },
+              [childB]: { x: 456, y: y + 456 }
+            }
+          }
+        ]
       }
     });
-    expect(moved.ok(), await moved.text()).toBe(true);
+    expect(seeded.ok(), await seeded.text()).toBe(true);
 
-    const layout = await (await page.request.get('/api/workspace-map/layout')).json();
-    const groupAnchor = layout.layout.positions[group!.id];
-    const childAnchor = layout.layout.positions[child];
-    expect(childAnchor.x - groupAnchor.x, 'relative spacing survived the move').toBe(76);
-    expect(childAnchor.y - groupAnchor.y).toBe(76);
-    expect(groupAnchor, 'the whole cluster moved by one step').toEqual({ x: 190, y: 190 });
+    await openMap(page);
+    await centerOnWorkspace(page, group);
+    await enableMapDrag(page);
 
-    // Metric 4: membership is untouched by a spatial move.
+    const before = (await (await page.request.get('/api/workspace-map/layout')).json()).layout
+      .positions;
+    const cameraBefore = await cameraOf(page);
+    const writes: string[] = [];
+    page.on('request', request => {
+      const body = request.postData() || '';
+      if (
+        request.url().includes('/api/workspace-map/layout') &&
+        request.method() === 'PATCH' &&
+        body.includes('translate_group')
+      ) {
+        writes.push(body);
+      }
+    });
+
+    const district = page.locator(`.ws-map-district[data-group-id="${group}"]`);
+    const grab = await districtSurfacePoint(page, group);
+    await page.mouse.move(grab.x, grab.y);
+    await page.mouse.down();
+    await page.mouse.move(grab.x + 150, grab.y + 75, { steps: 15 });
+    await expect(district).toHaveClass(/is-dragging/);
+    expect(writes, 'pointer movement writes nothing').toHaveLength(0);
+    expect(await cameraOf(page), 'the gesture did not pan the map').toEqual(cameraBefore);
+    await page.mouse.up();
+    await page.waitForTimeout(800);
+
+    expect(writes).toHaveLength(1);
+    const operation = JSON.parse(writes[0]).operations[0];
+    expect(operation.op).toBe('translate_group');
+    expect(operation.group_id).toBe(group);
+    expect(operation.delta.x !== 0 || operation.delta.y !== 0).toBe(true);
+
+    const afterLayout = await (await page.request.get('/api/workspace-map/layout')).json();
+    const groupDelta = {
+      x: afterLayout.layout.positions[group].x - before[group].x,
+      y: afterLayout.layout.positions[group].y - before[group].y
+    };
+    for (const child of [childA, childB]) {
+      const childDelta = {
+        x: afterLayout.layout.positions[child].x - before[child].x,
+        y: afterLayout.layout.positions[child].y - before[child].y
+      };
+      expect(childDelta, 'every member moved by the same delta').toEqual(groupDelta);
+    }
+    expect(groupDelta).toEqual(operation.delta);
+
     const after = await listWorkspaces(page);
-    const movedChild = after.find(ws => ws.id === child) as { parent_id?: string };
-    expect(movedChild.parent_id).toBe(group!.id);
+    for (const child of [childA, childB]) {
+      const movedChild = after.find(ws => ws.id === child) as { parent_id?: string };
+      expect(movedChild.parent_id, 'group movement never changes membership').toBe(group);
+    }
   });
 
   test('an unavailable layout still renders a navigable read-only map (FR-105)', async ({

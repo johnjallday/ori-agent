@@ -733,6 +733,7 @@
 .ws-map-canvas:not(.is-drag-enabled) .ws-map-district-handle {
   opacity: 0.65;
 }
+.ws-map-canvas.is-drag-enabled .ws-map-district,
 .ws-map-canvas.is-drag-enabled .ws-map-district-handle {
   cursor: grab;
 }
@@ -771,6 +772,7 @@
 .ws-map-district.is-dragging {
   border-style: solid;
   border-color: rgb(var(--ws-district-accent));
+  cursor: grabbing;
 }
 /* Releasing here would put the dragged workspace INTO this group (#346
    FR-6a). A filled surface plus a solid rule, matching what Tree's
