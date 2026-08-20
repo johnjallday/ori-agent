@@ -21,6 +21,13 @@
   let consoleOverlayId = '';
   let catalog = [];
   let catalogLoaded = false;
+  let scripts = [];
+  let scriptsLoaded = false;
+  let proposals = [];
+  let proposalsLoaded = false;
+  let proposalRequestInFlight = false;
+  let pendingProposal = null;
+  let proposalNotice = null;
   let actionRequestInFlight = false;
   let pendingAction = null;
   let lastRun = null;
@@ -44,6 +51,20 @@
     if (!id) return '';
     const base = '/api/workspaces/' + encodeURIComponent(id) + '/reaper/actions';
     return actionId ? base + '/' + encodeURIComponent(actionId) + '/run' : base;
+  }
+
+  function scriptsApiPath() {
+    const id = workspaceIdFromPage();
+    return id ? '/api/workspaces/' + encodeURIComponent(id) + '/reaper/scripts' : '';
+  }
+
+  function proposalsApiPath(proposalId, operation) {
+    const id = workspaceIdFromPage();
+    if (!id) return '';
+    let path = '/api/workspaces/' + encodeURIComponent(id) + '/reaper/script-proposals';
+    if (proposalId) path += '/' + encodeURIComponent(proposalId);
+    if (operation) path += '/' + operation;
+    return path;
   }
 
   function documentVisible() {
@@ -134,6 +155,163 @@
       if (consoleOpen) renderConsole();
       return catalog;
     }
+  }
+
+  async function loadScripts() {
+    const path = scriptsApiPath();
+    if (!path || typeof fetch !== 'function') return scripts;
+    try {
+      const response = await fetch(path, { headers: { Accept: 'application/json' } });
+      if (!response.ok) throw new Error('script library request failed');
+      const payload = await response.json();
+      if (!Array.isArray(payload)) throw new Error('invalid script library');
+      scripts = payload.filter(script => script && script.id && script.name);
+      scriptsLoaded = true;
+      if (consoleOpen) renderConsole();
+      return scripts;
+    } catch (_error) {
+      scriptsLoaded = true;
+      if (consoleOpen) renderConsole();
+      return scripts;
+    }
+  }
+
+  async function loadProposals() {
+    const path = proposalsApiPath();
+    if (!path || typeof fetch !== 'function') return proposals;
+    try {
+      const response = await fetch(path, { headers: { Accept: 'application/json' } });
+      if (!response.ok) throw new Error('proposal request failed');
+      const payload = await response.json();
+      if (!Array.isArray(payload)) throw new Error('invalid proposals');
+      proposals = payload.filter(proposal => proposal && proposal.id && proposal.code);
+      proposalsLoaded = true;
+      if (consoleOpen) renderConsole();
+      return proposals;
+    } catch (_error) {
+      proposalsLoaded = true;
+      if (consoleOpen) renderConsole();
+      return proposals;
+    }
+  }
+
+  function updateProposalFromRun(proposalId, payload) {
+    proposals = proposals.map(proposal =>
+      proposal.id === proposalId
+        ? {
+            ...proposal,
+            tested_successfully: Boolean(payload.tested_successfully),
+            last_run: { outcome: payload.outcome, error_text: payload.error_text || '' }
+          }
+        : proposal
+    );
+  }
+
+  async function runProposal(proposal, confirmed) {
+    if (!proposal || proposalRequestInFlight || typeof fetch !== 'function') return false;
+    proposalRequestInFlight = true;
+    pendingProposal = null;
+    proposalNotice = { outcome: 'running', text: 'Running draft ' + proposal.name + '…' };
+    if (consoleOpen) renderConsole();
+    try {
+      const response = await fetch(proposalsApiPath(proposal.id, 'run'), {
+        method: 'POST',
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirmed: Boolean(confirmed) })
+      });
+      const payload = await response.json().catch(() => ({}));
+      updateProposalFromRun(proposal.id, payload);
+      if (!response.ok || payload.outcome !== 'ok') {
+        proposalNotice = {
+          outcome: 'error',
+          text: proposal.name + ' failed: ' + (payload.error_text || 'The draft did not run.')
+        };
+        return false;
+      }
+      proposalNotice = { outcome: 'ok', text: proposal.name + ' ran successfully as a draft.' };
+      return true;
+    } catch (_error) {
+      proposalNotice = { outcome: 'error', text: proposal.name + ' failed: request unavailable.' };
+      return false;
+    } finally {
+      proposalRequestInFlight = false;
+      if (consoleOpen) renderConsole();
+    }
+  }
+
+  async function saveProposal(proposal) {
+    if (!proposal || proposalRequestInFlight || typeof fetch !== 'function') return false;
+    proposalRequestInFlight = true;
+    pendingProposal = null;
+    try {
+      const response = await fetch(proposalsApiPath(proposal.id, 'save'), {
+        method: 'POST',
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirmed: true })
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload.outcome !== 'saved') {
+        proposalNotice = {
+          outcome: 'error',
+          text: 'Save failed: ' + (payload.error || payload.message || 'Library unavailable.')
+        };
+        return false;
+      }
+      proposals = proposals.filter(candidate => candidate.id !== proposal.id);
+      proposalNotice = {
+        outcome: 'ok',
+        text: proposal.name + ' is now available in every REAPER workspace.'
+      };
+      catalogLoaded = false;
+      scriptsLoaded = false;
+      void loadActions();
+      void loadScripts();
+      return true;
+    } catch (_error) {
+      proposalNotice = { outcome: 'error', text: 'Save failed: library request unavailable.' };
+      return false;
+    } finally {
+      proposalRequestInFlight = false;
+      if (consoleOpen) renderConsole();
+    }
+  }
+
+  async function discardProposal(proposal) {
+    if (!proposal || proposalRequestInFlight || typeof fetch !== 'function') return false;
+    proposalRequestInFlight = true;
+    pendingProposal = null;
+    try {
+      const response = await fetch(proposalsApiPath(proposal.id), { method: 'DELETE' });
+      if (!response.ok) throw new Error('discard failed');
+      proposals = proposals.filter(candidate => candidate.id !== proposal.id);
+      proposalNotice = {
+        outcome: 'ok',
+        text: proposal.name + ' was discarded without being saved.'
+      };
+      return true;
+    } catch (_error) {
+      proposalNotice = { outcome: 'error', text: 'Discard failed: proposal is still available.' };
+      return false;
+    } finally {
+      proposalRequestInFlight = false;
+      if (consoleOpen) renderConsole();
+    }
+  }
+
+  function requestProposalRun(proposal) {
+    if (proposal.needs_confirmation) {
+      pendingProposal = { kind: 'run', proposal };
+      proposalNotice = null;
+      renderConsole();
+      return;
+    }
+    void runProposal(proposal, false);
+  }
+
+  function requestProposalSave(proposal) {
+    pendingProposal = { kind: 'save', proposal };
+    proposalNotice = null;
+    renderConsole();
   }
 
   function catalogAction(actionId) {
@@ -429,6 +607,190 @@
     host.appendChild(message);
   }
 
+  function renderProposalConfirmation(host) {
+    if (!pendingProposal) return;
+    const proposal = pendingProposal.proposal;
+    const panel = el('section', 'reaper-console-confirm reaper-console-proposal-confirm');
+    const copy = el('div', '');
+    if (pendingProposal.kind === 'save') {
+      copy.appendChild(el('strong', '', 'Save to the global script library?'));
+      copy.appendChild(
+        el(
+          'p',
+          '',
+          'Saving makes ' +
+            proposal.name +
+            ' available in every REAPER workspace on this Mac, not only this one.' +
+            (proposal.tested_successfully
+              ? ''
+              : ' This draft is untested because it has never run successfully.')
+        )
+      );
+    } else {
+      copy.appendChild(el('strong', '', 'Run this draft in REAPER?'));
+      copy.appendChild(
+        el('p', '', proposal.name + ' can change the open session before it is saved.')
+      );
+    }
+    panel.appendChild(copy);
+    const actions = el('div', 'reaper-console-confirm-actions');
+    actions.appendChild(
+      button('Cancel', 'reaper-console-btn is-secondary', () => {
+        pendingProposal = null;
+        renderConsole();
+      })
+    );
+    actions.appendChild(
+      button(
+        pendingProposal.kind === 'save' ? 'Save for every workspace' : 'Run draft',
+        'reaper-console-btn is-primary',
+        () =>
+          pendingProposal.kind === 'save'
+            ? void saveProposal(proposal)
+            : void runProposal(proposal, true)
+      )
+    );
+    panel.appendChild(actions);
+    host.appendChild(panel);
+  }
+
+  function renderProposals(host) {
+    if (!proposalsLoaded && !proposals.length) return;
+    if (proposalsLoaded && !proposals.length && !proposalNotice) return;
+    const section = el('section', 'reaper-console-proposals');
+    const head = el('div', 'reaper-console-section-head');
+    head.appendChild(el('h3', '', 'Script drafts'));
+    head.appendChild(el('span', '', proposals.length + ' awaiting review'));
+    section.appendChild(head);
+    renderProposalConfirmation(section);
+    if (proposalNotice) {
+      const notice = el(
+        'div',
+        'reaper-console-run-result is-' + proposalNotice.outcome,
+        proposalNotice.text
+      );
+      notice.setAttribute('role', 'status');
+      section.appendChild(notice);
+    }
+    proposals.forEach(proposal => {
+      const card = el('article', 'reaper-console-proposal');
+      const heading = el('div', 'reaper-console-proposal-head');
+      const identity = el('div', 'reaper-console-proposal-identity');
+      identity.appendChild(el('strong', '', proposal.name));
+      identity.appendChild(
+        el(
+          'span',
+          '',
+          proposal.filename +
+            ' · ' +
+            (proposal.needs_confirmation ? 'confirmation required' : 'one-click run')
+        )
+      );
+      heading.appendChild(identity);
+      heading.appendChild(
+        el(
+          'span',
+          'reaper-console-proposal-test ' +
+            (proposal.tested_successfully ? 'is-tested' : 'is-untested'),
+          proposal.tested_successfully ? 'Tested successfully' : 'Untested'
+        )
+      );
+      card.appendChild(heading);
+      card.appendChild(el('p', 'reaper-console-proposal-description', proposal.description));
+      const code = el('pre', 'reaper-console-proposal-code');
+      code.appendChild(el('code', '', proposal.code));
+      card.appendChild(code);
+      if (proposal.last_run) {
+        card.appendChild(
+          el(
+            'div',
+            'reaper-console-proposal-result is-' + proposal.last_run.outcome,
+            proposal.last_run.outcome === 'ok'
+              ? 'Last draft run succeeded.'
+              : 'Last draft run failed: ' +
+                  (proposal.last_run.error_text || 'Unknown runner error.')
+          )
+        );
+      }
+      const actions = el('div', 'reaper-console-proposal-actions');
+      const run = button('Run draft', 'reaper-console-btn is-secondary', () =>
+        requestProposalRun(proposal)
+      );
+      run.disabled = proposalRequestInFlight;
+      actions.appendChild(run);
+      const save = button('Save', 'reaper-console-btn is-primary', () =>
+        requestProposalSave(proposal)
+      );
+      save.disabled = proposalRequestInFlight;
+      actions.appendChild(save);
+      const discard = button(
+        'Discard',
+        'reaper-console-btn is-secondary',
+        () => void discardProposal(proposal)
+      );
+      discard.disabled = proposalRequestInFlight;
+      actions.appendChild(discard);
+      card.appendChild(actions);
+      section.appendChild(card);
+    });
+    host.appendChild(section);
+  }
+
+  function renderScriptLibrary(host) {
+    const section = el('section', 'reaper-console-script-library');
+    const head = el('div', 'reaper-console-section-head');
+    head.appendChild(el('h3', '', 'Script library'));
+    head.appendChild(el('span', '', scriptsLoaded ? scripts.length + ' shared' : 'Loading…'));
+    section.appendChild(head);
+    const list = el('div', 'reaper-console-script-list');
+    if (!scriptsLoaded) {
+      list.appendChild(el('p', 'reaper-console-empty', 'Loading shared ReaScripts…'));
+    } else if (!scripts.length) {
+      list.appendChild(
+        el(
+          'p',
+          'reaper-console-empty',
+          'Drop a .lua file into ~/Ori Scripts/reaper/ to share it across REAPER workspaces.'
+        )
+      );
+    } else {
+      scripts.forEach(script => {
+        const row = el('article', 'reaper-console-script-row');
+        const copy = el('div', 'reaper-console-script-copy');
+        copy.appendChild(el('strong', '', script.name));
+        copy.appendChild(
+          el(
+            'span',
+            '',
+            script.metadata_valid
+              ? script.description || script.filename
+              : 'Metadata missing or malformed · confirmation required'
+          )
+        );
+        row.appendChild(copy);
+        const action = catalogAction(script.id) || {
+          id: script.id,
+          label: script.name,
+          description: script.description,
+          source: 'custom',
+          mutates: true,
+          needs_confirmation: script.needs_confirmation
+        };
+        const run = button(
+          script.needs_confirmation ? 'Review run' : 'Run',
+          'reaper-console-btn is-secondary',
+          () => requestAction(action)
+        );
+        run.disabled = actionRequestInFlight;
+        run.setAttribute('aria-label', 'Run shared script ' + script.name + ' in REAPER');
+        row.appendChild(run);
+        list.appendChild(row);
+      });
+    }
+    section.appendChild(list);
+    host.appendChild(section);
+  }
+
   function renderRawCommand(host) {
     const raw = el('div', 'reaper-console-raw');
     const copy = el('div', 'reaper-console-raw-copy');
@@ -473,7 +835,7 @@
     section.appendChild(head);
     const grid = el('div', 'reaper-console-action-grid');
     const remaining = catalog.filter(
-      action => !['1007', '1016', '1013'].includes(String(action.id))
+      action => action.source !== 'custom' && !['1007', '1016', '1013'].includes(String(action.id))
     );
     if (!catalogLoaded) {
       grid.appendChild(el('p', 'reaper-console-empty', 'Loading REAPER actions…'));
@@ -500,6 +862,8 @@
     }
     section.appendChild(grid);
     host.appendChild(section);
+    renderProposals(host);
+    renderScriptLibrary(host);
     renderRawCommand(host);
   }
 
@@ -640,6 +1004,8 @@
     renderConsole();
     void refresh();
     if (!catalogLoaded) void loadActions();
+    if (!scriptsLoaded) void loadScripts();
+    if (!proposalsLoaded) void loadProposals();
     return true;
   }
 
@@ -719,6 +1085,20 @@
       catalogLoaded = true;
       if (consoleOpen) renderConsole();
     },
+    _setScripts: nextScripts => {
+      scripts = Array.isArray(nextScripts) ? nextScripts : [];
+      scriptsLoaded = true;
+      if (consoleOpen) renderConsole();
+    },
+    _setProposals: nextProposals => {
+      proposals = Array.isArray(nextProposals) ? nextProposals : [];
+      proposalsLoaded = true;
+      if (consoleOpen) renderConsole();
+    },
+    _requestProposalRun: requestProposalRun,
+    _requestProposalSave: requestProposalSave,
+    _runProposal: runProposal,
+    _saveProposal: saveProposal,
     _requestAction: requestAction,
     _executeAction: executeAction,
     _lastRun: () => lastRun,
@@ -736,6 +1116,13 @@
       consoleOverlayId = '';
       catalog = [];
       catalogLoaded = false;
+      scripts = [];
+      scriptsLoaded = false;
+      proposals = [];
+      proposalsLoaded = false;
+      proposalRequestInFlight = false;
+      pendingProposal = null;
+      proposalNotice = null;
       actionRequestInFlight = false;
       pendingAction = null;
       lastRun = null;

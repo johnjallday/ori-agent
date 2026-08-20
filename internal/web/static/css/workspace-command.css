@@ -6687,6 +6687,129 @@ button.ws-cmd-rpg-class-card:focus-visible {
   line-height: 1.4;
 }
 
+.reaper-console-proposal {
+  display: grid;
+  gap: 0.7rem;
+  margin-bottom: 0.75rem;
+  padding: 0.9rem;
+  background: rgba(9, 15, 16, 0.92);
+  border: 1px solid rgba(121, 219, 183, 0.2);
+  border-left: 3px solid rgba(121, 219, 183, 0.62);
+}
+
+.reaper-console-proposal-head {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.reaper-console-proposal-identity {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.reaper-console-proposal-identity strong {
+  color: #f1f7f3;
+  font-family: var(--ws-font-display, sans-serif);
+  font-size: 0.92rem;
+}
+
+.reaper-console-proposal-identity span,
+.reaper-console-proposal-description {
+  color: rgba(173, 192, 184, 0.62);
+  font-family: var(--ws-font-display, sans-serif);
+  font-size: 0.68rem;
+}
+
+.reaper-console-proposal-description {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.reaper-console-proposal-test {
+  flex: 0 0 auto;
+  padding: 0.25rem 0.42rem;
+  color: #89e1c0;
+  border: 1px solid rgba(94, 208, 167, 0.35);
+  font-size: 0.54rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.reaper-console-proposal-test.is-untested {
+  color: #f0c66a;
+  border-color: rgba(232, 181, 75, 0.4);
+}
+
+.reaper-console-proposal-code {
+  max-height: 14rem;
+  margin: 0;
+  padding: 0.8rem;
+  overflow: auto;
+  color: #c9e7dc;
+  background: #050808;
+  border: 1px solid rgba(173, 192, 184, 0.16);
+  font: 0.68rem/1.55 var(--ws-font-mono, monospace);
+  white-space: pre;
+}
+
+.reaper-console-proposal-result {
+  padding: 0.55rem 0.65rem;
+  color: #9be3c8;
+  background: rgba(94, 208, 167, 0.06);
+  font-family: var(--ws-font-display, sans-serif);
+  font-size: 0.68rem;
+}
+
+.reaper-console-proposal-result.is-error {
+  color: #ffc0b4;
+  background: rgba(239, 118, 93, 0.08);
+}
+
+.reaper-console-proposal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.reaper-console-script-list {
+  display: grid;
+  gap: 0.42rem;
+  margin-bottom: 1rem;
+}
+
+.reaper-console-script-row {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 3.5rem;
+  padding: 0.7rem 0.8rem;
+  background: rgba(13, 20, 21, 0.78);
+  border: 1px solid rgba(173, 192, 184, 0.14);
+  border-left: 2px solid rgba(94, 208, 167, 0.42);
+}
+
+.reaper-console-script-copy {
+  display: grid;
+  gap: 0.22rem;
+  min-width: 0;
+}
+
+.reaper-console-script-copy strong {
+  color: rgba(242, 247, 244, 0.9);
+  font-family: var(--ws-font-display, sans-serif);
+  font-size: 0.8rem;
+}
+
+.reaper-console-script-copy span {
+  color: rgba(173, 192, 184, 0.56);
+  font-family: var(--ws-font-display, sans-serif);
+  font-size: 0.68rem;
+  line-height: 1.4;
+}
+
 .reaper-console-raw {
   display: flex;
   gap: 1rem;

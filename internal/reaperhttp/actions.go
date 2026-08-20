@@ -112,6 +112,9 @@ func (h *Handler) runAction(ctx context.Context, workspaceID, requestedID string
 		response.ErrorReason = "Confirm this project change before running it."
 		return response, http.StatusConflict
 	}
+	if action.Source == reaper.ActionSourceCustom {
+		return h.runCustomScript(ctx, project, action)
+	}
 	runner, ok := h.client.(ActionRunner)
 	if !ok {
 		response.Code = "reaper_unavailable"
@@ -141,6 +144,40 @@ func (h *Handler) runAction(ctx context.Context, workspaceID, requestedID string
 		response.ErrorReason = "REAPER did not run the action."
 	}
 	logger.Warn("Live REAPER action failed", logger.Fields{"category": "reaper_action_failed"})
+	return response, status
+}
+
+func (h *Handler) runCustomScript(ctx context.Context, project reaper.ProjectSource, action reaper.Action) (ActionRunResponse, int) {
+	response := ActionRunResponse{ActionID: action.ID, Outcome: "error"}
+	if h == nil || h.scriptLibrary == nil || h.scriptRunner == nil || h.client == nil {
+		response.Code = "reaper_runner_unavailable"
+		response.ErrorReason = "The REAPER script runner is unavailable."
+		return response, http.StatusServiceUnavailable
+	}
+	script, err := h.scriptLibrary.Read(action.ID)
+	if err != nil {
+		response.Code = "reaper_script_not_found"
+		response.ErrorReason = "The custom REAPER script was not found."
+		return response, http.StatusNotFound
+	}
+	runResult, runErr := h.scriptRunner.RunScript(ctx, script.Code)
+	state, stateErr := h.client.ReadState(ctx, project)
+	state.Applies = true
+	response.State = state
+	if runErr == nil && stateErr == nil && runResult.Outcome == "ok" {
+		response.Outcome = "ok"
+		return response, http.StatusOK
+	}
+	response.Code = "reaper_script_failed"
+	response.ErrorReason = strings.TrimSpace(runResult.ErrorText)
+	if response.ErrorReason == "" {
+		response.ErrorReason = "The custom REAPER script failed."
+	}
+	status := http.StatusBadGateway
+	if errors.Is(runErr, reaper.ErrActionDisconnected) {
+		status = http.StatusConflict
+		response.Code = "reaper_disconnected"
+	}
 	return response, status
 }
 

@@ -330,6 +330,129 @@ test('a failed REAPER run is never rendered as success', async () => {
   assert.match(consolePanel._lastRun().reason, /Nothing was run/);
 });
 
+test('agent script proposals show readable Lua, real draft errors, and global save scope', () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  const proposal = {
+    id: 'proposal-1',
+    filename: 'layout.lua',
+    name: 'Build layout',
+    description: 'Adds the standard track layout.',
+    needs_confirmation: true,
+    code: 'reaper.NoSuchFunction()\n',
+    tested_successfully: false,
+    last_run: { outcome: 'error', error_text: 'attempt to call nil value' }
+  };
+  consolePanel._setProposals([proposal]);
+  consolePanel._setState({
+    applies: true,
+    connected: true,
+    project: 'Song',
+    tempo: 120,
+    play_state: 'stopped',
+    position: '1.1.00',
+    track_count: 0,
+    tracks: []
+  });
+  consolePanel.open();
+  const host = documentStub.getElementById('reaperConsole');
+  assert.match(host.textContent, /Script drafts/);
+  assert.match(host.textContent, /reaper.NoSuchFunction/);
+  assert.match(host.textContent, /attempt to call nil value/);
+  assert.match(host.textContent, /Untested/);
+
+  consolePanel._requestProposalSave(proposal);
+  assert.match(host.textContent, /available in every REAPER workspace on this Mac/);
+  assert.match(host.textContent, /This draft is untested/);
+  assert.match(host.textContent, /Save for every workspace/);
+  consolePanel.close();
+});
+
+test('a draft run surfaces the runner error instead of claiming success', async () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  const proposal = {
+    id: 'proposal-2',
+    filename: 'broken.lua',
+    name: 'Broken draft',
+    description: 'Test error reporting.',
+    needs_confirmation: true,
+    code: 'error("broken")',
+    tested_successfully: false
+  };
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  consolePanel._setProposals([proposal]);
+  globalThis.fetch = async () => ({
+    ok: false,
+    status: 502,
+    json: async () => ({
+      proposal_id: 'proposal-2',
+      outcome: 'error',
+      error_text: 'runner exploded on line 1',
+      tested_successfully: false
+    })
+  });
+  assert.equal(await consolePanel._runProposal(proposal, true), false);
+  consolePanel._setState({ applies: true, connected: true, tracks: [] });
+  consolePanel.open();
+  const host = documentStub.getElementById('reaperConsole');
+  assert.match(host.textContent, /runner exploded on line 1/);
+  assert.doesNotMatch(host.textContent, /ran successfully as a draft/);
+  consolePanel.close();
+});
+
+test('the shared custom script library lists metadata and run controls', () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([
+    {
+      id: 'custom:band.lua',
+      label: 'Add band tracks',
+      description: 'Adds the standard band layout.',
+      source: 'custom',
+      mutates: true,
+      needs_confirmation: true
+    }
+  ]);
+  consolePanel._setScripts([
+    {
+      id: 'custom:band.lua',
+      filename: 'band.lua',
+      name: 'Add band tracks',
+      description: 'Adds the standard band layout.',
+      needs_confirmation: true,
+      metadata_valid: true
+    },
+    {
+      id: 'custom:legacy.lua',
+      filename: 'legacy.lua',
+      name: 'legacy.lua',
+      needs_confirmation: true,
+      metadata_valid: false
+    }
+  ]);
+  consolePanel._setState({
+    applies: true,
+    connected: true,
+    project: 'Song',
+    tempo: 120,
+    play_state: 'stopped',
+    position: '1.1.00',
+    track_count: 0,
+    tracks: []
+  });
+  consolePanel.open();
+  const host = documentStub.getElementById('reaperConsole');
+  assert.match(host.textContent, /Script library/);
+  assert.match(host.textContent, /Add band tracks/);
+  assert.match(host.textContent, /Review run/);
+  assert.match(host.textContent, /Metadata missing or malformed/);
+  consolePanel.close();
+});
+
 test('registered scripts and the raw command escape hatch share the action surface', () => {
   consolePanel._resetForTest();
   consolePanel.init('ws-reaper');
