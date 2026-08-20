@@ -1435,6 +1435,8 @@
       if (candidate.id === id) node = candidate;
     });
     var moving = findWs(workspaces, id);
+    var source = moving && moving.parent_id ? findWs(workspaces, moving.parent_id) : null;
+    if (!source || !isGroup(source)) source = null;
 
     // Aim from the middle of the workspace, not from its top-left anchor. The
     // anchor is where the tile is *stored*; its centre is where it *looks like
@@ -1443,8 +1445,7 @@
     // bottom-right by all but a pixel would.
     var target = districtAtPoint(memberCenter(point), world);
     if (!target) {
-      var source = node && node.groupId ? findWs(workspaces, node.groupId) : null;
-      if (!source || !isGroup(source)) return { kind: 'none' };
+      if (!source) return { kind: 'none' };
       return {
         kind: 'leave',
         groupId: source.id,
@@ -1454,8 +1455,12 @@
     }
     if (target.id === id) return { kind: 'none' };
 
-    // Already in it: this is a reposition, not a join.
-    if (node && node.groupId === target.id) return { kind: 'none' };
+    // Already in it: this is a reposition, not a join. Membership comes from
+    // the hierarchy record, not visual containment, so nested records work even
+    // when only top-level districts are drawn.
+    if ((source && source.id === target.id) || (node && node.groupId === target.id)) {
+      return { kind: 'none' };
+    }
 
     // A group may not be dropped into itself or into its own descendant. Tree
     // owns that rule; the Map asks Tree's own validator rather than inventing a
@@ -5435,10 +5440,20 @@
    * claim a membership that does not exist, and that is blocked before save
    * rather than saved and explained afterwards (FR-83).
    */
-  function memberMoveOperations(id, point) {
+  function memberMoveOperations(id, point, intent) {
     var positions = {};
     positions[id] = { x: point.x, y: point.y };
     var operations = [{ op: 'set_positions', positions: positions }];
+
+    // A pending leave is evaluated against the hierarchy it intends to create.
+    // Do not expand or collision-check the source's custom minimum solely to
+    // contain a member that will be removed after confirmation. If the user
+    // declines or the hierarchy write fails, the unchanged saved minimum plus
+    // the retained member make effectiveDistrictFrame render truthful expanded
+    // containment without persisting that temporary expansion (#374 AR15).
+    if (intent && intent.kind === 'leave') {
+      return { operations: operations, conflict: null };
+    }
 
     var node = null;
     if (lastWorldLayout) {
@@ -5472,7 +5487,7 @@
   }
 
   function commitMove(container, id, el, point, previous, intent) {
-    var plan = memberMoveOperations(id, point);
+    var plan = memberMoveOperations(id, point, intent);
     if (!plan.operations) {
       // Blocked before save: nothing moved, nothing was asked of the server.
       placeElement(el, previous);
@@ -5647,18 +5662,18 @@
    * explicit affirmative answer is a decline — an unanswered question must
    * never be read as a yes.
    */
-  function settleDropConfirm(answer) {
+  function settleDropConfirm(answer, options) {
     var state = dropConfirmState;
     if (!state || state.settled) return;
     state.settled = true;
     var confirmed = answer === state.confirmAnswer;
     var onConfirm = state.onConfirm;
     var onDecline = state.onDecline;
-    closeDropConfirm({ restoreFocus: true });
+    closeDropConfirm({ restoreFocus: !options || options.restoreFocus !== false });
     if (confirmed) {
       if (typeof onConfirm === 'function') onConfirm();
     } else if (typeof onDecline === 'function') {
-      onDecline();
+      onDecline(options);
     }
   }
 
@@ -5763,7 +5778,7 @@
         onConfirm: function () {
           resolve(changeMembershipOnDrop(container, id, intent, committed));
         },
-        onDecline: function () {
+        onDecline: function (options) {
           announce(
             container,
             'Moved to ' +
@@ -5772,7 +5787,7 @@
               intent.name +
               '.'
           );
-          settleLayout();
+          if (!options || !options.skipRedraw) settleLayout();
           resolve(false);
         }
       });
@@ -7043,10 +7058,16 @@
     });
 
     var viewport = measureViewport(container);
+    // A hierarchy/data refresh rebuilds the live region too. Preserve its last
+    // truthful outcome so a required partial-failure or membership message does
+    // not disappear in the same tick that redraws retained membership.
+    var liveBeforeRemount = container.querySelector('[data-map-live]');
+    var preservedAnnouncement = liveBeforeRemount ? liveBeforeRemount.textContent : '';
     // The re-render below destroys interaction hosts and pointer owners. Close
     // or cancel them first so listeners, capture, and previews cannot outlive
     // the DOM they referred to.
     closeContextMenu({ restoreFocus: false });
+    settleDropConfirm('decline', { restoreFocus: false, skipRedraw: true });
     cancelPointerTranslations(container);
     lastMount = { container: container, state: state };
 
@@ -7077,6 +7098,10 @@
     bindDistrictDrag(container);
     bindResizeHandles(container);
     bindResetLayout(container);
+    if (preservedAnnouncement) {
+      var liveAfterRemount = container.querySelector('[data-map-live]');
+      if (liveAfterRemount) liveAfterRemount.textContent = preservedAnnouncement;
+    }
     // Focus returns to the record it was on before a committed move or a
     // refresh re-rendered the map (FR-117).
     if (pendingFocusId) {
@@ -7113,6 +7138,7 @@
     if (!container) return;
     stopResizeWatch();
     closeContextMenu({ restoreFocus: false });
+    settleDropConfirm('decline', { restoreFocus: false, skipRedraw: true });
     cancelPointerTranslations(container);
     container.innerHTML = '';
     // Clearing lastMount is what makes a layout response still in flight a

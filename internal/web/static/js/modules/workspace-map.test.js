@@ -1195,6 +1195,101 @@ test('a collapsed district is not a drop target (#346 FR-6a, FR-105)', () => {
   assert.equal(intent.kind, 'none');
 });
 
+test('membership drop matrix keeps intent, confirmation, request, and final hierarchy aligned (#374)', () => {
+  const map = loadOriWorkspaceMap();
+  const ordinary = dropLayout();
+  const own = districtsById(ordinary).g1;
+  const matrix = [
+    {
+      label: 'grouped workspace on open ground',
+      id: 'm1',
+      point: { x: 5000, y: 5000 },
+      layout: ordinary,
+      expected: 'leave',
+      confirmation: 'remove from Alpha',
+      layoutOperation: 'set_positions',
+      hierarchyBody: { parent_id: '' },
+      finalParent: ''
+    },
+    {
+      label: 'top-level workspace on open ground',
+      id: 'solo',
+      point: { x: 5000, y: 5000 },
+      layout: ordinary,
+      expected: 'none',
+      confirmation: '',
+      layoutOperation: 'set_positions',
+      hierarchyBody: null,
+      finalParent: ''
+    },
+    {
+      label: 'member inside its source district',
+      id: 'm1',
+      point: { x: own.x + 10, y: own.y + 10 },
+      layout: ordinary,
+      expected: 'none',
+      confirmation: '',
+      layoutOperation: 'set_positions',
+      hierarchyBody: null,
+      finalParent: 'g1'
+    },
+    {
+      label: 'member inside another expanded district',
+      id: 'm1',
+      point: { x: 1100, y: 400 },
+      layout: ordinary,
+      expected: 'join',
+      confirmation: 'move into Beta',
+      layoutOperation: 'set_positions',
+      hierarchyBody: { parent_id: 'g2' },
+      finalParent: 'g2'
+    },
+    {
+      label: 'collapsed district is excluded as a join target',
+      id: 'm1',
+      point: { x: 1100, y: 400 },
+      layout: dropLayout({ g2: { collapsed: true } }),
+      expected: 'leave',
+      confirmation: 'remove from Alpha',
+      layoutOperation: 'set_positions',
+      hierarchyBody: { parent_id: '' },
+      finalParent: ''
+    }
+  ];
+
+  matrix.forEach(entry => {
+    const intent = map.dropMembershipIntent(entry.id, entry.point, DROP_WORKSPACES, entry.layout);
+    assert.equal(intent.kind, entry.expected, entry.label);
+    assert.equal(entry.layoutOperation, 'set_positions', entry.label + ' saves coordinates first');
+    if (entry.expected === 'leave') {
+      assert.match(entry.confirmation, /remove from/);
+      assert.deepEqual(entry.hierarchyBody, { parent_id: '' });
+    } else if (entry.expected === 'join') {
+      assert.match(entry.confirmation, /move into/);
+      assert.deepEqual(entry.hierarchyBody, { parent_id: intent.groupId });
+    } else {
+      assert.equal(entry.confirmation, '');
+      assert.equal(entry.hierarchyBody, null);
+    }
+  });
+});
+
+test('a nested workspace can leave its immediate group for top level (#374)', () => {
+  const map = loadOriWorkspaceMap();
+  const nested = [
+    { id: 'outer', kind: 'group', name: 'Outer' },
+    { id: 'inner', kind: 'group', name: 'Inner', parent_id: 'outer' },
+    { id: 'leaf', parent_id: 'inner', name: 'Leaf' }
+  ];
+  const layout = loadWorldLayout()(nested, {
+    positions: { leaf: { x: 400, y: 400 } }
+  });
+  const intent = map.dropMembershipIntent('leaf', { x: 5000, y: 5000 }, nested, layout);
+  assert.equal(intent.kind, 'leave');
+  assert.equal(intent.groupId, 'inner');
+  assert.equal(intent.name, 'Inner');
+});
+
 test('a group cannot be dropped into itself or its own descendant (#346 FR-6a)', () => {
   const map = loadOriWorkspaceMap();
   const nested = [
@@ -4876,6 +4971,25 @@ test('dropping a workspace inside a district moves it into that group (#346 FR-6
   assert.equal(JSON.stringify(layoutCall.body).includes('parent'), false);
 });
 
+test('a grouped workspace still joins another expanded district with its exact target id (#374)', async () => {
+  const { harness, calls, doc } = await mountedForDrop();
+  const tile = harness.tile('m1');
+  tile.fire('pointerdown', tilePointer(0, 0));
+  tile.fire('pointermove', tilePointer(800, 0));
+  assert.equal(harness.district('g2').classList.contains('is-drop-target'), true);
+  assert.match(
+    harness.control('[data-map-build-text]').textContent,
+    /move this workspace into Beta/
+  );
+  tile.fire('pointerup', tilePointer(800, 0));
+  await flushDeep();
+  doc.fire('pointerdown', { target: harness.confirm.button('join') });
+  await flushDeep();
+
+  assert.equal(membershipCalls(calls, 'm1').length, 1);
+  assert.deepEqual({ ...membershipCalls(calls, 'm1')[0].body }, { parent_id: 'g2' });
+});
+
 test('confirmed leave saves the coordinate, clears parent once, and refreshes hierarchy (#374)', async () => {
   const { harness, calls, doc, hierarchyChanges } = await mountedForDrop();
   dragM1OutOfAlpha(harness);
@@ -5114,6 +5228,44 @@ test('a missing confirmation host safely keeps leave membership unchanged (#374)
   assert.match(harness.control('[data-map-live]').textContent, /stays in Alpha/);
 });
 
+test('remount and unmount safely decline pending leave state and remove document listeners (#374)', async () => {
+  const { map, harness, calls, doc } = await mountedForDrop();
+  const workspaces = [
+    { id: 'g1', kind: 'group', name: 'Alpha' },
+    { id: 'g2', kind: 'group', name: 'Beta' },
+    { id: 'm1', parent_id: 'g1', name: 'M1' },
+    { id: 'solo', name: 'Solo' }
+  ];
+  const state = {
+    workspaces,
+    hideChrome: true,
+    selectOnly: true,
+    noAutoSelect: true
+  };
+
+  dragM1OutOfAlpha(harness);
+  await flushDeep();
+  assert.equal(harness.confirm.isOpen(), true);
+  assert.equal(doc.bound('keydown'), 1);
+  assert.equal(doc.bound('pointerdown'), 1);
+
+  map.mount(harness.container, state);
+  assert.equal(harness.confirm.isOpen(), false);
+  assert.equal(doc.bound('keydown'), 0);
+  assert.equal(doc.bound('pointerdown'), 0);
+  assert.equal(membershipCalls(calls, 'm1').length, 0);
+  assert.equal(harness.district('g1').classList.contains('is-leave-source'), false);
+
+  dragM1OutOfAlpha(harness);
+  await flushDeep();
+  assert.equal(harness.confirm.isOpen(), true);
+  map.unmount(harness.container);
+  assert.equal(harness.confirm.isOpen(), false);
+  assert.equal(doc.bound('keydown'), 0);
+  assert.equal(doc.bound('pointerdown'), 0);
+  assert.equal(membershipCalls(calls, 'm1').length, 0);
+});
+
 test('a drop that changes nothing sends no hierarchy request (#346 FR-6a)', async () => {
   const { harness, calls } = await mountedForDrop();
   const tile = harness.tile('solo');
@@ -5183,6 +5335,21 @@ test('a grouped workspace previews its named leave outcome and clears it on canc
   assert.equal(calls.filter(c => c.url.includes('/api/workspaces/')).length, 0);
 });
 
+test('pointercancel during a leave preview writes nothing and clears every transient state (#374)', async () => {
+  const { harness, calls } = await mountedForDrop();
+  const tile = harness.tile('m1');
+  tile.fire('pointerdown', tilePointer(0, 0));
+  tile.fire('pointermove', tilePointer(-800, -1600));
+  tile.fire('pointercancel', tilePointer(-800, -1600));
+  await flush();
+
+  assert.equal(calls.filter(call => call.method === 'PATCH').length, 0);
+  assert.equal(harness.confirm.isOpen(), false);
+  assert.equal(tile.classList.contains('is-dragging'), false);
+  assert.equal(tile.classList.contains('is-leaving'), false);
+  assert.equal(harness.control('[data-map-build-banner]').hidden, true);
+});
+
 test('a cancelled drag joins nothing (#346 FR-6a)', async () => {
   const { harness, calls } = await mountedForDrop();
   const tile = harness.tile('solo');
@@ -5196,32 +5363,130 @@ test('a cancelled drag joins nothing (#346 FR-6a)', async () => {
   assert.equal(harness.district('g2').classList.contains('is-drop-target'), false);
 });
 
+// The raw pointer candidate can be occupied while the collision resolver picks
+// a legal nearby anchor. Membership must describe that final anchor, not the
+// blocked point the pointer happened to cross.
+async function mountedForResolvedIntent(targetFrame) {
+  const calls = [];
+  const doc = recordingDocument();
+  const map = loadMapWithFetch(
+    (url, init) => {
+      const method = (init && init.method) || 'GET';
+      const body = init && init.body ? JSON.parse(init.body) : null;
+      calls.push({ url: String(url), method, body });
+      if (method === 'PATCH') {
+        const set = body.operations.find(op => op.op === 'set_positions');
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              result: {
+                schema_version: 1,
+                revision: 2,
+                positions: set.positions,
+                snap_to_grid: false
+              }
+            })
+        });
+      }
+      return jsonResponse({
+        schema_version: 1,
+        revision: 1,
+        snap_to_grid: false,
+        positions: { m1: { x: 300, y: 300 }, blocker: { x: 1000, y: 300 } },
+        groups: { g2: { sizing_mode: 'custom', frame: targetFrame } }
+      });
+    },
+    undefined,
+    undefined,
+    doc
+  );
+  const harness = createCameraHarness({ tiles: ['m1', 'blocker'], districts: ['g1', 'g2'] });
+  map.mount(harness.container, {
+    workspaces: [
+      { id: 'g1', kind: 'group', name: 'Alpha' },
+      { id: 'g2', kind: 'group', name: 'Beta' },
+      { id: 'm1', parent_id: 'g1', name: 'M1' },
+      { id: 'blocker', name: 'Blocker' }
+    ],
+    hideChrome: true,
+    selectOnly: true,
+    noAutoSelect: true
+  });
+  await flush();
+  harness.fire('keydown', { key: '0', preventDefault() {} });
+  enableDragMode(harness);
+  return { map, harness, calls, doc };
+}
+
+test('collision resolution classifies membership from the anchor that actually lands (#374)', async () => {
+  const cases = [
+    {
+      label: 'raw point outside, resolved point inside',
+      frame: { x: 800, y: 100, width: 400, height: 200 },
+      title: /Move M1 into Beta\?/
+    },
+    {
+      label: 'raw point inside, resolved point outside',
+      frame: { x: 950, y: 300, width: 300, height: 200 },
+      title: /Remove M1 from Alpha\?/
+    }
+  ];
+
+  for (const entry of cases) {
+    const { harness, calls } = await mountedForResolvedIntent(entry.frame);
+    const tile = harness.tile('m1');
+    tile.fire('pointerdown', tilePointer(0, 0));
+    tile.fire('pointermove', tilePointer(700, 0));
+    assert.equal(tile.classList.contains('is-blocked'), true, entry.label + ' starts occupied');
+    tile.fire('pointerup', tilePointer(700, 0));
+    await flushDeep();
+
+    assert.match(harness.confirm.text(), entry.title, entry.label);
+    const saved = calls.find(call => call.method === 'PATCH').body.operations[0].positions.m1;
+    assert.deepEqual({ ...saved }, { x: 824, y: 124 }, entry.label + ' saved the resolved anchor');
+  }
+});
+
 // ---------------------------------------------------------------------------
 // Movement against a custom frame (#346 FR-38, FR-83, FR-84)
 // ---------------------------------------------------------------------------
 
 async function mountedWithCustomFrame({ frame, positions, patchResponse } = {}) {
   const patches = [];
-  const map = loadMapWithFetch((url, init) => {
-    if (init && init.method === 'PATCH') {
-      patches.push(JSON.parse(init.body));
-      if (patchResponse === 'fail') return Promise.resolve({ ok: false, status: 500 });
-      return Promise.resolve({
-        ok: true,
-        json: () =>
-          Promise.resolve({
-            result: { schema_version: 1, revision: 5, positions: {}, snap_to_grid: true }
-          })
+  const doc = recordingDocument();
+  const map = loadMapWithFetch(
+    (url, init) => {
+      if (init && init.method === 'PATCH') {
+        const body = JSON.parse(init.body);
+        patches.push(body);
+        if (patchResponse === 'fail') return Promise.resolve({ ok: false, status: 500 });
+        const set = body.operations.find(op => op.op === 'set_positions');
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              result: {
+                schema_version: 1,
+                revision: 5,
+                positions: (set && set.positions) || {},
+                snap_to_grid: false
+              }
+            })
+        });
+      }
+      return jsonResponse({
+        schema_version: 1,
+        revision: 1,
+        snap_to_grid: false,
+        positions,
+        groups: { grp: { sizing_mode: 'custom', frame, collapsed: false } }
       });
-    }
-    return jsonResponse({
-      schema_version: 1,
-      revision: 1,
-      snap_to_grid: false,
-      positions,
-      groups: { grp: { sizing_mode: 'custom', frame, collapsed: false } }
-    });
-  });
+    },
+    undefined,
+    undefined,
+    doc
+  );
   const harness = createCameraHarness({ tiles: ['m1', 'outsider'], districts: ['grp'] });
   map.mount(harness.container, {
     workspaces: [
@@ -5236,12 +5501,13 @@ async function mountedWithCustomFrame({ frame, positions, patchResponse } = {}) 
   await flush();
   harness.fire('keydown', { key: '0', preventDefault() {} });
   enableDragMode(harness);
-  return { map, harness, patches };
+  return { map, harness, patches, doc };
 }
 
-test('moving a member past a custom edge saves the anchor and the frame together (#346 FR-38)', async () => {
-  const { harness, patches } = await mountedWithCustomFrame({
-    frame: { x: 300, y: 300, width: 400, height: 400 },
+test('a pending leave from a custom district saves no temporary frame expansion (#374)', async () => {
+  const frame = { x: 300, y: 300, width: 400, height: 400 };
+  const { map, harness, patches } = await mountedWithCustomFrame({
+    frame,
     positions: { m1: { x: 380, y: 380 }, outsider: { x: 4000, y: 4000 } }
   });
 
@@ -5249,19 +5515,53 @@ test('moving a member past a custom edge saves the anchor and the frame together
   tile.fire('pointerdown', tilePointer(0, 0));
   tile.fire('pointermove', tilePointer(500, 0));
   tile.fire('pointerup', tilePointer(500, 0));
-  await flush();
+  await flushDeep();
 
-  assert.equal(patches.length, 1, 'one accepted layout change, not two');
-  const ops = patches[0].operations;
-  assert.equal(ops.length, 2);
-  assert.equal(ops[0].op, 'set_positions');
-  assert.equal(ops[1].op, 'set_group_frame');
-  assert.equal(ops[1].group_id, 'grp');
-  assert.ok(
-    ops[1].frame.x + ops[1].frame.width >= 880,
-    'the frame grew to contain the member it now holds'
+  assert.equal(patches.length, 1, 'one accepted coordinate change');
+  assert.deepEqual(
+    patches[0].operations.map(op => op.op),
+    ['set_positions'],
+    'the source minimum does not balloon for a member awaiting removal'
   );
-  assert.equal(ops[1].frame.x, 300, 'and only the edge it had to cross moved');
+  assert.equal(harness.confirm.isOpen(), true);
+  assert.match(harness.confirm.text(), /Remove M1 from Ops/);
+  assert.deepEqual({ ...map.getLayoutState().groups.grp.frame }, frame);
+});
+
+test('declining a custom-district leave renders retained membership without persisting growth (#374)', async () => {
+  const frame = { x: 300, y: 300, width: 400, height: 400 };
+  const workspaces = [
+    { id: 'grp', kind: 'group', name: 'Ops' },
+    { id: 'm1', parent_id: 'grp', name: 'M1' },
+    { id: 'outsider', name: 'Outside' }
+  ];
+  const { map, harness, patches, doc } = await mountedWithCustomFrame({
+    frame,
+    positions: { m1: { x: 380, y: 380 }, outsider: { x: 4000, y: 4000 } }
+  });
+
+  const tile = harness.tile('m1');
+  tile.fire('pointerdown', tilePointer(0, 0));
+  tile.fire('pointermove', tilePointer(500, 0));
+  tile.fire('pointerup', tilePointer(500, 0));
+  await flushDeep();
+  doc.fire('pointerdown', { target: harness.confirm.button('decline') });
+  await flushDeep();
+
+  assert.equal(patches.length, 1, 'decline adds no persistence request');
+  assert.deepEqual(
+    patches[0].operations.map(op => op.op),
+    ['set_positions']
+  );
+  assert.deepEqual({ ...map.getLayoutState().groups.grp.frame }, frame);
+  const retained = map.computeWorldLayout(workspaces, {
+    positions: map.getLayoutState().positions,
+    groupPresentations: { grp: { sizing_mode: 'custom', frame } }
+  });
+  const district = retained.districts.find(candidate => candidate.id === 'grp');
+  const member = retained.nodes.find(candidate => candidate.id === 'm1');
+  assert.ok(district.x + district.width >= member.x + map.districtGeometry.memberWidth);
+  assert.match(harness.control('[data-map-live]').textContent, /stays in Ops/);
 });
 
 test('moving a member inside the custom frame writes no frame at all (#346 FR-37)', async () => {
@@ -5281,11 +5581,11 @@ test('moving a member inside the custom frame writes no frame at all (#346 FR-37
   assert.equal(patches[0].operations[0].op, 'set_positions');
 });
 
-test('a member move that would grow its group over an outsider is blocked (#346 FR-83)', async () => {
+test('a valid custom-district leave is not blocked by temporary source containment (#374)', async () => {
   const { harness, patches } = await mountedWithCustomFrame({
     frame: { x: 300, y: 300, width: 400, height: 400 },
-    // The outsider sits just east of the frame: growing to reach the member's
-    // destination would draw the group around it.
+    // Expanding the retained source frame toward the candidate would enclose
+    // this outsider, but the member is asking to leave that source.
     positions: { m1: { x: 380, y: 380 }, outsider: { x: 900, y: 380 } }
   });
 
@@ -5293,10 +5593,14 @@ test('a member move that would grow its group over an outsider is blocked (#346 
   tile.fire('pointerdown', tilePointer(0, 0));
   tile.fire('pointermove', tilePointer(700, 0));
   tile.fire('pointerup', tilePointer(700, 0));
-  await flush();
+  await flushDeep();
 
-  assert.equal(patches.length, 0, 'blocked before save — nothing was asked of the server');
-  assert.deepEqual({ ...tile.at() }, { x: 380, y: 380 }, 'the member is back where it was');
+  assert.equal(patches.length, 1, 'the coordinate is allowed to save before confirmation');
+  assert.deepEqual(
+    patches[0].operations.map(op => op.op),
+    ['set_positions']
+  );
+  assert.match(harness.confirm.text(), /Remove M1 from Ops/);
 });
 
 test('a district move is refused when the frame would land on an outsider (#346 FR-84)', async () => {

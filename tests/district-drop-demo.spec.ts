@@ -1,11 +1,11 @@
 import { test, expect, Page, Locator } from '@playwright/test';
 
 /**
- * Issue #346 drop-to-group demo (PRD amendment 2026-08-17, FR-6a).
+ * Issue #346 join-by-drop and Issue #374 confirmed ungroup demo.
  *
- * Drags a workspace into a district and checks the hierarchy actually changed,
- * that the drag said so beforehand, and that the gestures which must NOT change
- * membership still don't.
+ * Drags a workspace into a district, then deliberately back onto open ground.
+ * Both hierarchy changes must preview, confirm, preserve the dropped coordinate,
+ * and use the same workspace PATCH contract as Tree.
  *
  * Not part of CI, and it needs a FRESH demo sandbox — one run per server:
  *   ./scripts/demo-346.sh 8981 --fresh
@@ -68,7 +68,7 @@ async function dragBy(page: Page, target: Locator, dx: number, dy: number, relea
   if (release) await page.mouse.up();
 }
 
-test('#346 dropping a workspace into a district moves it into that group', async ({ page }) => {
+test('#346 join and #374 confirmed ungroup preserve the dropped coordinate', async ({ page }) => {
   await skipOnboarding(page);
   const tag = String(Date.now()).slice(-5);
   const existing = await (await page.request.get('/api/workspaces')).json();
@@ -141,10 +141,48 @@ test('#346 dropping a workspace into a district moves it into that group', async
   await expect(confirm).toBeHidden();
   expect(await parentOf(page, loose)).toBe(before);
 
-  // FR-7: dragging it well clear does NOT remove it from the group — removal
-  // stays in Tree, because a frame follows its own members.
-  await dragBy(page, page.locator(`.ws-map-tile[data-ws-id="${loose}"]`), 0, 900);
+  // Issue #374: genuinely empty ground now previews a leave, then asks. The
+  // coordinate has already committed, while membership is still unchanged.
+  const layoutBeforeLeave = await (await page.request.get('/api/workspace-map/layout')).json();
+  await dragBy(page, page.locator(`.ws-map-tile[data-ws-id="${loose}"]`), 0, 900, false);
+  await expect(page.locator('[data-map-build-text]')).toContainText(
+    `Release to remove this workspace from Drop Group ${tag}`
+  );
+  await page.screenshot({ path: 'test-results/374-drop-leave-preview.png' });
+  await page.mouse.up();
+  await expect(confirm).toBeVisible();
+  await expect(confirm).toContainText(`Remove Drop Loose ${tag} from Drop Group ${tag}?`);
+  await expect(confirm.getByRole('button', { name: 'Remove from group' })).toBeVisible();
+  await expect(confirm.getByRole('button', { name: 'Keep in group' })).toBeVisible();
+  expect(await parentOf(page, loose)).toBe(group, 'release alone changes no hierarchy');
+  const firstDroppedLayout = await (await page.request.get('/api/workspace-map/layout')).json();
+  const firstDropped = firstDroppedLayout.layout.positions[loose];
+  expect(firstDropped).not.toEqual(layoutBeforeLeave.layout.positions[loose]);
+
+  // Declining keeps the new coordinate and the old group.
+  await confirm.getByRole('button', { name: 'Keep in group' }).click();
   await page.waitForTimeout(700);
-  await expect(confirm).toBeHidden();
-  expect(await parentOf(page, loose)).toBe(group, 'dragging out is not a removal gesture');
+  expect(await parentOf(page, loose)).toBe(group);
+  expect(
+    (await (await page.request.get('/api/workspace-map/layout')).json()).layout.positions[loose]
+  ).toEqual(firstDropped);
+
+  // Repeat from the retained source and explicitly remove it.
+  await dragBy(page, page.locator(`.ws-map-tile[data-ws-id="${loose}"]`), 0, 900);
+  await expect(confirm).toBeVisible();
+  const confirmedDrop = (await (await page.request.get('/api/workspace-map/layout')).json()).layout
+    .positions[loose];
+  await page.screenshot({ path: 'test-results/374-drop-leave-confirm.png' });
+  await confirm.getByRole('button', { name: 'Remove from group' }).click();
+  await page.waitForTimeout(900);
+
+  expect(await parentOf(page, loose)).toBe('', 'confirmed leave moves it to top level');
+  expect(
+    (await (await page.request.get('/api/workspace-map/layout')).json()).layout.positions[loose]
+  ).toEqual(confirmedDrop);
+  await expect(district.locator('.ws-map-district-count')).toHaveText('1 workspace');
+  await page.screenshot({ path: 'test-results/374-drop-left.png' });
+
+  await page.locator('[data-cockpit-view="tree"]').click();
+  await expect(page.locator(`[data-tree-row="${loose}"]`)).toHaveAttribute('aria-level', '1');
 });
