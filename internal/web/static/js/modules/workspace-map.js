@@ -144,6 +144,14 @@
   // dropped rather than painted over the current world.
   var layoutRequestSeq = 0;
 
+  // Moving records is an explicit, page-local mode (#374). It is off for every
+  // new page session and intentionally does not belong to layout, settings, or
+  // local storage. Keeping it at module scope lets ordinary Map redraws and
+  // Home's Map/Tree hide/show cycle preserve the user's choice. Pointer drags
+  // and keyboard arrows share this one visible mode instead of competing
+  // controls; the lower-level drag state keeps its established name.
+  var moveModeEnabled = false;
+
   function isSafeCoordinate(value) {
     return typeof value === 'number' && isFinite(value) && value >= MIN_COORD && value <= MAX_COORD;
   }
@@ -181,7 +189,7 @@
   // its shape as well as its colour, and a screen reader has to be able to say
   // which one is chosen (FR-130, design §"Accent choices should be named").
   var DISTRICT_ACCENT_CATALOG = [
-    { id: 'default', label: 'Keeper amber' },
+    { id: 'default', label: 'Ori green' },
     { id: 'beacon', label: 'Beacon blue' },
     { id: 'moss', label: 'Moss green' },
     { id: 'orchid', label: 'Orchid violet' },
@@ -1415,32 +1423,46 @@
   /**
    * What a drop at `point` means for the dragged workspace's membership.
    *
-   * `join` is the only membership change a Map drop can produce. Dropping onto
-   * open ground is deliberately NOT "leave your group": an automatic frame
-   * follows its members and a custom frame expands to hold them, so a member
-   * sits inside its own frame by construction — and the only way out is to drag
-   * a few pixels past an edge. Silently un-grouping a workspace on a nudge that
-   * small is not a gesture anyone opts into. Removal stays in Tree (FR-7).
+   * An eligible expanded district means `join`, unless it is already the
+   * record's current group. Genuinely open ground means `leave` only when the
+   * moving record has a valid group parent. Top-level records stay top-level.
+   * Every name remains raw data here and is escaped at its rendering boundary.
    *
-   * @returns {{kind: 'none'|'join', groupId?: string, name?: string, reason?: string}}
+   * @returns {{kind: 'none'|'join'|'leave', groupId?: string, name?: string, movingName?: string, reason?: string}}
    */
   function dropMembershipIntent(id, point, workspaces, layout) {
     var world = layout || lastWorldLayout;
+    var node = null;
+    (world.nodes || []).forEach(function (candidate) {
+      if (candidate.id === id) node = candidate;
+    });
+    var moving = findWs(workspaces, id);
+    var source = moving && moving.parent_id ? findWs(workspaces, moving.parent_id) : null;
+    if (!source || !isGroup(source)) source = null;
+
     // Aim from the middle of the workspace, not from its top-left anchor. The
     // anchor is where the tile is *stored*; its centre is where it *looks like
     // it is*. Testing the anchor makes the gesture lopsided — a tile covering a
     // frame's top-left corner would not join, while one hanging off the
     // bottom-right by all but a pixel would.
     var target = districtAtPoint(memberCenter(point), world);
-    if (!target) return { kind: 'none' };
+    if (!target) {
+      if (!source) return { kind: 'none' };
+      return {
+        kind: 'leave',
+        groupId: source.id,
+        name: source.name || 'its current group',
+        movingName: (moving && moving.name) || 'this workspace'
+      };
+    }
     if (target.id === id) return { kind: 'none' };
 
-    // Already in it: this is a reposition, not a join.
-    var node = null;
-    (world.nodes || []).forEach(function (candidate) {
-      if (candidate.id === id) node = candidate;
-    });
-    if (node && node.groupId === target.id) return { kind: 'none' };
+    // Already in it: this is a reposition, not a join. Membership comes from
+    // the hierarchy record, not visual containment, so nested records work even
+    // when only top-level districts are drawn.
+    if ((source && source.id === target.id) || (node && node.groupId === target.id)) {
+      return { kind: 'none' };
+    }
 
     // A group may not be dropped into itself or into its own descendant. Tree
     // owns that rule; the Map asks Tree's own validator rather than inventing a
@@ -1448,7 +1470,6 @@
     var rejection = dropRejectionReason(workspaces, id, target.id);
     if (rejection) return { kind: 'none', reason: rejection };
 
-    var moving = findWs(workspaces, id);
     return {
       kind: 'join',
       groupId: target.id,
@@ -2058,10 +2079,12 @@
    * and the glyph gave a screen reader a symbol with no name and a sighted user
    * no idea it was a drag handle.
    *
-   * The three controls stay separate on purpose. Selecting a group, moving
-   * everything inside it, and reaching its actions are three different
-   * intentions, and making the whole header draggable would collapse the first
-   * two into one gesture (FR-144, design §6).
+   * The three header controls stay separate on purpose. Selecting a group,
+   * moving everything inside it, and reaching its actions are three different
+   * intentions, so the label remains a button rather than becoming a drag
+   * target. With Drag enabled, the district's otherwise-empty surface is also
+   * a direct-manipulation target; the named Move control remains the clear,
+   * touch-sized and keyboard-focusable affordance (FR-144, design §6).
    */
   function districtHTML(d, selectedId) {
     var ws = d.ws || {};
@@ -2156,10 +2179,10 @@
       '"><span aria-hidden="true">' +
       (collapsed ? '▸' : '▾') +
       '</span></button>' +
-      // A separate, touch-sized handle for cluster movement. Dragging the label
-      // would make "select this group" and "move everything in it" the same
-      // gesture, and every existing group action — select, overview, open,
-      // delete, Tree management — has to stay reachable (FR-85, FR-94).
+      // A separate, touch-sized handle for cluster movement. The empty district
+      // surface can also be dragged while Drag is on, but the label remains
+      // selection-only and every existing group action — select, overview,
+      // open, delete, Tree management — stays reachable (FR-85, FR-94).
       //
       // The ⤧ glyph is the map's established symbol for this and stays. What
       // made it cryptic was never the symbol — it was that the control had no
@@ -2346,9 +2369,13 @@
       // click a spot — and the context menu already knows the spot: right-click
       // where you want the workspace and choose Build. One gesture instead of
       // three, and no mode to be stuck in.
-      '<button type="button" class="ws-map-ctl ws-map-ctl--wide" data-map-move' +
+      '<button type="button" class="ws-map-ctl ws-map-ctl--wide" data-map-drag aria-pressed="' +
+      (moveModeEnabled ? 'true' : 'false') +
+      '"' +
       (readOnly ? ' disabled' : '') +
-      '>Move</button>' +
+      '>Move: ' +
+      (moveModeEnabled ? 'on' : 'off') +
+      '</button>' +
       '<button type="button" class="ws-map-ctl ws-map-ctl--wide" data-map-snap aria-pressed="' +
       (snapOn ? 'true' : 'false') +
       '"' +
@@ -2413,9 +2440,9 @@
       '<li><b>Zoom</b> — pinch, ' +
       (isApplePlatform() ? '⌘' : 'Ctrl') +
       '+scroll, the + / − buttons, or the + / − keys.</li>' +
-      '<li><b>Move a building</b> — drag it. Select it and press Move to do the same with arrow keys; Enter saves, Escape cancels.</li>' +
-      '<li><b>Move a district</b> — drag the small handle on its outline. Its workspaces move with it; membership never changes.</li>' +
-      '<li><b>Build</b> — press Build, then click an empty spot (or use arrow keys and Enter).</li>' +
+      '<li><b>Move</b> — turn Move on, then drag a building or district. Buildings can reposition, join another expanded district, or leave their group on open ground; membership changes ask for confirmation. A district moves with all its workspaces and never changes membership.</li>' +
+      '<li><b>Keyboard move</b> — with Move on, select a building or district and use an arrow key to begin; press Enter to save or Escape to cancel.</li>' +
+      '<li><b>Build</b> — right-click empty ground where it should go and choose Build.</li>' +
       '<li><b>Snap</b> — on by default. Hold ' +
       (isApplePlatform() ? 'Option' : 'Alt') +
       ' to place freely for one move.</li>' +
@@ -4205,6 +4232,123 @@
     if (region) region.textContent = message;
   }
 
+  function updateMoveControl(container) {
+    if (!container || typeof container.querySelector !== 'function') return;
+    var toggle = container.querySelector('[data-map-drag]');
+    var writable = layoutState.status === 'ready';
+    if (toggle) {
+      toggle.disabled = !writable;
+      if (toggle.setAttribute) {
+        toggle.setAttribute('aria-pressed', moveModeEnabled ? 'true' : 'false');
+      }
+      toggle.textContent = 'Move: ' + (moveModeEnabled ? 'on' : 'off');
+    }
+    var available = writable && moveModeEnabled;
+    var canvas = container.querySelector('[data-ws-map-viewport]');
+    if (canvas && canvas.classList) {
+      canvas.classList.toggle('is-drag-enabled', available);
+    }
+    if (typeof container.querySelectorAll === 'function') {
+      var handles = container.querySelectorAll('[data-group-drag]');
+      Array.prototype.forEach.call(handles, function (handle) {
+        handle.disabled = !available;
+        if (handle.setAttribute) handle.setAttribute('aria-disabled', available ? 'false' : 'true');
+      });
+    }
+  }
+
+  /**
+   * Cancel pointer-only translations without saving.
+   *
+   * A mode switch or redraw can destroy the elements that own pointer capture.
+   * Restore previews and release capture first, so no stale drag object can
+   * write through a later event from detached DOM (#374 AR5).
+   */
+  function cancelPointerTranslations(container) {
+    var tileState = dragState;
+    dragState = null;
+    if (tileState) {
+      var tile = tileState.el;
+      if (
+        tile &&
+        tile.releasePointerCapture &&
+        tile.hasPointerCapture &&
+        tile.hasPointerCapture(tileState.pointerId)
+      ) {
+        tile.releasePointerCapture(tileState.pointerId);
+      }
+      if (tile && tile.classList) {
+        tile.classList.remove('is-dragging');
+        tile.classList.remove('is-blocked');
+        tile.classList.remove('is-leaving');
+      }
+      if (tileState.moved && tile) placeElement(tile, tileState.origin);
+    }
+
+    var districtState = clusterDrag;
+    clusterDrag = null;
+    if (districtState) {
+      var handle = districtState.handle;
+      if (
+        handle &&
+        handle.releasePointerCapture &&
+        handle.hasPointerCapture &&
+        handle.hasPointerCapture(districtState.pointerId)
+      ) {
+        handle.releasePointerCapture(districtState.pointerId);
+      }
+      if (districtState.districtEl && districtState.districtEl.classList) {
+        districtState.districtEl.classList.remove('is-dragging');
+      }
+      setClusterBlocked(districtState, false);
+      if (districtState.moved) restoreCluster(districtState);
+    }
+
+    suppressClickFor = null;
+    markDropTarget(container, '');
+    markLeaveSource(container, '');
+    setDragReadout(container, null);
+  }
+
+  function setMoveMode(container, enabled) {
+    var next = !!enabled;
+    if (next === moveModeEnabled) {
+      updateMoveControl(container);
+      return;
+    }
+    moveModeEnabled = next;
+    if (!next) {
+      cancelPointerTranslations(container);
+      endKeyboardMove(container, false);
+    }
+    updateMoveControl(container);
+    announce(
+      container,
+      next
+        ? 'Move mode enabled. Drag a workspace or district, or use arrow keys with a selection.'
+        : 'Move mode disabled. Workspace and district positions are locked.'
+    );
+  }
+
+  function bindMoveControl(container) {
+    var toggle = container.querySelector('[data-map-drag]');
+    if (toggle && typeof toggle.addEventListener === 'function') {
+      toggle.addEventListener('click', function () {
+        if (layoutState.status !== 'ready') return;
+        var next = !moveModeEnabled;
+        setMoveMode(container, next);
+        // The former keyboard-only Move action focused the canvas. Preserve
+        // that direct path when the unified mode is enabled: the first arrow
+        // begins moving the current selection instead of panning the camera.
+        if (next) {
+          var canvas = container.querySelector('[data-ws-map-viewport]');
+          if (canvas && canvas.focus) canvas.focus();
+        }
+      });
+    }
+    updateMoveControl(container);
+  }
+
   // isInteractiveTarget guards empty-space panning. A gesture that starts on a
   // building, a group label, a checkbox, a control, or a link belongs to that
   // element, not to the camera (FR-34).
@@ -4405,11 +4549,6 @@
     // Fit all, Center selected and Reset view have no buttons any more: they are
     // items on the canvas context menu (see runMenuAction), plus the f / 0 keys
     // below. Nothing about what they do changed.
-    on('[data-map-move]', function () {
-      startKeyboardMove(container);
-      var canvasEl = container.querySelector('[data-ws-map-viewport]');
-      if (canvasEl && canvasEl.focus) canvasEl.focus();
-    });
 
     if (!canvas || typeof canvas.addEventListener !== 'function') return;
     // Keyboard equivalents for every camera gesture, so navigating the map
@@ -4425,8 +4564,17 @@
         cancelResize('Resize cancelled. The group is back at its saved size.');
         return;
       }
-      // Keyboard Move owns the arrow keys while it is active: they move the
-      // building, not the camera (FR-78).
+      // Move mode merges pointer and keyboard placement behind one safe-default
+      // control. The first arrow lazily starts a keyboard transaction for the
+      // current selection; without Move mode, arrows keep panning the camera.
+      if (
+        !moveState &&
+        moveModeEnabled &&
+        /^Arrow(?:Left|Right|Up|Down)$/.test(event.key) &&
+        selectedNodeAnchor()
+      ) {
+        startKeyboardMove(container);
+      }
       if (handleMoveKey(container, event)) {
         if (event.preventDefault) event.preventDefault();
         return;
@@ -5218,6 +5366,39 @@
     return Math.abs(a.x - b.x) < CELL_W && Math.abs(a.y - b.y) < CELL_H;
   }
 
+  /**
+   * Snapshot every currently rendered automatic workspace/district anchor.
+   *
+   * Deterministic fallback placement is stable only while the set of saved
+   * anchors is stable. Saving one formerly automatic workspace changes that
+   * seed and can make every remaining automatic workspace reflow after redraw
+   * — which looks like an unrelated workspace followed the one being moved.
+   * Any explicit move therefore materializes the untouched automatic anchors
+   * in the same atomic request. The reserved HQ site is deliberately absent
+   * from nodes/districts and is never persisted.
+   */
+  function automaticLayoutPins() {
+    var positions = {};
+    var pin = function (record) {
+      if (!record || !record.id || layoutState.positions[record.id]) return;
+      positions[record.id] = { x: record.x, y: record.y };
+    };
+    if (!lastWorldLayout) return positions;
+    (lastWorldLayout.nodes || []).forEach(pin);
+    (lastWorldLayout.hiddenNodes || []).forEach(pin);
+    (lastWorldLayout.districts || []).forEach(pin);
+    return positions;
+  }
+
+  function withAutomaticLayoutPins(overrides) {
+    var positions = automaticLayoutPins();
+    Object.keys(overrides || {}).forEach(function (id) {
+      var point = safePoint(overrides[id]);
+      if (id && point) positions[id] = point;
+    });
+    return positions;
+  }
+
   /** Every committed anchor other than `excludeId`'s own. */
   function occupiedAnchors(excludeId) {
     var occupied = [];
@@ -5316,10 +5497,21 @@
    * claim a membership that does not exist, and that is blocked before save
    * rather than saved and explained afterwards (FR-83).
    */
-  function memberMoveOperations(id, point) {
-    var positions = {};
-    positions[id] = { x: point.x, y: point.y };
+  function memberMoveOperations(id, point, intent) {
+    var moved = {};
+    moved[id] = point;
+    var positions = withAutomaticLayoutPins(moved);
     var operations = [{ op: 'set_positions', positions: positions }];
+
+    // A pending membership change is evaluated against the hierarchy it intends
+    // to create. Do not expand or collision-check the source's custom minimum
+    // solely to contain a member that will leave it after confirmation. If the
+    // user declines or the hierarchy write fails, the unchanged saved minimum
+    // plus the retained member make effectiveDistrictFrame render truthful
+    // expanded containment without persisting a temporary expansion (#374).
+    if (intent && (intent.kind === 'leave' || intent.kind === 'join')) {
+      return { operations: operations, conflict: null };
+    }
 
     var node = null;
     if (lastWorldLayout) {
@@ -5353,7 +5545,7 @@
   }
 
   function commitMove(container, id, el, point, previous, intent) {
-    var plan = memberMoveOperations(id, point);
+    var plan = memberMoveOperations(id, point, intent);
     if (!plan.operations) {
       // Blocked before save: nothing moved, nothing was asked of the server.
       placeElement(el, previous);
@@ -5376,10 +5568,9 @@
         // the survivable one: a failed reparent leaves a workspace that moved
         // but did not change groups, which is a state the user can see and
         // repeat. The reverse would leave it in a new group at its old spot.
-        // ...and the membership is asked about before it is written. This is
-        // the only Map gesture with no Map-side undo (FR-6g).
-        if (intent && intent.kind === 'join') {
-          return confirmJoinOnDrop(container, id, el, intent, committed);
+        // Every hierarchy-changing drop asks before the second write.
+        if (intent && (intent.kind === 'join' || intent.kind === 'leave')) {
+          return confirmMembershipOnDrop(container, id, el, intent, committed);
         }
         announce(container, 'Moved to ' + formatCoordinate(committed));
         settleLayout();
@@ -5401,12 +5592,11 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Drop confirmation (#346 FR-6g)
+  // Drop confirmation (#346 FR-6g, #374)
   //
-  // A drop that changes which group a workspace belongs to asks first. It is the
-  // one Map gesture with no Map-side undo — a frame follows its own members, so
-  // nothing on this surface can take a workspace back out again, and the user
-  // would have to go to Tree to reverse an accident.
+  // Every drop that changes group membership asks first. Join and leave share
+  // one panel controller so focus, dismissal, escaping, and one-answer ownership
+  // cannot drift between visually symmetric gestures.
   //
   // The panel is the map's own, not window.confirm, for the same reason the
   // context menu is: a native modal seizing focus the instant the mouse comes up
@@ -5418,22 +5608,29 @@
   var dropConfirmState = null;
 
   function dropConfirmHTML(spec) {
+    var leave = spec.kind === 'leave';
     return (
-      '<div class="ws-map-drop-confirm" data-ws-map-drop-confirm role="dialog" ' +
+      '<div class="ws-map-drop-confirm' +
+      (leave ? ' is-leave' : '') +
+      '" data-ws-map-drop-confirm role="dialog" ' +
       'aria-labelledby="wsMapDropConfirmTitle" aria-describedby="wsMapDropConfirmBody">' +
-      '<p class="ws-map-drop-confirm-title" id="wsMapDropConfirmTitle">Move ' +
+      '<p class="ws-map-drop-confirm-title" id="wsMapDropConfirmTitle">' +
+      (leave ? 'Remove ' : 'Move ') +
       escapeHtml(spec.wsName) +
-      ' into ' +
+      (leave ? ' from ' : ' into ') +
       escapeHtml(spec.groupName) +
       '?</p>' +
       '<p class="ws-map-drop-confirm-body" id="wsMapDropConfirmBody">' +
-      'It stays where you dropped it either way. Only Tree can take a workspace ' +
-      'back out of a group.</p>' +
+      'Its position stays where you dropped it.</p>' +
       '<div class="ws-map-drop-confirm-actions">' +
-      '<button type="button" class="ws-map-drop-confirm-go" data-drop-confirm="join">' +
-      'Move into group</button>' +
+      '<button type="button" class="ws-map-drop-confirm-go" data-drop-confirm="' +
+      (leave ? 'leave' : 'join') +
+      '">' +
+      (leave ? 'Remove from group' : 'Move into group') +
+      '</button>' +
       '<button type="button" class="ws-map-drop-confirm-no" data-drop-confirm="decline">' +
-      'Keep it out</button>' +
+      (leave ? 'Keep in group' : 'Keep it out') +
+      '</button>' +
       '</div>' +
       '</div>'
     );
@@ -5443,7 +5640,7 @@
    * Ask before the reparent, and answer nothing until the user does.
    *
    * @returns {boolean} false when there is nowhere to render it, which the
-   * caller must treat as "do not join" rather than as consent.
+   * caller must treat as "do not change membership" rather than as consent.
    */
   function openDropConfirm(container, spec) {
     closeDropConfirm({ restoreFocus: false });
@@ -5465,6 +5662,7 @@
       host: host,
       panel: panel,
       groupId: spec.groupId,
+      confirmAnswer: spec.kind === 'leave' ? 'leave' : 'join',
       onConfirm: spec.onConfirm,
       onDecline: spec.onDecline,
       // Focus goes back to the workspace that was dropped, so a keyboard user
@@ -5474,11 +5672,13 @@
       teardown: []
     };
 
-    // The district stays lit while the question is on screen: the panel names
-    // the group in words, and the highlight says which rectangle that is.
-    markDropTarget(container, spec.groupId);
+    // The involved district stays visually identified while the question is on
+    // screen. Join marks a destination; leave uses a distinct source state so
+    // the Map never implies the workspace is about to join its current group.
+    if (spec.kind === 'leave') markLeaveSource(container, spec.groupId);
+    else markDropTarget(container, spec.groupId);
     // ...and the panel wears that district's colour, so a violet group is never
-    // asked about in the default amber (the same fix the resize overlay needed).
+    // asked about in the default green (the same fix the resize overlay needed).
     wearDistrictAccent(container, panel, spec.groupId);
     placeMenu(panel, anchorForElement(spec.el));
     bindDropConfirmInteractions();
@@ -5490,7 +5690,7 @@
    * Give `el` the accent of the district it is about (#346 FR-129).
    *
    * Same reasoning as the resize overlay: a panel that talks about a violet
-   * group while wearing the default amber reads as being about something else.
+   * group while wearing the default green reads as being about something else.
    */
   function wearDistrictAccent(container, el, groupId) {
     if (!el || !el.classList) return;
@@ -5515,22 +5715,22 @@
   /**
    * Answer the question exactly once.
    *
-   * Every dismissal route lands here, and everything that is not an explicit
-   * "Move into group" is a decline — an unanswered question must never be read
-   * as a yes.
+   * Every dismissal route lands here, and everything that is not the panel's
+   * explicit affirmative answer is a decline — an unanswered question must
+   * never be read as a yes.
    */
-  function settleDropConfirm(answer) {
+  function settleDropConfirm(answer, options) {
     var state = dropConfirmState;
     if (!state || state.settled) return;
     state.settled = true;
-    var confirmed = answer === 'join';
+    var confirmed = answer === state.confirmAnswer;
     var onConfirm = state.onConfirm;
     var onDecline = state.onDecline;
-    closeDropConfirm({ restoreFocus: true });
+    closeDropConfirm({ restoreFocus: !options || options.restoreFocus !== false });
     if (confirmed) {
       if (typeof onConfirm === 'function') onConfirm();
     } else if (typeof onDecline === 'function') {
-      onDecline();
+      onDecline(options);
     }
   }
 
@@ -5543,6 +5743,7 @@
     });
     if (state.host) state.host.innerHTML = '';
     markDropTarget(state.container, '');
+    markLeaveSource(state.container, '');
     var restore = options && options.restoreFocus;
     if (restore && state.restoreFocusTo && typeof state.restoreFocusTo.focus === 'function') {
       state.restoreFocusTo.focus();
@@ -5608,9 +5809,14 @@
     if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
       document.addEventListener('keydown', onKeyDown, true);
       document.addEventListener('pointerdown', onClick, true);
+      // Native buttons activated with Enter/Space emit click without a pointer.
+      // Share the same settle-once handler so keyboard and pointer answers have
+      // identical confirmation semantics.
+      document.addEventListener('click', onClick, true);
       state.teardown.push(function () {
         document.removeEventListener('keydown', onKeyDown, true);
         document.removeEventListener('pointerdown', onClick, true);
+        document.removeEventListener('click', onClick, true);
       });
     }
   }
@@ -5619,25 +5825,30 @@
    * Put the question on screen and resolve with what the user chose.
    *
    * The coordinate is already saved by the time this runs, so declining is not
-   * a failure and is not reported as one: it leaves exactly the state a drop on
-   * open ground would have left.
+   * a failure: the dropped position stands and the prior membership remains.
    */
-  function confirmJoinOnDrop(container, id, el, intent, committed) {
+  function confirmMembershipOnDrop(container, id, el, intent, committed) {
+    var leaving = intent.kind === 'leave';
     return new Promise(function (resolve) {
       var opened = openDropConfirm(container, {
+        kind: intent.kind,
         el: el,
         groupId: intent.groupId,
         groupName: intent.name,
         wsName: intent.movingName || 'this workspace',
         onConfirm: function () {
-          resolve(joinGroupOnDrop(container, id, intent, committed));
+          resolve(changeMembershipOnDrop(container, id, intent, committed));
         },
-        onDecline: function () {
+        onDecline: function (options) {
           announce(
             container,
-            'Moved to ' + formatCoordinate(committed) + '. It stays out of ' + intent.name + '.'
+            'Moved to ' +
+              formatCoordinate(committed) +
+              (leaving ? '. It stays in ' : '. It stays out of ') +
+              intent.name +
+              '.'
           );
-          settleLayout();
+          if (!options || !options.skipRedraw) settleLayout();
           resolve(false);
         }
       });
@@ -5646,48 +5857,57 @@
           container,
           'Moved to ' +
             formatCoordinate(committed) +
-            '. Confirm whether to move it into ' +
+            '. Confirm whether to ' +
+            (leaving ? 'remove it from ' : 'move it into ') +
             intent.name +
             '.'
         );
         return;
       }
-      // Nothing to render into. The move stands; the membership question goes
-      // unasked, and an unasked question is never a yes.
-      announce(container, 'Moved to ' + formatCoordinate(committed));
+      // Nothing to render into. The coordinate stands; the membership question
+      // goes unasked, and an unasked question is never a yes.
+      announce(
+        container,
+        'Moved to ' +
+          formatCoordinate(committed) +
+          (leaving ? '. It stays in ' + intent.name + '.' : '')
+      );
       settleLayout();
       resolve(false);
     });
   }
 
   /**
-   * Reparent a workspace that was dropped inside a district (#346 FR-6a).
+   * Apply the one confirmed hierarchy change produced by a Map drop.
    *
    * This is the ONE place the Map writes hierarchy, and it does not do so
    * through the layout API — that API has no vocabulary for a parent and keeps
-   * none. It calls the same workspace endpoint Tree's drag-and-drop calls, so
-   * both views produce byte-identical mutations and neither can develop its own
-   * idea of what "move into a group" means.
+   * none. It calls the same workspace endpoint Tree uses, with a target id for
+   * join or the same empty parent Tree sends for moving to top level.
    *
-   * The move has already been saved by the time this runs, so a failure here is
-   * partial rather than total: the workspace is where the user put it, and only
-   * the membership did not change. That is reported as what it is.
+   * The coordinate is already saved, so failure here is partial rather than
+   * total: the workspace stays where it was dropped and retains its old group.
    */
-  function joinGroupOnDrop(container, id, intent, committed) {
+  function changeMembershipOnDrop(container, id, intent, committed) {
     if (typeof fetch !== 'function') return Promise.resolve(false);
+    var leaving = intent.kind === 'leave';
     return fetch('/api/workspaces/' + encodeURIComponent(id), {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ parent_id: intent.groupId })
+      body: JSON.stringify({ parent_id: leaving ? '' : intent.groupId })
     })
       .then(function (response) {
         if (!response || !response.ok) throw new Error('reparent failed');
         announce(
           container,
-          'Moved to ' + formatCoordinate(committed) + ' and added to ' + intent.name + '.'
+          'Moved to ' +
+            formatCoordinate(committed) +
+            (leaving ? ' and removed from ' : ' and added to ') +
+            intent.name +
+            '.'
         );
         // Membership is the host's data, not the Map's: it reloads the tree and
-        // re-mounts, which is what redraws the district around its new member.
+        // re-mounts, which is what redraws district membership and counts.
         notifyHierarchyChanged();
         return true;
       })
@@ -5696,9 +5916,11 @@
           container,
           'Moved to ' +
             formatCoordinate(committed) +
-            ', but it could not be added to ' +
+            (leaving ? ', but it could not be removed from ' : ', but it could not be added to ') +
             intent.name +
-            '. It is still in its previous group.'
+            '. It is still in ' +
+            (leaving ? intent.name : 'its previous group') +
+            '.'
         );
         settleLayout();
         return false;
@@ -5724,6 +5946,18 @@
     });
   }
 
+  function markLeaveSource(container, groupId) {
+    if (!container || typeof container.querySelectorAll !== 'function') return;
+    var districts = container.querySelectorAll('.ws-map-district[data-group-id]');
+    Array.prototype.forEach.call(districts, function (el) {
+      if (!el.classList) return;
+      el.classList.toggle(
+        'is-leave-source',
+        !!groupId && el.getAttribute('data-group-id') === groupId
+      );
+    });
+  }
+
   /** Tell the host that workspace hierarchy changed underneath it. */
   function notifyHierarchyChanged() {
     var state = lastMount && lastMount.state;
@@ -5744,7 +5978,7 @@
       if (!el || typeof el.addEventListener !== 'function') return;
 
       el.addEventListener('pointerdown', function (event) {
-        if (layoutState.status !== 'ready') return;
+        if (layoutState.status !== 'ready' || !moveModeEnabled) return;
         if (event.button != null && event.button !== 0) return;
         // The checkbox and modifier-clicks belong to bulk selection, and must
         // never start a spatial move (FR-76).
@@ -5796,6 +6030,7 @@
           ? { kind: 'none' }
           : dropMembershipIntent(dragState.id, dragState.candidate, workspaces, lastWorldLayout);
         markDropTarget(container, intent.kind === 'join' ? intent.groupId : '');
+        if (el.classList) el.classList.toggle('is-leaving', intent.kind === 'leave');
         dragState.intent = intent;
         setDragReadout(
           container,
@@ -5804,7 +6039,10 @@
             ? MOVE_BLOCKED_INSTRUCTION
             : intent.kind === 'join'
               ? 'Release to move this workspace into ' + intent.name + '.'
-              : undefined
+              : intent.kind === 'leave'
+                ? 'Release to remove this workspace from ' + intent.name + '.'
+                : undefined,
+          intent.kind
         );
       });
 
@@ -5823,6 +6061,7 @@
         if (el.classList) {
           el.classList.remove('is-dragging');
           el.classList.remove('is-blocked');
+          el.classList.remove('is-leaving');
         }
         // Every exit path clears it — up, cancel, Escape — so a district can
         // never be left advertising a drop that already happened or was
@@ -5876,13 +6115,16 @@
   // setDragReadout shows the live candidate coordinate during a move. It shares
   // the banner with Build mode but never its words: a user dragging a building
   // must not be told to "choose where to build" (FR-68).
-  function setDragReadout(container, point, instruction) {
+  function setDragReadout(container, point, instruction, membershipKind) {
     var readout = container.querySelector('[data-map-build-coords]');
     var banner = container.querySelector('[data-map-build-banner]');
     if (!readout || !banner) return;
     if (!point) {
       banner.hidden = true;
-      if (banner.classList) banner.classList.remove('is-blocked');
+      if (banner.classList) {
+        banner.classList.remove('is-blocked');
+        banner.classList.remove('is-leaving');
+      }
       return;
     }
     banner.hidden = false;
@@ -5891,6 +6133,7 @@
     // that already passes MOVE_BLOCKED_INSTRUCTION gets this for free.
     if (banner.classList) {
       banner.classList.toggle('is-blocked', instruction === MOVE_BLOCKED_INSTRUCTION);
+      banner.classList.toggle('is-leaving', membershipKind === 'leave');
     }
     setBannerMode(container, instruction || MOVE_INSTRUCTION, false);
     readout.textContent = candidateLabel(point);
@@ -6045,17 +6288,56 @@
   }
 
   /**
+   * Materialize automatic anchors before translating one cluster.
+   *
+   * The moving group and members have to be pinned because the server
+   * deliberately skips unsaved anchors during translate_group. Unrelated
+   * automatic records have to be pinned too: introducing saved cluster anchors
+   * changes the deterministic fallback seed, so leaving outsiders automatic
+   * would make them reflow after redraw even though the gesture never touched
+   * them. One snapshot and one transaction therefore preserve every current
+   * world anchor while the following operation moves only this cluster.
+   *
+   * Anchors this layout snapshot already knows as saved are omitted, avoiding
+   * redundant coordinate rewrites before the server applies the shared delta.
+   */
+  function clusterMovePins(state) {
+    var positions = automaticLayoutPins();
+    var pin = function (id, point) {
+      if (!id || !point || layoutState.positions[id]) return;
+      positions[id] = { x: point.x, y: point.y };
+    };
+
+    // automaticLayoutPins normally contains the whole cluster. Keep the drag
+    // snapshot as a fallback for a partial test/DOM snapshot, and to document
+    // that translate_group requires each unsaved member to exist server-side.
+    pin(state.groupId, state.districtOrigin);
+    (state.members || []).forEach(function (member) {
+      pin(member.id, member.origin);
+    });
+    return positions;
+  }
+
+  /**
    * Commit a cluster move.
    *
-   * The client sends the group and one delta, not a list of coordinates: the
-   * server resolves the district's current members and translates their latest
-   * anchors inside one transaction, so the whole cluster lands or none of it
-   * does (FR-87).
+   * The client sends one atomic patch. Any automatic fallback anchors are
+   * materialized first; then the server resolves the district's current
+   * members and translates their latest saved anchors inside the same
+   * transaction, so the whole cluster lands or none of it does (FR-87).
    */
   function commitClusterMove(container, state, delta) {
-    return patchLayout([
-      { op: 'translate_group', group_id: state.groupId, delta: { x: delta.x, y: delta.y } }
-    ])
+    var operations = [];
+    var pins = clusterMovePins(state);
+    if (Object.keys(pins).length) {
+      operations.push({ op: 'set_positions', positions: pins });
+    }
+    operations.push({
+      op: 'translate_group',
+      group_id: state.groupId,
+      delta: { x: delta.x, y: delta.y }
+    });
+    return patchLayout(operations)
       .then(function () {
         announce(container, 'District moved. Every workspace kept its place inside it.');
         pendingFocusId = '';
@@ -6193,120 +6475,136 @@
   };
 
   function bindDistrictDrag(container) {
-    var handles = container.querySelectorAll('[data-group-drag]');
-    Array.prototype.forEach.call(handles, function (handle) {
-      if (!handle || typeof handle.addEventListener !== 'function') return;
+    var districts = container.querySelectorAll('.ws-map-district[data-group-id]');
+    Array.prototype.forEach.call(districts, function (district) {
+      if (!district || typeof district.addEventListener !== 'function') return;
+      var groupId = district.getAttribute('data-group-id');
+      var handle = district.querySelector('[data-group-drag]');
+      // The visible Move button remains the explicit, focusable affordance. The
+      // district itself is a second pointer target so dragging its border or
+      // empty fill moves the group instead of panning the entire map. Child
+      // tiles and header controls remain independent because a surface gesture
+      // starts only when the district itself is the event target.
+      var initiators = handle ? [handle, district] : [district];
 
-      handle.addEventListener('pointerdown', function (event) {
-        if (layoutState.status !== 'ready') return;
-        if (event.button != null && event.button !== 0) return;
-        var groupId = handle.getAttribute('data-group-drag');
-        var origin = committedAnchor(groupId);
-        if (!groupId || !origin) return;
-        var members = clusterMembers(container, groupId);
-        clusterDrag = {
-          groupId: groupId,
-          handle: handle,
-          pointerId: event.pointerId,
-          startX: event.clientX,
-          startY: event.clientY,
-          districtEl: container.querySelector('.ws-map-district[data-group-id="' + groupId + '"]'),
-          districtOrigin: origin,
-          snapOrigin: clusterSnapOrigin(members, origin),
-          members: members,
-          delta: { x: 0, y: 0 },
-          moved: false
-        };
-        if (handle.setPointerCapture) handle.setPointerCapture(event.pointerId);
-        if (event.stopPropagation) event.stopPropagation();
-        // Suppress the browser's own drag/selection behaviour so the gesture
-        // moves the district instead of highlighting its label.
-        if (event.preventDefault) event.preventDefault();
-      });
+      initiators.forEach(function (initiator) {
+        var isSurface = initiator === district;
 
-      handle.addEventListener('pointermove', function (event) {
-        if (!clusterDrag || clusterDrag.handle !== handle) return;
-        if (event.pointerId !== clusterDrag.pointerId) return;
-        var dx = event.clientX - clusterDrag.startX;
-        var dy = event.clientY - clusterDrag.startY;
-        if (!clusterDrag.moved) {
-          if (Math.abs(dx) < PAN_THRESHOLD && Math.abs(dy) < PAN_THRESHOLD) return;
-          clusterDrag.moved = true;
-          if (clusterDrag.districtEl && clusterDrag.districtEl.classList) {
-            clusterDrag.districtEl.classList.add('is-dragging');
+        initiator.addEventListener('pointerdown', function (event) {
+          if (layoutState.status !== 'ready' || !moveModeEnabled) return;
+          if (event.button != null && event.button !== 0) return;
+          if (isSurface && event.target !== district) return;
+          var origin = committedAnchor(groupId);
+          if (!groupId || !origin) return;
+          var members = clusterMembers(container, groupId);
+          clusterDrag = {
+            groupId: groupId,
+            handle: initiator,
+            pointerId: event.pointerId,
+            startX: event.clientX,
+            startY: event.clientY,
+            districtEl: district,
+            districtOrigin: origin,
+            snapOrigin: clusterSnapOrigin(members, origin),
+            members: members,
+            delta: { x: 0, y: 0 },
+            moved: false
+          };
+          if (initiator.setPointerCapture) initiator.setPointerCapture(event.pointerId);
+          if (event.stopPropagation) event.stopPropagation();
+          // Suppress the browser's own drag/selection behaviour so the gesture
+          // moves the district instead of highlighting nearby text.
+          if (event.preventDefault) event.preventDefault();
+        });
+
+        initiator.addEventListener('pointermove', function (event) {
+          if (!clusterDrag || clusterDrag.handle !== initiator) return;
+          if (event.pointerId !== clusterDrag.pointerId) return;
+          var dx = event.clientX - clusterDrag.startX;
+          var dy = event.clientY - clusterDrag.startY;
+          if (!clusterDrag.moved) {
+            if (Math.abs(dx) < PAN_THRESHOLD && Math.abs(dy) < PAN_THRESHOLD) return;
+            clusterDrag.moved = true;
+            if (clusterDrag.districtEl && clusterDrag.districtEl.classList) {
+              clusterDrag.districtEl.classList.add('is-dragging');
+            }
           }
-        }
-        if (event.preventDefault) event.preventDefault();
-        var raw = { x: dx / camera.zoom, y: dy / camera.zoom };
-        var snapOrigin = clusterDrag.snapOrigin;
-        var snappedTarget = snapPoint(
-          { x: snapOrigin.x + raw.x, y: snapOrigin.y + raw.y },
-          !!event.altKey
-        );
-        clusterDrag.delta = {
-          x: snappedTarget.x - snapOrigin.x,
-          y: snappedTarget.y - snapOrigin.y
-        };
-        previewCluster(clusterDrag, clusterDrag.delta);
-        var blocked = clusterCollides(clusterDrag.groupId, clusterDrag.members, clusterDrag.delta);
-        setClusterBlocked(clusterDrag, blocked);
-        // The readout describes where the district itself lands, which is the
-        // thing being dragged, even though the grid snap was taken from its
-        // top-left member.
-        setDragReadout(
-          container,
-          {
-            x: clusterDrag.districtOrigin.x + clusterDrag.delta.x,
-            y: clusterDrag.districtOrigin.y + clusterDrag.delta.y
-          },
-          blocked ? MOVE_BLOCKED_INSTRUCTION : undefined
-        );
-      });
-
-      function finish(event, cancelled) {
-        if (!clusterDrag || clusterDrag.handle !== handle) return;
-        if (event && event.pointerId != null && event.pointerId !== clusterDrag.pointerId) return;
-        var state = clusterDrag;
-        clusterDrag = null;
-        if (
-          handle.releasePointerCapture &&
-          handle.hasPointerCapture &&
-          handle.hasPointerCapture(state.pointerId)
-        ) {
-          handle.releasePointerCapture(state.pointerId);
-        }
-        if (state.districtEl && state.districtEl.classList) {
-          state.districtEl.classList.remove('is-dragging');
-        }
-        setClusterBlocked(state, false);
-        setDragReadout(container, null);
-        if (!state.moved) return;
-        if (cancelled) {
-          restoreCluster(state);
-          announce(container, 'District move cancelled.');
-          return;
-        }
-        if (clusterCollides(state.groupId, state.members, state.delta)) {
-          restoreCluster(state);
-          announce(
-            container,
-            'That would land a workspace on top of one outside this district. The district is back where it was.'
+          if (event.preventDefault) event.preventDefault();
+          var raw = { x: dx / camera.zoom, y: dy / camera.zoom };
+          var snapOrigin = clusterDrag.snapOrigin;
+          var snappedTarget = snapPoint(
+            { x: snapOrigin.x + raw.x, y: snapOrigin.y + raw.y },
+            !!event.altKey
           );
-          return;
-        }
-        commitClusterMove(container, state, state.delta);
-      }
+          clusterDrag.delta = {
+            x: snappedTarget.x - snapOrigin.x,
+            y: snappedTarget.y - snapOrigin.y
+          };
+          previewCluster(clusterDrag, clusterDrag.delta);
+          var blocked = clusterCollides(
+            clusterDrag.groupId,
+            clusterDrag.members,
+            clusterDrag.delta
+          );
+          setClusterBlocked(clusterDrag, blocked);
+          // The readout describes where the district itself lands, which is the
+          // thing being dragged, even though the grid snap was taken from its
+          // top-left member.
+          setDragReadout(
+            container,
+            {
+              x: clusterDrag.districtOrigin.x + clusterDrag.delta.x,
+              y: clusterDrag.districtOrigin.y + clusterDrag.delta.y
+            },
+            blocked ? MOVE_BLOCKED_INSTRUCTION : undefined
+          );
+        });
 
-      handle.addEventListener('pointerup', function (event) {
-        finish(event, false);
-      });
-      handle.addEventListener('pointercancel', function (event) {
-        finish(event, true);
-      });
-      handle.addEventListener('keydown', function (event) {
-        if (event.key === 'Escape' && clusterDrag && clusterDrag.handle === handle) {
-          finish(null, true);
+        function finish(event, cancelled) {
+          if (!clusterDrag || clusterDrag.handle !== initiator) return;
+          if (event && event.pointerId != null && event.pointerId !== clusterDrag.pointerId) return;
+          var state = clusterDrag;
+          clusterDrag = null;
+          if (
+            initiator.releasePointerCapture &&
+            initiator.hasPointerCapture &&
+            initiator.hasPointerCapture(state.pointerId)
+          ) {
+            initiator.releasePointerCapture(state.pointerId);
+          }
+          if (state.districtEl && state.districtEl.classList) {
+            state.districtEl.classList.remove('is-dragging');
+          }
+          setClusterBlocked(state, false);
+          setDragReadout(container, null);
+          if (!state.moved) return;
+          if (cancelled) {
+            restoreCluster(state);
+            announce(container, 'District move cancelled.');
+            return;
+          }
+          if (clusterCollides(state.groupId, state.members, state.delta)) {
+            restoreCluster(state);
+            announce(
+              container,
+              'That would land a workspace on top of one outside this district. The district is back where it was.'
+            );
+            return;
+          }
+          commitClusterMove(container, state, state.delta);
         }
+
+        initiator.addEventListener('pointerup', function (event) {
+          finish(event, false);
+        });
+        initiator.addEventListener('pointercancel', function (event) {
+          finish(event, true);
+        });
+        initiator.addEventListener('keydown', function (event) {
+          if (event.key === 'Escape' && clusterDrag && clusterDrag.handle === initiator) {
+            finish(null, true);
+          }
+        });
       });
     });
   }
@@ -6725,8 +7023,9 @@
     // placement resolves collisions through the same rule (FR-72).
     var target = resolveDropAnchor(workspaceId, point);
     point = { x: target.x, y: target.y };
-    var positions = {};
-    positions[workspaceId] = { x: point.x, y: point.y };
+    var built = {};
+    built[workspaceId] = point;
+    var positions = withAutomaticLayoutPins(built);
     return patchLayout([{ op: 'set_positions', positions: positions }])
       .then(function () {
         selectedId = workspaceId;
@@ -6756,8 +7055,9 @@
   function retryFailedPlacement(workspaceId) {
     var point = failedPlacements[workspaceId];
     if (!point) return Promise.resolve(false);
-    var positions = {};
-    positions[workspaceId] = point;
+    var retry = {};
+    retry[workspaceId] = point;
+    var positions = withAutomaticLayoutPins(retry);
     return patchLayout([{ op: 'set_positions', positions: positions }])
       .then(function () {
         delete failedPlacements[workspaceId];
@@ -6876,10 +7176,17 @@
     });
 
     var viewport = measureViewport(container);
-    // The re-render below destroys the menu's host along with everything else.
-    // Closing it first keeps the listeners and the focus-restore target from
-    // outliving the DOM they referred to.
+    // A hierarchy/data refresh rebuilds the live region too. Preserve its last
+    // truthful outcome so a required partial-failure or membership message does
+    // not disappear in the same tick that redraws retained membership.
+    var liveBeforeRemount = container.querySelector('[data-map-live]');
+    var preservedAnnouncement = liveBeforeRemount ? liveBeforeRemount.textContent : '';
+    // The re-render below destroys interaction hosts and pointer owners. Close
+    // or cancel them first so listeners, capture, and previews cannot outlive
+    // the DOM they referred to.
     closeContextMenu({ restoreFocus: false });
+    settleDropConfirm('decline', { restoreFocus: false, skipRedraw: true });
+    cancelPointerTranslations(container);
     lastMount = { container: container, state: state };
 
     container.innerHTML = shellHTML(
@@ -6903,11 +7210,16 @@
     bindViewportPan(container);
     bindViewportWheel(container);
     bindCameraControls(container);
+    bindMoveControl(container);
     bindSnapControl(container);
     bindTileDrag(container, workspaces);
     bindDistrictDrag(container);
     bindResizeHandles(container);
     bindResetLayout(container);
+    if (preservedAnnouncement) {
+      var liveAfterRemount = container.querySelector('[data-map-live]');
+      if (liveAfterRemount) liveAfterRemount.textContent = preservedAnnouncement;
+    }
     // Focus returns to the record it was on before a committed move or a
     // refresh re-rendered the map (FR-117).
     if (pendingFocusId) {
@@ -6944,6 +7256,9 @@
     if (!container) return;
     stopResizeWatch();
     closeContextMenu({ restoreFocus: false });
+    settleDropConfirm('decline', { restoreFocus: false, skipRedraw: true });
+    cancelPointerTranslations(container);
+    endKeyboardMove(container, false);
     container.innerHTML = '';
     // Clearing lastMount is what makes a layout response still in flight a
     // no-op when it lands: settleLayout has nothing to repaint.

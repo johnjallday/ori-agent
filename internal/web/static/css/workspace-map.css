@@ -432,6 +432,13 @@
   outline: 2px solid var(--ws-faction);
   outline-offset: 2px;
 }
+/* The pointer-translation mode announces itself in text and with a doubled
+   control boundary, so on/off is not encoded by colour alone. */
+.ws-map-ctl[data-map-drag][aria-pressed="true"] {
+  border-style: double;
+  border-width: 3px;
+  font-weight: 700;
+}
 .ws-map-ctl:disabled {
   opacity: 0.45;
   cursor: not-allowed;
@@ -486,6 +493,12 @@
 .ws-map-build.is-blocked .ws-map-build-dot,
 .ws-map-build.is-blocked .ws-map-build-coords {
   color: var(--ws-danger, #d9534f);
+}
+/* Leaving a group is a hierarchy outcome, not an ordinary coordinate move.
+   A double rule distinguishes it before release without relying on colour. */
+.ws-map-build.is-leaving {
+  border-style: double;
+  border-width: 3px;
 }
 /* The build-mode cursor and candidate-site marker are gone with the mode
    itself (#317): there is no in-between state to preview when the right-click
@@ -573,8 +586,8 @@
    out of reach of a district's appearance (FR-128).
    --------------------------------------------------------------------------- */
 .ws-map-district {
-  /* The default accent, and the fallback for anything unrecognised. */
-  --ws-district-accent: 232, 134, 77;
+  /* Ori green is the default accent and fallback for anything unrecognised. */
+  --ws-district-accent: 70, 211, 154;
 }
 .ws-map-district.ws-map-accent-beacon,
 .ws-map-resize-overlay.ws-map-accent-beacon,
@@ -714,8 +727,15 @@
 }
 .ws-map-district-handle {
   margin-left: auto;
-  cursor: grab;
+  cursor: default;
   touch-action: none;
+}
+.ws-map-canvas:not(.is-drag-enabled) .ws-map-district-handle {
+  opacity: 0.65;
+}
+.ws-map-canvas.is-drag-enabled .ws-map-district,
+.ws-map-canvas.is-drag-enabled .ws-map-district-handle {
+  cursor: grab;
 }
 .ws-map-district-more,
 .ws-map-district-collapse {
@@ -752,6 +772,7 @@
 .ws-map-district.is-dragging {
   border-style: solid;
   border-color: rgb(var(--ws-district-accent));
+  cursor: grabbing;
 }
 /* Releasing here would put the dragged workspace INTO this group (#346
    FR-6a). A filled surface plus a solid rule, matching what Tree's
@@ -763,6 +784,13 @@
   border-width: 2px;
   border-color: rgb(var(--ws-district-accent));
   background: rgba(var(--ws-district-accent), 0.16);
+}
+/* A leave confirmation identifies the source with a doubled boundary, not the
+   filled destination treatment above. The panel also names it in words. */
+.ws-map-district.is-leave-source {
+  border-style: double;
+  border-width: 4px;
+  border-color: rgb(var(--ws-district-accent));
 }
 .ws-map-district.is-dragging .ws-map-district-handle {
   cursor: grabbing;
@@ -776,27 +804,34 @@
 .ws-map-drop-confirm {
   /* The same default as a district, so the panel is never colourless while the
      accent classes above swap it to match the group being joined. */
-  --ws-district-accent: 232, 134, 77;
+  --ws-district-accent: 70, 211, 154;
   position: fixed;
   z-index: 10001;
-  max-width: 300px;
+  width: max-content;
+  max-width: min(300px, calc(100vw - 24px));
   padding: 14px 16px;
   background: var(--bg-primary);
   border: 1px solid var(--border-color);
   border-radius: 10px;
   box-shadow: var(--shadow-lg);
 }
+.ws-map-drop-confirm.is-leave {
+  border-style: double;
+  border-width: 3px;
+}
 .ws-map-drop-confirm-title {
   margin: 0 0 6px;
   font-size: 14px;
   font-weight: 600;
   color: var(--text-primary);
+  overflow-wrap: anywhere;
 }
 .ws-map-drop-confirm-body {
   margin: 0 0 12px;
   font-size: 12px;
   line-height: 1.45;
   color: var(--text-secondary);
+  overflow-wrap: anywhere;
 }
 .ws-map-drop-confirm-actions {
   display: flex;
@@ -875,8 +910,8 @@
   inset: 0;
   z-index: 8;
   /* The selected district's accent, set by positionResizeOverlay. Defaults to
-     the Keeper amber so the overlay is never colourless. */
-  --ws-district-accent: 232, 134, 77;
+     Ori green so the overlay is never colourless. */
+  --ws-district-accent: 70, 211, 154;
   /* Only the handles take input. The rectangle between them must stay inert or
      it would swallow every pan, click, and right-click aimed at the map under a
      selected district (FR-157). */
@@ -1027,9 +1062,9 @@
   padding: 0;
   border: 0;
   background: none;
-  /* Buildings are grabbable; empty world space is pannable. Two different cues
-     for two different kinds of movement (#292 design §6). */
-  cursor: grab;
+  /* Dragging is opt-in (#374). Off-mode buildings still advertise their
+     ordinary selection action without promising spatial movement. */
+  cursor: pointer;
   touch-action: none;
   display: flex;
   flex-direction: column;
@@ -1041,6 +1076,9 @@
 .ws-map-tile:hover {
   transform: translateY(-4px);
 }
+.ws-map-canvas.is-drag-enabled .ws-map-tile {
+  cursor: grab;
+}
 /* Drag and unsaved states carry a shape and an outline, never colour alone
    (FR-120). */
 .ws-map-tile.is-dragging {
@@ -1050,6 +1088,10 @@
   outline: 2px dashed var(--ws-faction);
   outline-offset: 4px;
   transition: none;
+}
+.ws-map-tile.is-dragging.is-leaving {
+  outline-style: double;
+  outline-width: 4px;
 }
 .ws-map-tile.is-unsaved {
   outline: 2px dotted var(--ws-danger, #d9534f);
@@ -2138,6 +2180,15 @@
 @media (max-width: 900px) {
   .ws-map-layout {
     grid-template-columns: 1fr;
+  }
+
+  /* The extra Drag control must not collide with the zoom cluster. Placement
+     actions take their own row while retaining 44px touch targets. */
+  .ws-map-actions {
+    left: 16px;
+    right: 16px;
+    bottom: 70px;
+    justify-content: flex-end;
   }
 
   /* Narrow windows: the overview stays in normal flow, stacked below the map,

@@ -1669,12 +1669,12 @@ body.home-command-page .ori-guide__launcher {
   margin-right: 6px;
   border: 1px solid rgba(0, 0, 0, 0.25);
   border-radius: 2px;
-  background: rgb(var(--cockpit-swatch, 232, 134, 77));
+  background: rgb(var(--cockpit-swatch, 70, 211, 154));
   vertical-align: baseline;
 }
 
 .cockpit-rail-accent-default {
-  --cockpit-swatch: 232, 134, 77;
+  --cockpit-swatch: 70, 211, 154;
 }
 .cockpit-rail-accent-beacon {
   --cockpit-swatch: 74, 124, 178;
