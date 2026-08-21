@@ -221,6 +221,25 @@ capture() {
     fail "server did not become healthy within 10 seconds; see ${RUN_DIR}/logs/server.log"
   fi
 
+  # Seed the "Workspace Command" README scene's backing workspace once, here,
+  # before the capture driver's two Playwright passes. The page route resolves
+  # `/workspaces/<slug>` against the real workspace store (folder-slug
+  # cutover), so that scene needs one real workspace to exist -- see
+  # tests/readme-capture.spec.ts. Seeding it eagerly (rather than letting the
+  # first Playwright pass create it lazily) keeps the several-second blank-
+  # workspace creation cost off of the "first" run only: both passes then find
+  # the same already-seeded workspace at the same (fast) speed, so the
+  # determinism check (assertRepeatable) isn't skewed by one pass paying that
+  # cost and the other not.
+  local seed_url="http://127.0.0.1:${requested_port}/api/workspaces"
+  if ! curl --fail --silent --show-error --max-time 15 \
+    -H 'Content-Type: application/json' \
+    -d '{"name":"Ws Product Launch","blank":true}' \
+    "${seed_url}" >"${RUN_DIR}/logs/seed-workspace.json" 2>"${RUN_DIR}/logs/seed-workspace.log"; then
+    cat "${RUN_DIR}/logs/seed-workspace.log" >&2 || true
+    fail "could not seed the Workspace Command scene's workspace; see ${RUN_DIR}/logs/seed-workspace.log"
+  fi
+
   if ! env -i \
     PATH="${PATH}" \
     HOME="${SANDBOX}" \
