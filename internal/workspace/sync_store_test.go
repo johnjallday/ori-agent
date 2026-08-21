@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -8,6 +9,58 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/agent"
 )
+
+type failingWorkspaceSaveStore struct {
+	Store
+	err error
+}
+
+func (s *failingWorkspaceSaveStore) Save(*Workspace) error { return s.err }
+
+func TestSyncStore_SaveRollsBackNewFolderWhenPrimaryFails(t *testing.T) {
+	primary := NewInMemoryStore()
+	fileStore, err := NewFileStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	defer func() { _ = fileStore.Close() }()
+
+	failure := errors.New("primary unavailable")
+	store := NewSyncStore(&failingWorkspaceSaveStore{Store: primary, err: failure}, fileStore)
+	ws := NewWorkspace(CreateWorkspaceParams{Name: "Rollback Me"})
+	if err := store.Save(ws); !errors.Is(err, failure) {
+		t.Fatalf("Save error = %v, want primary failure", err)
+	}
+	if _, err := fileStore.Get(ws.ID); err == nil {
+		t.Fatal("failed primary save left a folder registration behind")
+	}
+	if _, err := os.Stat(filepath.Join(fileStore.BasePath(), "rollback-me")); !os.IsNotExist(err) {
+		t.Fatalf("failed primary save left folder on disk: %v", err)
+	}
+}
+
+func TestSyncStore_FileSlugConflictDoesNotPersistPrimary(t *testing.T) {
+	primary := NewInMemoryStore()
+	fileStore, err := NewFileStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	defer func() { _ = fileStore.Close() }()
+
+	existing := NewWorkspace(CreateWorkspaceParams{Name: "Reports"})
+	if err := fileStore.Save(existing); err != nil {
+		t.Fatalf("seed FileStore: %v", err)
+	}
+	candidate := NewWorkspace(CreateWorkspaceParams{Name: "Reports"})
+	err = NewSyncStore(primary, fileStore).Save(candidate)
+	var conflict *FolderSlugConflictError
+	if !errors.As(err, &conflict) {
+		t.Fatalf("Save error = %v, want FolderSlugConflictError", err)
+	}
+	if _, err := primary.Get(candidate.ID); err == nil {
+		t.Fatal("FileStore slug conflict still persisted the primary record")
+	}
+}
 
 func TestSyncStore_SaveSyncsToDisk(t *testing.T) {
 	// Set up an in-memory primary store and a file-based sync store

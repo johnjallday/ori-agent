@@ -339,6 +339,11 @@ func (h *hybridStore) GetWorkspace(ctx context.Context, id string) (*Workspace, 
 	return h.sqlite.GetWorkspace(ctx, id)
 }
 
+// GetWorkspaceBySlug resolves a current active workspace slug through SQLite.
+func (h *hybridStore) GetWorkspaceBySlug(ctx context.Context, slug string) (*Workspace, error) {
+	return h.sqlite.GetWorkspaceBySlug(ctx, slug)
+}
+
 // UpdateWorkspace updates workspace metadata.
 func (h *hybridStore) UpdateWorkspace(ctx context.Context, workspace *Workspace) error {
 	workspace.Kind = NormalizeWorkspaceKind(string(workspace.Kind))

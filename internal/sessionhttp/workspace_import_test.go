@@ -1380,8 +1380,30 @@ func TestHandleWorkspaceImportDuplicateCheckAndConflict(t *testing.T) {
 	overrideReq.Header.Set("Content-Type", "application/json")
 	overrideW := httptest.NewRecorder()
 	handler.HandleWorkspaces(overrideW, overrideReq)
-	if overrideW.Code != http.StatusCreated {
-		t.Fatalf("expected duplicate override to succeed, got %d: %s", overrideW.Code, overrideW.Body.String())
+	if overrideW.Code != http.StatusConflict {
+		t.Fatalf("expected global slug conflict despite duplicate-folder override, got %d: %s", overrideW.Code, overrideW.Body.String())
+	}
+	var overrideResp map[string]any
+	if err := json.Unmarshal(overrideW.Body.Bytes(), &overrideResp); err != nil {
+		t.Fatalf("decode override conflict: %v", err)
+	}
+	conflict, ok := overrideResp["conflict"].(map[string]any)
+	if !ok || conflict["suggested_slug"] != "duplicate-target-2" {
+		t.Fatalf("expected globally available duplicate-target-2 suggestion, got %#v", overrideResp)
+	}
+
+	retryPayload, _ := json.Marshal(map[string]any{
+		"name":            "Duplicate Override",
+		"path":            importDir,
+		"allow_duplicate": true,
+		"folder_slug":     "duplicate-target-2",
+	})
+	retryReq := httptest.NewRequest(http.MethodPost, "/api/workspaces/import", bytes.NewBuffer(retryPayload))
+	retryReq.Header.Set("Content-Type", "application/json")
+	retryW := httptest.NewRecorder()
+	handler.HandleWorkspaces(retryW, retryReq)
+	if retryW.Code != http.StatusCreated {
+		t.Fatalf("expected suggested slug retry to succeed, got %d: %s", retryW.Code, retryW.Body.String())
 	}
 }
 

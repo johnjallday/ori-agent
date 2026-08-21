@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 	"unicode"
@@ -87,6 +88,40 @@ func Slugify(name string) string {
 	}
 
 	return s
+}
+
+// IsCanonicalWorkspaceSlug reports whether slug is already in the exact form
+// Slugify emits. Browser routes use this to reject empty, malformed, or
+// non-canonical tokens instead of silently rewriting them or treating them as
+// workspace IDs.
+func IsCanonicalWorkspaceSlug(slug string) bool {
+	trimmed := strings.TrimSpace(slug)
+	return trimmed != "" && trimmed == slug && Slugify(trimmed) == trimmed
+}
+
+// WorkspaceSlugWithSuffix appends a numeric conflict suffix without exceeding
+// MaxSlugLength.
+func WorkspaceSlugWithSuffix(baseSlug string, suffix int) string {
+	suffixText := fmt.Sprintf("-%d", suffix)
+	maxBaseLen := MaxSlugLength - len(suffixText)
+	if maxBaseLen < 1 {
+		maxBaseLen = 1
+	}
+
+	trimmedBase := strings.Trim(strings.TrimSpace(baseSlug), "-")
+	if len(trimmedBase) > maxBaseLen {
+		trimmedBase = strings.TrimRight(trimmedBase[:maxBaseLen], "-")
+	}
+	if trimmedBase == "" {
+		trimmedBase = "untitled"
+		if len(trimmedBase) > maxBaseLen {
+			trimmedBase = strings.TrimRight(trimmedBase[:maxBaseLen], "-")
+		}
+		if trimmedBase == "" {
+			trimmedBase = "w"
+		}
+	}
+	return trimmedBase + suffixText
 }
 
 // stripAccents removes combining unicode marks (accents) from the string,

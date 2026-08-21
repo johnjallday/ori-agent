@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -65,12 +66,20 @@ type Store interface {
 	Update(wsID string, fn func(*Workspace) error) error
 }
 
+// SlugResolver is the optional read contract used by browser-facing workspace
+// routes. Implementations resolve only a current canonical folder slug; they
+// must never fall back to treating the token as a workspace ID.
+type SlugResolver interface {
+	ResolveSlug(slug string) (*Workspace, error)
+}
+
 // FileStore implements Store using folder-based persistence.
 // Each workspace is a folder: workspaces/{slug}/workspace.json
 type FileStore struct {
 	basePath string
 	cache    map[string]*Workspace
 	idToPath map[string]string // maps workspace ID → relative folder path from basePath
+	slugToID map[string]string // maps the current globally unique folder slug → workspace ID
 	index    *Index            // optional global index (nil if not configured)
 	mu       sync.RWMutex
 	locks    LockTable // serializes Update calls per workspace
@@ -87,10 +96,15 @@ func (s *FileStore) Update(wsID string, fn func(*Workspace) error) error {
 	return CanonicalUpdate(s, wsID, fn)
 }
 
-var ErrWorkspaceFolderSlugConflict = errors.New("workspace folder slug conflict")
+var (
+	ErrWorkspaceFolderSlugConflict = errors.New("workspace folder slug conflict")
+	ErrWorkspaceSlugNotFound       = errors.New("workspace slug not found")
+	ErrWorkspaceSlugMigration      = errors.New("workspace slug migration failed")
+)
 
 // FolderSlugConflictError indicates that the requested workspace folder slug is
-// already in use on disk and includes a safe alternative suggestion.
+// already used by a registered workspace or conflicting folder and includes a
+// globally safe alternative suggestion.
 type FolderSlugConflictError struct {
 	Slug          string
 	SuggestedSlug string
@@ -102,9 +116,9 @@ func (e *FolderSlugConflictError) Error() string {
 		return ErrWorkspaceFolderSlugConflict.Error()
 	}
 	if e.SuggestedSlug != "" {
-		return fmt.Sprintf("a workspace folder named %q already exists, suggested slug %q", e.Slug, e.SuggestedSlug)
+		return fmt.Sprintf("workspace slug %q is already registered, suggested slug %q", e.Slug, e.SuggestedSlug)
 	}
-	return fmt.Sprintf("a workspace folder named %q already exists", e.Slug)
+	return fmt.Sprintf("workspace slug %q is already registered", e.Slug)
 }
 
 func (e *FolderSlugConflictError) Unwrap() error {
@@ -122,6 +136,7 @@ func NewFileStore(basePath string) (*FileStore, error) {
 		basePath: basePath,
 		cache:    make(map[string]*Workspace),
 		idToPath: make(map[string]string),
+		slugToID: make(map[string]string),
 	}
 
 	// Try to open the global index
@@ -132,9 +147,20 @@ func NewFileStore(basePath string) (*FileStore, error) {
 		store.index = idx
 	}
 
-	// Load existing workspaces into cache
+	// Load existing workspaces into cache, then reconcile legacy duplicate or
+	// non-canonical slugs before any resolver/index is exposed.
 	if err := store.loadCache(); err != nil {
 		return nil, fmt.Errorf("failed to load workspace cache: %w", err)
+	}
+	if changed, err := store.reconcileWorkspaceSlugsLocked(); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrWorkspaceSlugMigration, err)
+	} else if changed {
+		store.cache = make(map[string]*Workspace)
+		store.idToPath = make(map[string]string)
+		store.slugToID = make(map[string]string)
+		if err := store.loadCache(); err != nil {
+			return nil, fmt.Errorf("failed to reload reconciled workspace cache: %w", err)
+		}
 	}
 
 	// Repopulate the index from the cache loadCache just built. loadCache already
@@ -153,9 +179,11 @@ func (s *FileStore) Save(ws *Workspace) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Ensure the workspace has a folder slug
+	// Ensure the workspace has a canonical folder slug.
 	if ws.FolderSlug == "" {
 		ws.FolderSlug = Slugify(ws.Name)
+	} else {
+		ws.FolderSlug = Slugify(ws.FolderSlug)
 	}
 
 	// Stale-write detection: if the in-memory cache holds a newer version
@@ -193,6 +221,11 @@ func (s *FileStore) Save(ws *Workspace) error {
 	if exists {
 		existingFolderPath = s.resolveFolder(existingPath)
 	}
+	if workspaceReservesSlug(ws) {
+		if conflict := s.globalSlugConflictLocked(ws.FolderSlug, ws.ID, parentDir); conflict != nil {
+			return conflict
+		}
+	}
 
 	// Default folder target is derived from the current base path and slug.
 	folderPath := filepath.Join(parentDir, ws.FolderSlug)
@@ -212,7 +245,7 @@ func (s *FileStore) Save(ws *Workspace) error {
 		} else if existsOnDisk {
 			return &FolderSlugConflictError{
 				Slug:          ws.FolderSlug,
-				SuggestedSlug: nextAvailableWorkspaceSlug(parentDir, ws.FolderSlug),
+				SuggestedSlug: s.nextAvailableWorkspaceSlugLocked(parentDir, ws.FolderSlug),
 				ParentDir:     parentDir,
 			}
 		}
@@ -223,7 +256,7 @@ func (s *FileStore) Save(ws *Workspace) error {
 		} else if existsOnDisk {
 			return &FolderSlugConflictError{
 				Slug:          ws.FolderSlug,
-				SuggestedSlug: nextAvailableWorkspaceSlug(parentDir, ws.FolderSlug),
+				SuggestedSlug: s.nextAvailableWorkspaceSlugLocked(parentDir, ws.FolderSlug),
 				ParentDir:     parentDir,
 			}
 		}
@@ -293,11 +326,22 @@ func (s *FileStore) Save(ws *Workspace) error {
 // SaveAt creates a workspace folder at a custom location (outside the default root).
 // The workspace is registered in the index with its absolute path.
 func (s *FileStore) SaveAt(ws *Workspace, location string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if ws.FolderSlug == "" {
 		ws.FolderSlug = Slugify(ws.Name)
+	} else {
+		ws.FolderSlug = Slugify(ws.FolderSlug)
 	}
 
 	folderPath := filepath.Join(location, ws.FolderSlug)
+
+	if workspaceReservesSlug(ws) {
+		if conflict := s.globalSlugConflictLocked(ws.FolderSlug, ws.ID, location); conflict != nil {
+			return conflict
+		}
+	}
 
 	// Check for conflict
 	if existsOnDisk, err := pathExists(folderPath); err != nil {
@@ -305,7 +349,7 @@ func (s *FileStore) SaveAt(ws *Workspace, location string) error {
 	} else if existsOnDisk {
 		return &FolderSlugConflictError{
 			Slug:          ws.FolderSlug,
-			SuggestedSlug: nextAvailableWorkspaceSlug(location, ws.FolderSlug),
+			SuggestedSlug: s.nextAvailableWorkspaceSlugLocked(location, ws.FolderSlug),
 			ParentDir:     location,
 		}
 	}
@@ -333,9 +377,6 @@ func (s *FileStore) SaveAt(ws *Workspace, location string) error {
 	if err != nil {
 		return fmt.Errorf("failed to reload workspace after save: %w", err)
 	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	// Store the absolute path for custom locations
 	s.cacheMeta(freshWS)
@@ -373,6 +414,9 @@ func (s *FileStore) RebindExistingFolder(ws *Workspace, folderPath string) error
 		return fmt.Errorf("workspace id is required")
 	}
 
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	normalizedPath, err := filepath.Abs(strings.TrimSpace(folderPath))
 	if err != nil {
 		return fmt.Errorf("failed to normalize folder path: %w", err)
@@ -407,6 +451,13 @@ func (s *FileStore) RebindExistingFolder(ws *Workspace, folderPath string) error
 
 	if strings.TrimSpace(merged.FolderSlug) == "" {
 		merged.FolderSlug = Slugify(filepath.Base(normalizedPath))
+	} else {
+		merged.FolderSlug = Slugify(merged.FolderSlug)
+	}
+	if workspaceReservesSlug(merged) {
+		if conflict := s.globalSlugConflictLocked(merged.FolderSlug, merged.ID, filepath.Dir(normalizedPath)); conflict != nil {
+			return conflict
+		}
 	}
 
 	if err := os.MkdirAll(filepath.Join(normalizedPath, FilesDir), 0755); err != nil {
@@ -428,9 +479,6 @@ func (s *FileStore) RebindExistingFolder(ws *Workspace, folderPath string) error
 	if err != nil {
 		return fmt.Errorf("failed to reload workspace after rebind: %w", err)
 	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	// Root-relative under the same lock the mapping is stored under, so a
 	// concurrent root switch cannot record a path relative to the old root.
@@ -526,28 +574,62 @@ func nextAvailableWorkspaceSlug(parentDir, baseSlug string) string {
 	return appendWorkspaceSlugSuffix(baseSlug, int(time.Now().UnixNano()))
 }
 
+// globalSlugConflictLocked checks the registered workspace namespace before any
+// filesystem mutation. Callers must hold s.mu.
+func (s *FileStore) globalSlugConflictLocked(slug, workspaceID, parentDir string) *FolderSlugConflictError {
+	if !IsCanonicalWorkspaceSlug(slug) {
+		slug = Slugify(slug)
+	}
+	if owner, exists := s.slugToID[strings.ToLower(slug)]; exists && owner != workspaceID {
+		return &FolderSlugConflictError{
+			Slug:          slug,
+			SuggestedSlug: s.nextAvailableWorkspaceSlugLocked(parentDir, slug),
+			ParentDir:     parentDir,
+		}
+	}
+	return nil
+}
+
+// nextAvailableWorkspaceSlugLocked returns the lowest suffix that is free both
+// in the global registration index and, when parentDir is supplied, on disk.
+// Callers must hold s.mu.
+func (s *FileStore) nextAvailableWorkspaceSlugLocked(parentDir, baseSlug string) string {
+	baseSlug = Slugify(baseSlug)
+	if baseSlug == "" {
+		baseSlug = "untitled"
+	}
+
+	const maxAttempts = 1000
+	for suffix := 2; suffix < 2+maxAttempts; suffix++ {
+		candidate := appendWorkspaceSlugSuffix(baseSlug, suffix)
+		if _, used := s.slugToID[strings.ToLower(candidate)]; used {
+			continue
+		}
+		if parentDir != "" {
+			existsOnDisk, err := pathExists(filepath.Join(parentDir, candidate))
+			if err != nil || existsOnDisk {
+				continue
+			}
+		}
+		return candidate
+	}
+	return appendWorkspaceSlugSuffix(baseSlug, int(time.Now().UnixNano()))
+}
+
+func nextAvailableSlugFromIndex(slugToID map[string]string, baseSlug string) string {
+	baseSlug = Slugify(baseSlug)
+	const maxAttempts = 1000
+	for suffix := 2; suffix < 2+maxAttempts; suffix++ {
+		candidate := appendWorkspaceSlugSuffix(baseSlug, suffix)
+		if _, exists := slugToID[strings.ToLower(candidate)]; !exists {
+			return candidate
+		}
+	}
+	return appendWorkspaceSlugSuffix(baseSlug, int(time.Now().UnixNano()))
+}
+
 func appendWorkspaceSlugSuffix(baseSlug string, suffix int) string {
-	suffixText := fmt.Sprintf("-%d", suffix)
-	maxBaseLen := MaxSlugLength - len(suffixText)
-	if maxBaseLen < 1 {
-		maxBaseLen = 1
-	}
-
-	trimmedBase := strings.Trim(strings.TrimSpace(baseSlug), "-")
-	if len(trimmedBase) > maxBaseLen {
-		trimmedBase = strings.TrimRight(trimmedBase[:maxBaseLen], "-")
-	}
-	if trimmedBase == "" {
-		trimmedBase = "untitled"
-		if len(trimmedBase) > maxBaseLen {
-			trimmedBase = strings.TrimRight(trimmedBase[:maxBaseLen], "-")
-		}
-		if trimmedBase == "" {
-			trimmedBase = "w"
-		}
-	}
-
-	return trimmedBase + suffixText
+	return WorkspaceSlugWithSuffix(baseSlug, suffix)
 }
 
 func cloneWorkspaceForRebind(ws *Workspace) (*Workspace, error) {
@@ -633,6 +715,7 @@ func (s *FileStore) Get(id string) (*Workspace, error) {
 		if os.IsNotExist(err) {
 			// Folder was removed externally — clean up mappings.
 			s.mu.Lock()
+			s.removeSlugMappingLocked(id)
 			delete(s.idToPath, id)
 			delete(s.cache, id)
 			s.mu.Unlock()
@@ -676,7 +759,48 @@ func (s *FileStore) cacheMeta(ws *Workspace) {
 		logger.Warn("failed to build metadata cache copy", logger.Fields{"workspace_id": ws.ID, "error": err.Error()})
 		return
 	}
+	s.removeSlugMappingLocked(ws.ID)
 	s.cache[ws.ID] = lean
+	if workspaceReservesSlug(lean) && IsCanonicalWorkspaceSlug(lean.FolderSlug) {
+		key := strings.ToLower(lean.FolderSlug)
+		if _, exists := s.slugToID[key]; !exists {
+			s.slugToID[key] = lean.ID
+		}
+	}
+}
+
+func workspaceReservesSlug(ws *Workspace) bool {
+	return ws != nil && ws.Status != StatusTrashed && ws.Status != StatusMissing
+}
+
+// removeSlugMappingLocked removes every slug entry owned by id. Callers must
+// hold s.mu. Scanning is deliberate: this also cleans a stale pre-rename entry
+// if older code left more than one mapping for the workspace.
+func (s *FileStore) removeSlugMappingLocked(id string) {
+	for slug, workspaceID := range s.slugToID {
+		if workspaceID == id {
+			delete(s.slugToID, slug)
+		}
+	}
+}
+
+// ResolveSlug returns the workspace currently registered for a canonical slug.
+// It never falls back to the ID index after a miss.
+func (s *FileStore) ResolveSlug(slug string) (*Workspace, error) {
+	if !IsCanonicalWorkspaceSlug(slug) {
+		return nil, ErrWorkspaceSlugNotFound
+	}
+	s.mu.RLock()
+	id, ok := s.slugToID[strings.ToLower(slug)]
+	s.mu.RUnlock()
+	if !ok {
+		return nil, ErrWorkspaceSlugNotFound
+	}
+	ws, err := s.Get(id)
+	if err != nil {
+		return nil, ErrWorkspaceSlugNotFound
+	}
+	return ws, nil
 }
 
 // metadataCacheCopy clones ws with the heavy embedded fields (chat history, tasks)
@@ -841,6 +965,7 @@ func (s *FileStore) removeFromCacheRecursive(id string) {
 		}
 	}
 
+	s.removeSlugMappingLocked(id)
 	delete(s.cache, id)
 	delete(s.idToPath, id)
 
@@ -925,6 +1050,9 @@ func (s *FileStore) RenameWithSlug(id, newName, requestedSlug string) ([]MovedWo
 	}
 	oldFolderPath := s.resolveFolder(oldRelPath)
 	parentDir := filepath.Dir(oldFolderPath)
+	if conflict := s.globalSlugConflictLocked(newSlug, id, parentDir); conflict != nil {
+		return nil, conflict
+	}
 
 	// If the slug hasn't changed, just update the display name
 	if newSlug == filepath.Base(oldFolderPath) {
@@ -941,7 +1069,7 @@ func (s *FileStore) RenameWithSlug(id, newName, requestedSlug string) ([]MovedWo
 	if _, err := os.Stat(newFolderPath); err == nil {
 		return nil, &FolderSlugConflictError{
 			Slug:          newSlug,
-			SuggestedSlug: nextAvailableWorkspaceSlug(parentDir, newSlug),
+			SuggestedSlug: s.nextAvailableWorkspaceSlugLocked(parentDir, newSlug),
 			ParentDir:     parentDir,
 		}
 	}
@@ -1052,7 +1180,10 @@ func (s *FileStore) Import(folderPath string) (*Workspace, string, error) {
 	}
 
 	if ws.FolderSlug == "" {
-		ws.FolderSlug = filepath.Base(folderPath)
+		ws.FolderSlug = Slugify(filepath.Base(folderPath))
+	}
+	if err := s.preflightImportSlugsLocked(folderPath); err != nil {
+		return nil, "", err
 	}
 
 	// Determine target location
@@ -1131,6 +1262,82 @@ func (s *FileStore) Import(folderPath string) (*Workspace, string, error) {
 	}
 
 	return ws, warning, nil
+}
+
+func (s *FileStore) preflightImportSlugsLocked(rootPath string) error {
+	type importSlug struct {
+		id   string
+		slug string
+		path string
+	}
+	items := make([]importSlug, 0)
+	seenIDs := make(map[string]struct{})
+	var visit func(string) error
+	visit = func(folderPath string) error {
+		data, err := os.ReadFile(filepath.Join(folderPath, WorkspaceConfigFile))
+		if err != nil {
+			return fmt.Errorf("read imported workspace metadata: %w", err)
+		}
+		ws, err := FromJSONMetadata(data)
+		if err != nil {
+			return fmt.Errorf("parse imported workspace metadata: %w", err)
+		}
+		if _, duplicate := seenIDs[ws.ID]; duplicate {
+			return fmt.Errorf("import contains duplicate workspace id %s", ws.ID)
+		}
+		seenIDs[ws.ID] = struct{}{}
+		slug := strings.TrimSpace(ws.FolderSlug)
+		if slug == "" {
+			slug = Slugify(filepath.Base(folderPath))
+		}
+		if !IsCanonicalWorkspaceSlug(slug) {
+			return fmt.Errorf("workspace %s has non-canonical folder slug %q", ws.ID, slug)
+		}
+		items = append(items, importSlug{id: ws.ID, slug: slug, path: folderPath})
+		children, readErr := os.ReadDir(filepath.Join(folderPath, SubWorkspacesDir))
+		if readErr != nil {
+			if os.IsNotExist(readErr) {
+				return nil
+			}
+			return readErr
+		}
+		for _, child := range children {
+			if child.IsDir() {
+				if err := visit(filepath.Join(folderPath, SubWorkspacesDir, child.Name())); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}
+	if err := visit(rootPath); err != nil {
+		return err
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].path == items[j].path {
+			return items[i].id < items[j].id
+		}
+		return items[i].path < items[j].path
+	})
+
+	occupied := make(map[string]string, len(s.slugToID)+len(items))
+	for slug, id := range s.slugToID {
+		if _, replacing := seenIDs[id]; !replacing {
+			occupied[slug] = id
+		}
+	}
+	for _, item := range items {
+		key := strings.ToLower(item.slug)
+		if owner, exists := occupied[key]; exists && owner != item.id {
+			return &FolderSlugConflictError{
+				Slug:          item.slug,
+				SuggestedSlug: nextAvailableSlugFromIndex(occupied, item.slug),
+				ParentDir:     filepath.Dir(item.path),
+			}
+		}
+		occupied[key] = item.id
+	}
+	return nil
 }
 
 // importSubWorkspace registers a sub-workspace found during import. Caller must hold s.mu.
@@ -1245,6 +1452,7 @@ func (s *FileStore) ClearAll() {
 
 	s.cache = make(map[string]*Workspace)
 	s.idToPath = make(map[string]string)
+	s.slugToID = make(map[string]string)
 
 	if s.index != nil {
 		_ = s.index.Rebuild()
@@ -1375,6 +1583,271 @@ func (s *FileStore) persistMigration(ws *Workspace, configPath string) {
 	logger.Info("Successfully persisted migration for workspace", logger.Fields{"workspace_id": ws.ID})
 }
 
+type workspaceSlugMigrationEntry struct {
+	id               string
+	preMigrationPath string
+	targetSlug       string
+}
+
+// ReconcileReservedSlugs moves folder-backed workspaces away from slugs already
+// owned by another registered primary-store workspace. It is used when SQLite
+// and FileStore are joined after their independent startup inventories.
+func (s *FileStore) ReconcileReservedSlugs(reserved map[string]string) ([][]MovedWorkspace, error) {
+	type candidate struct {
+		id   string
+		path string
+		slug string
+		name string
+	}
+	cache := s.CachedWorkspaces()
+	candidates := make([]candidate, 0, len(cache))
+	for id, ws := range cache {
+		if !workspaceReservesSlug(ws) {
+			continue
+		}
+		folderPath, err := s.GetFolderPath(id)
+		if err != nil {
+			return nil, err
+		}
+		candidates = append(candidates, candidate{id: id, path: folderPath, slug: ws.FolderSlug, name: ws.Name})
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].path == candidates[j].path {
+			return candidates[i].id < candidates[j].id
+		}
+		return candidates[i].path < candidates[j].path
+	})
+
+	diskIDs := make(map[string]struct{}, len(candidates))
+	for _, item := range candidates {
+		diskIDs[item.id] = struct{}{}
+	}
+	occupied := make(map[string]string, len(reserved)+len(candidates))
+	for slug, id := range reserved {
+		// Disk is canonical for folder-backed rows. Do not reserve that row's
+		// stale SQLite slug before its current folder slug is published below.
+		if _, folderBacked := diskIDs[id]; folderBacked {
+			continue
+		}
+		if IsCanonicalWorkspaceSlug(slug) {
+			occupied[strings.ToLower(slug)] = id
+		}
+	}
+	// Reserve every disk base before suffix assignment.
+	for _, item := range candidates {
+		key := strings.ToLower(item.slug)
+		if _, exists := occupied[key]; !exists {
+			occupied[key] = item.id
+		}
+	}
+
+	allMoved := make([][]MovedWorkspace, 0)
+	for _, item := range candidates {
+		key := strings.ToLower(item.slug)
+		owner := occupied[key]
+		if owner == "" || owner == item.id {
+			occupied[key] = item.id
+			continue
+		}
+
+		target := ""
+		for suffix := 2; suffix < 1002; suffix++ {
+			candidateSlug := appendWorkspaceSlugSuffix(item.slug, suffix)
+			if _, used := occupied[strings.ToLower(candidateSlug)]; used {
+				continue
+			}
+			if _, err := s.ResolveSlug(candidateSlug); err == nil {
+				continue
+			}
+			candidatePath := filepath.Join(filepath.Dir(item.path), candidateSlug)
+			if exists, err := pathExists(candidatePath); err != nil || exists {
+				continue
+			}
+			target = candidateSlug
+			break
+		}
+		if target == "" {
+			return nil, fmt.Errorf("workspace %s has no available suffix for slug %q", item.id, item.slug)
+		}
+		moved, err := s.RenameWithSlug(item.id, item.name, target)
+		if err != nil {
+			return nil, fmt.Errorf("workspace %s failed global slug reconciliation: %w", item.id, err)
+		}
+		occupied[strings.ToLower(target)] = item.id
+		allMoved = append(allMoved, moved)
+	}
+	return allMoved, nil
+}
+
+// reconcileWorkspaceSlugsLocked upgrades the folder-backed registration set to
+// one canonical global slug namespace. It inventories every workspace before
+// changing disk, reserves all base slugs before assigning suffixes, and applies
+// changes deepest-first so renaming a group cannot invalidate a pending child
+// operation. Callers must hold s.mu or be constructing an unpublished store.
+func (s *FileStore) reconcileWorkspaceSlugsLocked() (bool, error) {
+	if len(s.cache) == 0 {
+		return false, nil
+	}
+
+	groups := make(map[string][]workspaceSlugMigrationEntry)
+	for id, ws := range s.cache {
+		pathValue, ok := s.idToPath[id]
+		if !ok {
+			return false, fmt.Errorf("workspace %s has no registered folder", id)
+		}
+		folderPath := s.resolveFolder(pathValue)
+		sourceSlug := strings.TrimSpace(ws.FolderSlug)
+		if sourceSlug == "" {
+			sourceSlug = filepath.Base(folderPath)
+		}
+		desired := Slugify(sourceSlug)
+		groups[desired] = append(groups[desired], workspaceSlugMigrationEntry{
+			id:               id,
+			preMigrationPath: filepath.Clean(folderPath),
+			targetSlug:       desired,
+		})
+	}
+
+	groupSlugs := make([]string, 0, len(groups))
+	for slug := range groups {
+		groupSlugs = append(groupSlugs, slug)
+	}
+	sort.Strings(groupSlugs)
+
+	// Reserve every existing base first. This prevents a duplicate "reports"
+	// group from taking reports-2 when an unrelated workspace already owns it.
+	occupied := make(map[string]string, len(groups))
+	for _, slug := range groupSlugs {
+		entries := groups[slug]
+		sort.Slice(entries, func(i, j int) bool {
+			if entries[i].preMigrationPath == entries[j].preMigrationPath {
+				return entries[i].id < entries[j].id
+			}
+			return entries[i].preMigrationPath < entries[j].preMigrationPath
+		})
+		groups[slug] = entries
+		occupied[strings.ToLower(slug)] = entries[0].id
+	}
+
+	assignments := make([]workspaceSlugMigrationEntry, 0, len(s.cache))
+	for _, slug := range groupSlugs {
+		entries := groups[slug]
+		assignments = append(assignments, entries[0])
+		for i := 1; i < len(entries); i++ {
+			entry := entries[i]
+			entry.targetSlug = nextAvailableMigrationSlug(slug, filepath.Dir(entry.preMigrationPath), entry.preMigrationPath, occupied)
+			occupied[strings.ToLower(entry.targetSlug)] = entry.id
+			assignments = append(assignments, entry)
+		}
+	}
+
+	changed := make([]workspaceSlugMigrationEntry, 0)
+	for _, entry := range assignments {
+		ws := s.cache[entry.id]
+		if ws == nil {
+			continue
+		}
+		if ws.FolderSlug != entry.targetSlug || filepath.Base(entry.preMigrationPath) != entry.targetSlug {
+			changed = append(changed, entry)
+		}
+	}
+	if len(changed) == 0 {
+		return false, nil
+	}
+
+	// Preflight every final destination before the first mutation.
+	for _, entry := range changed {
+		targetPath := filepath.Join(filepath.Dir(entry.preMigrationPath), entry.targetSlug)
+		if filepath.Clean(targetPath) == entry.preMigrationPath {
+			continue
+		}
+		exists, err := pathExists(targetPath)
+		if err != nil {
+			return false, fmt.Errorf("workspace %s cannot inspect target folder %q: %w", entry.id, filepath.Base(targetPath), err)
+		}
+		if exists {
+			return false, fmt.Errorf("workspace %s cannot migrate slug to %q because that folder already exists", entry.id, entry.targetSlug)
+		}
+	}
+
+	// Children first. currentPaths is rewritten after every parent move, making
+	// the operation restart-safe even when both a group and one of its members
+	// need new slugs.
+	sort.Slice(changed, func(i, j int) bool {
+		depthI := strings.Count(changed[i].preMigrationPath, string(filepath.Separator))
+		depthJ := strings.Count(changed[j].preMigrationPath, string(filepath.Separator))
+		if depthI != depthJ {
+			return depthI > depthJ
+		}
+		if changed[i].preMigrationPath == changed[j].preMigrationPath {
+			return changed[i].id < changed[j].id
+		}
+		return changed[i].preMigrationPath < changed[j].preMigrationPath
+	})
+	currentPaths := make(map[string]string, len(s.idToPath))
+	for id, pathValue := range s.idToPath {
+		currentPaths[id] = s.resolveFolder(pathValue)
+	}
+
+	for _, entry := range changed {
+		oldPath := filepath.Clean(currentPaths[entry.id])
+		newPath := filepath.Join(filepath.Dir(oldPath), entry.targetSlug)
+		configPath := filepath.Join(oldPath, WorkspaceConfigFile)
+		data, err := os.ReadFile(configPath)
+		if err != nil {
+			return false, fmt.Errorf("workspace %s cannot read metadata in folder %q: %w", entry.id, filepath.Base(oldPath), err)
+		}
+		full, err := FromJSON(data)
+		if err != nil {
+			return false, fmt.Errorf("workspace %s has invalid metadata in folder %q: %w", entry.id, filepath.Base(oldPath), err)
+		}
+		full.FolderSlug = entry.targetSlug
+		updated, err := full.ToJSON()
+		if err != nil {
+			return false, fmt.Errorf("workspace %s cannot encode migrated slug: %w", entry.id, err)
+		}
+		// Persist intent before moving the folder. If the rename fails, the next
+		// startup observes the intended slug and retries rather than adding a
+		// second suffix.
+		if err := atomicWriteFile(configPath, updated); err != nil {
+			return false, fmt.Errorf("workspace %s cannot persist migrated slug in folder %q: %w", entry.id, filepath.Base(oldPath), err)
+		}
+		if filepath.Clean(newPath) != oldPath {
+			if err := os.Rename(oldPath, newPath); err != nil {
+				return false, fmt.Errorf("workspace %s cannot rename folder %q to %q: %w", entry.id, filepath.Base(oldPath), filepath.Base(newPath), err)
+			}
+			for id, candidate := range currentPaths {
+				rel, relErr := filepath.Rel(oldPath, candidate)
+				if relErr == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+					currentPaths[id] = filepath.Join(newPath, rel)
+				}
+			}
+		}
+		currentPaths[entry.id] = newPath
+	}
+
+	return true, nil
+}
+
+func nextAvailableMigrationSlug(baseSlug, parentDir, ownPath string, occupied map[string]string) string {
+	baseSlug = Slugify(baseSlug)
+	const maxAttempts = 1000
+	for suffix := 2; suffix < 2+maxAttempts; suffix++ {
+		candidate := appendWorkspaceSlugSuffix(baseSlug, suffix)
+		if _, used := occupied[strings.ToLower(candidate)]; used {
+			continue
+		}
+		target := filepath.Join(parentDir, candidate)
+		if filepath.Clean(target) == filepath.Clean(ownPath) {
+			return candidate
+		}
+		if exists, err := pathExists(target); err == nil && !exists {
+			return candidate
+		}
+	}
+	return appendWorkspaceSlugSuffix(baseSlug, int(time.Now().UnixNano()))
+}
+
 // loadCache scans workspace directories and loads all workspaces into memory.
 func (s *FileStore) loadCache() error {
 	return s.loadWorkspacesFromDir(s.basePath, 0, "")
@@ -1390,8 +1863,19 @@ func (s *FileStore) Reload() error {
 
 	s.cache = make(map[string]*Workspace)
 	s.idToPath = make(map[string]string)
+	s.slugToID = make(map[string]string)
 	if err := s.loadCache(); err != nil {
 		return err
+	}
+	if changed, err := s.reconcileWorkspaceSlugsLocked(); err != nil {
+		return err
+	} else if changed {
+		s.cache = make(map[string]*Workspace)
+		s.idToPath = make(map[string]string)
+		s.slugToID = make(map[string]string)
+		if err := s.loadCache(); err != nil {
+			return err
+		}
 	}
 	if err := s.rebuildIndexFromCache(); err != nil {
 		logger.Warn("Failed to rebuild workspace index during reload", logger.Fields{"error": err.Error()})
@@ -1463,9 +1947,20 @@ func (s *FileStore) SetBasePath(newBasePath string) (RootChange, error) {
 		basePath: target,
 		cache:    make(map[string]*Workspace),
 		idToPath: make(map[string]string),
+		slugToID: make(map[string]string),
 	}
 	if err := staged.loadCache(); err != nil {
 		return RootChange{}, fmt.Errorf("failed to load workspace cache: %w", err)
+	}
+	if changed, err := staged.reconcileWorkspaceSlugsLocked(); err != nil {
+		return RootChange{}, fmt.Errorf("failed to reconcile workspace slugs: %w", err)
+	} else if changed {
+		staged.cache = make(map[string]*Workspace)
+		staged.idToPath = make(map[string]string)
+		staged.slugToID = make(map[string]string)
+		if err := staged.loadCache(); err != nil {
+			return RootChange{}, fmt.Errorf("failed to reload reconciled workspace cache: %w", err)
+		}
 	}
 	// A missing index is degraded but usable — NewFileStore treats it the same
 	// way — so an index failure must not abandon an otherwise-loaded root.
@@ -1489,6 +1984,7 @@ func (s *FileStore) SetBasePath(newBasePath string) (RootChange, error) {
 	s.basePath = staged.basePath
 	s.cache = staged.cache
 	s.idToPath = staged.idToPath
+	s.slugToID = staged.slugToID
 	s.index = staged.index
 	// Release the previous root's handle inside the critical section: every
 	// internal index user runs under s.mu, so closing here means none of them
@@ -1685,6 +2181,7 @@ func (s *FileStore) loadWorkspacesFromDir(dir string, depth int, parentID string
 // InMemoryStore implements Store using in-memory storage (for testing)
 type InMemoryStore struct {
 	workspaces map[string]*Workspace
+	slugToID   map[string]string
 	agents     map[string]map[string]*agent.Agent // workspaceID → agentName → snapshot
 	mu         sync.RWMutex
 	locks      LockTable
@@ -1694,6 +2191,7 @@ type InMemoryStore struct {
 func NewInMemoryStore() *InMemoryStore {
 	return &InMemoryStore{
 		workspaces: make(map[string]*Workspace),
+		slugToID:   make(map[string]string),
 		agents:     make(map[string]map[string]*agent.Agent),
 	}
 }
@@ -1753,7 +2251,30 @@ func (s *InMemoryStore) Save(ws *Workspace) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if ws.FolderSlug == "" && strings.TrimSpace(ws.Name) != "" {
+		ws.FolderSlug = Slugify(ws.Name)
+	}
+	if workspaceReservesSlug(ws) && ws.FolderSlug != "" {
+		key := strings.ToLower(ws.FolderSlug)
+		if owner, exists := s.slugToID[key]; exists && owner != ws.ID {
+			return &FolderSlugConflictError{
+				Slug:          ws.FolderSlug,
+				SuggestedSlug: nextAvailableSlugFromIndex(s.slugToID, ws.FolderSlug),
+			}
+		}
+	}
+	for slug, id := range s.slugToID {
+		if id == ws.ID {
+			delete(s.slugToID, slug)
+		}
+	}
 	s.workspaces[ws.ID] = ws
+	if workspaceReservesSlug(ws) && IsCanonicalWorkspaceSlug(ws.FolderSlug) {
+		key := strings.ToLower(ws.FolderSlug)
+		if _, exists := s.slugToID[key]; !exists {
+			s.slugToID[key] = ws.ID
+		}
+	}
 	return nil
 }
 
@@ -1767,6 +2288,25 @@ func (s *InMemoryStore) Get(id string) (*Workspace, error) {
 		return nil, fmt.Errorf("workspace %s not found", id)
 	}
 
+	return ws, nil
+}
+
+// ResolveSlug returns the current workspace for a canonical slug without ID
+// fallback.
+func (s *InMemoryStore) ResolveSlug(slug string) (*Workspace, error) {
+	if !IsCanonicalWorkspaceSlug(slug) {
+		return nil, ErrWorkspaceSlugNotFound
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	id, ok := s.slugToID[strings.ToLower(slug)]
+	if !ok {
+		return nil, ErrWorkspaceSlugNotFound
+	}
+	ws, ok := s.workspaces[id]
+	if !ok {
+		return nil, ErrWorkspaceSlugNotFound
+	}
 	return ws, nil
 }
 
@@ -1793,6 +2333,11 @@ func (s *InMemoryStore) Delete(id string) error {
 	}
 
 	delete(s.workspaces, id)
+	for slug, workspaceID := range s.slugToID {
+		if workspaceID == id {
+			delete(s.slugToID, slug)
+		}
+	}
 	return nil
 }
 

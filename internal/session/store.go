@@ -9,14 +9,15 @@ import (
 
 // Common errors returned by store operations.
 var (
-	ErrSessionNotFound   = errors.New("session not found")
-	ErrWorkspaceNotFound = errors.New("workspace not found")
-	ErrMessageNotFound   = errors.New("message not found")
-	ErrNoteNotFound      = errors.New("note not found")
-	ErrTaskNotFound      = errors.New("task not found")
-	ErrReminderNotFound  = errors.New("reminder not found")
-	ErrInvalidID         = errors.New("invalid ID format")
-	ErrDuplicateID       = errors.New("duplicate ID")
+	ErrSessionNotFound       = errors.New("session not found")
+	ErrWorkspaceNotFound     = errors.New("workspace not found")
+	ErrMessageNotFound       = errors.New("message not found")
+	ErrNoteNotFound          = errors.New("note not found")
+	ErrTaskNotFound          = errors.New("task not found")
+	ErrReminderNotFound      = errors.New("reminder not found")
+	ErrInvalidID             = errors.New("invalid ID format")
+	ErrDuplicateID           = errors.New("duplicate ID")
+	ErrWorkspaceSlugConflict = errors.New("workspace folder slug conflict")
 )
 
 // SessionStore defines the interface for session persistence operations.

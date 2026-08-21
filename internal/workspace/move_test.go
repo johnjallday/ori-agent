@@ -196,7 +196,7 @@ func TestCopyThenRemove_RollsBackKeepingSource(t *testing.T) {
 	}
 }
 
-func TestMoveWorkspaceFolder_RejectsSlugCollision(t *testing.T) {
+func TestFileStoreSave_RejectsCrossParentSlugCollision(t *testing.T) {
 	dir := t.TempDir()
 	st, err := NewFileStore(dir)
 	if err != nil {
@@ -204,15 +204,17 @@ func TestMoveWorkspaceFolder_RejectsSlugCollision(t *testing.T) {
 	}
 
 	saveWorkspaceUnder(t, st, "group-1", "Group", "")
-	saveWorkspaceUnder(t, st, "dup-inside", "Dup", "group-1") // group/sub-workspaces/dup
-	saveWorkspaceUnder(t, st, "dup-root", "Dup", "")          // root/dup
-
-	_, err = st.MoveWorkspaceFolder("dup-root", "group-1")
+	saveWorkspaceUnder(t, st, "dup-inside", "Dup", "group-1")
+	duplicate := newTestWorkspace("dup-root", "Dup")
+	err = st.Save(duplicate)
 	if err == nil {
-		t.Fatalf("expected slug-collision rejection")
+		t.Fatalf("expected global slug-collision rejection")
 	}
 	var conflict *FolderSlugConflictError
 	if !errors.As(err, &conflict) {
 		t.Fatalf("expected FolderSlugConflictError, got %T: %v", err, err)
+	}
+	if conflict.SuggestedSlug != "dup-2" {
+		t.Fatalf("suggested slug = %q, want dup-2", conflict.SuggestedSlug)
 	}
 }

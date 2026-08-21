@@ -10,7 +10,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 43
+const schemaVersion = 44
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -151,6 +151,8 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 		return db.migration042WorkspaceMapGroupPresentations(ctx)
 	case 43:
 		return db.migration043WorkspaceTicketState(ctx)
+	case 44:
+		return db.migration044WorkspaceFolderSlugs(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
@@ -188,6 +190,7 @@ func (db *DB) migration001Baseline(ctx context.Context) error {
 		CREATE TABLE IF NOT EXISTS workspaces (
 			id TEXT PRIMARY KEY,
 			name TEXT NOT NULL,
+			folder_slug TEXT NOT NULL DEFAULT '',
 			kind TEXT DEFAULT 'workspace',
 			description TEXT DEFAULT '',
 			tags TEXT DEFAULT '[]',
@@ -1511,6 +1514,51 @@ func (db *DB) migration043WorkspaceTicketState(ctx context.Context) error {
 		ALTER TABLE workspaces ADD COLUMN ticket_sequence INTEGER NOT NULL DEFAULT 0
 	`); err != nil && !isDuplicateColumnError(err) {
 		return fmt.Errorf("failed to add workspace ticket_sequence column: %w", err)
+	}
+	return nil
+}
+
+// migration044WorkspaceFolderSlugs persists the browser-facing workspace slug.
+// Empty values are intentionally allowed during the disk/SQLite reconciliation
+// that follows schema migration. Once populated, active registrations share one
+// case-insensitive namespace; trashed and missing rows release their slug so a
+// restore must re-enter conflict validation.
+func (db *DB) migration044WorkspaceFolderSlugs(ctx context.Context) error {
+	exists, err := db.tableExists(ctx, "workspaces")
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+
+	if _, err := db.ExecContext(ctx, `
+		ALTER TABLE workspaces ADD COLUMN folder_slug TEXT NOT NULL DEFAULT ''
+	`); err != nil && !isDuplicateColumnError(err) {
+		return fmt.Errorf("failed to add workspace folder_slug column: %w", err)
+	}
+	var statusColumnCount int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM pragma_table_info('workspaces') WHERE name = 'status'
+	`).Scan(&statusColumnCount); err != nil {
+		return fmt.Errorf("failed to inspect workspace status column: %w", err)
+	}
+
+	indexSQL := `
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_workspaces_folder_slug
+		ON workspaces(folder_slug COLLATE NOCASE)
+		WHERE TRIM(folder_slug) <> ''
+	`
+	if statusColumnCount > 0 {
+		indexSQL = `
+			CREATE UNIQUE INDEX IF NOT EXISTS idx_workspaces_folder_slug
+			ON workspaces(folder_slug COLLATE NOCASE)
+			WHERE TRIM(folder_slug) <> ''
+				AND COALESCE(status, 'active') NOT IN ('trashed', 'missing')
+		`
+	}
+	if _, err := db.ExecContext(ctx, indexSQL); err != nil {
+		return fmt.Errorf("failed to create workspace folder_slug index: %w", err)
 	}
 	return nil
 }

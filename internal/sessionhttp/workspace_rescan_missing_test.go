@@ -328,8 +328,9 @@ func TestRescanHidesWorkspaceSupersededByRecreatedFolder(t *testing.T) {
 		t.Fatalf("expected recreated workspace in listings exactly once, got %#v", ids)
 	}
 
-	// Recreate must refuse to clobber the folder that now belongs to the new
-	// workspace; cleanup is the supported action for the stale row.
+	// Global slug reconciliation moved the replacement workspace to a numeric
+	// suffix, so recreating the missing original is now safe and restores both
+	// registrations without an ambiguous slug or folder overwrite.
 	payload, _ := json.Marshal(map[string]any{"recreate": []string{staleID}})
 	syncReq := httptest.NewRequest(http.MethodPost, "/api/workspaces/sync", bytes.NewBuffer(payload))
 	syncReq.Header.Set("Content-Type", "application/json")
@@ -342,19 +343,31 @@ func TestRescanHidesWorkspaceSupersededByRecreatedFolder(t *testing.T) {
 	if err := json.Unmarshal(syncW.Body.Bytes(), &syncResp); err != nil {
 		t.Fatalf("decode sync response: %v", err)
 	}
-	if got := int(syncResp["recreated"].(float64)); got != 0 {
-		t.Fatalf("expected recreate to be refused for superseded row, got recreated=%d", got)
+	if got := int(syncResp["recreated"].(float64)); got != 1 {
+		t.Fatalf("expected missing workspace to be recreated after suffix migration, got recreated=%d", got)
 	}
 
 	rawOnDisk, err := os.ReadFile(filepath.Join(folderPath, agentworkspace.WorkspaceConfigFile))
 	if err != nil {
-		t.Fatalf("read workspace.json after refused recreate: %v", err)
+		t.Fatalf("read restored workspace.json: %v", err)
 	}
 	onDisk, err := agentworkspace.FromJSON(rawOnDisk)
 	if err != nil {
-		t.Fatalf("parse workspace.json after refused recreate: %v", err)
+		t.Fatalf("parse restored workspace.json: %v", err)
 	}
-	if onDisk.ID != recreated.ID {
-		t.Fatalf("expected recreated folder to keep its identity, got %q", onDisk.ID)
+	if onDisk.ID != staleID {
+		t.Fatalf("expected original folder to be restored for stale workspace, got %q", onDisk.ID)
+	}
+	replacementPath := filepath.Join(filepath.Dir(folderPath), "grouptest-2", agentworkspace.WorkspaceConfigFile)
+	replacementData, err := os.ReadFile(replacementPath)
+	if err != nil {
+		t.Fatalf("read suffix-migrated replacement workspace.json: %v", err)
+	}
+	replacement, err := agentworkspace.FromJSON(replacementData)
+	if err != nil {
+		t.Fatalf("parse replacement workspace.json: %v", err)
+	}
+	if replacement.ID != recreated.ID || replacement.FolderSlug != "grouptest-2" {
+		t.Fatalf("replacement workspace = %#v, want %s/grouptest-2", replacement, recreated.ID)
 	}
 }

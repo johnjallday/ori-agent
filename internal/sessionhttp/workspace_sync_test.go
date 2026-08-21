@@ -15,6 +15,84 @@ import (
 	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
 )
 
+func TestReconcileWorkspacesFromDiskBackfillsOneGlobalSlugNamespace(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+
+	fileStore, err := agentworkspace.NewFileStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	defer func() { _ = fileStore.Close() }()
+	handler.SetWorkspaceStore(fileStore)
+
+	disk := agentworkspace.NewWorkspace(agentworkspace.CreateWorkspaceParams{Name: "Reports"})
+	if err := fileStore.Save(disk); err != nil {
+		t.Fatalf("save disk workspace: %v", err)
+	}
+	now := time.Now()
+	if err := handler.store.CreateWorkspace(context.Background(), &session.Workspace{
+		ID:         disk.ID,
+		Name:       disk.Name,
+		Status:     session.WorkspaceStatusActive,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+		FolderSlug: "",
+	}); err != nil {
+		t.Fatalf("seed disk mirror: %v", err)
+	}
+	if err := handler.store.CreateWorkspace(context.Background(), &session.Workspace{
+		ID:         "db-only-reports",
+		Name:       "Reports",
+		Status:     session.WorkspaceStatusActive,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+		FolderSlug: "",
+	}); err != nil {
+		t.Fatalf("seed DB-only workspace: %v", err)
+	}
+
+	if err := handler.ReconcileWorkspacesFromDisk(context.Background()); err != nil {
+		t.Fatalf("ReconcileWorkspacesFromDisk: %v", err)
+	}
+	diskRow, err := handler.store.GetWorkspace(context.Background(), disk.ID)
+	if err != nil {
+		t.Fatalf("load disk row: %v", err)
+	}
+	if diskRow.FolderSlug != "reports" {
+		t.Fatalf("disk row slug = %q, want reports", diskRow.FolderSlug)
+	}
+	dbOnly, err := handler.store.GetWorkspace(context.Background(), "db-only-reports")
+	if err != nil {
+		t.Fatalf("load DB-only row: %v", err)
+	}
+	if dbOnly.FolderSlug != "reports-2" {
+		t.Fatalf("DB-only row slug = %q, want reports-2", dbOnly.FolderSlug)
+	}
+}
+
+func TestReconcileWorkspaceSlugsWithoutDiskBackfillsDuringUnconfirmedStartup(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+	now := time.Now()
+	for _, ws := range []*session.Workspace{
+		{ID: "a", Name: "Plans", Status: session.WorkspaceStatusActive, CreatedAt: now, UpdatedAt: now},
+		{ID: "b", Name: "Plans", Status: session.WorkspaceStatusActive, CreatedAt: now, UpdatedAt: now},
+	} {
+		if err := handler.store.CreateWorkspace(context.Background(), ws); err != nil {
+			t.Fatalf("seed %s: %v", ws.ID, err)
+		}
+	}
+	if err := handler.ReconcileWorkspaceSlugsWithoutDisk(context.Background()); err != nil {
+		t.Fatalf("ReconcileWorkspaceSlugsWithoutDisk: %v", err)
+	}
+	first, _ := handler.store.GetWorkspace(context.Background(), "a")
+	second, _ := handler.store.GetWorkspace(context.Background(), "b")
+	if first.FolderSlug != "plans" || second.FolderSlug != "plans-2" {
+		t.Fatalf("DB-only slugs = %q, %q; want plans, plans-2", first.FolderSlug, second.FolderSlug)
+	}
+}
+
 func TestHandleWorkspaceSyncStatusAndLocateMissingWorkspaceFolder(t *testing.T) {
 	handler, cleanup := createTestHandler(t)
 	defer cleanup()

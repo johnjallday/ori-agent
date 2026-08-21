@@ -135,6 +135,11 @@ func (h *Handler) handleWorkspaceImport(w http.ResponseWriter, r *http.Request) 
 				"entry_point": req.EntryPoint,
 				"reason":      "workspace_restore_failed",
 			})
+			var slugConflict *agentworkspace.FolderSlugConflictError
+			if errors.As(err, &slugConflict) {
+				writeWorkspaceCreateSlugConflict(w, workspaceName, h.globalWorkspaceSlugConflict(r.Context(), slugConflict.Slug, "", slugConflict.ParentDir))
+				return
+			}
 			if strings.Contains(strings.ToLower(err.Error()), "already exists") {
 				_ = orihttp.RespondConflict(w, err.Error())
 				return
@@ -170,13 +175,17 @@ func (h *Handler) handleWorkspaceImport(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	folderSlug := agentworkspace.Slugify(filepath.Base(normalizedPath))
+	if requestedSlug := strings.TrimSpace(req.FolderSlug); requestedSlug != "" {
+		folderSlug = agentworkspace.Slugify(requestedSlug)
+	}
 	workspace := &session.Workspace{
 		Name:        workspaceName,
 		Kind:        session.WorkspaceKindWorkspace,
 		Description: req.Description,
 		ParentID:    req.ParentID,
 		Color:       req.Color,
-		FolderSlug:  agentworkspace.Slugify(filepath.Base(normalizedPath)),
+		FolderSlug:  folderSlug,
 	}
 	if req.OrderIndex != nil {
 		workspace.OrderIndex = *req.OrderIndex
@@ -222,6 +231,10 @@ func (h *Handler) handleWorkspaceImport(w http.ResponseWriter, r *http.Request) 
 			"entry_point": req.EntryPoint,
 			"reason":      "workspace_create_failed",
 		})
+		if errors.Is(err, session.ErrWorkspaceSlugConflict) {
+			writeWorkspaceCreateSlugConflict(w, workspace.Name, h.globalWorkspaceSlugConflict(r.Context(), workspace.FolderSlug, "", filepath.Dir(normalizedPath)))
+			return
+		}
 		_ = orihttp.RespondInternalError(w, "Failed to create workspace from folder")
 		return
 	}
@@ -360,6 +373,34 @@ func workspaceImportHasConfig(folderPath string) bool {
 	return err == nil && !info.IsDir()
 }
 
+func (h *Handler) validateWorkspaceImportSlugs(ctx context.Context, importTree []workspaceImportItem) error {
+	rows, err := h.store.ListWorkspaces(ctx)
+	if err != nil {
+		return fmt.Errorf("list registered workspace slugs: %w", err)
+	}
+	occupied := make(map[string]string, len(rows)+len(importTree))
+	for i := range rows {
+		ws := &rows[i]
+		if ws.Status == session.WorkspaceStatusTrashed || ws.Status == session.WorkspaceStatusMissing ||
+			!agentworkspace.IsCanonicalWorkspaceSlug(ws.FolderSlug) {
+			continue
+		}
+		occupied[strings.ToLower(ws.FolderSlug)] = ws.ID
+	}
+	for _, item := range importTree {
+		ws := item.Workspace
+		slug := agentworkspace.Slugify(ws.FolderSlug)
+		if strings.TrimSpace(ws.FolderSlug) == "" {
+			slug = agentworkspace.Slugify(filepath.Base(item.SourcePath))
+		}
+		if owner, exists := occupied[strings.ToLower(slug)]; exists && owner != ws.ID {
+			return h.globalWorkspaceSlugConflict(ctx, slug, ws.ID, filepath.Dir(item.SourcePath))
+		}
+		occupied[strings.ToLower(slug)] = ws.ID
+	}
+	return nil
+}
+
 func (h *Handler) restoreImportedWorkspace(ctx context.Context, folderPath string, req createWorkspaceImportRequest) (*session.Workspace, string, error) {
 	importTree, err := loadWorkspaceImportTree(folderPath, strings.TrimSpace(req.ParentID))
 	if err != nil {
@@ -384,6 +425,9 @@ func (h *Handler) restoreImportedWorkspace(ctx context.Context, folderPath strin
 
 	if trimmedName := strings.TrimSpace(req.Name); trimmedName != "" {
 		rootWorkspace.Name = trimmedName
+	}
+	if requestedSlug := strings.TrimSpace(req.FolderSlug); requestedSlug != "" {
+		rootWorkspace.FolderSlug = agentworkspace.Slugify(requestedSlug)
 	}
 	if trimmedDescription := strings.TrimSpace(req.Description); trimmedDescription != "" {
 		rootWorkspace.Description = trimmedDescription
@@ -412,6 +456,9 @@ func (h *Handler) restoreImportedWorkspace(ctx context.Context, folderPath strin
 		}
 	}
 
+	if err := h.validateWorkspaceImportSlugs(ctx, importTree); err != nil {
+		return nil, "", err
+	}
 	_, warning, err := h.workspaceStore.Import(folderPath)
 	if err != nil {
 		return nil, "", err
@@ -785,6 +832,69 @@ func writeWorkspaceImportConflict(w http.ResponseWriter, message string, duplica
 		"duplicate": duplicate,
 	}); err != nil {
 		logger.Error("Failed to encode workspace import conflict response", logger.Fields{"error": err})
+	}
+}
+
+func (h *Handler) registeredWorkspaceSlugOwner(ctx context.Context, slug, excludeID string) string {
+	rows, err := h.store.ListWorkspaces(ctx)
+	if err != nil {
+		return ""
+	}
+	for i := range rows {
+		ws := &rows[i]
+		if ws.ID == excludeID || ws.Status == session.WorkspaceStatusTrashed || ws.Status == session.WorkspaceStatusMissing {
+			continue
+		}
+		if strings.EqualFold(ws.FolderSlug, slug) {
+			return ws.ID
+		}
+	}
+	return ""
+}
+
+func (h *Handler) globalWorkspaceSlugConflict(ctx context.Context, requestedSlug, excludeID, parentDir string) *agentworkspace.FolderSlugConflictError {
+	base := agentworkspace.Slugify(requestedSlug)
+	occupied := make(map[string]string)
+	if rows, err := h.store.ListWorkspaces(ctx); err == nil {
+		for i := range rows {
+			ws := &rows[i]
+			if ws.ID == excludeID || ws.Status == session.WorkspaceStatusTrashed || ws.Status == session.WorkspaceStatusMissing {
+				continue
+			}
+			if agentworkspace.IsCanonicalWorkspaceSlug(ws.FolderSlug) {
+				occupied[strings.ToLower(ws.FolderSlug)] = ws.ID
+			}
+		}
+	}
+	if h.workspaceStore != nil {
+		for id, ws := range h.workspaceStore.CachedWorkspaces() {
+			if id == excludeID || ws.Status == agentworkspace.StatusTrashed || ws.Status == agentworkspace.StatusMissing {
+				continue
+			}
+			if agentworkspace.IsCanonicalWorkspaceSlug(ws.FolderSlug) {
+				occupied[strings.ToLower(ws.FolderSlug)] = id
+			}
+		}
+	}
+
+	suggested := ""
+	for suffix := 2; suffix < 1002; suffix++ {
+		candidate := agentworkspace.WorkspaceSlugWithSuffix(base, suffix)
+		if _, used := occupied[strings.ToLower(candidate)]; used {
+			continue
+		}
+		if parentDir != "" {
+			if _, err := os.Stat(filepath.Join(parentDir, candidate)); err == nil || !os.IsNotExist(err) {
+				continue
+			}
+		}
+		suggested = candidate
+		break
+	}
+	return &agentworkspace.FolderSlugConflictError{
+		Slug:          base,
+		SuggestedSlug: suggested,
+		ParentDir:     parentDir,
 	}
 }
 
