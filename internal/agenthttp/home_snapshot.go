@@ -92,6 +92,7 @@ type HomeSnapshotSources struct {
 // HomeWorkspaceSummary is a per-workspace roll-up line.
 type HomeWorkspaceSummary struct {
 	ID         string
+	Slug       string
 	Name       string
 	Status     string
 	AgentCount int
@@ -313,6 +314,7 @@ func BuildHomeSnapshot(ctx context.Context, sources HomeSnapshotSources, window 
 				if len(snap.Workspaces) < homeSnapshotMaxWorkspaces {
 					snap.Workspaces = append(snap.Workspaces, HomeWorkspaceSummary{
 						ID:         ws.ID,
+						Slug:       ws.FolderSlug,
 						Name:       ws.Name,
 						Status:     string(ws.Status),
 						AgentCount: workspaceAgentCount(ws),

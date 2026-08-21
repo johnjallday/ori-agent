@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"sort"
 	"strconv"
@@ -543,7 +544,7 @@ func (h *LLMTaskHandler) executeTaskConversation(
 						Question:   "Review runtime setup before retrying this task.",
 						Repair: &TaskRepairAction{
 							Code: "review_runtime_setup", Label: "Review runtime setup",
-							URL: "/workspaces/" + task.WorkspaceID + "?runtime_setup=1",
+							URL: h.runtimeSetupURL(task.WorkspaceID),
 						},
 					}
 				}
@@ -1583,6 +1584,17 @@ func nativeMCPGateAllowed(ws *Workspace, ag *resolvedTaskAgent) bool {
 // (CLI agents like Claude Code / Codex). Such providers receive the agent's MCP
 // servers as resolved specs on the request rather than via the internal tool
 // loop.
+func (h *LLMTaskHandler) runtimeSetupURL(workspaceID string) string {
+	if h == nil || h.workspaceStore == nil {
+		return ""
+	}
+	ws, err := h.workspaceStore.Get(strings.TrimSpace(workspaceID))
+	if err != nil || ws == nil || strings.TrimSpace(ws.FolderSlug) == "" {
+		return ""
+	}
+	return "/workspaces/" + url.PathEscape(ws.FolderSlug) + "?runtime_setup=1"
+}
+
 func providerSupportsNativeMCP(provider llm.Provider) bool {
 	if provider == nil {
 		return false

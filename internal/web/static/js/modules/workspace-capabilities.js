@@ -27,17 +27,12 @@
 
   function wsId() {
     if (workspaceId) return workspaceId;
-    // The URL is authoritative and available immediately. window.currentWorkspaceId
-    // is set by a module script that runs after deferred ones, so relying on it
-    // alone leaves this module idle on exactly the load that matters — the first.
-    const match =
-      typeof window !== 'undefined' &&
-      /^\/workspaces\/([^/?#]+)/.exec((window.location && window.location.pathname) || '');
-    if (match) {
-      workspaceId = decodeURIComponent(match[1]);
-      return workspaceId;
-    }
-    return (typeof window !== 'undefined' && window.currentWorkspaceId) || '';
+    const resolved =
+      (typeof window !== 'undefined' && window.currentWorkspaceId) ||
+      (typeof document !== 'undefined' && document.body?.dataset?.workspaceId) ||
+      '';
+    if (resolved) workspaceId = String(resolved);
+    return workspaceId;
   }
 
   function el(tag, opts = {}, children = []) {

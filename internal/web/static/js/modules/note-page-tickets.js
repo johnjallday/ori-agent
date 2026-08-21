@@ -28,15 +28,8 @@
     const main = document.getElementById('noteMainContent');
     const workspaceId = (main && main.dataset.workspaceId) || '';
     const noteId = (main && main.dataset.noteId) || '';
-    if (workspaceId && noteId) return { workspaceId, noteId };
-
-    // Focused route: /workspaces/{workspaceId}/notes/{noteId}
-    const match = String(window.location.pathname || '').match(
-      /^\/workspaces\/([^/]+)\/notes\/([^/]+)/
-    );
-    if (match) {
-      return { workspaceId: decodeURIComponent(match[1]), noteId: decodeURIComponent(match[2]) };
-    }
+    // The first browser path segment is a slug. UUID identity must come from
+    // server-rendered page data; never feed the visible slug into ticket APIs.
     return { workspaceId, noteId };
   }
 
@@ -46,7 +39,7 @@
 
     const link = document.createElement('a');
     link.className = 'note-page-ticket-link';
-    link.href = `/workspaces/${encodeURIComponent(ticket.owningWorkspaceId)}?ticket=${encodeURIComponent(ticket.id)}`;
+    link.href = `/workspaces/${encodeURIComponent(ticket.owningWorkspaceSlug)}?ticket=${encodeURIComponent(ticket.id)}`;
 
     const number = document.createElement('span');
     number.className = 'note-page-ticket-number';

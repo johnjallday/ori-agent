@@ -5,13 +5,16 @@ import (
 	"testing"
 )
 
-func TestNormalizeChatRouteContext_InfersWorkspaceFromPath(t *testing.T) {
+func TestNormalizeChatRouteContext_InfersSlugButNeverIDFromPath(t *testing.T) {
 	ctx := normalizeChatRouteContext(&chatRouteContext{
-		PagePath: "/workspaces/abc-123",
+		PagePath: "/workspaces/marketing-site",
 	})
 
-	if ctx.WorkspaceID != "abc-123" {
-		t.Fatalf("expected workspace id abc-123, got %q", ctx.WorkspaceID)
+	if ctx.WorkspaceID != "" {
+		t.Fatalf("path slug leaked into workspace id: %q", ctx.WorkspaceID)
+	}
+	if ctx.WorkspaceSlug != "marketing-site" {
+		t.Fatalf("expected workspace slug marketing-site, got %q", ctx.WorkspaceSlug)
 	}
 	if ctx.Surface != "workspace_detail" {
 		t.Fatalf("expected workspace_detail surface, got %q", ctx.Surface)
@@ -30,19 +33,23 @@ func TestNormalizeChatRouteContext_InfersCanvasSurface(t *testing.T) {
 
 func TestBuildRouteContextSystemPrompt_WorkspaceDetail(t *testing.T) {
 	prompt := buildRouteContextSystemPrompt(normalizedChatRouteContext{
-		Surface:     "workspace_detail",
-		PagePath:    "/workspaces/ws-1",
-		WorkspaceID: "ws-1",
-		Origin:      "ask_ori",
+		Surface:       "workspace_detail",
+		PagePath:      "/workspaces/marketing-site",
+		WorkspaceID:   "workspace-uuid",
+		WorkspaceSlug: "marketing-site",
+		Origin:        "ask_ori",
 	})
 
 	if !strings.Contains(prompt, "Primary mode: workspace-focused assistance.") {
 		t.Fatalf("expected workspace-focused instructions, got %q", prompt)
 	}
-	if !strings.Contains(prompt, `Active workspace_id: "ws-1"`) {
+	if !strings.Contains(prompt, `Active workspace_id: "workspace-uuid"`) {
 		t.Fatalf("expected workspace id in prompt, got %q", prompt)
 	}
-	if !strings.Contains(prompt, `Page path: "/workspaces/ws-1"`) {
+	if !strings.Contains(prompt, `Active workspace_slug: "marketing-site"`) {
+		t.Fatalf("expected workspace slug in prompt, got %q", prompt)
+	}
+	if !strings.Contains(prompt, `Page path: "/workspaces/marketing-site"`) {
 		t.Fatalf("expected page path in prompt, got %q", prompt)
 	}
 	if !strings.Contains(prompt, `Request origin: "ask_ori"`) {

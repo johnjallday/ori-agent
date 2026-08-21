@@ -78,7 +78,10 @@
     // re-showing the capture action; the endpoint is idempotent either way,
     // but a direct link is the clearer affordance once linked (FR26, 29).
     if (item.status === 'planned' && item.linked_task_id) {
-      const href = `/workspaces/${encodeURIComponent(item.linked_workspace_id || item.workspace_id)}?panel=backlog&task=${encodeURIComponent(item.linked_task_id)}`;
+      const slug = String(item.linked_workspace_slug || item.workspace_slug || '').trim();
+      const href = slug
+        ? `/workspaces/${encodeURIComponent(slug)}?panel=backlog&task=${encodeURIComponent(item.linked_task_id)}`
+        : '#';
       return `<a class="btn btn-sm btn-outline-primary" href="${href}" title="View in Backlog">View in Backlog</a>`;
     }
     return `<button class="btn btn-sm btn-outline-primary" data-action="add-to-backlog" title="Add to Backlog">Add to Backlog</button>`;
@@ -86,9 +89,10 @@
 
   function rowHTML(item) {
     const unseen = !item.seen_at;
-    const opened = `/workspaces/${encodeURIComponent(item.workspace_id)}`;
+    const workspaceSlug = String(item.workspace_slug || '').trim();
+    const opened = workspaceSlug ? `/workspaces/${encodeURIComponent(workspaceSlug)}` : '#';
     return `
-      <div class="action-center-row" data-ws="${escapeHtml(item.workspace_id)}" data-id="${escapeHtml(item.id)}"
+      <div class="action-center-row" data-ws="${escapeHtml(item.workspace_id)}" data-workspace-slug="${escapeHtml(workspaceSlug)}" data-id="${escapeHtml(item.id)}"
            style="display: grid; grid-template-columns: auto 1fr auto; gap: 0.75rem 1rem; padding: 0.75rem; border-bottom: 1px solid var(--border-color, #eee); align-items: start; ${unseen ? 'background: rgba(99,102,241,0.04);' : ''}">
         <div style="display: flex; flex-direction: column; gap: 0.25rem; align-items: flex-start; min-width: 80px;">
           ${priorityChip(item.priority)}
@@ -217,11 +221,11 @@
       const data = await callMutation(workspaceID, opportunityID, 'add-to-backlog');
       await reload();
       const item = data && data.item;
-      const linkedWs = (item && item.workspace_id) || workspaceID;
-      if (item && item.id) {
+      const workspaceSlug = String(data?.workspace_slug || '').trim();
+      if (item && item.id && workspaceSlug) {
         setStatusWithLink(
           'Added to backlog.',
-          `/workspaces/${encodeURIComponent(linkedWs)}?panel=backlog&task=${encodeURIComponent(item.id)}`,
+          `/workspaces/${encodeURIComponent(workspaceSlug)}?panel=backlog&task=${encodeURIComponent(item.id)}`,
           'Open item'
         );
       } else {
@@ -241,6 +245,7 @@
     const row = evt.target.closest('.action-center-row');
     if (!row) return;
     const workspaceID = row.dataset.ws;
+    const workspaceSlug = row.dataset.workspaceSlug || '';
     const opportunityID = row.dataset.id;
     const triggerBtn = evt.target.closest('[data-action]');
     const action = triggerBtn?.dataset.action;
@@ -252,7 +257,8 @@
       fetch(
         `/api/action-center/opportunities/${encodeURIComponent(workspaceID)}/${encodeURIComponent(opportunityID)}`
       ).finally(() => {
-        window.location.href = `/workspaces/${encodeURIComponent(workspaceID)}`;
+        if (workspaceSlug)
+          window.location.href = `/workspaces/${encodeURIComponent(workspaceSlug)}`;
       });
       return;
     }

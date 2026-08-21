@@ -33,11 +33,9 @@
     }
 
     init() {
-      // Derive the workspace id from the URL rather than a global: classic
-      // deferred scripts run before module scripts set window.currentWorkspaceId.
-      const match = window.location.pathname.match(/\/workspaces\/([^/?#]+)/);
-      if (!match) return;
-      this.workspaceId = decodeURIComponent(match[1]);
+      const resolved = window.currentWorkspaceId || document.body?.dataset?.workspaceId || '';
+      if (!resolved) return;
+      this.workspaceId = String(resolved);
       this.refresh();
     }
 

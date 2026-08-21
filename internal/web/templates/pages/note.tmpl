@@ -3,13 +3,17 @@
 <html data-bs-theme="light">
 {{template "head.tmpl" .}}
 
-<body class="bg-light">
+<body class="bg-light" data-workspace-id="{{.Extra.WorkspaceID}}" data-workspace-slug="{{.Extra.WorkspaceSlug}}">
+  <script>
+    window.currentWorkspaceId = document.body.dataset.workspaceId || '';
+    window.currentWorkspaceSlug = document.body.dataset.workspaceSlug || '';
+  </script>
   <a href="#noteMainContent" class="skip-link">Skip to note content</a>
   <div id="toastContainer" class="toast-container" aria-live="polite" aria-atomic="true"></div>
 
   {{template "navbar.tmpl" .}}
 
-  <main id="noteMainContent" class="note-page" role="main" aria-label="Note editor" data-workspace-id="{{.Extra.WorkspaceID}}" data-note-id="{{.Extra.NoteID}}" data-page-mode="{{.Extra.NotePageMode}}">
+  <main id="noteMainContent" class="note-page" role="main" aria-label="Note editor" data-workspace-id="{{.Extra.WorkspaceID}}" data-workspace-slug="{{.Extra.WorkspaceSlug}}" data-note-id="{{.Extra.NoteID}}" data-page-mode="{{.Extra.NotePageMode}}">
     <!-- Top bar: breadcrumb, editable title, status -->
     <header class="note-page-top-bar">
       <nav aria-label="breadcrumb" class="note-page-breadcrumb">

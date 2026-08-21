@@ -654,8 +654,18 @@ function showError(message) {
 /**
  * Open workspace canvas view
  */
+function findLoadedWorkspace(workspaceId, items = loadedWorkspaces) {
+  for (const workspace of items || []) {
+    if (String(workspace?.id || '') === String(workspaceId || '')) return workspace;
+    const nested = findLoadedWorkspace(workspaceId, workspace?.children || []);
+    if (nested) return nested;
+  }
+  return null;
+}
+
 function openWorkspaceCanvas(workspaceId) {
-  window.location.href = `/workspaces/${workspaceId}/canvas`;
+  const slug = String(findLoadedWorkspace(workspaceId)?.folder_slug || '').trim();
+  if (slug) window.location.href = `/workspaces/${encodeURIComponent(slug)}/canvas`;
 }
 
 /**
@@ -704,7 +714,8 @@ function populateCanvasWorkspaceSelect() {
  * View workspace details
  */
 async function viewWorkspace(workspaceId) {
-  window.location.href = `/workspaces/${workspaceId}`;
+  const slug = String(findLoadedWorkspace(workspaceId)?.folder_slug || '').trim();
+  if (slug) window.location.href = `/workspaces/${encodeURIComponent(slug)}`;
 }
 
 // Export functions for global access

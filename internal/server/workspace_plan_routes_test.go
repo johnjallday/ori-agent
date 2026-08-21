@@ -13,14 +13,15 @@ import (
 // resolve the same way from every entry point (PRD FR-145, FR-148, FR-149).
 func TestWorkspacePlanPageRoutesResolveCanonically(t *testing.T) {
 	handler := newRoutesTestHandler(t)
+	workspace := createRouteTestWorkspace(t, handler, "Plan Route Workspace")
 
 	for _, tc := range []struct {
 		name string
 		path string
 		want string
 	}{
-		{"plans list", "/workspaces/ws-1/plans", "workspacePlansPageRoot"},
-		{"plan detail", "/workspaces/ws-1/plans/plan-1", "workspacePlanPageRoot"},
+		{"plans list", "/workspaces/" + workspace.Slug + "/plans", "workspacePlansPageRoot"},
+		{"plan detail", "/workspaces/" + workspace.Slug + "/plans/plan-1", "workspacePlanPageRoot"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
@@ -36,8 +37,11 @@ func TestWorkspacePlanPageRoutesResolveCanonically(t *testing.T) {
 			}
 			// The page carries the identifiers the client needs to call the
 			// workspace-scoped API; without them it would have to guess.
-			if !strings.Contains(body, `data-workspace-id="ws-1"`) {
+			if !strings.Contains(body, `data-workspace-id="`+workspace.ID+`"`) {
 				t.Errorf("%s did not carry its workspace id", tc.path)
+			}
+			if !strings.Contains(body, `data-workspace-slug="`+workspace.Slug+`"`) {
+				t.Errorf("%s did not carry its workspace slug", tc.path)
 			}
 		})
 	}
@@ -47,8 +51,9 @@ func TestWorkspacePlanPageRoutesResolveCanonically(t *testing.T) {
 // workspace-scoped API for that exact Plan rather than inferring one.
 func TestWorkspacePlanDetailPageCarriesPlanID(t *testing.T) {
 	handler := newRoutesTestHandler(t)
+	workspace := createRouteTestWorkspace(t, handler, "Plan Detail Route Workspace")
 
-	req := httptest.NewRequest(http.MethodGet, "/workspaces/ws-1/plans/plan-42", nil)
+	req := httptest.NewRequest(http.MethodGet, "/workspaces/"+workspace.Slug+"/plans/plan-42", nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -64,16 +69,18 @@ func TestWorkspacePlanDetailPageCarriesPlanID(t *testing.T) {
 // rendering a Plan page for an ID that was never valid.
 func TestWorkspacePlanMalformedPathRedirectsToTheList(t *testing.T) {
 	handler := newRoutesTestHandler(t)
+	workspace := createRouteTestWorkspace(t, handler, "Malformed Plan Route Workspace")
 
-	req := httptest.NewRequest(http.MethodGet, "/workspaces/ws-1/plans/plan-1/extra/segments", nil)
+	req := httptest.NewRequest(http.MethodGet, "/workspaces/"+workspace.Slug+"/plans/plan-1/extra/segments?panel=history", nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("status = %d, want 303", rec.Code)
 	}
-	if location := rec.Header().Get("Location"); location != "/workspaces/ws-1/plans" {
-		t.Errorf("redirect target = %q, want the canonical plans list", location)
+	wantLocation := "/workspaces/" + workspace.Slug + "/plans?panel=history"
+	if location := rec.Header().Get("Location"); location != wantLocation {
+		t.Errorf("redirect target = %q, want %q", location, wantLocation)
 	}
 }
 

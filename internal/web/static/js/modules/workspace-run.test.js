@@ -25,6 +25,16 @@ test('formatTaskOutputStatus maps task output validation states to PRD labels', 
   );
 });
 
+test('workspace run keeps UUID APIs separate from slug task and run links', () => {
+  const page = new WorkspaceRunPage('workspace-uuid', 'run-1', {
+    workspaceSlug: 'marketing-site'
+  });
+
+  assert.equal(page.taskHref('task/1'), '/workspaces/marketing-site/task/task%2F1');
+  assert.equal(page.runHref('run/2'), '/workspaces/marketing-site/runs/run%2F2');
+  assert.match(page.workspaceId, /workspace-uuid/);
+});
+
 test('workspace run overview and report render reference URL details', () => {
   const page = new WorkspaceRunPage('workspace-1', 'run-1');
   page.run = {

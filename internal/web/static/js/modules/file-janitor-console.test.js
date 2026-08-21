@@ -1871,16 +1871,13 @@ test('cancelling the confirmation returns focus to the control that opened it', 
   assert.notEqual(doc.activeElement, doc.body, 'cancelling must not strand focus on the body');
 });
 
-// The panel is loaded as a classic `defer` script; the page sets
-// window.currentWorkspaceId from a module script, which runs later. If the
-// panel depends on that global existing at init() time it renders nothing at
-// all — and every API call it would have made still looks correct, so this is
-// invisible to server-side verification.
-test('the panel finds its workspace without window.currentWorkspaceId', async () => {
+// The server-rendered body carries UUID identity before deferred tooling runs.
+test('the panel reads its UUID from server-rendered page data', async () => {
   const doc = setup();
   panel._forgetWorkspace();
   delete globalThis.window.currentWorkspaceId;
-  globalThis.window.location = { pathname: '/workspaces/ws-42' };
+  doc.body.dataset = { workspaceId: 'ws-42' };
+  globalThis.window.location = { pathname: '/workspaces/readable-slug' };
 
   const requested = [];
   globalThis.fetch = async url => {
@@ -1893,18 +1890,19 @@ test('the panel finds its workspace without window.currentWorkspaceId', async ()
 
   assert.ok(
     requested.some(url => url.includes('/api/workspaces/ws-42/file-janitor')),
-    'the panel must derive its workspace from the URL, not give up: ' + JSON.stringify(requested)
+    'the panel must use server-rendered UUID identity: ' + JSON.stringify(requested)
   );
   const host = surface(doc);
   assert.equal(host.hidden, false, 'the setup card must actually be shown');
   assert.match(text(doc), /Setup required|Use this folder/);
 });
 
-test('an explicit workspace id still wins over the URL', async () => {
+test('an explicit workspace id still wins over page data', async () => {
   const doc = setup();
   panel._forgetWorkspace();
   delete globalThis.window.currentWorkspaceId;
-  globalThis.window.location = { pathname: '/workspaces/ws-from-url' };
+  doc.body.dataset = { workspaceId: 'ws-from-page' };
+  globalThis.window.location = { pathname: '/workspaces/readable-slug' };
   const requested = [];
   globalThis.fetch = async url => {
     requested.push(String(url));
@@ -1916,7 +1914,8 @@ test('an explicit workspace id still wins over the URL', async () => {
     requested.some(url => url.includes('/ws-explicit/')),
     JSON.stringify(requested)
   );
-  assert.ok(!requested.some(url => url.includes('ws-from-url')));
+  assert.ok(!requested.some(url => url.includes('ws-from-page')));
+  assert.ok(!requested.some(url => url.includes('readable-slug')));
   assert.ok(doc);
 });
 

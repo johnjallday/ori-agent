@@ -79,7 +79,8 @@ function setup() {
     readyState: 'complete'
   };
   globalThis.window = globalThis;
-  globalThis.window.location = { pathname: '/workspaces/ws-1' };
+  globalThis.window.location = { pathname: '/workspaces/readable-slug' };
+  globalThis.window.currentWorkspaceId = 'ws-1';
   globalThis.CSS = { escape: v => v };
   return mount;
 }

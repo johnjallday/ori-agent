@@ -55,6 +55,7 @@ type BacklogUpdateInput struct {
 type BacklogItemView struct {
 	Task                Task   `json:"task"`
 	OwningWorkspaceID   string `json:"owning_workspace_id"`
+	OwningWorkspaceSlug string `json:"owning_workspace_slug"`
 	OwningWorkspaceName string `json:"owning_workspace_name"`
 }
 
@@ -281,7 +282,7 @@ func (s *BacklogService) Get(workspaceID, taskID string) (*BacklogItemView, erro
 	if task.CanonicalState() != TicketStateBacklog {
 		return nil, fmt.Errorf("item %s is not in Backlog", taskID)
 	}
-	return &BacklogItemView{Task: *task, OwningWorkspaceID: ws.ID, OwningWorkspaceName: ws.Name}, nil
+	return &BacklogItemView{Task: *task, OwningWorkspaceID: ws.ID, OwningWorkspaceSlug: ws.FolderSlug, OwningWorkspaceName: ws.Name}, nil
 }
 
 // List returns workspaceID's Backlog items sorted by persistent rank, then
@@ -331,7 +332,7 @@ func localBacklogItemViews(ws *Workspace) []BacklogItemView {
 		if t.ParentTaskID != "" {
 			continue
 		}
-		out = append(out, BacklogItemView{Task: t, OwningWorkspaceID: ws.ID, OwningWorkspaceName: ws.Name})
+		out = append(out, BacklogItemView{Task: t, OwningWorkspaceID: ws.ID, OwningWorkspaceSlug: ws.FolderSlug, OwningWorkspaceName: ws.Name})
 	}
 	return out
 }

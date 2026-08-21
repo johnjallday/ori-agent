@@ -31,6 +31,7 @@ const (
 type HomeAssistantWorkspaceResolution struct {
 	State                 string                            `json:"state"`
 	SelectedWorkspaceID   string                            `json:"selected_workspace_id,omitempty"`
+	SelectedWorkspaceSlug string                            `json:"selected_workspace_slug,omitempty"`
 	SelectedWorkspaceName string                            `json:"selected_workspace_name,omitempty"`
 	Confidence            float64                           `json:"confidence,omitempty"`
 	Reasons               []string                          `json:"reasons,omitempty"`
@@ -40,6 +41,7 @@ type HomeAssistantWorkspaceResolution struct {
 
 type HomeAssistantWorkspaceCandidate struct {
 	ID      string   `json:"id"`
+	Slug    string   `json:"slug"`
 	Name    string   `json:"name"`
 	Score   int      `json:"score"`
 	Reasons []string `json:"reasons,omitempty"`
@@ -242,6 +244,7 @@ func (r *HomeAssistantWorkspaceResolver) resolveSelectedWorkspace(ws *workspace.
 	resolution := &HomeAssistantWorkspaceResolution{
 		State:                 homeAssistantWorkspaceStateConfident,
 		SelectedWorkspaceID:   strings.TrimSpace(ws.ID),
+		SelectedWorkspaceSlug: strings.TrimSpace(ws.FolderSlug),
 		SelectedWorkspaceName: strings.TrimSpace(ws.Name),
 		Reasons:               append([]string(nil), reasons...),
 	}
@@ -578,6 +581,7 @@ func buildHomeAssistantWorkspaceCandidates(scores []homeAssistantWorkspaceScore)
 		}
 		out = append(out, HomeAssistantWorkspaceCandidate{
 			ID:      score.Workspace.ID,
+			Slug:    score.Workspace.FolderSlug,
 			Name:    score.Workspace.Name,
 			Score:   score.Score,
 			Reasons: append([]string(nil), score.Reasons...),

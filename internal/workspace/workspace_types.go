@@ -1065,6 +1065,7 @@ type FileInfo struct {
 	// linked folders surface nested workspaces as openable references.
 	IsWorkspace   bool   `json:"is_workspace,omitempty"`
 	WorkspaceID   string `json:"workspace_id,omitempty"`
+	WorkspaceSlug string `json:"workspace_slug,omitempty"`
 	WorkspaceName string `json:"workspace_name,omitempty"`
 }
 

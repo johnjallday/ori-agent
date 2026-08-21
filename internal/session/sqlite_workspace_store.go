@@ -246,6 +246,15 @@ func normalizeOwnerUserID(ownerUserID string) string {
 	return ownerUserID
 }
 
+func isWorkspaceSlugUniqueError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "unique constraint") &&
+		(strings.Contains(message, "workspaces.folder_slug") || strings.Contains(message, "idx_workspaces_folder_slug"))
+}
+
 // CreateWorkspace creates a new workspace.
 func (s *SQLiteStore) CreateWorkspace(ctx context.Context, workspace *Workspace) error {
 	if workspace.ID == "" {
@@ -264,13 +273,13 @@ func (s *SQLiteStore) CreateWorkspace(ctx context.Context, workspace *Workspace)
 	f := serializeWorkspaceFields(workspace)
 
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO workspaces (id, name, kind, description, owner_user_id, parent_id, order_index, color, session_count, created_at, updated_at,
+		INSERT INTO workspaces (id, name, folder_slug, kind, description, owner_user_id, parent_id, order_index, color, session_count, created_at, updated_at,
 			agent_instances, tags, shared_data, status, layout,
 			messages_json, tasks_json, attachments_json, folders_json, scheduled_tasks_json, store_nodes_json, workflows_json, directory_references_json,
 			mcp_bindings_json, agent_mcp_access_json, skill_bindings_json, agent_skill_access_json, opportunities_json, installed_capabilities_json, toolbox_state_json, mission_state_json,
 			ticket_migration_version, ticket_sequence, version, allow_native_mcp_cli)
-		VALUES (?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, workspace.ID, workspace.Name, NormalizeWorkspaceKind(string(workspace.Kind)), workspace.Description, normalizeOwnerUserID(workspace.OwnerUserID), workspace.ParentID, workspace.OrderIndex, workspace.Color,
+		VALUES (?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, workspace.ID, workspace.Name, workspace.FolderSlug, NormalizeWorkspaceKind(string(workspace.Kind)), workspace.Description, normalizeOwnerUserID(workspace.OwnerUserID), workspace.ParentID, workspace.OrderIndex, workspace.Color,
 		workspace.SessionCount, workspace.CreatedAt, workspace.UpdatedAt,
 		string(f.agentInstances), string(f.tags), string(f.sharedData), string(f.status), f.layout,
 		string(f.messages), string(f.tasks), string(f.attachments), string(f.folders), string(f.scheduledTasks), string(f.storeNodes), string(f.workflows), string(f.directoryReferences),
@@ -278,6 +287,9 @@ func (s *SQLiteStore) CreateWorkspace(ctx context.Context, workspace *Workspace)
 		workspace.TicketMigrationVersion, workspace.TicketSequence, workspace.Version, workspace.AllowNativeMCPCLI)
 
 	if err != nil {
+		if isWorkspaceSlugUniqueError(err) {
+			return ErrWorkspaceSlugConflict
+		}
 		if strings.Contains(err.Error(), "UNIQUE constraint") {
 			return ErrDuplicateID
 		}
@@ -338,13 +350,13 @@ func (s *SQLiteStore) GetWorkspace(ctx context.Context, id string) (*Workspace, 
 	var updatedAtRaw any
 
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, name, kind, description, owner_user_id, parent_id, order_index, color, session_count, created_at, updated_at,
+		SELECT id, name, folder_slug, kind, description, owner_user_id, parent_id, order_index, color, session_count, created_at, updated_at,
 			agent_instances, tags, shared_data, status, layout,
 			messages_json, tasks_json, attachments_json, folders_json, scheduled_tasks_json, store_nodes_json, workflows_json, directory_references_json,
 			mcp_bindings_json, agent_mcp_access_json, skill_bindings_json, agent_skill_access_json, opportunities_json, installed_capabilities_json, toolbox_state_json, mission_state_json,
 			ticket_migration_version, ticket_sequence, version, allow_native_mcp_cli
 		FROM workspaces WHERE id = ?
-	`, id).Scan(&workspace.ID, &workspace.Name, &kind, &description, &ownerUserID, &parentID, &workspace.OrderIndex, &color,
+	`, id).Scan(&workspace.ID, &workspace.Name, &workspace.FolderSlug, &kind, &description, &ownerUserID, &parentID, &workspace.OrderIndex, &color,
 		&workspace.SessionCount, &createdAtRaw, &updatedAtRaw,
 		&agentInstancesJSON, &tagsJSON, &sharedDataJSON, &status, &layoutJSON,
 		&messagesJSON, &tasksJSON, &attachmentsJSON, &foldersJSON, &scheduledTasksJSON, &storeNodesJSON, &workflowsJSON, &directoryReferencesJSON,
@@ -439,6 +451,26 @@ func (s *SQLiteStore) GetWorkspace(ctx context.Context, id string) (*Workspace, 
 	return workspace, nil
 }
 
+// GetWorkspaceBySlug resolves an active registered workspace by its persisted
+// canonical folder slug. It deliberately has no ID fallback.
+func (s *SQLiteStore) GetWorkspaceBySlug(ctx context.Context, slug string) (*Workspace, error) {
+	var id string
+	err := s.db.QueryRowContext(ctx, `
+		SELECT id
+		FROM workspaces
+		WHERE folder_slug = ? COLLATE NOCASE
+			AND TRIM(folder_slug) <> ''
+			AND COALESCE(status, 'active') NOT IN ('trashed', 'missing')
+	`, slug).Scan(&id)
+	if err == sql.ErrNoRows {
+		return nil, ErrWorkspaceNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve workspace slug: %w", err)
+	}
+	return s.GetWorkspace(ctx, id)
+}
+
 // UpdateWorkspace updates workspace metadata.
 func (s *SQLiteStore) UpdateWorkspace(ctx context.Context, workspace *Workspace) error {
 	// Serialize all JSON fields using helper
@@ -446,19 +478,22 @@ func (s *SQLiteStore) UpdateWorkspace(ctx context.Context, workspace *Workspace)
 
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE workspaces
-		SET name = ?, kind = ?, description = ?, owner_user_id = ?, parent_id = NULLIF(?, ''), order_index = ?, color = ?, updated_at = ?,
+		SET name = ?, folder_slug = ?, kind = ?, description = ?, owner_user_id = ?, parent_id = NULLIF(?, ''), order_index = ?, color = ?, updated_at = ?,
 			agent_instances = ?, tags = ?, shared_data = ?, status = ?, layout = ?,
 			messages_json = ?, tasks_json = ?, attachments_json = ?, folders_json = ?, scheduled_tasks_json = ?, store_nodes_json = ?, workflows_json = ?, directory_references_json = ?,
 			mcp_bindings_json = ?, agent_mcp_access_json = ?, skill_bindings_json = ?, agent_skill_access_json = ?, opportunities_json = ?, installed_capabilities_json = ?, toolbox_state_json = ?, mission_state_json = ?,
 			ticket_migration_version = ?, ticket_sequence = ?, version = ?, allow_native_mcp_cli = ?
 		WHERE id = ?
-	`, workspace.Name, NormalizeWorkspaceKind(string(workspace.Kind)), workspace.Description, normalizeOwnerUserID(workspace.OwnerUserID), workspace.ParentID, workspace.OrderIndex, workspace.Color, workspace.UpdatedAt,
+	`, workspace.Name, workspace.FolderSlug, NormalizeWorkspaceKind(string(workspace.Kind)), workspace.Description, normalizeOwnerUserID(workspace.OwnerUserID), workspace.ParentID, workspace.OrderIndex, workspace.Color, workspace.UpdatedAt,
 		string(f.agentInstances), string(f.tags), string(f.sharedData), string(f.status), f.layout,
 		string(f.messages), string(f.tasks), string(f.attachments), string(f.folders), string(f.scheduledTasks), string(f.storeNodes), string(f.workflows), string(f.directoryReferences),
 		string(f.mcpBindings), string(f.agentMCPAccess), string(f.skillBindings), string(f.agentSkillAccess), string(f.opportunities), string(f.installedCapabilities), string(f.toolboxState), nullableJSON(f.missionState),
 		workspace.TicketMigrationVersion, workspace.TicketSequence, workspace.Version, workspace.AllowNativeMCPCLI, workspace.ID)
 
 	if err != nil {
+		if isWorkspaceSlugUniqueError(err) {
+			return ErrWorkspaceSlugConflict
+		}
 		return fmt.Errorf("failed to update workspace: %w", err)
 	}
 
@@ -557,7 +592,7 @@ func (s *SQLiteStore) UnlinkSessionsFromWorkspace(ctx context.Context, workspace
 // as "nothing installed anywhere" and silently defeat conflict detection.
 func (s *SQLiteStore) ListWorkspaces(ctx context.Context) ([]Workspace, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, name, kind, description, owner_user_id, parent_id, order_index, color, session_count, created_at, updated_at,
+		SELECT id, name, folder_slug, kind, description, owner_user_id, parent_id, order_index, color, session_count, created_at, updated_at,
 			agent_instances, tags, status, installed_capabilities_json, ticket_migration_version, ticket_sequence, version
 		FROM workspaces
 		ORDER BY COALESCE(parent_id, ''), order_index ASC, name ASC
@@ -575,7 +610,7 @@ func (s *SQLiteStore) ListWorkspaces(ctx context.Context) ([]Workspace, error) {
 		var createdAtRaw any
 		var updatedAtRaw any
 
-		if err := rows.Scan(&workspace.ID, &workspace.Name, &kind, &description, &ownerUserID, &parentID, &workspace.OrderIndex, &color,
+		if err := rows.Scan(&workspace.ID, &workspace.Name, &workspace.FolderSlug, &kind, &description, &ownerUserID, &parentID, &workspace.OrderIndex, &color,
 			&workspace.SessionCount, &createdAtRaw, &updatedAtRaw,
 			&agentInstancesJSON, &tagsJSON, &status, &installedCapabilitiesJSON, &workspace.TicketMigrationVersion, &workspace.TicketSequence, &workspace.Version); err != nil {
 			return nil, fmt.Errorf("failed to scan workspace: %w", err)
@@ -622,7 +657,7 @@ func (s *SQLiteStore) ListWorkspaces(ctx context.Context) ([]Workspace, error) {
 // so the result is identical to a per-workspace Get minus Messages.
 func (s *SQLiteStore) ListWorkspacesForScheduling(ctx context.Context) ([]Workspace, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, name, kind, description, parent_id, order_index, color, session_count, created_at, updated_at,
+		SELECT id, name, folder_slug, kind, description, parent_id, order_index, color, session_count, created_at, updated_at,
 			agent_instances, tags, shared_data, status, layout,
 			tasks_json, attachments_json, folders_json, scheduled_tasks_json, store_nodes_json, workflows_json, directory_references_json,
 			mcp_bindings_json, agent_mcp_access_json, skill_bindings_json, agent_skill_access_json, opportunities_json, installed_capabilities_json, toolbox_state_json, mission_state_json,
@@ -643,7 +678,7 @@ func (s *SQLiteStore) ListWorkspacesForScheduling(ctx context.Context) ([]Worksp
 		var mcpBindingsJSON, agentMCPAccessJSON, skillBindingsJSON, agentSkillAccessJSON, opportunitiesJSON, installedCapabilitiesJSON, toolboxStateJSON, missionStateJSON sql.NullString
 		var createdAtRaw, updatedAtRaw any
 
-		if err := rows.Scan(&workspace.ID, &workspace.Name, &kind, &description, &parentID, &workspace.OrderIndex, &color,
+		if err := rows.Scan(&workspace.ID, &workspace.Name, &workspace.FolderSlug, &kind, &description, &parentID, &workspace.OrderIndex, &color,
 			&workspace.SessionCount, &createdAtRaw, &updatedAtRaw,
 			&agentInstancesJSON, &tagsJSON, &sharedDataJSON, &status, &layoutJSON,
 			&tasksJSON, &attachmentsJSON, &foldersJSON, &scheduledTasksJSON, &storeNodesJSON, &workflowsJSON, &directoryReferencesJSON,

@@ -121,7 +121,7 @@ func TestOneUnreadableRecordDoesNotHideTheReadableOnes(t *testing.T) {
 	resp := askGuide(t, h, "open my Launch Planning workspace", "/")
 	found := false
 	for _, a := range resp.Actions {
-		if a.Href == "/workspaces/ok1" {
+		if a.Href == "/workspaces/launch-planning" {
 			found = true
 		}
 	}

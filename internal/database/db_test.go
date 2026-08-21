@@ -120,6 +120,7 @@ func TestMigrations(t *testing.T) {
 	}
 
 	workspaceColumns := map[string]bool{
+		"folder_slug":             false,
 		"mcp_bindings_json":       false,
 		"agent_mcp_access_json":   false,
 		"skill_bindings_json":     false,
@@ -1777,11 +1778,12 @@ func TestMigration043UpgradesWorkspaceTicketState(t *testing.T) {
 		CREATE TABLE workspaces (
 			id TEXT PRIMARY KEY,
 			name TEXT NOT NULL,
+			status TEXT DEFAULT 'active',
 			created_at DATETIME NOT NULL,
 			updated_at DATETIME NOT NULL
 		);
-		INSERT INTO workspaces (id, name, created_at, updated_at)
-		VALUES ('ws-legacy', 'Legacy', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
+		INSERT INTO workspaces (id, name, status, created_at, updated_at)
+		VALUES ('ws-legacy', 'Legacy', 'active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
 	`); err != nil {
 		_ = legacyDB.Close()
 		t.Fatalf("seed legacy database: %v", err)
@@ -1810,6 +1812,79 @@ func TestMigration043UpgradesWorkspaceTicketState(t *testing.T) {
 
 	if err := db.migration043WorkspaceTicketState(ctx); err != nil {
 		t.Fatalf("re-running migration 43 failed: %v", err)
+	}
+}
+
+// TestMigration044UpgradesWorkspaceFolderSlugs proves a version-43 database
+// gains durable slugs and the active-registration uniqueness boundary without
+// changing existing workspace identities.
+func TestMigration044UpgradesWorkspaceFolderSlugs(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "migration-044.db")
+
+	legacyDB, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open legacy database: %v", err)
+	}
+	if _, err := legacyDB.ExecContext(ctx, `
+		CREATE TABLE schema_migrations (
+			version INTEGER PRIMARY KEY,
+			applied_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		);
+		INSERT INTO schema_migrations (version) VALUES (43);
+		CREATE TABLE workspaces (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			status TEXT DEFAULT 'active',
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL
+		);
+		INSERT INTO workspaces (id, name, status, created_at, updated_at)
+		VALUES ('ws-legacy', 'Legacy', 'active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
+	`); err != nil {
+		_ = legacyDB.Close()
+		t.Fatalf("seed legacy database: %v", err)
+	}
+	if err := legacyDB.Close(); err != nil {
+		t.Fatalf("close legacy database: %v", err)
+	}
+
+	db, err := Open(ctx, &Config{Path: dbPath, WALMode: false})
+	if err != nil {
+		t.Fatalf("open migrated database: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	var slug string
+	if err := db.QueryRowContext(ctx,
+		`SELECT folder_slug FROM workspaces WHERE id = 'ws-legacy'`).Scan(&slug); err != nil {
+		t.Fatalf("read migrated folder slug: %v", err)
+	}
+	if slug != "" {
+		t.Fatalf("legacy folder_slug = %q, want empty pending reconciliation", slug)
+	}
+
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO workspaces (id, name, folder_slug, status, created_at, updated_at)
+		VALUES ('ws-a', 'Reports', 'reports', 'active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`); err != nil {
+		t.Fatalf("insert first slug: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO workspaces (id, name, folder_slug, status, created_at, updated_at)
+		VALUES ('ws-b', 'Reports Again', 'REPORTS', 'active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`); err == nil {
+		t.Fatal("case-insensitive duplicate active slug unexpectedly succeeded")
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO workspaces (id, name, folder_slug, status, created_at, updated_at)
+		VALUES ('ws-trashed', 'Old Reports', 'reports', 'trashed', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`); err != nil {
+		t.Fatalf("trashed workspace should not reserve slug: %v", err)
+	}
+
+	if err := db.migration044WorkspaceFolderSlugs(ctx); err != nil {
+		t.Fatalf("re-running migration 44 failed: %v", err)
 	}
 }
 

@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"encoding/json"
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
@@ -50,6 +51,39 @@ func newRoutesTestHandler(t *testing.T) http.Handler {
 	}
 
 	return srv.Handler()
+}
+
+type routeTestWorkspace struct {
+	ID   string
+	Slug string
+}
+
+func createRouteTestWorkspace(t *testing.T, handler http.Handler, name string) routeTestWorkspace {
+	t.Helper()
+	body, err := json.Marshal(map[string]any{"name": name})
+	if err != nil {
+		t.Fatalf("marshal workspace create: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create workspace: got %d: %s", rec.Code, rec.Body.String())
+	}
+	var response struct {
+		Folder struct {
+			ID         string `json:"id"`
+			FolderSlug string `json:"folder_slug"`
+		} `json:"folder"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode workspace create: %v", err)
+	}
+	if response.Folder.ID == "" || response.Folder.FolderSlug == "" {
+		t.Fatalf("workspace create omitted route identity: %s", rec.Body.String())
+	}
+	return routeTestWorkspace{ID: response.Folder.ID, Slug: response.Folder.FolderSlug}
 }
 
 func TestLegacyStudiosRoutesRemoved(t *testing.T) {
@@ -183,8 +217,170 @@ func TestWorkspaceProjectOpenRouteUsesRuntimeHandler(t *testing.T) {
 	}
 }
 
+func TestWorkspaceListIncludesFolderSlugForPageNavigation(t *testing.T) {
+	handler := newRoutesTestHandler(t)
+	workspace := createRouteTestWorkspace(t, handler, "List Navigation Workspace")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("workspace list status = %d: %s", rec.Code, rec.Body.String())
+	}
+	var response struct {
+		Folders []struct {
+			ID         string `json:"id"`
+			FolderSlug string `json:"folder_slug"`
+		} `json:"folders"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode workspace list: %v", err)
+	}
+	for _, item := range response.Folders {
+		if item.ID == workspace.ID {
+			if item.FolderSlug != workspace.Slug {
+				t.Fatalf("listed folder_slug = %q, want %q", item.FolderSlug, workspace.Slug)
+			}
+			return
+		}
+	}
+	t.Fatalf("created workspace missing from list: %s", rec.Body.String())
+}
+
+func TestWorkspaceDetailRouteUsesSlugAndBootstrapsUUID(t *testing.T) {
+	handler := newRoutesTestHandler(t)
+	workspace := createRouteTestWorkspace(t, handler, "Marketing Site")
+	if workspace.Slug != "marketing-site" || workspace.ID == workspace.Slug {
+		t.Fatalf("test requires distinct ID and slug, got %#v", workspace)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/workspaces/"+workspace.Slug, nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("slug detail status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		`data-workspace-id="` + workspace.ID + `"`,
+		`data-workspace-slug="marketing-site"`,
+		`const workspaceId = "` + workspace.ID + `";`,
+		`const workspaceSlug = "marketing-site";`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("slug detail page omitted %q", want)
+		}
+	}
+	if strings.Contains(body, "window.location.pathname.split('/')") {
+		t.Error("detail page still derives its internal workspace ID from the slug path")
+	}
+
+	for _, path := range []string{
+		"/workspaces/" + workspace.ID,
+		"/workspaces/unknown-workspace",
+		"/workspaces/Marketing-Site",
+	} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("GET %s status = %d, want 404", path, rec.Code)
+		}
+	}
+}
+
+func TestWorkspaceDescendantPagesKeepUUIDStateSeparateFromSlugLinks(t *testing.T) {
+	handler := newRoutesTestHandler(t)
+	workspace := createRouteTestWorkspace(t, handler, "Descendant Route Workspace")
+
+	for _, tc := range []struct {
+		name   string
+		path   string
+		marker string
+	}{
+		{"canvas", "/canvas", "canvas-view"},
+		{"diagnostics", "/diagnostics", "workspace-diagnostics-view"},
+		{"task", "/task/task%201", "workspaceTaskPageRoot"},
+		{"run", "/runs/run%201", "workspaceRunPageRoot"},
+		{"agent", "/agents/Local%20Manager", "workspace-agent-detail-view"},
+		{"plans", "/plans", "workspacePlansPageRoot"},
+		{"plan", "/plans/plan%201", "workspacePlanPageRoot"},
+		{"notes", "/notes/note%201", "noteMainContent"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/workspaces/"+workspace.Slug+tc.path, nil)
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+			}
+			body := rec.Body.String()
+			for _, want := range []string{
+				tc.marker,
+				`data-workspace-id="` + workspace.ID + `"`,
+				`data-workspace-slug="` + workspace.Slug + `"`,
+			} {
+				if !strings.Contains(body, want) {
+					t.Errorf("response omitted %q", want)
+				}
+			}
+			if strings.Contains(body, `href="/workspaces/`+workspace.ID) {
+				t.Errorf("response used UUID in a browser href")
+			}
+		})
+	}
+}
+
+func TestWorkspaceMalformedDescendantsRedirectWithinCurrentSlug(t *testing.T) {
+	handler := newRoutesTestHandler(t)
+	workspace := createRouteTestWorkspace(t, handler, "Malformed Descendant Workspace")
+
+	for from, want := range map[string]string{
+		"/workspaces/" + workspace.Slug + "/task/?panel=tasks":      "/workspaces/" + workspace.Slug + "?panel=tasks",
+		"/workspaces/" + workspace.Slug + "/notes/a/b?panel=notes":  "/workspaces/" + workspace.Slug + "/notes?panel=notes",
+		"/workspaces/" + workspace.Slug + "/unknown?panel=settings": "/workspaces/" + workspace.Slug + "?panel=settings",
+	} {
+		req := httptest.NewRequest(http.MethodGet, from, nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusSeeOther {
+			t.Errorf("GET %s status = %d, want 303", from, rec.Code)
+		}
+		if got := rec.Header().Get("Location"); got != want {
+			t.Errorf("GET %s redirected to %q, want %q", from, got, want)
+		}
+	}
+}
+
+func TestWorkspaceDetailOldSlugReturns404AfterRename(t *testing.T) {
+	handler := newRoutesTestHandler(t)
+	workspace := createRouteTestWorkspace(t, handler, "Before Rename")
+
+	renameBody := bytes.NewBufferString(`{"name":"After Rename"}`)
+	renameReq := httptest.NewRequest(http.MethodPost, "/api/workspaces/"+workspace.ID+"/rename", renameBody)
+	renameReq.Header.Set("Content-Type", "application/json")
+	renameRec := httptest.NewRecorder()
+	handler.ServeHTTP(renameRec, renameReq)
+	if renameRec.Code != http.StatusOK {
+		t.Fatalf("rename status = %d: %s", renameRec.Code, renameRec.Body.String())
+	}
+
+	for path, want := range map[string]int{
+		"/workspaces/before-rename": http.StatusNotFound,
+		"/workspaces/after-rename":  http.StatusOK,
+	} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != want {
+			t.Errorf("GET %s status = %d, want %d", path, rec.Code, want)
+		}
+	}
+}
+
 func TestWorkspaceNotesRoutesServeNotePage(t *testing.T) {
 	handler := newRoutesTestHandler(t)
+	workspace := createRouteTestWorkspace(t, handler, "Notes Route Workspace")
 
 	tests := []struct {
 		name     string
@@ -193,20 +389,20 @@ func TestWorkspaceNotesRoutesServeNotePage(t *testing.T) {
 	}{
 		{
 			name: "workspace notes app",
-			path: "/workspaces/ws-1/notes",
+			path: "/workspaces/" + workspace.Slug + "/notes",
 			contains: []string{
 				`id="noteMainContent"`,
-				`data-workspace-id="ws-1"`,
+				`data-workspace-id="` + workspace.ID + `"`,
 				`data-note-id=""`,
 				`data-page-mode="workspace"`,
 			},
 		},
 		{
 			name: "workspace note deep link",
-			path: "/workspaces/ws-1/notes/note-1",
+			path: "/workspaces/" + workspace.Slug + "/notes/note-1",
 			contains: []string{
 				`id="noteMainContent"`,
-				`data-workspace-id="ws-1"`,
+				`data-workspace-id="` + workspace.ID + `"`,
 				`data-note-id="note-1"`,
 				`data-page-mode="workspace"`,
 			},
@@ -234,8 +430,9 @@ func TestWorkspaceNotesRoutesServeNotePage(t *testing.T) {
 
 func TestWorkspaceRunPageRouteServesRunDetailPage(t *testing.T) {
 	handler := newRoutesTestHandler(t)
+	workspace := createRouteTestWorkspace(t, handler, "Run Route Workspace")
 
-	req := httptest.NewRequest(http.MethodGet, "/workspaces/ws-1/runs/run-1", nil)
+	req := httptest.NewRequest(http.MethodGet, "/workspaces/"+workspace.Slug+"/runs/run-1", nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -246,7 +443,7 @@ func TestWorkspaceRunPageRouteServesRunDetailPage(t *testing.T) {
 	body := rec.Body.String()
 	for _, want := range []string{
 		`id="workspaceRunPageRoot"`,
-		`const workspaceId = "ws-1";`,
+		`const workspaceId = "` + workspace.ID + `";`,
 		`const runId = "run-1";`,
 	} {
 		if !strings.Contains(body, want) {
@@ -339,11 +536,12 @@ func TestWorkspacesLauncherRedirectsToHome(t *testing.T) {
 // keep working, and the API is untouched.
 func TestWorkspaceScopedRoutesSurviveTheMigration(t *testing.T) {
 	handler := newRoutesTestHandler(t)
+	workspace := createRouteTestWorkspace(t, handler, "Scoped Route Workspace")
 
 	for _, path := range []string{
-		"/workspaces/ws-1",
-		"/workspaces/ws-1/notes",
-		"/workspaces/ws-1/task/task-1",
+		"/workspaces/" + workspace.Slug,
+		"/workspaces/" + workspace.Slug + "/notes",
+		"/workspaces/" + workspace.Slug + "/task/task-1",
 	} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		rec := httptest.NewRecorder()

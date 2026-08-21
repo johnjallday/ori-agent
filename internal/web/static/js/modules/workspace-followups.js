@@ -159,7 +159,7 @@ export async function wireWorkspaceFollowUps({
   if (!mount) return;
   const workspaceId =
     (typeof window !== 'undefined' && window.currentWorkspaceId) ||
-    (document.location && document.location.pathname.split('/')[2]) ||
+    document.body?.dataset?.workspaceId ||
     '';
   if (!workspaceId) return;
 

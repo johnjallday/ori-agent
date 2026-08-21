@@ -325,15 +325,18 @@ test.describe('Ori Guide dynamic destinations', () => {
       data: { name, workspace_preset: 'general' }
     });
     expect(created.ok()).toBeTruthy();
-    const id = (await created.json())?.folder?.id;
+    const workspace = (await created.json())?.folder;
+    const id = workspace?.id;
+    const slug = workspace?.folder_slug;
     expect(id).toBeTruthy();
+    expect(slug).toBeTruthy();
 
     await gotoPage(page, '/');
     await openGuide(page);
     await ask(page, `where is my ${name} workspace`);
 
     const action = page.locator('.ori-guide__action', { hasText: name });
-    await expect(action).toHaveAttribute('href', `/workspaces/${id}`);
+    await expect(action).toHaveAttribute('href', `/workspaces/${slug}`);
   });
 
   test('a workspace that does not exist yields no destination', async ({ page }) => {

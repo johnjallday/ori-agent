@@ -3,6 +3,7 @@ package sessionhttp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -483,6 +484,30 @@ func (h *Handler) reconcileWorkspacesFromDiskLocked(ctx context.Context, opts wo
 		}
 	}
 
+	// Join the independently loaded SQLite and folder namespaces before either
+	// is exposed to route resolution. Existing primary-store owners keep their
+	// slug; conflicting folders receive deterministic numeric suffixes.
+	movedSets, reconcileErr := h.reconcileFolderSlugsAgainstPrimary(ctx)
+	if reconcileErr != nil {
+		return stats, nil, reconcileErr
+	}
+	for _, moved := range movedSets {
+		if len(moved) == 0 {
+			continue
+		}
+		self, getErr := h.store.GetWorkspace(ctx, moved[0].ID)
+		if getErr != nil {
+			continue // newly discovered disk workspace; imported below
+		}
+		if diskWS, diskErr := h.workspaceStore.Get(self.ID); diskErr == nil {
+			self.FolderSlug = diskWS.FolderSlug
+		}
+		h.applyMoveReferenceUpdates(ctx, self, moved)
+		if updateErr := h.store.UpdateWorkspace(ctx, self); updateErr != nil {
+			return stats, nil, fmt.Errorf("persist reconciled workspace %s: %w", self.ID, updateErr)
+		}
+	}
+
 	warnings = make([]string, 0)
 	diskWorkspaces := h.workspaceStore.CachedWorkspaces()
 	for _, id := range orderWorkspacesParentFirst(diskWorkspaces) {
@@ -502,6 +527,9 @@ func (h *Handler) reconcileWorkspacesFromDiskLocked(ctx context.Context, opts wo
 				continue
 			}
 			if createErr := h.store.CreateWorkspace(ctx, converted); createErr != nil {
+				if errors.Is(createErr, session.ErrWorkspaceSlugConflict) {
+					return stats, warnings, fmt.Errorf("workspace %s slug %q conflicts during disk import: %w", converted.ID, converted.FolderSlug, createErr)
+				}
 				warnings = append(warnings, fmt.Sprintf("Failed to import %s", diskWS.Name))
 				continue
 			}
@@ -517,6 +545,10 @@ func (h *Handler) reconcileWorkspacesFromDiskLocked(ctx context.Context, opts wo
 		parentChanged := sessionWS.ParentID != diskWS.ParentID
 		changed := parentChanged
 		sessionWS.ParentID = diskWS.ParentID
+		if sessionWS.FolderSlug != diskWS.FolderSlug {
+			sessionWS.FolderSlug = diskWS.FolderSlug
+			changed = true
+		}
 		if diskKind := session.NormalizeWorkspaceKind(diskWS.Kind); sessionWS.Kind != diskKind {
 			sessionWS.Kind = diskKind
 			changed = true
@@ -533,6 +565,9 @@ func (h *Handler) reconcileWorkspacesFromDiskLocked(ctx context.Context, opts wo
 		}
 		if changed {
 			if updateErr := h.store.UpdateWorkspace(ctx, sessionWS); updateErr != nil {
+				if errors.Is(updateErr, session.ErrWorkspaceSlugConflict) {
+					return stats, warnings, fmt.Errorf("workspace %s slug %q conflicts during disk reconciliation: %w", sessionWS.ID, sessionWS.FolderSlug, updateErr)
+				}
 				warnings = append(warnings, fmt.Sprintf("Failed to update %s", sessionWS.Name))
 				continue
 			}
@@ -550,7 +585,91 @@ func (h *Handler) reconcileWorkspacesFromDiskLocked(ctx context.Context, opts wo
 	stats.Orphaned = orphaned
 	warnings = append(warnings, sweepWarnings...)
 
+	if err := h.backfillDatabaseOnlyWorkspaceSlugs(ctx); err != nil {
+		return stats, warnings, err
+	}
 	return stats, warnings, nil
+}
+
+func (h *Handler) reconcileFolderSlugsAgainstPrimary(ctx context.Context) ([][]agentworkspace.MovedWorkspace, error) {
+	rows, err := h.store.ListWorkspaces(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list primary workspaces for slug reconciliation: %w", err)
+	}
+	reserved := make(map[string]string, len(rows))
+	for i := range rows {
+		ws := &rows[i]
+		if ws.Status == session.WorkspaceStatusTrashed || ws.Status == session.WorkspaceStatusMissing {
+			continue
+		}
+		if agentworkspace.IsCanonicalWorkspaceSlug(ws.FolderSlug) {
+			reserved[ws.FolderSlug] = ws.ID
+		}
+	}
+	return h.workspaceStore.ReconcileReservedSlugs(reserved)
+}
+
+// backfillDatabaseOnlyWorkspaceSlugs assigns deterministic slugs to active
+// SQLite rows that have no folder projection. Folder-backed rows have already
+// been populated above, so DB-only records join the same occupied namespace.
+func (h *Handler) backfillDatabaseOnlyWorkspaceSlugs(ctx context.Context) error {
+	rows, err := h.store.ListWorkspaces(ctx)
+	if err != nil {
+		return fmt.Errorf("list workspaces for slug backfill: %w", err)
+	}
+	sort.Slice(rows, func(i, j int) bool { return rows[i].ID < rows[j].ID })
+	occupied := make(map[string]string, len(rows))
+	for i := range rows {
+		ws := &rows[i]
+		if ws.Status == session.WorkspaceStatusTrashed || ws.Status == session.WorkspaceStatusMissing {
+			continue
+		}
+		if agentworkspace.IsCanonicalWorkspaceSlug(ws.FolderSlug) {
+			occupied[strings.ToLower(ws.FolderSlug)] = ws.ID
+		}
+	}
+
+	for i := range rows {
+		listed := &rows[i]
+		if listed.Status == session.WorkspaceStatusTrashed || listed.Status == session.WorkspaceStatusMissing ||
+			agentworkspace.IsCanonicalWorkspaceSlug(listed.FolderSlug) {
+			continue
+		}
+		ws, getErr := h.store.GetWorkspace(ctx, listed.ID)
+		if getErr != nil {
+			return fmt.Errorf("load workspace %s for slug backfill: %w", listed.ID, getErr)
+		}
+		baseSource := ws.Name
+		if importedPath := folderImportedWorkspacePath(*ws); importedPath != "" {
+			baseSource = filepath.Base(importedPath)
+		} else if managedPath, managed := h.syncManagedWorkspacePath(*ws); managed {
+			baseSource = filepath.Base(managedPath)
+			if ws.IsGroup() && (baseSource == agentworkspace.FilesDir || baseSource == agentworkspace.NotesDir) {
+				baseSource = filepath.Base(filepath.Dir(managedPath))
+			}
+		}
+		base := agentworkspace.Slugify(baseSource)
+		candidate := base
+		if owner, used := occupied[strings.ToLower(candidate)]; used && owner != ws.ID {
+			candidate = ""
+			for suffix := 2; suffix < 1002; suffix++ {
+				value := agentworkspace.WorkspaceSlugWithSuffix(base, suffix)
+				if _, exists := occupied[strings.ToLower(value)]; !exists {
+					candidate = value
+					break
+				}
+			}
+			if candidate == "" {
+				return fmt.Errorf("workspace %s has no globally available slug for %q", ws.ID, base)
+			}
+		}
+		ws.FolderSlug = candidate
+		if updateErr := h.store.UpdateWorkspace(ctx, ws); updateErr != nil {
+			return fmt.Errorf("persist workspace %s slug %q: %w", ws.ID, candidate, updateErr)
+		}
+		occupied[strings.ToLower(candidate)] = ws.ID
+	}
+	return nil
 }
 
 // orderWorkspacesParentFirst orders disk workspaces so a parent is always
@@ -758,6 +877,15 @@ func (h *Handler) workspaceIDOnDisk(dir string) string {
 	return ""
 }
 
+// ReconcileWorkspaceSlugsWithoutDisk backfills the primary-store namespace
+// without importing or mutating an unconfirmed staging directory.
+func (h *Handler) ReconcileWorkspaceSlugsWithoutDisk(ctx context.Context) error {
+	if h == nil {
+		return nil
+	}
+	return h.backfillDatabaseOnlyWorkspaceSlugs(ctx)
+}
+
 // ReconcileWorkspacesFromDisk reconciles the session store's workspace structure
 // with the on-disk folder layout. Intended for a one-time run at startup so
 // groupings that arrived via git/cloud sync are reflected without a manual
@@ -900,7 +1028,18 @@ func isFolderImportedWorkspace(ws session.Workspace) bool {
 		}
 	}
 
-	return strings.TrimSpace(fmt.Sprint(meta["path"])) != ""
+	return folderImportedWorkspacePath(ws) != ""
+}
+
+func folderImportedWorkspacePath(ws session.Workspace) string {
+	if ws.SharedData == nil {
+		return ""
+	}
+	meta, ok := ws.SharedData["folder_import"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(fmt.Sprint(meta["path"]))
 }
 
 func cleanWorkspaceSyncPath(path string) string {

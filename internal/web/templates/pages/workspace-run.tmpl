@@ -3,7 +3,11 @@
 <html data-bs-theme="light">
 {{template "head.tmpl" .}}
 
-<body class="bg-light">
+<body class="bg-light" data-workspace-id="{{.Extra.WorkspaceID}}" data-workspace-slug="{{.Extra.WorkspaceSlug}}">
+  <script>
+    window.currentWorkspaceId = document.body.dataset.workspaceId || '';
+    window.currentWorkspaceSlug = document.body.dataset.workspaceSlug || '';
+  </script>
   {{template "navbar.tmpl" .}}
 
   <div class="main-content-wrapper">
@@ -14,13 +18,14 @@
         id="workspaceRunPageRoot"
         class="workspace-run-page-shell"
         data-workspace-id="{{.Extra.WorkspaceID}}"
+        data-workspace-slug="{{.Extra.WorkspaceSlug}}"
         data-run-id="{{.Extra.RunID}}"
       >
         <div id="workspace-run-alert" class="workspace-run-alert" hidden></div>
 
         <section class="workspace-run-hero">
           <div class="workspace-run-hero-copy">
-            <a href="/workspaces/{{.Extra.WorkspaceID}}" id="workspace-run-backlink" class="workspace-run-backlink">
+            <a href="/workspaces/{{.Extra.WorkspaceSlug}}" id="workspace-run-backlink" class="workspace-run-backlink">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                 <path d="M20,11V13H8L13.5,18.5L12.08,19.92L4.16,12L12.08,4.08L13.5,5.5L8,11H20Z"/>
               </svg>
@@ -30,7 +35,7 @@
             <div class="workspace-run-breadcrumbs">
               <a href="/" class="workspace-run-breadcrumb-link">Home</a>
               <span>/</span>
-              <a href="/workspaces/{{.Extra.WorkspaceID}}" id="workspace-run-workspace-name" class="workspace-run-breadcrumb-link">Workspace</a>
+              <a href="/workspaces/{{.Extra.WorkspaceSlug}}" id="workspace-run-workspace-name" class="workspace-run-breadcrumb-link">Workspace</a>
               <span>/</span>
               <span id="workspace-run-breadcrumb-title">Run</span>
             </div>
@@ -617,11 +622,12 @@
 
     document.addEventListener('DOMContentLoaded', async () => {
       const workspaceId = "{{.Extra.WorkspaceID}}";
+      const workspaceSlug = "{{.Extra.WorkspaceSlug}}";
       const runId = "{{.Extra.RunID}}";
-      if (!workspaceId || !runId) {
+      if (!workspaceId || !workspaceSlug || !runId) {
         return;
       }
-      const page = new WorkspaceRunPage(workspaceId, runId);
+      const page = new WorkspaceRunPage(workspaceId, runId, { workspaceSlug });
       try {
         await page.init();
       } catch (error) {

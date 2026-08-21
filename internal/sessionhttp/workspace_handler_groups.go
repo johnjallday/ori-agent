@@ -511,6 +511,23 @@ func (h *Handler) restoreWorkspace(w http.ResponseWriter, r *http.Request, id st
 		_ = orihttp.RespondBadRequest(w, "Workspace is missing trash metadata; cannot restore")
 		return
 	}
+	restoreCandidates := []*session.Workspace{ws}
+	if ws.Kind == session.WorkspaceKindGroup {
+		if descendantIDs, err := h.store.GetSubworkspaceIDs(ctx, ws.ID); err == nil {
+			for _, memberID := range descendantIDs {
+				member, getErr := h.store.GetWorkspace(ctx, memberID)
+				if getErr == nil && member.Status == session.WorkspaceStatusTrashed {
+					restoreCandidates = append(restoreCandidates, member)
+				}
+			}
+		}
+	}
+	for _, candidate := range restoreCandidates {
+		if owner := h.registeredWorkspaceSlugOwner(ctx, candidate.FolderSlug, candidate.ID); owner != "" {
+			writeWorkspaceCreateSlugConflict(w, candidate.Name, h.globalWorkspaceSlugConflict(ctx, candidate.FolderSlug, candidate.ID, filepath.Dir(originalPath)))
+			return
+		}
+	}
 
 	if _, err := h.workspaceStore.RestoreFromTrash(originalPath, trashedPath); err != nil {
 		logger.Error("Failed to restore workspace from trash", logger.Fields{"id": id, "error": err})

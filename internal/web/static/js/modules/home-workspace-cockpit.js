@@ -661,7 +661,7 @@ export function groupRailView(group, flattened, options = {}) {
     description: String(ws.description || '').trim(),
     aggregates,
     mapLayout: groupMapLayoutView(options.district || null, { view: options.view }),
-    openHref: ws.id ? `/workspaces/${encodeURIComponent(ws.id)}` : ''
+    openHref: ws.folder_slug ? `/workspaces/${encodeURIComponent(ws.folder_slug)}` : ''
   };
 }
 
@@ -812,7 +812,7 @@ export function workspaceRailView(workspace) {
     isPersonalHQ: ws.is_personal_hq === true || ws.designation === 'personal_hq',
     status: signals,
     nextMove: recommendedNextMove(ws),
-    openHref: ws.id ? `/workspaces/${encodeURIComponent(ws.id)}` : '',
+    openHref: ws.folder_slug ? `/workspaces/${encodeURIComponent(ws.folder_slug)}` : '',
     commander,
     // FR68: the action exists only with a resolved entry agent; otherwise the
     // rail explains what is missing rather than offering a dead control.
@@ -2434,10 +2434,12 @@ import {
   function publishRouteContext() {
     const selected = findWorkspace(state.flattened, state.selectedId);
     const workspaceId = selected && !isGroupWorkspace(selected) ? selected.id : '';
+    const workspaceSlug = selected && !isGroupWorkspace(selected) ? selected.folder_slug : '';
     const workspaceName = selected ? selected.name : '';
 
     window.oriHomeRouteContext = {
       workspace_id: workspaceId,
+      workspace_slug: workspaceSlug,
       workspace_name: workspaceName,
       origin: 'ask_ori'
     };
@@ -2631,8 +2633,14 @@ import {
 
   function openItem(id) {
     if (!id) return;
+    const workspace = findWorkspace(state.flattened, id);
+    const slug = String(workspace?.folder_slug || '').trim();
+    if (!slug) {
+      console.error('home-workspace-cockpit: cannot open workspace without folder_slug', id);
+      return;
+    }
     fireTTFA('open-workspace');
-    window.location.href = `/workspaces/${encodeURIComponent(id)}`;
+    window.location.href = `/workspaces/${encodeURIComponent(slug)}`;
   }
 
   // ---- TTfA (FR141) ----

@@ -604,6 +604,7 @@ type Ticket struct {
 	// a roll-up it may differ from the workspace that served the request, and
 	// item mutations must be addressed to this ID (FR-12, FR-90).
 	OwningWorkspaceID   string `json:"owning_workspace_id"`
+	OwningWorkspaceSlug string `json:"owning_workspace_slug,omitempty"`
 	OwningWorkspaceName string `json:"owning_workspace_name,omitempty"`
 
 	Title       string      `json:"title"`
@@ -686,12 +687,13 @@ type TicketSummary struct {
 	State               TicketState `json:"state"`
 	StateLabel          string      `json:"state_label"`
 	OwningWorkspaceID   string      `json:"owning_workspace_id"`
+	OwningWorkspaceSlug string      `json:"owning_workspace_slug,omitempty"`
 	OwningWorkspaceName string      `json:"owning_workspace_name,omitempty"`
 	SubticketIndex      int         `json:"subticket_index,omitempty"`
 }
 
 // NewTicketSummary builds the compact reference for a record.
-func NewTicketSummary(task *Task, owningWorkspaceID, owningWorkspaceName string) TicketSummary {
+func NewTicketSummary(task *Task, owningWorkspaceID, owningWorkspaceName string, owningWorkspaceSlug ...string) TicketSummary {
 	if task == nil {
 		return TicketSummary{}
 	}
@@ -699,6 +701,10 @@ func NewTicketSummary(task *Task, owningWorkspaceID, owningWorkspaceName string)
 	ownerID := strings.TrimSpace(owningWorkspaceID)
 	if ownerID == "" {
 		ownerID = task.WorkspaceID
+	}
+	slug := ""
+	if len(owningWorkspaceSlug) > 0 {
+		slug = strings.TrimSpace(owningWorkspaceSlug[0])
 	}
 	return TicketSummary{
 		ID:                  task.ID,
@@ -708,6 +714,7 @@ func NewTicketSummary(task *Task, owningWorkspaceID, owningWorkspaceName string)
 		State:               state,
 		StateLabel:          state.Label(),
 		OwningWorkspaceID:   ownerID,
+		OwningWorkspaceSlug: slug,
 		OwningWorkspaceName: owningWorkspaceName,
 		SubticketIndex:      task.SubtaskIndex,
 	}
@@ -716,7 +723,7 @@ func NewTicketSummary(task *Task, owningWorkspaceID, owningWorkspaceName string)
 // NewTicket builds the canonical representation of a persisted record,
 // attaching the owning workspace's identity so rolled-up responses always
 // carry ownership (FR-11).
-func NewTicket(task *Task, owningWorkspaceID, owningWorkspaceName string) Ticket {
+func NewTicket(task *Task, owningWorkspaceID, owningWorkspaceName string, owningWorkspaceSlug ...string) Ticket {
 	if task == nil {
 		return Ticket{}
 	}
@@ -726,12 +733,17 @@ func NewTicket(task *Task, owningWorkspaceID, owningWorkspaceName string) Ticket
 		ownerID = task.WorkspaceID
 	}
 
+	slug := ""
+	if len(owningWorkspaceSlug) > 0 {
+		slug = strings.TrimSpace(owningWorkspaceSlug[0])
+	}
 	return Ticket{
 		ID:                      task.ID,
 		Number:                  task.TicketNumber,
 		DisplayNumber:           FormatTicketNumber(task.TicketNumber),
 		QualifiedNumber:         FormatQualifiedTicketNumber(owningWorkspaceName, task.TicketNumber),
 		OwningWorkspaceID:       ownerID,
+		OwningWorkspaceSlug:     slug,
 		OwningWorkspaceName:     owningWorkspaceName,
 		Title:                   task.Description,
 		Description:             task.Details,

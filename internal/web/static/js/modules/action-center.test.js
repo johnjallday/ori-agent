@@ -65,17 +65,19 @@ test("rowHTML shows a View in Backlog deep link once planned, using Group 5's pa
   const { api } = loadActionCenter();
   const html = api.rowHTML({
     id: 'o1',
-    workspace_id: 'ws-1',
+    workspace_id: 'workspace-uuid',
+    workspace_slug: 'marketing-site',
     title: 'Brand voice drift',
     status: 'planned',
     linked_task_id: 'task-9',
-    linked_workspace_id: 'ws-1'
+    linked_workspace_id: 'workspace-uuid',
+    linked_workspace_slug: 'marketing-site'
   });
   assert.ok(
     !html.includes('data-action="add-to-backlog"'),
     'no duplicate-capture affordance once planned'
   );
-  assert.match(html, /href="\/workspaces\/ws-1\?panel=backlog&task=task-9"/);
+  assert.match(html, /href="\/workspaces\/marketing-site\?panel=backlog&task=task-9"/);
   assert.match(html, />View in Backlog</);
 });
 
@@ -96,7 +98,11 @@ test('handleAddToBacklog shows a pending state on the clicked button while the r
       await pending;
       return {
         ok: true,
-        json: async () => ({ status: 'planned', item: { id: 'task-9', workspace_id: 'ws-1' } })
+        json: async () => ({
+          status: 'planned',
+          workspace_slug: 'marketing-site',
+          item: { id: 'task-9', workspace_id: 'workspace-uuid' }
+        })
       };
     }
   });
@@ -111,7 +117,7 @@ test('handleAddToBacklog shows a pending state on the clicked button while the r
   assert.equal(elements['#action-center-status'].innerHTML.includes('Added to backlog.'), true);
   assert.match(
     elements['#action-center-status'].innerHTML,
-    /href="\/workspaces\/ws-1\?panel=backlog&task=task-9"/
+    /href="\/workspaces\/marketing-site\?panel=backlog&task=task-9"/
   );
   assert.match(elements['#action-center-status'].innerHTML, />Open item</);
 });

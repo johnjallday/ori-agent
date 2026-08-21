@@ -787,8 +787,9 @@ test('approving without a loaded contract asks for the review first', async () =
 
 // --- Materialization -------------------------------------------------------
 
-test('materializing reports the work it created and links to it', async () => {
+test('materializing reports the work it created and links to it by slug', async () => {
   const { page, doc } = makePage();
+  page.workspaceSlug = 'marketing-site';
   await page.reload();
 
   page.fetchImpl = async (url, options = {}) => {
@@ -816,7 +817,7 @@ test('materializing reports the work it created and links to it', async () => {
   // It links to the tasks rather than restating their state (FR-11).
   assert.match(
     doc.elements['#plan-materialization-tasks'].innerHTML,
-    /workspaces\/ws-1\/task\/task-a/
+    /workspaces\/marketing-site\/task\/task-a/
   );
   assert.equal(doc.elements['#plan-materialization-artifacts'].hidden, false);
   assert.match(doc.elements['#plan-materialization-artifacts'].innerHTML, /tasks\/prd\.md/);

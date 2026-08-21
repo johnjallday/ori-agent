@@ -329,9 +329,10 @@ func (wh *WorkspaceHandler) handleCreateWorkspace(w http.ResponseWriter, r *http
 
 	w.WriteHeader(http.StatusOK)
 	orihttp.WriteJSON(w, map[string]any{
-		"workspace_id": ws.ID,
-		"status":       ws.Status,
-		"created_at":   ws.CreatedAt,
+		"workspace_id":   ws.ID,
+		"workspace_slug": ws.FolderSlug,
+		"status":         ws.Status,
+		"created_at":     ws.CreatedAt,
 	})
 }
 

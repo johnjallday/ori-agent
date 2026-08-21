@@ -19,6 +19,7 @@ import (
 type portalSummaryResponse struct {
 	HasWorkspace  bool                `json:"has_workspace"`
 	WorkspaceID   string              `json:"workspace_id,omitempty"`
+	WorkspaceSlug string              `json:"workspace_slug,omitempty"`
 	State         calendar.SetupState `json:"state,omitempty"`
 	NextMeeting   *calendar.Event     `json:"next_meeting,omitempty"`
 	EventCount    int                 `json:"event_count"`
@@ -45,7 +46,7 @@ func (h *Handler) PortalSummary(w http.ResponseWriter, r *http.Request) {
 		_ = orihttp.RespondSuccess(w, portalSummaryResponse{HasWorkspace: false})
 		return
 	}
-	resp := portalSummaryResponse{HasWorkspace: true, WorkspaceID: ws.ID}
+	resp := portalSummaryResponse{HasWorkspace: true, WorkspaceID: ws.ID, WorkspaceSlug: ws.FolderSlug}
 
 	gw, gerr := h.resolveGateway(ctx, ws.ID)
 	if gerr != nil {

@@ -710,7 +710,13 @@ test.describe('Home First Run', () => {
           current_tier: 2,
           total_tiers: 2,
           total_count: 1,
-          tiers: [{ tier: 2, name: 'Establish a Base', quests: [skipped ? { ...questBase, status: 'skipped' } : questBase] }]
+          tiers: [
+            {
+              tier: 2,
+              name: 'Establish a Base',
+              quests: [skipped ? { ...questBase, status: 'skipped' } : questBase]
+            }
+          ]
         })
       });
     });
@@ -850,7 +856,11 @@ test.describe('Home First Run', () => {
       // The FIRST load already carries poll-q1 as completed — Issue #334/FR36:
       // a historical completion must never toast on initial load.
       const status = calls === 1 ? pending : bothDone;
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(status) });
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(status)
+      });
     });
 
     await page.goto('/');
@@ -1154,8 +1164,16 @@ test.describe('API Health', () => {
 
 test.describe('Workspace Agent Character Roster', () => {
   async function installRosterRoutes(page, options = {}) {
+    const createResponse = await page.request.post('/api/workspaces', {
+      data: { name: `Roster Workspace ${Date.now()}`, blank: true }
+    });
+    expect(createResponse.ok()).toBeTruthy();
+    const createdWorkspace = (await createResponse.json()).folder;
+    const workspaceId = createdWorkspace.id;
+    const workspaceSlug = createdWorkspace.folder_slug;
     const workspace = {
-      id: 'roster-ws',
+      id: workspaceId,
+      folder_slug: workspaceSlug,
       name: 'Roster Workspace',
       description: 'Workspace for roster UI smoke coverage',
       entry_agent_name: 'Roster Manager',
@@ -1209,21 +1227,21 @@ test.describe('Workspace Agent Character Roster', () => {
     const tasks = [
       {
         id: 'task-1',
-        workspace_id: 'roster-ws',
+        workspace_id: workspaceId,
         to: 'Roster Manager',
         status: 'pending',
         description: 'Plan the work'
       },
       {
         id: 'task-2',
-        workspace_id: 'roster-ws',
+        workspace_id: workspaceId,
         to: 'Research Analyst',
         status: 'waiting_for_choice',
         description: 'Choose source'
       },
       {
         id: 'task-3',
-        workspace_id: 'roster-ws',
+        workspace_id: workspaceId,
         to: 'Research Analyst',
         status: 'in_progress',
         description: 'Read source',
@@ -1269,14 +1287,14 @@ test.describe('Workspace Agent Character Roster', () => {
         })
       });
     });
-    await page.route('**/api/orchestration/workspace?id=roster-ws', async route => {
+    await page.route(`**/api/orchestration/workspace?id=${workspaceId}`, async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify(workspace)
       });
     });
-    await page.route('**/api/workspaces/roster-ws/agent-snapshots', async route => {
+    await page.route(`**/api/workspaces/${workspaceId}/agent-snapshots`, async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -1302,28 +1320,28 @@ test.describe('Workspace Agent Character Roster', () => {
         })
       });
     });
-    await page.route('**/api/orchestration/tasks?workspace_id=roster-ws', async route => {
+    await page.route(`**/api/orchestration/tasks?workspace_id=${workspaceId}`, async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({ tasks })
       });
     });
-    await page.route('**/api/sessions?folder_id=roster-ws', async route => {
+    await page.route(`**/api/sessions?folder_id=${workspaceId}`, async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({ sessions: [] })
       });
     });
-    await page.route('**/api/workspaces/roster-ws/notes', async route => {
+    await page.route(`**/api/workspaces/${workspaceId}/notes`, async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({ notes: [] })
       });
     });
-    await page.route('**/api/workspaces/roster-ws/mission', async route => {
+    await page.route(`**/api/workspaces/${workspaceId}/mission`, async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -1337,7 +1355,7 @@ test.describe('Workspace Agent Character Roster', () => {
         })
       });
     });
-    await page.route('**/api/workspaces/roster-ws/agents/*/effective-prompt', async route => {
+    await page.route(`**/api/workspaces/${workspaceId}/agents/*/effective-prompt`, async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -1347,7 +1365,7 @@ test.describe('Workspace Agent Character Roster', () => {
         })
       });
     });
-    await page.route('**/api/workspaces/roster-ws', async route => {
+    await page.route(`**/api/workspaces/${workspaceId}`, async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -1361,7 +1379,7 @@ test.describe('Workspace Agent Character Roster', () => {
         body: JSON.stringify({ workspaces: [workspace], folders: [workspace] })
       });
     });
-    await page.route('**/api/orchestration/workspace/activate?id=roster-ws', async route => {
+    await page.route(`**/api/orchestration/workspace/activate?id=${workspaceId}`, async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -1375,14 +1393,15 @@ test.describe('Workspace Agent Character Roster', () => {
         body: JSON.stringify({ templates: [] })
       });
     });
+    return workspaceSlug;
   }
 
   test('command deck selects roster characters and updates the shared agent overview', async ({
     page
   }) => {
-    await installRosterRoutes(page);
+    const workspaceSlug = await installRosterRoutes(page);
     await page.setViewportSize({ width: 1280, height: 900 });
-    await page.goto('/workspaces/roster-ws');
+    await page.goto(`/workspaces/${workspaceSlug}`);
 
     const roster = page.locator('#workspaceCommandView .ws-cmd-roster-item');
     await expect(roster).toHaveCount(2);
@@ -1416,9 +1435,9 @@ test.describe('Workspace Agent Character Roster', () => {
   test('command deck uses the required desktop, tablet, and mobile layouts without page overflow', async ({
     page
   }) => {
-    await installRosterRoutes(page);
+    const workspaceSlug = await installRosterRoutes(page);
     await page.setViewportSize({ width: 1440, height: 900 });
-    await page.goto('/workspaces/roster-ws');
+    await page.goto(`/workspaces/${workspaceSlug}`);
     await expect(page.locator('.ws-cmd-roster-item')).toHaveCount(2);
     await expect(page.locator('.ws-cmd-deck')).toBeVisible();
 
@@ -1479,12 +1498,12 @@ test.describe('Workspace Agent Character Roster', () => {
   test('operations map switches from details, selects agents, and opens inventory', async ({
     page
   }) => {
-    await installRosterRoutes(page);
+    const workspaceSlug = await installRosterRoutes(page);
     await page.addInitScript(() => {
       window.localStorage.removeItem('oriWorkspaceCommandViewMode');
     });
     await page.setViewportSize({ width: 1280, height: 900 });
-    await page.goto('/workspaces/roster-ws');
+    await page.goto(`/workspaces/${workspaceSlug}`);
 
     await page.locator('#workspaceCommandView [data-cmd-view-mode="map"]').click();
     await expect(page.locator('#workspaceCommandView .ws-cmd-opmap')).toBeVisible();
@@ -1667,6 +1686,8 @@ test.describe('Task Output Contracts', () => {
     expect(workspaceResp.ok()).toBeTruthy();
     const workspaceData = await workspaceResp.json();
     workspaceId = workspaceData.workspace_id;
+    const workspaceSlug = workspaceData.workspace_slug;
+    expect(workspaceSlug).toBeTruthy();
 
     try {
       const taskResp = await request.post('/api/orchestration/tasks', {
@@ -1695,7 +1716,7 @@ test.describe('Task Output Contracts', () => {
       const taskId = taskData.task?.id;
       expect(taskId).toBeTruthy();
 
-      await page.goto(`/workspaces/${workspaceId}/task/${taskId}`);
+      await page.goto(`/workspaces/${workspaceSlug}/task/${taskId}`);
       await expect(page.locator('#workspace-task-automation-storage')).toContainText(
         'Storage destination'
       );
@@ -1738,6 +1759,8 @@ test.describe('Task Output Contracts', () => {
     expect(workspaceResp.ok()).toBeTruthy();
     const workspaceData = await workspaceResp.json();
     workspaceId = workspaceData.workspace_id;
+    const workspaceSlug = workspaceData.workspace_slug;
+    expect(workspaceSlug).toBeTruthy();
 
     await page.route('**/api/orchestration/tasks/output-spec/suggest', async route => {
       await route.fulfill({
@@ -1775,7 +1798,7 @@ test.describe('Task Output Contracts', () => {
       const taskId = taskData.task?.id;
       expect(taskId).toBeTruthy();
 
-      await page.goto(`/workspaces/${workspaceId}/task/${taskId}`);
+      await page.goto(`/workspaces/${workspaceSlug}/task/${taskId}`);
       await page.locator('.workspace-task-advanced-summary').click();
       await expect(page.locator('#workspace-task-automation-columns')).toContainText(
         'Save each run of this task to a dataset'
@@ -1818,12 +1841,14 @@ test.describe('Workspace File Folders', () => {
     expect(workspaceResp.ok()).toBeTruthy();
     const workspaceData = await workspaceResp.json();
     workspaceId = workspaceData.workspace_id;
+    const workspaceSlug = workspaceData.workspace_slug;
+    expect(workspaceSlug).toBeTruthy();
 
     try {
       await page.addInitScript(id => {
         window.sessionStorage.setItem(`workspace-detail-entry-agent-prompt-dismissed:${id}`, '1');
       }, workspaceId);
-      await page.goto(`/workspaces/${workspaceId}`);
+      await page.goto(`/workspaces/${workspaceSlug}`);
       await expect(page.locator('#workspaceCommandView .ws-cmd-files-panel')).toBeVisible();
       await page.waitForFunction(() =>
         Boolean((window as any).workspaceDetail?.fileModalManager?.fileModalElements?.modal)
@@ -1957,7 +1982,14 @@ test.describe('Floating Workspace Assistant', () => {
   async function gotoWorkspaceCommand(page, workspaceId: string) {
     await suppressOnboarding(page);
     await suppressEntryAgentPrompt(page, workspaceId);
-    await page.goto(`/workspaces/${workspaceId}`);
+    const workspaceResp = await page.request.get(`/api/workspaces/${workspaceId}`);
+    const workspaceData = await workspaceResp.json();
+    const workspaceSlug =
+      workspaceData.folder_slug ||
+      workspaceData.folder?.folder_slug ||
+      workspaceData.workspace?.folder_slug;
+    expect(workspaceSlug).toBeTruthy();
+    await page.goto(`/workspaces/${workspaceSlug}`);
     await expect(page.locator('#workspaceCommandView')).toBeVisible();
   }
 
@@ -2159,6 +2191,13 @@ test.describe('Floating Workspace Assistant', () => {
   }) => {
     let workspaceId = '';
     workspaceId = await createTemporaryWorkspace(request, 'Playwright Inline Assistant Regression');
+    const workspaceResp = await request.get(`/api/workspaces/${workspaceId}`);
+    const workspaceData = await workspaceResp.json();
+    const workspaceSlug =
+      workspaceData.folder_slug ||
+      workspaceData.folder?.folder_slug ||
+      workspaceData.workspace?.folder_slug;
+    expect(workspaceSlug).toBeTruthy();
 
     try {
       await suppressOnboarding(page);
@@ -2167,7 +2206,7 @@ test.describe('Floating Workspace Assistant', () => {
       await expect(page.locator('#homeAssistantInput')).toBeVisible();
       await expect(page.locator('#hubSupportChat')).toHaveCount(0);
 
-      await page.goto(`/workspaces/${workspaceId}/canvas`);
+      await page.goto(`/workspaces/${workspaceSlug}/canvas`);
       await expect(page.locator('#homeAssistantCard.modern-card')).toBeVisible();
       await expect(page.locator('#homeAssistantInput')).toHaveAttribute(
         'placeholder',

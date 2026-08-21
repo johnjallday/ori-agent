@@ -113,7 +113,8 @@ function load({
   runtimeStatus = null,
   runtimeRoutes = {},
   pathname = '/workspaces/ws-1',
-  search = ''
+  search = '',
+  currentWorkspaceId = 'ws-1'
 } = {}) {
   const elements = {};
   for (const id of ELEMENT_IDS) elements[id] = makeElement(id);
@@ -138,6 +139,7 @@ function load({
   const storage = new Map();
   const window = {
     location: { pathname, search },
+    currentWorkspaceId,
     sessionStorage: {
       getItem: key => storage.get(key) ?? null,
       setItem: (key, value) => storage.set(key, value),
@@ -654,10 +656,24 @@ test('?runtime_setup=1 opens the authoritative runtime requirement step for bloc
   assert.equal(elements.setupWizardStepTitle.textContent, 'Set up local REAPER control');
 });
 
-test('the workspace id comes from the URL, not a global set later', async () => {
-  const { api, calls } = load({ status: status(), pathname: '/workspaces/ws-from-url' });
+test('a browser slug is never reused as an API workspace id', async () => {
+  const { api, calls } = load({
+    status: status(),
+    pathname: '/workspaces/readable-slug',
+    currentWorkspaceId: ''
+  });
   await api.init();
-  assert.ok(calls[0].url.startsWith('/api/workspaces/ws-from-url/setup-wizard'));
+  assert.equal(calls.length, 0);
+});
+
+test('the server-resolved UUID wins over the browser slug for setup APIs', async () => {
+  const { api, calls } = load({
+    status: status(),
+    pathname: '/workspaces/readable-slug',
+    currentWorkspaceId: 'workspace-uuid'
+  });
+  await api.init();
+  assert.ok(calls[0].url.startsWith('/api/workspaces/workspace-uuid/setup-wizard'));
 });
 
 test('banner wording matches the three states a user can be in', () => {

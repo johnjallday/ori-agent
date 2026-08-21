@@ -202,6 +202,7 @@ func annotateWorkspaceEntries(store Store, basePath string, files []FileInfo) {
 		}
 		files[i].IsWorkspace = true
 		files[i].WorkspaceID = id
+		files[i].WorkspaceSlug = registered.FolderSlug
 		// Prefer the authoritative registered name; fall back to the folder's.
 		files[i].WorkspaceName = registered.Name
 		if files[i].WorkspaceName == "" {

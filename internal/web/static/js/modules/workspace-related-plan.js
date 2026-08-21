@@ -1,3 +1,5 @@
+import { workspacePageURL } from './workspace-routes.js';
+
 // The "this came from a plan" summary shown on Task and Run detail
 // (FR-148, FR-149, FR-150).
 //
@@ -47,7 +49,10 @@ export function relatedPlanProvenance(related) {
 // Building it here would be a second place that knows the route shape, and the
 // two would drift the first time it changed. An entry point that cannot get a
 // URL from the server renders no link rather than guessing at one.
-export function relatedPlanLink(related) {
+export function relatedPlanLink(related, workspaceSlug = '') {
+  if (workspaceSlug && related?.plan_id) {
+    return workspacePageURL(workspaceSlug, ['plans', related.plan_id]);
+  }
   return String(related?.url || '').trim();
 }
 
@@ -73,10 +78,15 @@ export async function fetchRelatedPlan(workspaceId, kind, id, fetchImpl = fetch)
 }
 
 // renderRelatedPlan fills a container, or hides it when there is no plan.
-export function renderRelatedPlan(container, related, escapeHtml = value => value) {
+export function renderRelatedPlan(
+  container,
+  related,
+  escapeHtml = value => value,
+  workspaceSlug = ''
+) {
   if (!container) return;
 
-  const link = relatedPlanLink(related);
+  const link = relatedPlanLink(related, workspaceSlug);
   if (!related?.plan_id || !link) {
     container.hidden = true;
     container.innerHTML = '';

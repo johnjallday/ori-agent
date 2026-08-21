@@ -67,8 +67,11 @@ func TestList_AggregatesAcrossWorkspacesAndFiltersByActive(t *testing.T) {
 	titles := map[string]bool{}
 	for _, it := range body.Items {
 		titles[it.Title] = true
-		if it.WorkspaceName == "" {
-			t.Errorf("workspace name missing for %q", it.Title)
+		if it.WorkspaceName == "" || it.WorkspaceSlug == "" {
+			t.Errorf("workspace name/slug missing for %q", it.Title)
+		}
+		if it.WorkspaceSlug == it.WorkspaceID {
+			t.Errorf("test requires distinct workspace id/slug for %q", it.Title)
 		}
 	}
 	if titles["Home-B"] {

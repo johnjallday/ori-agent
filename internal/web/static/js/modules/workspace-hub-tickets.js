@@ -91,6 +91,7 @@
       displayNumber: raw.display_number || formatTicketNumber(raw.number),
       qualifiedNumber: raw.qualified_number || '',
       owningWorkspaceId: raw.owning_workspace_id || '',
+      owningWorkspaceSlug: raw.owning_workspace_slug || '',
       owningWorkspaceName: raw.owning_workspace_name || '',
       title: raw.title || '',
       description: raw.description || '',
@@ -138,6 +139,7 @@
       state: raw.state || '',
       stateLabel: raw.state_label || stateLabel(raw.state),
       owningWorkspaceId: raw.owning_workspace_id || '',
+      owningWorkspaceSlug: raw.owning_workspace_slug || '',
       owningWorkspaceName: raw.owning_workspace_name || ''
     };
   }
@@ -391,7 +393,8 @@
       return ((payload && payload.notes) || []).map(note => ({
         id: note.id || '',
         title: note.title || '',
-        workspaceId: note.workspace_id || ''
+        workspaceId: note.workspace_id || '',
+        workspaceSlug: note.workspace_slug || ''
       }));
     },
 
@@ -573,20 +576,15 @@
   }
 
   /**
-   * The workspace whose tickets are on screen.
-   *
-   * Resolved from the URL first and the page objects second. Classic `defer`
-   * scripts run before the page's module scripts populate their state, so a
-   * module that trusts `WorkspaceHubState.selectedId` alone silently loads
-   * nothing on first paint — a failure mode this codebase has shipped before.
-   * The path segment is available immediately and is always correct on
-   * /workspaces/{id}.
+   * The workspace UUID whose tickets are on screen. The browser route segment
+   * is a slug, so page-provided identity must win before any legacy fallback.
    */
   function currentStudioId() {
-    if (typeof window !== 'undefined' && window.location) {
-      const match = String(window.location.pathname || '').match(/^\/workspaces\/([^/]+)/);
-      if (match && match[1]) return decodeURIComponent(match[1]);
-    }
+    const resolved =
+      (typeof window !== 'undefined' && window.currentWorkspaceId) ||
+      (typeof document !== 'undefined' && document.body?.dataset?.workspaceId) ||
+      '';
+    if (resolved) return String(resolved);
     const detail = typeof window !== 'undefined' ? window.workspaceDetail : null;
     if (detail && detail.workspaceId) return detail.workspaceId;
     const state = window.WorkspaceHubState && window.WorkspaceHubState.getState();
@@ -1309,7 +1307,7 @@
 
       const link = document.createElement('a');
       link.className = 'ticket-detail-note-link';
-      link.href = `/workspaces/${encodeURIComponent(note.workspaceId)}/notes/${encodeURIComponent(note.id)}`;
+      link.href = `/workspaces/${encodeURIComponent(note.workspaceSlug)}/notes/${encodeURIComponent(note.id)}`;
       link.textContent = note.title || note.id;
 
       const unlink = document.createElement('button');

@@ -1,3 +1,5 @@
+import { workspacePageURL, workspaceRootURL } from './workspace-routes.js';
+
 // What is stopping this plan, and the one thing to do about it (FR-156).
 //
 // A plan can be stuck for five unrelated reasons — it needs an answer, it needs
@@ -114,15 +116,15 @@ function unavailableAssignees(plan) {
 }
 
 function planHref(plan) {
-  const workspaceID = plan?.studio_id || '';
+  const workspaceSlug = plan?.workspace_slug || plan?.studio_id || '';
   const planID = plan?.id || '';
-  if (!workspaceID || !planID) return '';
-  return `/workspaces/${workspaceID}/plans/${planID}`;
+  if (!workspaceSlug || !planID) return '';
+  return workspacePageURL(workspaceSlug, ['plans', planID]);
 }
 
 function agentsHref(plan) {
-  const workspaceID = plan?.studio_id || '';
-  return workspaceID ? `/workspaces/${workspaceID}` : '';
+  const workspaceSlug = plan?.workspace_slug || plan?.studio_id || '';
+  return workspaceSlug ? workspaceRootURL(workspaceSlug) : '';
 }
 
 // POLL_INTERVAL_MS is the fallback refresh when no server event arrives.

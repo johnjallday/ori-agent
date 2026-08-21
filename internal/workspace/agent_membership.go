@@ -10,6 +10,7 @@ import (
 // Agents page can show which workspaces a definition is attached to.
 type WorkspaceRef struct {
 	ID         string `json:"id"`
+	FolderSlug string `json:"folder_slug"`
 	Name       string `json:"name"`
 	EntryPoint bool   `json:"entry_point"`
 }
@@ -68,7 +69,7 @@ func AgentWorkspaceMemberships(workspaces Store) map[string]AgentMembership {
 				// is the entry agent.
 				isEntry = isEntry || existing.EntryPoint
 			}
-			refs[ws.ID] = WorkspaceRef{ID: ws.ID, Name: ws.Name, EntryPoint: isEntry}
+			refs[ws.ID] = WorkspaceRef{ID: ws.ID, FolderSlug: ws.FolderSlug, Name: ws.Name, EntryPoint: isEntry}
 		}
 	})
 
@@ -101,7 +102,7 @@ func WorkspaceMembershipFor(workspaces Store, agentName string) AgentMembership 
 			if existing, ok := refs[ws.ID]; ok {
 				isEntry = isEntry || existing.EntryPoint
 			}
-			refs[ws.ID] = WorkspaceRef{ID: ws.ID, Name: ws.Name, EntryPoint: isEntry}
+			refs[ws.ID] = WorkspaceRef{ID: ws.ID, FolderSlug: ws.FolderSlug, Name: ws.Name, EntryPoint: isEntry}
 			break
 		}
 	})

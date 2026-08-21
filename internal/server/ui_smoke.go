@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -91,17 +92,24 @@ func (s *Server) runUISmokeTest(workspaceID string) uiSmokeTestResponse {
 		},
 	}
 
-	if workspaceID != "" {
+	workspaceSlug := ""
+	if workspaceID != "" && s.Storage != nil && s.Storage.WorkspaceStore != nil {
+		if ws, err := s.Storage.WorkspaceStore.Get(workspaceID); err == nil && ws != nil {
+			workspaceSlug = strings.TrimSpace(ws.FolderSlug)
+		}
+	}
+	if workspaceSlug != "" {
+		escapedSlug := url.PathEscape(workspaceSlug)
 		specs = append(specs,
 			uiSmokeCheckSpec{
 				name:             "Workspace detail page",
-				path:             "/workspaces/" + workspaceID,
+				path:             "/workspaces/" + escapedSlug,
 				expectedStatuses: []int{http.StatusOK},
 				requiredSnippets: []string{"hubSupportChat", "homeAssistantForm", "homeAssistantWorkspaceModeSwitch", "open-diagnostics-btn"},
 			},
 			uiSmokeCheckSpec{
 				name:             "Workspace diagnostics page",
-				path:             "/workspaces/" + workspaceID + "/diagnostics",
+				path:             "/workspaces/" + escapedSlug + "/diagnostics",
 				expectedStatuses: []int{http.StatusOK},
 				requiredSnippets: []string{"workspace-detail-health-panel", "workspace-detail-ui-smoke-test"},
 			},

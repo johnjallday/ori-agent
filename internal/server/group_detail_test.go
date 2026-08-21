@@ -30,17 +30,18 @@ func TestGroupWorkspaceServesWorkspaceDetailPage(t *testing.T) {
 	}
 	var resp struct {
 		Folder struct {
-			ID string `json:"id"`
+			ID         string `json:"id"`
+			FolderSlug string `json:"folder_slug"`
 		} `json:"folder"`
 	}
 	if err := json.Unmarshal(createRec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode create response: %v", err)
 	}
-	if resp.Folder.ID == "" {
-		t.Fatalf("expected created group id in response: %s", createRec.Body.String())
+	if resp.Folder.ID == "" || resp.Folder.FolderSlug == "" {
+		t.Fatalf("expected created group route identity in response: %s", createRec.Body.String())
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/workspaces/"+resp.Folder.ID, nil)
+	req := httptest.NewRequest(http.MethodGet, "/workspaces/"+resp.Folder.FolderSlug, nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 

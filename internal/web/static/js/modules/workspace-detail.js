@@ -20,6 +20,7 @@ import { WorkspacePluginsManager } from './workspace-detail-plugins.js';
 import { WorkspaceMemoryManager } from './workspace-detail-memory.js';
 import { WorkspaceFileModalManager } from './workspace-detail-file-modal.js';
 import { WorkspaceMembersPanel } from './workspace-detail-members.js';
+import { workspacePageURL, workspaceRootURL } from './workspace-routes.js';
 
 /**
  * Format a date for display
@@ -202,8 +203,10 @@ const TASK_ASSIST_TRAVEL_SPECIALISTS = Object.freeze({
 });
 
 export class WorkspaceDetailPage {
-  constructor(workspaceId) {
+  constructor(workspaceId, workspaceSlug = '', options = {}) {
     this.workspaceId = workspaceId;
+    this.workspaceSlug = String(workspaceSlug || '').trim();
+    this.suppressSetupPrompts = options.suppressSetupPrompts === true;
     this.workspace = null;
     this.tasks = [];
     this.sessions = [];
@@ -355,6 +358,10 @@ export class WorkspaceDetailPage {
         360
       );
     }
+    // Secondary workspace surfaces load shared data but must not launch setup
+    // dialogs or redirect into agent creation on first paint.
+    if (this.suppressSetupPrompts) return;
+
     // The blueprint Setup Wizard is resolved before any other first-open
     // prompt. When a blueprint owns its setup, its dialog is the one the user
     // should meet — not a missing-entry-agent prompt landing on top of it, and
@@ -1523,9 +1530,9 @@ export class WorkspaceDetailPage {
     );
 
     // "View all" -> workspace notes app. The href is set here (not in the
-    // template) because the workspace ID isn't known at server-render time.
-    if (this.elements.viewAllNotesLink && this.workspaceId) {
-      this.elements.viewAllNotesLink.href = `/workspaces/${encodeURIComponent(this.workspaceId)}/notes`;
+    // template) because this panel is shared with dynamically mounted surfaces.
+    if (this.elements.viewAllNotesLink && this.workspaceSlug) {
+      this.elements.viewAllNotesLink.href = workspacePageURL(this.workspaceSlug, ['notes']);
     }
 
     // "Open task editor" icon button: opens the task modal in auto mode with whatever
@@ -2007,6 +2014,20 @@ export class WorkspaceDetailPage {
       }
 
       window.workspaceCommand?.refresh();
+      if (key === 'name') {
+        const appliedSlug = String(updatedWorkspace?.folder_slug || '').trim();
+        if (appliedSlug && appliedSlug !== this.workspaceSlug) {
+          this.workspaceSlug = appliedSlug;
+          window.currentWorkspaceSlug = appliedSlug;
+          const target = workspaceRootURL(appliedSlug, {
+            search: window.location.search,
+            hash: window.location.hash
+          });
+          if (typeof window.location.assign === 'function') window.location.assign(target);
+          else window.location.href = target;
+          return { changed: true, navigated: true, workspace: this.workspace };
+        }
+      }
       return { changed: true, workspace: this.workspace };
     } catch (err) {
       console.error(`Failed to update ${key}:`, err);
@@ -2244,6 +2265,7 @@ export class WorkspaceDetailPage {
       if (!response.ok) throw new Error('Failed to load workspace');
 
       this.workspace = await response.json();
+      this.workspaceSlug = String(this.workspace?.folder_slug || this.workspaceSlug || '').trim();
       await this.loadAvailableSkills().catch(error => {
         console.warn('Failed to load skill catalog for workspace detail:', error);
       });
@@ -2332,11 +2354,12 @@ export class WorkspaceDetailPage {
     if (this.elements.workspaceBreadcrumb) {
       this.elements.workspaceBreadcrumb.textContent = this.workspace.name || 'Workspace';
     }
-    if (this.elements.openCanvasBtn) {
-      this.elements.openCanvasBtn.href = `/workspaces/${this.workspaceId}/canvas`;
+    const workspaceSlug = String(this.workspaceSlug || this.workspace?.folder_slug || '').trim();
+    if (this.elements.openCanvasBtn && workspaceSlug) {
+      this.elements.openCanvasBtn.href = workspacePageURL(workspaceSlug, ['canvas']);
     }
-    if (this.elements.openDiagnosticsBtn) {
-      this.elements.openDiagnosticsBtn.href = `/workspaces/${this.workspaceId}/diagnostics`;
+    if (this.elements.openDiagnosticsBtn && workspaceSlug) {
+      this.elements.openDiagnosticsBtn.href = workspacePageURL(workspaceSlug, ['diagnostics']);
     }
 
     this.renderWorkspaceWorkflowLinks();
@@ -3119,6 +3142,7 @@ export class WorkspaceDetailPage {
         const colorAccent = child.color ? `border-left: 3px solid ${child.color};` : '';
         const childCount = (child.children || []).length;
         const hasChildren = childCount > 0;
+        const childURL = child.folder_slug ? workspaceRootURL(child.folder_slug) : '#';
 
         return `
         <div class="workspace-detail-child-card"
@@ -3126,8 +3150,8 @@ export class WorkspaceDetailPage {
              role="button"
              tabindex="0"
              aria-label="Open workspace ${this.escapeHtml(name)}"
-             onclick="window.location.href='/workspaces/${child.id}'"
-             onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); window.location.href='/workspaces/${child.id}'; }"
+             onclick="window.location.href='${childURL}'"
+             onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); window.location.href='${childURL}'; }"
              style="${colorAccent}">
           <div class="child-name">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="color: ${child.color || 'var(--text-secondary)'}; flex-shrink: 0;">
@@ -3517,8 +3541,8 @@ export class WorkspaceDetailPage {
   }
 
   buildWorkspaceAgentRecoveryURL(agentName) {
-    const workspaceId = String(this.workspaceId || this.workspace?.id || '').trim();
-    if (!workspaceId) return '';
+    const workspaceSlug = String(this.workspaceSlug || this.workspace?.folder_slug || '').trim();
+    if (!workspaceSlug) return '';
 
     const params = new URLSearchParams();
     params.set('addAgent', '1');
@@ -3526,7 +3550,7 @@ export class WorkspaceDetailPage {
     if (normalizedName) {
       params.set('seedAgentName', normalizedName);
     }
-    return `/workspaces/${encodeURIComponent(workspaceId)}?${params.toString()}`;
+    return workspaceRootURL(workspaceSlug, { search: params });
   }
 
   getAgentDetailTarget(agentName) {
@@ -3561,12 +3585,12 @@ export class WorkspaceDetailPage {
       // Workspace-local agents (entry/manager agents defined in the workspace's
       // config.json) are NOT part of the global agent store, so /agents/<name>
       // would 404. They have a workspace-scoped detail page instead.
-      const workspaceId = String(this.workspaceId || this.workspace?.id || '').trim();
-      if (workspaceId) {
+      const workspaceSlug = String(this.workspaceSlug || this.workspace?.folder_slug || '').trim();
+      if (workspaceSlug) {
         const title = `Open ${normalizedName} details`;
         return {
           kind: 'workspace-local',
-          href: `/workspaces/${encodeURIComponent(workspaceId)}/agents/${encodedAgentName}`,
+          href: workspacePageURL(workspaceSlug, ['agents', normalizedName]),
           interactive: true,
           title,
           ariaLabel: title
@@ -3588,12 +3612,12 @@ export class WorkspaceDetailPage {
       }
     }
 
-    const workspaceId = String(this.workspaceId || this.workspace?.id || '').trim();
-    if (workspaceId) {
+    const workspaceSlug = String(this.workspaceSlug || this.workspace?.folder_slug || '').trim();
+    if (workspaceSlug) {
       const title = `Open workspace to repair ${normalizedName}`;
       return {
         kind: 'workspace-reference',
-        href: `/workspaces/${encodeURIComponent(workspaceId)}`,
+        href: workspaceRootURL(workspaceSlug),
         interactive: true,
         title,
         ariaLabel: title
@@ -5974,7 +5998,7 @@ export class WorkspaceDetailPage {
           prompt,
           context: {
             surface: 'workspace_detail',
-            page_path: window.location.pathname || `/workspaces/${this.workspaceId}`,
+            page_path: window.location.pathname || workspaceRootURL(this.workspaceSlug),
             workspace_id: this.workspaceId,
             origin: 'task_execution'
           }
@@ -16302,8 +16326,8 @@ export class WorkspaceDetailPage {
    */
   buildTaskHref(taskId) {
     const normalizedTaskId = String(taskId || '').trim();
-    if (!normalizedTaskId || !this.workspaceId) return '';
-    return `/workspaces/${encodeURIComponent(this.workspaceId)}/task/${encodeURIComponent(normalizedTaskId)}`;
+    if (!normalizedTaskId || !this.workspaceSlug) return '';
+    return workspacePageURL(this.workspaceSlug, ['task', normalizedTaskId]);
   }
 
   openTask(taskId) {

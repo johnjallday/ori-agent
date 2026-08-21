@@ -118,6 +118,102 @@ func TestSQLiteStore_WorkspaceOwnerUserIDPersists(t *testing.T) {
 	}
 }
 
+func TestSQLiteStore_WorkspaceFolderSlugPersistsAndConflicts(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	store := NewSQLiteStore(db)
+	ctx := context.Background()
+	now := time.Now()
+	first := &Workspace{
+		ID:         "workspace-reports",
+		Name:       "Reports",
+		FolderSlug: "reports",
+		Status:     WorkspaceStatusActive,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
+	if err := store.CreateWorkspace(ctx, first); err != nil {
+		t.Fatalf("CreateWorkspace(first): %v", err)
+	}
+
+	got, err := store.GetWorkspace(ctx, first.ID)
+	if err != nil {
+		t.Fatalf("GetWorkspace: %v", err)
+	}
+	if got.FolderSlug != "reports" {
+		t.Fatalf("GetWorkspace folder_slug = %q, want reports", got.FolderSlug)
+	}
+
+	adapter := NewWorkspaceStoreAdapter(NewHybridStoreWithDB(db, 10))
+	resolved, err := adapter.ResolveSlug("reports")
+	if err != nil {
+		t.Fatalf("adapter ResolveSlug: %v", err)
+	}
+	if resolved.ID != first.ID || resolved.FolderSlug != "reports" {
+		t.Fatalf("adapter resolved %#v, want %q/reports", resolved, first.ID)
+	}
+	if _, err := adapter.ResolveSlug(first.ID); err == nil {
+		t.Fatal("adapter unexpectedly fell back from slug to workspace ID")
+	}
+
+	listed, err := store.ListWorkspaces(ctx)
+	if err != nil {
+		t.Fatalf("ListWorkspaces: %v", err)
+	}
+	if len(listed) != 1 || listed[0].FolderSlug != "reports" {
+		t.Fatalf("ListWorkspaces did not retain slug: %#v", listed)
+	}
+
+	scheduled, err := store.ListWorkspacesForScheduling(ctx)
+	if err != nil {
+		t.Fatalf("ListWorkspacesForScheduling: %v", err)
+	}
+	if len(scheduled) != 1 || scheduled[0].FolderSlug != "reports" {
+		t.Fatalf("scheduling projection did not retain slug: %#v", scheduled)
+	}
+
+	duplicate := &Workspace{
+		ID:         "workspace-reports-duplicate",
+		Name:       "Other Reports",
+		FolderSlug: "REPORTS",
+		Status:     WorkspaceStatusActive,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
+	if err := store.CreateWorkspace(ctx, duplicate); err != ErrWorkspaceSlugConflict {
+		t.Fatalf("duplicate slug error = %v, want ErrWorkspaceSlugConflict", err)
+	}
+
+	second := &Workspace{
+		ID:         "workspace-plans",
+		Name:       "Plans",
+		FolderSlug: "plans",
+		Status:     WorkspaceStatusActive,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
+	if err := store.CreateWorkspace(ctx, second); err != nil {
+		t.Fatalf("CreateWorkspace(second): %v", err)
+	}
+	second.FolderSlug = "reports"
+	if err := store.UpdateWorkspace(ctx, second); err != ErrWorkspaceSlugConflict {
+		t.Fatalf("conflicting update error = %v, want ErrWorkspaceSlugConflict", err)
+	}
+
+	trashed := &Workspace{
+		ID:         "workspace-reports-trashed",
+		Name:       "Old Reports",
+		FolderSlug: "reports",
+		Status:     WorkspaceStatusTrashed,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
+	if err := store.CreateWorkspace(ctx, trashed); err != nil {
+		t.Fatalf("trashed workspace should not reserve slug: %v", err)
+	}
+}
+
 func TestSQLiteStore_UpdateSession(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()

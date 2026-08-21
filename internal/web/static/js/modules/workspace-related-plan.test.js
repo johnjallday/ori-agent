@@ -57,13 +57,19 @@ test('a group task reads as a group rather than a step', () => {
   assert.match(provenance, /task group/);
 });
 
-// --- The link comes from the server (FR-145, FR-149) -----------------------
+// --- The link keeps route identity separate from API identity --------------
 
-// Building the URL client-side would be a second place that knows the route
-// shape, and the two would drift the first time it changed.
-test('the canonical link is taken from the server, never built', () => {
+test('an explicit workspace slug overrides the legacy server URL', () => {
+  const related = relatedFixture({
+    studio_id: 'workspace-uuid',
+    url: '/workspaces/workspace-uuid/plans/plan_1'
+  });
+  assert.equal(
+    relatedPlanLink(related, 'marketing-site'),
+    '/workspaces/marketing-site/plans/plan_1'
+  );
+  // Legacy callers can still display a server-provided canonical URL.
   assert.equal(relatedPlanLink(relatedFixture()), '/workspaces/ws-1/plans/plan_1');
-  // No url means no link, rather than a guessed one.
   assert.equal(relatedPlanLink(relatedFixture({ url: '' })), '');
 });
 
@@ -73,12 +79,12 @@ function fakeContainer() {
   return { hidden: false, innerHTML: '' };
 }
 
-test('rendering produces a link to the canonical surface', () => {
+test('rendering produces a slug-based link to the canonical surface', () => {
   const container = fakeContainer();
-  renderRelatedPlan(container, relatedFixture());
+  renderRelatedPlan(container, relatedFixture(), value => value, 'marketing-site');
 
   assert.equal(container.hidden, false);
-  assert.match(container.innerHTML, /href="\/workspaces\/ws-1\/plans\/plan_1"/);
+  assert.match(container.innerHTML, /href="\/workspaces\/marketing-site\/plans\/plan_1"/);
   assert.match(container.innerHTML, /Migrate reporting/);
 });
 

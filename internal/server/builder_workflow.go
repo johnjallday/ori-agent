@@ -4,6 +4,8 @@ package server
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -201,6 +203,9 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 	startupMaintenanceApproved := shouldRunWorkspaceStartupMaintenance(b.configManager)
 	fileStore, err := workspace.NewFileStore(workspaceDir)
 	if err != nil {
+		if errors.Is(err, workspace.ErrWorkspaceSlugMigration) {
+			return fmt.Errorf("workspace slug integrity check failed: %w", err)
+		}
 		logger.Warn("Failed to create folder-based workspace store", logger.Fields{"error": err})
 	} else {
 		// When SQLite is the primary store, wrap with SyncStore so every
@@ -231,14 +236,21 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 			// exactly the callback that re-points it the moment onboarding or
 			// Build My HQ confirms a real directory.
 			b.wireWorkspaceRootUpdater()
+			// Slug reconciliation is an integrity boundary, not optional startup
+			// maintenance. Run it before publishing the composed workspace store so
+			// routes can never observe an ambiguous or unpersisted namespace. An
+			// unconfirmed staging root remains isolated: only DB-only rows are
+			// backfilled until the user approves that folder.
+			var slugReconcileErr error
 			if startupMaintenanceApproved {
-				// Disk is the source of truth for grouping: reconcile the session
-				// store's structure with the on-disk layout once at startup so
-				// groups that arrived via git/cloud sync show up without a manual
-				// rescan. Non-fatal.
-				if err := b.sessionHandler.ReconcileWorkspacesFromDisk(context.Background()); err != nil {
-					logger.Warn("Startup workspace reconcile from disk failed", logger.Fields{"error": err.Error()})
-				}
+				slugReconcileErr = b.sessionHandler.ReconcileWorkspacesFromDisk(context.Background())
+			} else {
+				slugReconcileErr = b.sessionHandler.ReconcileWorkspaceSlugsWithoutDisk(context.Background())
+			}
+			if slugReconcileErr != nil {
+				return fmt.Errorf("startup workspace slug reconciliation failed: %w", slugReconcileErr)
+			}
+			if startupMaintenanceApproved {
 				// Upgrade groups created before they supported direct work with
 				// the scoped scaffolding (files/, notes/, directory reference,
 				// workspace-files MCP binding). Idempotent; non-fatal.

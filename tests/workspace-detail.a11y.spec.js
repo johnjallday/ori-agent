@@ -26,15 +26,35 @@ for (const theme of ['light', 'dark']) {
     const workspacesResponse = await page.request.get(`${baseUrl}/api/workspaces?tree=true`);
     expect(workspacesResponse.ok()).toBeTruthy();
     const workspaceData = await workspacesResponse.json();
-    const workspaceId = workspaceData.workspaces?.find(
-      workspace => workspace.kind === 'workspace' && workspace.agent_count > 0
-    )?.id;
+    let workspace = workspaceData.workspaces?.find(
+      candidate => candidate.kind === 'workspace' && candidate.agent_count > 0
+    );
+    if (!workspace) {
+      const stamp = Date.now();
+      const created = await page.request.post(`${baseUrl}/api/workspaces`, {
+        data: { name: `Accessibility Workspace ${stamp}`, blank: true }
+      });
+      expect(created.ok()).toBeTruthy();
+      workspace = (await created.json()).folder;
+      const agentName = `Accessibility Manager ${stamp}`;
+      const agent = await page.request.post(`${baseUrl}/api/agents`, {
+        data: { name: agentName, type: 'general' }
+      });
+      expect(agent.ok()).toBeTruthy();
+      const attached = await page.request.post(`${baseUrl}/api/workspaces/${workspace.id}/agents`, {
+        data: { agent_name: agentName }
+      });
+      expect(attached.ok()).toBeTruthy();
+    }
+    const workspaceId = workspace.id;
+    const workspaceSlug = workspace.folder_slug;
     expect(workspaceId).toBeTruthy();
+    expect(workspaceSlug).toBeTruthy();
 
     const workspaceActivated = page.waitForResponse(response =>
       response.url().includes('/api/orchestration/workspace/activate?id=')
     );
-    await page.goto(`${baseUrl}/workspaces/${encodeURIComponent(workspaceId)}`, {
+    await page.goto(`${baseUrl}/workspaces/${encodeURIComponent(workspaceSlug)}`, {
       waitUntil: 'domcontentloaded'
     });
     await expect(page.locator('#workspaceCommandView .ws-cmd-title h2')).toBeVisible();

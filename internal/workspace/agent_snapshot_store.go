@@ -46,6 +46,16 @@ func (s *AgentSnapshotStore) GetFolderWorkspace(id string) (*Workspace, error) {
 	return nil, fmt.Errorf("wrapped store does not support GetFolderWorkspace")
 }
 
+// ResolveSlug preserves the optional canonical-slug resolver through this
+// decorator. No ID fallback is permitted when the wrapped store lacks it.
+func (s *AgentSnapshotStore) ResolveSlug(slug string) (*Workspace, error) {
+	resolver, ok := s.Store.(SlugResolver)
+	if !ok {
+		return nil, ErrWorkspaceSlugNotFound
+	}
+	return resolver.ResolveSlug(slug)
+}
+
 // Save persists the workspace, then opportunistically backfills missing
 // referenced-agent snapshots. Snapshot failures are logged but do not fail Save.
 func (s *AgentSnapshotStore) Save(ws *Workspace) error {

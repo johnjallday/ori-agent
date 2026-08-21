@@ -45,17 +45,28 @@ func (s *SyncStore) GetFolderWorkspace(workspaceID string) (*Workspace, error) {
 	return s.fileSync.Get(workspaceID)
 }
 
-// Save persists the workspace.
-//
-// The FileStore runs first because it owns the monotonic Version counter and
-// performs the lost-write detection check. Bumping there before the primary
-// write means the SQLite row records the post-bump version, so a subsequent
-// Get -> Save cycle reads back the same version that's on disk and the CAS
-// check stays meaningful. If the FileStore write fails (e.g. slug conflict)
-// we still persist to the primary so the authoritative record is updated;
-// the disk sync is best-effort.
+// Save persists the workspace. FileStore still runs first so its monotonic
+// Version bump reaches the primary record, but disk failures are no longer
+// best-effort: slug conflicts and other folder errors abort the operation. A
+// primary failure after the disk write restores the prior folder record (or
+// removes a newly created folder), preventing split registration state.
 func (s *SyncStore) Save(ws *Workspace) error {
 	if s.fileSync != nil && ws != nil && ws.Status != StatusTrashed && ws.Status != StatusMissing {
+		var primaryBefore *Workspace
+		if existing, err := s.primary.Get(ws.ID); err == nil && existing != nil {
+			primaryBefore, _ = cloneWorkspaceForRebind(existing)
+		}
+		var diskBefore *Workspace
+		if existing, err := s.fileSync.Get(ws.ID); err == nil && existing != nil {
+			diskBefore, _ = cloneWorkspaceForRebind(existing)
+		}
+
+		if resolver, ok := s.primary.(SlugResolver); ok && IsCanonicalWorkspaceSlug(ws.FolderSlug) {
+			if owner, err := resolver.ResolveSlug(ws.FolderSlug); err == nil && owner != nil && owner.ID != ws.ID {
+				return &FolderSlugConflictError{Slug: ws.FolderSlug}
+			}
+		}
+
 		// ProjectPath, Designation, TemplateProvenance, SetupWizardProgress, and
 		// RuntimeState are canonical workspace.json fields not represented by the SQLite
 		// workspace table. A workspace fetched from SQLite (the primary store's
@@ -98,13 +109,29 @@ func (s *SyncStore) Save(ws *Workspace) error {
 			}
 		}
 		if err := s.fileSync.Save(ws); err != nil {
-			logger.Warn("Failed to sync workspace to disk", logger.Fields{
-				"workspace_id": ws.ID,
-				"error":        err,
-			})
+			return fmt.Errorf("failed to sync workspace to disk: %w", err)
 		}
+		if err := s.primary.Save(ws); err != nil {
+			if rollbackErr := s.rollbackFileSave(ws.ID, diskBefore); rollbackErr != nil {
+				return fmt.Errorf("primary workspace save failed: %w (folder rollback failed: %v)", err, rollbackErr)
+			}
+			// primaryBefore is normally still present because the failed Save is
+			// transactional. Restore it defensively for custom primary stores.
+			if primaryBefore != nil {
+				_ = s.primary.Save(primaryBefore)
+			}
+			return err
+		}
+		return nil
 	}
 	return s.primary.Save(ws)
+}
+
+func (s *SyncStore) rollbackFileSave(workspaceID string, previous *Workspace) error {
+	if previous == nil {
+		return s.fileSync.Delete(workspaceID)
+	}
+	return s.fileSync.Save(previous)
 }
 
 func portableWorkspaceStateMissing(ws *Workspace) bool {
@@ -224,6 +251,16 @@ func cloneToolboxAssignments(assignments []AgentToolboxAssignment) []AgentToolbo
 // Get retrieves a workspace from the primary store.
 func (s *SyncStore) Get(id string) (*Workspace, error) {
 	return s.primary.Get(id)
+}
+
+// ResolveSlug delegates to the primary store because it includes DB-only
+// registrations that the folder sync target cannot see.
+func (s *SyncStore) ResolveSlug(slug string) (*Workspace, error) {
+	resolver, ok := s.primary.(SlugResolver)
+	if !ok {
+		return nil, ErrWorkspaceSlugNotFound
+	}
+	return resolver.ResolveSlug(slug)
 }
 
 // List returns all workspace IDs from the primary store.

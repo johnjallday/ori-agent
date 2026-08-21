@@ -230,7 +230,7 @@ func TestSynthesizer_NoResolverConfiguredErrors(t *testing.T) {
 
 func TestValidateAgainstAllowlist_DropsOnlyInvalidRefs(t *testing.T) {
 	allowed := map[string]SourceRef{
-		"task:ws-1:t1": {WorkspaceID: "ws-1", EntityType: "task", EntityID: "t1"},
+		"task:ws-1:t1": {WorkspaceID: "ws-1", WorkspaceSlug: "marketing-site", EntityType: "task", EntityID: "t1"},
 	}
 	content := BriefContent{
 		NeedsAttention: []BriefAttentionItem{
@@ -244,5 +244,8 @@ func TestValidateAgainstAllowlist_DropsOnlyInvalidRefs(t *testing.T) {
 	}
 	if len(got.NeedsAttention) != 1 || got.NeedsAttention[0].Title != "valid" {
 		t.Fatalf("expected only the valid item to survive, got %+v", got.NeedsAttention)
+	}
+	if got.NeedsAttention[0].Ref.WorkspaceSlug != "marketing-site" {
+		t.Fatalf("expected canonical slug to be restored from allowlist: %+v", got.NeedsAttention[0].Ref)
 	}
 }

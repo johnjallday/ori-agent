@@ -149,10 +149,15 @@ function getActiveChatStorageKey() {
 
   const pathname = String(window.location?.pathname || '/').trim() || '/';
   const workspaceId =
-    extractWorkspaceIdFromPath(pathname) ||
+    String(window.currentWorkspaceId || '').trim() ||
+    String(document.body?.dataset?.workspaceId || '').trim() ||
     String(window.sessionManager?.getActiveSession?.()?.folder_id || '').trim();
   if (workspaceId) {
     return `ori_chat_assistant_${workspaceId}`;
+  }
+  const workspaceSlug = extractWorkspaceSlugFromPath(pathname);
+  if (workspaceSlug) {
+    return `ori_chat_assistant_slug_${workspaceSlug}`;
   }
 
   return 'ori_chat_assistant';
@@ -2614,7 +2619,7 @@ async function persistUploadedFilesToSession(sessionId, files, workspaceId) {
   }
 }
 
-function extractWorkspaceIdFromPath(pathname) {
+function extractWorkspaceSlugFromPath(pathname) {
   const path = String(pathname || '').trim();
   const match = path.match(/^\/workspaces\/([^/]+)/i);
   if (!match || !match[1]) return '';
@@ -2648,10 +2653,11 @@ function normalizeRouteContextForChat(routeContext) {
       .toLowerCase(),
     page_path: String(routeContext.page_path || '').trim(),
     workspace_id: String(routeContext.workspace_id || '').trim(),
+    workspace_slug: String(routeContext.workspace_slug || '').trim(),
     origin: String(routeContext.origin || '').trim()
   };
-  if (!normalized.workspace_id && normalized.page_path) {
-    normalized.workspace_id = extractWorkspaceIdFromPath(normalized.page_path);
+  if (!normalized.workspace_slug && normalized.page_path) {
+    normalized.workspace_slug = extractWorkspaceSlugFromPath(normalized.page_path);
   }
   return normalized;
 }
@@ -2662,14 +2668,24 @@ function buildChatRequestRouteContext(overrideRouteContext) {
   const activeWorkspaceId = String(
     window.sessionManager?.getActiveSession?.()?.folder_id || ''
   ).trim();
-  const workspaceIdFromPath = extractWorkspaceIdFromPath(pathname);
+  const serverWorkspaceId = String(
+    window.currentWorkspaceId || document.body?.dataset?.workspaceId || ''
+  ).trim();
+  const serverWorkspaceSlug = String(
+    window.currentWorkspaceSlug || document.body?.dataset?.workspaceSlug || ''
+  ).trim();
+  const workspaceSlugFromPath = extractWorkspaceSlugFromPath(pathname);
 
   const routeContext = {
     page_path: (normalizedOverride && normalizedOverride.page_path) || pathname,
     workspace_id:
       (normalizedOverride && normalizedOverride.workspace_id) ||
-      workspaceIdFromPath ||
+      serverWorkspaceId ||
       activeWorkspaceId,
+    workspace_slug:
+      (normalizedOverride && normalizedOverride.workspace_slug) ||
+      serverWorkspaceSlug ||
+      workspaceSlugFromPath,
     origin: (normalizedOverride && normalizedOverride.origin) || 'chat'
   };
 

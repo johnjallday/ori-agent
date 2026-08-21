@@ -62,6 +62,31 @@ test('workspace detail activateWorkspaceConfigTab clicks the requested tab', () 
   assert.equal(mcpTab.clickCount, 1);
 });
 
+test('workspace detail keeps UUID APIs separate from slug page links', async () => {
+  const page = new WorkspaceDetailPage('8d8c4de0-uuid', 'marketing-site');
+  page.workspace = {
+    id: '8d8c4de0-uuid',
+    folder_slug: 'marketing-site',
+    name: 'Marketing Site',
+    agent_instances: []
+  };
+  page.elements = {
+    openCanvasBtn: {},
+    openDiagnosticsBtn: {}
+  };
+  page.renderWorkspaceTags = () => {};
+  page.renderWorkspaceWorkflowLinks = () => {};
+  page.renderWorkspaceIntent = () => {};
+  page.loadChildren = async () => {};
+  page.renderWorkspaceHealth = () => {};
+
+  await page.renderWorkspaceInfo();
+
+  assert.equal(page.workspaceId, '8d8c4de0-uuid');
+  assert.equal(page.elements.openCanvasBtn.href, '/workspaces/marketing-site/canvas');
+  assert.equal(page.elements.openDiagnosticsBtn.href, '/workspaces/marketing-site/diagnostics');
+});
+
 test('workspace detail consumes a scoped project-open failure notice once', () => {
   const page = new WorkspaceDetailPage('workspace-1');
   const storage = new Map([
@@ -476,7 +501,7 @@ test('workspace detail entity loaders refresh Command view after completion', as
 });
 
 test('workspace detail reusable identity and tag saves update workspace state', async () => {
-  const page = new WorkspaceDetailPage('workspace-1');
+  const page = new WorkspaceDetailPage('workspace-1', 'new-name');
   page.workspace = { id: 'workspace-1', name: 'Old Name', description: '', tags: ['old'] };
   page.elements = {};
   page.renderWorkspaceInfo = async () => {};
@@ -518,6 +543,51 @@ test('workspace detail reusable identity and tag saves update workspace state', 
     assert.match(requests[0].url, /\/api\/workspaces\/workspace-1\/rename$/);
     assert.match(requests[1].url, /\/api\/workspaces\/workspace-1$/);
     assert.match(requests[1].body, /"tags":\["alpha","beta"\]/);
+  } finally {
+    global.fetch = originalFetch;
+    global.window = originalWindow;
+  }
+});
+
+test('workspace detail rename navigates to the returned slug and preserves route state', async () => {
+  const page = new WorkspaceDetailPage('workspace-uuid', 'old-name');
+  page.workspace = { id: 'workspace-uuid', name: 'Old Name', folder_slug: 'old-name' };
+  page.elements = {};
+  page.renderWorkspaceInfo = async () => {};
+  page.loadNotes = async () => {};
+
+  const originalFetch = global.fetch;
+  const originalWindow = global.window;
+  const assigned = [];
+  global.window = {
+    ...originalWindow,
+    location: {
+      pathname: '/workspaces/old-name',
+      search: '?panel=settings',
+      hash: '#connections',
+      assign: target => assigned.push(target)
+    },
+    Toast: { success() {}, error() {} },
+    workspaceCommand: { refresh() {} }
+  };
+  global.fetch = async url => {
+    assert.match(String(url), /\/api\/workspaces\/workspace-uuid\/rename$/);
+    return {
+      ok: true,
+      json: async () => ({
+        folder: { id: 'workspace-uuid', name: 'New Name', folder_slug: 'new-name' }
+      })
+    };
+  };
+
+  try {
+    const result = await page.saveWorkspaceIdentityField('name', 'New Name', {
+      currentValue: 'Old Name'
+    });
+    assert.equal(result.navigated, true);
+    assert.equal(page.workspaceId, 'workspace-uuid');
+    assert.equal(page.workspaceSlug, 'new-name');
+    assert.deepEqual(assigned, ['/workspaces/new-name?panel=settings#connections']);
   } finally {
     global.fetch = originalFetch;
     global.window = originalWindow;
@@ -787,7 +857,7 @@ test('workspace detail links catalog-backed agents to the global detail page', (
 });
 
 test('workspace detail links snapshot-backed local agents to their workspace-scoped page', () => {
-  const page = new WorkspaceDetailPage('workspace-1');
+  const page = new WorkspaceDetailPage('workspace-uuid', 'marketing-site');
   page.workspace = {
     entry_agent_name: 'Local Manager',
     agent_instances: [{ name: 'Local Manager', role: 'Coordinator', entry_point: true }]
@@ -807,15 +877,15 @@ test('workspace detail links snapshot-backed local agents to their workspace-sco
   // would 404. They get a workspace-scoped detail page instead.
   assert.equal(target.kind, 'workspace-local');
   assert.equal(target.interactive, true);
-  assert.equal(target.href, '/workspaces/workspace-1/agents/Local%20Manager');
+  assert.equal(target.href, '/workspaces/marketing-site/agents/Local%20Manager');
   assert.match(markup, /data-agent-detail-kind="workspace-local"/);
-  assert.match(markup, /href="\/workspaces\/workspace-1\/agents\/Local%20Manager"/);
+  assert.match(markup, /href="\/workspaces\/marketing-site\/agents\/Local%20Manager"/);
   assert.doesNotMatch(markup, /href="\/agents\/Local%20Manager"/);
   assert.doesNotMatch(markup, /is-static/);
 });
 
 test('workspace detail routes missing entry agents to workspace recovery', () => {
-  const page = new WorkspaceDetailPage('workspace-1');
+  const page = new WorkspaceDetailPage('workspace-uuid', 'marketing-site');
   page.workspace = {
     entry_agent_name: 'Missing Manager',
     agent_instances: [{ name: 'Missing Manager', role: 'Coordinator', entry_point: true }]
@@ -837,14 +907,14 @@ test('workspace detail routes missing entry agents to workspace recovery', () =>
 
   assert.equal(target.kind, 'missing-entry');
   assert.equal(target.interactive, true);
-  assert.equal(target.href, '/workspaces/workspace-1?addAgent=1&seedAgentName=Missing+Manager');
+  assert.equal(target.href, '/workspaces/marketing-site?addAgent=1&seedAgentName=Missing+Manager');
   assert.match(
     frontMarkup,
-    /href="\/workspaces\/workspace-1\?addAgent=1&amp;seedAgentName=Missing\+Manager"/
+    /href="\/workspaces\/marketing-site\?addAgent=1&amp;seedAgentName=Missing\+Manager"/
   );
   assert.match(
     backMarkup,
-    /href="\/workspaces\/workspace-1\?addAgent=1&amp;seedAgentName=Missing\+Manager"/
+    /href="\/workspaces\/marketing-site\?addAgent=1&amp;seedAgentName=Missing\+Manager"/
   );
   assert.doesNotMatch(frontMarkup, /\/agents\/Missing%20Manager/);
   assert.doesNotMatch(backMarkup, /\/agents\/Missing%20Manager/);

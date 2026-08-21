@@ -6,7 +6,13 @@
      an agent's face is the same here as on /agents and Home (PRD FR-99). Its
      stylesheet and scripts come from head.tmpl, which every page shares. -->
 
-<body class="bg-light">
+<body class="bg-light" data-workspace-id="{{.Extra.WorkspaceID}}" data-workspace-slug="{{.Extra.WorkspaceSlug}}">
+  <script>
+    // Publish server-resolved route identity before deferred page scripts run.
+    // Browser links use the slug; every API and in-memory relationship uses the UUID.
+    window.currentWorkspaceId = document.body.dataset.workspaceId || '';
+    window.currentWorkspaceSlug = document.body.dataset.workspaceSlug || '';
+  </script>
   {{template "navbar.tmpl" .}}
 
   <div class="main-content-wrapper">
@@ -9103,22 +9109,23 @@
     function initializeWorkspaceDetailPage() {
       themeManager.initialize();
 
-      // Extract workspace ID from URL
-      const pathParts = window.location.pathname.split('/');
-      const workspaceId = pathParts[2]; // /workspaces/{id}
+      // Browser routes carry the readable slug; APIs and events keep the UUID.
+      // Both values are resolved server-side before this page is rendered.
+      const workspaceId = "{{.Extra.WorkspaceID}}";
+      const workspaceSlug = "{{.Extra.WorkspaceSlug}}";
 
-      if (workspaceId) {
-        // Make workspace ID available globally for hub modules
+      if (workspaceId && workspaceSlug) {
         window.currentWorkspaceId = workspaceId;
+        window.currentWorkspaceSlug = workspaceSlug;
 
-        const detailPage = new WorkspaceDetailPage(workspaceId);
+        const detailPage = new WorkspaceDetailPage(workspaceId, workspaceSlug);
         window.workspaceDetail = detailPage;
         detailPage.init();
 
         // Opt-in Command view (inert until Phase 1).
         window.workspaceCommand = new WorkspaceCommandView(detailPage);
       } else {
-        console.error('No workspace ID found in URL');
+        console.error('Workspace route identity was not provided');
         window.location.href = '/';
       }
 

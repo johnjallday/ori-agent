@@ -2278,15 +2278,34 @@ test('the workspace view switch offers Plans as a real link', () => {
   const commandView = Object.create(WorkspaceCommandView.prototype);
   Object.assign(commandView, {
     viewMode: 'details',
-    page: { workspaceId: 'ws-1', notes: [], schedules: [], sessions: [] }
+    page: {
+      workspaceId: 'workspace-uuid',
+      workspaceSlug: 'marketing-site',
+      notes: [],
+      schedules: [],
+      sessions: []
+    }
   });
 
   const switcher = commandView.commandViewSwitchHTML();
-  assert.match(switcher, /href="\/workspaces\/ws-1\/plans"/);
+  assert.match(switcher, /href="\/workspaces\/marketing-site\/plans"/);
   assert.match(switcher, />Plans</);
   // An anchor, not a button: middle-click, cmd-click, and "copy link address"
   // must behave the way a link does.
   assert.match(switcher, /<a class="ws-cmd-view-btn ws-cmd-view-link"/);
+});
+
+test('full task links use the slug while their return target preserves route state', () => {
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    page: { workspaceId: 'workspace-uuid', workspaceSlug: 'marketing-site' },
+    currentURLState: () => ({ panel: 'backlog' })
+  });
+
+  const href = commandView.taskHrefWithReturn('task/1');
+  assert.match(href, /^\/workspaces\/marketing-site\/task\/task%2F1\?return=/);
+  assert.match(decodeURIComponent(href), /\/workspaces\/marketing-site\?panel=backlog/);
+  assert.doesNotMatch(href, /workspace-uuid/);
 });
 
 // Without a workspace id there is no honest link to build, so none is rendered
@@ -3035,7 +3054,8 @@ test('Email station portal reflects legacy, loading, CTA, and Email Ops states',
       hqWorkspaceID: 'hq-1',
       status: 'ready',
       exists: true,
-      workspaceID: 'eo-1',
+      workspaceID: 'workspace-uuid',
+      workspaceSlug: 'email-ops',
       workspaceName: 'Email Ops',
       openFollowupCount: 3,
       error: ''
@@ -3071,13 +3091,14 @@ test('Email station portal routes by state: legacy modal, workspace nav, CTA dee
       hqWorkspaceID: 'hq-1',
       status: 'ready',
       exists: true,
-      workspaceID: 'eo-1',
+      workspaceID: 'workspace-uuid',
+      workspaceSlug: 'email-ops',
       workspaceName: 'Email Ops',
       openFollowupCount: 0,
       error: ''
     };
     hq.runHQStationAction('email');
-    assert.deepEqual(navPaths, ['/workspaces/eo-1']);
+    assert.deepEqual(navPaths, ['/workspaces/email-ops']);
 
     // (a) No Email Ops workspace → deep-link the Construct wizard preselected.
     navPaths.length = 0;
@@ -3184,7 +3205,8 @@ test('Watchtower panel groups items by workspace and renders empty, gap, and deg
     status: 'ready',
     items: [
       {
-        workspace_id: 'alpha',
+        workspace_id: 'workspace-uuid-alpha',
+        workspace_slug: 'alpha',
         workspace_name: 'Alpha',
         item_type: 'task',
         entity_id: 'task-1',
@@ -3194,7 +3216,8 @@ test('Watchtower panel groups items by workspace and renders empty, gap, and deg
         timestamp: recent
       },
       {
-        workspace_id: 'beta',
+        workspace_id: 'workspace-uuid-beta',
+        workspace_slug: 'beta',
         workspace_name: 'Beta',
         item_type: 'opportunity',
         entity_id: 'opp-1',
@@ -3204,7 +3227,8 @@ test('Watchtower panel groups items by workspace and renders empty, gap, and deg
         timestamp: recent
       },
       {
-        workspace_id: 'alpha',
+        workspace_id: 'workspace-uuid-alpha',
+        workspace_slug: 'alpha',
         workspace_name: 'Alpha',
         item_type: 'scheduled_task',
         entity_id: 'schedule-1',
@@ -3388,14 +3412,18 @@ test('Calendar Ops open action navigates to the resolved workspace with panel=ca
   try {
     const hq = makeHQCommandView({ id: 'hq-1' });
     hq.statModalSection = 'calendar-ops';
-    hq._calendarOpsPortal = { workspaceID: 'hq-1', calendarWorkspaceID: 'ws-cal' };
+    hq._calendarOpsPortal = {
+      workspaceID: 'hq-1',
+      calendarWorkspaceID: 'workspace-uuid',
+      calendarWorkspaceSlug: 'calendar-ops'
+    };
     let closed = 0;
     hq.closeStatModal = () => {
       closed += 1;
     };
     hq.handleStatModalAction('calendar-ops-open');
     assert.equal(closed, 1);
-    assert.deepEqual(opened, ['/workspaces/ws-cal?panel=calendar']);
+    assert.deepEqual(opened, ['/workspaces/calendar-ops?panel=calendar']);
   } finally {
     globalThis.window = originalWindow;
   }

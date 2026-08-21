@@ -54,7 +54,7 @@ func (f *fakeWorkspaceLister) ListWorkspaces(context.Context) ([]session.Workspa
 }
 
 func newCalendarOpsWorkspace(id string) *agentworkspace.Workspace {
-	ws := &agentworkspace.Workspace{ID: id, Name: "Calendar Ops"}
+	ws := &agentworkspace.Workspace{ID: id, Name: "Calendar Ops", FolderSlug: "calendar-ops"}
 	ws.SetTemplateProvenance(&agentworkspace.TemplateProvenance{TemplateID: CalendarOpsTemplateID, Builtin: true})
 	ws.AgentInstances = []agentworkspace.AgentInstance{
 		{ID: "sched-1", Name: "Scheduler", EntryPoint: true},

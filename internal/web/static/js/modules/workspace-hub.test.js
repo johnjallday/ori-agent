@@ -819,7 +819,18 @@ test('launcher checkbox click handlers select without triggering workspace navig
     getAttribute: name => (name === 'data-workspace-checkbox' ? 'workspace-1' : null)
   });
   const checkboxShell = listenerElement();
-  const { helpers, launcherGrid, state, window } = loadWorkspaceHub();
+  const { helpers, launcherGrid, state, window } = loadWorkspaceHub({
+    state: {
+      workspaces: [
+        {
+          id: 'workspace-1',
+          folder_slug: 'marketing-site',
+          kind: 'workspace',
+          name: 'Marketing Site'
+        }
+      ]
+    }
+  });
 
   launcherGrid.querySelector = () => null;
   launcherGrid.querySelectorAll = selector => {
@@ -846,7 +857,7 @@ test('launcher checkbox click handlers select without triggering workspace navig
   assert.equal(window.location.href, '');
 
   workspaceRow.dispatch('click', {});
-  assert.equal(window.location.href, '/workspaces/workspace-1');
+  assert.equal(window.location.href, '/workspaces/marketing-site');
 });
 
 test('selecting a group cascades to its subtree and reconciles tri-state', () => {
@@ -952,7 +963,11 @@ test('launcher group row opens details on click while the caret toggles collapse
   });
 
   const { helpers, launcherGrid, state, window } = loadWorkspaceHub({
-    state: { workspaces: [{ id: 'group-1', kind: 'group', name: 'Clients', children: [] }] }
+    state: {
+      workspaces: [
+        { id: 'group-1', folder_slug: 'clients', kind: 'group', name: 'Clients', children: [] }
+      ]
+    }
   });
 
   launcherGrid.querySelector = () => null;
@@ -966,7 +981,7 @@ test('launcher group row opens details on click while the caret toggles collapse
 
   // Clicking the group's name/body opens its details page.
   groupRow.dispatch('click', {});
-  assert.equal(window.location.href, '/workspaces/group-1');
+  assert.equal(window.location.href, '/workspaces/clients');
 
   // The caret toggles collapse, stops propagation, and must not navigate.
   window.location.href = '';

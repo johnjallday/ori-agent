@@ -425,6 +425,14 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		// is left with agents in Your Agents for a workspace that does not
 		// exist (FR71).
 		h.rollbackSeededAgents(seed)
+		if errors.Is(err, session.ErrWorkspaceSlugConflict) {
+			parentDir := ""
+			if h.workspaceStore != nil {
+				parentDir = h.workspaceStore.BasePath()
+			}
+			writeWorkspaceCreateSlugConflict(w, req.Name, h.globalWorkspaceSlugConflict(r.Context(), ws.FolderSlug, "", parentDir))
+			return
+		}
 		_ = orihttp.RespondInternalError(w, "Failed to create workspace")
 		return
 	}
@@ -788,7 +796,7 @@ func (h *Handler) provisionCreateWorkspaceFolder(ctx context.Context, w http.Res
 			// too — otherwise retrying under a different name would find them
 			// already present and silently reuse them (FR72).
 			h.rollbackSeededAgents(seed)
-			writeWorkspaceCreateSlugConflict(w, req.Name, slugConflict)
+			writeWorkspaceCreateSlugConflict(w, req.Name, h.globalWorkspaceSlugConflict(ctx, ws.FolderSlug, "", slugConflict.ParentDir))
 			return out, true
 		}
 		logger.Warn("Failed to create workspace folder on disk", logger.Fields{"id": ws.ID, "error": folderErr})
@@ -1585,6 +1593,16 @@ func (h *Handler) handleWorkspaceRename(w http.ResponseWriter, r *http.Request, 
 	ws.UpdatedAt = time.Now()
 
 	if err := h.store.UpdateWorkspace(ctx, ws); err != nil {
+		if errors.Is(err, session.ErrWorkspaceSlugConflict) {
+			parentDir := ""
+			if h.workspaceStore != nil {
+				if path, pathErr := h.workspaceStore.GetFolderPath(id); pathErr == nil {
+					parentDir = filepath.Dir(path)
+				}
+			}
+			writeWorkspaceCreateSlugConflict(w, req.Name, h.globalWorkspaceSlugConflict(ctx, targetSlug, id, parentDir))
+			return
+		}
 		_ = orihttp.RespondInternalError(w, "Failed to rename workspace")
 		return
 	}
@@ -1613,7 +1631,7 @@ func (h *Handler) handleWorkspaceRename(w http.ResponseWriter, r *http.Request, 
 
 			var slugConflict *agentworkspace.FolderSlugConflictError
 			if errors.As(err, &slugConflict) {
-				writeWorkspaceCreateSlugConflict(w, req.Name, slugConflict)
+				writeWorkspaceCreateSlugConflict(w, req.Name, h.globalWorkspaceSlugConflict(ctx, targetSlug, id, slugConflict.ParentDir))
 				return
 			}
 
@@ -1650,6 +1668,7 @@ func (h *Handler) handleWorkspaceRename(w http.ResponseWriter, r *http.Request, 
 
 type createWorkspaceImportRequest struct {
 	Name               string                     `json:"name,omitempty"`
+	FolderSlug         string                     `json:"folder_slug,omitempty"`
 	WorkspacePreset    string                     `json:"workspace_preset,omitempty"`
 	Description        string                     `json:"description,omitempty"`
 	ParentID           string                     `json:"parent_id,omitempty"`
@@ -1665,6 +1684,7 @@ type createWorkspaceImportRequest struct {
 type workspaceImportDuplicate struct {
 	Found         bool   `json:"found"`
 	WorkspaceID   string `json:"workspace_id,omitempty"`
+	WorkspaceSlug string `json:"workspace_slug,omitempty"`
 	WorkspaceName string `json:"workspace_name,omitempty"`
 	DirectoryID   string `json:"directory_id,omitempty"`
 	Path          string `json:"path,omitempty"`

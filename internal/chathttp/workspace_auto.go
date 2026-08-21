@@ -82,12 +82,15 @@ func applyWorkspaceRouteContext(routeCtx normalizedChatRouteContext, ws *workspa
 
 	updated := routeCtx
 	updated.WorkspaceID = strings.TrimSpace(ws.ID)
+	updated.WorkspaceSlug = strings.TrimSpace(ws.FolderSlug)
 	if updated.WorkspaceID == "" {
 		return routeCtx
 	}
 
 	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(updated.PagePath)), "/workspaces/") {
-		updated.PagePath = "/workspaces/" + updated.WorkspaceID
+		if updated.WorkspaceSlug != "" {
+			updated.PagePath = "/workspaces/" + updated.WorkspaceSlug
+		}
 	}
 	if !isWorkspaceChatSurface(updated.Surface) {
 		updated.Surface = "workspace_chat"

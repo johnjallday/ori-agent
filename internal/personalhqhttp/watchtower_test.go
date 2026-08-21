@@ -138,7 +138,7 @@ func TestWatchtower_AggregatesAndOrdersItemsAcrossWorkspaces(t *testing.T) {
 	}
 	for index, expected := range want {
 		item := response.Items[index]
-		if item.WorkspaceID != expected.workspaceID || item.ItemType != expected.itemType || item.Severity != expected.severity || item.EntityID == "" || item.Timestamp == "" {
+		if item.WorkspaceID != expected.workspaceID || item.WorkspaceSlug == "" || item.WorkspaceSlug == item.WorkspaceID || item.ItemType != expected.itemType || item.Severity != expected.severity || item.EntityID == "" || item.Timestamp == "" {
 			t.Fatalf("item %d = %#v, want workspace/type/severity %#v", index, item, expected)
 		}
 	}

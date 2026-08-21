@@ -3,7 +3,11 @@
 <html data-bs-theme="light">
 {{template "head.tmpl" .}}
 
-<body class="bg-light">
+<body class="bg-light" data-workspace-id="{{.Extra.WorkspaceID}}" data-workspace-slug="{{.Extra.WorkspaceSlug}}">
+  <script>
+    window.currentWorkspaceId = document.body.dataset.workspaceId || '';
+    window.currentWorkspaceSlug = document.body.dataset.workspaceSlug || '';
+  </script>
   {{template "navbar.tmpl" .}}
 
   <div class="main-content-wrapper">
@@ -14,13 +18,14 @@
         id="workspacePlansPageRoot"
         class="plans-page-shell"
         data-workspace-id="{{.Extra.WorkspaceID}}"
+        data-workspace-slug="{{.Extra.WorkspaceSlug}}"
       >
         <section class="plans-hero">
           <div class="plans-hero-copy">
             <div class="plans-breadcrumbs">
               <a href="/" class="plans-breadcrumb-link">Home</a>
               <span aria-hidden="true">/</span>
-              <a href="/workspaces/{{.Extra.WorkspaceID}}" class="plans-breadcrumb-link">Workspace</a>
+              <a href="/workspaces/{{.Extra.WorkspaceSlug}}" class="plans-breadcrumb-link">Workspace</a>
               <span aria-hidden="true">/</span>
               <span>Plans</span>
             </div>
@@ -50,7 +55,7 @@
             Existing plans below stay readable. To draft new ones, turn on structured planning in
             Workspace Settings.
           </p>
-          <a class="plans-settings-link" href="/workspaces/{{.Extra.WorkspaceID}}?panel=settings">
+          <a class="plans-settings-link" href="/workspaces/{{.Extra.WorkspaceSlug}}?panel=settings">
             Open Workspace Settings
           </a>
         </section>
@@ -308,10 +313,11 @@
 
     document.addEventListener('DOMContentLoaded', async () => {
       const workspaceId = "{{.Extra.WorkspaceID}}";
-      if (!workspaceId) {
+      const workspaceSlug = "{{.Extra.WorkspaceSlug}}";
+      if (!workspaceId || !workspaceSlug) {
         return;
       }
-      const page = new WorkspacePlansPage(workspaceId);
+      const page = new WorkspacePlansPage(workspaceId, { workspaceSlug });
       try {
         await page.init();
       } catch (error) {

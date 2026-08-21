@@ -3,7 +3,11 @@
 <html data-bs-theme="light">
 {{template "head.tmpl" .}}
 
-<body class="bg-light">
+<body class="bg-light" data-workspace-id="{{.Extra.WorkspaceID}}" data-workspace-slug="{{.Extra.WorkspaceSlug}}">
+  <script>
+    window.currentWorkspaceId = document.body.dataset.workspaceId || '';
+    window.currentWorkspaceSlug = document.body.dataset.workspaceSlug || '';
+  </script>
   <!-- Navigation -->
   {{template "navbar.tmpl" .}}
 
@@ -18,7 +22,7 @@
           <div class="modern-card p-3 mb-3">
             <div class="d-flex justify-content-between align-items-center">
               <div class="d-flex align-items-center gap-3">
-                <a href="/workspaces/{{.Extra.WorkspaceID}}" class="modern-btn modern-btn-secondary">
+                <a href="/workspaces/{{.Extra.WorkspaceSlug}}" class="modern-btn modern-btn-secondary">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
                     <path d="M20,11V13H8L13.5,18.5L12.08,19.92L4.16,12L12.08,4.08L13.5,5.5L8,11H20Z"/>
                   </svg>
@@ -678,11 +682,10 @@
   <script>
     // Workspace-specific canvas initialization
     const workspaceId = '{{.Extra.WorkspaceID}}';
-    // Set global workspace id for helper scripts that rely on currentWorkspaceId
-    if (typeof currentWorkspaceId !== 'undefined') {
-      currentWorkspaceId = workspaceId;
-    }
+    const workspaceSlug = '{{.Extra.WorkspaceSlug}}';
+    // Keep page identity available to shared scripts: UUID for APIs, slug for links.
     window.currentWorkspaceId = workspaceId;
+    window.currentWorkspaceSlug = workspaceSlug;
 
     // Initialize canvas directly with this workspace
     document.addEventListener('DOMContentLoaded', async function() {

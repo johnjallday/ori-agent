@@ -141,6 +141,7 @@ func TestEnsureWorkspaceForRoute_PrefersExplicitRouteWorkspace(t *testing.T) {
 
 func TestApplyWorkspaceRouteContext_PromotesNonWorkspaceSurface(t *testing.T) {
 	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Alpha"})
+	ws.FolderSlug = "alpha"
 	updated := applyWorkspaceRouteContext(normalizedChatRouteContext{
 		Surface:  "dashboard",
 		PagePath: "/dashboard",
@@ -150,10 +151,13 @@ func TestApplyWorkspaceRouteContext_PromotesNonWorkspaceSurface(t *testing.T) {
 	if updated.WorkspaceID != ws.ID {
 		t.Fatalf("expected workspace_id %q, got %q", ws.ID, updated.WorkspaceID)
 	}
+	if updated.WorkspaceSlug != ws.FolderSlug {
+		t.Fatalf("expected workspace_slug %q, got %q", ws.FolderSlug, updated.WorkspaceSlug)
+	}
 	if updated.Surface != "workspace_chat" {
 		t.Fatalf("expected workspace_chat surface, got %q", updated.Surface)
 	}
-	if updated.PagePath != "/workspaces/"+ws.ID {
+	if updated.PagePath != "/workspaces/"+ws.FolderSlug {
 		t.Fatalf("expected workspace page path, got %q", updated.PagePath)
 	}
 }

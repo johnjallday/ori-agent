@@ -11,9 +11,8 @@
  * calls are made until the user clicks "Find tools".
  */
 (function () {
-  function workspaceIdFromPath() {
-    const match = window.location.pathname.match(/\/workspaces\/([^/]+)/);
-    return match ? decodeURIComponent(match[1]) : '';
+  function workspaceIdFromPage() {
+    return String(window.currentWorkspaceId || document.body?.dataset?.workspaceId || '');
   }
 
   async function fetchWorkspaceInput(workspaceId) {
@@ -47,7 +46,7 @@
     ) {
       return;
     }
-    const workspaceId = workspaceIdFromPath();
+    const workspaceId = workspaceIdFromPage();
     if (!workspaceId) return;
 
     let panel = null;

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -178,11 +179,11 @@ type PlanOpener interface {
 // One canonical route, built in one place. A second link shape somewhere else
 // is how a "plan" ends up rendered by two different surfaces with two different
 // ideas of what approving means (FR-145, FR-148).
-func planLink(workspaceID, planID string) string {
-	if workspaceID == "" || planID == "" {
+func planLink(workspaceSlug, planID string) string {
+	if workspaceSlug == "" || planID == "" {
 		return ""
 	}
-	return fmt.Sprintf("/workspaces/%s/plans/%s", workspaceID, planID)
+	return fmt.Sprintf("/workspaces/%s/plans/%s", url.PathEscape(workspaceSlug), url.PathEscape(planID))
 }
 
 // planRequiredMessage is what chat says when a request is Plan work.

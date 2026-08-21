@@ -47,8 +47,8 @@ func TestPortalSummary_UnfinishedSetupReportsSetupState(t *testing.T) {
 		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
 	}
 	resp := decodeSuccess[portalSummaryResponse](t, w)
-	if !resp.HasWorkspace || resp.WorkspaceID != "ws-cal" {
-		t.Fatalf("expected has_workspace=true workspace_id=ws-cal, got %+v", resp)
+	if !resp.HasWorkspace || resp.WorkspaceID != "ws-cal" || resp.WorkspaceSlug != "calendar-ops" {
+		t.Fatalf("expected has_workspace=true with distinct id/slug, got %+v", resp)
 	}
 	if resp.State != calendar.SetupConnectorMissing {
 		t.Fatalf("expected state=connector_missing, got %q", resp.State)

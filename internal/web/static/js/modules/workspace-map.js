@@ -3086,6 +3086,13 @@
 
   function openWorkspace(id, opts) {
     if (!id) return;
+    var workspaces = (lastMount && lastMount.state && lastMount.state.workspaces) || [];
+    var workspace = findWs(workspaces, id);
+    var slug = workspace && String(workspace.folder_slug || '').trim();
+    if (!slug) {
+      console.error('workspace-map: cannot open workspace without folder_slug', id);
+      return;
+    }
     // Owning-workspace deep link (FR59): ?panel=backlog opens straight into
     // the Details Backlog drawer. The global Map never mutates/promotes/
     // deletes backlog items itself — it only ever navigates there.
@@ -3094,7 +3101,7 @@
     // ?setup=1 opens the workspace's own Setup Wizard on arrival — the same
     // persisted state its banner and dialog show, never a second copy.
     if (opts && opts.setup) query = '?setup=1';
-    window.location.href = '/workspaces/' + encodeURIComponent(id) + query;
+    window.location.href = '/workspaces/' + encodeURIComponent(slug) + query;
   }
 
   // Delete and group are owned by the host, not the map: the cockpit passes them

@@ -34,9 +34,10 @@ var ErrNoteNotFound = errors.New("note not found in this workspace")
 // order to display and navigate to it. Deliberately not the Note's body: the
 // Ticket references a Note, it does not contain one.
 type TicketNoteRef struct {
-	ID          string `json:"id"`
-	Title       string `json:"title"`
-	WorkspaceID string `json:"workspace_id"`
+	ID            string `json:"id"`
+	Title         string `json:"title"`
+	WorkspaceID   string `json:"workspace_id"`
+	WorkspaceSlug string `json:"workspace_slug,omitempty"`
 }
 
 // TicketNoteLookup resolves Notes for validation and display.
@@ -125,7 +126,7 @@ func (s *TicketService) LinkNote(ctx context.Context, workspaceID, ticketID, not
 		return nil, err
 	}
 
-	ticket := NewTicket(&updated, updated.WorkspaceID, s.WorkspaceName(updated.WorkspaceID))
+	ticket := NewTicket(&updated, updated.WorkspaceID, s.WorkspaceName(updated.WorkspaceID), s.WorkspaceSlug(updated.WorkspaceID))
 	if linked {
 		s.publishTicket(EventTicketNoteLinked, ticket, map[string]any{
 			"note_id":    ref.ID,
@@ -177,7 +178,7 @@ func (s *TicketService) UnlinkNote(ctx context.Context, workspaceID, ticketID, n
 		return nil, err
 	}
 
-	ticket := NewTicket(&updated, updated.WorkspaceID, s.WorkspaceName(updated.WorkspaceID))
+	ticket := NewTicket(&updated, updated.WorkspaceID, s.WorkspaceName(updated.WorkspaceID), s.WorkspaceSlug(updated.WorkspaceID))
 	if unlinked {
 		s.publishTicket(EventTicketNoteUnlinked, ticket, map[string]any{"note_id": noteID})
 	}
@@ -200,11 +201,13 @@ func (s *TicketService) LinkedNotes(ctx context.Context, workspaceID, ticketID s
 	}
 
 	refs := make([]TicketNoteRef, 0, len(ticket.LinkedNoteIDs))
+	workspaceSlug := s.WorkspaceSlug(workspaceID)
 	for _, noteID := range ticket.LinkedNoteIDs {
 		ref, err := s.notes.LookupNote(ctx, noteID)
 		if err != nil || ref.WorkspaceID != workspaceID {
 			continue
 		}
+		ref.WorkspaceSlug = workspaceSlug
 		refs = append(refs, ref)
 	}
 	return refs, nil
@@ -239,7 +242,7 @@ func (s *TicketService) TicketsLinkedToNote(workspaceID, noteID string) ([]Ticke
 			if linked != noteID {
 				continue
 			}
-			out = append(out, NewTicketSummary(task, ws.ID, ws.Name))
+			out = append(out, NewTicketSummary(task, ws.ID, ws.Name, ws.FolderSlug))
 			break
 		}
 	}

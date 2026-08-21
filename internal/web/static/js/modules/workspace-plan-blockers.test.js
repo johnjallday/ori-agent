@@ -24,14 +24,20 @@ function planFixture(overrides = {}) {
 
 // --- Each blocker names its own cause (FR-156) -----------------------------
 
-test('a plan awaiting approval says so and points at the review', () => {
-  const blocker = primaryBlocker(planFixture({ status: 'in_review' }));
+test('a plan awaiting approval says so and points at the slug-based review', () => {
+  const blocker = primaryBlocker(
+    planFixture({
+      studio_id: 'workspace-uuid',
+      workspace_slug: 'marketing-site',
+      status: 'in_review'
+    })
+  );
   assert.equal(blocker.kind, 'approval');
   assert.match(blocker.reason, /waiting for your approval/);
   // And it says nothing was created, because that is the question a user
   // actually has at this moment.
   assert.match(blocker.reason, /Nothing has been created/);
-  assert.equal(blocker.action.href, '/workspaces/ws-1/plans/plan_1');
+  assert.equal(blocker.action.href, '/workspaces/marketing-site/plans/plan_1');
 });
 
 test('a plan awaiting answers is distinct from one awaiting approval', () => {

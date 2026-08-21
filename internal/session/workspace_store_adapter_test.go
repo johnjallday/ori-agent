@@ -154,6 +154,23 @@ func TestWorkspaceStoreAdapter_OwnerUserIDRoundTrip(t *testing.T) {
 	}
 }
 
+func TestWorkspaceStoreAdapter_FolderSlugRoundTrip(t *testing.T) {
+	adapter := &WorkspaceStoreAdapter{}
+	input := &workspace.Workspace{
+		ID:         "workspace-slug",
+		Name:       "Marketing Site",
+		FolderSlug: "marketing-site",
+	}
+
+	sessionWS := adapter.toSessionWorkspace(input)
+	if sessionWS.FolderSlug != "marketing-site" {
+		t.Fatalf("session folder slug = %q, want marketing-site", sessionWS.FolderSlug)
+	}
+	if roundTripped := adapter.toAgentWorkspace(sessionWS); roundTripped.FolderSlug != "marketing-site" {
+		t.Fatalf("round-tripped folder slug = %q, want marketing-site", roundTripped.FolderSlug)
+	}
+}
+
 func TestWorkspaceStoreAdapter_TicketMigrationStateRoundTrip(t *testing.T) {
 	adapter := &WorkspaceStoreAdapter{}
 	input := &workspace.Workspace{

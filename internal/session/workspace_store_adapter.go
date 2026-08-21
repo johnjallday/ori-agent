@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -74,6 +75,44 @@ func (a *WorkspaceStoreAdapter) Get(id string) (*workspace.Workspace, error) {
 	}
 
 	return a.toAgentWorkspace(sessionWS), nil
+}
+
+// ResolveSlug resolves only a canonical current folder slug. Production
+// HybridStore values provide an indexed SQLite lookup; the listing fallback
+// keeps lightweight test stores compatible without ever consulting Get(id).
+func (a *WorkspaceStoreAdapter) ResolveSlug(slug string) (*workspace.Workspace, error) {
+	if !workspace.IsCanonicalWorkspaceSlug(slug) {
+		return nil, workspace.ErrWorkspaceSlugNotFound
+	}
+	ctx := context.Background()
+	type slugStore interface {
+		GetWorkspaceBySlug(context.Context, string) (*Workspace, error)
+	}
+	if indexed, ok := a.store.(slugStore); ok {
+		ws, err := indexed.GetWorkspaceBySlug(ctx, slug)
+		if err == ErrWorkspaceNotFound {
+			return nil, workspace.ErrWorkspaceSlugNotFound
+		}
+		if err != nil {
+			return nil, err
+		}
+		return a.toAgentWorkspace(ws), nil
+	}
+
+	workspaces, err := a.store.ListWorkspaces(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i := range workspaces {
+		candidate := &workspaces[i]
+		if candidate.Status == WorkspaceStatusTrashed || candidate.Status == WorkspaceStatusMissing {
+			continue
+		}
+		if strings.EqualFold(candidate.FolderSlug, slug) {
+			return a.toAgentWorkspace(candidate), nil
+		}
+	}
+	return nil, workspace.ErrWorkspaceSlugNotFound
 }
 
 // List returns all workspace IDs.

@@ -117,14 +117,14 @@
     };
   }
 
-  // resolveWorkspaceId reads the id from the URL rather than a global. Page
-  // scripts load with `defer` and run before the module script that sets
-  // window.currentWorkspaceId, so trusting the global here would mean an empty
-  // id on exactly the load that matters — the first one after creation.
+  // The browser route carries a slug. API identity comes only from the UUID
+  // the server publishes before deferred scripts run.
   function resolveWorkspaceId() {
-    const match = /^\/workspaces\/([^/?#]+)/.exec(window.location?.pathname || '');
-    if (match) return decodeURIComponent(match[1]);
-    return (typeof window !== 'undefined' && window.currentWorkspaceId) || '';
+    return String(
+      (typeof window !== 'undefined' && window.currentWorkspaceId) ||
+        (typeof document !== 'undefined' && document.body?.dataset?.workspaceId) ||
+        ''
+    );
   }
 
   function resumeKey() {

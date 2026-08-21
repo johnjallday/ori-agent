@@ -1063,7 +1063,11 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 			// "I could not create it" beats swallowing the reason.
 			if planID, workspaceID := h.openPlanForChat(ctx, normalizedRouteContext, q); planID != "" {
 				payload["plan_id"] = planID
-				payload["plan_url"] = planLink(workspaceID, planID)
+				if h.workspaceStore != nil {
+					if ws, err := h.workspaceStore.Get(workspaceID); err == nil && ws != nil && strings.TrimSpace(ws.FolderSlug) != "" {
+						payload["plan_url"] = planLink(ws.FolderSlug, planID)
+					}
+				}
 			}
 			writeJSONResponse(w, attachPlannerDecision(attachRouteMetadata(payload, chatRouteMetadata{
 				Mode:   string(routeDecision.Mode),

@@ -89,7 +89,10 @@ func (h *HomeAssistantAskHandler) buildNextStepActions(intent, prompt string, sn
 	// Introspection: surface the most recently active workspaces.
 	if intent == homeAssistantAppIntrospectionIntent.Key {
 		for _, ws := range snapshot.Workspaces {
-			add(HomeAction{ID: "open-ws-" + ws.ID, Type: HomeActionOpenWorkspace, Label: "Open " + ws.Name, Href: workspaceHref(ws.ID), WorkspaceID: ws.ID})
+			if strings.TrimSpace(ws.Slug) == "" {
+				continue
+			}
+			add(HomeAction{ID: "open-ws-" + ws.ID, Type: HomeActionOpenWorkspace, Label: "Open " + ws.Name, Href: workspaceHref(ws.Slug), WorkspaceID: ws.ID})
 			if len(actions) >= 3 {
 				break
 			}
@@ -102,8 +105,8 @@ func (h *HomeAssistantAskHandler) buildNextStepActions(intent, prompt string, sn
 	return actions
 }
 
-func workspaceHref(id string) string {
-	return "/workspaces/" + id
+func workspaceHref(slug string) string {
+	return "/workspaces/" + slug
 }
 
 func plural(n int, singular, pluralForm string) string {

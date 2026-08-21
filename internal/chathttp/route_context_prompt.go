@@ -6,19 +6,21 @@ import (
 )
 
 type chatRouteContext struct {
-	Surface     string `json:"surface,omitempty"`
-	PagePath    string `json:"page_path,omitempty"`
-	WorkspaceID string `json:"workspace_id,omitempty"`
-	TaskID      string `json:"task_id,omitempty"`
-	Origin      string `json:"origin,omitempty"`
+	Surface       string `json:"surface,omitempty"`
+	PagePath      string `json:"page_path,omitempty"`
+	WorkspaceID   string `json:"workspace_id,omitempty"`
+	WorkspaceSlug string `json:"workspace_slug,omitempty"`
+	TaskID        string `json:"task_id,omitempty"`
+	Origin        string `json:"origin,omitempty"`
 }
 
 type normalizedChatRouteContext struct {
-	Surface     string
-	PagePath    string
-	WorkspaceID string
-	TaskID      string
-	Origin      string
+	Surface       string
+	PagePath      string
+	WorkspaceID   string
+	WorkspaceSlug string
+	TaskID        string
+	Origin        string
 	// AgentName is the resolved responding agent, set after agent resolution so
 	// the runtime prompt can layer that agent's per-workspace refinement.
 	AgentName string
@@ -49,15 +51,16 @@ func normalizeChatRouteContext(input *chatRouteContext) normalizedChatRouteConte
 
 	pagePath := sanitizeRouteContextPath(input.PagePath)
 	workspaceID := sanitizeRouteContextIdentifier(input.WorkspaceID, maxRouteContextWorkspaceIDLen)
-	if workspaceID == "" {
-		workspaceID = sanitizeRouteContextIdentifier(extractWorkspaceIDFromPagePath(pagePath), maxRouteContextWorkspaceIDLen)
+	workspaceSlug := sanitizeRouteContextIdentifier(input.WorkspaceSlug, maxRouteContextWorkspaceIDLen)
+	if workspaceSlug == "" {
+		workspaceSlug = sanitizeRouteContextIdentifier(extractWorkspaceSlugFromPagePath(pagePath), maxRouteContextWorkspaceIDLen)
 	}
 	taskID := sanitizeRouteContextIdentifier(input.TaskID, maxRouteContextTaskIDLen)
 	if taskID == "" {
 		taskID = sanitizeRouteContextIdentifier(extractTaskIDFromPagePath(pagePath), maxRouteContextTaskIDLen)
 	}
-	if pagePath == "" && workspaceID != "" {
-		pagePath = "/workspaces/" + workspaceID
+	if pagePath == "" && workspaceSlug != "" {
+		pagePath = "/workspaces/" + workspaceSlug
 	}
 	if pagePath == "" {
 		pagePath = "/"
@@ -71,11 +74,12 @@ func normalizeChatRouteContext(input *chatRouteContext) normalizedChatRouteConte
 	}
 
 	return normalizedChatRouteContext{
-		Surface:     surface,
-		PagePath:    pagePath,
-		WorkspaceID: workspaceID,
-		TaskID:      taskID,
-		Origin:      sanitizeRouteContextOrigin(input.Origin),
+		Surface:       surface,
+		PagePath:      pagePath,
+		WorkspaceID:   workspaceID,
+		WorkspaceSlug: workspaceSlug,
+		TaskID:        taskID,
+		Origin:        sanitizeRouteContextOrigin(input.Origin),
 	}
 }
 
@@ -114,7 +118,7 @@ func inferChatRouteSurface(pathname, workspaceID string) string {
 	return "dashboard"
 }
 
-func extractWorkspaceIDFromPagePath(pathname string) string {
+func extractWorkspaceSlugFromPagePath(pathname string) string {
 	path := strings.TrimSpace(pathname)
 	if path == "" {
 		return ""
@@ -208,6 +212,9 @@ func buildRouteContextSystemPrompt(ctx normalizedChatRouteContext) string {
 
 	if strings.TrimSpace(ctx.WorkspaceID) != "" {
 		lines = append(lines, fmt.Sprintf("Active workspace_id: %q", ctx.WorkspaceID))
+	}
+	if strings.TrimSpace(ctx.WorkspaceSlug) != "" {
+		lines = append(lines, fmt.Sprintf("Active workspace_slug: %q", ctx.WorkspaceSlug))
 	}
 	if strings.TrimSpace(ctx.TaskID) != "" {
 		lines = append(lines, fmt.Sprintf("Active task_id: %q", ctx.TaskID))

@@ -1,3 +1,5 @@
+import { workspacePageURL } from './workspace-routes.js';
+
 // Workspace Plans: the canonical list/create surface for durable Plans.
 //
 // Two rules shape this module:
@@ -115,8 +117,8 @@ export function formatTimestamp(value) {
   return date.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
 }
 
-export function planDetailPath(workspaceId, planId) {
-  return `/workspaces/${encodeURIComponent(workspaceId)}/plans/${encodeURIComponent(planId)}`;
+export function planDetailPath(workspaceSlug, planId) {
+  return workspacePageURL(workspaceSlug, ['plans', planId]);
 }
 
 // versionLabel distinguishes "no immutable version yet" from "version 1", which
@@ -130,11 +132,11 @@ export function versionLabel(plan) {
   return `Version ${current}`;
 }
 
-export function planCardHtml(plan, workspaceId) {
+export function planCardHtml(plan, workspaceSlug) {
   const meta = statusMeta(plan.status);
   const action = nextActionFor(plan);
   const progress = progressSummary(plan);
-  const href = planDetailPath(workspaceId, plan.id);
+  const href = planDetailPath(workspaceSlug, plan.id);
 
   return `
     <li class="plan-card" data-plan-id="${escapeHtml(plan.id)}">
@@ -162,6 +164,7 @@ export function planCardHtml(plan, workspaceId) {
 export class WorkspacePlansPage {
   constructor(workspaceId, options = {}) {
     this.workspaceId = workspaceId;
+    this.workspaceSlug = options.workspaceSlug || workspaceId;
     this.doc = options.document || (typeof document !== 'undefined' ? document : null);
     this.fetchImpl =
       options.fetch || (typeof fetch !== 'undefined' ? fetch.bind(globalThis) : null);
@@ -260,7 +263,7 @@ export class WorkspacePlansPage {
     const list = this.el(listSelector);
     const empty = this.el(emptySelector);
     if (list) {
-      list.innerHTML = plans.map(plan => planCardHtml(plan, this.workspaceId)).join('');
+      list.innerHTML = plans.map(plan => planCardHtml(plan, this.workspaceSlug)).join('');
     }
     if (empty) empty.hidden = plans.length > 0;
   }
@@ -294,7 +297,7 @@ export class WorkspacePlansPage {
       // Creating a Plan navigates to its canonical detail route; there is one
       // full editing surface and this is not it (FR-145, FR-149).
       if (this.doc?.defaultView) {
-        this.doc.defaultView.location.href = planDetailPath(this.workspaceId, plan.id);
+        this.doc.defaultView.location.href = planDetailPath(this.workspaceSlug, plan.id);
       }
       return plan;
     } catch (error) {

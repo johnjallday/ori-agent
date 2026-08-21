@@ -23,7 +23,10 @@ test.describe('Workspace task drawer', () => {
       data: { name: `Drawer E2E ${stamp}`, description: 'drawer repro' }
     });
     expect(wsRes.ok()).toBeTruthy();
-    const workspaceId = (await wsRes.json()).folder.id as string;
+    const workspace = (await wsRes.json()).folder;
+    const workspaceId = workspace.id as string;
+    const workspaceSlug = workspace.folder_slug as string;
+    expect(workspaceSlug).toBeTruthy();
 
     const agentName = `Drawer E2E Manager ${stamp}`;
     const agentRes = await page.request.post('/api/agents', {
@@ -42,7 +45,7 @@ test.describe('Workspace task drawer', () => {
       expect(t.ok()).toBeTruthy();
     }
 
-    await page.goto(`/workspaces/${encodeURIComponent(workspaceId)}`);
+    await page.goto(`/workspaces/${encodeURIComponent(workspaceSlug)}`);
 
     // Switch to the Operations Map.
     await page.getByRole('button', { name: /^map$/i }).click();

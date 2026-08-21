@@ -2044,8 +2044,8 @@
 
   function readonlyWsRow(ws, role) {
     var nm = esc(ws.name || 'Workspace');
-    var link = ws.id
-      ? '<a href="/workspaces/' + encodeURIComponent(ws.id) + '">' + nm + '</a>'
+    var link = ws.folder_slug
+      ? '<a href="/workspaces/' + encodeURIComponent(ws.folder_slug) + '">' + nm + '</a>'
       : nm;
     var pill = ws.entry_point
       ? '<span class="ws-entry-pill">' + esc(commanderSlotLabel(role)) + '</span>'
@@ -3072,10 +3072,10 @@
         var wsLink = '';
         if (agent && Array.isArray(agent.workspaces) && agent.workspaces.length) {
           var ws = agent.workspaces[0];
-          if (ws && ws.id)
+          if (ws && ws.folder_slug)
             wsLink =
               ' <a class="bulk-dialog__wslink" href="/workspaces/' +
-              encodeURIComponent(ws.id) +
+              encodeURIComponent(ws.folder_slug) +
               '">' +
               esc(ws.name || 'workspace') +
               '</a>';

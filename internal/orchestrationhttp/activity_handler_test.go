@@ -57,7 +57,8 @@ func TestRecentActivityHandler_AggregatesSources(t *testing.T) {
 	now := time.Now().UTC()
 
 	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "WS"})
-	ws.ID = "ws-1"
+	ws.ID = "workspace-uuid"
+	ws.FolderSlug = "workspace-route"
 
 	// A completed task (timestamp = oldest)
 	completedAt := now.Add(-3 * time.Hour)
@@ -74,7 +75,7 @@ func TestRecentActivityHandler_AggregatesSources(t *testing.T) {
 	noteUpdated := now.Add(-2 * time.Hour)
 	sessionStore := &stubSessionStore{
 		notesByWorkspace: map[string][]WorkspaceNoteItem{
-			"ws-1": {{ID: "n-1", Name: "Brand Kit", UpdatedAt: noteUpdated}},
+			"workspace-uuid": {{ID: "n-1", Name: "Brand Kit", UpdatedAt: noteUpdated}},
 		},
 	}
 
@@ -82,7 +83,7 @@ func TestRecentActivityHandler_AggregatesSources(t *testing.T) {
 	bus := workspace.NewEventBus(10, 10)
 	bus.Publish(workspace.Event{
 		Type:        workspace.EventScheduledTaskTriggered,
-		WorkspaceID: "ws-1",
+		WorkspaceID: "workspace-uuid",
 		Timestamp:   now.Add(-1 * time.Hour),
 		Data:        map[string]any{"task_name": "Monday digest"},
 	})
@@ -128,8 +129,8 @@ func TestRecentActivityHandler_AggregatesSources(t *testing.T) {
 	}
 	// Workspace name propagated
 	for _, ev := range resp.Events {
-		if ev.WorkspaceName != "WS" {
-			t.Fatalf("workspace name not set on %s event", ev.Kind)
+		if ev.WorkspaceName != "WS" || ev.WorkspaceID != "workspace-uuid" || ev.WorkspaceSlug != "workspace-route" {
+			t.Fatalf("workspace identity not set on %s event: %+v", ev.Kind, ev)
 		}
 	}
 }

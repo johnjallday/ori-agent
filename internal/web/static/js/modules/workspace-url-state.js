@@ -121,26 +121,26 @@ export function resolveEffectiveMode(urlMode, localPreferenceMode, defaultMode =
  * absolute URL or another workspace's route, so it can't become an open
  * redirect vector.
  */
-export function buildReturnTarget(workspaceId, state) {
-  const id = String(workspaceId || '').trim();
-  if (!id) return '';
+export function buildReturnTarget(workspaceSlug, state) {
+  const slug = String(workspaceSlug || '').trim();
+  if (!slug) return '';
   const query = serializeWorkspaceURLState(state);
-  const path = '/workspaces/' + encodeURIComponent(id);
+  const path = '/workspaces/' + encodeURIComponent(slug);
   return query ? path + '?' + query : path;
 }
 
 /**
  * Validate a return-target string before navigating to it (FR93): must be a
- * relative, same-workspace `/workspaces/{id}` path — reject absolute URLs,
+ * relative, same-workspace `/workspaces/{slug}` path — reject absolute URLs,
  * protocol-relative (`//host`) links, and any other workspace's route.
  */
-export function isSafeReturnTarget(raw, workspaceId) {
+export function isSafeReturnTarget(raw, workspaceSlug) {
   const value = String(raw || '');
-  const id = String(workspaceId || '').trim();
-  if (!value || !id) return false;
+  const slug = String(workspaceSlug || '').trim();
+  if (!value || !slug) return false;
   if (!value.startsWith('/')) return false; // rejects absolute URLs and bare hosts
   if (value.startsWith('//')) return false; // rejects protocol-relative URLs
-  const expectedPrefix = '/workspaces/' + encodeURIComponent(id);
+  const expectedPrefix = '/workspaces/' + encodeURIComponent(slug);
   return (
     value === expectedPrefix ||
     value.startsWith(expectedPrefix + '?') ||

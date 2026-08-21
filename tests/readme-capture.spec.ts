@@ -910,10 +910,40 @@ test('captures the Workspace Map with Personal HQ and fictional workspaces', asy
 test('captures Workspace Command with agents, task state, note/file context, and mission', async ({
   page
 }) => {
+  // The page route now resolves `/workspaces/<slug>` against the real
+  // workspace store (folder-slug cutover) rather than trusting the URL
+  // token, so a synthetic ID with no backing workspace 404s. `page.request`
+  // bypasses the `**/*` fixture interception installed below and hits the
+  // real running server directly (see workspace-detail.a11y.spec.js for the
+  // same pattern), seeding one real, blank workspace whose name slugifies to
+  // the fixture's long-standing "ws-product-launch" scene id. Every other
+  // API call the scene makes still flows through the rich fixture mocks in
+  // README_SCENES -- swapping in the real UUID keeps those matches live.
+  // The capture driver runs this spec twice per refresh (determinism check),
+  // against the same live server, so reuse an already-seeded workspace
+  // instead of colliding on the folder slug the second time.
+  const existing = await page.request.get('/api/workspaces?tree=true');
+  expect(existing.ok(), 'list real workspaces for the Workspace Command scene').toBeTruthy();
+  const existingWorkspaces = ((await existing.json()).workspaces || []) as Array<{
+    id: string;
+    folder_slug?: string;
+  }>;
+  let seeded = existingWorkspaces.find(item => item.folder_slug === 'ws-product-launch');
+  if (!seeded) {
+    const created = await page.request.post('/api/workspaces', {
+      data: { name: 'Ws Product Launch', blank: true }
+    });
+    expect(created.ok(), 'seed workspace for the Workspace Command scene').toBeTruthy();
+    seeded = (await created.json()).folder;
+  }
+  expect(seeded?.id).toBeTruthy();
+  expect(seeded?.folder_slug).toBe('ws-product-launch');
+  (README_SCENES.workspace_command as { workspace_id: string }).workspace_id = seeded!.id;
+
   await captureScene(
     page,
     'workspace',
-    '/workspaces/ws-product-launch',
+    `/workspaces/${seeded!.folder_slug}`,
     '#workspaceCommandView',
     'Launch decision brief'
   );

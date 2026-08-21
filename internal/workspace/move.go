@@ -102,7 +102,7 @@ func (s *FileStore) MoveWorkspaceFolder(id, newParentID string) ([]MovedWorkspac
 	} else if existsOnDisk {
 		return nil, &FolderSlugConflictError{
 			Slug:          slug,
-			SuggestedSlug: nextAvailableWorkspaceSlug(destParentDir, slug),
+			SuggestedSlug: s.nextAvailableWorkspaceSlugLocked(destParentDir, slug),
 			ParentDir:     destParentDir,
 		}
 	}

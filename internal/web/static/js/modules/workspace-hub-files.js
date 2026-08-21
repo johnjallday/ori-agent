@@ -145,8 +145,9 @@
    */
   function openFile() {
     const state = window.WorkspaceHubState.getState();
-    if (state.selectedId) {
-      window.location.href = `/workspaces/${encodeURIComponent(state.selectedId)}/canvas`;
+    const slug = String(state.workspaceMap?.get(state.selectedId)?.folder_slug || '').trim();
+    if (slug) {
+      window.location.href = `/workspaces/${encodeURIComponent(slug)}/canvas`;
     }
   }
 

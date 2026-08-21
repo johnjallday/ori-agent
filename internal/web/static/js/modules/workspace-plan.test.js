@@ -124,7 +124,7 @@ test('versionLabel distinguishes no version, a draft version, and an approved on
   );
 });
 
-test('planDetailPath builds the canonical route and escapes its ids', () => {
+test('planDetailPath builds the canonical route from a slug and escapes its segments', () => {
   assert.equal(planDetailPath('ws-1', 'plan_1'), '/workspaces/ws-1/plans/plan_1');
   assert.equal(planDetailPath('ws 1', 'plan/1'), '/workspaces/ws%201/plans/plan%2F1');
 });
@@ -173,7 +173,7 @@ function jsonResponse(body, ok = true, status = 200) {
   };
 }
 
-test('the plans page splits active from history and hides an empty history', async () => {
+test('the plans page splits active from history and keeps UUID APIs separate from slug links', async () => {
   const elements = {
     '#plan-active-list': fakeEl(),
     '#plan-active-empty': fakeEl(),
@@ -182,10 +182,13 @@ test('the plans page splits active from history and hides an empty history', asy
     '#plan-history-section': fakeEl(),
     '#plan-status': fakeEl()
   };
+  const requestedURLs = [];
 
-  const page = new WorkspacePlansPage('ws-1', {
+  const page = new WorkspacePlansPage('workspace-uuid', {
+    workspaceSlug: 'marketing-site',
     document: fakeDocument(elements),
     fetch: async url => {
+      requestedURLs.push(url);
       if (url.includes('scope=active')) {
         return jsonResponse({ plans: [plan({ id: 'plan_a', title: 'Active plan' })] });
       }
@@ -196,6 +199,11 @@ test('the plans page splits active from history and hides an empty history', asy
   await page.reload();
 
   assert.match(elements['#plan-active-list'].innerHTML, /Active plan/);
+  assert.match(
+    elements['#plan-active-list'].innerHTML,
+    /workspaces\/marketing-site\/plans\/plan_a/
+  );
+  assert.ok(requestedURLs.every(url => url.includes('/api/workspaces/workspace-uuid/')));
   assert.equal(elements['#plan-active-empty'].hidden, true);
   assert.equal(elements['#plan-history-section'].hidden, true);
 });
