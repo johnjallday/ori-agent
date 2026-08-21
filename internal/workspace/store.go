@@ -1274,6 +1274,9 @@ func (s *FileStore) preflightImportSlugsLocked(rootPath string) error {
 	seenIDs := make(map[string]struct{})
 	var visit func(string) error
 	visit = func(folderPath string) error {
+		// #nosec G304 -- folderPath descends from rootPath, an operator-selected
+		// workspace import directory (see Import), and the filename is the fixed
+		// WorkspaceConfigFile constant.
 		data, err := os.ReadFile(filepath.Join(folderPath, WorkspaceConfigFile))
 		if err != nil {
 			return fmt.Errorf("read imported workspace metadata: %w", err)
