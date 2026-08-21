@@ -114,8 +114,11 @@ func TestFileStoreReconcilesDuplicateSlugsDeterministically(t *testing.T) {
 		t.Fatalf("restart NewFileStore: %v", err)
 	}
 	defer func() { _ = restarted.Close() }()
-	if _, err := restarted.ResolveSlug("reports-3"); err != nil {
-		t.Fatalf("migration was not restart-idempotent: %v", err)
+	if resolved, err := restarted.ResolveSlug("reports-3"); err != nil || resolved.ID != "reports-b" {
+		t.Fatalf("migration was not restart-idempotent: resolved=%#v err=%v", resolved, err)
+	}
+	if _, err := restarted.ResolveSlug("reports-b"); !errors.Is(err, ErrWorkspaceSlugNotFound) {
+		t.Fatalf("UUID-like browser token resolved after migration: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(root, "b-group", SubWorkspacesDir, "reports-4")); !os.IsNotExist(err) {
 		t.Fatalf("restart added another suffix, stat error = %v", err)

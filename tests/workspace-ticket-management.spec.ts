@@ -50,7 +50,7 @@ async function workspaceSlug(request: APIRequestContext, studioId: string): Prom
   const response = await request.get(`/api/workspaces/${studioId}`);
   expect(response.ok()).toBeTruthy();
   const body = await response.json();
-  return body.folder?.folder_slug || body.workspace?.folder_slug;
+  return body.folder_slug || body.folder?.folder_slug || body.workspace?.folder_slug;
 }
 
 /** The workspace page auto-opens modals that swallow clicks; clear them. */

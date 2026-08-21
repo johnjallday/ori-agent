@@ -1984,7 +1984,10 @@ test.describe('Floating Workspace Assistant', () => {
     await suppressEntryAgentPrompt(page, workspaceId);
     const workspaceResp = await page.request.get(`/api/workspaces/${workspaceId}`);
     const workspaceData = await workspaceResp.json();
-    const workspaceSlug = workspaceData.folder?.folder_slug || workspaceData.workspace?.folder_slug;
+    const workspaceSlug =
+      workspaceData.folder_slug ||
+      workspaceData.folder?.folder_slug ||
+      workspaceData.workspace?.folder_slug;
     expect(workspaceSlug).toBeTruthy();
     await page.goto(`/workspaces/${workspaceSlug}`);
     await expect(page.locator('#workspaceCommandView')).toBeVisible();
@@ -2190,7 +2193,10 @@ test.describe('Floating Workspace Assistant', () => {
     workspaceId = await createTemporaryWorkspace(request, 'Playwright Inline Assistant Regression');
     const workspaceResp = await request.get(`/api/workspaces/${workspaceId}`);
     const workspaceData = await workspaceResp.json();
-    const workspaceSlug = workspaceData.folder?.folder_slug || workspaceData.workspace?.folder_slug;
+    const workspaceSlug =
+      workspaceData.folder_slug ||
+      workspaceData.folder?.folder_slug ||
+      workspaceData.workspace?.folder_slug;
     expect(workspaceSlug).toBeTruthy();
 
     try {

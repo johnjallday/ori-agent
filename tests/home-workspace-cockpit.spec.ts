@@ -575,7 +575,10 @@ test.describe('Home workspace cockpit', () => {
     const id = await ensureWorkspace(page);
     const workspaceResponse = await page.request.get(`/api/workspaces/${id}`);
     const workspacePayload = await workspaceResponse.json();
-    const slug = workspacePayload.folder?.folder_slug || workspacePayload.workspace?.folder_slug;
+    const slug =
+      workspacePayload.folder_slug ||
+      workspacePayload.folder?.folder_slug ||
+      workspacePayload.workspace?.folder_slug;
     expect(slug).toBeTruthy();
     await page.goto('/');
     const site = page.locator(`.ws-map-tile[data-ws-id="${id}"]`);

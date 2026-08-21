@@ -26,11 +26,28 @@ for (const theme of ['light', 'dark']) {
     const workspacesResponse = await page.request.get(`${baseUrl}/api/workspaces?tree=true`);
     expect(workspacesResponse.ok()).toBeTruthy();
     const workspaceData = await workspacesResponse.json();
-    const workspace = workspaceData.workspaces?.find(
+    let workspace = workspaceData.workspaces?.find(
       candidate => candidate.kind === 'workspace' && candidate.agent_count > 0
     );
-    const workspaceId = workspace?.id;
-    const workspaceSlug = workspace?.folder_slug;
+    if (!workspace) {
+      const stamp = Date.now();
+      const created = await page.request.post(`${baseUrl}/api/workspaces`, {
+        data: { name: `Accessibility Workspace ${stamp}`, blank: true }
+      });
+      expect(created.ok()).toBeTruthy();
+      workspace = (await created.json()).folder;
+      const agentName = `Accessibility Manager ${stamp}`;
+      const agent = await page.request.post(`${baseUrl}/api/agents`, {
+        data: { name: agentName, type: 'general' }
+      });
+      expect(agent.ok()).toBeTruthy();
+      const attached = await page.request.post(`${baseUrl}/api/workspaces/${workspace.id}/agents`, {
+        data: { agent_name: agentName }
+      });
+      expect(attached.ok()).toBeTruthy();
+    }
+    const workspaceId = workspace.id;
+    const workspaceSlug = workspace.folder_slug;
     expect(workspaceId).toBeTruthy();
     expect(workspaceSlug).toBeTruthy();
 
