@@ -885,7 +885,7 @@ func (h *Handler) globalWorkspaceSlugConflict(ctx context.Context, requestedSlug
 			continue
 		}
 		if parentDir != "" {
-			// #nosec G304 -- candidate is Slugify/WorkspaceSlugWithSuffix output
+			// #nosec G304 G703 -- candidate is Slugify/WorkspaceSlugWithSuffix output
 			// (charset restricted to [a-z0-9-]), and parentDir is a server-resolved
 			// workspace directory, not raw user input.
 			if _, err := os.Stat(filepath.Join(parentDir, candidate)); err == nil || !os.IsNotExist(err) {
