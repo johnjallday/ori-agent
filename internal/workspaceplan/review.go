@@ -34,6 +34,10 @@ type ReviewInput struct {
 	// plan naming an agent that has since disappeared cannot reach review
 	// (FR-48).
 	Validation ValidationContext
+	// Artifacts is the compiled output policy applied before the immutable
+	// version is hashed. The review therefore shows the exact canonical files
+	// approval will write.
+	Artifacts ArtifactPolicy
 	// Intent classifies a version derived from already-approved work (FR-39).
 	Intent RevisionIntent
 }
@@ -57,7 +61,11 @@ func (s *Service) RequestReview(ctx context.Context, workspaceID, planID string,
 			ErrValidation, len(open))
 	}
 
-	if result := ValidatePlanContent(plan.Objective, plan.Draft, input.Validation); !result.OK() {
+	content, err := ApplyArtifactPolicy(plan, plan.Draft, input.Artifacts)
+	if err != nil {
+		return nil, err
+	}
+	if result := ValidatePlanContent(plan.Objective, content, input.Validation); !result.OK() {
 		return nil, result.Error()
 	}
 
@@ -75,7 +83,7 @@ func (s *Service) RequestReview(ctx context.Context, workspaceID, planID string,
 			ErrLimitExceeded, len(existing))
 	}
 
-	hash, err := ContentHash(plan.Objective, plan.Draft, input.Policy)
+	hash, err := ContentHash(plan.Objective, content, input.Policy)
 	if err != nil {
 		return nil, err
 	}
@@ -86,7 +94,7 @@ func (s *Service) RequestReview(ctx context.Context, workspaceID, planID string,
 		WorkspaceID:    plan.WorkspaceID,
 		Title:          plan.Title,
 		Objective:      plan.Objective,
-		Content:        plan.Draft,
+		Content:        content,
 		ContentHash:    hash,
 		PolicySnapshot: input.Policy,
 		Intent:         orDefaultIntent(input.Intent, plan.DraftIntent),

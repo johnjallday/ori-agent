@@ -53,6 +53,11 @@ The shell only validates arguments and resolves the exact `dev` worktree; the
 Go helper (`wt herd issue-plan`) does the GitHub read, eligibility checks,
 identity resolution, rendering, confirmation, writes, and the Herdr calls.
 
+The bootstrap prompt and size-routed starter carry only Issue-specific paths and
+state. Planning workflow lives once in
+`.agents/skills/task-planning/SKILL.md`, which Pi discovers directly; the
+planner runs its planning-only mode and stops after replacing the starter.
+
 **Planner sessions are not feature handoffs.** They are stored separately from
 `BridgeState.Features`, keyed by repository plus Issue *number* — the one part
 of an Issue that cannot change. That separation is the point:

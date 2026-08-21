@@ -46,6 +46,21 @@ func (r *Resolver) Capabilities(ctx context.Context, workspaceID string) workspa
 	return caps
 }
 
+// CodeFolder returns the workspace directory that contains the user's project
+// files. Planning artifacts use the same root repository inspection checks, so
+// an approved software Plan writes beside the code that `wt start` will read
+// rather than into Ori's private workspace metadata folder.
+func (r *Resolver) CodeFolder(workspaceID string) string {
+	if r == nil || r.store == nil {
+		return ""
+	}
+	ws, err := r.store.Get(workspaceID)
+	if err != nil || ws == nil {
+		return ""
+	}
+	return r.codeFolder(ws)
+}
+
 // codeFolder returns the directory whose version control matters.
 //
 // A workspace folder under the workspaces root is Ori's own storage; it is

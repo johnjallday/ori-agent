@@ -1689,6 +1689,14 @@ materialization **replays** the original result rather than doing the work
 twice. Task IDs are deterministic, so a crash mid-materialization is safe to
 retry.
 
+For software-project workspaces, compiled artifact policy replaces model-chosen
+PRD/task-list paths with stable repository paths derived from the Plan's
+immutable request and ID: `<tasks_dir>/prd-<feature>.md` and
+`<tasks_dir>/tasks-<feature>.md`. When that project is Ori's `dev` worktree, the
+materialization response also includes a `handoff` (`kind`, `feature`,
+`command`). The command enters `wt start` directly; the approved task list is
+already complete, so callers must not run `wt plan` again.
+
 Maximum 50 review versions per Plan. The 51st is refused with split/supersede
 guidance — history is never evicted.
 
@@ -1748,11 +1756,15 @@ GET    /api/workspaces/{workspaceID}/planning-policy[?preset=<name>]
 GET    /api/workspaces/{workspaceID}/plan-diagnostics
 ```
 
-`planning-policy` splits into two groups, and the split is a truth claim:
+`planning-policy` separates advisory guidance, compiled artifact outputs, and
+enforced controls; those boundaries are truth claims:
 
 - **`guidance`** — style, clarification depth, preferred artifacts, tone. These
   are *asked* of the planner. Nothing verifies them, and the UI must not
   describe them with "required", "guaranteed", or "will".
+- **`artifacts`** — compiled output directory and PRD/task-list write choices.
+  These values are applied to Plan content before review; they are not merely
+  requested from the model.
 - **`enforced`** — each control names a compiled adapter that actually runs.
   Every one reports `enabled` (the user's setting) and `available` (whether
   this workspace can honor it) as **separate facts**, plus a machine-readable

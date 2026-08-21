@@ -121,7 +121,8 @@ type GuidanceInput struct {
 	// MaxQuestionsPerRound is enforced by the application after generation,
 	// not merely requested of the model (FR-27).
 	MaxQuestionsPerRound int
-	// PreferredArtifacts names the artifact kinds the workspace wants.
+	// PreferredArtifacts names optional model-proposed outputs. Canonical PRD
+	// and task-list exports are compiled separately through ArtifactPolicy.
 	PreferredArtifacts []string
 	// DetailLevel is a free-form preference such as "concise".
 	DetailLevel string
@@ -319,6 +320,7 @@ func draftSystemPrompt(input GenerationInput) string {
 	b.WriteString("- Reuse an existing id exactly when you revise that element; omit the id for new elements.\n")
 	b.WriteString("- Never claim an agent, capability, tool, or output type that is not listed as available.\n")
 	b.WriteString("- Leave `assignee` empty rather than guessing. An unassigned item becomes an unassigned task.\n")
+	b.WriteString("- Do not propose `prd` or `task_list` artifacts. The application exports those from the approved typed Plan.\n")
 	b.WriteString("- You are proposing work. You cannot approve it, create tasks, or start execution.\n")
 
 	if style := strings.TrimSpace(input.Guidance.Style); style != "" {

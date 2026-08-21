@@ -84,6 +84,9 @@ type Materializer struct {
 	// if it were a first approval, because materializing it that way would
 	// duplicate every retained Task (FR-76).
 	reconciler *Reconciler
+	// handoff resolves an optional repository-native implementation command
+	// after canonical artifacts exist. It never executes the command.
+	handoff HandoffResolver
 }
 
 // NewMaterializer returns a materializer over the given services.
@@ -117,6 +120,16 @@ func WithArtifactRenderer(renderer ArtifactRenderer) MaterializerOption {
 // WithReconciler attaches revision reconciliation.
 func WithReconciler(reconciler *Reconciler) MaterializerOption {
 	return func(m *Materializer) { m.reconciler = reconciler }
+}
+
+// HandoffResolver recognizes when an approved artifact set can enter a
+// repository-native implementation workflow. It returns metadata only;
+// materialization never starts a shell command or agent on its own.
+type HandoffResolver func(workspaceID string, plan *Plan, artifactPaths []string) *ImplementationHandoff
+
+// WithHandoffResolver attaches repository handoff discovery.
+func WithHandoffResolver(resolve HandoffResolver) MaterializerOption {
+	return func(m *Materializer) { m.handoff = resolve }
 }
 
 // authorizeRevision decides whether a version that revises approved work may
@@ -183,6 +196,12 @@ type MaterializeInput struct {
 }
 
 // MaterializeResult reports what an approval produced.
+type ImplementationHandoff struct {
+	Kind    string `json:"kind"`
+	Feature string `json:"feature"`
+	Command string `json:"command"`
+}
+
 type MaterializeResult struct {
 	PlanID  string   `json:"plan_id"`
 	Version int      `json:"plan_version"`
@@ -205,6 +224,9 @@ type MaterializeResult struct {
 	// materialized but could not begin — it never looks like it started.
 	Launched     bool   `json:"launched"`
 	LaunchReason string `json:"launch_reason,omitempty"`
+	// Handoff is present only when the written artifacts are already a complete
+	// input to a repository-native implementation workflow such as `wt start`.
+	Handoff *ImplementationHandoff `json:"handoff,omitempty"`
 }
 
 // Materialize spends an approval and creates the work it authorized.
@@ -223,7 +245,7 @@ func (m *Materializer) Materialize(ctx context.Context, workspaceID, planID stri
 	// 1. Replay. An approval already spent returns what it produced, so a
 	//    retried request is answered rather than repeated (FR-72, FR-73).
 	if approval.Consumed() {
-		return replayResult(plan, approval), nil
+		return m.replayResult(plan, approval), nil
 	}
 	if approval.Invalidated() {
 		return nil, fmt.Errorf("%w: this approval was invalidated (%s)",
@@ -317,11 +339,15 @@ func (m *Materializer) Materialize(ctx context.Context, workspaceID, planID stri
 	// 10. Consume. This is the mutual exclusion: two callers reaching here both
 	//    issue the conditional update, exactly one wins, and the loser replays
 	//    the winner's result (FR-72, FR-178).
+	artifactPaths := pathsOf(staged)
+	handoff := m.resolveHandoff(plan, artifactPaths, approval.Effect.StartsExecution())
 	result := ApprovalResult{
-		TaskIDs:       taskIDs,
-		ArtifactPaths: pathsOf(staged),
-		Started:       approval.Effect.StartsExecution(),
-		CompletedAt:   now,
+		TaskIDs:         taskIDs,
+		ArtifactPaths:   artifactPaths,
+		Handoff:         handoff,
+		HandoffResolved: true,
+		Started:         approval.Effect.StartsExecution(),
+		CompletedAt:     now,
 	}
 	if err := store.ConsumeApproval(ctx, workspaceID, planID, approval.ID, result, now); err != nil {
 		if errors.Is(err, ErrApprovalConsumed) {
@@ -332,7 +358,7 @@ func (m *Materializer) Materialize(ctx context.Context, workspaceID, planID stri
 			if getErr != nil {
 				return nil, getErr
 			}
-			return replayResult(plan, winner), nil
+			return m.replayResult(plan, winner), nil
 		}
 		return nil, err
 	}
@@ -347,13 +373,14 @@ func (m *Materializer) Materialize(ctx context.Context, workspaceID, planID stri
 		PlanID:         plan.ID,
 		Version:        version.Number,
 		TaskIDs:        taskIDs,
-		ArtifactPaths:  pathsOf(staged),
+		ArtifactPaths:  artifactPaths,
 		StartExecution: approval.Effect.StartsExecution(),
 		Actor:          approval.UserName,
+		Handoff:        handoff,
 	}, nil
 }
 
-func replayResult(plan *Plan, approval *Approval) *MaterializeResult {
+func (m *Materializer) replayResult(plan *Plan, approval *Approval) *MaterializeResult {
 	result := &MaterializeResult{
 		PlanID:         plan.ID,
 		Version:        approval.Version,
@@ -364,8 +391,24 @@ func replayResult(plan *Plan, approval *Approval) *MaterializeResult {
 	if approval.ConsumedResult != nil {
 		result.TaskIDs = approval.ConsumedResult.TaskIDs
 		result.ArtifactPaths = approval.ConsumedResult.ArtifactPaths
+		result.Handoff = approval.ConsumedResult.Handoff
+		if !approval.ConsumedResult.HandoffResolved {
+			// Backfill handoff metadata for approvals consumed before that field
+			// was persisted. New approvals replay the exact stored value, including
+			// a deliberate nil result outside the dev worktree.
+			result.Handoff = m.resolveHandoff(plan, result.ArtifactPaths, approval.Effect.StartsExecution())
+		}
 	}
 	return result
+}
+
+func (m *Materializer) resolveHandoff(plan *Plan, artifactPaths []string, startsExecution bool) *ImplementationHandoff {
+	// Automatic Ori execution and an external repository handoff are mutually
+	// exclusive. Offering both would start the same approved work twice.
+	if startsExecution || m.handoff == nil || plan == nil {
+		return nil
+	}
+	return m.handoff(plan.WorkspaceID, plan, artifactPaths)
 }
 
 // commitTasks writes the compiled tree through workspace.AddTasks.

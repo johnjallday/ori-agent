@@ -22,7 +22,12 @@ func TestDraftWritesGeneratedContentForAClearRequest(t *testing.T) {
 	service, _ := newDraftingService(t, model)
 	plan := mustCreatePlan(t, ctx, service)
 
-	drafted, err := service.Draft(ctx, "ws-1", plan.ID, DraftingOptions{Actor: "jj"})
+	drafted, err := service.Draft(ctx, "ws-1", plan.ID, DraftingOptions{
+		Actor: "jj",
+		Artifacts: ArtifactPolicy{
+			Apply: true, Directory: "tasks", WritePRD: true, WriteTaskList: true,
+		},
+	})
 	if err != nil {
 		t.Fatalf("draft: %v", err)
 	}
@@ -34,6 +39,9 @@ func TestDraftWritesGeneratedContentForAClearRequest(t *testing.T) {
 	}
 	if len(drafted.Draft.Groups) != 1 {
 		t.Fatalf("groups = %d, want 1", len(drafted.Draft.Groups))
+	}
+	if len(drafted.Draft.Artifacts) != 2 || !drafted.Draft.Artifacts[0].Enabled || !drafted.Draft.Artifacts[1].Enabled {
+		t.Fatalf("draft did not apply compiled planning outputs: %#v", drafted.Draft.Artifacts)
 	}
 	// Drafting creates no work and authorizes nothing (FR-20).
 	if drafted.ApprovedVersion != 0 || len(drafted.TaskLinks) != 0 {

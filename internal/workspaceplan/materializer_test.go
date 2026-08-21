@@ -446,10 +446,17 @@ func TestMaterializeWritesEnabledArtifactsOnly(t *testing.T) {
 	}
 	// The task breakdown belongs to the task-list artifact, not the PRD.
 	taskList := string(artifacts.written["tasks/tasks-migration.md"])
-	for _, want := range []string{"Snapshot staging", "Verify checksums", "builder"} {
+	for _, want := range []string{
+		"## Relevant Files", "## Instructions for Completing Tasks", "## Tasks",
+		"- [ ] 1.0 Prepare", "- [ ] 1.1 Snapshot staging", "Verify checksums", "builder",
+		"Do not run `wt plan` again", "ready for `wt start`",
+	} {
 		if !strings.Contains(taskList, want) {
 			t.Errorf("task list omits %q", want)
 		}
+	}
+	if strings.Contains(taskList, "ori-devflow: planning-starter") {
+		t.Error("approved task list was mistaken for a planning starter")
 	}
 
 	// Both say plainly that editing them does not change the plan, because a
@@ -779,5 +786,44 @@ func TestMaterializeCompilesGroupDependencies(t *testing.T) {
 	}
 	if len(cutOver.InputTaskIDs) != 1 || cutOver.InputTaskIDs[0] != prepare.ID {
 		t.Errorf("group dependency did not compile: %+v", cutOver.InputTaskIDs)
+	}
+}
+
+func TestMaterializeReturnsRepositoryHandoffAndReplaysIt(t *testing.T) {
+	ctx := context.Background()
+	content := contentWithArtifacts()
+	artifacts := newFakeArtifactWriter()
+	service, materializer, _, plan, approval := materializable(t, ctx, content,
+		WithArtifactWriter(artifacts),
+		WithHandoffResolver(func(_ string, plan *Plan, paths []string) *ImplementationHandoff {
+			if len(paths) == 0 {
+				return nil
+			}
+			feature := PlanFeatureSlug(plan)
+			return &ImplementationHandoff{Kind: "wt", Feature: feature, Command: "wt start " + feature}
+		}),
+	)
+
+	result, err := materializer.Materialize(ctx, "ws-1", plan.ID, MaterializeInput{ApprovalID: approval.ID})
+	if err != nil {
+		t.Fatalf("materialize: %v", err)
+	}
+	if result.Handoff == nil || result.Handoff.Kind != "wt" || !strings.HasPrefix(result.Handoff.Command, "wt start ") {
+		t.Fatalf("handoff = %#v", result.Handoff)
+	}
+	if got := materializer.resolveHandoff(plan, result.ArtifactPaths, true); got != nil {
+		t.Fatalf("automatic Ori execution also offered an external handoff: %#v", got)
+	}
+
+	stored, err := service.Store().GetApproval(ctx, "ws-1", plan.ID, approval.ID)
+	if err != nil {
+		t.Fatalf("get consumed approval: %v", err)
+	}
+	if stored.ConsumedResult == nil || !stored.ConsumedResult.HandoffResolved || stored.ConsumedResult.Handoff == nil {
+		t.Fatalf("consumed approval did not persist handoff resolution: %#v", stored.ConsumedResult)
+	}
+	replayed := materializer.replayResult(plan, stored)
+	if !replayed.Replayed || replayed.Handoff == nil || replayed.Handoff.Command != result.Handoff.Command {
+		t.Fatalf("replayed handoff = %#v, first = %#v", replayed.Handoff, result.Handoff)
 	}
 }

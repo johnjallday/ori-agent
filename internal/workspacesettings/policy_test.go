@@ -91,10 +91,13 @@ func TestResearchDefaultsAreInvestigative(t *testing.T) {
 			t.Errorf("Research prefers software artifacts: %v", policy.Guidance.PreferredArtifacts)
 		}
 	}
+	if policy.Artifacts.WritePRD || policy.Artifacts.WriteTaskList {
+		t.Errorf("Research enabled software artifact writes: %+v", policy.Artifacts)
+	}
 }
 
 // Software Project keeps Planner as its default: planning on, repository
-// inspection on, PRD and task list preferred, and step-through execution.
+// inspection on, compiled PRD/task-list exports, and step-through execution.
 func TestSoftwareProjectDefaultsToPlanner(t *testing.T) {
 	policy := policyFor(t, "software_project", "", inRepo)
 
@@ -109,8 +112,11 @@ func TestSoftwareProjectDefaultsToPlanner(t *testing.T) {
 	}
 
 	artifacts := strings.Join(policy.Guidance.PreferredArtifacts, ",")
-	if !strings.Contains(artifacts, "prd") || !strings.Contains(artifacts, "task_list") {
-		t.Errorf("preferred artifacts = %v, want a PRD and a task list", policy.Guidance.PreferredArtifacts)
+	if strings.Contains(artifacts, "prd") || strings.Contains(artifacts, "task_list") {
+		t.Errorf("model guidance still asks for app-owned planning files: %v", policy.Guidance.PreferredArtifacts)
+	}
+	if policy.Artifacts.Directory != "tasks" || !policy.Artifacts.WritePRD || !policy.Artifacts.WriteTaskList {
+		t.Errorf("compiled artifact output = %+v, want canonical tasks directory with both files", policy.Artifacts)
 	}
 
 	mode := control(t, policy, ControlExecutionMode)

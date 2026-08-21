@@ -64,8 +64,11 @@ export function materializedMessage(result) {
   const next = result?.start_execution
     ? 'Eligible tasks will start automatically.'
     : 'Nothing starts until you start it.';
+  const handoff = result?.handoff?.command
+    ? ` Planning is complete; run “${result.handoff.command}”. Do not run wt plan again.`
+    : '';
 
-  return `${withFiles}. ${next}`;
+  return `${withFiles}. ${next}${handoff}`;
 }
 
 // approvalButtonLabel returns the exact wording the primary action must carry.
@@ -797,9 +800,12 @@ export class WorkspacePlanPage {
         const files = state.artifact_paths?.length
           ? ` and ${state.artifact_paths.length} file(s)`
           : '';
+        const handoff = state.handoff?.command
+          ? ` Planning is complete; run “${state.handoff.command}”. Do not run wt plan again.`
+          : '';
         summary.textContent = state.replayed
-          ? `This approval had already been used. It created ${state.task_ids.length} task(s)${files}.`
-          : `Created ${state.task_ids.length} task(s)${files}.`;
+          ? `This approval had already been used. It created ${state.task_ids.length} task(s)${files}.${handoff}`
+          : `Created ${state.task_ids.length} task(s)${files}.${handoff}`;
       }
     }
 

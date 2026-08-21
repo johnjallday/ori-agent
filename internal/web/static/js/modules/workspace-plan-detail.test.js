@@ -660,6 +660,15 @@ test('the materialization message says what was created and what happens next', 
     materializedMessage({ task_ids: ['a'], replayed: true }),
     /^This approval was already used\. It created 1 task\(s\)\./
   );
+  assert.equal(
+    materializedMessage({
+      task_ids: ['a'],
+      artifact_paths: ['tasks/tasks-demo.md'],
+      start_execution: false,
+      handoff: { kind: 'wt', feature: 'demo', command: 'source scripts/wt.sh && wt start demo' }
+    }),
+    'Created 1 task(s) and 1 file(s). Nothing starts until you start it. Planning is complete; run “source scripts/wt.sh && wt start demo”. Do not run wt plan again.'
+  );
 });
 
 test('an auto approval says work will start', async () => {
@@ -787,7 +796,8 @@ test('materializing reports the work it created and links to it', async () => {
       return jsonResponse({
         task_ids: ['task-a', 'task-b'],
         artifact_paths: ['tasks/prd.md'],
-        replayed: false
+        replayed: false,
+        handoff: { kind: 'wt', feature: 'demo', command: 'source scripts/wt.sh && wt start demo' }
       });
     }
     if (url.endsWith('/activity')) return jsonResponse({ activity: [] });
@@ -799,6 +809,10 @@ test('materializing reports the work it created and links to it', async () => {
   assert.equal(doc.elements['#plan-materialization-panel'].hidden, false);
   assert.match(doc.elements['#plan-materialization-summary'].textContent, /Created 2 task\(s\)/);
   assert.match(doc.elements['#plan-materialization-summary'].textContent, /1 file\(s\)/);
+  assert.match(
+    doc.elements['#plan-materialization-summary'].textContent,
+    /Do not run wt plan again/
+  );
   // It links to the tasks rather than restating their state (FR-11).
   assert.match(
     doc.elements['#plan-materialization-tasks'].innerHTML,

@@ -31,9 +31,19 @@ type EffectivePolicy struct {
 	// PlanningEnabled gates structured planning entirely. A workspace with it
 	// off still has its existing Plans and can read them; it just does not
 	// recommend or create new ones (FR-130, FR-132, FR-138).
-	PlanningEnabled bool              `json:"planning_enabled"`
-	Guidance        GuidancePolicy    `json:"guidance"`
-	Enforced        []EnforcedControl `json:"enforced"`
+	PlanningEnabled bool                 `json:"planning_enabled"`
+	Guidance        GuidancePolicy       `json:"guidance"`
+	Artifacts       ArtifactOutputPolicy `json:"artifacts"`
+	Enforced        []EnforcedControl    `json:"enforced"`
+}
+
+// ArtifactOutputPolicy is compiled output behavior, not model guidance. The
+// planning lifecycle uses it to force canonical repository paths and enabled
+// writes before a version reaches review.
+type ArtifactOutputPolicy struct {
+	Directory     string `json:"directory"`
+	WritePRD      bool   `json:"write_prd"`
+	WriteTaskList bool   `json:"write_task_list"`
 }
 
 // GuidancePolicy is advisory. Every field here is a request to the model, and
@@ -44,9 +54,8 @@ type GuidancePolicy struct {
 	Style string `json:"style"`
 	// ClarificationDepth is "minimal", "standard", or "deep".
 	ClarificationDepth string `json:"clarification_depth"`
-	// PreferredArtifacts names the artifact kinds the workspace would like.
-	// Whether they are actually written is an ENFORCED question, answered by
-	// the artifact_write control — this field only says what to propose.
+	// PreferredArtifacts names optional artifact kinds the model may propose.
+	// App-owned PRD/task-list exports live in ArtifactOutputPolicy instead.
 	PreferredArtifacts []string `json:"preferred_artifacts"`
 	// DetailLevel and Tone shape prose, and nothing verifies either.
 	DetailLevel string `json:"detail_level"`
@@ -148,22 +157,22 @@ func BuildEffectivePolicy(settings Settings, caps WorkspaceCapabilities) Effecti
 			DetailLevel:        detailLevelFor(settings),
 			Tone:               toneFor(settings),
 		},
+		Artifacts: ArtifactOutputPolicy{
+			Directory:     settings.Planning.TasksDir,
+			WritePRD:      settings.Planning.Enabled && settings.Planning.WritePRD,
+			WriteTaskList: settings.Planning.Enabled && settings.Planning.WriteTaskList,
+		},
 	}
 	policy.Enforced = enforcedControls(settings, caps)
 	return policy
 }
 
-// preferredArtifacts lists the artifact kinds the workspace would like a plan
-// to propose. It is guidance: whether they are written is the artifact_write
-// control's business.
+// preferredArtifacts lists optional artifacts the model may propose. PRDs and
+// task lists are deliberately absent: compiled ArtifactOutputPolicy exports
+// those from the approved typed Plan, so asking the model to propose a second
+// copy would recreate the overlap this boundary removes.
 func preferredArtifacts(settings Settings) []string {
 	artifacts := []string{}
-	if settings.Planning.WritePRD {
-		artifacts = append(artifacts, "prd")
-	}
-	if settings.Planning.WriteTaskList {
-		artifacts = append(artifacts, "task_list")
-	}
 	if settings.Workflow.SaveOutputsAsNotes {
 		artifacts = append(artifacts, "note")
 	}
@@ -254,7 +263,7 @@ func enforcedControls(settings Settings, caps WorkspaceCapabilities) []EnforcedC
 			Key:   ControlArtifactWrite,
 			Label: "Write planning documents",
 			Description: "Approved plans render their documents into the " +
-				"workspace, checked to stay inside it.",
+				"workspace or linked project, checked to stay inside the selected root.",
 			Enabled:   settings.Planning.WritePRD || settings.Planning.WriteTaskList,
 			Available: caps.HasFolder,
 		},

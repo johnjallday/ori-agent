@@ -1167,9 +1167,13 @@ rg -Fq '`code`' "$snapshot_path"
 rg -Fq '$(rm -rf /)' "$snapshot_path"
 rg -Fq -- '--leading-dash' "$snapshot_path"
 rg -q "ori-devflow: planning-starter" "$starter_path"
-rg -q '1\.1 Read `AGENTS.md`' "$starter_path"
-rg -q 'Wait for "Go"' "$starter_path"
-rg -q 'Do not start implementing' "$starter_path"
+rg -q '1\.1 Read the canonical planning skill' "$starter_path"
+rg -q '\.agents/skills/task-planning/SKILL\.md' "$starter_path"
+rg -q 'planning-only mode' "$starter_path"
+if rg -q 'Wait for "Go"|vertical slices|Permission sweep' "$starter_path"; then
+  print -r -- "the starter duplicated workflow from the canonical planning skill" >&2
+  exit 1
+fi
 
 # Idempotent rerun: neither file's content changes, and the command still
 # reports readiness rather than erroring on an already-planned Issue.
@@ -1212,12 +1216,13 @@ if [[ -e "$issue_dev/tasks" ]] && [[ "$(ls "$issue_dev/tasks" | wc -l | tr -d ' 
   exit 1
 fi
 
-# size:prd routes to a PRD-first starter that asks clarifying questions
-# before generating tasks, rather than the tasks-first starter above.
+# size:prd routes to the canonical skill's PRD-first workflow and names the
+# expected output path, rather than restating that workflow in the starter.
 FAKE_GH_LABELS="backlog,size:prd" issue_plan_direct 105 > /dev/null
 prd_starter="$issue_dev/tasks/tasks-105-ready-issue-codex-planning.md"
 [[ -f "$prd_starter" ]]
-rg -q 'Ask only the 3-5' "$prd_starter"
+rg -q 'canonical planning skill' "$prd_starter"
+rg -q 'planning-only mode' "$prd_starter"
 rg -q 'tasks/prd-105-ready-issue-codex-planning.md' "$prd_starter"
 
 # The remaining Herdr-free commands mutate Git or GitHub, so they are asserted

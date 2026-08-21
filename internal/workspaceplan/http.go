@@ -28,6 +28,7 @@ type Handler struct {
 	// no workspace-specific guidance and no assignment checking.
 	resolveGuidance     GuidanceResolver
 	resolveAvailability AvailabilityResolver
+	resolveArtifacts    ArtifactPolicyResolver
 	// materializer spends approvals. It is optional so the API still serves
 	// reads and drafting in a build with no task store wired.
 	materializer *Materializer
@@ -51,6 +52,11 @@ type GuidanceResolver func(ctx context.Context, workspaceID string) GuidanceInpu
 // has, so the planner is never asked to guess (FR-46).
 type AvailabilityResolver func(ctx context.Context, workspaceID string) ValidationContext
 
+// ArtifactPolicyResolver returns the compiled file-output policy. It is kept
+// separate from GuidanceResolver because canonical paths and enabled writes are
+// applied by code rather than requested from the model.
+type ArtifactPolicyResolver func(ctx context.Context, workspaceID string) ArtifactPolicy
+
 // PolicyResolver returns the ENFORCED half of a workspace's planning policy as
 // it stands right now.
 //
@@ -72,6 +78,11 @@ func (h *Handler) SetGuidanceResolver(resolve GuidanceResolver) { h.resolveGuida
 // SetAvailabilityResolver attaches the workspace agent/capability lookup.
 func (h *Handler) SetAvailabilityResolver(resolve AvailabilityResolver) {
 	h.resolveAvailability = resolve
+}
+
+// SetArtifactPolicyResolver attaches the compiled planning-output lookup.
+func (h *Handler) SetArtifactPolicyResolver(resolve ArtifactPolicyResolver) {
+	h.resolveArtifacts = resolve
 }
 
 // SetMaterializer attaches the service that spends approvals.
@@ -497,6 +508,7 @@ func (h *Handler) GenerateDraft(w http.ResponseWriter, r *http.Request) {
 		ExpectedRevision:   req.Revision,
 		Guidance:           h.guidance(r.Context(), workspaceID),
 		Validation:         h.availability(r.Context(), workspaceID),
+		Artifacts:          h.artifacts(r.Context(), workspaceID),
 	})
 	if err != nil {
 		writeGenerationError(w, err)
@@ -566,6 +578,7 @@ func (h *Handler) PlanVersions(w http.ResponseWriter, r *http.Request) {
 			Actor:      req.Actor,
 			Intent:     RevisionIntent(strings.TrimSpace(req.Intent)),
 			Validation: h.availability(r.Context(), workspaceID),
+			Artifacts:  h.artifacts(r.Context(), workspaceID),
 			// The enforced policy is snapshotted onto the version here, at the
 			// moment it becomes immutable. Later settings changes do not reach
 			// back into it: a plan approved under one policy keeps behaving
@@ -1040,6 +1053,13 @@ func (h *Handler) availability(ctx context.Context, workspaceID string) Validati
 		return ValidationContext{}
 	}
 	return h.resolveAvailability(ctx, workspaceID)
+}
+
+func (h *Handler) artifacts(ctx context.Context, workspaceID string) ArtifactPolicy {
+	if h.resolveArtifacts == nil {
+		return ArtifactPolicy{}
+	}
+	return h.resolveArtifacts(ctx, workspaceID)
 }
 
 // --- Execution (FR-100 through FR-121) -------------------------------------

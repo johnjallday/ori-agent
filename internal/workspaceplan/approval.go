@@ -88,6 +88,10 @@ type ApprovalResult struct {
 	TaskIDs []string `json:"task_ids,omitempty"`
 	// ArtifactPaths are the workspace-relative paths written.
 	ArtifactPaths []string `json:"artifact_paths,omitempty"`
+	// Handoff is the repository-native implementation entry point recognized
+	// when the approval was consumed. Persisting it keeps retries identical.
+	Handoff         *ImplementationHandoff `json:"handoff,omitempty"`
+	HandoffResolved bool                   `json:"handoff_resolved,omitempty"`
 	// Started reports whether automatic dispatch was authorized and begun.
 	Started     bool      `json:"started"`
 	CompletedAt time.Time `json:"completed_at"`

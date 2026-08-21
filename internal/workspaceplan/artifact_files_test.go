@@ -16,7 +16,7 @@ func newTestArtifactWriter(t *testing.T) (*FileArtifactWriter, string) {
 	if err := os.MkdirAll(workspaceRoot, 0o755); err != nil {
 		t.Fatalf("create workspace root: %v", err)
 	}
-	return NewFileArtifactWriter(func(string) string { return workspaceRoot }), workspaceRoot
+	return NewFileArtifactWriter(func(string, string) string { return workspaceRoot }), workspaceRoot
 }
 
 func TestFileArtifactWriterWritesAndRemoves(t *testing.T) {
@@ -114,7 +114,7 @@ func TestFileArtifactWriterRequiresAConfiguredRoot(t *testing.T) {
 		t.Errorf("error = %v, want ErrValidation", err)
 	}
 
-	empty := NewFileArtifactWriter(func(string) string { return "" })
+	empty := NewFileArtifactWriter(func(string, string) string { return "" })
 	if err := empty.WriteArtifact(ctx, "ws-1", "a.md", nil); !errors.Is(err, ErrValidation) {
 		t.Errorf("error = %v, want ErrValidation", err)
 	}
