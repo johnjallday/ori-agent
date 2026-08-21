@@ -6453,6 +6453,84 @@ button.ws-cmd-rpg-class-card:focus-visible {
   overscroll-behavior: contain;
 }
 
+/* Pinned to the top-right of the panel, under the header, so a stack of
+   toasts never drifts over the Tracks section further down the scrollable
+   body. */
+.reaper-console-toast-stack {
+  position: absolute;
+  top: 4.6rem;
+  right: 1.1rem;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: min(21rem, calc(100% - 2.2rem));
+  pointer-events: none;
+}
+
+.reaper-console-toast {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.62rem 0.7rem;
+  color: rgba(232, 240, 235, 0.92);
+  background: linear-gradient(145deg, #16201f, #0b1212 65%);
+  border: 1px solid rgba(94, 208, 167, 0.4);
+  border-left: 3px solid #5ed0a7;
+  border-radius: 2px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5);
+  font-size: 0.72rem;
+  line-height: 1.4;
+  pointer-events: auto;
+}
+
+.reaper-console-toast-message {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.reaper-console-toast-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.reaper-console-toast-undo {
+  padding: 0.28rem 0.6rem;
+  color: #0b1212;
+  background: #5ed0a7;
+  border: none;
+  border-radius: 2px;
+  font-family: var(--ws-font-mono, monospace);
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+}
+
+.reaper-console-toast-undo:hover {
+  background: #7bdcb9;
+}
+
+.reaper-console-toast-dismiss {
+  display: grid;
+  place-items: center;
+  width: 1.4rem;
+  height: 1.4rem;
+  padding: 0;
+  color: rgba(205, 216, 211, 0.62);
+  background: transparent;
+  border: none;
+  font-size: 0.9rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.reaper-console-toast-dismiss:hover {
+  color: #fff;
+}
+
 .reaper-console-project {
   display: grid;
   grid-template-columns: minmax(12rem, 1.25fr) minmax(22rem, 2fr);
@@ -6881,6 +6959,65 @@ button.ws-cmd-rpg-class-card:focus-visible {
   font-size: 0.68rem;
 }
 
+/* --- Bulk plan card ---
+   "A receipt, not a dialog" (PRD design considerations): grouped by
+   operation, old → new, one Apply and one Cancel. */
+.reaper-console-plan {
+  margin-bottom: 1rem;
+  padding: 0.9rem 1rem 1rem;
+  background: rgba(94, 208, 167, 0.05);
+  border: 1px solid rgba(94, 208, 167, 0.3);
+  border-left: 3px solid #5ed0a7;
+}
+
+.reaper-console-plan-group {
+  margin-top: 0.7rem;
+}
+
+.reaper-console-plan-group h4 {
+  margin: 0 0 0.35rem;
+  color: rgba(173, 192, 184, 0.6);
+  font-size: 0.62rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.reaper-console-plan-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.28rem 0;
+  color: rgba(232, 240, 235, 0.88);
+  font-family: var(--ws-font-display, sans-serif);
+  font-size: 0.8rem;
+}
+
+.reaper-console-plan-swatch {
+  width: 0.85rem;
+  height: 0.85rem;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  border: 1px solid rgba(173, 192, 184, 0.4);
+}
+
+.reaper-console-plan-swatch.is-empty {
+  background:
+    linear-gradient(
+      to bottom right,
+      transparent calc(50% - 1px),
+      rgba(239, 118, 93, 0.6),
+      transparent calc(50% + 1px)
+    ),
+    rgba(255, 255, 255, 0.03);
+}
+
+.reaper-console-plan-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
 .reaper-console-track-list {
   display: grid;
   gap: 0.36rem;
@@ -6890,15 +7027,100 @@ button.ws-cmd-rpg-class-card:focus-visible {
 }
 
 .reaper-console-track {
+  position: relative;
   display: grid;
-  grid-template-columns: 2.5rem minmax(0, 1fr) auto;
-  gap: 0.85rem;
+  grid-template-columns: auto 2.5rem auto minmax(0, 1fr) auto;
+  gap: 0.7rem;
   align-items: center;
   min-height: 2.8rem;
   padding: 0.5rem 0.8rem;
   background: rgba(13, 20, 21, 0.88);
   border: 1px solid rgba(173, 192, 184, 0.12);
   border-left: 2px solid rgba(94, 208, 167, 0.36);
+  touch-action: none;
+}
+
+.reaper-console-track.is-dragging {
+  opacity: 0.5;
+  border-left-color: #5ed0a7;
+}
+
+/* --- Drag grip + keyboard move equivalent --- */
+.reaper-console-track-grip-group {
+  display: grid;
+  grid-template-columns: auto auto;
+  grid-template-rows: repeat(2, auto);
+  align-items: center;
+  column-gap: 0.05rem;
+}
+
+.reaper-console-track-grip {
+  grid-row: 1 / -1;
+}
+
+.reaper-console-track-move.is-up {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.reaper-console-track-move.is-down {
+  grid-column: 2;
+  grid-row: 2;
+}
+
+.reaper-console-track-grip {
+  display: grid;
+  place-items: center;
+  width: 1.3rem;
+  height: 1.7rem;
+  padding: 0;
+  color: rgba(173, 192, 184, 0.5);
+  background: transparent;
+  border: none;
+  font-size: 0.85rem;
+  line-height: 1;
+  cursor: grab;
+  touch-action: none;
+}
+
+.reaper-console-track-grip:hover:not(:disabled) {
+  color: rgba(239, 245, 241, 0.85);
+}
+
+.reaper-console-track-grip:disabled {
+  cursor: default;
+  opacity: 0.35;
+}
+
+.reaper-console-track-move {
+  display: grid;
+  place-items: center;
+  width: 1.1rem;
+  height: 0.85rem;
+  padding: 0;
+  color: rgba(173, 192, 184, 0.4);
+  background: transparent;
+  border: none;
+  font-size: 0.5rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.reaper-console-track-move:hover:not(:disabled) {
+  color: rgba(239, 245, 241, 0.85);
+}
+
+.reaper-console-track-move:disabled {
+  cursor: default;
+  opacity: 0.25;
+}
+
+.reaper-console-track-drop-indicator {
+  height: 0.2rem;
+  margin: 0 0.2rem;
+  background: #5ed0a7;
+  border-radius: 2px;
+  box-shadow: 0 0 8px rgba(94, 208, 167, 0.7);
 }
 
 .reaper-console-track-index {
@@ -6917,23 +7139,206 @@ button.ws-cmd-rpg-class-card:focus-visible {
   white-space: nowrap;
 }
 
-.reaper-console-track-state {
+/* --- M / S / R toggle chips ---
+   Real controls, not a status readout: each reflects current state, is
+   keyboard-operable (native <button>), and carries the correct aria-pressed. */
+.reaper-console-track-chips {
+  display: flex;
+  gap: 0.3rem;
+}
+
+.reaper-console-track-chip {
+  display: grid;
+  place-items: center;
+  width: 1.7rem;
+  height: 1.7rem;
+  padding: 0;
   color: rgba(173, 192, 184, 0.58);
-  font-size: 0.62rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  background: rgba(5, 11, 12, 0.6);
+  border: 1px solid rgba(173, 192, 184, 0.22);
+  border-radius: 2px;
+  font-family: var(--ws-font-mono, monospace);
+  font-size: 0.68rem;
+  font-weight: 700;
+  cursor: pointer;
 }
 
-.reaper-console-track-state.is-muted {
-  color: #ef765d;
+.reaper-console-track-chip:hover:not(:disabled) {
+  border-color: rgba(173, 192, 184, 0.5);
 }
 
-.reaper-console-track-state.is-soloed {
-  color: #e8b54b;
+.reaper-console-track-chip:disabled {
+  cursor: default;
+  opacity: 0.5;
 }
 
-.reaper-console-track-state.is-armed {
-  color: #ff8a70;
+.reaper-console-track-chip.is-mute.is-active {
+  color: #0b1212;
+  background: #ef765d;
+  border-color: #ef765d;
+}
+
+.reaper-console-track-chip.is-solo.is-active {
+  color: #0b1212;
+  background: #e8b54b;
+  border-color: #e8b54b;
+}
+
+.reaper-console-track-chip.is-arm.is-active {
+  color: #0b1212;
+  background: #ff8a70;
+  border-color: #ff8a70;
+}
+
+/* --- Color swatch + palette popover --- */
+.reaper-console-track-swatch {
+  width: 1.15rem;
+  height: 1.15rem;
+  padding: 0;
+  background: transparent;
+  border: 1px solid rgba(173, 192, 184, 0.4);
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.reaper-console-track-swatch.is-empty {
+  background:
+    linear-gradient(
+      to bottom right,
+      transparent calc(50% - 1px),
+      rgba(239, 118, 93, 0.6),
+      transparent calc(50% + 1px)
+    ),
+    rgba(255, 255, 255, 0.03);
+}
+
+.reaper-console-track-swatch:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.reaper-console-track-swatch:hover:not(:disabled),
+.reaper-console-track-swatch[aria-expanded="true"] {
+  border-color: #5ed0a7;
+}
+
+.reaper-console-color-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 6;
+}
+
+.reaper-console-color-popover {
+  position: absolute;
+  top: 100%;
+  left: 2.5rem;
+  z-index: 7;
+  display: grid;
+  grid-template-columns: repeat(4, 1.5rem);
+  gap: 0.4rem;
+  margin-top: 0.3rem;
+  padding: 0.55rem;
+  background: linear-gradient(145deg, #16201f, #0b1212 65%);
+  border: 1px solid rgba(94, 208, 167, 0.4);
+  border-radius: 3px;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.55);
+}
+
+.reaper-console-color-option {
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(173, 192, 184, 0.3);
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.reaper-console-color-option:hover {
+  border-color: #fff;
+}
+
+.reaper-console-color-option.is-selected {
+  outline: 2px solid #5ed0a7;
+  outline-offset: 1px;
+}
+
+.reaper-console-color-option.is-none {
+  grid-column: 1 / -1;
+  width: auto;
+  height: auto;
+  padding: 0.3rem 0.4rem;
+  color: rgba(223, 235, 228, 0.8);
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 2px;
+  font-family: var(--ws-font-display, sans-serif);
+  font-size: 0.68rem;
+  text-align: left;
+}
+
+/* --- Interactive track strips ---
+   The strip borrows the Map's vocabulary: click the name to rename it inline.
+   A pending edit is subdued rather than blocked, and a refused guard reports
+   on the strip itself instead of in a modal. */
+.reaper-console-track.is-pending {
+  opacity: 0.62;
+  border-left-color: #e8b54b;
+}
+
+button.reaper-console-track-name {
+  min-width: 0;
+  padding: 0.2rem 0.35rem;
+  margin-left: -0.35rem;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 2px;
+  cursor: text;
+}
+
+button.reaper-console-track-name.is-editable:hover,
+button.reaper-console-track-name.is-editable:focus-visible {
+  border-color: rgba(94, 208, 167, 0.5);
+  background: rgba(94, 208, 167, 0.07);
+}
+
+button.reaper-console-track-name:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.reaper-console-track-name-input {
+  min-width: 0;
+  padding: 0.2rem 0.35rem;
+  color: #f3f7f4;
+  background: rgba(5, 11, 12, 0.9);
+  border: 1px solid #5ed0a7;
+  border-radius: 2px;
+  font-family: var(--ws-font-display, sans-serif);
+  font-size: 0.9rem;
+}
+
+.reaper-console-track-notice {
+  padding: 0.42rem 0.8rem;
+  color: #ffc0b4;
+  background: rgba(239, 118, 93, 0.08);
+  border-left: 2px solid #ef765d;
+  font-size: 0.66rem;
+  line-height: 1.4;
+}
+
+.reaper-console-track-degraded {
+  display: flex;
+  gap: 0.8rem;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.6rem;
+  padding: 0.6rem 0.8rem;
+  color: rgba(223, 235, 228, 0.74);
+  background: rgba(232, 181, 75, 0.07);
+  border-left: 2px solid #e8b54b;
+  font-size: 0.68rem;
+  line-height: 1.45;
 }
 
 .reaper-console-offline,
@@ -7085,10 +7490,18 @@ button.ws-cmd-rpg-class-card:focus-visible {
     flex-basis: auto;
   }
   .reaper-console-track {
-    grid-template-columns: 2rem minmax(0, 1fr);
+    grid-template-columns: auto 2rem auto minmax(0, 1fr);
   }
-  .reaper-console-track-state {
-    grid-column: 2;
+  .reaper-console-track-chips {
+    grid-column: 1 / -1;
+    justify-content: flex-end;
+  }
+  .reaper-console-toast-stack {
+    top: auto;
+    right: 0.7rem;
+    bottom: 0.7rem;
+    left: 0.7rem;
+    width: auto;
   }
 }
 

@@ -7,16 +7,23 @@
   'use strict';
 
   const POLL_INTERVAL_MS = 5000;
+  // While the console is open the user is driving REAPER directly, so state
+  // must keep up with their own edits rather than lag a five-second tick.
+  const CONSOLE_POLL_INTERVAL_MS = 1000;
   const CONSOLE_HOST_ID = 'reaperConsole';
   const REQUIREMENT_KEY = 'reaper_live_control';
+  const TOAST_DURATION_MS = 8000;
+  const GLOBAL_UNDO_COMMAND_ID = '40029';
 
   let workspaceId = '';
   let mapVisible = false;
   let pollTimer = null;
+  let pollTimerIntervalMs = 0;
   let requestInFlight = false;
   let lastState = null;
   let lastMeaningfulState = '';
   let consoleOpen = false;
+  let consoleBodyNode = null;
   let consoleTrigger = null;
   let consoleOverlayId = '';
   let catalog = [];
@@ -31,6 +38,42 @@
   let actionRequestInFlight = false;
   let pendingAction = null;
   let lastRun = null;
+  let toasts = [];
+  let toastSeq = 0;
+  // Track-strip edit state. editingIndex is the strip currently showing an
+  // inline input; pendingEdit is an optimistic value awaiting the server, and
+  // stripNotice is the inline failure message on one strip.
+  let editingIndex = 0;
+  let pendingEdit = null;
+  let stripNotice = null;
+  let trackRequestInFlight = false;
+  // openPalette is the index of the strip whose color popover is open, 0 for
+  // none. One strip at a time, per the Map's own popover convention.
+  let openPalette = 0;
+  // dragState is null when no drag is active. sourceIndex/sourceName are
+  // captured at pointerdown so the eventual move is guarded on the name Ori
+  // read before the drag started; targetIndex tracks the current drop slot
+  // for the indicator and is what gets sent if the pointer is released.
+  let dragState = null;
+  // The one pending bulk plan an agent may have proposed for this workspace,
+  // rendered as a plan card. Loaded once per console open, like scripts and
+  // proposals.
+  let pendingPlan = null;
+  let pendingPlanLoaded = false;
+  let planRequestInFlight = false;
+
+  // A fixed REAPER-compatible swatch set plus "no color" (PRD open question 1:
+  // fixed set over a full picker, to keep the popover small). Values already
+  // carry REAPER's 0x1000000 "has a custom color" flag.
+  const COLOR_PALETTE = [
+    { name: 'Red', hex: 0xef765d },
+    { name: 'Orange', hex: 0xe8b54b },
+    { name: 'Green', hex: 0x5ed0a7 },
+    { name: 'Blue', hex: 0x4f8ff7 },
+    { name: 'Purple', hex: 0x9b7fe8 },
+    { name: 'Pink', hex: 0xe87fc0 },
+    { name: 'Gray', hex: 0x8a97a1 }
+  ].map(entry => ({ name: entry.name, value: 0x1000000 | entry.hex }));
 
   function workspaceIdFromPage() {
     if (workspaceId) return workspaceId;
@@ -58,6 +101,20 @@
     return id ? '/api/workspaces/' + encodeURIComponent(id) + '/reaper/scripts' : '';
   }
 
+  function trackPlanApiPath(action) {
+    const id = workspaceIdFromPage();
+    if (!id) return '';
+    let path = '/api/workspaces/' + encodeURIComponent(id) + '/reaper/track-plan';
+    if (action) path += '/' + action;
+    return path;
+  }
+
+  function tracksApiPath(suffix) {
+    const id = workspaceIdFromPage();
+    if (!id) return '';
+    return '/api/workspaces/' + encodeURIComponent(id) + '/reaper/tracks/' + suffix;
+  }
+
   function proposalsApiPath(proposalId, operation) {
     const id = workspaceIdFromPage();
     if (!id) return '';
@@ -81,20 +138,29 @@
       time_signature: String(state.time_signature || ''),
       play_state: String(state.play_state || ''),
       position: String(state.position || ''),
+      track_editing_available: Boolean(state.track_editing_available),
+      // Peaks are deliberately excluded: they move continuously and would
+      // defeat change detection entirely.
       tracks: (Array.isArray(state.tracks) ? state.tracks : []).map(track => ({
         index: Number(track.index || 0),
         name: String(track.name || ''),
         muted: Boolean(track.muted),
         soloed: Boolean(track.soloed),
-        armed: Boolean(track.armed)
+        armed: Boolean(track.armed),
+        color: Number(track.color || 0)
       }))
     });
   }
 
   function publishIfChanged(state) {
     const next = meaningfulState(state);
-    if (next === lastMeaningfulState) return;
+    if (next === lastMeaningfulState) return false;
     lastMeaningfulState = next;
+    publishStateEvent(state);
+    return true;
+  }
+
+  function publishStateEvent(state) {
     if (typeof document === 'undefined' || typeof document.dispatchEvent !== 'function') return;
     const event =
       typeof CustomEvent === 'function'
@@ -113,8 +179,16 @@
       const state = await response.json();
       if (!state || typeof state.connected !== 'boolean') throw new Error('invalid state');
       lastState = state;
-      publishIfChanged(state);
-      if (consoleOpen) renderConsole();
+      const changed = publishIfChanged(state);
+      // At the one-second console cadence an unconditional re-render would
+      // rebuild the panel every tick for no reason, so only redraw when the
+      // state the console actually shows has moved.
+      // A drag in progress suspends re-render entirely: the transport
+      // position or any other change arriving mid-gesture must not rebuild
+      // the list under the user's pointer (PRD 4.1 item 5 / group 4.6). The
+      // state itself is still recorded above, so the next explicit render —
+      // on drop or cancel — starts from current truth.
+      if (consoleOpen && changed && !dragState) renderConsole();
       return state;
     } catch (_error) {
       const failed = {
@@ -130,8 +204,13 @@
         tracks: []
       };
       lastState = failed;
-      publishIfChanged(failed);
-      if (consoleOpen) renderConsole();
+      const changed = publishIfChanged(failed);
+      // A drag in progress suspends re-render entirely: the transport
+      // position or any other change arriving mid-gesture must not rebuild
+      // the list under the user's pointer (PRD 4.1 item 5 / group 4.6). The
+      // state itself is still recorded above, so the next explicit render —
+      // on drop or cancel — starts from current truth.
+      if (consoleOpen && changed && !dragState) renderConsole();
       return failed;
     } finally {
       requestInFlight = false;
@@ -192,6 +271,81 @@
       proposalsLoaded = true;
       if (consoleOpen) renderConsole();
       return proposals;
+    }
+  }
+
+  async function loadPlan() {
+    const path = trackPlanApiPath();
+    if (!path || typeof fetch !== 'function') return pendingPlan;
+    try {
+      const response = await fetch(path, { headers: { Accept: 'application/json' } });
+      if (!response.ok) throw new Error('plan request failed');
+      const payload = await response.json();
+      pendingPlan = payload && payload.plan ? payload.plan : null;
+      pendingPlanLoaded = true;
+      if (consoleOpen) renderConsole();
+      return pendingPlan;
+    } catch (_error) {
+      pendingPlanLoaded = true;
+      if (consoleOpen) renderConsole();
+      return pendingPlan;
+    }
+  }
+
+  async function applyPlan() {
+    const path = trackPlanApiPath('apply');
+    if (!path || planRequestInFlight || typeof fetch !== 'function') return false;
+    planRequestInFlight = true;
+    stripNotice = null;
+    if (consoleOpen) renderConsole();
+    try {
+      const response = await fetch(path, {
+        method: 'POST',
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirmed: true })
+      });
+      const payload = await response.json().catch(() => ({}));
+      adoptTrackState(payload);
+      if (!response.ok || payload.outcome !== 'ok') {
+        stripNotice = { index: 0, text: trackEditError(payload, response) };
+        return false;
+      }
+      pendingPlan = null;
+      // One toast for the whole plan; its Undo fires REAPER's global undo
+      // (the server's undo descriptor already carries that command id),
+      // exactly like a catalog action's toast.
+      if (payload.undo && payload.undo.summary) {
+        addToast(payload.undo.summary, payload.undo);
+      }
+      return true;
+    } catch (_error) {
+      stripNotice = { index: 0, text: 'The plan request failed. Nothing was applied.' };
+      return false;
+    } finally {
+      planRequestInFlight = false;
+      if (consoleOpen) renderConsole();
+      void refresh();
+    }
+  }
+
+  async function cancelPlan() {
+    const path = trackPlanApiPath();
+    // Cancel makes no REAPER contact at all (PRD requirement 26) — this DELETE
+    // only touches the pending-plan store server-side.
+    if (!path || planRequestInFlight || typeof fetch !== 'function') return false;
+    planRequestInFlight = true;
+    if (consoleOpen) renderConsole();
+    try {
+      const response = await fetch(path, { method: 'DELETE' });
+      if (!response.ok) throw new Error('cancel failed');
+      pendingPlan = null;
+      return true;
+    } catch (_error) {
+      stripNotice = { index: 0, text: 'The plan could not be cancelled.' };
+      return false;
+    } finally {
+      planRequestInFlight = false;
+      if (consoleOpen) renderConsole();
     }
   }
 
@@ -351,6 +505,9 @@
       lastRun = { outcome: 'ok', label: action.label };
       lastState = payload;
       publishIfChanged(payload);
+      if (payload.undo && payload.undo.summary) {
+        addToast(payload.undo.summary, payload.undo);
+      }
       return true;
     } catch (_error) {
       lastRun = {
@@ -377,22 +534,326 @@
     return true;
   }
 
+  // Toasts are the undo-forward teaching surface: a Tier 1 catalog action
+  // reports what it did in the response's `undo` field, and the console
+  // turns that into a stackable, dismissible notice. Undo and Redo never
+  // carry an `undo` field, so they never produce one of their own.
+  function scheduleToastDismiss(toast) {
+    if (typeof setTimeout !== 'function') return;
+    if (toast.remainingMs == null) toast.remainingMs = TOAST_DURATION_MS;
+    toast.startedAt = Date.now();
+    toast.timer = setTimeout(() => dismissToast(toast.id), toast.remainingMs);
+  }
+
+  function pauseToast(toast) {
+    if (!toast || !toast.timer) return;
+    if (typeof clearTimeout === 'function') clearTimeout(toast.timer);
+    toast.timer = null;
+    const elapsed = Date.now() - toast.startedAt;
+    toast.remainingMs = Math.max(0, toast.remainingMs - elapsed);
+  }
+
+  function resumeToast(toast) {
+    if (!toast || toast.timer) return;
+    scheduleToastDismiss(toast);
+  }
+
+  function dismissToast(id) {
+    const toast = toasts.find(candidate => candidate.id === id);
+    if (toast && toast.timer && typeof clearTimeout === 'function') clearTimeout(toast.timer);
+    toasts = toasts.filter(candidate => candidate.id !== id);
+    if (consoleOpen) renderConsole();
+  }
+
+  function addToast(message, undo) {
+    const text = String(message || '').trim();
+    if (!text) return null;
+    const toast = { id: 'toast-' + ++toastSeq, message: text, undo: undo || null, timer: null };
+    toasts = toasts.concat([toast]);
+    scheduleToastDismiss(toast);
+    if (consoleOpen) renderConsole();
+    return toast;
+  }
+
+  async function undoFromToast(toastId) {
+    const toast = toasts.find(candidate => candidate.id === toastId);
+    dismissToast(toastId);
+    // Hybrid undo (PRD 4.3 item 16): a single-track edit reverses through its
+    // own specific inverse, while catalog actions and saved scripts reverse
+    // through REAPER's global undo because they already run in one undo block.
+    if (toast && toast.undo && toast.undo.kind === 'track_edit') {
+      await undoTrackEdit();
+      return;
+    }
+    const commandId = (toast && toast.undo && toast.undo.command_id) || GLOBAL_UNDO_COMMAND_ID;
+    const path = actionsApiPath(commandId);
+    if (!path || typeof fetch !== 'function') return;
+    try {
+      const response = await fetch(path, {
+        method: 'POST',
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirmed: true })
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (response.ok && typeof payload.connected === 'boolean') {
+        lastState = payload;
+        publishIfChanged(payload);
+      }
+    } catch (_error) {
+      // Fall through to the forced refresh below, which re-reads live truth.
+    }
+    void refresh();
+  }
+
+  // --- Track strips -------------------------------------------------------
+  //
+  // Every edit is applied optimistically and guarded server-side on the name
+  // Ori last read. A refused guard is not an error the user caused: the track
+  // list moved underneath them, so the strip says so and re-reads live state.
+
+  function trackEditError(payload, response) {
+    if (payload && payload.error_reason) return String(payload.error_reason);
+    if (payload && payload.error) return String(payload.error);
+    return response && response.status === 409
+      ? 'The track list changed — refreshed.'
+      : 'REAPER did not apply the change.';
+  }
+
+  async function postTrackEdit(path, body) {
+    const response = await fetch(path, {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    const payload = await response.json().catch(() => ({}));
+    return { response, payload };
+  }
+
+  function adoptTrackState(payload) {
+    if (payload && typeof payload.connected === 'boolean') {
+      lastState = payload;
+      publishIfChanged(payload);
+    }
+  }
+
+  // runTrackEdit is the one path every strip mutation goes through: optimistic
+  // patch, server call, revert-with-notice on failure, toast on success, and a
+  // forced immediate state re-read either way.
+  async function runTrackEdit(index, path, body, patch) {
+    if (!path || trackRequestInFlight || typeof fetch !== 'function') return false;
+    trackRequestInFlight = true;
+    stripNotice = null;
+    pendingEdit = { index, patch };
+    if (consoleOpen) renderConsole();
+    try {
+      const { response, payload } = await postTrackEdit(path, body);
+      if (!response.ok || payload.outcome !== 'ok') {
+        pendingEdit = null;
+        stripNotice = { index, text: trackEditError(payload, response) };
+        adoptTrackState(payload);
+        return false;
+      }
+      pendingEdit = null;
+      adoptTrackState(payload);
+      if (payload.undo && payload.undo.summary) {
+        addToast(payload.undo.summary, { kind: 'track_edit' });
+      }
+      return true;
+    } catch (_error) {
+      pendingEdit = null;
+      stripNotice = { index, text: 'The edit request failed. Nothing was applied.' };
+      return false;
+    } finally {
+      trackRequestInFlight = false;
+      if (consoleOpen) renderConsole();
+      void refresh();
+    }
+  }
+
+  async function renameTrack(index, expectedName, newName) {
+    const name = String(newName || '').trim();
+    if (!name) return false;
+    editingIndex = 0;
+    return runTrackEdit(
+      index,
+      tracksApiPath(encodeURIComponent(index) + '/rename'),
+      { name, expected_name: String(expectedName == null ? '' : expectedName) },
+      { name }
+    );
+  }
+
+  async function setTrackColor(index, expectedName, color) {
+    openPalette = 0;
+    return runTrackEdit(
+      index,
+      tracksApiPath(encodeURIComponent(index) + '/color'),
+      { color, expected_name: String(expectedName == null ? '' : expectedName) },
+      { color }
+    );
+  }
+
+  const TOGGLE_PATCH_KEY = { mute: 'muted', solo: 'soloed', arm: 'armed' };
+
+  async function setTrackToggle(kind, index, expectedName, value) {
+    const patch = {};
+    patch[TOGGLE_PATCH_KEY[kind]] = value;
+    return runTrackEdit(
+      index,
+      tracksApiPath(encodeURIComponent(index) + '/' + kind),
+      { value, expected_name: String(expectedName == null ? '' : expectedName) },
+      patch
+    );
+  }
+
+  async function moveTrack(index, expectedName, newIndex) {
+    return runTrackEdit(
+      index,
+      tracksApiPath(encodeURIComponent(index) + '/move'),
+      { new_index: newIndex, expected_name: String(expectedName == null ? '' : expectedName) },
+      {}
+    );
+  }
+
+  async function undoTrackEdit() {
+    const path = tracksApiPath('undo');
+    if (!path || typeof fetch !== 'function') return false;
+    try {
+      const { response, payload } = await postTrackEdit(path, {});
+      adoptTrackState(payload);
+      if (!response.ok || payload.outcome !== 'ok') {
+        stripNotice = { index: 0, text: trackEditError(payload, response) };
+        return false;
+      }
+      return true;
+    } catch (_error) {
+      stripNotice = { index: 0, text: 'The undo request failed. Nothing was undone.' };
+      return false;
+    } finally {
+      if (consoleOpen) renderConsole();
+      void refresh();
+    }
+  }
+
+  function beginTrackRename(index) {
+    editingIndex = Number(index) || 0;
+    stripNotice = null;
+    if (consoleOpen) renderConsole();
+  }
+
+  function cancelTrackRename() {
+    editingIndex = 0;
+    if (consoleOpen) renderConsole();
+  }
+
+  // --- Drag-to-reorder ------------------------------------------------------
+  //
+  // Pointer coordinates are resolved through document.elementFromPoint, so the
+  // drag itself carries only logical track indices — the same functions a
+  // test can drive directly without simulating real pixel geometry. The
+  // 1-second poll is suspended for the whole gesture (PRD 4.1 item 5 / 4.6):
+  // a state change arriving mid-drag must not rebuild the list underneath the
+  // user's pointer.
+
+  function beginDrag(index, sourceName) {
+    if (!index) return;
+    dragState = { sourceIndex: index, sourceName: sourceName || '', targetIndex: index };
+    attachDragListeners();
+    if (consoleOpen) renderConsole();
+  }
+
+  function dragOverIndex(index) {
+    if (!dragState || !index || index === dragState.targetIndex) return;
+    dragState.targetIndex = index;
+    if (consoleOpen) renderConsole();
+  }
+
+  async function endDrag() {
+    if (!dragState) return;
+    const { sourceIndex, sourceName, targetIndex } = dragState;
+    detachDragListeners();
+    dragState = null;
+    if (targetIndex === sourceIndex) {
+      // Dropped back where it started: nothing to send, just resume normally.
+      if (consoleOpen) renderConsole();
+      return;
+    }
+    await moveTrack(sourceIndex, sourceName, targetIndex);
+  }
+
+  function cancelDrag() {
+    if (!dragState) return;
+    detachDragListeners();
+    dragState = null;
+    if (consoleOpen) renderConsole();
+  }
+
+  function handleDragPointerMove(event) {
+    if (
+      !dragState ||
+      typeof document === 'undefined' ||
+      typeof document.elementFromPoint !== 'function'
+    ) {
+      return;
+    }
+    const hit = document.elementFromPoint(event.clientX, event.clientY);
+    const strip =
+      hit && typeof hit.closest === 'function' ? hit.closest('[data-track-index]') : null;
+    const index = strip && Number(strip.getAttribute('data-track-index'));
+    if (index) dragOverIndex(index);
+  }
+
+  function handleDragPointerUp() {
+    void endDrag();
+  }
+
+  function handleDragKeydown(event) {
+    if (event.key === 'Escape') cancelDrag();
+  }
+
+  function attachDragListeners() {
+    if (typeof document === 'undefined' || typeof document.addEventListener !== 'function') return;
+    document.addEventListener('pointermove', handleDragPointerMove);
+    document.addEventListener('pointerup', handleDragPointerUp);
+    document.addEventListener('pointercancel', cancelDrag);
+    document.addEventListener('keydown', handleDragKeydown);
+  }
+
+  function detachDragListeners() {
+    if (typeof document === 'undefined' || typeof document.removeEventListener !== 'function')
+      return;
+    document.removeEventListener('pointermove', handleDragPointerMove);
+    document.removeEventListener('pointerup', handleDragPointerUp);
+    document.removeEventListener('pointercancel', cancelDrag);
+    document.removeEventListener('keydown', handleDragKeydown);
+  }
+
   function stopPolling() {
     if (pollTimer !== null && typeof clearInterval === 'function') clearInterval(pollTimer);
     pollTimer = null;
+    pollTimerIntervalMs = 0;
+  }
+
+  function pollIntervalMs() {
+    return consoleOpen ? CONSOLE_POLL_INTERVAL_MS : POLL_INTERVAL_MS;
   }
 
   function syncPolling({ refreshNow = false } = {}) {
-    const shouldPoll = mapVisible && documentVisible();
+    const shouldPoll = (mapVisible || consoleOpen) && documentVisible();
     if (!shouldPoll) {
       stopPolling();
       return;
     }
+    // Restart the timer when the cadence changes, so opening or closing the
+    // console takes effect immediately rather than after the current tick.
+    if (pollTimer !== null && pollTimerIntervalMs !== pollIntervalMs()) {
+      stopPolling();
+    }
     if (refreshNow || !lastState) void refresh();
     if (pollTimer === null && typeof setInterval === 'function') {
+      pollTimerIntervalMs = pollIntervalMs();
       pollTimer = setInterval(() => {
-        if (mapVisible && documentVisible()) void refresh();
-      }, POLL_INTERVAL_MS);
+        if ((mapVisible || consoleOpen) && documentVisible()) void refresh();
+      }, pollTimerIntervalMs);
     }
   }
 
@@ -533,6 +994,30 @@
         needs_confirmation: Boolean(needsConfirmation)
       }
     );
+  }
+
+  function renderToasts(panel) {
+    if (!toasts.length) return;
+    const stack = el('div', 'reaper-console-toast-stack');
+    stack.setAttribute('aria-live', 'polite');
+    toasts.forEach(toast => {
+      const item = el('div', 'reaper-console-toast');
+      item.addEventListener('mouseenter', () => pauseToast(toast));
+      item.addEventListener('mouseleave', () => resumeToast(toast));
+      item.appendChild(el('span', 'reaper-console-toast-message', toast.message));
+      const actions = el('div', 'reaper-console-toast-actions');
+      if (toast.undo) {
+        actions.appendChild(
+          button('Undo', 'reaper-console-toast-undo', () => void undoFromToast(toast.id))
+        );
+      }
+      const dismiss = button('×', 'reaper-console-toast-dismiss', () => dismissToast(toast.id));
+      dismiss.setAttribute('aria-label', 'Dismiss notification');
+      actions.appendChild(dismiss);
+      item.appendChild(actions);
+      stack.appendChild(item);
+    });
+    panel.appendChild(stack);
   }
 
   function renderTransport(host, state) {
@@ -889,12 +1374,262 @@
     host.appendChild(panel);
   }
 
-  function trackStateLabel(track) {
-    const states = [];
-    if (track.muted) states.push('Muted');
-    if (track.soloed) states.push('Solo');
-    if (track.armed) states.push('Armed');
-    return states.length ? states.join(' · ') : 'Ready';
+  // trackDisplayValue reads an optimistic patch over the live value, so a
+  // pending edit shows immediately, before the server confirms it.
+  function trackDisplayValue(track, key, liveValue) {
+    if (pendingEdit && pendingEdit.index === track.index && key in pendingEdit.patch) {
+      return pendingEdit.patch[key];
+    }
+    return liveValue;
+  }
+
+  function trackDisplayName(track) {
+    return trackDisplayValue(track, 'name', track.name || '');
+  }
+
+  function trackDisplayColor(track) {
+    return Number(trackDisplayValue(track, 'color', track.color || 0));
+  }
+
+  function cssColor(value) {
+    return '#' + (Number(value) & 0xffffff).toString(16).padStart(6, '0');
+  }
+
+  function renderTrackNameEditor(item, track) {
+    const input = el('input', 'reaper-console-track-name-input');
+    input.type = 'text';
+    input.value = trackDisplayName(track);
+    input.maxLength = 128;
+    input.autocomplete = 'off';
+    input.setAttribute('aria-label', 'Rename track ' + track.index);
+    let settled = false;
+    const commit = () => {
+      if (settled) return;
+      const next = String(input.value || '').trim();
+      // An empty name is rejected client-side, with no server call at all.
+      if (!next) {
+        settled = true;
+        editingIndex = 0;
+        stripNotice = { index: track.index, text: 'A track name cannot be empty.' };
+        renderConsole();
+        return;
+      }
+      if (next === (track.name || '')) {
+        settled = true;
+        cancelTrackRename();
+        return;
+      }
+      settled = true;
+      void renameTrack(track.index, track.name || '', next);
+    };
+    input.addEventListener('keydown', event => {
+      if (event.key === 'Enter') {
+        commit();
+      } else if (event.key === 'Escape') {
+        settled = true;
+        cancelTrackRename();
+      }
+    });
+    input.addEventListener('blur', commit);
+    item.appendChild(input);
+    if (typeof input.focus === 'function') input.focus();
+  }
+
+  function renderColorSwatch(item, track, editable) {
+    const color = trackDisplayColor(track);
+    const hasColor = (color & 0x1000000) !== 0;
+    const swatch = button(
+      '',
+      'reaper-console-track-swatch' + (hasColor ? ' has-color' : ' is-empty'),
+      () => {
+        if (!editable || trackRequestInFlight) return;
+        openPalette = openPalette === track.index ? 0 : track.index;
+        renderConsole();
+      }
+    );
+    if (hasColor) swatch.setAttribute('style', 'background:' + cssColor(color) + ';');
+    swatch.disabled = !editable;
+    swatch.setAttribute('aria-haspopup', 'true');
+    swatch.setAttribute('aria-expanded', String(openPalette === track.index));
+    swatch.setAttribute(
+      'aria-label',
+      'Color for track ' + track.index + (hasColor ? '' : ', no color') + ', open palette'
+    );
+    item.appendChild(swatch);
+
+    if (editable && openPalette === track.index) {
+      // A full-viewport backdrop closes the popover on any outside click,
+      // mirroring the console's own backdrop-to-close pattern.
+      const backdrop = el('div', 'reaper-console-color-backdrop');
+      backdrop.addEventListener('click', () => {
+        openPalette = 0;
+        renderConsole();
+      });
+      item.appendChild(backdrop);
+
+      const popover = el('div', 'reaper-console-color-popover');
+      popover.setAttribute('role', 'menu');
+      popover.addEventListener('keydown', event => {
+        if (event.key !== 'Escape') return;
+        openPalette = 0;
+        renderConsole();
+      });
+      const none = button('No color', 'reaper-console-color-option is-none', () => {
+        void setTrackColor(track.index, track.name || '', 0);
+      });
+      popover.appendChild(none);
+      COLOR_PALETTE.forEach(entry => {
+        const option = button('', 'reaper-console-color-option', () => {
+          void setTrackColor(track.index, track.name || '', entry.value);
+        });
+        option.setAttribute('style', 'background:' + cssColor(entry.value) + ';');
+        option.setAttribute('aria-label', entry.name);
+        if (entry.value === color) option.classList.add('is-selected');
+        popover.appendChild(option);
+      });
+      item.appendChild(popover);
+    }
+  }
+
+  function renderToggleChip(item, track, kind, letter, label, active, editable) {
+    const chip = button(
+      letter,
+      'reaper-console-track-chip is-' + kind + (active ? ' is-active' : ''),
+      () => {
+        if (!editable || trackRequestInFlight) return;
+        void setTrackToggle(kind, track.index, track.name || '', !active);
+      }
+    );
+    chip.disabled = !editable || trackRequestInFlight;
+    chip.setAttribute('aria-pressed', String(active));
+    chip.setAttribute('aria-label', label + ' track ' + track.index + (active ? ', on' : ', off'));
+    chip.title = label;
+    item.appendChild(chip);
+  }
+
+  function renderDragGrip(item, track, editable, trackCount) {
+    const group = el('span', 'reaper-console-track-grip-group');
+    const grip = button('⠿', 'reaper-console-track-grip', null);
+    grip.disabled = !editable;
+    grip.setAttribute('aria-label', 'Drag to reorder track ' + track.index);
+    grip.addEventListener('pointerdown', event => {
+      if (!editable) return;
+      event.preventDefault();
+      beginDrag(track.index, track.name || '');
+    });
+    group.appendChild(grip);
+
+    // Keyboard-accessible equivalent to dragging (PRD 4.1 item 5): move up
+    // and move down, each a normal guarded edit, not a drag gesture.
+    const up = button('▲', 'reaper-console-track-move is-up', () => {
+      if (!editable || track.index <= 1) return;
+      void moveTrack(track.index, track.name || '', track.index - 1);
+    });
+    up.disabled = !editable || track.index <= 1;
+    up.setAttribute('aria-label', 'Move track ' + track.index + ' up');
+    group.appendChild(up);
+
+    const down = button('▼', 'reaper-console-track-move is-down', () => {
+      if (!editable || track.index >= trackCount) return;
+      void moveTrack(track.index, track.name || '', track.index + 1);
+    });
+    down.disabled = !editable || track.index >= trackCount;
+    down.setAttribute('aria-label', 'Move track ' + track.index + ' down');
+    group.appendChild(down);
+
+    item.appendChild(group);
+  }
+
+  function renderTrackStrip(list, track, editable, trackCount) {
+    const item = el('li', 'reaper-console-track');
+    const pending = Boolean(pendingEdit && pendingEdit.index === track.index);
+    if (pending) item.classList.add('is-pending');
+    if (dragState && dragState.sourceIndex === track.index) item.classList.add('is-dragging');
+    // Read by the pointer-drag hit test (document.elementFromPoint + closest)
+    // to resolve a screen position back to a logical track index.
+    item.setAttribute('data-track-index', String(track.index));
+
+    renderDragGrip(item, track, editable, trackCount);
+    item.appendChild(
+      el('span', 'reaper-console-track-index', String(track.index).padStart(2, '0'))
+    );
+
+    renderColorSwatch(item, track, editable);
+
+    const name = trackDisplayName(track);
+    if (editable && editingIndex === track.index) {
+      renderTrackNameEditor(item, track);
+    } else if (editable) {
+      const trigger = button(
+        name || 'Untitled track',
+        'reaper-console-track-name is-editable',
+        () => beginTrackRename(track.index)
+      );
+      trigger.disabled = trackRequestInFlight;
+      trigger.setAttribute(
+        'aria-label',
+        'Rename track ' + track.index + ', currently ' + (name || 'untitled')
+      );
+      item.appendChild(trigger);
+    } else {
+      item.appendChild(el('strong', 'reaper-console-track-name', name || 'Untitled track'));
+    }
+
+    const chips = el('span', 'reaper-console-track-chips');
+    renderToggleChip(
+      chips,
+      track,
+      'mute',
+      'M',
+      'Mute',
+      trackDisplayValue(track, 'muted', Boolean(track.muted)),
+      editable
+    );
+    renderToggleChip(
+      chips,
+      track,
+      'solo',
+      'S',
+      'Solo',
+      trackDisplayValue(track, 'soloed', Boolean(track.soloed)),
+      editable
+    );
+    renderToggleChip(
+      chips,
+      track,
+      'arm',
+      'R',
+      'Record-arm',
+      trackDisplayValue(track, 'armed', Boolean(track.armed)),
+      editable
+    );
+    item.appendChild(chips);
+    list.appendChild(item);
+
+    if (stripNotice && stripNotice.index === track.index) {
+      const notice = el('li', 'reaper-console-track-notice', stripNotice.text);
+      notice.setAttribute('role', 'status');
+      list.appendChild(notice);
+    }
+  }
+
+  function renderDropIndicator(list) {
+    const indicator = el('li', 'reaper-console-track-drop-indicator');
+    indicator.setAttribute('aria-hidden', 'true');
+    list.appendChild(indicator);
+  }
+
+  function renderRunnerUnavailable(section) {
+    const panel = el('div', 'reaper-console-track-degraded');
+    panel.appendChild(
+      el(
+        'span',
+        '',
+        'Track editing needs the Ori REAPER runner. These tracks are read-only until it is installed.'
+      )
+    );
+    panel.appendChild(button('Fix setup', 'reaper-console-btn is-secondary', openSetupFix));
+    section.appendChild(panel);
   }
 
   function renderTracks(host, state) {
@@ -903,26 +1638,139 @@
     head.appendChild(el('h3', '', 'Tracks'));
     head.appendChild(el('span', '', trackCountLabel(state)));
     section.appendChild(head);
+
+    // Strips are interactive only when REAPER is connected and the runner is
+    // installed; otherwise the list degrades to a read-only readout rather
+    // than offering controls that cannot work (PRD 4.5 item 28).
+    const editable = Boolean(state.connected && state.track_editing_available);
+    if (state.connected && !state.track_editing_available) renderRunnerUnavailable(section);
+
     const list = el('ol', 'reaper-console-track-list');
     const tracks = Array.isArray(state.tracks) ? state.tracks : [];
     if (!tracks.length) {
       list.appendChild(el('li', 'reaper-console-empty', 'No project tracks'));
     } else {
+      const dropTarget = dragState ? dragState.targetIndex : 0;
       tracks.forEach(track => {
-        const item = el('li', 'reaper-console-track');
-        item.appendChild(
-          el('span', 'reaper-console-track-index', String(track.index).padStart(2, '0'))
-        );
-        item.appendChild(el('strong', 'reaper-console-track-name', track.name || 'Untitled track'));
-        const status = el('span', 'reaper-console-track-state', trackStateLabel(track));
-        if (track.muted) status.classList.add('is-muted');
-        if (track.soloed) status.classList.add('is-soloed');
-        if (track.armed) status.classList.add('is-armed');
-        item.appendChild(status);
-        list.appendChild(item);
+        if (dropTarget && track.index === dropTarget) renderDropIndicator(list);
+        renderTrackStrip(list, track, editable, tracks.length);
       });
+      // The drop is past every strip Ori knows about (moving to the end).
+      if (dropTarget && dropTarget > tracks.length) renderDropIndicator(list);
+    }
+    if (stripNotice && !stripNotice.index) {
+      const notice = el('li', 'reaper-console-track-notice', stripNotice.text);
+      notice.setAttribute('role', 'status');
+      list.appendChild(notice);
     }
     section.appendChild(list);
+    host.appendChild(section);
+  }
+
+  // --- Bulk plan card -------------------------------------------------------
+  //
+  // "A receipt, not a dialog" (PRD design considerations): a list of outcomes
+  // a musician recognizes, grouped by operation, old → new. One Apply, one
+  // Cancel. Apply is Tier 2 — always the user's own click, never something an
+  // agent can trigger — and Cancel makes no REAPER contact at all.
+
+  function quoteForDisplay(name) {
+    const trimmed = String(name || '').trim();
+    return trimmed ? '‘' + trimmed + '’' : 'the untitled track';
+  }
+
+  function groupPlanEdits(edits) {
+    const groups = { rename: [], color: [], mute: [], solo: [], arm: [], move: [] };
+    (Array.isArray(edits) ? edits : []).forEach(edit => {
+      if (edit && groups[edit.operation]) groups[edit.operation].push(edit);
+    });
+    return groups;
+  }
+
+  function renderPlanGroup(section, title, count, renderRow) {
+    if (!count) return;
+    const group = el('div', 'reaper-console-plan-group');
+    group.appendChild(el('h4', '', title + ' ' + count + (count === 1 ? ' track' : ' tracks')));
+    renderRow(group);
+    section.appendChild(group);
+  }
+
+  function renderPlanCard(host) {
+    if (!pendingPlan) return;
+    const edits = Array.isArray(pendingPlan.edits) ? pendingPlan.edits : [];
+    if (!edits.length) return;
+    const groups = groupPlanEdits(edits);
+
+    const section = el('section', 'reaper-console-plan');
+    const head = el('div', 'reaper-console-section-head');
+    head.appendChild(el('h3', '', 'Proposed changes'));
+    head.appendChild(el('span', '', edits.length + (edits.length === 1 ? ' edit' : ' edits')));
+    section.appendChild(head);
+
+    renderPlanGroup(section, 'Rename', groups.rename.length, group => {
+      groups.rename.forEach(edit => {
+        group.appendChild(
+          el(
+            'div',
+            'reaper-console-plan-row',
+            quoteForDisplay(edit.expected_name) + ' → ' + quoteForDisplay(edit.new_name)
+          )
+        );
+      });
+    });
+
+    renderPlanGroup(section, 'Color', groups.color.length, group => {
+      groups.color.forEach(edit => {
+        const row = el('div', 'reaper-console-plan-row');
+        const color = Number(edit.new_color || 0);
+        const hasColor = (color & 0x1000000) !== 0;
+        const swatch = el('span', 'reaper-console-plan-swatch' + (hasColor ? '' : ' is-empty'));
+        if (hasColor) swatch.setAttribute('style', 'background:' + cssColor(color) + ';');
+        row.appendChild(swatch);
+        row.appendChild(el('span', '', quoteForDisplay(edit.expected_name)));
+        group.appendChild(row);
+      });
+    });
+
+    [
+      ['mute', 'Mute'],
+      ['solo', 'Solo'],
+      ['arm', 'Arm']
+    ].forEach(([kind, label]) => {
+      renderPlanGroup(section, label, groups[kind].length, group => {
+        groups[kind].forEach(edit => {
+          group.appendChild(
+            el(
+              'div',
+              'reaper-console-plan-row',
+              quoteForDisplay(edit.expected_name) + (edit.new_bool ? ' — on' : ' — off')
+            )
+          );
+        });
+      });
+    });
+
+    renderPlanGroup(section, 'Move', groups.move.length, group => {
+      groups.move.forEach(edit => {
+        group.appendChild(
+          el(
+            'div',
+            'reaper-console-plan-row',
+            quoteForDisplay(edit.expected_name) + ' to position ' + edit.new_index
+          )
+        );
+      });
+    });
+
+    const actions = el('div', 'reaper-console-plan-actions');
+    const cancel = button('Cancel', 'reaper-console-btn is-secondary', () => void cancelPlan());
+    cancel.disabled = planRequestInFlight;
+    actions.appendChild(cancel);
+    const apply = button('Apply', 'reaper-console-btn is-primary', () => void applyPlan());
+    apply.disabled = planRequestInFlight;
+    actions.appendChild(apply);
+    section.appendChild(actions);
+
     host.appendChild(section);
   }
 
@@ -948,12 +1796,20 @@
     renderTransport(host, state);
     renderActionFeedback(host);
     renderActionGrid(host);
+    renderPlanCard(host);
     renderTracks(host, state);
   }
 
   function renderConsole() {
     const host = consoleHost();
     if (!host || !consoleOpen) return;
+    // The panel is rebuilt from scratch on every render, so carry the body's
+    // scroll offset across. Without this the transport position ticking during
+    // playback would yank the user back to the top of the console.
+    const previousScroll =
+      consoleBodyNode && typeof consoleBodyNode.scrollTop === 'number'
+        ? consoleBodyNode.scrollTop
+        : 0;
     clear(host);
     host.hidden = false;
     const backdrop = el('div', 'reaper-console-backdrop');
@@ -963,7 +1819,9 @@
     panel.setAttribute('aria-modal', 'true');
     panel.setAttribute('aria-labelledby', 'reaperConsoleTitle');
     renderHeader(panel, lastState);
+    renderToasts(panel);
     const body = el('div', 'reaper-console-body');
+    consoleBodyNode = body;
     if (!lastState) {
       const checking = el('section', 'reaper-console-checking');
       checking.appendChild(el('span', 'reaper-console-spinner'));
@@ -977,6 +1835,7 @@
     panel.appendChild(body);
     host.appendChild(backdrop);
     host.appendChild(panel);
+    if (previousScroll > 0) body.scrollTop = previousScroll;
   }
 
   function open(options) {
@@ -1002,16 +1861,28 @@
       });
     }
     renderConsole();
+    // An open console polls at the faster cadence (PRD 4.1 item 8).
+    syncPolling();
     void refresh();
     if (!catalogLoaded) void loadActions();
     if (!scriptsLoaded) void loadScripts();
     if (!proposalsLoaded) void loadProposals();
+    if (!pendingPlanLoaded) void loadPlan();
     return true;
   }
 
   function close(options) {
     if (!consoleOpen) return false;
     consoleOpen = false;
+    consoleBodyNode = null;
+    editingIndex = 0;
+    pendingEdit = null;
+    stripNotice = null;
+    openPalette = 0;
+    if (dragState) detachDragListeners();
+    dragState = null;
+    // Back to the slower map cadence now that nobody is editing.
+    syncPolling();
     const host = typeof document === 'undefined' ? null : document.getElementById(CONSOLE_HOST_ID);
     if (host) {
       host.hidden = true;
@@ -1104,6 +1975,35 @@
     _lastRun: () => lastRun,
     _polling: () => pollTimer !== null,
     _openSetupFix: openSetupFix,
+    _toasts: () => toasts,
+    _addToast: addToast,
+    _undoFromToast: undoFromToast,
+    _renameTrack: renameTrack,
+    _setTrackColor: setTrackColor,
+    _setTrackToggle: setTrackToggle,
+    _undoTrackEdit: undoTrackEdit,
+    _beginTrackRename: beginTrackRename,
+    _cancelTrackRename: cancelTrackRename,
+    _editingIndex: () => editingIndex,
+    _pendingEdit: () => pendingEdit,
+    _stripNotice: () => stripNotice,
+    _pollIntervalMs: () => pollTimerIntervalMs,
+    _openPalette: () => openPalette,
+    _beginDrag: beginDrag,
+    _dragOverIndex: dragOverIndex,
+    _endDrag: endDrag,
+    _cancelDrag: cancelDrag,
+    _dragState: () => dragState,
+    _moveTrack: moveTrack,
+    _setPendingPlan: plan => {
+      pendingPlan = plan;
+      pendingPlanLoaded = true;
+      if (consoleOpen) renderConsole();
+    },
+    _pendingPlan: () => pendingPlan,
+    _loadPlan: loadPlan,
+    _applyPlan: applyPlan,
+    _cancelPlan: cancelPlan,
     _resetForTest: () => {
       stopPolling();
       workspaceId = '';
@@ -1112,6 +2012,7 @@
       lastState = null;
       lastMeaningfulState = '';
       consoleOpen = false;
+      consoleBodyNode = null;
       consoleTrigger = null;
       consoleOverlayId = '';
       catalog = [];
@@ -1126,6 +2027,20 @@
       actionRequestInFlight = false;
       pendingAction = null;
       lastRun = null;
+      editingIndex = 0;
+      pendingEdit = null;
+      stripNotice = null;
+      trackRequestInFlight = false;
+      openPalette = 0;
+      if (dragState) detachDragListeners();
+      dragState = null;
+      pendingPlan = null;
+      pendingPlanLoaded = false;
+      planRequestInFlight = false;
+      toasts.forEach(toast => {
+        if (toast.timer && typeof clearTimeout === 'function') clearTimeout(toast.timer);
+      });
+      toasts = [];
     }
   };
 

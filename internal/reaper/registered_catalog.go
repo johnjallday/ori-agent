@@ -66,9 +66,15 @@ func (c *Catalog) List() ([]Action, error) {
 		return nil, err
 	}
 	for _, script := range scripts {
+		// A custom script's own needs_confirmation flag decides its tier, per
+		// PRD 4.3 item 12 ("custom scripts flagged needs_confirmation").
+		tier := TierConfirm
+		if !script.NeedsConfirmation {
+			tier = TierSilent
+		}
 		actions = append(actions, Action{
 			ID: script.ID, Label: script.Name, Description: script.Description,
-			Source: ActionSourceCustom, Mutates: true, NeedsConfirmation: script.NeedsConfirmation,
+			Source: ActionSourceCustom, Mutates: true, NeedsConfirmation: script.NeedsConfirmation, Tier: tier,
 		})
 	}
 	return actions, nil
@@ -154,7 +160,7 @@ func ParseRegisteredActions(reader io.Reader) ([]Action, error) {
 		seen[key] = struct{}{}
 		actions = append(actions, Action{
 			ID: id, Label: label, Description: "Registered ReaScript: " + label,
-			Source: ActionSourceRegistered, Mutates: true, NeedsConfirmation: true,
+			Source: ActionSourceRegistered, Mutates: true, NeedsConfirmation: true, Tier: TierConfirm,
 		})
 	}
 	if err := scanner.Err(); err != nil {

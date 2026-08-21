@@ -249,21 +249,86 @@ func TestRunActionReturnsResultingStateAndEnforcesConfirmation(t *testing.T) {
 	}
 
 	insert := httptest.NewRecorder()
-	mux.ServeHTTP(insert, httptest.NewRequest(http.MethodPost, "/api/workspaces/mine/reaper/actions/40001/run", nil))
+	mux.ServeHTTP(insert, httptest.NewRequest(http.MethodPost, "/api/workspaces/mine/reaper/actions/1013/run", nil))
 	var insertBody ActionRunResponse
 	if err := json.Unmarshal(insert.Body.Bytes(), &insertBody); err != nil {
 		t.Fatal(err)
 	}
 	if insert.Code != http.StatusConflict || insertBody.Outcome != "confirmation_required" || reader.runCalls != 1 {
-		t.Fatalf("unconfirmed insert = %d %+v, calls=%d", insert.Code, insertBody, reader.runCalls)
+		t.Fatalf("unconfirmed record = %d %+v, calls=%d", insert.Code, insertBody, reader.runCalls)
 	}
 
 	confirmed := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPost, "/api/workspaces/mine/reaper/actions/40001/run", strings.NewReader(`{"confirmed":true}`))
+	request := httptest.NewRequest(http.MethodPost, "/api/workspaces/mine/reaper/actions/1013/run", strings.NewReader(`{"confirmed":true}`))
 	request.Header.Set("Content-Type", "application/json")
 	mux.ServeHTTP(confirmed, request)
-	if confirmed.Code != http.StatusOK || reader.runCalls != 2 || reader.runActionID != "40001" {
-		t.Fatalf("confirmed insert = %d %s, reader=%+v", confirmed.Code, confirmed.Body.String(), reader)
+	if confirmed.Code != http.StatusOK || reader.runCalls != 2 || reader.runActionID != "1013" {
+		t.Fatalf("confirmed record = %d %s, reader=%+v", confirmed.Code, confirmed.Body.String(), reader)
+	}
+}
+
+func TestRunActionTier1RunsImmediatelyAndCarriesAnUndoDescriptor(t *testing.T) {
+	root := t.TempDir()
+	store := &testStore{root: root, workspaces: map[string]*workspace.Workspace{}}
+	store.workspaces["mine"] = reaperHTTPWorkspace(t, root, "mine", userprofile.LocalUserID)
+	reader := &stateReader{runState: reaper.State{Connected: true, PlayState: "stopped", Tracks: []reaper.Track{}}}
+	handler := NewHandler(store, testUser(userprofile.LocalUserID), reader, nil)
+	mux := http.NewServeMux()
+	handler.Register(mux)
+
+	for _, id := range []string{"40364", "40001"} {
+		recorder := httptest.NewRecorder()
+		mux.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/api/workspaces/mine/reaper/actions/"+id+"/run", nil))
+		var body ActionRunResponse
+		if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		if recorder.Code != http.StatusOK || body.Outcome != "ok" {
+			t.Fatalf("tier 1 action %s ran without confirmation = %d %+v", id, recorder.Code, body)
+		}
+		if body.Undo == nil || body.Undo.Summary == "" || body.Undo.CommandID != "40029" {
+			t.Fatalf("tier 1 action %s missing undo descriptor: %+v", id, body)
+		}
+	}
+
+	for _, id := range []string{"40029", "40030"} {
+		recorder := httptest.NewRecorder()
+		mux.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/api/workspaces/mine/reaper/actions/"+id+"/run", nil))
+		var body ActionRunResponse
+		if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		if recorder.Code != http.StatusOK || body.Outcome != "ok" {
+			t.Fatalf("undo/redo action %s ran without confirmation = %d %+v", id, recorder.Code, body)
+		}
+		if body.Undo != nil {
+			t.Fatalf("undo/redo action %s must not itself offer an undo toast: %+v", id, body)
+		}
+	}
+}
+
+func TestRunActionTier2StillRequiresConfirmedFlag(t *testing.T) {
+	root := t.TempDir()
+	store := &testStore{root: root, workspaces: map[string]*workspace.Workspace{}}
+	store.workspaces["mine"] = reaperHTTPWorkspace(t, root, "mine", userprofile.LocalUserID)
+	reader := &stateReader{runState: reaper.State{Connected: true, PlayState: "stopped", Tracks: []reaper.Track{}}}
+	handler := NewHandler(store, testUser(userprofile.LocalUserID), reader, nil)
+	mux := http.NewServeMux()
+	handler.Register(mux)
+
+	for _, id := range []string{"1013", "40026", "_RSdeadBEEF"} {
+		recorder := httptest.NewRecorder()
+		mux.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/api/workspaces/mine/reaper/actions/"+id+"/run", nil))
+		var body ActionRunResponse
+		if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		if recorder.Code != http.StatusConflict || body.Outcome != "confirmation_required" {
+			t.Fatalf("tier 2 action %s ran without confirmation = %d %+v", id, recorder.Code, body)
+		}
+	}
+	if reader.runCalls != 0 {
+		t.Fatalf("tier 2 actions reached the runner without confirmation: calls=%d", reader.runCalls)
 	}
 }
 
@@ -541,7 +606,7 @@ func TestAgentToolsRequireExactRuntimeGrantAndShareRunPolicy(t *testing.T) {
 	reader := &stateReader{runState: reaper.State{Connected: true, PlayState: "playing", Tracks: []reaper.Track{}}}
 	handler := NewHandler(store, testUser(userprofile.LocalUserID), reader, nil)
 	tools := handler.AgentTools("mine", "agent-1")
-	if len(tools) != 3 {
+	if len(tools) != 4 {
 		t.Fatalf("agent tools = %d", len(tools))
 	}
 	if _, err := tools[0].Call(context.Background(), `{}`); !errors.Is(err, ErrAgentRuntimeGrantRequired) {
@@ -564,11 +629,11 @@ func TestAgentToolsRequireExactRuntimeGrantAndShareRunPolicy(t *testing.T) {
 			runToolIndex = i
 		}
 	}
-	unconfirmed, err := tools[runToolIndex].Call(context.Background(), `{"action_id":"40001"}`)
+	unconfirmed, err := tools[runToolIndex].Call(context.Background(), `{"action_id":"1013"}`)
 	if err != nil || !strings.Contains(unconfirmed, `"outcome":"confirmation_required"`) || reader.runCalls != 0 {
 		t.Fatalf("agent confirmation = %q, err=%v, calls=%d", unconfirmed, err, reader.runCalls)
 	}
-	result, err := tools[runToolIndex].Call(context.Background(), `{"action_id":"40001","confirmed":true}`)
+	result, err := tools[runToolIndex].Call(context.Background(), `{"action_id":"1013","confirmed":true}`)
 	if err != nil || !strings.Contains(result, `"outcome":"ok"`) || reader.runCalls != 1 {
 		t.Fatalf("agent run = %q, err=%v, calls=%d", result, err, reader.runCalls)
 	}

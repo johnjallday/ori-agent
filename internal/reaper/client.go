@@ -48,20 +48,40 @@ type State struct {
 	TrackCount    int       `json:"track_count"`
 	Tracks        []Track   `json:"tracks"`
 	CheckedAt     time.Time `json:"checked_at"`
+	// TrackEditingAvailable reports whether the script runner is installed and
+	// ready. REAPER can be connected while the runner is missing, in which case
+	// the console renders strips read-only instead of offering dead controls.
+	TrackEditingAvailable bool `json:"track_editing_available"`
 }
 
 // Track is one non-master track. Peak values are parsed for protocol coverage,
 // but callers must not use them to decide whether station state meaningfully
 // changed: live meters move continuously.
+//
+// Color is REAPER's raw I_CUSTOMCOLOR integer, including the 0x1000000 "has a
+// custom color" flag bit REAPER itself sets. It comes free with every TRACK
+// line read, verified against a live session (see tasks-reaper-track-strips.md
+// group 3.1): Web Remote's last TRACK field is I_CUSTOMCOLOR verbatim, so no
+// runner round trip is needed to keep color current on every poll.
 type Track struct {
 	Index       int     `json:"index"`
 	Name        string  `json:"name"`
 	Muted       bool    `json:"muted"`
 	Soloed      bool    `json:"soloed"`
 	Armed       bool    `json:"armed"`
+	Color       int64   `json:"color"`
 	PeakLeftDB  float64 `json:"peak_left_db"`
 	PeakRightDB float64 `json:"peak_right_db"`
 }
+
+// HasCustomColor reports whether REAPER has assigned this track an explicit
+// color, distinct from Color being zero for an uncolored track that also
+// happens to want black.
+func (t Track) HasCustomColor() bool {
+	return t.Color&trackCustomColorFlag != 0
+}
+
+const trackCustomColorFlag = 0x1000000
 
 // ProjectSource is resolved from trusted persisted workspace metadata by the
 // HTTP layer. Path is the canonical .rpp used to read tempo; EntryPath supplies
@@ -284,14 +304,17 @@ func parseTracks(body []byte) ([]Track, error) {
 			continue
 		}
 		fields := responseFields(line)
-		if len(fields) < 8 || fields[0] != "TRACK" {
+		// 14 fields as of REAPER 7: TRACK, index, name, flags, volume, pan,
+		// peakL, peakR, and four more ending in I_CUSTOMCOLOR at index 13.
+		if len(fields) < 14 || fields[0] != "TRACK" {
 			return nil, ErrMalformedResponse
 		}
 		index, indexErr := strconv.Atoi(fields[1])
 		flags, flagsErr := strconv.Atoi(fields[3])
 		peakLeft, leftErr := strconv.ParseFloat(fields[6], 64)
 		peakRight, rightErr := strconv.ParseFloat(fields[7], 64)
-		if indexErr != nil || flagsErr != nil || leftErr != nil || rightErr != nil {
+		color, colorErr := strconv.ParseInt(fields[13], 10, 64)
+		if indexErr != nil || flagsErr != nil || leftErr != nil || rightErr != nil || colorErr != nil {
 			return nil, ErrMalformedResponse
 		}
 		if index == 0 {
@@ -303,6 +326,7 @@ func parseTracks(body []byte) ([]Track, error) {
 			Muted:       flags&8 != 0,
 			Soloed:      flags&16 != 0,
 			Armed:       flags&64 != 0,
+			Color:       color,
 			PeakLeftDB:  peakLeft / 100,
 			PeakRightDB: peakRight / 100,
 		})
