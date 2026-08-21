@@ -23,6 +23,7 @@ const (
 	TrackEditMute   = "mute"
 	TrackEditSolo   = "solo"
 	TrackEditArm    = "arm"
+	TrackEditMove   = "move"
 
 	// receiptFileName sits beside last_status.txt under the canonical runner
 	// root and is cleared before every run.
@@ -55,6 +56,7 @@ type TrackEdit struct {
 	NewName      string // TrackEditRename
 	NewColor     int64  // TrackEditColor
 	NewBool      bool   // TrackEditMute, TrackEditSolo, TrackEditArm
+	NewIndex     int    // TrackEditMove, 1-based target position
 }
 
 // RenameEdit builds a guarded rename.
@@ -81,6 +83,12 @@ func ArmEdit(index int, expectedName string, armed bool) TrackEdit {
 	return TrackEdit{Kind: TrackEditArm, Index: index, ExpectedName: expectedName, NewBool: armed}
 }
 
+// MoveEdit builds a guarded reorder from a 1-based source position to a
+// 1-based target position.
+func MoveEdit(index int, expectedName string, newIndex int) TrackEdit {
+	return TrackEdit{Kind: TrackEditMove, Index: index, ExpectedName: expectedName, NewIndex: newIndex}
+}
+
 // Inverse returns the edit that reverses this one, guarded on the value Ori
 // wrote. Applying it is only correct when the forward edit actually applied,
 // so callers must build it from the receipt rather than from hope. prior is
@@ -94,6 +102,13 @@ func (e TrackEdit) Inverse(prior string) TrackEdit {
 		return TrackEdit{
 			Kind: e.Kind, Index: e.Index, ExpectedName: e.ExpectedName,
 			NewBool: strings.TrimSpace(prior) == "1",
+		}
+	case TrackEditMove:
+		// The move left the name unchanged, so the guard still matches; only
+		// the position to check has moved, to where the forward edit put it.
+		priorIndex, _ := strconv.Atoi(strings.TrimSpace(prior))
+		return TrackEdit{
+			Kind: TrackEditMove, Index: e.NewIndex, ExpectedName: e.ExpectedName, NewIndex: priorIndex,
 		}
 	default: // TrackEditRename
 		// The forward rename changed what identifies the track going forward;
@@ -124,6 +139,12 @@ func (e TrackEdit) Validate() error {
 		}
 	case TrackEditMute, TrackEditSolo, TrackEditArm:
 		// NewBool has no invalid values.
+	case TrackEditMove:
+		// A target beyond the current track count is rejected by the caller,
+		// which knows the live count; this only rejects structural nonsense.
+		if e.NewIndex < 1 {
+			return ErrInvalidTrackEdit
+		}
 	default:
 		return ErrInvalidTrackEdit
 	}
@@ -195,6 +216,23 @@ func (e TrackEdit) mutationLua() string {
 		// SetMediaTrackInfo_Value write — verified against live REAPER
 		// (tasks-reaper-track-strips.md group 3.2).
 		return e.toggleLua("I_RECARM", "reaper.CSurf_OnRecArmChange(tr, "+luaBool(e.NewBool)+")", "arm")
+	case TrackEditMove:
+		// The 0-based beforeIndex REAPER wants depends on direction, verified
+		// against live REAPER (tasks-reaper-track-strips.md group 4.1): moving
+		// a track past its own original slot shifts everything after it down
+		// by one, so a forward move needs the target itself, not target-1.
+		beforeIndex := e.NewIndex - 1
+		if e.NewIndex > e.Index {
+			beforeIndex = e.NewIndex
+		}
+		return "reaper.Undo_BeginBlock()\n" +
+			"reaper.SetOnlyTrackSelected(tr)\n" +
+			"reaper.ReorderSelectedTracks(" + strconv.Itoa(beforeIndex) + ", 0)\n" +
+			"reaper.Undo_EndBlock(\"Ori: move track\", -1)\n" +
+			"reaper.TrackList_AdjustWindows(false)\n" +
+			"reaper.UpdateArrange()\n\n" +
+			// The source position was already known without reading REAPER.
+			"write_receipt(\"applied\\n\" .. index)\n"
 	default: // TrackEditRename
 		return "local new_value = " + luaString(e.NewName) + "\n" +
 			"reaper.Undo_BeginBlock()\n" +

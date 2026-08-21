@@ -51,7 +51,8 @@ func trackEditHandler(t *testing.T, runner TrackEditRunner) *http.ServeMux {
 	store.workspaces["mine"] = reaperHTTPWorkspace(t, root, "mine", userprofile.LocalUserID)
 	reader := &stateReader{state: reaper.State{
 		Connected: true, PlayState: "stopped",
-		Tracks: []reaper.Track{{Index: 1, Name: "Drums"}, {Index: 2, Name: "Bass"}},
+		Tracks:     []reaper.Track{{Index: 1, Name: "Drums"}, {Index: 2, Name: "Bass"}},
+		TrackCount: 2,
 	}}
 	handler := NewHandler(store, testUser(userprofile.LocalUserID), reader, nil)
 	if runner != nil {
@@ -357,6 +358,75 @@ func TestToggleEndpointGuardFailureAppliesNothing(t *testing.T) {
 		`{"value":true,"expected_name":"Drums"}`)
 	if recorder.Code != http.StatusConflict || body.Code != "track_list_changed" || body.Outcome == "ok" {
 		t.Fatalf("mute guard failure = %d %+v", recorder.Code, body)
+	}
+}
+
+func TestMoveTrackAppliesTheGuardedEditAndStoresAnUndoRecord(t *testing.T) {
+	runner := &trackRunnerStub{
+		available: true,
+		receipts:  []reaper.EditReceipt{{Applied: true, Prior: "1"}},
+	}
+	mux := trackEditHandler(t, runner)
+
+	recorder, body := postTrackEdit(t, mux, "/api/workspaces/mine/reaper/tracks/1/move",
+		`{"new_index":2,"expected_name":"Drums"}`)
+	if recorder.Code != http.StatusOK || body.Outcome != "ok" {
+		t.Fatalf("move = %d %+v", recorder.Code, body)
+	}
+	edit := runner.edits[0]
+	if edit.Kind != reaper.TrackEditMove || edit.Index != 1 || edit.NewIndex != 2 || edit.ExpectedName != "Drums" {
+		t.Fatalf("guarded edit = %+v", edit)
+	}
+	if body.Undo == nil || !strings.Contains(body.Undo.Summary, "Moved") {
+		t.Fatalf("undo descriptor = %+v", body.Undo)
+	}
+
+	// Undo restores the prior position, guarded on the name at the new spot.
+	undoRecorder, undoBody := postTrackEdit(t, mux, "/api/workspaces/mine/reaper/tracks/undo", "")
+	if undoRecorder.Code != http.StatusOK || undoBody.Outcome != "ok" {
+		t.Fatalf("undo = %d %+v", undoRecorder.Code, undoBody)
+	}
+	inverse := runner.edits[1]
+	if inverse.Kind != reaper.TrackEditMove || inverse.Index != 2 || inverse.NewIndex != 1 || inverse.ExpectedName != "Drums" {
+		t.Fatalf("move inverse = %+v", inverse)
+	}
+}
+
+func TestMoveTrackRejectsAnOutOfRangeTargetBeforeGeneratingLua(t *testing.T) {
+	runner := &trackRunnerStub{available: true}
+	mux := trackEditHandler(t, runner)
+
+	// The stub state has two tracks, so position 5 is out of range.
+	recorder, body := postTrackEdit(t, mux, "/api/workspaces/mine/reaper/tracks/1/move",
+		`{"new_index":5,"expected_name":"Drums"}`)
+	if recorder.Code != http.StatusBadRequest || body.Code != "invalid_track_edit" {
+		t.Fatalf("out-of-range move = %d %+v", recorder.Code, body)
+	}
+	if runner.calls != 0 {
+		t.Fatalf("an out-of-range move reached REAPER: %d calls", runner.calls)
+	}
+
+	zero, zeroBody := postTrackEdit(t, mux, "/api/workspaces/mine/reaper/tracks/1/move",
+		`{"new_index":0,"expected_name":"Drums"}`)
+	if zero.Code != http.StatusBadRequest || zeroBody.Code != "invalid_track_edit" {
+		t.Fatalf("zero target = %d %+v", zero.Code, zeroBody)
+	}
+	if runner.calls != 0 {
+		t.Fatalf("a zero target reached REAPER: %d calls", runner.calls)
+	}
+}
+
+func TestMoveTrackGuardFailureAppliesNothing(t *testing.T) {
+	runner := &trackRunnerStub{
+		available: true,
+		receipts:  []reaper.EditReceipt{{Applied: false}},
+	}
+	mux := trackEditHandler(t, runner)
+
+	recorder, body := postTrackEdit(t, mux, "/api/workspaces/mine/reaper/tracks/1/move",
+		`{"new_index":2,"expected_name":"Drums"}`)
+	if recorder.Code != http.StatusConflict || body.Code != "track_list_changed" || body.Outcome == "ok" {
+		t.Fatalf("move guard failure = %d %+v", recorder.Code, body)
 	}
 }
 

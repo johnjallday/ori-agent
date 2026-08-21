@@ -6970,7 +6970,7 @@ button.ws-cmd-rpg-class-card:focus-visible {
 .reaper-console-track {
   position: relative;
   display: grid;
-  grid-template-columns: 2.5rem auto minmax(0, 1fr) auto;
+  grid-template-columns: auto 2.5rem auto minmax(0, 1fr) auto;
   gap: 0.7rem;
   align-items: center;
   min-height: 2.8rem;
@@ -6978,6 +6978,90 @@ button.ws-cmd-rpg-class-card:focus-visible {
   background: rgba(13, 20, 21, 0.88);
   border: 1px solid rgba(173, 192, 184, 0.12);
   border-left: 2px solid rgba(94, 208, 167, 0.36);
+  touch-action: none;
+}
+
+.reaper-console-track.is-dragging {
+  opacity: 0.5;
+  border-left-color: #5ed0a7;
+}
+
+/* --- Drag grip + keyboard move equivalent --- */
+.reaper-console-track-grip-group {
+  display: grid;
+  grid-template-columns: auto auto;
+  grid-template-rows: repeat(2, auto);
+  align-items: center;
+  column-gap: 0.05rem;
+}
+
+.reaper-console-track-grip {
+  grid-row: 1 / -1;
+}
+
+.reaper-console-track-move.is-up {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.reaper-console-track-move.is-down {
+  grid-column: 2;
+  grid-row: 2;
+}
+
+.reaper-console-track-grip {
+  display: grid;
+  place-items: center;
+  width: 1.3rem;
+  height: 1.7rem;
+  padding: 0;
+  color: rgba(173, 192, 184, 0.5);
+  background: transparent;
+  border: none;
+  font-size: 0.85rem;
+  line-height: 1;
+  cursor: grab;
+  touch-action: none;
+}
+
+.reaper-console-track-grip:hover:not(:disabled) {
+  color: rgba(239, 245, 241, 0.85);
+}
+
+.reaper-console-track-grip:disabled {
+  cursor: default;
+  opacity: 0.35;
+}
+
+.reaper-console-track-move {
+  display: grid;
+  place-items: center;
+  width: 1.1rem;
+  height: 0.85rem;
+  padding: 0;
+  color: rgba(173, 192, 184, 0.4);
+  background: transparent;
+  border: none;
+  font-size: 0.5rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.reaper-console-track-move:hover:not(:disabled) {
+  color: rgba(239, 245, 241, 0.85);
+}
+
+.reaper-console-track-move:disabled {
+  cursor: default;
+  opacity: 0.25;
+}
+
+.reaper-console-track-drop-indicator {
+  height: 0.2rem;
+  margin: 0 0.2rem;
+  background: #5ed0a7;
+  border-radius: 2px;
+  box-shadow: 0 0 8px rgba(94, 208, 167, 0.7);
 }
 
 .reaper-console-track-index {
@@ -7347,7 +7431,7 @@ button.reaper-console-track-name:disabled {
     flex-basis: auto;
   }
   .reaper-console-track {
-    grid-template-columns: 2rem auto minmax(0, 1fr);
+    grid-template-columns: auto 2rem auto minmax(0, 1fr);
   }
   .reaper-console-track-chips {
     grid-column: 1 / -1;

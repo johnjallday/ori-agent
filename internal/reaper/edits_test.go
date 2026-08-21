@@ -196,6 +196,69 @@ func TestColorInverseParsesThePriorIntegerGuardedOnTheSameName(t *testing.T) {
 	}
 }
 
+func TestMoveEditValidatesTargetPosition(t *testing.T) {
+	if err := MoveEdit(2, "Bass", 0).Validate(); !errors.Is(err, ErrInvalidTrackEdit) {
+		t.Fatalf("target 0 = %v, want ErrInvalidTrackEdit", err)
+	}
+	if err := MoveEdit(2, "Bass", -1).Validate(); !errors.Is(err, ErrInvalidTrackEdit) {
+		t.Fatalf("negative target = %v, want ErrInvalidTrackEdit", err)
+	}
+	if err := MoveEdit(2, "Bass", 4).Validate(); err != nil {
+		t.Fatalf("valid move rejected: %v", err)
+	}
+}
+
+func TestMoveEditLuaUsesTheVerifiedDirectionalBeforeIndex(t *testing.T) {
+	// Verified against live REAPER (tasks-reaper-track-strips.md group 4.1):
+	// backward moves use target-1; forward moves use target, uncompensated.
+	cases := []struct {
+		name         string
+		source, dest int
+		wantBefore   int
+	}{
+		{"backward to first", 3, 1, 0},
+		{"forward to end", 2, 4, 4},
+		{"adjacent forward", 1, 2, 2},
+		{"no-op position", 2, 2, 1},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			lua, err := MoveEdit(testCase.source, "Kick", testCase.dest).Lua("/tmp/receipt.txt")
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := "reaper.ReorderSelectedTracks(" + strconv.Itoa(testCase.wantBefore) + ", 0)"
+			if !strings.Contains(lua, want) {
+				t.Fatalf("missing %q:\n%s", want, lua)
+			}
+		})
+	}
+}
+
+func TestMoveEditLuaGuardsOnNameAndSelectsBeforeReordering(t *testing.T) {
+	lua, err := MoveEdit(2, "Bass", 4).Lua("/tmp/receipt.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`if not ok or current ~= expected then`,
+		`reaper.SetOnlyTrackSelected(tr)`,
+		`write_receipt("applied\n" .. index)`,
+	} {
+		if !strings.Contains(lua, want) {
+			t.Fatalf("generated Lua missing %q:\n%s", want, lua)
+		}
+	}
+}
+
+func TestMoveInverseGuardsOnTheNewPositionAndRestoresTheOldOne(t *testing.T) {
+	forward := MoveEdit(2, "Bass", 4)
+	inverse := forward.Inverse("2")
+	if inverse.Kind != TrackEditMove || inverse.Index != 4 || inverse.ExpectedName != "Bass" || inverse.NewIndex != 2 {
+		t.Fatalf("inverse = %+v", inverse)
+	}
+}
+
 func TestInverseRestoresThePriorNameGuardedOnWhatOriWrote(t *testing.T) {
 	forward := RenameEdit(2, "Drums", "Kick")
 	inverse := forward.Inverse("Drums")

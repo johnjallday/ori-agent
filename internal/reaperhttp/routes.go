@@ -14,6 +14,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/workspaces/{workspaceID}/reaper/tracks/{index}/mute", h.MuteTrack)
 	mux.HandleFunc("POST /api/workspaces/{workspaceID}/reaper/tracks/{index}/solo", h.SoloTrack)
 	mux.HandleFunc("POST /api/workspaces/{workspaceID}/reaper/tracks/{index}/arm", h.ArmTrack)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/reaper/tracks/{index}/move", h.MoveTrack)
 	mux.HandleFunc("POST /api/workspaces/{workspaceID}/reaper/tracks/undo", h.UndoTrackEdit)
 	mux.HandleFunc("GET /api/workspaces/{workspaceID}/reaper/scripts", h.ListScripts)
 	mux.HandleFunc("POST /api/workspaces/{workspaceID}/reaper/scripts", h.CreateScript)

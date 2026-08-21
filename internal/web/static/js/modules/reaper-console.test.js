@@ -38,13 +38,20 @@ class FakeNode {
   }
   appendChild(child) {
     this.children.push(child);
+    child.parent = this;
     return child;
   }
   setAttribute(name, value) {
     this.attributes.set(name, String(value));
   }
+  getAttribute(name) {
+    return this.attributes.has(name) ? this.attributes.get(name) : null;
+  }
   addEventListener(type, listener) {
     this.listeners.set(type, listener);
+  }
+  removeEventListener(type, listener) {
+    if (this.listeners.get(type) === listener) this.listeners.delete(type);
   }
   focus() {
     this.focused = true;
@@ -52,6 +59,18 @@ class FakeNode {
   dispatch(type, event) {
     const listener = this.listeners.get(type);
     if (listener) listener(event || { type });
+  }
+  // Minimal stand-in for real closest(): supports only the "[attr]" selector
+  // shape this module actually uses, walking the appendChild parent chain.
+  closest(selector) {
+    const match = /^\[([\w-]+)\]$/.exec(selector);
+    const attr = match ? match[1] : null;
+    let node = this;
+    while (node) {
+      if (attr && node.attributes && node.attributes.has(attr)) return node;
+      node = node.parent;
+    }
+    return null;
   }
 }
 
@@ -89,14 +108,27 @@ function makeDocument() {
     addEventListener(type, listener) {
       listeners.set(type, listener);
     },
+    removeEventListener(type, listener) {
+      if (listeners.get(type) === listener) listeners.delete(type);
+    },
     dispatchEvent(event) {
       const listener = listeners.get(event.type);
       if (listener) listener(event);
       return true;
     },
+    // Drag hit-testing stands in for document.elementFromPoint + closest():
+    // a test sets doc._elementFromPoint to a function returning a FakeNode
+    // (or null) rather than simulating real pixel geometry.
+    _elementFromPoint: null,
+    elementFromPoint(x, y) {
+      return typeof doc._elementFromPoint === 'function' ? doc._elementFromPoint(x, y) : null;
+    },
     _dispatch(type) {
       const listener = listeners.get(type);
       if (listener) listener({ type });
+    },
+    _hasListener(type) {
+      return listeners.has(type);
     }
   };
   doc.body = new FakeNode('body', doc);
@@ -958,6 +990,191 @@ test('Escape closes the color palette', () => {
   );
   popover.dispatch('keydown', { key: 'Escape' });
   assert.equal(consolePanel._openPalette(), 0);
+  consolePanel.close();
+});
+
+function threeTrackState() {
+  return liveTrackState([
+    { index: 1, name: 'Kick' },
+    { index: 2, name: 'Bass' },
+    { index: 3, name: 'Guitar' }
+  ]);
+}
+
+test('dragging the grip posts a move to the target index and clears the drop indicator', async () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  consolePanel._setState(threeTrackState());
+  consolePanel.open();
+
+  const host = documentStub.getElementById('reaperConsole');
+  const grips = findAll(host, 'reaper-console-track-grip');
+  assert.equal(grips.length, 3);
+  grips[0].dispatch('pointerdown', { preventDefault: () => {} });
+  assert.deepEqual(consolePanel._dragState(), {
+    sourceIndex: 1,
+    sourceName: 'Kick',
+    targetIndex: 1
+  });
+  assert.ok(
+    findOne(documentStub.getElementById('reaperConsole'), 'reaper-console-track-drop-indicator')
+  );
+
+  consolePanel._dragOverIndex(3);
+  assert.equal(consolePanel._dragState().targetIndex, 3);
+
+  const requests = [];
+  globalThis.fetch = async (path, options) => {
+    requests.push({ path, options });
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ ...threeTrackState(), outcome: 'ok', undo: { summary: 'Moved ‘Kick’' } })
+    };
+  };
+  await consolePanel._endDrag();
+
+  const move = requests.find(request => /tracks\/1\/move$/.test(request.path));
+  assert.ok(move, 'ending the drag should post to the move endpoint');
+  assert.deepEqual(JSON.parse(move.options.body), { new_index: 3, expected_name: 'Kick' });
+  assert.equal(consolePanel._dragState(), null);
+  consolePanel.close();
+});
+
+test('dropping back on the source position sends no request', async () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  consolePanel._setState(threeTrackState());
+  consolePanel.open();
+
+  consolePanel._beginDrag(2, 'Bass');
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return { ok: true, status: 200, json: async () => ({}) };
+  };
+  await consolePanel._endDrag();
+  assert.equal(calls, 0);
+  assert.equal(consolePanel._dragState(), null);
+  consolePanel.close();
+});
+
+test('Escape cancels an in-progress drag without applying anything', () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  consolePanel._setState(threeTrackState());
+  consolePanel.open();
+
+  consolePanel._beginDrag(1, 'Kick');
+  consolePanel._dragOverIndex(2);
+  assert.ok(
+    documentStub._hasListener('keydown'),
+    'a drag should register its own keydown listener'
+  );
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return { ok: true, status: 200, json: async () => ({}) };
+  };
+  documentStub.dispatchEvent({ type: 'keydown', key: 'Escape' });
+  assert.equal(consolePanel._dragState(), null);
+  assert.equal(calls, 0, 'cancelling a drag must not touch REAPER');
+  consolePanel.close();
+});
+
+test('pointer movement resolves the drop target through elementFromPoint', () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  consolePanel._setState(threeTrackState());
+  consolePanel.open();
+
+  const host = documentStub.getElementById('reaperConsole');
+  const grips = findAll(host, 'reaper-console-track-grip');
+  grips[0].dispatch('pointerdown', { preventDefault: () => {} });
+  assert.equal(consolePanel._dragState().targetIndex, 1);
+
+  const stripUnderPointer = findAll(
+    documentStub.getElementById('reaperConsole'),
+    'reaper-console-track'
+  )[2];
+  documentStub._elementFromPoint = () => stripUnderPointer;
+  documentStub.dispatchEvent({ type: 'pointermove', clientX: 10, clientY: 400 });
+  assert.equal(consolePanel._dragState().targetIndex, 3);
+  documentStub._elementFromPoint = null;
+
+  consolePanel._cancelDrag();
+  consolePanel.close();
+});
+
+test('move up and move down buttons are a keyboard-accessible equivalent to dragging', async () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  consolePanel._setState(threeTrackState());
+  consolePanel.open();
+
+  const host = documentStub.getElementById('reaperConsole');
+  const downButtons = findAll(host, 'reaper-console-track-move').filter(node =>
+    node.className.includes('is-down')
+  );
+  // Track 1 (Kick) can move down; the last track cannot.
+  const requests = [];
+  globalThis.fetch = async (path, options) => {
+    requests.push({ path, options });
+    return { ok: true, status: 200, json: async () => ({ ...threeTrackState(), outcome: 'ok' }) };
+  };
+  downButtons[0].dispatch('click');
+  await new Promise(resolve => setImmediate(resolve));
+  const move = requests.find(request => /tracks\/1\/move$/.test(request.path));
+  assert.ok(move);
+  assert.deepEqual(JSON.parse(move.options.body), { new_index: 2, expected_name: 'Kick' });
+
+  const lastDown = downButtons[downButtons.length - 1];
+  assert.equal(lastDown.disabled, true, 'the last track cannot move further down');
+  consolePanel.close();
+});
+
+test('a state change mid-drag is recorded but does not rebuild the panel', async () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  consolePanel._setState(threeTrackState());
+  consolePanel.open();
+
+  consolePanel._beginDrag(1, 'Kick');
+  const bodyBeforeChange = findOne(
+    documentStub.getElementById('reaperConsole'),
+    'reaper-console-body'
+  );
+
+  const changed = threeTrackState();
+  changed.position = '5.1.00';
+  globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => changed });
+  await consolePanel.refresh();
+
+  const bodyAfterChange = findOne(
+    documentStub.getElementById('reaperConsole'),
+    'reaper-console-body'
+  );
+  assert.equal(bodyAfterChange, bodyBeforeChange, 'the panel must not rebuild while dragging');
+
+  // Dropping resumes normal rendering.
+  await consolePanel._endDrag();
+  const bodyAfterDrop = findOne(
+    documentStub.getElementById('reaperConsole'),
+    'reaper-console-body'
+  );
+  assert.notEqual(bodyAfterDrop, bodyBeforeChange);
   consolePanel.close();
 });
 

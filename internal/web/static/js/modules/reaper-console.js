@@ -50,6 +50,11 @@
   // openPalette is the index of the strip whose color popover is open, 0 for
   // none. One strip at a time, per the Map's own popover convention.
   let openPalette = 0;
+  // dragState is null when no drag is active. sourceIndex/sourceName are
+  // captured at pointerdown so the eventual move is guarded on the name Ori
+  // read before the drag started; targetIndex tracks the current drop slot
+  // for the indicator and is what gets sent if the pointer is released.
+  let dragState = null;
 
   // A fixed REAPER-compatible swatch set plus "no color" (PRD open question 1:
   // fixed set over a full picker, to keep the popover small). Values already
@@ -164,7 +169,12 @@
       // At the one-second console cadence an unconditional re-render would
       // rebuild the panel every tick for no reason, so only redraw when the
       // state the console actually shows has moved.
-      if (consoleOpen && changed) renderConsole();
+      // A drag in progress suspends re-render entirely: the transport
+      // position or any other change arriving mid-gesture must not rebuild
+      // the list under the user's pointer (PRD 4.1 item 5 / group 4.6). The
+      // state itself is still recorded above, so the next explicit render —
+      // on drop or cancel — starts from current truth.
+      if (consoleOpen && changed && !dragState) renderConsole();
       return state;
     } catch (_error) {
       const failed = {
@@ -181,7 +191,12 @@
       };
       lastState = failed;
       const changed = publishIfChanged(failed);
-      if (consoleOpen && changed) renderConsole();
+      // A drag in progress suspends re-render entirely: the transport
+      // position or any other change arriving mid-gesture must not rebuild
+      // the list under the user's pointer (PRD 4.1 item 5 / group 4.6). The
+      // state itself is still recorded above, so the next explicit render —
+      // on drop or cancel — starts from current truth.
+      if (consoleOpen && changed && !dragState) renderConsole();
       return failed;
     } finally {
       requestInFlight = false;
@@ -601,6 +616,15 @@
     );
   }
 
+  async function moveTrack(index, expectedName, newIndex) {
+    return runTrackEdit(
+      index,
+      tracksApiPath(encodeURIComponent(index) + '/move'),
+      { new_index: newIndex, expected_name: String(expectedName == null ? '' : expectedName) },
+      {}
+    );
+  }
+
   async function undoTrackEdit() {
     const path = tracksApiPath('undo');
     if (!path || typeof fetch !== 'function') return false;
@@ -630,6 +654,88 @@
   function cancelTrackRename() {
     editingIndex = 0;
     if (consoleOpen) renderConsole();
+  }
+
+  // --- Drag-to-reorder ------------------------------------------------------
+  //
+  // Pointer coordinates are resolved through document.elementFromPoint, so the
+  // drag itself carries only logical track indices — the same functions a
+  // test can drive directly without simulating real pixel geometry. The
+  // 1-second poll is suspended for the whole gesture (PRD 4.1 item 5 / 4.6):
+  // a state change arriving mid-drag must not rebuild the list underneath the
+  // user's pointer.
+
+  function beginDrag(index, sourceName) {
+    if (!index) return;
+    dragState = { sourceIndex: index, sourceName: sourceName || '', targetIndex: index };
+    attachDragListeners();
+    if (consoleOpen) renderConsole();
+  }
+
+  function dragOverIndex(index) {
+    if (!dragState || !index || index === dragState.targetIndex) return;
+    dragState.targetIndex = index;
+    if (consoleOpen) renderConsole();
+  }
+
+  async function endDrag() {
+    if (!dragState) return;
+    const { sourceIndex, sourceName, targetIndex } = dragState;
+    detachDragListeners();
+    dragState = null;
+    if (targetIndex === sourceIndex) {
+      // Dropped back where it started: nothing to send, just resume normally.
+      if (consoleOpen) renderConsole();
+      return;
+    }
+    await moveTrack(sourceIndex, sourceName, targetIndex);
+  }
+
+  function cancelDrag() {
+    if (!dragState) return;
+    detachDragListeners();
+    dragState = null;
+    if (consoleOpen) renderConsole();
+  }
+
+  function handleDragPointerMove(event) {
+    if (
+      !dragState ||
+      typeof document === 'undefined' ||
+      typeof document.elementFromPoint !== 'function'
+    ) {
+      return;
+    }
+    const hit = document.elementFromPoint(event.clientX, event.clientY);
+    const strip =
+      hit && typeof hit.closest === 'function' ? hit.closest('[data-track-index]') : null;
+    const index = strip && Number(strip.getAttribute('data-track-index'));
+    if (index) dragOverIndex(index);
+  }
+
+  function handleDragPointerUp() {
+    void endDrag();
+  }
+
+  function handleDragKeydown(event) {
+    if (event.key === 'Escape') cancelDrag();
+  }
+
+  function attachDragListeners() {
+    if (typeof document === 'undefined' || typeof document.addEventListener !== 'function') return;
+    document.addEventListener('pointermove', handleDragPointerMove);
+    document.addEventListener('pointerup', handleDragPointerUp);
+    document.addEventListener('pointercancel', cancelDrag);
+    document.addEventListener('keydown', handleDragKeydown);
+  }
+
+  function detachDragListeners() {
+    if (typeof document === 'undefined' || typeof document.removeEventListener !== 'function')
+      return;
+    document.removeEventListener('pointermove', handleDragPointerMove);
+    document.removeEventListener('pointerup', handleDragPointerUp);
+    document.removeEventListener('pointercancel', cancelDrag);
+    document.removeEventListener('keydown', handleDragKeydown);
   }
 
   function stopPolling() {
@@ -1312,10 +1418,49 @@
     item.appendChild(chip);
   }
 
-  function renderTrackStrip(list, track, editable) {
+  function renderDragGrip(item, track, editable, trackCount) {
+    const group = el('span', 'reaper-console-track-grip-group');
+    const grip = button('⠿', 'reaper-console-track-grip', null);
+    grip.disabled = !editable;
+    grip.setAttribute('aria-label', 'Drag to reorder track ' + track.index);
+    grip.addEventListener('pointerdown', event => {
+      if (!editable) return;
+      event.preventDefault();
+      beginDrag(track.index, track.name || '');
+    });
+    group.appendChild(grip);
+
+    // Keyboard-accessible equivalent to dragging (PRD 4.1 item 5): move up
+    // and move down, each a normal guarded edit, not a drag gesture.
+    const up = button('▲', 'reaper-console-track-move is-up', () => {
+      if (!editable || track.index <= 1) return;
+      void moveTrack(track.index, track.name || '', track.index - 1);
+    });
+    up.disabled = !editable || track.index <= 1;
+    up.setAttribute('aria-label', 'Move track ' + track.index + ' up');
+    group.appendChild(up);
+
+    const down = button('▼', 'reaper-console-track-move is-down', () => {
+      if (!editable || track.index >= trackCount) return;
+      void moveTrack(track.index, track.name || '', track.index + 1);
+    });
+    down.disabled = !editable || track.index >= trackCount;
+    down.setAttribute('aria-label', 'Move track ' + track.index + ' down');
+    group.appendChild(down);
+
+    item.appendChild(group);
+  }
+
+  function renderTrackStrip(list, track, editable, trackCount) {
     const item = el('li', 'reaper-console-track');
     const pending = Boolean(pendingEdit && pendingEdit.index === track.index);
     if (pending) item.classList.add('is-pending');
+    if (dragState && dragState.sourceIndex === track.index) item.classList.add('is-dragging');
+    // Read by the pointer-drag hit test (document.elementFromPoint + closest)
+    // to resolve a screen position back to a logical track index.
+    item.setAttribute('data-track-index', String(track.index));
+
+    renderDragGrip(item, track, editable, trackCount);
     item.appendChild(
       el('span', 'reaper-console-track-index', String(track.index).padStart(2, '0'))
     );
@@ -1379,6 +1524,12 @@
     }
   }
 
+  function renderDropIndicator(list) {
+    const indicator = el('li', 'reaper-console-track-drop-indicator');
+    indicator.setAttribute('aria-hidden', 'true');
+    list.appendChild(indicator);
+  }
+
   function renderRunnerUnavailable(section) {
     const panel = el('div', 'reaper-console-track-degraded');
     panel.appendChild(
@@ -1410,7 +1561,13 @@
     if (!tracks.length) {
       list.appendChild(el('li', 'reaper-console-empty', 'No project tracks'));
     } else {
-      tracks.forEach(track => renderTrackStrip(list, track, editable));
+      const dropTarget = dragState ? dragState.targetIndex : 0;
+      tracks.forEach(track => {
+        if (dropTarget && track.index === dropTarget) renderDropIndicator(list);
+        renderTrackStrip(list, track, editable, tracks.length);
+      });
+      // The drop is past every strip Ori knows about (moving to the end).
+      if (dropTarget && dropTarget > tracks.length) renderDropIndicator(list);
     }
     if (stripNotice && !stripNotice.index) {
       const notice = el('li', 'reaper-console-track-notice', stripNotice.text);
@@ -1524,6 +1681,8 @@
     pendingEdit = null;
     stripNotice = null;
     openPalette = 0;
+    if (dragState) detachDragListeners();
+    dragState = null;
     // Back to the slower map cadence now that nobody is editing.
     syncPolling();
     const host = typeof document === 'undefined' ? null : document.getElementById(CONSOLE_HOST_ID);
@@ -1632,6 +1791,12 @@
     _stripNotice: () => stripNotice,
     _pollIntervalMs: () => pollTimerIntervalMs,
     _openPalette: () => openPalette,
+    _beginDrag: beginDrag,
+    _dragOverIndex: dragOverIndex,
+    _endDrag: endDrag,
+    _cancelDrag: cancelDrag,
+    _dragState: () => dragState,
+    _moveTrack: moveTrack,
     _resetForTest: () => {
       stopPolling();
       workspaceId = '';
@@ -1660,6 +1825,8 @@
       stripNotice = null;
       trackRequestInFlight = false;
       openPalette = 0;
+      if (dragState) detachDragListeners();
+      dragState = null;
       toasts.forEach(toast => {
         if (toast.timer && typeof clearTimeout === 'function') clearTimeout(toast.timer);
       });

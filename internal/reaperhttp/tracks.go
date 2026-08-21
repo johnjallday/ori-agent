@@ -52,6 +52,11 @@ type toggleTrackRequest struct {
 	ExpectedName string `json:"expected_name"`
 }
 
+type moveTrackRequest struct {
+	NewIndex     int    `json:"new_index"`
+	ExpectedName string `json:"expected_name"`
+}
+
 // undoRecord is the most recent single-track edit for one workspace, together
 // with the specific inverse that reverses it. Per PRD requirement 19 these are
 // in-memory and per-workspace; they need not survive a restart or a reload.
@@ -149,6 +154,73 @@ func (h *Handler) SoloTrack(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) ArmTrack(w http.ResponseWriter, r *http.Request) {
 	h.toggleTrack(w, r, reaper.ArmEdit)
+}
+
+func (h *Handler) MoveTrack(w http.ResponseWriter, r *http.Request) {
+	ws, ok := h.resolveWorkspace(w, r)
+	if !ok {
+		return
+	}
+	index, ok := trackIndexFromPath(w, r)
+	if !ok {
+		return
+	}
+	var request moveTrackRequest
+	if !decodeTrackEditRequest(w, r, &request) {
+		return
+	}
+	response, status := h.moveTrack(r.Context(), ws.ID, index, request)
+	_ = orihttp.RespondJSON(w, status, response)
+}
+
+func (h *Handler) moveTrack(ctx context.Context, workspaceID string, index int, request moveTrackRequest) (TrackEditResponse, int) {
+	if request.NewIndex < 1 {
+		return TrackEditResponse{
+			Outcome: "error", Code: "invalid_track_edit", ErrorReason: "That track position is not valid.",
+		}, http.StatusBadRequest
+	}
+	// Reject a move outside the current track count before any Lua is
+	// generated (PRD 4.2 item 11) — read live state once up front rather than
+	// letting the runner discover the target doesn't exist.
+	state, errResponse, status, ok := h.liveTrackState(ctx, workspaceID)
+	if !ok {
+		return errResponse, status
+	}
+	if request.NewIndex > state.TrackCount {
+		return TrackEditResponse{
+			State: state, Outcome: "error", Code: "invalid_track_edit",
+			ErrorReason: "That position is outside the current track count.",
+		}, http.StatusBadRequest
+	}
+	return h.applyGuardedTrackEdit(ctx, workspaceID, reaper.MoveEdit(index, request.ExpectedName, request.NewIndex))
+}
+
+// liveTrackState reads fresh state for a pre-check that must happen before any
+// Lua is generated. It mirrors the resolution applyTrackEdit performs so both
+// paths agree on what "unavailable" and "not selected" mean.
+func (h *Handler) liveTrackState(ctx context.Context, workspaceID string) (reaper.State, TrackEditResponse, int, bool) {
+	project, applies, err := h.projectSource(workspaceID)
+	if err != nil {
+		return reaper.State{}, TrackEditResponse{
+			Outcome: "error", Code: "reaper_unavailable",
+			ErrorReason: "Live REAPER control is not available for this workspace.",
+		}, http.StatusServiceUnavailable, false
+	}
+	if !applies {
+		return reaper.State{}, TrackEditResponse{
+			Outcome: "error", Code: "reaper_not_selected",
+			ErrorReason: "Live REAPER control is not selected for this workspace.",
+		}, http.StatusConflict, false
+	}
+	state, err := h.client.ReadState(ctx, project)
+	if err != nil {
+		return reaper.State{}, TrackEditResponse{
+			Outcome: "error", Code: "reaper_state_failed",
+			ErrorReason: "Live REAPER state could not be read.",
+		}, http.StatusBadGateway, false
+	}
+	state.Applies = true
+	return state, TrackEditResponse{}, http.StatusOK, true
 }
 
 func (h *Handler) toggleTrack(w http.ResponseWriter, r *http.Request, build func(index int, expectedName string, value bool) reaper.TrackEdit) {
@@ -343,6 +415,8 @@ func editSummary(edit reaper.TrackEdit) string {
 			return "Armed " + quoteForUser(edit.ExpectedName)
 		}
 		return "Disarmed " + quoteForUser(edit.ExpectedName)
+	case reaper.TrackEditMove:
+		return "Moved " + quoteForUser(edit.ExpectedName) + " to position " + strconv.Itoa(edit.NewIndex)
 	default:
 		return "Changed " + quoteForUser(edit.ExpectedName)
 	}
