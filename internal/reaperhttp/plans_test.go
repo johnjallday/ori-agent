@@ -256,3 +256,46 @@ func seedPlan(t *testing.T, handler *Handler, edits []reaper.TrackEdit) {
 		t.Fatal(err)
 	}
 }
+
+// The same boundary rule as the single-edit paths: no Web Remote port,
+// endpoint, or filesystem path may reach the browser through the plan
+// surface either, success or failure.
+func TestPlanResponsesNeverLeakTransportOrPathDetail(t *testing.T) {
+	forbidden := []string{"127.0.0.1", "localhost", "/_/", ".ori-reaper", "inbox.lua", "last_receipt", "last_status", ":2307", ":2308"}
+	assertClean := func(t *testing.T, body string) {
+		t.Helper()
+		for _, term := range forbidden {
+			if strings.Contains(body, term) {
+				t.Fatalf("response leaked %q: %s", term, body)
+			}
+		}
+	}
+
+	t.Run("guard failure and runner unavailable", func(t *testing.T) {
+		runner := &bulkRunnerStub{receipt: reaper.BulkReceipt{Applied: false, FailedIndices: []int{2}}}
+		handler, mux := planHandler(t, runner)
+		seedPlan(t, handler, []reaper.TrackEdit{reaper.RenameEdit(1, "Drums", "Kick")})
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodPost, "/api/workspaces/mine/reaper/track-plan/apply", strings.NewReader(`{"confirmed":true}`))
+		request.Header.Set("Content-Type", "application/json")
+		mux.ServeHTTP(recorder, request)
+		assertClean(t, recorder.Body.String())
+
+		runner.err = reaper.ErrRunnerUnavailable
+		seedPlan(t, handler, []reaper.TrackEdit{reaper.RenameEdit(1, "Drums", "Kick")})
+		unavailable := httptest.NewRecorder()
+		mux.ServeHTTP(unavailable, request.Clone(request.Context()))
+		assertClean(t, unavailable.Body.String())
+	})
+
+	t.Run("disconnected", func(t *testing.T) {
+		runner := &bulkRunnerStub{err: reaper.ErrActionDisconnected}
+		handler, mux := planHandler(t, runner)
+		seedPlan(t, handler, []reaper.TrackEdit{reaper.RenameEdit(1, "Drums", "Kick")})
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodPost, "/api/workspaces/mine/reaper/track-plan/apply", strings.NewReader(`{"confirmed":true}`))
+		request.Header.Set("Content-Type", "application/json")
+		mux.ServeHTTP(recorder, request)
+		assertClean(t, recorder.Body.String())
+	})
+}

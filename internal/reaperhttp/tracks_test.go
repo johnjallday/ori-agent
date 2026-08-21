@@ -431,29 +431,60 @@ func TestMoveTrackGuardFailureAppliesNothing(t *testing.T) {
 }
 
 // The boundary rule from the control-surface work: no Web Remote port,
-// endpoint, or filesystem path may reach the browser through any track path.
+// endpoint, or filesystem path may reach the browser through any track path
+// — rename, color, every toggle, move, and undo alike, on both the success
+// and the failure side of each.
 func TestTrackEditResponsesNeverLeakTransportOrPathDetail(t *testing.T) {
-	runner := &trackRunnerStub{
-		available: true,
-		receipts:  []reaper.EditReceipt{{Applied: false}},
-		errs:      []error{nil, reaper.ErrRunnerUnavailable},
-	}
-	mux := trackEditHandler(t, runner)
-
-	bodies := []string{}
-	for _, call := range []struct{ path, body string }{
-		{"/api/workspaces/mine/reaper/tracks/1/rename", `{"name":"Kick","expected_name":"Drums"}`},
-		{"/api/workspaces/mine/reaper/tracks/1/rename", `{"name":"Snare","expected_name":"Kick"}`},
-		{"/api/workspaces/mine/reaper/tracks/undo", ""},
-	} {
-		recorder, _ := postTrackEdit(t, mux, call.path, call.body)
-		bodies = append(bodies, recorder.Body.String())
-	}
-	for _, body := range bodies {
-		for _, forbidden := range []string{"127.0.0.1", "localhost", "/_/", ".ori-reaper", "inbox.lua", "last_receipt", "last_status", ":2307", ":2308"} {
-			if strings.Contains(body, forbidden) {
-				t.Fatalf("response leaked %q: %s", forbidden, body)
+	forbidden := []string{"127.0.0.1", "localhost", "/_/", ".ori-reaper", "inbox.lua", "last_receipt", "last_status", ":2307", ":2308"}
+	assertClean := func(t *testing.T, body string) {
+		t.Helper()
+		for _, term := range forbidden {
+			if strings.Contains(body, term) {
+				t.Fatalf("response leaked %q: %s", term, body)
 			}
 		}
 	}
+
+	t.Run("guard failure and runner unavailable", func(t *testing.T) {
+		runner := &trackRunnerStub{
+			available: true,
+			receipts:  []reaper.EditReceipt{{Applied: false}},
+			errs:      []error{nil, reaper.ErrRunnerUnavailable},
+		}
+		mux := trackEditHandler(t, runner)
+		for _, call := range []struct{ path, body string }{
+			{"/api/workspaces/mine/reaper/tracks/1/rename", `{"name":"Kick","expected_name":"Drums"}`},
+			{"/api/workspaces/mine/reaper/tracks/1/rename", `{"name":"Snare","expected_name":"Kick"}`},
+			{"/api/workspaces/mine/reaper/tracks/undo", ""},
+		} {
+			recorder, _ := postTrackEdit(t, mux, call.path, call.body)
+			assertClean(t, recorder.Body.String())
+		}
+	})
+
+	t.Run("color, mute, solo, arm, move", func(t *testing.T) {
+		runner := &trackRunnerStub{
+			available: true,
+			receipts:  []reaper.EditReceipt{{Applied: true, Prior: "0"}},
+		}
+		mux := trackEditHandler(t, runner)
+		for _, call := range []struct{ path, body string }{
+			{"/api/workspaces/mine/reaper/tracks/1/color", `{"color":16777471,"expected_name":"Drums"}`},
+			{"/api/workspaces/mine/reaper/tracks/1/mute", `{"value":true,"expected_name":"Drums"}`},
+			{"/api/workspaces/mine/reaper/tracks/1/solo", `{"value":true,"expected_name":"Drums"}`},
+			{"/api/workspaces/mine/reaper/tracks/1/arm", `{"value":true,"expected_name":"Drums"}`},
+			{"/api/workspaces/mine/reaper/tracks/1/move", `{"new_index":2,"expected_name":"Drums"}`},
+		} {
+			recorder, _ := postTrackEdit(t, mux, call.path, call.body)
+			assertClean(t, recorder.Body.String())
+		}
+	})
+
+	t.Run("disconnected", func(t *testing.T) {
+		runner := &trackRunnerStub{available: true, errs: []error{reaper.ErrActionDisconnected}}
+		mux := trackEditHandler(t, runner)
+		recorder, _ := postTrackEdit(t, mux, "/api/workspaces/mine/reaper/tracks/1/rename",
+			`{"name":"Kick","expected_name":"Drums"}`)
+		assertClean(t, recorder.Body.String())
+	})
 }

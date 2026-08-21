@@ -451,6 +451,30 @@ test('Undo and Redo never produce a toast of their own', async () => {
   consolePanel.close();
 });
 
+test('no strip controls render while REAPER is disconnected', () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  consolePanel._setState({
+    applies: true,
+    connected: false,
+    reason: 'reaper_unreachable',
+    tracks: []
+  });
+  consolePanel.open();
+
+  const host = documentStub.getElementById('reaperConsole');
+  // The offline panel, not a track list — even a track_editing_available:true
+  // left over from a prior connected state must not leak controls through.
+  assert.equal(findAll(host, 'reaper-console-track').length, 0);
+  assert.equal(findAll(host, 'reaper-console-track-grip').length, 0);
+  assert.equal(findAll(host, 'reaper-console-track-chip').length, 0);
+  assert.equal(findAll(host, 'reaper-console-track-swatch').length, 0);
+  assert.match(host.textContent, /REAPER not running/);
+  consolePanel.close();
+});
+
 test('a failed REAPER run is never rendered as success', async () => {
   consolePanel._resetForTest();
   consolePanel.init('ws-reaper');
@@ -862,6 +886,40 @@ test('the M/S/R chips reflect current state and toggle with a click', async () =
   consolePanel.close();
 });
 
+test('disconnect mid-edit reverts optimistically and says plainly nothing was applied — every operation', async () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  consolePanel.open();
+
+  // The same runTrackEdit path serves all four operations; a genuine network
+  // failure (not a 409) exercises the catch branch identically for each.
+  globalThis.fetch = async () => {
+    throw new Error('network unreachable');
+  };
+
+  assert.equal(await consolePanel._setTrackColor(1, 'Drums', 0), false);
+  assert.equal(consolePanel._pendingEdit(), null);
+  assert.match(consolePanel._stripNotice().text, /Nothing was applied/);
+
+  assert.equal(await consolePanel._setTrackToggle('mute', 1, 'Drums', true), false);
+  assert.equal(consolePanel._pendingEdit(), null);
+  assert.match(consolePanel._stripNotice().text, /Nothing was applied/);
+
+  assert.equal(await consolePanel._moveTrack(1, 'Drums', 2), false);
+  assert.equal(consolePanel._pendingEdit(), null);
+  assert.match(consolePanel._stripNotice().text, /Nothing was applied/);
+
+  // Each call above leaves its own fire-and-forget forced refresh() in
+  // flight against this same throwing mock. Swap in a benign mock so a stray
+  // late render can only ever land as harmless, then drain it before the
+  // next test starts.
+  globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => liveTrackState([]) });
+  await new Promise(resolve => setImmediate(resolve));
+  consolePanel.close();
+});
+
 test('a disabled chip on a read-only strip does not post', () => {
   consolePanel._resetForTest();
   consolePanel.init('ws-reaper');
@@ -882,6 +940,57 @@ test('a disabled chip on a read-only strip does not post', () => {
   assert.equal(chip.type, 'button');
   chip.dispatch('click');
   assert.equal(calls, 0);
+  consolePanel.close();
+});
+
+test('strip controls carry the correct accessible roles and states', () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  consolePanel._setState(
+    liveTrackState([{ index: 1, name: 'Kick', muted: true, soloed: false, armed: false, color: 0 }])
+  );
+  consolePanel.open();
+
+  const host = documentStub.getElementById('reaperConsole');
+
+  // Every strip control is a real <button> — keyboard-operable by default,
+  // Enter/Space activate it, and it participates in normal tab order.
+  for (const className of [
+    'reaper-console-track-grip',
+    'reaper-console-track-move',
+    'reaper-console-track-swatch',
+    'reaper-console-track-chip'
+  ]) {
+    for (const node of findAll(host, className)) {
+      assert.equal(node.tagName, 'BUTTON', `${className} should be a <button>`);
+    }
+  }
+
+  const muteChip = findAll(host, 'reaper-console-track-chip').find(chip =>
+    chip.attributes.get('aria-label').startsWith('Mute')
+  );
+  assert.equal(muteChip.attributes.get('aria-pressed'), 'true');
+
+  const swatch = findOne(host, 'reaper-console-track-swatch');
+  assert.equal(swatch.attributes.get('aria-haspopup'), 'true');
+  assert.equal(swatch.attributes.get('aria-expanded'), 'false');
+  swatch.dispatch('click');
+  assert.equal(
+    findOne(
+      documentStub.getElementById('reaperConsole'),
+      'reaper-console-track-swatch'
+    ).attributes.get('aria-expanded'),
+    'true'
+  );
+  assert.equal(
+    findOne(
+      documentStub.getElementById('reaperConsole'),
+      'reaper-console-color-popover'
+    ).attributes.get('role'),
+    'menu'
+  );
   consolePanel.close();
 });
 
@@ -1313,6 +1422,37 @@ test('a guard failure on apply keeps the plan pending and shows the notice', asy
   assert.equal(consolePanel._toasts().length, 0);
   const host = documentStub.getElementById('reaperConsole');
   assert.match(host.textContent, /nothing was applied/);
+  consolePanel.close();
+});
+
+test('a network failure during apply reverts and says plainly nothing was applied', async () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  consolePanel._setState(threeTrackState());
+  consolePanel._setPendingPlan(samplePlan());
+  consolePanel.open();
+
+  globalThis.fetch = async () => {
+    throw new Error('network unreachable');
+  };
+  assert.equal(await consolePanel._applyPlan(), false);
+  assert.equal(consolePanel._toasts().length, 0);
+  // The plan stays pending — a disconnect is not the same as a refusal, but
+  // either way nothing was applied and the console must say so plainly. Read
+  // the notice state directly: applyPlan's own forced refresh() races in the
+  // background against this same throwing mock, so which panel is on screen
+  // by the time this assertion runs is nondeterministic — the underlying
+  // notice text is not.
+  assert.ok(consolePanel._pendingPlan(), 'the plan should still be there to retry');
+  assert.match(consolePanel._stripNotice().text, /Nothing was applied/);
+
+  // applyPlan's own fire-and-forget forced refresh() is still in flight
+  // against this same throwing mock. Swap in a benign mock so a stray late
+  // render can only ever land as harmless, then drain it.
+  globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => threeTrackState() });
+  await new Promise(resolve => setImmediate(resolve));
   consolePanel.close();
 });
 
