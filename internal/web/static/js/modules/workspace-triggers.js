@@ -33,10 +33,7 @@
   }
 
   function getWorkspaceId() {
-    if (window.currentWorkspaceId) return window.currentWorkspaceId;
-    const parts = window.location.pathname.split('/');
-    if (parts[1] === 'workspaces' && parts[2]) return parts[2];
-    return '';
+    return String(window.currentWorkspaceId || document.body?.dataset?.workspaceId || '');
   }
 
   function setStatus(msg, kind) {

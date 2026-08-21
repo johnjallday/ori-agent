@@ -20,20 +20,25 @@ const LEGACY_STATE_KEY = 'note.tabs';
 const STATE_KEY_PREFIX = 'note.tabs.workspace.';
 
 function readInitialRoute() {
-  if (typeof window === 'undefined') return { mode: 'workspace', workspaceId: '', noteId: '' };
+  if (typeof window === 'undefined') {
+    return { mode: 'workspace', workspaceId: '', workspaceSlug: '', noteId: '' };
+  }
   const workspaceRoute = readWorkspaceNotesRoute(window.location.pathname);
   const focusedRoute = readFocusedNoteRoute(window.location.pathname);
   const page = typeof document !== 'undefined' ? document.getElementById('noteMainContent') : null;
   const mode = page?.dataset?.pageMode || (focusedRoute.noteId ? 'focused' : 'workspace');
-  const workspaceId = workspaceRoute.workspaceId || page?.dataset?.workspaceId || '';
+  // UUIDs come from server-rendered data. The path segment is only the slug.
+  const workspaceId = page?.dataset?.workspaceId || '';
+  const workspaceSlug = page?.dataset?.workspaceSlug || workspaceRoute.workspaceSlug || '';
   const noteId = workspaceRoute.noteId || focusedRoute.noteId || page?.dataset?.noteId || '';
-  return { mode, workspaceId, noteId };
+  return { mode, workspaceId, workspaceSlug, noteId };
 }
 
 const INITIAL_ROUTE = readInitialRoute();
 const NOTE_PAGE_MODE = INITIAL_ROUTE.mode === 'focused' ? 'focused' : 'workspace';
 const FOCUSED_NOTE_PAGE = NOTE_PAGE_MODE === 'focused';
 const WORKSPACE_ID = INITIAL_ROUTE.workspaceId;
+const WORKSPACE_SLUG = INITIAL_ROUTE.workspaceSlug;
 const NOTE_ID = INITIAL_ROUTE.noteId;
 let currentNote = null; // the note shown in the active pane
 let bundle = null; // NoteEditor.mount return value (single instance)
@@ -42,6 +47,7 @@ let switching = false; // re-entrancy guard while swapping content
 let pendingGenerateDraft = null; // last whole-note AI draft waiting to apply
 let creatingNoteFromTabStrip = false;
 let stateWorkspaceId = WORKSPACE_ID || null; // workspace scope for persisted tab state
+let stateWorkspaceSlug = WORKSPACE_SLUG || ''; // browser-route identity only
 
 // =============================================================================
 // State persistence (localStorage)
@@ -58,6 +64,10 @@ function noteWorkspaceId(note) {
 
 function currentWorkspaceId() {
   return stateWorkspaceId || noteWorkspaceId(currentNote) || WORKSPACE_ID || '';
+}
+
+function currentWorkspaceSlug() {
+  return stateWorkspaceSlug || WORKSPACE_SLUG || '';
 }
 
 function loadSavedState(fallbackNoteId, workspaceId) {
@@ -106,7 +116,10 @@ async function fetchWorkspaceName(workspaceId) {
     const resp = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}`);
     if (!resp.ok) return null;
     const data = await resp.json();
-    return data?.name || data?.workspace?.name || null;
+    const workspace = data?.folder || data?.workspace || data || {};
+    const slug = String(workspace.folder_slug || '').trim();
+    if (slug) stateWorkspaceSlug = slug;
+    return workspace.name || null;
   } catch (_) {
     return null;
   }
@@ -163,11 +176,11 @@ function showLoadError(message) {
   }
 }
 
-function populateBreadcrumb(note, workspaceName, workspaceId = currentWorkspaceId()) {
+function populateBreadcrumb(_note, workspaceName, workspaceSlug = currentWorkspaceSlug()) {
   const link = document.getElementById('notePageWorkspaceLink');
-  const id = workspaceId || noteWorkspaceId(note);
-  if (link && id) {
-    link.href = `/workspaces/${encodeURIComponent(id)}`;
+  const slug = workspaceSlug || currentWorkspaceSlug();
+  if (link && slug) {
+    link.href = `/workspaces/${encodeURIComponent(slug)}`;
     link.textContent = workspaceName || 'Workspace';
   }
 }
@@ -989,7 +1002,7 @@ async function loadNoteIntoActivePane(noteId) {
   resetPageAIAssistForCurrentNote(null);
   syncNoteTagsWidget();
   fetchWorkspaceName(stateWorkspaceId).then(name =>
-    populateBreadcrumb(currentNote, name, stateWorkspaceId)
+    populateBreadcrumb(currentNote, name, currentWorkspaceSlug())
   );
 
   // 4. Reset history so undo doesn't cross note boundaries.
@@ -999,7 +1012,7 @@ async function loadNoteIntoActivePane(noteId) {
   // 5. Update URL so refresh / share / browser back work intuitively.
   const nextPath = FOCUSED_NOTE_PAGE
     ? notePath(next.id, window.location.hash)
-    : workspaceNotePath(stateWorkspaceId || nextWorkspaceId, next.id, window.location.hash);
+    : workspaceNotePath(currentWorkspaceSlug(), next.id, window.location.hash);
   if (`${window.location.pathname}${window.location.hash}` !== nextPath) {
     const url = nextPath;
     window.history.pushState(null, '', url);
@@ -1140,9 +1153,9 @@ async function closeTab(noteId, paneIndex) {
   // may also have collapsed split mode if pane 1 emptied out.
   const pane0 = state.panes[0];
   if (!pane0?.activeId) {
-    const wsId = currentWorkspaceId();
+    const workspaceSlug = currentWorkspaceSlug();
     window.NotePresence?.releaseOpenNote(currentNote?.id);
-    window.location.href = wsId ? workspaceNotesPath(wsId) : '/';
+    window.location.href = workspaceSlug ? workspaceNotesPath(workspaceSlug) : '/';
     return;
   }
   // If the editor pane's active note changed, load it.
@@ -1562,10 +1575,9 @@ async function bootstrap() {
   }
   syncNoteTagsWidget();
 
-  // 4. Breadcrumb workspace name (best effort).
-  fetchWorkspaceName(stateWorkspaceId).then(name =>
-    populateBreadcrumb(currentNote, name, stateWorkspaceId)
-  );
+  // 4. Breadcrumb workspace name and current slug (best effort).
+  const workspaceName = await fetchWorkspaceName(stateWorkspaceId);
+  populateBreadcrumb(currentNote, workspaceName, currentWorkspaceSlug());
 
   // 5. Cross-module hooks (wikilinks, backlinks, rail, presence).
   window.NoteWikilinks?.setWorkspaceContext(() => currentWorkspaceId() || null);

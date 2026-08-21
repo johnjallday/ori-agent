@@ -40,6 +40,9 @@ func TestWorkspacePlanPageRoutesResolveCanonically(t *testing.T) {
 			if !strings.Contains(body, `data-workspace-id="`+workspace.ID+`"`) {
 				t.Errorf("%s did not carry its workspace id", tc.path)
 			}
+			if !strings.Contains(body, `data-workspace-slug="`+workspace.Slug+`"`) {
+				t.Errorf("%s did not carry its workspace slug", tc.path)
+			}
 		})
 	}
 }
@@ -68,14 +71,14 @@ func TestWorkspacePlanMalformedPathRedirectsToTheList(t *testing.T) {
 	handler := newRoutesTestHandler(t)
 	workspace := createRouteTestWorkspace(t, handler, "Malformed Plan Route Workspace")
 
-	req := httptest.NewRequest(http.MethodGet, "/workspaces/"+workspace.Slug+"/plans/plan-1/extra/segments", nil)
+	req := httptest.NewRequest(http.MethodGet, "/workspaces/"+workspace.Slug+"/plans/plan-1/extra/segments?panel=history", nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("status = %d, want 303", rec.Code)
 	}
-	wantLocation := "/workspaces/" + workspace.Slug + "/plans"
+	wantLocation := "/workspaces/" + workspace.Slug + "/plans?panel=history"
 	if location := rec.Header().Get("Location"); location != wantLocation {
 		t.Errorf("redirect target = %q, want %q", location, wantLocation)
 	}

@@ -489,6 +489,17 @@ func (s *Server) resolveWorkspacePageIdentity(slug string) (workspacePageIdentit
 	return workspacePageIdentity{ID: ws.ID, Slug: ws.FolderSlug}, nil
 }
 
+func redirectWorkspacePage(w http.ResponseWriter, r *http.Request, workspaceSlug string, segments ...string) {
+	parts := []string{"", "workspaces", url.PathEscape(workspaceSlug)}
+	for _, segment := range segments {
+		if value := strings.TrimSpace(segment); value != "" {
+			parts = append(parts, url.PathEscape(value))
+		}
+	}
+	target := url.URL{Path: strings.Join(parts, "/"), RawQuery: r.URL.RawQuery}
+	http.Redirect(w, r, target.String(), http.StatusSeeOther)
+}
+
 // handleWorkspacesRoutes handles all /workspaces/* routes.
 func (s *Server) handleWorkspacesRoutes(w http.ResponseWriter, r *http.Request) {
 	// Extract path after /workspaces/
@@ -565,7 +576,7 @@ func (s *Server) handleWorkspacesRoutes(w http.ResponseWriter, r *http.Request) 
 			s.serveWorkspacePlan(w, workspaceID, workspaceSlug, parts[2])
 			return
 		}
-		http.Redirect(w, r, "/workspaces/"+url.PathEscape(workspaceSlug)+"/plans", http.StatusSeeOther)
+		redirectWorkspacePage(w, r, workspaceSlug, "plans")
 		return
 	}
 
@@ -579,7 +590,7 @@ func (s *Server) handleWorkspacesRoutes(w http.ResponseWriter, r *http.Request) 
 			s.serveWorkspaceNotesPage(w, workspaceID, workspaceSlug, parts[2])
 			return
 		}
-		http.Redirect(w, r, "/", http.StatusSeeOther)
+		redirectWorkspacePage(w, r, workspaceSlug, "notes")
 		return
 	}
 
@@ -589,8 +600,9 @@ func (s *Server) handleWorkspacesRoutes(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Otherwise, redirect to home page
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	// Malformed descendants return to the current workspace without discarding
+	// route state carried in the query string.
+	redirectWorkspacePage(w, r, workspaceSlug)
 }
 
 func (s *Server) serveWorkspaceNotesPage(w http.ResponseWriter, workspaceID, workspaceSlug, noteID string) {
@@ -628,6 +640,7 @@ func (s *Server) serveFocusedNotePage(w http.ResponseWriter, noteID string) {
 	data.BrandText = "Ori Agent"
 	data.ShowSidebarToggle = false
 	data.Extra["WorkspaceID"] = ""
+	data.Extra["WorkspaceSlug"] = ""
 	data.Extra["NoteID"] = noteID
 	data.Extra["NotePageMode"] = "focused"
 	s.renderAndWritePage(w, "note-page", data)

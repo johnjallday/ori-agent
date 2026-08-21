@@ -3,7 +3,11 @@
 <html data-bs-theme="light">
 {{template "head.tmpl" .}}
 
-<body class="bg-light">
+<body class="bg-light" data-workspace-id="{{.Extra.WorkspaceID}}" data-workspace-slug="{{.Extra.WorkspaceSlug}}">
+  <script>
+    window.currentWorkspaceId = document.body.dataset.workspaceId || '';
+    window.currentWorkspaceSlug = document.body.dataset.workspaceSlug || '';
+  </script>
   {{template "navbar.tmpl" .}}
 
   <div class="main-content-wrapper">
@@ -15,7 +19,7 @@
           <!-- Header / breadcrumb -->
           <div class="modern-card p-3 mb-3">
             <div class="d-flex align-items-center gap-3 flex-wrap">
-              <a href="/workspaces/{{.Extra.WorkspaceID}}" class="modern-btn modern-btn-secondary">
+              <a href="/workspaces/{{.Extra.WorkspaceSlug}}" class="modern-btn modern-btn-secondary">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
                   <path d="M20,11V13H8L13.5,18.5L12.08,19.92L4.16,12L12.08,4.08L13.5,5.5L8,11H20Z"/>
                 </svg>
@@ -24,7 +28,7 @@
               <nav aria-label="breadcrumb">
                 <ol class="breadcrumb mb-0" style="font-size: 0.875rem;">
                   <li class="breadcrumb-item"><a href="/" style="color: var(--text-secondary); text-decoration: none;">Home</a></li>
-                  <li class="breadcrumb-item"><a href="/workspaces/{{.Extra.WorkspaceID}}" style="color: var(--text-secondary); text-decoration: none;" id="wad-breadcrumb-workspace">Workspace</a></li>
+                  <li class="breadcrumb-item"><a href="/workspaces/{{.Extra.WorkspaceSlug}}" style="color: var(--text-secondary); text-decoration: none;" id="wad-breadcrumb-workspace">Workspace</a></li>
                   <li class="breadcrumb-item active" aria-current="page" id="wad-breadcrumb-agent">Agent</li>
                 </ol>
               </nav>
@@ -40,7 +44,7 @@
             <p class="wad-muted" id="wad-error-detail">
               This agent is not attached to this workspace. Open the workspace to review its roster.
             </p>
-            <a href="/workspaces/{{.Extra.WorkspaceID}}" class="modern-btn modern-btn-primary">Open Workspace</a>
+            <a href="/workspaces/{{.Extra.WorkspaceSlug}}" class="modern-btn modern-btn-primary">Open Workspace</a>
           </div>
 
           <!-- Content -->
@@ -61,7 +65,7 @@
             <div class="modern-card p-4 mb-3">
               <div class="wad-section-head">
                 <h2 class="wad-section-title">Model</h2>
-                <a class="wad-section-action" href="/workspaces/{{.Extra.WorkspaceID}}" title="Edit this agent's model on the workspace page">Edit in workspace</a>
+                <a class="wad-section-action" href="/workspaces/{{.Extra.WorkspaceSlug}}" title="Edit this agent's model on the workspace page">Edit in workspace</a>
               </div>
               <div class="wad-kv">
                 <div class="wad-kv-row"><span class="wad-kv-key">Model</span><span class="wad-kv-val" id="wad-model">—</span></div>
@@ -203,7 +207,10 @@
 
     document.addEventListener('DOMContentLoaded', () => {
       const workspaceId = "{{.Extra.WorkspaceID}}";
+      const workspaceSlug = "{{.Extra.WorkspaceSlug}}";
       const agentName = "{{.Extra.AgentName}}";
+      window.currentWorkspaceId = workspaceId;
+      window.currentWorkspaceSlug = workspaceSlug;
       const page = new WorkspaceAgentDetailPage(workspaceId, agentName);
       page.init().catch((error) => {
         console.error('Failed to initialize workspace agent detail page:', error);

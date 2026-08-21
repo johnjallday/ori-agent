@@ -1,3 +1,5 @@
+import { workspacePageURL } from './workspace-routes.js';
+
 const ACTIVE_STATUSES = new Set([
   'pending',
   'preparing',
@@ -73,8 +75,9 @@ function compactText(value) {
 }
 
 export class WorkspaceRunPage {
-  constructor(workspaceId, runId) {
+  constructor(workspaceId, runId, options = {}) {
     this.workspaceId = workspaceId;
+    this.workspaceSlug = options.workspaceSlug || workspaceId;
     this.runId = runId;
     this.workspace = null;
     this.run = null;
@@ -1018,10 +1021,10 @@ export class WorkspaceRunPage {
   }
 
   taskHref(taskId) {
-    return `/workspaces/${encodeURIComponent(this.workspaceId)}/task/${encodeURIComponent(taskId)}`;
+    return workspacePageURL(this.workspaceSlug, ['task', taskId]);
   }
 
   runHref(runId) {
-    return `/workspaces/${encodeURIComponent(this.workspaceId)}/runs/${encodeURIComponent(runId)}`;
+    return workspacePageURL(this.workspaceSlug, ['runs', runId]);
   }
 }

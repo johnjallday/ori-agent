@@ -3,7 +3,11 @@
 <html data-bs-theme="light">
 {{template "head.tmpl" .}}
 
-<body class="bg-light">
+<body class="bg-light" data-workspace-id="{{.Extra.WorkspaceID}}" data-workspace-slug="{{.Extra.WorkspaceSlug}}">
+  <script>
+    window.currentWorkspaceId = document.body.dataset.workspaceId || '';
+    window.currentWorkspaceSlug = document.body.dataset.workspaceSlug || '';
+  </script>
   {{template "navbar.tmpl" .}}
 
   <div class="main-content-wrapper">
@@ -17,6 +21,7 @@
         id="workspacePlanPageRoot"
         class="plan-page-shell"
         data-workspace-id="{{.Extra.WorkspaceID}}"
+        data-workspace-slug="{{.Extra.WorkspaceSlug}}"
         data-plan-id="{{.Extra.PlanID}}"
       >
         <section class="plan-hero">
@@ -24,9 +29,9 @@
             <div class="plan-breadcrumbs">
               <a href="/" class="plan-breadcrumb-link">Home</a>
               <span aria-hidden="true">/</span>
-              <a href="/workspaces/{{.Extra.WorkspaceID}}" class="plan-breadcrumb-link">Workspace</a>
+              <a href="/workspaces/{{.Extra.WorkspaceSlug}}" class="plan-breadcrumb-link">Workspace</a>
               <span aria-hidden="true">/</span>
-              <a href="/workspaces/{{.Extra.WorkspaceID}}/plans" class="plan-breadcrumb-link">Plans</a>
+              <a href="/workspaces/{{.Extra.WorkspaceSlug}}/plans" class="plan-breadcrumb-link">Plans</a>
               <span aria-hidden="true">/</span>
               <span id="plan-breadcrumb-title">Plan</span>
             </div>
@@ -606,11 +611,12 @@
 
     document.addEventListener('DOMContentLoaded', async () => {
       const workspaceId = "{{.Extra.WorkspaceID}}";
+      const workspaceSlug = "{{.Extra.WorkspaceSlug}}";
       const planId = "{{.Extra.PlanID}}";
-      if (!workspaceId || !planId) {
+      if (!workspaceId || !workspaceSlug || !planId) {
         return;
       }
-      const page = new WorkspacePlanPage(workspaceId, planId);
+      const page = new WorkspacePlanPage(workspaceId, planId, { workspaceSlug });
       try {
         await page.init();
       } catch (error) {

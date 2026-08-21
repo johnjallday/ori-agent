@@ -2278,15 +2278,34 @@ test('the workspace view switch offers Plans as a real link', () => {
   const commandView = Object.create(WorkspaceCommandView.prototype);
   Object.assign(commandView, {
     viewMode: 'details',
-    page: { workspaceId: 'ws-1', notes: [], schedules: [], sessions: [] }
+    page: {
+      workspaceId: 'workspace-uuid',
+      workspaceSlug: 'marketing-site',
+      notes: [],
+      schedules: [],
+      sessions: []
+    }
   });
 
   const switcher = commandView.commandViewSwitchHTML();
-  assert.match(switcher, /href="\/workspaces\/ws-1\/plans"/);
+  assert.match(switcher, /href="\/workspaces\/marketing-site\/plans"/);
   assert.match(switcher, />Plans</);
   // An anchor, not a button: middle-click, cmd-click, and "copy link address"
   // must behave the way a link does.
   assert.match(switcher, /<a class="ws-cmd-view-btn ws-cmd-view-link"/);
+});
+
+test('full task links use the slug while their return target preserves route state', () => {
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    page: { workspaceId: 'workspace-uuid', workspaceSlug: 'marketing-site' },
+    currentURLState: () => ({ panel: 'backlog' })
+  });
+
+  const href = commandView.taskHrefWithReturn('task/1');
+  assert.match(href, /^\/workspaces\/marketing-site\/task\/task%2F1\?return=/);
+  assert.match(decodeURIComponent(href), /\/workspaces\/marketing-site\?panel=backlog/);
+  assert.doesNotMatch(href, /workspace-uuid/);
 });
 
 // Without a workspace id there is no honest link to build, so none is rendered

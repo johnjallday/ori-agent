@@ -12,11 +12,7 @@
  */
 (function () {
   function workspaceIdFromPage() {
-    const resolved = window.currentWorkspaceId || document.body?.dataset?.workspaceId || '';
-    if (resolved) return String(resolved);
-    // Legacy/test fallback. Production workspace routes carry a slug here.
-    const match = window.location.pathname.match(/\/workspaces\/([^/]+)/);
-    return match ? decodeURIComponent(match[1]) : '';
+    return String(window.currentWorkspaceId || document.body?.dataset?.workspaceId || '');
   }
 
   async function fetchWorkspaceInput(workspaceId) {

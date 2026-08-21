@@ -15,6 +15,7 @@ import {
   versionLabel
 } from './workspace-plan.js';
 import { POLL_INTERVAL_MS, primaryBlocker, shouldPoll } from './workspace-plan-blockers.js';
+import { workspacePageURL } from './workspace-routes.js';
 import {
   addGroup,
   addItem,
@@ -211,6 +212,7 @@ export function activityLine(entry) {
 export class WorkspacePlanPage {
   constructor(workspaceId, planId, options = {}) {
     this.workspaceId = workspaceId;
+    this.workspaceSlug = options.workspaceSlug || workspaceId;
     this.planId = planId;
     this.doc = options.document || (typeof document !== 'undefined' ? document : null);
     this.fetchImpl =
@@ -360,6 +362,7 @@ export class WorkspacePlanPage {
   async reload() {
     try {
       const plan = await this.request(this.basePath());
+      plan.workspace_slug = this.workspaceSlug;
       this.plan = plan;
       // A reload replaces the editor only when there is nothing unsaved to
       // lose. Refreshing away someone's in-progress edit is the bug autosave
@@ -812,10 +815,10 @@ export class WorkspacePlanPage {
     const links = this.el('#plan-materialization-tasks');
     if (links) {
       links.innerHTML = (state.task_ids || [])
-        .map(
-          id =>
-            `<li><a href="/workspaces/${escapeHtml(this.workspaceId)}/task/${escapeHtml(id)}">${escapeHtml(id)}</a></li>`
-        )
+        .map(id => {
+          const href = workspacePageURL(this.workspaceSlug, ['task', id]);
+          return `<li><a href="${escapeHtml(href)}">${escapeHtml(id)}</a></li>`;
+        })
         .join('');
     }
 

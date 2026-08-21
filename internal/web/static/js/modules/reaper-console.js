@@ -35,10 +35,7 @@
   function workspaceIdFromPage() {
     if (workspaceId) return workspaceId;
     if (typeof window === 'undefined') return '';
-    if (window.currentWorkspaceId) return String(window.currentWorkspaceId);
-    const path = (window.location && window.location.pathname) || '';
-    const parts = path.split('/').filter(Boolean);
-    return parts[0] === 'workspaces' && parts[1] ? decodeURIComponent(parts[1]) : '';
+    return String(window.currentWorkspaceId || document.body?.dataset?.workspaceId || '');
   }
 
   function apiPath() {

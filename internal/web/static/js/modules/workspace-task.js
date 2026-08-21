@@ -12,6 +12,7 @@ import { taskResultActionsMethods } from './workspace-task-result-actions.js';
 import { showCanvasAgentPicker } from './agent-canvas-dialogs.js';
 import { resolveTaskState, PRESENTATION_STATE } from './task-presentation.js';
 import { fetchRelatedPlan, renderRelatedPlan } from './workspace-related-plan.js';
+import { workspacePageURL, workspaceRootURL } from './workspace-routes.js';
 
 const escapeTaskHtml =
   window.escapeHtml ||
@@ -874,8 +875,9 @@ function buildResultWorkflowDraft(
 }
 
 export class WorkspaceTaskPage {
-  constructor(workspaceId, taskId) {
+  constructor(workspaceId, taskId, workspaceSlug = workspaceId) {
     this.workspaceId = workspaceId;
+    this.workspaceSlug = workspaceSlug;
     this.taskId = taskId;
     this.workspace = null;
     this.workspaceOutputDir = '';
@@ -2294,7 +2296,7 @@ export class WorkspaceTaskPage {
         // Send the user straight to the new task page so they can run /
         // edit it immediately. Using a full navigation (not history.push)
         // because each task page bootstraps its own controller.
-        window.location.href = `/workspaces/${encodeURIComponent(this.workspaceId)}/task/${encodeURIComponent(newTaskId)}`;
+        window.location.href = workspacePageURL(this.workspaceSlug, ['task', newTaskId]);
       }
     } catch (error) {
       console.error('Failed to create follow-up task:', error);
@@ -2326,11 +2328,11 @@ export class WorkspaceTaskPage {
   }
 
   getTaskHref(taskId) {
-    return `/workspaces/${encodeURIComponent(this.workspaceId)}/task/${encodeURIComponent(taskId)}`;
+    return workspacePageURL(this.workspaceSlug, ['task', taskId]);
   }
 
   getRunHref(runId) {
-    return `/workspaces/${encodeURIComponent(this.workspaceId)}/runs/${encodeURIComponent(runId)}`;
+    return workspacePageURL(this.workspaceSlug, ['runs', runId]);
   }
 
   getTaskHumanLoop(task = this.task) {
@@ -2921,8 +2923,11 @@ export class WorkspaceTaskPage {
   // is the ordinary case, not an error worth reporting (FR-148).
   async loadRelatedPlan() {
     const related = await fetchRelatedPlan(this.workspaceId, 'task', this.taskId);
-    renderRelatedPlan(document.getElementById('workspace-task-related-plan'), related, value =>
-      escapeHtml(String(value ?? ''))
+    renderRelatedPlan(
+      document.getElementById('workspace-task-related-plan'),
+      related,
+      value => escapeHtml(String(value ?? '')),
+      this.workspaceSlug
     );
   }
 
@@ -8238,7 +8243,7 @@ export class WorkspaceTaskPage {
       }
     }
 
-    window.location.href = `/workspaces/${encodeURIComponent(this.workspaceId)}#notes`;
+    window.location.href = workspaceRootURL(this.workspaceSlug, { hash: 'notes' });
   }
 
   getCurrentTaskAssignmentValue() {
@@ -10192,7 +10197,7 @@ export class WorkspaceTaskPage {
         const text = await response.text();
         throw new Error(text || 'Failed to delete task');
       }
-      window.location.href = `/workspaces/${encodeURIComponent(this.workspaceId)}`;
+      window.location.href = workspaceRootURL(this.workspaceSlug);
     } catch (error) {
       console.error('Failed to delete task:', error);
       this.notify('error', error?.message || 'Failed to delete task');

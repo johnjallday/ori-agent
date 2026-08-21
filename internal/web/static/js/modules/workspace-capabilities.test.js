@@ -373,7 +373,8 @@ test('installing dispatches a change event so dependent surfaces refresh in plac
     createElement: tag => new FakeElement(tag)
   };
   const window = {
-    location: { pathname: '/workspaces/ws-1' },
+    location: { pathname: '/workspaces/readable-slug' },
+    currentWorkspaceId: 'ws-1',
     CustomEvent: class {
       constructor(type, init) {
         this.type = type;
@@ -416,7 +417,10 @@ test('a catalog request failure degrades to a message rather than an empty pane'
     getElementById: id => (id === 'workspace-capabilities-list' ? host : null),
     createElement: tag => new FakeElement(tag)
   };
-  const window = { location: { pathname: '/workspaces/ws-1' } };
+  const window = {
+    location: { pathname: '/workspaces/readable-slug' },
+    currentWorkspaceId: 'ws-1'
+  };
   const context = {
     console,
     window,

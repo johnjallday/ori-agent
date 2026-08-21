@@ -12,10 +12,10 @@ export function readWorkspaceNotesRoute(pathname) {
   const parts = path.split('/').filter(Boolean);
   const idx = parts.indexOf('workspaces');
   if (idx < 0 || idx + 2 >= parts.length || parts[idx + 2] !== 'notes') {
-    return { workspaceId: '', noteId: '' };
+    return { workspaceSlug: '', noteId: '' };
   }
   return {
-    workspaceId: decodePathSegment(parts[idx + 1]),
+    workspaceSlug: decodePathSegment(parts[idx + 1]),
     noteId: idx + 3 < parts.length ? decodePathSegment(parts[idx + 3]) : ''
   };
 }
@@ -33,24 +33,24 @@ export function notePath(noteId, hash = '') {
   return appendHash(path, hash);
 }
 
-export function workspaceNotesPath(workspaceId, hash = '') {
-  const id = String(workspaceId || '').trim();
-  const path = id ? `/workspaces/${encodeURIComponent(id)}/notes` : '/workspaces';
+export function workspaceNotesPath(workspaceSlug, hash = '') {
+  const slug = String(workspaceSlug || '').trim();
+  const path = slug ? `/workspaces/${encodeURIComponent(slug)}/notes` : '/workspaces';
   return appendHash(path, hash);
 }
 
-export function workspaceNotePath(workspaceId, noteId, hash = '') {
-  if (!String(workspaceId || '').trim()) return workspaceNotesPath('', hash);
+export function workspaceNotePath(workspaceSlug, noteId, hash = '') {
+  if (!String(workspaceSlug || '').trim()) return workspaceNotesPath('', hash);
   const id = String(noteId || '').trim();
-  if (!id) return workspaceNotesPath(workspaceId, hash);
-  return appendHash(`${workspaceNotesPath(workspaceId)}/${encodeURIComponent(id)}`, hash);
+  if (!id) return workspaceNotesPath(workspaceSlug, hash);
+  return appendHash(`${workspaceNotesPath(workspaceSlug)}/${encodeURIComponent(id)}`, hash);
 }
 
 export function workspaceNotePathForNote(note, hash = '') {
-  const workspaceId = note?.workspace_id || note?.folder_id || '';
+  const workspaceSlug = note?.workspace_slug || note?.folder_slug || '';
   const noteId = note?.id || '';
-  if (!workspaceId || !noteId) return '';
-  return workspaceNotePath(workspaceId, noteId, hash);
+  if (!workspaceSlug || !noteId) return '';
+  return workspaceNotePath(workspaceSlug, noteId, hash);
 }
 
 export function notePathForNote(note, hash = '') {

@@ -585,13 +585,7 @@
     const detail = typeof window !== 'undefined' ? window.workspaceDetail : null;
     if (detail && detail.workspaceId) return detail.workspaceId;
     const state = window.WorkspaceHubState && window.WorkspaceHubState.getState();
-    if (state && state.selectedId) return state.selectedId;
-    // Legacy/test fallback. Production workspace routes carry a slug here.
-    if (typeof window !== 'undefined' && window.location) {
-      const match = String(window.location.pathname || '').match(/^\/workspaces\/([^/]+)/);
-      if (match && match[1]) return decodeURIComponent(match[1]);
-    }
-    return '';
+    return (state && state.selectedId) || '';
   }
 
   function setStatus(message, tone = 'info') {

@@ -33,9 +33,7 @@ import { emailSetupView, chipStateLabel } from './personal-hq-onboarding.js';
   const body = modal.querySelector('.hq-email-setup-body');
 
   function currentWorkspaceId() {
-    if (window.currentWorkspaceId) return String(window.currentWorkspaceId);
-    const parts = window.location.pathname.split('/');
-    return parts[2] || '';
+    return String(window.currentWorkspaceId || document.body?.dataset?.workspaceId || '');
   }
 
   // scope is set by resolveScope() to the endpoints for whichever email-capable

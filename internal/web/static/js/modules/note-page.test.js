@@ -97,24 +97,24 @@ test('noteTabsStateKey scopes persisted tab state by workspace', () => {
 
 test('readWorkspaceNotesRoute parses workspace notes route without note id', () => {
   assert.deepEqual(readWorkspaceNotesRoute('/workspaces/ws%201/notes'), {
-    workspaceId: 'ws 1',
+    workspaceSlug: 'ws 1',
     noteId: ''
   });
 });
 
 test('readWorkspaceNotesRoute parses workspace notes route with note id', () => {
   assert.deepEqual(readWorkspaceNotesRoute('/workspaces/ws%201/notes/note%2F1?tab=notes#Heading'), {
-    workspaceId: 'ws 1',
+    workspaceSlug: 'ws 1',
     noteId: 'note/1'
   });
 });
 
 test('readWorkspaceNotesRoute ignores non-notes routes', () => {
   assert.deepEqual(readWorkspaceNotesRoute('/workspaces/ws-1/canvas'), {
-    workspaceId: '',
+    workspaceSlug: '',
     noteId: ''
   });
-  assert.deepEqual(readWorkspaceNotesRoute('/notes/note-1'), { workspaceId: '', noteId: '' });
+  assert.deepEqual(readWorkspaceNotesRoute('/notes/note-1'), { workspaceSlug: '', noteId: '' });
 });
 
 test('readFocusedNoteRoute parses focused note routes only', () => {
@@ -132,7 +132,7 @@ test('focused note path builders encode note ids', () => {
   assert.equal(notePathForNote({ workspace_id: 'ws-1' }), '');
 });
 
-test('workspace note path builders encode workspace and note ids', () => {
+test('workspace note path builders encode workspace slugs and note ids', () => {
   assert.equal(workspaceNotesPath('ws 1'), '/workspaces/ws%201/notes');
   assert.equal(workspaceNotePath('ws 1', 'note/1'), '/workspaces/ws%201/notes/note%2F1');
   assert.equal(
@@ -148,12 +148,19 @@ test('workspace note path builders encode workspace and note ids', () => {
 
 test('workspaceNotePathForNote converts known notes to workspace-scoped URLs', () => {
   assert.equal(
-    workspaceNotePathForNote({ id: 'note 1', workspace_id: 'ws 1' }),
-    '/workspaces/ws%201/notes/note%201'
+    workspaceNotePathForNote({
+      id: 'note 1',
+      workspace_id: 'workspace-uuid',
+      workspace_slug: 'marketing site'
+    }),
+    '/workspaces/marketing%20site/notes/note%201'
   );
   assert.equal(
-    workspaceNotePathForNote({ id: 'note-1', folder_id: 'folder-1' }, 'Intro'),
-    '/workspaces/folder-1/notes/note-1#Intro'
+    workspaceNotePathForNote(
+      { id: 'note-1', folder_id: 'workspace-uuid', folder_slug: 'campaign-room' },
+      'Intro'
+    ),
+    '/workspaces/campaign-room/notes/note-1#Intro'
   );
   assert.equal(workspaceNotePathForNote({ id: 'note-1' }), '');
 });

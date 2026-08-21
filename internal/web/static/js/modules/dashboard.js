@@ -7859,7 +7859,7 @@
     return (data && data.agents) || [];
   }
 
-  function extractWorkspaceIdFromPath(pathname) {
+  function extractWorkspaceSlugFromPath(pathname) {
     var path = String(pathname || '').trim();
     var match = path.match(/^\/workspaces\/([^/]+)/i);
     if (!match || !match[1]) return '';
@@ -7901,13 +7901,18 @@
       pathname = window.location.pathname;
     }
     // Workspace browser paths carry slugs. The server-published UUID remains
-    // the routing/API identity; pathname parsing is only a legacy/test fallback.
+    // the routing/API identity and is never reconstructed from the pathname.
     var workspaceId = String(
       window.currentWorkspaceId ||
         (document.body && document.body.dataset && document.body.dataset.workspaceId) ||
         ''
     ).trim();
-    if (!workspaceId) workspaceId = extractWorkspaceIdFromPath(pathname);
+    var workspaceSlug = String(
+      window.currentWorkspaceSlug ||
+        (document.body && document.body.dataset && document.body.dataset.workspaceSlug) ||
+        extractWorkspaceSlugFromPath(pathname) ||
+        ''
+    ).trim();
     var taskId = extractTaskIdFromPath(pathname);
     var sessionId = getCurrentHomeSessionId();
 
@@ -7923,6 +7928,7 @@
       surface: inferHomeRouteSurface(pathname),
       page_path: pathname || '/',
       workspace_id: workspaceId,
+      workspace_slug: workspaceSlug,
       task_id: taskId,
       session_id: sessionId,
       origin: 'ask_ori'

@@ -31,15 +31,7 @@
       (typeof window !== 'undefined' && window.currentWorkspaceId) ||
       (typeof document !== 'undefined' && document.body?.dataset?.workspaceId) ||
       '';
-    if (resolved) {
-      workspaceId = String(resolved);
-      return workspaceId;
-    }
-    // Legacy/test fallback. Production workspace routes carry a slug here.
-    const match =
-      typeof window !== 'undefined' &&
-      /^\/workspaces\/([^/?#]+)/.exec((window.location && window.location.pathname) || '');
-    if (match) workspaceId = decodeURIComponent(match[1]);
+    if (resolved) workspaceId = String(resolved);
     return workspaceId;
   }
 

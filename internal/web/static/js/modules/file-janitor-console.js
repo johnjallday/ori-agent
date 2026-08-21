@@ -71,30 +71,12 @@
   // something away the user cannot get back with a click.
   let revokeConfirmed = false;
 
-  // The workspace id is read from the URL rather than taken solely from
-  // window.currentWorkspaceId.
-  //
-  // The page sets that global inside a <script type="module">, and this file is
-  // loaded as a classic `defer` script. Deferred classic scripts run BEFORE
-  // module scripts, so at init() time the global does not exist yet: wsId()
-  // returned '', refresh() bailed on its first line, and the mount stayed
-  // hidden. The panel never rendered in a browser at all, while every API call
-  // it would have made worked perfectly — which is exactly why this survived
-  // API-level verification.
-  //
-  // The path is the same source the page itself derives the global from
-  // (/workspaces/{id}), so this cannot disagree with it.
+  // The URL carries a slug. API identity comes only from explicit state or the
+  // UUID the server publishes before this deferred script runs.
   function wsId() {
     if (workspaceId) return workspaceId;
     if (typeof window === 'undefined') return '';
-    if (window.currentWorkspaceId) return window.currentWorkspaceId;
-    return workspaceIdFromPath();
-  }
-
-  function workspaceIdFromPath() {
-    const path = (window.location && window.location.pathname) || '';
-    const parts = path.split('/').filter(Boolean);
-    return parts[0] === 'workspaces' && parts[1] ? decodeURIComponent(parts[1]) : '';
+    return String(window.currentWorkspaceId || document.body?.dataset?.workspaceId || '');
   }
 
   // API_PREFIX is the canonical File Janitor route segment. Every request this

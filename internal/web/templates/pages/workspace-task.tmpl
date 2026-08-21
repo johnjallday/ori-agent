@@ -3,7 +3,11 @@
 <html data-bs-theme="light">
 {{template "head.tmpl" .}}
 
-<body class="bg-light">
+<body class="bg-light" data-workspace-id="{{.Extra.WorkspaceID}}" data-workspace-slug="{{.Extra.WorkspaceSlug}}">
+  <script>
+    window.currentWorkspaceId = document.body.dataset.workspaceId || '';
+    window.currentWorkspaceSlug = document.body.dataset.workspaceSlug || '';
+  </script>
   {{template "navbar.tmpl" .}}
 
   <div class="main-content-wrapper">
@@ -14,18 +18,19 @@
         id="workspaceTaskPageRoot"
         class="workspace-task-page-shell"
         data-workspace-id="{{.Extra.WorkspaceID}}"
+        data-workspace-slug="{{.Extra.WorkspaceSlug}}"
         data-task-id="{{.Extra.TaskID}}">
 
         <section class="workspace-task-page-hero">
           <div class="workspace-task-page-hero-copy">
-            <a id="workspace-task-backlink" href="/workspaces/{{.Extra.WorkspaceID}}" class="workspace-task-page-backlink">
+            <a id="workspace-task-backlink" href="/workspaces/{{.Extra.WorkspaceSlug}}" class="workspace-task-page-backlink">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                 <path d="M20,11V13H8L13.5,18.5L12.08,19.92L4.16,12L12.08,4.08L13.5,5.5L8,11H20Z"/>
               </svg>
               Back To Workspace
             </a>
             <div class="workspace-task-page-breadcrumbs">
-              <a href="/workspaces/{{.Extra.WorkspaceID}}" id="workspace-task-workspace-name" class="workspace-task-page-breadcrumb-link">Workspace</a>
+              <a href="/workspaces/{{.Extra.WorkspaceSlug}}" id="workspace-task-workspace-name" class="workspace-task-page-breadcrumb-link">Workspace</a>
               <span aria-hidden="true">/</span>
               <span id="workspace-task-breadcrumb-title">Task</span>
             </div>
@@ -128,7 +133,7 @@
           <div class="workspace-task-page-empty-icon">!</div>
           <h2>Task not found</h2>
           <p>This task could not be loaded from the workspace.</p>
-          <a href="/workspaces/{{.Extra.WorkspaceID}}" class="modern-btn modern-btn-secondary">Return To Workspace</a>
+          <a href="/workspaces/{{.Extra.WorkspaceSlug}}" class="modern-btn modern-btn-secondary">Return To Workspace</a>
         </div>
 
         <div id="workspace-task-page-content" class="workspace-task-page-layout" hidden>
@@ -6749,11 +6754,14 @@
     document.addEventListener('DOMContentLoaded', () => {
       const root = document.getElementById('workspaceTaskPageRoot');
       const workspaceId = root?.dataset?.workspaceId || '';
+      const workspaceSlug = root?.dataset?.workspaceSlug || '';
       const taskId = root?.dataset?.taskId || '';
 
-      if (!workspaceId || !taskId) {
-        console.error('Missing workspace or task identifier for task page');
-        window.location.href = workspaceId ? `/workspaces/${encodeURIComponent(workspaceId)}` : '/workspaces';
+      if (!workspaceId || !workspaceSlug || !taskId) {
+        console.error('Missing workspace route identity or task identifier for task page');
+        window.location.href = workspaceSlug
+          ? `/workspaces/${encodeURIComponent(workspaceSlug)}`
+          : '/workspaces';
         return;
       }
 
@@ -6764,13 +6772,14 @@
       const backlink = document.getElementById('workspace-task-backlink');
       if (backlink) {
         const rawReturn = new URLSearchParams(window.location.search).get('return');
-        if (rawReturn && isSafeReturnTarget(rawReturn, workspaceId)) {
+        if (rawReturn && isSafeReturnTarget(rawReturn, workspaceSlug)) {
           backlink.href = rawReturn;
         }
       }
 
       window.currentWorkspaceId = workspaceId;
-      const taskPage = new WorkspaceTaskPage(workspaceId, taskId);
+      window.currentWorkspaceSlug = workspaceSlug;
+      const taskPage = new WorkspaceTaskPage(workspaceId, taskId, workspaceSlug);
       window.workspaceTaskPage = taskPage;
       taskPage.init();
     });

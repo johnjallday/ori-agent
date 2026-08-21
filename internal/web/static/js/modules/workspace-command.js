@@ -22,6 +22,7 @@ import {
   FILTER
 } from './task-presentation.js';
 import { WorkspaceExecutionController, RUN_PHASE } from './workspace-execution-controller.js';
+import { workspacePageURL, workspaceRootURL } from './workspace-routes.js';
 import {
   parseWorkspaceURLState,
   sanitizeWorkspaceURLState,
@@ -622,9 +623,9 @@ export class WorkspaceCommandView {
 
   /** A safe, same-origin `Open Full Task` href carrying a validated return target (FR92). */
   taskHrefWithReturn(taskId) {
-    const wsId = typeof this.workspaceId === 'function' ? this.workspaceId() : '';
-    const base = '/workspaces/' + encodeURIComponent(wsId) + '/task/' + encodeURIComponent(taskId);
-    const returnTarget = buildReturnTarget(wsId, this.currentURLState());
+    const workspaceSlug = this.workspaceSlug();
+    const base = workspacePageURL(workspaceSlug, ['task', taskId]);
+    const returnTarget = buildReturnTarget(workspaceSlug, this.currentURLState());
     return returnTarget ? base + '?return=' + encodeURIComponent(returnTarget) : base;
   }
 
@@ -731,6 +732,13 @@ export class WorkspaceCommandView {
     return String(page.workspaceId || (page.workspace && page.workspace.id) || '').trim();
   }
 
+  workspaceSlug() {
+    const page = this.page || {};
+    return String(
+      page.workspaceSlug || (page.workspace && page.workspace.folder_slug) || page.workspaceId || ''
+    ).trim();
+  }
+
   workspaceTags() {
     const page = this.page || {};
     if (typeof page.getWorkspaceTags === 'function') {
@@ -765,8 +773,8 @@ export class WorkspaceCommandView {
   }
 
   workspaceRoute(suffix = '') {
-    const id = this.workspaceId();
-    return id ? '/workspaces/' + encodeURIComponent(id) + suffix : '#';
+    const slug = this.workspaceSlug();
+    return slug ? workspaceRootURL(slug) + suffix : '#';
   }
 
   hasAttentionTasks() {
@@ -827,7 +835,7 @@ export class WorkspaceCommandView {
   // Plans is a LINK, not a fourth view mode.
   //
   // The other three swap what this page renders. Plans has its own canonical
-  // pages — /workspaces/{id}/plans and .../plans/{planId} — because a plan is
+  // pages — /workspaces/{slug}/plans and .../plans/{planId} — because a plan is
   // reviewed, edited, and approved on exactly one surface, and giving it an
   // in-page mode here would be the second surface this feature exists to
   // prevent (FR-145, FR-148, FR-149).
@@ -836,13 +844,13 @@ export class WorkspaceCommandView {
   // destination, and it is an <a> so middle-click, cmd-click, and "copy link
   // address" all behave the way a link should.
   plansLinkHTML() {
-    const workspaceId = this.page?.workspaceId;
-    if (!workspaceId) return '';
+    const workspaceSlug = this.workspaceSlug();
+    if (!workspaceSlug) return '';
 
     return (
-      '<a class="ws-cmd-view-btn ws-cmd-view-link" href="/workspaces/' +
-      encodeURIComponent(workspaceId) +
-      '/plans">' +
+      '<a class="ws-cmd-view-btn ws-cmd-view-link" href="' +
+      escapeHtml(workspacePageURL(workspaceSlug, ['plans'])) +
+      '">' +
       escapeHtml('Plans') +
       '</a>'
     );

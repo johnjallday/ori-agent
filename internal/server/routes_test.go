@@ -289,6 +289,69 @@ func TestWorkspaceDetailRouteUsesSlugAndBootstrapsUUID(t *testing.T) {
 	}
 }
 
+func TestWorkspaceDescendantPagesKeepUUIDStateSeparateFromSlugLinks(t *testing.T) {
+	handler := newRoutesTestHandler(t)
+	workspace := createRouteTestWorkspace(t, handler, "Descendant Route Workspace")
+
+	for _, tc := range []struct {
+		name   string
+		path   string
+		marker string
+	}{
+		{"canvas", "/canvas", "canvas-view"},
+		{"diagnostics", "/diagnostics", "workspace-diagnostics-view"},
+		{"task", "/task/task%201", "workspaceTaskPageRoot"},
+		{"run", "/runs/run%201", "workspaceRunPageRoot"},
+		{"agent", "/agents/Local%20Manager", "workspace-agent-detail-view"},
+		{"plans", "/plans", "workspacePlansPageRoot"},
+		{"plan", "/plans/plan%201", "workspacePlanPageRoot"},
+		{"notes", "/notes/note%201", "noteMainContent"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/workspaces/"+workspace.Slug+tc.path, nil)
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+			}
+			body := rec.Body.String()
+			for _, want := range []string{
+				tc.marker,
+				`data-workspace-id="` + workspace.ID + `"`,
+				`data-workspace-slug="` + workspace.Slug + `"`,
+			} {
+				if !strings.Contains(body, want) {
+					t.Errorf("response omitted %q", want)
+				}
+			}
+			if strings.Contains(body, `href="/workspaces/`+workspace.ID) {
+				t.Errorf("response used UUID in a browser href")
+			}
+		})
+	}
+}
+
+func TestWorkspaceMalformedDescendantsRedirectWithinCurrentSlug(t *testing.T) {
+	handler := newRoutesTestHandler(t)
+	workspace := createRouteTestWorkspace(t, handler, "Malformed Descendant Workspace")
+
+	for from, want := range map[string]string{
+		"/workspaces/" + workspace.Slug + "/task/?panel=tasks":      "/workspaces/" + workspace.Slug + "?panel=tasks",
+		"/workspaces/" + workspace.Slug + "/notes/a/b?panel=notes":  "/workspaces/" + workspace.Slug + "/notes?panel=notes",
+		"/workspaces/" + workspace.Slug + "/unknown?panel=settings": "/workspaces/" + workspace.Slug + "?panel=settings",
+	} {
+		req := httptest.NewRequest(http.MethodGet, from, nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusSeeOther {
+			t.Errorf("GET %s status = %d, want 303", from, rec.Code)
+		}
+		if got := rec.Header().Get("Location"); got != want {
+			t.Errorf("GET %s redirected to %q, want %q", from, got, want)
+		}
+	}
+}
+
 func TestWorkspaceDetailOldSlugReturns404AfterRename(t *testing.T) {
 	handler := newRoutesTestHandler(t)
 	workspace := createRouteTestWorkspace(t, handler, "Before Rename")

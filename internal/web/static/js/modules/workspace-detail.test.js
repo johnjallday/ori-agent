@@ -812,7 +812,7 @@ test('workspace detail links catalog-backed agents to the global detail page', (
 });
 
 test('workspace detail links snapshot-backed local agents to their workspace-scoped page', () => {
-  const page = new WorkspaceDetailPage('workspace-1');
+  const page = new WorkspaceDetailPage('workspace-uuid', 'marketing-site');
   page.workspace = {
     entry_agent_name: 'Local Manager',
     agent_instances: [{ name: 'Local Manager', role: 'Coordinator', entry_point: true }]
@@ -832,15 +832,15 @@ test('workspace detail links snapshot-backed local agents to their workspace-sco
   // would 404. They get a workspace-scoped detail page instead.
   assert.equal(target.kind, 'workspace-local');
   assert.equal(target.interactive, true);
-  assert.equal(target.href, '/workspaces/workspace-1/agents/Local%20Manager');
+  assert.equal(target.href, '/workspaces/marketing-site/agents/Local%20Manager');
   assert.match(markup, /data-agent-detail-kind="workspace-local"/);
-  assert.match(markup, /href="\/workspaces\/workspace-1\/agents\/Local%20Manager"/);
+  assert.match(markup, /href="\/workspaces\/marketing-site\/agents\/Local%20Manager"/);
   assert.doesNotMatch(markup, /href="\/agents\/Local%20Manager"/);
   assert.doesNotMatch(markup, /is-static/);
 });
 
 test('workspace detail routes missing entry agents to workspace recovery', () => {
-  const page = new WorkspaceDetailPage('workspace-1');
+  const page = new WorkspaceDetailPage('workspace-uuid', 'marketing-site');
   page.workspace = {
     entry_agent_name: 'Missing Manager',
     agent_instances: [{ name: 'Missing Manager', role: 'Coordinator', entry_point: true }]
@@ -862,14 +862,14 @@ test('workspace detail routes missing entry agents to workspace recovery', () =>
 
   assert.equal(target.kind, 'missing-entry');
   assert.equal(target.interactive, true);
-  assert.equal(target.href, '/workspaces/workspace-1?addAgent=1&seedAgentName=Missing+Manager');
+  assert.equal(target.href, '/workspaces/marketing-site?addAgent=1&seedAgentName=Missing+Manager');
   assert.match(
     frontMarkup,
-    /href="\/workspaces\/workspace-1\?addAgent=1&amp;seedAgentName=Missing\+Manager"/
+    /href="\/workspaces\/marketing-site\?addAgent=1&amp;seedAgentName=Missing\+Manager"/
   );
   assert.match(
     backMarkup,
-    /href="\/workspaces\/workspace-1\?addAgent=1&amp;seedAgentName=Missing\+Manager"/
+    /href="\/workspaces\/marketing-site\?addAgent=1&amp;seedAgentName=Missing\+Manager"/
   );
   assert.doesNotMatch(frontMarkup, /\/agents\/Missing%20Manager/);
   assert.doesNotMatch(backMarkup, /\/agents\/Missing%20Manager/);

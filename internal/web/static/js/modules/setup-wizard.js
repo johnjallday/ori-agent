@@ -117,17 +117,14 @@
     };
   }
 
-  // The server publishes the resolved UUID before deferred scripts run. Keep
-  // the URL fallback for standalone test fixtures and legacy embeds only; on
-  // workspace pages that segment is a slug and must never drive an API call.
+  // The browser route carries a slug. API identity comes only from the UUID
+  // the server publishes before deferred scripts run.
   function resolveWorkspaceId() {
-    const resolved =
+    return String(
       (typeof window !== 'undefined' && window.currentWorkspaceId) ||
-      (typeof document !== 'undefined' && document.body?.dataset?.workspaceId) ||
-      '';
-    if (resolved) return String(resolved);
-    const match = /^\/workspaces\/([^/?#]+)/.exec(window.location?.pathname || '');
-    return match ? decodeURIComponent(match[1]) : '';
+        (typeof document !== 'undefined' && document.body?.dataset?.workspaceId) ||
+        ''
+    );
   }
 
   function resumeKey() {

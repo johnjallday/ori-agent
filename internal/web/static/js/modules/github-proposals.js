@@ -34,14 +34,8 @@
 
     init() {
       const resolved = window.currentWorkspaceId || document.body?.dataset?.workspaceId || '';
-      if (resolved) {
-        this.workspaceId = String(resolved);
-      } else {
-        // Legacy/test fallback. Production workspace routes carry a slug here.
-        const match = window.location.pathname.match(/\/workspaces\/([^/?#]+)/);
-        if (!match) return;
-        this.workspaceId = decodeURIComponent(match[1]);
-      }
+      if (!resolved) return;
+      this.workspaceId = String(resolved);
       this.refresh();
     }
 
