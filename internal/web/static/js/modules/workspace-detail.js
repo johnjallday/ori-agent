@@ -20,6 +20,7 @@ import { WorkspacePluginsManager } from './workspace-detail-plugins.js';
 import { WorkspaceMemoryManager } from './workspace-detail-memory.js';
 import { WorkspaceFileModalManager } from './workspace-detail-file-modal.js';
 import { WorkspaceMembersPanel } from './workspace-detail-members.js';
+import { workspacePageURL, workspaceRootURL } from './workspace-routes.js';
 
 /**
  * Format a date for display
@@ -202,8 +203,9 @@ const TASK_ASSIST_TRAVEL_SPECIALISTS = Object.freeze({
 });
 
 export class WorkspaceDetailPage {
-  constructor(workspaceId) {
+  constructor(workspaceId, workspaceSlug = '') {
     this.workspaceId = workspaceId;
+    this.workspaceSlug = String(workspaceSlug || '').trim();
     this.workspace = null;
     this.tasks = [];
     this.sessions = [];
@@ -2244,6 +2246,7 @@ export class WorkspaceDetailPage {
       if (!response.ok) throw new Error('Failed to load workspace');
 
       this.workspace = await response.json();
+      this.workspaceSlug = String(this.workspace?.folder_slug || this.workspaceSlug || '').trim();
       await this.loadAvailableSkills().catch(error => {
         console.warn('Failed to load skill catalog for workspace detail:', error);
       });
@@ -2332,11 +2335,12 @@ export class WorkspaceDetailPage {
     if (this.elements.workspaceBreadcrumb) {
       this.elements.workspaceBreadcrumb.textContent = this.workspace.name || 'Workspace';
     }
-    if (this.elements.openCanvasBtn) {
-      this.elements.openCanvasBtn.href = `/workspaces/${this.workspaceId}/canvas`;
+    const workspaceSlug = String(this.workspaceSlug || this.workspace?.folder_slug || '').trim();
+    if (this.elements.openCanvasBtn && workspaceSlug) {
+      this.elements.openCanvasBtn.href = workspacePageURL(workspaceSlug, ['canvas']);
     }
-    if (this.elements.openDiagnosticsBtn) {
-      this.elements.openDiagnosticsBtn.href = `/workspaces/${this.workspaceId}/diagnostics`;
+    if (this.elements.openDiagnosticsBtn && workspaceSlug) {
+      this.elements.openDiagnosticsBtn.href = workspacePageURL(workspaceSlug, ['diagnostics']);
     }
 
     this.renderWorkspaceWorkflowLinks();
@@ -3119,6 +3123,7 @@ export class WorkspaceDetailPage {
         const colorAccent = child.color ? `border-left: 3px solid ${child.color};` : '';
         const childCount = (child.children || []).length;
         const hasChildren = childCount > 0;
+        const childURL = child.folder_slug ? workspaceRootURL(child.folder_slug) : '#';
 
         return `
         <div class="workspace-detail-child-card"
@@ -3126,8 +3131,8 @@ export class WorkspaceDetailPage {
              role="button"
              tabindex="0"
              aria-label="Open workspace ${this.escapeHtml(name)}"
-             onclick="window.location.href='/workspaces/${child.id}'"
-             onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); window.location.href='/workspaces/${child.id}'; }"
+             onclick="window.location.href='${childURL}'"
+             onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); window.location.href='${childURL}'; }"
              style="${colorAccent}">
           <div class="child-name">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="color: ${child.color || 'var(--text-secondary)'}; flex-shrink: 0;">

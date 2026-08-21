@@ -7900,7 +7900,14 @@
     if (window.location && typeof window.location.pathname === 'string') {
       pathname = window.location.pathname;
     }
-    var workspaceId = extractWorkspaceIdFromPath(pathname);
+    // Workspace browser paths carry slugs. The server-published UUID remains
+    // the routing/API identity; pathname parsing is only a legacy/test fallback.
+    var workspaceId = String(
+      window.currentWorkspaceId ||
+        (document.body && document.body.dataset && document.body.dataset.workspaceId) ||
+        ''
+    ).trim();
+    if (!workspaceId) workspaceId = extractWorkspaceIdFromPath(pathname);
     var taskId = extractTaskIdFromPath(pathname);
     var sessionId = getCurrentHomeSessionId();
 

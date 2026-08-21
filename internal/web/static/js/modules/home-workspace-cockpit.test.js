@@ -385,9 +385,15 @@ test('workspaceRailView offers Ask Commander only with a resolved entry agent (F
 });
 
 test('workspaceRailView builds an encoded, workspace-scoped open target (FR67)', () => {
-  assert.equal(workspaceRailView({ id: 'w 1', name: 'A' }).openHref, '/workspaces/w%201');
-  assert.equal(workspaceRailView({ id: 'a/b', name: 'A' }).openHref, '/workspaces/a%2Fb');
-  assert.equal(workspaceRailView({ name: 'No id' }).openHref, '');
+  assert.equal(
+    workspaceRailView({ id: 'uuid-1', folder_slug: 'workspace one', name: 'A' }).openHref,
+    '/workspaces/workspace%20one'
+  );
+  assert.equal(
+    workspaceRailView({ id: 'uuid-2', folder_slug: 'a/b', name: 'A' }).openHref,
+    '/workspaces/a%2Fb'
+  );
+  assert.equal(workspaceRailView({ id: 'uuid-only', name: 'No slug' }).openHref, '');
 });
 
 test('workspaceRailView flags Personal HQ and groups', () => {
@@ -408,11 +414,17 @@ test('workspaceRailView falls back to an honest name for an unnamed workspace', 
 
 test('renderWorkspaceRailHTML keeps Open Workspace available even with no next move (FR66)', () => {
   const html = renderWorkspaceRailHTML(
-    workspaceRailView({ id: 'w1', name: 'Quiet', open_task_count: 0, needs_attention_count: 0 })
+    workspaceRailView({
+      id: 'uuid-1',
+      folder_slug: 'quiet-workspace',
+      name: 'Quiet',
+      open_task_count: 0,
+      needs_attention_count: 0
+    })
   );
   assert.match(html, /No immediate action/);
   assert.match(html, /data-cockpit-rail-open/);
-  assert.match(html, /href="\/workspaces\/w1"/);
+  assert.match(html, /href="\/workspaces\/quiet-workspace"/);
 });
 
 test('renderWorkspaceRailHTML marks unavailable metrics instead of printing 0 (FR121)', () => {
@@ -452,6 +464,7 @@ test('renderWorkspaceRailHTML escapes hostile workspace content', () => {
   const html = renderWorkspaceRailHTML(
     workspaceRailView({
       id: '"><script>x()</script>',
+      folder_slug: '"><script>slug()</script>',
       name: '<img src=x onerror=alert(1)>',
       description: '</div><script>bad()</script>',
       entry_agent_name: '<b>Scout</b>'
@@ -467,8 +480,8 @@ test('renderWorkspaceRailHTML escapes hostile workspace content', () => {
   assert.doesNotMatch(html, /<b>Scout/i);
   assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;/);
   assert.match(html, /&lt;script&gt;bad\(\)&lt;\/script&gt;/);
-  // The id lands in both an href and an attribute; neither may break out.
-  assert.match(html, /href="\/workspaces\/%22%3E%3Cscript%3E/);
+  // The slug lands in the href and the id in an attribute; neither may break out.
+  assert.match(html, /href="\/workspaces\/%22%3E%3Cscript%3Eslug/);
   assert.match(html, /data-workspace-id="&quot;&gt;&lt;script&gt;/);
 });
 

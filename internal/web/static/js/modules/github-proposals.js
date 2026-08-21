@@ -33,11 +33,15 @@
     }
 
     init() {
-      // Derive the workspace id from the URL rather than a global: classic
-      // deferred scripts run before module scripts set window.currentWorkspaceId.
-      const match = window.location.pathname.match(/\/workspaces\/([^/?#]+)/);
-      if (!match) return;
-      this.workspaceId = decodeURIComponent(match[1]);
+      const resolved = window.currentWorkspaceId || document.body?.dataset?.workspaceId || '';
+      if (resolved) {
+        this.workspaceId = String(resolved);
+      } else {
+        // Legacy/test fallback. Production workspace routes carry a slug here.
+        const match = window.location.pathname.match(/\/workspaces\/([^/?#]+)/);
+        if (!match) return;
+        this.workspaceId = decodeURIComponent(match[1]);
+      }
       this.refresh();
     }
 

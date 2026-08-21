@@ -117,14 +117,17 @@
     };
   }
 
-  // resolveWorkspaceId reads the id from the URL rather than a global. Page
-  // scripts load with `defer` and run before the module script that sets
-  // window.currentWorkspaceId, so trusting the global here would mean an empty
-  // id on exactly the load that matters — the first one after creation.
+  // The server publishes the resolved UUID before deferred scripts run. Keep
+  // the URL fallback for standalone test fixtures and legacy embeds only; on
+  // workspace pages that segment is a slug and must never drive an API call.
   function resolveWorkspaceId() {
+    const resolved =
+      (typeof window !== 'undefined' && window.currentWorkspaceId) ||
+      (typeof document !== 'undefined' && document.body?.dataset?.workspaceId) ||
+      '';
+    if (resolved) return String(resolved);
     const match = /^\/workspaces\/([^/?#]+)/.exec(window.location?.pathname || '');
-    if (match) return decodeURIComponent(match[1]);
-    return (typeof window !== 'undefined' && window.currentWorkspaceId) || '';
+    return match ? decodeURIComponent(match[1]) : '';
   }
 
   function resumeKey() {

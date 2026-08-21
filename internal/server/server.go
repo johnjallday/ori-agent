@@ -466,7 +466,30 @@ func (s *Server) serveWorkspaces(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, target.String(), http.StatusFound)
 }
 
-// handleWorkspacesRoutes handles all /workspaces/* routes
+type workspacePageIdentity struct {
+	ID   string
+	Slug string
+}
+
+// resolveWorkspacePageIdentity resolves only the canonical browser slug. It
+// deliberately never falls back to Store.Get(token), so UUID bookmarks and
+// stale pre-rename slugs return a real 404.
+func (s *Server) resolveWorkspacePageIdentity(slug string) (workspacePageIdentity, error) {
+	if s == nil || s.Storage == nil || s.Storage.WorkspaceStore == nil || !workspace.IsCanonicalWorkspaceSlug(slug) {
+		return workspacePageIdentity{}, workspace.ErrWorkspaceSlugNotFound
+	}
+	resolver, ok := s.Storage.WorkspaceStore.(workspace.SlugResolver)
+	if !ok {
+		return workspacePageIdentity{}, workspace.ErrWorkspaceSlugNotFound
+	}
+	ws, err := resolver.ResolveSlug(slug)
+	if err != nil || ws == nil || ws.ID == "" || ws.FolderSlug == "" {
+		return workspacePageIdentity{}, workspace.ErrWorkspaceSlugNotFound
+	}
+	return workspacePageIdentity{ID: ws.ID, Slug: ws.FolderSlug}, nil
+}
+
+// handleWorkspacesRoutes handles all /workspaces/* routes.
 func (s *Server) handleWorkspacesRoutes(w http.ResponseWriter, r *http.Request) {
 	// Extract path after /workspaces/
 	path := strings.TrimPrefix(r.URL.Path, "/workspaces/")
@@ -477,31 +500,38 @@ func (s *Server) handleWorkspacesRoutes(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Split path into segments
+	// Resolve the browser-facing slug once. Every descendant receives the UUID
+	// for API/state work and the current slug for page navigation.
 	parts := strings.Split(path, "/")
-	workspaceID := parts[0]
+	identity, err := s.resolveWorkspacePageIdentity(parts[0])
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	workspaceID := identity.ID
+	workspaceSlug := identity.Slug
 
-	// Check if this is a canvas route: /workspaces/{id}/canvas
+	// Check if this is a canvas route: /workspaces/{slug}/canvas
 	if len(parts) == 2 && parts[1] == "canvas" {
-		s.serveWorkspaceCanvas(w, workspaceID)
+		s.serveWorkspaceCanvas(w, workspaceID, workspaceSlug)
 		return
 	}
 
 	// Check if this is a diagnostics route: /workspaces/{id}/diagnostics
 	if len(parts) == 2 && parts[1] == "diagnostics" {
-		s.serveWorkspaceDiagnostics(w, workspaceID)
+		s.serveWorkspaceDiagnostics(w, workspaceID, workspaceSlug)
 		return
 	}
 
 	// Check if this is a task route: /workspaces/{id}/task/{taskId}
 	if len(parts) == 3 && parts[1] == "task" && strings.TrimSpace(parts[2]) != "" {
-		s.serveWorkspaceTask(w, workspaceID, parts[2])
+		s.serveWorkspaceTask(w, workspaceID, workspaceSlug, parts[2])
 		return
 	}
 
 	// Check if this is a workspace run route: /workspaces/{id}/runs/{runId}
 	if len(parts) == 3 && parts[1] == "runs" && strings.TrimSpace(parts[2]) != "" {
-		s.serveWorkspaceRun(w, workspaceID, parts[2])
+		s.serveWorkspaceRun(w, workspaceID, workspaceSlug, parts[2])
 		return
 	}
 
@@ -513,7 +543,7 @@ func (s *Server) handleWorkspacesRoutes(w http.ResponseWriter, r *http.Request) 
 		if err != nil {
 			agentName = parts[2]
 		}
-		s.serveWorkspaceAgentDetail(w, workspaceID, agentName)
+		s.serveWorkspaceAgentDetail(w, workspaceID, workspaceSlug, agentName)
 		return
 	}
 
@@ -528,25 +558,25 @@ func (s *Server) handleWorkspacesRoutes(w http.ResponseWriter, r *http.Request) 
 	// rendering an empty Plan page for an ID that was never valid.
 	if len(parts) >= 2 && parts[1] == "plans" {
 		if len(parts) == 2 {
-			s.serveWorkspacePlans(w, workspaceID)
+			s.serveWorkspacePlans(w, workspaceID, workspaceSlug)
 			return
 		}
 		if len(parts) == 3 && strings.TrimSpace(parts[2]) != "" {
-			s.serveWorkspacePlan(w, workspaceID, parts[2])
+			s.serveWorkspacePlan(w, workspaceID, workspaceSlug, parts[2])
 			return
 		}
-		http.Redirect(w, r, "/workspaces/"+url.PathEscape(workspaceID)+"/plans", http.StatusSeeOther)
+		http.Redirect(w, r, "/workspaces/"+url.PathEscape(workspaceSlug)+"/plans", http.StatusSeeOther)
 		return
 	}
 
 	// Workspace notes app: /workspaces/{id}/notes[/noteId].
 	if len(parts) >= 2 && parts[1] == "notes" {
 		if len(parts) == 2 {
-			s.serveWorkspaceNotesPage(w, workspaceID, "")
+			s.serveWorkspaceNotesPage(w, workspaceID, workspaceSlug, "")
 			return
 		}
 		if len(parts) == 3 && strings.TrimSpace(parts[2]) != "" {
-			s.serveWorkspaceNotesPage(w, workspaceID, parts[2])
+			s.serveWorkspaceNotesPage(w, workspaceID, workspaceSlug, parts[2])
 			return
 		}
 		http.Redirect(w, r, "/", http.StatusSeeOther)
@@ -555,7 +585,7 @@ func (s *Server) handleWorkspacesRoutes(w http.ResponseWriter, r *http.Request) 
 
 	// If just /workspaces/{id}, serve the workspace detail page
 	if len(parts) == 1 {
-		s.serveWorkspaceDetail(w, workspaceID)
+		s.serveWorkspaceDetail(w, workspaceID, workspaceSlug)
 		return
 	}
 
@@ -563,12 +593,13 @@ func (s *Server) handleWorkspacesRoutes(w http.ResponseWriter, r *http.Request) 
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
-func (s *Server) serveWorkspaceNotesPage(w http.ResponseWriter, workspaceID, noteID string) {
+func (s *Server) serveWorkspaceNotesPage(w http.ResponseWriter, workspaceID, workspaceSlug, noteID string) {
 	data := s.prepareBasePageData("workspaces")
 	data.Title = "Workspace Notes - Ori Agent"
 	data.BrandText = "Ori Agent"
 	data.ShowSidebarToggle = false
 	data.Extra["WorkspaceID"] = workspaceID
+	data.Extra["WorkspaceSlug"] = workspaceSlug
 	data.Extra["NoteID"] = noteID
 	data.Extra["NotePageMode"] = "workspace"
 	s.renderAndWritePage(w, "note-page", data)
@@ -604,12 +635,13 @@ func (s *Server) serveFocusedNotePage(w http.ResponseWriter, noteID string) {
 
 // serveWorkspacePlans renders the canonical Plans destination for a workspace:
 // Active and History, plus creation when planning is enabled (FR-145, FR-146).
-func (s *Server) serveWorkspacePlans(w http.ResponseWriter, workspaceID string) {
+func (s *Server) serveWorkspacePlans(w http.ResponseWriter, workspaceID, workspaceSlug string) {
 	data := s.prepareBasePageData("workspaces")
 	data.Title = "Plans - Ori Agent"
 	data.BrandText = "Ori Agent"
 	data.ShowSidebarToggle = true
 	data.Extra["WorkspaceID"] = workspaceID
+	data.Extra["WorkspaceSlug"] = workspaceSlug
 	s.renderAndWritePage(w, "workspace-plans", data)
 }
 
@@ -617,12 +649,13 @@ func (s *Server) serveWorkspacePlans(w http.ResponseWriter, workspaceID string) 
 // the Plan through the workspace-scoped API, so a Plan ID from another
 // workspace renders "not found" rather than another workspace's content
 // (FR-163, FR-167).
-func (s *Server) serveWorkspacePlan(w http.ResponseWriter, workspaceID, planID string) {
+func (s *Server) serveWorkspacePlan(w http.ResponseWriter, workspaceID, workspaceSlug, planID string) {
 	data := s.prepareBasePageData("workspaces")
 	data.Title = "Plan - Ori Agent"
 	data.BrandText = "Ori Agent"
 	data.ShowSidebarToggle = true
 	data.Extra["WorkspaceID"] = workspaceID
+	data.Extra["WorkspaceSlug"] = workspaceSlug
 	data.Extra["PlanID"] = planID
 	s.renderAndWritePage(w, "workspace-plan", data)
 }
@@ -631,12 +664,13 @@ func (s *Server) serveWorkspacePlan(w http.ResponseWriter, workspaceID, planID s
 // kind. Groups render the same page as concrete workspaces; the page itself
 // shows group-specific UI (header badge, Members panel) based on the loaded
 // workspace's kind.
-func (s *Server) serveWorkspaceDetail(w http.ResponseWriter, workspaceID string) {
+func (s *Server) serveWorkspaceDetail(w http.ResponseWriter, workspaceID, workspaceSlug string) {
 	data := s.prepareBasePageData("workspaces")
 	data.Title = "Workspace - Ori Agent"
 	data.BrandText = "Ori Agent"
 	data.ShowSidebarToggle = true
 	data.Extra["WorkspaceID"] = workspaceID
+	data.Extra["WorkspaceSlug"] = workspaceSlug
 	s.renderAndWritePage(w, "workspace-detail", data)
 }
 
@@ -644,50 +678,55 @@ func (s *Server) serveWorkspaceDetail(w http.ResponseWriter, workspaceID string)
 // agent (an entry/manager agent defined in the workspace's config.json). These
 // agents are not registered in the global agent store, so they have no
 // /agents/<name> page; this workspace-scoped route is their home.
-func (s *Server) serveWorkspaceAgentDetail(w http.ResponseWriter, workspaceID, agentName string) {
+func (s *Server) serveWorkspaceAgentDetail(w http.ResponseWriter, workspaceID, workspaceSlug, agentName string) {
 	data := s.prepareBasePageData("workspaces")
 	data.Title = "Workspace Agent - Ori Agent"
 	data.BrandText = "Ori Agent"
 	data.ShowSidebarToggle = true
 	data.Extra["WorkspaceID"] = workspaceID
+	data.Extra["WorkspaceSlug"] = workspaceSlug
 	data.Extra["AgentName"] = agentName
 	s.renderAndWritePage(w, "workspace-agent-detail", data)
 }
 
-func (s *Server) serveWorkspaceDiagnostics(w http.ResponseWriter, workspaceID string) {
+func (s *Server) serveWorkspaceDiagnostics(w http.ResponseWriter, workspaceID, workspaceSlug string) {
 	data := s.prepareBasePageData("workspaces")
 	data.Title = "Workspace Diagnostics - Ori Agent"
 	data.BrandText = "Ori Agent"
 	data.ShowSidebarToggle = true
 	data.Extra["WorkspaceID"] = workspaceID
+	data.Extra["WorkspaceSlug"] = workspaceSlug
 	s.renderAndWritePage(w, "workspace-diagnostics", data)
 }
 
-func (s *Server) serveWorkspaceCanvas(w http.ResponseWriter, workspaceID string) {
+func (s *Server) serveWorkspaceCanvas(w http.ResponseWriter, workspaceID, workspaceSlug string) {
 	data := s.prepareBasePageData("workspaces")
 	data.Title = "Workspace Canvas - Ori Agent"
 	data.BrandText = "Ori Agent"
 	data.ShowSidebarToggle = true
 	data.Extra["WorkspaceID"] = workspaceID
+	data.Extra["WorkspaceSlug"] = workspaceSlug
 	s.renderAndWritePage(w, "workspace-canvas", data)
 }
 
-func (s *Server) serveWorkspaceTask(w http.ResponseWriter, workspaceID, taskID string) {
+func (s *Server) serveWorkspaceTask(w http.ResponseWriter, workspaceID, workspaceSlug, taskID string) {
 	data := s.prepareBasePageData("workspaces")
 	data.Title = "Task - Ori Agent"
 	data.BrandText = "Ori Agent"
 	data.ShowSidebarToggle = true
 	data.Extra["WorkspaceID"] = workspaceID
+	data.Extra["WorkspaceSlug"] = workspaceSlug
 	data.Extra["TaskID"] = taskID
 	s.renderAndWritePage(w, "workspace-task", data)
 }
 
-func (s *Server) serveWorkspaceRun(w http.ResponseWriter, workspaceID, runID string) {
+func (s *Server) serveWorkspaceRun(w http.ResponseWriter, workspaceID, workspaceSlug, runID string) {
 	data := s.prepareBasePageData("workspaces")
 	data.Title = "Workspace Run - Ori Agent"
 	data.BrandText = "Ori Agent"
 	data.ShowSidebarToggle = true
 	data.Extra["WorkspaceID"] = workspaceID
+	data.Extra["WorkspaceSlug"] = workspaceSlug
 	data.Extra["RunID"] = runID
 	s.renderAndWritePage(w, "workspace-run", data)
 }

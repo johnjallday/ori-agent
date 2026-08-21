@@ -6891,8 +6891,8 @@ async function menuHarness({ handlers = {}, workspaces, tiles } = {}) {
   const harness = createCameraHarness({ tiles: tiles || ['ws-1', 'ws-2'] });
   map.mount(harness.container, {
     workspaces: workspaces || [
-      { id: 'ws-1', name: 'Alpha' },
-      { id: 'ws-2', name: 'Beta' }
+      { id: 'ws-1', folder_slug: 'alpha', name: 'Alpha' },
+      { id: 'ws-2', folder_slug: 'beta', name: 'Beta' }
     ],
     hideChrome: true,
     selectOnly: true,
@@ -7091,7 +7091,7 @@ test('each tile item runs the action the rail runs', async () => {
 
   open();
   harness.menu.item('open-backlog').fire('click');
-  assert.match(env.window.location.href, /\/workspaces\/ws-1\?panel=backlog$/);
+  assert.match(env.window.location.href, /\/workspaces\/alpha\?panel=backlog$/);
 
   open();
   harness.menu.item('toggle-selection').fire('click');

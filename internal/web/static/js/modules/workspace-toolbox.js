@@ -58,17 +58,20 @@
 
   function wsId() {
     if (state.workspaceId) return state.workspaceId;
-    // The URL is authoritative and available immediately; window.currentWorkspaceId
-    // is set by a module script that runs after deferred ones, so relying on it
-    // alone leaves this module idle on exactly the load that matters — the first.
+    const resolved =
+      (typeof window !== 'undefined' && window.currentWorkspaceId) ||
+      (typeof document !== 'undefined' && document.body?.dataset?.workspaceId) ||
+      '';
+    if (resolved) {
+      state.workspaceId = String(resolved);
+      return state.workspaceId;
+    }
+    // Legacy/test fallback. Production workspace routes carry a slug here.
     const match =
       typeof window !== 'undefined' &&
       /^\/workspaces\/([^/?#]+)/.exec((window.location && window.location.pathname) || '');
-    if (match) {
-      state.workspaceId = decodeURIComponent(match[1]);
-      return state.workspaceId;
-    }
-    return (typeof window !== 'undefined' && window.currentWorkspaceId) || '';
+    if (match) state.workspaceId = decodeURIComponent(match[1]);
+    return state.workspaceId;
   }
 
   function el(tag, opts = {}, children = []) {

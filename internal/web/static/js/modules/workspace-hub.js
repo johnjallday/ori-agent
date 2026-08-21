@@ -1026,7 +1026,16 @@
 
   function navigateToWorkspace(workspaceId) {
     if (!workspaceId) return;
-    window.location.href = `/workspaces/${encodeURIComponent(workspaceId)}`;
+    const state = window.WorkspaceHubState.getState();
+    const workspace = flattenWorkspaces(state.workspaces || []).find(
+      item => item.id === workspaceId
+    );
+    const slug = String(workspace?.folder_slug || '').trim();
+    if (!slug) {
+      console.error('workspace-hub: cannot open workspace without folder_slug', workspaceId);
+      return;
+    }
+    window.location.href = `/workspaces/${encodeURIComponent(slug)}`;
   }
 
   function normalizeWorkspaceKind(value) {

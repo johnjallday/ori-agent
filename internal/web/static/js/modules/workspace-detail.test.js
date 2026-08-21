@@ -62,6 +62,31 @@ test('workspace detail activateWorkspaceConfigTab clicks the requested tab', () 
   assert.equal(mcpTab.clickCount, 1);
 });
 
+test('workspace detail keeps UUID APIs separate from slug page links', async () => {
+  const page = new WorkspaceDetailPage('8d8c4de0-uuid', 'marketing-site');
+  page.workspace = {
+    id: '8d8c4de0-uuid',
+    folder_slug: 'marketing-site',
+    name: 'Marketing Site',
+    agent_instances: []
+  };
+  page.elements = {
+    openCanvasBtn: {},
+    openDiagnosticsBtn: {}
+  };
+  page.renderWorkspaceTags = () => {};
+  page.renderWorkspaceWorkflowLinks = () => {};
+  page.renderWorkspaceIntent = () => {};
+  page.loadChildren = async () => {};
+  page.renderWorkspaceHealth = () => {};
+
+  await page.renderWorkspaceInfo();
+
+  assert.equal(page.workspaceId, '8d8c4de0-uuid');
+  assert.equal(page.elements.openCanvasBtn.href, '/workspaces/marketing-site/canvas');
+  assert.equal(page.elements.openDiagnosticsBtn.href, '/workspaces/marketing-site/diagnostics');
+});
+
 test('workspace detail consumes a scoped project-open failure notice once', () => {
   const page = new WorkspaceDetailPage('workspace-1');
   const storage = new Map([

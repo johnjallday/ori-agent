@@ -100,8 +100,9 @@ func registerPageRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/agents-dashboard", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/agents", http.StatusFound)
 	})
-	// Workspaces page routes (primary)
-	mux.HandleFunc("/workspaces/", s.handleWorkspacesRoutes) // Dynamic route handler for /workspaces/{id}
+	// Workspace page routes use the globally unique folder slug. UUIDs remain
+	// API-only and intentionally return 404 in this browser namespace.
+	mux.HandleFunc("/workspaces/", s.handleWorkspacesRoutes) // /workspaces/{folder_slug}[/*]
 	mux.HandleFunc("/notes/", s.handleNotesPageRoute)        // Focused note page: /notes/{id}
 	mux.HandleFunc("/workspaces", s.serveWorkspaces)
 	mux.HandleFunc("/action-center", s.serveActionCenter)

@@ -11,7 +11,10 @@
  * calls are made until the user clicks "Find tools".
  */
 (function () {
-  function workspaceIdFromPath() {
+  function workspaceIdFromPage() {
+    const resolved = window.currentWorkspaceId || document.body?.dataset?.workspaceId || '';
+    if (resolved) return String(resolved);
+    // Legacy/test fallback. Production workspace routes carry a slug here.
     const match = window.location.pathname.match(/\/workspaces\/([^/]+)/);
     return match ? decodeURIComponent(match[1]) : '';
   }
@@ -47,7 +50,7 @@
     ) {
       return;
     }
-    const workspaceId = workspaceIdFromPath();
+    const workspaceId = workspaceIdFromPage();
     if (!workspaceId) return;
 
     let panel = null;
