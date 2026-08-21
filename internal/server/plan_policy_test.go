@@ -2,10 +2,14 @@ package server
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/johnjallday/ori-agent/internal/workspace"
 	"github.com/johnjallday/ori-agent/internal/workspaceplan"
+	"github.com/johnjallday/ori-agent/internal/workspacepolicy"
 	"github.com/johnjallday/ori-agent/internal/workspacesettings"
 )
 
@@ -118,6 +122,63 @@ func TestResolversDegradeToEmptyRatherThanToEachOther(t *testing.T) {
 	}
 	if snapshot.Profile != "" {
 		t.Errorf("policy invented a profile: %q", snapshot.Profile)
+	}
+	if artifacts := builder.resolvePlanArtifacts(ctx, "ws-1"); artifacts.Apply {
+		t.Errorf("artifact resolver invented compiled output policy: %+v", artifacts)
+	}
+}
+
+func TestApprovedOriArtifactsOfferWtHandoffOnlyFromDevWorktree(t *testing.T) {
+	store, err := workspace.NewFileStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("new workspace store: %v", err)
+	}
+	ws := &workspace.Workspace{ID: "ws-1", Name: "Ori dev", ProjectPath: "project"}
+	if err := store.Save(ws); err != nil {
+		t.Fatalf("save workspace: %v", err)
+	}
+	project := filepath.Join(filepath.Dir(store.GetFilesPath(ws.ID)), "project")
+	if err := os.MkdirAll(filepath.Join(project, ".git"), 0o750); err != nil {
+		t.Fatalf("create fake repository: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(project, "scripts"), 0o750); err != nil {
+		t.Fatalf("create scripts directory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(project, ".git", "HEAD"), []byte("ref: refs/heads/dev\n"), 0o600); err != nil {
+		t.Fatalf("write HEAD: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(project, "scripts", "wt.sh"), []byte("# wt\n"), 0o600); err != nil {
+		t.Fatalf("write wt script: %v", err)
+	}
+
+	builder := &ServerBuilder{workspaceStore: store, workspacePlanPolicy: workspacepolicy.NewResolver(store)}
+	if got := builder.workspacePlanArtifactRoot(ws.ID, "tasks/tasks-approved.md"); got != project {
+		t.Fatalf("repository task root = %q, want project %q", got, project)
+	}
+	if got := builder.workspacePlanArtifactRoot(ws.ID, "older-dir/prd-approved.md"); got != project {
+		t.Fatalf("approved PRD root changed with current settings: %q, want %q", got, project)
+	}
+	if got := builder.workspacePlanArtifactRoot(ws.ID, "notes/context.md"); got != store.GetFilesPath(ws.ID) {
+		t.Fatalf("note root = %q, want workspace files root %q", got, store.GetFilesPath(ws.ID))
+	}
+
+	plan := &workspaceplan.Plan{ID: "plan_12345678", WorkspaceID: ws.ID, OriginalRequest: "Approved bridge"}
+	feature := workspaceplan.PlanFeatureSlug(plan)
+	paths := []string{"tasks/tasks-" + feature + ".md"}
+
+	handoff := builder.resolveWorkspacePlanHandoff(ws.ID, plan, paths)
+	if handoff == nil || handoff.Kind != "wt" || handoff.Feature != feature {
+		t.Fatalf("handoff = %#v", handoff)
+	}
+	if !strings.Contains(handoff.Command, "wt start "+feature) {
+		t.Fatalf("handoff command = %q", handoff.Command)
+	}
+
+	if err := os.WriteFile(filepath.Join(project, ".git", "HEAD"), []byte("ref: refs/heads/feature/work\n"), 0o600); err != nil {
+		t.Fatalf("change HEAD: %v", err)
+	}
+	if got := builder.resolveWorkspacePlanHandoff(ws.ID, plan, paths); got != nil {
+		t.Fatalf("non-dev worktree offered wt start: %#v", got)
 	}
 }
 

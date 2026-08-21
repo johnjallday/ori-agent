@@ -120,6 +120,33 @@ func TestTheLegacyPlanningSkillIsNotInTheRepository(t *testing.T) {
 	}
 }
 
+func TestCrossHarnessTaskPlanningSkillHasOneWorkflowSource(t *testing.T) {
+	root, err := repositoryRoot()
+	if err != nil {
+		t.Skipf("could not locate the repository root: %v", err)
+	}
+	canonicalPath := filepath.Join(root, ".agents", "skills", "task-planning", "SKILL.md")
+	canonical, err := os.ReadFile(canonicalPath) // #nosec G304 -- fixed repository test path
+	if err != nil || !strings.Contains(string(canonical), "## Operating modes") {
+		t.Fatalf("canonical task-planning skill is missing or incomplete: %v", err)
+	}
+
+	claudePath := filepath.Join(root, ".claude", "skills", "task-planning", "SKILL.md")
+	entrypoint, err := os.ReadFile(claudePath) // #nosec G304 -- fixed repository test path
+	if err != nil {
+		t.Fatalf("read Claude task-planning entry point: %v", err)
+	}
+	text := string(entrypoint)
+	if !strings.Contains(text, ".agents/skills/task-planning/SKILL.md") {
+		t.Fatalf("Claude entry point does not delegate to the canonical skill: %s", text)
+	}
+	for _, duplicated := range []string{"## Operating modes", "## Demo checkpoints", "## Permission sweep"} {
+		if strings.Contains(text, duplicated) {
+			t.Errorf("Claude entry point duplicated canonical workflow section %q", duplicated)
+		}
+	}
+}
+
 // packageImportPaths returns every import in a directory's non-test Go files.
 func packageImportPaths(dir string) ([]string, error) {
 	entries, err := os.ReadDir(dir)

@@ -560,16 +560,15 @@ func (s *Service) validateLivePlanner(live herdr.AgentInfo, placement featurePla
 }
 
 // PlanningBootstrapPrompt is the Pi planner's first instruction (AR22). It
-// names AGENTS.md, the Issue snapshot, the expected PRD path when the route
-// calls for one, the task-list path, the size route, and the next planning
-// action — and explicitly forbids implementation, branch creation, and
-// worktree creation before the plan is complete. It never embeds the Issue
-// body or comments: those stay in the snapshot file, referenced by path only.
+// carries only run-specific state and points at the canonical cross-harness
+// planning skill for workflow. It never embeds the Issue body, comments, or a
+// second copy of the planning protocol.
 func PlanningBootstrapPrompt(plan IssuePlan) string {
 	lines := []string{
 		"You are the Pi planner for Ori Issue #" + strconv.Itoa(plan.IssueNumber) + " (" + plan.Slug + ").",
 		"Work only in this Git worktree: " + plan.DevWorktreePath,
 		"Read and follow: " + filepath.Join(plan.DevWorktreePath, "AGENTS.md"),
+		"Planning workflow: " + filepath.Join(plan.DevWorktreePath, ".agents", "skills", "task-planning", "SKILL.md") + " (planning-only mode)",
 		"Issue snapshot: " + plan.SnapshotPath,
 	}
 	if plan.PRDPath != "" {
@@ -580,8 +579,7 @@ func PlanningBootstrapPrompt(plan IssuePlan) string {
 		"Size route: size:"+string(plan.Route),
 		"Next planning action: "+nextIncompleteTask(plan.TaskListPath),
 		"Do not implement this feature. Do not create a Git branch or worktree, and do not run wt start.",
-		"Follow the task checklist's first unchecked item, generate parent tasks, and stop to wait for \"Go\" before expanding sub-tasks — exactly as AGENTS.md's planning rules describe.",
-		"The feature worktree and implementation begin only after the detailed plan is complete, when a person runs wt start "+plan.Slug+".",
+		"Replace the starter with the completed planning artifacts, then stop. A person or separate handoff action starts implementation.",
 	)
 	return strings.Join(lines, "\n")
 }
@@ -1042,9 +1040,9 @@ func starterHeader(b *strings.Builder, plan IssuePlan) {
 }
 
 func starterPreamble(b *strings.Builder) {
-	b.WriteString("This checklist is a planning starter created by `wt plan`. It is not a\n")
-	b.WriteString("real plan. Do not start implementing, and do not create a branch or\n")
-	b.WriteString("worktree, until it has been replaced.\n\n")
+	b.WriteString("This is a planning starter created by `wt plan`, not an implementation\n")
+	b.WriteString("checklist. Follow `.agents/skills/task-planning/SKILL.md` in\n")
+	b.WriteString("planning-only mode and replace this file with the completed plan.\n\n")
 }
 
 func renderTasksFirstStarter(plan IssuePlan) string {
@@ -1053,39 +1051,22 @@ func renderTasksFirstStarter(plan IssuePlan) string {
 	fmt.Fprintf(&b, "Source Issue: `tasks/issue-%s.md`\n\n", plan.Slug)
 	starterPreamble(&b)
 	b.WriteString("## Tasks\n\n")
-	fmt.Fprintf(&b, "- [ ] 1.1 Read `AGENTS.md` and `tasks/issue-%s.md`, then generate the\n", plan.Slug)
-	b.WriteString("      high-level parent tasks for this feature (about 5, each annotated\n")
-	b.WriteString("      with a recommended Claude model) and present them without\n")
-	b.WriteString("      sub-tasks yet. Wait for \"Go\" before continuing.\n")
-	b.WriteString("- [ ] 1.2 After \"Go\", generate the sub-tasks for every parent group,\n")
-	b.WriteString("      following this repository's task-list rules (vertical slices, a\n")
-	b.WriteString("      Commit sub-item per group, Demo checkpoints for user-visible\n")
-	b.WriteString("      groups, a Permission sweep and a manual test guide before the\n")
-	b.WriteString("      final PR). Replace this file with the result. Do not begin\n")
-	fmt.Fprintf(&b, "      implementation and do not create a branch or worktree — `wt start\n      %s` does that once this file is a real plan.\n", plan.Slug)
+	fmt.Fprintf(&b, "- [ ] 1.1 Read the canonical planning skill and `tasks/issue-%s.md`;\n", plan.Slug)
+	b.WriteString("      follow its task-list workflow in planning-only mode and replace\n")
+	b.WriteString("      this starter with the completed detailed checklist.\n")
 	return b.String()
 }
 
 func renderPRDFirstStarter(plan IssuePlan) string {
 	var b strings.Builder
 	starterHeader(&b, plan)
-	fmt.Fprintf(&b, "Source Issue: `tasks/issue-%s.md`\n\n", plan.Slug)
+	fmt.Fprintf(&b, "Source Issue: `tasks/issue-%s.md`\n", plan.Slug)
+	fmt.Fprintf(&b, "Expected PRD: `tasks/prd-%s.md`\n\n", plan.Slug)
 	starterPreamble(&b)
 	b.WriteString("## Tasks\n\n")
-	fmt.Fprintf(&b, "- [ ] 1.1 Read `AGENTS.md` and `tasks/issue-%s.md`. Ask only the 3-5\n", plan.Slug)
-	b.WriteString("      most essential clarifying questions (numbered, lettered options)\n")
-	b.WriteString("      needed to write a clear PRD, following this repository's PRD\n")
-	b.WriteString("      rules. Wait for the answers.\n")
-	fmt.Fprintf(&b, "- [ ] 1.2 Write `tasks/prd-%s.md` from the answers, following this\n", plan.Slug)
-	b.WriteString("      repository's PRD structure. Do not start implementing.\n")
-	b.WriteString("- [ ] 1.3 Generate the high-level parent tasks for the detailed task\n")
-	b.WriteString("      list (about 5, each annotated with a recommended Claude model)\n")
-	b.WriteString("      and present them without sub-tasks yet. Wait for \"Go\" before\n")
-	b.WriteString("      continuing.\n")
-	b.WriteString("- [ ] 1.4 After \"Go\", generate the sub-tasks for every parent group\n")
-	b.WriteString("      and replace this file with the result, following this\n")
-	b.WriteString("      repository's task-list rules. Do not begin implementation and do\n")
-	fmt.Fprintf(&b, "      not create a branch or worktree — `wt start %s` does that once\n      this file is a real plan.\n", plan.Slug)
+	fmt.Fprintf(&b, "- [ ] 1.1 Read the canonical planning skill and `tasks/issue-%s.md`;\n", plan.Slug)
+	b.WriteString("      follow its PRD and task-list workflows in planning-only mode,\n")
+	b.WriteString("      then replace this starter with the completed detailed checklist.\n")
 	return b.String()
 }
 
@@ -1096,13 +1077,8 @@ func renderPRDResumeStarter(plan IssuePlan) string {
 	fmt.Fprintf(&b, "Source PRD:   `tasks/prd-%s.md` (already written)\n\n", plan.Slug)
 	starterPreamble(&b)
 	b.WriteString("## Tasks\n\n")
-	fmt.Fprintf(&b, "- [ ] 1.1 Read `AGENTS.md` and `tasks/prd-%s.md`. Generate the\n", plan.Slug)
-	b.WriteString("      high-level parent tasks for the detailed task list (about 5,\n")
-	b.WriteString("      each annotated with a recommended Claude model) and present them\n")
-	b.WriteString("      without sub-tasks yet. Wait for \"Go\" before continuing.\n")
-	b.WriteString("- [ ] 1.2 After \"Go\", generate the sub-tasks for every parent group\n")
-	b.WriteString("      and replace this file with the result, following this\n")
-	b.WriteString("      repository's task-list rules. Do not begin implementation and do\n")
-	fmt.Fprintf(&b, "      not create a branch or worktree — `wt start %s` does that once\n      this file is a real plan.\n", plan.Slug)
+	fmt.Fprintf(&b, "- [ ] 1.1 Read the canonical planning skill and `tasks/prd-%s.md`;\n", plan.Slug)
+	b.WriteString("      follow its task-list workflow in planning-only mode and replace\n")
+	b.WriteString("      this starter with the completed detailed checklist.\n")
 	return b.String()
 }

@@ -8,20 +8,24 @@ import (
 	"strings"
 )
 
-// FileArtifactWriter writes planning artifacts into a workspace's own folder.
+// FileArtifactWriter writes planning artifacts into a resolved workspace root.
+// For software projects this may be the project repository; other workspaces
+// use their own files directory.
 //
 // It re-checks containment after resolving the path, rather than trusting the
 // normalization done earlier. A path is untrusted input wherever it arrives
 // from, and this is the boundary that actually touches the disk — the last
 // place a mistake is still cheap (FR-97, FR-169).
 type FileArtifactWriter struct {
-	// root resolves a workspace's files directory.
-	root func(workspaceID string) string
+	// root resolves the approved root for one artifact path. A software Plan
+	// may route repository planning files to its project while keeping notes in
+	// the workspace's own files directory.
+	root func(workspaceID, relativePath string) string
 }
 
-// NewFileArtifactWriter returns an artifact writer over the workspace files
-// root.
-func NewFileArtifactWriter(root func(workspaceID string) string) *FileArtifactWriter {
+// NewFileArtifactWriter returns an artifact writer over a path-aware
+// workspace-root resolver.
+func NewFileArtifactWriter(root func(workspaceID, relativePath string) string) *FileArtifactWriter {
 	return &FileArtifactWriter{root: root}
 }
 
@@ -81,7 +85,7 @@ func (w *FileArtifactWriter) resolve(workspaceID, relativePath string) (string, 
 		return "", fmt.Errorf("%w: %v", ErrUnsafePath, err)
 	}
 
-	root := strings.TrimSpace(w.root(workspaceID))
+	root := strings.TrimSpace(w.root(workspaceID, cleanedRelative))
 	if root == "" {
 		return "", fmt.Errorf("%w: workspace %s has no files root", ErrValidation, workspaceID)
 	}

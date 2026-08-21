@@ -646,6 +646,26 @@ func TestPlanningSessionCannotSeedOrOverrideFeatureHandoffKind(t *testing.T) {
 	}
 }
 
+func TestPlanningStartersPointToCanonicalSkillWithoutRestatingItsWorkflow(t *testing.T) {
+	t.Parallel()
+	plans := []IssuePlan{
+		{Slug: "342-demo", Route: RouteQuick},
+		{Slug: "342-demo", Route: RoutePRD},
+		{Slug: "342-demo", Route: RoutePRD, ExistingPRD: true},
+	}
+	for _, plan := range plans {
+		starter := RenderPlanningStarter(plan)
+		if !strings.Contains(starter, ".agents/skills/task-planning/SKILL.md") || !strings.Contains(starter, "planning-only mode") {
+			t.Errorf("starter does not delegate to canonical skill:\n%s", starter)
+		}
+		for _, duplicated := range []string{"vertical slices", "Permission sweep", "recommended Claude model"} {
+			if strings.Contains(starter, duplicated) {
+				t.Errorf("starter duplicated %q from canonical skill:\n%s", duplicated, starter)
+			}
+		}
+	}
+}
+
 func TestPlanningBootstrapPromptNamesArtifactsForbidsImplementationAndOmitsIssueBody(t *testing.T) {
 	t.Parallel()
 	plan := IssuePlan{
@@ -662,8 +682,10 @@ func TestPlanningBootstrapPromptNamesArtifactsForbidsImplementationAndOmitsIssue
 		plan.SnapshotPath,
 		plan.TaskListPath,
 		"size:planned",
+		".agents/skills/task-planning/SKILL.md",
+		"planning-only mode",
 		"Do not implement",
-		"wt start 342-ready-issue-codex-planning",
+		"separate handoff action starts implementation",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("PlanningBootstrapPrompt missing %q: %s", want, prompt)

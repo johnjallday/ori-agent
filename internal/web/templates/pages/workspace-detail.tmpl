@@ -652,13 +652,13 @@
                             <div class="col-sm-6">
                               <div class="form-check form-switch">
                                 <input class="form-check-input" type="checkbox" role="switch" id="workspace-detail-settings-write-prd" checked>
-                                <label class="form-check-label" for="workspace-detail-settings-write-prd">Write PRD files</label>
+                                <label class="form-check-label" for="workspace-detail-settings-write-prd">Export approved PRD</label>
                               </div>
                             </div>
                             <div class="col-sm-6">
                               <div class="form-check form-switch">
                                 <input class="form-check-input" type="checkbox" role="switch" id="workspace-detail-settings-write-task-list" checked>
-                                <label class="form-check-label" for="workspace-detail-settings-write-task-list">Write task list files</label>
+                                <label class="form-check-label" for="workspace-detail-settings-write-task-list">Export approved task list</label>
                               </div>
                             </div>
                             <div class="col-sm-6">
@@ -1729,7 +1729,7 @@
                     <div class="col-md-6">
                       <label for="workspace-detail-skill-planning-tasks-dir" class="form-label">Planning output directory</label>
                       <input id="workspace-detail-skill-planning-tasks-dir" type="text" class="form-control" maxlength="120" placeholder="tasks">
-                      <div class="workspace-detail-mcp-field-help">Relative workspace path where PRDs and task lists should be written.</div>
+                      <div class="workspace-detail-mcp-field-help">Relative project path for PRDs and task lists. Workspaces without a linked project use their own files folder.</div>
                     </div>
                     <div class="col-md-6">
                       <label for="workspace-detail-skill-planning-default-execution" class="form-label">Default execution mode</label>
@@ -1743,21 +1743,21 @@
                       <div class="workspace-detail-mcp-agent-access-card">
                         <div class="workspace-detail-mcp-agent-access-header">
                           <div>
-                            <div class="workspace-detail-mcp-agent-access-title">Planning outputs</div>
-                            <div class="workspace-detail-mcp-agent-access-subtitle">Choose which formal artifacts the planner should prefer when the request calls for planning.</div>
+                            <div class="workspace-detail-mcp-agent-access-title">Approved Plan exports</div>
+                            <div class="workspace-detail-mcp-agent-access-subtitle">Choose which repository files Ori exports from the approved Plan.</div>
                           </div>
                         </div>
                         <div class="row g-3 mt-0">
                           <div class="col-md-6">
                             <div class="form-check form-switch workspace-detail-mcp-toggle">
                               <input class="form-check-input" type="checkbox" role="switch" id="workspace-detail-skill-planning-write-prd" checked>
-                              <label class="form-check-label" for="workspace-detail-skill-planning-write-prd">Write PRD files</label>
+                              <label class="form-check-label" for="workspace-detail-skill-planning-write-prd">Export approved PRD</label>
                             </div>
                           </div>
                           <div class="col-md-6">
                             <div class="form-check form-switch workspace-detail-mcp-toggle">
                               <input class="form-check-input" type="checkbox" role="switch" id="workspace-detail-skill-planning-write-task-list" checked>
-                              <label class="form-check-label" for="workspace-detail-skill-planning-write-task-list">Write task list files</label>
+                              <label class="form-check-label" for="workspace-detail-skill-planning-write-task-list">Export approved task list</label>
                             </div>
                           </div>
                           <div class="col-md-6">

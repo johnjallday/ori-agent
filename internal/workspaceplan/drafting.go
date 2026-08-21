@@ -31,6 +31,10 @@ type DraftingOptions struct {
 	Validation ValidationContext
 	// WorkspaceContext is free-form context for the planner.
 	WorkspaceContext string
+	// Artifacts is the compiled output policy applied after generation. It is
+	// separate from Guidance because paths and enabled writes are guarantees,
+	// not suggestions to the model.
+	Artifacts ArtifactPolicy
 	// Sections limits a revision to named sections (FR-54).
 	Sections []string
 	// ExpectedRevision is the draft revision the caller last saw. It is
@@ -100,12 +104,16 @@ func (s *Service) Draft(ctx context.Context, workspaceID, planID string, opts Dr
 	if err != nil {
 		return nil, &GenerationError{Err: err, Issues: outcome.Issues, Attempts: outcome.Attempts}
 	}
+	content, err := ApplyArtifactPolicy(plan, outcome.Content, opts.Artifacts)
+	if err != nil {
+		return nil, err
+	}
 
 	now := s.now()
 	revision, err := s.store.UpdatePlanDraft(ctx, workspaceID, planID, opts.ExpectedRevision, DraftUpdate{
 		Title:     plan.Title,
 		Objective: outcome.Objective,
-		Content:   outcome.Content,
+		Content:   content,
 		Intent:    plan.DraftIntent,
 		UpdatedAt: now,
 	})

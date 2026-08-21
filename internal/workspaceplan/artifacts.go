@@ -158,39 +158,63 @@ func renderTaskList(artifact ProposedArtifact, plan *Plan, version *Version) str
 	renderHeader(&b, title, plan, version)
 
 	content := version.Content
+	b.WriteString("## Relevant Files\n\n")
+	fileCount := 0
+	for _, source := range content.Sources {
+		if source.Kind != SourceFile || strings.TrimSpace(source.Ref) == "" {
+			continue
+		}
+		fileCount++
+		description := strings.TrimSpace(source.Title)
+		if description == "" {
+			description = "Approved Plan source"
+		}
+		fmt.Fprintf(&b, "- `%s` - %s.\n", source.Ref, description)
+	}
+	if fileCount == 0 {
+		b.WriteString("- Identify affected implementation and test files before editing.\n")
+	}
+
+	b.WriteString("\n### Notes\n\n")
+	b.WriteString("- This checklist is the repository projection of an approved Ori Plan.\n")
+	b.WriteString("- Workspace Tasks remain the execution source of truth; update the copied worktree checklist as implementation progresses.\n")
+	b.WriteString("- Do not run `wt plan` again. This file is already a completed plan and is ready for `wt start`.\n\n")
+
+	b.WriteString("## Instructions for Completing Tasks\n\n")
+	b.WriteString("Complete tasks in dependency order. Check off each numbered sub-task only after its expected result is satisfied.\n\n")
+	b.WriteString("## Tasks\n\n")
 	if len(content.Groups) == 0 {
 		b.WriteString("_This plan has no task groups._\n")
 		return b.String()
 	}
 
-	// Checkboxes are unchecked on purpose: the Task records are the truth about
-	// what is done, and this file is a projection, not a tracker (FR-11).
-	b.WriteString("_Task state lives on the workspace tasks this plan created; this file is a snapshot._\n\n")
-
 	for groupIndex, group := range content.Groups {
-		fmt.Fprintf(&b, "## %d. %s\n\n", groupIndex+1, group.Title)
+		groupNumber := groupIndex + 1
+		fmt.Fprintf(&b, "- [ ] %d.0 %s\n", groupNumber, group.Title)
 		if strings.TrimSpace(group.Outcome) != "" {
-			fmt.Fprintf(&b, "_%s_\n\n", group.Outcome)
+			fmt.Fprintf(&b, "  - Outcome: %s\n", group.Outcome)
 		}
 		if len(group.DependsOn) > 0 {
-			fmt.Fprintf(&b, "Depends on: %s\n\n", strings.Join(group.DependsOn, ", "))
+			fmt.Fprintf(&b, "  - Depends on: %s\n", strings.Join(group.DependsOn, ", "))
 		}
-		for _, item := range group.Items {
-			fmt.Fprintf(&b, "- [ ] %s", item.Description)
+		for itemIndex, item := range group.Items {
+			fmt.Fprintf(&b, "  - [ ] %d.%d %s", groupNumber, itemIndex+1, item.Description)
 			if item.Assignee != "" {
 				fmt.Fprintf(&b, " — %s", item.Assignee)
 			} else {
 				b.WriteString(" — _unassigned_")
 			}
 			b.WriteString("\n")
+			if strings.TrimSpace(item.Details) != "" {
+				fmt.Fprintf(&b, "    - Details: %s\n", item.Details)
+			}
 			if strings.TrimSpace(item.ExpectedResult) != "" {
-				fmt.Fprintf(&b, "  - Expected: %s\n", item.ExpectedResult)
+				fmt.Fprintf(&b, "    - Expected: %s\n", item.ExpectedResult)
 			}
 			if len(item.RequiredCapabilities) > 0 {
-				fmt.Fprintf(&b, "  - Requires: %s\n", strings.Join(item.RequiredCapabilities, ", "))
+				fmt.Fprintf(&b, "    - Requires: %s\n", strings.Join(item.RequiredCapabilities, ", "))
 			}
 		}
-		b.WriteString("\n")
 	}
 
 	return b.String()

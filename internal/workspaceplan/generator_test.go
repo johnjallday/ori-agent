@@ -173,6 +173,9 @@ func TestDraftPromptStatesWhatIsAvailable(t *testing.T) {
 	if !strings.Contains(system, "cannot approve") {
 		t.Errorf("system prompt does not disclaim approval authority:\n%s", system)
 	}
+	if !strings.Contains(system, "Do not propose `prd` or `task_list`") {
+		t.Errorf("system prompt still delegates app-owned planning files to the model:\n%s", system)
+	}
 	// The bounds are stated up front rather than discovered by rejection.
 	if !strings.Contains(system, "20 task groups") || !strings.Contains(system, "200 task items") {
 		t.Errorf("system prompt omits the hard limits:\n%s", system)

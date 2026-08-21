@@ -3,6 +3,8 @@ package server
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -49,13 +51,81 @@ func (b *ServerBuilder) attachWorkspacePlanMaterializer() {
 		b.workspacePlanService,
 		b.workspaceStore,
 		workspaceplan.WithReconciler(reconciler),
-		// Artifacts are written into the workspace's own files root, and the
-		// writer re-checks containment there rather than trusting the path it
-		// was handed (FR-97).
+		// Software-project PRDs and task lists are written into the resolved
+		// project folder so repository-native tools can consume them. Notes and
+		// other documents stay in the workspace's files root. The writer
+		// re-checks containment against whichever root was resolved (FR-97).
 		workspaceplan.WithArtifactWriter(
-			workspaceplan.NewFileArtifactWriter(b.workspaceStore.GetFilesPath)),
+			workspaceplan.NewFileArtifactWriter(b.workspacePlanArtifactRoot)),
+		workspaceplan.WithHandoffResolver(b.resolveWorkspacePlanHandoff),
 	)
 	b.workspacePlanHandler.SetMaterializer(b.workspacePlanMaterializer)
+}
+
+func (b *ServerBuilder) workspacePlanArtifactRoot(workspaceID, relativePath string) string {
+	if isRepositoryPlanningArtifact(relativePath) {
+		if root := b.workspacePlanProjectRoot(workspaceID); root != "" {
+			return root
+		}
+	}
+	if b.workspaceStore == nil {
+		return ""
+	}
+	return b.workspaceStore.GetFilesPath(workspaceID)
+}
+
+func (b *ServerBuilder) workspacePlanProjectRoot(workspaceID string) string {
+	if b.workspacePlanPolicy == nil {
+		return ""
+	}
+	return strings.TrimSpace(b.workspacePlanPolicy.CodeFolder(workspaceID))
+}
+
+// isRepositoryPlanningArtifact recognizes the app-owned filename contract
+// without consulting current settings. A version's approved path must keep the
+// same root even if TasksDir changes before materialization.
+func isRepositoryPlanningArtifact(relativePath string) bool {
+	name := filepath.Base(filepath.Clean(relativePath))
+	return strings.HasSuffix(name, ".md") &&
+		(strings.HasPrefix(name, "prd-") || strings.HasPrefix(name, "tasks-"))
+}
+
+func (b *ServerBuilder) resolveWorkspacePlanHandoff(workspaceID string, plan *workspaceplan.Plan, artifactPaths []string) *workspaceplan.ImplementationHandoff {
+	if plan == nil || b.workspacePlanPolicy == nil {
+		return nil
+	}
+	_, caps := b.workspacePlanPolicy.Policy(context.Background(), workspaceID)
+	if !caps.IsRepository || caps.CurrentBranch != "dev" {
+		return nil
+	}
+
+	feature := workspaceplan.PlanFeatureSlug(plan)
+	expectedTaskList := filepath.ToSlash(filepath.Join("tasks", "tasks-"+feature+".md"))
+	found := false
+	for _, artifactPath := range artifactPaths {
+		if filepath.ToSlash(filepath.Clean(artifactPath)) == expectedTaskList {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return nil
+	}
+
+	root := b.workspacePlanProjectRoot(workspaceID)
+	if root == "" {
+		return nil
+	}
+	// #nosec G703 -- root is the containment-checked workspace project path;
+	// this read-only probe only recognizes Ori's checked-in worktree manager.
+	if info, err := os.Stat(filepath.Join(root, "scripts", "wt.sh")); err != nil || info.IsDir() {
+		return nil
+	}
+	return &workspaceplan.ImplementationHandoff{
+		Kind:    "wt",
+		Feature: feature,
+		Command: "source scripts/wt.sh && wt start " + feature,
+	}
 }
 
 // planTaskDispatcher starts a plan's Task through the existing Task-to-Run
@@ -227,6 +297,24 @@ func (b *ServerBuilder) resolvePlanGuidance(ctx context.Context, workspaceID str
 	}
 }
 
+// resolvePlanArtifacts returns the compiled artifact-output policy. The model
+// may suggest artifact kinds, but only this path decides which files are enabled
+// and where their canonical repository paths live.
+func (b *ServerBuilder) resolvePlanArtifacts(ctx context.Context, workspaceID string) workspaceplan.ArtifactPolicy {
+	if b.workspacePlanPolicy == nil {
+		return workspaceplan.ArtifactPolicy{}
+	}
+	policy, _ := b.workspacePlanPolicy.Policy(ctx, workspaceID)
+	artifactWrite, found := policy.Control(workspacesettings.ControlArtifactWrite)
+	writable := found && artifactWrite.Active()
+	return workspaceplan.ArtifactPolicy{
+		Apply:         policy.PlanningEnabled,
+		Directory:     policy.Artifacts.Directory,
+		WritePRD:      writable && policy.Artifacts.WritePRD,
+		WriteTaskList: writable && policy.Artifacts.WriteTaskList,
+	}
+}
+
 // resolvePlanPolicy returns the ENFORCED half, as the snapshot a review version
 // records.
 //
@@ -340,6 +428,7 @@ func (b *ServerBuilder) attachWorkspacePlanExecutor() {
 	// b.workspacePlanPolicy does not exist until the workspace store does. Two
 	// separate setters keep the halves separate all the way to the handler.
 	b.workspacePlanHandler.SetGuidanceResolver(b.resolvePlanGuidance)
+	b.workspacePlanHandler.SetArtifactPolicyResolver(b.resolvePlanArtifacts)
 	b.workspacePlanHandler.SetPolicyResolver(b.resolvePlanPolicy)
 
 	// Automatic execution runs in the background, so it outlives the request

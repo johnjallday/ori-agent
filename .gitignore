@@ -61,7 +61,7 @@ Thumbs.db
 # Local configuration files
 .claude/settings.local.json
 .claude/agents/
-# Local-only agent skill tooling (release-manager); workspace-planning stays tracked
+# Local-only release tooling; cross-harness task-planning stays tracked
 .agents/skills/release-manager/
 .env
 .env.*

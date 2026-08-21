@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/workspaceplan"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/config"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/herdr"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/model"
@@ -768,6 +769,34 @@ func TestBootstrapPromptNamesAnExistingPRDAndIssueSnapshot(t *testing.T) {
 	}
 	if strings.Contains(prompt, "task-list-sized") {
 		t.Fatalf("BootstrapPrompt called a PRD-backed feature task-list-sized: %s", prompt)
+	}
+}
+
+func TestApprovedOriTaskListIsImmediatelyActionableByWtHandoff(t *testing.T) {
+	t.Parallel()
+	plan := &workspaceplan.Plan{ID: "plan-1", WorkspaceID: "ws-1", Title: "Bridge"}
+	artifact := workspaceplan.ProposedArtifact{Kind: workspaceplan.ArtifactTaskList, Title: "Tasks: Bridge"}
+	version := &workspaceplan.Version{
+		Number: 1,
+		Title:  "Bridge",
+		Content: workspaceplan.PlanContent{Groups: []workspaceplan.TaskGroup{{
+			ID: "group-1", Title: "First slice",
+			Items: []workspaceplan.TaskItem{{ID: "item-1", Description: "Wire the approved path"}},
+		}}},
+	}
+	contents, err := (workspaceplan.DefaultArtifactRenderer{}).Render(artifact, plan, version)
+	if err != nil {
+		t.Fatalf("render approved Ori task list: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "tasks-bridge.md")
+	if err := os.WriteFile(path, contents, 0600); err != nil {
+		t.Fatalf("write approved Ori task list: %v", err)
+	}
+	if got := nextIncompleteTask(path); got != "1.1 Wire the approved path — _unassigned_" {
+		t.Fatalf("next incomplete task = %q", got)
+	}
+	if strings.Contains(string(contents), PlanningStarterMarker) {
+		t.Fatal("approved Ori task list carries the planning-starter marker")
 	}
 }
 

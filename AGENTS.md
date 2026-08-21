@@ -235,69 +235,27 @@ and handoff.
 
 # Planning: PRDs and Task Lists
 
-The full protocol — clarifying questions, PRD structure, parent/sub-task
-decomposition, vertical slicing, demo checkpoints, commit and PR boundaries, epic
-branching, model chips, the permission sweep, the manual test guide, and the
-two-pause execution model — lives in **one canonical document**:
+The canonical cross-harness protocol lives at:
 
 ```
-~/.claude/skills/task-planning/SKILL.md
+.agents/skills/task-planning/SKILL.md
 ```
 
-Claude Code loads it by invoking the `task-planning` skill. Other agents (Codex,
-cloud runners) should read that file directly before writing a PRD or a task list.
+Pi and other Agent Skills-compatible harnesses discover it from `.agents/skills`.
+Claude Code's `.claude/skills/task-planning/SKILL.md` entry point delegates to
+the same canonical file.
+Read or invoke that skill before writing a PRD, generating a task list, or
+executing an existing checklist. Do not restate its workflow here, in a starter
+checklist, or in a bootstrap prompt; update the skill instead.
 
-It used to be duplicated here, and the copy silently drifted — this file had lost
-the demo checkpoint, the permission sweep, the manual test guide, the model chips,
-and the whole epic section. Do not re-inline it. Fix the skill instead.
+PRDs and task lists remain opt-in. A Pi session launched by `wt plan` runs the
+skill's **planning-only mode**: it writes artifacts in `ori-agent-dev/tasks/` and
+stops. It must not run `wt start`; a person or separate handoff action crosses
+that boundary. Direct implementation whose shape is already agreed starts in an
+isolated worktree with `wt new`.
 
-Both artifacts are **opt-in**: produce them only when the user explicitly asks.
-Work whose shape is already agreed goes straight to a worktree.
-
-## What is Ori-specific
-
-The skill is written to be project-agnostic. These bindings are ours:
-
-| Skill concept | Ori binding |
-|---|---|
-| "the project's `tasks/` directory" | `ori-agent-dev/tasks/` — see *Planning Artifact Location* above |
-| "create the feature worktree" | `wt start [feature-name]` (PRD/tasks exist) or `wt new <name>` (ad-hoc) |
-| "feature naming" | Issue number first — see *Feature Naming: Issue Number First* above |
-| "the isolated demo server" | `wt demo [port]` (default 8931) |
-| "open the PR" | `wt pr [name]`, always targeting `dev`, never `main` |
-| "epic CI" | `.github/workflows/ci.yml` already lists `'epic/**'` as a PR base branch |
-
-## Delivery checkpoints
-
-By default, one PRD and task list maps to one feature worktree, one branch, and
-one PR targeting `dev`. Keep commits conventional and focused; commit at the end
-of each parent group, not per sub-task.
-
-The final parent group ends with `Open PR → squash-merge to dev` (using `wt pr`
-when authorized), then `Run wt done [feature-name] after merge` — which closes an
-explicitly attached Issue as completed, archives the completed checklist back to
-the dev worktree, and cleans up the feature worktree. Ad-hoc work has no Issue
-attachment and is unchanged; use `--keep-issue-open` only for an intentional
-exception.
-
-For work too large for one PR, the default is a single long-lived `epic/<name>`
-branch with one `epic → dev` PR at the end — **not** a series of PRs into `dev`.
-See the skill's *Commit & PR Points* section for when the serialized-split
-exception applies.
-
-## The third checkpoint is not a pause
-
-The skill defines exactly two pauses: after parent tasks (wait for "Go"), and
-before the PR is opened. There is a third checkpoint that is **not** a pause —
-once the sub-tasks are generated and the task list is saved, immediately proceed
-to `wt start [feature-name]` without asking again.
-
-PRD generation and the full task list both happen in the `ori-agent-dev`
-worktree, the single source of truth for planning docs (`tasks/` is gitignored, so
-it does not sync between worktrees on its own). Only after the complete task list
-is saved does the feature worktree get created — implementation never starts in
-dev. Work that skips the PRD and task list still gets its own worktree, created up
-front with `wt new` (see *Where Work Happens: One Worktree Per Change*).
+Ori-specific command bindings and the Issue-number-first naming convention are
+recorded in the skill and in the lifecycle sections above.
 
 ## Terminology Note
 
