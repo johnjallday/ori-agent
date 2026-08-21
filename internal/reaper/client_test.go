@@ -100,7 +100,7 @@ func TestClientRunActionTriggersOnceAndReturnsResultingState(t *testing.T) {
 		case "/_/TRANSPORT":
 			_, _ = w.Write([]byte("TRANSPORT\t" + strconv.Itoa(playState) + "\t0\t0\t1.1.00\t1.1.00\n"))
 		case "/_/TRACK":
-			_, _ = w.Write([]byte("TRACK\t0\tMASTER\t1536\t1\t0\t-1500\t-1500\n"))
+			_, _ = w.Write([]byte("TRACK\t0\tMASTER\t1536\t1\t0\t-1500\t-1500\t1\t0\t0\t0\t1\t0\n"))
 		case "/_/BEATPOS":
 			_, _ = w.Write([]byte("BEATPOS\t0\t0\t0\t0\t0\t4\t4\n"))
 		default:
@@ -145,15 +145,54 @@ func TestClientRunActionDoesNotQueueWhenDisconnected(t *testing.T) {
 }
 
 func TestParseTracksUsesVerifiedFlagBits(t *testing.T) {
-	body := []byte("TRACK\t1\tClean\t128\t1\t0\t-1500\t-1500\n" +
-		"TRACK\t2\tMuted\t136\t1\t0\t-1500\t-1500\n" +
-		"TRACK\t3\tSoloed\t144\t1\t0\t-1500\t-1500\n" +
-		"TRACK\t4\tArmed\t192\t1\t0\t-1500\t-1500\n")
+	body := []byte("TRACK\t1\tClean\t128\t1\t0\t-1500\t-1500\t1\t0\t0\t0\t0\t0\n" +
+		"TRACK\t2\tMuted\t136\t1\t0\t-1500\t-1500\t1\t0\t0\t0\t0\t0\n" +
+		"TRACK\t3\tSoloed\t144\t1\t0\t-1500\t-1500\t1\t0\t0\t0\t0\t0\n" +
+		"TRACK\t4\tArmed\t192\t1\t0\t-1500\t-1500\t1\t0\t0\t0\t0\t0\n")
 	tracks, err := parseTracks(body)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(tracks) != 4 || tracks[0].Muted || !tracks[1].Muted || !tracks[2].Soloed || !tracks[3].Armed {
 		t.Fatalf("decoded tracks = %+v", tracks)
+	}
+}
+
+// TestParseTracksReadsColorVerifiedAgainstLiveREAPER locks in the group 3.1
+// finding: the last TRACK field is I_CUSTOMCOLOR verbatim, flag bit included.
+// Values below were captured from a live REAPER session (see
+// tasks-reaper-track-strips.md group 3.1).
+func TestParseTracksReadsColorVerifiedAgainstLiveREAPER(t *testing.T) {
+	body := []byte(
+		"TRACK\t1\tRed\t128\t1\t0\t-1500\t-1500\t1\t0\t0\t0\t0\t33488896\n" + // 0x1ff0000
+			"TRACK\t2\tGreen\t128\t1\t0\t-1500\t-1500\t1\t0\t0\t0\t0\t16842496\n" + // 0x100ff00
+			"TRACK\t3\tBlue\t128\t1\t0\t-1500\t-1500\t1\t0\t0\t0\t0\t16777471\n" + // 0x10000ff
+			"TRACK\t4\tUncolored\t128\t1\t0\t-1500\t-1500\t1\t0\t0\t0\t0\t0\n",
+	)
+	tracks, err := parseTracks(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tracks) != 4 {
+		t.Fatalf("tracks = %+v", tracks)
+	}
+	if tracks[0].Color != 0x1ff0000 || !tracks[0].HasCustomColor() {
+		t.Fatalf("red = %+v", tracks[0])
+	}
+	if tracks[1].Color != 0x100ff00 || !tracks[1].HasCustomColor() {
+		t.Fatalf("green = %+v", tracks[1])
+	}
+	if tracks[2].Color != 0x10000ff || !tracks[2].HasCustomColor() {
+		t.Fatalf("blue = %+v", tracks[2])
+	}
+	if tracks[3].Color != 0 || tracks[3].HasCustomColor() {
+		t.Fatalf("uncolored = %+v", tracks[3])
+	}
+}
+
+func TestParseTracksRejectsAShortTrackLine(t *testing.T) {
+	// Fewer than 14 fields predates the color field this feature relies on.
+	if _, err := parseTracks([]byte("TRACK\t1\tShort\t128\t1\t0\t-1500\t-1500\n")); err != ErrMalformedResponse {
+		t.Fatalf("short TRACK line = %v, want ErrMalformedResponse", err)
 	}
 }

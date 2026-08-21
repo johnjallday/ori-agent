@@ -2,6 +2,7 @@ package reaper
 
 import (
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -95,6 +96,103 @@ func TestRenameEditLuaRejectsAnUntrustedReceiptPath(t *testing.T) {
 		if _, err := RenameEdit(1, "Drums", "Kick").Lua(path); err == nil {
 			t.Fatalf("receipt path %q was accepted", path)
 		}
+	}
+}
+
+func TestColorEditValidatesRange(t *testing.T) {
+	cases := []struct {
+		name  string
+		color int64
+		valid bool
+	}{
+		{"no color", 0, true},
+		{"flagged red", trackCustomColorFlag | 0xFF0000, true},
+		{"flagged white", trackCustomColorFlag | 0xFFFFFF, true},
+		{"missing flag bit", 0xFF0000, false},
+		{"stray high bits", trackCustomColorFlag | 0x2FFFFFF, false},
+		{"negative", -1, false},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			err := ColorEdit(1, "Kick", testCase.color).Validate()
+			if testCase.valid && err != nil {
+				t.Fatalf("Validate() = %v, want nil", err)
+			}
+			if !testCase.valid && !errors.Is(err, ErrInvalidTrackEdit) {
+				t.Fatalf("Validate() = %v, want ErrInvalidTrackEdit", err)
+			}
+		})
+	}
+}
+
+func TestColorEditLuaGuardsOnNameAndWritesTheColor(t *testing.T) {
+	color := int64(trackCustomColorFlag | 0xFF0000)
+	lua, err := ColorEdit(2, "Bass", color).Lua("/tmp/receipt.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`if not ok or current ~= expected then`,
+		`local prior = reaper.GetMediaTrackInfo_Value(tr, "I_CUSTOMCOLOR")`,
+		`reaper.SetMediaTrackInfo_Value(tr, "I_CUSTOMCOLOR", ` + strconv.FormatInt(color, 10) + `)`,
+		`write_receipt("applied\n" .. string.format("%d", prior))`,
+	} {
+		if !strings.Contains(lua, want) {
+			t.Fatalf("generated Lua missing %q:\n%s", want, lua)
+		}
+	}
+}
+
+func TestToggleEditsGuardOnNameAndUseTheVerifiedRecArmCall(t *testing.T) {
+	cases := []struct {
+		name     string
+		edit     TrackEdit
+		property string
+		setCall  string
+	}{
+		{"mute on", MuteEdit(1, "Kick", true), "B_MUTE", `reaper.SetMediaTrackInfo_Value(tr, "B_MUTE", 1)`},
+		{"mute off", MuteEdit(1, "Kick", false), "B_MUTE", `reaper.SetMediaTrackInfo_Value(tr, "B_MUTE", 0)`},
+		{"solo on", SoloEdit(1, "Kick", true), "I_SOLO", `reaper.SetMediaTrackInfo_Value(tr, "I_SOLO", 1)`},
+		// Record-arm needs CSurf_OnRecArmChange, not a plain
+		// SetMediaTrackInfo_Value write — verified against live REAPER.
+		{"arm on", ArmEdit(1, "Kick", true), "I_RECARM", `reaper.CSurf_OnRecArmChange(tr, 1)`},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			lua, err := testCase.edit.Lua("/tmp/receipt.txt")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(lua, `reaper.GetMediaTrackInfo_Value(tr, "`+testCase.property+`")`) {
+				t.Fatalf("missing prior-value read for %s:\n%s", testCase.property, lua)
+			}
+			if !strings.Contains(lua, testCase.setCall) {
+				t.Fatalf("missing expected mutation call %q:\n%s", testCase.setCall, lua)
+			}
+			if !strings.Contains(lua, `write_receipt("applied\n" .. (prior ~= 0 and "1" or "0"))`) {
+				t.Fatalf("missing boolean receipt write:\n%s", lua)
+			}
+		})
+	}
+}
+
+func TestToggleInverseFlipsTheBooleanGuardedOnTheSameName(t *testing.T) {
+	forward := MuteEdit(3, "Guitar", true)
+	inverse := forward.Inverse("1") // the receipt reported the prior state was muted
+	if inverse.Kind != TrackEditMute || inverse.Index != 3 || inverse.ExpectedName != "Guitar" || !inverse.NewBool {
+		t.Fatalf("inverse = %+v", inverse)
+	}
+	unmuted := forward.Inverse("0")
+	if unmuted.NewBool {
+		t.Fatalf("inverse from prior=0 should restore unmuted: %+v", unmuted)
+	}
+}
+
+func TestColorInverseParsesThePriorIntegerGuardedOnTheSameName(t *testing.T) {
+	forward := ColorEdit(1, "Kick", trackCustomColorFlag|0xFF0000)
+	inverse := forward.Inverse("0")
+	if inverse.Kind != TrackEditColor || inverse.Index != 1 || inverse.ExpectedName != "Kick" || inverse.NewColor != 0 {
+		t.Fatalf("inverse = %+v", inverse)
 	}
 }
 

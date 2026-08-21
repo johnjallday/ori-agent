@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -256,6 +257,106 @@ func TestStateReportsWhetherTrackEditingIsAvailable(t *testing.T) {
 		if state.TrackEditingAvailable != available {
 			t.Fatalf("track_editing_available = %v, want %v", state.TrackEditingAvailable, available)
 		}
+	}
+}
+
+func TestColorTrackAppliesTheGuardedEditAndStoresAnUndoRecord(t *testing.T) {
+	runner := &trackRunnerStub{
+		available: true,
+		receipts:  []reaper.EditReceipt{{Applied: true, Prior: "0"}},
+	}
+	mux := trackEditHandler(t, runner)
+
+	color := int64(0x1000000 | 0xff0000)
+	recorder, body := postTrackEdit(t, mux, "/api/workspaces/mine/reaper/tracks/1/color",
+		`{"color":`+strconv.FormatInt(color, 10)+`,"expected_name":"Drums"}`)
+	if recorder.Code != http.StatusOK || body.Outcome != "ok" {
+		t.Fatalf("color = %d %+v", recorder.Code, body)
+	}
+	if len(runner.edits) != 1 {
+		t.Fatalf("runner edits = %+v", runner.edits)
+	}
+	edit := runner.edits[0]
+	if edit.Kind != reaper.TrackEditColor || edit.Index != 1 || edit.ExpectedName != "Drums" || edit.NewColor != color {
+		t.Fatalf("guarded edit = %+v", edit)
+	}
+	if body.Undo == nil || !strings.Contains(body.Undo.Summary, "Recolored") {
+		t.Fatalf("undo descriptor = %+v", body.Undo)
+	}
+
+	// Undo restores the prior color, guarded on the name the color edit left.
+	undoRecorder, undoBody := postTrackEdit(t, mux, "/api/workspaces/mine/reaper/tracks/undo", "")
+	if undoRecorder.Code != http.StatusOK || undoBody.Outcome != "ok" {
+		t.Fatalf("undo = %d %+v", undoRecorder.Code, undoBody)
+	}
+	inverse := runner.edits[1]
+	if inverse.Kind != reaper.TrackEditColor || inverse.NewColor != 0 || inverse.ExpectedName != "Drums" {
+		t.Fatalf("color inverse = %+v", inverse)
+	}
+}
+
+func TestColorTrackRejectsAnOutOfRangeColorWithoutTouchingREAPER(t *testing.T) {
+	runner := &trackRunnerStub{available: true}
+	mux := trackEditHandler(t, runner)
+
+	for _, color := range []string{"-1", "16777215", "50331647"} { // missing flag bit, or stray high bits
+		recorder, body := postTrackEdit(t, mux, "/api/workspaces/mine/reaper/tracks/1/color",
+			`{"color":`+color+`,"expected_name":"Drums"}`)
+		if recorder.Code != http.StatusBadRequest || body.Code != "invalid_track_edit" {
+			t.Fatalf("color %s = %d %+v", color, recorder.Code, body)
+		}
+	}
+	if runner.calls != 0 {
+		t.Fatalf("an invalid color reached REAPER: %d calls", runner.calls)
+	}
+}
+
+func TestToggleEndpointsApplyGuardedEditsAndStoreUndo(t *testing.T) {
+	cases := []struct {
+		name    string
+		path    string
+		kind    string
+		summary string
+	}{
+		{"mute", "mute", reaper.TrackEditMute, "Muted"},
+		{"solo", "solo", reaper.TrackEditSolo, "Soloed"},
+		{"arm", "arm", reaper.TrackEditArm, "Armed"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			runner := &trackRunnerStub{
+				available: true,
+				receipts:  []reaper.EditReceipt{{Applied: true, Prior: "0"}},
+			}
+			mux := trackEditHandler(t, runner)
+
+			recorder, body := postTrackEdit(t, mux, "/api/workspaces/mine/reaper/tracks/1/"+testCase.path,
+				`{"value":true,"expected_name":"Drums"}`)
+			if recorder.Code != http.StatusOK || body.Outcome != "ok" {
+				t.Fatalf("%s = %d %+v", testCase.name, recorder.Code, body)
+			}
+			edit := runner.edits[0]
+			if edit.Kind != testCase.kind || edit.Index != 1 || edit.ExpectedName != "Drums" || !edit.NewBool {
+				t.Fatalf("guarded edit = %+v", edit)
+			}
+			if body.Undo == nil || !strings.Contains(body.Undo.Summary, testCase.summary) {
+				t.Fatalf("undo descriptor = %+v", body.Undo)
+			}
+		})
+	}
+}
+
+func TestToggleEndpointGuardFailureAppliesNothing(t *testing.T) {
+	runner := &trackRunnerStub{
+		available: true,
+		receipts:  []reaper.EditReceipt{{Applied: false}},
+	}
+	mux := trackEditHandler(t, runner)
+
+	recorder, body := postTrackEdit(t, mux, "/api/workspaces/mine/reaper/tracks/1/mute",
+		`{"value":true,"expected_name":"Drums"}`)
+	if recorder.Code != http.StatusConflict || body.Code != "track_list_changed" || body.Outcome == "ok" {
+		t.Fatalf("mute guard failure = %d %+v", recorder.Code, body)
 	}
 }
 

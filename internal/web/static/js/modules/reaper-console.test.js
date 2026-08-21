@@ -213,9 +213,15 @@ test('the console overlay renders current project and track state in place', () 
   assert.match(host.textContent, /Reaper Songasd/);
   assert.match(host.textContent, /120 BPM/);
   assert.match(host.textContent, /Drums/);
-  assert.match(host.textContent, /Muted/);
   assert.match(host.textContent, /Bass/);
-  assert.match(host.textContent, /Armed/);
+  // Muted/soloed/armed now render as M/S/R toggle chips, not words.
+  const chips = findAll(host, 'reaper-console-track-chip');
+  const muteChip = chips.find(chip => chip.attributes.get('aria-label').startsWith('Mute track 1'));
+  assert.equal(muteChip.attributes.get('aria-pressed'), 'true');
+  const armChip = chips.find(chip =>
+    chip.attributes.get('aria-label').startsWith('Record-arm track 2')
+  );
+  assert.equal(armChip.attributes.get('aria-pressed'), 'true');
   consolePanel.close();
 });
 
@@ -781,6 +787,177 @@ test('strips render read-only when the runner is unavailable', () => {
   // No name control renders, so there is no dead thing to click.
   assert.equal(findAll(host, 'reaper-console-track-name').length, 1);
   assert.equal(findOne(host, 'reaper-console-track-name').tagName, 'STRONG');
+  consolePanel.close();
+});
+
+test('the M/S/R chips reflect current state and toggle with a click', async () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  consolePanel._setState(
+    liveTrackState([{ index: 1, name: 'Drums', muted: false, soloed: false, armed: false }])
+  );
+  consolePanel.open();
+
+  const host = documentStub.getElementById('reaperConsole');
+  const chips = findAll(host, 'reaper-console-track-chip');
+  assert.equal(chips.length, 3);
+  const muteChip = chips.find(chip => chip.attributes.get('aria-label').startsWith('Mute'));
+  assert.equal(muteChip.attributes.get('aria-pressed'), 'false');
+
+  const requests = [];
+  globalThis.fetch = async (path, options) => {
+    requests.push({ path, options });
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        ...liveTrackState([{ index: 1, name: 'Drums', muted: true }]),
+        outcome: 'ok',
+        undo: { summary: 'Muted ‘Drums’' }
+      })
+    };
+  };
+  muteChip.dispatch('click');
+  await new Promise(resolve => setImmediate(resolve));
+
+  const mute = requests.find(request => /tracks\/1\/mute$/.test(request.path));
+  assert.ok(mute, 'clicking the M chip should post to the mute endpoint');
+  assert.deepEqual(JSON.parse(mute.options.body), { value: true, expected_name: 'Drums' });
+  assert.equal(consolePanel._toasts().length, 1);
+  assert.match(consolePanel._toasts()[0].message, /Muted/);
+  consolePanel.close();
+});
+
+test('a disabled chip on a read-only strip does not post', () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  const state = liveTrackState([{ index: 1, name: 'Drums' }]);
+  state.track_editing_available = false;
+  consolePanel._setState(state);
+  consolePanel.open();
+
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return { ok: true, status: 200, json: async () => ({}) };
+  };
+  const host = documentStub.getElementById('reaperConsole');
+  const chip = findOne(host, 'reaper-console-track-chip');
+  assert.equal(chip.type, 'button');
+  chip.dispatch('click');
+  assert.equal(calls, 0);
+  consolePanel.close();
+});
+
+test('the color swatch opens a palette with a fixed set plus No color', () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  consolePanel._setState(liveTrackState([{ index: 1, name: 'Drums', color: 0 }]));
+  consolePanel.open();
+
+  const host = documentStub.getElementById('reaperConsole');
+  const swatch = findOne(host, 'reaper-console-track-swatch');
+  assert.ok(swatch);
+  assert.equal(consolePanel._openPalette(), 0);
+  swatch.dispatch('click');
+  assert.equal(consolePanel._openPalette(), 1);
+
+  const popover = findOne(host, 'reaper-console-color-popover');
+  assert.ok(popover, 'the palette should render once open');
+  const options = findAll(host, 'reaper-console-color-option');
+  // A fixed swatch set plus "No color" (PRD open question 1).
+  assert.ok(options.length > 1);
+  assert.match(host.textContent, /No color/);
+  consolePanel.close();
+});
+
+test('picking a swatch applies the color and closes the palette', async () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  consolePanel._setState(liveTrackState([{ index: 1, name: 'Drums', color: 0 }]));
+  consolePanel.open();
+  const host = documentStub.getElementById('reaperConsole');
+  findOne(host, 'reaper-console-track-swatch').dispatch('click');
+
+  const requests = [];
+  globalThis.fetch = async (path, options) => {
+    requests.push({ path, options });
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        ...liveTrackState([{ index: 1, name: 'Drums', color: 33488896 }]),
+        outcome: 'ok',
+        undo: { summary: 'Recolored ‘Drums’' }
+      })
+    };
+  };
+  const swatchOption = findAll(
+    documentStub.getElementById('reaperConsole'),
+    'reaper-console-color-option'
+  ).find(option => !option.className.includes('is-none'));
+  swatchOption.dispatch('click');
+  await new Promise(resolve => setImmediate(resolve));
+
+  const colorCall = requests.find(request => /tracks\/1\/color$/.test(request.path));
+  assert.ok(colorCall, 'picking a swatch should post to the color endpoint');
+  assert.equal(consolePanel._openPalette(), 0, 'the palette should close after picking');
+  assert.equal(consolePanel._toasts().length, 1);
+  consolePanel.close();
+});
+
+test('clicking outside the palette closes it without applying anything', () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  consolePanel._setState(liveTrackState([{ index: 1, name: 'Drums', color: 0 }]));
+  consolePanel.open();
+  const host = documentStub.getElementById('reaperConsole');
+  findOne(host, 'reaper-console-track-swatch').dispatch('click');
+  assert.equal(consolePanel._openPalette(), 1);
+
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return { ok: true, status: 200, json: async () => ({}) };
+  };
+  const backdrop = findOne(
+    documentStub.getElementById('reaperConsole'),
+    'reaper-console-color-backdrop'
+  );
+  assert.ok(backdrop);
+  backdrop.dispatch('click');
+  assert.equal(consolePanel._openPalette(), 0);
+  assert.equal(calls, 0);
+  consolePanel.close();
+});
+
+test('Escape closes the color palette', () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  consolePanel._setState(liveTrackState([{ index: 1, name: 'Drums', color: 0 }]));
+  consolePanel.open();
+  const host = documentStub.getElementById('reaperConsole');
+  findOne(host, 'reaper-console-track-swatch').dispatch('click');
+  assert.equal(consolePanel._openPalette(), 1);
+
+  const popover = findOne(
+    documentStub.getElementById('reaperConsole'),
+    'reaper-console-color-popover'
+  );
+  popover.dispatch('keydown', { key: 'Escape' });
+  assert.equal(consolePanel._openPalette(), 0);
   consolePanel.close();
 });
 

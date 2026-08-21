@@ -42,6 +42,16 @@ type renameTrackRequest struct {
 	ExpectedName string `json:"expected_name"`
 }
 
+type colorTrackRequest struct {
+	Color        int64  `json:"color"`
+	ExpectedName string `json:"expected_name"`
+}
+
+type toggleTrackRequest struct {
+	Value        bool   `json:"value"`
+	ExpectedName string `json:"expected_name"`
+}
+
 // undoRecord is the most recent single-track edit for one workspace, together
 // with the specific inverse that reverses it. Per PRD requirement 19 these are
 // in-memory and per-workspace; they need not survive a restart or a reload.
@@ -108,9 +118,63 @@ func (h *Handler) renameTrack(ctx context.Context, workspaceID string, index int
 			ErrorReason: "A track name cannot be empty.",
 		}, http.StatusBadRequest
 	}
+	return h.applyGuardedTrackEdit(ctx, workspaceID, reaper.RenameEdit(index, request.ExpectedName, name))
+}
+
+func (h *Handler) ColorTrack(w http.ResponseWriter, r *http.Request) {
+	ws, ok := h.resolveWorkspace(w, r)
+	if !ok {
+		return
+	}
+	index, ok := trackIndexFromPath(w, r)
+	if !ok {
+		return
+	}
+	var request colorTrackRequest
+	if !decodeTrackEditRequest(w, r, &request) {
+		return
+	}
+	edit := reaper.ColorEdit(index, request.ExpectedName, request.Color)
+	response, status := h.applyGuardedTrackEdit(r.Context(), ws.ID, edit)
+	_ = orihttp.RespondJSON(w, status, response)
+}
+
+func (h *Handler) MuteTrack(w http.ResponseWriter, r *http.Request) {
+	h.toggleTrack(w, r, reaper.MuteEdit)
+}
+
+func (h *Handler) SoloTrack(w http.ResponseWriter, r *http.Request) {
+	h.toggleTrack(w, r, reaper.SoloEdit)
+}
+
+func (h *Handler) ArmTrack(w http.ResponseWriter, r *http.Request) {
+	h.toggleTrack(w, r, reaper.ArmEdit)
+}
+
+func (h *Handler) toggleTrack(w http.ResponseWriter, r *http.Request, build func(index int, expectedName string, value bool) reaper.TrackEdit) {
+	ws, ok := h.resolveWorkspace(w, r)
+	if !ok {
+		return
+	}
+	index, ok := trackIndexFromPath(w, r)
+	if !ok {
+		return
+	}
+	var request toggleTrackRequest
+	if !decodeTrackEditRequest(w, r, &request) {
+		return
+	}
+	response, status := h.applyGuardedTrackEdit(r.Context(), ws.ID, build(index, request.ExpectedName, request.Value))
+	_ = orihttp.RespondJSON(w, status, response)
+}
+
+// applyGuardedTrackEdit runs any single-track edit through the shared policy
+// path with the standard guard vocabulary, then stores its undo record. Color
+// and the three toggles all reuse this alongside rename.
+func (h *Handler) applyGuardedTrackEdit(ctx context.Context, workspaceID string, edit reaper.TrackEdit) (TrackEditResponse, int) {
 	return h.applyTrackEdit(ctx, workspaceID, trackEditPlan{
-		edit:        reaper.RenameEdit(index, request.ExpectedName, name),
-		summary:     "Renamed " + quoteForUser(request.ExpectedName) + " to " + quoteForUser(name),
+		edit:        edit,
+		summary:     editSummary(edit),
 		guardCode:   "track_list_changed",
 		guardReason: "The track list changed — refreshed.",
 		storeUndo:   true,
@@ -207,10 +271,8 @@ func (h *Handler) applyTrackEdit(ctx context.Context, workspaceID string, plan t
 
 	response.Outcome = "ok"
 	if plan.storeUndo {
-		h.undos.put(workspaceID, undoRecord{
-			inverse: edit.Inverse(receipt.Prior),
-			summary: reverseSummary(plan.summary),
-		})
+		inverse := edit.Inverse(receipt.Prior)
+		h.undos.put(workspaceID, undoRecord{inverse: inverse, summary: editSummary(inverse)})
 		// A single-track edit reverses through its own specific inverse
 		// endpoint, not through REAPER's global undo, so CommandID stays empty.
 		response.Undo = &UndoAction{Summary: plan.summary}
@@ -255,10 +317,35 @@ func (h *Handler) trackEditFailure(
 	return response, status
 }
 
-// reverseSummary turns the forward toast copy into what its Undo will do, so
-// the record carries user-facing words rather than a diff of Lua.
-func reverseSummary(summary string) string {
-	return strings.Replace(summary, "Renamed ", "Restored ", 1)
+// editSummary names what an edit does in the user's own words for the toast.
+// It is used for both directions: the forward edit's toast, and — applied to
+// the inverse — the undo record stored for the next Undo click. Deriving both
+// from the same function keeps a color or toggle summary correct without
+// string surgery on the forward copy.
+func editSummary(edit reaper.TrackEdit) string {
+	switch edit.Kind {
+	case reaper.TrackEditRename:
+		return "Renamed " + quoteForUser(edit.ExpectedName) + " to " + quoteForUser(edit.NewName)
+	case reaper.TrackEditColor:
+		return "Recolored " + quoteForUser(edit.ExpectedName)
+	case reaper.TrackEditMute:
+		if edit.NewBool {
+			return "Muted " + quoteForUser(edit.ExpectedName)
+		}
+		return "Unmuted " + quoteForUser(edit.ExpectedName)
+	case reaper.TrackEditSolo:
+		if edit.NewBool {
+			return "Soloed " + quoteForUser(edit.ExpectedName)
+		}
+		return "Cleared solo on " + quoteForUser(edit.ExpectedName)
+	case reaper.TrackEditArm:
+		if edit.NewBool {
+			return "Armed " + quoteForUser(edit.ExpectedName)
+		}
+		return "Disarmed " + quoteForUser(edit.ExpectedName)
+	default:
+		return "Changed " + quoteForUser(edit.ExpectedName)
+	}
 }
 
 // quoteForUser renders a track name the way the toast reads it aloud, naming
@@ -283,20 +370,28 @@ func trackIndexFromPath(w http.ResponseWriter, r *http.Request) (int, bool) {
 
 func decodeRenameRequest(w http.ResponseWriter, r *http.Request) (renameTrackRequest, bool) {
 	var request renameTrackRequest
+	ok := decodeTrackEditRequest(w, r, &request)
+	return request, ok
+}
+
+// decodeTrackEditRequest is the one strict-JSON decode every track-edit
+// endpoint uses: a body is required, unknown fields are rejected, and
+// trailing content after the object is rejected too.
+func decodeTrackEditRequest(w http.ResponseWriter, r *http.Request, out any) bool {
 	if r.Body == nil || r.ContentLength == 0 {
-		_ = orihttp.RespondBadRequest(w, "invalid track rename request")
-		return request, false
+		_ = orihttp.RespondBadRequest(w, "invalid track edit request")
+		return false
 	}
 	decoder := json.NewDecoder(io.LimitReader(r.Body, maxTrackEditBody))
 	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&request); err != nil {
-		_ = orihttp.RespondBadRequest(w, "invalid track rename request")
-		return renameTrackRequest{}, false
+	if err := decoder.Decode(out); err != nil {
+		_ = orihttp.RespondBadRequest(w, "invalid track edit request")
+		return false
 	}
 	var extra any
 	if err := decoder.Decode(&extra); err != io.EOF {
-		_ = orihttp.RespondBadRequest(w, "invalid track rename request")
-		return renameTrackRequest{}, false
+		_ = orihttp.RespondBadRequest(w, "invalid track edit request")
+		return false
 	}
-	return request, true
+	return true
 }

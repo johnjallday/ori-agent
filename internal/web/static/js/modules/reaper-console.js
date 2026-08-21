@@ -47,6 +47,22 @@
   let pendingEdit = null;
   let stripNotice = null;
   let trackRequestInFlight = false;
+  // openPalette is the index of the strip whose color popover is open, 0 for
+  // none. One strip at a time, per the Map's own popover convention.
+  let openPalette = 0;
+
+  // A fixed REAPER-compatible swatch set plus "no color" (PRD open question 1:
+  // fixed set over a full picker, to keep the popover small). Values already
+  // carry REAPER's 0x1000000 "has a custom color" flag.
+  const COLOR_PALETTE = [
+    { name: 'Red', hex: 0xef765d },
+    { name: 'Orange', hex: 0xe8b54b },
+    { name: 'Green', hex: 0x5ed0a7 },
+    { name: 'Blue', hex: 0x4f8ff7 },
+    { name: 'Purple', hex: 0x9b7fe8 },
+    { name: 'Pink', hex: 0xe87fc0 },
+    { name: 'Gray', hex: 0x8a97a1 }
+  ].map(entry => ({ name: entry.name, value: 0x1000000 | entry.hex }));
 
   function workspaceIdFromPage() {
     if (workspaceId) return workspaceId;
@@ -104,12 +120,15 @@
       play_state: String(state.play_state || ''),
       position: String(state.position || ''),
       track_editing_available: Boolean(state.track_editing_available),
+      // Peaks are deliberately excluded: they move continuously and would
+      // defeat change detection entirely.
       tracks: (Array.isArray(state.tracks) ? state.tracks : []).map(track => ({
         index: Number(track.index || 0),
         name: String(track.name || ''),
         muted: Boolean(track.muted),
         soloed: Boolean(track.soloed),
-        armed: Boolean(track.armed)
+        armed: Boolean(track.armed),
+        color: Number(track.color || 0)
       }))
     });
   }
@@ -513,24 +532,18 @@
     }
   }
 
-  async function renameTrack(index, expectedName, newName) {
-    const name = String(newName || '').trim();
-    if (!name) return false;
-    const path = tracksApiPath(encodeURIComponent(index) + '/rename');
+  // runTrackEdit is the one path every strip mutation goes through: optimistic
+  // patch, server call, revert-with-notice on failure, toast on success, and a
+  // forced immediate state re-read either way.
+  async function runTrackEdit(index, path, body, patch) {
     if (!path || trackRequestInFlight || typeof fetch !== 'function') return false;
     trackRequestInFlight = true;
-    editingIndex = 0;
     stripNotice = null;
-    // Optimistic: show the new name immediately, marked pending.
-    pendingEdit = { index, name };
+    pendingEdit = { index, patch };
     if (consoleOpen) renderConsole();
     try {
-      const { response, payload } = await postTrackEdit(path, {
-        name,
-        expected_name: String(expectedName == null ? '' : expectedName)
-      });
+      const { response, payload } = await postTrackEdit(path, body);
       if (!response.ok || payload.outcome !== 'ok') {
-        // Revert the optimistic update and say plainly that nothing changed.
         pendingEdit = null;
         stripNotice = { index, text: trackEditError(payload, response) };
         adoptTrackState(payload);
@@ -551,6 +564,41 @@
       if (consoleOpen) renderConsole();
       void refresh();
     }
+  }
+
+  async function renameTrack(index, expectedName, newName) {
+    const name = String(newName || '').trim();
+    if (!name) return false;
+    editingIndex = 0;
+    return runTrackEdit(
+      index,
+      tracksApiPath(encodeURIComponent(index) + '/rename'),
+      { name, expected_name: String(expectedName == null ? '' : expectedName) },
+      { name }
+    );
+  }
+
+  async function setTrackColor(index, expectedName, color) {
+    openPalette = 0;
+    return runTrackEdit(
+      index,
+      tracksApiPath(encodeURIComponent(index) + '/color'),
+      { color, expected_name: String(expectedName == null ? '' : expectedName) },
+      { color }
+    );
+  }
+
+  const TOGGLE_PATCH_KEY = { mute: 'muted', solo: 'soloed', arm: 'armed' };
+
+  async function setTrackToggle(kind, index, expectedName, value) {
+    const patch = {};
+    patch[TOGGLE_PATCH_KEY[kind]] = value;
+    return runTrackEdit(
+      index,
+      tracksApiPath(encodeURIComponent(index) + '/' + kind),
+      { value, expected_name: String(expectedName == null ? '' : expectedName) },
+      patch
+    );
   }
 
   async function undoTrackEdit() {
@@ -1131,18 +1179,25 @@
     host.appendChild(panel);
   }
 
-  function trackStateLabel(track) {
-    const states = [];
-    if (track.muted) states.push('Muted');
-    if (track.soloed) states.push('Solo');
-    if (track.armed) states.push('Armed');
-    return states.length ? states.join(' · ') : 'Ready';
+  // trackDisplayValue reads an optimistic patch over the live value, so a
+  // pending edit shows immediately, before the server confirms it.
+  function trackDisplayValue(track, key, liveValue) {
+    if (pendingEdit && pendingEdit.index === track.index && key in pendingEdit.patch) {
+      return pendingEdit.patch[key];
+    }
+    return liveValue;
   }
 
   function trackDisplayName(track) {
-    // An optimistic rename shows immediately, before the server confirms.
-    if (pendingEdit && pendingEdit.index === track.index) return pendingEdit.name;
-    return track.name || '';
+    return trackDisplayValue(track, 'name', track.name || '');
+  }
+
+  function trackDisplayColor(track) {
+    return Number(trackDisplayValue(track, 'color', track.color || 0));
+  }
+
+  function cssColor(value) {
+    return '#' + (Number(value) & 0xffffff).toString(16).padStart(6, '0');
   }
 
   function renderTrackNameEditor(item, track) {
@@ -1185,6 +1240,78 @@
     if (typeof input.focus === 'function') input.focus();
   }
 
+  function renderColorSwatch(item, track, editable) {
+    const color = trackDisplayColor(track);
+    const hasColor = (color & 0x1000000) !== 0;
+    const swatch = button(
+      '',
+      'reaper-console-track-swatch' + (hasColor ? ' has-color' : ' is-empty'),
+      () => {
+        if (!editable || trackRequestInFlight) return;
+        openPalette = openPalette === track.index ? 0 : track.index;
+        renderConsole();
+      }
+    );
+    if (hasColor) swatch.setAttribute('style', 'background:' + cssColor(color) + ';');
+    swatch.disabled = !editable;
+    swatch.setAttribute('aria-haspopup', 'true');
+    swatch.setAttribute('aria-expanded', String(openPalette === track.index));
+    swatch.setAttribute(
+      'aria-label',
+      'Color for track ' + track.index + (hasColor ? '' : ', no color') + ', open palette'
+    );
+    item.appendChild(swatch);
+
+    if (editable && openPalette === track.index) {
+      // A full-viewport backdrop closes the popover on any outside click,
+      // mirroring the console's own backdrop-to-close pattern.
+      const backdrop = el('div', 'reaper-console-color-backdrop');
+      backdrop.addEventListener('click', () => {
+        openPalette = 0;
+        renderConsole();
+      });
+      item.appendChild(backdrop);
+
+      const popover = el('div', 'reaper-console-color-popover');
+      popover.setAttribute('role', 'menu');
+      popover.addEventListener('keydown', event => {
+        if (event.key !== 'Escape') return;
+        openPalette = 0;
+        renderConsole();
+      });
+      const none = button('No color', 'reaper-console-color-option is-none', () => {
+        void setTrackColor(track.index, track.name || '', 0);
+      });
+      popover.appendChild(none);
+      COLOR_PALETTE.forEach(entry => {
+        const option = button('', 'reaper-console-color-option', () => {
+          void setTrackColor(track.index, track.name || '', entry.value);
+        });
+        option.setAttribute('style', 'background:' + cssColor(entry.value) + ';');
+        option.setAttribute('aria-label', entry.name);
+        if (entry.value === color) option.classList.add('is-selected');
+        popover.appendChild(option);
+      });
+      item.appendChild(popover);
+    }
+  }
+
+  function renderToggleChip(item, track, kind, letter, label, active, editable) {
+    const chip = button(
+      letter,
+      'reaper-console-track-chip is-' + kind + (active ? ' is-active' : ''),
+      () => {
+        if (!editable || trackRequestInFlight) return;
+        void setTrackToggle(kind, track.index, track.name || '', !active);
+      }
+    );
+    chip.disabled = !editable || trackRequestInFlight;
+    chip.setAttribute('aria-pressed', String(active));
+    chip.setAttribute('aria-label', label + ' track ' + track.index + (active ? ', on' : ', off'));
+    chip.title = label;
+    item.appendChild(chip);
+  }
+
   function renderTrackStrip(list, track, editable) {
     const item = el('li', 'reaper-console-track');
     const pending = Boolean(pendingEdit && pendingEdit.index === track.index);
@@ -1192,6 +1319,8 @@
     item.appendChild(
       el('span', 'reaper-console-track-index', String(track.index).padStart(2, '0'))
     );
+
+    renderColorSwatch(item, track, editable);
 
     const name = trackDisplayName(track);
     if (editable && editingIndex === track.index) {
@@ -1212,11 +1341,35 @@
       item.appendChild(el('strong', 'reaper-console-track-name', name || 'Untitled track'));
     }
 
-    const status = el('span', 'reaper-console-track-state', trackStateLabel(track));
-    if (track.muted) status.classList.add('is-muted');
-    if (track.soloed) status.classList.add('is-soloed');
-    if (track.armed) status.classList.add('is-armed');
-    item.appendChild(status);
+    const chips = el('span', 'reaper-console-track-chips');
+    renderToggleChip(
+      chips,
+      track,
+      'mute',
+      'M',
+      'Mute',
+      trackDisplayValue(track, 'muted', Boolean(track.muted)),
+      editable
+    );
+    renderToggleChip(
+      chips,
+      track,
+      'solo',
+      'S',
+      'Solo',
+      trackDisplayValue(track, 'soloed', Boolean(track.soloed)),
+      editable
+    );
+    renderToggleChip(
+      chips,
+      track,
+      'arm',
+      'R',
+      'Record-arm',
+      trackDisplayValue(track, 'armed', Boolean(track.armed)),
+      editable
+    );
+    item.appendChild(chips);
     list.appendChild(item);
 
     if (stripNotice && stripNotice.index === track.index) {
@@ -1370,6 +1523,7 @@
     editingIndex = 0;
     pendingEdit = null;
     stripNotice = null;
+    openPalette = 0;
     // Back to the slower map cadence now that nobody is editing.
     syncPolling();
     const host = typeof document === 'undefined' ? null : document.getElementById(CONSOLE_HOST_ID);
@@ -1468,6 +1622,8 @@
     _addToast: addToast,
     _undoFromToast: undoFromToast,
     _renameTrack: renameTrack,
+    _setTrackColor: setTrackColor,
+    _setTrackToggle: setTrackToggle,
     _undoTrackEdit: undoTrackEdit,
     _beginTrackRename: beginTrackRename,
     _cancelTrackRename: cancelTrackRename,
@@ -1475,6 +1631,7 @@
     _pendingEdit: () => pendingEdit,
     _stripNotice: () => stripNotice,
     _pollIntervalMs: () => pollTimerIntervalMs,
+    _openPalette: () => openPalette,
     _resetForTest: () => {
       stopPolling();
       workspaceId = '';
@@ -1502,6 +1659,7 @@
       pendingEdit = null;
       stripNotice = null;
       trackRequestInFlight = false;
+      openPalette = 0;
       toasts.forEach(toast => {
         if (toast.timer && typeof clearTimeout === 'function') clearTimeout(toast.timer);
       });
