@@ -49,6 +49,28 @@ class FakeNode {
   focus() {
     this.focused = true;
   }
+  dispatch(type, event) {
+    const listener = this.listeners.get(type);
+    if (listener) listener(event || { type });
+  }
+}
+
+// Walk the rendered tree for nodes matching a class, so a test can find the
+// one strip control it wants without a real DOM.
+function findAll(node, className, found = []) {
+  if (!node) return found;
+  if (
+    String(node.className || '')
+      .split(/\s+/)
+      .includes(className)
+  )
+    found.push(node);
+  (node.children || []).forEach(child => findAll(child, className, found));
+  return found;
+}
+
+function findOne(node, className) {
+  return findAll(node, className)[0] || null;
 }
 
 function makeDocument() {
@@ -573,6 +595,259 @@ test('registered scripts and the raw command escape hatch share the action surfa
   });
   assert.match(host.textContent, /Confirm project change/);
   assert.match(host.textContent, /Run Raw command 40001/);
+  consolePanel.close();
+});
+
+function liveTrackState(tracks) {
+  return {
+    applies: true,
+    connected: true,
+    project: 'Song',
+    tempo: 120,
+    time_signature: '4/4',
+    play_state: 'stopped',
+    position: '1.1.00',
+    track_editing_available: true,
+    track_count: tracks.length,
+    tracks
+  };
+}
+
+test('clicking a track name opens an inline editor that commits on Enter', async () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  consolePanel._setState(liveTrackState([{ index: 1, name: 'Drums' }]));
+  consolePanel.open();
+
+  const host = documentStub.getElementById('reaperConsole');
+  const nameButton = findOne(host, 'reaper-console-track-name');
+  assert.ok(nameButton, 'the strip name should be a control');
+  nameButton.dispatch('click');
+  assert.equal(consolePanel._editingIndex(), 1);
+
+  const input = findOne(host, 'reaper-console-track-name-input');
+  assert.ok(input);
+  assert.equal(input.value, 'Drums');
+  assert.equal(input.focused, true);
+
+  const requests = [];
+  globalThis.fetch = async (path, options) => {
+    requests.push({ path, options });
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        ...liveTrackState([{ index: 1, name: 'Kick' }]),
+        outcome: 'ok',
+        undo: { summary: 'Renamed ‘Drums’ to ‘Kick’' }
+      })
+    };
+  };
+  input.value = 'Kick';
+  input.dispatch('keydown', { key: 'Enter' });
+  await new Promise(resolve => setImmediate(resolve));
+
+  const rename = requests.find(request => /tracks\/1\/rename$/.test(request.path));
+  assert.ok(rename, 'Enter should post the rename');
+  assert.deepEqual(JSON.parse(rename.options.body), { name: 'Kick', expected_name: 'Drums' });
+  assert.equal(consolePanel._toasts().length, 1);
+  assert.match(consolePanel._toasts()[0].message, /Renamed/);
+  consolePanel.close();
+});
+
+test('Escape cancels an inline rename without calling the server', () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  consolePanel._setState(liveTrackState([{ index: 1, name: 'Drums' }]));
+  consolePanel.open();
+
+  const host = documentStub.getElementById('reaperConsole');
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return { ok: true, status: 200, json: async () => ({}) };
+  };
+  consolePanel._beginTrackRename(1);
+  const input = findOne(host, 'reaper-console-track-name-input');
+  input.value = 'Kick';
+  input.dispatch('keydown', { key: 'Escape' });
+  assert.equal(consolePanel._editingIndex(), 0);
+  assert.equal(calls, 0);
+  consolePanel.close();
+});
+
+test('an empty name is rejected client-side with no server call', () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  consolePanel._setState(liveTrackState([{ index: 1, name: 'Drums' }]));
+  consolePanel.open();
+
+  const host = documentStub.getElementById('reaperConsole');
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return { ok: true, status: 200, json: async () => ({}) };
+  };
+  consolePanel._beginTrackRename(1);
+  const input = findOne(host, 'reaper-console-track-name-input');
+  input.value = '   ';
+  input.dispatch('keydown', { key: 'Enter' });
+  assert.equal(calls, 0);
+  assert.match(host.textContent, /A track name cannot be empty/);
+  consolePanel.close();
+});
+
+test('a failed rename reverts the optimistic update and shows the guard notice', async () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  consolePanel._setState(liveTrackState([{ index: 1, name: 'Drums' }]));
+  consolePanel.open();
+
+  globalThis.fetch = async (path, options) => {
+    // The forced state re-read still succeeds; only the edit is refused.
+    if (!options || options.method !== 'POST') {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => liveTrackState([{ index: 1, name: 'Drums' }])
+      };
+    }
+    return {
+      ok: false,
+      status: 409,
+      json: async () => ({
+        ...liveTrackState([{ index: 1, name: 'Drums' }]),
+        outcome: 'error',
+        code: 'track_list_changed',
+        error_reason: 'The track list changed — refreshed.'
+      })
+    };
+  };
+
+  assert.equal(await consolePanel._renameTrack(1, 'Drums', 'Kick'), false);
+  // The optimistic value is gone and the strip reports what happened.
+  assert.equal(consolePanel._pendingEdit(), null);
+  assert.equal(consolePanel._stripNotice().text, 'The track list changed — refreshed.');
+  const host = documentStub.getElementById('reaperConsole');
+  assert.match(host.textContent, /The track list changed/);
+  assert.match(host.textContent, /Drums/);
+  assert.equal(consolePanel._toasts().length, 0);
+  consolePanel.close();
+});
+
+test('a track-edit toast undoes through the specific inverse endpoint', async () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setState(liveTrackState([{ index: 1, name: 'Kick' }]));
+  const toast = consolePanel._addToast('Renamed ‘Drums’ to ‘Kick’', { kind: 'track_edit' });
+
+  const requests = [];
+  globalThis.fetch = async (path, options) => {
+    requests.push({ path, options });
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ ...liveTrackState([{ index: 1, name: 'Drums' }]), outcome: 'ok' })
+    };
+  };
+  await consolePanel._undoFromToast(toast.id);
+  // The specific inverse, never REAPER's global undo command.
+  assert.match(requests[0].path, /tracks\/undo$/);
+  assert.ok(!requests.some(request => /actions\/40029\/run$/.test(request.path)));
+  assert.equal(consolePanel._toasts().length, 0);
+});
+
+test('strips render read-only when the runner is unavailable', () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  const state = liveTrackState([{ index: 1, name: 'Drums' }]);
+  state.track_editing_available = false;
+  consolePanel._setState(state);
+  consolePanel.open();
+
+  const host = documentStub.getElementById('reaperConsole');
+  assert.match(host.textContent, /Track editing needs the Ori REAPER runner/);
+  assert.match(host.textContent, /read-only until it is installed/);
+  // No name control renders, so there is no dead thing to click.
+  assert.equal(findAll(host, 'reaper-console-track-name').length, 1);
+  assert.equal(findOne(host, 'reaper-console-track-name').tagName, 'STRONG');
+  consolePanel.close();
+});
+
+test('the poll drops to one second while the console is open', () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  documentStub.visibilityState = 'visible';
+  consolePanel.setMapVisible(true);
+  assert.equal(consolePanel._pollIntervalMs(), 5000);
+
+  consolePanel._setState(liveTrackState([]));
+  consolePanel.open();
+  assert.equal(consolePanel._pollIntervalMs(), 1000);
+  assert.equal(timers.at(-1).delay, 1000);
+
+  consolePanel.close();
+  assert.equal(consolePanel._pollIntervalMs(), 5000);
+  assert.equal(timers.at(-1).delay, 5000);
+
+  // Still visibility-aware at the faster cadence.
+  consolePanel.open();
+  documentStub.visibilityState = 'hidden';
+  documentStub._dispatch('visibilitychange');
+  assert.equal(consolePanel._polling(), false);
+  documentStub.visibilityState = 'visible';
+  consolePanel.close();
+});
+
+test('a re-render keeps the console body scrolled where the user left it', () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  consolePanel._setState(liveTrackState([{ index: 1, name: 'Drums' }]));
+  consolePanel.open();
+
+  const host = documentStub.getElementById('reaperConsole');
+  const body = findOne(host, 'reaper-console-body');
+  assert.ok(body);
+  // The user scrolls down to the Tracks section.
+  body.scrollTop = 420;
+
+  // The transport position ticks, forcing a re-render at the 1s cadence.
+  const moved = liveTrackState([{ index: 1, name: 'Drums' }]);
+  moved.position = '2.1.00';
+  consolePanel._setState(moved);
+
+  const rebuilt = findOne(documentStub.getElementById('reaperConsole'), 'reaper-console-body');
+  assert.notEqual(rebuilt, body, 'the panel should have been rebuilt');
+  assert.equal(rebuilt.scrollTop, 420, 'the scroll offset should survive the re-render');
+  consolePanel.close();
+});
+
+test('an unchanged poll tick does not rebuild the console', async () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  const state = liveTrackState([{ index: 1, name: 'Drums' }]);
+  consolePanel._setState(state);
+  consolePanel.open();
+
+  const before = findOne(documentStub.getElementById('reaperConsole'), 'reaper-console-body');
+  globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => state });
+  await consolePanel.refresh();
+  const after = findOne(documentStub.getElementById('reaperConsole'), 'reaper-console-body');
+  assert.equal(after, before, 'an identical state must not rebuild the panel');
   consolePanel.close();
 });
 

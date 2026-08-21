@@ -50,14 +50,19 @@ type Handler struct {
 	catalog       ActionCatalog
 	scriptLibrary ScriptLibrary
 	scriptRunner  ScriptRunner
+	trackRunner   TrackEditRunner
 	proposals     *proposalStore
+	undos         *undoStore
 }
 
 func NewHandler(store WorkspaceStore, provider userprofile.UserProvider, client StateReader, catalog ActionCatalog) *Handler {
 	if provider == nil {
 		provider = userprofile.LocalUserProvider{}
 	}
-	return &Handler{store: store, provider: provider, client: client, catalog: catalog, proposals: newProposalStore()}
+	return &Handler{
+		store: store, provider: provider, client: client, catalog: catalog,
+		proposals: newProposalStore(), undos: newUndoStore(),
+	}
 }
 
 func (h *Handler) SetScriptServices(library ScriptLibrary, runner ScriptRunner) {
@@ -65,6 +70,21 @@ func (h *Handler) SetScriptServices(library ScriptLibrary, runner ScriptRunner) 
 		h.scriptLibrary = library
 		h.scriptRunner = runner
 	}
+}
+
+// SetTrackEditRunner supplies the guarded single-track edit path. Track
+// editing stays unavailable until it is set, which is also how a workspace
+// with no installed runner degrades.
+func (h *Handler) SetTrackEditRunner(runner TrackEditRunner) {
+	if h != nil {
+		h.trackRunner = runner
+	}
+}
+
+// trackEditingAvailable answers the one question the console needs to decide
+// between interactive strips and a read-only list.
+func (h *Handler) trackEditingAvailable(ctx context.Context) bool {
+	return h != nil && h.trackRunner != nil && h.trackRunner.Available(ctx)
 }
 
 func (h *Handler) GetState(w http.ResponseWriter, r *http.Request) {
@@ -94,6 +114,11 @@ func (h *Handler) GetState(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	state.Applies = true
+	// Probe the runner only while REAPER is reachable: a disconnected session
+	// already renders the offline panel, and strips never appear there.
+	if state.Connected {
+		state.TrackEditingAvailable = h.trackEditingAvailable(r.Context())
+	}
 	_ = orihttp.RespondSuccess(w, state)
 }
 

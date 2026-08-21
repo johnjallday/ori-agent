@@ -25,7 +25,11 @@ func (b *ServerBuilder) wireReaperControl() {
 	library := reaper.NewLibrary()
 	catalog := reaper.NewCatalog()
 	catalog.SetLibrary(library)
+	runner := reaper.NewRunner(roots, probes, client)
 	handler := reaperhttp.NewHandler(store, b.userProvider, client, catalog)
-	handler.SetScriptServices(library, reaper.NewRunner(roots, probes, client))
+	handler.SetScriptServices(library, runner)
+	// The same runner performs the guarded single-track edits; it owns the
+	// receipt path so no filesystem detail reaches the HTTP layer.
+	handler.SetTrackEditRunner(runner)
 	b.reaperHandler = handler
 }

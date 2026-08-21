@@ -48,6 +48,10 @@ type State struct {
 	TrackCount    int       `json:"track_count"`
 	Tracks        []Track   `json:"tracks"`
 	CheckedAt     time.Time `json:"checked_at"`
+	// TrackEditingAvailable reports whether the script runner is installed and
+	// ready. REAPER can be connected while the runner is missing, in which case
+	// the console renders strips read-only instead of offering dead controls.
+	TrackEditingAvailable bool `json:"track_editing_available"`
 }
 
 // Track is one non-master track. Peak values are parsed for protocol coverage,

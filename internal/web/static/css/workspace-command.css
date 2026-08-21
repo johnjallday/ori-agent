@@ -7014,6 +7014,71 @@ button.ws-cmd-rpg-class-card:focus-visible {
   color: #ff8a70;
 }
 
+/* --- Interactive track strips ---
+   The strip borrows the Map's vocabulary: click the name to rename it inline.
+   A pending edit is subdued rather than blocked, and a refused guard reports
+   on the strip itself instead of in a modal. */
+.reaper-console-track.is-pending {
+  opacity: 0.62;
+  border-left-color: #e8b54b;
+}
+
+button.reaper-console-track-name {
+  min-width: 0;
+  padding: 0.2rem 0.35rem;
+  margin-left: -0.35rem;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 2px;
+  cursor: text;
+}
+
+button.reaper-console-track-name.is-editable:hover,
+button.reaper-console-track-name.is-editable:focus-visible {
+  border-color: rgba(94, 208, 167, 0.5);
+  background: rgba(94, 208, 167, 0.07);
+}
+
+button.reaper-console-track-name:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.reaper-console-track-name-input {
+  min-width: 0;
+  padding: 0.2rem 0.35rem;
+  color: #f3f7f4;
+  background: rgba(5, 11, 12, 0.9);
+  border: 1px solid #5ed0a7;
+  border-radius: 2px;
+  font-family: var(--ws-font-display, sans-serif);
+  font-size: 0.9rem;
+}
+
+.reaper-console-track-notice {
+  padding: 0.42rem 0.8rem;
+  color: #ffc0b4;
+  background: rgba(239, 118, 93, 0.08);
+  border-left: 2px solid #ef765d;
+  font-size: 0.66rem;
+  line-height: 1.4;
+}
+
+.reaper-console-track-degraded {
+  display: flex;
+  gap: 0.8rem;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.6rem;
+  padding: 0.6rem 0.8rem;
+  color: rgba(223, 235, 228, 0.74);
+  background: rgba(232, 181, 75, 0.07);
+  border-left: 2px solid #e8b54b;
+  font-size: 0.68rem;
+  line-height: 1.45;
+}
+
 .reaper-console-offline,
 .reaper-console-checking {
   display: flex;

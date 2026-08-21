@@ -7,6 +7,9 @@
   'use strict';
 
   const POLL_INTERVAL_MS = 5000;
+  // While the console is open the user is driving REAPER directly, so state
+  // must keep up with their own edits rather than lag a five-second tick.
+  const CONSOLE_POLL_INTERVAL_MS = 1000;
   const CONSOLE_HOST_ID = 'reaperConsole';
   const REQUIREMENT_KEY = 'reaper_live_control';
   const TOAST_DURATION_MS = 8000;
@@ -15,10 +18,12 @@
   let workspaceId = '';
   let mapVisible = false;
   let pollTimer = null;
+  let pollTimerIntervalMs = 0;
   let requestInFlight = false;
   let lastState = null;
   let lastMeaningfulState = '';
   let consoleOpen = false;
+  let consoleBodyNode = null;
   let consoleTrigger = null;
   let consoleOverlayId = '';
   let catalog = [];
@@ -35,6 +40,13 @@
   let lastRun = null;
   let toasts = [];
   let toastSeq = 0;
+  // Track-strip edit state. editingIndex is the strip currently showing an
+  // inline input; pendingEdit is an optimistic value awaiting the server, and
+  // stripNotice is the inline failure message on one strip.
+  let editingIndex = 0;
+  let pendingEdit = null;
+  let stripNotice = null;
+  let trackRequestInFlight = false;
 
   function workspaceIdFromPage() {
     if (workspaceId) return workspaceId;
@@ -62,6 +74,12 @@
     return id ? '/api/workspaces/' + encodeURIComponent(id) + '/reaper/scripts' : '';
   }
 
+  function tracksApiPath(suffix) {
+    const id = workspaceIdFromPage();
+    if (!id) return '';
+    return '/api/workspaces/' + encodeURIComponent(id) + '/reaper/tracks/' + suffix;
+  }
+
   function proposalsApiPath(proposalId, operation) {
     const id = workspaceIdFromPage();
     if (!id) return '';
@@ -85,6 +103,7 @@
       time_signature: String(state.time_signature || ''),
       play_state: String(state.play_state || ''),
       position: String(state.position || ''),
+      track_editing_available: Boolean(state.track_editing_available),
       tracks: (Array.isArray(state.tracks) ? state.tracks : []).map(track => ({
         index: Number(track.index || 0),
         name: String(track.name || ''),
@@ -97,8 +116,13 @@
 
   function publishIfChanged(state) {
     const next = meaningfulState(state);
-    if (next === lastMeaningfulState) return;
+    if (next === lastMeaningfulState) return false;
     lastMeaningfulState = next;
+    publishStateEvent(state);
+    return true;
+  }
+
+  function publishStateEvent(state) {
     if (typeof document === 'undefined' || typeof document.dispatchEvent !== 'function') return;
     const event =
       typeof CustomEvent === 'function'
@@ -117,8 +141,11 @@
       const state = await response.json();
       if (!state || typeof state.connected !== 'boolean') throw new Error('invalid state');
       lastState = state;
-      publishIfChanged(state);
-      if (consoleOpen) renderConsole();
+      const changed = publishIfChanged(state);
+      // At the one-second console cadence an unconditional re-render would
+      // rebuild the panel every tick for no reason, so only redraw when the
+      // state the console actually shows has moved.
+      if (consoleOpen && changed) renderConsole();
       return state;
     } catch (_error) {
       const failed = {
@@ -134,8 +161,8 @@
         tracks: []
       };
       lastState = failed;
-      publishIfChanged(failed);
-      if (consoleOpen) renderConsole();
+      const changed = publishIfChanged(failed);
+      if (consoleOpen && changed) renderConsole();
       return failed;
     } finally {
       requestInFlight = false;
@@ -428,6 +455,13 @@
   async function undoFromToast(toastId) {
     const toast = toasts.find(candidate => candidate.id === toastId);
     dismissToast(toastId);
+    // Hybrid undo (PRD 4.3 item 16): a single-track edit reverses through its
+    // own specific inverse, while catalog actions and saved scripts reverse
+    // through REAPER's global undo because they already run in one undo block.
+    if (toast && toast.undo && toast.undo.kind === 'track_edit') {
+      await undoTrackEdit();
+      return;
+    }
     const commandId = (toast && toast.undo && toast.undo.command_id) || GLOBAL_UNDO_COMMAND_ID;
     const path = actionsApiPath(commandId);
     if (!path || typeof fetch !== 'function') return;
@@ -448,22 +482,135 @@
     void refresh();
   }
 
+  // --- Track strips -------------------------------------------------------
+  //
+  // Every edit is applied optimistically and guarded server-side on the name
+  // Ori last read. A refused guard is not an error the user caused: the track
+  // list moved underneath them, so the strip says so and re-reads live state.
+
+  function trackEditError(payload, response) {
+    if (payload && payload.error_reason) return String(payload.error_reason);
+    if (payload && payload.error) return String(payload.error);
+    return response && response.status === 409
+      ? 'The track list changed — refreshed.'
+      : 'REAPER did not apply the change.';
+  }
+
+  async function postTrackEdit(path, body) {
+    const response = await fetch(path, {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    const payload = await response.json().catch(() => ({}));
+    return { response, payload };
+  }
+
+  function adoptTrackState(payload) {
+    if (payload && typeof payload.connected === 'boolean') {
+      lastState = payload;
+      publishIfChanged(payload);
+    }
+  }
+
+  async function renameTrack(index, expectedName, newName) {
+    const name = String(newName || '').trim();
+    if (!name) return false;
+    const path = tracksApiPath(encodeURIComponent(index) + '/rename');
+    if (!path || trackRequestInFlight || typeof fetch !== 'function') return false;
+    trackRequestInFlight = true;
+    editingIndex = 0;
+    stripNotice = null;
+    // Optimistic: show the new name immediately, marked pending.
+    pendingEdit = { index, name };
+    if (consoleOpen) renderConsole();
+    try {
+      const { response, payload } = await postTrackEdit(path, {
+        name,
+        expected_name: String(expectedName == null ? '' : expectedName)
+      });
+      if (!response.ok || payload.outcome !== 'ok') {
+        // Revert the optimistic update and say plainly that nothing changed.
+        pendingEdit = null;
+        stripNotice = { index, text: trackEditError(payload, response) };
+        adoptTrackState(payload);
+        return false;
+      }
+      pendingEdit = null;
+      adoptTrackState(payload);
+      if (payload.undo && payload.undo.summary) {
+        addToast(payload.undo.summary, { kind: 'track_edit' });
+      }
+      return true;
+    } catch (_error) {
+      pendingEdit = null;
+      stripNotice = { index, text: 'The edit request failed. Nothing was applied.' };
+      return false;
+    } finally {
+      trackRequestInFlight = false;
+      if (consoleOpen) renderConsole();
+      void refresh();
+    }
+  }
+
+  async function undoTrackEdit() {
+    const path = tracksApiPath('undo');
+    if (!path || typeof fetch !== 'function') return false;
+    try {
+      const { response, payload } = await postTrackEdit(path, {});
+      adoptTrackState(payload);
+      if (!response.ok || payload.outcome !== 'ok') {
+        stripNotice = { index: 0, text: trackEditError(payload, response) };
+        return false;
+      }
+      return true;
+    } catch (_error) {
+      stripNotice = { index: 0, text: 'The undo request failed. Nothing was undone.' };
+      return false;
+    } finally {
+      if (consoleOpen) renderConsole();
+      void refresh();
+    }
+  }
+
+  function beginTrackRename(index) {
+    editingIndex = Number(index) || 0;
+    stripNotice = null;
+    if (consoleOpen) renderConsole();
+  }
+
+  function cancelTrackRename() {
+    editingIndex = 0;
+    if (consoleOpen) renderConsole();
+  }
+
   function stopPolling() {
     if (pollTimer !== null && typeof clearInterval === 'function') clearInterval(pollTimer);
     pollTimer = null;
+    pollTimerIntervalMs = 0;
+  }
+
+  function pollIntervalMs() {
+    return consoleOpen ? CONSOLE_POLL_INTERVAL_MS : POLL_INTERVAL_MS;
   }
 
   function syncPolling({ refreshNow = false } = {}) {
-    const shouldPoll = mapVisible && documentVisible();
+    const shouldPoll = (mapVisible || consoleOpen) && documentVisible();
     if (!shouldPoll) {
       stopPolling();
       return;
     }
+    // Restart the timer when the cadence changes, so opening or closing the
+    // console takes effect immediately rather than after the current tick.
+    if (pollTimer !== null && pollTimerIntervalMs !== pollIntervalMs()) {
+      stopPolling();
+    }
     if (refreshNow || !lastState) void refresh();
     if (pollTimer === null && typeof setInterval === 'function') {
+      pollTimerIntervalMs = pollIntervalMs();
       pollTimer = setInterval(() => {
-        if (mapVisible && documentVisible()) void refresh();
-      }, POLL_INTERVAL_MS);
+        if ((mapVisible || consoleOpen) && documentVisible()) void refresh();
+      }, pollTimerIntervalMs);
     }
   }
 
@@ -992,30 +1139,130 @@
     return states.length ? states.join(' · ') : 'Ready';
   }
 
+  function trackDisplayName(track) {
+    // An optimistic rename shows immediately, before the server confirms.
+    if (pendingEdit && pendingEdit.index === track.index) return pendingEdit.name;
+    return track.name || '';
+  }
+
+  function renderTrackNameEditor(item, track) {
+    const input = el('input', 'reaper-console-track-name-input');
+    input.type = 'text';
+    input.value = trackDisplayName(track);
+    input.maxLength = 128;
+    input.autocomplete = 'off';
+    input.setAttribute('aria-label', 'Rename track ' + track.index);
+    let settled = false;
+    const commit = () => {
+      if (settled) return;
+      const next = String(input.value || '').trim();
+      // An empty name is rejected client-side, with no server call at all.
+      if (!next) {
+        settled = true;
+        editingIndex = 0;
+        stripNotice = { index: track.index, text: 'A track name cannot be empty.' };
+        renderConsole();
+        return;
+      }
+      if (next === (track.name || '')) {
+        settled = true;
+        cancelTrackRename();
+        return;
+      }
+      settled = true;
+      void renameTrack(track.index, track.name || '', next);
+    };
+    input.addEventListener('keydown', event => {
+      if (event.key === 'Enter') {
+        commit();
+      } else if (event.key === 'Escape') {
+        settled = true;
+        cancelTrackRename();
+      }
+    });
+    input.addEventListener('blur', commit);
+    item.appendChild(input);
+    if (typeof input.focus === 'function') input.focus();
+  }
+
+  function renderTrackStrip(list, track, editable) {
+    const item = el('li', 'reaper-console-track');
+    const pending = Boolean(pendingEdit && pendingEdit.index === track.index);
+    if (pending) item.classList.add('is-pending');
+    item.appendChild(
+      el('span', 'reaper-console-track-index', String(track.index).padStart(2, '0'))
+    );
+
+    const name = trackDisplayName(track);
+    if (editable && editingIndex === track.index) {
+      renderTrackNameEditor(item, track);
+    } else if (editable) {
+      const trigger = button(
+        name || 'Untitled track',
+        'reaper-console-track-name is-editable',
+        () => beginTrackRename(track.index)
+      );
+      trigger.disabled = trackRequestInFlight;
+      trigger.setAttribute(
+        'aria-label',
+        'Rename track ' + track.index + ', currently ' + (name || 'untitled')
+      );
+      item.appendChild(trigger);
+    } else {
+      item.appendChild(el('strong', 'reaper-console-track-name', name || 'Untitled track'));
+    }
+
+    const status = el('span', 'reaper-console-track-state', trackStateLabel(track));
+    if (track.muted) status.classList.add('is-muted');
+    if (track.soloed) status.classList.add('is-soloed');
+    if (track.armed) status.classList.add('is-armed');
+    item.appendChild(status);
+    list.appendChild(item);
+
+    if (stripNotice && stripNotice.index === track.index) {
+      const notice = el('li', 'reaper-console-track-notice', stripNotice.text);
+      notice.setAttribute('role', 'status');
+      list.appendChild(notice);
+    }
+  }
+
+  function renderRunnerUnavailable(section) {
+    const panel = el('div', 'reaper-console-track-degraded');
+    panel.appendChild(
+      el(
+        'span',
+        '',
+        'Track editing needs the Ori REAPER runner. These tracks are read-only until it is installed.'
+      )
+    );
+    panel.appendChild(button('Fix setup', 'reaper-console-btn is-secondary', openSetupFix));
+    section.appendChild(panel);
+  }
+
   function renderTracks(host, state) {
     const section = el('section', 'reaper-console-tracks');
     const head = el('div', 'reaper-console-section-head');
     head.appendChild(el('h3', '', 'Tracks'));
     head.appendChild(el('span', '', trackCountLabel(state)));
     section.appendChild(head);
+
+    // Strips are interactive only when REAPER is connected and the runner is
+    // installed; otherwise the list degrades to a read-only readout rather
+    // than offering controls that cannot work (PRD 4.5 item 28).
+    const editable = Boolean(state.connected && state.track_editing_available);
+    if (state.connected && !state.track_editing_available) renderRunnerUnavailable(section);
+
     const list = el('ol', 'reaper-console-track-list');
     const tracks = Array.isArray(state.tracks) ? state.tracks : [];
     if (!tracks.length) {
       list.appendChild(el('li', 'reaper-console-empty', 'No project tracks'));
     } else {
-      tracks.forEach(track => {
-        const item = el('li', 'reaper-console-track');
-        item.appendChild(
-          el('span', 'reaper-console-track-index', String(track.index).padStart(2, '0'))
-        );
-        item.appendChild(el('strong', 'reaper-console-track-name', track.name || 'Untitled track'));
-        const status = el('span', 'reaper-console-track-state', trackStateLabel(track));
-        if (track.muted) status.classList.add('is-muted');
-        if (track.soloed) status.classList.add('is-soloed');
-        if (track.armed) status.classList.add('is-armed');
-        item.appendChild(status);
-        list.appendChild(item);
-      });
+      tracks.forEach(track => renderTrackStrip(list, track, editable));
+    }
+    if (stripNotice && !stripNotice.index) {
+      const notice = el('li', 'reaper-console-track-notice', stripNotice.text);
+      notice.setAttribute('role', 'status');
+      list.appendChild(notice);
     }
     section.appendChild(list);
     host.appendChild(section);
@@ -1049,6 +1296,13 @@
   function renderConsole() {
     const host = consoleHost();
     if (!host || !consoleOpen) return;
+    // The panel is rebuilt from scratch on every render, so carry the body's
+    // scroll offset across. Without this the transport position ticking during
+    // playback would yank the user back to the top of the console.
+    const previousScroll =
+      consoleBodyNode && typeof consoleBodyNode.scrollTop === 'number'
+        ? consoleBodyNode.scrollTop
+        : 0;
     clear(host);
     host.hidden = false;
     const backdrop = el('div', 'reaper-console-backdrop');
@@ -1060,6 +1314,7 @@
     renderHeader(panel, lastState);
     renderToasts(panel);
     const body = el('div', 'reaper-console-body');
+    consoleBodyNode = body;
     if (!lastState) {
       const checking = el('section', 'reaper-console-checking');
       checking.appendChild(el('span', 'reaper-console-spinner'));
@@ -1073,6 +1328,7 @@
     panel.appendChild(body);
     host.appendChild(backdrop);
     host.appendChild(panel);
+    if (previousScroll > 0) body.scrollTop = previousScroll;
   }
 
   function open(options) {
@@ -1098,6 +1354,8 @@
       });
     }
     renderConsole();
+    // An open console polls at the faster cadence (PRD 4.1 item 8).
+    syncPolling();
     void refresh();
     if (!catalogLoaded) void loadActions();
     if (!scriptsLoaded) void loadScripts();
@@ -1108,6 +1366,12 @@
   function close(options) {
     if (!consoleOpen) return false;
     consoleOpen = false;
+    consoleBodyNode = null;
+    editingIndex = 0;
+    pendingEdit = null;
+    stripNotice = null;
+    // Back to the slower map cadence now that nobody is editing.
+    syncPolling();
     const host = typeof document === 'undefined' ? null : document.getElementById(CONSOLE_HOST_ID);
     if (host) {
       host.hidden = true;
@@ -1203,6 +1467,14 @@
     _toasts: () => toasts,
     _addToast: addToast,
     _undoFromToast: undoFromToast,
+    _renameTrack: renameTrack,
+    _undoTrackEdit: undoTrackEdit,
+    _beginTrackRename: beginTrackRename,
+    _cancelTrackRename: cancelTrackRename,
+    _editingIndex: () => editingIndex,
+    _pendingEdit: () => pendingEdit,
+    _stripNotice: () => stripNotice,
+    _pollIntervalMs: () => pollTimerIntervalMs,
     _resetForTest: () => {
       stopPolling();
       workspaceId = '';
@@ -1211,6 +1483,7 @@
       lastState = null;
       lastMeaningfulState = '';
       consoleOpen = false;
+      consoleBodyNode = null;
       consoleTrigger = null;
       consoleOverlayId = '';
       catalog = [];
@@ -1225,6 +1498,10 @@
       actionRequestInFlight = false;
       pendingAction = null;
       lastRun = null;
+      editingIndex = 0;
+      pendingEdit = null;
+      stripNotice = null;
+      trackRequestInFlight = false;
       toasts.forEach(toast => {
         if (toast.timer && typeof clearTimeout === 'function') clearTimeout(toast.timer);
       });

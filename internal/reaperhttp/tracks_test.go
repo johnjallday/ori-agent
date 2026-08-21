@@ -1,0 +1,288 @@
+package reaperhttp
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/johnjallday/ori-agent/internal/reaper"
+	"github.com/johnjallday/ori-agent/internal/userprofile"
+	"github.com/johnjallday/ori-agent/internal/workspace"
+)
+
+// trackRunnerStub stands in for the real runner. It records the edits it was
+// asked to apply and replays a scripted sequence of receipts, so a test can
+// describe "the guard refused" without a live REAPER.
+type trackRunnerStub struct {
+	available bool
+	receipts  []reaper.EditReceipt
+	errs      []error
+	edits     []reaper.TrackEdit
+	calls     int
+}
+
+func (r *trackRunnerStub) Available(context.Context) bool { return r.available }
+
+func (r *trackRunnerStub) RunTrackEdit(_ context.Context, edit reaper.TrackEdit) (reaper.EditReceipt, error) {
+	r.edits = append(r.edits, edit)
+	index := r.calls
+	r.calls++
+	var err error
+	if index < len(r.errs) {
+		err = r.errs[index]
+	}
+	if err != nil {
+		return reaper.EditReceipt{}, err
+	}
+	if index < len(r.receipts) {
+		return r.receipts[index], nil
+	}
+	return reaper.EditReceipt{Applied: true}, nil
+}
+
+func trackEditHandler(t *testing.T, runner TrackEditRunner) *http.ServeMux {
+	t.Helper()
+	root := t.TempDir()
+	store := &testStore{root: root, workspaces: map[string]*workspace.Workspace{}}
+	store.workspaces["mine"] = reaperHTTPWorkspace(t, root, "mine", userprofile.LocalUserID)
+	reader := &stateReader{state: reaper.State{
+		Connected: true, PlayState: "stopped",
+		Tracks: []reaper.Track{{Index: 1, Name: "Drums"}, {Index: 2, Name: "Bass"}},
+	}}
+	handler := NewHandler(store, testUser(userprofile.LocalUserID), reader, nil)
+	if runner != nil {
+		handler.SetTrackEditRunner(runner)
+	}
+	mux := http.NewServeMux()
+	handler.Register(mux)
+	return mux
+}
+
+func postTrackEdit(t *testing.T, mux *http.ServeMux, path, body string) (*httptest.ResponseRecorder, TrackEditResponse) {
+	t.Helper()
+	recorder := httptest.NewRecorder()
+	var request *http.Request
+	if body == "" {
+		request = httptest.NewRequest(http.MethodPost, path, nil)
+	} else {
+		request = httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+		request.Header.Set("Content-Type", "application/json")
+	}
+	mux.ServeHTTP(recorder, request)
+	var decoded TrackEditResponse
+	if recorder.Body.Len() > 0 {
+		_ = json.Unmarshal(recorder.Body.Bytes(), &decoded)
+	}
+	return recorder, decoded
+}
+
+func TestRenameTrackAppliesTheGuardedEditAndStoresAnUndoRecord(t *testing.T) {
+	runner := &trackRunnerStub{
+		available: true,
+		receipts:  []reaper.EditReceipt{{Applied: true, Prior: "Drums"}},
+	}
+	mux := trackEditHandler(t, runner)
+
+	recorder, body := postTrackEdit(t, mux, "/api/workspaces/mine/reaper/tracks/1/rename",
+		`{"name":"Kick","expected_name":"Drums"}`)
+	if recorder.Code != http.StatusOK || body.Outcome != "ok" {
+		t.Fatalf("rename = %d %+v", recorder.Code, body)
+	}
+	if len(runner.edits) != 1 {
+		t.Fatalf("runner edits = %+v", runner.edits)
+	}
+	edit := runner.edits[0]
+	if edit.Index != 1 || edit.ExpectedName != "Drums" || edit.NewName != "Kick" {
+		t.Fatalf("guarded edit = %+v", edit)
+	}
+	if body.Undo == nil || !strings.Contains(body.Undo.Summary, "Kick") {
+		t.Fatalf("undo descriptor = %+v", body.Undo)
+	}
+	if !body.TrackEditingAvailable {
+		t.Fatalf("successful edit did not report track editing available: %+v", body)
+	}
+}
+
+func TestRenameTrackRejectsAnEmptyNameWithoutTouchingREAPER(t *testing.T) {
+	runner := &trackRunnerStub{available: true}
+	mux := trackEditHandler(t, runner)
+
+	for _, body := range []string{`{"name":"","expected_name":"Drums"}`, `{"name":"   ","expected_name":"Drums"}`} {
+		recorder, decoded := postTrackEdit(t, mux, "/api/workspaces/mine/reaper/tracks/1/rename", body)
+		if recorder.Code != http.StatusBadRequest || decoded.Code != "invalid_track_name" {
+			t.Fatalf("empty name = %d %+v", recorder.Code, decoded)
+		}
+	}
+	if runner.calls != 0 {
+		t.Fatalf("an invalid name reached REAPER: %d calls", runner.calls)
+	}
+}
+
+func TestRenameTrackRejectsAnInvalidIndexWithoutTouchingREAPER(t *testing.T) {
+	runner := &trackRunnerStub{available: true}
+	mux := trackEditHandler(t, runner)
+
+	for _, path := range []string{
+		"/api/workspaces/mine/reaper/tracks/0/rename",
+		"/api/workspaces/mine/reaper/tracks/-1/rename",
+		"/api/workspaces/mine/reaper/tracks/master/rename",
+	} {
+		recorder, _ := postTrackEdit(t, mux, path, `{"name":"Kick","expected_name":"Drums"}`)
+		if recorder.Code != http.StatusBadRequest {
+			t.Fatalf("index path %q = %d", path, recorder.Code)
+		}
+	}
+	if runner.calls != 0 {
+		t.Fatalf("an invalid index reached REAPER: %d calls", runner.calls)
+	}
+}
+
+func TestRenameTrackReportsAGuardFailureAndWritesNothing(t *testing.T) {
+	runner := &trackRunnerStub{
+		available: true,
+		receipts:  []reaper.EditReceipt{{Applied: false}},
+	}
+	mux := trackEditHandler(t, runner)
+
+	recorder, body := postTrackEdit(t, mux, "/api/workspaces/mine/reaper/tracks/1/rename",
+		`{"name":"Kick","expected_name":"Drums"}`)
+	if recorder.Code != http.StatusConflict || body.Code != "track_list_changed" {
+		t.Fatalf("guard failure = %d %+v", recorder.Code, body)
+	}
+	if body.Outcome == "ok" {
+		t.Fatalf("a refused guard was reported as success: %+v", body)
+	}
+	// A refused guard leaves nothing to undo.
+	undo, undoBody := postTrackEdit(t, mux, "/api/workspaces/mine/reaper/tracks/undo", "")
+	if undo.Code != http.StatusConflict || undoBody.Code != "nothing_to_undo" {
+		t.Fatalf("undo after guard failure = %d %+v", undo.Code, undoBody)
+	}
+}
+
+func TestUndoAppliesTheSpecificInverseGuardedOnWhatOriWrote(t *testing.T) {
+	runner := &trackRunnerStub{
+		available: true,
+		receipts: []reaper.EditReceipt{
+			{Applied: true, Prior: "Drums"}, // the rename
+			{Applied: true, Prior: "Kick"},  // the inverse
+		},
+	}
+	mux := trackEditHandler(t, runner)
+
+	if recorder, body := postTrackEdit(t, mux, "/api/workspaces/mine/reaper/tracks/1/rename",
+		`{"name":"Kick","expected_name":"Drums"}`); recorder.Code != http.StatusOK {
+		t.Fatalf("rename = %d %+v", recorder.Code, body)
+	}
+	recorder, body := postTrackEdit(t, mux, "/api/workspaces/mine/reaper/tracks/undo", "")
+	if recorder.Code != http.StatusOK || body.Outcome != "ok" {
+		t.Fatalf("undo = %d %+v", recorder.Code, body)
+	}
+	if len(runner.edits) != 2 {
+		t.Fatalf("runner edits = %+v", runner.edits)
+	}
+	inverse := runner.edits[1]
+	// The inverse restores the prior name and guards on the value Ori wrote,
+	// so a user edit in between is refused rather than clobbered.
+	if inverse.Index != 1 || inverse.ExpectedName != "Kick" || inverse.NewName != "Drums" {
+		t.Fatalf("inverse = %+v", inverse)
+	}
+	// The record is consumed, so a second Undo click cannot re-apply it.
+	second, secondBody := postTrackEdit(t, mux, "/api/workspaces/mine/reaper/tracks/undo", "")
+	if second.Code != http.StatusConflict || secondBody.Code != "nothing_to_undo" {
+		t.Fatalf("second undo = %d %+v", second.Code, secondBody)
+	}
+}
+
+func TestUndoReportsWhenTheTrackChangedInREAPER(t *testing.T) {
+	runner := &trackRunnerStub{
+		available: true,
+		receipts: []reaper.EditReceipt{
+			{Applied: true, Prior: "Drums"}, // the rename
+			{Applied: false},                // the user renamed it in REAPER first
+		},
+	}
+	mux := trackEditHandler(t, runner)
+
+	postTrackEdit(t, mux, "/api/workspaces/mine/reaper/tracks/1/rename", `{"name":"Kick","expected_name":"Drums"}`)
+	recorder, body := postTrackEdit(t, mux, "/api/workspaces/mine/reaper/tracks/undo", "")
+	if recorder.Code != http.StatusConflict || body.Code != "track_changed_in_reaper" {
+		t.Fatalf("undo guard failure = %d %+v", recorder.Code, body)
+	}
+	if !strings.Contains(body.ErrorReason, "nothing was undone") {
+		t.Fatalf("undo guard message = %q", body.ErrorReason)
+	}
+}
+
+func TestTrackEditReportsDisconnectedREAPERAsNothingRun(t *testing.T) {
+	runner := &trackRunnerStub{
+		available: true,
+		errs:      []error{reaper.ErrActionDisconnected},
+	}
+	mux := trackEditHandler(t, runner)
+
+	recorder, body := postTrackEdit(t, mux, "/api/workspaces/mine/reaper/tracks/1/rename",
+		`{"name":"Kick","expected_name":"Drums"}`)
+	if recorder.Code != http.StatusConflict || body.Code != "reaper_disconnected" {
+		t.Fatalf("disconnected edit = %d %+v", recorder.Code, body)
+	}
+	if !strings.Contains(body.ErrorReason, "Nothing was run") || body.Outcome == "ok" {
+		t.Fatalf("disconnected edit message = %+v", body)
+	}
+}
+
+func TestTrackEditIsUnavailableWithoutTheRunner(t *testing.T) {
+	mux := trackEditHandler(t, nil)
+
+	recorder, body := postTrackEdit(t, mux, "/api/workspaces/mine/reaper/tracks/1/rename",
+		`{"name":"Kick","expected_name":"Drums"}`)
+	if recorder.Code != http.StatusServiceUnavailable || body.Code != "reaper_runner_unavailable" {
+		t.Fatalf("missing runner = %d %+v", recorder.Code, body)
+	}
+}
+
+func TestStateReportsWhetherTrackEditingIsAvailable(t *testing.T) {
+	for _, available := range []bool{true, false} {
+		runner := &trackRunnerStub{available: available}
+		mux := trackEditHandler(t, runner)
+		recorder := httptest.NewRecorder()
+		mux.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/workspaces/mine/reaper/state", nil))
+		var state reaper.State
+		if err := json.Unmarshal(recorder.Body.Bytes(), &state); err != nil {
+			t.Fatal(err)
+		}
+		if state.TrackEditingAvailable != available {
+			t.Fatalf("track_editing_available = %v, want %v", state.TrackEditingAvailable, available)
+		}
+	}
+}
+
+// The boundary rule from the control-surface work: no Web Remote port,
+// endpoint, or filesystem path may reach the browser through any track path.
+func TestTrackEditResponsesNeverLeakTransportOrPathDetail(t *testing.T) {
+	runner := &trackRunnerStub{
+		available: true,
+		receipts:  []reaper.EditReceipt{{Applied: false}},
+		errs:      []error{nil, reaper.ErrRunnerUnavailable},
+	}
+	mux := trackEditHandler(t, runner)
+
+	bodies := []string{}
+	for _, call := range []struct{ path, body string }{
+		{"/api/workspaces/mine/reaper/tracks/1/rename", `{"name":"Kick","expected_name":"Drums"}`},
+		{"/api/workspaces/mine/reaper/tracks/1/rename", `{"name":"Snare","expected_name":"Kick"}`},
+		{"/api/workspaces/mine/reaper/tracks/undo", ""},
+	} {
+		recorder, _ := postTrackEdit(t, mux, call.path, call.body)
+		bodies = append(bodies, recorder.Body.String())
+	}
+	for _, body := range bodies {
+		for _, forbidden := range []string{"127.0.0.1", "localhost", "/_/", ".ori-reaper", "inbox.lua", "last_receipt", "last_status", ":2307", ":2308"} {
+			if strings.Contains(body, forbidden) {
+				t.Fatalf("response leaked %q: %s", forbidden, body)
+			}
+		}
+	}
+}
