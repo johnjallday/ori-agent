@@ -230,14 +230,19 @@ capture() {
   # workspace creation cost off of the "first" run only: both passes then find
   # the same already-seeded workspace at the same (fast) speed, so the
   # determinism check (assertRepeatable) isn't skewed by one pass paying that
-  # cost and the other not.
-  local seed_url="http://127.0.0.1:${requested_port}/api/workspaces"
-  if ! curl --fail --silent --show-error --max-time 15 \
-    -H 'Content-Type: application/json' \
-    -d '{"name":"Ws Product Launch","blank":true}' \
-    "${seed_url}" >"${RUN_DIR}/logs/seed-workspace.json" 2>"${RUN_DIR}/logs/seed-workspace.log"; then
-    cat "${RUN_DIR}/logs/seed-workspace.log" >&2 || true
-    fail "could not seed the Workspace Command scene's workspace; see ${RUN_DIR}/logs/seed-workspace.log"
+  # cost and the other not. Skipped under the lifecycle-test server override
+  # (scripts/readme/refresh-runtime.test.mjs): that fixture server has no
+  # /api/workspaces route -- it stands in for orchestration tests only, never
+  # runs the real Playwright capture, and doesn't need this workspace to exist.
+  if [[ -z "${README_CAPTURE_TEST_SERVER_BINARY:-}" ]]; then
+    local seed_url="http://127.0.0.1:${requested_port}/api/workspaces"
+    if ! curl --fail --silent --show-error --max-time 15 \
+      -H 'Content-Type: application/json' \
+      -d '{"name":"Ws Product Launch","blank":true}' \
+      "${seed_url}" >"${RUN_DIR}/logs/seed-workspace.json" 2>"${RUN_DIR}/logs/seed-workspace.log"; then
+      cat "${RUN_DIR}/logs/seed-workspace.log" >&2 || true
+      fail "could not seed the Workspace Command scene's workspace; see ${RUN_DIR}/logs/seed-workspace.log"
+    fi
   fi
 
   if ! env -i \
