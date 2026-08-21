@@ -28,10 +28,21 @@ type actionRunRequest struct {
 // stable, non-sensitive phrase; transport endpoints and ports never enter it.
 type ActionRunResponse struct {
 	reaper.State
-	ActionID    string `json:"action_id"`
-	Outcome     string `json:"outcome"`
-	Code        string `json:"code,omitempty"`
-	ErrorReason string `json:"error_reason,omitempty"`
+	ActionID    string      `json:"action_id"`
+	Outcome     string      `json:"outcome"`
+	Code        string      `json:"code,omitempty"`
+	ErrorReason string      `json:"error_reason,omitempty"`
+	Undo        *UndoAction `json:"undo,omitempty"`
+}
+
+// UndoAction is a toast-ready description of a successful Tier 1 run: what
+// changed, in the user's words, and the single global-undo command that
+// reverses it. Catalog-level actions always reverse through REAPER's global
+// undo because they already execute inside one undo block; specific inverses
+// (rename, color, toggle, reorder) are added in later groups.
+type UndoAction struct {
+	Summary   string `json:"summary"`
+	CommandID string `json:"command_id"`
 }
 
 func (h *Handler) GetActions(w http.ResponseWriter, r *http.Request) {
@@ -102,11 +113,11 @@ func (h *Handler) runAction(ctx context.Context, workspaceID, requestedID string
 		}
 		action = reaper.Action{
 			ID: actionID, Label: "Raw command " + actionID, Source: "raw",
-			Mutates: true, NeedsConfirmation: true,
+			Mutates: true, NeedsConfirmation: true, Tier: reaper.TierConfirm,
 		}
 	}
 	response.ActionID = action.ID
-	if action.NeedsConfirmation && !confirmed {
+	if action.ResolveTier() == reaper.TierConfirm && !confirmed {
 		response.Outcome = "confirmation_required"
 		response.Code = "reaper_confirmation_required"
 		response.ErrorReason = "Confirm this project change before running it."
@@ -126,6 +137,7 @@ func (h *Handler) runAction(ctx context.Context, workspaceID, requestedID string
 	response.State = state
 	response.Outcome = "ok"
 	if runErr == nil {
+		response.Undo = undoDescriptorFor(action)
 		return response, http.StatusOK
 	}
 	response.Outcome = "error"
@@ -145,6 +157,32 @@ func (h *Handler) runAction(ctx context.Context, workspaceID, requestedID string
 	}
 	logger.Warn("Live REAPER action failed", logger.Fields{"category": "reaper_action_failed"})
 	return response, status
+}
+
+// undoCommandID is REAPER's own global undo command. It reverses a Tier 1
+// catalog action by undoing REAPER's most recent project change, which is
+// correct because every catalog action already runs as one undo block.
+const undoCommandID = "40029"
+
+// undoDescriptorFor names what a successful Tier 1 run did, in the user's own
+// words, so the console can show a toast with an Undo button. Undo and Redo
+// are already the undo mechanism, so they must never offer one themselves;
+// Tier 0 and Tier 2 actions never reach here with an undo descriptor either.
+func undoDescriptorFor(action reaper.Action) *UndoAction {
+	if action.ResolveTier() != reaper.TierUndoable {
+		return nil
+	}
+	if action.ID == "40029" || action.ID == "40030" {
+		return nil
+	}
+	summary := strings.TrimSpace(action.UndoSummary)
+	if summary == "" {
+		summary = strings.TrimSpace(action.Label)
+	}
+	if summary == "" {
+		return nil
+	}
+	return &UndoAction{Summary: summary, CommandID: undoCommandID}
 }
 
 func (h *Handler) runCustomScript(ctx context.Context, project reaper.ProjectSource, action reaper.Action) (ActionRunResponse, int) {

@@ -9,6 +9,8 @@
   const POLL_INTERVAL_MS = 5000;
   const CONSOLE_HOST_ID = 'reaperConsole';
   const REQUIREMENT_KEY = 'reaper_live_control';
+  const TOAST_DURATION_MS = 8000;
+  const GLOBAL_UNDO_COMMAND_ID = '40029';
 
   let workspaceId = '';
   let mapVisible = false;
@@ -31,6 +33,8 @@
   let actionRequestInFlight = false;
   let pendingAction = null;
   let lastRun = null;
+  let toasts = [];
+  let toastSeq = 0;
 
   function workspaceIdFromPage() {
     if (workspaceId) return workspaceId;
@@ -351,6 +355,9 @@
       lastRun = { outcome: 'ok', label: action.label };
       lastState = payload;
       publishIfChanged(payload);
+      if (payload.undo && payload.undo.summary) {
+        addToast(payload.undo.summary, payload.undo);
+      }
       return true;
     } catch (_error) {
       lastRun = {
@@ -375,6 +382,70 @@
     }
     void executeAction(action, false);
     return true;
+  }
+
+  // Toasts are the undo-forward teaching surface: a Tier 1 catalog action
+  // reports what it did in the response's `undo` field, and the console
+  // turns that into a stackable, dismissible notice. Undo and Redo never
+  // carry an `undo` field, so they never produce one of their own.
+  function scheduleToastDismiss(toast) {
+    if (typeof setTimeout !== 'function') return;
+    if (toast.remainingMs == null) toast.remainingMs = TOAST_DURATION_MS;
+    toast.startedAt = Date.now();
+    toast.timer = setTimeout(() => dismissToast(toast.id), toast.remainingMs);
+  }
+
+  function pauseToast(toast) {
+    if (!toast || !toast.timer) return;
+    if (typeof clearTimeout === 'function') clearTimeout(toast.timer);
+    toast.timer = null;
+    const elapsed = Date.now() - toast.startedAt;
+    toast.remainingMs = Math.max(0, toast.remainingMs - elapsed);
+  }
+
+  function resumeToast(toast) {
+    if (!toast || toast.timer) return;
+    scheduleToastDismiss(toast);
+  }
+
+  function dismissToast(id) {
+    const toast = toasts.find(candidate => candidate.id === id);
+    if (toast && toast.timer && typeof clearTimeout === 'function') clearTimeout(toast.timer);
+    toasts = toasts.filter(candidate => candidate.id !== id);
+    if (consoleOpen) renderConsole();
+  }
+
+  function addToast(message, undo) {
+    const text = String(message || '').trim();
+    if (!text) return null;
+    const toast = { id: 'toast-' + ++toastSeq, message: text, undo: undo || null, timer: null };
+    toasts = toasts.concat([toast]);
+    scheduleToastDismiss(toast);
+    if (consoleOpen) renderConsole();
+    return toast;
+  }
+
+  async function undoFromToast(toastId) {
+    const toast = toasts.find(candidate => candidate.id === toastId);
+    dismissToast(toastId);
+    const commandId = (toast && toast.undo && toast.undo.command_id) || GLOBAL_UNDO_COMMAND_ID;
+    const path = actionsApiPath(commandId);
+    if (!path || typeof fetch !== 'function') return;
+    try {
+      const response = await fetch(path, {
+        method: 'POST',
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirmed: true })
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (response.ok && typeof payload.connected === 'boolean') {
+        lastState = payload;
+        publishIfChanged(payload);
+      }
+    } catch (_error) {
+      // Fall through to the forced refresh below, which re-reads live truth.
+    }
+    void refresh();
   }
 
   function stopPolling() {
@@ -533,6 +604,30 @@
         needs_confirmation: Boolean(needsConfirmation)
       }
     );
+  }
+
+  function renderToasts(panel) {
+    if (!toasts.length) return;
+    const stack = el('div', 'reaper-console-toast-stack');
+    stack.setAttribute('aria-live', 'polite');
+    toasts.forEach(toast => {
+      const item = el('div', 'reaper-console-toast');
+      item.addEventListener('mouseenter', () => pauseToast(toast));
+      item.addEventListener('mouseleave', () => resumeToast(toast));
+      item.appendChild(el('span', 'reaper-console-toast-message', toast.message));
+      const actions = el('div', 'reaper-console-toast-actions');
+      if (toast.undo) {
+        actions.appendChild(
+          button('Undo', 'reaper-console-toast-undo', () => void undoFromToast(toast.id))
+        );
+      }
+      const dismiss = button('×', 'reaper-console-toast-dismiss', () => dismissToast(toast.id));
+      dismiss.setAttribute('aria-label', 'Dismiss notification');
+      actions.appendChild(dismiss);
+      item.appendChild(actions);
+      stack.appendChild(item);
+    });
+    panel.appendChild(stack);
   }
 
   function renderTransport(host, state) {
@@ -963,6 +1058,7 @@
     panel.setAttribute('aria-modal', 'true');
     panel.setAttribute('aria-labelledby', 'reaperConsoleTitle');
     renderHeader(panel, lastState);
+    renderToasts(panel);
     const body = el('div', 'reaper-console-body');
     if (!lastState) {
       const checking = el('section', 'reaper-console-checking');
@@ -1104,6 +1200,9 @@
     _lastRun: () => lastRun,
     _polling: () => pollTimer !== null,
     _openSetupFix: openSetupFix,
+    _toasts: () => toasts,
+    _addToast: addToast,
+    _undoFromToast: undoFromToast,
     _resetForTest: () => {
       stopPolling();
       workspaceId = '';
@@ -1126,6 +1225,10 @@
       actionRequestInFlight = false;
       pendingAction = null;
       lastRun = null;
+      toasts.forEach(toast => {
+        if (toast.timer && typeof clearTimeout === 'function') clearTimeout(toast.timer);
+      });
+      toasts = [];
     }
   };
 

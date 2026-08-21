@@ -6453,6 +6453,84 @@ button.ws-cmd-rpg-class-card:focus-visible {
   overscroll-behavior: contain;
 }
 
+/* Pinned to the top-right of the panel, under the header, so a stack of
+   toasts never drifts over the Tracks section further down the scrollable
+   body. */
+.reaper-console-toast-stack {
+  position: absolute;
+  top: 4.6rem;
+  right: 1.1rem;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: min(21rem, calc(100% - 2.2rem));
+  pointer-events: none;
+}
+
+.reaper-console-toast {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.62rem 0.7rem;
+  color: rgba(232, 240, 235, 0.92);
+  background: linear-gradient(145deg, #16201f, #0b1212 65%);
+  border: 1px solid rgba(94, 208, 167, 0.4);
+  border-left: 3px solid #5ed0a7;
+  border-radius: 2px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5);
+  font-size: 0.72rem;
+  line-height: 1.4;
+  pointer-events: auto;
+}
+
+.reaper-console-toast-message {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.reaper-console-toast-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.reaper-console-toast-undo {
+  padding: 0.28rem 0.6rem;
+  color: #0b1212;
+  background: #5ed0a7;
+  border: none;
+  border-radius: 2px;
+  font-family: var(--ws-font-mono, monospace);
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+}
+
+.reaper-console-toast-undo:hover {
+  background: #7bdcb9;
+}
+
+.reaper-console-toast-dismiss {
+  display: grid;
+  place-items: center;
+  width: 1.4rem;
+  height: 1.4rem;
+  padding: 0;
+  color: rgba(205, 216, 211, 0.62);
+  background: transparent;
+  border: none;
+  font-size: 0.9rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.reaper-console-toast-dismiss:hover {
+  color: #fff;
+}
+
 .reaper-console-project {
   display: grid;
   grid-template-columns: minmax(12rem, 1.25fr) minmax(22rem, 2fr);
@@ -7089,6 +7167,13 @@ button.ws-cmd-rpg-class-card:focus-visible {
   }
   .reaper-console-track-state {
     grid-column: 2;
+  }
+  .reaper-console-toast-stack {
+    top: auto;
+    right: 0.7rem;
+    bottom: 0.7rem;
+    left: 0.7rem;
+    width: auto;
   }
 }
 

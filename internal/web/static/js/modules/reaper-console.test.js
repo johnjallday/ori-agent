@@ -254,18 +254,18 @@ test('transport actions run one click, surface outcomes, and update live state',
   consolePanel.close();
 });
 
-test('mutating actions render an explicit confirmation before execution', async () => {
+test('Tier 2 actions still render an explicit confirmation before execution', async () => {
   consolePanel._resetForTest();
   consolePanel.init('ws-reaper');
-  const insert = {
-    id: '40001',
-    label: 'Insert new track',
-    description: 'Add a track.',
+  const record = {
+    id: '1013',
+    label: 'Record',
+    description: 'Begin recording.',
     source: 'builtin',
     mutates: true,
     needs_confirmation: true
   };
-  consolePanel._setActions([insert]);
+  consolePanel._setActions([record]);
   consolePanel._setState({
     applies: true,
     connected: true,
@@ -286,12 +286,12 @@ test('mutating actions render an explicit confirmation before execution', async 
       status: 200,
       json: async () => ({
         outcome: 'ok',
-        action_id: '40001',
+        action_id: '1013',
         applies: true,
         connected: true,
         project: 'Song',
         tempo: 120,
-        play_state: 'stopped',
+        play_state: 'recording',
         position: '1.1.00',
         track_count: 1,
         tracks: []
@@ -299,13 +299,95 @@ test('mutating actions render an explicit confirmation before execution', async 
     };
   };
 
-  assert.equal(consolePanel._requestAction(insert), true);
+  assert.equal(consolePanel._requestAction(record), true);
   assert.equal(calls, 0);
   const host = documentStub.getElementById('reaperConsole');
   assert.match(host.textContent, /Confirm project change/);
-  assert.match(host.textContent, /Run Insert new track/);
-  assert.equal(await consolePanel._executeAction(insert, true), true);
+  assert.match(host.textContent, /Run Record/);
+  assert.equal(await consolePanel._executeAction(record, true), true);
   assert.equal(calls, 1);
+  assert.equal(consolePanel._toasts().length, 0);
+  consolePanel.close();
+});
+
+test('a Tier 1 action fires a toast with Undo, and toasts stack', async () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  const metronome = { id: '40364', label: 'Toggle metronome', needs_confirmation: false };
+  const insert = { id: '40001', label: 'Insert new track', needs_confirmation: false };
+  consolePanel._setActions([metronome, insert]);
+  consolePanel._setState({ applies: true, connected: true, tracks: [] });
+  consolePanel.open();
+  globalThis.fetch = async path => ({
+    ok: true,
+    status: 200,
+    json: async () => ({
+      outcome: 'ok',
+      action_id: /40364/.test(path) ? '40364' : '40001',
+      applies: true,
+      connected: true,
+      tracks: [],
+      undo: {
+        summary: /40364/.test(path) ? 'Toggled the metronome' : 'Inserted a new track',
+        command_id: '40029'
+      }
+    })
+  });
+
+  await consolePanel._executeAction(metronome, false);
+  await consolePanel._executeAction(insert, false);
+  assert.equal(consolePanel._toasts().length, 2);
+  const host = documentStub.getElementById('reaperConsole');
+  assert.match(host.textContent, /Toggled the metronome/);
+  assert.match(host.textContent, /Inserted a new track/);
+  consolePanel.close();
+});
+
+test('toast Undo posts REAPER global undo and dismisses the toast', async () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setState({ applies: true, connected: true, tracks: [] });
+  const toast = consolePanel._addToast('Renamed ‘Track 3’ to ‘Kick’', {
+    summary: 'Renamed',
+    command_id: '40029'
+  });
+  const requests = [];
+  globalThis.fetch = async (path, options) => {
+    requests.push({ path, options });
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ outcome: 'ok', applies: true, connected: true, tracks: [] })
+    };
+  };
+  await consolePanel._undoFromToast(toast.id);
+  // The undo call, plus the forced immediate state re-read (requirement 4.1.7).
+  assert.ok(requests.length >= 1);
+  assert.match(requests[0].path, /actions\/40029\/run$/);
+  assert.deepEqual(JSON.parse(requests[0].options.body), { confirmed: true });
+  assert.equal(consolePanel._toasts().length, 0);
+});
+
+test('Undo and Redo never produce a toast of their own', async () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  const undoAction = { id: '40029', label: 'Undo', needs_confirmation: false };
+  consolePanel._setActions([undoAction]);
+  consolePanel._setState({ applies: true, connected: true, tracks: [] });
+  consolePanel.open();
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({
+      outcome: 'ok',
+      action_id: '40029',
+      applies: true,
+      connected: true,
+      tracks: []
+    })
+  });
+  await consolePanel._executeAction(undoAction, false);
+  assert.equal(consolePanel._toasts().length, 0);
   consolePanel.close();
 });
 
