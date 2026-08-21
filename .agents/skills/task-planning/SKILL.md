@@ -84,10 +84,15 @@ by invoking this skill a second time.
 
 1. Read the requirements, PRD, approved Ori Plan, and relevant repository
    evidence.
-2. Write only the high-level parent groups, usually about five. Prefer thin
+2. Identify uncertainty hotspots, external or live-system questions, repeated
+   implementation patterns, shared-file contention, and genuinely independent
+   work before choosing an execution shape.
+3. Write only the high-level parent groups, usually about five. Prefer thin
    end-to-end outcomes over architecture layers.
-3. Add a recommended model chip to every implementation parent group.
-4. Present the parent groups and wait for `Go` before expanding sub-tasks.
+4. Add a recommended model chip to every implementation parent group. The parent
+   chip is the default for most of that group; reserve sub-task overrides for
+   small deep-reasoning or mechanical pockets.
+5. Present the parent groups and wait for `Go` before expanding sub-tasks.
 
 This is the first of exactly two human pauses. In planning-only mode, do not ask
 for an implementation-agent choice: the later handoff owns that decision. In a
@@ -99,20 +104,30 @@ otherwise use the repository's configured primary agent.
 After `Go`:
 
 1. Break every parent into concrete, ordered sub-tasks.
-2. Prefer vertical slices. A group should produce a narrow real path through the
+2. Add an `Execution Topology` section that names the integration owner, writing
+   rule, bounded delegation lanes, model hotspots, parallel-safe boundaries, and
+   validation cadence. Use `none` rather than inventing delegation for work that
+   is cheaper in the primary context.
+3. Prefer vertical slices. A group should produce a narrow real path through the
    necessary layers, not “all backend” followed by “all frontend.”
-3. Order each group for the fastest honest feedback.
-4. End each group with `Commit: "<conventional message>"`.
-5. For every user-visible group, place a `Demo:` item immediately before its
+4. Order each group for the fastest honest feedback. Consolidate related
+   external or live-system unknowns into one early findings-first spike when its
+   result will govern multiple later groups.
+5. Keep the parent model chip as the group's default. Add a model override to an
+   individual sub-task when expensive reasoning or mechanical work is localized;
+   do not assign a deep model to routine implementation after the contract is
+   settled.
+6. End each group with `Commit: "<conventional message>"`.
+7. For every user-visible group, place a `Demo:` item immediately before its
    commit.
-6. End the final delivery group with:
+8. End the final delivery group with:
    - `Permission sweep`
    - `Write manual test guide: tasks/test-guide-<feature>.md`
    - `Open PR → squash-merge to dev`
    - `Run wt done <feature> after merge`
-7. List relevant implementation and test files.
-8. Replace the planning starter with the complete checklist. The final file must
-   not contain `ori-devflow: planning-starter`.
+9. List relevant implementation and test files.
+10. Replace the planning starter with the complete checklist. The final file must
+    not contain `ori-devflow: planning-starter`.
 
 Use this shape:
 
@@ -133,6 +148,15 @@ Implementation agent: `[configured primary, explicit override, or worktree-only]
 Check off each sub-task immediately after it is complete. Execution is continuous
 between the planning gate and the final PR gate.
 
+## Execution Topology
+
+- Integration owner: `[primary implementation agent]`
+- Writing rule: one active writer at a time; the integration owner owns shared files
+- Delegation: `[bounded findings-only research/review, sequential test/docs edits, or none]`
+- Deep-model hotspots: `[specific unresolved decisions, or none]`
+- Parallel-safe work: `[file-disjoint, independently verifiable work, or none]`
+- Validation cadence: `[scoped checks per slice; affected suites per group; full repository gate once at delivery]`
+
 ## Tasks
 
 - [ ] 1.0 First vertical outcome `Model: Sonnet 5`
@@ -150,12 +174,42 @@ between the planning gate and the final PR gate.
 ## Slicing and build order
 
 - Default to vertical slices that are independently demoable.
+- Front-load a single bounded spike when several groups depend on the same
+  uncertain external API, hardware behavior, or architectural contract. Record
+  observed findings before product implementation continues.
 - Within one branch, frontend-first prototyping is allowed when UX is the
   uncertainty. Mark stub-backed checks as `Prototype demo`; wire the real path
   before the delivery demo.
 - Never merge a mock-backed frontend to `dev`.
 - Backend-only groups may replace a browser demo with a cheap endpoint or CLI
   exercise.
+
+## Execution topology and delegation
+
+Adding agents is not itself a cost optimization: every separate context pays a
+repository-reading and coordination tax. Optimize first by routing the smallest
+uncertain unit to the right model.
+
+1. Keep one primary integration owner for a feature branch.
+2. Prefer a model switch in the primary session when the work is short and the
+   existing context is valuable.
+3. Use a short-lived subagent for a bounded research spike, test matrix, focused
+   review, or other output that can return as findings without editing shared
+   product files.
+4. Use a persistent separate role only for a genuinely independent long-running
+   workstream or repeated review responsibility.
+5. Route deep models to specific decision-bearing tasks. Once the contract or
+   pattern is settled, return implementation to the balanced or fast tier.
+6. Allow only one active writer in a shared worktree. Delegated edits must be
+   sequential and explicitly file-bounded; concurrent coding requires separate
+   branches, file-disjoint ownership, independent verification, and a planned
+   integration point.
+7. Keep reviewers and testers diff-focused. Give them the goal, changed files,
+   constraints, acceptance criteria, and expected output instead of asking them
+   to rediscover the whole feature.
+8. The integration owner synthesizes delegated findings and remains responsible
+   for checklist updates, demos, commits, and the delivery gate. Delegation adds
+   no human pause.
 
 ## Demo checkpoints
 
@@ -172,6 +226,18 @@ For every user-visible group:
 
 Demos are self-checks, not extra approval pauses. Include screenshots in the
 final report.
+
+## Validation cadence
+
+- After a sub-task or narrow slice, run the smallest affected package, module, or
+  focused test that can disprove the change quickly.
+- At a parent-group boundary, run the affected package and frontend suites before
+  committing.
+- Run the repository's complete required test, ratcheted lint, scoped security,
+  and relevant frontend gates in the final delivery group.
+- Do not replace the final gate with scoped checks, and do not repeatedly run the
+  full repository suite after every mechanical sub-task unless coupling makes it
+  necessary.
 
 ## Manual test guide
 
@@ -225,6 +291,10 @@ Choose by uncertainty, not line count:
   performance-sensitive, or security-sensitive work
 
 When model names change, map these to fast, balanced, and deep-reasoning tiers.
+A separate agent on the same model is usually more expensive than a model switch
+because it must rebuild context. Use separate contexts for isolation or durable
+independent work, and subagents for narrow outputs. Budget the deep tier around
+unresolved decisions rather than whole parent groups whenever possible.
 
 ## Continuous execution
 
