@@ -1178,6 +1178,144 @@ test('a state change mid-drag is recorded but does not rebuild the panel', async
   consolePanel.close();
 });
 
+function samplePlan() {
+  return {
+    id: 'plan_1',
+    edits: [
+      { index: 1, expected_name: 'Track 1', operation: 'rename', new_name: 'Kick' },
+      { index: 2, expected_name: 'Track 2', operation: 'rename', new_name: 'Snare' },
+      { index: 3, expected_name: 'Bass', operation: 'color', new_color: 0x1ff0000 },
+      { index: 4, expected_name: 'Guitar', operation: 'mute', new_bool: true },
+      { index: 5, expected_name: 'Synth', operation: 'move', new_index: 1 }
+    ]
+  };
+}
+
+test('the plan card groups edits by operation and shows old to new', () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  consolePanel._setState(threeTrackState());
+  consolePanel._setPendingPlan(samplePlan());
+  consolePanel.open();
+
+  const host = documentStub.getElementById('reaperConsole');
+  assert.match(host.textContent, /Proposed changes/);
+  assert.match(host.textContent, /Rename 2 tracks/);
+  assert.match(host.textContent, /Track 1.*Kick/);
+  assert.match(host.textContent, /Track 2.*Snare/);
+  assert.match(host.textContent, /Color 1 track/);
+  assert.match(host.textContent, /Mute 1 track/);
+  assert.match(host.textContent, /Move 1 track/);
+  assert.match(host.textContent, /Synth.*position 1/);
+  consolePanel.close();
+});
+
+test('Apply posts confirmed:true and fires one toast with a global-undo Undo', async () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  consolePanel._setState(threeTrackState());
+  consolePanel._setPendingPlan(samplePlan());
+  consolePanel.open();
+
+  const requests = [];
+  globalThis.fetch = async (path, options) => {
+    requests.push({ path, options });
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        ...threeTrackState(),
+        outcome: 'ok',
+        applied_count: 5,
+        undo: { summary: 'Applied 5 changes', command_id: '40029' }
+      })
+    };
+  };
+  await consolePanel._applyPlan();
+
+  const apply = requests.find(request => /track-plan\/apply$/.test(request.path));
+  assert.ok(apply);
+  assert.deepEqual(JSON.parse(apply.options.body), { confirmed: true });
+  assert.equal(consolePanel._pendingPlan(), null, 'the plan clears once applied');
+  assert.equal(consolePanel._toasts().length, 1);
+  assert.match(consolePanel._toasts()[0].message, /Applied 5 changes/);
+
+  // The plan's Undo fires REAPER's global undo, not a specific inverse.
+  const undoRequests = [];
+  globalThis.fetch = async (path, options) => {
+    undoRequests.push({ path, options });
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ outcome: 'ok', applies: true, connected: true, tracks: [] })
+    };
+  };
+  await consolePanel._undoFromToast(consolePanel._toasts()[0].id);
+  assert.match(undoRequests[0].path, /actions\/40029\/run$/);
+  consolePanel.close();
+});
+
+test('Cancel discards the plan with no REAPER contact', async () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  consolePanel._setState(threeTrackState());
+  consolePanel._setPendingPlan(samplePlan());
+  consolePanel.open();
+
+  const requests = [];
+  globalThis.fetch = async (path, options) => {
+    requests.push({ path, options });
+    return { ok: true, status: 200, json: async () => ({}) };
+  };
+  await consolePanel._cancelPlan();
+
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].options.method, 'DELETE');
+  assert.equal(consolePanel._pendingPlan(), null);
+  assert.equal(consolePanel._toasts().length, 0, 'cancelling must not toast');
+  consolePanel.close();
+});
+
+test('a guard failure on apply keeps the plan pending and shows the notice', async () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  consolePanel._setState(threeTrackState());
+  consolePanel._setPendingPlan(samplePlan());
+  consolePanel.open();
+
+  globalThis.fetch = async (path, options) => {
+    // Only the apply call fails the guard; the forced state re-read after it
+    // still succeeds, matching what refresh() would see from a live server.
+    if (options && options.method === 'POST') {
+      return {
+        ok: false,
+        status: 409,
+        json: async () => ({
+          ...threeTrackState(),
+          outcome: 'error',
+          code: 'plan_guard_failed',
+          error_reason: 'The track list changed — nothing was applied.',
+          failed_indices: [2]
+        })
+      };
+    }
+    return { ok: true, status: 200, json: async () => threeTrackState() };
+  };
+  assert.equal(await consolePanel._applyPlan(), false);
+  assert.equal(consolePanel._toasts().length, 0);
+  const host = documentStub.getElementById('reaperConsole');
+  assert.match(host.textContent, /nothing was applied/);
+  consolePanel.close();
+});
+
 test('the poll drops to one second while the console is open', () => {
   consolePanel._resetForTest();
   consolePanel.init('ws-reaper');

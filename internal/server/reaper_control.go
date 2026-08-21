@@ -28,8 +28,10 @@ func (b *ServerBuilder) wireReaperControl() {
 	runner := reaper.NewRunner(roots, probes, client)
 	handler := reaperhttp.NewHandler(store, b.userProvider, client, catalog)
 	handler.SetScriptServices(library, runner)
-	// The same runner performs the guarded single-track edits; it owns the
-	// receipt path so no filesystem detail reaches the HTTP layer.
+	// The same runner performs the guarded single-track edits and applied bulk
+	// plans; it owns the receipt path so no filesystem detail reaches the
+	// HTTP layer.
 	handler.SetTrackEditRunner(runner)
+	handler.SetBulkEditRunner(runner)
 	b.reaperHandler = handler
 }

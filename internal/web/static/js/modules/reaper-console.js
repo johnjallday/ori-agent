@@ -55,6 +55,12 @@
   // read before the drag started; targetIndex tracks the current drop slot
   // for the indicator and is what gets sent if the pointer is released.
   let dragState = null;
+  // The one pending bulk plan an agent may have proposed for this workspace,
+  // rendered as a plan card. Loaded once per console open, like scripts and
+  // proposals.
+  let pendingPlan = null;
+  let pendingPlanLoaded = false;
+  let planRequestInFlight = false;
 
   // A fixed REAPER-compatible swatch set plus "no color" (PRD open question 1:
   // fixed set over a full picker, to keep the popover small). Values already
@@ -93,6 +99,14 @@
   function scriptsApiPath() {
     const id = workspaceIdFromPage();
     return id ? '/api/workspaces/' + encodeURIComponent(id) + '/reaper/scripts' : '';
+  }
+
+  function trackPlanApiPath(action) {
+    const id = workspaceIdFromPage();
+    if (!id) return '';
+    let path = '/api/workspaces/' + encodeURIComponent(id) + '/reaper/track-plan';
+    if (action) path += '/' + action;
+    return path;
   }
 
   function tracksApiPath(suffix) {
@@ -257,6 +271,81 @@
       proposalsLoaded = true;
       if (consoleOpen) renderConsole();
       return proposals;
+    }
+  }
+
+  async function loadPlan() {
+    const path = trackPlanApiPath();
+    if (!path || typeof fetch !== 'function') return pendingPlan;
+    try {
+      const response = await fetch(path, { headers: { Accept: 'application/json' } });
+      if (!response.ok) throw new Error('plan request failed');
+      const payload = await response.json();
+      pendingPlan = payload && payload.plan ? payload.plan : null;
+      pendingPlanLoaded = true;
+      if (consoleOpen) renderConsole();
+      return pendingPlan;
+    } catch (_error) {
+      pendingPlanLoaded = true;
+      if (consoleOpen) renderConsole();
+      return pendingPlan;
+    }
+  }
+
+  async function applyPlan() {
+    const path = trackPlanApiPath('apply');
+    if (!path || planRequestInFlight || typeof fetch !== 'function') return false;
+    planRequestInFlight = true;
+    stripNotice = null;
+    if (consoleOpen) renderConsole();
+    try {
+      const response = await fetch(path, {
+        method: 'POST',
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirmed: true })
+      });
+      const payload = await response.json().catch(() => ({}));
+      adoptTrackState(payload);
+      if (!response.ok || payload.outcome !== 'ok') {
+        stripNotice = { index: 0, text: trackEditError(payload, response) };
+        return false;
+      }
+      pendingPlan = null;
+      // One toast for the whole plan; its Undo fires REAPER's global undo
+      // (the server's undo descriptor already carries that command id),
+      // exactly like a catalog action's toast.
+      if (payload.undo && payload.undo.summary) {
+        addToast(payload.undo.summary, payload.undo);
+      }
+      return true;
+    } catch (_error) {
+      stripNotice = { index: 0, text: 'The plan request failed. Nothing was applied.' };
+      return false;
+    } finally {
+      planRequestInFlight = false;
+      if (consoleOpen) renderConsole();
+      void refresh();
+    }
+  }
+
+  async function cancelPlan() {
+    const path = trackPlanApiPath();
+    // Cancel makes no REAPER contact at all (PRD requirement 26) — this DELETE
+    // only touches the pending-plan store server-side.
+    if (!path || planRequestInFlight || typeof fetch !== 'function') return false;
+    planRequestInFlight = true;
+    if (consoleOpen) renderConsole();
+    try {
+      const response = await fetch(path, { method: 'DELETE' });
+      if (!response.ok) throw new Error('cancel failed');
+      pendingPlan = null;
+      return true;
+    } catch (_error) {
+      stripNotice = { index: 0, text: 'The plan could not be cancelled.' };
+      return false;
+    } finally {
+      planRequestInFlight = false;
+      if (consoleOpen) renderConsole();
     }
   }
 
@@ -1578,6 +1667,113 @@
     host.appendChild(section);
   }
 
+  // --- Bulk plan card -------------------------------------------------------
+  //
+  // "A receipt, not a dialog" (PRD design considerations): a list of outcomes
+  // a musician recognizes, grouped by operation, old → new. One Apply, one
+  // Cancel. Apply is Tier 2 — always the user's own click, never something an
+  // agent can trigger — and Cancel makes no REAPER contact at all.
+
+  function quoteForDisplay(name) {
+    const trimmed = String(name || '').trim();
+    return trimmed ? '‘' + trimmed + '’' : 'the untitled track';
+  }
+
+  function groupPlanEdits(edits) {
+    const groups = { rename: [], color: [], mute: [], solo: [], arm: [], move: [] };
+    (Array.isArray(edits) ? edits : []).forEach(edit => {
+      if (edit && groups[edit.operation]) groups[edit.operation].push(edit);
+    });
+    return groups;
+  }
+
+  function renderPlanGroup(section, title, count, renderRow) {
+    if (!count) return;
+    const group = el('div', 'reaper-console-plan-group');
+    group.appendChild(el('h4', '', title + ' ' + count + (count === 1 ? ' track' : ' tracks')));
+    renderRow(group);
+    section.appendChild(group);
+  }
+
+  function renderPlanCard(host) {
+    if (!pendingPlan) return;
+    const edits = Array.isArray(pendingPlan.edits) ? pendingPlan.edits : [];
+    if (!edits.length) return;
+    const groups = groupPlanEdits(edits);
+
+    const section = el('section', 'reaper-console-plan');
+    const head = el('div', 'reaper-console-section-head');
+    head.appendChild(el('h3', '', 'Proposed changes'));
+    head.appendChild(el('span', '', edits.length + (edits.length === 1 ? ' edit' : ' edits')));
+    section.appendChild(head);
+
+    renderPlanGroup(section, 'Rename', groups.rename.length, group => {
+      groups.rename.forEach(edit => {
+        group.appendChild(
+          el(
+            'div',
+            'reaper-console-plan-row',
+            quoteForDisplay(edit.expected_name) + ' → ' + quoteForDisplay(edit.new_name)
+          )
+        );
+      });
+    });
+
+    renderPlanGroup(section, 'Color', groups.color.length, group => {
+      groups.color.forEach(edit => {
+        const row = el('div', 'reaper-console-plan-row');
+        const color = Number(edit.new_color || 0);
+        const hasColor = (color & 0x1000000) !== 0;
+        const swatch = el('span', 'reaper-console-plan-swatch' + (hasColor ? '' : ' is-empty'));
+        if (hasColor) swatch.setAttribute('style', 'background:' + cssColor(color) + ';');
+        row.appendChild(swatch);
+        row.appendChild(el('span', '', quoteForDisplay(edit.expected_name)));
+        group.appendChild(row);
+      });
+    });
+
+    [
+      ['mute', 'Mute'],
+      ['solo', 'Solo'],
+      ['arm', 'Arm']
+    ].forEach(([kind, label]) => {
+      renderPlanGroup(section, label, groups[kind].length, group => {
+        groups[kind].forEach(edit => {
+          group.appendChild(
+            el(
+              'div',
+              'reaper-console-plan-row',
+              quoteForDisplay(edit.expected_name) + (edit.new_bool ? ' — on' : ' — off')
+            )
+          );
+        });
+      });
+    });
+
+    renderPlanGroup(section, 'Move', groups.move.length, group => {
+      groups.move.forEach(edit => {
+        group.appendChild(
+          el(
+            'div',
+            'reaper-console-plan-row',
+            quoteForDisplay(edit.expected_name) + ' to position ' + edit.new_index
+          )
+        );
+      });
+    });
+
+    const actions = el('div', 'reaper-console-plan-actions');
+    const cancel = button('Cancel', 'reaper-console-btn is-secondary', () => void cancelPlan());
+    cancel.disabled = planRequestInFlight;
+    actions.appendChild(cancel);
+    const apply = button('Apply', 'reaper-console-btn is-primary', () => void applyPlan());
+    apply.disabled = planRequestInFlight;
+    actions.appendChild(apply);
+    section.appendChild(actions);
+
+    host.appendChild(section);
+  }
+
   function renderOnline(host, state) {
     const project = el('section', 'reaper-console-project');
     const title = el('div', 'reaper-console-project-title');
@@ -1600,6 +1796,7 @@
     renderTransport(host, state);
     renderActionFeedback(host);
     renderActionGrid(host);
+    renderPlanCard(host);
     renderTracks(host, state);
   }
 
@@ -1670,6 +1867,7 @@
     if (!catalogLoaded) void loadActions();
     if (!scriptsLoaded) void loadScripts();
     if (!proposalsLoaded) void loadProposals();
+    if (!pendingPlanLoaded) void loadPlan();
     return true;
   }
 
@@ -1797,6 +1995,15 @@
     _cancelDrag: cancelDrag,
     _dragState: () => dragState,
     _moveTrack: moveTrack,
+    _setPendingPlan: plan => {
+      pendingPlan = plan;
+      pendingPlanLoaded = true;
+      if (consoleOpen) renderConsole();
+    },
+    _pendingPlan: () => pendingPlan,
+    _loadPlan: loadPlan,
+    _applyPlan: applyPlan,
+    _cancelPlan: cancelPlan,
     _resetForTest: () => {
       stopPolling();
       workspaceId = '';
@@ -1827,6 +2034,9 @@
       openPalette = 0;
       if (dragState) detachDragListeners();
       dragState = null;
+      pendingPlan = null;
+      pendingPlanLoaded = false;
+      planRequestInFlight = false;
       toasts.forEach(toast => {
         if (toast.timer && typeof clearTimeout === 'function') clearTimeout(toast.timer);
       });

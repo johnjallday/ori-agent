@@ -606,7 +606,7 @@ func TestAgentToolsRequireExactRuntimeGrantAndShareRunPolicy(t *testing.T) {
 	reader := &stateReader{runState: reaper.State{Connected: true, PlayState: "playing", Tracks: []reaper.Track{}}}
 	handler := NewHandler(store, testUser(userprofile.LocalUserID), reader, nil)
 	tools := handler.AgentTools("mine", "agent-1")
-	if len(tools) != 3 {
+	if len(tools) != 4 {
 		t.Fatalf("agent tools = %d", len(tools))
 	}
 	if _, err := tools[0].Call(context.Background(), `{}`); !errors.Is(err, ErrAgentRuntimeGrantRequired) {

@@ -50,13 +50,13 @@ var (
 // because REAPER reports an unnamed track's name as empty on both the Web
 // Remote and P_NAME paths. Only the field matching Kind is meaningful.
 type TrackEdit struct {
-	Kind         string
-	Index        int
-	ExpectedName string
-	NewName      string // TrackEditRename
-	NewColor     int64  // TrackEditColor
-	NewBool      bool   // TrackEditMute, TrackEditSolo, TrackEditArm
-	NewIndex     int    // TrackEditMove, 1-based target position
+	Kind         string `json:"operation"`
+	Index        int    `json:"index"`
+	ExpectedName string `json:"expected_name"`
+	NewName      string `json:"new_name,omitempty"`  // TrackEditRename
+	NewColor     int64  `json:"new_color,omitempty"` // TrackEditColor
+	NewBool      bool   `json:"new_bool,omitempty"`  // TrackEditMute, TrackEditSolo, TrackEditArm
+	NewIndex     int    `json:"new_index,omitempty"` // TrackEditMove, 1-based target position
 }
 
 // RenameEdit builds a guarded rename.
@@ -194,28 +194,25 @@ end
 	return script.String(), nil
 }
 
-// mutationLua emits the guard-passed body: read the prior value, apply the new
-// one inside one undo block, and write the prior value to the receipt so a
-// specific inverse can be built.
-func (e TrackEdit) mutationLua() string {
+// applyLua emits just the mutation call itself, assuming `tr` is already
+// bound and the guard already passed. This is the one piece shared between a
+// single guarded edit (wrapped below with its own undo block and receipt) and
+// a bulk plan (internal/reaper/bulk.go), which wraps a whole ordered set of
+// these in one undo block and needs no per-edit receipt at all — a plan
+// reverses through REAPER's global undo, not a specific inverse.
+func (e TrackEdit) applyLua() string {
 	switch e.Kind {
 	case TrackEditColor:
-		return "local prior = reaper.GetMediaTrackInfo_Value(tr, \"I_CUSTOMCOLOR\")\n" +
-			"reaper.Undo_BeginBlock()\n" +
-			"reaper.SetMediaTrackInfo_Value(tr, \"I_CUSTOMCOLOR\", " + strconv.FormatInt(e.NewColor, 10) + ")\n" +
-			"reaper.Undo_EndBlock(\"Ori: recolor track\", -1)\n" +
-			"reaper.TrackList_AdjustWindows(false)\n" +
-			"reaper.UpdateArrange()\n\n" +
-			"write_receipt(\"applied\\n\" .. string.format(\"%d\", prior))\n"
+		return "reaper.SetMediaTrackInfo_Value(tr, \"I_CUSTOMCOLOR\", " + strconv.FormatInt(e.NewColor, 10) + ")\n"
 	case TrackEditMute:
-		return e.toggleLua("B_MUTE", "reaper.SetMediaTrackInfo_Value(tr, \"B_MUTE\", "+luaBool(e.NewBool)+")", "mute")
+		return "reaper.SetMediaTrackInfo_Value(tr, \"B_MUTE\", " + luaBool(e.NewBool) + ")\n"
 	case TrackEditSolo:
-		return e.toggleLua("I_SOLO", "reaper.SetMediaTrackInfo_Value(tr, \"I_SOLO\", "+luaBool(e.NewBool)+")", "solo")
+		return "reaper.SetMediaTrackInfo_Value(tr, \"I_SOLO\", " + luaBool(e.NewBool) + ")\n"
 	case TrackEditArm:
 		// I_RECARM needs CSurf_OnRecArmChange rather than a plain
 		// SetMediaTrackInfo_Value write — verified against live REAPER
 		// (tasks-reaper-track-strips.md group 3.2).
-		return e.toggleLua("I_RECARM", "reaper.CSurf_OnRecArmChange(tr, "+luaBool(e.NewBool)+")", "arm")
+		return "reaper.CSurf_OnRecArmChange(tr, " + luaBool(e.NewBool) + ")\n"
 	case TrackEditMove:
 		// The 0-based beforeIndex REAPER wants depends on direction, verified
 		// against live REAPER (tasks-reaper-track-strips.md group 4.1): moving
@@ -225,18 +222,43 @@ func (e TrackEdit) mutationLua() string {
 		if e.NewIndex > e.Index {
 			beforeIndex = e.NewIndex
 		}
+		return "reaper.SetOnlyTrackSelected(tr)\n" +
+			"reaper.ReorderSelectedTracks(" + strconv.Itoa(beforeIndex) + ", 0)\n"
+	default: // TrackEditRename
+		return "reaper.GetSetMediaTrackInfo_String(tr, \"P_NAME\", " + luaString(e.NewName) + ", true)\n"
+	}
+}
+
+// mutationLua emits the guard-passed body for a single guarded edit: read the
+// prior value, apply the new one inside its own undo block, and write the
+// prior value to the receipt so a specific inverse can be built.
+func (e TrackEdit) mutationLua() string {
+	switch e.Kind {
+	case TrackEditColor:
+		return "local prior = reaper.GetMediaTrackInfo_Value(tr, \"I_CUSTOMCOLOR\")\n" +
+			"reaper.Undo_BeginBlock()\n" +
+			e.applyLua() +
+			"reaper.Undo_EndBlock(\"Ori: recolor track\", -1)\n" +
+			"reaper.TrackList_AdjustWindows(false)\n" +
+			"reaper.UpdateArrange()\n\n" +
+			"write_receipt(\"applied\\n\" .. string.format(\"%d\", prior))\n"
+	case TrackEditMute:
+		return e.toggleLua("B_MUTE", "mute")
+	case TrackEditSolo:
+		return e.toggleLua("I_SOLO", "solo")
+	case TrackEditArm:
+		return e.toggleLua("I_RECARM", "arm")
+	case TrackEditMove:
 		return "reaper.Undo_BeginBlock()\n" +
-			"reaper.SetOnlyTrackSelected(tr)\n" +
-			"reaper.ReorderSelectedTracks(" + strconv.Itoa(beforeIndex) + ", 0)\n" +
+			e.applyLua() +
 			"reaper.Undo_EndBlock(\"Ori: move track\", -1)\n" +
 			"reaper.TrackList_AdjustWindows(false)\n" +
 			"reaper.UpdateArrange()\n\n" +
 			// The source position was already known without reading REAPER.
 			"write_receipt(\"applied\\n\" .. index)\n"
 	default: // TrackEditRename
-		return "local new_value = " + luaString(e.NewName) + "\n" +
-			"reaper.Undo_BeginBlock()\n" +
-			"reaper.GetSetMediaTrackInfo_String(tr, \"P_NAME\", new_value, true)\n" +
+		return "reaper.Undo_BeginBlock()\n" +
+			e.applyLua() +
 			"reaper.Undo_EndBlock(\"Ori: rename track\", -1)\n" +
 			"reaper.TrackList_AdjustWindows(false)\n" +
 			"reaper.UpdateArrange()\n\n" +
@@ -244,10 +266,10 @@ func (e TrackEdit) mutationLua() string {
 	}
 }
 
-func (e TrackEdit) toggleLua(property, setCall, undoLabel string) string {
+func (e TrackEdit) toggleLua(property, undoLabel string) string {
 	return "local prior = reaper.GetMediaTrackInfo_Value(tr, \"" + property + "\")\n" +
 		"reaper.Undo_BeginBlock()\n" +
-		setCall + "\n" +
+		e.applyLua() +
 		"reaper.Undo_EndBlock(\"Ori: " + undoLabel + " track\", -1)\n" +
 		"reaper.TrackList_AdjustWindows(false)\n" +
 		"reaper.UpdateArrange()\n\n" +

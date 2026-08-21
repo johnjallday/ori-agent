@@ -6959,6 +6959,65 @@ button.ws-cmd-rpg-class-card:focus-visible {
   font-size: 0.68rem;
 }
 
+/* --- Bulk plan card ---
+   "A receipt, not a dialog" (PRD design considerations): grouped by
+   operation, old → new, one Apply and one Cancel. */
+.reaper-console-plan {
+  margin-bottom: 1rem;
+  padding: 0.9rem 1rem 1rem;
+  background: rgba(94, 208, 167, 0.05);
+  border: 1px solid rgba(94, 208, 167, 0.3);
+  border-left: 3px solid #5ed0a7;
+}
+
+.reaper-console-plan-group {
+  margin-top: 0.7rem;
+}
+
+.reaper-console-plan-group h4 {
+  margin: 0 0 0.35rem;
+  color: rgba(173, 192, 184, 0.6);
+  font-size: 0.62rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.reaper-console-plan-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.28rem 0;
+  color: rgba(232, 240, 235, 0.88);
+  font-family: var(--ws-font-display, sans-serif);
+  font-size: 0.8rem;
+}
+
+.reaper-console-plan-swatch {
+  width: 0.85rem;
+  height: 0.85rem;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  border: 1px solid rgba(173, 192, 184, 0.4);
+}
+
+.reaper-console-plan-swatch.is-empty {
+  background:
+    linear-gradient(
+      to bottom right,
+      transparent calc(50% - 1px),
+      rgba(239, 118, 93, 0.6),
+      transparent calc(50% + 1px)
+    ),
+    rgba(255, 255, 255, 0.03);
+}
+
+.reaper-console-plan-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
 .reaper-console-track-list {
   display: grid;
   gap: 0.36rem;

@@ -28,6 +28,7 @@ func (h *Handler) AgentTools(workspaceID, agentInstanceID string) []toolapi.Tool
 		&listActionsTool{handler: h, workspaceID: workspaceID, agentInstanceID: agentInstanceID},
 		&runActionTool{handler: h, workspaceID: workspaceID, agentInstanceID: agentInstanceID},
 		&proposeScriptTool{handler: h, workspaceID: workspaceID, agentInstanceID: agentInstanceID},
+		&proposeTrackEditsTool{handler: h, workspaceID: workspaceID, agentInstanceID: agentInstanceID},
 	}
 }
 
@@ -177,4 +178,129 @@ func marshalToolResult(value any) (string, error) {
 		return "", errors.New("REAPER tool result could not be encoded")
 	}
 	return string(encoded), nil
+}
+
+type proposeTrackEditsTool struct {
+	handler         *Handler
+	workspaceID     string
+	agentInstanceID string
+}
+
+func (t *proposeTrackEditsTool) Definition() toolapi.ToolDefinition {
+	return toolapi.ToolDefinition{
+		Name: "propose_reaper_track_edits",
+		Description: "Propose a set of track edits (rename, color, mute, solo, arm, or move) as a single reviewable plan. " +
+			"This creates a pending plan for the workspace only — it never applies anything. The user reviews the whole " +
+			"plan as one card and applies or cancels it themselves; this tool cannot apply a plan. Every edit is guarded " +
+			"on the track's expected current name, exactly like a direct edit: if a track's name no longer matches when " +
+			"the user applies the plan, the whole plan is refused rather than risking the wrong track.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"edits": map[string]any{
+					"type":        "array",
+					"description": "One to 64 edits. Renames and colors execute before moves within the plan.",
+					"items": map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"index":         map[string]any{"type": "integer", "description": "1-based track position, matching the console."},
+							"expected_name": map[string]any{"type": "string", "description": "The name Ori currently believes this track has. The empty string means unnamed."},
+							"operation":     map[string]any{"type": "string", "enum": []string{"rename", "color", "mute", "solo", "arm", "move"}},
+							"new_value": map[string]any{
+								"description": "rename: new name (string). color: one of " + strings.Join(reaper.NamedColorNames(), ", ") +
+									" (string). mute/solo/arm: true or false (boolean). move: target 1-based position (integer).",
+							},
+						},
+						"required":             []string{"index", "expected_name", "operation", "new_value"},
+						"additionalProperties": false,
+					},
+				},
+			},
+			"required":             []string{"edits"},
+			"additionalProperties": false,
+		},
+	}
+}
+
+type proposedTrackEdit struct {
+	Index        int             `json:"index"`
+	ExpectedName string          `json:"expected_name"`
+	Operation    string          `json:"operation"`
+	NewValue     json.RawMessage `json:"new_value"`
+}
+
+func (e proposedTrackEdit) toTrackEdit() (reaper.TrackEdit, error) {
+	switch e.Operation {
+	case reaper.TrackEditRename:
+		var name string
+		if err := json.Unmarshal(e.NewValue, &name); err != nil {
+			return reaper.TrackEdit{}, errors.New("rename new_value must be a string")
+		}
+		return reaper.RenameEdit(e.Index, e.ExpectedName, name), nil
+	case reaper.TrackEditColor:
+		var name string
+		if err := json.Unmarshal(e.NewValue, &name); err != nil {
+			return reaper.TrackEdit{}, errors.New("color new_value must be a string")
+		}
+		color, ok := reaper.NamedColor(name)
+		if !ok {
+			return reaper.TrackEdit{}, fmt.Errorf("color must be one of: %s", strings.Join(reaper.NamedColorNames(), ", "))
+		}
+		return reaper.ColorEdit(e.Index, e.ExpectedName, color), nil
+	case reaper.TrackEditMute, reaper.TrackEditSolo, reaper.TrackEditArm:
+		var value bool
+		if err := json.Unmarshal(e.NewValue, &value); err != nil {
+			return reaper.TrackEdit{}, errors.New("mute/solo/arm new_value must be a boolean")
+		}
+		switch e.Operation {
+		case reaper.TrackEditMute:
+			return reaper.MuteEdit(e.Index, e.ExpectedName, value), nil
+		case reaper.TrackEditSolo:
+			return reaper.SoloEdit(e.Index, e.ExpectedName, value), nil
+		default:
+			return reaper.ArmEdit(e.Index, e.ExpectedName, value), nil
+		}
+	case reaper.TrackEditMove:
+		var target int
+		if err := json.Unmarshal(e.NewValue, &target); err != nil {
+			return reaper.TrackEdit{}, errors.New("move new_value must be an integer position")
+		}
+		return reaper.MoveEdit(e.Index, e.ExpectedName, target), nil
+	default:
+		return reaper.TrackEdit{}, errors.New("operation must be one of: rename, color, mute, solo, arm, move")
+	}
+}
+
+func (t *proposeTrackEditsTool) Call(_ context.Context, args string) (string, error) {
+	if t == nil || t.handler == nil || !t.handler.agentHasLiveControlGrant(t.workspaceID, t.agentInstanceID) {
+		return "", ErrAgentRuntimeGrantRequired
+	}
+	var request struct {
+		Edits []proposedTrackEdit `json:"edits"`
+	}
+	decoder := json.NewDecoder(strings.NewReader(args))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil || len(request.Edits) == 0 {
+		return "", errors.New("edits is required and must not be empty")
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		return "", errors.New("invalid track-edit plan arguments")
+	}
+	edits := make([]reaper.TrackEdit, 0, len(request.Edits))
+	for i, proposed := range request.Edits {
+		edit, err := proposed.toTrackEdit()
+		if err != nil {
+			return "", fmt.Errorf("edit %d: %w", i+1, err)
+		}
+		edits = append(edits, edit)
+	}
+	plan, err := t.handler.proposeEdits(t.workspaceID, t.agentInstanceID, edits)
+	if err != nil {
+		return "", err
+	}
+	return marshalToolResult(map[string]any{
+		"outcome": "proposed", "plan_id": plan.ID, "edit_count": len(plan.Edits),
+		"next": "The user reviews the plan card and applies or cancels it themselves. Nothing has been applied.",
+	})
 }

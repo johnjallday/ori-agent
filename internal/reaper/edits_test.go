@@ -60,7 +60,7 @@ func TestRenameEditLuaGuardsOnNameAndWritesAReceipt(t *testing.T) {
 		`local index = 3`,
 		// The write happens inside one undo block.
 		`reaper.Undo_BeginBlock()`,
-		`reaper.GetSetMediaTrackInfo_String(tr, "P_NAME", new_value, true)`,
+		`reaper.GetSetMediaTrackInfo_String(tr, "P_NAME", "\75\105\99\107", true)`,
 		`reaper.Undo_EndBlock("Ori: rename track", -1)`,
 		// The prior value comes back for the specific inverse.
 		`write_receipt("applied\n" .. current)`,

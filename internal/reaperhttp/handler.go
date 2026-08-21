@@ -51,8 +51,10 @@ type Handler struct {
 	scriptLibrary ScriptLibrary
 	scriptRunner  ScriptRunner
 	trackRunner   TrackEditRunner
+	bulkRunner    BulkEditRunner
 	proposals     *proposalStore
 	undos         *undoStore
+	plans         *planStore
 }
 
 func NewHandler(store WorkspaceStore, provider userprofile.UserProvider, client StateReader, catalog ActionCatalog) *Handler {
@@ -61,7 +63,7 @@ func NewHandler(store WorkspaceStore, provider userprofile.UserProvider, client 
 	}
 	return &Handler{
 		store: store, provider: provider, client: client, catalog: catalog,
-		proposals: newProposalStore(), undos: newUndoStore(),
+		proposals: newProposalStore(), undos: newUndoStore(), plans: newPlanStore(),
 	}
 }
 
@@ -78,6 +80,13 @@ func (h *Handler) SetScriptServices(library ScriptLibrary, runner ScriptRunner) 
 func (h *Handler) SetTrackEditRunner(runner TrackEditRunner) {
 	if h != nil {
 		h.trackRunner = runner
+	}
+}
+
+// SetBulkEditRunner supplies the guarded bulk-plan apply path.
+func (h *Handler) SetBulkEditRunner(runner BulkEditRunner) {
+	if h != nil {
+		h.bulkRunner = runner
 	}
 }
 
