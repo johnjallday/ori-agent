@@ -39,7 +39,7 @@
 
     const link = document.createElement('a');
     link.className = 'note-page-ticket-link';
-    link.href = `/workspaces/${encodeURIComponent(ticket.owningWorkspaceId)}?ticket=${encodeURIComponent(ticket.id)}`;
+    link.href = `/workspaces/${encodeURIComponent(ticket.owningWorkspaceSlug)}?ticket=${encodeURIComponent(ticket.id)}`;
 
     const number = document.createElement('span');
     number.className = 'note-page-ticket-number';

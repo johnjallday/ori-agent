@@ -68,6 +68,18 @@ for path in (("id",), ("workspace", "id"), ("folder", "id")):
         break'
 }
 
+workspace_slug() {
+  python3 -c 'import sys,json
+d = json.load(sys.stdin)
+for path in (("folder_slug",), ("workspace", "folder_slug"), ("folder", "folder_slug")):
+    value = d
+    for key in path:
+        value = value.get(key) if isinstance(value, dict) else None
+    if value:
+        print(value)
+        break'
+}
+
 smoke_plans() {
   local ws="$1"
   [[ -n "$ws" ]] || fail "usage: smoke.sh plans <base-url> <workspace-id>"
@@ -458,9 +470,9 @@ for link in d.get("task_links", []):
   related=$(curl -s "$BASE_URL/api/workspaces/$ws/plan-for-task/$taskid")
   [[ "$(echo "$related" | json_field plan_id)" == "$plan" ]] ||
     fail "reverse lookup did not resolve the plan: $related"
-  [[ "$(echo "$related" | json_field url)" == "/workspaces/$ws/plans/$plan" ]] ||
-    fail "reverse lookup did not return the canonical route: $related"
-  echo "ok   task resolves back to its plan via the canonical route"
+  [[ -z "$(echo "$related" | json_field url)" ]] ||
+    fail "UUID-scoped reverse lookup returned a browser URL: $related"
+  echo "ok   task resolves back to its plan without manufacturing a UUID page route"
 
   # Cancelling stops the plan and leaves history alone (FR-112).
   expect_status 200 POST "$base/execution" '{"action":"cancel","reason":"demo over"}'
@@ -483,11 +495,13 @@ seed_demo() {
     -H 'Content-Type: application/json' \
     -d "{\"workspace_root\":\"$HOME/Ori Workspaces\"}" > /dev/null
 
-  local ws
-  ws=$(curl -s -X POST "$BASE_URL/api/workspaces" \
+  local created ws slug
+  created=$(curl -s -X POST "$BASE_URL/api/workspaces" \
     -H 'Content-Type: application/json' \
-    -d "{\"name\":\"Plan Review $(date +%H%M%S)\"}" | workspace_id)
-  [[ -n "$ws" ]] || fail "could not create a workspace"
+    -d "{\"name\":\"Plan Review $(date +%H%M%S)\"}")
+  ws=$(echo "$created" | workspace_id)
+  slug=$(echo "$created" | workspace_slug)
+  [[ -n "$ws" && -n "$slug" ]] || fail "could not create a workspace with route identity"
 
   # Structured planning on, so the create panel shows.
   curl -s -X PATCH "$BASE_URL/api/workspaces/$ws/settings" \
@@ -535,11 +549,11 @@ seed_demo() {
 
   echo
   echo "Open these:"
-  echo "  Plans list      $BASE_URL/workspaces/$ws/plans"
-  echo "  Draft (editor)  $BASE_URL/workspaces/$ws/plans/$draft"
-  echo "  In review       $BASE_URL/workspaces/$ws/plans/$review"
-  echo "  In review (auto)$BASE_URL/workspaces/$ws/plans/$auto"
-  echo "  Approved        $BASE_URL/workspaces/$ws/plans/$approved"
+  echo "  Plans list      $BASE_URL/workspaces/$slug/plans"
+  echo "  Draft (editor)  $BASE_URL/workspaces/$slug/plans/$draft"
+  echo "  In review       $BASE_URL/workspaces/$slug/plans/$review"
+  echo "  In review (auto)$BASE_URL/workspaces/$slug/plans/$auto"
+  echo "  Approved        $BASE_URL/workspaces/$slug/plans/$approved"
   echo
 }
 

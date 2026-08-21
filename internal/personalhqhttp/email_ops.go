@@ -14,6 +14,7 @@ import (
 type EmailOpsStatus struct {
 	Exists            bool   `json:"exists"`
 	WorkspaceID       string `json:"workspace_id,omitempty"`
+	WorkspaceSlug     string `json:"workspace_slug,omitempty"`
 	WorkspaceName     string `json:"workspace_name,omitempty"`
 	OpenFollowupCount int    `json:"open_followup_count"`
 }
@@ -45,6 +46,7 @@ func (h *Handler) EmailOpsStatusHandler(w http.ResponseWriter, r *http.Request) 
 		if src := h.watchtowerSources().Workspaces; src != nil {
 			if ws, err := src.Get(workspaceID); err == nil && ws != nil {
 				status.WorkspaceName = ws.Name
+				status.WorkspaceSlug = ws.FolderSlug
 			}
 		}
 	}

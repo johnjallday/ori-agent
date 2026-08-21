@@ -1362,6 +1362,12 @@ func TestHandleWorkspaceImportDuplicateCheckAndConflict(t *testing.T) {
 	if found, _ := dupMap["found"].(bool); !found {
 		t.Fatalf("expected duplicate found=true")
 	}
+	if slug, _ := dupMap["workspace_slug"].(string); slug != "duplicate-target" {
+		t.Fatalf("expected duplicate response to include route slug, got %#v", dupMap)
+	}
+	if dupMap["workspace_slug"] == dupMap["workspace_id"] {
+		t.Fatalf("duplicate response conflated UUID and slug: %#v", dupMap)
+	}
 
 	secondReq := httptest.NewRequest(http.MethodPost, "/api/workspaces/import", bytes.NewBuffer(createPayload))
 	secondReq.Header.Set("Content-Type", "application/json")

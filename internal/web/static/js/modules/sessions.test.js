@@ -232,10 +232,10 @@ test('a Map-origin create flags the existing modal rather than opening a second 
 
 test('workspace post-create action keeps the standard workspace destination by default', async () => {
   const manager = loadSessionManager();
-  const result = await manager.applyWorkspacePostCreateAction('workspace 1');
+  const result = await manager.applyWorkspacePostCreateAction('workspace-uuid', 'marketing site');
 
   assert.equal(result.applied, false);
-  assert.equal(result.destination, '/workspaces/workspace%201');
+  assert.equal(result.destination, '/workspaces/marketing%20site');
 });
 
 test('Personal HQ import designates the imported workspace and completes onboarding', async () => {

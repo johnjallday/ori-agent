@@ -31,6 +31,7 @@ const sessionManager = {
   importModeEnabled: false,
   importAllowDuplicate: false,
   importDuplicateWorkspaceId: '',
+  importDuplicateWorkspaceSlug: '',
   importDuplicateWorkspaceName: '',
   importEntryPoint: 'workspace_hub_create',
   workspacePostCreateAction: '',
@@ -448,11 +449,11 @@ const sessionManager = {
       this.emitImportDuplicateActionTelemetry('suggestion_accepted', importPathInput?.value || '');
       try {
         const postCreate = await this.applyWorkspacePostCreateAction(
-          this.importDuplicateWorkspaceId
+          this.importDuplicateWorkspaceId,
+          this.importDuplicateWorkspaceSlug
         );
-        const destination =
-          postCreate.destination ||
-          `/workspaces/${encodeURIComponent(this.importDuplicateWorkspaceId)}`;
+        const destination = postCreate.destination;
+        if (!destination) throw new Error('Workspace slug is unavailable; refresh and try again.');
         const modal = bootstrap.Modal.getInstance(addFolderModal);
         modal?.hide();
         this.resetAddWorkspaceModalForm();
@@ -3485,6 +3486,7 @@ const sessionManager = {
     if (warning) warning.style.display = 'none';
     if (text) text.textContent = '';
     this.importDuplicateWorkspaceId = '';
+    this.importDuplicateWorkspaceSlug = '';
     this.importDuplicateWorkspaceName = '';
   },
 
@@ -3498,6 +3500,7 @@ const sessionManager = {
     warning.style.display = 'block';
 
     this.importDuplicateWorkspaceId = duplicate.workspace_id || '';
+    this.importDuplicateWorkspaceSlug = duplicate.workspace_slug || '';
     this.importDuplicateWorkspaceName = duplicate.workspace_name || '';
   },
 
@@ -3615,10 +3618,11 @@ const sessionManager = {
     });
   },
 
-  async applyWorkspacePostCreateAction(workspaceId) {
+  async applyWorkspacePostCreateAction(workspaceId, workspaceSlug = '') {
     const id = String(workspaceId || '').trim();
+    const slug = String(workspaceSlug || '').trim();
     const action = String(this.workspacePostCreateAction || '').trim();
-    const workspaceDestination = id ? `/workspaces/${encodeURIComponent(id)}` : '/workspaces';
+    const workspaceDestination = slug ? `/workspaces/${encodeURIComponent(slug)}` : '';
     if (!action) {
       return { applied: false, destination: workspaceDestination };
     }
@@ -5745,6 +5749,10 @@ const sessionManager = {
 
       const createdWorkspaceId =
         result && result.folder && result.folder.id ? String(result.folder.id) : '';
+      const createdWorkspaceSlug =
+        result && result.folder && result.folder.folder_slug
+          ? String(result.folder.folder_slug)
+          : '';
       const askOriSeedNoteRaw = modalElement
         ? String(modalElement.dataset.askOriSeedNote || '')
         : '';
@@ -5813,7 +5821,10 @@ const sessionManager = {
       let postCreateError = null;
       if (createdWorkspaceId && this.workspacePostCreateAction) {
         try {
-          postCreateResult = await this.applyWorkspacePostCreateAction(createdWorkspaceId);
+          postCreateResult = await this.applyWorkspacePostCreateAction(
+            createdWorkspaceId,
+            createdWorkspaceSlug
+          );
         } catch (error) {
           postCreateError = error;
         }
@@ -5926,9 +5937,9 @@ const sessionManager = {
       }
 
       // Navigate to the new workspace once the reviewed setup has been applied
-      if (createdWorkspaceId) {
+      if (createdWorkspaceId && (postCreateResult.destination || createdWorkspaceSlug)) {
         window.location.href =
-          postCreateResult.destination || `/workspaces/${encodeURIComponent(createdWorkspaceId)}`;
+          postCreateResult.destination || `/workspaces/${encodeURIComponent(createdWorkspaceSlug)}`;
         return;
       }
 

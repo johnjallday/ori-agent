@@ -413,11 +413,11 @@
     var candidates = (resolution && resolution.candidates) || [];
     for (var i = 0; i < candidates.length && actions.length < 3; i++) {
       var candidate = candidates[i];
-      if (!candidate || !candidate.id) continue;
+      if (!candidate || !candidate.id || !candidate.slug) continue;
       actions.push({
         type: 'navigate',
         label: 'Open ' + String(candidate.name || candidate.id),
-        href: '/workspaces/' + encodeURIComponent(String(candidate.id))
+        href: '/workspaces/' + encodeURIComponent(String(candidate.slug))
       });
     }
 

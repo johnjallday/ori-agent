@@ -47,8 +47,10 @@ func NewHandler(ws workspace.Store, opps workspace.OpportunityStore, backlogServ
 // the UI doesn't need a second round-trip per row.
 type AggregatedOpportunity struct {
 	workspace.Opportunity
-	WorkspaceName string `json:"workspace_name"`
-	WorkspaceKind string `json:"workspace_kind,omitempty"`
+	WorkspaceName       string `json:"workspace_name"`
+	WorkspaceSlug       string `json:"workspace_slug"`
+	WorkspaceKind       string `json:"workspace_kind,omitempty"`
+	LinkedWorkspaceSlug string `json:"linked_workspace_slug,omitempty"`
 }
 
 // listResponse wraps the slice so future top-level fields (counts, cursors)
@@ -114,11 +116,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 				o.Status = eff
 				o.SnoozedUntil = nil
 			}
-			items = append(items, AggregatedOpportunity{
-				Opportunity:   o,
-				WorkspaceName: ws.Name,
-				WorkspaceKind: ws.Kind,
-			})
+			items = append(items, h.aggregate(id, o))
 		}
 	}
 
@@ -250,9 +248,10 @@ func (h *Handler) Resolve(w http.ResponseWriter, r *http.Request) {
 // opportunity plus the linked Backlog item, so the client can navigate
 // straight to it without a second round-trip.
 type addToBacklogResponse struct {
-	Status      string                `json:"status"`
-	Opportunity AggregatedOpportunity `json:"opportunity"`
-	Item        *workspace.Task       `json:"item,omitempty"`
+	Status        string                `json:"status"`
+	WorkspaceSlug string                `json:"workspace_slug,omitempty"`
+	Opportunity   AggregatedOpportunity `json:"opportunity"`
+	Item          *workspace.Task       `json:"item,omitempty"`
 }
 
 // AddToBacklog handles POST /api/action-center/opportunities/{workspaceID}/{opportunityID}/add-to-backlog.
@@ -286,7 +285,8 @@ func (h *Handler) AddToBacklog(w http.ResponseWriter, r *http.Request) {
 			orihttp.InternalError(w, fmt.Sprintf("get linked backlog item: %v", err))
 			return
 		}
-		writeJSON(w, addToBacklogResponse{Status: "planned", Opportunity: h.aggregate(wsID, opp), Item: &item.Task})
+		aggregated := h.aggregate(wsID, opp)
+		writeJSON(w, addToBacklogResponse{Status: "planned", WorkspaceSlug: aggregated.LinkedWorkspaceSlug, Opportunity: aggregated, Item: &item.Task})
 		return
 	}
 
@@ -313,7 +313,8 @@ func (h *Handler) AddToBacklog(w http.ResponseWriter, r *http.Request) {
 		orihttp.InternalError(w, fmt.Sprintf("get updated opportunity: %v", err))
 		return
 	}
-	writeJSON(w, addToBacklogResponse{Status: "planned", Opportunity: h.aggregate(wsID, planned), Item: task})
+	aggregated := h.aggregate(wsID, planned)
+	writeJSON(w, addToBacklogResponse{Status: "planned", WorkspaceSlug: aggregated.LinkedWorkspaceSlug, Opportunity: aggregated, Item: task})
 }
 
 // aggregate attaches the source workspace's display name/kind to an
@@ -322,7 +323,15 @@ func (h *Handler) aggregate(wsID string, opp workspace.Opportunity) AggregatedOp
 	resp := AggregatedOpportunity{Opportunity: opp}
 	if ws, err := h.workspaces.Get(wsID); err == nil && ws != nil {
 		resp.WorkspaceName = ws.Name
+		resp.WorkspaceSlug = ws.FolderSlug
 		resp.WorkspaceKind = ws.Kind
+	}
+	linkedID := strings.TrimSpace(opp.LinkedWorkspaceID)
+	if linkedID == "" {
+		linkedID = wsID
+	}
+	if linked, err := h.workspaces.Get(linkedID); err == nil && linked != nil {
+		resp.LinkedWorkspaceSlug = linked.FolderSlug
 	}
 	return resp
 }

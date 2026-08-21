@@ -1025,10 +1025,10 @@ export function followUpView(f) {
       });
       if (res.ok) {
         const eo = (await res.json()).status || {};
-        if (eo.exists && eo.workspace_id) {
+        if (eo.exists && eo.workspace_slug) {
           const link = document.createElement('a');
           link.className = 'hq-followup-manage-link';
-          link.href = `/workspaces/${encodeURIComponent(eo.workspace_id)}`;
+          link.href = `/workspaces/${encodeURIComponent(eo.workspace_slug)}`;
           link.textContent = 'Manage in Email Ops →';
           mount.appendChild(link);
         }

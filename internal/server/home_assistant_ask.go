@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
@@ -117,6 +118,17 @@ type homeActionMutator struct {
 	backlogService *workspace.BacklogService
 }
 
+func (m homeActionMutator) workspaceHref(workspaceID string) string {
+	if m.workspaces == nil {
+		return ""
+	}
+	ws, err := m.workspaces.Get(strings.TrimSpace(workspaceID))
+	if err != nil || ws == nil || strings.TrimSpace(ws.FolderSlug) == "" {
+		return ""
+	}
+	return "/workspaces/" + url.PathEscape(ws.FolderSlug)
+}
+
 func (m homeActionMutator) defaultAgentName() string {
 	if m.agents == nil {
 		return ""
@@ -148,7 +160,7 @@ func (m homeActionMutator) CreateWorkspace(ctx context.Context, name, descriptio
 	if err := m.workspaces.Save(ws); err != nil {
 		return "", "", err
 	}
-	return ws.ID, "/workspaces/" + ws.ID, nil
+	return ws.ID, "/workspaces/" + url.PathEscape(ws.FolderSlug), nil
 }
 
 func (m homeActionMutator) CreateTask(ctx context.Context, workspaceID, description string) (string, string, error) {
@@ -178,7 +190,7 @@ func (m homeActionMutator) CreateTask(ctx context.Context, workspaceID, descript
 	if err != nil {
 		return "", "", err
 	}
-	return taskID, "/workspaces/" + workspaceID, nil
+	return taskID, m.workspaceHref(workspaceID), nil
 }
 
 // CreateBacklogItem adds an uncommitted Backlog item through the canonical
@@ -187,7 +199,7 @@ func (m homeActionMutator) CreateTask(ctx context.Context, workspaceID, descript
 // assistant-created backlog items must not be assigned to an agent or become
 // runnable (FR25).
 func (m homeActionMutator) CreateBacklogItem(ctx context.Context, workspaceID, description string) (string, string, error) {
-	href := "/workspaces/" + workspaceID
+	href := m.workspaceHref(workspaceID)
 	if m.backlogService == nil {
 		return "", href, fmt.Errorf("backlog capture is unavailable right now")
 	}
@@ -203,7 +215,7 @@ func (m homeActionMutator) CreateBacklogItem(ctx context.Context, workspaceID, d
 }
 
 func (m homeActionMutator) StartTask(ctx context.Context, workspaceID, taskID string) (string, error) {
-	href := "/workspaces/" + workspaceID
+	href := m.workspaceHref(workspaceID)
 	if m.workspaces == nil {
 		return href, fmt.Errorf("workspace store unavailable")
 	}
@@ -253,7 +265,7 @@ func (m homeActionMutator) StartTask(ctx context.Context, workspaceID, taskID st
 }
 
 func (m homeActionMutator) AssignAgent(ctx context.Context, workspaceID, agentName string) (string, error) {
-	href := "/workspaces/" + workspaceID
+	href := m.workspaceHref(workspaceID)
 	if m.workspaces == nil {
 		return href, fmt.Errorf("workspace store unavailable")
 	}
@@ -308,7 +320,7 @@ func (m homeActionMutator) CreateAgent(ctx context.Context, name, description st
 }
 
 func (m homeActionMutator) RemoveAgent(ctx context.Context, workspaceID, agentName string) (string, error) {
-	href := "/workspaces/" + workspaceID
+	href := m.workspaceHref(workspaceID)
 	if m.workspaces == nil {
 		return href, fmt.Errorf("workspace store unavailable")
 	}

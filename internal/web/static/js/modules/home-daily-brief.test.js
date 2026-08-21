@@ -23,19 +23,39 @@ test('parseContent decodes a revision content_json, degrading to {} on garbage',
 
 test('hrefForRef routes tasks to their deep-link page and everything else to the owning workspace', () => {
   assert.equal(
-    hrefForRef({ workspace_id: 'ws-1', entity_type: 'task', entity_id: 't-1' }),
-    '/workspaces/ws-1/task/t-1'
+    hrefForRef({
+      workspace_id: 'workspace-uuid',
+      workspace_slug: 'marketing-site',
+      entity_type: 'task',
+      entity_id: 't-1'
+    }),
+    '/workspaces/marketing-site/task/t-1'
   );
   assert.equal(
-    hrefForRef({ workspace_id: 'ws-1', entity_type: 'session', entity_id: 's-1' }),
-    '/workspaces/ws-1'
+    hrefForRef({
+      workspace_id: 'workspace-uuid',
+      workspace_slug: 'marketing-site',
+      entity_type: 'session',
+      entity_id: 's-1'
+    }),
+    '/workspaces/marketing-site'
   );
   assert.equal(
-    hrefForRef({ workspace_id: 'ws-1', entity_type: 'scheduled_task', entity_id: 'sc-1' }),
-    '/workspaces/ws-1'
+    hrefForRef({
+      workspace_id: 'workspace-uuid',
+      workspace_slug: 'marketing-site',
+      entity_type: 'scheduled_task',
+      entity_id: 'sc-1'
+    }),
+    '/workspaces/marketing-site'
   );
   assert.equal(
-    hrefForRef({ workspace_id: 'ws 1', entity_type: 'task', entity_id: 't/1' }),
+    hrefForRef({
+      workspace_id: 'workspace-uuid',
+      workspace_slug: 'ws 1',
+      entity_type: 'task',
+      entity_id: 't/1'
+    }),
     '/workspaces/ws%201/task/t%2F1'
   );
 });
@@ -142,14 +162,19 @@ test('renderContent renders Needs Attention items with a real link built from th
   const html = renderContent({
     needs_attention: [
       {
-        ref: { workspace_id: 'ws-1', entity_type: 'task', entity_id: 't-1' },
+        ref: {
+          workspace_id: 'workspace-uuid',
+          workspace_slug: 'marketing-site',
+          entity_type: 'task',
+          entity_id: 't-1'
+        },
         title: 'Approve deploy',
         workspace_name: 'Ops',
         reason: 'Waiting on your approval.'
       }
     ]
   });
-  assert.match(html, /href="\/workspaces\/ws-1\/task\/t-1"/);
+  assert.match(html, /href="\/workspaces\/marketing-site\/task\/t-1"/);
   assert.match(html, /Approve deploy/);
   assert.match(html, /Waiting on your approval\./);
 });
@@ -158,7 +183,7 @@ test('renderContent visually distinguishes suggestion text (why_suggested\\/next
   const html = renderContent({
     todays_plan: [
       {
-        ref: { workspace_id: 'ws-1' },
+        ref: { workspace_id: 'workspace-uuid', workspace_slug: 'marketing-site' },
         title: 'Ship the release',
         workspace_name: 'Ops',
         reason: 'In progress',
@@ -184,13 +209,18 @@ test('renderContent renders suggested actions as real links carrying their ref, 
   const html = renderContent({
     suggested_actions: [
       {
-        ref: { workspace_id: 'ws-2', entity_type: 'task', entity_id: 't-9' },
+        ref: {
+          workspace_id: 'workspace-uuid-2',
+          workspace_slug: 'release-ops',
+          entity_type: 'task',
+          entity_id: 't-9'
+        },
         label: 'Retry the failed run',
         action_type: 'retry'
       }
     ]
   });
-  assert.match(html, /href="\/workspaces\/ws-2\/task\/t-9"/);
+  assert.match(html, /href="\/workspaces\/release-ops\/task\/t-9"/);
   assert.match(html, /Retry the failed run/);
   assert.match(html, /data-action-type="retry"/);
 });

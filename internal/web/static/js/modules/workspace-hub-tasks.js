@@ -941,8 +941,9 @@
       card.querySelectorAll('[data-action="view-canvas"]').forEach(btn => {
         btn.addEventListener('click', event => {
           event.stopPropagation();
-          if (task && state.selectedId) {
-            window.location.href = `/workspaces/${state.selectedId}/canvas?workflow=${taskId}`;
+          const slug = String(state.workspaceMap?.get(state.selectedId)?.folder_slug || '').trim();
+          if (task && slug) {
+            window.location.href = `/workspaces/${encodeURIComponent(slug)}/canvas?workflow=${encodeURIComponent(taskId)}`;
           }
         });
       });

@@ -26,10 +26,11 @@ const (
 // one of these (PRD FR81, task 6.8), and model output is validated against
 // the set of refs actually present in the snapshot (task 6.12).
 type SourceRef struct {
-	WorkspaceID string    `json:"workspace_id"`
-	EntityType  string    `json:"entity_type"` // task | opportunity | scheduled_task | session | email_thread
-	EntityID    string    `json:"entity_id"`
-	Timestamp   time.Time `json:"timestamp"`
+	WorkspaceID   string    `json:"workspace_id"`
+	WorkspaceSlug string    `json:"workspace_slug,omitempty"`
+	EntityType    string    `json:"entity_type"` // task | opportunity | scheduled_task | session | email_thread
+	EntityID      string    `json:"entity_id"`
+	Timestamp     time.Time `json:"timestamp"`
 	// AccountID is set only for email_thread refs: the connected mailbox account
 	// the provider thread belongs to, needed to build a validated open route
 	// (task 4.1). Never a token — just the account's stable ID.
@@ -83,6 +84,7 @@ type SessionSnapshot struct {
 // WorkspaceSnapshot is one eligible workspace's bounded projection.
 type WorkspaceSnapshot struct {
 	WorkspaceID    string
+	WorkspaceSlug  string
 	Name           string
 	AgentCount     int
 	OpenTasks      []TaskSnapshot
@@ -316,7 +318,7 @@ func BuildAllScopeSnapshot(ctx context.Context, sources SnapshotSources, userID 
 }
 
 func buildWorkspaceSnapshot(ctx context.Context, sources SnapshotSources, ws *workspace.Workspace) (WorkspaceSnapshot, []string) {
-	out := WorkspaceSnapshot{WorkspaceID: ws.ID, Name: ws.Name, AgentCount: len(ws.AgentInstances)}
+	out := WorkspaceSnapshot{WorkspaceID: ws.ID, WorkspaceSlug: ws.FolderSlug, Name: ws.Name, AgentCount: len(ws.AgentInstances)}
 	var gaps []string
 
 	for _, task := range ws.Tasks {
@@ -324,7 +326,7 @@ func buildWorkspaceSnapshot(ctx context.Context, sources SnapshotSources, ws *wo
 			continue
 		}
 		out.OpenTasks = append(out.OpenTasks, TaskSnapshot{
-			Ref:           SourceRef{WorkspaceID: ws.ID, EntityType: "task", EntityID: task.ID, Timestamp: task.CreatedAt},
+			Ref:           SourceRef{WorkspaceID: ws.ID, WorkspaceSlug: ws.FolderSlug, EntityType: "task", EntityID: task.ID, Timestamp: task.CreatedAt},
 			Description:   task.Description,
 			Status:        string(task.Status),
 			AssignedAgent: task.To,
@@ -339,7 +341,7 @@ func buildWorkspaceSnapshot(ctx context.Context, sources SnapshotSources, ws *wo
 	for _, st := range ws.ScheduledTasks {
 		nextRun, lastRun := st.NextRun, st.LastRun
 		out.ScheduledTasks = append(out.ScheduledTasks, ScheduledTaskSnapshot{
-			Ref:          SourceRef{WorkspaceID: ws.ID, EntityType: "scheduled_task", EntityID: st.ID, Timestamp: st.UpdatedAt},
+			Ref:          SourceRef{WorkspaceID: ws.ID, WorkspaceSlug: ws.FolderSlug, EntityType: "scheduled_task", EntityID: st.ID, Timestamp: st.UpdatedAt},
 			Name:         st.Name,
 			Enabled:      st.Enabled,
 			FailureCount: st.FailureCount,
@@ -359,7 +361,7 @@ func buildWorkspaceSnapshot(ctx context.Context, sources SnapshotSources, ws *wo
 					continue
 				}
 				out.Opportunities = append(out.Opportunities, OpportunitySnapshot{
-					Ref:      SourceRef{WorkspaceID: ws.ID, EntityType: "opportunity", EntityID: o.ID, Timestamp: o.UpdatedAt},
+					Ref:      SourceRef{WorkspaceID: ws.ID, WorkspaceSlug: ws.FolderSlug, EntityType: "opportunity", EntityID: o.ID, Timestamp: o.UpdatedAt},
 					Title:    o.Title,
 					Priority: o.Priority,
 					Status:   string(o.Status),
@@ -386,7 +388,7 @@ func buildWorkspaceSnapshot(ctx context.Context, sources SnapshotSources, ws *wo
 		} else {
 			for _, item := range items {
 				out.RecentSessions = append(out.RecentSessions, SessionSnapshot{
-					Ref:          SourceRef{WorkspaceID: ws.ID, EntityType: "session", EntityID: item.ID, Timestamp: item.UpdatedAt},
+					Ref:          SourceRef{WorkspaceID: ws.ID, WorkspaceSlug: ws.FolderSlug, EntityType: "session", EntityID: item.ID, Timestamp: item.UpdatedAt},
 					Title:        item.Title,
 					Preview:      item.Preview,
 					AgentName:    item.AgentName,

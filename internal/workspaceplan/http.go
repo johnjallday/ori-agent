@@ -1448,9 +1448,9 @@ func (h *Handler) writeRelatedPlan(w http.ResponseWriter, r *http.Request, works
 		"status_label": plan.Status.Label(),
 		"plan_version": version,
 		"provenance":   provenance,
-		// The canonical route is returned rather than built by the client, so
-		// every entry point lands on the same surface (FR-145, FR-149).
-		"url": fmt.Sprintf("/workspaces/%s/plans/%s", plan.WorkspaceID, plan.ID),
+		// Browser routes require the current workspace slug. The task/run page
+		// already has that server-resolved value and builds the link explicitly;
+		// this UUID-scoped API must not manufacture a page URL from the UUID.
 	}
 	if plan.Progress != nil {
 		summary["progress"] = plan.Progress

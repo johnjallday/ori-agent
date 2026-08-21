@@ -16,16 +16,23 @@ test('computePortalView reports no_workspace when has_workspace is false', () =>
 test('computePortalView reports needs_setup for any non-ready state', () => {
   const view = computePortalView({
     has_workspace: true,
-    workspace_id: 'ws-1',
+    workspace_id: 'workspace-uuid',
+    workspace_slug: 'marketing-site',
     state: 'auth_required'
   });
-  assert.deepEqual(view, { kind: 'needs_setup', state: 'auth_required', workspaceId: 'ws-1' });
+  assert.deepEqual(view, {
+    kind: 'needs_setup',
+    state: 'auth_required',
+    workspaceId: 'workspace-uuid',
+    workspaceSlug: 'marketing-site'
+  });
 });
 
 test('computePortalView reports ready with events/conflicts/next meeting/data gap', () => {
   const view = computePortalView({
     has_workspace: true,
-    workspace_id: 'ws-1',
+    workspace_id: 'workspace-uuid',
+    workspace_slug: 'marketing-site',
     state: 'ready',
     next_meeting: { id: 'evt-1', title: 'Sync' },
     event_count: 3,
@@ -33,7 +40,8 @@ test('computePortalView reports ready with events/conflicts/next meeting/data ga
     data_gap: true
   });
   assert.equal(view.kind, 'ready');
-  assert.equal(view.workspaceId, 'ws-1');
+  assert.equal(view.workspaceId, 'workspace-uuid');
+  assert.equal(view.workspaceSlug, 'marketing-site');
   assert.equal(view.eventCount, 3);
   assert.equal(view.conflictCount, 1);
   assert.equal(view.dataGap, true);

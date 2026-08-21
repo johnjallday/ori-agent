@@ -1684,6 +1684,7 @@ type createWorkspaceImportRequest struct {
 type workspaceImportDuplicate struct {
 	Found         bool   `json:"found"`
 	WorkspaceID   string `json:"workspace_id,omitempty"`
+	WorkspaceSlug string `json:"workspace_slug,omitempty"`
 	WorkspaceName string `json:"workspace_name,omitempty"`
 	DirectoryID   string `json:"directory_id,omitempty"`
 	Path          string `json:"path,omitempty"`

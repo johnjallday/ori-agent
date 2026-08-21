@@ -46,9 +46,17 @@ async function transition(
   });
 }
 
+async function workspaceSlug(request: APIRequestContext, studioId: string): Promise<string> {
+  const response = await request.get(`/api/workspaces/${studioId}`);
+  expect(response.ok()).toBeTruthy();
+  const body = await response.json();
+  return body.folder?.folder_slug || body.workspace?.folder_slug;
+}
+
 /** The workspace page auto-opens modals that swallow clicks; clear them. */
 async function openTickets(page: Page, studioId: string) {
-  await page.goto(`/workspaces/${studioId}`, { waitUntil: 'domcontentloaded' });
+  const slug = await workspaceSlug(page.request, studioId);
+  await page.goto(`/workspaces/${slug}`, { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(2500);
   await page.evaluate(() => {
     document.querySelectorAll('.modal.show').forEach(modal => {
@@ -159,7 +167,8 @@ test.describe('Workspace Ticket Management', () => {
     expect(noteStill.name).toBe('Cache research');
 
     // FR-78: the note page shows the ticket, read-only.
-    await page.goto(`/workspaces/${studioId}/notes/${noteId}`, { waitUntil: 'domcontentloaded' });
+    const slug = await workspaceSlug(request, studioId);
+    await page.goto(`/workspaces/${slug}/notes/${noteId}`, { waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(2500);
     const panel = page.locator('#notePageTickets');
     await expect(panel).toBeVisible();
@@ -257,7 +266,8 @@ test.describe('Workspace Ticket Management', () => {
       title: 'Deep linked work'
     });
 
-    await page.goto(`/workspaces/${studioId}?ticket=${ticket.id}`, {
+    const slug = await workspaceSlug(request, studioId);
+    await page.goto(`/workspaces/${slug}?ticket=${ticket.id}`, {
       waitUntil: 'domcontentloaded'
     });
     await page.waitForTimeout(3500);

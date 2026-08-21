@@ -2434,10 +2434,12 @@ import {
   function publishRouteContext() {
     const selected = findWorkspace(state.flattened, state.selectedId);
     const workspaceId = selected && !isGroupWorkspace(selected) ? selected.id : '';
+    const workspaceSlug = selected && !isGroupWorkspace(selected) ? selected.folder_slug : '';
     const workspaceName = selected ? selected.name : '';
 
     window.oriHomeRouteContext = {
       workspace_id: workspaceId,
+      workspace_slug: workspaceSlug,
       workspace_name: workspaceName,
       origin: 'ask_ori'
     };

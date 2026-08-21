@@ -227,12 +227,13 @@
   }
 
   function renderActivityRow(ev) {
-    const wsId = encodeURIComponent(ev.workspace_id || '');
+    const workspaceSlug = String(ev.workspace_slug || '').trim();
+    const encodedSlug = workspaceSlug ? encodeURIComponent(workspaceSlug) : '';
     // Best-effort target navigation. Notes get a deep link via the workspace
     // notes route; tasks/fires route to the workspace itself.
-    let href = wsId ? `/workspaces/${wsId}` : '#';
-    if (ev.kind === 'note_edited' && wsId && ev.target_id) {
-      href = `/workspaces/${wsId}/notes/${encodeURIComponent(ev.target_id)}`;
+    let href = encodedSlug ? `/workspaces/${encodedSlug}` : '#';
+    if (ev.kind === 'note_edited' && encodedSlug && ev.target_id) {
+      href = `/workspaces/${encodedSlug}/notes/${encodeURIComponent(ev.target_id)}`;
     }
     return `
       <li class="home-row home-row-activity">

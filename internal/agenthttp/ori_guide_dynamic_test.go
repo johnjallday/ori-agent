@@ -39,7 +39,7 @@ func guideWithWorkspaces(items ...*workspace.Workspace) *GuideHandler {
 }
 
 func ws(id, name string) *workspace.Workspace {
-	return &workspace.Workspace{ID: id, Name: name}
+	return &workspace.Workspace{ID: id, Name: name, FolderSlug: workspace.Slugify(name)}
 }
 
 /* ---- resolving real records ---------------------------------------------------- */
@@ -54,8 +54,8 @@ func TestNamingARealWorkspaceOffersToOpenIt(t *testing.T) {
 	if len(resp.Actions) != 1 {
 		t.Fatalf("expected one destination, got %d: %+v", len(resp.Actions), resp.Actions)
 	}
-	if got := resp.Actions[0].Href; got != "/workspaces/abc123" {
-		t.Errorf("expected the resolved id in the href, got %q", got)
+	if got := resp.Actions[0].Href; got != "/workspaces/launch-planning" {
+		t.Errorf("expected the resolved slug in the href, got %q", got)
 	}
 	if !strings.Contains(resp.Answer, "Launch Planning") {
 		t.Errorf("answer should name the workspace, got: %s", resp.Answer)
@@ -101,7 +101,7 @@ func TestLongerWorkspaceNameSubsumesTheShorterOne(t *testing.T) {
 	if len(resp.Actions) != 1 {
 		t.Fatalf("expected one destination, got %d: %+v", len(resp.Actions), resp.Actions)
 	}
-	if resp.Actions[0].Href != "/workspaces/b2" {
+	if resp.Actions[0].Href != "/workspaces/launch-planning" {
 		t.Errorf("expected the longer match, got %q", resp.Actions[0].Href)
 	}
 }
@@ -199,30 +199,28 @@ func TestHostileWorkspaceNamesCannotEscapeIntoActions(t *testing.T) {
 	}
 }
 
-// An id that is not a plain token is not linkable at all.
-//
-// Percent-escaping is not sufficient: Go's mux routes on the decoded path, so
-// an id containing %2F would come back as a real separator and could climb out
-// of /workspace/. Refusing to link is the only safe answer.
-func TestUnsafeWorkspaceIDsAreNotLinked(t *testing.T) {
+// A slug that is not a plain token is not linkable at all.
+func TestUnsafeWorkspaceSlugsAreNotLinked(t *testing.T) {
 	unsafe := []string{"../admin", "a/b", "a?b", "a#b", "a%2Fb", "a b", "", strings.Repeat("x", 200)}
-	for _, id := range unsafe {
-		t.Run(id, func(t *testing.T) {
-			h := guideWithWorkspaces(ws(id, "Escape Hatch Workspace"))
+	for _, slug := range unsafe {
+		t.Run(slug, func(t *testing.T) {
+			workspaceRecord := ws("stable-uuid", "Escape Hatch Workspace")
+			workspaceRecord.FolderSlug = slug
+			h := guideWithWorkspaces(workspaceRecord)
 			resp := askGuide(t, h, "open Escape Hatch Workspace", "/")
 			for _, a := range resp.Actions {
 				if strings.HasPrefix(a.Href, "/workspaces/") {
-					t.Errorf("unsafe id %q was linked as %q", id, a.Href)
+					t.Errorf("unsafe slug %q was linked as %q", slug, a.Href)
 				}
 			}
 		})
 	}
 }
 
-func TestOrdinaryWorkspaceIDsAreLinkable(t *testing.T) {
-	for _, id := range []string{"abc123", "ws-2026-08", "a_b_c", "A1"} {
-		if !isLinkableRecordID(id) {
-			t.Errorf("expected %q to be linkable", id)
+func TestOrdinaryWorkspaceSlugsAreLinkable(t *testing.T) {
+	for _, slug := range []string{"abc123", "ws-2026-08", "a_b_c", "A1"} {
+		if !isLinkableRecordID(slug) {
+			t.Errorf("expected %q to be linkable", slug)
 		}
 	}
 }

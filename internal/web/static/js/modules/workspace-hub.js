@@ -4186,7 +4186,10 @@
     }
 
     if (elements.workspaceCanvasBtn) {
-      elements.workspaceCanvasBtn.href = `/workspaces/${encodeURIComponent(workspace.id)}/canvas`;
+      const slug = String(workspace.folder_slug || '').trim();
+      elements.workspaceCanvasBtn.href = slug
+        ? `/workspaces/${encodeURIComponent(slug)}/canvas`
+        : '#';
     }
   }
 

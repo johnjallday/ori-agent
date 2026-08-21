@@ -38,12 +38,12 @@ export function hrefForRef(ref) {
   if (ref.entity_type === 'email_thread' && ref.entity_id) {
     return `https://mail.google.com/mail/u/0/#all/${encodeURIComponent(ref.entity_id)}`;
   }
-  if (!ref.workspace_id) return '#';
-  const wsId = encodeURIComponent(ref.workspace_id);
+  if (!ref.workspace_slug) return '#';
+  const workspaceSlug = encodeURIComponent(ref.workspace_slug);
   if (ref.entity_type === 'task' && ref.entity_id) {
-    return `/workspaces/${wsId}/task/${encodeURIComponent(ref.entity_id)}`;
+    return `/workspaces/${workspaceSlug}/task/${encodeURIComponent(ref.entity_id)}`;
   }
-  return `/workspaces/${wsId}`;
+  return `/workspaces/${workspaceSlug}`;
 }
 
 // humanizeReason turns the deterministic machine reason tags for email
@@ -496,8 +496,12 @@ export function renderContent(content) {
       return;
     }
     hqWorkspaceId = status.workspace_id;
+    const hqWorkspaceSlug = String(status.workspace?.folder_slug || '').trim();
     section.hidden = false;
-    if (openHQLink) openHQLink.href = `/workspaces/${encodeURIComponent(hqWorkspaceId)}`;
+    if (openHQLink)
+      openHQLink.href = hqWorkspaceSlug
+        ? `/workspaces/${encodeURIComponent(hqWorkspaceSlug)}`
+        : '#';
 
     let config = null;
     try {

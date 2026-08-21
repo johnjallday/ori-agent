@@ -573,21 +573,25 @@ test.describe('Home workspace cockpit', () => {
 
   test('Open Workspace navigates and Enter opens the focused site', async ({ page }) => {
     const id = await ensureWorkspace(page);
+    const workspaceResponse = await page.request.get(`/api/workspaces/${id}`);
+    const workspacePayload = await workspaceResponse.json();
+    const slug = workspacePayload.folder?.folder_slug || workspacePayload.workspace?.folder_slug;
+    expect(slug).toBeTruthy();
     await page.goto('/');
     const site = page.locator(`.ws-map-tile[data-ws-id="${id}"]`);
     await site.waitFor();
     await site.click();
 
     const open = page.locator('[data-cockpit-rail-open]');
-    await expect(open).toHaveAttribute('href', `/workspaces/${id}`);
+    await expect(open).toHaveAttribute('href', `/workspaces/${slug}`);
     await open.click();
-    await page.waitForURL(`**/workspaces/${id}`);
+    await page.waitForURL(`**/workspaces/${slug}`);
 
     // FR125: Enter on a focused site opens it explicitly.
     await page.goto('/');
     await page.locator(`.ws-map-tile[data-ws-id="${id}"]`).focus();
     await page.keyboard.press('Enter');
-    await page.waitForURL(`**/workspaces/${id}`);
+    await page.waitForURL(`**/workspaces/${slug}`);
   });
 
   test('the Map/Tree toggle swaps peer views without adding history entries', async ({ page }) => {

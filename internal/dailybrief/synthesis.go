@@ -212,9 +212,9 @@ func deterministicOpeningSummary(attention []AttentionItem, changes []ChangeItem
 // items were dropped.
 func ValidateAgainstAllowlist(content BriefContent, allowed map[string]SourceRef) (BriefContent, int) {
 	dropped := 0
-	valid := func(ref SourceRef) bool {
-		_, ok := allowed[ref.Key()]
-		return ok
+	canonical := func(ref SourceRef) (SourceRef, bool) {
+		grounded, ok := allowed[ref.Key()]
+		return grounded, ok
 	}
 
 	out := BriefContent{
@@ -224,35 +224,40 @@ func ValidateAgainstAllowlist(content BriefContent, allowed map[string]SourceRef
 		Degraded:       content.Degraded,
 	}
 	for _, item := range content.NeedsAttention {
-		if valid(item.Ref) {
+		if ref, ok := canonical(item.Ref); ok {
+			item.Ref = ref
 			out.NeedsAttention = append(out.NeedsAttention, item)
 		} else {
 			dropped++
 		}
 	}
 	for _, item := range content.SinceLastBrief {
-		if valid(item.Ref) {
+		if ref, ok := canonical(item.Ref); ok {
+			item.Ref = ref
 			out.SinceLastBrief = append(out.SinceLastBrief, item)
 		} else {
 			dropped++
 		}
 	}
 	for _, item := range content.TodaysPlan {
-		if valid(item.Ref) {
+		if ref, ok := canonical(item.Ref); ok {
+			item.Ref = ref
 			out.TodaysPlan = append(out.TodaysPlan, item)
 		} else {
 			dropped++
 		}
 	}
 	for _, item := range content.Resume {
-		if valid(item.Ref) {
+		if ref, ok := canonical(item.Ref); ok {
+			item.Ref = ref
 			out.Resume = append(out.Resume, item)
 		} else {
 			dropped++
 		}
 	}
 	for _, item := range content.SuggestedActions {
-		if valid(item.Ref) {
+		if ref, ok := canonical(item.Ref); ok {
+			item.Ref = ref
 			out.SuggestedActions = append(out.SuggestedActions, item)
 		} else {
 			dropped++

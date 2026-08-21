@@ -642,6 +642,7 @@
         const payload = await this.fetchJSON('/api/workspaces');
         const workspaces = safeArray(payload.workspaces || payload.folders).map(workspace => ({
           id: String(workspace.id || '').trim(),
+          slug: String(workspace.folder_slug || '').trim(),
           name: String(workspace.name || 'Untitled Workspace').trim(),
           description: String(workspace.description || '').trim(),
           agents: safeArray(workspace.agents)
@@ -2262,7 +2263,12 @@
         );
         this.launchModal?.hide();
         if (payload.parent_task?.id) {
-          window.location.href = `/workspaces/${encodeURIComponent(workspaceId)}`;
+          const workspaceSlug = String(
+            this.state.workspaces.find(workspace => workspace.id === workspaceId)?.slug || ''
+          ).trim();
+          if (workspaceSlug) {
+            window.location.href = `/workspaces/${encodeURIComponent(workspaceSlug)}`;
+          }
           return;
         }
       } catch (error) {

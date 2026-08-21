@@ -3,7 +3,6 @@ package reapersetup
 import (
 	"context"
 	"errors"
-	"net/url"
 	"strings"
 	"time"
 
@@ -333,8 +332,7 @@ func supportedCLIProvider(provider string) bool {
 	}
 }
 
-func runtimeAction(workspaceID, code, label string) *runtimecapability.Action {
-	workspaceID = strings.TrimSpace(workspaceID)
+func runtimeAction(_ string, code, label string) *runtimecapability.Action {
 	code = workspace.NormalizeRuntimeIdentifier(code)
 	if code == "" || strings.TrimSpace(label) == "" {
 		return nil
@@ -343,7 +341,6 @@ func runtimeAction(workspaceID, code, label string) *runtimecapability.Action {
 		Token: code,
 		Code:  code,
 		Label: strings.TrimSpace(label),
-		URL:   "/workspaces/" + url.PathEscape(workspaceID) + "?runtime_setup=1&action=" + url.QueryEscape(code),
 	}
 }
 

@@ -6,12 +6,13 @@ test('describeDirectoryEntry marks a registered workspace folder as openable', (
   const node = {
     name: 'member-folder',
     isWorkspace: true,
-    workspaceId: 'ws-123',
+    workspaceId: 'workspace-uuid',
+    workspaceSlug: 'clients',
     workspaceName: 'Clients'
   };
   const d = describeDirectoryEntry(node);
   assert.equal(d.isWorkspace, true);
-  assert.equal(d.openHref, '/workspaces/ws-123');
+  assert.equal(d.openHref, '/workspaces/clients');
   // Prefers the registered workspace name over the folder name.
   assert.equal(d.label, 'Clients');
 });
@@ -20,10 +21,11 @@ test('describeDirectoryEntry falls back to the folder name when unnamed', () => 
   const d = describeDirectoryEntry({
     name: 'member-folder',
     isWorkspace: true,
-    workspaceId: 'ws-9'
+    workspaceId: 'workspace-uuid',
+    workspaceSlug: 'member-folder'
   });
   assert.equal(d.label, 'member-folder');
-  assert.equal(d.openHref, '/workspaces/ws-9');
+  assert.equal(d.openHref, '/workspaces/member-folder');
 });
 
 test('describeDirectoryEntry leaves ordinary folders/files untouched', () => {
@@ -41,7 +43,12 @@ test('describeDirectoryEntry leaves ordinary folders/files untouched', () => {
   assert.equal(describeDirectoryEntry(null).label, 'Untitled');
 });
 
-test('describeDirectoryEntry encodes the workspace id in the href', () => {
-  const d = describeDirectoryEntry({ isWorkspace: true, workspaceId: 'a b/c', name: 'x' });
+test('describeDirectoryEntry encodes the workspace slug in the href', () => {
+  const d = describeDirectoryEntry({
+    isWorkspace: true,
+    workspaceId: 'workspace-uuid',
+    workspaceSlug: 'a b/c',
+    name: 'x'
+  });
   assert.equal(d.openHref, '/workspaces/a%20b%2Fc');
 });

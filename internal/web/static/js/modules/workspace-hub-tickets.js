@@ -91,6 +91,7 @@
       displayNumber: raw.display_number || formatTicketNumber(raw.number),
       qualifiedNumber: raw.qualified_number || '',
       owningWorkspaceId: raw.owning_workspace_id || '',
+      owningWorkspaceSlug: raw.owning_workspace_slug || '',
       owningWorkspaceName: raw.owning_workspace_name || '',
       title: raw.title || '',
       description: raw.description || '',
@@ -138,6 +139,7 @@
       state: raw.state || '',
       stateLabel: raw.state_label || stateLabel(raw.state),
       owningWorkspaceId: raw.owning_workspace_id || '',
+      owningWorkspaceSlug: raw.owning_workspace_slug || '',
       owningWorkspaceName: raw.owning_workspace_name || ''
     };
   }
@@ -391,7 +393,8 @@
       return ((payload && payload.notes) || []).map(note => ({
         id: note.id || '',
         title: note.title || '',
-        workspaceId: note.workspace_id || ''
+        workspaceId: note.workspace_id || '',
+        workspaceSlug: note.workspace_slug || ''
       }));
     },
 
@@ -1304,7 +1307,7 @@
 
       const link = document.createElement('a');
       link.className = 'ticket-detail-note-link';
-      link.href = `/workspaces/${encodeURIComponent(note.workspaceId)}/notes/${encodeURIComponent(note.id)}`;
+      link.href = `/workspaces/${encodeURIComponent(note.workspaceSlug)}/notes/${encodeURIComponent(note.id)}`;
       link.textContent = note.title || note.id;
 
       const unlink = document.createElement('button');

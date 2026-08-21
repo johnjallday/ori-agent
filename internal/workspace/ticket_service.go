@@ -185,6 +185,16 @@ func (s *TicketService) WorkspaceName(workspaceID string) string {
 	return ws.Name
 }
 
+// WorkspaceSlug returns the current browser-route slug without treating the
+// stable workspace ID as a page destination.
+func (s *TicketService) WorkspaceSlug(workspaceID string) string {
+	ws, err := s.store.Get(workspaceID)
+	if err != nil {
+		return ""
+	}
+	return ws.FolderSlug
+}
+
 // Get returns one Ticket from its owning workspace. A ticketID that does not
 // exist in workspaceID is reported as ErrTicketNotFound whether it is unknown
 // or simply owned by someone else — a caller must never be able to use this
@@ -198,7 +208,7 @@ func (s *TicketService) Get(workspaceID, ticketID string) (*Ticket, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: %s", ErrTicketNotFound, ticketID)
 	}
-	ticket := NewTicket(task, ws.ID, ws.Name)
+	ticket := NewTicket(task, ws.ID, ws.Name, ws.FolderSlug)
 	ticket.Archived = ticket.State.Terminal() && ticketIsArchived(task, s.clock())
 	attachTicketHierarchy(ws, task, &ticket)
 	return &ticket, nil
@@ -214,7 +224,7 @@ func attachTicketHierarchy(ws *Workspace, task *Task, ticket *Ticket) {
 	if task.ParentTaskID != "" {
 		for i := range ws.Tasks {
 			if ws.Tasks[i].ID == task.ParentTaskID {
-				parent := NewTicketSummary(&ws.Tasks[i], ws.ID, ws.Name)
+				parent := NewTicketSummary(&ws.Tasks[i], ws.ID, ws.Name, ws.FolderSlug)
 				ticket.Parent = &parent
 				break
 			}
@@ -225,7 +235,7 @@ func attachTicketHierarchy(ws *Workspace, task *Task, ticket *Ticket) {
 		if ws.Tasks[i].ParentTaskID != task.ID {
 			continue
 		}
-		ticket.Subtickets = append(ticket.Subtickets, NewTicketSummary(&ws.Tasks[i], ws.ID, ws.Name))
+		ticket.Subtickets = append(ticket.Subtickets, NewTicketSummary(&ws.Tasks[i], ws.ID, ws.Name, ws.FolderSlug))
 	}
 	// Preserve the author's declared subtask order, falling back to the stable
 	// ID so two unordered subtickets never swap between reads.
@@ -340,7 +350,7 @@ func localTickets(ws *Workspace, filter *ticketFilter) []Ticket {
 		if !filter.matches(task, ws.ID) {
 			continue
 		}
-		ticket := NewTicket(task, ws.ID, ws.Name)
+		ticket := NewTicket(task, ws.ID, ws.Name, ws.FolderSlug)
 		ticket.Archived = ticket.State.Terminal() && ticketIsArchived(task, filter.now)
 		out = append(out, ticket)
 	}
@@ -396,7 +406,7 @@ func (s *TicketService) Create(input TicketCreateInput) (*Ticket, error) {
 	if err != nil {
 		return nil, err
 	}
-	ticket := NewTicket(&created, created.WorkspaceID, s.WorkspaceName(created.WorkspaceID))
+	ticket := NewTicket(&created, created.WorkspaceID, s.WorkspaceName(created.WorkspaceID), s.WorkspaceSlug(created.WorkspaceID))
 	s.publishTicket(EventTicketCreated, ticket, nil)
 	// Legacy consumers (Details panel, drawer, Quest Board) still listen for
 	// the old capture events; keep them fed during the compatibility window.
@@ -624,7 +634,7 @@ func (s *TicketService) Update(workspaceID, ticketID string, input TicketUpdateI
 		return nil, err
 	}
 
-	ticket := NewTicket(&updated, updated.WorkspaceID, s.WorkspaceName(updated.WorkspaceID))
+	ticket := NewTicket(&updated, updated.WorkspaceID, s.WorkspaceName(updated.WorkspaceID), s.WorkspaceSlug(updated.WorkspaceID))
 	s.publishTicket(EventTicketUpdated, ticket, nil)
 	return &ticket, nil
 }
@@ -744,7 +754,7 @@ func (s *TicketService) Transition(workspaceID, ticketID string, input TicketTra
 		return nil, err
 	}
 
-	ticket := NewTicket(&updated, updated.WorkspaceID, s.WorkspaceName(updated.WorkspaceID))
+	ticket := NewTicket(&updated, updated.WorkspaceID, s.WorkspaceName(updated.WorkspaceID), s.WorkspaceSlug(updated.WorkspaceID))
 	if noop {
 		return &ticket, nil
 	}

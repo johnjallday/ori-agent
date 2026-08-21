@@ -2388,10 +2388,10 @@ export class WorkspaceCommandView {
       return;
     }
     if (a === 'open-watchtower-workspace' && section === 'watchtower') {
-      const workspaceID = String(id || '').trim();
-      if (!workspaceID) return;
+      const workspaceSlug = String(id || '').trim();
+      if (!workspaceSlug) return;
       this.closeStatModal();
-      const target = '/workspaces/' + encodeURIComponent(workspaceID);
+      const target = '/workspaces/' + encodeURIComponent(workspaceSlug);
       if (typeof window !== 'undefined' && window.location) {
         if (typeof window.location.assign === 'function') window.location.assign(target);
         else window.location.href = target;
@@ -2409,10 +2409,12 @@ export class WorkspaceCommandView {
       return;
     }
     if (a === 'calendar-ops-open' && section === 'calendar-ops') {
-      const workspaceID = String(this.calendarOpsPortalState().calendarWorkspaceID || '').trim();
-      if (!workspaceID) return;
+      const workspaceSlug = String(
+        this.calendarOpsPortalState().calendarWorkspaceSlug || ''
+      ).trim();
+      if (!workspaceSlug) return;
       this.closeStatModal();
-      const target = '/workspaces/' + encodeURIComponent(workspaceID) + '?panel=calendar';
+      const target = '/workspaces/' + encodeURIComponent(workspaceSlug) + '?panel=calendar';
       if (typeof window !== 'undefined' && window.location) {
         if (typeof window.location.assign === 'function') window.location.assign(target);
         else window.location.href = target;
@@ -4883,10 +4885,11 @@ export class WorkspaceCommandView {
     const details = String(task.details || '').trim();
     const isOwnedElsewhere =
       item.owning_workspace_id && item.owning_workspace_id !== this.workspaceId();
+    const ownerSlug = String(item.owning_workspace_slug || '').trim();
     const ownerLink =
-      isOwnedElsewhere && item.owning_workspace_id
+      isOwnedElsewhere && ownerSlug
         ? '<a class="ws-cmd-drawer-row-owner-link" href="/workspaces/' +
-          encodeURIComponent(item.owning_workspace_id) +
+          encodeURIComponent(ownerSlug) +
           '">' +
           escapeHtml(item.owning_workspace_name || 'Owning workspace') +
           '</a>'
@@ -5455,6 +5458,7 @@ export class WorkspaceCommandView {
         status: 'idle',
         exists: false,
         workspaceID: '',
+        workspaceSlug: '',
         workspaceName: '',
         openFollowupCount: 0,
         error: ''
@@ -5495,6 +5499,7 @@ export class WorkspaceCommandView {
         current.status = 'ready';
         current.exists = !!st.exists;
         current.workspaceID = String(st.workspace_id || '');
+        current.workspaceSlug = String(st.workspace_slug || '');
         current.workspaceName = String(st.workspace_name || '');
         current.openFollowupCount = Number(st.open_followup_count || 0);
         current.error = '';
@@ -5651,6 +5656,7 @@ export class WorkspaceCommandView {
         status: 'idle',
         hasWorkspace: false,
         calendarWorkspaceID: '',
+        calendarWorkspaceSlug: '',
         state: '',
         nextMeeting: null,
         eventCount: 0,
@@ -5741,6 +5747,7 @@ export class WorkspaceCommandView {
         current.status = 'ready';
         current.hasWorkspace = !!(payload && payload.has_workspace);
         current.calendarWorkspaceID = String((payload && payload.workspace_id) || '');
+        current.calendarWorkspaceSlug = String((payload && payload.workspace_slug) || '');
         current.state = String((payload && payload.state) || '');
         current.nextMeeting = (payload && payload.next_meeting) || null;
         current.eventCount = Number((payload && payload.event_count) || 0);
@@ -5885,7 +5892,7 @@ export class WorkspaceCommandView {
   }
 
   watchtowerItemHTML(item) {
-    const workspaceID = String(item.workspace_id || '').trim();
+    const workspaceSlug = String(item.workspace_slug || '').trim();
     const severity = String(item.severity || 'attention').trim();
     const title = String(item.title || 'Attention item').trim() || 'Attention item';
     const description = String(item.description || '').trim();
@@ -5897,7 +5904,7 @@ export class WorkspaceCommandView {
       '<button type="button" class="ws-cmd-watchtower-item is-' +
       escapeHtml(severity.toLowerCase()) +
       '" data-cmd-modal-action="open-watchtower-workspace" data-cmd-id="' +
-      escapeHtml(workspaceID) +
+      escapeHtml(workspaceSlug) +
       '" aria-label="Open ' +
       escapeHtml(title) +
       ' in ' +
@@ -7520,8 +7527,8 @@ export class WorkspaceCommandView {
       return;
     }
     const state = this.emailOpsState();
-    if (state.status === 'ready' && state.exists && state.workspaceID) {
-      this.navigateTo('/workspaces/' + encodeURIComponent(state.workspaceID));
+    if (state.status === 'ready' && state.exists && state.workspaceSlug) {
+      this.navigateTo('/workspaces/' + encodeURIComponent(state.workspaceSlug));
       return;
     }
     this.navigateTo('/workspaces?create=1&blueprint=email-ops');

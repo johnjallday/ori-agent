@@ -64,7 +64,7 @@ const COHORT_SIZE = 5;
 /** Stable prefix so a re-run can find (and reuse) the seeded cohort. */
 const FIXTURE_PREFIX = 'TTfA Bench';
 
-type SeededWorkspace = { id: string; name: string };
+type SeededWorkspace = { id: string; name: string; folder_slug: string };
 
 async function listWorkspaces(request: APIRequestContext): Promise<SeededWorkspace[]> {
   const res = await request.get('/api/workspaces');
@@ -84,14 +84,17 @@ async function createWorkspace(request: APIRequestContext, name: string): Promis
       workspace_preset: 'general'
     }
   });
-  const body = (await res.json().catch(() => ({}))) as { folder?: { id?: string } };
+  const body = (await res.json().catch(() => ({}))) as {
+    folder?: { id?: string; folder_slug?: string };
+  };
   const id = body.folder?.id;
-  if (!res.ok() || !id) {
+  const folderSlug = body.folder?.folder_slug;
+  if (!res.ok() || !id || !folderSlug) {
     throw new Error(
       `create workspace failed (${res.status()}): ${JSON.stringify(body).slice(0, 300)}`
     );
   }
-  return { id, name };
+  return { id, name, folder_slug: folderSlug };
 }
 
 /**
@@ -173,16 +176,16 @@ async function runJourney(
     const openAction = page.locator('#cockpitContextModal [data-cockpit-rail-open]');
     await expect(openAction).toBeVisible();
     await openAction.click();
-    await page.waitForURL(`**/workspaces/${target.id}`);
+    await page.waitForURL(`**/workspaces/${target.folder_slug}`);
     await expect(page.locator('#workspaceCommandView')).toBeVisible();
     return { ms: Date.now() - start, path: 'cockpit-map-select-then-open' };
   }
 
   // --- Path B: the Operations Board card straight to the workspace. ---
-  const card = page.locator(`a.home-workspace-card[href="/workspaces/${target.id}"]`);
+  const card = page.locator(`a.home-workspace-card[href="/workspaces/${target.folder_slug}"]`);
   if (await card.count()) {
     await card.first().click();
-    await page.waitForURL(`**/workspaces/${target.id}`);
+    await page.waitForURL(`**/workspaces/${target.folder_slug}`);
     await expect(page.locator('#workspaceCommandView')).toBeVisible();
     return { ms: Date.now() - start, path: 'home-recent-card' };
   }
@@ -199,7 +202,7 @@ async function runJourney(
   // The legacy Map opens on a repeat click of an already-selected tile.
   await launcherSite.first().click();
   await launcherSite.first().click();
-  await page.waitForURL(`**/workspaces/${target.id}**`);
+  await page.waitForURL(`**/workspaces/${target.folder_slug}**`);
   await expect(page.locator('#workspaceCommandView')).toBeVisible();
   return { ms: Date.now() - start, path: 'launcher-detour' };
 }

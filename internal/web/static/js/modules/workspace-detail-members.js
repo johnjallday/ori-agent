@@ -412,11 +412,12 @@ export class WorkspaceMembersPanel {
         : '';
     const desc = member.description || '';
     const safeId = escapeHtml(member.id);
+    const safeSlug = escapeHtml(member.folder_slug || '');
     const safeName = escapeHtml(name);
 
     return `
       <div class="group-member-row" role="listitem">
-        <button type="button" class="group-member-open" data-member-id="${safeId}" aria-label="Open ${safeName}">
+        <button type="button" class="group-member-open" data-member-id="${safeId}" data-member-slug="${safeSlug}" aria-label="Open ${safeName}">
           <span class="group-member-kind">${kindLabel}</span>
           <span class="group-member-name">${safeName}</span>
           ${desc ? `<span class="group-member-desc">${escapeHtml(desc)}</span>` : ''}
@@ -435,7 +436,8 @@ export class WorkspaceMembersPanel {
     if (!container) return;
     container.querySelectorAll('[data-member-id]').forEach(btn => {
       btn.addEventListener('click', () => {
-        window.location.href = `/workspaces/${encodeURIComponent(btn.getAttribute('data-member-id'))}`;
+        const slug = String(btn.getAttribute('data-member-slug') || '').trim();
+        if (slug) window.location.href = `/workspaces/${encodeURIComponent(slug)}`;
       });
     });
     container.querySelectorAll('[data-member-remove]').forEach(btn => {
@@ -656,6 +658,7 @@ export class WorkspaceMembersPanel {
         return (data.notes || []).map(note => ({
           ...note,
           __wsId: member.id,
+          __wsSlug: member.folder_slug || '',
           __wsName: member.name || member.id
         }));
       })
@@ -671,6 +674,7 @@ export class WorkspaceMembersPanel {
         return extractFileItems(attachments).map(file => ({
           ...file,
           __wsId: member.id,
+          __wsSlug: member.folder_slug || '',
           __wsName: member.name || member.id
         }));
       })
@@ -712,8 +716,8 @@ export class WorkspaceMembersPanel {
   }
 
   noteRowHtml(note) {
-    const wsId = note.__wsId || note.workspace_id;
-    const link = `/workspaces/${encodeURIComponent(wsId)}/notes/${encodeURIComponent(note.id)}`;
+    const workspaceSlug = note.__wsSlug || note.workspace_slug;
+    const link = `/workspaces/${encodeURIComponent(workspaceSlug)}/notes/${encodeURIComponent(note.id)}`;
     return `
       <a class="group-task-row" role="listitem" href="${escapeHtml(link)}">
         <span class="group-task-desc">${escapeHtml(note.name || 'Untitled note')}</span>
@@ -722,7 +726,7 @@ export class WorkspaceMembersPanel {
   }
 
   fileRowHtml(file) {
-    const href = file.url || `/workspaces/${encodeURIComponent(file.__wsId)}`;
+    const href = file.url || `/workspaces/${encodeURIComponent(file.__wsSlug)}`;
     return `
       <a class="group-task-row" role="listitem" href="${escapeHtml(href)}">
         <span class="group-task-desc">${escapeHtml(file.title || 'File')}</span>
@@ -747,6 +751,7 @@ export class WorkspaceMembersPanel {
         return (data.tasks || []).map(task => ({
           ...task,
           __workspaceId: member.id,
+          __workspaceSlug: member.folder_slug || '',
           __workspaceName: member.name || member.id
         }));
       })
@@ -848,8 +853,8 @@ export class WorkspaceMembersPanel {
     const status = normalizeStatus(task.status);
     const wsName = task.__workspaceName || '';
     const scheduled = isScheduledTask(task) ? ' · scheduled' : '';
-    const wsId = task.__workspaceId || task.workspace_id;
-    const link = `/workspaces/${encodeURIComponent(wsId)}/task/${encodeURIComponent(task.id)}`;
+    const workspaceSlug = task.__workspaceSlug || task.workspace_slug;
+    const link = `/workspaces/${encodeURIComponent(workspaceSlug)}/task/${encodeURIComponent(task.id)}`;
     return `
       <a class="group-task-row" role="listitem" href="${escapeHtml(link)}">
         <span class="group-task-desc">${escapeHtml(desc)}</span>

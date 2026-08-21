@@ -7922,6 +7922,7 @@
     // already names, the routing result, or any confirmation step (PRD FR98).
     if (!workspaceId && window.oriHomeRouteContext && window.oriHomeRouteContext.workspace_id) {
       workspaceId = String(window.oriHomeRouteContext.workspace_id).trim();
+      workspaceSlug = String(window.oriHomeRouteContext.workspace_slug || '').trim();
     }
 
     return {
@@ -7951,7 +7952,12 @@
           routeContext.surface || fallback.surface || inferHomeRouteSurface(pagePath)
         ).trim() || inferHomeRouteSurface(pagePath),
       page_path: pagePath,
-      workspace_id: String(routeContext.workspace_id || '').trim(),
+      workspace_id: String(routeContext.workspace_id || fallback.workspace_id || '').trim(),
+      workspace_slug: String(
+        routeContext.workspace_slug ||
+          fallback.workspace_slug ||
+          extractWorkspaceSlugFromPath(pagePath)
+      ).trim(),
       task_id: String(
         routeContext.task_id || fallback.task_id || extractTaskIdFromPath(pagePath)
       ).trim(),
@@ -7999,6 +8005,7 @@
     return {
       state: normalizeToken(raw.state),
       selectedWorkspaceId: String(raw.selected_workspace_id || '').trim(),
+      selectedWorkspaceSlug: String(raw.selected_workspace_slug || '').trim(),
       selectedWorkspaceName: String(raw.selected_workspace_name || '').trim(),
       confidence: Number(raw.confidence || 0),
       reasons: Array.isArray(raw.reasons) ? raw.reasons : [],
@@ -8007,6 +8014,7 @@
         .map(function (candidate) {
           return {
             id: String((candidate && candidate.id) || '').trim(),
+            slug: String((candidate && candidate.slug) || '').trim(),
             name: String((candidate && candidate.name) || '').trim(),
             score: Number((candidate && candidate.score) || 0),
             reasons: Array.isArray(candidate && candidate.reasons) ? candidate.reasons : []
@@ -8719,8 +8727,10 @@
             intentKey: intent && intent.key,
             source: 'repair'
           });
-          window.location.href =
-            '/workspaces/' + encodeURIComponent(resolution.selectedWorkspaceId);
+          if (resolution.selectedWorkspaceSlug) {
+            window.location.href =
+              '/workspaces/' + encodeURIComponent(resolution.selectedWorkspaceSlug);
+          }
         }
       },
       {
@@ -10028,6 +10038,7 @@
   async function runWorkspaceScheduleSummaryDirect(prompt, routeContext) {
     var activeContext = normalizeHomeRouteContext(routeContext);
     var workspaceId = String((activeContext && activeContext.workspace_id) || '').trim();
+    var workspaceSlug = String((activeContext && activeContext.workspace_slug) || '').trim();
     if (!workspaceId) {
       appendHomeAssistantMessage(
         'assistant',
@@ -10100,7 +10111,9 @@
             label: 'Open Workspace',
             variant: 'primary',
             onClick: function () {
-              window.location.href = '/workspaces/' + encodeURIComponent(workspaceId);
+              if (workspaceSlug) {
+                window.location.href = '/workspaces/' + encodeURIComponent(workspaceSlug);
+              }
             }
           },
           {
@@ -10152,7 +10165,9 @@
           label: 'Open Workspace',
           variant: 'primary',
           onClick: function () {
-            window.location.href = '/workspaces/' + encodeURIComponent(workspaceId);
+            if (workspaceSlug) {
+              window.location.href = '/workspaces/' + encodeURIComponent(workspaceSlug);
+            }
           }
         },
         {
@@ -10199,7 +10214,9 @@
           label: 'Open Workspace',
           variant: 'secondary',
           onClick: function () {
-            window.location.href = '/workspaces/' + encodeURIComponent(workspaceId);
+            if (workspaceSlug) {
+              window.location.href = '/workspaces/' + encodeURIComponent(workspaceSlug);
+            }
           }
         }
       ]);
@@ -11049,13 +11066,13 @@
     return false;
   }
 
-  function openWorkspaceAgentAddFlow(workspaceId) {
+  function openWorkspaceAgentAddFlow(workspaceId, workspaceSlug) {
     if (window.workspaceDetail && typeof window.workspaceDetail.openAddAgentModal === 'function') {
       window.workspaceDetail.openAddAgentModal();
       return true;
     }
-    if (workspaceId) {
-      window.location.href = '/workspaces/' + encodeURIComponent(workspaceId);
+    if (workspaceSlug) {
+      window.location.href = '/workspaces/' + encodeURIComponent(workspaceSlug);
       return true;
     }
     return false;
@@ -11701,7 +11718,7 @@
     });
   }
 
-  async function handleWorkspaceScheduledTaskCreation(content, workspaceId) {
+  async function handleWorkspaceScheduledTaskCreation(content, workspaceId, workspaceSlug) {
     var prompt = String(content || '').trim();
     if (!prompt) return false;
 
@@ -11836,8 +11853,8 @@
           window.workspaceDetail.showSchedulesModal();
           return;
         }
-        if (workspaceId) {
-          window.location.href = '/workspaces/' + encodeURIComponent(workspaceId);
+        if (workspaceSlug) {
+          window.location.href = '/workspaces/' + encodeURIComponent(workspaceSlug);
         }
       }
     };
@@ -11959,7 +11976,7 @@
           label: 'Pick Agent',
           variant: 'secondary',
           onClick: function () {
-            openWorkspaceAgentAddFlow(workspaceId);
+            openWorkspaceAgentAddFlow(workspaceId, workspaceSlug);
           }
         },
         {
@@ -12086,6 +12103,7 @@
     if (!hasWorkspaceRouteContext(routeContext)) return false;
 
     var workspaceId = String(routeContext.workspace_id || '').trim();
+    var workspaceSlug = String(routeContext.workspace_slug || '').trim();
     if (!workspaceId) return false;
 
     var command = String(commandPayload.command).trim();
@@ -12126,7 +12144,11 @@
           return true;
         }
 
-        var scheduledTaskHandled = await handleWorkspaceScheduledTaskCreation(content, workspaceId);
+        var scheduledTaskHandled = await handleWorkspaceScheduledTaskCreation(
+          content,
+          workspaceId,
+          workspaceSlug
+        );
         if (scheduledTaskHandled) {
           return true;
         }

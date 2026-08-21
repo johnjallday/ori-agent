@@ -94,7 +94,7 @@ func TestAsk_IntrospectionAnswerWithGroundedActions(t *testing.T) {
 		if a.RequiresConfirmation {
 			t.Errorf("introspection action unexpectedly requires confirmation: %+v", a)
 		}
-		if a.Type == HomeActionOpenWorkspace && a.Href == "/workspaces/ws-1" {
+		if a.Type == HomeActionOpenWorkspace && a.Href == "/workspaces/alpha" {
 			foundOpen = true
 		}
 	}

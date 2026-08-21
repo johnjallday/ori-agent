@@ -43,12 +43,14 @@ export function computePortalView(payload) {
   }
   const state = String(payload.state || '');
   const workspaceId = String(payload.workspace_id || '');
+  const workspaceSlug = String(payload.workspace_slug || '');
   if (state !== 'ready') {
-    return { kind: 'needs_setup', state, workspaceId };
+    return { kind: 'needs_setup', state, workspaceId, workspaceSlug };
   }
   return {
     kind: 'ready',
     workspaceId,
+    workspaceSlug,
     nextMeeting: payload.next_meeting || null,
     eventCount: Number(payload.event_count || 0),
     conflictCount: Number(payload.conflict_count || 0),
@@ -130,9 +132,10 @@ export function renderBodyHTML(view) {
     const view = computePortalView(payload);
     section.dataset.state = view.kind;
     section.dataset.workspaceId = view.workspaceId || '';
+    section.dataset.workspaceSlug = view.workspaceSlug || '';
     if (openLink) {
-      if (view.kind === 'ready' && view.workspaceId) {
-        openLink.href = `/workspaces/${encodeURIComponent(view.workspaceId)}?panel=calendar`;
+      if (view.kind === 'ready' && view.workspaceSlug) {
+        openLink.href = `/workspaces/${encodeURIComponent(view.workspaceSlug)}?panel=calendar`;
         openLink.hidden = false;
       } else {
         openLink.hidden = true;
@@ -152,9 +155,9 @@ export function renderBodyHTML(view) {
         return;
       }
       if (role === 'finish-setup') {
-        const workspaceId = section.dataset.workspaceId || '';
-        window.location.href = workspaceId
-          ? `/workspaces/${encodeURIComponent(workspaceId)}?panel=calendar`
+        const workspaceSlug = section.dataset.workspaceSlug || '';
+        window.location.href = workspaceSlug
+          ? `/workspaces/${encodeURIComponent(workspaceSlug)}?panel=calendar`
           : '/workspaces';
       }
     });

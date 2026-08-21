@@ -18,6 +18,7 @@ const watchtowerWorkspaceIDQuery = "workspace_id"
 // workspace without exposing the entity's full content.
 type WatchtowerItem struct {
 	WorkspaceID   string `json:"workspace_id"`
+	WorkspaceSlug string `json:"workspace_slug"`
 	WorkspaceName string `json:"workspace_name"`
 	ItemType      string `json:"item_type"`
 	EntityID      string `json:"entity_id"`
@@ -98,6 +99,7 @@ func buildWatchtowerResponse(snapshot dailybrief.Snapshot) WatchtowerResponse {
 			}
 			response.Items = append(response.Items, newWatchtowerItem(
 				workspaceSnapshot.WorkspaceID,
+				workspaceSnapshot.WorkspaceSlug,
 				workspaceSnapshot.Name,
 				"task",
 				task.Ref.EntityID,
@@ -115,6 +117,7 @@ func buildWatchtowerResponse(snapshot dailybrief.Snapshot) WatchtowerResponse {
 			}
 			response.Items = append(response.Items, newWatchtowerItem(
 				workspaceSnapshot.WorkspaceID,
+				workspaceSnapshot.WorkspaceSlug,
 				workspaceSnapshot.Name,
 				"scheduled_task",
 				scheduled.Ref.EntityID,
@@ -133,6 +136,7 @@ func buildWatchtowerResponse(snapshot dailybrief.Snapshot) WatchtowerResponse {
 			}
 			response.Items = append(response.Items, newWatchtowerItem(
 				workspaceSnapshot.WorkspaceID,
+				workspaceSnapshot.WorkspaceSlug,
 				workspaceSnapshot.Name,
 				"opportunity",
 				opportunity.Ref.EntityID,
@@ -175,9 +179,10 @@ const (
 	watchtowerRankHighOpportunity
 )
 
-func newWatchtowerItem(workspaceID, workspaceName, itemType, entityID, title, description, severity string, timestamp time.Time, rank int) WatchtowerItem {
+func newWatchtowerItem(workspaceID, workspaceSlug, workspaceName, itemType, entityID, title, description, severity string, timestamp time.Time, rank int) WatchtowerItem {
 	item := WatchtowerItem{
 		WorkspaceID:   workspaceID,
+		WorkspaceSlug: workspaceSlug,
 		WorkspaceName: workspaceName,
 		ItemType:      itemType,
 		EntityID:      entityID,

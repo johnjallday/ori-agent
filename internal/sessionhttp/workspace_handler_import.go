@@ -777,6 +777,7 @@ func (h *Handler) findDuplicateImportedWorkspace(ctx context.Context, normalized
 				return workspaceImportDuplicate{
 					Found:         true,
 					WorkspaceID:   ws.ID,
+					WorkspaceSlug: ws.FolderSlug,
 					WorkspaceName: ws.Name,
 					DirectoryID:   ref.ID,
 					Path:          ref.Path,

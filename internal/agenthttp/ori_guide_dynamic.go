@@ -87,21 +87,15 @@ func resolveWorkspaceDestinations(store workspace.Store, question string) []dyna
 		if len(lower) < 3 || !strings.Contains(q, lower) {
 			continue
 		}
-		// Escaping is not enough here. Go's mux routes on the *decoded* path, so
-		// an id containing %2F would come back as a real separator and could
-		// climb out of /workspace/. An id that is not a plain token is simply
-		// not linkable, and skipping it is safer than encoding around it.
-		if !isLinkableRecordID(ws.ID) {
+		// Browser destinations use the globally unique folder slug. Keep the
+		// stable UUID in ID for actions and route only a plain slug token.
+		if !isLinkableRecordID(ws.FolderSlug) {
 			continue
 		}
 		matches = append(matches, dynamicMatch{
-			ID:   ws.ID,
-			Name: name,
-			// The route is /workspaces/{id}; the singular form 404s. The client's
-			// same-origin check passes either way — it validates the shape of a
-			// path, not that the path exists — so nothing caught this until the
-			// link was actually followed.
-			Href:  "/workspaces/" + url.PathEscape(ws.ID),
+			ID:    ws.ID,
+			Name:  name,
+			Href:  "/workspaces/" + url.PathEscape(ws.FolderSlug),
 			Label: "Open " + name,
 		})
 	}

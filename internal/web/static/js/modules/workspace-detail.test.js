@@ -501,7 +501,7 @@ test('workspace detail entity loaders refresh Command view after completion', as
 });
 
 test('workspace detail reusable identity and tag saves update workspace state', async () => {
-  const page = new WorkspaceDetailPage('workspace-1');
+  const page = new WorkspaceDetailPage('workspace-1', 'new-name');
   page.workspace = { id: 'workspace-1', name: 'Old Name', description: '', tags: ['old'] };
   page.elements = {};
   page.renderWorkspaceInfo = async () => {};
@@ -543,6 +543,51 @@ test('workspace detail reusable identity and tag saves update workspace state', 
     assert.match(requests[0].url, /\/api\/workspaces\/workspace-1\/rename$/);
     assert.match(requests[1].url, /\/api\/workspaces\/workspace-1$/);
     assert.match(requests[1].body, /"tags":\["alpha","beta"\]/);
+  } finally {
+    global.fetch = originalFetch;
+    global.window = originalWindow;
+  }
+});
+
+test('workspace detail rename navigates to the returned slug and preserves route state', async () => {
+  const page = new WorkspaceDetailPage('workspace-uuid', 'old-name');
+  page.workspace = { id: 'workspace-uuid', name: 'Old Name', folder_slug: 'old-name' };
+  page.elements = {};
+  page.renderWorkspaceInfo = async () => {};
+  page.loadNotes = async () => {};
+
+  const originalFetch = global.fetch;
+  const originalWindow = global.window;
+  const assigned = [];
+  global.window = {
+    ...originalWindow,
+    location: {
+      pathname: '/workspaces/old-name',
+      search: '?panel=settings',
+      hash: '#connections',
+      assign: target => assigned.push(target)
+    },
+    Toast: { success() {}, error() {} },
+    workspaceCommand: { refresh() {} }
+  };
+  global.fetch = async url => {
+    assert.match(String(url), /\/api\/workspaces\/workspace-uuid\/rename$/);
+    return {
+      ok: true,
+      json: async () => ({
+        folder: { id: 'workspace-uuid', name: 'New Name', folder_slug: 'new-name' }
+      })
+    };
+  };
+
+  try {
+    const result = await page.saveWorkspaceIdentityField('name', 'New Name', {
+      currentValue: 'Old Name'
+    });
+    assert.equal(result.navigated, true);
+    assert.equal(page.workspaceId, 'workspace-uuid');
+    assert.equal(page.workspaceSlug, 'new-name');
+    assert.deepEqual(assigned, ['/workspaces/new-name?panel=settings#connections']);
   } finally {
     global.fetch = originalFetch;
     global.window = originalWindow;

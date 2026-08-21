@@ -26,15 +26,18 @@ for (const theme of ['light', 'dark']) {
     const workspacesResponse = await page.request.get(`${baseUrl}/api/workspaces?tree=true`);
     expect(workspacesResponse.ok()).toBeTruthy();
     const workspaceData = await workspacesResponse.json();
-    const workspaceId = workspaceData.workspaces?.find(
-      workspace => workspace.kind === 'workspace' && workspace.agent_count > 0
-    )?.id;
+    const workspace = workspaceData.workspaces?.find(
+      candidate => candidate.kind === 'workspace' && candidate.agent_count > 0
+    );
+    const workspaceId = workspace?.id;
+    const workspaceSlug = workspace?.folder_slug;
     expect(workspaceId).toBeTruthy();
+    expect(workspaceSlug).toBeTruthy();
 
     const workspaceActivated = page.waitForResponse(response =>
       response.url().includes('/api/orchestration/workspace/activate?id=')
     );
-    await page.goto(`${baseUrl}/workspaces/${encodeURIComponent(workspaceId)}`, {
+    await page.goto(`${baseUrl}/workspaces/${encodeURIComponent(workspaceSlug)}`, {
       waitUntil: 'domcontentloaded'
     });
     await expect(page.locator('#workspaceCommandView .ws-cmd-title h2')).toBeVisible();

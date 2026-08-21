@@ -2014,6 +2014,20 @@ export class WorkspaceDetailPage {
       }
 
       window.workspaceCommand?.refresh();
+      if (key === 'name') {
+        const appliedSlug = String(updatedWorkspace?.folder_slug || '').trim();
+        if (appliedSlug && appliedSlug !== this.workspaceSlug) {
+          this.workspaceSlug = appliedSlug;
+          window.currentWorkspaceSlug = appliedSlug;
+          const target = workspaceRootURL(appliedSlug, {
+            search: window.location.search,
+            hash: window.location.hash
+          });
+          if (typeof window.location.assign === 'function') window.location.assign(target);
+          else window.location.href = target;
+          return { changed: true, navigated: true, workspace: this.workspace };
+        }
+      }
       return { changed: true, workspace: this.workspace };
     } catch (err) {
       console.error(`Failed to update ${key}:`, err);

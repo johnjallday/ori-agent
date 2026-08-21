@@ -1879,7 +1879,20 @@ window.executeCombinerTask = executeCombinerTask;
  * View workspace (redirect to workspace dashboard)
  */
 async function viewWorkspace(workspaceId) {
-  window.location.href = `/workspaces/${workspaceId}`;
+  let slug =
+    String(workspaceId || '') === String(window.currentWorkspaceId || '')
+      ? String(window.currentWorkspaceSlug || '').trim()
+      : '';
+  if (!slug && workspaceId) {
+    try {
+      const response = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}`);
+      const payload = await response.json();
+      slug = String(payload?.folder?.folder_slug || payload?.workspace?.folder_slug || '').trim();
+    } catch (_error) {
+      slug = '';
+    }
+  }
+  if (slug) window.location.href = `/workspaces/${encodeURIComponent(slug)}`;
 }
 
 /**

@@ -114,7 +114,7 @@ func (s *Service) EvaluateTaskCapability(workspaceID, capability string) (bool, 
 		return false, nil
 	}
 	if !contract.StructurallyValid() {
-		return true, runtimeTaskBlocked(workspaceID, &Blocker{
+		return true, runtimeTaskBlocked(ws.FolderSlug, &Blocker{
 			RequirementKey: key,
 			ReasonCode:     ReasonUnsupportedSnapshot,
 			Summary:        "This workspace's runtime contract is not supported by this version of Ori.",
@@ -124,7 +124,7 @@ func (s *Service) EvaluateTaskCapability(workspaceID, capability string) (bool, 
 	state := ws.GetRuntimeState()
 	mode, selected := resolveSelectedMode(contract, state)
 	if !selected {
-		return true, runtimeTaskBlocked(workspaceID, &Blocker{
+		return true, runtimeTaskBlocked(ws.FolderSlug, &Blocker{
 			RequirementKey: key,
 			ReasonCode:     ReasonModeSelectionRequired,
 			Summary:        "Choose an operating mode before starting this task.",
@@ -132,7 +132,7 @@ func (s *Service) EvaluateTaskCapability(workspaceID, capability string) (bool, 
 		})
 	}
 	if _, required := selectedRequirement(contract, mode, key); !required {
-		return true, runtimeTaskBlocked(workspaceID, &Blocker{
+		return true, runtimeTaskBlocked(ws.FolderSlug, &Blocker{
 			RequirementKey: key,
 			ReasonCode:     ReasonModeNotEnabled,
 			Summary:        "The selected operating mode does not enable this runtime capability.",
@@ -141,7 +141,7 @@ func (s *Service) EvaluateTaskCapability(workspaceID, capability string) (bool, 
 	}
 	status, statusErr := s.Recheck(context.Background(), workspaceID)
 	if statusErr != nil {
-		return true, runtimeTaskBlocked(workspaceID, &Blocker{
+		return true, runtimeTaskBlocked(ws.FolderSlug, &Blocker{
 			RequirementKey: key,
 			ReasonCode:     ReasonRequirementUnsupported,
 			Summary:        "This runtime capability could not be checked.",
@@ -149,7 +149,7 @@ func (s *Service) EvaluateTaskCapability(workspaceID, capability string) (bool, 
 		})
 	}
 	if status.FirstBlocker != nil {
-		return true, runtimeTaskBlocked(workspaceID, status.FirstBlocker)
+		return true, runtimeTaskBlocked(ws.FolderSlug, status.FirstBlocker)
 	}
 	return true, nil
 }
@@ -179,7 +179,7 @@ func (s *Service) EvaluateTaskCapabilityForTask(workspaceID string, task workspa
 	}
 	instance, found := findTaskAgentInstance(ws, task)
 	if !found {
-		return true, runtimeTaskBlocked(workspaceID, &Blocker{
+		return true, runtimeTaskBlocked(ws.FolderSlug, &Blocker{
 			RequirementKey: key,
 			ReasonCode:     ReasonTaskAgentRequired,
 			Summary:        "Choose a compatible workspace agent before starting this runtime task.",
@@ -187,7 +187,7 @@ func (s *Service) EvaluateTaskCapabilityForTask(workspaceID string, task workspa
 		})
 	}
 	if !ws.GetRuntimeState().HasActiveRuntimeGrant(key, instance.ID) {
-		return true, runtimeTaskBlocked(workspaceID, &Blocker{
+		return true, runtimeTaskBlocked(ws.FolderSlug, &Blocker{
 			RequirementKey: key,
 			ReasonCode:     ReasonTaskGrantRequired,
 			Summary:        "The assigned workspace agent does not have access to this runtime capability.",
@@ -202,7 +202,7 @@ func (s *Service) EvaluateTaskCapabilityForTask(workspaceID string, task workspa
 		if err := authorizer.ValidateGrant(context.Background(), GrantValidationRequest{
 			WorkspaceID: workspaceID, Mode: mode, Requirement: requirement, Agent: instance,
 		}); err != nil {
-			return true, runtimeTaskBlocked(workspaceID, &Blocker{
+			return true, runtimeTaskBlocked(ws.FolderSlug, &Blocker{
 				RequirementKey: key,
 				ReasonCode:     ReasonTaskAgentRequired,
 				Summary:        "The assigned workspace agent cannot use this runtime capability safely.",
@@ -916,7 +916,7 @@ func combineLiveState(current, next string) string {
 	return next
 }
 
-func runtimeTaskBlocked(workspaceID string, blocker *Blocker) *workspace.TaskBlockedError {
+func runtimeTaskBlocked(workspaceSlug string, blocker *Blocker) *workspace.TaskBlockedError {
 	if blocker == nil {
 		return nil
 	}
@@ -924,17 +924,20 @@ func runtimeTaskBlocked(workspaceID string, blocker *Blocker) *workspace.TaskBlo
 	if reason == "" {
 		reason = "This task's runtime capability is not available."
 	}
+	repairURL := ""
+	if slug := strings.TrimSpace(workspaceSlug); slug != "" {
+		repairURL = "/workspaces/" + url.PathEscape(slug) + "?runtime_setup=1"
+	}
 	repair := &workspace.TaskRepairAction{
 		Code:  "review_runtime_setup",
 		Label: "Review runtime setup",
-		URL:   "/workspaces/" + url.PathEscape(strings.TrimSpace(workspaceID)) + "?runtime_setup=1",
+		URL:   repairURL,
 	}
 	if action := sanitizeAction(blocker.Action); action != nil {
 		repair.Code = action.Code
 		repair.Label = action.Label
-		if action.URL != "" {
-			repair.URL = action.URL
-		}
+		// The adapter controls the action token and label, not browser routing.
+		// The service already resolved the current workspace slug above.
 	}
 	return &workspace.TaskBlockedError{
 		CapabilityKey:    workspace.NormalizeRuntimeIdentifier(blocker.RequirementKey),

@@ -25,6 +25,7 @@ type activityRow struct {
 	Kind          string    `json:"kind"`
 	Description   string    `json:"description"`
 	WorkspaceID   string    `json:"workspace_id"`
+	WorkspaceSlug string    `json:"workspace_slug"`
 	WorkspaceName string    `json:"workspace_name"`
 	TargetID      string    `json:"target_id,omitempty"`
 	Timestamp     time.Time `json:"timestamp"`
@@ -59,6 +60,7 @@ func (h *Handler) RecentActivityHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	wsNameByID := make(map[string]string, len(ids))
+	wsSlugByID := make(map[string]string, len(ids))
 	rows := make([]activityRow, 0)
 
 	for _, id := range ids {
@@ -68,6 +70,7 @@ func (h *Handler) RecentActivityHandler(w http.ResponseWriter, r *http.Request) 
 			continue
 		}
 		wsNameByID[ws.ID] = ws.Name
+		wsSlugByID[ws.ID] = ws.FolderSlug
 
 		// Task completions
 		for _, task := range ws.Tasks {
@@ -78,6 +81,7 @@ func (h *Handler) RecentActivityHandler(w http.ResponseWriter, r *http.Request) 
 				Kind:          ActivityKindTaskCompleted,
 				Description:   "Task completed: " + safeFirstLine(task.Description),
 				WorkspaceID:   ws.ID,
+				WorkspaceSlug: ws.FolderSlug,
 				WorkspaceName: ws.Name,
 				TargetID:      task.ID,
 				Timestamp:     *task.CompletedAt,
@@ -95,6 +99,7 @@ func (h *Handler) RecentActivityHandler(w http.ResponseWriter, r *http.Request) 
 						Kind:          ActivityKindNoteEdited,
 						Description:   "Note edited: " + note.Name,
 						WorkspaceID:   ws.ID,
+						WorkspaceSlug: ws.FolderSlug,
 						WorkspaceName: ws.Name,
 						TargetID:      note.ID,
 						Timestamp:     note.UpdatedAt,
@@ -129,6 +134,7 @@ func (h *Handler) RecentActivityHandler(w http.ResponseWriter, r *http.Request) 
 				Kind:          kind,
 				Description:   desc,
 				WorkspaceID:   ev.WorkspaceID,
+				WorkspaceSlug: wsSlugByID[ev.WorkspaceID],
 				WorkspaceName: wsNameByID[ev.WorkspaceID],
 				Timestamp:     ev.Timestamp,
 			})

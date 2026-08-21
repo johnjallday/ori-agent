@@ -174,6 +174,7 @@ function findMissingAgentWorkspaceMatch(workspace, requestedAgentName) {
     return null;
   }
 
+  const workspaceSlug = String(workspace.folder_slug || '').trim();
   const workspaceName =
     String(workspace.name || 'Untitled Workspace').trim() || 'Untitled Workspace';
   const directEntryName = String(workspace.entry_agent_name || '').trim();
@@ -181,6 +182,7 @@ function findMissingAgentWorkspaceMatch(workspace, requestedAgentName) {
   if (normalizeAgentLookupToken(directEntryName) === target) {
     return {
       workspaceId,
+      workspaceSlug,
       workspaceName,
       isEntryAgent: true,
       matchKind: 'entry_agent_name'
@@ -189,6 +191,7 @@ function findMissingAgentWorkspaceMatch(workspace, requestedAgentName) {
   if (normalizeAgentLookupToken(sharedEntryName) === target) {
     return {
       workspaceId,
+      workspaceSlug,
       workspaceName,
       isEntryAgent: true,
       matchKind: 'shared_entry_agent_name'
@@ -203,6 +206,7 @@ function findMissingAgentWorkspaceMatch(workspace, requestedAgentName) {
     const isEntryAgent = Boolean(instance?.entry_point || instance?.entryPoint);
     return {
       workspaceId,
+      workspaceSlug,
       workspaceName,
       isEntryAgent,
       matchKind: isEntryAgent ? 'entry_agent_instance' : 'agent_instance'
@@ -213,6 +217,7 @@ function findMissingAgentWorkspaceMatch(workspace, requestedAgentName) {
   if (agents.some(name => normalizeAgentLookupToken(name) === target)) {
     return {
       workspaceId,
+      workspaceSlug,
       workspaceName,
       isEntryAgent: false,
       matchKind: 'legacy_agent'
@@ -265,13 +270,13 @@ async function loadMissingAgentWorkspaceRecovery(requestedAgentName) {
   }
 }
 
-function buildWorkspaceEntryAgentRecoveryURL(workspaceId, requestedAgentName) {
+function buildWorkspaceEntryAgentRecoveryURL(workspaceSlug, requestedAgentName) {
   const params = new URLSearchParams();
   params.set('addAgent', '1');
   if (requestedAgentName) {
     params.set('seedAgentName', requestedAgentName);
   }
-  return `/workspaces/${encodeURIComponent(workspaceId)}?${params.toString()}`;
+  return `/workspaces/${encodeURIComponent(workspaceSlug)}?${params.toString()}`;
 }
 
 function hideMissingAgentState() {
@@ -370,8 +375,8 @@ async function showMissingAgentState(message) {
   }
 
   if (createBtn) {
-    if (recovery?.workspaceId && recovery.isEntryAgent) {
-      createBtn.href = buildWorkspaceEntryAgentRecoveryURL(recovery.workspaceId, requestedName);
+    if (recovery?.workspaceSlug && recovery.isEntryAgent) {
+      createBtn.href = buildWorkspaceEntryAgentRecoveryURL(recovery.workspaceSlug, requestedName);
       createBtn.style.display = 'inline-flex';
     } else {
       createBtn.style.display = 'none';
@@ -379,8 +384,8 @@ async function showMissingAgentState(message) {
   }
 
   if (openWorkspaceBtn) {
-    if (recovery?.workspaceId) {
-      openWorkspaceBtn.href = `/workspaces/${encodeURIComponent(recovery.workspaceId)}`;
+    if (recovery?.workspaceSlug) {
+      openWorkspaceBtn.href = `/workspaces/${encodeURIComponent(recovery.workspaceSlug)}`;
       openWorkspaceBtn.style.display = 'inline-flex';
     } else {
       openWorkspaceBtn.style.display = 'none';

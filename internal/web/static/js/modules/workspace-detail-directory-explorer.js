@@ -30,14 +30,14 @@ function formatDate(dateString) {
 
 // describeDirectoryEntry decides how a directory tree node should be presented:
 // when the server flagged it as a registered workspace folder, it becomes an
-// openable workspace reference (label = registered name, link to /workspaces/id).
+// openable workspace reference (label = registered name, link by folder slug).
 // Pure + exported for unit testing.
 export function describeDirectoryEntry(node) {
-  const isWorkspace = !!(node && node.isWorkspace && node.workspaceId);
+  const isWorkspace = !!(node && node.isWorkspace && node.workspaceId && node.workspaceSlug);
   const fallback = (node && (node.name || node.path)) || 'Untitled';
   return {
     isWorkspace,
-    openHref: isWorkspace ? `/workspaces/${encodeURIComponent(node.workspaceId)}` : '',
+    openHref: isWorkspace ? `/workspaces/${encodeURIComponent(node.workspaceSlug)}` : '',
     label: isWorkspace && node.workspaceName ? node.workspaceName : fallback
   };
 }
@@ -416,6 +416,7 @@ export class WorkspaceDirectoryExplorer {
             status: item?.status || '',
             isWorkspace: Boolean(item?.is_workspace),
             workspaceId: item?.workspace_id || '',
+            workspaceSlug: item?.workspace_slug || '',
             workspaceName: item?.workspace_name || ''
           };
         })
@@ -544,6 +545,7 @@ export class WorkspaceDirectoryExplorer {
         if (entry.isWorkspace) {
           dirNode.isWorkspace = true;
           dirNode.workspaceId = entry.workspaceId || dirNode.workspaceId;
+          dirNode.workspaceSlug = entry.workspaceSlug || dirNode.workspaceSlug;
           dirNode.workspaceName = entry.workspaceName || dirNode.workspaceName;
         }
         return;

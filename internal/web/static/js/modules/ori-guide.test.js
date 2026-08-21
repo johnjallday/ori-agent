@@ -913,8 +913,8 @@ const MATRIX = [
       workspace_resolution: {
         state: 'ambiguous',
         candidates: [
-          { id: 'launch', name: 'Launch' },
-          { id: 'research', name: 'Research' }
+          { id: 'workspace-uuid-1', slug: 'launch', name: 'Launch' },
+          { id: 'workspace-uuid-2', slug: 'research', name: 'Research' }
         ]
       }
     },
