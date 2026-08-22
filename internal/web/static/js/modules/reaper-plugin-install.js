@@ -21,7 +21,11 @@
     } catch (_) {
       data = {};
     }
-    if (!resp.ok) throw new Error(data.error || 'request failed: ' + resp.status);
+    // Server error responses are internal/http.APIError: {code, message, ...}
+    // — the reason lives under "message", not "error". Reading the wrong key
+    // silently discarded every specific failure reason (git clone errors,
+    // permission errors, ...) behind a useless generic "request failed: 400".
+    if (!resp.ok) throw new Error(data.message || 'request failed: ' + resp.status);
     return data;
   }
 
