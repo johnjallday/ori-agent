@@ -30,6 +30,15 @@
   let catalogLoaded = false;
   let scripts = [];
   let scriptsLoaded = false;
+  // pinnedScriptIds is the ordered list of script IDs this workspace has
+  // pinned as quick actions, loaded alongside scripts (loadScripts) from the
+  // same response so the pinned band never needs a second round trip.
+  let pinnedScriptIds = [];
+  let pinRequestInFlight = false;
+  // advancedOpen gates the raw command-ID input and the full script library
+  // behind a disclosure, closed by default (task 2.4): most day-to-day use
+  // is pinned quick actions, not raw command IDs or browsing every script.
+  let advancedOpen = false;
   let proposals = [];
   let proposalsLoaded = false;
   let proposalRequestInFlight = false;
@@ -55,6 +64,12 @@
   // read before the drag started; targetIndex tracks the current drop slot
   // for the indicator and is what gets sent if the pointer is released.
   let dragState = null;
+  // pinDragState mirrors dragState above for the pinned quick-action band —
+  // a separate list with a separate commit path (reorderPinnedScripts, not
+  // moveTrack), kept as its own state/listener pair rather than overloading
+  // the track one. sourceIndex/targetIndex are 1-based positions within
+  // pinnedScriptIds, matching the track strip's 1-based index convention.
+  let pinDragState = null;
   // The one pending bulk plan an agent may have proposed for this workspace,
   // rendered as a plan card. Loaded once per console open, like scripts and
   // proposals.
@@ -96,6 +111,23 @@
   function scriptsApiPath() {
     const id = workspaceIdFromPage();
     return id ? '/api/workspaces/' + encodeURIComponent(id) + '/reaper/scripts' : '';
+  }
+
+  function pinScriptApiPath(scriptId) {
+    const id = workspaceIdFromPage();
+    if (!id || !scriptId) return '';
+    return (
+      '/api/workspaces/' +
+      encodeURIComponent(id) +
+      '/reaper/scripts/' +
+      encodeURIComponent(scriptId) +
+      '/pin'
+    );
+  }
+
+  function pinnedScriptsApiPath() {
+    const id = workspaceIdFromPage();
+    return id ? '/api/workspaces/' + encodeURIComponent(id) + '/reaper/pinned-scripts' : '';
   }
 
   function trackPlanApiPath(action) {
@@ -185,7 +217,7 @@
       // the list under the user's pointer (PRD 4.1 item 5 / group 4.6). The
       // state itself is still recorded above, so the next explicit render —
       // on drop or cancel — starts from current truth.
-      if (consoleOpen && changed && !dragState) renderConsole();
+      if (consoleOpen && changed && !dragState && !pinDragState) renderConsole();
       return state;
     } catch (_error) {
       const failed = {
@@ -207,7 +239,7 @@
       // the list under the user's pointer (PRD 4.1 item 5 / group 4.6). The
       // state itself is still recorded above, so the next explicit render —
       // on drop or cancel — starts from current truth.
-      if (consoleOpen && changed && !dragState) renderConsole();
+      if (consoleOpen && changed && !dragState && !pinDragState) renderConsole();
       return failed;
     } finally {
       requestInFlight = false;
@@ -240,8 +272,15 @@
       const response = await fetch(path, { headers: { Accept: 'application/json' } });
       if (!response.ok) throw new Error('script library request failed');
       const payload = await response.json();
-      if (!Array.isArray(payload)) throw new Error('invalid script library');
-      scripts = payload.filter(script => script && script.id && script.name);
+      // ScriptListResponse (internal/reaperhttp/scripts.go): {scripts,
+      // pinned_script_ids} — pinned_script_ids is already pruned server-side
+      // to IDs that still resolve, so no client-side filtering is needed.
+      const list = Array.isArray(payload && payload.scripts) ? payload.scripts : [];
+      if (!Array.isArray(payload && payload.scripts)) throw new Error('invalid script library');
+      scripts = list.filter(script => script && script.id && script.name);
+      pinnedScriptIds = Array.isArray(payload.pinned_script_ids)
+        ? payload.pinned_script_ids.filter(id => typeof id === 'string' && id)
+        : [];
       scriptsLoaded = true;
       if (consoleOpen) renderConsole();
       return scripts;
@@ -250,6 +289,170 @@
       if (consoleOpen) renderConsole();
       return scripts;
     }
+  }
+
+  // --- Pinned quick actions --------------------------------------------------
+  //
+  // Pin/unpin/reorder apply an optimistic local patch, call the server, and
+  // revert-with-nothing-shown on failure — a forced loadScripts() call after
+  // (in the console's normal refresh cadence) is what re-syncs truth, mirroring
+  // the shape of runTrackEdit above without needing a per-item strip notice.
+
+  async function pinScript(scriptId) {
+    const path = pinScriptApiPath(scriptId);
+    if (!path || pinRequestInFlight || typeof fetch !== 'function') return false;
+    pinRequestInFlight = true;
+    const previous = pinnedScriptIds;
+    if (!pinnedScriptIds.includes(scriptId)) {
+      pinnedScriptIds = pinnedScriptIds.concat([scriptId]);
+    }
+    if (consoleOpen) renderConsole();
+    try {
+      const response = await fetch(path, {
+        method: 'POST',
+        headers: { Accept: 'application/json' }
+      });
+      if (!response.ok) throw new Error('pin request failed');
+      return true;
+    } catch (_error) {
+      pinnedScriptIds = previous;
+      return false;
+    } finally {
+      pinRequestInFlight = false;
+      if (consoleOpen) renderConsole();
+    }
+  }
+
+  async function unpinScript(scriptId) {
+    const path = pinScriptApiPath(scriptId);
+    if (!path || pinRequestInFlight || typeof fetch !== 'function') return false;
+    pinRequestInFlight = true;
+    const previous = pinnedScriptIds;
+    pinnedScriptIds = pinnedScriptIds.filter(id => id !== scriptId);
+    if (consoleOpen) renderConsole();
+    try {
+      const response = await fetch(path, {
+        method: 'DELETE',
+        headers: { Accept: 'application/json' }
+      });
+      if (!response.ok) throw new Error('unpin request failed');
+      return true;
+    } catch (_error) {
+      pinnedScriptIds = previous;
+      return false;
+    } finally {
+      pinRequestInFlight = false;
+      if (consoleOpen) renderConsole();
+    }
+  }
+
+  async function reorderPinnedScripts(orderedScriptIds) {
+    const path = pinnedScriptsApiPath();
+    if (!path || typeof fetch !== 'function') return false;
+    const previous = pinnedScriptIds;
+    pinnedScriptIds = orderedScriptIds.slice();
+    if (consoleOpen) renderConsole();
+    try {
+      const response = await fetch(path, {
+        method: 'PUT',
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ordered_script_ids: orderedScriptIds })
+      });
+      if (!response.ok) throw new Error('reorder request failed');
+      return true;
+    } catch (_error) {
+      pinnedScriptIds = previous;
+      if (consoleOpen) renderConsole();
+      return false;
+    }
+  }
+
+  async function movePinnedScript(fromIndex, toIndex) {
+    if (fromIndex === toIndex || toIndex < 1 || toIndex > pinnedScriptIds.length) return false;
+    const reordered = pinnedScriptIds.slice();
+    const [moved] = reordered.splice(fromIndex - 1, 1);
+    reordered.splice(toIndex - 1, 0, moved);
+    return reorderPinnedScripts(reordered);
+  }
+
+  // --- Pinned quick-action drag-to-reorder -----------------------------------
+  //
+  // Mirrors the track-strip drag idiom above (beginDrag/dragOverIndex/endDrag):
+  // pointer coordinates are resolved through document.elementFromPoint against
+  // a data attribute, so a test can drive the gesture through logical
+  // positions alone. Kept as its own state/listener pair — a different list
+  // with a different commit path (reorderPinnedScripts, not moveTrack) — but
+  // the same shape throughout.
+
+  function beginPinDrag(index) {
+    if (!index) return;
+    pinDragState = { sourceIndex: index, targetIndex: index };
+    attachPinDragListeners();
+    if (consoleOpen) renderConsole();
+  }
+
+  function pinDragOverIndex(index) {
+    if (!pinDragState || !index || index === pinDragState.targetIndex) return;
+    pinDragState.targetIndex = index;
+    if (consoleOpen) renderConsole();
+  }
+
+  async function endPinDrag() {
+    if (!pinDragState) return;
+    const { sourceIndex, targetIndex } = pinDragState;
+    detachPinDragListeners();
+    pinDragState = null;
+    if (targetIndex === sourceIndex) {
+      if (consoleOpen) renderConsole();
+      return;
+    }
+    await movePinnedScript(sourceIndex, targetIndex);
+  }
+
+  function cancelPinDrag() {
+    if (!pinDragState) return;
+    detachPinDragListeners();
+    pinDragState = null;
+    if (consoleOpen) renderConsole();
+  }
+
+  function handlePinDragPointerMove(event) {
+    if (
+      !pinDragState ||
+      typeof document === 'undefined' ||
+      typeof document.elementFromPoint !== 'function'
+    ) {
+      return;
+    }
+    const hit = document.elementFromPoint(event.clientX, event.clientY);
+    const card = hit && typeof hit.closest === 'function' ? hit.closest('[data-pin-index]') : null;
+    const index = card && Number(card.getAttribute('data-pin-index'));
+    if (index) pinDragOverIndex(index);
+  }
+
+  function handlePinDragPointerUp() {
+    void endPinDrag();
+  }
+
+  function handlePinDragKeydown(event) {
+    if (event.key === 'Escape') cancelPinDrag();
+  }
+
+  function attachPinDragListeners() {
+    if (typeof document === 'undefined' || typeof document.addEventListener !== 'function') return;
+    document.addEventListener('pointermove', handlePinDragPointerMove);
+    document.addEventListener('pointerup', handlePinDragPointerUp);
+    document.addEventListener('pointercancel', cancelPinDrag);
+    document.addEventListener('keydown', handlePinDragKeydown);
+  }
+
+  function detachPinDragListeners() {
+    if (typeof document === 'undefined' || typeof document.removeEventListener !== 'function')
+      return;
+    document.removeEventListener('pointermove', handlePinDragPointerMove);
+    document.removeEventListener('pointerup', handlePinDragPointerUp);
+    document.removeEventListener('pointercancel', cancelPinDrag);
+    document.removeEventListener('keydown', handlePinDragKeydown);
   }
 
   async function loadProposals() {
@@ -1250,6 +1453,18 @@
           )
         );
         row.appendChild(copy);
+        const isPinned = pinnedScriptIds.includes(script.id);
+        const pin = button(
+          isPinned ? 'Unpin' : 'Pin as quick action',
+          'reaper-console-btn is-tertiary',
+          () => void (isPinned ? unpinScript(script.id) : pinScript(script.id))
+        );
+        pin.disabled = pinRequestInFlight;
+        pin.setAttribute(
+          'aria-label',
+          (isPinned ? 'Unpin ' : 'Pin ') + script.name + (isPinned ? '' : ' as a quick action')
+        );
+        row.appendChild(pin);
         const action = catalogAction(script.id) || {
           id: script.id,
           label: script.name,
@@ -1309,7 +1524,116 @@
     host.appendChild(raw);
   }
 
+  // renderPinnedBand shows this workspace's pinned scripts as large, labeled
+  // buttons above the raw catalog grid (task 2.2). pinnedScriptIds is already
+  // pruned server-side to IDs that still resolve (workspace.ReaperPinService
+  // doc comment / ScriptListResponse), but a lookup miss is still tolerated
+  // here in case scripts hasn't caught up with a pin made moments ago.
+  function renderPinnedBand(host) {
+    const pinned = pinnedScriptIds
+      .map(id => scripts.find(script => script && script.id === id))
+      .filter(Boolean);
+    if (!pinned.length) return;
+    const section = el('section', 'reaper-console-pinned-band');
+    const head = el('div', 'reaper-console-section-head');
+    head.appendChild(el('h3', '', 'Quick actions'));
+    section.appendChild(head);
+    const grid = el('div', 'reaper-console-pinned-grid');
+    pinned.forEach((script, position) => {
+      grid.appendChild(renderPinnedCard(script, position + 1, pinned.length));
+    });
+    section.appendChild(grid);
+    host.appendChild(section);
+  }
+
+  function renderPinnedCard(script, index, total) {
+    const card = el('article', 'reaper-console-pinned-card');
+    if (pinDragState && pinDragState.sourceIndex === index) card.classList.add('is-dragging');
+    // Read by the pointer-drag hit test (document.elementFromPoint + closest)
+    // to resolve a screen position back to a logical pinned-band position.
+    card.setAttribute('data-pin-index', String(index));
+
+    const grip = button('⠿', 'reaper-console-pinned-grip', null);
+    grip.setAttribute('aria-label', 'Drag to reorder ' + script.name);
+    grip.addEventListener('pointerdown', event => {
+      event.preventDefault();
+      beginPinDrag(index);
+    });
+    card.appendChild(grip);
+
+    const action = catalogAction(script.id) || {
+      id: script.id,
+      label: script.name,
+      description: script.description,
+      source: 'custom',
+      mutates: true,
+      needs_confirmation: script.needs_confirmation
+    };
+    const run = button('', 'reaper-console-pinned-run', () => requestAction(action));
+    run.disabled = actionRequestInFlight;
+    run.setAttribute('aria-label', 'Run pinned quick action ' + script.name + ' in REAPER');
+    run.appendChild(el('strong', '', script.name));
+    run.appendChild(
+      el('span', 'reaper-console-pinned-hint', script.needs_confirmation ? 'Confirm' : 'One click')
+    );
+    card.appendChild(run);
+
+    // Keyboard-accessible equivalent to dragging, mirroring the track strip's
+    // move up/down grip group (renderDragGrip above).
+    const moves = el('span', 'reaper-console-pinned-move-group');
+    const up = button(
+      '▲',
+      'reaper-console-pinned-move is-up',
+      () => void movePinnedScript(index, index - 1)
+    );
+    up.disabled = index <= 1;
+    up.setAttribute('aria-label', 'Move ' + script.name + ' earlier');
+    moves.appendChild(up);
+    const down = button(
+      '▼',
+      'reaper-console-pinned-move is-down',
+      () => void movePinnedScript(index, index + 1)
+    );
+    down.disabled = index >= total;
+    down.setAttribute('aria-label', 'Move ' + script.name + ' later');
+    moves.appendChild(down);
+    card.appendChild(moves);
+
+    const unpin = button('Unpin', 'reaper-console-pinned-unpin', () => void unpinScript(script.id));
+    unpin.disabled = pinRequestInFlight;
+    unpin.setAttribute('aria-label', 'Unpin ' + script.name);
+    card.appendChild(unpin);
+
+    return card;
+  }
+
+  // renderAdvanced tucks the raw command-ID escape hatch and the full script
+  // library behind a disclosure, closed by default (task 2.4): pinning moves
+  // day-to-day use onto the quick-action band above, so these stay reachable
+  // without competing for space with it.
+  function renderAdvanced(host) {
+    const wrapper = el('div', 'reaper-console-advanced');
+    const toggle = button(
+      advancedOpen ? 'Hide advanced' : 'Show advanced',
+      'reaper-console-advanced-toggle',
+      () => {
+        advancedOpen = !advancedOpen;
+        if (consoleOpen) renderConsole();
+      }
+    );
+    toggle.setAttribute('aria-expanded', String(advancedOpen));
+    wrapper.appendChild(toggle);
+    if (advancedOpen) {
+      const body = el('div', 'reaper-console-advanced-body');
+      renderScriptLibrary(body);
+      renderRawCommand(body);
+      wrapper.appendChild(body);
+    }
+    host.appendChild(wrapper);
+  }
+
   function renderActionGrid(host) {
+    renderPinnedBand(host);
     const section = el('section', 'reaper-console-action-catalog');
     const head = el('div', 'reaper-console-section-head');
     head.appendChild(el('h3', '', 'Actions'));
@@ -1345,8 +1669,7 @@
     section.appendChild(grid);
     host.appendChild(section);
     renderProposals(host);
-    renderScriptLibrary(host);
-    renderRawCommand(host);
+    renderAdvanced(host);
   }
 
   function renderOffline(host, state) {
@@ -1878,6 +2201,8 @@
     openPalette = 0;
     if (dragState) detachDragListeners();
     dragState = null;
+    if (pinDragState) detachPinDragListeners();
+    pinDragState = null;
     // Back to the slower map cadence now that nobody is editing.
     syncPolling();
     const host = typeof document === 'undefined' ? null : document.getElementById(CONSOLE_HOST_ID);
@@ -1958,6 +2283,24 @@
       scriptsLoaded = true;
       if (consoleOpen) renderConsole();
     },
+    _pinnedScriptIds: () => pinnedScriptIds,
+    _setPinnedScriptIds: nextIds => {
+      pinnedScriptIds = Array.isArray(nextIds) ? nextIds : [];
+      if (consoleOpen) renderConsole();
+    },
+    _pinScript: pinScript,
+    _unpinScript: unpinScript,
+    _reorderPinnedScripts: reorderPinnedScripts,
+    _beginPinDrag: beginPinDrag,
+    _pinDragOverIndex: pinDragOverIndex,
+    _endPinDrag: endPinDrag,
+    _cancelPinDrag: cancelPinDrag,
+    _pinDragState: () => pinDragState,
+    _advancedOpen: () => advancedOpen,
+    _setAdvancedOpen: value => {
+      advancedOpen = Boolean(value);
+      if (consoleOpen) renderConsole();
+    },
     _setProposals: nextProposals => {
       proposals = Array.isArray(nextProposals) ? nextProposals : [];
       proposalsLoaded = true;
@@ -2016,6 +2359,11 @@
       catalogLoaded = false;
       scripts = [];
       scriptsLoaded = false;
+      pinnedScriptIds = [];
+      pinRequestInFlight = false;
+      advancedOpen = false;
+      if (pinDragState) detachPinDragListeners();
+      pinDragState = null;
       proposals = [];
       proposalsLoaded = false;
       proposalRequestInFlight = false;
