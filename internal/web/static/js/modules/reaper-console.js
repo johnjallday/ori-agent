@@ -181,6 +181,81 @@
     });
   }
 
+  // --- Contextual Ask Ori prompt chips (#396) ---------------------------
+  //
+  // Pure state-derivation: each helper reads only the console's own
+  // lastState/tracks and returns a chip spec ({id, label, prompt}) or null,
+  // so the derivation is unit-testable against synthetic states with no DOM
+  // or console machinery involved. Rendering/wiring lives separately, near
+  // the Ask Ori input (group 5).
+
+  const MAX_PROMPT_CHIPS = 4;
+
+  // hasUnnamedTracks fires when at least one live track has no name — REAPER
+  // itself reports an empty string for an unnamed track (see client.go's
+  // Name: fields[2] parse; there is no synthetic "Track N" fallback on the
+  // wire, only in this console's own display code).
+  function hasUnnamedTracks(tracks) {
+    const list = Array.isArray(tracks) ? tracks : [];
+    if (!list.some(track => !String((track && track.name) || '').trim())) return null;
+    return {
+      id: 'unnamed-tracks',
+      label: 'Rename these tracks to match my template',
+      prompt: 'Rename these tracks to match my template'
+    };
+  }
+
+  // hasNamedTracks fires when at least one live track HAS a name. Not
+  // mutually exclusive with hasUnnamedTracks: a mixed project (some named,
+  // some not) can show both chips at once.
+  function hasNamedTracks(tracks) {
+    const list = Array.isArray(tracks) ? tracks : [];
+    if (!list.some(track => String((track && track.name) || '').trim())) return null;
+    return {
+      id: 'named-tracks',
+      label: 'Color all the drum tracks',
+      prompt: 'Color all the drum tracks'
+    };
+  }
+
+  // isUntitledProject fires for a freshly scaffolded project with no tracks
+  // yet. state.project is NOT a usable signal here — it's derived from the
+  // workspace's configured project_entry filename (see projectDisplayName in
+  // client.go), which is set the moment the workspace exists, not from
+  // whether the REAPER session itself has any content. Track count is what a
+  // brand-new Reaper Song workspace actually starts at zero on.
+  function isUntitledProject(state) {
+    const trackCount = Number(state && state.track_count) || 0;
+    const tracks = Array.isArray(state && state.tracks) ? state.tracks : [];
+    if (trackCount > 0 || tracks.length > 0) return null;
+    return {
+      id: 'untitled-project',
+      label: 'Set up a band session',
+      prompt: 'Set up a band session'
+    };
+  }
+
+  // capPromptChips is the generic cap+priority step, kept separate from
+  // composePromptChips so the cap behavior itself is testable with a
+  // synthetic candidate list longer than any real condition count today.
+  // Candidates earlier in the list win when more than `max` are active.
+  function capPromptChips(candidates, max) {
+    const list = Array.isArray(candidates) ? candidates.filter(Boolean) : [];
+    return list.slice(0, max || MAX_PROMPT_CHIPS);
+  }
+
+  // composePromptChips runs every derivation helper against the current
+  // state and caps the result. Priority order (first wins when over the
+  // cap): untitled project, unnamed tracks, named tracks.
+  function composePromptChips(state) {
+    const tracks = Array.isArray(state && state.tracks) ? state.tracks : [];
+    return capPromptChips([
+      isUntitledProject(state),
+      hasUnnamedTracks(tracks),
+      hasNamedTracks(tracks)
+    ]);
+  }
+
   function publishIfChanged(state) {
     const next = meaningfulState(state);
     if (next === lastMeaningfulState) return false;
@@ -2321,6 +2396,11 @@
     _pinScript: pinScript,
     _unpinScript: unpinScript,
     _reorderPinnedScripts: reorderPinnedScripts,
+    _hasUnnamedTracks: hasUnnamedTracks,
+    _hasNamedTracks: hasNamedTracks,
+    _isUntitledProject: isUntitledProject,
+    _capPromptChips: capPromptChips,
+    _composePromptChips: composePromptChips,
     _beginPinDrag: beginPinDrag,
     _pinDragOverIndex: pinDragOverIndex,
     _endPinDrag: endPinDrag,

@@ -964,6 +964,82 @@ function liveTrackState(tracks) {
   };
 }
 
+test('hasUnnamedTracks fires only when at least one live track has no name', () => {
+  assert.equal(consolePanel._hasUnnamedTracks([]), null);
+  assert.equal(consolePanel._hasUnnamedTracks([{ index: 1, name: 'Kick' }]), null);
+  const chip = consolePanel._hasUnnamedTracks([
+    { index: 1, name: 'Kick' },
+    { index: 2, name: '' }
+  ]);
+  assert.ok(chip);
+  assert.equal(chip.id, 'unnamed-tracks');
+  assert.equal(chip.prompt, 'Rename these tracks to match my template');
+});
+
+test('hasNamedTracks fires only when at least one live track has a name', () => {
+  assert.equal(consolePanel._hasNamedTracks([]), null);
+  assert.equal(consolePanel._hasNamedTracks([{ index: 1, name: '' }]), null);
+  const chip = consolePanel._hasNamedTracks([{ index: 1, name: 'Kick' }]);
+  assert.ok(chip);
+  assert.equal(chip.id, 'named-tracks');
+  assert.equal(chip.prompt, 'Color all the drum tracks');
+});
+
+test('a mixed track list (some named, some not) fires both track chips at once', () => {
+  const tracks = [
+    { index: 1, name: 'Kick' },
+    { index: 2, name: '' }
+  ];
+  assert.ok(consolePanel._hasUnnamedTracks(tracks));
+  assert.ok(consolePanel._hasNamedTracks(tracks));
+});
+
+test('isUntitledProject fires only when there are zero live tracks', () => {
+  assert.ok(consolePanel._isUntitledProject(liveTrackState([])));
+  assert.equal(consolePanel._isUntitledProject(liveTrackState([{ index: 1, name: 'Kick' }])), null);
+  // state.project is not the signal — it's always set from the workspace's
+  // configured project_entry filename, not from REAPER session content.
+  assert.ok(consolePanel._isUntitledProject({ ...liveTrackState([]), project: 'Song' }));
+});
+
+test('composePromptChips derives the full active set in priority order', () => {
+  assert.deepEqual(
+    consolePanel._composePromptChips(liveTrackState([])).map(c => c.id),
+    ['untitled-project']
+  );
+  assert.deepEqual(
+    consolePanel._composePromptChips(liveTrackState([{ index: 1, name: 'Kick' }])).map(c => c.id),
+    ['named-tracks']
+  );
+  assert.deepEqual(
+    consolePanel
+      ._composePromptChips(
+        liveTrackState([
+          { index: 1, name: 'Kick' },
+          { index: 2, name: '' }
+        ])
+      )
+      .map(c => c.id),
+    ['unnamed-tracks', 'named-tracks']
+  );
+});
+
+test('capPromptChips caps at 4 and keeps earlier candidates on priority', () => {
+  const candidates = [{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }, { id: 'e' }];
+  assert.deepEqual(
+    consolePanel._capPromptChips(candidates).map(c => c.id),
+    ['a', 'b', 'c', 'd']
+  );
+  assert.deepEqual(
+    consolePanel._capPromptChips(candidates, 2).map(c => c.id),
+    ['a', 'b']
+  );
+  assert.deepEqual(
+    consolePanel._capPromptChips([null, { id: 'a' }, null]).map(c => c.id),
+    ['a']
+  );
+});
+
 test('clicking a track name opens an inline editor that commits on Enter', async () => {
   consolePanel._resetForTest();
   consolePanel.init('ws-reaper');
