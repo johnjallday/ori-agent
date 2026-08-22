@@ -570,9 +570,18 @@ func (b *ServerBuilder) initializeHandlers() {
 	}
 
 	// Plugin installer (Claude Code- and Codex-compatible bundles): wired over the
-	// MCP registry + the personal skills dir; installed plugins live under ./plugins.
+	// MCP registry + the personal skills dir; installed plugins live under
+	// <data dir>/plugins. Anchored to config.DefaultDataDir() (same root as the
+	// connections store and secrets reset above), not a bare "plugins" literal:
+	// a relative path resolves against the SERVER PROCESS's working directory,
+	// which is project-checkout-dependent when launched from a terminal but
+	// defaults to "/" for the menu bar app's LaunchAgent (no WorkingDirectory
+	// key) — every install/preview there failed on "create clone dir: permission
+	// denied", masked by the frontend into an unhelpful generic 400. Same class
+	// of bug as the CWD-relative agent store path fixed in #179.
 	if b.mcpConfigManager != nil && b.mcpRegistry != nil {
-		b.pluginHandler = pluginhttp.NewHandler(b.mcpConfigManager, b.mcpRegistry, personalSkillsDir, "plugins")
+		pluginsDir := filepath.Join(config.DefaultDataDir(), "plugins")
+		b.pluginHandler = pluginhttp.NewHandler(b.mcpConfigManager, b.mcpRegistry, personalSkillsDir, pluginsDir)
 	}
 
 	// Let workspaces created from a template bind its declared default tools
