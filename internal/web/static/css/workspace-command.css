@@ -6885,6 +6885,88 @@ button.ws-cmd-rpg-class-card:focus-visible {
   border-color: rgba(239, 118, 93, 0.5);
 }
 
+/* --- Contextual Ask Ori prompt chips + input (task 5.x, #396). Named
+   distinctly from calendar-console.js's unrelated #calendarConsoleChip
+   tab-indicator concept so the two "chip" ideas never collide in shared
+   selectors. --- */
+.reaper-console-ask {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid rgba(173, 192, 184, 0.18);
+}
+
+.reaper-console-prompt-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.reaper-console-prompt-chip {
+  padding: 0.4rem 0.7rem;
+  color: rgba(121, 219, 183, 0.88);
+  background: rgba(94, 208, 167, 0.08);
+  border: 1px solid rgba(94, 208, 167, 0.32);
+  border-radius: 999px;
+  font-family: var(--ws-font-display, sans-serif);
+  font-size: 0.68rem;
+  cursor: pointer;
+}
+
+.reaper-console-prompt-chip:hover {
+  color: #eafff5;
+  background: rgba(94, 208, 167, 0.16);
+  border-color: rgba(94, 208, 167, 0.55);
+}
+
+.reaper-console-ask-controls {
+  display: flex;
+  gap: 0.45rem;
+}
+
+.reaper-console-ask-input {
+  min-width: 0;
+  flex: 1;
+  padding: 0.55rem 0.65rem;
+  color: #dff7ee;
+  background: #070b0c;
+  border: 1px solid rgba(173, 192, 184, 0.28);
+  border-radius: 2px;
+  font: inherit;
+  font-size: 0.68rem;
+}
+
+.reaper-console-ask-input::placeholder {
+  color: rgba(173, 192, 184, 0.38);
+}
+
+.reaper-console-ask-send {
+  padding: 0.55rem 0.9rem;
+  color: #07110e;
+  background: #5ed0a7;
+  border: 1px solid #5ed0a7;
+  border-radius: 2px;
+  font-family: var(--ws-font-display, sans-serif);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.reaper-console-ask-send:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.reaper-console-ask-notice {
+  margin: 0;
+  color: #f0c66a;
+  font-family: var(--ws-font-display, sans-serif);
+  font-size: 0.66rem;
+}
+
 /* --- Advanced disclosure (task 2.4): raw command ID + full script library,
    collapsed by default so pinned quick actions carry day-to-day use. --- */
 .reaper-console-advanced {

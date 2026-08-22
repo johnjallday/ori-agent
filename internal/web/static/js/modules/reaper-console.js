@@ -76,6 +76,19 @@
   let pendingPlan = null;
   let pendingPlanLoaded = false;
   let planRequestInFlight = false;
+  // Ask Ori input state (#396). No visible Ask Ori input exists elsewhere
+  // while the console is open (it's a full-screen modal at a higher z-index
+  // than everything else on the page), so the console carries its own
+  // compact one. askInputValue is controlled state, not read from the DOM,
+  // because renderConsole rebuilds the whole panel from scratch on every
+  // render — an uncontrolled input would lose its value the next time
+  // anything else changes (a poll tick, a track edit, ...).
+  let askInputValue = '';
+  // Set by a chip click; consumed by the next render to focus+select the
+  // input, then cleared — a one-shot signal, not part of steady-state.
+  let askInputFocusPending = false;
+  let askRequestInFlight = false;
+  let askNotice = null;
 
   // A fixed REAPER-compatible swatch set plus "no color" (PRD open question 1:
   // fixed set over a full picker, to keep the popover small). Values already
@@ -1712,6 +1725,122 @@
     return card;
   }
 
+  // buildAskRouteContext identifies this ask as coming from the REAPER
+  // console, mirroring buildWorkspaceHubRouteContext in
+  // workspace-input-router.js — same shape, different surface, since that
+  // one is scoped to the (dead) Workspace Hub page rather than this console.
+  function buildAskRouteContext() {
+    return {
+      surface: 'reaper_console',
+      page_path:
+        (typeof window !== 'undefined' &&
+          window.location &&
+          typeof window.location.pathname === 'string' &&
+          window.location.pathname) ||
+        '',
+      workspace_id: workspaceIdFromPage(),
+      origin: 'reaper_console_ask_input'
+    };
+  }
+
+  function canUseAskOri() {
+    return (
+      typeof window !== 'undefined' &&
+      window.OriAskRouting &&
+      typeof window.OriAskRouting.submit === 'function'
+    );
+  }
+
+  // seedAskInput fills the console's own Ask Ori input with a chip's prompt
+  // and focuses it, WITHOUT sending — sending stays a deliberate, separate
+  // user action (explicit out-of-scope for a chip click in #396).
+  function seedAskInput(prompt) {
+    askInputValue = String(prompt || '');
+    askInputFocusPending = true;
+    askNotice = null;
+    if (consoleOpen) renderConsole();
+  }
+
+  async function submitAskInput() {
+    const text = askInputValue.trim();
+    if (!text || askRequestInFlight) return false;
+    if (!canUseAskOri()) {
+      askNotice = 'Ask Ori is not available on this page.';
+      if (consoleOpen) renderConsole();
+      return false;
+    }
+    askRequestInFlight = true;
+    askNotice = null;
+    if (consoleOpen) renderConsole();
+    try {
+      await window.OriAskRouting.submit(text, {
+        routeContext: buildAskRouteContext(),
+        openThinkingModal: true
+      });
+      askInputValue = '';
+      return true;
+    } catch (_error) {
+      askNotice = 'Could not reach Ori. Try again.';
+      return false;
+    } finally {
+      askRequestInFlight = false;
+      if (consoleOpen) renderConsole();
+    }
+  }
+
+  // renderAskSection renders the contextual prompt chips (#396) and the
+  // console's own compact Ask Ori input together: chips only ever seed this
+  // input's value, never send on their own. Placed below the pinned band and
+  // built-in Actions grid — secondary to the one-click quick actions above,
+  // not competing with them for the first thing a user sees.
+  function renderAskSection(host, state) {
+    const chips = composePromptChips(state);
+    const section = el('section', 'reaper-console-ask');
+    if (chips.length) {
+      const row = el('div', 'reaper-console-prompt-chip-row');
+      chips.forEach(chip => {
+        const pill = button(chip.label, 'reaper-console-prompt-chip', () =>
+          seedAskInput(chip.prompt)
+        );
+        pill.setAttribute('aria-label', 'Ask Ori: ' + chip.label);
+        row.appendChild(pill);
+      });
+      section.appendChild(row);
+    }
+    const controls = el('div', 'reaper-console-ask-controls');
+    const input = el('input', 'reaper-console-ask-input');
+    input.type = 'text';
+    input.placeholder = 'Ask Ori about this REAPER session…';
+    input.maxLength = 2000;
+    input.autocomplete = 'off';
+    input.value = askInputValue;
+    input.disabled = askRequestInFlight;
+    input.setAttribute('aria-label', 'Ask Ori about this REAPER session');
+    input.addEventListener('input', event => {
+      askInputValue = event.target.value;
+    });
+    input.addEventListener('keydown', event => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        void submitAskInput();
+      }
+    });
+    controls.appendChild(input);
+    const send = button('Ask', 'reaper-console-ask-send', () => void submitAskInput());
+    send.disabled = askRequestInFlight || !askInputValue.trim();
+    controls.appendChild(send);
+    section.appendChild(controls);
+    if (askNotice) {
+      section.appendChild(el('p', 'reaper-console-ask-notice', askNotice));
+    }
+    host.appendChild(section);
+    if (askInputFocusPending) {
+      askInputFocusPending = false;
+      if (typeof input.focus === 'function') input.focus();
+      if (typeof input.select === 'function') input.select();
+    }
+  }
+
   // renderAdvanced tucks the raw command-ID escape hatch and the full script
   // library behind a disclosure, closed by default (task 2.4): pinning moves
   // day-to-day use onto the quick-action band above, so these stay reachable
@@ -1774,6 +1903,7 @@
     section.appendChild(grid);
     host.appendChild(section);
     renderProposals(host);
+    renderAskSection(host, lastState);
     renderAdvanced(host);
   }
 
@@ -2411,6 +2541,10 @@
       advancedOpen = Boolean(value);
       if (consoleOpen) renderConsole();
     },
+    _seedAskInput: seedAskInput,
+    _submitAskInput: submitAskInput,
+    _askInputValue: () => askInputValue,
+    _askNotice: () => askNotice,
     _setProposals: nextProposals => {
       proposals = Array.isArray(nextProposals) ? nextProposals : [];
       proposalsLoaded = true;
@@ -2474,6 +2608,10 @@
       advancedOpen = false;
       if (pinDragState) detachPinDragListeners();
       pinDragState = null;
+      askInputValue = '';
+      askInputFocusPending = false;
+      askRequestInFlight = false;
+      askNotice = null;
       proposals = [];
       proposalsLoaded = false;
       proposalRequestInFlight = false;

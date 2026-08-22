@@ -1040,6 +1040,131 @@ test('capPromptChips caps at 4 and keeps earlier candidates on priority', () => 
   );
 });
 
+test('clicking a prompt chip seeds the Ask Ori input without sending', () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  consolePanel._setState(
+    liveTrackState([
+      { index: 1, name: 'Kick' },
+      { index: 2, name: '' }
+    ])
+  );
+  consolePanel.open();
+
+  const host = documentStub.getElementById('reaperConsole');
+  const chips = findAll(host, 'reaper-console-prompt-chip');
+  assert.ok(chips.length >= 1, 'expected at least one prompt chip to render');
+  const renameChip = chips.find(c => c.textContent.includes('Rename these tracks'));
+  assert.ok(renameChip, 'expected the unnamed-tracks chip to render');
+
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return { ok: true, status: 200, json: async () => ({}) };
+  };
+  renameChip.dispatch('click');
+
+  assert.equal(consolePanel._askInputValue(), 'Rename these tracks to match my template');
+  assert.equal(calls, 0, 'a chip click must never itself send anything');
+
+  const input = findOne(documentStub.getElementById('reaperConsole'), 'reaper-console-ask-input');
+  assert.equal(input.value, 'Rename these tracks to match my template');
+  assert.ok(input.focused, 'the ask input should be focused after a chip seeds it');
+  consolePanel.close();
+});
+
+test('no prompt chips render when no condition is active but the ask input still does', () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  // Untitled-project fires whenever track_count is 0 — force it non-zero
+  // with an empty tracks array so no chip condition is active at all.
+  consolePanel._setState({ ...liveTrackState([]), track_count: 1 });
+  consolePanel.open();
+
+  const host = documentStub.getElementById('reaperConsole');
+  assert.equal(findAll(host, 'reaper-console-prompt-chip').length, 0);
+  assert.ok(findOne(host, 'reaper-console-ask-input'));
+  consolePanel.close();
+});
+
+test('the Ask Ori input submits through window.OriAskRouting.submit and clears on success', async () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  consolePanel._setState(liveTrackState([]));
+  consolePanel.open();
+
+  const submitted = [];
+  globalThis.window.OriAskRouting = {
+    submit: async (prompt, options) => {
+      submitted.push({ prompt, options });
+    }
+  };
+  consolePanel._seedAskInput('What tempo is this project?');
+  await consolePanel._submitAskInput();
+
+  assert.equal(submitted.length, 1);
+  assert.equal(submitted[0].prompt, 'What tempo is this project?');
+  assert.equal(submitted[0].options.routeContext.surface, 'reaper_console');
+  assert.equal(submitted[0].options.routeContext.workspace_id, 'ws-reaper');
+  assert.equal(submitted[0].options.openThinkingModal, true);
+  assert.equal(consolePanel._askInputValue(), '');
+
+  delete globalThis.window.OriAskRouting;
+  consolePanel.close();
+});
+
+test('the Ask Ori input shows a notice instead of throwing when Ask Ori is unavailable', async () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  consolePanel._setState(liveTrackState([]));
+  consolePanel.open();
+
+  delete globalThis.window.OriAskRouting;
+  consolePanel._seedAskInput('Anything');
+  const ok = await consolePanel._submitAskInput();
+
+  assert.equal(ok, false);
+  assert.match(consolePanel._askNotice() || '', /not available/);
+  // The draft is preserved, not silently discarded, so the user can retry.
+  assert.equal(consolePanel._askInputValue(), 'Anything');
+  consolePanel.close();
+});
+
+test('pressing Enter in the Ask Ori input submits like clicking Ask', async () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  consolePanel._setState(liveTrackState([]));
+  consolePanel.open();
+
+  const submitted = [];
+  globalThis.window.OriAskRouting = {
+    submit: async prompt => {
+      submitted.push(prompt);
+    }
+  };
+  const host = documentStub.getElementById('reaperConsole');
+  const input = findOne(host, 'reaper-console-ask-input');
+  input.dispatch('input', { target: { value: 'Typed directly' } });
+  input.dispatch('keydown', { key: 'Enter', preventDefault: () => {} });
+  await Promise.resolve();
+  await Promise.resolve();
+
+  assert.deepEqual(submitted, ['Typed directly']);
+
+  delete globalThis.window.OriAskRouting;
+  consolePanel.close();
+});
+
 test('clicking a track name opens an inline editor that commits on Enter', async () => {
   consolePanel._resetForTest();
   consolePanel.init('ws-reaper');
