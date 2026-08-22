@@ -4,7 +4,7 @@
   "icon": "🎵",
   "behavior_profile": "general",
   "builtin": true,
-  "builtin_version": 8,
+  "builtin_version": 9,
   "tools": {
     "plugins": [
       "reaper-plugin"
@@ -20,6 +20,11 @@
   "tags": [
     "music",
     "reaper"
+  ],
+  "pinned_reaper_scripts": [
+    "40026",
+    "40001",
+    "40364"
   ],
   "starter_tasks": [
     {

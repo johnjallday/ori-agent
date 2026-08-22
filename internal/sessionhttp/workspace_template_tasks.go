@@ -122,6 +122,63 @@ func (h *Handler) seedTemplateStarterTasksLogged(workspaceID string, tpl project
 	return seeded
 }
 
+// seedTemplatePinnedReaperScripts writes the template's starter pinned-action
+// pack onto the new workspace's own PinnedReaperScripts (task 3.1). Each ID is
+// resolved against the live catalog/script library only at render time
+// (internal/reaperhttp), not here — this just carries the template's declared
+// list onto the workspace record, exactly like seedTemplateStarterTasks
+// carries StarterTasks onto ws.Tasks, and through the same store.Update.
+//
+// Best-effort by contract: callers log the error and continue, a failure must
+// never fail workspace creation.
+func (h *Handler) seedTemplatePinnedReaperScripts(workspaceID string, tpl projecttemplates.Template) (int, error) {
+	if h == nil || len(tpl.PinnedReaperScripts) == 0 {
+		return 0, nil
+	}
+	store := h.taskMutationStore()
+	if store == nil {
+		return 0, nil
+	}
+	id := strings.TrimSpace(workspaceID)
+	if id == "" {
+		return 0, nil
+	}
+
+	seeded := 0
+	err := store.Update(id, func(ws *agentworkspace.Workspace) error {
+		// A freshly created workspace has no pins of its own yet; overwrite
+		// rather than append so a retried/duplicated seed call stays
+		// idempotent instead of doubling the starter pack.
+		ws.PinnedReaperScripts = append([]string(nil), tpl.PinnedReaperScripts...)
+		// Required so a later, unrelated store.Update on this workspace (e.g.
+		// persistCreateWorkspaceTemplateProvenance right after this call)
+		// doesn't read the pins back from the lean SQLite-primary projection
+		// and silently overwrite what was just seeded — see
+		// workspace.Workspace's pinnedReaperScriptsExplicit doc comment.
+		ws.MarkPinnedReaperScriptsExplicit()
+		seeded = len(ws.PinnedReaperScripts)
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return seeded, nil
+}
+
+// seedTemplatePinnedReaperScriptsLogged mirrors
+// seedTemplateStarterTasksLogged: best-effort, logged, returns 0 on failure.
+func (h *Handler) seedTemplatePinnedReaperScriptsLogged(workspaceID string, tpl projecttemplates.Template) int {
+	seeded, err := h.seedTemplatePinnedReaperScripts(workspaceID, tpl)
+	if err != nil {
+		logger.Warn("Failed to seed template pinned REAPER scripts", logger.Fields{"workspace_id": workspaceID, "template": tpl.ID, "error": err})
+		return 0
+	}
+	if seeded > 0 {
+		logger.Info("Seeded template pinned REAPER scripts", logger.Fields{"workspace_id": workspaceID, "template": tpl.ID, "seeded": seeded})
+	}
+	return seeded
+}
+
 // handleTemplateSetupStart serves POST /api/workspaces/{id}/template-setup/start:
 // the first-open auto-start trigger for a template's setup task. Inside a
 // single store Update it finds the unconsumed setup task and stamps the

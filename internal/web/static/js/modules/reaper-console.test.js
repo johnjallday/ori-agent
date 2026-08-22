@@ -786,6 +786,37 @@ test('the pinned band renders a labeled button per pinned script, above the raw 
   consolePanel.close();
 });
 
+test('a pinned built-in catalog action (a starter pack pin) resolves and runs like any other pinned entry', () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  // A template starter pack (task 3.1) pins plain catalog command IDs —
+  // never custom scripts — so the pinned band must resolve those too.
+  consolePanel._setActions([
+    {
+      id: '40026',
+      label: 'Save project',
+      description: 'Save the open REAPER project.',
+      source: 'builtin',
+      mutates: true,
+      needs_confirmation: true
+    }
+  ]);
+  consolePanel._setScripts([]);
+  consolePanel._setPinnedScriptIds(['40026']);
+  consolePanel._setState(openSongState());
+  consolePanel.open();
+
+  const host = documentStub.getElementById('reaperConsole');
+  const cards = findAll(host, 'reaper-console-pinned-card');
+  assert.equal(cards.length, 1);
+  assert.match(cards[0].textContent, /Save project/);
+  assert.match(cards[0].textContent, /Confirm/);
+
+  findOne(host, 'reaper-console-pinned-run').dispatch('click');
+  assert.match(host.textContent, /Confirm project change/);
+  consolePanel.close();
+});
+
 test('unpinning removes a script from the pinned band', async () => {
   consolePanel._resetForTest();
   consolePanel.init('ws-reaper');

@@ -43,10 +43,16 @@ func (s *ReaperPinService) Pin(workspaceID, scriptID string) error {
 		return fmt.Errorf("script id is required")
 	}
 	return s.store.Update(workspaceID, func(ws *Workspace) error {
-		if slices.Contains(ws.PinnedReaperScripts, scriptID) {
-			return nil
+		if !slices.Contains(ws.PinnedReaperScripts, scriptID) {
+			ws.PinnedReaperScripts = append(ws.PinnedReaperScripts, scriptID)
 		}
-		ws.PinnedReaperScripts = append(ws.PinnedReaperScripts, scriptID)
+		// Marked even on the no-op branch: SyncStore's Update seeds ws from
+		// the SQLite-primary projection then restores folder-only state (see
+		// sync_store.go) only when it looks unloaded — an explicit mark here
+		// is what tells the subsequent Save that THIS value's pins (even an
+		// unpinned-to-empty one from a concurrent Unpin) are current truth,
+		// not a lean projection to be silently refilled from stale disk state.
+		ws.MarkPinnedReaperScriptsExplicit()
 		return nil
 	})
 }
@@ -69,6 +75,7 @@ func (s *ReaperPinService) Unpin(workspaceID, scriptID string) error {
 			}
 		}
 		ws.PinnedReaperScripts = out
+		ws.MarkPinnedReaperScriptsExplicit()
 		return nil
 	})
 }
@@ -98,6 +105,7 @@ func (s *ReaperPinService) Reorder(workspaceID string, orderedScriptIDs []string
 			}
 		}
 		ws.PinnedReaperScripts = append([]string(nil), orderedScriptIDs...)
+		ws.MarkPinnedReaperScriptsExplicit()
 		return nil
 	})
 }

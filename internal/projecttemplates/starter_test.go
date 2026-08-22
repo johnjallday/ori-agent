@@ -53,8 +53,8 @@ func TestEnsureLibraryMaterializesStarters(t *testing.T) {
 			t.Errorf("reaper runtime setup must not be represented by a starter task: %+v", task)
 		}
 	}
-	if reaper.BuiltinVersion != 8 {
-		t.Errorf("reaper starter builtin_version = %d, want 8 for runtime-contract activation", reaper.BuiltinVersion)
+	if reaper.BuiltinVersion != 9 {
+		t.Errorf("reaper starter builtin_version = %d, want 9 for the starter pinned-action pack", reaper.BuiltinVersion)
 	}
 	// The manifest declares reaper-plugin under top-level workspace tool defaults
 	// so creation attaches its components when installed.
@@ -225,14 +225,17 @@ func TestEnsureLibraryRefreshesReaperRuntimeContractOnVersionBump(t *testing.T) 
 	if err != nil {
 		t.Fatalf("FindLibraryTemplate: %v", err)
 	}
-	if refreshed.BuiltinVersion != 8 {
-		t.Errorf("reaper builtin_version = %d, want 8", refreshed.BuiltinVersion)
+	if refreshed.BuiltinVersion != 9 {
+		t.Errorf("reaper builtin_version = %d, want 9", refreshed.BuiltinVersion)
 	}
 	if !refreshed.HasRuntimeRequirements() || refreshed.RuntimeRequirementsError != "" {
 		t.Fatalf("refreshed Reaper runtime contract = %#v, error %q", refreshed.RuntimeRequirements, refreshed.RuntimeRequirementsError)
 	}
 	if len(refreshed.StarterTasks) != 2 || refreshed.StarterTasks[0].Setup || refreshed.StarterTasks[1].Setup {
 		t.Fatalf("refreshed Reaper starter tasks = %+v", refreshed.StarterTasks)
+	}
+	if len(refreshed.PinnedReaperScripts) == 0 {
+		t.Errorf("refreshed Reaper template lost its starter pinned-action pack")
 	}
 	if refreshed.ProjectEntry == nil || refreshed.ProjectEntry.RelativePath != "{{name}}.rpp" || !refreshed.ProjectEntry.OpenAfterCreateDefault {
 		t.Errorf("refreshed Reaper project entry = %#v", refreshed.ProjectEntry)

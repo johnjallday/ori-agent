@@ -1524,29 +1524,67 @@
     host.appendChild(raw);
   }
 
-  // renderPinnedBand shows this workspace's pinned scripts as large, labeled
-  // buttons above the raw catalog grid (task 2.2). pinnedScriptIds is already
-  // pruned server-side to IDs that still resolve (workspace.ReaperPinService
-  // doc comment / ScriptListResponse), but a lookup miss is still tolerated
-  // here in case scripts hasn't caught up with a pin made moments ago.
+  // resolvePinnedEntry turns a pinned ID into the one shape renderPinnedCard
+  // needs, trying the shared custom-script library first and falling back to
+  // the built-in action catalog. A starter pack (task 3.1) pins plain
+  // catalog command IDs like "40026" — those never appear in `scripts` — so
+  // a pinned entry is not scoped to custom scripts alone, unlike the pin
+  // control in renderScriptLibrary above, which only ever offers to pin a
+  // script. Returns null when neither resolves (e.g. a stale ID pointing at
+  // a deleted custom script the server hasn't pruned yet).
+  function resolvePinnedEntry(id) {
+    const script = scripts.find(candidate => candidate && candidate.id === id);
+    if (script) {
+      return {
+        id: script.id,
+        name: script.name,
+        description: script.description,
+        needsConfirmation: Boolean(script.needs_confirmation),
+        action: catalogAction(script.id) || {
+          id: script.id,
+          label: script.name,
+          description: script.description,
+          source: 'custom',
+          mutates: true,
+          needs_confirmation: script.needs_confirmation
+        }
+      };
+    }
+    const action = catalogAction(id);
+    if (action) {
+      return {
+        id: action.id,
+        name: action.label,
+        description: action.description,
+        needsConfirmation: Boolean(action.needs_confirmation),
+        action
+      };
+    }
+    return null;
+  }
+
+  // renderPinnedBand shows this workspace's pinned quick actions — shared
+  // scripts and/or built-in catalog commands — as large, labeled buttons
+  // above the raw catalog grid (task 2.2). pinnedScriptIds is already pruned
+  // server-side to script IDs that still resolve (workspace.ReaperPinService
+  // doc comment / ScriptListResponse); a catalog ID needs no such pruning
+  // since the built-in catalog never changes underneath a pin.
   function renderPinnedBand(host) {
-    const pinned = pinnedScriptIds
-      .map(id => scripts.find(script => script && script.id === id))
-      .filter(Boolean);
+    const pinned = pinnedScriptIds.map(resolvePinnedEntry).filter(Boolean);
     if (!pinned.length) return;
     const section = el('section', 'reaper-console-pinned-band');
     const head = el('div', 'reaper-console-section-head');
     head.appendChild(el('h3', '', 'Quick actions'));
     section.appendChild(head);
     const grid = el('div', 'reaper-console-pinned-grid');
-    pinned.forEach((script, position) => {
-      grid.appendChild(renderPinnedCard(script, position + 1, pinned.length));
+    pinned.forEach((entry, position) => {
+      grid.appendChild(renderPinnedCard(entry, position + 1, pinned.length));
     });
     section.appendChild(grid);
     host.appendChild(section);
   }
 
-  function renderPinnedCard(script, index, total) {
+  function renderPinnedCard(entry, index, total) {
     const card = el('article', 'reaper-console-pinned-card');
     if (pinDragState && pinDragState.sourceIndex === index) card.classList.add('is-dragging');
     // Read by the pointer-drag hit test (document.elementFromPoint + closest)
@@ -1554,27 +1592,19 @@
     card.setAttribute('data-pin-index', String(index));
 
     const grip = button('⠿', 'reaper-console-pinned-grip', null);
-    grip.setAttribute('aria-label', 'Drag to reorder ' + script.name);
+    grip.setAttribute('aria-label', 'Drag to reorder ' + entry.name);
     grip.addEventListener('pointerdown', event => {
       event.preventDefault();
       beginPinDrag(index);
     });
     card.appendChild(grip);
 
-    const action = catalogAction(script.id) || {
-      id: script.id,
-      label: script.name,
-      description: script.description,
-      source: 'custom',
-      mutates: true,
-      needs_confirmation: script.needs_confirmation
-    };
-    const run = button('', 'reaper-console-pinned-run', () => requestAction(action));
+    const run = button('', 'reaper-console-pinned-run', () => requestAction(entry.action));
     run.disabled = actionRequestInFlight;
-    run.setAttribute('aria-label', 'Run pinned quick action ' + script.name + ' in REAPER');
-    run.appendChild(el('strong', '', script.name));
+    run.setAttribute('aria-label', 'Run pinned quick action ' + entry.name + ' in REAPER');
+    run.appendChild(el('strong', '', entry.name));
     run.appendChild(
-      el('span', 'reaper-console-pinned-hint', script.needs_confirmation ? 'Confirm' : 'One click')
+      el('span', 'reaper-console-pinned-hint', entry.needsConfirmation ? 'Confirm' : 'One click')
     );
     card.appendChild(run);
 
@@ -1587,7 +1617,7 @@
       () => void movePinnedScript(index, index - 1)
     );
     up.disabled = index <= 1;
-    up.setAttribute('aria-label', 'Move ' + script.name + ' earlier');
+    up.setAttribute('aria-label', 'Move ' + entry.name + ' earlier');
     moves.appendChild(up);
     const down = button(
       '▼',
@@ -1595,13 +1625,13 @@
       () => void movePinnedScript(index, index + 1)
     );
     down.disabled = index >= total;
-    down.setAttribute('aria-label', 'Move ' + script.name + ' later');
+    down.setAttribute('aria-label', 'Move ' + entry.name + ' later');
     moves.appendChild(down);
     card.appendChild(moves);
 
-    const unpin = button('Unpin', 'reaper-console-pinned-unpin', () => void unpinScript(script.id));
+    const unpin = button('Unpin', 'reaper-console-pinned-unpin', () => void unpinScript(entry.id));
     unpin.disabled = pinRequestInFlight;
-    unpin.setAttribute('aria-label', 'Unpin ' + script.name);
+    unpin.setAttribute('aria-label', 'Unpin ' + entry.name);
     card.appendChild(unpin);
 
     return card;

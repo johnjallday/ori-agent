@@ -470,6 +470,9 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	seededStarterTasks := 0
 	if templateResolved && kind != session.WorkspaceKindGroup {
 		seededStarterTasks = h.seedTemplateStarterTasksLogged(ws.ID, resolvedTemplate)
+		// Same gating as starter tasks above: only for a real template match,
+		// never for a group workspace (which has no console of its own).
+		h.seedTemplatePinnedReaperScriptsLogged(ws.ID, resolvedTemplate)
 	}
 
 	// Must run after starter-task seeding above — see

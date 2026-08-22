@@ -107,6 +107,105 @@ func TestCreateWorkspaceSeedsStarterTasksServerSide(t *testing.T) {
 	}
 }
 
+// writePinnedReaperScriptsTemplate writes a minimal template declaring a
+// starter pinned-action pack (task 3.1), mirroring writeStarterTaskTemplate's
+// shape for the sibling field.
+func writePinnedReaperScriptsTemplate(t *testing.T, libDir, id string, pinnedIDs []string) {
+	t.Helper()
+	tplDir := filepath.Join(libDir, id)
+	if err := os.MkdirAll(tplDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tplDir, "{{name}}.rpp"), []byte("<REAPER_PROJECT 0.1\n  TEMPO 120 4 4\n>\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	encodedIDs, err := json.Marshal(pinnedIDs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := fmt.Sprintf(`{
+		"name":"Pinned Scripts Template",
+		"agents":[{"name":"Producer","role":"orchestrator","system_prompt":"produce"}],
+		"pinned_reaper_scripts":%s
+	}`, encodedIDs)
+	if err := os.WriteFile(filepath.Join(tplDir, "template.json"), []byte(manifest), 0o640); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCreateWorkspaceSeedsPinnedReaperScriptsServerSide(t *testing.T) {
+	handler, _, _, cleanup := templateTestEnv(t)
+	defer cleanup()
+	writePinnedReaperScriptsTemplate(t, handler.templatesRootResolver(), "pinned-template", []string{"40026", "40001"})
+
+	w, resp := postCreateWorkspace(t, handler, `{"name":"Song Z","template_id":"pinned-template"}`)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	folder, _ := resp["folder"].(map[string]any)
+	wsID, _ := folder["id"].(string)
+	ws, err := handler.workspaceStore.Get(wsID)
+	if err != nil {
+		t.Fatalf("workspaceStore.Get: %v", err)
+	}
+	want := []string{"40026", "40001"}
+	if len(ws.PinnedReaperScripts) != len(want) {
+		t.Fatalf("PinnedReaperScripts = %v, want %v", ws.PinnedReaperScripts, want)
+	}
+	for i, id := range want {
+		if ws.PinnedReaperScripts[i] != id {
+			t.Fatalf("PinnedReaperScripts = %v, want %v", ws.PinnedReaperScripts, want)
+		}
+	}
+}
+
+func TestCreateWorkspaceWithoutPinnedReaperScriptsLeavesPinsEmpty(t *testing.T) {
+	handler, _, _, cleanup := templateTestEnv(t)
+	defer cleanup()
+	writeStarterTaskTemplate(t, handler.templatesRootResolver(), "starter-template", true)
+
+	w, resp := postCreateWorkspace(t, handler, `{"name":"Song W","template_id":"starter-template"}`)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	folder, _ := resp["folder"].(map[string]any)
+	wsID, _ := folder["id"].(string)
+	ws, err := handler.workspaceStore.Get(wsID)
+	if err != nil {
+		t.Fatalf("workspaceStore.Get: %v", err)
+	}
+	if len(ws.PinnedReaperScripts) != 0 {
+		t.Fatalf("PinnedReaperScripts = %v, want none for a template with no starter pack", ws.PinnedReaperScripts)
+	}
+}
+
+// TestCreateReaperSongWorkspaceSeedsStarterPinnedPack exercises the actual
+// shipped reaper-song template.json (task 3.2/3.3), not a fixture — this is
+// what proves a new REAPER-template workspace shows starter pins without any
+// user action.
+func TestCreateReaperSongWorkspaceSeedsStarterPinnedPack(t *testing.T) {
+	handler, _, _, cleanup := templateTestEnv(t)
+	defer cleanup()
+	if err := projecttemplates.EnsureLibrary(handler.templatesRootResolver()); err != nil {
+		t.Fatalf("EnsureLibrary: %v", err)
+	}
+
+	w, resp := postCreateWorkspace(t, handler, `{"name":"Starter Pins Song","template_id":"reaper-song"}`)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	folder, _ := resp["folder"].(map[string]any)
+	wsID, _ := folder["id"].(string)
+	ws, err := handler.workspaceStore.Get(wsID)
+	if err != nil {
+		t.Fatalf("workspaceStore.Get: %v", err)
+	}
+	if len(ws.PinnedReaperScripts) == 0 {
+		t.Fatalf("a new Reaper Song workspace has no starter pinned quick actions")
+	}
+}
+
 func TestCreateReaperWorkspaceSeedsRealWorkWithoutSetupHelpTask(t *testing.T) {
 	handler, _, _, cleanup := templateTestEnv(t)
 	defer cleanup()
