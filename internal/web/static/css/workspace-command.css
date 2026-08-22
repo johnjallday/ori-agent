@@ -7517,6 +7517,41 @@ button.ws-cmd-rpg-class-card:focus-visible {
   text-align: left;
 }
 
+/* --- Per-track "Ask Ori about this track…" context menu (task 6.x, #396).
+   Reuses .reaper-console-color-backdrop (already generic) for the
+   click-away dismiss; the menu itself mirrors the color popover's shape. --- */
+.reaper-console-track-menu {
+  position: absolute;
+  top: 100%;
+  left: 2.5rem;
+  z-index: 7;
+  display: grid;
+  margin-top: 0.3rem;
+  padding: 0.3rem;
+  background: linear-gradient(145deg, #16201f, #0b1212 65%);
+  border: 1px solid rgba(94, 208, 167, 0.4);
+  border-radius: 3px;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.55);
+}
+
+.reaper-console-track-menu-item {
+  padding: 0.4rem 0.6rem;
+  color: rgba(223, 235, 228, 0.85);
+  background: transparent;
+  border: none;
+  border-radius: 2px;
+  font-family: var(--ws-font-display, sans-serif);
+  font-size: 0.68rem;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.reaper-console-track-menu-item:hover {
+  color: #eafff5;
+  background: rgba(94, 208, 167, 0.14);
+}
+
 /* --- Interactive track strips ---
    The strip borrows the Map's vocabulary: click the name to rename it inline.
    A pending edit is subdued rather than blocked, and a refused guard reports

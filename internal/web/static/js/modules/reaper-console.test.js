@@ -1592,6 +1592,93 @@ test('Escape closes the color palette', () => {
   consolePanel.close();
 });
 
+test('right-clicking a track strip opens a context menu with an Ask Ori item', () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  consolePanel._setState(liveTrackState([{ index: 1, name: 'Drums' }]));
+  consolePanel.open();
+
+  const host = documentStub.getElementById('reaperConsole');
+  const strip = findOne(host, 'reaper-console-track');
+  assert.equal(consolePanel._openTrackMenu(), 0);
+  strip.dispatch('contextmenu', { preventDefault: () => {} });
+  assert.equal(consolePanel._openTrackMenu(), 1);
+
+  const menuItem = findOne(
+    documentStub.getElementById('reaperConsole'),
+    'reaper-console-track-menu-item'
+  );
+  assert.ok(menuItem);
+  assert.equal(menuItem.textContent, 'Ask Ori about this track…');
+  consolePanel.close();
+});
+
+test('the per-track menu item seeds the Ask Ori input with the track name and does not auto-send', () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  consolePanel._setState(liveTrackState([{ index: 1, name: 'Drums' }]));
+  consolePanel.open();
+
+  const host = documentStub.getElementById('reaperConsole');
+  findOne(host, 'reaper-console-track').dispatch('contextmenu', { preventDefault: () => {} });
+
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return { ok: true, status: 200, json: async () => ({}) };
+  };
+  findOne(documentStub.getElementById('reaperConsole'), 'reaper-console-track-menu-item').dispatch(
+    'click'
+  );
+
+  assert.equal(consolePanel._askInputValue(), 'What can you tell me about the "Drums" track?');
+  assert.equal(consolePanel._openTrackMenu(), 0, 'the menu should close after picking an item');
+  assert.equal(calls, 0, 'picking the menu item must never itself send anything');
+  consolePanel.close();
+});
+
+test('the per-track menu item falls back to a track number for an unnamed track', () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  consolePanel._setState(liveTrackState([{ index: 2, name: '' }]));
+  consolePanel.open();
+
+  const host = documentStub.getElementById('reaperConsole');
+  findOne(host, 'reaper-console-track').dispatch('contextmenu', { preventDefault: () => {} });
+  findOne(documentStub.getElementById('reaperConsole'), 'reaper-console-track-menu-item').dispatch(
+    'click'
+  );
+
+  assert.equal(consolePanel._askInputValue(), 'What can you tell me about track 2?');
+  consolePanel.close();
+});
+
+test('clicking outside the track menu closes it without seeding anything', () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  consolePanel._setState(liveTrackState([{ index: 1, name: 'Drums' }]));
+  consolePanel.open();
+
+  const host = documentStub.getElementById('reaperConsole');
+  findOne(host, 'reaper-console-track').dispatch('contextmenu', { preventDefault: () => {} });
+  assert.equal(consolePanel._openTrackMenu(), 1);
+
+  findOne(documentStub.getElementById('reaperConsole'), 'reaper-console-color-backdrop').dispatch(
+    'click'
+  );
+  assert.equal(consolePanel._openTrackMenu(), 0);
+  assert.equal(consolePanel._askInputValue(), '');
+  consolePanel.close();
+});
+
 function threeTrackState() {
   return liveTrackState([
     { index: 1, name: 'Kick' },

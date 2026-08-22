@@ -59,6 +59,14 @@
   // openPalette is the index of the strip whose color popover is open, 0 for
   // none. One strip at a time, per the Map's own popover convention.
   let openPalette = 0;
+  // openTrackMenu is the index of the strip whose right-click context menu
+  // is open, 0 for none — same shape as openPalette above (one at a time,
+  // backdrop-to-close, Escape-to-close). The Map's own right-click menu
+  // (workspace-map.js's openContextMenu/closeContextMenu, #324/#325) is the
+  // idiom this mirrors; its implementation is deeply coupled to Map canvas
+  // state and not directly reusable here, so this is a from-scratch popover
+  // built the same way this console already builds the color popover above.
+  let openTrackMenu = 0;
   // dragState is null when no drag is active. sourceIndex/sourceName are
   // captured at pointerdown so the eventual move is guarded on the name Ori
   // read before the drag started; targetIndex tracks the current drop slot
@@ -2103,6 +2111,14 @@
     // Read by the pointer-drag hit test (document.elementFromPoint + closest)
     // to resolve a screen position back to a logical track index.
     item.setAttribute('data-track-index', String(track.index));
+    // "Ask Ori about this track…" (#396) is read-only and never mutates
+    // REAPER, so it's offered regardless of `editable` — unlike every other
+    // strip control, which is gated on live track editing being available.
+    item.addEventListener('contextmenu', event => {
+      event.preventDefault();
+      openTrackMenu = track.index;
+      renderConsole();
+    });
 
     renderDragGrip(item, track, editable, trackCount);
     item.appendChild(
@@ -2159,6 +2175,7 @@
       editable
     );
     item.appendChild(chips);
+    renderTrackContextMenu(item, track, name);
     list.appendChild(item);
 
     if (stripNotice && stripNotice.index === track.index) {
@@ -2166,6 +2183,44 @@
       notice.setAttribute('role', 'status');
       list.appendChild(notice);
     }
+  }
+
+  // trackAskPrompt builds the seeded prompt naming a specific track (#396).
+  function trackAskPrompt(track, name) {
+    return name
+      ? 'What can you tell me about the "' + name + '" track?'
+      : 'What can you tell me about track ' + track.index + '?';
+  }
+
+  // renderTrackContextMenu is the per-track "Ask Ori about this track…" menu
+  // (#396), mirroring renderColorSwatch's popover above exactly: a
+  // full-viewport backdrop closes it on any outside click, Escape closes it
+  // from the menu itself, one open at a time (openTrackMenu, like
+  // openPalette). Read-only, so offered on every strip regardless of
+  // `editable`.
+  function renderTrackContextMenu(item, track, name) {
+    if (openTrackMenu !== track.index) return;
+    const backdrop = el('div', 'reaper-console-color-backdrop');
+    backdrop.addEventListener('click', () => {
+      openTrackMenu = 0;
+      renderConsole();
+    });
+    item.appendChild(backdrop);
+
+    const menu = el('div', 'reaper-console-track-menu');
+    menu.setAttribute('role', 'menu');
+    menu.addEventListener('keydown', event => {
+      if (event.key !== 'Escape') return;
+      openTrackMenu = 0;
+      renderConsole();
+    });
+    const askItem = button('Ask Ori about this track…', 'reaper-console-track-menu-item', () => {
+      openTrackMenu = 0;
+      seedAskInput(trackAskPrompt(track, name));
+    });
+    askItem.setAttribute('role', 'menuitem');
+    menu.appendChild(askItem);
+    item.appendChild(menu);
   }
 
   function renderDropIndicator(list) {
@@ -2434,6 +2489,7 @@
     pendingEdit = null;
     stripNotice = null;
     openPalette = 0;
+    openTrackMenu = 0;
     if (dragState) detachDragListeners();
     dragState = null;
     if (pinDragState) detachPinDragListeners();
@@ -2573,6 +2629,7 @@
     _stripNotice: () => stripNotice,
     _pollIntervalMs: () => pollTimerIntervalMs,
     _openPalette: () => openPalette,
+    _openTrackMenu: () => openTrackMenu,
     _beginDrag: beginDrag,
     _dragOverIndex: dragOverIndex,
     _endDrag: endDrag,
@@ -2625,6 +2682,7 @@
       stripNotice = null;
       trackRequestInFlight = false;
       openPalette = 0;
+      openTrackMenu = 0;
       if (dragState) detachDragListeners();
       dragState = null;
       pendingPlan = null;
