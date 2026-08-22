@@ -378,12 +378,16 @@ func TestScriptCRUDJoinsCatalogAndRunsThroughRunner(t *testing.T) {
 
 	listed := httptest.NewRecorder()
 	mux.ServeHTTP(listed, httptest.NewRequest(http.MethodGet, "/api/workspaces/mine/reaper/scripts", nil))
-	var scripts []reaper.Script
-	if err := json.Unmarshal(listed.Body.Bytes(), &scripts); err != nil {
+	var listResponse ScriptListResponse
+	if err := json.Unmarshal(listed.Body.Bytes(), &listResponse); err != nil {
 		t.Fatal(err)
 	}
+	scripts := listResponse.Scripts
 	if len(scripts) != 1 || scripts[0].ID != "custom:band.lua" || scripts[0].Code != "" {
 		t.Fatalf("scripts = %+v", scripts)
+	}
+	if len(listResponse.PinnedScriptIDs) != 0 {
+		t.Fatalf("pinned script ids = %+v, want none pinned yet", listResponse.PinnedScriptIDs)
 	}
 
 	actions := httptest.NewRecorder()

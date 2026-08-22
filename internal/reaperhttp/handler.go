@@ -22,6 +22,15 @@ type WorkspaceStore interface {
 	Get(string) (*workspace.Workspace, error)
 }
 
+// PinService persists per-workspace pinned REAPER quick actions. Satisfied
+// by *workspace.ReaperPinService; kept as a narrow local interface for
+// testability, matching ScriptLibrary/ScriptRunner below.
+type PinService interface {
+	Pin(workspaceID, scriptID string) error
+	Unpin(workspaceID, scriptID string) error
+	Reorder(workspaceID string, orderedScriptIDs []string) error
+}
+
 type StateReader interface {
 	ReadState(context.Context, reaper.ProjectSource) (reaper.State, error)
 }
@@ -50,6 +59,7 @@ type Handler struct {
 	catalog       ActionCatalog
 	scriptLibrary ScriptLibrary
 	scriptRunner  ScriptRunner
+	pins          PinService
 	trackRunner   TrackEditRunner
 	bulkRunner    BulkEditRunner
 	proposals     *proposalStore
@@ -71,6 +81,14 @@ func (h *Handler) SetScriptServices(library ScriptLibrary, runner ScriptRunner) 
 	if h != nil {
 		h.scriptLibrary = library
 		h.scriptRunner = runner
+	}
+}
+
+// SetPinService supplies pinned-quick-action persistence. Pin/unpin/reorder
+// endpoints degrade to unavailable until it is set.
+func (h *Handler) SetPinService(pins PinService) {
+	if h != nil {
+		h.pins = pins
 	}
 }
 

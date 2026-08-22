@@ -232,6 +232,16 @@ type Workspace struct {
 	// FR-104).
 	GoalToolboxPolicy *GoalToolboxPolicy `json:"goal_toolbox_policy,omitempty"`
 
+	// PinnedReaperScripts is the ordered list of REAPER script IDs (e.g.
+	// "custom:filename.lua") this workspace has pinned as quick actions in
+	// the console (see internal/workspace/reaper_pins.go). REAPER scripts
+	// themselves are globally shared files (internal/reaper/library.go), so
+	// per-workspace pin state has nowhere else portable to live and is kept
+	// here instead — never written into the script file or its frontmatter.
+	// A pin whose script no longer resolves is pruned at read time by
+	// internal/reaperhttp, not here (FR from tasks-reaper-station-discoverability.md 1.3).
+	PinnedReaperScripts []string `json:"pinned_reaper_scripts,omitempty"`
+
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`
 	mu        sync.RWMutex   `json:"-"`
