@@ -284,6 +284,15 @@ type Template struct {
 	BehaviorProfile string `json:"behavior_profile,omitempty"`
 	// StarterTasks are example tasks seeded into a new workspace.
 	StarterTasks []StarterTask `json:"starter_tasks,omitempty"`
+	// PinnedReaperScripts is an ordered starter pack of REAPER quick-action IDs
+	// (built-in catalog command IDs like "40026", or "custom:filename.lua" for
+	// a shared script) seeded onto a new workspace's
+	// workspace.Workspace.PinnedReaperScripts (see
+	// internal/workspace/reaper_pins.go). Inert for any template that isn't
+	// REAPER-flavored; the console simply never shows a pinned band with no
+	// pins. Data only — resolved against the live catalog/script library at
+	// render time, same as any other pin.
+	PinnedReaperScripts []string `json:"pinned_reaper_scripts,omitempty"`
 	// ProjectEntry is the optional scaffolded file Ori can offer to open after
 	// an explicit Create Workspace action. It is validated data only.
 	ProjectEntry *ProjectEntry `json:"project_entry,omitempty"`
@@ -431,6 +440,7 @@ type manifest struct {
 	Addons                 []string                `json:"addons,omitempty"`
 	BehaviorProfile        string                  `json:"behavior_profile,omitempty"`
 	StarterTasks           []StarterTask           `json:"starter_tasks,omitempty"`
+	PinnedReaperScripts    []string                `json:"pinned_reaper_scripts,omitempty"`
 	ProjectEntry           json.RawMessage         `json:"project_entry,omitempty"`
 	Builtin                bool                    `json:"builtin,omitempty"`
 	BuiltinVersion         int                     `json:"builtin_version,omitempty"`
@@ -487,6 +497,7 @@ func newTemplate(path string) Template {
 	t.Addons = normalizeAddons(m.Addons)
 	t.BehaviorProfile = NormalizeBehaviorProfile(m.BehaviorProfile)
 	t.StarterTasks = normalizeStarterTasks(m.StarterTasks)
+	t.PinnedReaperScripts = normalizePinnedReaperScripts(m.PinnedReaperScripts)
 	t.Builtin = m.Builtin || IsBuiltinStarterID(t.ID)
 	t.BuiltinVersion = m.BuiltinVersion
 	t.HasSkeleton = hasSkeletonFiles(t.Path)
@@ -572,6 +583,30 @@ func normalizeStarterTasks(tasks []StarterTask) []StarterTask {
 			Requires:        normalizeOperationNames(task.Requires),
 			FileFallbackFor: normalizeOperationNames(task.FileFallbackFor),
 		})
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// normalizePinnedReaperScripts trims each starter pin ID and drops empties,
+// preserving order and duplicates as written — a hand-edited manifest listing
+// the same ID twice is the authoring layer's problem, not this loader's; the
+// pin service's own Reorder guard (internal/workspace/reaper_pins.go) is
+// where a duplicate would actually misbehave, and seeding calls Pin per ID
+// (itself a no-op on a repeat), so a duplicate here is harmless.
+func normalizePinnedReaperScripts(ids []string) []string {
+	if len(ids) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		out = append(out, id)
 	}
 	if len(out) == 0 {
 		return nil

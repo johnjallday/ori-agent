@@ -27,8 +27,8 @@ func TestReaperStarterRuntimeTasks(t *testing.T) {
 	if len(tpl.Warnings) != 0 {
 		t.Fatalf("reaper-song should load without warnings, got %v", tpl.Warnings)
 	}
-	if tpl.BuiltinVersion != 8 {
-		t.Fatalf("reaper-song builtin_version = %d, want 8 for runtime-contract activation", tpl.BuiltinVersion)
+	if tpl.BuiltinVersion != 9 {
+		t.Fatalf("reaper-song builtin_version = %d, want 9 for the starter pinned-action pack", tpl.BuiltinVersion)
 	}
 	if tpl.ProjectEntry == nil || tpl.ProjectEntry.RelativePath != "{{name}}.rpp" || !tpl.ProjectEntry.OpenAfterCreateDefault {
 		t.Fatalf("reaper-song project entry = %#v", tpl.ProjectEntry)
@@ -151,8 +151,8 @@ func TestReaperStarterRuntimeContract(t *testing.T) {
 	if tpl.HasInvalidSetupWizard() {
 		t.Fatalf("reaper-song wizard failed to parse: %v", tpl.SetupWizardError)
 	}
-	if tpl.BuiltinVersion != 8 {
-		t.Fatalf("builtin_version = %d, want 8 so installed libraries receive the runtime contract", tpl.BuiltinVersion)
+	if tpl.BuiltinVersion != 9 {
+		t.Fatalf("builtin_version = %d, want 9 so installed libraries receive the starter pinned-action pack", tpl.BuiltinVersion)
 	}
 	contract := tpl.RuntimeRequirements
 	if contract == nil || !contract.StructurallyValid() {

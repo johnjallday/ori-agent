@@ -5,6 +5,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/reaper"
 	"github.com/johnjallday/ori-agent/internal/reaperhttp"
 	"github.com/johnjallday/ori-agent/internal/reapersetup"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // wireReaperControl constructs the live REAPER state and action surface after
@@ -28,6 +29,7 @@ func (b *ServerBuilder) wireReaperControl() {
 	runner := reaper.NewRunner(roots, probes, client)
 	handler := reaperhttp.NewHandler(store, b.userProvider, client, catalog)
 	handler.SetScriptServices(library, runner)
+	handler.SetPinService(workspace.NewReaperPinService(b.workspaceStore))
 	// The same runner performs the guarded single-track edits and applied bulk
 	// plans; it owns the receipt path so no filesystem detail reaches the
 	// HTTP layer.

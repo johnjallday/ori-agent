@@ -232,6 +232,16 @@ type Workspace struct {
 	// FR-104).
 	GoalToolboxPolicy *GoalToolboxPolicy `json:"goal_toolbox_policy,omitempty"`
 
+	// PinnedReaperScripts is the ordered list of REAPER script IDs (e.g.
+	// "custom:filename.lua") this workspace has pinned as quick actions in
+	// the console (see internal/workspace/reaper_pins.go). REAPER scripts
+	// themselves are globally shared files (internal/reaper/library.go), so
+	// per-workspace pin state has nowhere else portable to live and is kept
+	// here instead — never written into the script file or its frontmatter.
+	// A pin whose script no longer resolves is pruned at read time by
+	// internal/reaperhttp, not here (FR from tasks-reaper-station-discoverability.md 1.3).
+	PinnedReaperScripts []string `json:"pinned_reaper_scripts,omitempty"`
+
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`
 	mu        sync.RWMutex   `json:"-"`
@@ -267,6 +277,45 @@ type Workspace struct {
 	// Never persisted and never cloned: it describes how one value was loaded,
 	// and a copy decoded from disk always carries its own Goal directly.
 	missionLoaded bool
+
+	// pinnedReaperScriptsExplicit records that THIS in-memory value has had its
+	// PinnedReaperScripts deliberately edited (by ReaperPinService or template
+	// starter-pack seeding), as opposed to merely arriving without them.
+	//
+	// The two cases are otherwise indistinguishable — both leave the slice
+	// empty — but they must produce opposite behavior on save: a workspace
+	// record that never loaded pins (e.g. the lean SQLite-primary projection
+	// SyncStore reads before restoring folder-only state) has to be refilled
+	// from the canonical workspace.json, while unpinning the last quick action
+	// has to be allowed to write the empty collection away. Mirrors
+	// capabilitiesExplicit above for the exact same reason — see SyncStore.Save.
+	//
+	// Never persisted and never cloned: it is intent attached to one
+	// mutate-then-save cycle, and a copy decoded from disk correctly carries no
+	// pending intent.
+	pinnedReaperScriptsExplicit bool
+}
+
+// MarkPinnedReaperScriptsExplicit records that this value's PinnedReaperScripts
+// was deliberately written, not merely absent. Called by ReaperPinService
+// (internal/workspace/reaper_pins.go) and template starter-pack seeding after
+// mutating the field; see the field comment for why the distinction matters.
+func (w *Workspace) MarkPinnedReaperScriptsExplicit() {
+	if w == nil {
+		return
+	}
+	w.pinnedReaperScriptsExplicit = true
+}
+
+// PinnedReaperScriptsExplicit reports whether this in-memory workspace has had
+// its PinnedReaperScripts deliberately written during this value's lifetime,
+// as opposed to merely arriving without them. See the pinnedReaperScriptsExplicit
+// field doc comment on Workspace.
+func (w *Workspace) PinnedReaperScriptsExplicit() bool {
+	if w == nil {
+		return false
+	}
+	return w.pinnedReaperScriptsExplicit
 }
 
 // MarkMissionLoaded records that this value's Goal configuration came from a

@@ -611,6 +611,9 @@ test('the shared custom script library lists metadata and run controls', () => {
     tracks: []
   });
   consolePanel.open();
+  // Script library lives behind the Advanced disclosure, closed by default
+  // (task 2.4) — open it before asserting on its contents.
+  consolePanel._setAdvancedOpen(true);
   const host = documentStub.getElementById('reaperConsole');
   assert.match(host.textContent, /Script library/);
   assert.match(host.textContent, /Add band tracks/);
@@ -645,6 +648,8 @@ test('registered scripts and the raw command escape hatch share the action surfa
   consolePanel.open();
   const host = documentStub.getElementById('reaperConsole');
   assert.match(host.textContent, /Add arrangement markers/);
+  // Raw command ID lives behind the Advanced disclosure, closed by default.
+  consolePanel._setAdvancedOpen(true);
   assert.match(host.textContent, /Raw command ID/);
   assert.match(host.textContent, /Decimal or _RS hexadecimal IDs always require confirmation/);
 
@@ -657,6 +662,290 @@ test('registered scripts and the raw command escape hatch share the action surfa
   });
   assert.match(host.textContent, /Confirm project change/);
   assert.match(host.textContent, /Run Raw command 40001/);
+  consolePanel.close();
+});
+
+function openSongState() {
+  return {
+    applies: true,
+    connected: true,
+    project: 'Song',
+    tempo: 120,
+    play_state: 'stopped',
+    position: '1.1.00',
+    track_count: 0,
+    tracks: []
+  };
+}
+
+test('the Advanced disclosure starts collapsed and reveals its contents on toggle', () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([
+    {
+      id: 'custom:a.lua',
+      filename: 'a.lua',
+      name: 'Script A',
+      needs_confirmation: false,
+      metadata_valid: true
+    }
+  ]);
+  consolePanel._setState(openSongState());
+  consolePanel.open();
+
+  const host = documentStub.getElementById('reaperConsole');
+  assert.equal(consolePanel._advancedOpen(), false);
+  assert.doesNotMatch(host.textContent, /Script library/);
+  assert.doesNotMatch(host.textContent, /Raw command ID/);
+
+  const toggle = findOne(host, 'reaper-console-advanced-toggle');
+  assert.ok(toggle, 'the disclosure needs a toggle control');
+  assert.equal(toggle.getAttribute('aria-expanded'), 'false');
+  toggle.dispatch('click');
+
+  assert.equal(consolePanel._advancedOpen(), true);
+  assert.match(host.textContent, /Script library/);
+  assert.match(host.textContent, /Raw command ID/);
+  consolePanel.close();
+});
+
+test('the pin control in the script library toggles state and posts to the pin endpoint', async () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([
+    {
+      id: 'custom:a.lua',
+      filename: 'a.lua',
+      name: 'Script A',
+      needs_confirmation: false,
+      metadata_valid: true
+    }
+  ]);
+  consolePanel._setState(openSongState());
+  consolePanel.open();
+  consolePanel._setAdvancedOpen(true);
+
+  const host = documentStub.getElementById('reaperConsole');
+  const pinButton = findOne(host, 'is-tertiary');
+  assert.ok(pinButton, 'a pin control should render on the script row');
+  assert.equal(pinButton.textContent, 'Pin as quick action');
+
+  const requests = [];
+  globalThis.fetch = async (path, options) => {
+    requests.push({ path, options });
+    return { ok: true, status: 200, json: async () => ({ pinned: true }) };
+  };
+  await consolePanel._pinScript('custom:a.lua');
+
+  const pinRequest = requests.find(request => /scripts\/custom%3Aa\.lua\/pin$/.test(request.path));
+  assert.ok(pinRequest, 'pinning should POST to the pin endpoint');
+  assert.equal(pinRequest.options.method, 'POST');
+  // Asserted on the state accessor rather than a post-await DOM re-query: an
+  // unawaited background refresh() from open() (see other async tests in
+  // this file, e.g. Apply posts confirmed:true above) can resolve against
+  // the default disconnected fetch stub during this await and repaint the
+  // panel offline before a DOM check would run. _pinnedScriptIds() is the
+  // same "did the pin toggle" fact without that race; the row's rendered
+  // label for a pinned script is covered by the "pinned band renders a
+  // labeled button" test below via _setPinnedScriptIds.
+  assert.deepEqual(consolePanel._pinnedScriptIds(), ['custom:a.lua']);
+  consolePanel.close();
+});
+
+test('the pinned band renders a labeled button per pinned script, above the raw catalog grid', () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([
+    {
+      id: 'custom:a.lua',
+      filename: 'a.lua',
+      name: 'Script A',
+      needs_confirmation: false,
+      metadata_valid: true
+    },
+    {
+      id: 'custom:b.lua',
+      filename: 'b.lua',
+      name: 'Script B',
+      needs_confirmation: true,
+      metadata_valid: true
+    }
+  ]);
+  consolePanel._setPinnedScriptIds(['custom:b.lua', 'custom:a.lua']);
+  consolePanel._setState(openSongState());
+  consolePanel.open();
+
+  const host = documentStub.getElementById('reaperConsole');
+  const cards = findAll(host, 'reaper-console-pinned-card');
+  assert.equal(cards.length, 2);
+  assert.match(cards[0].textContent, /Script B/);
+  assert.match(cards[1].textContent, /Script A/);
+  consolePanel.close();
+});
+
+test('a pinned built-in catalog action (a starter pack pin) resolves and runs like any other pinned entry', () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  // A template starter pack (task 3.1) pins plain catalog command IDs —
+  // never custom scripts — so the pinned band must resolve those too.
+  consolePanel._setActions([
+    {
+      id: '40026',
+      label: 'Save project',
+      description: 'Save the open REAPER project.',
+      source: 'builtin',
+      mutates: true,
+      needs_confirmation: true
+    }
+  ]);
+  consolePanel._setScripts([]);
+  consolePanel._setPinnedScriptIds(['40026']);
+  consolePanel._setState(openSongState());
+  consolePanel.open();
+
+  const host = documentStub.getElementById('reaperConsole');
+  const cards = findAll(host, 'reaper-console-pinned-card');
+  assert.equal(cards.length, 1);
+  assert.match(cards[0].textContent, /Save project/);
+  assert.match(cards[0].textContent, /Confirm/);
+
+  findOne(host, 'reaper-console-pinned-run').dispatch('click');
+  assert.match(host.textContent, /Confirm project change/);
+  consolePanel.close();
+});
+
+test('unpinning removes a script from the pinned band', async () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([
+    {
+      id: 'custom:a.lua',
+      filename: 'a.lua',
+      name: 'Script A',
+      needs_confirmation: false,
+      metadata_valid: true
+    }
+  ]);
+  consolePanel._setPinnedScriptIds(['custom:a.lua']);
+  consolePanel._setState(openSongState());
+  consolePanel.open();
+
+  const requests = [];
+  globalThis.fetch = async (path, options) => {
+    requests.push({ path, options });
+    return { ok: true, status: 200, json: async () => ({ pinned: false }) };
+  };
+  const host = documentStub.getElementById('reaperConsole');
+  const unpin = findOne(host, 'reaper-console-pinned-unpin');
+  assert.ok(unpin);
+  await consolePanel._unpinScript('custom:a.lua');
+
+  const unpinRequest = requests.find(request =>
+    /scripts\/custom%3Aa\.lua\/pin$/.test(request.path)
+  );
+  assert.ok(unpinRequest, 'unpinning should DELETE the pin endpoint');
+  assert.equal(unpinRequest.options.method, 'DELETE');
+  // Asserted on the state accessor, not a post-await DOM re-query — see the
+  // comment in the pin-control test above for why.
+  assert.deepEqual(consolePanel._pinnedScriptIds(), []);
+  consolePanel.close();
+});
+
+test('dragging a pinned card grip posts the new order to the reorder endpoint', async () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([
+    {
+      id: 'custom:a.lua',
+      filename: 'a.lua',
+      name: 'Script A',
+      needs_confirmation: false,
+      metadata_valid: true
+    },
+    {
+      id: 'custom:b.lua',
+      filename: 'b.lua',
+      name: 'Script B',
+      needs_confirmation: false,
+      metadata_valid: true
+    },
+    {
+      id: 'custom:c.lua',
+      filename: 'c.lua',
+      name: 'Script C',
+      needs_confirmation: false,
+      metadata_valid: true
+    }
+  ]);
+  consolePanel._setPinnedScriptIds(['custom:a.lua', 'custom:b.lua', 'custom:c.lua']);
+  consolePanel._setState(openSongState());
+  consolePanel.open();
+
+  const host = documentStub.getElementById('reaperConsole');
+  const grips = findAll(host, 'reaper-console-pinned-grip');
+  assert.equal(grips.length, 3);
+  grips[0].dispatch('pointerdown', { preventDefault: () => {} });
+  assert.deepEqual(consolePanel._pinDragState(), { sourceIndex: 1, targetIndex: 1 });
+
+  consolePanel._pinDragOverIndex(3);
+  assert.equal(consolePanel._pinDragState().targetIndex, 3);
+
+  const requests = [];
+  globalThis.fetch = async (path, options) => {
+    requests.push({ path, options });
+    return { ok: true, status: 200, json: async () => ({ reordered: true }) };
+  };
+  await consolePanel._endPinDrag();
+
+  const reorder = requests.find(request => /pinned-scripts$/.test(request.path));
+  assert.ok(reorder, 'ending the drag should PUT the reorder endpoint');
+  assert.equal(reorder.options.method, 'PUT');
+  assert.deepEqual(JSON.parse(reorder.options.body), {
+    ordered_script_ids: ['custom:b.lua', 'custom:c.lua', 'custom:a.lua']
+  });
+  assert.equal(consolePanel._pinDragState(), null);
+  consolePanel.close();
+});
+
+test('Escape cancels an in-progress pin drag without applying anything', () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([
+    {
+      id: 'custom:a.lua',
+      filename: 'a.lua',
+      name: 'Script A',
+      needs_confirmation: false,
+      metadata_valid: true
+    },
+    {
+      id: 'custom:b.lua',
+      filename: 'b.lua',
+      name: 'Script B',
+      needs_confirmation: false,
+      metadata_valid: true
+    }
+  ]);
+  consolePanel._setPinnedScriptIds(['custom:a.lua', 'custom:b.lua']);
+  consolePanel._setState(openSongState());
+  consolePanel.open();
+
+  consolePanel._beginPinDrag(1);
+  consolePanel._pinDragOverIndex(2);
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return { ok: true, status: 200, json: async () => ({}) };
+  };
+  documentStub.dispatchEvent({ type: 'keydown', key: 'Escape' });
+  assert.equal(consolePanel._pinDragState(), null);
+  assert.equal(calls, 0, 'cancelling a pin drag must not touch the server');
   consolePanel.close();
 });
 
