@@ -785,6 +785,10 @@ async function captureScene(
 ) {
   const fixture = await installFixtureRoutes(page);
   try {
+    // Set the preference before navigation so external SVG image documents see
+    // it when they load. The page-level freeze below cannot reach animations
+    // embedded inside assets such as Ori's launcher sprite.
+    await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.goto(route, { waitUntil: 'networkidle' });
     // Freeze the page before a scene-specific interaction. The Map preparation
     // opens and closes a Bootstrap modal; freezing afterwards allowed its body
