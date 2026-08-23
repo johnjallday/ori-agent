@@ -19,7 +19,13 @@ class FakeNode {
         const classes = new Set(this.className.split(/\s+/).filter(Boolean));
         classes.add(value);
         this.className = Array.from(classes).join(' ');
-      }
+      },
+      remove: value => {
+        const classes = new Set(this.className.split(/\s+/).filter(Boolean));
+        classes.delete(value);
+        this.className = Array.from(classes).join(' ');
+      },
+      contains: value => this.className.split(/\s+/).filter(Boolean).includes(value)
     };
   }
   set id(value) {
@@ -964,6 +970,363 @@ function liveTrackState(tracks) {
   };
 }
 
+test('hasUnnamedTracks fires only when at least one live track has no name', () => {
+  assert.equal(consolePanel._hasUnnamedTracks([]), null);
+  assert.equal(consolePanel._hasUnnamedTracks([{ index: 1, name: 'Kick' }]), null);
+  const chip = consolePanel._hasUnnamedTracks([
+    { index: 1, name: 'Kick' },
+    { index: 2, name: '' }
+  ]);
+  assert.ok(chip);
+  assert.equal(chip.id, 'unnamed-tracks');
+  assert.equal(chip.prompt, 'Rename these tracks to match my template');
+});
+
+test('hasNamedTracks fires only when at least one live track has a name', () => {
+  assert.equal(consolePanel._hasNamedTracks([]), null);
+  assert.equal(consolePanel._hasNamedTracks([{ index: 1, name: '' }]), null);
+  const chip = consolePanel._hasNamedTracks([{ index: 1, name: 'Kick' }]);
+  assert.ok(chip);
+  assert.equal(chip.id, 'named-tracks');
+  assert.equal(chip.prompt, 'Color all the drum tracks');
+});
+
+test('a mixed track list (some named, some not) fires both track chips at once', () => {
+  const tracks = [
+    { index: 1, name: 'Kick' },
+    { index: 2, name: '' }
+  ];
+  assert.ok(consolePanel._hasUnnamedTracks(tracks));
+  assert.ok(consolePanel._hasNamedTracks(tracks));
+});
+
+test('isUntitledProject fires only when there are zero live tracks', () => {
+  assert.ok(consolePanel._isUntitledProject(liveTrackState([])));
+  assert.equal(consolePanel._isUntitledProject(liveTrackState([{ index: 1, name: 'Kick' }])), null);
+  // state.project is not the signal — it's always set from the workspace's
+  // configured project_entry filename, not from REAPER session content.
+  assert.ok(consolePanel._isUntitledProject({ ...liveTrackState([]), project: 'Song' }));
+});
+
+test('composePromptChips derives the full active set in priority order', () => {
+  assert.deepEqual(
+    consolePanel._composePromptChips(liveTrackState([])).map(c => c.id),
+    ['untitled-project']
+  );
+  assert.deepEqual(
+    consolePanel._composePromptChips(liveTrackState([{ index: 1, name: 'Kick' }])).map(c => c.id),
+    ['named-tracks']
+  );
+  assert.deepEqual(
+    consolePanel
+      ._composePromptChips(
+        liveTrackState([
+          { index: 1, name: 'Kick' },
+          { index: 2, name: '' }
+        ])
+      )
+      .map(c => c.id),
+    ['unnamed-tracks', 'named-tracks']
+  );
+});
+
+test('capPromptChips caps at 4 and keeps earlier candidates on priority', () => {
+  const candidates = [{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }, { id: 'e' }];
+  assert.deepEqual(
+    consolePanel._capPromptChips(candidates).map(c => c.id),
+    ['a', 'b', 'c', 'd']
+  );
+  assert.deepEqual(
+    consolePanel._capPromptChips(candidates, 2).map(c => c.id),
+    ['a', 'b']
+  );
+  assert.deepEqual(
+    consolePanel._capPromptChips([null, { id: 'a' }, null]).map(c => c.id),
+    ['a']
+  );
+});
+
+test('clicking a prompt chip seeds the Ask Ori input without sending', () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  consolePanel._setState(
+    liveTrackState([
+      { index: 1, name: 'Kick' },
+      { index: 2, name: '' }
+    ])
+  );
+  consolePanel.open();
+
+  const host = documentStub.getElementById('reaperConsole');
+  const chips = findAll(host, 'reaper-console-prompt-chip');
+  assert.ok(chips.length >= 1, 'expected at least one prompt chip to render');
+  const renameChip = chips.find(c => c.textContent.includes('Rename these tracks'));
+  assert.ok(renameChip, 'expected the unnamed-tracks chip to render');
+
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return { ok: true, status: 200, json: async () => ({}) };
+  };
+  renameChip.dispatch('click');
+
+  assert.equal(consolePanel._askInputValue(), 'Rename these tracks to match my template');
+  assert.equal(calls, 0, 'a chip click must never itself send anything');
+
+  const input = findOne(documentStub.getElementById('reaperConsole'), 'reaper-console-ask-input');
+  assert.equal(input.value, 'Rename these tracks to match my template');
+  assert.ok(input.focused, 'the ask input should be focused after a chip seeds it');
+  consolePanel.close();
+});
+
+test('no prompt chips render when no condition is active but the ask input still does', () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  // Untitled-project fires whenever track_count is 0 — force it non-zero
+  // with an empty tracks array so no chip condition is active at all.
+  consolePanel._setState({ ...liveTrackState([]), track_count: 1 });
+  consolePanel.open();
+
+  const host = documentStub.getElementById('reaperConsole');
+  assert.equal(findAll(host, 'reaper-console-prompt-chip').length, 0);
+  assert.ok(findOne(host, 'reaper-console-ask-input'));
+  consolePanel.close();
+});
+
+test('the Ask Ori input submits through window.OriAskRouting.submit and clears on success', async () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  consolePanel._setState(liveTrackState([]));
+  consolePanel.open();
+
+  const submitted = [];
+  globalThis.window.OriAskRouting = {
+    submit: async (prompt, options) => {
+      submitted.push({ prompt, options });
+    }
+  };
+  consolePanel._seedAskInput('What tempo is this project?');
+  await consolePanel._submitAskInput();
+
+  assert.equal(submitted.length, 1);
+  assert.equal(submitted[0].prompt, 'What tempo is this project?');
+  assert.equal(submitted[0].options.routeContext.surface, 'reaper_console');
+  assert.equal(submitted[0].options.routeContext.workspace_id, 'ws-reaper');
+  assert.equal(submitted[0].options.openThinkingModal, true);
+  assert.equal(consolePanel._askInputValue(), '');
+
+  delete globalThis.window.OriAskRouting;
+  consolePanel.close();
+});
+
+// This is the load-bearing assertion for the whole feature. REAPER tools are
+// handed to an executing agent ONLY when its task declares this capability
+// (workspace.RuntimeTaskToolFactory), so an ask that omits it produces a task
+// that runs with no REAPER access and can only talk about the work.
+test('an ask from the console declares reaper_live_control so the task can actually reach REAPER', async () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  consolePanel._setState(liveTrackState([]));
+  consolePanel.open();
+
+  const submitted = [];
+  globalThis.window.OriAskRouting = {
+    submit: async (prompt, options) => {
+      submitted.push({ prompt, options });
+    }
+  };
+  consolePanel._seedAskInput('Set up a band session');
+  await consolePanel._submitAskInput();
+
+  assert.equal(submitted.length, 1);
+  assert.deepEqual(submitted[0].options.routeContext.required_capabilities, [
+    'reaper_live_control'
+  ]);
+
+  delete globalThis.window.OriAskRouting;
+  consolePanel.close();
+});
+
+// The task-creation confirm is an ordinary Bootstrap modal at z-index 10100,
+// deliberately below --app-modal-layer (20200) where this full-screen console
+// lives. A dialog this console itself triggered would open underneath it, so
+// the console yields for exactly the duration of the request — the confirm is
+// awaited inside that same call.
+test('the console yields its layer while an ask is in flight, and restores after', async () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  consolePanel._setState(liveTrackState([]));
+  consolePanel.open();
+
+  const host = documentStub.getElementById('reaperConsole');
+  assert.equal(host.classList.contains('is-yielding-to-dialog'), false);
+
+  let yieldedDuringRequest = null;
+  globalThis.window.OriAskRouting = {
+    submit: async () => {
+      // Stands in for the confirm dialog being raised inside submit().
+      yieldedDuringRequest = host.classList.contains('is-yielding-to-dialog');
+    }
+  };
+  consolePanel._seedAskInput('Set up a band session');
+  await consolePanel._submitAskInput();
+
+  assert.equal(yieldedDuringRequest, true, 'console must yield while the dialog can be up');
+  assert.equal(
+    host.classList.contains('is-yielding-to-dialog'),
+    false,
+    'console must reclaim its layer once the request settles'
+  );
+
+  delete globalThis.window.OriAskRouting;
+  consolePanel.close();
+});
+
+test('the console reclaims its layer even when the ask fails', async () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  consolePanel._setState(liveTrackState([]));
+  consolePanel.open();
+
+  const host = documentStub.getElementById('reaperConsole');
+  globalThis.window.OriAskRouting = {
+    submit: async () => {
+      throw new Error('routing blew up');
+    }
+  };
+  consolePanel._seedAskInput('Set up a band session');
+  await consolePanel._submitAskInput();
+
+  assert.equal(
+    host.classList.contains('is-yielding-to-dialog'),
+    false,
+    'a failed ask must not strand the console underneath the modal layer'
+  );
+
+  delete globalThis.window.OriAskRouting;
+  consolePanel.close();
+});
+
+test('a plan proposed while the console is open appears without reopening it', async () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  consolePanel._setState(liveTrackState([{ index: 1, name: 'Kick' }]));
+  consolePanel.open();
+
+  // No plan yet — the console shows no plan card.
+  assert.equal(
+    findAll(documentStub.getElementById('reaperConsole'), 'reaper-console-plan').length,
+    0
+  );
+
+  // An agent proposes one mid-session; the next poll should pick it up.
+  globalThis.fetch = async path => ({
+    ok: true,
+    status: 200,
+    json: async () =>
+      /track-plan/.test(path)
+        ? {
+            plan: {
+              id: 'plan_live',
+              edits: [{ kind: 'rename', index: 1, expected_name: 'Kick', new_name: 'Kick In' }]
+            }
+          }
+        : {}
+  });
+  await consolePanel._loadPlan();
+
+  assert.ok(consolePanel._pendingPlan(), 'the polled plan should be adopted');
+  assert.equal(consolePanel._pendingPlan().id, 'plan_live');
+  consolePanel.close();
+});
+
+test('re-reading an unchanged plan does not rebuild the console', async () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  consolePanel._setState(liveTrackState([{ index: 1, name: 'Kick' }]));
+  consolePanel._setPendingPlan({ id: 'plan_same', edits: [] });
+  consolePanel.open();
+
+  const host = documentStub.getElementById('reaperConsole');
+  // Typing into the ask input is the thing an unnecessary rebuild destroys.
+  const input = findOne(host, 'reaper-console-ask-input');
+  input.dispatch('input', { target: { value: 'half-typed thought' } });
+
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({ plan: { id: 'plan_same', edits: [] } })
+  });
+  await consolePanel._loadPlan();
+
+  // Same plan came back, so the panel must not have been rebuilt underneath
+  // the user — the in-progress draft survives.
+  assert.equal(consolePanel._askInputValue(), 'half-typed thought');
+  consolePanel.close();
+});
+
+test('the Ask Ori input shows a notice instead of throwing when Ask Ori is unavailable', async () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  consolePanel._setState(liveTrackState([]));
+  consolePanel.open();
+
+  delete globalThis.window.OriAskRouting;
+  consolePanel._seedAskInput('Anything');
+  const ok = await consolePanel._submitAskInput();
+
+  assert.equal(ok, false);
+  assert.match(consolePanel._askNotice() || '', /not available/);
+  // The draft is preserved, not silently discarded, so the user can retry.
+  assert.equal(consolePanel._askInputValue(), 'Anything');
+  consolePanel.close();
+});
+
+test('pressing Enter in the Ask Ori input submits like clicking Ask', async () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  consolePanel._setState(liveTrackState([]));
+  consolePanel.open();
+
+  const submitted = [];
+  globalThis.window.OriAskRouting = {
+    submit: async prompt => {
+      submitted.push(prompt);
+    }
+  };
+  const host = documentStub.getElementById('reaperConsole');
+  const input = findOne(host, 'reaper-console-ask-input');
+  input.dispatch('input', { target: { value: 'Typed directly' } });
+  input.dispatch('keydown', { key: 'Enter', preventDefault: () => {} });
+  await Promise.resolve();
+  await Promise.resolve();
+
+  assert.deepEqual(submitted, ['Typed directly']);
+
+  delete globalThis.window.OriAskRouting;
+  consolePanel.close();
+});
+
 test('clicking a track name opens an inline editor that commits on Enter', async () => {
   consolePanel._resetForTest();
   consolePanel.init('ws-reaper');
@@ -1388,6 +1751,93 @@ test('Escape closes the color palette', () => {
   );
   popover.dispatch('keydown', { key: 'Escape' });
   assert.equal(consolePanel._openPalette(), 0);
+  consolePanel.close();
+});
+
+test('right-clicking a track strip opens a context menu with an Ask Ori item', () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  consolePanel._setState(liveTrackState([{ index: 1, name: 'Drums' }]));
+  consolePanel.open();
+
+  const host = documentStub.getElementById('reaperConsole');
+  const strip = findOne(host, 'reaper-console-track');
+  assert.equal(consolePanel._openTrackMenu(), 0);
+  strip.dispatch('contextmenu', { preventDefault: () => {} });
+  assert.equal(consolePanel._openTrackMenu(), 1);
+
+  const menuItem = findOne(
+    documentStub.getElementById('reaperConsole'),
+    'reaper-console-track-menu-item'
+  );
+  assert.ok(menuItem);
+  assert.equal(menuItem.textContent, 'Ask Ori about this track…');
+  consolePanel.close();
+});
+
+test('the per-track menu item seeds the Ask Ori input with the track name and does not auto-send', () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  consolePanel._setState(liveTrackState([{ index: 1, name: 'Drums' }]));
+  consolePanel.open();
+
+  const host = documentStub.getElementById('reaperConsole');
+  findOne(host, 'reaper-console-track').dispatch('contextmenu', { preventDefault: () => {} });
+
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return { ok: true, status: 200, json: async () => ({}) };
+  };
+  findOne(documentStub.getElementById('reaperConsole'), 'reaper-console-track-menu-item').dispatch(
+    'click'
+  );
+
+  assert.equal(consolePanel._askInputValue(), 'What can you tell me about the "Drums" track?');
+  assert.equal(consolePanel._openTrackMenu(), 0, 'the menu should close after picking an item');
+  assert.equal(calls, 0, 'picking the menu item must never itself send anything');
+  consolePanel.close();
+});
+
+test('the per-track menu item falls back to a track number for an unnamed track', () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  consolePanel._setState(liveTrackState([{ index: 2, name: '' }]));
+  consolePanel.open();
+
+  const host = documentStub.getElementById('reaperConsole');
+  findOne(host, 'reaper-console-track').dispatch('contextmenu', { preventDefault: () => {} });
+  findOne(documentStub.getElementById('reaperConsole'), 'reaper-console-track-menu-item').dispatch(
+    'click'
+  );
+
+  assert.equal(consolePanel._askInputValue(), 'What can you tell me about track 2?');
+  consolePanel.close();
+});
+
+test('clicking outside the track menu closes it without seeding anything', () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  consolePanel._setState(liveTrackState([{ index: 1, name: 'Drums' }]));
+  consolePanel.open();
+
+  const host = documentStub.getElementById('reaperConsole');
+  findOne(host, 'reaper-console-track').dispatch('contextmenu', { preventDefault: () => {} });
+  assert.equal(consolePanel._openTrackMenu(), 1);
+
+  findOne(documentStub.getElementById('reaperConsole'), 'reaper-console-color-backdrop').dispatch(
+    'click'
+  );
+  assert.equal(consolePanel._openTrackMenu(), 0);
+  assert.equal(consolePanel._askInputValue(), '');
   consolePanel.close();
 });
 

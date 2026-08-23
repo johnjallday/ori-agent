@@ -59,6 +59,14 @@
   // openPalette is the index of the strip whose color popover is open, 0 for
   // none. One strip at a time, per the Map's own popover convention.
   let openPalette = 0;
+  // openTrackMenu is the index of the strip whose right-click context menu
+  // is open, 0 for none — same shape as openPalette above (one at a time,
+  // backdrop-to-close, Escape-to-close). The Map's own right-click menu
+  // (workspace-map.js's openContextMenu/closeContextMenu, #324/#325) is the
+  // idiom this mirrors; its implementation is deeply coupled to Map canvas
+  // state and not directly reusable here, so this is a from-scratch popover
+  // built the same way this console already builds the color popover above.
+  let openTrackMenu = 0;
   // dragState is null when no drag is active. sourceIndex/sourceName are
   // captured at pointerdown so the eventual move is guarded on the name Ori
   // read before the drag started; targetIndex tracks the current drop slot
@@ -75,7 +83,22 @@
   // proposals.
   let pendingPlan = null;
   let pendingPlanLoaded = false;
+  // Change-detection token for the polled plan; see adoptPlan.
+  let lastPlanToken = '';
   let planRequestInFlight = false;
+  // Ask Ori input state (#396). No visible Ask Ori input exists elsewhere
+  // while the console is open (it's a full-screen modal at a higher z-index
+  // than everything else on the page), so the console carries its own
+  // compact one. askInputValue is controlled state, not read from the DOM,
+  // because renderConsole rebuilds the whole panel from scratch on every
+  // render — an uncontrolled input would lose its value the next time
+  // anything else changes (a poll tick, a track edit, ...).
+  let askInputValue = '';
+  // Set by a chip click; consumed by the next render to focus+select the
+  // input, then cleared — a one-shot signal, not part of steady-state.
+  let askInputFocusPending = false;
+  let askRequestInFlight = false;
+  let askNotice = null;
 
   // A fixed REAPER-compatible swatch set plus "no color" (PRD open question 1:
   // fixed set over a full picker, to keep the popover small). Values already
@@ -179,6 +202,81 @@
         color: Number(track.color || 0)
       }))
     });
+  }
+
+  // --- Contextual Ask Ori prompt chips (#396) ---------------------------
+  //
+  // Pure state-derivation: each helper reads only the console's own
+  // lastState/tracks and returns a chip spec ({id, label, prompt}) or null,
+  // so the derivation is unit-testable against synthetic states with no DOM
+  // or console machinery involved. Rendering/wiring lives separately, near
+  // the Ask Ori input (group 5).
+
+  const MAX_PROMPT_CHIPS = 4;
+
+  // hasUnnamedTracks fires when at least one live track has no name — REAPER
+  // itself reports an empty string for an unnamed track (see client.go's
+  // Name: fields[2] parse; there is no synthetic "Track N" fallback on the
+  // wire, only in this console's own display code).
+  function hasUnnamedTracks(tracks) {
+    const list = Array.isArray(tracks) ? tracks : [];
+    if (!list.some(track => !String((track && track.name) || '').trim())) return null;
+    return {
+      id: 'unnamed-tracks',
+      label: 'Rename these tracks to match my template',
+      prompt: 'Rename these tracks to match my template'
+    };
+  }
+
+  // hasNamedTracks fires when at least one live track HAS a name. Not
+  // mutually exclusive with hasUnnamedTracks: a mixed project (some named,
+  // some not) can show both chips at once.
+  function hasNamedTracks(tracks) {
+    const list = Array.isArray(tracks) ? tracks : [];
+    if (!list.some(track => String((track && track.name) || '').trim())) return null;
+    return {
+      id: 'named-tracks',
+      label: 'Color all the drum tracks',
+      prompt: 'Color all the drum tracks'
+    };
+  }
+
+  // isUntitledProject fires for a freshly scaffolded project with no tracks
+  // yet. state.project is NOT a usable signal here — it's derived from the
+  // workspace's configured project_entry filename (see projectDisplayName in
+  // client.go), which is set the moment the workspace exists, not from
+  // whether the REAPER session itself has any content. Track count is what a
+  // brand-new Reaper Song workspace actually starts at zero on.
+  function isUntitledProject(state) {
+    const trackCount = Number(state && state.track_count) || 0;
+    const tracks = Array.isArray(state && state.tracks) ? state.tracks : [];
+    if (trackCount > 0 || tracks.length > 0) return null;
+    return {
+      id: 'untitled-project',
+      label: 'Set up a band session',
+      prompt: 'Set up a band session'
+    };
+  }
+
+  // capPromptChips is the generic cap+priority step, kept separate from
+  // composePromptChips so the cap behavior itself is testable with a
+  // synthetic candidate list longer than any real condition count today.
+  // Candidates earlier in the list win when more than `max` are active.
+  function capPromptChips(candidates, max) {
+    const list = Array.isArray(candidates) ? candidates.filter(Boolean) : [];
+    return list.slice(0, max || MAX_PROMPT_CHIPS);
+  }
+
+  // composePromptChips runs every derivation helper against the current
+  // state and caps the result. Priority order (first wins when over the
+  // cap): untitled project, unnamed tracks, named tracks.
+  function composePromptChips(state) {
+    const tracks = Array.isArray(state && state.tracks) ? state.tracks : [];
+    return capPromptChips([
+      isUntitledProject(state),
+      hasUnnamedTracks(tracks),
+      hasNamedTracks(tracks)
+    ]);
   }
 
   function publishIfChanged(state) {
@@ -474,6 +572,22 @@
     }
   }
 
+  // adoptPlan records a freshly-read plan and re-renders ONLY when it
+  // actually changed, mirroring publishIfChanged's role for live state.
+  // Unconditional re-rendering matters here because loadPlan is polled
+  // (see syncPolling): rebuilding the panel every tick would drop focus and
+  // the in-progress value of the Ask Ori input, and yank the list out from
+  // under an active drag — the same reasons refresh() guards its own render.
+  function adoptPlan(nextPlan) {
+    const token = nextPlan ? JSON.stringify(nextPlan) : '';
+    const changed = token !== lastPlanToken;
+    lastPlanToken = token;
+    pendingPlan = nextPlan;
+    pendingPlanLoaded = true;
+    if (changed && consoleOpen && !dragState && !pinDragState) renderConsole();
+    return pendingPlan;
+  }
+
   async function loadPlan() {
     const path = trackPlanApiPath();
     if (!path || typeof fetch !== 'function') return pendingPlan;
@@ -481,13 +595,11 @@
       const response = await fetch(path, { headers: { Accept: 'application/json' } });
       if (!response.ok) throw new Error('plan request failed');
       const payload = await response.json();
-      pendingPlan = payload && payload.plan ? payload.plan : null;
-      pendingPlanLoaded = true;
-      if (consoleOpen) renderConsole();
-      return pendingPlan;
+      return adoptPlan(payload && payload.plan ? payload.plan : null);
     } catch (_error) {
+      // A failed poll is not evidence the plan is gone — keep whatever we
+      // last read rather than clearing a plan the user may be reviewing.
       pendingPlanLoaded = true;
-      if (consoleOpen) renderConsole();
       return pendingPlan;
     }
   }
@@ -1052,7 +1164,15 @@
     if (pollTimer === null && typeof setInterval === 'function') {
       pollTimerIntervalMs = pollIntervalMs();
       pollTimer = setInterval(() => {
-        if ((mapVisible || consoleOpen) && documentVisible()) void refresh();
+        if (!documentVisible()) return;
+        if (mapVisible || consoleOpen) void refresh();
+        // Poll the pending plan only while the console is actually open —
+        // it is the only surface that renders one, and the Map's slower
+        // cadence has no use for it. This is what lets a plan proposed by an
+        // agent MID-SESSION appear without closing and reopening the console
+        // (loadPlan otherwise runs once per open), which is the whole point
+        // of asking Ori for a change from in here.
+        if (consoleOpen) void loadPlan();
       }, pollTimerIntervalMs);
     }
   }
@@ -1637,6 +1757,155 @@
     return card;
   }
 
+  // buildAskRouteContext identifies this ask as coming from the REAPER
+  // console, mirroring buildWorkspaceHubRouteContext in
+  // workspace-input-router.js — same shape, different surface, since that
+  // one is scoped to the (dead) Workspace Hub page rather than this console.
+  function buildAskRouteContext() {
+    return {
+      surface: 'reaper_console',
+      page_path:
+        (typeof window !== 'undefined' &&
+          window.location &&
+          typeof window.location.pathname === 'string' &&
+          window.location.pathname) ||
+        '',
+      workspace_id: workspaceIdFromPage(),
+      origin: 'reaper_console_ask_input',
+      // The load-bearing part, not decoration. REAPER tools
+      // (propose_reaper_track_edits, run_reaper_action, ...) are handed out
+      // ONLY to an agent executing a task that declares this capability —
+      // see workspace.RuntimeTaskToolFactory's doc comment, which makes that
+      // a deliberate boundary ("a model cannot gain runtime access merely by
+      // knowing a workspace ID"). An ask from this console is always about
+      // the live session, so it must carry the requirement through to the
+      // task it creates; without it the agent runs with no REAPER access and
+      // can only talk about the work instead of doing it.
+      required_capabilities: [REQUIREMENT_KEY]
+    };
+  }
+
+  function canUseAskOri() {
+    return (
+      typeof window !== 'undefined' &&
+      window.OriAskRouting &&
+      typeof window.OriAskRouting.submit === 'function'
+    );
+  }
+
+  // seedAskInput fills the console's own Ask Ori input with a chip's prompt
+  // and focuses it, WITHOUT sending — sending stays a deliberate, separate
+  // user action (explicit out-of-scope for a chip click in #396).
+  function seedAskInput(prompt) {
+    askInputValue = String(prompt || '');
+    askInputFocusPending = true;
+    askNotice = null;
+    if (consoleOpen) renderConsole();
+  }
+
+  async function submitAskInput() {
+    const text = askInputValue.trim();
+    if (!text || askRequestInFlight) return false;
+    if (!canUseAskOri()) {
+      askNotice = 'Ask Ori is not available on this page.';
+      if (consoleOpen) renderConsole();
+      return false;
+    }
+    askRequestInFlight = true;
+    askNotice = null;
+    // Yield the full-screen layer for the duration of the request: the app
+    // may raise an ordinary dialog for this ask (the task-creation confirm),
+    // and those sit below this console's layer by design. See the
+    // .is-yielding-to-dialog rule in workspace-command.css.
+    setConsoleYieldingToDialog(true);
+    if (consoleOpen) renderConsole();
+    try {
+      await window.OriAskRouting.submit(text, {
+        routeContext: buildAskRouteContext(),
+        openThinkingModal: true
+      });
+      askInputValue = '';
+      return true;
+    } catch (_error) {
+      askNotice = 'Could not reach Ori. Try again.';
+      return false;
+    } finally {
+      askRequestInFlight = false;
+      setConsoleYieldingToDialog(false);
+      if (consoleOpen) renderConsole();
+    }
+  }
+
+  // setConsoleYieldingToDialog toggles the class that drops this console below
+  // the ordinary modal layer. Applied to the persistent host element (which
+  // renderConsole empties but never recreates), so it survives re-renders.
+  function setConsoleYieldingToDialog(yielding) {
+    const host = typeof document === 'undefined' ? null : document.getElementById(CONSOLE_HOST_ID);
+    if (!host || !host.classList) return;
+    if (yielding) {
+      if (typeof host.classList.add === 'function') {
+        host.classList.add('is-yielding-to-dialog');
+      }
+      return;
+    }
+    if (typeof host.classList.remove === 'function') {
+      host.classList.remove('is-yielding-to-dialog');
+    }
+  }
+
+  // renderAskSection renders the contextual prompt chips (#396) and the
+  // console's own compact Ask Ori input together: chips only ever seed this
+  // input's value, never send on their own. Placed below the pinned band and
+  // built-in Actions grid — secondary to the one-click quick actions above,
+  // not competing with them for the first thing a user sees.
+  function renderAskSection(host, state) {
+    const chips = composePromptChips(state);
+    const section = el('section', 'reaper-console-ask');
+    if (chips.length) {
+      const row = el('div', 'reaper-console-prompt-chip-row');
+      chips.forEach(chip => {
+        const pill = button(chip.label, 'reaper-console-prompt-chip', () =>
+          seedAskInput(chip.prompt)
+        );
+        pill.setAttribute('aria-label', 'Ask Ori: ' + chip.label);
+        row.appendChild(pill);
+      });
+      section.appendChild(row);
+    }
+    const controls = el('div', 'reaper-console-ask-controls');
+    const input = el('input', 'reaper-console-ask-input');
+    input.type = 'text';
+    input.placeholder = 'Ask Ori about this REAPER session…';
+    input.maxLength = 2000;
+    input.autocomplete = 'off';
+    input.value = askInputValue;
+    input.disabled = askRequestInFlight;
+    input.setAttribute('aria-label', 'Ask Ori about this REAPER session');
+    input.addEventListener('input', event => {
+      askInputValue = event.target.value;
+    });
+    input.addEventListener('keydown', event => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        void submitAskInput();
+      }
+    });
+    controls.appendChild(input);
+    const send = button('Ask', 'reaper-console-ask-send', () => void submitAskInput());
+    send.disabled = askRequestInFlight || !askInputValue.trim();
+    controls.appendChild(send);
+    section.appendChild(controls);
+    if (askNotice) {
+      section.appendChild(el('p', 'reaper-console-ask-notice', askNotice));
+    }
+    host.appendChild(section);
+    if (askInputFocusPending) {
+      askInputFocusPending = false;
+      if (typeof input.focus === 'function') input.focus();
+      if (typeof input.select === 'function') input.select();
+    }
+  }
+
   // renderAdvanced tucks the raw command-ID escape hatch and the full script
   // library behind a disclosure, closed by default (task 2.4): pinning moves
   // day-to-day use onto the quick-action band above, so these stay reachable
@@ -1699,6 +1968,7 @@
     section.appendChild(grid);
     host.appendChild(section);
     renderProposals(host);
+    renderAskSection(host, lastState);
     renderAdvanced(host);
   }
 
@@ -1898,6 +2168,14 @@
     // Read by the pointer-drag hit test (document.elementFromPoint + closest)
     // to resolve a screen position back to a logical track index.
     item.setAttribute('data-track-index', String(track.index));
+    // "Ask Ori about this track…" (#396) is read-only and never mutates
+    // REAPER, so it's offered regardless of `editable` — unlike every other
+    // strip control, which is gated on live track editing being available.
+    item.addEventListener('contextmenu', event => {
+      event.preventDefault();
+      openTrackMenu = track.index;
+      renderConsole();
+    });
 
     renderDragGrip(item, track, editable, trackCount);
     item.appendChild(
@@ -1954,6 +2232,7 @@
       editable
     );
     item.appendChild(chips);
+    renderTrackContextMenu(item, track, name);
     list.appendChild(item);
 
     if (stripNotice && stripNotice.index === track.index) {
@@ -1961,6 +2240,44 @@
       notice.setAttribute('role', 'status');
       list.appendChild(notice);
     }
+  }
+
+  // trackAskPrompt builds the seeded prompt naming a specific track (#396).
+  function trackAskPrompt(track, name) {
+    return name
+      ? 'What can you tell me about the "' + name + '" track?'
+      : 'What can you tell me about track ' + track.index + '?';
+  }
+
+  // renderTrackContextMenu is the per-track "Ask Ori about this track…" menu
+  // (#396), mirroring renderColorSwatch's popover above exactly: a
+  // full-viewport backdrop closes it on any outside click, Escape closes it
+  // from the menu itself, one open at a time (openTrackMenu, like
+  // openPalette). Read-only, so offered on every strip regardless of
+  // `editable`.
+  function renderTrackContextMenu(item, track, name) {
+    if (openTrackMenu !== track.index) return;
+    const backdrop = el('div', 'reaper-console-color-backdrop');
+    backdrop.addEventListener('click', () => {
+      openTrackMenu = 0;
+      renderConsole();
+    });
+    item.appendChild(backdrop);
+
+    const menu = el('div', 'reaper-console-track-menu');
+    menu.setAttribute('role', 'menu');
+    menu.addEventListener('keydown', event => {
+      if (event.key !== 'Escape') return;
+      openTrackMenu = 0;
+      renderConsole();
+    });
+    const askItem = button('Ask Ori about this track…', 'reaper-console-track-menu-item', () => {
+      openTrackMenu = 0;
+      seedAskInput(trackAskPrompt(track, name));
+    });
+    askItem.setAttribute('role', 'menuitem');
+    menu.appendChild(askItem);
+    item.appendChild(menu);
   }
 
   function renderDropIndicator(list) {
@@ -2229,6 +2546,7 @@
     pendingEdit = null;
     stripNotice = null;
     openPalette = 0;
+    openTrackMenu = 0;
     if (dragState) detachDragListeners();
     dragState = null;
     if (pinDragState) detachPinDragListeners();
@@ -2321,6 +2639,11 @@
     _pinScript: pinScript,
     _unpinScript: unpinScript,
     _reorderPinnedScripts: reorderPinnedScripts,
+    _hasUnnamedTracks: hasUnnamedTracks,
+    _hasNamedTracks: hasNamedTracks,
+    _isUntitledProject: isUntitledProject,
+    _capPromptChips: capPromptChips,
+    _composePromptChips: composePromptChips,
     _beginPinDrag: beginPinDrag,
     _pinDragOverIndex: pinDragOverIndex,
     _endPinDrag: endPinDrag,
@@ -2331,6 +2654,10 @@
       advancedOpen = Boolean(value);
       if (consoleOpen) renderConsole();
     },
+    _seedAskInput: seedAskInput,
+    _submitAskInput: submitAskInput,
+    _askInputValue: () => askInputValue,
+    _askNotice: () => askNotice,
     _setProposals: nextProposals => {
       proposals = Array.isArray(nextProposals) ? nextProposals : [];
       proposalsLoaded = true;
@@ -2359,6 +2686,7 @@
     _stripNotice: () => stripNotice,
     _pollIntervalMs: () => pollTimerIntervalMs,
     _openPalette: () => openPalette,
+    _openTrackMenu: () => openTrackMenu,
     _beginDrag: beginDrag,
     _dragOverIndex: dragOverIndex,
     _endDrag: endDrag,
@@ -2368,6 +2696,10 @@
     _setPendingPlan: plan => {
       pendingPlan = plan;
       pendingPlanLoaded = true;
+      // Keep the poll's change-detection token in step with a directly-set
+      // plan, so a subsequent poll returning the same plan is correctly seen
+      // as unchanged rather than as a new one.
+      lastPlanToken = plan ? JSON.stringify(plan) : '';
       if (consoleOpen) renderConsole();
     },
     _pendingPlan: () => pendingPlan,
@@ -2394,6 +2726,10 @@
       advancedOpen = false;
       if (pinDragState) detachPinDragListeners();
       pinDragState = null;
+      askInputValue = '';
+      askInputFocusPending = false;
+      askRequestInFlight = false;
+      askNotice = null;
       proposals = [];
       proposalsLoaded = false;
       proposalRequestInFlight = false;
@@ -2407,10 +2743,12 @@
       stripNotice = null;
       trackRequestInFlight = false;
       openPalette = 0;
+      openTrackMenu = 0;
       if (dragState) detachDragListeners();
       dragState = null;
       pendingPlan = null;
       pendingPlanLoaded = false;
+      lastPlanToken = '';
       planRequestInFlight = false;
       toasts.forEach(toast => {
         if (toast.timer && typeof clearTimeout === 'function') clearTimeout(toast.timer);

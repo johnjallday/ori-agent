@@ -7962,8 +7962,34 @@
         routeContext.task_id || fallback.task_id || extractTaskIdFromPath(pagePath)
       ).trim(),
       session_id: String(sessionId || '').trim(),
-      origin: String(routeContext.origin || fallback.origin || 'ask_ori').trim() || 'ask_ori'
+      origin: String(routeContext.origin || fallback.origin || 'ask_ori').trim() || 'ask_ori',
+      // Runtime capabilities the ORIGINATING SURFACE knows this ask needs
+      // (e.g. the REAPER console declares reaper_live_control). This
+      // normalizer rebuilds routeContext from a fixed whitelist, so a field
+      // that is not listed here is silently dropped — which is exactly how
+      // this requirement got lost before. Carried generically: surfaces
+      // declare what they need, and this layer never has to know what any
+      // particular capability means.
+      required_capabilities: normalizeRouteCapabilities(
+        routeContext.required_capabilities || fallback.required_capabilities
+      )
     };
+  }
+
+  // normalizeRouteCapabilities trims a capability list down to non-empty
+  // strings, de-duplicated, order preserved. Returns [] rather than
+  // undefined so callers can spread/forward it without null checks.
+  function normalizeRouteCapabilities(capabilities) {
+    if (!Array.isArray(capabilities)) return [];
+    var seen = {};
+    var out = [];
+    for (var i = 0; i < capabilities.length; i++) {
+      var key = String(capabilities[i] || '').trim();
+      if (!key || seen[key]) continue;
+      seen[key] = true;
+      out.push(key);
+    }
+    return out;
   }
 
   function getCurrentHomeSessionId() {
@@ -12106,6 +12132,12 @@
     var workspaceSlug = String(routeContext.workspace_slug || '').trim();
     if (!workspaceId) return false;
 
+    // Capabilities the originating surface declared (see
+    // normalizeHomeRouteContext). Forwarded onto the created task so its
+    // executing agent is actually granted the matching runtime tools —
+    // a task created without them runs with no runtime access at all.
+    var requiredCapabilities = normalizeRouteCapabilities(routeContext.required_capabilities);
+
     var command = String(commandPayload.command).trim();
     var content = String(commandPayload.content || '').trim();
     var displayCommand = '/' + command;
@@ -12160,6 +12192,7 @@
             requireConfirmation: true,
             source: 'assistant',
             assignee: taskAssignee,
+            requiredCapabilities: requiredCapabilities,
             successToast: false,
             cancelToast: false
           });
@@ -12209,7 +12242,8 @@
             description: content,
             details: '',
             status: 'pending',
-            to: taskAssignee || undefined
+            to: taskAssignee || undefined,
+            required_capabilities: requiredCapabilities.length ? requiredCapabilities : undefined
           });
         } else {
           var confirmedByFetch = await confirmWorkspaceAssistantTaskCreation(content, {
@@ -12240,7 +12274,8 @@
               description: content,
               details: '',
               status: 'pending',
-              to: taskAssignee || undefined
+              to: taskAssignee || undefined,
+              required_capabilities: requiredCapabilities.length ? requiredCapabilities : undefined
             })
           });
           if (!taskResponse.ok) throw new Error('Failed to create task');
