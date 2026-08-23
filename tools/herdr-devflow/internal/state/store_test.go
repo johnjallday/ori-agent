@@ -243,6 +243,44 @@ func TestLoadAcceptsAStateFileWrittenBeforePlanningSessions(t *testing.T) {
 // TestPlanningSessionsRoundTripAndStayOutOfFeatures is the additive-state
 // contract AR19 requires: a planning session lives in its own map, keyed by
 // repository+Issue, and never becomes a Features entry.
+func TestBundlePlanningSessionsRoundTripCanonicalMembersAndLegacyFallback(t *testing.T) {
+	t.Parallel()
+	store := New(t.TempDir())
+	state := model.NewBridgeState()
+	state.PlanningSessions["repo-1:bundle:101,202"] = model.PlanningSession{
+		RepositoryID: "repo-1",
+		IssueNumber:  101,
+		IssueNumbers: []int{101, 202},
+		Slug:         "101-202-camera-workflow",
+		WorktreePath: "/tmp/ori-agent-dev",
+		Stage:        model.PlanningPrompted,
+	}
+	state.PlanningSessions["repo-1:342"] = model.PlanningSession{
+		RepositoryID: "repo-1",
+		IssueNumber:  342,
+		Slug:         "342-legacy-single",
+		WorktreePath: "/tmp/ori-agent-dev",
+	}
+	if err := store.Save(state); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundle := loaded.PlanningSessions["repo-1:bundle:101,202"]
+	if got := bundle.MemberIssueNumbers(); len(got) != 2 || got[0] != 101 || got[1] != 202 {
+		t.Fatalf("bundle members = %v, want [101 202]", got)
+	}
+	legacy := loaded.PlanningSessions["repo-1:342"]
+	if got := legacy.MemberIssueNumbers(); len(got) != 1 || got[0] != 342 {
+		t.Fatalf("legacy members = %v, want IssueNumber fallback [342]", got)
+	}
+	if len(loaded.Features) != 0 {
+		t.Fatalf("bundle planning sessions leaked into Features: %#v", loaded.Features)
+	}
+}
+
 func TestPlanningSessionsRoundTripAndStayOutOfFeatures(t *testing.T) {
 	t.Parallel()
 	store := New(t.TempDir())

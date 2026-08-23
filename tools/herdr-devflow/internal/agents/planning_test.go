@@ -31,6 +31,29 @@ func (f *fakeIssues) GetIssue(_ context.Context, _ int) (github.Issue, error) {
 	return f.issue, nil
 }
 
+type fakeIssueSet struct {
+	issues        map[int]github.Issue
+	errors        map[int]error
+	callsByNumber map[int]int
+	callOrder     []int
+}
+
+func (f *fakeIssueSet) GetIssue(_ context.Context, number int) (github.Issue, error) {
+	if f.callsByNumber == nil {
+		f.callsByNumber = make(map[int]int)
+	}
+	f.callsByNumber[number]++
+	f.callOrder = append(f.callOrder, number)
+	if err := f.errors[number]; err != nil {
+		return github.Issue{}, err
+	}
+	issue, ok := f.issues[number]
+	if !ok {
+		return github.Issue{}, errors.New("unexpected Issue lookup #" + strconv.Itoa(number))
+	}
+	return issue, nil
+}
+
 func readyIssue(number int, title string, route IssueRoute) github.Issue {
 	return github.Issue{
 		Number:    number,
@@ -149,6 +172,331 @@ func TestIssueRouteCountsSizeLabels(t *testing.T) {
 	}
 	if route, count := issueRoute([]string{"size:planned", "size:prd"}); count != 2 {
 		t.Fatalf("duplicate size labels = %q, %d, want count 2", route, count)
+	}
+}
+
+func TestDeriveBundleSlugContainsEverySortedMemberAndRefusesOverflow(t *testing.T) {
+	t.Parallel()
+	issues := []github.Issue{
+		readyIssue(456, "Workflow", RoutePlanned),
+		readyIssue(123, "Camera", RouteQuick),
+	}
+	slug, err := DeriveBundleSlug(issues)
+	if err != nil {
+		t.Fatalf("DeriveBundleSlug() error = %v", err)
+	}
+	if slug != "123-456-camera-workflow" {
+		t.Fatalf("DeriveBundleSlug() = %q, want every sorted number and deterministic title words", slug)
+	}
+	if !planningValidSlugForTest(slug) {
+		t.Fatalf("DeriveBundleSlug() = %q is not canonical", slug)
+	}
+
+	tooMany := make([]github.Issue, 0, 9)
+	for number := 1_000_000_000; number < 1_000_000_009; number++ {
+		tooMany = append(tooMany, readyIssue(number, "x", RouteQuick))
+	}
+	if slug, err := DeriveBundleSlug(tooMany); err == nil || !strings.Contains(err.Error(), "80") {
+		t.Fatalf("DeriveBundleSlug(overflow) = %q, %v; want an explicit 80-character refusal", slug, err)
+	}
+}
+
+func TestBuildIssuePlanCanonicalizesBundleMembersAndUsesHighestRoute(t *testing.T) {
+	t.Parallel()
+	devPath := t.TempDir()
+	issues := &fakeIssueSet{issues: map[int]github.Issue{
+		101: readyIssue(101, "Quick camera", RouteQuick),
+		202: readyIssue(202, "Planned workflow", RoutePlanned),
+		303: readyIssue(303, "PRD polish", RoutePRD),
+	}}
+	service := newPlanningService(newFakeHerdr(devPath), newMemoryStore(), devPath, issues)
+
+	plan, err := service.BuildIssuePlan(context.Background(), IssuePlanRequest{
+		IssueNumbers:    []int{303, 101, 202},
+		DevWorktreePath: devPath,
+	})
+	if err != nil {
+		t.Fatalf("BuildIssuePlan() error = %v", err)
+	}
+	wantMembers := []int{101, 202, 303}
+	if len(plan.IssueNumbers) != len(wantMembers) {
+		t.Fatalf("plan.IssueNumbers = %v, want %v", plan.IssueNumbers, wantMembers)
+	}
+	for index := range wantMembers {
+		if plan.IssueNumbers[index] != wantMembers[index] {
+			t.Fatalf("plan.IssueNumbers = %v, want %v", plan.IssueNumbers, wantMembers)
+		}
+	}
+	if plan.Route != RoutePRD {
+		t.Fatalf("plan.Route = %q, want the highest member route %q", plan.Route, RoutePRD)
+	}
+	if !strings.HasPrefix(plan.Slug, "101-202-303-") {
+		t.Fatalf("plan.Slug = %q, want every canonical member number in its prefix", plan.Slug)
+	}
+	for _, number := range wantMembers {
+		if issues.callsByNumber[number] != 1 {
+			t.Fatalf("GetIssue(%d) called %d times, want exactly once", number, issues.callsByNumber[number])
+		}
+	}
+	if got := issues.callOrder; len(got) != 3 || got[0] != 101 || got[1] != 202 || got[2] != 303 {
+		t.Fatalf("Issue fetch order = %v, want canonical member order", got)
+	}
+}
+
+func TestBuildIssuePlanRejectsDuplicateBundleMembersBeforeIO(t *testing.T) {
+	t.Parallel()
+	devPath := t.TempDir()
+	issues := &fakeIssueSet{issues: map[int]github.Issue{
+		101: readyIssue(101, "one", RouteQuick),
+		202: readyIssue(202, "two", RouteQuick),
+	}}
+	service := newPlanningService(newFakeHerdr(devPath), newMemoryStore(), devPath, issues)
+	service.Inspector = inspectorFunc(func(context.Context, string, string, string) (worktree.GitWorktree, error) {
+		t.Fatal("duplicate members must fail before inspecting Git")
+		return worktree.GitWorktree{}, nil
+	})
+
+	_, err := service.BuildIssuePlan(context.Background(), IssuePlanRequest{
+		IssueNumbers:    []int{202, 101, 202},
+		DevWorktreePath: devPath,
+	})
+	var stage *model.StageError
+	if !errors.As(err, &stage) || stage.Code != model.ErrConfigInvalid || !strings.Contains(err.Error(), "duplicate") {
+		t.Fatalf("BuildIssuePlan() error = %v, want a duplicate-member config failure", err)
+	}
+	if len(issues.callsByNumber) != 0 {
+		t.Fatalf("duplicate request contacted GitHub: %v", issues.callsByNumber)
+	}
+	if _, statErr := os.Stat(filepath.Join(devPath, "tasks")); !os.IsNotExist(statErr) {
+		t.Fatalf("duplicate request touched tasks/: %v", statErr)
+	}
+}
+
+func TestBuildIssuePlanBundleEligibilityIsAtomic(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name        string
+		badIssue    github.Issue
+		wantMessage string
+	}{
+		{
+			name: "one member is closed",
+			badIssue: func() github.Issue {
+				issue := readyIssue(202, "closed", RoutePlanned)
+				issue.State = "closed"
+				return issue
+			}(),
+			wantMessage: "Issue #202",
+		},
+		{
+			name: "feature proposal cannot enter an ad-hoc bundle",
+			badIssue: func() github.Issue {
+				issue := readyIssue(202, "proposal", RoutePlanned)
+				issue.Labels = []string{"feature-proposal", "size:planned"}
+				return issue
+			}(),
+			wantMessage: "feature-proposal",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			devPath := t.TempDir()
+			issues := &fakeIssueSet{issues: map[int]github.Issue{
+				101: readyIssue(101, "eligible", RouteQuick),
+				202: tc.badIssue,
+				303: readyIssue(303, "also eligible", RoutePRD),
+			}}
+			client := newFakeHerdr(devPath)
+			store := newMemoryStore()
+			service := newPlanningService(client, store, devPath, issues)
+
+			_, err := service.BuildIssuePlan(context.Background(), IssuePlanRequest{
+				IssueNumbers:    []int{303, 202, 101},
+				DevWorktreePath: devPath,
+			})
+			var stage *model.StageError
+			if !errors.As(err, &stage) || stage.Code != model.ErrIssueIneligible || !strings.Contains(err.Error(), tc.wantMessage) {
+				t.Fatalf("BuildIssuePlan() error = %v, want atomic member-specific eligibility failure containing %q", err, tc.wantMessage)
+			}
+			for _, number := range []int{101, 202, 303} {
+				if issues.callsByNumber[number] != 1 {
+					t.Fatalf("GetIssue(%d) called %d times, want every member fetched exactly once before validation", number, issues.callsByNumber[number])
+				}
+			}
+			if _, statErr := os.Stat(filepath.Join(devPath, "tasks")); !os.IsNotExist(statErr) {
+				t.Fatalf("ineligible bundle touched tasks/: %v", statErr)
+			}
+			state, loadErr := store.Load()
+			if loadErr != nil || len(state.PlanningSessions) != 0 || client.tabCreateCalls != 0 || client.startCalls != 0 {
+				t.Fatalf("ineligible bundle mutated planning state or Herdr: state=%#v err=%v tabs=%d starts=%d", state.PlanningSessions, loadErr, client.tabCreateCalls, client.startCalls)
+			}
+		})
+	}
+}
+
+func TestBuildIssuePlanReusesOnlyExactBundleMemberIdentity(t *testing.T) {
+	t.Parallel()
+	const oldSlug = "101-202-old-combined-title"
+	devPath := t.TempDir()
+	tasksDir := filepath.Join(devPath, "tasks")
+	if err := os.MkdirAll(tasksDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := "# Issue bundle #101, #202\n\n<!-- ori-devflow: issue-bundle-snapshot; issues=101,202 -->\n"
+	if err := os.WriteFile(filepath.Join(tasksDir, "issue-"+oldSlug+".md"), []byte(snapshot), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	issues := &fakeIssueSet{issues: map[int]github.Issue{
+		101: readyIssue(101, "renamed first title", RouteQuick),
+		202: readyIssue(202, "renamed second title", RoutePlanned),
+	}}
+	service := newPlanningService(newFakeHerdr(devPath), newMemoryStore(), devPath, issues)
+
+	plan, err := service.BuildIssuePlan(context.Background(), IssuePlanRequest{
+		IssueNumbers:    []int{202, 101},
+		DevWorktreePath: devPath,
+	})
+	if err != nil {
+		t.Fatalf("BuildIssuePlan() error = %v", err)
+	}
+	if plan.Slug != oldSlug || plan.ArtifactState != IssueArtifactResume {
+		t.Fatalf("exact reordered member set resolved to slug=%q state=%q, want %q/resume", plan.Slug, plan.ArtifactState, oldSlug)
+	}
+}
+
+func TestBuildIssuePlanReusesExactPersistedBundleIdentityAndRejectsOverlap(t *testing.T) {
+	t.Parallel()
+	t.Run("exact member set survives title rename without artifacts", func(t *testing.T) {
+		t.Parallel()
+		devPath := t.TempDir()
+		store := newMemoryStore()
+		state := model.NewBridgeState()
+		state.PlanningSessions["repo-123456:bundle:101,202"] = model.PlanningSession{
+			RepositoryID: "repo-123456",
+			IssueNumber:  101,
+			IssueNumbers: []int{101, 202},
+			Slug:         "101-202-original-bundle-title",
+			WorktreePath: devPath,
+		}
+		if err := store.Save(state); err != nil {
+			t.Fatal(err)
+		}
+		issues := &fakeIssueSet{issues: map[int]github.Issue{
+			101: readyIssue(101, "renamed one", RouteQuick),
+			202: readyIssue(202, "renamed two", RoutePlanned),
+		}}
+		service := newPlanningService(newFakeHerdr(devPath), store, devPath, issues)
+		plan, err := service.BuildIssuePlan(context.Background(), IssuePlanRequest{IssueNumbers: []int{202, 101}, DevWorktreePath: devPath})
+		if err != nil {
+			t.Fatalf("BuildIssuePlan() error = %v", err)
+		}
+		if plan.Slug != "101-202-original-bundle-title" {
+			t.Fatalf("slug = %q, want the exact saved bundle identity", plan.Slug)
+		}
+	})
+
+	t.Run("overlapping saved individual plan conflicts", func(t *testing.T) {
+		t.Parallel()
+		devPath := t.TempDir()
+		store := newMemoryStore()
+		state := model.NewBridgeState()
+		state.PlanningSessions["repo-123456:101"] = model.PlanningSession{
+			RepositoryID: "repo-123456",
+			IssueNumber:  101,
+			Slug:         "101-individual-plan",
+			WorktreePath: devPath,
+		}
+		if err := store.Save(state); err != nil {
+			t.Fatal(err)
+		}
+		issues := &fakeIssueSet{issues: map[int]github.Issue{
+			101: readyIssue(101, "one", RouteQuick),
+			202: readyIssue(202, "two", RoutePlanned),
+		}}
+		service := newPlanningService(newFakeHerdr(devPath), store, devPath, issues)
+		_, err := service.BuildIssuePlan(context.Background(), IssuePlanRequest{IssueNumbers: []int{101, 202}, DevWorktreePath: devPath})
+		if err == nil || !strings.Contains(err.Error(), "different member set") {
+			t.Fatalf("BuildIssuePlan() error = %v, want a saved-membership conflict", err)
+		}
+	})
+}
+
+func TestBuildIssuePlanRejectsOverlappingIndividualOrBundleIdentity(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name     string
+		fileName string
+		marker   string
+	}{
+		{
+			name:     "member already has an individual plan",
+			fileName: "issue-101-individual.md",
+			marker:   "<!-- ori-devflow: issue-snapshot; issue=101 -->",
+		},
+		{
+			name:     "member already belongs to another bundle",
+			fileName: "issue-101-303-other-bundle.md",
+			marker:   "<!-- ori-devflow: issue-bundle-snapshot; issues=101,303 -->",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			devPath := t.TempDir()
+			tasksDir := filepath.Join(devPath, "tasks")
+			if err := os.MkdirAll(tasksDir, 0o750); err != nil {
+				t.Fatal(err)
+			}
+			original := "# Existing plan\n\n" + tc.marker + "\n"
+			path := filepath.Join(tasksDir, tc.fileName)
+			if err := os.WriteFile(path, []byte(original), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			issues := &fakeIssueSet{issues: map[int]github.Issue{
+				101: readyIssue(101, "first", RouteQuick),
+				202: readyIssue(202, "second", RoutePlanned),
+			}}
+			service := newPlanningService(newFakeHerdr(devPath), newMemoryStore(), devPath, issues)
+
+			_, err := service.BuildIssuePlan(context.Background(), IssuePlanRequest{
+				IssueNumbers:    []int{101, 202},
+				DevWorktreePath: devPath,
+			})
+			if err == nil || !strings.Contains(err.Error(), "different") {
+				t.Fatalf("BuildIssuePlan() error = %v, want an explicit different-member-set conflict", err)
+			}
+			after, readErr := os.ReadFile(path)
+			if readErr != nil || string(after) != original {
+				t.Fatalf("conflicting attachment was changed: %q, %v", after, readErr)
+			}
+		})
+	}
+}
+
+func TestBuildIssuePlanSingleIssueRequestRemainsBackwardCompatible(t *testing.T) {
+	t.Parallel()
+	for _, req := range []IssuePlanRequest{
+		{IssueNumber: 342},
+		{IssueNumbers: []int{342}},
+	} {
+		devPath := t.TempDir()
+		req.DevWorktreePath = devPath
+		issue := readyIssue(342, "Ready issue codex planning", RoutePlanned)
+		service := newPlanningService(newFakeHerdr(devPath), newMemoryStore(), devPath, &fakeIssues{issue: issue})
+		plan, err := service.BuildIssuePlan(context.Background(), req)
+		if err != nil {
+			t.Fatalf("BuildIssuePlan(%#v) error = %v", req, err)
+		}
+		if plan.IssueNumber != 342 || len(plan.IssueNumbers) != 1 || plan.IssueNumbers[0] != 342 {
+			t.Fatalf("single-Issue identity changed: %#v", plan)
+		}
+		if plan.Slug != "342-ready-issue-codex-planning" || plan.Route != RoutePlanned {
+			t.Fatalf("single-Issue route or slug changed: %#v", plan)
+		}
+		if plan.snapshotContent != RenderIssueSnapshot(issue) {
+			t.Fatalf("single-Issue snapshot rendering changed:\n%s", plan.snapshotContent)
+		}
 	}
 }
 
@@ -315,6 +663,122 @@ func TestExecuteIssuePlanWritesFilesAndIsIdempotentOnRerun(t *testing.T) {
 	session, ok := state.PlanningSessions["repo-123456:342"]
 	if !ok || session.Stage != model.PlanningPrompted || session.Slug != "342-ready-issue-codex-planning" {
 		t.Fatalf("planning session record = %#v, ok=%v", session, ok)
+	}
+}
+
+func TestExecuteIssueBundlePlanRerunInAnotherOrderResumesOneSession(t *testing.T) {
+	t.Parallel()
+	devPath := t.TempDir()
+	issues := &fakeIssueSet{issues: map[int]github.Issue{
+		101: readyIssue(101, "Camera", RouteQuick),
+		202: readyIssue(202, "Workflow", RoutePRD),
+	}}
+	client := newFakeHerdr(devPath)
+	store := newMemoryStore()
+	service := newPlanningService(client, store, devPath, issues)
+
+	first, err := service.BuildIssuePlan(context.Background(), IssuePlanRequest{
+		IssueNumbers:    []int{202, 101},
+		DevWorktreePath: devPath,
+	})
+	if err != nil {
+		t.Fatalf("first BuildIssuePlan() error = %v", err)
+	}
+	if first.Route != RoutePRD || first.PRDPath == "" {
+		t.Fatalf("mixed bundle did not route through PRD: %#v", first)
+	}
+	for _, want := range []string{"Source Issues: #101, #202", "Combined snapshot:", "Effective size route: `size:prd`"} {
+		if !strings.Contains(first.starterContent, want) {
+			t.Fatalf("bundle starter missing %q:\n%s", want, first.starterContent)
+		}
+	}
+	prompt := PlanningBootstrapPrompt(first)
+	for _, want := range []string{"Issue bundle #101, #202", "Attached Issues: #101, #202", first.SnapshotPath, first.PRDPath, first.TaskListPath, "size:prd"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("bundle bootstrap prompt missing %q:\n%s", want, prompt)
+		}
+	}
+	if _, err := service.ExecuteIssuePlan(context.Background(), first); err != nil {
+		t.Fatalf("first ExecuteIssuePlan() error = %v", err)
+	}
+
+	second, err := service.BuildIssuePlan(context.Background(), IssuePlanRequest{
+		IssueNumbers:    []int{101, 202},
+		DevWorktreePath: devPath,
+	})
+	if err != nil {
+		t.Fatalf("second BuildIssuePlan() error = %v", err)
+	}
+	if second.Slug != first.Slug || second.ArtifactState != IssueArtifactResume {
+		t.Fatalf("reordered rerun = slug %q state %q, want %q/resume", second.Slug, second.ArtifactState, first.Slug)
+	}
+	result, err := service.ExecuteIssuePlan(context.Background(), second)
+	if err != nil {
+		t.Fatalf("second ExecuteIssuePlan() error = %v", err)
+	}
+	if !result.PromptSkipped || result.SnapshotWritten || result.StarterWritten {
+		t.Fatalf("reordered rerun duplicated work: %#v", result)
+	}
+	if client.tabCreateCalls != 1 || client.startCalls != 1 || client.promptCalls != 1 {
+		t.Fatalf("reordered rerun duplicated Herdr resources: tabs=%d starts=%d prompts=%d", client.tabCreateCalls, client.startCalls, client.promptCalls)
+	}
+	state, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.PlanningSessions) != 1 {
+		t.Fatalf("planning sessions = %#v, want one canonical bundle session", state.PlanningSessions)
+	}
+	session, ok := state.PlanningSessions["repo-123456:bundle:101,202"]
+	if !ok || !sameIssueNumbers(session.MemberIssueNumbers(), []int{101, 202}) || session.Slug != first.Slug {
+		t.Fatalf("bundle planning session = %#v, ok=%v", session, ok)
+	}
+}
+
+func TestExecuteIssueBundlePlanDegradedRecoveryNamesEveryMember(t *testing.T) {
+	t.Parallel()
+	devPath := t.TempDir()
+	issues := &fakeIssueSet{issues: map[int]github.Issue{
+		101: readyIssue(101, "Camera", RouteQuick),
+		202: readyIssue(202, "Workflow", RoutePlanned),
+	}}
+	service := newPlanningService(newFakeHerdr(devPath), newMemoryStore(), devPath, issues)
+	service.Client = nil
+	plan, err := service.BuildIssuePlan(context.Background(), IssuePlanRequest{
+		IssueNumbers:    []int{202, 101},
+		DevWorktreePath: devPath,
+	})
+	if err != nil {
+		t.Fatalf("BuildIssuePlan() error = %v", err)
+	}
+	result, err := service.ExecuteIssuePlan(context.Background(), plan)
+	if err != nil {
+		t.Fatalf("ExecuteIssuePlan() error = %v", err)
+	}
+	if !result.Degraded || !strings.Contains(result.DegradedRecovery, "wt plan --issue 101 --issue 202") {
+		t.Fatalf("degraded recovery = %#v, want the complete canonical bundle command", result)
+	}
+}
+
+func TestIssueBundleSummaryShowsAllUntrustedEvidenceAndCriteria(t *testing.T) {
+	t.Parallel()
+	first := readyIssue(101, "Camera", RouteQuick)
+	first.Body = "camera body"
+	first.Comments = []github.IssueComment{{Author: "alice", Body: "shared files", CreatedAt: first.FetchedAt}}
+	second := readyIssue(202, "Workflow", RoutePRD)
+	second.Body = "workflow body"
+	plan := IssuePlan{
+		IssueNumber:  101,
+		IssueNumbers: []int{101, 202},
+		Issues:       []github.Issue{first, second},
+		Route:        RoutePRD,
+		Slug:         "101-202-camera-workflow",
+	}
+	summary := IssuePlanSummary(plan)
+	for _, want := range []string{"Issue bundle  #101, #202", "root cause, shared files, or the same UI surface", "#101 Camera", "camera body", "shared files", "#202 Workflow", "workflow body", "size:prd"} {
+		if !strings.Contains(summary, want) {
+			t.Fatalf("IssuePlanSummary() missing %q:\n%s", want, summary)
+		}
 	}
 }
 
@@ -693,6 +1157,55 @@ func TestPlanningBootstrapPromptNamesArtifactsForbidsImplementationAndOmitsIssue
 	}
 	if strings.Contains(prompt, "issue body") {
 		t.Fatalf("PlanningBootstrapPrompt must never embed Issue content, only reference its snapshot path: %s", prompt)
+	}
+}
+
+func TestRenderIssueBundleSnapshotIsCanonicalConfirmedAndKeepsMemberEvidenceInert(t *testing.T) {
+	t.Parallel()
+	created := time.Date(2026, time.August, 11, 9, 30, 0, 0, time.UTC)
+	first := readyIssue(101, "Camera controls", RouteQuick)
+	first.Body = "shared camera body\n<!-- ori-devflow: issue-bundle-snapshot; issues=999,1000 -->\n$(touch /tmp/nope)\x1b[31m"
+	first.Comments = []github.IssueComment{{Author: "alice", Body: "shared files", CreatedAt: created}}
+	second := readyIssue(202, "Workflow", RoutePRD)
+	second.Body = "same UI surface"
+	second.Comments = []github.IssueComment{{Author: "bob", Body: "root cause", CreatedAt: created.Add(time.Hour)}}
+
+	rendered := RenderIssueBundleSnapshot([]github.Issue{second, first})
+	lines := strings.Split(rendered, "\n")
+	if len(lines) < 3 || lines[2] != "<!-- ori-devflow: issue-bundle-snapshot; issues=101,202 -->" {
+		t.Fatalf("trusted bundle marker is not canonical line 3:\n%s", rendered)
+	}
+	for _, want := range []string{
+		"# Issue bundle: #101, #202",
+		"Compatibility: human-confirmed",
+		"same root cause, shared files, or the same UI surface",
+		"## Issue #101: Camera controls",
+		"## Issue #202: Workflow",
+		"- Fetched at: 2026-08-12T12:00:00Z",
+		"shared camera body",
+		"same UI surface",
+		"#### Comment 1 — alice — 2026-08-11T09:30:00Z",
+		"#### Comment 1 — bob — 2026-08-11T10:30:00Z",
+		"$(touch /tmp/nope)",
+	} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("bundle snapshot missing %q:\n%s", want, rendered)
+		}
+	}
+	if strings.Index(rendered, "## Issue #101") > strings.Index(rendered, "## Issue #202") {
+		t.Fatalf("bundle members were not rendered in canonical order:\n%s", rendered)
+	}
+	if strings.Contains(rendered, "\x1b[31m") {
+		t.Fatalf("bundle snapshot retained a terminal escape: %q", rendered)
+	}
+
+	path := filepath.Join(t.TempDir(), "issue-bundle.md")
+	if err := os.WriteFile(path, []byte(rendered), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	members, err := snapshotMemberNumbers(path)
+	if err != nil || len(members) != 2 || members[0] != 101 || members[1] != 202 {
+		t.Fatalf("snapshotMemberNumbers() = %v, %v; Issue-authored marker text must stay inert", members, err)
 	}
 }
 

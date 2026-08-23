@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -28,31 +29,35 @@ import (
 )
 
 type issuePlanArgs struct {
-	issueNumber int
-	worktree    string
-	yes         bool
-	json        bool
+	// issueNumber preserves the original parsed shape for single-Issue callers.
+	// issueNumbers is the canonical sorted member set for service requests.
+	issueNumber  int
+	issueNumbers []int
+	worktree     string
+	yes          bool
+	json         bool
 }
 
 func parseIssuePlanArgs(args []string) (issuePlanArgs, error) {
 	var parsed issuePlanArgs
-	var issueSeen, worktreeSeen bool
+	var worktreeSeen bool
+	issueSeen := make(map[int]struct{})
 	for index := 0; index < len(args); index++ {
 		switch args[index] {
 		case "--issue":
 			if index+1 >= len(args) {
 				return issuePlanArgs{}, fmt.Errorf("--issue requires a positive Issue number")
 			}
-			if issueSeen {
-				return issuePlanArgs{}, fmt.Errorf("issue-plan accepts --issue only once")
-			}
 			index++
 			number, err := strconv.Atoi(args[index])
 			if err != nil || number <= 0 {
 				return issuePlanArgs{}, fmt.Errorf("--issue requires a positive Issue number")
 			}
-			parsed.issueNumber = number
-			issueSeen = true
+			if _, duplicate := issueSeen[number]; duplicate {
+				return issuePlanArgs{}, fmt.Errorf("duplicate --issue %d is not allowed", number)
+			}
+			issueSeen[number] = struct{}{}
+			parsed.issueNumbers = append(parsed.issueNumbers, number)
 		case "--worktree":
 			if index+1 >= len(args) {
 				return issuePlanArgs{}, fmt.Errorf("--worktree requires a value")
@@ -71,12 +76,14 @@ func parseIssuePlanArgs(args []string) (issuePlanArgs, error) {
 			return issuePlanArgs{}, fmt.Errorf("unknown issue-plan option %q", args[index])
 		}
 	}
-	if !issueSeen {
+	if len(parsed.issueNumbers) == 0 {
 		return issuePlanArgs{}, fmt.Errorf("issue-plan requires --issue <positive-number>")
 	}
 	if !worktreeSeen || strings.TrimSpace(parsed.worktree) == "" {
 		return issuePlanArgs{}, fmt.Errorf("issue-plan requires --worktree <dev-worktree-path>")
 	}
+	sort.Ints(parsed.issueNumbers)
+	parsed.issueNumber = parsed.issueNumbers[0]
 	return parsed, nil
 }
 
@@ -107,10 +114,13 @@ func (a *App) issuePlan(ctx context.Context, opts options, args []string) int {
 		}),
 	}
 
-	plan, err := service.BuildIssuePlan(ctx, agents.IssuePlanRequest{
-		IssueNumber:     parsed.issueNumber,
-		DevWorktreePath: parsed.worktree,
-	})
+	request := agents.IssuePlanRequest{IssueNumbers: parsed.issueNumbers, DevWorktreePath: parsed.worktree}
+	if len(parsed.issueNumbers) == 1 {
+		// Preserve the original service request shape for single-Issue callers.
+		request.IssueNumber = parsed.issueNumber
+		request.IssueNumbers = nil
+	}
+	plan, err := service.BuildIssuePlan(ctx, request)
 	if err != nil {
 		a.writeError(err, opts.json)
 		return 1
@@ -134,7 +144,7 @@ func (a *App) issuePlan(ctx context.Context, opts options, args []string) int {
 		agents.IssuePlanSummary(plan), plan.Slug, plan.Slug)
 
 	if !parsed.yes {
-		approved, err := a.confirmIssuePlan()
+		approved, err := a.confirmIssuePlan(plan)
 		if err != nil {
 			a.writeError(fmt.Errorf("this plan needs an answer: %w; re-run with --yes from a script", err), false)
 			return 1
@@ -168,11 +178,15 @@ func (a *App) planPrint(format string, args ...any) {
 	_, _ = fmt.Fprintf(a.stdout, format, args...)
 }
 
-func (a *App) confirmIssuePlan() (bool, error) {
+func (a *App) confirmIssuePlan(plan agents.IssuePlan) (bool, error) {
 	if a.stdin == nil {
 		return false, errors.New("no input is available to confirm on")
 	}
-	a.planPrint("\nProceed? [y/N] ")
+	if plan.IsBundle() {
+		a.planPrint("\nAffirm that every selected Issue shares a root cause, shared files, or the same UI surface, and proceed? [y/N] ")
+	} else {
+		a.planPrint("\nProceed? [y/N] ")
+	}
 	reader := bufio.NewReader(a.stdin)
 	line, err := reader.ReadString('\n')
 	if err != nil && strings.TrimSpace(line) == "" {
@@ -223,6 +237,7 @@ func issuePlanOutcome(result agents.IssuePlanResult) string {
 func issuePlanPayload(plan agents.IssuePlan) map[string]any {
 	payload := map[string]any{
 		"issue_number":    plan.IssueNumber,
+		"issue_numbers":   plan.IssueNumbers,
 		"title":           plan.Title,
 		"url":             plan.URL,
 		"issue_state":     plan.IssueState,
@@ -235,6 +250,32 @@ func issuePlanPayload(plan agents.IssuePlan) map[string]any {
 		"artifact_state":  string(plan.ArtifactState),
 		"planner_kind":    plan.PlannerKind,
 		"workspace_state": plan.WorkspaceState,
+	}
+	if plan.IsBundle() {
+		payload["compatibility_required"] = true
+		payload["compatibility_criteria"] = []string{"same root cause", "shared files", "same UI surface"}
+		members := make([]map[string]any, 0, len(plan.Issues))
+		for _, issue := range plan.Issues {
+			comments := make([]map[string]any, 0, len(issue.Comments))
+			for _, comment := range issue.Comments {
+				comments = append(comments, map[string]any{
+					"author":     comment.Author,
+					"body":       comment.Body,
+					"created_at": comment.CreatedAt,
+				})
+			}
+			members = append(members, map[string]any{
+				"issue_number": issue.Number,
+				"title":        issue.Title,
+				"url":          issue.URL,
+				"issue_state":  issue.State,
+				"labels":       issue.Labels,
+				"body":         issue.Body,
+				"comments":     comments,
+				"fetched_at":   issue.FetchedAt,
+			})
+		}
+		payload["members"] = members
 	}
 	if plan.PRDPath != "" {
 		payload["prd_path"] = plan.PRDPath

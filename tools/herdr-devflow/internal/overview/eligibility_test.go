@@ -243,13 +243,14 @@ func TestEligibilityNeverConsultsClaudeForAStructurallyIneligibleAgent(t *testin
 // this asserts it is never a *managed* one.
 func TestPlanningSessionsProduceNoBridgeDerivedFeatureOrAgentEvidence(t *testing.T) {
 	state := model.NewBridgeState()
-	state.PlanningSessions["repo-1:342"] = model.PlanningSession{
+	state.PlanningSessions["repo-1:bundle:101,342"] = model.PlanningSession{
 		RepositoryID: "repo-1",
-		IssueNumber:  342,
-		Slug:         "342-ready-issue-codex-planning",
+		IssueNumber:  101,
+		IssueNumbers: []int{101, 342},
+		Slug:         "101-342-ready-issue-bundle",
 		WorktreePath: "/tmp/ori-agent-dev",
 		Stage:        model.PlanningPrompted,
-		Planner:      model.RoleAgent{Name: "ori-repo1-issue342-planner", Kind: "pi"},
+		Planner:      model.RoleAgent{Name: "ori-repo1-issues101-342-planner", Kind: "pi"},
 	}
 	if len(state.Features) != 0 {
 		t.Fatalf("fixture is invalid: expected no Features, got %#v", state.Features)

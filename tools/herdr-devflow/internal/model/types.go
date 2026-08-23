@@ -279,10 +279,13 @@ const (
 // that iterates BridgeState.Features must never observe one.
 type PlanningSession struct {
 	RepositoryID string `json:"repository_id"`
-	// IssueNumber is the durable identity: the slug may be re-derived after a
-	// title rename, but the Issue number never changes.
-	IssueNumber int    `json:"issue_number"`
-	Slug        string `json:"slug"`
+	// IssueNumber preserves records and consumers from the original
+	// single-Issue planner. For a bundle it is the first canonical member.
+	IssueNumber int `json:"issue_number"`
+	// IssueNumbers is additive bundle identity. Legacy records omit it and are
+	// interpreted as the one-member set containing IssueNumber.
+	IssueNumbers []int  `json:"issue_numbers,omitempty"`
+	Slug         string `json:"slug"`
 	// WorktreePath is the canonical ori-agent-dev checkout this session plans
 	// in. It is recorded so a later invocation can detect a mismatched dev
 	// worktree instead of silently placing a second planner in the wrong tree.
@@ -294,4 +297,16 @@ type PlanningSession struct {
 	Prompted     bool          `json:"prompted,omitempty"`
 	CreatedAt    time.Time     `json:"created_at"`
 	UpdatedAt    time.Time     `json:"updated_at"`
+}
+
+// MemberIssueNumbers returns a defensive copy of the session's canonical
+// membership while preserving state files written before IssueNumbers existed.
+func (s PlanningSession) MemberIssueNumbers() []int {
+	if len(s.IssueNumbers) > 0 {
+		return append([]int(nil), s.IssueNumbers...)
+	}
+	if s.IssueNumber > 0 {
+		return []int{s.IssueNumber}
+	}
+	return nil
 }
