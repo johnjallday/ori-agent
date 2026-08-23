@@ -154,15 +154,13 @@ func TestSQLiteStoreTracePagingCapsResults(t *testing.T) {
 }
 
 func TestSQLiteStoreListRunsDoesNotDeadlockWithSingleConnection(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	db := openTestDB(t, ctx)
+	setupCtx := context.Background()
+	db := openTestDB(t, setupCtx)
 	store := NewSQLiteStore(db)
-	createTestWorkspace(t, ctx, db, "workspace-1")
+	createTestWorkspace(t, setupCtx, db, "workspace-1")
 
 	for _, runID := range []string{"run-1", "run-2"} {
-		if err := store.CreateRun(ctx, &Run{
+		if err := store.CreateRun(setupCtx, &Run{
 			ID:             runID,
 			WorkspaceID:    "workspace-1",
 			ProfileID:      ProfileGeneral,
@@ -179,6 +177,9 @@ func TestSQLiteStoreListRunsDoesNotDeadlockWithSingleConnection(t *testing.T) {
 			t.Fatalf("create run %s: %v", runID, err)
 		}
 	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
 
 	runs, err := store.ListRuns(ctx, "workspace-1")
 	if err != nil {
