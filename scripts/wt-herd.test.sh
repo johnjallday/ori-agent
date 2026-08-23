@@ -280,6 +280,29 @@ rg -q "handoff --feature onlytasks --worktree $target_root --branch feature/only
 [[ ! -f "$target_root/tasks/prd-onlytasks.md" ]]
 rg -q "Real work, no PRD needed" "$target_root/tasks/tasks-onlytasks.md"
 
+# A completed bundle uses the same feature-slug copy path: its trusted combined
+# snapshot, effective-route PRD, and one detailed task list all move together,
+# with no GitHub read or mutation during wt start.
+bundle_start_feature="801-802-camera-workflow"
+cat > "$dev_root/tasks/issue-$bundle_start_feature.md" <<'MD'
+# Issue bundle: #801, #802
+
+<!-- ori-devflow: issue-bundle-snapshot; issues=801,802 -->
+MD
+print -r -- "# PRD: $bundle_start_feature" > "$dev_root/tasks/prd-$bundle_start_feature.md"
+print -r -- "## Tasks\n- [ ] 1.0 Shared implementation" > "$dev_root/tasks/tasks-$bundle_start_feature.md"
+function gh {
+  print -r -- "$*" >> "$fixture_root/bundle-start-gh-calls"
+  return 91
+}
+wt start "$bundle_start_feature" --no-herdr --yes > "$fixture_root/bundle-start-output" 2>&1
+[[ ! -f "$fixture_root/bundle-start-gh-calls" ]]
+[[ -f "$target_root/tasks/issue-$bundle_start_feature.md" ]]
+[[ -f "$target_root/tasks/prd-$bundle_start_feature.md" ]]
+[[ -f "$target_root/tasks/tasks-$bundle_start_feature.md" ]]
+rg -q 'issue-bundle-snapshot; issues=801,802' "$target_root/tasks/issue-$bundle_start_feature.md"
+unfunction gh
+
 # Named resolution accepts "onlytasks", "tasks-onlytasks", and
 # "tasks-onlytasks.md" interchangeably — each reaches the same confirmation
 # summary instead of "No PRD or task list found". Declining costs nothing,

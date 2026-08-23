@@ -203,6 +203,79 @@ other_labels_of() {
 
 tasks_dir=""
 
+# Trusted attachment identity lives only in the generated snapshot header on
+# line 3. Issue-authored bodies and comments may contain marker-looking text;
+# these readers never scan beyond the header.
+snapshot_members=()
+read_snapshot_members() {
+  local path="$1" heading blank marker match csv member previous=0 old_ifs
+  local single_re='^<!-- ori-devflow: issue-snapshot; issue=([1-9][0-9]*) -->$'
+  local bundle_re='^<!-- ori-devflow: issue-bundle-snapshot; issues=([1-9][0-9]*(,[1-9][0-9]*)+) -->$'
+
+  snapshot_members=()
+  {
+    IFS= read -r heading || return 1
+    IFS= read -r blank || return 1
+    IFS= read -r marker || return 1
+  } < "$path"
+  heading="${heading%$'\r'}"
+  blank="${blank%$'\r'}"
+  marker="${marker%$'\r'}"
+  [[ "$heading" == '# '* && -z "$blank" ]] || return 1
+
+  if [[ "$marker" =~ $single_re ]]; then
+    snapshot_members=("${BASH_REMATCH[1]}")
+    return 0
+  fi
+  if [[ ! "$marker" =~ $bundle_re ]]; then
+    return 1
+  fi
+  csv="${BASH_REMATCH[1]}"
+  old_ifs="$IFS"
+  IFS=','
+  # Intentional splitting of the generated numeric CSV marker.
+  # shellcheck disable=SC2086
+  set -- $csv
+  IFS="$old_ifs"
+  [[ "$#" -ge 2 ]] || return 1
+  for member in "$@"; do
+    [[ "$member" =~ ^[1-9][0-9]*$ ]] || return 1
+    if [[ "$previous" -gt 0 && "$member" -le "$previous" ]]; then
+      snapshot_members=()
+      return 1
+    fi
+    snapshot_members+=("$member")
+    previous="$member"
+  done
+}
+
+feature_members=()
+load_feature_members() {
+  local slug="$1" snapshot="$tasks_dir/issue-$slug.md"
+  feature_members=()
+  if [[ -f "$snapshot" ]]; then
+    if ! read_snapshot_members "$snapshot"; then
+      return 2
+    fi
+    feature_members=("${snapshot_members[@]}")
+    return 0
+  fi
+  # Preserve number-first plans created before trusted snapshots existed.
+  if [[ "$slug" =~ ^([1-9][0-9]*)- ]]; then
+    feature_members=("${BASH_REMATCH[1]}")
+    return 0
+  fi
+  return 1
+}
+
+feature_members_include() {
+  local wanted="$1" member
+  for member in ${feature_members[@]+"${feature_members[@]}"}; do
+    [[ "$member" == "$wanted" ]] && return 0
+  done
+  return 1
+}
+
 resolve_tasks_dir() {
   local line path
 
@@ -267,6 +340,23 @@ remember_branch_flight() {
   fi
 }
 
+index_attached_plan_flights() {
+  local file slug state member
+  [[ -n "$tasks_dir" ]] || return 0
+  for file in "$tasks_dir"/tasks-*.md; do
+    [[ -f "$file" ]] || continue
+    slug="${file##*/}"
+    slug="${slug#tasks-}"
+    slug="${slug%.md}"
+    load_feature_members "$slug" || continue
+    state="$(flight_state_of "$slug")"
+    [[ -n "$state" ]] || continue
+    for member in "${feature_members[@]}"; do
+      remember_flight "$member" "$state"
+    done
+  done
+}
+
 load_flight_index() {
   local line branch
 
@@ -284,6 +374,11 @@ load_flight_index() {
   while IFS= read -r branch; do
     remember_branch_flight "${branch#origin/}" branch
   done < <(git branch --all --format='%(refname:short)' 2>/dev/null)
+
+  # A bundle branch's numeric slug prefix identifies only its first member by
+  # itself. The trusted local snapshot attaches the same branch/worktree state
+  # to every remaining member without consulting GitHub or Herdr.
+  index_attached_plan_flights
 }
 
 flight_state_of() {
@@ -297,12 +392,12 @@ flight_state_of() {
   printf '%s' ""
 }
 
-# Resolve an Issue to the one number-first task list owned by the dev worktree.
-# This is deliberately local: the later `i` action must be useful after an
-# asynchronous planner finishes without refreshing GitHub or consulting Herdr.
+# Resolve an Issue to the one exact local task list attached to it. This stays
+# offline: the later `i` action reads only generated snapshot headers, tasks/,
+# and Git, never GitHub or Herdr.
 implementation_feature=""
 resolve_implementation_feature() {
-  local issue_number="$1" file slug state
+  local issue_number="$1" file slug state member_status
   local -a matches=()
 
   implementation_feature=""
@@ -313,9 +408,27 @@ resolve_implementation_feature() {
 
   resolve_tasks_dir
   if [[ -n "$tasks_dir" ]]; then
-    for file in "$tasks_dir"/tasks-"$issue_number"-*.md; do
+    for file in "$tasks_dir"/tasks-*.md; do
       [[ -f "$file" ]] || continue
-      matches+=("$file")
+      slug="${file##*/}"
+      slug="${slug#tasks-}"
+      slug="${slug%.md}"
+      member_status=0
+      load_feature_members "$slug" || member_status=$?
+      if [[ "$member_status" -eq 2 ]]; then
+        # A malformed snapshot whose filename starts with this Issue is an
+        # explicit conflict, not permission to fall back to filename matching.
+        if [[ "$slug" == "$issue_number"-* ]]; then
+          printf 'Cannot resolve #%s: %s has a malformed generated attachment marker on line 3.\n' \
+            "$issue_number" "$tasks_dir/issue-$slug.md" >&2
+          return 1
+        fi
+        continue
+      fi
+      [[ "$member_status" -eq 0 ]] || continue
+      if feature_members_include "$issue_number"; then
+        matches+=("$file")
+      fi
     done
   fi
 
@@ -374,13 +487,19 @@ task_groups_of_file() {
 }
 
 task_progress_of_issue() {
-  local number="$1" file
+  local number="$1" file slug
 
   [[ -n "$tasks_dir" ]] || { printf '%s' ""; return 0; }
-  for file in "$tasks_dir"/tasks-"$number"-*.md; do
+  for file in "$tasks_dir"/tasks-*.md; do
     [[ -f "$file" ]] || continue
-    task_groups_of_file "$file"
-    return 0
+    slug="${file##*/}"
+    slug="${slug#tasks-}"
+    slug="${slug%.md}"
+    load_feature_members "$slug" || continue
+    if feature_members_include "$number"; then
+      task_groups_of_file "$file"
+      return 0
+    fi
   done
   printf '%s' ""
 }
@@ -410,7 +529,7 @@ flight_cell_of() {
 }
 
 list_status() {
-  local file slug progress state number rows=0
+  local file slug progress state number member members_cell rows=0
 
   resolve_tasks_dir
   load_flight_index
@@ -428,8 +547,18 @@ list_status() {
     slug="${slug%.md}"
     progress="$(task_groups_of_file "$file")"
     number=""
-    if [[ "$slug" =~ ^([0-9]+)- ]]; then
-      number="${BASH_REMATCH[1]}"
+    members_cell=""
+    if load_feature_members "$slug"; then
+      for member in "${feature_members[@]}"; do
+        if [[ -z "$members_cell" ]]; then
+          members_cell="#$member"
+        else
+          members_cell="$members_cell,#$member"
+        fi
+      done
+      number="${feature_members[0]:-}"
+    elif [[ -f "$tasks_dir/issue-$slug.md" ]]; then
+      members_cell="invalid"
     fi
     # Slug first: it also covers features whose branch carries no Issue number.
     state="$(flight_state_of "$slug")"
@@ -439,7 +568,7 @@ list_status() {
     printf '  %-7s %-9s %-8s %s\n' \
       "${progress:--}" \
       "${state:--}" \
-      "${number:+#$number}" \
+      "$members_cell" \
       "$slug"
     rows=$((rows + 1))
   done

@@ -188,6 +188,54 @@ check "decision comment includes rationale" \
   $'<!-- ori-decision -->\n\n**Answers:** 1B, 2A\n\n**Rationale:** Preserves existing JSON consumers'
 
 # ---------------------------------------------------------------------------
+# Trusted local snapshot membership. Only the exact generated marker on line 3
+# attaches Issues; marker-looking body text is inert.
+# ---------------------------------------------------------------------------
+cat > "$fixture_root/issue-single.md" <<'MD'
+# Issue #777: Single
+
+<!-- ori-devflow: issue-snapshot; issue=777 -->
+
+<!-- ori-devflow: issue-bundle-snapshot; issues=1,2 -->
+MD
+read_snapshot_members "$fixture_root/issue-single.md"
+check "single snapshot membership is read from line 3" "${snapshot_members[*]}" "777"
+
+cat > "$fixture_root/issue-bundle.md" <<'MD'
+# Issue bundle: #801, #802, #803
+
+<!-- ori-devflow: issue-bundle-snapshot; issues=801,802,803 -->
+
+Issue body with <!-- ori-devflow: issue-snapshot; issue=999 --> stays inert.
+MD
+read_snapshot_members "$fixture_root/issue-bundle.md"
+check "bundle snapshot membership is canonical" "${snapshot_members[*]}" "801 802 803"
+
+cat > "$fixture_root/issue-unsorted.md" <<'MD'
+# Issue bundle
+
+<!-- ori-devflow: issue-bundle-snapshot; issues=802,801 -->
+MD
+check "snapshot reader rejects unsorted members" \
+  "$(read_snapshot_members "$fixture_root/issue-unsorted.md" && echo yes || echo no)" "no"
+cat > "$fixture_root/issue-duplicate.md" <<'MD'
+# Issue bundle
+
+<!-- ori-devflow: issue-bundle-snapshot; issues=801,801 -->
+MD
+check "snapshot reader rejects duplicate members" \
+  "$(read_snapshot_members "$fixture_root/issue-duplicate.md" && echo yes || echo no)" "no"
+cat > "$fixture_root/issue-body-marker-only.md" <<'MD'
+# Issue bundle
+
+No generated marker here.
+
+<!-- ori-devflow: issue-bundle-snapshot; issues=801,802 -->
+MD
+check "snapshot reader never scans Issue-authored content" \
+  "$(read_snapshot_members "$fixture_root/issue-body-marker-only.md" && echo yes || echo no)" "no"
+
+# ---------------------------------------------------------------------------
 # In-flight status. Parent groups are the top-level `- [ ]` lines; sub-tasks are
 # indented, so an anchored match must not count them.
 # ---------------------------------------------------------------------------
@@ -266,6 +314,37 @@ check "cell falls back to location alone" "$(flight_cell_of 888)" "wt"
 flight_numbers=()
 flight_states=()
 check "cell is empty when nothing is in flight" "$(flight_cell_of 999)" ""
+
+cat > "$fixture_root/tasks-801-802-803-shared.md" <<'MD'
+## Tasks
+- [x] 1.0 First group
+- [ ] 2.0 Second group
+MD
+cp "$fixture_root/issue-bundle.md" "$fixture_root/issue-801-802-803-shared.md"
+flight_numbers=()
+flight_states=()
+remember_branch_flight "feature/801-802-803-shared" branch
+index_attached_plan_flights
+check "bundle branch indexes the middle member" "$(flight_state_of 802)" "branch"
+check "bundle branch indexes the last member" "$(flight_state_of 803)" "branch"
+check "bundle first member cell shares progress" "$(flight_cell_of 801)" "1/2 br"
+check "bundle middle member cell shares progress" "$(flight_cell_of 802)" "1/2 br"
+check "bundle last member cell shares progress" "$(flight_cell_of 803)" "1/2 br"
+
+bundle_status_output="$(
+  (
+    resolve_tasks_dir() { tasks_dir="$fixture_root"; }
+    load_flight_index() { :; }
+    list_status
+  ) 2>/dev/null
+)"
+check "status reports one row for a bundle feature" \
+  "$(grep -c '801-802-803-shared' <<< "$bundle_status_output")" "1"
+if [[ "$bundle_status_output" != *"#801,#802,#803"* ]]; then
+  printf 'FAIL status did not display every bundle member:\n%s\n' "$bundle_status_output" >&2
+  failures=$((failures + 1))
+fi
+
 tasks_dir=""
 
 # Starting implementation resolves only the dev worktree's local, number-first
@@ -327,6 +406,61 @@ printf '%s\n' '## Tasks' > "$implementation_tasks/tasks-781-worktree.md"
 check "implementation resolver refuses an existing worktree" \
   "$(implementation_fixture_result 781 worktree 2>&1 >/dev/null || true)" \
   "Implementation for #781 already has a checked-out worktree (781-worktree). Use that worktree instead of starting another."
+
+bundle_feature="801-802-803-shared"
+cat > "$implementation_tasks/issue-$bundle_feature.md" <<'MD'
+# Issue bundle: #801, #802, #803
+
+<!-- ori-devflow: issue-bundle-snapshot; issues=801,802,803 -->
+MD
+cat > "$implementation_tasks/tasks-$bundle_feature.md" <<'MD'
+## Tasks
+- [ ] 1.0 Shared implementation
+MD
+for bundle_member in 801 802 803; do
+  check "implementation resolver maps bundle member #$bundle_member" \
+    "$(implementation_fixture_result "$bundle_member" 2>/dev/null)" "$bundle_feature"
+done
+
+cat > "$implementation_tasks/tasks-$bundle_feature.md" <<'MD'
+<!-- ori-devflow: planning-starter; do not implement until the planner replaces this file -->
+## Tasks
+MD
+check "bundle middle member refuses a pending starter" \
+  "$(implementation_fixture_result 802 2>&1 >/dev/null || true)" \
+  "Planning for #802 is not complete: $implementation_tasks/tasks-$bundle_feature.md is still a planning starter. Return after Pi replaces it with the real task list."
+printf '%s\n' '## Tasks' '- [ ] 1.0 Shared implementation' > "$implementation_tasks/tasks-$bundle_feature.md"
+check "bundle middle member refuses an existing shared branch" \
+  "$(implementation_fixture_result 802 branch 2>&1 >/dev/null || true)" \
+  "Implementation for #802 already has a branch ($bundle_feature). Resume it instead of starting duplicate work."
+
+cat > "$implementation_tasks/issue-802-individual.md" <<'MD'
+# Issue #802: Individual
+
+<!-- ori-devflow: issue-snapshot; issue=802 -->
+MD
+printf '%s\n' '## Tasks' > "$implementation_tasks/tasks-802-individual.md"
+overlap_result="$(implementation_fixture_result 802 2>&1 >/dev/null || true)"
+if [[ "$overlap_result" != *"Multiple task lists match #802"* || \
+      "$overlap_result" != *"tasks-$bundle_feature.md"* || \
+      "$overlap_result" != *"tasks-802-individual.md"* ]]; then
+  printf 'FAIL implementation resolver did not reject overlapping plans:\n%s\n' "$overlap_result" >&2
+  failures=$((failures + 1))
+fi
+rm -f "$implementation_tasks/issue-802-individual.md" "$implementation_tasks/tasks-802-individual.md"
+
+cat > "$implementation_tasks/issue-804-805-malformed.md" <<'MD'
+# Issue bundle
+
+<!-- ori-devflow: issue-bundle-snapshot; issues=805,804 -->
+MD
+printf '%s\n' '## Tasks' > "$implementation_tasks/tasks-804-805-malformed.md"
+malformed_result="$(implementation_fixture_result 804 2>&1 >/dev/null || true)"
+if [[ "$malformed_result" != *"malformed generated attachment marker on line 3"* ]]; then
+  printf 'FAIL implementation resolver did not reject malformed bundle identity:\n%s\n' "$malformed_result" >&2
+  failures=$((failures + 1))
+fi
+
 check "implementation resolver performs no GitHub or Herdr side effect" \
   "$(wc -c < "$implementation_side_effects" | tr -d ' ')" "0"
 
