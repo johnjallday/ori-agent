@@ -2245,10 +2245,6 @@
 
   function renderTrackIdentity(item, track, editable, moveDisabledReason) {
     const identity = el('span', 'reaper-console-track-identity');
-    identity.setAttribute(
-      'style',
-      '--reaper-track-indent:' + (track.nestingLevel * 0.75).toFixed(2) + 'rem;'
-    );
 
     if (track.isFolderParent) {
       const cue = el('span', 'reaper-console-track-folder-cue', 'Folder');
@@ -2295,7 +2291,17 @@
     if (pending) item.classList.add('is-pending');
     if (dragState && dragState.sourceIndex === track.index) item.classList.add('is-dragging');
     if (track.isFolderParent) item.classList.add('is-folder-parent');
-    if (track.nestingLevel > 0) item.classList.add('is-nested');
+    if (track.nestingLevel > 0) {
+      item.classList.add('is-nested');
+      item.setAttribute(
+        'style',
+        '--reaper-track-indent:' +
+          (track.nestingLevel * 1.25).toFixed(2) +
+          'rem;--reaper-track-mobile-indent:' +
+          (track.nestingLevel * 0.7).toFixed(2) +
+          'rem;'
+      );
+    }
     // Read by the pointer-drag hit test (document.elementFromPoint + closest)
     // to resolve a screen position back to a logical track index.
     item.setAttribute('data-track-index', String(track.index));

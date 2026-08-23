@@ -1071,6 +1071,14 @@ test('folder parents and nested tracks render cues, bounded levels, and accessib
   assert.equal(strips[1].classList.contains('is-folder-parent'), true);
   assert.equal(strips[3].classList.contains('is-folder-parent'), true);
   assert.equal(strips[4].getAttribute('data-folder-depth'), '-2');
+  assert.equal(
+    strips[2].getAttribute('style'),
+    '--reaper-track-indent:1.25rem;--reaper-track-mobile-indent:0.70rem;'
+  );
+  assert.equal(
+    strips[4].getAttribute('style'),
+    '--reaper-track-indent:2.50rem;--reaper-track-mobile-indent:1.40rem;'
+  );
 
   const cues = findAll(host, 'reaper-console-track-folder-cue');
   assert.equal(cues.length, 2);
@@ -1097,6 +1105,7 @@ test('flat projects retain unindented strips without folder cues', () => {
   const strips = findAll(host, 'reaper-console-track');
   assert.ok(strips.every(strip => strip.getAttribute('data-nesting-level') === '0'));
   assert.ok(strips.every(strip => !strip.classList.contains('is-nested')));
+  assert.ok(strips.every(strip => strip.getAttribute('style') === null));
   assert.equal(findAll(host, 'reaper-console-track-folder-cue').length, 0);
   consolePanel.close();
 });
