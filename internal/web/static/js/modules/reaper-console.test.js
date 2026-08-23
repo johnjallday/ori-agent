@@ -1119,6 +1119,98 @@ test('the Ask Ori input submits through window.OriAskRouting.submit and clears o
   consolePanel.close();
 });
 
+// This is the load-bearing assertion for the whole feature. REAPER tools are
+// handed to an executing agent ONLY when its task declares this capability
+// (workspace.RuntimeTaskToolFactory), so an ask that omits it produces a task
+// that runs with no REAPER access and can only talk about the work.
+test('an ask from the console declares reaper_live_control so the task can actually reach REAPER', async () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  consolePanel._setState(liveTrackState([]));
+  consolePanel.open();
+
+  const submitted = [];
+  globalThis.window.OriAskRouting = {
+    submit: async (prompt, options) => {
+      submitted.push({ prompt, options });
+    }
+  };
+  consolePanel._seedAskInput('Set up a band session');
+  await consolePanel._submitAskInput();
+
+  assert.equal(submitted.length, 1);
+  assert.deepEqual(submitted[0].options.routeContext.required_capabilities, [
+    'reaper_live_control'
+  ]);
+
+  delete globalThis.window.OriAskRouting;
+  consolePanel.close();
+});
+
+test('a plan proposed while the console is open appears without reopening it', async () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  consolePanel._setState(liveTrackState([{ index: 1, name: 'Kick' }]));
+  consolePanel.open();
+
+  // No plan yet — the console shows no plan card.
+  assert.equal(
+    findAll(documentStub.getElementById('reaperConsole'), 'reaper-console-plan').length,
+    0
+  );
+
+  // An agent proposes one mid-session; the next poll should pick it up.
+  globalThis.fetch = async path => ({
+    ok: true,
+    status: 200,
+    json: async () =>
+      /track-plan/.test(path)
+        ? {
+            plan: {
+              id: 'plan_live',
+              edits: [{ kind: 'rename', index: 1, expected_name: 'Kick', new_name: 'Kick In' }]
+            }
+          }
+        : {}
+  });
+  await consolePanel._loadPlan();
+
+  assert.ok(consolePanel._pendingPlan(), 'the polled plan should be adopted');
+  assert.equal(consolePanel._pendingPlan().id, 'plan_live');
+  consolePanel.close();
+});
+
+test('re-reading an unchanged plan does not rebuild the console', async () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  consolePanel._setState(liveTrackState([{ index: 1, name: 'Kick' }]));
+  consolePanel._setPendingPlan({ id: 'plan_same', edits: [] });
+  consolePanel.open();
+
+  const host = documentStub.getElementById('reaperConsole');
+  // Typing into the ask input is the thing an unnecessary rebuild destroys.
+  const input = findOne(host, 'reaper-console-ask-input');
+  input.dispatch('input', { target: { value: 'half-typed thought' } });
+
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({ plan: { id: 'plan_same', edits: [] } })
+  });
+  await consolePanel._loadPlan();
+
+  // Same plan came back, so the panel must not have been rebuilt underneath
+  // the user — the in-progress draft survives.
+  assert.equal(consolePanel._askInputValue(), 'half-typed thought');
+  consolePanel.close();
+});
+
 test('the Ask Ori input shows a notice instead of throwing when Ask Ori is unavailable', async () => {
   consolePanel._resetForTest();
   consolePanel.init('ws-reaper');

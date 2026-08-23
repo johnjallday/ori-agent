@@ -83,6 +83,8 @@
   // proposals.
   let pendingPlan = null;
   let pendingPlanLoaded = false;
+  // Change-detection token for the polled plan; see adoptPlan.
+  let lastPlanToken = '';
   let planRequestInFlight = false;
   // Ask Ori input state (#396). No visible Ask Ori input exists elsewhere
   // while the console is open (it's a full-screen modal at a higher z-index
@@ -570,6 +572,22 @@
     }
   }
 
+  // adoptPlan records a freshly-read plan and re-renders ONLY when it
+  // actually changed, mirroring publishIfChanged's role for live state.
+  // Unconditional re-rendering matters here because loadPlan is polled
+  // (see syncPolling): rebuilding the panel every tick would drop focus and
+  // the in-progress value of the Ask Ori input, and yank the list out from
+  // under an active drag — the same reasons refresh() guards its own render.
+  function adoptPlan(nextPlan) {
+    const token = nextPlan ? JSON.stringify(nextPlan) : '';
+    const changed = token !== lastPlanToken;
+    lastPlanToken = token;
+    pendingPlan = nextPlan;
+    pendingPlanLoaded = true;
+    if (changed && consoleOpen && !dragState && !pinDragState) renderConsole();
+    return pendingPlan;
+  }
+
   async function loadPlan() {
     const path = trackPlanApiPath();
     if (!path || typeof fetch !== 'function') return pendingPlan;
@@ -577,13 +595,11 @@
       const response = await fetch(path, { headers: { Accept: 'application/json' } });
       if (!response.ok) throw new Error('plan request failed');
       const payload = await response.json();
-      pendingPlan = payload && payload.plan ? payload.plan : null;
-      pendingPlanLoaded = true;
-      if (consoleOpen) renderConsole();
-      return pendingPlan;
+      return adoptPlan(payload && payload.plan ? payload.plan : null);
     } catch (_error) {
+      // A failed poll is not evidence the plan is gone — keep whatever we
+      // last read rather than clearing a plan the user may be reviewing.
       pendingPlanLoaded = true;
-      if (consoleOpen) renderConsole();
       return pendingPlan;
     }
   }
@@ -1148,7 +1164,15 @@
     if (pollTimer === null && typeof setInterval === 'function') {
       pollTimerIntervalMs = pollIntervalMs();
       pollTimer = setInterval(() => {
-        if ((mapVisible || consoleOpen) && documentVisible()) void refresh();
+        if (!documentVisible()) return;
+        if (mapVisible || consoleOpen) void refresh();
+        // Poll the pending plan only while the console is actually open —
+        // it is the only surface that renders one, and the Map's slower
+        // cadence has no use for it. This is what lets a plan proposed by an
+        // agent MID-SESSION appear without closing and reopening the console
+        // (loadPlan otherwise runs once per open), which is the whole point
+        // of asking Ori for a change from in here.
+        if (consoleOpen) void loadPlan();
       }, pollTimerIntervalMs);
     }
   }
@@ -1747,7 +1771,17 @@
           window.location.pathname) ||
         '',
       workspace_id: workspaceIdFromPage(),
-      origin: 'reaper_console_ask_input'
+      origin: 'reaper_console_ask_input',
+      // The load-bearing part, not decoration. REAPER tools
+      // (propose_reaper_track_edits, run_reaper_action, ...) are handed out
+      // ONLY to an agent executing a task that declares this capability —
+      // see workspace.RuntimeTaskToolFactory's doc comment, which makes that
+      // a deliberate boundary ("a model cannot gain runtime access merely by
+      // knowing a workspace ID"). An ask from this console is always about
+      // the live session, so it must carry the requirement through to the
+      // task it creates; without it the agent runs with no REAPER access and
+      // can only talk about the work instead of doing it.
+      required_capabilities: [REQUIREMENT_KEY]
     };
   }
 
@@ -2639,6 +2673,10 @@
     _setPendingPlan: plan => {
       pendingPlan = plan;
       pendingPlanLoaded = true;
+      // Keep the poll's change-detection token in step with a directly-set
+      // plan, so a subsequent poll returning the same plan is correctly seen
+      // as unchanged rather than as a new one.
+      lastPlanToken = plan ? JSON.stringify(plan) : '';
       if (consoleOpen) renderConsole();
     },
     _pendingPlan: () => pendingPlan,
@@ -2687,6 +2725,7 @@
       dragState = null;
       pendingPlan = null;
       pendingPlanLoaded = false;
+      lastPlanToken = '';
       planRequestInFlight = false;
       toasts.forEach(toast => {
         if (toast.timer && typeof clearTimeout === 'function') clearTimeout(toast.timer);

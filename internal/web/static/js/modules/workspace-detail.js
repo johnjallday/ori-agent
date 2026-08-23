@@ -16255,7 +16255,15 @@ export class WorkspaceDetailPage {
           parent_task_id: String(options.parentTaskID || '').trim() || undefined,
           subtask_index: Number.isFinite(Number(options.subtaskIndex))
             ? Number(options.subtaskIndex)
-            : undefined
+            : undefined,
+          // Runtime capabilities this task needs in order to do its work.
+          // The executing agent is granted matching runtime tools only when
+          // the task declares them (workspace.RuntimeTaskToolFactory), so a
+          // task created without this runs with no runtime access at all.
+          required_capabilities:
+            Array.isArray(options.requiredCapabilities) && options.requiredCapabilities.length
+              ? options.requiredCapabilities
+              : undefined
         })
       });
 
