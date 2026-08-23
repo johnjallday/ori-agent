@@ -19,7 +19,13 @@ class FakeNode {
         const classes = new Set(this.className.split(/\s+/).filter(Boolean));
         classes.add(value);
         this.className = Array.from(classes).join(' ');
-      }
+      },
+      remove: value => {
+        const classes = new Set(this.className.split(/\s+/).filter(Boolean));
+        classes.delete(value);
+        this.className = Array.from(classes).join(' ');
+      },
+      contains: value => this.className.split(/\s+/).filter(Boolean).includes(value)
     };
   }
   set id(value) {
@@ -1144,6 +1150,70 @@ test('an ask from the console declares reaper_live_control so the task can actua
   assert.deepEqual(submitted[0].options.routeContext.required_capabilities, [
     'reaper_live_control'
   ]);
+
+  delete globalThis.window.OriAskRouting;
+  consolePanel.close();
+});
+
+// The task-creation confirm is an ordinary Bootstrap modal at z-index 10100,
+// deliberately below --app-modal-layer (20200) where this full-screen console
+// lives. A dialog this console itself triggered would open underneath it, so
+// the console yields for exactly the duration of the request — the confirm is
+// awaited inside that same call.
+test('the console yields its layer while an ask is in flight, and restores after', async () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  consolePanel._setState(liveTrackState([]));
+  consolePanel.open();
+
+  const host = documentStub.getElementById('reaperConsole');
+  assert.equal(host.classList.contains('is-yielding-to-dialog'), false);
+
+  let yieldedDuringRequest = null;
+  globalThis.window.OriAskRouting = {
+    submit: async () => {
+      // Stands in for the confirm dialog being raised inside submit().
+      yieldedDuringRequest = host.classList.contains('is-yielding-to-dialog');
+    }
+  };
+  consolePanel._seedAskInput('Set up a band session');
+  await consolePanel._submitAskInput();
+
+  assert.equal(yieldedDuringRequest, true, 'console must yield while the dialog can be up');
+  assert.equal(
+    host.classList.contains('is-yielding-to-dialog'),
+    false,
+    'console must reclaim its layer once the request settles'
+  );
+
+  delete globalThis.window.OriAskRouting;
+  consolePanel.close();
+});
+
+test('the console reclaims its layer even when the ask fails', async () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  consolePanel._setState(liveTrackState([]));
+  consolePanel.open();
+
+  const host = documentStub.getElementById('reaperConsole');
+  globalThis.window.OriAskRouting = {
+    submit: async () => {
+      throw new Error('routing blew up');
+    }
+  };
+  consolePanel._seedAskInput('Set up a band session');
+  await consolePanel._submitAskInput();
+
+  assert.equal(
+    host.classList.contains('is-yielding-to-dialog'),
+    false,
+    'a failed ask must not strand the console underneath the modal layer'
+  );
 
   delete globalThis.window.OriAskRouting;
   consolePanel.close();

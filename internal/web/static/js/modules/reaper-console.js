@@ -1813,6 +1813,11 @@
     }
     askRequestInFlight = true;
     askNotice = null;
+    // Yield the full-screen layer for the duration of the request: the app
+    // may raise an ordinary dialog for this ask (the task-creation confirm),
+    // and those sit below this console's layer by design. See the
+    // .is-yielding-to-dialog rule in workspace-command.css.
+    setConsoleYieldingToDialog(true);
     if (consoleOpen) renderConsole();
     try {
       await window.OriAskRouting.submit(text, {
@@ -1826,7 +1831,25 @@
       return false;
     } finally {
       askRequestInFlight = false;
+      setConsoleYieldingToDialog(false);
       if (consoleOpen) renderConsole();
+    }
+  }
+
+  // setConsoleYieldingToDialog toggles the class that drops this console below
+  // the ordinary modal layer. Applied to the persistent host element (which
+  // renderConsole empties but never recreates), so it survives re-renders.
+  function setConsoleYieldingToDialog(yielding) {
+    const host = typeof document === 'undefined' ? null : document.getElementById(CONSOLE_HOST_ID);
+    if (!host || !host.classList) return;
+    if (yielding) {
+      if (typeof host.classList.add === 'function') {
+        host.classList.add('is-yielding-to-dialog');
+      }
+      return;
+    }
+    if (typeof host.classList.remove === 'function') {
+      host.classList.remove('is-yielding-to-dialog');
     }
   }
 

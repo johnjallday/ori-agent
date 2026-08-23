@@ -6336,6 +6336,23 @@ button.ws-cmd-rpg-class-card:focus-visible {
   display: none;
 }
 
+/* While an Ask Ori request from inside this console is in flight, the app may
+   raise an ordinary dialog for it (the task-creation confirm). Those are
+   Bootstrap modals at z-index 10100 — deliberately BELOW --app-modal-layer,
+   which variables.css defines as the layer for full-screen surfaces like this
+   console. That ordering is correct in general (a console should cover page
+   chrome) but inverted for a dialog this console itself asked for, which
+   would otherwise open underneath it and be invisible.
+
+   Yielding for the duration of the request is the narrow fix: the console is
+   a direct <body> child like the modal, so lowering it below 10100 is a plain
+   sibling comparison, and it restores itself when the request settles — the
+   confirm dialog is awaited INSIDE that same request, so the window is
+   exactly right without the console needing to observe the modal. */
+.reaper-console-host.is-yielding-to-dialog {
+  z-index: 10000;
+}
+
 .reaper-console-backdrop {
   position: fixed;
   inset: 0;
