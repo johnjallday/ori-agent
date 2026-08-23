@@ -20,8 +20,9 @@ import (
 )
 
 const (
-	maxRemoteResponse = 256 << 10
-	remoteTimeout     = 2 * time.Second
+	maxRemoteResponse    = 256 << 10
+	maxFolderDepthTracks = 256
+	remoteTimeout        = 2 * time.Second
 )
 
 var (
@@ -37,17 +38,21 @@ var (
 // stable non-sensitive code used only while disconnected. No endpoint or port
 // is present in this public shape.
 type State struct {
-	Applies       bool      `json:"applies"`
-	Connected     bool      `json:"connected"`
-	Reason        string    `json:"reason,omitempty"`
-	Project       string    `json:"project"`
-	Tempo         float64   `json:"tempo"`
-	TimeSignature string    `json:"time_signature"`
-	PlayState     string    `json:"play_state"`
-	Position      string    `json:"position"`
-	TrackCount    int       `json:"track_count"`
-	Tracks        []Track   `json:"tracks"`
-	CheckedAt     time.Time `json:"checked_at"`
+	Applies       bool    `json:"applies"`
+	Connected     bool    `json:"connected"`
+	Reason        string  `json:"reason,omitempty"`
+	Project       string  `json:"project"`
+	Tempo         float64 `json:"tempo"`
+	TimeSignature string  `json:"time_signature"`
+	PlayState     string  `json:"play_state"`
+	Position      string  `json:"position"`
+	TrackCount    int     `json:"track_count"`
+	Tracks        []Track `json:"tracks"`
+	// FolderDepthAvailable distinguishes authoritative zero depths from a
+	// failed or oversized folder metadata read. Callers must not authorize a
+	// reorder while it is false.
+	FolderDepthAvailable bool      `json:"folder_depth_available"`
+	CheckedAt            time.Time `json:"checked_at"`
 	// TrackEditingAvailable reports whether the script runner is installed and
 	// ready. REAPER can be connected while the runner is missing, in which case
 	// the console renders strips read-only instead of offering dead controls.
@@ -63,6 +68,9 @@ type State struct {
 // line read, verified against a live session (see tasks-reaper-track-strips.md
 // group 3.1): Web Remote's last TRACK field is I_CUSTOMCOLOR verbatim, so no
 // runner round trip is needed to keep color current on every poll.
+//
+// FolderDepth comes from one separately bounded Web Remote property request for
+// the whole snapshot; State.FolderDepthAvailable says whether it is trusted.
 type Track struct {
 	Index       int     `json:"index"`
 	Name        string  `json:"name"`
@@ -70,6 +78,7 @@ type Track struct {
 	Soloed      bool    `json:"soloed"`
 	Armed       bool    `json:"armed"`
 	Color       int64   `json:"color"`
+	FolderDepth int     `json:"folder_depth"`
 	PeakLeftDB  float64 `json:"peak_left_db"`
 	PeakRightDB float64 `json:"peak_right_db"`
 }
@@ -157,6 +166,16 @@ func (c *Client) ReadState(ctx context.Context, project ProjectSource) (State, e
 	if err != nil {
 		return state, err
 	}
+	folderDepthAvailable := len(tracks) == 0
+	if len(tracks) > 0 {
+		depths, depthErr := c.readFolderDepths(ctx, port, tracks)
+		if depthErr == nil {
+			for index := range tracks {
+				tracks[index].FolderDepth = depths[index]
+			}
+			folderDepthAvailable = true
+		}
+	}
 	beatBody, err := c.get(ctx, port, "BEATPOS")
 	if err != nil {
 		return state, err
@@ -178,7 +197,65 @@ func (c *Client) ReadState(ctx context.Context, project ProjectSource) (State, e
 	state.Position = position
 	state.Tracks = tracks
 	state.TrackCount = len(tracks)
+	state.FolderDepthAvailable = folderDepthAvailable
 	return state, nil
+}
+
+func (c *Client) readFolderDepths(ctx context.Context, port int, tracks []Track) ([]int, error) {
+	if len(tracks) == 0 {
+		return []int{}, nil
+	}
+	if len(tracks) > maxFolderDepthTracks {
+		return nil, ErrMalformedResponse
+	}
+	commands := make([]string, len(tracks))
+	for position, track := range tracks {
+		// A full TRACK response numbers non-master tracks contiguously from one.
+		// Validate that contract before composing the bounded property request.
+		if track.Index != position+1 {
+			return nil, ErrMalformedResponse
+		}
+		commands[position] = folderDepthCommand(track.Index)
+	}
+	body, err := c.get(ctx, port, strings.Join(commands, ";"))
+	if err != nil {
+		return nil, err
+	}
+	return parseFolderDepths(body, tracks)
+}
+
+func folderDepthCommand(trackIndex int) string {
+	return "GET/TRACK/" + strconv.Itoa(trackIndex) + "/I_FOLDERDEPTH"
+}
+
+func parseFolderDepths(body []byte, tracks []Track) ([]int, error) {
+	depths := make([]int, len(tracks))
+	lineIndex := 0
+	scanner := bufio.NewScanner(strings.NewReader(string(body)))
+	scanner.Buffer(make([]byte, 4096), maxRemoteResponse)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		if lineIndex >= len(tracks) {
+			return nil, ErrMalformedResponse
+		}
+		fields := responseFields(line)
+		if len(fields) != 2 || fields[0] != folderDepthCommand(tracks[lineIndex].Index) {
+			return nil, ErrMalformedResponse
+		}
+		depth, err := strconv.Atoi(fields[1])
+		if err != nil {
+			return nil, ErrMalformedResponse
+		}
+		depths[lineIndex] = depth
+		lineIndex++
+	}
+	if scanner.Err() != nil || lineIndex != len(tracks) {
+		return nil, ErrMalformedResponse
+	}
+	return depths, nil
 }
 
 // RunAction triggers one validated REAPER command and then reads the resulting
