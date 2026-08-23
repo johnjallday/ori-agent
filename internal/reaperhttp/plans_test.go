@@ -326,6 +326,12 @@ func TestApplyPendingPlanStillAllowsZeroAndNegativeDepthMoves(t *testing.T) {
 			if recorder.Code != http.StatusOK || body.Outcome != "ok" || runner.calls != 1 {
 				t.Fatalf("supported plan move = %d %+v, calls=%d", recorder.Code, body, runner.calls)
 			}
+			if body.Undo == nil || body.Undo.CommandID != undoCommandID {
+				t.Fatalf("supported plan move undo = %+v", body.Undo)
+			}
+			if _, found := handler.plans.get("mine"); found {
+				t.Fatal("applied supported move remained pending")
+			}
 		})
 	}
 }

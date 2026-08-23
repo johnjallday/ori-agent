@@ -208,34 +208,53 @@ func TestMoveEditValidatesTargetPosition(t *testing.T) {
 	}
 }
 
-func TestValidateTrackMoveBlocksOnlyPositiveFolderDepth(t *testing.T) {
-	state := State{
-		TrackCount:           3,
-		FolderDepthAvailable: true,
-		Tracks: []Track{
-			{Index: 1, Name: "Parent", FolderDepth: 1},
-			{Index: 2, Name: "Child", FolderDepth: 0},
-			{Index: 3, Name: "Closer", FolderDepth: -1},
-		},
+func TestValidateTrackMoveFolderBoundaryMatrix(t *testing.T) {
+	fixtures := []struct {
+		name   string
+		depths []int
+	}{
+		{name: "flat", depths: []int{0, 0}},
+		{name: "single folder", depths: []int{1, 0, -1}},
+		{name: "nested multi-close", depths: []int{1, 1, 0, -2}},
+		{name: "adjacent folders", depths: []int{1, -1, 1, -1}},
 	}
-	if err := ValidateTrackMove(state, MoveEdit(1, "Parent", 3)); !errors.Is(err, ErrFolderParentMoveUnsupported) {
-		t.Fatalf("folder parent move = %v, want ErrFolderParentMoveUnsupported", err)
-	}
-	for _, edit := range []TrackEdit{MoveEdit(2, "Child", 1), MoveEdit(3, "Closer", 1)} {
-		if err := ValidateTrackMove(state, edit); err != nil {
-			t.Fatalf("depth %d move rejected: %v", state.Tracks[edit.Index-1].FolderDepth, err)
-		}
+	for _, fixture := range fixtures {
+		t.Run(fixture.name, func(t *testing.T) {
+			state := State{TrackCount: len(fixture.depths), FolderDepthAvailable: true}
+			for index, depth := range fixture.depths {
+				state.Tracks = append(state.Tracks, Track{
+					Index: index + 1, Name: "Track " + strconv.Itoa(index+1), FolderDepth: depth,
+				})
+			}
+			for index, track := range state.Tracks {
+				target := 1
+				if index == 0 {
+					target = len(state.Tracks)
+				}
+				err := ValidateTrackMove(state, MoveEdit(track.Index, track.Name, target))
+				if track.FolderDepth > 0 && !errors.Is(err, ErrFolderParentMoveUnsupported) {
+					t.Fatalf("positive depth %d move = %v, want ErrFolderParentMoveUnsupported", track.FolderDepth, err)
+				}
+				if track.FolderDepth <= 0 && err != nil {
+					t.Fatalf("supported depth %d move rejected: %v", track.FolderDepth, err)
+				}
+			}
+		})
 	}
 
+	state := State{
+		TrackCount: 2, FolderDepthAvailable: true,
+		Tracks: []Track{{Index: 1, Name: "Drums"}, {Index: 2, Name: "Bass"}},
+	}
 	unknown := state
 	unknown.FolderDepthAvailable = false
-	if err := ValidateTrackMove(unknown, MoveEdit(2, "Child", 1)); !errors.Is(err, ErrFolderDepthUnavailable) {
+	if err := ValidateTrackMove(unknown, MoveEdit(1, "Drums", 2)); !errors.Is(err, ErrFolderDepthUnavailable) {
 		t.Fatalf("unknown depth move = %v, want ErrFolderDepthUnavailable", err)
 	}
-	if err := ValidateTrackMove(state, MoveEdit(2, "Changed", 1)); !errors.Is(err, ErrTrackIdentityChanged) {
+	if err := ValidateTrackMove(state, MoveEdit(1, "Changed", 2)); !errors.Is(err, ErrTrackIdentityChanged) {
 		t.Fatalf("stale identity move = %v, want ErrTrackIdentityChanged", err)
 	}
-	if err := ValidateTrackMove(state, MoveEdit(2, "Child", 4)); !errors.Is(err, ErrTrackMoveTargetOutOfRange) {
+	if err := ValidateTrackMove(state, MoveEdit(1, "Drums", 3)); !errors.Is(err, ErrTrackMoveTargetOutOfRange) {
 		t.Fatalf("out-of-range move = %v, want ErrTrackMoveTargetOutOfRange", err)
 	}
 }

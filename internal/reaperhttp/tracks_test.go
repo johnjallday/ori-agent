@@ -367,6 +367,40 @@ func TestToggleEndpointGuardFailureAppliesNothing(t *testing.T) {
 	}
 }
 
+func TestNonMoveEditsRemainAvailableForFolderParentsAndChildren(t *testing.T) {
+	state := reaper.State{
+		Connected: true, PlayState: "stopped", TrackCount: 3, FolderDepthAvailable: true,
+		Tracks: []reaper.Track{
+			{Index: 1, Name: "Folder", FolderDepth: 1},
+			{Index: 2, Name: "Child", FolderDepth: 0},
+			{Index: 3, Name: "Closer", FolderDepth: -1},
+		},
+	}
+	tests := []struct {
+		name, path, body, kind, prior string
+	}{
+		{name: "rename parent", path: "1/rename", body: `{"name":"Group","expected_name":"Folder"}`, kind: reaper.TrackEditRename, prior: "Folder"},
+		{name: "color parent", path: "1/color", body: `{"color":16777471,"expected_name":"Folder"}`, kind: reaper.TrackEditColor, prior: "0"},
+		{name: "mute parent", path: "1/mute", body: `{"value":true,"expected_name":"Folder"}`, kind: reaper.TrackEditMute, prior: "0"},
+		{name: "solo child", path: "2/solo", body: `{"value":true,"expected_name":"Child"}`, kind: reaper.TrackEditSolo, prior: "0"},
+		{name: "arm closer", path: "3/arm", body: `{"value":true,"expected_name":"Closer"}`, kind: reaper.TrackEditArm, prior: "0"},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			runner := &trackRunnerStub{available: true, receipts: []reaper.EditReceipt{{Applied: true, Prior: testCase.prior}}}
+			mux := trackEditHandlerWithState(t, runner, state)
+			recorder, body := postTrackEdit(t, mux,
+				"/api/workspaces/mine/reaper/tracks/"+testCase.path, testCase.body)
+			if recorder.Code != http.StatusOK || body.Outcome != "ok" || runner.calls != 1 {
+				t.Fatalf("non-move edit = %d %+v, calls=%d", recorder.Code, body, runner.calls)
+			}
+			if runner.edits[0].Kind != testCase.kind || body.Undo == nil {
+				t.Fatalf("edit=%+v undo=%+v", runner.edits[0], body.Undo)
+			}
+		})
+	}
+}
+
 func TestMoveTrackAppliesTheGuardedEditAndStoresAnUndoRecord(t *testing.T) {
 	runner := &trackRunnerStub{
 		available: true,

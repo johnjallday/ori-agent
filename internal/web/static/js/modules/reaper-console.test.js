@@ -1129,6 +1129,19 @@ test('folder-parent reorder controls are disabled with a discoverable reason and
   const reason = findOne(parentStrip, 'reaper-console-track-move-reason');
   assert.match(reason.textContent, /Move folder group in REAPER/);
   assert.match(reason.getAttribute('aria-label'), /must currently be moved in REAPER/);
+  assert.equal(findOne(parentStrip, 'reaper-console-track-name').disabled, false);
+  assert.equal(findOne(parentStrip, 'reaper-console-track-swatch').disabled, false);
+  assert.ok(findAll(parentStrip, 'reaper-console-track-chip').every(control => !control.disabled));
+
+  const closerStrip = findAll(host, 'reaper-console-track')[2];
+  assert.equal(findOne(closerStrip, 'reaper-console-track-grip').disabled, false);
+  assert.equal(findOne(closerStrip, 'reaper-console-track-name').disabled, false);
+  assert.equal(findOne(closerStrip, 'reaper-console-track-swatch').disabled, false);
+  assert.ok(findAll(closerStrip, 'reaper-console-track-chip').every(control => !control.disabled));
+
+  parentStrip.dispatch('contextmenu', { preventDefault: () => {} });
+  assert.equal(consolePanel._openTrackMenu(), 2);
+  assert.ok(findOne(documentStub.getElementById('reaperConsole'), 'reaper-console-track-menu'));
 
   let calls = 0;
   globalThis.fetch = async () => {
@@ -1174,6 +1187,7 @@ test('only positive depth is a folder parent and negative closing tracks still m
   const move = requests.find(request => /tracks\/2\/move$/.test(request.path));
   assert.ok(move);
   assert.deepEqual(JSON.parse(move.options.body), { new_index: 1, expected_name: 'Closer' });
+  await new Promise(resolve => setImmediate(resolve));
 });
 
 test('unknown folder metadata defensively disables every reorder request', async () => {
@@ -2525,6 +2539,49 @@ test('folder metadata availability alone is meaningful polling state', async () 
   await consolePanel.refresh();
   const after = findOne(documentStub.getElementById('reaperConsole'), 'reaper-console-body');
   assert.notEqual(after, before);
+  consolePanel.close();
+});
+
+test('folder metadata failure clears stale hierarchy and a later valid poll restores it safely', async () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  const valid = liveTrackState([
+    { index: 1, name: 'Folder', folder_depth: 1 },
+    { index: 2, name: 'Closer', folder_depth: -1 }
+  ]);
+  consolePanel._setState(valid);
+  globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => valid });
+  consolePanel.open();
+  await new Promise(resolve => setImmediate(resolve));
+
+  const unknown = { ...valid, folder_depth_available: false };
+  globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => unknown });
+  await consolePanel.refresh();
+  let host = documentStub.getElementById('reaperConsole');
+  let strips = findAll(host, 'reaper-console-track');
+  assert.equal(findAll(host, 'reaper-console-track-folder-cue').length, 0);
+  assert.deepEqual(
+    strips.map(strip => strip.getAttribute('data-nesting-level')),
+    ['0', '0']
+  );
+  assert.ok(
+    strips.every(strip => findOne(strip, 'reaper-console-track-grip').disabled),
+    'unknown metadata must not temporarily enable a move'
+  );
+
+  globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => valid });
+  await consolePanel.refresh();
+  host = documentStub.getElementById('reaperConsole');
+  strips = findAll(host, 'reaper-console-track');
+  assert.equal(findAll(host, 'reaper-console-track-folder-cue').length, 1);
+  assert.deepEqual(
+    strips.map(strip => strip.getAttribute('data-nesting-level')),
+    ['0', '1']
+  );
+  assert.equal(findOne(strips[0], 'reaper-console-track-grip').disabled, true);
+  assert.equal(findOne(strips[1], 'reaper-console-track-grip').disabled, false);
   consolePanel.close();
 });
 
