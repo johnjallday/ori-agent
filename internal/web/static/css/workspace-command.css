@@ -7303,6 +7303,11 @@ button.ws-cmd-rpg-class-card:focus-visible {
   border-left-color: #5ed0a7;
 }
 
+.reaper-console-track.is-folder-parent {
+  background: linear-gradient(90deg, rgba(94, 208, 167, 0.08), rgba(13, 20, 21, 0.88) 32%);
+  border-left-width: 3px;
+}
+
 /* --- Drag grip + keyboard move equivalent --- */
 .reaper-console-track-grip-group {
   display: grid;
@@ -7387,7 +7392,49 @@ button.ws-cmd-rpg-class-card:focus-visible {
   font-variant-numeric: tabular-nums;
 }
 
+.reaper-console-track-identity {
+  display: flex;
+  gap: 0.42rem;
+  align-items: center;
+  min-width: 0;
+  padding-inline-start: var(--reaper-track-indent, 0);
+}
+
+.reaper-console-track-folder-cue {
+  flex: 0 0 auto;
+  padding: 0.12rem 0.28rem;
+  color: #b9ebd8;
+  background: rgba(94, 208, 167, 0.09);
+  border: 1px solid rgba(94, 208, 167, 0.38);
+  border-radius: 2px;
+  font-family: var(--ws-font-mono, monospace);
+  font-size: 0.52rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.reaper-console-track-folder-cue::before {
+  content: "▰";
+  margin-right: 0.22rem;
+  font-size: 0.58rem;
+}
+
+.reaper-console-track-depth-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .reaper-console-track-name {
+  flex: 1 1 auto;
   min-width: 0;
   color: rgba(239, 245, 241, 0.9);
   font-family: var(--ws-font-display, sans-serif);
@@ -7785,6 +7832,12 @@ button.reaper-console-track-name:disabled {
   }
   .reaper-console-track {
     grid-template-columns: auto 2rem auto minmax(0, 1fr);
+    gap: 0.5rem;
+    padding-inline: 0.55rem;
+  }
+  .reaper-console-track-folder-cue {
+    padding-inline: 0.2rem;
+    font-size: 0.48rem;
   }
   .reaper-console-track-chips {
     grid-column: 1 / -1;

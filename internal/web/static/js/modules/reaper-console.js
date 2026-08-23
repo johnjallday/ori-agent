@@ -14,6 +14,8 @@
   const REQUIREMENT_KEY = 'reaper_live_control';
   const TOAST_DURATION_MS = 8000;
   const GLOBAL_UNDO_COMMAND_ID = '40029';
+  const MAX_TRACK_LAYOUT_LEVEL = 6;
+  const MAX_TRACK_HIERARCHY_LEVEL = 64;
 
   let workspaceId = '';
   let mapVisible = false;
@@ -191,6 +193,7 @@
       play_state: String(state.play_state || ''),
       position: String(state.position || ''),
       track_editing_available: Boolean(state.track_editing_available),
+      folder_depth_available: Boolean(state.folder_depth_available),
       // Peaks are deliberately excluded: they move continuously and would
       // defeat change detection entirely.
       tracks: (Array.isArray(state.tracks) ? state.tracks : []).map(track => ({
@@ -199,8 +202,35 @@
         muted: Boolean(track.muted),
         soloed: Boolean(track.soloed),
         armed: Boolean(track.armed),
-        color: Number(track.color || 0)
+        color: Number(track.color || 0),
+        folder_depth: Number(track.folder_depth || 0)
       }))
+    });
+  }
+
+  // REAPER applies I_FOLDERDEPTH after the row carrying it: a positive value
+  // opens nesting for following rows, while a negative value closes one or
+  // more folders only after the closing row. Keep logical and layout bounds
+  // separate so malformed input cannot create runaway indentation while real
+  // multi-close rows still render at their current level.
+  function deriveTrackHierarchy(tracks, folderDepthAvailable = true) {
+    const list = Array.isArray(tracks) ? tracks : [];
+    let logicalLevel = 0;
+    return list.map(track => {
+      const rawDepth = Number(track && track.folder_depth);
+      const depth =
+        folderDepthAvailable && Number.isSafeInteger(rawDepth)
+          ? Math.max(-MAX_TRACK_HIERARCHY_LEVEL, Math.min(MAX_TRACK_HIERARCHY_LEVEL, rawDepth))
+          : 0;
+      const nestingLevel = Math.min(logicalLevel, MAX_TRACK_LAYOUT_LEVEL);
+      const enriched = {
+        ...track,
+        folderDepth: depth,
+        isFolderParent: depth > 0,
+        nestingLevel
+      };
+      logicalLevel = Math.max(0, Math.min(MAX_TRACK_HIERARCHY_LEVEL, logicalLevel + depth));
+      return enriched;
     });
   }
 
@@ -2160,14 +2190,58 @@
     item.appendChild(group);
   }
 
+  function renderTrackIdentity(item, track, editable) {
+    const identity = el('span', 'reaper-console-track-identity');
+    identity.setAttribute(
+      'style',
+      '--reaper-track-indent:' + (track.nestingLevel * 0.75).toFixed(2) + 'rem;'
+    );
+
+    if (track.isFolderParent) {
+      const cue = el('span', 'reaper-console-track-folder-cue', 'Folder');
+      cue.setAttribute('aria-label', 'Folder parent');
+      identity.appendChild(cue);
+    }
+    if (track.nestingLevel > 0) {
+      identity.appendChild(
+        el('span', 'reaper-console-track-depth-label', 'Nesting level ' + track.nestingLevel)
+      );
+    }
+
+    const name = trackDisplayName(track);
+    if (editable && editingIndex === track.index) {
+      renderTrackNameEditor(identity, track);
+    } else if (editable) {
+      const trigger = button(
+        name || 'Untitled track',
+        'reaper-console-track-name is-editable',
+        () => beginTrackRename(track.index)
+      );
+      trigger.disabled = trackRequestInFlight;
+      trigger.setAttribute(
+        'aria-label',
+        'Rename track ' + track.index + ', currently ' + (name || 'untitled')
+      );
+      identity.appendChild(trigger);
+    } else {
+      identity.appendChild(el('strong', 'reaper-console-track-name', name || 'Untitled track'));
+    }
+    item.appendChild(identity);
+    return name;
+  }
+
   function renderTrackStrip(list, track, editable, trackCount) {
     const item = el('li', 'reaper-console-track');
     const pending = Boolean(pendingEdit && pendingEdit.index === track.index);
     if (pending) item.classList.add('is-pending');
     if (dragState && dragState.sourceIndex === track.index) item.classList.add('is-dragging');
+    if (track.isFolderParent) item.classList.add('is-folder-parent');
+    if (track.nestingLevel > 0) item.classList.add('is-nested');
     // Read by the pointer-drag hit test (document.elementFromPoint + closest)
     // to resolve a screen position back to a logical track index.
     item.setAttribute('data-track-index', String(track.index));
+    item.setAttribute('data-folder-depth', String(track.folderDepth));
+    item.setAttribute('data-nesting-level', String(track.nestingLevel));
     // "Ask Ori about this track…" (#396) is read-only and never mutates
     // REAPER, so it's offered regardless of `editable` — unlike every other
     // strip control, which is gated on live track editing being available.
@@ -2184,25 +2258,7 @@
 
     renderColorSwatch(item, track, editable);
 
-    const name = trackDisplayName(track);
-    if (editable && editingIndex === track.index) {
-      renderTrackNameEditor(item, track);
-    } else if (editable) {
-      const trigger = button(
-        name || 'Untitled track',
-        'reaper-console-track-name is-editable',
-        () => beginTrackRename(track.index)
-      );
-      trigger.disabled = trackRequestInFlight;
-      trigger.setAttribute(
-        'aria-label',
-        'Rename track ' + track.index + ', currently ' + (name || 'untitled')
-      );
-      item.appendChild(trigger);
-    } else {
-      item.appendChild(el('strong', 'reaper-console-track-name', name || 'Untitled track'));
-    }
-
+    const name = renderTrackIdentity(item, track, editable);
     const chips = el('span', 'reaper-console-track-chips');
     renderToggleChip(
       chips,
@@ -2313,7 +2369,10 @@
     if (state.connected && !state.track_editing_available) renderRunnerUnavailable(section);
 
     const list = el('ol', 'reaper-console-track-list');
-    const tracks = Array.isArray(state.tracks) ? state.tracks : [];
+    const tracks = deriveTrackHierarchy(
+      Array.isArray(state.tracks) ? state.tracks : [],
+      state.folder_depth_available === true
+    );
     if (!tracks.length) {
       list.appendChild(el('li', 'reaper-console-empty', 'No project tracks'));
     } else {
@@ -2644,6 +2703,7 @@
     _isUntitledProject: isUntitledProject,
     _capPromptChips: capPromptChips,
     _composePromptChips: composePromptChips,
+    _deriveTrackHierarchy: deriveTrackHierarchy,
     _beginPinDrag: beginPinDrag,
     _pinDragOverIndex: pinDragOverIndex,
     _endPinDrag: endPinDrag,
