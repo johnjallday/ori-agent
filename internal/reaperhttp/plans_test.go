@@ -30,15 +30,21 @@ func (r *bulkRunnerStub) RunBulkPlan(_ context.Context, plan reaper.BulkPlan) (r
 
 func planHandler(t *testing.T, runner BulkEditRunner) (*Handler, *http.ServeMux) {
 	t.Helper()
+	return planHandlerWithState(t, runner, reaper.State{
+		Connected:            true,
+		PlayState:            "stopped",
+		Tracks:               []reaper.Track{{Index: 1, Name: "Drums"}, {Index: 2, Name: "Bass"}},
+		TrackCount:           2,
+		FolderDepthAvailable: true,
+	})
+}
+
+func planHandlerWithState(t *testing.T, runner BulkEditRunner, state reaper.State) (*Handler, *http.ServeMux) {
+	t.Helper()
 	root := t.TempDir()
 	store := &testStore{root: root, workspaces: map[string]*workspace.Workspace{}}
 	store.workspaces["mine"] = reaperHTTPWorkspace(t, root, "mine", userprofile.LocalUserID)
-	reader := &stateReader{state: reaper.State{
-		Connected: true, PlayState: "stopped",
-		Tracks:     []reaper.Track{{Index: 1, Name: "Drums"}, {Index: 2, Name: "Bass"}},
-		TrackCount: 2,
-	}}
-	handler := NewHandler(store, testUser(userprofile.LocalUserID), reader, nil)
+	handler := NewHandler(store, testUser(userprofile.LocalUserID), &stateReader{state: state}, nil)
 	if runner != nil {
 		handler.SetBulkEditRunner(runner)
 	}
@@ -168,7 +174,7 @@ func TestApplyPendingPlanProducesExactlyOneUndoStep(t *testing.T) {
 	seedPlan(t, handler, []reaper.TrackEdit{
 		reaper.RenameEdit(1, "Drums", "Kick"),
 		reaper.ColorEdit(2, "Bass", 0),
-		reaper.MoveEdit(1, "Kick", 2),
+		reaper.MoveEdit(1, "Drums", 2),
 	})
 
 	recorder := httptest.NewRecorder()
@@ -210,6 +216,146 @@ func TestApplyPendingPlanGuardFailureAppliesNothingAndReportsFailedTracks(t *tes
 	}
 	if len(body.FailedIndices) != 1 || body.FailedIndices[0] != 2 {
 		t.Fatalf("failed indices = %+v", body.FailedIndices)
+	}
+}
+
+func TestApplyPendingPlanRefusesFolderParentMoveBeforeRunnerAndKeepsPlan(t *testing.T) {
+	runner := &bulkRunnerStub{receipt: reaper.BulkReceipt{Applied: true, AppliedCount: 1}}
+	state := reaper.State{
+		Connected: true, PlayState: "stopped", TrackCount: 3, FolderDepthAvailable: true,
+		Tracks: []reaper.Track{
+			{Index: 1, Name: "Folder", FolderDepth: 1},
+			{Index: 2, Name: "Child", FolderDepth: 0},
+			{Index: 3, Name: "Closer", FolderDepth: -1},
+		},
+	}
+	handler, mux := planHandlerWithState(t, runner, state)
+	seedPlan(t, handler, []reaper.TrackEdit{reaper.MoveEdit(1, "Folder", 3)})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/workspaces/mine/reaper/track-plan/apply", strings.NewReader(`{"confirmed":true}`))
+	request.Header.Set("Content-Type", "application/json")
+	mux.ServeHTTP(recorder, request)
+	var body PlanApplyResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if recorder.Code != http.StatusConflict || body.Code != folderParentMoveCode || body.Outcome == "ok" {
+		t.Fatalf("folder-parent plan = %d %+v", recorder.Code, body)
+	}
+	if runner.calls != 0 || body.Undo != nil {
+		t.Fatalf("folder-parent plan reached runner or exposed undo: calls=%d body=%+v", runner.calls, body)
+	}
+	if _, found := handler.plans.get("mine"); !found {
+		t.Fatal("folder-parent refusal discarded the pending plan")
+	}
+}
+
+func TestApplyPendingPlanMovePreflightRejectsStaleIdentityAndUnknownDepth(t *testing.T) {
+	base := reaper.State{
+		Connected: true, PlayState: "stopped", TrackCount: 2, FolderDepthAvailable: true,
+		Tracks: []reaper.Track{{Index: 1, Name: "Drums"}, {Index: 2, Name: "Bass"}},
+	}
+	tests := []struct {
+		name     string
+		state    reaper.State
+		wantCode string
+	}{
+		{name: "stale identity", state: base, wantCode: "plan_guard_failed"},
+		{name: "unknown folder depth", state: func() reaper.State {
+			unknown := base
+			unknown.FolderDepthAvailable = false
+			return unknown
+		}(), wantCode: folderDepthMissingCode},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			runner := &bulkRunnerStub{}
+			handler, mux := planHandlerWithState(t, runner, testCase.state)
+			expected := "Drums"
+			if testCase.name == "stale identity" {
+				expected = "Changed"
+			}
+			seedPlan(t, handler, []reaper.TrackEdit{reaper.MoveEdit(1, expected, 2)})
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodPost, "/api/workspaces/mine/reaper/track-plan/apply", strings.NewReader(`{"confirmed":true}`))
+			request.Header.Set("Content-Type", "application/json")
+			mux.ServeHTTP(recorder, request)
+			var body PlanApplyResponse
+			if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+				t.Fatal(err)
+			}
+			if recorder.Code != http.StatusConflict || body.Code != testCase.wantCode || runner.calls != 0 {
+				t.Fatalf("preflight = %d %+v, calls=%d", recorder.Code, body, runner.calls)
+			}
+			if _, found := handler.plans.get("mine"); !found {
+				t.Fatal("preflight refusal discarded the pending plan")
+			}
+		})
+	}
+}
+
+func TestApplyPendingPlanStillAllowsZeroAndNegativeDepthMoves(t *testing.T) {
+	state := reaper.State{
+		Connected: true, PlayState: "stopped", TrackCount: 3, FolderDepthAvailable: true,
+		Tracks: []reaper.Track{
+			{Index: 1, Name: "Folder", FolderDepth: 1},
+			{Index: 2, Name: "Child", FolderDepth: 0},
+			{Index: 3, Name: "Closer", FolderDepth: -1},
+		},
+	}
+	for _, source := range []struct {
+		index int
+		name  string
+	}{
+		{index: 2, name: "Child"},
+		{index: 3, name: "Closer"},
+	} {
+		t.Run(source.name, func(t *testing.T) {
+			runner := &bulkRunnerStub{receipt: reaper.BulkReceipt{Applied: true, AppliedCount: 1}}
+			handler, mux := planHandlerWithState(t, runner, state)
+			seedPlan(t, handler, []reaper.TrackEdit{reaper.MoveEdit(source.index, source.name, 1)})
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodPost, "/api/workspaces/mine/reaper/track-plan/apply", strings.NewReader(`{"confirmed":true}`))
+			request.Header.Set("Content-Type", "application/json")
+			mux.ServeHTTP(recorder, request)
+			var body PlanApplyResponse
+			if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+				t.Fatal(err)
+			}
+			if recorder.Code != http.StatusOK || body.Outcome != "ok" || runner.calls != 1 {
+				t.Fatalf("supported plan move = %d %+v, calls=%d", recorder.Code, body, runner.calls)
+			}
+			if body.Undo == nil || body.Undo.CommandID != undoCommandID {
+				t.Fatalf("supported plan move undo = %+v", body.Undo)
+			}
+			if _, found := handler.plans.get("mine"); found {
+				t.Fatal("applied supported move remained pending")
+			}
+		})
+	}
+}
+
+func TestApplyPendingPlanFinalLuaRaceRefusalKeepsPlan(t *testing.T) {
+	runner := &bulkRunnerStub{receipt: reaper.BulkReceipt{
+		Applied: false, Refusal: "folder_parent", FailedIndices: []int{1},
+	}}
+	handler, mux := planHandler(t, runner)
+	seedPlan(t, handler, []reaper.TrackEdit{reaper.MoveEdit(1, "Drums", 2)})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/workspaces/mine/reaper/track-plan/apply", strings.NewReader(`{"confirmed":true}`))
+	request.Header.Set("Content-Type", "application/json")
+	mux.ServeHTTP(recorder, request)
+	var body PlanApplyResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if recorder.Code != http.StatusConflict || body.Code != folderParentMoveCode || runner.calls != 1 || body.Undo != nil {
+		t.Fatalf("final race plan = %d %+v, calls=%d", recorder.Code, body, runner.calls)
+	}
+	if _, found := handler.plans.get("mine"); !found {
+		t.Fatal("final race refusal discarded the pending plan")
 	}
 }
 
@@ -286,6 +432,20 @@ func TestPlanResponsesNeverLeakTransportOrPathDetail(t *testing.T) {
 		unavailable := httptest.NewRecorder()
 		mux.ServeHTTP(unavailable, request.Clone(request.Context()))
 		assertClean(t, unavailable.Body.String())
+	})
+
+	t.Run("folder parent refusal", func(t *testing.T) {
+		runner := &bulkRunnerStub{}
+		handler, mux := planHandlerWithState(t, runner, reaper.State{
+			Connected: true, PlayState: "stopped", TrackCount: 2, FolderDepthAvailable: true,
+			Tracks: []reaper.Track{{Index: 1, Name: "Folder", FolderDepth: 1}, {Index: 2, Name: "Child"}},
+		})
+		seedPlan(t, handler, []reaper.TrackEdit{reaper.MoveEdit(1, "Folder", 2)})
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodPost, "/api/workspaces/mine/reaper/track-plan/apply", strings.NewReader(`{"confirmed":true}`))
+		request.Header.Set("Content-Type", "application/json")
+		mux.ServeHTTP(recorder, request)
+		assertClean(t, recorder.Body.String())
 	})
 
 	t.Run("disconnected", func(t *testing.T) {

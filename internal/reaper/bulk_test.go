@@ -83,6 +83,26 @@ func TestBulkPlanLuaChecksEveryGuardBeforeApplyingAnything(t *testing.T) {
 	}
 }
 
+func TestBulkPlanLuaRefusesFolderParentMovesBeforeOpeningUndo(t *testing.T) {
+	plan := BulkPlan{Edits: []TrackEdit{
+		RenameEdit(1, "Kick", "Kick Drum"),
+		MoveEdit(2, "Folder", 1),
+	}}
+	lua, err := plan.Lua("/tmp/receipt.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	folderCheck := strings.Index(lua, `reaper.GetMediaTrackInfo_Value(tr, "I_FOLDERDEPTH") > 0`)
+	refusal := strings.Index(lua, `write_receipt("folder_parent\n" .. table.concat(folder_parents, ","))`)
+	undo := strings.Index(lua, "reaper.Undo_BeginBlock()")
+	if folderCheck < 0 || refusal < folderCheck || undo < refusal {
+		t.Fatalf("folder-parent refusal must precede bulk undo:\n%s", lua)
+	}
+	if strings.Count(lua, "I_FOLDERDEPTH") != 1 {
+		t.Fatalf("only the move edit should receive a folder-depth guard:\n%s", lua)
+	}
+}
+
 func TestBulkPlanLuaAppliesInTheOrderedSequence(t *testing.T) {
 	plan := BulkPlan{Edits: []TrackEdit{
 		MoveEdit(3, "Guitar", 1),
@@ -111,11 +131,16 @@ func TestParseBulkReceiptReadsAppliedCountAndFailedIndices(t *testing.T) {
 	}
 
 	empty, err := ParseBulkReceipt([]byte("guard_failed\n"))
-	if err != nil || empty.Applied || len(empty.FailedIndices) != 0 {
+	if err != nil || empty.Applied || empty.Refusal != "guard_failed" || len(empty.FailedIndices) != 0 {
 		t.Fatalf("empty guard_failed receipt = %+v, %v", empty, err)
 	}
 
-	for _, bad := range []string{"", "ok", "applied\n0", "applied\nabc", "guard_failed\n1,x"} {
+	folderParent, err := ParseBulkReceipt([]byte("folder_parent\n2"))
+	if err != nil || folderParent.Applied || folderParent.Refusal != "folder_parent" || len(folderParent.FailedIndices) != 1 || folderParent.FailedIndices[0] != 2 {
+		t.Fatalf("folder_parent receipt = %+v, %v", folderParent, err)
+	}
+
+	for _, bad := range []string{"", "ok", "applied\n0", "applied\nabc", "guard_failed\n1,x", "folder_parent\nx"} {
 		if _, err := ParseBulkReceipt([]byte(bad)); !errors.Is(err, ErrInvalidReceipt) {
 			t.Fatalf("receipt %q = %v, want ErrInvalidReceipt", bad, err)
 		}

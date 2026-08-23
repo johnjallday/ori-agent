@@ -14,6 +14,11 @@
   const REQUIREMENT_KEY = 'reaper_live_control';
   const TOAST_DURATION_MS = 8000;
   const GLOBAL_UNDO_COMMAND_ID = '40029';
+  const MAX_TRACK_LAYOUT_LEVEL = 6;
+  const MAX_TRACK_HIERARCHY_LEVEL = 64;
+  const FOLDER_PARENT_MOVE_REASON = 'Folder groups must currently be moved in REAPER.';
+  const FOLDER_DEPTH_MISSING_REASON =
+    "Ori cannot verify this project's folder structure right now. Nothing was moved.";
 
   let workspaceId = '';
   let mapVisible = false;
@@ -191,6 +196,7 @@
       play_state: String(state.play_state || ''),
       position: String(state.position || ''),
       track_editing_available: Boolean(state.track_editing_available),
+      folder_depth_available: Boolean(state.folder_depth_available),
       // Peaks are deliberately excluded: they move continuously and would
       // defeat change detection entirely.
       tracks: (Array.isArray(state.tracks) ? state.tracks : []).map(track => ({
@@ -199,8 +205,46 @@
         muted: Boolean(track.muted),
         soloed: Boolean(track.soloed),
         armed: Boolean(track.armed),
-        color: Number(track.color || 0)
+        color: Number(track.color || 0),
+        folder_depth: Number(track.folder_depth || 0)
       }))
+    });
+  }
+
+  // REAPER applies I_FOLDERDEPTH after the row carrying it: a positive value
+  // opens nesting for following rows, while a negative value closes one or
+  // more folders only after the closing row. Keep logical and layout bounds
+  // separate so malformed input cannot create runaway indentation while real
+  // multi-close rows still render at their current level.
+  function isFolderParentTrack(track) {
+    const depth = Number(track && track.folder_depth);
+    return Number.isSafeInteger(depth) && depth > 0;
+  }
+
+  function trackMoveDisabledReason(track, folderDepthAvailable) {
+    if (!folderDepthAvailable) return FOLDER_DEPTH_MISSING_REASON;
+    return isFolderParentTrack(track) ? FOLDER_PARENT_MOVE_REASON : '';
+  }
+
+  function deriveTrackHierarchy(tracks, folderDepthAvailable = true) {
+    const list = Array.isArray(tracks) ? tracks : [];
+    let logicalLevel = 0;
+    return list.map(track => {
+      const rawDepth = Number(track && track.folder_depth);
+      const depth =
+        folderDepthAvailable && Number.isSafeInteger(rawDepth)
+          ? Math.max(-MAX_TRACK_HIERARCHY_LEVEL, Math.min(MAX_TRACK_HIERARCHY_LEVEL, rawDepth))
+          : 0;
+      const nestingLevel = Math.min(logicalLevel, MAX_TRACK_LAYOUT_LEVEL);
+      const enriched = {
+        ...track,
+        folderDepth: depth,
+        folderDepthAvailable: Boolean(folderDepthAvailable),
+        isFolderParent: folderDepthAvailable && isFolderParentTrack(track),
+        nestingLevel
+      };
+      logicalLevel = Math.max(0, Math.min(MAX_TRACK_HIERARCHY_LEVEL, logicalLevel + depth));
+      return enriched;
     });
   }
 
@@ -1017,7 +1061,20 @@
     );
   }
 
+  function currentTrackMoveDisabledReason(index) {
+    const tracks = Array.isArray(lastState && lastState.tracks) ? lastState.tracks : [];
+    const track = tracks.find(candidate => Number(candidate && candidate.index) === Number(index));
+    if (!track) return '';
+    return trackMoveDisabledReason(track, lastState.folder_depth_available === true);
+  }
+
   async function moveTrack(index, expectedName, newIndex) {
+    const disabledReason = currentTrackMoveDisabledReason(index);
+    if (disabledReason) {
+      stripNotice = { index, text: disabledReason };
+      if (consoleOpen) renderConsole();
+      return false;
+    }
     return runTrackEdit(
       index,
       tracksApiPath(encodeURIComponent(index) + '/move'),
@@ -1067,10 +1124,17 @@
   // user's pointer.
 
   function beginDrag(index, sourceName) {
-    if (!index) return;
+    if (!index) return false;
+    const disabledReason = currentTrackMoveDisabledReason(index);
+    if (disabledReason) {
+      stripNotice = { index, text: disabledReason };
+      if (consoleOpen) renderConsole();
+      return false;
+    }
     dragState = { sourceIndex: index, sourceName: sourceName || '', targetIndex: index };
     attachDragListeners();
     if (consoleOpen) renderConsole();
+    return true;
   }
 
   function dragOverIndex(index) {
@@ -2127,13 +2191,20 @@
     item.appendChild(chip);
   }
 
-  function renderDragGrip(item, track, editable, trackCount) {
+  function renderDragGrip(item, track, editable, trackCount, disabledReason) {
+    const reorderEnabled = editable && !disabledReason;
     const group = el('span', 'reaper-console-track-grip-group');
     const grip = button('⠿', 'reaper-console-track-grip', null);
-    grip.disabled = !editable;
-    grip.setAttribute('aria-label', 'Drag to reorder track ' + track.index);
+    grip.disabled = !reorderEnabled;
+    grip.setAttribute(
+      'aria-label',
+      disabledReason
+        ? 'Reorder unavailable for track ' + track.index + '. ' + disabledReason
+        : 'Drag to reorder track ' + track.index
+    );
+    if (disabledReason) grip.title = disabledReason;
     grip.addEventListener('pointerdown', event => {
-      if (!editable) return;
+      if (!reorderEnabled) return;
       event.preventDefault();
       beginDrag(track.index, track.name || '');
     });
@@ -2142,51 +2213,53 @@
     // Keyboard-accessible equivalent to dragging (PRD 4.1 item 5): move up
     // and move down, each a normal guarded edit, not a drag gesture.
     const up = button('▲', 'reaper-console-track-move is-up', () => {
-      if (!editable || track.index <= 1) return;
+      if (!reorderEnabled || track.index <= 1) return;
       void moveTrack(track.index, track.name || '', track.index - 1);
     });
-    up.disabled = !editable || track.index <= 1;
-    up.setAttribute('aria-label', 'Move track ' + track.index + ' up');
+    up.disabled = !reorderEnabled || track.index <= 1;
+    up.setAttribute(
+      'aria-label',
+      disabledReason
+        ? 'Move up unavailable. ' + disabledReason
+        : 'Move track ' + track.index + ' up'
+    );
+    if (disabledReason) up.title = disabledReason;
     group.appendChild(up);
 
     const down = button('▼', 'reaper-console-track-move is-down', () => {
-      if (!editable || track.index >= trackCount) return;
+      if (!reorderEnabled || track.index >= trackCount) return;
       void moveTrack(track.index, track.name || '', track.index + 1);
     });
-    down.disabled = !editable || track.index >= trackCount;
-    down.setAttribute('aria-label', 'Move track ' + track.index + ' down');
+    down.disabled = !reorderEnabled || track.index >= trackCount;
+    down.setAttribute(
+      'aria-label',
+      disabledReason
+        ? 'Move down unavailable. ' + disabledReason
+        : 'Move track ' + track.index + ' down'
+    );
+    if (disabledReason) down.title = disabledReason;
     group.appendChild(down);
 
     item.appendChild(group);
   }
 
-  function renderTrackStrip(list, track, editable, trackCount) {
-    const item = el('li', 'reaper-console-track');
-    const pending = Boolean(pendingEdit && pendingEdit.index === track.index);
-    if (pending) item.classList.add('is-pending');
-    if (dragState && dragState.sourceIndex === track.index) item.classList.add('is-dragging');
-    // Read by the pointer-drag hit test (document.elementFromPoint + closest)
-    // to resolve a screen position back to a logical track index.
-    item.setAttribute('data-track-index', String(track.index));
-    // "Ask Ori about this track…" (#396) is read-only and never mutates
-    // REAPER, so it's offered regardless of `editable` — unlike every other
-    // strip control, which is gated on live track editing being available.
-    item.addEventListener('contextmenu', event => {
-      event.preventDefault();
-      openTrackMenu = track.index;
-      renderConsole();
-    });
+  function renderTrackIdentity(item, track, editable, moveDisabledReason) {
+    const identity = el('span', 'reaper-console-track-identity');
 
-    renderDragGrip(item, track, editable, trackCount);
-    item.appendChild(
-      el('span', 'reaper-console-track-index', String(track.index).padStart(2, '0'))
-    );
-
-    renderColorSwatch(item, track, editable);
+    if (track.isFolderParent) {
+      const cue = el('span', 'reaper-console-track-folder-cue', 'Folder');
+      cue.setAttribute('aria-label', 'Folder parent');
+      identity.appendChild(cue);
+    }
+    if (track.nestingLevel > 0) {
+      identity.appendChild(
+        el('span', 'reaper-console-track-depth-label', 'Nesting level ' + track.nestingLevel)
+      );
+    }
 
     const name = trackDisplayName(track);
     if (editable && editingIndex === track.index) {
-      renderTrackNameEditor(item, track);
+      renderTrackNameEditor(identity, track);
     } else if (editable) {
       const trigger = button(
         name || 'Untitled track',
@@ -2198,11 +2271,60 @@
         'aria-label',
         'Rename track ' + track.index + ', currently ' + (name || 'untitled')
       );
-      item.appendChild(trigger);
+      identity.appendChild(trigger);
     } else {
-      item.appendChild(el('strong', 'reaper-console-track-name', name || 'Untitled track'));
+      identity.appendChild(el('strong', 'reaper-console-track-name', name || 'Untitled track'));
     }
+    if (track.isFolderParent) {
+      const reason = el('span', 'reaper-console-track-move-reason', 'Move folder group in REAPER');
+      reason.setAttribute('aria-label', moveDisabledReason);
+      reason.title = moveDisabledReason;
+      identity.appendChild(reason);
+    }
+    item.appendChild(identity);
+    return name;
+  }
 
+  function renderTrackStrip(list, track, editable, trackCount) {
+    const item = el('li', 'reaper-console-track');
+    const pending = Boolean(pendingEdit && pendingEdit.index === track.index);
+    if (pending) item.classList.add('is-pending');
+    if (dragState && dragState.sourceIndex === track.index) item.classList.add('is-dragging');
+    if (track.isFolderParent) item.classList.add('is-folder-parent');
+    if (track.nestingLevel > 0) {
+      item.classList.add('is-nested');
+      item.setAttribute(
+        'style',
+        '--reaper-track-indent:' +
+          (track.nestingLevel * 1.25).toFixed(2) +
+          'rem;--reaper-track-mobile-indent:' +
+          (track.nestingLevel * 0.7).toFixed(2) +
+          'rem;'
+      );
+    }
+    // Read by the pointer-drag hit test (document.elementFromPoint + closest)
+    // to resolve a screen position back to a logical track index.
+    item.setAttribute('data-track-index', String(track.index));
+    item.setAttribute('data-folder-depth', String(track.folderDepth));
+    item.setAttribute('data-nesting-level', String(track.nestingLevel));
+    // "Ask Ori about this track…" (#396) is read-only and never mutates
+    // REAPER, so it's offered regardless of `editable` — unlike every other
+    // strip control, which is gated on live track editing being available.
+    item.addEventListener('contextmenu', event => {
+      event.preventDefault();
+      openTrackMenu = track.index;
+      renderConsole();
+    });
+
+    const moveDisabledReason = trackMoveDisabledReason(track, track.folderDepthAvailable);
+    renderDragGrip(item, track, editable, trackCount, moveDisabledReason);
+    item.appendChild(
+      el('span', 'reaper-console-track-index', String(track.index).padStart(2, '0'))
+    );
+
+    renderColorSwatch(item, track, editable);
+
+    const name = renderTrackIdentity(item, track, editable, moveDisabledReason);
     const chips = el('span', 'reaper-console-track-chips');
     renderToggleChip(
       chips,
@@ -2313,7 +2435,10 @@
     if (state.connected && !state.track_editing_available) renderRunnerUnavailable(section);
 
     const list = el('ol', 'reaper-console-track-list');
-    const tracks = Array.isArray(state.tracks) ? state.tracks : [];
+    const tracks = deriveTrackHierarchy(
+      Array.isArray(state.tracks) ? state.tracks : [],
+      state.folder_depth_available === true
+    );
     if (!tracks.length) {
       list.appendChild(el('li', 'reaper-console-empty', 'No project tracks'));
     } else {
@@ -2644,6 +2769,9 @@
     _isUntitledProject: isUntitledProject,
     _capPromptChips: capPromptChips,
     _composePromptChips: composePromptChips,
+    _deriveTrackHierarchy: deriveTrackHierarchy,
+    _isFolderParentTrack: isFolderParentTrack,
+    _trackMoveDisabledReason: trackMoveDisabledReason,
     _beginPinDrag: beginPinDrag,
     _pinDragOverIndex: pinDragOverIndex,
     _endPinDrag: endPinDrag,

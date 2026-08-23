@@ -15,7 +15,14 @@ import (
 	"github.com/johnjallday/ori-agent/internal/reaper"
 )
 
-const maxTrackEditBody = 4 << 10
+const (
+	maxTrackEditBody = 4 << 10
+
+	folderParentMoveCode     = "folder_parent_move_unsupported"
+	folderParentMoveReason   = "Folder groups must currently be moved in REAPER."
+	folderDepthMissingCode   = "folder_depth_unavailable"
+	folderDepthMissingReason = "Ori cannot verify this project's folder structure right now. Nothing was moved."
+)
 
 // TrackEditRunner executes one guarded single-track edit and returns the
 // receipt the generated Lua wrote. The receipt is the authority on whether the
@@ -186,13 +193,29 @@ func (h *Handler) moveTrack(ctx context.Context, workspaceID string, index int, 
 	if !ok {
 		return errResponse, status
 	}
-	if request.NewIndex > state.TrackCount {
+	edit := reaper.MoveEdit(index, request.ExpectedName, request.NewIndex)
+	if err := reaper.ValidateTrackMove(state, edit); err != nil {
+		code, reason, status := trackMovePreflightError(err)
 		return TrackEditResponse{
-			State: state, Outcome: "error", Code: "invalid_track_edit",
-			ErrorReason: "That position is outside the current track count.",
-		}, http.StatusBadRequest
+			State: state, Outcome: "error", Code: code, ErrorReason: reason,
+		}, status
 	}
-	return h.applyGuardedTrackEdit(ctx, workspaceID, reaper.MoveEdit(index, request.ExpectedName, request.NewIndex))
+	return h.applyGuardedTrackEdit(ctx, workspaceID, edit)
+}
+
+func trackMovePreflightError(err error) (string, string, int) {
+	switch {
+	case errors.Is(err, reaper.ErrTrackMoveTargetOutOfRange):
+		return "invalid_track_edit", "That position is outside the current track count.", http.StatusBadRequest
+	case errors.Is(err, reaper.ErrTrackIdentityChanged):
+		return "track_list_changed", "The track list changed — refreshed.", http.StatusConflict
+	case errors.Is(err, reaper.ErrFolderDepthUnavailable):
+		return folderDepthMissingCode, folderDepthMissingReason, http.StatusConflict
+	case errors.Is(err, reaper.ErrFolderParentMoveUnsupported):
+		return folderParentMoveCode, folderParentMoveReason, http.StatusConflict
+	default:
+		return "invalid_track_edit", "That track edit is not valid.", http.StatusBadRequest
+	}
 }
 
 // liveTrackState reads fresh state for a pre-check that must happen before any
@@ -220,6 +243,9 @@ func (h *Handler) liveTrackState(ctx context.Context, workspaceID string) (reape
 		}, http.StatusBadGateway, false
 	}
 	state.Applies = true
+	if state.Connected {
+		state.TrackEditingAvailable = h.trackEditingAvailable(ctx)
+	}
 	return state, TrackEditResponse{}, http.StatusOK, true
 }
 
@@ -336,8 +362,13 @@ func (h *Handler) applyTrackEdit(ctx context.Context, workspaceID string, plan t
 	if !receipt.Applied {
 		// The guard refused. Nothing was written, and the console re-reads
 		// live state so the user sees what is actually there now.
-		response.Code = plan.guardCode
-		response.ErrorReason = plan.guardReason
+		if receipt.Refusal == "folder_parent" {
+			response.Code = folderParentMoveCode
+			response.ErrorReason = folderParentMoveReason
+		} else {
+			response.Code = plan.guardCode
+			response.ErrorReason = plan.guardReason
+		}
 		return response, http.StatusConflict
 	}
 

@@ -965,10 +965,265 @@ function liveTrackState(tracks) {
     play_state: 'stopped',
     position: '1.1.00',
     track_editing_available: true,
+    folder_depth_available: true,
     track_count: tracks.length,
     tracks
   };
 }
+
+test('folder hierarchy applies depth changes after each row and bounds malformed input', () => {
+  const cases = [
+    {
+      name: 'flat',
+      depths: [0, 0, 0],
+      levels: [0, 0, 0],
+      parents: []
+    },
+    {
+      name: 'one folder',
+      depths: [1, 0, -1, 0],
+      levels: [0, 1, 1, 0],
+      parents: [1]
+    },
+    {
+      name: 'nested with multi-close',
+      depths: [1, 1, 0, -2, 0],
+      levels: [0, 1, 2, 2, 0],
+      parents: [1, 2]
+    },
+    {
+      name: 'consecutive folder closures',
+      depths: [1, -1, 1, -1, 0],
+      levels: [0, 1, 0, 1, 0],
+      parents: [1, 3]
+    },
+    {
+      name: 'malformed underflow',
+      depths: [-3, 0],
+      levels: [0, 0],
+      parents: []
+    },
+    {
+      name: 'runaway values',
+      depths: [999, 0, -999, 0],
+      levels: [0, 6, 6, 0],
+      parents: [1]
+    }
+  ];
+
+  for (const fixture of cases) {
+    const tracks = fixture.depths.map((folder_depth, index) => ({
+      index: index + 1,
+      name: fixture.name + ' ' + (index + 1),
+      folder_depth
+    }));
+    const hierarchy = consolePanel._deriveTrackHierarchy(tracks, true);
+    assert.deepEqual(
+      hierarchy.map(track => track.nestingLevel),
+      fixture.levels,
+      fixture.name + ' levels'
+    );
+    assert.deepEqual(
+      hierarchy.filter(track => track.isFolderParent).map(track => track.index),
+      fixture.parents,
+      fixture.name + ' parents'
+    );
+  }
+
+  const unavailable = consolePanel._deriveTrackHierarchy(
+    [
+      { index: 1, folder_depth: 1 },
+      { index: 2, folder_depth: -1 }
+    ],
+    false
+  );
+  assert.deepEqual(
+    unavailable.map(track => track.nestingLevel),
+    [0, 0]
+  );
+  assert.ok(unavailable.every(track => !track.isFolderParent && track.folderDepth === 0));
+});
+
+test('folder parents and nested tracks render cues, bounded levels, and accessible metadata', () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  consolePanel._setState(
+    liveTrackState([
+      { index: 1, name: 'Flat', folder_depth: 0 },
+      { index: 2, name: 'Parent', folder_depth: 1 },
+      { index: 3, name: 'Child', folder_depth: 0 },
+      { index: 4, name: 'Nested parent', folder_depth: 1 },
+      { index: 5, name: 'Multi close', folder_depth: -2 },
+      { index: 6, name: 'Tail', folder_depth: 0 }
+    ])
+  );
+  consolePanel.open();
+
+  const host = documentStub.getElementById('reaperConsole');
+  const strips = findAll(host, 'reaper-console-track');
+  assert.equal(strips.length, 6);
+  assert.deepEqual(
+    strips.map(strip => strip.getAttribute('data-nesting-level')),
+    ['0', '0', '1', '1', '2', '0']
+  );
+  assert.equal(strips[1].classList.contains('is-folder-parent'), true);
+  assert.equal(strips[3].classList.contains('is-folder-parent'), true);
+  assert.equal(strips[4].getAttribute('data-folder-depth'), '-2');
+  assert.equal(
+    strips[2].getAttribute('style'),
+    '--reaper-track-indent:1.25rem;--reaper-track-mobile-indent:0.70rem;'
+  );
+  assert.equal(
+    strips[4].getAttribute('style'),
+    '--reaper-track-indent:2.50rem;--reaper-track-mobile-indent:1.40rem;'
+  );
+
+  const cues = findAll(host, 'reaper-console-track-folder-cue');
+  assert.equal(cues.length, 2);
+  assert.ok(cues.every(cue => cue.tagName === 'SPAN' && cue.listeners.size === 0));
+  assert.ok(cues.every(cue => cue.getAttribute('aria-label') === 'Folder parent'));
+  assert.match(host.textContent, /Nesting level 2/);
+  consolePanel.close();
+});
+
+test('flat projects retain unindented strips without folder cues', () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  consolePanel._setState(
+    liveTrackState([
+      { index: 1, name: 'Kick', folder_depth: 0 },
+      { index: 2, name: 'Bass', folder_depth: 0 }
+    ])
+  );
+  consolePanel.open();
+
+  const host = documentStub.getElementById('reaperConsole');
+  const strips = findAll(host, 'reaper-console-track');
+  assert.ok(strips.every(strip => strip.getAttribute('data-nesting-level') === '0'));
+  assert.ok(strips.every(strip => !strip.classList.contains('is-nested')));
+  assert.ok(strips.every(strip => strip.getAttribute('style') === null));
+  assert.equal(findAll(host, 'reaper-console-track-folder-cue').length, 0);
+  consolePanel.close();
+});
+
+test('folder-parent reorder controls are disabled with a discoverable reason and no request path', async () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  const state = liveTrackState([
+    { index: 1, name: 'Flat', folder_depth: 0 },
+    { index: 2, name: 'Folder', folder_depth: 1 },
+    { index: 3, name: 'Closer', folder_depth: -1 }
+  ]);
+  consolePanel._setState(state);
+  consolePanel.open();
+
+  const host = documentStub.getElementById('reaperConsole');
+  const parentStrip = findAll(host, 'reaper-console-track')[1];
+  const grip = findOne(parentStrip, 'reaper-console-track-grip');
+  const moveButtons = findAll(parentStrip, 'reaper-console-track-move');
+  assert.equal(grip.disabled, true);
+  assert.ok(moveButtons.every(control => control.disabled));
+  assert.match(grip.getAttribute('aria-label'), /Folder groups must currently be moved in REAPER/);
+  assert.ok(
+    moveButtons.every(control =>
+      /Folder groups must currently be moved in REAPER/.test(control.getAttribute('aria-label'))
+    )
+  );
+  const reason = findOne(parentStrip, 'reaper-console-track-move-reason');
+  assert.match(reason.textContent, /Move folder group in REAPER/);
+  assert.match(reason.getAttribute('aria-label'), /must currently be moved in REAPER/);
+  assert.equal(findOne(parentStrip, 'reaper-console-track-name').disabled, false);
+  assert.equal(findOne(parentStrip, 'reaper-console-track-swatch').disabled, false);
+  assert.ok(findAll(parentStrip, 'reaper-console-track-chip').every(control => !control.disabled));
+
+  const closerStrip = findAll(host, 'reaper-console-track')[2];
+  assert.equal(findOne(closerStrip, 'reaper-console-track-grip').disabled, false);
+  assert.equal(findOne(closerStrip, 'reaper-console-track-name').disabled, false);
+  assert.equal(findOne(closerStrip, 'reaper-console-track-swatch').disabled, false);
+  assert.ok(findAll(closerStrip, 'reaper-console-track-chip').every(control => !control.disabled));
+
+  parentStrip.dispatch('contextmenu', { preventDefault: () => {} });
+  assert.equal(consolePanel._openTrackMenu(), 2);
+  assert.ok(findOne(documentStub.getElementById('reaperConsole'), 'reaper-console-track-menu'));
+
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return { ok: true, status: 200, json: async () => state };
+  };
+  grip.dispatch('pointerdown', { preventDefault: () => assert.fail('disabled grip prevented') });
+  moveButtons.forEach(control => control.dispatch('click'));
+  assert.equal(consolePanel._beginDrag(2, 'Folder'), false);
+  assert.equal(await consolePanel._moveTrack(2, 'Folder', 1), false);
+  assert.equal(consolePanel._dragState(), null);
+  assert.equal(documentStub._hasListener('pointermove'), false);
+  assert.equal(calls, 0);
+  assert.equal(consolePanel._toasts().length, 0);
+  assert.match(consolePanel._stripNotice().text, /must currently be moved in REAPER/);
+  consolePanel.close();
+});
+
+test('only positive depth is a folder parent and negative closing tracks still move', async () => {
+  assert.equal(consolePanel._isFolderParentTrack({ folder_depth: 1 }), true);
+  assert.equal(consolePanel._isFolderParentTrack({ folder_depth: 0 }), false);
+  assert.equal(consolePanel._isFolderParentTrack({ folder_depth: -1 }), false);
+  assert.equal(consolePanel._isFolderParentTrack({ folder_depth: -2 }), false);
+
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  const state = liveTrackState([
+    { index: 1, name: 'Folder', folder_depth: 1 },
+    { index: 2, name: 'Closer', folder_depth: -1 }
+  ]);
+  consolePanel._setState(state);
+  const requests = [];
+  globalThis.fetch = async (path, options) => {
+    requests.push({ path, options });
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ ...state, outcome: 'ok', undo: { summary: 'Moved Closer' } })
+    };
+  };
+
+  assert.equal(await consolePanel._moveTrack(2, 'Closer', 1), true);
+  const move = requests.find(request => /tracks\/2\/move$/.test(request.path));
+  assert.ok(move);
+  assert.deepEqual(JSON.parse(move.options.body), { new_index: 1, expected_name: 'Closer' });
+  await new Promise(resolve => setImmediate(resolve));
+});
+
+test('unknown folder metadata defensively disables every reorder request', async () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  const state = liveTrackState([{ index: 1, name: 'Flat', folder_depth: 0 }]);
+  state.folder_depth_available = false;
+  consolePanel._setState(state);
+  consolePanel.open();
+
+  const host = documentStub.getElementById('reaperConsole');
+  assert.equal(findOne(host, 'reaper-console-track-grip').disabled, true);
+  assert.match(
+    findOne(host, 'reaper-console-track-grip').getAttribute('aria-label'),
+    /cannot verify this project's folder structure/
+  );
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return { ok: true, status: 200, json: async () => state };
+  };
+  assert.equal(await consolePanel._moveTrack(1, 'Flat', 1), false);
+  assert.equal(calls, 0);
+  consolePanel.close();
+});
 
 test('hasUnnamedTracks fires only when at least one live track has no name', () => {
   assert.equal(consolePanel._hasUnnamedTracks([]), null);
@@ -2242,6 +2497,100 @@ test('a re-render keeps the console body scrolled where the user left it', () =>
   const rebuilt = findOne(documentStub.getElementById('reaperConsole'), 'reaper-console-body');
   assert.notEqual(rebuilt, body, 'the panel should have been rebuilt');
   assert.equal(rebuilt.scrollTop, 420, 'the scroll offset should survive the re-render');
+  consolePanel.close();
+});
+
+test('a folder-depth-only poll change rebuilds the open console hierarchy', async () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  const initial = liveTrackState([
+    { index: 1, name: 'Drums', folder_depth: 0 },
+    { index: 2, name: 'Kick', folder_depth: 0 }
+  ]);
+  consolePanel._setState(initial);
+  globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => initial });
+  consolePanel.open();
+  await new Promise(resolve => setImmediate(resolve));
+
+  const before = findOne(documentStub.getElementById('reaperConsole'), 'reaper-console-body');
+  const changed = liveTrackState([
+    { index: 1, name: 'Drums', folder_depth: 1 },
+    { index: 2, name: 'Kick', folder_depth: -1 }
+  ]);
+  globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => changed });
+  await consolePanel.refresh();
+
+  const host = documentStub.getElementById('reaperConsole');
+  const after = findOne(host, 'reaper-console-body');
+  assert.notEqual(after, before);
+  assert.equal(findAll(host, 'reaper-console-track-folder-cue').length, 1);
+  assert.equal(findAll(host, 'reaper-console-track')[1].getAttribute('data-nesting-level'), '1');
+  consolePanel.close();
+});
+
+test('folder metadata availability alone is meaningful polling state', async () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  const initial = liveTrackState([{ index: 1, name: 'Drums', folder_depth: 0 }]);
+  initial.folder_depth_available = false;
+  consolePanel._setState(initial);
+  globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => initial });
+  consolePanel.open();
+  await new Promise(resolve => setImmediate(resolve));
+
+  const before = findOne(documentStub.getElementById('reaperConsole'), 'reaper-console-body');
+  const recovered = { ...initial, folder_depth_available: true };
+  globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => recovered });
+  await consolePanel.refresh();
+  const after = findOne(documentStub.getElementById('reaperConsole'), 'reaper-console-body');
+  assert.notEqual(after, before);
+  consolePanel.close();
+});
+
+test('folder metadata failure clears stale hierarchy and a later valid poll restores it safely', async () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  const valid = liveTrackState([
+    { index: 1, name: 'Folder', folder_depth: 1 },
+    { index: 2, name: 'Closer', folder_depth: -1 }
+  ]);
+  consolePanel._setState(valid);
+  globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => valid });
+  consolePanel.open();
+  await new Promise(resolve => setImmediate(resolve));
+
+  const unknown = { ...valid, folder_depth_available: false };
+  globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => unknown });
+  await consolePanel.refresh();
+  let host = documentStub.getElementById('reaperConsole');
+  let strips = findAll(host, 'reaper-console-track');
+  assert.equal(findAll(host, 'reaper-console-track-folder-cue').length, 0);
+  assert.deepEqual(
+    strips.map(strip => strip.getAttribute('data-nesting-level')),
+    ['0', '0']
+  );
+  assert.ok(
+    strips.every(strip => findOne(strip, 'reaper-console-track-grip').disabled),
+    'unknown metadata must not temporarily enable a move'
+  );
+
+  globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => valid });
+  await consolePanel.refresh();
+  host = documentStub.getElementById('reaperConsole');
+  strips = findAll(host, 'reaper-console-track');
+  assert.equal(findAll(host, 'reaper-console-track-folder-cue').length, 1);
+  assert.deepEqual(
+    strips.map(strip => strip.getAttribute('data-nesting-level')),
+    ['0', '1']
+  );
+  assert.equal(findOne(strips[0], 'reaper-console-track-grip').disabled, true);
+  assert.equal(findOne(strips[1], 'reaper-console-track-grip').disabled, false);
   consolePanel.close();
 });
 
