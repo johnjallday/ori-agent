@@ -208,6 +208,59 @@ func TestMoveEditValidatesTargetPosition(t *testing.T) {
 	}
 }
 
+func TestValidateTrackMoveBlocksOnlyPositiveFolderDepth(t *testing.T) {
+	state := State{
+		TrackCount:           3,
+		FolderDepthAvailable: true,
+		Tracks: []Track{
+			{Index: 1, Name: "Parent", FolderDepth: 1},
+			{Index: 2, Name: "Child", FolderDepth: 0},
+			{Index: 3, Name: "Closer", FolderDepth: -1},
+		},
+	}
+	if err := ValidateTrackMove(state, MoveEdit(1, "Parent", 3)); !errors.Is(err, ErrFolderParentMoveUnsupported) {
+		t.Fatalf("folder parent move = %v, want ErrFolderParentMoveUnsupported", err)
+	}
+	for _, edit := range []TrackEdit{MoveEdit(2, "Child", 1), MoveEdit(3, "Closer", 1)} {
+		if err := ValidateTrackMove(state, edit); err != nil {
+			t.Fatalf("depth %d move rejected: %v", state.Tracks[edit.Index-1].FolderDepth, err)
+		}
+	}
+
+	unknown := state
+	unknown.FolderDepthAvailable = false
+	if err := ValidateTrackMove(unknown, MoveEdit(2, "Child", 1)); !errors.Is(err, ErrFolderDepthUnavailable) {
+		t.Fatalf("unknown depth move = %v, want ErrFolderDepthUnavailable", err)
+	}
+	if err := ValidateTrackMove(state, MoveEdit(2, "Changed", 1)); !errors.Is(err, ErrTrackIdentityChanged) {
+		t.Fatalf("stale identity move = %v, want ErrTrackIdentityChanged", err)
+	}
+	if err := ValidateTrackMove(state, MoveEdit(2, "Child", 4)); !errors.Is(err, ErrTrackMoveTargetOutOfRange) {
+		t.Fatalf("out-of-range move = %v, want ErrTrackMoveTargetOutOfRange", err)
+	}
+}
+
+func TestMoveEditLuaRefusesAFolderParentBeforeOpeningUndo(t *testing.T) {
+	lua, err := MoveEdit(2, "Bass", 4).Lua("/tmp/receipt.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	folderCheck := strings.Index(lua, `reaper.GetMediaTrackInfo_Value(tr, "I_FOLDERDEPTH")`)
+	refusal := strings.Index(lua, `write_receipt("folder_parent\n")`)
+	undo := strings.Index(lua, "reaper.Undo_BeginBlock()")
+	if folderCheck < 0 || refusal < folderCheck || undo < refusal {
+		t.Fatalf("folder-parent refusal must precede undo:\n%s", lua)
+	}
+	if !strings.Contains(lua, "if folder_depth > 0 then") || strings.Contains(lua, "if folder_depth ~= 0 then") {
+		t.Fatalf("folder-parent guard must block only positive depth:\n%s", lua)
+	}
+
+	receipt, err := ParseEditReceipt([]byte("folder_parent\n"))
+	if err != nil || receipt.Applied || receipt.Refusal != "folder_parent" {
+		t.Fatalf("folder-parent receipt = %+v, %v", receipt, err)
+	}
+}
+
 func TestMoveEditLuaUsesTheVerifiedDirectionalBeforeIndex(t *testing.T) {
 	// Verified against live REAPER (tasks-reaper-track-strips.md group 4.1):
 	// backward moves use target-1; forward moves use target, uncompensated.
@@ -295,8 +348,13 @@ func TestParseEditReceiptReadsTheOutcomeAndPriorValue(t *testing.T) {
 	}
 
 	refused, err := ParseEditReceipt([]byte("guard_failed\n"))
-	if err != nil || refused.Applied {
+	if err != nil || refused.Applied || refused.Refusal != "guard_failed" {
 		t.Fatalf("guard_failed receipt = %+v, %v", refused, err)
+	}
+
+	folderParent, err := ParseEditReceipt([]byte("folder_parent\n"))
+	if err != nil || folderParent.Applied || folderParent.Refusal != "folder_parent" {
+		t.Fatalf("folder_parent receipt = %+v, %v", folderParent, err)
 	}
 
 	for _, bad := range []string{"", "ok", "applied-ish\nDrums", "error: boom"} {

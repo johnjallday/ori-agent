@@ -46,15 +46,21 @@ func (r *trackRunnerStub) RunTrackEdit(_ context.Context, edit reaper.TrackEdit)
 
 func trackEditHandler(t *testing.T, runner TrackEditRunner) *http.ServeMux {
 	t.Helper()
+	return trackEditHandlerWithState(t, runner, reaper.State{
+		Connected:            true,
+		PlayState:            "stopped",
+		Tracks:               []reaper.Track{{Index: 1, Name: "Drums"}, {Index: 2, Name: "Bass"}},
+		TrackCount:           2,
+		FolderDepthAvailable: true,
+	})
+}
+
+func trackEditHandlerWithState(t *testing.T, runner TrackEditRunner, state reaper.State) *http.ServeMux {
+	t.Helper()
 	root := t.TempDir()
 	store := &testStore{root: root, workspaces: map[string]*workspace.Workspace{}}
 	store.workspaces["mine"] = reaperHTTPWorkspace(t, root, "mine", userprofile.LocalUserID)
-	reader := &stateReader{state: reaper.State{
-		Connected: true, PlayState: "stopped",
-		Tracks:     []reaper.Track{{Index: 1, Name: "Drums"}, {Index: 2, Name: "Bass"}},
-		TrackCount: 2,
-	}}
-	handler := NewHandler(store, testUser(userprofile.LocalUserID), reader, nil)
+	handler := NewHandler(store, testUser(userprofile.LocalUserID), &stateReader{state: state}, nil)
 	if runner != nil {
 		handler.SetTrackEditRunner(runner)
 	}
@@ -416,6 +422,111 @@ func TestMoveTrackRejectsAnOutOfRangeTargetBeforeGeneratingLua(t *testing.T) {
 	}
 }
 
+func TestMoveTrackRefusesFolderParentsBeforeRunnerOrUndo(t *testing.T) {
+	runner := &trackRunnerStub{available: true}
+	state := reaper.State{
+		Connected: true, PlayState: "stopped", TrackCount: 3, FolderDepthAvailable: true,
+		Tracks: []reaper.Track{
+			{Index: 1, Name: "Folder", FolderDepth: 1},
+			{Index: 2, Name: "Child", FolderDepth: 0},
+			{Index: 3, Name: "Closer", FolderDepth: -1},
+		},
+	}
+	mux := trackEditHandlerWithState(t, runner, state)
+
+	recorder, body := postTrackEdit(t, mux, "/api/workspaces/mine/reaper/tracks/1/move",
+		`{"new_index":3,"expected_name":"Folder"}`)
+	if recorder.Code != http.StatusConflict || body.Code != folderParentMoveCode || body.Outcome == "ok" {
+		t.Fatalf("folder-parent move = %d %+v", recorder.Code, body)
+	}
+	if runner.calls != 0 || body.Undo != nil || !strings.Contains(body.ErrorReason, "moved in REAPER") {
+		t.Fatalf("folder-parent refusal reached mutation or exposed undo: calls=%d body=%+v", runner.calls, body)
+	}
+	undo, undoBody := postTrackEdit(t, mux, "/api/workspaces/mine/reaper/tracks/undo", "")
+	if undo.Code != http.StatusConflict || undoBody.Code != "nothing_to_undo" {
+		t.Fatalf("undo after folder-parent refusal = %d %+v", undo.Code, undoBody)
+	}
+}
+
+func TestMoveTrackPreflightRejectsStaleIdentityAndUnknownDepth(t *testing.T) {
+	base := reaper.State{
+		Connected: true, PlayState: "stopped", TrackCount: 2, FolderDepthAvailable: true,
+		Tracks: []reaper.Track{{Index: 1, Name: "Drums"}, {Index: 2, Name: "Bass"}},
+	}
+
+	t.Run("stale identity", func(t *testing.T) {
+		runner := &trackRunnerStub{available: true}
+		mux := trackEditHandlerWithState(t, runner, base)
+		recorder, body := postTrackEdit(t, mux, "/api/workspaces/mine/reaper/tracks/1/move",
+			`{"new_index":2,"expected_name":"Changed"}`)
+		if recorder.Code != http.StatusConflict || body.Code != "track_list_changed" || runner.calls != 0 {
+			t.Fatalf("stale move = %d %+v, calls=%d", recorder.Code, body, runner.calls)
+		}
+	})
+
+	t.Run("unknown folder depth", func(t *testing.T) {
+		runner := &trackRunnerStub{available: true}
+		unknown := base
+		unknown.FolderDepthAvailable = false
+		mux := trackEditHandlerWithState(t, runner, unknown)
+		recorder, body := postTrackEdit(t, mux, "/api/workspaces/mine/reaper/tracks/1/move",
+			`{"new_index":2,"expected_name":"Drums"}`)
+		if recorder.Code != http.StatusConflict || body.Code != folderDepthMissingCode || runner.calls != 0 {
+			t.Fatalf("unknown-depth move = %d %+v, calls=%d", recorder.Code, body, runner.calls)
+		}
+	})
+}
+
+func TestMoveTrackStillAllowsZeroAndNegativeDepthSources(t *testing.T) {
+	state := reaper.State{
+		Connected: true, PlayState: "stopped", TrackCount: 3, FolderDepthAvailable: true,
+		Tracks: []reaper.Track{
+			{Index: 1, Name: "Folder", FolderDepth: 1},
+			{Index: 2, Name: "Child", FolderDepth: 0},
+			{Index: 3, Name: "Closer", FolderDepth: -1},
+		},
+	}
+	for _, source := range []struct {
+		index int
+		name  string
+	}{
+		{index: 2, name: "Child"},
+		{index: 3, name: "Closer"},
+	} {
+		t.Run(source.name, func(t *testing.T) {
+			runner := &trackRunnerStub{available: true, receipts: []reaper.EditReceipt{{Applied: true, Prior: strconv.Itoa(source.index)}}}
+			mux := trackEditHandlerWithState(t, runner, state)
+			recorder, body := postTrackEdit(t, mux,
+				"/api/workspaces/mine/reaper/tracks/"+strconv.Itoa(source.index)+"/move",
+				`{"new_index":1,"expected_name":"`+source.name+`"}`)
+			if recorder.Code != http.StatusOK || body.Outcome != "ok" || runner.calls != 1 {
+				t.Fatalf("supported move = %d %+v, calls=%d", recorder.Code, body, runner.calls)
+			}
+		})
+	}
+}
+
+func TestMoveTrackFinalLuaRaceRefusalIsNotApplied(t *testing.T) {
+	runner := &trackRunnerStub{
+		available: true,
+		receipts:  []reaper.EditReceipt{{Applied: false, Refusal: "folder_parent"}},
+	}
+	mux := trackEditHandler(t, runner)
+
+	recorder, body := postTrackEdit(t, mux, "/api/workspaces/mine/reaper/tracks/1/move",
+		`{"new_index":2,"expected_name":"Drums"}`)
+	if recorder.Code != http.StatusConflict || body.Code != folderParentMoveCode || body.Outcome == "ok" {
+		t.Fatalf("final race refusal = %d %+v", recorder.Code, body)
+	}
+	if runner.calls != 1 || body.Undo != nil {
+		t.Fatalf("final race refusal calls=%d undo=%+v", runner.calls, body.Undo)
+	}
+	undo, undoBody := postTrackEdit(t, mux, "/api/workspaces/mine/reaper/tracks/undo", "")
+	if undo.Code != http.StatusConflict || undoBody.Code != "nothing_to_undo" {
+		t.Fatalf("undo after final race refusal = %d %+v", undo.Code, undoBody)
+	}
+}
+
 func TestMoveTrackGuardFailureAppliesNothing(t *testing.T) {
 	runner := &trackRunnerStub{
 		available: true,
@@ -478,6 +589,17 @@ func TestTrackEditResponsesNeverLeakTransportOrPathDetail(t *testing.T) {
 			recorder, _ := postTrackEdit(t, mux, call.path, call.body)
 			assertClean(t, recorder.Body.String())
 		}
+	})
+
+	t.Run("folder parent refusal", func(t *testing.T) {
+		runner := &trackRunnerStub{available: true}
+		mux := trackEditHandlerWithState(t, runner, reaper.State{
+			Connected: true, PlayState: "stopped", TrackCount: 2, FolderDepthAvailable: true,
+			Tracks: []reaper.Track{{Index: 1, Name: "Folder", FolderDepth: 1}, {Index: 2, Name: "Child"}},
+		})
+		recorder, _ := postTrackEdit(t, mux, "/api/workspaces/mine/reaper/tracks/1/move",
+			`{"new_index":2,"expected_name":"Folder"}`)
+		assertClean(t, recorder.Body.String())
 	})
 
 	t.Run("disconnected", func(t *testing.T) {

@@ -40,8 +40,12 @@ const (
 )
 
 var (
-	ErrInvalidTrackEdit = errors.New("invalid REAPER track edit")
-	ErrInvalidReceipt   = errors.New("invalid REAPER edit receipt")
+	ErrInvalidTrackEdit            = errors.New("invalid REAPER track edit")
+	ErrInvalidReceipt              = errors.New("invalid REAPER edit receipt")
+	ErrTrackIdentityChanged        = errors.New("REAPER track identity changed")
+	ErrTrackMoveTargetOutOfRange   = errors.New("REAPER track move target is out of range")
+	ErrFolderDepthUnavailable      = errors.New("REAPER folder depth is unavailable")
+	ErrFolderParentMoveUnsupported = errors.New("REAPER folder-parent moves are unsupported")
 )
 
 // TrackEdit is one guarded single-track mutation. Index is 1-based to match
@@ -87,6 +91,42 @@ func ArmEdit(index int, expectedName string, armed bool) TrackEdit {
 // 1-based target position.
 func MoveEdit(index int, expectedName string, newIndex int) TrackEdit {
 	return TrackEdit{Kind: TrackEditMove, Index: index, ExpectedName: expectedName, NewIndex: newIndex}
+}
+
+// IsFolderParent is the one authoritative classification used by move
+// preflights. A negative closing track remains movable; only a positive depth
+// starts a folder whose group movement is outside this feature's contract.
+func (t Track) IsFolderParent() bool {
+	return t.FolderDepth > 0
+}
+
+// ValidateTrackMove checks one move against a fresh live snapshot before any
+// Lua runs. The final generated Lua repeats the folder-parent check to close
+// the time-of-check/time-of-use gap.
+func ValidateTrackMove(state State, edit TrackEdit) error {
+	if edit.Kind != TrackEditMove || edit.Validate() != nil {
+		return ErrInvalidTrackEdit
+	}
+	if edit.NewIndex > state.TrackCount {
+		return ErrTrackMoveTargetOutOfRange
+	}
+	var source *Track
+	for index := range state.Tracks {
+		if state.Tracks[index].Index == edit.Index {
+			source = &state.Tracks[index]
+			break
+		}
+	}
+	if source == nil || source.Name != edit.ExpectedName {
+		return ErrTrackIdentityChanged
+	}
+	if !state.FolderDepthAvailable {
+		return ErrFolderDepthUnavailable
+	}
+	if source.IsFolderParent() {
+		return ErrFolderParentMoveUnsupported
+	}
+	return nil
 }
 
 // Inverse returns the edit that reverses this one, guarded on the value Ori
@@ -190,6 +230,17 @@ if not ok or current ~= expected then
 end
 
 `)
+	if e.Kind == TrackEditMove {
+		script.WriteString(`-- Folder groups must move atomically. Refuse before opening an undo
+-- block if this source became a folder parent after the HTTP preflight.
+local folder_depth = reaper.GetMediaTrackInfo_Value(tr, "I_FOLDERDEPTH")
+if folder_depth > 0 then
+  write_receipt("folder_parent\n")
+  return
+end
+
+`)
+	}
 	script.WriteString(e.mutationLua())
 	return script.String(), nil
 }
@@ -289,11 +340,12 @@ func luaBool(value bool) string {
 type EditReceipt struct {
 	Applied bool
 	Prior   string
+	Refusal string
 }
 
-// ParseEditReceipt reads the receipt contract: the first line is the outcome,
-// and everything after the first newline is the prior value verbatim so names
-// containing spaces round-trip intact.
+// ParseEditReceipt reads the receipt contract: the first line is applied,
+// guard_failed, or folder_parent. For applied receipts, everything after the
+// first newline is the prior value verbatim so names containing spaces round-trip.
 func ParseEditReceipt(data []byte) (EditReceipt, error) {
 	text := string(data)
 	outcome := text
@@ -306,7 +358,9 @@ func ParseEditReceipt(data []byte) (EditReceipt, error) {
 	case "applied":
 		return EditReceipt{Applied: true, Prior: prior}, nil
 	case "guard_failed":
-		return EditReceipt{Applied: false}, nil
+		return EditReceipt{Applied: false, Refusal: "guard_failed"}, nil
+	case "folder_parent":
+		return EditReceipt{Applied: false, Refusal: "folder_parent"}, nil
 	default:
 		return EditReceipt{}, ErrInvalidReceipt
 	}

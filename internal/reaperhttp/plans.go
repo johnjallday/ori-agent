@@ -193,8 +193,40 @@ func (h *Handler) applyPendingPlan(ctx context.Context, workspaceID string, conf
 			ErrorReason: "Track editing is unavailable until the REAPER runner is installed."}, http.StatusServiceUnavailable
 	}
 
-	receipt, runErr := h.bulkRunner.RunBulkPlan(ctx, reaper.BulkPlan{Edits: plan.Edits})
 	response := PlanApplyResponse{Outcome: "error"}
+	if planHasMove(plan) {
+		state, stateErr := h.client.ReadState(ctx, project)
+		if stateErr != nil {
+			response.Code = "reaper_state_failed"
+			response.ErrorReason = "Live REAPER state could not be read."
+			return response, http.StatusBadGateway
+		}
+		state.Applies = true
+		state.TrackEditingAvailable = true
+		response.State = state
+		for _, edit := range plan.Edits {
+			if edit.Kind != reaper.TrackEditMove {
+				continue
+			}
+			if preflightErr := reaper.ValidateTrackMove(state, edit); preflightErr != nil {
+				switch {
+				case errors.Is(preflightErr, reaper.ErrFolderParentMoveUnsupported):
+					response.Code = folderParentMoveCode
+					response.ErrorReason = folderParentMoveReason
+				case errors.Is(preflightErr, reaper.ErrFolderDepthUnavailable):
+					response.Code = folderDepthMissingCode
+					response.ErrorReason = folderDepthMissingReason
+				default:
+					response.Code = "plan_guard_failed"
+					response.ErrorReason = "The track list changed — nothing was applied."
+					response.FailedIndices = []int{edit.Index}
+				}
+				return response, http.StatusConflict
+			}
+		}
+	}
+
+	receipt, runErr := h.bulkRunner.RunBulkPlan(ctx, reaper.BulkPlan{Edits: plan.Edits})
 	if runErr != nil {
 		return h.planApplyFailure(ctx, project, response, runErr)
 	}
@@ -207,11 +239,16 @@ func (h *Handler) applyPendingPlan(ctx context.Context, workspaceID string, conf
 	}
 
 	if !receipt.Applied {
-		// All-or-nothing: nothing applied. The plan stays pending discard is
-		// still available and the console re-reads live state so the user
+		// All-or-nothing: nothing applied. The plan stays pending, discard is
+		// still available, and the console re-reads live state so the user
 		// sees what actually changed underneath the plan.
-		response.Code = "plan_guard_failed"
-		response.ErrorReason = "The track list changed — nothing was applied."
+		if receipt.Refusal == "folder_parent" {
+			response.Code = folderParentMoveCode
+			response.ErrorReason = folderParentMoveReason
+		} else {
+			response.Code = "plan_guard_failed"
+			response.ErrorReason = "The track list changed — nothing was applied."
+		}
 		response.FailedIndices = receipt.FailedIndices
 		return response, http.StatusConflict
 	}
@@ -227,6 +264,15 @@ func (h *Handler) applyPendingPlan(ctx context.Context, workspaceID string, conf
 		CommandID: undoCommandID,
 	}
 	return response, http.StatusOK
+}
+
+func planHasMove(plan PendingPlan) bool {
+	for _, edit := range plan.Edits {
+		if edit.Kind == reaper.TrackEditMove {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *Handler) planApplyFailure(ctx context.Context, project reaper.ProjectSource, response PlanApplyResponse, runErr error) (PlanApplyResponse, int) {

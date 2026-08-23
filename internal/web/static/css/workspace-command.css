@@ -7394,7 +7394,8 @@ button.ws-cmd-rpg-class-card:focus-visible {
 
 .reaper-console-track-identity {
   display: flex;
-  gap: 0.42rem;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.42rem;
   align-items: center;
   min-width: 0;
   padding-inline-start: var(--reaper-track-indent, 0);
@@ -7419,6 +7420,17 @@ button.ws-cmd-rpg-class-card:focus-visible {
   content: "▰";
   margin-right: 0.22rem;
   font-size: 0.58rem;
+}
+
+.reaper-console-track-move-reason {
+  flex: 0 0 auto;
+  margin-inline-start: auto;
+  padding: 0.12rem 0.28rem;
+  color: #ffd88a;
+  border-bottom: 1px solid rgba(232, 181, 75, 0.42);
+  font-size: 0.52rem;
+  line-height: 1.25;
+  white-space: nowrap;
 }
 
 .reaper-console-track-depth-label {
@@ -7838,6 +7850,11 @@ button.reaper-console-track-name:disabled {
   .reaper-console-track-folder-cue {
     padding-inline: 0.2rem;
     font-size: 0.48rem;
+  }
+  .reaper-console-track-move-reason {
+    flex-basis: 100%;
+    margin-inline-start: 0;
+    white-space: normal;
   }
   .reaper-console-track-chips {
     grid-column: 1 / -1;

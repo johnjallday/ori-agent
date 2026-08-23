@@ -78,6 +78,7 @@ end
 -- Phase 1: verify every guard without applying anything. Track identity is
 -- always checked by name at the index Ori read, exactly like a single edit.
 local failed = {}
+local folder_parents = {}
 `)
 	for i, edit := range ordered {
 		script.WriteString("do -- guard " + strconv.Itoa(i+1) + "\n")
@@ -88,11 +89,20 @@ local failed = {}
 		script.WriteString("  if not tr or not ok or current ~= expected then\n")
 		script.WriteString("    failed[#failed + 1] = " + strconv.Itoa(edit.Index) + "\n")
 		script.WriteString("  end\n")
+		if edit.Kind == TrackEditMove {
+			script.WriteString("  if tr and ok and current == expected and reaper.GetMediaTrackInfo_Value(tr, \"I_FOLDERDEPTH\") > 0 then\n")
+			script.WriteString("    folder_parents[#folder_parents + 1] = " + strconv.Itoa(edit.Index) + "\n")
+			script.WriteString("  end\n")
+		}
 		script.WriteString("end\n")
 	}
 	script.WriteString(`
 if #failed > 0 then
   write_receipt("guard_failed\n" .. table.concat(failed, ","))
+  return
+end
+if #folder_parents > 0 then
+  write_receipt("folder_parent\n" .. table.concat(folder_parents, ","))
   return
 end
 
@@ -125,16 +135,17 @@ func indentLua(lua, prefix string) string {
 // BulkReceipt is what the generated plan script reported back. Applied is the
 // authority on whether the plan changed anything at all — a plan is
 // all-or-nothing, so there is no partial-apply state to represent.
-// FailedIndices are the original 1-based track indices whose guard refused,
-// for reporting "which tracks changed underneath it" (PRD requirement 24).
+// FailedIndices are the original 1-based track indices whose identity or
+// folder-parent guard refused, for reporting which tracks prevented apply.
 type BulkReceipt struct {
 	Applied       bool
 	AppliedCount  int
 	FailedIndices []int
+	Refusal       string
 }
 
-// ParseBulkReceipt reads the bulk receipt contract: "applied\n<count>" or
-// "guard_failed\n<comma-separated failed indices>".
+// ParseBulkReceipt reads the bulk receipt contract: "applied\n<count>",
+// "guard_failed\n<indices>", or "folder_parent\n<indices>".
 func ParseBulkReceipt(data []byte) (BulkReceipt, error) {
 	text := string(data)
 	outcome := text
@@ -150,7 +161,7 @@ func ParseBulkReceipt(data []byte) (BulkReceipt, error) {
 			return BulkReceipt{}, ErrInvalidReceipt
 		}
 		return BulkReceipt{Applied: true, AppliedCount: count}, nil
-	case "guard_failed":
+	case "guard_failed", "folder_parent":
 		var indices []int
 		if rest != "" {
 			for _, field := range strings.Split(rest, ",") {
@@ -161,7 +172,7 @@ func ParseBulkReceipt(data []byte) (BulkReceipt, error) {
 				indices = append(indices, index)
 			}
 		}
-		return BulkReceipt{Applied: false, FailedIndices: indices}, nil
+		return BulkReceipt{Applied: false, FailedIndices: indices, Refusal: strings.TrimSpace(outcome)}, nil
 	default:
 		return BulkReceipt{}, ErrInvalidReceipt
 	}

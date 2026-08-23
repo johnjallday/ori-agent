@@ -1101,6 +1101,107 @@ test('flat projects retain unindented strips without folder cues', () => {
   consolePanel.close();
 });
 
+test('folder-parent reorder controls are disabled with a discoverable reason and no request path', async () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  const state = liveTrackState([
+    { index: 1, name: 'Flat', folder_depth: 0 },
+    { index: 2, name: 'Folder', folder_depth: 1 },
+    { index: 3, name: 'Closer', folder_depth: -1 }
+  ]);
+  consolePanel._setState(state);
+  consolePanel.open();
+
+  const host = documentStub.getElementById('reaperConsole');
+  const parentStrip = findAll(host, 'reaper-console-track')[1];
+  const grip = findOne(parentStrip, 'reaper-console-track-grip');
+  const moveButtons = findAll(parentStrip, 'reaper-console-track-move');
+  assert.equal(grip.disabled, true);
+  assert.ok(moveButtons.every(control => control.disabled));
+  assert.match(grip.getAttribute('aria-label'), /Folder groups must currently be moved in REAPER/);
+  assert.ok(
+    moveButtons.every(control =>
+      /Folder groups must currently be moved in REAPER/.test(control.getAttribute('aria-label'))
+    )
+  );
+  const reason = findOne(parentStrip, 'reaper-console-track-move-reason');
+  assert.match(reason.textContent, /Move folder group in REAPER/);
+  assert.match(reason.getAttribute('aria-label'), /must currently be moved in REAPER/);
+
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return { ok: true, status: 200, json: async () => state };
+  };
+  grip.dispatch('pointerdown', { preventDefault: () => assert.fail('disabled grip prevented') });
+  moveButtons.forEach(control => control.dispatch('click'));
+  assert.equal(consolePanel._beginDrag(2, 'Folder'), false);
+  assert.equal(await consolePanel._moveTrack(2, 'Folder', 1), false);
+  assert.equal(consolePanel._dragState(), null);
+  assert.equal(documentStub._hasListener('pointermove'), false);
+  assert.equal(calls, 0);
+  assert.equal(consolePanel._toasts().length, 0);
+  assert.match(consolePanel._stripNotice().text, /must currently be moved in REAPER/);
+  consolePanel.close();
+});
+
+test('only positive depth is a folder parent and negative closing tracks still move', async () => {
+  assert.equal(consolePanel._isFolderParentTrack({ folder_depth: 1 }), true);
+  assert.equal(consolePanel._isFolderParentTrack({ folder_depth: 0 }), false);
+  assert.equal(consolePanel._isFolderParentTrack({ folder_depth: -1 }), false);
+  assert.equal(consolePanel._isFolderParentTrack({ folder_depth: -2 }), false);
+
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  const state = liveTrackState([
+    { index: 1, name: 'Folder', folder_depth: 1 },
+    { index: 2, name: 'Closer', folder_depth: -1 }
+  ]);
+  consolePanel._setState(state);
+  const requests = [];
+  globalThis.fetch = async (path, options) => {
+    requests.push({ path, options });
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ ...state, outcome: 'ok', undo: { summary: 'Moved Closer' } })
+    };
+  };
+
+  assert.equal(await consolePanel._moveTrack(2, 'Closer', 1), true);
+  const move = requests.find(request => /tracks\/2\/move$/.test(request.path));
+  assert.ok(move);
+  assert.deepEqual(JSON.parse(move.options.body), { new_index: 1, expected_name: 'Closer' });
+});
+
+test('unknown folder metadata defensively disables every reorder request', async () => {
+  consolePanel._resetForTest();
+  consolePanel.init('ws-reaper');
+  consolePanel._setActions([]);
+  consolePanel._setScripts([]);
+  const state = liveTrackState([{ index: 1, name: 'Flat', folder_depth: 0 }]);
+  state.folder_depth_available = false;
+  consolePanel._setState(state);
+  consolePanel.open();
+
+  const host = documentStub.getElementById('reaperConsole');
+  assert.equal(findOne(host, 'reaper-console-track-grip').disabled, true);
+  assert.match(
+    findOne(host, 'reaper-console-track-grip').getAttribute('aria-label'),
+    /cannot verify this project's folder structure/
+  );
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return { ok: true, status: 200, json: async () => state };
+  };
+  assert.equal(await consolePanel._moveTrack(1, 'Flat', 1), false);
+  assert.equal(calls, 0);
+  consolePanel.close();
+});
+
 test('hasUnnamedTracks fires only when at least one live track has no name', () => {
   assert.equal(consolePanel._hasUnnamedTracks([]), null);
   assert.equal(consolePanel._hasUnnamedTracks([{ index: 1, name: 'Kick' }]), null);
