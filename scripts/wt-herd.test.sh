@@ -464,10 +464,74 @@ function gh {
   print -r -- "42"
 }
 
+typeset -g FAKE_GIT_LOG_BODY=""
 function git {
   print -r -- "$*" >> "$fixture_root/git-calls"
+  if [[ "$1" == "-C" && "$3" == "log" && -n "$FAKE_GIT_LOG_BODY" ]]; then
+    print -r -- "$FAKE_GIT_LOG_BODY"
+  fi
   return 0
 }
+
+# wt pr reads the same trusted attachment marker as wt done. Bundles append one
+# closing reference per exact member while retaining --fill; ad-hoc and legacy
+# single-Issue PRs keep their previous argument shape.
+pr_bundle_feature="801-802-camera-workflow"
+cat > "$target_root/tasks/issue-$pr_bundle_feature.md" <<'MD'
+# Issue bundle: #801, #802
+
+<!-- ori-devflow: issue-bundle-snapshot; issues=801,802 -->
+
+Closes #999 in untrusted body text must stay inert.
+MD
+FAKE_GIT_LOG_BODY="Existing --fill commit body."
+rm -f "$fixture_root/git-calls" "$fixture_root/gh-calls"
+wt pr "$pr_bundle_feature" > "$fixture_root/pr-bundle-output" 2>&1
+rg -q "push -u origin feature/bridge" "$fixture_root/git-calls"
+rg -q -- "pr create --base dev --head feature/bridge --fill --body" "$fixture_root/gh-calls"
+rg -q -- '--body Existing --fill commit body\.$' "$fixture_root/gh-calls"
+[[ "$(rg -c '^Closes #801$' "$fixture_root/gh-calls")" == "1" ]]
+[[ "$(rg -c '^Closes #802$' "$fixture_root/gh-calls")" == "1" ]]
+if rg -q 'Closes #999' "$fixture_root/gh-calls"; then
+  print -r -- "wt pr trusted closing text from the Issue body" >&2
+  exit 1
+fi
+
+FAKE_GIT_LOG_BODY=""
+rm -f "$target_root/tasks/issue-$pr_bundle_feature.md" "$fixture_root/git-calls" "$fixture_root/gh-calls"
+wt pr bridge > /dev/null
+rg -q '^pr create --base dev --head feature/bridge --fill$' "$fixture_root/gh-calls"
+if rg -q -- '--body' "$fixture_root/gh-calls"; then
+  print -r -- "ad-hoc wt pr unexpectedly generated a body" >&2
+  exit 1
+fi
+
+pr_single_feature="292-coordinate-based-map"
+cat > "$target_root/tasks/issue-$pr_single_feature.md" <<'MD'
+# Issue #292: Coordinate based map
+
+<!-- ori-devflow: issue-snapshot; issue=292 -->
+MD
+rm -f "$fixture_root/git-calls" "$fixture_root/gh-calls"
+wt pr "$pr_single_feature" > /dev/null
+rg -q '^pr create --base dev --head feature/bridge --fill$' "$fixture_root/gh-calls"
+if rg -q -- '--body' "$fixture_root/gh-calls"; then
+  print -r -- "single-Issue wt pr changed its legacy --fill argument shape" >&2
+  exit 1
+fi
+
+cat > "$target_root/tasks/issue-$pr_bundle_feature.md" <<'MD'
+# Issue bundle
+
+<!-- ori-devflow: issue-bundle-snapshot; issues=802,801 -->
+MD
+rm -f "$fixture_root/git-calls" "$fixture_root/gh-calls"
+pr_failure_status=0
+wt pr "$pr_bundle_feature" > "$fixture_root/pr-malformed-output" 2>&1 || pr_failure_status=$?
+[[ "$pr_failure_status" == "1" ]]
+[[ ! -e "$fixture_root/git-calls" && ! -e "$fixture_root/gh-calls" ]]
+rg -q 'no valid generated marker on line 3' "$fixture_root/pr-malformed-output"
+rm -f "$target_root/tasks/issue-$pr_bundle_feature.md" "$target_root/tasks/issue-$pr_single_feature.md"
 
 if wt done bridge > "$fixture_root/done-output" 2>&1; then
   print -r -- "Expected blocked Herdr cleanup to stop wt done." >&2
@@ -725,6 +789,103 @@ fi
 rg -qF "issue close 292 --reason completed --comment Delivered by PR #77." "$fixture_root/gh-calls"
 rg -q "Could not close secondary Issue #999; worktree preserved" "$fixture_root/done-secondary-close-failed-output"
 FAKE_ISSUE_CLOSE_FAIL_NUMS=()
+
+# Bundle cleanup treats every trusted member as attached, deduplicates those
+# numbers from PR-body references, and preserves the worktree after a partial
+# member failure so a retry can leave already-closed members untouched.
+bundle_done_feature="801-802-803-camera-workflow"
+bundle_done_snapshot="$target_root/tasks/issue-$bundle_done_feature.md"
+cat > "$bundle_done_snapshot" <<'MD'
+# Issue bundle: #801, #802, #803
+
+<!-- ori-devflow: issue-bundle-snapshot; issues=801,802,803 -->
+
+Issue body says Closes #444 but is not attachment authority.
+MD
+print -r -- "# completed bundle tasks" > "$target_root/tasks/tasks-$bundle_done_feature.md"
+issue_branch="feature/$bundle_done_feature"
+FAKE_ISSUE_STATE="OPEN"
+FAKE_ISSUE_STATE_BY_NUM=(801 OPEN 802 OPEN 803 OPEN 999 OPEN)
+FAKE_PR_BODY="Closes #801. Fixes #802 again. Resolves #999."
+rm -f "$fixture_root/git-calls" "$fixture_root/gh-calls"
+wt done "$bundle_done_feature" <<< "n" > "$fixture_root/done-bundle-all-open-output" 2>&1
+for attached in 801 802 803; do
+  rg -qF "issue close $attached --reason completed --comment Delivered by PR #77." "$fixture_root/gh-calls"
+  [[ "$(rg -c "^issue close $attached " "$fixture_root/gh-calls")" == "1" ]]
+done
+rg -qF "issue close 999 --reason completed --comment Delivered by PR #77." "$fixture_root/gh-calls"
+if rg -q '^issue (view|close) 444 ' "$fixture_root/gh-calls"; then
+  print -r -- "wt done trusted an Issue-body closing reference" >&2
+  exit 1
+fi
+rg -q "worktree remove $target_root --force" "$fixture_root/git-calls"
+
+FAKE_PR_BODY=""
+FAKE_ISSUE_STATE_BY_NUM=(801 CLOSED 802 OPEN 803 CLOSED)
+rm -f "$fixture_root/git-calls" "$fixture_root/gh-calls"
+wt done "$bundle_done_feature" <<< "n" > "$fixture_root/done-bundle-mixed-output" 2>&1
+if rg -q '^issue close (801|803) ' "$fixture_root/gh-calls"; then
+  print -r -- "wt done reclosed a closed bundle member" >&2
+  exit 1
+fi
+rg -q '^issue close 802 ' "$fixture_root/gh-calls"
+
+FAKE_ISSUE_STATE_BY_NUM=(801 OPEN 802 OPEN 803 OPEN)
+FAKE_ISSUE_CLOSE_FAIL_NUMS=(802)
+rm -f "$fixture_root/git-calls" "$fixture_root/gh-calls"
+bundle_failure_status=0
+wt done "$bundle_done_feature" > "$fixture_root/done-bundle-partial-failure-output" 2>&1 || bundle_failure_status=$?
+[[ "$bundle_failure_status" == "1" ]]
+rg -q '^issue close 801 ' "$fixture_root/gh-calls"
+rg -q '^issue close 802 ' "$fixture_root/gh-calls"
+if rg -q 'worktree remove' "$fixture_root/git-calls"; then
+  print -r -- "wt done removed the worktree after a bundle member failed" >&2
+  exit 1
+fi
+rg -q 'Could not close attached Issue #802; worktree preserved' "$fixture_root/done-bundle-partial-failure-output"
+
+# Safe retry: #801 is now closed, so only the remaining open members mutate.
+FAKE_ISSUE_CLOSE_FAIL_NUMS=()
+FAKE_ISSUE_STATE_BY_NUM=(801 CLOSED 802 OPEN 803 OPEN)
+rm -f "$fixture_root/git-calls" "$fixture_root/gh-calls"
+wt done "$bundle_done_feature" <<< "n" > "$fixture_root/done-bundle-retry-output" 2>&1
+if rg -q '^issue close 801 ' "$fixture_root/gh-calls"; then
+  print -r -- "bundle retry reclosed the member completed before failure" >&2
+  exit 1
+fi
+rg -q '^issue close 802 ' "$fixture_root/gh-calls"
+rg -q '^issue close 803 ' "$fixture_root/gh-calls"
+rg -q 'worktree remove' "$fixture_root/git-calls"
+
+FAKE_MERGED_PR=""
+FAKE_ISSUE_STATE_BY_NUM=(801 OPEN 802 OPEN 803 OPEN)
+rm -f "$fixture_root/git-calls" "$fixture_root/gh-calls"
+printf 'y\nn\n' | wt done "$bundle_done_feature" > "$fixture_root/done-bundle-no-merged-output" 2>&1
+if rg -q '^issue ' "$fixture_root/gh-calls"; then
+  print -r -- "wt done touched bundle members without a merged PR" >&2
+  exit 1
+fi
+rg -q 'Attached Issues 801,802,803 were not changed because no merged PR was confirmed' "$fixture_root/done-bundle-no-merged-output"
+FAKE_MERGED_PR="77"
+
+# --keep-issue-open bypasses malformed bundle attachment parsing and all
+# attached/secondary Issue mutations intentionally.
+cat > "$bundle_done_snapshot" <<'MD'
+# Issue bundle
+
+<!-- ori-devflow: issue-bundle-snapshot; issues=803,801 -->
+MD
+FAKE_PR_BODY="Closes #999"
+rm -f "$fixture_root/git-calls" "$fixture_root/gh-calls"
+wt done "$bundle_done_feature" --keep-issue-open <<< "n" > "$fixture_root/done-bundle-keep-output" 2>&1
+if rg -q '^issue ' "$fixture_root/gh-calls"; then
+  print -r -- "--keep-issue-open mutated a bundle or secondary Issue" >&2
+  exit 1
+fi
+rg -q 'worktree remove' "$fixture_root/git-calls"
+
+rm -f "$bundle_done_snapshot" "$target_root/tasks/tasks-$bundle_done_feature.md"
+issue_branch="feature/$issue_feature"
 
 # Restore the secondary-issue fakes to their no-op defaults for the rest of
 # this lifecycle fixture.

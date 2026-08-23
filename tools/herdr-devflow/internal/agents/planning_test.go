@@ -192,6 +192,14 @@ func TestDeriveBundleSlugContainsEverySortedMemberAndRefusesOverflow(t *testing.
 		t.Fatalf("DeriveBundleSlug() = %q is not canonical", slug)
 	}
 
+	numericTitleSlug, err := DeriveBundleSlug([]github.Issue{
+		readyIssue(101, "123 workflow", RouteQuick),
+		readyIssue(202, "456 polish", RoutePlanned),
+	})
+	if err != nil || numericTitleSlug != "101-202-issues-123-workflow-456-polish" {
+		t.Fatalf("numeric-title bundle slug = %q, %v; want an unambiguous numeric member prefix", numericTitleSlug, err)
+	}
+
 	tooMany := make([]github.Issue, 0, 9)
 	for number := 1_000_000_000; number < 1_000_000_009; number++ {
 		tooMany = append(tooMany, readyIssue(number, "x", RouteQuick))

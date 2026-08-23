@@ -943,6 +943,11 @@ func DeriveBundleSlug(issues []github.Issue) (string, error) {
 	body := strings.Join(titleWords, "-")
 	if body == "" {
 		body = "issues"
+	} else if body[0] >= '0' && body[0] <= '9' {
+		// Keep the complete leading numeric run unambiguously reserved for
+		// attachment membership. Delivery parsers can then verify that no Issue
+		// number was added to or dropped from the slug prefix.
+		body = "issues-" + body
 	}
 	prefix := strings.Join(numberParts, "-") + "-"
 	available := 80 - len(prefix)
