@@ -531,6 +531,21 @@ wt pr "$pr_bundle_feature" > "$fixture_root/pr-malformed-output" 2>&1 || pr_fail
 [[ "$pr_failure_status" == "1" ]]
 [[ ! -e "$fixture_root/git-calls" && ! -e "$fixture_root/gh-calls" ]]
 rg -q 'no valid generated marker on line 3' "$fixture_root/pr-malformed-output"
+
+pr_prefix_conflict="801-802-999-camera"
+cat > "$target_root/tasks/issue-$pr_prefix_conflict.md" <<'MD'
+# Issue bundle
+
+<!-- ori-devflow: issue-bundle-snapshot; issues=801,802 -->
+MD
+rm -f "$fixture_root/git-calls" "$fixture_root/gh-calls"
+pr_failure_status=0
+wt pr "$pr_prefix_conflict" > "$fixture_root/pr-prefix-conflict-output" 2>&1 || pr_failure_status=$?
+[[ "$pr_failure_status" == "1" ]]
+[[ ! -e "$fixture_root/git-calls" && ! -e "$fixture_root/gh-calls" ]]
+rg -q "attached Issues 801,802 do not match feature '$pr_prefix_conflict'" "$fixture_root/pr-prefix-conflict-output"
+rm -f "$target_root/tasks/issue-$pr_prefix_conflict.md"
+
 rm -f "$target_root/tasks/issue-$pr_bundle_feature.md" "$target_root/tasks/issue-$pr_single_feature.md"
 
 if wt done bridge > "$fixture_root/done-output" 2>&1; then

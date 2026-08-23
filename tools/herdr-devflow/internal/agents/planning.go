@@ -1,8 +1,9 @@
 package agents
 
-// This file is the `wt plan --issue <N>` command family: turning a Ready
-// GitHub Issue into a durable local snapshot, a size-routed planning starter
-// checklist, and an issue-scoped Pi session that begins the repository's
+// This file is the `wt plan --issue <N> [--issue <N> ...]` command family:
+// turning one Ready Issue or an affirmed ordinary-backlog bundle into a durable
+// local snapshot, a highest-size-routed starter, and an issue-scoped Pi session
+// that begins the repository's
 // PRD/task-list workflow — never implementation.
 //
 // It is deliberately kept apart from feature handoff (service.go). A
@@ -15,7 +16,7 @@ package agents
 // generic Herdr mechanics that do not know what a "feature" is.
 //
 // Every stage here is read-only until BuildIssuePlan has returned a plan and
-// the caller has shown it to the user: no Issue is fetched more than once, no
+// the caller has shown all member evidence to the user: no Issue is fetched more than once, no
 // file is created, and no bridge state is written before that happens.
 
 import (
@@ -87,7 +88,7 @@ type IssuePlanRequest struct {
 	DevWorktreePath string
 }
 
-// IssuePlan is the fully resolved, read-only plan for one Issue: everything
+// IssuePlan is the fully resolved, read-only plan for one Issue or bundle: everything
 // the confirmation summary needs to show, plus what BuildIssuePlan already
 // computed so ExecuteIssuePlan never re-fetches the Issue or re-derives its
 // identity.

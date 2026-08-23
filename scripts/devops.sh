@@ -191,10 +191,10 @@ other_labels_of() {
 #
 # Deliberately NOT a Herdr integration: scripts/wt-herd.test.sh asserts this
 # file never reaches for the devflow bridge, which is the whole point of the
-# REPL replacing that helper. The Issue-number-first convention already encodes
-# the link in a branch name (`fix/339-slug`) and a task file
-# (`tasks/tasks-339-slug.md`), so local git answers "am I implementing this?"
-# with no network and no second contract.
+# REPL replacing that helper. Issue-number-first identity plus the generated
+# snapshot header maps each attached member to its shared task list and branch,
+# so local Git answers "am I implementing this?" with no network and no second
+# contract.
 #
 # Task files are gitignored and live in ONE place - the dev worktree's tasks/ -
 # so progress is read from disk. That is deliberately fresher than anything
@@ -576,7 +576,7 @@ list_status() {
   if [[ "$rows" -eq 0 ]]; then
     printf '  no task lists yet\n'
   fi
-  printf '\ngroups done/total  •  where the branch is  •  Issue  •  feature\n'
+  printf '\ngroups done/total  •  where the branch is  •  attached Issue(s)  •  feature\n'
 }
 
 list_issues() {

@@ -1,14 +1,14 @@
 package app
 
 // This file is the `wt herd issue-plan` command: the Go half of
-// `wt plan --issue <N>`. `wt.sh` resolves the exact ori-agent-dev worktree
+// `wt plan --issue <N> [--issue <N> ...]`. `wt.sh` resolves the exact ori-agent-dev worktree
 // and forwards it here as separate argument words, never as a shell string,
 // so a title, label, or Issue body containing shell metacharacters is data
 // this command reads rather than syntax anything runs.
 //
 // Confirmation happens here, not in the shell, the same way `wt herd
-// overnight start` confirms its own plan: BuildIssuePlan performs the one
-// fresh GitHub read and every other read-only check, the plan is rendered,
+// overnight start` confirms its own plan: BuildIssuePlan performs one fresh
+// GitHub read per member and every other read-only check, all evidence is rendered,
 // and only an explicit answer (interactive "y", or --yes) reaches
 // ExecuteIssuePlan. Declining leaves every file, bridge record, tab, and
 // agent exactly as it was.

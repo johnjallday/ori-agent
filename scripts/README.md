@@ -94,7 +94,7 @@ The full release flow is documented in `docs/RELEASE_CHECKLIST.md`.
 ```bash
 source scripts/wt.sh   # load the function
 wt                     # interactive: pick a worktree to navigate
-wt plan --issue <N>    # start Pi planning a Ready Issue in the dev worktree
+wt plan --issue <N> [--issue <N> ...] # plan one Ready Issue or an affirmed bundle
 wt start <feature>     # create a worktree from a PRD and/or task list
 wt new <name>          # create a worktree
 wt rm <name>           # remove a worktree
@@ -106,16 +106,18 @@ Source it (don't execute) so `cd` affects your current shell.
 `wt demo` removes its exact sandbox when the demo exits. Set
 `ORI_KEEP_DEMO_SANDBOX=1` when the sandbox needs to be retained for debugging.
 
-#### `wt plan --issue <N>` — plan a Ready Issue
+#### `wt plan --issue <N> [--issue <N> ...]` — plan one unit
 
-Planning and implementation are separate stages. `wt plan` handles the first:
-it reads the Issue once, writes a snapshot plus a size-routed starter
-checklist into `ori-agent-dev/tasks/`, and starts a **Pi** session there to
-finish the plan. `wt start` handles the second, on Claude.
+Planning and implementation are separate stages. One `--issue` preserves the
+single-Issue flow. Repeated distinct values plan an ordinary-backlog bundle as
+one unit: every Issue is fetched once, sorted by immutable number, written into
+one combined snapshot and size-routed starter under `ori-agent-dev/tasks/`, and
+sent to one **Pi** session. `wt start` handles implementation later.
 
 ```bash
-wt plan --issue 342          # show the plan, then ask before writing anything
-wt plan --issue 342 --yes    # same plan, no prompt
+wt plan --issue 342                         # one Issue
+wt plan --issue 456 --issue 123             # one sorted bundle identity
+wt plan --issue 123 --issue 456 --yes       # explicit scripted affirmation
 ```
 
 | Issue size | What Pi is told to do first |
@@ -123,18 +125,23 @@ wt plan --issue 342 --yes    # same plan, no prompt
 | `size:quick`, `size:planned` | Generate parent tasks, wait for `Go`, then expand them — no PRD |
 | `size:prd` | Ask 3–5 clarifying questions, write the PRD, *then* generate parent tasks |
 
-It accepts only an open Issue that currently matches the same Ready semantics
-`./scripts/devops.sh ready` uses and carries exactly one `size:*` label;
-anything else stops before writing a file. It never comments on, labels, or
-otherwise changes the Issue. Re-running on the same Issue resumes: an existing
-PRD or a real (non-starter) task list is never replaced.
+Every selected Issue must be open, currently Ready, and carry exactly one
+`size:*` label. Ad-hoc bundles accept ordinary backlog Issues only;
+`feature-proposal` keeps its existing single-Issue flow. Before mutation, the
+command shows every body and comment and requires affirmation that the members
+share a root cause, shared files, or the same UI surface. The highest selected
+route wins (`prd` > `planned` > `quick`). Any failure is atomic, and planning
+never comments on, labels, or otherwise changes GitHub.
 
 If Herdr is unavailable, the planning files are still written and the command
 prints the exact retry — they are never rolled back.
 
-The feature slug is `<issue-number>-<title-slug>`, and the number comes first
-because it cannot change. Renaming the Issue mid-planning reuses the existing
-slug rather than deriving a second identity.
+A single feature slug is `<issue-number>-<title-slug>`. A bundle contains every
+sorted number plus a deterministic fragment, such as
+`123-456-camera-workflow`; numbers are never truncated to meet the 80-character
+limit. Reordering the same members and later title renames reuse the exact
+artifacts and planning session. Existing real PRDs and task lists are never
+overwritten.
 
 #### `wt start` accepts a task list without a PRD
 
@@ -182,8 +189,11 @@ when that Issue's own live labels make them eligible - the bar is drawn for
 one known Issue, so it never offers a write or a command the Issue does not
 actually support. The list's `c` key is a shortcut that opens the same Issue
 directly at its decision answers. `n` captures a new Issue with an optional
-body, `o` approves it, `s` starts Pi planning for the selected Ready row,
-`r` refreshes the list, `?` shows help, and `q` quits. At the new-Issue body
+body, `o` approves it, and `s` starts Pi planning for the selected Ready row.
+In Ready, Space marks/unmarks ordinary backlog rows and `b` plans at least two
+marks together; cursor and marks render separately and the header shows the
+count. Marks survive view changes. `r` refreshes and visibly prunes marks that
+vanished or became ineligible; `?` shows help and `q` quits. At the new-Issue body
 prompt, a blank line keeps capture title-only and `:edit` opens `$VISUAL` or
 `$EDITOR` for multiline Markdown.
 
@@ -196,9 +206,10 @@ of lists.
 Every row shows the Issue's `size:*` label in its own column, so a long label
 list can never truncate away the signal that says whether to open a PRD first.
 
-**Planning key.** In the Ready view, `s` runs `wt plan --issue <N>` for the
-selected row and launches a Herdr-managed Pi planner after wt shows its normal
-summary and confirmation. The same `s` is also on the opened-Issue action bar
+**Planning keys.** In Ready, `s` runs `wt plan --issue <N>` for the current
+row. Space + `b` forwards every marked number as a separate argument and opens
+the combined evidence/compatibility confirmation. `feature-proposal` rows stay
+single and cannot be marked. The same `s` is also on the opened-Issue action bar
 (`Enter` on any row), where it reads that Issue's own live labels through the
 same `labels_are_ready` rule the Ready view itself uses, so it works from any
 view - not only rows already sitting in Ready. The picker starts the sourced
@@ -216,6 +227,7 @@ status` prints the same thing for every task list at once:
 ```
   0/8     worktree           workspace-ticket-management
   3/3     branch    #339     339-workspace-map-camera-framing
+  2/5     worktree  #123,#456 123-456-camera-workflow
   5/6     -                  build-my-hq-button-fix
 ```
 
@@ -223,10 +235,11 @@ This is **entirely local** — plain `git worktree list`, `git branch`, and the
 task files on disk. It is deliberately *not* a Herdr integration:
 `scripts/wt-herd.test.sh` asserts this script never reaches for the devflow
 bridge, which is the whole point of the REPL having replaced that helper. The
-Issue-number-first convention already encodes the link in the branch name
-(`fix/339-slug`) and the task file (`tasks-339-slug.md`), so no network, no
-second contract, and no `wt` dependency is needed. Branches predating that
-convention still resolve, by slug.
+Issue-number-first convention and generated snapshot header encode the link.
+For a bundle, every attached row shows the same progress and branch/worktree
+state while `status` prints one feature row with all member numbers. No network,
+second contract, or `wt` dependency is needed. Numberless legacy branches still
+resolve by slug.
 
 Task files are gitignored and live in one place, the dev worktree's `tasks/`, so
 progress is read from disk rather than from anything pushed. That is
@@ -323,35 +336,36 @@ number remain valid and are never renamed.
 
 ```bash
 wt done 292-coordinate-based-map
-wt done 292-coordinate-based-map --keep-issue-open # intentional exception
+wt done 123-456-camera-workflow                 # closes every attached member
+wt done 123-456-camera-workflow --keep-issue-open # intentional exception
 ```
 
-For Issue-backed work, `wt done` treats the exact
-`tasks/issue-<feature>.md` snapshot created by `wt plan` as the attachment. It
-requires the generated header marker to agree with the number-first feature
-slug and a merged PR for the exact branch targeting `dev`. An open attached
-Issue is closed as `completed` with a comment linking the merged PR; an already
-closed Issue is left unchanged. This explicit transition is necessary because
+For Issue-backed work, `wt pr` and `wt done` trust only the generated marker on
+line 3 of `tasks/issue-<feature>.md`. A bundle marker carries every sorted
+member and must agree with the complete numeric slug prefix. `wt pr` keeps its
+normal `--fill` content and adds one `Closes #N` reference per bundle member.
+After that branch is confirmed merged to `dev`, `wt done` inspects every
+attached member, closes each open one as `completed` with PR attribution, and
+leaves already-closed members unchanged. This explicit transition is necessary because
 delivery PRs target `dev`, not the repository's default branch, so GitHub
 closing keywords do not complete the Issue at that merge. A number-looking slug
 without the snapshot is never enough to infer an Issue, so ad-hoc and legacy
 cleanup keeps working.
 
-After the primary Issue closes, `wt done` additionally reads the confirmed
-merged PR's body once and closes every OPEN Issue it names with a
+After all attached members close, `wt done` additionally reads the confirmed
+merged PR's body once and closes every other OPEN Issue it names with a
 case-insensitive `Closes`/`Fixes`/`Resolves #N` reference — the same way a PR
 against a repository's default branch would, since a `dev`-targeted merge does
-not trigger GitHub's own closing keywords. References are deduplicated, the
-primary Issue is never closed twice even if repeated in the body, and each
-closed secondary gets the same `Delivered by PR #N.` comment. This is purely
-additive to the one trusted attachment: work with no attached Issue never has
+not trigger GitHub's own closing keywords. References are deduplicated against every attached member, and each closed
+secondary gets the same `Delivered by PR #N.` comment. This is purely additive
+to the trusted generated attachment: work with no attached Issue never has
 its merged PR body read at all, so ad-hoc cleanup still cannot infer Issue
 authority from PR text alone.
 
-Issue inspection or closure failures — for the primary or any secondary
-Issue — preserve the feature worktree so the same command can be retried. A
-failed PR-body read is a nonfatal warning: it never undoes the primary
-close, and cleanup still proceeds; secondary Issues just are not found and
+Issue inspection or closure failures — for any attached or secondary Issue —
+preserve the feature worktree so the same command can be retried. Already
+closed members make that retry idempotent. A failed PR-body read is a nonfatal
+warning: it never undoes attached closures, and cleanup still proceeds; secondary Issues just are not found and
 closed that time. `--keep-issue-open` is the explicit escape hatch for a
 feature whose Issue must intentionally remain open; it skips every Issue read
 and write, primary and secondary alike, and never reads the PR body. The

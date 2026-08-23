@@ -9,7 +9,7 @@
 #   wt start [prd] [--kind KIND] [--no-herdr] # Create a worktree from a PRD or task list in the dev tasks/ folder
 #   wt new <name>           # Create a clean worktree (no PRD/tasks)
 #   wt pr [name]            # Push branch and open a PR against dev
-#   wt done [name] [--keep-issue-open] [--herdr-override] # Finish attached Issue, archive tasks, and clean up
+#   wt done [name] [--keep-issue-open] [--herdr-override] # Finish all attached Issues, archive, and clean up
 #   wt rm [name]            # Remove worktree and its branch
 #   wt ls                   # List worktrees
 #   wt status               # Feature-first overview of every feature in the repo
@@ -1130,8 +1130,8 @@ function wt_pr_bundle_body {
 # closes; CLOSED is left unchanged; any other state is not guessed about.
 # Failure is always fatal while the worktree still exists, making the
 # operation safely retryable. `label` names the Issue in output ("attached"
-# for the one primary Issue `wt plan` recorded, "secondary" for one the
-# merged PR body additionally names) so a reader can tell which contract
+# for a trusted snapshot member, "secondary" for one the merged PR body
+# additionally names) so a reader can tell which contract
 # produced the close.
 function wt_done_close_issue {
   local issue_number="$1" merged_num="$2" label="$3" issue_state
@@ -1161,8 +1161,8 @@ function wt_done_close_issue {
   esac
 }
 
-# Close only the primary Issue attached by `wt plan`, and only after this
-# branch has a confirmed merged PR.
+# Close one trusted snapshot member, only after this branch has a confirmed
+# merged PR. Bundle delivery calls this once per canonical member.
 function wt_done_close_attached_issue {
   wt_done_close_issue "$1" "$2" "attached"
 }
@@ -1190,11 +1190,11 @@ function wt_done_secondary_issue_numbers {
   print -rl -- "${numbers[@]}"
 }
 
-# After the primary Issue closes, additionally close every OPEN Issue the
+# After all attached members close, additionally close every OPEN Issue the
 # confirmed merged PR body names with Closes/Fixes/Resolves. This is additive
-# to, never a substitute for, the one trusted primary attachment: a PR body
-# read failure is a visible warning that skips secondary closures without
-# undoing the primary close already performed; a secondary Issue's own
+# to, never a substitute for, trusted snapshot attachment: a PR body read
+# failure is a visible warning that skips secondary closures without undoing
+# attached closes already performed; a secondary Issue's own
 # state/close failure is fatal, preserving the worktree for retry exactly
 # like a primary failure would.
 function wt_done_close_secondary_issues {

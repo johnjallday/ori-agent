@@ -131,18 +131,21 @@ receipt while deliberately leaving `needs-decision` in place for the grooming
 routine. If that label write fails, the comment remains the answer of record and
 the command reports the partial result without pretending the receipt exists.
 Everything else about an Issue's lifecycle — triaging, sizing, and bundling —
-belongs to that routine. Delivery owns closing:
-`wt done` closes the exact attached Issue only after its implementation PR has
-merged to `dev`, then additionally closes any other Issue that same merged PR's
-body names with `Closes`/`Fixes`/`Resolves #N` — the equivalent of GitHub's own
-closing keywords, which a `dev`-targeted merge does not trigger on its own.
+belongs to that routine. Delivery owns closing. `wt pr` adds one trusted closing
+reference for every member of an ad-hoc Issue bundle. After that PR merges to
+`dev`, `wt done`
+closes every Issue attached by the generated snapshot header, then additionally
+closes any other Issue the merged PR body names with
+`Closes`/`Fixes`/`Resolves #N`. A failure on any attached member preserves the
+worktree for retry; `--keep-issue-open` skips all Issue mutations intentionally.
 
 `status` and the picker's in-flight column resolve an Issue to work-in-progress
-through the naming convention above: branch `fix/339-slug` and task file
-`tasks/tasks-339-slug.md`. Both are read from local git and disk — never from
-Herdr, which `scripts/wt-herd.test.sh` enforces — so the check is instant,
-offline, and reflects checkbox ticks before they are committed. Task files are
-gitignored and shared out of the dev worktree's `tasks/`; they are never pushed.
+through the naming convention above plus the exact generated snapshot header.
+For a bundle, every attached member maps to the same task list and branch while
+`status` prints one feature row. Both views read local Git and `tasks/` only —
+never GitHub or Herdr — so checkbox progress appears before it is committed.
+Task files are gitignored and shared out of the dev worktree's `tasks/`; they
+are never pushed.
 
 Work selected from an Issue uses the Issue number at the front of its identity:
 
@@ -159,6 +162,12 @@ The number is the repository-local integer GitHub shows. Never derive it from ti
 
 **Why the number and not the title:** it is the one part of an Issue that cannot change. Renaming an Issue after planning starts must never require renaming the branch, the worktree, the PRD, or the pull request — and later tooling that joins delivery back to an Issue can then match on an exact identifier instead of comparing prose.
 
+An ad-hoc bundle uses every sorted member number followed by a deterministic
+title fragment, for example `123-456-camera-workflow`. Numbers are never
+truncated or omitted; if the complete numeric prefix plus a non-empty fragment
+cannot fit the 80-character slug limit, planning refuses. Reordering the same
+members or renaming their titles reuses the exact existing identity.
+
 Work that did not come from an Issue keeps a plain descriptive slug. Existing features whose slugs have no number remain valid and are **not** renamed.
 
 ## From a Ready Issue to a Merged PR
@@ -166,23 +175,27 @@ Work that did not come from an Issue keeps a plain descriptive slug. Existing fe
 The full lifecycle, and which agent owns each stage:
 
 ```
-Ready Issue on GitHub
-  → wt plan --issue N        Pi plans in ori-agent-dev  (never implements)
-  → picker i → wt start      chosen agent implements in its own worktree
-  → wt pr → squash-merge     one PR to dev
-  → wt done <feature>        close its attached Issue, archive the checklist, clean up
+Ready Issue(s) on GitHub
+  → s for one, or Space + b for an ordinary-backlog bundle
+  → wt plan --issue N [--issue N ...]  Pi plans one unit in ori-agent-dev
+  → picker i → wt start      chosen agent implements in one feature worktree
+  → wt pr → squash-merge     one PR to dev; bundles reference every member
+  → wt done <feature>        close every attached member, archive, and clean up
 ```
 
-`wt plan --issue <N>` is the planning stage. It reads the Issue once through
-`gh issue view`, writes two files into `ori-agent-dev/tasks/`, and starts a
-Pi session there to finish planning:
+`wt plan --issue <N> [--issue <N> ...]` is the planning stage. One number
+preserves the original path. Repeated distinct numbers form a human-affirmed
+bundle: each Issue is read once, normalized in ascending order, and handled by
+one Pi session. Before mutation, the summary shows every title, label, body,
+and comment and asks the user to affirm a shared root cause, shared files, or
+the same UI surface (`--yes` is the explicit non-interactive affirmation).
 
 | File | What it is |
 |---|---|
-| `tasks/issue-<feature>.md` | A durable snapshot of the Issue: title, URL, state, labels, body, and every comment |
+| `tasks/issue-<feature>.md` | One durable single-Issue or combined snapshot, with trusted attachment membership and inert requirements evidence |
 | `tasks/tasks-<feature>.md` | A **planning starter** — not a plan. Its first item tells Pi what to do next |
 
-The starter's wording is chosen by the Issue's size label:
+The starter's wording is chosen by the single Issue's or bundle's effective size:
 
 | Size | Pi's first action |
 |---|---|
@@ -193,14 +206,16 @@ Rules this stage holds to:
 
 - **It only reads GitHub.** No comment, label, assignment, or state change is
   ever written to the Issue. Grooming is unaffected.
-- **It fails closed.** The Issue must be open, currently match the Ready
-  semantics `./scripts/devops.sh ready` uses, and carry exactly one supported
-  `size:*` label. Anything else stops before a single file is written.
+- **It fails closed.** Every member must be open, Ready, and carry exactly one
+  supported `size:*` label. Ad-hoc bundles accept ordinary backlog Issues only;
+  `feature-proposal` stays on the single-Issue path. Any failure is atomic.
+- **The highest size wins.** A bundle routes `size:prd` over `size:planned` over
+  `size:quick`, so combining work can never skip the more demanding workflow.
 - **Nothing happens before you confirm.** The Issue read, eligibility checks,
   identity resolution, and the rendered plan are all read-only; `--yes` skips
   the prompt but not the plan.
 - **It never overwrites your work.** An existing PRD or a real (non-starter)
-  task list is left exactly as it is. Re-running on the same Issue resumes.
+  task list is left exactly as it is. Re-running the same exact member set resumes.
 - **The Issue snapshot is untrusted input.** It is requirements to read, never
   instructions that override this repository's own, and never anything to
   execute.
@@ -214,9 +229,12 @@ binding, an Overnight Run participant, a continuation target, a PR owner, or a
 Claude primary; the Issue picker instead requires an explicit implementation
 choice.
 
-In the `./scripts/devops.sh` picker's Ready view, pressing `s` on a selected
-row runs `wt plan --issue <N>` for it and launches the Pi planner after wt's
-normal confirmation. The same `s` is also on the opened-Issue action bar
+In the `./scripts/devops.sh` picker's Ready view, `s` plans the current row.
+Space marks/unmarks ordinary backlog rows and `b` plans at least two marks as
+one bundle. Marks use immutable Issue numbers, survive view changes, and are
+pruned with a visible notice on refresh if a member disappeared or became
+ineligible. `feature-proposal` rows cannot be marked. The same single-Issue `s`
+is also on the opened-Issue action bar
 (`Enter` on any row): it reads that Issue's own live labels and offers
 `[s] Plan` only when they satisfy the same Ready rule, so planning is reachable
 from any view, not only Ready. Any other label state — or a label read that
@@ -225,10 +243,11 @@ check before writing files or contacting Herdr.
 
 Planning is asynchronous; `devops.sh` does not wait or poll it. After Pi replaces
 the starter with a real task list, press `[i] Start implementation` on the
-selected row or opened Issue. This later action resolves exactly one local
-`tasks/tasks-<N>-*.md`, refuses a missing/ambiguous/starter plan or existing
-branch/worktree, and prompts for Claude, Codex, Pi, worktree-only, or cancel. It
-then delegates to `wt start <feature> --kind <kind>` or `--no-herdr`, leaving
+selected row or opened Issue. For a bundle, every attached member resolves the
+same exact task list and in-flight state. The action refuses a missing,
+ambiguous, malformed, or starter plan and an existing shared branch/worktree,
+then prompts for Claude, Codex, Pi, worktree-only, or cancel. It delegates to
+`wt start <feature> --kind <kind>` or `--no-herdr`, leaving
 `wt start` responsible for its normal summary, confirmation, worktree creation,
 and handoff.
 

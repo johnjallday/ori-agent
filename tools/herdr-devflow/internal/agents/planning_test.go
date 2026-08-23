@@ -280,6 +280,34 @@ func TestBuildIssuePlanRejectsDuplicateBundleMembersBeforeIO(t *testing.T) {
 	}
 }
 
+func TestBuildIssuePlanBundleFetchFailureIsAtomicAndNamesMember(t *testing.T) {
+	t.Parallel()
+	devPath := t.TempDir()
+	issues := &fakeIssueSet{
+		issues: map[int]github.Issue{
+			101: readyIssue(101, "first", RouteQuick),
+			202: readyIssue(202, "second", RoutePlanned),
+		},
+		errors: map[int]error{202: errors.New("network down")},
+	}
+	client := newFakeHerdr(devPath)
+	store := newMemoryStore()
+	service := newPlanningService(client, store, devPath, issues)
+
+	_, err := service.BuildIssuePlan(context.Background(), IssuePlanRequest{IssueNumbers: []int{202, 101}, DevWorktreePath: devPath})
+	var stage *model.StageError
+	if !errors.As(err, &stage) || stage.Code != model.ErrGitHubUnavailable || !strings.Contains(err.Error(), "Issue #202") {
+		t.Fatalf("BuildIssuePlan() error = %v, want member-specific GitHub failure", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(devPath, "tasks")); !os.IsNotExist(statErr) {
+		t.Fatalf("failed bundle fetch touched tasks/: %v", statErr)
+	}
+	state, loadErr := store.Load()
+	if loadErr != nil || len(state.PlanningSessions) != 0 || client.tabCreateCalls != 0 {
+		t.Fatalf("failed bundle fetch mutated state or Herdr: %#v, %v, tabs=%d", state.PlanningSessions, loadErr, client.tabCreateCalls)
+	}
+}
+
 func TestBuildIssuePlanBundleEligibilityIsAtomic(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -800,6 +828,41 @@ func TestTaskListIsPlanningStarterRecognizesLegacyCodexMarker(t *testing.T) {
 	isStarter, err := taskListIsPlanningStarter(path)
 	if err != nil || !isStarter {
 		t.Fatalf("taskListIsPlanningStarter() = %v, %v; want true for a pending legacy plan", isStarter, err)
+	}
+}
+
+func TestBuildIssueBundlePlanNeverOverwritesARealTaskList(t *testing.T) {
+	t.Parallel()
+	devPath := t.TempDir()
+	tasksDir := filepath.Join(devPath, "tasks")
+	if err := os.MkdirAll(tasksDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	slug := "101-202-camera-workflow"
+	snapshot := "# Issue bundle: #101, #202\n\n<!-- ori-devflow: issue-bundle-snapshot; issues=101,202 -->\n"
+	realList := "# Tasks: " + slug + "\n\n- [ ] 1.0 Existing detailed plan.\n"
+	if err := os.WriteFile(filepath.Join(tasksDir, "issue-"+slug+".md"), []byte(snapshot), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(tasksDir, "tasks-"+slug+".md")
+	if err := os.WriteFile(path, []byte(realList), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	issues := &fakeIssueSet{issues: map[int]github.Issue{
+		101: readyIssue(101, "renamed camera", RouteQuick),
+		202: readyIssue(202, "renamed workflow", RoutePlanned),
+	}}
+	service := newPlanningService(newFakeHerdr(devPath), newMemoryStore(), devPath, issues)
+	plan, err := service.BuildIssuePlan(context.Background(), IssuePlanRequest{IssueNumbers: []int{202, 101}, DevWorktreePath: devPath})
+	if err != nil {
+		t.Fatalf("BuildIssuePlan() error = %v", err)
+	}
+	if plan.Slug != slug || plan.ArtifactState != IssueArtifactComplete || plan.Startable() {
+		t.Fatalf("existing bundle plan was not reused as complete: %#v", plan)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil || string(after) != realList {
+		t.Fatalf("real bundle task list changed: %q, %v", after, err)
 	}
 }
 

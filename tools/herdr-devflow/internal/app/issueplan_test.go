@@ -101,6 +101,27 @@ func TestConfirmIssueBundlePlanRequiresCompatibilityAffirmation(t *testing.T) {
 	}
 }
 
+func TestSingleIssuePlanPayloadKeepsLegacyShapeAndAddsOnlyCanonicalNumbers(t *testing.T) {
+	t.Parallel()
+	plan := agents.IssuePlan{
+		IssueNumber:  342,
+		IssueNumbers: []int{342},
+		Title:        "Single",
+		Route:        agents.RoutePlanned,
+		Slug:         "342-single",
+	}
+	payload := issuePlanPayload(plan)
+	if payload["issue_number"] != 342 || payload["title"] != "Single" || payload["feature"] != "342-single" {
+		t.Fatalf("legacy payload fields changed: %#v", payload)
+	}
+	if _, exists := payload["members"]; exists {
+		t.Fatalf("single-Issue payload unexpectedly changed to bundle evidence: %#v", payload)
+	}
+	if _, exists := payload["compatibility_required"]; exists {
+		t.Fatalf("single-Issue payload unexpectedly requires bundle compatibility: %#v", payload)
+	}
+}
+
 func TestIssuePlanPayloadAddsCompleteBundleEvidenceAndKeepsLegacyFields(t *testing.T) {
 	t.Parallel()
 	fetched := time.Date(2026, time.August, 12, 12, 0, 0, 0, time.UTC)
