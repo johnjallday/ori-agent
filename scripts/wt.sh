@@ -5,7 +5,7 @@
 #   source scripts/wt.sh    # Load the function (cd works directly)
 #   wt                      # Interactive REPL (type: go, status, start, ...)
 #   wt go                   # One-shot worktree picker (navigate + cd)
-#   wt plan --issue <N> [--yes]  # Start Pi planning a Ready Issue in the dev worktree
+#   wt plan --issue <N> [--issue <N> ...] [--yes]  # Plan one Ready Issue or an affirmed bundle in dev
 #   wt start [prd] [--kind KIND] [--no-herdr] # Create a worktree from a PRD or task list in the dev tasks/ folder
 #   wt new <name>           # Create a clean worktree (no PRD/tasks)
 #   wt pr [name]            # Push branch and open a PR against dev
@@ -598,8 +598,9 @@ function wt_status_worktrees {
 
 # --- Issue planning -----------------------------------------------------
 #
-# wt plan --issue <N> starts a Pi planning session for one Ready GitHub
-# Issue in the dev worktree. It is a distinct lifecycle stage from wt start:
+# wt plan accepts one Ready GitHub Issue or a repeated --issue bundle and
+# starts one Pi planning session in the dev worktree. It is a distinct lifecycle
+# stage from wt start:
 # planning happens in ori-agent-dev and never creates a branch, a worktree, or
 # an implementation agent. Everything past argument parsing — the fresh
 # GitHub read, eligibility, identity, artifact-state resolution, rendering,
@@ -607,12 +608,12 @@ function wt_status_worktrees {
 # the same way wt status delegates its rendering. This function only
 # validates arguments and resolves the exact dev worktree to plan in.
 function wt_plan_issue_usage {
-  echo "Usage: wt plan --issue <positive-integer> [--yes]"
+  echo "Usage: wt plan --issue <positive-integer> [--issue <positive-integer> ...] [--yes]"
 }
 
 function wt_plan_issue {
-  local issue="" assume_yes=0
-  local -a args
+  local issue="" existing_issue assume_yes=0
+  local -a args issues
   args=("$@")
   local arg index=1
   while (( index <= ${#args[@]} )); do
@@ -625,16 +626,19 @@ function wt_plan_issue {
           wt_plan_issue_usage
           return 1
         fi
-        if [[ -n "$issue" ]]; then
-          echo "wt plan accepts --issue only once"
-          return 1
-        fi
         if [[ ! "${args[$index]}" =~ ^[1-9][0-9]*$ ]]; then
           echo "wt plan --issue requires a positive Issue number"
           wt_plan_issue_usage
           return 1
         fi
         issue="${args[$index]}"
+        for existing_issue in "${issues[@]}"; do
+          if [[ "$existing_issue" == "$issue" ]]; then
+            echo "wt plan does not accept duplicate Issue #$issue"
+            return 1
+          fi
+        done
+        issues+=("$issue")
         ;;
       --yes|-y)
         assume_yes=1
@@ -648,7 +652,7 @@ function wt_plan_issue {
     index=$(( index + 1 ))
   done
 
-  if [[ -z "$issue" ]]; then
+  if (( ${#issues[@]} == 0 )); then
     echo "wt plan requires --issue <positive-integer>"
     wt_plan_issue_usage
     return 1
@@ -665,7 +669,11 @@ function wt_plan_issue {
   # Issue number (already validated above as digits-only) and the resolved
   # worktree path are the only values reaching the helper's argument vector.
   local -a plan_args
-  plan_args=(issue-plan --issue "$issue" --worktree "$dev_path")
+  plan_args=(issue-plan)
+  for issue in "${issues[@]}"; do
+    plan_args+=(--issue "$issue")
+  done
+  plan_args+=(--worktree "$dev_path")
   if (( assume_yes )); then
     plan_args+=(--yes)
   fi
@@ -1821,8 +1829,9 @@ function wt_dispatch {
     echo "Usage: wt [command] [args]"
     echo "  wt               - Interactive REPL (bare 'wt'; type commands, q to quit)"
     echo "  wt go            - One-shot worktree picker (navigate + cd)"
-    echo "  wt plan --issue <N> [--yes] - Start a Pi planning session for a Ready GitHub"
-    echo "                     Issue in the dev worktree (PRD-first or tasks-first by size)."
+    echo "  wt plan --issue <N> [--issue <N> ...] [--yes]"
+    echo "                   - Plan one Ready Issue or an affirmed ordinary-backlog bundle"
+    echo "                     in the dev worktree (highest selected size route wins)."
     echo "                     Writes tasks/issue-<feature>.md and a starter checklist there;"
     echo "                     never touches the Issue on GitHub. Run 'wt start <feature>' once"
     echo "                     Pi has replaced the starter with a real plan."

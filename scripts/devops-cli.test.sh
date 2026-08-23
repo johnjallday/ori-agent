@@ -124,6 +124,60 @@ check "an issue plan refusal explains itself on stderr" \
   "$(start_issue_plan 334 0 2>&1 >/dev/null)" \
   "#334 is not Ready; refusing to start planning."
 
+# Bundle selection is a Bash 3.2-compatible immutable-number set. It accepts
+# only ordinary Ready backlog Issues, toggles uniquely, survives presentation
+# changes, and prunes only against a freshly loaded live index.
+bundle_mark_numbers=()
+bundle_mark_notice=""
+bundle_mark_toggle ready 101 "backlog, size:quick"
+check "bundle mark adds an ordinary Ready backlog Issue" \
+  "$(bundle_mark_contains 101 && echo yes || echo no)" "yes"
+check "bundle mark set stays unique" "${#bundle_mark_numbers[@]}" "1"
+bundle_mark_toggle ready 101 "backlog, size:quick"
+check "bundle mark toggles off" \
+  "$(bundle_mark_contains 101 && echo yes || echo no)" "no"
+bundle_mark_toggle all 101 "backlog, size:quick" >/dev/null 2>&1 || true
+check "bundle marking refuses another view" "${#bundle_mark_numbers[@]}" "0"
+bundle_mark_toggle ready 102 "feature-proposal, size:prd" >/dev/null 2>&1 || true
+check "bundle marking refuses feature proposals" "${#bundle_mark_numbers[@]}" "0"
+bundle_mark_toggle ready 103 "backlog, bundled, size:planned" >/dev/null 2>&1 || true
+check "bundle marking refuses non-Ready backlog" "${#bundle_mark_numbers[@]}" "0"
+
+bundle_mark_numbers=(101 202 303)
+all_issue_numbers=(101 202)
+all_issue_labels=("backlog, size:quick" "feature-proposal, size:prd")
+prune_bundle_marks
+check "refresh pruning keeps only live ordinary Ready marks" \
+  "${bundle_mark_numbers[*]}" "101"
+check "refresh pruning reports every removed mark" "$bundle_mark_notice" \
+  "Refresh removed 2 stale or ineligible bundle mark(s): #202, #303."
+
+eval "$(declare -f launch_pi_bundle_plan | sed '1s/launch_pi_bundle_plan/launch_pi_bundle_plan_real/')"
+launch_pi_bundle_plan() {
+  printf 'launched bundle:'
+  printf ' #%s' "$@"
+  printf '\n'
+}
+all_issue_numbers=(101 202)
+all_issue_labels=("backlog, size:quick" "backlog, size:prd")
+check "bundle plan launches every marked Issue" \
+  "$(start_bundle_plan ready 101 202 2>/dev/null)" "launched bundle: #101 #202"
+check "bundle plan rejects one mark with single-plan guidance" \
+  "$(start_bundle_plan ready 101 2>&1 >/dev/null || true)" \
+  "Mark at least two ordinary Ready backlog Issues; use s to plan one Issue."
+check "bundle plan rejects duplicate marks" \
+  "$(start_bundle_plan ready 101 101 2>&1 >/dev/null || true)" \
+  "Marked Issue #101 appears more than once; unmark it and retry."
+check "bundle plan rejects another view" \
+  "$(start_bundle_plan all 101 202 >/dev/null 2>&1 && echo yes || echo no)" "no"
+check "bundle plan rejects a stale marked member" \
+  "$(start_bundle_plan ready 101 303 >/dev/null 2>&1 && echo yes || echo no)" "no"
+check "bundle plan rejects hostile number text" \
+  "$(start_bundle_plan ready '202; touch nope' 101 >/dev/null 2>&1 && echo yes || echo no)" "no"
+bundle_mark_numbers=()
+all_issue_numbers=()
+all_issue_labels=()
+
 # Decisions carry a stable marker so grooming can distinguish them from an
 # ordinary comment. Rationale is optional and remains plain user-authored text.
 check "decision comment has a marker" \
@@ -633,6 +687,7 @@ cat > "$fake_bin/zsh" <<'SH'
 } >> "$WT_CALLS"
 case "$3" in
   devops-plan) printf 'Pi planner launched for #%s\n' "$5" ;;
+  devops-bundle-plan) printf 'Pi bundle planner launched for #%s and #%s\n' "$5" "$6" ;;
   devops-start) printf 'Implementation start launched for %s with %s\n' "$5" "$6" ;;
 esac
 SH
@@ -719,6 +774,24 @@ done
 check "an unsupported implementation mode is rejected" \
   "$(launch_implementation 777-sample shell >/dev/null 2>&1 && echo yes || echo no)" "no"
 check "an unsupported implementation mode launches no child" \
+  "$(wc -c < "$wt_calls" | tr -d ' ')" "0"
+
+# Exercise the real bundle launcher after the pure unit section replaced it
+# with a recorder. Every Issue is a separate zsh positional argument; the fixed
+# child builds a quoted array rather than flattening or evaluating them.
+launch_real_bundle() (
+  launch_pi_bundle_plan_real "$@"
+)
+bundle_bridge='source "$1" || exit; shift; typeset -a plan_args; plan_args=(); for issue in "$@"; do plan_args+=(--issue "$issue"); done; wt plan "${plan_args[@]}"'
+: > "$wt_calls"
+launch_real_bundle 202 101 > /dev/null
+check "bundle launcher preserves separate Issue arguments" \
+  "$(<"$wt_calls")" \
+  $'CALL\t-c\t'"$bundle_bridge"$'\tdevops-bundle-plan\t'"$repo_root"$'/scripts/wt.sh\t202\t101'
+: > "$wt_calls"
+check "real bundle launcher rejects hostile argument text" \
+  "$(launch_real_bundle 101 '202; touch nope' >/dev/null 2>&1 && echo yes || echo no)" "no"
+check "hostile bundle argument launches no child" \
   "$(wc -c < "$wt_calls" | tr -d ' ')" "0"
 
 # With no arguments in a non-TTY, the command lists every open Issue before
@@ -1351,6 +1424,27 @@ if [[ -z "$s_branch" ]]; then
 fi
 if grep -Eq 'load_picker_index|apply_picker_filter|reload=1' <<< "$s_branch"; then
   printf 'the s key re-queries GitHub or resets the view: %s\n' "$s_branch" >&2
+  exit 1
+fi
+
+# Space marks by immutable Issue number and b launches the complete mark set.
+if ! grep -Fq 'bundle_mark_toggle "${picker_filters[$filter_index]}"' "$script" || \
+   ! grep -Fq '"${issue_numbers[$selected_index]}" "${issue_labels[$selected_index]}"' "$script"; then
+  printf 'the picker Space key does not toggle the current immutable Issue number\n' >&2
+  exit 1
+fi
+if ! grep -Fq 'with_normal_terminal start_bundle_plan "${picker_filters[$filter_index]}"' "$script" || \
+   ! grep -Fq '"${bundle_mark_numbers[@]+"${bundle_mark_numbers[@]}"}"' "$script"; then
+  printf 'the picker b key does not launch the complete marked Issue set\n' >&2
+  exit 1
+fi
+if ! grep -Fq 'Space mark/unmark' "$script" || ! grep -Fq 'b plan marked bundle' "$script"; then
+  printf 'the picker footer does not document bundle selection controls\n' >&2
+  exit 1
+fi
+b_branch="$(awk '/^      b\)$/{inside=1} inside{print} inside && /^        ;;$/{exit}' "$script")"
+if [[ -z "$b_branch" ]] || grep -Eq 'load_picker_index|apply_picker_filter|reload=1' <<< "$b_branch"; then
+  printf 'the b key is missing or resets the cached picker after planning: %s\n' "$b_branch" >&2
   exit 1
 fi
 

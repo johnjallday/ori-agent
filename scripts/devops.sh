@@ -84,10 +84,12 @@ reads the body from stdin.
 
 In the picker's Ready view, pressing `s` on a selected row starts
 `wt plan --issue <N>`, which shows its normal confirmation summary and launches
-a Herdr-managed Pi planner in the dev worktree. The same `s` is available from
-the opened-Issue action bar (Enter on any row) once that Issue's live labels
-satisfy `labels_are_ready`. Any other label state, or a failed label read, is a
-clear refusal instead.
+a Herdr-managed Pi planner in the dev worktree. Space marks ordinary backlog
+rows and `b` plans at least two marks as one bundle after showing all evidence
+and asking for the compatibility affirmation. Feature proposals remain on the
+single-Issue path. The same `s` is available from the opened-Issue action bar
+(Enter on any row) once that Issue's live labels satisfy `labels_are_ready`.
+Any other label state, or a failed label read, is a clear refusal instead.
 
 Planning is asynchronous. Return later and press `i` on the selected or opened
 Issue to resolve its completed local task list, choose Claude, Codex, Pi, or a
@@ -944,10 +946,96 @@ declare -a issue_numbers=()
 declare -a issue_titles=()
 declare -a issue_labels=()
 declare -a issue_updates=()
+# Bundle marks are immutable Issue numbers, never row indexes. Parallel-array
+# helpers keep this compatible with the Bash 3.2 shipped by macOS.
+declare -a bundle_mark_numbers=()
+bundle_mark_notice=""
 picker_error=""
 picker_release_summary=""
 picker_release_error=""
 picker_release_count=0
+
+bundle_labels_are_eligible() {
+  local labels="$1"
+  labels_are_ready "$labels" &&
+    labels_contain "$labels" "backlog" &&
+    ! labels_contain "$labels" "feature-proposal"
+}
+
+bundle_mark_index_of() {
+  local number="$1" index
+  for index in ${bundle_mark_numbers[@]+"${!bundle_mark_numbers[@]}"}; do
+    if [[ "${bundle_mark_numbers[$index]}" == "$number" ]]; then
+      printf '%s' "$index"
+      return 0
+    fi
+  done
+  return 1
+}
+
+bundle_mark_contains() {
+  bundle_mark_index_of "$1" >/dev/null
+}
+
+bundle_mark_remove() {
+  local number="$1" marked
+  local -a kept=()
+  for marked in ${bundle_mark_numbers[@]+"${bundle_mark_numbers[@]}"}; do
+    [[ "$marked" == "$number" ]] || kept+=("$marked")
+  done
+  bundle_mark_numbers=("${kept[@]+"${kept[@]}"}")
+}
+
+bundle_mark_toggle() {
+  local view="$1" number="$2" labels="$3"
+  if [[ "$view" != "ready" ]]; then
+    bundle_mark_notice="Bundle marks are available only in the Ready view."
+    return 1
+  fi
+  if [[ ! "$number" =~ ^[1-9][0-9]*$ ]] || ! bundle_labels_are_eligible "$labels"; then
+    bundle_mark_notice="Only ordinary Ready backlog Issues can be marked; feature proposals stay on the single-Issue plan path."
+    return 1
+  fi
+  if bundle_mark_contains "$number"; then
+    bundle_mark_remove "$number"
+    bundle_mark_notice="Unmarked #$number."
+  else
+    bundle_mark_numbers+=("$number")
+    bundle_mark_notice="Marked #$number for bundle planning."
+  fi
+}
+
+bundle_mark_is_live_eligible() {
+  local number="$1" index
+  for index in ${all_issue_numbers[@]+"${!all_issue_numbers[@]}"}; do
+    if [[ "${all_issue_numbers[$index]}" == "$number" ]]; then
+      bundle_labels_are_eligible "${all_issue_labels[$index]}"
+      return $?
+    fi
+  done
+  return 1
+}
+
+prune_bundle_marks() {
+  local number removed_text="" removed_count=0
+  local -a kept=()
+  for number in ${bundle_mark_numbers[@]+"${bundle_mark_numbers[@]}"}; do
+    if bundle_mark_is_live_eligible "$number"; then
+      kept+=("$number")
+    else
+      removed_count=$((removed_count + 1))
+      if [[ -z "$removed_text" ]]; then
+        removed_text="#$number"
+      else
+        removed_text="$removed_text, #$number"
+      fi
+    fi
+  done
+  bundle_mark_numbers=("${kept[@]+"${kept[@]}"}")
+  if [[ "$removed_count" -gt 0 ]]; then
+    bundle_mark_notice="Refresh removed $removed_count stale or ineligible bundle mark(s): $removed_text."
+  fi
+}
 
 load_picker_release_status() {
   picker_release_summary=""
@@ -1024,8 +1112,8 @@ apply_picker_filter() {
 
 render_picker() {
   local filter_index="$1" selected_index="$2" count="$3"
-  local current_filter="${picker_filters[$filter_index]}" index marker title labels size updated
-  local id id_width row labels_cell flight
+  local current_filter="${picker_filters[$filter_index]}" index cursor mark title labels size updated
+  local id id_width row labels_cell flight marked_count="${#bundle_mark_numbers[@]}"
   local -r title_width=52 size_width=7 flight_width=8 labels_width=26
 
   printf '\033[H\033[2J'
@@ -1057,7 +1145,18 @@ render_picker() {
   style '1' "$(filter_title "$current_filter")"
   printf '  '
   style '2' "$count issue(s)"
-  printf '\n\n'
+  printf '  '
+  if [[ "$marked_count" -gt 0 ]]; then
+    style '1;36' "$marked_count marked for bundle"
+  else
+    style '2' '0 marked for bundle'
+  fi
+  printf '\n'
+  if [[ -n "$bundle_mark_notice" ]]; then
+    style '1;33' "$bundle_mark_notice"
+    printf '\n'
+  fi
+  printf '\n'
 
   if [[ -n "$picker_error" ]]; then
     style '1;31' "$picker_error"
@@ -1078,7 +1177,8 @@ render_picker() {
     done
 
     for ((index = 0; index < count; index++)); do
-      marker=' '
+      cursor=' '
+      mark=' '
       id="#${issue_numbers[$index]}"
       title="$(truncate "${issue_titles[$index]}" "$title_width")"
       size="$(size_label_of "${issue_labels[$index]}")"
@@ -1088,9 +1188,12 @@ render_picker() {
       # The selection highlight covers the whole id+title block, so it has to be
       # one already-padded string rather than several styled fragments.
       if [[ "$index" -eq "$selected_index" ]]; then
-        marker='›'
+        cursor='›'
       fi
-      row="$(printf '%s %-*s %-*s' "$marker" "$id_width" "$id" "$title_width" "$title")"
+      if bundle_mark_contains "${issue_numbers[$index]}"; then
+        mark='●'
+      fi
+      row="$(printf '%s%s %-*s %-*s' "$cursor" "$mark" "$id_width" "$id" "$title_width" "$title")"
       if [[ "$index" -eq "$selected_index" ]]; then
         style '1;30;47' "$row"
       else
@@ -1135,9 +1238,9 @@ render_picker() {
   fi
 
   printf '\n'
-  style '2' '↑/↓ or j/k select  •  ←/→ or h/l change view  •  Enter open Issue  •  c open + decide  •  n new'
+  style '2' '↑/↓ or j/k select  •  ←/→ or h/l change view  •  Space mark/unmark  •  b plan marked bundle'
   printf '\n'
-  style '2' 'o approve  •  s plan  •  i start implementation  •  r refresh  •  ? help  •  q quit'
+  style '2' 'Enter open  •  c decide  •  n new  •  o approve  •  s plan one  •  i start implementation  •  r refresh  •  ? help  •  q quit'
   printf '\n'
 }
 
@@ -1205,12 +1308,19 @@ Picker keys
   c             Open the selected Issue directly at its decision prompt
   n             Capture a new Issue with an optional body
   o             Add the approved label
+  Space         Mark/unmark an ordinary backlog Issue in the Ready view
+  b             Plan at least two marked Issues as one affirmed bundle
   s             Start asynchronous Pi planning for the selected Ready Issue
   i             Start implementation from a completed local plan; choose Claude,
                 Codex, Pi, worktree-only, or cancel
   r             Refresh from GitHub
   ?             Show this help
   q             Quit
+
+Bundle marks survive view changes. Refresh removes marks that disappeared or
+stopped being ordinary Ready backlog Issues; feature proposals remain on the
+single-Issue s path. Bundle planning shows every selected Issue's evidence and
+asks you to affirm a shared root cause, shared files, or the same UI surface.
 
 Writes always show a preview and ask for confirmation. Recorded decisions add
 the answered label as a receipt and leave needs-decision in place until the
@@ -1330,6 +1440,71 @@ launch_pi_plan() {
     return 1
   fi
   zsh -c 'source "$1" && wt plan --issue "$2"' devops-plan "$script_dir/wt.sh" "$issue_number"
+}
+
+# Each selected number crosses the bash-to-zsh boundary as its own positional
+# argument. The fixed child script builds a zsh array and never evaluates Issue
+# data as code.
+launch_pi_bundle_plan() {
+  local number seen
+  local -a numbers=("$@") validated=()
+
+  if [[ "${#numbers[@]}" -lt 2 ]]; then
+    printf 'Bundle planning requires at least two distinct marked Issues; use s for one Issue.\n' >&2
+    return 1
+  fi
+  for number in "${numbers[@]}"; do
+    if [[ ! "$number" =~ ^[1-9][0-9]*$ ]]; then
+      printf 'Bundle planning received an invalid Issue number: %s\n' "$number" >&2
+      return 1
+    fi
+    for seen in ${validated[@]+"${validated[@]}"}; do
+      if [[ "$seen" == "$number" ]]; then
+        printf 'Bundle planning received duplicate Issue #%s.\n' "$number" >&2
+        return 1
+      fi
+    done
+    validated+=("$number")
+  done
+  if ! command -v zsh >/dev/null 2>&1; then
+    printf 'Planning requires zsh to run scripts/wt.sh.\n' >&2
+    return 1
+  fi
+  if [[ ! -f "$script_dir/wt.sh" ]]; then
+    printf 'Planning entrypoint not found: %s\n' "$script_dir/wt.sh" >&2
+    return 1
+  fi
+  zsh -c 'source "$1" || exit; shift; typeset -a plan_args; plan_args=(); for issue in "$@"; do plan_args+=(--issue "$issue"); done; wt plan "${plan_args[@]}"' \
+    devops-bundle-plan "$script_dir/wt.sh" "${validated[@]}"
+}
+
+start_bundle_plan() {
+  local view="$1" number seen
+  shift
+  local -a numbers=("$@") validated=()
+
+  if [[ "$view" != "ready" ]]; then
+    printf 'Switch to the Ready view to plan the marked bundle.\n' >&2
+    return 1
+  fi
+  if [[ "${#numbers[@]}" -lt 2 ]]; then
+    printf 'Mark at least two ordinary Ready backlog Issues; use s to plan one Issue.\n' >&2
+    return 1
+  fi
+  for number in "${numbers[@]}"; do
+    if [[ ! "$number" =~ ^[1-9][0-9]*$ ]] || ! bundle_mark_is_live_eligible "$number"; then
+      printf 'Marked Issue #%s is missing or no longer an ordinary Ready backlog Issue; press r to refresh marks.\n' "$number" >&2
+      return 1
+    fi
+    for seen in ${validated[@]+"${validated[@]}"}; do
+      if [[ "$seen" == "$number" ]]; then
+        printf 'Marked Issue #%s appears more than once; unmark it and retry.\n' "$number" >&2
+        return 1
+      fi
+    done
+    validated+=("$number")
+  done
+  launch_pi_bundle_plan "${validated[@]}"
 }
 
 # start_plan is the Ready-list `s` key. It refuses stale or malformed picker
@@ -1485,7 +1660,9 @@ run_picker() {
   local filter_index=0 selected_index=0 count key reload
   enter_picker_screen
   trap restore_terminal EXIT INT TERM
-  load_picker_index || true
+  if load_picker_index; then
+    prune_bundle_marks
+  fi
   apply_picker_filter "${picker_filters[$filter_index]}"
 
   while true; do
@@ -1528,15 +1705,31 @@ run_picker() {
       o)
         if [[ "$count" -gt 0 ]]; then
           with_normal_terminal prompt_approve_issue "${issue_numbers[$selected_index]}"
-          load_picker_index || true
+          if load_picker_index; then
+            prune_bundle_marks
+          fi
           apply_picker_filter "${picker_filters[$filter_index]}"
         fi
         ;;
       n)
         # Capture does not need a selected row, so it works on an empty list.
         with_normal_terminal prompt_create_issue
-        load_picker_index || true
+        if load_picker_index; then
+          prune_bundle_marks
+        fi
         apply_picker_filter "${picker_filters[$filter_index]}"
+        ;;
+      ' ')
+        if [[ "$count" -gt 0 ]]; then
+          bundle_mark_toggle "${picker_filters[$filter_index]}" \
+            "${issue_numbers[$selected_index]}" "${issue_labels[$selected_index]}" || true
+        fi
+        ;;
+      b)
+        # Keep the cached index and marks after a decline, success, or helper
+        # refusal; only an explicit refresh is allowed to prune selection.
+        with_normal_terminal start_bundle_plan "${picker_filters[$filter_index]}" \
+          "${bundle_mark_numbers[@]+"${bundle_mark_numbers[@]}"}"
         ;;
       s)
         # Drop out of the alternate screen while wt shows its confirmation and
@@ -1561,7 +1754,9 @@ run_picker() {
     esac
     if [[ "$reload" -eq 1 ]]; then
       if [[ "$key" == r ]]; then
-        load_picker_index || true
+        if load_picker_index; then
+          prune_bundle_marks
+        fi
       fi
       apply_picker_filter "${picker_filters[$filter_index]}"
     fi
