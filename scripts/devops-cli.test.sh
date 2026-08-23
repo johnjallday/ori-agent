@@ -124,6 +124,60 @@ check "an issue plan refusal explains itself on stderr" \
   "$(start_issue_plan 334 0 2>&1 >/dev/null)" \
   "#334 is not Ready; refusing to start planning."
 
+# Bundle selection is a Bash 3.2-compatible immutable-number set. It accepts
+# only ordinary Ready backlog Issues, toggles uniquely, survives presentation
+# changes, and prunes only against a freshly loaded live index.
+bundle_mark_numbers=()
+bundle_mark_notice=""
+bundle_mark_toggle ready 101 "backlog, size:quick"
+check "bundle mark adds an ordinary Ready backlog Issue" \
+  "$(bundle_mark_contains 101 && echo yes || echo no)" "yes"
+check "bundle mark set stays unique" "${#bundle_mark_numbers[@]}" "1"
+bundle_mark_toggle ready 101 "backlog, size:quick"
+check "bundle mark toggles off" \
+  "$(bundle_mark_contains 101 && echo yes || echo no)" "no"
+bundle_mark_toggle all 101 "backlog, size:quick" >/dev/null 2>&1 || true
+check "bundle marking refuses another view" "${#bundle_mark_numbers[@]}" "0"
+bundle_mark_toggle ready 102 "feature-proposal, size:prd" >/dev/null 2>&1 || true
+check "bundle marking refuses feature proposals" "${#bundle_mark_numbers[@]}" "0"
+bundle_mark_toggle ready 103 "backlog, bundled, size:planned" >/dev/null 2>&1 || true
+check "bundle marking refuses non-Ready backlog" "${#bundle_mark_numbers[@]}" "0"
+
+bundle_mark_numbers=(101 202 303)
+all_issue_numbers=(101 202)
+all_issue_labels=("backlog, size:quick" "feature-proposal, size:prd")
+prune_bundle_marks
+check "refresh pruning keeps only live ordinary Ready marks" \
+  "${bundle_mark_numbers[*]}" "101"
+check "refresh pruning reports every removed mark" "$bundle_mark_notice" \
+  "Refresh removed 2 stale or ineligible bundle mark(s): #202, #303."
+
+eval "$(declare -f launch_pi_bundle_plan | sed '1s/launch_pi_bundle_plan/launch_pi_bundle_plan_real/')"
+launch_pi_bundle_plan() {
+  printf 'launched bundle:'
+  printf ' #%s' "$@"
+  printf '\n'
+}
+all_issue_numbers=(101 202)
+all_issue_labels=("backlog, size:quick" "backlog, size:prd")
+check "bundle plan launches every marked Issue" \
+  "$(start_bundle_plan ready 101 202 2>/dev/null)" "launched bundle: #101 #202"
+check "bundle plan rejects one mark with single-plan guidance" \
+  "$(start_bundle_plan ready 101 2>&1 >/dev/null || true)" \
+  "Mark at least two ordinary Ready backlog Issues; use s to plan one Issue."
+check "bundle plan rejects duplicate marks" \
+  "$(start_bundle_plan ready 101 101 2>&1 >/dev/null || true)" \
+  "Marked Issue #101 appears more than once; unmark it and retry."
+check "bundle plan rejects another view" \
+  "$(start_bundle_plan all 101 202 >/dev/null 2>&1 && echo yes || echo no)" "no"
+check "bundle plan rejects a stale marked member" \
+  "$(start_bundle_plan ready 101 303 >/dev/null 2>&1 && echo yes || echo no)" "no"
+check "bundle plan rejects hostile number text" \
+  "$(start_bundle_plan ready '202; touch nope' 101 >/dev/null 2>&1 && echo yes || echo no)" "no"
+bundle_mark_numbers=()
+all_issue_numbers=()
+all_issue_labels=()
+
 # Decisions carry a stable marker so grooming can distinguish them from an
 # ordinary comment. Rationale is optional and remains plain user-authored text.
 check "decision comment has a marker" \
@@ -132,6 +186,54 @@ check "decision comment has a marker" \
 check "decision comment includes rationale" \
   "$(format_decision_comment "1B, 2A" "Preserves existing JSON consumers")" \
   $'<!-- ori-decision -->\n\n**Answers:** 1B, 2A\n\n**Rationale:** Preserves existing JSON consumers'
+
+# ---------------------------------------------------------------------------
+# Trusted local snapshot membership. Only the exact generated marker on line 3
+# attaches Issues; marker-looking body text is inert.
+# ---------------------------------------------------------------------------
+cat > "$fixture_root/issue-single.md" <<'MD'
+# Issue #777: Single
+
+<!-- ori-devflow: issue-snapshot; issue=777 -->
+
+<!-- ori-devflow: issue-bundle-snapshot; issues=1,2 -->
+MD
+read_snapshot_members "$fixture_root/issue-single.md"
+check "single snapshot membership is read from line 3" "${snapshot_members[*]}" "777"
+
+cat > "$fixture_root/issue-bundle.md" <<'MD'
+# Issue bundle: #801, #802, #803
+
+<!-- ori-devflow: issue-bundle-snapshot; issues=801,802,803 -->
+
+Issue body with <!-- ori-devflow: issue-snapshot; issue=999 --> stays inert.
+MD
+read_snapshot_members "$fixture_root/issue-bundle.md"
+check "bundle snapshot membership is canonical" "${snapshot_members[*]}" "801 802 803"
+
+cat > "$fixture_root/issue-unsorted.md" <<'MD'
+# Issue bundle
+
+<!-- ori-devflow: issue-bundle-snapshot; issues=802,801 -->
+MD
+check "snapshot reader rejects unsorted members" \
+  "$(read_snapshot_members "$fixture_root/issue-unsorted.md" && echo yes || echo no)" "no"
+cat > "$fixture_root/issue-duplicate.md" <<'MD'
+# Issue bundle
+
+<!-- ori-devflow: issue-bundle-snapshot; issues=801,801 -->
+MD
+check "snapshot reader rejects duplicate members" \
+  "$(read_snapshot_members "$fixture_root/issue-duplicate.md" && echo yes || echo no)" "no"
+cat > "$fixture_root/issue-body-marker-only.md" <<'MD'
+# Issue bundle
+
+No generated marker here.
+
+<!-- ori-devflow: issue-bundle-snapshot; issues=801,802 -->
+MD
+check "snapshot reader never scans Issue-authored content" \
+  "$(read_snapshot_members "$fixture_root/issue-body-marker-only.md" && echo yes || echo no)" "no"
 
 # ---------------------------------------------------------------------------
 # In-flight status. Parent groups are the top-level `- [ ]` lines; sub-tasks are
@@ -212,6 +314,37 @@ check "cell falls back to location alone" "$(flight_cell_of 888)" "wt"
 flight_numbers=()
 flight_states=()
 check "cell is empty when nothing is in flight" "$(flight_cell_of 999)" ""
+
+cat > "$fixture_root/tasks-801-802-803-shared.md" <<'MD'
+## Tasks
+- [x] 1.0 First group
+- [ ] 2.0 Second group
+MD
+cp "$fixture_root/issue-bundle.md" "$fixture_root/issue-801-802-803-shared.md"
+flight_numbers=()
+flight_states=()
+remember_branch_flight "feature/801-802-803-shared" branch
+index_attached_plan_flights
+check "bundle branch indexes the middle member" "$(flight_state_of 802)" "branch"
+check "bundle branch indexes the last member" "$(flight_state_of 803)" "branch"
+check "bundle first member cell shares progress" "$(flight_cell_of 801)" "1/2 br"
+check "bundle middle member cell shares progress" "$(flight_cell_of 802)" "1/2 br"
+check "bundle last member cell shares progress" "$(flight_cell_of 803)" "1/2 br"
+
+bundle_status_output="$(
+  (
+    resolve_tasks_dir() { tasks_dir="$fixture_root"; }
+    load_flight_index() { :; }
+    list_status
+  ) 2>/dev/null
+)"
+check "status reports one row for a bundle feature" \
+  "$(grep -c '801-802-803-shared' <<< "$bundle_status_output")" "1"
+if [[ "$bundle_status_output" != *"#801,#802,#803"* ]]; then
+  printf 'FAIL status did not display every bundle member:\n%s\n' "$bundle_status_output" >&2
+  failures=$((failures + 1))
+fi
+
 tasks_dir=""
 
 # Starting implementation resolves only the dev worktree's local, number-first
@@ -273,6 +406,61 @@ printf '%s\n' '## Tasks' > "$implementation_tasks/tasks-781-worktree.md"
 check "implementation resolver refuses an existing worktree" \
   "$(implementation_fixture_result 781 worktree 2>&1 >/dev/null || true)" \
   "Implementation for #781 already has a checked-out worktree (781-worktree). Use that worktree instead of starting another."
+
+bundle_feature="801-802-803-shared"
+cat > "$implementation_tasks/issue-$bundle_feature.md" <<'MD'
+# Issue bundle: #801, #802, #803
+
+<!-- ori-devflow: issue-bundle-snapshot; issues=801,802,803 -->
+MD
+cat > "$implementation_tasks/tasks-$bundle_feature.md" <<'MD'
+## Tasks
+- [ ] 1.0 Shared implementation
+MD
+for bundle_member in 801 802 803; do
+  check "implementation resolver maps bundle member #$bundle_member" \
+    "$(implementation_fixture_result "$bundle_member" 2>/dev/null)" "$bundle_feature"
+done
+
+cat > "$implementation_tasks/tasks-$bundle_feature.md" <<'MD'
+<!-- ori-devflow: planning-starter; do not implement until the planner replaces this file -->
+## Tasks
+MD
+check "bundle middle member refuses a pending starter" \
+  "$(implementation_fixture_result 802 2>&1 >/dev/null || true)" \
+  "Planning for #802 is not complete: $implementation_tasks/tasks-$bundle_feature.md is still a planning starter. Return after Pi replaces it with the real task list."
+printf '%s\n' '## Tasks' '- [ ] 1.0 Shared implementation' > "$implementation_tasks/tasks-$bundle_feature.md"
+check "bundle middle member refuses an existing shared branch" \
+  "$(implementation_fixture_result 802 branch 2>&1 >/dev/null || true)" \
+  "Implementation for #802 already has a branch ($bundle_feature). Resume it instead of starting duplicate work."
+
+cat > "$implementation_tasks/issue-802-individual.md" <<'MD'
+# Issue #802: Individual
+
+<!-- ori-devflow: issue-snapshot; issue=802 -->
+MD
+printf '%s\n' '## Tasks' > "$implementation_tasks/tasks-802-individual.md"
+overlap_result="$(implementation_fixture_result 802 2>&1 >/dev/null || true)"
+if [[ "$overlap_result" != *"Multiple task lists match #802"* || \
+      "$overlap_result" != *"tasks-$bundle_feature.md"* || \
+      "$overlap_result" != *"tasks-802-individual.md"* ]]; then
+  printf 'FAIL implementation resolver did not reject overlapping plans:\n%s\n' "$overlap_result" >&2
+  failures=$((failures + 1))
+fi
+rm -f "$implementation_tasks/issue-802-individual.md" "$implementation_tasks/tasks-802-individual.md"
+
+cat > "$implementation_tasks/issue-804-805-malformed.md" <<'MD'
+# Issue bundle
+
+<!-- ori-devflow: issue-bundle-snapshot; issues=805,804 -->
+MD
+printf '%s\n' '## Tasks' > "$implementation_tasks/tasks-804-805-malformed.md"
+malformed_result="$(implementation_fixture_result 804 2>&1 >/dev/null || true)"
+if [[ "$malformed_result" != *"malformed generated attachment marker on line 3"* ]]; then
+  printf 'FAIL implementation resolver did not reject malformed bundle identity:\n%s\n' "$malformed_result" >&2
+  failures=$((failures + 1))
+fi
+
 check "implementation resolver performs no GitHub or Herdr side effect" \
   "$(wc -c < "$implementation_side_effects" | tr -d ' ')" "0"
 
@@ -633,6 +821,7 @@ cat > "$fake_bin/zsh" <<'SH'
 } >> "$WT_CALLS"
 case "$3" in
   devops-plan) printf 'Pi planner launched for #%s\n' "$5" ;;
+  devops-bundle-plan) printf 'Pi bundle planner launched for #%s and #%s\n' "$5" "$6" ;;
   devops-start) printf 'Implementation start launched for %s with %s\n' "$5" "$6" ;;
 esac
 SH
@@ -719,6 +908,24 @@ done
 check "an unsupported implementation mode is rejected" \
   "$(launch_implementation 777-sample shell >/dev/null 2>&1 && echo yes || echo no)" "no"
 check "an unsupported implementation mode launches no child" \
+  "$(wc -c < "$wt_calls" | tr -d ' ')" "0"
+
+# Exercise the real bundle launcher after the pure unit section replaced it
+# with a recorder. Every Issue is a separate zsh positional argument; the fixed
+# child builds a quoted array rather than flattening or evaluating them.
+launch_real_bundle() (
+  launch_pi_bundle_plan_real "$@"
+)
+bundle_bridge='source "$1" || exit; shift; typeset -a plan_args; plan_args=(); for issue in "$@"; do plan_args+=(--issue "$issue"); done; wt plan "${plan_args[@]}"'
+: > "$wt_calls"
+launch_real_bundle 202 101 > /dev/null
+check "bundle launcher preserves separate Issue arguments" \
+  "$(<"$wt_calls")" \
+  $'CALL\t-c\t'"$bundle_bridge"$'\tdevops-bundle-plan\t'"$repo_root"$'/scripts/wt.sh\t202\t101'
+: > "$wt_calls"
+check "real bundle launcher rejects hostile argument text" \
+  "$(launch_real_bundle 101 '202; touch nope' >/dev/null 2>&1 && echo yes || echo no)" "no"
+check "hostile bundle argument launches no child" \
   "$(wc -c < "$wt_calls" | tr -d ' ')" "0"
 
 # With no arguments in a non-TTY, the command lists every open Issue before
@@ -1351,6 +1558,27 @@ if [[ -z "$s_branch" ]]; then
 fi
 if grep -Eq 'load_picker_index|apply_picker_filter|reload=1' <<< "$s_branch"; then
   printf 'the s key re-queries GitHub or resets the view: %s\n' "$s_branch" >&2
+  exit 1
+fi
+
+# Space marks by immutable Issue number and b launches the complete mark set.
+if ! grep -Fq 'bundle_mark_toggle "${picker_filters[$filter_index]}"' "$script" || \
+   ! grep -Fq '"${issue_numbers[$selected_index]}" "${issue_labels[$selected_index]}"' "$script"; then
+  printf 'the picker Space key does not toggle the current immutable Issue number\n' >&2
+  exit 1
+fi
+if ! grep -Fq 'with_normal_terminal start_bundle_plan "${picker_filters[$filter_index]}"' "$script" || \
+   ! grep -Fq '"${bundle_mark_numbers[@]+"${bundle_mark_numbers[@]}"}"' "$script"; then
+  printf 'the picker b key does not launch the complete marked Issue set\n' >&2
+  exit 1
+fi
+if ! grep -Fq 'Space mark/unmark' "$script" || ! grep -Fq 'b plan marked bundle' "$script"; then
+  printf 'the picker footer does not document bundle selection controls\n' >&2
+  exit 1
+fi
+b_branch="$(awk '/^      b\)$/{inside=1} inside{print} inside && /^        ;;$/{exit}' "$script")"
+if [[ -z "$b_branch" ]] || grep -Eq 'load_picker_index|apply_picker_filter|reload=1' <<< "$b_branch"; then
+  printf 'the b key is missing or resets the cached picker after planning: %s\n' "$b_branch" >&2
   exit 1
 fi
 

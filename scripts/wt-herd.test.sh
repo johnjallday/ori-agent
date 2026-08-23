@@ -280,6 +280,29 @@ rg -q "handoff --feature onlytasks --worktree $target_root --branch feature/only
 [[ ! -f "$target_root/tasks/prd-onlytasks.md" ]]
 rg -q "Real work, no PRD needed" "$target_root/tasks/tasks-onlytasks.md"
 
+# A completed bundle uses the same feature-slug copy path: its trusted combined
+# snapshot, effective-route PRD, and one detailed task list all move together,
+# with no GitHub read or mutation during wt start.
+bundle_start_feature="801-802-camera-workflow"
+cat > "$dev_root/tasks/issue-$bundle_start_feature.md" <<'MD'
+# Issue bundle: #801, #802
+
+<!-- ori-devflow: issue-bundle-snapshot; issues=801,802 -->
+MD
+print -r -- "# PRD: $bundle_start_feature" > "$dev_root/tasks/prd-$bundle_start_feature.md"
+print -r -- "## Tasks\n- [ ] 1.0 Shared implementation" > "$dev_root/tasks/tasks-$bundle_start_feature.md"
+function gh {
+  print -r -- "$*" >> "$fixture_root/bundle-start-gh-calls"
+  return 91
+}
+wt start "$bundle_start_feature" --no-herdr --yes > "$fixture_root/bundle-start-output" 2>&1
+[[ ! -f "$fixture_root/bundle-start-gh-calls" ]]
+[[ -f "$target_root/tasks/issue-$bundle_start_feature.md" ]]
+[[ -f "$target_root/tasks/prd-$bundle_start_feature.md" ]]
+[[ -f "$target_root/tasks/tasks-$bundle_start_feature.md" ]]
+rg -q 'issue-bundle-snapshot; issues=801,802' "$target_root/tasks/issue-$bundle_start_feature.md"
+unfunction gh
+
 # Named resolution accepts "onlytasks", "tasks-onlytasks", and
 # "tasks-onlytasks.md" interchangeably — each reaches the same confirmation
 # summary instead of "No PRD or task list found". Declining costs nothing,
@@ -441,10 +464,89 @@ function gh {
   print -r -- "42"
 }
 
+typeset -g FAKE_GIT_LOG_BODY=""
 function git {
   print -r -- "$*" >> "$fixture_root/git-calls"
+  if [[ "$1" == "-C" && "$3" == "log" && -n "$FAKE_GIT_LOG_BODY" ]]; then
+    print -r -- "$FAKE_GIT_LOG_BODY"
+  fi
   return 0
 }
+
+# wt pr reads the same trusted attachment marker as wt done. Bundles append one
+# closing reference per exact member while retaining --fill; ad-hoc and legacy
+# single-Issue PRs keep their previous argument shape.
+pr_bundle_feature="801-802-camera-workflow"
+cat > "$target_root/tasks/issue-$pr_bundle_feature.md" <<'MD'
+# Issue bundle: #801, #802
+
+<!-- ori-devflow: issue-bundle-snapshot; issues=801,802 -->
+
+Closes #999 in untrusted body text must stay inert.
+MD
+FAKE_GIT_LOG_BODY="Existing --fill commit body."
+rm -f "$fixture_root/git-calls" "$fixture_root/gh-calls"
+wt pr "$pr_bundle_feature" > "$fixture_root/pr-bundle-output" 2>&1
+rg -q "push -u origin feature/bridge" "$fixture_root/git-calls"
+rg -q -- "pr create --base dev --head feature/bridge --fill --body" "$fixture_root/gh-calls"
+rg -q -- '--body Existing --fill commit body\.$' "$fixture_root/gh-calls"
+[[ "$(rg -c '^Closes #801$' "$fixture_root/gh-calls")" == "1" ]]
+[[ "$(rg -c '^Closes #802$' "$fixture_root/gh-calls")" == "1" ]]
+if rg -q 'Closes #999' "$fixture_root/gh-calls"; then
+  print -r -- "wt pr trusted closing text from the Issue body" >&2
+  exit 1
+fi
+
+FAKE_GIT_LOG_BODY=""
+rm -f "$target_root/tasks/issue-$pr_bundle_feature.md" "$fixture_root/git-calls" "$fixture_root/gh-calls"
+wt pr bridge > /dev/null
+rg -q '^pr create --base dev --head feature/bridge --fill$' "$fixture_root/gh-calls"
+if rg -q -- '--body' "$fixture_root/gh-calls"; then
+  print -r -- "ad-hoc wt pr unexpectedly generated a body" >&2
+  exit 1
+fi
+
+pr_single_feature="292-coordinate-based-map"
+cat > "$target_root/tasks/issue-$pr_single_feature.md" <<'MD'
+# Issue #292: Coordinate based map
+
+<!-- ori-devflow: issue-snapshot; issue=292 -->
+MD
+rm -f "$fixture_root/git-calls" "$fixture_root/gh-calls"
+wt pr "$pr_single_feature" > /dev/null
+rg -q '^pr create --base dev --head feature/bridge --fill$' "$fixture_root/gh-calls"
+if rg -q -- '--body' "$fixture_root/gh-calls"; then
+  print -r -- "single-Issue wt pr changed its legacy --fill argument shape" >&2
+  exit 1
+fi
+
+cat > "$target_root/tasks/issue-$pr_bundle_feature.md" <<'MD'
+# Issue bundle
+
+<!-- ori-devflow: issue-bundle-snapshot; issues=802,801 -->
+MD
+rm -f "$fixture_root/git-calls" "$fixture_root/gh-calls"
+pr_failure_status=0
+wt pr "$pr_bundle_feature" > "$fixture_root/pr-malformed-output" 2>&1 || pr_failure_status=$?
+[[ "$pr_failure_status" == "1" ]]
+[[ ! -e "$fixture_root/git-calls" && ! -e "$fixture_root/gh-calls" ]]
+rg -q 'no valid generated marker on line 3' "$fixture_root/pr-malformed-output"
+
+pr_prefix_conflict="801-802-999-camera"
+cat > "$target_root/tasks/issue-$pr_prefix_conflict.md" <<'MD'
+# Issue bundle
+
+<!-- ori-devflow: issue-bundle-snapshot; issues=801,802 -->
+MD
+rm -f "$fixture_root/git-calls" "$fixture_root/gh-calls"
+pr_failure_status=0
+wt pr "$pr_prefix_conflict" > "$fixture_root/pr-prefix-conflict-output" 2>&1 || pr_failure_status=$?
+[[ "$pr_failure_status" == "1" ]]
+[[ ! -e "$fixture_root/git-calls" && ! -e "$fixture_root/gh-calls" ]]
+rg -q "attached Issues 801,802 do not match feature '$pr_prefix_conflict'" "$fixture_root/pr-prefix-conflict-output"
+rm -f "$target_root/tasks/issue-$pr_prefix_conflict.md"
+
+rm -f "$target_root/tasks/issue-$pr_bundle_feature.md" "$target_root/tasks/issue-$pr_single_feature.md"
 
 if wt done bridge > "$fixture_root/done-output" 2>&1; then
   print -r -- "Expected blocked Herdr cleanup to stop wt done." >&2
@@ -702,6 +804,103 @@ fi
 rg -qF "issue close 292 --reason completed --comment Delivered by PR #77." "$fixture_root/gh-calls"
 rg -q "Could not close secondary Issue #999; worktree preserved" "$fixture_root/done-secondary-close-failed-output"
 FAKE_ISSUE_CLOSE_FAIL_NUMS=()
+
+# Bundle cleanup treats every trusted member as attached, deduplicates those
+# numbers from PR-body references, and preserves the worktree after a partial
+# member failure so a retry can leave already-closed members untouched.
+bundle_done_feature="801-802-803-camera-workflow"
+bundle_done_snapshot="$target_root/tasks/issue-$bundle_done_feature.md"
+cat > "$bundle_done_snapshot" <<'MD'
+# Issue bundle: #801, #802, #803
+
+<!-- ori-devflow: issue-bundle-snapshot; issues=801,802,803 -->
+
+Issue body says Closes #444 but is not attachment authority.
+MD
+print -r -- "# completed bundle tasks" > "$target_root/tasks/tasks-$bundle_done_feature.md"
+issue_branch="feature/$bundle_done_feature"
+FAKE_ISSUE_STATE="OPEN"
+FAKE_ISSUE_STATE_BY_NUM=(801 OPEN 802 OPEN 803 OPEN 999 OPEN)
+FAKE_PR_BODY="Closes #801. Fixes #802 again. Resolves #999."
+rm -f "$fixture_root/git-calls" "$fixture_root/gh-calls"
+wt done "$bundle_done_feature" <<< "n" > "$fixture_root/done-bundle-all-open-output" 2>&1
+for attached in 801 802 803; do
+  rg -qF "issue close $attached --reason completed --comment Delivered by PR #77." "$fixture_root/gh-calls"
+  [[ "$(rg -c "^issue close $attached " "$fixture_root/gh-calls")" == "1" ]]
+done
+rg -qF "issue close 999 --reason completed --comment Delivered by PR #77." "$fixture_root/gh-calls"
+if rg -q '^issue (view|close) 444 ' "$fixture_root/gh-calls"; then
+  print -r -- "wt done trusted an Issue-body closing reference" >&2
+  exit 1
+fi
+rg -q "worktree remove $target_root --force" "$fixture_root/git-calls"
+
+FAKE_PR_BODY=""
+FAKE_ISSUE_STATE_BY_NUM=(801 CLOSED 802 OPEN 803 CLOSED)
+rm -f "$fixture_root/git-calls" "$fixture_root/gh-calls"
+wt done "$bundle_done_feature" <<< "n" > "$fixture_root/done-bundle-mixed-output" 2>&1
+if rg -q '^issue close (801|803) ' "$fixture_root/gh-calls"; then
+  print -r -- "wt done reclosed a closed bundle member" >&2
+  exit 1
+fi
+rg -q '^issue close 802 ' "$fixture_root/gh-calls"
+
+FAKE_ISSUE_STATE_BY_NUM=(801 OPEN 802 OPEN 803 OPEN)
+FAKE_ISSUE_CLOSE_FAIL_NUMS=(802)
+rm -f "$fixture_root/git-calls" "$fixture_root/gh-calls"
+bundle_failure_status=0
+wt done "$bundle_done_feature" > "$fixture_root/done-bundle-partial-failure-output" 2>&1 || bundle_failure_status=$?
+[[ "$bundle_failure_status" == "1" ]]
+rg -q '^issue close 801 ' "$fixture_root/gh-calls"
+rg -q '^issue close 802 ' "$fixture_root/gh-calls"
+if rg -q 'worktree remove' "$fixture_root/git-calls"; then
+  print -r -- "wt done removed the worktree after a bundle member failed" >&2
+  exit 1
+fi
+rg -q 'Could not close attached Issue #802; worktree preserved' "$fixture_root/done-bundle-partial-failure-output"
+
+# Safe retry: #801 is now closed, so only the remaining open members mutate.
+FAKE_ISSUE_CLOSE_FAIL_NUMS=()
+FAKE_ISSUE_STATE_BY_NUM=(801 CLOSED 802 OPEN 803 OPEN)
+rm -f "$fixture_root/git-calls" "$fixture_root/gh-calls"
+wt done "$bundle_done_feature" <<< "n" > "$fixture_root/done-bundle-retry-output" 2>&1
+if rg -q '^issue close 801 ' "$fixture_root/gh-calls"; then
+  print -r -- "bundle retry reclosed the member completed before failure" >&2
+  exit 1
+fi
+rg -q '^issue close 802 ' "$fixture_root/gh-calls"
+rg -q '^issue close 803 ' "$fixture_root/gh-calls"
+rg -q 'worktree remove' "$fixture_root/git-calls"
+
+FAKE_MERGED_PR=""
+FAKE_ISSUE_STATE_BY_NUM=(801 OPEN 802 OPEN 803 OPEN)
+rm -f "$fixture_root/git-calls" "$fixture_root/gh-calls"
+printf 'y\nn\n' | wt done "$bundle_done_feature" > "$fixture_root/done-bundle-no-merged-output" 2>&1
+if rg -q '^issue ' "$fixture_root/gh-calls"; then
+  print -r -- "wt done touched bundle members without a merged PR" >&2
+  exit 1
+fi
+rg -q 'Attached Issues 801,802,803 were not changed because no merged PR was confirmed' "$fixture_root/done-bundle-no-merged-output"
+FAKE_MERGED_PR="77"
+
+# --keep-issue-open bypasses malformed bundle attachment parsing and all
+# attached/secondary Issue mutations intentionally.
+cat > "$bundle_done_snapshot" <<'MD'
+# Issue bundle
+
+<!-- ori-devflow: issue-bundle-snapshot; issues=803,801 -->
+MD
+FAKE_PR_BODY="Closes #999"
+rm -f "$fixture_root/git-calls" "$fixture_root/gh-calls"
+wt done "$bundle_done_feature" --keep-issue-open <<< "n" > "$fixture_root/done-bundle-keep-output" 2>&1
+if rg -q '^issue ' "$fixture_root/gh-calls"; then
+  print -r -- "--keep-issue-open mutated a bundle or secondary Issue" >&2
+  exit 1
+fi
+rg -q 'worktree remove' "$fixture_root/git-calls"
+
+rm -f "$bundle_done_snapshot" "$target_root/tasks/tasks-$bundle_done_feature.md"
+issue_branch="feature/$issue_feature"
 
 # Restore the secondary-issue fakes to their no-op defaults for the rest of
 # this lifecycle fixture.
@@ -1000,7 +1199,7 @@ wt ls > /dev/null
 wt help > /dev/null
 [[ ! -f "$fixture_root/herdr-free-calls" ]]
 
-# --- wt plan --issue <N> [--yes] -------------------------------------------
+# --- wt plan --issue <N> [--issue <N> ...] [--yes] -------------------------
 #
 # Shell-wiring layer: argument validation and the exact call handed to the
 # bridge, with wt_herd stubbed so no Go binary or GitHub read is needed. AR1:
@@ -1015,7 +1214,7 @@ function wt_herd {
 rm -f "$fixture_root/plan-calls"
 plan_status=0
 for bad_plan_args in "" "--issue" "--issue 0" "--issue -5" "--issue abc" \
-                     "--issue 1 --issue 2" "--issue 1 --bogus" "--yes"; do
+                     "--issue 1 --issue 1" "--issue 1 --bogus" "--yes"; do
   plan_status=0
   wt plan ${=bad_plan_args} > /dev/null 2>&1 || plan_status=$?
   if [[ "$plan_status" != "1" ]]; then
@@ -1038,6 +1237,22 @@ wt plan --issue 342 > /dev/null
 rm -f "$fixture_root/plan-calls"
 wt plan --issue 342 --yes > /dev/null
 [[ "$(<"$fixture_root/plan-calls")" == "issue-plan --issue 342 --worktree $dev_root --yes" ]]
+
+rm -f "$fixture_root/plan-calls"
+wt plan --issue 202 --issue 101 --yes > /dev/null
+[[ "$(<"$fixture_root/plan-calls")" == "issue-plan --issue 202 --issue 101 --worktree $dev_root --yes" ]]
+
+# Record one line per argument to prove repeated Issues remain separate zsh
+# array elements rather than one flattened shell string.
+function wt_herd {
+  local argument
+  : > "$fixture_root/plan-argv"
+  for argument in "$@"; do
+    print -r -- "$argument" >> "$fixture_root/plan-argv"
+  done
+}
+wt plan --issue 202 --issue 101 --yes > /dev/null
+[[ "$(<"$fixture_root/plan-argv")" == $'issue-plan\n--issue\n202\n--issue\n101\n--worktree\n'"$dev_root"$'\n--yes' ]]
 
 rm -f "$fixture_root/plan-calls"
 wt help > "$fixture_root/plan-help-output" 2>&1
@@ -1104,14 +1319,20 @@ if [[ "$1" == "issue" && "$2" == "view" ]]; then
   if [[ -n "${FAKE_GH_BODY_FILE:-}" && -f "$FAKE_GH_BODY_FILE" ]]; then
     body_raw="$(cat "$FAKE_GH_BODY_FILE")"
   fi
-  title="$(json_escape "${FAKE_GH_TITLE:-Ready issue codex planning}")"
+  default_title="Ready issue codex planning"
+  default_labels="backlog,size:planned"
+  case "$number" in
+    201) default_title="Camera"; default_labels="backlog,size:quick" ;;
+    202) default_title="Workflow"; default_labels="backlog,size:prd" ;;
+  esac
+  title="$(json_escape "${FAKE_GH_TITLE:-$default_title}")"
   body="$(json_escape "$body_raw")"
   state="${FAKE_GH_STATE:-OPEN}"
 
   labels_json=""
   old_ifs="$IFS"
   IFS=','
-  for label in ${FAKE_GH_LABELS:-backlog,size:planned}; do
+  for label in ${FAKE_GH_LABELS:-$default_labels}; do
     [[ -n "$label" ]] || continue
     [[ -n "$labels_json" ]] && labels_json="$labels_json,"
     labels_json="$labels_json{\"name\":\"$(json_escape "$label")\"}"
@@ -1138,6 +1359,17 @@ function issue_plan_direct {
   local -a call
   call=(--repo-root "$issue_repo" issue-plan --issue "$issue" --worktree "$issue_dev" --yes)
   [[ -n "$extra_arg" ]] && call+=("$extra_arg")
+  HERDR_DEVFLOW_USE_SOURCE=1 \
+  PATH="$issue_gh_bin:$PATH" \
+  HERDR_DEVFLOW_HOME="$fixture_root/issue-plan-runtime" \
+  HERDR_BIN_PATH="$fixture_root/no-such-herdr" \
+  FAKE_GH_BODY_FILE="$fake_gh_body_file" \
+    bash "$repo_root/scripts/herdr-devflow.sh" "${call[@]}"
+}
+
+function issue_bundle_plan_direct {
+  local -a call
+  call=(--repo-root "$issue_repo" issue-plan --issue 202 --issue 201 --worktree "$issue_dev" --yes)
   HERDR_DEVFLOW_USE_SOURCE=1 \
   PATH="$issue_gh_bin:$PATH" \
   HERDR_DEVFLOW_HOME="$fixture_root/issue-plan-runtime" \
@@ -1186,6 +1418,27 @@ rg -q "resumed" "$fixture_root/issue-plan-rerun"
 [[ "$(shasum -a 256 "$snapshot_path")" == "$before_snapshot_sum" ]]
 [[ "$(shasum -a 256 "$starter_path")" == "$before_starter_sum" ]]
 
+# Repeated --issue values cross the real shell/Go boundary as one canonical
+# bundle. Input order is presentation-only, the highest size route wins, and
+# Herdr degradation prints a recovery command containing every member.
+bundle_status=0
+issue_bundle_plan_direct > "$fixture_root/issue-plan-bundle" 2>&1 || bundle_status=$?
+if [[ "$bundle_status" != "0" ]]; then
+  print -r -- "issue-plan bundle exited $bundle_status: $(<"$fixture_root/issue-plan-bundle")" >&2
+  exit 1
+fi
+bundle_slug="201-202-camera-workflow"
+bundle_snapshot="$issue_dev/tasks/issue-$bundle_slug.md"
+bundle_starter="$issue_dev/tasks/tasks-$bundle_slug.md"
+[[ -f "$bundle_snapshot" && -f "$bundle_starter" ]]
+rg -q 'Issue bundle  #201, #202' "$fixture_root/issue-plan-bundle"
+rg -q 'Size +size:prd' "$fixture_root/issue-plan-bundle"
+rg -q 'wt plan --issue 201 --issue 202' "$fixture_root/issue-plan-bundle"
+rg -q 'ori-devflow: issue-bundle-snapshot; issues=201,202' "$bundle_snapshot"
+rg -q 'Compatibility: human-confirmed' "$bundle_snapshot"
+rg -q 'Effective size route: `size:prd`' "$bundle_starter"
+rg -Fq '$(rm -rf /)' "$bundle_snapshot"
+
 # Ineligible Issues fail closed and create nothing: closed, approved,
 # missing size, and duplicate size, each its own Issue number so a rejected
 # case can never be confused with the happy path's artifacts.
@@ -1211,7 +1464,7 @@ FAKE_GH_LABELS="backlog,size:quick,size:prd" \
   issue_plan_direct 104 > "$fixture_root/issue-plan-dup-size" 2>&1 || ineligible_status=$?
 [[ "$ineligible_status" == "1" ]]
 [[ ! -e "$issue_dev/tasks/issue-104-ready-issue-codex-planning.md" ]]
-if [[ -e "$issue_dev/tasks" ]] && [[ "$(ls "$issue_dev/tasks" | wc -l | tr -d ' ')" != "2" ]]; then
+if [[ -e "$issue_dev/tasks" ]] && [[ "$(ls "$issue_dev/tasks" | wc -l | tr -d ' ')" != "4" ]]; then
   print -r -- "an ineligible Issue left files behind: $(ls "$issue_dev/tasks")" >&2
   exit 1
 fi
@@ -1262,21 +1515,26 @@ if rg -q 'wt_herd|herdr-devflow|devflow_exec|devflow-bootstrap' "$devops_entrypo
   print -r -- "scripts/devops.sh reaches for the Herdr bridge" >&2
   exit 1
 fi
-# The picker has exactly two bash-to-zsh bridges: `s` delegates planning and
-# the later `i` action delegates implementation. Both source this checkout's wt
-# entrypoint and pass validated values as separate arguments. wt remains the
+# The picker has exactly three bash-to-zsh bridges: `s` delegates one-Issue
+# planning, `b` delegates bundle planning, and `i` delegates implementation.
+# All source this checkout's wt entrypoint and pass validated values as separate
+# arguments. wt remains the
 # owner of confirmation, files, worktree creation, and Herdr/Pi handoff.
 devops_code="$(rg -v '^\s*#' "$devops_entrypoint")"
 if ! print -r -- "$devops_code" | rg -Fq "zsh -c 'source \"\$1\" && wt plan --issue \"\$2\"' devops-plan \"\$script_dir/wt.sh\" \"\$issue_number\""; then
   print -r -- "scripts/devops.sh does not launch wt plan through the constrained zsh bridge" >&2
   exit 1
 fi
+if ! print -r -- "$devops_code" | rg -Fq "zsh -c 'source \"\$1\" || exit; shift; typeset -a plan_args; plan_args=(); for issue in \"\$@\"; do plan_args+=(--issue \"\$issue\"); done; wt plan \"\${plan_args[@]}\"'"; then
+  print -r -- "scripts/devops.sh does not launch bundle planning through the constrained positional-argument bridge" >&2
+  exit 1
+fi
 if ! print -r -- "$devops_code" | rg -Fq "zsh -c 'source \"\$1\" && if [[ \"\$3\" == no-herdr ]]; then wt start \"\$2\" --no-herdr; else wt start \"\$2\" --kind \"\$3\"; fi' devops-start \"\$script_dir/wt.sh\" \"\$feature\" \"\$mode\""; then
   print -r -- "scripts/devops.sh does not launch wt start through the constrained zsh bridge" >&2
   exit 1
 fi
-if [[ "$(print -r -- "$devops_code" | rg -c '^\s*zsh -c ' || true)" != "2" ]]; then
-  print -r -- "scripts/devops.sh must contain only the constrained wt plan and wt start zsh bridges" >&2
+if [[ "$(print -r -- "$devops_code" | rg -c '^\s*zsh -c ' || true)" != "3" ]]; then
+  print -r -- "scripts/devops.sh must contain only the three constrained wt plan/bundle/start zsh bridges" >&2
   exit 1
 fi
 if print -r -- "$devops_code" | rg -q '\beval\b|\$\(\s*wt\s|^\s*(source\s+.*wt\.sh|wt\s+(plan|start))'; then

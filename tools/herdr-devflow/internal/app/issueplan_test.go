@@ -5,6 +5,10 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/agents"
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/github"
 )
 
 func TestParseIssuePlanArgs(t *testing.T) {
@@ -19,8 +23,23 @@ func TestParseIssuePlanArgs(t *testing.T) {
 			name: "valid minimal",
 			args: []string{"--issue", "342", "--worktree", "/tmp/dev"},
 			check: func(t *testing.T, parsed issuePlanArgs) {
-				if parsed.issueNumber != 342 || parsed.worktree != "/tmp/dev" || parsed.yes {
+				if parsed.issueNumber != 342 || len(parsed.issueNumbers) != 1 || parsed.issueNumbers[0] != 342 || parsed.worktree != "/tmp/dev" || parsed.yes {
 					t.Fatalf("parsed = %#v", parsed)
+				}
+			},
+		},
+		{
+			name: "repeated issues are sorted without flattening",
+			args: []string{"--issue", "303", "--worktree", "/tmp/dev", "--issue", "101", "--issue", "202"},
+			check: func(t *testing.T, parsed issuePlanArgs) {
+				want := []int{101, 202, 303}
+				if len(parsed.issueNumbers) != len(want) {
+					t.Fatalf("parsed issueNumbers = %v, want %v", parsed.issueNumbers, want)
+				}
+				for index := range want {
+					if parsed.issueNumbers[index] != want[index] {
+						t.Fatalf("parsed issueNumbers = %v, want %v", parsed.issueNumbers, want)
+					}
 				}
 			},
 		},
@@ -39,7 +58,7 @@ func TestParseIssuePlanArgs(t *testing.T) {
 		{name: "negative issue", args: []string{"--issue", "-5", "--worktree", "/tmp/dev"}, wantErr: true},
 		{name: "non-numeric issue", args: []string{"--issue", "abc", "--worktree", "/tmp/dev"}, wantErr: true},
 		{name: "issue with no value", args: []string{"--issue"}, wantErr: true},
-		{name: "duplicate issue", args: []string{"--issue", "1", "--issue", "2", "--worktree", "/tmp/dev"}, wantErr: true},
+		{name: "duplicate issue", args: []string{"--issue", "1", "--issue", "1", "--worktree", "/tmp/dev"}, wantErr: true},
 		{name: "duplicate worktree", args: []string{"--issue", "1", "--worktree", "/a", "--worktree", "/b"}, wantErr: true},
 		{name: "empty worktree", args: []string{"--issue", "1", "--worktree", "  "}, wantErr: true},
 		{name: "unknown flag", args: []string{"--issue", "1", "--worktree", "/tmp/dev", "--bogus"}, wantErr: true},
@@ -64,6 +83,84 @@ func TestParseIssuePlanArgs(t *testing.T) {
 	}
 }
 
+func TestConfirmIssueBundlePlanRequiresCompatibilityAffirmation(t *testing.T) {
+	t.Parallel()
+	var stdout bytes.Buffer
+	application := New(Dependencies{Stdout: &stdout, Stdin: strings.NewReader("n\n")})
+	approved, err := application.confirmIssuePlan(agents.IssuePlan{IssueNumber: 101, IssueNumbers: []int{101, 202}})
+	if err != nil {
+		t.Fatalf("confirmIssuePlan() error = %v", err)
+	}
+	if approved {
+		t.Fatal("declined bundle confirmation was approved")
+	}
+	for _, want := range []string{"Affirm", "root cause", "shared files", "same UI surface"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("bundle confirmation missing %q: %s", want, stdout.String())
+		}
+	}
+}
+
+func TestSingleIssuePlanPayloadKeepsLegacyShapeAndAddsOnlyCanonicalNumbers(t *testing.T) {
+	t.Parallel()
+	plan := agents.IssuePlan{
+		IssueNumber:  342,
+		IssueNumbers: []int{342},
+		Title:        "Single",
+		Route:        agents.RoutePlanned,
+		Slug:         "342-single",
+	}
+	payload := issuePlanPayload(plan)
+	if payload["issue_number"] != 342 || payload["title"] != "Single" || payload["feature"] != "342-single" {
+		t.Fatalf("legacy payload fields changed: %#v", payload)
+	}
+	if _, exists := payload["members"]; exists {
+		t.Fatalf("single-Issue payload unexpectedly changed to bundle evidence: %#v", payload)
+	}
+	if _, exists := payload["compatibility_required"]; exists {
+		t.Fatalf("single-Issue payload unexpectedly requires bundle compatibility: %#v", payload)
+	}
+}
+
+func TestIssuePlanPayloadAddsCompleteBundleEvidenceAndKeepsLegacyFields(t *testing.T) {
+	t.Parallel()
+	fetched := time.Date(2026, time.August, 12, 12, 0, 0, 0, time.UTC)
+	plan := agents.IssuePlan{
+		IssueNumber:  101,
+		IssueNumbers: []int{101, 202},
+		Issues: []github.Issue{
+			{Number: 101, Title: "Camera", Body: "camera body", URL: "https://example.invalid/101", State: "open", Labels: []string{"backlog", "size:quick"}, FetchedAt: fetched},
+			{Number: 202, Title: "Workflow", Body: "workflow body", URL: "https://example.invalid/202", State: "open", Labels: []string{"backlog", "size:prd"}, Comments: []github.IssueComment{{Author: "alice", Body: "shared files", CreatedAt: fetched}}, FetchedAt: fetched},
+		},
+		Title:         "Camera",
+		URL:           "https://example.invalid/101",
+		IssueState:    "open",
+		Labels:        []string{"backlog", "size:quick"},
+		Route:         agents.RoutePRD,
+		Slug:          "101-202-camera-workflow",
+		ArtifactState: agents.IssueArtifactNone,
+	}
+	payload := issuePlanPayload(plan)
+	if payload["issue_number"] != 101 || payload["title"] != "Camera" || payload["route"] != "prd" {
+		t.Fatalf("legacy single-Issue payload fields changed: %#v", payload)
+	}
+	numbers, ok := payload["issue_numbers"].([]int)
+	if !ok || len(numbers) != 2 || numbers[0] != 101 || numbers[1] != 202 {
+		t.Fatalf("issue_numbers = %#v", payload["issue_numbers"])
+	}
+	members, ok := payload["members"].([]map[string]any)
+	if !ok || len(members) != 2 || members[1]["body"] != "workflow body" {
+		t.Fatalf("members = %#v", payload["members"])
+	}
+	comments, ok := members[1]["comments"].([]map[string]any)
+	if !ok || len(comments) != 1 || comments[0]["body"] != "shared files" {
+		t.Fatalf("member comments = %#v", members[1]["comments"])
+	}
+	if payload["compatibility_required"] != true {
+		t.Fatalf("compatibility gate missing: %#v", payload)
+	}
+}
+
 // TestIssuePlanRejectsBadArgumentsBeforeAnyIO proves AR1: a malformed,
 // duplicate, or missing argument fails before this command reads the working
 // directory, contacts GitHub, or touches Git/Herdr state. It runs with no Git
@@ -75,6 +172,8 @@ func TestIssuePlanRejectsBadArgumentsBeforeAnyIO(t *testing.T) {
 		{"issue-plan"},
 		{"issue-plan", "--issue", "0", "--worktree", "/tmp/does-not-exist"},
 		{"issue-plan", "--issue", "abc", "--worktree", "/tmp/does-not-exist"},
+		{"issue-plan", "--issue", "1", "--issue", "1", "--worktree", "/tmp/does-not-exist"},
+		{"issue-plan", "--issue", "1", "--issue", "nope", "--worktree", "/tmp/does-not-exist"},
 		{"issue-plan", "--worktree", "/tmp/does-not-exist"},
 		{"issue-plan", "--issue", "1"},
 	}
