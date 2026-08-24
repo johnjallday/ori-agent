@@ -94,7 +94,7 @@ func (s *Server) handleProjectTemplates(w http.ResponseWriter, r *http.Request) 
 		if listErr != nil {
 			logger.Warn("Plugin blueprints could not be listed", logger.Fields{"error": listErr.Error()})
 		} else {
-			templates = append(templates, activePluginBlueprintTemplates(installed)...)
+			templates = mergeActivePluginBlueprints(templates, activePluginBlueprintTemplates(installed))
 		}
 	}
 
@@ -102,6 +102,28 @@ func (s *Server) handleProjectTemplates(w http.ResponseWriter, r *http.Request) 
 		"templates":      templates,
 		"templates_root": root,
 	})
+}
+
+func mergeActivePluginBlueprints(existing, contributed []projecttemplates.Template) []projecttemplates.Template {
+	if len(contributed) == 0 {
+		return existing
+	}
+	superseded := make(map[string]struct{})
+	for _, template := range contributed {
+		if template.PluginOwner != nil && strings.TrimSpace(template.PluginOwner.BlueprintID) != "" {
+			superseded[strings.TrimSpace(template.PluginOwner.BlueprintID)] = struct{}{}
+		}
+	}
+	merged := make([]projecttemplates.Template, 0, len(existing)+len(contributed))
+	for _, template := range existing {
+		if template.Builtin {
+			if _, replaced := superseded[template.ID]; replaced {
+				continue
+			}
+		}
+		merged = append(merged, template)
+	}
+	return append(merged, contributed...)
 }
 
 func activePluginBlueprintTemplates(installed []plugin.InstalledPlugin) []projecttemplates.Template {

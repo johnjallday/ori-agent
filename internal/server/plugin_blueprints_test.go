@@ -8,6 +8,24 @@ import (
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
+func TestPluginBlueprintSupersedesMatchingBuiltinOnlyWhileActive(t *testing.T) {
+	owner := &workspace.PluginTemplateOwner{PluginID: "owner", BlueprintID: "song", BlueprintVersion: 1}
+	existing := []projecttemplates.Template{
+		{ID: "song", Name: "Built-in song", Builtin: true},
+		{ID: "research", Name: "Research", Builtin: true},
+	}
+	contributed := []projecttemplates.Template{{
+		ID: "plugin:owner:song", Name: "Plugin song", PluginOwner: owner,
+	}}
+	merged := mergeActivePluginBlueprints(existing, contributed)
+	if len(merged) != 2 || merged[0].ID != "research" || merged[1].ID != "plugin:owner:song" {
+		t.Fatalf("merged templates = %+v", merged)
+	}
+	if got := mergeActivePluginBlueprints(existing, nil); len(got) != 2 {
+		t.Fatalf("inactive plugin removed a built-in: %+v", got)
+	}
+}
+
 func TestActivePluginBlueprintCatalogRequiresEnabledCompatibleOwner(t *testing.T) {
 	owner := &workspace.PluginTemplateOwner{
 		PluginID: "demo", PluginVersion: "1.0.0", BlueprintID: "starter", BlueprintVersion: 1,
