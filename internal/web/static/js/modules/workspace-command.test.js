@@ -3917,6 +3917,64 @@ test('the rail click delegation dispatches HQ station rows through the registry 
 // capability catalog — never from the workspace's name, template, folder, or
 // agents (FR-93, FR-94). `catalogItem` is the catalog entry this workspace
 // would get back from GET /api/workspaces/{id}/capabilities.
+function installJanitorStationAdapter(target) {
+  target.WorkspaceBuiltinStationAdapters = [
+    {
+      key: 'file-janitor',
+      station() {
+        const item = target.WorkspaceCapabilities?.find?.('file-janitor');
+        if (!item?.installed || item.available === false) return null;
+        const status = item.status || {};
+        const folder = status.folder_display_name || '';
+        return {
+          key: 'file-janitor',
+          label: folder ? 'File Janitor · ' + folder : 'File Janitor',
+          icon: 'bi-folder-symlink',
+          state: () =>
+            target.FileJanitorConsole?.stationState?.() || {
+              applies: true,
+              value: status.detail || '',
+              description: status.detail || '',
+              tone: status.state === 'needs_attention' ? 'degraded' : ''
+            },
+          action: trigger => {
+            if (target.FileJanitorConsole?.open) {
+              target.FileJanitorConsole.open({ source: 'map-station', trigger });
+            } else {
+              target.WorkspaceCapabilities?.onOpen?.('file-janitor', trigger);
+            }
+          }
+        };
+      }
+    }
+  ];
+}
+
+function installReaperStationAdapter(target) {
+  target.WorkspaceBuiltinStationAdapters = [
+    {
+      key: 'reaper',
+      station({ workspace }) {
+        const contract = workspace.template_provenance?.runtime_requirements;
+        const selectedMode = workspace.runtime_state?.selected_mode_id;
+        const mode = contract?.operating_modes?.find(candidate => candidate.id === selectedMode);
+        const selected =
+          selectedMode === 'ori_assisted' &&
+          mode?.requires?.includes('reaper_live_control') &&
+          contract?.requirements?.some(item => item.key === 'reaper_live_control');
+        if (!selected && !target.ReaperConsole?.applies?.()) return null;
+        return {
+          key: 'reaper',
+          label: target.ReaperConsole?.stationLabel?.() || 'REAPER',
+          icon: 'bi-sliders2-vertical',
+          state: () => target.ReaperConsole?.stationState?.() || {},
+          action: trigger => target.ReaperConsole?.open?.({ source: 'map-station', trigger })
+        };
+      }
+    }
+  ];
+}
+
 function janitorCommandView(catalogItem) {
   const commandView = Object.create(WorkspaceCommandView.prototype);
   Object.assign(commandView, {
@@ -3935,6 +3993,7 @@ function janitorCommandView(catalogItem) {
       find: id => (id === 'file-janitor' ? catalogItem : null)
     }
   };
+  installJanitorStationAdapter(globalThis.window);
   return commandView;
 }
 
@@ -4039,6 +4098,7 @@ test('pressing the File Janitor station opens the console in place', () => {
         open: options => opens.push(options)
       }
     };
+    installJanitorStationAdapter(globalThis.window);
     commandView.runHQStationAction('file-janitor', trigger);
     assert.equal(opens.length, 1, 'the station must lead somewhere, not just report state');
     assert.equal(
@@ -4079,6 +4139,7 @@ test('the File Janitor station never scrolls to an inline mount', () => {
         }
       }
     };
+    installJanitorStationAdapter(globalThis.window);
     commandView.runHQStationAction('file-janitor', null);
     assert.equal(focusedInline, 0, 'the scroll-to-inline behavior must be gone');
     assert.equal(openedViaCatalog, 1, 'the station must never be a dead end');
@@ -4110,6 +4171,7 @@ test('the File Janitor station shows live console state over the catalog snapsho
         })
       }
     };
+    installJanitorStationAdapter(globalThis.window);
     const station = commandView.workspaceStationRegistry()[0];
     assert.equal(station.state().value, '3 files ready for review');
   } finally {
@@ -4131,6 +4193,7 @@ test('the File Janitor station falls back to the catalog snapshot', () => {
         find: () => installedFileJanitor({ state: 'needs_attention', detail: 'Folder missing.' })
       }
     };
+    installJanitorStationAdapter(globalThis.window);
     const station = commandView.workspaceStationRegistry()[0];
     assert.equal(station.state().value, 'Folder missing.');
     assert.equal(station.state().tone, 'degraded');
@@ -4169,6 +4232,7 @@ test('the REAPER station is gated only by the persisted assisted runtime record'
         })
       }
     };
+    installReaperStationAdapter(globalThis.window);
     const commandView = Object.create(WorkspaceCommandView.prototype);
     Object.assign(commandView, { page: { workspace: reaperRuntimeWorkspace(), tasks: [] } });
     const station = commandView.workspaceStationRegistry().find(item => item.key === 'reaper');
@@ -4193,6 +4257,7 @@ test('the canonical state endpoint can gate REAPER when the detail projection om
         })
       }
     };
+    installReaperStationAdapter(globalThis.window);
     const commandView = Object.create(WorkspaceCommandView.prototype);
     Object.assign(commandView, { page: { workspace: { id: 'ws-reaper' }, tasks: [] } });
     assert.equal(
@@ -4208,6 +4273,7 @@ test('REAPER-looking names tags folders templates and agents cannot invent a sta
   const originalWindow = globalThis.window;
   try {
     globalThis.window = { ReaperConsole: { stationState: () => ({ applies: true }) } };
+    installReaperStationAdapter(globalThis.window);
     const commandView = Object.create(WorkspaceCommandView.prototype);
     Object.assign(commandView, {
       page: {
@@ -4247,6 +4313,7 @@ test('pressing the REAPER station opens its console over the map', () => {
         open: options => opens.push(options)
       }
     };
+    installReaperStationAdapter(globalThis.window);
     const commandView = Object.create(WorkspaceCommandView.prototype);
     Object.assign(commandView, { page: { workspace: reaperRuntimeWorkspace(), tasks: [] } });
     const trigger = { id: 'reaper-station' };

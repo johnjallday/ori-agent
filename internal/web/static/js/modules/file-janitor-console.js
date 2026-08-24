@@ -3400,4 +3400,44 @@
   // pointing it at the identical object means there is no way for the two to
   // diverge, and retiring it is a deletion rather than a migration.
   window.DownloadsJanitorPanel = controller;
+
+  // Built-in adapter: Workspace Command consumes this through the same
+  // descriptor registry as every other compiled station. The command renderer
+  // no longer knows File Janitor's capability id or controller global.
+  window.WorkspaceBuiltinStationAdapters = window.WorkspaceBuiltinStationAdapters || [];
+  if (!window.WorkspaceBuiltinStationAdapters.some(adapter => adapter?.key === 'file-janitor')) {
+    window.WorkspaceBuiltinStationAdapters.push({
+      key: 'file-janitor',
+      station() {
+        const catalog = window.WorkspaceCapabilities;
+        const item =
+          catalog && typeof catalog.find === 'function' ? catalog.find('file-janitor') : null;
+        if (!item || !item.installed || item.available === false) return null;
+        const status = item.status || {};
+        const folder = status.folder_display_name || '';
+        return {
+          key: 'file-janitor',
+          label: folder ? 'File Janitor · ' + folder : 'File Janitor',
+          icon: 'bi-folder-symlink',
+          state: () => {
+            const derived = controller.stationState();
+            if (derived && derived.applies) return derived;
+            return {
+              applies: true,
+              value: status.detail || '',
+              description: status.detail || '',
+              tone: status.state === 'needs_attention' ? 'degraded' : ''
+            };
+          },
+          action: trigger => {
+            if (typeof controller.open === 'function') {
+              controller.open({ source: 'map-station', trigger });
+              return;
+            }
+            catalog.onOpen?.('file-janitor', trigger);
+          }
+        };
+      }
+    });
+  }
 })();

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"reflect"
 	"strings"
 	"unicode/utf8"
 )
@@ -16,67 +17,118 @@ const MaxOperationInputBytes = 64 << 10
 var ErrInputInvalid = errors.New("workspace surface operation input is invalid")
 
 type prototypeSchema struct {
-	Type                 string                     `json:"type"`
-	Properties           map[string]prototypeSchema `json:"properties"`
-	Required             []string                   `json:"required"`
-	AdditionalProperties *bool                      `json:"additionalProperties"`
-	MinLength            *int                       `json:"minLength"`
-	MaxLength            *int                       `json:"maxLength"`
-	Minimum              *float64                   `json:"minimum"`
-	Maximum              *float64                   `json:"maximum"`
+	Schema               string                     `json:"$schema,omitempty"`
+	Type                 json.RawMessage            `json:"type"`
+	Properties           map[string]prototypeSchema `json:"properties,omitempty"`
+	Required             []string                   `json:"required,omitempty"`
+	AdditionalProperties *bool                      `json:"additionalProperties,omitempty"`
+	Items                *prototypeSchema           `json:"items,omitempty"`
+	Enum                 []any                      `json:"enum,omitempty"`
+	Const                any                        `json:"const,omitempty"`
+	MinLength            *int                       `json:"minLength,omitempty"`
+	MaxLength            *int                       `json:"maxLength,omitempty"`
+	Minimum              *float64                   `json:"minimum,omitempty"`
+	Maximum              *float64                   `json:"maximum,omitempty"`
+	MinItems             *int                       `json:"minItems,omitempty"`
+	MaxItems             *int                       `json:"maxItems,omitempty"`
+	Description          string                     `json:"description,omitempty"`
 }
 
-// ValidateOperationInput is the prototype's closed-object value gate. Group 2
-// promotes the full documented v1 schema subset; this slice already guarantees
-// that unknown browser fields (including workspace/path/confirmed overrides),
-// missing required fields, primitive type mismatches, and declared scalar
-// bounds never reach a Runtime.
+// ValidateOperationInput applies the frozen closed JSON schema after the byte
+// gate and before a Runtime receives browser data.
 func ValidateOperationInput(operation Operation, input json.RawMessage) error {
 	if len(input) == 0 || len(input) > MaxOperationInputBytes || !utf8.Valid(input) {
 		return ErrInputInvalid
 	}
-	var schema prototypeSchema
-	decoder := json.NewDecoder(bytes.NewReader(operation.InputSchema))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&schema); err != nil || decoder.Decode(&struct{}{}) != io.EOF {
-		return fmt.Errorf("%w: installed input schema is invalid", ErrInputInvalid)
-	}
-	if schema.Type != "object" || schema.AdditionalProperties == nil || *schema.AdditionalProperties {
-		return fmt.Errorf("%w: installed input schema is not closed", ErrInputInvalid)
-	}
+	return validateOperationValue(operation.InputSchema, input, ErrInputInvalid)
+}
 
-	decoder = json.NewDecoder(bytes.NewReader(input))
+// ValidateOperationOutput treats native service output as untrusted too. The
+// caller applies the operation's byte limit before this schema check.
+func ValidateOperationOutput(operation Operation, output json.RawMessage) error {
+	if len(output) == 0 || !utf8.Valid(output) {
+		return fmt.Errorf("workspace surface operation output is invalid")
+	}
+	return validateOperationValue(operation.OutputSchema, output, fmt.Errorf("workspace surface operation output is invalid"))
+}
+
+func validateOperationValue(schemaJSON, valueJSON json.RawMessage, invalid error) error {
+	var schema prototypeSchema
+	decoder := json.NewDecoder(bytes.NewReader(schemaJSON))
+	decoder.DisallowUnknownFields()
 	decoder.UseNumber()
-	var value map[string]any
-	if err := decoder.Decode(&value); err != nil || decoder.Decode(&struct{}{}) != io.EOF || value == nil {
-		return ErrInputInvalid
+	if err := decoder.Decode(&schema); err != nil || decoder.Decode(&struct{}{}) != io.EOF {
+		return invalid
 	}
-	for key := range value {
-		property, declared := schema.Properties[key]
-		if !declared || validatePrototypeValue(property, value[key]) != nil {
-			return ErrInputInvalid
-		}
+	decoder = json.NewDecoder(bytes.NewReader(valueJSON))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil || decoder.Decode(&struct{}{}) != io.EOF {
+		return invalid
 	}
-	for _, required := range schema.Required {
-		if _, present := value[required]; !present {
-			return ErrInputInvalid
-		}
+	if err := validateSchemaValue(schema, value, 0); err != nil {
+		return invalid
 	}
 	return nil
 }
 
-func validatePrototypeValue(schema prototypeSchema, value any) error {
-	switch schema.Type {
+func validateSchemaValue(schema prototypeSchema, value any, depth int) error {
+	if depth > 16 {
+		return ErrInputInvalid
+	}
+	types, err := valueSchemaTypes(schema.Type)
+	if err != nil {
+		return err
+	}
+	if value == nil {
+		if containsType(types, "null") {
+			return validateEnumConst(schema, value)
+		}
+		return ErrInputInvalid
+	}
+	primary := ""
+	for _, candidate := range types {
+		if candidate != "null" {
+			primary = candidate
+		}
+	}
+	switch primary {
+	case "object":
+		object, ok := value.(map[string]any)
+		if !ok || schema.AdditionalProperties == nil || *schema.AdditionalProperties || len(object) > 256 {
+			return ErrInputInvalid
+		}
+		for key, child := range object {
+			property, declared := schema.Properties[key]
+			if !declared || validateSchemaValue(property, child, depth+1) != nil {
+				return ErrInputInvalid
+			}
+		}
+		for _, required := range schema.Required {
+			if _, present := object[required]; !present {
+				return ErrInputInvalid
+			}
+		}
+	case "array":
+		array, ok := value.([]any)
+		if !ok || schema.Items == nil || schema.MaxItems == nil || len(array) > *schema.MaxItems || len(array) > 256 {
+			return ErrInputInvalid
+		}
+		if schema.MinItems != nil && len(array) < *schema.MinItems {
+			return ErrInputInvalid
+		}
+		for _, child := range array {
+			if validateSchemaValue(*schema.Items, child, depth+1) != nil {
+				return ErrInputInvalid
+			}
+		}
 	case "string":
 		text, ok := value.(string)
-		if !ok || !utf8.ValidString(text) {
+		if !ok || !utf8.ValidString(text) || schema.MaxLength == nil {
 			return ErrInputInvalid
 		}
 		length := utf8.RuneCountInString(text)
-		if schema.MinLength != nil && length < *schema.MinLength {
-			return ErrInputInvalid
-		}
-		if schema.MaxLength == nil || length > *schema.MaxLength {
+		if length > *schema.MaxLength || (schema.MinLength != nil && length < *schema.MinLength) {
 			return ErrInputInvalid
 		}
 	case "boolean":
@@ -92,7 +144,7 @@ func validatePrototypeValue(schema prototypeSchema, value any) error {
 		if err != nil || math.IsInf(parsed, 0) || math.IsNaN(parsed) {
 			return ErrInputInvalid
 		}
-		if schema.Type == "integer" && strings.ContainsAny(number.String(), ".eE") {
+		if primary == "integer" && strings.ContainsAny(number.String(), ".eE") {
 			return ErrInputInvalid
 		}
 		if schema.Minimum != nil && parsed < *schema.Minimum {
@@ -101,12 +153,48 @@ func validatePrototypeValue(schema prototypeSchema, value any) error {
 		if schema.Maximum != nil && parsed > *schema.Maximum {
 			return ErrInputInvalid
 		}
-	case "null":
-		if value != nil {
-			return ErrInputInvalid
-		}
 	default:
 		return ErrInputInvalid
 	}
+	return validateEnumConst(schema, value)
+}
+
+func validateEnumConst(schema prototypeSchema, value any) error {
+	if len(schema.Enum) > 0 {
+		found := false
+		for _, candidate := range schema.Enum {
+			if reflect.DeepEqual(candidate, value) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return ErrInputInvalid
+		}
+	}
+	if schema.Const != nil && !reflect.DeepEqual(schema.Const, value) {
+		return ErrInputInvalid
+	}
 	return nil
+}
+
+func valueSchemaTypes(raw json.RawMessage) ([]string, error) {
+	var single string
+	if err := json.Unmarshal(raw, &single); err == nil {
+		return []string{single}, nil
+	}
+	var list []string
+	if err := json.Unmarshal(raw, &list); err != nil || len(list) != 2 {
+		return nil, ErrInputInvalid
+	}
+	return list, nil
+}
+
+func containsType(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }

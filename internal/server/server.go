@@ -21,6 +21,7 @@ import (
 	web "github.com/johnjallday/ori-agent/internal/web"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 	"github.com/johnjallday/ori-agent/internal/workspaceplan"
+	"github.com/johnjallday/ori-agent/internal/workspacesurface"
 )
 
 // Server holds all the dependencies and state for the HTTP server
@@ -39,7 +40,8 @@ type Server struct {
 	// workspacePlanAuto drives approved automatic Plans. Its loops are not
 	// owned by any request, so shutdown has to stop them explicitly or a
 	// closing process keeps dispatching work.
-	workspacePlanAuto *workspaceplan.AutoRunner
+	workspacePlanAuto        *workspaceplan.AutoRunner
+	workspaceSurfaceServices *workspacesurface.ServiceManager
 }
 
 func (s *Server) resolvedDesktopOpener() platform.DesktopOpener {
@@ -139,6 +141,9 @@ func (s *Server) Shutdown() {
 	}
 	if s.Workflow != nil {
 		s.Workflow.Shutdown()
+	}
+	if s.workspaceSurfaceServices != nil {
+		_ = s.workspaceSurfaceServices.Shutdown()
 	}
 	if s.Handlers != nil && s.Handlers.SessionFiles != nil {
 		if watcher := s.Handlers.SessionFiles.Watcher(); watcher != nil {

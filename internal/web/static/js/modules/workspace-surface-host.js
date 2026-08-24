@@ -42,9 +42,21 @@ export class WorkspaceSurfaceHost {
     this.window = options.window || globalThis.window || null;
     this.coordinator = options.coordinator || workspaceOverlayCoordinator();
     this.Bridge = options.Bridge || ParentSurfaceBridge;
+    this.confirm = options.confirm || (message => this.window?.confirm?.(message) ?? false);
+    this.schedule =
+      options.schedule || ((callback, delay) => this.window?.setTimeout?.(callback, delay));
+    this.cancelSchedule = options.cancelSchedule || (timer => this.window?.clearTimeout?.(timer));
     this.surfaces = [];
     this.active = null;
     this.loading = null;
+    this.mapVisible = false;
+    this.documentVisible = this.document?.visibilityState !== 'hidden';
+    this.pollTimer = null;
+    this.deepLinkHandled = false;
+    this._boundVisibility = () => {
+      this.setDocumentVisible(this.document?.visibilityState !== 'hidden');
+    };
+    this.document?.addEventListener?.('visibilitychange', this._boundVisibility);
   }
 
   async loadCatalog() {
@@ -58,11 +70,14 @@ export class WorkspaceSurfaceHost {
     )
       .then(payload => {
         this.surfaces = Array.isArray(payload?.surfaces) ? payload.surfaces : [];
+        this._reconcileActiveSurface();
         this._notifyChanged();
+        this._openDeepLink();
         return this.surfaces;
       })
       .catch(() => {
         this.surfaces = [];
+        this._reconcileActiveSurface();
         this._notifyChanged();
         return this.surfaces;
       })
@@ -77,7 +92,8 @@ export class WorkspaceSurfaceHost {
       key: text(surface.key),
       label: text(surface.label) || 'Plugin surface',
       icon: HOST_ICON_CLASSES[surface.icon?.value] || 'bi-puzzle',
-      state: () => this.stationState(surface),
+      state: () =>
+        this.stationState(this.surfaces.find(item => item?.key === surface.key) || surface),
       action: trigger => {
         void this.open(surface.key, trigger);
       }
@@ -93,6 +109,17 @@ export class WorkspaceSurfaceHost {
       description: text(status.description) || 'Plugin surface status',
       tone: STATE_TONES[state] || 'degraded'
     };
+  }
+
+  setMapVisible(visible) {
+    this.mapVisible = Boolean(visible);
+    this._schedulePolling();
+  }
+
+  setDocumentVisible(visible) {
+    this.documentVisible = Boolean(visible);
+    this.active?.bridge?.visibility(this.documentVisible);
+    this._schedulePolling();
   }
 
   async open(surfaceKey, trigger = null) {
@@ -155,6 +182,7 @@ export class WorkspaceSurfaceHost {
     this.document.body.appendChild(modal);
 
     const overlayId = 'workspace-surface:' + surface.key;
+    const features = surface.features || {};
     const bridge = new this.Bridge({
       frameWindow: frame.contentWindow,
       eventTarget: this.window,
@@ -167,11 +195,11 @@ export class WorkspaceSurfaceHost {
       },
       features: {
         operation: true,
-        confirmation: false,
-        state: false,
-        ask_ori: false,
-        open_setup: false,
-        close: true
+        confirmation: Boolean(features.confirmation),
+        state: Boolean(features.state),
+        ask_ori: Boolean(features.ask_ori),
+        open_setup: Boolean(features.open_setup),
+        close: Boolean(features.close)
       },
       onRequest: request => this._handleFrameRequest(request)
     });
@@ -191,18 +219,14 @@ export class WorkspaceSurfaceHost {
       kind: 'modal',
       trigger,
       container: modal,
-      onClose: () => {
-        this._teardownActive();
-      }
+      onClose: () => this._teardownActive()
     });
     frame.addEventListener('load', () => bridge.start(), { once: true });
-    close.addEventListener('click', () => {
-      void this.close();
-    });
-    backdrop.addEventListener('click', () => {
-      void this.close();
-    });
+    close.addEventListener('click', () => void this.close());
+    backdrop.addEventListener('click', () => void this.close());
     close.focus();
+    this._setDeepLink(surface.key);
+    this._schedulePolling();
     return true;
   }
 
@@ -214,54 +238,170 @@ export class WorkspaceSurfaceHost {
     return true;
   }
 
-  setDocumentVisible(visible) {
-    this.active?.bridge?.visibility(Boolean(visible));
-  }
-
   async _handleFrameRequest(request) {
     const active = this.active;
-    if (!active) {
-      return {
-        ok: false,
-        error: {
-          code: 'session_invalidated',
-          message: 'This plugin surface is no longer available.'
-        }
-      };
+    if (!active)
+      return this._bridgeError(
+        'session_invalidated',
+        'This plugin surface is no longer available.'
+      );
+    const payload = request.payload || {};
+    switch (request.type) {
+      case 'ori.surface.operation.invoke':
+        return this._invokeOperation(text(payload.operation_id), payload.input || {});
+      case 'ori.surface.state.get':
+        return this._state('get', payload);
+      case 'ori.surface.state.set':
+        return this._state('set', payload);
+      case 'ori.surface.state.delete':
+        return this._state('delete', payload);
+      case 'ori.surface.host.ask_ori':
+        return this._askOri(text(payload.context));
+      case 'ori.surface.host.open_setup':
+        return this._openSetup();
+      case 'ori.surface.status_changed':
+        await this.loadCatalog();
+        return { ok: true, result: { refreshed: true } };
+      case 'ori.surface.host.close':
+        this.window?.setTimeout?.(() => void this.close(), 0);
+        return { ok: true, result: { closed: true } };
+      default:
+        return this._bridgeError('host_intent_unavailable', 'That host action is unavailable.');
     }
-    if (request.type === 'ori.surface.operation.invoke') {
-      const payload = request.payload || {};
+  }
+
+  async _invokeOperation(operationId, input) {
+    const active = this.active;
+    const invoke = confirmationToken =>
+      this._request('/api/workspace-surfaces/operations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session: active.session,
+          operation_id: operationId,
+          input,
+          ...(confirmationToken ? { confirmation_token: confirmationToken } : {})
+        })
+      });
+    try {
+      const response = await invoke('');
+      return { ok: true, result: response?.output };
+    } catch (error) {
+      if (error.code !== 'confirmation_required' || !error.confirmationId) {
+        return this._bridgeError(error.code || 'service_unavailable', error.message);
+      }
+      const approved = await Promise.resolve(
+        this.confirm(
+          `${text(active.surface.label) || 'This plugin'} wants to run ${operationId}. Review this exact action before continuing.`
+        )
+      );
+      if (!approved) {
+        await this._request('/api/workspace-surfaces/confirmations', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            session: active.session,
+            confirmation_id: error.confirmationId
+          })
+        }).catch(() => {});
+        return this._bridgeError('confirmation_cancelled', 'The plugin action was cancelled.');
+      }
       try {
-        const response = await this._request('/api/workspace-surfaces/operations', {
+        const approval = await this._request('/api/workspace-surfaces/confirmations', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             session: active.session,
-            operation_id: text(payload.operation_id),
-            input: payload.input || {}
+            confirmation_id: error.confirmationId
           })
         });
+        const response = await invoke(text(approval?.confirmation_token));
         return { ok: true, result: response?.output };
-      } catch (error) {
-        return {
-          ok: false,
-          error: {
-            code: text(error?.code) || 'service_unavailable',
-            message: text(error?.message) || 'The plugin service could not complete that operation.'
-          }
-        };
+      } catch (confirmedError) {
+        return this._bridgeError(
+          confirmedError.code || 'confirmation_invalid',
+          confirmedError.message
+        );
       }
     }
-    if (request.type === 'ori.surface.host.close') {
-      // Let ParentSurfaceBridge post the correlated response before teardown.
+  }
+
+  async _state(action, payload) {
+    try {
+      const result = await this._request('/api/workspace-surfaces/state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session: this.active.session,
+          action,
+          key: text(payload.key),
+          ...(action === 'set'
+            ? {
+                schema_version: Number(payload.schema_version || 0),
+                expected_revision: text(payload.expected_revision),
+                value: payload.value
+              }
+            : {}),
+          ...(action === 'delete' ? { expected_revision: text(payload.expected_revision) } : {})
+        })
+      });
+      return { ok: true, result };
+    } catch (error) {
+      return this._bridgeError(error.code || 'state_invalid', error.message);
+    }
+  }
+
+  async _askOri(context) {
+    try {
+      const intent = await this._intent('ask_ori', context);
+      if (!this.window?.OriAskRouting || typeof this.window.OriAskRouting.submit !== 'function') {
+        return this._bridgeError('ask_ori_unavailable', 'Ask Ori is not available.');
+      }
+      await this.window.OriAskRouting.submit(context, {
+        routeContext: {
+          surface: 'plugin_workspace_surface',
+          workspace_id: intent.workspace_id,
+          origin: 'plugin_workspace_surface',
+          required_capabilities: intent.required_capabilities || [],
+          plugin_context: intent.plugin_context || ''
+        },
+        openThinkingModal: true
+      });
+      return { ok: true, result: { submitted: true } };
+    } catch (error) {
+      return this._bridgeError(error.code || 'ask_ori_unavailable', error.message);
+    }
+  }
+
+  async _openSetup() {
+    try {
+      const intent = await this._intent('open_setup', '');
       this.window?.setTimeout?.(() => {
         void this.close();
+        this.window?.SetupWizard?.open?.();
+        this._dispatch('ori:workspace-surface-open-setup', { providerId: intent.provider_id });
       }, 0);
-      return { ok: true, result: { closed: true } };
+      return { ok: true, result: { opened: true } };
+    } catch (error) {
+      return this._bridgeError(error.code || 'intent_unavailable', error.message);
     }
+  }
+
+  _intent(type, context) {
+    return this._request('/api/workspace-surfaces/intents', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session: this.active.session, type, ...(context ? { context } : {}) })
+    });
+  }
+
+  _bridgeError(code, message) {
     return {
       ok: false,
-      error: { code: 'host_intent_unavailable', message: 'That host action is unavailable.' }
+      error: {
+        code: text(code) || 'host_request_failed',
+        message: text(message) || 'Ori could not complete that request.'
+      }
     };
   }
 
@@ -271,6 +411,8 @@ export class WorkspaceSurfaceHost {
     this.active = null;
     active.bridge.destroy();
     active.modal.remove();
+    this._setDeepLink('');
+    this._schedulePolling();
     if (active.session && this.fetch) {
       void this.fetch('/api/workspace-surfaces/sessions', {
         method: 'DELETE',
@@ -280,11 +422,61 @@ export class WorkspaceSurfaceHost {
     }
   }
 
+  _reconcileActiveSurface() {
+    if (!this.active) return;
+    const current = this.surfaces.find(surface => surface?.key === this.active.surface?.key);
+    if (
+      !current ||
+      current.available === false ||
+      text(current.plugin?.generation) !== text(this.active.surface?.plugin?.generation)
+    ) {
+      this.active.bridge.invalidate('session_invalidated');
+      void this.close();
+      return;
+    }
+    this.active.surface = current;
+  }
+
+  _schedulePolling() {
+    if (this.pollTimer) {
+      this.cancelSchedule?.(this.pollTimer);
+      this.pollTimer = null;
+    }
+    if (!this.documentVisible || (!this.mapVisible && !this.active)) return;
+    const seconds = this.active
+      ? Math.max(1, Math.min(60, Number(this.active.surface?.polling?.open_seconds || 1)))
+      : Math.max(
+          5,
+          Math.min(60, ...this.surfaces.map(surface => Number(surface?.polling?.map_seconds || 60)))
+        );
+    this.pollTimer = this.schedule?.(async () => {
+      this.pollTimer = null;
+      await this.loadCatalog();
+      this._schedulePolling();
+    }, seconds * 1000);
+  }
+
+  _openDeepLink() {
+    if (this.deepLinkHandled || this.active || !this.window?.location) return;
+    this.deepLinkHandled = true;
+    const key = new URLSearchParams(this.window.location.search || '').get('surface');
+    if (key && this.surfaces.some(surface => surface?.key === key && surface.available !== false)) {
+      void this.open(key, null);
+    }
+  }
+
+  _setDeepLink(key) {
+    if (!this.window?.history || !this.window?.location) return;
+    const params = new URLSearchParams(this.window.location.search || '');
+    if (key) params.set('surface', key);
+    else params.delete('surface');
+    const query = params.toString();
+    const next = this.window.location.pathname + (query ? '?' + query : '');
+    this.window.history.replaceState(null, '', next);
+  }
+
   async _request(path, options = {}) {
-    const response = await this.fetch(path, {
-      credentials: 'same-origin',
-      ...options
-    });
+    const response = await this.fetch(path, { credentials: 'same-origin', ...options });
     if (response.ok) {
       if (response.status === 204) return null;
       return response.json();
@@ -297,14 +489,17 @@ export class WorkspaceSurfaceHost {
     }
     const error = new Error(text(payload.message) || 'Workspace surface request failed.');
     error.code = text(payload.code) || 'surface_unavailable';
+    error.confirmationId = text(payload.confirmation_id);
     throw error;
   }
 
-  _notifyChanged() {
-    if (!this.document || typeof this.document.dispatchEvent !== 'function') return;
+  _dispatch(type, detail) {
     const EventCtor = this.window?.CustomEvent || globalThis.CustomEvent;
-    if (typeof EventCtor === 'function') {
-      this.document.dispatchEvent(new EventCtor('ori:workspace-surfaces-changed'));
-    }
+    if (typeof EventCtor === 'function')
+      this.document?.dispatchEvent?.(new EventCtor(type, { detail }));
+  }
+
+  _notifyChanged() {
+    this._dispatch('ori:workspace-surfaces-changed');
   }
 }

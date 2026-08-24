@@ -180,6 +180,7 @@ export default defineConfig([
       'internal/web/static/js/modules/workspace-surface-host.js',
       'internal/web/static/js/plugin/workspace-surface-sdk.js',
       'internal/workspacesurfacedemo/testdata/plugin/ui/*.js',
+      'examples/plugins/workspace-surface-demo/ui/*.js',
       'internal/web/static/js/modules/workspace-routes.js',
       'internal/web/static/js/modules/workspace-url-state.js',
       'internal/web/static/js/modules/workspace-bulk-actions.js',

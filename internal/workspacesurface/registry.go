@@ -61,10 +61,10 @@ func (r *Registry) RegisterTrusted(registration Registration) error {
 			key := SurfaceKey(owner, capability.ID, surface.ID)
 			pending[key] = registered{
 				public: RegisteredSurface{
-					Key:        key,
-					Owner:      owner,
+					Key: key, Owner: owner,
 					Capability: cloneCapabilityWithoutSiblingSurfaces(capability, surface),
-					Surface:    cloneSurface(surface),
+					Surface:    cloneSurface(surface), Available: registration.UnavailableCode == "",
+					UnavailableCode: registration.UnavailableCode,
 				},
 				binding: cloneBinding(bindings[capability.ID+"\x00"+surface.ID]),
 			}
@@ -153,7 +153,7 @@ func (r *Registry) Binding(key string) (Binding, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	entry, ok := r.surfaces[strings.TrimSpace(key)]
-	if !ok {
+	if !ok || !entry.public.Available {
 		return Binding{}, false
 	}
 	return cloneBinding(entry.binding), true

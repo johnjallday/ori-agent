@@ -84,6 +84,10 @@ class BridgeFake {
   visibility(value) {
     this.visibilityValues.push(value);
   }
+
+  invalidate() {
+    this.destroy();
+  }
 }
 
 function response(status, payload = null) {
@@ -99,6 +103,8 @@ function response(status, payload = null) {
 function makeHost() {
   const document = new DocumentFake();
   const calls = [];
+  const asks = [];
+  const setupCalls = [];
   const fetch = async (path, options = {}) => {
     calls.push({ path, options });
     if (path.endsWith('/surfaces')) {
@@ -120,7 +126,14 @@ function makeHost() {
               description: 'The demo service is ready.'
             },
             available: true,
-            polling: { map_seconds: 5, open_seconds: 1 }
+            polling: { map_seconds: 5, open_seconds: 1 },
+            features: {
+              confirmation: true,
+              state: true,
+              ask_ori: true,
+              open_setup: true,
+              close: true
+            }
           }
         ]
       });
@@ -132,7 +145,43 @@ function makeHost() {
       });
     }
     if (path === '/api/workspace-surfaces/operations') {
+      const request = JSON.parse(options.body);
+      if (request.operation_id === 'setting.validate' && !request.confirmation_token) {
+        return response(409, {
+          code: 'confirmation_required',
+          message: 'Review this action.',
+          confirmation_id: 'confirmation-1'
+        });
+      }
+      if (request.operation_id === 'setting.validate') {
+        return response(200, { output: { accepted: true } });
+      }
       return response(200, { output: { message: 'Hello, Ori.' } });
+    }
+    if (path === '/api/workspace-surfaces/confirmations' && options.method === 'POST') {
+      return response(200, { confirmation_token: 'host-only-token' });
+    }
+    if (path === '/api/workspace-surfaces/confirmations' && options.method === 'DELETE') {
+      return response(204);
+    }
+    if (path === '/api/workspace-surfaces/state') {
+      return response(200, { found: false, revision: '0' });
+    }
+    if (path === '/api/workspace-surfaces/intents') {
+      const request = JSON.parse(options.body);
+      if (request.type === 'ask_ori') {
+        return response(200, {
+          intent: 'ask_ori',
+          workspace_id: 'workspace-1',
+          plugin_context: request.context,
+          required_capabilities: ['demo_runtime']
+        });
+      }
+      return response(200, {
+        intent: 'open_setup',
+        workspace_id: 'workspace-1',
+        provider_id: 'demo-runtime'
+      });
     }
     if (path === '/api/workspace-surfaces/sessions' && options.method === 'DELETE') {
       return response(204);
@@ -151,6 +200,17 @@ function makeHost() {
   });
   const timers = [];
   const window = {
+    confirm: () => true,
+    OriAskRouting: {
+      async submit(prompt, options) {
+        asks.push({ prompt, options });
+      }
+    },
+    SetupWizard: {
+      open() {
+        setupCalls.push(true);
+      }
+    },
     setTimeout(callback) {
       timers.push(callback);
     }
@@ -161,9 +221,11 @@ function makeHost() {
     document,
     window,
     coordinator,
-    Bridge: BridgeFake
+    Bridge: BridgeFake,
+    schedule: () => null,
+    cancelSchedule: () => {}
   });
-  return { host, document, calls, coordinator, restored, timers };
+  return { host, document, calls, coordinator, restored, timers, asks, setupCalls };
 }
 
 function find(node, tag) {
@@ -223,6 +285,67 @@ test('host opens an opaque sandbox through the overlay coordinator and invokes o
   });
 });
 
+test('host keeps confirmation token out of frame while retrying the exact operation', async () => {
+  const { host, calls } = makeHost();
+  await host.loadCatalog();
+  await host.open('plugin:workspace-surface-demo:demo-tools:main', new NodeFake('button'));
+  const result = await host.active.bridge.options.onRequest({
+    type: 'ori.surface.operation.invoke',
+    payload: { operation_id: 'setting.validate', input: { enabled: true } }
+  });
+  assert.deepEqual(result, { ok: true, result: { accepted: true } });
+  const confirmation = calls.find(
+    call => call.path === '/api/workspace-surfaces/confirmations' && call.options.method === 'POST'
+  );
+  assert.ok(confirmation);
+  const operationCalls = calls.filter(call => call.path === '/api/workspace-surfaces/operations');
+  assert.equal(operationCalls.length, 2);
+  assert.equal(JSON.parse(operationCalls[0].options.body).confirmation_token, undefined);
+  assert.equal(JSON.parse(operationCalls[1].options.body).confirmation_token, 'host-only-token');
+  assert.equal(
+    JSON.stringify(result).includes('host-only-token'),
+    false,
+    'frame response never receives the confirmation token'
+  );
+});
+
+test('state, Ask Ori, and Setup requests use host-owned generic intents', async () => {
+  const { host, calls, asks, setupCalls, timers } = makeHost();
+  await host.loadCatalog();
+  await host.open('plugin:workspace-surface-demo:demo-tools:main', new NodeFake('button'));
+
+  const state = await host.active.bridge.options.onRequest({
+    type: 'ori.surface.state.get',
+    payload: { key: 'display' }
+  });
+  assert.deepEqual(state, { ok: true, result: { found: false, revision: '0' } });
+  const stateCall = calls.find(call => call.path === '/api/workspace-surfaces/state');
+  assert.deepEqual(JSON.parse(stateCall.options.body), {
+    session: 'parent-only-session',
+    action: 'get',
+    key: 'display'
+  });
+
+  const asked = await host.active.bridge.options.onRequest({
+    type: 'ori.surface.host.ask_ori',
+    payload: { context: 'Explain this status.' }
+  });
+  assert.deepEqual(asked, { ok: true, result: { submitted: true } });
+  assert.equal(asks.length, 1);
+  assert.deepEqual(asks[0].options.routeContext.required_capabilities, ['demo_runtime']);
+  assert.equal(asks[0].options.routeContext.plugin_context, 'Explain this status.');
+
+  const setup = await host.active.bridge.options.onRequest({
+    type: 'ori.surface.host.open_setup',
+    payload: {}
+  });
+  assert.deepEqual(setup, { ok: true, result: { opened: true } });
+  assert.equal(timers.length, 1);
+  timers[0]();
+  await Promise.resolve();
+  assert.equal(setupCalls.length, 1);
+});
+
 test('host-owned close tears down frame, invalidates session, and restores station focus', async () => {
   const { host, document, calls, coordinator, restored } = makeHost();
   await host.loadCatalog();
@@ -241,6 +364,36 @@ test('host-owned close tears down frame, invalidates session, and restores stati
     call => call.path === '/api/workspace-surfaces/sessions' && call.options.method === 'DELETE'
   );
   assert.deepEqual(JSON.parse(close.options.body), { session: 'parent-only-session' });
+});
+
+test('polling is clamped, visibility-aware, and generation changes invalidate the frame', async () => {
+  const { host } = makeHost();
+  await host.loadCatalog();
+  let scheduled = null;
+  const canceled = [];
+  host.schedule = (callback, delay) => {
+    scheduled = { callback, delay, id: 9 };
+    return 9;
+  };
+  host.cancelSchedule = id => canceled.push(id);
+  host.setMapVisible(true);
+  assert.equal(scheduled.delay, 5000);
+  host.setDocumentVisible(false);
+  assert.deepEqual(canceled, [9]);
+  assert.equal(host.pollTimer, null);
+
+  host.setDocumentVisible(true);
+  await host.open('plugin:workspace-surface-demo:demo-tools:main', new NodeFake('button'));
+  const bridge = host.active.bridge;
+  assert.equal(scheduled.delay, 1000);
+  host.surfaces = host.surfaces.map(surface => ({
+    ...surface,
+    plugin: { ...surface.plugin, generation: '8' }
+  }));
+  host._reconcileActiveSurface();
+  await Promise.resolve();
+  assert.equal(bridge.destroyed, true);
+  assert.equal(host.active, null);
 });
 
 test('frame close intent receives a response before host teardown is scheduled', async () => {

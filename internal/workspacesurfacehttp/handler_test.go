@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -79,6 +80,8 @@ func (r *recordingRuntime) Invoke(ctx context.Context, invocation workspacesurfa
 		return workspacesurface.Result{}, ctx.Err()
 	case "crash.read":
 		return workspacesurface.Result{}, errors.New("service crashed at /Users/example/plugin on localhost:2307")
+	case "setting.validate":
+		return workspacesurface.Result{Output: json.RawMessage(`{"accepted":true}`)}, nil
 	default:
 		return workspacesurface.Result{Output: json.RawMessage(`{"message":"Hello, Ori."}`)}, nil
 	}
@@ -97,14 +100,15 @@ func (r *recordingRuntime) lastInvocation() workspacesurface.Invocation {
 }
 
 type prototypeHTTPFixture struct {
-	handler     *Handler
-	mux         *http.ServeMux
-	registry    *workspacesurface.Registry
-	runtime     *recordingRuntime
-	user        *mutableUser
-	surface     workspacesurface.RegisteredSurface
-	workspaceID string
-	root        string
+	handler      *Handler
+	mux          *http.ServeMux
+	registry     *workspacesurface.Registry
+	runtime      *recordingRuntime
+	user         *mutableUser
+	surface      workspacesurface.RegisteredSurface
+	registration workspacesurface.Registration
+	workspaceID  string
+	root         string
 }
 
 func newPrototypeHTTPFixture(t *testing.T) *prototypeHTTPFixture {
@@ -136,11 +140,13 @@ func newPrototypeHTTPFixture(t *testing.T) *prototypeHTTPFixture {
 				Icon: workspacesurface.Icon{Kind: "host", Value: "puzzle"}, Placement: "map_modal",
 				Modal:        workspacesurface.Modal{Width: 720, Height: 560},
 				Polling:      workspacesurface.Polling{MapSeconds: 5, OpenSeconds: 1},
-				OperationIDs: []string{"status.read", "greeting.create", "slow.read", "crash.read"}, StatusOperation: "status.read",
+				OperationIDs: []string{"status.read", "greeting.create", "slow.read", "crash.read", "setting.validate"}, StatusOperation: "status.read",
+				StateEnabled: true, ConfirmationEnabled: true, CloseEnabled: true,
+				AskOriCapabilities: []string{"demo_runtime"}, SetupProviderID: "demo-runtime",
 			}},
 		}},
 		Bindings: []workspacesurface.Binding{{
-			CapabilityID: "demo-tools", SurfaceID: "main", AssetRoot: root, EntryAsset: "ui/index.html", Runtime: runtime,
+			CapabilityID: "demo-tools", SurfaceID: "main", AssetRoot: root, AssetVersion: "fixture-v1", EntryAsset: "ui/index.html", Runtime: runtime,
 			Operations: map[string]workspacesurface.Operation{
 				"status.read": {
 					ID:             "status.read",
@@ -165,6 +171,12 @@ func newPrototypeHTTPFixture(t *testing.T) *prototypeHTTPFixture {
 					InputSchema:    json.RawMessage(`{"type":"object","properties":{},"required":[],"additionalProperties":false}`),
 					OutputSchema:   json.RawMessage(`{"type":"object","properties":{},"required":[],"additionalProperties":false}`),
 					MaxOutputBytes: 4096, Timeout: workspacesurface.TimeoutFast, Policy: workspacesurface.PolicyReadOnly,
+				},
+				"setting.validate": {
+					ID:             "setting.validate",
+					InputSchema:    json.RawMessage(`{"type":"object","properties":{"enabled":{"type":"boolean"}},"required":["enabled"],"additionalProperties":false}`),
+					OutputSchema:   json.RawMessage(`{"type":"object","properties":{"accepted":{"type":"boolean"}},"required":["accepted"],"additionalProperties":false}`),
+					MaxOutputBytes: 4096, Timeout: workspacesurface.TimeoutFast, Policy: workspacesurface.PolicyConfirmationRequired,
 				},
 			},
 		}},
@@ -196,11 +208,12 @@ func newPrototypeHTTPFixture(t *testing.T) *prototypeHTTPFixture {
 		}, nil
 	})
 	handler := NewHandler(registry, store, user, attachments, contexts)
+	handler.SetStateStore(workspacesurface.NewStateStore(t.TempDir()))
 	mux := http.NewServeMux()
 	handler.Register(mux)
 	return &prototypeHTTPFixture{
 		handler: handler, mux: mux, registry: registry, runtime: runtime,
-		user: user, surface: surface, workspaceID: workspaceID, root: root,
+		user: user, surface: surface, registration: registration, workspaceID: workspaceID, root: root,
 	}
 }
 
@@ -249,7 +262,7 @@ func TestCatalogReturnsOnlyOwnedAttachedSanitizedSurfaces(t *testing.T) {
 		t.Fatalf("catalog item = %+v", item)
 	}
 	body := recorder.Body.String()
-	for _, forbidden := range []string{fixture.root, "ui/index.html", "/canonical/", "status.read", "greeting.create", "slow.read", "crash.read"} {
+	for _, forbidden := range []string{fixture.root, "ui/index.html", "/canonical/", "status.read", "greeting.create", "slow.read", "crash.read", "setting.validate"} {
 		if strings.Contains(body, forbidden) {
 			t.Fatalf("catalog leaked %q: %s", forbidden, body)
 		}
@@ -279,8 +292,13 @@ func TestOpenSessionServesOnlyCanonicalBoundedAssets(t *testing.T) {
 	}
 	appURL := strings.TrimSuffix(opened.FrameURL, "index.html") + "app.js"
 	asset := fixture.serve(http.MethodGet, appURL, "")
-	if asset.Code != http.StatusOK || asset.Header().Get("Content-Type") != "text/javascript; charset=utf-8" {
+	if asset.Code != http.StatusOK || asset.Header().Get("Content-Type") != "text/javascript; charset=utf-8" ||
+		asset.Header().Get("Cache-Control") != "public, max-age=31536000, immutable" {
 		t.Fatalf("script asset = %d %s headers=%v", asset.Code, asset.Body.String(), asset.Header())
+	}
+	staleVersionURL := strings.Replace(opened.FrameURL, "/fixture-v1/", "/stale-version/", 1)
+	if stale := fixture.serve(http.MethodGet, staleVersionURL, ""); stale.Code != http.StatusGone {
+		t.Fatalf("stale asset version status = %d, body=%s", stale.Code, stale.Body.String())
 	}
 	missing := fixture.serve(http.MethodGet, strings.TrimSuffix(opened.FrameURL, "index.html")+"missing.js", "")
 	if missing.Code != http.StatusNotFound || strings.Contains(missing.Body.String(), fixture.root) {
@@ -403,6 +421,140 @@ func TestExpiredMalformedAndOversizedRequestsFailClosed(t *testing.T) {
 	}
 }
 
+func TestHostIntentsUseOnlySurfaceRegisteredRequirements(t *testing.T) {
+	fixture := newPrototypeHTTPFixture(t)
+	opened := fixture.openSession(t)
+	askRecorder := fixture.serve(http.MethodPost, "/api/workspace-surfaces/intents",
+		`{"session":"`+opened.Session+`","type":"ask_ori","context":"Explain this status"}`)
+	var ask intentResponse
+	if err := json.Unmarshal(askRecorder.Body.Bytes(), &ask); err != nil || askRecorder.Code != http.StatusOK || ask.Intent != "ask_ori" ||
+		len(ask.RequiredCapabilities) != 1 || ask.RequiredCapabilities[0] != "demo_runtime" || ask.PluginContext != "Explain this status" {
+		t.Fatalf("Ask Ori intent = %d %+v, %v", askRecorder.Code, ask, err)
+	}
+	setup := fixture.serve(http.MethodPost, "/api/workspace-surfaces/intents",
+		`{"session":"`+opened.Session+`","type":"open_setup"}`)
+	var setupIntent intentResponse
+	if err := json.Unmarshal(setup.Body.Bytes(), &setupIntent); err != nil || setupIntent.ProviderID != "demo-runtime" {
+		t.Fatalf("Setup intent = %d %+v, %v", setup.Code, setupIntent, err)
+	}
+	injected := fixture.serve(http.MethodPost, "/api/workspace-surfaces/intents",
+		`{"session":"`+opened.Session+`","type":"ask_ori","context":"x","required_capabilities":["admin"]}`)
+	if injected.Code != http.StatusBadRequest {
+		t.Fatalf("injected intent authority status = %d, body=%s", injected.Code, injected.Body.String())
+	}
+}
+
+func TestNamespacedStatePreservesMissingNullAndRevisionConflicts(t *testing.T) {
+	fixture := newPrototypeHTTPFixture(t)
+	opened := fixture.openSession(t)
+	state := func(body string) *httptest.ResponseRecorder {
+		return fixture.serve(http.MethodPost, "/api/workspace-surfaces/state", body)
+	}
+	missing := state(`{"session":"` + opened.Session + `","action":"get","key":"display"}`)
+	var value workspacesurface.StateValue
+	if err := json.Unmarshal(missing.Body.Bytes(), &value); err != nil || missing.Code != http.StatusOK || value.Found || value.Revision != "0" {
+		t.Fatalf("missing state = %d %+v, %v", missing.Code, value, err)
+	}
+	saved := state(`{"session":"` + opened.Session + `","action":"set","key":"display","schema_version":1,"expected_revision":"0","value":null}`)
+	if err := json.Unmarshal(saved.Body.Bytes(), &value); err != nil || saved.Code != http.StatusOK || !value.Found || string(value.Value) != "null" || value.Revision != "1" {
+		t.Fatalf("saved state = %d %+v, %v", saved.Code, value, err)
+	}
+	conflict := state(`{"session":"` + opened.Session + `","action":"set","key":"display","schema_version":1,"expected_revision":"0","value":{}}`)
+	if conflict.Code != http.StatusConflict || !strings.Contains(conflict.Body.String(), `"state_conflict"`) {
+		t.Fatalf("state conflict = %d %s", conflict.Code, conflict.Body.String())
+	}
+	got := state(`{"session":"` + opened.Session + `","action":"get","key":"display"}`)
+	if err := json.Unmarshal(got.Body.Bytes(), &value); err != nil || !value.Found || string(value.Value) != "null" {
+		t.Fatalf("explicit null read = %d %+v, %v", got.Code, value, err)
+	}
+}
+
+func TestHostConfirmationBindsPayloadAndIsSingleUse(t *testing.T) {
+	fixture := newPrototypeHTTPFixture(t)
+	opened := fixture.openSession(t)
+	invoke := func(payload string) *httptest.ResponseRecorder {
+		return fixture.serve(http.MethodPost, "/api/workspace-surfaces/operations", payload)
+	}
+	request := `{"session":"` + opened.Session + `","operation_id":"setting.validate","input":{"enabled":true}}`
+	pending := invoke(request)
+	if pending.Code != http.StatusConflict || fixture.runtime.invokeCount() != 0 {
+		t.Fatalf("pending confirmation = %d %s; calls=%d", pending.Code, pending.Body.String(), fixture.runtime.invokeCount())
+	}
+	var pendingError errorResponse
+	if err := json.Unmarshal(pending.Body.Bytes(), &pendingError); err != nil || pendingError.Code != "confirmation_required" || pendingError.ConfirmationID == "" {
+		t.Fatalf("pending response = %+v, %v", pendingError, err)
+	}
+	approved := fixture.serve(http.MethodPost, "/api/workspace-surfaces/confirmations",
+		`{"session":"`+opened.Session+`","confirmation_id":"`+pendingError.ConfirmationID+`"}`)
+	var approval confirmationResponse
+	if err := json.Unmarshal(approved.Body.Bytes(), &approval); err != nil || approved.Code != http.StatusOK || approval.ConfirmationToken == "" {
+		t.Fatalf("approval = %d %+v, %v", approved.Code, approval, err)
+	}
+	confirmedRequest := `{"session":"` + opened.Session + `","operation_id":"setting.validate","input":{"enabled":true},"confirmation_token":"` + approval.ConfirmationToken + `"}`
+	confirmed := invoke(confirmedRequest)
+	if confirmed.Code != http.StatusOK || fixture.runtime.invokeCount() != 1 || !strings.Contains(confirmed.Body.String(), `"accepted":true`) {
+		t.Fatalf("confirmed = %d %s; calls=%d", confirmed.Code, confirmed.Body.String(), fixture.runtime.invokeCount())
+	}
+	replay := invoke(confirmedRequest)
+	if replay.Code != http.StatusConflict || fixture.runtime.invokeCount() != 1 {
+		t.Fatalf("replay = %d %s; calls=%d", replay.Code, replay.Body.String(), fixture.runtime.invokeCount())
+	}
+}
+
+func TestConfirmationRejectsChangedPayloadAndCancellationBeforeService(t *testing.T) {
+	fixture := newPrototypeHTTPFixture(t)
+	opened := fixture.openSession(t)
+	initial := fixture.serve(http.MethodPost, "/api/workspace-surfaces/operations",
+		`{"session":"`+opened.Session+`","operation_id":"setting.validate","input":{"enabled":true}}`)
+	var pending errorResponse
+	if err := json.Unmarshal(initial.Body.Bytes(), &pending); err != nil {
+		t.Fatal(err)
+	}
+	approved := fixture.serve(http.MethodPost, "/api/workspace-surfaces/confirmations",
+		`{"session":"`+opened.Session+`","confirmation_id":"`+pending.ConfirmationID+`"}`)
+	var approval confirmationResponse
+	if err := json.Unmarshal(approved.Body.Bytes(), &approval); err != nil {
+		t.Fatal(err)
+	}
+	changed := fixture.serve(http.MethodPost, "/api/workspace-surfaces/operations",
+		`{"session":"`+opened.Session+`","operation_id":"setting.validate","input":{"enabled":false},"confirmation_token":"`+approval.ConfirmationToken+`"}`)
+	if changed.Code != http.StatusConflict || fixture.runtime.invokeCount() != 0 {
+		t.Fatalf("changed payload = %d %s; calls=%d", changed.Code, changed.Body.String(), fixture.runtime.invokeCount())
+	}
+
+	initial = fixture.serve(http.MethodPost, "/api/workspace-surfaces/operations",
+		`{"session":"`+opened.Session+`","operation_id":"setting.validate","input":{"enabled":true}}`)
+	if err := json.Unmarshal(initial.Body.Bytes(), &pending); err != nil {
+		t.Fatal(err)
+	}
+	canceled := fixture.serve(http.MethodDelete, "/api/workspace-surfaces/confirmations",
+		`{"session":"`+opened.Session+`","confirmation_id":"`+pending.ConfirmationID+`"}`)
+	if canceled.Code != http.StatusNoContent {
+		t.Fatalf("cancel = %d %s", canceled.Code, canceled.Body.String())
+	}
+	approveCanceled := fixture.serve(http.MethodPost, "/api/workspace-surfaces/confirmations",
+		`{"session":"`+opened.Session+`","confirmation_id":"`+pending.ConfirmationID+`"}`)
+	if approveCanceled.Code != http.StatusConflict || fixture.runtime.invokeCount() != 0 {
+		t.Fatalf("approve canceled = %d %s; calls=%d", approveCanceled.Code, approveCanceled.Body.String(), fixture.runtime.invokeCount())
+	}
+}
+
+func TestRuntimeGrantDenialStopsBeforeContextOrService(t *testing.T) {
+	fixture := newPrototypeHTTPFixture(t)
+	fixture.handler.SetOperationAuthorizer(OperationAuthorizerFunc(func(context.Context, string, string, workspacesurface.RegisteredSurface, workspacesurface.Operation) error {
+		return errors.New("grant missing for /private/runtime")
+	}))
+	opened := fixture.openSession(t)
+	response := fixture.serve(http.MethodPost, "/api/workspace-surfaces/operations",
+		`{"session":"`+opened.Session+`","operation_id":"greeting.create","input":{"name":"Ori"}}`)
+	if response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), `"runtime_grant_required"`) || fixture.runtime.invokeCount() != 0 {
+		t.Fatalf("grant denial = %d %s; calls=%d", response.Code, response.Body.String(), fixture.runtime.invokeCount())
+	}
+	if strings.Contains(response.Body.String(), "/private/runtime") {
+		t.Fatalf("grant denial leaked internal detail: %s", response.Body.String())
+	}
+}
+
 func TestServiceTimeoutAndCrashAreSanitized(t *testing.T) {
 	fixture := newPrototypeHTTPFixture(t)
 	fixture.handler.timeoutFor = func(workspacesurface.TimeoutClass) time.Duration { return 20 * time.Millisecond }
@@ -425,6 +577,90 @@ func TestServiceTimeoutAndCrashAreSanitized(t *testing.T) {
 	}
 	if fixture.runtime.invokeCount() != 2 {
 		t.Fatalf("runtime calls = %d, want timeout and crash dispatch only", fixture.runtime.invokeCount())
+	}
+}
+
+func TestCapabilityRemovalAndServiceRestartInvalidateBoundSessions(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		invalidate func(*prototypeHTTPFixture) int
+	}{
+		{
+			name: "capability removal",
+			invalidate: func(fixture *prototypeHTTPFixture) int {
+				return fixture.handler.InvalidateCapability(fixture.workspaceID, "workspace-surface-demo", "demo-tools")
+			},
+		},
+		{
+			name: "service restart",
+			invalidate: func(fixture *prototypeHTTPFixture) int {
+				return fixture.handler.InvalidateServiceRestart("workspace-surface-demo", 7)
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newPrototypeHTTPFixture(t)
+			opened := fixture.openSession(t)
+			if count := test.invalidate(fixture); count != 1 {
+				t.Fatalf("invalidated sessions = %d", count)
+			}
+			if frame := fixture.serve(http.MethodGet, opened.FrameURL, ""); frame.Code != http.StatusNotFound {
+				t.Fatalf("invalidated frame status = %d", frame.Code)
+			}
+			operation := fixture.serve(http.MethodPost, "/api/workspace-surfaces/operations",
+				`{"session":"`+opened.Session+`","operation_id":"greeting.create","input":{"name":"Ori"}}`)
+			if operation.Code != http.StatusNotFound || fixture.runtime.invokeCount() != 0 {
+				t.Fatalf("invalidated operation = %d %s; calls=%d", operation.Code, operation.Body.String(), fixture.runtime.invokeCount())
+			}
+		})
+	}
+}
+
+func TestConcurrentLifecycleChangesAreSafeDuringCatalogAssetStatusAndOperationRequests(t *testing.T) {
+	fixture := newPrototypeHTTPFixture(t)
+	opened := fixture.openSession(t)
+	operationBody := `{"session":"` + opened.Session + `","operation_id":"greeting.create","input":{"name":"Ori"}}`
+	openPath := "/api/workspaces/" + fixture.workspaceID + "/surfaces/" + url.PathEscape(fixture.surface.Key) + "/sessions"
+	catalogPath := "/api/workspaces/" + fixture.workspaceID + "/surfaces"
+
+	var wait sync.WaitGroup
+	errorsSeen := make(chan string, 500)
+	runRequests := func(name, method, path, body string, allowed ...int) {
+		defer wait.Done()
+		for range 75 {
+			response := fixture.serve(method, path, body)
+			accepted := false
+			for _, status := range allowed {
+				accepted = accepted || response.Code == status
+			}
+			if !accepted {
+				errorsSeen <- name + ": unexpected HTTP status " + fmt.Sprint(response.Code)
+			}
+		}
+	}
+	wait.Add(5)
+	go runRequests("catalog/status", http.MethodGet, catalogPath, "", http.StatusOK)
+	go runRequests("asset", http.MethodGet, opened.FrameURL, "", http.StatusOK, http.StatusNotFound)
+	go runRequests("operation", http.MethodPost, "/api/workspace-surfaces/operations", operationBody, http.StatusOK, http.StatusNotFound)
+	go runRequests("session", http.MethodPost, openPath, "", http.StatusCreated, http.StatusNotFound)
+	go func() {
+		defer wait.Done()
+		for range 75 {
+			fixture.handler.InvalidateOwner(fixture.surface.Owner.ID, fixture.surface.Owner.Generation)
+			if err := fixture.registry.UnregisterOwner(fixture.surface.Owner.Kind, fixture.surface.Owner.ID, fixture.surface.Owner.Generation); err != nil {
+				errorsSeen <- "unregister: " + err.Error()
+				return
+			}
+			if err := fixture.registry.RegisterTrusted(fixture.registration); err != nil {
+				errorsSeen <- "register: " + err.Error()
+				return
+			}
+		}
+	}()
+	wait.Wait()
+	close(errorsSeen)
+	for message := range errorsSeen {
+		t.Error(message)
 	}
 }
 

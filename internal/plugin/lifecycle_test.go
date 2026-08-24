@@ -50,6 +50,56 @@ func TestStoreRoundTrip(t *testing.T) {
 	}
 }
 
+type recordingContributionLifecycle struct {
+	events   []string
+	previous InstalledPlugin
+	next     InstalledPlugin
+}
+
+func (l *recordingContributionLifecycle) RegisterInstalled(plugin InstalledPlugin) error {
+	l.events = append(l.events, "register:"+plugin.Name)
+	return nil
+}
+func (l *recordingContributionLifecycle) Replace(previous, next InstalledPlugin) error {
+	l.events = append(l.events, "replace:"+previous.Name)
+	l.previous, l.next = previous, next
+	return nil
+}
+func (l *recordingContributionLifecycle) Unregister(pluginID string, _ uint64) error {
+	l.events = append(l.events, "unregister:"+pluginID)
+	return nil
+}
+func (l *recordingContributionLifecycle) DeleteState(pluginID string) error {
+	l.events = append(l.events, "delete-state:"+pluginID)
+	return nil
+}
+
+func TestManagerSetEnabledReplacesContributionGenerationBeforeCommit(t *testing.T) {
+	m := NewManager(&fakeRegistrar{}, &fakeSkills{}, t.TempDir(), "")
+	installed := InstalledPlugin{Name: "surface-tools", Enabled: false, Generation: 4}
+	if err := m.store.Put(installed); err != nil {
+		t.Fatal(err)
+	}
+	lifecycle := &recordingContributionLifecycle{}
+	m.SetSurfaceLifecycle(lifecycle)
+	if err := m.SetEnabled(installed.Name, true); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := m.store.Get(installed.Name)
+	if err != nil || !ok {
+		t.Fatalf("Get() ok=%v err=%v", ok, err)
+	}
+	if !got.Enabled || got.Generation != 5 {
+		t.Fatalf("enabled plugin = %+v", got)
+	}
+	if len(lifecycle.events) != 1 || lifecycle.events[0] != "replace:surface-tools" {
+		t.Fatalf("lifecycle events = %v", lifecycle.events)
+	}
+	if lifecycle.previous.Generation != 4 || lifecycle.next.Generation != 5 || !lifecycle.next.Enabled {
+		t.Fatalf("replacement = %+v -> %+v", lifecycle.previous, lifecycle.next)
+	}
+}
+
 func TestManagerInstallAndUninstall(t *testing.T) {
 	root := makeClaudeBundle(t)
 	reg := &fakeRegistrar{}
@@ -74,6 +124,8 @@ func TestManagerInstallAndUninstall(t *testing.T) {
 		t.Errorf("store should have 1 entry, got %d", len(list))
 	}
 
+	lifecycle := &recordingContributionLifecycle{}
+	m.SetSurfaceLifecycle(lifecycle)
 	if err := m.Uninstall("reaper"); err != nil {
 		t.Fatalf("uninstall: %v", err)
 	}
@@ -82,6 +134,9 @@ func TestManagerInstallAndUninstall(t *testing.T) {
 	}
 	if list, _ := m.List(); len(list) != 0 {
 		t.Errorf("store entry not removed, got %d", len(list))
+	}
+	if len(lifecycle.events) != 1 || lifecycle.events[0] != "delete-state:reaper" {
+		t.Fatalf("uninstall lifecycle events = %v", lifecycle.events)
 	}
 }
 

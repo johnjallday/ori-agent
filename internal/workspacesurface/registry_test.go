@@ -42,7 +42,7 @@ func registerTestSurface(t *testing.T, registry *Registry, ownerID string, gener
 			}},
 		}},
 		Bindings: []Binding{{
-			CapabilityID: "demo-tools", SurfaceID: "main", AssetRoot: root, EntryAsset: "ui/index.html",
+			CapabilityID: "demo-tools", SurfaceID: "main", AssetRoot: root, AssetVersion: "fixture-v1", EntryAsset: "ui/index.html",
 			Operations: map[string]Operation{
 				"status.read": {
 					ID: "status.read", InputSchema: json.RawMessage(`{"type":"object","properties":{},"required":[],"additionalProperties":false}`),

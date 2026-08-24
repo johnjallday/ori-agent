@@ -2885,5 +2885,44 @@
     }
   };
 
-  if (typeof window !== 'undefined') window.ReaperConsole = controller;
+  if (typeof window !== 'undefined') {
+    window.ReaperConsole = controller;
+    window.WorkspaceBuiltinStationAdapters = window.WorkspaceBuiltinStationAdapters || [];
+    if (!window.WorkspaceBuiltinStationAdapters.some(adapter => adapter?.key === 'reaper')) {
+      window.WorkspaceBuiltinStationAdapters.push({
+        key: 'reaper',
+        station(context = {}) {
+          // Legacy core REAPER remains reachable only through its exact
+          // persisted assisted-runtime contract (or the canonical state result).
+          // Names, tags, templates, folders, and agent names are irrelevant.
+          const workspace = context.workspace || {};
+          const runtimeState = workspace.runtime_state || {};
+          const contract = workspace.template_provenance?.runtime_requirements || null;
+          const selectedMode = String(runtimeState.selected_mode_id || '');
+          const mode =
+            contract && Array.isArray(contract.operating_modes)
+              ? contract.operating_modes.find(
+                  candidate => candidate && candidate.id === selectedMode
+                )
+              : null;
+          const requirements =
+            contract && Array.isArray(contract.requirements) ? contract.requirements : [];
+          const selected =
+            selectedMode === 'ori_assisted' &&
+            mode &&
+            Array.isArray(mode.requires) &&
+            mode.requires.includes(REQUIREMENT_KEY) &&
+            requirements.some(requirement => requirement?.key === REQUIREMENT_KEY);
+          if (!selected && !controller.applies()) return null;
+          return {
+            key: 'reaper',
+            label: controller.stationLabel(),
+            icon: 'bi-sliders2-vertical',
+            state: () => controller.stationState(),
+            action: trigger => controller.open({ source: 'map-station', trigger })
+          };
+        }
+      });
+    }
+  }
 })();

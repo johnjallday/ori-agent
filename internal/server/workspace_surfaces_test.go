@@ -8,10 +8,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/johnjallday/ori-agent/internal/plugin"
+	"github.com/johnjallday/ori-agent/internal/pluginhttp"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
-func TestWireWorkspaceSurfacesRegistersOnlyGenericRoutes(t *testing.T) {
+func TestWireWorkspaceSurfacesRestoresInstalledPluginThroughOnlyGenericRoutes(t *testing.T) {
 	root := t.TempDir()
 	store, err := workspace.NewFileStore(root)
 	if err != nil {
@@ -27,11 +29,21 @@ func TestWireWorkspaceSurfacesRegistersOnlyGenericRoutes(t *testing.T) {
 		t.Fatal("could not resolve repository root")
 	}
 	repositoryRoot := filepath.Clean(filepath.Join(filepath.Dir(currentFile), "..", ".."))
-	t.Setenv(workspaceSurfaceDemoEnv, "1")
-	t.Setenv(workspaceSurfaceDemoRootEnv, filepath.Join(repositoryRoot, "internal", "workspacesurfacedemo", "testdata", "plugin"))
 	t.Setenv("ORI_DATA_DIR", t.TempDir())
+	pluginHandler := pluginhttp.NewHandler(nil, nil, t.TempDir(), t.TempDir())
+	installed, err := pluginHandler.Manager().Install(
+		filepath.Join(repositoryRoot, "examples", "plugins", "workspace-surface-demo"),
+		"",
+		func(plugin.TrustReport) bool { return true },
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := pluginHandler.Manager().SetEnabled(installed.Name, true); err != nil {
+		t.Fatal(err)
+	}
 
-	builder := &ServerBuilder{workspaceStore: store, workspaceFileStore: store}
+	builder := &ServerBuilder{workspaceStore: store, workspaceFileStore: store, pluginHandler: pluginHandler}
 	builder.wireWorkspaceSurfaces()
 	if builder.workspaceSurfaceHandler == nil || builder.workspaceSurfaceRegistry == nil {
 		t.Fatal("workspace surface handler/registry was not wired")
@@ -58,12 +70,11 @@ func TestWireWorkspaceSurfacesRegistersOnlyGenericRoutes(t *testing.T) {
 	}
 }
 
-func TestWireWorkspaceSurfacesLeavesRegistryEmptyWithoutExplicitDemoOptIn(t *testing.T) {
+func TestWireWorkspaceSurfacesLeavesRegistryEmptyWithoutInstalledPlugin(t *testing.T) {
 	store, err := workspace.NewFileStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv(workspaceSurfaceDemoEnv, "")
 	builder := &ServerBuilder{workspaceStore: store, workspaceFileStore: store}
 	builder.wireWorkspaceSurfaces()
 	if builder.workspaceSurfaceHandler == nil {

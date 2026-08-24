@@ -10,8 +10,9 @@ import (
 )
 
 const (
-	defaultSessionTTL = 15 * time.Minute
-	maxOpenSessions   = 256
+	defaultSessionIdleTTL     = 15 * time.Minute
+	defaultSessionAbsoluteTTL = 8 * time.Hour
+	maxOpenSessions           = 256
 )
 
 var (
@@ -20,16 +21,19 @@ var (
 )
 
 type surfaceSession struct {
-	UserID      string
-	WorkspaceID string
-	SurfaceKey  string
-	PluginID    string
-	Generation  uint64
-	Credential  string
-	FrameToken  string
-	CreatedAt   time.Time
-	ExpiresAt   time.Time
-	Invalidated bool
+	UserID            string
+	WorkspaceID       string
+	SurfaceKey        string
+	PluginID          string
+	Generation        uint64
+	Credential        string
+	FrameToken        string
+	CapabilityID      string
+	SurfaceID         string
+	CreatedAt         time.Time
+	IdleExpiresAt     time.Time
+	AbsoluteExpiresAt time.Time
+	Invalidated       bool
 }
 
 type sessionStore struct {
@@ -38,6 +42,7 @@ type sessionStore struct {
 	byFrame      map[[sha256.Size]byte][sha256.Size]byte
 	now          func() time.Time
 	ttl          time.Duration
+	absoluteTTL  time.Duration
 }
 
 func newSessionStore() *sessionStore {
@@ -45,7 +50,8 @@ func newSessionStore() *sessionStore {
 		byCredential: make(map[[sha256.Size]byte]surfaceSession),
 		byFrame:      make(map[[sha256.Size]byte][sha256.Size]byte),
 		now:          time.Now,
-		ttl:          defaultSessionTTL,
+		ttl:          defaultSessionIdleTTL,
+		absoluteTTL:  defaultSessionAbsoluteTTL,
 	}
 }
 
@@ -68,7 +74,8 @@ func (s *sessionStore) open(record surfaceSession) (surfaceSession, error) {
 	record.Credential = credential
 	record.FrameToken = frame
 	record.CreatedAt = now
-	record.ExpiresAt = now.Add(s.ttl)
+	record.IdleExpiresAt = now.Add(s.ttl)
+	record.AbsoluteExpiresAt = now.Add(s.absoluteTTL)
 	credentialKey := tokenKey(credential)
 	s.byCredential[credentialKey] = record
 	s.byFrame[tokenKey(frame)] = credentialKey
@@ -80,10 +87,13 @@ func (s *sessionStore) credential(token string) (surfaceSession, error) {
 	defer s.mu.Unlock()
 	now := s.clock()
 	s.removeExpiredLocked(now)
-	record, ok := s.byCredential[tokenKey(token)]
+	key := tokenKey(token)
+	record, ok := s.byCredential[key]
 	if !ok || record.Invalidated {
 		return surfaceSession{}, errSessionUnknown
 	}
+	record.IdleExpiresAt = minTime(now.Add(s.ttl), record.AbsoluteExpiresAt)
+	s.byCredential[key] = record
 	return record, nil
 }
 
@@ -100,6 +110,8 @@ func (s *sessionStore) frame(token string) (surfaceSession, error) {
 	if !ok || record.Invalidated {
 		return surfaceSession{}, errSessionUnknown
 	}
+	record.IdleExpiresAt = minTime(now.Add(s.ttl), record.AbsoluteExpiresAt)
+	s.byCredential[credentialKey] = record
 	return record, nil
 }
 
@@ -130,14 +142,36 @@ func (s *sessionStore) invalidateOwner(pluginID string, generation uint64) int {
 	return count
 }
 
+func (s *sessionStore) invalidateCapability(workspaceID, pluginID, capabilityID string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	count := 0
+	for key, record := range s.byCredential {
+		if record.WorkspaceID != workspaceID || record.PluginID != pluginID || record.CapabilityID != capabilityID {
+			continue
+		}
+		delete(s.byCredential, key)
+		delete(s.byFrame, tokenKey(record.FrameToken))
+		count++
+	}
+	return count
+}
+
 func (s *sessionStore) removeExpiredLocked(now time.Time) {
 	for key, record := range s.byCredential {
-		if now.Before(record.ExpiresAt) && !record.Invalidated {
+		if now.Before(record.IdleExpiresAt) && now.Before(record.AbsoluteExpiresAt) && !record.Invalidated {
 			continue
 		}
 		delete(s.byCredential, key)
 		delete(s.byFrame, tokenKey(record.FrameToken))
 	}
+}
+
+func minTime(left, right time.Time) time.Time {
+	if left.Before(right) {
+		return left
+	}
+	return right
 }
 
 func (s *sessionStore) clock() time.Time {

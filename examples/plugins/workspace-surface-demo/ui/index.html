@@ -36,6 +36,10 @@
           <span>Checks</span>
           <strong data-check-count>0</strong>
         </article>
+        <article>
+          <span>Persisted opens</span>
+          <strong data-visit-count>Loading</strong>
+        </article>
       </section>
 
       <section class="console" aria-labelledby="operation-title">
@@ -54,9 +58,19 @@
         <output class="result" data-result aria-live="polite">No operation sent yet.</output>
       </section>
 
+      <section class="negative" aria-labelledby="confirmation-title">
+        <div>
+          <p class="ordinal">02 / host-owned confirmation</p>
+          <h2 id="confirmation-title">Request a protected operation</h2>
+          <p>Ori owns the approval prompt and binds one token to this exact payload.</p>
+        </div>
+        <button type="button" class="quiet" data-confirmation>Request confirmation</button>
+        <output data-confirmation-result aria-live="polite">Not requested.</output>
+      </section>
+
       <section class="negative" aria-labelledby="negative-title">
         <div>
-          <p class="ordinal">02 / fail closed</p>
+          <p class="ordinal">03 / fail closed</p>
           <h2 id="negative-title">Try an undeclared operation</h2>
           <p>The host should reject it before the fake service records a call.</p>
         </div>

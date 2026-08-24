@@ -32,10 +32,11 @@ type PluginDescriptor struct {
 	SourceLocation string       `json:"source_location,omitempty"`
 	InstallDir     string       `json:"install_dir"`
 
-	MCPServers  []MCPServerSpec        `json:"mcp_servers,omitempty"`
-	Skills      []SkillSpec            `json:"skills,omitempty"`
-	Interface   *InterfaceMetadata     `json:"interface,omitempty"`
-	Unsupported []UnsupportedComponent `json:"unsupported,omitempty"`
+	MCPServers        []MCPServerSpec        `json:"mcp_servers,omitempty"`
+	Skills            []SkillSpec            `json:"skills,omitempty"`
+	Interface         *InterfaceMetadata     `json:"interface,omitempty"`
+	WorkspaceSurfaces *SurfaceContribution   `json:"workspace_surfaces,omitempty"`
+	Unsupported       []UnsupportedComponent `json:"unsupported,omitempty"`
 }
 
 // MCPServerSpec is one MCP server declared by a plugin, before resolution to a

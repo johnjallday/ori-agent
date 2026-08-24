@@ -74,15 +74,20 @@ type Polling struct {
 // particular, it contains no command, service method, asset path, module, URL,
 // endpoint, filesystem path, or schema.
 type Surface struct {
-	ID              string   `json:"id"`
-	Label           string   `json:"label"`
-	Description     string   `json:"description,omitempty"`
-	Icon            Icon     `json:"icon"`
-	Placement       string   `json:"placement"`
-	Modal           Modal    `json:"modal"`
-	Polling         Polling  `json:"polling"`
-	OperationIDs    []string `json:"operation_ids,omitempty"`
-	StatusOperation string   `json:"status_operation,omitempty"`
+	ID                  string   `json:"id"`
+	Label               string   `json:"label"`
+	Description         string   `json:"description,omitempty"`
+	Icon                Icon     `json:"icon"`
+	Placement           string   `json:"placement"`
+	Modal               Modal    `json:"modal"`
+	Polling             Polling  `json:"polling"`
+	OperationIDs        []string `json:"operation_ids,omitempty"`
+	StatusOperation     string   `json:"status_operation,omitempty"`
+	StateEnabled        bool     `json:"state_enabled,omitempty"`
+	ConfirmationEnabled bool     `json:"confirmation_enabled,omitempty"`
+	CloseEnabled        bool     `json:"close_enabled,omitempty"`
+	AskOriCapabilities  []string `json:"ask_ori_capabilities,omitempty"`
+	SetupProviderID     string   `json:"setup_provider_id,omitempty"`
 }
 
 // Capability is the inert definition contributed by one trusted owner. Owner is
@@ -182,6 +187,7 @@ type Binding struct {
 	CapabilityID string
 	SurfaceID    string
 	AssetRoot    string
+	AssetVersion string
 	EntryAsset   string
 	Operations   map[string]Operation
 	Runtime      Runtime
@@ -190,17 +196,20 @@ type Binding struct {
 // Registration atomically pairs one owner's inert capability descriptors with
 // every trusted runtime binding they require.
 type Registration struct {
-	Owner        Owner
-	Capabilities []Capability
-	Bindings     []Binding
+	Owner           Owner
+	Capabilities    []Capability
+	Bindings        []Binding
+	UnavailableCode string
 }
 
 // RegisteredSurface is the registry's inert/public resolution result.
 type RegisteredSurface struct {
-	Key        string     `json:"key"`
-	Owner      Owner      `json:"owner"`
-	Capability Capability `json:"capability"`
-	Surface    Surface    `json:"surface"`
+	Key             string     `json:"key"`
+	Owner           Owner      `json:"owner"`
+	Capability      Capability `json:"capability"`
+	Surface         Surface    `json:"surface"`
+	Available       bool       `json:"available"`
+	UnavailableCode string     `json:"unavailable_code,omitempty"`
 }
 
 func (o Owner) key() string { return string(o.Kind) + ":" + o.ID }
@@ -245,6 +254,13 @@ func validateRegistration(reg Registration) error {
 			}
 			surfaces[localKey] = surface
 		}
+	}
+
+	if reg.UnavailableCode != "" {
+		if !canonicalUnavailableCode(reg.UnavailableCode) || len(reg.Bindings) != 0 {
+			return fmt.Errorf("workspace surface unavailable registration is invalid")
+		}
+		return nil
 	}
 
 	bindings := make(map[string]Binding, len(reg.Bindings))
@@ -351,6 +367,16 @@ func validateSurface(surface Surface) error {
 			return fmt.Errorf("surface %q status operation %q is not declared", surface.ID, surface.StatusOperation)
 		}
 	}
+	for _, capability := range surface.AskOriCapabilities {
+		if err := validateID("Ask Ori capability", capability); err != nil {
+			return err
+		}
+	}
+	if surface.SetupProviderID != "" {
+		if err := validateID("Setup provider", surface.SetupProviderID); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -360,6 +386,9 @@ func validateBinding(binding Binding, surface Surface) error {
 	}
 	if !filepath.IsAbs(binding.AssetRoot) || filepath.Clean(binding.AssetRoot) != binding.AssetRoot {
 		return fmt.Errorf("workspace surface binding %q/%q has an invalid trusted asset root", binding.CapabilityID, binding.SurfaceID)
+	}
+	if !canonicalAssetVersion(binding.AssetVersion) {
+		return fmt.Errorf("workspace surface binding %q/%q has an invalid asset version", binding.CapabilityID, binding.SurfaceID)
 	}
 	if !safeRelativeAssetPath(binding.EntryAsset) || !strings.EqualFold(path.Ext(binding.EntryAsset), ".html") {
 		return fmt.Errorf("workspace surface binding %q/%q has an invalid HTML entry asset", binding.CapabilityID, binding.SurfaceID)
@@ -409,6 +438,22 @@ func validateOperation(operation Operation) error {
 	return nil
 }
 
+func canonicalAssetVersion(value string) bool {
+	if len(value) < 1 || len(value) > 128 {
+		return false
+	}
+	for _, r := range value {
+		if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '.' && r != '_' && r != '-' {
+			return false
+		}
+	}
+	return true
+}
+
+func canonicalUnavailableCode(value string) bool {
+	return len(value) <= maxIDBytes && idPattern.MatchString(value)
+}
+
 func validateID(kind, value string) error {
 	if len(value) == 0 || len(value) > maxIDBytes || value != strings.TrimSpace(value) || !idPattern.MatchString(value) {
 		return fmt.Errorf("workspace surface %s id %q is invalid", kind, value)
@@ -441,6 +486,7 @@ func cloneOwner(owner Owner) Owner { return owner }
 func cloneSurface(surface Surface) Surface {
 	copy := surface
 	copy.OperationIDs = append([]string(nil), surface.OperationIDs...)
+	copy.AskOriCapabilities = append([]string(nil), surface.AskOriCapabilities...)
 	return copy
 }
 

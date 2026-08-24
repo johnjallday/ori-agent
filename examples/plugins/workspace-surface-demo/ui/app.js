@@ -5,7 +5,9 @@ const liveToken = document.querySelector('[data-live-token]');
 const bridgeState = document.querySelector('[data-bridge-state]');
 const cadence = document.querySelector('[data-cadence]');
 const checks = document.querySelector('[data-check-count]');
+const visits = document.querySelector('[data-visit-count]');
 const result = document.querySelector('[data-result]');
+const confirmationResult = document.querySelector('[data-confirmation-result]');
 const rejection = document.querySelector('[data-rejection]');
 let visible = true;
 let timer = null;
@@ -45,10 +47,26 @@ function startPolling() {
   timer = setInterval(() => void readStatus(), 1000);
 }
 
-sdk.on('ready', () => {
+sdk.on('ready', async () => {
   liveToken?.classList.add('is-ready');
   setText(liveToken?.lastChild, 'Bridge ready');
   setText(bridgeState, 'Authenticated parent');
+  try {
+    const saved = await sdk.getState('opens');
+    const previous = saved?.found ? Number(saved.value?.count || 0) : 0;
+    const next = previous + 1;
+    await sdk.setState(
+      'opens',
+      { count: next },
+      {
+        schemaVersion: 1,
+        expectedRevision: saved?.revision || '0'
+      }
+    );
+    setText(visits, next);
+  } catch (error) {
+    setText(visits, error.code || 'Unavailable');
+  }
   startPolling();
 });
 
@@ -71,6 +89,19 @@ document.querySelector('[data-invoke-greeting]')?.addEventListener('click', asyn
     setText(result, output?.message || 'The operation completed.');
   } catch (error) {
     setText(result, `${error.code || 'error'} · ${error.message}`);
+  }
+});
+
+document.querySelector('[data-confirmation]')?.addEventListener('click', async () => {
+  setText(confirmationResult, 'Waiting for Ori approval…');
+  try {
+    const output = await sdk.invoke('setting.validate', { enabled: true });
+    setText(
+      confirmationResult,
+      output?.accepted ? 'Approved and completed once.' : 'Not accepted.'
+    );
+  } catch (error) {
+    setText(confirmationResult, `${error.code || 'cancelled'} · ${error.message}`);
   }
 });
 

@@ -368,6 +368,7 @@ type ServerBuilder struct {
 	// Generic plugin-contributed Workspace Surfaces. The registry owns inert
 	// descriptors and trusted bindings; one handler serves every plugin.
 	workspaceSurfaceRegistry *workspacesurface.Registry
+	workspaceSurfaceServices *workspacesurface.ServiceManager
 	workspaceSurfaceHandler  *workspacesurfacehttp.Handler
 
 	// Coordinate-based Workspace Map: the current user's layout storage, the
@@ -591,6 +592,7 @@ func (b *ServerBuilder) createDomainFacades() {
 		handlers.WorkspaceMemory = memoryhttp.NewHandler(b.workspaceFileStore, b.workspaceFileStore)
 	}
 	b.server.Handlers = handlers
+	b.server.workspaceSurfaceServices = b.workspaceSurfaceServices
 }
 
 // WithLLMFactory injects a custom LLM factory (for testing).
