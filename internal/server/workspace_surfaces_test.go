@@ -3,6 +3,7 @@ package server
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -13,6 +14,40 @@ import (
 	"github.com/johnjallday/ori-agent/internal/workspace"
 	"github.com/johnjallday/ori-agent/internal/workspacecapability"
 )
+
+func TestTrustedWorkspaceProjectEntryRejectsTraversalAndSymlinks(t *testing.T) {
+	root := t.TempDir()
+	project := filepath.Join(root, "song")
+	if err := os.Mkdir(project, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	entry := filepath.Join(project, "song.rpp")
+	if err := os.WriteFile(entry, []byte("project"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Song"})
+	ws.ProjectPath = "song"
+	ws.SharedData = map[string]any{}
+	if err := workspace.SetProjectEntryPath(ws.SharedData, "song.rpp"); err != nil {
+		t.Fatal(err)
+	}
+	if got := trustedWorkspaceProjectEntry(root, ws); got != entry {
+		t.Fatalf("entry = %q", got)
+	}
+	outside := filepath.Join(t.TempDir(), "outside.rpp")
+	if err := os.WriteFile(outside, []byte("outside"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(entry); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, entry); err != nil {
+		t.Fatal(err)
+	}
+	if got := trustedWorkspaceProjectEntry(root, ws); got != "" {
+		t.Fatalf("symlink entry = %q", got)
+	}
+}
 
 func TestWireWorkspaceSurfacesRestoresInstalledPluginThroughOnlyGenericRoutes(t *testing.T) {
 	root := t.TempDir()

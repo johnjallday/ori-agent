@@ -39,6 +39,7 @@ type PluginDescriptor struct {
 	Interface          *InterfaceMetadata     `json:"interface,omitempty"`
 	WorkspaceSurfaces  *SurfaceContribution   `json:"workspace_surfaces,omitempty"`
 	ResolvedBlueprints []ResolvedBlueprint    `json:"resolved_blueprints,omitempty"`
+	TrustedAssetDigest string                 `json:"trusted_asset_digest,omitempty"`
 	Unsupported        []UnsupportedComponent `json:"unsupported,omitempty"`
 }
 

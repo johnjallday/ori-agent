@@ -2,14 +2,49 @@ package server
 
 import (
 	"context"
+	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/config"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/plugin"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 	"github.com/johnjallday/ori-agent/internal/workspacesurface"
 	"github.com/johnjallday/ori-agent/internal/workspacesurfacehttp"
 )
+
+func trustedWorkspaceProjectEntry(root string, ws *workspace.Workspace) string {
+	if ws == nil || !filepath.IsAbs(root) {
+		return ""
+	}
+	entry, err := workspace.GetProjectEntryPath(ws.SharedData)
+	if err != nil || entry == "" {
+		return ""
+	}
+	projectPath := filepath.Clean(strings.TrimSpace(ws.ProjectPath))
+	if projectPath == "." || filepath.IsAbs(projectPath) || strings.HasPrefix(projectPath, ".."+string(filepath.Separator)) {
+		return ""
+	}
+	candidate := filepath.Join(root, projectPath, filepath.FromSlash(entry))
+	relative, err := filepath.Rel(root, candidate)
+	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return ""
+	}
+	current := filepath.Clean(root)
+	for _, part := range strings.Split(relative, string(filepath.Separator)) {
+		current = filepath.Join(current, part)
+		info, statErr := os.Lstat(current) // #nosec G304 -- every validated relative component remains under the canonical workspace root
+		if statErr != nil || info.Mode()&os.ModeSymlink != 0 {
+			return ""
+		}
+	}
+	info, err := os.Lstat(candidate) // #nosec G304 -- exact contained project entry checked above
+	if err != nil || !info.Mode().IsRegular() {
+		return ""
+	}
+	return filepath.Clean(candidate)
+}
 
 // wireWorkspaceSurfaces constructs one process-wide registry and one generic
 // authenticated HTTP boundary. Contributions enter only through the installed
@@ -46,14 +81,19 @@ func (b *ServerBuilder) wireWorkspaceSurfaces() {
 	})
 	contextForOwner := func(workspaceID, pluginID string) workspacesurface.WorkspaceContext {
 		root := ""
+		projectEntry := ""
 		if b.workspaceFileStore != nil {
 			if resolved, err := b.workspaceFileStore.GetFolderPath(workspaceID); err == nil {
 				root = filepath.Clean(resolved)
 			}
 		}
+		if b.workspaceStore != nil {
+			if ws, err := b.workspaceStore.Get(workspaceID); err == nil && ws != nil {
+				projectEntry = trustedWorkspaceProjectEntry(root, ws)
+			}
+		}
 		return workspacesurface.WorkspaceContext{
-			WorkspaceID:    workspaceID,
-			WorkspaceRoot:  root,
+			WorkspaceID: workspaceID, WorkspaceRoot: root, ProjectEntry: projectEntry,
 			PluginDataRoot: filepath.Join(config.DefaultDataDir(), "plugins", "state", pluginID),
 		}
 	}

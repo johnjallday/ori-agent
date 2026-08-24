@@ -27,8 +27,8 @@ func TestWorkspaceSurfaceExampleValidatesAndInstallsArtifact(t *testing.T) {
 	if err := prepareTrustedBlueprints(&descriptor); err != nil {
 		t.Fatalf("validate example blueprints: %v", err)
 	}
-	if len(descriptor.ResolvedBlueprints) != 1 {
-		t.Fatalf("resolved example blueprints = %+v", descriptor.ResolvedBlueprints)
+	if len(descriptor.ResolvedBlueprints) != 1 || descriptor.TrustedAssetDigest == "" {
+		t.Fatalf("resolved example components: blueprints=%+v asset_digest=%q", descriptor.ResolvedBlueprints, descriptor.TrustedAssetDigest)
 	}
 	artifacts, err := NewArtifactInstaller(t.TempDir()).Install(context.Background(), descriptor)
 	if err != nil {

@@ -18,6 +18,7 @@ type trustedFingerprintInput struct {
 	Skills            []string                      `json:"skills,omitempty"`
 	WorkspaceSurfaces *SurfaceContribution          `json:"workspace_surfaces,omitempty"`
 	Blueprints        []trustedBlueprintFingerprint `json:"blueprints,omitempty"`
+	AssetDigest       string                        `json:"asset_digest,omitempty"`
 }
 
 // trustedComponentFingerprint changes whenever executable/runtime footprint or
@@ -27,6 +28,7 @@ func trustedComponentFingerprint(descriptor PluginDescriptor) string {
 	input := trustedFingerprintInput{
 		MCPServers:        append([]MCPServerSpec(nil), descriptor.MCPServers...),
 		WorkspaceSurfaces: descriptor.WorkspaceSurfaces,
+		AssetDigest:       descriptor.TrustedAssetDigest,
 	}
 	for _, skill := range descriptor.Skills {
 		input.Skills = append(input.Skills, skill.Name)

@@ -60,6 +60,11 @@ func prepareTrustedBlueprints(descriptor *PluginDescriptor) error {
 		return err
 	}
 	descriptor.ResolvedBlueprints = resolved
+	assetDigest, err := resolvePluginAssetDigest(*descriptor)
+	if err != nil {
+		return err
+	}
+	descriptor.TrustedAssetDigest = assetDigest
 	return nil
 }
 
