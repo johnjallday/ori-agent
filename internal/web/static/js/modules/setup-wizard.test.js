@@ -476,6 +476,82 @@ test('the primary control does what the server says the step needs', async () =>
   assert.equal(elements.setupWizardPrimary.textContent, 'Check again');
 });
 
+test('runtime readiness performs the explicit first verification before setup recheck', async () => {
+  const pending = status({
+    state: 'in_progress',
+    current_step_id: 'live-control',
+    steps: [
+      step({ id: 'mode', kind: 'runtime_mode', status: 'complete', action: '' }),
+      step({
+        id: 'live-control',
+        kind: 'runtime_readiness',
+        runtime_requirement_key: 'reaper_live_control',
+        status: 'blocked',
+        action: 'recheck'
+      }),
+      step({ id: 'summary', kind: 'summary', title: 'Summary', status: 'pending' })
+    ]
+  });
+  const verified = status({
+    state: 'in_progress',
+    current_step_id: 'summary',
+    steps: [
+      step({ id: 'mode', kind: 'runtime_mode', status: 'complete', action: '' }),
+      step({
+        id: 'live-control',
+        kind: 'runtime_readiness',
+        runtime_requirement_key: 'reaper_live_control',
+        status: 'complete',
+        action: ''
+      }),
+      step({ id: 'summary', kind: 'summary', title: 'Summary', status: 'pending' })
+    ]
+  });
+  const runtimePending = {
+    applicable: true,
+    selected_mode_id: 'ori_assisted',
+    durable_state: 'in_progress',
+    live_state: 'not_checked',
+    requirements: [
+      {
+        key: 'reaper_live_control',
+        durable_state: 'in_progress',
+        verification_needed: true
+      }
+    ]
+  };
+  const runtimeVerified = {
+    ...runtimePending,
+    durable_state: 'configured',
+    live_state: 'available',
+    first_verified_at: '2026-08-25T00:00:00Z',
+    requirements: [
+      {
+        key: 'reaper_live_control',
+        durable_state: 'configured',
+        live_state: 'available',
+        first_verified_at: '2026-08-25T00:00:00Z'
+      }
+    ]
+  };
+  const { api, elements, calls } = load({
+    status: pending,
+    runtimeStatus: runtimePending,
+    routes: { 'POST /recheck': verified },
+    runtimeRoutes: {
+      'POST /requirements/reaper_live_control/verify': runtimeVerified
+    }
+  });
+
+  await api.init();
+  assert.equal(elements.setupWizardPrimary.textContent, 'Check connection');
+  await click(elements.setupWizardPrimary);
+
+  const writes = calls.filter(call => call.key?.startsWith('POST ')).map(call => call.key);
+  assert.deepEqual(writes, ['POST /requirements/reaper_live_control/verify', 'POST /recheck']);
+  assert.equal(elements.setupWizardStepTitle.textContent, 'Summary');
+});
+
 test('confirming a step posts it and advances only when the server agrees', async () => {
   const pending = status({ state: 'in_progress' });
   const confirmed = status({

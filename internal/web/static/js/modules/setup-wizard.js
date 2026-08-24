@@ -518,6 +518,8 @@
     ) {
       return 'Choose an option to continue';
     }
+    const runtimePrimary = runtimePrimaryAction(step);
+    if (runtimePrimary) return runtimePrimary.label;
     if (step.action === ACTION_RECHECK) return 'Check again';
     const renderer = rendererFor(step);
     if (renderer && typeof renderer.primaryLabel === 'function') {
@@ -825,6 +827,83 @@
     return act(() => api('/recheck', { method: 'POST' }), 'Checking…');
   }
 
+  function runtimeRequirement(step) {
+    if (step?.kind !== 'runtime_readiness') return null;
+    const key = String(step.runtime_requirement_key || '').trim();
+    if (!key) return null;
+    return (
+      (runtimeStatus?.requirements || []).find(requirement => requirement?.key === key) || null
+    );
+  }
+
+  function runtimePrimaryAction(step) {
+    const requirement = runtimeRequirement(step);
+    if (!requirement) return null;
+    const key = String(requirement.key || '').trim();
+    const token = String(requirement.action?.token || '').trim();
+    if (token) {
+      return {
+        kind: 'action',
+        key,
+        token,
+        label: String(requirement.action?.label || 'Continue setup')
+      };
+    }
+    if (requirement.verification_needed) {
+      return { kind: 'verify', key, label: 'Check connection' };
+    }
+    return { kind: 'recheck', key, label: 'Check again' };
+  }
+
+  // A runtime-readiness step has two different checks. Setup recheck only asks
+  // whether durable state changed; the first project-specific connection test
+  // is an explicit runtime verification. Keeping that distinction here avoids
+  // a "Check again" loop that can never record first_verified_at.
+  async function runRuntimePrimary(step) {
+    const action = runtimePrimaryAction(step);
+    if (!action) return false;
+
+    setError('');
+    setBusy(true, action.kind === 'verify' ? 'Checking connection…' : 'Checking…');
+    try {
+      const base = `/requirements/${encodeURIComponent(action.key)}`;
+      if (action.kind === 'action') {
+        runtimeStatus = await runtimeApi(`${base}/actions/${encodeURIComponent(action.token)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: '{}'
+        });
+      } else if (action.kind === 'verify') {
+        runtimeStatus = await runtimeApi(`${base}/verify`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: '{}'
+        });
+      } else {
+        runtimeStatus = await runtimeApi('/recheck', { method: 'POST' });
+      }
+      status = await api('/recheck', { method: 'POST' });
+      render();
+      publish();
+      await advanceIfResolved(step.id);
+    } catch (error) {
+      // A failed verify can still change the safe next action. Refresh both
+      // projections before showing the bounded server error.
+      try {
+        runtimeStatus = await runtimeApi();
+        status = await api('/recheck', { method: 'POST' });
+        render();
+        publish();
+      } catch (refreshError) {
+        console.warn('Runtime readiness refresh failed:', refreshError);
+      }
+      setError(friendlyError(error));
+    } finally {
+      setBusy(false, '');
+    }
+    return true;
+  }
+
   async function complete() {
     const result = await act(() => api('/complete', { method: 'POST' }), 'Finishing setup…');
     if (result && result.state === STATE_READY) {
@@ -897,6 +976,8 @@
       setError('One or more required steps still need attention.');
       return;
     }
+
+    if (await runRuntimePrimary(step)) return;
 
     if (step.action === ACTION_RECHECK) {
       await recheck();
