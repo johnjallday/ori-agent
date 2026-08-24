@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
+	"sync"
 
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -12,6 +14,7 @@ import (
 // Registry is the compiled allowlist of runtime adapters. It is populated by
 // server wiring, never by a manifest or browser request.
 type Registry struct {
+	mu       sync.RWMutex
 	adapters map[string]Adapter
 }
 
@@ -26,10 +29,12 @@ func (r *Registry) Register(adapter Adapter) error {
 	if adapter == nil {
 		return errors.New("cannot register a nil runtime adapter")
 	}
-	id := workspace.NormalizeRuntimeIdentifier(adapter.ID())
+	id := workspace.NormalizeRuntimeAdapterID(adapter.ID())
 	if id == "" {
 		return errors.New("cannot register a runtime adapter with an invalid id")
 	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if _, exists := r.adapters[id]; exists {
 		return fmt.Errorf("runtime adapter %q is already registered", id)
 	}
@@ -44,10 +49,12 @@ func (r *Registry) Replace(adapter Adapter) error {
 	if r == nil || adapter == nil {
 		return errors.New("runtime adapter registry or replacement is nil")
 	}
-	id := workspace.NormalizeRuntimeIdentifier(adapter.ID())
+	id := workspace.NormalizeRuntimeAdapterID(adapter.ID())
 	if id == "" {
 		return errors.New("cannot replace a runtime adapter with an invalid id")
 	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if _, exists := r.adapters[id]; !exists {
 		return fmt.Errorf("runtime adapter %q is not reserved", id)
 	}
@@ -59,18 +66,53 @@ func (r *Registry) Lookup(id string) (Adapter, bool) {
 	if r == nil {
 		return nil, false
 	}
-	id = workspace.NormalizeRuntimeIdentifier(id)
+	id = workspace.NormalizeRuntimeAdapterID(id)
 	if id == "" {
 		return nil, false
 	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	adapter, ok := r.adapters[id]
 	return adapter, ok
+}
+
+func (r *Registry) Unregister(id string) {
+	if r == nil {
+		return
+	}
+	id = workspace.NormalizeRuntimeAdapterID(id)
+	if id == "" {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.adapters, id)
+}
+
+func (r *Registry) UnregisterPlugin(pluginID string) {
+	if r == nil {
+		return
+	}
+	pluginID = workspace.NormalizeCapabilityID(pluginID)
+	if pluginID == "" {
+		return
+	}
+	prefix := "plugin:" + pluginID + ":"
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for id := range r.adapters {
+		if strings.HasPrefix(id, prefix) {
+			delete(r.adapters, id)
+		}
+	}
 }
 
 func (r *Registry) IDs() []string {
 	if r == nil {
 		return nil
 	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	ids := make([]string, 0, len(r.adapters))
 	for id := range r.adapters {
 		ids = append(ids, id)
@@ -89,7 +131,10 @@ func (a unavailableAdapter) EvaluateDurable(context.Context, EvaluationRequest) 
 	return DurableResult{
 		State:      DurableInProgress,
 		ReasonCode: ReasonAdapterUnavailable,
-		Summary:    "This runtime requirement is unavailable in this build.",
+		Summary:    ProviderUnavailableMessage,
+		Action: &Action{
+			Token: "review_plugins", Code: "review_plugins", Label: "Review plugins", URL: "/settings?panel=plugins",
+		},
 	}, nil
 }
 

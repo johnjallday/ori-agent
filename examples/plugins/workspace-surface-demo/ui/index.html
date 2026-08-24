@@ -64,7 +64,10 @@
           <h2 id="confirmation-title">Request a protected operation</h2>
           <p>Ori owns the approval prompt and binds one token to this exact payload.</p>
         </div>
-        <button type="button" class="quiet" data-confirmation>Request confirmation</button>
+        <div class="button-stack">
+          <button type="button" class="quiet" data-confirmation>Request confirmation</button>
+          <button type="button" class="quiet" data-degrade>Enter degraded state</button>
+        </div>
         <output data-confirmation-result aria-live="polite">Not requested.</output>
       </section>
 

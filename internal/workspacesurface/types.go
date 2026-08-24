@@ -25,7 +25,10 @@ const (
 	maxStationValue     = 160
 )
 
-var idPattern = regexp.MustCompile(`^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$`)
+var (
+	idPattern                = regexp.MustCompile(`^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$`)
+	qualifiedProviderPattern = regexp.MustCompile(`^plugin:[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*:[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$`)
+)
 
 type OwnerKind string
 
@@ -94,10 +97,12 @@ type Surface struct {
 // held by Registration/RegisteredSurface so a plugin cannot spoof it inside a
 // local capability declaration.
 type Capability struct {
-	ID       string    `json:"id"`
-	Version  int       `json:"version"`
-	Display  Display   `json:"display"`
-	Surfaces []Surface `json:"surfaces,omitempty"`
+	ID                    string    `json:"id"`
+	Version               int       `json:"version"`
+	Display               Display   `json:"display"`
+	Surfaces              []Surface `json:"surfaces,omitempty"`
+	AgentOperationIDs     []string  `json:"agent_operation_ids,omitempty"`
+	RuntimeRequirementKey string    `json:"runtime_requirement_key,omitempty"`
 }
 
 // StationState is the generic status vocabulary rendered by the host.
@@ -273,7 +278,7 @@ func validateRegistration(reg Registration) error {
 		if _, duplicate := bindings[localKey]; duplicate {
 			return fmt.Errorf("workspace surface binding %q/%q is registered twice", binding.CapabilityID, binding.SurfaceID)
 		}
-		if err := validateBinding(binding, surface); err != nil {
+		if err := validateBinding(binding, surface, capabilities[binding.CapabilityID]); err != nil {
 			return err
 		}
 		bindings[localKey] = binding
@@ -321,6 +326,21 @@ func validateCapability(capability Capability) error {
 	}
 	if err := validateText("capability description", capability.Display.Description, maxDescriptionBytes, true); err != nil {
 		return err
+	}
+	if capability.RuntimeRequirementKey != "" {
+		if err := validateID("runtime requirement", capability.RuntimeRequirementKey); err != nil {
+			return err
+		}
+	}
+	seenAgentOperations := make(map[string]struct{}, len(capability.AgentOperationIDs))
+	for _, operationID := range capability.AgentOperationIDs {
+		if err := validateID("agent operation", operationID); err != nil {
+			return err
+		}
+		if _, duplicate := seenAgentOperations[operationID]; duplicate {
+			return fmt.Errorf("capability %q agent operation %q is declared twice", capability.ID, operationID)
+		}
+		seenAgentOperations[operationID] = struct{}{}
 	}
 	for _, surface := range capability.Surfaces {
 		if err := validateSurface(surface); err != nil {
@@ -372,15 +392,13 @@ func validateSurface(surface Surface) error {
 			return err
 		}
 	}
-	if surface.SetupProviderID != "" {
-		if err := validateID("Setup provider", surface.SetupProviderID); err != nil {
-			return err
-		}
+	if surface.SetupProviderID != "" && !validSetupProviderID(surface.SetupProviderID) {
+		return fmt.Errorf("workspace surface Setup provider id %q is invalid", surface.SetupProviderID)
 	}
 	return nil
 }
 
-func validateBinding(binding Binding, surface Surface) error {
+func validateBinding(binding Binding, surface Surface, capability Capability) error {
 	if binding.Runtime == nil {
 		return fmt.Errorf("workspace surface binding %q/%q has no runtime", binding.CapabilityID, binding.SurfaceID)
 	}
@@ -393,10 +411,14 @@ func validateBinding(binding Binding, surface Surface) error {
 	if !safeRelativeAssetPath(binding.EntryAsset) || !strings.EqualFold(path.Ext(binding.EntryAsset), ".html") {
 		return fmt.Errorf("workspace surface binding %q/%q has an invalid HTML entry asset", binding.CapabilityID, binding.SurfaceID)
 	}
-	if len(binding.Operations) != len(surface.OperationIDs) {
+	expected := make(map[string]struct{}, len(surface.OperationIDs)+len(capability.AgentOperationIDs))
+	for _, operationID := range append(append([]string(nil), surface.OperationIDs...), capability.AgentOperationIDs...) {
+		expected[operationID] = struct{}{}
+	}
+	if len(binding.Operations) != len(expected) {
 		return fmt.Errorf("workspace surface binding %q/%q operation set does not match its inert descriptor", binding.CapabilityID, binding.SurfaceID)
 	}
-	for _, operationID := range surface.OperationIDs {
+	for operationID := range expected {
 		operation, exists := binding.Operations[operationID]
 		if !exists || operation.ID != operationID {
 			return fmt.Errorf("workspace surface binding %q/%q does not define operation %q", binding.CapabilityID, binding.SurfaceID, operationID)
@@ -454,6 +476,11 @@ func canonicalUnavailableCode(value string) bool {
 	return len(value) <= maxIDBytes && idPattern.MatchString(value)
 }
 
+func validSetupProviderID(value string) bool {
+	return len(value) <= maxIDBytes && idPattern.MatchString(value) ||
+		len(value) <= 192 && value == strings.TrimSpace(value) && qualifiedProviderPattern.MatchString(value)
+}
+
 func validateID(kind, value string) error {
 	if len(value) == 0 || len(value) > maxIDBytes || value != strings.TrimSpace(value) || !idPattern.MatchString(value) {
 		return fmt.Errorf("workspace surface %s id %q is invalid", kind, value)
@@ -492,6 +519,7 @@ func cloneSurface(surface Surface) Surface {
 
 func cloneCapability(capability Capability) Capability {
 	copy := capability
+	copy.AgentOperationIDs = append([]string(nil), capability.AgentOperationIDs...)
 	copy.Surfaces = make([]Surface, len(capability.Surfaces))
 	for index, surface := range capability.Surfaces {
 		copy.Surfaces[index] = cloneSurface(surface)

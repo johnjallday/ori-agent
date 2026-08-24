@@ -17,6 +17,8 @@ const CapabilityFileJanitor = "file-janitor"
 // non-empty string is accepted so a future blueprint or preset can name itself
 // without a change here. These constants exist so the in-repo writers agree.
 const (
+	CapabilityOwnerPlugin = "plugin"
+
 	// InstallSourceInPlace is a user installing the capability into an existing
 	// workspace from the Capabilities catalog (FR-19).
 	InstallSourceInPlace = "in-place"
@@ -33,6 +35,7 @@ const (
 const (
 	ResourceDirectoryReference = "directory_reference"
 	ResourceMCPBinding         = "mcp_binding"
+	ResourceSkillBinding       = "skill_binding"
 	ResourceWatcher            = "watcher"
 	ResourceSchedule           = "schedule"
 	ResourceCompanionAgent     = "companion_agent"
@@ -70,6 +73,8 @@ func normalizeResourceKind(kind string) string {
 		return ResourceDirectoryReference
 	case ResourceMCPBinding:
 		return ResourceMCPBinding
+	case ResourceSkillBinding:
+		return ResourceSkillBinding
 	case ResourceWatcher:
 		return ResourceWatcher
 	case ResourceSchedule:
@@ -84,8 +89,36 @@ func normalizeResourceKind(kind string) string {
 	}
 }
 
-// InstalledCapability is the persisted record that one built-in Workspace
-// Capability is installed on one workspace (PRD FR-4, FR-5).
+// CapabilityOwner is inert provenance for a non-built-in capability. Commands,
+// paths, endpoints, operation bindings, and plugin generations remain in the
+// trusted global plugin registries and are never persisted here.
+type CapabilityOwner struct {
+	Kind          string `json:"kind"`
+	PluginID      string `json:"plugin_id"`
+	PluginVersion string `json:"plugin_version,omitempty"`
+}
+
+func (o CapabilityOwner) Clone() CapabilityOwner { return o }
+
+func (o CapabilityOwner) Normalize() CapabilityOwner {
+	o.Kind = strings.ToLower(strings.TrimSpace(o.Kind))
+	o.PluginID = NormalizeCapabilityID(o.PluginID)
+	o.PluginVersion = strings.TrimSpace(o.PluginVersion)
+	return o
+}
+
+func (o CapabilityOwner) Valid() bool {
+	o = o.Normalize()
+	return o.Kind == CapabilityOwnerPlugin && o.PluginID != "" && o.PluginVersion != ""
+}
+
+func (o CapabilityOwner) MatchesPlugin(pluginID string) bool {
+	o = o.Normalize()
+	return o.Kind == CapabilityOwnerPlugin && o.PluginID == NormalizeCapabilityID(pluginID)
+}
+
+// InstalledCapability is the persisted record that one Workspace Capability
+// is installed on one workspace (PRD FR-4, FR-5).
 //
 // It is deliberately inert metadata: an ID that may only resolve to a
 // definition compiled into the running Ori build, the definition version that
@@ -111,6 +144,10 @@ type InstalledCapability struct {
 	// Source records which flow performed the install (FR-5). See the
 	// InstallSource* constants.
 	Source string `json:"source,omitempty"`
+	// Owner is nil for compiled built-ins. Plugin-backed records retain only
+	// inert owner/version provenance so another plugin can never claim the same
+	// local capability ID from a workspace file.
+	Owner *CapabilityOwner `json:"owner,omitempty"`
 	// OwnedResources records the workspace resources this capability created or
 	// associated itself with, so removal and relink can release exactly the
 	// right ones (FR-27). Empty until setup grants something: installing alone
@@ -153,6 +190,10 @@ func normalizeInstallSource(source string) string {
 // Clone returns a deep copy of the record, including its owned-resource list.
 func (c InstalledCapability) Clone() InstalledCapability {
 	cp := c
+	if c.Owner != nil {
+		owner := c.Owner.Clone()
+		cp.Owner = &owner
+	}
 	if c.OwnedResources != nil {
 		cp.OwnedResources = append([]CapabilityResource(nil), c.OwnedResources...)
 	}
@@ -255,6 +296,9 @@ func (c InstalledCapability) Validate() error {
 	if normalizeInstallSource(c.Source) == "" {
 		return fmt.Errorf("installed capability %q: source is required", c.ID)
 	}
+	if c.Owner != nil && !c.Owner.Valid() {
+		return fmt.Errorf("installed capability %q: plugin owner is invalid", c.ID)
+	}
 	return nil
 }
 
@@ -270,6 +314,16 @@ func (c InstalledCapability) Validate() error {
 func normalizeInstalledCapability(c InstalledCapability) (InstalledCapability, bool) {
 	c.ID = NormalizeCapabilityID(c.ID)
 	c.Source = normalizeInstallSource(c.Source)
+	if c.Owner != nil {
+		owner := c.Owner.Normalize()
+		if owner.Valid() {
+			c.Owner = &owner
+		} else {
+			// Preserve the capability record but retain an unusable owner marker;
+			// resolution will fail closed rather than treating it as a built-in.
+			c.Owner = &owner
+		}
+	}
 	c.OwnedResources = normalizeResources(c.OwnedResources)
 	if c.ID == "" || c.Version < 1 {
 		return InstalledCapability{}, false

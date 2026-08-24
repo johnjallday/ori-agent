@@ -1,0 +1,61 @@
+{
+  "name": "Workspace Surface Demo",
+  "description": "A small workspace for trying a plugin-owned setup provider, station, modal, and granted agent operation.",
+  "icon": "🧩",
+  "tagline": "Try the complete Workspace Surface lifecycle.",
+  "behavior_profile": "general",
+  "agents": [
+    {
+      "name": "Demo Guide",
+      "role": "orchestrator",
+      "system_prompt": "Help the user explore this harmless demo workspace. Use only explicitly granted tools and report provider availability truthfully."
+    }
+  ],
+  "capabilities": [
+    {
+      "id": "demo-tools",
+      "source": "plugin-blueprint"
+    }
+  ],
+  "runtime_requirements": {
+    "schema_version": 1,
+    "operating_modes": [
+      {
+        "id": "standard",
+        "label": "Standard",
+        "description": "Use the installed demo provider.",
+        "requires": ["demo_runtime"]
+      }
+    ],
+    "requirements": [
+      {
+        "key": "demo_runtime",
+        "label": "Demo provider",
+        "description": "Check the installed plugin service and verify its harmless local demo operation.",
+        "disclosure": "The granted agent may call the declared greeting operation. Plugin state writes stay inside this plugin's managed data directory.",
+        "adapter": "plugin:workspace-surface-demo:demo-runtime"
+      }
+    ]
+  },
+  "setup_wizard": {
+    "version": 1,
+    "title": "Set up Workspace Surface Demo",
+    "steps": [
+      {
+        "id": "provider",
+        "kind": "runtime_readiness",
+        "requirement_key": "demo_runtime",
+        "required": true,
+        "title": "Check the demo provider",
+        "description": "Verify that the installed plugin service is available."
+      },
+      {
+        "id": "summary",
+        "kind": "summary",
+        "required": true,
+        "title": "Review demo setup",
+        "description": "Review what Ori checked and what authority remains ungranted."
+      }
+    ]
+  }
+}

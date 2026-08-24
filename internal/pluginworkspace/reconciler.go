@@ -24,6 +24,7 @@
 package pluginworkspace
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -31,6 +32,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/plugin"
 	"github.com/johnjallday/ori-agent/internal/workspace"
+	"github.com/johnjallday/ori-agent/internal/workspacecapability"
 )
 
 // PluginManager is the read/enable surface the reconciler needs from the
@@ -125,6 +127,170 @@ type Reconciler struct {
 // New builds a Reconciler over the configured plugin manager and workspace store.
 func New(plugins PluginManager, store WorkspaceStore) *Reconciler {
 	return &Reconciler{plugins: plugins, store: store}
+}
+
+// AttachCapability reconciles only the owning plugin's portable components for
+// one already-persisted owner-aware capability record. Private surface services
+// are deliberately not exposed as native MCP bindings.
+func (r *Reconciler) AttachCapability(workspaceID string, definition workspacecapability.Definition) error {
+	if r == nil || r.store == nil || definition.Owner == nil || !definition.Owner.Valid() {
+		return fmt.Errorf("plugin capability owner is unavailable")
+	}
+	ws, err := r.store.Get(workspaceID)
+	if err != nil || ws == nil {
+		return err
+	}
+	record, ok := ws.GetInstalledCapability(definition.ID)
+	if !ok || record.Owner == nil || !record.Owner.MatchesPlugin(definition.Owner.PluginID) {
+		return fmt.Errorf("workspace capability owner does not match")
+	}
+	installed, err := r.installedPlugin(definition.Owner.PluginID)
+	if err != nil {
+		return err
+	}
+	if !installed.Enabled || !pluginDeclaresCapability(installed, definition.ID) {
+		return fmt.Errorf("owning plugin capability is unavailable")
+	}
+
+	boundSkills := make(map[string]workspace.SkillBinding)
+	for _, binding := range ws.GetSkillBindings() {
+		boundSkills[strings.ToLower(strings.TrimSpace(binding.SkillName))] = binding
+	}
+	boundMCP := make(map[string]workspace.MCPBinding)
+	for _, binding := range ws.GetMCPBindings() {
+		boundMCP[strings.ToLower(strings.TrimSpace(binding.ServerName))] = binding
+	}
+	now := time.Now()
+	for _, component := range componentsOf(installed) {
+		key := strings.ToLower(strings.TrimSpace(component.Name))
+		switch component.Kind {
+		case ComponentSkill:
+			binding, exists := boundSkills[key]
+			shared := true
+			if !exists {
+				binding = workspace.SkillBinding{
+					ID: uuid.NewString(), SkillName: component.Name, Enabled: true, CreatedAt: now, UpdatedAt: now,
+				}
+				if err := ws.UpsertSkillBinding(binding); err != nil {
+					return err
+				}
+				boundSkills[key] = binding
+				shared = false
+			} else if pluginOwnsResource(ws, definition.Owner.PluginID, workspace.ResourceSkillBinding, binding.ID) {
+				shared = false
+			}
+			ws.RecordCapabilityResource(definition.ID, workspace.CapabilityResource{
+				Kind: workspace.ResourceSkillBinding, ID: binding.ID, Shared: shared,
+			})
+		case ComponentMCP:
+			binding, exists := boundMCP[key]
+			shared := true
+			if !exists {
+				binding = workspace.MCPBinding{
+					ID: uuid.NewString(), ServerName: component.Name, Enabled: true, CreatedAt: now, UpdatedAt: now,
+				}
+				if err := ws.UpsertMCPBinding(binding); err != nil {
+					return err
+				}
+				boundMCP[key] = binding
+				shared = false
+			} else if pluginOwnsResource(ws, definition.Owner.PluginID, workspace.ResourceMCPBinding, binding.ID) {
+				shared = false
+			}
+			ws.RecordCapabilityResource(definition.ID, workspace.CapabilityResource{
+				Kind: workspace.ResourceMCPBinding, ID: binding.ID, Shared: shared,
+			})
+		}
+	}
+	return r.store.Save(ws)
+}
+
+// DetachCapability removes only binding IDs recorded by this capability. A
+// user-owned pre-existing binding is preserved, as is a plugin-owned binding
+// still referenced by another capability from the same owner.
+func (r *Reconciler) DetachCapability(workspaceID string, definition workspacecapability.Definition) error {
+	if r == nil || r.store == nil || definition.Owner == nil || !definition.Owner.Valid() {
+		return fmt.Errorf("plugin capability owner is unavailable")
+	}
+	ws, err := r.store.Get(workspaceID)
+	if err != nil || ws == nil {
+		return err
+	}
+	record, ok := ws.GetInstalledCapability(definition.ID)
+	if !ok {
+		return nil
+	}
+	if record.Owner == nil || !record.Owner.MatchesPlugin(definition.Owner.PluginID) {
+		return fmt.Errorf("workspace capability owner does not match")
+	}
+	for _, resource := range record.OwnedResources {
+		if resource.Shared || anotherCapabilityOwnsResource(ws, definition.ID, definition.Owner.PluginID, resource.Kind, resource.ID) {
+			continue
+		}
+		switch resource.Kind {
+		case workspace.ResourceSkillBinding:
+			if err := ws.DeleteSkillBinding(resource.ID); err != nil {
+				return err
+			}
+		case workspace.ResourceMCPBinding:
+			if err := ws.DeleteMCPBinding(resource.ID); err != nil {
+				return err
+			}
+		}
+	}
+	return r.store.Save(ws)
+}
+
+func (r *Reconciler) installedPlugin(pluginID string) (plugin.InstalledPlugin, error) {
+	if r.plugins == nil {
+		return plugin.InstalledPlugin{}, fmt.Errorf("plugin registry is unavailable")
+	}
+	plugins, err := r.plugins.List()
+	if err != nil {
+		return plugin.InstalledPlugin{}, err
+	}
+	for _, installed := range plugins {
+		if strings.EqualFold(strings.TrimSpace(installed.Name), strings.TrimSpace(pluginID)) {
+			return installed, nil
+		}
+	}
+	return plugin.InstalledPlugin{}, fmt.Errorf("owning plugin is not installed")
+}
+
+func pluginDeclaresCapability(installed plugin.InstalledPlugin, capabilityID string) bool {
+	if installed.WorkspaceSurfaces == nil {
+		return false
+	}
+	for _, capability := range installed.WorkspaceSurfaces.Capabilities {
+		if strings.EqualFold(strings.TrimSpace(capability.ID), strings.TrimSpace(capabilityID)) {
+			return true
+		}
+	}
+	return false
+}
+
+func pluginOwnsResource(ws *workspace.Workspace, pluginID, kind, resourceID string) bool {
+	for _, record := range ws.GetInstalledCapabilities() {
+		if record.Owner == nil || !record.Owner.MatchesPlugin(pluginID) {
+			continue
+		}
+		if _, owned := record.Owns(kind, resourceID); owned {
+			return true
+		}
+	}
+	return false
+}
+
+func anotherCapabilityOwnsResource(ws *workspace.Workspace, capabilityID, pluginID, kind, resourceID string) bool {
+	for _, record := range ws.GetInstalledCapabilities() {
+		if strings.EqualFold(record.ID, capabilityID) || record.Owner == nil || !record.Owner.MatchesPlugin(pluginID) {
+			continue
+		}
+		if _, owned := record.Owns(kind, resourceID); owned {
+			return true
+		}
+	}
+	return false
 }
 
 // Reconcile attaches the requested plugins' recorded components to the workspace.

@@ -38,16 +38,30 @@
           },
           "host_intents": {
             "ask_ori": {
-              "required_capabilities": []
+              "required_capabilities": ["demo_runtime"]
             },
-            "open_setup": {},
+            "open_setup": {
+              "provider_id": "demo-runtime"
+            },
             "confirmation": true,
             "state": true,
             "close": true
           }
         }
       ],
-      "agent_operations": []
+      "agent_operations": ["greeting.create"],
+      "runtime_provider": {
+        "id": "demo-runtime",
+        "requirement_key": "demo_runtime",
+        "operations": {
+          "prerequisites": "runtime.prerequisites",
+          "readiness": "runtime.readiness",
+          "live_status": "runtime.live_status",
+          "verify": "runtime.verify",
+          "repair": "runtime.repair"
+        },
+        "scopes": ["plugin_data_write"]
+      }
     }
   ],
   "services": [
@@ -68,8 +82,8 @@
             "kind": "bundled",
             "path": "artifacts/demo-service.py"
           },
-          "sha256": "1cbfc7d1d407ac8eb992cd7721fc15067f648ae3376b2ac9ddd6c18dcd2cd877",
-          "size": 4590
+          "sha256": "7b93ae6f9a81853386f0e04c8db0f7be8ccc61e2d9b3957dc752d9dc2311ffba",
+          "size": 6022
         },
         {
           "id": "demo-darwin-amd64",
@@ -79,8 +93,8 @@
             "kind": "bundled",
             "path": "artifacts/demo-service.py"
           },
-          "sha256": "1cbfc7d1d407ac8eb992cd7721fc15067f648ae3376b2ac9ddd6c18dcd2cd877",
-          "size": 4590
+          "sha256": "7b93ae6f9a81853386f0e04c8db0f7be8ccc61e2d9b3957dc752d9dc2311ffba",
+          "size": 6022
         },
         {
           "id": "demo-linux-arm64",
@@ -90,8 +104,8 @@
             "kind": "bundled",
             "path": "artifacts/demo-service.py"
           },
-          "sha256": "1cbfc7d1d407ac8eb992cd7721fc15067f648ae3376b2ac9ddd6c18dcd2cd877",
-          "size": 4590
+          "sha256": "7b93ae6f9a81853386f0e04c8db0f7be8ccc61e2d9b3957dc752d9dc2311ffba",
+          "size": 6022
         },
         {
           "id": "demo-linux-amd64",
@@ -101,8 +115,8 @@
             "kind": "bundled",
             "path": "artifacts/demo-service.py"
           },
-          "sha256": "1cbfc7d1d407ac8eb992cd7721fc15067f648ae3376b2ac9ddd6c18dcd2cd877",
-          "size": 4590
+          "sha256": "7b93ae6f9a81853386f0e04c8db0f7be8ccc61e2d9b3957dc752d9dc2311ffba",
+          "size": 6022
         }
       ],
       "operations": [
@@ -199,9 +213,152 @@
           "timeout_class": "normal",
           "policy": "confirmation_required",
           "scopes": []
+        },
+        {
+          "id": "runtime.prerequisites",
+          "input_schema": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": false
+          },
+          "output_schema": {
+            "type": "object",
+            "properties": {
+              "ready": {
+                "type": "boolean"
+              },
+              "summary": {
+                "type": "string",
+                "maxLength": 500
+              }
+            },
+            "required": ["ready", "summary"],
+            "additionalProperties": false
+          },
+          "max_output_bytes": 4096,
+          "timeout_class": "fast",
+          "policy": "read_only",
+          "scopes": []
+        },
+        {
+          "id": "runtime.readiness",
+          "input_schema": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": false
+          },
+          "output_schema": {
+            "type": "object",
+            "properties": {
+              "ready": {
+                "type": "boolean"
+              },
+              "summary": {
+                "type": "string",
+                "maxLength": 500
+              }
+            },
+            "required": ["ready", "summary"],
+            "additionalProperties": false
+          },
+          "max_output_bytes": 4096,
+          "timeout_class": "fast",
+          "policy": "read_only",
+          "scopes": []
+        },
+        {
+          "id": "runtime.live_status",
+          "input_schema": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": false
+          },
+          "output_schema": {
+            "type": "object",
+            "properties": {
+              "available": {
+                "type": "boolean"
+              },
+              "summary": {
+                "type": "string",
+                "maxLength": 500
+              }
+            },
+            "required": ["available", "summary"],
+            "additionalProperties": false
+          },
+          "max_output_bytes": 4096,
+          "timeout_class": "fast",
+          "policy": "read_only",
+          "scopes": []
+        },
+        {
+          "id": "runtime.verify",
+          "input_schema": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": false
+          },
+          "output_schema": {
+            "type": "object",
+            "properties": {
+              "verified": {
+                "type": "boolean"
+              },
+              "summary": {
+                "type": "string",
+                "maxLength": 500
+              }
+            },
+            "required": ["verified", "summary"],
+            "additionalProperties": false
+          },
+          "max_output_bytes": 4096,
+          "timeout_class": "normal",
+          "policy": "confirmation_required",
+          "scopes": ["plugin_data_write"]
+        },
+        {
+          "id": "runtime.repair",
+          "input_schema": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": false
+          },
+          "output_schema": {
+            "type": "object",
+            "properties": {
+              "repaired": {
+                "type": "boolean"
+              },
+              "summary": {
+                "type": "string",
+                "maxLength": 500
+              }
+            },
+            "required": ["repaired", "summary"],
+            "additionalProperties": false
+          },
+          "max_output_bytes": 4096,
+          "timeout_class": "normal",
+          "policy": "confirmation_required",
+          "scopes": ["plugin_data_write"]
         }
       ]
     }
   ],
-  "blueprints": []
+  "blueprints": [
+    {
+      "id": "demo-workspace",
+      "version": 1,
+      "manifest": "blueprints/demo-workspace/template.json",
+      "skeleton": "blueprints/demo-workspace/project",
+      "capabilities": ["demo-tools"]
+    }
+  ]
 }

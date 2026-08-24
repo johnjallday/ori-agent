@@ -21,6 +21,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/workspace"
+	"github.com/johnjallday/ori-agent/internal/workspacecapability"
 	"github.com/johnjallday/ori-agent/internal/workspacepolicy"
 )
 
@@ -32,13 +33,15 @@ type Handler struct {
 	// for task mutations such as the entry-agent claim sweep. It must be the same
 	// store orchestration reads from (SQLite primary + disk write-through), not
 	// the raw folder store, or task changes won't be visible to task reads.
-	workspaceTaskStore    workspace.Store
-	workspaceRootResolver func() string
-	templatesRootResolver func() string // resolves the project templates library directory
-	agentStore            store.Store
-	systemModelReader     SystemModelReader
-	workspaceAllowlist    *workspace.Allowlist
-	eventBus              *workspace.EventBus // optional, for project.created events
+	workspaceTaskStore        workspace.Store
+	workspaceRootResolver     func() string
+	templatesRootResolver     func() string // resolves the project templates library directory
+	projectTemplateResolver   func(templateID, templatePath string) (projecttemplates.Template, error)
+	templateCapabilityService *workspacecapability.Service
+	agentStore                store.Store
+	systemModelReader         SystemModelReader
+	workspaceAllowlist        *workspace.Allowlist
+	eventBus                  *workspace.EventBus // optional, for project.created events
 	// applyTemplateTools binds a template's declared default tools onto a newly
 	// created workspace (apply-if-present), returning the applied and skipped
 	// names. Injected by the server, which holds the tool registries and binds
@@ -210,6 +213,16 @@ func (h *Handler) PersonalHQDesignatorWired() bool {
 // templates library directory.
 func (h *Handler) SetTemplatesRootResolver(fn func() string) {
 	h.templatesRootResolver = fn
+}
+
+// SetProjectTemplateResolver injects the trusted composed built-in/user/plugin
+// blueprint catalog. Minimal/test handlers retain the legacy library resolver.
+func (h *Handler) SetProjectTemplateResolver(fn func(templateID, templatePath string) (projecttemplates.Template, error)) {
+	h.projectTemplateResolver = fn
+}
+
+func (h *Handler) SetTemplateCapabilityService(service *workspacecapability.Service) {
+	h.templateCapabilityService = service
 }
 
 // SetEventBus sets the workspace event bus used to publish project lifecycle

@@ -36,7 +36,14 @@ func capabilityTemplateEnv(t *testing.T) (*Handler, string, func()) {
 		t.Fatalf("NewFileStore: %v", err)
 	}
 	handler.SetWorkspaceStore(fileStore)
-	handler.SetWorkspaceTaskStore(agentworkspace.NewSyncStore(session.NewWorkspaceStoreAdapter(handler.store), fileStore))
+	syncStore := agentworkspace.NewSyncStore(session.NewWorkspaceStoreAdapter(handler.store), fileStore)
+	handler.SetWorkspaceTaskStore(syncStore)
+	registry, err := workspacecapability.NewBuiltinRegistry()
+	if err != nil {
+		cleanup()
+		t.Fatalf("NewBuiltinRegistry: %v", err)
+	}
+	handler.SetTemplateCapabilityService(workspacecapability.NewService(registry, syncStore))
 
 	libDir := t.TempDir()
 	handler.SetTemplatesRootResolver(func() string { return libDir })

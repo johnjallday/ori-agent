@@ -34,6 +34,9 @@ const workspaceSharedDataProjectDirectoryIDKey = projecttemplates.ProjectDirecto
 // LoadFolder should not be exposed to untrusted callers without adding a
 // path allowlist/containment check.
 func (h *Handler) resolveProjectTemplate(templateID, templatePath string) (projecttemplates.Template, error) {
+	if h.projectTemplateResolver != nil {
+		return h.projectTemplateResolver(templateID, templatePath)
+	}
 	switch {
 	case strings.TrimSpace(templateID) != "":
 		if h.templatesRootResolver == nil {

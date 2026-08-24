@@ -477,7 +477,13 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 
 	// Must run after starter-task seeding above — see
 	// persistCreateWorkspaceTemplateProvenance's doc comment for why.
-	h.persistCreateWorkspaceTemplateProvenance(ws.ID, resolvedTemplate, templateResolved)
+	if capabilityWarning := h.persistCreateWorkspaceTemplateProvenance(ws.ID, resolvedTemplate, templateResolved); capabilityWarning != "" {
+		if prov.projectWarning == "" {
+			prov.projectWarning = capabilityWarning
+		} else {
+			prov.projectWarning += "; " + capabilityWarning
+		}
+	}
 
 	// Completeness/ordering backstop: when the workspace was created with an
 	// entry agent, claim any tasks that already exist on the folder workspace
@@ -905,23 +911,28 @@ func (h *Handler) applyCreateWorkspaceTemplate(ctx context.Context, req createWo
 // later Update on the same workspace id — starter-task seeding runs right
 // after template application — would clobber a provenance write made here
 // earlier. Doing it last avoids that.
-func (h *Handler) persistCreateWorkspaceTemplateProvenance(wsID string, tmpl projecttemplates.Template, resolved bool) {
+func (h *Handler) persistCreateWorkspaceTemplateProvenance(wsID string, tmpl projecttemplates.Template, resolved bool) string {
 	if !resolved || strings.TrimSpace(tmpl.ID) == "" || h.workspaceTaskStore == nil {
-		return
+		return ""
 	}
 	// Built-ins always record provenance. A user template records it too when it
 	// declares a setup wizard or runtime contract: those snapshots *are* the
 	// workspace's setup contract, so without provenance the blueprint's declared
 	// requirements would silently disappear after creation.
-	if !tmpl.Builtin && !tmpl.HasSetupWizard() && !tmpl.HasRuntimeRequirements() {
-		return
+	if !tmpl.Builtin && tmpl.PluginOwner == nil && !tmpl.HasSetupWizard() && !tmpl.HasRuntimeRequirements() {
+		return ""
+	}
+	version := tmpl.BuiltinVersion
+	if tmpl.PluginOwner != nil {
+		version = tmpl.PluginOwner.BlueprintVersion
 	}
 	prov := &agentworkspace.TemplateProvenance{
 		TemplateID:   tmpl.ID,
 		TemplateName: tmpl.Name,
 		Builtin:      tmpl.Builtin,
-		Version:      tmpl.BuiltinVersion,
+		Version:      version,
 		AppliedAt:    time.Now(),
+		PluginOwner:  tmpl.PluginOwner,
 		// Setup requirements are recorded unresolved on purpose: creation states
 		// which folder the template will ask for and what automation it wants
 		// afterwards, but selects no path, expands no "~", registers no watcher,
@@ -950,45 +961,54 @@ func (h *Handler) persistCreateWorkspaceTemplateProvenance(wsID string, tmpl pro
 	// overwritten by the last one. See
 	// tasks/trace-installed-capabilities-persistence.md (H5).
 	installedAt := time.Now()
-	// The version recorded is the one THIS build compiles for that capability,
-	// read from the registry rather than assumed, so a record can never claim a
-	// version that does not exist (FR-13). A capability the registry does not
-	// know about was already dropped at manifest load.
-	registry, registryErr := workspacecapability.NewBuiltinRegistry()
+	if len(tmpl.Capabilities) > 0 && h.templateCapabilityService == nil {
+		return "workspace was created, but blueprint capabilities are unavailable; retry setup after restoring the provider"
+	}
+	var registry *workspacecapability.Registry
+	if h.templateCapabilityService != nil {
+		registry = h.templateCapabilityService.Registry()
+	}
 	if err := h.workspaceTaskStore.Update(wsID, func(w *agentworkspace.Workspace) error {
 		w.SetTemplateProvenance(prov)
 		for _, capability := range tmpl.Capabilities {
-			if registryErr != nil {
-				break
+			if registry == nil {
+				return fmt.Errorf("capability registry is unavailable")
 			}
 			def, known := registry.Definition(capability.ID)
 			if !known {
-				logger.Warn("Blueprint declares a capability this build does not provide", logger.Fields{
-					"id": wsID, "template": tmpl.ID, "capability": capability.ID,
-				})
-				continue
+				return fmt.Errorf("capability %q is unavailable", capability.ID)
 			}
 			source := capability.Source
 			if strings.TrimSpace(source) == "" {
 				source = agentworkspace.InstallSourceBlueprint
 			}
-			if _, err := w.AddInstalledCapability(agentworkspace.InstalledCapability{
-				ID:          def.ID,
-				Version:     def.Version,
-				InstalledAt: installedAt,
-				Source:      source,
-			}); err != nil {
-				// One malformed declaration must not cost the workspace its
-				// provenance, which is written in this same update.
-				logger.Warn("Blueprint capability not installed", logger.Fields{
-					"id": wsID, "template": tmpl.ID, "capability": capability.ID, "error": err,
-				})
+			record := agentworkspace.InstalledCapability{
+				ID: def.ID, Version: def.Version, InstalledAt: installedAt, Source: source,
+			}
+			if def.Owner != nil {
+				owner := def.Owner.Clone()
+				record.Owner = &owner
+			}
+			if _, err := w.AddInstalledCapability(record); err != nil {
+				return err
 			}
 		}
 		return nil
 	}); err != nil {
-		logger.Warn("Failed to persist template provenance", logger.Fields{"id": wsID, "template": tmpl.ID, "error": err})
+		logger.Warn("Failed to persist template provenance and capabilities", logger.Fields{"id": wsID, "template": tmpl.ID, "error": err})
+		return "workspace was created, but blueprint setup is incomplete; retry setup after restoring the capability provider"
 	}
+	for _, capability := range tmpl.Capabilities {
+		if _, err := h.templateCapabilityService.Install(workspacecapability.InstallRequest{
+			WorkspaceID: wsID, CapabilityID: capability.ID, Source: capability.Source,
+		}); err != nil {
+			logger.Warn("Blueprint capability components were not reconciled", logger.Fields{
+				"id": wsID, "template": tmpl.ID, "capability": capability.ID, "error": err,
+			})
+			return "workspace was created, but blueprint setup is incomplete; retry setup from the capability catalog"
+		}
+	}
+	return ""
 }
 
 func workspacePathsEqual(a, b string) bool {

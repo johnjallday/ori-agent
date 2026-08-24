@@ -21,8 +21,16 @@ func (b *ServerBuilder) wireWorkspaceSurfaces() {
 	registry := workspacesurface.NewRegistry()
 	services := workspacesurface.NewServiceManager(nil)
 
-	attachments := workspacesurfacehttp.AttachmentCheckerFunc(func(_ context.Context, _ string, surface workspacesurface.RegisteredSurface) bool {
+	attachments := workspacesurfacehttp.AttachmentCheckerFunc(func(_ context.Context, workspaceID string, surface workspacesurface.RegisteredSurface) bool {
 		if b.pluginHandler == nil || surface.Owner.Kind != workspacesurface.OwnerPlugin {
+			return false
+		}
+		ws, err := b.workspaceStore.Get(workspaceID)
+		if err != nil || ws == nil {
+			return false
+		}
+		record, attached := ws.GetInstalledCapability(surface.Capability.ID)
+		if !attached || record.Owner == nil || !record.Owner.MatchesPlugin(surface.Owner.ID) {
 			return false
 		}
 		installed, err := b.pluginHandler.Manager().List()
@@ -36,7 +44,7 @@ func (b *ServerBuilder) wireWorkspaceSurfaces() {
 		}
 		return false
 	})
-	contexts := workspacesurfacehttp.ContextResolverFunc(func(_ context.Context, workspaceID string, surface workspacesurface.RegisteredSurface) (workspacesurface.WorkspaceContext, error) {
+	contextForOwner := func(workspaceID, pluginID string) workspacesurface.WorkspaceContext {
 		root := ""
 		if b.workspaceFileStore != nil {
 			if resolved, err := b.workspaceFileStore.GetFolderPath(workspaceID); err == nil {
@@ -46,12 +54,16 @@ func (b *ServerBuilder) wireWorkspaceSurfaces() {
 		return workspacesurface.WorkspaceContext{
 			WorkspaceID:    workspaceID,
 			WorkspaceRoot:  root,
-			PluginDataRoot: filepath.Join(config.DefaultDataDir(), "plugins", "state", surface.Owner.ID),
-		}, nil
+			PluginDataRoot: filepath.Join(config.DefaultDataDir(), "plugins", "state", pluginID),
+		}
+	}
+	contexts := workspacesurfacehttp.ContextResolverFunc(func(_ context.Context, workspaceID string, surface workspacesurface.RegisteredSurface) (workspacesurface.WorkspaceContext, error) {
+		return contextForOwner(workspaceID, surface.Owner.ID), nil
 	})
 	b.workspaceSurfaceRegistry = registry
 	b.workspaceSurfaceServices = services
 	b.workspaceSurfaceHandler = workspacesurfacehttp.NewHandler(registry, b.workspaceStore, b.userProvider, attachments, contexts)
+	b.workspaceSurfaceHandler.SetAgentRuntimeService(b.runtimeCapabilityService)
 	state := workspacesurface.NewStateStore(filepath.Join(config.DefaultDataDir(), "plugins", "state"))
 	b.workspaceSurfaceHandler.SetStateStore(state)
 
@@ -59,6 +71,11 @@ func (b *ServerBuilder) wireWorkspaceSurfaces() {
 	// registry and process manager. Restore trusted inert projections on startup.
 	if b.pluginHandler != nil {
 		lifecycle := plugin.NewSurfaceLifecycle(registry, services)
+		lifecycle.SetCapabilityRegistry(b.workspaceCapabilityRegistry)
+		lifecycle.SetRuntimeRegistry(b.runtimeCapabilityRegistry)
+		lifecycle.SetRuntimeContextResolver(func(_ context.Context, workspaceID string, owner workspacesurface.Owner) (workspacesurface.WorkspaceContext, error) {
+			return contextForOwner(workspaceID, owner.ID), nil
+		})
 		lifecycle.SetStateStore(state)
 		lifecycle.SetSessionInvalidator(func(pluginID string, generation uint64) {
 			b.workspaceSurfaceHandler.InvalidateOwner(pluginID, generation)

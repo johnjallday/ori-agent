@@ -65,6 +65,14 @@ func (e *Error) Unwrap() error { return e.Err }
 // Ownership is enforced at the HTTP boundary, matching the convention every
 // other workspace handler follows (FR-140). The service takes an already
 // authorized workspace ID.
+// PluginComponentReconciler attaches/removes only the portable workspace
+// components owned by a plugin-backed capability. Implementations must verify
+// the workspace record's exact owner before mutating bindings.
+type PluginComponentReconciler interface {
+	AttachCapability(workspaceID string, definition Definition) error
+	DetachCapability(workspaceID string, definition Definition) error
+}
+
 type Service struct {
 	registry *Registry
 	store    WorkspaceStore
@@ -72,6 +80,7 @@ type Service struct {
 	// companions creates the optional companion agent. Nil until wired, which
 	// makes the offer unavailable rather than broken.
 	companions CompanionProvisioner
+	plugins    PluginComponentReconciler
 }
 
 // NewService builds the lifecycle service.
@@ -81,6 +90,12 @@ func NewService(registry *Registry, store WorkspaceStore) *Service {
 
 // Registry exposes the compiled allowlist backing this service.
 func (s *Service) Registry() *Registry { return s.registry }
+
+func (s *Service) SetPluginComponentReconciler(reconciler PluginComponentReconciler) {
+	if s != nil {
+		s.plugins = reconciler
+	}
+}
 
 func (s *Service) clock() time.Time {
 	if s == nil || s.now == nil {
@@ -217,6 +232,20 @@ func (s *Service) Install(req InstallRequest) (InstallResult, error) {
 	// per-workspace lock, which is what actually makes concurrent installs safe;
 	// this only avoids a pointless write.
 	if existing, ok := ws.GetInstalledCapability(def.ID); ok {
+		if def.Owner != nil {
+			if s.plugins == nil {
+				return InstallResult{}, &Error{
+					Code: CodeInstallIncomplete, Message: "The plugin capability is recorded but its workspace components are unavailable.",
+					Repair: "Enable or reinstall the owning plugin, then retry setup.",
+				}
+			}
+			if err := s.plugins.AttachCapability(req.WorkspaceID, def); err != nil {
+				return InstallResult{}, &Error{
+					Code: CodeInstallIncomplete, Message: "The plugin capability is recorded but its workspace components could not be attached.",
+					Repair: "Retry setup.", Err: err,
+				}
+			}
+		}
 		return InstallResult{
 			Record:           existing,
 			AlreadyInstalled: true,
@@ -234,6 +263,10 @@ func (s *Service) Install(req InstallRequest) (InstallResult, error) {
 		Version:     def.Version,
 		InstalledAt: s.clock(),
 		Source:      source,
+	}
+	if def.Owner != nil {
+		owner := def.Owner.Clone()
+		record.Owner = &owner
 	}
 
 	alreadyInstalled := false
@@ -283,6 +316,14 @@ func (s *Service) Install(req InstallRequest) (InstallResult, error) {
 	if err := s.runInstallHook(def, req.WorkspaceID); err != nil {
 		return InstallResult{}, s.rollbackInstall(def, req.WorkspaceID, err)
 	}
+	if def.Owner != nil {
+		if s.plugins == nil {
+			return InstallResult{}, s.rollbackInstall(def, req.WorkspaceID, errors.New("plugin component reconciler is unavailable"))
+		}
+		if err := s.plugins.AttachCapability(req.WorkspaceID, def); err != nil {
+			return InstallResult{}, s.rollbackInstall(def, req.WorkspaceID, err)
+		}
+	}
 
 	return InstallResult{
 		Record:     record,
@@ -312,6 +353,11 @@ func (s *Service) runInstallHook(def Definition, workspaceID string) error {
 // CodeInstallIncomplete — a repairable state the user can see and retry, which
 // is strictly better than a silently half-installed capability.
 func (s *Service) rollbackInstall(def Definition, workspaceID string, cause error) error {
+	if def.Owner != nil && s.plugins != nil {
+		if detachErr := s.plugins.DetachCapability(workspaceID, def); detachErr != nil {
+			cause = errors.Join(cause, detachErr)
+		}
+	}
 	if runtime, ok := s.registry.Runtime(def.ID); ok {
 		if controller, ok := runtime.(AutomationController); ok {
 			if stopErr := controller.StopCapabilityAutomation(workspaceID); stopErr != nil {

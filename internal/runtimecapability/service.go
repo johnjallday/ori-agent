@@ -586,7 +586,10 @@ func (s *Service) evaluate(ctx context.Context, workspaceID string, checkLive bo
 		adapter, registered := s.registry.Lookup(requirement.Adapter)
 		if !registered {
 			projected.ReasonCode = ReasonAdapterUnavailable
-			projected.Summary = "This runtime requirement is unavailable in this build."
+			projected.Summary = ProviderUnavailableMessage
+			projected.Action = &Action{
+				Token: "review_plugins", Code: "review_plugins", Label: "Review plugins", URL: "/settings?panel=plugins",
+			}
 		} else {
 			request := EvaluationRequest{WorkspaceID: workspaceID, Mode: mode, Requirement: requirement, Persisted: persisted}
 			result, evalErr := adapter.EvaluateDurable(ctx, request)

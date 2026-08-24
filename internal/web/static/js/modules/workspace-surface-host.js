@@ -363,7 +363,8 @@ export class WorkspaceSurfaceHost {
           workspace_id: intent.workspace_id,
           origin: 'plugin_workspace_surface',
           required_capabilities: intent.required_capabilities || [],
-          plugin_context: intent.plugin_context || ''
+          plugin_context: intent.plugin_context || '',
+          plugin_context_untrusted: true
         },
         openThinkingModal: true
       });
@@ -379,7 +380,10 @@ export class WorkspaceSurfaceHost {
       this.window?.setTimeout?.(() => {
         void this.close();
         this.window?.SetupWizard?.open?.();
-        this._dispatch('ori:workspace-surface-open-setup', { providerId: intent.provider_id });
+        this._dispatch('ori:workspace-surface-open-setup', {
+          providerId: intent.provider_id,
+          requirementKey: intent.requirement_key
+        });
       }, 0);
       return { ok: true, result: { opened: true } };
     } catch (error) {

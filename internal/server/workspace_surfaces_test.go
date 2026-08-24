@@ -11,6 +11,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/plugin"
 	"github.com/johnjallday/ori-agent/internal/pluginhttp"
 	"github.com/johnjallday/ori-agent/internal/workspace"
+	"github.com/johnjallday/ori-agent/internal/workspacecapability"
 )
 
 func TestWireWorkspaceSurfacesRestoresInstalledPluginThroughOnlyGenericRoutes(t *testing.T) {
@@ -42,8 +43,27 @@ func TestWireWorkspaceSurfacesRestoresInstalledPluginThroughOnlyGenericRoutes(t 
 	if err := pluginHandler.Manager().SetEnabled(installed.Name, true); err != nil {
 		t.Fatal(err)
 	}
+	owner := workspace.CapabilityOwner{
+		Kind: workspace.CapabilityOwnerPlugin, PluginID: installed.Name, PluginVersion: installed.Version,
+	}
+	if _, err := ws.AddInstalledCapability(workspace.InstalledCapability{
+		ID: "demo-tools", Version: 1, InstalledAt: installed.InstalledAt,
+		Source: workspace.InstallSourceInPlace, Owner: &owner,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Save(ws); err != nil {
+		t.Fatal(err)
+	}
+	capabilityRegistry, err := workspacecapability.NewBuiltinRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	builder := &ServerBuilder{workspaceStore: store, workspaceFileStore: store, pluginHandler: pluginHandler}
+	builder := &ServerBuilder{
+		workspaceStore: store, workspaceFileStore: store, pluginHandler: pluginHandler,
+		workspaceCapabilityRegistry: capabilityRegistry,
+	}
 	builder.wireWorkspaceSurfaces()
 	if builder.workspaceSurfaceHandler == nil || builder.workspaceSurfaceRegistry == nil {
 		t.Fatal("workspace surface handler/registry was not wired")

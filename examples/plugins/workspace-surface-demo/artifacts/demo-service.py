@@ -27,6 +27,8 @@ EMPTY_INPUT = {
     "additionalProperties": False,
 }
 
+degraded = False
+
 TOOLS = [
     tool("status.read", "Return bounded station status.", EMPTY_INPUT),
     tool(
@@ -41,7 +43,7 @@ TOOLS = [
     ),
     tool(
         "setting.validate",
-        "Demonstrate a host-confirmed operation without changing host state.",
+        "Demonstrate a host-confirmed switch between ready and degraded state.",
         {
             "type": "object",
             "properties": {"enabled": {"type": "boolean"}},
@@ -49,6 +51,11 @@ TOOLS = [
             "additionalProperties": False,
         },
     ),
+    tool("runtime.prerequisites", "Check harmless demo prerequisites.", EMPTY_INPUT),
+    tool("runtime.readiness", "Check durable demo readiness.", EMPTY_INPUT),
+    tool("runtime.live_status", "Check current demo availability.", EMPTY_INPUT),
+    tool("runtime.verify", "Verify the demo provider.", EMPTY_INPUT),
+    tool("runtime.repair", "Repair the intentional degraded demo state.", EMPTY_INPUT),
 ]
 
 
@@ -66,14 +73,15 @@ def failed(request_id, code, message):
 
 
 def call_tool(name, arguments):
+    global degraded
     # Ori's broker wraps frame input with authoritative context. Domain tools
     # read only the bounded `input`; they must not accept caller-selected roots.
     payload = arguments.get("input") if isinstance(arguments.get("input"), dict) else arguments
     if name == "status.read":
         output = {
-            "state": "ready",
-            "value": "Example service ready",
-            "description": "The copyable MCP stdio example is responding.",
+            "state": "degraded" if degraded else "ready",
+            "value": "Intentional degraded state" if degraded else "Example service ready",
+            "description": "Use Repair in setup to restore the demo." if degraded else "The copyable MCP stdio example is responding.",
             "checked_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         }
     elif name == "greeting.create":
@@ -84,7 +92,26 @@ def call_tool(name, arguments):
     elif name == "setting.validate":
         if not isinstance(payload.get("enabled"), bool):
             raise ValueError("enabled must be boolean")
-        output = {"accepted": payload["enabled"]}
+        degraded = not payload["enabled"]
+        output = {"accepted": True}
+    elif name in ("runtime.prerequisites", "runtime.readiness"):
+        output = {
+            "ready": not degraded,
+            "summary": "Demo provider is ready." if not degraded else "The intentional demo degradation needs repair.",
+        }
+    elif name == "runtime.live_status":
+        output = {
+            "available": not degraded,
+            "summary": "Demo provider is online." if not degraded else "Demo provider is intentionally degraded.",
+        }
+    elif name == "runtime.verify":
+        output = {
+            "verified": not degraded,
+            "summary": "Demo provider verified." if not degraded else "Repair the demo provider before verification.",
+        }
+    elif name == "runtime.repair":
+        degraded = False
+        output = {"repaired": True, "summary": "Demo provider repaired."}
     else:
         raise KeyError("unknown tool")
     return {

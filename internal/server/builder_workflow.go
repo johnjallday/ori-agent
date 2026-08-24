@@ -88,15 +88,20 @@ func (b *ServerBuilder) buildWorkspaceToolFactory() workspace.WorkspaceToolFacto
 // different builder phases, so resolving dependencies only at tool-call time
 // avoids a partially initialized HQ overview.
 func (b *ServerBuilder) buildRuntimeTaskToolFactory() workspace.RuntimeTaskToolFactory {
-	handler := b.reaperHandler
-	if handler == nil {
+	reaper := b.reaperHandler
+	surfaces := b.workspaceSurfaceHandler
+	if reaper == nil && surfaces == nil {
 		return nil
 	}
 	return func(task workspace.Task, _ string, agentInstanceID string) []toolapi.Tool {
-		if !task.RequiresCapability(reapersetup.ReaperLiveControlCapability) {
-			return nil
+		var tools []toolapi.Tool
+		if reaper != nil && task.RequiresCapability(reapersetup.ReaperLiveControlCapability) {
+			tools = append(tools, reaper.AgentTools(task.WorkspaceID, agentInstanceID)...)
 		}
-		return handler.AgentTools(task.WorkspaceID, agentInstanceID)
+		if surfaces != nil {
+			tools = append(tools, surfaces.AgentTools(context.Background(), task.WorkspaceID, agentInstanceID)...)
+		}
+		return tools
 	}
 }
 
@@ -402,11 +407,13 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 	b.wireReaperControl()
 	b.wireCalendarOpsSetup()
 	b.wireDownloadsJanitor()
-	b.wireWorkspaceSurfaces()
-	// After the domain services above: the capability registry binds their
-	// runtimes, and the wizard registers their adapters.
+	// Build the compiled capability registry before restoring plugin surfaces:
+	// enabled plugin contributions register owner-aware definitions into this
+	// same catalog and must collide fail-closed with built-ins.
 	b.wireWorkspaceCapabilities()
 	b.wireRuntimeCapabilities()
+	b.wireWorkspaceSurfaces()
+	b.wireProjectTemplateResolver()
 	b.wireSetupWizard()
 	// The coordinate map resolves node ownership through the composed workspace
 	// store, so it wires here for the same reason (#292 FR-99).

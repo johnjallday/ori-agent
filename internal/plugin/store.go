@@ -23,6 +23,7 @@ type InstalledPlugin struct {
 	Skills               []string             `json:"skills,omitempty"`
 	WorkspaceSurfaces    *SurfaceContribution `json:"workspace_surfaces,omitempty"`
 	ResolvedArtifacts    []ResolvedArtifact   `json:"resolved_artifacts,omitempty"`
+	ResolvedBlueprints   []ResolvedBlueprint  `json:"resolved_blueprints,omitempty"`
 	ComponentFingerprint string               `json:"component_fingerprint,omitempty"`
 	Generation           uint64               `json:"generation,omitempty"`
 	Enabled              bool                 `json:"enabled"`

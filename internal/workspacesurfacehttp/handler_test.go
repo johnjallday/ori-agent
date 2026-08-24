@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/runtimecapability"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 	"github.com/johnjallday/ori-agent/internal/workspacesurface"
 )
@@ -134,7 +135,8 @@ func newPrototypeHTTPFixture(t *testing.T) *prototypeHTTPFixture {
 		Owner: owner,
 		Capabilities: []workspacesurface.Capability{{
 			ID: "demo-tools", Version: 1,
-			Display: workspacesurface.Display{Name: "Surface Demo", Description: "A harmless demo."},
+			Display:           workspacesurface.Display{Name: "Surface Demo", Description: "A harmless demo."},
+			AgentOperationIDs: []string{"greeting.create", "setting.validate"}, RuntimeRequirementKey: "demo_runtime",
 			Surfaces: []workspacesurface.Surface{{
 				ID: "main", Label: "Surface Demo", Description: "Open the harmless demo surface.",
 				Icon: workspacesurface.Icon{Kind: "host", Value: "puzzle"}, Placement: "map_modal",
@@ -434,13 +436,18 @@ func TestHostIntentsUseOnlySurfaceRegisteredRequirements(t *testing.T) {
 	setup := fixture.serve(http.MethodPost, "/api/workspace-surfaces/intents",
 		`{"session":"`+opened.Session+`","type":"open_setup"}`)
 	var setupIntent intentResponse
-	if err := json.Unmarshal(setup.Body.Bytes(), &setupIntent); err != nil || setupIntent.ProviderID != "demo-runtime" {
+	if err := json.Unmarshal(setup.Body.Bytes(), &setupIntent); err != nil || setupIntent.ProviderID != "demo-runtime" || setupIntent.RequirementKey != "demo_runtime" {
 		t.Fatalf("Setup intent = %d %+v, %v", setup.Code, setupIntent, err)
 	}
 	injected := fixture.serve(http.MethodPost, "/api/workspace-surfaces/intents",
-		`{"session":"`+opened.Session+`","type":"ask_ori","context":"x","required_capabilities":["admin"]}`)
+		`{"session":"`+opened.Session+`","type":"ask_ori","context":"x","required_capabilities":["admin"],"tools":["admin"],"route":"/settings"}`)
 	if injected.Code != http.StatusBadRequest {
 		t.Fatalf("injected intent authority status = %d, body=%s", injected.Code, injected.Body.String())
+	}
+	control := fixture.serve(http.MethodPost, "/api/workspace-surfaces/intents",
+		`{"session":"`+opened.Session+`","type":"ask_ori","context":"unsafe\u0001context"}`)
+	if control.Code != http.StatusBadRequest {
+		t.Fatalf("control-character intent status = %d, body=%s", control.Code, control.Body.String())
 	}
 }
 
@@ -661,6 +668,84 @@ func TestConcurrentLifecycleChangesAreSafeDuringCatalogAssetStatusAndOperationRe
 	close(errorsSeen)
 	for message := range errorsSeen {
 		t.Error(message)
+	}
+}
+
+type agentRuntimeStatus struct{}
+
+func (agentRuntimeStatus) Status(context.Context, string) (runtimecapability.Status, error) {
+	return runtimecapability.Status{Requirements: []runtimecapability.RequirementStatus{{
+		Key: "demo_runtime", DurableState: runtimecapability.DurableConfigured, LiveState: runtimecapability.LiveAvailable,
+	}}}, nil
+}
+
+func agentErrorCode(err error) string {
+	var operationErr *AgentOperationError
+	if errors.As(err, &operationErr) {
+		return operationErr.Code
+	}
+	return ""
+}
+
+func TestAgentOperationAdapterRequiresExactGrantAndUsesHostConfirmation(t *testing.T) {
+	fixture := newPrototypeHTTPFixture(t)
+	store := fixture.handler.workspaces.(testWorkspaceStore)
+	ws := store.workspaces[fixture.workspaceID]
+	ws.AgentInstances = []workspace.AgentInstance{{ID: "agent-a", Name: "Agent A"}, {ID: "agent-b", Name: "Agent B"}}
+	fixture.handler.SetAgentRuntimeService(agentRuntimeStatus{})
+	request := AgentOperationRequest{
+		WorkspaceID: fixture.workspaceID, AgentInstanceID: "agent-a",
+		PluginID: "workspace-surface-demo", CapabilityID: "demo-tools",
+		OperationID: "greeting.create", Input: json.RawMessage(`{"name":"Agent"}`),
+	}
+	if _, err := fixture.handler.InvokeAgentOperation(context.Background(), request); agentErrorCode(err) != "runtime_grant_required" {
+		t.Fatalf("ungranted error = %v", err)
+	}
+	if fixture.runtime.invokeCount() != 0 {
+		t.Fatal("ungranted agent request reached the service")
+	}
+	if _, err := ws.GrantRuntimeCapability("demo_runtime", "agent-a", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	tools := fixture.handler.AgentTools(context.Background(), fixture.workspaceID, "agent-a")
+	if len(tools) != 2 {
+		t.Fatalf("agent tools = %+v", tools)
+	}
+	for _, tool := range tools {
+		if strings.Contains(tool.Definition().Name, "service") || strings.Contains(tool.Definition().Name, "mcp") {
+			t.Fatalf("private service leaked as native tool: %+v", tool.Definition())
+		}
+	}
+	if tools := fixture.handler.AgentTools(context.Background(), fixture.workspaceID, "agent-b"); len(tools) != 0 {
+		t.Fatalf("ungranted agent tools = %+v", tools)
+	}
+	result, err := fixture.handler.InvokeAgentOperation(context.Background(), request)
+	if err != nil || !strings.Contains(string(result.Output), "Hello, Ori.") {
+		t.Fatalf("agent result = %s, %v", result.Output, err)
+	}
+	request.AgentInstanceID = "agent-b"
+	if _, err := fixture.handler.InvokeAgentOperation(context.Background(), request); agentErrorCode(err) != "runtime_grant_required" {
+		t.Fatalf("cross-agent grant error = %v", err)
+	}
+
+	request.AgentInstanceID = "agent-a"
+	request.OperationID = "setting.validate"
+	request.Input = json.RawMessage(`{"enabled":true}`)
+	pending, err := fixture.handler.InvokeAgentOperation(context.Background(), request)
+	if agentErrorCode(err) != "confirmation_required" || pending.ConfirmationID == "" || fixture.runtime.invokeCount() != 1 {
+		t.Fatalf("pending confirmation = %+v, %v calls=%d", pending, err, fixture.runtime.invokeCount())
+	}
+	token, err := fixture.handler.ApproveAgentOperationConfirmation(context.Background(), request, pending.ConfirmationID)
+	if err != nil || token == "" {
+		t.Fatalf("approve = %q, %v", token, err)
+	}
+	request.ConfirmationToken = token
+	confirmed, err := fixture.handler.InvokeAgentOperation(context.Background(), request)
+	if err != nil || !strings.Contains(string(confirmed.Output), "accepted") || fixture.runtime.invokeCount() != 2 {
+		t.Fatalf("confirmed = %s, %v calls=%d", confirmed.Output, err, fixture.runtime.invokeCount())
+	}
+	if _, err := fixture.handler.InvokeAgentOperation(context.Background(), request); agentErrorCode(err) != "confirmation_invalid" || fixture.runtime.invokeCount() != 2 {
+		t.Fatalf("replay = %v calls=%d", err, fixture.runtime.invokeCount())
 	}
 }
 

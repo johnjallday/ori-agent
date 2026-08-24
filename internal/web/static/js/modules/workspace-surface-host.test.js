@@ -334,6 +334,7 @@ test('state, Ask Ori, and Setup requests use host-owned generic intents', async 
   assert.equal(asks.length, 1);
   assert.deepEqual(asks[0].options.routeContext.required_capabilities, ['demo_runtime']);
   assert.equal(asks[0].options.routeContext.plugin_context, 'Explain this status.');
+  assert.equal(asks[0].options.routeContext.plugin_context_untrusted, true);
 
   const setup = await host.active.bridge.options.onRequest({
     type: 'ori.surface.host.open_setup',

@@ -750,6 +750,9 @@ func (b *ServerBuilder) wireWorkspaceCapabilities() {
 	}
 
 	service := workspacecapability.NewService(registry, b.workspaceStore)
+	if b.pluginHandler != nil {
+		service.SetPluginComponentReconciler(pluginworkspace.New(b.pluginHandler.Manager(), b.workspaceStore))
+	}
 	// Companion creation belongs to the layer that owns the agent store; the
 	// capability service only decides whether one is wanted. Without this the
 	// offer reports itself unavailable rather than failing obscurely.
@@ -757,6 +760,9 @@ func (b *ServerBuilder) wireWorkspaceCapabilities() {
 		service.SetCompanionProvisioner(sessionhttp.NewCapabilityCompanionProvisioner(b.sessionHandler))
 	}
 	b.workspaceCapabilityService = service
+	if b.sessionHandler != nil {
+		b.sessionHandler.SetTemplateCapabilityService(service)
+	}
 	b.workspaceCapabilityHandler = workspacecapabilityhttp.NewHandler(service, b.workspaceStore, b.userProvider)
 
 	b.backfillLegacyCapabilities(registry, legacyProbe)
@@ -943,7 +949,10 @@ func (b *ServerBuilder) blueprintWizardLookup() setupwizard.BlueprintLookup {
 		if strings.TrimSpace(root) == "" {
 			return setupwizard.Blueprint{}, false
 		}
-		tpl, err := projecttemplates.FindLibraryTemplate(root, templateID)
+		tpl, err := projecttemplates.FindLibraryTemplateWithCatalog(root, templateID, templateRuntimeCatalog{
+			capabilities: b.workspaceCapabilityRegistry,
+			runtimes:     b.runtimeCapabilityRegistry,
+		})
 		if err != nil || !tpl.HasSetupWizard() || tpl.HasInvalidSetupWizard() {
 			return setupwizard.Blueprint{}, false
 		}

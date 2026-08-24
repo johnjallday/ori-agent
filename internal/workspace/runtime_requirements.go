@@ -24,7 +24,10 @@ const (
 	MaxRuntimeDisclosureLength  = 2000
 )
 
-var runtimeIdentifierPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
+var (
+	runtimeIdentifierPattern    = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
+	pluginRuntimeAdapterPattern = regexp.MustCompile(`^plugin:[a-z0-9][a-z0-9_-]*:[a-z0-9][a-z0-9_-]*$`)
+)
 
 // NormalizeRuntimeIdentifier canonicalizes a persisted mode, requirement, or
 // adapter lookup key. Invalid identifiers normalize to empty, never to a
@@ -35,6 +38,20 @@ func NormalizeRuntimeIdentifier(value string) string {
 		return ""
 	}
 	return value
+}
+
+// NormalizeRuntimeAdapterID accepts either a compiled built-in identifier or
+// an owner-qualified plugin provider key. It remains a bounded lookup key; the
+// workspace record never carries an implementation, command, path, or endpoint.
+func NormalizeRuntimeAdapterID(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if NormalizeRuntimeIdentifier(value) != "" {
+		return value
+	}
+	if len(value) <= 192 && pluginRuntimeAdapterPattern.MatchString(value) {
+		return value
+	}
+	return ""
 }
 
 // RuntimeRequirementsContract is the normalized, portable runtime contract a
@@ -110,7 +127,7 @@ func (c *RuntimeRequirementsContract) StructurallyValid() bool {
 	requirementKeys := make(map[string]struct{}, len(c.Requirements))
 	for _, requirement := range c.Requirements {
 		key := NormalizeRuntimeIdentifier(requirement.Key)
-		adapter := NormalizeRuntimeIdentifier(requirement.Adapter)
+		adapter := NormalizeRuntimeAdapterID(requirement.Adapter)
 		if key == "" || adapter == "" || !runtimeTextValid(requirement.Label, MaxRuntimeLabelLength, true) ||
 			!runtimeTextValid(requirement.Description, MaxRuntimeDescriptionLength, true) ||
 			!runtimeTextValid(requirement.Disclosure, MaxRuntimeDisclosureLength, false) {

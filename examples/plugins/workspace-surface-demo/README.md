@@ -9,8 +9,11 @@ The example intentionally demonstrates:
 
 - a polled `status.read` operation;
 - a bounded `greeting.create` operation;
-- a `confirmation_required` operation;
-- host-managed state and close intents;
+- a `confirmation_required` operation and intentional degraded state;
+- an inert contributed workspace blueprint with generic Setup Wizard steps;
+- a plugin runtime provider using the host-approved `plugin_data_write` scope;
+- a per-agent-grant-gated `greeting.create` tool (never unrestricted native MCP);
+- host-managed state, Ask Ori, Open Setup, and close intents;
 - rejection of an undeclared `service.admin` operation; and
 - one artifact digest reused for explicitly listed supported platforms.
 

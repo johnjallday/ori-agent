@@ -108,7 +108,7 @@ command + `cwd`, which Ori resolves to an absolute command).
 A plugin may add an Ori contribution at the fixed path
 `.ori-plugin/plugin.json`. The contribution can declare sandboxed workspace UI,
 a private MCP stdio service, verified platform artifacts, bounded operations,
-and (in later protocol components) runtime providers and workspace blueprints.
+runtime providers, grant-gated agent operations, and workspace blueprints.
 It supplements rather than replaces the portable Claude or Codex identity.
 
 Start with the copyable, runnable example:
@@ -147,7 +147,7 @@ The Ori manifest's top-level fields are:
 - `protocol`: supported inclusive `min`/`max` range;
 - `capabilities`: owner-scoped display metadata and surfaces;
 - `services`: MCP stdio entrypoints, platform artifacts, and operations; and
-- `blueprints`: bounded inert template references (when used).
+- `blueprints`: bounded inert template references.
 
 Unknown fields, blank or duplicate IDs, owner collisions, unsafe paths,
 unsupported placements/transports, invalid protocol ranges, unknown symbolic

@@ -18,6 +18,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/platform"
 	"github.com/johnjallday/ori-agent/internal/privateservices"
+	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	web "github.com/johnjallday/ori-agent/internal/web"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 	"github.com/johnjallday/ori-agent/internal/workspaceplan"
@@ -42,6 +43,7 @@ type Server struct {
 	// closing process keeps dispatching work.
 	workspacePlanAuto        *workspaceplan.AutoRunner
 	workspaceSurfaceServices *workspacesurface.ServiceManager
+	projectTemplateCatalog   projecttemplates.RuntimeCatalog
 }
 
 func (s *Server) resolvedDesktopOpener() platform.DesktopOpener {

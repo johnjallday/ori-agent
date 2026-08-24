@@ -196,6 +196,9 @@ type CompanionDescriptor struct {
 type Definition struct {
 	// ID is the stable capability identifier, normalized to lower case.
 	ID string `json:"id"`
+	// Owner is nil for compiled built-ins. Plugin definitions carry inert owner
+	// provenance; executable bindings remain in trusted plugin registries.
+	Owner *workspace.CapabilityOwner `json:"owner,omitempty"`
 	// Version is this build's definition version, used to detect that a
 	// persisted install predates the current definition and may need
 	// capability-specific migration (FR-13).
@@ -215,6 +218,10 @@ type Definition struct {
 // cannot mutate the compiled definition held by the registry.
 func (d Definition) Clone() Definition {
 	cp := d
+	if d.Owner != nil {
+		owner := d.Owner.Clone()
+		cp.Owner = &owner
+	}
 	cp.Display.Highlights = append([]string(nil), d.Display.Highlights...)
 	cp.Setup.LegacyAdapterIDs = append([]string(nil), d.Setup.LegacyAdapterIDs...)
 	cp.Setup.LegacyDirectoryRequirementKeys = append([]string(nil), d.Setup.LegacyDirectoryRequirementKeys...)
@@ -237,6 +244,9 @@ func (d Definition) Validate() error {
 	}
 	if strings.TrimSpace(d.Display.Name) == "" {
 		return fmt.Errorf("capability definition %q: display name is required", d.ID)
+	}
+	if d.Owner != nil && !d.Owner.Valid() {
+		return fmt.Errorf("capability definition %q: plugin owner is invalid", d.ID)
 	}
 	if d.Requirements.MaxInstallsPerWorkspace < 0 {
 		return fmt.Errorf("capability definition %q: max installs per workspace cannot be negative", d.ID)

@@ -51,12 +51,27 @@ func (m *Manager) SetSurfaceLifecycle(lifecycle contributionLifecycle) {
 	}
 }
 
+func prepareTrustedBlueprints(descriptor *PluginDescriptor) error {
+	if descriptor == nil {
+		return nil
+	}
+	resolved, err := ResolvePluginBlueprints(*descriptor)
+	if err != nil {
+		return err
+	}
+	descriptor.ResolvedBlueprints = resolved
+	return nil
+}
+
 // Install resolves, discloses, confirms, and registers a plugin. Declining the
 // trust prompt makes no changes. On success the plugin is recorded in the store,
 // disabled — enabling happens per workspace (task 4.x).
 func (m *Manager) Install(source string, prefer SourceFormat, confirm ConfirmFunc) (InstalledPlugin, error) {
 	d, err := Load(source, m.cloneDir, prefer)
 	if err != nil {
+		return InstalledPlugin{}, err
+	}
+	if err := prepareTrustedBlueprints(&d); err != nil {
 		return InstalledPlugin{}, err
 	}
 
@@ -84,6 +99,7 @@ func (m *Manager) Install(source string, prefer SourceFormat, confirm ConfirmFun
 		Skills:               res.Skills,
 		WorkspaceSurfaces:    d.WorkspaceSurfaces,
 		ResolvedArtifacts:    resolvedArtifacts,
+		ResolvedBlueprints:   append([]ResolvedBlueprint(nil), d.ResolvedBlueprints...),
 		ComponentFingerprint: trustedComponentFingerprint(d),
 		Generation:           1,
 		Enabled:              false,
@@ -110,6 +126,9 @@ func (m *Manager) Install(source string, prefer SourceFormat, confirm ConfirmFun
 func (m *Manager) Preview(source string, prefer SourceFormat) (TrustReport, error) {
 	d, err := Load(source, m.cloneDir, prefer)
 	if err != nil {
+		return TrustReport{}, err
+	}
+	if err := prepareTrustedBlueprints(&d); err != nil {
 		return TrustReport{}, err
 	}
 	return BuildTrustReport(d), nil
@@ -207,6 +226,9 @@ func (m *Manager) UpdatePreview(name string) (TrustReport, bool, error) {
 	if err != nil {
 		return TrustReport{}, false, err
 	}
+	if err := prepareTrustedBlueprints(&d); err != nil {
+		return TrustReport{}, false, err
+	}
 	return BuildTrustReport(d), componentsChanged(existing, d), nil
 }
 
@@ -238,6 +260,10 @@ func (m *Manager) Update(name string, confirm ConfirmFunc) (InstalledPlugin, err
 
 	d, err := m.reload(existing)
 	if err != nil {
+		restoreSurface()
+		return InstalledPlugin{}, err
+	}
+	if err := prepareTrustedBlueprints(&d); err != nil {
 		restoreSurface()
 		return InstalledPlugin{}, err
 	}
@@ -276,6 +302,7 @@ func (m *Manager) Update(name string, confirm ConfirmFunc) (InstalledPlugin, err
 		Skills:               res.Skills,
 		WorkspaceSurfaces:    d.WorkspaceSurfaces,
 		ResolvedArtifacts:    resolvedArtifacts,
+		ResolvedBlueprints:   append([]ResolvedBlueprint(nil), d.ResolvedBlueprints...),
 		ComponentFingerprint: trustedComponentFingerprint(d),
 		Generation:           nextPluginGeneration(existing.Generation),
 		Enabled:              existing.Enabled,

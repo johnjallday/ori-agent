@@ -10,35 +10,38 @@ async function removeExample(request: APIRequestContext) {
   await request.delete(`/api/plugins/${PLUGIN_NAME}`).catch(() => {});
 }
 
-async function createWorkspace(request: APIRequestContext) {
+async function createWorkspace(request: APIRequestContext, templateId: string) {
   const response = await request.post('/api/workspaces', {
     data: {
       name: `Workspace Surface Browser ${Date.now().toString(36)}`,
-      description: 'Disposable Workspace Surface browser journey'
+      description: 'Disposable Workspace Surface browser journey',
+      template_id: templateId,
+      create_template_agents: true
     }
   });
   expect(response.ok(), await response.text()).toBeTruthy();
   const payload = await response.json();
   const record = payload.folder || payload.workspace || payload;
-  const agentName = `Surface Demo Manager ${Date.now().toString(36)}`;
-  const agent = await request.post('/api/agents', {
-    data: { name: agentName, type: 'orchestration' }
-  });
-  expect(agent.ok(), await agent.text()).toBeTruthy();
-  const attached = await request.post(`/api/workspaces/${record.id}/agents`, {
-    data: { agent_name: agentName }
-  });
-  expect(attached.ok(), await attached.text()).toBeTruthy();
+  expect(
+    payload.project_warning,
+    'plugin blueprint creation must not report normal-ready on partial setup'
+  ).toBeUndefined();
+  const loaded = await request.get(`/api/workspaces/${record.id}`);
+  expect(loaded.ok(), await loaded.text()).toBeTruthy();
+  const loadedPayload = await loaded.json();
+  const workspace = loadedPayload.folder || loadedPayload.workspace || loadedPayload;
+  const agent = workspace.agent_instances?.[0] || workspace.agents?.[0];
+  expect(agent?.id, 'plugin blueprint should create its declared agent').toBeTruthy();
   return {
     id: record.id as string,
     slug: (record.folder_slug || record.slug || record.id) as string,
-    agentName
+    agentId: agent.id as string
   };
 }
 
 test.describe.configure({ mode: 'serial' });
 
-test('local plugin install drives a generic station, frame, state, confirmation, and invalidation', async ({
+test('plugin blueprint drives capability setup, granted agent surface, and full lifecycle', async ({
   page,
   request
 }) => {
@@ -73,7 +76,44 @@ test('local plugin install drives a generic station, frame, state, confirmation,
 
     const enable = await request.post(`/api/plugins/${PLUGIN_NAME}/enable`);
     expect(enable.ok(), await enable.text()).toBeTruthy();
-    workspace = await createWorkspace(request);
+    const templateID = 'plugin:workspace-surface-demo:demo-workspace';
+    const templates = await request.get('/api/project-templates');
+    expect(templates.ok(), await templates.text()).toBeTruthy();
+    expect(
+      (await templates.json()).templates.some(
+        (template: { id: string }) => template.id === templateID
+      )
+    ).toBeTruthy();
+
+    workspace = await createWorkspace(request, templateID);
+    const capabilityCatalog = await (
+      await request.get(`/api/workspaces/${workspace.id}/capabilities`)
+    ).json();
+    const attachedCapability = capabilityCatalog.capabilities.find(
+      (item: { definition: { id: string } }) => item.definition.id === 'demo-tools'
+    );
+    expect(attachedCapability.installed).toBeTruthy();
+    expect(attachedCapability.record.owner.plugin_id).toBe(PLUGIN_NAME);
+
+    const verify = await request.post(
+      `/api/workspaces/${workspace.id}/runtime-capabilities/requirements/demo_runtime/verify`
+    );
+    expect(verify.ok(), await verify.text()).toBeTruthy();
+    const grant = await request.post(
+      `/api/workspaces/${workspace.id}/runtime-capabilities/requirements/demo_runtime/grants`,
+      { data: { agent_instance_id: workspace.agentId } }
+    );
+    expect(grant.ok(), await grant.text()).toBeTruthy();
+    await request.post(`/api/workspaces/${workspace.id}/setup-wizard/open`);
+    const summary = await request.post(
+      `/api/workspaces/${workspace.id}/setup-wizard/steps/summary/confirm`,
+      { data: {} }
+    );
+    expect(summary.ok(), await summary.text()).toBeTruthy();
+    const completeSetup = await request.post(
+      `/api/workspaces/${workspace.id}/setup-wizard/complete`
+    );
+    expect(completeSetup.ok(), await completeSetup.text()).toBeTruthy();
 
     const catalog = await request.get(`/api/workspaces/${workspace.id}/surfaces`);
     expect(catalog.ok(), await catalog.text()).toBeTruthy();
@@ -99,7 +139,7 @@ test('local plugin install drives a generic station, frame, state, confirmation,
     await expect(frame.locator('[data-confirmation-result]')).toHaveText(
       'Approved and completed once.'
     );
-    await capture('group2-01-installed-open-operated.png');
+    await capture('group3-01-blueprint-setup-grant-operated.png');
 
     await page.locator('.workspace-surface-close').click();
     await expect(page.locator('.workspace-surface-modal')).toBeHidden();
@@ -108,21 +148,44 @@ test('local plugin install drives a generic station, frame, state, confirmation,
     await expect(page.locator('.workspace-surface-modal')).toBeVisible({ timeout: 20_000 });
     frame = page.frameLocator('iframe.workspace-surface-frame');
     await expect(frame.locator('[data-visit-count]')).toHaveText('2', { timeout: 15_000 });
-    await capture('group2-02-state-survives-frame-reload.png');
+    await capture('group3-02-state-survives-frame-reload.png');
 
     const disable = await request.post(`/api/plugins/${PLUGIN_NAME}/disable`);
     expect(disable.ok(), await disable.text()).toBeTruthy();
+    const disabledCapabilities = await (
+      await request.get(`/api/workspaces/${workspace.id}/capabilities`)
+    ).json();
+    const disabledRecord = disabledCapabilities.capabilities.find(
+      (item: { definition: { id: string } }) => item.definition.id === 'demo-tools'
+    );
+    expect(disabledRecord.installed).toBeTruthy();
+    expect(disabledRecord.available).toBeFalsy();
     await frame.getByRole('button', { name: 'Invoke broker' }).click();
     await expect(frame.locator('[data-result]')).toContainText('session_unknown');
     await page.reload();
     await expect(page.locator('.workspace-surface-modal')).toBeHidden();
     await page.getByRole('button', { name: /^map$/i }).click();
     await expect(page.locator(`[data-cmd-hq-station="${SURFACE_KEY}"]`)).toHaveCount(0);
-    await capture('group2-03-disabled.png');
+    await capture('group3-03-disabled-station-removed.png');
+    await page.goto(`/workspaces/${encodeURIComponent(workspace.slug)}?setup=1`);
+    if (!(await page.locator('#setupWizardDialog').isVisible())) {
+      await page.evaluate(() => {
+        const setup = (
+          window as typeof window & { SetupWizard?: { open?: (step?: string) => void } }
+        ).SetupWizard;
+        setup?.open?.('provider');
+      });
+    }
+    await expect(page.locator('#setupWizardDialog')).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator('#setupWizardStepContent')).toContainText(
+      "This workspace's capability provider is not available"
+    );
+    await capture('group3-04-disabled-provider-repair.png');
+    await request.post(`/api/workspaces/${workspace.id}/setup-wizard/dismiss`);
 
     const reenable = await request.post(`/api/plugins/${PLUGIN_NAME}/enable`);
     expect(reenable.ok(), await reenable.text()).toBeTruthy();
-    await page.reload();
+    await page.goto(`/workspaces/${encodeURIComponent(workspace.slug)}`);
     await page.getByRole('button', { name: /^map$/i }).click();
     const restoredStation = page.locator(`[data-cmd-hq-station="${SURFACE_KEY}"]`).first();
     await expect(restoredStation).toContainText('Surface Demo', { timeout: 20_000 });
@@ -130,7 +193,7 @@ test('local plugin install drives a generic station, frame, state, confirmation,
     await expect(page.locator('.workspace-surface-modal')).toBeVisible({ timeout: 20_000 });
     frame = page.frameLocator('iframe.workspace-surface-frame');
     await expect(frame.locator('[data-visit-count]')).toHaveText('3', { timeout: 15_000 });
-    await capture('group2-04-reenabled.png');
+    await capture('group3-05-reenabled.png');
 
     const manifestPath = path.join(source, '.ori-plugin', 'plugin.json');
     const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
@@ -154,7 +217,7 @@ test('local plugin install drives a generic station, frame, state, confirmation,
     expect(update.ok(), await update.text()).toBeTruthy();
     await frame.getByRole('button', { name: 'Invoke broker' }).click();
     await expect(frame.locator('[data-result]')).toContainText('session_unknown');
-    await capture('group2-05-trust-changing-update-invalidates-frame.png');
+    await capture('group3-06-trust-changing-update-invalidates-frame.png');
 
     await page.reload();
     await page.getByRole('button', { name: /^map$/i }).click();
@@ -167,12 +230,20 @@ test('local plugin install drives a generic station, frame, state, confirmation,
 
     const uninstall = await request.delete(`/api/plugins/${PLUGIN_NAME}`);
     expect(uninstall.ok(), await uninstall.text()).toBeTruthy();
+    const removedCapabilities = await (
+      await request.get(`/api/workspaces/${workspace.id}/capabilities`)
+    ).json();
+    const removedRecord = removedCapabilities.capabilities.find(
+      (item: { definition: { id: string } }) => item.definition.id === 'demo-tools'
+    );
+    expect(removedRecord.installed).toBeTruthy();
+    expect(removedRecord.available).toBeFalsy();
     await frame.getByRole('button', { name: 'Invoke broker' }).click();
     await expect(frame.locator('[data-result]')).toContainText('session_unknown');
     await page.reload();
     await expect(page.locator('.workspace-surface-modal')).toBeHidden();
     await expect(page.locator(`[data-cmd-hq-station="${SURFACE_KEY}"]`)).toHaveCount(0);
-    await capture('group2-06-uninstalled-while-open.png');
+    await capture('group3-07-uninstalled-while-open.png');
   } finally {
     await removeExample(request);
     if (workspace) await request.delete(`/api/workspaces/${workspace.id}`).catch(() => {});

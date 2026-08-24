@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/userprofile"
@@ -79,6 +80,7 @@ type Handler struct {
 	attachments   AttachmentChecker
 	contexts      ContextResolver
 	authorizer    OperationAuthorizer
+	runtime       AgentRuntimeService
 	sessions      *sessionStore
 	confirmations *confirmationStore
 	state         *workspacesurface.StateStore
@@ -480,6 +482,7 @@ type intentResponse struct {
 	PluginContext        string   `json:"plugin_context,omitempty"`
 	RequiredCapabilities []string `json:"required_capabilities,omitempty"`
 	ProviderID           string   `json:"provider_id,omitempty"`
+	RequirementKey       string   `json:"requirement_key,omitempty"`
 }
 
 func (h *Handler) Intent(w http.ResponseWriter, r *http.Request) {
@@ -502,7 +505,7 @@ func (h *Handler) Intent(w http.ResponseWriter, r *http.Request) {
 	response := intentResponse{WorkspaceID: record.WorkspaceID}
 	switch strings.TrimSpace(input.Type) {
 	case "ask_ori":
-		if len(surface.Surface.AskOriCapabilities) == 0 || len([]byte(input.Context)) > 2000 || strings.ContainsRune(input.Context, 0) {
+		if len(surface.Surface.AskOriCapabilities) == 0 || !validPluginIntentContext(input.Context) {
 			respondError(w, http.StatusBadRequest, "intent_unavailable", "Ask Ori is not available for this surface.")
 			return
 		}
@@ -516,11 +519,24 @@ func (h *Handler) Intent(w http.ResponseWriter, r *http.Request) {
 		}
 		response.Intent = "open_setup"
 		response.ProviderID = surface.Surface.SetupProviderID
+		response.RequirementKey = surface.Capability.RuntimeRequirementKey
 	default:
 		respondError(w, http.StatusBadRequest, "intent_unavailable", "That host action is not available for this surface.")
 		return
 	}
 	_ = orihttp.RespondSuccess(w, response)
+}
+
+func validPluginIntentContext(value string) bool {
+	if !utf8.ValidString(value) || len([]byte(value)) > 2000 {
+		return false
+	}
+	for _, r := range value {
+		if r < 0x20 && r != '\n' && r != '\t' || r == 0x7f {
+			return false
+		}
+	}
+	return true
 }
 
 type stateRequest struct {

@@ -593,6 +593,10 @@ func (b *ServerBuilder) createDomainFacades() {
 	}
 	b.server.Handlers = handlers
 	b.server.workspaceSurfaceServices = b.workspaceSurfaceServices
+	b.server.projectTemplateCatalog = templateRuntimeCatalog{
+		capabilities: b.workspaceCapabilityRegistry,
+		runtimes:     b.runtimeCapabilityRegistry,
+	}
 }
 
 // WithLLMFactory injects a custom LLM factory (for testing).

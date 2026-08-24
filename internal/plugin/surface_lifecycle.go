@@ -8,6 +8,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/runtimecapability"
+	"github.com/johnjallday/ori-agent/internal/workspace"
+	"github.com/johnjallday/ori-agent/internal/workspacecapability"
 	"github.com/johnjallday/ori-agent/internal/workspacesurface"
 )
 
@@ -15,10 +18,14 @@ import (
 // process-wide owner-aware registry. Workspace files never call this API and
 // never supply a Binding.
 type SurfaceLifecycle struct {
-	registry    *workspacesurface.Registry
-	services    *workspacesurface.ServiceManager
-	state       *workspacesurface.StateStore
-	invalidator func(string, uint64)
+	registry     *workspacesurface.Registry
+	services     *workspacesurface.ServiceManager
+	state        *workspacesurface.StateStore
+	capabilities *workspacecapability.Registry
+	runtimes     *runtimecapability.Registry
+	contexts     RuntimeContextResolver
+	scopes       SymbolicScopeResolver
+	invalidator  func(string, uint64)
 }
 
 func NewSurfaceLifecycle(registry *workspacesurface.Registry, services *workspacesurface.ServiceManager) *SurfaceLifecycle {
@@ -28,7 +35,31 @@ func NewSurfaceLifecycle(registry *workspacesurface.Registry, services *workspac
 	if services == nil {
 		services = workspacesurface.NewServiceManager(nil)
 	}
-	return &SurfaceLifecycle{registry: registry, services: services}
+	return &SurfaceLifecycle{registry: registry, services: services, scopes: HostSymbolicScopeResolver{}}
+}
+
+func (l *SurfaceLifecycle) SetCapabilityRegistry(registry *workspacecapability.Registry) {
+	if l != nil {
+		l.capabilities = registry
+	}
+}
+
+func (l *SurfaceLifecycle) SetRuntimeRegistry(registry *runtimecapability.Registry) {
+	if l != nil {
+		l.runtimes = registry
+	}
+}
+
+func (l *SurfaceLifecycle) SetRuntimeContextResolver(resolver RuntimeContextResolver) {
+	if l != nil {
+		l.contexts = resolver
+	}
+}
+
+func (l *SurfaceLifecycle) SetSymbolicScopeResolver(resolver SymbolicScopeResolver) {
+	if l != nil && resolver != nil {
+		l.scopes = resolver
+	}
 }
 
 func (l *SurfaceLifecycle) SetStateStore(store *workspacesurface.StateStore) {
@@ -51,7 +82,52 @@ func (l *SurfaceLifecycle) RegisterInstalled(installed InstalledPlugin) error {
 	if err != nil {
 		return err
 	}
-	return l.registry.RegisterTrusted(registration)
+	capabilitiesRegistered := false
+	if installed.Enabled && l.capabilities != nil {
+		owner := workspace.CapabilityOwner{
+			Kind: workspace.CapabilityOwnerPlugin, PluginID: installed.Name, PluginVersion: installed.Version,
+		}
+		if err := l.capabilities.RegisterPluginDefinitions(owner, contributedCapabilityDefinitions(installed)); err != nil {
+			return err
+		}
+		capabilitiesRegistered = true
+	}
+	providers, err := l.runtimeProviders(installed)
+	if err != nil {
+		if capabilitiesRegistered {
+			l.capabilities.UnregisterPluginDefinitions(installed.Name)
+		}
+		return err
+	}
+	providersRegistered := false
+	if len(providers) > 0 && l.runtimes != nil {
+		if l.contexts == nil {
+			if capabilitiesRegistered {
+				l.capabilities.UnregisterPluginDefinitions(installed.Name)
+			}
+			return fmt.Errorf("plugin runtime provider context resolver is unavailable")
+		}
+		for _, provider := range providers {
+			if err := l.runtimes.Register(provider); err != nil {
+				l.runtimes.UnregisterPlugin(installed.Name)
+				if capabilitiesRegistered {
+					l.capabilities.UnregisterPluginDefinitions(installed.Name)
+				}
+				return err
+			}
+		}
+		providersRegistered = true
+	}
+	if err := l.registry.RegisterTrusted(registration); err != nil {
+		if providersRegistered {
+			l.runtimes.UnregisterPlugin(installed.Name)
+		}
+		if capabilitiesRegistered {
+			l.capabilities.UnregisterPluginDefinitions(installed.Name)
+		}
+		return err
+	}
+	return nil
 }
 
 // Unregister stops service calls/processes before removing trusted bindings.
@@ -66,7 +142,16 @@ func (l *SurfaceLifecycle) Unregister(pluginID string, generation uint64) error 
 	if err := l.services.StopPlugin(pluginID, generation); err != nil {
 		return err
 	}
-	return l.registry.UnregisterOwner(workspacesurface.OwnerPlugin, pluginID, generation)
+	if err := l.registry.UnregisterOwner(workspacesurface.OwnerPlugin, pluginID, generation); err != nil {
+		return err
+	}
+	if l.capabilities != nil {
+		l.capabilities.UnregisterPluginDefinitions(pluginID)
+	}
+	if l.runtimes != nil {
+		l.runtimes.UnregisterPlugin(pluginID)
+	}
+	return nil
 }
 
 // Replace performs stop/unregister/register in lifecycle order. If the new
@@ -114,6 +199,34 @@ func (l *SurfaceLifecycle) Restore(installed []InstalledPlugin) error {
 	return joined
 }
 
+func contributedCapabilityDefinitions(installed InstalledPlugin) []workspacecapability.Definition {
+	if installed.WorkspaceSurfaces == nil {
+		return nil
+	}
+	definitions := make([]workspacecapability.Definition, 0, len(installed.WorkspaceSurfaces.Capabilities))
+	for _, capability := range installed.WorkspaceSurfaces.Capabilities {
+		owner := workspace.CapabilityOwner{
+			Kind: workspace.CapabilityOwnerPlugin, PluginID: installed.Name, PluginVersion: installed.Version,
+		}
+		definition := workspacecapability.Definition{
+			ID: capability.ID, Version: capability.Version, Owner: &owner,
+			Display: workspacecapability.Display{
+				Name: capability.Display.Name, Summary: capability.Display.Description,
+			},
+			Requirements: workspacecapability.Requirements{MaxInstallsPerWorkspace: 1},
+			Station:      workspacecapability.StationDescriptor{Title: capability.Display.Name},
+		}
+		if capability.RuntimeProvider != nil {
+			definition.Setup = workspacecapability.SetupDescriptor{
+				AdapterID:               "plugin:" + workspace.NormalizeCapabilityID(installed.Name) + ":" + capability.RuntimeProvider.ID,
+				DirectoryRequirementKey: capability.RuntimeProvider.RequirementKey,
+			}
+		}
+		definitions = append(definitions, definition)
+	}
+	return definitions
+}
+
 func (l *SurfaceLifecycle) registration(installed InstalledPlugin) (workspacesurface.Registration, error) {
 	contribution := installed.WorkspaceSurfaces
 	owner := workspacesurface.Owner{
@@ -138,7 +251,11 @@ func (l *SurfaceLifecycle) registration(installed InstalledPlugin) (workspacesur
 	for _, capability := range contribution.Capabilities {
 		inert := workspacesurface.Capability{
 			ID: capability.ID, Version: capability.Version,
-			Display: workspacesurface.Display{Name: capability.Display.Name, Description: capability.Display.Description},
+			Display:           workspacesurface.Display{Name: capability.Display.Name, Description: capability.Display.Description},
+			AgentOperationIDs: append([]string(nil), capability.AgentOperations...),
+		}
+		if capability.RuntimeProvider != nil {
+			inert.RuntimeRequirementKey = capability.RuntimeProvider.RequirementKey
 		}
 		for _, surface := range capability.Surfaces {
 			inert.Surfaces = append(inert.Surfaces, workspacesurface.Surface{
@@ -151,7 +268,12 @@ func (l *SurfaceLifecycle) registration(installed InstalledPlugin) (workspacesur
 				StateEnabled: surface.HostIntents.State, ConfirmationEnabled: surface.HostIntents.Confirmation,
 				CloseEnabled:       surface.HostIntents.Close,
 				AskOriCapabilities: append([]string(nil), surface.HostIntents.AskOri.RequiredCapabilities...),
-				SetupProviderID:    surface.HostIntents.OpenSetup.ProviderID,
+				SetupProviderID: func() string {
+					if surface.HostIntents.OpenSetup.ProviderID == "" {
+						return ""
+					}
+					return "plugin:" + owner.ID + ":" + surface.HostIntents.OpenSetup.ProviderID
+				}(),
 			})
 			if unavailable != "" {
 				continue
@@ -173,12 +295,13 @@ func (l *SurfaceLifecycle) registration(installed InstalledPlugin) (workspacesur
 				Command: artifact.ManagedPath, Args: append([]string(nil), service.Entrypoint.Args...),
 				MaxConcurrency: 8, StartupTimeout: 10 * time.Second, ShutdownTimeout: 5 * time.Second,
 			}
-			operations := make(map[string]workspacesurface.Operation, len(surface.Operations))
+			operations := make(map[string]workspacesurface.Operation, len(surface.Operations)+len(capability.AgentOperations))
 			serviceOperations := make(map[string]ContributedOperation, len(service.Operations))
 			for _, operation := range service.Operations {
 				serviceOperations[operation.ID] = operation
 			}
-			for _, operationID := range surface.Operations {
+			declaredOperations := append(append([]string(nil), surface.Operations...), capability.AgentOperations...)
+			for _, operationID := range declaredOperations {
 				operation, exists := serviceOperations[operationID]
 				if !exists {
 					return workspacesurface.Registration{}, fmt.Errorf("surface %q operation %q is unavailable", surface.ID, operationID)

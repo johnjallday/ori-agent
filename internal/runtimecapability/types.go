@@ -50,6 +50,9 @@ const (
 // Safe generic reason codes used when the service, rather than an adapter,
 // classifies a failure.
 const (
+	ProviderUnavailableTitle   = "Capability provider unavailable"
+	ProviderUnavailableMessage = "This workspace's capability provider is not available. Install or enable a compatible plugin, then check setup again."
+
 	ReasonModeSelectionRequired  = "mode_selection_required"
 	ReasonAdapterUnavailable     = "adapter_unavailable"
 	ReasonCheckFailed            = "check_failed"

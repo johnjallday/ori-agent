@@ -280,6 +280,9 @@ func TestServiceUnknownAdapterAndAdapterErrorsFailClosedAndRedacted(t *testing.T
 	if status.FirstBlocker == nil || status.FirstBlocker.ReasonCode != ReasonAdapterUnavailable || status.DurableState == DurableConfigured {
 		t.Fatalf("unknown adapter did not fail closed: %+v", status)
 	}
+	if status.FirstBlocker.Summary != ProviderUnavailableMessage || status.FirstBlocker.Action == nil || status.FirstBlocker.Action.Code != "review_plugins" {
+		t.Fatalf("generic missing-provider projection = %+v", status.FirstBlocker)
+	}
 
 	secret := "/Users/alice/private/project.rpp localhost:8080 token=secret command=1234"
 	adapter := &recordingAdapter{id: "unknown_adapter", durableErr: errors.New(secret)}

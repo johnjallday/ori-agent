@@ -24,6 +24,12 @@ func TestWorkspaceSurfaceExampleValidatesAndInstallsArtifact(t *testing.T) {
 	if descriptor.Name != "workspace-surface-demo" || descriptor.WorkspaceSurfaces == nil {
 		t.Fatalf("descriptor = %+v", descriptor)
 	}
+	if err := prepareTrustedBlueprints(&descriptor); err != nil {
+		t.Fatalf("validate example blueprints: %v", err)
+	}
+	if len(descriptor.ResolvedBlueprints) != 1 {
+		t.Fatalf("resolved example blueprints = %+v", descriptor.ResolvedBlueprints)
+	}
 	artifacts, err := NewArtifactInstaller(t.TempDir()).Install(context.Background(), descriptor)
 	if err != nil {
 		t.Fatalf("install verified example artifact: %v", err)

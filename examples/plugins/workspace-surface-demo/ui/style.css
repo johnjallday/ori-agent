@@ -258,6 +258,11 @@ button:focus-visible {
   color: var(--warning);
 }
 
+.button-stack {
+  display: grid;
+  gap: 0.5rem;
+}
+
 .quiet,
 .close-intent {
   border-radius: 8px;

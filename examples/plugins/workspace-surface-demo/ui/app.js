@@ -105,6 +105,17 @@ document.querySelector('[data-confirmation]')?.addEventListener('click', async (
   }
 });
 
+document.querySelector('[data-degrade]')?.addEventListener('click', async () => {
+  setText(confirmationResult, 'Waiting for Ori approval…');
+  try {
+    await sdk.invoke('setting.validate', { enabled: false });
+    await sdk.statusChanged();
+    setText(confirmationResult, 'Degraded intentionally. Open Setup to repair it.');
+  } catch (error) {
+    setText(confirmationResult, `${error.code || 'cancelled'} · ${error.message}`);
+  }
+});
+
 document.querySelector('[data-undeclared]')?.addEventListener('click', async () => {
   setText(rejection, 'Invoking service.admin…');
   try {

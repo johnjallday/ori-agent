@@ -24,7 +24,13 @@ var (
 	evening    = time.Date(2026, 7, 29, 22, 0, 0, 0, newYork).UTC()
 )
 
-func defaults() config.OvernightConfig { return config.Default().Overnight }
+func defaults() config.OvernightConfig {
+	defaults := config.Default().Overnight
+	// Fixed clocks above are New York instants; pin the config too so this suite
+	// does not inherit the developer/CI machine's local timezone.
+	defaults.Timezone = "America/New_York"
+	return defaults
+}
 
 // snapshotWith builds a snapshot carrying the given agents and their features.
 func snapshotWith(agents ...overview.Agent) overview.Snapshot {
