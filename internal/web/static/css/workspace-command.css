@@ -6318,6 +6318,144 @@ button.ws-cmd-rpg-class-card:focus-visible {
   }
 }
 
+/* ------------------------------------------------ Workspace Surface host
+   A neutral, gallery-like aperture around plugin-owned UI. The host shell owns
+   title, close, focus, sizing, and backdrop; all domain styling stays inside
+   the opaque frame so it cannot leak into Ori. */
+.workspace-surface-modal {
+  position: fixed;
+  inset: 0;
+  z-index: var(--app-modal-layer, 20200);
+  display: grid;
+  place-items: center;
+  padding: clamp(0.75rem, 3vw, 2.5rem);
+}
+
+.workspace-surface-backdrop {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background:
+    radial-gradient(circle at 50% 28%, rgba(73, 96, 126, 0.2), transparent 42%),
+    rgba(5, 7, 10, 0.82);
+  backdrop-filter: blur(14px) saturate(0.75);
+  cursor: default;
+}
+
+.workspace-surface-panel {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  width: min(var(--workspace-surface-width, 720px), calc(100vw - 1.5rem));
+  height: min(var(--workspace-surface-height, 560px), calc(100vh - 1.5rem));
+  min-height: min(340px, calc(100vh - 1.5rem));
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--border-color, #4b5563) 76%, #9fb8d4);
+  border-radius: 18px;
+  background: var(--bg-primary, #111419);
+  box-shadow:
+    0 34px 90px rgba(0, 0, 0, 0.52),
+    0 0 0 1px rgba(255, 255, 255, 0.035) inset;
+}
+
+.workspace-surface-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  min-height: 68px;
+  padding: 0.8rem 0.85rem 0.8rem 1.1rem;
+  border-bottom: 1px solid var(--border-color, #303640);
+  background:
+    linear-gradient(90deg, rgba(90, 119, 151, 0.12), transparent 42%), var(--bg-secondary, #181c22);
+}
+
+.workspace-surface-identity {
+  min-width: 0;
+}
+
+.workspace-surface-eyebrow {
+  display: block;
+  margin-bottom: 0.15rem;
+  color: var(--text-muted, #8793a1);
+  font-size: 0.67rem;
+  font-weight: 700;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+.workspace-surface-title {
+  overflow: hidden;
+  margin: 0;
+  color: var(--text-primary, #f4f6f8);
+  font-family: var(--ws-font-display, Georgia, serif);
+  font-size: clamp(1.05rem, 2vw, 1.35rem);
+  font-weight: 650;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-surface-close {
+  flex: 0 0 auto;
+  min-width: 74px;
+  min-height: 40px;
+  border: 1px solid var(--border-color, #3a424e);
+  border-radius: 999px;
+  background: var(--bg-primary, #111419);
+  color: var(--text-secondary, #c7ced7);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.workspace-surface-close:hover {
+  border-color: color-mix(in srgb, var(--primary-color, #5f8fc2) 65%, #fff);
+  color: var(--text-primary, #fff);
+}
+
+.workspace-surface-close:focus-visible {
+  outline: 2px solid var(--primary-color, #6d9dcb);
+  outline-offset: 3px;
+}
+
+.workspace-surface-frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #0d1014;
+}
+
+@media (max-width: 640px) {
+  .workspace-surface-modal {
+    padding: 0;
+  }
+
+  .workspace-surface-panel {
+    width: 100vw;
+    height: 100dvh;
+    max-width: none;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .workspace-surface-header {
+    min-height: 62px;
+    padding-inline: 0.9rem 0.7rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workspace-surface-panel,
+  .workspace-surface-backdrop {
+    scroll-behavior: auto;
+  }
+}
+
 /* -------------------------------------------------------- REAPER console
    An industrial, meter-bridge surface: compact numeric readouts and channel
    rows rather than another generic settings card. It opens over the Map and

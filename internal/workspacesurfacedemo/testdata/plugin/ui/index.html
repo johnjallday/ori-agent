@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Workspace Surface Protocol Observatory</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <main class="observatory" aria-labelledby="demo-title">
+      <header class="hero">
+        <div>
+          <p class="kicker">Workspace Surface v1 · isolated frame</p>
+          <h1 id="demo-title">Protocol Observatory</h1>
+          <p class="lede">
+            A non-REAPER reference surface proving that a plugin can earn a Map station, call one declared operation,
+            and remain outside Ori’s DOM and credentials.
+          </p>
+        </div>
+        <div class="live-token" data-live-token aria-live="polite">
+          <span aria-hidden="true"></span>
+          Handshaking
+        </div>
+      </header>
+
+      <section class="telemetry" aria-label="Surface telemetry">
+        <article>
+          <span>Bridge</span>
+          <strong data-bridge-state>Waiting</strong>
+        </article>
+        <article>
+          <span>Cadence</span>
+          <strong data-cadence>Paused</strong>
+        </article>
+        <article>
+          <span>Checks</span>
+          <strong data-check-count>0</strong>
+        </article>
+      </section>
+
+      <section class="console" aria-labelledby="operation-title">
+        <div class="section-copy">
+          <p class="ordinal">01 / declared operation</p>
+          <h2 id="operation-title">Send a bounded greeting</h2>
+          <p>Only <code>greeting.create</code> is forwarded. Ori injects workspace context after authorization.</p>
+        </div>
+        <div class="operation-form" data-greeting-form>
+          <label for="demo-name">Name</label>
+          <div class="input-row">
+            <input id="demo-name" name="name" maxlength="80" value="Ori" required />
+            <button type="button" data-invoke-greeting>Invoke broker</button>
+          </div>
+        </div>
+        <output class="result" data-result aria-live="polite">No operation sent yet.</output>
+      </section>
+
+      <section class="negative" aria-labelledby="negative-title">
+        <div>
+          <p class="ordinal">02 / fail closed</p>
+          <h2 id="negative-title">Try an undeclared operation</h2>
+          <p>The host should reject it before the fake service records a call.</p>
+        </div>
+        <button type="button" class="quiet" data-undeclared>Test rejection</button>
+        <output data-rejection aria-live="polite">Not tested.</output>
+      </section>
+
+      <footer>
+        <span>No cookies · no parent DOM · no direct fetch</span>
+        <button type="button" class="close-intent" data-close>Ask host to close</button>
+      </footer>
+    </main>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

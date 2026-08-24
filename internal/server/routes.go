@@ -45,6 +45,7 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	registerWorkspaceMemoryRoutes(mux, s)
 	registerDownloadsJanitorRoutes(mux, s)
 	registerWorkspaceCapabilityRoutes(mux, s)
+	registerWorkspaceSurfaceRoutes(mux, s)
 	registerWorkspaceMapRoutes(mux, s)
 	registerRuntimeCapabilityRoutes(mux, s)
 	registerReaperRoutes(mux, s)
@@ -1057,6 +1058,15 @@ func registerWorkspaceCapabilityRoutes(mux *http.ServeMux, s *Server) {
 //
 // A nil handler (the map failed to wire) registers nothing, so the Map falls
 // back to read-only deterministic placement rather than taking the API down.
+// registerWorkspaceSurfaceRoutes registers one generic route set. Contributions
+// are data in the shared registry and never add their own ServeMux patterns.
+func registerWorkspaceSurfaceRoutes(mux *http.ServeMux, s *Server) {
+	if s.Handlers.WorkspaceSurfaces == nil {
+		return
+	}
+	s.Handlers.WorkspaceSurfaces.Register(mux)
+}
+
 func registerWorkspaceMapRoutes(mux *http.ServeMux, s *Server) {
 	// =============================================================================
 	// Workspace Map Layout Endpoints (current user)

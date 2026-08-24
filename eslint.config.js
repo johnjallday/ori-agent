@@ -176,6 +176,10 @@ export default defineConfig([
       'internal/web/static/js/modules/workspace-execution-controller.js',
       'internal/web/static/js/modules/workspace-followups.js',
       'internal/web/static/js/modules/workspace-overlay-coordinator.js',
+      'internal/web/static/js/modules/workspace-surface-bridge.js',
+      'internal/web/static/js/modules/workspace-surface-host.js',
+      'internal/web/static/js/plugin/workspace-surface-sdk.js',
+      'internal/workspacesurfacedemo/testdata/plugin/ui/*.js',
       'internal/web/static/js/modules/workspace-routes.js',
       'internal/web/static/js/modules/workspace-url-state.js',
       'internal/web/static/js/modules/workspace-bulk-actions.js',
@@ -184,7 +188,7 @@ export default defineConfig([
       'internal/web/static/js/modules/workspace-plan-editor.js',
       'internal/web/static/js/modules/workspace-planning-policy.js',
       'internal/web/static/js/modules/workspace-plan-blockers.js',
-      'internal/web/static/js/modules/workspace-related-plan.js',
+      'internal/web/static/js/modules/workspace-related-plan.js'
     ],
     languageOptions: {
       sourceType: 'module'
@@ -206,9 +210,22 @@ export default defineConfig([
     }
   },
   { files: ['**/*.json'], plugins: { json }, language: 'json/json', extends: ['json/recommended'] },
-  { files: ['**/*.md'], plugins: { markdown }, language: 'markdown/gfm', extends: ['markdown/recommended'] },
+  {
+    files: ['**/*.md'],
+    plugins: { markdown },
+    language: 'markdown/gfm',
+    extends: ['markdown/recommended']
+  },
   { files: ['**/*.css'], plugins: { css }, language: 'css/css', extends: ['css/recommended'] },
   {
-    ignores: ['node_modules/', 'vendor/', '*.min.js', '**/*.min.js', 'internal/web/static/js/vendor/**', 'dist/', 'example_plugins/']
+    ignores: [
+      'node_modules/',
+      'vendor/',
+      '*.min.js',
+      '**/*.min.js',
+      'internal/web/static/js/vendor/**',
+      'dist/',
+      'example_plugins/'
+    ]
   }
 ]);

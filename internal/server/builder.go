@@ -87,6 +87,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/workspaceplan"
 	"github.com/johnjallday/ori-agent/internal/workspacepolicy"
 	"github.com/johnjallday/ori-agent/internal/workspacerun"
+	"github.com/johnjallday/ori-agent/internal/workspacesurface"
+	"github.com/johnjallday/ori-agent/internal/workspacesurfacehttp"
 )
 
 // ServerBuilder builds a Server instance through a series of initialization phases.
@@ -363,6 +365,11 @@ type ServerBuilder struct {
 	workspaceCapabilityService  *workspacecapability.Service
 	workspaceCapabilityHandler  *workspacecapabilityhttp.Handler
 
+	// Generic plugin-contributed Workspace Surfaces. The registry owns inert
+	// descriptors and trusted bindings; one handler serves every plugin.
+	workspaceSurfaceRegistry *workspacesurface.Registry
+	workspaceSurfaceHandler  *workspacesurfacehttp.Handler
+
 	// Coordinate-based Workspace Map: the current user's layout storage, the
 	// ownership/lifecycle service over it, and its HTTP handler. Kept entirely
 	// separate from the per-workspace CanvasLayout served by
@@ -565,6 +572,7 @@ func (b *ServerBuilder) createDomainFacades() {
 		OriGuide:              b.oriGuideHandler,
 		DownloadsJanitor:      b.downloadsJanitorHandler,
 		WorkspaceCapabilities: b.workspaceCapabilityHandler,
+		WorkspaceSurfaces:     b.workspaceSurfaceHandler,
 		WorkspaceMap:          b.workspaceMapHandler,
 		SetupWizard:           b.setupWizardHandler,
 		RuntimeCapabilities:   b.runtimeCapabilityHandler,

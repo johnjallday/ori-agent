@@ -61,6 +61,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/workspacemaphttp"
 	"github.com/johnjallday/ori-agent/internal/workspaceplan"
 	"github.com/johnjallday/ori-agent/internal/workspacerun"
+	"github.com/johnjallday/ori-agent/internal/workspacesurfacehttp"
 )
 
 // CoreSystemFacade manages core system dependencies (LLM, client factory, config)
@@ -168,6 +169,9 @@ type HandlerFacade struct {
 	// and install lifecycle. One set of routes serves every capability; there
 	// is no per-capability lifecycle API.
 	WorkspaceCapabilities *workspacecapabilityhttp.Handler
+	// WorkspaceSurfaces serves one generic catalog/frame/broker boundary for
+	// every plugin-contributed surface.
+	WorkspaceSurfaces *workspacesurfacehttp.Handler
 	// WorkspaceMap serves the current user's coordinate-based Workspace Map
 	// layout. It is deliberately not part of the workspace API surface: the
 	// layout belongs to a user, not to a workspace, and must never be confused

@@ -402,6 +402,7 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 	b.wireReaperControl()
 	b.wireCalendarOpsSetup()
 	b.wireDownloadsJanitor()
+	b.wireWorkspaceSurfaces()
 	// After the domain services above: the capability registry binds their
 	// runtimes, and the wizard registers their adapters.
 	b.wireWorkspaceCapabilities()

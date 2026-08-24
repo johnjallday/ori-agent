@@ -1,0 +1,86 @@
+{
+  "messages": [
+    {
+      "from": "host",
+      "message": {
+        "protocol_version": 1,
+        "request_id": "init-1",
+        "type": "service.initialize",
+        "payload": {
+          "plugin_id": "workspace-surface-demo",
+          "plugin_version": "0.1.0",
+          "service_id": "demo-service"
+        }
+      }
+    },
+    {
+      "from": "service",
+      "message": {
+        "protocol_version": 1,
+        "request_id": "init-1",
+        "type": "service.initialize.result",
+        "payload": {
+          "plugin_id": "workspace-surface-demo",
+          "plugin_version": "0.1.0",
+          "service_id": "demo-service",
+          "operations": [
+            "status.read",
+            "greeting.create",
+            "setting.validate",
+            "runtime.prerequisites",
+            "runtime.readiness",
+            "runtime.live_status",
+            "runtime.verify",
+            "runtime.repair"
+          ]
+        }
+      }
+    },
+    {
+      "from": "host",
+      "message": {
+        "protocol_version": 1,
+        "request_id": "call-1",
+        "type": "service.operation.call",
+        "payload": {
+          "operation_id": "greeting.create",
+          "context": {
+            "workspace_id": "workspace-demo-1",
+            "workspace_root": "/host-only/workspaces/workspace-demo-1",
+            "project_entry": "",
+            "plugin_data_root": "/host-only/plugins/state/demo",
+            "scopes": []
+          },
+          "input": {
+            "name": "Ori"
+          }
+        }
+      }
+    },
+    {
+      "from": "service",
+      "message": {
+        "protocol_version": 1,
+        "request_id": "call-1",
+        "type": "service.operation.result",
+        "payload": {
+          "output": {
+            "message": "Hello, Ori."
+          }
+        }
+      }
+    },
+    {
+      "from": "service",
+      "message": {
+        "protocol_version": 1,
+        "request_id": "call-2",
+        "type": "service.operation.error",
+        "payload": {
+          "code": "domain_unavailable",
+          "user_message": "The demo is unavailable."
+        }
+      }
+    }
+  ]
+}

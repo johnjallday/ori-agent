@@ -1,0 +1,46 @@
+{
+  "installed_capabilities": [
+    {
+      "id": "demo-tools",
+      "version": 1,
+      "installed_at": "2026-08-24T12:00:00Z",
+      "source": "plugin-blueprint",
+      "owner": {
+        "kind": "plugin",
+        "plugin_id": "workspace-surface-demo",
+        "plugin_version": "0.1.0"
+      }
+    }
+  ],
+  "template_provenance": {
+    "template_id": "demo-workspace",
+    "template_name": "Surface Demo Workspace",
+    "version": 1,
+    "applied_at": "2026-08-24T12:00:00Z",
+    "plugin_owner": {
+      "plugin_id": "workspace-surface-demo",
+      "plugin_version": "0.1.0"
+    },
+    "runtime_requirements": {
+      "schema_version": 1,
+      "operating_modes": [
+        {
+          "id": "standard",
+          "label": "Standard",
+          "description": "Use the plugin-backed demo runtime.",
+          "requires": [
+            "demo_runtime"
+          ]
+        }
+      ],
+      "requirements": [
+        {
+          "key": "demo_runtime",
+          "label": "Demo runtime",
+          "description": "Use the installed demo provider.",
+          "adapter": "plugin:workspace-surface-demo:demo-runtime"
+        }
+      ]
+    }
+  }
+}

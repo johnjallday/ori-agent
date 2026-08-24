@@ -1,0 +1,504 @@
+{
+  "schema_version": 1,
+  "vectors": [
+    {
+      "name": "ori name differs from base identity",
+      "kind": "identity",
+      "input": {
+        "claude": {
+          "name": "workspace-surface-demo",
+          "version": "0.1.0"
+        },
+        "ori": {
+          "name": "other-demo",
+          "version": "0.1.0"
+        }
+      },
+      "want_code": "plugin_identity_mismatch"
+    },
+    {
+      "name": "codex version differs from claude and ori",
+      "kind": "identity",
+      "input": {
+        "claude": {
+          "name": "workspace-surface-demo",
+          "version": "0.1.0"
+        },
+        "codex": {
+          "name": "workspace-surface-demo",
+          "version": "0.2.0"
+        },
+        "ori": {
+          "name": "workspace-surface-demo",
+          "version": "0.1.0"
+        }
+      },
+      "want_code": "plugin_identity_mismatch"
+    },
+    {
+      "name": "ori contribution has no portable base manifest",
+      "kind": "identity",
+      "input": {
+        "ori": {
+          "name": "workspace-surface-demo",
+          "version": "0.1.0"
+        }
+      },
+      "want_code": "plugin_base_manifest_required"
+    },
+    {
+      "name": "surface protocol excludes host v1",
+      "kind": "compatibility",
+      "input": {
+        "host_protocol": 1,
+        "plugin_protocol": {
+          "min": 2,
+          "max": 3
+        }
+      },
+      "want_code": "protocol_incompatible",
+      "want_service_calls": 0
+    },
+    {
+      "name": "protocol maximum precedes minimum",
+      "kind": "manifest",
+      "input": {
+        "protocol": {
+          "min": 2,
+          "max": 1
+        }
+      },
+      "want_code": "protocol_range_invalid"
+    },
+    {
+      "name": "no exact current platform artifact",
+      "kind": "compatibility",
+      "input": {
+        "current": {
+          "os": "linux",
+          "arch": "arm64"
+        },
+        "artifacts": [
+          {
+            "os": "darwin",
+            "arch": "arm64"
+          }
+        ]
+      },
+      "want_code": "platform_unsupported",
+      "want_service_calls": 0
+    },
+    {
+      "name": "duplicate artifact platform",
+      "kind": "manifest",
+      "input": {
+        "artifacts": [
+          {
+            "id": "one",
+            "os": "darwin",
+            "arch": "arm64"
+          },
+          {
+            "id": "two",
+            "os": "darwin",
+            "arch": "arm64"
+          }
+        ]
+      },
+      "want_code": "artifact_platform_duplicate"
+    },
+    {
+      "name": "artifact digest is not sha256 hex",
+      "kind": "manifest",
+      "input": {
+        "sha256": "not-a-digest"
+      },
+      "want_code": "artifact_digest_invalid"
+    },
+    {
+      "name": "artifact uses insecure remote source",
+      "kind": "manifest",
+      "input": {
+        "source": {
+          "kind": "https",
+          "url": "http://example.test/demo"
+        }
+      },
+      "want_code": "artifact_source_invalid"
+    },
+    {
+      "name": "bundled artifact path is absolute",
+      "kind": "manifest",
+      "input": {
+        "source": {
+          "kind": "bundled",
+          "path": "/tmp/demo-service"
+        }
+      },
+      "want_code": "asset_path_invalid"
+    },
+    {
+      "name": "duplicate capability id",
+      "kind": "manifest",
+      "input": {
+        "capabilities": [
+          {
+            "id": "demo-tools"
+          },
+          {
+            "id": "demo-tools"
+          }
+        ]
+      },
+      "want_code": "component_id_duplicate"
+    },
+    {
+      "name": "duplicate surface id in one capability",
+      "kind": "manifest",
+      "input": {
+        "surfaces": [
+          {
+            "id": "main"
+          },
+          {
+            "id": "main"
+          }
+        ]
+      },
+      "want_code": "component_id_duplicate"
+    },
+    {
+      "name": "surface references missing service",
+      "kind": "manifest",
+      "input": {
+        "capability": {
+          "id": "demo-tools",
+          "service_id": "missing-service"
+        },
+        "services": []
+      },
+      "want_code": "component_reference_unknown"
+    },
+    {
+      "name": "surface references undeclared operation",
+      "kind": "manifest",
+      "input": {
+        "surface_operations": [
+          "missing.operation"
+        ],
+        "service_operations": [
+          "status.read"
+        ]
+      },
+      "want_code": "component_reference_unknown"
+    },
+    {
+      "name": "entry asset traverses plugin root",
+      "kind": "manifest",
+      "input": {
+        "entry_asset": "ui/../../secrets.html"
+      },
+      "want_code": "asset_path_invalid"
+    },
+    {
+      "name": "entry asset uses encoded separator",
+      "kind": "manifest",
+      "input": {
+        "entry_asset": "ui%2findex.html"
+      },
+      "want_code": "asset_path_invalid"
+    },
+    {
+      "name": "entry asset resolves through symlink escape",
+      "kind": "asset_lookup",
+      "input": {
+        "trusted_root": "/managed/plugin/ui",
+        "request_path": "linked-outside/index.html",
+        "symlink_target": "/private/outside"
+      },
+      "want_code": "asset_path_invalid"
+    },
+    {
+      "name": "unsupported surface placement",
+      "kind": "manifest",
+      "input": {
+        "placement": "dashboard_card"
+      },
+      "want_code": "surface_placement_unsupported"
+    },
+    {
+      "name": "unknown station state from service",
+      "kind": "service_output",
+      "input": {
+        "state": "playing",
+        "value": "Playing",
+        "description": "Demo",
+        "checked_at": "2026-08-24T12:00:00Z"
+      },
+      "want_code": "output_invalid"
+    },
+    {
+      "name": "operation object schema is open",
+      "kind": "operation_schema",
+      "input": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": true
+      },
+      "want_code": "operation_schema_invalid"
+    },
+    {
+      "name": "operation schema uses recursive reference",
+      "kind": "operation_schema",
+      "input": {
+        "type": "object",
+        "properties": {
+          "child": {
+            "$ref": "#"
+          }
+        },
+        "additionalProperties": false
+      },
+      "want_code": "operation_schema_invalid"
+    },
+    {
+      "name": "array schema has no bounded maximum",
+      "kind": "operation_schema",
+      "input": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "maxLength": 10
+        }
+      },
+      "want_code": "operation_schema_invalid"
+    },
+    {
+      "name": "operation requests raw writable path",
+      "kind": "manifest",
+      "input": {
+        "scopes": [
+          "/Users/example/Music"
+        ]
+      },
+      "want_code": "scope_unknown"
+    },
+    {
+      "name": "operation output limit exceeds host maximum",
+      "kind": "manifest",
+      "input": {
+        "max_output_bytes": 262145
+      },
+      "want_code": "operation_limit_invalid"
+    },
+    {
+      "name": "operation policy is unknown",
+      "kind": "manifest",
+      "input": {
+        "policy": "auto_approve"
+      },
+      "want_code": "operation_policy_invalid"
+    },
+    {
+      "name": "browser invokes operation not declared on surface",
+      "kind": "broker",
+      "input": {
+        "surface_operations": [
+          "status.read"
+        ],
+        "requested_operation": "service.admin"
+      },
+      "want_code": "operation_unknown",
+      "want_service_calls": 0
+    },
+    {
+      "name": "browser input includes authoritative workspace override",
+      "kind": "broker",
+      "input": {
+        "operation_id": "greeting.create",
+        "input": {
+          "name": "Ori",
+          "workspace_id": "other-workspace"
+        }
+      },
+      "want_code": "input_invalid",
+      "want_service_calls": 0
+    },
+    {
+      "name": "browser supplies confirmed flag",
+      "kind": "broker",
+      "input": {
+        "operation_id": "setting.validate",
+        "input": {
+          "enabled": true,
+          "confirmed": true
+        }
+      },
+      "want_code": "input_invalid",
+      "want_service_calls": 0
+    },
+    {
+      "name": "cross-workspace session use",
+      "kind": "broker",
+      "input": {
+        "session_workspace": "workspace-a",
+        "request_workspace": "workspace-b"
+      },
+      "want_code": "session_invalidated",
+      "want_service_calls": 0
+    },
+    {
+      "name": "expired surface session",
+      "kind": "broker",
+      "input": {
+        "expires_at": "2026-08-24T12:00:00Z",
+        "now": "2026-08-24T12:00:01Z"
+      },
+      "want_code": "session_expired",
+      "want_service_calls": 0
+    },
+    {
+      "name": "session plugin generation is stale",
+      "kind": "broker",
+      "input": {
+        "session_generation": "7",
+        "installed_generation": "8"
+      },
+      "want_code": "session_invalidated",
+      "want_service_calls": 0
+    },
+    {
+      "name": "bridge source window differs",
+      "kind": "bridge",
+      "input": {
+        "expected_source": "frame-window-1",
+        "actual_source": "frame-window-2"
+      },
+      "want_code": "frame_source_mismatch",
+      "want_service_calls": 0
+    },
+    {
+      "name": "bridge challenge differs",
+      "kind": "bridge",
+      "input": {
+        "expected_challenge": "expected",
+        "actual_challenge": "other"
+      },
+      "want_code": "frame_source_mismatch",
+      "want_service_calls": 0
+    },
+    {
+      "name": "bridge message type is unknown",
+      "kind": "bridge",
+      "input": {
+        "protocol_version": 1,
+        "bridge_id": "bridge-demo-1",
+        "type": "ori.surface.parent_dom.read",
+        "request_id": "bad-1",
+        "payload": {}
+      },
+      "want_code": "protocol_message_invalid",
+      "want_service_calls": 0
+    },
+    {
+      "name": "bridge message exceeds byte limit",
+      "kind": "bridge",
+      "input": {
+        "encoded_bytes": 65537
+      },
+      "want_code": "input_too_large",
+      "want_service_calls": 0
+    },
+    {
+      "name": "bridge payload exceeds nesting limit",
+      "kind": "bridge",
+      "input": {
+        "nesting_depth": 17
+      },
+      "want_code": "input_invalid",
+      "want_service_calls": 0
+    },
+    {
+      "name": "confirmation token replay",
+      "kind": "confirmation",
+      "input": {
+        "used": true
+      },
+      "want_code": "confirmation_invalid",
+      "want_service_calls": 0
+    },
+    {
+      "name": "confirmation payload changed",
+      "kind": "confirmation",
+      "input": {
+        "token_payload_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "request_payload_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "want_code": "confirmation_invalid",
+      "want_service_calls": 0
+    },
+    {
+      "name": "workspace projection contains executable command",
+      "kind": "workspace_projection",
+      "input": {
+        "id": "demo-tools",
+        "version": 1,
+        "command": "/tmp/plugin-service"
+      },
+      "want_code": "workspace_projection_executable_field"
+    },
+    {
+      "name": "workspace projection contains asset path",
+      "kind": "workspace_projection",
+      "input": {
+        "id": "demo-tools",
+        "version": 1,
+        "entry_asset": "ui/index.html"
+      },
+      "want_code": "workspace_projection_executable_field"
+    },
+    {
+      "name": "service error contains path and port",
+      "kind": "redaction",
+      "input": {
+        "code": "domain_unavailable",
+        "user_message": "failed at /Users/example/.ori/plugin on localhost:2307"
+      },
+      "want_code": "service_unavailable",
+      "want_forbidden_substrings": [
+        "/Users/example",
+        "localhost",
+        "2307"
+      ]
+    },
+    {
+      "name": "service handshake identity differs",
+      "kind": "service_handshake",
+      "input": {
+        "expected": {
+          "plugin_id": "workspace-surface-demo",
+          "plugin_version": "0.1.0",
+          "service_id": "demo-service",
+          "protocol_version": 1
+        },
+        "actual": {
+          "plugin_id": "other-plugin",
+          "plugin_version": "0.1.0",
+          "service_id": "demo-service",
+          "protocol_version": 1
+        }
+      },
+      "want_code": "service_start_failed",
+      "want_service_calls": 0
+    },
+    {
+      "name": "service output exceeds declared limit",
+      "kind": "service_output",
+      "input": {
+        "declared_max_output_bytes": 4096,
+        "encoded_output_bytes": 4097
+      },
+      "want_code": "output_too_large"
+    }
+  ]
+}

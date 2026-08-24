@@ -269,6 +269,7 @@ export class WorkspaceCommandView {
       window.addEventListener('popstate', this.boundPopState);
     }
     this.ensureCapabilityStations();
+    this.ensureSurfaceStations();
     this.ensureReaperStation();
     this.applyBootURLState();
   }
@@ -292,6 +293,33 @@ export class WorkspaceCommandView {
     if (this.capabilityCatalogRequested) return;
     this.capabilityCatalogRequested = true;
     void Promise.resolve(catalog.load()).then(() => {
+      if (this.active) this.render();
+    });
+  }
+
+  // Plugin-contributed stations arrive through one generic authenticated
+  // catalog. The command view knows no plugin/capability names: it asks the
+  // surface host for sanitized station descriptors and re-renders when their
+  // catalog changes.
+  ensureSurfaceStations() {
+    const host = typeof window === 'undefined' ? null : window.WorkspaceSurfaceHost;
+    if (!host || typeof host.loadCatalog !== 'function') return;
+
+    if (!this.boundWorkspaceSurfacesChanged) {
+      this.boundWorkspaceSurfacesChanged = () => {
+        if (this.active) this.render();
+      };
+      if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+        document.addEventListener(
+          'ori:workspace-surfaces-changed',
+          this.boundWorkspaceSurfacesChanged
+        );
+      }
+    }
+
+    if (this.workspaceSurfaceCatalogRequested) return;
+    this.workspaceSurfaceCatalogRequested = true;
+    void Promise.resolve(host.loadCatalog()).then(() => {
       if (this.active) this.render();
     });
   }
@@ -6138,6 +6166,12 @@ export class WorkspaceCommandView {
           }
         }
       });
+    }
+
+    const surfaceHost = typeof window === 'undefined' ? null : window.WorkspaceSurfaceHost;
+    if (surfaceHost && typeof surfaceHost.stations === 'function') {
+      const contributed = surfaceHost.stations();
+      if (Array.isArray(contributed)) stations.push(...contributed);
     }
 
     return stations;

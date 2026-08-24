@@ -4257,3 +4257,35 @@ test('pressing the REAPER station opens its console over the map', () => {
     globalThis.window = originalWindow;
   }
 });
+
+test('plugin stations are consumed from the generic surface host without name conditionals', () => {
+  const originalWindow = globalThis.window;
+  try {
+    const opens = [];
+    globalThis.window = {
+      WorkspaceSurfaceHost: {
+        stations: () => [
+          {
+            key: 'plugin:weather-tools:forecast:main',
+            label: 'Forecast',
+            icon: 'bi-cloud-sun',
+            state: () => ({ applies: true, value: 'Clear', description: 'Clear skies' }),
+            action: trigger => opens.push(trigger)
+          }
+        ]
+      }
+    };
+    const commandView = Object.create(WorkspaceCommandView.prototype);
+    Object.assign(commandView, { page: { workspace: { id: 'ws-plugin' }, tasks: [] } });
+    const station = commandView
+      .workspaceStationRegistry()
+      .find(item => item.key === 'plugin:weather-tools:forecast:main');
+    assert.ok(station);
+    assert.equal(station.label, 'Forecast');
+    const trigger = { id: 'forecast-station' };
+    commandView.runHQStationAction(station.key, trigger);
+    assert.deepEqual(opens, [trigger]);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});

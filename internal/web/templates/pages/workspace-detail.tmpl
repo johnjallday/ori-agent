@@ -9105,6 +9105,7 @@
   <script type="module">
     import { WorkspaceDetailPage } from '/js/modules/workspace-detail.js';
     import { WorkspaceCommandView } from '/js/modules/workspace-command.js';
+    import { WorkspaceSurfaceHost } from '/js/modules/workspace-surface-host.js';
 
     function initializeWorkspaceDetailPage() {
       themeManager.initialize();
@@ -9121,6 +9122,10 @@
         const detailPage = new WorkspaceDetailPage(workspaceId, workspaceSlug);
         window.workspaceDetail = detailPage;
         detailPage.init();
+
+        // One generic host owns every plugin-contributed station/frame. Plugin
+        // JavaScript remains in an opaque sandbox and never enters this page.
+        window.WorkspaceSurfaceHost = new WorkspaceSurfaceHost({ workspaceId });
 
         // Opt-in Command view (inert until Phase 1).
         window.workspaceCommand = new WorkspaceCommandView(detailPage);
