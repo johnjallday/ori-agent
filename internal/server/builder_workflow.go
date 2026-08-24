@@ -21,7 +21,6 @@ import (
 	"github.com/johnjallday/ori-agent/internal/orchestration"
 	"github.com/johnjallday/ori-agent/internal/orchestration/templates"
 	"github.com/johnjallday/ori-agent/internal/orchestrationhttp"
-	"github.com/johnjallday/ori-agent/internal/reapersetup"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/toolapi"
 	"github.com/johnjallday/ori-agent/internal/trigger"
@@ -88,20 +87,12 @@ func (b *ServerBuilder) buildWorkspaceToolFactory() workspace.WorkspaceToolFacto
 // different builder phases, so resolving dependencies only at tool-call time
 // avoids a partially initialized HQ overview.
 func (b *ServerBuilder) buildRuntimeTaskToolFactory() workspace.RuntimeTaskToolFactory {
-	reaper := b.reaperHandler
 	surfaces := b.workspaceSurfaceHandler
-	if reaper == nil && surfaces == nil {
+	if surfaces == nil {
 		return nil
 	}
 	return func(task workspace.Task, _ string, agentInstanceID string) []toolapi.Tool {
-		var tools []toolapi.Tool
-		if reaper != nil && task.RequiresCapability(reapersetup.ReaperLiveControlCapability) {
-			tools = append(tools, reaper.AgentTools(task.WorkspaceID, agentInstanceID)...)
-		}
-		if surfaces != nil {
-			tools = append(tools, surfaces.AgentTools(context.Background(), task.WorkspaceID, agentInstanceID)...)
-		}
-		return tools
+		return surfaces.AgentTools(context.Background(), task.WorkspaceID, agentInstanceID)
 	}
 }
 
@@ -400,11 +391,6 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 		b.sessionHandler.SetPlanningPolicyResolver(b.workspacePlanPolicy)
 	}
 
-	// Now that the workspace store (SyncStore) exists, wire REAPER readiness /
-	// preview / repair. Done here rather than in initializeHandlers because the
-	// store is created in this phase (Phase 18), after the handlers.
-	b.wireReaperSetup()
-	b.wireReaperControl()
 	b.wireCalendarOpsSetup()
 	b.wireDownloadsJanitor()
 	// Build the compiled capability registry before restoring plugin surfaces:
@@ -483,7 +469,6 @@ func (b *ServerBuilder) initializeTaskExecution() {
 		runtimeResolver.SetSkillResolver(newSkillResolverAdapter(b.skillsManager))
 	}
 	b.runtimeResolver = runtimeResolver
-	b.wireRuntimeGrantFoundation()
 
 	// Make every existing agent's implicit capability set explicit before the
 	// resolver serves its first request (PRD FR-28–FR-35). This runs here

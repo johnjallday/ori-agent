@@ -571,7 +571,7 @@
         return {
           state: 'File-only',
           tone: 'ready',
-          detail: 'Project-file work is available. Live REAPER was not configured or tested.',
+          detail: 'Project-file work is available. Live control was not configured or tested.',
           action: 'Review mode'
         };
       }
@@ -584,28 +584,33 @@
             return {
               state: 'Connected now',
               tone: 'ready',
-              detail: requirement?.summary || 'REAPER is connected to this workspace project now.',
+              detail:
+                requirement?.summary ||
+                'The live provider is connected to this workspace project now.',
               action: 'View live control'
             };
           case 'checking':
             return {
               state: 'Checking connection',
               tone: 'ready',
-              detail: 'Refreshing the current REAPER connection for this workspace project…',
+              detail: 'Refreshing the current live connection for this workspace project…',
               action: 'View live control'
             };
           case 'offline':
             return {
-              state: 'Configured · REAPER offline',
+              state: 'Configured · offline',
               tone: 'ready',
-              detail: requirement?.summary || 'Open REAPER, then check the connection.',
-              action: 'Check REAPER'
+              detail:
+                requirement?.summary || 'Open the required application, then check the connection.',
+              action: 'Check connection'
             };
           case 'wrong_target':
             return {
               state: 'Wrong project',
               tone: 'attention',
-              detail: requirement?.summary || 'Open this workspace’s project in REAPER.',
+              detail:
+                requirement?.summary ||
+                'Open this workspace’s project in the required application.',
               action: 'Fix project'
             };
           default:
@@ -634,7 +639,7 @@
         detail:
           runtime.first_blocker?.summary ||
           requirement?.summary ||
-          'Finish local REAPER control setup.',
+          'Finish local live-control setup.',
         action: 'Continue setup'
       };
     }

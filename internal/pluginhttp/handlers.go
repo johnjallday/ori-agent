@@ -35,7 +35,7 @@ func newHandlerWithManager(mgr *plugin.Manager) *Handler {
 }
 
 // Manager returns the underlying plugin manager so other subsystems (template
-// application, REAPER readiness, repair) inspect installed plugins and reconcile
+// application and runtime providers inspect installed plugins and reconcile
 // workspace bindings through the same configured store the Plugins API uses,
 // rather than a separate hard-coded plugins/ lookup.
 func (h *Handler) Manager() *plugin.Manager { return h.mgr }

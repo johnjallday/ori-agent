@@ -107,22 +107,6 @@ func (h *Handler) HandleWorkspaces(w http.ResponseWriter, r *http.Request) {
 				h.handleTemplateSetupStart(w, r, id)
 				return
 			}
-		case "reaper-setup":
-			if len(parts) == 3 {
-				switch parts[2] {
-				case "repair":
-					h.handleReaperRepair(w, r, id)
-					return
-				case "recheck":
-					h.handleReaperRuntimeTransition(w, r, id, false)
-					return
-				case "verify":
-					h.handleReaperRuntimeTransition(w, r, id, true)
-					return
-				}
-			}
-			h.handleReaperReadiness(w, r, id)
-			return
 		}
 	}
 
@@ -374,12 +358,9 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	// install/enable; the create modal surfaces this and offers the install/enable
 	// actions.
 	//
-	// A blueprint with a Setup Wizard is exempt, and deliberately so. Its wizard
-	// asks how the workspace should work — and for Reaper Song one of the two
-	// supported answers needs no plugin at all. Blocking creation on a plugin
-	// would force everyone through an install to reach a question whose answer
-	// might be "I don't need that", and there is no way to ask before the
-	// workspace exists.
+	// A blueprint with a Setup Wizard is exempt: its wizard may offer an
+	// operating mode that does not need an optional plugin. The trusted plugin
+	// blueprint path performs its own compatibility and attachment checks.
 	if templateResolved && !resolvedTemplate.HasSetupWizard() {
 		if missing, disabled := h.unsatisfiedRequiredPlugins(resolvedTemplate.Tools); len(missing)+len(disabled) > 0 {
 			_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{
@@ -470,9 +451,6 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	seededStarterTasks := 0
 	if templateResolved && kind != session.WorkspaceKindGroup {
 		seededStarterTasks = h.seedTemplateStarterTasksLogged(ws.ID, resolvedTemplate)
-		// Same gating as starter tasks above: only for a real template match,
-		// never for a group workspace (which has no console of its own).
-		h.seedTemplatePinnedReaperScriptsLogged(ws.ID, resolvedTemplate)
 	}
 
 	// Must run after starter-task seeding above — see
@@ -898,10 +876,10 @@ func (h *Handler) applyCreateWorkspaceTemplate(ctx context.Context, req createWo
 	return projectWarning
 }
 
-// persistCreateWorkspaceTemplateProvenance records the built-in template a
-// workspace was created from onto its portable workspace.json (features like
-// REAPER readiness and repair identify origin from this rather than scanning
-// filenames or task prose). Best-effort: a failure never fails creation.
+// persistCreateWorkspaceTemplateProvenance records the template a workspace
+// was created from onto its portable workspace.json. Runtime providers identify
+// origin from this rather than scanning filenames or task prose. Best-effort: a
+// failure never fails creation.
 //
 // Must run after starter-task seeding, not from inside
 // applyCreateWorkspaceTemplate. h.workspaceTaskStore is a SyncStore whose

@@ -760,65 +760,17 @@ function renderModal(data, metadata) {
           return item.filename || item.name;
         });
 
-        // Disable button and show loading
-        downloadBtn.disabled = true;
-        downloadBtn.innerHTML = `<span class="spinner-border spinner-border-sm me-2"></span>Downloading ${filenames.length} script(s)...`;
-
-        let successCount = 0;
-        let _errorCount = 0;
-
-        try {
-          // Download each script sequentially using direct API call
-          for (const filename of filenames) {
-            try {
-              const result = await API.post('/api/plugins/tool-call', {
-                plugin_name: 'ori-reaper',
-                operation: 'download_script',
-                args: {
-                  filename: filename
-                }
-              });
-
-              if (result.success) {
-                successCount++;
-                addMessageToChat(result.result, false);
-              } else {
-                _errorCount++;
-                addMessageToChat(`Error downloading ${filename}: ${result.error}`, false, true);
-              }
-            } catch (error) {
-              appLog.error(`Error downloading ${filename}:`, error);
-              _errorCount++;
-              addMessageToChat(`Error downloading ${filename}: ${error.message}`, false, true);
-              if (window.Toast) {
-                Toast.error(`Failed to download ${filename}`);
-              }
-            }
-          }
-
-          // Show summary
-          if (successCount > 0) {
-            downloadBtn.innerHTML = `<span class="download-icon">✅</span> Downloaded ${successCount}!`;
-          } else {
-            downloadBtn.innerHTML = `<span class="download-icon">❌</span> All failed`;
-          }
-
-          setTimeout(() => {
-            downloadBtn.innerHTML = `<span class="download-icon">⬇️</span> ${escapeHtml(buttonLabel)}`;
-            downloadBtn.disabled = false;
-            // Uncheck all checkboxes
-            selected.forEach(cb => (cb.checked = false));
-            updateCount();
-          }, 2000);
-        } catch (error) {
-          appLog.error('Download error:', error);
-          addMessageToChat(`Error: ${error.message}`, false, true);
+        document.dispatchEvent(
+          new CustomEvent('ori:modal-selection', {
+            detail: { items: filenames }
+          })
+        );
+        downloadBtn.innerHTML = `<span class="download-icon">✅</span> Selected ${filenames.length}`;
+        selected.forEach(cb => (cb.checked = false));
+        updateCount();
+        setTimeout(() => {
           downloadBtn.innerHTML = `<span class="download-icon">⬇️</span> ${escapeHtml(buttonLabel)}`;
-          downloadBtn.disabled = false;
-          if (window.Toast) {
-            Toast.error('Download failed');
-          }
-        }
+        }, 1200);
       });
     }
   }, 100);
@@ -1810,20 +1762,12 @@ function looksLikePermissionDeniedDependencyText(lower) {
       lower.includes('enable the `mcp__') ||
       lower.includes("enable the 'mcp__") ||
       lower.includes('enable the "mcp__')) &&
-    (lower.includes('tool') || lower.includes('mcp') || lower.includes('reaper'))
+    (lower.includes('tool') || lower.includes('mcp'))
   );
 }
 
 function inferDependencyResolutionTarget(responseText) {
   const lower = responseText.toLowerCase();
-  if (
-    lower.includes('mcp__ori-reaper') ||
-    lower.includes('ori-reaper') ||
-    lower.includes('reaper')
-  ) {
-    return { displayName: 'REAPER MCP tool', serverName: 'ori-reaper' };
-  }
-
   const match = lower.match(/mcp__([a-z0-9._-]+)/);
   if (match && match[1]) {
     const serverName = String(match[1]).trim();
@@ -1847,7 +1791,6 @@ function humanizeDependencyResolutionServerName(serverName) {
     .replace(/^ori-/, '')
     .trim();
   if (!cleaned) return '';
-  if (cleaned.toLowerCase() === 'reaper') return 'REAPER';
   return cleaned
     .split(/[-_.]+/)
     .filter(Boolean)

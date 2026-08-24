@@ -22,7 +22,6 @@ func TestWorkspaceBrowserURLsDoNotUseInternalIDs(t *testing.T) {
 		filepath.Join(root, "internal", "chathttp"),
 		filepath.Join(root, "internal", "workspace"),
 		filepath.Join(root, "internal", "runtimecapability"),
-		filepath.Join(root, "internal", "reapersetup"),
 		filepath.Join(root, "internal", "workspaceplan"),
 	}
 	forbidden := []*regexp.Regexp{

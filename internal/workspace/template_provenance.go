@@ -17,13 +17,12 @@ type PluginTemplateOwner struct {
 
 func (o PluginTemplateOwner) Clone() PluginTemplateOwner { return o }
 
-// TemplateProvenance records the built-in template a workspace was created from,
-// in portable workspace metadata (persisted to workspace.json). Features such as
-// REAPER readiness and repair identify a workspace's origin from this rather than
-// scanning task descriptions or project filenames, which are brittle and can be
-// renamed by the user. It carries no executable hooks — it is pure provenance.
+// TemplateProvenance records the template a workspace was created from in
+// portable workspace metadata. Runtime providers identify origin from this
+// rather than scanning user-editable names, tasks, or project filenames. It
+// carries no executable hooks — it is pure provenance.
 type TemplateProvenance struct {
-	// TemplateID is the stable built-in identifier, e.g. "reaper-song".
+	// TemplateID is the stable built-in or owner-qualified identifier.
 	TemplateID string `json:"template_id,omitempty"`
 	// TemplateName is the human-facing template name at creation time.
 	TemplateName string `json:"template_name,omitempty"`

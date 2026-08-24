@@ -135,7 +135,7 @@ var registry = []Entry{
 		Emblem:      "gem",
 		AccentColor: "#14b8a6",
 		Tagline:     "Deep expert in one domain you define",
-		Description: "A focused expert in a single domain you name at creation (e.g. \"reaper\", \"tax\").",
+		Description: "A focused expert in a single domain you name at creation (e.g. \"audio\", \"tax\").",
 		ModelTier:   TierFast,
 		StarterPrompt: "You are a Specialist with deep expertise in one domain. Focus on that domain, use the " +
 			"tools and context available to you, and be explicit when a request falls outside your area.",

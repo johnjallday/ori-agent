@@ -140,11 +140,11 @@ func AddFileFallbackChoice(blocked *TaskBlockedError) *TaskBlockedError {
 	clone.WorkflowStep = &TaskBlockedWorkflowStep{
 		StepType: "ask_choice",
 		Title:    "Choose how to continue",
-		Summary:  "Live REAPER state is not verified. You can repair live control or explicitly make a project-file change instead.",
+		Summary:  "Live application state is not verified. You can repair live control or explicitly make a project-file change instead.",
 		Choices: []TaskBlockedChoice{{
 			ID:          "use_file_fallback",
 			Label:       "Use project-file fallback",
-			Description: "Run in a confined staging folder and promote only the authoritative .rpp file. This is not a verified live-session change.",
+			Description: "Run in a confined staging folder and promote only the authoritative project file. This is not a verified live-session change.",
 			Number:      "F",
 		}},
 		FreeTextAllowed: false,

@@ -10,7 +10,7 @@
 //     up "In this workspace" and "Globally disabled" at once.
 //   - The Plugins tab (internal/web/static/js/modules/workspace-detail-plugins.js)
 //     decided "attached" purely from workspace skill/MCP bindings, so an
-//     agent-level REAPER skill made the plugin look detached.
+//     agent-level skill made the plugin look detached.
 //   - Manual "Add to workspace" and (new) repair need to optionally enable a
 //     disabled plugin, but only after explicit confirmation.
 //

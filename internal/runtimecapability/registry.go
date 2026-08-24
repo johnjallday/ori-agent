@@ -1,7 +1,6 @@
 package runtimecapability
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"sort"
@@ -121,35 +120,8 @@ func (r *Registry) IDs() []string {
 	return ids
 }
 
-// unavailableAdapter reserves an authorable, compiled adapter ID before its
-// platform implementation is wired. It fails closed with bounded safe output;
-// a blueprint can never turn an absent implementation into ready behavior.
-type unavailableAdapter struct{ id string }
-
-func (a unavailableAdapter) ID() string { return a.id }
-func (a unavailableAdapter) EvaluateDurable(context.Context, EvaluationRequest) (DurableResult, error) {
-	return DurableResult{
-		State:      DurableInProgress,
-		ReasonCode: ReasonAdapterUnavailable,
-		Summary:    ProviderUnavailableMessage,
-		Action: &Action{
-			Token: "review_plugins", Code: "review_plugins", Label: "Review plugins", URL: "/settings?panel=plugins",
-		},
-	}, nil
-}
-
-// NewBuiltinRegistry returns every runtime adapter ID this build accepts at
-// authoring time. The unavailable reservation fails closed until server wiring
-// replaces it with the compiled platform implementation; minimal/test builders
-// that omit that wiring therefore remain honest rather than assuming readiness.
+// NewBuiltinRegistry returns the compiled runtime adapters shipped by this
+// build. Domain providers are contributed by trusted installed plugins.
 func NewBuiltinRegistry() (*Registry, error) {
-	registry := NewRegistry()
-	for _, adapter := range []Adapter{
-		unavailableAdapter{id: "reaper_live_control"},
-	} {
-		if err := registry.Register(adapter); err != nil {
-			return nil, err
-		}
-	}
-	return registry, nil
+	return NewRegistry(), nil
 }

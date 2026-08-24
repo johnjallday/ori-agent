@@ -322,7 +322,7 @@ test('runtime-aware banner and single chip distinguish File-only, Configured, Of
         durable_state: 'configured',
         live_state: 'offline'
       },
-      'Configured · REAPER offline'
+      'Configured · offline'
     ],
     [
       {

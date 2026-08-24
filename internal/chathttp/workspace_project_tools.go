@@ -28,7 +28,7 @@ func (p *WorkspaceToolProvider) projectTemplatesTool() toolapi.Tool {
 	return &nativeUtilityTool{
 		definition: toolapi.ToolDefinition{
 			Name:        "workspace_project_templates",
-			Description: "List the project templates available for scaffolding a project folder inside this workspace (e.g. a REAPER song or a writing project). Use workspace_create_project to instantiate one.",
+			Description: "List the project templates available for scaffolding a project folder inside this workspace (e.g. a media project or a writing project). Use workspace_create_project to instantiate one.",
 			Parameters: map[string]any{
 				"type":       "object",
 				"properties": map[string]any{},

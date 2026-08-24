@@ -613,7 +613,7 @@ func invalidText(value string, maximum int, allowEmpty bool) bool {
 
 func knownSymbolicScope(scope string) bool {
 	switch scope {
-	case "loopback_reaper", "plugin_data_write", "reaper_runner_exchange", "workspace_project_read", "workspace_project_write":
+	case "plugin_data_write", "workspace_project_read", "workspace_project_write":
 		return true
 	default:
 		return false

@@ -2,8 +2,8 @@ package chathttp
 
 import "testing"
 
-func TestInferDependencyResolutionFromText_ReaperPermissionDenied(t *testing.T) {
-	responseText := "The REAPER MCP tool isn't enabled in the current permission mode. Please enable the `mcp__ori-reaper` tool in your permission settings and try again."
+func TestInferDependencyResolutionFromText_MCPPermissionDenied(t *testing.T) {
+	responseText := "The calendar MCP tool isn't enabled in the current permission mode. Please enable the `mcp__calendar` tool in your permission settings and try again."
 
 	resolution := inferDependencyResolutionFromText(responseText, normalizedChatRouteContext{WorkspaceID: "workspace-1"}, "claude_code")
 	if resolution == nil {
@@ -12,7 +12,7 @@ func TestInferDependencyResolutionFromText_ReaperPermissionDenied(t *testing.T) 
 	if resolution.ReasonCode != "provider_permission_denied" {
 		t.Fatalf("expected provider_permission_denied, got %q", resolution.ReasonCode)
 	}
-	if resolution.Title != "REAPER MCP tool permission required" {
+	if resolution.Title != "Calendar MCP tool permission required" {
 		t.Fatalf("unexpected title %q", resolution.Title)
 	}
 	if len(resolution.Steps) != 1 {
@@ -27,7 +27,7 @@ func TestInferDependencyResolutionFromText_ReaperPermissionDenied(t *testing.T) 
 }
 
 func TestInferDependencyResolutionFromText_IgnoresRegularResponses(t *testing.T) {
-	resolution := inferDependencyResolutionFromText("REAPER project created successfully.", normalizedChatRouteContext{}, "claude_code")
+	resolution := inferDependencyResolutionFromText("Media project created successfully.", normalizedChatRouteContext{}, "claude_code")
 	if resolution != nil {
 		t.Fatalf("expected nil resolution, got %#v", resolution)
 	}

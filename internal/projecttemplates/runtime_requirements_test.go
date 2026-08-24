@@ -11,6 +11,10 @@ import (
 	"testing"
 )
 
+func init() {
+	ValidRuntimeRequirementAdapters = []string{"test_runtime"}
+}
+
 const validRuntimeRequirementsManifest = `{
 	"name": "Runtime Demo",
 	"description": "The rest of the blueprint still loads.",
@@ -27,16 +31,16 @@ const validRuntimeRequirementsManifest = `{
 				"id": " Assisted ",
 				"label": "  Assisted  ",
 				"description": "  Control the external application after setup.  ",
-				"requires": [" REAPER_LIVE_CONTROL "]
+				"requires": [" TEST_RUNTIME "]
 			}
 		],
 		"requirements": [
 			{
-				"key": " REAPER_LIVE_CONTROL ",
+				"key": " TEST_RUNTIME ",
 				"label": "  Local REAPER control  ",
 				"description": "  Lets approved tasks control the open workspace project.  ",
 				"disclosure": "  The selected agent may use loopback and Ori's dedicated runner exchange.  ",
-				"adapter": " REAPER_LIVE_CONTROL "
+				"adapter": " TEST_RUNTIME "
 			}
 		]
 	}
@@ -75,12 +79,12 @@ func TestNewTemplate_RuntimeRequirementsPublicJSONContract(t *testing.T) {
 	if assisted.ID != "assisted" || assisted.Label != "Assisted" || assisted.Description != "Control the external application after setup." {
 		t.Fatalf("assisted mode was not normalized: %+v", assisted)
 	}
-	if len(assisted.Requires) != 1 || assisted.Requires[0] != "reaper_live_control" {
+	if len(assisted.Requires) != 1 || assisted.Requires[0] != "test_runtime" {
 		t.Fatalf("mode-to-requirement reference changed: %v", assisted.Requires)
 	}
 
 	requirement := contract.Requirements[0]
-	if requirement.Key != "reaper_live_control" || requirement.Adapter != "reaper_live_control" {
+	if requirement.Key != "test_runtime" || requirement.Adapter != "test_runtime" {
 		t.Fatalf("stable requirement/adapter keys changed: %+v", requirement)
 	}
 	if requirement.Label != "Local REAPER control" || requirement.Description != "Lets approved tasks control the open workspace project." {
@@ -121,10 +125,10 @@ func TestNewTemplate_RuntimeRequirementsPublicJSONContract(t *testing.T) {
 	if public.RuntimeRequirements.SchemaVersion != 1 || len(public.RuntimeRequirements.OperatingModes) != 2 || len(public.RuntimeRequirements.Requirements) != 1 {
 		t.Fatalf("public JSON omitted the runtime contract: %s", encoded)
 	}
-	if got := public.RuntimeRequirements.OperatingModes[1].Requires; len(got) != 1 || got[0] != "reaper_live_control" {
+	if got := public.RuntimeRequirements.OperatingModes[1].Requires; len(got) != 1 || got[0] != "test_runtime" {
 		t.Fatalf("public JSON lost mode references: %s", encoded)
 	}
-	if got := public.RuntimeRequirements.Requirements[0]; got.Key != "reaper_live_control" || got.Adapter != "reaper_live_control" || got.Disclosure == "" {
+	if got := public.RuntimeRequirements.Requirements[0]; got.Key != "test_runtime" || got.Adapter != "test_runtime" || got.Disclosure == "" {
 		t.Fatalf("public JSON lost requirement metadata: %s", encoded)
 	}
 }
@@ -164,14 +168,14 @@ func TestNewTemplate_RuntimeRequirementsSchemaAndReferencesFailClosed(t *testing
 		},
 		{
 			name:     "blank requirement key",
-			contract: `{"schema_version":1,"operating_modes":[{"id":"default","label":"Default","description":"Use it."}],"requirements":[{"key":" ","label":"Runtime","description":"Configure it.","adapter":"reaper_live_control"}]}`,
+			contract: `{"schema_version":1,"operating_modes":[{"id":"default","label":"Default","description":"Use it."}],"requirements":[{"key":" ","label":"Runtime","description":"Configure it.","adapter":"test_runtime"}]}`,
 			contains: "requirement key is required",
 		},
 		{
 			name: "duplicate normalized requirement key",
 			contract: `{"schema_version":1,"operating_modes":[{"id":"default","label":"Default","description":"Use it.","requires":["runtime"]}],"requirements":[
-				{"key":"runtime","label":"Runtime","description":"Configure it.","adapter":"reaper_live_control"},
-				{"key":" Runtime ","label":"Again","description":"Again.","adapter":"reaper_live_control"}]}`,
+				{"key":"runtime","label":"Runtime","description":"Configure it.","adapter":"test_runtime"},
+				{"key":" Runtime ","label":"Again","description":"Again.","adapter":"test_runtime"}]}`,
 			contains: `duplicate runtime requirement key "runtime"`,
 		},
 		{
@@ -239,7 +243,7 @@ func TestNewTemplate_RuntimeRequirementsRejectBehaviorBearingAndUnknownFields(t 
 				"runtime_requirements":{
 					"schema_version":1,
 					"operating_modes":[{"id":"assisted","label":"Assisted","description":"Use runtime.","requires":["runtime"]}],
-					"requirements":[{"key":"runtime","label":"Runtime","description":"Configure it.","adapter":"reaper_live_control",%q:%s}]
+					"requirements":[{"key":"runtime","label":"Runtime","description":"Configure it.","adapter":"test_runtime",%q:%s}]
 				}
 			}`, field, value)
 			tpl := loadTemplateWithManifest(t, manifest)
@@ -261,10 +265,10 @@ func TestNewTemplate_RuntimeRequirementsRejectBehaviorBearingAndUnknownFields(t 
 		{name: "mode unknown field", contract: `{"schema_version":1,"operating_modes":[{"id":"default","label":"Default","description":"Use it.","probe":"now"}],"requirements":[]}`, contains: `unknown field "probe"`},
 		{name: "blank mode label", contract: `{"schema_version":1,"operating_modes":[{"id":"default","label":" ","description":"Use it."}],"requirements":[]}`, contains: `label is required`},
 		{name: "blank mode description", contract: `{"schema_version":1,"operating_modes":[{"id":"default","label":"Default","description":" "}],"requirements":[]}`, contains: `description is required`},
-		{name: "blank requirement label", contract: `{"schema_version":1,"operating_modes":[{"id":"default","label":"Default","description":"Use it."}],"requirements":[{"key":"runtime","label":" ","description":"Configure it.","adapter":"reaper_live_control"}]}`, contains: `label is required`},
-		{name: "blank requirement description", contract: `{"schema_version":1,"operating_modes":[{"id":"default","label":"Default","description":"Use it."}],"requirements":[{"key":"runtime","label":"Runtime","description":" ","adapter":"reaper_live_control"}]}`, contains: `description is required`},
+		{name: "blank requirement label", contract: `{"schema_version":1,"operating_modes":[{"id":"default","label":"Default","description":"Use it."}],"requirements":[{"key":"runtime","label":" ","description":"Configure it.","adapter":"test_runtime"}]}`, contains: `label is required`},
+		{name: "blank requirement description", contract: `{"schema_version":1,"operating_modes":[{"id":"default","label":"Default","description":"Use it."}],"requirements":[{"key":"runtime","label":"Runtime","description":" ","adapter":"test_runtime"}]}`, contains: `description is required`},
 		{name: "missing adapter", contract: `{"schema_version":1,"operating_modes":[{"id":"default","label":"Default","description":"Use it."}],"requirements":[{"key":"runtime","label":"Runtime","description":"Configure it."}]}`, contains: `must name a registered adapter`},
-		{name: "duplicate mode reference", contract: `{"schema_version":1,"operating_modes":[{"id":"default","label":"Default","description":"Use it.","requires":["runtime"," RUNTIME "]}],"requirements":[{"key":"runtime","label":"Runtime","description":"Configure it.","adapter":"reaper_live_control"}]}`, contains: `more than once`},
+		{name: "duplicate mode reference", contract: `{"schema_version":1,"operating_modes":[{"id":"default","label":"Default","description":"Use it.","requires":["runtime"," RUNTIME "]}],"requirements":[{"key":"runtime","label":"Runtime","description":"Configure it.","adapter":"test_runtime"}]}`, contains: `more than once`},
 		{name: "control character", contract: "{\"schema_version\":1,\"operating_modes\":[{\"id\":\"default\",\"label\":\"Default\",\"description\":\"bad\\u0007text\"}],\"requirements\":[]}", contains: `control character`},
 		{name: "wrong field type", contract: `{"schema_version":1,"operating_modes":"default","requirements":[]}`, contains: `cannot unmarshal`},
 		{name: "not an object", contract: `"enabled"`, contains: `cannot unmarshal`},
@@ -296,7 +300,7 @@ func TestNewTemplate_RuntimeRequirementCountsAreBounded(t *testing.T) {
 		return fmt.Sprintf(`{"id":"mode_%d","label":"Mode %d","description":"Mode %d behavior."}`, i, i, i)
 	}
 	requirement := func(i int) string {
-		return fmt.Sprintf(`{"key":"runtime_%d","label":"Runtime %d","description":"Configure runtime %d.","adapter":"reaper_live_control"}`, i, i, i)
+		return fmt.Sprintf(`{"key":"runtime_%d","label":"Runtime %d","description":"Configure runtime %d.","adapter":"test_runtime"}`, i, i, i)
 	}
 
 	modes := make([]string, maxRuntimeOperatingModes)
@@ -369,7 +373,7 @@ func TestNewTemplate_RuntimeStarterTaskReferencesFailClosedWithoutADeclaration(t
 	invalid := loadTemplateWithManifest(t, `{
 		"name":"Invalid Runtime Task",
 		"agents":[{"name":"Lead"}],
-		"starter_tasks":[{"description":"Control REAPER","requires":["reaper_live_control"]}]
+		"starter_tasks":[{"description":"Control REAPER","requires":["test_runtime"]}]
 	}`)
 	if !invalid.HasInvalidRuntimeRequirements() || invalid.RuntimeRequirements != nil || !strings.Contains(invalid.RuntimeRequirementsError, "declares no runtime_requirements") {
 		t.Fatalf("undeclared runtime task reference did not fail closed: %+v / %q", invalid.RuntimeRequirements, invalid.RuntimeRequirementsError)
@@ -379,13 +383,13 @@ func TestNewTemplate_RuntimeStarterTaskReferencesFailClosedWithoutADeclaration(t
 		"name":"Valid Runtime Task",
 		"agents":[{"name":"Lead"}],
 		"starter_tasks":[
-			{"description":"Control REAPER","requires":["reaper_live_control"],"file_fallback_for":["reaper_live_control"]},
+			{"description":"Control REAPER","requires":["test_runtime"],"file_fallback_for":["test_runtime"]},
 			{"description":"Plan arrangement","requires":["planning"]}
 		],
 		"runtime_requirements":{
 			"schema_version":1,
-			"operating_modes":[{"id":"assisted","label":"Assisted","description":"Use live control.","requires":["reaper_live_control"]}],
-			"requirements":[{"key":"reaper_live_control","label":"REAPER","description":"Configure it.","adapter":"reaper_live_control"}]
+			"operating_modes":[{"id":"assisted","label":"Assisted","description":"Use live control.","requires":["test_runtime"]}],
+			"requirements":[{"key":"test_runtime","label":"REAPER","description":"Configure it.","adapter":"test_runtime"}]
 		}
 	}`)
 	if valid.RuntimeRequirementsError != "" || !valid.HasRuntimeRequirements() || len(valid.StarterTasks) != 2 || len(valid.StarterTasks[0].FileFallbackFor) != 1 {
@@ -395,11 +399,11 @@ func TestNewTemplate_RuntimeStarterTaskReferencesFailClosedWithoutADeclaration(t
 	invalidFallback := loadTemplateWithManifest(t, `{
 		"name":"Invalid Fallback",
 		"agents":[{"name":"Lead"}],
-		"starter_tasks":[{"description":"Control REAPER","file_fallback_for":["reaper_live_control"]}],
+		"starter_tasks":[{"description":"Control REAPER","file_fallback_for":["test_runtime"]}],
 		"runtime_requirements":{
 			"schema_version":1,
-			"operating_modes":[{"id":"assisted","label":"Assisted","description":"Use live control.","requires":["reaper_live_control"]}],
-			"requirements":[{"key":"reaper_live_control","label":"REAPER","description":"Configure it.","adapter":"reaper_live_control"}]
+			"operating_modes":[{"id":"assisted","label":"Assisted","description":"Use live control.","requires":["test_runtime"]}],
+			"requirements":[{"key":"test_runtime","label":"REAPER","description":"Configure it.","adapter":"test_runtime"}]
 		}
 	}`)
 	if !invalidFallback.HasInvalidRuntimeRequirements() || !strings.Contains(invalidFallback.RuntimeRequirementsError, "must also be a required capability") {
@@ -417,7 +421,7 @@ func TestUpdateManifest_RuntimeRequirementsRoundTripAndTriState(t *testing.T) {
 			{"id":"limited","label":"Limited","description":"Use files."},
 			{"id":"assisted","label":"Assisted","description":"Use live control.","requires":["runtime"]}
 		],
-		"requirements":[{"key":"runtime","label":"Runtime","description":"Configure it.","adapter":"reaper_live_control"}]
+		"requirements":[{"key":"runtime","label":"Runtime","description":"Configure it.","adapter":"test_runtime"}]
 	}`)
 	updated, err := UpdateManifest(dir, "demo", "Demo", "", nil, &ManifestEdit{RuntimeRequirements: raw})
 	if err != nil {
@@ -433,7 +437,7 @@ func TestUpdateManifest_RuntimeRequirementsRoundTripAndTriState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UpdateManifest(preserve runtime_requirements): %v", err)
 	}
-	if !preserved.HasRuntimeRequirements() || preserved.RuntimeRequirements.Requirements[0].Adapter != "reaper_live_control" {
+	if !preserved.HasRuntimeRequirements() || preserved.RuntimeRequirements.Requirements[0].Adapter != "test_runtime" {
 		t.Fatalf("unrelated edit dropped the contract: %+v", preserved.RuntimeRequirements)
 	}
 	manifestBytes, err := os.ReadFile(filepath.Join(dir, "demo", ManifestFileName))
@@ -459,7 +463,7 @@ func TestUpdateManifest_RuntimeTaskReferenceNeverPartiallySaves(t *testing.T) {
 	manifestPath := filepath.Join(dir, "demo", ManifestFileName)
 	original := `{"name":"Demo","agents":[{"name":"Lead"}]}`
 	writeFile(t, manifestPath, original)
-	tasks := []StarterTask{{Description: "Control REAPER", Requires: []string{"reaper_live_control"}}}
+	tasks := []StarterTask{{Description: "Control REAPER", Requires: []string{"test_runtime"}}}
 	_, err := UpdateManifest(dir, "demo", "Changed", "", nil, &ManifestEdit{StarterTasks: &tasks})
 	if !errors.Is(err, ErrInvalidRuntimeRequirements) {
 		t.Fatalf("undeclared runtime task save error = %v", err)
@@ -524,14 +528,14 @@ func TestImportAndDuplicate_RuntimeRequirementsRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ImportFolder: %v", err)
 	}
-	if !imported.HasRuntimeRequirements() || imported.RuntimeRequirements.Requirements[0].Key != "reaper_live_control" {
+	if !imported.HasRuntimeRequirements() || imported.RuntimeRequirements.Requirements[0].Key != "test_runtime" {
 		t.Fatalf("import dropped the runtime contract: %+v", imported.RuntimeRequirements)
 	}
 	duplicate, err := Duplicate(libDir, imported.ID, "Runtime Copy")
 	if err != nil {
 		t.Fatalf("Duplicate: %v", err)
 	}
-	if !duplicate.HasRuntimeRequirements() || duplicate.RuntimeRequirements.OperatingModes[1].Requires[0] != "reaper_live_control" {
+	if !duplicate.HasRuntimeRequirements() || duplicate.RuntimeRequirements.OperatingModes[1].Requires[0] != "test_runtime" {
 		t.Fatalf("duplicate dropped the runtime contract: %+v", duplicate.RuntimeRequirements)
 	}
 

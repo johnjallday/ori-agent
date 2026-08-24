@@ -45,13 +45,6 @@ func (HostSymbolicScopeResolver) Resolve(_ context.Context, workspace workspaces
 				return runtimecapability.CapabilityExecutionScope{}, err
 			}
 			writable[root] = struct{}{}
-		case "loopback_reaper":
-			result.NetworkPosture = runtimecapability.CapabilityNetworkLocal
-		case "reaper_runner_exchange":
-			// This requires a separately configured host-owned exchange root. The
-			// generic resolver has none and fails closed rather than deriving one
-			// from plugin/workspace/service text.
-			return runtimecapability.CapabilityExecutionScope{}, ErrSymbolicScopeUnavailable
 		default:
 			return runtimecapability.CapabilityExecutionScope{}, ErrSymbolicScopeUnavailable
 		}

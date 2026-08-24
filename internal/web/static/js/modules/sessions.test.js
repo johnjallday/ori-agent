@@ -172,32 +172,6 @@ test('runtime contract review lists modes, immediate behavior, and post-create s
   assert.equal(calls.length, 0, 'rendering creation disclosure must make no probe request');
 });
 
-test('Reaper Song review truthfully lists immediate project-file work and optional post-create live control', () => {
-  const { manager, elements, calls } = loadSessionManagerWithSetupPreview();
-  const template = JSON.parse(
-    readFileSync(
-      new URL('../../../../projecttemplates/starter/reaper-song/template.json', import.meta.url),
-      'utf8'
-    )
-  );
-  template.id = 'reaper-song';
-
-  manager.renderSetupPreview(template);
-
-  const list = elements.get('workspaceSetupPreviewList');
-  assert.equal(list.children.length, 2);
-  assert.match(list.children[0].textContent, /File-only/);
-  assert.match(list.children[0].textContent, /Works immediately/);
-  assert.match(list.children[0].textContent, /scaffolded REAPER project file/);
-  assert.match(list.children[0].textContent, /No additional runtime setup/);
-  assert.match(list.children[1].textContent, /Ori-assisted REAPER/);
-  assert.match(list.children[1].textContent, /Project-file work remains available/);
-  assert.match(list.children[1].textContent, /Setup after creationLocal REAPER control/);
-  assert.match(list.children[1].textContent, /project-specific connection test/);
-  assert.match(elements.get('workspaceSetupPreviewNote').textContent, /nothing is checked/i);
-  assert.equal(calls.length, 0, 'Reaper creation review must not probe or block on local setup');
-});
-
 test('runtime review hides for a no-contract blueprint and fails visibly for an invalid contract', () => {
   const { manager, elements } = loadSessionManagerWithSetupPreview();
   manager.renderSetupPreview({ id: 'plain' });

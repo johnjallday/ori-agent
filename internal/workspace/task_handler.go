@@ -286,7 +286,7 @@ func (h *LLMTaskHandler) runTaskOnProvider(ctx context.Context, providerName, re
 			ReasonCode: "file_fallback_unavailable",
 			Reason:     "The selected agent cannot run the confined project-file fallback safely.",
 			Question:   "Choose a compatible CLI agent or review live-control setup.",
-			Repair:     &TaskRepairAction{Code: "choose_reaper_agent", Label: "Choose compatible agent"},
+			Repair:     &TaskRepairAction{Code: "choose_runtime_agent", Label: "Choose compatible agent"},
 		}
 	}
 	modelName := h.normalizeModelForProvider(providerName, requestedModel)
@@ -1642,7 +1642,7 @@ func (h *LLMTaskHandler) resolveNativeMCPSpecs(ag *resolvedTaskAgent) []llm.MCPS
 // nativeMCPAlias derives a CLI-safe MCP-config key from a runtime server name.
 // Runtime names are "ws:{workspaceID}:mcp:{server}:{bindingID}" (colon-bearing);
 // the logical server segment ("{server}") is the stable, CLI-friendly basis.
-// The segment may still contain "/" (e.g. "reaper-plugin/ori-reaper"), so all
+// The segment may still contain "/" (for example, an owner-qualified ID), so all
 // chars outside [A-Za-z0-9_-] are mapped to "_" to keep the MCP-config key and
 // the resulting "mcp__<key>__<tool>" tool names valid. (Alias rules + dedup are
 // hardened in task 2.2.)

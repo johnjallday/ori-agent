@@ -1,6 +1,6 @@
 # Plugin Workspace Surfaces v1 Architecture Decision
 
-**Status:** Workspace Surface protocol v1 frozen after prototype review
+**Status:** Implemented; protocol v1 frozen; compiled REAPER extraction complete
 
 **Decision date:** 2026-08-24
 
@@ -521,9 +521,9 @@ canonical context through the broker.
 
 Manifests request symbolic scopes, not paths or endpoints. V1 host resolvers map
 an allowlisted symbol to canonical workspace/plugin-owned resources, for
-example `workspace_project_read`, `workspace_project_write`,
-`plugin_data_write`, `reaper_runner_exchange`, or `loopback_reaper`. Unknown
-symbols fail installation. Resolution rechecks canonical roots and symlinks at
+example `workspace_project_read`, `workspace_project_write`, or
+`plugin_data_write`. Domain-named endpoints and exchange roots are not part of
+the host vocabulary. Unknown symbols fail installation. Resolution rechecks canonical roots and symlinks at
 call/grant time. Service responses cannot broaden scope.
 
 Ori continues to own:
@@ -615,9 +615,10 @@ specific routes are absent; the generic `provider_unavailable` result above is
 the only compatibility behavior. Manually attaching the new capability creates
 fresh namespaced state and plugin defaults.
 
-Core packages/routes/UI/persistence fields are deleted only after every row in
-`tasks/reaper-parity-matrix-plugin-workspace-surfaces.md` has equivalent plugin
-and live evidence.
+The compiled packages, routes, UI modules, template, and persistence fields were
+deleted after all 47 rows in
+`tasks/reaper-parity-matrix-plugin-workspace-surfaces.md` gained equivalent
+plugin/generic-host tests and generated-artifact live evidence.
 
 ## Rejected alternatives
 

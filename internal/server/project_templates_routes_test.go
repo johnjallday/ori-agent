@@ -156,6 +156,9 @@ func TestProjectTemplateManagementRoutes(t *testing.T) {
 }
 
 func TestHandleProjectTemplateUpdateRuntimeRequirementsRoundTrip(t *testing.T) {
+	previousAdapters := append([]string(nil), projecttemplates.ValidRuntimeRequirementAdapters...)
+	projecttemplates.ValidRuntimeRequirementAdapters = []string{"test_runtime"}
+	t.Cleanup(func() { projecttemplates.ValidRuntimeRequirementAdapters = previousAdapters })
 	libDir := t.TempDir()
 	templateDir := filepath.Join(libDir, "runtime-demo")
 	if err := os.MkdirAll(templateDir, 0o750); err != nil {
@@ -184,7 +187,7 @@ func TestHandleProjectTemplateUpdateRuntimeRequirementsRoundTrip(t *testing.T) {
 				{"id":"limited","label":"Limited","description":"Use files."},
 				{"id":"assisted","label":"Assisted","description":"Use live control.","requires":["runtime"]}
 			],
-			"requirements":[{"key":"runtime","label":"Runtime","description":"Configure it.","adapter":"reaper_live_control"}]
+			"requirements":[{"key":"runtime","label":"Runtime","description":"Configure it.","adapter":"test_runtime"}]
 		}
 	}`
 	w := callUpdate(valid)
@@ -199,7 +202,7 @@ func TestHandleProjectTemplateUpdateRuntimeRequirementsRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
 		t.Fatal(err)
 	}
-	if response.Template.RuntimeRequirements == nil || len(response.Template.RuntimeRequirements.OperatingModes) != 2 || response.Template.RuntimeRequirements.Requirements[0].Adapter != "reaper_live_control" {
+	if response.Template.RuntimeRequirements == nil || len(response.Template.RuntimeRequirements.OperatingModes) != 2 || response.Template.RuntimeRequirements.Requirements[0].Adapter != "test_runtime" {
 		t.Fatalf("update response lost public runtime metadata: %s", w.Body.String())
 	}
 

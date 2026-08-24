@@ -21,7 +21,7 @@ test('plugin-backed Reaper Song reaches generic setup, surface, action, script, 
     data: {
       name: `Legacy REAPER ${Date.now().toString(36)}`,
       description: 'Disposable pre-plugin legacy fixture',
-      template_id: 'reaper-song',
+      template_id: 'writing-project',
       create_template_agents: false
     }
   });
@@ -30,7 +30,7 @@ test('plugin-backed Reaper Song reaches generic setup, surface, action, script, 
   const legacyPrimary = legacy.directory_references.find(
     (item: { id: string }) => item.id === legacy.shared_data.primary_directory_id
   );
-  const legacyProject = path.join(legacyPrimary.path, legacy.shared_data.project_entry_path);
+  const legacyProject = path.join(legacyPrimary.path, 'outline.md');
   const legacyProjectBytes = readFileSync(legacyProject);
   const evidenceDir = process.env.ORI_REAPER_EVIDENCE_DIR;
   if (evidenceDir) mkdirSync(evidenceDir, { recursive: true });
@@ -128,8 +128,9 @@ test('plugin-backed Reaper Song reaches generic setup, surface, action, script, 
     await capture('group4-01-live-control.png');
 
     await frame.getByRole('button', { name: 'Play', exact: true }).click();
-    await expect(frame.locator('[data-action-result]')).not.toHaveText('No action run.');
+    await expect(frame.locator('[data-action-result]')).toContainText('Play');
     await frame.getByRole('button', { name: 'Stop', exact: true }).click();
+    await expect(frame.locator('[data-action-result]')).toContainText('Stop');
     await capture('group4-02-transport-action.png');
 
     const frameURL = await page.locator('iframe.workspace-surface-frame').getAttribute('src');
@@ -198,7 +199,8 @@ test('plugin-backed Reaper Song reaches generic setup, surface, action, script, 
       }
       expect(state.connected).toBeTruthy();
       expect(state.tracks.length).toBeGreaterThan(0);
-      expect(JSON.stringify(state)).not.toMatch(/2307|2308|\.ori-reaper|inbox\.lua|\/Users\//i);
+      expect(JSON.stringify(state)).not.toMatch(/\.ori-reaper|inbox\.lua|\/Users\//i);
+      expect(JSON.stringify(state)).not.toMatch(/"(?:port|endpoint|runner_root|receipt_path)"/i);
       const liveTrackRow = frame.locator('[data-track-index]').last();
       await liveTrackRow
         .locator('select[data-track-operation="color"]')

@@ -270,7 +270,6 @@ export class WorkspaceCommandView {
     }
     this.ensureCapabilityStations();
     this.ensureSurfaceStations();
-    this.ensureReaperStation();
     this.applyBootURLState();
   }
 
@@ -322,19 +321,6 @@ export class WorkspaceCommandView {
     void Promise.resolve(host.loadCatalog()).then(() => {
       if (this.active) this.render();
     });
-  }
-
-  // Live REAPER polling is owned by ReaperConsole, but the command view owns
-  // whether the Map is visible and when its station needs repainting. The event
-  // carries no endpoint or port — only the already-redacted live state.
-  ensureReaperStation() {
-    if (this.boundReaperStateChanged) return;
-    this.boundReaperStateChanged = () => {
-      if (this.active) this.render();
-    };
-    if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
-      document.addEventListener('ori:reaper-state-changed', this.boundReaperStateChanged);
-    }
   }
 
   /** Re-render if active — called by the page after its data loads/refreshes. */
@@ -1263,10 +1249,6 @@ export class WorkspaceCommandView {
   }
 
   render() {
-    const reaperConsole = typeof window === 'undefined' ? null : window.ReaperConsole;
-    if (reaperConsole && typeof reaperConsole.setMapVisible === 'function') {
-      reaperConsole.setMapVisible(this.active && this.viewMode === 'map');
-    }
     const surfaceHost = typeof window === 'undefined' ? null : window.WorkspaceSurfaceHost;
     if (surfaceHost && typeof surfaceHost.setMapVisible === 'function') {
       surfaceHost.setMapVisible(this.active && this.viewMode === 'map');
@@ -6328,7 +6310,7 @@ export class WorkspaceCommandView {
       ? this.commanderLabel(agent.profile && agent.profile.role)
       : '';
     // Station title (design consideration): pair role with the workspace it's
-    // stationed in, e.g. "Commander · Reaper Studio" — this is how
+    // stationed in, e.g. "Commander · Production" — this is how
     // domain-specialized identity is displayed without existing in the catalog.
     const wsName = String(
       (this.page && this.page.workspace && this.page.workspace.name) || ''

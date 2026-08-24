@@ -173,7 +173,7 @@ func TestNewTemplate_InvalidWizardFailsClosed(t *testing.T) {
 		},
 		{
 			name:     "undeclared plugin reference",
-			wizard:   `{"version": 1, "title": "T", "steps": [{"id": "s", "kind": "plugin_readiness", "requirement_key": "other-plugin", "adapter": "reaper_song", "required": true}]}`,
+			wizard:   `{"version": 1, "title": "T", "steps": [{"id": "s", "kind": "plugin_readiness", "requirement_key": "other-plugin", "adapter": "calendar_ops", "required": true}]}`,
 			contains: "does not declare in tools.plugins",
 		},
 		{
@@ -188,12 +188,12 @@ func TestNewTemplate_InvalidWizardFailsClosed(t *testing.T) {
 		},
 		{
 			name:     "runtime step cannot override adapter",
-			wizard:   `{"version": 1, "title": "T", "steps": [{"id": "s", "kind": "runtime_readiness", "requirement_key": "runtime", "adapter": "reaper_song", "required": true}]}`,
+			wizard:   `{"version": 1, "title": "T", "steps": [{"id": "s", "kind": "runtime_readiness", "requirement_key": "runtime", "adapter": "calendar_ops", "required": true}]}`,
 			contains: "takes no adapter",
 		},
 		{
 			name:     "runtime mode cannot override service",
-			wizard:   `{"version": 1, "title": "T", "steps": [{"id": "s", "kind": "runtime_mode", "adapter": "reaper_song", "required": true}]}`,
+			wizard:   `{"version": 1, "title": "T", "steps": [{"id": "s", "kind": "runtime_mode", "adapter": "calendar_ops", "required": true}]}`,
 			contains: "runtime service owns mode selection",
 		},
 		{
@@ -272,7 +272,7 @@ func TestNewTemplate_InvalidWizardFailsClosed(t *testing.T) {
 				"name": "Demo",
 				"description": "Still loads",
 				"tools": {"plugins": ["reaper-plugin"]},
-				"runtime_requirements": {"schema_version": 1, "operating_modes": [{"id":"default","label":"Default","description":"Use runtime.","requires":["runtime"]}], "requirements": [{"key":"runtime","label":"Runtime","description":"Configure it.","adapter":"reaper_live_control"}]},
+				"runtime_requirements": {"schema_version": 1, "operating_modes": [{"id":"default","label":"Default","description":"Use runtime.","requires":["runtime"]}], "requirements": [{"key":"runtime","label":"Runtime","description":"Configure it.","adapter":"test_runtime"}]},
 				"capability_requirements": [{"key": "calendar"}],
 				"directory_requirements": [{"key": "downloads-root", "label": "Downloads folder"}],
 				"starter_tasks": [{"description": "Do the thing"}],
@@ -327,8 +327,8 @@ func TestValidateSetupWizard_AcceptsEveryAllowlistedKind(t *testing.T) {
 		[]string{"reaper-plugin"},
 		&RuntimeRequirementsContract{
 			SchemaVersion:  RuntimeRequirementsSchemaVersion,
-			OperatingModes: []RuntimeOperatingMode{{ID: "assisted", Label: "Assisted", Description: "Use runtime.", Requires: []string{"reaper_live_control"}}},
-			Requirements:   []RuntimeRequirement{{Key: "reaper_live_control", Label: "REAPER", Description: "Control REAPER.", Adapter: "reaper_live_control"}},
+			OperatingModes: []RuntimeOperatingMode{{ID: "assisted", Label: "Assisted", Description: "Use runtime.", Requires: []string{"test_runtime"}}},
+			Requirements:   []RuntimeRequirement{{Key: "test_runtime", Label: "REAPER", Description: "Control REAPER.", Adapter: "test_runtime"}},
 		},
 	)
 	required := true
@@ -338,10 +338,10 @@ func TestValidateSetupWizard_AcceptsEveryAllowlistedKind(t *testing.T) {
 		{ID: "connect", Kind: "capability_connect", RequirementKey: "calendar", Adapter: "calendar_ops", Required: &required},
 		{ID: "configure", Kind: "capability_configure", RequirementKey: "calendar", Adapter: "calendar_ops", Required: &required},
 		{ID: "mailbox", Kind: "account_link", RequirementKey: "email", Adapter: "email_ops", Required: &required},
-		{ID: "plugin", Kind: "plugin_readiness", RequirementKey: "reaper-plugin", Adapter: "reaper_song", Required: &required},
+		{ID: "plugin", Kind: "plugin_readiness", RequirementKey: "reaper-plugin", Adapter: "calendar_ops", Required: &required},
 		{ID: "readiness", Kind: "readiness", Adapter: "downloads_janitor", Required: &required},
 		{ID: "runtime-mode", Kind: "runtime_mode", Required: &required},
-		{ID: "runtime", Kind: "runtime_readiness", RequirementKey: "reaper_live_control", Required: &required},
+		{ID: "runtime", Kind: "runtime_readiness", RequirementKey: "test_runtime", Required: &required},
 		{ID: "summary", Kind: "summary", Required: &required},
 	}
 	if len(steps) != len(workspace.ValidSetupStepKinds()) {
@@ -478,8 +478,8 @@ func TestBuiltinStarters_DeclareOnlyValidSetupWizards(t *testing.T) {
 	}
 }
 
-func TestValidSetupWizardAdapters_CoversTheFourMigratedBlueprints(t *testing.T) {
-	for _, want := range []string{"downloads_janitor", "calendar_ops", "email_ops", "reaper_song"} {
+func TestValidSetupWizardAdapters_CoversShippedBlueprints(t *testing.T) {
+	for _, want := range []string{"downloads_janitor", "calendar_ops", "email_ops"} {
 		if !isKnownSetupWizardAdapter(want) {
 			t.Errorf("adapter %q must be authorable", want)
 		}
@@ -494,7 +494,7 @@ func TestValidSetupWizardAdapters_CoversTheFourMigratedBlueprints(t *testing.T) 
 // TestShippedBlueprintsDeclareRunnableWizards is the cross-check none of the
 // per-blueprint tests can make: every current adapter this build allows is
 // used by a shipped blueprint, and every shipped wizard names an adapter this
-// build implements. The legacy reaper_song adapter remains authorable only so
+// build implements. The legacy calendar_ops adapter remains authorable only so
 // older custom manifests keep loading; the built-in now uses runtime steps.
 func TestShippedBlueprintsDeclareRunnableWizards(t *testing.T) {
 	libDir := filepath.Join(t.TempDir(), "templates")
@@ -504,7 +504,7 @@ func TestShippedBlueprintsDeclareRunnableWizards(t *testing.T) {
 
 	// Blueprints that existed before wizards and gained one by migration. They
 	// must carry builtin_version >= 2 so existing installs refresh.
-	migrated := []string{"downloads-janitor", "calendar-ops", "email-ops", "reaper-song"}
+	migrated := []string{"downloads-janitor", "calendar-ops", "email-ops"}
 	// Blueprints that shipped with a wizard from their first release. There are
 	// no pre-wizard installs of these to refresh, so version 1 is correct and
 	// requiring a bump would only invite a meaningless one.
@@ -542,7 +542,7 @@ func TestShippedBlueprintsDeclareRunnableWizards(t *testing.T) {
 		}
 	}
 	for _, adapter := range ValidSetupWizardAdapters {
-		if adapter == "reaper_song" {
+		if adapter == "calendar_ops" {
 			continue
 		}
 		if !used[adapter] {

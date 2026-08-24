@@ -52,7 +52,7 @@ func TestLoadFolderUsesInjectedCapabilityAndProviderCatalog(t *testing.T) {
 
 func TestDefaultRuntimeCatalogKeepsOlderBuiltinTemplatesResolvable(t *testing.T) {
 	catalog := defaultRuntimeCatalog()
-	if !catalog.HasCapability("file-janitor") || !catalog.HasRuntimeAdapter("reaper_live_control") {
+	if !catalog.HasCapability("file-janitor") || !catalog.HasRuntimeAdapter("test_runtime") {
 		t.Fatal("default built-in catalog lost an existing provider")
 	}
 	if catalog.HasCapability("unknown-plugin-capability") || catalog.HasRuntimeAdapter("plugin:missing:provider") {

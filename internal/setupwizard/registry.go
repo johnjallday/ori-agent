@@ -2,7 +2,7 @@
 // steps a workspace must satisfy after it is created. It owns the lifecycle
 // (open, resume, dismiss, skip, complete, repair) and the readiness decisions;
 // the domain work itself belongs to registered adapters, which call the
-// existing Downloads Janitor, Calendar, email, plugin, and REAPER services
+// existing Downloads Janitor, Calendar, email, and plugin services
 // rather than reimplementing them.
 //
 // Two boundaries define this package:
@@ -102,7 +102,7 @@ type StepReadiness struct {
 	// ErrorCategory is one of the stable categories above when the step cannot
 	// pass. Empty when Ready.
 	ErrorCategory string
-	// Options are the choices this step offers, when it offers any (e.g. REAPER's
+	// Options are the choices this step offers, when it offers any (for example a
 	// file-only versus Ori-assisted modes). The IDs are the only option values a
 	// client may send back.
 	Options []StepOption
@@ -155,7 +155,7 @@ type StepRequest struct {
 	SelectedOption string
 	// Selections is every choice recorded across this wizard, keyed by step ID.
 	// A later step usually has to honor a decision made on an earlier one — the
-	// step that asks how REAPER should work is not the step that then checks the
+	// step that asks how a provider should work is not the step that then checks the
 	// prerequisites for that answer — and this is where it reads it.
 	Selections map[string]string
 }

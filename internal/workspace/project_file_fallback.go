@@ -186,6 +186,10 @@ func readProjectFallbackFile(path string) ([]byte, os.FileMode, error) {
 		return nil, 0, err
 	}
 	defer func() { _ = file.Close() }()
+	openedInfo, err := file.Stat()
+	if err != nil || !openedInfo.Mode().IsRegular() || !os.SameFile(info, openedInfo) {
+		return nil, 0, ErrProjectFileFallbackUnavailable
+	}
 	data, err := io.ReadAll(io.LimitReader(file, maxProjectFileFallbackBytes+1))
 	if err != nil || int64(len(data)) > maxProjectFileFallbackBytes {
 		return nil, 0, ErrProjectFileFallbackUnavailable

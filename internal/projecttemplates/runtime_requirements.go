@@ -38,9 +38,7 @@ const (
 // runtime adapter IDs. Values are lookup keys only; manifests cannot provide
 // implementation packages, paths, commands, or endpoints. A parity test with
 // the runtime registry keeps this list resolvable as adapters are introduced.
-var ValidRuntimeRequirementAdapters = []string{
-	"reaper_live_control",
-}
+var ValidRuntimeRequirementAdapters = []string{}
 
 type runtimeRequirementsDecl struct {
 	SchemaVersion  int                        `json:"schema_version"`
@@ -129,13 +127,21 @@ func validateRuntimeStarterTaskReferences(tasks []StarterTask, contract *Runtime
 		required := workspace.NormalizeCapabilityKeys(task.Requires)
 		for _, rawKey := range task.Requires {
 			key := workspace.NormalizeRuntimeIdentifier(rawKey)
-			if key == "" || !slices.Contains(ValidRuntimeRequirementAdapters, key) {
+			if key == "" {
 				continue
 			}
-			if contract == nil {
-				return fmt.Errorf("%w: starter task %q references runtime requirement %q, but the blueprint declares no runtime_requirements contract", ErrInvalidRuntimeRequirements, task.Description, key)
+			if contract != nil {
+				if _, declared := contract.Requirement(key); declared {
+					continue
+				}
 			}
-			if _, declared := contract.Requirement(key); !declared {
+			// Only compiled authoring keys are unambiguously runtime-shaped when
+			// no contract declares them. Plugin capability keys are interpreted
+			// through the injected catalog and contract, never a global name list.
+			if slices.Contains(ValidRuntimeRequirementAdapters, key) {
+				if contract == nil {
+					return fmt.Errorf("%w: starter task %q references runtime requirement %q, but the blueprint declares no runtime_requirements contract", ErrInvalidRuntimeRequirements, task.Description, key)
+				}
 				return fmt.Errorf("%w: starter task %q references undeclared runtime requirement %q", ErrInvalidRuntimeRequirements, task.Description, key)
 			}
 		}
@@ -144,7 +150,7 @@ func validateRuntimeStarterTaskReferences(tasks []StarterTask, contract *Runtime
 			if key == "" || !slices.Contains(required, key) {
 				return fmt.Errorf("%w: starter task %q file fallback %q must also be a required capability", ErrInvalidRuntimeRequirements, task.Description, rawKey)
 			}
-			if !slices.Contains(ValidRuntimeRequirementAdapters, key) || contract == nil {
+			if contract == nil {
 				return fmt.Errorf("%w: starter task %q file fallback %q is not a declared runtime requirement", ErrInvalidRuntimeRequirements, task.Description, key)
 			}
 			if _, declared := contract.Requirement(key); !declared {

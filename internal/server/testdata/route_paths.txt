@@ -127,7 +127,7 @@
 /api/plugins/install
 /api/plugins/marketplaces
 /api/plugins/marketplaces/install
-/api/plugins/reaper-plugin/enable
+/api/plugins/demo-plugin/enable
 /api/plugins/tool-call
 /api/progression
 /api/progression/dismiss
@@ -139,7 +139,6 @@
 /api/prompt-variables
 /api/prompt-variables/preview
 /api/providers
-/api/reaper-setup/preview
 /api/reset
 /api/sessions
 /api/sessions/auto-classify
@@ -211,7 +210,7 @@
 /api/workspaces/workspace
 /api/workspaces/workspace-1
 /api/workspaces/ws
-/api/workspaces/ws-1/agents/ReaperDAW
+/api/workspaces/ws-1/agents/Specialist
 /api/workspaces/ws-1/notes
 /api/workspaces/x
 /api/workspaces/x/agents

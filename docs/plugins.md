@@ -172,7 +172,7 @@ Each operation declares:
 - bounded input and output JSON schemas;
 - `max_output_bytes`;
 - a fixed timeout class;
-- one policy (`read_only` or `confirmation_required` in v1); and
+- one policy (`read_only`, `reversible`, or `confirmation_required` in v1); and
 - host-known symbolic scopes only.
 
 Schemas use the bounded v1 JSON Schema subset documented in the contract. Do
@@ -298,6 +298,21 @@ an explicit unsupported-platform projection. At minimum cover:
 Run Ori's affected Go/JavaScript/Playwright suites under the race detector where
 applicable. Never claim compatibility from compilation alone; preserve canonical
 fixture transcripts and observable browser/service evidence.
+
+### Extracted integrations and legacy workspaces
+
+A plugin can replace a previously compiled integration without migrating old
+workspace state. Ori does not infer attachment from names, tags, project file
+extensions, tasks, agents, or retired template provenance. Old records remain
+inert and receive the generic `provider_unavailable` setup result; manually
+attaching the plugin starts with fresh namespaced state and never imports a
+retired integration's pins, grants, setup history, or provenance.
+
+The first complete extracted integration is `reaper-plugin` version 0.3.0. Its
+Workspace Surface service currently declares only a **macOS arm64** artifact.
+Every other OS/architecture is explicitly unsupported and Ori must not launch a
+fallback binary. Portable Claude/Codex shell skills remain a separate plugin
+feature and do not weaken Ori's broker, grant, or confirmation boundary.
 
 ## Binary delivery
 

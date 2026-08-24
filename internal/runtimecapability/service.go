@@ -173,10 +173,6 @@ func (s *Service) EvaluateTaskCapabilityForTask(workspaceID string, task workspa
 	}
 	chooseAgentAction := &Action{Token: "choose_runtime_agent", Code: "choose_runtime_agent", Label: "Choose compatible agent"}
 	grantAction := &Action{Token: "grant_runtime_access", Code: "grant_runtime_access", Label: "Grant runtime access"}
-	if requirement.Adapter == "reaper_live_control" {
-		chooseAgentAction = &Action{Token: "choose_reaper_agent", Code: "choose_reaper_agent", Label: "Choose compatible agent"}
-		grantAction = &Action{Token: "grant_reaper_access", Code: "grant_reaper_access", Label: "Grant REAPER access"}
-	}
 	instance, found := findTaskAgentInstance(ws, task)
 	if !found {
 		return true, runtimeTaskBlocked(ws.FolderSlug, &Blocker{

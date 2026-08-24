@@ -45,7 +45,7 @@ func TestTemplatesRootSettingsHandler_Post(t *testing.T) {
 	}
 
 	// Changing the root materializes the library there (starters included).
-	if _, err := os.Stat(filepath.Join(customRoot, "reaper-song")); err != nil {
+	if _, err := os.Stat(filepath.Join(customRoot, "writing-project")); err != nil {
 		t.Fatalf("expected starter templates in new root: %v", err)
 	}
 

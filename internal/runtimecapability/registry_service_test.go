@@ -136,7 +136,7 @@ func TestBuiltinRegistryMatchesAuthoringAllowlist(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewBuiltinRegistry: %v", err)
 	}
-	if got, want := registry.IDs(), append([]string(nil), projecttemplates.ValidRuntimeRequirementAdapters...); !reflect.DeepEqual(got, want) {
+	if got, want := registry.IDs(), append([]string{}, projecttemplates.ValidRuntimeRequirementAdapters...); !reflect.DeepEqual(got, want) {
 		t.Fatalf("runtime adapter parity changed:\n registry %v\nauthoring %v", got, want)
 	}
 }

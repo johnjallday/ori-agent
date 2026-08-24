@@ -11,7 +11,6 @@ import (
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
-	"github.com/johnjallday/ori-agent/internal/reapersetup"
 	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -27,12 +26,6 @@ const (
 	// completed on the user's behalf. It is also the idempotency key: a second
 	// completion attempt finds the marker and changes nothing.
 	taskContextSetupWizardCompletedAt = "setup_wizard_completed_at"
-)
-
-const (
-	legacyReaperSetupTaskDescription = "Help with the REAPER setup choices"
-	legacyReaperSetupTaskDetails     = "Optional help while the Setup Wizard is open. The wizard owns setup: it asks how Ori should work with REAPER — file only, or Ori-assisted — and, for the assisted path, walks through installing and enabling the plugin, attaching it, assigning a compatible CLI agent, and the two native-access permissions. Your job here is to explain what each choice means. Be exact about the limit: even when every prerequisite is in place, that means Ori is *configured* to attempt live control, not that REAPER is running, the project is open, or Web Remote is reachable. Do not install, enable, or grant anything for the user, and do not claim setup is complete. Ori completes this task by itself once setup passes."
-	legacyReaperSetupSupersededNote  = "Superseded by the blueprint's deterministic runtime setup. No agent ran for this task."
 )
 
 // setupWizardCompletionNote is the system-authored result recorded on a setup
@@ -122,63 +115,6 @@ func (h *Handler) seedTemplateStarterTasksLogged(workspaceID string, tpl project
 	return seeded
 }
 
-// seedTemplatePinnedReaperScripts writes the template's starter pinned-action
-// pack onto the new workspace's own PinnedReaperScripts (task 3.1). Each ID is
-// resolved against the live catalog/script library only at render time
-// (internal/reaperhttp), not here — this just carries the template's declared
-// list onto the workspace record, exactly like seedTemplateStarterTasks
-// carries StarterTasks onto ws.Tasks, and through the same store.Update.
-//
-// Best-effort by contract: callers log the error and continue, a failure must
-// never fail workspace creation.
-func (h *Handler) seedTemplatePinnedReaperScripts(workspaceID string, tpl projecttemplates.Template) (int, error) {
-	if h == nil || len(tpl.PinnedReaperScripts) == 0 {
-		return 0, nil
-	}
-	store := h.taskMutationStore()
-	if store == nil {
-		return 0, nil
-	}
-	id := strings.TrimSpace(workspaceID)
-	if id == "" {
-		return 0, nil
-	}
-
-	seeded := 0
-	err := store.Update(id, func(ws *agentworkspace.Workspace) error {
-		// A freshly created workspace has no pins of its own yet; overwrite
-		// rather than append so a retried/duplicated seed call stays
-		// idempotent instead of doubling the starter pack.
-		ws.PinnedReaperScripts = append([]string(nil), tpl.PinnedReaperScripts...)
-		// Required so a later, unrelated store.Update on this workspace (e.g.
-		// persistCreateWorkspaceTemplateProvenance right after this call)
-		// doesn't read the pins back from the lean SQLite-primary projection
-		// and silently overwrite what was just seeded — see
-		// workspace.Workspace's pinnedReaperScriptsExplicit doc comment.
-		ws.MarkPinnedReaperScriptsExplicit()
-		seeded = len(ws.PinnedReaperScripts)
-		return nil
-	})
-	if err != nil {
-		return 0, err
-	}
-	return seeded, nil
-}
-
-// seedTemplatePinnedReaperScriptsLogged mirrors
-// seedTemplateStarterTasksLogged: best-effort, logged, returns 0 on failure.
-func (h *Handler) seedTemplatePinnedReaperScriptsLogged(workspaceID string, tpl projecttemplates.Template) int {
-	seeded, err := h.seedTemplatePinnedReaperScripts(workspaceID, tpl)
-	if err != nil {
-		logger.Warn("Failed to seed template pinned REAPER scripts", logger.Fields{"workspace_id": workspaceID, "template": tpl.ID, "error": err})
-		return 0
-	}
-	if seeded > 0 {
-		logger.Info("Seeded template pinned REAPER scripts", logger.Fields{"workspace_id": workspaceID, "template": tpl.ID, "seeded": seeded})
-	}
-	return seeded
-}
-
 // handleTemplateSetupStart serves POST /api/workspaces/{id}/template-setup/start:
 // the first-open auto-start trigger for a template's setup task. Inside a
 // single store Update it finds the unconsumed setup task and stamps the
@@ -213,25 +149,6 @@ func (h *Handler) handleTemplateSetupStart(w http.ResponseWriter, r *http.Reques
 			"reason":  "setup_wizard_owned",
 		})
 		return
-	}
-
-	// Gate on normalized readiness BEFORE reserving/writing the consumed marker.
-	// For a REAPER workspace, auto-start proceeds only when Ori is configured to
-	// attempt live control (ori_ready). Otherwise the setup task is left pending
-	// and unconsumed with a stable blocker reason, so a later readiness change
-	// (repair, enable, permission) still auto-starts it exactly once. Non-REAPER
-	// templates are not identified and keep the prior behavior.
-	if h.reaperResolver != nil {
-		if readiness, rerr := h.reaperResolver.Resolve(workspaceID); rerr == nil && readiness.Identified && readiness.Status != reapersetup.StatusOriReady {
-			_ = orihttp.RespondSuccess(w, map[string]any{
-				"success":          true,
-				"started":          false,
-				"reason":           "not_ready",
-				"readiness_status": string(readiness.Status),
-				"readiness":        readiness,
-			})
-			return
-		}
 	}
 
 	var (
@@ -339,58 +256,6 @@ func isNilPointer(v any) bool {
 		return value.IsNil()
 	default:
 		return false
-	}
-}
-
-// SupersedeLegacyReaperSetupHelpTask deterministically closes only the exact
-// untouched pending setup-help task shipped by Reaper Song before runtime
-// setup. User-edited, started, completed, failed, or historical tasks are left
-// byte-for-byte alone. Replays are no-ops and no agent/model path is reachable.
-func (h *Handler) SupersedeLegacyReaperSetupHelpTask(workspaceID string) {
-	if h == nil || strings.TrimSpace(workspaceID) == "" {
-		return
-	}
-	store := h.taskMutationStore()
-	if store == nil {
-		return
-	}
-	var supersededTaskID string
-	err := store.Update(strings.TrimSpace(workspaceID), func(ws *agentworkspace.Workspace) error {
-		if ws == nil || !ws.IsFromTemplate(reapersetup.ReaperSongTemplateID) {
-			return errTemplateSetupNoChange
-		}
-		for i := range ws.Tasks {
-			task := &ws.Tasks[i]
-			if task.Status != agentworkspace.TaskStatusPending ||
-				task.Description != legacyReaperSetupTaskDescription ||
-				task.Details != legacyReaperSetupTaskDetails ||
-				task.Context[taskContextTemplateID] != reapersetup.ReaperSongTemplateID ||
-				task.Context[taskContextTemplateStarterTask] != true ||
-				task.Context[taskContextTemplateSetup] != true ||
-				task.StartedAt != nil || task.CompletedAt != nil || strings.TrimSpace(task.Result) != "" ||
-				strings.TrimSpace(task.Error) != "" || task.ExecutionCount != 0 || len(task.ExecutionHistory) != 0 ||
-				len(task.ExecutionTrace) != 0 || strings.TrimSpace(task.CurrentRunID) != "" {
-				continue
-			}
-			if _, consumed := task.Context[taskContextSetupConsumedAt]; consumed {
-				continue
-			}
-			now := time.Now().UTC()
-			task.Status = agentworkspace.TaskStatusCompleted
-			task.CompletedAt = &now
-			task.Result = legacyReaperSetupSupersededNote
-			task.Context[taskContextSetupWizardCompletedAt] = now.Format(time.RFC3339)
-			supersededTaskID = task.ID
-			return nil
-		}
-		return errTemplateSetupNoChange
-	})
-	if err != nil && !errors.Is(err, errTemplateSetupNoChange) {
-		logger.Warn("Failed to supersede legacy REAPER setup task", logger.Fields{"workspace_id": workspaceID, "error": err})
-		return
-	}
-	if supersededTaskID != "" {
-		logger.Info("Superseded legacy REAPER setup task", logger.Fields{"workspace_id": workspaceID, "task_id": supersededTaskID})
 	}
 }
 

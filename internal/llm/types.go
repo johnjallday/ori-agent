@@ -69,7 +69,7 @@ type ChatRequest struct {
 // CLINetworkPosture describes what local connectivity a scoped CLI task needs.
 // Capability-local means general shell network remains disabled: loopback is
 // reached only through a compiled capability-owned MCP/helper operation. This
-// avoids turning one REAPER grant into unrestricted prompt-controlled egress.
+// avoids turning one runtime grant into unrestricted prompt-controlled egress.
 type CLINetworkPosture string
 
 const (
@@ -109,7 +109,7 @@ func CloneCLIExecutionScope(scope *CLIExecutionScope) *CLIExecutionScope {
 // provider (Claude Code / Codex) so its CLI can connect to the server directly.
 type MCPServerSpec struct {
 	// Name is the logical server name used as the MCP-config key (CLI-safe;
-	// e.g. "ori-reaper", not the colon-bearing runtime name).
+	// e.g. an owner slug, not the colon-bearing runtime name).
 	Name string
 
 	// Command is the absolute executable to launch the stdio MCP server.

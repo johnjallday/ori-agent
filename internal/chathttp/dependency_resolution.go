@@ -290,7 +290,7 @@ func looksLikeExternalProviderPermissionDenial(lower string) bool {
 		strings.Contains(lower, "enable the `mcp__"),
 		strings.Contains(lower, "enable the 'mcp__"),
 		strings.Contains(lower, "enable the \"mcp__"):
-		return strings.Contains(lower, "tool") || strings.Contains(lower, "mcp") || strings.Contains(lower, "reaper")
+		return strings.Contains(lower, "tool") || strings.Contains(lower, "mcp")
 	default:
 		return false
 	}
@@ -298,10 +298,6 @@ func looksLikeExternalProviderPermissionDenial(lower string) bool {
 
 func inferPermissionDependencyTarget(responseText string) (displayName, serverName string) {
 	lower := strings.ToLower(responseText)
-
-	if strings.Contains(lower, "mcp__ori-reaper") || strings.Contains(lower, "ori-reaper") || strings.Contains(lower, "reaper") {
-		return "REAPER MCP tool", "ori-reaper"
-	}
 
 	if matches := dependencyResolutionMCPTargetPattern.FindStringSubmatch(lower); len(matches) == 2 {
 		serverName = strings.TrimSpace(matches[1])
@@ -325,9 +321,6 @@ func humanizeDependencyServerName(serverName string) string {
 	cleaned := strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(serverName, "mcp__"), "ori-"))
 	if cleaned == "" {
 		return ""
-	}
-	if strings.EqualFold(cleaned, "reaper") {
-		return "REAPER"
 	}
 	parts := strings.FieldsFunc(cleaned, func(r rune) bool {
 		return r == '-' || r == '_' || r == '.'

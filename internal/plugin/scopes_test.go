@@ -15,11 +15,11 @@ func TestHostSymbolicScopeResolverUsesOnlyCanonicalHostRoots(t *testing.T) {
 	pluginRoot := filepath.Join(t.TempDir(), "plugin-data")
 	scope, err := (HostSymbolicScopeResolver{}).Resolve(context.Background(), workspacesurface.WorkspaceContext{
 		WorkspaceID: "workspace-a", WorkspaceRoot: workspaceRoot, PluginDataRoot: pluginRoot,
-	}, []string{"workspace_project_read", "workspace_project_write", "plugin_data_write", "loopback_reaper"})
+	}, []string{"workspace_project_read", "workspace_project_write", "plugin_data_write"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if scope.NetworkPosture != runtimecapability.CapabilityNetworkLocal || len(scope.AdditionalWritableRoots) != 2 {
+	if scope.NetworkPosture != runtimecapability.CapabilityNetworkDisabled || len(scope.AdditionalWritableRoots) != 2 {
 		t.Fatalf("scope = %+v", scope)
 	}
 	resolvedWorkspace, _ := filepath.EvalSymlinks(workspaceRoot)
@@ -36,7 +36,7 @@ func TestHostSymbolicScopeResolverRejectsRawUnknownAndSymlinkRoots(t *testing.T)
 	contextValue := workspacesurface.WorkspaceContext{
 		WorkspaceID: "workspace-a", WorkspaceRoot: workspaceRoot, PluginDataRoot: filepath.Join(t.TempDir(), "data"),
 	}
-	for _, symbol := range []string{"/tmp/write-here", "https://example.test", "workspace_broadened_write", "reaper_runner_exchange"} {
+	for _, symbol := range []string{"/tmp/write-here", "https://example.test", "workspace_broadened_write", "external_exchange_write"} {
 		if _, err := (HostSymbolicScopeResolver{}).Resolve(context.Background(), contextValue, []string{symbol}); err == nil {
 			t.Fatalf("scope %q was accepted", symbol)
 		}

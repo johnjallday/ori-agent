@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -213,7 +214,7 @@ func writeRuntimeRequirementTemplate(t *testing.T, libDir, modeLabel string) {
 				{"id":"limited","label":"Limited","description":"Use files."},
 				{"id":"assisted","label":"` + modeLabel + `","description":"Use live control.","requires":["runtime"]}
 			],
-			"requirements":[{"key":"runtime","label":"Runtime","description":"Configure local runtime.","adapter":"reaper_live_control"}]
+			"requirements":[{"key":"runtime","label":"Runtime","description":"Configure local runtime.","adapter":"test_runtime"}]
 		}
 	}`
 	if err := os.WriteFile(filepath.Join(dir, "template.json"), []byte(manifest), 0o640); err != nil {
@@ -225,6 +226,9 @@ func writeRuntimeRequirementTemplate(t *testing.T, libDir, modeLabel string) {
 }
 
 func TestCreateWorkspace_SnapshotsCustomRuntimeRequirementsIntoProvenance(t *testing.T) {
+	previousAdapters := append([]string(nil), projecttemplates.ValidRuntimeRequirementAdapters...)
+	projecttemplates.ValidRuntimeRequirementAdapters = []string{"test_runtime"}
+	t.Cleanup(func() { projecttemplates.ValidRuntimeRequirementAdapters = previousAdapters })
 	handler, _, _, cleanup := templateTestEnv(t)
 	defer cleanup()
 
@@ -245,7 +249,7 @@ func TestCreateWorkspace_SnapshotsCustomRuntimeRequirementsIntoProvenance(t *tes
 	if provenance == nil || provenance.RuntimeRequirements == nil {
 		t.Fatalf("custom runtime blueprint did not persist provenance: %+v", provenance)
 	}
-	if provenance.RuntimeRequirements.OperatingModes[1].Label != "Assisted" || provenance.RuntimeRequirements.Requirements[0].Adapter != "reaper_live_control" {
+	if provenance.RuntimeRequirements.OperatingModes[1].Label != "Assisted" || provenance.RuntimeRequirements.Requirements[0].Adapter != "test_runtime" {
 		t.Fatalf("runtime snapshot changed during creation: %+v", provenance.RuntimeRequirements)
 	}
 
