@@ -648,7 +648,7 @@ func (b *ServerBuilder) initializeOrchestration() error {
 	b.taskCapabilityGate = gate
 	handler.SetTaskCapabilityGate(gate)
 	if b.workspaceFileStore != nil {
-		handler.SetTaskFileFallbackPreparer(reapersetup.NewFileFallbackPreparer(b.workspaceFileStore))
+		handler.SetTaskFileFallbackPreparer(workspace.NewProjectFileFallbackPreparer(b.workspaceFileStore))
 	}
 
 	// Template-setup first-open auto-start runs seeded tasks through the same

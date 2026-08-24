@@ -26,24 +26,37 @@ func trustedWorkspaceProjectEntry(root string, ws *workspace.Workspace) string {
 	if projectPath == "." || filepath.IsAbs(projectPath) || strings.HasPrefix(projectPath, ".."+string(filepath.Separator)) {
 		return ""
 	}
-	candidate := filepath.Join(root, projectPath, filepath.FromSlash(entry))
+	candidates := []string{filepath.Join(root, projectPath, filepath.FromSlash(entry))}
+	// Folder-capable stores may resolve a workspace either to its metadata
+	// folder or directly to its selected project directory. The latter is
+	// accepted only when the trusted root basename exactly matches ProjectPath;
+	// arbitrary fallback searching remains forbidden.
+	if filepath.Base(root) == filepath.Base(projectPath) {
+		candidates = append(candidates, filepath.Join(root, filepath.FromSlash(entry)))
+	}
+	for _, candidate := range candidates {
+		if trustedContainedRegularFile(root, candidate) {
+			return filepath.Clean(candidate)
+		}
+	}
+	return ""
+}
+
+func trustedContainedRegularFile(root, candidate string) bool {
 	relative, err := filepath.Rel(root, candidate)
 	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-		return ""
+		return false
 	}
 	current := filepath.Clean(root)
 	for _, part := range strings.Split(relative, string(filepath.Separator)) {
 		current = filepath.Join(current, part)
 		info, statErr := os.Lstat(current) // #nosec G304 -- every validated relative component remains under the canonical workspace root
 		if statErr != nil || info.Mode()&os.ModeSymlink != 0 {
-			return ""
+			return false
 		}
 	}
 	info, err := os.Lstat(candidate) // #nosec G304 -- exact contained project entry checked above
-	if err != nil || !info.Mode().IsRegular() {
-		return ""
-	}
-	return filepath.Clean(candidate)
+	return err == nil && info.Mode().IsRegular()
 }
 
 // wireWorkspaceSurfaces constructs one process-wide registry and one generic
@@ -87,11 +100,20 @@ func (b *ServerBuilder) wireWorkspaceSurfaces() {
 				root = filepath.Clean(resolved)
 			}
 		}
+		var projectWorkspace *workspace.Workspace
 		if b.workspaceStore != nil {
-			if ws, err := b.workspaceStore.Get(workspaceID); err == nil && ws != nil {
-				projectEntry = trustedWorkspaceProjectEntry(root, ws)
+			projectWorkspace, _ = b.workspaceStore.Get(workspaceID)
+		}
+		// Project files and their containing root are one authority. Prefer the
+		// same FileStore snapshot that supplied root so an eventually consistent
+		// catalog/cache cannot erase freshly-created template provenance from a
+		// service invocation context.
+		if b.workspaceFileStore != nil {
+			if stored, err := b.workspaceFileStore.Get(workspaceID); err == nil && stored != nil {
+				projectWorkspace = stored
 			}
 		}
+		projectEntry = trustedWorkspaceProjectEntry(root, projectWorkspace)
 		return workspacesurface.WorkspaceContext{
 			WorkspaceID: workspaceID, WorkspaceRoot: root, ProjectEntry: projectEntry,
 			PluginDataRoot: filepath.Join(config.DefaultDataDir(), "plugins", "state", pluginID),

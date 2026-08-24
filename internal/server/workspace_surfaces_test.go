@@ -34,6 +34,22 @@ func TestTrustedWorkspaceProjectEntryRejectsTraversalAndSymlinks(t *testing.T) {
 	if got := trustedWorkspaceProjectEntry(root, ws); got != entry {
 		t.Fatalf("entry = %q", got)
 	}
+	if got := trustedWorkspaceProjectEntry(project, ws); got != entry {
+		t.Fatalf("project-directory root entry = %q", got)
+	}
+	decoy := filepath.Join(root, "song.rpp")
+	if err := os.WriteFile(decoy, []byte("wrong level"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(entry); err != nil {
+		t.Fatal(err)
+	}
+	if got := trustedWorkspaceProjectEntry(root, ws); got != "" {
+		t.Fatalf("metadata root accepted wrong-level decoy = %q", got)
+	}
+	if err := os.WriteFile(entry, []byte("project"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	outside := filepath.Join(t.TempDir(), "outside.rpp")
 	if err := os.WriteFile(outside, []byte("outside"), 0o600); err != nil {
 		t.Fatal(err)
