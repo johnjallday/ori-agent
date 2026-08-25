@@ -2,8 +2,8 @@ package agents
 
 // This file is the `wt plan --issue <N> [--issue <N> ...]` command family:
 // turning one Ready Issue or an affirmed ordinary-backlog bundle into a durable
-// local snapshot, a highest-size-routed starter, and an issue-scoped Pi session
-// that begins the repository's
+// local snapshot, a highest-size-routed starter, and an issue-scoped Claude/Pi
+// session that begins the repository's
 // PRD/task-list workflow — never implementation.
 //
 // It is deliberately kept apart from feature handoff (service.go). A
@@ -83,8 +83,10 @@ const (
 type IssuePlanRequest struct {
 	IssueNumber  int
 	IssueNumbers []int
-	// PlannerModel is an optional, per-plan Pi model choice. Empty keeps the
-	// integration default. It never inherits the feature primary or role model.
+	// PlannerKind is an optional per-plan choice restricted to Claude or Pi;
+	// empty preserves the historical Pi default. PlannerModel is available only
+	// for Pi. Neither value inherits feature primary or role defaults.
+	PlannerKind  string
 	PlannerModel string
 	// DevWorktreePath is the repository's canonical ori-agent-dev planning
 	// worktree, validated against Git the same way HandoffRequest.WorktreePath
@@ -122,10 +124,10 @@ type IssuePlan struct {
 	// asking clarifying questions again.
 	ExistingPRD   bool
 	ArtifactState IssueArtifactState
-	// PlannerKind is always "pi". It is a field, not a config read, because
-	// planning must never depend on or change the configured default agent kind.
+	// PlannerKind is the effective explicit planning agent (Claude or Pi). It is
+	// never read from feature primary/role defaults.
 	PlannerKind string
-	// PlannerModel is the effective per-plan model intent. Empty means the Pi
+	// PlannerModel is the effective per-plan Pi model intent. Empty means the Pi
 	// integration default; it never comes from primary or role defaults.
 	PlannerModel string
 	// WorkspaceState/WorkspaceLabel are a best-effort, read-only hint about
@@ -179,8 +181,8 @@ func (s *Service) BuildIssuePlan(ctx context.Context, req IssuePlanRequest) (Iss
 	if err != nil {
 		return IssuePlan{}, err
 	}
-	if err := config.ValidateAgentModel(req.PlannerModel); err != nil {
-		return IssuePlan{}, &model.StageError{Stage: "validate planner model", Code: model.ErrConfigInvalid, Message: "the requested planner model is invalid", Recovery: "choose a bounded model value without control characters or a leading dash", Cause: err}
+	if err := validateRequestedPlannerSelection(req.PlannerKind, req.PlannerModel); err != nil {
+		return IssuePlan{}, err
 	}
 	if req.DevWorktreePath == "" {
 		return IssuePlan{}, &model.StageError{Stage: "resolve issue", Code: model.ErrWorktreeInvalid, Message: "the ori-agent-dev planning worktree could not be found", Recovery: "run wt plan from a checkout with a dev worktree"}
@@ -242,7 +244,7 @@ func (s *Service) BuildIssuePlan(ctx context.Context, req IssuePlanRequest) (Iss
 		return IssuePlan{}, err
 	}
 
-	plannerModel, err := s.resolvePlanningModel(issueNumbers, req.PlannerModel)
+	plannerKind, plannerModel, err := s.resolvePlanningSelection(issueNumbers, req.PlannerKind, req.PlannerModel)
 	if err != nil {
 		return IssuePlan{}, err
 	}
@@ -262,7 +264,7 @@ func (s *Service) BuildIssuePlan(ctx context.Context, req IssuePlanRequest) (Iss
 		TasksDir:        tasksDir,
 		SnapshotPath:    filepath.Join(tasksDir, "issue-"+slug+".md"),
 		TaskListPath:    filepath.Join(tasksDir, "tasks-"+slug+".md"),
-		PlannerKind:     "pi",
+		PlannerKind:     plannerKind,
 		PlannerModel:    plannerModel,
 		issue:           primary,
 	}
@@ -301,7 +303,7 @@ func (s *Service) BuildIssuePlan(ctx context.Context, req IssuePlanRequest) (Iss
 }
 
 // ExecuteIssuePlan writes the confirmed planning files (if any remain to
-// write) and then places and prompts the Issue's Pi planner. A Herdr/Pi
+// write) and then places and prompts the selected planner. A Herdr/agent
 // failure is reported on the result as Degraded rather than returned as an
 // error: the files above are never rolled back, matching wt_herd_handoff's
 // contract for feature worktrees.
@@ -347,7 +349,7 @@ func (s *Service) executeIssuePlan(ctx context.Context, plan IssuePlan) (IssuePl
 	if s.Client == nil || s.Store == nil || !s.Config.Bridge.Enabled {
 		result.Degraded = true
 		result.DegradedStage = "herdr"
-		result.DegradedMessage = "Ori Herdr Devflow is disabled or unavailable; the planning files are ready without a Pi session."
+		result.DegradedMessage = "Ori Herdr Devflow is disabled or unavailable; the planning files are ready without a " + planningKindLabel(plan.PlannerKind) + " session."
 		result.DegradedRecovery = "wt herd doctor, then " + issuePlanCommand(plan.IssueNumbers)
 		return result, nil
 	}
@@ -452,11 +454,14 @@ func (s *Service) persistPlanningIntent(plan IssuePlan) error {
 		return &model.StageError{Stage: "resolve planning session", Code: model.ErrWorktreeInvalid, Message: "this Issue plan's session is already bound to a different dev worktree", Recovery: "inspect the other checkout, or remove its stale planning-session record"}
 	}
 	if found {
-		saved := session.PlannerModel
-		if saved == "" {
-			saved = session.Planner.Model
+		savedKind, savedModel, legacyCodex, selectionErr := recordedPlanningSelection(session)
+		if selectionErr != nil {
+			return &model.StageError{Stage: "resolve planner selection", Code: model.ErrStateCorrupt, Message: "the saved planning agent selection is invalid", Recovery: "inspect the planning-session record with wt herd doctor", Cause: selectionErr}
 		}
-		if saved != plan.PlannerModel {
+		if !legacyCodex && savedKind != plan.PlannerKind {
+			return &model.StageError{Stage: "resolve planner kind", Code: model.ErrConfigInvalid, Message: "this planning session already recorded a different agent kind", Recovery: "retry without --kind to reuse the recorded planning agent"}
+		}
+		if !legacyCodex && savedModel != plan.PlannerModel {
 			return &model.StageError{Stage: "resolve planner model", Code: model.ErrConfigInvalid, Message: "this planning session already recorded a different model intent", Recovery: "retry without --model to reuse the recorded planner model"}
 		}
 	} else {
@@ -467,6 +472,7 @@ func (s *Service) persistPlanningIntent(plan IssuePlan) error {
 	session.IssueNumbers = persistedPlanningMembers(plan.IssueNumbers)
 	session.Slug = plan.Slug
 	session.WorktreePath = plan.DevWorktreePath
+	session.PlannerKind = plan.PlannerKind
 	session.PlannerModel = plan.PlannerModel
 	if session.Stage == "" {
 		session.Stage = model.PlanningRecorded
@@ -480,7 +486,7 @@ func (s *Service) persistPlanningIntent(plan IssuePlan) error {
 }
 
 // placeAndPromptPlanner records the planning session, places its tab, starts
-// (or reuses) its Pi agent, and delivers the bootstrap prompt. Each
+// (or reuses) its selected Claude/Pi agent, and delivers the bootstrap prompt. Each
 // completed stage is persisted before the next Herdr call, so a retry after a
 // partial failure resumes only the missing stage — the same idempotent
 // recovery contract as feature handoff.
@@ -501,36 +507,34 @@ func (s *Service) placeAndPromptPlanner(ctx context.Context, plan IssuePlan, res
 		return &model.StageError{Stage: "resolve planning session", Code: model.ErrWorktreeInvalid, Message: "this Issue plan's session is already bound to a different dev worktree", Recovery: "inspect the other checkout, or remove its stale planning-session record"}
 	}
 	if found {
-		saved := session.PlannerModel
-		if saved == "" {
-			saved = session.Planner.Model
-		}
-		if saved != plan.PlannerModel {
-			return &model.StageError{Stage: "resolve planner model", Code: model.ErrConfigInvalid, Message: "this planning session already recorded a different model intent", Recovery: "retry without --model to reuse the recorded planner model"}
+		savedKind, savedModel, _, selectionErr := recordedPlanningSelection(session)
+		if selectionErr != nil || savedKind != plan.PlannerKind || savedModel != plan.PlannerModel {
+			return &model.StageError{Stage: "resolve planner selection", Code: model.ErrStateCorrupt, Message: "the saved planning agent selection changed after confirmation", Recovery: "inspect the planning-session record with wt herd doctor", Cause: selectionErr}
 		}
 	}
 	now := s.now()
 	previousKind := ""
 	if found && session.Planner.Kind != "" && session.Planner.Kind != plan.PlannerKind {
 		// Planning originally shipped with a fixed Codex kind. Do not try to
-		// adopt that process as Pi or stop its tab behind the user's back. Reset
-		// only Ori's issue-scoped binding, then place the new kind in a fresh tab
-		// under a kind-qualified agent name below.
+		// adopt that process as Claude/Pi or stop its tab behind the user's back.
+		// Reset only Ori's issue-scoped binding, then place the selected kind in a
+		// fresh tab under a kind-qualified agent name below.
 		previousKind = session.Planner.Kind
 		createdAt := session.CreatedAt
 		if createdAt.IsZero() {
 			createdAt = now
 		}
-		session = model.PlanningSession{RepositoryID: s.RepositoryID, IssueNumber: plan.IssueNumber, IssueNumbers: persistedPlanningMembers(plan.IssueNumbers), PlannerModel: plan.PlannerModel, CreatedAt: createdAt}
+		session = model.PlanningSession{RepositoryID: s.RepositoryID, IssueNumber: plan.IssueNumber, IssueNumbers: persistedPlanningMembers(plan.IssueNumbers), PlannerKind: plan.PlannerKind, PlannerModel: plan.PlannerModel, CreatedAt: createdAt}
 	}
 	if !found {
-		session = model.PlanningSession{RepositoryID: s.RepositoryID, IssueNumber: plan.IssueNumber, IssueNumbers: persistedPlanningMembers(plan.IssueNumbers), PlannerModel: plan.PlannerModel, CreatedAt: now}
+		session = model.PlanningSession{RepositoryID: s.RepositoryID, IssueNumber: plan.IssueNumber, IssueNumbers: persistedPlanningMembers(plan.IssueNumbers), PlannerKind: plan.PlannerKind, PlannerModel: plan.PlannerModel, CreatedAt: now}
 	}
 	session.RepositoryID = s.RepositoryID
 	session.IssueNumber = plan.IssueNumber
 	session.IssueNumbers = persistedPlanningMembers(plan.IssueNumbers)
 	session.Slug = plan.Slug
 	session.WorktreePath = plan.DevWorktreePath
+	session.PlannerKind = plan.PlannerKind
 	session.PlannerModel = plan.PlannerModel
 	if session.Stage == "" {
 		session.Stage = model.PlanningRecorded
@@ -564,7 +568,7 @@ func (s *Service) placeAndPromptPlanner(ctx context.Context, plan IssuePlan, res
 	result.TabReused = placement.Reused
 	result.Warnings = append(result.Warnings, placement.Warnings...)
 	if previousKind != "" {
-		result.Warnings = append(result.Warnings, "Saved "+previousKind+" planner replaced by Pi; its previous Herdr tab was left untouched.")
+		result.Warnings = append(result.Warnings, "Saved "+previousKind+" planner replaced by "+planningKindLabel(plan.PlannerKind)+"; its previous Herdr tab was left untouched.")
 	}
 
 	plannerIdentity := "issue-" + strconv.Itoa(plan.IssueNumber) + "-" + plan.PlannerKind
@@ -768,8 +772,19 @@ func (s *Service) validateLivePlanner(live herdr.AgentInfo, placement featurePla
 	return roleAgent, nil
 }
 
-// PlanningBootstrapPrompt is the Pi planner's first instruction (AR22). It
-// carries only run-specific state and points at the canonical cross-harness
+func planningKindLabel(kind string) string {
+	switch kind {
+	case "claude":
+		return "Claude"
+	case "pi":
+		return "Pi"
+	default:
+		return kind
+	}
+}
+
+// PlanningBootstrapPrompt is the selected planner's first instruction (AR22).
+// It carries only run-specific state and points at the canonical cross-harness
 // planning skill for workflow. It never embeds the Issue body, comments, or a
 // second copy of the planning protocol.
 func PlanningBootstrapPrompt(plan IssuePlan) string {
@@ -778,7 +793,7 @@ func PlanningBootstrapPrompt(plan IssuePlan) string {
 		identity = "Ori Issue bundle " + formatIssueNumbers(plan.IssueNumbers)
 	}
 	lines := []string{
-		"You are the Pi planner for " + identity + " (" + plan.Slug + ").",
+		"You are the " + planningKindLabel(plan.PlannerKind) + " planner for " + identity + " (" + plan.Slug + ").",
 		"Work only in this Git worktree: " + plan.DevWorktreePath,
 		"Read and follow: " + filepath.Join(plan.DevWorktreePath, "AGENTS.md"),
 		"Planning workflow: " + filepath.Join(plan.DevWorktreePath, ".agents", "skills", "task-planning", "SKILL.md") + " (planning-only mode)",
@@ -800,7 +815,7 @@ func PlanningBootstrapPrompt(plan IssuePlan) string {
 
 // IssuePlanSummary builds the pre-confirmation summary AR9 requires: the
 // Issue, its size, the planning step, the feature slug, the snapshot path,
-// PRD/task-list state, the exact dev worktree path, the Pi planner, and
+// PRD/task-list state, the exact dev worktree path, the selected planner, and
 // the focused Herdr destination or its degradation.
 //
 // It returns the text rather than writing it. Nothing here mutates anything,
@@ -861,16 +876,18 @@ func IssuePlanSummary(plan IssuePlan) string {
 		return b.String()
 	}
 	line("Planner       %s  (started in a new tab, given the planning bootstrap prompt)\n", plan.PlannerKind)
-	if plan.PlannerModel == "" {
-		b.WriteString("Model         integration default\n")
-	} else {
-		line("Model         %s\n", plan.PlannerModel)
+	if plan.PlannerKind == "pi" {
+		if plan.PlannerModel == "" {
+			b.WriteString("Model         integration default\n")
+		} else {
+			line("Model         %s\n", plan.PlannerModel)
+		}
 	}
 	switch plan.WorkspaceState {
 	case "ready":
 		line("Herdr tab     in workspace %s (whichever is focused when this runs)\n", plan.WorkspaceLabel)
 	case "disabled":
-		b.WriteString("Herdr tab     bridge disabled — planning files only, no Pi session\n")
+		line("Herdr tab     bridge disabled — planning files only, no %s session\n", planningKindLabel(plan.PlannerKind))
 	default:
 		b.WriteString("Herdr tab     Herdr unreachable — planning files only, retry later\n")
 	}
@@ -1052,18 +1069,72 @@ func DeriveBundleSlug(issues []github.Issue) (string, error) {
 
 var issueArtifactNamePattern = regexp.MustCompile(`^(?:issue|prd|tasks)-([a-z0-9][a-z0-9-]{0,79})\.md$`)
 
-// resolvePlanningModel keeps model choice scoped to one planning session. A
-// fresh plan uses only its explicit request; feature primary/role defaults are
-// never consulted. Once any session record exists, its model intent wins on an
-// omitted retry and a different non-empty request is refused before files or
-// Herdr are touched.
-func (s *Service) resolvePlanningModel(issueNumbers []int, requested string) (string, error) {
+func validateRequestedPlannerSelection(requestedKind, requestedModel string) error {
+	kind := requestedKind
+	if kind == "" {
+		kind = "pi"
+	}
+	if kind != "pi" && kind != "claude" {
+		return &model.StageError{Stage: "validate planner kind", Code: model.ErrConfigInvalid, Message: "the requested planner kind must be claude or pi", Recovery: "choose Claude or Pi for this planning session"}
+	}
+	if kind != "pi" && requestedModel != "" {
+		return &model.StageError{Stage: "validate planner model", Code: model.ErrConfigInvalid, Message: "a planner model can be selected only for Pi", Recovery: "omit --model for Claude, or choose Pi"}
+	}
+	if err := config.ValidateAgentModel(requestedModel); err != nil {
+		return &model.StageError{Stage: "validate planner model", Code: model.ErrConfigInvalid, Message: "the requested planner model is invalid", Recovery: "choose a bounded model value without control characters or a leading dash", Cause: err}
+	}
+	return nil
+}
+
+// recordedPlanningSelection interprets state written before explicit planning
+// kind/model intent existed. An empty legacy planner is Pi (the historical
+// default). A saved Codex planner is the one migration case: it may be replaced
+// by the newly selected Claude or Pi planner without being treated as intent.
+func recordedPlanningSelection(session model.PlanningSession) (kind, plannerModel string, legacyCodex bool, err error) {
+	kind = session.PlannerKind
+	if kind == "" {
+		switch session.Planner.Kind {
+		case "", "pi":
+			kind = "pi"
+		case "claude":
+			kind = "claude"
+		case "codex":
+			return "", "", true, nil
+		default:
+			return "", "", false, fmt.Errorf("unsupported saved planner kind")
+		}
+	}
+	if kind != "pi" && kind != "claude" {
+		return "", "", false, fmt.Errorf("unsupported saved planner kind")
+	}
+	plannerModel = session.PlannerModel
+	if plannerModel == "" {
+		plannerModel = session.Planner.Model
+	}
+	if kind != "pi" && plannerModel != "" {
+		return "", "", false, fmt.Errorf("saved non-Pi planner has model intent")
+	}
+	if err := config.ValidateAgentModel(plannerModel); err != nil {
+		return "", "", false, err
+	}
+	return kind, plannerModel, false, nil
+}
+
+// resolvePlanningSelection keeps agent choice scoped to one planning session.
+// A fresh plan uses only its explicit request (default Pi); feature primary and
+// role defaults are never consulted. Once recorded, an omitted retry reuses the
+// pair and a conflicting explicit request is refused before mutation.
+func (s *Service) resolvePlanningSelection(issueNumbers []int, requestedKind, requestedModel string) (string, string, error) {
+	freshKind := requestedKind
+	if freshKind == "" {
+		freshKind = "pi"
+	}
 	if s.Store == nil {
-		return requested, nil
+		return freshKind, requestedModel, nil
 	}
 	state, err := s.Store.Load()
 	if err != nil {
-		return "", &model.StageError{Stage: "resolve planner model", Code: model.ErrStateCorrupt, Message: "the local planning-session state could not be read", Recovery: "run wt herd doctor before retrying", Cause: err}
+		return "", "", &model.StageError{Stage: "resolve planner selection", Code: model.ErrStateCorrupt, Message: "the local planning-session state could not be read", Recovery: "run wt herd doctor before retrying", Cause: err}
 	}
 	for _, session := range state.PlanningSessions {
 		if session.RepositoryID != "" && session.RepositoryID != s.RepositoryID {
@@ -1072,16 +1143,22 @@ func (s *Service) resolvePlanningModel(issueNumbers []int, requested string) (st
 		if !sameIssueNumbers(session.MemberIssueNumbers(), issueNumbers) {
 			continue
 		}
-		saved := session.PlannerModel
-		if saved == "" {
-			saved = session.Planner.Model
+		savedKind, savedModel, legacyCodex, selectionErr := recordedPlanningSelection(session)
+		if selectionErr != nil {
+			return "", "", &model.StageError{Stage: "resolve planner selection", Code: model.ErrStateCorrupt, Message: "the saved planning agent selection is invalid", Recovery: "inspect the planning-session record with wt herd doctor", Cause: selectionErr}
 		}
-		if requested != "" && requested != saved {
-			return "", &model.StageError{Stage: "resolve planner model", Code: model.ErrConfigInvalid, Message: "this planning session already recorded a different model intent", Recovery: "retry without --model to reuse the recorded planner model"}
+		if legacyCodex {
+			return freshKind, requestedModel, nil
 		}
-		return saved, nil
+		if requestedKind != "" && requestedKind != savedKind {
+			return "", "", &model.StageError{Stage: "resolve planner kind", Code: model.ErrConfigInvalid, Message: "this planning session already recorded a different agent kind", Recovery: "retry without --kind to reuse the recorded planning agent"}
+		}
+		if requestedModel != "" && requestedModel != savedModel {
+			return "", "", &model.StageError{Stage: "resolve planner model", Code: model.ErrConfigInvalid, Message: "this planning session already recorded a different model intent", Recovery: "retry without --model to reuse the recorded planner model"}
+		}
+		return savedKind, savedModel, nil
 	}
-	return requested, nil
+	return freshKind, requestedModel, nil
 }
 
 // resolveIssueSlug reuses one existing, unambiguous number-first slug when

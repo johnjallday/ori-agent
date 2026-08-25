@@ -35,6 +35,7 @@ type issuePlanArgs struct {
 	issueNumber  int
 	issueNumbers []int
 	worktree     string
+	plannerKind  string
 	plannerModel string
 	yes          bool
 	json         bool
@@ -42,7 +43,7 @@ type issuePlanArgs struct {
 
 func parseIssuePlanArgs(args []string) (issuePlanArgs, error) {
 	var parsed issuePlanArgs
-	var worktreeSeen, modelSeen bool
+	var worktreeSeen, kindSeen, modelSeen bool
 	issueSeen := make(map[int]struct{})
 	for index := 0; index < len(args); index++ {
 		switch args[index] {
@@ -70,6 +71,16 @@ func parseIssuePlanArgs(args []string) (issuePlanArgs, error) {
 			index++
 			parsed.worktree = args[index]
 			worktreeSeen = true
+		case "--kind":
+			if index+1 >= len(args) || strings.TrimSpace(args[index+1]) == "" {
+				return issuePlanArgs{}, fmt.Errorf("--kind requires claude or pi")
+			}
+			if kindSeen {
+				return issuePlanArgs{}, fmt.Errorf("issue-plan accepts --kind only once")
+			}
+			index++
+			parsed.plannerKind = args[index]
+			kindSeen = true
 		case "--model":
 			if index+1 >= len(args) || strings.TrimSpace(args[index+1]) == "" {
 				return issuePlanArgs{}, fmt.Errorf("--model requires a non-empty value")
@@ -93,6 +104,12 @@ func parseIssuePlanArgs(args []string) (issuePlanArgs, error) {
 	}
 	if !worktreeSeen || strings.TrimSpace(parsed.worktree) == "" {
 		return issuePlanArgs{}, fmt.Errorf("issue-plan requires --worktree <dev-worktree-path>")
+	}
+	if parsed.plannerKind != "" && parsed.plannerKind != "claude" && parsed.plannerKind != "pi" {
+		return issuePlanArgs{}, fmt.Errorf("--kind must be claude or pi")
+	}
+	if parsed.plannerKind == "claude" && parsed.plannerModel != "" {
+		return issuePlanArgs{}, fmt.Errorf("--model is available only with --kind pi")
 	}
 	if err := config.ValidateAgentModel(parsed.plannerModel); err != nil {
 		return issuePlanArgs{}, fmt.Errorf("--model: %w", err)
@@ -129,7 +146,7 @@ func (a *App) issuePlan(ctx context.Context, opts options, args []string) int {
 		}),
 	}
 
-	request := agents.IssuePlanRequest{IssueNumbers: parsed.issueNumbers, PlannerModel: parsed.plannerModel, DevWorktreePath: parsed.worktree}
+	request := agents.IssuePlanRequest{IssueNumbers: parsed.issueNumbers, PlannerKind: parsed.plannerKind, PlannerModel: parsed.plannerModel, DevWorktreePath: parsed.worktree}
 	if len(parsed.issueNumbers) == 1 {
 		// Preserve the original service request shape for single-Issue callers.
 		request.IssueNumber = parsed.issueNumber
@@ -155,8 +172,8 @@ func (a *App) issuePlan(ctx context.Context, opts options, args []string) int {
 		return 0
 	}
 
-	a.planPrint("%s\n! marks steps that are not undone by declining later: writing tasks/issue-%s.md and tasks/tasks-%s.md, and starting a Pi planner.\n",
-		agents.IssuePlanSummary(plan), plan.Slug, plan.Slug)
+	a.planPrint("%s\n! marks steps that are not undone by declining later: writing tasks/issue-%s.md and tasks/tasks-%s.md, and starting a %s planner.\n",
+		agents.IssuePlanSummary(plan), plan.Slug, plan.Slug, plannerKindDisplay(plan.PlannerKind))
 
 	if !parsed.yes {
 		approved, err := a.confirmIssuePlan(plan)
@@ -211,6 +228,17 @@ func (a *App) confirmIssuePlan(plan agents.IssuePlan) (bool, error) {
 	return answer == "y" || answer == "yes", nil
 }
 
+func plannerKindDisplay(kind string) string {
+	switch kind {
+	case "claude":
+		return "Claude"
+	case "pi":
+		return "Pi"
+	default:
+		return kind
+	}
+}
+
 func renderIssuePlanResult(a *App, result agents.IssuePlanResult) {
 	if result.SnapshotWritten {
 		a.planPrint("\nWrote %s\n", result.Plan.SnapshotPath)
@@ -225,7 +253,7 @@ func renderIssuePlanResult(a *App, result agents.IssuePlanResult) {
 		}
 		return
 	}
-	a.planPrint("\nPi planner: %s\n", result.Planner.Name)
+	a.planPrint("\n%s planner: %s\n", plannerKindDisplay(result.Plan.PlannerKind), result.Planner.Name)
 	if result.PromptDelivered {
 		a.planPrint("Planning prompt delivered.\n")
 	} else if result.PromptSkipped {

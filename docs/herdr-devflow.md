@@ -101,13 +101,15 @@ recorded pair remains available to `wt herd retry`.
 ## Planning an Issue
 
 `wt plan --issue <N>` is the stage *before* a feature exists. It turns a Ready
-GitHub Issue into planning artifacts in `ori-agent-dev` and starts a **Pi**
-session there to finish the plan. No branch, no worktree, no implementation.
+GitHub Issue into planning artifacts in `ori-agent-dev` and starts a selected
+**Claude or Pi** session there to finish the plan. No branch, no implementation
+worktree, no implementation.
 
 ~~~bash
-wt plan --issue 342                         # Pi integration-default model
-wt plan --issue 342 --model '[openai] gpt'  # explicit per-plan Pi model
-wt plan --issue 342 --yes                   # skip confirmation, not validation
+wt plan --issue 342 --kind claude                  # Claude, no model prompt
+wt plan --issue 342 --kind pi                      # Pi integration default
+wt plan --issue 342 --kind pi --model openai/id    # explicit Pi model
+wt plan --issue 342 --yes                          # legacy default Pi; skip confirmation
 ~~~
 
 The shell only validates arguments and resolves the exact `dev` worktree; the
@@ -116,8 +118,8 @@ identity resolution, rendering, confirmation, writes, and the Herdr calls.
 
 The bootstrap prompt and size-routed starter carry only Issue-specific paths and
 state. Planning workflow lives once in
-`.agents/skills/task-planning/SKILL.md`, which Pi discovers directly; the
-planner runs its planning-only mode and stops after replacing the starter.
+`.agents/skills/task-planning/SKILL.md`, which the selected planner reads
+directly; it runs planning-only mode and stops after replacing the starter.
 
 **Planner sessions are not feature handoffs.** They are stored separately from
 `BridgeState.Features`, keyed by repository plus Issue *number* — the one part
@@ -125,21 +127,23 @@ of an Issue that cannot change. That separation is the point:
 
 - A planner is never a feature binding, an Overnight Run participant, a
   continuation target, a PR owner, or a `wt done` cleanup target.
-- Its kind is always `pi`. Its optional model is selected for that plan only.
-  The DevOps action discovers Pi's available provider/model IDs with an offline
-  `pi --list-models` call that disables extensions, skills, prompts, themes,
-  context files, and project trust; it then presents provider-first numbered
-  choices. Blank means the Pi integration default, `c` permits a custom opaque
-  value, and catalog failure keeps default/custom/cancel available. `--model`
-  carries the selected validated value. Planning never consumes feature primary
-  or role defaults, and its selection cannot leak into a later feature handoff. The selected
-  model is recorded before Herdr starts, retained across launch failure/reuse,
-  and cannot be replaced by a conflicting retry. A bare `wt start` uses the
+- Its kind is explicitly Claude or Pi (a direct command with no `--kind` keeps
+  Pi as the backward-compatible default). The DevOps action asks for kind first;
+  Claude skips model selection. Pi discovers available provider/model IDs with
+  an offline `pi --list-models` call that disables extensions, skills, prompts,
+  themes, context files, and project trust. `openai-codex` is promoted to the
+  first provider option, followed by the remaining discovered order. Blank
+  means the Pi integration default, `c` permits a custom opaque value, and
+  catalog failure keeps default/custom/cancel available. Planning never consumes
+  feature primary or role defaults, and its selection cannot leak into a later
+  feature handoff. The selected kind/model intent is recorded before Herdr
+  starts, retained across launch failure/reuse, and cannot be replaced by a
+  conflicting retry. A bare `wt start` uses the
   configured primary pair; the Issue picker's later implementation action
   passes the owner's explicit Claude, Codex, Pi, or worktree-only kind choice
   and deliberately adds no implementation-model prompt.
-- A generic live-agent view may still truthfully show the running Pi
-  process. It is a real process; it is simply not a *managed feature* agent.
+- A generic live-agent view may still truthfully show the running Claude or Pi
+  process. It is real; it is simply not a *managed feature* agent.
 
 **Placement and reuse.** Each Issue gets its own tab in the currently focused
 workspace, labelled `issue-<N>-plan`, and a deterministically named planner.
@@ -147,11 +151,11 @@ Several Issue planners can therefore share `ori-agent-dev` without colliding.
 Re-running the same command resumes: it re-enters the recorded tab, adopts the
 saved planner, and does not resend a confirmed prompt. If the tab was closed
 by hand, it is placed again. A pending planner saved by the former Codex-based
-flow is migrated to a fresh Pi tab; the old Herdr tab is left untouched rather
-than being closed behind the user's back.
+flow is migrated to a fresh tab for the newly selected kind; the old Herdr tab
+is left untouched rather than being closed behind the user's back.
 
 **Degradation.** The planning files are written before Herdr is contacted and
-are never rolled back. A Herdr or Pi failure reports the stage that failed
+are never rolled back. A Herdr or agent failure reports the stage that failed
 and the exact retry, and the command still reports what it did write — it
 never claims a planner started when none did.
 
@@ -217,8 +221,8 @@ agent, and it does not resend an already confirmed bootstrap prompt unless
 --resend is supplied.
 
 For Issue-backed work, the interactive `./scripts/devops.sh` flow makes this
-choice explicit. Press `s` to start the asynchronous Pi planner, return after it
-has replaced the planning starter, then press `i`. The later action resolves the
+choice explicit. Press `s`, choose Claude or Pi (and, for Pi, its model), return
+after the planner has replaced the planning starter, then press `i`. The later action resolves the
 number-first task list locally, prompts for Claude, Codex, Pi, worktree-only, or
 cancel, and invokes the corresponding `wt start --kind <kind>` or `--no-herdr`.
 It never chains to the planner or polls it; `wt start` still owns its normal plan
@@ -619,15 +623,15 @@ In a terminal, the colorful picker shows the number of PRs merged into `dev`
 since the latest Release directly below its heading; `r` refreshes that banner
 and the Issue data. It accepts `↑/↓` or `j/k` to select an Issue, `←/→` or `h/l`
 for those five list views, and `1`–`5` in the same order as the line REPL.
-`Enter` opens an Issue with an action bar where `c` decides, `s` starts Pi
+`Enter` opens an Issue with an action bar where `c` decides, `s` starts Claude/Pi
 planning, `i` starts implementation from a completed local plan, `r` refreshes
 the detail, and Enter returns to the list; the list's `c` key opens that same
 Issue directly at its decision answers. Decide and Plan each appear on that bar
 only when the opened Issue's own live labels make them eligible, read fresh
 every time the Issue opens; Start implementation is always available so its
 local resolver can explain whether planning is incomplete or work already
-exists. `n` captures one with an optional body, `o` approves it, `s` starts Pi
-planning for the selected Ready row, `i` starts the selected Issue's later
+exists. `n` captures one with an optional body, `o` approves it, `s` starts
+Claude/Pi planning for the selected Ready row, `i` starts the selected Issue's later
 implementation flow, `g` manages persistent agent defaults locally,
 list-level `r` refreshes, `?` shows help, and `q` quits.
 `:edit` at the body prompt opens `$VISUAL` or `$EDITOR` for multiline Markdown. In a pipe or redirected shell, the line REPL accepts
@@ -638,14 +642,15 @@ participates.
 
 The `s` key is the direct link from this REPL to the planning flow above. In
 the Ready view, or on the opened Issue's own action bar when its live labels
-satisfy the same eligibility rule as Ready, it first presents provider options
-from the installed Pi catalog, then numbered models for that provider. Enter
-means integration default, `c` accepts a custom value, and `q` cancels. It then
-runs `wt plan --issue <N>` with the optional `--model` value. Bundle key `b` asks
-once and applies the same model to its one planner. `wt plan` then performs its
-own fresh eligibility read, shows the selected model in the normal consequence
-summary and confirmation, writes the planning artifacts, and launches the
-Herdr-managed Pi planner. Off Ready, or on an Issue whose labels are not Ready
+satisfy the same eligibility rule as Ready, it first asks for Claude or Pi.
+Claude continues directly; Pi presents numbered providers (`openai-codex`
+first) and then numbered models. Integration default, custom, back, and cancel
+remain available. It then runs `wt plan --issue <N>` with explicit `--kind` and
+an optional Pi `--model`. Bundle key `b` asks once and applies the same selection
+to its one planner. `wt plan` then performs its own fresh eligibility read,
+shows the selected kind/model in the normal consequence summary and
+confirmation, writes the planning artifacts, and launches the Herdr-managed
+planner. Off Ready, or on an Issue whose labels are not Ready
 (or could not be read), the key refuses before launching anything.
 
 Planning is asynchronous, so `s` never chains to implementation. Return later

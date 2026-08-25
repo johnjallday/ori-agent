@@ -647,7 +647,7 @@ func TestExecuteIssuePlanWritesFilesAndIsIdempotentOnRerun(t *testing.T) {
 	client := newFakeHerdr(devPath)
 	store := newMemoryStore()
 	service := newPlanningService(client, store, devPath, issues)
-	// Feature and role defaults must never leak into the fixed Pi planner.
+	// Feature and role defaults must never leak into the default Pi planner.
 	service.Config.Primary.Kind = "claude"
 	service.Config.Primary.Model = "anthropic/feature-default"
 	service.Config.Roles.DefaultKind = "codex"
@@ -734,6 +734,101 @@ func TestBuildIssuePlanRejectsInvalidPlannerModelBeforeIO(t *testing.T) {
 	if strings.Contains(err.Error(), "--unsafe") {
 		t.Fatalf("validation error leaked the model value: %v", err)
 	}
+
+	_, err = service.BuildIssuePlan(context.Background(), IssuePlanRequest{
+		IssueNumber:     342,
+		PlannerKind:     "claude",
+		PlannerModel:    "model",
+		DevWorktreePath: devPath,
+	})
+	stage = nil
+	if !errors.As(err, &stage) || stage.Stage != "validate planner model" || stage.Code != model.ErrConfigInvalid {
+		t.Fatalf("Claude model error = %v, want pre-I/O planner-model error", err)
+	}
+	_, err = service.BuildIssuePlan(context.Background(), IssuePlanRequest{
+		IssueNumber:     342,
+		PlannerKind:     "codex",
+		DevWorktreePath: devPath,
+	})
+	stage = nil
+	if !errors.As(err, &stage) || stage.Stage != "validate planner kind" || stage.Code != model.ErrConfigInvalid {
+		t.Fatalf("unsupported planner kind error = %v, want pre-I/O planner-kind error", err)
+	}
+	if issues.calls != 0 || client.tabCreateCalls != 0 || client.startCalls != 0 {
+		t.Fatalf("invalid planner selections reached I/O: issue calls=%d tabs=%d starts=%d", issues.calls, client.tabCreateCalls, client.startCalls)
+	}
+}
+
+func TestClaudePlannerKindPersistsAcrossFailedLaunchRetryAndRejectsReselection(t *testing.T) {
+	t.Parallel()
+	devPath := t.TempDir()
+	issues := &fakeIssues{issue: readyIssue(342, "Ready issue", RoutePlanned)}
+	client := newFakeHerdr(devPath)
+	client.fail["start"] = errors.New("simulated launch rejection")
+	store := newMemoryStore()
+	service := newPlanningService(client, store, devPath, issues)
+
+	plan, err := service.BuildIssuePlan(context.Background(), IssuePlanRequest{
+		IssueNumber:     342,
+		PlannerKind:     "claude",
+		DevWorktreePath: devPath,
+	})
+	if err != nil {
+		t.Fatalf("BuildIssuePlan() error = %v", err)
+	}
+	if plan.PlannerKind != "claude" || plan.PlannerModel != "" {
+		t.Fatalf("planner selection = %q/%q", plan.PlannerKind, plan.PlannerModel)
+	}
+	if !strings.Contains(PlanningBootstrapPrompt(plan), "You are the Claude planner") {
+		t.Fatalf("Claude bootstrap prompt = %q", PlanningBootstrapPrompt(plan))
+	}
+	if summary := IssuePlanSummary(plan); !strings.Contains(summary, "Planner       claude") || strings.Contains(summary, "Model         ") {
+		t.Fatalf("Claude summary = %q", summary)
+	}
+
+	first, err := service.ExecuteIssuePlan(context.Background(), plan)
+	if err != nil || !first.Degraded {
+		t.Fatalf("failed Claude ExecuteIssuePlan() = %#v, %v", first, err)
+	}
+	if len(client.startRequests) != 1 || client.startRequests[0].Kind != "claude" || client.startRequests[0].Model != "" {
+		t.Fatalf("Claude start requests = %#v", client.startRequests)
+	}
+	state, _ := store.Load()
+	session := state.PlanningSessions["repo-123456:342"]
+	if session.PlannerKind != "claude" || session.Planner.Name != "" {
+		t.Fatalf("pre-launch Claude intent = %#v", session)
+	}
+
+	_, err = service.BuildIssuePlan(context.Background(), IssuePlanRequest{
+		IssueNumber:     342,
+		PlannerKind:     "pi",
+		DevWorktreePath: devPath,
+	})
+	var stage *model.StageError
+	if !errors.As(err, &stage) || stage.Stage != "resolve planner kind" || stage.Code != model.ErrConfigInvalid {
+		t.Fatalf("conflicting planner kind error = %v", err)
+	}
+
+	delete(client.fail, "start")
+	retryPlan, err := service.BuildIssuePlan(context.Background(), IssuePlanRequest{IssueNumber: 342, DevWorktreePath: devPath})
+	if err != nil {
+		t.Fatalf("retry BuildIssuePlan() error = %v", err)
+	}
+	if retryPlan.PlannerKind != "claude" || retryPlan.PlannerModel != "" {
+		t.Fatalf("retry planner selection = %q/%q", retryPlan.PlannerKind, retryPlan.PlannerModel)
+	}
+	retried, err := service.ExecuteIssuePlan(context.Background(), retryPlan)
+	if err != nil || retried.Degraded {
+		t.Fatalf("retry ExecuteIssuePlan() = %#v, %v", retried, err)
+	}
+	if len(client.startRequests) != 2 || client.startRequests[1].Kind != "claude" || client.startRequests[1].Model != "" {
+		t.Fatalf("retry start requests = %#v", client.startRequests)
+	}
+	state, _ = store.Load()
+	session = state.PlanningSessions["repo-123456:342"]
+	if session.PlannerKind != "claude" || session.Planner.Kind != "claude" {
+		t.Fatalf("ready Claude planner dropped kind intent: %#v", session)
+	}
 }
 
 func TestIssuePlannerModelPersistsAcrossFailedLaunchRetryAndRejectsReselection(t *testing.T) {
@@ -772,8 +867,8 @@ func TestIssuePlannerModelPersistsAcrossFailedLaunchRetryAndRejectsReselection(t
 	}
 	state, _ := store.Load()
 	session := state.PlanningSessions["repo-123456:342"]
-	if session.PlannerModel != selectedModel || session.Planner.Name != "" {
-		t.Fatalf("pre-launch model intent = %#v", session)
+	if session.PlannerKind != "pi" || session.PlannerModel != selectedModel || session.Planner.Name != "" {
+		t.Fatalf("pre-launch planner intent = %#v", session)
 	}
 
 	// Defaults can change and an ordinary recovery command can omit --model;
@@ -797,8 +892,8 @@ func TestIssuePlannerModelPersistsAcrossFailedLaunchRetryAndRejectsReselection(t
 	}
 	state, _ = store.Load()
 	session = state.PlanningSessions["repo-123456:342"]
-	if session.PlannerModel != selectedModel || session.Planner.Model != selectedModel {
-		t.Fatalf("ready planner dropped model intent: %#v", session)
+	if session.PlannerKind != "pi" || session.PlannerModel != selectedModel || session.Planner.Kind != "pi" || session.Planner.Model != selectedModel {
+		t.Fatalf("ready planner dropped selection intent: %#v", session)
 	}
 
 	_, err = service.BuildIssuePlan(context.Background(), IssuePlanRequest{

@@ -53,11 +53,20 @@ func TestParseIssuePlanArgs(t *testing.T) {
 			},
 		},
 		{
-			name: "opaque planner model stays one value",
-			args: []string{"--issue", "1", "--model", "[openai] gpt 5.1; $(echo inert)", "--worktree", "/tmp/dev"},
+			name: "Claude planner has no model",
+			args: []string{"--issue", "1", "--kind", "claude", "--worktree", "/tmp/dev"},
 			check: func(t *testing.T, parsed issuePlanArgs) {
-				if parsed.plannerModel != "[openai] gpt 5.1; $(echo inert)" {
-					t.Fatalf("planner model = %q", parsed.plannerModel)
+				if parsed.plannerKind != "claude" || parsed.plannerModel != "" {
+					t.Fatalf("planner selection = %q/%q", parsed.plannerKind, parsed.plannerModel)
+				}
+			},
+		},
+		{
+			name: "opaque Pi planner model stays one value",
+			args: []string{"--issue", "1", "--kind", "pi", "--model", "[openai] gpt 5.1; $(echo inert)", "--worktree", "/tmp/dev"},
+			check: func(t *testing.T, parsed issuePlanArgs) {
+				if parsed.plannerKind != "pi" || parsed.plannerModel != "[openai] gpt 5.1; $(echo inert)" {
+					t.Fatalf("planner selection = %q/%q", parsed.plannerKind, parsed.plannerModel)
 				}
 			},
 		},
@@ -70,6 +79,10 @@ func TestParseIssuePlanArgs(t *testing.T) {
 		{name: "duplicate issue", args: []string{"--issue", "1", "--issue", "1", "--worktree", "/tmp/dev"}, wantErr: true},
 		{name: "duplicate worktree", args: []string{"--issue", "1", "--worktree", "/a", "--worktree", "/b"}, wantErr: true},
 		{name: "empty worktree", args: []string{"--issue", "1", "--worktree", "  "}, wantErr: true},
+		{name: "kind with no value", args: []string{"--issue", "1", "--worktree", "/tmp/dev", "--kind"}, wantErr: true},
+		{name: "unsupported planner kind", args: []string{"--issue", "1", "--worktree", "/tmp/dev", "--kind", "codex"}, wantErr: true},
+		{name: "duplicate planner kind", args: []string{"--issue", "1", "--kind", "pi", "--kind", "claude", "--worktree", "/tmp/dev"}, wantErr: true},
+		{name: "Claude with model", args: []string{"--issue", "1", "--kind", "claude", "--model", "model", "--worktree", "/tmp/dev"}, wantErr: true},
 		{name: "model with no value", args: []string{"--issue", "1", "--worktree", "/tmp/dev", "--model"}, wantErr: true},
 		{name: "empty model", args: []string{"--issue", "1", "--worktree", "/tmp/dev", "--model", "  "}, wantErr: true},
 		{name: "duplicate model", args: []string{"--issue", "1", "--model", "one", "--model", "two", "--worktree", "/tmp/dev"}, wantErr: true},
@@ -197,6 +210,8 @@ func TestIssuePlanRejectsBadArgumentsBeforeAnyIO(t *testing.T) {
 		{"issue-plan", "--issue", "abc", "--worktree", "/tmp/does-not-exist"},
 		{"issue-plan", "--issue", "1", "--issue", "1", "--worktree", "/tmp/does-not-exist"},
 		{"issue-plan", "--issue", "1", "--issue", "nope", "--worktree", "/tmp/does-not-exist"},
+		{"issue-plan", "--issue", "1", "--kind", "codex", "--worktree", "/tmp/does-not-exist"},
+		{"issue-plan", "--issue", "1", "--kind", "claude", "--model", "model", "--worktree", "/tmp/does-not-exist"},
 		{"issue-plan", "--issue", "1", "--model", "--unsafe", "--worktree", "/tmp/does-not-exist"},
 		{"issue-plan", "--issue", "1", "--model", "one", "--model", "two", "--worktree", "/tmp/does-not-exist"},
 		{"issue-plan", "--worktree", "/tmp/does-not-exist"},
