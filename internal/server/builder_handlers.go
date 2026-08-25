@@ -1304,6 +1304,7 @@ func detectDefaultBraveExecutablePath() string {
 		if candidate == "" {
 			continue
 		}
+		// #nosec G703 -- candidates are fixed browser install locations plus the OS-owned ProgramFiles roots.
 		if _, err := os.Stat(candidate); err == nil {
 			return candidate
 		}

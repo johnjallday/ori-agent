@@ -664,9 +664,14 @@ async function installFixtureRoutes(page: Page) {
       await json(route, { status: { applies: false } });
       return;
     }
-    // The capability catalog is likewise asked for on every workspace page.
+    // Generic plugin capability and surface catalogs are likewise asked for
+    // on every workspace page. This fixture has neither, so both stay empty.
     if (/^\/api\/workspaces\/[^/]+\/capabilities$/.test(url.pathname)) {
       await json(route, { capabilities: [] });
+      return;
+    }
+    if (/^\/api\/workspaces\/[^/]+\/surfaces$/.test(url.pathname)) {
+      await json(route, { surfaces: [] });
       return;
     }
     // The Workshop panel (agent Toolbox tab) mounts for every agent tab that
