@@ -242,19 +242,23 @@ Rules this stage holds to:
 The planning Pi session is a separate record entirely: it is never a feature
 binding, an Overnight Run participant, a continuation target, a PR owner, or a
 `wt done` cleanup target. Its kind is always Pi and it never inherits feature
-defaults. The DevOps planning actions ask for an optional model; blank uses the
-Pi integration default. A non-empty selection is validated, shown in the plan,
-recorded before Herdr launch, and retained by a plain retry. A different model
+defaults. The DevOps planning actions load Pi's available model catalog in
+offline, resource-disabled mode, then offer provider-first numbered options;
+blank uses the Pi integration default and `c` accepts a custom opaque value when
+needed. Catalog failure leaves integration-default/custom/cancel available. A
+non-empty selection is validated, shown in the plan, recorded before Herdr
+launch, and retained by a plain retry. A different model
 cannot replace an existing planning session's recorded intent. A bare direct
 `wt start` uses the configured primary kind/model pair; the Issue picker's later
 implementation action still requires an explicit one-run kind choice and does
 not add an implementation-model prompt.
 
-In the `./scripts/devops.sh` picker's Ready view, `s` asks for an optional Pi
-model and plans the current row. Space marks/unmarks ordinary backlog rows and
-`b` asks once for the bundle planner model before planning at least two marks as
-one bundle. The picker/REPL `g` action manages persistent agent defaults without
-reading or refreshing GitHub. Marks use immutable Issue numbers, survive view changes, and are
+In the `./scripts/devops.sh` picker's Ready view, `s` opens the installed Pi
+provider/model options and plans the current row. Space marks/unmarks ordinary
+backlog rows and `b` asks once for the bundle planner model before planning at
+least two marks as one bundle. The picker/REPL `g` action manages persistent
+agent defaults without reading or refreshing GitHub. Marks use immutable Issue
+numbers, survive view changes, and are
 pruned with a visible notice on refresh if a member disappeared or became
 ineligible. `feature-proposal` rows cannot be marked. The same single-Issue `s`
 is also on the opened-Issue action bar

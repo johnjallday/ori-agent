@@ -1772,25 +1772,176 @@ prompt_approve_issue() {
 }
 
 planner_model_choice=""
-prompt_planner_model() {
-  local choice
-  planner_model_choice=""
-  printf '\nChoose the Pi model for this planning session.\n'
-  printf '  [Enter] Integration default (or recorded model on retry)\n'
-  printf '  [q] Cancel\n'
-  printf 'model> '
-  IFS= read -r choice || {
-    printf 'Cancelled.\n'
+planner_model_catalog_providers=()
+planner_model_catalog_provider=()
+planner_model_catalog_model=()
+
+load_pi_model_catalog() {
+  local pi_binary output provider model ignored existing duplicate
+  planner_model_catalog_providers=()
+  planner_model_catalog_provider=()
+  planner_model_catalog_model=()
+
+  pi_binary="$(command -v pi 2>/dev/null || true)"
+  [[ -n "$pi_binary" ]] || return 1
+  output="$(PI_OFFLINE=1 PI_SKIP_VERSION_CHECK=1 "$pi_binary" \
+    --offline --no-extensions --no-skills --no-prompt-templates --no-themes \
+    --no-context-files --no-approve --list-models 2>/dev/null)" || return 1
+
+  while read -r provider model ignored; do
+    [[ "$provider" == "provider" && "$model" == "model" ]] && continue
+    [[ "$provider" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || continue
+    [[ "$model" =~ ^[A-Za-z0-9@][A-Za-z0-9@._/:+-]*$ ]] || continue
+    [[ "${#provider}" -le 64 ]] || continue
+    (( ${#provider} + 1 + ${#model} <= 256 )) || continue
+
+    [[ "${#planner_model_catalog_model[@]}" -lt 500 ]] || break
+    duplicate=0
+    for existing in ${planner_model_catalog_model[@]+"${planner_model_catalog_model[@]}"}; do
+      if [[ "$existing" == "$provider/$model" ]]; then
+        duplicate=1
+        break
+      fi
+    done
+    [[ "$duplicate" -eq 0 ]] || continue
+    planner_model_catalog_provider+=("$provider")
+    planner_model_catalog_model+=("$provider/$model")
+
+    duplicate=0
+    for existing in ${planner_model_catalog_providers[@]+"${planner_model_catalog_providers[@]}"}; do
+      if [[ "$existing" == "$provider" ]]; then
+        duplicate=1
+        break
+      fi
+    done
+    [[ "$duplicate" -eq 1 ]] || planner_model_catalog_providers+=("$provider")
+  done <<< "$output"
+
+  [[ "${#planner_model_catalog_model[@]}" -gt 0 ]]
+}
+
+planner_model_provider_count() {
+  local wanted="$1" provider count=0
+  for provider in ${planner_model_catalog_provider[@]+"${planner_model_catalog_provider[@]}"}; do
+    [[ "$provider" == "$wanted" ]] && count=$((count + 1))
+  done
+  printf '%s' "$count"
+}
+
+prompt_custom_planner_model() {
+  local custom
+  printf 'custom model> '
+  IFS= read -r custom || return 1
+  if [[ -z "$custom" ]]; then
+    printf 'Custom model cannot be empty.\n' >&2
     return 1
-  }
-  case "$choice" in
-    q|Q|cancel|Cancel)
+  fi
+  if [[ "$custom" == -* ]]; then
+    printf 'Custom model cannot begin with a dash.\n' >&2
+    return 1
+  fi
+  planner_model_choice="$custom"
+  return 0
+}
+
+prompt_planner_model() {
+  local choice provider provider_number model_number index count noun selected_provider
+  local -a provider_models
+  planner_model_choice=""
+  load_pi_model_catalog >/dev/null 2>&1 || true
+
+  while true; do
+    printf '\nChoose the Pi model for this planning session.\n'
+    printf '  [Enter] Integration default (or recorded model on retry)\n'
+    if [[ "${#planner_model_catalog_providers[@]}" -gt 0 ]]; then
+      index=1
+      for provider in "${planner_model_catalog_providers[@]}"; do
+        count="$(planner_model_provider_count "$provider")"
+        noun="models"
+        [[ "$count" -eq 1 ]] && noun="model"
+        printf '  [%d] %s (%s %s)\n' "$index" "$provider" "$count" "$noun"
+        index=$((index + 1))
+      done
+    else
+      printf '  Available Pi catalog could not be loaded.\n'
+    fi
+    printf '  [c] Custom model\n'
+    printf '  [q] Cancel\n'
+    printf 'provider> '
+    IFS= read -r choice || {
       printf 'Cancelled.\n'
       return 1
-      ;;
-  esac
-  planner_model_choice="$choice"
-  return 0
+    }
+    case "$choice" in
+      "") return 0 ;;
+      c|C|custom|Custom)
+        prompt_custom_planner_model && return 0
+        continue
+        ;;
+      q|Q|cancel|Cancel)
+        printf 'Cancelled.\n'
+        return 1
+        ;;
+      *[!0-9]*|0)
+        printf 'Choose a listed provider, c for custom, or q to cancel.\n' >&2
+        continue
+        ;;
+    esac
+    if [[ "${#choice}" -gt 6 ]]; then
+      printf 'Choose a listed provider, c for custom, or q to cancel.\n' >&2
+      continue
+    fi
+    provider_number=$((10#$choice))
+    if (( provider_number < 1 || provider_number > ${#planner_model_catalog_providers[@]} )); then
+      printf 'Choose a listed provider, c for custom, or q to cancel.\n' >&2
+      continue
+    fi
+    selected_provider="${planner_model_catalog_providers[$((provider_number - 1))]}"
+    provider_models=()
+    for index in "${!planner_model_catalog_model[@]}"; do
+      if [[ "${planner_model_catalog_provider[$index]}" == "$selected_provider" ]]; then
+        provider_models+=("${planner_model_catalog_model[$index]}")
+      fi
+    done
+
+    while true; do
+      printf '\nModels for %s:\n' "$selected_provider"
+      index=1
+      for provider in "${provider_models[@]}"; do
+        printf '  [%d] %s\n' "$index" "$provider"
+        index=$((index + 1))
+      done
+      printf '  [b/Enter] Back\n'
+      printf '  [q] Cancel\n'
+      printf 'model> '
+      IFS= read -r choice || {
+        printf 'Cancelled.\n'
+        return 1
+      }
+      case "$choice" in
+        ""|b|B|back|Back) break ;;
+        q|Q|cancel|Cancel)
+          printf 'Cancelled.\n'
+          return 1
+          ;;
+        *[!0-9]*|0)
+          printf 'Choose a listed model, b to go back, or q to cancel.\n' >&2
+          continue
+          ;;
+      esac
+      if [[ "${#choice}" -gt 6 ]]; then
+        printf 'Choose a listed model, b to go back, or q to cancel.\n' >&2
+        continue
+      fi
+      model_number=$((10#$choice))
+      if (( model_number < 1 || model_number > ${#provider_models[@]} )); then
+        printf 'Choose a listed model, b to go back, or q to cancel.\n' >&2
+        continue
+      fi
+      planner_model_choice="${provider_models[$((model_number - 1))]}"
+      return 0
+    done
+  done
 }
 
 # wt is a sourced zsh function, while this picker is a standalone bash

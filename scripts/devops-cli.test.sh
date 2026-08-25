@@ -95,13 +95,66 @@ check "picker proposals view is exact" \
 # below proves launch_pi_plan invokes the repository's wt function through zsh.
 eval "$(declare -f launch_pi_plan | sed '1s/launch_pi_plan/launch_pi_plan_real/')"
 eval "$(declare -f prompt_planner_model | sed '1s/prompt_planner_model/prompt_planner_model_real/')"
-check "planner model prompt preserves an opaque model" \
-  "$(printf '%s\n' '[openai] gpt 5.1; $(echo inert)' | (prompt_planner_model_real >/dev/null && printf '%s' "$planner_model_choice"))" \
+eval "$(declare -f load_pi_model_catalog | sed '1s/load_pi_model_catalog/load_pi_model_catalog_real/')"
+
+# Catalog discovery is local, offline, and extension-free. Parse only safe
+# provider/model identifiers, preserve Pi's order, and deduplicate exact pairs.
+catalog_bin="$fixture_root/model-catalog-bin"
+catalog_calls="$fixture_root/model-catalog-calls"
+mkdir -p "$catalog_bin"
+cat > "$catalog_bin/pi" <<'SH'
+#!/bin/sh
+printf 'offline=%s skip=%s args=%s\n' "$PI_OFFLINE" "$PI_SKIP_VERSION_CHECK" "$*" > "$PI_CATALOG_CALLS"
+cat <<'MODELS'
+provider   model             context  max-out  thinking  images
+openai     gpt-5.6-sol       272K     128K     yes       yes
+openai     gpt-5.4           272K     128K     yes       yes
+anthropic  claude-sonnet-5   1M       128K     yes       yes
+openai     gpt-5.6-sol       272K     128K     yes       yes
+bad$name   unsafe            1K       1K       no        no
+MODELS
+SH
+chmod +x "$catalog_bin/pi"
+PI_CATALOG_CALLS="$catalog_calls" PATH="$catalog_bin:$PATH" load_pi_model_catalog_real
+check "Pi catalog keeps ordered provider options" \
+  "${planner_model_catalog_providers[*]}" "openai anthropic"
+check "Pi catalog keeps unique provider/model options" \
+  "${planner_model_catalog_model[*]}" \
+  "openai/gpt-5.6-sol openai/gpt-5.4 anthropic/claude-sonnet-5"
+if ! grep -Fq 'offline=1 skip=1 args=--offline --no-extensions --no-skills --no-prompt-templates --no-themes --no-context-files --no-approve --list-models' "$catalog_calls"; then
+  printf 'Pi catalog discovery was not offline and resource-disabled: %s\n' "$(cat "$catalog_calls")" >&2
+  exit 1
+fi
+
+load_pi_model_catalog() {
+  planner_model_catalog_providers=(openai anthropic)
+  planner_model_catalog_provider=(openai openai anthropic)
+  planner_model_catalog_model=(openai/gpt-5.6-sol openai/gpt-5.4 anthropic/claude-sonnet-5)
+  return 0
+}
+check "planner model prompt chooses a numbered provider/model option" \
+  "$(printf '2\n1\n' | (prompt_planner_model_real >/dev/null && printf '%s' "$planner_model_choice"))" \
+  "anthropic/claude-sonnet-5"
+check "planner model prompt can go back and choose another provider" \
+  "$(printf '1\nb\n2\n1\n' | (prompt_planner_model_real >/dev/null && printf '%s' "$planner_model_choice"))" \
+  "anthropic/claude-sonnet-5"
+check "planner model prompt preserves an opaque custom model" \
+  "$(printf '%s\n' c '[openai] gpt 5.1; $(echo inert)' | (prompt_planner_model_real >/dev/null && printf '%s' "$planner_model_choice"))" \
   '[openai] gpt 5.1; $(echo inert)'
 check "planner model prompt treats Enter as the integration default" \
   "$(printf '\n' | (prompt_planner_model_real >/dev/null && printf '<%s>' "$planner_model_choice"))" "<>"
 check "planner model prompt cancels on q" \
   "$(printf 'q\n' | (prompt_planner_model_real >/dev/null 2>&1 && echo yes || echo no))" "no"
+load_pi_model_catalog() {
+  planner_model_catalog_providers=()
+  planner_model_catalog_provider=()
+  planner_model_catalog_model=()
+  return 1
+}
+check "planner prompt keeps custom fallback when Pi catalog is unavailable" \
+  "$(printf '%s\n' c 'custom/provider-model' | (prompt_planner_model_real >/dev/null && printf '%s' "$planner_model_choice"))" \
+  "custom/provider-model"
+
 prompt_planner_model() {
   planner_model_choice='[openai] planner model'
   return 0
@@ -957,6 +1010,18 @@ esac
 SH
 chmod +x "$fake_bin/zsh"
 
+# Planner selection discovers only the installed Pi catalog. This fake keeps
+# the integration test hermetic and proves the REPL can render real options.
+cat > "$fake_bin/pi" <<'SH'
+#!/bin/sh
+cat <<'MODELS'
+provider   model            context  max-out  thinking  images
+openai     gpt-5.6-sol      272K     128K     yes       yes
+anthropic  claude-sonnet-5  1M       128K     yes       yes
+MODELS
+SH
+chmod +x "$fake_bin/pi"
+
 export PATH="$fake_bin:$PATH"
 export GH_CALLS="$gh_calls"
 export GH_BODY="$gh_body"
@@ -1447,13 +1512,13 @@ check "an answered-label failure still follows comment ordering" \
 # through zsh after one label read; #334 is needs-decision (not Ready) and is
 # refused before any process launch. Neither path writes to GitHub.
 prompt_open_issue_plan_output() {
-  local issue_number="$1"
+  local issue_number="$1" planner_answers="${2:-}"
   (
     set +e
     # Re-sourced because the unit section above replaced issue_labels_of and
     # view_issue with stubs; this subshell gets the real gh-backed versions.
     DEVOPS_SOURCE_ONLY=1 source "$script" > /dev/null 2>&1
-    printf 's\n\n' | prompt_open_issue "$issue_number"
+    printf 's\n%s\n' "$planner_answers" | prompt_open_issue "$issue_number"
   )
 }
 
@@ -1463,12 +1528,24 @@ prompt_open_issue_plan_output 320 > "$fixture_root/prompt-plan-real-output" \
   2> "$fixture_root/prompt-plan-real-error"
 check "a real Ready Issue's Plan launches Pi" \
   "$(grep -Fc 'Pi planner launched for #320' "$fixture_root/prompt-plan-real-output" || true)" "1"
-assert_output_has "a real Ready Issue's Plan" "$fixture_root/prompt-plan-real-output" "model>"
+assert_output_has "a real Ready Issue's Plan" "$fixture_root/prompt-plan-real-output" "provider>"
 check "a real Ready Issue's Plan invokes wt through zsh" \
   "$(<"$wt_calls")" \
   $'CALL\t-c\t'"$plan_bridge"$'\tdevops-plan\t'"$repo_root"$'/scripts/wt.sh\t320\t'
 check "a real Ready Issue's Plan reads labels exactly once" "$(count_label_reads 320)" "1"
 assert_no_github_write "a real Ready Issue's Plan action"
+
+: > "$gh_calls"
+: > "$wt_calls"
+prompt_open_issue_plan_output 320 $'2\n1' > "$fixture_root/prompt-plan-model-option-output" \
+  2> "$fixture_root/prompt-plan-model-option-error"
+assert_output_has "a numbered planning-model choice" \
+  "$fixture_root/prompt-plan-model-option-output" "anthropic/claude-sonnet-5"
+check "a numbered planning-model choice reaches wt as one argument" \
+  "$(<"$wt_calls")" \
+  $'CALL\t-c\t'"$plan_bridge"$'\tdevops-plan\t'"$repo_root"$'/scripts/wt.sh\t320\tanthropic/claude-sonnet-5'
+check "a numbered planning-model choice reads labels exactly once" "$(count_label_reads 320)" "1"
+assert_no_github_write "a numbered planning-model choice"
 
 : > "$gh_calls"
 : > "$wt_calls"

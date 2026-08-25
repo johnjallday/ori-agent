@@ -125,10 +125,14 @@ of an Issue that cannot change. That separation is the point:
 
 - A planner is never a feature binding, an Overnight Run participant, a
   continuation target, a PR owner, or a `wt done` cleanup target.
-- Its kind is always `pi`. Its optional model is selected for that plan only:
-  blank means the Pi integration default, while `--model` carries one opaque,
-  validated value. Planning never consumes feature primary or role defaults,
-  and its selection cannot leak into a later feature handoff. The selected
+- Its kind is always `pi`. Its optional model is selected for that plan only.
+  The DevOps action discovers Pi's available provider/model IDs with an offline
+  `pi --list-models` call that disables extensions, skills, prompts, themes,
+  context files, and project trust; it then presents provider-first numbered
+  choices. Blank means the Pi integration default, `c` permits a custom opaque
+  value, and catalog failure keeps default/custom/cancel available. `--model`
+  carries the selected validated value. Planning never consumes feature primary
+  or role defaults, and its selection cannot leak into a later feature handoff. The selected
   model is recorded before Herdr starts, retained across launch failure/reuse,
   and cannot be replaced by a conflicting retry. A bare `wt start` uses the
   configured primary pair; the Issue picker's later implementation action
@@ -634,14 +638,15 @@ participates.
 
 The `s` key is the direct link from this REPL to the planning flow above. In
 the Ready view, or on the opened Issue's own action bar when its live labels
-satisfy the same eligibility rule as Ready, it first asks for the Pi model
-(blank means integration default), then runs `wt plan --issue <N>` with the
-optional `--model` value. Bundle key `b` asks once and applies the same model to
-its one planner. `wt plan` then performs its own fresh eligibility read, shows
-the selected model in the normal consequence summary and confirmation, writes
-the planning artifacts, and launches the Herdr-managed Pi planner. Off Ready, or on an Issue whose
-labels are not Ready (or could not be read), the key refuses before launching
-anything.
+satisfy the same eligibility rule as Ready, it first presents provider options
+from the installed Pi catalog, then numbered models for that provider. Enter
+means integration default, `c` accepts a custom value, and `q` cancels. It then
+runs `wt plan --issue <N>` with the optional `--model` value. Bundle key `b` asks
+once and applies the same model to its one planner. `wt plan` then performs its
+own fresh eligibility read, shows the selected model in the normal consequence
+summary and confirmation, writes the planning artifacts, and launches the
+Herdr-managed Pi planner. Off Ready, or on an Issue whose labels are not Ready
+(or could not be read), the key refuses before launching anything.
 
 Planning is asynchronous, so `s` never chains to implementation. Return later
 and press `i` on a selected or opened Issue. That action contacts neither GitHub
