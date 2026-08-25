@@ -500,9 +500,19 @@ func TestHandoffResultRendersOptionalPrimaryModelCompatibly(t *testing.T) {
 
 func TestParseScopedAgentCommandsKeepsContextAndTargetExplicit(t *testing.T) {
 	t.Parallel()
-	add, err := parseAddAgentArgs([]string{"reviewer", "--kind", "codex", "--feature", "bridge"})
-	if err != nil || add.Role != "reviewer" || add.Kind != "codex" || add.Context.FeatureName != "bridge" {
+	add, err := parseAddAgentArgs([]string{"reviewer", "--kind", "codex", "--model", "[openai] codex max", "--feature", "bridge"})
+	if err != nil || add.Role != "reviewer" || add.Kind != "codex" || add.Model != "[openai] codex max" || add.Context.FeatureName != "bridge" {
 		t.Fatalf("parseAddAgentArgs() = %#v, %v", add, err)
+	}
+	for _, invalid := range [][]string{
+		{"reviewer", "--model"},
+		{"reviewer", "--model", "one", "--model", "two"},
+		{"reviewer", "--model", "bad\nmodel"},
+		{"reviewer", "--kind", "invented"},
+	} {
+		if _, err := parseAddAgentArgs(invalid); err == nil {
+			t.Fatalf("parseAddAgentArgs(%v) unexpectedly succeeded", invalid)
+		}
 	}
 	prompt, err := parsePromptAgentArgs([]string{"reviewer", "Please", "inspect", "this", "--target", "w1:p2", "--worktree", "/tmp/bridge"})
 	if err != nil || prompt.Role != "reviewer" || prompt.Target != "w1:p2" || prompt.Text != "Please inspect this" || prompt.Context.WorktreePath != "/tmp/bridge" {

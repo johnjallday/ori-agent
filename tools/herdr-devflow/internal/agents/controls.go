@@ -29,6 +29,7 @@ type AddRequest struct {
 	Context ContextRequest
 	Role    string
 	Kind    string
+	Model   string
 }
 
 type AddResult struct {
@@ -208,24 +209,26 @@ func (s *Service) Add(ctx context.Context, request AddRequest) (AddResult, error
 	if request.Role == resolved.primaryRole {
 		return AddResult{}, &model.StageError{Stage: "add role agent", Code: model.ErrAgentAmbiguous, Message: "the feature's primary role already exists; use wt herd retry to recover it", Recovery: "wt herd retry --feature " + resolved.feature.Feature.Name}
 	}
-	kind := request.Kind
-	if kind == "" {
-		kind = s.Config.RoleKind(request.Role)
-	}
-	if !config.IsSupportedAgentKind(kind) {
-		return AddResult{}, &model.StageError{Stage: "add role agent", Code: model.ErrConfigInvalid, Message: "the requested agent kind is not supported by Herdr", Recovery: "choose a supported --kind or update .herdr/devflow.toml"}
+	selection, err := s.resolveRoleSelection(resolved.feature, request)
+	if err != nil {
+		return AddResult{}, err
 	}
 
 	if saved, exists := resolved.feature.Agents[request.Role]; exists {
-		if saved.PaneID != "" && saved.TerminalID != "" {
+		if saved.PaneID != "" && saved.TerminalID != "" && saved.Status != model.AgentUnknown {
 			agent, err := s.resolveSavedRole(ctx, &resolved, request.Role)
 			if err != nil {
 				return AddResult{}, err
 			}
 			return AddResult{Feature: resolved.feature.Feature, Agent: agent, Reused: true}, nil
 		}
-		if saved.Kind != "" && saved.Kind != kind {
-			return AddResult{}, &model.StageError{Stage: "add role agent", Code: model.ErrAgentAmbiguous, Message: "a partial role launch already uses a different kind", Recovery: "wt herd rebind " + request.Role + " --target <live-target>"}
+		if saved.Kind == "" {
+			saved.Kind = selection.Kind
+			saved.Model = selection.Model
+			resolved.feature.Agents[request.Role] = saved
+			if err := s.saveResolved(&resolved); err != nil {
+				return AddResult{}, err
+			}
 		}
 	} else {
 		name, nameErr := ScopedAgentName(resolved.feature.Feature.RepositoryID, resolved.feature.Feature.Name, request.Role)
@@ -235,7 +238,8 @@ func (s *Service) Add(ctx context.Context, request AddRequest) (AddResult, error
 		resolved.feature.Agents[request.Role] = model.RoleAgent{
 			Role:        request.Role,
 			Name:        name,
-			Kind:        kind,
+			Kind:        selection.Kind,
+			Model:       selection.Model,
 			WorkspaceID: resolved.feature.WorkspaceID,
 			Status:      model.AgentUnknown,
 			UpdatedAt:   s.now(),
@@ -245,10 +249,35 @@ func (s *Service) Add(ctx context.Context, request AddRequest) (AddResult, error
 		}
 	}
 
-	return s.resumeAdd(ctx, &resolved, request.Role, kind)
+	return s.resumeAdd(ctx, &resolved, request.Role, selection)
 }
 
-func (s *Service) resumeAdd(ctx context.Context, resolved *resolvedFeature, role, kind string) (AddResult, error) {
+func (s *Service) resolveRoleSelection(featureState model.FeatureState, request AddRequest) (config.AgentSelection, error) {
+	if err := config.ValidateAgentModel(request.Model); err != nil {
+		return config.AgentSelection{}, &model.StageError{Stage: "add role agent", Code: model.ErrConfigInvalid, Message: "the requested agent model is invalid", Recovery: "choose a bounded model value without flags or control characters", Cause: err}
+	}
+	if saved, exists := featureState.Agents[request.Role]; exists && saved.Kind != "" {
+		selection := config.AgentSelection{Kind: saved.Kind, Model: saved.Model}
+		if request.Kind != "" && request.Kind != selection.Kind {
+			return config.AgentSelection{}, &model.StageError{Stage: "add role agent", Code: model.ErrAgentAmbiguous, Message: "the saved role launch already uses a different kind", Recovery: "resume without overrides or rebind the role"}
+		}
+		if request.Model != "" && request.Model != selection.Model {
+			return config.AgentSelection{}, &model.StageError{Stage: "add role agent", Code: model.ErrAgentAmbiguous, Message: "the saved role launch already uses a different model", Recovery: "resume without overrides or rebind the role"}
+		}
+		if err := config.ValidateAgentSelection(selection.Kind, selection.Model); err != nil {
+			return config.AgentSelection{}, &model.StageError{Stage: "add role agent", Code: model.ErrConfigInvalid, Message: "the saved role kind or model is invalid", Recovery: "inspect local bridge state, then rebind the role", Cause: err}
+		}
+		return selection, nil
+	}
+	selection, err := s.Config.ResolveAgentSelection(request.Role, request.Kind, request.Model)
+	if err != nil {
+		return config.AgentSelection{}, &model.StageError{Stage: "add role agent", Code: model.ErrConfigInvalid, Message: "the requested role kind or model is invalid", Recovery: "choose supported role defaults or explicit add values", Cause: err}
+	}
+	return selection, nil
+}
+
+func (s *Service) resumeAdd(ctx context.Context, resolved *resolvedFeature, role string, selection config.AgentSelection) (AddResult, error) {
+	kind := selection.Kind
 	saved := resolved.feature.Agents[role]
 	if saved.Name == "" {
 		return AddResult{}, &model.StageError{Stage: "add role agent", Code: model.ErrStateCorrupt, Message: "the saved role launch has no unique Herdr name", Recovery: "wt herd rebind " + role + " --target <live-target>"}
@@ -257,7 +286,7 @@ func (s *Service) resumeAdd(ctx context.Context, resolved *resolvedFeature, role
 		if saved.PaneID == "" {
 			return AddResult{}, &model.StageError{Stage: "add role agent", Code: model.ErrAgentAmbiguous, Message: "the generated role-agent name is already live without a recorded feature pane", Recovery: "wt herd rebind " + role + " --target " + saved.Name}
 		}
-		agent, validateErr := s.roleAgentFromLive(live, resolved, role, kind)
+		agent, validateErr := s.roleAgentFromLive(live, resolved, role, kind, selection.Model)
 		if validateErr != nil {
 			return AddResult{}, validateErr
 		}
@@ -305,7 +334,7 @@ func (s *Service) resumeAdd(ctx context.Context, resolved *resolvedFeature, role
 		return AddResult{}, err
 	}
 	started, err := s.Client.AgentStartInfo(ctx, herdr.AgentStartRequest{
-		Name: saved.Name, Kind: kind, PaneID: saved.PaneID,
+		Name: saved.Name, Kind: kind, Model: selection.Model, PaneID: saved.PaneID,
 		Timeout: time.Duration(s.Config.Bootstrap.TimeoutSeconds) * time.Second,
 	})
 	if err != nil {
@@ -315,7 +344,7 @@ func (s *Service) resumeAdd(ctx context.Context, resolved *resolvedFeature, role
 	if err != nil {
 		return AddResult{}, err
 	}
-	agent, err := s.roleAgentFromLive(ready, resolved, role, kind)
+	agent, err := s.roleAgentFromLive(ready, resolved, role, kind, selection.Model)
 	if err != nil {
 		return AddResult{}, err
 	}
@@ -418,7 +447,7 @@ func (s *Service) Rename(ctx context.Context, request RenameRequest) (RenameResu
 			native := agent.NativeSession
 			renamed.AgentSession = &native
 		}
-		agent, err = s.roleAgentFromLive(renamed, &resolved, request.NewRole, agent.Kind)
+		agent, err = s.roleAgentFromLive(renamed, &resolved, request.NewRole, agent.Kind, agent.Model)
 		if err != nil {
 			return RenameResult{}, err
 		}
@@ -571,7 +600,7 @@ func (s *Service) Rebind(ctx context.Context, request RebindRequest) (RebindResu
 			live.AgentSession = priorNative
 		}
 	}
-	agent, err := s.roleAgentFromLive(live, &resolved, request.Role, saved.Kind)
+	agent, err := s.roleAgentFromLive(live, &resolved, request.Role, saved.Kind, saved.Model)
 	if err != nil {
 		return RebindResult{}, err
 	}
@@ -602,11 +631,11 @@ func (s *Service) resolveTarget(ctx context.Context, resolved *resolvedFeature, 
 	if err != nil {
 		return model.RoleAgent{}, wrapHerdrError("resolve explicit role target", err, "herdr agent list; then retry with --target <live-target>")
 	}
-	kind := s.Config.RoleKind(role)
+	selection := s.Config.RoleAgentSelection(role)
 	if saved, ok := resolved.feature.Agents[role]; ok && saved.Kind != "" {
-		kind = saved.Kind
+		selection = config.AgentSelection{Kind: saved.Kind, Model: saved.Model}
 	}
-	return s.roleAgentFromLive(live, resolved, role, kind)
+	return s.roleAgentFromLive(live, resolved, role, selection.Kind, selection.Model)
 }
 
 // findInFeatureWorktree locates a live agent working in this feature's
@@ -702,7 +731,7 @@ func (s *Service) resolveSavedRole(ctx context.Context, resolved *resolvedFeatur
 			// roleAgentFromLive would reject exactly the case this fallback
 			// exists to handle. Membership was established by the worktree
 			// path, which is the stronger evidence.
-			return roleAgentFrom(recovered, role, saved.Kind, s.now()), nil
+			return roleAgentFrom(recovered, role, saved.Kind, saved.Model, s.now()), nil
 		}
 	}
 	if err := s.validateLiveForFeature(live, resolved, saved.Kind); err != nil {
@@ -711,7 +740,7 @@ func (s *Service) resolveSavedRole(ctx context.Context, resolved *resolvedFeatur
 	if !sameSavedIdentity(saved, live) {
 		return model.RoleAgent{}, &model.StageError{Stage: "resolve saved role agent", Code: model.ErrAgentAmbiguous, Message: "the saved role identity no longer matches the live Herdr agent", Recovery: "wt herd rebind " + role + " --target <live-target>"}
 	}
-	agent, err := s.roleAgentFromLive(live, resolved, role, saved.Kind)
+	agent, err := s.roleAgentFromLive(live, resolved, role, saved.Kind, saved.Model)
 	if err != nil {
 		return model.RoleAgent{}, err
 	}
@@ -753,24 +782,25 @@ func (s *Service) findByNativeSession(ctx context.Context, saved model.RoleAgent
 	return matches[0], true, nil
 }
 
-func (s *Service) roleAgentFromLive(live herdr.AgentInfo, resolved *resolvedFeature, role, kind string) (model.RoleAgent, error) {
+func (s *Service) roleAgentFromLive(live herdr.AgentInfo, resolved *resolvedFeature, role, kind, agentModel string) (model.RoleAgent, error) {
 	if err := s.validateLiveForFeature(live, resolved, kind); err != nil {
 		return model.RoleAgent{}, err
 	}
 	if live.Name == "" {
 		return model.RoleAgent{}, &model.StageError{Stage: "resolve role agent", Code: model.ErrAgentMissing, Message: "the selected live agent has no stable Herdr name", Recovery: "wt herd rebind " + role + " --target " + live.PaneID}
 	}
-	return roleAgentFrom(live, role, kind, s.now()), nil
+	return roleAgentFrom(live, role, kind, agentModel, s.now()), nil
 }
 
 // roleAgentFrom records a live agent as a role binding. It performs no
 // validation: callers establish feature membership first, either through the
 // saved workspace identity or through the worktree path.
-func roleAgentFrom(live herdr.AgentInfo, role, kind string, now time.Time) model.RoleAgent {
+func roleAgentFrom(live herdr.AgentInfo, role, kind, agentModel string, now time.Time) model.RoleAgent {
 	agent := model.RoleAgent{
 		Role:        role,
 		Name:        live.Name,
 		Kind:        kind,
+		Model:       agentModel,
 		WorkspaceID: live.WorkspaceID,
 		TabID:       live.TabID,
 		PaneID:      live.PaneID,

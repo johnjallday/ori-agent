@@ -602,8 +602,7 @@ func (s *Service) ensurePrimary(ctx context.Context, state *model.BridgeState, f
 	// failing because the root pane is busy running exactly the agent we were
 	// about to duplicate.
 	if adopted, found, adoptErr := s.findAgentInWorktree(ctx, featureState.Feature.Path, kind); adoptErr == nil && found {
-		primary := roleAgentFrom(adopted, role, kind, s.now())
-		primary.Model = selection.Model
+		primary := roleAgentFrom(adopted, role, kind, selection.Model, s.now())
 		featureState.Agents[role] = primary
 		if !featureState.Handoff.BootstrapPrompted {
 			featureState.Handoff.Stage = model.HandoffReady

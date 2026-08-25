@@ -961,15 +961,25 @@ func parseAddAgentArgs(args []string) (agents.AddRequest, error) {
 	if err != nil {
 		return agents.AddRequest{}, err
 	}
-	var kind string
+	var kind, agentModel string
 	var positional []string
+	seen := map[string]bool{}
 	for index := 0; index < len(remaining); index++ {
 		switch remaining[index] {
-		case "--kind":
-			if index+1 >= len(remaining) || strings.HasPrefix(remaining[index+1], "--") {
-				return agents.AddRequest{}, fmt.Errorf("--kind requires a value")
+		case "--kind", "--model":
+			flag := remaining[index]
+			if seen[flag] {
+				return agents.AddRequest{}, fmt.Errorf("%s may be provided only once", flag)
 			}
-			kind = remaining[index+1]
+			if index+1 >= len(remaining) || strings.HasPrefix(remaining[index+1], "--") {
+				return agents.AddRequest{}, fmt.Errorf("%s requires a value", flag)
+			}
+			seen[flag] = true
+			if flag == "--kind" {
+				kind = remaining[index+1]
+			} else {
+				agentModel = remaining[index+1]
+			}
 			index++
 		default:
 			if strings.HasPrefix(remaining[index], "--") {
@@ -979,9 +989,15 @@ func parseAddAgentArgs(args []string) (agents.AddRequest, error) {
 		}
 	}
 	if len(positional) != 1 {
-		return agents.AddRequest{}, fmt.Errorf("add requires one role: wt herd add <role> [--kind <kind>]")
+		return agents.AddRequest{}, fmt.Errorf("add requires one role: wt herd add <role> [--kind <kind>] [--model <model>]")
 	}
-	return agents.AddRequest{Context: agents.ContextRequest{FeatureName: contextArgs.feature, WorktreePath: contextArgs.worktree}, Role: positional[0], Kind: kind}, nil
+	if kind != "" && !config.IsSupportedAgentKind(kind) {
+		return agents.AddRequest{}, fmt.Errorf("--kind %q is not supported by Herdr", kind)
+	}
+	if err := config.ValidateAgentModel(agentModel); err != nil {
+		return agents.AddRequest{}, fmt.Errorf("--model: %w", err)
+	}
+	return agents.AddRequest{Context: agents.ContextRequest{FeatureName: contextArgs.feature, WorktreePath: contextArgs.worktree}, Role: positional[0], Kind: kind, Model: agentModel}, nil
 }
 
 func parsePromptAgentArgs(args []string) (agents.PromptRequest, error) {
@@ -1728,10 +1744,16 @@ func (a *App) addAgent(ctx context.Context, opts options, args []string) int {
 	a.recordAudit(runtime, audit.Event{Operation: "add", Feature: result.Feature.Name, Role: result.Agent.Role, Stage: "role-agent", Outcome: addOutcome})
 	if opts.json {
 		a.writeResult(true, map[string]any{"status": "ready", "feature": result.Feature.Name, "agent": result.Agent, "reused": result.Reused})
-	} else if result.Reused {
-		fmt.Fprintf(a.stdout, "Ori Herdr Devflow: using existing %s agent %s for %s\n", result.Agent.Role, result.Agent.Name, result.Feature.Name)
 	} else {
-		fmt.Fprintf(a.stdout, "Ori Herdr Devflow: added %s agent %s for %s\n", result.Agent.Role, result.Agent.Name, result.Feature.Name)
+		action := "added"
+		if result.Reused {
+			action = "using existing"
+		}
+		agentModel := result.Agent.Model
+		if agentModel == "" {
+			agentModel = "integration default"
+		}
+		fmt.Fprintf(a.stdout, "Ori Herdr Devflow: %s %s agent %s for %s (kind=%s model=%s)\n", action, result.Agent.Role, result.Agent.Name, result.Feature.Name, result.Agent.Kind, agentModel)
 	}
 	return 0
 }
@@ -3361,7 +3383,7 @@ Usage:
                                 task list to point at; the choice is recorded for later retries.
   wt herd retry [--feature NAME] [--worktree PATH] [--branch NAME] [--resend]
                                 Resume the recorded primary kind/model pair; --resend repeats a confirmed prompt
-  wt herd add <role> [--kind KIND] [--feature NAME|--worktree PATH]
+  wt herd add <role> [--kind KIND] [--model MODEL] [--feature NAME|--worktree PATH]
                                 Start one explicit secondary role agent in the managed workspace
   wt herd prompt [role] <text> [--target TARGET] [--feature NAME|--worktree PATH]
                                 Prompt the selected feature-scoped agent (primary role by default)

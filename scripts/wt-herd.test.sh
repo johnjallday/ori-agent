@@ -1570,7 +1570,8 @@ for herdr_free_command in pr merge demo backlog cd ls; do
 done
 
 # Reading GitHub Issues must never need a running Herdr. The one DevOps
-# entrypoint calls `gh` directly and the former helper bootstrap is gone.
+# entrypoint calls `gh` directly. Its sole Go-helper boundary is the local
+# config agent-defaults command, which makes no Herdr call.
 devops_entrypoint="$repo_root/scripts/devops.sh"
 if [[ ! -x "$devops_entrypoint" ]]; then
   print -r -- "scripts/devops.sh is missing or not executable" >&2
@@ -1580,8 +1581,13 @@ if ! rg -q 'gh "\$\{args\[@\]\}"' "$devops_entrypoint"; then
   print -r -- "scripts/devops.sh no longer invokes gh directly" >&2
   exit 1
 fi
-if rg -q 'wt_herd|herdr-devflow|devflow_exec|devflow-bootstrap' "$devops_entrypoint"; then
-  print -r -- "scripts/devops.sh reaches for the Herdr bridge" >&2
+if rg -q 'wt_herd|devflow_exec|devflow-bootstrap' "$devops_entrypoint"; then
+  print -r -- "scripts/devops.sh reaches for the Herdr runtime bridge" >&2
+  exit 1
+fi
+if [[ "$(rg -c 'bash "\$script_dir/herdr-devflow\.sh" "\$@"' "$devops_entrypoint" || true)" != "1" ]] || \
+   ! rg -q 'agent_defaults_helper config agent-defaults' "$devops_entrypoint"; then
+  print -r -- "scripts/devops.sh local helper boundary is not limited to config agent-defaults" >&2
   exit 1
 fi
 # The picker has exactly three bash-to-zsh bridges: `s` delegates one-Issue
