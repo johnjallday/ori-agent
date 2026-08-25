@@ -291,7 +291,11 @@ type PlanningSession struct {
 	// WorktreePath is the canonical ori-agent-dev checkout this session plans
 	// in. It is recorded so a later invocation can detect a mismatched dev
 	// worktree instead of silently placing a second planner in the wrong tree.
-	WorktreePath string        `json:"worktree_path"`
+	WorktreePath string `json:"worktree_path"`
+	// PlannerModel is the opaque per-plan Pi model intent. It is separate from
+	// Planner because intent must survive a failed launch before a live agent
+	// exists, and Herdr does not report a running agent's model.
+	PlannerModel string        `json:"planner_model,omitempty"`
 	TabID        string        `json:"tab_id,omitempty"`
 	RootPaneID   string        `json:"root_pane_id,omitempty"`
 	Planner      RoleAgent     `json:"planner,omitempty"`

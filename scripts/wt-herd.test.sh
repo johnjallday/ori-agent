@@ -1289,7 +1289,8 @@ function wt_herd {
 rm -f "$fixture_root/plan-calls"
 plan_status=0
 for bad_plan_args in "" "--issue" "--issue 0" "--issue -5" "--issue abc" \
-                     "--issue 1 --issue 1" "--issue 1 --bogus" "--yes"; do
+                     "--issue 1 --issue 1" "--issue 1 --bogus" "--issue 1 --model" \
+                     "--issue 1 --model --yes" "--issue 1 --model one --model two" "--yes"; do
   plan_status=0
   wt plan ${=bad_plan_args} > /dev/null 2>&1 || plan_status=$?
   if [[ "$plan_status" != "1" ]]; then
@@ -1314,6 +1315,10 @@ wt plan --issue 342 --yes > /dev/null
 [[ "$(<"$fixture_root/plan-calls")" == "issue-plan --issue 342 --worktree $dev_root --yes" ]]
 
 rm -f "$fixture_root/plan-calls"
+wt plan --issue 342 --model '[openai] gpt 5.1; $(echo inert)' --yes > /dev/null
+[[ "$(<"$fixture_root/plan-calls")" == 'issue-plan --issue 342 --model [openai] gpt 5.1; $(echo inert) --worktree '"$dev_root"' --yes' ]]
+
+rm -f "$fixture_root/plan-calls"
 wt plan --issue 202 --issue 101 --yes > /dev/null
 [[ "$(<"$fixture_root/plan-calls")" == "issue-plan --issue 202 --issue 101 --worktree $dev_root --yes" ]]
 
@@ -1326,8 +1331,8 @@ function wt_herd {
     print -r -- "$argument" >> "$fixture_root/plan-argv"
   done
 }
-wt plan --issue 202 --issue 101 --yes > /dev/null
-[[ "$(<"$fixture_root/plan-argv")" == $'issue-plan\n--issue\n202\n--issue\n101\n--worktree\n'"$dev_root"$'\n--yes' ]]
+wt plan --issue 202 --issue 101 --model '[openai] bundle model; $(echo inert)' --yes > /dev/null
+[[ "$(<"$fixture_root/plan-argv")" == $'issue-plan\n--issue\n202\n--issue\n101\n--model\n[openai] bundle model; $(echo inert)\n--worktree\n'"$dev_root"$'\n--yes' ]]
 
 rm -f "$fixture_root/plan-calls"
 wt help > "$fixture_root/plan-help-output" 2>&1
@@ -1602,11 +1607,11 @@ fi
 # arguments. wt remains the
 # owner of confirmation, files, worktree creation, and Herdr/Pi handoff.
 devops_code="$(rg -v '^\s*#' "$devops_entrypoint")"
-if ! print -r -- "$devops_code" | rg -Fq "zsh -c 'source \"\$1\" && wt plan --issue \"\$2\"' devops-plan \"\$script_dir/wt.sh\" \"\$issue_number\""; then
+if ! print -r -- "$devops_code" | rg -Fq "zsh -c 'source \"\$1\" || exit; if [[ -n \"\$3\" ]]; then wt plan --issue \"\$2\" --model \"\$3\"; else wt plan --issue \"\$2\"; fi'"; then
   print -r -- "scripts/devops.sh does not launch wt plan through the constrained zsh bridge" >&2
   exit 1
 fi
-if ! print -r -- "$devops_code" | rg -Fq "zsh -c 'source \"\$1\" || exit; shift; typeset -a plan_args; plan_args=(); for issue in \"\$@\"; do plan_args+=(--issue \"\$issue\"); done; wt plan \"\${plan_args[@]}\"'"; then
+if ! print -r -- "$devops_code" | rg -Fq "zsh -c 'source \"\$1\" || exit; model=\"\$2\"; shift 2; typeset -a plan_args; plan_args=(); for issue in \"\$@\"; do plan_args+=(--issue \"\$issue\"); done; [[ -n \"\$model\" ]] && plan_args+=(--model \"\$model\"); wt plan \"\${plan_args[@]}\"'"; then
   print -r -- "scripts/devops.sh does not launch bundle planning through the constrained positional-argument bridge" >&2
   exit 1
 fi

@@ -52,6 +52,15 @@ func TestParseIssuePlanArgs(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "opaque planner model stays one value",
+			args: []string{"--issue", "1", "--model", "[openai] gpt 5.1; $(echo inert)", "--worktree", "/tmp/dev"},
+			check: func(t *testing.T, parsed issuePlanArgs) {
+				if parsed.plannerModel != "[openai] gpt 5.1; $(echo inert)" {
+					t.Fatalf("planner model = %q", parsed.plannerModel)
+				}
+			},
+		},
 		{name: "missing issue", args: []string{"--worktree", "/tmp/dev"}, wantErr: true},
 		{name: "missing worktree", args: []string{"--issue", "1"}, wantErr: true},
 		{name: "zero issue", args: []string{"--issue", "0", "--worktree", "/tmp/dev"}, wantErr: true},
@@ -61,6 +70,11 @@ func TestParseIssuePlanArgs(t *testing.T) {
 		{name: "duplicate issue", args: []string{"--issue", "1", "--issue", "1", "--worktree", "/tmp/dev"}, wantErr: true},
 		{name: "duplicate worktree", args: []string{"--issue", "1", "--worktree", "/a", "--worktree", "/b"}, wantErr: true},
 		{name: "empty worktree", args: []string{"--issue", "1", "--worktree", "  "}, wantErr: true},
+		{name: "model with no value", args: []string{"--issue", "1", "--worktree", "/tmp/dev", "--model"}, wantErr: true},
+		{name: "empty model", args: []string{"--issue", "1", "--worktree", "/tmp/dev", "--model", "  "}, wantErr: true},
+		{name: "duplicate model", args: []string{"--issue", "1", "--model", "one", "--model", "two", "--worktree", "/tmp/dev"}, wantErr: true},
+		{name: "flag shaped model", args: []string{"--issue", "1", "--model", "--unsafe", "--worktree", "/tmp/dev"}, wantErr: true},
+		{name: "control model", args: []string{"--issue", "1", "--model", "line\nbreak", "--worktree", "/tmp/dev"}, wantErr: true},
 		{name: "unknown flag", args: []string{"--issue", "1", "--worktree", "/tmp/dev", "--bogus"}, wantErr: true},
 	}
 	for _, tc := range cases {
@@ -120,6 +134,15 @@ func TestSingleIssuePlanPayloadKeepsLegacyShapeAndAddsOnlyCanonicalNumbers(t *te
 	if _, exists := payload["compatibility_required"]; exists {
 		t.Fatalf("single-Issue payload unexpectedly requires bundle compatibility: %#v", payload)
 	}
+	if _, exists := payload["planner_model"]; exists {
+		t.Fatalf("integration-default planner unexpectedly added a JSON model: %#v", payload)
+	}
+
+	plan.PlannerModel = "[openai] gpt-5.1"
+	payload = issuePlanPayload(plan)
+	if payload["planner_model"] != "[openai] gpt-5.1" {
+		t.Fatalf("planner_model = %#v", payload["planner_model"])
+	}
 }
 
 func TestIssuePlanPayloadAddsCompleteBundleEvidenceAndKeepsLegacyFields(t *testing.T) {
@@ -174,6 +197,8 @@ func TestIssuePlanRejectsBadArgumentsBeforeAnyIO(t *testing.T) {
 		{"issue-plan", "--issue", "abc", "--worktree", "/tmp/does-not-exist"},
 		{"issue-plan", "--issue", "1", "--issue", "1", "--worktree", "/tmp/does-not-exist"},
 		{"issue-plan", "--issue", "1", "--issue", "nope", "--worktree", "/tmp/does-not-exist"},
+		{"issue-plan", "--issue", "1", "--model", "--unsafe", "--worktree", "/tmp/does-not-exist"},
+		{"issue-plan", "--issue", "1", "--model", "one", "--model", "two", "--worktree", "/tmp/does-not-exist"},
 		{"issue-plan", "--worktree", "/tmp/does-not-exist"},
 		{"issue-plan", "--issue", "1"},
 	}

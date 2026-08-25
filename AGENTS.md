@@ -191,18 +191,20 @@ The full lifecycle, and which agent owns each stage:
 ```
 Ready Issue(s) on GitHub
   → s for one, or Space + b for an ordinary-backlog bundle
-  → wt plan --issue N [--issue N ...]  Pi plans one unit in ori-agent-dev
+  → wt plan --issue N [--issue N ...] [--model MODEL]  Pi plans one unit in ori-agent-dev
   → picker i → wt start      chosen agent implements in one feature worktree
   → wt pr → squash-merge     one PR to dev; bundles reference every member
   → wt done <feature>        close every attached member, archive, and clean up
 ```
 
-`wt plan --issue <N> [--issue <N> ...]` is the planning stage. One number
-preserves the original path. Repeated distinct numbers form a human-affirmed
-bundle: each Issue is read once, normalized in ascending order, and handled by
-one Pi session. Before mutation, the summary shows every title, label, body,
-and comment and asks the user to affirm a shared root cause, shared files, or
-the same UI surface (`--yes` is the explicit non-interactive affirmation).
+`wt plan --issue <N> [--issue <N> ...] [--model MODEL]` is the planning stage.
+One number preserves the original path. Repeated distinct numbers form a
+human-affirmed bundle: each Issue is read once, normalized in ascending order,
+and handled by one Pi session. `--model` is an optional per-plan Pi model; it
+never comes from feature primary or role defaults. Before mutation, the summary
+shows every title, label, body, comment, and effective planner model and asks
+the user to affirm a shared root cause, shared files, or the same UI surface
+(`--yes` is the explicit non-interactive affirmation).
 
 | File | What it is |
 |---|---|
@@ -239,13 +241,18 @@ Rules this stage holds to:
 
 The planning Pi session is a separate record entirely: it is never a feature
 binding, an Overnight Run participant, a continuation target, a PR owner, or a
-`wt done` cleanup target. It is always Pi with no model override and never
-inherits feature defaults. A bare direct `wt start` uses the configured primary
-kind/model pair; the Issue picker instead requires an explicit one-run kind
-choice and does not add a model prompt.
+`wt done` cleanup target. Its kind is always Pi and it never inherits feature
+defaults. The DevOps planning actions ask for an optional model; blank uses the
+Pi integration default. A non-empty selection is validated, shown in the plan,
+recorded before Herdr launch, and retained by a plain retry. A different model
+cannot replace an existing planning session's recorded intent. A bare direct
+`wt start` uses the configured primary kind/model pair; the Issue picker's later
+implementation action still requires an explicit one-run kind choice and does
+not add an implementation-model prompt.
 
-In the `./scripts/devops.sh` picker's Ready view, `s` plans the current row.
-Space marks/unmarks ordinary backlog rows and `b` plans at least two marks as
+In the `./scripts/devops.sh` picker's Ready view, `s` asks for an optional Pi
+model and plans the current row. Space marks/unmarks ordinary backlog rows and
+`b` asks once for the bundle planner model before planning at least two marks as
 one bundle. The picker/REPL `g` action manages persistent agent defaults without
 reading or refreshing GitHub. Marks use immutable Issue numbers, survive view changes, and are
 pruned with a visible notice on refresh if a member disappeared or became

@@ -86,10 +86,11 @@ those answers. `n` accepts an optional one-line body; enter `:edit` to use
 VISUAL or EDITOR for multiline Markdown. For one-shot capture, `--body-file -`
 reads the body from stdin.
 
-In the picker's Ready view, pressing `s` on a selected row starts
-`wt plan --issue <N>`, which shows its normal confirmation summary and launches
-a Herdr-managed Pi planner in the dev worktree. Space marks ordinary backlog
-rows and `b` plans at least two marks as one bundle after showing all evidence
+In the picker's Ready view, pressing `s` on a selected row asks for an optional
+Pi model, then starts `wt plan --issue <N>`. The command shows its normal
+confirmation summary and launches a Herdr-managed Pi planner in the dev
+worktree. Space marks ordinary backlog rows and `b` asks for the same model
+choice before planning at least two marks as one bundle after showing all evidence
 and asking for the compatibility affirmation. Feature proposals remain on the
 single-Issue path. The same `s` is available from the opened-Issue action bar
 (Enter on any row) once that Issue's live labels satisfy `labels_are_ready`.
@@ -1655,8 +1656,8 @@ Picker keys
   n             Capture a new Issue with an optional body
   o             Add the approved label
   Space         Mark/unmark an ordinary backlog Issue in the Ready view
-  b             Plan at least two marked Issues as one affirmed bundle
-  s             Start asynchronous Pi planning for the selected Ready Issue
+  b             Choose a Pi model and plan at least two marked Issues as one bundle
+  s             Choose a Pi model and start planning the selected Ready Issue
   i             Start implementation from a completed local plan; choose Claude,
                 Codex, Pi, worktree-only, or cancel
   g             Read or change persistent primary and role agent defaults
@@ -1770,14 +1771,35 @@ prompt_approve_issue() {
   set_approved approve "$issue_number"
 }
 
+planner_model_choice=""
+prompt_planner_model() {
+  local choice
+  planner_model_choice=""
+  printf '\nChoose the Pi model for this planning session.\n'
+  printf '  [Enter] Integration default (or recorded model on retry)\n'
+  printf '  [q] Cancel\n'
+  printf 'model> '
+  IFS= read -r choice || {
+    printf 'Cancelled.\n'
+    return 1
+  }
+  case "$choice" in
+    q|Q|cancel|Cancel)
+      printf 'Cancelled.\n'
+      return 1
+      ;;
+  esac
+  planner_model_choice="$choice"
+  return 0
+}
+
 # wt is a sourced zsh function, while this picker is a standalone bash
 # process. Start it in a short-lived zsh child so the existing wt plan flow
 # remains the single owner of eligibility revalidation, confirmation, planning
-# artifacts, Herdr placement, and the Pi bootstrap prompt. The Issue number is
-# validated before it reaches this argument vector and is never evaluated as
-# shell syntax.
+# artifacts, Herdr placement, and the Pi bootstrap prompt. The Issue number and
+# opaque model stay separate arguments and are never evaluated as shell syntax.
 launch_pi_plan() {
-  local issue_number="$1"
+  local issue_number="$1" planner_model="${2:-}"
 
   if ! command -v zsh >/dev/null 2>&1; then
     printf 'Planning requires zsh to run scripts/wt.sh.\n' >&2
@@ -1787,14 +1809,16 @@ launch_pi_plan() {
     printf 'Planning entrypoint not found: %s\n' "$script_dir/wt.sh" >&2
     return 1
   fi
-  zsh -c 'source "$1" && wt plan --issue "$2"' devops-plan "$script_dir/wt.sh" "$issue_number"
+  zsh -c 'source "$1" || exit; if [[ -n "$3" ]]; then wt plan --issue "$2" --model "$3"; else wt plan --issue "$2"; fi' \
+    devops-plan "$script_dir/wt.sh" "$issue_number" "$planner_model"
 }
 
 # Each selected number crosses the bash-to-zsh boundary as its own positional
 # argument. The fixed child script builds a zsh array and never evaluates Issue
 # data as code.
 launch_pi_bundle_plan() {
-  local number seen
+  local planner_model="$1" number seen
+  shift
   local -a numbers=("$@") validated=()
 
   if [[ "${#numbers[@]}" -lt 2 ]]; then
@@ -1822,8 +1846,8 @@ launch_pi_bundle_plan() {
     printf 'Planning entrypoint not found: %s\n' "$script_dir/wt.sh" >&2
     return 1
   fi
-  zsh -c 'source "$1" || exit; shift; typeset -a plan_args; plan_args=(); for issue in "$@"; do plan_args+=(--issue "$issue"); done; wt plan "${plan_args[@]}"' \
-    devops-bundle-plan "$script_dir/wt.sh" "${validated[@]}"
+  zsh -c 'source "$1" || exit; model="$2"; shift 2; typeset -a plan_args; plan_args=(); for issue in "$@"; do plan_args+=(--issue "$issue"); done; [[ -n "$model" ]] && plan_args+=(--model "$model"); wt plan "${plan_args[@]}"' \
+    devops-bundle-plan "$script_dir/wt.sh" "$planner_model" "${validated[@]}"
 }
 
 start_bundle_plan() {
@@ -1852,7 +1876,8 @@ start_bundle_plan() {
     done
     validated+=("$number")
   done
-  launch_pi_bundle_plan "${validated[@]}"
+  prompt_planner_model || return 0
+  launch_pi_bundle_plan "$planner_model_choice" "${validated[@]}"
 }
 
 # start_plan is the Ready-list `s` key. It refuses stale or malformed picker
@@ -1869,7 +1894,8 @@ start_plan() {
     printf 'No Ready row is selected.\n' >&2
     return 1
   fi
-  launch_pi_plan "$issue_number"
+  prompt_planner_model || return 0
+  launch_pi_plan "$issue_number" "$planner_model_choice"
 }
 
 # start_issue_plan is the opened-Issue action bar equivalent. can_plan was
@@ -1886,7 +1912,8 @@ start_issue_plan() {
     printf 'No Ready Issue is selected.\n' >&2
     return 1
   fi
-  launch_pi_plan "$issue_number"
+  prompt_planner_model || return 0
+  launch_pi_plan "$issue_number" "$planner_model_choice"
 }
 
 implementation_mode=""

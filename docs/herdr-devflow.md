@@ -105,8 +105,9 @@ GitHub Issue into planning artifacts in `ori-agent-dev` and starts a **Pi**
 session there to finish the plan. No branch, no worktree, no implementation.
 
 ~~~bash
-wt plan --issue 342          # show the plan, confirm, then write and start Pi
-wt plan --issue 342 --yes    # same, without the prompt
+wt plan --issue 342                         # Pi integration-default model
+wt plan --issue 342 --model '[openai] gpt'  # explicit per-plan Pi model
+wt plan --issue 342 --yes                   # skip confirmation, not validation
 ~~~
 
 The shell only validates arguments and resolves the exact `dev` worktree; the
@@ -124,12 +125,15 @@ of an Issue that cannot change. That separation is the point:
 
 - A planner is never a feature binding, an Overnight Run participant, a
   continuation target, a PR owner, or a `wt done` cleanup target.
-- Its kind is always `pi`, its model override is always empty, and both are
-  fixed by the operation. It does not consume feature primary or role defaults,
-  and it cannot leak into a later feature handoff. A bare `wt start` uses the
+- Its kind is always `pi`. Its optional model is selected for that plan only:
+  blank means the Pi integration default, while `--model` carries one opaque,
+  validated value. Planning never consumes feature primary or role defaults,
+  and its selection cannot leak into a later feature handoff. The selected
+  model is recorded before Herdr starts, retained across launch failure/reuse,
+  and cannot be replaced by a conflicting retry. A bare `wt start` uses the
   configured primary pair; the Issue picker's later implementation action
   passes the owner's explicit Claude, Codex, Pi, or worktree-only kind choice
-  and deliberately adds no model prompt.
+  and deliberately adds no implementation-model prompt.
 - A generic live-agent view may still truthfully show the running Pi
   process. It is a real process; it is simply not a *managed feature* agent.
 
@@ -630,10 +634,12 @@ participates.
 
 The `s` key is the direct link from this REPL to the planning flow above. In
 the Ready view, or on the opened Issue's own action bar when its live labels
-satisfy the same eligibility rule as Ready, it runs `wt plan --issue <N>` for
-that Issue. `wt plan` then performs its own fresh eligibility read, shows the
-normal consequence summary and confirmation, writes the planning artifacts,
-and launches the Herdr-managed Pi planner. Off Ready, or on an Issue whose
+satisfy the same eligibility rule as Ready, it first asks for the Pi model
+(blank means integration default), then runs `wt plan --issue <N>` with the
+optional `--model` value. Bundle key `b` asks once and applies the same model to
+its one planner. `wt plan` then performs its own fresh eligibility read, shows
+the selected model in the normal consequence summary and confirmation, writes
+the planning artifacts, and launches the Herdr-managed Pi planner. Off Ready, or on an Issue whose
 labels are not Ready (or could not be read), the key refuses before launching
 anything.
 
@@ -696,9 +702,10 @@ The Issue commands run `gh issue list`, `gh issue view`, `gh issue create`,
 `gh` is not installed.
 The terminal picker fetches the complete open-Issue index and release count
 once and filters Issues locally until `r` refreshes both. It does not persist a
-cache or define a JSON contract. Its eligible `s` action starts `wt plan` in a
-constrained zsh child; the later local-ready `i` action starts `wt start` in the
-only other constrained child. Neither path calls Herdr directly or evaluates
+cache or define a JSON contract. Its eligible `s`/`b` actions keep the planner
+model and Issue numbers as separate arguments while starting `wt plan` in two
+constrained zsh children; the later local-ready `i` action starts `wt start` in
+the third constrained child. Neither path calls Herdr directly or evaluates
 Issue text as shell code. Agents that need structured data should use
 `gh issue list --json` directly. Capture remains a thin wrapper over the GitHub
 CLI, and either surface is valid:

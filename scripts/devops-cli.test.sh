@@ -93,14 +93,27 @@ check "picker proposals view is exact" \
 
 # Stub the process boundary for pure gating tests. Separate integration coverage
 # below proves launch_pi_plan invokes the repository's wt function through zsh.
+eval "$(declare -f launch_pi_plan | sed '1s/launch_pi_plan/launch_pi_plan_real/')"
+eval "$(declare -f prompt_planner_model | sed '1s/prompt_planner_model/prompt_planner_model_real/')"
+check "planner model prompt preserves an opaque model" \
+  "$(printf '%s\n' '[openai] gpt 5.1; $(echo inert)' | (prompt_planner_model_real >/dev/null && printf '%s' "$planner_model_choice"))" \
+  '[openai] gpt 5.1; $(echo inert)'
+check "planner model prompt treats Enter as the integration default" \
+  "$(printf '\n' | (prompt_planner_model_real >/dev/null && printf '<%s>' "$planner_model_choice"))" "<>"
+check "planner model prompt cancels on q" \
+  "$(printf 'q\n' | (prompt_planner_model_real >/dev/null 2>&1 && echo yes || echo no))" "no"
+prompt_planner_model() {
+  planner_model_choice='[openai] planner model'
+  return 0
+}
 launch_pi_plan() {
-  printf 'launched Pi for #%s\n' "$1"
+  printf 'launched Pi for #%s with %s\n' "$1" "$2"
 }
 
 # start_plan is the picker's `s` key: launch only for a valid selected Ready
 # row, with no GitHub read of its own and no shell execution for rejected input.
-check "plan starts Pi for a selected Ready row" \
-  "$(start_plan ready 3 934 2>/dev/null)" "launched Pi for #934"
+check "plan asks for and forwards a model for a selected Ready row" \
+  "$(start_plan ready 3 934 2>/dev/null)" "launched Pi for #934 with [openai] planner model"
 check "plan refuses a non-Ready view" \
   "$(start_plan all 3 934 >/dev/null 2>&1 && echo yes || echo no)" "no"
 check "plan refuses an empty Ready view" \
@@ -116,8 +129,8 @@ check "a rejected plan explains itself on stderr" \
 
 # start_issue_plan is the opened-Issue action bar equivalent, gated on the
 # pre-computed live-label result for the one Issue currently open.
-check "issue plan starts Pi for a Ready Issue" \
-  "$(start_issue_plan 353 1 2>/dev/null)" "launched Pi for #353"
+check "issue plan asks for and forwards a model for a Ready Issue" \
+  "$(start_issue_plan 353 1 2>/dev/null)" "launched Pi for #353 with [openai] planner model"
 check "issue plan refuses when can_plan is 0" \
   "$(start_issue_plan 334 0 >/dev/null 2>&1 && echo yes || echo no)" "no"
 check "an issue plan refusal explains itself on stderr" \
@@ -154,14 +167,16 @@ check "refresh pruning reports every removed mark" "$bundle_mark_notice" \
 
 eval "$(declare -f launch_pi_bundle_plan | sed '1s/launch_pi_bundle_plan/launch_pi_bundle_plan_real/')"
 launch_pi_bundle_plan() {
-  printf 'launched bundle:'
+  local model="$1"
+  shift
+  printf 'launched bundle with %s:' "$model"
   printf ' #%s' "$@"
   printf '\n'
 }
 all_issue_numbers=(101 202)
 all_issue_labels=("backlog, size:quick" "backlog, size:prd")
-check "bundle plan launches every marked Issue" \
-  "$(start_bundle_plan ready 101 202 2>/dev/null)" "launched bundle: #101 #202"
+check "bundle plan asks for one model and launches every marked Issue" \
+  "$(start_bundle_plan ready 101 202 2>/dev/null)" "launched bundle with [openai] planner model: #101 #202"
 check "bundle plan rejects one mark with single-plan guidance" \
   "$(start_bundle_plan ready 101 2>&1 >/dev/null || true)" \
   "Mark at least two ordinary Ready backlog Issues; use s to plan one Issue."
@@ -1049,6 +1064,20 @@ gh_call_sequence() {
   awk '/^CALL/ {printf "%s %s;", $2, $3}' "$gh_calls"
 }
 
+# The planning launcher keeps a selected model as one inert zsh positional
+# argument. Blank retains the integration default without adding --model.
+plan_bridge='source "$1" || exit; if [[ -n "$3" ]]; then wt plan --issue "$2" --model "$3"; else wt plan --issue "$2"; fi'
+: > "$wt_calls"
+launch_pi_plan_real 934 '[openai] gpt 5.1; $(echo inert)' > /dev/null
+check "single planner launcher preserves one opaque model argument" \
+  "$(<"$wt_calls")" \
+  $'CALL\t-c\t'"$plan_bridge"$'\tdevops-plan\t'"$repo_root"$'/scripts/wt.sh\t934\t[openai] gpt 5.1; $(echo inert)'
+: > "$wt_calls"
+launch_pi_plan_real 934 '' > /dev/null
+check "single planner launcher preserves the integration default" \
+  "$(<"$wt_calls")" \
+  $'CALL\t-c\t'"$plan_bridge"$'\tdevops-plan\t'"$repo_root"$'/scripts/wt.sh\t934\t'
+
 # The implementation launcher crosses the same bash-to-zsh boundary as Plan.
 # Its constrained child receives the feature and validated mode as separate
 # words, then chooses exactly --kind or --no-herdr inside the child.
@@ -1072,15 +1101,15 @@ check "an unsupported implementation mode launches no child" \
 launch_real_bundle() (
   launch_pi_bundle_plan_real "$@"
 )
-bundle_bridge='source "$1" || exit; shift; typeset -a plan_args; plan_args=(); for issue in "$@"; do plan_args+=(--issue "$issue"); done; wt plan "${plan_args[@]}"'
+bundle_bridge='source "$1" || exit; model="$2"; shift 2; typeset -a plan_args; plan_args=(); for issue in "$@"; do plan_args+=(--issue "$issue"); done; [[ -n "$model" ]] && plan_args+=(--model "$model"); wt plan "${plan_args[@]}"'
 : > "$wt_calls"
-launch_real_bundle 202 101 > /dev/null
-check "bundle launcher preserves separate Issue arguments" \
+launch_real_bundle '[openai] bundle model; $(echo inert)' 202 101 > /dev/null
+check "bundle launcher preserves separate model and Issue arguments" \
   "$(<"$wt_calls")" \
-  $'CALL\t-c\t'"$bundle_bridge"$'\tdevops-bundle-plan\t'"$repo_root"$'/scripts/wt.sh\t202\t101'
+  $'CALL\t-c\t'"$bundle_bridge"$'\tdevops-bundle-plan\t'"$repo_root"$'/scripts/wt.sh\t[openai] bundle model; $(echo inert)\t202\t101'
 : > "$wt_calls"
-check "real bundle launcher rejects hostile argument text" \
-  "$(launch_real_bundle 101 '202; touch nope' >/dev/null 2>&1 && echo yes || echo no)" "no"
+check "real bundle launcher rejects hostile Issue argument text" \
+  "$(launch_real_bundle '' 101 '202; touch nope' >/dev/null 2>&1 && echo yes || echo no)" "no"
 check "hostile bundle argument launches no child" \
   "$(wc -c < "$wt_calls" | tr -d ' ')" "0"
 
@@ -1434,9 +1463,10 @@ prompt_open_issue_plan_output 320 > "$fixture_root/prompt-plan-real-output" \
   2> "$fixture_root/prompt-plan-real-error"
 check "a real Ready Issue's Plan launches Pi" \
   "$(grep -Fc 'Pi planner launched for #320' "$fixture_root/prompt-plan-real-output" || true)" "1"
+assert_output_has "a real Ready Issue's Plan" "$fixture_root/prompt-plan-real-output" "model>"
 check "a real Ready Issue's Plan invokes wt through zsh" \
   "$(<"$wt_calls")" \
-  $'CALL\t-c\tsource "$1" && wt plan --issue "$2"\tdevops-plan\t'"$repo_root"$'/scripts/wt.sh\t320'
+  $'CALL\t-c\t'"$plan_bridge"$'\tdevops-plan\t'"$repo_root"$'/scripts/wt.sh\t320\t'
 check "a real Ready Issue's Plan reads labels exactly once" "$(count_label_reads 320)" "1"
 assert_no_github_write "a real Ready Issue's Plan action"
 

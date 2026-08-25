@@ -24,6 +24,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/agents"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/audit"
+	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/config"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/github"
 	"github.com/johnjallday/ori-agent/tools/herdr-devflow/internal/state"
 )
@@ -34,13 +35,14 @@ type issuePlanArgs struct {
 	issueNumber  int
 	issueNumbers []int
 	worktree     string
+	plannerModel string
 	yes          bool
 	json         bool
 }
 
 func parseIssuePlanArgs(args []string) (issuePlanArgs, error) {
 	var parsed issuePlanArgs
-	var worktreeSeen bool
+	var worktreeSeen, modelSeen bool
 	issueSeen := make(map[int]struct{})
 	for index := 0; index < len(args); index++ {
 		switch args[index] {
@@ -68,6 +70,16 @@ func parseIssuePlanArgs(args []string) (issuePlanArgs, error) {
 			index++
 			parsed.worktree = args[index]
 			worktreeSeen = true
+		case "--model":
+			if index+1 >= len(args) || strings.TrimSpace(args[index+1]) == "" {
+				return issuePlanArgs{}, fmt.Errorf("--model requires a non-empty value")
+			}
+			if modelSeen {
+				return issuePlanArgs{}, fmt.Errorf("issue-plan accepts --model only once")
+			}
+			index++
+			parsed.plannerModel = args[index]
+			modelSeen = true
 		case "--yes", "--confirm":
 			parsed.yes = true
 		case "--json":
@@ -81,6 +93,9 @@ func parseIssuePlanArgs(args []string) (issuePlanArgs, error) {
 	}
 	if !worktreeSeen || strings.TrimSpace(parsed.worktree) == "" {
 		return issuePlanArgs{}, fmt.Errorf("issue-plan requires --worktree <dev-worktree-path>")
+	}
+	if err := config.ValidateAgentModel(parsed.plannerModel); err != nil {
+		return issuePlanArgs{}, fmt.Errorf("--model: %w", err)
 	}
 	sort.Ints(parsed.issueNumbers)
 	parsed.issueNumber = parsed.issueNumbers[0]
@@ -114,7 +129,7 @@ func (a *App) issuePlan(ctx context.Context, opts options, args []string) int {
 		}),
 	}
 
-	request := agents.IssuePlanRequest{IssueNumbers: parsed.issueNumbers, DevWorktreePath: parsed.worktree}
+	request := agents.IssuePlanRequest{IssueNumbers: parsed.issueNumbers, PlannerModel: parsed.plannerModel, DevWorktreePath: parsed.worktree}
 	if len(parsed.issueNumbers) == 1 {
 		// Preserve the original service request shape for single-Issue callers.
 		request.IssueNumber = parsed.issueNumber
@@ -250,6 +265,9 @@ func issuePlanPayload(plan agents.IssuePlan) map[string]any {
 		"artifact_state":  string(plan.ArtifactState),
 		"planner_kind":    plan.PlannerKind,
 		"workspace_state": plan.WorkspaceState,
+	}
+	if plan.PlannerModel != "" {
+		payload["planner_model"] = plan.PlannerModel
 	}
 	if plan.IsBundle() {
 		payload["compatibility_required"] = true

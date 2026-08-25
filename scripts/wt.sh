@@ -5,7 +5,7 @@
 #   source scripts/wt.sh    # Load the function (cd works directly)
 #   wt                      # Interactive REPL (type: go, status, start, ...)
 #   wt go                   # One-shot worktree picker (navigate + cd)
-#   wt plan --issue <N> [--issue <N> ...] [--yes]  # Plan one Ready Issue or an affirmed bundle in dev
+#   wt plan --issue <N> [--issue <N> ...] [--model MODEL] [--yes]  # Plan one Ready Issue or an affirmed bundle in dev
 #   wt start [prd] [--kind KIND] [--model MODEL] [--no-herdr] # Create a planned worktree
 #   wt new <name> [--kind KIND] [--model MODEL] # Create a clean worktree (no PRD/tasks)
 #   wt pr [name]            # Push branch and open a PR against dev
@@ -614,8 +614,9 @@ function wt_status_worktrees {
 
 # --- Issue planning -----------------------------------------------------
 #
-# wt plan accepts one Ready GitHub Issue or a repeated --issue bundle and
-# starts one Pi planning session in the dev worktree. It is a distinct lifecycle
+# wt plan accepts one Ready GitHub Issue or a repeated --issue bundle plus an
+# optional per-plan Pi model, and starts one planning session in the dev
+# worktree. It is a distinct lifecycle
 # stage from wt start:
 # planning happens in ori-agent-dev and never creates a branch, a worktree, or
 # an implementation agent. Everything past argument parsing — the fresh
@@ -624,11 +625,11 @@ function wt_status_worktrees {
 # the same way wt status delegates its rendering. This function only
 # validates arguments and resolves the exact dev worktree to plan in.
 function wt_plan_issue_usage {
-  echo "Usage: wt plan --issue <positive-integer> [--issue <positive-integer> ...] [--yes]"
+  echo "Usage: wt plan --issue <positive-integer> [--issue <positive-integer> ...] [--model MODEL] [--yes]"
 }
 
 function wt_plan_issue {
-  local issue="" existing_issue assume_yes=0
+  local issue="" existing_issue planner_model="" model_seen=0 assume_yes=0
   local -a args issues
   args=("$@")
   local arg index=1
@@ -655,6 +656,20 @@ function wt_plan_issue {
           fi
         done
         issues+=("$issue")
+        ;;
+      --model)
+        index=$(( index + 1 ))
+        if (( index > ${#args[@]} )) || [[ -z "${args[$index]}" || "${args[$index]}" == -* ]]; then
+          echo "wt plan --model requires one non-empty model value"
+          wt_plan_issue_usage
+          return 1
+        fi
+        if (( model_seen )); then
+          echo "wt plan accepts --model only once"
+          return 1
+        fi
+        planner_model="${args[$index]}"
+        model_seen=1
         ;;
       --yes|-y)
         assume_yes=1
@@ -689,6 +704,9 @@ function wt_plan_issue {
   for issue in "${issues[@]}"; do
     plan_args+=(--issue "$issue")
   done
+  if (( model_seen )); then
+    plan_args+=(--model "$planner_model")
+  fi
   plan_args+=(--worktree "$dev_path")
   if (( assume_yes )); then
     plan_args+=(--yes)
@@ -2000,8 +2018,8 @@ function wt_dispatch {
     echo "Usage: wt [command] [args]"
     echo "  wt               - Interactive REPL (bare 'wt'; type commands, q to quit)"
     echo "  wt go            - One-shot worktree picker (navigate + cd)"
-    echo "  wt plan --issue <N> [--issue <N> ...] [--yes]"
-    echo "                   - Plan one Ready Issue or an affirmed ordinary-backlog bundle"
+    echo "  wt plan --issue <N> [--issue <N> ...] [--model MODEL] [--yes]"
+    echo "                   - Plan with fixed Pi and an optional per-plan model"
     echo "                     in the dev worktree (highest selected size route wins)."
     echo "                     Writes tasks/issue-<feature>.md and a starter checklist there;"
     echo "                     never touches the Issue on GitHub. Run 'wt start <feature>' once"
