@@ -10,9 +10,11 @@ source_id = "ori.devflow"
 [primary]
 role = "builder"
 kind = "claude"
+model = ""
 
 [roles]
 default_kind = "claude"
+default_model = ""
 
 [roles.defaults]
 reviewer = "claude"
