@@ -457,6 +457,9 @@ func TestParseHandoffArgsRequiresAnExplicitInitialTargetAndGatesResend(t *testin
 	if _, err := parseHandoffArgs([]string{"--feature", "bridge", "--worktree", "/tmp/bridge", "--model", "bad\nmodel"}, false); err == nil {
 		t.Fatal("handoff accepted an invalid primary model")
 	}
+	if _, err := parseHandoffArgs([]string{"--feature", "bridge", "--worktree", "/tmp/bridge", "--model", "one", "--model", "two"}, false); err == nil {
+		t.Fatal("handoff accepted duplicate primary model flags")
+	}
 	if _, err := parseHandoffArgs([]string{"--feature", "bridge", "--worktree", "/tmp/bridge", "--kind", "unknown"}, false); err == nil {
 		t.Fatal("handoff accepted an unsupported primary kind")
 	}

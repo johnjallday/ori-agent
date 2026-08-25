@@ -81,6 +81,12 @@ rg -q "Model .*openai/configured" "$fixture_root/configured-model-output"
 rg -q "^handoff --feature bridge --worktree $target_root --branch feature/bridge$" "$fixture_root/herd-calls"
 
 > "$fixture_root/herd-calls"
+HERDR_DEVFLOW_CONFIG="$fixture_root/model-defaults.toml" HERDR_DEVFLOW_PRIMARY_KIND=claude \
+  wt start bridge > "$fixture_root/environment-kind-output" 2>&1
+rg -q "Agent .*claude" "$fixture_root/environment-kind-output"
+rg -q "Model .*integration default" "$fixture_root/environment-kind-output"
+
+> "$fixture_root/herd-calls"
 HERDR_DEVFLOW_CONFIG="$fixture_root/model-defaults.toml" wt start bridge --model '[openai] gpt 5.1' > "$fixture_root/model-only-output" 2>&1
 rg -q "Agent .*pi" "$fixture_root/model-only-output"
 rg -q "Model .*\[openai\] gpt 5.1" "$fixture_root/model-only-output"

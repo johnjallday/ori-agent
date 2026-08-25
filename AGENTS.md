@@ -68,7 +68,7 @@ Every change is implemented in its own feature worktree. `ori-agent-dev` is for 
 `size:quick` or `size:planned` legitimately has no PRD, and a detailed task
 list alone is enough to start implementing.
 
-Both accept `--yes` for non-interactive runs and `--no-herdr` to skip the agent handoff. If `wt` itself is broken, that is a bug to fix — not a reason to fall back to implementing in `ori-agent-dev`. Bootstrapping a fix to `wt` is the one case where creating the worktree by hand with `git worktree add` is correct.
+Both accept `--yes` for non-interactive runs, `--no-herdr` to skip the agent handoff, and optional one-run `--kind`/`--model` overrides. If `wt` itself is broken, that is a bug to fix — not a reason to fall back to implementing in `ori-agent-dev`. Bootstrapping a fix to `wt` is the one case where creating the worktree by hand with `git worktree add` is correct.
 
 **Why a worktree and not just a branch:** `ori-agent-dev` is shared — other sessions commit in it, and a `git switch` there is visible to every one of them, and can disturb a running server or build mid-flight. Separate worktrees let several changes be in flight at once without any of them touching each other's checkout.
 
@@ -91,14 +91,17 @@ same views and release status to scripts and agents.
 | `./scripts/devops.sh proposals` | reads open Issues labeled `feature-proposal` |
 | `./scripts/devops.sh status` | reads which group each task list is on, and whether its branch has a worktree — local only |
 | `./scripts/devops.sh release` | reads the latest Release's tag/publish time and counts delivery PRs merged into `dev` strictly after it |
+| `./scripts/devops.sh agent-defaults` | reads or confirm-gates persistent primary and role-fallback kind/model pairs in `.herdr/devflow.toml` — local only |
 | `./scripts/devops.sh view <n>` | reads one Issue in full |
 | `./scripts/devops.sh new <title> [--body <text> \| --body-file <path\|->]` | **writes** a new unlabelled Issue with optional context, confirm-gated |
 | `./scripts/devops.sh decide <n> <answers> [--rationale <text>]` | **writes** a marked decision comment, confirm-gated (`answer` is an alias) |
 | `./scripts/devops.sh approve <n>` / `unapprove <n>` | **writes** the `approved` label, confirm-gated |
 
-The script delegates directly to `gh issue list`, `gh issue view`,
-`gh issue create`, `gh issue comment` and `gh issue edit`. Its filters are
-literal GitHub labels, not Project columns, and every read is fresh.
+The Issue commands delegate directly to `gh issue list`, `gh issue view`,
+`gh issue create`, `gh issue comment` and `gh issue edit`. Their filters are
+literal GitHub labels, not Project columns, and every read is fresh. The
+`agent-defaults` action is the exception: it needs no `gh`, calls only the local
+Go config command, and never contacts Herdr.
 
 `release` additionally delegates to `gh release view` and `gh pr list --base
 dev --state merged`. Feature delivery targets `dev`, while Releases snapshot
@@ -110,11 +113,22 @@ release status is unavailable without hiding the Issue list. The one-shot
 command remains strict: either read failing exits non-zero with `gh`'s own
 message rather than reporting a misleading zero count.
 
-Reads never mutate. The write commands exist because they are the three things
-only a human does in this pipeline: capturing an idea, answering a spec's open
-questions, and setting `approved` — the single gate the grooming routine is
-forbidden from touching. They confirm before writing and refuse without a
+Reads never mutate. The GitHub write commands exist because they are the three
+things only a human does in this pipeline: capturing an idea, answering a spec's
+open questions, and setting `approved` — the single gate the grooming routine
+is forbidden from touching. The separate local `agent-defaults` write changes
+only four checked-in TOML keys. All writes confirm first and refuse without a
 terminal unless given `--yes`.
+
+Persistent defaults are pairs: `primary.kind`/`primary.model` and
+`roles.default_kind`/`roles.default_model`; `[roles.defaults]` and
+`[roles.models]` add per-role overrides. Empty model means the external
+integration chooses. A model-only one-run override keeps the configured kind;
+a different explicit kind without `--model` clears the configured model for
+that launch. A recorded feature or partial role launch keeps its original pair
+on retry even if repository defaults later change. Ori validates and forwards a
+non-empty model as one `herdr agent start --model` argument, but support in the
+installed Herdr/Pi integration is deliberately unconfirmed.
 
 `new` accepts an optional one-line body in the picker (`:edit` opens `$VISUAL`
 or `$EDITOR` for multiline Markdown), `--body` text, or `--body-file` input. It
@@ -225,13 +239,15 @@ Rules this stage holds to:
 
 The planning Pi session is a separate record entirely: it is never a feature
 binding, an Overnight Run participant, a continuation target, a PR owner, or a
-`wt done` cleanup target. A bare direct `wt start` still uses Herdr's configured
-Claude primary; the Issue picker instead requires an explicit implementation
-choice.
+`wt done` cleanup target. It is always Pi with no model override and never
+inherits feature defaults. A bare direct `wt start` uses the configured primary
+kind/model pair; the Issue picker instead requires an explicit one-run kind
+choice and does not add a model prompt.
 
 In the `./scripts/devops.sh` picker's Ready view, `s` plans the current row.
 Space marks/unmarks ordinary backlog rows and `b` plans at least two marks as
-one bundle. Marks use immutable Issue numbers, survive view changes, and are
+one bundle. The picker/REPL `g` action manages persistent agent defaults without
+reading or refreshing GitHub. Marks use immutable Issue numbers, survive view changes, and are
 pruned with a visible notice on refresh if a member disappeared or became
 ineligible. `feature-proposal` rows cannot be marked. The same single-Issue `s`
 is also on the opened-Issue action bar

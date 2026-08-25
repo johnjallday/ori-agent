@@ -783,10 +783,17 @@ function wt_plan_default_model {
     print -r -- "$HERDR_DEVFLOW_PRIMARY_MODEL"
     return 0
   fi
-  local config agent_model=""
+  local config agent_model="" file_kind=""
   config="$(wt_plan_config_path)"
   if [[ -f "$config" ]]; then
+    file_kind="$(sed -n '/^\[primary\]/,/^\[roles\]/{ s/^[[:space:]]*kind[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p; }' "$config" | head -1)"
     agent_model="$(sed -n '/^\[primary\]/,/^\[roles\]/{ s/^[[:space:]]*model[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p; }' "$config" | head -1)"
+  fi
+  # Environment kind is an explicit override. If it changes the file's kind
+  # without its own model override, mirror the Go resolver and clear stale
+  # model intent in the confirmation summary.
+  if (( ${+HERDR_DEVFLOW_PRIMARY_KIND} )) && [[ -n "$HERDR_DEVFLOW_PRIMARY_KIND" && "$HERDR_DEVFLOW_PRIMARY_KIND" != "${file_kind:-claude}" ]]; then
+    agent_model=""
   fi
   print -r -- "$agent_model"
 }

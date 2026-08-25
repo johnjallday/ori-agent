@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/BurntSushi/toml"
 )
@@ -277,6 +278,9 @@ func ValidateAgentModel(agentModel string) error {
 	if agentModel == "" {
 		return nil
 	}
+	if !utf8.ValidString(agentModel) {
+		return fmt.Errorf("model must be valid UTF-8")
+	}
 	if len(agentModel) > MaxAgentModelLength {
 		return fmt.Errorf("model must be at most %d bytes", MaxAgentModelLength)
 	}
@@ -310,10 +314,15 @@ func (c Config) RoleAgentSelection(role string) AgentSelection {
 		return AgentSelection{Kind: c.Primary.Kind, Model: c.Primary.Model}
 	}
 	selection := AgentSelection{Kind: c.Roles.DefaultKind, Model: c.Roles.DefaultModel}
-	if kind, ok := c.Roles.Defaults[role]; ok {
+	kind, hasKind := c.Roles.Defaults[role]
+	agentModel, hasModel := c.Roles.Models[role]
+	if hasKind {
+		if kind != selection.Kind && !hasModel {
+			selection.Model = ""
+		}
 		selection.Kind = kind
 	}
-	if agentModel, ok := c.Roles.Models[role]; ok {
+	if hasModel {
 		selection.Model = agentModel
 	}
 	return selection
@@ -390,11 +399,15 @@ func applyOverrides(cfg *Config, lookupEnv func(string) (string, bool)) error {
 	if value, ok := lookupEnv("HERDR_DEVFLOW_PRIMARY_ROLE"); ok {
 		cfg.Primary.Role = value
 	}
+	primaryModel, primaryModelSet := lookupEnv("HERDR_DEVFLOW_PRIMARY_MODEL")
 	if value, ok := lookupEnv("HERDR_DEVFLOW_PRIMARY_KIND"); ok {
+		if value != cfg.Primary.Kind && !primaryModelSet {
+			cfg.Primary.Model = ""
+		}
 		cfg.Primary.Kind = value
 	}
-	if value, ok := lookupEnv("HERDR_DEVFLOW_PRIMARY_MODEL"); ok {
-		cfg.Primary.Model = value
+	if primaryModelSet {
+		cfg.Primary.Model = primaryModel
 	}
 	if value, ok := lookupEnv("HERDR_DEVFLOW_RETRY_WINDOW"); ok {
 		cfg.Scheduler.RetryWindow = value

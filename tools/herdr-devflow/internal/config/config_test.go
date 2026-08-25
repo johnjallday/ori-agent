@@ -180,6 +180,46 @@ func TestLoadAppliesExplicitPrimaryModelOverride(t *testing.T) {
 	}
 }
 
+func TestLoadPrimaryKindOverrideDoesNotCarryAStaleModel(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name     string
+		kind     string
+		model    string
+		modelSet bool
+		want     AgentSelection
+	}{
+		{name: "changed kind clears configured model", kind: "claude", want: AgentSelection{Kind: "claude"}},
+		{name: "changed kind with explicit model keeps pair", kind: "claude", model: "anthropic/opus", modelSet: true, want: AgentSelection{Kind: "claude", Model: "anthropic/opus"}},
+		{name: "same kind inherits configured model", kind: "pi", want: AgentSelection{Kind: "pi", Model: "openai/configured"}},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "devflow.toml")
+			if err := os.WriteFile(path, []byte("[primary]\nkind = \"pi\"\nmodel = \"openai/configured\"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := Load(path, func(key string) (string, bool) {
+				switch key {
+				case "HERDR_DEVFLOW_PRIMARY_KIND":
+					return testCase.kind, true
+				case "HERDR_DEVFLOW_PRIMARY_MODEL":
+					return testCase.model, testCase.modelSet
+				default:
+					return "", false
+				}
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := AgentSelection{Kind: cfg.Primary.Kind, Model: cfg.Primary.Model}
+			if got != testCase.want {
+				t.Fatalf("environment pair = %#v, want %#v", got, testCase.want)
+			}
+		})
+	}
+}
+
 func TestValidateAgentModelAcceptsOpaqueValuesAndRejectsUnsafeShape(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -195,6 +235,7 @@ func TestValidateAgentModelAcceptsOpaqueValuesAndRejectsUnsafeShape(t *testing.T
 		{name: "newline", model: "model\nnext", wantErr: true},
 		{name: "escape", model: "model\x1bnext", wantErr: true},
 		{name: "delete", model: "model\x7fnext", wantErr: true},
+		{name: "invalid UTF-8", model: string([]byte{0xff}), wantErr: true},
 		{name: "overlong", model: strings.Repeat("m", 257), wantErr: true},
 	}
 	for _, testCase := range cases {
@@ -229,6 +270,7 @@ func TestResolveAgentSelectionKeepsKindAndModelAsAPair(t *testing.T) {
 	}{
 		{name: "configured primary pair", role: "builder", want: AgentSelection{Kind: "pi", Model: "openai/primary"}},
 		{name: "configured role pair", role: "reviewer", want: AgentSelection{Kind: "pi", Model: "openai/reviewer"}},
+		{name: "role kind without role model clears stale fallback model", role: "tester", want: AgentSelection{Kind: "claude"}},
 		{name: "configured fallback pair", role: "analyst", want: AgentSelection{Kind: "codex", Model: "openai/fallback"}},
 		{name: "same kind inherits model", role: "builder", kind: "pi", want: AgentSelection{Kind: "pi", Model: "openai/primary"}},
 		{name: "model-only override inherits kind", role: "builder", model: "anthropic/override", want: AgentSelection{Kind: "pi", Model: "anthropic/override"}},

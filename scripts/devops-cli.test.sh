@@ -539,6 +539,14 @@ check "model with spaces and brackets is one helper argument" \
   "$(grep -Fxc '<[openai] gpt 5.1>' "$agent_defaults_calls")" "2"
 check "role model with spaces is one helper argument" \
   "$(grep -Fxc '<openai/role model>' "$agent_defaults_calls")" "2"
+: > "$agent_defaults_calls"
+rm -f "$fixture_root/model-shell-injection"
+agent_defaults_action --primary-kind pi \
+  --primary-model '[openai] x; $(touch model-shell-injection)' --yes < /dev/null > /dev/null
+check "shell-looking model remains one inert helper argument" \
+  "$(grep -Fxc '<[openai] x; $(touch model-shell-injection)>' "$agent_defaults_calls")" "2"
+check "shell-looking model executes nothing" \
+  "$([[ -e "$fixture_root/model-shell-injection" || -e model-shell-injection ]] && echo yes || echo no)" "no"
 check "agent defaults action contacts neither GitHub nor Herdr" \
   "$([[ -e "$agent_defaults_forbidden" ]] && wc -c < "$agent_defaults_forbidden" | tr -d ' ' || printf 0)" "0"
 

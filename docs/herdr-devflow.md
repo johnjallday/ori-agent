@@ -38,6 +38,66 @@ integration commands, but it never installs, rewrites, or enables an agent
 integration for you. Install or update an integration explicitly with Herdr if
 you choose to use native session restore.
 
+## Persistent agent defaults
+
+Feature handoffs resolve a kind/model pair from `.herdr/devflow.toml`:
+
+~~~toml
+[primary]
+role = "builder"
+kind = "claude"
+model = "" # empty: let the external integration choose
+
+[roles]
+default_kind = "claude"
+default_model = ""
+
+[roles.defaults]
+reviewer = "pi"
+
+[roles.models]
+reviewer = "provider/reviewer-model"
+~~~
+
+Use the local DevOps action instead of hand-editing the two fallback pairs:
+
+~~~bash
+./scripts/devops.sh agent-defaults        # prompts in a terminal; reads in a pipe
+# Picker or line REPL: press g
+
+./scripts/devops.sh agent-defaults \
+  --primary-kind pi --primary-model 'provider/primary-model' \
+  --role-kind claude --clear-role-model --yes
+~~~
+
+It reads and validates the complete file, previews current → proposed values,
+then confirms before atomically replacing it. It preserves unrelated sections,
+comments, per-role overrides, newline style, and file mode. Malformed or
+symlinked files, missing/duplicate target keys, invalid values, and failed writes
+leave the original untouched. `HERDR_DEVFLOW_CONFIG` selects an isolated config
+for tests. `HERDR_DEVFLOW_PRIMARY_MODEL` is an explicit runtime override,
+including an explicitly empty value; it does not rewrite the file.
+
+Kind and model are selected together:
+
+1. A saved feature or partial role launch wins on every retry.
+2. An explicit `--model` replaces the model while keeping the effective kind.
+3. An explicit `--kind` equal to the configured kind inherits its model.
+4. A different explicit kind with no model uses that integration's default; it
+   never inherits a model chosen for the old kind.
+5. With no one-run override, the configured primary, per-role, or role-fallback
+   pair applies.
+
+Model values are opaque, bounded argv values. Ori does not maintain a
+provider/model allow-list. It rejects control characters, flag-shaped values,
+and values over 256 bytes, then forwards a non-empty value as one
+`herdr agent start --model <value>` argument without a shell. **This proves
+Ori's local persistence and forwarding only. Herdr/Pi model support is
+unconfirmed, deliberately; do not interpret a successful local preview as
+proof that the installed integration honors the model.** A Herdr rejection
+uses the normal non-fatal handoff contract: the worktree remains ready and the
+recorded pair remains available to `wt herd retry`.
+
 ## Planning an Issue
 
 `wt plan --issue <N>` is the stage *before* a feature exists. It turns a Ready
@@ -64,11 +124,12 @@ of an Issue that cannot change. That separation is the point:
 
 - A planner is never a feature binding, an Overnight Run participant, a
   continuation target, a PR owner, or a `wt done` cleanup target.
-- Its kind is always `pi` and is fixed by the operation. It does not read
-  or write `.herdr/devflow.toml`, and it cannot leak into a later feature
-  handoff. A bare `wt start` still uses Herdr's configured Claude primary;
-  the Issue picker's later implementation action passes the owner's explicit
-  Claude, Codex, Pi, or worktree-only choice.
+- Its kind is always `pi`, its model override is always empty, and both are
+  fixed by the operation. It does not consume feature primary or role defaults,
+  and it cannot leak into a later feature handoff. A bare `wt start` uses the
+  configured primary pair; the Issue picker's later implementation action
+  passes the owner's explicit Claude, Codex, Pi, or worktree-only kind choice
+  and deliberately adds no model prompt.
 - A generic live-agent view may still truthfully show the running Pi
   process. It is a real process; it is simply not a *managed feature* agent.
 
@@ -99,8 +160,10 @@ worktree as usual and then attempts the Herdr handoff:
 ~~~bash
 wt start herdr-devflow-bridge
 
-# Keep the configured Claude default for other features, but use Codex here.
+# Keep the configured pair for other features, but override this run.
 wt start experimental-codex-flow --kind codex
+wt start experimental-pi-flow --kind pi --model 'provider/model'
+wt start same-kind-new-model --model 'provider/other-model'
 ~~~
 
 The handoff opens the existing checkout, finds an interactive pane, starts the
@@ -132,11 +195,13 @@ wt herd retry --feature herdr-devflow-bridge --worktree /absolute/path/to/herdr-
 wt herd doctor
 ~~~
 
-The checked-in configuration defaults the primary agent to Claude. Use
-wt start <feature> --kind <kind> only when one feature should start with a
-different supported Herdr kind. The selected kind is recorded with the handoff,
-so a later wt herd retry keeps that choice instead of falling back to the
-default.
+The checked-in configuration defaults the primary agent to Claude with an empty
+model. Use `wt start <feature> --kind <kind>` and/or `--model <model>` only for
+a one-run override. The confirmation summary shows the effective pair, including
+`integration default` when the model is empty. The pair is recorded before
+Herdr is contacted, so a launch rejection and every later `wt herd retry` keep
+that intent instead of reading newly changed repository defaults. Retry rejects
+new kind/model overrides; it is a continuation, not a reselection.
 
 Use wt start <feature> --no-herdr for a one-run opt-out. A successful retry
 completes only missing stages. It does not create a second workspace or primary
@@ -176,6 +241,7 @@ wt herd prompt "Begin the next incomplete task."
 
 # Explicit role in the current worktree.
 wt herd add reviewer --kind claude
+wt herd add tester --kind pi --model 'provider/tester-model'
 wt herd prompt reviewer "Review the current implementation."
 wt herd focus reviewer
 wt herd read reviewer --lines 160
@@ -185,9 +251,14 @@ wt herd prompt builder "Continue after the CI result." --feature another-feature
 wt herd status --feature another-feature
 ~~~
 
-Each managed role has a generated globally unique Herdr name and saved native
-session identity when Herdr provides one. The bridge resolves the saved
-feature/role/session association first; it does not select an agent merely
+Each managed role has a generated globally unique Herdr name, saved kind/model
+intent, and saved native session identity when Herdr provides one. New roles use
+`[roles.defaults]`/`[roles.models]` when present, then the role-fallback pair.
+The same one-run pair rules apply to `wt herd add`. The pair is saved before a
+pane split or agent start, so retry, reuse, rename, recovery, and rebind preserve
+it. Herdr does not report a live model, so model intent is never used as live
+identity or as a continuation/Overnight target field. The bridge resolves the
+saved feature/role/session association first; it does not select an agent merely
 because a generic label, terminal title, or current directory matches.
 
 Prompt delivery waits only for Herdr's immediate structured
@@ -526,6 +597,7 @@ lists every open Issue before prompting for another view.
 ./scripts/devops.sh proposals          # label: feature-proposal
 ./scripts/devops.sh status             # which group each task list is on
 ./scripts/devops.sh release            # what has merged to dev since the latest release
+./scripts/devops.sh agent-defaults     # local persistent kind/model fallback pairs
 ./scripts/devops.sh view <number>      # one Issue in full
 ./scripts/devops.sh new <title>                    # quick title-only capture
 ./scripts/devops.sh new <title> --body <text>      # optional inline context
@@ -548,11 +620,12 @@ every time the Issue opens; Start implementation is always available so its
 local resolver can explain whether planning is incomplete or work already
 exists. `n` captures one with an optional body, `o` approves it, `s` starts Pi
 planning for the selected Ready row, `i` starts the selected Issue's later
-implementation flow, list-level `r` refreshes, `?` shows help, and `q` quits.
+implementation flow, `g` manages persistent agent defaults locally,
+list-level `r` refreshes, `?` shows help, and `q` quits.
 `:edit` at the body prompt opens `$VISUAL` or `$EDITOR` for multiline Markdown. In a pipe or redirected shell, the line REPL accepts
 `1/a`, `2/d`, `3/b`, `4/f`, and `5/y`, plus `v <number>`, `n <title>`,
-`c <number> <answers>`, and `ok <number>`. Lists include every author and only
-open Issues. Filters are literal labels; no Project board or rank
+`c <number> <answers>`, `ok <number>`, and `g` for the interactive local
+defaults action. Lists include every author and only open Issues. Filters are literal labels; no Project board or rank
 participates.
 
 The `s` key is the direct link from this REPL to the planning flow above. In
@@ -590,12 +663,12 @@ write fails, the command warns that the receipt is missing but returns the
 successfully posted comment as the answer of record; the opened Issue still
 refreshes so that durable answer is visible.
 
-`status`, and the picker's in-flight column, are the one part of the REPL that
-overlaps this document's subject — and they deliberately do **not** call Herdr.
-`scripts/wt-herd.test.sh` fails if `scripts/devops.sh` so much as mentions
-`wt_herd`, `herdr-devflow`, or the retired bootstrap, because shedding that
-dependency is why the REPL exists. Instead they read `git worktree list`,
-`git branch --all`, and the task files on disk, resolving an Issue to work via
+`status`, and the picker's in-flight column, deliberately do **not** call
+Herdr. The sole Go-helper boundary in `devops.sh` is the local
+`config agent-defaults` operation; it neither reads GitHub nor calls the Herdr
+runtime. `scripts/wt-herd.test.sh` enforces that separation and rejects any
+other bridge reach. Status instead reads `git worktree list`, `git branch
+--all`, and the task files on disk, resolving an Issue to work via
 the naming convention: branch `fix/339-slug`, task file `tasks-339-slug.md`.
 Branches predating the number-first convention resolve by slug.
 
@@ -617,9 +690,10 @@ pushed, so progress reflects ticked checkboxes immediately rather than at the
 next commit. `wt status` remains the richer, Herdr-backed feature/delivery
 snapshot; `devops.sh status` is the cheap local glance.
 
-The command runs `gh issue list`, `gh issue view`, `gh issue create`,
-`gh issue comment`, or `gh issue edit` directly from its checkout. `status`
-contacts GitHub not at all.
+The Issue commands run `gh issue list`, `gh issue view`, `gh issue create`,
+`gh issue comment`, or `gh issue edit` directly from the checkout. `status` and
+`agent-defaults` contact GitHub not at all; `agent-defaults` also works when
+`gh` is not installed.
 The terminal picker fetches the complete open-Issue index and release count
 once and filters Issues locally until `r` refreshes both. It does not persist a
 cache or define a JSON contract. Its eligible `s` action starts `wt plan` in a
@@ -1048,7 +1122,9 @@ tables, ANSI output, titles, or screen text for identity/state. Structured API
 errors are decoded from either CLI output stream, since Herdr can place a JSON
 error envelope on stderr.
 
-Feature names, roles, agent kinds, schedule IDs, timestamps, metadata tokens,
-and canonical linked-worktree paths are bounded and validated. Every external
-process receives an argument vector; the bridge does not use eval or build a
-shell command from untrusted values.
+Feature names, roles, agent kinds, optional opaque model values, schedule IDs,
+timestamps, metadata tokens, and canonical linked-worktree paths are bounded and
+validated. Every external process receives an argument vector; the bridge does
+not use `eval` or build a shell command from untrusted values. An empty model
+keeps Herdr 0.7.5's prior command vector byte-for-byte; a non-empty model adds
+exactly `--model`, then one value argument.

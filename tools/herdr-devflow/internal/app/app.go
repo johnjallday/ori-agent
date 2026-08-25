@@ -447,7 +447,10 @@ func (a *App) configCommand(opts options, args []string) int {
 		}
 	}
 	if parsed.tsv {
-		fmt.Fprintf(a.stdout, "primary\t%s\t%s\nrole_fallback\t%s\t%s\n", result.Primary.Kind, result.Primary.Model, result.RoleFallback.Kind, result.RoleFallback.Model)
+		if _, err := fmt.Fprintf(a.stdout, "primary\t%s\t%s\nrole_fallback\t%s\t%s\n", result.Primary.Kind, result.Primary.Model, result.RoleFallback.Kind, result.RoleFallback.Model); err != nil {
+			a.writeError(fmt.Errorf("write agent defaults: %w", err), opts.json)
+			return 1
+		}
 		return 0
 	}
 	a.writeAgentDefaults(opts.json, status, path, result)
@@ -513,10 +516,10 @@ func (a *App) writeAgentDefaults(asJSON bool, status, path string, defaults conf
 		}
 		return value
 	}
-	fmt.Fprintf(a.stdout, "Agent defaults (%s)\n", status)
-	fmt.Fprintf(a.stdout, "  Primary:      kind=%s model=%s\n", defaults.Primary.Kind, modelLabel(defaults.Primary.Model))
-	fmt.Fprintf(a.stdout, "  Role fallback: kind=%s model=%s\n", defaults.RoleFallback.Kind, modelLabel(defaults.RoleFallback.Model))
-	fmt.Fprintf(a.stdout, "Config: %s\n", path)
+	_, _ = fmt.Fprintf(a.stdout, "Agent defaults (%s)\n", status)
+	_, _ = fmt.Fprintf(a.stdout, "  Primary:      kind=%s model=%s\n", defaults.Primary.Kind, modelLabel(defaults.Primary.Model))
+	_, _ = fmt.Fprintf(a.stdout, "  Role fallback: kind=%s model=%s\n", defaults.RoleFallback.Kind, modelLabel(defaults.RoleFallback.Model))
+	_, _ = fmt.Fprintf(a.stdout, "Config: %s\n", path)
 }
 
 type wakeCommandArgs struct {
@@ -1753,7 +1756,10 @@ func (a *App) addAgent(ctx context.Context, opts options, args []string) int {
 		if agentModel == "" {
 			agentModel = "integration default"
 		}
-		fmt.Fprintf(a.stdout, "Ori Herdr Devflow: %s %s agent %s for %s (kind=%s model=%s)\n", action, result.Agent.Role, result.Agent.Name, result.Feature.Name, result.Agent.Kind, agentModel)
+		if _, err := fmt.Fprintf(a.stdout, "Ori Herdr Devflow: %s %s agent %s for %s (kind=%s model=%s)\n", action, result.Agent.Role, result.Agent.Name, result.Feature.Name, result.Agent.Kind, agentModel); err != nil {
+			a.writeError(fmt.Errorf("write add result: %w", err), opts.json)
+			return 1
+		}
 	}
 	return 0
 }
@@ -3469,9 +3475,9 @@ func (a *App) writeResult(asJSON bool, value any) {
 				primaryModel = "integration default"
 			}
 			if primaryAgent, ok := pretty["primary_agent"].(string); ok {
-				fmt.Fprintf(a.stdout, "Primary: %s kind=%s model=%s\n", primaryAgent, primaryKind, primaryModel)
+				_, _ = fmt.Fprintf(a.stdout, "Primary: %s kind=%s model=%s\n", primaryAgent, primaryKind, primaryModel)
 			} else {
-				fmt.Fprintf(a.stdout, "Primary: kind=%s model=%s\n", primaryKind, primaryModel)
+				_, _ = fmt.Fprintf(a.stdout, "Primary: kind=%s model=%s\n", primaryKind, primaryModel)
 			}
 		}
 		return
