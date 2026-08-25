@@ -36,6 +36,44 @@ func TestStoreRoundTripsAtomicallyWithPrivatePermissions(t *testing.T) {
 	}
 }
 
+func TestStoreLoadsLegacyAgentStateWithoutModelsAndRoundTripsModelIntent(t *testing.T) {
+	t.Parallel()
+	legacyDir := t.TempDir()
+	legacy := `{"version":1,"features":{"repo:legacy":{"feature":{"repository_id":"repo","name":"legacy"},"agents":{"builder":{"role":"builder","name":"legacy-builder","kind":"claude"}},"handoff":{"primary_role":"builder","primary_kind":"claude"}}}}`
+	if err := os.WriteFile(filepath.Join(legacyDir, FileName), []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := New(legacyDir).Load()
+	if err != nil {
+		t.Fatalf("legacy state without models failed to load: %v", err)
+	}
+	legacyFeature := loaded.Features["repo:legacy"]
+	if legacyFeature.Handoff.PrimaryModel != "" || legacyFeature.Agents["builder"].Model != "" {
+		t.Fatalf("legacy state invented model intent: %#v", legacyFeature)
+	}
+
+	store := New(t.TempDir())
+	state := model.NewBridgeState()
+	state.Features["repo:feature"] = model.FeatureState{
+		Feature: model.Feature{RepositoryID: "repo", Name: "feature"},
+		Agents: map[string]model.RoleAgent{
+			"builder": {Role: "builder", Name: "feature-builder", Kind: "pi", Model: "openai/gpt-5.1"},
+		},
+		Handoff: model.HandoffState{PrimaryRole: "builder", PrimaryKind: "pi", PrimaryModel: "openai/gpt-5.1"},
+	}
+	if err := store.Save(state); err != nil {
+		t.Fatal(err)
+	}
+	roundTripped, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	feature := roundTripped.Features["repo:feature"]
+	if feature.Handoff.PrimaryModel != "openai/gpt-5.1" || feature.Agents["builder"].Model != "openai/gpt-5.1" {
+		t.Fatalf("model intent did not round-trip: %#v", feature)
+	}
+}
+
 func TestStoreRejectsCorruptOrFutureState(t *testing.T) {
 	t.Parallel()
 	store := New(t.TempDir())

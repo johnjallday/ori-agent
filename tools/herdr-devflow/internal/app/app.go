@@ -821,6 +821,7 @@ type handoffArgs struct {
 	worktree string
 	branch   string
 	kind     string
+	model    string
 	resend   bool
 	noPrompt bool
 }
@@ -1146,12 +1147,17 @@ func parseScheduleArgs(args []string) (scheduleArgs, error) {
 
 func parseHandoffArgs(args []string, retry bool) (handoffArgs, error) {
 	var parsed handoffArgs
+	seen := map[string]bool{}
 	for len(args) > 0 {
 		switch args[0] {
-		case "--feature", "--worktree", "--branch", "--kind":
+		case "--feature", "--worktree", "--branch", "--kind", "--model":
+			if seen[args[0]] {
+				return handoffArgs{}, fmt.Errorf("%s may be provided only once", args[0])
+			}
 			if len(args) < 2 || strings.HasPrefix(args[1], "--") {
 				return handoffArgs{}, fmt.Errorf("%s requires a value", args[0])
 			}
+			seen[args[0]] = true
 			switch args[0] {
 			case "--feature":
 				parsed.feature = args[1]
@@ -1161,9 +1167,14 @@ func parseHandoffArgs(args []string, retry bool) (handoffArgs, error) {
 				parsed.branch = args[1]
 			case "--kind":
 				if retry {
-					return handoffArgs{}, fmt.Errorf("--kind is only available with handoff; retry uses the recorded primary kind")
+					return handoffArgs{}, fmt.Errorf("--kind is only available with handoff; retry uses the recorded primary kind and model")
 				}
 				parsed.kind = args[1]
+			case "--model":
+				if retry {
+					return handoffArgs{}, fmt.Errorf("--model is only available with handoff; retry uses the recorded primary kind and model")
+				}
+				parsed.model = args[1]
 			}
 			args = args[2:]
 		case "--resend":
@@ -1187,6 +1198,9 @@ func parseHandoffArgs(args []string, retry bool) (handoffArgs, error) {
 	}
 	if parsed.kind != "" && !config.IsSupportedAgentKind(parsed.kind) {
 		return handoffArgs{}, fmt.Errorf("--kind %q is not supported by Herdr", parsed.kind)
+	}
+	if err := config.ValidateAgentModel(parsed.model); err != nil {
+		return handoffArgs{}, fmt.Errorf("--model: %w", err)
 	}
 	if parsed.resend && parsed.noPrompt {
 		return handoffArgs{}, fmt.Errorf("--resend and --no-prompt cannot be combined")
@@ -1512,6 +1526,7 @@ func (a *App) handoff(ctx context.Context, opts options, args []string, retry bo
 		WorktreePath: parsed.worktree,
 		Branch:       parsed.branch,
 		PrimaryKind:  parsed.kind,
+		PrimaryModel: parsed.model,
 		Resend:       parsed.resend,
 		SkipPrompt:   parsed.noPrompt,
 	})
@@ -1537,6 +1552,9 @@ func (a *App) handoff(ctx context.Context, opts options, args []string, retry bo
 		"primary_kind":     result.Primary.Kind,
 		"prompt_delivered": result.PromptDelivered,
 		"prompt_skipped":   result.PromptSkipped,
+	}
+	if result.Primary.Model != "" {
+		payload["primary_model"] = result.Primary.Model
 	}
 	if result.WorkspaceLabel != "" {
 		payload["workspace_label"] = result.WorkspaceLabel
@@ -3304,13 +3322,13 @@ Usage:
   wt herd wake doctor [--json]  Diagnose standalone wake installation and health
   wt herd wake uninstall [--yes]
                                 Remove only the standalone Herdr wake service after safety checks
-  wt herd handoff --feature NAME --worktree PATH [--branch NAME] [--kind KIND] [--no-prompt]
+  wt herd handoff --feature NAME --worktree PATH [--branch NAME] [--kind KIND] [--model MODEL] [--no-prompt]
                                 Add a tab for an existing Git worktree in the focused workspace
                                 and launch its primary agent there. --no-prompt starts the agent
                                 without the bootstrap prompt, for ad-hoc work that has no PRD or
                                 task list to point at; the choice is recorded for later retries.
   wt herd retry [--feature NAME] [--worktree PATH] [--branch NAME] [--resend]
-                                Resume the recorded primary kind; --resend repeats a confirmed prompt
+                                Resume the recorded primary kind/model pair; --resend repeats a confirmed prompt
   wt herd add <role> [--kind KIND] [--feature NAME|--worktree PATH]
                                 Start one explicit secondary role agent in the managed workspace
   wt herd prompt [role] <text> [--target TARGET] [--feature NAME|--worktree PATH]
@@ -3390,6 +3408,17 @@ func (a *App) writeResult(asJSON bool, value any) {
 		}
 		if configPath, ok := pretty["config"].(string); ok {
 			fmt.Fprintf(a.stdout, "Config: %s\n", configPath)
+		}
+		if primaryKind, ok := pretty["primary_kind"].(string); ok {
+			primaryModel, _ := pretty["primary_model"].(string)
+			if primaryModel == "" {
+				primaryModel = "integration default"
+			}
+			if primaryAgent, ok := pretty["primary_agent"].(string); ok {
+				fmt.Fprintf(a.stdout, "Primary: %s kind=%s model=%s\n", primaryAgent, primaryKind, primaryModel)
+			} else {
+				fmt.Fprintf(a.stdout, "Primary: kind=%s model=%s\n", primaryKind, primaryModel)
+			}
 		}
 		return
 	}

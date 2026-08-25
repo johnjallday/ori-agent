@@ -94,6 +94,7 @@ type RoleAgent struct {
 	Role          string        `json:"role"`
 	Name          string        `json:"name"`
 	Kind          string        `json:"kind"`
+	Model         string        `json:"model,omitempty"`
 	WorkspaceID   string        `json:"workspace_id"`
 	TabID         string        `json:"tab_id"`
 	PaneID        string        `json:"pane_id"`
@@ -223,6 +224,7 @@ type HandoffState struct {
 	RootPaneID        string       `json:"root_pane_id,omitempty"`
 	PrimaryRole       string       `json:"primary_role,omitempty"`
 	PrimaryKind       string       `json:"primary_kind,omitempty"`
+	PrimaryModel      string       `json:"primary_model,omitempty"`
 	PrimaryAgentName  string       `json:"primary_agent_name,omitempty"`
 	BootstrapPrompted bool         `json:"bootstrap_prompted,omitempty"`
 	// SkipBootstrapPrompt marks a feature that has no PRD and no checklist to

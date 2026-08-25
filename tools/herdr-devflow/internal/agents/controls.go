@@ -304,7 +304,10 @@ func (s *Service) resumeAdd(ctx context.Context, resolved *resolvedFeature, role
 	if err := s.validateInteractiveShell(ctx, pane, resolved.feature.Feature.Path, "resolve role pane"); err != nil {
 		return AddResult{}, err
 	}
-	started, err := s.Client.AgentStartInfo(ctx, saved.Name, kind, saved.PaneID, time.Duration(s.Config.Bootstrap.TimeoutSeconds)*time.Second)
+	started, err := s.Client.AgentStartInfo(ctx, herdr.AgentStartRequest{
+		Name: saved.Name, Kind: kind, PaneID: saved.PaneID,
+		Timeout: time.Duration(s.Config.Bootstrap.TimeoutSeconds) * time.Second,
+	})
 	if err != nil {
 		return AddResult{}, wrapHerdrError("start role agent", err, "wt herd add "+role+" --feature "+resolved.feature.Feature.Name)
 	}

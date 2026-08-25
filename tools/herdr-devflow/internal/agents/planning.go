@@ -633,7 +633,10 @@ func (s *Service) ensurePlanner(ctx context.Context, state *model.BridgeState, k
 	if err := s.validateRootShell(ctx, placement.RootPane, session.WorktreePath, !placement.Reused); err != nil {
 		return model.RoleAgent{}, err
 	}
-	started, err := s.Client.AgentStartInfo(ctx, expectedName, kind, placement.RootPane.PaneID, time.Duration(s.Config.Bootstrap.TimeoutSeconds)*time.Second)
+	started, err := s.Client.AgentStartInfo(ctx, herdr.AgentStartRequest{
+		Name: expectedName, Kind: kind, PaneID: placement.RootPane.PaneID,
+		Timeout: time.Duration(s.Config.Bootstrap.TimeoutSeconds) * time.Second,
+	})
 	if err != nil {
 		return model.RoleAgent{}, wrapHerdrError("start planner", err, recovery)
 	}

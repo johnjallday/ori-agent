@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync"
@@ -284,6 +285,41 @@ func TestOpenExistingWorktreeUsesTheSourceCheckoutAndOnlyTheDocumentedOpenOperat
 		if argument == "create" || argument == "remove" {
 			t.Fatalf("forbidden Herdr worktree mutation in %#v", runner.calls[0])
 		}
+	}
+}
+
+func TestAgentStartForwardsOptionalModelAsOneArgument(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name  string
+		model string
+		want  []string
+	}{
+		{
+			name: "empty model preserves legacy vector",
+			want: []string{"agent", "start", "builder", "--kind", "pi", "--pane", "w1:p1", "--timeout", "3000"},
+		},
+		{
+			name:  "opaque model is one argument",
+			model: "[openai] gpt-5.1; $(touch nope)",
+			want:  []string{"agent", "start", "builder", "--kind", "pi", "--model", "[openai] gpt-5.1; $(touch nope)", "--pane", "w1:p1", "--timeout", "3000"},
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			runner := &fakeRunner{responses: map[string]CommandResult{
+				strings.Join(testCase.want, " "): {Stdout: []byte(`{"result":{"agent":{"name":"builder","agent":"pi","pane_id":"w1:p1"}}}`)},
+			}}
+			_, err := New("fake-herdr", "", runner).AgentStartInfo(context.Background(), AgentStartRequest{
+				Name: "builder", Kind: "pi", Model: testCase.model, PaneID: "w1:p1", Timeout: 3 * time.Second,
+			})
+			if err != nil {
+				t.Fatalf("AgentStartInfo() error = %v", err)
+			}
+			if len(runner.calls) != 1 || !reflect.DeepEqual(runner.calls[0].Args, testCase.want) {
+				t.Fatalf("agent start argv = %#v, want %#v", runner.calls, testCase.want)
+			}
+		})
 	}
 }
 

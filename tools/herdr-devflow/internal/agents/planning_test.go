@@ -647,6 +647,12 @@ func TestExecuteIssuePlanWritesFilesAndIsIdempotentOnRerun(t *testing.T) {
 	client := newFakeHerdr(devPath)
 	store := newMemoryStore()
 	service := newPlanningService(client, store, devPath, issues)
+	// Feature and role defaults must never leak into the fixed Pi planner.
+	service.Config.Primary.Kind = "claude"
+	service.Config.Primary.Model = "anthropic/feature-default"
+	service.Config.Roles.DefaultKind = "codex"
+	service.Config.Roles.DefaultModel = "openai/role-default"
+	service.Config.Roles.Models["planner"] = "openai/planner-default"
 
 	plan, err := service.BuildIssuePlan(context.Background(), IssuePlanRequest{IssueNumber: 342, DevWorktreePath: devPath})
 	if err != nil {
@@ -661,6 +667,9 @@ func TestExecuteIssuePlanWritesFilesAndIsIdempotentOnRerun(t *testing.T) {
 	}
 	if !result.PromptDelivered || client.tabCreateCalls != 1 || client.startCalls != 1 || client.promptCalls != 1 {
 		t.Fatalf("first execute did not place/start/prompt exactly once: %#v tabs=%d starts=%d prompts=%d", result, client.tabCreateCalls, client.startCalls, client.promptCalls)
+	}
+	if len(client.startRequests) != 1 || client.startRequests[0].Kind != "pi" || client.startRequests[0].Model != "" {
+		t.Fatalf("planner launch inherited feature defaults: %#v", client.startRequests)
 	}
 	snapshot, err := os.ReadFile(plan.SnapshotPath)
 	if err != nil || !strings.Contains(string(snapshot), "ori-devflow: issue-snapshot; issue=342") {

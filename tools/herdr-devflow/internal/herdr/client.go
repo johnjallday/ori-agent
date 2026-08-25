@@ -760,12 +760,27 @@ func (c *Client) WorkspaceListInfo(ctx context.Context) ([]WorkspaceInfo, error)
 	return response.Workspaces, nil
 }
 
-func (c *Client) AgentStart(ctx context.Context, name, kind, paneID string, timeout time.Duration) (json.RawMessage, error) {
-	return c.CLIJSON(ctx, "agent", "start", name, "--kind", kind, "--pane", paneID, "--timeout", fmt.Sprintf("%d", timeout.Milliseconds()))
+// AgentStartRequest is the structured launch boundary shared by feature,
+// planning, and role agents. Model is optional and remains one opaque argument.
+type AgentStartRequest struct {
+	Name    string
+	Kind    string
+	Model   string
+	PaneID  string
+	Timeout time.Duration
 }
 
-func (c *Client) AgentStartInfo(ctx context.Context, name, kind, paneID string, timeout time.Duration) (AgentInfo, error) {
-	raw, err := c.AgentStart(ctx, name, kind, paneID, timeout)
+func (c *Client) AgentStart(ctx context.Context, request AgentStartRequest) (json.RawMessage, error) {
+	args := []string{"agent", "start", request.Name, "--kind", request.Kind}
+	if request.Model != "" {
+		args = append(args, "--model", request.Model)
+	}
+	args = append(args, "--pane", request.PaneID, "--timeout", fmt.Sprintf("%d", request.Timeout.Milliseconds()))
+	return c.CLIJSON(ctx, args...)
+}
+
+func (c *Client) AgentStartInfo(ctx context.Context, request AgentStartRequest) (AgentInfo, error) {
+	raw, err := c.AgentStart(ctx, request)
 	if err != nil {
 		return AgentInfo{}, err
 	}

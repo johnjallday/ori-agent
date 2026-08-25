@@ -61,11 +61,65 @@ wt start bridge --no-herdr >/dev/null
 wt start bridge >/dev/null
 rg -q "^handoff --feature bridge --worktree $target_root --branch feature/bridge$" "$fixture_root/herd-calls"
 
-# An optional per-feature kind override is forwarded to the initial handoff;
-# omitting it above leaves the configured Claude default unchanged.
+# Optional per-feature kind/model overrides are forwarded to the initial
+# handoff. Omitted values stay omitted so the Go helper owns configured
+# defaults and retry persistence.
 > "$fixture_root/herd-calls"
 wt start bridge --kind codex >/dev/null
 rg -q "^handoff --feature bridge --worktree $target_root --branch feature/bridge --kind codex$" "$fixture_root/herd-calls"
+
+cat > "$fixture_root/model-defaults.toml" <<'TOML'
+[primary]
+kind = "pi"
+model = "openai/configured"
+[roles]
+TOML
+> "$fixture_root/herd-calls"
+HERDR_DEVFLOW_CONFIG="$fixture_root/model-defaults.toml" wt start bridge > "$fixture_root/configured-model-output" 2>&1
+rg -q "Agent .*pi" "$fixture_root/configured-model-output"
+rg -q "Model .*openai/configured" "$fixture_root/configured-model-output"
+rg -q "^handoff --feature bridge --worktree $target_root --branch feature/bridge$" "$fixture_root/herd-calls"
+
+> "$fixture_root/herd-calls"
+HERDR_DEVFLOW_CONFIG="$fixture_root/model-defaults.toml" wt start bridge --model '[openai] gpt 5.1' > "$fixture_root/model-only-output" 2>&1
+rg -q "Agent .*pi" "$fixture_root/model-only-output"
+rg -q "Model .*\[openai\] gpt 5.1" "$fixture_root/model-only-output"
+rg -q "^handoff --feature bridge --worktree $target_root --branch feature/bridge --model \[openai\] gpt 5.1$" "$fixture_root/herd-calls"
+
+> "$fixture_root/herd-calls"
+HERDR_DEVFLOW_CONFIG="$fixture_root/model-defaults.toml" wt start bridge --kind claude > "$fixture_root/changed-kind-output" 2>&1
+rg -q "Agent .*claude" "$fixture_root/changed-kind-output"
+rg -q "Model .*integration default" "$fixture_root/changed-kind-output"
+rg -q "^handoff --feature bridge --worktree $target_root --branch feature/bridge --kind claude$" "$fixture_root/herd-calls"
+if rg -q -- '--model' "$fixture_root/herd-calls"; then
+  print -r -- "changed kind inherited the configured model" >&2
+  exit 1
+fi
+
+> "$fixture_root/herd-calls"
+HERDR_DEVFLOW_CONFIG="$fixture_root/model-defaults.toml" wt new scratch-model --kind pi --model 'openai/new model' > "$fixture_root/new-model-output" 2>&1
+rg -q "Model .*openai/new model" "$fixture_root/new-model-output"
+rg -q "^handoff --feature scratch-model --worktree $target_root --branch feature/scratch-model --kind pi --model openai/new model --no-prompt$" "$fixture_root/herd-calls"
+
+# Record one bracketed field per argument to prove a model with spaces and shell
+# syntax remains one zsh argv value rather than command text.
+function wt_herd {
+  local argument
+  : > "$fixture_root/exact-handoff-argv"
+  for argument in "$@"; do
+    print -r -- "<$argument>" >> "$fixture_root/exact-handoff-argv"
+  done
+  return 1
+}
+wt start bridge --kind pi --model '[openai] x; $(touch nope)' >/dev/null
+rg -Fxq '<--model>' "$fixture_root/exact-handoff-argv"
+rg -Fxq '<[openai] x; $(touch nope)>' "$fixture_root/exact-handoff-argv"
+[[ ! -e "$fixture_root/nope" ]]
+# Restore the ordinary transcript helper for the rest of the suite.
+function wt_herd {
+  print -r -- "$*" >> "$fixture_root/herd-calls"
+  return 1
+}
 
 # Only the summary's read-only lookup may precede a mutation. Anything else
 # would mean the flow contacted Herdr before the user agreed to anything.
@@ -176,8 +230,9 @@ function wt_herd {
   return 0
 }
 
-# Declining at the gate: not one Git or Herdr call may be recorded.
-wt start bridge <<< "n" > "$fixture_root/declined-output" 2>&1
+# Declining at the gate: not one Git or Herdr call may be recorded, even when
+# an exact model override was already parsed and previewed.
+wt start bridge --model '[openai] decline model' <<< "n" > "$fixture_root/declined-output" 2>&1
 rg -q "Nothing was changed" "$fixture_root/declined-output"
 if [[ -f "$fixture_root/decline-mutations" ]]; then
   print -r -- "declining the confirmation still mutated: $(<"$fixture_root/decline-mutations")" >&2
@@ -215,6 +270,10 @@ rg -q "handoff --feature bridge --worktree $target_root --branch feature/bridge 
 rm -f "$fixture_root/decline-mutations"
 if wt start bridge --kind codex --no-herdr > /dev/null 2>&1; then
   print -r -- "wt start accepted --kind together with --no-herdr" >&2
+  exit 1
+fi
+if wt start bridge --model openai/model --no-herdr > /dev/null 2>&1; then
+  print -r -- "wt start accepted --model together with --no-herdr" >&2
   exit 1
 fi
 [[ ! -f "$fixture_root/decline-mutations" ]]
@@ -363,6 +422,10 @@ if wt new adhoc --kind codex --no-herdr > /dev/null 2>&1; then
   print -r -- "wt new accepted --kind together with --no-herdr" >&2
   exit 1
 fi
+if wt new adhoc --model openai/model --no-herdr > /dev/null 2>&1; then
+  print -r -- "wt new accepted --model together with --no-herdr" >&2
+  exit 1
+fi
 [[ ! -f "$fixture_root/decline-mutations" ]]
 
 # FR-19 applies to wt new as well: declining creates nothing.
@@ -378,21 +441,27 @@ rm -f "$fixture_root/decline-mutations"
 typeset -a parser_cases
 parser_cases=(
   "start x --kind|wt start --kind requires a Herdr agent kind"
-  "start x --kind|Usage: wt start [feature] [--kind KIND] [--no-herdr] [--yes]"
+  "start x --kind|Usage: wt start [feature] [--kind KIND] [--model MODEL] [--no-herdr] [--yes]"
   "start x --kind --nope|wt start --kind requires a Herdr agent kind"
   "start x --kind a --kind b|wt start accepts --kind only once"
+  "start x --model|wt start --model requires one non-empty model value"
+  "start x --model a --model b|wt start accepts --model only once"
   "start --bogus|Unknown wt start option: --bogus"
-  "start --bogus|Usage: wt start [feature] [--kind KIND] [--no-herdr] [--yes]"
+  "start --bogus|Usage: wt start [feature] [--kind KIND] [--model MODEL] [--no-herdr] [--yes]"
   "start one two|wt start accepts one PRD/task-list feature name (got: one and two)"
-  "start x --kind codex --no-herdr|wt start --kind cannot be combined with --no-herdr"
+  "start x --kind codex --no-herdr|wt start --kind/--model cannot be combined with --no-herdr"
+  "start x --model openai/model --no-herdr|wt start --kind/--model cannot be combined with --no-herdr"
   "new x --kind|wt new --kind requires a Herdr agent kind"
-  "new x --kind|Usage: wt new <name> [--kind KIND] [--no-herdr] [--yes]"
+  "new x --kind|Usage: wt new <name> [--kind KIND] [--model MODEL] [--no-herdr] [--yes]"
   "new x --kind --nope|wt new --kind requires a Herdr agent kind"
   "new x --kind a --kind b|wt new accepts --kind only once"
+  "new x --model|wt new --model requires one non-empty model value"
+  "new x --model a --model b|wt new accepts --model only once"
   "new --bogus|Unknown wt new option: --bogus"
-  "new --bogus|Usage: wt new <name> [--kind KIND] [--no-herdr] [--yes]"
+  "new --bogus|Usage: wt new <name> [--kind KIND] [--model MODEL] [--no-herdr] [--yes]"
   "new one two|wt new accepts one name (got: one and two)"
-  "new x --kind codex --no-herdr|wt new --kind cannot be combined with --no-herdr"
+  "new x --kind codex --no-herdr|wt new --kind/--model cannot be combined with --no-herdr"
+  "new x --model openai/model --no-herdr|wt new --kind/--model cannot be combined with --no-herdr"
 )
 for parser_case in "${parser_cases[@]}"; do
   parser_args="${parser_case%%|*}"
