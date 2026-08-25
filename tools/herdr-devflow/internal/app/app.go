@@ -301,6 +301,8 @@ type agentDefaultsCommandArgs struct {
 	roleModel         string
 	clearRoleModel    bool
 	provided          bool
+	validateOnly      bool
+	tsv               bool
 }
 
 func parseAgentDefaultsCommandArgs(args []string) (agentDefaultsCommandArgs, error) {
@@ -341,6 +343,17 @@ func parseAgentDefaultsCommandArgs(args []string) (agentDefaultsCommandArgs, err
 				parsed.clearRoleModel = true
 			}
 			args = args[1:]
+		case "--validate-only", "--tsv":
+			if seen[argument] {
+				return agentDefaultsCommandArgs{}, fmt.Errorf("%s may be provided only once", argument)
+			}
+			seen[argument] = true
+			if argument == "--validate-only" {
+				parsed.validateOnly = true
+			} else {
+				parsed.tsv = true
+			}
+			args = args[1:]
 		default:
 			return agentDefaultsCommandArgs{}, fmt.Errorf("unknown config agent-defaults option %q", argument)
 		}
@@ -350,6 +363,9 @@ func parseAgentDefaultsCommandArgs(args []string) (agentDefaultsCommandArgs, err
 	}
 	if seen["--role-model"] && parsed.clearRoleModel {
 		return agentDefaultsCommandArgs{}, fmt.Errorf("--role-model and --clear-role-model cannot be combined")
+	}
+	if parsed.validateOnly && !parsed.provided {
+		return agentDefaultsCommandArgs{}, fmt.Errorf("--validate-only requires at least one proposed default")
 	}
 	if parsed.primaryKind != "" && !config.IsSupportedAgentKind(parsed.primaryKind) {
 		return agentDefaultsCommandArgs{}, fmt.Errorf("--primary-kind %q is not supported by Herdr", parsed.primaryKind)
@@ -412,11 +428,27 @@ func (a *App) configCommand(opts options, args []string) int {
 		if parsed.clearRoleModel {
 			result.RoleFallback.Model = ""
 		}
-		result, err = config.UpdateAgentDefaults(path, result)
-		if err != nil {
-			a.writeError(err, opts.json)
-			return 1
+		if err := config.ValidateAgentSelection(result.Primary.Kind, result.Primary.Model); err != nil {
+			a.writeError(fmt.Errorf("primary defaults: %w", err), opts.json)
+			return 2
 		}
+		if err := config.ValidateAgentSelection(result.RoleFallback.Kind, result.RoleFallback.Model); err != nil {
+			a.writeError(fmt.Errorf("role fallback defaults: %w", err), opts.json)
+			return 2
+		}
+		if parsed.validateOnly {
+			status = "valid"
+		} else {
+			result, err = config.UpdateAgentDefaults(path, result)
+			if err != nil {
+				a.writeError(err, opts.json)
+				return 1
+			}
+		}
+	}
+	if parsed.tsv {
+		fmt.Fprintf(a.stdout, "primary\t%s\t%s\nrole_fallback\t%s\t%s\n", result.Primary.Kind, result.Primary.Model, result.RoleFallback.Kind, result.RoleFallback.Model)
+		return 0
 	}
 	a.writeAgentDefaults(opts.json, status, path, result)
 	return 0

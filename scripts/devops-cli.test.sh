@@ -476,6 +476,113 @@ check "Codex choice maps to its wt kind" "$(implementation_choice_result 2)" "co
 check "Pi choice maps to its wt kind" "$(implementation_choice_result 3)" "pi"
 check "worktree-only choice maps to no-herdr" "$(implementation_choice_result 4)" "no-herdr"
 check "cancel maps to no launch mode" "$(implementation_choice_result q)" ""
+implementation_prompt_output="$(prompt_implementation_agent 777 777-sample <<< q 2>/dev/null)"
+if [[ "$implementation_prompt_output" == *"model"* || "$implementation_prompt_output" == *"Model"* ]]; then
+  printf 'FAIL the one-run implementation picker gained a model prompt: %s\n' "$implementation_prompt_output" >&2
+  failures=$((failures + 1))
+fi
+
+# Persistent agent defaults stay behind the Go helper boundary. These tests
+# stub only that process, then assert current rendering, preview/confirmation,
+# validation, clear forms, and exact separate arguments without touching TOML,
+# GitHub, or Herdr.
+agent_defaults_calls="$fixture_root/agent-defaults-calls"
+agent_defaults_forbidden="$fixture_root/agent-defaults-forbidden"
+agent_defaults_helper() {
+  {
+    printf 'CALL\n'
+    local item
+    for item in "$@"; do
+      printf '<%s>\n' "$item"
+    done
+  } >> "$agent_defaults_calls"
+  case " $* " in
+    *" --tsv "*)
+      [[ "${AGENT_DEFAULTS_FAIL_STAGE:-}" != read ]] || return 9
+      printf 'primary\tclaude\t\nrole_fallback\tclaude\t\n'
+      ;;
+    *" --validate-only "*)
+      [[ " $* " != *" invented "* ]] || { printf 'unsupported kind\n' >&2; return 2; }
+      [[ "${AGENT_DEFAULTS_FAIL_STAGE:-}" != validate ]] || return 8
+      ;;
+    *)
+      [[ "${AGENT_DEFAULTS_FAIL_STAGE:-}" != update ]] || return 7
+      printf 'Agent defaults (updated)\n'
+      ;;
+  esac
+}
+
+: > "$agent_defaults_calls"
+current_defaults_output="$(agent_defaults_action < /dev/null)"
+if [[ "$current_defaults_output" != *"Primary:       kind=claude  model=integration default"* ||
+      "$current_defaults_output" != *"Role fallback: kind=claude  model=integration default"* ]]; then
+  printf 'FAIL current agent defaults output: %s\n' "$current_defaults_output" >&2
+  failures=$((failures + 1))
+fi
+check "current defaults perform one helper read" "$(grep -c '^CALL$' "$agent_defaults_calls")" "1"
+
+: > "$agent_defaults_calls"
+update_defaults_output="$(
+  gh() { printf 'github\n' >> "$agent_defaults_forbidden"; return 97; }
+  herdr() { printf 'herdr\n' >> "$agent_defaults_forbidden"; return 97; }
+  agent_defaults_action --primary-kind pi --primary-model '[openai] gpt 5.1' \
+    --role-kind codex --role-model 'openai/role model' --yes < /dev/null
+)"
+if [[ "$update_defaults_output" != *"Agent defaults preview"* ||
+      "$update_defaults_output" != *"claude -> pi"* ||
+      "$update_defaults_output" != *"integration default -> [openai] gpt 5.1"* ]]; then
+  printf 'FAIL agent defaults preview: %s\n' "$update_defaults_output" >&2
+  failures=$((failures + 1))
+fi
+check "agent defaults update reads validates and writes" "$(grep -c '^CALL$' "$agent_defaults_calls")" "3"
+check "model with spaces and brackets is one helper argument" \
+  "$(grep -Fxc '<[openai] gpt 5.1>' "$agent_defaults_calls")" "2"
+check "role model with spaces is one helper argument" \
+  "$(grep -Fxc '<openai/role model>' "$agent_defaults_calls")" "2"
+check "agent defaults action contacts neither GitHub nor Herdr" \
+  "$([[ -e "$agent_defaults_forbidden" ]] && wc -c < "$agent_defaults_forbidden" | tr -d ' ' || printf 0)" "0"
+
+: > "$agent_defaults_calls"
+agent_defaults_action --primary-kind pi --role-kind codex --clear-primary-model --clear-role-model --yes < /dev/null > /dev/null
+check "clear primary model reaches validate and update" \
+  "$(grep -c '^<--clear-primary-model>$' "$agent_defaults_calls")" "2"
+check "clear role model reaches validate and update" \
+  "$(grep -c '^<--clear-role-model>$' "$agent_defaults_calls")" "2"
+
+: > "$agent_defaults_calls"
+noop_defaults_output="$(agent_defaults_action --primary-kind claude --clear-primary-model --role-kind claude --clear-role-model --yes < /dev/null)"
+check "a no-op reports no write" "$noop_defaults_output" "Agent defaults are unchanged; no file was written."
+check "a no-op performs only the current-value read" "$(grep -c '^CALL$' "$agent_defaults_calls")" "1"
+
+: > "$agent_defaults_calls"
+decline_status=0
+(
+  confirm_write() { return 1; }
+  agent_defaults_action --primary-kind pi < /dev/null > /dev/null
+) || decline_status=$?
+check "declining an agent defaults preview is non-success" "$decline_status" "1"
+check "decline stops after read and validation" "$(grep -c '^CALL$' "$agent_defaults_calls")" "2"
+
+agent_default_prompt_cancelled=0
+prompt_agent_default_value "Primary kind" claude 0 <<< q > /dev/null 2>&1 || true
+check "interactive agent defaults cancellation is recorded" "$agent_default_prompt_cancelled" "1"
+
+: > "$agent_defaults_calls"
+check "invalid kind fails through Go-side validation" \
+  "$(agent_defaults_action --primary-kind invented --yes < /dev/null > /dev/null 2>&1 && echo yes || echo no)" "no"
+check "invalid kind never reaches the update call" "$(grep -c '^CALL$' "$agent_defaults_calls")" "2"
+
+: > "$agent_defaults_calls"
+AGENT_DEFAULTS_FAIL_STAGE=read
+check "helper read failure is preserved" \
+  "$(agent_defaults_action < /dev/null > /dev/null 2>&1 && echo yes || echo no)" "no"
+unset AGENT_DEFAULTS_FAIL_STAGE
+: > "$agent_defaults_calls"
+AGENT_DEFAULTS_FAIL_STAGE=update
+check "helper update failure is preserved" \
+  "$(agent_defaults_action --primary-kind pi --yes < /dev/null > /dev/null 2>&1 && echo yes || echo no)" "no"
+unset AGENT_DEFAULTS_FAIL_STAGE
+check "failed update still passed validation first" "$(grep -c '^CALL$' "$agent_defaults_calls")" "3"
 
 # Drive the full local resolve -> prompt -> launch flow against the same
 # isolated fixture. The launcher is a recorder here; exact zsh vectors are
@@ -888,6 +995,47 @@ count_label_reads() {
 count_gh_calls() {
   grep -c '^CALL' "$gh_calls" || true
 }
+
+# The real one-shot command must honor HERDR_DEVFLOW_CONFIG, work without any
+# GitHub call, and leave both the repository config and every refused fixture
+# byte-identical. The Go helper is real here; only gh remains the recorder above.
+agent_defaults_config="$fixture_root/devflow-agent-defaults.toml"
+cp "$repo_root/.herdr/devflow.toml" "$agent_defaults_config"
+repo_config_before="$(cksum < "$repo_root/.herdr/devflow.toml")"
+: > "$gh_calls"
+HERDR_DEVFLOW_CONFIG="$agent_defaults_config" "$script" agent-defaults \
+  --primary-kind pi --primary-model '[openai] gpt 5.1' \
+  --role-kind codex --role-model 'openai/role model' --yes \
+  > "$fixture_root/agent-defaults-real-output"
+assert_no_github "agent-defaults one-shot update"
+assert_output_has "agent-defaults update" "$fixture_root/agent-defaults-real-output" "Agent defaults preview"
+grep -Fq 'kind = "pi"' "$agent_defaults_config"
+grep -Fq 'model = "[openai] gpt 5.1"' "$agent_defaults_config"
+grep -Fq 'default_kind = "codex"' "$agent_defaults_config"
+grep -Fq 'default_model = "openai/role model"' "$agent_defaults_config"
+check "HERDR_DEVFLOW_CONFIG isolates the repository config" \
+  "$(cksum < "$repo_root/.herdr/devflow.toml")" "$repo_config_before"
+
+refused_before="$(cksum < "$agent_defaults_config")"
+if HERDR_DEVFLOW_CONFIG="$agent_defaults_config" "$script" agent-defaults --primary-kind invented --yes \
+  > "$fixture_root/agent-defaults-invalid-output" 2>&1; then
+  printf 'invalid agent kind was accepted by the real helper\n' >&2
+  exit 1
+fi
+check "invalid real-helper path preserves config" "$(cksum < "$agent_defaults_config")" "$refused_before"
+if HERDR_DEVFLOW_CONFIG="$agent_defaults_config" "$script" agent-defaults --primary-kind claude \
+  < /dev/null > "$fixture_root/agent-defaults-unconfirmed-output" 2>&1; then
+  printf 'non-TTY agent-defaults write succeeded without --yes\n' >&2
+  exit 1
+fi
+check "unconfirmed real-helper path preserves config" "$(cksum < "$agent_defaults_config")" "$refused_before"
+
+# A no-option one-shot is a pure current-value read and still skips GitHub.
+: > "$gh_calls"
+HERDR_DEVFLOW_CONFIG="$agent_defaults_config" "$script" agent-defaults \
+  < /dev/null > "$fixture_root/agent-defaults-current-output"
+assert_no_github "agent-defaults one-shot read"
+assert_output_has "agent-defaults current read" "$fixture_root/agent-defaults-current-output" "Primary:       kind=pi"
 
 gh_call_sequence() {
   awk '/^CALL/ {printf "%s %s;", $2, $3}' "$gh_calls"
@@ -1599,6 +1747,30 @@ if [[ -z "$i_branch" ]]; then
 fi
 if grep -Eq 'load_picker_index|apply_picker_filter|reload=1|issue_labels_of|\bgh\b' <<< "$i_branch"; then
   printf 'the i key re-queries GitHub or resets the view: %s\n' "$i_branch" >&2
+  exit 1
+fi
+
+# The picker g action is local and documented. It must escape the alternate
+# screen for prompts, then return without refreshing or reading GitHub.
+if ! grep -Fq 'with_normal_terminal agent_defaults_action' "$script"; then
+  printf 'the picker g key is not wired to agent_defaults_action\n' >&2
+  exit 1
+fi
+if ! grep -Fq 'g agent defaults' "$script"; then
+  printf 'the picker footer does not document the g key\n' >&2
+  exit 1
+fi
+g_branch="$(awk '/^      g\)$/{inside=1} inside{print} inside && /^        ;;$/{exit}' "$script")"
+if [[ -z "$g_branch" ]]; then
+  printf 'could not read the picker g) branch\n' >&2
+  exit 1
+fi
+if grep -Eq 'load_picker_index|apply_picker_filter|reload=1|issue_labels_of|\bgh\b|wt_herd' <<< "$g_branch"; then
+  printf 'the g key contacts a remote service or resets the view: %s\n' "$g_branch" >&2
+  exit 1
+fi
+if ! grep -Fq 'g|agent-defaults)' "$script"; then
+  printf 'the line REPL does not expose agent-defaults\n' >&2
   exit 1
 fi
 

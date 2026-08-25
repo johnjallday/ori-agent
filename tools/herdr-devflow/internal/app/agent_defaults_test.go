@@ -77,6 +77,32 @@ func TestAgentDefaultsCommandReadsUpdatesAndClearsConfiguredPath(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
+	if exit := newApplication(&stdout, &stderr).Run(context.Background(), []string{"config", "agent-defaults", "--tsv"}); exit != 0 {
+		t.Fatalf("TSV read exit = %d stderr=%q", exit, stderr.String())
+	}
+	if stdout.String() != "primary\tclaude\t\nrole_fallback\tclaude\t\n" {
+		t.Fatalf("TSV read = %q", stdout.String())
+	}
+	beforeValidation, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout.Reset()
+	stderr.Reset()
+	validate := []string{"config", "agent-defaults", "--validate-only", "--primary-kind", "pi", "--primary-model", "[openai] preview"}
+	if exit := newApplication(&stdout, &stderr).Run(context.Background(), validate); exit != 0 || !strings.Contains(stdout.String(), "(valid)") {
+		t.Fatalf("validation exit=%d stdout=%q stderr=%q", exit, stdout.String(), stderr.String())
+	}
+	afterValidation, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(afterValidation) != string(beforeValidation) {
+		t.Fatal("validation-only command changed the config")
+	}
+
+	stdout.Reset()
+	stderr.Reset()
 	update := []string{
 		"--json", "config", "agent-defaults",
 		"--primary-kind", "pi", "--primary-model", "[openai] gpt-5.1 codex",

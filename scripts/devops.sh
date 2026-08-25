@@ -31,10 +31,13 @@ if ! repo_root="$(git -C "$script_dir/.." rev-parse --show-toplevel 2>/dev/null)
   printf '%s\n' "devops.sh must live inside a Git checkout" >&2
   exit 2
 fi
-if ! command -v gh >/dev/null 2>&1; then
+require_gh() {
+  if command -v gh >/dev/null 2>&1; then
+    return 0
+  fi
   printf '%s\n' "devops.sh requires the GitHub CLI (gh): https://cli.github.com" >&2
-  exit 1
-fi
+  return 1
+}
 cd "$repo_root" || exit 1
 
 print_usage() {
@@ -48,6 +51,7 @@ Usage:
   ./scripts/devops.sh proposals
   ./scripts/devops.sh status
   ./scripts/devops.sh release
+  ./scripts/devops.sh agent-defaults [options] [--yes]
   ./scripts/devops.sh view <issue-number>
   ./scripts/devops.sh new <title...> [--body <text> | --body-file <path|->] [--yes]
   ./scripts/devops.sh decide <issue-number> <answers...> [--rationale <text>] [--yes]
@@ -95,6 +99,12 @@ Planning is asynchronous. Return later and press `i` on the selected or opened
 Issue to resolve its completed local task list, choose Claude, Codex, Pi, or a
 worktree without Herdr, and delegate the confirmed start to `wt start`.
 
+`agent-defaults` (picker/REPL key `g`) reads or changes the checked-in primary
+and role-fallback kind/model pairs. Interactive use prompts for all four values;
+one-shot options are --primary-kind, --primary-model/--clear-primary-model,
+--role-kind, and --role-model/--clear-role-model. It is local: no GitHub or
+Herdr call is made. Empty models mean the external integration chooses.
+
 new/decide/approve/unapprove write to GitHub. They prompt for confirmation on
 a terminal, and require --yes when stdin is not a terminal. `answer` remains a
 backwards-compatible alias for `decide`. A new Issue is created with no labels -
@@ -107,7 +117,7 @@ EOF
 print_menu() {
   printf '\n%s\n' \
     "[1/a] All  [2/d] Needs my decision  [3/b] Backlog  [4/f] Proposals  [5/y] Ready" \
-    "[v #] View  [n title] New  [c # choices] Decide  [ok #] Approve  [q] Quit"
+    "[v #] View  [n title] New  [c # choices] Decide  [ok #] Approve  [g] Agent defaults  [q] Quit"
 }
 
 # Labels arrive from `gh` as a ", "-joined string. Split on commas and trim so a
@@ -734,6 +744,210 @@ confirm_write() {
   [[ "$reply" == y || "$reply" == Y ]]
 }
 
+agent_defaults_helper() {
+  # The Go helper owns TOML parsing, validation, and atomic replacement. This
+  # shell only transports separate arguments and confirms the local write.
+  HERDR_DEVFLOW_USE_SOURCE=1 bash "$script_dir/herdr-devflow.sh" "$@"
+}
+
+agent_defaults_primary_kind=""
+agent_defaults_primary_model=""
+agent_defaults_role_kind=""
+agent_defaults_role_model=""
+load_agent_defaults() {
+  local output scope kind model primary_seen=0 role_seen=0
+  output="$(agent_defaults_helper config agent-defaults --tsv)" || return $?
+  agent_defaults_primary_kind=""
+  agent_defaults_primary_model=""
+  agent_defaults_role_kind=""
+  agent_defaults_role_model=""
+  while IFS=$'\t' read -r scope kind model; do
+    case "$scope" in
+      primary)
+        agent_defaults_primary_kind="$kind"
+        agent_defaults_primary_model="$model"
+        primary_seen=$((primary_seen + 1))
+        ;;
+      role_fallback)
+        agent_defaults_role_kind="$kind"
+        agent_defaults_role_model="$model"
+        role_seen=$((role_seen + 1))
+        ;;
+      "") ;;
+      *)
+        printf 'agent-defaults helper returned an unknown record: %s\n' "$scope" >&2
+        return 1
+        ;;
+    esac
+  done <<< "$output"
+  if [[ "$primary_seen" -ne 1 || "$role_seen" -ne 1 || -z "$agent_defaults_primary_kind" || -z "$agent_defaults_role_kind" ]]; then
+    printf 'agent-defaults helper returned an incomplete result\n' >&2
+    return 1
+  fi
+}
+
+agent_model_label() {
+  if [[ -n "$1" ]]; then
+    printf '%s' "$1"
+  else
+    printf '%s' "integration default"
+  fi
+}
+
+show_current_agent_defaults() {
+  printf 'Current agent defaults\n'
+  printf '  Primary:       kind=%s  model=%s\n' "$agent_defaults_primary_kind" "$(agent_model_label "$agent_defaults_primary_model")"
+  printf '  Role fallback: kind=%s  model=%s\n' "$agent_defaults_role_kind" "$(agent_model_label "$agent_defaults_role_model")"
+}
+
+agent_default_prompt_value=""
+agent_default_prompt_cancelled=0
+prompt_agent_default_value() {
+  local label="$1" current="$2" allow_clear="$3" reply
+  agent_default_prompt_value="$current"
+  printf '%s [%s]' "$label" "$(agent_model_label "$current")"
+  if [[ "$allow_clear" -eq 1 ]]; then
+    printf ' (blank keeps, <clear> uses integration default, q cancels)'
+  else
+    printf ' (blank keeps, q cancels)'
+  fi
+  printf ': '
+  IFS= read -r reply || { agent_default_prompt_cancelled=1; return 1; }
+  case "$reply" in
+    q|Q|cancel|Cancel)
+      agent_default_prompt_cancelled=1
+      return 1
+      ;;
+    "") return 0 ;;
+    '<clear>'|clear)
+      if [[ "$allow_clear" -eq 1 ]]; then
+        agent_default_prompt_value=""
+        return 0
+      fi
+      ;;
+  esac
+  agent_default_prompt_value="$reply"
+  return 0
+}
+
+agent_defaults_action() {
+  local assume_yes=0 any_proposed=0 interactive=0 argument
+  local primary_kind_set=0 primary_model_set=0 role_kind_set=0 role_model_set=0
+  local proposed_primary_kind="" proposed_primary_model="" proposed_role_kind="" proposed_role_model=""
+  local -a update_args=()
+
+  while [[ $# -gt 0 ]]; do
+    argument="$1"
+    case "$argument" in
+      --yes)
+        assume_yes=1
+        shift
+        ;;
+      --primary-kind|--primary-model|--role-kind|--role-model)
+        if [[ $# -lt 2 || "$2" == --* ]]; then
+          printf '%s requires a value\n' "$argument" >&2
+          return 2
+        fi
+        case "$argument" in
+          --primary-kind)
+            [[ "$primary_kind_set" -eq 0 ]] || { printf '%s may be provided only once\n' "$argument" >&2; return 2; }
+            proposed_primary_kind="$2"; primary_kind_set=1 ;;
+          --primary-model)
+            [[ "$primary_model_set" -eq 0 ]] || { printf 'a primary model choice may be provided only once\n' >&2; return 2; }
+            proposed_primary_model="$2"; primary_model_set=1 ;;
+          --role-kind)
+            [[ "$role_kind_set" -eq 0 ]] || { printf '%s may be provided only once\n' "$argument" >&2; return 2; }
+            proposed_role_kind="$2"; role_kind_set=1 ;;
+          --role-model)
+            [[ "$role_model_set" -eq 0 ]] || { printf 'a role model choice may be provided only once\n' >&2; return 2; }
+            proposed_role_model="$2"; role_model_set=1 ;;
+        esac
+        any_proposed=1
+        shift 2
+        ;;
+      --clear-primary-model)
+        [[ "$primary_model_set" -eq 0 ]] || { printf 'a primary model choice may be provided only once\n' >&2; return 2; }
+        proposed_primary_model=""; primary_model_set=1; any_proposed=1; shift
+        ;;
+      --clear-role-model)
+        [[ "$role_model_set" -eq 0 ]] || { printf 'a role model choice may be provided only once\n' >&2; return 2; }
+        proposed_role_model=""; role_model_set=1; any_proposed=1; shift
+        ;;
+      *)
+        printf 'unknown agent-defaults option: %s\n' "$argument" >&2
+        return 2
+        ;;
+    esac
+  done
+
+  load_agent_defaults || return $?
+  if [[ "$any_proposed" -eq 0 && -t 0 ]]; then
+    interactive=1
+  fi
+  if [[ "$any_proposed" -eq 0 && "$interactive" -eq 0 ]]; then
+    show_current_agent_defaults
+    return 0
+  fi
+
+  [[ "$primary_kind_set" -eq 1 ]] || proposed_primary_kind="$agent_defaults_primary_kind"
+  [[ "$primary_model_set" -eq 1 ]] || proposed_primary_model="$agent_defaults_primary_model"
+  [[ "$role_kind_set" -eq 1 ]] || proposed_role_kind="$agent_defaults_role_kind"
+  [[ "$role_model_set" -eq 1 ]] || proposed_role_model="$agent_defaults_role_model"
+
+  if [[ "$interactive" -eq 1 ]]; then
+    show_current_agent_defaults
+    agent_default_prompt_cancelled=0
+    prompt_agent_default_value "Primary kind" "$proposed_primary_kind" 0 || true
+    [[ "$agent_default_prompt_cancelled" -eq 0 ]] || { printf 'Cancelled.\n'; return 0; }
+    proposed_primary_kind="$agent_default_prompt_value"
+    prompt_agent_default_value "Primary model" "$proposed_primary_model" 1 || true
+    [[ "$agent_default_prompt_cancelled" -eq 0 ]] || { printf 'Cancelled.\n'; return 0; }
+    proposed_primary_model="$agent_default_prompt_value"
+    prompt_agent_default_value "Role fallback kind" "$proposed_role_kind" 0 || true
+    [[ "$agent_default_prompt_cancelled" -eq 0 ]] || { printf 'Cancelled.\n'; return 0; }
+    proposed_role_kind="$agent_default_prompt_value"
+    prompt_agent_default_value "Role fallback model" "$proposed_role_model" 1 || true
+    [[ "$agent_default_prompt_cancelled" -eq 0 ]] || { printf 'Cancelled.\n'; return 0; }
+    proposed_role_model="$agent_default_prompt_value"
+  fi
+
+  if [[ "$proposed_primary_kind" == "$agent_defaults_primary_kind" &&
+        "$proposed_primary_model" == "$agent_defaults_primary_model" &&
+        "$proposed_role_kind" == "$agent_defaults_role_kind" &&
+        "$proposed_role_model" == "$agent_defaults_role_model" ]]; then
+    printf 'Agent defaults are unchanged; no file was written.\n'
+    return 0
+  fi
+
+  update_args=(
+    --primary-kind "$proposed_primary_kind"
+    --role-kind "$proposed_role_kind"
+  )
+  if [[ -n "$proposed_primary_model" ]]; then
+    update_args+=(--primary-model "$proposed_primary_model")
+  else
+    update_args+=(--clear-primary-model)
+  fi
+  if [[ -n "$proposed_role_model" ]]; then
+    update_args+=(--role-model "$proposed_role_model")
+  else
+    update_args+=(--clear-role-model)
+  fi
+
+  # Validate the complete proposed pairs through the same Go path that will
+  # perform the update, but do not touch the config before confirmation.
+  agent_defaults_helper config agent-defaults --validate-only "${update_args[@]}" >/dev/null || return $?
+
+  printf 'Agent defaults preview\n'
+  printf '  Primary kind:        %s -> %s\n' "$agent_defaults_primary_kind" "$proposed_primary_kind"
+  printf '  Primary model:       %s -> %s\n' "$(agent_model_label "$agent_defaults_primary_model")" "$(agent_model_label "$proposed_primary_model")"
+  printf '  Role fallback kind:  %s -> %s\n' "$agent_defaults_role_kind" "$proposed_role_kind"
+  printf '  Role fallback model: %s -> %s\n' "$(agent_model_label "$agent_defaults_role_model")" "$(agent_model_label "$proposed_role_model")"
+  confirm_write "Update the checked-in agent defaults?" "$assume_yes" || return $?
+
+  agent_defaults_helper config agent-defaults "${update_args[@]}"
+}
+
 print_indented() {
   local value="$1" line
   while IFS= read -r line; do
@@ -978,6 +1192,9 @@ run_one_shot() {
     release)
       [[ $# -eq 0 ]] || return 2
       release_report
+      ;;
+    agent-defaults)
+      agent_defaults_action "$@"
       ;;
     decisions|decision)
       [[ $# -eq 0 ]] || return 2
@@ -1369,7 +1586,7 @@ render_picker() {
   printf '\n'
   style '2' '↑/↓ or j/k select  •  ←/→ or h/l change view  •  Space mark/unmark  •  b plan marked bundle'
   printf '\n'
-  style '2' 'Enter open  •  c decide  •  n new  •  o approve  •  s plan one  •  i start implementation  •  r refresh  •  ? help  •  q quit'
+  style '2' 'Enter open  •  c decide  •  n new  •  o approve  •  s plan one  •  i start implementation  •  g agent defaults  •  r refresh  •  ? help  •  q quit'
   printf '\n'
 }
 
@@ -1442,6 +1659,8 @@ Picker keys
   s             Start asynchronous Pi planning for the selected Ready Issue
   i             Start implementation from a completed local plan; choose Claude,
                 Codex, Pi, worktree-only, or cancel
+  g             Read or change persistent primary and role agent defaults
+                (local config only; no GitHub or Herdr call)
   r             Refresh from GitHub
   ?             Show this help
   q             Quit
@@ -1848,6 +2067,11 @@ run_picker() {
         fi
         apply_picker_filter "${picker_filters[$filter_index]}"
         ;;
+      g)
+        # Persistent defaults are repository-local. Do not refresh or otherwise
+        # contact GitHub after this action.
+        with_normal_terminal agent_defaults_action
+        ;;
       ' ')
         if [[ "$count" -gt 0 ]]; then
           bundle_mark_toggle "${picker_filters[$filter_index]}" \
@@ -1896,6 +2120,12 @@ run_picker() {
 # the REPL. Nothing above this line touches GitHub.
 if [[ -n "${DEVOPS_SOURCE_ONLY:-}" ]]; then
   return 0 2>/dev/null || exit 0
+fi
+
+# agent-defaults is intentionally usable without gh. Every existing Issue,
+# release, picker, and REPL path retains the same GitHub CLI prerequisite.
+if [[ $# -eq 0 || "$1" != "agent-defaults" ]]; then
+  require_gh || exit $?
 fi
 
 if [[ $# -gt 0 ]]; then
@@ -2014,6 +2244,13 @@ while true; do
         continue
       fi
       set_approved unapprove "$argument"
+      ;;
+    g|agent-defaults)
+      if [[ -n "$argument" || -n "$extra" ]]; then
+        printf '%s\n' "agent-defaults takes no REPL arguments; follow its prompts" >&2
+        continue
+      fi
+      agent_defaults_action
       ;;
     h|help|'?')
       print_usage
