@@ -114,9 +114,75 @@ func (r *Registry) register(def Definition) error {
 	}
 	normalized := def.Clone()
 	normalized.ID = id
+	if normalized.Owner != nil {
+		owner := normalized.Owner.Normalize()
+		normalized.Owner = &owner
+	}
 	r.defs[id] = normalized
 	r.order = append(r.order, id)
 	return nil
+}
+
+// RegisterPluginDefinitions atomically adds one enabled installed plugin's
+// inert capability definitions. IDs share the global namespace with built-ins
+// and other plugins; any malformed definition or collision rejects the batch.
+func (r *Registry) RegisterPluginDefinitions(owner workspace.CapabilityOwner, defs []Definition) error {
+	owner = owner.Normalize()
+	if !owner.Valid() {
+		return fmt.Errorf("plugin capability owner is invalid")
+	}
+	if len(defs) == 0 {
+		return nil
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	seen := make(map[string]struct{}, len(defs))
+	for _, def := range defs {
+		id := workspace.NormalizeCapabilityID(def.ID)
+		if err := def.Validate(); err != nil {
+			return err
+		}
+		if def.Owner == nil || def.Owner.Normalize() != owner {
+			return fmt.Errorf("capability definition %q does not belong to plugin %q", id, owner.PluginID)
+		}
+		if _, duplicate := seen[id]; duplicate {
+			return fmt.Errorf("capability definition %q registered twice", id)
+		}
+		if _, collision := r.defs[id]; collision {
+			return fmt.Errorf("capability definition %q collides with an existing owner", id)
+		}
+		seen[id] = struct{}{}
+	}
+	for _, def := range defs {
+		if err := r.register(def); err != nil {
+			// Validation/collision was completed above, so this is defensive.
+			return err
+		}
+	}
+	return nil
+}
+
+// UnregisterPluginDefinitions removes only definitions owned by pluginID. Any
+// workspace install records remain inert and resolve as provider unavailable.
+func (r *Registry) UnregisterPluginDefinitions(pluginID string) {
+	pluginID = workspace.NormalizeCapabilityID(pluginID)
+	if pluginID == "" {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	kept := r.order[:0]
+	for _, id := range r.order {
+		def := r.defs[id]
+		if def.Owner != nil && def.Owner.MatchesPlugin(pluginID) {
+			delete(r.defs, id)
+			delete(r.runtimes, id)
+			continue
+		}
+		kept = append(kept, id)
+	}
+	r.order = kept
 }
 
 // Definition returns the compiled definition for id, if this build has one.
@@ -199,17 +265,17 @@ func (r *Registry) Resolve(record workspace.InstalledCapability) Resolved {
 	if id == "" {
 		return Resolved{
 			Record:      record,
-			Definition:  unavailableDefinition(id),
+			Definition:  unavailableDefinition(id, record.Owner),
 			Unavailable: "install record has no capability id",
 		}
 	}
 
 	def, ok := r.Definition(id)
-	if !ok {
+	if !ok || !ownersMatch(record.Owner, def.Owner) {
 		return Resolved{
 			Record:      record,
-			Definition:  unavailableDefinition(id),
-			Unavailable: fmt.Sprintf("capability %q is not available in this version of Ori", id),
+			Definition:  unavailableDefinition(id, record.Owner),
+			Unavailable: "This workspace's capability provider is not available. Install or enable a compatible plugin, then check setup again.",
 		}
 	}
 
@@ -261,7 +327,7 @@ func (r *Registry) Status(record workspace.InstalledCapability, workspaceID stri
 		// caller renders "needs attention" and everything else keeps loading.
 		return Status{
 			State:  StatusNeedsAttention,
-			Detail: "File Janitor could not report its status.",
+			Detail: resolved.Definition.Display.Name + " could not report its status.",
 		}, resolved, err
 	}
 	return status, resolved, nil
@@ -271,12 +337,21 @@ func (r *Registry) Status(record workspace.InstalledCapability, workspaceID stri
 // install record this build cannot resolve. It carries the persisted ID and
 // nothing else — no runtime, no routes, no console, no companion — so there is
 // nothing for an unknown ID to activate.
-func unavailableDefinition(id string) Definition {
+func ownersMatch(recordOwner, definitionOwner *workspace.CapabilityOwner) bool {
+	if recordOwner == nil || definitionOwner == nil {
+		return recordOwner == nil && definitionOwner == nil
+	}
+	record := recordOwner.Normalize()
+	definition := definitionOwner.Normalize()
+	return record.Valid() && definition.Valid() && record.Kind == definition.Kind && record.PluginID == definition.PluginID
+}
+
+func unavailableDefinition(id string, owner *workspace.CapabilityOwner) Definition {
 	display := id
 	if display == "" {
 		display = "Unknown capability"
 	}
-	return Definition{
+	definition := Definition{
 		ID:      id,
 		Version: 0,
 		Display: Display{
@@ -284,4 +359,9 @@ func unavailableDefinition(id string) Definition {
 			Summary: "This capability is not available in this version of Ori.",
 		},
 	}
+	if owner != nil {
+		copy := owner.Clone()
+		definition.Owner = &copy
+	}
+	return definition
 }

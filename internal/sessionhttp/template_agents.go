@@ -83,7 +83,7 @@ type templateAgentOverride struct {
 }
 
 // blankWorkspaceEntryAgentName is the reusable entry agent seeded for the Blank
-// blueprint. Like every other template's entry agent (e.g. "Reaper Producer"),
+// blueprint. Like every other template's entry agent,
 // it is a normal global agent reused on name-match across blank workspaces.
 //
 // A new blank workspace must never mint a record under a retired name (FR59), so

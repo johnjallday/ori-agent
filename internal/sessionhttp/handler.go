@@ -13,14 +13,12 @@ import (
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/personalhq"
-	"github.com/johnjallday/ori-agent/internal/pluginworkspace"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
-	"github.com/johnjallday/ori-agent/internal/reapersetup"
-	"github.com/johnjallday/ori-agent/internal/runtimecapability"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/workspace"
+	"github.com/johnjallday/ori-agent/internal/workspacecapability"
 	"github.com/johnjallday/ori-agent/internal/workspacepolicy"
 )
 
@@ -32,13 +30,16 @@ type Handler struct {
 	// for task mutations such as the entry-agent claim sweep. It must be the same
 	// store orchestration reads from (SQLite primary + disk write-through), not
 	// the raw folder store, or task changes won't be visible to task reads.
-	workspaceTaskStore    workspace.Store
-	workspaceRootResolver func() string
-	templatesRootResolver func() string // resolves the project templates library directory
-	agentStore            store.Store
-	systemModelReader     SystemModelReader
-	workspaceAllowlist    *workspace.Allowlist
-	eventBus              *workspace.EventBus // optional, for project.created events
+	workspaceTaskStore        workspace.Store
+	workspaceRootResolver     func() string
+	templatesRootResolver     func() string // resolves the project templates library directory
+	projectTemplateResolver   func(templateID, templatePath string) (projecttemplates.Template, error)
+	templateCapabilityService *workspacecapability.Service
+	installedPluginLister     installedPluginLister
+	agentStore                store.Store
+	systemModelReader         SystemModelReader
+	workspaceAllowlist        *workspace.Allowlist
+	eventBus                  *workspace.EventBus // optional, for project.created events
 	// applyTemplateTools binds a template's declared default tools onto a newly
 	// created workspace (apply-if-present), returning the applied and skipped
 	// names. Injected by the server, which holds the tool registries and binds
@@ -54,16 +55,6 @@ type Handler struct {
 	// orchestration task handler); used by the template-setup first-open
 	// auto-start after the consumed marker is stamped.
 	templateSetupStarter func(workspaceID, taskID string) error
-
-	// REAPER setup: the normalized readiness resolver, the plugin lister used for
-	// the pre-create preview, and the shared reconciler used by repair. Injected
-	// by the server, which holds the plugin manager; nil when plugins are
-	// unavailable (the endpoints then report an unidentified/empty result).
-	reaperResolver     *reapersetup.Resolver
-	reaperPluginLister reapersetup.PluginLister
-	reaperReconciler   *pluginworkspace.Reconciler
-	reaperRepairer     *reapersetup.Repairer
-	reaperRuntime      reaperRuntimeService
 
 	// planningPolicy resolves a workspace's effective planning policy and what
 	// its folder can actually enforce. Injected by the server; nil in a build
@@ -155,37 +146,6 @@ func (h *Handler) SetAgentToolApplier(fn func(workspaceID, agentName string, too
 	h.applyAgentTools = fn
 }
 
-// SetReaperSetup injects the normalized REAPER readiness resolver, the plugin
-// lister used for the pre-create preview, and the shared reconciler used by
-// repair. The server supplies these because the plugin manager lives there.
-func (h *Handler) SetReaperSetup(resolver *reapersetup.Resolver, lister reapersetup.PluginLister, reconciler *pluginworkspace.Reconciler, repairer *reapersetup.Repairer) {
-	h.reaperResolver = resolver
-	h.reaperPluginLister = lister
-	h.reaperReconciler = reconciler
-	h.reaperRepairer = repairer
-}
-
-type reaperRuntimeService interface {
-	Status(context.Context, string) (runtimecapability.Status, error)
-	Recheck(context.Context, string) (runtimecapability.Status, error)
-	Verify(context.Context, string, string) (runtimecapability.Status, error)
-}
-
-func (h *Handler) SetReaperRuntimeService(service reaperRuntimeService) {
-	if h != nil {
-		h.reaperRuntime = service
-	}
-}
-
-// ReaperSetupWired reports whether the REAPER readiness resolver, preview lister,
-// and repairer have been injected. Used by build wiring tests to catch the
-// ordering bug where wiring ran before the workspace store existed (which left
-// every REAPER endpoint nil-guarded and the create preview stuck on
-// plugin_missing).
-func (h *Handler) ReaperSetupWired() bool {
-	return h.reaperResolver != nil && h.reaperPluginLister != nil && h.reaperRepairer != nil
-}
-
 // SetPersonalHQDesignator injects the Personal HQ designation capability used
 // by workspace import to restore an exported workspace's personal_hq marker on
 // this machine. The server supplies it because the profile store lives there.
@@ -210,6 +170,16 @@ func (h *Handler) PersonalHQDesignatorWired() bool {
 // templates library directory.
 func (h *Handler) SetTemplatesRootResolver(fn func() string) {
 	h.templatesRootResolver = fn
+}
+
+// SetProjectTemplateResolver injects the trusted composed built-in/user/plugin
+// blueprint catalog. Minimal/test handlers retain the legacy library resolver.
+func (h *Handler) SetProjectTemplateResolver(fn func(templateID, templatePath string) (projecttemplates.Template, error)) {
+	h.projectTemplateResolver = fn
+}
+
+func (h *Handler) SetTemplateCapabilityService(service *workspacecapability.Service) {
+	h.templateCapabilityService = service
 }
 
 // SetEventBus sets the workspace event bus used to publish project lifecycle

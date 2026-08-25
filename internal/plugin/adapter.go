@@ -43,6 +43,7 @@ func Normalize(m locatedManifest, sourceLocation string) (PluginDescriptor, erro
 		}
 	}
 
+	d.WorkspaceSurfaces = m.contribution
 	d.Unsupported = collectUnsupported(m)
 	return d, nil
 }

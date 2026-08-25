@@ -6,13 +6,23 @@ import (
 	"time"
 )
 
-// TemplateProvenance records the built-in template a workspace was created from,
-// in portable workspace metadata (persisted to workspace.json). Features such as
-// REAPER readiness and repair identify a workspace's origin from this rather than
-// scanning task descriptions or project filenames, which are brittle and can be
-// renamed by the user. It carries no executable hooks — it is pure provenance.
+// PluginTemplateOwner is inert provenance for a trusted installed-plugin
+// blueprint. It contains no command, asset root, module, path, or operation.
+type PluginTemplateOwner struct {
+	PluginID         string `json:"plugin_id"`
+	PluginVersion    string `json:"plugin_version"`
+	BlueprintID      string `json:"blueprint_id"`
+	BlueprintVersion int    `json:"blueprint_version"`
+}
+
+func (o PluginTemplateOwner) Clone() PluginTemplateOwner { return o }
+
+// TemplateProvenance records the template a workspace was created from in
+// portable workspace metadata. Runtime providers identify origin from this
+// rather than scanning user-editable names, tasks, or project filenames. It
+// carries no executable hooks — it is pure provenance.
 type TemplateProvenance struct {
-	// TemplateID is the stable built-in identifier, e.g. "reaper-song".
+	// TemplateID is the stable built-in or owner-qualified identifier.
 	TemplateID string `json:"template_id,omitempty"`
 	// TemplateName is the human-facing template name at creation time.
 	TemplateName string `json:"template_name,omitempty"`
@@ -22,6 +32,9 @@ type TemplateProvenance struct {
 	Version int `json:"version,omitempty"`
 	// AppliedAt records when the template was applied to the workspace.
 	AppliedAt time.Time `json:"applied_at,omitempty"`
+	// PluginOwner is present only for a plugin-contributed blueprint. Existing
+	// workspaces retain this inert snapshot when the plugin is disabled/removed.
+	PluginOwner *PluginTemplateOwner `json:"plugin_owner,omitempty"`
 	// DirectoryRequirements are the local folders the template asked the user to
 	// choose. They are carried unresolved: creation records what the template
 	// requested, and guided setup — not this record — resolves, validates, and
@@ -85,6 +98,10 @@ func clonePluginSources(sources map[string]string) map[string]string {
 // caller can neither observe nor mutate the workspace's stored snapshot through
 // a shared slice, map, or pointer.
 func cloneTemplateProvenanceInto(dst *TemplateProvenance, src *TemplateProvenance) {
+	if src.PluginOwner != nil {
+		owner := src.PluginOwner.Clone()
+		dst.PluginOwner = &owner
+	}
 	dst.DirectoryRequirements = cloneDirectoryRequirements(src.DirectoryRequirements)
 	dst.AutomationRecipes = cloneAutomationRecipes(src.AutomationRecipes)
 	dst.CapabilityRequirements = cloneCapabilityRequirements(src.CapabilityRequirements)

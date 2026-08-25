@@ -1,10 +1,8 @@
 package projecttemplates
 
 import (
-	"bytes"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -23,11 +21,9 @@ func TestEnsureLibraryMaterializesStarters(t *testing.T) {
 		byID[tpl.ID] = tpl
 	}
 
-	// The two file-scaffold starters and the five metadata-only built-ins all
-	// materialize on a fresh library.
+	// The file-scaffold starter and metadata-only built-ins all materialize.
 	for _, id := range []string{
-		"reaper-song", "writing-project",
-		"travels", "daily-briefings", "content-production", "research-project", "personal-ops",
+		"writing-project", "travels", "daily-briefings", "content-production", "research-project", "personal-ops",
 	} {
 		if _, ok := byID[id]; !ok {
 			t.Fatalf("missing starter %q; got %v", id, templates)
@@ -35,44 +31,6 @@ func TestEnsureLibraryMaterializesStarters(t *testing.T) {
 	}
 
 	// Scaffold starters keep their files and are flagged builtin.
-	reaper := byID["reaper-song"]
-	if reaper.Name != "Reaper Song" || !reaper.Builtin || !reaper.HasSkeleton {
-		t.Errorf("reaper-song: %+v", reaper)
-	}
-	if len(reaper.Tags) != 2 || reaper.Tags[0] != "music" || reaper.Tags[1] != "reaper" {
-		t.Errorf("reaper starter tags not applied: %+v", reaper.Tags)
-	}
-	if reaper.HasOnboarding() {
-		t.Error("reaper starter must not carry the legacy intake onboarding block")
-	}
-	if len(reaper.StarterTasks) != 2 {
-		t.Errorf("reaper starter should retain only two real work tasks: %+v", reaper.StarterTasks)
-	}
-	for _, task := range reaper.StarterTasks {
-		if task.Setup {
-			t.Errorf("reaper runtime setup must not be represented by a starter task: %+v", task)
-		}
-	}
-	if reaper.BuiltinVersion != 9 {
-		t.Errorf("reaper starter builtin_version = %d, want 9 for the starter pinned-action pack", reaper.BuiltinVersion)
-	}
-	// The manifest declares reaper-plugin under top-level workspace tool defaults
-	// so creation attaches its components when installed.
-	if len(reaper.Tools.Plugins) != 1 || reaper.Tools.Plugins[0] != "reaper-plugin" {
-		t.Errorf("reaper starter must declare reaper-plugin in tool defaults, got %+v", reaper.Tools.Plugins)
-	}
-	// It also declares the exact install source so the create UI can offer a
-	// one-click, trust-previewed install without resolving a marketplace.
-	if src := reaper.Tools.PluginSource("reaper-plugin"); src == "" || !strings.Contains(src, "reaper-plugin") {
-		t.Errorf("reaper starter must declare a reaper-plugin install source, got %q", src)
-	}
-	// One authoritative Reaper Producer agent; no extra default agents.
-	if len(reaper.Agents) != 1 || reaper.Agents[0].Name != "Reaper Producer" {
-		t.Errorf("reaper starter must keep exactly one Reaper Producer agent, got %+v", reaper.Agents)
-	}
-	if reaper.ProjectEntry == nil || reaper.ProjectEntry.RelativePath != "{{name}}.rpp" || !reaper.ProjectEntry.OpenAfterCreateDefault {
-		t.Errorf("reaper starter project entry is not configured for default launch: %#v", reaper.ProjectEntry)
-	}
 	if writing := byID["writing-project"]; !writing.Builtin || !writing.HasSkeleton ||
 		len(writing.Tags) != 1 || writing.Tags[0] != "writing" {
 		t.Errorf("writing-project: %+v", writing)
@@ -96,32 +54,9 @@ func TestEnsureLibraryMaterializesStarters(t *testing.T) {
 		t.Errorf("research-project roster wrong: %+v", research.Agents)
 	}
 
-	// Seed file with token name plus the dot-file under chapters/ made it out
-	// of the embed (all: prefix) and onto disk.
-	if _, err := os.Stat(filepath.Join(dir, "reaper-song", "{{name}}.rpp")); err != nil {
-		t.Errorf("reaper seed missing: %v", err)
-	}
+	// The dot-file under chapters/ made it out of the embed (all: prefix).
 	if _, err := os.Stat(filepath.Join(dir, "writing-project", "chapters", ".keep")); err != nil {
 		t.Errorf("chapters/.keep missing: %v", err)
-	}
-}
-
-func TestEnsureLibraryMaterializedReaperManifestMatchesCanonicalCopy(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "templates")
-	if err := EnsureLibrary(dir); err != nil {
-		t.Fatalf("EnsureLibrary: %v", err)
-	}
-
-	canonical, err := starterFS.ReadFile("starter/reaper-song/template.json")
-	if err != nil {
-		t.Fatalf("read canonical Reaper manifest: %v", err)
-	}
-	materialized, err := os.ReadFile(filepath.Join(dir, "reaper-song", ManifestFileName))
-	if err != nil {
-		t.Fatalf("read materialized Reaper manifest: %v", err)
-	}
-	if !bytes.Equal(materialized, canonical) {
-		t.Fatal("materialized Reaper template copy differs from the canonical embedded manifest")
 	}
 }
 
@@ -131,7 +66,7 @@ func TestEnsureLibraryNeverOverwritesUserEdits(t *testing.T) {
 		t.Fatalf("EnsureLibrary: %v", err)
 	}
 
-	edited := filepath.Join(dir, "reaper-song", "{{name}}.rpp")
+	edited := filepath.Join(dir, "writing-project", "outline.md")
 	if err := os.WriteFile(edited, []byte("user-edited"), 0o640); err != nil {
 		t.Fatal(err)
 	}
@@ -202,50 +137,6 @@ func TestEnsureLibraryRefreshesBuiltinManifestOnVersionBump(t *testing.T) {
 	}
 }
 
-func TestEnsureLibraryRefreshesReaperRuntimeContractOnVersionBump(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "templates")
-	if err := EnsureLibrary(dir); err != nil {
-		t.Fatalf("EnsureLibrary: %v", err)
-	}
-
-	reaperDir := filepath.Join(dir, "reaper-song")
-	manifestPath := filepath.Join(reaperDir, ManifestFileName)
-	if err := os.WriteFile(manifestPath, []byte(`{"name":"Reaper Song","builtin":true,"builtin_version":2}`), 0o640); err != nil {
-		t.Fatal(err)
-	}
-	seed := filepath.Join(reaperDir, "{{name}}.rpp")
-	if err := os.WriteFile(seed, []byte("user-edited reaper project"), 0o640); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := EnsureLibrary(dir); err != nil {
-		t.Fatalf("EnsureLibrary (refresh): %v", err)
-	}
-	refreshed, err := FindLibraryTemplate(dir, "reaper-song")
-	if err != nil {
-		t.Fatalf("FindLibraryTemplate: %v", err)
-	}
-	if refreshed.BuiltinVersion != 9 {
-		t.Errorf("reaper builtin_version = %d, want 9", refreshed.BuiltinVersion)
-	}
-	if !refreshed.HasRuntimeRequirements() || refreshed.RuntimeRequirementsError != "" {
-		t.Fatalf("refreshed Reaper runtime contract = %#v, error %q", refreshed.RuntimeRequirements, refreshed.RuntimeRequirementsError)
-	}
-	if len(refreshed.StarterTasks) != 2 || refreshed.StarterTasks[0].Setup || refreshed.StarterTasks[1].Setup {
-		t.Fatalf("refreshed Reaper starter tasks = %+v", refreshed.StarterTasks)
-	}
-	if len(refreshed.PinnedReaperScripts) == 0 {
-		t.Errorf("refreshed Reaper template lost its starter pinned-action pack")
-	}
-	if refreshed.ProjectEntry == nil || refreshed.ProjectEntry.RelativePath != "{{name}}.rpp" || !refreshed.ProjectEntry.OpenAfterCreateDefault {
-		t.Errorf("refreshed Reaper project entry = %#v", refreshed.ProjectEntry)
-	}
-	data, err := os.ReadFile(seed)
-	if err != nil || string(data) != "user-edited reaper project" {
-		t.Errorf("Reaper seed should survive manifest refresh, got %q err=%v", string(data), err)
-	}
-}
-
 func TestStarterInstantiatesEndToEnd(t *testing.T) {
 	// Generality gate (PRD success metric 2): both starters run through the
 	// identical engine path; the music template is in no way special.
@@ -259,7 +150,6 @@ func TestStarterInstantiatesEndToEnd(t *testing.T) {
 		wantFile  string
 		wantEntry string
 	}{
-		{"reaper-song", "midnight.rpp", "midnight.rpp"},
 		{"writing-project", "outline.md", ""},
 	} {
 		wsDir := t.TempDir()
@@ -278,30 +168,5 @@ func TestStarterInstantiatesEndToEnd(t *testing.T) {
 		if result.ProjectEntryPath != tc.wantEntry || result.ProjectWarning != "" {
 			t.Errorf("%s: project entry = %q warning = %q, want %q without warning", tc.id, result.ProjectEntryPath, result.ProjectWarning, tc.wantEntry)
 		}
-		if tc.id == "reaper-song" {
-			entries, err := os.ReadDir(filepath.Join(wsDir, result.ProjectPath))
-			if err != nil {
-				t.Fatal(err)
-			}
-			rppCount := 0
-			for _, entry := range entries {
-				if !entry.IsDir() && strings.EqualFold(filepath.Ext(entry.Name()), ".rpp") {
-					rppCount++
-				}
-			}
-			if rppCount != 1 {
-				t.Errorf("reaper-song scaffold contains %d .rpp files, want exactly one", rppCount)
-			}
-		}
-	}
-}
-
-func TestReaperSeedLooksLikeAnRPP(t *testing.T) {
-	data, err := starterFS.ReadFile("starter/reaper-song/{{name}}.rpp")
-	if err != nil {
-		t.Fatalf("embedded seed missing: %v", err)
-	}
-	if !strings.HasPrefix(string(data), "<REAPER_PROJECT") {
-		t.Errorf("seed does not open with <REAPER_PROJECT: %q", data)
 	}
 }

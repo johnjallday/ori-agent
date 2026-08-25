@@ -137,7 +137,7 @@ func (s *SyncStore) rollbackFileSave(workspaceID string, previous *Workspace) er
 func portableWorkspaceStateMissing(ws *Workspace) bool {
 	return ws != nil && (ws.ProjectPath == "" || ws.Designation == "" || ws.TemplateProvenance == nil ||
 		ws.SetupWizardProgress == nil || ws.RuntimeState == nil || capabilitiesMissing(ws) ||
-		toolboxStateMissing(ws) || missionStateMissing(ws) || pinnedReaperScriptsMissing(ws))
+		toolboxStateMissing(ws) || missionStateMissing(ws))
 }
 
 func restorePortableWorkspaceState(ws, diskWorkspace *Workspace) {
@@ -172,9 +172,6 @@ func restorePortableWorkspaceState(ws, diskWorkspace *Workspace) {
 	if missionStateMissing(ws) {
 		restoreMissionFromDisk(ws, diskWorkspace)
 	}
-	if pinnedReaperScriptsMissing(ws) {
-		ws.PinnedReaperScripts = append([]string(nil), diskWorkspace.PinnedReaperScripts...)
-	}
 }
 
 // capabilitiesMissing reports whether ws carries no capability records AND did
@@ -183,14 +180,6 @@ func restorePortableWorkspaceState(ws, diskWorkspace *Workspace) {
 // from disk.
 func capabilitiesMissing(ws *Workspace) bool {
 	return len(ws.InstalledCapabilities) == 0 && !ws.InstalledCapabilitiesExplicit()
-}
-
-// pinnedReaperScriptsMissing reports whether ws carries no pinned REAPER
-// quick actions AND did not mean to. An empty slice that was deliberately
-// written (unpinning the last quick action) is a real value and must not be
-// refilled from disk. Mirrors capabilitiesMissing above.
-func pinnedReaperScriptsMissing(ws *Workspace) bool {
-	return len(ws.PinnedReaperScripts) == 0 && !ws.PinnedReaperScriptsExplicit()
 }
 
 // toolboxStateMissing reports whether ws carries no Toolbox state at all.

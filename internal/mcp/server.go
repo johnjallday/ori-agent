@@ -381,8 +381,13 @@ func (s *Server) finishConnect(client *sdkmcp.Client, session *sdkmcp.ClientSess
 
 	s.setStatus(StatusRunning)
 
-	// Start health check goroutine
-	go s.healthCheckLoop()
+	// Bind this loop to the exact connection generation. Start may replace
+	// s.ctx after a stopped/crashed process; a loop that re-reads s.ctx can then
+	// accidentally follow the new generation and race its context swap.
+	s.mu.RLock()
+	healthCtx := s.ctx
+	s.mu.RUnlock()
+	go s.healthCheckLoop(healthCtx)
 
 	return nil
 }
@@ -571,15 +576,15 @@ func (s *Server) discoverTools() error {
 	return nil
 }
 
-// healthCheckLoop periodically checks if the server is still alive
-func (s *Server) healthCheckLoop() {
+// healthCheckLoop periodically checks if the server is still alive.
+func (s *Server) healthCheckLoop(ctx context.Context) {
 	interval := resolveMCPHealthCheckInterval()
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	for {
 		select {
-		case <-s.ctx.Done():
+		case <-ctx.Done():
 			return
 		case <-ticker.C:
 			s.mu.RLock()
@@ -597,10 +602,11 @@ func (s *Server) healthCheckLoop() {
 				s.setStatus(StatusError)
 				continue
 			}
-			// Remote servers have no local subprocess to check; fall through
-			// to the ping below. Stdio servers additionally verify the
-			// subprocess is still alive.
-			if !remote && (cmd == nil || (cmd.ProcessState != nil && cmd.ProcessState.Exited())) {
+			// CommandTransport owns Cmd.Wait and writes exec.Cmd.ProcessState.
+			// Reading ProcessState concurrently is racy, so stdio liveness is
+			// determined by the session ping; cmd==nil still catches a torn-down
+			// local connection before attempting it.
+			if !remote && cmd == nil {
 				s.setStatus(StatusError)
 			} else {
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

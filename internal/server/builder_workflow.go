@@ -21,7 +21,6 @@ import (
 	"github.com/johnjallday/ori-agent/internal/orchestration"
 	"github.com/johnjallday/ori-agent/internal/orchestration/templates"
 	"github.com/johnjallday/ori-agent/internal/orchestrationhttp"
-	"github.com/johnjallday/ori-agent/internal/reapersetup"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/toolapi"
 	"github.com/johnjallday/ori-agent/internal/trigger"
@@ -88,15 +87,12 @@ func (b *ServerBuilder) buildWorkspaceToolFactory() workspace.WorkspaceToolFacto
 // different builder phases, so resolving dependencies only at tool-call time
 // avoids a partially initialized HQ overview.
 func (b *ServerBuilder) buildRuntimeTaskToolFactory() workspace.RuntimeTaskToolFactory {
-	handler := b.reaperHandler
-	if handler == nil {
+	surfaces := b.workspaceSurfaceHandler
+	if surfaces == nil {
 		return nil
 	}
 	return func(task workspace.Task, _ string, agentInstanceID string) []toolapi.Tool {
-		if !task.RequiresCapability(reapersetup.ReaperLiveControlCapability) {
-			return nil
-		}
-		return handler.AgentTools(task.WorkspaceID, agentInstanceID)
+		return surfaces.AgentTools(context.Background(), task.WorkspaceID, agentInstanceID)
 	}
 }
 
@@ -395,17 +391,15 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 		b.sessionHandler.SetPlanningPolicyResolver(b.workspacePlanPolicy)
 	}
 
-	// Now that the workspace store (SyncStore) exists, wire REAPER readiness /
-	// preview / repair. Done here rather than in initializeHandlers because the
-	// store is created in this phase (Phase 18), after the handlers.
-	b.wireReaperSetup()
-	b.wireReaperControl()
 	b.wireCalendarOpsSetup()
 	b.wireDownloadsJanitor()
-	// After the domain services above: the capability registry binds their
-	// runtimes, and the wizard registers their adapters.
+	// Build the compiled capability registry before restoring plugin surfaces:
+	// enabled plugin contributions register owner-aware definitions into this
+	// same catalog and must collide fail-closed with built-ins.
 	b.wireWorkspaceCapabilities()
 	b.wireRuntimeCapabilities()
+	b.wireWorkspaceSurfaces()
+	b.wireProjectTemplateResolver()
 	b.wireSetupWizard()
 	// The coordinate map resolves node ownership through the composed workspace
 	// store, so it wires here for the same reason (#292 FR-99).
@@ -475,7 +469,6 @@ func (b *ServerBuilder) initializeTaskExecution() {
 		runtimeResolver.SetSkillResolver(newSkillResolverAdapter(b.skillsManager))
 	}
 	b.runtimeResolver = runtimeResolver
-	b.wireRuntimeGrantFoundation()
 
 	// Make every existing agent's implicit capability set explicit before the
 	// resolver serves its first request (PRD FR-28–FR-35). This runs here
@@ -640,7 +633,7 @@ func (b *ServerBuilder) initializeOrchestration() error {
 	b.taskCapabilityGate = gate
 	handler.SetTaskCapabilityGate(gate)
 	if b.workspaceFileStore != nil {
-		handler.SetTaskFileFallbackPreparer(reapersetup.NewFileFallbackPreparer(b.workspaceFileStore))
+		handler.SetTaskFileFallbackPreparer(workspace.NewProjectFileFallbackPreparer(b.workspaceFileStore))
 	}
 
 	// Template-setup first-open auto-start runs seeded tasks through the same

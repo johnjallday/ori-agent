@@ -54,8 +54,6 @@ import (
 	"github.com/johnjallday/ori-agent/internal/privateservices"
 	"github.com/johnjallday/ori-agent/internal/progression"
 	"github.com/johnjallday/ori-agent/internal/progressionhttp"
-	"github.com/johnjallday/ori-agent/internal/reaperhttp"
-	"github.com/johnjallday/ori-agent/internal/reapersetup"
 	"github.com/johnjallday/ori-agent/internal/reviewhttp"
 	"github.com/johnjallday/ori-agent/internal/runtimecapability"
 	"github.com/johnjallday/ori-agent/internal/runtimecapabilityhttp"
@@ -87,6 +85,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/workspaceplan"
 	"github.com/johnjallday/ori-agent/internal/workspacepolicy"
 	"github.com/johnjallday/ori-agent/internal/workspacerun"
+	"github.com/johnjallday/ori-agent/internal/workspacesurface"
+	"github.com/johnjallday/ori-agent/internal/workspacesurfacehttp"
 )
 
 // ServerBuilder builds a Server instance through a series of initialization phases.
@@ -347,11 +347,6 @@ type ServerBuilder struct {
 	runtimeCapabilityService  *runtimecapability.Service
 	runtimeCapabilityHandler  *runtimecapabilityhttp.Handler
 	taskCapabilityGate        *workspace.CompositeTaskCapabilityGate
-	reaperHandler             *reaperhttp.Handler
-	// reaperResolver is the normalized REAPER readiness resolver, held so the
-	// Setup Wizard's adapter reads the same one the panel and repair flow use.
-	reaperResolver        *reapersetup.Resolver
-	reaperPluginInspector reapersetup.PluginInspector
 	// downloadsJanitorSetupAdapter is held so the watcher lifecycle can be
 	// attached to it once the automation service exists (a later phase).
 	downloadsJanitorSetupAdapter *downloadsjanitor.SetupAdapter
@@ -362,6 +357,12 @@ type ServerBuilder struct {
 	workspaceCapabilityRegistry *workspacecapability.Registry
 	workspaceCapabilityService  *workspacecapability.Service
 	workspaceCapabilityHandler  *workspacecapabilityhttp.Handler
+
+	// Generic plugin-contributed Workspace Surfaces. The registry owns inert
+	// descriptors and trusted bindings; one handler serves every plugin.
+	workspaceSurfaceRegistry *workspacesurface.Registry
+	workspaceSurfaceServices *workspacesurface.ServiceManager
+	workspaceSurfaceHandler  *workspacesurfacehttp.Handler
 
 	// Coordinate-based Workspace Map: the current user's layout storage, the
 	// ownership/lifecycle service over it, and its HTTP handler. Kept entirely
@@ -565,10 +566,10 @@ func (b *ServerBuilder) createDomainFacades() {
 		OriGuide:              b.oriGuideHandler,
 		DownloadsJanitor:      b.downloadsJanitorHandler,
 		WorkspaceCapabilities: b.workspaceCapabilityHandler,
+		WorkspaceSurfaces:     b.workspaceSurfaceHandler,
 		WorkspaceMap:          b.workspaceMapHandler,
 		SetupWizard:           b.setupWizardHandler,
 		RuntimeCapabilities:   b.runtimeCapabilityHandler,
-		Reaper:                b.reaperHandler,
 		CLIAgents:             b.cliAgentHandler,
 		CLIAgentRegistry:      b.cliAgentRegistry,
 		WorkspaceRuns:         b.workspaceRunHandler,
@@ -583,6 +584,11 @@ func (b *ServerBuilder) createDomainFacades() {
 		handlers.WorkspaceMemory = memoryhttp.NewHandler(b.workspaceFileStore, b.workspaceFileStore)
 	}
 	b.server.Handlers = handlers
+	b.server.workspaceSurfaceServices = b.workspaceSurfaceServices
+	b.server.projectTemplateCatalog = templateRuntimeCatalog{
+		capabilities: b.workspaceCapabilityRegistry,
+		runtimes:     b.runtimeCapabilityRegistry,
+	}
 }
 
 // WithLLMFactory injects a custom LLM factory (for testing).

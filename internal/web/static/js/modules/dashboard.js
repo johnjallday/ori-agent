@@ -99,17 +99,7 @@
     app_launch: {
       key: 'app_launch',
       label: 'app launch',
-      keywords: [
-        'open',
-        'launch',
-        'start',
-        'run',
-        'application',
-        'app',
-        'obsidian',
-        'reaper',
-        'finder'
-      ],
+      keywords: ['open', 'launch', 'start', 'run', 'application', 'app', 'obsidian', 'finder'],
       preferredPlugins: ['shell', 'executor', 'desktop', 'automation', 'os-shell', 'command'],
       preferredTypes: ['tool-calling', 'general'],
       defaultType: 'tool-calling',
@@ -7963,8 +7953,8 @@
       ).trim(),
       session_id: String(sessionId || '').trim(),
       origin: String(routeContext.origin || fallback.origin || 'ask_ori').trim() || 'ask_ori',
-      // Runtime capabilities the ORIGINATING SURFACE knows this ask needs
-      // (e.g. the REAPER console declares reaper_live_control). This
+      // Runtime capabilities the ORIGINATING SURFACE knows this ask needs.
+      // This
       // normalizer rebuilds routeContext from a fixed whitelist, so a field
       // that is not listed here is silently dropped — which is exactly how
       // this requirement got lost before. Carried generically: surfaces

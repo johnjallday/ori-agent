@@ -1,0 +1,44 @@
+{
+  "errors": [
+    {
+      "code": "provider_unavailable",
+      "title": "Capability provider unavailable",
+      "message": "This workspace's capability provider is not available. Install or enable a compatible plugin, then check setup again.",
+      "action": {
+        "code": "review_plugins",
+        "label": "Review plugins"
+      }
+    },
+    {
+      "code": "operation_unknown",
+      "message": "That plugin operation is not available."
+    },
+    {
+      "code": "confirmation_required",
+      "message": "Review and confirm this plugin action before it runs.",
+      "confirmation_id": "confirmation-demo-1"
+    },
+    {
+      "code": "service_timeout",
+      "message": "The plugin service did not answer in time."
+    },
+    {
+      "code": "session_invalidated",
+      "message": "This plugin surface is no longer available. Close it and try again."
+    }
+  ],
+  "forbidden_public_fields": [
+    "command",
+    "args",
+    "env",
+    "artifact_path",
+    "asset_root",
+    "project_path",
+    "plugin_data_path",
+    "endpoint",
+    "port",
+    "stderr",
+    "stack_trace",
+    "credential"
+  ]
+}

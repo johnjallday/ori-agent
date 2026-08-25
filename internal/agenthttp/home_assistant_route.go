@@ -216,7 +216,7 @@ var (
 	homeAssistantAppLaunchIntent = homeAssistantIntent{
 		Key:              "app_launch",
 		Label:            "app launch",
-		Keywords:         []string{"open", "launch", "start", "run", "application", "app", "obsidian", "reaper", "finder"},
+		Keywords:         []string{"open", "launch", "start", "run", "application", "app", "obsidian", "finder"},
 		PreferredPlugins: []string{"shell", "executor", "desktop", "automation", "os-shell", "command"},
 		PreferredTypes:   []string{"tool-calling", "general"},
 		DefaultType:      "tool-calling",

@@ -55,7 +55,6 @@ var ValidSetupWizardAdapters = []string{
 	"calendar_ops",
 	"email_ops",
 	"github_ops",
-	"reaper_song",
 }
 
 // Bounds on author-supplied wizard text. A manifest is local and hand-written,

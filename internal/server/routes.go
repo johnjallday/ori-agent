@@ -45,9 +45,9 @@ func registerRoutes(mux *http.ServeMux, s *Server) {
 	registerWorkspaceMemoryRoutes(mux, s)
 	registerDownloadsJanitorRoutes(mux, s)
 	registerWorkspaceCapabilityRoutes(mux, s)
+	registerWorkspaceSurfaceRoutes(mux, s)
 	registerWorkspaceMapRoutes(mux, s)
 	registerRuntimeCapabilityRoutes(mux, s)
-	registerReaperRoutes(mux, s)
 	registerSetupWizardRoutes(mux, s)
 	registerExternalAgentRoutes(mux, s)
 	registerSkillsRoutes(mux, s)
@@ -672,11 +672,6 @@ func registerSessionRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("/api/sessions/stats", s.Handlers.Session.HandleStorageStats)
 		mux.HandleFunc("/api/sessions/bulk", s.Handlers.Session.HandleBulkDeleteSessions)
 
-		// Pre-create REAPER Setup preview for the Reaper Song template (no
-		// workspace id yet). Per-workspace readiness is dispatched under
-		// /api/workspaces/{id}/reaper-setup by the session handler.
-		mux.HandleFunc("/api/reaper-setup/preview", s.Handlers.Session.GetReaperCreatePreview)
-
 		// Auto-classify route (must be registered before the wildcard routes)
 		if s.Handlers.AutoClassify != nil {
 			mux.HandleFunc("/api/sessions/auto-classify", s.Handlers.AutoClassify.HandleAutoClassify)
@@ -1057,6 +1052,15 @@ func registerWorkspaceCapabilityRoutes(mux *http.ServeMux, s *Server) {
 //
 // A nil handler (the map failed to wire) registers nothing, so the Map falls
 // back to read-only deterministic placement rather than taking the API down.
+// registerWorkspaceSurfaceRoutes registers one generic route set. Contributions
+// are data in the shared registry and never add their own ServeMux patterns.
+func registerWorkspaceSurfaceRoutes(mux *http.ServeMux, s *Server) {
+	if s.Handlers.WorkspaceSurfaces == nil {
+		return
+	}
+	s.Handlers.WorkspaceSurfaces.Register(mux)
+}
+
 func registerWorkspaceMapRoutes(mux *http.ServeMux, s *Server) {
 	// =============================================================================
 	// Workspace Map Layout Endpoints (current user)
@@ -1071,16 +1075,6 @@ func registerRuntimeCapabilityRoutes(mux *http.ServeMux, s *Server) {
 		return
 	}
 	s.Handlers.RuntimeCapabilities.Register(mux)
-}
-
-// registerReaperRoutes mounts the live REAPER state surface separately from
-// durable runtime capabilities. Connectivity is current state, never persisted
-// readiness history.
-func registerReaperRoutes(mux *http.ServeMux, s *Server) {
-	if s.Handlers.Reaper == nil {
-		return
-	}
-	s.Handlers.Reaper.Register(mux)
 }
 
 // registerSetupWizardRoutes registers the workspace-scoped blueprint Setup

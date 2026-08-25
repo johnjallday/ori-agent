@@ -46,9 +46,11 @@ type rawInterface struct {
 // locatedManifest is a parsed manifest with its format and the plugin root
 // directory (the directory that contains the manifest dir and component dirs).
 type locatedManifest struct {
-	format SourceFormat
-	root   string
-	raw    rawManifest
+	format       SourceFormat
+	root         string
+	raw          rawManifest
+	identities   []ManifestIdentity
+	contribution *SurfaceContribution
 }
 
 // DetectManifest locates and parses a plugin manifest under root. When both a
@@ -62,19 +64,62 @@ func DetectManifest(root string, prefer SourceFormat) (locatedManifest, error) {
 	hasClaude := fileExists(claudePath)
 	hasCodex := codexPath != ""
 
+	var (
+		selected locatedManifest
+		err      error
+	)
 	switch {
 	case hasClaude && hasCodex:
 		if prefer == FormatCodex {
-			return loadManifest(FormatCodex, codexRoot, codexPath)
+			selected, err = loadManifest(FormatCodex, codexRoot, codexPath)
+		} else {
+			selected, err = loadManifest(FormatClaude, root, claudePath) // default precedence: Claude > Codex
 		}
-		return loadManifest(FormatClaude, root, claudePath) // default precedence: Claude > Codex
 	case hasClaude:
-		return loadManifest(FormatClaude, root, claudePath)
+		selected, err = loadManifest(FormatClaude, root, claudePath)
 	case hasCodex:
-		return loadManifest(FormatCodex, codexRoot, codexPath)
+		selected, err = loadManifest(FormatCodex, codexRoot, codexPath)
 	default:
 		return locatedManifest{}, ErrNoManifest
 	}
+	if err != nil {
+		return locatedManifest{}, err
+	}
+
+	identities := make([]ManifestIdentity, 0, 2)
+	if hasClaude {
+		identity, identityErr := readManifestIdentity(FormatClaude, root, claudePath)
+		if identityErr != nil {
+			return locatedManifest{}, identityErr
+		}
+		identities = append(identities, identity)
+	}
+	if hasCodex {
+		identity, identityErr := readManifestIdentity(FormatCodex, codexRoot, codexPath)
+		if identityErr != nil {
+			return locatedManifest{}, identityErr
+		}
+		identities = append(identities, identity)
+	}
+	selected.identities = identities
+
+	oriPath := filepath.Join(selected.root, OriManifestDir, OriManifestFile)
+	if !fileExists(oriPath) {
+		return selected, nil
+	}
+	data, err := os.ReadFile(oriPath) // #nosec G304 -- fixed contribution path under the selected plugin root
+	if err != nil {
+		return locatedManifest{}, fmt.Errorf("plugin: read Ori contribution: %w", err)
+	}
+	contribution, err := ParseSurfaceContribution(data)
+	if err != nil {
+		return locatedManifest{}, err
+	}
+	if err := ValidateContributionIdentity(contribution, identities); err != nil {
+		return locatedManifest{}, err
+	}
+	selected.contribution = contribution
+	return selected, nil
 }
 
 // findCodexManifest looks for .codex-plugin/plugin.json at root, then under one
@@ -117,6 +162,14 @@ func loadManifest(format SourceFormat, root, path string) (locatedManifest, erro
 		return locatedManifest{}, ErrNoName
 	}
 	return locatedManifest{format: format, root: root, raw: raw}, nil
+}
+
+func readManifestIdentity(format SourceFormat, root, path string) (ManifestIdentity, error) {
+	manifest, err := loadManifest(format, root, path)
+	if err != nil {
+		return ManifestIdentity{}, err
+	}
+	return ManifestIdentity{Format: format, Name: manifest.raw.Name, Version: manifest.raw.Version}, nil
 }
 
 func fileExists(path string) bool {

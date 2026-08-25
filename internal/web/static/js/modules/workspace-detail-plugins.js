@@ -321,8 +321,6 @@ export class WorkspacePluginsManager {
       );
 
       await this.host.loadWorkspace();
-      // Attachment changed: refresh the durable REAPER readiness card if present.
-      window.ReaperReadinessPanel?.refresh?.();
 
       const failures = Array.isArray(result?.failures) ? result.failures : [];
       if (failures.length > 0) {
@@ -402,8 +400,6 @@ export class WorkspacePluginsManager {
       }
 
       await this.host.loadWorkspace();
-      // Attachment changed: refresh the durable REAPER readiness card if present.
-      window.ReaperReadinessPanel?.refresh?.();
       if (window.Toast) window.Toast.success(`Removed ${label} from this workspace`);
     } catch (error) {
       console.error('Failed to remove plugin from workspace:', error);

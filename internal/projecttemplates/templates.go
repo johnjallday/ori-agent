@@ -17,7 +17,6 @@ import (
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/workspace"
-	"github.com/johnjallday/ori-agent/internal/workspacecapability"
 )
 
 // ManifestFileName is the optional per-template metadata file. It carries
@@ -160,10 +159,13 @@ func normalizeCapabilityRequirements(reqs []CapabilityRequirement) []CapabilityR
 // Duplicates collapse (first-seen wins) rather than producing two install
 // records for one capability, which the workspace model forbids anyway (FR-8).
 func normalizeCapabilityInstalls(installs []CapabilityInstall) ([]CapabilityInstall, []string) {
+	return normalizeCapabilityInstallsWithCatalog(installs, defaultRuntimeCatalog())
+}
+
+func normalizeCapabilityInstallsWithCatalog(installs []CapabilityInstall, catalog RuntimeCatalog) ([]CapabilityInstall, []string) {
 	if len(installs) == 0 {
 		return nil, nil
 	}
-	registry, registryErr := workspacecapability.NewBuiltinRegistry()
 
 	var warnings []string
 	out := make([]CapabilityInstall, 0, len(installs))
@@ -177,7 +179,7 @@ func normalizeCapabilityInstalls(installs []CapabilityInstall) ([]CapabilityInst
 		if _, duplicate := seen[id]; duplicate {
 			continue
 		}
-		if registryErr == nil && !registry.Has(id) {
+		if catalog == nil || !catalog.HasCapability(id) {
 			warnings = append(warnings, fmt.Sprintf(
 				"template.json declares capability %q, which this version of Ori does not provide; it was ignored", id))
 			continue
@@ -284,21 +286,15 @@ type Template struct {
 	BehaviorProfile string `json:"behavior_profile,omitempty"`
 	// StarterTasks are example tasks seeded into a new workspace.
 	StarterTasks []StarterTask `json:"starter_tasks,omitempty"`
-	// PinnedReaperScripts is an ordered starter pack of REAPER quick-action IDs
-	// (built-in catalog command IDs like "40026", or "custom:filename.lua" for
-	// a shared script) seeded onto a new workspace's
-	// workspace.Workspace.PinnedReaperScripts (see
-	// internal/workspace/reaper_pins.go). Inert for any template that isn't
-	// REAPER-flavored; the console simply never shows a pinned band with no
-	// pins. Data only — resolved against the live catalog/script library at
-	// render time, same as any other pin.
-	PinnedReaperScripts []string `json:"pinned_reaper_scripts,omitempty"`
 	// ProjectEntry is the optional scaffolded file Ori can offer to open after
 	// an explicit Create Workspace action. It is validated data only.
 	ProjectEntry *ProjectEntry `json:"project_entry,omitempty"`
 	// Builtin marks a template shipped with the app: read-only in the authoring
 	// UI and grouped as a built-in in the create-modal picker.
 	Builtin bool `json:"builtin"`
+	// PluginOwner identifies an enabled trusted installed-plugin blueprint.
+	// It is inert provenance and is nil for built-in/user templates.
+	PluginOwner *workspace.PluginTemplateOwner `json:"plugin_owner,omitempty"`
 	// BuiltinVersion is the shipped revision of a built-in's manifest. When the
 	// embedded version exceeds the on-disk copy, EnsureLibrary refreshes the
 	// built-in's template.json so metadata changes (rosters, tags, …) reach
@@ -440,7 +436,6 @@ type manifest struct {
 	Addons                 []string                `json:"addons,omitempty"`
 	BehaviorProfile        string                  `json:"behavior_profile,omitempty"`
 	StarterTasks           []StarterTask           `json:"starter_tasks,omitempty"`
-	PinnedReaperScripts    []string                `json:"pinned_reaper_scripts,omitempty"`
 	ProjectEntry           json.RawMessage         `json:"project_entry,omitempty"`
 	Builtin                bool                    `json:"builtin,omitempty"`
 	BuiltinVersion         int                     `json:"builtin_version,omitempty"`
@@ -481,11 +476,14 @@ func readManifest(dir string) manifest {
 // newTemplate builds a Template for the folder at path, applying manifest
 // display overrides when present.
 func newTemplate(path string) Template {
+	return newTemplateWithManifest(path, readManifest(filepath.Clean(path)), defaultRuntimeCatalog())
+}
+
+func newTemplateWithManifest(path string, m manifest, catalog RuntimeCatalog) Template {
 	t := Template{
 		ID:   filepath.Base(filepath.Clean(path)),
 		Path: filepath.Clean(path),
 	}
-	m := readManifest(t.Path)
 	t.Name = strings.TrimSpace(m.Name)
 	if t.Name == "" {
 		t.Name = t.ID
@@ -497,7 +495,6 @@ func newTemplate(path string) Template {
 	t.Addons = normalizeAddons(m.Addons)
 	t.BehaviorProfile = NormalizeBehaviorProfile(m.BehaviorProfile)
 	t.StarterTasks = normalizeStarterTasks(m.StarterTasks)
-	t.PinnedReaperScripts = normalizePinnedReaperScripts(m.PinnedReaperScripts)
 	t.Builtin = m.Builtin || IsBuiltinStarterID(t.ID)
 	t.BuiltinVersion = m.BuiltinVersion
 	t.HasSkeleton = hasSkeletonFiles(t.Path)
@@ -509,11 +506,11 @@ func newTemplate(path string) Template {
 	}
 	t.Agents = normalizeAgentSpecs(m.Agents)
 	t.CapabilityRequirements = normalizeCapabilityRequirements(m.CapabilityRequirements)
-	capabilities, capabilityWarnings := normalizeCapabilityInstalls(m.Capabilities)
+	capabilities, capabilityWarnings := normalizeCapabilityInstallsWithCatalog(m.Capabilities, catalog)
 	t.Capabilities = capabilities
 	t.DirectoryRequirements = normalizeDirectoryRequirements(m.DirectoryRequirements)
 	t.AutomationRecipes = normalizeAutomationRecipes(m.AutomationRecipes, t.DirectoryRequirements)
-	runtimeRequirements, runtimeRequirementsErr := normalizeRuntimeRequirements(m.RuntimeRequirements)
+	runtimeRequirements, runtimeRequirementsErr := normalizeRuntimeRequirementsWithCatalog(m.RuntimeRequirements, catalog)
 	if runtimeRequirementsErr == nil {
 		runtimeRequirementsErr = validateRuntimeStarterTaskReferences(t.StarterTasks, runtimeRequirements)
 	}
@@ -590,30 +587,6 @@ func normalizeStarterTasks(tasks []StarterTask) []StarterTask {
 	return out
 }
 
-// normalizePinnedReaperScripts trims each starter pin ID and drops empties,
-// preserving order and duplicates as written — a hand-edited manifest listing
-// the same ID twice is the authoring layer's problem, not this loader's; the
-// pin service's own Reorder guard (internal/workspace/reaper_pins.go) is
-// where a duplicate would actually misbehave, and seeding calls Pin per ID
-// (itself a no-op on a repeat), so a duplicate here is harmless.
-func normalizePinnedReaperScripts(ids []string) []string {
-	if len(ids) == 0 {
-		return nil
-	}
-	out := make([]string, 0, len(ids))
-	for _, id := range ids {
-		id = strings.TrimSpace(id)
-		if id == "" {
-			continue
-		}
-		out = append(out, id)
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
-}
-
 // normalizeAddons trims each recommended-addon label and drops empties.
 func normalizeAddons(addons []string) []string {
 	if len(addons) == 0 {
@@ -656,6 +629,10 @@ func hasSkeletonFiles(dir string) bool {
 // (dot-prefixed) are skipped. A missing library directory yields an empty
 // list, not an error, so a fresh install works before anything is authored.
 func ListLibrary(dir string) ([]Template, error) {
+	return ListLibraryWithCatalog(dir, defaultRuntimeCatalog())
+}
+
+func ListLibraryWithCatalog(dir string, catalog RuntimeCatalog) ([]Template, error) {
 	dir = strings.TrimSpace(dir)
 	if dir == "" {
 		return nil, nil
@@ -674,7 +651,8 @@ func ListLibrary(dir string) ([]Template, error) {
 		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
 			continue
 		}
-		templates = append(templates, newTemplate(filepath.Join(dir, entry.Name())))
+		path := filepath.Join(dir, entry.Name())
+		templates = append(templates, newTemplateWithManifest(path, readManifest(path), catalog))
 	}
 
 	sort.Slice(templates, func(i, j int) bool { return templates[i].ID < templates[j].ID })
@@ -683,6 +661,10 @@ func ListLibrary(dir string) ([]Template, error) {
 
 // FindLibraryTemplate resolves a template ID against the library directory.
 func FindLibraryTemplate(dir, id string) (Template, error) {
+	return FindLibraryTemplateWithCatalog(dir, id, defaultRuntimeCatalog())
+}
+
+func FindLibraryTemplateWithCatalog(dir, id string, catalog RuntimeCatalog) (Template, error) {
 	id = strings.TrimSpace(id)
 	if id == "" || id != filepath.Base(id) || strings.HasPrefix(id, ".") {
 		return Template{}, fmt.Errorf("%w: %q", ErrTemplateNotFound, id)
@@ -693,13 +675,17 @@ func FindLibraryTemplate(dir, id string) (Template, error) {
 	if err != nil || !info.IsDir() {
 		return Template{}, fmt.Errorf("%w: %q", ErrTemplateNotFound, id)
 	}
-	return newTemplate(path), nil
+	return newTemplateWithManifest(path, readManifest(path), catalog), nil
 }
 
 // LoadFolder treats an arbitrary folder on disk as a template (the
 // "Choose folder…" escape hatch). It is handled identically to a library
 // template — including the optional manifest — but is not part of the library.
 func LoadFolder(path string) (Template, error) {
+	return LoadFolderWithCatalog(path, defaultRuntimeCatalog())
+}
+
+func LoadFolderWithCatalog(path string, catalog RuntimeCatalog) (Template, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
 		return Template{}, fmt.Errorf("%w: empty path", ErrTemplateNotFound)
@@ -713,5 +699,5 @@ func LoadFolder(path string) (Template, error) {
 	if err != nil || !info.IsDir() {
 		return Template{}, fmt.Errorf("%w: %q is not a folder", ErrTemplateNotFound, path)
 	}
-	return newTemplate(abs), nil
+	return newTemplateWithManifest(abs, readManifest(abs), catalog), nil
 }

@@ -30,7 +30,7 @@
         "label": "Local review control",
         "description": "Connect the approved local review application after creation.",
         "disclosure": "Ori will ask before granting the selected agent narrowly scoped local access.",
-        "adapter": "reaper_live_control"
+        "adapter": "test_runtime"
       }
     ]
   }

@@ -1,0 +1,364 @@
+{
+  "schema_version": 1,
+  "name": "workspace-surface-demo",
+  "version": "0.1.0",
+  "protocol": {
+    "min": 1,
+    "max": 1
+  },
+  "capabilities": [
+    {
+      "id": "demo-tools",
+      "version": 1,
+      "display": {
+        "name": "Surface Demo",
+        "description": "A harmless copyable Workspace Surface example."
+      },
+      "service_id": "demo-service",
+      "surfaces": [
+        {
+          "id": "main",
+          "label": "Surface Demo",
+          "description": "Open the harmless demo surface.",
+          "icon": {
+            "kind": "host",
+            "value": "puzzle"
+          },
+          "placement": "map_modal",
+          "entry_asset": "ui/index.html",
+          "modal": {
+            "width": 720,
+            "height": 560
+          },
+          "status_operation": "status.read",
+          "operations": ["status.read", "greeting.create", "setting.validate"],
+          "polling": {
+            "map_seconds": 5,
+            "open_seconds": 1
+          },
+          "host_intents": {
+            "ask_ori": {
+              "required_capabilities": ["demo_runtime"]
+            },
+            "open_setup": {
+              "provider_id": "demo-runtime"
+            },
+            "confirmation": true,
+            "state": true,
+            "close": true
+          }
+        }
+      ],
+      "agent_operations": ["greeting.create"],
+      "runtime_provider": {
+        "id": "demo-runtime",
+        "requirement_key": "demo_runtime",
+        "operations": {
+          "prerequisites": "runtime.prerequisites",
+          "readiness": "runtime.readiness",
+          "live_status": "runtime.live_status",
+          "verify": "runtime.verify",
+          "repair": "runtime.repair"
+        },
+        "scopes": ["plugin_data_write"]
+      }
+    }
+  ],
+  "services": [
+    {
+      "id": "demo-service",
+      "transport": "mcp_stdio",
+      "protocol_version": 1,
+      "entrypoint": {
+        "artifact_id": "demo-darwin-arm64",
+        "args": []
+      },
+      "artifacts": [
+        {
+          "id": "demo-darwin-arm64",
+          "os": "darwin",
+          "arch": "arm64",
+          "source": {
+            "kind": "bundled",
+            "path": "artifacts/demo-service.py"
+          },
+          "sha256": "7b93ae6f9a81853386f0e04c8db0f7be8ccc61e2d9b3957dc752d9dc2311ffba",
+          "size": 6022
+        },
+        {
+          "id": "demo-darwin-amd64",
+          "os": "darwin",
+          "arch": "amd64",
+          "source": {
+            "kind": "bundled",
+            "path": "artifacts/demo-service.py"
+          },
+          "sha256": "7b93ae6f9a81853386f0e04c8db0f7be8ccc61e2d9b3957dc752d9dc2311ffba",
+          "size": 6022
+        },
+        {
+          "id": "demo-linux-arm64",
+          "os": "linux",
+          "arch": "arm64",
+          "source": {
+            "kind": "bundled",
+            "path": "artifacts/demo-service.py"
+          },
+          "sha256": "7b93ae6f9a81853386f0e04c8db0f7be8ccc61e2d9b3957dc752d9dc2311ffba",
+          "size": 6022
+        },
+        {
+          "id": "demo-linux-amd64",
+          "os": "linux",
+          "arch": "amd64",
+          "source": {
+            "kind": "bundled",
+            "path": "artifacts/demo-service.py"
+          },
+          "sha256": "7b93ae6f9a81853386f0e04c8db0f7be8ccc61e2d9b3957dc752d9dc2311ffba",
+          "size": 6022
+        }
+      ],
+      "operations": [
+        {
+          "id": "status.read",
+          "input_schema": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": false
+          },
+          "output_schema": {
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": ["checking", "ready", "attention", "degraded", "unavailable", "disabled"],
+                "maxLength": 32
+              },
+              "value": {
+                "type": "string",
+                "maxLength": 160
+              },
+              "description": {
+                "type": "string",
+                "maxLength": 500
+              },
+              "checked_at": {
+                "type": "string",
+                "maxLength": 64
+              }
+            },
+            "required": ["state", "value", "description", "checked_at"],
+            "additionalProperties": false
+          },
+          "max_output_bytes": 4096,
+          "timeout_class": "fast",
+          "policy": "read_only",
+          "scopes": []
+        },
+        {
+          "id": "greeting.create",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80
+              }
+            },
+            "required": ["name"],
+            "additionalProperties": false
+          },
+          "output_schema": {
+            "type": "object",
+            "properties": {
+              "message": {
+                "type": "string",
+                "maxLength": 160
+              }
+            },
+            "required": ["message"],
+            "additionalProperties": false
+          },
+          "max_output_bytes": 4096,
+          "timeout_class": "fast",
+          "policy": "read_only",
+          "scopes": []
+        },
+        {
+          "id": "setting.validate",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              }
+            },
+            "required": ["enabled"],
+            "additionalProperties": false
+          },
+          "output_schema": {
+            "type": "object",
+            "properties": {
+              "accepted": {
+                "type": "boolean"
+              }
+            },
+            "required": ["accepted"],
+            "additionalProperties": false
+          },
+          "max_output_bytes": 4096,
+          "timeout_class": "normal",
+          "policy": "confirmation_required",
+          "scopes": []
+        },
+        {
+          "id": "runtime.prerequisites",
+          "input_schema": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": false
+          },
+          "output_schema": {
+            "type": "object",
+            "properties": {
+              "ready": {
+                "type": "boolean"
+              },
+              "summary": {
+                "type": "string",
+                "maxLength": 500
+              }
+            },
+            "required": ["ready", "summary"],
+            "additionalProperties": false
+          },
+          "max_output_bytes": 4096,
+          "timeout_class": "fast",
+          "policy": "read_only",
+          "scopes": []
+        },
+        {
+          "id": "runtime.readiness",
+          "input_schema": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": false
+          },
+          "output_schema": {
+            "type": "object",
+            "properties": {
+              "ready": {
+                "type": "boolean"
+              },
+              "summary": {
+                "type": "string",
+                "maxLength": 500
+              }
+            },
+            "required": ["ready", "summary"],
+            "additionalProperties": false
+          },
+          "max_output_bytes": 4096,
+          "timeout_class": "fast",
+          "policy": "read_only",
+          "scopes": []
+        },
+        {
+          "id": "runtime.live_status",
+          "input_schema": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": false
+          },
+          "output_schema": {
+            "type": "object",
+            "properties": {
+              "available": {
+                "type": "boolean"
+              },
+              "summary": {
+                "type": "string",
+                "maxLength": 500
+              }
+            },
+            "required": ["available", "summary"],
+            "additionalProperties": false
+          },
+          "max_output_bytes": 4096,
+          "timeout_class": "fast",
+          "policy": "read_only",
+          "scopes": []
+        },
+        {
+          "id": "runtime.verify",
+          "input_schema": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": false
+          },
+          "output_schema": {
+            "type": "object",
+            "properties": {
+              "verified": {
+                "type": "boolean"
+              },
+              "summary": {
+                "type": "string",
+                "maxLength": 500
+              }
+            },
+            "required": ["verified", "summary"],
+            "additionalProperties": false
+          },
+          "max_output_bytes": 4096,
+          "timeout_class": "normal",
+          "policy": "confirmation_required",
+          "scopes": ["plugin_data_write"]
+        },
+        {
+          "id": "runtime.repair",
+          "input_schema": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": false
+          },
+          "output_schema": {
+            "type": "object",
+            "properties": {
+              "repaired": {
+                "type": "boolean"
+              },
+              "summary": {
+                "type": "string",
+                "maxLength": 500
+              }
+            },
+            "required": ["repaired", "summary"],
+            "additionalProperties": false
+          },
+          "max_output_bytes": 4096,
+          "timeout_class": "normal",
+          "policy": "confirmation_required",
+          "scopes": ["plugin_data_write"]
+        }
+      ]
+    }
+  ],
+  "blueprints": [
+    {
+      "id": "demo-workspace",
+      "version": 1,
+      "manifest": "blueprints/demo-workspace/template.json",
+      "skeleton": "blueprints/demo-workspace/project",
+      "capabilities": ["demo-tools"]
+    }
+  ]
+}

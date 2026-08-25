@@ -34,6 +34,9 @@ const workspaceSharedDataProjectDirectoryIDKey = projecttemplates.ProjectDirecto
 // LoadFolder should not be exposed to untrusted callers without adding a
 // path allowlist/containment check.
 func (h *Handler) resolveProjectTemplate(templateID, templatePath string) (projecttemplates.Template, error) {
+	if h.projectTemplateResolver != nil {
+		return h.projectTemplateResolver(templateID, templatePath)
+	}
 	switch {
 	case strings.TrimSpace(templateID) != "":
 		if h.templatesRootResolver == nil {
@@ -218,6 +221,7 @@ func (h *Handler) instantiateWorkspaceProject(ctx context.Context, ws *session.W
 
 	projectDirID, err := projecttemplates.EnsureProjectDirectoryReference(folderWS, displayProjectName, folderPath, relPath)
 	if err != nil {
+		// #nosec G703 -- relPath is the validated in-root result returned by InstantiateTemplate.
 		_ = os.RemoveAll(filepath.Join(folderPath, relPath))
 		return projecttemplates.InstantiationResult{}, fmt.Errorf("failed to register project folder: %w", err)
 	}
@@ -235,6 +239,7 @@ func (h *Handler) instantiateWorkspaceProject(ctx context.Context, ws *session.W
 	}
 	folderWS.UpdatedAt = now
 	if err := h.workspaceStore.Save(folderWS); err != nil {
+		// #nosec G703 -- relPath is the validated in-root result returned by InstantiateTemplate.
 		_ = os.RemoveAll(filepath.Join(folderPath, relPath))
 		folderWS.ProjectPath = ""
 		return projecttemplates.InstantiationResult{}, fmt.Errorf("failed to persist project path: %w", err)

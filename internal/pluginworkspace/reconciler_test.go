@@ -8,6 +8,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/plugin"
 	"github.com/johnjallday/ori-agent/internal/workspace"
+	"github.com/johnjallday/ori-agent/internal/workspacecapability"
 )
 
 // fakePlugins is an in-memory PluginManager built from a temporary fixture set,
@@ -82,6 +83,76 @@ func skillNames(ws *workspace.Workspace) []string {
 
 func hasSkill(ws *workspace.Workspace, name string) bool {
 	return slices.Contains(skillNames(ws), strings.ToLower(name))
+}
+
+func contributedPluginCapability(t *testing.T, ws *workspace.Workspace) (plugin.InstalledPlugin, workspacecapability.Definition) {
+	t.Helper()
+	owner := workspace.CapabilityOwner{
+		Kind: workspace.CapabilityOwnerPlugin, PluginID: "demo-plugin", PluginVersion: "1.0.0",
+	}
+	if _, err := ws.AddInstalledCapability(workspace.InstalledCapability{
+		ID: "demo-tools", Version: 1, Source: workspace.InstallSourceInPlace, Owner: &owner,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	installed := plugin.InstalledPlugin{
+		Name: "demo-plugin", Version: "1.0.0", Enabled: true,
+		Skills: []string{"demo-skill"}, MCPServers: []string{"demo-plugin/demo-mcp"},
+		WorkspaceSurfaces: &plugin.SurfaceContribution{Capabilities: []plugin.ContributedCapability{{ID: "demo-tools", Version: 1}}},
+	}
+	definition := workspacecapability.Definition{
+		ID: "demo-tools", Version: 1, Owner: &owner,
+		Display: workspacecapability.Display{Name: "Demo Tools"},
+	}
+	return installed, definition
+}
+
+func TestCapabilityReconcileAttachesAndDetachesOnlyOwningPluginResources(t *testing.T) {
+	ws := newWS()
+	installed, definition := contributedPluginCapability(t, ws)
+	// A pre-existing user binding with the same skill is shared and must survive
+	// capability removal.
+	if err := ws.UpsertSkillBinding(workspace.SkillBinding{ID: "user-skill", SkillName: "demo-skill", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	store := &fakeStore{ws: ws}
+	reconciler := New(&fakePlugins{list: []plugin.InstalledPlugin{installed}}, store)
+	if err := reconciler.AttachCapability(ws.ID, definition); err != nil {
+		t.Fatal(err)
+	}
+	if !hasSkill(ws, "demo-skill") || len(ws.GetMCPBindings()) != 1 {
+		t.Fatalf("bindings after attach: skills=%+v mcp=%+v", ws.GetSkillBindings(), ws.GetMCPBindings())
+	}
+	record, _ := ws.GetInstalledCapability("demo-tools")
+	if len(record.OwnedResources) != 2 {
+		t.Fatalf("owned resources = %+v", record.OwnedResources)
+	}
+	if err := reconciler.DetachCapability(ws.ID, definition); err != nil {
+		t.Fatal(err)
+	}
+	if !hasSkill(ws, "demo-skill") {
+		t.Fatal("detach removed the user's shared skill binding")
+	}
+	if len(ws.GetMCPBindings()) != 0 {
+		t.Fatalf("detach left plugin-created MCP binding: %+v", ws.GetMCPBindings())
+	}
+}
+
+func TestCapabilityReconcileRejectsForeignWorkspaceAndDisabledOwner(t *testing.T) {
+	ws := newWS()
+	installed, definition := contributedPluginCapability(t, ws)
+	foreign := newWS()
+	foreign.ID = "foreign-workspace"
+	reconciler := New(&fakePlugins{list: []plugin.InstalledPlugin{installed}}, &fakeStore{ws: foreign})
+	if err := reconciler.AttachCapability(foreign.ID, definition); err == nil {
+		t.Fatal("foreign workspace without the owner-aware record was attached")
+	}
+
+	installed.Enabled = false
+	reconciler = New(&fakePlugins{list: []plugin.InstalledPlugin{installed}}, &fakeStore{ws: ws})
+	if err := reconciler.AttachCapability(ws.ID, definition); err == nil {
+		t.Fatal("disabled owning plugin was attached")
+	}
 }
 
 func TestReconcile_MissingPlugin(t *testing.T) {

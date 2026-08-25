@@ -75,7 +75,7 @@ type AgentStatistics struct {
 type AgentRoutingProfile struct {
 	MatchPhrases    []string `json:"match_phrases,omitempty"`    // High-signal phrases that should strongly match this agent
 	ExampleRequests []string `json:"example_requests,omitempty"` // Example user requests this agent should handle
-	Domains         []string `json:"domains,omitempty"`          // User-defined domains or topics such as "reaper" or "tax"
+	Domains         []string `json:"domains,omitempty"`          // User-defined domains or topics such as "audio" or "tax"
 	ExternalSystems []string `json:"external_systems,omitempty"` // External apps or services this agent can operate on
 	SideEffects     string   `json:"side_effects,omitempty"`     // none, local_app, external_account, destructive, etc.
 }

@@ -48,7 +48,6 @@ import (
 	"github.com/johnjallday/ori-agent/internal/pluginhttp"
 	"github.com/johnjallday/ori-agent/internal/pluginworkspace"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
-	"github.com/johnjallday/ori-agent/internal/reapersetup"
 	"github.com/johnjallday/ori-agent/internal/review"
 	"github.com/johnjallday/ori-agent/internal/reviewhttp"
 	"github.com/johnjallday/ori-agent/internal/runtimecapability"
@@ -310,7 +309,7 @@ func (b *ServerBuilder) initializeHandlers() {
 		// The mailbox read/link/send runtime depends on b.workspaceStore, which is
 		// still nil at this phase (Phase 17). Stash the vault store and defer that
 		// wiring to wireMailboxRuntime, called after the workspace store exists
-		// (Phase 18) — same reason wireReaperSetup is deferred.
+		// (Phase 18).
 		b.vaultStore = vaultStore
 		logger.Info("Vault system initialized", logger.Fields{})
 	}
@@ -588,6 +587,9 @@ func (b *ServerBuilder) initializeHandlers() {
 	// (skills / MCP servers / plugins) at creation, applying only what is present.
 	// The applier reads the SyncStore + MCP config lazily at request time.
 	if b.sessionHandler != nil {
+		if b.pluginHandler != nil {
+			b.sessionHandler.SetInstalledPluginLister(b.pluginHandler.Manager())
+		}
 		b.sessionHandler.SetTemplateToolApplier(makeTemplateToolApplier(b))
 		b.sessionHandler.SetAgentToolApplier(makeAgentToolApplier(b))
 	}
@@ -615,8 +617,8 @@ func (b *ServerBuilder) reconcileWorkspaceDesignations(ctx context.Context) erro
 // store against it, so pre-existing workspaces and a portable Personal HQ marker
 // appear without a restart.
 //
-// Like wireReaperSetup, it must run AFTER the folder store exists (Phase 18);
-// during initializeHandlers (Phase 17) the session handler has no folder store
+// This must run AFTER the folder store exists (Phase 18); during
+// initializeHandlers (Phase 17) the session handler has no folder store
 // yet and the callback would apply roots to nothing.
 //
 // The session handler's context is deliberately Background: the reconciles write
@@ -641,31 +643,8 @@ func (b *ServerBuilder) wireWorkspaceRootUpdater() {
 	})
 }
 
-// wireReaperSetup wires the normalized REAPER readiness resolver, pre-create
-// preview lister, shared reconciler, and repairer onto the session handler so the
-// create modal, workspace UI, and repair all read one truthful model backed by
-// the configured plugin manager and synchronized workspace store.
-//
-// It must be called AFTER the workspace store exists (Phase 18), not during
-// initializeHandlers (Phase 17) where b.workspaceStore is still nil — otherwise
-// every REAPER endpoint stays nil-guarded and the create preview always reports
-// plugin_missing.
-func (b *ServerBuilder) wireReaperSetup() {
-	if b.sessionHandler == nil || b.pluginHandler == nil || b.workspaceStore == nil {
-		return
-	}
-	reconciler := pluginworkspace.New(b.pluginHandler.Manager(), b.workspaceStore)
-	resolver := reapersetup.NewResolver(b.workspaceStore, reconciler)
-	repairer := reapersetup.NewRepairer(b.workspaceStore, reconciler, resolver)
-	b.sessionHandler.SetReaperSetup(resolver, b.pluginHandler.Manager(), reconciler, repairer)
-	// Held for the Setup Wizard's REAPER adapter, which reads the same resolver
-	// the readiness panel and the repair flow do.
-	b.reaperResolver = resolver
-	b.reaperPluginInspector = reconciler
-}
-
-// wireCalendarOpsSetup constructs the Calendar Ops guided-setup handler. Like
-// wireReaperSetup, this must run AFTER the workspace store exists (Phase 18),
+// wireCalendarOpsSetup constructs the Calendar Ops guided-setup handler. It
+// must run AFTER the workspace store exists (Phase 18),
 // not during initializeHandlers (Phase 17) where b.workspaceStore is still
 // nil -- the handler needs it as its FolderStore.
 //
@@ -694,7 +673,7 @@ func (b *ServerBuilder) wireCalendarOpsSetup() {
 }
 
 // wireDownloadsJanitor constructs the Downloads Janitor service and handler.
-// Like wireReaperSetup/wireCalendarOpsSetup it runs in the workspace-store
+// Like wireCalendarOpsSetup it runs in the workspace-store
 // phase (18) rather than initializeHandlers (17): the service needs the
 // composed workspace store to record the approved folder's directory reference
 // and read-only MCP binding, and the folder store to resolve where each
@@ -750,6 +729,9 @@ func (b *ServerBuilder) wireWorkspaceCapabilities() {
 	}
 
 	service := workspacecapability.NewService(registry, b.workspaceStore)
+	if b.pluginHandler != nil {
+		service.SetPluginComponentReconciler(pluginworkspace.New(b.pluginHandler.Manager(), b.workspaceStore))
+	}
 	// Companion creation belongs to the layer that owns the agent store; the
 	// capability service only decides whether one is wanted. Without this the
 	// offer reports itself unavailable rather than failing obscurely.
@@ -757,6 +739,9 @@ func (b *ServerBuilder) wireWorkspaceCapabilities() {
 		service.SetCompanionProvisioner(sessionhttp.NewCapabilityCompanionProvisioner(b.sessionHandler))
 	}
 	b.workspaceCapabilityService = service
+	if b.sessionHandler != nil {
+		b.sessionHandler.SetTemplateCapabilityService(service)
+	}
 	b.workspaceCapabilityHandler = workspacecapabilityhttp.NewHandler(service, b.workspaceStore, b.userProvider)
 
 	b.backfillLegacyCapabilities(registry, legacyProbe)
@@ -852,15 +837,12 @@ func (b *ServerBuilder) wireRuntimeCapabilities() {
 	b.runtimeCapabilityService = service
 	b.runtimeCapabilityHandler = runtimecapabilityhttp.NewHandler(service, b.workspaceStore, b.userProvider)
 	b.runtimeCapabilityHandler.SetGrantDelegator(service)
-	if b.sessionHandler != nil {
-		b.sessionHandler.SetReaperRuntimeService(service)
-	}
 }
 
 // wireSetupWizard constructs the shared blueprint Setup Wizard: its compiled
 // adapter registry, the lifecycle service, and the workspace-scoped HTTP
 // handler. It runs in the workspace-store phase (18) for the same reason as
-// wireReaperSetup/wireCalendarOpsSetup — the service reads and writes the
+// wireCalendarOpsSetup — the service reads and writes the
 // workspace's canonical folder record, which does not exist until this phase.
 //
 // The store must expose GetFolderWorkspace: the wizard snapshot and its
@@ -897,11 +879,6 @@ func (b *ServerBuilder) wireSetupWizard() {
 			}
 		}
 	}
-	if b.reaperResolver != nil {
-		if err := registry.Register(reapersetup.NewSetupAdapter(b.reaperResolver)); err != nil {
-			logger.Warn("Reaper Song setup adapter not registered", logger.Fields{"error": err})
-		}
-	}
 	if b.downloadsJanitorService != nil {
 		adapter := downloadsjanitor.NewSetupAdapter(b.downloadsJanitorService)
 		b.downloadsJanitorSetupAdapter = adapter
@@ -923,9 +900,6 @@ func (b *ServerBuilder) wireSetupWizard() {
 		service.SetCompletionHook(func(_ context.Context, workspaceID string) {
 			sessionHandler.CompleteSetupHelpTaskOnWizardReady(workspaceID)
 		})
-		service.SetMigrationHook(func(_ context.Context, workspaceID string) {
-			sessionHandler.SupersedeLegacyReaperSetupHelpTask(workspaceID)
-		})
 	}
 }
 
@@ -943,7 +917,10 @@ func (b *ServerBuilder) blueprintWizardLookup() setupwizard.BlueprintLookup {
 		if strings.TrimSpace(root) == "" {
 			return setupwizard.Blueprint{}, false
 		}
-		tpl, err := projecttemplates.FindLibraryTemplate(root, templateID)
+		tpl, err := projecttemplates.FindLibraryTemplateWithCatalog(root, templateID, templateRuntimeCatalog{
+			capabilities: b.workspaceCapabilityRegistry,
+			runtimes:     b.runtimeCapabilityRegistry,
+		})
 		if err != nil || !tpl.HasSetupWizard() || tpl.HasInvalidSetupWizard() {
 			return setupwizard.Blueprint{}, false
 		}
@@ -958,9 +935,6 @@ func (b *ServerBuilder) blueprintWizardLookup() setupwizard.BlueprintLookup {
 			CapabilityRequirements: tpl.CapabilityRequirements,
 			Plugins:                tpl.Tools.Plugins,
 			PluginSources:          tpl.Tools.PluginSources,
-		}
-		if tpl.Builtin && tpl.ID == reapersetup.ReaperSongTemplateID {
-			blueprint.RuntimeMigration = reapersetup.PlanLegacyRuntimeMigration
 		}
 		return blueprint, true
 	}
@@ -1013,7 +987,7 @@ func (c janitorToolCaller) CallTool(ctx context.Context, serverName, toolName st
 // b.workspaceOrchestrator does not exist until initializeWorkspaceOrchestrator
 // (Phase 22), which runs after the workspace-store phase (18) where
 // wireCalendarOpsSetup itself is called -- same later-phase-dependency
-// pattern as wireReaperSetup/wireCalendarOpsSetup's own doc comment describes.
+// pattern described by the other workspace-backed services.
 func (b *ServerBuilder) wireCalendarOpsPrepTaskExecutor() {
 	if b.calendarOpsHandler == nil || b.workspaceOrchestrator == nil {
 		return
@@ -1330,6 +1304,7 @@ func detectDefaultBraveExecutablePath() string {
 		if candidate == "" {
 			continue
 		}
+		// #nosec G703 -- candidates are fixed browser install locations plus the OS-owned ProgramFiles roots.
 		if _, err := os.Stat(candidate); err == nil {
 			return candidate
 		}

@@ -3917,6 +3917,39 @@ test('the rail click delegation dispatches HQ station rows through the registry 
 // capability catalog — never from the workspace's name, template, folder, or
 // agents (FR-93, FR-94). `catalogItem` is the catalog entry this workspace
 // would get back from GET /api/workspaces/{id}/capabilities.
+function installJanitorStationAdapter(target) {
+  target.WorkspaceBuiltinStationAdapters = [
+    {
+      key: 'file-janitor',
+      station() {
+        const item = target.WorkspaceCapabilities?.find?.('file-janitor');
+        if (!item?.installed || item.available === false) return null;
+        const status = item.status || {};
+        const folder = status.folder_display_name || '';
+        return {
+          key: 'file-janitor',
+          label: folder ? 'File Janitor · ' + folder : 'File Janitor',
+          icon: 'bi-folder-symlink',
+          state: () =>
+            target.FileJanitorConsole?.stationState?.() || {
+              applies: true,
+              value: status.detail || '',
+              description: status.detail || '',
+              tone: status.state === 'needs_attention' ? 'degraded' : ''
+            },
+          action: trigger => {
+            if (target.FileJanitorConsole?.open) {
+              target.FileJanitorConsole.open({ source: 'map-station', trigger });
+            } else {
+              target.WorkspaceCapabilities?.onOpen?.('file-janitor', trigger);
+            }
+          }
+        };
+      }
+    }
+  ];
+}
+
 function janitorCommandView(catalogItem) {
   const commandView = Object.create(WorkspaceCommandView.prototype);
   Object.assign(commandView, {
@@ -3935,6 +3968,7 @@ function janitorCommandView(catalogItem) {
       find: id => (id === 'file-janitor' ? catalogItem : null)
     }
   };
+  installJanitorStationAdapter(globalThis.window);
   return commandView;
 }
 
@@ -4039,6 +4073,7 @@ test('pressing the File Janitor station opens the console in place', () => {
         open: options => opens.push(options)
       }
     };
+    installJanitorStationAdapter(globalThis.window);
     commandView.runHQStationAction('file-janitor', trigger);
     assert.equal(opens.length, 1, 'the station must lead somewhere, not just report state');
     assert.equal(
@@ -4079,6 +4114,7 @@ test('the File Janitor station never scrolls to an inline mount', () => {
         }
       }
     };
+    installJanitorStationAdapter(globalThis.window);
     commandView.runHQStationAction('file-janitor', null);
     assert.equal(focusedInline, 0, 'the scroll-to-inline behavior must be gone');
     assert.equal(openedViaCatalog, 1, 'the station must never be a dead end');
@@ -4110,6 +4146,7 @@ test('the File Janitor station shows live console state over the catalog snapsho
         })
       }
     };
+    installJanitorStationAdapter(globalThis.window);
     const station = commandView.workspaceStationRegistry()[0];
     assert.equal(station.state().value, '3 files ready for review');
   } finally {
@@ -4131,6 +4168,7 @@ test('the File Janitor station falls back to the catalog snapshot', () => {
         find: () => installedFileJanitor({ state: 'needs_attention', detail: 'Folder missing.' })
       }
     };
+    installJanitorStationAdapter(globalThis.window);
     const station = commandView.workspaceStationRegistry()[0];
     assert.equal(station.state().value, 'Folder missing.');
     assert.equal(station.state().tone, 'degraded');
@@ -4139,120 +4177,33 @@ test('the File Janitor station falls back to the catalog snapshot', () => {
   }
 });
 
-function reaperRuntimeWorkspace(selectedMode = 'ori_assisted') {
-  return {
-    id: 'ws-reaper',
-    runtime_state: { selected_mode_id: selectedMode },
-    template_provenance: {
-      runtime_requirements: {
-        schema_version: 1,
-        operating_modes: [
-          { id: 'file_only', requires: [] },
-          { id: 'ori_assisted', requires: ['reaper_live_control'] }
-        ],
-        requirements: [{ key: 'reaper_live_control', adapter: 'reaper_live_control' }]
-      }
-    }
-  };
-}
-
-test('the REAPER station is gated only by the persisted assisted runtime record', () => {
-  const originalWindow = globalThis.window;
-  try {
-    globalThis.window = {
-      ReaperConsole: {
-        stationState: () => ({
-          applies: true,
-          value: '120 BPM · 3 tracks · stopped',
-          description: 'Song — 120 BPM · 3 tracks · stopped',
-          tone: 'clear'
-        })
-      }
-    };
-    const commandView = Object.create(WorkspaceCommandView.prototype);
-    Object.assign(commandView, { page: { workspace: reaperRuntimeWorkspace(), tasks: [] } });
-    const station = commandView.workspaceStationRegistry().find(item => item.key === 'reaper');
-    assert.ok(station);
-    assert.equal(station.state().value, '120 BPM · 3 tracks · stopped');
-  } finally {
-    globalThis.window = originalWindow;
-  }
-});
-
-test('the canonical state endpoint can gate REAPER when the detail projection omits runtime metadata', () => {
-  const originalWindow = globalThis.window;
-  try {
-    globalThis.window = {
-      ReaperConsole: {
-        applies: () => true,
-        stationState: () => ({
-          applies: true,
-          value: '120 BPM · 3 tracks · stopped',
-          description: 'Live state',
-          tone: 'clear'
-        })
-      }
-    };
-    const commandView = Object.create(WorkspaceCommandView.prototype);
-    Object.assign(commandView, { page: { workspace: { id: 'ws-reaper' }, tasks: [] } });
-    assert.equal(
-      commandView.workspaceStationRegistry().some(item => item.key === 'reaper'),
-      true
-    );
-  } finally {
-    globalThis.window = originalWindow;
-  }
-});
-
-test('REAPER-looking names tags folders templates and agents cannot invent a station', () => {
-  const originalWindow = globalThis.window;
-  try {
-    globalThis.window = { ReaperConsole: { stationState: () => ({ applies: true }) } };
-    const commandView = Object.create(WorkspaceCommandView.prototype);
-    Object.assign(commandView, {
-      page: {
-        workspace: {
-          id: 'ws-fake',
-          name: 'REAPER Song',
-          tags: ['reaper'],
-          project_path: 'song.rpp',
-          template_provenance: { template_id: 'reaper-song' },
-          agents: [{ name: 'Reaper Producer' }]
-        },
-        tasks: []
-      }
-    });
-    assert.equal(
-      commandView.workspaceStationRegistry().some(item => item.key === 'reaper'),
-      false
-    );
-
-    commandView.page.workspace = reaperRuntimeWorkspace('file_only');
-    assert.equal(
-      commandView.workspaceStationRegistry().some(item => item.key === 'reaper'),
-      false
-    );
-  } finally {
-    globalThis.window = originalWindow;
-  }
-});
-
-test('pressing the REAPER station opens its console over the map', () => {
+test('plugin stations are consumed from the generic surface host without name conditionals', () => {
   const originalWindow = globalThis.window;
   try {
     const opens = [];
     globalThis.window = {
-      ReaperConsole: {
-        stationState: () => ({ applies: true, value: 'Connected', description: 'Connected' }),
-        open: options => opens.push(options)
+      WorkspaceSurfaceHost: {
+        stations: () => [
+          {
+            key: 'plugin:weather-tools:forecast:main',
+            label: 'Forecast',
+            icon: 'bi-cloud-sun',
+            state: () => ({ applies: true, value: 'Clear', description: 'Clear skies' }),
+            action: trigger => opens.push(trigger)
+          }
+        ]
       }
     };
     const commandView = Object.create(WorkspaceCommandView.prototype);
-    Object.assign(commandView, { page: { workspace: reaperRuntimeWorkspace(), tasks: [] } });
-    const trigger = { id: 'reaper-station' };
-    commandView.runHQStationAction('reaper', trigger);
-    assert.equal(opens.length, 1);
-    assert.equal(opens[0].trigger, trigger);
+    Object.assign(commandView, { page: { workspace: { id: 'ws-plugin' }, tasks: [] } });
+    const station = commandView
+      .workspaceStationRegistry()
+      .find(item => item.key === 'plugin:weather-tools:forecast:main');
+    assert.ok(station);
+    assert.equal(station.label, 'Forecast');
+    const trigger = { id: 'forecast-station' };
+    commandView.runHQStationAction(station.key, trigger);
+    assert.deepEqual(opens, [trigger]);
   } finally {
     globalThis.window = originalWindow;
   }

@@ -1,0 +1,9 @@
+{
+  "name": "workspace-surface-demo",
+  "version": "0.1.0",
+  "description": "A small copyable Workspace Surface v1 example",
+  "interface": {
+    "displayName": "Workspace Surface Demo",
+    "shortDescription": "Copyable Workspace Surface v1 example"
+  }
+}

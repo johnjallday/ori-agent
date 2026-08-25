@@ -7,6 +7,8 @@
 // gRPC plugin system is not revived here.
 package plugin
 
+import "github.com/johnjallday/ori-agent/internal/projecttemplates"
+
 // SourceFormat identifies which external plugin packaging format a bundle uses.
 type SourceFormat string
 
@@ -32,10 +34,24 @@ type PluginDescriptor struct {
 	SourceLocation string       `json:"source_location,omitempty"`
 	InstallDir     string       `json:"install_dir"`
 
-	MCPServers  []MCPServerSpec        `json:"mcp_servers,omitempty"`
-	Skills      []SkillSpec            `json:"skills,omitempty"`
-	Interface   *InterfaceMetadata     `json:"interface,omitempty"`
-	Unsupported []UnsupportedComponent `json:"unsupported,omitempty"`
+	MCPServers         []MCPServerSpec        `json:"mcp_servers,omitempty"`
+	Skills             []SkillSpec            `json:"skills,omitempty"`
+	Interface          *InterfaceMetadata     `json:"interface,omitempty"`
+	WorkspaceSurfaces  *SurfaceContribution   `json:"workspace_surfaces,omitempty"`
+	ResolvedBlueprints []ResolvedBlueprint    `json:"resolved_blueprints,omitempty"`
+	TrustedAssetDigest string                 `json:"trusted_asset_digest,omitempty"`
+	Unsupported        []UnsupportedComponent `json:"unsupported,omitempty"`
+}
+
+// ResolvedBlueprint is the install-time validated trusted blueprint component.
+// SkeletonRoot is global trusted state and is never copied into a workspace.
+type ResolvedBlueprint struct {
+	ID             string                    `json:"id"`
+	QualifiedID    string                    `json:"qualified_id"`
+	Version        int                       `json:"version"`
+	Template       projecttemplates.Template `json:"template"`
+	SkeletonRoot   string                    `json:"skeleton_root"`
+	SkeletonDigest string                    `json:"skeleton_digest"`
 }
 
 // MCPServerSpec is one MCP server declared by a plugin, before resolution to a

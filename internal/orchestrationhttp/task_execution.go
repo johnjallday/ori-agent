@@ -1006,7 +1006,7 @@ func (th *TaskHandler) executeTaskWithDependencies(ws *workspace.Workspace, task
 		if err := fallbackRun.Commit(); err != nil {
 			execErr = fileFallbackBlocked(fallbackCapability)
 		} else {
-			result = "Completed as an explicitly confirmed project-file change; live REAPER state was not verified.\n\n" + strings.TrimSpace(result)
+			result = "Completed as an explicitly confirmed project-file change; live application state was not verified.\n\n" + strings.TrimSpace(result)
 		}
 	}
 

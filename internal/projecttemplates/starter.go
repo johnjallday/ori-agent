@@ -49,7 +49,7 @@ var builtinStarterIDs = func() map[string]struct{} {
 // IsBuiltinStarterID reports whether id is a shipped built-in starter template.
 // It lets the listing layer mark a shipped template as built-in even on installs
 // whose on-disk copy predates the builtin flag (EnsureLibrary never overwrites
-// an existing folder, so an old reaper-song/writing-project won't carry it).
+// an existing folder, so an older built-in starter won't carry it).
 func IsBuiltinStarterID(id string) bool {
 	_, ok := builtinStarterIDs[id]
 	return ok

@@ -212,6 +212,21 @@ func (s *Service) Remove(workspaceID, capabilityID string, opts RemoveOptions) (
 		}
 	}
 
+	if resolved.Definition.Owner != nil {
+		if s.plugins == nil {
+			return RemovalResult{}, &Error{
+				Code: CodeRemovalIncomplete, Message: "Ori could not detach this capability's plugin components.",
+				Repair: "Enable or reinstall the owning plugin, then try again.",
+			}
+		}
+		if detachErr := s.plugins.DetachCapability(workspaceID, resolved.Definition); detachErr != nil {
+			return RemovalResult{}, &Error{
+				Code: CodeRemovalIncomplete, Message: "Ori could not detach this capability's plugin components.",
+				Repair: "Try removing it again.", Err: detachErr,
+			}
+		}
+	}
+
 	result := RemovalResult{}
 
 	// 3. Companion, only when the user made that separate choice AND the

@@ -97,6 +97,37 @@ func newTestService(t *testing.T, store WorkspaceStore) *Service {
 	return NewService(mustBuiltinRegistry(t), store)
 }
 
+type noOpPluginComponents struct{}
+
+func (noOpPluginComponents) AttachCapability(string, Definition) error { return nil }
+func (noOpPluginComponents) DetachCapability(string, Definition) error { return nil }
+
+func TestService_PluginInstallPersistsOnlyInertOwnerProvenance(t *testing.T) {
+	store := newMemStore(testWorkspace())
+	registry := mustBuiltinRegistry(t)
+	owner := pluginCapabilityOwner("weather-tools", "1.2.0")
+	if err := registry.RegisterPluginDefinitions(owner, []Definition{pluginCapabilityDefinition(owner, "forecast")}); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewService(registry, store)
+	svc.SetPluginComponentReconciler(noOpPluginComponents{})
+	result, err := svc.Install(InstallRequest{WorkspaceID: "ws-1", CapabilityID: "forecast"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Record.Owner == nil || !result.Record.Owner.MatchesPlugin("weather-tools") || result.Record.Owner.PluginVersion != "1.2.0" {
+		t.Fatalf("installed owner = %+v", result.Record.Owner)
+	}
+	stored, err := store.Get("ws-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, ok := stored.GetInstalledCapability("forecast")
+	if !ok || record.Owner == nil || !record.Owner.MatchesPlugin("weather-tools") {
+		t.Fatalf("stored plugin capability = %+v, %v", record, ok)
+	}
+}
+
 func TestService_CatalogListsFileJanitorAsAvailableAndNotInstalled(t *testing.T) {
 	svc := newTestService(t, newMemStore(testWorkspace()))
 

@@ -38,9 +38,7 @@ const (
 // runtime adapter IDs. Values are lookup keys only; manifests cannot provide
 // implementation packages, paths, commands, or endpoints. A parity test with
 // the runtime registry keeps this list resolvable as adapters are introduced.
-var ValidRuntimeRequirementAdapters = []string{
-	"reaper_live_control",
-}
+var ValidRuntimeRequirementAdapters = []string{}
 
 type runtimeRequirementsDecl struct {
 	SchemaVersion  int                        `json:"schema_version"`
@@ -68,6 +66,10 @@ type runtimeRequirementDecl struct {
 // dropping a script, URL, path, or custom component would leave an author
 // believing behavior was active when the safe contract never supports it.
 func normalizeRuntimeRequirements(raw json.RawMessage) (*RuntimeRequirementsContract, error) {
+	return normalizeRuntimeRequirementsWithCatalog(raw, defaultRuntimeCatalog())
+}
+
+func normalizeRuntimeRequirementsWithCatalog(raw json.RawMessage, catalog RuntimeCatalog) (*RuntimeRequirementsContract, error) {
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
 		return nil, nil
@@ -79,7 +81,7 @@ func normalizeRuntimeRequirements(raw json.RawMessage) (*RuntimeRequirementsCont
 	if err := decoder.Decode(&declaration); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidRuntimeRequirements, err)
 	}
-	if err := validateRuntimeRequirements(&declaration); err != nil {
+	if err := validateRuntimeRequirementsWithCatalog(&declaration, catalog); err != nil {
 		return nil, err
 	}
 
@@ -109,7 +111,7 @@ func normalizeRuntimeRequirements(raw json.RawMessage) (*RuntimeRequirementsCont
 			Label:       strings.TrimSpace(requirement.Label),
 			Description: strings.TrimSpace(requirement.Description),
 			Disclosure:  strings.TrimSpace(requirement.Disclosure),
-			Adapter:     workspace.NormalizeRuntimeIdentifier(requirement.Adapter),
+			Adapter:     workspace.NormalizeRuntimeAdapterID(requirement.Adapter),
 		})
 	}
 	return contract, nil
@@ -125,13 +127,21 @@ func validateRuntimeStarterTaskReferences(tasks []StarterTask, contract *Runtime
 		required := workspace.NormalizeCapabilityKeys(task.Requires)
 		for _, rawKey := range task.Requires {
 			key := workspace.NormalizeRuntimeIdentifier(rawKey)
-			if key == "" || !slices.Contains(ValidRuntimeRequirementAdapters, key) {
+			if key == "" {
 				continue
 			}
-			if contract == nil {
-				return fmt.Errorf("%w: starter task %q references runtime requirement %q, but the blueprint declares no runtime_requirements contract", ErrInvalidRuntimeRequirements, task.Description, key)
+			if contract != nil {
+				if _, declared := contract.Requirement(key); declared {
+					continue
+				}
 			}
-			if _, declared := contract.Requirement(key); !declared {
+			// Only compiled authoring keys are unambiguously runtime-shaped when
+			// no contract declares them. Plugin capability keys are interpreted
+			// through the injected catalog and contract, never a global name list.
+			if slices.Contains(ValidRuntimeRequirementAdapters, key) {
+				if contract == nil {
+					return fmt.Errorf("%w: starter task %q references runtime requirement %q, but the blueprint declares no runtime_requirements contract", ErrInvalidRuntimeRequirements, task.Description, key)
+				}
 				return fmt.Errorf("%w: starter task %q references undeclared runtime requirement %q", ErrInvalidRuntimeRequirements, task.Description, key)
 			}
 		}
@@ -140,7 +150,7 @@ func validateRuntimeStarterTaskReferences(tasks []StarterTask, contract *Runtime
 			if key == "" || !slices.Contains(required, key) {
 				return fmt.Errorf("%w: starter task %q file fallback %q must also be a required capability", ErrInvalidRuntimeRequirements, task.Description, rawKey)
 			}
-			if !slices.Contains(ValidRuntimeRequirementAdapters, key) || contract == nil {
+			if contract == nil {
 				return fmt.Errorf("%w: starter task %q file fallback %q is not a declared runtime requirement", ErrInvalidRuntimeRequirements, task.Description, key)
 			}
 			if _, declared := contract.Requirement(key); !declared {
@@ -152,6 +162,10 @@ func validateRuntimeStarterTaskReferences(tasks []StarterTask, contract *Runtime
 }
 
 func validateRuntimeRequirements(declaration *runtimeRequirementsDecl) error {
+	return validateRuntimeRequirementsWithCatalog(declaration, defaultRuntimeCatalog())
+}
+
+func validateRuntimeRequirementsWithCatalog(declaration *runtimeRequirementsDecl, catalog RuntimeCatalog) error {
 	if declaration == nil {
 		return nil
 	}
@@ -190,12 +204,13 @@ func validateRuntimeRequirements(declaration *runtimeRequirementsDecl) error {
 		if err := validateRuntimeText(fmt.Sprintf("requirement %q disclosure", key), requirement.Disclosure, maxRuntimeDisclosureLength, false); err != nil {
 			return err
 		}
-		adapter := strings.ToLower(strings.TrimSpace(requirement.Adapter))
-		if adapter == "" {
+		rawAdapter := strings.ToLower(strings.TrimSpace(requirement.Adapter))
+		if rawAdapter == "" {
 			return fmt.Errorf("%w: requirement %q must name a registered adapter", ErrInvalidRuntimeRequirements, key)
 		}
-		if !slices.Contains(ValidRuntimeRequirementAdapters, adapter) {
-			return fmt.Errorf("%w: requirement %q names unregistered adapter %q; registered adapters are %s", ErrInvalidRuntimeRequirements, key, adapter, strings.Join(ValidRuntimeRequirementAdapters, ", "))
+		adapter := workspace.NormalizeRuntimeAdapterID(rawAdapter)
+		if adapter == "" || catalog == nil || !catalog.HasRuntimeAdapter(adapter) {
+			return fmt.Errorf("%w: requirement %q names unregistered adapter %q", ErrInvalidRuntimeRequirements, key, rawAdapter)
 		}
 	}
 

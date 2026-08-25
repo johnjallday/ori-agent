@@ -1,0 +1,174 @@
+{
+  "messages": [
+    {
+      "from": "host",
+      "message": {
+        "protocol_version": 1,
+        "bridge_id": "bridge-demo-1",
+        "type": "ori.surface.challenge",
+        "request_id": "handshake-1",
+        "payload": {
+          "challenge": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "surface": {
+            "plugin_id": "workspace-surface-demo",
+            "capability_id": "demo-tools",
+            "surface_id": "main"
+          }
+        }
+      }
+    },
+    {
+      "from": "frame",
+      "message": {
+        "protocol_version": 1,
+        "bridge_id": "bridge-demo-1",
+        "type": "ori.surface.ready",
+        "request_id": "handshake-1",
+        "payload": {
+          "challenge": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "sdk_version": "1.0.0",
+          "supported_protocols": [
+            1
+          ]
+        }
+      }
+    },
+    {
+      "from": "host",
+      "message": {
+        "protocol_version": 1,
+        "bridge_id": "bridge-demo-1",
+        "type": "ori.surface.init",
+        "request_id": "handshake-1",
+        "payload": {
+          "surface": {
+            "key": "plugin:workspace-surface-demo:demo-tools:main",
+            "label": "Surface Demo"
+          },
+          "features": {
+            "confirmation": true,
+            "state": true,
+            "ask_ori": true,
+            "open_setup": true,
+            "close": true
+          }
+        }
+      }
+    },
+    {
+      "from": "frame",
+      "message": {
+        "protocol_version": 1,
+        "bridge_id": "bridge-demo-1",
+        "type": "ori.surface.operation.invoke",
+        "request_id": "operation-1",
+        "payload": {
+          "operation_id": "greeting.create",
+          "input": {
+            "name": "Ori"
+          }
+        }
+      }
+    },
+    {
+      "from": "host",
+      "message": {
+        "protocol_version": 1,
+        "bridge_id": "bridge-demo-1",
+        "type": "ori.surface.response",
+        "request_id": "operation-1",
+        "payload": {
+          "ok": true,
+          "result": {
+            "message": "Hello, Ori."
+          }
+        }
+      }
+    },
+    {
+      "from": "frame",
+      "message": {
+        "protocol_version": 1,
+        "bridge_id": "bridge-demo-1",
+        "type": "ori.surface.state.get",
+        "request_id": "state-1",
+        "payload": {
+          "key": "display"
+        }
+      }
+    },
+    {
+      "from": "host",
+      "message": {
+        "protocol_version": 1,
+        "bridge_id": "bridge-demo-1",
+        "type": "ori.surface.response",
+        "request_id": "state-1",
+        "payload": {
+          "ok": true,
+          "result": {
+            "found": false,
+            "revision": "0"
+          }
+        }
+      }
+    },
+    {
+      "from": "frame",
+      "message": {
+        "protocol_version": 1,
+        "bridge_id": "bridge-demo-1",
+        "type": "ori.surface.state.set",
+        "request_id": "state-2",
+        "payload": {
+          "key": "display",
+          "schema_version": 1,
+          "expected_revision": "0",
+          "value": null
+        }
+      }
+    },
+    {
+      "from": "frame",
+      "message": {
+        "protocol_version": 1,
+        "bridge_id": "bridge-demo-1",
+        "type": "ori.surface.host.ask_ori",
+        "request_id": "ask-1",
+        "payload": {
+          "context": "Explain the current demo status."
+        }
+      }
+    },
+    {
+      "from": "frame",
+      "message": {
+        "protocol_version": 1,
+        "bridge_id": "bridge-demo-1",
+        "type": "ori.surface.host.open_setup",
+        "request_id": "setup-1",
+        "payload": {}
+      }
+    },
+    {
+      "from": "frame",
+      "message": {
+        "protocol_version": 1,
+        "bridge_id": "bridge-demo-1",
+        "type": "ori.surface.status_changed",
+        "request_id": "status-1",
+        "payload": {}
+      }
+    },
+    {
+      "from": "frame",
+      "message": {
+        "protocol_version": 1,
+        "bridge_id": "bridge-demo-1",
+        "type": "ori.surface.host.close",
+        "request_id": "close-1",
+        "payload": {}
+      }
+    }
+  ]
+}

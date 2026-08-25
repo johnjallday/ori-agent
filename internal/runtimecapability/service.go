@@ -173,10 +173,6 @@ func (s *Service) EvaluateTaskCapabilityForTask(workspaceID string, task workspa
 	}
 	chooseAgentAction := &Action{Token: "choose_runtime_agent", Code: "choose_runtime_agent", Label: "Choose compatible agent"}
 	grantAction := &Action{Token: "grant_runtime_access", Code: "grant_runtime_access", Label: "Grant runtime access"}
-	if requirement.Adapter == "reaper_live_control" {
-		chooseAgentAction = &Action{Token: "choose_reaper_agent", Code: "choose_reaper_agent", Label: "Choose compatible agent"}
-		grantAction = &Action{Token: "grant_reaper_access", Code: "grant_reaper_access", Label: "Grant REAPER access"}
-	}
 	instance, found := findTaskAgentInstance(ws, task)
 	if !found {
 		return true, runtimeTaskBlocked(ws.FolderSlug, &Blocker{
@@ -586,7 +582,10 @@ func (s *Service) evaluate(ctx context.Context, workspaceID string, checkLive bo
 		adapter, registered := s.registry.Lookup(requirement.Adapter)
 		if !registered {
 			projected.ReasonCode = ReasonAdapterUnavailable
-			projected.Summary = "This runtime requirement is unavailable in this build."
+			projected.Summary = ProviderUnavailableMessage
+			projected.Action = &Action{
+				Token: "review_plugins", Code: "review_plugins", Label: "Review plugins", URL: "/settings?panel=plugins",
+			}
 		} else {
 			request := EvaluationRequest{WorkspaceID: workspaceID, Mode: mode, Requirement: requirement, Persisted: persisted}
 			result, evalErr := adapter.EvaluateDurable(ctx, request)

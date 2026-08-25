@@ -136,7 +136,7 @@ func TestBuiltinRegistryMatchesAuthoringAllowlist(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewBuiltinRegistry: %v", err)
 	}
-	if got, want := registry.IDs(), append([]string(nil), projecttemplates.ValidRuntimeRequirementAdapters...); !reflect.DeepEqual(got, want) {
+	if got, want := registry.IDs(), append([]string{}, projecttemplates.ValidRuntimeRequirementAdapters...); !reflect.DeepEqual(got, want) {
 		t.Fatalf("runtime adapter parity changed:\n registry %v\nauthoring %v", got, want)
 	}
 }
@@ -279,6 +279,9 @@ func TestServiceUnknownAdapterAndAdapterErrorsFailClosedAndRedacted(t *testing.T
 	}
 	if status.FirstBlocker == nil || status.FirstBlocker.ReasonCode != ReasonAdapterUnavailable || status.DurableState == DurableConfigured {
 		t.Fatalf("unknown adapter did not fail closed: %+v", status)
+	}
+	if status.FirstBlocker.Summary != ProviderUnavailableMessage || status.FirstBlocker.Action == nil || status.FirstBlocker.Action.Code != "review_plugins" {
+		t.Fatalf("generic missing-provider projection = %+v", status.FirstBlocker)
 	}
 
 	secret := "/Users/alice/private/project.rpp localhost:8080 token=secret command=1234"

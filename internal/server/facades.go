@@ -37,7 +37,6 @@ import (
 	"github.com/johnjallday/ori-agent/internal/pluginhttp"
 	"github.com/johnjallday/ori-agent/internal/privateservices"
 	"github.com/johnjallday/ori-agent/internal/progressionhttp"
-	"github.com/johnjallday/ori-agent/internal/reaperhttp"
 	"github.com/johnjallday/ori-agent/internal/reviewhttp"
 	"github.com/johnjallday/ori-agent/internal/runtimecapabilityhttp"
 	"github.com/johnjallday/ori-agent/internal/session"
@@ -61,6 +60,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/workspacemaphttp"
 	"github.com/johnjallday/ori-agent/internal/workspaceplan"
 	"github.com/johnjallday/ori-agent/internal/workspacerun"
+	"github.com/johnjallday/ori-agent/internal/workspacesurfacehttp"
 )
 
 // CoreSystemFacade manages core system dependencies (LLM, client factory, config)
@@ -168,6 +168,9 @@ type HandlerFacade struct {
 	// and install lifecycle. One set of routes serves every capability; there
 	// is no per-capability lifecycle API.
 	WorkspaceCapabilities *workspacecapabilityhttp.Handler
+	// WorkspaceSurfaces serves one generic catalog/frame/broker boundary for
+	// every plugin-contributed surface.
+	WorkspaceSurfaces *workspacesurfacehttp.Handler
 	// WorkspaceMap serves the current user's coordinate-based Workspace Map
 	// layout. It is deliberately not part of the workspace API surface: the
 	// layout belongs to a user, not to a workspace, and must never be confused
@@ -179,11 +182,9 @@ type HandlerFacade struct {
 	// RuntimeCapabilities serves operating modes, durable/live status, exact
 	// actions, verification, and capability-scoped grant delegation.
 	RuntimeCapabilities *runtimecapabilityhttp.Handler
-	// Reaper serves live workspace-scoped state and actions through REAPER's loopback Web Remote.
-	Reaper     *reaperhttp.Handler
-	User       *userhttp.Handler
-	PersonalHQ *personalhqhttp.Handler
-	DailyBrief *dailybriefhttp.Handler
+	User                *userhttp.Handler
+	PersonalHQ          *personalhqhttp.Handler
+	DailyBrief          *dailybriefhttp.Handler
 	// OriGuide serves the setup-and-navigation guide. It is deliberately a
 	// separate handler from the Home work surface: its action type cannot
 	// express a mutation and it holds no dependency capable of performing one.

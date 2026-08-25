@@ -10,8 +10,61 @@ import (
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/plugin"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
+	"github.com/johnjallday/ori-agent/internal/runtimecapability"
+	"github.com/johnjallday/ori-agent/internal/workspacecapability"
 )
+
+func (b *ServerBuilder) wireProjectTemplateResolver() {
+	if b == nil || b.sessionHandler == nil {
+		return
+	}
+	b.sessionHandler.SetProjectTemplateResolver(func(templateID, templatePath string) (projecttemplates.Template, error) {
+		catalog := templateRuntimeCatalog{
+			capabilities: b.workspaceCapabilityRegistry,
+			runtimes:     b.runtimeCapabilityRegistry,
+		}
+		if id := strings.TrimSpace(templateID); id != "" {
+			if b.pluginHandler != nil {
+				installed, err := b.pluginHandler.Manager().List()
+				if err != nil {
+					return projecttemplates.Template{}, err
+				}
+				for _, template := range activePluginBlueprintTemplates(installed) {
+					if template.ID == id {
+						return template, nil
+					}
+				}
+			}
+			if strings.HasPrefix(id, "plugin:") {
+				return projecttemplates.Template{}, fmt.Errorf("%w: %q", projecttemplates.ErrTemplateNotFound, id)
+			}
+			return projecttemplates.FindLibraryTemplateWithCatalog(resolveTemplatesRoot(b.configManager), id, catalog)
+		}
+		if path := strings.TrimSpace(templatePath); path != "" {
+			return projecttemplates.LoadFolderWithCatalog(path, catalog)
+		}
+		return projecttemplates.Template{}, errors.New("no template specified")
+	})
+}
+
+type templateRuntimeCatalog struct {
+	capabilities *workspacecapability.Registry
+	runtimes     *runtimecapability.Registry
+}
+
+func (c templateRuntimeCatalog) HasCapability(id string) bool {
+	return c.capabilities != nil && c.capabilities.Has(id)
+}
+
+func (c templateRuntimeCatalog) HasRuntimeAdapter(id string) bool {
+	if c.runtimes == nil {
+		return false
+	}
+	_, ok := c.runtimes.Lookup(id)
+	return ok
+}
 
 // handleProjectTemplates serves GET /api/project-templates: the project
 // template library available for workspace creation.
@@ -22,7 +75,13 @@ func (s *Server) handleProjectTemplates(w http.ResponseWriter, r *http.Request) 
 	}
 
 	root := resolveTemplatesRoot(s.Core.ConfigManager)
-	templates, err := projecttemplates.ListLibrary(root)
+	var templates []projecttemplates.Template
+	var err error
+	if s.projectTemplateCatalog == nil {
+		templates, err = projecttemplates.ListLibrary(root)
+	} else {
+		templates, err = projecttemplates.ListLibraryWithCatalog(root, s.projectTemplateCatalog)
+	}
 	if err != nil {
 		_ = orihttp.RespondInternalError(w, "Failed to read templates library")
 		return
@@ -30,11 +89,66 @@ func (s *Server) handleProjectTemplates(w http.ResponseWriter, r *http.Request) 
 	if templates == nil {
 		templates = []projecttemplates.Template{}
 	}
+	if s.Handlers != nil && s.Handlers.Plugin != nil {
+		installed, listErr := s.Handlers.Plugin.Manager().List()
+		if listErr != nil {
+			logger.Warn("Plugin blueprints could not be listed", logger.Fields{"error": listErr.Error()})
+		} else {
+			templates = mergeActivePluginBlueprints(templates, activePluginBlueprintTemplates(installed))
+		}
+	}
 
 	_ = orihttp.RespondSuccess(w, map[string]any{
 		"templates":      templates,
 		"templates_root": root,
 	})
+}
+
+func mergeActivePluginBlueprints(existing, contributed []projecttemplates.Template) []projecttemplates.Template {
+	if len(contributed) == 0 {
+		return existing
+	}
+	superseded := make(map[string]struct{})
+	for _, template := range contributed {
+		if template.PluginOwner != nil && strings.TrimSpace(template.PluginOwner.BlueprintID) != "" {
+			superseded[strings.TrimSpace(template.PluginOwner.BlueprintID)] = struct{}{}
+		}
+	}
+	merged := make([]projecttemplates.Template, 0, len(existing)+len(contributed))
+	for _, template := range existing {
+		if template.Builtin {
+			if _, replaced := superseded[template.ID]; replaced {
+				continue
+			}
+		}
+		merged = append(merged, template)
+	}
+	return append(merged, contributed...)
+}
+
+func activePluginBlueprintTemplates(installed []plugin.InstalledPlugin) []projecttemplates.Template {
+	var templates []projecttemplates.Template
+	for _, candidate := range installed {
+		if !candidate.Enabled || candidate.WorkspaceSurfaces == nil || !pluginArtifactsAvailable(candidate.ResolvedArtifacts) {
+			continue
+		}
+		for _, blueprint := range candidate.ResolvedBlueprints {
+			template := blueprint.Template
+			template.Path = blueprint.SkeletonRoot
+			template.HasSkeleton = true
+			templates = append(templates, template)
+		}
+	}
+	return templates
+}
+
+func pluginArtifactsAvailable(artifacts []plugin.ResolvedArtifact) bool {
+	for _, artifact := range artifacts {
+		if !artifact.Available {
+			return false
+		}
+	}
+	return true
 }
 
 // handleProjectTemplateImport serves POST /api/project-templates/import:
@@ -358,7 +472,13 @@ func (s *Server) handleProjectTemplateReveal(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	tpl, err := projecttemplates.FindLibraryTemplate(root, req.ID)
+	var tpl projecttemplates.Template
+	var err error
+	if s.projectTemplateCatalog == nil {
+		tpl, err = projecttemplates.FindLibraryTemplate(root, req.ID)
+	} else {
+		tpl, err = projecttemplates.FindLibraryTemplateWithCatalog(root, req.ID, s.projectTemplateCatalog)
+	}
 	if err != nil {
 		s.respondProjectTemplateError(w, err)
 		return

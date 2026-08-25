@@ -2,6 +2,7 @@ package orchestrationhttp
 
 import (
 	"bytes"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -11,6 +12,13 @@ import (
 )
 
 type canonicalTaskStore struct{ *workspace.InMemoryStore }
+
+type taskValidationRuntimeAdapter struct{}
+
+func (taskValidationRuntimeAdapter) ID() string { return "test_runtime" }
+func (taskValidationRuntimeAdapter) EvaluateDurable(context.Context, runtimecapability.EvaluationRequest) (runtimecapability.DurableResult, error) {
+	return runtimecapability.DurableResult{State: runtimecapability.DurableConfigured}, nil
+}
 
 func (s *canonicalTaskStore) GetFolderWorkspace(id string) (*workspace.Workspace, error) {
 	return s.Get(id)
@@ -36,8 +44,8 @@ func taskValidationWorkspace(id string, runtimeContract bool) *workspace.Workspa
 			TemplateID: "runtime",
 			RuntimeRequirements: &workspace.RuntimeRequirementsContract{
 				SchemaVersion:  workspace.RuntimeRequirementsSchemaVersion,
-				OperatingModes: []workspace.RuntimeOperatingMode{{ID: "assisted", Label: "Assisted", Description: "Use live control.", Requires: []string{"reaper_live_control"}}},
-				Requirements:   []workspace.RuntimeRequirement{{Key: "reaper_live_control", Label: "REAPER", Description: "Configure it.", Adapter: "reaper_live_control"}},
+				OperatingModes: []workspace.RuntimeOperatingMode{{ID: "assisted", Label: "Assisted", Description: "Use live control.", Requires: []string{"test_runtime"}}},
+				Requirements:   []workspace.RuntimeRequirement{{Key: "test_runtime", Label: "Test runtime", Description: "Configure it.", Adapter: "test_runtime"}},
 			},
 		})
 	}
@@ -54,9 +62,12 @@ func TestCreateTaskValidatesKnownRuntimeKeysBeforeWrite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := registry.Register(taskValidationRuntimeAdapter{}); err != nil {
+		t.Fatal(err)
+	}
 	validator := runtimecapability.NewService(store, registry)
 
-	recorder := createCapabilityTask(t, store, validator, `{"workspace_id":"ws-plain","description":"Live task","required_capabilities":["reaper_live_control"]}`)
+	recorder := createCapabilityTask(t, store, validator, `{"workspace_id":"ws-plain","description":"Live task","required_capabilities":["test_runtime"]}`)
 	if recorder.Code != http.StatusBadRequest {
 		t.Fatalf("undeclared runtime key = %d: %s", recorder.Code, recorder.Body.String())
 	}
@@ -86,17 +97,20 @@ func TestCreateTaskRoundTripsDeclaredRuntimeKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	registry, _ := runtimecapability.NewBuiltinRegistry()
+	if err := registry.Register(taskValidationRuntimeAdapter{}); err != nil {
+		t.Fatal(err)
+	}
 	validator := runtimecapability.NewService(store, registry)
-	recorder := createCapabilityTask(t, store, validator, `{"workspace_id":"ws-runtime","description":"Live task","required_capabilities":[" REAPER_LIVE_CONTROL ","reaper_live_control"],"file_fallback_for":["reaper_live_control"]}`)
+	recorder := createCapabilityTask(t, store, validator, `{"workspace_id":"ws-runtime","description":"Live task","required_capabilities":[" TEST_RUNTIME ","test_runtime"],"file_fallback_for":["test_runtime"]}`)
 	if recorder.Code != http.StatusCreated {
 		t.Fatalf("declared runtime key = %d: %s", recorder.Code, recorder.Body.String())
 	}
 	stored, _ := store.Get(ws.ID)
-	if len(stored.Tasks) != 1 || len(stored.Tasks[0].RequiredCapabilities) != 1 || stored.Tasks[0].RequiredCapabilities[0] != "reaper_live_control" || len(stored.Tasks[0].FileFallbackFor) != 1 {
+	if len(stored.Tasks) != 1 || len(stored.Tasks[0].RequiredCapabilities) != 1 || stored.Tasks[0].RequiredCapabilities[0] != "test_runtime" || len(stored.Tasks[0].FileFallbackFor) != 1 {
 		t.Fatalf("runtime task key did not normalize/round-trip: %+v", stored.Tasks)
 	}
 
-	invalid := createCapabilityTask(t, store, validator, `{"workspace_id":"ws-runtime","description":"Invalid fallback","file_fallback_for":["reaper_live_control"]}`)
+	invalid := createCapabilityTask(t, store, validator, `{"workspace_id":"ws-runtime","description":"Invalid fallback","file_fallback_for":["test_runtime"]}`)
 	if invalid.Code != http.StatusBadRequest {
 		t.Fatalf("fallback without matching requirement = %d: %s", invalid.Code, invalid.Body.String())
 	}

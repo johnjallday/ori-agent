@@ -269,7 +269,7 @@ export class WorkspaceCommandView {
       window.addEventListener('popstate', this.boundPopState);
     }
     this.ensureCapabilityStations();
-    this.ensureReaperStation();
+    this.ensureSurfaceStations();
     this.applyBootURLState();
   }
 
@@ -296,17 +296,31 @@ export class WorkspaceCommandView {
     });
   }
 
-  // Live REAPER polling is owned by ReaperConsole, but the command view owns
-  // whether the Map is visible and when its station needs repainting. The event
-  // carries no endpoint or port — only the already-redacted live state.
-  ensureReaperStation() {
-    if (this.boundReaperStateChanged) return;
-    this.boundReaperStateChanged = () => {
-      if (this.active) this.render();
-    };
-    if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
-      document.addEventListener('ori:reaper-state-changed', this.boundReaperStateChanged);
+  // Plugin-contributed stations arrive through one generic authenticated
+  // catalog. The command view knows no plugin/capability names: it asks the
+  // surface host for sanitized station descriptors and re-renders when their
+  // catalog changes.
+  ensureSurfaceStations() {
+    const host = typeof window === 'undefined' ? null : window.WorkspaceSurfaceHost;
+    if (!host || typeof host.loadCatalog !== 'function') return;
+
+    if (!this.boundWorkspaceSurfacesChanged) {
+      this.boundWorkspaceSurfacesChanged = () => {
+        if (this.active) this.render();
+      };
+      if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+        document.addEventListener(
+          'ori:workspace-surfaces-changed',
+          this.boundWorkspaceSurfacesChanged
+        );
+      }
     }
+
+    if (this.workspaceSurfaceCatalogRequested) return;
+    this.workspaceSurfaceCatalogRequested = true;
+    void Promise.resolve(host.loadCatalog()).then(() => {
+      if (this.active) this.render();
+    });
   }
 
   /** Re-render if active — called by the page after its data loads/refreshes. */
@@ -1235,9 +1249,9 @@ export class WorkspaceCommandView {
   }
 
   render() {
-    const reaperConsole = typeof window === 'undefined' ? null : window.ReaperConsole;
-    if (reaperConsole && typeof reaperConsole.setMapVisible === 'function') {
-      reaperConsole.setMapVisible(this.active && this.viewMode === 'map');
+    const surfaceHost = typeof window === 'undefined' ? null : window.WorkspaceSurfaceHost;
+    if (surfaceHost && typeof surfaceHost.setMapVisible === 'function') {
+      surfaceHost.setMapVisible(this.active && this.viewMode === 'map');
     }
     if (!this.container) return;
     // An active station drag owns the DOM: render() rebuilds it wholesale,
@@ -6041,105 +6055,22 @@ export class WorkspaceCommandView {
   // station and the catalog can never disagree.
   workspaceStationRegistry() {
     const stations = [];
-    const catalog = typeof window === 'undefined' ? null : window.WorkspaceCapabilities;
-    const item =
-      catalog && typeof catalog.find === 'function' ? catalog.find('file-janitor') : null;
-    if (item && item.installed && item.available !== false) {
-      const status = item.status || {};
-      const folder = status.folder_display_name || '';
-      const janitorConsole = typeof window === 'undefined' ? null : window.FileJanitorConsole;
+    const context = { page: this.page, workspace: (this.page && this.page.workspace) || {} };
+    const adapters =
+      typeof window === 'undefined' || !Array.isArray(window.WorkspaceBuiltinStationAdapters)
+        ? []
+        : window.WorkspaceBuiltinStationAdapters;
+    adapters.forEach(adapter => {
+      if (!adapter || typeof adapter.station !== 'function') return;
+      const station = adapter.station(context);
+      if (station && typeof station.key === 'string') stations.push(station);
+    });
 
-      // State prefers the console's live derivation over the catalog snapshot.
-      // The catalog is fetched once per page load; the console re-reads on every
-      // scan, approval, and pause, so it is the only source that can say "3 files
-      // ready for review" while the user is looking at the map (FR-95, FR-96).
-      const liveState = () => {
-        const derived =
-          janitorConsole && typeof janitorConsole.stationState === 'function'
-            ? janitorConsole.stationState()
-            : null;
-        if (derived && derived.applies) return derived;
-        return {
-          applies: true,
-          value: status.detail || '',
-          description: status.detail || '',
-          tone: status.state === 'needs_attention' ? 'degraded' : ''
-        };
-      };
-
-      stations.push({
-        key: 'file-janitor',
-        label: folder ? 'File Janitor · ' + folder : 'File Janitor',
-        icon: 'bi-folder-symlink',
-        state: liveState,
-        // Activation opens the console in place, over the map. It never
-        // scrolls to or focuses an inline mount: in Map mode that surface is
-        // not on screen, so the press looked like it did nothing (FR-97).
-        action: trigger => {
-          if (janitorConsole && typeof janitorConsole.open === 'function') {
-            janitorConsole.open({ source: 'map-station', trigger });
-            return;
-          }
-          if (typeof catalog.onOpen === 'function') catalog.onOpen('file-janitor', trigger);
-        }
-      });
+    const surfaceHost = typeof window === 'undefined' ? null : window.WorkspaceSurfaceHost;
+    if (surfaceHost && typeof surfaceHost.stations === 'function') {
+      const contributed = surfaceHost.stations();
+      if (Array.isArray(contributed)) stations.push(...contributed);
     }
-
-    // REAPER is earned only by the persisted runtime selection and its
-    // snapshotted contract. Names, tags, template IDs, folders, .rpp evidence,
-    // and agent skills are intentionally irrelevant (FR6, FR7).
-    const workspace = (this.page && this.page.workspace) || {};
-    const runtimeState = workspace.runtime_state || {};
-    const contract = workspace.template_provenance?.runtime_requirements || null;
-    const selectedMode = String(runtimeState.selected_mode_id || '');
-    const mode =
-      contract && Array.isArray(contract.operating_modes)
-        ? contract.operating_modes.find(candidate => candidate && candidate.id === selectedMode)
-        : null;
-    const requirements =
-      contract && Array.isArray(contract.requirements) ? contract.requirements : [];
-    const carriesReaperRequirement = requirements.some(
-      requirement => requirement && requirement.key === 'reaper_live_control'
-    );
-    const selectedRequiresReaper =
-      selectedMode === 'ori_assisted' &&
-      mode &&
-      Array.isArray(mode.requires) &&
-      mode.requires.includes('reaper_live_control');
-    const reaperConsole = typeof window === 'undefined' ? null : window.ReaperConsole;
-    // The workspace detail projection may omit folder-only runtime metadata.
-    // In that case the state endpoint performs the same check against the
-    // canonical workspace.json and exposes only the resulting boolean.
-    const endpointApplies =
-      reaperConsole && typeof reaperConsole.applies === 'function' && reaperConsole.applies();
-
-    if ((selectedRequiresReaper && carriesReaperRequirement) || endpointApplies) {
-      stations.push({
-        key: 'reaper',
-        label:
-          reaperConsole && typeof reaperConsole.stationLabel === 'function'
-            ? reaperConsole.stationLabel()
-            : 'REAPER',
-        icon: 'bi-sliders2-vertical',
-        state: () => {
-          if (reaperConsole && typeof reaperConsole.stationState === 'function') {
-            return reaperConsole.stationState();
-          }
-          return {
-            applies: true,
-            value: 'Checking…',
-            description: 'checking the current REAPER connection',
-            tone: 'loading'
-          };
-        },
-        action: trigger => {
-          if (reaperConsole && typeof reaperConsole.open === 'function') {
-            reaperConsole.open({ source: 'map-station', trigger });
-          }
-        }
-      });
-    }
-
     return stations;
   }
 
@@ -6379,7 +6310,7 @@ export class WorkspaceCommandView {
       ? this.commanderLabel(agent.profile && agent.profile.role)
       : '';
     // Station title (design consideration): pair role with the workspace it's
-    // stationed in, e.g. "Commander · Reaper Studio" — this is how
+    // stationed in, e.g. "Commander · Production" — this is how
     // domain-specialized identity is displayed without existing in the catalog.
     const wsName = String(
       (this.page && this.page.workspace && this.page.workspace.name) || ''

@@ -203,7 +203,10 @@ func TestRegistry_BindRuntimeRejectsUnknownID(t *testing.T) {
 // module specifier, a workspace-supplied install record would gain a way to
 // point at it. Definitions must stay inert metadata.
 func TestDefinition_CarriesNoExecutableReference(t *testing.T) {
-	banned := []string{"url", "uri", "path", "command", "cmd", "script", "exec", "module", "plugin", "binary", "endpoint", "handler", "func", "hook"}
+	// Plugin owner/version fields are inert provenance, not executable
+	// references. Commands, paths, modules, handlers, and endpoints remain
+	// structurally forbidden.
+	banned := []string{"url", "uri", "path", "command", "cmd", "script", "exec", "module", "binary", "endpoint", "handler", "func", "hook"}
 
 	var walk func(t *testing.T, typ reflect.Type, trail string)
 	walk = func(t *testing.T, typ reflect.Type, trail string) {

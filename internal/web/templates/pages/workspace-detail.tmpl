@@ -9044,10 +9044,7 @@
   <script defer src="/js/modules/workspace-bootstrap-review.js"></script>
   <script defer src="/js/modules/workspace-tools.js"></script>
   <script defer src="/js/modules/workspace-group-options.js"></script>
-  <script defer src="/js/modules/reaper-plugin-install.js"></script>
   <script defer src="/js/modules/setup-wizard.js"></script>
-  <script defer src="/js/modules/reaper-readiness-panel.js"></script>
-  <script defer src="/js/modules/reaper-console.js"></script>
   <script defer src="/js/modules/github-setup-step.js"></script>
   <!-- The one overlay coordinator for this page. It is a module, so it runs
        after the deferred classic scripts below; that is fine because they read
@@ -9105,6 +9102,7 @@
   <script type="module">
     import { WorkspaceDetailPage } from '/js/modules/workspace-detail.js';
     import { WorkspaceCommandView } from '/js/modules/workspace-command.js';
+    import { WorkspaceSurfaceHost } from '/js/modules/workspace-surface-host.js';
 
     function initializeWorkspaceDetailPage() {
       themeManager.initialize();
@@ -9121,6 +9119,10 @@
         const detailPage = new WorkspaceDetailPage(workspaceId, workspaceSlug);
         window.workspaceDetail = detailPage;
         detailPage.init();
+
+        // One generic host owns every plugin-contributed station/frame. Plugin
+        // JavaScript remains in an opaque sandbox and never enters this page.
+        window.WorkspaceSurfaceHost = new WorkspaceSurfaceHost({ workspaceId });
 
         // Opt-in Command view (inert until Phase 1).
         window.workspaceCommand = new WorkspaceCommandView(detailPage);
