@@ -32,18 +32,19 @@ import (
 type issuePlanArgs struct {
 	// issueNumber preserves the original parsed shape for single-Issue callers.
 	// issueNumbers is the canonical sorted member set for service requests.
-	issueNumber  int
-	issueNumbers []int
-	worktree     string
-	plannerKind  string
-	plannerModel string
-	yes          bool
-	json         bool
+	issueNumber   int
+	issueNumbers  []int
+	worktree      string
+	plannerKind   string
+	plannerModel  string
+	plannerEffort string
+	yes           bool
+	json          bool
 }
 
 func parseIssuePlanArgs(args []string) (issuePlanArgs, error) {
 	var parsed issuePlanArgs
-	var worktreeSeen, kindSeen, modelSeen bool
+	var worktreeSeen, kindSeen, modelSeen, effortSeen bool
 	issueSeen := make(map[int]struct{})
 	for index := 0; index < len(args); index++ {
 		switch args[index] {
@@ -91,6 +92,16 @@ func parseIssuePlanArgs(args []string) (issuePlanArgs, error) {
 			index++
 			parsed.plannerModel = args[index]
 			modelSeen = true
+		case "--effort":
+			if index+1 >= len(args) || strings.TrimSpace(args[index+1]) == "" {
+				return issuePlanArgs{}, fmt.Errorf("--effort requires low, medium, high, xhigh, or max")
+			}
+			if effortSeen {
+				return issuePlanArgs{}, fmt.Errorf("issue-plan accepts --effort only once")
+			}
+			index++
+			parsed.plannerEffort = args[index]
+			effortSeen = true
 		case "--yes", "--confirm":
 			parsed.yes = true
 		case "--json":
@@ -108,11 +119,14 @@ func parseIssuePlanArgs(args []string) (issuePlanArgs, error) {
 	if parsed.plannerKind != "" && parsed.plannerKind != "claude" && parsed.plannerKind != "pi" {
 		return issuePlanArgs{}, fmt.Errorf("--kind must be claude or pi")
 	}
-	if parsed.plannerKind == "claude" && parsed.plannerModel != "" {
-		return issuePlanArgs{}, fmt.Errorf("--model is available only with --kind pi")
+	if parsed.plannerKind != "claude" && parsed.plannerEffort != "" {
+		return issuePlanArgs{}, fmt.Errorf("--effort is available only with --kind claude")
 	}
 	if err := config.ValidateAgentModel(parsed.plannerModel); err != nil {
 		return issuePlanArgs{}, fmt.Errorf("--model: %w", err)
+	}
+	if err := agents.ValidatePlannerEffort(parsed.plannerEffort); err != nil {
+		return issuePlanArgs{}, fmt.Errorf("--effort: %w", err)
 	}
 	sort.Ints(parsed.issueNumbers)
 	parsed.issueNumber = parsed.issueNumbers[0]
@@ -146,7 +160,7 @@ func (a *App) issuePlan(ctx context.Context, opts options, args []string) int {
 		}),
 	}
 
-	request := agents.IssuePlanRequest{IssueNumbers: parsed.issueNumbers, PlannerKind: parsed.plannerKind, PlannerModel: parsed.plannerModel, DevWorktreePath: parsed.worktree}
+	request := agents.IssuePlanRequest{IssueNumbers: parsed.issueNumbers, PlannerKind: parsed.plannerKind, PlannerModel: parsed.plannerModel, PlannerEffort: parsed.plannerEffort, DevWorktreePath: parsed.worktree}
 	if len(parsed.issueNumbers) == 1 {
 		// Preserve the original service request shape for single-Issue callers.
 		request.IssueNumber = parsed.issueNumber
@@ -296,6 +310,9 @@ func issuePlanPayload(plan agents.IssuePlan) map[string]any {
 	}
 	if plan.PlannerModel != "" {
 		payload["planner_model"] = plan.PlannerModel
+	}
+	if plan.PlannerEffort != "" {
+		payload["planner_effort"] = plan.PlannerEffort
 	}
 	if plan.IsBundle() {
 		payload["compatibility_required"] = true

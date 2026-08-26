@@ -288,21 +288,32 @@ func TestOpenExistingWorktreeUsesTheSourceCheckoutAndOnlyTheDocumentedOpenOperat
 	}
 }
 
-func TestAgentStartForwardsOptionalModelAsOneArgument(t *testing.T) {
+func TestAgentStartForwardsOptionalNativeArgumentsAsSeparateWords(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
-		name  string
-		model string
-		want  []string
+		name   string
+		kind   string
+		model  string
+		effort string
+		want   []string
 	}{
 		{
-			name: "empty model preserves legacy vector",
+			name: "empty selection preserves legacy vector",
+			kind: "pi",
 			want: []string{"agent", "start", "builder", "--kind", "pi", "--pane", "w1:p1", "--timeout", "3000"},
 		},
 		{
-			name:  "opaque model is one argument",
+			name:  "opaque model is one native argument",
+			kind:  "pi",
 			model: "[openai] gpt-5.1; $(touch nope)",
-			want:  []string{"agent", "start", "builder", "--kind", "pi", "--model", "[openai] gpt-5.1; $(touch nope)", "--pane", "w1:p1", "--timeout", "3000"},
+			want:  []string{"agent", "start", "builder", "--kind", "pi", "--pane", "w1:p1", "--timeout", "3000", "--", "--model", "[openai] gpt-5.1; $(touch nope)"},
+		},
+		{
+			name:   "Claude model and effort are distinct native arguments",
+			kind:   "claude",
+			model:  "sonnet; $(touch nope)",
+			effort: "xhigh",
+			want:   []string{"agent", "start", "builder", "--kind", "claude", "--pane", "w1:p1", "--timeout", "3000", "--", "--model", "sonnet; $(touch nope)", "--effort", "xhigh"},
 		},
 	}
 	for _, testCase := range cases {
@@ -311,7 +322,7 @@ func TestAgentStartForwardsOptionalModelAsOneArgument(t *testing.T) {
 				strings.Join(testCase.want, " "): {Stdout: []byte(`{"result":{"agent":{"name":"builder","agent":"pi","pane_id":"w1:p1"}}}`)},
 			}}
 			_, err := New("fake-herdr", "", runner).AgentStartInfo(context.Background(), AgentStartRequest{
-				Name: "builder", Kind: "pi", Model: testCase.model, PaneID: "w1:p1", Timeout: 3 * time.Second,
+				Name: "builder", Kind: testCase.kind, Model: testCase.model, Effort: testCase.effort, PaneID: "w1:p1", Timeout: 3 * time.Second,
 			})
 			if err != nil {
 				t.Fatalf("AgentStartInfo() error = %v", err)

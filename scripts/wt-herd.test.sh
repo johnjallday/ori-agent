@@ -1274,7 +1274,7 @@ wt ls > /dev/null
 wt help > /dev/null
 [[ ! -f "$fixture_root/herdr-free-calls" ]]
 
-# --- wt plan --issue <N> [--issue <N> ...] [--kind claude|pi] [--model] -----
+# --- wt plan --issue <N> ... [--kind claude|pi] [--model] [--effort] -------
 #
 # Shell-wiring layer: argument validation and the exact call handed to the
 # bridge, with wt_herd stubbed so no Go binary or GitHub read is needed. AR1:
@@ -1291,8 +1291,10 @@ plan_status=0
 for bad_plan_args in "" "--issue" "--issue 0" "--issue -5" "--issue abc" \
                      "--issue 1 --issue 1" "--issue 1 --bogus" "--issue 1 --kind" \
                      "--issue 1 --kind codex" "--issue 1 --kind pi --kind claude" \
-                     "--issue 1 --kind claude --model model" "--issue 1 --model" \
-                     "--issue 1 --model --yes" "--issue 1 --model one --model two" "--yes"; do
+                     "--issue 1 --kind pi --effort high" "--issue 1 --effort high" \
+                     "--issue 1 --kind claude --effort unbounded" "--issue 1 --kind claude --effort low --effort high" \
+                     "--issue 1 --model" "--issue 1 --model --yes" \
+                     "--issue 1 --model one --model two" "--yes"; do
   plan_status=0
   wt plan ${=bad_plan_args} > /dev/null 2>&1 || plan_status=$?
   if [[ "$plan_status" != "1" ]]; then
@@ -1317,8 +1319,8 @@ wt plan --issue 342 --yes > /dev/null
 [[ "$(<"$fixture_root/plan-calls")" == "issue-plan --issue 342 --worktree $dev_root --yes" ]]
 
 rm -f "$fixture_root/plan-calls"
-wt plan --issue 342 --kind claude --yes > /dev/null
-[[ "$(<"$fixture_root/plan-calls")" == "issue-plan --issue 342 --kind claude --worktree $dev_root --yes" ]]
+wt plan --issue 342 --kind claude --model 'sonnet; $(echo inert)' --effort xhigh --yes > /dev/null
+[[ "$(<"$fixture_root/plan-calls")" == 'issue-plan --issue 342 --kind claude --model sonnet; $(echo inert) --effort xhigh --worktree '"$dev_root"' --yes' ]]
 
 rm -f "$fixture_root/plan-calls"
 wt plan --issue 342 --kind pi --model '[openai] gpt 5.1; $(echo inert)' --yes > /dev/null
@@ -1613,11 +1615,11 @@ fi
 # arguments. wt remains the
 # owner of confirmation, files, worktree creation, and Herdr/Pi handoff.
 devops_code="$(rg -v '^\s*#' "$devops_entrypoint")"
-if ! print -r -- "$devops_code" | rg -Fq "zsh -c 'source \"\$1\" || exit; typeset -a plan_args; plan_args=(--issue \"\$2\" --kind \"\$3\"); [[ -n \"\$4\" ]] && plan_args+=(--model \"\$4\"); wt plan \"\${plan_args[@]}\"'"; then
+if ! print -r -- "$devops_code" | rg -Fq "zsh -c 'source \"\$1\" || exit; typeset -a plan_args; plan_args=(--issue \"\$2\" --kind \"\$3\"); [[ -n \"\$4\" ]] && plan_args+=(--model \"\$4\"); [[ -n \"\$5\" ]] && plan_args+=(--effort \"\$5\"); wt plan \"\${plan_args[@]}\"'"; then
   print -r -- "scripts/devops.sh does not launch wt plan through the constrained zsh bridge" >&2
   exit 1
 fi
-if ! print -r -- "$devops_code" | rg -Fq "zsh -c 'source \"\$1\" || exit; kind=\"\$2\"; model=\"\$3\"; shift 3; typeset -a plan_args; plan_args=(); for issue in \"\$@\"; do plan_args+=(--issue \"\$issue\"); done; plan_args+=(--kind \"\$kind\"); [[ -n \"\$model\" ]] && plan_args+=(--model \"\$model\"); wt plan \"\${plan_args[@]}\"'"; then
+if ! print -r -- "$devops_code" | rg -Fq "zsh -c 'source \"\$1\" || exit; kind=\"\$2\"; model=\"\$3\"; effort=\"\$4\"; shift 4; typeset -a plan_args; plan_args=(); for issue in \"\$@\"; do plan_args+=(--issue \"\$issue\"); done; plan_args+=(--kind \"\$kind\"); [[ -n \"\$model\" ]] && plan_args+=(--model \"\$model\"); [[ -n \"\$effort\" ]] && plan_args+=(--effort \"\$effort\"); wt plan \"\${plan_args[@]}\"'"; then
   print -r -- "scripts/devops.sh does not launch bundle planning through the constrained positional-argument bridge" >&2
   exit 1
 fi

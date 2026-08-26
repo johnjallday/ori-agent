@@ -324,14 +324,15 @@ func TestPlanningSessionsRoundTripAndStayOutOfFeatures(t *testing.T) {
 	store := New(t.TempDir())
 	want := model.NewBridgeState()
 	want.PlanningSessions["repo-1:342"] = model.PlanningSession{
-		RepositoryID: "repo-1",
-		IssueNumber:  342,
-		Slug:         "342-ready-issue-codex-planning",
-		WorktreePath: "/tmp/ori-agent-dev",
-		PlannerKind:  "pi",
-		PlannerModel: "[openai] gpt-5.1",
-		Stage:        model.PlanningPrompted,
-		Prompted:     true,
+		RepositoryID:  "repo-1",
+		IssueNumber:   342,
+		Slug:          "342-ready-issue-codex-planning",
+		WorktreePath:  "/tmp/ori-agent-dev",
+		PlannerKind:   "claude",
+		PlannerModel:  "sonnet",
+		PlannerEffort: "xhigh",
+		Stage:         model.PlanningPrompted,
+		Prompted:      true,
 	}
 	if err := store.Save(want); err != nil {
 		t.Fatal(err)
@@ -341,7 +342,7 @@ func TestPlanningSessionsRoundTripAndStayOutOfFeatures(t *testing.T) {
 		t.Fatal(err)
 	}
 	session, ok := loaded.PlanningSessions["repo-1:342"]
-	if !ok || session.IssueNumber != 342 || session.Slug != "342-ready-issue-codex-planning" || session.PlannerKind != "pi" || session.PlannerModel != "[openai] gpt-5.1" || session.Stage != model.PlanningPrompted {
+	if !ok || session.IssueNumber != 342 || session.Slug != "342-ready-issue-codex-planning" || session.PlannerKind != "claude" || session.PlannerModel != "sonnet" || session.PlannerEffort != "xhigh" || session.Stage != model.PlanningPrompted {
 		t.Fatalf("planning session = %#v, ok=%v", session, ok)
 	}
 	if len(loaded.Features) != 0 {

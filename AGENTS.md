@@ -127,8 +127,9 @@ integration chooses. A model-only one-run override keeps the configured kind;
 a different explicit kind without `--model` clears the configured model for
 that launch. A recorded feature or partial role launch keeps its original pair
 on retry even if repository defaults later change. Ori validates and forwards a
-non-empty model as one `herdr agent start --model` argument, but support in the
-installed Herdr/Pi integration is deliberately unconfirmed.
+non-empty model as one native-agent value after Herdr's `--` separator. Herdr
+parser and local CLI flag discovery are covered, but live integration behavior
+remains deliberately unconfirmed.
 
 `new` accepts an optional one-line body in the picker (`:edit` opens `$VISUAL`
 or `$EDITOR` for multiline Markdown), `--body` text, or `--body-file` input. It
@@ -191,19 +192,20 @@ The full lifecycle, and which agent owns each stage:
 ```
 Ready Issue(s) on GitHub
   → s for one, or Space + b for an ordinary-backlog bundle
-  → wt plan --issue N [--issue N ...] [--kind claude|pi] [--model MODEL]  one planner works in ori-agent-dev
+  → wt plan --issue N [--issue N ...] [--kind claude|pi] [--model MODEL] [--effort LEVEL]
   → picker i → wt start      chosen agent implements in one feature worktree
   → wt pr → squash-merge     one PR to dev; bundles reference every member
   → wt done <feature>        close every attached member, archive, and clean up
 ```
 
-`wt plan --issue <N> [--issue <N> ...] [--kind claude|pi] [--model MODEL]` is
-the planning stage. One number preserves the original path. Repeated distinct
-numbers form a human-affirmed bundle: each Issue is read once, normalized in
-ascending order, and handled by one planning session. Kind defaults to Pi for
-backward compatibility; `--model` is available only for Pi. Neither comes from
-feature primary or role defaults. Before mutation, the summary
-shows every title, label, body, comment, and effective planner model and asks
+`wt plan --issue <N> [--issue <N> ...] [--kind claude|pi] [--model MODEL]
+[--effort LEVEL]` is the planning stage. One number preserves the original path.
+Repeated distinct numbers form a human-affirmed bundle: each Issue is read once,
+normalized in ascending order, and handled by one planning session. Kind
+defaults to Pi for backward compatibility. Both kinds accept a model; Claude
+also accepts `--effort low|medium|high|xhigh|max`. None comes from feature
+primary or role defaults. Before mutation, the summary shows every title, label,
+body, comment, and effective planner selection and asks
 the user to affirm a shared root cause, shared files, or the same UI surface
 (`--yes` is the explicit non-interactive affirmation).
 
@@ -243,22 +245,25 @@ Rules this stage holds to:
 The planning session is a separate record entirely: it is never a feature
 binding, an Overnight Run participant, a continuation target, a PR owner, or a
 `wt done` cleanup target. Its explicit Claude/Pi kind never inherits feature
-defaults. The DevOps action asks for Claude or Pi first. Claude proceeds without
-a model prompt. Pi loads its available model catalog in offline,
-resource-disabled mode, promotes `openai-codex` to the first provider option,
-then offers provider-first numbered models; blank uses the Pi integration
-default and `c` accepts a custom opaque value when needed. Catalog failure leaves integration-default/custom/cancel available. A
-non-empty selection is validated, shown in the plan, recorded before Herdr
-launch, and retained by a plain retry. A different model
+defaults. The DevOps action asks for Claude or Pi first. Claude then offers
+Integration default, Sonnet, Opus, or a custom alias/full model name, followed
+by thinking levels Integration default, low, medium, high, xhigh, and max. Pi
+loads its available model catalog in offline, resource-disabled mode, promotes
+`openai-codex` to the first provider option, then offers provider-first numbered
+models; blank uses the Pi integration default and `c` accepts a custom opaque
+value when needed. Catalog failure leaves integration-default/custom/cancel
+available. The selection is validated, shown in the plan, recorded before Herdr
+launch, and retained by a plain retry. A different kind, model, or Claude effort
 cannot replace an existing planning session's recorded intent. A bare direct
 `wt start` uses the configured primary kind/model pair; the Issue picker's later
 implementation action still requires an explicit one-run kind choice and does
 not add an implementation-model prompt.
 
 In the `./scripts/devops.sh` picker's Ready view, `s` asks for Claude or Pi and
-plans the current row; Pi then opens the installed provider/model options. Space
-marks/unmarks ordinary backlog rows and `b` asks once for the bundle planner
-kind/model before planning at least two marks as one bundle. The picker/REPL `g` action manages persistent
+plans the current row; Claude opens model/thinking options, while Pi opens the
+installed provider/model options. Space marks/unmarks ordinary backlog rows and
+`b` asks once for the bundle planner selection before planning at least two
+marks as one bundle. The picker/REPL `g` action manages persistent
 agent defaults without reading or refreshing GitHub. Marks use immutable Issue
 numbers, survive view changes, and are
 pruned with a visible notice on refresh if a member disappeared or became

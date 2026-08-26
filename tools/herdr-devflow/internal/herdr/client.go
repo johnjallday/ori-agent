@@ -761,21 +761,29 @@ func (c *Client) WorkspaceListInfo(ctx context.Context) ([]WorkspaceInfo, error)
 }
 
 // AgentStartRequest is the structured launch boundary shared by feature,
-// planning, and role agents. Model is optional and remains one opaque argument.
+// planning, and role agents. Model and Claude effort are optional native-agent
+// arguments. Each value remains one opaque argv word after Herdr's `--`
+// separator; neither is interpreted by a shell.
 type AgentStartRequest struct {
 	Name    string
 	Kind    string
 	Model   string
+	Effort  string
 	PaneID  string
 	Timeout time.Duration
 }
 
 func (c *Client) AgentStart(ctx context.Context, request AgentStartRequest) (json.RawMessage, error) {
-	args := []string{"agent", "start", request.Name, "--kind", request.Kind}
-	if request.Model != "" {
-		args = append(args, "--model", request.Model)
+	args := []string{"agent", "start", request.Name, "--kind", request.Kind, "--pane", request.PaneID, "--timeout", fmt.Sprintf("%d", request.Timeout.Milliseconds())}
+	if request.Model != "" || request.Effort != "" {
+		args = append(args, "--")
+		if request.Model != "" {
+			args = append(args, "--model", request.Model)
+		}
+		if request.Effort != "" {
+			args = append(args, "--effort", request.Effort)
+		}
 	}
-	args = append(args, "--pane", request.PaneID, "--timeout", fmt.Sprintf("%d", request.Timeout.Milliseconds()))
 	return c.CLIJSON(ctx, args...)
 }
 

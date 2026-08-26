@@ -147,9 +147,12 @@ check "planner model prompt treats Enter as the integration default" \
   "$(printf '\n' | (prompt_planner_model_real >/dev/null && printf '<%s>' "$planner_model_choice"))" "<>"
 check "planner model prompt cancels on q" \
   "$(printf 'q\n' | (prompt_planner_model_real >/dev/null 2>&1 && echo yes || echo no))" "no"
-check "planner selection chooses Claude without a model prompt" \
-  "$(printf '1\n' | (prompt_planner_selection_real >/dev/null && printf '%s/<%s>' "$planner_kind_choice" "$planner_model_choice"))" \
-  "claude/<>"
+check "planner selection chooses Claude model and thinking level" \
+  "$(printf '1\n1\n4\n' | (prompt_planner_selection_real >/dev/null && printf '%s/%s/%s' "$planner_kind_choice" "$planner_model_choice" "$planner_effort_choice"))" \
+  "claude/sonnet/xhigh"
+check "planner selection keeps Claude integration defaults" \
+  "$(printf '1\n\n\n' | (prompt_planner_selection_real >/dev/null && printf '%s/<%s>/<%s>' "$planner_kind_choice" "$planner_model_choice" "$planner_effort_choice"))" \
+  "claude/<>/<>"
 check "planner selection chooses Pi before its model options" \
   "$(printf '2\n1\n1\n' | (prompt_planner_selection_real >/dev/null && printf '%s/%s' "$planner_kind_choice" "$planner_model_choice"))" \
   "pi/openai-codex/gpt-5.6-sol"
@@ -166,16 +169,17 @@ check "planner prompt keeps custom fallback when Pi catalog is unavailable" \
 prompt_planner_selection() {
   planner_kind_choice="pi"
   planner_model_choice='openai-codex/planner-model'
+  planner_effort_choice=""
   return 0
 }
 launch_planner_plan() {
-  printf 'launched %s for #%s with %s\n' "$2" "$1" "$3"
+  printf 'launched %s for #%s with %s/%s\n' "$2" "$1" "$3" "$4"
 }
 
 # start_plan is the picker's `s` key: launch only for a valid selected Ready
 # row, with no GitHub read of its own and no shell execution for rejected input.
 check "plan asks for and forwards an agent/model for a selected Ready row" \
-  "$(start_plan ready 3 934 2>/dev/null)" "launched pi for #934 with openai-codex/planner-model"
+  "$(start_plan ready 3 934 2>/dev/null)" "launched pi for #934 with openai-codex/planner-model/"
 check "plan refuses a non-Ready view" \
   "$(start_plan all 3 934 >/dev/null 2>&1 && echo yes || echo no)" "no"
 check "plan refuses an empty Ready view" \
@@ -192,7 +196,7 @@ check "a rejected plan explains itself on stderr" \
 # start_issue_plan is the opened-Issue action bar equivalent, gated on the
 # pre-computed live-label result for the one Issue currently open.
 check "issue plan asks for and forwards an agent/model for a Ready Issue" \
-  "$(start_issue_plan 353 1 2>/dev/null)" "launched pi for #353 with openai-codex/planner-model"
+  "$(start_issue_plan 353 1 2>/dev/null)" "launched pi for #353 with openai-codex/planner-model/"
 check "issue plan refuses when can_plan is 0" \
   "$(start_issue_plan 334 0 >/dev/null 2>&1 && echo yes || echo no)" "no"
 check "an issue plan refusal explains itself on stderr" \
@@ -229,16 +233,16 @@ check "refresh pruning reports every removed mark" "$bundle_mark_notice" \
 
 eval "$(declare -f launch_planner_bundle_plan | sed '1s/launch_planner_bundle_plan/launch_planner_bundle_plan_real/')"
 launch_planner_bundle_plan() {
-  local kind="$1" model="$2"
-  shift 2
-  printf 'launched %s bundle with %s:' "$kind" "$model"
+  local kind="$1" model="$2" effort="$3"
+  shift 3
+  printf 'launched %s bundle with %s/%s:' "$kind" "$model" "$effort"
   printf ' #%s' "$@"
   printf '\n'
 }
 all_issue_numbers=(101 202)
 all_issue_labels=("backlog, size:quick" "backlog, size:prd")
 check "bundle plan asks for one agent/model and launches every marked Issue" \
-  "$(start_bundle_plan ready 101 202 2>/dev/null)" "launched pi bundle with openai-codex/planner-model: #101 #202"
+  "$(start_bundle_plan ready 101 202 2>/dev/null)" "launched pi bundle with openai-codex/planner-model/: #101 #202"
 check "bundle plan rejects one mark with single-plan guidance" \
   "$(start_bundle_plan ready 101 2>&1 >/dev/null || true)" \
   "Mark at least two ordinary Ready backlog Issues; use s to plan one Issue."
@@ -1139,19 +1143,19 @@ gh_call_sequence() {
   awk '/^CALL/ {printf "%s %s;", $2, $3}' "$gh_calls"
 }
 
-# The planning launcher keeps kind and model as inert zsh positional arguments.
-# Claude carries no model; Pi may carry exactly one opaque model value.
-plan_bridge='source "$1" || exit; typeset -a plan_args; plan_args=(--issue "$2" --kind "$3"); [[ -n "$4" ]] && plan_args+=(--model "$4"); wt plan "${plan_args[@]}"'
+# The planning launcher keeps kind, model, and effort as inert zsh positional
+# arguments. Pi ignores effort; Claude can carry both model and effort.
+plan_bridge='source "$1" || exit; typeset -a plan_args; plan_args=(--issue "$2" --kind "$3"); [[ -n "$4" ]] && plan_args+=(--model "$4"); [[ -n "$5" ]] && plan_args+=(--effort "$5"); wt plan "${plan_args[@]}"'
 : > "$wt_calls"
 launch_planner_plan_real 934 pi '[openai] gpt 5.1; $(echo inert)' > /dev/null
 check "single Pi planner launcher preserves one opaque model argument" \
   "$(<"$wt_calls")" \
-  $'CALL\t-c\t'"$plan_bridge"$'\tdevops-plan\t'"$repo_root"$'/scripts/wt.sh\t934\tpi\t[openai] gpt 5.1; $(echo inert)'
+  $'CALL\t-c\t'"$plan_bridge"$'\tdevops-plan\t'"$repo_root"$'/scripts/wt.sh\t934\tpi\t[openai] gpt 5.1; $(echo inert)\t'
 : > "$wt_calls"
-launch_planner_plan_real 934 claude '' > /dev/null
-check "single Claude planner launcher preserves empty model intent" \
+launch_planner_plan_real 934 claude 'sonnet; $(echo inert)' xhigh > /dev/null
+check "single Claude planner launcher preserves model and effort intent" \
   "$(<"$wt_calls")" \
-  $'CALL\t-c\t'"$plan_bridge"$'\tdevops-plan\t'"$repo_root"$'/scripts/wt.sh\t934\tclaude\t'
+  $'CALL\t-c\t'"$plan_bridge"$'\tdevops-plan\t'"$repo_root"$'/scripts/wt.sh\t934\tclaude\tsonnet; $(echo inert)\txhigh'
 
 # The implementation launcher crosses the same bash-to-zsh boundary as Plan.
 # Its constrained child receives the feature and validated mode as separate
@@ -1176,15 +1180,15 @@ check "an unsupported implementation mode launches no child" \
 launch_real_bundle() (
   launch_planner_bundle_plan_real "$@"
 )
-bundle_bridge='source "$1" || exit; kind="$2"; model="$3"; shift 3; typeset -a plan_args; plan_args=(); for issue in "$@"; do plan_args+=(--issue "$issue"); done; plan_args+=(--kind "$kind"); [[ -n "$model" ]] && plan_args+=(--model "$model"); wt plan "${plan_args[@]}"'
+bundle_bridge='source "$1" || exit; kind="$2"; model="$3"; effort="$4"; shift 4; typeset -a plan_args; plan_args=(); for issue in "$@"; do plan_args+=(--issue "$issue"); done; plan_args+=(--kind "$kind"); [[ -n "$model" ]] && plan_args+=(--model "$model"); [[ -n "$effort" ]] && plan_args+=(--effort "$effort"); wt plan "${plan_args[@]}"'
 : > "$wt_calls"
-launch_real_bundle pi '[openai] bundle model; $(echo inert)' 202 101 > /dev/null
+launch_real_bundle pi '[openai] bundle model; $(echo inert)' '' 202 101 > /dev/null
 check "bundle launcher preserves separate kind, model, and Issue arguments" \
   "$(<"$wt_calls")" \
-  $'CALL\t-c\t'"$bundle_bridge"$'\tdevops-bundle-plan\t'"$repo_root"$'/scripts/wt.sh\tpi\t[openai] bundle model; $(echo inert)\t202\t101'
+  $'CALL\t-c\t'"$bundle_bridge"$'\tdevops-bundle-plan\t'"$repo_root"$'/scripts/wt.sh\tpi\t[openai] bundle model; $(echo inert)\t\t202\t101'
 : > "$wt_calls"
 check "real bundle launcher rejects hostile Issue argument text" \
-  "$(launch_real_bundle claude '' 101 '202; touch nope' >/dev/null 2>&1 && echo yes || echo no)" "no"
+  "$(launch_real_bundle claude '' high 101 '202; touch nope' >/dev/null 2>&1 && echo yes || echo no)" "no"
 check "hostile bundle argument launches no child" \
   "$(wc -c < "$wt_calls" | tr -d ' ')" "0"
 
@@ -1534,7 +1538,7 @@ prompt_open_issue_plan_output() {
 
 : > "$gh_calls"
 : > "$wt_calls"
-prompt_open_issue_plan_output 320 '1' > "$fixture_root/prompt-plan-real-output" \
+prompt_open_issue_plan_output 320 $'1\n1\n4' > "$fixture_root/prompt-plan-real-output" \
   2> "$fixture_root/prompt-plan-real-error"
 check "a real Ready Issue's Plan launches the selected agent" \
   "$(grep -Fc 'Planner launched for #320' "$fixture_root/prompt-plan-real-output" || true)" "1"
@@ -1542,7 +1546,7 @@ assert_output_has "a real Ready Issue's Plan" "$fixture_root/prompt-plan-real-ou
 assert_output_lacks "a Claude planning choice" "$fixture_root/prompt-plan-real-output" "provider>"
 check "a real Ready Issue's Claude Plan invokes wt through zsh" \
   "$(<"$wt_calls")" \
-  $'CALL\t-c\t'"$plan_bridge"$'\tdevops-plan\t'"$repo_root"$'/scripts/wt.sh\t320\tclaude\t'
+  $'CALL\t-c\t'"$plan_bridge"$'\tdevops-plan\t'"$repo_root"$'/scripts/wt.sh\t320\tclaude\tsonnet\txhigh'
 check "a real Ready Issue's Plan reads labels exactly once" "$(count_label_reads 320)" "1"
 assert_no_github_write "a real Ready Issue's Plan action"
 
@@ -1554,7 +1558,7 @@ assert_output_has "a numbered planning-model choice" \
   "$fixture_root/prompt-plan-model-option-output" "anthropic/claude-sonnet-5"
 check "a numbered planning-model choice reaches wt as one argument" \
   "$(<"$wt_calls")" \
-  $'CALL\t-c\t'"$plan_bridge"$'\tdevops-plan\t'"$repo_root"$'/scripts/wt.sh\t320\tpi\tanthropic/claude-sonnet-5'
+  $'CALL\t-c\t'"$plan_bridge"$'\tdevops-plan\t'"$repo_root"$'/scripts/wt.sh\t320\tpi\tanthropic/claude-sonnet-5\t'
 check "a numbered planning-model choice reads labels exactly once" "$(count_label_reads 320)" "1"
 assert_no_github_write "a numbered planning-model choice"
 

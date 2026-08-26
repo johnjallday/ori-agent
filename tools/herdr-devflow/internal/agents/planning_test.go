@@ -737,13 +737,23 @@ func TestBuildIssuePlanRejectsInvalidPlannerModelBeforeIO(t *testing.T) {
 
 	_, err = service.BuildIssuePlan(context.Background(), IssuePlanRequest{
 		IssueNumber:     342,
-		PlannerKind:     "claude",
-		PlannerModel:    "model",
+		PlannerKind:     "pi",
+		PlannerEffort:   "high",
 		DevWorktreePath: devPath,
 	})
 	stage = nil
-	if !errors.As(err, &stage) || stage.Stage != "validate planner model" || stage.Code != model.ErrConfigInvalid {
-		t.Fatalf("Claude model error = %v, want pre-I/O planner-model error", err)
+	if !errors.As(err, &stage) || stage.Stage != "validate planner effort" || stage.Code != model.ErrConfigInvalid {
+		t.Fatalf("Pi effort error = %v, want pre-I/O planner-effort error", err)
+	}
+	_, err = service.BuildIssuePlan(context.Background(), IssuePlanRequest{
+		IssueNumber:     342,
+		PlannerKind:     "claude",
+		PlannerEffort:   "unbounded",
+		DevWorktreePath: devPath,
+	})
+	stage = nil
+	if !errors.As(err, &stage) || stage.Stage != "validate planner effort" || stage.Code != model.ErrConfigInvalid {
+		t.Fatalf("invalid Claude effort error = %v, want pre-I/O planner-effort error", err)
 	}
 	_, err = service.BuildIssuePlan(context.Background(), IssuePlanRequest{
 		IssueNumber:     342,
@@ -759,7 +769,7 @@ func TestBuildIssuePlanRejectsInvalidPlannerModelBeforeIO(t *testing.T) {
 	}
 }
 
-func TestClaudePlannerKindPersistsAcrossFailedLaunchRetryAndRejectsReselection(t *testing.T) {
+func TestClaudePlannerSelectionPersistsAcrossFailedLaunchRetryAndRejectsReselection(t *testing.T) {
 	t.Parallel()
 	devPath := t.TempDir()
 	issues := &fakeIssues{issue: readyIssue(342, "Ready issue", RoutePlanned)}
@@ -771,18 +781,20 @@ func TestClaudePlannerKindPersistsAcrossFailedLaunchRetryAndRejectsReselection(t
 	plan, err := service.BuildIssuePlan(context.Background(), IssuePlanRequest{
 		IssueNumber:     342,
 		PlannerKind:     "claude",
+		PlannerModel:    "sonnet",
+		PlannerEffort:   "xhigh",
 		DevWorktreePath: devPath,
 	})
 	if err != nil {
 		t.Fatalf("BuildIssuePlan() error = %v", err)
 	}
-	if plan.PlannerKind != "claude" || plan.PlannerModel != "" {
-		t.Fatalf("planner selection = %q/%q", plan.PlannerKind, plan.PlannerModel)
+	if plan.PlannerKind != "claude" || plan.PlannerModel != "sonnet" || plan.PlannerEffort != "xhigh" {
+		t.Fatalf("planner selection = %q/%q/%q", plan.PlannerKind, plan.PlannerModel, plan.PlannerEffort)
 	}
 	if !strings.Contains(PlanningBootstrapPrompt(plan), "You are the Claude planner") {
 		t.Fatalf("Claude bootstrap prompt = %q", PlanningBootstrapPrompt(plan))
 	}
-	if summary := IssuePlanSummary(plan); !strings.Contains(summary, "Planner       claude") || strings.Contains(summary, "Model         ") {
+	if summary := IssuePlanSummary(plan); !strings.Contains(summary, "Planner       claude") || !strings.Contains(summary, "Model         sonnet") || !strings.Contains(summary, "Thinking      xhigh") {
 		t.Fatalf("Claude summary = %q", summary)
 	}
 
@@ -790,12 +802,12 @@ func TestClaudePlannerKindPersistsAcrossFailedLaunchRetryAndRejectsReselection(t
 	if err != nil || !first.Degraded {
 		t.Fatalf("failed Claude ExecuteIssuePlan() = %#v, %v", first, err)
 	}
-	if len(client.startRequests) != 1 || client.startRequests[0].Kind != "claude" || client.startRequests[0].Model != "" {
+	if len(client.startRequests) != 1 || client.startRequests[0].Kind != "claude" || client.startRequests[0].Model != "sonnet" || client.startRequests[0].Effort != "xhigh" {
 		t.Fatalf("Claude start requests = %#v", client.startRequests)
 	}
 	state, _ := store.Load()
 	session := state.PlanningSessions["repo-123456:342"]
-	if session.PlannerKind != "claude" || session.Planner.Name != "" {
+	if session.PlannerKind != "claude" || session.PlannerModel != "sonnet" || session.PlannerEffort != "xhigh" || session.Planner.Name != "" {
 		t.Fatalf("pre-launch Claude intent = %#v", session)
 	}
 
@@ -814,20 +826,40 @@ func TestClaudePlannerKindPersistsAcrossFailedLaunchRetryAndRejectsReselection(t
 	if err != nil {
 		t.Fatalf("retry BuildIssuePlan() error = %v", err)
 	}
-	if retryPlan.PlannerKind != "claude" || retryPlan.PlannerModel != "" {
-		t.Fatalf("retry planner selection = %q/%q", retryPlan.PlannerKind, retryPlan.PlannerModel)
+	if retryPlan.PlannerKind != "claude" || retryPlan.PlannerModel != "sonnet" || retryPlan.PlannerEffort != "xhigh" {
+		t.Fatalf("retry planner selection = %q/%q/%q", retryPlan.PlannerKind, retryPlan.PlannerModel, retryPlan.PlannerEffort)
 	}
 	retried, err := service.ExecuteIssuePlan(context.Background(), retryPlan)
 	if err != nil || retried.Degraded {
 		t.Fatalf("retry ExecuteIssuePlan() = %#v, %v", retried, err)
 	}
-	if len(client.startRequests) != 2 || client.startRequests[1].Kind != "claude" || client.startRequests[1].Model != "" {
+	if len(client.startRequests) != 2 || client.startRequests[1].Kind != "claude" || client.startRequests[1].Model != "sonnet" || client.startRequests[1].Effort != "xhigh" {
 		t.Fatalf("retry start requests = %#v", client.startRequests)
 	}
 	state, _ = store.Load()
 	session = state.PlanningSessions["repo-123456:342"]
-	if session.PlannerKind != "claude" || session.Planner.Kind != "claude" {
-		t.Fatalf("ready Claude planner dropped kind intent: %#v", session)
+	if session.PlannerKind != "claude" || session.PlannerModel != "sonnet" || session.PlannerEffort != "xhigh" || session.Planner.Kind != "claude" {
+		t.Fatalf("ready Claude planner dropped selection intent: %#v", session)
+	}
+
+	_, err = service.BuildIssuePlan(context.Background(), IssuePlanRequest{
+		IssueNumber:     342,
+		PlannerEffort:   "high",
+		DevWorktreePath: devPath,
+	})
+	stage = nil
+	if !errors.As(err, &stage) || stage.Stage != "validate planner effort" || stage.Code != model.ErrConfigInvalid {
+		t.Fatalf("effort without explicit Claude error = %v", err)
+	}
+	_, err = service.BuildIssuePlan(context.Background(), IssuePlanRequest{
+		IssueNumber:     342,
+		PlannerKind:     "claude",
+		PlannerEffort:   "high",
+		DevWorktreePath: devPath,
+	})
+	stage = nil
+	if !errors.As(err, &stage) || stage.Stage != "resolve planner effort" || stage.Code != model.ErrConfigInvalid {
+		t.Fatalf("conflicting Claude effort error = %v", err)
 	}
 }
 

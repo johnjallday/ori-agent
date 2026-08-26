@@ -292,18 +292,20 @@ type PlanningSession struct {
 	// in. It is recorded so a later invocation can detect a mismatched dev
 	// worktree instead of silently placing a second planner in the wrong tree.
 	WorktreePath string `json:"worktree_path"`
-	// PlannerKind/PlannerModel are the per-plan launch intent. They are separate
-	// from Planner because intent must survive a failed launch before a live
-	// agent exists, and Herdr does not report a running agent's model.
-	PlannerKind  string        `json:"planner_kind,omitempty"`
-	PlannerModel string        `json:"planner_model,omitempty"`
-	TabID        string        `json:"tab_id,omitempty"`
-	RootPaneID   string        `json:"root_pane_id,omitempty"`
-	Planner      RoleAgent     `json:"planner,omitempty"`
-	Stage        PlanningStage `json:"stage,omitempty"`
-	Prompted     bool          `json:"prompted,omitempty"`
-	CreatedAt    time.Time     `json:"created_at"`
-	UpdatedAt    time.Time     `json:"updated_at"`
+	// PlannerKind/PlannerModel/PlannerEffort are the per-plan launch intent. They
+	// are separate from Planner because intent must survive a failed launch before
+	// a live agent exists, and Herdr does not report a running agent's model or
+	// Claude effort level.
+	PlannerKind   string        `json:"planner_kind,omitempty"`
+	PlannerModel  string        `json:"planner_model,omitempty"`
+	PlannerEffort string        `json:"planner_effort,omitempty"`
+	TabID         string        `json:"tab_id,omitempty"`
+	RootPaneID    string        `json:"root_pane_id,omitempty"`
+	Planner       RoleAgent     `json:"planner,omitempty"`
+	Stage         PlanningStage `json:"stage,omitempty"`
+	Prompted      bool          `json:"prompted,omitempty"`
+	CreatedAt     time.Time     `json:"created_at"`
+	UpdatedAt     time.Time     `json:"updated_at"`
 }
 
 // MemberIssueNumbers returns a defensive copy of the session's canonical
