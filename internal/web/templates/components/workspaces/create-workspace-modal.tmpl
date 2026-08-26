@@ -53,6 +53,11 @@
                 </div>
               </div>
               <div id="projectTemplateEmptyHint" style="margin-top: -2px; margin-bottom: 6px; font-size: 12px; color: var(--text-secondary);" hidden></div>
+              <!-- Announces only deliberate events — a blocked Next, a completed
+                   recovery. The card grid itself is not live: re-announcing every
+                   blueprint's state as the user arrows through it would bury the
+                   one message that matters. -->
+              <div id="blueprintReadinessLive" class="visually-hidden" aria-live="assertive" aria-atomic="true"></div>
               <div class="workspace-create-step-hint" style="margin-top: 4px; font-size: 12px; color: var(--text-secondary);">
                 Pick a blueprint (or Blank), then continue to name and tailor the workspace. Double-click remains a shortcut.
               </div>
@@ -66,6 +71,13 @@
                 <div id="templateBriefingDefault" class="workspace-template-briefing-default">
                   Blank uses the reusable Ask Ori agent as its primary workspace assistant. You can add more teammates after creation.
                 </div>
+                <!-- Readiness for the selected blueprint: what its state is, what
+                     it means, and the one next action. Rendered by
+                     blueprint-readiness.js from the server's projection; empty
+                     for a blueprint that is ready. Not a live region — it
+                     re-renders on every selection, so announcing it would read
+                     the briefing aloud while the user is still browsing. -->
+                <div id="templateBriefingReadiness" class="workspace-template-briefing-readiness"></div>
                 <div id="projectTemplateDescription" class="workspace-template-briefing-desc" aria-live="polite" hidden></div>
                 <div id="templateBriefingDeploys" class="workspace-template-briefing-deploys" hidden>
                   <div class="workspace-template-briefing-deploys-kicker">Includes</div>
@@ -332,6 +344,14 @@
               <!-- The same classified issues Team shows, blockers first, so the
                    receipt can never look calmer than the step it summarizes. -->
               <div id="workspaceReviewIssues" class="workspace-team-issues"></div>
+
+              <!-- Blueprint readiness, restated on Review. Review must never be
+                   the first place a known blocker appears, but readiness can
+                   change between choosing a blueprint and creating from it —
+                   a plugin disabled in another tab, a store that stopped
+                   responding — so the same structured state and the same
+                   recovery controls are available here too. -->
+              <div id="workspaceReviewReadiness" class="workspace-review-readiness"></div>
 
               <!-- Authoritative server failure. A toast disappears and cannot be
                    focused or acted on, so a failed create also lands here with

@@ -1074,6 +1074,150 @@
   color: var(--wc-ink) !important;
 }
 
+/* ---------- blueprint readiness ----------
+   State is carried by a text label first, a glyph second, and color last, so
+   it survives a monochrome display, a color-vision difference, and a
+   forced-colors theme. A ready blueprint gets no badge at all: badging every
+   card would make the two that need attention harder to find. */
+
+.workspace-create-modal .workspace-template-readiness-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  border: 1px solid currentcolor;
+  border-radius: 2px;
+  font-family: var(--wc-font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  line-height: 1.5;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.workspace-create-modal .workspace-template-readiness-badge[data-state="action_required"] {
+  color: var(--wc-keeper);
+}
+.workspace-create-modal .workspace-template-readiness-badge[data-state="unavailable"] {
+  color: var(--wc-alert);
+}
+.workspace-create-modal .workspace-template-readiness-glyph {
+  font-weight: 700;
+}
+
+/* On a card the badge sits under the tagline; on a list row it trails the
+   label. Both keep the badge inside the option's own button, so it never
+   becomes a second tab stop the user has to pass through. */
+.workspace-create-modal .workspace-template-card-readiness {
+  margin-top: 4px;
+  align-self: flex-start;
+}
+.workspace-create-modal .workspace-template-row-readiness {
+  margin-left: auto;
+}
+
+/* A blueprint that cannot be used stays selectable — the user has to be able
+   to read why — but reads as recessed rather than inviting. */
+.workspace-create-modal .workspace-template-card[data-readiness-state="unavailable"],
+.workspace-create-modal .workspace-template-row[data-readiness-state="unavailable"] {
+  border-style: dashed;
+}
+.workspace-create-modal
+  .workspace-template-card[data-readiness-state="unavailable"]
+  .workspace-template-card-label,
+.workspace-create-modal
+  .workspace-template-row[data-readiness-state="unavailable"]
+  .workspace-template-row-label {
+  color: var(--wc-ink-dim);
+}
+
+/* ---------- readiness panel (Step 1 briefing + Review) ---------- */
+
+.workspace-create-modal .workspace-blueprint-readiness {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--wc-line-bright);
+  border-left-width: 3px;
+  background: var(--wc-panel-2);
+  color: var(--wc-ink);
+}
+.workspace-create-modal .workspace-blueprint-readiness[data-state="action_required"] {
+  border-left-color: var(--wc-keeper);
+}
+.workspace-create-modal .workspace-blueprint-readiness[data-state="unavailable"] {
+  border-left-color: var(--wc-alert);
+}
+.workspace-create-modal .workspace-blueprint-readiness:focus-visible {
+  outline: 2px solid var(--wc-faction);
+  outline-offset: 2px;
+}
+.workspace-create-modal .workspace-blueprint-readiness-heading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--wc-ink-heading);
+}
+.workspace-create-modal .workspace-blueprint-readiness-detail,
+.workspace-create-modal .workspace-blueprint-readiness-dependency {
+  margin: 0 0 4px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--wc-ink-dim);
+}
+.workspace-create-modal .workspace-blueprint-readiness-dependency {
+  font-family: var(--wc-font-mono);
+  font-size: 11px;
+}
+.workspace-create-modal .workspace-blueprint-readiness-diagnostic {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: var(--wc-ink-faint);
+}
+.workspace-create-modal .workspace-blueprint-readiness-diagnostic > summary {
+  cursor: pointer;
+  color: var(--wc-ink-dim);
+}
+.workspace-create-modal .workspace-blueprint-readiness-diagnostic-text {
+  margin: 4px 0 0;
+  font-family: var(--wc-font-mono);
+  /* A parser message can be one long unbroken token; it must wrap rather than
+     push the modal into a horizontal scroll. */
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.workspace-create-modal .workspace-blueprint-readiness-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+.workspace-create-modal .workspace-blueprint-readiness-action {
+  font-size: 12px;
+}
+
+.workspace-create-modal .workspace-review-readiness:empty,
+.workspace-create-modal .workspace-template-briefing-readiness:empty {
+  display: none;
+}
+
+[data-bs-theme="light"] .workspace-create-modal .workspace-blueprint-readiness {
+  background: var(--wc-card-bg);
+}
+[data-bs-theme="light"]
+  .workspace-create-modal
+  .workspace-template-card[data-readiness-state="unavailable"]
+  .workspace-template-card-label,
+[data-bs-theme="light"]
+  .workspace-create-modal
+  .workspace-template-row[data-readiness-state="unavailable"]
+  .workspace-template-row-label {
+  color: var(--wc-ink-dim);
+}
+
 /* honor the OS reduce-motion preference (drop the hover lift/transition) */
 @media (prefers-reduced-motion: reduce) {
   .workspace-create-modal .workspace-template-card,

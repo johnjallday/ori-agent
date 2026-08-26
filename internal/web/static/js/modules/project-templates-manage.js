@@ -330,6 +330,11 @@ async function ptmSettingsSave(value) {
 // the behavior default.
 
 // The synthetic "Blank" entry maps to no template (no template_id submitted).
+//
+// Its readiness is stated explicitly rather than left absent: Blank depends on
+// nothing, so no catalog failure, missing plugin, or unreadable manifest may
+// ever make it unavailable. It is the escape hatch the whole picker falls back
+// to.
 const PTC_BLANK = {
   id: '',
   name: '',
@@ -340,8 +345,23 @@ const PTC_BLANK = {
   behavior_profile: 'general',
   starter_tasks: [],
   has_skeleton: false,
-  blank: true
+  blank: true,
+  readiness: { state: 'ready', ownership: 'builtin', reason: '' }
 };
+
+// A monotonically increasing token for catalog loads. A response that arrives
+// after a newer request started is discarded rather than painted, so a slow
+// first load cannot overwrite the state a completed recovery just produced.
+let ptcCatalogGeneration = 0;
+
+function ptcReadiness(template) {
+  return window.BlueprintReadiness?.normalize(template?.readiness) || null;
+}
+
+function ptcIsBlocked(template) {
+  const readiness = ptcReadiness(template);
+  return Boolean(readiness && readiness.state !== 'ready');
+}
 
 let ptcSelected = PTC_BLANK;
 
@@ -359,6 +379,8 @@ function ptcElements() {
     importToggle: document.getElementById('folderImportToggle'),
     openAfterCreate: document.getElementById('projectTemplateOpenAfterCreate'),
     openAfterCreateToggle: document.getElementById('projectTemplateOpenAfterCreateToggle'),
+    readinessPanel: document.getElementById('templateBriefingReadiness'),
+    readinessLive: document.getElementById('blueprintReadinessLive'),
     // Briefing panel: the selected template's description + a "deploys" readout.
     blueprintHeader: document.getElementById('workspaceCreateBlueprintHeader'),
     briefingHeader: document.getElementById('workspaceCreateBriefingHeader'),
@@ -430,20 +452,68 @@ function ptcEmitAdvance() {
     ?.dispatchEvent(new CustomEvent('workspace-template-advance'));
 }
 
-function ptcMarkSelectedAcross(selectedEl) {
+// Every selectable blueprint control, grid then list, in the order a user
+// arrows through them.
+function ptcOptions() {
   const els = ptcElements();
-  [els.grid, els.userList].forEach(container => {
-    container?.querySelectorAll('.workspace-template-card, .workspace-template-row').forEach(el => {
-      const on = el === selectedEl;
-      el.classList.toggle('is-selected', on);
-      el.setAttribute('aria-checked', on ? 'true' : 'false');
-    });
+  return [els.grid, els.userList]
+    .filter(Boolean)
+    .flatMap(container =>
+      Array.from(container.querySelectorAll('.workspace-template-card, .workspace-template-row'))
+    );
+}
+
+// A radiogroup has one tab stop, and arrow keys move within it. Without the
+// roving tabindex the grid announces itself as a radiogroup and then behaves
+// like a list of buttons — a promise the keyboard does not keep.
+function ptcMarkSelectedAcross(selectedEl) {
+  const options = ptcOptions();
+  let selected = null;
+  options.forEach(el => {
+    const on = el === selectedEl;
+    el.classList.toggle('is-selected', on);
+    el.setAttribute('aria-checked', on ? 'true' : 'false');
+    if (on) selected = el;
   });
+  const stop = selected || options[0] || null;
+  options.forEach(el => {
+    el.tabIndex = el === stop ? 0 : -1;
+  });
+}
+
+// Arrow keys move the selection; Home/End jump to the ends. Selection follows
+// focus, which is the expected radiogroup behavior — and safe here because
+// selecting an unavailable blueprint only explains it, never acts on it.
+function ptcHandleOptionKeydown(event) {
+  const keys = ['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp', 'Home', 'End'];
+  if (!keys.includes(event.key)) return;
+  const options = ptcOptions();
+  const current = options.indexOf(event.currentTarget);
+  if (current < 0 || options.length === 0) return;
+  event.preventDefault();
+
+  let next = current;
+  if (event.key === 'Home') next = 0;
+  else if (event.key === 'End') next = options.length - 1;
+  else if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+    next = (current + 1) % options.length;
+  } else {
+    next = (current - 1 + options.length) % options.length;
+  }
+
+  const target = options[next];
+  if (!target) return;
+  target.focus();
+  target.click();
 }
 
 function ptcSelect(template, cardEl) {
   ptcSelected = template || PTC_BLANK;
   const els = ptcElements();
+  // A refusal message belongs to the attempt that produced it. Choosing a
+  // different blueprint ends that attempt, so the announcement is cleared
+  // rather than left to be re-read as advice about a card nobody is on.
+  ptcClearAnnouncement();
   ptcMarkSelectedAcross(cardEl);
   // Picking a library template clears the ad-hoc folder (mutually exclusive);
   // selecting Blank keeps a typed path so it can act as the override.
@@ -452,13 +522,59 @@ function ptcSelect(template, cardEl) {
   ptcEmitSelection();
 }
 
+// Attaches the shared behavior every blueprint control has, whichever shape it
+// takes: a readiness badge, an accessible description of its state, selection,
+// keyboard navigation, and the double-click shortcut.
+//
+// Double-click advances only from a ready blueprint. An unavailable one stays
+// selectable — the user needs to be able to read why — but the shortcut must
+// not carry them past a blocker they have not seen.
+function ptcDecorateOption(element, template, kind) {
+  const readiness = ptcReadiness(template);
+  element.dataset.templateId = template.id || '';
+  if (readiness) element.dataset.readinessState = readiness.state;
+
+  const badge = window.BlueprintReadiness?.renderBadge(readiness);
+  if (badge) {
+    badge.classList.add(`workspace-template-${kind}-readiness`);
+    element.append(badge);
+  }
+
+  const description = window.BlueprintReadiness?.describe(readiness) || '';
+  if (description) {
+    // Described-by rather than appended text: the visible badge already says
+    // "Setup required"; the description adds the why for a screen reader
+    // without repeating the label on screen.
+    const help = document.createElement('span');
+    help.className = 'visually-hidden';
+    help.id = `blueprintReadinessDesc-${kind}-${(template.id || 'blank').replace(/[^\w:-]/g, '')}`;
+    help.textContent = description;
+    element.append(help);
+    element.setAttribute('aria-describedby', help.id);
+  } else {
+    element.removeAttribute('aria-describedby');
+  }
+
+  element.addEventListener('click', () => ptcSelect(template, element));
+  element.addEventListener('keydown', ptcHandleOptionKeydown);
+  element.addEventListener('dblclick', () => {
+    ptcSelect(template, element);
+    if (ptcIsBlocked(template)) {
+      ptcAnnounceBlocked(template);
+      ptcFocusReadinessPanel();
+      return;
+    }
+    ptcEmitAdvance();
+  });
+}
+
 function ptcCard(template) {
   const card = document.createElement('button');
   card.type = 'button';
   card.className = 'workspace-template-card';
   card.setAttribute('role', 'radio');
   card.setAttribute('aria-checked', 'false');
-  card.dataset.templateId = template.id || '';
+  card.tabIndex = -1;
   const icon = document.createElement('span');
   icon.className = 'workspace-template-card-icon';
   icon.setAttribute('aria-hidden', 'true');
@@ -474,11 +590,7 @@ function ptcCard(template) {
     tagline.textContent = taglineText;
     card.append(tagline);
   }
-  card.addEventListener('click', () => ptcSelect(template, card));
-  card.addEventListener('dblclick', () => {
-    ptcSelect(template, card);
-    ptcEmitAdvance();
-  });
+  ptcDecorateOption(card, template, 'card');
   return card;
 }
 
@@ -488,7 +600,7 @@ function ptcRow(template) {
   row.className = 'workspace-template-row';
   row.setAttribute('role', 'radio');
   row.setAttribute('aria-checked', 'false');
-  row.dataset.templateId = template.id || '';
+  row.tabIndex = -1;
   const icon = document.createElement('span');
   icon.className = 'workspace-template-row-icon';
   icon.setAttribute('aria-hidden', 'true');
@@ -497,11 +609,7 @@ function ptcRow(template) {
   label.className = 'workspace-template-row-label';
   label.textContent = template.name || template.id;
   row.append(icon, label);
-  row.addEventListener('click', () => ptcSelect(template, row));
-  row.addEventListener('dblclick', () => {
-    ptcSelect(template, row);
-    ptcEmitAdvance();
-  });
+  ptcDecorateOption(row, template, 'row');
   return row;
 }
 
@@ -628,6 +736,96 @@ function ptcRenderBriefing(els, importMode, templatePath) {
   if (els.briefingDeploys) {
     els.briefingDeploys.hidden = !(showAgents || showScaffold || showAddons);
   }
+
+  ptcRenderReadiness(els, showBriefing ? template : null);
+}
+
+// ptcRenderReadiness paints the selected blueprint's state into the briefing.
+// A ready blueprint (and Blank, and an ad-hoc folder path, and import mode)
+// leaves the panel empty: there is nothing to fix and nothing to say.
+function ptcRenderReadiness(els, template) {
+  const host = els.readinessPanel;
+  if (!host) return;
+  host.textContent = '';
+  const readiness = template ? ptcReadiness(template) : null;
+  const panel = readiness
+    ? window.BlueprintReadiness?.renderPanel(readiness, {
+        blueprintName: template?.name || template?.id || '',
+        onAction: action => ptcHandleReadinessAction(action, template, readiness)
+      })
+    : null;
+  if (panel) host.appendChild(panel);
+}
+
+// The recovery actions this group owns: routing and explanation. The plugin
+// lifecycle actions (install, enable, review update) are wired to the shared
+// lifecycle client in the next group; until then they route to the Plugins
+// page, which can already perform them, rather than silently doing nothing.
+function ptcHandleReadinessAction(action, template, readiness) {
+  const handler = ptcReadinessActionHandlers[action];
+  if (typeof handler === 'function') {
+    handler(template, readiness);
+    return;
+  }
+  ptcOpenPluginsPage();
+}
+
+function ptcOpenPluginsPage() {
+  window.open('/plugins', '_blank', 'noopener');
+}
+
+const ptcReadinessActionHandlers = {
+  change_blueprint: () => {
+    ptcSelect(PTC_BLANK, ptcBlankCard());
+    ptcBlankCard()?.focus();
+  },
+  manage_plugins: () => ptcOpenPluginsPage(),
+  edit_template_manifest: template => {
+    // Reveals the template's own folder so the author can open its
+    // template.json. Only ever offered for a template the user owns.
+    if (template?.id) void ptmReveal(template.id);
+  },
+  retry: () => void ptcPopulate({ preserveSelection: true })
+};
+
+// ptcAnnounceBlocked states, once and concisely, why the wizard did not
+// advance. It writes to the dedicated live region rather than the panel so the
+// message is heard when it is caused, not every time a card is browsed.
+function ptcAnnounceBlocked(template) {
+  const els = ptcElements();
+  if (!els.readinessLive) return;
+  const readiness = ptcReadiness(template);
+  const name = template?.name || template?.id || 'This blueprint';
+  const summary = readiness?.summary || window.BlueprintReadiness?.badgeLabel(readiness) || '';
+  els.readinessLive.textContent = summary
+    ? `Cannot continue with ${name}. ${summary}`
+    : `Cannot continue with ${name}.`;
+}
+
+function ptcClearAnnouncement() {
+  const els = ptcElements();
+  if (els.readinessLive) els.readinessLive.textContent = '';
+}
+
+// Moves focus into the readiness panel so the reason and its action are the
+// next thing reached, rather than leaving focus on a Next button that just
+// refused to do anything.
+function ptcFocusReadinessPanel() {
+  const panel = ptcElements().readinessPanel?.querySelector('.workspace-blueprint-readiness');
+  if (panel) panel.focus();
+  return Boolean(panel);
+}
+
+// The selected blueprint's readiness, or null when the current selection has
+// none to speak of: Blank depends on nothing, an ad-hoc folder path overrides
+// the picker entirely, and import mode does not use blueprints at all. Those
+// three must never be blocked by a catalog problem.
+function ptcSelectedReadiness() {
+  const els = ptcElements();
+  if (els.importToggle?.checked) return null;
+  if (els.pathInput?.value?.trim()) return null;
+  if (!ptcSelected || ptcSelected.blank) return null;
+  return ptcReadiness(ptcSelected);
 }
 
 function ptcShouldOpenAfterCreate() {
@@ -660,9 +858,30 @@ function ptcSyncImportVisibility() {
   ptcUpdateUI();
 }
 
-async function ptcPopulate() {
+// ptcPopulate (re)loads the catalog and rebuilds the picker.
+//
+// options.preserveSelection keeps the user on the blueprint they had chosen
+// across a reload — the case that matters after a recovery action, where
+// silently dropping them back to Blank would discard the choice they were part
+// way through fixing. The match is by blueprint identity, never display text.
+async function ptcPopulate(options) {
   const els = ptcElements();
   if (!els.grid) return;
+  const settings = options || {};
+  const generation = ++ptcCatalogGeneration;
+  const previousId = settings.preserveSelection ? ptcSelectionKey(ptcSelected) : '';
+
+  let data = null;
+  let loadFailed = false;
+  try {
+    data = await ptmFetchJSON('/api/project-templates');
+  } catch (error) {
+    console.error('Failed to load project templates:', error);
+    loadFailed = true;
+  }
+  // A response from a superseded request must not repaint the picker: the
+  // newer load is the one that reflects what the user just did.
+  if (generation !== ptcCatalogGeneration) return;
 
   els.grid.innerHTML = '';
   if (els.userList) els.userList.innerHTML = '';
@@ -673,18 +892,35 @@ async function ptcPopulate() {
   const blankCard = ptcCard({ ...PTC_BLANK });
   els.grid.appendChild(blankCard);
 
-  try {
-    const data = await ptmFetchJSON('/api/project-templates');
+  let restored = null;
+  let restoredTemplate = null;
+  if (loadFailed) {
+    if (els.emptyHint) {
+      els.emptyHint.textContent =
+        'Could not load the template library. You can still use any folder in Advanced as a template.';
+      els.emptyHint.hidden = false;
+    }
+  } else {
     const templates = Array.isArray(data.templates) ? data.templates : [];
     const builtins = templates.filter(t => t && t.id && t.builtin);
     const userTemplates = templates.filter(t => t && t.id && !t.builtin);
 
+    const register = (template, element) => {
+      if (previousId && ptcSelectionKey(template) === previousId) {
+        restored = element;
+        restoredTemplate = template;
+      }
+    };
     for (const template of builtins) {
-      els.grid.appendChild(ptcCard(template));
+      const card = ptcCard(template);
+      els.grid.appendChild(card);
+      register(template, card);
     }
     if (userTemplates.length > 0 && els.userList && els.userSection) {
       for (const template of userTemplates) {
-        els.userList.appendChild(ptcRow(template));
+        const row = ptcRow(template);
+        els.userList.appendChild(row);
+        register(template, row);
       }
       els.userSection.hidden = false;
     } else if (builtins.length === 0 && els.emptyHint) {
@@ -693,16 +929,24 @@ async function ptcPopulate() {
         : 'No templates yet. Use any folder in Advanced as a template.';
       els.emptyHint.hidden = false;
     }
-  } catch (error) {
-    console.error('Failed to load project templates:', error);
-    if (els.emptyHint) {
-      els.emptyHint.textContent =
-        'Could not load the template library. You can still use any folder in Advanced as a template.';
-      els.emptyHint.hidden = false;
-    }
   }
 
-  ptcSelect(PTC_BLANK, blankCard);
+  if (restoredTemplate) ptcSelect(restoredTemplate, restored);
+  else ptcSelect(PTC_BLANK, blankCard);
+}
+
+// ptcSelectionKey identifies a blueprint across a catalog reload. A
+// plugin-contributed blueprint is keyed by its owner and blueprint ID rather
+// than its qualified ID or display name, so the trusted replacement that
+// appears after an install or enable is recognized as the same choice even
+// though its identity in the catalog changed.
+function ptcSelectionKey(template) {
+  if (!template || template.blank) return '';
+  const owner = template.plugin_owner;
+  if (owner && owner.plugin_id && owner.blueprint_id) {
+    return `plugin:${owner.plugin_id}:${owner.blueprint_id}`;
+  }
+  return template.id ? `template:${template.id}` : '';
 }
 
 async function ptcBrowse() {
@@ -772,6 +1016,18 @@ function ptcInit() {
 window.ProjectTemplateCard = {
   populate: ptcPopulate,
   reset: ptcReset,
+  // The selected blueprint's readiness, normalized, or null when the current
+  // selection has none (Blank, an ad-hoc folder, import mode). The wizard uses
+  // it to decide whether advancing is allowed and what to announce; the server
+  // decides whether creating is.
+  getSelectedReadiness: ptcSelectedReadiness,
+  isSelectionBlocked: () => {
+    const readiness = ptcSelectedReadiness();
+    return Boolean(readiness && readiness.state !== 'ready');
+  },
+  announceBlocked: () => ptcAnnounceBlocked(ptcSelected),
+  focusReadiness: ptcFocusReadinessPanel,
+  clearAnnouncement: ptcClearAnnouncement,
   // syncState re-syncs import-mode visibility (which hides the blueprint grid,
   // briefing, and their headers) as well as the per-selection UI, so callers
   // like setImportModeEnabled don't depend on show-handler ordering.
