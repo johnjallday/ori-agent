@@ -24,10 +24,16 @@ func Load(source, cloneDir string, prefer SourceFormat) (PluginDescriptor, error
 }
 
 // ResolveSource returns a local directory containing the plugin bundle. A local
-// path is returned as-is; a git URL is cloned into cloneDir/<repo>; a git repo +
+// path is made absolute; a git URL is cloned into cloneDir/<repo>; a git repo +
 // subdirectory (encoded by encodeGitSubdir) is cloned/fetched — pinned to its
 // ref/sha when present — and the subdirectory is returned. The caller owns
 // cloneDir (e.g. a managed plugins directory).
+//
+// A local path is deliberately absolutized here rather than stored as given.
+// The resolved root is recorded as the plugin's install directory and read
+// again on every later update, and the server does not always run from the
+// directory an install was started in — a relative root recorded once resolves
+// somewhere else, or nowhere, the next time.
 func ResolveSource(source, cloneDir string) (string, error) {
 	source = strings.TrimSpace(source)
 	if source == "" {
@@ -46,7 +52,56 @@ func ResolveSource(source, cloneDir string) (string, error) {
 	if !info.IsDir() {
 		return "", fmt.Errorf("plugin: source %q is not a directory", source)
 	}
-	return source, nil
+	absolute, err := filepath.Abs(source)
+	if err != nil {
+		return "", fmt.Errorf("plugin: resolve source %q: %w", source, err)
+	}
+	return absolute, nil
+}
+
+// canonicalInstallRoot resolves the directory an installed plugin's components
+// live in, repairing records written before install roots were absolutized.
+//
+// A legacy relative root is not simply made absolute against the current
+// working directory: the server may well have moved since, and silently
+// resolving to a different directory is how an update ends up validating a
+// bundle that is not the installed one. Each candidate is tried in the order
+// that is most likely to be the real bundle and accepted only if it exists.
+func canonicalInstallRoot(installDir, source, cloneDir string) (string, error) {
+	installDir = strings.TrimSpace(installDir)
+	if installDir == "" {
+		return "", fmt.Errorf("plugin: installed record has no install directory")
+	}
+	if filepath.IsAbs(installDir) {
+		return filepath.Clean(installDir), nil
+	}
+
+	var candidates []string
+	if cloneDir = strings.TrimSpace(cloneDir); cloneDir != "" {
+		// Git sources are cloned under the managed clone directory, so a legacy
+		// relative root for one is almost always a path beneath it.
+		candidates = append(candidates, filepath.Join(cloneDir, installDir))
+	}
+	if absolute, err := filepath.Abs(installDir); err == nil {
+		// The original interpretation: relative to the process working
+		// directory. Correct whenever the server still starts where it did.
+		candidates = append(candidates, absolute)
+	}
+	source = strings.TrimSpace(source)
+	if source != "" && !isGitURL(source) {
+		if _, isSubdir := parseGitSubdir(source); !isSubdir {
+			if absolute, err := filepath.Abs(source); err == nil {
+				candidates = append(candidates, absolute)
+			}
+		}
+	}
+
+	for _, candidate := range candidates {
+		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+			return filepath.Clean(candidate), nil
+		}
+	}
+	return "", fmt.Errorf("plugin: install directory %q could not be located", installDir)
 }
 
 func isGitURL(s string) bool {

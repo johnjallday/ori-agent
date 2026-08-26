@@ -33,7 +33,7 @@ func folderWorkspace(t *testing.T, handler *Handler, wsID string) *agentworkspac
 // Downloads Janitor's shape, without depending on that template existing yet.
 func writeSetupRequirementTemplate(t *testing.T, libDir string) {
 	t.Helper()
-	dir := filepath.Join(libDir, "folder-template")
+	dir := filepath.Join(libDir, "downloads-janitor")
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +63,7 @@ func TestCreateWorkspace_CarriesSetupRequirementsUnresolved(t *testing.T) {
 
 	writeSetupRequirementTemplate(t, handler.templatesRootResolver())
 
-	w, resp := postCreateWorkspace(t, handler, `{"name":"Inbox WS","template_id":"folder-template"}`)
+	w, resp := postCreateWorkspace(t, handler, `{"name":"Inbox WS","template_id":"downloads-janitor"}`)
 	if w.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
 	}
@@ -120,7 +120,7 @@ func TestCreateWorkspace_CarriesSetupRequirementsUnresolved(t *testing.T) {
 // steps reference its own directory, capability, and plugin declarations.
 func writeWizardTemplate(t *testing.T, libDir, title string) {
 	t.Helper()
-	dir := filepath.Join(libDir, "wizard-template")
+	dir := filepath.Join(libDir, "research-project")
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +159,7 @@ func TestCreateWorkspace_SnapshotsSetupWizardIntoProvenance(t *testing.T) {
 	libDir := handler.templatesRootResolver()
 	writeWizardTemplate(t, libDir, "Set up the workspace")
 
-	w, resp := postCreateWorkspace(t, handler, `{"name":"Wizard WS","template_id":"wizard-template"}`)
+	w, resp := postCreateWorkspace(t, handler, `{"name":"Wizard WS","template_id":"research-project"}`)
 	if w.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
 	}
@@ -173,7 +173,7 @@ func TestCreateWorkspace_SnapshotsSetupWizardIntoProvenance(t *testing.T) {
 	if prov == nil || prov.SetupWizard == nil {
 		t.Fatalf("creation did not snapshot the wizard: %+v", prov)
 	}
-	if prov.TemplateID != "wizard-template" || prov.Version != 1 {
+	if prov.TemplateID != "research-project" || prov.Version != 1 {
 		t.Fatalf("wizard snapshot is missing its source blueprint identity: %+v", prov)
 	}
 	if prov.SetupWizard.Title != "Set up the workspace" || len(prov.SetupWizard.Steps) != 4 {
@@ -340,8 +340,6 @@ func TestCreateWorkspace_RefusesTemplateWithUnusableSetupWizard(t *testing.T) {
 	// exist.
 	manifest := `{
 		"name": "Broken Wizard",
-		"builtin": true,
-		"builtin_version": 1,
 		"directory_requirements": [{"key": "inbox-root", "label": "Inbox folder"}],
 		"setup_wizard": {
 			"version": 1,

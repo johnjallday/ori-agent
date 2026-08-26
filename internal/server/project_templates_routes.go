@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/johnjallday/ori-agent/internal/blueprintreadiness"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/plugin"
@@ -66,8 +67,19 @@ func (c templateRuntimeCatalog) HasRuntimeAdapter(id string) bool {
 	return ok
 }
 
+// blueprintCatalogEntry is one selectable blueprint plus the readiness
+// projection describing whether it can actually be used right now.
+//
+// The template is embedded, so every field existing clients already read stays
+// exactly where it was; `readiness` is purely additive.
+type blueprintCatalogEntry struct {
+	projecttemplates.Template
+	Readiness blueprintreadiness.Readiness `json:"readiness"`
+}
+
 // handleProjectTemplates serves GET /api/project-templates: the project
-// template library available for workspace creation.
+// template library available for workspace creation, each entry carrying its
+// current dependency readiness.
 func (s *Server) handleProjectTemplates(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		_ = orihttp.RespondMethodNotAllowed(w)
@@ -75,61 +87,159 @@ func (s *Server) handleProjectTemplates(w http.ResponseWriter, r *http.Request) 
 	}
 
 	root := resolveTemplatesRoot(s.Core.ConfigManager)
-	var templates []projecttemplates.Template
-	var err error
-	if s.projectTemplateCatalog == nil {
-		templates, err = projecttemplates.ListLibrary(root)
-	} else {
-		templates, err = projecttemplates.ListLibraryWithCatalog(root, s.projectTemplateCatalog)
-	}
+	entries, err := s.buildBlueprintCatalog(root)
 	if err != nil {
 		_ = orihttp.RespondInternalError(w, "Failed to read templates library")
 		return
 	}
-	if templates == nil {
-		templates = []projecttemplates.Template{}
-	}
-	if s.Handlers != nil && s.Handlers.Plugin != nil {
-		installed, listErr := s.Handlers.Plugin.Manager().List()
-		if listErr != nil {
-			logger.Warn("Plugin blueprints could not be listed", logger.Fields{"error": listErr.Error()})
-		} else {
-			templates = mergeActivePluginBlueprints(templates, activePluginBlueprintTemplates(installed))
-		}
-	}
 
 	_ = orihttp.RespondSuccess(w, map[string]any{
-		"templates":      templates,
+		"templates":      entries,
 		"templates_root": root,
 	})
 }
 
-func mergeActivePluginBlueprints(existing, contributed []projecttemplates.Template) []projecttemplates.Template {
-	if len(contributed) == 0 {
-		return existing
+// buildBlueprintCatalog assembles the creation catalog: the library, the
+// blueprints installed plugins contribute, and one readiness projection per
+// entry derived from the same authoritative state the create gate uses.
+func (s *Server) buildBlueprintCatalog(root string) ([]blueprintCatalogEntry, error) {
+	catalog := s.projectTemplateCatalog
+	var templates []projecttemplates.Template
+	var err error
+	if catalog == nil {
+		templates, err = projecttemplates.ListLibrary(root)
+	} else {
+		templates, err = projecttemplates.ListLibraryWithCatalog(root, catalog)
 	}
-	superseded := make(map[string]struct{})
-	for _, template := range contributed {
-		if template.PluginOwner != nil && strings.TrimSpace(template.PluginOwner.BlueprintID) != "" {
-			superseded[strings.TrimSpace(template.PluginOwner.BlueprintID)] = struct{}{}
+	if err != nil {
+		return nil, err
+	}
+
+	sources := blueprintreadiness.Sources{Catalog: catalog}
+	var candidates []pluginBlueprintCandidate
+	if s.Handlers != nil && s.Handlers.Plugin != nil {
+		installed, listErr := s.Handlers.Plugin.Manager().List()
+		if listErr != nil {
+			// A failed read is not "nothing is installed". Recording it here is
+			// what turns a blueprint's card into "could not check — retry"
+			// instead of silently offering a stale built-in as ready.
+			logger.Warn("Plugin blueprints could not be listed", logger.Fields{"error": listErr.Error()})
+			sources.DependencyStateUnavailable = true
+		} else {
+			sources.Installed = installed
+			candidates = candidatePluginBlueprintTemplates(installed)
 		}
 	}
-	merged := make([]projecttemplates.Template, 0, len(existing)+len(contributed))
+
+	merged := mergePluginBlueprintCandidates(templates, candidates)
+	entries := make([]blueprintCatalogEntry, 0, len(merged))
+	for _, template := range merged {
+		entries = append(entries, blueprintCatalogEntry{
+			Template:  template,
+			Readiness: blueprintreadiness.Derive(template, sources),
+		})
+	}
+	return entries, nil
+}
+
+// mergePluginBlueprintCandidates folds plugin-contributed blueprints into the
+// library listing and decides which matching built-in each one replaces.
+//
+// An active candidate supersedes its matching built-in, as it always has: the
+// plugin-owned manifest is the current definition of that blueprint. An inert
+// candidate — one whose plugin is installed but disabled or otherwise not
+// usable yet — supersedes only a RETIRED built-in. That is the case the
+// substitution exists for: the app stopped shipping a blueprint, a plugin now
+// owns it, and the user must see the plugin's version (and the one action that
+// makes it work) rather than a shipped copy that is no longer maintained.
+//
+// The converse restriction matters just as much: an inert candidate must never
+// displace a built-in the app still ships, or installing a plugin that cannot
+// run here would take a working blueprint away.
+func mergePluginBlueprintCandidates(existing []projecttemplates.Template, candidates []pluginBlueprintCandidate) []projecttemplates.Template {
+	if len(candidates) == 0 {
+		return existing
+	}
+	supersededByActive := make(map[string]struct{})
+	supersededWhenRetired := make(map[string]struct{})
+	for _, candidate := range candidates {
+		if candidate.Template.PluginOwner == nil {
+			continue
+		}
+		blueprintID := strings.TrimSpace(candidate.Template.PluginOwner.BlueprintID)
+		if blueprintID == "" {
+			continue
+		}
+		if candidate.Active {
+			supersededByActive[blueprintID] = struct{}{}
+			continue
+		}
+		supersededWhenRetired[blueprintID] = struct{}{}
+	}
+
+	merged := make([]projecttemplates.Template, 0, len(existing)+len(candidates))
 	for _, template := range existing {
 		if template.Builtin {
-			if _, replaced := superseded[template.ID]; replaced {
+			if _, replaced := supersededByActive[template.ID]; replaced {
+				continue
+			}
+			if _, replaced := supersededWhenRetired[template.ID]; replaced && !projecttemplates.IsBuiltinStarterID(template.ID) {
 				continue
 			}
 		}
 		merged = append(merged, template)
 	}
-	return append(merged, contributed...)
+	for _, candidate := range candidates {
+		merged = append(merged, candidate.Template)
+	}
+	return merged
+}
+
+// pluginBlueprintCandidate is one blueprint an installed plugin contributes,
+// paired with whether that plugin can currently supply it. Active is carried
+// explicitly rather than inferred from the template, so nothing downstream has
+// to reconstruct the lifecycle decision from a display field.
+type pluginBlueprintCandidate struct {
+	Template projecttemplates.Template
+	Active   bool
+}
+
+// candidatePluginBlueprintTemplates returns every blueprint an installed
+// plugin contributes, including those whose plugin is currently disabled,
+// unsupported, or incompatible.
+//
+// Listing an unusable blueprint is deliberate and is not the same as enabling
+// it: an inert candidate carries no skeleton path, so nothing can be
+// instantiated from it, and creation resolves only through
+// activePluginBlueprintTemplates. It exists so the user can see the blueprint
+// they installed a plugin for, learn why it is not ready, and take the one
+// action that fixes it.
+func candidatePluginBlueprintTemplates(installed []plugin.InstalledPlugin) []pluginBlueprintCandidate {
+	var candidates []pluginBlueprintCandidate
+	for _, entry := range installed {
+		active := pluginBlueprintsActive(entry)
+		for _, blueprint := range entry.ResolvedBlueprints {
+			template := blueprint.Template
+			if active {
+				template.Path = blueprint.SkeletonRoot
+				template.HasSkeleton = true
+			} else {
+				// Withholding the skeleton root keeps an inert candidate
+				// uninstantiable by construction rather than by a check
+				// somewhere else remembering to run.
+				template.Path = ""
+				template.HasSkeleton = false
+			}
+			candidates = append(candidates, pluginBlueprintCandidate{Template: template, Active: active})
+		}
+	}
+	return candidates
 }
 
 func activePluginBlueprintTemplates(installed []plugin.InstalledPlugin) []projecttemplates.Template {
 	var templates []projecttemplates.Template
 	for _, candidate := range installed {
-		if !candidate.Enabled || candidate.WorkspaceSurfaces == nil || !pluginArtifactsAvailable(candidate.ResolvedArtifacts) {
+		if !pluginBlueprintsActive(candidate) {
 			continue
 		}
 		for _, blueprint := range candidate.ResolvedBlueprints {
@@ -140,6 +250,26 @@ func activePluginBlueprintTemplates(installed []plugin.InstalledPlugin) []projec
 		}
 	}
 	return templates
+}
+
+// pluginBlueprintsActive reports whether an installed plugin's contributed
+// blueprints may be instantiated: it is enabled, it actually declares a
+// workspace surface contribution, every artifact this platform needs resolved,
+// and its declared surface protocol range includes the running host.
+//
+// The protocol check is repeated here rather than trusted from install time
+// because an Ori upgrade can move the host out of a range that was valid when
+// the record was written.
+func pluginBlueprintsActive(candidate plugin.InstalledPlugin) bool {
+	if !candidate.Enabled || candidate.WorkspaceSurfaces == nil {
+		return false
+	}
+	if !pluginArtifactsAvailable(candidate.ResolvedArtifacts) {
+		return false
+	}
+	protocol := candidate.WorkspaceSurfaces.Protocol
+	maximum := max(protocol.Max, protocol.Min)
+	return protocol.Min <= plugin.SurfaceProtocolVersion && maximum >= plugin.SurfaceProtocolVersion
 }
 
 func pluginArtifactsAvailable(artifacts []plugin.ResolvedArtifact) bool {

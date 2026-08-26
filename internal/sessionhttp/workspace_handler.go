@@ -326,48 +326,22 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Unusable-runtime-contract gate: a template whose runtime_requirements block
-	// cannot be honored is refused before workspace files, agents, tasks,
-	// plugins, or permissions are changed. Treating an invalid declaration as
-	// absent would silently turn a requirement-bearing mode into an ungated one.
-	if templateResolved && resolvedTemplate.HasInvalidRuntimeRequirements() {
-		_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{
-			"error":                      fmt.Sprintf("This blueprint's runtime requirements are unusable, so no workspace was created. Fix its template.json: %s", resolvedTemplate.RuntimeRequirementsError),
-			"runtime_requirements_error": resolvedTemplate.RuntimeRequirementsError,
-		})
-		return
-	}
-
-	// Unusable-setup-wizard gate: a template whose `setup_wizard` block could not
-	// be understood is refused outright rather than created without its setup.
-	// The author declared steps that grant folder access, connect accounts, or
-	// change permissions; creating the workspace anyway would leave the user with
-	// a blueprint that silently does none of them. Reported before the plugin gate
-	// because a manifest Ori cannot read is the more fundamental problem.
-	if templateResolved && resolvedTemplate.HasInvalidSetupWizard() {
-		_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{
-			"error":              fmt.Sprintf("This blueprint's setup wizard is unusable, so no workspace was created. Fix its template.json: %s", resolvedTemplate.SetupWizardError),
-			"setup_wizard_error": resolvedTemplate.SetupWizardError,
-		})
-		return
-	}
-
-	// Required-plugin gate: a template that declares plugins requires them
-	// installed and enabled before creation, so the workspace is never created
-	// missing its required tools. Reject with a structured 409 naming what to
-	// install/enable; the create modal surfaces this and offers the install/enable
-	// actions.
+	// Blueprint readiness gate. The catalog the user chose from was drawn at
+	// some earlier moment; this re-derives the same contract from current state
+	// before any workspace file, agent, task, capability, plugin binding, or
+	// permission is touched.
 	//
-	// A blueprint with a Setup Wizard is exempt: its wizard may offer an
-	// operating mode that does not need an optional plugin. The trusted plugin
-	// blueprint path performs its own compatibility and attachment checks.
-	if templateResolved && !resolvedTemplate.HasSetupWizard() {
-		if missing, disabled := h.unsatisfiedRequiredPlugins(resolvedTemplate.Tools); len(missing)+len(disabled) > 0 {
-			_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{
-				"error":            "required plugins are not ready",
-				"missing_plugins":  missing,
-				"disabled_plugins": disabled,
-			})
+	// It covers every way a blueprint can be unusable in one place: a manifest
+	// whose runtime contract or setup wizard could not be understood (creating
+	// the workspace anyway would silently skip setup the author declared), a
+	// blueprint this build no longer ships, a required plugin that is missing,
+	// disabled, incompatible, or unrunnable here, and dependency state that
+	// could not be read at all. The refusal carries the current reason and the
+	// allowlisted recovery actions, so the wizard can offer the fix in place.
+	if templateResolved {
+		readiness := h.revalidateBlueprintReadiness(resolvedTemplate)
+		if blueprintCreationBlocked(resolvedTemplate, readiness) {
+			respondBlueprintReadinessConflict(w, resolvedTemplate, readiness)
 			return
 		}
 	}
