@@ -87,11 +87,12 @@ VISUAL or EDITOR for multiline Markdown. For one-shot capture, `--body-file -`
 reads the body from stdin.
 
 In the picker's Ready view, pressing `s` on a selected row asks for Claude or
-Pi. Claude then offers model and thinking-level choices; Pi opens provider/model
-options with `openai-codex` first. The command starts `wt plan --issue <N>`,
+Pi. Claude offers Sonnet, Opus, Fable, custom/default model choices and thinking;
+Pi opens provider/model options with `openai-codex` first, then Pi thinking.
+The command starts `wt plan --issue <N>`,
 shows its normal confirmation summary,
 and launches the selected Herdr-managed planner in the dev worktree. Space marks
-ordinary backlog rows and `b` asks for the same agent/model choice before
+ordinary backlog rows and `b` asks for the same planner selection before
 planning at least two marks as one bundle after showing all evidence
 and asking for the compatibility affirmation. Feature proposals remain on the
 single-Issue path. The same `s` is available from the opened-Issue action bar
@@ -1775,7 +1776,7 @@ prompt_approve_issue() {
 
 planner_kind_choice=""
 planner_model_choice=""
-planner_effort_choice=""
+planner_thinking_choice=""
 planner_model_catalog_providers=()
 planner_model_catalog_provider=()
 planner_model_catalog_model=()
@@ -1886,6 +1887,7 @@ prompt_claude_planner_model() {
     printf '  [Enter] Integration default (or recorded model on retry)\n'
     printf '  [1/s] Sonnet (sonnet)\n'
     printf '  [2/o] Opus (opus)\n'
+    printf '  [3/f] Fable (fable)\n'
     printf '  [c] Custom alias or full model name\n'
     printf '  [q] Cancel\n'
     printf 'model> '
@@ -1894,6 +1896,7 @@ prompt_claude_planner_model() {
       "") return 0 ;;
       1|s|S|sonnet|Sonnet) planner_model_choice="sonnet"; return 0 ;;
       2|o|O|opus|Opus) planner_model_choice="opus"; return 0 ;;
+      3|f|F|fable|Fable) planner_model_choice="fable"; return 0 ;;
       c|C|custom|Custom)
         prompt_custom_planner_model && return 0
         ;;
@@ -1901,14 +1904,14 @@ prompt_claude_planner_model() {
         printf 'Cancelled.\n'
         return 1
         ;;
-      *) printf 'Choose Sonnet, Opus, Custom, Integration default, or Cancel.\n' >&2 ;;
+      *) printf 'Choose Sonnet, Opus, Fable, Custom, Integration default, or Cancel.\n' >&2 ;;
     esac
   done
 }
 
-prompt_claude_planner_effort() {
+prompt_claude_planner_thinking() {
   local choice
-  planner_effort_choice=""
+  planner_thinking_choice=""
   while true; do
     printf '\nChoose the Claude thinking level for this planning session.\n'
     printf '  [Enter] Integration default (or recorded level on retry)\n'
@@ -1922,16 +1925,51 @@ prompt_claude_planner_effort() {
     IFS= read -r choice || return 1
     case "$choice" in
       "") return 0 ;;
-      1|l|L|low|Low) planner_effort_choice="low"; return 0 ;;
-      2|m|M|medium|Medium) planner_effort_choice="medium"; return 0 ;;
-      3|h|H|high|High) planner_effort_choice="high"; return 0 ;;
-      4|x|X|xhigh|XHigh) planner_effort_choice="xhigh"; return 0 ;;
-      5|max|Max) planner_effort_choice="max"; return 0 ;;
+      1|l|L|low|Low) planner_thinking_choice="low"; return 0 ;;
+      2|m|M|medium|Medium) planner_thinking_choice="medium"; return 0 ;;
+      3|h|H|high|High) planner_thinking_choice="high"; return 0 ;;
+      4|x|X|xhigh|XHigh) planner_thinking_choice="xhigh"; return 0 ;;
+      5|max|Max) planner_thinking_choice="max"; return 0 ;;
       q|Q|cancel|Cancel)
         printf 'Cancelled.\n'
         return 1
         ;;
       *) printf 'Choose Low, Medium, High, Extra high, Max, Integration default, or Cancel.\n' >&2 ;;
+    esac
+  done
+}
+
+prompt_pi_planner_thinking() {
+  local choice
+  planner_thinking_choice=""
+  while true; do
+    printf '\nChoose the Pi thinking level for this planning session.\n'
+    printf 'Pi may clamp a level that the selected model does not support.\n'
+    printf '  [Enter] Integration default (or recorded level on retry)\n'
+    printf '  [1/o] Off\n'
+    printf '  [2/n] Minimal\n'
+    printf '  [3/l] Low\n'
+    printf '  [4/m] Medium\n'
+    printf '  [5/h] High\n'
+    printf '  [6/x] Extra high\n'
+    printf '  [7] Max\n'
+    printf '  [q] Cancel\n'
+    printf 'thinking> '
+    IFS= read -r choice || return 1
+    case "$choice" in
+      "") return 0 ;;
+      1|o|O|off|Off) planner_thinking_choice="off"; return 0 ;;
+      2|n|N|minimal|Minimal) planner_thinking_choice="minimal"; return 0 ;;
+      3|l|L|low|Low) planner_thinking_choice="low"; return 0 ;;
+      4|m|M|medium|Medium) planner_thinking_choice="medium"; return 0 ;;
+      5|h|H|high|High) planner_thinking_choice="high"; return 0 ;;
+      6|x|X|xhigh|XHigh) planner_thinking_choice="xhigh"; return 0 ;;
+      7|max|Max) planner_thinking_choice="max"; return 0 ;;
+      q|Q|cancel|Cancel)
+        printf 'Cancelled.\n'
+        return 1
+        ;;
+      *) printf 'Choose Off, Minimal, Low, Medium, High, Extra high, Max, Integration default, or Cancel.\n' >&2 ;;
     esac
   done
 }
@@ -2039,13 +2077,14 @@ prompt_planner_model() {
 prompt_planner_selection() {
   planner_kind_choice=""
   planner_model_choice=""
-  planner_effort_choice=""
+  planner_thinking_choice=""
   prompt_planner_agent || return 1
   if [[ "$planner_kind_choice" == "pi" ]]; then
     prompt_planner_model || return 1
+    prompt_pi_planner_thinking || return 1
   else
     prompt_claude_planner_model || return 1
-    prompt_claude_planner_effort || return 1
+    prompt_claude_planner_thinking || return 1
   fi
   return 0
 }
@@ -2054,10 +2093,10 @@ prompt_planner_selection() {
 # process. Start it in a short-lived zsh child so the existing wt plan flow
 # remains the single owner of eligibility revalidation, confirmation, planning
 # artifacts, Herdr placement, and the planner bootstrap prompt. The Issue number and
-# opaque model and effort stay separate arguments and are never evaluated as
-# shell syntax.
+# opaque model and thinking level stay separate arguments and are never
+# evaluated as shell syntax.
 launch_planner_plan() {
-  local issue_number="$1" planner_kind="$2" planner_model="${3:-}" planner_effort="${4:-}"
+  local issue_number="$1" planner_kind="$2" planner_model="${3:-}" planner_thinking="${4:-}"
 
   if ! command -v zsh >/dev/null 2>&1; then
     printf 'Planning requires zsh to run scripts/wt.sh.\n' >&2
@@ -2067,15 +2106,15 @@ launch_planner_plan() {
     printf 'Planning entrypoint not found: %s\n' "$script_dir/wt.sh" >&2
     return 1
   fi
-  zsh -c 'source "$1" || exit; typeset -a plan_args; plan_args=(--issue "$2" --kind "$3"); [[ -n "$4" ]] && plan_args+=(--model "$4"); [[ -n "$5" ]] && plan_args+=(--effort "$5"); wt plan "${plan_args[@]}"' \
-    devops-plan "$script_dir/wt.sh" "$issue_number" "$planner_kind" "$planner_model" "$planner_effort"
+  zsh -c 'source "$1" || exit; typeset -a plan_args; plan_args=(--issue "$2" --kind "$3"); [[ -n "$4" ]] && plan_args+=(--model "$4"); [[ -n "$5" ]] && plan_args+=(--thinking "$5"); wt plan "${plan_args[@]}"' \
+    devops-plan "$script_dir/wt.sh" "$issue_number" "$planner_kind" "$planner_model" "$planner_thinking"
 }
 
 # Each selected number crosses the bash-to-zsh boundary as its own positional
 # argument. The fixed child script builds a zsh array and never evaluates Issue
 # data as code.
 launch_planner_bundle_plan() {
-  local planner_kind="$1" planner_model="$2" planner_effort="$3" number seen
+  local planner_kind="$1" planner_model="$2" planner_thinking="$3" number seen
   shift 3
   local -a numbers=("$@") validated=()
 
@@ -2104,8 +2143,8 @@ launch_planner_bundle_plan() {
     printf 'Planning entrypoint not found: %s\n' "$script_dir/wt.sh" >&2
     return 1
   fi
-  zsh -c 'source "$1" || exit; kind="$2"; model="$3"; effort="$4"; shift 4; typeset -a plan_args; plan_args=(); for issue in "$@"; do plan_args+=(--issue "$issue"); done; plan_args+=(--kind "$kind"); [[ -n "$model" ]] && plan_args+=(--model "$model"); [[ -n "$effort" ]] && plan_args+=(--effort "$effort"); wt plan "${plan_args[@]}"' \
-    devops-bundle-plan "$script_dir/wt.sh" "$planner_kind" "$planner_model" "$planner_effort" "${validated[@]}"
+  zsh -c 'source "$1" || exit; kind="$2"; model="$3"; thinking="$4"; shift 4; typeset -a plan_args; plan_args=(); for issue in "$@"; do plan_args+=(--issue "$issue"); done; plan_args+=(--kind "$kind"); [[ -n "$model" ]] && plan_args+=(--model "$model"); [[ -n "$thinking" ]] && plan_args+=(--thinking "$thinking"); wt plan "${plan_args[@]}"' \
+    devops-bundle-plan "$script_dir/wt.sh" "$planner_kind" "$planner_model" "$planner_thinking" "${validated[@]}"
 }
 
 start_bundle_plan() {
@@ -2135,7 +2174,7 @@ start_bundle_plan() {
     validated+=("$number")
   done
   prompt_planner_selection || return 0
-  launch_planner_bundle_plan "$planner_kind_choice" "$planner_model_choice" "$planner_effort_choice" "${validated[@]}"
+  launch_planner_bundle_plan "$planner_kind_choice" "$planner_model_choice" "$planner_thinking_choice" "${validated[@]}"
 }
 
 # start_plan is the Ready-list `s` key. It refuses stale or malformed picker
@@ -2153,7 +2192,7 @@ start_plan() {
     return 1
   fi
   prompt_planner_selection || return 0
-  launch_planner_plan "$issue_number" "$planner_kind_choice" "$planner_model_choice" "$planner_effort_choice"
+  launch_planner_plan "$issue_number" "$planner_kind_choice" "$planner_model_choice" "$planner_thinking_choice"
 }
 
 # start_issue_plan is the opened-Issue action bar equivalent. can_plan was
@@ -2171,7 +2210,7 @@ start_issue_plan() {
     return 1
   fi
   prompt_planner_selection || return 0
-  launch_planner_plan "$issue_number" "$planner_kind_choice" "$planner_model_choice" "$planner_effort_choice"
+  launch_planner_plan "$issue_number" "$planner_kind_choice" "$planner_model_choice" "$planner_thinking_choice"
 }
 
 implementation_mode=""

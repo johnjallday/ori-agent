@@ -292,12 +292,15 @@ type PlanningSession struct {
 	// in. It is recorded so a later invocation can detect a mismatched dev
 	// worktree instead of silently placing a second planner in the wrong tree.
 	WorktreePath string `json:"worktree_path"`
-	// PlannerKind/PlannerModel/PlannerEffort are the per-plan launch intent. They
-	// are separate from Planner because intent must survive a failed launch before
-	// a live agent exists, and Herdr does not report a running agent's model or
-	// Claude effort level.
-	PlannerKind   string        `json:"planner_kind,omitempty"`
-	PlannerModel  string        `json:"planner_model,omitempty"`
+	// PlannerKind/PlannerModel/PlannerThinking are the per-plan launch intent.
+	// They are separate from Planner because intent must survive a failed launch
+	// before a live agent exists, and Herdr does not report a running agent's
+	// model or thinking level.
+	PlannerKind     string `json:"planner_kind,omitempty"`
+	PlannerModel    string `json:"planner_model,omitempty"`
+	PlannerThinking string `json:"planner_thinking,omitempty"`
+	// PlannerEffort loads the short-lived Claude-only state shape that preceded
+	// common Pi/Claude thinking selection. New writes clear it after migration.
 	PlannerEffort string        `json:"planner_effort,omitempty"`
 	TabID         string        `json:"tab_id,omitempty"`
 	RootPaneID    string        `json:"root_pane_id,omitempty"`

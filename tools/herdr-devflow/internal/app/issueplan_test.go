@@ -53,20 +53,29 @@ func TestParseIssuePlanArgs(t *testing.T) {
 			},
 		},
 		{
-			name: "Claude planner keeps model and effort",
-			args: []string{"--issue", "1", "--kind", "claude", "--model", "sonnet", "--effort", "xhigh", "--worktree", "/tmp/dev"},
+			name: "Claude planner keeps model and thinking",
+			args: []string{"--issue", "1", "--kind", "claude", "--model", "fable", "--thinking", "xhigh", "--worktree", "/tmp/dev"},
 			check: func(t *testing.T, parsed issuePlanArgs) {
-				if parsed.plannerKind != "claude" || parsed.plannerModel != "sonnet" || parsed.plannerEffort != "xhigh" {
-					t.Fatalf("planner selection = %q/%q/%q", parsed.plannerKind, parsed.plannerModel, parsed.plannerEffort)
+				if parsed.plannerKind != "claude" || parsed.plannerModel != "fable" || parsed.plannerThinking != "xhigh" {
+					t.Fatalf("planner selection = %q/%q/%q", parsed.plannerKind, parsed.plannerModel, parsed.plannerThinking)
 				}
 			},
 		},
 		{
-			name: "opaque Pi planner model stays one value",
-			args: []string{"--issue", "1", "--kind", "pi", "--model", "[openai] gpt 5.1; $(echo inert)", "--worktree", "/tmp/dev"},
+			name: "Claude effort remains a compatibility alias",
+			args: []string{"--issue", "1", "--kind", "claude", "--effort", "high", "--worktree", "/tmp/dev"},
 			check: func(t *testing.T, parsed issuePlanArgs) {
-				if parsed.plannerKind != "pi" || parsed.plannerModel != "[openai] gpt 5.1; $(echo inert)" {
-					t.Fatalf("planner selection = %q/%q", parsed.plannerKind, parsed.plannerModel)
+				if parsed.plannerThinking != "high" {
+					t.Fatalf("planner thinking = %q", parsed.plannerThinking)
+				}
+			},
+		},
+		{
+			name: "opaque Pi planner model and thinking stay separate",
+			args: []string{"--issue", "1", "--kind", "pi", "--model", "[openai] gpt 5.1; $(echo inert)", "--thinking", "max", "--worktree", "/tmp/dev"},
+			check: func(t *testing.T, parsed issuePlanArgs) {
+				if parsed.plannerKind != "pi" || parsed.plannerModel != "[openai] gpt 5.1; $(echo inert)" || parsed.plannerThinking != "max" {
+					t.Fatalf("planner selection = %q/%q/%q", parsed.plannerKind, parsed.plannerModel, parsed.plannerThinking)
 				}
 			},
 		},
@@ -82,11 +91,12 @@ func TestParseIssuePlanArgs(t *testing.T) {
 		{name: "kind with no value", args: []string{"--issue", "1", "--worktree", "/tmp/dev", "--kind"}, wantErr: true},
 		{name: "unsupported planner kind", args: []string{"--issue", "1", "--worktree", "/tmp/dev", "--kind", "codex"}, wantErr: true},
 		{name: "duplicate planner kind", args: []string{"--issue", "1", "--kind", "pi", "--kind", "claude", "--worktree", "/tmp/dev"}, wantErr: true},
-		{name: "Pi with effort", args: []string{"--issue", "1", "--kind", "pi", "--effort", "high", "--worktree", "/tmp/dev"}, wantErr: true},
-		{name: "effort with default Pi", args: []string{"--issue", "1", "--effort", "high", "--worktree", "/tmp/dev"}, wantErr: true},
-		{name: "invalid Claude effort", args: []string{"--issue", "1", "--kind", "claude", "--effort", "unbounded", "--worktree", "/tmp/dev"}, wantErr: true},
-		{name: "duplicate Claude effort", args: []string{"--issue", "1", "--kind", "claude", "--effort", "low", "--effort", "high", "--worktree", "/tmp/dev"}, wantErr: true},
-		{name: "effort with no value", args: []string{"--issue", "1", "--kind", "claude", "--worktree", "/tmp/dev", "--effort"}, wantErr: true},
+		{name: "Pi with Claude effort alias", args: []string{"--issue", "1", "--kind", "pi", "--effort", "high", "--worktree", "/tmp/dev"}, wantErr: true},
+		{name: "effort alias with default Pi", args: []string{"--issue", "1", "--effort", "high", "--worktree", "/tmp/dev"}, wantErr: true},
+		{name: "invalid Claude thinking", args: []string{"--issue", "1", "--kind", "claude", "--thinking", "minimal", "--worktree", "/tmp/dev"}, wantErr: true},
+		{name: "invalid Pi thinking", args: []string{"--issue", "1", "--kind", "pi", "--thinking", "unbounded", "--worktree", "/tmp/dev"}, wantErr: true},
+		{name: "duplicate thinking aliases", args: []string{"--issue", "1", "--kind", "claude", "--thinking", "low", "--effort", "high", "--worktree", "/tmp/dev"}, wantErr: true},
+		{name: "thinking with no value", args: []string{"--issue", "1", "--kind", "pi", "--worktree", "/tmp/dev", "--thinking"}, wantErr: true},
 		{name: "model with no value", args: []string{"--issue", "1", "--worktree", "/tmp/dev", "--model"}, wantErr: true},
 		{name: "empty model", args: []string{"--issue", "1", "--worktree", "/tmp/dev", "--model", "  "}, wantErr: true},
 		{name: "duplicate model", args: []string{"--issue", "1", "--model", "one", "--model", "two", "--worktree", "/tmp/dev"}, wantErr: true},
@@ -155,10 +165,10 @@ func TestSingleIssuePlanPayloadKeepsLegacyShapeAndAddsOnlyCanonicalNumbers(t *te
 		t.Fatalf("integration-default planner unexpectedly added a JSON model: %#v", payload)
 	}
 
-	plan.PlannerModel = "sonnet"
-	plan.PlannerEffort = "xhigh"
+	plan.PlannerModel = "fable"
+	plan.PlannerThinking = "xhigh"
 	payload = issuePlanPayload(plan)
-	if payload["planner_model"] != "sonnet" || payload["planner_effort"] != "xhigh" {
+	if payload["planner_model"] != "fable" || payload["planner_thinking"] != "xhigh" {
 		t.Fatalf("planner selection payload = %#v", payload)
 	}
 }
@@ -217,7 +227,7 @@ func TestIssuePlanRejectsBadArgumentsBeforeAnyIO(t *testing.T) {
 		{"issue-plan", "--issue", "1", "--issue", "nope", "--worktree", "/tmp/does-not-exist"},
 		{"issue-plan", "--issue", "1", "--kind", "codex", "--worktree", "/tmp/does-not-exist"},
 		{"issue-plan", "--issue", "1", "--kind", "pi", "--effort", "high", "--worktree", "/tmp/does-not-exist"},
-		{"issue-plan", "--issue", "1", "--kind", "claude", "--effort", "unbounded", "--worktree", "/tmp/does-not-exist"},
+		{"issue-plan", "--issue", "1", "--kind", "claude", "--thinking", "minimal", "--worktree", "/tmp/does-not-exist"},
 		{"issue-plan", "--issue", "1", "--model", "--unsafe", "--worktree", "/tmp/does-not-exist"},
 		{"issue-plan", "--issue", "1", "--model", "one", "--model", "two", "--worktree", "/tmp/does-not-exist"},
 		{"issue-plan", "--worktree", "/tmp/does-not-exist"},

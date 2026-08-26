@@ -5,7 +5,7 @@
 #   source scripts/wt.sh    # Load the function (cd works directly)
 #   wt                      # Interactive REPL (type: go, status, start, ...)
 #   wt go                   # One-shot worktree picker (navigate + cd)
-#   wt plan --issue <N> [--issue <N> ...] [--kind claude|pi] [--model MODEL] [--effort LEVEL] [--yes]
+#   wt plan --issue <N> [--issue <N> ...] [--kind claude|pi] [--model MODEL] [--thinking LEVEL] [--yes]
 #   wt start [prd] [--kind KIND] [--model MODEL] [--no-herdr] # Create a planned worktree
 #   wt new <name> [--kind KIND] [--model MODEL] # Create a clean worktree (no PRD/tasks)
 #   wt pr [name]            # Push branch and open a PR against dev
@@ -615,7 +615,7 @@ function wt_status_worktrees {
 # --- Issue planning -----------------------------------------------------
 #
 # wt plan accepts one Ready GitHub Issue or a repeated --issue bundle plus an
-# optional Claude/Pi kind, model, and Claude effort, and starts one session in the dev
+# optional Claude/Pi kind, model, and thinking level, and starts one session in the dev
 # worktree. It is a distinct lifecycle
 # stage from wt start:
 # planning happens in ori-agent-dev and never creates a branch, a worktree, or
@@ -625,12 +625,12 @@ function wt_status_worktrees {
 # the same way wt status delegates its rendering. This function only
 # validates arguments and resolves the exact dev worktree to plan in.
 function wt_plan_issue_usage {
-  echo "Usage: wt plan --issue <positive-integer> [--issue <positive-integer> ...] [--kind claude|pi] [--model MODEL] [--effort low|medium|high|xhigh|max] [--yes]"
+  echo "Usage: wt plan --issue <positive-integer> [--issue <positive-integer> ...] [--kind claude|pi] [--model MODEL] [--thinking LEVEL] [--yes]"
 }
 
 function wt_plan_issue {
-  local issue="" existing_issue planner_kind="" planner_model="" planner_effort=""
-  local kind_seen=0 model_seen=0 effort_seen=0 assume_yes=0
+  local issue="" existing_issue planner_kind="" planner_model="" planner_thinking=""
+  local kind_seen=0 model_seen=0 thinking_seen=0 effort_alias=0 assume_yes=0
   local -a args issues
   args=("$@")
   local arg index=1
@@ -686,19 +686,21 @@ function wt_plan_issue {
         planner_model="${args[$index]}"
         model_seen=1
         ;;
-      --effort)
+      --thinking|--effort)
+        local thinking_option="$arg"
         index=$(( index + 1 ))
-        if (( index > ${#args[@]} )) || [[ "${args[$index]}" != "low" && "${args[$index]}" != "medium" && "${args[$index]}" != "high" && "${args[$index]}" != "xhigh" && "${args[$index]}" != "max" ]]; then
-          echo "wt plan --effort requires low, medium, high, xhigh, or max"
+        if (( index > ${#args[@]} )); then
+          echo "wt plan $thinking_option requires a thinking level"
           wt_plan_issue_usage
           return 1
         fi
-        if (( effort_seen )); then
-          echo "wt plan accepts --effort only once"
+        if (( thinking_seen )); then
+          echo "wt plan accepts a thinking level only once"
           return 1
         fi
-        planner_effort="${args[$index]}"
-        effort_seen=1
+        planner_thinking="${args[$index]}"
+        thinking_seen=1
+        [[ "$thinking_option" == "--effort" ]] && effort_alias=1
         ;;
       --yes|-y)
         assume_yes=1
@@ -717,10 +719,24 @@ function wt_plan_issue {
     wt_plan_issue_usage
     return 1
   fi
-  if [[ "$planner_kind" != "claude" ]] && (( effort_seen )); then
-    echo "wt plan --effort is available only with --kind claude"
+  local effective_planner_kind="${planner_kind:-pi}"
+  if (( effort_alias )) && [[ "$effective_planner_kind" != "claude" ]]; then
+    echo "wt plan --effort is a Claude compatibility alias; use --thinking for Pi"
     wt_plan_issue_usage
     return 1
+  fi
+  if (( thinking_seen )); then
+    if [[ "$effective_planner_kind" == "claude" ]]; then
+      if [[ "$planner_thinking" != "low" && "$planner_thinking" != "medium" && "$planner_thinking" != "high" && "$planner_thinking" != "xhigh" && "$planner_thinking" != "max" ]]; then
+        echo "wt plan --thinking requires low, medium, high, xhigh, or max for Claude"
+        wt_plan_issue_usage
+        return 1
+      fi
+    elif [[ "$planner_thinking" != "off" && "$planner_thinking" != "minimal" && "$planner_thinking" != "low" && "$planner_thinking" != "medium" && "$planner_thinking" != "high" && "$planner_thinking" != "xhigh" && "$planner_thinking" != "max" ]]; then
+      echo "wt plan --thinking requires off, minimal, low, medium, high, xhigh, or max for Pi"
+      wt_plan_issue_usage
+      return 1
+    fi
   fi
 
   local dev_path
@@ -744,8 +760,8 @@ function wt_plan_issue {
   if (( model_seen )); then
     plan_args+=(--model "$planner_model")
   fi
-  if (( effort_seen )); then
-    plan_args+=(--effort "$planner_effort")
+  if (( thinking_seen )); then
+    plan_args+=(--thinking "$planner_thinking")
   fi
   plan_args+=(--worktree "$dev_path")
   if (( assume_yes )); then
@@ -2058,8 +2074,8 @@ function wt_dispatch {
     echo "Usage: wt [command] [args]"
     echo "  wt               - Interactive REPL (bare 'wt'; type commands, q to quit)"
     echo "  wt go            - One-shot worktree picker (navigate + cd)"
-    echo "  wt plan --issue <N> [--issue <N> ...] [--kind claude|pi] [--model MODEL] [--effort LEVEL] [--yes]"
-    echo "                   - Plan with Claude or Pi; Claude also supports effort"
+    echo "  wt plan --issue <N> [--issue <N> ...] [--kind claude|pi] [--model MODEL] [--thinking LEVEL] [--yes]"
+    echo "                   - Plan with Claude or Pi; both support thinking levels"
     echo "                     in the dev worktree (highest selected size route wins)."
     echo "                     Writes tasks/issue-<feature>.md and a starter checklist there;"
     echo "                     never touches the Issue on GitHub. Run 'wt start <feature>' once"

@@ -107,11 +107,11 @@ GitHub Issue into planning artifacts in `ori-agent-dev` and starts a selected
 worktree, no implementation.
 
 ~~~bash
-wt plan --issue 342 --kind claude                              # Claude defaults
-wt plan --issue 342 --kind claude --model sonnet --effort high # Claude selection
-wt plan --issue 342 --kind pi                                  # Pi default
-wt plan --issue 342 --kind pi --model openai/id                # explicit Pi model
-wt plan --issue 342 --yes                                      # legacy default Pi
+wt plan --issue 342 --kind claude                               # Claude defaults
+wt plan --issue 342 --kind claude --model fable --thinking high # Claude selection
+wt plan --issue 342 --kind pi                                   # Pi defaults
+wt plan --issue 342 --kind pi --model openai/id --thinking max  # Pi selection
+wt plan --issue 342 --yes                                       # legacy default Pi
 ~~~
 
 The shell only validates arguments and resolves the exact `dev` worktree; the
@@ -131,18 +131,20 @@ of an Issue that cannot change. That separation is the point:
   continuation target, a PR owner, or a `wt done` cleanup target.
 - Its kind is explicitly Claude or Pi (a direct command with no `--kind` keeps
   Pi as the backward-compatible default). The DevOps action asks for kind first.
-  Claude then offers Integration default, Sonnet, Opus, or a custom alias/full
-  model name, followed by Integration default, low, medium, high, xhigh, or max
-  thinking effort. Pi discovers available provider/model IDs with an offline
-  `pi --list-models` call that disables extensions, skills, prompts, themes,
-  context files, and project trust. `openai-codex` is promoted to the first
-  provider option, followed by the remaining discovered order. Blank means the
-  integration default, `c` permits a custom opaque model, and catalog failure
-  keeps default/custom/cancel available. Planning never consumes feature primary
-  or role defaults, and its selection cannot leak into a later feature handoff.
-  The selected kind/model/effort intent is recorded before Herdr starts,
-  retained across launch failure/reuse, and cannot be replaced by a conflicting
-  retry. A bare `wt start` uses the
+  Claude then offers Integration default, Sonnet, Opus, Fable, or a custom
+  alias/full model name, followed by Integration default, low, medium, high,
+  xhigh, or max thinking. Pi discovers available provider/model IDs with an
+  offline `pi --list-models` call that disables extensions, skills, prompts,
+  themes, context files, and project trust. `openai-codex` is promoted to the
+  first provider option, followed by the remaining discovered order; Pi then
+  offers Integration default, off, minimal, low, medium, high, xhigh, or max
+  thinking. Pi itself clamps unavailable levels to the selected model's
+  capabilities. Blank means the integration default, `c` permits a custom opaque
+  model, and catalog failure keeps default/custom/cancel available. Planning
+  never consumes feature primary or role defaults, and its selection cannot leak
+  into a later feature handoff. The selected kind/model/thinking intent is
+  recorded before Herdr starts, retained across launch failure/reuse, and cannot
+  be replaced by a conflicting retry. A bare `wt start` uses the
   configured primary pair; the Issue picker's later implementation action
   passes the owner's explicit Claude, Codex, Pi, or worktree-only kind choice
   and deliberately adds no implementation-model prompt.
@@ -647,14 +649,15 @@ participates.
 The `s` key is the direct link from this REPL to the planning flow above. In
 the Ready view, or on the opened Issue's own action bar when its live labels
 satisfy the same eligibility rule as Ready, it first asks for Claude or Pi.
-Claude offers Integration default, Sonnet, Opus, or a custom model, then a
-thinking level from Integration default through max. Pi presents numbered
-providers (`openai-codex` first) and then numbered models. Integration default,
+Claude offers Integration default, Sonnet, Opus, Fable, or a custom model, then
+a thinking level from Integration default through max. Pi presents numbered
+providers (`openai-codex` first), numbered models, then Integration default,
+off, minimal, low, medium, high, xhigh, or max thinking. Integration default,
 custom, back, and cancel remain available. It then runs `wt plan --issue <N>`
-with explicit `--kind`, optional `--model`, and Claude-only `--effort`. Bundle
-key `b` asks once and applies the same selection to its one planner. `wt plan`
-then performs its own fresh eligibility read, shows the selected
-kind/model/effort in the normal consequence summary and
+with explicit `--kind` and optional `--model`/`--thinking`. Bundle key `b` asks
+once and applies the same selection to its one planner. `wt plan` then performs
+its own fresh eligibility read, shows the selected kind/model/thinking in the
+normal consequence summary and
 confirmation, writes the planning artifacts, and launches the Herdr-managed
 planner. Off Ready, or on an Issue whose labels are not Ready
 (or could not be read), the key refuses before launching anything.
@@ -719,8 +722,8 @@ The Issue commands run `gh issue list`, `gh issue view`, `gh issue create`,
 The terminal picker fetches the complete open-Issue index and release count
 once and filters Issues locally until `r` refreshes both. It does not persist a
 cache or define a JSON contract. Its eligible `s`/`b` actions keep the planner
-model, effort, and Issue numbers as separate arguments while starting `wt plan`
-in two constrained zsh children; the later local-ready `i` action starts `wt start` in
+model, thinking level, and Issue numbers as separate arguments while starting
+`wt plan` in two constrained zsh children; the later local-ready `i` action starts `wt start` in
 the third constrained child. Neither path calls Herdr directly or evaluates
 Issue text as shell code. Agents that need structured data should use
 `gh issue list --json` directly. Capture remains a thin wrapper over the GitHub
@@ -1145,10 +1148,11 @@ tables, ANSI output, titles, or screen text for identity/state. Structured API
 errors are decoded from either CLI output stream, since Herdr can place a JSON
 error envelope on stderr.
 
-Feature names, roles, agent kinds, optional opaque model values, Claude effort
-levels, schedule IDs, timestamps, metadata tokens, and canonical
-linked-worktree paths are bounded and validated. Every external process receives
-an argument vector; the bridge does not use `eval` or build a shell command from
-untrusted values. An empty model/effort keeps the prior command vector
-byte-for-byte; any native selection follows Herdr's `--` separator, with model
-and effort each retained as one value argument.
+Feature names, roles, agent kinds, optional opaque model values, thinking
+levels, schedule IDs, timestamps, metadata tokens, and canonical linked-worktree
+paths are bounded and validated. Every external process receives an argument
+vector; the bridge does not use `eval` or build a shell command from untrusted
+values. An empty model/thinking selection keeps the prior command vector
+byte-for-byte; any native selection follows Herdr's `--` separator. Model and
+thinking each remain one value argument; the adapter emits Pi `--thinking` or
+Claude `--effort` as required by the installed CLIs.
