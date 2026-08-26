@@ -434,8 +434,8 @@ func TestDisabledHandoffIsANoOpAfterArgumentValidation(t *testing.T) {
 
 func TestParseHandoffArgsRequiresAnExplicitInitialTargetAndGatesResend(t *testing.T) {
 	t.Parallel()
-	parsed, err := parseHandoffArgs([]string{"--feature", "bridge", "--worktree", "/tmp/bridge", "--branch", "feature/bridge", "--kind", "codex"}, false)
-	if err != nil || parsed.feature != "bridge" || parsed.worktree != "/tmp/bridge" || parsed.branch != "feature/bridge" || parsed.kind != "codex" {
+	parsed, err := parseHandoffArgs([]string{"--feature", "bridge", "--worktree", "/tmp/bridge", "--branch", "feature/bridge", "--kind", "codex", "--model", "openai/codex-max"}, false)
+	if err != nil || parsed.feature != "bridge" || parsed.worktree != "/tmp/bridge" || parsed.branch != "feature/bridge" || parsed.kind != "codex" || parsed.model != "openai/codex-max" {
 		t.Fatalf("parseHandoffArgs() = %#v, %v", parsed, err)
 	}
 	if _, err := parseHandoffArgs([]string{"--feature", "bridge"}, false); err == nil {
@@ -451,16 +451,71 @@ func TestParseHandoffArgsRequiresAnExplicitInitialTargetAndGatesResend(t *testin
 	if _, err := parseHandoffArgs([]string{"--kind", "codex"}, true); err == nil {
 		t.Fatal("retry accepted a primary-kind override")
 	}
+	if _, err := parseHandoffArgs([]string{"--model", "openai/override"}, true); err == nil {
+		t.Fatal("retry accepted a primary-model override")
+	}
+	if _, err := parseHandoffArgs([]string{"--feature", "bridge", "--worktree", "/tmp/bridge", "--model", "bad\nmodel"}, false); err == nil {
+		t.Fatal("handoff accepted an invalid primary model")
+	}
+	if _, err := parseHandoffArgs([]string{"--feature", "bridge", "--worktree", "/tmp/bridge", "--model", "one", "--model", "two"}, false); err == nil {
+		t.Fatal("handoff accepted duplicate primary model flags")
+	}
 	if _, err := parseHandoffArgs([]string{"--feature", "bridge", "--worktree", "/tmp/bridge", "--kind", "unknown"}, false); err == nil {
 		t.Fatal("handoff accepted an unsupported primary kind")
 	}
 }
 
+func TestHandoffResultRendersOptionalPrimaryModelCompatibly(t *testing.T) {
+	t.Parallel()
+	for _, testCase := range []struct {
+		name    string
+		model   string
+		want    string
+		wantKey bool
+	}{
+		{name: "integration default", want: "model=integration default"},
+		{name: "selected model", model: "openai/gpt-5.1", want: "model=openai/gpt-5.1", wantKey: true},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			payload := map[string]any{"status": "ready", "primary_agent": "builder", "primary_kind": "pi"}
+			if testCase.model != "" {
+				payload["primary_model"] = testCase.model
+			}
+			var stdout bytes.Buffer
+			application := New(Dependencies{Stdout: &stdout})
+			application.writeResult(false, payload)
+			if !strings.Contains(stdout.String(), testCase.want) {
+				t.Fatalf("human result = %q, want %q", stdout.String(), testCase.want)
+			}
+			stdout.Reset()
+			application.writeResult(true, payload)
+			var decoded map[string]any
+			if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
+				t.Fatal(err)
+			}
+			_, hasModel := decoded["primary_model"]
+			if hasModel != testCase.wantKey {
+				t.Fatalf("JSON primary_model present = %v, want %v: %v", hasModel, testCase.wantKey, decoded)
+			}
+		})
+	}
+}
+
 func TestParseScopedAgentCommandsKeepsContextAndTargetExplicit(t *testing.T) {
 	t.Parallel()
-	add, err := parseAddAgentArgs([]string{"reviewer", "--kind", "codex", "--feature", "bridge"})
-	if err != nil || add.Role != "reviewer" || add.Kind != "codex" || add.Context.FeatureName != "bridge" {
+	add, err := parseAddAgentArgs([]string{"reviewer", "--kind", "codex", "--model", "[openai] codex max", "--feature", "bridge"})
+	if err != nil || add.Role != "reviewer" || add.Kind != "codex" || add.Model != "[openai] codex max" || add.Context.FeatureName != "bridge" {
 		t.Fatalf("parseAddAgentArgs() = %#v, %v", add, err)
+	}
+	for _, invalid := range [][]string{
+		{"reviewer", "--model"},
+		{"reviewer", "--model", "one", "--model", "two"},
+		{"reviewer", "--model", "bad\nmodel"},
+		{"reviewer", "--kind", "invented"},
+	} {
+		if _, err := parseAddAgentArgs(invalid); err == nil {
+			t.Fatalf("parseAddAgentArgs(%v) unexpectedly succeeded", invalid)
+		}
 	}
 	prompt, err := parsePromptAgentArgs([]string{"reviewer", "Please", "inspect", "this", "--target", "w1:p2", "--worktree", "/tmp/bridge"})
 	if err != nil || prompt.Role != "reviewer" || prompt.Target != "w1:p2" || prompt.Text != "Please inspect this" || prompt.Context.WorktreePath != "/tmp/bridge" {

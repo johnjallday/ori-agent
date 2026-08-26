@@ -7,16 +7,27 @@ enabled = true
 min_herdr_version = "0.7.5"
 source_id = "ori.devflow"
 
+# kind/model are persistent feature-handoff defaults. An empty model delegates
+# model choice to the external integration. Ori forwards a non-empty model to
+# Herdr but does not claim that the installed Herdr/Pi version honors it.
 [primary]
 role = "builder"
 kind = "claude"
+model = ""
 
+# Secondary roles use the fallback pair unless their role appears in the
+# parallel [roles.defaults] and/or [roles.models] maps below.
 [roles]
 default_kind = "claude"
+default_model = ""
 
 [roles.defaults]
 reviewer = "claude"
 tester = "claude"
+
+[roles.models]
+# reviewer = "provider/model"
+# tester = "provider/model"
 
 [bootstrap]
 template = "primary-v1"

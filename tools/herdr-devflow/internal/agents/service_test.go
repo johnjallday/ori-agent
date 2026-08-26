@@ -74,6 +74,7 @@ type fakeHerdr struct {
 	agents           []herdr.AgentInfo
 	byName           map[string]herdr.AgentInfo
 	startCalls       int
+	startRequests    []herdr.AgentStartRequest
 	splitCalls       int
 	renameCalls      int
 	focusCalls       int
@@ -256,27 +257,28 @@ func (f *fakeHerdr) AgentGetInfo(_ context.Context, target string) (herdr.AgentI
 	return agent, nil
 }
 
-func (f *fakeHerdr) AgentStartInfo(_ context.Context, name, kind, paneID string, _ time.Duration) (herdr.AgentInfo, error) {
-	f.record("agent.start:" + name + ":" + kind + ":" + paneID)
+func (f *fakeHerdr) AgentStartInfo(_ context.Context, request herdr.AgentStartRequest) (herdr.AgentInfo, error) {
+	f.record("agent.start:" + request.Name + ":" + request.Kind + ":" + request.PaneID)
+	f.startRequests = append(f.startRequests, request)
 	if err := f.fail["start"]; err != nil {
 		return herdr.AgentInfo{}, err
 	}
 	f.startCalls++
-	agent, ok := f.panes[paneID]
+	agent, ok := f.panes[request.PaneID]
 	if !ok {
 		agent = f.opened.RootPane
 	}
-	agent.Name = name
-	agent.Agent = kind
-	agent.PaneID = paneID
+	agent.Name = request.Name
+	agent.Agent = request.Kind
+	agent.PaneID = request.PaneID
 	agent.InteractiveReady = f.startedReady
 	agent.LaunchPending = !f.startedReady
 	agent.AgentStatus = model.AgentIdle
-	agent.AgentSession = &model.NativeSession{Source: "herdr:" + kind, Agent: kind, Kind: "id", Value: "session-" + strconv.Itoa(f.startCalls)}
+	agent.AgentSession = &model.NativeSession{Source: "herdr:" + request.Kind, Agent: request.Kind, Kind: "id", Value: "session-" + strconv.Itoa(f.startCalls)}
 	if f.startResult != nil {
 		agent = *f.startResult
 	}
-	f.byName[name] = agent
+	f.byName[request.Name] = agent
 	return agent, nil
 }
 
@@ -407,7 +409,76 @@ func TestHandoffLaunchesOnePrimaryAndDoesNotResendConfirmedPrompt(t *testing.T) 
 	}
 }
 
-func TestHandoffPersistsRequestedPrimaryKindForRetries(t *testing.T) {
+func TestHandoffResolvesPrimaryKindAndModelAsAPair(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name            string
+		configuredKind  string
+		configuredModel string
+		requestedKind   string
+		requestedModel  string
+		wantKind        string
+		wantModel       string
+	}{
+		{name: "legacy empty model", configuredKind: "claude", wantKind: "claude"},
+		{name: "configured pair", configuredKind: "pi", configuredModel: "openai/configured", wantKind: "pi", wantModel: "openai/configured"},
+		{name: "same kind inherits configured model", configuredKind: "pi", configuredModel: "openai/configured", requestedKind: "pi", wantKind: "pi", wantModel: "openai/configured"},
+		{name: "explicit model override", configuredKind: "pi", configuredModel: "openai/configured", requestedModel: "openai/override", wantKind: "pi", wantModel: "openai/override"},
+		{name: "different kind does not inherit stale model", configuredKind: "pi", configuredModel: "openai/configured", requestedKind: "claude", wantKind: "claude"},
+		{name: "explicit pair", configuredKind: "pi", configuredModel: "openai/configured", requestedKind: "claude", requestedModel: "anthropic/opus", wantKind: "claude", wantModel: "anthropic/opus"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "bridge")
+			client := newFakeHerdr(path)
+			store := newMemoryStore()
+			service := newService(client, store, path)
+			service.Config.Primary.Kind = testCase.configuredKind
+			service.Config.Primary.Model = testCase.configuredModel
+			result, err := service.Handoff(context.Background(), HandoffRequest{
+				FeatureName: "bridge", WorktreePath: path, Branch: "feature/bridge",
+				PrimaryKind: testCase.requestedKind, PrimaryModel: testCase.requestedModel, SkipPrompt: true,
+			})
+			if err != nil {
+				t.Fatalf("Handoff() error = %v", err)
+			}
+			if result.Primary.Kind != testCase.wantKind || result.Primary.Model != testCase.wantModel {
+				t.Fatalf("primary pair = %q/%q, want %q/%q", result.Primary.Kind, result.Primary.Model, testCase.wantKind, testCase.wantModel)
+			}
+			if len(client.startRequests) != 1 || client.startRequests[0].Kind != testCase.wantKind || client.startRequests[0].Model != testCase.wantModel {
+				t.Fatalf("start requests = %#v, want %q/%q", client.startRequests, testCase.wantKind, testCase.wantModel)
+			}
+			state, err := store.Load()
+			if err != nil {
+				t.Fatal(err)
+			}
+			handoff := state.Features["repo-123456:bridge"].Handoff
+			if handoff.PrimaryKind != testCase.wantKind || handoff.PrimaryModel != testCase.wantModel {
+				t.Fatalf("saved handoff pair = %#v, want %q/%q", handoff, testCase.wantKind, testCase.wantModel)
+			}
+		})
+	}
+}
+
+func TestHandoffRejectsInvalidPrimaryModelBeforeHerdr(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "bridge")
+	client := newFakeHerdr(path)
+	store := newMemoryStore()
+	service := newService(client, store, path)
+	_, err := service.Handoff(context.Background(), HandoffRequest{
+		FeatureName: "bridge", WorktreePath: path, Branch: "feature/bridge", PrimaryModel: "bad\nmodel",
+	})
+	var stage *model.StageError
+	if !errors.As(err, &stage) || stage.Code != model.ErrConfigInvalid {
+		t.Fatalf("invalid model error = %#v, want config_invalid", err)
+	}
+	if len(client.calls) != 0 || store.saves != 0 {
+		t.Fatalf("invalid model reached side effects: calls=%#v saves=%d", client.calls, store.saves)
+	}
+}
+
+func TestHandoffPersistsRequestedPrimaryPairForRetries(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "bridge")
 	client := newFakeHerdr(path)
@@ -415,27 +486,40 @@ func TestHandoffPersistsRequestedPrimaryKindForRetries(t *testing.T) {
 	service := newService(client, store, path)
 	client.fail["start"] = errors.New("agent launch failed")
 
-	_, err := service.Handoff(context.Background(), HandoffRequest{FeatureName: "bridge", WorktreePath: path, Branch: "feature/bridge", PrimaryKind: "codex"})
+	request := HandoffRequest{FeatureName: "bridge", WorktreePath: path, Branch: "feature/bridge", PrimaryKind: "codex", PrimaryModel: "openai/codex-max"}
+	_, err := service.Handoff(context.Background(), request)
 	var stage *model.StageError
 	if !errors.As(err, &stage) || stage.Stage != "start primary agent" {
 		t.Fatalf("initial Codex handoff error = %#v", err)
 	}
 	state, err := store.Load()
-	if err != nil || state.Features["repo-123456:bridge"].Handoff.PrimaryKind != "codex" {
-		t.Fatalf("primary kind was not retained after failed handoff: state=%#v err=%v", state, err)
+	handoff := state.Features["repo-123456:bridge"].Handoff
+	if err != nil || handoff.PrimaryKind != "codex" || handoff.PrimaryModel != "openai/codex-max" {
+		t.Fatalf("primary pair was not retained after failed handoff: state=%#v err=%v", state, err)
 	}
-	_, err = service.Handoff(context.Background(), HandoffRequest{FeatureName: "bridge", WorktreePath: path, Branch: "feature/bridge", PrimaryKind: "claude"})
-	if !errors.As(err, &stage) || stage.Stage != "record handoff" {
-		t.Fatalf("conflicting primary-kind override error = %#v", err)
+	for _, conflict := range []HandoffRequest{
+		{FeatureName: "bridge", WorktreePath: path, Branch: "feature/bridge", PrimaryKind: "claude"},
+		{FeatureName: "bridge", WorktreePath: path, Branch: "feature/bridge", PrimaryKind: "codex", PrimaryModel: "openai/other"},
+	} {
+		_, err = service.Handoff(context.Background(), conflict)
+		if !errors.As(err, &stage) || stage.Stage != "record handoff" {
+			t.Fatalf("conflicting primary-pair override error = %#v", err)
+		}
 	}
 
 	delete(client.fail, "start")
+	service.Config.Primary.Kind = "pi"
+	service.Config.Primary.Model = "openai/new-default"
 	result, err := service.Handoff(context.Background(), HandoffRequest{FeatureName: "bridge", WorktreePath: path, Branch: "feature/bridge"})
 	if err != nil {
 		t.Fatalf("retry Handoff() error = %v", err)
 	}
-	if result.Primary.Kind != "codex" || client.startCalls != 1 {
-		t.Fatalf("retry should launch the saved Codex kind: result=%#v starts=%d calls=%#v", result, client.startCalls, client.calls)
+	if result.Primary.Kind != "codex" || result.Primary.Model != "openai/codex-max" || client.startCalls != 1 {
+		t.Fatalf("retry should launch the saved pair: result=%#v starts=%d calls=%#v", result, client.startCalls, client.calls)
+	}
+	last := client.startRequests[len(client.startRequests)-1]
+	if last.Kind != "codex" || last.Model != "openai/codex-max" {
+		t.Fatalf("retry launch = %#v, want recorded pair", last)
 	}
 }
 

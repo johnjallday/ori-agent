@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync"
@@ -284,6 +285,59 @@ func TestOpenExistingWorktreeUsesTheSourceCheckoutAndOnlyTheDocumentedOpenOperat
 		if argument == "create" || argument == "remove" {
 			t.Fatalf("forbidden Herdr worktree mutation in %#v", runner.calls[0])
 		}
+	}
+}
+
+func TestAgentStartForwardsOptionalNativeArgumentsAsSeparateWords(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name     string
+		kind     string
+		model    string
+		thinking string
+		want     []string
+	}{
+		{
+			name: "empty selection preserves legacy vector",
+			kind: "pi",
+			want: []string{"agent", "start", "builder", "--kind", "pi", "--pane", "w1:p1", "--timeout", "3000"},
+		},
+		{
+			name:  "opaque model is one native argument",
+			kind:  "pi",
+			model: "[openai] gpt-5.1; $(touch nope)",
+			want:  []string{"agent", "start", "builder", "--kind", "pi", "--pane", "w1:p1", "--timeout", "3000", "--", "--model", "[openai] gpt-5.1; $(touch nope)"},
+		},
+		{
+			name:     "Pi model and thinking are distinct native arguments",
+			kind:     "pi",
+			model:    "openai-codex/gpt-5.6-luna",
+			thinking: "max",
+			want:     []string{"agent", "start", "builder", "--kind", "pi", "--pane", "w1:p1", "--timeout", "3000", "--", "--model", "openai-codex/gpt-5.6-luna", "--thinking", "max"},
+		},
+		{
+			name:     "Claude thinking maps to its effort flag",
+			kind:     "claude",
+			model:    "fable; $(touch nope)",
+			thinking: "xhigh",
+			want:     []string{"agent", "start", "builder", "--kind", "claude", "--pane", "w1:p1", "--timeout", "3000", "--", "--model", "fable; $(touch nope)", "--effort", "xhigh"},
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			runner := &fakeRunner{responses: map[string]CommandResult{
+				strings.Join(testCase.want, " "): {Stdout: []byte(`{"result":{"agent":{"name":"builder","agent":"pi","pane_id":"w1:p1"}}}`)},
+			}}
+			_, err := New("fake-herdr", "", runner).AgentStartInfo(context.Background(), AgentStartRequest{
+				Name: "builder", Kind: testCase.kind, Model: testCase.model, Thinking: testCase.thinking, PaneID: "w1:p1", Timeout: 3 * time.Second,
+			})
+			if err != nil {
+				t.Fatalf("AgentStartInfo() error = %v", err)
+			}
+			if len(runner.calls) != 1 || !reflect.DeepEqual(runner.calls[0].Args, testCase.want) {
+				t.Fatalf("agent start argv = %#v, want %#v", runner.calls, testCase.want)
+			}
+		})
 	}
 }
 

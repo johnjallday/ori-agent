@@ -61,11 +61,71 @@ wt start bridge --no-herdr >/dev/null
 wt start bridge >/dev/null
 rg -q "^handoff --feature bridge --worktree $target_root --branch feature/bridge$" "$fixture_root/herd-calls"
 
-# An optional per-feature kind override is forwarded to the initial handoff;
-# omitting it above leaves the configured Claude default unchanged.
+# Optional per-feature kind/model overrides are forwarded to the initial
+# handoff. Omitted values stay omitted so the Go helper owns configured
+# defaults and retry persistence.
 > "$fixture_root/herd-calls"
 wt start bridge --kind codex >/dev/null
 rg -q "^handoff --feature bridge --worktree $target_root --branch feature/bridge --kind codex$" "$fixture_root/herd-calls"
+
+cat > "$fixture_root/model-defaults.toml" <<'TOML'
+[primary]
+kind = "pi"
+model = "openai/configured"
+[roles]
+TOML
+> "$fixture_root/herd-calls"
+HERDR_DEVFLOW_CONFIG="$fixture_root/model-defaults.toml" wt start bridge > "$fixture_root/configured-model-output" 2>&1
+rg -q "Agent .*pi" "$fixture_root/configured-model-output"
+rg -q "Model .*openai/configured" "$fixture_root/configured-model-output"
+rg -q "^handoff --feature bridge --worktree $target_root --branch feature/bridge$" "$fixture_root/herd-calls"
+
+> "$fixture_root/herd-calls"
+HERDR_DEVFLOW_CONFIG="$fixture_root/model-defaults.toml" HERDR_DEVFLOW_PRIMARY_KIND=claude \
+  wt start bridge > "$fixture_root/environment-kind-output" 2>&1
+rg -q "Agent .*claude" "$fixture_root/environment-kind-output"
+rg -q "Model .*integration default" "$fixture_root/environment-kind-output"
+
+> "$fixture_root/herd-calls"
+HERDR_DEVFLOW_CONFIG="$fixture_root/model-defaults.toml" wt start bridge --model '[openai] gpt 5.1' > "$fixture_root/model-only-output" 2>&1
+rg -q "Agent .*pi" "$fixture_root/model-only-output"
+rg -q "Model .*\[openai\] gpt 5.1" "$fixture_root/model-only-output"
+rg -q "^handoff --feature bridge --worktree $target_root --branch feature/bridge --model \[openai\] gpt 5.1$" "$fixture_root/herd-calls"
+
+> "$fixture_root/herd-calls"
+HERDR_DEVFLOW_CONFIG="$fixture_root/model-defaults.toml" wt start bridge --kind claude > "$fixture_root/changed-kind-output" 2>&1
+rg -q "Agent .*claude" "$fixture_root/changed-kind-output"
+rg -q "Model .*integration default" "$fixture_root/changed-kind-output"
+rg -q "^handoff --feature bridge --worktree $target_root --branch feature/bridge --kind claude$" "$fixture_root/herd-calls"
+if rg -q -- '--model' "$fixture_root/herd-calls"; then
+  print -r -- "changed kind inherited the configured model" >&2
+  exit 1
+fi
+
+> "$fixture_root/herd-calls"
+HERDR_DEVFLOW_CONFIG="$fixture_root/model-defaults.toml" wt new scratch-model --kind pi --model 'openai/new model' > "$fixture_root/new-model-output" 2>&1
+rg -q "Model .*openai/new model" "$fixture_root/new-model-output"
+rg -q "^handoff --feature scratch-model --worktree $target_root --branch feature/scratch-model --kind pi --model openai/new model --no-prompt$" "$fixture_root/herd-calls"
+
+# Record one bracketed field per argument to prove a model with spaces and shell
+# syntax remains one zsh argv value rather than command text.
+function wt_herd {
+  local argument
+  : > "$fixture_root/exact-handoff-argv"
+  for argument in "$@"; do
+    print -r -- "<$argument>" >> "$fixture_root/exact-handoff-argv"
+  done
+  return 1
+}
+wt start bridge --kind pi --model '[openai] x; $(touch nope)' >/dev/null
+rg -Fxq '<--model>' "$fixture_root/exact-handoff-argv"
+rg -Fxq '<[openai] x; $(touch nope)>' "$fixture_root/exact-handoff-argv"
+[[ ! -e "$fixture_root/nope" ]]
+# Restore the ordinary transcript helper for the rest of the suite.
+function wt_herd {
+  print -r -- "$*" >> "$fixture_root/herd-calls"
+  return 1
+}
 
 # Only the summary's read-only lookup may precede a mutation. Anything else
 # would mean the flow contacted Herdr before the user agreed to anything.
@@ -176,8 +236,9 @@ function wt_herd {
   return 0
 }
 
-# Declining at the gate: not one Git or Herdr call may be recorded.
-wt start bridge <<< "n" > "$fixture_root/declined-output" 2>&1
+# Declining at the gate: not one Git or Herdr call may be recorded, even when
+# an exact model override was already parsed and previewed.
+wt start bridge --model '[openai] decline model' <<< "n" > "$fixture_root/declined-output" 2>&1
 rg -q "Nothing was changed" "$fixture_root/declined-output"
 if [[ -f "$fixture_root/decline-mutations" ]]; then
   print -r -- "declining the confirmation still mutated: $(<"$fixture_root/decline-mutations")" >&2
@@ -215,6 +276,10 @@ rg -q "handoff --feature bridge --worktree $target_root --branch feature/bridge 
 rm -f "$fixture_root/decline-mutations"
 if wt start bridge --kind codex --no-herdr > /dev/null 2>&1; then
   print -r -- "wt start accepted --kind together with --no-herdr" >&2
+  exit 1
+fi
+if wt start bridge --model openai/model --no-herdr > /dev/null 2>&1; then
+  print -r -- "wt start accepted --model together with --no-herdr" >&2
   exit 1
 fi
 [[ ! -f "$fixture_root/decline-mutations" ]]
@@ -363,6 +428,10 @@ if wt new adhoc --kind codex --no-herdr > /dev/null 2>&1; then
   print -r -- "wt new accepted --kind together with --no-herdr" >&2
   exit 1
 fi
+if wt new adhoc --model openai/model --no-herdr > /dev/null 2>&1; then
+  print -r -- "wt new accepted --model together with --no-herdr" >&2
+  exit 1
+fi
 [[ ! -f "$fixture_root/decline-mutations" ]]
 
 # FR-19 applies to wt new as well: declining creates nothing.
@@ -378,21 +447,27 @@ rm -f "$fixture_root/decline-mutations"
 typeset -a parser_cases
 parser_cases=(
   "start x --kind|wt start --kind requires a Herdr agent kind"
-  "start x --kind|Usage: wt start [feature] [--kind KIND] [--no-herdr] [--yes]"
+  "start x --kind|Usage: wt start [feature] [--kind KIND] [--model MODEL] [--no-herdr] [--yes]"
   "start x --kind --nope|wt start --kind requires a Herdr agent kind"
   "start x --kind a --kind b|wt start accepts --kind only once"
+  "start x --model|wt start --model requires one non-empty model value"
+  "start x --model a --model b|wt start accepts --model only once"
   "start --bogus|Unknown wt start option: --bogus"
-  "start --bogus|Usage: wt start [feature] [--kind KIND] [--no-herdr] [--yes]"
+  "start --bogus|Usage: wt start [feature] [--kind KIND] [--model MODEL] [--no-herdr] [--yes]"
   "start one two|wt start accepts one PRD/task-list feature name (got: one and two)"
-  "start x --kind codex --no-herdr|wt start --kind cannot be combined with --no-herdr"
+  "start x --kind codex --no-herdr|wt start --kind/--model cannot be combined with --no-herdr"
+  "start x --model openai/model --no-herdr|wt start --kind/--model cannot be combined with --no-herdr"
   "new x --kind|wt new --kind requires a Herdr agent kind"
-  "new x --kind|Usage: wt new <name> [--kind KIND] [--no-herdr] [--yes]"
+  "new x --kind|Usage: wt new <name> [--kind KIND] [--model MODEL] [--no-herdr] [--yes]"
   "new x --kind --nope|wt new --kind requires a Herdr agent kind"
   "new x --kind a --kind b|wt new accepts --kind only once"
+  "new x --model|wt new --model requires one non-empty model value"
+  "new x --model a --model b|wt new accepts --model only once"
   "new --bogus|Unknown wt new option: --bogus"
-  "new --bogus|Usage: wt new <name> [--kind KIND] [--no-herdr] [--yes]"
+  "new --bogus|Usage: wt new <name> [--kind KIND] [--model MODEL] [--no-herdr] [--yes]"
   "new one two|wt new accepts one name (got: one and two)"
-  "new x --kind codex --no-herdr|wt new --kind cannot be combined with --no-herdr"
+  "new x --kind codex --no-herdr|wt new --kind/--model cannot be combined with --no-herdr"
+  "new x --model openai/model --no-herdr|wt new --kind/--model cannot be combined with --no-herdr"
 )
 for parser_case in "${parser_cases[@]}"; do
   parser_args="${parser_case%%|*}"
@@ -1199,7 +1274,7 @@ wt ls > /dev/null
 wt help > /dev/null
 [[ ! -f "$fixture_root/herdr-free-calls" ]]
 
-# --- wt plan --issue <N> [--issue <N> ...] [--yes] -------------------------
+# --- wt plan --issue <N> ... [--kind claude|pi] [--model] [--thinking] -----
 #
 # Shell-wiring layer: argument validation and the exact call handed to the
 # bridge, with wt_herd stubbed so no Go binary or GitHub read is needed. AR1:
@@ -1214,7 +1289,12 @@ function wt_herd {
 rm -f "$fixture_root/plan-calls"
 plan_status=0
 for bad_plan_args in "" "--issue" "--issue 0" "--issue -5" "--issue abc" \
-                     "--issue 1 --issue 1" "--issue 1 --bogus" "--yes"; do
+                     "--issue 1 --issue 1" "--issue 1 --bogus" "--issue 1 --kind" \
+                     "--issue 1 --kind codex" "--issue 1 --kind pi --kind claude" \
+                     "--issue 1 --kind pi --effort high" "--issue 1 --effort high" \
+                     "--issue 1 --kind pi --thinking unbounded" "--issue 1 --kind claude --thinking minimal" \
+                     "--issue 1 --kind claude --effort low --thinking high" "--issue 1 --model" "--issue 1 --model --yes" \
+                     "--issue 1 --model one --model two" "--yes"; do
   plan_status=0
   wt plan ${=bad_plan_args} > /dev/null 2>&1 || plan_status=$?
   if [[ "$plan_status" != "1" ]]; then
@@ -1239,6 +1319,18 @@ wt plan --issue 342 --yes > /dev/null
 [[ "$(<"$fixture_root/plan-calls")" == "issue-plan --issue 342 --worktree $dev_root --yes" ]]
 
 rm -f "$fixture_root/plan-calls"
+wt plan --issue 342 --kind claude --model 'fable; $(echo inert)' --thinking xhigh --yes > /dev/null
+[[ "$(<"$fixture_root/plan-calls")" == 'issue-plan --issue 342 --kind claude --model fable; $(echo inert) --thinking xhigh --worktree '"$dev_root"' --yes' ]]
+
+rm -f "$fixture_root/plan-calls"
+wt plan --issue 342 --kind pi --model openai-codex/gpt-5.6-luna --thinking max --yes > /dev/null
+[[ "$(<"$fixture_root/plan-calls")" == "issue-plan --issue 342 --kind pi --model openai-codex/gpt-5.6-luna --thinking max --worktree $dev_root --yes" ]]
+
+rm -f "$fixture_root/plan-calls"
+wt plan --issue 342 --kind pi --model '[openai] gpt 5.1; $(echo inert)' --yes > /dev/null
+[[ "$(<"$fixture_root/plan-calls")" == 'issue-plan --issue 342 --kind pi --model [openai] gpt 5.1; $(echo inert) --worktree '"$dev_root"' --yes' ]]
+
+rm -f "$fixture_root/plan-calls"
 wt plan --issue 202 --issue 101 --yes > /dev/null
 [[ "$(<"$fixture_root/plan-calls")" == "issue-plan --issue 202 --issue 101 --worktree $dev_root --yes" ]]
 
@@ -1251,8 +1343,8 @@ function wt_herd {
     print -r -- "$argument" >> "$fixture_root/plan-argv"
   done
 }
-wt plan --issue 202 --issue 101 --yes > /dev/null
-[[ "$(<"$fixture_root/plan-argv")" == $'issue-plan\n--issue\n202\n--issue\n101\n--worktree\n'"$dev_root"$'\n--yes' ]]
+wt plan --issue 202 --issue 101 --kind pi --model '[openai] bundle model; $(echo inert)' --yes > /dev/null
+[[ "$(<"$fixture_root/plan-argv")" == $'issue-plan\n--issue\n202\n--issue\n101\n--kind\npi\n--model\n[openai] bundle model; $(echo inert)\n--worktree\n'"$dev_root"$'\n--yes' ]]
 
 rm -f "$fixture_root/plan-calls"
 wt help > "$fixture_root/plan-help-output" 2>&1
@@ -1501,7 +1593,8 @@ for herdr_free_command in pr merge demo backlog cd ls; do
 done
 
 # Reading GitHub Issues must never need a running Herdr. The one DevOps
-# entrypoint calls `gh` directly and the former helper bootstrap is gone.
+# entrypoint calls `gh` directly. Its sole Go-helper boundary is the local
+# config agent-defaults command, which makes no Herdr call.
 devops_entrypoint="$repo_root/scripts/devops.sh"
 if [[ ! -x "$devops_entrypoint" ]]; then
   print -r -- "scripts/devops.sh is missing or not executable" >&2
@@ -1511,8 +1604,13 @@ if ! rg -q 'gh "\$\{args\[@\]\}"' "$devops_entrypoint"; then
   print -r -- "scripts/devops.sh no longer invokes gh directly" >&2
   exit 1
 fi
-if rg -q 'wt_herd|herdr-devflow|devflow_exec|devflow-bootstrap' "$devops_entrypoint"; then
-  print -r -- "scripts/devops.sh reaches for the Herdr bridge" >&2
+if rg -q 'wt_herd|devflow_exec|devflow-bootstrap' "$devops_entrypoint"; then
+  print -r -- "scripts/devops.sh reaches for the Herdr runtime bridge" >&2
+  exit 1
+fi
+if [[ "$(rg -c 'bash "\$script_dir/herdr-devflow\.sh" "\$@"' "$devops_entrypoint" || true)" != "1" ]] || \
+   ! rg -q 'agent_defaults_helper config agent-defaults' "$devops_entrypoint"; then
+  print -r -- "scripts/devops.sh local helper boundary is not limited to config agent-defaults" >&2
   exit 1
 fi
 # The picker has exactly three bash-to-zsh bridges: `s` delegates one-Issue
@@ -1521,11 +1619,11 @@ fi
 # arguments. wt remains the
 # owner of confirmation, files, worktree creation, and Herdr/Pi handoff.
 devops_code="$(rg -v '^\s*#' "$devops_entrypoint")"
-if ! print -r -- "$devops_code" | rg -Fq "zsh -c 'source \"\$1\" && wt plan --issue \"\$2\"' devops-plan \"\$script_dir/wt.sh\" \"\$issue_number\""; then
+if ! print -r -- "$devops_code" | rg -Fq "zsh -c 'source \"\$1\" || exit; typeset -a plan_args; plan_args=(--issue \"\$2\" --kind \"\$3\"); [[ -n \"\$4\" ]] && plan_args+=(--model \"\$4\"); [[ -n \"\$5\" ]] && plan_args+=(--thinking \"\$5\"); wt plan \"\${plan_args[@]}\"'"; then
   print -r -- "scripts/devops.sh does not launch wt plan through the constrained zsh bridge" >&2
   exit 1
 fi
-if ! print -r -- "$devops_code" | rg -Fq "zsh -c 'source \"\$1\" || exit; shift; typeset -a plan_args; plan_args=(); for issue in \"\$@\"; do plan_args+=(--issue \"\$issue\"); done; wt plan \"\${plan_args[@]}\"'"; then
+if ! print -r -- "$devops_code" | rg -Fq "zsh -c 'source \"\$1\" || exit; kind=\"\$2\"; model=\"\$3\"; thinking=\"\$4\"; shift 4; typeset -a plan_args; plan_args=(); for issue in \"\$@\"; do plan_args+=(--issue \"\$issue\"); done; plan_args+=(--kind \"\$kind\"); [[ -n \"\$model\" ]] && plan_args+=(--model \"\$model\"); [[ -n \"\$thinking\" ]] && plan_args+=(--thinking \"\$thinking\"); wt plan \"\${plan_args[@]}\"'"; then
   print -r -- "scripts/devops.sh does not launch bundle planning through the constrained positional-argument bridge" >&2
   exit 1
 fi

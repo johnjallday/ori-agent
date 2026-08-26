@@ -243,6 +243,8 @@ func (a *App) Run(ctx context.Context, args []string) int {
 		return a.setup(ctx, opts)
 	case "doctor":
 		return a.doctor(ctx, opts)
+	case "config":
+		return a.configCommand(opts, commandArgs)
 	case "handoff":
 		return a.handoff(ctx, opts, commandArgs, false)
 	case "retry":
@@ -289,6 +291,235 @@ func (a *App) Run(ctx context.Context, args []string) int {
 		a.writeError(fmt.Errorf("unknown command %q", command), opts.json)
 		return 2
 	}
+}
+
+type agentDefaultsCommandArgs struct {
+	primaryKind       string
+	primaryModel      string
+	clearPrimaryModel bool
+	roleKind          string
+	roleModel         string
+	clearRoleModel    bool
+	provided          bool
+	validateOnly      bool
+	tsv               bool
+}
+
+func parseAgentDefaultsCommandArgs(args []string) (agentDefaultsCommandArgs, error) {
+	var parsed agentDefaultsCommandArgs
+	seen := map[string]bool{}
+	for len(args) > 0 {
+		argument := args[0]
+		switch argument {
+		case "--primary-kind", "--primary-model", "--role-kind", "--role-model":
+			if seen[argument] {
+				return agentDefaultsCommandArgs{}, fmt.Errorf("%s may be provided only once", argument)
+			}
+			if len(args) < 2 || strings.HasPrefix(args[1], "--") {
+				return agentDefaultsCommandArgs{}, fmt.Errorf("%s requires a value", argument)
+			}
+			seen[argument] = true
+			parsed.provided = true
+			switch argument {
+			case "--primary-kind":
+				parsed.primaryKind = args[1]
+			case "--primary-model":
+				parsed.primaryModel = args[1]
+			case "--role-kind":
+				parsed.roleKind = args[1]
+			case "--role-model":
+				parsed.roleModel = args[1]
+			}
+			args = args[2:]
+		case "--clear-primary-model", "--clear-role-model":
+			if seen[argument] {
+				return agentDefaultsCommandArgs{}, fmt.Errorf("%s may be provided only once", argument)
+			}
+			seen[argument] = true
+			parsed.provided = true
+			if argument == "--clear-primary-model" {
+				parsed.clearPrimaryModel = true
+			} else {
+				parsed.clearRoleModel = true
+			}
+			args = args[1:]
+		case "--validate-only", "--tsv":
+			if seen[argument] {
+				return agentDefaultsCommandArgs{}, fmt.Errorf("%s may be provided only once", argument)
+			}
+			seen[argument] = true
+			if argument == "--validate-only" {
+				parsed.validateOnly = true
+			} else {
+				parsed.tsv = true
+			}
+			args = args[1:]
+		default:
+			return agentDefaultsCommandArgs{}, fmt.Errorf("unknown config agent-defaults option %q", argument)
+		}
+	}
+	if seen["--primary-model"] && parsed.clearPrimaryModel {
+		return agentDefaultsCommandArgs{}, fmt.Errorf("--primary-model and --clear-primary-model cannot be combined")
+	}
+	if seen["--role-model"] && parsed.clearRoleModel {
+		return agentDefaultsCommandArgs{}, fmt.Errorf("--role-model and --clear-role-model cannot be combined")
+	}
+	if parsed.validateOnly && !parsed.provided {
+		return agentDefaultsCommandArgs{}, fmt.Errorf("--validate-only requires at least one proposed default")
+	}
+	if parsed.primaryKind != "" && !config.IsSupportedAgentKind(parsed.primaryKind) {
+		return agentDefaultsCommandArgs{}, fmt.Errorf("--primary-kind %q is not supported by Herdr", parsed.primaryKind)
+	}
+	if parsed.roleKind != "" && !config.IsSupportedAgentKind(parsed.roleKind) {
+		return agentDefaultsCommandArgs{}, fmt.Errorf("--role-kind %q is not supported by Herdr", parsed.roleKind)
+	}
+	if seen["--primary-model"] {
+		if err := config.ValidateAgentModel(parsed.primaryModel); err != nil {
+			return agentDefaultsCommandArgs{}, fmt.Errorf("--primary-model: %w", err)
+		}
+	}
+	if seen["--role-model"] {
+		if err := config.ValidateAgentModel(parsed.roleModel); err != nil {
+			return agentDefaultsCommandArgs{}, fmt.Errorf("--role-model: %w", err)
+		}
+	}
+	return parsed, nil
+}
+
+func (a *App) configCommand(opts options, args []string) int {
+	if len(args) == 0 || args[0] != "agent-defaults" {
+		a.writeError(fmt.Errorf("config requires agent-defaults"), opts.json)
+		return 2
+	}
+	parsed, err := parseAgentDefaultsCommandArgs(args[1:])
+	if err != nil {
+		a.writeError(err, opts.json)
+		return 2
+	}
+	path, err := a.configCommandPath(opts)
+	if err != nil {
+		a.writeError(err, opts.json)
+		return 1
+	}
+	current, err := config.ReadAgentDefaults(path)
+	if err != nil {
+		a.writeError(err, opts.json)
+		return 1
+	}
+	result := current
+	status := "current"
+	if parsed.provided {
+		status = "updated"
+		if parsed.primaryKind != "" {
+			result.Primary.Kind = parsed.primaryKind
+		}
+		if seenValue(args[1:], "--primary-model") {
+			result.Primary.Model = parsed.primaryModel
+		}
+		if parsed.clearPrimaryModel {
+			result.Primary.Model = ""
+		}
+		if parsed.roleKind != "" {
+			result.RoleFallback.Kind = parsed.roleKind
+		}
+		if seenValue(args[1:], "--role-model") {
+			result.RoleFallback.Model = parsed.roleModel
+		}
+		if parsed.clearRoleModel {
+			result.RoleFallback.Model = ""
+		}
+		if err := config.ValidateAgentSelection(result.Primary.Kind, result.Primary.Model); err != nil {
+			a.writeError(fmt.Errorf("primary defaults: %w", err), opts.json)
+			return 2
+		}
+		if err := config.ValidateAgentSelection(result.RoleFallback.Kind, result.RoleFallback.Model); err != nil {
+			a.writeError(fmt.Errorf("role fallback defaults: %w", err), opts.json)
+			return 2
+		}
+		if parsed.validateOnly {
+			status = "valid"
+		} else {
+			result, err = config.UpdateAgentDefaults(path, result)
+			if err != nil {
+				a.writeError(err, opts.json)
+				return 1
+			}
+		}
+	}
+	if parsed.tsv {
+		if _, err := fmt.Fprintf(a.stdout, "primary\t%s\t%s\nrole_fallback\t%s\t%s\n", result.Primary.Kind, result.Primary.Model, result.RoleFallback.Kind, result.RoleFallback.Model); err != nil {
+			a.writeError(fmt.Errorf("write agent defaults: %w", err), opts.json)
+			return 1
+		}
+		return 0
+	}
+	a.writeAgentDefaults(opts.json, status, path, result)
+	return 0
+}
+
+func seenValue(args []string, flag string) bool {
+	for _, argument := range args {
+		if argument == flag {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *App) configCommandPath(opts options) (string, error) {
+	lookup := a.withOverrides(opts)
+	path := ""
+	if value, ok := lookup(worktree.ConfigOverrideEnv); ok && strings.TrimSpace(value) != "" {
+		path = value
+	}
+	if path == "" {
+		repoRoot := opts.repoRoot
+		if repoRoot == "" {
+			if value, ok := lookup(worktree.RepoOverrideEnv); ok && strings.TrimSpace(value) != "" {
+				repoRoot = value
+			}
+		}
+		if repoRoot == "" {
+			cwd, err := a.getwd()
+			if err != nil {
+				return "", fmt.Errorf("resolve working directory: %w", err)
+			}
+			foundRoot, err := worktree.FindRepoRoot(cwd)
+			if err != nil {
+				return "", fmt.Errorf("resolve repository: %w", err)
+			}
+			repoRoot = foundRoot
+		}
+		path = filepath.Join(repoRoot, config.DefaultConfigRelativePath)
+	}
+	if !filepath.IsAbs(path) {
+		cwd, err := a.getwd()
+		if err != nil {
+			return "", fmt.Errorf("resolve working directory: %w", err)
+		}
+		path = filepath.Join(cwd, path)
+	}
+	return filepath.Clean(path), nil
+}
+
+func (a *App) writeAgentDefaults(asJSON bool, status, path string, defaults config.AgentDefaults) {
+	if asJSON {
+		a.writeResult(true, map[string]any{
+			"status": status, "config": path,
+			"primary": defaults.Primary, "role_fallback": defaults.RoleFallback,
+		})
+		return
+	}
+	modelLabel := func(value string) string {
+		if value == "" {
+			return "integration default"
+		}
+		return value
+	}
+	_, _ = fmt.Fprintf(a.stdout, "Agent defaults (%s)\n", status)
+	_, _ = fmt.Fprintf(a.stdout, "  Primary:      kind=%s model=%s\n", defaults.Primary.Kind, modelLabel(defaults.Primary.Model))
+	_, _ = fmt.Fprintf(a.stdout, "  Role fallback: kind=%s model=%s\n", defaults.RoleFallback.Kind, modelLabel(defaults.RoleFallback.Model))
+	_, _ = fmt.Fprintf(a.stdout, "Config: %s\n", path)
 }
 
 type wakeCommandArgs struct {
@@ -625,6 +856,7 @@ type handoffArgs struct {
 	worktree string
 	branch   string
 	kind     string
+	model    string
 	resend   bool
 	noPrompt bool
 }
@@ -732,15 +964,25 @@ func parseAddAgentArgs(args []string) (agents.AddRequest, error) {
 	if err != nil {
 		return agents.AddRequest{}, err
 	}
-	var kind string
+	var kind, agentModel string
 	var positional []string
+	seen := map[string]bool{}
 	for index := 0; index < len(remaining); index++ {
 		switch remaining[index] {
-		case "--kind":
-			if index+1 >= len(remaining) || strings.HasPrefix(remaining[index+1], "--") {
-				return agents.AddRequest{}, fmt.Errorf("--kind requires a value")
+		case "--kind", "--model":
+			flag := remaining[index]
+			if seen[flag] {
+				return agents.AddRequest{}, fmt.Errorf("%s may be provided only once", flag)
 			}
-			kind = remaining[index+1]
+			if index+1 >= len(remaining) || strings.HasPrefix(remaining[index+1], "--") {
+				return agents.AddRequest{}, fmt.Errorf("%s requires a value", flag)
+			}
+			seen[flag] = true
+			if flag == "--kind" {
+				kind = remaining[index+1]
+			} else {
+				agentModel = remaining[index+1]
+			}
 			index++
 		default:
 			if strings.HasPrefix(remaining[index], "--") {
@@ -750,9 +992,15 @@ func parseAddAgentArgs(args []string) (agents.AddRequest, error) {
 		}
 	}
 	if len(positional) != 1 {
-		return agents.AddRequest{}, fmt.Errorf("add requires one role: wt herd add <role> [--kind <kind>]")
+		return agents.AddRequest{}, fmt.Errorf("add requires one role: wt herd add <role> [--kind <kind>] [--model <model>]")
 	}
-	return agents.AddRequest{Context: agents.ContextRequest{FeatureName: contextArgs.feature, WorktreePath: contextArgs.worktree}, Role: positional[0], Kind: kind}, nil
+	if kind != "" && !config.IsSupportedAgentKind(kind) {
+		return agents.AddRequest{}, fmt.Errorf("--kind %q is not supported by Herdr", kind)
+	}
+	if err := config.ValidateAgentModel(agentModel); err != nil {
+		return agents.AddRequest{}, fmt.Errorf("--model: %w", err)
+	}
+	return agents.AddRequest{Context: agents.ContextRequest{FeatureName: contextArgs.feature, WorktreePath: contextArgs.worktree}, Role: positional[0], Kind: kind, Model: agentModel}, nil
 }
 
 func parsePromptAgentArgs(args []string) (agents.PromptRequest, error) {
@@ -950,12 +1198,17 @@ func parseScheduleArgs(args []string) (scheduleArgs, error) {
 
 func parseHandoffArgs(args []string, retry bool) (handoffArgs, error) {
 	var parsed handoffArgs
+	seen := map[string]bool{}
 	for len(args) > 0 {
 		switch args[0] {
-		case "--feature", "--worktree", "--branch", "--kind":
+		case "--feature", "--worktree", "--branch", "--kind", "--model":
+			if seen[args[0]] {
+				return handoffArgs{}, fmt.Errorf("%s may be provided only once", args[0])
+			}
 			if len(args) < 2 || strings.HasPrefix(args[1], "--") {
 				return handoffArgs{}, fmt.Errorf("%s requires a value", args[0])
 			}
+			seen[args[0]] = true
 			switch args[0] {
 			case "--feature":
 				parsed.feature = args[1]
@@ -965,9 +1218,14 @@ func parseHandoffArgs(args []string, retry bool) (handoffArgs, error) {
 				parsed.branch = args[1]
 			case "--kind":
 				if retry {
-					return handoffArgs{}, fmt.Errorf("--kind is only available with handoff; retry uses the recorded primary kind")
+					return handoffArgs{}, fmt.Errorf("--kind is only available with handoff; retry uses the recorded primary kind and model")
 				}
 				parsed.kind = args[1]
+			case "--model":
+				if retry {
+					return handoffArgs{}, fmt.Errorf("--model is only available with handoff; retry uses the recorded primary kind and model")
+				}
+				parsed.model = args[1]
 			}
 			args = args[2:]
 		case "--resend":
@@ -991,6 +1249,9 @@ func parseHandoffArgs(args []string, retry bool) (handoffArgs, error) {
 	}
 	if parsed.kind != "" && !config.IsSupportedAgentKind(parsed.kind) {
 		return handoffArgs{}, fmt.Errorf("--kind %q is not supported by Herdr", parsed.kind)
+	}
+	if err := config.ValidateAgentModel(parsed.model); err != nil {
+		return handoffArgs{}, fmt.Errorf("--model: %w", err)
 	}
 	if parsed.resend && parsed.noPrompt {
 		return handoffArgs{}, fmt.Errorf("--resend and --no-prompt cannot be combined")
@@ -1316,6 +1577,7 @@ func (a *App) handoff(ctx context.Context, opts options, args []string, retry bo
 		WorktreePath: parsed.worktree,
 		Branch:       parsed.branch,
 		PrimaryKind:  parsed.kind,
+		PrimaryModel: parsed.model,
 		Resend:       parsed.resend,
 		SkipPrompt:   parsed.noPrompt,
 	})
@@ -1341,6 +1603,9 @@ func (a *App) handoff(ctx context.Context, opts options, args []string, retry bo
 		"primary_kind":     result.Primary.Kind,
 		"prompt_delivered": result.PromptDelivered,
 		"prompt_skipped":   result.PromptSkipped,
+	}
+	if result.Primary.Model != "" {
+		payload["primary_model"] = result.Primary.Model
 	}
 	if result.WorkspaceLabel != "" {
 		payload["workspace_label"] = result.WorkspaceLabel
@@ -1482,10 +1747,19 @@ func (a *App) addAgent(ctx context.Context, opts options, args []string) int {
 	a.recordAudit(runtime, audit.Event{Operation: "add", Feature: result.Feature.Name, Role: result.Agent.Role, Stage: "role-agent", Outcome: addOutcome})
 	if opts.json {
 		a.writeResult(true, map[string]any{"status": "ready", "feature": result.Feature.Name, "agent": result.Agent, "reused": result.Reused})
-	} else if result.Reused {
-		fmt.Fprintf(a.stdout, "Ori Herdr Devflow: using existing %s agent %s for %s\n", result.Agent.Role, result.Agent.Name, result.Feature.Name)
 	} else {
-		fmt.Fprintf(a.stdout, "Ori Herdr Devflow: added %s agent %s for %s\n", result.Agent.Role, result.Agent.Name, result.Feature.Name)
+		action := "added"
+		if result.Reused {
+			action = "using existing"
+		}
+		agentModel := result.Agent.Model
+		if agentModel == "" {
+			agentModel = "integration default"
+		}
+		if _, err := fmt.Fprintf(a.stdout, "Ori Herdr Devflow: %s %s agent %s for %s (kind=%s model=%s)\n", action, result.Agent.Role, result.Agent.Name, result.Feature.Name, result.Agent.Kind, agentModel); err != nil {
+			a.writeError(fmt.Errorf("write add result: %w", err), opts.json)
+			return 1
+		}
 	}
 	return 0
 }
@@ -3100,19 +3374,22 @@ func (a *App) writeHelp() {
 Usage:
   wt herd setup                 Install/update the stable local helper and linked plugin
   wt herd doctor                Check config, Herdr, plugin, agent, scheduler, and state readiness
+  wt herd config agent-defaults [--primary-kind KIND] [--primary-model MODEL|--clear-primary-model]
+                                [--role-kind KIND] [--role-model MODEL|--clear-role-model]
+                                Read or atomically update persistent agent launch defaults
   wt herd wake install [--yes]  Stage, explain, authorize, install, and self-test the root wake service
   wt herd wake status [--json]  Report fixed files, daemon health, compatibility, UID, and self-test
   wt herd wake doctor [--json]  Diagnose standalone wake installation and health
   wt herd wake uninstall [--yes]
                                 Remove only the standalone Herdr wake service after safety checks
-  wt herd handoff --feature NAME --worktree PATH [--branch NAME] [--kind KIND] [--no-prompt]
+  wt herd handoff --feature NAME --worktree PATH [--branch NAME] [--kind KIND] [--model MODEL] [--no-prompt]
                                 Add a tab for an existing Git worktree in the focused workspace
                                 and launch its primary agent there. --no-prompt starts the agent
                                 without the bootstrap prompt, for ad-hoc work that has no PRD or
                                 task list to point at; the choice is recorded for later retries.
   wt herd retry [--feature NAME] [--worktree PATH] [--branch NAME] [--resend]
-                                Resume the recorded primary kind; --resend repeats a confirmed prompt
-  wt herd add <role> [--kind KIND] [--feature NAME|--worktree PATH]
+                                Resume the recorded primary kind/model pair; --resend repeats a confirmed prompt
+  wt herd add <role> [--kind KIND] [--model MODEL] [--feature NAME|--worktree PATH]
                                 Start one explicit secondary role agent in the managed workspace
   wt herd prompt [role] <text> [--target TARGET] [--feature NAME|--worktree PATH]
                                 Prompt the selected feature-scoped agent (primary role by default)
@@ -3191,6 +3468,17 @@ func (a *App) writeResult(asJSON bool, value any) {
 		}
 		if configPath, ok := pretty["config"].(string); ok {
 			fmt.Fprintf(a.stdout, "Config: %s\n", configPath)
+		}
+		if primaryKind, ok := pretty["primary_kind"].(string); ok {
+			primaryModel, _ := pretty["primary_model"].(string)
+			if primaryModel == "" {
+				primaryModel = "integration default"
+			}
+			if primaryAgent, ok := pretty["primary_agent"].(string); ok {
+				_, _ = fmt.Fprintf(a.stdout, "Primary: %s kind=%s model=%s\n", primaryAgent, primaryKind, primaryModel)
+			} else {
+				_, _ = fmt.Fprintf(a.stdout, "Primary: kind=%s model=%s\n", primaryKind, primaryModel)
+			}
 		}
 		return
 	}

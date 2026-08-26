@@ -92,15 +92,97 @@ check "picker proposals view is exact" \
   "$(row_matches_filter proposals "feature-proposal" && echo yes || echo no)" "yes"
 
 # Stub the process boundary for pure gating tests. Separate integration coverage
-# below proves launch_pi_plan invokes the repository's wt function through zsh.
-launch_pi_plan() {
-  printf 'launched Pi for #%s\n' "$1"
+# below proves launch_planner_plan invokes the repository's wt function through zsh.
+eval "$(declare -f launch_planner_plan | sed '1s/launch_planner_plan/launch_planner_plan_real/')"
+eval "$(declare -f prompt_planner_model | sed '1s/prompt_planner_model/prompt_planner_model_real/')"
+eval "$(declare -f prompt_planner_selection | sed '1s/prompt_planner_selection/prompt_planner_selection_real/')"
+eval "$(declare -f load_pi_model_catalog | sed '1s/load_pi_model_catalog/load_pi_model_catalog_real/')"
+
+# Catalog discovery is local, offline, and extension-free. Parse only safe
+# provider/model identifiers, preserve Pi's order, and deduplicate exact pairs.
+catalog_bin="$fixture_root/model-catalog-bin"
+catalog_calls="$fixture_root/model-catalog-calls"
+mkdir -p "$catalog_bin"
+cat > "$catalog_bin/pi" <<'SH'
+#!/bin/sh
+printf 'offline=%s skip=%s args=%s\n' "$PI_OFFLINE" "$PI_SKIP_VERSION_CHECK" "$*" > "$PI_CATALOG_CALLS"
+cat <<'MODELS'
+provider   model             context  max-out  thinking  images
+openai     gpt-5.6-sol       272K     128K     yes       yes
+openai     gpt-5.4           272K     128K     yes       yes
+anthropic  claude-sonnet-5   1M       128K     yes       yes
+openai     gpt-5.6-sol       272K     128K     yes       yes
+openai-codex gpt-5.6-sol     272K     128K     yes       yes
+bad$name   unsafe            1K       1K       no        no
+MODELS
+SH
+chmod +x "$catalog_bin/pi"
+PI_CATALOG_CALLS="$catalog_calls" PATH="$catalog_bin:$PATH" load_pi_model_catalog_real
+check "Pi catalog promotes openai-codex ahead of discovered providers" \
+  "${planner_model_catalog_providers[*]}" "openai-codex openai anthropic"
+check "Pi catalog keeps unique provider/model options" \
+  "${planner_model_catalog_model[*]}" \
+  "openai/gpt-5.6-sol openai/gpt-5.4 anthropic/claude-sonnet-5 openai-codex/gpt-5.6-sol"
+if ! grep -Fq 'offline=1 skip=1 args=--offline --no-extensions --no-skills --no-prompt-templates --no-themes --no-context-files --no-approve --list-models' "$catalog_calls"; then
+  printf 'Pi catalog discovery was not offline and resource-disabled: %s\n' "$(cat "$catalog_calls")" >&2
+  exit 1
+fi
+
+load_pi_model_catalog() {
+  planner_model_catalog_providers=(openai-codex openai anthropic)
+  planner_model_catalog_provider=(openai-codex openai openai anthropic)
+  planner_model_catalog_model=(openai-codex/gpt-5.6-sol openai/gpt-5.6-sol openai/gpt-5.4 anthropic/claude-sonnet-5)
+  return 0
+}
+check "planner model prompt chooses a numbered provider/model option" \
+  "$(printf '3\n1\n' | (prompt_planner_model_real >/dev/null && printf '%s' "$planner_model_choice"))" \
+  "anthropic/claude-sonnet-5"
+check "planner model prompt can go back and choose another provider" \
+  "$(printf '1\nb\n3\n1\n' | (prompt_planner_model_real >/dev/null && printf '%s' "$planner_model_choice"))" \
+  "anthropic/claude-sonnet-5"
+check "planner model prompt preserves an opaque custom model" \
+  "$(printf '%s\n' c '[openai] gpt 5.1; $(echo inert)' | (prompt_planner_model_real >/dev/null && printf '%s' "$planner_model_choice"))" \
+  '[openai] gpt 5.1; $(echo inert)'
+check "planner model prompt treats Enter as the integration default" \
+  "$(printf '\n' | (prompt_planner_model_real >/dev/null && printf '<%s>' "$planner_model_choice"))" "<>"
+check "planner model prompt cancels on q" \
+  "$(printf 'q\n' | (prompt_planner_model_real >/dev/null 2>&1 && echo yes || echo no))" "no"
+check "planner selection chooses Claude model and thinking level" \
+  "$(printf '1\n1\n4\n' | (prompt_planner_selection_real >/dev/null && printf '%s/%s/%s' "$planner_kind_choice" "$planner_model_choice" "$planner_thinking_choice"))" \
+  "claude/sonnet/xhigh"
+check "planner selection offers Fable for Claude" \
+  "$(printf '1\n3\n3\n' | (prompt_planner_selection_real >/dev/null && printf '%s/%s/%s' "$planner_kind_choice" "$planner_model_choice" "$planner_thinking_choice"))" \
+  "claude/fable/high"
+check "planner selection keeps Claude integration defaults" \
+  "$(printf '1\n\n\n' | (prompt_planner_selection_real >/dev/null && printf '%s/<%s>/<%s>' "$planner_kind_choice" "$planner_model_choice" "$planner_thinking_choice"))" \
+  "claude/<>/<>"
+check "planner selection chooses Pi before its model and thinking options" \
+  "$(printf '2\n1\n1\n7\n' | (prompt_planner_selection_real >/dev/null && printf '%s/%s/%s' "$planner_kind_choice" "$planner_model_choice" "$planner_thinking_choice"))" \
+  "pi/openai-codex/gpt-5.6-sol/max"
+load_pi_model_catalog() {
+  planner_model_catalog_providers=()
+  planner_model_catalog_provider=()
+  planner_model_catalog_model=()
+  return 1
+}
+check "planner prompt keeps custom fallback when Pi catalog is unavailable" \
+  "$(printf '%s\n' c 'custom/provider-model' | (prompt_planner_model_real >/dev/null && printf '%s' "$planner_model_choice"))" \
+  "custom/provider-model"
+
+prompt_planner_selection() {
+  planner_kind_choice="pi"
+  planner_model_choice='openai-codex/planner-model'
+  planner_thinking_choice="max"
+  return 0
+}
+launch_planner_plan() {
+  printf 'launched %s for #%s with %s/%s\n' "$2" "$1" "$3" "$4"
 }
 
 # start_plan is the picker's `s` key: launch only for a valid selected Ready
 # row, with no GitHub read of its own and no shell execution for rejected input.
-check "plan starts Pi for a selected Ready row" \
-  "$(start_plan ready 3 934 2>/dev/null)" "launched Pi for #934"
+check "plan asks for and forwards an agent/model for a selected Ready row" \
+  "$(start_plan ready 3 934 2>/dev/null)" "launched pi for #934 with openai-codex/planner-model/max"
 check "plan refuses a non-Ready view" \
   "$(start_plan all 3 934 >/dev/null 2>&1 && echo yes || echo no)" "no"
 check "plan refuses an empty Ready view" \
@@ -116,8 +198,8 @@ check "a rejected plan explains itself on stderr" \
 
 # start_issue_plan is the opened-Issue action bar equivalent, gated on the
 # pre-computed live-label result for the one Issue currently open.
-check "issue plan starts Pi for a Ready Issue" \
-  "$(start_issue_plan 353 1 2>/dev/null)" "launched Pi for #353"
+check "issue plan asks for and forwards an agent/model for a Ready Issue" \
+  "$(start_issue_plan 353 1 2>/dev/null)" "launched pi for #353 with openai-codex/planner-model/max"
 check "issue plan refuses when can_plan is 0" \
   "$(start_issue_plan 334 0 >/dev/null 2>&1 && echo yes || echo no)" "no"
 check "an issue plan refusal explains itself on stderr" \
@@ -152,16 +234,18 @@ check "refresh pruning keeps only live ordinary Ready marks" \
 check "refresh pruning reports every removed mark" "$bundle_mark_notice" \
   "Refresh removed 2 stale or ineligible bundle mark(s): #202, #303."
 
-eval "$(declare -f launch_pi_bundle_plan | sed '1s/launch_pi_bundle_plan/launch_pi_bundle_plan_real/')"
-launch_pi_bundle_plan() {
-  printf 'launched bundle:'
+eval "$(declare -f launch_planner_bundle_plan | sed '1s/launch_planner_bundle_plan/launch_planner_bundle_plan_real/')"
+launch_planner_bundle_plan() {
+  local kind="$1" model="$2" thinking="$3"
+  shift 3
+  printf 'launched %s bundle with %s/%s:' "$kind" "$model" "$thinking"
   printf ' #%s' "$@"
   printf '\n'
 }
 all_issue_numbers=(101 202)
 all_issue_labels=("backlog, size:quick" "backlog, size:prd")
-check "bundle plan launches every marked Issue" \
-  "$(start_bundle_plan ready 101 202 2>/dev/null)" "launched bundle: #101 #202"
+check "bundle plan asks for one agent/model and launches every marked Issue" \
+  "$(start_bundle_plan ready 101 202 2>/dev/null)" "launched pi bundle with openai-codex/planner-model/max: #101 #202"
 check "bundle plan rejects one mark with single-plan guidance" \
   "$(start_bundle_plan ready 101 2>&1 >/dev/null || true)" \
   "Mark at least two ordinary Ready backlog Issues; use s to plan one Issue."
@@ -370,7 +454,7 @@ check "implementation resolver rejects an invalid Issue number" \
   "$(implementation_fixture_result 0 >/dev/null 2>&1 && echo yes || echo no)" "no"
 check "implementation resolver refuses a missing plan" \
   "$(implementation_fixture_result 777 2>&1 >/dev/null || true)" \
-  "No completed local plan found for #777. Press s to start Pi planning, then return after the planner writes the real task list."
+  "No completed local plan found for #777. Press s to start planning, then return after the planner writes the real task list."
 
 cat > "$implementation_tasks/tasks-777-sample.md" <<'MD'
 ## Tasks
@@ -385,7 +469,7 @@ cat > "$implementation_tasks/tasks-778-starter.md" <<'MD'
 MD
 check "implementation resolver refuses a planning starter" \
   "$(implementation_fixture_result 778 2>&1 >/dev/null || true)" \
-  "Planning for #778 is not complete: $implementation_tasks/tasks-778-starter.md is still a planning starter. Return after Pi replaces it with the real task list."
+  "Planning for #778 is not complete: $implementation_tasks/tasks-778-starter.md is still a planning starter. Return after the planner replaces it with the real task list."
 
 printf '%s\n' '## Tasks' > "$implementation_tasks/tasks-779-first.md"
 printf '%s\n' '## Tasks' > "$implementation_tasks/tasks-779-second.md"
@@ -428,7 +512,7 @@ cat > "$implementation_tasks/tasks-$bundle_feature.md" <<'MD'
 MD
 check "bundle middle member refuses a pending starter" \
   "$(implementation_fixture_result 802 2>&1 >/dev/null || true)" \
-  "Planning for #802 is not complete: $implementation_tasks/tasks-$bundle_feature.md is still a planning starter. Return after Pi replaces it with the real task list."
+  "Planning for #802 is not complete: $implementation_tasks/tasks-$bundle_feature.md is still a planning starter. Return after the planner replaces it with the real task list."
 printf '%s\n' '## Tasks' '- [ ] 1.0 Shared implementation' > "$implementation_tasks/tasks-$bundle_feature.md"
 check "bundle middle member refuses an existing shared branch" \
   "$(implementation_fixture_result 802 branch 2>&1 >/dev/null || true)" \
@@ -476,6 +560,121 @@ check "Codex choice maps to its wt kind" "$(implementation_choice_result 2)" "co
 check "Pi choice maps to its wt kind" "$(implementation_choice_result 3)" "pi"
 check "worktree-only choice maps to no-herdr" "$(implementation_choice_result 4)" "no-herdr"
 check "cancel maps to no launch mode" "$(implementation_choice_result q)" ""
+implementation_prompt_output="$(prompt_implementation_agent 777 777-sample <<< q 2>/dev/null)"
+if [[ "$implementation_prompt_output" == *"model"* || "$implementation_prompt_output" == *"Model"* ]]; then
+  printf 'FAIL the one-run implementation picker gained a model prompt: %s\n' "$implementation_prompt_output" >&2
+  failures=$((failures + 1))
+fi
+
+# Persistent agent defaults stay behind the Go helper boundary. These tests
+# stub only that process, then assert current rendering, preview/confirmation,
+# validation, clear forms, and exact separate arguments without touching TOML,
+# GitHub, or Herdr.
+agent_defaults_calls="$fixture_root/agent-defaults-calls"
+agent_defaults_forbidden="$fixture_root/agent-defaults-forbidden"
+agent_defaults_helper() {
+  {
+    printf 'CALL\n'
+    local item
+    for item in "$@"; do
+      printf '<%s>\n' "$item"
+    done
+  } >> "$agent_defaults_calls"
+  case " $* " in
+    *" --tsv "*)
+      [[ "${AGENT_DEFAULTS_FAIL_STAGE:-}" != read ]] || return 9
+      printf 'primary\tclaude\t\nrole_fallback\tclaude\t\n'
+      ;;
+    *" --validate-only "*)
+      [[ " $* " != *" invented "* ]] || { printf 'unsupported kind\n' >&2; return 2; }
+      [[ "${AGENT_DEFAULTS_FAIL_STAGE:-}" != validate ]] || return 8
+      ;;
+    *)
+      [[ "${AGENT_DEFAULTS_FAIL_STAGE:-}" != update ]] || return 7
+      printf 'Agent defaults (updated)\n'
+      ;;
+  esac
+}
+
+: > "$agent_defaults_calls"
+current_defaults_output="$(agent_defaults_action < /dev/null)"
+if [[ "$current_defaults_output" != *"Primary:       kind=claude  model=integration default"* ||
+      "$current_defaults_output" != *"Role fallback: kind=claude  model=integration default"* ]]; then
+  printf 'FAIL current agent defaults output: %s\n' "$current_defaults_output" >&2
+  failures=$((failures + 1))
+fi
+check "current defaults perform one helper read" "$(grep -c '^CALL$' "$agent_defaults_calls")" "1"
+
+: > "$agent_defaults_calls"
+update_defaults_output="$(
+  gh() { printf 'github\n' >> "$agent_defaults_forbidden"; return 97; }
+  herdr() { printf 'herdr\n' >> "$agent_defaults_forbidden"; return 97; }
+  agent_defaults_action --primary-kind pi --primary-model '[openai] gpt 5.1' \
+    --role-kind codex --role-model 'openai/role model' --yes < /dev/null
+)"
+if [[ "$update_defaults_output" != *"Agent defaults preview"* ||
+      "$update_defaults_output" != *"claude -> pi"* ||
+      "$update_defaults_output" != *"integration default -> [openai] gpt 5.1"* ]]; then
+  printf 'FAIL agent defaults preview: %s\n' "$update_defaults_output" >&2
+  failures=$((failures + 1))
+fi
+check "agent defaults update reads validates and writes" "$(grep -c '^CALL$' "$agent_defaults_calls")" "3"
+check "model with spaces and brackets is one helper argument" \
+  "$(grep -Fxc '<[openai] gpt 5.1>' "$agent_defaults_calls")" "2"
+check "role model with spaces is one helper argument" \
+  "$(grep -Fxc '<openai/role model>' "$agent_defaults_calls")" "2"
+: > "$agent_defaults_calls"
+rm -f "$fixture_root/model-shell-injection"
+agent_defaults_action --primary-kind pi \
+  --primary-model '[openai] x; $(touch model-shell-injection)' --yes < /dev/null > /dev/null
+check "shell-looking model remains one inert helper argument" \
+  "$(grep -Fxc '<[openai] x; $(touch model-shell-injection)>' "$agent_defaults_calls")" "2"
+check "shell-looking model executes nothing" \
+  "$([[ -e "$fixture_root/model-shell-injection" || -e model-shell-injection ]] && echo yes || echo no)" "no"
+check "agent defaults action contacts neither GitHub nor Herdr" \
+  "$([[ -e "$agent_defaults_forbidden" ]] && wc -c < "$agent_defaults_forbidden" | tr -d ' ' || printf 0)" "0"
+
+: > "$agent_defaults_calls"
+agent_defaults_action --primary-kind pi --role-kind codex --clear-primary-model --clear-role-model --yes < /dev/null > /dev/null
+check "clear primary model reaches validate and update" \
+  "$(grep -c '^<--clear-primary-model>$' "$agent_defaults_calls")" "2"
+check "clear role model reaches validate and update" \
+  "$(grep -c '^<--clear-role-model>$' "$agent_defaults_calls")" "2"
+
+: > "$agent_defaults_calls"
+noop_defaults_output="$(agent_defaults_action --primary-kind claude --clear-primary-model --role-kind claude --clear-role-model --yes < /dev/null)"
+check "a no-op reports no write" "$noop_defaults_output" "Agent defaults are unchanged; no file was written."
+check "a no-op performs only the current-value read" "$(grep -c '^CALL$' "$agent_defaults_calls")" "1"
+
+: > "$agent_defaults_calls"
+decline_status=0
+(
+  confirm_write() { return 1; }
+  agent_defaults_action --primary-kind pi < /dev/null > /dev/null
+) || decline_status=$?
+check "declining an agent defaults preview is non-success" "$decline_status" "1"
+check "decline stops after read and validation" "$(grep -c '^CALL$' "$agent_defaults_calls")" "2"
+
+agent_default_prompt_cancelled=0
+prompt_agent_default_value "Primary kind" claude 0 <<< q > /dev/null 2>&1 || true
+check "interactive agent defaults cancellation is recorded" "$agent_default_prompt_cancelled" "1"
+
+: > "$agent_defaults_calls"
+check "invalid kind fails through Go-side validation" \
+  "$(agent_defaults_action --primary-kind invented --yes < /dev/null > /dev/null 2>&1 && echo yes || echo no)" "no"
+check "invalid kind never reaches the update call" "$(grep -c '^CALL$' "$agent_defaults_calls")" "2"
+
+: > "$agent_defaults_calls"
+AGENT_DEFAULTS_FAIL_STAGE=read
+check "helper read failure is preserved" \
+  "$(agent_defaults_action < /dev/null > /dev/null 2>&1 && echo yes || echo no)" "no"
+unset AGENT_DEFAULTS_FAIL_STAGE
+: > "$agent_defaults_calls"
+AGENT_DEFAULTS_FAIL_STAGE=update
+check "helper update failure is preserved" \
+  "$(agent_defaults_action --primary-kind pi --yes < /dev/null > /dev/null 2>&1 && echo yes || echo no)" "no"
+unset AGENT_DEFAULTS_FAIL_STAGE
+check "failed update still passed validation first" "$(grep -c '^CALL$' "$agent_defaults_calls")" "3"
 
 # Drive the full local resolve -> prompt -> launch flow against the same
 # isolated fixture. The launcher is a recorder here; exact zsh vectors are
@@ -600,8 +799,8 @@ printf 's\n\n' | prompt_open_issue 353 > "$fixture_root/prompt-plan-output" \
   2> "$fixture_root/prompt-plan-error"
 check "a Ready Issue is offered Plan" \
   "$(grep -Fc '[s] Plan' "$fixture_root/prompt-plan-output" || true)" "2"
-check "a Ready Issue's Plan action starts Pi" \
-  "$(grep -Fc 'launched Pi for #353' "$fixture_root/prompt-plan-output" || true)" "1"
+check "a Ready Issue's Plan action starts the selected agent" \
+  "$(grep -Fc 'launched pi for #353' "$fixture_root/prompt-plan-output" || true)" "1"
 check "pressing s makes no decision write" "$(<"$prompt_capture")" ""
 check "pressing s records no decision" "$decision_recorded" "0"
 
@@ -808,7 +1007,7 @@ esac
 SH
 chmod +x "$fake_bin/gh"
 
-# launch_pi_plan crosses from bash into the sourced zsh wt function. Record the
+# launch_planner_plan crosses from bash into the sourced zsh wt function. Record the
 # exact child-process argument vector without loading wt or contacting Herdr.
 cat > "$fake_bin/zsh" <<'SH'
 #!/bin/sh
@@ -820,12 +1019,25 @@ cat > "$fake_bin/zsh" <<'SH'
   printf '\n'
 } >> "$WT_CALLS"
 case "$3" in
-  devops-plan) printf 'Pi planner launched for #%s\n' "$5" ;;
-  devops-bundle-plan) printf 'Pi bundle planner launched for #%s and #%s\n' "$5" "$6" ;;
+  devops-plan) printf 'Planner launched for #%s\n' "$5" ;;
+  devops-bundle-plan) printf 'Bundle planner launched\n' ;;
   devops-start) printf 'Implementation start launched for %s with %s\n' "$5" "$6" ;;
 esac
 SH
 chmod +x "$fake_bin/zsh"
+
+# Planner selection discovers only the installed Pi catalog. This fake keeps
+# the integration test hermetic and proves the REPL can render real options.
+cat > "$fake_bin/pi" <<'SH'
+#!/bin/sh
+cat <<'MODELS'
+provider   model            context  max-out  thinking  images
+openai     gpt-5.6-sol      272K     128K     yes       yes
+anthropic  claude-sonnet-5  1M       128K     yes       yes
+openai-codex gpt-5.6-sol    272K     128K     yes       yes
+MODELS
+SH
+chmod +x "$fake_bin/pi"
 
 export PATH="$fake_bin:$PATH"
 export GH_CALLS="$gh_calls"
@@ -889,9 +1101,64 @@ count_gh_calls() {
   grep -c '^CALL' "$gh_calls" || true
 }
 
+# The real one-shot command must honor HERDR_DEVFLOW_CONFIG, work without any
+# GitHub call, and leave both the repository config and every refused fixture
+# byte-identical. The Go helper is real here; only gh remains the recorder above.
+agent_defaults_config="$fixture_root/devflow-agent-defaults.toml"
+cp "$repo_root/.herdr/devflow.toml" "$agent_defaults_config"
+repo_config_before="$(cksum < "$repo_root/.herdr/devflow.toml")"
+: > "$gh_calls"
+HERDR_DEVFLOW_CONFIG="$agent_defaults_config" "$script" agent-defaults \
+  --primary-kind pi --primary-model '[openai] gpt 5.1' \
+  --role-kind codex --role-model 'openai/role model' --yes \
+  > "$fixture_root/agent-defaults-real-output"
+assert_no_github "agent-defaults one-shot update"
+assert_output_has "agent-defaults update" "$fixture_root/agent-defaults-real-output" "Agent defaults preview"
+grep -Fq 'kind = "pi"' "$agent_defaults_config"
+grep -Fq 'model = "[openai] gpt 5.1"' "$agent_defaults_config"
+grep -Fq 'default_kind = "codex"' "$agent_defaults_config"
+grep -Fq 'default_model = "openai/role model"' "$agent_defaults_config"
+check "HERDR_DEVFLOW_CONFIG isolates the repository config" \
+  "$(cksum < "$repo_root/.herdr/devflow.toml")" "$repo_config_before"
+
+refused_before="$(cksum < "$agent_defaults_config")"
+if HERDR_DEVFLOW_CONFIG="$agent_defaults_config" "$script" agent-defaults --primary-kind invented --yes \
+  > "$fixture_root/agent-defaults-invalid-output" 2>&1; then
+  printf 'invalid agent kind was accepted by the real helper\n' >&2
+  exit 1
+fi
+check "invalid real-helper path preserves config" "$(cksum < "$agent_defaults_config")" "$refused_before"
+if HERDR_DEVFLOW_CONFIG="$agent_defaults_config" "$script" agent-defaults --primary-kind claude \
+  < /dev/null > "$fixture_root/agent-defaults-unconfirmed-output" 2>&1; then
+  printf 'non-TTY agent-defaults write succeeded without --yes\n' >&2
+  exit 1
+fi
+check "unconfirmed real-helper path preserves config" "$(cksum < "$agent_defaults_config")" "$refused_before"
+
+# A no-option one-shot is a pure current-value read and still skips GitHub.
+: > "$gh_calls"
+HERDR_DEVFLOW_CONFIG="$agent_defaults_config" "$script" agent-defaults \
+  < /dev/null > "$fixture_root/agent-defaults-current-output"
+assert_no_github "agent-defaults one-shot read"
+assert_output_has "agent-defaults current read" "$fixture_root/agent-defaults-current-output" "Primary:       kind=pi"
+
 gh_call_sequence() {
   awk '/^CALL/ {printf "%s %s;", $2, $3}' "$gh_calls"
 }
+
+# The planning launcher keeps kind, model, and thinking as inert zsh positional
+# arguments. The adapter maps thinking to each native integration's flag.
+plan_bridge='source "$1" || exit; typeset -a plan_args; plan_args=(--issue "$2" --kind "$3"); [[ -n "$4" ]] && plan_args+=(--model "$4"); [[ -n "$5" ]] && plan_args+=(--thinking "$5"); wt plan "${plan_args[@]}"'
+: > "$wt_calls"
+launch_planner_plan_real 934 pi '[openai] gpt 5.1; $(echo inert)' max > /dev/null
+check "single Pi planner launcher preserves one opaque model argument" \
+  "$(<"$wt_calls")" \
+  $'CALL\t-c\t'"$plan_bridge"$'\tdevops-plan\t'"$repo_root"$'/scripts/wt.sh\t934\tpi\t[openai] gpt 5.1; $(echo inert)\tmax'
+: > "$wt_calls"
+launch_planner_plan_real 934 claude 'fable; $(echo inert)' xhigh > /dev/null
+check "single Claude planner launcher preserves model and thinking intent" \
+  "$(<"$wt_calls")" \
+  $'CALL\t-c\t'"$plan_bridge"$'\tdevops-plan\t'"$repo_root"$'/scripts/wt.sh\t934\tclaude\tfable; $(echo inert)\txhigh'
 
 # The implementation launcher crosses the same bash-to-zsh boundary as Plan.
 # Its constrained child receives the feature and validated mode as separate
@@ -914,17 +1181,17 @@ check "an unsupported implementation mode launches no child" \
 # with a recorder. Every Issue is a separate zsh positional argument; the fixed
 # child builds a quoted array rather than flattening or evaluating them.
 launch_real_bundle() (
-  launch_pi_bundle_plan_real "$@"
+  launch_planner_bundle_plan_real "$@"
 )
-bundle_bridge='source "$1" || exit; shift; typeset -a plan_args; plan_args=(); for issue in "$@"; do plan_args+=(--issue "$issue"); done; wt plan "${plan_args[@]}"'
+bundle_bridge='source "$1" || exit; kind="$2"; model="$3"; thinking="$4"; shift 4; typeset -a plan_args; plan_args=(); for issue in "$@"; do plan_args+=(--issue "$issue"); done; plan_args+=(--kind "$kind"); [[ -n "$model" ]] && plan_args+=(--model "$model"); [[ -n "$thinking" ]] && plan_args+=(--thinking "$thinking"); wt plan "${plan_args[@]}"'
 : > "$wt_calls"
-launch_real_bundle 202 101 > /dev/null
-check "bundle launcher preserves separate Issue arguments" \
+launch_real_bundle pi '[openai] bundle model; $(echo inert)' high 202 101 > /dev/null
+check "bundle launcher preserves separate kind, model, and Issue arguments" \
   "$(<"$wt_calls")" \
-  $'CALL\t-c\t'"$bundle_bridge"$'\tdevops-bundle-plan\t'"$repo_root"$'/scripts/wt.sh\t202\t101'
+  $'CALL\t-c\t'"$bundle_bridge"$'\tdevops-bundle-plan\t'"$repo_root"$'/scripts/wt.sh\tpi\t[openai] bundle model; $(echo inert)\thigh\t202\t101'
 : > "$wt_calls"
-check "real bundle launcher rejects hostile argument text" \
-  "$(launch_real_bundle 101 '202; touch nope' >/dev/null 2>&1 && echo yes || echo no)" "no"
+check "real bundle launcher rejects hostile Issue argument text" \
+  "$(launch_real_bundle claude '' high 101 '202; touch nope' >/dev/null 2>&1 && echo yes || echo no)" "no"
 check "hostile bundle argument launches no child" \
   "$(wc -c < "$wt_calls" | tr -d ' ')" "0"
 
@@ -1262,27 +1529,41 @@ check "an answered-label failure still follows comment ordering" \
 # through zsh after one label read; #334 is needs-decision (not Ready) and is
 # refused before any process launch. Neither path writes to GitHub.
 prompt_open_issue_plan_output() {
-  local issue_number="$1"
+  local issue_number="$1" planner_answers="${2:-}"
   (
     set +e
     # Re-sourced because the unit section above replaced issue_labels_of and
     # view_issue with stubs; this subshell gets the real gh-backed versions.
     DEVOPS_SOURCE_ONLY=1 source "$script" > /dev/null 2>&1
-    printf 's\n\n' | prompt_open_issue "$issue_number"
+    printf 's\n%s\n' "$planner_answers" | prompt_open_issue "$issue_number"
   )
 }
 
 : > "$gh_calls"
 : > "$wt_calls"
-prompt_open_issue_plan_output 320 > "$fixture_root/prompt-plan-real-output" \
+prompt_open_issue_plan_output 320 $'1\n1\n4' > "$fixture_root/prompt-plan-real-output" \
   2> "$fixture_root/prompt-plan-real-error"
-check "a real Ready Issue's Plan launches Pi" \
-  "$(grep -Fc 'Pi planner launched for #320' "$fixture_root/prompt-plan-real-output" || true)" "1"
-check "a real Ready Issue's Plan invokes wt through zsh" \
+check "a real Ready Issue's Plan launches the selected agent" \
+  "$(grep -Fc 'Planner launched for #320' "$fixture_root/prompt-plan-real-output" || true)" "1"
+assert_output_has "a real Ready Issue's Plan" "$fixture_root/prompt-plan-real-output" "agent>"
+assert_output_lacks "a Claude planning choice" "$fixture_root/prompt-plan-real-output" "provider>"
+check "a real Ready Issue's Claude Plan invokes wt through zsh" \
   "$(<"$wt_calls")" \
-  $'CALL\t-c\tsource "$1" && wt plan --issue "$2"\tdevops-plan\t'"$repo_root"$'/scripts/wt.sh\t320'
+  $'CALL\t-c\t'"$plan_bridge"$'\tdevops-plan\t'"$repo_root"$'/scripts/wt.sh\t320\tclaude\tsonnet\txhigh'
 check "a real Ready Issue's Plan reads labels exactly once" "$(count_label_reads 320)" "1"
 assert_no_github_write "a real Ready Issue's Plan action"
+
+: > "$gh_calls"
+: > "$wt_calls"
+prompt_open_issue_plan_output 320 $'2\n3\n1\n7' > "$fixture_root/prompt-plan-model-option-output" \
+  2> "$fixture_root/prompt-plan-model-option-error"
+assert_output_has "a numbered planning-model choice" \
+  "$fixture_root/prompt-plan-model-option-output" "anthropic/claude-sonnet-5"
+check "a numbered planning-model choice reaches wt as one argument" \
+  "$(<"$wt_calls")" \
+  $'CALL\t-c\t'"$plan_bridge"$'\tdevops-plan\t'"$repo_root"$'/scripts/wt.sh\t320\tpi\tanthropic/claude-sonnet-5\tmax'
+check "a numbered planning-model choice reads labels exactly once" "$(count_label_reads 320)" "1"
+assert_no_github_write "a numbered planning-model choice"
 
 : > "$gh_calls"
 : > "$wt_calls"
@@ -1599,6 +1880,30 @@ if [[ -z "$i_branch" ]]; then
 fi
 if grep -Eq 'load_picker_index|apply_picker_filter|reload=1|issue_labels_of|\bgh\b' <<< "$i_branch"; then
   printf 'the i key re-queries GitHub or resets the view: %s\n' "$i_branch" >&2
+  exit 1
+fi
+
+# The picker g action is local and documented. It must escape the alternate
+# screen for prompts, then return without refreshing or reading GitHub.
+if ! grep -Fq 'with_normal_terminal agent_defaults_action' "$script"; then
+  printf 'the picker g key is not wired to agent_defaults_action\n' >&2
+  exit 1
+fi
+if ! grep -Fq 'g agent defaults' "$script"; then
+  printf 'the picker footer does not document the g key\n' >&2
+  exit 1
+fi
+g_branch="$(awk '/^      g\)$/{inside=1} inside{print} inside && /^        ;;$/{exit}' "$script")"
+if [[ -z "$g_branch" ]]; then
+  printf 'could not read the picker g) branch\n' >&2
+  exit 1
+fi
+if grep -Eq 'load_picker_index|apply_picker_filter|reload=1|issue_labels_of|\bgh\b|wt_herd' <<< "$g_branch"; then
+  printf 'the g key contacts a remote service or resets the view: %s\n' "$g_branch" >&2
+  exit 1
+fi
+if ! grep -Fq 'g|agent-defaults)' "$script"; then
+  printf 'the line REPL does not expose agent-defaults\n' >&2
   exit 1
 fi
 

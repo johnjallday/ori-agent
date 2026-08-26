@@ -36,6 +36,44 @@ func TestStoreRoundTripsAtomicallyWithPrivatePermissions(t *testing.T) {
 	}
 }
 
+func TestStoreLoadsLegacyAgentStateWithoutModelsAndRoundTripsModelIntent(t *testing.T) {
+	t.Parallel()
+	legacyDir := t.TempDir()
+	legacy := `{"version":1,"features":{"repo:legacy":{"feature":{"repository_id":"repo","name":"legacy"},"agents":{"builder":{"role":"builder","name":"legacy-builder","kind":"claude"}},"handoff":{"primary_role":"builder","primary_kind":"claude"}}}}`
+	if err := os.WriteFile(filepath.Join(legacyDir, FileName), []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := New(legacyDir).Load()
+	if err != nil {
+		t.Fatalf("legacy state without models failed to load: %v", err)
+	}
+	legacyFeature := loaded.Features["repo:legacy"]
+	if legacyFeature.Handoff.PrimaryModel != "" || legacyFeature.Agents["builder"].Model != "" {
+		t.Fatalf("legacy state invented model intent: %#v", legacyFeature)
+	}
+
+	store := New(t.TempDir())
+	state := model.NewBridgeState()
+	state.Features["repo:feature"] = model.FeatureState{
+		Feature: model.Feature{RepositoryID: "repo", Name: "feature"},
+		Agents: map[string]model.RoleAgent{
+			"builder": {Role: "builder", Name: "feature-builder", Kind: "pi", Model: "openai/gpt-5.1"},
+		},
+		Handoff: model.HandoffState{PrimaryRole: "builder", PrimaryKind: "pi", PrimaryModel: "openai/gpt-5.1"},
+	}
+	if err := store.Save(state); err != nil {
+		t.Fatal(err)
+	}
+	roundTripped, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	feature := roundTripped.Features["repo:feature"]
+	if feature.Handoff.PrimaryModel != "openai/gpt-5.1" || feature.Agents["builder"].Model != "openai/gpt-5.1" {
+		t.Fatalf("model intent did not round-trip: %#v", feature)
+	}
+}
+
 func TestStoreRejectsCorruptOrFutureState(t *testing.T) {
 	t.Parallel()
 	store := New(t.TempDir())
@@ -286,12 +324,15 @@ func TestPlanningSessionsRoundTripAndStayOutOfFeatures(t *testing.T) {
 	store := New(t.TempDir())
 	want := model.NewBridgeState()
 	want.PlanningSessions["repo-1:342"] = model.PlanningSession{
-		RepositoryID: "repo-1",
-		IssueNumber:  342,
-		Slug:         "342-ready-issue-codex-planning",
-		WorktreePath: "/tmp/ori-agent-dev",
-		Stage:        model.PlanningPrompted,
-		Prompted:     true,
+		RepositoryID:    "repo-1",
+		IssueNumber:     342,
+		Slug:            "342-ready-issue-codex-planning",
+		WorktreePath:    "/tmp/ori-agent-dev",
+		PlannerKind:     "pi",
+		PlannerModel:    "openai-codex/gpt-5.6-luna",
+		PlannerThinking: "max",
+		Stage:           model.PlanningPrompted,
+		Prompted:        true,
 	}
 	if err := store.Save(want); err != nil {
 		t.Fatal(err)
@@ -301,7 +342,7 @@ func TestPlanningSessionsRoundTripAndStayOutOfFeatures(t *testing.T) {
 		t.Fatal(err)
 	}
 	session, ok := loaded.PlanningSessions["repo-1:342"]
-	if !ok || session.IssueNumber != 342 || session.Slug != "342-ready-issue-codex-planning" || session.Stage != model.PlanningPrompted {
+	if !ok || session.IssueNumber != 342 || session.Slug != "342-ready-issue-codex-planning" || session.PlannerKind != "pi" || session.PlannerModel != "openai-codex/gpt-5.6-luna" || session.PlannerThinking != "max" || session.Stage != model.PlanningPrompted {
 		t.Fatalf("planning session = %#v, ok=%v", session, ok)
 	}
 	if len(loaded.Features) != 0 {

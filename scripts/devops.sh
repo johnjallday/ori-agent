@@ -31,10 +31,13 @@ if ! repo_root="$(git -C "$script_dir/.." rev-parse --show-toplevel 2>/dev/null)
   printf '%s\n' "devops.sh must live inside a Git checkout" >&2
   exit 2
 fi
-if ! command -v gh >/dev/null 2>&1; then
+require_gh() {
+  if command -v gh >/dev/null 2>&1; then
+    return 0
+  fi
   printf '%s\n' "devops.sh requires the GitHub CLI (gh): https://cli.github.com" >&2
-  exit 1
-fi
+  return 1
+}
 cd "$repo_root" || exit 1
 
 print_usage() {
@@ -48,6 +51,7 @@ Usage:
   ./scripts/devops.sh proposals
   ./scripts/devops.sh status
   ./scripts/devops.sh release
+  ./scripts/devops.sh agent-defaults [options] [--yes]
   ./scripts/devops.sh view <issue-number>
   ./scripts/devops.sh new <title...> [--body <text> | --body-file <path|->] [--yes]
   ./scripts/devops.sh decide <issue-number> <answers...> [--rationale <text>] [--yes]
@@ -82,10 +86,14 @@ those answers. `n` accepts an optional one-line body; enter `:edit` to use
 VISUAL or EDITOR for multiline Markdown. For one-shot capture, `--body-file -`
 reads the body from stdin.
 
-In the picker's Ready view, pressing `s` on a selected row starts
-`wt plan --issue <N>`, which shows its normal confirmation summary and launches
-a Herdr-managed Pi planner in the dev worktree. Space marks ordinary backlog
-rows and `b` plans at least two marks as one bundle after showing all evidence
+In the picker's Ready view, pressing `s` on a selected row asks for Claude or
+Pi. Claude offers Sonnet, Opus, Fable, custom/default model choices and thinking;
+Pi opens provider/model options with `openai-codex` first, then Pi thinking.
+The command starts `wt plan --issue <N>`,
+shows its normal confirmation summary,
+and launches the selected Herdr-managed planner in the dev worktree. Space marks
+ordinary backlog rows and `b` asks for the same planner selection before
+planning at least two marks as one bundle after showing all evidence
 and asking for the compatibility affirmation. Feature proposals remain on the
 single-Issue path. The same `s` is available from the opened-Issue action bar
 (Enter on any row) once that Issue's live labels satisfy `labels_are_ready`.
@@ -94,6 +102,12 @@ Any other label state, or a failed label read, is a clear refusal instead.
 Planning is asynchronous. Return later and press `i` on the selected or opened
 Issue to resolve its completed local task list, choose Claude, Codex, Pi, or a
 worktree without Herdr, and delegate the confirmed start to `wt start`.
+
+`agent-defaults` (picker/REPL key `g`) reads or changes the checked-in primary
+and role-fallback kind/model pairs. Interactive use prompts for all four values;
+one-shot options are --primary-kind, --primary-model/--clear-primary-model,
+--role-kind, and --role-model/--clear-role-model. It is local: no GitHub or
+Herdr call is made. Empty models mean the external integration chooses.
 
 new/decide/approve/unapprove write to GitHub. They prompt for confirmation on
 a terminal, and require --yes when stdin is not a terminal. `answer` remains a
@@ -107,7 +121,7 @@ EOF
 print_menu() {
   printf '\n%s\n' \
     "[1/a] All  [2/d] Needs my decision  [3/b] Backlog  [4/f] Proposals  [5/y] Ready" \
-    "[v #] View  [n title] New  [c # choices] Decide  [ok #] Approve  [q] Quit"
+    "[v #] View  [n title] New  [c # choices] Decide  [ok #] Approve  [g] Agent defaults  [q] Quit"
 }
 
 # Labels arrive from `gh` as a ", "-joined string. Split on commas and trim so a
@@ -433,7 +447,7 @@ resolve_implementation_feature() {
   fi
 
   if [[ "${#matches[@]}" -eq 0 ]]; then
-    printf 'No completed local plan found for #%s. Press s to start Pi planning, then return after the planner writes the real task list.\n' "$issue_number" >&2
+    printf 'No completed local plan found for #%s. Press s to start planning, then return after the planner writes the real task list.\n' "$issue_number" >&2
     return 1
   fi
   if [[ "${#matches[@]}" -gt 1 ]]; then
@@ -446,7 +460,7 @@ resolve_implementation_feature() {
 
   file="${matches[0]}"
   if grep -Fq '<!-- ori-devflow: planning-starter;' "$file"; then
-    printf 'Planning for #%s is not complete: %s is still a planning starter. Return after Pi replaces it with the real task list.\n' "$issue_number" "$file" >&2
+    printf 'Planning for #%s is not complete: %s is still a planning starter. Return after the planner replaces it with the real task list.\n' "$issue_number" "$file" >&2
     return 1
   fi
 
@@ -734,6 +748,210 @@ confirm_write() {
   [[ "$reply" == y || "$reply" == Y ]]
 }
 
+agent_defaults_helper() {
+  # The Go helper owns TOML parsing, validation, and atomic replacement. This
+  # shell only transports separate arguments and confirms the local write.
+  HERDR_DEVFLOW_USE_SOURCE=1 bash "$script_dir/herdr-devflow.sh" "$@"
+}
+
+agent_defaults_primary_kind=""
+agent_defaults_primary_model=""
+agent_defaults_role_kind=""
+agent_defaults_role_model=""
+load_agent_defaults() {
+  local output scope kind model primary_seen=0 role_seen=0
+  output="$(agent_defaults_helper config agent-defaults --tsv)" || return $?
+  agent_defaults_primary_kind=""
+  agent_defaults_primary_model=""
+  agent_defaults_role_kind=""
+  agent_defaults_role_model=""
+  while IFS=$'\t' read -r scope kind model; do
+    case "$scope" in
+      primary)
+        agent_defaults_primary_kind="$kind"
+        agent_defaults_primary_model="$model"
+        primary_seen=$((primary_seen + 1))
+        ;;
+      role_fallback)
+        agent_defaults_role_kind="$kind"
+        agent_defaults_role_model="$model"
+        role_seen=$((role_seen + 1))
+        ;;
+      "") ;;
+      *)
+        printf 'agent-defaults helper returned an unknown record: %s\n' "$scope" >&2
+        return 1
+        ;;
+    esac
+  done <<< "$output"
+  if [[ "$primary_seen" -ne 1 || "$role_seen" -ne 1 || -z "$agent_defaults_primary_kind" || -z "$agent_defaults_role_kind" ]]; then
+    printf 'agent-defaults helper returned an incomplete result\n' >&2
+    return 1
+  fi
+}
+
+agent_model_label() {
+  if [[ -n "$1" ]]; then
+    printf '%s' "$1"
+  else
+    printf '%s' "integration default"
+  fi
+}
+
+show_current_agent_defaults() {
+  printf 'Current agent defaults\n'
+  printf '  Primary:       kind=%s  model=%s\n' "$agent_defaults_primary_kind" "$(agent_model_label "$agent_defaults_primary_model")"
+  printf '  Role fallback: kind=%s  model=%s\n' "$agent_defaults_role_kind" "$(agent_model_label "$agent_defaults_role_model")"
+}
+
+agent_default_prompt_value=""
+agent_default_prompt_cancelled=0
+prompt_agent_default_value() {
+  local label="$1" current="$2" allow_clear="$3" reply
+  agent_default_prompt_value="$current"
+  printf '%s [%s]' "$label" "$(agent_model_label "$current")"
+  if [[ "$allow_clear" -eq 1 ]]; then
+    printf ' (blank keeps, <clear> uses integration default, q cancels)'
+  else
+    printf ' (blank keeps, q cancels)'
+  fi
+  printf ': '
+  IFS= read -r reply || { agent_default_prompt_cancelled=1; return 1; }
+  case "$reply" in
+    q|Q|cancel|Cancel)
+      agent_default_prompt_cancelled=1
+      return 1
+      ;;
+    "") return 0 ;;
+    '<clear>'|clear)
+      if [[ "$allow_clear" -eq 1 ]]; then
+        agent_default_prompt_value=""
+        return 0
+      fi
+      ;;
+  esac
+  agent_default_prompt_value="$reply"
+  return 0
+}
+
+agent_defaults_action() {
+  local assume_yes=0 any_proposed=0 interactive=0 argument
+  local primary_kind_set=0 primary_model_set=0 role_kind_set=0 role_model_set=0
+  local proposed_primary_kind="" proposed_primary_model="" proposed_role_kind="" proposed_role_model=""
+  local -a update_args=()
+
+  while [[ $# -gt 0 ]]; do
+    argument="$1"
+    case "$argument" in
+      --yes)
+        assume_yes=1
+        shift
+        ;;
+      --primary-kind|--primary-model|--role-kind|--role-model)
+        if [[ $# -lt 2 || "$2" == --* ]]; then
+          printf '%s requires a value\n' "$argument" >&2
+          return 2
+        fi
+        case "$argument" in
+          --primary-kind)
+            [[ "$primary_kind_set" -eq 0 ]] || { printf '%s may be provided only once\n' "$argument" >&2; return 2; }
+            proposed_primary_kind="$2"; primary_kind_set=1 ;;
+          --primary-model)
+            [[ "$primary_model_set" -eq 0 ]] || { printf 'a primary model choice may be provided only once\n' >&2; return 2; }
+            proposed_primary_model="$2"; primary_model_set=1 ;;
+          --role-kind)
+            [[ "$role_kind_set" -eq 0 ]] || { printf '%s may be provided only once\n' "$argument" >&2; return 2; }
+            proposed_role_kind="$2"; role_kind_set=1 ;;
+          --role-model)
+            [[ "$role_model_set" -eq 0 ]] || { printf 'a role model choice may be provided only once\n' >&2; return 2; }
+            proposed_role_model="$2"; role_model_set=1 ;;
+        esac
+        any_proposed=1
+        shift 2
+        ;;
+      --clear-primary-model)
+        [[ "$primary_model_set" -eq 0 ]] || { printf 'a primary model choice may be provided only once\n' >&2; return 2; }
+        proposed_primary_model=""; primary_model_set=1; any_proposed=1; shift
+        ;;
+      --clear-role-model)
+        [[ "$role_model_set" -eq 0 ]] || { printf 'a role model choice may be provided only once\n' >&2; return 2; }
+        proposed_role_model=""; role_model_set=1; any_proposed=1; shift
+        ;;
+      *)
+        printf 'unknown agent-defaults option: %s\n' "$argument" >&2
+        return 2
+        ;;
+    esac
+  done
+
+  load_agent_defaults || return $?
+  if [[ "$any_proposed" -eq 0 && -t 0 ]]; then
+    interactive=1
+  fi
+  if [[ "$any_proposed" -eq 0 && "$interactive" -eq 0 ]]; then
+    show_current_agent_defaults
+    return 0
+  fi
+
+  [[ "$primary_kind_set" -eq 1 ]] || proposed_primary_kind="$agent_defaults_primary_kind"
+  [[ "$primary_model_set" -eq 1 ]] || proposed_primary_model="$agent_defaults_primary_model"
+  [[ "$role_kind_set" -eq 1 ]] || proposed_role_kind="$agent_defaults_role_kind"
+  [[ "$role_model_set" -eq 1 ]] || proposed_role_model="$agent_defaults_role_model"
+
+  if [[ "$interactive" -eq 1 ]]; then
+    show_current_agent_defaults
+    agent_default_prompt_cancelled=0
+    prompt_agent_default_value "Primary kind" "$proposed_primary_kind" 0 || true
+    [[ "$agent_default_prompt_cancelled" -eq 0 ]] || { printf 'Cancelled.\n'; return 0; }
+    proposed_primary_kind="$agent_default_prompt_value"
+    prompt_agent_default_value "Primary model" "$proposed_primary_model" 1 || true
+    [[ "$agent_default_prompt_cancelled" -eq 0 ]] || { printf 'Cancelled.\n'; return 0; }
+    proposed_primary_model="$agent_default_prompt_value"
+    prompt_agent_default_value "Role fallback kind" "$proposed_role_kind" 0 || true
+    [[ "$agent_default_prompt_cancelled" -eq 0 ]] || { printf 'Cancelled.\n'; return 0; }
+    proposed_role_kind="$agent_default_prompt_value"
+    prompt_agent_default_value "Role fallback model" "$proposed_role_model" 1 || true
+    [[ "$agent_default_prompt_cancelled" -eq 0 ]] || { printf 'Cancelled.\n'; return 0; }
+    proposed_role_model="$agent_default_prompt_value"
+  fi
+
+  if [[ "$proposed_primary_kind" == "$agent_defaults_primary_kind" &&
+        "$proposed_primary_model" == "$agent_defaults_primary_model" &&
+        "$proposed_role_kind" == "$agent_defaults_role_kind" &&
+        "$proposed_role_model" == "$agent_defaults_role_model" ]]; then
+    printf 'Agent defaults are unchanged; no file was written.\n'
+    return 0
+  fi
+
+  update_args=(
+    --primary-kind "$proposed_primary_kind"
+    --role-kind "$proposed_role_kind"
+  )
+  if [[ -n "$proposed_primary_model" ]]; then
+    update_args+=(--primary-model "$proposed_primary_model")
+  else
+    update_args+=(--clear-primary-model)
+  fi
+  if [[ -n "$proposed_role_model" ]]; then
+    update_args+=(--role-model "$proposed_role_model")
+  else
+    update_args+=(--clear-role-model)
+  fi
+
+  # Validate the complete proposed pairs through the same Go path that will
+  # perform the update, but do not touch the config before confirmation.
+  agent_defaults_helper config agent-defaults --validate-only "${update_args[@]}" >/dev/null || return $?
+
+  printf 'Agent defaults preview\n'
+  printf '  Primary kind:        %s -> %s\n' "$agent_defaults_primary_kind" "$proposed_primary_kind"
+  printf '  Primary model:       %s -> %s\n' "$(agent_model_label "$agent_defaults_primary_model")" "$(agent_model_label "$proposed_primary_model")"
+  printf '  Role fallback kind:  %s -> %s\n' "$agent_defaults_role_kind" "$proposed_role_kind"
+  printf '  Role fallback model: %s -> %s\n' "$(agent_model_label "$agent_defaults_role_model")" "$(agent_model_label "$proposed_role_model")"
+  confirm_write "Update the checked-in agent defaults?" "$assume_yes" || return $?
+
+  agent_defaults_helper config agent-defaults "${update_args[@]}"
+}
+
 print_indented() {
   local value="$1" line
   while IFS= read -r line; do
@@ -978,6 +1196,9 @@ run_one_shot() {
     release)
       [[ $# -eq 0 ]] || return 2
       release_report
+      ;;
+    agent-defaults)
+      agent_defaults_action "$@"
       ;;
     decisions|decision)
       [[ $# -eq 0 ]] || return 2
@@ -1369,7 +1590,7 @@ render_picker() {
   printf '\n'
   style '2' '↑/↓ or j/k select  •  ←/→ or h/l change view  •  Space mark/unmark  •  b plan marked bundle'
   printf '\n'
-  style '2' 'Enter open  •  c decide  •  n new  •  o approve  •  s plan one  •  i start implementation  •  r refresh  •  ? help  •  q quit'
+  style '2' 'Enter open  •  c decide  •  n new  •  o approve  •  s plan one  •  i start implementation  •  g agent defaults  •  r refresh  •  ? help  •  q quit'
   printf '\n'
 }
 
@@ -1438,10 +1659,12 @@ Picker keys
   n             Capture a new Issue with an optional body
   o             Add the approved label
   Space         Mark/unmark an ordinary backlog Issue in the Ready view
-  b             Plan at least two marked Issues as one affirmed bundle
-  s             Start asynchronous Pi planning for the selected Ready Issue
+  b             Choose Claude/Pi plus model/thinking options for the marked bundle
+  s             Choose Claude/Pi plus model/thinking options for the selected Issue
   i             Start implementation from a completed local plan; choose Claude,
                 Codex, Pi, worktree-only, or cancel
+  g             Read or change persistent primary and role agent defaults
+                (local config only; no GitHub or Herdr call)
   r             Refresh from GitHub
   ?             Show this help
   q             Quit
@@ -1551,14 +1774,329 @@ prompt_approve_issue() {
   set_approved approve "$issue_number"
 }
 
+planner_kind_choice=""
+planner_model_choice=""
+planner_thinking_choice=""
+planner_model_catalog_providers=()
+planner_model_catalog_provider=()
+planner_model_catalog_model=()
+
+load_pi_model_catalog() {
+  local pi_binary output provider model ignored existing duplicate
+  planner_model_catalog_providers=()
+  planner_model_catalog_provider=()
+  planner_model_catalog_model=()
+
+  pi_binary="$(command -v pi 2>/dev/null || true)"
+  [[ -n "$pi_binary" ]] || return 1
+  output="$(PI_OFFLINE=1 PI_SKIP_VERSION_CHECK=1 "$pi_binary" \
+    --offline --no-extensions --no-skills --no-prompt-templates --no-themes \
+    --no-context-files --no-approve --list-models 2>/dev/null)" || return 1
+
+  while read -r provider model ignored; do
+    [[ "$provider" == "provider" && "$model" == "model" ]] && continue
+    [[ "$provider" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || continue
+    [[ "$model" =~ ^[A-Za-z0-9@][A-Za-z0-9@._/:+-]*$ ]] || continue
+    [[ "${#provider}" -le 64 ]] || continue
+    (( ${#provider} + 1 + ${#model} <= 256 )) || continue
+
+    [[ "${#planner_model_catalog_model[@]}" -lt 500 ]] || break
+    duplicate=0
+    for existing in ${planner_model_catalog_model[@]+"${planner_model_catalog_model[@]}"}; do
+      if [[ "$existing" == "$provider/$model" ]]; then
+        duplicate=1
+        break
+      fi
+    done
+    [[ "$duplicate" -eq 0 ]] || continue
+    planner_model_catalog_provider+=("$provider")
+    planner_model_catalog_model+=("$provider/$model")
+
+    duplicate=0
+    for existing in ${planner_model_catalog_providers[@]+"${planner_model_catalog_providers[@]}"}; do
+      if [[ "$existing" == "$provider" ]]; then
+        duplicate=1
+        break
+      fi
+    done
+    if [[ "$duplicate" -eq 0 ]]; then
+      if [[ "$provider" == "openai-codex" ]]; then
+        planner_model_catalog_providers=("$provider" "${planner_model_catalog_providers[@]}")
+      else
+        planner_model_catalog_providers+=("$provider")
+      fi
+    fi
+  done <<< "$output"
+
+  [[ "${#planner_model_catalog_model[@]}" -gt 0 ]]
+}
+
+planner_model_provider_count() {
+  local wanted="$1" provider count=0
+  for provider in ${planner_model_catalog_provider[@]+"${planner_model_catalog_provider[@]}"}; do
+    [[ "$provider" == "$wanted" ]] && count=$((count + 1))
+  done
+  printf '%s' "$count"
+}
+
+prompt_custom_planner_model() {
+  local custom
+  printf 'custom model> '
+  IFS= read -r custom || return 1
+  if [[ -z "$custom" ]]; then
+    printf 'Custom model cannot be empty.\n' >&2
+    return 1
+  fi
+  if [[ "$custom" == -* ]]; then
+    printf 'Custom model cannot begin with a dash.\n' >&2
+    return 1
+  fi
+  planner_model_choice="$custom"
+  return 0
+}
+
+prompt_planner_agent() {
+  local choice
+  planner_kind_choice=""
+  printf '\nChoose the planning agent.\n'
+  printf '  [1/c] Claude\n'
+  printf '  [2/p] Pi\n'
+  printf '  [q/Enter] Cancel\n'
+  printf 'agent> '
+  IFS= read -r choice || return 1
+  case "$choice" in
+    1|c|C|claude|Claude) planner_kind_choice="claude" ;;
+    2|p|P|pi|Pi) planner_kind_choice="pi" ;;
+    ""|q|Q|cancel|Cancel)
+      printf 'Cancelled.\n'
+      return 1
+      ;;
+    *)
+      printf 'Choose Claude, Pi, or cancel.\n' >&2
+      return 1
+      ;;
+  esac
+  return 0
+}
+
+prompt_claude_planner_model() {
+  local choice
+  planner_model_choice=""
+  while true; do
+    printf '\nChoose the Claude model for this planning session.\n'
+    printf '  [Enter] Integration default (or recorded model on retry)\n'
+    printf '  [1/s] Sonnet (sonnet)\n'
+    printf '  [2/o] Opus (opus)\n'
+    printf '  [3/f] Fable (fable)\n'
+    printf '  [c] Custom alias or full model name\n'
+    printf '  [q] Cancel\n'
+    printf 'model> '
+    IFS= read -r choice || return 1
+    case "$choice" in
+      "") return 0 ;;
+      1|s|S|sonnet|Sonnet) planner_model_choice="sonnet"; return 0 ;;
+      2|o|O|opus|Opus) planner_model_choice="opus"; return 0 ;;
+      3|f|F|fable|Fable) planner_model_choice="fable"; return 0 ;;
+      c|C|custom|Custom)
+        prompt_custom_planner_model && return 0
+        ;;
+      q|Q|cancel|Cancel)
+        printf 'Cancelled.\n'
+        return 1
+        ;;
+      *) printf 'Choose Sonnet, Opus, Fable, Custom, Integration default, or Cancel.\n' >&2 ;;
+    esac
+  done
+}
+
+prompt_claude_planner_thinking() {
+  local choice
+  planner_thinking_choice=""
+  while true; do
+    printf '\nChoose the Claude thinking level for this planning session.\n'
+    printf '  [Enter] Integration default (or recorded level on retry)\n'
+    printf '  [1/l] Low\n'
+    printf '  [2/m] Medium\n'
+    printf '  [3/h] High\n'
+    printf '  [4/x] Extra high\n'
+    printf '  [5] Max\n'
+    printf '  [q] Cancel\n'
+    printf 'thinking> '
+    IFS= read -r choice || return 1
+    case "$choice" in
+      "") return 0 ;;
+      1|l|L|low|Low) planner_thinking_choice="low"; return 0 ;;
+      2|m|M|medium|Medium) planner_thinking_choice="medium"; return 0 ;;
+      3|h|H|high|High) planner_thinking_choice="high"; return 0 ;;
+      4|x|X|xhigh|XHigh) planner_thinking_choice="xhigh"; return 0 ;;
+      5|max|Max) planner_thinking_choice="max"; return 0 ;;
+      q|Q|cancel|Cancel)
+        printf 'Cancelled.\n'
+        return 1
+        ;;
+      *) printf 'Choose Low, Medium, High, Extra high, Max, Integration default, or Cancel.\n' >&2 ;;
+    esac
+  done
+}
+
+prompt_pi_planner_thinking() {
+  local choice
+  planner_thinking_choice=""
+  while true; do
+    printf '\nChoose the Pi thinking level for this planning session.\n'
+    printf 'Pi may clamp a level that the selected model does not support.\n'
+    printf '  [Enter] Integration default (or recorded level on retry)\n'
+    printf '  [1/o] Off\n'
+    printf '  [2/n] Minimal\n'
+    printf '  [3/l] Low\n'
+    printf '  [4/m] Medium\n'
+    printf '  [5/h] High\n'
+    printf '  [6/x] Extra high\n'
+    printf '  [7] Max\n'
+    printf '  [q] Cancel\n'
+    printf 'thinking> '
+    IFS= read -r choice || return 1
+    case "$choice" in
+      "") return 0 ;;
+      1|o|O|off|Off) planner_thinking_choice="off"; return 0 ;;
+      2|n|N|minimal|Minimal) planner_thinking_choice="minimal"; return 0 ;;
+      3|l|L|low|Low) planner_thinking_choice="low"; return 0 ;;
+      4|m|M|medium|Medium) planner_thinking_choice="medium"; return 0 ;;
+      5|h|H|high|High) planner_thinking_choice="high"; return 0 ;;
+      6|x|X|xhigh|XHigh) planner_thinking_choice="xhigh"; return 0 ;;
+      7|max|Max) planner_thinking_choice="max"; return 0 ;;
+      q|Q|cancel|Cancel)
+        printf 'Cancelled.\n'
+        return 1
+        ;;
+      *) printf 'Choose Off, Minimal, Low, Medium, High, Extra high, Max, Integration default, or Cancel.\n' >&2 ;;
+    esac
+  done
+}
+
+prompt_planner_model() {
+  local choice provider provider_number model_number index count noun selected_provider
+  local -a provider_models
+  planner_model_choice=""
+  load_pi_model_catalog >/dev/null 2>&1 || true
+
+  while true; do
+    printf '\nChoose the Pi model for this planning session.\n'
+    printf '  [Enter] Integration default (or recorded model on retry)\n'
+    if [[ "${#planner_model_catalog_providers[@]}" -gt 0 ]]; then
+      index=1
+      for provider in "${planner_model_catalog_providers[@]}"; do
+        count="$(planner_model_provider_count "$provider")"
+        noun="models"
+        [[ "$count" -eq 1 ]] && noun="model"
+        printf '  [%d] %s (%s %s)\n' "$index" "$provider" "$count" "$noun"
+        index=$((index + 1))
+      done
+    else
+      printf '  Available Pi catalog could not be loaded.\n'
+    fi
+    printf '  [c] Custom model\n'
+    printf '  [q] Cancel\n'
+    printf 'provider> '
+    IFS= read -r choice || {
+      printf 'Cancelled.\n'
+      return 1
+    }
+    case "$choice" in
+      "") return 0 ;;
+      c|C|custom|Custom)
+        prompt_custom_planner_model && return 0
+        continue
+        ;;
+      q|Q|cancel|Cancel)
+        printf 'Cancelled.\n'
+        return 1
+        ;;
+      *[!0-9]*|0)
+        printf 'Choose a listed provider, c for custom, or q to cancel.\n' >&2
+        continue
+        ;;
+    esac
+    if [[ "${#choice}" -gt 6 ]]; then
+      printf 'Choose a listed provider, c for custom, or q to cancel.\n' >&2
+      continue
+    fi
+    provider_number=$((10#$choice))
+    if (( provider_number < 1 || provider_number > ${#planner_model_catalog_providers[@]} )); then
+      printf 'Choose a listed provider, c for custom, or q to cancel.\n' >&2
+      continue
+    fi
+    selected_provider="${planner_model_catalog_providers[$((provider_number - 1))]}"
+    provider_models=()
+    for index in "${!planner_model_catalog_model[@]}"; do
+      if [[ "${planner_model_catalog_provider[$index]}" == "$selected_provider" ]]; then
+        provider_models+=("${planner_model_catalog_model[$index]}")
+      fi
+    done
+
+    while true; do
+      printf '\nModels for %s:\n' "$selected_provider"
+      index=1
+      for provider in "${provider_models[@]}"; do
+        printf '  [%d] %s\n' "$index" "$provider"
+        index=$((index + 1))
+      done
+      printf '  [b/Enter] Back\n'
+      printf '  [q] Cancel\n'
+      printf 'model> '
+      IFS= read -r choice || {
+        printf 'Cancelled.\n'
+        return 1
+      }
+      case "$choice" in
+        ""|b|B|back|Back) break ;;
+        q|Q|cancel|Cancel)
+          printf 'Cancelled.\n'
+          return 1
+          ;;
+        *[!0-9]*|0)
+          printf 'Choose a listed model, b to go back, or q to cancel.\n' >&2
+          continue
+          ;;
+      esac
+      if [[ "${#choice}" -gt 6 ]]; then
+        printf 'Choose a listed model, b to go back, or q to cancel.\n' >&2
+        continue
+      fi
+      model_number=$((10#$choice))
+      if (( model_number < 1 || model_number > ${#provider_models[@]} )); then
+        printf 'Choose a listed model, b to go back, or q to cancel.\n' >&2
+        continue
+      fi
+      planner_model_choice="${provider_models[$((model_number - 1))]}"
+      return 0
+    done
+  done
+}
+
+prompt_planner_selection() {
+  planner_kind_choice=""
+  planner_model_choice=""
+  planner_thinking_choice=""
+  prompt_planner_agent || return 1
+  if [[ "$planner_kind_choice" == "pi" ]]; then
+    prompt_planner_model || return 1
+    prompt_pi_planner_thinking || return 1
+  else
+    prompt_claude_planner_model || return 1
+    prompt_claude_planner_thinking || return 1
+  fi
+  return 0
+}
+
 # wt is a sourced zsh function, while this picker is a standalone bash
 # process. Start it in a short-lived zsh child so the existing wt plan flow
 # remains the single owner of eligibility revalidation, confirmation, planning
-# artifacts, Herdr placement, and the Pi bootstrap prompt. The Issue number is
-# validated before it reaches this argument vector and is never evaluated as
-# shell syntax.
-launch_pi_plan() {
-  local issue_number="$1"
+# artifacts, Herdr placement, and the planner bootstrap prompt. The Issue number and
+# opaque model and thinking level stay separate arguments and are never
+# evaluated as shell syntax.
+launch_planner_plan() {
+  local issue_number="$1" planner_kind="$2" planner_model="${3:-}" planner_thinking="${4:-}"
 
   if ! command -v zsh >/dev/null 2>&1; then
     printf 'Planning requires zsh to run scripts/wt.sh.\n' >&2
@@ -1568,14 +2106,16 @@ launch_pi_plan() {
     printf 'Planning entrypoint not found: %s\n' "$script_dir/wt.sh" >&2
     return 1
   fi
-  zsh -c 'source "$1" && wt plan --issue "$2"' devops-plan "$script_dir/wt.sh" "$issue_number"
+  zsh -c 'source "$1" || exit; typeset -a plan_args; plan_args=(--issue "$2" --kind "$3"); [[ -n "$4" ]] && plan_args+=(--model "$4"); [[ -n "$5" ]] && plan_args+=(--thinking "$5"); wt plan "${plan_args[@]}"' \
+    devops-plan "$script_dir/wt.sh" "$issue_number" "$planner_kind" "$planner_model" "$planner_thinking"
 }
 
 # Each selected number crosses the bash-to-zsh boundary as its own positional
 # argument. The fixed child script builds a zsh array and never evaluates Issue
 # data as code.
-launch_pi_bundle_plan() {
-  local number seen
+launch_planner_bundle_plan() {
+  local planner_kind="$1" planner_model="$2" planner_thinking="$3" number seen
+  shift 3
   local -a numbers=("$@") validated=()
 
   if [[ "${#numbers[@]}" -lt 2 ]]; then
@@ -1603,8 +2143,8 @@ launch_pi_bundle_plan() {
     printf 'Planning entrypoint not found: %s\n' "$script_dir/wt.sh" >&2
     return 1
   fi
-  zsh -c 'source "$1" || exit; shift; typeset -a plan_args; plan_args=(); for issue in "$@"; do plan_args+=(--issue "$issue"); done; wt plan "${plan_args[@]}"' \
-    devops-bundle-plan "$script_dir/wt.sh" "${validated[@]}"
+  zsh -c 'source "$1" || exit; kind="$2"; model="$3"; thinking="$4"; shift 4; typeset -a plan_args; plan_args=(); for issue in "$@"; do plan_args+=(--issue "$issue"); done; plan_args+=(--kind "$kind"); [[ -n "$model" ]] && plan_args+=(--model "$model"); [[ -n "$thinking" ]] && plan_args+=(--thinking "$thinking"); wt plan "${plan_args[@]}"' \
+    devops-bundle-plan "$script_dir/wt.sh" "$planner_kind" "$planner_model" "$planner_thinking" "${validated[@]}"
 }
 
 start_bundle_plan() {
@@ -1633,7 +2173,8 @@ start_bundle_plan() {
     done
     validated+=("$number")
   done
-  launch_pi_bundle_plan "${validated[@]}"
+  prompt_planner_selection || return 0
+  launch_planner_bundle_plan "$planner_kind_choice" "$planner_model_choice" "$planner_thinking_choice" "${validated[@]}"
 }
 
 # start_plan is the Ready-list `s` key. It refuses stale or malformed picker
@@ -1650,7 +2191,8 @@ start_plan() {
     printf 'No Ready row is selected.\n' >&2
     return 1
   fi
-  launch_pi_plan "$issue_number"
+  prompt_planner_selection || return 0
+  launch_planner_plan "$issue_number" "$planner_kind_choice" "$planner_model_choice" "$planner_thinking_choice"
 }
 
 # start_issue_plan is the opened-Issue action bar equivalent. can_plan was
@@ -1667,7 +2209,8 @@ start_issue_plan() {
     printf 'No Ready Issue is selected.\n' >&2
     return 1
   fi
-  launch_pi_plan "$issue_number"
+  prompt_planner_selection || return 0
+  launch_planner_plan "$issue_number" "$planner_kind_choice" "$planner_model_choice" "$planner_thinking_choice"
 }
 
 implementation_mode=""
@@ -1848,6 +2391,11 @@ run_picker() {
         fi
         apply_picker_filter "${picker_filters[$filter_index]}"
         ;;
+      g)
+        # Persistent defaults are repository-local. Do not refresh or otherwise
+        # contact GitHub after this action.
+        with_normal_terminal agent_defaults_action
+        ;;
       ' ')
         if [[ "$count" -gt 0 ]]; then
           bundle_mark_toggle "${picker_filters[$filter_index]}" \
@@ -1862,7 +2410,7 @@ run_picker() {
         ;;
       s)
         # Drop out of the alternate screen while wt shows its confirmation and
-        # launches the Pi planner. Safe on an empty or non-Ready view.
+        # launches the selected planner. Safe on an empty or non-Ready view.
         with_normal_terminal start_plan "${picker_filters[$filter_index]}" "$count" "${issue_numbers[$selected_index]:-}"
         ;;
       i)
@@ -1896,6 +2444,12 @@ run_picker() {
 # the REPL. Nothing above this line touches GitHub.
 if [[ -n "${DEVOPS_SOURCE_ONLY:-}" ]]; then
   return 0 2>/dev/null || exit 0
+fi
+
+# agent-defaults is intentionally usable without gh. Every existing Issue,
+# release, picker, and REPL path retains the same GitHub CLI prerequisite.
+if [[ $# -eq 0 || "$1" != "agent-defaults" ]]; then
+  require_gh || exit $?
 fi
 
 if [[ $# -gt 0 ]]; then
@@ -2014,6 +2568,13 @@ while true; do
         continue
       fi
       set_approved unapprove "$argument"
+      ;;
+    g|agent-defaults)
+      if [[ -n "$argument" || -n "$extra" ]]; then
+        printf '%s\n' "agent-defaults takes no REPL arguments; follow its prompts" >&2
+        continue
+      fi
+      agent_defaults_action
       ;;
     h|help|'?')
       print_usage

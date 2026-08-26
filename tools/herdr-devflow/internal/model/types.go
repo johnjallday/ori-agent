@@ -94,6 +94,7 @@ type RoleAgent struct {
 	Role          string        `json:"role"`
 	Name          string        `json:"name"`
 	Kind          string        `json:"kind"`
+	Model         string        `json:"model,omitempty"`
 	WorkspaceID   string        `json:"workspace_id"`
 	TabID         string        `json:"tab_id"`
 	PaneID        string        `json:"pane_id"`
@@ -188,7 +189,7 @@ type BridgeState struct {
 	// purpose: a state file written before Overnight Runs existed simply has no
 	// key here, and must keep loading rather than being migrated or rejected.
 	Runs map[string]OvernightRun `json:"runs,omitempty"`
-	// PlanningSessions are issue-scoped Pi planning sessions, keyed by
+	// PlanningSessions are issue-scoped Claude/Pi planning sessions, keyed by
 	// "<repository_id>:<issue_number>". This is deliberately its own map and
 	// never a FeatureState: a planning session has no PRD-driven feature
 	// identity yet, and code that walks Features to find roles, continuation
@@ -223,6 +224,7 @@ type HandoffState struct {
 	RootPaneID        string       `json:"root_pane_id,omitempty"`
 	PrimaryRole       string       `json:"primary_role,omitempty"`
 	PrimaryKind       string       `json:"primary_kind,omitempty"`
+	PrimaryModel      string       `json:"primary_model,omitempty"`
 	PrimaryAgentName  string       `json:"primary_agent_name,omitempty"`
 	BootstrapPrompted bool         `json:"bootstrap_prompted,omitempty"`
 	// SkipBootstrapPrompt marks a feature that has no PRD and no checklist to
@@ -258,7 +260,7 @@ func NewBridgeState() BridgeState {
 }
 
 // PlanningStage tracks how far one issue-scoped planning session has
-// progressed placing and prompting its Pi planner. It mirrors
+// progressed placing and prompting its selected planner. It mirrors
 // HandoffStage's shape but is its own type: a planning session is not a
 // feature handoff, and the two must never be assignable to one another by
 // accident.
@@ -272,7 +274,7 @@ const (
 	PlanningPrompted     PlanningStage = "prompted"
 )
 
-// PlanningSession is one issue-scoped Pi planning session in
+// PlanningSession is one issue-scoped Claude/Pi planning session in
 // ori-agent-dev. It is deliberately not a Feature or FeatureState: a
 // planning session has no PRD-backed feature role, is never selectable for
 // Overnight Runs, continuations, PR delivery, or `wt done`, and generic code
@@ -289,14 +291,24 @@ type PlanningSession struct {
 	// WorktreePath is the canonical ori-agent-dev checkout this session plans
 	// in. It is recorded so a later invocation can detect a mismatched dev
 	// worktree instead of silently placing a second planner in the wrong tree.
-	WorktreePath string        `json:"worktree_path"`
-	TabID        string        `json:"tab_id,omitempty"`
-	RootPaneID   string        `json:"root_pane_id,omitempty"`
-	Planner      RoleAgent     `json:"planner,omitempty"`
-	Stage        PlanningStage `json:"stage,omitempty"`
-	Prompted     bool          `json:"prompted,omitempty"`
-	CreatedAt    time.Time     `json:"created_at"`
-	UpdatedAt    time.Time     `json:"updated_at"`
+	WorktreePath string `json:"worktree_path"`
+	// PlannerKind/PlannerModel/PlannerThinking are the per-plan launch intent.
+	// They are separate from Planner because intent must survive a failed launch
+	// before a live agent exists, and Herdr does not report a running agent's
+	// model or thinking level.
+	PlannerKind     string `json:"planner_kind,omitempty"`
+	PlannerModel    string `json:"planner_model,omitempty"`
+	PlannerThinking string `json:"planner_thinking,omitempty"`
+	// PlannerEffort loads the short-lived Claude-only state shape that preceded
+	// common Pi/Claude thinking selection. New writes clear it after migration.
+	PlannerEffort string        `json:"planner_effort,omitempty"`
+	TabID         string        `json:"tab_id,omitempty"`
+	RootPaneID    string        `json:"root_pane_id,omitempty"`
+	Planner       RoleAgent     `json:"planner,omitempty"`
+	Stage         PlanningStage `json:"stage,omitempty"`
+	Prompted      bool          `json:"prompted,omitempty"`
+	CreatedAt     time.Time     `json:"created_at"`
+	UpdatedAt     time.Time     `json:"updated_at"`
 }
 
 // MemberIssueNumbers returns a defensive copy of the session's canonical

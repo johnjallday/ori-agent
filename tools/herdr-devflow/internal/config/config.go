@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/BurntSushi/toml"
 )
@@ -61,13 +63,24 @@ type BridgeConfig struct {
 }
 
 type PrimaryConfig struct {
-	Role string `toml:"role"`
-	Kind string `toml:"kind"`
+	Role  string `toml:"role"`
+	Kind  string `toml:"kind"`
+	Model string `toml:"model"`
 }
 
 type RolesConfig struct {
-	DefaultKind string            `toml:"default_kind"`
-	Defaults    map[string]string `toml:"defaults"`
+	DefaultKind  string            `toml:"default_kind"`
+	DefaultModel string            `toml:"default_model"`
+	Defaults     map[string]string `toml:"defaults"`
+	Models       map[string]string `toml:"models"`
+}
+
+// AgentSelection is the configured or explicitly requested kind/model pair for
+// one agent launch. An empty Model deliberately delegates model selection to
+// the external integration.
+type AgentSelection struct {
+	Kind  string `json:"kind"`
+	Model string `json:"model"`
 }
 
 type BootstrapConfig struct {
@@ -103,13 +116,15 @@ func Default() Config {
 			MinHerdrVersion: "0.7.5",
 			SourceID:        "ori.devflow",
 		},
-		Primary: PrimaryConfig{Role: "builder", Kind: "claude"},
+		Primary: PrimaryConfig{Role: "builder", Kind: "claude", Model: ""},
 		Roles: RolesConfig{
-			DefaultKind: "claude",
+			DefaultKind:  "claude",
+			DefaultModel: "",
 			Defaults: map[string]string{
 				"reviewer": "claude",
 				"tester":   "claude",
 			},
+			Models: map[string]string{},
 		},
 		Bootstrap: BootstrapConfig{Template: "primary-v1", TimeoutSeconds: 30},
 		Scheduler: SchedulerConfig{RetryWindow: "15m"},
@@ -186,11 +201,11 @@ func (c Config) Validate() error {
 	if !identifierPattern.MatchString(c.Primary.Role) {
 		return fmt.Errorf("primary.role must match %s", identifierPattern.String())
 	}
-	if !supportedAgentKind(c.Primary.Kind) {
-		return fmt.Errorf("primary.kind must be a Herdr-supported agent kind")
+	if err := ValidateAgentSelection(c.Primary.Kind, c.Primary.Model); err != nil {
+		return fmt.Errorf("primary: %w", err)
 	}
-	if !supportedAgentKind(c.Roles.DefaultKind) {
-		return fmt.Errorf("roles.default_kind must be a Herdr-supported agent kind")
+	if err := ValidateAgentSelection(c.Roles.DefaultKind, c.Roles.DefaultModel); err != nil {
+		return fmt.Errorf("roles: %w", err)
 	}
 	for role, kind := range c.Roles.Defaults {
 		if !identifierPattern.MatchString(role) {
@@ -198,6 +213,14 @@ func (c Config) Validate() error {
 		}
 		if !supportedAgentKind(kind) {
 			return fmt.Errorf("roles.defaults.%s must be a Herdr-supported agent kind", role)
+		}
+	}
+	for role, agentModel := range c.Roles.Models {
+		if !identifierPattern.MatchString(role) {
+			return fmt.Errorf("roles.models.%s must match %s", role, identifierPattern.String())
+		}
+		if err := ValidateAgentModel(agentModel); err != nil {
+			return fmt.Errorf("roles.models.%s: %w", role, err)
 		}
 	}
 	if c.Bootstrap.Template != "primary-v1" {
@@ -244,14 +267,90 @@ func IsSupportedAgentKind(kind string) bool {
 	return supportedAgentKind(kind)
 }
 
-func (c Config) RoleKind(role string) string {
+// MaxAgentModelLength bounds the opaque model argument retained in config and
+// state. Model names are not interpreted or provider-allow-listed here.
+const MaxAgentModelLength = 256
+
+// ValidateAgentModel accepts an empty integration default or one bounded,
+// opaque argv value. Flag-shaped and control-bearing values are rejected before
+// they can blur the Herdr command boundary or forge terminal output.
+func ValidateAgentModel(agentModel string) error {
+	if agentModel == "" {
+		return nil
+	}
+	if !utf8.ValidString(agentModel) {
+		return fmt.Errorf("model must be valid UTF-8")
+	}
+	if len(agentModel) > MaxAgentModelLength {
+		return fmt.Errorf("model must be at most %d bytes", MaxAgentModelLength)
+	}
+	if strings.HasPrefix(agentModel, "-") {
+		return fmt.Errorf("model must not be flag-shaped")
+	}
+	for _, character := range agentModel {
+		if unicode.IsControl(character) {
+			return fmt.Errorf("model must not contain control characters")
+		}
+	}
+	return nil
+}
+
+// ValidateAgentSelection validates a complete kind/model launch pair without
+// imposing any provider-specific meaning on the model value.
+func ValidateAgentSelection(kind, agentModel string) error {
+	if !supportedAgentKind(kind) {
+		return fmt.Errorf("kind must be a Herdr-supported agent kind")
+	}
+	if err := ValidateAgentModel(agentModel); err != nil {
+		return err
+	}
+	return nil
+}
+
+// RoleAgentSelection returns the configured pair for role. Primary, per-role,
+// and fallback defaults use the same lookup rules.
+func (c Config) RoleAgentSelection(role string) AgentSelection {
 	if role == c.Primary.Role {
-		return c.Primary.Kind
+		return AgentSelection{Kind: c.Primary.Kind, Model: c.Primary.Model}
 	}
-	if kind, ok := c.Roles.Defaults[role]; ok {
-		return kind
+	selection := AgentSelection{Kind: c.Roles.DefaultKind, Model: c.Roles.DefaultModel}
+	kind, hasKind := c.Roles.Defaults[role]
+	agentModel, hasModel := c.Roles.Models[role]
+	if hasKind {
+		if kind != selection.Kind && !hasModel {
+			selection.Model = ""
+		}
+		selection.Kind = kind
 	}
-	return c.Roles.DefaultKind
+	if hasModel {
+		selection.Model = agentModel
+	}
+	return selection
+}
+
+// ResolveAgentSelection overlays optional invocation values on a role's
+// configured pair. A model-only override keeps the configured kind. A changed
+// explicit kind with no explicit model clears the configured model so a stale
+// model chosen for another integration is never inherited.
+func (c Config) ResolveAgentSelection(role, kind, agentModel string) (AgentSelection, error) {
+	selection := c.RoleAgentSelection(role)
+	if kind != "" {
+		if kind != selection.Kind && agentModel == "" {
+			selection.Model = ""
+		}
+		selection.Kind = kind
+	}
+	if agentModel != "" {
+		selection.Model = agentModel
+	}
+	if err := ValidateAgentSelection(selection.Kind, selection.Model); err != nil {
+		return AgentSelection{}, err
+	}
+	return selection, nil
+}
+
+func (c Config) RoleKind(role string) string {
+	return c.RoleAgentSelection(role).Kind
 }
 
 func (c Config) RetryWindow() time.Duration {
@@ -300,8 +399,15 @@ func applyOverrides(cfg *Config, lookupEnv func(string) (string, bool)) error {
 	if value, ok := lookupEnv("HERDR_DEVFLOW_PRIMARY_ROLE"); ok {
 		cfg.Primary.Role = value
 	}
+	primaryModel, primaryModelSet := lookupEnv("HERDR_DEVFLOW_PRIMARY_MODEL")
 	if value, ok := lookupEnv("HERDR_DEVFLOW_PRIMARY_KIND"); ok {
+		if value != cfg.Primary.Kind && !primaryModelSet {
+			cfg.Primary.Model = ""
+		}
 		cfg.Primary.Kind = value
+	}
+	if primaryModelSet {
+		cfg.Primary.Model = primaryModel
 	}
 	if value, ok := lookupEnv("HERDR_DEVFLOW_RETRY_WINDOW"); ok {
 		cfg.Scheduler.RetryWindow = value

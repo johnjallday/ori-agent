@@ -52,6 +52,33 @@ func TestParseIssuePlanArgs(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "Claude planner keeps model and thinking",
+			args: []string{"--issue", "1", "--kind", "claude", "--model", "fable", "--thinking", "xhigh", "--worktree", "/tmp/dev"},
+			check: func(t *testing.T, parsed issuePlanArgs) {
+				if parsed.plannerKind != "claude" || parsed.plannerModel != "fable" || parsed.plannerThinking != "xhigh" {
+					t.Fatalf("planner selection = %q/%q/%q", parsed.plannerKind, parsed.plannerModel, parsed.plannerThinking)
+				}
+			},
+		},
+		{
+			name: "Claude effort remains a compatibility alias",
+			args: []string{"--issue", "1", "--kind", "claude", "--effort", "high", "--worktree", "/tmp/dev"},
+			check: func(t *testing.T, parsed issuePlanArgs) {
+				if parsed.plannerThinking != "high" {
+					t.Fatalf("planner thinking = %q", parsed.plannerThinking)
+				}
+			},
+		},
+		{
+			name: "opaque Pi planner model and thinking stay separate",
+			args: []string{"--issue", "1", "--kind", "pi", "--model", "[openai] gpt 5.1; $(echo inert)", "--thinking", "max", "--worktree", "/tmp/dev"},
+			check: func(t *testing.T, parsed issuePlanArgs) {
+				if parsed.plannerKind != "pi" || parsed.plannerModel != "[openai] gpt 5.1; $(echo inert)" || parsed.plannerThinking != "max" {
+					t.Fatalf("planner selection = %q/%q/%q", parsed.plannerKind, parsed.plannerModel, parsed.plannerThinking)
+				}
+			},
+		},
 		{name: "missing issue", args: []string{"--worktree", "/tmp/dev"}, wantErr: true},
 		{name: "missing worktree", args: []string{"--issue", "1"}, wantErr: true},
 		{name: "zero issue", args: []string{"--issue", "0", "--worktree", "/tmp/dev"}, wantErr: true},
@@ -61,6 +88,20 @@ func TestParseIssuePlanArgs(t *testing.T) {
 		{name: "duplicate issue", args: []string{"--issue", "1", "--issue", "1", "--worktree", "/tmp/dev"}, wantErr: true},
 		{name: "duplicate worktree", args: []string{"--issue", "1", "--worktree", "/a", "--worktree", "/b"}, wantErr: true},
 		{name: "empty worktree", args: []string{"--issue", "1", "--worktree", "  "}, wantErr: true},
+		{name: "kind with no value", args: []string{"--issue", "1", "--worktree", "/tmp/dev", "--kind"}, wantErr: true},
+		{name: "unsupported planner kind", args: []string{"--issue", "1", "--worktree", "/tmp/dev", "--kind", "codex"}, wantErr: true},
+		{name: "duplicate planner kind", args: []string{"--issue", "1", "--kind", "pi", "--kind", "claude", "--worktree", "/tmp/dev"}, wantErr: true},
+		{name: "Pi with Claude effort alias", args: []string{"--issue", "1", "--kind", "pi", "--effort", "high", "--worktree", "/tmp/dev"}, wantErr: true},
+		{name: "effort alias with default Pi", args: []string{"--issue", "1", "--effort", "high", "--worktree", "/tmp/dev"}, wantErr: true},
+		{name: "invalid Claude thinking", args: []string{"--issue", "1", "--kind", "claude", "--thinking", "minimal", "--worktree", "/tmp/dev"}, wantErr: true},
+		{name: "invalid Pi thinking", args: []string{"--issue", "1", "--kind", "pi", "--thinking", "unbounded", "--worktree", "/tmp/dev"}, wantErr: true},
+		{name: "duplicate thinking aliases", args: []string{"--issue", "1", "--kind", "claude", "--thinking", "low", "--effort", "high", "--worktree", "/tmp/dev"}, wantErr: true},
+		{name: "thinking with no value", args: []string{"--issue", "1", "--kind", "pi", "--worktree", "/tmp/dev", "--thinking"}, wantErr: true},
+		{name: "model with no value", args: []string{"--issue", "1", "--worktree", "/tmp/dev", "--model"}, wantErr: true},
+		{name: "empty model", args: []string{"--issue", "1", "--worktree", "/tmp/dev", "--model", "  "}, wantErr: true},
+		{name: "duplicate model", args: []string{"--issue", "1", "--model", "one", "--model", "two", "--worktree", "/tmp/dev"}, wantErr: true},
+		{name: "flag shaped model", args: []string{"--issue", "1", "--model", "--unsafe", "--worktree", "/tmp/dev"}, wantErr: true},
+		{name: "control model", args: []string{"--issue", "1", "--model", "line\nbreak", "--worktree", "/tmp/dev"}, wantErr: true},
 		{name: "unknown flag", args: []string{"--issue", "1", "--worktree", "/tmp/dev", "--bogus"}, wantErr: true},
 	}
 	for _, tc := range cases {
@@ -120,6 +161,16 @@ func TestSingleIssuePlanPayloadKeepsLegacyShapeAndAddsOnlyCanonicalNumbers(t *te
 	if _, exists := payload["compatibility_required"]; exists {
 		t.Fatalf("single-Issue payload unexpectedly requires bundle compatibility: %#v", payload)
 	}
+	if _, exists := payload["planner_model"]; exists {
+		t.Fatalf("integration-default planner unexpectedly added a JSON model: %#v", payload)
+	}
+
+	plan.PlannerModel = "fable"
+	plan.PlannerThinking = "xhigh"
+	payload = issuePlanPayload(plan)
+	if payload["planner_model"] != "fable" || payload["planner_thinking"] != "xhigh" {
+		t.Fatalf("planner selection payload = %#v", payload)
+	}
 }
 
 func TestIssuePlanPayloadAddsCompleteBundleEvidenceAndKeepsLegacyFields(t *testing.T) {
@@ -174,6 +225,11 @@ func TestIssuePlanRejectsBadArgumentsBeforeAnyIO(t *testing.T) {
 		{"issue-plan", "--issue", "abc", "--worktree", "/tmp/does-not-exist"},
 		{"issue-plan", "--issue", "1", "--issue", "1", "--worktree", "/tmp/does-not-exist"},
 		{"issue-plan", "--issue", "1", "--issue", "nope", "--worktree", "/tmp/does-not-exist"},
+		{"issue-plan", "--issue", "1", "--kind", "codex", "--worktree", "/tmp/does-not-exist"},
+		{"issue-plan", "--issue", "1", "--kind", "pi", "--effort", "high", "--worktree", "/tmp/does-not-exist"},
+		{"issue-plan", "--issue", "1", "--kind", "claude", "--thinking", "minimal", "--worktree", "/tmp/does-not-exist"},
+		{"issue-plan", "--issue", "1", "--model", "--unsafe", "--worktree", "/tmp/does-not-exist"},
+		{"issue-plan", "--issue", "1", "--model", "one", "--model", "two", "--worktree", "/tmp/does-not-exist"},
 		{"issue-plan", "--worktree", "/tmp/does-not-exist"},
 		{"issue-plan", "--issue", "1"},
 	}

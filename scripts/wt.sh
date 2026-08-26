@@ -5,9 +5,9 @@
 #   source scripts/wt.sh    # Load the function (cd works directly)
 #   wt                      # Interactive REPL (type: go, status, start, ...)
 #   wt go                   # One-shot worktree picker (navigate + cd)
-#   wt plan --issue <N> [--issue <N> ...] [--yes]  # Plan one Ready Issue or an affirmed bundle in dev
-#   wt start [prd] [--kind KIND] [--no-herdr] # Create a worktree from a PRD or task list in the dev tasks/ folder
-#   wt new <name>           # Create a clean worktree (no PRD/tasks)
+#   wt plan --issue <N> [--issue <N> ...] [--kind claude|pi] [--model MODEL] [--thinking LEVEL] [--yes]
+#   wt start [prd] [--kind KIND] [--model MODEL] [--no-herdr] # Create a planned worktree
+#   wt new <name> [--kind KIND] [--model MODEL] # Create a clean worktree (no PRD/tasks)
 #   wt pr [name]            # Push branch and open a PR against dev
 #   wt done [name] [--keep-issue-open] [--herdr-override] # Finish all attached Issues, archive, and clean up
 #   wt rm [name]            # Remove worktree and its branch
@@ -129,8 +129,8 @@ function wt_parse_name {
 }
 
 function wt_parse_create_flags {
-  # The argument parser `wt start` and `wt new` share. Both accept the same five
-  # things — --no-herdr, --yes/-y, --kind <value>, one positional name, and no
+  # The argument parser `wt start` and `wt new` share. Both accept the same six
+  # things — --no-herdr, --yes/-y, --kind/--model values, one positional name, and no
   # other option — and both used to say so in their own copy of this loop.
   #
   # What they do not share is wording. Each command names itself, prints its own
@@ -140,13 +140,15 @@ function wt_parse_create_flags {
   #
   # Results come back in WT_PARSE_* globals rather than on stdout, because a
   # positional may contain anything and a command substitution would re-split it.
-  typeset -g WT_PARSE_NAME WT_PARSE_NO_HERDR WT_PARSE_KIND WT_PARSE_ASSUME_YES
+  typeset -g WT_PARSE_NAME WT_PARSE_NO_HERDR WT_PARSE_KIND WT_PARSE_MODEL WT_PARSE_MODEL_SET WT_PARSE_ASSUME_YES
   local label="$1" usage="$2" positional_noun="$3"
   shift 3
 
   WT_PARSE_NAME=""
   WT_PARSE_NO_HERDR=0
   WT_PARSE_KIND=""
+  WT_PARSE_MODEL=""
+  WT_PARSE_MODEL_SET=0
   WT_PARSE_ASSUME_YES=0
 
   local -a parse_args
@@ -173,6 +175,20 @@ function wt_parse_create_flags {
           return 1
         fi
         WT_PARSE_KIND="${parse_args[$parse_index]}"
+        ;;
+      --model)
+        parse_index=$(( parse_index + 1 ))
+        if (( parse_index > ${#parse_args[@]} )) || [[ -z "${parse_args[$parse_index]}" ]] || [[ "${parse_args[$parse_index]}" == --* ]]; then
+          echo "$label --model requires one non-empty model value"
+          echo "$usage"
+          return 1
+        fi
+        if (( WT_PARSE_MODEL_SET )); then
+          echo "$label accepts --model only once"
+          return 1
+        fi
+        WT_PARSE_MODEL="${parse_args[$parse_index]}"
+        WT_PARSE_MODEL_SET=1
         ;;
       --*)
         echo "Unknown $label option: $parse_arg"
@@ -598,8 +614,9 @@ function wt_status_worktrees {
 
 # --- Issue planning -----------------------------------------------------
 #
-# wt plan accepts one Ready GitHub Issue or a repeated --issue bundle and
-# starts one Pi planning session in the dev worktree. It is a distinct lifecycle
+# wt plan accepts one Ready GitHub Issue or a repeated --issue bundle plus an
+# optional Claude/Pi kind, model, and thinking level, and starts one session in the dev
+# worktree. It is a distinct lifecycle
 # stage from wt start:
 # planning happens in ori-agent-dev and never creates a branch, a worktree, or
 # an implementation agent. Everything past argument parsing — the fresh
@@ -608,11 +625,12 @@ function wt_status_worktrees {
 # the same way wt status delegates its rendering. This function only
 # validates arguments and resolves the exact dev worktree to plan in.
 function wt_plan_issue_usage {
-  echo "Usage: wt plan --issue <positive-integer> [--issue <positive-integer> ...] [--yes]"
+  echo "Usage: wt plan --issue <positive-integer> [--issue <positive-integer> ...] [--kind claude|pi] [--model MODEL] [--thinking LEVEL] [--yes]"
 }
 
 function wt_plan_issue {
-  local issue="" existing_issue assume_yes=0
+  local issue="" existing_issue planner_kind="" planner_model="" planner_thinking=""
+  local kind_seen=0 model_seen=0 thinking_seen=0 effort_alias=0 assume_yes=0
   local -a args issues
   args=("$@")
   local arg index=1
@@ -640,6 +658,50 @@ function wt_plan_issue {
         done
         issues+=("$issue")
         ;;
+      --kind)
+        index=$(( index + 1 ))
+        if (( index > ${#args[@]} )) || [[ "${args[$index]}" != "claude" && "${args[$index]}" != "pi" ]]; then
+          echo "wt plan --kind requires claude or pi"
+          wt_plan_issue_usage
+          return 1
+        fi
+        if (( kind_seen )); then
+          echo "wt plan accepts --kind only once"
+          return 1
+        fi
+        planner_kind="${args[$index]}"
+        kind_seen=1
+        ;;
+      --model)
+        index=$(( index + 1 ))
+        if (( index > ${#args[@]} )) || [[ -z "${args[$index]}" || "${args[$index]}" == -* ]]; then
+          echo "wt plan --model requires one non-empty model value"
+          wt_plan_issue_usage
+          return 1
+        fi
+        if (( model_seen )); then
+          echo "wt plan accepts --model only once"
+          return 1
+        fi
+        planner_model="${args[$index]}"
+        model_seen=1
+        ;;
+      --thinking|--effort)
+        local thinking_option="$arg"
+        index=$(( index + 1 ))
+        if (( index > ${#args[@]} )); then
+          echo "wt plan $thinking_option requires a thinking level"
+          wt_plan_issue_usage
+          return 1
+        fi
+        if (( thinking_seen )); then
+          echo "wt plan accepts a thinking level only once"
+          return 1
+        fi
+        planner_thinking="${args[$index]}"
+        thinking_seen=1
+        [[ "$thinking_option" == "--effort" ]] && effort_alias=1
+        ;;
       --yes|-y)
         assume_yes=1
         ;;
@@ -657,6 +719,25 @@ function wt_plan_issue {
     wt_plan_issue_usage
     return 1
   fi
+  local effective_planner_kind="${planner_kind:-pi}"
+  if (( effort_alias )) && [[ "$effective_planner_kind" != "claude" ]]; then
+    echo "wt plan --effort is a Claude compatibility alias; use --thinking for Pi"
+    wt_plan_issue_usage
+    return 1
+  fi
+  if (( thinking_seen )); then
+    if [[ "$effective_planner_kind" == "claude" ]]; then
+      if [[ "$planner_thinking" != "low" && "$planner_thinking" != "medium" && "$planner_thinking" != "high" && "$planner_thinking" != "xhigh" && "$planner_thinking" != "max" ]]; then
+        echo "wt plan --thinking requires low, medium, high, xhigh, or max for Claude"
+        wt_plan_issue_usage
+        return 1
+      fi
+    elif [[ "$planner_thinking" != "off" && "$planner_thinking" != "minimal" && "$planner_thinking" != "low" && "$planner_thinking" != "medium" && "$planner_thinking" != "high" && "$planner_thinking" != "xhigh" && "$planner_thinking" != "max" ]]; then
+      echo "wt plan --thinking requires off, minimal, low, medium, high, xhigh, or max for Pi"
+      wt_plan_issue_usage
+      return 1
+    fi
+  fi
 
   local dev_path
   dev_path="$(wt_get_dev_worktree)"
@@ -673,6 +754,15 @@ function wt_plan_issue {
   for issue in "${issues[@]}"; do
     plan_args+=(--issue "$issue")
   done
+  if (( kind_seen )); then
+    plan_args+=(--kind "$planner_kind")
+  fi
+  if (( model_seen )); then
+    plan_args+=(--model "$planner_model")
+  fi
+  if (( thinking_seen )); then
+    plan_args+=(--thinking "$planner_thinking")
+  fi
   plan_args+=(--worktree "$dev_path")
   if (( assume_yes )); then
     plan_args+=(--yes)
@@ -727,7 +817,8 @@ function wt_plan_reset {
   typeset -g WT_PLAN_FEATURE="" WT_PLAN_BRANCH="" WT_PLAN_TARGET=""
   typeset -g WT_PLAN_DEV="" WT_PLAN_PRD="" WT_PLAN_TASKS="" WT_PLAN_TASKS_STATE="none"
   typeset -g WT_PLAN_ISSUE_SNAPSHOT=""
-  typeset -g WT_PLAN_KIND="" WT_PLAN_KIND_DISPLAY="" WT_PLAN_START_AGENT=1 WT_PLAN_COPY_DOCS=1 WT_PLAN_PROMPT=1
+  typeset -g WT_PLAN_KIND="" WT_PLAN_KIND_DISPLAY="" WT_PLAN_MODEL="" WT_PLAN_MODEL_DISPLAY=""
+  typeset -g WT_PLAN_START_AGENT=1 WT_PLAN_COPY_DOCS=1 WT_PLAN_PROMPT=1
   typeset -g WT_PLAN_WORKSPACE="" WT_PLAN_WORKSPACE_STATE=""
 }
 
@@ -735,17 +826,67 @@ function wt_plan_reset {
 # WT_PLAN_KIND stays empty unless the user picked one: passing no --kind lets the
 # helper use its own recorded default, which matters on a retry where the kind is
 # already saved in state.
-function wt_plan_default_kind {
-  local config root kind=""
+function wt_plan_config_path {
+  if [[ -n "${HERDR_DEVFLOW_CONFIG:-}" ]]; then
+    print -r -- "$HERDR_DEVFLOW_CONFIG"
+    return 0
+  fi
+  local root
   # `|| true` matters: wt.sh is sourced, and a caller running under `set -e`
   # (the shell test suite does) would otherwise abort here whenever this runs
   # outside a Git checkout.
   root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
-  config="$root/.herdr/devflow.toml"
+  print -r -- "$root/.herdr/devflow.toml"
+}
+
+function wt_plan_default_kind {
+  if (( ${+HERDR_DEVFLOW_PRIMARY_KIND} )) && [[ -n "$HERDR_DEVFLOW_PRIMARY_KIND" ]]; then
+    print -r -- "$HERDR_DEVFLOW_PRIMARY_KIND"
+    return 0
+  fi
+  local config kind=""
+  config="$(wt_plan_config_path)"
   if [[ -f "$config" ]]; then
     kind="$(sed -n '/^\[primary\]/,/^\[roles\]/{ s/^[[:space:]]*kind[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p; }' "$config" | head -1)"
   fi
   print -r -- "${kind:-claude}"
+}
+
+function wt_plan_default_model {
+  if (( ${+HERDR_DEVFLOW_PRIMARY_MODEL} )); then
+    print -r -- "$HERDR_DEVFLOW_PRIMARY_MODEL"
+    return 0
+  fi
+  local config agent_model="" file_kind=""
+  config="$(wt_plan_config_path)"
+  if [[ -f "$config" ]]; then
+    file_kind="$(sed -n '/^\[primary\]/,/^\[roles\]/{ s/^[[:space:]]*kind[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p; }' "$config" | head -1)"
+    agent_model="$(sed -n '/^\[primary\]/,/^\[roles\]/{ s/^[[:space:]]*model[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p; }' "$config" | head -1)"
+  fi
+  # Environment kind is an explicit override. If it changes the file's kind
+  # without its own model override, mirror the Go resolver and clear stale
+  # model intent in the confirmation summary.
+  if (( ${+HERDR_DEVFLOW_PRIMARY_KIND} )) && [[ -n "$HERDR_DEVFLOW_PRIMARY_KIND" && "$HERDR_DEVFLOW_PRIMARY_KIND" != "${file_kind:-claude}" ]]; then
+    agent_model=""
+  fi
+  print -r -- "$agent_model"
+}
+
+# Resolve the display pair with the same stale-model rule as the Go helper. A
+# model-only override keeps the configured kind; a different explicit kind with
+# no model delegates model selection to that integration.
+function wt_plan_resolve_agent_display {
+  local configured_kind configured_model
+  configured_kind="$(wt_plan_default_kind)"
+  configured_model="$(wt_plan_default_model)"
+  WT_PLAN_KIND_DISPLAY="${WT_PLAN_KIND:-$configured_kind}"
+  if [[ -n "$WT_PLAN_MODEL" ]]; then
+    WT_PLAN_MODEL_DISPLAY="$WT_PLAN_MODEL"
+  elif [[ -n "$WT_PLAN_KIND" && "$WT_PLAN_KIND" != "$configured_kind" ]]; then
+    WT_PLAN_MODEL_DISPLAY=""
+  else
+    WT_PLAN_MODEL_DISPLAY="$configured_model"
+  fi
 }
 
 # Interactivity is decided by the terminal, not by whether a feature was named.
@@ -818,6 +959,11 @@ function wt_plan_render {
     else
       printf '  %-14s %s\n' "Agent" "$WT_PLAN_KIND_DISPLAY ${WT_C_DIM}(started in a new tab; no prompt — nothing to point it at)${WT_C_RESET}"
     fi
+    if [[ -n "$WT_PLAN_MODEL_DISPLAY" ]]; then
+      printf '  %-14s %s\n' "Model" "$WT_PLAN_MODEL_DISPLAY"
+    else
+      printf '  %-14s %s\n' "Model" "${WT_C_DIM}integration default${WT_C_RESET}"
+    fi
     case "$WT_PLAN_WORKSPACE_STATE" in
       ready)    printf '  %-14s %s\n' "Herdr tab" "in workspace ${WT_C_CYAN}${WT_PLAN_WORKSPACE}${WT_C_RESET} ${WT_C_DIM}(whichever is focused when this runs)${WT_C_RESET}" ;;
       disabled) printf '  %-14s %s\n' "Herdr tab" "${WT_C_DIM}bridge disabled — worktree only${WT_C_RESET}" ;;
@@ -886,7 +1032,7 @@ function wt_start_execute {
   # `wt start` does not touch it: it neither reads an Issue nor changes one.
 
   if (( WT_PLAN_START_AGENT )); then
-    wt_herd_handoff "$WT_PLAN_FEATURE" "$WT_PLAN_TARGET" "$WT_PLAN_BRANCH" "$WT_PLAN_KIND" "$WT_PLAN_PROMPT"
+    wt_herd_handoff "$WT_PLAN_FEATURE" "$WT_PLAN_TARGET" "$WT_PLAN_BRANCH" "$WT_PLAN_KIND" "$WT_PLAN_MODEL" "$WT_PLAN_PROMPT"
   else
     echo "Skipping Herdr handoff (--no-herdr)."
   fi
@@ -939,11 +1085,14 @@ TASKS
 # it failed, because the thing the user actually asked for — a worktree they can
 # work in — is sitting there ready.
 function wt_herd_handoff {
-  local feature="$1" target="$2" branch="$3" primary_kind="${4:-}" prompt="${5:-1}"
+  local feature="$1" target="$2" branch="$3" primary_kind="${4:-}" primary_model="${5:-}" prompt="${6:-1}"
   local -a handoff_args
   handoff_args=(handoff --feature "$feature" --worktree "$target" --branch "$branch")
   if [[ -n "$primary_kind" ]]; then
     handoff_args+=(--kind "$primary_kind")
+  fi
+  if [[ -n "$primary_model" ]]; then
+    handoff_args+=(--model "$primary_model")
   fi
   if (( ! prompt )); then
     handoff_args+=(--no-prompt)
@@ -1268,19 +1417,20 @@ function wt_dispatch {
       fi
     done
 
-    local chosen no_herdr primary_kind assume_yes
+    local chosen no_herdr primary_kind primary_model assume_yes
     if ! wt_parse_create_flags "wt start" \
-      "Usage: wt start [feature] [--kind KIND] [--no-herdr] [--yes]" \
+      "Usage: wt start [feature] [--kind KIND] [--model MODEL] [--no-herdr] [--yes]" \
       "PRD/task-list feature name" "${@:2}"; then
       return 1
     fi
     chosen="$WT_PARSE_NAME"
     no_herdr="$WT_PARSE_NO_HERDR"
     primary_kind="$WT_PARSE_KIND"
+    primary_model="$WT_PARSE_MODEL"
     assume_yes="$WT_PARSE_ASSUME_YES"
 
-    if (( no_herdr )) && [[ -n "$primary_kind" ]]; then
-      echo "wt start --kind cannot be combined with --no-herdr"
+    if (( no_herdr )) && [[ -n "$primary_kind$primary_model" ]]; then
+      echo "wt start --kind/--model cannot be combined with --no-herdr"
       return 1
     fi
 
@@ -1301,7 +1451,7 @@ function wt_dispatch {
       fi
       if ! wt_plan_is_interactive; then
         echo "wt start needs a feature name when there is no terminal to choose from."
-        echo "Usage: wt start <feature> [--kind KIND] [--no-herdr]"
+        echo "Usage: wt start <feature> [--kind KIND] [--model MODEL] [--no-herdr]"
         return 1
       fi
       echo "Select a feature to start (from ${WT_C_CYAN}$tasks_dir${WT_C_RESET}):"
@@ -1401,7 +1551,8 @@ function wt_dispatch {
     else
       WT_PLAN_START_AGENT=1
       WT_PLAN_KIND="$primary_kind"
-      WT_PLAN_KIND_DISPLAY="${primary_kind:-$(wt_plan_default_kind)}"
+      WT_PLAN_MODEL="$primary_model"
+      wt_plan_resolve_agent_display
       wt_plan_resolve_workspace
       # The agent step defaults to the configured primary kind with
       # start-and-prompt pre-selected, so accepting every default reproduces
@@ -1418,8 +1569,9 @@ function wt_dispatch {
         case "$agent_choice" in
           "")     ;;
           n|N)    WT_PLAN_START_AGENT=0 ;;
-          *)      WT_PLAN_KIND="$agent_choice"; WT_PLAN_KIND_DISPLAY="$agent_choice" ;;
+          *)      WT_PLAN_KIND="$agent_choice" ;;
         esac
+        wt_plan_resolve_agent_display
       fi
     fi
 
@@ -1445,15 +1597,16 @@ function wt_dispatch {
     wt_color_init
     wt_plan_reset
 
-    local name no_herdr primary_kind assume_yes
+    local name no_herdr primary_kind primary_model assume_yes
     if ! wt_parse_create_flags "wt new" \
-      "Usage: wt new <name> [--kind KIND] [--no-herdr] [--yes]" \
+      "Usage: wt new <name> [--kind KIND] [--model MODEL] [--no-herdr] [--yes]" \
       "name" "${@:2}"; then
       return 1
     fi
     name="$WT_PARSE_NAME"
     no_herdr="$WT_PARSE_NO_HERDR"
     primary_kind="$WT_PARSE_KIND"
+    primary_model="$WT_PARSE_MODEL"
     assume_yes="$WT_PARSE_ASSUME_YES"
 
     if [[ -z "$name" ]]; then
@@ -1462,8 +1615,8 @@ function wt_dispatch {
       echo "For PRD-driven work, prefer: wt start"
       return 1
     fi
-    if (( no_herdr )) && [[ -n "$primary_kind" ]]; then
-      echo "wt new --kind cannot be combined with --no-herdr"
+    if (( no_herdr )) && [[ -n "$primary_kind$primary_model" ]]; then
+      echo "wt new --kind/--model cannot be combined with --no-herdr"
       return 1
     fi
 
@@ -1504,7 +1657,8 @@ function wt_dispatch {
     else
       WT_PLAN_START_AGENT=1
       WT_PLAN_KIND="$primary_kind"
-      WT_PLAN_KIND_DISPLAY="${primary_kind:-$(wt_plan_default_kind)}"
+      WT_PLAN_MODEL="$primary_model"
+      wt_plan_resolve_agent_display
       wt_plan_resolve_workspace
     fi
 
@@ -1920,14 +2074,14 @@ function wt_dispatch {
     echo "Usage: wt [command] [args]"
     echo "  wt               - Interactive REPL (bare 'wt'; type commands, q to quit)"
     echo "  wt go            - One-shot worktree picker (navigate + cd)"
-    echo "  wt plan --issue <N> [--issue <N> ...] [--yes]"
-    echo "                   - Plan one Ready Issue or an affirmed ordinary-backlog bundle"
+    echo "  wt plan --issue <N> [--issue <N> ...] [--kind claude|pi] [--model MODEL] [--thinking LEVEL] [--yes]"
+    echo "                   - Plan with Claude or Pi; both support thinking levels"
     echo "                     in the dev worktree (highest selected size route wins)."
     echo "                     Writes tasks/issue-<feature>.md and a starter checklist there;"
     echo "                     never touches the Issue on GitHub. Run 'wt start <feature>' once"
     echo "                     Pi has replaced the starter with a real plan."
-    echo "  wt start [prd] [--kind KIND] [--no-herdr] - Create worktree from a PRD or task list in the dev tasks/ folder"
-    echo "  wt new <name> [--kind KIND] [--no-herdr] [--yes] - Ad-hoc worktree (feature/<name>, or <type>/<name>)"
+    echo "  wt start [prd] [--kind KIND] [--model MODEL] [--no-herdr] - Create worktree from a PRD or task list in dev"
+    echo "  wt new <name> [--kind KIND] [--model MODEL] [--no-herdr] [--yes] - Ad-hoc worktree"
     echo "                     Same guided flow as wt start, minus the planning documents."
     echo "                     --no-herdr on either: bare Git worktree, no Herdr tab or agent."
     echo "                     Herdr is optional throughout; if it is missing or unhealthy the"

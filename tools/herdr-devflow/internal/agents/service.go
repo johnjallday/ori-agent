@@ -36,7 +36,7 @@ type Herdr interface {
 	PaneSplitInfo(context.Context, string, string, string) (herdr.PaneInfo, error)
 	AgentListInfo(context.Context) ([]herdr.AgentInfo, error)
 	AgentGetInfo(context.Context, string) (herdr.AgentInfo, error)
-	AgentStartInfo(context.Context, string, string, string, time.Duration) (herdr.AgentInfo, error)
+	AgentStartInfo(context.Context, herdr.AgentStartRequest) (herdr.AgentInfo, error)
 	AgentPromptInfo(context.Context, string, string, time.Duration) (herdr.AgentInfo, error)
 	AgentRenameInfo(context.Context, string, string) (herdr.AgentInfo, error)
 	FocusAgent(context.Context, string) error
@@ -94,6 +94,7 @@ type HandoffRequest struct {
 	WorktreePath string
 	Branch       string
 	PrimaryKind  string
+	PrimaryModel string
 	Resend       bool
 	// SkipPrompt starts the agent without the bootstrap prompt, for ad-hoc
 	// features that have no PRD or task list to be sent to. It is recorded on
@@ -189,22 +190,9 @@ func (s *Service) handoff(ctx context.Context, request HandoffRequest) (HandoffR
 	if primaryRole == "" {
 		primaryRole = s.Config.Primary.Role
 	}
-	primaryKind := featureState.Handoff.PrimaryKind
-	if request.PrimaryKind != "" {
-		if primaryKind != "" && primaryKind != request.PrimaryKind {
-			return HandoffResult{}, &model.StageError{Stage: "record handoff", Code: model.ErrAgentAmbiguous, Message: "the managed primary kind is already recorded as " + primaryKind, Recovery: "run wt herd retry to preserve the original primary kind"}
-		}
-		primaryKind = request.PrimaryKind
-	}
-	if primaryKind == "" {
-		if saved, ok := featureState.Agents[primaryRole]; ok && saved.Kind != "" {
-			primaryKind = saved.Kind
-		} else {
-			primaryKind = s.Config.Primary.Kind
-		}
-	}
-	if !config.IsSupportedAgentKind(primaryKind) {
-		return HandoffResult{}, &model.StageError{Stage: "primary agent kind", Code: model.ErrConfigInvalid, Message: "the requested primary agent kind is not supported by Herdr", Recovery: "choose a supported --kind or update .herdr/devflow.toml"}
+	primarySelection, err := s.resolvePrimarySelection(featureState, primaryRole, request)
+	if err != nil {
+		return HandoffResult{}, err
 	}
 	// The installed plugin can outlive this checkout, so persist the
 	// configured display-metadata source on this feature record. State is
@@ -213,13 +201,17 @@ func (s *Service) handoff(ctx context.Context, request HandoffRequest) (HandoffR
 	metadataEnabled := s.Config.Metadata.Enabled
 	featureState.MetadataEnabled = &metadataEnabled
 	if featureState.Handoff.Stage == "" {
-		featureState.Handoff = model.HandoffState{Stage: model.HandoffRecorded, PrimaryRole: primaryRole, PrimaryKind: primaryKind, UpdatedAt: s.now()}
+		featureState.Handoff = model.HandoffState{
+			Stage: model.HandoffRecorded, PrimaryRole: primaryRole,
+			PrimaryKind: primarySelection.Kind, PrimaryModel: primarySelection.Model, UpdatedAt: s.now(),
+		}
 	} else {
 		if featureState.Handoff.PrimaryRole == "" {
 			featureState.Handoff.PrimaryRole = primaryRole
 		}
 		if featureState.Handoff.PrimaryKind == "" {
-			featureState.Handoff.PrimaryKind = primaryKind
+			featureState.Handoff.PrimaryKind = primarySelection.Kind
+			featureState.Handoff.PrimaryModel = primarySelection.Model
 		}
 	}
 	// Set after the stage initialisation above, which replaces the whole
@@ -235,7 +227,7 @@ func (s *Service) handoff(ctx context.Context, request HandoffRequest) (HandoffR
 		return HandoffResult{}, &model.StageError{Stage: "record handoff", Code: model.ErrStateCorrupt, Message: "could not persist the feature handoff record before contacting Herdr", Recovery: "check the local bridge state directory, then run wt herd retry", Cause: err}
 	}
 
-	placement, err := s.resolvePlacement(ctx, featureState, feature, primaryRole, primaryKind, gitWorktree.SourcePath)
+	placement, err := s.resolvePlacement(ctx, featureState, feature, primaryRole, primarySelection.Kind, gitWorktree.SourcePath)
 	if err != nil {
 		return HandoffResult{}, err
 	}
@@ -281,12 +273,12 @@ func (s *Service) handoff(ctx context.Context, request HandoffRequest) (HandoffR
 	}
 
 	primaryRole = featureState.Handoff.PrimaryRole
-	primaryKind = featureState.Handoff.PrimaryKind
+	primarySelection = config.AgentSelection{Kind: featureState.Handoff.PrimaryKind, Model: featureState.Handoff.PrimaryModel}
 	name, err := ScopedAgentName(feature.RepositoryID, feature.Name, primaryRole)
 	if err != nil {
 		return HandoffResult{}, &model.StageError{Stage: "primary agent name", Code: model.ErrConfigInvalid, Message: "could not create a safe primary agent name", Recovery: "check the feature and role names", Cause: err}
 	}
-	primary, _, err := s.ensurePrimary(ctx, &state, featureKey, featureState, placement, name, primaryRole, primaryKind)
+	primary, _, err := s.ensurePrimary(ctx, &state, featureKey, featureState, placement, name, primaryRole, primarySelection)
 	if err != nil {
 		return HandoffResult{}, err
 	}
@@ -343,6 +335,57 @@ func (s *Service) handoff(ctx context.Context, request HandoffRequest) (HandoffR
 	}
 	result.PromptDelivered = true
 	return result, nil
+}
+
+func (s *Service) resolvePrimarySelection(featureState model.FeatureState, role string, request HandoffRequest) (config.AgentSelection, error) {
+	if err := config.ValidateAgentModel(request.PrimaryModel); err != nil {
+		return config.AgentSelection{}, &model.StageError{
+			Stage: "primary agent selection", Code: model.ErrConfigInvalid,
+			Message: "the requested primary model is invalid", Recovery: "choose a bounded model value without flags or control characters", Cause: err,
+		}
+	}
+
+	selection := config.AgentSelection{}
+	recorded := false
+	if featureState.Handoff.PrimaryKind != "" {
+		selection = config.AgentSelection{Kind: featureState.Handoff.PrimaryKind, Model: featureState.Handoff.PrimaryModel}
+		recorded = true
+	} else if saved, ok := featureState.Agents[role]; ok && saved.Kind != "" {
+		selection = config.AgentSelection{Kind: saved.Kind, Model: saved.Model}
+		recorded = true
+	}
+	if recorded {
+		if request.PrimaryKind != "" && request.PrimaryKind != selection.Kind {
+			return config.AgentSelection{}, &model.StageError{
+				Stage: "record handoff", Code: model.ErrAgentAmbiguous,
+				Message:  "the managed primary kind is already recorded as " + selection.Kind,
+				Recovery: "run wt herd retry to preserve the original primary kind and model",
+			}
+		}
+		if request.PrimaryModel != "" && request.PrimaryModel != selection.Model {
+			return config.AgentSelection{}, &model.StageError{
+				Stage: "record handoff", Code: model.ErrAgentAmbiguous,
+				Message:  "the managed primary model is already recorded",
+				Recovery: "run wt herd retry to preserve the original primary kind and model",
+			}
+		}
+		if err := config.ValidateAgentSelection(selection.Kind, selection.Model); err != nil {
+			return config.AgentSelection{}, &model.StageError{
+				Stage: "primary agent selection", Code: model.ErrConfigInvalid,
+				Message: "the recorded primary kind or model is invalid", Recovery: "inspect local bridge state, then run wt herd doctor", Cause: err,
+			}
+		}
+		return selection, nil
+	}
+
+	selection, err := s.Config.ResolveAgentSelection(role, request.PrimaryKind, request.PrimaryModel)
+	if err != nil {
+		return config.AgentSelection{}, &model.StageError{
+			Stage: "primary agent selection", Code: model.ErrConfigInvalid,
+			Message: "the requested primary kind or model is invalid", Recovery: "choose supported agent defaults or explicit handoff values", Cause: err,
+		}
+	}
+	return selection, nil
 }
 
 // resolvePlacement returns the tab this feature occupies, creating one only
@@ -490,7 +533,8 @@ func isMissingTarget(err error) bool {
 	return errors.As(err, &stage) && stage.Code == model.ErrAgentMissing
 }
 
-func (s *Service) ensurePrimary(ctx context.Context, state *model.BridgeState, featureKey string, featureState model.FeatureState, placement featurePlacement, expectedName, role, kind string) (model.RoleAgent, bool, error) {
+func (s *Service) ensurePrimary(ctx context.Context, state *model.BridgeState, featureKey string, featureState model.FeatureState, placement featurePlacement, expectedName, role string, selection config.AgentSelection) (model.RoleAgent, bool, error) {
+	kind := selection.Kind
 	if saved, ok := featureState.Agents[role]; ok {
 		if saved.Name != expectedName {
 			return model.RoleAgent{}, true, &model.StageError{Stage: "resolve primary agent", Code: model.ErrAgentAmbiguous, Message: "saved primary agent name does not match this feature's identity", Recovery: "wt herd rebind " + role + " --target <live-target>"}
@@ -508,6 +552,7 @@ func (s *Service) ensurePrimary(ctx context.Context, state *model.BridgeState, f
 		if primary.Kind == "" {
 			primary.Kind = kind
 		}
+		primary.Model = selection.Model
 		featureState.Agents[role] = primary
 		if !featureState.Handoff.BootstrapPrompted {
 			featureState.Handoff.Stage = model.HandoffReady
@@ -536,6 +581,7 @@ func (s *Service) ensurePrimary(ctx context.Context, state *model.BridgeState, f
 		}
 		primary.Role = role
 		primary.Kind = kind
+		primary.Model = selection.Model
 		featureState.Agents[role] = primary
 		if !featureState.Handoff.BootstrapPrompted {
 			featureState.Handoff.Stage = model.HandoffReady
@@ -556,7 +602,7 @@ func (s *Service) ensurePrimary(ctx context.Context, state *model.BridgeState, f
 	// failing because the root pane is busy running exactly the agent we were
 	// about to duplicate.
 	if adopted, found, adoptErr := s.findAgentInWorktree(ctx, featureState.Feature.Path, kind); adoptErr == nil && found {
-		primary := roleAgentFrom(adopted, role, kind, s.now())
+		primary := roleAgentFrom(adopted, role, kind, selection.Model, s.now())
 		featureState.Agents[role] = primary
 		if !featureState.Handoff.BootstrapPrompted {
 			featureState.Handoff.Stage = model.HandoffReady
@@ -577,7 +623,10 @@ func (s *Service) ensurePrimary(ctx context.Context, state *model.BridgeState, f
 		return model.RoleAgent{}, false, err
 	}
 
-	started, err := s.Client.AgentStartInfo(ctx, expectedName, kind, placement.RootPane.PaneID, time.Duration(s.Config.Bootstrap.TimeoutSeconds)*time.Second)
+	started, err := s.Client.AgentStartInfo(ctx, herdr.AgentStartRequest{
+		Name: expectedName, Kind: kind, Model: selection.Model, PaneID: placement.RootPane.PaneID,
+		Timeout: time.Duration(s.Config.Bootstrap.TimeoutSeconds) * time.Second,
+	})
 	if err != nil {
 		return model.RoleAgent{}, false, wrapHerdrError("start primary agent", err, "wt herd retry")
 	}
@@ -591,6 +640,7 @@ func (s *Service) ensurePrimary(ctx context.Context, state *model.BridgeState, f
 	}
 	primary.Role = role
 	primary.Kind = kind
+	primary.Model = selection.Model
 	featureState.Agents[role] = primary
 	featureState.Handoff.Stage = model.HandoffPrimaryStarted
 	featureState.Handoff.PrimaryAgentName = expectedName

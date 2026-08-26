@@ -17,14 +17,14 @@ func TestScopedControlsAddPromptRenameFocusAndRead(t *testing.T) {
 	t.Parallel()
 	service, client, store, path := seededFeature(t)
 
-	added, err := service.Add(context.Background(), AddRequest{Context: ContextRequest{WorktreePath: path}, Role: "reviewer", Kind: "codex"})
+	added, err := service.Add(context.Background(), AddRequest{Context: ContextRequest{WorktreePath: path}, Role: "reviewer", Kind: "codex", Model: "openai/codex-review"})
 	if err != nil {
 		t.Fatalf("Add() error = %v", err)
 	}
-	if added.Reused || added.Agent.Role != "reviewer" || added.Agent.Kind != "codex" || added.Agent.PaneID == "w1:p1" || client.splitCalls != 1 || client.startCalls != 2 {
+	if added.Reused || added.Agent.Role != "reviewer" || added.Agent.Kind != "codex" || added.Agent.Model != "openai/codex-review" || added.Agent.PaneID == "w1:p1" || client.splitCalls != 1 || client.startCalls != 2 {
 		t.Fatalf("Add() = %#v; splits=%d starts=%d", added, client.splitCalls, client.startCalls)
 	}
-	repeated, err := service.Add(context.Background(), AddRequest{Context: ContextRequest{WorktreePath: path}, Role: "reviewer", Kind: "codex"})
+	repeated, err := service.Add(context.Background(), AddRequest{Context: ContextRequest{WorktreePath: path}, Role: "reviewer", Kind: "codex", Model: "openai/codex-review"})
 	if err != nil || !repeated.Reused || client.splitCalls != 1 || client.startCalls != 2 {
 		t.Fatalf("repeat Add() = %#v, %v; splits=%d starts=%d", repeated, err, client.splitCalls, client.startCalls)
 	}
@@ -59,12 +59,12 @@ func TestScopedControlsAddPromptRenameFocusAndRead(t *testing.T) {
 		t.Fatalf("Rename() error = %v", err)
 	}
 	expectedName, _ := ScopedAgentName(service.RepositoryID, "bridge", "tester")
-	if renamed.Agent.Role != "tester" || renamed.Agent.Name != expectedName || client.renameCalls != 1 {
+	if renamed.Agent.Role != "tester" || renamed.Agent.Name != expectedName || renamed.Agent.Model != "openai/codex-review" || client.renameCalls != 1 {
 		t.Fatalf("Rename() = %#v; renames=%d", renamed, client.renameCalls)
 	}
 	state, _ := store.Load()
 	feature := state.Features[service.RepositoryID+":bridge"]
-	if _, oldRoleExists := feature.Agents["reviewer"]; oldRoleExists || feature.Agents["tester"].NativeSession.Value == "" || feature.Schedules["future"].Role != "tester" {
+	if _, oldRoleExists := feature.Agents["reviewer"]; oldRoleExists || feature.Agents["tester"].NativeSession.Value == "" || feature.Agents["tester"].Model != "openai/codex-review" || feature.Schedules["future"].Role != "tester" {
 		t.Fatalf("role mapping after rename = %#v", feature.Agents)
 	}
 	assertCallsInOrder(t, client.calls,
@@ -81,6 +81,149 @@ func TestScopedControlsAddPromptRenameFocusAndRead(t *testing.T) {
 	var stage *model.StageError
 	if !errors.As(err, &stage) || stage.Code != model.ErrAgentMissing || client.startCalls != startsBefore || client.promptCalls != promptsBefore {
 		t.Fatalf("stale role prompt = %v; starts=%d prompts=%d", err, client.startCalls, client.promptCalls)
+	}
+}
+
+func TestRoleAgentResolvesKindAndModelAsAPair(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name           string
+		configure      func(*Service)
+		requestedKind  string
+		requestedModel string
+		wantKind       string
+		wantModel      string
+	}{
+		{
+			name: "default role pair",
+			configure: func(service *Service) {
+				service.Config.Roles.DefaultKind = "pi"
+				service.Config.Roles.DefaultModel = "openai/fallback"
+				delete(service.Config.Roles.Defaults, "analyst")
+			},
+			wantKind: "pi", wantModel: "openai/fallback",
+		},
+		{
+			name: "role-specific pair",
+			configure: func(service *Service) {
+				service.Config.Roles.Defaults["analyst"] = "pi"
+				service.Config.Roles.Models["analyst"] = "openai/analyst"
+			},
+			wantKind: "pi", wantModel: "openai/analyst",
+		},
+		{
+			name: "model-only override",
+			configure: func(service *Service) {
+				service.Config.Roles.Defaults["analyst"] = "pi"
+				service.Config.Roles.Models["analyst"] = "openai/configured"
+			},
+			requestedModel: "openai/override", wantKind: "pi", wantModel: "openai/override",
+		},
+		{
+			name: "changed kind clears stale model",
+			configure: func(service *Service) {
+				service.Config.Roles.Defaults["analyst"] = "pi"
+				service.Config.Roles.Models["analyst"] = "openai/configured"
+			},
+			requestedKind: "claude", wantKind: "claude",
+		},
+		{
+			name: "explicit pair",
+			configure: func(service *Service) {
+				service.Config.Roles.Defaults["analyst"] = "pi"
+				service.Config.Roles.Models["analyst"] = "openai/configured"
+			},
+			requestedKind: "codex", requestedModel: "openai/codex-max", wantKind: "codex", wantModel: "openai/codex-max",
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			service, client, store, path := seededFeature(t)
+			testCase.configure(service)
+			result, err := service.Add(context.Background(), AddRequest{
+				Context: ContextRequest{WorktreePath: path}, Role: "analyst",
+				Kind: testCase.requestedKind, Model: testCase.requestedModel,
+			})
+			if err != nil {
+				t.Fatalf("Add() error = %v", err)
+			}
+			if result.Agent.Kind != testCase.wantKind || result.Agent.Model != testCase.wantModel {
+				t.Fatalf("role pair = %q/%q, want %q/%q", result.Agent.Kind, result.Agent.Model, testCase.wantKind, testCase.wantModel)
+			}
+			last := client.startRequests[len(client.startRequests)-1]
+			if last.Kind != testCase.wantKind || last.Model != testCase.wantModel {
+				t.Fatalf("role launch = %#v, want %q/%q", last, testCase.wantKind, testCase.wantModel)
+			}
+			state, err := store.Load()
+			if err != nil {
+				t.Fatal(err)
+			}
+			saved := state.Features[service.RepositoryID+":bridge"].Agents["analyst"]
+			if saved.Kind != testCase.wantKind || saved.Model != testCase.wantModel {
+				t.Fatalf("saved role pair = %#v, want %q/%q", saved, testCase.wantKind, testCase.wantModel)
+			}
+		})
+	}
+}
+
+func TestRoleAgentRetainsPartialLaunchPairAcrossFailureRetryReuseAndRebind(t *testing.T) {
+	t.Parallel()
+	service, client, store, path := seededFeature(t)
+	service.Config.Roles.Defaults["reviewer"] = "pi"
+	service.Config.Roles.Models["reviewer"] = "openai/reviewer"
+	client.fail["start"] = errors.New("role launch failed")
+
+	_, err := service.Add(context.Background(), AddRequest{Context: ContextRequest{WorktreePath: path}, Role: "reviewer"})
+	var stage *model.StageError
+	if !errors.As(err, &stage) || stage.Stage != "start role agent" {
+		t.Fatalf("failed Add() error = %#v", err)
+	}
+	state, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved := state.Features[service.RepositoryID+":bridge"].Agents["reviewer"]
+	if saved.Kind != "pi" || saved.Model != "openai/reviewer" || saved.PaneID == "" {
+		t.Fatalf("partial role pair was not persisted: %#v", saved)
+	}
+	failedLaunch := client.startRequests[len(client.startRequests)-1]
+	t.Logf("failed launch intent: name=%q kind=%q model=%q pane=%q", failedLaunch.Name, failedLaunch.Kind, failedLaunch.Model, failedLaunch.PaneID)
+	_, err = service.Add(context.Background(), AddRequest{Context: ContextRequest{WorktreePath: path}, Role: "reviewer", Kind: "pi", Model: "openai/other"})
+	if !errors.As(err, &stage) || stage.Code != model.ErrAgentAmbiguous {
+		t.Fatalf("conflicting partial model error = %#v", err)
+	}
+
+	delete(client.fail, "start")
+	service.Config.Roles.Defaults["reviewer"] = "codex"
+	service.Config.Roles.Models["reviewer"] = "openai/new-default"
+	retried, err := service.Add(context.Background(), AddRequest{Context: ContextRequest{WorktreePath: path}, Role: "reviewer"})
+	if err != nil {
+		t.Fatalf("retry Add() error = %v", err)
+	}
+	if retried.Agent.Kind != "pi" || retried.Agent.Model != "openai/reviewer" {
+		t.Fatalf("retry did not retain pair: %#v", retried.Agent)
+	}
+	last := client.startRequests[len(client.startRequests)-1]
+	if last.Kind != "pi" || last.Model != "openai/reviewer" {
+		t.Fatalf("retry launch = %#v, want recorded pair", last)
+	}
+	t.Logf("retry after defaults changed to codex/openai/new-default: name=%q kind=%q model=%q pane=%q", last.Name, last.Kind, last.Model, last.PaneID)
+
+	reused, err := service.Add(context.Background(), AddRequest{Context: ContextRequest{WorktreePath: path}, Role: "reviewer"})
+	if err != nil || !reused.Reused || reused.Agent.Model != "openai/reviewer" {
+		t.Fatalf("reused role lost model intent: %#v, %v", reused, err)
+	}
+
+	external := client.byName[retried.Agent.Name]
+	external.Name = "manual-reviewer"
+	delete(client.byName, retried.Agent.Name)
+	client.byName[external.Name] = external
+	rebound, err := service.Rebind(context.Background(), RebindRequest{Context: ContextRequest{WorktreePath: path}, Role: "reviewer", Target: external.Name})
+	if err != nil {
+		t.Fatalf("Rebind() error = %v", err)
+	}
+	if rebound.Agent.Model != "openai/reviewer" {
+		t.Fatalf("rebind lost model intent: %#v", rebound.Agent)
 	}
 }
 
@@ -398,10 +541,14 @@ func TestExistingSavedRecordsResolveWithoutMigration(t *testing.T) {
 	// The saved agent is still live and unchanged: the ordinary path must not
 	// have regressed while the fallback was added.
 	promptsBefore := client.promptCalls
-	if _, err := service.Prompt(context.Background(), PromptRequest{
+	result, err := service.Prompt(context.Background(), PromptRequest{
 		Context: ContextRequest{WorktreePath: path}, Role: "builder", Text: "still works",
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatalf("Prompt() on an unmigrated record = %v", err)
+	}
+	if result.Agent.Model != "" {
+		t.Fatalf("legacy role invented a model: %#v", result.Agent)
 	}
 	if client.promptCalls != promptsBefore+1 {
 		t.Fatal("the saved-identity path stopped working")
