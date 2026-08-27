@@ -741,6 +741,7 @@ func registerSessionRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("POST /api/project-templates/import", s.handleProjectTemplateImport)
 		mux.HandleFunc("POST /api/project-templates/reveal", s.handleProjectTemplateReveal)
 		mux.HandleFunc("POST /api/project-templates/{templateID}/duplicate", s.handleProjectTemplateDuplicate)
+		mux.HandleFunc("POST /api/project-templates/{templateID}/plugin-recovery", s.handleBlueprintPluginRecovery)
 		mux.HandleFunc("PUT /api/project-templates/{templateID}", s.handleProjectTemplateUpdate)
 		mux.HandleFunc("DELETE /api/project-templates/{templateID}", s.handleProjectTemplateDelete)
 		// In-app file authoring (path-jailed to the template folder)

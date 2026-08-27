@@ -141,12 +141,14 @@ const ELEMENT_IDS = [
   'templateBriefingScaffoldValue',
   'templateBriefingAddonsRow',
   'templateBriefingAddonsList',
+  'blueprintRecoveryPanel',
   'addFolderModal'
 ];
 
 let elements;
 let fetchQueue;
 let fetchCalls;
+let documentListeners;
 
 function installDom() {
   elements = new Map();
@@ -155,10 +157,16 @@ function installDom() {
     el.id = id;
     elements.set(id, el);
   });
+  documentListeners = {};
   globalThis.document = {
     createElement: tag => new FakeElement(tag),
     getElementById: id => elements.get(id) || null,
-    addEventListener: () => {},
+    // Recorded rather than dropped: the module wires its modal handlers from
+    // DOMContentLoaded, and a stub that swallows it silently skips half the
+    // behavior under test.
+    addEventListener: (name, fn) => {
+      (documentListeners[name] = documentListeners[name] || []).push(fn);
+    },
     querySelectorAll: () => [],
     querySelector: () => null,
     body: new FakeElement('body')
@@ -177,18 +185,25 @@ function installDom() {
 }
 
 const READINESS_SOURCE = readFileSync(new URL('./blueprint-readiness.js', import.meta.url), 'utf8');
+const LIFECYCLE_SOURCE = readFileSync(new URL('./plugin-lifecycle.js', import.meta.url), 'utf8');
 const PICKER_SOURCE = readFileSync(
   new URL('./project-templates-manage.js', import.meta.url),
   'utf8'
 );
 
-// A fresh vm context per test: both modules declare top-level consts, so
+// A fresh vm context per test: the modules declare top-level consts, so
 // re-running them in one realm would collide. Every assertion here is on a
 // primitive, so the cross-realm prototypes a new context brings are harmless.
 let sandbox;
 
+// Every request the picker makes, so a test can assert what was sent — which
+// for recovery is the whole point: an action name and a plugin name, never a
+// source.
+let requests;
+
 function loadModules() {
   installDom();
+  requests = [];
   sandbox = {
     window: { open: () => {} },
     document: globalThis.document,
@@ -207,18 +222,34 @@ function loadModules() {
     Error,
     encodeURIComponent,
     requestAnimationFrame: () => {},
-    fetch: async url => {
+    fetch: async (url, options) => {
       fetchCalls.push(url);
+      requests.push({
+        url,
+        method: options?.method || 'GET',
+        body: options?.body ? JSON.parse(options.body) : null
+      });
       const next = fetchQueue.shift();
       if (!next) throw new Error(`unexpected fetch: ${url}`);
       if (next instanceof Error) throw next;
-      return { ok: true, json: async () => next };
+      const status = next.__status || 200;
+      const body = next.__body === undefined ? next : next.__body;
+      return {
+        ok: status >= 200 && status < 300,
+        status,
+        json: async () => body,
+        text: async () => JSON.stringify(body)
+      };
     }
   };
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
   vm.runInContext(READINESS_SOURCE, sandbox, { filename: 'blueprint-readiness.js' });
+  vm.runInContext(LIFECYCLE_SOURCE, sandbox, { filename: 'plugin-lifecycle.js' });
   vm.runInContext(PICKER_SOURCE, sandbox, { filename: 'project-templates-manage.js' });
+  // The page's own startup, so the modal's show/hidden handlers are wired the
+  // way they are in the browser.
+  (documentListeners.DOMContentLoaded || []).forEach(fn => fn());
   return sandbox.window.ProjectTemplateCard;
 }
 
@@ -635,4 +666,396 @@ test('a superseded catalog response never repaints the picker', async () => {
 
   assert.ok(optionById('b'), 'the newer catalog should be on screen');
   assert.equal(optionById('stale'), null, 'a stale response repainted the picker');
+});
+
+// --- in-wizard recovery ----------------------------------------------------
+
+// A recovery step chains several promises (fetch → text → parse → state →
+// render), so a fixed number of microticks is fragile. Drain the queue instead.
+async function flush() {
+  for (let i = 0; i < 50; i++) await Promise.resolve();
+}
+
+function recoveryHost() {
+  return elements.get('blueprintRecoveryPanel');
+}
+
+function recoveryButton(label) {
+  return recoveryHost()
+    .querySelectorAll('.workspace-blueprint-recovery-action')
+    .find(node => node.textContent === label);
+}
+
+function readinessAction(name) {
+  return readinessPanel()
+    ?.descendants()
+    .find(node => node.dataset.readinessAction === name);
+}
+
+function disabledPluginTemplate(overrides = {}) {
+  return template('needs-plugin', {
+    name: 'Needs Plugin',
+    builtin: false,
+    readiness: {
+      state: 'action_required',
+      ownership: 'user',
+      reason: 'plugin_install_required',
+      summary: 'This blueprint needs a plugin that is not installed yet.',
+      dependency: { plugin_name: 'owner-plugin', installed: false, source_declared: true },
+      actions: ['install_plugin', 'manage_plugins'],
+      generation: 0
+    },
+    ...overrides
+  });
+}
+
+const TRUST_REPORT = {
+  MCPCommands: ['/usr/local/bin/owner --serve'],
+  Skills: ['owner-setup'],
+  Warnings: []
+};
+
+// The central security property: the browser names an action and a plugin.
+// It never sends a source, so a tampered client cannot install from anywhere
+// the selected blueprint does not already point at.
+test('a recovery request carries an action and a plugin name, never a source', async () => {
+  await setup([disabledPluginTemplate()]);
+  optionById('needs-plugin').click();
+  fetchQueue = [{ trust: TRUST_REPORT }];
+
+  readinessAction('install_plugin').fire('click');
+  await flush();
+
+  const request = requests[requests.length - 1];
+  assert.equal(request.method, 'POST');
+  assert.match(request.url, /\/api\/project-templates\/needs-plugin\/plugin-recovery$/);
+  assert.equal(request.body.action, 'install_plugin');
+  assert.equal(request.body.plugin, 'owner-plugin');
+  assert.equal(request.body.confirm, false, 'the first call must be a preview');
+  assert.equal('source' in request.body, false, 'the client sent a source');
+});
+
+test('the trust disclosure is shown in full before anything is confirmed', async () => {
+  await setup([disabledPluginTemplate()]);
+  optionById('needs-plugin').click();
+  fetchQueue = [{ trust: TRUST_REPORT }];
+
+  readinessAction('install_plugin').fire('click');
+  await flush();
+
+  const text = recoveryHost().textContent;
+  assert.match(text, /will be able to do the following/);
+  assert.match(text, /\/usr\/local\/bin\/owner --serve/);
+  assert.match(text, /owner-setup/);
+  // Both halves of what the button does are named.
+  assert.ok(recoveryButton('Install and enable'), 'no confirm control');
+  assert.ok(recoveryButton('Cancel'), 'no cancel control');
+  // Only one request so far: the preview. Nothing has been installed.
+  assert.equal(requests.filter(r => r.url.includes('plugin-recovery')).length, 1);
+});
+
+// The catalog withholds the source; the disclosure is where it finally
+// appears, above the commands it will be allowed to run.
+test('the disclosure names where the plugin comes from', async () => {
+  await setup([disabledPluginTemplate()]);
+  optionById('needs-plugin').click();
+  fetchQueue = [{ trust: TRUST_REPORT, source: 'https://example.test/owner.git' }];
+
+  readinessAction('install_plugin').fire('click');
+  await flush();
+
+  assert.match(recoveryHost().textContent, /Installed from/);
+  assert.match(recoveryHost().textContent, /https:\/\/example\.test\/owner\.git/);
+});
+
+test('a disclosure with no source simply omits the line', async () => {
+  await setup([disabledPluginTemplate()]);
+  optionById('needs-plugin').click();
+  fetchQueue = [{ trust: TRUST_REPORT }];
+
+  readinessAction('install_plugin').fire('click');
+  await flush();
+
+  assert.doesNotMatch(recoveryHost().textContent, /Installed from/);
+  // The disclosure itself is still there.
+  assert.match(recoveryHost().textContent, /Runs these commands/);
+});
+
+test('a completed recovery moves focus to its result', async () => {
+  await setup([disabledPluginTemplate()]);
+  optionById('needs-plugin').click();
+  fetchQueue = [{ trust: TRUST_REPORT }];
+  readinessAction('install_plugin').fire('click');
+  await flush();
+
+  const ready = template('needs-plugin', {
+    name: 'Needs Plugin',
+    builtin: false,
+    readiness: { state: 'ready', ownership: 'user', reason: '' }
+  });
+  fetchQueue = [
+    {
+      outcome: { completed: true, summary: 'Installed and enabled.' },
+      blueprint_id: 'needs-plugin'
+    },
+    catalog([ready])
+  ];
+  recoveryButton('Install and enable').fire('click');
+  await flush();
+
+  // The button that was pressed is gone, so focus would otherwise fall to the
+  // top of the document.
+  assert.equal(FakeElement.lastFocused, recoveryHost());
+});
+
+test('cancelling returns focus to the readiness panel', async () => {
+  await setup([disabledPluginTemplate()]);
+  optionById('needs-plugin').click();
+  fetchQueue = [{ trust: TRUST_REPORT }];
+  readinessAction('install_plugin').fire('click');
+  await flush();
+
+  recoveryButton('Cancel').fire('click');
+  assert.equal(FakeElement.lastFocused, readinessPanel());
+});
+
+test('cancelling a disclosure sends nothing and clears the panel', async () => {
+  await setup([disabledPluginTemplate()]);
+  optionById('needs-plugin').click();
+  fetchQueue = [{ trust: TRUST_REPORT }];
+  readinessAction('install_plugin').fire('click');
+  await flush();
+
+  const before = requests.length;
+  recoveryButton('Cancel').fire('click');
+  assert.equal(requests.length, before, 'cancelling made a request');
+  assert.equal(recoveryHost().textContent, '');
+});
+
+test('confirming installs, then reports the outcome and reloads the catalog', async () => {
+  const Picker = await setup([disabledPluginTemplate()]);
+  optionById('needs-plugin').click();
+  fetchQueue = [{ trust: TRUST_REPORT }];
+  readinessAction('install_plugin').fire('click');
+  await flush();
+
+  const ready = template('needs-plugin', {
+    name: 'Needs Plugin',
+    builtin: false,
+    readiness: { state: 'ready', ownership: 'user', reason: '' }
+  });
+  fetchQueue = [
+    {
+      outcome: { action: 'install_plugin', completed: true, summary: 'Installed and enabled.' },
+      blueprint_id: 'needs-plugin'
+    },
+    catalog([ready])
+  ];
+  recoveryButton('Install and enable').fire('click');
+  await flush();
+
+  const applied = requests.find(r => r.body && r.body.confirm === true);
+  assert.ok(applied, 'the confirmed call was never sent');
+  assert.match(recoveryHost().textContent, /Installed and enabled/);
+  // The catalog was re-read and the blueprint is now ready.
+  assert.equal(Picker.isSelectionBlocked(), false);
+  assert.equal(readinessPanel(), null, 'the blocked panel survived a successful recovery');
+});
+
+// The honest-partial-outcome case: install worked, enable did not.
+test('a partial outcome says installed, still disabled', async () => {
+  await setup([disabledPluginTemplate()]);
+  optionById('needs-plugin').click();
+  fetchQueue = [{ trust: TRUST_REPORT }];
+  readinessAction('install_plugin').fire('click');
+  await flush();
+
+  const stillDisabled = disabledPluginTemplate({
+    readiness: {
+      state: 'action_required',
+      ownership: 'plugin',
+      reason: 'plugin_enable_required',
+      summary: "This blueprint's plugin is installed but disabled.",
+      dependency: { plugin_name: 'owner-plugin', installed: true, enabled: false },
+      actions: ['enable_plugin']
+    }
+  });
+  fetchQueue = [
+    {
+      outcome: {
+        action: 'install_plugin',
+        completed: false,
+        summary: 'Installed, still disabled.',
+        detail: 'The plugin is on this computer but could not be switched on.'
+      },
+      blueprint_id: 'needs-plugin'
+    },
+    catalog([stillDisabled])
+  ];
+  recoveryButton('Install and enable').fire('click');
+  await flush();
+
+  const host = recoveryHost();
+  assert.match(host.textContent, /Installed, still disabled/);
+  assert.match(host.textContent, /could not be switched on/);
+  // A partial result is not styled as a success.
+  const message = host.querySelectorAll('.workspace-blueprint-recovery-partial');
+  assert.equal(message.length, 1, 'a partial outcome was rendered as a success');
+  // And the card still offers the one remaining action.
+  assert.ok(readinessAction('enable_plugin'), 'no way to finish the job');
+});
+
+test('a failed recovery says nothing changed and offers an escape route', async () => {
+  await setup([disabledPluginTemplate()]);
+  optionById('needs-plugin').click();
+  fetchQueue = [{ __status: 409, __body: { error: 'Ori could not read this plugin.' } }];
+
+  readinessAction('install_plugin').fire('click');
+  await flush();
+
+  const host = recoveryHost();
+  assert.match(host.textContent, /could not read this plugin/);
+  assert.ok(recoveryButton('Manage plugins'), 'no escape route offered');
+  // Nothing to confirm: a failed preview must not leave a confirm button.
+  assert.equal(recoveryButton('Install and enable'), undefined);
+});
+
+test('a pending confirmation is dropped when the blueprint changes', async () => {
+  await setup([disabledPluginTemplate(), template('other', { name: 'Other' })]);
+  optionById('needs-plugin').click();
+  fetchQueue = [{ trust: TRUST_REPORT }];
+  readinessAction('install_plugin').fire('click');
+  await flush();
+  assert.ok(recoveryButton('Install and enable'), 'expected a pending confirmation');
+
+  // Consent given for one blueprint must never be applied to another.
+  optionById('other').click();
+  assert.equal(recoveryHost().textContent, '');
+});
+
+test('a pending confirmation is dropped when the modal closes', async () => {
+  await setup([disabledPluginTemplate()]);
+  optionById('needs-plugin').click();
+  fetchQueue = [{ trust: TRUST_REPORT }];
+  readinessAction('install_plugin').fire('click');
+  await flush();
+  assert.ok(recoveryButton('Install and enable'));
+
+  elements.get('addFolderModal').fire('hidden.bs.modal');
+  assert.equal(recoveryHost().textContent, '');
+});
+
+test('rapid repeated presses start one flow, not several', async () => {
+  await setup([disabledPluginTemplate()]);
+  optionById('needs-plugin').click();
+  fetchQueue = [{ trust: TRUST_REPORT }, { trust: TRUST_REPORT }, { trust: TRUST_REPORT }];
+
+  const action = readinessAction('install_plugin');
+  action.fire('click');
+  action.fire('click');
+  action.fire('click');
+  await flush();
+
+  // Each press invalidates the last, so only the final flow renders — and no
+  // press can produce a second confirm control alongside the first.
+  const confirms = recoveryHost()
+    .querySelectorAll('.workspace-blueprint-recovery-action')
+    .filter(node => node.textContent === 'Install and enable');
+  assert.equal(confirms.length, 1, 'more than one confirmation was on screen');
+});
+
+test('a completed recovery selects the replacement the server names', async () => {
+  const stale = template('song-production', {
+    name: 'Song Production',
+    builtin: false,
+    readiness: {
+      state: 'action_required',
+      ownership: 'plugin',
+      reason: 'plugin_enable_required',
+      summary: 'Installed but disabled.',
+      dependency: { plugin_name: 'owner-plugin', installed: true, enabled: false },
+      actions: ['enable_plugin'],
+      generation: 3
+    }
+  });
+  const Picker = await setup([stale]);
+  optionById('song-production').click();
+
+  // Enable confirms itself: there is nothing new to disclose.
+  const replacement = template('plugin:owner-plugin:song-production', {
+    name: 'Renamed Entirely',
+    builtin: false,
+    plugin_owner: { plugin_id: 'owner-plugin', blueprint_id: 'song-production' },
+    readiness: { state: 'ready', ownership: 'plugin', reason: '' }
+  });
+  fetchQueue = [
+    { trust: null },
+    {
+      outcome: { action: 'enable_plugin', completed: true, summary: 'Enabled.' },
+      blueprint_id: 'plugin:owner-plugin:song-production'
+    },
+    catalog([replacement])
+  ];
+  readinessAction('enable_plugin').fire('click');
+  await flush();
+
+  // Matched by the ID the server reported, not by the display text — which
+  // changed completely.
+  assert.equal(Picker.getSelectedTemplate().id, 'plugin:owner-plugin:song-production');
+  assert.equal(Picker.isSelectionBlocked(), false);
+  assert.match(recoveryHost().textContent, /Enabled/);
+});
+
+test('the confirmed request carries the generation the disclosure was read at', async () => {
+  const withGeneration = disabledPluginTemplate({
+    readiness: {
+      state: 'action_required',
+      ownership: 'plugin',
+      reason: 'plugin_enable_required',
+      summary: 'Installed but disabled.',
+      dependency: { plugin_name: 'owner-plugin', installed: true, enabled: false },
+      actions: ['enable_plugin'],
+      generation: 7
+    }
+  });
+  await setup([withGeneration]);
+  optionById('needs-plugin').click();
+  fetchQueue = [
+    { trust: null },
+    {
+      outcome: { action: 'enable_plugin', completed: true, summary: 'Enabled.' },
+      blueprint_id: 'needs-plugin'
+    },
+    catalog([withGeneration])
+  ];
+  readinessAction('enable_plugin').fire('click');
+  await flush();
+
+  const applied = requests.find(r => r.body && r.body.confirm === true);
+  assert.ok(applied, 'nothing was confirmed');
+  assert.equal(applied.body.generation, 7);
+});
+
+test('recheckSelection re-reads the catalog and reports the current state', async () => {
+  const Picker = await setup([disabledPluginTemplate()]);
+  optionById('needs-plugin').click();
+  assert.equal(Picker.isSelectionBlocked(), true);
+
+  const ready = template('needs-plugin', {
+    name: 'Needs Plugin',
+    builtin: false,
+    readiness: { state: 'ready', ownership: 'user', reason: '' }
+  });
+  fetchQueue = [catalog([ready])];
+  const current = await Picker.recheckSelection();
+  assert.equal(current.state, 'ready');
+  assert.equal(Picker.isSelectionBlocked(), false);
+});
+
+test('recheckSelection is a no-op for a selection with no readiness', async () => {
+  const Picker = await setup([template('a')]);
+  // Blank is selected; there is nothing to re-check and no request to make.
+  const before = requests.length;
+  assert.equal(await Picker.recheckSelection(), null);
+  assert.equal(requests.length, before);
 });

@@ -1199,6 +1199,121 @@
   font-size: 12px;
 }
 
+/* ---------- in-wizard plugin recovery ----------
+   The trust disclosure and its confirm/cancel controls. Visually separated
+   from the readiness panel above it: this is the surface where a plugin gains
+   the ability to run commands, and it should not read as more of the same
+   explanatory text. */
+
+.workspace-create-modal .workspace-blueprint-recovery:empty {
+  display: none;
+}
+.workspace-create-modal .workspace-blueprint-recovery-body {
+  margin-top: 8px;
+  padding: 12px;
+  border: 1px solid var(--wc-faction-deep);
+  background: var(--wc-bg-2);
+  color: var(--wc-ink);
+}
+.workspace-create-modal .workspace-blueprint-recovery:focus-visible {
+  outline: 2px solid var(--wc-faction);
+  outline-offset: 2px;
+}
+.workspace-create-modal .workspace-blueprint-recovery-heading {
+  margin: 0 0 6px;
+  font-family: var(--wc-font-mono);
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--wc-faction);
+}
+.workspace-create-modal .workspace-blueprint-recovery-intro,
+.workspace-create-modal .workspace-blueprint-recovery-status,
+.workspace-create-modal .workspace-blueprint-recovery-detail {
+  margin: 0 0 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--wc-ink-dim);
+}
+.workspace-create-modal .workspace-blueprint-recovery-source {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--wc-ink-dim);
+}
+.workspace-create-modal .workspace-blueprint-recovery-source code {
+  /* A source is often a long URL; it must wrap, because a source the user
+     cannot read in full is a source they cannot consent to. */
+  overflow-wrap: anywhere;
+  color: var(--wc-ink);
+}
+.workspace-create-modal .workspace-blueprint-recovery-error {
+  margin: 0 0 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--wc-alert);
+}
+.workspace-create-modal .workspace-blueprint-recovery-success {
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--wc-faction);
+}
+/* A partial result is not a success and must not be coloured like one:
+   "Installed, still disabled" means there is something left to do. */
+.workspace-create-modal .workspace-blueprint-recovery-partial {
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--wc-keeper);
+}
+.workspace-create-modal .workspace-blueprint-recovery-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+.workspace-create-modal .workspace-blueprint-recovery-action {
+  font-size: 12px;
+}
+
+/* ---------- shared trust disclosure ----------
+   Rendered by plugin-lifecycle.js on both the Plugins page and here, so the
+   rules stay unscoped and the Plugins page inherits its own theme. */
+
+.plugin-trust-report {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.plugin-trust-section-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  opacity: 0.85;
+}
+.plugin-trust-list {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+/* A command line is often long and unbroken. It must wrap: a command the user
+   cannot read in full is a command they cannot meaningfully consent to. */
+.plugin-trust-list code {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.plugin-trust-value,
+.plugin-trust-empty {
+  margin: 4px 0 0;
+  font-size: 12px;
+}
+.plugin-trust-section.is-warning .plugin-trust-section-title,
+.plugin-trust-warning {
+  color: #e8b54b;
+}
+
 .workspace-create-modal .workspace-review-readiness:empty,
 .workspace-create-modal .workspace-template-briefing-readiness:empty {
   display: none;

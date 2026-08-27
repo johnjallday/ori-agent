@@ -5571,6 +5571,19 @@ const sessionManager = {
       nameInput?.focus();
       return;
     }
+    if (!importEnabled) {
+      // Re-read the blueprint's dependency state immediately before creating.
+      // The catalog on screen can be minutes old, and a plugin disabled in
+      // another tab would otherwise turn a considered Create into a server
+      // rejection. Rendering the current state here is cheaper than that, and
+      // the server still has the final say either way.
+      const current = await window.ProjectTemplateCard?.recheckSelection?.();
+      if (current && current.state !== 'ready') {
+        this.renderReviewReadiness();
+        this.showWorkspaceCreateError(current.summary || 'This blueprint is not ready.', current);
+        return;
+      }
+    }
     if (importEnabled && !importPath) {
       this.showToast('Please enter or browse for a folder path to import', 'warning');
       return;

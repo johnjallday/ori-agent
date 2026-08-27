@@ -512,8 +512,11 @@ function ptcSelect(template, cardEl) {
   const els = ptcElements();
   // A refusal message belongs to the attempt that produced it. Choosing a
   // different blueprint ends that attempt, so the announcement is cleared
-  // rather than left to be re-read as advice about a card nobody is on.
+  // rather than left to be re-read as advice about a card nobody is on. A
+  // pending trust confirmation ends with it — consent given for one blueprint
+  // must never be applied to another.
   ptcClearAnnouncement();
+  ptcSyncRecoveryToSelection();
   ptcMarkSelectedAcross(cardEl);
   // Picking a library template clears the ad-hoc folder (mutually exclusive);
   // selecting Blank keeps a typed path so it can act as the override.
@@ -757,14 +760,19 @@ function ptcRenderReadiness(els, template) {
   if (panel) host.appendChild(panel);
 }
 
-// The recovery actions this group owns: routing and explanation. The plugin
-// lifecycle actions (install, enable, review update) are wired to the shared
-// lifecycle client in the next group; until then they route to the Plugins
-// page, which can already perform them, rather than silently doing nothing.
+// ptcHandleReadinessAction dispatches one allowlisted recovery action.
+//
+// Routing actions are handled here. The three that change the machine —
+// install, enable, review update — go through the confirm-gated flow below,
+// which discloses first and acts only after the user says so.
 function ptcHandleReadinessAction(action, template, readiness) {
   const handler = ptcReadinessActionHandlers[action];
   if (typeof handler === 'function') {
     handler(template, readiness);
+    return;
+  }
+  if (PTC_LIFECYCLE_ACTIONS.has(action)) {
+    void ptcStartRecovery(action, template, readiness);
     return;
   }
   ptcOpenPluginsPage();
@@ -773,6 +781,8 @@ function ptcHandleReadinessAction(action, template, readiness) {
 function ptcOpenPluginsPage() {
   window.open('/plugins', '_blank', 'noopener');
 }
+
+const PTC_LIFECYCLE_ACTIONS = new Set(['install_plugin', 'enable_plugin', 'review_plugin_update']);
 
 const ptcReadinessActionHandlers = {
   change_blueprint: () => {
@@ -787,6 +797,324 @@ const ptcReadinessActionHandlers = {
   },
   retry: () => void ptcPopulate({ preserveSelection: true })
 };
+
+// ---- in-wizard plugin recovery ----
+//
+// One flow at a time, held here rather than in the readiness panel because the
+// panel re-renders whenever the selection changes and a disclosure the user is
+// reading must survive that.
+
+let ptcRecoveryFlow = null;
+// The blueprint the visible recovery panel belongs to, so selecting a
+// different one clears it and selecting the same one (as happens on the
+// catalog reload that follows a success) leaves the result on screen.
+let ptcRecoveryBlueprintKey = '';
+
+const PTC_RECOVERY_COPY = {
+  install_plugin: {
+    heading: 'Install this blueprint’s plugin',
+    // The label names both halves, because both happen: the server installs and
+    // then enables under this one press. Saying only "Install" would leave the
+    // enable unaccounted for.
+    confirm: 'Install and enable',
+    working: 'Installing…',
+    preparing: 'Checking what this plugin will do…'
+  },
+  enable_plugin: {
+    heading: 'Enable this blueprint’s plugin',
+    confirm: 'Enable plugin',
+    working: 'Enabling…',
+    preparing: 'Enabling…'
+  },
+  review_plugin_update: {
+    heading: 'Review this plugin’s update',
+    confirm: 'Update plugin',
+    working: 'Updating…',
+    preparing: 'Checking for an update…'
+  }
+};
+
+function ptcRecoveryHost() {
+  return document.getElementById('blueprintRecoveryPanel');
+}
+
+// ptcCancelRecovery ends a pending flow the user decided against.
+function ptcCancelRecovery() {
+  if (ptcRecoveryFlow) ptcRecoveryFlow.cancel();
+  ptcRecoveryFlow = null;
+  ptcRecoveryBlueprintKey = '';
+  const host = ptcRecoveryHost();
+  if (host) host.textContent = '';
+  // Return focus to the readiness panel the action was offered from, rather
+  // than dropping it to the top of the document.
+  ptcFocusReadinessPanel();
+}
+
+// ptcInvalidateRecovery drops a pending flow silently.
+//
+// Used when the surface goes away — the modal closed, the selected blueprint
+// changed. The user made no decision, so nothing is announced, and crucially a
+// confirmation they left on screen can no longer be applied to a blueprint
+// they are no longer looking at.
+function ptcInvalidateRecovery() {
+  if (ptcRecoveryFlow) ptcRecoveryFlow.invalidate();
+  ptcRecoveryFlow = null;
+  ptcRecoveryBlueprintKey = '';
+  const host = ptcRecoveryHost();
+  if (host) host.textContent = '';
+}
+
+// ptcSyncRecoveryToSelection clears the recovery panel when the user moves to
+// a different blueprint. It deliberately does nothing when the selection is
+// unchanged: the catalog reload that follows a successful action re-selects
+// the same blueprint, and wiping the result there would delete the only
+// on-screen record of what just happened.
+function ptcSyncRecoveryToSelection() {
+  if (ptcRecoveryReloading) return;
+  if (!ptcRecoveryBlueprintKey) return;
+  if (ptcSelectionKey(ptcSelected) === ptcRecoveryBlueprintKey) return;
+  ptcInvalidateRecovery();
+}
+
+function ptcRecoveryEndpoint(template) {
+  return `/api/project-templates/${encodeURIComponent(template.id)}/plugin-recovery`;
+}
+
+// ptcStartRecovery runs one lifecycle action end to end.
+//
+// The client sends an action name and a plugin name — never a source, a path,
+// or a command. The blueprint the user selected is what tells the server where
+// the plugin comes from, and the trust preview is where that finally becomes
+// visible, immediately before the user agrees to it.
+async function ptcStartRecovery(action, template, readiness) {
+  const lifecycle = window.PluginLifecycle;
+  const host = ptcRecoveryHost();
+  if (!lifecycle || !host || !template?.id) {
+    ptcOpenPluginsPage();
+    return;
+  }
+  const pluginName = readiness?.dependency?.pluginName || '';
+  if (!pluginName) {
+    ptcOpenPluginsPage();
+    return;
+  }
+
+  // A second press while one flow is live must not start another.
+  ptcInvalidateRecovery();
+  ptcRecoveryBlueprintKey = ptcSelectionKey(template);
+
+  const url = ptcRecoveryEndpoint(template);
+  const generation = Number(readiness?.generation) || 0;
+  const copy = PTC_RECOVERY_COPY[action] || PTC_RECOVERY_COPY.install_plugin;
+
+  const flow = lifecycle.createFlow({
+    preview: () =>
+      lifecycle.request('POST', url, { action, plugin: pluginName, confirm: false, generation }),
+    apply: () =>
+      lifecycle.request('POST', url, { action, plugin: pluginName, confirm: true, generation }),
+    onState: (state, payload) =>
+      ptcRenderRecovery(state, payload, { action, template, copy, pluginName })
+  });
+  ptcRecoveryFlow = flow;
+
+  const previewed = await flow.start();
+  if (!previewed || flow !== ptcRecoveryFlow) return;
+
+  // Enable needs no disclosure: the components were disclosed when the plugin
+  // was installed, and enabling registers exactly those. The server still
+  // returns a preview shape, so the flow stays uniform; only the copy differs.
+  if (action === 'enable_plugin' && previewed.ok) {
+    await ptcConfirmRecovery();
+  }
+}
+
+async function ptcConfirmRecovery() {
+  const flow = ptcRecoveryFlow;
+  if (!flow) return;
+  const result = await flow.confirm();
+  if (!result || flow !== ptcRecoveryFlow) return;
+  if (!result.ok) return;
+
+  const data = result.data || {};
+  // Match the trusted replacement by the ID the server just told us it has.
+  // Display text can change across an update; the qualified ID the server
+  // reports is what the next catalog will actually contain.
+  ptcRecoveryPreferredId = String(data.blueprint_id || '').trim();
+  // The reload re-selects the blueprint — possibly a replacement with a new
+  // key. Hold the result on screen across it; the selection change is one this
+  // flow caused, not one the user made.
+  ptcRecoveryReloading = true;
+  try {
+    await ptcPopulate({ preserveSelection: true });
+  } finally {
+    ptcRecoveryReloading = false;
+    ptcRecoveryPreferredId = '';
+    ptcRecoveryBlueprintKey = ptcSelectionKey(ptcSelected);
+  }
+}
+
+// True while a completed recovery is reloading the catalog, so the reload's
+// own re-selection does not read as the user leaving the blueprint.
+let ptcRecoveryReloading = false;
+
+// The blueprint ID a completed recovery says to select next, consulted once by
+// the following catalog load.
+let ptcRecoveryPreferredId = '';
+
+function ptcRecoveryButton(label, variant, onClick) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = `modern-btn modern-btn-${variant} workspace-blueprint-recovery-action`;
+  button.textContent = label;
+  button.addEventListener('click', onClick);
+  return button;
+}
+
+// ptcRenderRecovery paints whichever state the flow is in. It is the only
+// writer of the recovery host, so a state cannot half-overwrite another.
+function ptcRenderRecovery(state, payload, context) {
+  const host = ptcRecoveryHost();
+  if (!host) return;
+  const lifecycle = window.PluginLifecycle;
+  const states = lifecycle.STATES;
+  host.textContent = '';
+  host.dataset.state = state;
+
+  if (state === states.CANCELLED) return;
+
+  const panel = document.createElement('div');
+  panel.className = 'workspace-blueprint-recovery-body';
+  // A group rather than a live region: the disclosure is long, and reading it
+  // aloud in full on every transition would bury the one line that changed.
+  panel.setAttribute('role', 'group');
+  panel.setAttribute('aria-label', context.copy.heading);
+
+  const heading = document.createElement('p');
+  heading.className = 'workspace-blueprint-recovery-heading';
+  heading.textContent = context.copy.heading;
+  panel.appendChild(heading);
+
+  if (state === states.PREVIEWING || state === states.APPLYING) {
+    const status = document.createElement('p');
+    status.className = 'workspace-blueprint-recovery-status';
+    status.textContent = state === states.APPLYING ? context.copy.working : context.copy.preparing;
+    panel.appendChild(status);
+    host.appendChild(panel);
+    return;
+  }
+
+  if (state === states.FAILED) {
+    const message = document.createElement('p');
+    message.className = 'workspace-blueprint-recovery-error';
+    message.setAttribute('role', 'alert');
+    message.textContent = (payload && payload.error) || 'That did not work. Nothing was changed.';
+    panel.appendChild(message);
+    const outcome = payload?.data?.outcome;
+    if (outcome?.detail) {
+      const detail = document.createElement('p');
+      detail.className = 'workspace-blueprint-recovery-detail';
+      detail.textContent = outcome.detail;
+      panel.appendChild(detail);
+    }
+    const actions = document.createElement('div');
+    actions.className = 'workspace-blueprint-recovery-actions';
+    actions.appendChild(
+      ptcRecoveryButton('Manage plugins', 'secondary', () => ptcOpenPluginsPage())
+    );
+    actions.appendChild(ptcRecoveryButton('Close', 'secondary', () => ptcCancelRecovery()));
+    panel.appendChild(actions);
+    host.appendChild(panel);
+    ptcAnnounceRecovery(message.textContent);
+    host.focus();
+    return;
+  }
+
+  if (state === states.AWAITING_CONFIRMATION) {
+    // Enable confirms itself immediately, so its disclosure never renders.
+    if (context.action === 'enable_plugin') {
+      const status = document.createElement('p');
+      status.className = 'workspace-blueprint-recovery-status';
+      status.textContent = context.copy.working;
+      panel.appendChild(status);
+      host.appendChild(panel);
+      return;
+    }
+
+    const intro = document.createElement('p');
+    intro.className = 'workspace-blueprint-recovery-intro';
+    intro.textContent =
+      context.action === 'review_plugin_update' && payload?.changed === false
+        ? `${context.pluginName} asks for nothing new. Updating changes only its version.`
+        : `${context.pluginName} will be able to do the following on this computer:`;
+    panel.appendChild(intro);
+
+    // Where it comes from, shown here and only here. The catalog withholds a
+    // template-declared source on purpose; asking someone to trust software
+    // without telling them its origin would be the opposite mistake.
+    const source = String(payload?.source || '').trim();
+    if (source) {
+      const origin = document.createElement('p');
+      origin.className = 'workspace-blueprint-recovery-source';
+      const label = document.createElement('span');
+      label.textContent = 'Installed from ';
+      const value = document.createElement('code');
+      value.textContent = source;
+      origin.append(label, value);
+      panel.appendChild(origin);
+    }
+
+    panel.appendChild(lifecycle.renderTrustReport(payload?.trust));
+
+    const actions = document.createElement('div');
+    actions.className = 'workspace-blueprint-recovery-actions';
+    const confirm = ptcRecoveryButton(context.copy.confirm, 'primary', () => {
+      // The flow's own state machine refuses a second apply, so a double press
+      // cannot install twice; disabling the button makes that visible too.
+      confirm.disabled = true;
+      void ptcConfirmRecovery();
+    });
+    actions.appendChild(confirm);
+    actions.appendChild(ptcRecoveryButton('Cancel', 'secondary', () => ptcCancelRecovery()));
+    panel.appendChild(actions);
+    host.appendChild(panel);
+    // Focus the disclosure, not the confirm button: the user should arrive at
+    // what they are agreeing to, not at the button that agrees.
+    host.focus();
+    return;
+  }
+
+  if (state === states.DONE) {
+    const outcome = payload?.outcome || {};
+    const message = document.createElement('p');
+    message.className = outcome.completed
+      ? 'workspace-blueprint-recovery-success'
+      : 'workspace-blueprint-recovery-partial';
+    message.textContent = outcome.summary || 'Done.';
+    panel.appendChild(message);
+    if (outcome.detail) {
+      const detail = document.createElement('p');
+      detail.className = 'workspace-blueprint-recovery-detail';
+      detail.textContent = outcome.detail;
+      panel.appendChild(detail);
+    }
+    host.appendChild(panel);
+    ptcAnnounceRecovery(
+      outcome.detail ? `${message.textContent} ${outcome.detail}` : message.textContent
+    );
+    // The control that was pressed no longer exists, so focus would otherwise
+    // fall to the top of the document. Put it on the result instead — which is
+    // also where the remaining action lives when the outcome was partial.
+    host.focus();
+    return;
+  }
+}
+
+// One announcement per completed action, through the same region the blocked
+// message uses so the two can never overlap each other.
+function ptcAnnounceRecovery(message) {
+  const els = ptcElements();
+  if (els.readinessLive) els.readinessLive.textContent = message;
+}
 
 // ptcAnnounceBlocked states, once and concisely, why the wizard did not
 // advance. It writes to the dedicated live region rather than the panel so the
@@ -906,6 +1234,16 @@ async function ptcPopulate(options) {
     const userTemplates = templates.filter(t => t && t.id && !t.builtin);
 
     const register = (template, element) => {
+      // A completed recovery names the blueprint's current qualified ID. It
+      // wins over the remembered key: an install can replace a stale built-in
+      // with the plugin-owned blueprint that supersedes it, and only the
+      // server knows which entry that turned out to be.
+      if (ptcRecoveryPreferredId && template.id === ptcRecoveryPreferredId) {
+        restored = element;
+        restoredTemplate = template;
+        return;
+      }
+      if (restoredTemplate && ptcRecoveryPreferredId) return;
       if (previousId && ptcSelectionKey(template) === previousId) {
         restored = element;
         restoredTemplate = template;
@@ -1006,8 +1344,17 @@ function ptcInit() {
   const createModal = document.getElementById('addFolderModal');
   if (createModal) {
     createModal.addEventListener('show.bs.modal', () => {
+      ptcInvalidateRecovery();
+      ptcClearAnnouncement();
       ptcSyncImportVisibility();
       void ptcPopulate();
+    });
+    // Closing the modal ends any pending confirmation. The user walked away
+    // from a disclosure without answering it, so there is no consent to carry
+    // into the next time the wizard opens.
+    createModal.addEventListener('hidden.bs.modal', () => {
+      ptcInvalidateRecovery();
+      ptcClearAnnouncement();
     });
   }
   ptcSyncImportVisibility();
@@ -1021,6 +1368,18 @@ window.ProjectTemplateCard = {
   // it to decide whether advancing is allowed and what to announce; the server
   // decides whether creating is.
   getSelectedReadiness: ptcSelectedReadiness,
+  // Re-reads the catalog and returns the selected blueprint's current
+  // readiness. The wizard calls it before advancing and before Create, because
+  // the catalog on screen can be minutes old and a plugin can be disabled in
+  // another tab. It is still only guidance — the server refuses again anyway.
+  recheckSelection: async () => {
+    const readiness = ptcSelectedReadiness();
+    if (!readiness) return null;
+    await ptcPopulate({ preserveSelection: true });
+    return ptcSelectedReadiness();
+  },
+  cancelRecovery: ptcCancelRecovery,
+  invalidateRecovery: ptcInvalidateRecovery,
   isSelectionBlocked: () => {
     const readiness = ptcSelectedReadiness();
     return Boolean(readiness && readiness.state !== 'ready');
