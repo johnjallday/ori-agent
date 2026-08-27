@@ -65,26 +65,48 @@ export class WorkspaceSurfaceHost {
       return this.surfaces;
     }
     if (this.loading) return this.loading;
+    const previousStationSignature = this._stationSignature(this.surfaces);
     this.loading = this._request(
       '/api/workspaces/' + encodeURIComponent(this.workspaceId) + '/surfaces'
     )
       .then(payload => {
         this.surfaces = Array.isArray(payload?.surfaces) ? payload.surfaces : [];
         this._reconcileActiveSurface();
-        this._notifyChanged();
+        this._notifyStationsChanged(previousStationSignature);
         this._openDeepLink();
         return this.surfaces;
       })
       .catch(() => {
         this.surfaces = [];
         this._reconcileActiveSurface();
-        this._notifyChanged();
+        this._notifyStationsChanged(previousStationSignature);
         return this.surfaces;
       })
       .finally(() => {
         this.loading = null;
       });
     return this.loading;
+  }
+
+  // Poll responses include volatile metadata such as status.checked_at. The
+  // Map does not render that metadata, so it must not trigger a full Command
+  // view rebuild. Keep the signature aligned with stations(), plus plugin
+  // generation so a changed contribution is never mistaken for a no-op.
+  _stationSignature(surfaces) {
+    return JSON.stringify(
+      (Array.isArray(surfaces) ? surfaces : []).map(surface => ({
+        key: text(surface?.key),
+        label: text(surface?.label) || 'Plugin surface',
+        icon: HOST_ICON_CLASSES[surface?.icon?.value] || 'bi-puzzle',
+        available: surface?.available !== false,
+        generation: text(surface?.plugin?.generation),
+        state: this.stationState(surface)
+      }))
+    );
+  }
+
+  _notifyStationsChanged(previousSignature) {
+    if (this._stationSignature(this.surfaces) !== previousSignature) this._notifyChanged();
   }
 
   stations() {
