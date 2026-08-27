@@ -54,6 +54,7 @@ Usage:
   ./scripts/devops.sh agent-defaults [options] [--yes]
   ./scripts/devops.sh view <issue-number>
   ./scripts/devops.sh new <title...> [--body <text> | --body-file <path|->] [--yes]
+  ./scripts/devops.sh plan-new <title...> (--body <text> | --body-file <path|->) --size <quick|planned|prd> [--kind <claude|pi>] [--model <model>] [--thinking <level>] [--yes]
   ./scripts/devops.sh decide <issue-number> <answers...> [--rationale <text>] [--yes]
   ./scripts/devops.sh answer <issue-number> <answers...> [--rationale <text>] [--yes]
   ./scripts/devops.sh approve <issue-number> [--yes]
@@ -109,19 +110,22 @@ one-shot options are --primary-kind, --primary-model/--clear-primary-model,
 --role-kind, and --role-model/--clear-role-model. It is local: no GitHub or
 Herdr call is made. Empty models mean the external integration chooses.
 
-new/decide/approve/unapprove write to GitHub. They prompt for confirmation on
-a terminal, and require --yes when stdin is not a terminal. `answer` remains a
-backwards-compatible alias for `decide`. A new Issue is created with no labels -
-capture takes ten seconds and the grooming routine specs it. A recorded decision
-adds `answered` as a receipt and keeps `needs-decision` until that routine
-processes the answer.
+new/plan-new/decide/approve/unapprove write to GitHub. They prompt for
+confirmation on a terminal, and require --yes when stdin is not a terminal.
+`answer` remains a backwards-compatible alias for `decide`. A new Issue is
+created with no labels - capture takes ten seconds and the grooming routine specs
+it. `plan-new` is the deliberate bypass for already-reviewed work: it requires
+problem context and a size, creates backlog plus exactly one size label, never
+adds approved, and delegates planning to `wt plan`. Non-interactive use also
+requires an explicit --kind. A recorded decision adds `answered` as a receipt
+and keeps `needs-decision` until that routine processes the answer.
 EOF
 }
 
 print_menu() {
   printf '\n%s\n' \
     "[1/a] All  [2/d] Needs my decision  [3/b] Backlog  [4/f] Proposals  [5/y] Ready" \
-    "[v #] View  [n title] New  [c # choices] Decide  [ok #] Approve  [g] Agent defaults  [q] Quit"
+    "[v #] View  [n title] Capture  [c # choices] Decide  [ok #] Approve  [g] Agent defaults  [q] Quit"
 }
 
 # Labels arrive from `gh` as a ", "-joined string. Split on commas and trim so a
@@ -1054,6 +1058,26 @@ answer_issue() {
   decide_issue "$@"
 }
 
+loaded_issue_body=""
+load_issue_body_file() {
+  local body_file="$1" loaded status
+
+  loaded_issue_body=""
+  if [[ "$body_file" == - ]]; then
+    loaded="$(cat || exit $?; printf x)"
+  elif [[ ! -f "$body_file" || ! -r "$body_file" ]]; then
+    printf 'cannot read Issue body file: %s\n' "$body_file" >&2
+    return 2
+  else
+    loaded="$(cat < "$body_file" || exit $?; printf x)"
+  fi
+  status=$?
+  [[ "$status" -eq 0 ]] || return "$status"
+  # The sentinel prevents command substitution from stripping trailing
+  # newlines; remove only the byte appended after the read.
+  loaded_issue_body="${loaded%x}"
+}
+
 # Capture is meant to take ten seconds: a title is enough, and the grooming
 # routine researches the rest on its next run. The new Issue therefore carries
 # NO labels - applying `backlog` here would skip the spec step the whole
@@ -1061,7 +1085,7 @@ answer_issue() {
 create_issue() {
   local assume_yes=0 expecting="" body_set=0 body_file_set=0
   local -a rest=()
-  local argument title body="" body_file="" status
+  local argument title body="" body_file=""
 
   for argument in "$@"; do
     if [[ -n "$expecting" ]]; then
@@ -1114,19 +1138,8 @@ create_issue() {
   fi
 
   if [[ "$body_file_set" -eq 1 ]]; then
-    if [[ "$body_file" == - ]]; then
-      body="$(cat || exit $?; printf x)"
-    elif [[ ! -f "$body_file" || ! -r "$body_file" ]]; then
-      printf 'cannot read Issue body file: %s\n' "$body_file" >&2
-      return 2
-    else
-      body="$(cat < "$body_file" || exit $?; printf x)"
-    fi
-    status=$?
-    [[ "$status" -eq 0 ]] || return "$status"
-    # The sentinel prevents command substitution from stripping trailing
-    # newlines; remove only the byte we appended after the read.
-    body="${body%x}"
+    load_issue_body_file "$body_file" || return $?
+    body="$loaded_issue_body"
   fi
 
   printf '\nWill create an Issue titled:\n'
@@ -1140,6 +1153,276 @@ create_issue() {
   # Pass the title and body through verbatim. GitHub stores them as given, so
   # escaping an ampersand here would leave a literal `&amp;` in the Issue.
   gh issue create --title "$title" --body "$body"
+}
+
+# Parsed `plan-new` state is kept in named fields rather than flattened back
+# into shell text. Bash 3.2 has indexed arrays but no associative arrays, so the
+# title words use one indexed array while body bytes and workflow choices each
+# have their own scalar. Callers must use these fields as quoted arguments.
+plan_new_title_words=()
+plan_new_title=""
+plan_new_body=""
+plan_new_size=""
+plan_new_kind=""
+plan_new_model=""
+plan_new_thinking=""
+plan_new_assume_yes=0
+
+planner_thinking_is_valid() {
+  local kind="$1" thinking="$2"
+  case "$kind" in
+    claude)
+      case "$thinking" in
+        low|medium|high|xhigh|max) return 0 ;;
+      esac
+      ;;
+    pi)
+      case "$thinking" in
+        off|minimal|low|medium|high|xhigh|max) return 0 ;;
+      esac
+      ;;
+  esac
+  return 1
+}
+
+parse_plan_new_args() {
+  local body_set=0 body_file_set=0 size_set=0 kind_set=0
+  local model_set=0 thinking_set=0 body_file="" argument
+
+  plan_new_title_words=()
+  plan_new_title=""
+  plan_new_body=""
+  plan_new_size=""
+  plan_new_kind=""
+  plan_new_model=""
+  plan_new_thinking=""
+  plan_new_assume_yes=0
+
+  while [[ $# -gt 0 ]]; do
+    argument="$1"
+    case "$argument" in
+      --body)
+        if [[ "$body_set" -eq 1 ]]; then
+          printf '%s\n' "--body may only be provided once" >&2
+          return 2
+        fi
+        if [[ $# -lt 2 ]]; then
+          printf '%s\n' "--body requires text" >&2
+          return 2
+        fi
+        body_set=1
+        plan_new_body="$2"
+        shift 2
+        ;;
+      --body-file)
+        if [[ "$body_file_set" -eq 1 ]]; then
+          printf '%s\n' "--body-file may only be provided once" >&2
+          return 2
+        fi
+        if [[ $# -lt 2 ]]; then
+          printf '%s\n' "--body-file requires a path or -" >&2
+          return 2
+        fi
+        body_file_set=1
+        body_file="$2"
+        shift 2
+        ;;
+      --size)
+        if [[ "$size_set" -eq 1 ]]; then
+          printf '%s\n' "--size may only be provided once" >&2
+          return 2
+        fi
+        if [[ $# -lt 2 ]]; then
+          printf '%s\n' "--size requires quick, planned, or prd" >&2
+          return 2
+        fi
+        size_set=1
+        plan_new_size="$2"
+        shift 2
+        ;;
+      --kind)
+        if [[ "$kind_set" -eq 1 ]]; then
+          printf '%s\n' "--kind may only be provided once" >&2
+          return 2
+        fi
+        if [[ $# -lt 2 ]]; then
+          printf '%s\n' "--kind requires claude or pi" >&2
+          return 2
+        fi
+        kind_set=1
+        plan_new_kind="$2"
+        shift 2
+        ;;
+      --model)
+        if [[ "$model_set" -eq 1 ]]; then
+          printf '%s\n' "--model may only be provided once" >&2
+          return 2
+        fi
+        if [[ $# -lt 2 ]]; then
+          printf '%s\n' "--model requires one non-empty model value" >&2
+          return 2
+        fi
+        model_set=1
+        plan_new_model="$2"
+        shift 2
+        ;;
+      --thinking)
+        if [[ "$thinking_set" -eq 1 ]]; then
+          printf '%s\n' "--thinking may only be provided once" >&2
+          return 2
+        fi
+        if [[ $# -lt 2 ]]; then
+          printf '%s\n' "--thinking requires a level" >&2
+          return 2
+        fi
+        thinking_set=1
+        plan_new_thinking="$2"
+        shift 2
+        ;;
+      --yes)
+        plan_new_assume_yes=1
+        shift
+        ;;
+      --)
+        shift
+        while [[ $# -gt 0 ]]; do
+          plan_new_title_words+=("$1")
+          shift
+        done
+        ;;
+      --*)
+        printf 'unknown plan-new option: %s\n' "$argument" >&2
+        return 2
+        ;;
+      *)
+        plan_new_title_words+=("$argument")
+        shift
+        ;;
+    esac
+  done
+
+  if [[ "${#plan_new_title_words[@]}" -eq 0 ]]; then
+    printf '%s\n' "plan-new requires a title" >&2
+    return 2
+  fi
+  plan_new_title="${plan_new_title_words[*]}"
+  if [[ ! "$plan_new_title" =~ [^[:space:]] ]]; then
+    printf '%s\n' "plan-new requires a non-empty title" >&2
+    return 2
+  fi
+  if [[ "$body_set" -eq 1 && "$body_file_set" -eq 1 ]]; then
+    printf '%s\n' "use either --body or --body-file, not both" >&2
+    return 2
+  fi
+  if [[ "$body_set" -eq 0 && "$body_file_set" -eq 0 ]]; then
+    printf '%s\n' "plan-new requires problem context via --body or --body-file" >&2
+    return 2
+  fi
+  if [[ "$body_file_set" -eq 1 ]]; then
+    load_issue_body_file "$body_file" || return $?
+    plan_new_body="$loaded_issue_body"
+  fi
+  if [[ ! "$plan_new_body" =~ [^[:space:]] ]]; then
+    printf '%s\n' "plan-new requires non-empty problem context" >&2
+    return 2
+  fi
+  case "$plan_new_size" in
+    quick|planned|prd) ;;
+    *)
+      printf '%s\n' "plan-new --size requires quick, planned, or prd" >&2
+      return 2
+      ;;
+  esac
+  if [[ "$kind_set" -eq 1 && "$plan_new_kind" != claude && "$plan_new_kind" != pi ]]; then
+    printf '%s\n' "plan-new --kind requires claude or pi" >&2
+    return 2
+  fi
+  if [[ "$model_set" -eq 1 && ( -z "$plan_new_model" || "$plan_new_model" == -* ) ]]; then
+    printf '%s\n' "plan-new --model requires one non-empty model value" >&2
+    return 2
+  fi
+  if [[ -z "$plan_new_kind" && ( "$model_set" -eq 1 || "$thinking_set" -eq 1 ) ]]; then
+    printf '%s\n' "plan-new --model/--thinking require an explicit --kind" >&2
+    return 2
+  fi
+  if [[ "$thinking_set" -eq 1 && -n "$plan_new_kind" ]] &&
+     ! planner_thinking_is_valid "$plan_new_kind" "$plan_new_thinking"; then
+    printf 'plan-new --thinking is not supported for %s: %s\n' "$plan_new_kind" "$plan_new_thinking" >&2
+    return 2
+  fi
+}
+
+ready_issue_created=0
+ready_issue_url=""
+ready_issue_number=""
+ready_issue_create_output=""
+
+recover_ready_issue_number() {
+  local output="$1"
+  local issue_url_re='^https?://[^/[:space:]]+/[^/[:space:]]+/[^/[:space:]]+/issues/([1-9][0-9]*)/?$'
+
+  ready_issue_url=""
+  ready_issue_number=""
+  if [[ "$output" =~ $issue_url_re ]]; then
+    ready_issue_url="$output"
+    ready_issue_number="${BASH_REMATCH[1]}"
+    return 0
+  fi
+  return 1
+}
+
+# This is the only GitHub-write primitive for New & Plan. It takes already
+# parsed fields, previews the complete Ready state, and transports each value as
+# one inert gh argument. The durable-creation flag changes only after gh exits
+# successfully, allowing callers to distinguish a refusal/failure from the
+# create-then-plan consequence boundary.
+create_ready_issue() {
+  local title="$1" body="$2" size="$3" assume_yes="$4" output status
+
+  ready_issue_created=0
+  ready_issue_url=""
+  ready_issue_number=""
+  ready_issue_create_output=""
+
+  case "$size" in
+    quick|planned|prd) ;;
+    *)
+      printf 'cannot create Ready Issue with unsupported size: %s\n' "$size" >&2
+      return 2
+      ;;
+  esac
+  if [[ ! "$title" =~ [^[:space:]] || ! "$body" =~ [^[:space:]] ]]; then
+    printf '%s\n' "cannot create Ready Issue without a title and problem context" >&2
+    return 2
+  fi
+
+  printf '\nWill create a Ready Issue titled:\n'
+  print_indented "$title"
+  printf 'with problem/context:\n'
+  print_indented "$body"
+  printf 'with workflow labels:\n'
+  printf '  backlog\n'
+  printf '  size:%s\n' "$size"
+  printf 'It is Ready for planning, but is not approved for implementation.\n'
+  confirm_write "Create this Ready Issue?" "$assume_yes" || return $?
+
+  output="$(gh issue create --title "$title" --body "$body" \
+    --label backlog --label "size:$size")"
+  status=$?
+  [[ "$status" -eq 0 ]] || return "$status"
+  ready_issue_created=1
+  ready_issue_create_output="$output"
+
+  if ! recover_ready_issue_number "$output"; then
+    printf '%s\n' "GitHub created the Ready Issue, but its number could not be recovered from the create result." >&2
+    printf '%s\n' "The Issue was preserved; no planner was launched and no rollback was attempted." >&2
+    printf 'GitHub returned:\n%s\n' "$output" >&2
+    printf '%s\n' "Open that result, find the positive Issue number, and retry manually with:" >&2
+    printf '%s\n' "  wt plan --issue <number> --kind <claude|pi> [--model <model>] [--thinking <level>]" >&2
+    return 1
+  fi
+
+  printf '%s\n' "$ready_issue_url"
 }
 
 set_approved() {
@@ -1220,6 +1503,9 @@ run_one_shot() {
       ;;
     new|create)
       create_issue "$@"
+      ;;
+    plan-new)
+      plan_new_issue "$@"
       ;;
     approve)
       set_approved approve "$@"
@@ -1304,6 +1590,7 @@ picker_error=""
 picker_release_summary=""
 picker_release_error=""
 picker_release_count=0
+picker_action_notice=""
 
 bundle_labels_are_eligible() {
   local labels="$1"
@@ -1506,6 +1793,10 @@ render_picker() {
     style '1;33' "$bundle_mark_notice"
     printf '\n'
   fi
+  if [[ -n "$picker_action_notice" ]]; then
+    style '1;36' "$picker_action_notice"
+    printf '\n'
+  fi
   printf '\n'
 
   if [[ -n "$picker_error" ]]; then
@@ -1590,7 +1881,7 @@ render_picker() {
   printf '\n'
   style '2' '↑/↓ or j/k select  •  ←/→ or h/l change view  •  Space mark/unmark  •  b plan marked bundle'
   printf '\n'
-  style '2' 'Enter open  •  c decide  •  n new  •  o approve  •  s plan one  •  i start implementation  •  g agent defaults  •  r refresh  •  ? help  •  q quit'
+  style '2' 'Enter open  •  c decide  •  n capture  •  p new & plan  •  o approve  •  s plan selected  •  i start implementation  •  g agent defaults  •  r refresh  •  ? help  •  q quit'
   printf '\n'
 }
 
@@ -1656,11 +1947,13 @@ Picker keys
   Enter         Open the selected Issue; its action bar offers Decide and Plan
                 when eligible, plus Start implementation
   c             Open the selected Issue directly at its decision prompt
-  n             Capture a new Issue with an optional body
+  n             Capture an unlabelled idea for the grooming routine
+  p             New & Plan a reviewed brief: require context and size, create a
+                Ready Issue, then plan it (never adds approved)
   o             Add the approved label
   Space         Mark/unmark an ordinary backlog Issue in the Ready view
   b             Choose Claude/Pi plus model/thinking options for the marked bundle
-  s             Choose Claude/Pi plus model/thinking options for the selected Issue
+  s             Plan the selected existing Ready Issue with Claude/Pi options
   i             Start implementation from a completed local plan; choose Claude,
                 Codex, Pi, worktree-only, or cancel
   g             Read or change persistent primary and role agent defaults
@@ -2089,6 +2382,47 @@ prompt_planner_selection() {
   return 0
 }
 
+plan_new_cancelled=0
+plan_new_is_interactive() {
+  [[ -t 0 ]]
+}
+
+# Resolve the complete planner selection before create_ready_issue can make an
+# outward-facing write. A script must state its planner kind and confirmation;
+# a terminal may choose the same kind/model/thinking triple through the existing
+# selector. An explicit kind intentionally leaves omitted model/thinking values
+# at the integration defaults instead of consulting persistent feature defaults.
+prepare_plan_new_execution() {
+  plan_new_cancelled=0
+
+  if ! plan_new_is_interactive; then
+    if [[ "$plan_new_assume_yes" -ne 1 ]]; then
+      printf '%s\n' "non-interactive plan-new requires --yes" >&2
+      return 2
+    fi
+    if [[ -z "$plan_new_kind" ]]; then
+      printf '%s\n' "non-interactive plan-new requires explicit planner intent via --kind claude|pi" >&2
+      return 2
+    fi
+  fi
+
+  if [[ -z "$plan_new_kind" ]]; then
+    if ! prompt_planner_selection; then
+      plan_new_cancelled=1
+      return 1
+    fi
+    plan_new_kind="$planner_kind_choice"
+    plan_new_model="$planner_model_choice"
+    plan_new_thinking="$planner_thinking_choice"
+  fi
+
+  if [[ -n "$plan_new_thinking" ]] &&
+     ! planner_thinking_is_valid "$plan_new_kind" "$plan_new_thinking"; then
+    printf 'plan-new --thinking is not supported for %s: %s\n' "$plan_new_kind" "$plan_new_thinking" >&2
+    return 2
+  fi
+}
+
 # wt is a sourced zsh function, while this picker is a standalone bash
 # process. Start it in a short-lived zsh child so the existing wt plan flow
 # remains the single owner of eligibility revalidation, confirmation, planning
@@ -2097,7 +2431,12 @@ prompt_planner_selection() {
 # evaluated as shell syntax.
 launch_planner_plan() {
   local issue_number="$1" planner_kind="$2" planner_model="${3:-}" planner_thinking="${4:-}"
+  local planner_confirmed="${5:-0}"
 
+  if [[ "$planner_confirmed" != 0 && "$planner_confirmed" != 1 ]]; then
+    printf 'Planning confirmation bit must be 0 or 1.\n' >&2
+    return 2
+  fi
   if ! command -v zsh >/dev/null 2>&1; then
     printf 'Planning requires zsh to run scripts/wt.sh.\n' >&2
     return 1
@@ -2106,8 +2445,59 @@ launch_planner_plan() {
     printf 'Planning entrypoint not found: %s\n' "$script_dir/wt.sh" >&2
     return 1
   fi
-  zsh -c 'source "$1" || exit; typeset -a plan_args; plan_args=(--issue "$2" --kind "$3"); [[ -n "$4" ]] && plan_args+=(--model "$4"); [[ -n "$5" ]] && plan_args+=(--thinking "$5"); wt plan "${plan_args[@]}"' \
-    devops-plan "$script_dir/wt.sh" "$issue_number" "$planner_kind" "$planner_model" "$planner_thinking"
+  zsh -c 'source "$1" || exit; typeset -a plan_args; plan_args=(--issue "$2" --kind "$3"); [[ -n "$4" ]] && plan_args+=(--model "$4"); [[ -n "$5" ]] && plan_args+=(--thinking "$5"); [[ "$6" == 1 ]] && plan_args+=(--yes); wt plan "${plan_args[@]}"' \
+    devops-plan "$script_dir/wt.sh" "$issue_number" "$planner_kind" "$planner_model" "$planner_thinking" "$planner_confirmed"
+}
+
+print_plan_new_receipt() {
+  local issue_number="$1" kind="$2" model="$3" thinking="$4" assume_yes="$5"
+
+  printf '\nReady Issue: #%s\n' "$issue_number"
+  printf 'Retry/resume: wt plan --issue %s --kind ' "$issue_number"
+  printf '%q' "$kind"
+  if [[ -n "$model" ]]; then
+    printf ' --model '
+    printf '%q' "$model"
+  fi
+  if [[ -n "$thinking" ]]; then
+    printf ' --thinking '
+    printf '%q' "$thinking"
+  fi
+  if [[ "$assume_yes" -eq 1 ]]; then
+    printf ' --yes'
+  fi
+  printf '\n'
+}
+
+plan_new_issue() {
+  local status=0
+
+  # Never let a pre-write refusal inherit durable state from an earlier action
+  # in the same picker process.
+  ready_issue_created=0
+  ready_issue_url=""
+  ready_issue_number=""
+  ready_issue_create_output=""
+  parse_plan_new_args "$@" || return $?
+  prepare_plan_new_execution || status=$?
+  if [[ "$status" -ne 0 ]]; then
+    # Choosing Cancel in a terminal is a completed no-op, while parser and
+    # non-interactive contract failures retain their usage status.
+    [[ "$plan_new_cancelled" -eq 1 ]] && return 0
+    return "$status"
+  fi
+
+  create_ready_issue "$plan_new_title" "$plan_new_body" "$plan_new_size" \
+    "$plan_new_assume_yes" || return $?
+
+  status=0
+  launch_planner_plan "$ready_issue_number" "$plan_new_kind" \
+    "$plan_new_model" "$plan_new_thinking" "$plan_new_assume_yes" || status=$?
+  # Once GitHub has returned a trusted number, the durable receipt is printed
+  # after every child result: launch success, interactive decline, or failure.
+  print_plan_new_receipt "$ready_issue_number" "$plan_new_kind" \
+    "$plan_new_model" "$plan_new_thinking" "$plan_new_assume_yes"
+  return "$status"
 }
 
 # Each selected number crosses the bash-to-zsh boundary as its own positional
@@ -2328,8 +2718,81 @@ prompt_create_issue() {
   fi
 }
 
+plan_new_prompt_created=0
+plan_new_prompt_number=""
+prompt_plan_new_issue() {
+  local title body choice size="" status=0
+  local -a args
+
+  plan_new_prompt_created=0
+  plan_new_prompt_number=""
+  printf 'New & Plan a reviewed brief. Empty title cancels.\n'
+  printf 'title> '
+  IFS= read -r title || return 0
+  if [[ ! "$title" =~ [^[:space:]] ]]; then
+    printf 'Cancelled.\n'
+    return 0
+  fi
+
+  printf 'Required short problem context; enter :edit for multiline Markdown.\n'
+  printf 'context> '
+  IFS= read -r body || return 0
+  if [[ "$body" == :edit ]]; then
+    edit_issue_body || return $?
+    body="$edited_issue_body"
+  fi
+  if [[ ! "$body" =~ [^[:space:]] ]]; then
+    printf 'Problem context is required; cancelled.\n'
+    return 0
+  fi
+
+  while [[ -z "$size" ]]; do
+    printf '\nChoose the planning route.\n'
+    printf '  [1/qk] Quick — direct task planning, no PRD\n'
+    printf '  [2/p]  Planned — detailed task planning, no PRD\n'
+    printf '  [3/d]  PRD — clarify requirements before task planning\n'
+    printf '  [q/Enter] Cancel\n'
+    printf 'size> '
+    IFS= read -r choice || return 0
+    case "$choice" in
+      1|qk|quick|Quick) size="quick" ;;
+      2|p|planned|Planned) size="planned" ;;
+      3|d|prd|PRD) size="prd" ;;
+      ""|q|Q|cancel|Cancel)
+        printf 'Cancelled.\n'
+        return 0
+        ;;
+      *) printf 'Choose Quick, Planned, PRD, or Cancel.\n' >&2 ;;
+    esac
+  done
+
+  # Selection is intentionally complete before plan_new_issue reaches the
+  # create preview. Cancelling here leaves no Issue to recover or refresh.
+  prompt_planner_selection || return 0
+  args=("$title" --body "$body" --size "$size" --kind "$planner_kind_choice")
+  [[ -n "$planner_model_choice" ]] && args+=(--model "$planner_model_choice")
+  [[ -n "$planner_thinking_choice" ]] && args+=(--thinking "$planner_thinking_choice")
+  plan_new_issue "${args[@]}" || status=$?
+  if [[ "$ready_issue_created" -eq 1 ]]; then
+    plan_new_prompt_created=1
+    plan_new_prompt_number="$ready_issue_number"
+  fi
+  return "$status"
+}
+
+picker_row_index_of() {
+  local issue_number="$1" index
+  for index in ${issue_numbers[@]+"${!issue_numbers[@]}"}; do
+    if [[ "${issue_numbers[$index]}" == "$issue_number" ]]; then
+      printf '%s' "$index"
+      return 0
+    fi
+  done
+  return 1
+}
+
 run_picker() {
-  local filter_index=0 selected_index=0 count key reload
+  local filter_index=0 selected_index=0 count key reload new_row
   enter_picker_screen
   trap restore_terminal EXIT INT TERM
   if load_picker_index; then
@@ -2390,6 +2853,34 @@ run_picker() {
           prune_bundle_marks
         fi
         apply_picker_filter "${picker_filters[$filter_index]}"
+        ;;
+      p)
+        # New & Plan is global: no selected row is required. Planner cancellation,
+        # create refusal, and create failure leave the cached index untouched.
+        # Once GitHub has durably created an Issue, refresh even if downstream
+        # planning declined or failed so the Ready work remains discoverable.
+        picker_action_notice=""
+        with_normal_terminal prompt_plan_new_issue
+        if [[ "$plan_new_prompt_created" -eq 1 ]]; then
+          if load_picker_index; then
+            prune_bundle_marks
+            apply_picker_filter "${picker_filters[$filter_index]}"
+            new_row=""
+            if [[ -n "$plan_new_prompt_number" ]]; then
+              new_row="$(picker_row_index_of "$plan_new_prompt_number" || true)"
+            fi
+            if [[ -n "$new_row" ]]; then
+              selected_index="$new_row"
+              picker_action_notice="Ready Issue #$plan_new_prompt_number is selected. Use its printed retry command if planning did not start."
+            elif [[ -n "$plan_new_prompt_number" ]]; then
+              picker_action_notice="Ready Issue #$plan_new_prompt_number was created but is outside this view. Use its printed retry command if planning did not start."
+            else
+              picker_action_notice="A Ready Issue was created, but its number could not be recovered. Follow the printed manual recovery guidance."
+            fi
+          else
+            picker_action_notice="The Ready Issue was created, but refresh failed. Use the printed Issue result and retry guidance."
+          fi
+        fi
         ;;
       g)
         # Persistent defaults are repository-local. Do not refresh or otherwise

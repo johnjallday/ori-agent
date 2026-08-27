@@ -1619,7 +1619,7 @@ fi
 # arguments. wt remains the
 # owner of confirmation, files, worktree creation, and Herdr/Pi handoff.
 devops_code="$(rg -v '^\s*#' "$devops_entrypoint")"
-if ! print -r -- "$devops_code" | rg -Fq "zsh -c 'source \"\$1\" || exit; typeset -a plan_args; plan_args=(--issue \"\$2\" --kind \"\$3\"); [[ -n \"\$4\" ]] && plan_args+=(--model \"\$4\"); [[ -n \"\$5\" ]] && plan_args+=(--thinking \"\$5\"); wt plan \"\${plan_args[@]}\"'"; then
+if ! print -r -- "$devops_code" | rg -Fq "zsh -c 'source \"\$1\" || exit; typeset -a plan_args; plan_args=(--issue \"\$2\" --kind \"\$3\"); [[ -n \"\$4\" ]] && plan_args+=(--model \"\$4\"); [[ -n \"\$5\" ]] && plan_args+=(--thinking \"\$5\"); [[ \"\$6\" == 1 ]] && plan_args+=(--yes); wt plan \"\${plan_args[@]}\"'"; then
   print -r -- "scripts/devops.sh does not launch wt plan through the constrained zsh bridge" >&2
   exit 1
 fi
