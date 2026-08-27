@@ -38,6 +38,7 @@
   --wsx-layer-menu: 1100;
   --wsx-layer-toast: 2000;
   --wsx-layer-legacy-map-window: 10010;
+  --wsx-layer-unit-sheet-modal: 10020;
   --wsx-layer-legacy-stat-modal: 1050;
 
   /* NOTE: this scale orders surfaces WITHIN the workspace page, and it is
@@ -4029,49 +4030,207 @@ button.ws-cmd-rpg-class-card:focus-visible {
   outline: 2px solid var(--ws-faction);
   outline-offset: -2px;
 }
-.ws-cmd-loadout-picker {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-  padding: 8px;
-  border: 1px solid var(--ws-line-bright);
-  background: rgba(9, 11, 15, 0.7);
+.ws-cmd-loadout-add-modal {
+  --ws-bg: #0c0d10;
+  --ws-bg-2: #121317;
+  --ws-line: #3b3f49;
+  --ws-line-bright: #69717e;
+  --ws-ink: #e5e8ec;
+  --ws-ink-dim: #b3b9c2;
+  --ws-ink-faint: #929aa5;
+  --ws-faction: #46d39a;
+  --ws-alert: #e87863;
+  position: fixed;
+  inset: 0;
+  z-index: var(--wsx-layer-unit-sheet-modal);
+  display: grid;
+  place-items: center;
+  padding: 24px;
 }
-.ws-cmd-loadout-picker.is-loading,
-.ws-cmd-loadout-picker.is-empty {
+.ws-cmd-loadout-add-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(3, 5, 8, 0.58);
+  backdrop-filter: blur(1px);
+}
+.ws-cmd-loadout-add-dialog {
+  position: relative;
+  z-index: 1;
+  width: min(460px, 100%);
+  max-height: min(620px, calc(100vh - 48px));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--ws-line-bright);
+  background:
+    linear-gradient(rgba(70, 211, 154, 0.024) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(70, 211, 154, 0.02) 1px, transparent 1px),
+    linear-gradient(180deg, #15171c, #0d0f13);
+  background-size:
+    24px 24px,
+    24px 24px,
+    auto;
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.72);
+  clip-path: polygon(
+    0 0,
+    calc(100% - 16px) 0,
+    100% 16px,
+    100% 100%,
+    16px 100%,
+    0 calc(100% - 16px)
+  );
+}
+.ws-cmd-loadout-add-dialog > header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--ws-line);
+  background: rgba(9, 11, 15, 0.88);
+}
+.ws-cmd-loadout-add-dialog > header > div {
+  min-width: 0;
+}
+.ws-cmd-loadout-add-dialog h3 {
+  margin: 3px 0 0;
+  color: #eef0f3;
+  font-size: 18px;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+}
+.ws-cmd-loadout-add-dialog > p {
+  margin: 0;
+  padding: 14px 18px 12px;
+  color: var(--ws-ink-dim);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.ws-cmd-loadout-add-dialog > p strong {
+  color: var(--ws-ink);
+}
+.ws-cmd-loadout-add-close {
+  width: 34px;
+  height: 34px;
+  margin-left: auto;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--ws-line-bright);
+  background: var(--ws-bg-2);
+  color: var(--ws-ink-dim);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+.ws-cmd-loadout-add-close:hover {
+  color: var(--ws-alert);
+  border-color: rgba(226, 101, 77, 0.52);
+}
+.ws-cmd-loadout-add-close:focus-visible,
+.ws-cmd-loadout-add-dialog:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 2px;
+}
+.ws-cmd-loadout-add-body {
+  min-height: 0;
+  padding: 0 18px 18px;
+  overflow-y: auto;
+}
+.ws-cmd-loadout-picker {
+  display: grid;
+  gap: 8px;
+}
+.ws-cmd-loadout-picker-state,
+.ws-cmd-loadout-picker-empty {
+  min-height: 104px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  border: 1px dashed var(--ws-line-bright);
   color: var(--ws-ink-faint);
   font-family: var(--ws-font-mono);
   font-size: 10px;
-  font-style: italic;
+}
+.ws-cmd-loadout-picker-state > span {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--ws-line-bright);
+  border-top-color: var(--ws-faction);
+  border-radius: 50%;
+  animation: ws-cmd-capability-spin 0.8s linear infinite;
 }
 .ws-cmd-loadout-picker-item {
-  display: inline-flex;
+  min-width: 0;
+  min-height: 58px;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 4px;
-  padding: 3px 8px;
+  gap: 10px;
+  padding: 9px 11px;
   border: 1px solid var(--ws-line-bright);
-  background: rgba(9, 11, 15, 0.84);
+  background: rgba(5, 7, 10, 0.58);
   color: var(--ws-ink-dim);
-  font-family: var(--ws-font-mono);
-  font-size: 10px;
   cursor: pointer;
+  text-align: left;
 }
-.ws-cmd-loadout-picker-item i {
-  font-size: 9px;
+.ws-cmd-loadout-picker-item > span:not(.ws-cmd-loadout-picker-item-icon) {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ws-cmd-loadout-picker-item strong,
+.ws-cmd-loadout-picker-item small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ws-cmd-loadout-picker-item strong {
+  color: var(--ws-ink);
+  font-size: 11px;
+}
+.ws-cmd-loadout-picker-item small {
+  color: var(--ws-ink-faint);
+  font-family: var(--ws-font-mono);
+  font-size: 8px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+.ws-cmd-loadout-picker-item > i {
   color: var(--ws-faction);
+  font-size: 12px;
+}
+.ws-cmd-loadout-picker-item-icon {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--ws-line-bright);
+  color: var(--ws-faction);
+  background: rgba(70, 211, 154, 0.06);
 }
 .ws-cmd-loadout-picker-item:hover:not([disabled]) {
-  color: var(--ws-ink);
   border-color: var(--ws-faction);
+  background: rgba(70, 211, 154, 0.08);
 }
 .ws-cmd-loadout-picker-item:focus-visible {
   outline: 2px solid var(--ws-faction);
-  outline-offset: 2px;
+  outline-offset: -2px;
 }
 .ws-cmd-loadout-picker-item.is-busy,
 .ws-cmd-loadout-picker-item[disabled] {
   opacity: 0.55;
   cursor: progress;
+}
+.ws-cmd-loadout-add-error {
+  margin: 0 18px 12px;
+  padding: 9px 10px;
+  border: 1px solid rgba(226, 101, 77, 0.48);
+  background: rgba(226, 101, 77, 0.09);
+  color: #f29a88;
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
 }
 .ws-cmd-loadout-editor-error {
   margin: 0;
@@ -5221,6 +5380,15 @@ button.ws-cmd-rpg-class-card:focus-visible {
   }
   .ws-cmd-map-window-backdrop {
     padding: 12px;
+  }
+  .ws-cmd-loadout-add-modal {
+    padding: 12px;
+  }
+  .ws-cmd-loadout-add-dialog {
+    max-height: calc(100vh - 24px);
+  }
+  .ws-cmd-loadout-picker-item {
+    min-height: 64px;
   }
   .ws-cmd-map-window {
     max-height: calc(100% - 12px);

@@ -1332,7 +1332,8 @@ test.describe('Workspace Agent Character Roster', () => {
         body: JSON.stringify({
           skills: [
             { name: 'workspace-planning', enabled: true },
-            { name: 'browser:control-in-app-browser', enabled: true }
+            { name: 'browser:control-in-app-browser', enabled: true },
+            { name: 'reviewer', enabled: true }
           ]
         })
       });
@@ -1372,6 +1373,18 @@ test.describe('Workspace Agent Character Roster', () => {
           trusted: true,
           has_scripts: false,
           validation_errors: []
+        })
+      });
+    });
+    await page.route('**/api/mcp/servers', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          servers: [
+            { name: 'notes-server', enabled: true },
+            { name: 'calendar-server', enabled: true }
+          ]
         })
       });
     });
@@ -1772,6 +1785,33 @@ test.describe('Workspace Agent Character Roster', () => {
     expect(inspectorGeometry.menuTop).toBeGreaterThanOrEqual(inspectorGeometry.bodyTop);
     expect(inspectorGeometry.menuBottom).toBeLessThanOrEqual(inspectorGeometry.bodyBottom);
 
+    const addSkillButton = inspector.getByRole('button', { name: 'Add Skill' });
+    await addSkillButton.click();
+    const addSkillDialog = page.getByRole('dialog', { name: 'Add Skill' });
+    await expect(addSkillDialog).toBeVisible();
+    await expect(addSkillDialog).toContainText('reviewer');
+    await expect(addSkillDialog).toContainText('Research Analyst');
+    const closeAddSkillButton = addSkillDialog.getByRole('button', { name: 'Close Add Skill' });
+    const reviewerOption = addSkillDialog.getByRole('button', { name: /reviewer/ });
+    await expect(closeAddSkillButton).toBeFocused();
+    await page.keyboard.press('Shift+Tab');
+    await expect(reviewerOption).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(closeAddSkillButton).toBeFocused();
+    await captureImplementationScreenshot(page, 'unit-sheet-add-skill-modal.png');
+    await closeAddSkillButton.click();
+    await expect(addSkillDialog).toHaveCount(0);
+    await expect(addSkillButton).toBeFocused();
+
+    const addToolButton = inspector.getByRole('button', { name: 'Add Tool' });
+    await addToolButton.click();
+    const addToolDialog = page.getByRole('dialog', { name: 'Add Tool' });
+    await expect(addToolDialog).toContainText('calendar-server');
+    await page.keyboard.press('Escape');
+    await expect(addToolDialog).toHaveCount(0);
+    await expect(addToolButton).toBeFocused();
+    await expect(inspector).toBeVisible();
+
     const skillRow = inspector
       .locator('.ws-cmd-loadout-row')
       .filter({ hasText: 'browser:control-in-app-browser' });
@@ -1868,6 +1908,28 @@ test.describe('Workspace Agent Character Roster', () => {
       .filter({ hasText: 'Research Analyst' })
       .click();
     const mobileUnitSheet = page.locator('#workspaceCommandView .ws-cmd-map-window-inspector');
+    await mobileUnitSheet.getByRole('button', { name: 'Add Skill' }).click();
+    const mobileAddDialog = page.getByRole('dialog', { name: 'Add Skill' });
+    const mobileAddGeometry = await mobileAddDialog.evaluate(node => {
+      const rect = node.getBoundingClientRect();
+      return {
+        top: rect.top,
+        right: rect.right,
+        bottom: rect.bottom,
+        left: rect.left,
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight,
+        pageWidth: document.documentElement.scrollWidth
+      };
+    });
+    expect(mobileAddGeometry.top).toBeGreaterThanOrEqual(0);
+    expect(mobileAddGeometry.left).toBeGreaterThanOrEqual(0);
+    expect(mobileAddGeometry.right).toBeLessThanOrEqual(mobileAddGeometry.viewportWidth);
+    expect(mobileAddGeometry.bottom).toBeLessThanOrEqual(mobileAddGeometry.viewportHeight);
+    expect(mobileAddGeometry.pageWidth).toBeLessThanOrEqual(mobileAddGeometry.viewportWidth);
+    await captureImplementationScreenshot(page, 'unit-sheet-add-skill-modal-mobile.png');
+    await mobileAddDialog.getByRole('button', { name: 'Close Add Skill' }).click();
+
     const mobileSkillRow = mobileUnitSheet
       .locator('.ws-cmd-loadout-row')
       .filter({ hasText: 'browser:control-in-app-browser' });

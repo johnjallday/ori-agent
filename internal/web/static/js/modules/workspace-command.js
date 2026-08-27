@@ -196,9 +196,12 @@ export class WorkspaceCommandView {
     this.agentPromptLoadingKey = '';
     this.lastAnnouncedAgentStatus = '';
     // Interactive loadout editing (shared by map Unit Sheet + details Loadout tab).
-    this.loadoutAddOpen = ''; // '' | 'skill' | 'mcp' — which "Add" picker is open
+    this.loadoutAddOpen = ''; // '' | 'skill' | 'mcp' — which Add modal is open
+    this.loadoutAddAgent = '';
     this.loadoutAddOptions = [];
     this.loadoutAddLoading = false;
+    this.loadoutAddRequestId = 0;
+    this.pendingLoadoutAddFocus = '';
     this.loadoutBusyKey = ''; // "<kind>:<bindingId>" or "<kind>:add:<name>" while mutating
     this.loadoutError = '';
     this.capabilityInspector = this.emptyCapabilityInspectorState();
@@ -249,6 +252,7 @@ export class WorkspaceCommandView {
     if (nextMode !== 'map' && this.capabilityInspector?.open) {
       this.resetCapabilityInspector();
     }
+    if (this.loadoutAddOpen) this.resetLoadoutPicker();
     this.activeRailSection = '';
     if (nextMode === 'details') {
       this.activeMapWindow = '';
@@ -636,6 +640,7 @@ export class WorkspaceCommandView {
     ) {
       this.resetCapabilityInspector();
     }
+    if (this.loadoutAddOpen) this.resetLoadoutPicker();
     this.viewMode = effectiveMode;
     if (state.agent) {
       this.selectedAgentKey = state.agent;
@@ -695,10 +700,8 @@ export class WorkspaceCommandView {
       this.closeTaskComposer();
       return;
     }
-    if (this.viewMode === 'map' && this.activeMapWindow === 'inspector' && this.loadoutAddOpen) {
-      this.loadoutAddOpen = '';
-      this.loadoutAddOptions = [];
-      this.render();
+    if (this.loadoutAddOpen) {
+      this.closeLoadoutPicker();
       return;
     }
     if (
@@ -1306,6 +1309,7 @@ export class WorkspaceCommandView {
     // ends, picking up any data that changed in the meantime (FR11).
     if (this._stationDragActive) return;
     this.rememberCapabilityInspectorFocus();
+    this.rememberLoadoutAddFocus();
     this.captureAgentDeckViewState();
     if (this.commandTagInput) {
       try {
@@ -1343,7 +1347,10 @@ export class WorkspaceCommandView {
             '</aside>' +
             '</div>';
 
-    this.container.innerHTML = this.commandBarHTML(ws, name, mode, stats) + body;
+    this.container.innerHTML =
+      this.commandBarHTML(ws, name, mode, stats) +
+      body +
+      this.loadoutAddModalHTML(this.loadoutAddAgent);
 
     this.bindIdentityControls();
     this.bindReadout();
@@ -1354,6 +1361,7 @@ export class WorkspaceCommandView {
       this.bindGarrison();
       this.bindRail();
     }
+    this.bindLoadoutAddModal();
     this.syncTicketsView();
     this.mountCommandTagInput();
     this.syncMissionPanel();
@@ -1361,6 +1369,7 @@ export class WorkspaceCommandView {
     this.mountNoteFilterBar();
     this.restoreAgentDeckViewState();
     this.restoreCapabilityInspectorFocus();
+    this.restoreLoadoutAddFocus();
     this.hydrateActiveAgentPrompt();
     // The Workshop host only exists once the Toolbox tab has rendered, so it is
     // mounted here rather than at page load. Idempotent per instance.
@@ -6650,7 +6659,7 @@ export class WorkspaceCommandView {
       '<div class="ws-cmd-loadout-editor">' +
       this.loadoutSectionHTML('skill', 'Skills', skills, enc) +
       this.loadoutSectionHTML('mcp', 'MCP Tools', mcps, enc) +
-      (this.loadoutError
+      (this.loadoutError && !this.loadoutAddOpen
         ? '<p class="ws-cmd-loadout-editor-error" role="alert">' +
           escapeHtml(this.loadoutError) +
           '</p>'
@@ -6731,7 +6740,8 @@ export class WorkspaceCommandView {
           })
           .join('')
       : '<span class="ws-cmd-loadout-empty">None bound to this workspace.</span>';
-    const addOpen = this.loadoutAddOpen === kind;
+    const addOpen = this.loadoutAddOpen === kind && this.loadoutAddAgent === encodedAgent;
+    const originKey = this.loadoutAddOriginKey(kind, encodedAgent);
     return (
       '<section class="ws-cmd-loadout-editor-section">' +
       '<header><span class="ws-cmd-loadout-kicker">' +
@@ -6742,53 +6752,194 @@ export class WorkspaceCommandView {
       escapeHtml(kind) +
       '" data-cmd-loadout-agent="' +
       escapeHtml(encodedAgent) +
-      '" aria-expanded="' +
+      '" data-cmd-loadout-add-origin="' +
+      escapeHtml(originKey) +
+      '" aria-haspopup="dialog" aria-expanded="' +
       (addOpen ? 'true' : 'false') +
       '">' +
       (kind === 'mcp' ? 'Add Tool' : 'Add Skill') +
       '</button></header>' +
       '<div class="ws-cmd-loadout-rows">' +
       rows +
-      '</div>' +
-      (addOpen ? this.loadoutPickerHTML(kind, encodedAgent) : '') +
-      '</section>'
+      '</div></section>'
     );
   }
 
-  loadoutPickerHTML(kind, encodedAgent) {
+  loadoutAddModalHTML(encodedAgent) {
+    const kind = this.loadoutAddOpen;
+    if (!['skill', 'mcp'].includes(kind) || this.loadoutAddAgent !== encodedAgent) return '';
+    const isMCP = kind === 'mcp';
+    const noun = isMCP ? 'Tool' : 'Skill';
+    const agentName = this.decodeAgentName(encodedAgent);
+    const titleId = 'ws-cmd-loadout-add-title';
+    const descriptionId = 'ws-cmd-loadout-add-description';
+    let content = '';
     if (this.loadoutAddLoading) {
-      return '<div class="ws-cmd-loadout-picker is-loading" aria-live="polite">Loading…</div>';
-    }
-    const options = Array.isArray(this.loadoutAddOptions) ? this.loadoutAddOptions : [];
-    if (!options.length) {
-      return '<div class="ws-cmd-loadout-picker is-empty">Nothing new to add.</div>';
+      content =
+        '<div class="ws-cmd-loadout-picker-state" role="status" aria-live="polite"><span aria-hidden="true"></span>Loading available ' +
+        (isMCP ? 'tools' : 'skills') +
+        '…</div>';
+    } else {
+      const options = Array.isArray(this.loadoutAddOptions) ? this.loadoutAddOptions : [];
+      content = options.length
+        ? '<div class="ws-cmd-loadout-picker" role="list" aria-label="Available ' +
+          (isMCP ? 'tools' : 'skills') +
+          '">' +
+          options
+            .map(name => {
+              const busy = this.loadoutBusyKey === kind + ':add:' + name;
+              return (
+                '<button type="button" class="ws-cmd-loadout-picker-item' +
+                (busy ? ' is-busy' : '') +
+                '" data-cmd-loadout-bind="' +
+                escapeHtml(kind) +
+                '" data-cmd-loadout-name="' +
+                escapeHtml(name) +
+                '" data-cmd-loadout-agent="' +
+                escapeHtml(encodedAgent) +
+                '"' +
+                (busy ? ' disabled' : '') +
+                '><span class="ws-cmd-loadout-picker-item-icon"><i class="bi ' +
+                (isMCP ? 'bi-hdd-network' : 'bi-stars') +
+                '" aria-hidden="true"></i></span><span><strong>' +
+                escapeHtml(name) +
+                '</strong><small>Add to ' +
+                escapeHtml(agentName) +
+                '</small></span><i class="bi bi-plus-lg" aria-hidden="true"></i></button>'
+              );
+            })
+            .join('') +
+          '</div>'
+        : '<div class="ws-cmd-loadout-picker-empty">Nothing new to add.</div>';
     }
     return (
-      '<div class="ws-cmd-loadout-picker" role="listbox" aria-label="Add ' +
-      (kind === 'mcp' ? 'tool' : 'skill') +
-      '">' +
-      options
-        .map(name => {
-          const busy = this.loadoutBusyKey === kind + ':add:' + name;
-          return (
-            '<button type="button" class="ws-cmd-loadout-picker-item' +
-            (busy ? ' is-busy' : '') +
-            '" role="option" data-cmd-loadout-bind="' +
-            escapeHtml(kind) +
-            '" data-cmd-loadout-name="' +
-            escapeHtml(name) +
-            '" data-cmd-loadout-agent="' +
-            escapeHtml(encodedAgent) +
-            '"' +
-            (busy ? ' disabled' : '') +
-            '><i class="bi bi-plus-lg" aria-hidden="true"></i>' +
-            escapeHtml(name) +
-            '</button>'
-          );
-        })
-        .join('') +
-      '</div>'
+      '<div class="ws-cmd-loadout-add-modal" data-cmd-loadout-add-modal>' +
+      '<div class="ws-cmd-loadout-add-backdrop" data-cmd-loadout-add-close aria-hidden="true"></div><section class="ws-cmd-loadout-add-dialog" role="dialog" aria-modal="true" aria-labelledby="' +
+      titleId +
+      '" aria-describedby="' +
+      descriptionId +
+      '" tabindex="-1"><header><div><span class="ws-cmd-loadout-kicker">Toolbox</span><h3 id="' +
+      titleId +
+      '">Add ' +
+      noun +
+      '</h3></div><button type="button" class="ws-cmd-loadout-add-close" data-cmd-loadout-add-close aria-label="Close Add ' +
+      noun +
+      '">×</button></header><p id="' +
+      descriptionId +
+      '">Choose a workspace ' +
+      (isMCP ? 'tool' : 'skill') +
+      ' to assign to <strong>' +
+      escapeHtml(agentName) +
+      '</strong>.</p>' +
+      (this.loadoutError
+        ? '<div class="ws-cmd-loadout-add-error" role="alert">' +
+          escapeHtml(this.loadoutError) +
+          '</div>'
+        : '') +
+      '<div class="ws-cmd-loadout-add-body">' +
+      content +
+      '</div></section></div>'
     );
+  }
+
+  loadoutAddOriginKey(kind, encodedAgent) {
+    return encodeURIComponent([String(kind || ''), String(encodedAgent || '')].join(':'));
+  }
+
+  resetLoadoutPicker({ restoreFocus = false } = {}) {
+    const originKey = restoreFocus
+      ? this.loadoutAddOriginKey(this.loadoutAddOpen, this.loadoutAddAgent)
+      : '';
+    this.loadoutAddRequestId = Number(this.loadoutAddRequestId || 0) + 1;
+    this.loadoutAddOpen = '';
+    this.loadoutAddAgent = '';
+    this.loadoutAddOptions = [];
+    this.loadoutAddLoading = false;
+    this.loadoutError = '';
+    this.pendingLoadoutAddFocus = originKey ? 'origin:' + originKey : '';
+  }
+
+  closeLoadoutPicker() {
+    if (!this.loadoutAddOpen) return;
+    this.resetLoadoutPicker({ restoreFocus: true });
+    this.render();
+  }
+
+  rememberLoadoutAddFocus() {
+    if (this.pendingLoadoutAddFocus || !this.loadoutAddOpen) return;
+    const activeElement = typeof document === 'undefined' ? null : document.activeElement;
+    if (!activeElement || typeof activeElement.closest !== 'function') return;
+    if (!activeElement.closest('[data-cmd-loadout-add-modal]')) return;
+    const option = activeElement.closest('[data-cmd-loadout-bind]');
+    if (option) {
+      this.pendingLoadoutAddFocus =
+        'option:' + String(option.getAttribute('data-cmd-loadout-name') || '');
+      return;
+    }
+    if (activeElement.closest('.ws-cmd-loadout-add-close')) {
+      this.pendingLoadoutAddFocus = 'close';
+      return;
+    }
+    this.pendingLoadoutAddFocus = 'dialog';
+  }
+
+  restoreLoadoutAddFocus() {
+    const targetKey = String(this.pendingLoadoutAddFocus || '');
+    if (!targetKey || !this.container || typeof this.container.querySelector !== 'function') return;
+    this.pendingLoadoutAddFocus = '';
+    let selector = '';
+    let target = null;
+    if (targetKey === 'close') selector = '.ws-cmd-loadout-add-close';
+    else if (targetKey === 'dialog') selector = '.ws-cmd-loadout-add-dialog';
+    else if (targetKey.startsWith('option:')) {
+      const name = targetKey.slice(7);
+      if (typeof this.container.querySelectorAll === 'function') {
+        target = Array.from(this.container.querySelectorAll('[data-cmd-loadout-bind]')).find(
+          option => String(option.getAttribute('data-cmd-loadout-name') || '') === name
+        );
+      }
+    } else if (targetKey.startsWith('origin:')) {
+      selector = '[data-cmd-loadout-add-origin="' + targetKey.slice(7) + '"]';
+    }
+    if (!target && selector) target = this.container.querySelector(selector);
+    if (target && typeof target.focus === 'function') {
+      try {
+        target.focus({ preventScroll: true });
+      } catch (_error) {
+        target.focus();
+      }
+    }
+  }
+
+  handleLoadoutAddKeydown(event) {
+    if (!this.loadoutAddOpen) return false;
+    const modal = event?.target?.closest?.('[data-cmd-loadout-add-modal]');
+    if (!modal) return false;
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      if (typeof event.stopPropagation === 'function') event.stopPropagation();
+      this.closeLoadoutPicker();
+      return true;
+    }
+    if (event.key !== 'Tab' || typeof modal.querySelectorAll !== 'function') return false;
+    const focusable = Array.from(
+      modal.querySelectorAll('button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])')
+    );
+    if (!focusable.length) return false;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    const activeElement = typeof document === 'undefined' ? null : document.activeElement;
+    if (event.shiftKey && activeElement === first) {
+      event.preventDefault();
+      last.focus();
+      return true;
+    }
+    if (!event.shiftKey && activeElement === last) {
+      event.preventDefault();
+      first.focus();
+      return true;
+    }
+    return false;
   }
 
   decodeAgentName(encodedName) {
@@ -6827,8 +6978,7 @@ export class WorkspaceCommandView {
         trigger.getAttribute('data-cmd-capability-origin') ||
         this.capabilityOriginKey(kind, bindingId, encodedAgent)
     };
-    this.loadoutAddOpen = '';
-    this.loadoutAddOptions = [];
+    this.resetLoadoutPicker();
     if (this.viewMode !== 'map') {
       this.viewMode = 'map';
       this.persistCommandViewMode('map');
@@ -6973,7 +7123,27 @@ export class WorkspaceCommandView {
 
   // Delegated handler for loadout capability rows, assignment switches, Add buttons,
   // and picker items. Returns true when shared map/garrison listeners should stop.
+  bindLoadoutAddModal() {
+    const modal =
+      this.container && this.container.querySelector
+        ? this.container.querySelector('[data-cmd-loadout-add-modal]')
+        : null;
+    if (!modal) return;
+    if (this.container.children) {
+      Array.from(this.container.children).forEach(child => {
+        if (child !== modal) child.inert = true;
+      });
+    }
+    modal.addEventListener('click', event => this.handleLoadoutClick(event));
+    modal.addEventListener('keydown', event => this.handleLoadoutAddKeydown(event));
+  }
+
   handleLoadoutClick(event) {
+    const closeAdd = event.target.closest('[data-cmd-loadout-add-close]');
+    if (closeAdd) {
+      this.closeLoadoutPicker();
+      return true;
+    }
     const inspect = event.target.closest('[data-cmd-capability-inspect]');
     if (inspect) {
       this.openCapabilityInspector(inspect);
@@ -7034,30 +7204,60 @@ export class WorkspaceCommandView {
     }
   }
 
-  async openLoadoutPicker(kind, _encodedAgent) {
-    if (this.loadoutAddOpen === kind) {
-      this.loadoutAddOpen = '';
-      this.loadoutAddOptions = [];
-      this.render();
+  async openLoadoutPicker(kind, encodedAgent) {
+    const normalizedKind = String(kind || '').trim();
+    const agent = String(encodedAgent || '').trim();
+    if (!['skill', 'mcp'].includes(normalizedKind) || !agent) return;
+    if (this.loadoutAddOpen === normalizedKind && this.loadoutAddAgent === agent) {
+      this.closeLoadoutPicker();
       return;
     }
     const page = this.page || (typeof window !== 'undefined' ? window.workspaceDetail : null);
-    this.loadoutAddOpen = kind;
+    const requestId = Number(this.loadoutAddRequestId || 0) + 1;
+    this.loadoutAddRequestId = requestId;
+    this.loadoutAddOpen = normalizedKind;
+    this.loadoutAddAgent = agent;
     this.loadoutAddLoading = true;
     this.loadoutAddOptions = [];
     this.loadoutError = '';
+    this.pendingLoadoutAddFocus = 'close';
     this.render();
     try {
-      this.loadoutAddOptions =
+      const options =
         page && typeof page.listAgentLoadoutAdditions === 'function'
-          ? await page.listAgentLoadoutAdditions(kind)
+          ? await page.listAgentLoadoutAdditions(normalizedKind)
           : [];
-    } catch (_error) {
+      if (
+        requestId !== this.loadoutAddRequestId ||
+        this.loadoutAddOpen !== normalizedKind ||
+        this.loadoutAddAgent !== agent
+      ) {
+        return;
+      }
+      this.loadoutAddOptions = options;
+    } catch (error) {
+      if (
+        requestId !== this.loadoutAddRequestId ||
+        this.loadoutAddOpen !== normalizedKind ||
+        this.loadoutAddAgent !== agent
+      ) {
+        return;
+      }
       this.loadoutAddOptions = [];
+      this.loadoutError =
+        'Could not load available ' +
+        (normalizedKind === 'mcp' ? 'tools' : 'skills') +
+        ': ' +
+        (error?.message || 'error');
     } finally {
-      this.loadoutAddLoading = false;
-      // Only re-render if this picker is still the open one.
-      if (this.loadoutAddOpen === kind) this.render();
+      if (
+        requestId === this.loadoutAddRequestId &&
+        this.loadoutAddOpen === normalizedKind &&
+        this.loadoutAddAgent === agent
+      ) {
+        this.loadoutAddLoading = false;
+        this.render();
+      }
     }
   }
 
@@ -7068,16 +7268,19 @@ export class WorkspaceCommandView {
     const capName = String(name || '').trim();
     this.loadoutError = '';
     this.loadoutBusyKey = kind + ':add:' + capName;
+    this.pendingLoadoutAddFocus = 'option:' + capName;
     this.render();
     try {
       await page.addAgentWorkspaceCapability(kind, agentName, capName);
-      this.loadoutAddOpen = '';
-      this.loadoutAddOptions = [];
+      const originKey = this.loadoutAddOriginKey(kind, encodedAgent);
+      this.resetLoadoutPicker();
+      this.pendingLoadoutAddFocus = 'origin:' + originKey;
       if (window.Toast) {
         window.Toast.success((kind === 'mcp' ? 'Tool' : 'Skill') + ' "' + capName + '" added');
       }
     } catch (error) {
       this.loadoutError = 'Could not add ' + capName + ': ' + (error?.message || 'error');
+      this.pendingLoadoutAddFocus = 'option:' + capName;
       if (window.Toast) window.Toast.error(this.loadoutError);
     } finally {
       this.loadoutBusyKey = '';
@@ -8235,6 +8438,7 @@ export class WorkspaceCommandView {
       if (closeWindow) {
         this.activeMapWindow = '';
         this.resetCapabilityInspector();
+        this.resetLoadoutPicker();
         this.render();
         return;
       }
@@ -8242,6 +8446,7 @@ export class WorkspaceCommandView {
       if (backdrop && event.target === backdrop) {
         this.activeMapWindow = '';
         this.resetCapabilityInspector();
+        this.resetLoadoutPicker();
         this.render();
         return;
       }
@@ -8398,7 +8603,10 @@ export class WorkspaceCommandView {
         );
       }
     });
-    root.addEventListener('keydown', event => this.handleCapabilityInspectorKeydown(event));
+    root.addEventListener('keydown', event => {
+      if (this.handleLoadoutAddKeydown(event)) return;
+      this.handleCapabilityInspectorKeydown(event);
+    });
     this.bindTaskComposer(root);
   }
 
@@ -8488,8 +8696,9 @@ export class WorkspaceCommandView {
     }
     const key = this.normalizeAgentKey(name);
     if (!key) return;
-    if (this.selectedAgentKey && this.selectedAgentKey !== key && this.capabilityInspector?.open) {
-      this.resetCapabilityInspector();
+    if (this.selectedAgentKey && this.selectedAgentKey !== key) {
+      if (this.capabilityInspector?.open) this.resetCapabilityInspector();
+      if (this.loadoutAddOpen) this.resetLoadoutPicker();
     }
     this.selectedAgentKey = key;
     this.agentSelectionInitialized = true;
@@ -8561,7 +8770,10 @@ export class WorkspaceCommandView {
   bindGarrison() {
     const root = this.container && this.container.querySelector('.ws-cmd-garrison');
     if (!root) return;
-    root.addEventListener('keydown', event => this.handleAgentTabKeydown(event));
+    root.addEventListener('keydown', event => {
+      if (this.handleLoadoutAddKeydown(event)) return;
+      this.handleAgentTabKeydown(event);
+    });
     root.addEventListener('click', event => {
       const page = this.page || (typeof window !== 'undefined' ? window.workspaceDetail : null);
       if (this.handleLoadoutClick(event)) return;

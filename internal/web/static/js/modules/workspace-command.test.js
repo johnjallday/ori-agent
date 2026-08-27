@@ -2702,8 +2702,11 @@ function makeLoadoutView(overrides = {}) {
     view,
     {
       loadoutAddOpen: '',
+      loadoutAddAgent: '',
       loadoutAddOptions: [],
       loadoutAddLoading: false,
+      loadoutAddRequestId: 0,
+      pendingLoadoutAddFocus: '',
       loadoutBusyKey: '',
       loadoutError: '',
       renderCalls: 0,
@@ -2742,6 +2745,35 @@ test('loadout editor separates inspect rows from assignment switches and keeps l
   assert.match(html, /MCP Servers/);
   assert.match(html, /data-cmd-loadout-add="skill"/);
   assert.match(html, /data-cmd-loadout-add="mcp"/);
+  assert.match(html, /aria-haspopup="dialog"/);
+});
+
+test('Add Skill and Add Tool render a modal instead of expanding their loadout sections', () => {
+  const view = makeLoadoutView({
+    loadoutAddOpen: 'skill',
+    loadoutAddAgent: 'Atlas',
+    loadoutAddOptions: ['reviewer', 'summarizer'],
+    page: {
+      getAgentWorkspaceSkillLoadout: () => [],
+      getAgentWorkspaceMCPLoadout: () => []
+    }
+  });
+
+  const editorHTML = view.renderLoadoutEditor({ name: 'Atlas', encodedName: 'Atlas' });
+  const skillHTML = view.loadoutAddModalHTML('Atlas');
+  assert.doesNotMatch(editorHTML, /data-cmd-loadout-add-modal/);
+  assert.match(skillHTML, /data-cmd-loadout-add-modal/);
+  assert.match(skillHTML, /role="dialog" aria-modal="true"/);
+  assert.match(skillHTML, /<h3 id="ws-cmd-loadout-add-title">Add Skill<\/h3>/);
+  assert.match(skillHTML, /reviewer/);
+  assert.match(skillHTML, /Choose a workspace skill to assign to <strong>Atlas<\/strong>/);
+
+  view.loadoutAddOpen = 'mcp';
+  view.loadoutAddOptions = ['calendar-server'];
+  const toolHTML = view.loadoutAddModalHTML('Atlas');
+  assert.match(toolHTML, /<h3 id="ws-cmd-loadout-add-title">Add Tool<\/h3>/);
+  assert.match(toolHTML, /calendar-server/);
+  assert.doesNotMatch(toolHTML, /<h3 id="ws-cmd-loadout-add-title">Add Skill<\/h3>/);
 });
 
 test('skill capability inspector renders escaped details and restores the Command Menu on Back', () => {
@@ -3064,7 +3096,7 @@ test('handleLoadoutClick routes a toggle target to toggleLoadoutBinding', () => 
   assert.deepEqual(args, [['mcp', 'Atlas', 'mcp-3', true]]);
 });
 
-test('opening a loadout picker loads registry additions; reopening the same kind closes it', async () => {
+test('opening a loadout modal loads registry additions; reopening the same kind closes it', async () => {
   const view = makeLoadoutView({
     page: {
       async listAgentLoadoutAdditions(kind) {
@@ -3075,11 +3107,44 @@ test('opening a loadout picker loads registry additions; reopening the same kind
 
   await view.openLoadoutPicker('skill', 'Atlas');
   assert.equal(view.loadoutAddOpen, 'skill');
+  assert.equal(view.loadoutAddAgent, 'Atlas');
   assert.deepEqual(view.loadoutAddOptions, ['reviewer', 'summarizer']);
   assert.equal(view.loadoutAddLoading, false);
 
   await view.openLoadoutPicker('skill', 'Atlas');
   assert.equal(view.loadoutAddOpen, '');
+  assert.equal(view.loadoutAddAgent, '');
+  assert.match(view.pendingLoadoutAddFocus, /^origin:/);
+});
+
+test('loadout Add modal closes on Escape before the Unit Sheet and restores the Add button', () => {
+  let stopped = false;
+  const view = makeLoadoutView({
+    active: true,
+    viewMode: 'map',
+    activeMapWindow: 'inspector',
+    loadoutAddOpen: 'mcp',
+    loadoutAddAgent: 'Atlas'
+  });
+  const modal = {
+    querySelectorAll: () => [],
+    closest: selector => (selector === '[data-cmd-loadout-add-modal]' ? modal : null)
+  };
+
+  const handled = view.handleLoadoutAddKeydown({
+    key: 'Escape',
+    target: modal,
+    preventDefault() {},
+    stopPropagation() {
+      stopped = true;
+    }
+  });
+
+  assert.equal(handled, true);
+  assert.equal(stopped, true);
+  assert.equal(view.loadoutAddOpen, '');
+  assert.equal(view.activeMapWindow, 'inspector');
+  assert.match(view.pendingLoadoutAddFocus, /^origin:/);
 });
 
 test('binding a loadout capability delegates to the page and closes the picker on success', async () => {
@@ -3090,6 +3155,7 @@ test('binding a loadout capability delegates to the page and closes the picker o
     const calls = [];
     const view = makeLoadoutView({
       loadoutAddOpen: 'mcp',
+      loadoutAddAgent: 'Atlas',
       loadoutAddOptions: ['filesystem'],
       page: {
         async addAgentWorkspaceCapability(kind, agentName, name) {
@@ -3103,6 +3169,8 @@ test('binding a loadout capability delegates to the page and closes the picker o
 
     assert.deepEqual(calls, [['mcp', 'Atlas', 'filesystem']]);
     assert.equal(view.loadoutAddOpen, '');
+    assert.equal(view.loadoutAddAgent, '');
+    assert.match(view.pendingLoadoutAddFocus, /^origin:/);
     assert.deepEqual(toasts, ['Tool "filesystem" added']);
   } finally {
     globalThis.window = originalWindow;
@@ -3115,6 +3183,8 @@ test('a failed loadout binding surfaces an error and preserves the picker', asyn
   try {
     const view = makeLoadoutView({
       loadoutAddOpen: 'skill',
+      loadoutAddAgent: 'Atlas',
+      loadoutAddOptions: ['reviewer'],
       page: {
         async addAgentWorkspaceCapability() {
           throw new Error('registry offline');
@@ -3127,6 +3197,9 @@ test('a failed loadout binding surfaces an error and preserves the picker', asyn
     assert.equal(view.loadoutAddOpen, 'skill');
     assert.match(view.loadoutError, /could not add reviewer/i);
     assert.match(view.loadoutError, /registry offline/);
+    const html = view.loadoutAddModalHTML('Atlas');
+    assert.match(html, /role="alert"/);
+    assert.match(html, /registry offline/);
   } finally {
     globalThis.window = originalWindow;
   }
