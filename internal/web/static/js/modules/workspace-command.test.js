@@ -2706,6 +2706,8 @@ function makeLoadoutView(overrides = {}) {
       loadoutAddOptions: [],
       loadoutAddLoading: false,
       loadoutAddRequestId: 0,
+      loadoutAddPreviewRequestId: 0,
+      loadoutAddPreview: WorkspaceCommandView.prototype.emptyLoadoutAddPreviewState(),
       pendingLoadoutAddFocus: '',
       loadoutBusyKey: '',
       loadoutError: '',
@@ -2719,7 +2721,7 @@ function makeLoadoutView(overrides = {}) {
   return view;
 }
 
-test('loadout editor separates inspect rows from assignment switches and keeps locked rows inspectable', () => {
+test('loadout editor shows assigned capabilities with explicit removal and keeps locked rows inspectable', () => {
   const view = makeLoadoutView({
     page: {
       getAgentWorkspaceSkillLoadout() {
@@ -2736,12 +2738,14 @@ test('loadout editor separates inspect rows from assignment switches and keeps l
 
   const html = view.renderLoadoutEditor({ name: 'Atlas', encodedName: 'Atlas' });
   assert.match(html, /data-cmd-capability-inspect="skill" data-cmd-loadout-binding="sk-1"/);
-  assert.match(html, /role="switch" aria-checked="true"[^>]*data-cmd-loadout-binding="sk-1"/);
+  assert.match(html, /data-cmd-loadout-remove="skill"[^>]*data-cmd-loadout-binding="sk-1"/);
   assert.match(html, /aria-label="Inspect skill planner for Atlas"/);
-  assert.match(html, /aria-label="Assign skill writer to Atlas"/);
+  assert.match(html, /aria-label="Remove skill planner from Atlas"/);
+  assert.doesNotMatch(html, /writer/);
+  assert.doesNotMatch(html, /role="switch"/);
   assert.match(html, /ws-cmd-loadout-row is-locked/);
   assert.match(html, /data-cmd-capability-inspect="mcp" data-cmd-loadout-binding="fs"/);
-  assert.doesNotMatch(html, /data-cmd-loadout-toggle="mcp"[^>]*data-cmd-loadout-binding="fs"/);
+  assert.doesNotMatch(html, /data-cmd-loadout-remove="mcp"[^>]*data-cmd-loadout-binding="fs"/);
   assert.match(html, /MCP Servers/);
   assert.match(html, /data-cmd-loadout-add="skill"/);
   assert.match(html, /data-cmd-loadout-add="mcp"/);
@@ -2766,6 +2770,8 @@ test('Add Skill and Add Tool render a modal instead of expanding their loadout s
   assert.match(skillHTML, /role="dialog" aria-modal="true"/);
   assert.match(skillHTML, /<h3 id="ws-cmd-loadout-add-title">Add Skill<\/h3>/);
   assert.match(skillHTML, /reviewer/);
+  assert.match(skillHTML, /data-cmd-loadout-preview="skill"/);
+  assert.doesNotMatch(skillHTML, /data-cmd-loadout-bind="skill"/);
   assert.match(skillHTML, /Choose a workspace skill to assign to <strong>Atlas<\/strong>/);
 
   view.loadoutAddOpen = 'mcp';
@@ -2774,6 +2780,93 @@ test('Add Skill and Add Tool render a modal instead of expanding their loadout s
   assert.match(toolHTML, /<h3 id="ws-cmd-loadout-add-title">Add Tool<\/h3>/);
   assert.match(toolHTML, /calendar-server/);
   assert.doesNotMatch(toolHTML, /<h3 id="ws-cmd-loadout-add-title">Add Skill<\/h3>/);
+});
+
+test('Add modal previews skill details before exposing the Add action', async () => {
+  const calls = [];
+  const view = makeLoadoutView({
+    loadoutAddOpen: 'skill',
+    loadoutAddAgent: 'Atlas',
+    loadoutAddOptions: ['reviewer'],
+    page: {
+      async loadWorkspaceSkillDetails(agent, name, options) {
+        calls.push([agent, name, options]);
+        return {
+          description: 'Reviews changes before delivery.',
+          prompt: 'Inspect the diff.',
+          source: 'agent',
+          trusted: true
+        };
+      }
+    }
+  });
+
+  await view.openLoadoutAddPreview('skill', 'Atlas', 'reviewer');
+
+  assert.deepEqual(calls, [['Atlas', 'reviewer', { force: false }]]);
+  assert.equal(view.loadoutAddPreview.status, 'loaded');
+  const html = view.loadoutAddModalHTML('Atlas');
+  assert.match(html, /Reviews changes before delivery/);
+  assert.match(html, /Review this skill before assigning it to <strong>Atlas<\/strong>/);
+  assert.match(html, /data-cmd-loadout-bind="skill"/);
+  assert.match(html, />Add Skill<\/button>/);
+  assert.match(html, /ws-cmd-loadout-preview-panel-overview/);
+
+  view.setLoadoutAddPreviewTab('instructions');
+  assert.match(view.loadoutAddModalHTML('Atlas'), /Inspect the diff/);
+  view.closeLoadoutAddPreview();
+  assert.equal(view.loadoutAddPreview.name, '');
+  assert.equal(view.pendingLoadoutAddFocus, 'candidate:reviewer');
+});
+
+test('Add preview errors are retryable and keep Add disabled until details load', async () => {
+  let attempts = 0;
+  const view = makeLoadoutView({
+    loadoutAddOpen: 'skill',
+    loadoutAddAgent: 'Atlas',
+    loadoutAddOptions: ['reviewer'],
+    page: {
+      async loadWorkspaceSkillDetails() {
+        attempts += 1;
+        if (attempts === 1) throw new Error('detail catalog offline');
+        return { description: 'Retry loaded detail.' };
+      }
+    }
+  });
+
+  await view.openLoadoutAddPreview('skill', 'Atlas', 'reviewer');
+  const failedHTML = view.loadoutAddModalHTML('Atlas');
+  assert.match(failedHTML, /detail catalog offline/);
+  assert.match(failedHTML, /data-cmd-loadout-preview-retry/);
+  assert.match(failedHTML, /data-cmd-loadout-bind="skill"[^>]* disabled/);
+
+  await view.retryLoadoutAddPreview();
+  assert.equal(attempts, 2);
+  assert.equal(view.loadoutAddPreview.status, 'loaded');
+  assert.match(view.loadoutAddModalHTML('Atlas'), /Retry loaded detail/);
+});
+
+test('Add Tool preview stays passive and never offers to start an unbound server', async () => {
+  const view = makeLoadoutView({
+    loadoutAddOpen: 'mcp',
+    loadoutAddAgent: 'Atlas',
+    loadoutAddOptions: ['calendar-server'],
+    page: {
+      async loadWorkspaceMCPDetails(bindingId, name, options) {
+        assert.equal(bindingId, '');
+        assert.equal(name, 'calendar-server');
+        assert.deepEqual(options, { force: false, start: false });
+        return { server: name, status: 'stopped', transport: 'stdio', tools: [] };
+      }
+    }
+  });
+
+  await view.openLoadoutAddPreview('mcp', 'Atlas', 'calendar-server');
+
+  const html = view.loadoutAddModalHTML('Atlas');
+  assert.match(html, /passive details now/);
+  assert.match(html, /data-cmd-loadout-bind="mcp"/);
+  assert.doesNotMatch(html, /data-cmd-capability-start/);
 });
 
 test('skill capability inspector renders escaped details and restores the Command Menu on Back', () => {
@@ -3051,7 +3144,7 @@ test('capability inspector Escape closes details before closing the Unit Sheet',
   assert.equal(view.activeMapWindow, '');
 });
 
-test('toggling a loadout assignment switch delegates with the decoded agent and new state', async () => {
+test('removing a loadout capability delegates with the decoded agent and returns focus to Add', async () => {
   const calls = [];
   const view = makeLoadoutView({
     page: {
@@ -3062,26 +3155,26 @@ test('toggling a loadout assignment switch delegates with the decoded agent and 
     }
   });
 
-  await view.toggleLoadoutBinding('skill', encodeURIComponent('Atlas Prime'), 'sk-9', false);
+  await view.removeLoadoutCapability('skill', encodeURIComponent('Atlas Prime'), 'sk-9');
 
   assert.deepEqual(calls, [['skill', 'Atlas Prime', 'sk-9', false]]);
   assert.equal(view.loadoutBusyKey, '');
+  assert.match(view.pendingCapabilityInspectorFocus, /^add:/);
 });
 
-test('handleLoadoutClick routes a toggle target to toggleLoadoutBinding', () => {
+test('handleLoadoutClick routes a remove target to removeLoadoutCapability', () => {
   const args = [];
   const view = makeLoadoutView();
-  view.toggleLoadoutBinding = (...a) => args.push(a);
+  view.removeLoadoutCapability = (...a) => args.push(a);
   const target = {
     closest(selector) {
-      if (selector === '[data-cmd-loadout-toggle]') {
+      if (selector === '[data-cmd-loadout-remove]') {
         return {
           getAttribute(name) {
             return {
-              'data-cmd-loadout-toggle': 'mcp',
+              'data-cmd-loadout-remove': 'mcp',
               'data-cmd-loadout-agent': 'Atlas',
-              'data-cmd-loadout-binding': 'mcp-3',
-              'aria-checked': 'false'
+              'data-cmd-loadout-binding': 'mcp-3'
             }[name];
           }
         };
@@ -3093,13 +3186,15 @@ test('handleLoadoutClick routes a toggle target to toggleLoadoutBinding', () => 
   const handled = view.handleLoadoutClick({ target });
 
   assert.equal(handled, true);
-  assert.deepEqual(args, [['mcp', 'Atlas', 'mcp-3', true]]);
+  assert.deepEqual(args, [['mcp', 'Atlas', 'mcp-3']]);
 });
 
-test('opening a loadout modal loads registry additions; reopening the same kind closes it', async () => {
+test('opening a loadout modal loads agent additions; reopening the same kind closes it', async () => {
+  const calls = [];
   const view = makeLoadoutView({
     page: {
-      async listAgentLoadoutAdditions(kind) {
+      async listAgentLoadoutAdditions(kind, agentName) {
+        calls.push([kind, agentName]);
         return kind === 'skill' ? ['reviewer', 'summarizer'] : [];
       }
     }
@@ -3109,6 +3204,7 @@ test('opening a loadout modal loads registry additions; reopening the same kind 
   assert.equal(view.loadoutAddOpen, 'skill');
   assert.equal(view.loadoutAddAgent, 'Atlas');
   assert.deepEqual(view.loadoutAddOptions, ['reviewer', 'summarizer']);
+  assert.deepEqual(calls, [['skill', 'Atlas']]);
   assert.equal(view.loadoutAddLoading, false);
 
   await view.openLoadoutPicker('skill', 'Atlas');
@@ -3185,6 +3281,13 @@ test('a failed loadout binding surfaces an error and preserves the picker', asyn
       loadoutAddOpen: 'skill',
       loadoutAddAgent: 'Atlas',
       loadoutAddOptions: ['reviewer'],
+      loadoutAddPreview: {
+        name: 'reviewer',
+        status: 'loaded',
+        activeTab: 'overview',
+        data: { description: 'Reviews changes.' },
+        error: ''
+      },
       page: {
         async addAgentWorkspaceCapability() {
           throw new Error('registry offline');

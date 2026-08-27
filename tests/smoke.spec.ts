@@ -1223,8 +1223,14 @@ test.describe('Workspace Agent Character Roster', () => {
       ],
       agent_skill_access: [
         { agent_instance_id: 'manager-1', enabled_binding_ids: ['skill-planning'] },
-        { agent_instance_id: 'analyst-1', enabled_binding_ids: ['skill-research'] },
-        { agent_instance_id: 'analyst-2', enabled_binding_ids: ['skill-research'] }
+        {
+          agent_instance_id: 'analyst-1',
+          enabled_binding_ids: ['skill-research', 'skill-planning']
+        },
+        {
+          agent_instance_id: 'analyst-2',
+          enabled_binding_ids: ['skill-research', 'skill-planning']
+        }
       ],
       mcp_bindings: [
         {
@@ -1358,7 +1364,9 @@ test.describe('Workspace Agent Character Roster', () => {
           description:
             skillName === 'workspace-planning'
               ? 'Plans workspace delivery with deliberate checkpoints.'
-              : 'Controls the approved in-app browser for research.',
+              : skillName === 'reviewer'
+                ? 'Reviews workspace changes before delivery.'
+                : 'Controls the approved in-app browser for research.',
           prompt:
             'Inspect the request carefully.\n\nUse workspace evidence before making recommendations.\n'.repeat(
               12
@@ -1390,24 +1398,32 @@ test.describe('Workspace Agent Character Roster', () => {
     });
     await page.route('**/api/mcp/servers/*/details*', async route => {
       const requestURL = new URL(route.request().url());
+      const pathSegments = requestURL.pathname.split('/').filter(Boolean);
+      const serverName = decodeURIComponent(
+        pathSegments[pathSegments.length - 2] || 'notes-server'
+      );
+      const serverTitle = serverName
+        .split('-')
+        .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+        .join(' ');
       const started = requestURL.searchParams.get('start') === 'true';
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
-          server: 'notes-server',
+          server: serverName,
           status: started ? 'running' : 'stopped',
           command: 'npx',
           args: ['-y', '@ori/notes-server'],
           transport: 'stdio',
           enabled: true,
           env_keys: ['NOTES_TOKEN'],
-          instructions: 'Use the notes server only for approved workspace notes.',
+          instructions: `Use ${serverName} only for approved workspace operations.`,
           server_info: started
             ? { name: 'notes-server', title: 'Ori Notes', version: '1.0.0' }
             : null,
           readme: {
-            markdown: '# Notes Server\n\nLong-form deterministic fixture documentation.',
+            markdown: `# ${serverTitle}\n\nLong-form deterministic fixture documentation.`,
             source: 'github',
             source_url: 'https://example.com/notes-server'
           },
@@ -1792,13 +1808,24 @@ test.describe('Workspace Agent Character Roster', () => {
     await expect(addSkillDialog).toContainText('reviewer');
     await expect(addSkillDialog).toContainText('Research Analyst');
     const closeAddSkillButton = addSkillDialog.getByRole('button', { name: 'Close Add Skill' });
-    const reviewerOption = addSkillDialog.getByRole('button', { name: /reviewer/ });
+    const reviewerOption = addSkillDialog.getByRole('button', {
+      name: 'View details for skill reviewer'
+    });
     await expect(closeAddSkillButton).toBeFocused();
     await page.keyboard.press('Shift+Tab');
     await expect(reviewerOption).toBeFocused();
     await page.keyboard.press('Tab');
     await expect(closeAddSkillButton).toBeFocused();
+    await reviewerOption.click();
+    await expect(addSkillDialog).toContainText('Reviews workspace changes before delivery');
+    await expect(
+      addSkillDialog.getByRole('button', { name: 'Add Skill', exact: true })
+    ).toBeVisible();
+    await addSkillDialog.getByRole('tab', { name: 'Instructions' }).click();
+    await expect(addSkillDialog).toContainText('Inspect the request carefully');
     await captureImplementationScreenshot(page, 'unit-sheet-add-skill-modal.png');
+    await addSkillDialog.getByRole('button', { name: /Back to available skills/ }).click();
+    await expect(reviewerOption).toBeFocused();
     await closeAddSkillButton.click();
     await expect(addSkillDialog).toHaveCount(0);
     await expect(addSkillButton).toBeFocused();
@@ -1806,7 +1833,19 @@ test.describe('Workspace Agent Character Roster', () => {
     const addToolButton = inspector.getByRole('button', { name: 'Add Tool' });
     await addToolButton.click();
     const addToolDialog = page.getByRole('dialog', { name: 'Add Tool' });
+    const calendarOption = addToolDialog.getByRole('button', {
+      name: 'View details for tool calendar-server'
+    });
+    await calendarOption.click();
     await expect(addToolDialog).toContainText('calendar-server');
+    await expect(addToolDialog).toContainText('stopped');
+    await expect(
+      addToolDialog.getByRole('button', { name: 'Add Tool', exact: true })
+    ).toBeVisible();
+    await expect(addToolDialog.locator('[data-cmd-capability-start]')).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await expect(addToolDialog).toBeVisible();
+    await expect(calendarOption).toBeFocused();
     await page.keyboard.press('Escape');
     await expect(addToolDialog).toHaveCount(0);
     await expect(addToolButton).toBeFocused();
@@ -1818,19 +1857,21 @@ test.describe('Workspace Agent Character Roster', () => {
     const skillInspect = skillRow.getByRole('button', {
       name: /Inspect skill browser:control-in-app-browser/
     });
-    const skillSwitch = skillRow.getByRole('switch');
-    await expect(skillSwitch).toHaveAttribute('aria-checked', 'true');
+    const skillRemove = skillRow.getByRole('button', {
+      name: /Remove skill browser:control-in-app-browser from Research Analyst/
+    });
+    await expect(skillRemove).toBeVisible();
     await skillInspect.click();
     const capabilityInspector = inspector.locator('[data-cmd-capability-inspector]');
     await expect(capabilityInspector).toContainText('Controls the approved in-app browser');
-    await expect(skillSwitch).toHaveAttribute('aria-checked', 'true');
+    await expect(skillRemove).toBeVisible();
     await expect(inspector.locator('.ws-cmd-rpg-command-panel')).toHaveCount(0);
     await expect(capabilityInspector.locator('[role="dialog"]')).toHaveCount(0);
     await expect(inspector.locator('[role="dialog"]')).toHaveCount(0);
     await expect(page.locator('[role="dialog"][aria-label="Unit Sheet"]')).toHaveCount(1);
 
-    await skillSwitch.click();
-    await expect(skillSwitch).toHaveAttribute('aria-checked', 'false');
+    await skillRemove.click();
+    await expect(skillRow).toHaveCount(0);
     await expect(capabilityInspector).toContainText('Not assigned to Research Analyst');
     await capabilityInspector.getByRole('tab', { name: 'Instructions' }).click();
     await expect(capabilityInspector.locator('.ws-cmd-capability-prompt')).toContainText(
@@ -1839,7 +1880,21 @@ test.describe('Workspace Agent Character Roster', () => {
     await captureImplementationScreenshot(page, 'unit-sheet-skill-inspector-desktop.png');
     await capabilityInspector.getByRole('button', { name: /Back to Command Menu/ }).click();
     await expect(inspector.locator('.ws-cmd-rpg-command-panel')).toContainText('Command Menu');
-    await expect(skillInspect).toBeFocused();
+    await expect(addSkillButton).toBeFocused();
+    if (process.env.ORI_CAPTURE_SCREENSHOTS) await page.waitForTimeout(450);
+    await captureImplementationScreenshot(page, 'unit-sheet-capability-removed.png');
+
+    await addSkillButton.click();
+    const readdSkillDialog = page.getByRole('dialog', { name: 'Add Skill' });
+    const removedSkillOption = readdSkillDialog.getByRole('button', {
+      name: 'View details for skill browser:control-in-app-browser'
+    });
+    await expect(removedSkillOption).toBeVisible();
+    await removedSkillOption.click();
+    await expect(readdSkillDialog).toContainText('Controls the approved in-app browser');
+    await readdSkillDialog.getByRole('button', { name: 'Add Skill', exact: true }).click();
+    await expect(readdSkillDialog).toHaveCount(0);
+    await expect(skillRow).toBeVisible();
 
     const mcpRow = inspector.locator('.ws-cmd-loadout-row').filter({ hasText: 'notes-server' });
     await mcpRow.getByRole('button', { name: /Inspect MCP server notes-server/ }).click();
@@ -1910,6 +1965,8 @@ test.describe('Workspace Agent Character Roster', () => {
     const mobileUnitSheet = page.locator('#workspaceCommandView .ws-cmd-map-window-inspector');
     await mobileUnitSheet.getByRole('button', { name: 'Add Skill' }).click();
     const mobileAddDialog = page.getByRole('dialog', { name: 'Add Skill' });
+    await mobileAddDialog.getByRole('button', { name: 'View details for skill reviewer' }).click();
+    await expect(mobileAddDialog).toContainText('Reviews workspace changes before delivery');
     const mobileAddGeometry = await mobileAddDialog.evaluate(node => {
       const rect = node.getBoundingClientRect();
       return {

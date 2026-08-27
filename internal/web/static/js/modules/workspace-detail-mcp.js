@@ -191,8 +191,17 @@ export class WorkspaceMCPManager {
   }
 
   async loadMCPDetails(bindingId, serverName, options = {}) {
-    const binding = this.getWorkspaceMCPBinding(bindingId, { includeDisabled: true });
-    const name = String(serverName || binding?.serverName || '').trim();
+    const requestedName = String(serverName || '').trim();
+    const binding =
+      this.getWorkspaceMCPBinding(bindingId, { includeDisabled: true }) ||
+      this.getWorkspaceMCPBindings({ includeDisabled: true }).find(
+        candidate =>
+          requestedName &&
+          String(candidate?.serverName || '')
+            .trim()
+            .toLowerCase() === requestedName.toLowerCase()
+      );
+    const name = String(requestedName || binding?.serverName || '').trim();
     if (!name) throw new Error('MCP server name is required');
 
     if (binding?.source === 'synthesized') {
@@ -1318,8 +1327,12 @@ export class WorkspaceMCPManager {
         );
 
         if (!response.ok) {
-          const text = await response.text();
-          throw new Error(text || `Failed to clear MCP access rule for ${instanceId}`);
+          const fallback = `Failed to clear MCP access rule for ${instanceId}`;
+          const message =
+            typeof this.host.responseErrorMessage === 'function'
+              ? await this.host.responseErrorMessage(response, fallback)
+              : (await response.text()) || fallback;
+          throw new Error(message);
         }
         return;
       }
@@ -1338,8 +1351,12 @@ export class WorkspaceMCPManager {
       );
 
       if (!response.ok) {
-        const text = await response.text();
-        throw new Error(text || `Failed to update MCP access for ${instanceId}`);
+        const fallback = `Failed to update MCP access for ${instanceId}`;
+        const message =
+          typeof this.host.responseErrorMessage === 'function'
+            ? await this.host.responseErrorMessage(response, fallback)
+            : (await response.text()) || fallback;
+        throw new Error(message);
       }
     });
 

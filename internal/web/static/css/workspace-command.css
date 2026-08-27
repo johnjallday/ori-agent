@@ -3965,49 +3965,27 @@ button.ws-cmd-rpg-class-card:focus-visible {
   font-size: 8px;
   text-transform: uppercase;
 }
-.ws-cmd-loadout-switch {
-  position: relative;
+.ws-cmd-loadout-remove {
   flex: 0 0 48px;
   width: 48px;
   min-height: 44px;
+  display: grid;
+  place-items: center;
   border: 0;
   border-left: 1px solid var(--ws-line);
   background: rgba(0, 0, 0, 0.18);
+  color: var(--ws-ink-faint);
   cursor: pointer;
-}
-.ws-cmd-loadout-switch > span {
-  position: absolute;
-  top: 50%;
-  left: 9px;
-  width: 30px;
-  height: 16px;
-  border: 1px solid var(--ws-line-bright);
-  background: #090b0e;
-  transform: translateY(-50%);
-}
-.ws-cmd-loadout-switch > span::after {
-  content: "";
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 10px;
-  height: 10px;
-  background: var(--ws-ink-faint);
   transition:
-    left 0.14s ease,
+    color 0.14s ease,
     background 0.14s ease;
 }
-.ws-cmd-loadout-switch.is-on > span {
-  border-color: var(--ws-faction);
-  background: rgba(70, 211, 154, 0.15);
+.ws-cmd-loadout-remove:hover:not([disabled]) {
+  color: var(--ws-alert);
+  background: rgba(232, 120, 99, 0.1);
 }
-.ws-cmd-loadout-switch.is-on > span::after {
-  left: 16px;
-  background: var(--ws-faction);
-  box-shadow: 0 0 8px rgba(70, 211, 154, 0.6);
-}
-.ws-cmd-loadout-switch.is-busy,
-.ws-cmd-loadout-switch[disabled] {
+.ws-cmd-loadout-remove.is-busy,
+.ws-cmd-loadout-remove[disabled] {
   opacity: 0.5;
   cursor: progress;
 }
@@ -4024,7 +4002,7 @@ button.ws-cmd-rpg-class-card:focus-visible {
   text-transform: uppercase;
 }
 .ws-cmd-loadout-inspect:focus-visible,
-.ws-cmd-loadout-switch:focus-visible {
+.ws-cmd-loadout-remove:focus-visible {
   position: relative;
   z-index: 1;
   outline: 2px solid var(--ws-faction);
@@ -4079,6 +4057,10 @@ button.ws-cmd-rpg-class-card:focus-visible {
     16px 100%,
     0 calc(100% - 16px)
   );
+}
+.ws-cmd-loadout-add-dialog.is-preview {
+  width: min(680px, 100%);
+  max-height: min(760px, calc(100vh - 48px));
 }
 .ws-cmd-loadout-add-dialog > header {
   display: flex;
@@ -4231,6 +4213,70 @@ button.ws-cmd-rpg-class-card:focus-visible {
   color: #f29a88;
   font-family: var(--ws-font-mono);
   font-size: 10px;
+}
+.ws-cmd-loadout-preview {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid rgba(70, 211, 154, 0.28);
+  background: rgba(5, 7, 10, 0.62);
+}
+.ws-cmd-loadout-preview > header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  padding: 11px;
+  border-bottom: 1px solid var(--ws-line);
+  background: rgba(9, 11, 15, 0.96);
+}
+.ws-cmd-loadout-preview > header > div {
+  min-width: 0;
+}
+.ws-cmd-loadout-preview > header span,
+.ws-cmd-loadout-preview > header small {
+  display: block;
+  color: var(--ws-faction);
+  font-family: var(--ws-font-mono);
+  font-size: 8px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.ws-cmd-loadout-preview > header h4 {
+  margin: 2px 0 3px;
+  color: #f2f4f7;
+  font-size: 17px;
+  overflow-wrap: anywhere;
+}
+.ws-cmd-loadout-preview > header small {
+  color: var(--ws-ink-faint);
+  letter-spacing: 0;
+}
+.ws-cmd-loadout-preview-body {
+  min-height: 180px;
+  max-height: min(390px, calc(100vh - 330px));
+  overflow: auto;
+  padding: 12px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--ws-line-bright) transparent;
+}
+.ws-cmd-loadout-preview > footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--ws-line);
+  background: rgba(9, 11, 15, 0.96);
+}
+.ws-cmd-loadout-preview > footer > span {
+  color: var(--ws-ink-faint);
+  font-family: var(--ws-font-mono);
+  font-size: 8px;
+  text-transform: uppercase;
+}
+.ws-cmd-loadout-preview > footer .ws-cmd-capability-action {
+  min-width: 112px;
 }
 .ws-cmd-loadout-editor-error {
   margin: 0;
@@ -5543,7 +5589,7 @@ button.ws-cmd-rpg-class-card:focus-visible {
   .ws-cmd-map-agent,
   .ws-cmd-map-window,
   .ws-cmd-loadout-row,
-  .ws-cmd-loadout-switch > span::after {
+  .ws-cmd-loadout-remove {
     transition: none;
     animation: none;
   }

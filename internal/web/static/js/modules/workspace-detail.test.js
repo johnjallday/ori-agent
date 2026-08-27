@@ -1238,6 +1238,63 @@ test('setAgentWorkspaceCapabilityEnabled merges the agent into the binding acces
   assert.deepEqual([...persisted[0][1]].sort(), ['inst-A', 'inst-B']);
 });
 
+test('agent Toolbox lists only assigned capabilities and offers removed workspace bindings again', async () => {
+  const page = new WorkspaceDetailPage('ws-1');
+  page.workspace = {
+    agent_instances: [
+      { id: 'inst-A', name: 'Atlas' },
+      { id: 'inst-B', name: 'Bolt' }
+    ],
+    skill_bindings: [
+      { id: 'skill-planner', skill_name: 'planner', enabled: true },
+      { id: 'skill-writer', skill_name: 'writer', enabled: true }
+    ],
+    agent_skill_access: [
+      { agent_instance_id: 'inst-A', enabled_binding_ids: ['skill-planner'] },
+      { agent_instance_id: 'inst-B', enabled_binding_ids: ['skill-writer'] }
+    ],
+    mcp_bindings: [
+      { id: 'mcp-notes', server_name: 'notes', enabled: true },
+      { id: 'mcp-calendar', server_name: 'calendar', enabled: true }
+    ],
+    agent_mcp_access: [
+      { agent_instance_id: 'inst-A', enabled_binding_ids: ['mcp-notes'] },
+      { agent_instance_id: 'inst-B', enabled_binding_ids: ['mcp-calendar'] }
+    ],
+    directory_references: [{ path: '/approved/project' }]
+  };
+  page.skillsManager.loadAvailableSkills = async () => [
+    { name: 'planner' },
+    { name: 'writer' },
+    { name: 'reviewer' }
+  ];
+  page.mcpManager.loadAvailableMCPServers = async () => [
+    { name: 'notes' },
+    { name: 'calendar' },
+    { name: 'weather' }
+  ];
+
+  assert.deepEqual(
+    page.getAgentWorkspaceSkillLoadout('Atlas').map(item => item.name),
+    ['planner']
+  );
+  assert.deepEqual(
+    page.getAgentWorkspaceMCPLoadout('Atlas').map(item => item.name),
+    ['notes', 'filesystem'],
+    'the locked workspace-native capability remains visible'
+  );
+  assert.deepEqual(await page.listAgentLoadoutAdditions('skill', 'Atlas'), ['reviewer', 'writer']);
+  assert.deepEqual(await page.listAgentLoadoutAdditions('mcp', 'Atlas'), ['calendar', 'weather']);
+
+  page.workspace.agent_skill_access[0].enabled_binding_ids = [];
+  assert.deepEqual(page.getAgentWorkspaceSkillLoadout('Atlas'), []);
+  assert.deepEqual(await page.listAgentLoadoutAdditions('skill', 'Atlas'), [
+    'planner',
+    'reviewer',
+    'writer'
+  ]);
+});
+
 test('setAgentWorkspaceCapabilityEnabled removes the agent when disabling', async () => {
   const page = new WorkspaceDetailPage('ws-1');
   page.workspace = {
@@ -1401,6 +1458,10 @@ test('MCP detail facade is passive by default and refreshes its cache only on ex
     assert.equal(cached.status, 'stopped');
     assert.deepEqual(passive.workspace_binding.scope, { notebook: 'team' });
     assert.deepEqual(calls, ['/api/mcp/servers/notes%20server/details']);
+
+    const addPreview = await page.loadWorkspaceMCPDetails('', 'notes server');
+    assert.equal(addPreview.workspace_binding.id, 'mcp-notes');
+    assert.equal(calls.length, 1, 'name-only Add previews reuse the passive detail cache');
 
     const started = await page.loadWorkspaceMCPDetails('mcp-notes', 'notes server', {
       start: true

@@ -742,8 +742,12 @@ export class WorkspaceSkillsManager {
         );
 
         if (!response.ok) {
-          const text = await response.text();
-          throw new Error(text || `Failed to clear skill access rule for ${instanceId}`);
+          const fallback = `Failed to clear skill access rule for ${instanceId}`;
+          const message =
+            typeof this.host.responseErrorMessage === 'function'
+              ? await this.host.responseErrorMessage(response, fallback)
+              : (await response.text()) || fallback;
+          throw new Error(message);
         }
         return;
       }
@@ -762,8 +766,12 @@ export class WorkspaceSkillsManager {
       );
 
       if (!response.ok) {
-        const text = await response.text();
-        throw new Error(text || `Failed to update skill access for ${instanceId}`);
+        const fallback = `Failed to update skill access for ${instanceId}`;
+        const message =
+          typeof this.host.responseErrorMessage === 'function'
+            ? await this.host.responseErrorMessage(response, fallback)
+            : (await response.text()) || fallback;
+        throw new Error(message);
       }
     });
 

@@ -11979,7 +11979,7 @@ export class WorkspaceDetailPage {
           source: String(binding?.source || 'workspace').trim()
         };
       })
-      .filter(item => item.bindingId && item.name);
+      .filter(item => item.bindingId && item.name && (item.enabled || item.locked));
   }
 
   getAgentWorkspaceMCPLoadout(agentName) {
@@ -12009,12 +12009,14 @@ export class WorkspaceDetailPage {
           scope: binding?.scope && typeof binding.scope === 'object' ? { ...binding.scope } : {}
         };
       })
-      .filter(item => item.bindingId && item.name);
+      .filter(item => item.bindingId && item.name && (item.enabled || item.locked));
   }
 
-  // Registry capabilities of `kind` ('skill'|'mcp') not yet present as an
-  // enabled workspace binding — the candidates a "bind new" picker should list.
-  async listAgentLoadoutAdditions(kind) {
+  // Registry and workspace capabilities of `kind` ('skill'|'mcp') that are
+  // not currently assigned to this agent. Removed capabilities disappear from
+  // the Toolbox list but remain available here so the user can inspect and
+  // explicitly add them again.
+  async listAgentLoadoutAdditions(kind, agentName) {
     const isMCP = kind === 'mcp';
     const mgr = isMCP ? this.mcpManager : this.skillsManager;
     if (!mgr) return [];
@@ -12024,18 +12026,48 @@ export class WorkspaceDetailPage {
     } catch (_error) {
       registry = [];
     }
-    const bound = new Set(
-      (isMCP ? mgr.getWorkspaceMCPBindings() : mgr.getWorkspaceSkillBindings())
+
+    const bindings = isMCP
+      ? mgr.getWorkspaceMCPBindings({ includeDisabled: true })
+      : mgr.getWorkspaceSkillBindings({ includeDisabled: true });
+    const effectiveBindings = isMCP
+      ? mgr.getEffectiveWorkspaceMCPBindingsForAgent(agentName)
+      : mgr.getEffectiveWorkspaceSkillBindingsForAgent(agentName);
+    const effectiveIDs = new Set(
+      effectiveBindings
         .map(binding =>
-          String(isMCP ? binding?.serverName : binding?.skillName || '')
+          String(binding?.id || '')
             .trim()
             .toLowerCase()
         )
         .filter(Boolean)
     );
-    return (Array.isArray(registry) ? registry : [])
-      .map(entry => String(entry?.name || '').trim())
-      .filter(name => name && !bound.has(name.toLowerCase()));
+    const effectiveNames = new Set(
+      effectiveBindings
+        .map(binding =>
+          String((isMCP ? binding?.serverName : binding?.skillName) || '')
+            .trim()
+            .toLowerCase()
+        )
+        .filter(Boolean)
+    );
+    const candidates = new Map();
+    const addCandidate = value => {
+      const name = String(value || '').trim();
+      const key = name.toLowerCase();
+      if (name && !effectiveNames.has(key) && !candidates.has(key)) candidates.set(key, name);
+    };
+
+    (Array.isArray(registry) ? registry : []).forEach(entry => addCandidate(entry?.name));
+    bindings.forEach(binding => {
+      if (binding?.source === 'synthesized') return;
+      const bindingID = String(binding?.id || '')
+        .trim()
+        .toLowerCase();
+      if (bindingID && effectiveIDs.has(bindingID)) return;
+      addCandidate(isMCP ? binding?.serverName : binding?.skillName);
+    });
+    return Array.from(candidates.values()).sort((left, right) => left.localeCompare(right));
   }
 
   async setAgentWorkspaceCapabilityEnabled(kind, agentName, bindingId, enabled) {
@@ -12083,7 +12115,7 @@ export class WorkspaceDetailPage {
     if (!mgr) return false;
 
     const bindingName = binding =>
-      String(isMCP ? binding?.serverName : binding?.skillName || '').trim();
+      String((isMCP ? binding?.serverName : binding?.skillName) || '').trim();
     const findBinding = () =>
       (isMCP
         ? mgr.getWorkspaceMCPBindings({ includeDisabled: true })
