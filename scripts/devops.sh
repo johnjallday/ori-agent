@@ -125,7 +125,7 @@ EOF
 print_menu() {
   printf '\n%s\n' \
     "[1/a] All  [2/d] Needs my decision  [3/b] Backlog  [4/f] Proposals  [5/y] Ready" \
-    "[v #] View  [n title] Capture  [p] New & Plan  [c # choices] Decide  [ok #] Approve  [g] Agent defaults  [q] Quit"
+    "[v #] View  [n title] Capture  [c # choices] Decide  [ok #] Approve  [g] Agent defaults  [q] Quit"
 }
 
 # Labels arrive from `gh` as a ", "-joined string. Split on commas and trim so a
