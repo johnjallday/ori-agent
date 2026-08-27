@@ -1337,9 +1337,18 @@ test.describe('Workspace Agent Character Roster', () => {
         })
       });
     });
+    let workspacePlanningDetailAttempts = 0;
     await page.route('**/api/skills/*', async route => {
       const requestURL = new URL(route.request().url());
       const skillName = decodeURIComponent(requestURL.pathname.split('/').pop() || '');
+      if (skillName === 'workspace-planning' && workspacePlanningDetailAttempts++ === 0) {
+        await route.fulfill({
+          status: 503,
+          contentType: 'text/plain',
+          body: 'Deterministic skill detail failure'
+        });
+        return;
+      }
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -1818,6 +1827,15 @@ test.describe('Workspace Agent Character Roster', () => {
     await expect(capabilityInspector.locator('[data-cmd-capability-start]')).toHaveCount(0);
     await capabilityInspector.getByRole('button', { name: /Back to Command Menu/ }).click();
 
+    const planningRow = inspector
+      .locator('.ws-cmd-loadout-row')
+      .filter({ hasText: 'workspace-planning' });
+    await planningRow.getByRole('button', { name: /Inspect skill workspace-planning/ }).click();
+    await expect(capabilityInspector).toContainText('Deterministic skill detail failure');
+    await capabilityInspector.getByRole('button', { name: 'Retry' }).click();
+    await expect(capabilityInspector).toContainText('Plans workspace delivery');
+    await capabilityInspector.getByRole('button', { name: /Back to Command Menu/ }).click();
+
     await skillInspect.focus();
     await page.keyboard.press('Enter');
     await expect(capabilityInspector).toBeVisible();
@@ -1828,6 +1846,7 @@ test.describe('Workspace Agent Character Roster', () => {
       'aria-selected',
       'true'
     );
+    await captureImplementationScreenshot(page, 'unit-sheet-keyboard-focused.png');
     await page.keyboard.press('Escape');
     await expect(inspector.locator('.ws-cmd-rpg-command-panel')).toContainText('Command Menu');
     await page.keyboard.press('Escape');
