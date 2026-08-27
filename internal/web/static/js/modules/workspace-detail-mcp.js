@@ -21,6 +21,9 @@ export class WorkspaceMCPManager {
     this.host = host;
     this.availableMCPServers = [];
     this.availableMCPServersPromise = null;
+    this.mcpDetailCache = new Map();
+    this.mcpDetailPromises = new Map();
+    this.mcpDetailRequestVersions = new Map();
     this.availableEmailAccounts = [];
     this.availableEmailAccountsPromise = null;
     this.activeWorkspaceMCPBindingId = '';
@@ -155,6 +158,105 @@ export class WorkspaceMCPManager {
       .trim()
       .toLowerCase()
       .startsWith('ws:');
+  }
+
+  mcpDetailCacheKey(serverName) {
+    return String(serverName || '')
+      .trim()
+      .toLowerCase();
+  }
+
+  synthesizedMCPDetails(binding) {
+    const scope = binding?.scope && typeof binding.scope === 'object' ? { ...binding.scope } : {};
+    return {
+      server: String(binding?.serverName || 'filesystem').trim() || 'filesystem',
+      status: 'workspace',
+      enabled: binding?.enabled !== false,
+      tools: [],
+      env_keys: [],
+      args: [],
+      command: '',
+      transport: 'workspace binding',
+      instructions:
+        'This capability is derived from approved workspace directories. It follows workspace scope automatically and does not start a global MCP process.',
+      synthesized: true,
+      workspace_binding: {
+        id: String(binding?.id || '').trim(),
+        alias: String(binding?.alias || '').trim(),
+        source: 'synthesized',
+        scope,
+        locked: true
+      }
+    };
+  }
+
+  async loadMCPDetails(bindingId, serverName, options = {}) {
+    const requestedName = String(serverName || '').trim();
+    const binding =
+      this.getWorkspaceMCPBinding(bindingId, { includeDisabled: true }) ||
+      this.getWorkspaceMCPBindings({ includeDisabled: true }).find(
+        candidate =>
+          requestedName &&
+          String(candidate?.serverName || '')
+            .trim()
+            .toLowerCase() === requestedName.toLowerCase()
+      );
+    const name = String(requestedName || binding?.serverName || '').trim();
+    if (!name) throw new Error('MCP server name is required');
+
+    if (binding?.source === 'synthesized') {
+      return this.synthesizedMCPDetails(binding);
+    }
+
+    const key = this.mcpDetailCacheKey(name);
+    const start = options.start === true;
+    const force = options.force === true || start;
+    let detail;
+    if (!force && this.mcpDetailCache.has(key)) {
+      detail = this.mcpDetailCache.get(key);
+    } else if (!force && this.mcpDetailPromises.has(key)) {
+      detail = await this.mcpDetailPromises.get(key);
+    } else {
+      const requestVersion = (this.mcpDetailRequestVersions.get(key) || 0) + 1;
+      this.mcpDetailRequestVersions.set(key, requestVersion);
+      const promise = (async () => {
+        const suffix = start ? '?start=true' : '';
+        const response = await fetch(
+          `/api/mcp/servers/${encodeURIComponent(name)}/details${suffix}`
+        );
+        if (!response.ok) {
+          const text = await response.text().catch(() => '');
+          throw new Error(text || `Failed to load MCP details (${response.status})`);
+        }
+        const payload = await response.json();
+        if (this.mcpDetailRequestVersions.get(key) === requestVersion) {
+          this.mcpDetailCache.set(key, payload);
+        }
+        return payload;
+      })();
+      this.mcpDetailPromises.set(key, promise);
+      try {
+        detail = await promise;
+      } finally {
+        if (this.mcpDetailPromises.get(key) === promise) {
+          this.mcpDetailPromises.delete(key);
+        }
+      }
+    }
+
+    return {
+      ...detail,
+      synthesized: false,
+      workspace_binding: binding
+        ? {
+            id: String(binding.id || '').trim(),
+            alias: String(binding.alias || '').trim(),
+            source: String(binding.source || 'workspace').trim(),
+            scope: binding.scope && typeof binding.scope === 'object' ? { ...binding.scope } : {},
+            locked: false
+          }
+        : null
+    };
   }
 
   async loadAvailableMCPServers(force = false) {
@@ -1225,8 +1327,12 @@ export class WorkspaceMCPManager {
         );
 
         if (!response.ok) {
-          const text = await response.text();
-          throw new Error(text || `Failed to clear MCP access rule for ${instanceId}`);
+          const fallback = `Failed to clear MCP access rule for ${instanceId}`;
+          const message =
+            typeof this.host.responseErrorMessage === 'function'
+              ? await this.host.responseErrorMessage(response, fallback)
+              : (await response.text()) || fallback;
+          throw new Error(message);
         }
         return;
       }
@@ -1245,8 +1351,12 @@ export class WorkspaceMCPManager {
       );
 
       if (!response.ok) {
-        const text = await response.text();
-        throw new Error(text || `Failed to update MCP access for ${instanceId}`);
+        const fallback = `Failed to update MCP access for ${instanceId}`;
+        const message =
+          typeof this.host.responseErrorMessage === 'function'
+            ? await this.host.responseErrorMessage(response, fallback)
+            : (await response.text()) || fallback;
+        throw new Error(message);
       }
     });
 

@@ -2702,8 +2702,13 @@ function makeLoadoutView(overrides = {}) {
     view,
     {
       loadoutAddOpen: '',
+      loadoutAddAgent: '',
       loadoutAddOptions: [],
       loadoutAddLoading: false,
+      loadoutAddRequestId: 0,
+      loadoutAddPreviewRequestId: 0,
+      loadoutAddPreview: WorkspaceCommandView.prototype.emptyLoadoutAddPreviewState(),
+      pendingLoadoutAddFocus: '',
       loadoutBusyKey: '',
       loadoutError: '',
       renderCalls: 0,
@@ -2716,7 +2721,7 @@ function makeLoadoutView(overrides = {}) {
   return view;
 }
 
-test('loadout editor renders interactive toggles, locked chips, and add buttons', () => {
+test('loadout editor shows assigned capabilities with explicit removal and keeps locked rows inspectable', () => {
   const view = makeLoadoutView({
     page: {
       getAgentWorkspaceSkillLoadout() {
@@ -2732,19 +2737,414 @@ test('loadout editor renders interactive toggles, locked chips, and add buttons'
   });
 
   const html = view.renderLoadoutEditor({ name: 'Atlas', encodedName: 'Atlas' });
-  assert.match(html, /data-cmd-loadout-toggle="skill" data-cmd-loadout-binding="sk-1"/);
-  assert.match(
-    html,
-    /aria-checked="true"[^>]*data-cmd-loadout-binding="sk-1"|data-cmd-loadout-binding="sk-1"[^>]*aria-checked="true"/
-  );
-  assert.match(html, /data-cmd-loadout-binding="sk-2"/);
-  assert.match(html, /ws-cmd-loadout-chip is-locked/);
-  assert.doesNotMatch(html, /data-cmd-loadout-toggle="mcp" data-cmd-loadout-binding="fs"/);
+  assert.match(html, /data-cmd-capability-inspect="skill" data-cmd-loadout-binding="sk-1"/);
+  assert.match(html, /data-cmd-loadout-remove="skill"[^>]*data-cmd-loadout-binding="sk-1"/);
+  assert.match(html, /aria-label="Inspect skill planner for Atlas"/);
+  assert.match(html, /aria-label="Remove skill planner from Atlas"/);
+  assert.doesNotMatch(html, /writer/);
+  assert.doesNotMatch(html, /role="switch"/);
+  assert.match(html, /ws-cmd-loadout-row is-locked/);
+  assert.match(html, /data-cmd-capability-inspect="mcp" data-cmd-loadout-binding="fs"/);
+  assert.doesNotMatch(html, /data-cmd-loadout-remove="mcp"[^>]*data-cmd-loadout-binding="fs"/);
+  assert.match(html, /MCP Servers/);
   assert.match(html, /data-cmd-loadout-add="skill"/);
   assert.match(html, /data-cmd-loadout-add="mcp"/);
+  assert.match(html, /aria-haspopup="dialog"/);
 });
 
-test('toggling a loadout chip delegates to the page with decoded agent and inverted state', async () => {
+test('Add Skill and Add Tool render a modal instead of expanding their loadout sections', () => {
+  const view = makeLoadoutView({
+    loadoutAddOpen: 'skill',
+    loadoutAddAgent: 'Atlas',
+    loadoutAddOptions: ['reviewer', 'summarizer'],
+    page: {
+      getAgentWorkspaceSkillLoadout: () => [],
+      getAgentWorkspaceMCPLoadout: () => []
+    }
+  });
+
+  const editorHTML = view.renderLoadoutEditor({ name: 'Atlas', encodedName: 'Atlas' });
+  const skillHTML = view.loadoutAddModalHTML('Atlas');
+  assert.doesNotMatch(editorHTML, /data-cmd-loadout-add-modal/);
+  assert.match(skillHTML, /data-cmd-loadout-add-modal/);
+  assert.match(skillHTML, /role="dialog" aria-modal="true"/);
+  assert.match(skillHTML, /<h3 id="ws-cmd-loadout-add-title">Add Skill<\/h3>/);
+  assert.match(skillHTML, /reviewer/);
+  assert.match(skillHTML, /data-cmd-loadout-preview="skill"/);
+  assert.doesNotMatch(skillHTML, /data-cmd-loadout-bind="skill"/);
+  assert.match(skillHTML, /Choose a workspace skill to assign to <strong>Atlas<\/strong>/);
+
+  view.loadoutAddOpen = 'mcp';
+  view.loadoutAddOptions = ['calendar-server'];
+  const toolHTML = view.loadoutAddModalHTML('Atlas');
+  assert.match(toolHTML, /<h3 id="ws-cmd-loadout-add-title">Add Tool<\/h3>/);
+  assert.match(toolHTML, /calendar-server/);
+  assert.doesNotMatch(toolHTML, /<h3 id="ws-cmd-loadout-add-title">Add Skill<\/h3>/);
+});
+
+test('Add modal previews skill details before exposing the Add action', async () => {
+  const calls = [];
+  const view = makeLoadoutView({
+    loadoutAddOpen: 'skill',
+    loadoutAddAgent: 'Atlas',
+    loadoutAddOptions: ['reviewer'],
+    page: {
+      async loadWorkspaceSkillDetails(agent, name, options) {
+        calls.push([agent, name, options]);
+        return {
+          description: 'Reviews changes before delivery.',
+          prompt: 'Inspect the diff.',
+          source: 'agent',
+          trusted: true
+        };
+      }
+    }
+  });
+
+  await view.openLoadoutAddPreview('skill', 'Atlas', 'reviewer');
+
+  assert.deepEqual(calls, [['Atlas', 'reviewer', { force: false }]]);
+  assert.equal(view.loadoutAddPreview.status, 'loaded');
+  const html = view.loadoutAddModalHTML('Atlas');
+  assert.match(html, /Reviews changes before delivery/);
+  assert.match(html, /Review this skill before assigning it to <strong>Atlas<\/strong>/);
+  assert.match(html, /data-cmd-loadout-bind="skill"/);
+  assert.match(html, />Add Skill<\/button>/);
+  assert.match(html, /ws-cmd-loadout-preview-panel-overview/);
+
+  view.setLoadoutAddPreviewTab('instructions');
+  assert.match(view.loadoutAddModalHTML('Atlas'), /Inspect the diff/);
+  view.closeLoadoutAddPreview();
+  assert.equal(view.loadoutAddPreview.name, '');
+  assert.equal(view.pendingLoadoutAddFocus, 'candidate:reviewer');
+});
+
+test('Add preview errors are retryable and keep Add disabled until details load', async () => {
+  let attempts = 0;
+  const view = makeLoadoutView({
+    loadoutAddOpen: 'skill',
+    loadoutAddAgent: 'Atlas',
+    loadoutAddOptions: ['reviewer'],
+    page: {
+      async loadWorkspaceSkillDetails() {
+        attempts += 1;
+        if (attempts === 1) throw new Error('detail catalog offline');
+        return { description: 'Retry loaded detail.' };
+      }
+    }
+  });
+
+  await view.openLoadoutAddPreview('skill', 'Atlas', 'reviewer');
+  const failedHTML = view.loadoutAddModalHTML('Atlas');
+  assert.match(failedHTML, /detail catalog offline/);
+  assert.match(failedHTML, /data-cmd-loadout-preview-retry/);
+  assert.match(failedHTML, /data-cmd-loadout-bind="skill"[^>]* disabled/);
+
+  await view.retryLoadoutAddPreview();
+  assert.equal(attempts, 2);
+  assert.equal(view.loadoutAddPreview.status, 'loaded');
+  assert.match(view.loadoutAddModalHTML('Atlas'), /Retry loaded detail/);
+});
+
+test('Add Tool preview stays passive and never offers to start an unbound server', async () => {
+  const view = makeLoadoutView({
+    loadoutAddOpen: 'mcp',
+    loadoutAddAgent: 'Atlas',
+    loadoutAddOptions: ['calendar-server'],
+    page: {
+      async loadWorkspaceMCPDetails(bindingId, name, options) {
+        assert.equal(bindingId, '');
+        assert.equal(name, 'calendar-server');
+        assert.deepEqual(options, { force: false, start: false });
+        return { server: name, status: 'stopped', transport: 'stdio', tools: [] };
+      }
+    }
+  });
+
+  await view.openLoadoutAddPreview('mcp', 'Atlas', 'calendar-server');
+
+  const html = view.loadoutAddModalHTML('Atlas');
+  assert.match(html, /passive details now/);
+  assert.match(html, /data-cmd-loadout-bind="mcp"/);
+  assert.doesNotMatch(html, /data-cmd-capability-start/);
+});
+
+test('skill capability inspector renders escaped details and restores the Command Menu on Back', () => {
+  const view = makeLoadoutView({
+    selectedAgentKey: 'atlas',
+    capabilityInspector: {
+      open: true,
+      kind: 'skill',
+      bindingId: 'sk-1',
+      name: 'planner',
+      agent: 'Atlas',
+      encodedAgent: 'Atlas',
+      activeTab: 'overview',
+      status: 'loaded',
+      assigned: true,
+      locked: false,
+      originKey: 'skill%3Ask-1%3AAtlas',
+      data: {
+        description: '<img src=x onerror=alert(1)> Planning',
+        source: 'agent',
+        path: '/tmp/<skill>',
+        model: 'sonnet',
+        prompt: '<script>unsafe()</script>\nDo the work',
+        required_mcp_servers: ['filesystem'],
+        allowed_tools: ['read_file'],
+        disallowed_tools: ['delete_file'],
+        has_scripts: true,
+        trusted: false,
+        validation_errors: ['Missing metadata <bad>']
+      }
+    }
+  });
+
+  const overview = view.renderCapabilityInspector({ key: 'atlas', name: 'Atlas' });
+  assert.match(overview, /role="region"/);
+  assert.doesNotMatch(overview, /role="dialog"/);
+  assert.match(overview, /&lt;img src=x onerror=alert\(1\)&gt; Planning/);
+  assert.match(overview, /Required MCP servers/);
+  assert.match(overview, /Untrusted scripts/);
+  assert.doesNotMatch(overview, /<img src=x/);
+
+  view.capabilityInspector.activeTab = 'instructions';
+  const instructions = view.renderCapabilityInspector({ key: 'atlas', name: 'Atlas' });
+  assert.match(instructions, /&lt;script&gt;unsafe\(\)&lt;\/script&gt;/);
+  assert.match(instructions, /Manage on the Skills page/);
+
+  view.closeCapabilityInspector();
+  assert.equal(view.capabilityInspector.open, false);
+  assert.equal(view.pendingCapabilityInspectorFocus, 'origin:skill%3Ask-1%3AAtlas');
+});
+
+test('MCP capability inspector exposes safe config, schemas, docs, and explicit start only', () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = {
+    marked: { parse: markdown => `<p>${markdown}</p><script>bad()</script>` },
+    DOMPurify: { sanitize: html => html.replace(/<script>[\s\S]*?<\/script>/g, '') }
+  };
+  try {
+    const view = makeLoadoutView({
+      capabilityInspector: {
+        open: true,
+        kind: 'mcp',
+        bindingId: 'mcp-1',
+        name: 'notes',
+        agent: 'Atlas',
+        encodedAgent: 'Atlas',
+        activeTab: 'overview',
+        status: 'loaded',
+        assigned: false,
+        locked: false,
+        data: {
+          server: 'notes',
+          status: 'stopped',
+          command: 'npx',
+          args: ['-y', '@ori/notes'],
+          transport: 'stdio',
+          env_keys: ['NOTES_TOKEN'],
+          env: { NOTES_TOKEN: 'secret-value-must-not-render' },
+          tools: [],
+          server_info: { name: 'notes-server', version: '1.2.3' },
+          workspace_binding: { source: 'workspace', alias: 'team_notes', scope: {} },
+          readme: {
+            markdown: '# Notes docs',
+            source_url: 'https://example.com/notes'
+          },
+          instructions: 'Use **notes** safely.'
+        }
+      }
+    });
+
+    const overview = view.renderCapabilityInspector({ key: 'atlas', name: 'Atlas' });
+    assert.match(overview, /Start server &amp; load tools/);
+    assert.match(overview, /NOTES_TOKEN/);
+    assert.doesNotMatch(overview, /secret-value-must-not-render/);
+    assert.match(overview, /npx -y @ori\/notes/);
+
+    view.capabilityInspector.activeTab = 'tools';
+    view.capabilityInspector.data.status = 'running';
+    view.capabilityInspector.data.tools = [
+      {
+        name: 'create_note',
+        description: 'Create a note',
+        inputSchema: {
+          properties: {
+            title: { type: 'string', description: 'Note title' },
+            tags: { type: ['array', 'null'] }
+          },
+          required: ['title']
+        }
+      }
+    ];
+    const tools = view.renderCapabilityInspector({ key: 'atlas', name: 'Atlas' });
+    assert.match(tools, /create_note/);
+    assert.match(tools, /Required/);
+    assert.match(tools, /Optional/);
+    assert.doesNotMatch(tools, /data-cmd-capability-start/);
+
+    view.capabilityInspector.activeTab = 'docs';
+    const docs = view.renderCapabilityInspector({ key: 'atlas', name: 'Atlas' });
+    assert.match(docs, /Notes docs/);
+    assert.match(docs, /View source/);
+    assert.doesNotMatch(docs, /<script>/);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('capability inspector ignores stale detail responses after a second row is selected', async () => {
+  let resolveFirst;
+  let resolveSecond;
+  const first = new Promise(resolve => {
+    resolveFirst = resolve;
+  });
+  const second = new Promise(resolve => {
+    resolveSecond = resolve;
+  });
+  const view = makeLoadoutView({
+    viewMode: 'map',
+    activeMapWindow: 'inspector',
+    selectedAgentKey: 'atlas',
+    capabilityInspectorRequestId: 0,
+    page: {
+      loadWorkspaceSkillDetails(_agent, name) {
+        return name === 'first' ? first : second;
+      }
+    }
+  });
+  const trigger = name => ({
+    getAttribute(attribute) {
+      return {
+        'data-cmd-capability-inspect': 'skill',
+        'data-cmd-loadout-binding': 'sk-' + name,
+        'data-cmd-loadout-name': name,
+        'data-cmd-loadout-agent': 'Atlas',
+        'data-cmd-loadout-enabled': 'true',
+        'data-cmd-loadout-locked': 'false',
+        'data-cmd-capability-origin': 'origin-' + name
+      }[attribute];
+    }
+  });
+
+  const firstOpen = view.openCapabilityInspector(trigger('first'));
+  const secondOpen = view.openCapabilityInspector(trigger('second'));
+  resolveSecond({ name: 'second', description: 'Second detail' });
+  await secondOpen;
+  assert.equal(view.capabilityInspector.name, 'second');
+  assert.equal(view.capabilityInspector.data.description, 'Second detail');
+
+  resolveFirst({ name: 'first', description: 'Stale detail' });
+  await firstOpen;
+  assert.equal(view.capabilityInspector.name, 'second');
+  assert.equal(view.capabilityInspector.data.description, 'Second detail');
+});
+
+test('capability inspector tabs support ArrowLeft, ArrowRight, Home, and End', () => {
+  const view = makeLoadoutView({
+    capabilityInspector: {
+      ...WorkspaceCommandView.prototype.emptyCapabilityInspectorState(),
+      open: true,
+      kind: 'mcp',
+      activeTab: 'overview'
+    }
+  });
+  const tabs = ['overview', 'tools', 'docs'].map(name => ({
+    getAttribute: attribute => (attribute === 'data-cmd-capability-tab' ? name : '')
+  }));
+  tabs.forEach(tab => {
+    tab.closest = selector =>
+      selector === '[role="tablist"]' ? { querySelectorAll: () => tabs } : null;
+  });
+  const event = key => ({
+    key,
+    target: { closest: () => tabs[1] },
+    preventDefault() {}
+  });
+
+  view.handleCapabilityInspectorKeydown(event('ArrowRight'));
+  assert.equal(view.capabilityInspector.activeTab, 'docs');
+  view.handleCapabilityInspectorKeydown(event('ArrowLeft'));
+  assert.equal(view.capabilityInspector.activeTab, 'overview');
+  view.handleCapabilityInspectorKeydown(event('Home'));
+  assert.equal(view.capabilityInspector.activeTab, 'overview');
+  view.handleCapabilityInspectorKeydown(event('End'));
+  assert.equal(view.capabilityInspector.activeTab, 'docs');
+});
+
+test('capability inspector renders retryable errors without removing its tabs or agent context', () => {
+  const view = makeLoadoutView({
+    capabilityInspector: {
+      ...WorkspaceCommandView.prototype.emptyCapabilityInspectorState(),
+      open: true,
+      kind: 'skill',
+      name: 'planner',
+      agent: 'Atlas',
+      encodedAgent: 'Atlas',
+      activeTab: 'overview',
+      status: 'error',
+      error: 'catalog unavailable'
+    }
+  });
+
+  const html = view.renderCapabilityInspector({ key: 'atlas', name: 'Atlas' });
+  assert.match(html, /catalog unavailable/);
+  assert.match(html, /data-cmd-capability-retry/);
+  assert.match(html, /role="tabpanel"/);
+  assert.match(html, /Not assigned to Atlas/);
+});
+
+test('capability inspector resets when the selected agent or command mode changes', () => {
+  const view = makeLoadoutView({
+    selectedAgentKey: 'atlas',
+    agentSelectionInitialized: true,
+    capabilityInspectorRequestId: 4,
+    capabilityInspector: {
+      ...WorkspaceCommandView.prototype.emptyCapabilityInspectorState(),
+      open: true,
+      agent: 'Atlas'
+    },
+    persistAgentKey() {},
+    persistCommandViewMode() {},
+    syncURLState() {},
+    viewMode: 'map'
+  });
+
+  view.selectAgent('Bolt', { focus: false });
+  assert.equal(view.capabilityInspector.open, false);
+  assert.equal(view.capabilityInspectorRequestId, 5);
+
+  view.capabilityInspector = {
+    ...WorkspaceCommandView.prototype.emptyCapabilityInspectorState(),
+    open: true
+  };
+  view.setCommandViewMode('details', { focus: false });
+  assert.equal(view.capabilityInspector.open, false);
+});
+
+test('capability inspector Escape closes details before closing the Unit Sheet', () => {
+  const view = makeLoadoutView({
+    active: true,
+    viewMode: 'map',
+    activeMapWindow: 'inspector',
+    capabilityInspector: {
+      ...WorkspaceCommandView.prototype.emptyCapabilityInspectorState(),
+      open: true,
+      kind: 'skill',
+      originKey: 'skill-origin'
+    }
+  });
+
+  view.handleGlobalKeydown({ key: 'Escape' });
+  assert.equal(view.capabilityInspector.open, false);
+  assert.equal(view.activeMapWindow, 'inspector');
+
+  view.handleGlobalKeydown({ key: 'Escape' });
+  assert.equal(view.activeMapWindow, '');
+});
+
+test('removing a loadout capability delegates with the decoded agent and returns focus to Add', async () => {
   const calls = [];
   const view = makeLoadoutView({
     page: {
@@ -2755,26 +3155,26 @@ test('toggling a loadout chip delegates to the page with decoded agent and inver
     }
   });
 
-  await view.toggleLoadoutBinding('skill', encodeURIComponent('Atlas Prime'), 'sk-9', false);
+  await view.removeLoadoutCapability('skill', encodeURIComponent('Atlas Prime'), 'sk-9');
 
   assert.deepEqual(calls, [['skill', 'Atlas Prime', 'sk-9', false]]);
   assert.equal(view.loadoutBusyKey, '');
+  assert.match(view.pendingCapabilityInspectorFocus, /^add:/);
 });
 
-test('handleLoadoutClick routes a toggle target to toggleLoadoutBinding', () => {
+test('handleLoadoutClick routes a remove target to removeLoadoutCapability', () => {
   const args = [];
   const view = makeLoadoutView();
-  view.toggleLoadoutBinding = (...a) => args.push(a);
+  view.removeLoadoutCapability = (...a) => args.push(a);
   const target = {
     closest(selector) {
-      if (selector === '[data-cmd-loadout-toggle]') {
+      if (selector === '[data-cmd-loadout-remove]') {
         return {
           getAttribute(name) {
             return {
-              'data-cmd-loadout-toggle': 'mcp',
+              'data-cmd-loadout-remove': 'mcp',
               'data-cmd-loadout-agent': 'Atlas',
-              'data-cmd-loadout-binding': 'mcp-3',
-              'aria-checked': 'false'
+              'data-cmd-loadout-binding': 'mcp-3'
             }[name];
           }
         };
@@ -2786,13 +3186,15 @@ test('handleLoadoutClick routes a toggle target to toggleLoadoutBinding', () => 
   const handled = view.handleLoadoutClick({ target });
 
   assert.equal(handled, true);
-  assert.deepEqual(args, [['mcp', 'Atlas', 'mcp-3', true]]);
+  assert.deepEqual(args, [['mcp', 'Atlas', 'mcp-3']]);
 });
 
-test('opening a loadout picker loads registry additions; reopening the same kind closes it', async () => {
+test('opening a loadout modal loads agent additions; reopening the same kind closes it', async () => {
+  const calls = [];
   const view = makeLoadoutView({
     page: {
-      async listAgentLoadoutAdditions(kind) {
+      async listAgentLoadoutAdditions(kind, agentName) {
+        calls.push([kind, agentName]);
         return kind === 'skill' ? ['reviewer', 'summarizer'] : [];
       }
     }
@@ -2800,11 +3202,45 @@ test('opening a loadout picker loads registry additions; reopening the same kind
 
   await view.openLoadoutPicker('skill', 'Atlas');
   assert.equal(view.loadoutAddOpen, 'skill');
+  assert.equal(view.loadoutAddAgent, 'Atlas');
   assert.deepEqual(view.loadoutAddOptions, ['reviewer', 'summarizer']);
+  assert.deepEqual(calls, [['skill', 'Atlas']]);
   assert.equal(view.loadoutAddLoading, false);
 
   await view.openLoadoutPicker('skill', 'Atlas');
   assert.equal(view.loadoutAddOpen, '');
+  assert.equal(view.loadoutAddAgent, '');
+  assert.match(view.pendingLoadoutAddFocus, /^origin:/);
+});
+
+test('loadout Add modal closes on Escape before the Unit Sheet and restores the Add button', () => {
+  let stopped = false;
+  const view = makeLoadoutView({
+    active: true,
+    viewMode: 'map',
+    activeMapWindow: 'inspector',
+    loadoutAddOpen: 'mcp',
+    loadoutAddAgent: 'Atlas'
+  });
+  const modal = {
+    querySelectorAll: () => [],
+    closest: selector => (selector === '[data-cmd-loadout-add-modal]' ? modal : null)
+  };
+
+  const handled = view.handleLoadoutAddKeydown({
+    key: 'Escape',
+    target: modal,
+    preventDefault() {},
+    stopPropagation() {
+      stopped = true;
+    }
+  });
+
+  assert.equal(handled, true);
+  assert.equal(stopped, true);
+  assert.equal(view.loadoutAddOpen, '');
+  assert.equal(view.activeMapWindow, 'inspector');
+  assert.match(view.pendingLoadoutAddFocus, /^origin:/);
 });
 
 test('binding a loadout capability delegates to the page and closes the picker on success', async () => {
@@ -2815,6 +3251,7 @@ test('binding a loadout capability delegates to the page and closes the picker o
     const calls = [];
     const view = makeLoadoutView({
       loadoutAddOpen: 'mcp',
+      loadoutAddAgent: 'Atlas',
       loadoutAddOptions: ['filesystem'],
       page: {
         async addAgentWorkspaceCapability(kind, agentName, name) {
@@ -2828,6 +3265,8 @@ test('binding a loadout capability delegates to the page and closes the picker o
 
     assert.deepEqual(calls, [['mcp', 'Atlas', 'filesystem']]);
     assert.equal(view.loadoutAddOpen, '');
+    assert.equal(view.loadoutAddAgent, '');
+    assert.match(view.pendingLoadoutAddFocus, /^origin:/);
     assert.deepEqual(toasts, ['Tool "filesystem" added']);
   } finally {
     globalThis.window = originalWindow;
@@ -2840,6 +3279,15 @@ test('a failed loadout binding surfaces an error and preserves the picker', asyn
   try {
     const view = makeLoadoutView({
       loadoutAddOpen: 'skill',
+      loadoutAddAgent: 'Atlas',
+      loadoutAddOptions: ['reviewer'],
+      loadoutAddPreview: {
+        name: 'reviewer',
+        status: 'loaded',
+        activeTab: 'overview',
+        data: { description: 'Reviews changes.' },
+        error: ''
+      },
       page: {
         async addAgentWorkspaceCapability() {
           throw new Error('registry offline');
@@ -2852,6 +3300,9 @@ test('a failed loadout binding surfaces an error and preserves the picker', asyn
     assert.equal(view.loadoutAddOpen, 'skill');
     assert.match(view.loadoutError, /could not add reviewer/i);
     assert.match(view.loadoutError, /registry offline/);
+    const html = view.loadoutAddModalHTML('Atlas');
+    assert.match(html, /role="alert"/);
+    assert.match(html, /registry offline/);
   } finally {
     globalThis.window = originalWindow;
   }

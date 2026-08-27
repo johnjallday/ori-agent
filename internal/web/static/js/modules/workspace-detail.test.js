@@ -1238,6 +1238,63 @@ test('setAgentWorkspaceCapabilityEnabled merges the agent into the binding acces
   assert.deepEqual([...persisted[0][1]].sort(), ['inst-A', 'inst-B']);
 });
 
+test('agent Toolbox lists only assigned capabilities and offers removed workspace bindings again', async () => {
+  const page = new WorkspaceDetailPage('ws-1');
+  page.workspace = {
+    agent_instances: [
+      { id: 'inst-A', name: 'Atlas' },
+      { id: 'inst-B', name: 'Bolt' }
+    ],
+    skill_bindings: [
+      { id: 'skill-planner', skill_name: 'planner', enabled: true },
+      { id: 'skill-writer', skill_name: 'writer', enabled: true }
+    ],
+    agent_skill_access: [
+      { agent_instance_id: 'inst-A', enabled_binding_ids: ['skill-planner'] },
+      { agent_instance_id: 'inst-B', enabled_binding_ids: ['skill-writer'] }
+    ],
+    mcp_bindings: [
+      { id: 'mcp-notes', server_name: 'notes', enabled: true },
+      { id: 'mcp-calendar', server_name: 'calendar', enabled: true }
+    ],
+    agent_mcp_access: [
+      { agent_instance_id: 'inst-A', enabled_binding_ids: ['mcp-notes'] },
+      { agent_instance_id: 'inst-B', enabled_binding_ids: ['mcp-calendar'] }
+    ],
+    directory_references: [{ path: '/approved/project' }]
+  };
+  page.skillsManager.loadAvailableSkills = async () => [
+    { name: 'planner' },
+    { name: 'writer' },
+    { name: 'reviewer' }
+  ];
+  page.mcpManager.loadAvailableMCPServers = async () => [
+    { name: 'notes' },
+    { name: 'calendar' },
+    { name: 'weather' }
+  ];
+
+  assert.deepEqual(
+    page.getAgentWorkspaceSkillLoadout('Atlas').map(item => item.name),
+    ['planner']
+  );
+  assert.deepEqual(
+    page.getAgentWorkspaceMCPLoadout('Atlas').map(item => item.name),
+    ['notes', 'filesystem'],
+    'the locked workspace-native capability remains visible'
+  );
+  assert.deepEqual(await page.listAgentLoadoutAdditions('skill', 'Atlas'), ['reviewer', 'writer']);
+  assert.deepEqual(await page.listAgentLoadoutAdditions('mcp', 'Atlas'), ['calendar', 'weather']);
+
+  page.workspace.agent_skill_access[0].enabled_binding_ids = [];
+  assert.deepEqual(page.getAgentWorkspaceSkillLoadout('Atlas'), []);
+  assert.deepEqual(await page.listAgentLoadoutAdditions('skill', 'Atlas'), [
+    'planner',
+    'reviewer',
+    'writer'
+  ]);
+});
+
 test('setAgentWorkspaceCapabilityEnabled removes the agent when disabling', async () => {
   const page = new WorkspaceDetailPage('ws-1');
   page.workspace = {
@@ -1316,6 +1373,140 @@ test('addAgentWorkspaceCapability reuses an existing enabled binding without a P
 
   assert.equal(fetched, false, 'no binding is created when one already exists enabled');
   assert.deepEqual(enableCalls, [['skill', 'Atlas', 'sk-existing', true]]);
+});
+
+test('skill detail facade encodes agent and name, caches successes, and keeps failures retryable', async () => {
+  const page = new WorkspaceDetailPage('ws-1');
+  const originalFetch = global.fetch;
+  const calls = [];
+  let failFirst = true;
+  global.fetch = async url => {
+    calls.push(url);
+    if (url.includes('retry-skill') && failFirst) {
+      failFirst = false;
+      return { ok: false, status: 503, text: async () => 'catalog unavailable' };
+    }
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        name: url.includes('retry-skill') ? 'retry-skill' : 'review:planner',
+        prompt: 'Complete prompt',
+        allowed_tools: ['read_file']
+      }),
+      text: async () => ''
+    };
+  };
+  try {
+    const first = await page.loadWorkspaceSkillDetails('Atlas Prime', 'review:planner');
+    const cached = await page.loadWorkspaceSkillDetails('Atlas Prime', 'review:planner');
+    assert.equal(first.prompt, 'Complete prompt');
+    assert.equal(cached, first);
+    assert.equal(calls[0], '/api/skills/review%3Aplanner?agent=Atlas%20Prime');
+    assert.equal(calls.length, 1, 'a successful detail response is session-cached');
+
+    await assert.rejects(
+      page.loadWorkspaceSkillDetails('Atlas Prime', 'retry-skill'),
+      /catalog unavailable/
+    );
+    const retried = await page.loadWorkspaceSkillDetails('Atlas Prime', 'retry-skill');
+    assert.equal(retried.name, 'retry-skill');
+    assert.equal(calls.filter(url => url.includes('retry-skill')).length, 2);
+
+    await page.loadWorkspaceSkillDetails('Bolt', 'review:planner');
+    assert.equal(calls.length, 4, 'an identical skill name is cached separately per agent');
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('MCP detail facade is passive by default and refreshes its cache only on explicit start', async () => {
+  const page = new WorkspaceDetailPage('ws-1');
+  page.workspace = {
+    mcp_bindings: [
+      {
+        id: 'mcp-notes',
+        server_name: 'notes server',
+        alias: 'team_notes',
+        enabled: true,
+        scope: { notebook: 'team' }
+      }
+    ],
+    directory_references: []
+  };
+  const originalFetch = global.fetch;
+  const calls = [];
+  global.fetch = async url => {
+    calls.push(url);
+    const started = url.endsWith('?start=true');
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        server: 'notes server',
+        status: started ? 'running' : 'stopped',
+        env_keys: ['NOTES_TOKEN'],
+        tools: started ? [{ name: 'create_note', inputSchema: {} }] : []
+      }),
+      text: async () => ''
+    };
+  };
+  try {
+    const passive = await page.loadWorkspaceMCPDetails('mcp-notes', 'notes server');
+    const cached = await page.loadWorkspaceMCPDetails('mcp-notes', 'notes server');
+    assert.equal(passive.status, 'stopped');
+    assert.equal(cached.status, 'stopped');
+    assert.deepEqual(passive.workspace_binding.scope, { notebook: 'team' });
+    assert.deepEqual(calls, ['/api/mcp/servers/notes%20server/details']);
+
+    const addPreview = await page.loadWorkspaceMCPDetails('', 'notes server');
+    assert.equal(addPreview.workspace_binding.id, 'mcp-notes');
+    assert.equal(calls.length, 1, 'name-only Add previews reuse the passive detail cache');
+
+    const started = await page.loadWorkspaceMCPDetails('mcp-notes', 'notes server', {
+      start: true
+    });
+    assert.equal(started.status, 'running');
+    assert.equal(started.tools.length, 1);
+    assert.equal(calls[1], '/api/mcp/servers/notes%20server/details?start=true');
+
+    const refreshedCache = await page.loadWorkspaceMCPDetails('mcp-notes', 'notes server');
+    assert.equal(refreshedCache.status, 'running');
+    assert.equal(calls.length, 2);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('synthesized filesystem details stay local, locked, and carry approved roots', async () => {
+  const page = new WorkspaceDetailPage('ws-1');
+  page.workspace = {
+    mcp_bindings: [],
+    directory_references: [{ path: '/approved/project' }, { path: '/approved/reference' }]
+  };
+  const originalFetch = global.fetch;
+  let fetched = false;
+  global.fetch = async () => {
+    fetched = true;
+    throw new Error('synthesized bindings must not use the global endpoint');
+  };
+  try {
+    const loadout = page.getAgentWorkspaceMCPLoadout('Atlas');
+    assert.equal(loadout.length, 1);
+    assert.equal(loadout[0].source, 'synthesized');
+    assert.deepEqual(loadout[0].scope.roots, ['/approved/project', '/approved/reference']);
+
+    const detail = await page.loadWorkspaceMCPDetails('workspace-filesystem', 'filesystem');
+    assert.equal(detail.synthesized, true);
+    assert.equal(detail.workspace_binding.locked, true);
+    assert.deepEqual(detail.workspace_binding.scope.roots, [
+      '/approved/project',
+      '/approved/reference'
+    ]);
+    assert.equal(fetched, false);
+  } finally {
+    global.fetch = originalFetch;
+  }
 });
 
 function makeClassList(initial = []) {

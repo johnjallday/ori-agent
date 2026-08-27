@@ -104,9 +104,13 @@ func ApplyLegacyAccessToToolbox(ws *Workspace, agentInstanceID string, kind Lega
 // with the ones the access list names, preserving agent-learned entries.
 func rewriteWorkspaceSkillEntries(ws *Workspace, existing []ToolboxSkillRef, enabledBindingIDs []string) []ToolboxSkillRef {
 	preserved := make([]ToolboxSkillRef, 0, len(existing))
+	preservedIdentities := make(map[string]struct{}, len(existing))
 	for _, ref := range existing {
 		if NormalizeToolboxSource(ref.Source) != ToolboxSourceWorkspaceProvided {
 			preserved = append(preserved, ref)
+			if identity := NormalizeToolboxCapabilityID(ref.CapabilityID); identity != "" {
+				preservedIdentities[identity] = struct{}{}
+			}
 		}
 	}
 
@@ -117,11 +121,20 @@ func rewriteWorkspaceSkillEntries(ws *Workspace, existing []ToolboxSkillRef, ena
 			continue
 		}
 		name := strings.TrimSpace(binding.SkillName)
-		if name == "" {
+		identity := NormalizeToolboxCapabilityID(name)
+		if identity == "" {
+			continue
+		}
+		// Migration deliberately omits a workspace binding shadowed by an
+		// agent-learned/core skill: the legacy access model controlled whether
+		// the capability was available, not which source supplied it. Preserve
+		// that precedence when translating later access writes, or changing an
+		// unrelated switch can recreate a source collision and block removal.
+		if _, shadowed := preservedIdentities[identity]; shadowed {
 			continue
 		}
 		preserved = append(preserved, ToolboxSkillRef{
-			CapabilityID:      NormalizeToolboxCapabilityID(name),
+			CapabilityID:      identity,
 			DisplayName:       name,
 			Source:            ToolboxSourceWorkspaceProvided,
 			BindingID:         binding.ID,

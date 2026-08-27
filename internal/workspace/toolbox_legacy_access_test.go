@@ -68,6 +68,59 @@ func TestApplyLegacyAccessToToolbox_SkillAccessProducesANewVersion(t *testing.T)
 	}
 }
 
+// A migrated learned skill shadows its same-named workspace binding. Changing
+// some other legacy switch must preserve that precedence instead of recreating
+// the source collision migration intentionally avoided.
+func TestApplyLegacyAccessToToolbox_SkipsWorkspaceBindingsShadowedByLearnedSkills(t *testing.T) {
+	ws := &Workspace{
+		ID: "ws-shadowed-skill",
+		AgentInstances: []AgentInstance{
+			{ID: "inst-1", Name: "Producer", NodeID: "producer-1", InstanceNumber: 1},
+		},
+		SkillBindings: []SkillBinding{
+			{ID: "sb-reaper", SkillName: "reaper-session-setup", Enabled: true},
+			{ID: "sb-applescript", SkillName: "applescript", Enabled: true},
+		},
+		Toolboxes: []ToolboxDefinition{
+			{
+				ID:      "tbx-shadowed",
+				Name:    "Workspace Default",
+				Status:  ToolboxStatusActive,
+				Version: 1,
+				Skills: []ToolboxSkillRef{
+					{CapabilityID: "reaper-session-setup", DisplayName: "reaper-session-setup", Source: ToolboxSourceAgentLearned},
+					{CapabilityID: "applescript", DisplayName: "applescript", Source: ToolboxSourceWorkspaceProvided, BindingID: "sb-applescript"},
+				},
+			},
+		},
+		ToolboxAssignments: []AgentToolboxAssignment{
+			{AgentInstanceID: "inst-1", ToolboxID: "tbx-shadowed", ToolboxVersion: 1},
+		},
+	}
+
+	assignment, bridged, err := ApplyLegacyAccessToToolbox(
+		ws,
+		"inst-1",
+		LegacyAccessSkills,
+		[]string{"sb-reaper"},
+		"test",
+	)
+	if err != nil || !bridged {
+		t.Fatalf("ApplyLegacyAccessToToolbox() bridged=%v err=%v", bridged, err)
+	}
+	if assignment.ToolboxVersion != 2 {
+		t.Fatalf("expected the bridge to produce version 2, got %d", assignment.ToolboxVersion)
+	}
+
+	_, recipe, ok, err := ws.ResolveAssignedToolbox("inst-1")
+	if err != nil || !ok {
+		t.Fatalf("ResolveAssignedToolbox() ok=%v err=%v", ok, err)
+	}
+	assertStringsEqual(t, "shadow-preserving skills", skillIdentities(recipe.Skills), []string{
+		"reaper-session-setup/" + ToolboxSourceAgentLearned,
+	})
+}
+
 // An MCP-access write rewrites only the MCP half, and an all-tools binding
 // becomes an inherited entry rather than an invented subset.
 func TestApplyLegacyAccessToToolbox_MCPAccessRewritesOnlyBindings(t *testing.T) {

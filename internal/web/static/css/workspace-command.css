@@ -38,6 +38,7 @@
   --wsx-layer-menu: 1100;
   --wsx-layer-toast: 2000;
   --wsx-layer-legacy-map-window: 10010;
+  --wsx-layer-unit-sheet-modal: 10020;
   --wsx-layer-legacy-stat-modal: 1050;
 
   /* NOTE: this scale orders surfaces WITHIN the workspace page, and it is
@@ -1684,10 +1685,14 @@
   .ws-cmd-map-window-inspector .ws-cmd-rpg-sheet {
     grid-column: 1;
   }
-  .ws-cmd-map-window-inspector .ws-cmd-rpg-command-panel {
+  .ws-cmd-map-window-inspector .ws-cmd-rpg-command-panel,
+  .ws-cmd-map-window-inspector .ws-cmd-capability-inspector {
     grid-column: 2;
     grid-row: 2;
     align-self: start;
+  }
+  .ws-cmd-map-window-inspector .ws-cmd-capability-inspector {
+    max-height: min(626px, calc(100vh - 190px));
   }
 }
 .ws-cmd-map-agent-sheet-head {
@@ -3881,49 +3886,397 @@ button.ws-cmd-rpg-class-card:focus-visible {
   color: var(--ws-ink-faint);
   border-style: dashed;
 }
-.ws-cmd-loadout-picker {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-  padding: 8px;
-  border: 1px solid var(--ws-line-bright);
-  background: rgba(9, 11, 15, 0.7);
+.ws-cmd-rpg-loadout .ws-cmd-loadout-rows,
+.ws-cmd-loadout-rows {
+  display: grid;
+  gap: 6px;
+  width: 100%;
 }
-.ws-cmd-loadout-picker.is-loading,
-.ws-cmd-loadout-picker.is-empty {
+.ws-cmd-rpg-loadout .ws-cmd-loadout-row,
+.ws-cmd-loadout-row {
+  min-width: 0;
+  min-height: 46px;
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  border: 1px solid var(--ws-line);
+  background: rgba(5, 7, 10, 0.42);
+  transition:
+    border-color 0.14s ease,
+    background 0.14s ease;
+}
+.ws-cmd-loadout-row:hover,
+.ws-cmd-loadout-row.is-selected {
+  border-color: var(--ws-faction-deep);
+  background: rgba(70, 211, 154, 0.07);
+}
+.ws-cmd-loadout-row.is-selected {
+  box-shadow: inset 2px 0 0 var(--ws-faction);
+}
+.ws-cmd-loadout-row.is-locked {
+  border-style: dashed;
+}
+.ws-cmd-loadout-inspect {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  border: 0;
+  background: transparent;
+  color: var(--ws-ink);
+  cursor: pointer;
+  text-align: left;
+}
+.ws-cmd-loadout-inspect:hover .ws-cmd-loadout-row-copy strong {
+  color: var(--ws-faction);
+}
+.ws-cmd-loadout-row-icon {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--ws-line-bright);
+  color: var(--ws-faction);
+  background: rgba(70, 211, 154, 0.06);
+}
+.ws-cmd-loadout-row-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ws-cmd-loadout-row-copy strong,
+.ws-cmd-loadout-row-copy small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ws-cmd-loadout-row-copy strong {
+  color: var(--ws-ink);
+  font-size: 10.5px;
+}
+.ws-cmd-loadout-row-copy small {
+  color: var(--ws-ink-faint);
+  font-family: var(--ws-font-mono);
+  font-size: 8px;
+  text-transform: uppercase;
+}
+.ws-cmd-loadout-remove {
+  flex: 0 0 48px;
+  width: 48px;
+  min-height: 44px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-left: 1px solid var(--ws-line);
+  background: rgba(0, 0, 0, 0.18);
+  color: var(--ws-ink-faint);
+  cursor: pointer;
+  transition:
+    color 0.14s ease,
+    background 0.14s ease;
+}
+.ws-cmd-loadout-remove:hover:not([disabled]) {
+  color: var(--ws-alert);
+  background: rgba(232, 120, 99, 0.1);
+}
+.ws-cmd-loadout-remove.is-busy,
+.ws-cmd-loadout-remove[disabled] {
+  opacity: 0.5;
+  cursor: progress;
+}
+.ws-cmd-loadout-lock {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 9px;
+  border-left: 1px solid var(--ws-line);
+  color: var(--ws-ink-faint);
+  font-family: var(--ws-font-mono);
+  font-size: 8px;
+  text-transform: uppercase;
+}
+.ws-cmd-loadout-inspect:focus-visible,
+.ws-cmd-loadout-remove:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline: 2px solid var(--ws-faction);
+  outline-offset: -2px;
+}
+.ws-cmd-loadout-add-modal {
+  --ws-bg: #0c0d10;
+  --ws-bg-2: #121317;
+  --ws-line: #3b3f49;
+  --ws-line-bright: #69717e;
+  --ws-ink: #e5e8ec;
+  --ws-ink-dim: #b3b9c2;
+  --ws-ink-faint: #929aa5;
+  --ws-faction: #46d39a;
+  --ws-alert: #e87863;
+  position: fixed;
+  inset: 0;
+  z-index: var(--wsx-layer-unit-sheet-modal);
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+.ws-cmd-loadout-add-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(3, 5, 8, 0.58);
+  backdrop-filter: blur(1px);
+}
+.ws-cmd-loadout-add-dialog {
+  position: relative;
+  z-index: 1;
+  width: min(460px, 100%);
+  max-height: min(620px, calc(100vh - 48px));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--ws-line-bright);
+  background:
+    linear-gradient(rgba(70, 211, 154, 0.024) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(70, 211, 154, 0.02) 1px, transparent 1px),
+    linear-gradient(180deg, #15171c, #0d0f13);
+  background-size:
+    24px 24px,
+    24px 24px,
+    auto;
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.72);
+  clip-path: polygon(
+    0 0,
+    calc(100% - 16px) 0,
+    100% 16px,
+    100% 100%,
+    16px 100%,
+    0 calc(100% - 16px)
+  );
+}
+.ws-cmd-loadout-add-dialog.is-preview {
+  width: min(680px, 100%);
+  max-height: min(760px, calc(100vh - 48px));
+}
+.ws-cmd-loadout-add-dialog > header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--ws-line);
+  background: rgba(9, 11, 15, 0.88);
+}
+.ws-cmd-loadout-add-dialog > header > div {
+  min-width: 0;
+}
+.ws-cmd-loadout-add-dialog h3 {
+  margin: 3px 0 0;
+  color: #eef0f3;
+  font-size: 18px;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+}
+.ws-cmd-loadout-add-dialog > p {
+  margin: 0;
+  padding: 14px 18px 12px;
+  color: var(--ws-ink-dim);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.ws-cmd-loadout-add-dialog > p strong {
+  color: var(--ws-ink);
+}
+.ws-cmd-loadout-add-close {
+  width: 34px;
+  height: 34px;
+  margin-left: auto;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--ws-line-bright);
+  background: var(--ws-bg-2);
+  color: var(--ws-ink-dim);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+.ws-cmd-loadout-add-close:hover {
+  color: var(--ws-alert);
+  border-color: rgba(226, 101, 77, 0.52);
+}
+.ws-cmd-loadout-add-close:focus-visible,
+.ws-cmd-loadout-add-dialog:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 2px;
+}
+.ws-cmd-loadout-add-body {
+  min-height: 0;
+  padding: 0 18px 18px;
+  overflow-y: auto;
+}
+.ws-cmd-loadout-picker {
+  display: grid;
+  gap: 8px;
+}
+.ws-cmd-loadout-picker-state,
+.ws-cmd-loadout-picker-empty {
+  min-height: 104px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  border: 1px dashed var(--ws-line-bright);
   color: var(--ws-ink-faint);
   font-family: var(--ws-font-mono);
   font-size: 10px;
-  font-style: italic;
+}
+.ws-cmd-loadout-picker-state > span {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--ws-line-bright);
+  border-top-color: var(--ws-faction);
+  border-radius: 50%;
+  animation: ws-cmd-capability-spin 0.8s linear infinite;
 }
 .ws-cmd-loadout-picker-item {
-  display: inline-flex;
+  min-width: 0;
+  min-height: 58px;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 4px;
-  padding: 3px 8px;
+  gap: 10px;
+  padding: 9px 11px;
   border: 1px solid var(--ws-line-bright);
-  background: rgba(9, 11, 15, 0.84);
+  background: rgba(5, 7, 10, 0.58);
   color: var(--ws-ink-dim);
-  font-family: var(--ws-font-mono);
-  font-size: 10px;
   cursor: pointer;
+  text-align: left;
 }
-.ws-cmd-loadout-picker-item i {
-  font-size: 9px;
+.ws-cmd-loadout-picker-item > span:not(.ws-cmd-loadout-picker-item-icon) {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ws-cmd-loadout-picker-item strong,
+.ws-cmd-loadout-picker-item small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ws-cmd-loadout-picker-item strong {
+  color: var(--ws-ink);
+  font-size: 11px;
+}
+.ws-cmd-loadout-picker-item small {
+  color: var(--ws-ink-faint);
+  font-family: var(--ws-font-mono);
+  font-size: 8px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+.ws-cmd-loadout-picker-item > i {
   color: var(--ws-faction);
+  font-size: 12px;
+}
+.ws-cmd-loadout-picker-item-icon {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--ws-line-bright);
+  color: var(--ws-faction);
+  background: rgba(70, 211, 154, 0.06);
 }
 .ws-cmd-loadout-picker-item:hover:not([disabled]) {
-  color: var(--ws-ink);
   border-color: var(--ws-faction);
+  background: rgba(70, 211, 154, 0.08);
 }
 .ws-cmd-loadout-picker-item:focus-visible {
   outline: 2px solid var(--ws-faction);
-  outline-offset: 2px;
+  outline-offset: -2px;
 }
 .ws-cmd-loadout-picker-item.is-busy,
 .ws-cmd-loadout-picker-item[disabled] {
   opacity: 0.55;
   cursor: progress;
+}
+.ws-cmd-loadout-add-error {
+  margin: 0 18px 12px;
+  padding: 9px 10px;
+  border: 1px solid rgba(226, 101, 77, 0.48);
+  background: rgba(226, 101, 77, 0.09);
+  color: #f29a88;
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+}
+.ws-cmd-loadout-preview {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid rgba(70, 211, 154, 0.28);
+  background: rgba(5, 7, 10, 0.62);
+}
+.ws-cmd-loadout-preview > header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  padding: 11px;
+  border-bottom: 1px solid var(--ws-line);
+  background: rgba(9, 11, 15, 0.96);
+}
+.ws-cmd-loadout-preview > header > div {
+  min-width: 0;
+}
+.ws-cmd-loadout-preview > header span,
+.ws-cmd-loadout-preview > header small {
+  display: block;
+  color: var(--ws-faction);
+  font-family: var(--ws-font-mono);
+  font-size: 8px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.ws-cmd-loadout-preview > header h4 {
+  margin: 2px 0 3px;
+  color: #f2f4f7;
+  font-size: 17px;
+  overflow-wrap: anywhere;
+}
+.ws-cmd-loadout-preview > header small {
+  color: var(--ws-ink-faint);
+  letter-spacing: 0;
+}
+.ws-cmd-loadout-preview-body {
+  min-height: 180px;
+  max-height: min(390px, calc(100vh - 330px));
+  overflow: auto;
+  padding: 12px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--ws-line-bright) transparent;
+}
+.ws-cmd-loadout-preview > footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--ws-line);
+  background: rgba(9, 11, 15, 0.96);
+}
+.ws-cmd-loadout-preview > footer > span {
+  color: var(--ws-ink-faint);
+  font-family: var(--ws-font-mono);
+  font-size: 8px;
+  text-transform: uppercase;
+}
+.ws-cmd-loadout-preview > footer .ws-cmd-capability-action {
+  min-width: 112px;
 }
 .ws-cmd-loadout-editor-error {
   margin: 0;
@@ -3964,6 +4317,341 @@ button.ws-cmd-rpg-class-card:focus-visible {
 }
 .ws-cmd-loadout-prompt.is-error {
   border-color: rgba(226, 101, 77, 0.42);
+}
+
+/* Read-only capability drill-down inside the existing Unit Sheet dialog. */
+.ws-cmd-capability-inspector {
+  min-width: 0;
+  min-height: 340px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid rgba(70, 211, 154, 0.28);
+  background:
+    linear-gradient(rgba(70, 211, 154, 0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(70, 211, 154, 0.022) 1px, transparent 1px), rgba(5, 7, 10, 0.72);
+  background-size: 24px 24px;
+  clip-path: polygon(
+    0 0,
+    calc(100% - 10px) 0,
+    100% 10px,
+    100% 100%,
+    10px 100%,
+    0 calc(100% - 10px)
+  );
+}
+.ws-cmd-capability-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  padding: 11px;
+  border-bottom: 1px solid var(--ws-line);
+  background: rgba(9, 11, 15, 0.97);
+}
+.ws-cmd-capability-head > div {
+  min-width: 0;
+}
+.ws-cmd-capability-head span,
+.ws-cmd-capability-head small {
+  display: block;
+  color: var(--ws-faction);
+  font-family: var(--ws-font-mono);
+  font-size: 8px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.ws-cmd-capability-head h3 {
+  margin: 2px 0 3px;
+  color: #f2f4f7;
+  font-family: var(--ws-font-display);
+  font-size: 18px;
+  letter-spacing: 0.4px;
+  overflow-wrap: anywhere;
+}
+.ws-cmd-capability-head small {
+  color: var(--ws-ink-faint);
+  letter-spacing: 0;
+}
+.ws-cmd-capability-back,
+.ws-cmd-capability-action {
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 7px 9px;
+  border: 1px solid var(--ws-line-bright);
+  background: rgba(0, 0, 0, 0.24);
+  color: var(--ws-ink-dim);
+  cursor: pointer;
+  font-family: var(--ws-font-mono);
+  font-size: 9px;
+  text-transform: uppercase;
+}
+.ws-cmd-capability-action.is-primary {
+  color: #06120d;
+  border-color: var(--ws-faction);
+  background: var(--ws-faction);
+}
+.ws-cmd-capability-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  border-bottom: 1px solid var(--ws-line);
+  background: rgba(9, 11, 15, 0.97);
+}
+.ws-cmd-capability-tabs button {
+  min-height: 40px;
+  flex: 1 1 0;
+  border: 0;
+  border-right: 1px solid var(--ws-line);
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--ws-ink-faint);
+  cursor: pointer;
+  font-family: var(--ws-font-mono);
+  font-size: 8px;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+}
+.ws-cmd-capability-tabs button[aria-selected="true"] {
+  color: var(--ws-faction);
+  border-bottom-color: var(--ws-faction);
+  background: rgba(70, 211, 154, 0.05);
+}
+.ws-cmd-capability-body {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 12px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--ws-line-bright) transparent;
+}
+.ws-cmd-capability-pane,
+.ws-cmd-capability-doc,
+.ws-cmd-capability-tools {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+.ws-cmd-capability-pane h4,
+.ws-cmd-capability-doc h4 {
+  margin: 0;
+  color: var(--ws-ink);
+  font-size: 12px;
+  text-transform: uppercase;
+}
+.ws-cmd-capability-description,
+.ws-cmd-capability-empty,
+.ws-cmd-capability-notice p,
+.ws-cmd-capability-error p {
+  margin: 0;
+  color: var(--ws-ink-dim);
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.ws-cmd-capability-facts {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  border: 1px solid var(--ws-line);
+}
+.ws-cmd-capability-fact {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(92px, 0.38fr) minmax(0, 1fr);
+  gap: 8px;
+  padding: 8px;
+  border-bottom: 1px solid var(--ws-line);
+}
+.ws-cmd-capability-fact:last-child {
+  border-bottom: 0;
+}
+.ws-cmd-capability-fact dt {
+  color: var(--ws-ink-faint);
+  font-family: var(--ws-font-mono);
+  font-size: 8px;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+.ws-cmd-capability-fact dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--ws-ink);
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+.ws-cmd-capability-fact code,
+.ws-cmd-capability-fact pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.ws-cmd-capability-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.ws-cmd-capability-tags code,
+.ws-cmd-capability-params dt span,
+.ws-cmd-capability-params dt em {
+  padding: 2px 4px;
+  border: 1px solid var(--ws-line-bright);
+  color: var(--ws-ink-dim);
+  font-family: var(--ws-font-mono);
+  font-size: 8px;
+  font-style: normal;
+}
+.ws-cmd-capability-prompt,
+.ws-cmd-capability-markdown pre {
+  max-width: 100%;
+  margin: 0;
+  padding: 10px;
+  border: 1px solid var(--ws-line);
+  background: rgba(0, 0, 0, 0.28);
+  color: var(--ws-ink);
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.ws-cmd-capability-markdown {
+  min-width: 0;
+  color: var(--ws-ink-dim);
+  font-size: 10.5px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.ws-cmd-capability-markdown img,
+.ws-cmd-capability-markdown table {
+  max-width: 100%;
+}
+.ws-cmd-capability-warnings,
+.ws-cmd-capability-notice,
+.ws-cmd-capability-error {
+  padding: 9px;
+  border: 1px solid rgba(232, 181, 75, 0.4);
+  background: rgba(232, 181, 75, 0.06);
+  color: var(--ws-keeper);
+}
+.ws-cmd-capability-warnings ul {
+  margin: 5px 0 0;
+  padding-left: 18px;
+  color: var(--ws-ink-dim);
+  font-size: 10px;
+}
+.ws-cmd-capability-error,
+.ws-cmd-capability-start-error {
+  border-color: rgba(226, 101, 77, 0.42);
+  color: var(--ws-alert);
+}
+.ws-cmd-capability-start-error {
+  margin: 0;
+  font-size: 10px;
+}
+.ws-cmd-capability-pane-title,
+.ws-cmd-capability-tool header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.ws-cmd-capability-pane-title span {
+  min-width: 25px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--ws-line-bright);
+  color: var(--ws-faction);
+  font-family: var(--ws-font-mono);
+}
+.ws-cmd-capability-tool {
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid var(--ws-line);
+  background: rgba(0, 0, 0, 0.2);
+}
+.ws-cmd-capability-tool header code {
+  color: var(--ws-faction);
+  overflow-wrap: anywhere;
+}
+.ws-cmd-capability-tool header span,
+.ws-cmd-capability-tool > p,
+.ws-cmd-capability-tool-empty {
+  color: var(--ws-ink-dim);
+  font-size: 9.5px;
+}
+.ws-cmd-capability-tool > p {
+  margin: 6px 0;
+}
+.ws-cmd-capability-params {
+  display: grid;
+  gap: 5px;
+  margin: 8px 0 0;
+}
+.ws-cmd-capability-params > div {
+  min-width: 0;
+  padding-top: 6px;
+  border-top: 1px solid var(--ws-line);
+}
+.ws-cmd-capability-params dt {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.ws-cmd-capability-params dd {
+  margin: 4px 0 0;
+  color: var(--ws-ink-dim);
+  font-size: 9.5px;
+}
+.ws-cmd-capability-loading {
+  min-height: 230px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 7px;
+  color: var(--ws-ink-dim);
+  text-align: center;
+}
+.ws-cmd-capability-loading > span {
+  width: 30px;
+  height: 30px;
+  border: 2px solid var(--ws-line-bright);
+  border-top-color: var(--ws-faction);
+  border-radius: 50%;
+}
+.ws-cmd-capability-loading small {
+  color: var(--ws-ink-faint);
+}
+.ws-cmd-capability-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 11px;
+  border-top: 1px solid var(--ws-line);
+  background: rgba(9, 11, 15, 0.97);
+  color: var(--ws-ink-faint);
+  font-family: var(--ws-font-mono);
+  font-size: 8px;
+  text-transform: uppercase;
+}
+.ws-cmd-capability-footer a,
+.ws-cmd-capability-pane-title a {
+  color: var(--ws-faction);
+}
+.ws-cmd-capability-back:focus-visible,
+.ws-cmd-capability-action:focus-visible,
+.ws-cmd-capability-tabs button:focus-visible,
+.ws-cmd-capability-footer a:focus-visible,
+.ws-cmd-capability-pane-title a:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 2px;
 }
 .ws-cmd-activity-list {
   display: flex;
@@ -4479,6 +5167,28 @@ button.ws-cmd-rpg-class-card:focus-visible {
   --ws-glow: 0 0 0 1px rgba(255, 255, 255, 0.7), 0 20px 42px -26px rgba(10, 10, 10, 0.34);
 }
 
+/* The Operations Map Unit Sheet intentionally remains a dark tactical surface
+   in light app chrome. Restore its dark-surface ink/accent tokens locally so
+   details, prompts, schemas, switches, and focus rings keep readable contrast. */
+[data-bs-theme="light"] .ws-cmd-map-window-inspector {
+  --ws-bg: #0c0d10;
+  --ws-bg-2: #121317;
+  --ws-panel: #16181d;
+  --ws-panel-2: #1a1d23;
+  --ws-line: #3b3f49;
+  --ws-line-bright: #69717e;
+  --ws-ink: #e5e8ec;
+  --ws-ink-dim: #b3b9c2;
+  --ws-ink-faint: #929aa5;
+  --ws-ink-heading: #f4f6f8;
+  --ws-faction: #46d39a;
+  --ws-faction-deep: rgba(70, 211, 154, 0.42);
+  --ws-keeper: #e8b54b;
+  --ws-keeper-deep: rgba(232, 181, 75, 0.38);
+  --ws-idle: #4ec5e6;
+  --ws-alert: #e87863;
+}
+
 [data-bs-theme="light"] .ws-cmd-title h2,
 [data-bs-theme="light"] .ws-cmd-stat .ws-v,
 [data-bs-theme="light"] .ws-cmd-mission-title,
@@ -4717,8 +5427,41 @@ button.ws-cmd-rpg-class-card:focus-visible {
   .ws-cmd-map-window-backdrop {
     padding: 12px;
   }
+  .ws-cmd-loadout-add-modal {
+    padding: 12px;
+  }
+  .ws-cmd-loadout-add-dialog {
+    max-height: calc(100vh - 24px);
+  }
+  .ws-cmd-loadout-picker-item {
+    min-height: 64px;
+  }
   .ws-cmd-map-window {
     max-height: calc(100% - 12px);
+  }
+  .ws-cmd-map-inspector-card.is-capability-open > .ws-cmd-map-agent-sheet-head,
+  .ws-cmd-map-inspector-card.is-capability-open > .ws-cmd-rpg-sheet {
+    display: none;
+  }
+  .ws-cmd-capability-inspector {
+    width: 100%;
+    min-height: min(640px, calc(100vh - 180px));
+    max-height: calc(100vh - 150px);
+  }
+  .ws-cmd-capability-head {
+    grid-template-columns: minmax(76px, auto) minmax(0, 1fr);
+  }
+  .ws-cmd-capability-back,
+  .ws-cmd-capability-action,
+  .ws-cmd-capability-tabs button {
+    min-height: 44px;
+  }
+  .ws-cmd-capability-fact {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .ws-cmd-capability-footer {
+    align-items: flex-start;
+    flex-direction: column;
   }
   .ws-cmd-map-station-grid,
   .ws-cmd-map-inventory-badges,
@@ -4835,11 +5578,20 @@ button.ws-cmd-rpg-class-card:focus-visible {
   .ws-cmd-modal-panel {
     animation: ws-cmd-rise 0.22s ease both;
   }
+  /* Unit Sheet re-renders are used for loading, tabs, and switches. Replaying
+     the whole-dialog entrance on each one creates a flash, so only the initial
+     Unit Sheet opening animates. */
+  .ws-cmd-map-window.has-capability-inspector {
+    animation: none;
+  }
 }
 @media (prefers-reduced-motion: reduce) {
   .ws-cmd-map-agent,
-  .ws-cmd-map-window {
+  .ws-cmd-map-window,
+  .ws-cmd-loadout-row,
+  .ws-cmd-loadout-remove {
     transition: none;
+    animation: none;
   }
 }
 

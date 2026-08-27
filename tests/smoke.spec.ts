@@ -1,5 +1,14 @@
 import { test, expect } from '@playwright/test';
 import { Buffer } from 'node:buffer';
+import { mkdirSync } from 'node:fs';
+import { join } from 'node:path';
+
+async function captureImplementationScreenshot(page, name: string) {
+  const directory = process.env.ORI_CAPTURE_SCREENSHOTS;
+  if (!directory) return;
+  mkdirSync(directory, { recursive: true });
+  await page.screenshot({ path: join(directory, name), fullPage: false });
+}
 
 /**
  * Smoke tests to verify basic frontend functionality.
@@ -1214,12 +1223,26 @@ test.describe('Workspace Agent Character Roster', () => {
       ],
       agent_skill_access: [
         { agent_instance_id: 'manager-1', enabled_binding_ids: ['skill-planning'] },
-        { agent_instance_id: 'analyst-1', enabled_binding_ids: ['skill-research'] },
-        { agent_instance_id: 'analyst-2', enabled_binding_ids: ['skill-research'] }
+        {
+          agent_instance_id: 'analyst-1',
+          enabled_binding_ids: ['skill-research', 'skill-planning']
+        },
+        {
+          agent_instance_id: 'analyst-2',
+          enabled_binding_ids: ['skill-research', 'skill-planning']
+        }
       ],
-      mcp_bindings: [],
+      mcp_bindings: [
+        {
+          id: 'mcp-notes',
+          server_name: 'notes-server',
+          alias: 'team_notes',
+          enabled: true,
+          scope: { notebook: 'workspace' }
+        }
+      ],
       agent_mcp_access: [],
-      directory_references: [],
+      directory_references: [{ path: '/tmp/roster-workspace' }],
       attachments: [],
       tasks: [],
       status: 'active'
@@ -1315,10 +1338,132 @@ test.describe('Workspace Agent Character Roster', () => {
         body: JSON.stringify({
           skills: [
             { name: 'workspace-planning', enabled: true },
-            { name: 'browser:control-in-app-browser', enabled: true }
+            { name: 'browser:control-in-app-browser', enabled: true },
+            { name: 'reviewer', enabled: true }
           ]
         })
       });
+    });
+    let workspacePlanningDetailAttempts = 0;
+    await page.route('**/api/skills/*', async route => {
+      const requestURL = new URL(route.request().url());
+      const skillName = decodeURIComponent(requestURL.pathname.split('/').pop() || '');
+      if (skillName === 'workspace-planning' && workspacePlanningDetailAttempts++ === 0) {
+        await route.fulfill({
+          status: 503,
+          contentType: 'text/plain',
+          body: 'Deterministic skill detail failure'
+        });
+        return;
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          name: skillName,
+          description:
+            skillName === 'workspace-planning'
+              ? 'Plans workspace delivery with deliberate checkpoints.'
+              : skillName === 'reviewer'
+                ? 'Reviews workspace changes before delivery.'
+                : 'Controls the approved in-app browser for research.',
+          prompt:
+            'Inspect the request carefully.\n\nUse workspace evidence before making recommendations.\n'.repeat(
+              12
+            ),
+          source: 'agent',
+          path: `/tmp/skills/${skillName}`,
+          allowed_tools: ['read_file', 'browser_search'],
+          disallowed_tools: ['delete_workspace'],
+          required_mcp_servers: ['notes-server'],
+          model: 'claude-sonnet-4',
+          enabled: true,
+          trusted: true,
+          has_scripts: false,
+          validation_errors: []
+        })
+      });
+    });
+    await page.route('**/api/mcp/servers', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          servers: [
+            { name: 'notes-server', enabled: true },
+            { name: 'calendar-server', enabled: true }
+          ]
+        })
+      });
+    });
+    await page.route('**/api/mcp/servers/*/details*', async route => {
+      const requestURL = new URL(route.request().url());
+      const pathSegments = requestURL.pathname.split('/').filter(Boolean);
+      const serverName = decodeURIComponent(
+        pathSegments[pathSegments.length - 2] || 'notes-server'
+      );
+      const serverTitle = serverName
+        .split('-')
+        .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+        .join(' ');
+      const started = requestURL.searchParams.get('start') === 'true';
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          server: serverName,
+          status: started ? 'running' : 'stopped',
+          command: 'npx',
+          args: ['-y', '@ori/notes-server'],
+          transport: 'stdio',
+          enabled: true,
+          env_keys: ['NOTES_TOKEN'],
+          instructions: `Use ${serverName} only for approved workspace operations.`,
+          server_info: started
+            ? { name: 'notes-server', title: 'Ori Notes', version: '1.0.0' }
+            : null,
+          readme: {
+            markdown: `# ${serverTitle}\n\nLong-form deterministic fixture documentation.`,
+            source: 'github',
+            source_url: 'https://example.com/notes-server'
+          },
+          tools: started
+            ? [
+                {
+                  name: 'create_note',
+                  description: 'Create an approved workspace note.',
+                  inputSchema: {
+                    properties: {
+                      title: { type: 'string', description: 'Note title' },
+                      body: { type: 'string', description: 'Note content' }
+                    },
+                    required: ['title', 'body']
+                  }
+                }
+              ]
+            : []
+        })
+      });
+    });
+    await page.route(`**/api/workspaces/${workspaceId}/agent-skill-access/*`, async route => {
+      const instanceId = decodeURIComponent(route.request().url().split('/').pop() || '');
+      if (route.request().method() === 'DELETE') {
+        workspace.agent_skill_access = workspace.agent_skill_access.filter(
+          entry => entry.agent_instance_id !== instanceId
+        );
+      } else {
+        const body = route.request().postDataJSON();
+        const nextEntry = {
+          agent_instance_id: instanceId,
+          enabled_binding_ids: body.enabled_binding_ids || []
+        };
+        const index = workspace.agent_skill_access.findIndex(
+          entry => entry.agent_instance_id === instanceId
+        );
+        if (index >= 0) workspace.agent_skill_access[index] = nextEntry;
+        else workspace.agent_skill_access.push(nextEntry);
+      }
+      await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
     });
     await page.route(`**/api/orchestration/tasks?workspace_id=${workspaceId}`, async route => {
       await route.fulfill({
@@ -1655,7 +1800,151 @@ test.describe('Workspace Agent Character Roster', () => {
     expect(inspectorGeometry.bottom).toBeLessThanOrEqual(inspectorGeometry.viewportHeight);
     expect(inspectorGeometry.menuTop).toBeGreaterThanOrEqual(inspectorGeometry.bodyTop);
     expect(inspectorGeometry.menuBottom).toBeLessThanOrEqual(inspectorGeometry.bodyBottom);
-    await page.locator('#workspaceCommandView [data-cmd-map-window-close]').click();
+
+    const addSkillButton = inspector.getByRole('button', { name: 'Add Skill' });
+    await addSkillButton.click();
+    const addSkillDialog = page.getByRole('dialog', { name: 'Add Skill' });
+    await expect(addSkillDialog).toBeVisible();
+    await expect(addSkillDialog).toContainText('reviewer');
+    await expect(addSkillDialog).toContainText('Research Analyst');
+    const closeAddSkillButton = addSkillDialog.getByRole('button', { name: 'Close Add Skill' });
+    const reviewerOption = addSkillDialog.getByRole('button', {
+      name: 'View details for skill reviewer'
+    });
+    await expect(closeAddSkillButton).toBeFocused();
+    await page.keyboard.press('Shift+Tab');
+    await expect(reviewerOption).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(closeAddSkillButton).toBeFocused();
+    await reviewerOption.click();
+    await expect(addSkillDialog).toContainText('Reviews workspace changes before delivery');
+    await expect(
+      addSkillDialog.getByRole('button', { name: 'Add Skill', exact: true })
+    ).toBeVisible();
+    await addSkillDialog.getByRole('tab', { name: 'Instructions' }).click();
+    await expect(addSkillDialog).toContainText('Inspect the request carefully');
+    await captureImplementationScreenshot(page, 'unit-sheet-add-skill-modal.png');
+    await addSkillDialog.getByRole('button', { name: /Back to available skills/ }).click();
+    await expect(reviewerOption).toBeFocused();
+    await closeAddSkillButton.click();
+    await expect(addSkillDialog).toHaveCount(0);
+    await expect(addSkillButton).toBeFocused();
+
+    const addToolButton = inspector.getByRole('button', { name: 'Add Tool' });
+    await addToolButton.click();
+    const addToolDialog = page.getByRole('dialog', { name: 'Add Tool' });
+    const calendarOption = addToolDialog.getByRole('button', {
+      name: 'View details for tool calendar-server'
+    });
+    await calendarOption.click();
+    await expect(addToolDialog).toContainText('calendar-server');
+    await expect(addToolDialog).toContainText('stopped');
+    await expect(
+      addToolDialog.getByRole('button', { name: 'Add Tool', exact: true })
+    ).toBeVisible();
+    await expect(addToolDialog.locator('[data-cmd-capability-start]')).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await expect(addToolDialog).toBeVisible();
+    await expect(calendarOption).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(addToolDialog).toHaveCount(0);
+    await expect(addToolButton).toBeFocused();
+    await expect(inspector).toBeVisible();
+
+    const skillRow = inspector
+      .locator('.ws-cmd-loadout-row')
+      .filter({ hasText: 'browser:control-in-app-browser' });
+    const skillInspect = skillRow.getByRole('button', {
+      name: /Inspect skill browser:control-in-app-browser/
+    });
+    const skillRemove = skillRow.getByRole('button', {
+      name: /Remove skill browser:control-in-app-browser from Research Analyst/
+    });
+    await expect(skillRemove).toBeVisible();
+    await skillInspect.click();
+    const capabilityInspector = inspector.locator('[data-cmd-capability-inspector]');
+    await expect(capabilityInspector).toContainText('Controls the approved in-app browser');
+    await expect(skillRemove).toBeVisible();
+    await expect(inspector.locator('.ws-cmd-rpg-command-panel')).toHaveCount(0);
+    await expect(capabilityInspector.locator('[role="dialog"]')).toHaveCount(0);
+    await expect(inspector.locator('[role="dialog"]')).toHaveCount(0);
+    await expect(page.locator('[role="dialog"][aria-label="Unit Sheet"]')).toHaveCount(1);
+
+    await skillRemove.click();
+    await expect(skillRow).toHaveCount(0);
+    await expect(capabilityInspector).toContainText('Not assigned to Research Analyst');
+    await capabilityInspector.getByRole('tab', { name: 'Instructions' }).click();
+    await expect(capabilityInspector.locator('.ws-cmd-capability-prompt')).toContainText(
+      'Use workspace evidence'
+    );
+    await captureImplementationScreenshot(page, 'unit-sheet-skill-inspector-desktop.png');
+    await capabilityInspector.getByRole('button', { name: /Back to Command Menu/ }).click();
+    await expect(inspector.locator('.ws-cmd-rpg-command-panel')).toContainText('Command Menu');
+    await expect(addSkillButton).toBeFocused();
+    if (process.env.ORI_CAPTURE_SCREENSHOTS) await page.waitForTimeout(450);
+    await captureImplementationScreenshot(page, 'unit-sheet-capability-removed.png');
+
+    await addSkillButton.click();
+    const readdSkillDialog = page.getByRole('dialog', { name: 'Add Skill' });
+    const removedSkillOption = readdSkillDialog.getByRole('button', {
+      name: 'View details for skill browser:control-in-app-browser'
+    });
+    await expect(removedSkillOption).toBeVisible();
+    await removedSkillOption.click();
+    await expect(readdSkillDialog).toContainText('Controls the approved in-app browser');
+    await readdSkillDialog.getByRole('button', { name: 'Add Skill', exact: true }).click();
+    await expect(readdSkillDialog).toHaveCount(0);
+    await expect(skillRow).toBeVisible();
+
+    const mcpRow = inspector.locator('.ws-cmd-loadout-row').filter({ hasText: 'notes-server' });
+    await mcpRow.getByRole('button', { name: /Inspect MCP server notes-server/ }).click();
+    await expect(capabilityInspector).toContainText('stopped');
+    await expect(capabilityInspector).toContainText('NOTES_TOKEN');
+    await expect(capabilityInspector).not.toContainText('secret');
+    await captureImplementationScreenshot(page, 'unit-sheet-mcp-inspector-passive.png');
+    await capabilityInspector.getByRole('tab', { name: 'Tools' }).click();
+    await capabilityInspector
+      .getByRole('button', { name: /Start MCP server notes-server and load tools/ })
+      .click();
+    await expect(capabilityInspector).toContainText('create_note');
+    await expect(capabilityInspector).toContainText('Required');
+    await capabilityInspector.getByRole('tab', { name: 'Docs' }).click();
+    await expect(capabilityInspector).toContainText('Notes Server');
+    await captureImplementationScreenshot(page, 'unit-sheet-mcp-inspector-desktop.png');
+    await capabilityInspector.getByRole('button', { name: /Back to Command Menu/ }).click();
+
+    const filesystemRow = inspector
+      .locator('.ws-cmd-loadout-row')
+      .filter({ hasText: 'filesystem' });
+    await filesystemRow.getByRole('button', { name: /Inspect MCP server filesystem/ }).click();
+    await expect(capabilityInspector).toContainText('Workspace-native capability');
+    await expect(capabilityInspector).toContainText('/tmp/roster-workspace');
+    await expect(capabilityInspector.locator('[data-cmd-capability-start]')).toHaveCount(0);
+    await capabilityInspector.getByRole('button', { name: /Back to Command Menu/ }).click();
+
+    const planningRow = inspector
+      .locator('.ws-cmd-loadout-row')
+      .filter({ hasText: 'workspace-planning' });
+    await planningRow.getByRole('button', { name: /Inspect skill workspace-planning/ }).click();
+    await expect(capabilityInspector).toContainText('Deterministic skill detail failure');
+    await capabilityInspector.getByRole('button', { name: 'Retry' }).click();
+    await expect(capabilityInspector).toContainText('Plans workspace delivery');
+    await capabilityInspector.getByRole('button', { name: /Back to Command Menu/ }).click();
+
+    await skillInspect.focus();
+    await page.keyboard.press('Enter');
+    await expect(capabilityInspector).toBeVisible();
+    const overviewTab = capabilityInspector.getByRole('tab', { name: 'Overview' });
+    await overviewTab.focus();
+    await page.keyboard.press('ArrowRight');
+    await expect(capabilityInspector.getByRole('tab', { name: 'Instructions' })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    );
+    await captureImplementationScreenshot(page, 'unit-sheet-keyboard-focused.png');
+    await page.keyboard.press('Escape');
+    await expect(inspector.locator('.ws-cmd-rpg-command-panel')).toContainText('Command Menu');
+    await page.keyboard.press('Escape');
     await expect(page.locator('#workspaceCommandView .ws-cmd-map-window')).toHaveCount(0);
 
     await page.setViewportSize({ width: 390, height: 844 });
@@ -1668,6 +1957,64 @@ test.describe('Workspace Agent Character Roster', () => {
         };
       });
     expect(mobileGeometry.pageWidth).toBeLessThanOrEqual(mobileGeometry.viewportWidth);
+
+    await page
+      .locator('#workspaceCommandView .ws-cmd-map-agent')
+      .filter({ hasText: 'Research Analyst' })
+      .click();
+    const mobileUnitSheet = page.locator('#workspaceCommandView .ws-cmd-map-window-inspector');
+    await mobileUnitSheet.getByRole('button', { name: 'Add Skill' }).click();
+    const mobileAddDialog = page.getByRole('dialog', { name: 'Add Skill' });
+    await mobileAddDialog.getByRole('button', { name: 'View details for skill reviewer' }).click();
+    await expect(mobileAddDialog).toContainText('Reviews workspace changes before delivery');
+    const mobileAddGeometry = await mobileAddDialog.evaluate(node => {
+      const rect = node.getBoundingClientRect();
+      return {
+        top: rect.top,
+        right: rect.right,
+        bottom: rect.bottom,
+        left: rect.left,
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight,
+        pageWidth: document.documentElement.scrollWidth
+      };
+    });
+    expect(mobileAddGeometry.top).toBeGreaterThanOrEqual(0);
+    expect(mobileAddGeometry.left).toBeGreaterThanOrEqual(0);
+    expect(mobileAddGeometry.right).toBeLessThanOrEqual(mobileAddGeometry.viewportWidth);
+    expect(mobileAddGeometry.bottom).toBeLessThanOrEqual(mobileAddGeometry.viewportHeight);
+    expect(mobileAddGeometry.pageWidth).toBeLessThanOrEqual(mobileAddGeometry.viewportWidth);
+    await captureImplementationScreenshot(page, 'unit-sheet-add-skill-modal-mobile.png');
+    await mobileAddDialog.getByRole('button', { name: 'Close Add Skill' }).click();
+
+    const mobileSkillRow = mobileUnitSheet
+      .locator('.ws-cmd-loadout-row')
+      .filter({ hasText: 'browser:control-in-app-browser' });
+    await mobileSkillRow.getByRole('button', { name: /Inspect skill/ }).click();
+    await mobileUnitSheet.getByRole('tab', { name: 'Instructions' }).click();
+    await expect(mobileUnitSheet.locator('.ws-cmd-rpg-sheet')).toBeHidden();
+    const mobileInspectorGeometry = await mobileUnitSheet.evaluate(node => {
+      const panel = node.querySelector('.ws-cmd-capability-inspector')?.getBoundingClientRect();
+      const content = node.querySelector('.ws-cmd-capability-body');
+      return {
+        left: panel?.left || 0,
+        right: panel?.right || 0,
+        viewportWidth: window.innerWidth,
+        pageWidth: document.documentElement.scrollWidth,
+        contentScrollable: content ? content.scrollHeight >= content.clientHeight : false
+      };
+    });
+    expect(mobileInspectorGeometry.left).toBeGreaterThanOrEqual(0);
+    expect(mobileInspectorGeometry.right).toBeLessThanOrEqual(
+      mobileInspectorGeometry.viewportWidth
+    );
+    expect(mobileInspectorGeometry.pageWidth).toBeLessThanOrEqual(
+      mobileInspectorGeometry.viewportWidth
+    );
+    expect(mobileInspectorGeometry.contentScrollable).toBeTruthy();
+    await captureImplementationScreenshot(page, 'unit-sheet-skill-inspector-mobile.png');
+    await mobileUnitSheet.getByRole('button', { name: /Back to Command Menu/ }).click();
+    await page.locator('#workspaceCommandView [data-cmd-map-window-close]').click();
 
     await page.locator('#workspaceCommandView [data-cmd-view-mode="details"]').click();
     await expect(page.locator('#workspaceCommandView .ws-cmd-deck')).toBeVisible();

@@ -23,6 +23,9 @@ export class WorkspaceSkillsManager {
     this.host = host;
     this.availableSkills = [];
     this.availableSkillsPromise = null;
+    this.skillDetailCache = new Map();
+    this.skillDetailPromises = new Map();
+    this.skillDetailRequestVersions = new Map();
     this.activeWorkspaceSkillBindingId = '';
     this.activeWorkspaceSkillMode = 'create';
   }
@@ -292,6 +295,55 @@ export class WorkspaceSkillsManager {
       names.push(name);
     });
     return names;
+  }
+
+  skillDetailCacheKey(agentName, skillName) {
+    const agentKey = this.host.normalizeAgentName(agentName);
+    const skillKey = String(skillName || '')
+      .trim()
+      .toLowerCase();
+    return agentKey && skillKey ? `${agentKey}:${skillKey}` : '';
+  }
+
+  async loadSkillDetails(agentName, skillName, options = {}) {
+    const agent = String(agentName || '').trim();
+    const name = String(skillName || '').trim();
+    const key = this.skillDetailCacheKey(agent, name);
+    if (!key) throw new Error('Agent and skill name are required');
+
+    const force = options.force === true;
+    if (!force && this.skillDetailCache.has(key)) {
+      return this.skillDetailCache.get(key);
+    }
+    if (!force && this.skillDetailPromises.has(key)) {
+      return this.skillDetailPromises.get(key);
+    }
+
+    const requestVersion = (this.skillDetailRequestVersions.get(key) || 0) + 1;
+    this.skillDetailRequestVersions.set(key, requestVersion);
+    const promise = (async () => {
+      const response = await fetch(
+        `/api/skills/${encodeURIComponent(name)}?agent=${encodeURIComponent(agent)}`
+      );
+      if (!response.ok) {
+        const text = await response.text().catch(() => '');
+        throw new Error(text || `Failed to load skill details (${response.status})`);
+      }
+      const detail = await response.json();
+      if (this.skillDetailRequestVersions.get(key) === requestVersion) {
+        this.skillDetailCache.set(key, detail);
+      }
+      return detail;
+    })();
+
+    this.skillDetailPromises.set(key, promise);
+    try {
+      return await promise;
+    } finally {
+      if (this.skillDetailPromises.get(key) === promise) {
+        this.skillDetailPromises.delete(key);
+      }
+    }
   }
 
   async loadAvailableSkills(force = false) {
@@ -690,8 +742,12 @@ export class WorkspaceSkillsManager {
         );
 
         if (!response.ok) {
-          const text = await response.text();
-          throw new Error(text || `Failed to clear skill access rule for ${instanceId}`);
+          const fallback = `Failed to clear skill access rule for ${instanceId}`;
+          const message =
+            typeof this.host.responseErrorMessage === 'function'
+              ? await this.host.responseErrorMessage(response, fallback)
+              : (await response.text()) || fallback;
+          throw new Error(message);
         }
         return;
       }
@@ -710,8 +766,12 @@ export class WorkspaceSkillsManager {
       );
 
       if (!response.ok) {
-        const text = await response.text();
-        throw new Error(text || `Failed to update skill access for ${instanceId}`);
+        const fallback = `Failed to update skill access for ${instanceId}`;
+        const message =
+          typeof this.host.responseErrorMessage === 'function'
+            ? await this.host.responseErrorMessage(response, fallback)
+            : (await response.text()) || fallback;
+        throw new Error(message);
       }
     });
 
