@@ -10962,6 +10962,14 @@ export class WorkspaceDetailPage {
     return this.mcpManager.getWorkspaceMCPBindings(options);
   }
 
+  loadWorkspaceSkillDetails(agentName, skillName, options = {}) {
+    return this.skillsManager.loadSkillDetails(agentName, skillName, options);
+  }
+
+  loadWorkspaceMCPDetails(bindingId, serverName, options = {}) {
+    return this.mcpManager.loadMCPDetails(bindingId, serverName, options);
+  }
+
   // ── Workspace Configuration Methods ─────────────────────────────────
 
   formatWorkspaceConfigPresetLabel(preset) {
@@ -11967,7 +11975,8 @@ export class WorkspaceDetailPage {
           bindingId,
           name: String(binding?.skillName || '').trim(),
           enabled: effective.has(bindingId.toLowerCase()),
-          locked: binding?.source === 'synthesized'
+          locked: binding?.source === 'synthesized',
+          source: String(binding?.source || 'workspace').trim()
         };
       })
       .filter(item => item.bindingId && item.name);
@@ -11993,8 +12002,11 @@ export class WorkspaceDetailPage {
         return {
           bindingId,
           name: String(binding?.serverName || '').trim(),
+          alias: String(binding?.alias || '').trim(),
           enabled: effective.has(bindingId.toLowerCase()),
-          locked: binding?.source === 'synthesized'
+          locked: binding?.source === 'synthesized',
+          source: String(binding?.source || 'workspace').trim(),
+          scope: binding?.scope && typeof binding.scope === 'object' ? { ...binding.scope } : {}
         };
       })
       .filter(item => item.bindingId && item.name);

@@ -47,6 +47,25 @@ function escapeHtml(value) {
   });
 }
 
+function renderCapabilityMarkdown(value) {
+  const markdown = String(value || '');
+  if (!markdown) return '';
+  try {
+    if (
+      typeof window !== 'undefined' &&
+      window.marked &&
+      typeof window.marked.parse === 'function' &&
+      window.DOMPurify &&
+      typeof window.DOMPurify.sanitize === 'function'
+    ) {
+      return window.DOMPurify.sanitize(window.marked.parse(markdown, { breaks: true, gfm: true }));
+    }
+  } catch (error) {
+    console.error('Capability Markdown render failed:', error);
+  }
+  return '<pre>' + escapeHtml(markdown) + '</pre>';
+}
+
 // Clamp an HQ station's fractional map coordinate into [0,1]. Non-finite input
 // (a corrupt saved value) collapses to 0 so a station can never render or
 // persist off-field (FR11/FR13).
@@ -182,6 +201,9 @@ export class WorkspaceCommandView {
     this.loadoutAddLoading = false;
     this.loadoutBusyKey = ''; // "<kind>:<bindingId>" or "<kind>:add:<name>" while mutating
     this.loadoutError = '';
+    this.capabilityInspector = this.emptyCapabilityInspectorState();
+    this.capabilityInspectorRequestId = 0;
+    this.pendingCapabilityInspectorFocus = '';
     this.sharedSurfaceAnchors = {};
     this.boundGlobalKeydown = event => this.handleGlobalKeydown(event);
     this.boundPopState = event => this.handlePopState(event);
@@ -224,6 +246,9 @@ export class WorkspaceCommandView {
     if (nextMode === this.viewMode) return;
     this.viewMode = nextMode;
     this.persistCommandViewMode(nextMode);
+    if (nextMode !== 'map' && this.capabilityInspector?.open) {
+      this.resetCapabilityInspector();
+    }
     this.activeRailSection = '';
     if (nextMode === 'details') {
       this.activeMapWindow = '';
@@ -605,6 +630,12 @@ export class WorkspaceCommandView {
     this._lastSyncedURLState = state;
 
     const effectiveMode = resolveEffectiveMode(state.mode, this.viewMode, this.viewMode);
+    if (
+      (effectiveMode !== 'map' || (state.agent && state.agent !== this.selectedAgentKey)) &&
+      this.capabilityInspector?.open
+    ) {
+      this.resetCapabilityInspector();
+    }
     this.viewMode = effectiveMode;
     if (state.agent) {
       this.selectedAgentKey = state.agent;
@@ -664,7 +695,22 @@ export class WorkspaceCommandView {
       this.closeTaskComposer();
       return;
     }
+    if (this.viewMode === 'map' && this.activeMapWindow === 'inspector' && this.loadoutAddOpen) {
+      this.loadoutAddOpen = '';
+      this.loadoutAddOptions = [];
+      this.render();
+      return;
+    }
+    if (
+      this.viewMode === 'map' &&
+      this.activeMapWindow === 'inspector' &&
+      this.capabilityInspector?.open
+    ) {
+      this.closeCapabilityInspector();
+      return;
+    }
     if (this.viewMode === 'map' && this.activeMapWindow) {
+      this.resetCapabilityInspector();
       this.activeMapWindow = '';
       this.render();
       return;
@@ -1259,6 +1305,7 @@ export class WorkspaceCommandView {
     // re-renders while dragging; the drop path re-renders once the gesture
     // ends, picking up any data that changed in the meantime (FR11).
     if (this._stationDragActive) return;
+    this.rememberCapabilityInspectorFocus();
     this.captureAgentDeckViewState();
     if (this.commandTagInput) {
       try {
@@ -1313,6 +1360,7 @@ export class WorkspaceCommandView {
     this.syncSharedSurfaces();
     this.mountNoteFilterBar();
     this.restoreAgentDeckViewState();
+    this.restoreCapabilityInspectorFocus();
     this.hydrateActiveAgentPrompt();
     // The Workshop host only exists once the Toolbox tab has rendered, so it is
     // mounted here rather than at page load. Idempotent per instance.
@@ -6446,6 +6494,96 @@ export class WorkspaceCommandView {
     );
   }
 
+  emptyCapabilityInspectorState() {
+    return {
+      open: false,
+      kind: '',
+      bindingId: '',
+      name: '',
+      agent: '',
+      encodedAgent: '',
+      activeTab: 'overview',
+      status: 'idle',
+      data: null,
+      error: '',
+      assigned: false,
+      locked: false,
+      originKey: ''
+    };
+  }
+
+  capabilityOriginKey(kind, bindingId, encodedAgent) {
+    return encodeURIComponent(
+      [String(kind || ''), String(bindingId || ''), String(encodedAgent || '')].join(':')
+    );
+  }
+
+  resetCapabilityInspector() {
+    this.capabilityInspectorRequestId = Number(this.capabilityInspectorRequestId || 0) + 1;
+    this.capabilityInspector = this.emptyCapabilityInspectorState();
+    this.pendingCapabilityInspectorFocus = '';
+  }
+
+  capabilityInspectorMatches(kind, bindingId, encodedAgent) {
+    const inspector = this.capabilityInspector || {};
+    return (
+      inspector.open === true &&
+      inspector.kind === kind &&
+      inspector.bindingId === String(bindingId || '') &&
+      inspector.encodedAgent === String(encodedAgent || '')
+    );
+  }
+
+  rememberCapabilityInspectorFocus() {
+    if (this.pendingCapabilityInspectorFocus || !this.capabilityInspector?.open) return;
+    const activeElement = typeof document === 'undefined' ? null : document.activeElement;
+    if (!activeElement || typeof activeElement.closest !== 'function') return;
+    const inspector = activeElement.closest('[data-cmd-capability-inspector]');
+    if (!inspector) return;
+    if (activeElement.closest('[data-cmd-capability-back]')) {
+      this.pendingCapabilityInspectorFocus = 'back';
+      return;
+    }
+    const tab = activeElement.closest('[data-cmd-capability-tab]');
+    if (tab) {
+      this.pendingCapabilityInspectorFocus =
+        'tab:' + String(tab.getAttribute('data-cmd-capability-tab') || 'overview');
+      return;
+    }
+    if (activeElement.closest('[data-cmd-capability-retry]')) {
+      this.pendingCapabilityInspectorFocus = 'retry';
+      return;
+    }
+    if (activeElement.closest('[data-cmd-capability-start]')) {
+      this.pendingCapabilityInspectorFocus = 'start';
+    }
+  }
+
+  restoreCapabilityInspectorFocus() {
+    const targetKey = String(this.pendingCapabilityInspectorFocus || '');
+    if (!targetKey || !this.container || typeof this.container.querySelector !== 'function') return;
+    this.pendingCapabilityInspectorFocus = '';
+    let selector = '';
+    if (targetKey === 'back') selector = '[data-cmd-capability-back]';
+    else if (targetKey === 'retry') selector = '[data-cmd-capability-retry]';
+    else if (targetKey === 'start') selector = '[data-cmd-capability-start]';
+    else if (targetKey.startsWith('tab:')) {
+      selector = '[data-cmd-capability-tab="' + targetKey.slice(4) + '"]';
+    } else if (targetKey.startsWith('origin:')) {
+      selector = '[data-cmd-capability-origin="' + targetKey.slice(7) + '"]';
+    } else if (targetKey.startsWith('switch:')) {
+      selector = '[data-cmd-capability-switch="' + targetKey.slice(7) + '"]';
+    }
+    const target = selector ? this.container.querySelector(selector) : null;
+    if (target && typeof target.focus === 'function') {
+      try {
+        target.focus({ preventScroll: true });
+      } catch (_error) {
+        target.focus();
+      }
+    }
+  }
+
   // The method name, the CSS class, and the tab key stay "loadout" — they are
   // internal identifiers, and renaming them would churn selectors and saved tab
   // state for no user-visible gain. Only the label a person reads changes
@@ -6523,36 +6661,72 @@ export class WorkspaceCommandView {
 
   loadoutSectionHTML(kind, label, items, encodedAgent) {
     const list = Array.isArray(items) ? items : [];
-    const chips = list.length
+    const capabilityType = kind === 'mcp' ? 'MCP server' : 'skill';
+    const rows = list.length
       ? list
           .map(item => {
-            if (item.locked) {
-              return (
-                '<span class="ws-cmd-loadout-chip is-locked" title="Always available in this workspace">' +
-                escapeHtml(item.name) +
-                '</span>'
-              );
-            }
-            const busy = this.loadoutBusyKey === kind + ':' + item.bindingId;
+            const bindingId = String(item?.bindingId || '');
+            const name = String(item?.name || '').trim();
+            const originKey = this.capabilityOriginKey(kind, bindingId, encodedAgent);
+            const busy = this.loadoutBusyKey === kind + ':' + bindingId;
+            const selected = this.capabilityInspectorMatches(kind, bindingId, encodedAgent);
+            const inspectLabel = `Inspect ${capabilityType} ${name}`;
+            const assignment = item.locked
+              ? '<span class="ws-cmd-loadout-lock" title="Always available in this workspace"><i class="bi bi-lock-fill" aria-hidden="true"></i> Locked</span>'
+              : '<button type="button" class="ws-cmd-loadout-switch ' +
+                (item.enabled ? 'is-on' : 'is-off') +
+                (busy ? ' is-busy' : '') +
+                '" role="switch" aria-checked="' +
+                (item.enabled ? 'true' : 'false') +
+                '" aria-label="' +
+                escapeHtml(
+                  `${item.enabled ? 'Remove' : 'Assign'} ${capabilityType} ${name} ${
+                    item.enabled ? 'from' : 'to'
+                  } ${this.decodeAgentName(encodedAgent)}`
+                ) +
+                '" data-cmd-loadout-toggle="' +
+                escapeHtml(kind) +
+                '" data-cmd-loadout-binding="' +
+                escapeHtml(bindingId) +
+                '" data-cmd-loadout-name="' +
+                escapeHtml(name) +
+                '" data-cmd-loadout-agent="' +
+                escapeHtml(encodedAgent) +
+                '" data-cmd-capability-switch="' +
+                escapeHtml(originKey) +
+                '"' +
+                (busy ? ' disabled' : '') +
+                '><span aria-hidden="true"></span></button>';
             return (
-              '<button type="button" class="ws-cmd-loadout-chip is-toggle ' +
-              (item.enabled ? 'is-on' : 'is-off') +
-              (busy ? ' is-busy' : '') +
-              '" role="switch" aria-checked="' +
-              (item.enabled ? 'true' : 'false') +
-              '" data-cmd-loadout-toggle="' +
+              '<div class="ws-cmd-loadout-row' +
+              (selected ? ' is-selected' : '') +
+              (item.locked ? ' is-locked' : '') +
+              '">' +
+              '<button type="button" class="ws-cmd-loadout-inspect" data-cmd-capability-inspect="' +
               escapeHtml(kind) +
               '" data-cmd-loadout-binding="' +
-              escapeHtml(item.bindingId) +
+              escapeHtml(bindingId) +
+              '" data-cmd-loadout-name="' +
+              escapeHtml(name) +
               '" data-cmd-loadout-agent="' +
               escapeHtml(encodedAgent) +
-              '"' +
-              (busy ? ' disabled' : '') +
-              '><span class="ws-cmd-loadout-chip-mark" aria-hidden="true">' +
-              (item.enabled ? '✓' : '+') +
-              '</span>' +
-              escapeHtml(item.name) +
-              '</button>'
+              '" data-cmd-loadout-enabled="' +
+              (item.enabled ? 'true' : 'false') +
+              '" data-cmd-loadout-locked="' +
+              (item.locked ? 'true' : 'false') +
+              '" data-cmd-capability-origin="' +
+              escapeHtml(originKey) +
+              '" aria-label="' +
+              escapeHtml(`${inspectLabel} for ${this.decodeAgentName(encodedAgent)}`) +
+              '"><span class="ws-cmd-loadout-row-icon"><i class="bi ' +
+              (kind === 'mcp' ? 'bi-hdd-network' : 'bi-stars') +
+              '" aria-hidden="true"></i></span><span class="ws-cmd-loadout-row-copy"><strong>' +
+              escapeHtml(name) +
+              '</strong><small>' +
+              escapeHtml(capabilityType) +
+              ' · View details</small></span></button>' +
+              assignment +
+              '</div>'
             );
           })
           .join('')
@@ -6561,7 +6735,7 @@ export class WorkspaceCommandView {
     return (
       '<section class="ws-cmd-loadout-editor-section">' +
       '<header><span class="ws-cmd-loadout-kicker">' +
-      escapeHtml(label) +
+      escapeHtml(kind === 'mcp' ? 'MCP Servers' : label) +
       '</span><button type="button" class="ws-cmd-loadout-add-btn' +
       (addOpen ? ' is-open' : '') +
       '" data-cmd-loadout-add="' +
@@ -6573,8 +6747,8 @@ export class WorkspaceCommandView {
       '">' +
       (kind === 'mcp' ? 'Add Tool' : 'Add Skill') +
       '</button></header>' +
-      '<div class="ws-cmd-loadout-chips">' +
-      chips +
+      '<div class="ws-cmd-loadout-rows">' +
+      rows +
       '</div>' +
       (addOpen ? this.loadoutPickerHTML(kind, encodedAgent) : '') +
       '</section>'
@@ -6625,9 +6799,186 @@ export class WorkspaceCommandView {
     }
   }
 
-  // Delegated handler for loadout chip toggles, Add buttons, and picker items.
-  // Returns true if it handled the event (shared by map + garrison listeners).
+  async openCapabilityInspector(trigger) {
+    if (!trigger || typeof trigger.getAttribute !== 'function') return;
+    const kind = String(trigger.getAttribute('data-cmd-capability-inspect') || '').trim();
+    const bindingId = String(trigger.getAttribute('data-cmd-loadout-binding') || '').trim();
+    const name = String(trigger.getAttribute('data-cmd-loadout-name') || '').trim();
+    const encodedAgent = String(trigger.getAttribute('data-cmd-loadout-agent') || '').trim();
+    if (!['skill', 'mcp'].includes(kind) || !bindingId || !name || !encodedAgent) return;
+
+    const agent = this.decodeAgentName(encodedAgent);
+    const requestId = Number(this.capabilityInspectorRequestId || 0) + 1;
+    this.capabilityInspectorRequestId = requestId;
+    this.capabilityInspector = {
+      open: true,
+      kind,
+      bindingId,
+      name,
+      agent,
+      encodedAgent,
+      activeTab: 'overview',
+      status: 'loading',
+      data: null,
+      error: '',
+      assigned: trigger.getAttribute('data-cmd-loadout-enabled') === 'true',
+      locked: trigger.getAttribute('data-cmd-loadout-locked') === 'true',
+      originKey:
+        trigger.getAttribute('data-cmd-capability-origin') ||
+        this.capabilityOriginKey(kind, bindingId, encodedAgent)
+    };
+    this.loadoutAddOpen = '';
+    this.loadoutAddOptions = [];
+    if (this.viewMode !== 'map') {
+      this.viewMode = 'map';
+      this.persistCommandViewMode('map');
+    }
+    this.activeMapWindow = 'inspector';
+    this.pendingCapabilityInspectorFocus = 'back';
+    this.render();
+    await this.loadCapabilityInspectorDetails({ requestId });
+  }
+
+  async loadCapabilityInspectorDetails(options = {}) {
+    const inspector = this.capabilityInspector || {};
+    if (!inspector.open) return;
+    const requestId = options.requestId || Number(this.capabilityInspectorRequestId || 0) + 1;
+    this.capabilityInspectorRequestId = requestId;
+    const identity = [
+      inspector.kind,
+      inspector.bindingId,
+      inspector.name,
+      inspector.agent,
+      inspector.encodedAgent
+    ].join('\u0000');
+    inspector.status = 'loading';
+    inspector.error = '';
+    this.pendingCapabilityInspectorFocus = this.pendingCapabilityInspectorFocus || 'back';
+    this.render();
+
+    const page = this.page || (typeof window !== 'undefined' ? window.workspaceDetail : null);
+    try {
+      let data;
+      if (inspector.kind === 'skill') {
+        if (!page || typeof page.loadWorkspaceSkillDetails !== 'function') {
+          throw new Error('Skill details are unavailable');
+        }
+        data = await page.loadWorkspaceSkillDetails(inspector.agent, inspector.name, {
+          force: options.force === true
+        });
+      } else {
+        if (!page || typeof page.loadWorkspaceMCPDetails !== 'function') {
+          throw new Error('MCP details are unavailable');
+        }
+        data = await page.loadWorkspaceMCPDetails(inspector.bindingId, inspector.name, {
+          force: options.force === true,
+          start: options.start === true
+        });
+      }
+
+      const current = this.capabilityInspector || {};
+      const currentIdentity = [
+        current.kind,
+        current.bindingId,
+        current.name,
+        current.agent,
+        current.encodedAgent
+      ].join('\u0000');
+      if (
+        requestId !== this.capabilityInspectorRequestId ||
+        !current.open ||
+        identity !== currentIdentity
+      ) {
+        return;
+      }
+      this.rememberCapabilityInspectorFocus();
+      current.status = 'loaded';
+      current.data = data;
+      current.error = '';
+      if (data?.workspace_binding?.locked === true) current.locked = true;
+      this.render();
+    } catch (error) {
+      const current = this.capabilityInspector || {};
+      const currentIdentity = [
+        current.kind,
+        current.bindingId,
+        current.name,
+        current.agent,
+        current.encodedAgent
+      ].join('\u0000');
+      if (
+        requestId !== this.capabilityInspectorRequestId ||
+        !current.open ||
+        identity !== currentIdentity
+      ) {
+        return;
+      }
+      this.rememberCapabilityInspectorFocus();
+      current.status = 'error';
+      current.error = error?.message || 'Details could not be loaded';
+      this.render();
+    }
+  }
+
+  closeCapabilityInspector() {
+    const originKey = String(this.capabilityInspector?.originKey || '');
+    this.resetCapabilityInspector();
+    this.pendingCapabilityInspectorFocus = originKey ? 'origin:' + originKey : '';
+    this.render();
+  }
+
+  setCapabilityInspectorTab(tab) {
+    const inspector = this.capabilityInspector || {};
+    if (!inspector.open) return;
+    const allowed =
+      inspector.kind === 'mcp' ? ['overview', 'tools', 'docs'] : ['overview', 'instructions'];
+    const normalized = String(tab || '')
+      .trim()
+      .toLowerCase();
+    if (!allowed.includes(normalized)) return;
+    inspector.activeTab = normalized;
+    this.pendingCapabilityInspectorFocus = 'tab:' + normalized;
+    this.render();
+  }
+
+  retryCapabilityInspector() {
+    if (!this.capabilityInspector?.open) return;
+    return this.loadCapabilityInspectorDetails({ force: true });
+  }
+
+  startCapabilityMCP() {
+    if (!this.capabilityInspector?.open || this.capabilityInspector.kind !== 'mcp') return;
+    return this.loadCapabilityInspectorDetails({ force: true, start: true });
+  }
+
+  handleCapabilityInspectorKeydown(event) {
+    const current = event?.target?.closest?.('[data-cmd-capability-tab]');
+    if (!current) return;
+    const tablist = current.closest?.('[role="tablist"]');
+    const tabs =
+      tablist && typeof tablist.querySelectorAll === 'function'
+        ? Array.from(tablist.querySelectorAll('[data-cmd-capability-tab]'))
+        : [];
+    if (!tabs.length) return;
+    const index = tabs.indexOf(current);
+    let nextIndex = index;
+    if (event.key === 'ArrowRight') nextIndex = (index + 1) % tabs.length;
+    else if (event.key === 'ArrowLeft') nextIndex = (index - 1 + tabs.length) % tabs.length;
+    else if (event.key === 'Home') nextIndex = 0;
+    else if (event.key === 'End') nextIndex = tabs.length - 1;
+    else return;
+    event.preventDefault();
+    this.setCapabilityInspectorTab(tabs[nextIndex].getAttribute('data-cmd-capability-tab'));
+  }
+
+  // Delegated handler for loadout capability rows, assignment switches, Add buttons,
+  // and picker items. Returns true when shared map/garrison listeners should stop.
   handleLoadoutClick(event) {
+    const inspect = event.target.closest('[data-cmd-capability-inspect]');
+    if (inspect) {
+      this.openCapabilityInspector(inspect);
+      return true;
+    }
     const toggle = event.target.closest('[data-cmd-loadout-toggle]');
     if (toggle) {
       this.toggleLoadoutBinding(
@@ -6662,17 +7013,23 @@ export class WorkspaceCommandView {
     const page = this.page || (typeof window !== 'undefined' ? window.workspaceDetail : null);
     if (!page || typeof page.setAgentWorkspaceCapabilityEnabled !== 'function') return;
     const agentName = this.decodeAgentName(encodedAgent);
+    const originKey = this.capabilityOriginKey(kind, bindingId, encodedAgent);
     this.loadoutError = '';
     this.loadoutBusyKey = kind + ':' + bindingId;
+    this.pendingCapabilityInspectorFocus = 'switch:' + originKey;
     this.render();
     try {
       await page.setAgentWorkspaceCapabilityEnabled(kind, agentName, bindingId, enable);
+      if (this.capabilityInspectorMatches(kind, bindingId, encodedAgent)) {
+        this.capabilityInspector.assigned = enable;
+      }
     } catch (error) {
       this.loadoutError =
         (kind === 'mcp' ? 'Tool' : 'Skill') + ' update failed: ' + (error?.message || 'error');
       if (window.Toast) window.Toast.error(this.loadoutError);
     } finally {
       this.loadoutBusyKey = '';
+      this.pendingCapabilityInspectorFocus = 'switch:' + originKey;
       this.render();
     }
   }
@@ -6767,6 +7124,347 @@ export class WorkspaceCommandView {
       if (window.Toast) window.Toast.error('Could not start the quest.');
       if (typeof page.loadTasks === 'function') await page.loadTasks();
     }
+  }
+
+  capabilityValueListHTML(label, values, emptyText = 'None') {
+    const list = Array.isArray(values)
+      ? values.map(value => String(value || '').trim()).filter(Boolean)
+      : [];
+    return (
+      '<div class="ws-cmd-capability-fact"><dt>' +
+      escapeHtml(label) +
+      '</dt><dd>' +
+      (list.length
+        ? '<span class="ws-cmd-capability-tags">' +
+          list.map(value => '<code>' + escapeHtml(value) + '</code>').join('') +
+          '</span>'
+        : escapeHtml(emptyText)) +
+      '</dd></div>'
+    );
+  }
+
+  capabilityWarningsHTML(data) {
+    const warnings = [];
+    const validationErrors = Array.isArray(data?.validation_errors)
+      ? data.validation_errors.map(value => String(value || '').trim()).filter(Boolean)
+      : [];
+    if (data?.has_scripts && !data?.trusted) {
+      warnings.push('This skill contains scripts and is not trusted.');
+    } else if (data?.has_scripts) {
+      warnings.push('This skill contains scripts and is trusted.');
+    }
+    validationErrors.forEach(error => warnings.push(error));
+    if (!warnings.length) return '';
+    return (
+      '<div class="ws-cmd-capability-warnings" role="note"><strong>Attention</strong><ul>' +
+      warnings.map(warning => '<li>' + escapeHtml(warning) + '</li>').join('') +
+      '</ul></div>'
+    );
+  }
+
+  renderSkillCapabilityPane(inspector) {
+    const data = inspector.data || {};
+    if (inspector.activeTab === 'instructions') {
+      return (
+        '<section class="ws-cmd-capability-pane" role="tabpanel" id="ws-cmd-capability-panel-instructions" aria-labelledby="ws-cmd-capability-tab-instructions">' +
+        '<h4>Prompt / Instructions</h4>' +
+        (String(data.prompt || '').trim()
+          ? '<pre class="ws-cmd-capability-prompt">' + escapeHtml(data.prompt) + '</pre>'
+          : '<p class="ws-cmd-capability-empty">No prompt or instructions are available.</p>') +
+        '</section>'
+      );
+    }
+
+    return (
+      '<section class="ws-cmd-capability-pane" role="tabpanel" id="ws-cmd-capability-panel-overview" aria-labelledby="ws-cmd-capability-tab-overview">' +
+      '<p class="ws-cmd-capability-description">' +
+      escapeHtml(data.description || 'No description is available for this skill.') +
+      '</p>' +
+      this.capabilityWarningsHTML(data) +
+      '<dl class="ws-cmd-capability-facts">' +
+      '<div class="ws-cmd-capability-fact"><dt>Source</dt><dd>' +
+      escapeHtml(data.source || 'Unknown') +
+      '</dd></div>' +
+      (data.path
+        ? '<div class="ws-cmd-capability-fact"><dt>Path</dt><dd><code>' +
+          escapeHtml(data.path) +
+          '</code></dd></div>'
+        : '') +
+      '<div class="ws-cmd-capability-fact"><dt>Model</dt><dd>' +
+      escapeHtml(data.model || 'Agent default') +
+      '</dd></div>' +
+      '<div class="ws-cmd-capability-fact"><dt>Trust</dt><dd>' +
+      escapeHtml(
+        data.has_scripts ? (data.trusted ? 'Trusted scripts' : 'Untrusted scripts') : 'No scripts'
+      ) +
+      '</dd></div>' +
+      this.capabilityValueListHTML('Required MCP servers', data.required_mcp_servers) +
+      this.capabilityValueListHTML('Allowed tools', data.allowed_tools, 'Agent policy') +
+      this.capabilityValueListHTML('Disallowed tools', data.disallowed_tools) +
+      '</dl></section>'
+    );
+  }
+
+  renderMCPToolSchemaHTML(tool) {
+    const schema =
+      tool?.inputSchema && typeof tool.inputSchema === 'object' ? tool.inputSchema : {};
+    const properties =
+      schema.properties && typeof schema.properties === 'object' ? schema.properties : {};
+    const required = new Set(Array.isArray(schema.required) ? schema.required : []);
+    const names = Object.keys(properties);
+    if (!names.length) {
+      return '<p class="ws-cmd-capability-tool-empty">No parameters.</p>';
+    }
+    return (
+      '<dl class="ws-cmd-capability-params">' +
+      names
+        .map(name => {
+          const property = properties[name] || {};
+          const rawType = property.type || (Array.isArray(property.enum) ? 'enum' : 'value');
+          const type = Array.isArray(rawType) ? rawType.join(' | ') : String(rawType || 'value');
+          return (
+            '<div><dt><code>' +
+            escapeHtml(name) +
+            '</code><span>' +
+            escapeHtml(type) +
+            '</span><em>' +
+            (required.has(name) ? 'Required' : 'Optional') +
+            '</em></dt>' +
+            (property.description ? '<dd>' + escapeHtml(property.description) + '</dd>' : '') +
+            '</div>'
+          );
+        })
+        .join('') +
+      '</dl>'
+    );
+  }
+
+  renderMCPStartActionHTML(data, inspector) {
+    const tools = Array.isArray(data?.tools) ? data.tools : [];
+    const status = String(data?.status || '')
+      .trim()
+      .toLowerCase();
+    if (data?.synthesized || tools.length || status === 'running') return '';
+    return (
+      (data?.start_error
+        ? '<p class="ws-cmd-capability-start-error" role="alert">Server start failed: ' +
+          escapeHtml(data.start_error) +
+          '</p>'
+        : '<p class="ws-cmd-capability-empty">This server is not running. Passive inspection does not start it.</p>') +
+      '<button type="button" class="ws-cmd-capability-action is-primary" data-cmd-capability-start aria-label="Start MCP server ' +
+      escapeHtml(inspector.name) +
+      ' and load tools">Start server &amp; load tools</button>'
+    );
+  }
+
+  renderMCPOverviewHTML(data, inspector) {
+    const binding = data?.workspace_binding || {};
+    const scope = binding.scope && typeof binding.scope === 'object' ? binding.scope : {};
+    const roots = Array.isArray(scope.roots)
+      ? scope.roots.map(value => String(value || '').trim()).filter(Boolean)
+      : [];
+    const args = Array.isArray(data?.args) ? data.args : [];
+    const info = data?.server_info && typeof data.server_info === 'object' ? data.server_info : {};
+    return (
+      '<section class="ws-cmd-capability-pane" role="tabpanel" id="ws-cmd-capability-panel-overview" aria-labelledby="ws-cmd-capability-tab-overview">' +
+      (data?.synthesized
+        ? '<div class="ws-cmd-capability-notice"><strong>Workspace-native capability</strong><p>This locked binding is synthesized from approved workspace directories. It does not use or start a global MCP server.</p></div>'
+        : '') +
+      '<dl class="ws-cmd-capability-facts">' +
+      '<div class="ws-cmd-capability-fact"><dt>Status</dt><dd>' +
+      escapeHtml(data?.status || 'Unknown') +
+      '</dd></div>' +
+      '<div class="ws-cmd-capability-fact"><dt>Workspace binding</dt><dd>' +
+      escapeHtml(binding.source || (data?.synthesized ? 'Synthesized' : 'Explicit')) +
+      (binding.alias ? ' · ' + escapeHtml(binding.alias) : '') +
+      '</dd></div>' +
+      (roots.length ? this.capabilityValueListHTML('Approved roots', roots) : '') +
+      (Object.keys(scope).length && !roots.length
+        ? '<div class="ws-cmd-capability-fact"><dt>Scope</dt><dd><pre>' +
+          escapeHtml(JSON.stringify(scope, null, 2)) +
+          '</pre></dd></div>'
+        : '') +
+      '<div class="ws-cmd-capability-fact"><dt>Transport</dt><dd>' +
+      escapeHtml(data?.transport || 'stdio') +
+      '</dd></div>' +
+      (data?.command
+        ? '<div class="ws-cmd-capability-fact"><dt>Command</dt><dd><code>' +
+          escapeHtml([data.command, ...args].filter(Boolean).join(' ')) +
+          '</code></dd></div>'
+        : '') +
+      (info.name || info.title
+        ? '<div class="ws-cmd-capability-fact"><dt>Reported server</dt><dd>' +
+          escapeHtml(info.title || info.name) +
+          (info.version ? ' · ' + escapeHtml(info.version) : '') +
+          '</dd></div>'
+        : '') +
+      this.capabilityValueListHTML('Environment keys', data?.env_keys, 'None reported') +
+      '</dl>' +
+      this.renderMCPStartActionHTML(data, inspector) +
+      '</section>'
+    );
+  }
+
+  renderMCPToolsHTML(data, inspector) {
+    const tools = Array.isArray(data?.tools) ? data.tools : [];
+    return (
+      '<section class="ws-cmd-capability-pane" role="tabpanel" id="ws-cmd-capability-panel-tools" aria-labelledby="ws-cmd-capability-tab-tools">' +
+      '<div class="ws-cmd-capability-pane-title"><h4>Callable tools</h4><span>' +
+      escapeHtml(tools.length) +
+      '</span></div>' +
+      (tools.length
+        ? '<div class="ws-cmd-capability-tools">' +
+          tools
+            .map(
+              tool =>
+                '<article class="ws-cmd-capability-tool"><header><code>' +
+                escapeHtml(tool?.name || 'Unnamed tool') +
+                '</code>' +
+                (tool?.title && tool.title !== tool.name
+                  ? '<span>' + escapeHtml(tool.title) + '</span>'
+                  : '') +
+                '</header>' +
+                (tool?.description ? '<p>' + escapeHtml(tool.description) + '</p>' : '') +
+                this.renderMCPToolSchemaHTML(tool) +
+                '</article>'
+            )
+            .join('') +
+          '</div>'
+        : this.renderMCPStartActionHTML(data, inspector) ||
+          '<p class="ws-cmd-capability-empty">This running server reported no tools.</p>') +
+      '</section>'
+    );
+  }
+
+  safeCapabilitySourceURL(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    try {
+      const parsed = new URL(raw);
+      return ['http:', 'https:'].includes(parsed.protocol) ? parsed.href : '';
+    } catch (_error) {
+      return '';
+    }
+  }
+
+  renderMCPDocsHTML(data) {
+    const instructions = String(data?.instructions || '').trim();
+    const readme = data?.readme && typeof data.readme === 'object' ? data.readme : {};
+    const markdown = String(readme.markdown || '').trim();
+    const sourceURL = this.safeCapabilitySourceURL(readme.source_url);
+    return (
+      '<section class="ws-cmd-capability-pane" role="tabpanel" id="ws-cmd-capability-panel-docs" aria-labelledby="ws-cmd-capability-tab-docs">' +
+      (instructions
+        ? '<div class="ws-cmd-capability-doc"><h4>Server instructions</h4><div class="ws-cmd-capability-markdown">' +
+          renderCapabilityMarkdown(instructions) +
+          '</div></div>'
+        : '') +
+      (markdown
+        ? '<div class="ws-cmd-capability-doc"><div class="ws-cmd-capability-pane-title"><h4>README</h4>' +
+          (sourceURL
+            ? '<a href="' +
+              escapeHtml(sourceURL) +
+              '" target="_blank" rel="noopener noreferrer">View source</a>'
+            : '') +
+          '</div><div class="ws-cmd-capability-markdown">' +
+          renderCapabilityMarkdown(markdown) +
+          '</div></div>'
+        : '') +
+      (!instructions && !markdown
+        ? '<p class="ws-cmd-capability-empty">No README or server instructions are available.</p>'
+        : '') +
+      '</section>'
+    );
+  }
+
+  renderMCPCapabilityPane(inspector) {
+    const data = inspector.data || {};
+    if (inspector.activeTab === 'tools') return this.renderMCPToolsHTML(data, inspector);
+    if (inspector.activeTab === 'docs') return this.renderMCPDocsHTML(data);
+    return this.renderMCPOverviewHTML(data, inspector);
+  }
+
+  renderCapabilityInspector(agent) {
+    const inspector = this.capabilityInspector || {};
+    if (
+      !inspector.open ||
+      this.normalizeAgentKey(inspector.agent) !== this.normalizeAgentKey(agent?.key || agent?.name)
+    ) {
+      return '';
+    }
+    const isMCP = inspector.kind === 'mcp';
+    const tabs = isMCP ? ['overview', 'tools', 'docs'] : ['overview', 'instructions'];
+    const assignmentLabel = inspector.locked
+      ? 'Always available · Locked'
+      : inspector.assigned
+        ? 'Assigned to ' + inspector.agent
+        : 'Not assigned to ' + inspector.agent;
+    let content = '';
+    if (inspector.status === 'loading') {
+      content =
+        '<div role="tabpanel" id="ws-cmd-capability-panel-' +
+        inspector.activeTab +
+        '" aria-labelledby="ws-cmd-capability-tab-' +
+        inspector.activeTab +
+        '"><div class="ws-cmd-capability-loading" role="status" aria-live="polite"><span aria-hidden="true"></span><strong>' +
+        (isMCP ? 'Loading server details…' : 'Loading skill details…') +
+        '</strong><small>Assignment remains unchanged.</small></div></div>';
+    } else if (inspector.status === 'error') {
+      content =
+        '<div role="tabpanel" id="ws-cmd-capability-panel-' +
+        inspector.activeTab +
+        '" aria-labelledby="ws-cmd-capability-tab-' +
+        inspector.activeTab +
+        '"><div class="ws-cmd-capability-error" role="alert"><strong>Details unavailable</strong><p>' +
+        escapeHtml(inspector.error || 'The capability could not be loaded.') +
+        '</p><button type="button" class="ws-cmd-capability-action" data-cmd-capability-retry>Retry</button></div></div>';
+    } else {
+      content = isMCP
+        ? this.renderMCPCapabilityPane(inspector)
+        : this.renderSkillCapabilityPane(inspector);
+    }
+    return (
+      '<section class="ws-cmd-capability-inspector" data-cmd-capability-inspector role="region" aria-labelledby="ws-cmd-capability-title" aria-busy="' +
+      (inspector.status === 'loading' ? 'true' : 'false') +
+      '">' +
+      '<header class="ws-cmd-capability-head"><button type="button" class="ws-cmd-capability-back" data-cmd-capability-back aria-label="Back to Command Menu and ' +
+      escapeHtml(inspector.name) +
+      ' row"><i class="bi bi-arrow-left" aria-hidden="true"></i> Back</button><div><span>' +
+      (isMCP ? 'MCP Server' : 'Skill') +
+      '</span><h3 id="ws-cmd-capability-title" tabindex="-1">' +
+      escapeHtml(inspector.name) +
+      '</h3><small>' +
+      escapeHtml(assignmentLabel) +
+      '</small></div></header>' +
+      '<div class="ws-cmd-capability-tabs" role="tablist" aria-label="' +
+      escapeHtml(inspector.name) +
+      ' details">' +
+      tabs
+        .map(
+          tab =>
+            '<button type="button" role="tab" id="ws-cmd-capability-tab-' +
+            tab +
+            '" data-cmd-capability-tab="' +
+            tab +
+            '" aria-selected="' +
+            (inspector.activeTab === tab ? 'true' : 'false') +
+            '" aria-controls="ws-cmd-capability-panel-' +
+            tab +
+            '" tabindex="' +
+            (inspector.activeTab === tab ? '0' : '-1') +
+            '">' +
+            escapeHtml(tab.charAt(0).toUpperCase() + tab.slice(1)) +
+            '</button>'
+        )
+        .join('') +
+      '</div><div class="ws-cmd-capability-body">' +
+      content +
+      '</div><footer class="ws-cmd-capability-footer"><span>Read-only details</span><a href="' +
+      (isMCP ? '/mcp' : '/skills?agent=' + encodeURIComponent(inspector.agent)) +
+      '">Manage on the ' +
+      (isMCP ? 'MCP' : 'Skills') +
+      ' page <i class="bi bi-box-arrow-up-right" aria-hidden="true"></i></a></footer></section>'
+    );
   }
 
   renderMapAgentCommandMenu(agent, detailTarget) {
@@ -6933,6 +7631,7 @@ export class WorkspaceCommandView {
     return (
       '<div class="ws-cmd-map-inspector-card ' +
       escapeHtml(agent.tone) +
+      (this.capabilityInspector?.open ? ' is-capability-open' : '') +
       '" aria-label="' +
       escapeHtml(agent.name) +
       ' sheet">' +
@@ -6976,7 +7675,8 @@ export class WorkspaceCommandView {
       '<div class="ws-cmd-rpg-sheet-row"><span>Recent Activity</span><strong>' +
       escapeHtml(recentActivityMeta) +
       '</strong></div></div>' +
-      this.renderMapAgentCommandMenu(agent, detailTarget) +
+      (this.renderCapabilityInspector(agent) ||
+        this.renderMapAgentCommandMenu(agent, detailTarget)) +
       '</div>'
     );
   }
@@ -7211,6 +7911,7 @@ export class WorkspaceCommandView {
       '<div class="ws-cmd-map-window-backdrop" data-cmd-map-window-backdrop>' +
       '<section class="ws-cmd-map-window ws-cmd-map-window-' +
       escapeHtml(key) +
+      (key === 'inspector' && this.capabilityInspector?.open ? ' has-capability-inspector' : '') +
       '" role="dialog" aria-modal="true" aria-label="' +
       escapeHtml(option.label) +
       '">' +
@@ -7480,6 +8181,23 @@ export class WorkspaceCommandView {
     root.addEventListener('click', event => {
       const page = this.page || (typeof window !== 'undefined' ? window.workspaceDetail : null);
       if (this.handleLoadoutClick(event)) return;
+      if (event.target.closest('[data-cmd-capability-back]')) {
+        this.closeCapabilityInspector();
+        return;
+      }
+      const capabilityTab = event.target.closest('[data-cmd-capability-tab]');
+      if (capabilityTab) {
+        this.setCapabilityInspectorTab(capabilityTab.getAttribute('data-cmd-capability-tab'));
+        return;
+      }
+      if (event.target.closest('[data-cmd-capability-retry]')) {
+        this.retryCapabilityInspector();
+        return;
+      }
+      if (event.target.closest('[data-cmd-capability-start]')) {
+        this.startCapabilityMCP();
+        return;
+      }
       const modelBtn = event.target.closest('[data-cmd-edit-model]');
       if (modelBtn && page && typeof page.openAgentModelModal === 'function') {
         page.openAgentModelModal(modelBtn.getAttribute('data-cmd-edit-model'));
@@ -7516,12 +8234,14 @@ export class WorkspaceCommandView {
       const closeWindow = event.target.closest('[data-cmd-map-window-close]');
       if (closeWindow) {
         this.activeMapWindow = '';
+        this.resetCapabilityInspector();
         this.render();
         return;
       }
       const backdrop = event.target.closest('[data-cmd-map-window-backdrop]');
       if (backdrop && event.target === backdrop) {
         this.activeMapWindow = '';
+        this.resetCapabilityInspector();
         this.render();
         return;
       }
@@ -7529,6 +8249,7 @@ export class WorkspaceCommandView {
       if (windowBtn) {
         const nextWindow = windowBtn.getAttribute('data-cmd-map-window');
         this.activeMapWindow = this.activeMapWindow === nextWindow ? '' : nextWindow;
+        if (this.activeMapWindow !== 'inspector') this.resetCapabilityInspector();
         if (this.activeMapWindow === 'inventory' && !this.mapInventorySection) {
           this.mapInventorySection = 'notes';
         }
@@ -7677,6 +8398,7 @@ export class WorkspaceCommandView {
         );
       }
     });
+    root.addEventListener('keydown', event => this.handleCapabilityInspectorKeydown(event));
     this.bindTaskComposer(root);
   }
 
@@ -7766,6 +8488,9 @@ export class WorkspaceCommandView {
     }
     const key = this.normalizeAgentKey(name);
     if (!key) return;
+    if (this.selectedAgentKey && this.selectedAgentKey !== key && this.capabilityInspector?.open) {
+      this.resetCapabilityInspector();
+    }
     this.selectedAgentKey = key;
     this.agentSelectionInitialized = true;
     this.persistAgentKey(key);
