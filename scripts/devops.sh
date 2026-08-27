@@ -125,7 +125,7 @@ EOF
 print_menu() {
   printf '\n%s\n' \
     "[1/a] All  [2/d] Needs my decision  [3/b] Backlog  [4/f] Proposals  [5/y] Ready" \
-    "[v #] View  [n title] New  [c # choices] Decide  [ok #] Approve  [g] Agent defaults  [q] Quit"
+    "[v #] View  [n title] Capture  [p] New & Plan  [c # choices] Decide  [ok #] Approve  [g] Agent defaults  [q] Quit"
 }
 
 # Labels arrive from `gh` as a ", "-joined string. Split on commas and trim so a
@@ -1590,6 +1590,7 @@ picker_error=""
 picker_release_summary=""
 picker_release_error=""
 picker_release_count=0
+picker_action_notice=""
 
 bundle_labels_are_eligible() {
   local labels="$1"
@@ -1792,6 +1793,10 @@ render_picker() {
     style '1;33' "$bundle_mark_notice"
     printf '\n'
   fi
+  if [[ -n "$picker_action_notice" ]]; then
+    style '1;36' "$picker_action_notice"
+    printf '\n'
+  fi
   printf '\n'
 
   if [[ -n "$picker_error" ]]; then
@@ -1876,7 +1881,7 @@ render_picker() {
   printf '\n'
   style '2' '↑/↓ or j/k select  •  ←/→ or h/l change view  •  Space mark/unmark  •  b plan marked bundle'
   printf '\n'
-  style '2' 'Enter open  •  c decide  •  n new  •  o approve  •  s plan one  •  i start implementation  •  g agent defaults  •  r refresh  •  ? help  •  q quit'
+  style '2' 'Enter open  •  c decide  •  n capture  •  p new & plan  •  o approve  •  s plan selected  •  i start implementation  •  g agent defaults  •  r refresh  •  ? help  •  q quit'
   printf '\n'
 }
 
@@ -1942,11 +1947,13 @@ Picker keys
   Enter         Open the selected Issue; its action bar offers Decide and Plan
                 when eligible, plus Start implementation
   c             Open the selected Issue directly at its decision prompt
-  n             Capture a new Issue with an optional body
+  n             Capture an unlabelled idea for the grooming routine
+  p             New & Plan a reviewed brief: require context and size, create a
+                Ready Issue, then plan it (never adds approved)
   o             Add the approved label
   Space         Mark/unmark an ordinary backlog Issue in the Ready view
   b             Choose Claude/Pi plus model/thinking options for the marked bundle
-  s             Choose Claude/Pi plus model/thinking options for the selected Issue
+  s             Plan the selected existing Ready Issue with Claude/Pi options
   i             Start implementation from a completed local plan; choose Claude,
                 Codex, Pi, worktree-only, or cancel
   g             Read or change persistent primary and role agent defaults
@@ -2465,6 +2472,12 @@ print_plan_new_receipt() {
 plan_new_issue() {
   local status=0
 
+  # Never let a pre-write refusal inherit durable state from an earlier action
+  # in the same picker process.
+  ready_issue_created=0
+  ready_issue_url=""
+  ready_issue_number=""
+  ready_issue_create_output=""
   parse_plan_new_args "$@" || return $?
   prepare_plan_new_execution || status=$?
   if [[ "$status" -ne 0 ]]; then
@@ -2705,8 +2718,81 @@ prompt_create_issue() {
   fi
 }
 
+plan_new_prompt_created=0
+plan_new_prompt_number=""
+prompt_plan_new_issue() {
+  local title body choice size="" status=0
+  local -a args
+
+  plan_new_prompt_created=0
+  plan_new_prompt_number=""
+  printf 'New & Plan a reviewed brief. Empty title cancels.\n'
+  printf 'title> '
+  IFS= read -r title || return 0
+  if [[ ! "$title" =~ [^[:space:]] ]]; then
+    printf 'Cancelled.\n'
+    return 0
+  fi
+
+  printf 'Required short problem context; enter :edit for multiline Markdown.\n'
+  printf 'context> '
+  IFS= read -r body || return 0
+  if [[ "$body" == :edit ]]; then
+    edit_issue_body || return $?
+    body="$edited_issue_body"
+  fi
+  if [[ ! "$body" =~ [^[:space:]] ]]; then
+    printf 'Problem context is required; cancelled.\n'
+    return 0
+  fi
+
+  while [[ -z "$size" ]]; do
+    printf '\nChoose the planning route.\n'
+    printf '  [1/qk] Quick — direct task planning, no PRD\n'
+    printf '  [2/p]  Planned — detailed task planning, no PRD\n'
+    printf '  [3/d]  PRD — clarify requirements before task planning\n'
+    printf '  [q/Enter] Cancel\n'
+    printf 'size> '
+    IFS= read -r choice || return 0
+    case "$choice" in
+      1|qk|quick|Quick) size="quick" ;;
+      2|p|planned|Planned) size="planned" ;;
+      3|d|prd|PRD) size="prd" ;;
+      ""|q|Q|cancel|Cancel)
+        printf 'Cancelled.\n'
+        return 0
+        ;;
+      *) printf 'Choose Quick, Planned, PRD, or Cancel.\n' >&2 ;;
+    esac
+  done
+
+  # Selection is intentionally complete before plan_new_issue reaches the
+  # create preview. Cancelling here leaves no Issue to recover or refresh.
+  prompt_planner_selection || return 0
+  args=("$title" --body "$body" --size "$size" --kind "$planner_kind_choice")
+  [[ -n "$planner_model_choice" ]] && args+=(--model "$planner_model_choice")
+  [[ -n "$planner_thinking_choice" ]] && args+=(--thinking "$planner_thinking_choice")
+  plan_new_issue "${args[@]}" || status=$?
+  if [[ "$ready_issue_created" -eq 1 ]]; then
+    plan_new_prompt_created=1
+    plan_new_prompt_number="$ready_issue_number"
+  fi
+  return "$status"
+}
+
+picker_row_index_of() {
+  local issue_number="$1" index
+  for index in ${issue_numbers[@]+"${!issue_numbers[@]}"}; do
+    if [[ "${issue_numbers[$index]}" == "$issue_number" ]]; then
+      printf '%s' "$index"
+      return 0
+    fi
+  done
+  return 1
+}
+
 run_picker() {
-  local filter_index=0 selected_index=0 count key reload
+  local filter_index=0 selected_index=0 count key reload new_row
   enter_picker_screen
   trap restore_terminal EXIT INT TERM
   if load_picker_index; then
@@ -2767,6 +2853,34 @@ run_picker() {
           prune_bundle_marks
         fi
         apply_picker_filter "${picker_filters[$filter_index]}"
+        ;;
+      p)
+        # New & Plan is global: no selected row is required. Planner cancellation,
+        # create refusal, and create failure leave the cached index untouched.
+        # Once GitHub has durably created an Issue, refresh even if downstream
+        # planning declined or failed so the Ready work remains discoverable.
+        picker_action_notice=""
+        with_normal_terminal prompt_plan_new_issue
+        if [[ "$plan_new_prompt_created" -eq 1 ]]; then
+          if load_picker_index; then
+            prune_bundle_marks
+            apply_picker_filter "${picker_filters[$filter_index]}"
+            new_row=""
+            if [[ -n "$plan_new_prompt_number" ]]; then
+              new_row="$(picker_row_index_of "$plan_new_prompt_number" || true)"
+            fi
+            if [[ -n "$new_row" ]]; then
+              selected_index="$new_row"
+              picker_action_notice="Ready Issue #$plan_new_prompt_number is selected. Use its printed retry command if planning did not start."
+            elif [[ -n "$plan_new_prompt_number" ]]; then
+              picker_action_notice="Ready Issue #$plan_new_prompt_number was created but is outside this view. Use its printed retry command if planning did not start."
+            else
+              picker_action_notice="A Ready Issue was created, but its number could not be recovered. Follow the printed manual recovery guidance."
+            fi
+          else
+            picker_action_notice="The Ready Issue was created, but refresh failed. Use the printed Issue result and retry guidance."
+          fi
+        fi
         ;;
       g)
         # Persistent defaults are repository-local. Do not refresh or otherwise

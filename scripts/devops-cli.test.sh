@@ -914,6 +914,160 @@ check "picker new passes an inline body" "$(<"$prompt_capture")" \
 printf 'Fast capture\n\n' | prompt_create_issue > /dev/null
 check "picker new keeps body optional" "$(<"$prompt_capture")" "Fast capture"
 
+# New & Plan owns a distinct prompt contract: title and short context are
+# required, :edit remains available for multiline context, sizing is explicit,
+# and planner selection completes before the one-shot primitive can write.
+eval "$(declare -f plan_new_issue | sed '1s/plan_new_issue/plan_new_issue_prompt_real/')"
+plan_new_prompt_calls="$fixture_root/plan-new-prompt-calls"
+plan_new_prompt_order="$fixture_root/plan-new-prompt-order"
+plan_new_issue() {
+  printf 'plan-new\n' >> "$plan_new_prompt_order"
+  printf '<%s>\n' "$@" > "$plan_new_prompt_calls"
+  ready_issue_created="${PLAN_NEW_PROMPT_STUB_CREATED:-1}"
+  ready_issue_number="${PLAN_NEW_PROMPT_STUB_NUMBER:-481}"
+  return "${PLAN_NEW_PROMPT_STUB_STATUS:-0}"
+}
+prompt_planner_selection() {
+  printf 'planner\n' >> "$plan_new_prompt_order"
+  planner_kind_choice="claude"
+  planner_model_choice="sonnet"
+  planner_thinking_choice="high"
+  return 0
+}
+
+: > "$plan_new_prompt_calls"
+: > "$plan_new_prompt_order"
+printf '\n' | prompt_plan_new_issue > "$fixture_root/plan-new-prompt-title-cancel" 2>/dev/null || true
+check "New & Plan empty title cancels" \
+  "$(grep -Fc 'Cancelled.' "$fixture_root/plan-new-prompt-title-cancel" || true)" "1"
+check "New & Plan title cancellation makes no planner or write call" \
+  "$(wc -c < "$plan_new_prompt_order" | tr -d ' ')" "0"
+
+: > "$plan_new_prompt_calls"
+: > "$plan_new_prompt_order"
+printf 'Camera framing\n   \n' | prompt_plan_new_issue \
+  > "$fixture_root/plan-new-prompt-context-cancel" 2>/dev/null || true
+check "New & Plan requires non-empty short context" \
+  "$(grep -Fc 'Problem context is required; cancelled.' "$fixture_root/plan-new-prompt-context-cancel" || true)" "1"
+check "New & Plan context cancellation makes no planner or write call" \
+  "$(wc -c < "$plan_new_prompt_order" | tr -d ' ')" "0"
+
+edit_issue_body() {
+  edited_issue_body=$'## Context\n\nMultiline map detail.'
+}
+: > "$plan_new_prompt_calls"
+: > "$plan_new_prompt_order"
+prompt_plan_new_issue <<< $'Multiline brief\n:edit\n1\n' \
+  > "$fixture_root/plan-new-prompt-edit" 2>/dev/null || true
+check "New & Plan :edit preserves multiline context heading" \
+  "$(grep -Fc '<## Context' "$plan_new_prompt_calls" || true)" "1"
+check "New & Plan :edit preserves multiline context detail" \
+  "$(grep -Fc 'Multiline map detail.>' "$plan_new_prompt_calls" || true)" "1"
+check "New & Plan quick route reaches the one-shot primitive" \
+  "$(grep -Fxc '<quick>' "$plan_new_prompt_calls" || true)" "1"
+check "New & Plan records a durable created Issue for picker refresh" \
+  "$plan_new_prompt_created/$plan_new_prompt_number" "1/481"
+
+for size_fixture in '1:quick' '2:planned' '3:prd'; do
+  size_choice="${size_fixture%%:*}"
+  expected_size="${size_fixture#*:}"
+  : > "$plan_new_prompt_calls"
+  : > "$plan_new_prompt_order"
+  printf 'Sized brief\nReviewed context\n%s\n' "$size_choice" | prompt_plan_new_issue \
+    > "$fixture_root/plan-new-prompt-size-$expected_size" 2>/dev/null || true
+  check "New & Plan maps size choice $size_choice to $expected_size" \
+    "$(grep -Fxc "<$expected_size>" "$plan_new_prompt_calls" || true)" "1"
+  check "New & Plan selects the planner before invoking plan-new for $expected_size" \
+    "$(<"$plan_new_prompt_order")" $'planner\nplan-new'
+done
+size_prompt_output="$(cat "$fixture_root/plan-new-prompt-size-quick")"
+if [[ "$size_prompt_output" != *"Quick — direct task planning, no PRD"* || \
+      "$size_prompt_output" != *"Planned — detailed task planning, no PRD"* || \
+      "$size_prompt_output" != *"PRD — clarify requirements before task planning"* ]]; then
+  printf 'FAIL New & Plan size prompt does not describe all routes: %s\n' "$size_prompt_output" >&2
+  failures=$((failures + 1))
+fi
+
+: > "$plan_new_prompt_calls"
+: > "$plan_new_prompt_order"
+printf 'Retry size\nReviewed context\ninvalid\n2\n' | prompt_plan_new_issue \
+  > "$fixture_root/plan-new-prompt-size-retry" 2>&1 || true
+check "New & Plan retries an invalid size choice" \
+  "$(grep -Fxc '<planned>' "$plan_new_prompt_calls" || true)" "1"
+check "New & Plan explains an invalid size choice" \
+  "$(grep -Fc 'Choose Quick, Planned, PRD, or Cancel.' "$fixture_root/plan-new-prompt-size-retry" || true)" "1"
+
+: > "$plan_new_prompt_calls"
+: > "$plan_new_prompt_order"
+printf 'Cancelled size\nReviewed context\nq\n' | prompt_plan_new_issue \
+  > "$fixture_root/plan-new-prompt-size-cancel" 2>/dev/null || true
+check "New & Plan size cancellation occurs before planner selection" \
+  "$(wc -c < "$plan_new_prompt_order" | tr -d ' ')" "0"
+
+prompt_planner_selection() {
+  printf 'planner\n' >> "$plan_new_prompt_order"
+  return 1
+}
+: > "$plan_new_prompt_calls"
+: > "$plan_new_prompt_order"
+prompt_plan_new_issue <<< $'Planner cancel\nReviewed context\n1\n' \
+  > "$fixture_root/plan-new-prompt-planner-cancel" 2>/dev/null || true
+check "New & Plan planner cancellation creates nothing" \
+  "$(wc -c < "$plan_new_prompt_calls" | tr -d ' ')" "0"
+check "New & Plan reaches planner selection exactly once before cancellation" \
+  "$(grep -c '^planner$' "$plan_new_prompt_order" || true)" "1"
+check "planner cancellation leaves no durable refresh signal" \
+  "$plan_new_prompt_created/<$plan_new_prompt_number>" "0/<>"
+
+# A child planning failure happens after creation. The prompt preserves both
+# the non-zero status and the durable refresh signal so the picker can show the
+# Ready row and its retry receipt.
+prompt_planner_selection() {
+  planner_kind_choice="pi"
+  planner_model_choice=""
+  planner_thinking_choice="high"
+  return 0
+}
+: > "$plan_new_prompt_calls"
+: > "$plan_new_prompt_order"
+PLAN_NEW_PROMPT_STUB_STATUS=9
+prompt_failure_status=0
+prompt_plan_new_issue <<< $'Durable partial result\nReviewed context\n2\n' \
+  > "$fixture_root/plan-new-prompt-child-failure" 2>/dev/null || prompt_failure_status=$?
+unset PLAN_NEW_PROMPT_STUB_STATUS
+check "New & Plan preserves a planner child failure status" "$prompt_failure_status" "9"
+check "planner child failure retains the durable refresh signal" \
+  "$plan_new_prompt_created/$plan_new_prompt_number" "1/481"
+
+# A declined/failed create has no durable signal, so the picker must retain its
+# cached list rather than perform a refresh-dependent mutation.
+PLAN_NEW_PROMPT_STUB_CREATED=0
+PLAN_NEW_PROMPT_STUB_STATUS=7
+prompt_failure_status=0
+prompt_plan_new_issue <<< $'Failed create\nReviewed context\n1\n' \
+  > "$fixture_root/plan-new-prompt-create-failure" 2>/dev/null || prompt_failure_status=$?
+unset PLAN_NEW_PROMPT_STUB_CREATED PLAN_NEW_PROMPT_STUB_STATUS
+check "New & Plan preserves a create failure status" "$prompt_failure_status" "7"
+check "create failure leaves no durable refresh signal" \
+  "$plan_new_prompt_created/<$plan_new_prompt_number>" "0/<>"
+
+# Restore the fixed selector used by the existing opened-Issue unit fixtures and
+# the real one-shot primitive for any later direct helper checks.
+prompt_planner_selection() {
+  planner_kind_choice="pi"
+  planner_model_choice='openai-codex/planner-model'
+  planner_thinking_choice="max"
+  return 0
+}
+eval "$(declare -f plan_new_issue_prompt_real | sed '1s/plan_new_issue_prompt_real/plan_new_issue/')"
+
+issue_numbers=(320 481 999)
+check "picker can select a newly created Issue by immutable number" \
+  "$(picker_row_index_of 481)" "1"
+check "picker leaves another view unselected when the new Issue is absent" \
+  "$(picker_row_index_of 777 >/dev/null 2>&1 && echo yes || echo no)" "no"
+issue_numbers=()
+
 view_issue() {
   printf 'viewed #%s\n' "$1"
 }
@@ -2249,6 +2403,51 @@ for mapping in \
     exit 1
   fi
 done
+
+# ---------------------------------------------------------------------------
+# The picker's global `p` New & Plan key.
+#
+# Like n, it must work with an empty list and from every view. Unlike n, it
+# refreshes only after prompt_plan_new_issue reports a durable create; planner
+# selection and all create/launch details stay in the prompt/one-shot path.
+# ---------------------------------------------------------------------------
+p_branch="$(awk '/^      p\)$/{inside=1} inside{print} inside && /^        ;;$/{exit}' "$script")"
+if [[ -z "$p_branch" ]]; then
+  printf 'could not read the picker p) branch\n' >&2
+  exit 1
+fi
+check "picker p invokes the New & Plan prompt once" \
+  "$(grep -Fc 'with_normal_terminal prompt_plan_new_issue' <<< "$p_branch" || true)" "1"
+if grep -Eq '\$count|selected_index.*issue_numbers|issue_numbers\[\$selected_index\]' <<< "$p_branch"; then
+  printf 'the picker p key incorrectly requires a selected row: %s\n' "$p_branch" >&2
+  exit 1
+fi
+if ! grep -Fq 'if [[ "$plan_new_prompt_created" -eq 1 ]]' <<< "$p_branch" || \
+   [[ "$(grep -c 'load_picker_index' <<< "$p_branch" || true)" -ne 1 ]]; then
+  printf 'the picker p key does not refresh exactly once behind the durable-create gate: %s\n' "$p_branch" >&2
+  exit 1
+fi
+if grep -Eq 'prompt_planner_selection|create_ready_issue|launch_planner_plan|bundle_mark_(toggle|remove)|start_bundle_plan' <<< "$p_branch"; then
+  printf 'the picker p key duplicates planning logic or mutates bundle actions: %s\n' "$p_branch" >&2
+  exit 1
+fi
+if ! grep -Fq 'p new & plan' "$script" || \
+   ! grep -Fq 'n capture' "$script" || \
+   ! grep -Fq 's plan selected' "$script"; then
+  printf 'the picker footer does not distinguish capture, New & Plan, and selected planning\n' >&2
+  exit 1
+fi
+if ! grep -Fq 'New & Plan a reviewed brief' "$script" || \
+   ! grep -Fq 'never adds approved' "$script"; then
+  printf 'picker help does not explain the New & Plan boundary\n' >&2
+  exit 1
+fi
+n_branch="$(awk '/^      n\)$/{inside=1} inside{print} inside && /^        ;;$/{exit}' "$script")"
+if [[ "$(grep -Fc 'with_normal_terminal prompt_create_issue' <<< "$n_branch" || true)" -ne 1 ]] || \
+   grep -Fq 'prompt_plan_new_issue' <<< "$n_branch"; then
+  printf 'the picker n capture path changed while adding p: %s\n' "$n_branch" >&2
+  exit 1
+fi
 
 # ---------------------------------------------------------------------------
 # The picker's `s` key.
