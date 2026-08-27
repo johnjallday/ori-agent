@@ -1378,6 +1378,7 @@
   display: flex;
   align-items: center;
   gap: 16px;
+  max-width: calc(100vw - 24px);
   padding: 9px 10px 9px 16px;
   background: rgba(18, 19, 23, 0.96);
   border: 1px solid var(--ws-line-bright);
@@ -1403,32 +1404,79 @@
 }
 .ws-map-selbar-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
-/* Group and Delete moved into the map's context menu (#317); the bar is a count
-   plus Clear, so only Clear's rules remain. */
+.ws-map-selbar-group,
+.ws-map-selbar-delete,
 .ws-map-selbar-clear {
+  min-height: 36px;
   padding: 7px 13px;
+  border: 1px solid var(--ws-line-bright);
+  background: transparent;
+  color: var(--ws-ink-dim);
   cursor: pointer;
   font-family: var(--ws-font-display);
   font-size: 11px;
+  font-weight: 700;
   letter-spacing: 1.5px;
   text-transform: uppercase;
-  font-weight: 700;
   transition: 0.15s;
   white-space: nowrap;
   clip-path: polygon(7px 0, 100% 0, 100% calc(100% - 7px), calc(100% - 7px) 100%, 0 100%, 0 7px);
-  background: transparent;
-  border: 1px solid var(--ws-line-bright);
-  color: var(--ws-ink-dim);
 }
-.ws-map-selbar-clear:hover {
-  border-color: var(--ws-faction);
+.ws-map-selbar-group {
+  border-color: var(--ws-faction-deep);
   color: var(--ws-faction);
 }
+.ws-map-selbar-delete {
+  border-color: color-mix(in srgb, var(--ws-danger, #e2654d) 65%, var(--ws-line-bright));
+  color: var(--ws-danger, #e2654d);
+}
+.ws-map-selbar-group:hover:not(:disabled),
+.ws-map-selbar-clear:hover:not(:disabled) {
+  border-color: var(--ws-faction);
+  background: rgba(70, 211, 154, 0.1);
+  color: var(--ws-faction);
+}
+.ws-map-selbar-delete:hover:not(:disabled) {
+  border-color: var(--ws-danger, #e2654d);
+  background: rgba(226, 101, 77, 0.12);
+  color: var(--ws-danger, #e2654d);
+}
+.ws-map-selbar-group:focus-visible,
+.ws-map-selbar-delete:focus-visible,
 .ws-map-selbar-clear:focus-visible {
   outline: 2px solid var(--ws-faction);
   outline-offset: 2px;
+}
+.ws-map-selbar-delete:focus-visible {
+  outline-color: var(--ws-danger, #e2654d);
+}
+.ws-map-selbar-group:disabled,
+.ws-map-selbar-delete:disabled,
+.ws-map-selbar-clear:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+@media (max-width: 620px) {
+  .ws-map-selbar {
+    align-items: flex-start;
+    gap: 8px;
+    bottom: 12px;
+  }
+  .ws-map-selbar-count {
+    padding-top: 9px;
+  }
+  .ws-map-selbar-actions {
+    gap: 6px;
+  }
+  .ws-map-selbar-group,
+  .ws-map-selbar-delete,
+  .ws-map-selbar-clear {
+    min-height: 44px;
+    padding-inline: 10px;
+  }
 }
 .ws-map-tile-name {
   margin-top: 2px;
