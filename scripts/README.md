@@ -112,7 +112,7 @@ Planning and implementation are separate stages. One `--issue` preserves the
 single-Issue flow. Repeated distinct values plan an ordinary-backlog bundle as
 one unit: every Issue is fetched once, sorted by immutable number, written into
 one combined snapshot and size-routed starter under `ori-agent-dev/tasks/`, and
-sent to one **Pi** session. `wt start` handles implementation later.
+sent to one selected **Claude or Pi** session. `wt start` handles implementation later.
 
 ```bash
 wt plan --issue 342                         # one Issue
@@ -169,6 +169,9 @@ One command covers the human issue workflow:
 ./scripts/devops.sh new <title>                         # quick title-only capture
 ./scripts/devops.sh new <title> --body <text>           # optional inline context
 ./scripts/devops.sh new <title> --body-file <path|->     # Markdown file or stdin
+./scripts/devops.sh plan-new <title...> --body <context> --size <quick|planned|prd>
+./scripts/devops.sh plan-new <title...> --body-file <path|-> --size <size> \
+  --kind <claude|pi> [--model <model>] [--thinking <level>] --yes
 ./scripts/devops.sh decide <n> <answers> [--rationale <why>] # marked decision
 ./scripts/devops.sh answer <n> <answers>                   # alias for decide
 ./scripts/devops.sh approve <n>        # add the approved label (confirm-gated)
@@ -183,14 +186,17 @@ and again as its members.
 In a terminal, the colorful picker uses `↑/↓` or `j/k` to select an Issue,
 `←/→` or `h/l` to change views, and the same `1`–`5` view order shown by the
 line REPL. `Enter` opens an Issue and keeps you there with an action bar:
-`c` records a decision, `s` starts its Pi planner, `r` refreshes the
+`c` records a decision, `s` starts its Claude/Pi planner, `r` refreshes the
 opened Issue, and Enter returns to the list. Decide and Plan each appear only
 when that Issue's own live labels make them eligible - the bar is drawn for
 one known Issue, so it never offers a write or a command the Issue does not
 actually support. The list's `c` key is a shortcut that opens the same Issue
-directly at its decision answers. `n` captures a new Issue with an optional
-body, `o` approves it, and `s` starts Pi planning for the selected Ready row.
-In Ready, Space marks/unmarks ordinary backlog rows and `b` plans at least two
+directly at its decision answers. `n` captures an unlabelled Issue with an
+optional body. The distinct global `p` action works in every view and on an
+empty list: it collects required context, a quick/planned/prd route, and the
+Claude/Pi model/thinking selection before creating and planning one Ready Issue.
+It never adds `approved`. `o` approves an existing Issue, and `s` plans the
+selected Ready row. In Ready, Space marks/unmarks ordinary backlog rows and `b` plans at least two
 marks together; cursor and marks render separately and the header shows the
 count. Marks survive view changes. `r` refreshes and visibly prunes marks that
 vanished or became ineligible; `?` shows help and `q` quits. At the new-Issue body
@@ -206,7 +212,14 @@ of lists.
 Every row shows the Issue's `size:*` label in its own column, so a long label
 list can never truncate away the signal that says whether to open a PRD first.
 
-**Planning keys.** In Ready, `s` runs `wt plan --issue <N>` for the current
+**Planning keys.** `p` is New & Plan for a reviewed brief whose triage and size
+a human is intentionally taking over from grooming. A pre-write cancellation
+creates nothing. After a durable create, the picker refreshes, selects the new
+row when it belongs to the current view, and otherwise reports it without
+changing views. If planning is declined or fails, the Issue remains Ready and
+the interaction leaves its exact retry receipt visible.
+
+In Ready, `s` runs `wt plan --issue <N>` for the current
 row. Space + `b` forwards every marked number as a separate argument and opens
 the combined evidence/compatibility confirmation. `feature-proposal` rows stay
 single and cannot be marked. The same `s` is also on the opened-Issue action bar
@@ -274,7 +287,7 @@ line, and either read failing
 (no release exists, the PR query errors) exits non-zero with `gh`'s own
 message on stderr rather than reporting a misleading zero.
 
-**Writes.** `new`, `decide`, `approve` and `unapprove` are the only mutating
+**Writes.** `new`, `plan-new`, `decide`, `approve` and `unapprove` are the only mutating
 commands; `answer` is a backwards-compatible alias for `decide`. Each prints
 what it will do and asks for confirmation; without a terminal they refuse unless
 given `--yes`, so a pipe can never write by accident.
@@ -287,6 +300,23 @@ Adding `backlog` here would skip the spec step the whole pipeline is built
 around, and `needs-decision` would assert a spec exists when none does. Titles
 and bodies are passed through verbatim, so an ampersand stays an ampersand
 rather than becoming a literal `&amp;`.
+
+`plan-new` is an explicit grooming bypass, not a faster spelling of `new`. It
+requires non-empty problem context and one size, then previews and creates an
+Issue with exactly `backlog` plus `size:quick`, `size:planned`, or `size:prd`.
+It never adds `approved` or any grooming marker. Interactive use prompts for the
+same Claude/Pi model/thinking intent as `s` before the GitHub write. A script
+must pass `--kind` and `--yes`; model and thinking are optional integration
+overrides.
+
+The create and plan stages are intentionally not atomic. After GitHub returns a
+valid Issue URL/number, `plan-new` delegates to the existing `wt plan` path so
+its fresh Ready check, evidence summary, artifact writes, and Herdr degradation
+remain authoritative. A downstream decline or failure never rolls back the
+Ready Issue; the command prints `Ready Issue: #N` and a shell-safe exact
+`wt plan` retry. If a successful create returns malformed or multiline output,
+no number is guessed and no planner starts—the raw result and manual recovery
+steps are printed instead.
 
 `decide` records choices such as `1B, 2A` plus an optional rationale in a comment
 marked `<!-- ori-decision -->`. The opened Issue owns this interaction: its
@@ -319,12 +349,14 @@ need machine-readable reads should use its JSON output:
 ```bash
 ./scripts/devops.sh new "<title>" --body "<optional context>"
 ./scripts/devops.sh new "<title>" --body-file notes.md
+./scripts/devops.sh plan-new "<reviewed title>" --body-file notes.md \
+  --size planned --kind pi --yes
 gh issue create --title "<title>" --body "<optional context>"
 gh issue list --state open --limit 1000 --json number,title,author,labels,url,createdAt,updatedAt
 ```
 
 The script exits `0` after a completed operation, `2` for invalid arguments,
-and otherwise preserves the failed `gh` command's status.
+and otherwise preserves the failed `gh` or constrained planning child status.
 
 New Issue-backed work uses the Issue number in its identity —
 `<issue-number>-<slug>`, for example `292-coordinate-based-map` — so a PRD,

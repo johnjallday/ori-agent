@@ -94,6 +94,7 @@ same views and release status to scripts and agents.
 | `./scripts/devops.sh agent-defaults` | reads or confirm-gates persistent primary and role-fallback kind/model pairs in `.herdr/devflow.toml` — local only |
 | `./scripts/devops.sh view <n>` | reads one Issue in full |
 | `./scripts/devops.sh new <title> [--body <text> \| --body-file <path\|->]` | **writes** a new unlabelled Issue with optional context, confirm-gated |
+| `./scripts/devops.sh plan-new <title...> (--body <text> \| --body-file <path\|->) --size <quick\|planned\|prd> [planner options]` | **writes** one Ready Issue and delegates to the existing planning flow, confirm-gated |
 | `./scripts/devops.sh decide <n> <answers> [--rationale <text>]` | **writes** a marked decision comment, confirm-gated (`answer` is an alias) |
 | `./scripts/devops.sh approve <n>` / `unapprove <n>` | **writes** the `approved` label, confirm-gated |
 
@@ -113,12 +114,13 @@ release status is unavailable without hiding the Issue list. The one-shot
 command remains strict: either read failing exits non-zero with `gh`'s own
 message rather than reporting a misleading zero count.
 
-Reads never mutate. The GitHub write commands exist because they are the three
-things only a human does in this pipeline: capturing an idea, answering a spec's
-open questions, and setting `approved` — the single gate the grooming routine
-is forbidden from touching. The separate local `agent-defaults` write changes
-only four checked-in TOML keys. All writes confirm first and refuse without a
-terminal unless given `--yes`.
+Reads never mutate. The GitHub write commands exist because they are the four
+things only a human does in this pipeline: capturing an idea, explicitly taking
+ownership of triage and sizing for an already-reviewed brief, answering a spec's
+open questions, and setting `approved` — the single implementation gate the
+grooming routine is forbidden from touching. The separate local
+`agent-defaults` write changes only four checked-in TOML keys. All writes
+confirm first and refuse without a terminal unless given `--yes`.
 
 Persistent defaults are pairs: `primary.kind`/`primary.model` and
 `roles.default_kind`/`roles.default_model`; `[roles.defaults]` and
@@ -136,6 +138,27 @@ or `$EDITOR` for multiline Markdown), `--body` text, or `--body-file` input. It
 still creates the Issue with **no labels**, on purpose: a raw capture has to
 reach the grooming routine untriaged, or it skips the spec step the pipeline is
 built around.
+
+`p` / `plan-new` is deliberately different. Use it only when a human accepts
+responsibility for bypassing grooming and has already reviewed enough context to
+choose `quick`, `planned`, or `prd`. It requires non-empty problem context,
+creates one open Issue with exactly `backlog` plus the selected `size:*` label,
+never adds `approved`, and then delegates the recovered positive Issue number to
+the same constrained `wt plan --issue <N>` path used by `s`. In a terminal it
+collects Claude/Pi, model, and thinking intent before showing the create preview;
+scripted use requires explicit `--kind` and `--yes`, with optional
+`--model`/`--thinking`, and propagates `--yes` to planning. Cancellation before
+the create leaves no Issue.
+
+Creation and planning are a two-stage consequence boundary. Once GitHub creates
+the Ready Issue, a declined or failed planning child never closes, deletes, or
+relabels it. The command always prints the durable number and a shell-safe exact
+`wt plan` retry after the child returns. If GitHub succeeds but does not return
+one anchored Issue URL with a positive numeric suffix, no planner is launched;
+the raw result and manual recovery command are printed instead of guessing. The
+picker refreshes after every durable create, selects the new row when it belongs
+to the current view, and otherwise reports that the Ready Issue exists without
+changing views.
 
 `decide` records answers in a comment marked `<!-- ori-decision -->`. In the
 picker, the opened Issue owns the interaction: its `c` action asks for choices
@@ -190,7 +213,9 @@ Work that did not come from an Issue keeps a plain descriptive slug. Existing fe
 The full lifecycle, and which agent owns each stage:
 
 ```
-Ready Issue(s) on GitHub
+Reviewed and human-sized brief
+  → p / plan-new → one Ready Issue on GitHub
+Existing Ready Issue(s) on GitHub
   → s for one, or Space + b for an ordinary-backlog bundle
   → wt plan --issue N [--issue N ...] [--kind claude|pi] [--model MODEL] [--thinking LEVEL]
   → picker i → wt start      chosen agent implements in one feature worktree
@@ -263,8 +288,11 @@ not add an implementation-model prompt.
 
 In the `./scripts/devops.sh` picker's Ready view, `s` asks for Claude or Pi and
 plans the current row; Claude opens model/thinking options, while Pi opens the
-installed provider/model options followed by thinking. Space marks/unmarks ordinary backlog rows and
-`b` asks once for the bundle planner selection before planning at least two
+installed provider/model options followed by thinking. The global `p` action
+works from any view, including an empty list: it collects a required title,
+context (`:edit` for multiline), size, and the same planner selection before it
+creates and plans one Ready Issue. It never means approval. Space marks/unmarks
+ordinary backlog rows and `b` asks once for the bundle planner selection before planning at least two
 marks as one bundle. The picker/REPL `g` action manages persistent
 agent defaults without reading or refreshing GitHub. Marks use immutable Issue
 numbers, survive view changes, and are
@@ -277,7 +305,9 @@ from any view, not only Ready. Any other label state — or a label read that
 fails — is a clear refusal instead. `wt plan` performs its own fresh eligibility
 check before writing files or contacting Herdr.
 
-Planning is asynchronous; `devops.sh` does not wait or poll it. After the planner replaces
+Planning is asynchronous; `devops.sh` does not wait or poll it. `p` refreshes
+the Issue index after creation, not after a pre-write cancellation or failure;
+its printed retry remains the recovery path when planning did not start. After the planner replaces
 the starter with a real task list, press `[i] Start implementation` on the
 selected row or opened Issue. For a bundle, every attached member resolves the
 same exact task list and in-flight state. The action refuses a missing,

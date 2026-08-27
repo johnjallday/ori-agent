@@ -112,7 +112,27 @@ wt plan --issue 342 --kind claude --model fable --thinking high # Claude selecti
 wt plan --issue 342 --kind pi                                   # Pi defaults
 wt plan --issue 342 --kind pi --model openai/id --thinking max  # Pi selection
 wt plan --issue 342 --yes                                       # legacy default Pi
+
+# Create a reviewed, explicitly sized brief and enter this same planning path.
+./scripts/devops.sh plan-new "Camera framing" --body-file notes.md \
+  --size planned --kind pi --thinking high --yes
 ~~~
+
+`plan-new` is the deliberate entry point for a human who is taking ownership of
+triage and sizing instead of sending a raw capture through grooming. It requires
+non-empty context and `quick`, `planned`, or `prd`, creates exactly one open
+Issue with `backlog` plus that `size:*` label, never adds `approved`, recovers the
+positive number from one anchored GitHub Issue URL, and then invokes this same
+`wt plan` path. Interactive use collects Claude/Pi, model, and thinking intent
+before the create confirmation; non-interactive use requires explicit `--kind`
+and `--yes`.
+
+The create and planning stages are intentionally separate consequences. Once
+the Issue exists, a planning decline, zsh failure, or Herdr degradation never
+rolls it back. The durable Issue number and exact shell-safe retry print after
+the child returns. If GitHub succeeds but its output cannot be parsed safely,
+planning does not start; the output and a manual `wt plan --issue <number>`
+recovery shape are shown instead.
 
 The shell only validates arguments and resolves the exact `dev` worktree; the
 Go helper (`wt herd issue-plan`) does the GitHub read, eligibility checks,
@@ -227,8 +247,10 @@ agent, and it does not resend an already confirmed bootstrap prompt unless
 --resend is supplied.
 
 For Issue-backed work, the interactive `./scripts/devops.sh` flow makes this
-choice explicit. Press `s`, choose Claude or Pi (and, for Pi, its model), return
-after the planner has replaced the planning starter, then press `i`. The later action resolves the
+choice explicit. Press `s` for an existing Ready Issue and choose its planner,
+or global `p` to collect a reviewed title, required context, explicit size, and
+the same Claude/Pi model/thinking selection before creating one. Return after
+the planner has replaced the planning starter, then press `i`. The later action resolves the
 number-first task list locally, prompts for Claude, Codex, Pi, worktree-only, or
 cancel, and invokes the corresponding `wt start --kind <kind>` or `--no-herdr`.
 It never chains to the planner or polls it; `wt start` still owns its normal plan
@@ -620,6 +642,9 @@ lists every open Issue before prompting for another view.
 ./scripts/devops.sh new <title>                    # quick title-only capture
 ./scripts/devops.sh new <title> --body <text>      # optional inline context
 ./scripts/devops.sh new <title> --body-file <path|-> # Markdown file or stdin
+./scripts/devops.sh plan-new <title...> --body <context> --size <quick|planned|prd>
+./scripts/devops.sh plan-new <title...> --body-file <path|-> --size <size> \
+  --kind <claude|pi> [--model <model>] [--thinking <level>] --yes
 ./scripts/devops.sh decide <n> <answers> [--rationale <why>] # marked decision
 ./scripts/devops.sh answer <n> <answers>             # alias for decide
 ./scripts/devops.sh approve <n>        # add `approved`, confirm-gated
@@ -636,9 +661,11 @@ Issue directly at its decision answers. Decide and Plan each appear on that bar
 only when the opened Issue's own live labels make them eligible, read fresh
 every time the Issue opens; Start implementation is always available so its
 local resolver can explain whether planning is incomplete or work already
-exists. `n` captures one with an optional body, `o` approves it, `s` starts
-Claude/Pi planning for the selected Ready row, `i` starts the selected Issue's later
-implementation flow, `g` manages persistent agent defaults locally,
+exists. `n` captures one unlabelled Issue with an optional body. Global `p`
+works from every view and an empty list; it creates and plans a Ready Issue after
+required context, size, planner selection, and confirmation, and never approves
+it. `o` approves, `s` starts Claude/Pi planning for the selected Ready row, and
+`i` starts the selected Issue's later implementation flow. `g` manages persistent agent defaults locally,
 list-level `r` refreshes, `?` shows help, and `q` quits.
 `:edit` at the body prompt opens `$VISUAL` or `$EDITOR` for multiline Markdown. In a pipe or redirected shell, the line REPL accepts
 `1/a`, `2/d`, `3/b`, `4/f`, and `5/y`, plus `v <number>`, `n <title>`,
@@ -671,13 +698,22 @@ Pi, worktree-only, or cancel, then starts an argument-safe zsh child that invoke
 `wt start` with `--kind <kind>` or `--no-herdr`. `wt start` remains the final
 source of truth and displays its own confirmation.
 
-Reads never mutate. The write commands cover the three things only a human does
-here — capturing an idea, answering a spec's open questions, and setting
+Reads never mutate. The write commands cover the four things only a human does
+here — capturing an idea, explicitly taking over triage and sizing for an
+already-reviewed brief, answering a spec's open questions, and setting
 `approved`, the one label the grooming routine may never write. All confirm
 first, and refuse without a terminal unless given `--yes`. A captured Issue gets
 no labels: it must reach the grooming routine untriaged so the spec step runs.
 Its optional body can come from an inline prompt, `$VISUAL`/`$EDITOR`, a file,
 or stdin.
+
+New & Plan is distinct in both the picker (`p`) and one-shot CLI (`plan-new`). It
+requires context and a size, resolves the complete planner selection before any
+write, and creates only `backlog` plus the chosen size label. Scripted callers
+must pass `--kind` and `--yes`; the latter also confirms `wt plan`, while an
+interactive call keeps the normal downstream evidence gate. The picker refreshes
+only after a durable create, selects the row if the current view contains it,
+and leaves the printed retry readable when planning declined or failed.
 
 `decide` (and its `answer` alias) posts `<!-- ori-decision -->` plus the selected
 answers and optional rationale. Only after that comment succeeds, the same
@@ -727,11 +763,14 @@ model, thinking level, and Issue numbers as separate arguments while starting
 the third constrained child. Neither path calls Herdr directly or evaluates
 Issue text as shell code. Agents that need structured data should use
 `gh issue list --json` directly. Capture remains a thin wrapper over the GitHub
-CLI, and either surface is valid:
+CLI; New & Plan deliberately adds Ready labels and the constrained planning
+handoff:
 
 ~~~bash
 ./scripts/devops.sh new "<title>" --body "<optional context>"
 ./scripts/devops.sh new "<title>" --body-file notes.md
+./scripts/devops.sh plan-new "<reviewed title>" --body-file notes.md \
+  --size planned --kind pi --yes
 gh issue create --title "<title>" --body "<optional context>"
 gh issue list --state open --limit 1000 --json number,title,author,labels,url,createdAt,updatedAt
 ~~~
