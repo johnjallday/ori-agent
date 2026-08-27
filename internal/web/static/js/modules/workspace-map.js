@@ -2487,14 +2487,11 @@
 
   // Readout for the multi-select set. Shown only while at least one tile is
   // checked, and refreshed in place by updateSelBar so toggling selection never
-  // re-mounts the map.
-  //
-  // Group and Delete used to live here. They moved into the context menu (#317)
-  // where the count is in the label and the cursor is already on one of the
-  // checked buildings; the bar keeps only what it is uniquely good at — saying
-  // how many are checked, and letting go of all of them at once.
+  // re-mounts the map. Group and Delete deliberately reuse the same host-owned
+  // actions exposed by the checked tile's context menu.
   function selBarHTML() {
     var n = multiCount();
+    var mutationsDisabled = isMapReadOnly() ? ' disabled' : '';
     return (
       '<div class="ws-map-selbar" data-ws-selbar' +
       (n ? '' : ' hidden') +
@@ -2503,6 +2500,12 @@
       n +
       ' selected</span>' +
       '<div class="ws-map-selbar-actions">' +
+      '<button type="button" class="ws-map-selbar-group" data-ws-selbar-group' +
+      mutationsDisabled +
+      '>Group</button>' +
+      '<button type="button" class="ws-map-selbar-delete" data-ws-selbar-delete' +
+      mutationsDisabled +
+      '>Delete</button>' +
       '<button type="button" class="ws-map-selbar-clear" data-ws-selbar-clear>Clear</button>' +
       '</div>' +
       '</div>'
@@ -3297,9 +3300,17 @@
     if (action) action(ids);
   }
 
-  // Only Clear is bound here now: Group and Delete are reached by right-clicking
-  // any checked building (see contextMenuItemsFor).
-  function bindSelBar(container) {
+  function bindSelBar(container, options) {
+    var group = container.querySelector('[data-ws-selbar-group]');
+    if (group)
+      group.addEventListener('click', function () {
+        groupMulti(options);
+      });
+    var del = container.querySelector('[data-ws-selbar-delete]');
+    if (del)
+      del.addEventListener('click', function () {
+        deleteMulti(options);
+      });
     var clr = container.querySelector('[data-ws-selbar-clear]');
     if (clr)
       clr.addEventListener('click', function () {
@@ -7237,7 +7248,7 @@
     // The first paint has a selection too, so its setup state is read here as
     // well as on every later selection change.
     ensureSetupStatus(container, findWs(workspaces, selectedId));
-    bindSelBar(container);
+    bindSelBar(container, state);
     // Announce the focus-intent selection recorded above, now that the tiles it
     // refers to actually exist. `hqFocusConsumed` makes this fire at most once
     // per page load, so later re-mounts (filters, refreshes, Map/Tree switches)

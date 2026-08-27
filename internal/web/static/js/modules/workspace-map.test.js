@@ -1877,13 +1877,14 @@ test('tileHTML shows no HQ badge for any workspace when no HQ is designated', ()
   assert.doesNotMatch(html, /ws-map-tile-hq-badge/);
 });
 
-test('the selection bar is a count plus Clear — group and delete live in the context menu (#317)', () => {
+test('the selection bar exposes Group, Delete, and Clear alongside its count (#411)', () => {
   const { selBarHTML } = loadOriWorkspaceMap();
   const html = selBarHTML();
   assert.match(html, /data-ws-selbar-count/);
+  assert.match(html, /data-ws-selbar-group[^>]*disabled/);
+  assert.match(html, /data-ws-selbar-delete[^>]*disabled/);
   assert.match(html, /data-ws-selbar-clear/);
-  assert.doesNotMatch(html, /data-ws-selbar-group/, 'Group moved to the context menu');
-  assert.doesNotMatch(html, /data-ws-selbar-delete/, 'Delete moved to the context menu');
+  assert.doesNotMatch(html, /data-ws-selbar-clear[^>]*disabled/);
 });
 
 test('the selection bar is hidden at zero and counts what is checked', () => {
@@ -6682,9 +6683,8 @@ const checkboxClick = () => ({
 // another realm and fail a strict deepEqual against host-built ones.
 const ids = calls => calls.map(call => Array.from(call));
 
-// Right-click a tile. Since #317 this is how the bulk actions are reached: the
-// selection bar carries only the count and Clear, and Group/Delete moved into
-// the menu that opens on any checked building.
+// Right-click a tile. The context menu retains its bulk actions alongside the
+// visible selection-bar controls, so both paths use the same host callbacks.
 const openTileMenu = (harness, id, at = { x: 200, y: 150 }) =>
   harness.fire('contextmenu', {
     target: {
@@ -6698,7 +6698,7 @@ const openTileMenu = (harness, id, at = { x: 200, y: 150 }) =>
     preventDefault() {}
   });
 
-test('the context menu hands the checked ids to the host (the shipped no-op)', async () => {
+test('visible selection-bar actions and the context menu hand checked ids to the host', async () => {
   const deleted = [];
   const grouped = [];
   const { harness } = bulkHarness({
@@ -6712,13 +6712,33 @@ test('the context menu hands the checked ids to the host (the shipped no-op)', a
   harness.tile('ws-1').fire('click', checkboxClick());
   harness.tile('ws-2').fire('click', checkboxClick());
 
+  harness.control('[data-ws-selbar-group]').click();
+  assert.deepEqual(ids(grouped), [['ws-1', 'ws-2']], 'Group must reach the host once');
+
+  harness.control('[data-ws-selbar-delete]').click();
+  assert.deepEqual(ids(deleted), [['ws-1', 'ws-2']], 'Delete must reach the host once');
+
   openTileMenu(harness, 'ws-1');
   harness.menu.item('delete-multi').fire('click');
-  assert.deepEqual(ids(deleted), [['ws-1', 'ws-2']], 'Delete must reach the host');
+  assert.deepEqual(
+    ids(deleted),
+    [
+      ['ws-1', 'ws-2'],
+      ['ws-1', 'ws-2']
+    ],
+    'Delete menu path remains'
+  );
 
   openTileMenu(harness, 'ws-1');
   harness.menu.item('group-multi').fire('click');
-  assert.deepEqual(ids(grouped), [['ws-1', 'ws-2']], 'Group must reach the host');
+  assert.deepEqual(
+    ids(grouped),
+    [
+      ['ws-1', 'ws-2'],
+      ['ws-1', 'ws-2']
+    ],
+    'Group menu path remains'
+  );
 });
 
 test('an unwired bulk action reports the wiring bug instead of doing nothing', async () => {
