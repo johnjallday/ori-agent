@@ -113,9 +113,11 @@ func assertProjection(t *testing.T, entry blueprintCatalogEntry, state blueprint
 	}
 }
 
-// matrixPlugin builds an installed-plugin record contributing one blueprint
-// that shares an ID with the built-in it supersedes.
-func matrixPlugin(name, blueprintID string, enabled bool, artifacts []plugin.ResolvedArtifact) plugin.InstalledPlugin {
+// matrixPlugin builds an installed-plugin record, always named "owner" in
+// this file's fixtures, contributing one blueprint that shares an ID with the
+// built-in it supersedes.
+func matrixPlugin(blueprintID string, enabled bool, artifacts []plugin.ResolvedArtifact) plugin.InstalledPlugin {
+	const name = "owner"
 	owner := &workspace.PluginTemplateOwner{
 		PluginID: name, PluginVersion: "1.0.0", BlueprintID: blueprintID, BlueprintVersion: 1,
 	}
@@ -269,7 +271,7 @@ func TestBlueprintCatalogMatrix_PluginOwnedStates(t *testing.T) {
 
 	t.Run("enabled compatible plugin blueprint is ready and supersedes the builtin", func(t *testing.T) {
 		entries := projectCreationCatalog(t, libDir, catalog,
-			[]plugin.InstalledPlugin{matrixPlugin("owner", "song-production", true, availableArtifacts())}, false)
+			[]plugin.InstalledPlugin{matrixPlugin("song-production", true, availableArtifacts())}, false)
 		entry := requireEntry(t, entries, "plugin:owner:song-production")
 		assertProjection(t, entry, blueprintreadiness.StateReady, blueprintreadiness.OwnershipPlugin, blueprintreadiness.ReasonNone)
 		if entry.Readiness.Generation != 4 {
@@ -284,7 +286,7 @@ func TestBlueprintCatalogMatrix_PluginOwnedStates(t *testing.T) {
 		// Before: the blueprint vanished from the catalog entirely and the
 		// stale built-in it replaces was offered as ready in its place.
 		entries := projectCreationCatalog(t, libDir, catalog,
-			[]plugin.InstalledPlugin{matrixPlugin("owner", "song-production", false, availableArtifacts())}, false)
+			[]plugin.InstalledPlugin{matrixPlugin("song-production", false, availableArtifacts())}, false)
 		entry := requireEntry(t, entries, "plugin:owner:song-production")
 		assertProjection(t, entry, blueprintreadiness.StateActionRequired, blueprintreadiness.OwnershipPlugin, blueprintreadiness.ReasonPluginEnableRequired)
 		if entry.Readiness.Creatable() {
@@ -302,7 +304,7 @@ func TestBlueprintCatalogMatrix_PluginOwnedStates(t *testing.T) {
 	t.Run("unsupported platform artifact is unavailable with a stated reason", func(t *testing.T) {
 		// Before: silently filtered out; the recorded reason never surfaced.
 		entries := projectCreationCatalog(t, libDir, catalog,
-			[]plugin.InstalledPlugin{matrixPlugin("owner", "song-production", true, unsupportedArtifacts())}, false)
+			[]plugin.InstalledPlugin{matrixPlugin("song-production", true, unsupportedArtifacts())}, false)
 		entry := requireEntry(t, entries, "plugin:owner:song-production")
 		assertProjection(t, entry, blueprintreadiness.StateUnavailable, blueprintreadiness.OwnershipPlugin, blueprintreadiness.ReasonPlatformUnsupported)
 		for _, action := range entry.Readiness.Actions {
@@ -315,7 +317,7 @@ func TestBlueprintCatalogMatrix_PluginOwnedStates(t *testing.T) {
 	t.Run("incompatible protocol is rechecked and reported", func(t *testing.T) {
 		// Before: the protocol range was validated only at install time, so a
 		// host upgrade left an unusable blueprint projected as ready.
-		incompatible := matrixPlugin("owner", "song-production", true, availableArtifacts())
+		incompatible := matrixPlugin("song-production", true, availableArtifacts())
 		incompatible.WorkspaceSurfaces.Protocol = plugin.ProtocolRange{
 			Min: plugin.SurfaceProtocolVersion + 1, Max: plugin.SurfaceProtocolVersion + 2,
 		}
@@ -328,7 +330,7 @@ func TestBlueprintCatalogMatrix_PluginOwnedStates(t *testing.T) {
 	})
 
 	t.Run("an owner that no longer resolves the blueprint asks for a reviewed update", func(t *testing.T) {
-		legacy := matrixPlugin("owner", "song-production", true, availableArtifacts())
+		legacy := matrixPlugin("song-production", true, availableArtifacts())
 		legacy.ResolvedBlueprints = nil
 		// The blueprint is still selectable from a catalog loaded a moment ago;
 		// revalidating it against the current record must say what to do.
@@ -388,7 +390,7 @@ func TestBlueprintCatalogMatrix_ProjectionDisclosesNothingSensitive(t *testing.T
 		"agents":[{"name":"Lead"}],
 		"tools":{"plugins":["absent"],"plugin_sources":{"absent":"https://evil.test/absent.git"}}
 	}`)
-	installed := matrixPlugin("owner", "starter", false, availableArtifacts())
+	installed := matrixPlugin("starter", false, availableArtifacts())
 	installed.InstallDir = "/Users/someone/Library/Application Support/ori/plugins/owner"
 
 	entries := projectCreationCatalog(t, libDir, catalog, []plugin.InstalledPlugin{installed}, false)

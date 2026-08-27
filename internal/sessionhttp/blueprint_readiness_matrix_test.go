@@ -67,7 +67,11 @@ func countWorkspaceState(t *testing.T, handler *Handler, baseDir string) (int, i
 	return len(folders), len(records)
 }
 
-func installedPluginRecord(name string, enabled bool) plugin.InstalledPlugin {
+// installedPluginRecord builds a minimal installed-plugin record. Always
+// named "owner-plugin" in this file's fixtures — the blueprint each test
+// wires up always declares that same dependency name.
+func installedPluginRecord(enabled bool) plugin.InstalledPlugin {
+	const name = "owner-plugin"
 	return plugin.InstalledPlugin{
 		Name: name, Version: "1.0.0", Enabled: enabled, Generation: 3,
 		WorkspaceSurfaces: &plugin.SurfaceContribution{
@@ -270,7 +274,7 @@ func TestBlueprintCreateGateMatrix_PluginDependencyStates(t *testing.T) {
 
 	t.Run("installed but disabled asks to enable, not to install", func(t *testing.T) {
 		handler, _, cleanup := newEnv(t, matrixPluginLister{
-			installed: []plugin.InstalledPlugin{installedPluginRecord("owner-plugin", false)},
+			installed: []plugin.InstalledPlugin{installedPluginRecord(false)},
 		})
 		defer cleanup()
 
@@ -290,7 +294,7 @@ func TestBlueprintCreateGateMatrix_PluginDependencyStates(t *testing.T) {
 
 	t.Run("enabled plugin creates", func(t *testing.T) {
 		handler, _, cleanup := newEnv(t, matrixPluginLister{
-			installed: []plugin.InstalledPlugin{installedPluginRecord("owner-plugin", true)},
+			installed: []plugin.InstalledPlugin{installedPluginRecord(true)},
 		})
 		defer cleanup()
 
@@ -301,7 +305,7 @@ func TestBlueprintCreateGateMatrix_PluginDependencyStates(t *testing.T) {
 	})
 
 	t.Run("an unsupported platform is refused without offering a pointless retry", func(t *testing.T) {
-		unsupported := installedPluginRecord("owner-plugin", true)
+		unsupported := installedPluginRecord(true)
 		unsupported.ResolvedArtifacts = []plugin.ResolvedArtifact{
 			{ServiceID: "svc", Available: false, Unavailable: "platform_unsupported"},
 		}
@@ -316,7 +320,7 @@ func TestBlueprintCreateGateMatrix_PluginDependencyStates(t *testing.T) {
 	})
 
 	t.Run("an incompatible protocol is refused after a host upgrade", func(t *testing.T) {
-		incompatible := installedPluginRecord("owner-plugin", true)
+		incompatible := installedPluginRecord(true)
 		incompatible.WorkspaceSurfaces.Protocol = plugin.ProtocolRange{
 			Min: plugin.SurfaceProtocolVersion + 1, Max: plugin.SurfaceProtocolVersion + 2,
 		}
@@ -370,7 +374,7 @@ func TestBlueprintCreateGateMatrix_PluginDependencyStates(t *testing.T) {
 	})
 
 	t.Run("a setup wizard does not exempt a hard blocker", func(t *testing.T) {
-		unsupported := installedPluginRecord("owner-plugin", true)
+		unsupported := installedPluginRecord(true)
 		unsupported.ResolvedArtifacts = []plugin.ResolvedArtifact{
 			{ServiceID: "svc", Available: false, Unavailable: "platform_unsupported"},
 		}
@@ -399,7 +403,7 @@ func TestBlueprintCreateGateMatrix_ConflictsDiscloseNothingSensitive(t *testing.
 	handler, _, _, cleanup := templateTestEnv(t)
 	defer cleanup()
 	libDir := handler.templatesRootResolver()
-	installed := installedPluginRecord("owner-plugin", false)
+	installed := installedPluginRecord(false)
 	installed.InstallDir = "/Users/someone/Library/Application Support/ori/plugins/owner-plugin"
 	handler.SetInstalledPluginLister(matrixPluginLister{installed: []plugin.InstalledPlugin{installed}})
 
