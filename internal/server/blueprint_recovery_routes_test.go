@@ -387,6 +387,30 @@ func TestRecoveryResponseDropsASourceWithoutADisclosure(t *testing.T) {
 	}
 }
 
+// TestRecoveryOutcomesNeverImplyLiveVerification guards FR-consistency: an
+// install or enable is a creation prerequisite this build satisfied, not proof
+// that the external application or service the plugin talks to actually
+// works. None of the copy this feature owns may say otherwise.
+func TestRecoveryOutcomesNeverImplyLiveVerification(t *testing.T) {
+	installed := endpointPluginRecord(t, "owner-plugin", "starter", false, availableArtifacts())
+	s, _ := recoveryServer(t, recoveryManifestWithSource, []plugin.InstalledPlugin{installed})
+
+	_, resp := postRecovery(t, s, "needs-plugin",
+		`{"action":"enable_plugin","plugin":"owner-plugin","confirm":true}`)
+	outcome, _ := resp["outcome"].(map[string]any)
+	summary, _ := outcome["summary"].(string)
+
+	forbidden := []string{"verified", "verify", "connected", "tested", "granted access", "confirmed working"}
+	for _, word := range forbidden {
+		if strings.Contains(strings.ToLower(summary), word) {
+			t.Errorf("outcome summary %q implies live verification via %q", summary, word)
+		}
+	}
+	if summary != "Enabled." {
+		t.Fatalf("unexpected summary: %q", summary)
+	}
+}
+
 func TestRecoveryFailureMessageRedactsLocators(t *testing.T) {
 	for _, tc := range []struct {
 		name string

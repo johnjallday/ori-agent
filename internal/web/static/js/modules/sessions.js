@@ -4784,11 +4784,16 @@ const sessionManager = {
       .filter(Boolean)
       .join(' · ');
 
+    const owner = this.workspaceReceiptOwnerLine(selectedTemplate);
+    const sessionRecovery = this.workspaceReceiptSessionRecoveryLine();
+
     const identity = `
       <div class="workspace-review-card">
         <div class="workspace-review-card-main">
           <strong class="workspace-review-identity-name">${this.escapeHtml(name || 'Untitled workspace')}</strong>
           <span class="workspace-review-card-meta">${provenance}</span>
+          ${owner ? `<span class="workspace-review-card-meta">${this.escapeHtml(owner)}</span>` : ''}
+          ${sessionRecovery ? `<span class="workspace-review-card-note">${this.escapeHtml(sessionRecovery)}</span>` : ''}
         </div>
         <div class="workspace-review-card-actions">
           <button type="button" class="workspace-wizard-inline-action" data-wizard-edit-step="2">Edit</button>
@@ -4811,6 +4816,41 @@ const sessionManager = {
       : '';
 
     return identity + details + this.renderWorkspaceReceiptTeam(view);
+  },
+
+  // Names who owns the selected blueprint and, where one is tracked, its
+  // version — so Review states provenance precisely rather than leaving
+  // "Based on X" to imply the workspace's own template is doing the work.
+  // '' for Blank and for an ad-hoc folder path, which own nothing to name.
+  workspaceReceiptOwnerLine(template) {
+    if (!template || template.blank) return '';
+    const owner = template.plugin_owner;
+    if (owner && owner.plugin_id) {
+      const version = String(owner.plugin_version || '').trim();
+      return version
+        ? `Owner: ${owner.plugin_id} plugin (v${version})`
+        : `Owner: ${owner.plugin_id} plugin`;
+    }
+    if (template.builtin) {
+      const version = Number(template.builtin_version) || 0;
+      return version > 0 ? `Owner: Built-in blueprint (v${version})` : 'Owner: Built-in blueprint';
+    }
+    return 'Owner: Your template';
+  },
+
+  // States which plugin dependency this wizard session explicitly installed
+  // or enabled, when the selected blueprint has one. Read from the picker's
+  // own session log rather than re-derived from current readiness: a plugin
+  // that is now ready looks identical whether it was already there or the
+  // user just switched it on a moment ago, and that distinction is the one
+  // this line exists to preserve.
+  workspaceReceiptSessionRecoveryLine() {
+    const record = window.ProjectTemplateCard?.getSelectedSessionRecovery?.();
+    if (!record || !record.pluginName) return '';
+    const verb = record.action === 'install_plugin' ? 'Installed and enabled' : 'Enabled';
+    return record.completed
+      ? `${verb} ${record.pluginName} during this session.`
+      : `Started enabling ${record.pluginName} this session — not finished yet.`;
   },
 
   // Names the primary and accounts for the specialists — the two facts that

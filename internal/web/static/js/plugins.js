@@ -124,8 +124,11 @@
     const badge = '<span class="badge bg-secondary">' + esc(p.format) + '</span>';
     const name = esc(p.name);
     return (
-      '<div class="d-flex align-items-start justify-content-between border-bottom py-3">' +
-      '<div>' +
+      // flex-wrap so the action buttons drop below the plugin's details at a
+      // narrow width instead of running off the edge of the screen — a
+      // pre-existing gap this feature's own narrow-width demo caught.
+      '<div class="d-flex flex-wrap align-items-start justify-content-between gap-2 border-bottom py-3">' +
+      '<div style="min-width: 0; flex: 1 1 240px;">' +
       '<div class="fw-semibold">' +
       name +
       ' <span class="text-muted small">' +
@@ -145,7 +148,13 @@
       '<div class="small mt-1 ' +
       (p.enabled ? 'text-success' : 'text-warning') +
       '">' +
-      (p.enabled ? 'Installed and enabled' : 'Installed, still disabled') +
+      esc(
+        window.PluginLifecycle.capitalize(
+          p.enabled
+            ? window.PluginLifecycle.LIFECYCLE_LABELS.ENABLED
+            : window.PluginLifecycle.LIFECYCLE_LABELS.DISABLED
+        )
+      ) +
       '</div>' +
       '</div>' +
       '<div class="d-flex gap-2">' +
@@ -192,10 +201,11 @@
         // in the same words the creation wizard uses.
         const installed = (res && res.plugin) || {};
         const name = installed.name || source;
+        const labels = window.PluginLifecycle.LIFECYCLE_LABELS;
         if (installed.enabled) {
-          notify(name + ' is installed and ready.', 'success');
+          notify(name + ' is ' + labels.ENABLED + '.', 'success');
         } else {
-          notify(name + ' is installed, still disabled — enable it to use it.', 'warning');
+          notify(name + ' is ' + labels.DISABLED + ' — enable it to use it.', 'warning');
         }
       });
     } catch (e) {

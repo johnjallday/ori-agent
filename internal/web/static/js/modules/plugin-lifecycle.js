@@ -398,8 +398,32 @@ function plCreateFlow(options) {
   return flow;
 }
 
+// The lifecycle-position phrases every surface reports, lower-case so a
+// caller can drop them into a sentence or capitalize them at the start of
+// one. The Plugins page and the wizard's readiness/recovery panels all read
+// from here, so "installed but disabled" cannot drift into two different
+// wordings on two different screens — a real risk this shared module exists
+// to remove, not just an inconvenience if it happened.
+//
+// Deliberately narrow: these three describe where the plugin's OWN lifecycle
+// stands (on the machine, switched on or not). None of them claims anything
+// about the live external application or service the plugin talks to —
+// installing and enabling are prerequisites this build satisfied, not a
+// verification that anything downstream works.
+const PL_LIFECYCLE_LABELS = {
+  NOT_INSTALLED: 'not installed',
+  DISABLED: 'installed, still disabled',
+  ENABLED: 'installed and enabled'
+};
+
+function plCapitalize(text) {
+  return text ? text.charAt(0).toUpperCase() + text.slice(1) : text;
+}
+
 window.PluginLifecycle = {
   STATES: PL_STATES,
+  LIFECYCLE_LABELS: PL_LIFECYCLE_LABELS,
+  capitalize: plCapitalize,
   request: plRequest,
   errorText: plErrorText,
   trustModel: plTrustModel,

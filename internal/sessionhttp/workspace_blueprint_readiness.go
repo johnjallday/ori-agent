@@ -69,7 +69,10 @@ func blueprintCreationBlocked(template projecttemplates.Template, readiness blue
 // the same recovery panel it would have shown at selection time instead of
 // reducing a missing dependency to a toast. The pre-existing diagnostic keys
 // are still emitted alongside it so a client that has not been updated keeps
-// working.
+// working — but only for a manifest the user actually owns. The contract
+// withholds a parser diagnostic from a shipped or plugin-owned blueprint on
+// both sides deliberately (Normalize drops it, and there is no author for the
+// user to be one); a legacy compatibility key must not reopen that door.
 func respondBlueprintReadinessConflict(w http.ResponseWriter, template projecttemplates.Template, readiness blueprintreadiness.Readiness) {
 	body := map[string]any{
 		"error":     conflictMessage(template, readiness),
@@ -77,11 +80,13 @@ func respondBlueprintReadinessConflict(w http.ResponseWriter, template projectte
 	}
 	switch readiness.Reason {
 	case blueprintreadiness.ReasonManifestInvalid:
-		if template.HasInvalidRuntimeRequirements() {
-			body["runtime_requirements_error"] = template.RuntimeRequirementsError
-		}
-		if template.HasInvalidSetupWizard() {
-			body["setup_wizard_error"] = template.SetupWizardError
+		if readiness.Ownership == blueprintreadiness.OwnershipUser {
+			if template.HasInvalidRuntimeRequirements() {
+				body["runtime_requirements_error"] = template.RuntimeRequirementsError
+			}
+			if template.HasInvalidSetupWizard() {
+				body["setup_wizard_error"] = template.SetupWizardError
+			}
 		}
 	case blueprintreadiness.ReasonPluginInstallRequired:
 		body["missing_plugins"] = dependencyNames(readiness)

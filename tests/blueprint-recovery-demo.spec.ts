@@ -108,6 +108,17 @@ test('install-and-enable recovery: cancel once, then complete, with details pres
   await page.locator('#wizardNextBtn').click();
   await expect(page.locator('#wizardStep4')).toBeVisible();
   await expect(page.locator('#workspaceReviewReadiness')).toBeEmpty();
+
+  // The receipt names who owns the blueprint itself — Surface Studio is the
+  // user's own template, which merely depends on the plugin rather than
+  // being contributed by it — and states, distinctly, that this session was
+  // the one that installed and enabled that dependency. Neither fact is one
+  // a ready card alone can convey.
+  const receipt = page.locator('#workspaceReviewSummary');
+  await expect(receipt).toContainText('Owner: Your template');
+  await expect(receipt).toContainText(
+    'Installed and enabled workspace-surface-demo during this session.'
+  );
   await page.locator('#wizardStep4').screenshot({ path: `${SHOTS}/review-ready.png` });
 
   await expect(page.locator('#createFolderBtn')).toBeEnabled();

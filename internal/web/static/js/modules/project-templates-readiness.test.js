@@ -862,6 +862,46 @@ test('confirming installs, then reports the outcome and reloads the catalog', as
   assert.equal(readinessPanel(), null, 'the blocked panel survived a successful recovery');
 });
 
+// Regression: Ready() sets no Dependency at all, so a session-recovery lookup
+// keyed off the CURRENT readiness projection goes blind at exactly the moment
+// recovery succeeds — the one moment Review most needs to say something. The
+// lookup must read the template's own declared plugin names instead.
+test('the session recovery record is still found once the blueprint reads ready', async () => {
+  const Picker = await setup([disabledPluginTemplate({ tools: { plugins: ['owner-plugin'] } })]);
+  optionById('needs-plugin').click();
+  fetchQueue = [{ trust: TRUST_REPORT }];
+  readinessAction('install_plugin').fire('click');
+  await flush();
+
+  const ready = template('needs-plugin', {
+    name: 'Needs Plugin',
+    builtin: false,
+    tools: { plugins: ['owner-plugin'] },
+    readiness: { state: 'ready', ownership: 'user', reason: '' }
+  });
+  fetchQueue = [
+    {
+      outcome: { action: 'install_plugin', completed: true, summary: 'Installed and enabled.' },
+      blueprint_id: 'needs-plugin'
+    },
+    catalog([ready])
+  ];
+  recoveryButton('Install and enable').fire('click');
+  await flush();
+
+  assert.equal(Picker.isSelectionBlocked(), false);
+  const record = Picker.getSelectedSessionRecovery();
+  assert.ok(record, 'the completed recovery was not found for the now-ready blueprint');
+  assert.equal(record.pluginName, 'owner-plugin');
+  assert.equal(record.completed, true);
+});
+
+test('getSelectedSessionRecovery is null when nothing was recovered this session', async () => {
+  const Picker = await setup([template('a', { tools: { plugins: ['owner-plugin'] } })]);
+  optionById('a').click();
+  assert.equal(Picker.getSelectedSessionRecovery(), null);
+});
+
 // The honest-partial-outcome case: install worked, enable did not.
 test('a partial outcome says installed, still disabled', async () => {
   await setup([disabledPluginTemplate()]);

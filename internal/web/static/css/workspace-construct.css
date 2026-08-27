@@ -585,6 +585,18 @@
   font-size: 12px;
   line-height: 1.45;
 }
+/* States a prerequisite this wizard session completed just now (e.g. a plugin
+   install/enable), as distinct from the ordinary metadata above it — a ready
+   blueprint looks identical either way, and this is the one place that says
+   which. */
+.workspace-create-modal .workspace-review-card-note {
+  display: block;
+  margin-top: 6px;
+  overflow-wrap: anywhere;
+  color: var(--wc-faction);
+  font-size: 12px;
+  line-height: 1.45;
+}
 .workspace-create-modal .workspace-review-card-actions {
   display: flex;
   flex: 0 0 auto;

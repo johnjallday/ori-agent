@@ -432,3 +432,46 @@ func TestBlueprintCreateGateMatrix_ConflictsDiscloseNothingSensitive(t *testing.
 		t.Fatal("a declared source was not reported as available for the trust preview")
 	}
 }
+
+// TestBlueprintCreateGateBaseline_ManifestDiagnosticNeverLeaksForANonUserOwner
+// guards the legacy compatibility keys the create-conflict body still emits
+// alongside the readiness projection. The projection itself withholds a
+// parser diagnostic from anyone but the manifest's actual author; a
+// shipped-built-in row reaching the same failure must not reopen that
+// through `setup_wizard_error` / `runtime_requirements_error`.
+func TestBlueprintCreateGateMatrix_ManifestDiagnosticNeverLeaksForANonUserOwner(t *testing.T) {
+	handler, _, _, cleanup := templateTestEnv(t)
+	defer cleanup()
+	libDir := handler.templatesRootResolver()
+
+	// A shipped built-in (still in the embedded starter catalog, so it is not
+	// classified as retired) whose manifest is nonetheless broken.
+	writeCreateMatrixTemplate(t, libDir, "research-project", `{
+		"name":"Research Project","builtin":true,"builtin_version":1,
+		"agents":[{"name":"Lead"}],
+		"setup_wizard":{"version":1,"title":"Set up","steps":[
+			{"id":"readiness","kind":"readiness","adapter":"not_a_real_adapter","required":true}
+		]}
+	}`)
+
+	w, resp := postCreateWorkspace(t, handler, `{"name":"Research WS","template_id":"research-project"}`)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d: %s", w.Code, w.Body.String())
+	}
+	assertConflictProjection(t, resp, blueprintreadiness.StateUnavailable, blueprintreadiness.OwnershipBuiltin, blueprintreadiness.ReasonManifestInvalid)
+
+	if _, present := resp["setup_wizard_error"]; present {
+		t.Fatalf("a shipped built-in's parser diagnostic leaked through the legacy key: %v", resp)
+	}
+	if _, present := resp["runtime_requirements_error"]; present {
+		t.Fatalf("a shipped built-in's parser diagnostic leaked through the legacy key: %v", resp)
+	}
+	message, _ := resp["error"].(string)
+	if strings.Contains(message, "not_a_real_adapter") || strings.Contains(message, "template.json") {
+		t.Fatalf("the human-readable error told the user to edit shipped JSON: %q", message)
+	}
+	readiness := conflictReadiness(t, resp)
+	if diagnostic, _ := readiness["diagnostic"].(string); diagnostic != "" {
+		t.Fatalf("the readiness projection itself carried a diagnostic for a non-user owner: %q", diagnostic)
+	}
+}

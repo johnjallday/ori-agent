@@ -809,6 +809,53 @@ let ptcRecoveryFlow = null;
 // different one clears it and selecting the same one (as happens on the
 // catalog reload that follows a success) leaves the result on screen.
 let ptcRecoveryBlueprintKey = '';
+// The action/plugin the current flow is for, so a completed confirmation can
+// be logged without threading extra arguments through the state machine.
+let ptcRecoveryContext = null;
+
+// What this wizard session explicitly installed or enabled, keyed by plugin
+// name (case-insensitive). Review reads this to say which prerequisite was
+// completed just now rather than one that was already satisfied — the
+// distinction the checklist asks for, and one no catalog snapshot alone can
+// make, since a ready blueprint looks identical either way.
+const ptcSessionRecoveryLog = new Map();
+
+function ptcRecoveryLogKey(pluginName) {
+  return String(pluginName || '')
+    .trim()
+    .toLowerCase();
+}
+
+// getSessionRecoveryFor returns what this session did for a plugin, or null.
+// Keyed by plugin name rather than blueprint ID so the record survives an
+// install replacing a stale built-in with the plugin-owned blueprint that
+// supersedes it — the plugin name is the one thing that does not change.
+function ptcGetSessionRecoveryFor(pluginName) {
+  return ptcSessionRecoveryLog.get(ptcRecoveryLogKey(pluginName)) || null;
+}
+
+// getSelectedSessionRecovery resolves the same lookup for whatever is
+// currently selected.
+//
+// It reads the template's own declarations — plugin_owner for a
+// plugin-contributed blueprint, tools.plugins for one that merely depends on
+// a plugin — rather than the current readiness projection. Readiness carries
+// a Dependency only while there is something left to report: Ready() sets
+// none at all, so a lookup keyed off readiness alone goes blind the moment
+// recovery succeeds, which is exactly the moment this line needs to say
+// something.
+function ptcGetSelectedSessionRecovery() {
+  const template = ptcSelected;
+  if (!template || template.blank) return null;
+  const candidates = [];
+  if (template.plugin_owner?.plugin_id) candidates.push(template.plugin_owner.plugin_id);
+  if (Array.isArray(template.tools?.plugins)) candidates.push(...template.tools.plugins);
+  for (const name of candidates) {
+    const record = ptcGetSessionRecoveryFor(name);
+    if (record) return record;
+  }
+  return null;
+}
 
 const PTC_RECOVERY_COPY = {
   install_plugin: {
@@ -843,6 +890,7 @@ function ptcCancelRecovery() {
   if (ptcRecoveryFlow) ptcRecoveryFlow.cancel();
   ptcRecoveryFlow = null;
   ptcRecoveryBlueprintKey = '';
+  ptcRecoveryContext = null;
   const host = ptcRecoveryHost();
   if (host) host.textContent = '';
   // Return focus to the readiness panel the action was offered from, rather
@@ -860,6 +908,7 @@ function ptcInvalidateRecovery() {
   if (ptcRecoveryFlow) ptcRecoveryFlow.invalidate();
   ptcRecoveryFlow = null;
   ptcRecoveryBlueprintKey = '';
+  ptcRecoveryContext = null;
   const host = ptcRecoveryHost();
   if (host) host.textContent = '';
 }
@@ -902,6 +951,7 @@ async function ptcStartRecovery(action, template, readiness) {
   // A second press while one flow is live must not start another.
   ptcInvalidateRecovery();
   ptcRecoveryBlueprintKey = ptcSelectionKey(template);
+  ptcRecoveryContext = { action, pluginName };
 
   const url = ptcRecoveryEndpoint(template);
   const generation = Number(readiness?.generation) || 0;
@@ -931,11 +981,21 @@ async function ptcStartRecovery(action, template, readiness) {
 async function ptcConfirmRecovery() {
   const flow = ptcRecoveryFlow;
   if (!flow) return;
+  const context = ptcRecoveryContext;
   const result = await flow.confirm();
   if (!result || flow !== ptcRecoveryFlow) return;
   if (!result.ok) return;
 
   const data = result.data || {};
+  if (context?.pluginName) {
+    const outcome = data.outcome || {};
+    ptcSessionRecoveryLog.set(ptcRecoveryLogKey(context.pluginName), {
+      pluginName: context.pluginName,
+      action: context.action,
+      summary: String(outcome.summary || '').trim(),
+      completed: Boolean(outcome.completed)
+    });
+  }
   // Match the trusted replacement by the ID the server just told us it has.
   // Display text can change across an update; the qualified ID the server
   // reports is what the next catalog will actually contain.
@@ -1380,6 +1440,10 @@ window.ProjectTemplateCard = {
   },
   cancelRecovery: ptcCancelRecovery,
   invalidateRecovery: ptcInvalidateRecovery,
+  // What this wizard session explicitly installed or enabled for the current
+  // selection, or null. Review reads this to distinguish a prerequisite it
+  // just completed from one that was already satisfied.
+  getSelectedSessionRecovery: ptcGetSelectedSessionRecovery,
   isSelectionBlocked: () => {
     const readiness = ptcSelectedReadiness();
     return Boolean(readiness && readiness.state !== 'ready');

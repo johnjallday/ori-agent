@@ -269,6 +269,93 @@ test('completed onboarding preserves normal session-manager workspace loading', 
   assert.deepEqual(calls, ['/api/workspaces?tree=true']);
 });
 
+// --- Review receipt: blueprint owner/version + session recovery (Group 4) ---
+
+test('the receipt names a built-in blueprint’s owner and shipped version', () => {
+  const manager = loadSessionManager();
+  assert.equal(
+    manager.workspaceReceiptOwnerLine({ builtin: true, builtin_version: 3 }),
+    'Owner: Built-in blueprint (v3)'
+  );
+  assert.equal(manager.workspaceReceiptOwnerLine({ builtin: true }), 'Owner: Built-in blueprint');
+});
+
+test('the receipt names a plugin owner and its version', () => {
+  const manager = loadSessionManager();
+  assert.equal(
+    manager.workspaceReceiptOwnerLine({
+      plugin_owner: { plugin_id: 'studio-tools', plugin_version: '1.4.0' }
+    }),
+    'Owner: studio-tools plugin (v1.4.0)'
+  );
+  assert.equal(
+    manager.workspaceReceiptOwnerLine({ plugin_owner: { plugin_id: 'studio-tools' } }),
+    'Owner: studio-tools plugin'
+  );
+});
+
+test('the receipt names a user template, and names nothing for Blank', () => {
+  const manager = loadSessionManager();
+  assert.equal(manager.workspaceReceiptOwnerLine({ id: 'mine' }), 'Owner: Your template');
+  assert.equal(manager.workspaceReceiptOwnerLine({ blank: true }), '');
+  assert.equal(manager.workspaceReceiptOwnerLine(null), '');
+});
+
+// loadSessionManagerWithProjectTemplateCard runs sessions.js with a stub
+// ProjectTemplateCard on its vm-local `window`, so
+// workspaceReceiptSessionRecoveryLine reads a controlled session log instead
+// of the real picker module.
+function loadSessionManagerWithProjectTemplateCard(getSelectedSessionRecovery) {
+  const window = { ProjectTemplateCard: { getSelectedSessionRecovery } };
+  const document = { addEventListener() {} };
+  vm.runInNewContext(
+    source,
+    { window, document, fetch: async () => ({ ok: true, json: async () => ({}) }), console },
+    { filename: 'sessions.js' }
+  );
+  return window.sessionManager;
+}
+
+test('the receipt states a completed session recovery for the selected blueprint', () => {
+  const manager = loadSessionManagerWithProjectTemplateCard(() => ({
+    pluginName: 'owner-plugin',
+    action: 'install_plugin',
+    completed: true
+  }));
+  assert.equal(
+    manager.workspaceReceiptSessionRecoveryLine(),
+    'Installed and enabled owner-plugin during this session.'
+  );
+});
+
+test('the receipt states an enable-only session recovery distinctly from install', () => {
+  const manager = loadSessionManagerWithProjectTemplateCard(() => ({
+    pluginName: 'owner-plugin',
+    action: 'enable_plugin',
+    completed: true
+  }));
+  assert.equal(
+    manager.workspaceReceiptSessionRecoveryLine(),
+    'Enabled owner-plugin during this session.'
+  );
+});
+
+test('a partial session recovery is stated as unfinished, never as success', () => {
+  const manager = loadSessionManagerWithProjectTemplateCard(() => ({
+    pluginName: 'owner-plugin',
+    action: 'install_plugin',
+    completed: false
+  }));
+  const line = manager.workspaceReceiptSessionRecoveryLine();
+  assert.match(line, /not finished yet/);
+  assert.doesNotMatch(line, /^Installed and enabled/);
+});
+
+test('no session recovery line when nothing was done this session', () => {
+  const manager = loadSessionManager();
+  assert.equal(manager.workspaceReceiptSessionRecoveryLine(), '');
+});
+
 test('session bootstrap consumes the shared initial workspace tree', async () => {
   resetOnboardingGateForTests(async () => ({
     ok: true,
