@@ -91,6 +91,114 @@ check "picker all view includes everything" \
 check "picker proposals view is exact" \
   "$(row_matches_filter proposals "feature-proposal" && echo yes || echo no)" "yes"
 
+# `plan-new` parsing has an explicit Bash 3.2 result contract: title words stay
+# in an indexed array until they are joined for GitHub, body bytes have their
+# own field, and workflow/planner/confirmation choices never become shell text.
+parse_plan_new_args Coordinate based map \
+  --body 'The map jumps; $(echo inert)' --size quick --kind pi \
+  --model '[openai] gpt 5.1' --thinking max --yes
+check "plan-new parser preserves title words" "${plan_new_title_words[*]}" "Coordinate based map"
+check "plan-new parser joins the GitHub title once" "$plan_new_title" "Coordinate based map"
+check "plan-new parser preserves opaque body text" "$plan_new_body" 'The map jumps; $(echo inert)'
+check "plan-new parser keeps size separate" "$plan_new_size" "quick"
+check "plan-new parser keeps kind separate" "$plan_new_kind" "pi"
+check "plan-new parser keeps model separate" "$plan_new_model" "[openai] gpt 5.1"
+check "plan-new parser keeps thinking separate" "$plan_new_thinking" "max"
+check "plan-new parser records confirmation separately" "$plan_new_assume_yes" "1"
+
+parser_body_file="$fixture_root/parser-plan-new-body.md"
+printf 'line one\nline two\n' > "$parser_body_file"
+parse_plan_new_args "File-backed context" --body-file "$parser_body_file" --size planned
+check "plan-new parser preserves body-file trailing newlines" "$plan_new_body" $'line one\nline two\n'
+check "plan-new parser leaves optional planner kind empty" "$plan_new_kind" ""
+check "plan-new parser leaves optional planner model empty" "$plan_new_model" ""
+check "plan-new parser leaves optional thinking empty" "$plan_new_thinking" ""
+check "plan-new parser leaves terminal confirmation pending" "$plan_new_assume_yes" "0"
+
+ready_create_calls="$fixture_root/ready-create-unit-calls"
+: > "$ready_create_calls"
+ready_create_result="$({
+  confirm_write() { return 0; }
+  gh() {
+    printf '%s\n' "$@" > "$ready_create_calls"
+    printf '%s\n' 'https://git.example.test/team/ori/issues/481'
+  }
+  create_ready_issue 'Ready map work' 'Reviewed problem context.' planned 0 > /dev/null
+  printf '%s/%s/%s' "$ready_issue_created" "$ready_issue_number" "$ready_issue_url"
+})"
+check "Ready-Issue creation exposes durable URL and number only after success" \
+  "$ready_create_result" "1/481/https://git.example.test/team/ori/issues/481"
+check "Ready-Issue creation keeps title as one gh argument" \
+  "$(grep -Fxc 'Ready map work' "$ready_create_calls" || true)" "1"
+check "Ready-Issue creation keeps body as one gh argument" \
+  "$(grep -Fxc 'Reviewed problem context.' "$ready_create_calls" || true)" "1"
+check "Ready-Issue creation adds backlog once" \
+  "$(grep -Fxc 'backlog' "$ready_create_calls" || true)" "1"
+check "Ready-Issue creation adds exactly one selected size" \
+  "$(grep -Fxc 'size:planned' "$ready_create_calls" || true)" "1"
+if grep -Eq 'approved|feature-proposal|needs-decision|answered|bundled' "$ready_create_calls"; then
+  printf 'FAIL Ready-Issue creation added a forbidden workflow label: %s\n' \
+    "$(cat "$ready_create_calls")" >&2
+  failures=$((failures + 1))
+fi
+
+: > "$ready_create_calls"
+ready_decline_result="$({
+  confirm_write() { return 1; }
+  gh() { printf 'unexpected write\n' >> "$ready_create_calls"; }
+  create_ready_issue 'Declined work' 'Reviewed context.' quick 0 > /dev/null 2>&1 || true
+  printf '%s/<%s>/<%s>' "$ready_issue_created" "$ready_issue_number" "$ready_issue_url"
+})"
+check "declined Ready-Issue creation exposes no durable identity" \
+  "$ready_decline_result" "0/<>/<>"
+check "declined Ready-Issue creation performs no gh call" \
+  "$(wc -c < "$ready_create_calls" | tr -d ' ')" "0"
+
+check "Issue URL recovery accepts a host-agnostic positive suffix" \
+  "$({ recover_ready_issue_number 'https://ghe.example.test/org/repo/issues/77'; printf '%s' "$ready_issue_number"; })" "77"
+check "Issue URL recovery accepts one trailing slash" \
+  "$({ recover_ready_issue_number 'http://localhost:3000/org/repo/issues/8/'; printf '%s' "$ready_issue_number"; })" "8"
+for malformed_issue_result in \
+  'https://github.com/org/repo/issues/0' \
+  'https://github.com/org/repo/issues/-4' \
+  'https://github.com/org/repo/issues/42?tab=body' \
+  'https://github.com/org/repo/pulls/42' \
+  $'https://github.com/org/repo/issues/42\nextra output' \
+  '42'; do
+  recovery_status=0
+  recover_ready_issue_number "$malformed_issue_result" || recovery_status=$?
+  check "Issue URL recovery rejects malformed result '$malformed_issue_result'" "$recovery_status" "1"
+  check "malformed Issue URL exposes no guessed number" "$ready_issue_number" ""
+done
+
+malformed_create_state="$fixture_root/ready-create-malformed-state"
+: > "$ready_create_calls"
+(
+  confirm_write() { return 0; }
+  gh() {
+    printf '%s\n' "$@" > "$ready_create_calls"
+    printf '%s\n' 'created Issue but no URL was returned' 'second output line'
+  }
+  malformed_status=0
+  create_ready_issue 'Created without parseable URL' 'Reviewed context.' prd 1 \
+    > "$fixture_root/ready-create-malformed-output" \
+    2> "$fixture_root/ready-create-malformed-error" || malformed_status=$?
+  printf '%s/%s/<%s>' "$malformed_status" "$ready_issue_created" "$ready_issue_number" \
+    > "$malformed_create_state"
+)
+check "an unparseable successful create is a durable partial result" \
+  "$(<"$malformed_create_state")" "1/1/<>"
+check "an unparseable create still performs only one GitHub write" \
+  "$(grep -c '^issue$' "$ready_create_calls" || true)" "1"
+if ! grep -Fq 'created Issue but no URL was returned' "$fixture_root/ready-create-malformed-error" || \
+   ! grep -Fq 'second output line' "$fixture_root/ready-create-malformed-error" || \
+   ! grep -Fq 'no planner was launched and no rollback was attempted' "$fixture_root/ready-create-malformed-error" || \
+   ! grep -Fq 'wt plan --issue <number>' "$fixture_root/ready-create-malformed-error"; then
+  printf 'FAIL malformed successful create did not provide honest manual recovery:\n%s\n' \
+    "$(cat "$fixture_root/ready-create-malformed-error")" >&2
+  failures=$((failures + 1))
+fi
+
 # Stub the process boundary for pure gating tests. Separate integration coverage
 # below proves launch_planner_plan invokes the repository's wt function through zsh.
 eval "$(declare -f launch_planner_plan | sed '1s/launch_planner_plan/launch_planner_plan_real/')"
@@ -178,6 +286,71 @@ prompt_planner_selection() {
 launch_planner_plan() {
   printf 'launched %s for #%s with %s/%s\n' "$2" "$1" "$3" "$4"
 }
+
+prepare_calls="$fixture_root/plan-new-prepare-calls"
+: > "$prepare_calls"
+explicit_prepare_result="$({
+  plan_new_is_interactive() { return 1; }
+  prompt_planner_selection() { printf 'unexpected prompt\n' >> "$prepare_calls"; return 1; }
+  plan_new_kind="claude"
+  plan_new_model=""
+  plan_new_thinking=""
+  plan_new_assume_yes=1
+  prepare_plan_new_execution
+  printf '%s/<%s>/<%s>' "$plan_new_kind" "$plan_new_model" "$plan_new_thinking"
+})"
+check "explicit non-interactive planner intent keeps integration defaults" \
+  "$explicit_prepare_result" "claude/<>/<>"
+check "explicit planner intent does not open interactive prompts" \
+  "$(wc -c < "$prepare_calls" | tr -d ' ')" "0"
+
+interactive_prepare_result="$({
+  plan_new_is_interactive() { return 0; }
+  prompt_planner_selection() {
+    planner_kind_choice="pi"
+    planner_model_choice="openai-codex/gpt-5.6-sol"
+    planner_thinking_choice="max"
+    return 0
+  }
+  plan_new_kind=""
+  plan_new_model=""
+  plan_new_thinking=""
+  plan_new_assume_yes=0
+  prepare_plan_new_execution
+  printf '%s/%s/%s' "$plan_new_kind" "$plan_new_model" "$plan_new_thinking"
+})"
+check "interactive plan-new resolves planner selection before a write" \
+  "$interactive_prepare_result" "pi/openai-codex/gpt-5.6-sol/max"
+
+noninteractive_prepare_status=0
+(
+  plan_new_is_interactive() { return 1; }
+  plan_new_kind="pi"
+  plan_new_assume_yes=0
+  prepare_plan_new_execution
+) > /dev/null 2>&1 || noninteractive_prepare_status=$?
+check "non-interactive planner preparation requires --yes" "$noninteractive_prepare_status" "2"
+
+noninteractive_prepare_status=0
+(
+  plan_new_is_interactive() { return 1; }
+  plan_new_kind=""
+  plan_new_assume_yes=1
+  prepare_plan_new_execution
+) > /dev/null 2>&1 || noninteractive_prepare_status=$?
+check "non-interactive planner preparation requires an explicit kind" "$noninteractive_prepare_status" "2"
+
+cancelled_prepare_result="$({
+  plan_new_is_interactive() { return 0; }
+  prompt_planner_selection() { return 1; }
+  plan_new_kind=""
+  plan_new_model=""
+  plan_new_thinking=""
+  plan_new_assume_yes=0
+  prepare_plan_new_execution >/dev/null 2>&1 || true
+  printf '%s/<%s>' "$plan_new_cancelled" "$plan_new_kind"
+})"
+check "planner cancellation is recorded before creation" "$cancelled_prepare_result" "1/<>"
 
 # start_plan is the picker's `s` key: launch only for a valid selected Ready
 # row, with no GitHub read of its own and no shell execution for rejected input.
@@ -1101,6 +1274,52 @@ count_gh_calls() {
   grep -c '^CALL' "$gh_calls" || true
 }
 
+count_wt_calls() {
+  grep -c '^CALL' "$wt_calls" || true
+}
+
+# Drive commands behind a real pseudo-terminal without depending on the
+# platform-specific `script(1)` interface. This is deliberately tiny: input is
+# supplied up front, output is copied verbatim, and the child's exit status is
+# preserved. It lets the command-contract tests distinguish terminal prompts
+# from the non-interactive --yes path.
+pty_driver="$fixture_root/pty-driver.py"
+cat > "$pty_driver" <<'PY'
+#!/usr/bin/env python3
+import errno
+import os
+import pty
+import sys
+
+pid, master = pty.fork()
+if pid == 0:
+    os.execv(sys.argv[1], sys.argv[1:])
+
+pending = os.environ.get("PTY_INPUT", "").encode()
+while pending:
+    written = os.write(master, pending)
+    pending = pending[written:]
+
+while True:
+    try:
+        chunk = os.read(master, 4096)
+    except OSError as error:
+        if error.errno == errno.EIO:
+            break
+        raise
+    if not chunk:
+        break
+    os.write(sys.stdout.fileno(), chunk)
+
+_, child_status = os.waitpid(pid, 0)
+if os.WIFEXITED(child_status):
+    raise SystemExit(os.WEXITSTATUS(child_status))
+if os.WIFSIGNALED(child_status):
+    raise SystemExit(128 + os.WTERMSIG(child_status))
+raise SystemExit(1)
+PY
+chmod +x "$pty_driver"
+
 # The real one-shot command must honor HERDR_DEVFLOW_CONFIG, work without any
 # GitHub call, and leave both the repository config and every refused fixture
 # byte-identical. The Go helper is real here; only gh remains the recorder above.
@@ -1148,17 +1367,26 @@ gh_call_sequence() {
 
 # The planning launcher keeps kind, model, and thinking as inert zsh positional
 # arguments. The adapter maps thinking to each native integration's flag.
-plan_bridge='source "$1" || exit; typeset -a plan_args; plan_args=(--issue "$2" --kind "$3"); [[ -n "$4" ]] && plan_args+=(--model "$4"); [[ -n "$5" ]] && plan_args+=(--thinking "$5"); wt plan "${plan_args[@]}"'
+plan_bridge='source "$1" || exit; typeset -a plan_args; plan_args=(--issue "$2" --kind "$3"); [[ -n "$4" ]] && plan_args+=(--model "$4"); [[ -n "$5" ]] && plan_args+=(--thinking "$5"); [[ "$6" == 1 ]] && plan_args+=(--yes); wt plan "${plan_args[@]}"'
 : > "$wt_calls"
 launch_planner_plan_real 934 pi '[openai] gpt 5.1; $(echo inert)' max > /dev/null
 check "single Pi planner launcher preserves one opaque model argument" \
   "$(<"$wt_calls")" \
-  $'CALL\t-c\t'"$plan_bridge"$'\tdevops-plan\t'"$repo_root"$'/scripts/wt.sh\t934\tpi\t[openai] gpt 5.1; $(echo inert)\tmax'
+  $'CALL\t-c\t'"$plan_bridge"$'\tdevops-plan\t'"$repo_root"$'/scripts/wt.sh\t934\tpi\t[openai] gpt 5.1; $(echo inert)\tmax\t0'
 : > "$wt_calls"
 launch_planner_plan_real 934 claude 'fable; $(echo inert)' xhigh > /dev/null
 check "single Claude planner launcher preserves model and thinking intent" \
   "$(<"$wt_calls")" \
-  $'CALL\t-c\t'"$plan_bridge"$'\tdevops-plan\t'"$repo_root"$'/scripts/wt.sh\t934\tclaude\tfable; $(echo inert)\txhigh'
+  $'CALL\t-c\t'"$plan_bridge"$'\tdevops-plan\t'"$repo_root"$'/scripts/wt.sh\t934\tclaude\tfable; $(echo inert)\txhigh\t0'
+: > "$wt_calls"
+launch_planner_plan_real 934 pi 'openai/confirmed' high 1 > /dev/null
+check "confirmed planner launcher transports one explicit confirmation bit" \
+  "$(tail -c 2 "$wt_calls")" "1"
+: > "$wt_calls"
+check "planner launcher rejects an invalid confirmation bit" \
+  "$(launch_planner_plan_real 934 pi '' high yes >/dev/null 2>&1 && echo yes || echo no)" "no"
+check "invalid planner confirmation launches no child" \
+  "$(wc -c < "$wt_calls" | tr -d ' ')" "0"
 
 # The implementation launcher crosses the same bash-to-zsh boundary as Plan.
 # Its constrained child receives the feature and validated mode as separate
@@ -1549,7 +1777,7 @@ assert_output_has "a real Ready Issue's Plan" "$fixture_root/prompt-plan-real-ou
 assert_output_lacks "a Claude planning choice" "$fixture_root/prompt-plan-real-output" "provider>"
 check "a real Ready Issue's Claude Plan invokes wt through zsh" \
   "$(<"$wt_calls")" \
-  $'CALL\t-c\t'"$plan_bridge"$'\tdevops-plan\t'"$repo_root"$'/scripts/wt.sh\t320\tclaude\tsonnet\txhigh'
+  $'CALL\t-c\t'"$plan_bridge"$'\tdevops-plan\t'"$repo_root"$'/scripts/wt.sh\t320\tclaude\tsonnet\txhigh\t0'
 check "a real Ready Issue's Plan reads labels exactly once" "$(count_label_reads 320)" "1"
 assert_no_github_write "a real Ready Issue's Plan action"
 
@@ -1561,7 +1789,7 @@ assert_output_has "a numbered planning-model choice" \
   "$fixture_root/prompt-plan-model-option-output" "anthropic/claude-sonnet-5"
 check "a numbered planning-model choice reaches wt as one argument" \
   "$(<"$wt_calls")" \
-  $'CALL\t-c\t'"$plan_bridge"$'\tdevops-plan\t'"$repo_root"$'/scripts/wt.sh\t320\tpi\tanthropic/claude-sonnet-5\tmax'
+  $'CALL\t-c\t'"$plan_bridge"$'\tdevops-plan\t'"$repo_root"$'/scripts/wt.sh\t320\tpi\tanthropic/claude-sonnet-5\tmax\t0'
 check "a numbered planning-model choice reads labels exactly once" "$(count_label_reads 320)" "1"
 assert_no_github_write "a numbered planning-model choice"
 
@@ -1596,6 +1824,210 @@ assert_output_has "the answer alias" \
   "$fixture_root/answer-ineligible" "#320 is not needs-decision"
 assert_no_github_write "an ineligible answer alias"
 
+# `plan-new` is deliberately separate from ordinary capture. Its one-shot
+# contract requires title words, non-empty context, one explicit size route,
+# and (outside a terminal) an explicit planner kind plus --yes. Valid calls
+# create exactly one Ready Issue and then hand its recovered number to the
+# existing planner bridge.
+: > "$gh_calls"
+"$script" help > "$fixture_root/plan-new-help-output"
+check "one-shot usage exposes the complete plan-new shape" \
+  "$(grep -Fc './scripts/devops.sh plan-new <title...> (--body <text> | --body-file <path|->) --size <quick|planned|prd>' "$fixture_root/plan-new-help-output" || true)" "1"
+assert_no_github "plan-new help"
+
+: > "$gh_calls"
+: > "$wt_calls"
+status=0
+"$script" plan-new Coordinate based map \
+  --body "The viewport jumps after Fit All." \
+  --size quick --kind pi --yes \
+  > "$fixture_root/plan-new-quick-output" \
+  2> "$fixture_root/plan-new-quick-error" || status=$?
+check "plan-new accepts title words and inline context" "$status" "0"
+check "plan-new quick creates exactly one Issue" \
+  "$(grep -Fc $'CALL\tissue\tcreate' "$gh_calls" || true)" "1"
+check "plan-new quick creates the exact Ready label pair" \
+  "$(grep -Fxc $'CALL\tissue\tcreate\t--title\tCoordinate based map\t--body\tThe viewport jumps after Fit All.\t--label\tbacklog\t--label\tsize:quick' "$gh_calls" || true)" "1"
+check "plan-new quick launches exactly one planner" "$(count_wt_calls)" "1"
+check "plan-new quick forwards the recovered number and explicit kind" \
+  "$(grep -Ec $'\tdevops-plan\t.*\/scripts/wt.sh\t999\tpi(\t|$)' "$wt_calls" || true)" "1"
+check "non-interactive plan-new propagates its confirmation bit" \
+  "$(tail -c 2 "$wt_calls")" "1"
+check "plan-new always prints its durable Issue number" \
+  "$(grep -Fc 'Ready Issue: #999' "$fixture_root/plan-new-quick-output" || true)" "1"
+check "plan-new prints an idempotent non-interactive retry" \
+  "$(grep -Fxc 'Retry/resume: wt plan --issue 999 --kind pi --yes' "$fixture_root/plan-new-quick-output" || true)" "1"
+
+# File and stdin body sources preserve bytes and all three supported size
+# routes use the same command. Model/thinking are optional explicit overrides;
+# when present they remain opaque, separate arguments.
+cat > "$fixture_root/plan-new-body.md" <<'MD'
+## Problem
+
+The selected workspace loses its camera framing.
+MD
+: > "$gh_calls"
+: > "$gh_body"
+: > "$wt_calls"
+status=0
+"$script" plan-new "Preserve workspace framing" \
+  --body-file "$fixture_root/plan-new-body.md" \
+  --size planned --kind claude --yes \
+  > "$fixture_root/plan-new-planned-output" \
+  2> "$fixture_root/plan-new-planned-error" || status=$?
+check "plan-new accepts a body file and optional integration-default model/thinking" "$status" "0"
+if ! cmp -s "$fixture_root/plan-new-body.md" "$gh_body"; then
+  printf 'FAIL plan-new changed body-file bytes while creating the Issue\n' >&2
+  failures=$((failures + 1))
+fi
+check "plan-new planned applies one planned size label" \
+  "$(grep -Fc $'\t--label\tbacklog\t--label\tsize:planned' "$gh_calls" || true)" "1"
+check "plan-new planned forwards Claude without inventing model text" \
+  "$(grep -Ec $'\tdevops-plan\t.*\/scripts/wt.sh\t999\tclaude\t\t' "$wt_calls" || true)" "1"
+check "omitted planner defaults stay omitted in the retry" \
+  "$(grep -Fxc 'Retry/resume: wt plan --issue 999 --kind claude --yes' "$fixture_root/plan-new-planned-output" || true)" "1"
+
+: > "$gh_calls"
+: > "$gh_body"
+: > "$wt_calls"
+status=0
+printf 'Context supplied on stdin.' | \
+  "$script" plan-new "Plan a guided map reset" \
+    --body-file - --size prd --kind pi \
+    --model '[openai] planner model; $(echo inert)' --thinking max --yes \
+    > "$fixture_root/plan-new-prd-output" \
+    2> "$fixture_root/plan-new-prd-error" || status=$?
+check "plan-new accepts stdin context plus explicit planner overrides" "$status" "0"
+check "plan-new stdin body survives" "$([[ -f "$gh_body" ]] && cat "$gh_body" || true)" \
+  "Context supplied on stdin."
+check "plan-new prd applies one prd size label" \
+  "$(grep -Fc $'\t--label\tbacklog\t--label\tsize:prd' "$gh_calls" || true)" "1"
+check "plan-new keeps an opaque model as one zsh argument" \
+  "$(grep -Foc $'\t[openai] planner model; $(echo inert)\tmax' "$wt_calls" || true)" "1"
+
+: > "$gh_calls"
+: > "$wt_calls"
+status=0
+GH_FAIL=1 "$script" plan-new "Creation failure" --body "Reviewed context." \
+  --size quick --kind pi --yes \
+  > "$fixture_root/plan-new-create-failure-output" \
+  2> "$fixture_root/plan-new-create-failure-error" || status=$?
+check "plan-new preserves the gh create failure status" "$status" "7"
+check "a failed plan-new creation attempts exactly one GitHub call" "$(count_gh_calls)" "1"
+check "a failed plan-new creation launches no planner" "$(count_wt_calls)" "0"
+check "a failed plan-new creation retains gh's error" \
+  "$(grep -Fc 'simulated GitHub failure' "$fixture_root/plan-new-create-failure-error" || true)" "1"
+
+# A non-interactive caller must make both decisions explicitly before any
+# outward-facing write: select a planner kind and pass --yes. Model and thinking
+# remain optional integration defaults once the kind establishes intent.
+for noninteractive_case in \
+  "plan-new Missing confirmation --body context --size quick --kind pi" \
+  "plan-new Missing planner --body context --size quick --yes" \
+  "plan-new Model is not a kind --body context --size quick --model sonnet --thinking high --yes"; do
+  : > "$gh_calls"
+  : > "$wt_calls"
+  status=0
+  # Intentional splitting builds each fixed argument vector.
+  "$script" $noninteractive_case < /dev/null > /dev/null 2>&1 || status=$?
+  check "non-interactive '$noninteractive_case' is a usage refusal" "$status" "2"
+  check "non-interactive '$noninteractive_case' writes no Issue" "$(count_gh_calls)" "0"
+  check "non-interactive '$noninteractive_case' launches no planner" "$(count_wt_calls)" "0"
+done
+
+# In a terminal the same omissions are interactive choices, not usage errors.
+# Planner selection happens first; only after it succeeds does the Ready-Issue
+# preview ask for write confirmation.
+: > "$gh_calls"
+: > "$wt_calls"
+status=0
+PTY_INPUT=$'1\n1\n4\ny\n' python3 "$pty_driver" \
+  "$script" plan-new "Terminal planning" \
+    --body "Reviewed in the terminal." --size quick \
+    > "$fixture_root/plan-new-terminal-output" \
+    2> "$fixture_root/plan-new-terminal-error" || status=$?
+check "terminal plan-new can select and confirm a planner" "$status" "0"
+check "terminal plan-new prompts for planner selection" \
+  "$(grep -Fc 'Choose the planning agent.' "$fixture_root/plan-new-terminal-output" || true)" "1"
+check "terminal plan-new previews before its confirmed write" \
+  "$(grep -Fc 'Create this Ready Issue?' "$fixture_root/plan-new-terminal-output" || true)" "1"
+check "terminal plan-new writes only after confirmation" \
+  "$(grep -Fc $'CALL\tissue\tcreate' "$gh_calls" || true)" "1"
+check "terminal plan-new launches the selected planner" "$(count_wt_calls)" "1"
+check "terminal plan-new keeps the downstream evidence gate interactive" \
+  "$(tail -c 2 "$wt_calls")" "0"
+check "terminal plan-new receipt records the selected planner without --yes" \
+  "$(grep -Fc 'Retry/resume: wt plan --issue 999 --kind claude --model sonnet --thinking xhigh' "$fixture_root/plan-new-terminal-output" || true)" "1"
+
+# Every parser rejection is local and exits 2. Duplicate value sources and
+# options are forbidden; every value-taking option must have a value; unknown
+# options, sizes, and planner kinds are rejected rather than becoming title
+# words or reaching GitHub.
+plan_new_invalid_cases=(
+  "plan-new"
+  "plan-new --body context --size quick --kind pi --yes"
+  "plan-new title --size quick --kind pi --yes"
+  "plan-new title --body context --kind pi --yes"
+  "plan-new title --body context --size tiny --kind pi --yes"
+  "plan-new title --body context --size quick --kind codex --yes"
+  "plan-new title --body"
+  "plan-new title --body-file"
+  "plan-new title --body-file /missing --size quick --kind pi --yes"
+  "plan-new title --body context --body other --size quick --kind pi --yes"
+  "plan-new title --body-file one --body-file two --size quick --kind pi --yes"
+  "plan-new title --body context --body-file file --size quick --kind pi --yes"
+  "plan-new title --body context --size"
+  "plan-new title --body context --size quick --size planned --kind pi --yes"
+  "plan-new title --body context --size quick --kind"
+  "plan-new title --body context --size quick --kind pi --kind claude --yes"
+  "plan-new title --body context --size quick --kind pi --model"
+  "plan-new title --body context --size quick --kind pi --model one --model two --yes"
+  "plan-new title --body context --size quick --kind pi --thinking"
+  "plan-new title --body context --size quick --kind pi --thinking high --thinking max --yes"
+  "plan-new title --body context --size quick --kind pi --unknown value --yes"
+)
+for invalid in "${plan_new_invalid_cases[@]}"; do
+  : > "$gh_calls"
+  : > "$wt_calls"
+  status=0
+  # Intentional splitting builds each fixed invalid argument vector.
+  "$script" $invalid > /dev/null 2>&1 || status=$?
+  check "invalid invocation '$invalid' exits 2" "$status" "2"
+  check "invalid invocation '$invalid' contacts no GitHub" "$(count_gh_calls)" "0"
+  check "invalid invocation '$invalid' launches no planner" "$(count_wt_calls)" "0"
+done
+
+# Context means actual problem information, not merely the presence of a body
+# option. Inline, file, and stdin whitespace-only forms all fail before writes.
+: > "$gh_calls"
+: > "$wt_calls"
+status=0
+"$script" plan-new "Blank inline context" --body "   " \
+  --size quick --kind pi --yes > /dev/null 2>&1 || status=$?
+check "plan-new rejects whitespace-only inline context" "$status" "2"
+check "blank inline context contacts no GitHub" "$(count_gh_calls)" "0"
+check "blank inline context launches no planner" "$(count_wt_calls)" "0"
+
+printf ' \n\t\n' > "$fixture_root/plan-new-blank-body.md"
+: > "$gh_calls"
+: > "$wt_calls"
+status=0
+"$script" plan-new "Blank file context" \
+  --body-file "$fixture_root/plan-new-blank-body.md" \
+  --size planned --kind claude --yes > /dev/null 2>&1 || status=$?
+check "plan-new rejects whitespace-only file context" "$status" "2"
+check "blank file context contacts no GitHub" "$(count_gh_calls)" "0"
+check "blank file context launches no planner" "$(count_wt_calls)" "0"
+
+: > "$gh_calls"
+: > "$wt_calls"
+status=0
+printf '\n\t' | "$script" plan-new "Blank stdin context" --body-file - \
+  --size prd --kind pi --yes > /dev/null 2>&1 || status=$?
+check "plan-new rejects whitespace-only stdin context" "$status" "2"
+check "blank stdin context contacts no GitHub" "$(count_gh_calls)" "0"
+check "blank stdin context launches no planner" "$(count_wt_calls)" "0"
+
 # Capture is confirm-gated like every other write.
 : > "$gh_calls"
 status=0
@@ -1621,6 +2053,14 @@ fi
 : > "$gh_calls"
 "$script" new "Map zoom is jumpy" --body "happens at 30% zoom" --yes > /dev/null
 assert_call $'CALL\tissue\tcreate\t--title\tMap zoom is jumpy\t--body\thappens at 30% zoom'
+
+: > "$gh_calls"
+"$script" create "Map zoom is jumpy" --body "happens at 30% zoom" --yes > /dev/null
+assert_call $'CALL\tissue\tcreate\t--title\tMap zoom is jumpy\t--body\thappens at 30% zoom'
+if grep -Eq -- '--label|backlog|needs-decision' "$gh_calls"; then
+  printf 'the create alias no longer behaves like unlabelled new: %s\n' "$(cat "$gh_calls")" >&2
+  exit 1
+fi
 
 # Bodies can come from a Markdown file or stdin. They are read once before the
 # preview, then passed verbatim as one argument to gh.
