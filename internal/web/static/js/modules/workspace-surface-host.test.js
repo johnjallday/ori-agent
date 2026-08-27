@@ -56,13 +56,23 @@ class NodeFake {
 class DocumentFake {
   constructor() {
     this.body = new NodeFake('body');
+    this.dispatchedEvents = [];
   }
 
   createElement(tag) {
     return new NodeFake(tag);
   }
 
-  dispatchEvent() {}
+  dispatchEvent(event) {
+    this.dispatchedEvents.push(event);
+  }
+}
+
+class CustomEventFake {
+  constructor(type, options = {}) {
+    this.type = type;
+    this.detail = options.detail;
+  }
 }
 
 class BridgeFake {
@@ -200,6 +210,7 @@ function makeHost() {
   });
   const timers = [];
   const window = {
+    CustomEvent: CustomEventFake,
     confirm: () => true,
     OriAskRouting: {
       async submit(prompt, options) {
@@ -250,6 +261,46 @@ test('generic catalog becomes one Map station without plugin-name branching', as
     description: 'The demo service is ready.',
     tone: 'clear'
   });
+});
+
+test('catalog polling announces only render-relevant station changes', async () => {
+  const { host, document } = makeHost();
+  await host.loadCatalog();
+  assert.deepEqual(
+    document.dispatchedEvents.map(event => event.type),
+    ['ori:workspace-surfaces-changed']
+  );
+
+  const firstSurface = host.surfaces[0];
+  host.fetch = async () =>
+    response(200, {
+      surfaces: [
+        {
+          ...firstSurface,
+          status: { ...firstSurface.status, checked_at: '2026-08-27T14:44:48Z' }
+        }
+      ]
+    });
+  await host.loadCatalog();
+  assert.equal(host.surfaces[0].status.checked_at, '2026-08-27T14:44:48Z');
+  assert.equal(
+    document.dispatchedEvents.length,
+    1,
+    'checked_at-only polling must not rebuild the Map'
+  );
+
+  host.fetch = async () =>
+    response(200, {
+      surfaces: [
+        {
+          ...firstSurface,
+          status: { ...firstSurface.status, value: 'Updated status' }
+        }
+      ]
+    });
+  await host.loadCatalog();
+  assert.equal(document.dispatchedEvents.length, 2);
+  assert.equal(document.dispatchedEvents[1].type, 'ori:workspace-surfaces-changed');
 });
 
 test('host opens an opaque sandbox through the overlay coordinator and invokes operation', async () => {
