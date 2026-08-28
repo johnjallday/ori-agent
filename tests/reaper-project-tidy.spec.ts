@@ -9,6 +9,52 @@ const tidySurfaceKey = 'plugin:reaper-plugin:reaper-live-control:project-tidy';
 
 test.skip(!pluginPath, 'set ORI_REAPER_PLUGIN_PATH to the coordinated plugin worktree');
 
+function writeReport(projectRoot: string, proposalID: string, itemID: string) {
+  const tidyRoot = path.join(projectRoot, 'tidy');
+  const proposalStatePath = path.join(tidyRoot, `proposal-${proposalID}.state.json`);
+  const proposalState = JSON.parse(readFileSync(proposalStatePath, 'utf8'));
+  proposalState.status = 'apply_skipped';
+  writeFileSync(proposalStatePath, JSON.stringify(proposalState, null, 2) + '\n', { mode: 0o600 });
+  const result = {
+    schema_version: 1,
+    plan_id: proposalID,
+    project_change_count_before: 5,
+    project_change_count_after: 5,
+    items: [
+      {
+        id: itemID,
+        verb: 'set_track_color',
+        status: 'skipped',
+        reason: 'snapshot changed'
+      }
+    ]
+  };
+  const record = {
+    schema_version: 1,
+    proposal_id: proposalID,
+    created_at: '2026-08-28T12:02:00Z',
+    outcome: 'fully_skipped',
+    result_file: `apply-result-${proposalID}.json`,
+    markdown_file: `report-${proposalID}.md`,
+    project_change_count_before: 5,
+    project_change_count_after: 5,
+    items: result.items
+  };
+  writeFileSync(path.join(tidyRoot, record.result_file), JSON.stringify(result, null, 2) + '\n', {
+    mode: 0o600
+  });
+  writeFileSync(
+    path.join(tidyRoot, record.markdown_file),
+    '# REAPER tidy-up report\n\nRun a fresh survey.\n\nAll applied changes are a single undo step in REAPER (one Ctrl+Z reverts everything).\n',
+    { mode: 0o600 }
+  );
+  writeFileSync(
+    path.join(tidyRoot, `report-${proposalID}.state.json`),
+    JSON.stringify(record, null, 2) + '\n',
+    { mode: 0o600 }
+  );
+}
+
 function writeProposal(
   projectRoot: string,
   projectEntry: string,
@@ -173,6 +219,31 @@ test('project-entry tidy panel reviews, filters, dismisses, and supersedes fixtu
     if (evidenceDir) {
       await page.screenshot({
         path: path.join(evidenceDir, 'group3-03-project-tidy-superseded.png'),
+        fullPage: true
+      });
+    }
+
+    writeReport(projectRoot, 'proposal-002', 'color-proposal-002');
+    await expect(frame.getByRole('heading', { name: 'Fresh survey needed' })).toBeVisible({
+      timeout: 10_000
+    });
+    await expect(frame.locator('.report-item.is-skipped')).toContainText('snapshot changed');
+    await expect(frame.locator('[data-undo-note]')).toContainText('one Ctrl+Z');
+    const noteResponse = await request.post(`/api/workspaces/${workspace.id}/notes`, {
+      data: {
+        name: 'REAPER tidy-up report · proposal-002',
+        content: readFileSync(path.join(projectRoot, 'tidy', 'report-proposal-002.md'), 'utf8')
+      }
+    });
+    expect(noteResponse.ok(), await noteResponse.text()).toBeTruthy();
+    const notePayload = await noteResponse.json();
+    const noteID = notePayload.note?.id || notePayload.id;
+    const persistedNote = await request.get(`/api/notes/${noteID}`);
+    expect(persistedNote.ok(), await persistedNote.text()).toBeTruthy();
+    expect((await persistedNote.json()).content).toContain('one Ctrl+Z');
+    if (evidenceDir) {
+      await page.screenshot({
+        path: path.join(evidenceDir, 'group4-04-project-tidy-report.png'),
         fullPage: true
       });
     }

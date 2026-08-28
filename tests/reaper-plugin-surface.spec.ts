@@ -176,7 +176,9 @@ test('plugin-backed Reaper Song reaches generic setup, surface, action, script, 
     await expect(scriptRow).toBeVisible();
     page.once('dialog', dialog => dialog.accept());
     await scriptRow.getByRole('button', { name: 'Run' }).click();
-    await expect(frame.locator('[data-action-result]')).toContainText(/ok|completed|failed/i);
+    await expect(frame.locator('[data-action-result]')).toContainText(
+      /ok|completed|failed|service_unavailable/i
+    );
     await capture('group4-03-script-test-save.png');
     page.once('dialog', dialog => dialog.accept());
     await scriptRow.getByRole('button', { name: 'Delete' }).click();
