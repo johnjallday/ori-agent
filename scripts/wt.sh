@@ -8,6 +8,7 @@
 #   wt plan --issue <N> [--issue <N> ...] [--kind claude|pi] [--model MODEL] [--thinking LEVEL] [--yes]
 #   wt start [prd] [--kind KIND] [--model MODEL] [--no-herdr] # Create a planned worktree
 #   wt new <name> [--kind KIND] [--model MODEL] # Create a clean worktree (no PRD/tasks)
+#   wt away arm|disarm|status|tick # Control unattended queued dispatches
 #   wt pr [name]            # Push branch and open a PR against dev
 #   wt done [name] [--keep-issue-open] [--herdr-override] # Finish all attached Issues, archive, and clean up
 #   wt rm [name]            # Remove worktree and its branch
@@ -470,7 +471,7 @@ function wt_repl {
   # current shell (wt is sourced), so cd/start still change the shell's dir; the
   # prompt shows the current directory's basename so you can see where you are.
   wt_color_init
-  echo "wt REPL - commands: go, status, plan, start, new, pr, done, cd, ls, rm, demo, herd, help  (q to quit)"
+  echo "wt REPL - commands: go, status, plan, start, new, away, pr, done, cd, ls, rm, demo, herd, help  (q to quit)"
   local line
   local -a words
   while true; do
@@ -1368,6 +1369,121 @@ function wt_done_close_secondary_issues {
   done
 }
 
+function wt_away_usage {
+  cat <<'EOF'
+Usage: wt away <command>
+  wt away arm      - Allow queued plans to start on scheduled ticks
+  wt away disarm   - Stop new dispatches; running agents continue
+  wt away status   - Show armed state and dispatcher status
+  wt away tick     - Run one dispatch cycle (safe to invoke manually)
+EOF
+}
+
+function wt_away_tasks_dir {
+  local dev_path
+  dev_path="$(wt_get_dev_worktree)"
+  if [[ -z "$dev_path" ]]; then
+    echo "Could not find $BASE_BRANCH worktree" >&2
+    return 1
+  fi
+  print -r -- "$dev_path/tasks"
+}
+
+function wt_away_arm {
+  if (( $# != 0 )); then
+    echo "wt away arm accepts no arguments" >&2
+    wt_away_usage >&2
+    return 1
+  fi
+
+  local tasks_dir marker
+  tasks_dir="$(wt_away_tasks_dir)" || return 1
+  marker="$tasks_dir/.away-armed"
+  if [[ -f "$marker" ]]; then
+    echo "Away dispatcher is already armed."
+    return 0
+  fi
+
+  (umask 027; mkdir -p "$tasks_dir") || return 1
+  (umask 077; : > "$marker") || return 1
+  chmod 600 "$marker" 2>/dev/null || true
+  echo "Away dispatcher armed."
+}
+
+function wt_away_disarm {
+  if (( $# != 0 )); then
+    echo "wt away disarm accepts no arguments" >&2
+    wt_away_usage >&2
+    return 1
+  fi
+
+  local tasks_dir marker
+  tasks_dir="$(wt_away_tasks_dir)" || return 1
+  marker="$tasks_dir/.away-armed"
+  if [[ ! -e "$marker" ]]; then
+    echo "Away dispatcher is already disarmed."
+    return 0
+  fi
+
+  rm -f -- "$marker"
+  echo "Away dispatcher disarmed. Running agents were not interrupted."
+}
+
+function wt_away_status {
+  if (( $# != 0 )); then
+    echo "wt away status accepts no arguments" >&2
+    wt_away_usage >&2
+    return 1
+  fi
+
+  local tasks_dir
+  tasks_dir="$(wt_away_tasks_dir)" || return 1
+  if [[ -f "$tasks_dir/.away-armed" ]]; then
+    echo "Away dispatcher: armed"
+  else
+    echo "Away dispatcher: disarmed"
+  fi
+}
+
+function wt_away_tick {
+  if (( $# != 0 )); then
+    echo "wt away tick accepts no arguments" >&2
+    wt_away_usage >&2
+    return 1
+  fi
+
+  local tasks_dir
+  tasks_dir="$(wt_away_tasks_dir)" || return 1
+  # The armed flag is deliberately the first runtime read. A disarmed tick must
+  # not inspect or infer authorization from away-queue.md.
+  if [[ ! -f "$tasks_dir/.away-armed" ]]; then
+    return 0
+  fi
+
+  echo "Away dispatcher tick: armed (queue dispatch is not configured yet)."
+}
+
+function wt_away {
+  local command="${1:-}"
+  case "$command" in
+    arm) shift; wt_away_arm "$@" ;;
+    disarm) shift; wt_away_disarm "$@" ;;
+    status) shift; wt_away_status "$@" ;;
+    tick) shift; wt_away_tick "$@" ;;
+    help|-h|--help) wt_away_usage ;;
+    "")
+      echo "wt away needs a command" >&2
+      wt_away_usage >&2
+      return 1
+      ;;
+    *)
+      echo "Unknown wt away command: $command" >&2
+      wt_away_usage >&2
+      return 1
+      ;;
+  esac
+}
+
 function wt_dispatch {
   case "$1" in
   repl)
@@ -1584,6 +1700,10 @@ function wt_dispatch {
   herd)
     shift
     wt_herd "$@"
+    ;;
+  away)
+    shift
+    wt_away "$@"
     ;;
   plan)
     shift
@@ -2086,6 +2206,7 @@ function wt_dispatch {
     echo "                     --no-herdr on either: bare Git worktree, no Herdr tab or agent."
     echo "                     Herdr is optional throughout; if it is missing or unhealthy the"
     echo "                     worktree is still created and 'wt herd retry' resumes the rest."
+    echo "  wt away arm|disarm|status|tick - Control unattended queued dispatches"
     echo "  wt pr [name]     - Push branch and open a PR against $BASE_BRANCH"
     echo "  wt done [name] [--keep-issue-open] [--herdr-override]"
     echo "                     Close an explicitly attached Issue after merge, archive tasks,"
