@@ -19,10 +19,12 @@ import (
 const (
 	ProtocolVersion = 1
 
-	maxIDBytes          = 64
-	maxLabelBytes       = 120
-	maxDescriptionBytes = 500
-	maxStationValue     = 160
+	maxIDBytes               = 64
+	maxLabelBytes            = 120
+	maxDescriptionBytes      = 500
+	maxStationValue          = 160
+	maxTaskTitleBytes        = 300
+	maxTaskInstructionsBytes = 16 << 10
 )
 
 var (
@@ -76,21 +78,29 @@ type Polling struct {
 // Surface describes only stable identity and bounded presentation. In
 // particular, it contains no command, service method, asset path, module, URL,
 // endpoint, filesystem path, or schema.
+type TaskTemplate struct {
+	ID          string `json:"id"`
+	Label       string `json:"label"`
+	Description string `json:"description,omitempty"`
+}
+
 type Surface struct {
-	ID                  string   `json:"id"`
-	Label               string   `json:"label"`
-	Description         string   `json:"description,omitempty"`
-	Icon                Icon     `json:"icon"`
-	Placement           string   `json:"placement"`
-	Modal               Modal    `json:"modal"`
-	Polling             Polling  `json:"polling"`
-	OperationIDs        []string `json:"operation_ids,omitempty"`
-	StatusOperation     string   `json:"status_operation,omitempty"`
-	StateEnabled        bool     `json:"state_enabled,omitempty"`
-	ConfirmationEnabled bool     `json:"confirmation_enabled,omitempty"`
-	CloseEnabled        bool     `json:"close_enabled,omitempty"`
-	AskOriCapabilities  []string `json:"ask_ori_capabilities,omitempty"`
-	SetupProviderID     string   `json:"setup_provider_id,omitempty"`
+	ID                  string         `json:"id"`
+	Label               string         `json:"label"`
+	Description         string         `json:"description,omitempty"`
+	Icon                Icon           `json:"icon"`
+	Placement           string         `json:"placement"`
+	Modal               Modal          `json:"modal"`
+	Polling             Polling        `json:"polling"`
+	OperationIDs        []string       `json:"operation_ids,omitempty"`
+	StatusOperation     string         `json:"status_operation,omitempty"`
+	StateEnabled        bool           `json:"state_enabled,omitempty"`
+	ConfirmationEnabled bool           `json:"confirmation_enabled,omitempty"`
+	CloseEnabled        bool           `json:"close_enabled,omitempty"`
+	AskOriCapabilities  []string       `json:"ask_ori_capabilities,omitempty"`
+	SetupProviderID     string         `json:"setup_provider_id,omitempty"`
+	TaskTemplates       []TaskTemplate `json:"task_templates,omitempty"`
+	DefaultTaskTemplate string         `json:"default_task_template,omitempty"`
 }
 
 // Capability is the inert definition contributed by one trusted owner. Owner is
@@ -188,14 +198,24 @@ type Runtime interface {
 // Binding carries executable trust and therefore deliberately has no JSON
 // tags. AssetRoot, EntryAsset, operation policy, and Runtime are held only by
 // the global installed-plugin registry.
+type TaskTemplateBinding struct {
+	ID                   string
+	Title                string
+	Instructions         string
+	RequiredCapabilities []string
+	AutoStart            bool
+	InputSchema          json.RawMessage
+}
+
 type Binding struct {
-	CapabilityID string
-	SurfaceID    string
-	AssetRoot    string
-	AssetVersion string
-	EntryAsset   string
-	Operations   map[string]Operation
-	Runtime      Runtime
+	CapabilityID  string
+	SurfaceID     string
+	AssetRoot     string
+	AssetVersion  string
+	EntryAsset    string
+	Operations    map[string]Operation
+	TaskTemplates map[string]TaskTemplateBinding
+	Runtime       Runtime
 }
 
 // Registration atomically pairs one owner's inert capability descriptors with
@@ -363,7 +383,7 @@ func validateSurface(surface Surface) error {
 	if surface.Icon.Kind != "host" || validateID("host icon", surface.Icon.Value) != nil {
 		return fmt.Errorf("surface %q must use a valid host icon token", surface.ID)
 	}
-	if surface.Placement != "map_modal" {
+	if surface.Placement != "map_modal" && surface.Placement != "project_entry" {
 		return fmt.Errorf("surface %q placement %q is unsupported", surface.ID, surface.Placement)
 	}
 	if surface.Modal.Width < 320 || surface.Modal.Width > 1600 || surface.Modal.Height < 240 || surface.Modal.Height > 1200 {
@@ -394,6 +414,30 @@ func validateSurface(surface Surface) error {
 	}
 	if surface.SetupProviderID != "" && !validSetupProviderID(surface.SetupProviderID) {
 		return fmt.Errorf("workspace surface Setup provider id %q is invalid", surface.SetupProviderID)
+	}
+	seenTemplates := make(map[string]struct{}, len(surface.TaskTemplates))
+	for _, template := range surface.TaskTemplates {
+		if err := validateID("task template", template.ID); err != nil {
+			return err
+		}
+		if err := validateText("task template label", template.Label, maxLabelBytes, false); err != nil {
+			return err
+		}
+		if err := validateText("task template description", template.Description, maxDescriptionBytes, true); err != nil {
+			return err
+		}
+		if _, duplicate := seenTemplates[template.ID]; duplicate {
+			return fmt.Errorf("surface %q task template %q is declared twice", surface.ID, template.ID)
+		}
+		seenTemplates[template.ID] = struct{}{}
+	}
+	if surface.DefaultTaskTemplate != "" {
+		if _, exists := seenTemplates[surface.DefaultTaskTemplate]; !exists {
+			return fmt.Errorf("surface %q default task template is not declared", surface.ID)
+		}
+	}
+	if surface.Placement == "project_entry" && (len(surface.TaskTemplates) == 0 || surface.DefaultTaskTemplate == "") {
+		return fmt.Errorf("project-entry surface %q requires a default task template", surface.ID)
 	}
 	return nil
 }
@@ -433,6 +477,15 @@ func validateBinding(binding Binding, surface Surface, capability Capability) er
 			return fmt.Errorf("workspace surface status operation %q must be read-only", status.ID)
 		}
 	}
+	if len(binding.TaskTemplates) != len(surface.TaskTemplates) {
+		return fmt.Errorf("workspace surface binding %q/%q task template set does not match", binding.CapabilityID, binding.SurfaceID)
+	}
+	for _, inert := range surface.TaskTemplates {
+		template, exists := binding.TaskTemplates[inert.ID]
+		if !exists || template.ID != inert.ID || validateTaskTemplateBinding(template) != nil {
+			return fmt.Errorf("workspace surface binding %q/%q task template %q is invalid", binding.CapabilityID, binding.SurfaceID, inert.ID)
+		}
+	}
 	return nil
 }
 
@@ -455,6 +508,44 @@ func validateOperation(operation Operation) error {
 	for _, scope := range operation.Scopes {
 		if err := validateID("symbolic scope", scope); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+func validateTaskTemplateBinding(template TaskTemplateBinding) error {
+	if err := validateID("task template", template.ID); err != nil {
+		return err
+	}
+	if err := validateTaskText(template.Title, maxTaskTitleBytes, false); err != nil {
+		return err
+	}
+	if err := validateTaskText(template.Instructions, maxTaskInstructionsBytes, false); err != nil {
+		return err
+	}
+	if len(template.RequiredCapabilities) == 0 || len(template.RequiredCapabilities) > 16 || !json.Valid(template.InputSchema) || len(template.InputSchema) > 16<<10 {
+		return fmt.Errorf("workspace surface task template %q contract is invalid", template.ID)
+	}
+	seen := make(map[string]struct{}, len(template.RequiredCapabilities))
+	for _, capability := range template.RequiredCapabilities {
+		if err := validateID("task capability", capability); err != nil {
+			return err
+		}
+		if _, duplicate := seen[capability]; duplicate {
+			return fmt.Errorf("workspace surface task template %q repeats capability %q", template.ID, capability)
+		}
+		seen[capability] = struct{}{}
+	}
+	return nil
+}
+
+func validateTaskText(value string, maximum int, allowEmpty bool) error {
+	if !utf8.ValidString(value) || value != strings.TrimSpace(value) || len(value) > maximum || (!allowEmpty && value == "") {
+		return fmt.Errorf("workspace surface task text is invalid")
+	}
+	for _, r := range value {
+		if r == 0 || r == 0x7f || r < 0x20 && r != '\n' && r != '\t' {
+			return fmt.Errorf("workspace surface task text contains control characters")
 		}
 	}
 	return nil
@@ -514,6 +605,7 @@ func cloneSurface(surface Surface) Surface {
 	copy := surface
 	copy.OperationIDs = append([]string(nil), surface.OperationIDs...)
 	copy.AskOriCapabilities = append([]string(nil), surface.AskOriCapabilities...)
+	copy.TaskTemplates = append([]TaskTemplate(nil), surface.TaskTemplates...)
 	return copy
 }
 
@@ -540,6 +632,12 @@ func cloneBinding(binding Binding) Binding {
 	copy.Operations = make(map[string]Operation, len(binding.Operations))
 	for id, operation := range binding.Operations {
 		copy.Operations[id] = cloneOperation(operation)
+	}
+	copy.TaskTemplates = make(map[string]TaskTemplateBinding, len(binding.TaskTemplates))
+	for id, template := range binding.TaskTemplates {
+		template.RequiredCapabilities = append([]string(nil), template.RequiredCapabilities...)
+		template.InputSchema = append(json.RawMessage(nil), template.InputSchema...)
+		copy.TaskTemplates[id] = template
 	}
 	return copy
 }

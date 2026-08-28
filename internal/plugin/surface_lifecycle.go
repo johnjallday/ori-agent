@@ -258,6 +258,10 @@ func (l *SurfaceLifecycle) registration(installed InstalledPlugin) (workspacesur
 			inert.RuntimeRequirementKey = capability.RuntimeProvider.RequirementKey
 		}
 		for _, surface := range capability.Surfaces {
+			inertTemplates := make([]workspacesurface.TaskTemplate, 0, len(surface.TaskTemplates))
+			for _, template := range surface.TaskTemplates {
+				inertTemplates = append(inertTemplates, workspacesurface.TaskTemplate{ID: template.ID, Label: template.Label, Description: template.Description})
+			}
 			inert.Surfaces = append(inert.Surfaces, workspacesurface.Surface{
 				ID: surface.ID, Label: surface.Label, Description: surface.Description,
 				Icon:         workspacesurface.Icon{Kind: surface.Icon.Kind, Value: surface.Icon.Value},
@@ -268,6 +272,7 @@ func (l *SurfaceLifecycle) registration(installed InstalledPlugin) (workspacesur
 				StateEnabled: surface.HostIntents.State, ConfirmationEnabled: surface.HostIntents.Confirmation,
 				CloseEnabled:       surface.HostIntents.Close,
 				AskOriCapabilities: append([]string(nil), surface.HostIntents.AskOri.RequiredCapabilities...),
+				TaskTemplates:      inertTemplates, DefaultTaskTemplate: surface.DefaultTaskTemplate,
 				SetupProviderID: func() string {
 					if surface.HostIntents.OpenSetup.ProviderID == "" {
 						return ""
@@ -308,10 +313,18 @@ func (l *SurfaceLifecycle) registration(installed InstalledPlugin) (workspacesur
 				}
 				operations[operationID] = runtimeOperation(operation)
 			}
+			taskTemplates := make(map[string]workspacesurface.TaskTemplateBinding, len(surface.TaskTemplates))
+			for _, template := range surface.TaskTemplates {
+				taskTemplates[template.ID] = workspacesurface.TaskTemplateBinding{
+					ID: template.ID, Title: template.Title, Instructions: template.Instructions,
+					RequiredCapabilities: append([]string(nil), template.RequiredCapabilities...),
+					AutoStart:            template.AutoStart, InputSchema: append(json.RawMessage(nil), template.InputSchema...),
+				}
+			}
 			registration.Bindings = append(registration.Bindings, workspacesurface.Binding{
 				CapabilityID: capability.ID, SurfaceID: surface.ID,
 				AssetRoot: installed.InstallDir, AssetVersion: installed.ComponentFingerprint,
-				EntryAsset: surface.EntryAsset, Operations: operations,
+				EntryAsset: surface.EntryAsset, Operations: operations, TaskTemplates: taskTemplates,
 				Runtime: &serviceRuntime{manager: l.services, spec: spec, statusOperation: surface.StatusOperation},
 			})
 		}

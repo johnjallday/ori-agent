@@ -145,10 +145,19 @@ func newPrototypeHTTPFixture(t *testing.T) *prototypeHTTPFixture {
 				OperationIDs: []string{"status.read", "greeting.create", "slow.read", "crash.read", "setting.validate"}, StatusOperation: "status.read",
 				StateEnabled: true, ConfirmationEnabled: true, CloseEnabled: true,
 				AskOriCapabilities: []string{"demo_runtime"}, SetupProviderID: "demo-runtime",
+				TaskTemplates:       []workspacesurface.TaskTemplate{{ID: "survey", Label: "Run survey", Description: "Create a fixed survey task."}},
+				DefaultTaskTemplate: "survey",
 			}},
 		}},
 		Bindings: []workspacesurface.Binding{{
 			CapabilityID: "demo-tools", SurfaceID: "main", AssetRoot: root, AssetVersion: "fixture-v1", EntryAsset: "ui/index.html", Runtime: runtime,
+			TaskTemplates: map[string]workspacesurface.TaskTemplateBinding{
+				"survey": {
+					ID: "survey", Title: "Run fixed survey", Instructions: "Run the fixed survey workflow.",
+					RequiredCapabilities: []string{"demo_runtime"}, AutoStart: true,
+					InputSchema: json.RawMessage(`{"type":"object","properties":{"proposal_id":{"type":"string","maxLength":64}},"required":["proposal_id"],"additionalProperties":false}`),
+				},
+			},
 			Operations: map[string]workspacesurface.Operation{
 				"status.read": {
 					ID:             "status.read",
@@ -277,6 +286,38 @@ func TestCatalogReturnsOnlyOwnedAttachedSanitizedSurfaces(t *testing.T) {
 	foreign := fixture.serve(http.MethodGet, "/api/workspaces/workspace-foreign/surfaces", "")
 	if foreign.Code != http.StatusNotFound {
 		t.Fatalf("foreign catalog status = %d", foreign.Code)
+	}
+}
+
+func TestProjectEntryCatalogStaysVisibleButDisabledUntilHostRuntimeIsHealthy(t *testing.T) {
+	fixture := newPrototypeHTTPFixture(t)
+	if err := fixture.registry.UnregisterOwner(fixture.surface.Owner.Kind, fixture.surface.Owner.ID, fixture.surface.Owner.Generation); err != nil {
+		t.Fatal(err)
+	}
+	fixture.registration.Capabilities[0].Surfaces[0].Placement = "project_entry"
+	if err := fixture.registry.RegisterTrusted(fixture.registration); err != nil {
+		t.Fatal(err)
+	}
+	disabled := fixture.serve(http.MethodGet, "/api/workspaces/"+fixture.workspaceID+"/surfaces", "")
+	var catalog catalogResponse
+	if err := json.Unmarshal(disabled.Body.Bytes(), &catalog); err != nil || len(catalog.Surfaces) != 1 {
+		t.Fatalf("disabled catalog = %d %+v, %v", disabled.Code, catalog, err)
+	}
+	item := catalog.Surfaces[0]
+	if !item.Available || item.Status.State != workspacesurface.StationDisabled || !item.Features.CreateTask || !item.Features.OpenSetup {
+		t.Fatalf("disabled project entry = %+v", item)
+	}
+	if fixture.runtime.statusCalls != 0 {
+		t.Fatalf("plugin runtime was consulted before host runtime readiness")
+	}
+
+	fixture.handler.SetAgentRuntimeService(agentRuntimeStatus{})
+	ready := fixture.serve(http.MethodGet, "/api/workspaces/"+fixture.workspaceID+"/surfaces", "")
+	if err := json.Unmarshal(ready.Body.Bytes(), &catalog); err != nil || catalog.Surfaces[0].Status.State != workspacesurface.StationReady {
+		t.Fatalf("ready catalog = %d %+v, %v", ready.Code, catalog, err)
+	}
+	if fixture.runtime.statusCalls != 1 {
+		t.Fatalf("plugin runtime status calls = %d", fixture.runtime.statusCalls)
 	}
 }
 
@@ -448,6 +489,52 @@ func TestHostIntentsUseOnlySurfaceRegisteredRequirements(t *testing.T) {
 		`{"session":"`+opened.Session+`","type":"ask_ori","context":"unsafe\u0001context"}`)
 	if control.Code != http.StatusBadRequest {
 		t.Fatalf("control-character intent status = %d, body=%s", control.Code, control.Body.String())
+	}
+}
+
+func TestDirectTaskIntentUsesOnlyFixedTemplateAndHostRuntime(t *testing.T) {
+	fixture := newPrototypeHTTPFixture(t)
+	opened := fixture.openSession(t)
+	request := func(body string) *httptest.ResponseRecorder {
+		return fixture.serve(http.MethodPost, "/api/workspace-surfaces/intents", body)
+	}
+	body := `{"session":"` + opened.Session + `","type":"create_task","template_id":"survey","variables":{"proposal_id":"proposal-1"}}`
+	unavailable := request(body)
+	if unavailable.Code != http.StatusConflict || !strings.Contains(unavailable.Body.String(), `"runtime_unavailable"`) {
+		t.Fatalf("unavailable runtime = %d %s", unavailable.Code, unavailable.Body.String())
+	}
+	fixture.handler.SetAgentRuntimeService(agentRuntimeStatus{})
+	resolved := request(body)
+	var response intentResponse
+	if err := json.Unmarshal(resolved.Body.Bytes(), &response); err != nil || resolved.Code != http.StatusOK || response.Intent != "create_task" || response.Task == nil {
+		t.Fatalf("resolved task = %d %+v, %v", resolved.Code, response, err)
+	}
+	if response.WorkspaceID != fixture.workspaceID || response.Task.TemplateID != "survey" ||
+		response.Task.Title != "Run fixed survey" || !response.Task.AutoStart ||
+		response.Task.AssigneeStrategy != "workspace_entry_agent" ||
+		len(response.Task.RequiredCapabilities) != 1 || response.Task.RequiredCapabilities[0] != "demo_runtime" ||
+		!strings.Contains(response.Task.Details, "Run the fixed survey workflow.") ||
+		!strings.Contains(response.Task.Details, `<ori_task_variables_json>`) {
+		t.Fatalf("fixed task projection = %+v", response)
+	}
+	serialized := resolved.Body.String()
+	for _, forbidden := range []string{"file_fallback_for", "workspace_root", "project_entry", "auto_start_override"} {
+		if strings.Contains(serialized, forbidden) {
+			t.Fatalf("task intent leaked/accepted %q: %s", forbidden, serialized)
+		}
+	}
+
+	for name, forged := range map[string]string{
+		"template":        `{"session":"` + opened.Session + `","type":"create_task","template_id":"admin","variables":{"proposal_id":"proposal-1"}}`,
+		"variables":       `{"session":"` + opened.Session + `","type":"create_task","template_id":"survey","variables":{"proposal_id":"proposal-1","required_capabilities":["admin"]}}`,
+		"outer authority": `{"session":"` + opened.Session + `","type":"create_task","template_id":"survey","variables":{"proposal_id":"proposal-1"},"required_capabilities":["admin"],"auto_start":false}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			result := request(forged)
+			if result.Code != http.StatusBadRequest {
+				t.Fatalf("forged intent = %d %s", result.Code, result.Body.String())
+			}
+		})
 	}
 }
 

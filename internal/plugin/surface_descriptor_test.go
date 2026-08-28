@@ -135,6 +135,80 @@ func TestSurfaceContributionStableValidationCodes(t *testing.T) {
 	}
 }
 
+func TestCheckedInProjectEntryProtocolFixtureParses(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("testdata", "workspace-surface-v1", "valid-project-entry-contribution.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	contribution, err := ParseSurfaceContribution(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	surface := contribution.Capabilities[0].Surfaces[0]
+	if surface.Placement != "project_entry" || surface.DefaultTaskTemplate != "survey" || len(surface.TaskTemplates) != 1 {
+		t.Fatalf("project entry fixture = %+v", surface)
+	}
+}
+
+func TestProjectEntryTaskTemplatesAreFixedClosedAndInertPublicly(t *testing.T) {
+	var document map[string]any
+	if err := json.Unmarshal(canonicalSurfaceFixture(t), &document); err != nil {
+		t.Fatal(err)
+	}
+	surface := document["capabilities"].([]any)[0].(map[string]any)["surfaces"].([]any)[0].(map[string]any)
+	surface["placement"] = "project_entry"
+	surface["default_task_template"] = "survey"
+	surface["task_templates"] = []any{map[string]any{
+		"id": "survey", "label": "Run survey", "description": "Create the fixed survey task.",
+		"title": "Survey project", "instructions": "Run the canonical survey workflow.",
+		"required_capabilities": []any{"demo_runtime"}, "auto_start": true,
+		"input_schema": map[string]any{
+			"type": "object", "properties": map[string]any{}, "required": []any{}, "additionalProperties": false,
+		},
+	}}
+	data, err := json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	contribution, err := ParseSurfaceContribution(data)
+	if err != nil {
+		t.Fatalf("project entry contribution error = %v", err)
+	}
+	got := contribution.Capabilities[0].Surfaces[0]
+	if got.Placement != "project_entry" || got.DefaultTaskTemplate != "survey" || len(got.TaskTemplates) != 1 || !got.TaskTemplates[0].AutoStart {
+		t.Fatalf("task template = %+v", got)
+	}
+	public, _ := json.Marshal(contribution.Public())
+	for _, secret := range []string{"Run the canonical survey workflow", "required_capabilities", "auto_start", "input_schema"} {
+		if strings.Contains(string(public), secret) {
+			t.Fatalf("public contribution leaked task authority %q: %s", secret, public)
+		}
+	}
+
+	invalidCases := map[string]func(map[string]any){
+		"file fallback":      func(template map[string]any) { template["file_fallback_for"] = []any{"demo_runtime"} },
+		"arbitrary assignee": func(template map[string]any) { template["assignee"] = "plugin-picked" },
+		"foreign capability": func(template map[string]any) { template["required_capabilities"] = []any{"admin_runtime"} },
+		"open variables": func(template map[string]any) {
+			template["input_schema"].(map[string]any)["additionalProperties"] = true
+		},
+	}
+	for name, mutate := range invalidCases {
+		t.Run(name, func(t *testing.T) {
+			var clone map[string]any
+			if err := json.Unmarshal(data, &clone); err != nil {
+				t.Fatal(err)
+			}
+			template := clone["capabilities"].([]any)[0].(map[string]any)["surfaces"].([]any)[0].(map[string]any)["task_templates"].([]any)[0].(map[string]any)
+			mutate(template)
+			encoded, _ := json.Marshal(clone)
+			if _, err := ParseSurfaceContribution(encoded); err == nil {
+				t.Fatalf("invalid task template was accepted")
+			}
+		})
+	}
+}
+
 func TestValidateContributionIdentityRequiresExactPortableIdentity(t *testing.T) {
 	contribution, err := ParseSurfaceContribution(canonicalSurfaceFixture(t))
 	if err != nil {

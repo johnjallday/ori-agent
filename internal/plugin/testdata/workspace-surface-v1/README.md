@@ -6,7 +6,9 @@ bytes or verify a recorded fixture digest; do not rewrite lookalike local
 fixtures with different semantics.
 
 - `valid-identities.json` — matching Claude, Codex, and Ori identity.
-- `valid-contribution.json` — complete non-REAPER contribution descriptor.
+- `valid-contribution.json` — complete non-REAPER map-modal contribution descriptor.
+- `valid-project-entry-contribution.json` — generic project-entry placement with
+  one closed, fixed, auto-start task template and no plugin-selected authority.
 - `valid-workspace-projection.json` — allowed inert persistence only.
 - `valid-catalog.json` — sanitized browser catalog projection.
 - `valid-bridge-transcript.json` — opaque-frame parent bridge flow.

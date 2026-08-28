@@ -110,16 +110,41 @@ export class WorkspaceSurfaceHost {
   }
 
   stations() {
-    return this.surfaces.map(surface => ({
-      key: text(surface.key),
-      label: text(surface.label) || 'Plugin surface',
-      icon: HOST_ICON_CLASSES[surface.icon?.value] || 'bi-puzzle',
-      state: () =>
-        this.stationState(this.surfaces.find(item => item?.key === surface.key) || surface),
-      action: trigger => {
-        void this.open(surface.key, trigger);
-      }
-    }));
+    return this.surfaces
+      .filter(surface => surface?.placement === 'map_modal')
+      .map(surface => ({
+        key: text(surface.key),
+        label: text(surface.label) || 'Plugin surface',
+        icon: HOST_ICON_CLASSES[surface.icon?.value] || 'bi-puzzle',
+        state: () =>
+          this.stationState(this.surfaces.find(item => item?.key === surface.key) || surface),
+        action: trigger => {
+          void this.open(surface.key, trigger);
+        }
+      }));
+  }
+
+  projectEntryActions() {
+    return this.surfaces
+      .filter(surface => surface?.placement === 'project_entry')
+      .map(surface => {
+        const state = text(surface?.status?.state) || 'checking';
+        const enabled = surface?.available !== false && state === 'ready';
+        return {
+          key: text(surface.key),
+          label: text(surface.label) || 'Project action',
+          description: text(surface.description),
+          enabled,
+          disabledReason: enabled
+            ? ''
+            : text(surface?.status?.description) || 'Set up the required workspace runtime first.',
+          setupAvailable: Boolean(surface?.features?.open_setup),
+          badge: state === 'ready' ? text(surface?.status?.value) : '',
+          run: trigger => this.runProjectEntryTask(surface.key, trigger),
+          open: trigger => this.open(surface.key, trigger),
+          setup: () => this.openProjectEntrySetup(surface.key)
+        };
+      });
   }
 
   stationState(surface) {
@@ -131,6 +156,72 @@ export class WorkspaceSurfaceHost {
       description: text(status.description) || 'Plugin surface status',
       tone: STATE_TONES[state] || 'degraded'
     };
+  }
+
+  async _openHeadlessSession(surface) {
+    if (!surface || !this.workspaceId || !this.fetch) return null;
+    return this._request(
+      '/api/workspaces/' +
+        encodeURIComponent(this.workspaceId) +
+        '/surfaces/' +
+        encodeURIComponent(surface.key) +
+        '/sessions',
+      { method: 'POST' }
+    );
+  }
+
+  async _closeHeadlessSession(session) {
+    if (!session || !this.fetch) return;
+    await this.fetch('/api/workspace-surfaces/sessions', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session })
+    }).catch(() => {});
+  }
+
+  async runProjectEntryTask(surfaceKey, _trigger = null) {
+    const surface = this.surfaces.find(item => item?.key === surfaceKey);
+    const action = this.projectEntryActions().find(item => item.key === surfaceKey);
+    if (!surface || !action) return false;
+    if (!action.enabled) {
+      if (action.setupAvailable) await this.openProjectEntrySetup(surfaceKey);
+      return false;
+    }
+    let opened = null;
+    try {
+      opened = await this._openHeadlessSession(surface);
+      if (!opened?.session) return false;
+      const intent = await this._intentForSession(opened.session, 'create_task', '', {
+        variables: {}
+      });
+      const result = await this._applyResolvedTaskIntent(intent);
+      return Boolean(result?.ok);
+    } catch (_error) {
+      return false;
+    } finally {
+      await this._closeHeadlessSession(opened?.session);
+    }
+  }
+
+  async openProjectEntrySetup(surfaceKey) {
+    const surface = this.surfaces.find(item => item?.key === surfaceKey);
+    if (!surface) return false;
+    let opened = null;
+    try {
+      opened = await this._openHeadlessSession(surface);
+      if (!opened?.session) return false;
+      const intent = await this._intentForSession(opened.session, 'open_setup', '');
+      this.window?.SetupWizard?.open?.();
+      this._dispatch('ori:workspace-surface-open-setup', {
+        providerId: intent.provider_id,
+        requirementKey: intent.requirement_key
+      });
+      return true;
+    } catch (_error) {
+      return false;
+    } finally {
+      await this._closeHeadlessSession(opened?.session);
+    }
   }
 
   setMapVisible(visible) {
@@ -220,6 +311,7 @@ export class WorkspaceSurfaceHost {
         confirmation: Boolean(features.confirmation),
         state: Boolean(features.state),
         ask_ori: Boolean(features.ask_ori),
+        create_task: Boolean(features.create_task),
         open_setup: Boolean(features.open_setup),
         close: Boolean(features.close)
       },
@@ -279,6 +371,8 @@ export class WorkspaceSurfaceHost {
         return this._state('delete', payload);
       case 'ori.surface.host.ask_ori':
         return this._askOri(text(payload.context));
+      case 'ori.surface.host.create_task':
+        return this._createTask(text(payload.template_id), payload.variables || {});
       case 'ori.surface.host.open_setup':
         return this._openSetup();
       case 'ori.surface.status_changed':
@@ -396,6 +490,58 @@ export class WorkspaceSurfaceHost {
     }
   }
 
+  async _createTask(templateId, variables) {
+    try {
+      const intent = await this._intent('create_task', '', {
+        ...(templateId ? { template_id: templateId } : {}),
+        variables: variables && typeof variables === 'object' ? variables : {}
+      });
+      return this._applyResolvedTaskIntent(intent);
+    } catch (error) {
+      return this._bridgeError(error.code || 'task_unavailable', error.message);
+    }
+  }
+
+  async _applyResolvedTaskIntent(intent) {
+    const task = intent?.task || {};
+    const page = this.window?.workspaceDetail;
+    if (
+      !page ||
+      typeof page.createTask !== 'function' ||
+      typeof task.title !== 'string' ||
+      !task.title.trim() ||
+      typeof task.details !== 'string' ||
+      !Array.isArray(task.required_capabilities)
+    ) {
+      return this._bridgeError('task_unavailable', 'The workspace task could not be created.');
+    }
+    const workspace = page.workspace || {};
+    const assignee =
+      text(workspace.entry_agent_name) || text(workspace.shared_data?.entry_agent_name);
+    const created = await page.createTask(task.title, task.details, '', {
+      assignee,
+      requiredCapabilities: task.required_capabilities,
+      successToast: false
+    });
+    if (!created?.id) {
+      return this._bridgeError('task_create_failed', 'The workspace task could not be created.');
+    }
+    if (task.auto_start) {
+      if (typeof page.executeTask !== 'function') {
+        return this._bridgeError(
+          'task_start_failed',
+          'The workspace task was created but could not be started.'
+        );
+      }
+      await page.executeTask(created.id, { skipConfirm: true, skipModal: true });
+    }
+    await this.loadCatalog();
+    return {
+      ok: true,
+      result: { task_id: String(created.id), started: Boolean(task.auto_start) }
+    };
+  }
+
   async _openSetup() {
     try {
       const intent = await this._intent('open_setup', '');
@@ -413,11 +559,20 @@ export class WorkspaceSurfaceHost {
     }
   }
 
-  _intent(type, context) {
+  _intent(type, context, extra = {}) {
+    return this._intentForSession(this.active.session, type, context, extra);
+  }
+
+  _intentForSession(session, type, context, extra = {}) {
     return this._request('/api/workspace-surfaces/intents', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session: this.active.session, type, ...(context ? { context } : {}) })
+      body: JSON.stringify({
+        session,
+        type,
+        ...(context ? { context } : {}),
+        ...(extra && typeof extra === 'object' ? extra : {})
+      })
     });
   }
 
