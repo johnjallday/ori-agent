@@ -8,6 +8,7 @@
 #   wt plan --issue <N> [--issue <N> ...] [--kind claude|pi] [--model MODEL] [--thinking LEVEL] [--yes]
 #   wt start [prd] [--kind KIND] [--model MODEL] [--no-herdr] # Create a planned worktree
 #   wt new <name> [--kind KIND] [--model MODEL] # Create a clean worktree (no PRD/tasks)
+#   wt away arm|disarm|status|tick # Control unattended queued dispatches
 #   wt pr [name]            # Push branch and open a PR against dev
 #   wt done [name] [--keep-issue-open] [--herdr-override] # Finish all attached Issues, archive, and clean up
 #   wt rm [name]            # Remove worktree and its branch
@@ -470,7 +471,7 @@ function wt_repl {
   # current shell (wt is sourced), so cd/start still change the shell's dir; the
   # prompt shows the current directory's basename so you can see where you are.
   wt_color_init
-  echo "wt REPL - commands: go, status, plan, start, new, pr, done, cd, ls, rm, demo, herd, help  (q to quit)"
+  echo "wt REPL - commands: go, status, plan, start, new, away, pr, done, cd, ls, rm, demo, herd, help  (q to quit)"
   local line
   local -a words
   while true; do
@@ -1368,6 +1369,20 @@ function wt_done_close_secondary_issues {
   done
 }
 
+function wt_away {
+  local repo_root dispatcher
+  repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" || {
+    echo "wt must run from an Ori Git worktree"
+    return 1
+  }
+  dispatcher="$repo_root/scripts/away-dispatch.sh"
+  if [[ ! -f "$dispatcher" ]]; then
+    echo "Away dispatcher not found: $dispatcher"
+    return 1
+  fi
+  bash "$dispatcher" "$@"
+}
+
 function wt_dispatch {
   case "$1" in
   repl)
@@ -1584,6 +1599,10 @@ function wt_dispatch {
   herd)
     shift
     wt_herd "$@"
+    ;;
+  away)
+    shift
+    wt_away "$@"
     ;;
   plan)
     shift
@@ -2086,6 +2105,7 @@ function wt_dispatch {
     echo "                     --no-herdr on either: bare Git worktree, no Herdr tab or agent."
     echo "                     Herdr is optional throughout; if it is missing or unhealthy the"
     echo "                     worktree is still created and 'wt herd retry' resumes the rest."
+    echo "  wt away arm|disarm|status|tick - Control unattended queued dispatches"
     echo "  wt pr [name]     - Push branch and open a PR against $BASE_BRANCH"
     echo "  wt done [name] [--keep-issue-open] [--herdr-override]"
     echo "                     Close an explicitly attached Issue after merge, archive tasks,"

@@ -31,6 +31,10 @@ if ! repo_root="$(git -C "$script_dir/.." rev-parse --show-toplevel 2>/dev/null)
   printf '%s\n' "devops.sh must live inside a Git checkout" >&2
   exit 2
 fi
+# Filesystem/Git-only plan identity and progress helpers are shared with the
+# away dispatcher. The library is intentionally macOS bash 3.2 compatible.
+source "$script_dir/lib/devflow-common.sh"
+
 require_gh() {
   if command -v gh >/dev/null 2>&1; then
     return 0
@@ -219,197 +223,6 @@ other_labels_of() {
 # pushed: checkboxes get ticked while you work, a pushed copy only at commit.
 # ---------------------------------------------------------------------------
 
-tasks_dir=""
-
-# Trusted attachment identity lives only in the generated snapshot header on
-# line 3. Issue-authored bodies and comments may contain marker-looking text;
-# these readers never scan beyond the header.
-snapshot_members=()
-read_snapshot_members() {
-  local path="$1" heading blank marker match csv member previous=0 old_ifs
-  local single_re='^<!-- ori-devflow: issue-snapshot; issue=([1-9][0-9]*) -->$'
-  local bundle_re='^<!-- ori-devflow: issue-bundle-snapshot; issues=([1-9][0-9]*(,[1-9][0-9]*)+) -->$'
-
-  snapshot_members=()
-  {
-    IFS= read -r heading || return 1
-    IFS= read -r blank || return 1
-    IFS= read -r marker || return 1
-  } < "$path"
-  heading="${heading%$'\r'}"
-  blank="${blank%$'\r'}"
-  marker="${marker%$'\r'}"
-  [[ "$heading" == '# '* && -z "$blank" ]] || return 1
-
-  if [[ "$marker" =~ $single_re ]]; then
-    snapshot_members=("${BASH_REMATCH[1]}")
-    return 0
-  fi
-  if [[ ! "$marker" =~ $bundle_re ]]; then
-    return 1
-  fi
-  csv="${BASH_REMATCH[1]}"
-  old_ifs="$IFS"
-  IFS=','
-  # Intentional splitting of the generated numeric CSV marker.
-  # shellcheck disable=SC2086
-  set -- $csv
-  IFS="$old_ifs"
-  [[ "$#" -ge 2 ]] || return 1
-  for member in "$@"; do
-    [[ "$member" =~ ^[1-9][0-9]*$ ]] || return 1
-    if [[ "$previous" -gt 0 && "$member" -le "$previous" ]]; then
-      snapshot_members=()
-      return 1
-    fi
-    snapshot_members+=("$member")
-    previous="$member"
-  done
-}
-
-feature_members=()
-load_feature_members() {
-  local slug="$1" snapshot="$tasks_dir/issue-$slug.md"
-  feature_members=()
-  if [[ -f "$snapshot" ]]; then
-    if ! read_snapshot_members "$snapshot"; then
-      return 2
-    fi
-    feature_members=("${snapshot_members[@]}")
-    return 0
-  fi
-  # Preserve number-first plans created before trusted snapshots existed.
-  if [[ "$slug" =~ ^([1-9][0-9]*)- ]]; then
-    feature_members=("${BASH_REMATCH[1]}")
-    return 0
-  fi
-  return 1
-}
-
-feature_members_include() {
-  local wanted="$1" member
-  for member in ${feature_members[@]+"${feature_members[@]}"}; do
-    [[ "$member" == "$wanted" ]] && return 0
-  done
-  return 1
-}
-
-resolve_tasks_dir() {
-  local line path
-
-  tasks_dir=""
-  # The dev worktree owns tasks/. Find it rather than assuming a path, so this
-  # works from any worktree and from a plain clone.
-  path=""
-  while IFS= read -r line; do
-    case "$line" in
-      "worktree "*) path="${line#worktree }" ;;
-      "branch refs/heads/dev")
-        if [[ -d "$path/tasks" ]]; then
-          tasks_dir="$path/tasks"
-          return 0
-        fi
-        ;;
-    esac
-  done < <(git worktree list --porcelain 2>/dev/null)
-
-  if [[ -d "$repo_root/tasks" ]]; then
-    tasks_dir="$repo_root/tasks"
-  fi
-}
-
-# Parallel arrays rather than an associative array: this has to run under the
-# bash 3.2 that ships with macOS, which has no `declare -A`.
-flight_numbers=()
-flight_states=()
-
-remember_flight() {
-  local number="$1" state="$2" index
-  for index in ${flight_numbers[@]+"${!flight_numbers[@]}"}; do
-    if [[ "${flight_numbers[$index]}" == "$number" ]]; then
-      # worktree beats branch; never downgrade a stronger signal.
-      if [[ "${flight_states[$index]}" != "worktree" ]]; then
-        flight_states[$index]="$state"
-      fi
-      return 0
-    fi
-  done
-  flight_numbers+=("$number")
-  flight_states+=("$state")
-}
-
-# Register a branch under BOTH keys it can be looked up by: its Issue number
-# (`fix/339-slug` -> `339`) and its full slug (`339-slug`, or plain
-# `workspace-ticket-management` for branches that predate the number-first
-# convention). The picker looks up by number; `status` looks up by task-file
-# slug, and those older features have no number to match on.
-remember_branch_flight() {
-  local branch="$1" state="$2" slug
-
-  case "$branch" in
-    */*) slug="${branch#*/}" ;;
-    *) return 0 ;;
-  esac
-  [[ -n "$slug" ]] || return 0
-
-  remember_flight "$slug" "$state"
-  if [[ "$slug" =~ ^([0-9]+)- ]]; then
-    remember_flight "${BASH_REMATCH[1]}" "$state"
-  fi
-}
-
-index_attached_plan_flights() {
-  local file slug state member
-  [[ -n "$tasks_dir" ]] || return 0
-  for file in "$tasks_dir"/tasks-*.md; do
-    [[ -f "$file" ]] || continue
-    slug="${file##*/}"
-    slug="${slug#tasks-}"
-    slug="${slug%.md}"
-    load_feature_members "$slug" || continue
-    state="$(flight_state_of "$slug")"
-    [[ -n "$state" ]] || continue
-    for member in "${feature_members[@]}"; do
-      remember_flight "$member" "$state"
-    done
-  done
-}
-
-load_flight_index() {
-  local line branch
-
-  flight_numbers=()
-  flight_states=()
-
-  while IFS= read -r line; do
-    case "$line" in
-      "branch refs/heads/"*)
-        remember_branch_flight "${line#branch refs/heads/}" worktree
-        ;;
-    esac
-  done < <(git worktree list --porcelain 2>/dev/null)
-
-  while IFS= read -r branch; do
-    remember_branch_flight "${branch#origin/}" branch
-  done < <(git branch --all --format='%(refname:short)' 2>/dev/null)
-
-  # A bundle branch's numeric slug prefix identifies only its first member by
-  # itself. The trusted local snapshot attaches the same branch/worktree state
-  # to every remaining member without consulting GitHub or Herdr.
-  index_attached_plan_flights
-}
-
-flight_state_of() {
-  local number="$1" index
-  for index in ${flight_numbers[@]+"${!flight_numbers[@]}"}; do
-    if [[ "${flight_numbers[$index]}" == "$number" ]]; then
-      printf '%s' "${flight_states[$index]}"
-      return 0
-    fi
-  done
-  printf '%s' ""
-}
-
 # Resolve an Issue to the one exact local task list attached to it. This stays
 # offline: the later `i` action reads only generated snapshot headers, tasks/,
 # and Git, never GitHub or Herdr.
@@ -463,7 +276,7 @@ resolve_implementation_feature() {
   fi
 
   file="${matches[0]}"
-  if grep -Fq '<!-- ori-devflow: planning-starter;' "$file"; then
+  if task_is_planning_starter "$file"; then
     printf 'Planning for #%s is not complete: %s is still a planning starter. Return after the planner replaces it with the real task list.\n' "$issue_number" "$file" >&2
     return 1
   fi
@@ -488,20 +301,6 @@ resolve_implementation_feature() {
   esac
 
   implementation_feature="$slug"
-}
-
-# "<done>/<total>" over the task list's PARENT groups - the top-level `- [ ]`
-# lines. Sub-tasks are indented, so an anchored match counts groups only.
-task_groups_of_file() {
-  local file="$1" done total
-
-  done="$(grep -c '^- \[[xX]\]' "$file" 2>/dev/null)" || done=0
-  total="$(grep -c '^- \[[ xX]\]' "$file" 2>/dev/null)" || total=0
-  if [[ "${total:-0}" -le 0 ]]; then
-    printf '%s' ""
-    return 0
-  fi
-  printf '%s/%s' "${done:-0}" "$total"
 }
 
 task_progress_of_issue() {
