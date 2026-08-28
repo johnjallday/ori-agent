@@ -23,8 +23,11 @@ away_herdr_source_dir="$HOME/.local/share/herdr-remote/v0.7.5"
 away_herdr_expected_commit="ea5a8e2a9820e84d0ca27278b46cbb6e33045916"
 away_launch_agents_dir="$HOME/Library/LaunchAgents"
 away_launch_plist="$away_launch_agents_dir/com.ori.wt-away-tick.plist"
+away_caffeinate_plist="$away_launch_agents_dir/com.ori.wt-away-caffeinate.plist"
+away_caffeinate_template="$away_script_dir/away/com.ori.wt-away-caffeinate.plist"
 
 away_launch_label="com.ori.wt-away-tick"
+away_caffeinate_label="com.ori.wt-away-caffeinate"
 away_pmset_owner="com.ori.wt-away-tick"
 away_pmset_type="wakeorpoweron"
 away_pmset_helper_label="com.ori.wt-away-pmset"
@@ -430,6 +433,70 @@ away_active_dispatch_count() {
       away_active_count=$((away_active_count + 1))
     fi
   done <<< "$rows"
+}
+
+away_has_working_dispatched_agent() {
+  local slug branch worktree merged_status=0 rows snapshot paths='[]'
+  [[ "$away_active_count" -gt 0 ]] || return 1
+  [[ -s "$away_ledger_file" ]] || return 1
+  command -v jq >/dev/null 2>&1 || return 2
+  if ! rows="$(jq -r 'select(.action == "dispatched" and .dispatched != null) |
+      [.dispatched.slug, .dispatched.branch, .dispatched.worktree] | @tsv' \
+      "$away_ledger_file" 2>/dev/null)"; then
+    return 2
+  fi
+
+  while IFS=$'\t' read -r slug branch worktree; do
+    [[ -n "$slug" && -n "$branch" && -n "$worktree" ]] || continue
+    away_branch_exists "$branch" || continue
+    merged_status=0
+    away_pr_merged "$branch" || merged_status=$?
+    [[ "$merged_status" -ne 0 ]] || continue
+    paths="$(jq -cn --argjson current "$paths" --arg path "$worktree" \
+      '$current + [$path] | unique')" || return 2
+  done <<< "$rows"
+  [[ "$(printf '%s\n' "$paths" | jq -r 'length' 2>/dev/null)" -gt 0 ]] || return 1
+
+  if ! snapshot="$(herdr api snapshot 2>/dev/null)"; then
+    return 2
+  fi
+  if printf '%s\n' "$snapshot" | jq -e --argjson paths "$paths" '
+      [.result.snapshot.agents[]? |
+       select((.agent_status // "" | ascii_downcase) == "working") |
+       .cwd, .foreground_cwd] |
+      map(select(type == "string")) |
+      any(. as $path | $paths | index($path))
+    ' >/dev/null 2>&1; then
+    return 0
+  fi
+  if ! printf '%s\n' "$snapshot" | jq -e '.result.snapshot.agents | type == "array"' \
+      >/dev/null 2>&1; then
+    return 2
+  fi
+  return 1
+}
+
+away_reconcile_caffeinate() {
+  local working_status=0
+  if [[ -n "$away_dispatched_slug" ]]; then
+    away_install_caffeinate_assertion
+    return $?
+  fi
+
+  away_has_working_dispatched_agent || working_status=$?
+  case "$working_status" in
+    0) away_install_caffeinate_assertion ;;
+    1) away_uninstall_caffeinate_assertion ;;
+    2)
+      # Unknown Herdr state must not let a known active dispatch fall asleep.
+      # If nothing is active, cleanup remains the conservative result.
+      if [[ "$away_active_count" -gt 0 ]]; then
+        away_install_caffeinate_assertion
+      else
+        away_uninstall_caffeinate_assertion
+      fi
+      ;;
+  esac
 }
 
 away_set_verdict() {
@@ -1078,6 +1145,64 @@ away_uninstall_launch_agent() {
   return "$result"
 }
 
+away_caffeinate_loaded() {
+  away_launchctl print "gui/$(id -u)/$away_caffeinate_label" >/dev/null 2>&1
+}
+
+away_caffeinate_resource_safe() {
+  local loaded=0
+  [[ -f "$away_caffeinate_template" ]] || return 1
+  /usr/bin/plutil -lint "$away_caffeinate_template" >/dev/null 2>&1 || return 1
+  away_caffeinate_loaded && loaded=1
+  if [[ -e "$away_caffeinate_plist" ]]; then
+    [[ -f "$away_caffeinate_plist" && ! -L "$away_caffeinate_plist" ]] || return 1
+    cmp -s "$away_caffeinate_template" "$away_caffeinate_plist" || return 1
+  elif [[ "$loaded" -eq 1 ]]; then
+    return 1
+  fi
+}
+
+away_install_caffeinate_assertion() {
+  local temporary_plist
+  away_caffeinate_resource_safe || {
+    printf '%s\n' "Refusing an unrecognized Away Dispatcher caffeinate resource." >&2
+    return 1
+  }
+  if away_caffeinate_loaded; then
+    return 0
+  fi
+  (umask 027; mkdir -p "$away_launch_agents_dir") || return 1
+  if [[ ! -f "$away_caffeinate_plist" ]]; then
+    temporary_plist="$(mktemp "$away_launch_agents_dir/.com.ori.wt-away-caffeinate.XXXXXX")" || return 1
+    if ! cp "$away_caffeinate_template" "$temporary_plist"; then
+      rm -f -- "$temporary_plist"
+      return 1
+    fi
+    chmod 600 "$temporary_plist"
+    mv -f -- "$temporary_plist" "$away_caffeinate_plist"
+  fi
+  away_launchctl bootstrap "gui/$(id -u)" "$away_caffeinate_plist" || return 1
+  away_caffeinate_loaded
+}
+
+away_uninstall_caffeinate_assertion() {
+  local result=0
+  if [[ ! -e "$away_caffeinate_plist" ]] && ! away_caffeinate_loaded; then
+    return 0
+  fi
+  away_caffeinate_resource_safe || {
+    printf '%s\n' "Refusing to remove an unrecognized caffeinate resource." >&2
+    return 1
+  }
+  if away_caffeinate_loaded; then
+    away_launchctl bootout "gui/$(id -u)/$away_caffeinate_label" || result=1
+  fi
+  if [[ "$result" -eq 0 ]]; then
+    rm -f -- "$away_caffeinate_plist"
+  fi
+  return "$result"
+}
+
 away_pmset_read() {
   /usr/bin/pmset -g sched
 }
@@ -1373,6 +1498,10 @@ away_arm() {
   away_require_macos || return 1
   away_resolve_dev || return 1
   away_verify_herdr_remote || return 1
+  away_caffeinate_resource_safe || {
+    printf '%s\n' "Away Dispatcher caffeinate resource is unsafe or invalid." >&2
+    return 1
+  }
   [[ -f "$away_tasks_dir/.away-armed" ]] && was_armed=1
   (umask 027; mkdir -p "$away_tasks_dir") || return 1
 
@@ -1403,6 +1532,7 @@ away_disarm() {
   # no subsequent tick may start new work.
   rm -f -- "$away_tasks_dir/.away-armed"
   away_uninstall_launch_agent || result=1
+  away_uninstall_caffeinate_assertion || result=1
   away_cancel_pending_wake || result=1
   if [[ "$result" -ne 0 ]]; then
     printf 'Away dispatcher is disarmed, but scheduled-resource cleanup needs attention.\n' >&2
@@ -1535,6 +1665,11 @@ away_status() {
     printf 'Away dispatcher: disarmed\n'
   fi
   away_render_schedule_status
+  if away_caffeinate_loaded; then
+    printf 'Active-work assertion: caffeinate -i loaded\n'
+  else
+    printf 'Active-work assertion: not loaded\n'
+  fi
   if away_verify_herdr_remote >/dev/null 2>&1; then
     printf 'herdr-remote: ready (token-protected loopback + private Telegram)\n'
   else
@@ -1558,7 +1693,11 @@ away_tick() {
   # reading away-queue.md or fetching remote state.
   if [[ ! -f "$away_tasks_dir/.away-armed" ]]; then
     away_add_skip "" "disarmed" "new dispatches are disabled"
-    away_append_ledger false
+    if ! away_uninstall_caffeinate_assertion; then
+      away_tick_error="caffeinate-release-failed"
+    fi
+    away_append_ledger false || return 1
+    [[ -z "$away_tick_error" ]]
     return $?
   fi
   if ! away_schedule_next_wake; then
@@ -1573,6 +1712,14 @@ away_tick() {
     return 1
   fi
   away_run_armed_tick || tick_status=$?
+  if ! away_reconcile_caffeinate; then
+    if [[ -z "$away_tick_error" ]]; then
+      away_tick_error="caffeinate-reconcile-failed"
+    else
+      away_tick_error="$away_tick_error; caffeinate-reconcile-failed"
+    fi
+    tick_status=1
+  fi
   # Notification delivery is observability, never an authorization or liveness
   # dependency. Failures are recorded on this tick and retried from state.
   away_process_notifications || true

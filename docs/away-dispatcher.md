@@ -119,8 +119,32 @@ disagree, cleanup fails closed; it never uses an owner-wide cancellation and
 never touches Apple or third-party wake events.
 
 `wt away disarm` removes the authorization flag first, unloads/removes only the
-Away LaunchAgent, and exactly cancels its tracked wake. Already-running agents
-continue.
+Away LaunchAgent, releases the scoped idle-sleep assertion, and exactly cancels
+its tracked wake. Already-running agents continue.
+
+## Scoped active-work caffeinate assertion
+
+Scheduled wakes make a tick run, but do not keep the Mac awake while a newly
+dispatched agent works. The dispatcher therefore manages a separate
+`com.ori.wt-away-caffeinate` user LaunchAgent whose only command is:
+
+```text
+/usr/bin/caffeinate -i
+```
+
+The `-i` flag prevents idle **system** sleep without forcing the display or disk
+to remain awake. A successful dispatch acquires it immediately. Later ticks
+retain it only while Herdr reports a dispatcher-started worktree as `working`;
+if Herdr is temporarily unreadable, a known active dispatch conservatively
+retains the assertion. It is unloaded and its plist removed when no dispatched
+agent is working, on `wt away disarm`, or whenever a disarmed tick reconciles
+stale state. `wt away status` reports whether the assertion is loaded.
+
+The assertion is intentionally not held for the entire armed period: an idle
+queue may sleep and rely on the exact chained wake. Keep the Mac connected to
+AC power while away. A closed laptop lid may still force sleep depending on the
+Mac's clamshell/power configuration; caffeinate does not override hardware lid
+sleep policy.
 
 ## Operate and inspect
 
@@ -132,9 +156,9 @@ wt away tick       # safe manual cycle
 wt away disarm
 ```
 
-`status` shows armed state, LaunchAgent/wake state, active dispatcher-started
-branches with parent-group progress, every queue verdict, and the last ledger
-entry. Every tick appends one compact JSON object to
+`status` shows armed state, LaunchAgent/wake state, scoped caffeinate assertion,
+active dispatcher-started branches with parent-group progress, every queue
+verdict, and the last ledger entry. Every tick appends one compact JSON object to
 `tasks/away-ledger.jsonl`, including disarmed no-ops. A slug that has ever been
 recorded as dispatched is never dispatched again, even if its branch later
 disappears.

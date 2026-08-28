@@ -34,7 +34,8 @@ original_path="$PATH"
 export PATH="$fake_bin:$PATH"
 
 run_wt() {
-  zsh -c 'source "$1"; shift; wt away "$@"' _ "$repo_root/scripts/wt.sh" "$@"
+  mkdir -p "$fixture_root/home"
+  HOME="$fixture_root/home" zsh -c 'source "$1"; shift; wt away "$@"' _ "$repo_root/scripts/wt.sh" "$@"
 }
 
 output="$(run_wt --help)"
@@ -81,8 +82,10 @@ launch_install_calls=0
 launch_uninstall_calls=0
 wake_schedule_calls=0
 wake_cancel_calls=0
+caffeinate_uninstall_calls=0
 away_require_macos() { return 0; }
 away_verify_herdr_remote() { return 0; }
+away_caffeinate_resource_safe() { return 0; }
 away_resolve_dev() {
   away_dev_root="$dev_root"
   away_tasks_dir="$dev_root/tasks"
@@ -95,6 +98,7 @@ away_install_launch_agent() { launch_install_calls=$((launch_install_calls + 1))
 away_uninstall_launch_agent() { launch_uninstall_calls=$((launch_uninstall_calls + 1)); }
 away_schedule_next_wake() { wake_schedule_calls=$((wake_schedule_calls + 1)); }
 away_cancel_pending_wake() { wake_cancel_calls=$((wake_cancel_calls + 1)); }
+away_uninstall_caffeinate_assertion() { caffeinate_uninstall_calls=$((caffeinate_uninstall_calls + 1)); }
 away_arm > "$fixture_root/arm.out"
 output="$(<"$fixture_root/arm.out")"
 [[ "$output" == "Away dispatcher armed." ]]
@@ -111,7 +115,7 @@ output="$(<"$fixture_root/disarm.out")"
 away_disarm > "$fixture_root/disarm.out"
 output="$(<"$fixture_root/disarm.out")"
 [[ "$output" == "Away dispatcher is already disarmed; schedule is clear." ]]
-[[ "$launch_uninstall_calls" -eq 2 && "$wake_cancel_calls" -eq 2 ]]
+[[ "$launch_uninstall_calls" -eq 2 && "$wake_cancel_calls" -eq 2 && "$caffeinate_uninstall_calls" -eq 2 ]]
 
 # Restore the real resource functions for the isolated launchd/pmset fixtures.
 AWAY_DISPATCH_SOURCE_ONLY=1 source "$repo_root/scripts/away-dispatch.sh"
@@ -144,6 +148,17 @@ away_install_launch_agent
 grep -Fq "${TMPDIR:-/tmp}/ori-wt-away-tick.out.log" "$away_launch_plist"
 away_uninstall_launch_agent
 [[ "$launch_loaded" -eq 0 && ! -e "$away_launch_plist" ]]
+
+# Active work uses its own narrowly scoped idle-sleep assertion LaunchAgent.
+away_caffeinate_plist="$away_launch_agents_dir/com.ori.wt-away-caffeinate.plist"
+away_caffeinate_template="$repo_root/scripts/away/com.ori.wt-away-caffeinate.plist"
+away_install_caffeinate_assertion
+[[ "$launch_loaded" -eq 1 ]]
+/usr/bin/plutil -lint "$away_caffeinate_plist" >/dev/null
+[[ "$(/usr/libexec/PlistBuddy -c 'Print :ProgramArguments:0' "$away_caffeinate_plist")" == "/usr/bin/caffeinate" ]]
+[[ "$(/usr/libexec/PlistBuddy -c 'Print :ProgramArguments:1' "$away_caffeinate_plist")" == "-i" ]]
+away_uninstall_caffeinate_assertion
+[[ "$launch_loaded" -eq 0 && ! -e "$away_caffeinate_plist" ]]
 
 # The pmset chain tracks one exact fixed-owner wake, cancels only that event,
 # and leaves a foreign scheduled event untouched.
@@ -473,6 +488,7 @@ away_resolve_dev() {
 away_fetch_dev() { return 0; }
 away_schedule_next_wake() { return 0; }
 away_process_notifications() { return 0; }
+away_reconcile_caffeinate() { return 0; }
 away_render_schedule_status() {
   printf 'LaunchAgent: loaded (fixture)\nScheduled wake: fixture\n'
 }
@@ -545,6 +561,57 @@ away_ledger_file="$away_tasks_dir/away-ledger.jsonl"
 away_wake_state_file="$away_tasks_dir/.away-wake.json"
 away_notify_state_file="$away_tasks_dir/.away-notify-state.json"
 tasks_dir="$away_tasks_dir"
+
+# Caffeinate is acquired immediately for a new dispatch, released when known
+# active work is no longer working, and conservatively retained when Herdr is
+# temporarily unavailable but an active dispatch remains.
+caffeinate_install_calls=0
+caffeinate_uninstall_calls=0
+away_install_caffeinate_assertion() { caffeinate_install_calls=$((caffeinate_install_calls + 1)); }
+away_uninstall_caffeinate_assertion() { caffeinate_uninstall_calls=$((caffeinate_uninstall_calls + 1)); }
+away_has_working_dispatched_agent() { return 1; }
+away_dispatched_slug="new-dispatch"
+away_active_count=1
+away_reconcile_caffeinate
+[[ "$caffeinate_install_calls" -eq 1 && "$caffeinate_uninstall_calls" -eq 0 ]]
+away_dispatched_slug=""
+away_reconcile_caffeinate
+[[ "$caffeinate_uninstall_calls" -eq 1 ]]
+away_has_working_dispatched_agent() { return 2; }
+away_active_count=1
+away_reconcile_caffeinate
+[[ "$caffeinate_install_calls" -eq 2 ]]
+away_active_count=0
+away_reconcile_caffeinate
+[[ "$caffeinate_uninstall_calls" -eq 2 ]]
+
+# Restore the real detection/reconciliation functions and prove worktree-scoped
+# Herdr status matching.
+AWAY_DISPATCH_SOURCE_ONLY=1 source "$REAL_REPO_ROOT/scripts/away-dispatch.sh"
+away_dev_root="$dev_root"
+away_tasks_dir="$dev_root/tasks"
+away_queue_file="$away_tasks_dir/away-queue.md"
+away_ledger_file="$away_tasks_dir/away-ledger.jsonl"
+away_notify_state_file="$away_tasks_dir/.away-notify-state.json"
+tasks_dir="$away_tasks_dir"
+cat > "$away_ledger_file" <<LEDGER
+{"action":"dispatched","dispatched":{"slug":"working-plan","branch":"feature/working-plan","worktree":"$fixture_root/working-plan"}}
+LEDGER
+away_active_count=1
+away_branch_exists() { return 0; }
+away_pr_merged() { return 1; }
+herdr() {
+  printf '%s\n' "{\"result\":{\"snapshot\":{\"agents\":[{\"agent_status\":\"working\",\"cwd\":\"$fixture_root/working-plan\"}]}}}"
+}
+away_has_working_dispatched_agent
+herdr() {
+  printf '%s\n' "{\"result\":{\"snapshot\":{\"agents\":[{\"agent_status\":\"idle\",\"cwd\":\"$fixture_root/working-plan\"}]}}}"
+}
+if away_has_working_dispatched_agent; then
+  printf '%s\n' "idle dispatched agent requested caffeinate" >&2
+  exit 1
+fi
+
 AWAY_TODAY="2030-01-02"
 cat > "$away_ledger_file" <<'LEDGER'
 {"ts":"2030-01-02T08:00:00Z","action":"dispatched","dispatched":{"slug":"digest-plan","branch":"feature/digest-plan"},"skips":[],"armed":true}
