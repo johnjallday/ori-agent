@@ -585,6 +585,18 @@
   font-size: 12px;
   line-height: 1.45;
 }
+/* States a prerequisite this wizard session completed just now (e.g. a plugin
+   install/enable), as distinct from the ordinary metadata above it — a ready
+   blueprint looks identical either way, and this is the one place that says
+   which. */
+.workspace-create-modal .workspace-review-card-note {
+  display: block;
+  margin-top: 6px;
+  overflow-wrap: anywhere;
+  color: var(--wc-faction);
+  font-size: 12px;
+  line-height: 1.45;
+}
 .workspace-create-modal .workspace-review-card-actions {
   display: flex;
   flex: 0 0 auto;
@@ -1072,6 +1084,265 @@
   background: var(--wc-bg-2) !important;
   border-color: var(--wc-line-bright) !important;
   color: var(--wc-ink) !important;
+}
+
+/* ---------- blueprint readiness ----------
+   State is carried by a text label first, a glyph second, and color last, so
+   it survives a monochrome display, a color-vision difference, and a
+   forced-colors theme. A ready blueprint gets no badge at all: badging every
+   card would make the two that need attention harder to find. */
+
+.workspace-create-modal .workspace-template-readiness-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  border: 1px solid currentcolor;
+  border-radius: 2px;
+  font-family: var(--wc-font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  line-height: 1.5;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.workspace-create-modal .workspace-template-readiness-badge[data-state="action_required"] {
+  color: var(--wc-keeper);
+}
+.workspace-create-modal .workspace-template-readiness-badge[data-state="unavailable"] {
+  color: var(--wc-alert);
+}
+.workspace-create-modal .workspace-template-readiness-glyph {
+  font-weight: 700;
+}
+
+/* On a card the badge sits under the tagline; on a list row it trails the
+   label. Both keep the badge inside the option's own button, so it never
+   becomes a second tab stop the user has to pass through. */
+.workspace-create-modal .workspace-template-card-readiness {
+  margin-top: 4px;
+  align-self: flex-start;
+}
+.workspace-create-modal .workspace-template-row-readiness {
+  margin-left: auto;
+}
+
+/* A blueprint that cannot be used stays selectable — the user has to be able
+   to read why — but reads as recessed rather than inviting. */
+.workspace-create-modal .workspace-template-card[data-readiness-state="unavailable"],
+.workspace-create-modal .workspace-template-row[data-readiness-state="unavailable"] {
+  border-style: dashed;
+}
+.workspace-create-modal
+  .workspace-template-card[data-readiness-state="unavailable"]
+  .workspace-template-card-label,
+.workspace-create-modal
+  .workspace-template-row[data-readiness-state="unavailable"]
+  .workspace-template-row-label {
+  color: var(--wc-ink-dim);
+}
+
+/* ---------- readiness panel (Step 1 briefing + Review) ---------- */
+
+.workspace-create-modal .workspace-blueprint-readiness {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--wc-line-bright);
+  border-left-width: 3px;
+  background: var(--wc-panel-2);
+  color: var(--wc-ink);
+}
+.workspace-create-modal .workspace-blueprint-readiness[data-state="action_required"] {
+  border-left-color: var(--wc-keeper);
+}
+.workspace-create-modal .workspace-blueprint-readiness[data-state="unavailable"] {
+  border-left-color: var(--wc-alert);
+}
+.workspace-create-modal .workspace-blueprint-readiness:focus-visible {
+  outline: 2px solid var(--wc-faction);
+  outline-offset: 2px;
+}
+.workspace-create-modal .workspace-blueprint-readiness-heading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--wc-ink-heading);
+}
+.workspace-create-modal .workspace-blueprint-readiness-detail,
+.workspace-create-modal .workspace-blueprint-readiness-dependency {
+  margin: 0 0 4px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--wc-ink-dim);
+}
+.workspace-create-modal .workspace-blueprint-readiness-dependency {
+  font-family: var(--wc-font-mono);
+  font-size: 11px;
+}
+.workspace-create-modal .workspace-blueprint-readiness-diagnostic {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: var(--wc-ink-faint);
+}
+.workspace-create-modal .workspace-blueprint-readiness-diagnostic > summary {
+  cursor: pointer;
+  color: var(--wc-ink-dim);
+}
+.workspace-create-modal .workspace-blueprint-readiness-diagnostic-text {
+  margin: 4px 0 0;
+  font-family: var(--wc-font-mono);
+  /* A parser message can be one long unbroken token; it must wrap rather than
+     push the modal into a horizontal scroll. */
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.workspace-create-modal .workspace-blueprint-readiness-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+.workspace-create-modal .workspace-blueprint-readiness-action {
+  font-size: 12px;
+}
+
+/* ---------- in-wizard plugin recovery ----------
+   The trust disclosure and its confirm/cancel controls. Visually separated
+   from the readiness panel above it: this is the surface where a plugin gains
+   the ability to run commands, and it should not read as more of the same
+   explanatory text. */
+
+.workspace-create-modal .workspace-blueprint-recovery:empty {
+  display: none;
+}
+.workspace-create-modal .workspace-blueprint-recovery-body {
+  margin-top: 8px;
+  padding: 12px;
+  border: 1px solid var(--wc-faction-deep);
+  background: var(--wc-bg-2);
+  color: var(--wc-ink);
+}
+.workspace-create-modal .workspace-blueprint-recovery:focus-visible {
+  outline: 2px solid var(--wc-faction);
+  outline-offset: 2px;
+}
+.workspace-create-modal .workspace-blueprint-recovery-heading {
+  margin: 0 0 6px;
+  font-family: var(--wc-font-mono);
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--wc-faction);
+}
+.workspace-create-modal .workspace-blueprint-recovery-intro,
+.workspace-create-modal .workspace-blueprint-recovery-status,
+.workspace-create-modal .workspace-blueprint-recovery-detail {
+  margin: 0 0 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--wc-ink-dim);
+}
+.workspace-create-modal .workspace-blueprint-recovery-source {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--wc-ink-dim);
+}
+.workspace-create-modal .workspace-blueprint-recovery-source code {
+  /* A source is often a long URL; it must wrap, because a source the user
+     cannot read in full is a source they cannot consent to. */
+  overflow-wrap: anywhere;
+  color: var(--wc-ink);
+}
+.workspace-create-modal .workspace-blueprint-recovery-error {
+  margin: 0 0 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--wc-alert);
+}
+.workspace-create-modal .workspace-blueprint-recovery-success {
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--wc-faction);
+}
+/* A partial result is not a success and must not be coloured like one:
+   "Installed, still disabled" means there is something left to do. */
+.workspace-create-modal .workspace-blueprint-recovery-partial {
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--wc-keeper);
+}
+.workspace-create-modal .workspace-blueprint-recovery-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+.workspace-create-modal .workspace-blueprint-recovery-action {
+  font-size: 12px;
+}
+
+/* ---------- shared trust disclosure ----------
+   Rendered by plugin-lifecycle.js on both the Plugins page and here, so the
+   rules stay unscoped and the Plugins page inherits its own theme. */
+
+.plugin-trust-report {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.plugin-trust-section-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  opacity: 0.85;
+}
+.plugin-trust-list {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+/* A command line is often long and unbroken. It must wrap: a command the user
+   cannot read in full is a command they cannot meaningfully consent to. */
+.plugin-trust-list code {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.plugin-trust-value,
+.plugin-trust-empty {
+  margin: 4px 0 0;
+  font-size: 12px;
+}
+.plugin-trust-section.is-warning .plugin-trust-section-title,
+.plugin-trust-warning {
+  color: #e8b54b;
+}
+
+.workspace-create-modal .workspace-review-readiness:empty,
+.workspace-create-modal .workspace-template-briefing-readiness:empty {
+  display: none;
+}
+
+[data-bs-theme="light"] .workspace-create-modal .workspace-blueprint-readiness {
+  background: var(--wc-card-bg);
+}
+[data-bs-theme="light"]
+  .workspace-create-modal
+  .workspace-template-card[data-readiness-state="unavailable"]
+  .workspace-template-card-label,
+[data-bs-theme="light"]
+  .workspace-create-modal
+  .workspace-template-row[data-readiness-state="unavailable"]
+  .workspace-template-row-label {
+  color: var(--wc-ink-dim);
 }
 
 /* honor the OS reduce-motion preference (drop the hover lift/transition) */

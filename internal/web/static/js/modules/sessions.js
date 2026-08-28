@@ -4784,11 +4784,16 @@ const sessionManager = {
       .filter(Boolean)
       .join(' · ');
 
+    const owner = this.workspaceReceiptOwnerLine(selectedTemplate);
+    const sessionRecovery = this.workspaceReceiptSessionRecoveryLine();
+
     const identity = `
       <div class="workspace-review-card">
         <div class="workspace-review-card-main">
           <strong class="workspace-review-identity-name">${this.escapeHtml(name || 'Untitled workspace')}</strong>
           <span class="workspace-review-card-meta">${provenance}</span>
+          ${owner ? `<span class="workspace-review-card-meta">${this.escapeHtml(owner)}</span>` : ''}
+          ${sessionRecovery ? `<span class="workspace-review-card-note">${this.escapeHtml(sessionRecovery)}</span>` : ''}
         </div>
         <div class="workspace-review-card-actions">
           <button type="button" class="workspace-wizard-inline-action" data-wizard-edit-step="2">Edit</button>
@@ -4811,6 +4816,41 @@ const sessionManager = {
       : '';
 
     return identity + details + this.renderWorkspaceReceiptTeam(view);
+  },
+
+  // Names who owns the selected blueprint and, where one is tracked, its
+  // version — so Review states provenance precisely rather than leaving
+  // "Based on X" to imply the workspace's own template is doing the work.
+  // '' for Blank and for an ad-hoc folder path, which own nothing to name.
+  workspaceReceiptOwnerLine(template) {
+    if (!template || template.blank) return '';
+    const owner = template.plugin_owner;
+    if (owner && owner.plugin_id) {
+      const version = String(owner.plugin_version || '').trim();
+      return version
+        ? `Owner: ${owner.plugin_id} plugin (v${version})`
+        : `Owner: ${owner.plugin_id} plugin`;
+    }
+    if (template.builtin) {
+      const version = Number(template.builtin_version) || 0;
+      return version > 0 ? `Owner: Built-in blueprint (v${version})` : 'Owner: Built-in blueprint';
+    }
+    return 'Owner: Your template';
+  },
+
+  // States which plugin dependency this wizard session explicitly installed
+  // or enabled, when the selected blueprint has one. Read from the picker's
+  // own session log rather than re-derived from current readiness: a plugin
+  // that is now ready looks identical whether it was already there or the
+  // user just switched it on a moment ago, and that distinction is the one
+  // this line exists to preserve.
+  workspaceReceiptSessionRecoveryLine() {
+    const record = window.ProjectTemplateCard?.getSelectedSessionRecovery?.();
+    if (!record || !record.pluginName) return '';
+    const verb = record.action === 'install_plugin' ? 'Installed and enabled' : 'Enabled';
+    return record.completed
+      ? `${verb} ${record.pluginName} during this session.`
+      : `Started enabling ${record.pluginName} this session — not finished yet.`;
   },
 
   // Names the primary and accounts for the specialists — the two facts that
@@ -5263,10 +5303,14 @@ const sessionManager = {
             : 'Import Folder'
           : this.workspaceCreateCtaLabel();
         // A known blocker means no trustworthy request can be built yet, so the
-        // final action is unavailable until it is resolved.
-        createBtn.disabled = !importMode && this.hasBlockingTeamIssue();
+        // final action is unavailable until it is resolved. An unresolved
+        // blueprint dependency counts: the server would refuse the request, and
+        // offering Create anyway turns a knowable state into a failed attempt.
+        createBtn.disabled =
+          !importMode && (this.hasBlockingTeamIssue() || this.blueprintSelectionBlocked());
       }
     }
+    if (onFinalStep) this.renderReviewReadiness();
     // The step-2 recap names the chosen blueprint; import mode has no blueprint.
     const recap = document.getElementById('wizardStep2Recap');
     if (recap) recap.hidden = importMode;
@@ -5279,6 +5323,14 @@ const sessionManager = {
       }
     }
     if (onFinalStep) this.refreshWorkspaceReview();
+  },
+
+  // Whether the selected blueprint's dependencies are unresolved. Blank, an
+  // ad-hoc template folder, and import mode all report false: they depend on
+  // nothing the catalog can fail to provide.
+  blueprintSelectionBlocked() {
+    if (this.importModeEnabled) return false;
+    return Boolean(window.ProjectTemplateCard?.isSelectionBlocked?.());
   },
 
   // Whether the team draft currently carries an issue that prevents building a
@@ -5380,6 +5432,22 @@ const sessionManager = {
   // validation refuses the move, to the control that has to be fixed first.
   goToWizardStep(step) {
     const targetStep = Math.max(1, Math.min(this.wizardStepCount, Number(step) || 1));
+    // Leaving Blueprint requires a blueprint that can actually produce a
+    // workspace. A blueprint whose plugin is missing, disabled, or unusable
+    // here would otherwise be carried silently through Details and Team, and
+    // the user would meet the problem for the first time at Create — after
+    // naming the workspace and building its roster.
+    //
+    // The blueprint stays selected either way: this refuses to move on, it does
+    // not undo the choice.
+    if (!this.importModeEnabled && targetStep > 1 && this.wizardStep === 1) {
+      if (this.blueprintSelectionBlocked()) {
+        this.refreshWizardChrome();
+        window.ProjectTemplateCard?.announceBlocked?.();
+        window.ProjectTemplateCard?.focusReadiness?.();
+        return;
+      }
+    }
     // Leaving Details requires a workspace name and a folder slug that isn't
     // already taken: without them neither the Team roster nor the Review receipt
     // can describe a workspace that could exist.
@@ -5543,6 +5611,19 @@ const sessionManager = {
       nameInput?.focus();
       return;
     }
+    if (!importEnabled) {
+      // Re-read the blueprint's dependency state immediately before creating.
+      // The catalog on screen can be minutes old, and a plugin disabled in
+      // another tab would otherwise turn a considered Create into a server
+      // rejection. Rendering the current state here is cheaper than that, and
+      // the server still has the final say either way.
+      const current = await window.ProjectTemplateCard?.recheckSelection?.();
+      if (current && current.state !== 'ready') {
+        this.renderReviewReadiness();
+        this.showWorkspaceCreateError(current.summary || 'This blueprint is not ready.', current);
+        return;
+      }
+    }
     if (importEnabled && !importPath) {
       this.showToast('Please enter or browse for a folder path to import', 'warning');
       return;
@@ -5695,23 +5776,18 @@ const sessionManager = {
           continue;
         }
 
-        if (
-          response.status === 409 &&
-          !importEnabled &&
-          ((Array.isArray(result.missing_plugins) && result.missing_plugins.length) ||
-            (Array.isArray(result.disabled_plugins) && result.disabled_plugins.length))
-        ) {
-          // Required-plugin gate: the selected blueprint needs plugins installed
-          // and enabled before creation. Surface exactly what to fix; setup and
-          // mutation controls remain in their authoritative post-create surfaces.
-          const parts = [];
-          if (result.missing_plugins?.length) {
-            parts.push(`Install required plugin(s): ${result.missing_plugins.join(', ')}`);
-          }
-          if (result.disabled_plugins?.length) {
-            parts.push(`Enable required plugin(s): ${result.disabled_plugins.join(', ')}`);
-          }
-          this.showToast(parts.join(' · ') || 'Required plugins are not ready', 'warning');
+        if (response.status === 409 && !importEnabled && result.readiness) {
+          // Blueprint readiness gate: the server re-derived the blueprint's
+          // dependency state at create time and refused. It is rendered inline
+          // with its own recovery controls rather than as a toast — a toast
+          // disappears, cannot be focused, and offers nothing to act on, which
+          // is exactly wrong for a state the user can fix without leaving the
+          // wizard.
+          const message = String(result.error || '').trim() || 'This blueprint is not ready.';
+          this.showWorkspaceCreateError(message, result.readiness);
+          // Re-read the catalog so the card, the briefing, and Review all agree
+          // with the state the server just reported.
+          void window.ProjectTemplateCard?.populate?.({ preserveSelection: true });
           return;
         }
 
@@ -5973,24 +6049,75 @@ const sessionManager = {
     }
   },
 
+  // Restates the selected blueprint's readiness on Review.
+  //
+  // Step 1 already refuses to advance past a known blocker, so in the ordinary
+  // case this renders nothing. It exists for the state that changed underneath
+  // the draft — a plugin disabled in another tab, a plugin store that stopped
+  // answering — where the receipt would otherwise look calmer than reality.
+  renderReviewReadiness() {
+    const host = document.getElementById('workspaceReviewReadiness');
+    if (!host) return;
+    host.textContent = '';
+    if (this.importModeEnabled) return;
+    const readiness = window.ProjectTemplateCard?.getSelectedReadiness?.();
+    if (!readiness || readiness.state === 'ready') return;
+    const template = window.ProjectTemplateCard?.getSelectedTemplate?.();
+    const panel = window.BlueprintReadiness?.renderPanel(readiness, {
+      blueprintName: template?.name || template?.id || '',
+      // Recovery belongs to the step that owns the blueprint. Routing back
+      // keeps one place responsible for the choice and its repair, rather than
+      // scattering half a recovery flow across the receipt.
+      onAction: () => this.goToWizardStep(1)
+    });
+    if (panel) host.appendChild(panel);
+  },
+
   // Renders the server's own failure message on Review with a route back to the
   // step that can fix it, then moves focus there so it is announced and
   // immediately actionable.
-  showWorkspaceCreateError(message) {
+  //
+  // A refusal carrying a readiness projection renders that projection with its
+  // real recovery controls. Reducing "the plugin this blueprint needs is
+  // disabled" to a sentence and two Edit links would hand the user a problem
+  // with no way to act on it.
+  showWorkspaceCreateError(message, readiness) {
     const host = document.getElementById('workspaceReviewError');
     if (!host) return;
-    host.innerHTML = `
-      <p class="workspace-review-error-text">${this.escapeHtml(message)}</p>
-      <div class="workspace-review-error-actions">
-        <button type="button" class="workspace-wizard-inline-action" data-wizard-edit-step="2">Edit details</button>
-        <button type="button" class="workspace-wizard-inline-action" data-wizard-edit-step="3">Edit team</button>
-      </div>`;
-    host.hidden = false;
-    host.querySelectorAll('[data-wizard-edit-step]').forEach(button => {
-      button.addEventListener('click', () =>
-        this.goToWizardStep(Number(button.dataset.wizardEditStep))
-      );
+    host.innerHTML = '';
+
+    const normalized = readiness ? window.BlueprintReadiness?.normalize(readiness) : null;
+    if (normalized && normalized.state !== 'ready') {
+      const template = window.ProjectTemplateCard?.getSelectedTemplate?.();
+      const panel = window.BlueprintReadiness?.renderPanel(normalized, {
+        blueprintName: template?.name || template?.id || '',
+        onAction: () => this.goToWizardStep(1)
+      });
+      if (panel) host.appendChild(panel);
+    } else {
+      const text = document.createElement('p');
+      text.className = 'workspace-review-error-text';
+      text.textContent = message;
+      host.appendChild(text);
+    }
+
+    const actions = document.createElement('div');
+    actions.className = 'workspace-review-error-actions';
+    [
+      { step: 1, label: 'Edit blueprint' },
+      { step: 2, label: 'Edit details' },
+      { step: 3, label: 'Edit team' }
+    ].forEach(({ step, label }) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'workspace-wizard-inline-action';
+      button.textContent = label;
+      button.addEventListener('click', () => this.goToWizardStep(step));
+      actions.appendChild(button);
     });
+    host.appendChild(actions);
+
+    host.hidden = false;
     host.focus();
   },
 

@@ -389,8 +389,6 @@ func writeWizardStarterTaskTemplate(t *testing.T, libDir, id string) {
 	}
 	manifest := `{
 		"name":"Wizard Starter Template",
-		"builtin": true,
-		"builtin_version": 1,
 		"directory_requirements":[{"key":"inbox-root","label":"Inbox folder"}],
 		"starter_tasks":[
 			{"description":"Set up this workspace","details":"Explain the setup steps","setup":true},

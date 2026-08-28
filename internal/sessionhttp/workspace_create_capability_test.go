@@ -57,13 +57,13 @@ func TestCreateWorkspace_PersistsABlueprintDeclaredCapability(t *testing.T) {
 	handler, libDir, cleanup := capabilityTemplateEnv(t)
 	defer cleanup()
 
-	writeCapabilityTemplate(t, libDir, "janitor-blueprint", `{
+	writeCapabilityTemplate(t, libDir, "file-janitor", `{
 		"name": "File Janitor",
 		"builtin": true,
 		"capabilities": [{"id": "file-janitor", "source": "downloads-janitor-preset"}]
 	}`)
 
-	w, resp := postCreateWorkspace(t, handler, `{"name":"Tidy","template_id":"janitor-blueprint"}`)
+	w, resp := postCreateWorkspace(t, handler, `{"name":"Tidy","template_id":"file-janitor"}`)
 	if w.Code != http.StatusCreated {
 		t.Fatalf("status = %d: %s", w.Code, w.Body.String())
 	}
@@ -92,7 +92,7 @@ func TestCreateWorkspace_PersistsABlueprintDeclaredCapability(t *testing.T) {
 	// Provenance survived the same update that wrote the install: a workspace
 	// must never be recorded as coming from this blueprint while lacking the
 	// capability the blueprint exists to install.
-	if !ws.IsFromTemplate("janitor-blueprint") {
+	if !ws.IsFromTemplate("file-janitor") {
 		t.Fatalf("template provenance was lost: %+v", ws.GetTemplateProvenance())
 	}
 }
@@ -105,8 +105,7 @@ func TestCreateWorkspace_WithoutADeclarationInstallsNothing(t *testing.T) {
 	defer cleanup()
 
 	writeCapabilityTemplate(t, libDir, "plain-blueprint", `{
-		"name": "Downloads Janitor Helper",
-		"builtin": true
+		"name": "Downloads Janitor Helper"
 	}`)
 
 	w, resp := postCreateWorkspace(t, handler, `{"name":"Downloads Janitor","template_id":"plain-blueprint"}`)
@@ -134,7 +133,6 @@ func TestCreateWorkspace_IgnoresAnUnknownDeclaredCapability(t *testing.T) {
 
 	writeCapabilityTemplate(t, libDir, "future-blueprint", `{
 		"name": "From The Future",
-		"builtin": true,
 		"capabilities": [{"id": "capability-from-the-future"}]
 	}`)
 
@@ -161,7 +159,7 @@ func TestCreateWorkspace_DeclaredCapabilityGrantsNothing(t *testing.T) {
 	handler, libDir, cleanup := capabilityTemplateEnv(t)
 	defer cleanup()
 
-	writeCapabilityTemplate(t, libDir, "janitor-blueprint", `{
+	writeCapabilityTemplate(t, libDir, "file-janitor", `{
 		"name": "File Janitor",
 		"builtin": true,
 		"capabilities": [{"id": "file-janitor"}],
@@ -170,7 +168,7 @@ func TestCreateWorkspace_DeclaredCapabilityGrantsNothing(t *testing.T) {
 		]
 	}`)
 
-	w, resp := postCreateWorkspace(t, handler, `{"name":"Tidy","template_id":"janitor-blueprint"}`)
+	w, resp := postCreateWorkspace(t, handler, `{"name":"Tidy","template_id":"file-janitor"}`)
 	if w.Code != http.StatusCreated {
 		t.Fatalf("status = %d: %s", w.Code, w.Body.String())
 	}

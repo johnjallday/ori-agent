@@ -63,6 +63,123 @@ Before anything is registered, install shows a **disclosure**: the exact command
 MCP server will run, the skills it adds, any unsupported components, and warnings (e.g. a
 missing binary). Nothing is registered until you confirm; declining makes **no changes**.
 
+## Blueprint dependencies and in-wizard recovery
+
+A workspace blueprint (built-in, user-authored, or plugin-contributed) can
+declare a plugin dependency. The Create Workspace wizard's blueprint catalog
+carries one **readiness** projection per blueprint — `ready`,
+`action_required`, or `unavailable`, with a closed set of reason codes
+(`plugin_install_required`, `plugin_enable_required`,
+`plugin_update_required`, `platform_unsupported`, `protocol_incompatible`,
+`blueprint_retired`, `manifest_invalid`, `runtime_provider_unavailable`,
+`dependency_state_unknown`) and an allowlisted set of recovery actions
+(`install_plugin`, `enable_plugin`, `review_plugin_update`, `retry`,
+`manage_plugins`, `change_blueprint`, `edit_template_manifest`). The server
+re-derives this from the installed-plugin store on every catalog load and
+again immediately before workspace creation; the catalog a client is holding
+is guidance, never an authorization to create.
+
+### Install versus enable
+
+**Installing a plugin never enables it, and enabling never re-installs it.**
+These are two separate, explicit user acts everywhere in the product — the
+Plugins page and the wizard use the identical wording
+(`internal/web/static/js/modules/plugin-lifecycle.js` is the one source of
+those labels, read by both surfaces):
+
+- **Installed, still disabled** — the plugin is on disk and registered, but
+  switched off. Nothing it declared is running.
+- **Installed and enabled** — the plugin is on disk, registered, and active.
+
+A blueprint's "Install" recovery action performs both steps under that one
+press (its button reads **Install and enable**), but reports them as two
+outcomes: if install succeeds and enable fails, the wizard states
+**"Installed, still disabled"** and offers Enable as the next action — never a
+bare install failure, because the install itself worked.
+
+### In-wizard recovery
+
+A blueprint card whose dependency is `action_required` shows a badge, an
+accessible description, and — in the Step 1 briefing — a readiness panel with
+the one next action. Choosing a plugin lifecycle action (Install, Enable,
+Review update) opens a recovery panel that follows the same confirm/cancel
+contract as the standalone Plugins page:
+
+1. **Preview** — a request with `confirm:false` returns the trust disclosure.
+   Nothing is registered yet.
+2. **Disclosure** — the complete trust report renders inline: commands,
+   skills, background services, downloadable artifacts (with their SHA-256),
+   permission scopes, and any workspace UI surfaces the plugin adds. Nothing
+   is summarized or hidden. The install source itself is shown here, and only
+   here — the catalog never echoes a template-declared source, because a
+   manifest is untrusted input and the disclosure is where a source is finally
+   read in context, immediately before the user agrees to it.
+3. **Confirm or cancel** — confirming applies the action; cancelling makes no
+   changes. A pending confirmation is invalidated (silently, not as a decline)
+   if the user selects a different blueprint or closes the modal — consent
+   given for one blueprint's disclosure can never be applied to another.
+4. **Result and catalog reload** — on completion the wizard re-reads the
+   catalog and re-selects the trusted replacement by **plugin owner and
+   blueprint ID**, never by display text, since an update can rename a
+   blueprint. The workspace name, description, context, team, and every other
+   field the user already entered are untouched — the recovery panel is the
+   only part of the wizard a lifecycle action ever writes to.
+
+The endpoint is `POST /api/project-templates/{templateID}/plugin-recovery`:
+
+```
+{"action": "install_plugin" | "enable_plugin" | "review_plugin_update",
+ "plugin": "<name>", "confirm": false | true, "generation": <uint64>}
+```
+
+The client sends an action name and a plugin name — **never a source, a path,
+or a command**; the server resolves the source from the blueprint's own
+declaration, and refuses the request outright if the named blueprint does not
+actually depend on the named plugin. `generation` is the installed-plugin
+generation the client's disclosure was read at; a confirmation carrying a
+stale generation is refused with `409`, so a captured/replayed confirmation
+can never be applied after the plugin has moved on. The response always
+carries the freshly re-derived readiness and, on success, the blueprint's
+current qualified ID.
+
+### Unsupported and incompatible states
+
+`platform_unsupported` (no artifact for this OS/architecture) and
+`protocol_incompatible` (the plugin's declared surface protocol range excludes
+this host) are hard blockers: no lifecycle action can resolve them, so the
+wizard offers explanation and **Manage Plugins** / **Change blueprint**
+instead of a retry loop. Both are rechecked against the installed record on
+every projection, not trusted from install time — a host upgrade can move a
+previously-compatible plugin outside the supported range.
+
+### Retired built-ins
+
+An on-disk manifest that claims `"builtin": true` under an ID this build no
+longer ships is classified **retired**: `blueprint_retired`, ownership
+`builtin`. Its files are preserved exactly as they are — retirement is a
+catalog decision, never a filesystem one — and it is excluded from ordinary
+creation. A retired built-in is never told to "fix its template.json"; nobody
+using it wrote that file, and telling them to edit shipped JSON would be
+wrong regardless of whether the edit is even reachable in the UI. If an
+installed plugin's contributed blueprint carries the same ID, that trusted
+candidate supersedes the retired built-in in the catalog — even while the
+plugin is still disabled, so the user sees the current, correct blueprint and
+its one remaining step rather than a stale shipped copy sitting in front of
+it.
+
+### Genuinely invalid manifests
+
+A manifest whose `runtime_requirements` or `setup_wizard` block could not be
+understood is `manifest_invalid`. The instruction to fix `template.json`, and
+the underlying parser diagnostic (bounded, behind an accessible disclosure),
+are shown **only when the manifest's ownership is `user`** — a template the
+person looking at the message actually authored or imported. For a shipped
+built-in or a plugin-contributed blueprint whose manifest fails validation,
+the same reason code produces generic copy with no file-edit instruction and
+no diagnostic text, on both the server (the readiness projection withholds
+`Diagnostic` for any ownership but `user`) and the client (the same rule is
+enforced independently in `blueprint-readiness.js`).
+
 ## Supported components
 
 | Component                                      | Status                                                    |

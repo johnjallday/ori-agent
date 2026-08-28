@@ -331,13 +331,26 @@ func (m *Manager) Update(name string, confirm ConfirmFunc) (InstalledPlugin, err
 	return updated, nil
 }
 
-// reload re-resolves a descriptor for an installed plugin, refreshing git clones.
+// reload re-resolves a descriptor for an installed plugin, refreshing git
+// clones.
+//
+// The install root is canonicalized first, so a record written before roots
+// were absolutized is refreshed, validated, and re-fingerprinted against the
+// bundle that is actually installed. Doing this before the trust comparison
+// matters: a root that resolved to the wrong place would produce a descriptor
+// whose components differ from the recorded ones for a reason that has nothing
+// to do with the plugin changing, and the user would be asked to re-approve
+// access on the strength of a path bug.
 func (m *Manager) reload(existing InstalledPlugin) (PluginDescriptor, error) {
+	installRoot, err := canonicalInstallRoot(existing.InstallDir, existing.Source, m.cloneDir)
+	if err != nil {
+		return PluginDescriptor{}, err
+	}
 	if g, ok := parseGitSubdir(existing.Source); ok {
 		// Composite git repo + subdirectory. Pinned commits are immutable, so
 		// re-resolving is idempotent; unpinned subdir sources pull for latest.
 		if g.Sha == "" && g.Ref == "" {
-			if err := pullGit(existing.InstallDir); err != nil {
+			if err := pullGit(installRoot); err != nil {
 				return PluginDescriptor{}, err
 			}
 		}
@@ -352,11 +365,11 @@ func (m *Manager) reload(existing InstalledPlugin) (PluginDescriptor, error) {
 		return Normalize(mfst, existing.Source)
 	}
 	if isGitURL(existing.Source) {
-		if err := pullGit(existing.InstallDir); err != nil {
+		if err := pullGit(installRoot); err != nil {
 			return PluginDescriptor{}, err
 		}
 	}
-	mfst, err := DetectManifest(existing.InstallDir, existing.Format)
+	mfst, err := DetectManifest(installRoot, existing.Format)
 	if err != nil {
 		return PluginDescriptor{}, err
 	}

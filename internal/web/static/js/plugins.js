@@ -12,19 +12,14 @@
     );
   }
 
+  // api keeps this page's throwing call style, but the request, the response
+  // parsing, and the error wording come from the shared lifecycle module so
+  // the Plugins page and the Create Workspace wizard cannot drift apart on
+  // what a failure means.
   async function api(method, url, body) {
-    const opts = { method, headers: { 'Content-Type': 'application/json' } };
-    if (body !== undefined) opts.body = JSON.stringify(body);
-    const res = await fetch(url, opts);
-    const text = await res.text();
-    let data = {};
-    try {
-      data = text ? JSON.parse(text) : {};
-    } catch (_) {
-      data = { message: text };
-    }
-    if (!res.ok) throw new Error(data.message || 'HTTP ' + res.status);
-    return data;
+    const result = await window.PluginLifecycle.request(method, url, body);
+    if (!result.ok) throw new Error(result.error);
+    return result.data;
   }
 
   // notify surfaces feedback via the shared Toast module when present, falling
@@ -92,34 +87,18 @@
     if (confirmEl) confirmEl.textContent = DEFAULT_TRUST_CONFIRM;
   };
 
-  function trustHTML(t) {
-    t = t || {};
-    const mcp = (t.MCPCommands || []).map(c => '<li><code>' + esc(c) + '</code></li>').join('');
-    const skills = (t.Skills || []).map(esc).join(', ');
-    const unsupported = (t.Unsupported || [])
-      .map(u => '<li>' + esc(u.kind) + ': ' + esc(u.detail) + '</li>')
-      .join('');
-    const warnings = (t.Warnings || [])
-      .map(w => '<li class="text-warning">' + esc(w) + '</li>')
-      .join('');
-    let html = '';
-    if (mcp)
-      html +=
-        '<div class="small fw-semibold">MCP servers (run as local commands):</div><ul class="small">' +
-        mcp +
-        '</ul>';
-    if (skills) html += '<div class="small">Skills: ' + esc(skills) + '</div>';
-    if (unsupported)
-      html +=
-        '<div class="small fw-semibold mt-2">Skipped (not yet supported):</div><ul class="small">' +
-        unsupported +
-        '</ul>';
-    if (warnings) html += '<ul class="small mb-0">' + warnings + '</ul>';
-    return html || '<div class="small text-muted">Nothing to register.</div>';
+  // The disclosure itself is built by the shared lifecycle module: it is the
+  // last thing a user reads before a plugin can run commands on their machine,
+  // so there is exactly one implementation of it, and both surfaces show the
+  // same thing.
+  function renderTrustInto(host, report) {
+    if (!host) return;
+    host.innerHTML = '';
+    host.appendChild(window.PluginLifecycle.renderTrustReport(report));
   }
 
   function renderTrustBody(t) {
-    byId('pluginTrustBody').innerHTML = trustHTML(t);
+    renderTrustInto(byId('pluginTrustBody'), t);
   }
 
   // ---- installed plugins ----
@@ -145,8 +124,11 @@
     const badge = '<span class="badge bg-secondary">' + esc(p.format) + '</span>';
     const name = esc(p.name);
     return (
-      '<div class="d-flex align-items-start justify-content-between border-bottom py-3">' +
-      '<div>' +
+      // flex-wrap so the action buttons drop below the plugin's details at a
+      // narrow width instead of running off the edge of the screen — a
+      // pre-existing gap this feature's own narrow-width demo caught.
+      '<div class="d-flex flex-wrap align-items-start justify-content-between gap-2 border-bottom py-3">' +
+      '<div style="min-width: 0; flex: 1 1 240px;">' +
       '<div class="fw-semibold">' +
       name +
       ' <span class="text-muted small">' +
@@ -160,9 +142,27 @@
       ' &middot; Skills: ' +
       skills +
       '</div>' +
+      // Lifecycle state in the same words the creation wizard uses, so a user
+      // moving between the two surfaces is never told two different things
+      // about one plugin.
+      '<div class="small mt-1 ' +
+      (p.enabled ? 'text-success' : 'text-warning') +
+      '">' +
+      esc(
+        window.PluginLifecycle.capitalize(
+          p.enabled
+            ? window.PluginLifecycle.LIFECYCLE_LABELS.ENABLED
+            : window.PluginLifecycle.LIFECYCLE_LABELS.DISABLED
+        )
+      ) +
+      '</div>' +
       '</div>' +
       '<div class="d-flex gap-2">' +
-      '<button class="modern-btn modern-btn-secondary" onclick="pluginToggle(\'' +
+      // Enable is the call to action while a plugin is disabled: it is the one
+      // thing standing between an installed plugin and a usable one.
+      '<button class="modern-btn ' +
+      (p.enabled ? 'modern-btn-secondary' : 'modern-btn-primary') +
+      '" onclick="pluginToggle(\'' +
       name +
       "', " +
       (p.enabled ? 'false' : 'true') +
@@ -196,7 +196,17 @@
         window.pluginCancelInstall();
         byId('pluginSource').value = '';
         loadPlugins();
-        notify('Installed ' + ((res && res.plugin && res.plugin.name) || source), 'success');
+        // Installing does not switch a plugin on, and a bare "Installed" reads
+        // as if it did. Say which of the two states the plugin is actually in,
+        // in the same words the creation wizard uses.
+        const installed = (res && res.plugin) || {};
+        const name = installed.name || source;
+        const labels = window.PluginLifecycle.LIFECYCLE_LABELS;
+        if (installed.enabled) {
+          notify(name + ' is ' + labels.ENABLED + '.', 'success');
+        } else {
+          notify(name + ' is ' + labels.DISABLED + ' — enable it to use it.', 'warning');
+        }
       });
     } catch (e) {
       notify('Preview failed: ' + e.message, 'error');
@@ -530,10 +540,8 @@
         plugin: name,
         confirm: false
       });
-      box.innerHTML =
-        meta +
-        '<div class="fw-semibold mt-2">This plugin will register:</div>' +
-        trustHTML(data.trust);
+      box.innerHTML = meta + '<div class="fw-semibold mt-2">This plugin will register:</div>';
+      box.appendChild(window.PluginLifecycle.renderTrustReport(data.trust));
       box.dataset.loaded = '1';
     } catch (err) {
       box.innerHTML =
@@ -558,17 +566,19 @@
         plugin: name,
         confirm: false
       });
-      box.innerHTML =
-        '<div class="fw-semibold">This plugin will register:</div>' +
-        trustHTML(data.trust) +
+      box.innerHTML = '<div class="fw-semibold">This plugin will register:</div>';
+      box.appendChild(window.PluginLifecycle.renderTrustReport(data.trust));
+      box.insertAdjacentHTML(
+        'beforeend',
         '<div class="d-flex gap-2 mt-2">' +
-        '<button class="modern-btn modern-btn-primary" data-official-confirm="' +
-        esc(name) +
-        '">Confirm install</button>' +
-        '<button class="modern-btn modern-btn-secondary" data-official-cancel="' +
-        esc(name) +
-        '">Cancel</button>' +
-        '</div>';
+          '<button class="modern-btn modern-btn-primary" data-official-confirm="' +
+          esc(name) +
+          '">Confirm install</button>' +
+          '<button class="modern-btn modern-btn-secondary" data-official-cancel="' +
+          esc(name) +
+          '">Cancel</button>' +
+          '</div>'
+      );
     } catch (e) {
       box.innerHTML = '<div class="text-danger">Preview failed: ' + esc(e.message) + '</div>';
     }

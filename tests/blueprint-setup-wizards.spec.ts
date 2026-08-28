@@ -28,11 +28,13 @@ import { join } from 'node:path';
 const TEMPLATE_ID = 'blueprint-wizard-shell-demo';
 
 const MANIFEST = {
+  // Deliberately NOT `builtin: true`. A manifest that claims built-in
+  // ownership under an ID the app does not ship is classified as a retired
+  // blueprint — preserved on disk, but no longer offered for creation — so a
+  // hand-written fixture cannot borrow built-in status any more. Nothing in
+  // the Setup Wizard shell or its creation preview branches on that flag, so
+  // this spec exercises the same path it always did.
   name: 'Wizard Shell Demo',
-  // A built-in, like every blueprint this feature migrates: it puts the card in
-  // the picker's built-in grid, which is the path the preview really takes.
-  builtin: true,
-  builtin_version: 1,
   description: 'A blueprint used by the Setup Wizard browser journey.',
   icon: '🧭',
   tagline: 'Shell coverage for the shared Setup Wizard.',
