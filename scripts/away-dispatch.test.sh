@@ -23,6 +23,7 @@ case "$*" in
   "worktree list --porcelain")
     printf 'worktree %s\nHEAD deadbeef\nbranch refs/heads/dev\n\n' "$FAKE_DEV_ROOT"
     ;;
+  "fetch --quiet origin dev"|"branch --all --format=%(refname:short)") ;;
   *) printf 'fake git: unsupported call: %s\n' "$*" >&2; exit 1 ;;
 esac
 FAKE_GIT
@@ -37,7 +38,9 @@ run_wt() {
 }
 
 output="$(run_wt status)"
-[[ "$output" == "Away dispatcher: disarmed" ]]
+grep -q '^Away dispatcher: disarmed$' <<< "$output"
+grep -q '^Queue verdicts:$' <<< "$output"
+grep -q '^Last tick:$' <<< "$output"
 
 # A disarmed tick is silent and exits before the queue authorization boundary.
 mkdir "$dev_root/tasks/away-queue.md"
@@ -51,7 +54,8 @@ output="$(run_wt arm)"
 
 output="$(run_wt arm)"
 [[ "$output" == "Away dispatcher is already armed." ]]
-[[ "$(run_wt status)" == "Away dispatcher: armed" ]]
+output="$(run_wt status)"
+grep -q '^Away dispatcher: armed$' <<< "$output"
 
 output="$(run_wt disarm)"
 [[ "$output" == "Away dispatcher disarmed. Running agents were not interrupted." ]]
@@ -288,5 +292,84 @@ write_plan footprint-disjoint pi model-a disjoint.txt
     exit 1
   fi
 )
+
+# Tick dispatch, ledger shape, double-dispatch guard, and status rendering.
+AWAY_DISPATCH_SOURCE_ONLY=1 source "$REAL_REPO_ROOT/scripts/away-dispatch.sh"
+repo_root="$REAL_REPO_ROOT"
+away_dev_root="$dev_root"
+away_tasks_dir="$dev_root/tasks"
+away_queue_file="$away_tasks_dir/away-queue.md"
+away_ledger_file="$away_tasks_dir/away-ledger.jsonl"
+tasks_dir="$away_tasks_dir"
+write_plan tick-plan pi 'openai/tick-model' internal/tick.go
+printf '%s\n' '- tick-plan' > "$away_queue_file"
+: > "$away_tasks_dir/.away-armed"
+rm -f "$away_ledger_file"
+dispatch_calls=0
+away_resolve_dev() {
+  away_dev_root="$dev_root"
+  away_tasks_dir="$dev_root/tasks"
+  away_queue_file="$away_tasks_dir/away-queue.md"
+  away_ledger_file="$away_tasks_dir/away-ledger.jsonl"
+  tasks_dir="$away_tasks_dir"
+}
+away_fetch_dev() { return 0; }
+load_flight_index() {
+  flight_numbers=()
+  flight_states=()
+  flight_refs=()
+  flight_branch_names=()
+  flight_branch_states=()
+  flight_branch_refs=()
+}
+away_active_dispatch_count() { away_active_count=0; }
+away_check_overlap() { return 1; }
+away_dispatch_plan() {
+  dispatch_calls=$((dispatch_calls + 1))
+  printf '%s\n' "$*" > "$fixture_root/dispatch-args"
+  return 0
+}
+away_worktree_for_branch() { printf '%s' "$fixture_root/tick-plan"; }
+away_tick
+[[ "$dispatch_calls" -eq 1 ]]
+[[ "$(<"$fixture_root/dispatch-args")" == "tick-plan pi openai/tick-model" ]]
+[[ "$(wc -l < "$away_ledger_file" | tr -d ' ')" == "1" ]]
+jq -e '
+  .action == "dispatched" and .armed == true and
+  .dispatched == {
+    slug: "tick-plan",
+    kind: "pi",
+    model: "openai/tick-model",
+    branch: "feature/tick-plan",
+    worktree: $worktree
+  } and .skips == [] and (.ts | type == "string")
+' --arg worktree "$fixture_root/tick-plan" "$away_ledger_file" >/dev/null
+[[ "$(stat -f '%Lp' "$away_ledger_file")" == "600" ]]
+
+# A second tick sees the append-only dispatch record immediately before any
+# possible start and records a no-op instead of calling the dispatcher again.
+away_tick
+[[ "$dispatch_calls" -eq 1 ]]
+[[ "$(wc -l < "$away_ledger_file" | tr -d ' ')" == "2" ]]
+tail -n 1 "$away_ledger_file" | jq -e '
+  .action == "noop" and .dispatched == null and
+  any(.skips[]; .slug == "tick-plan" and .reason == "in-flight")
+' >/dev/null
+
+away_branch_exists() { return 0; }
+away_pr_merged() { return 1; }
+status_output="$(away_status)"
+grep -q '^Away dispatcher: armed$' <<< "$status_output"
+grep -q 'tick-plan.*feature/tick-plan.*0/1' <<< "$status_output"
+grep -q 'tick-plan.*in-flight' <<< "$status_output"
+grep -q 'noop: tick-plan=in-flight' <<< "$status_output"
+
+rm -f "$away_tasks_dir/.away-armed"
+away_tick
+[[ "$(wc -l < "$away_ledger_file" | tr -d ' ')" == "3" ]]
+tail -n 1 "$away_ledger_file" | jq -e '
+  .action == "noop" and .armed == false and
+  any(.skips[]; .reason == "disarmed")
+' >/dev/null
 
 printf '%s\n' "away-dispatch.test.sh: OK"

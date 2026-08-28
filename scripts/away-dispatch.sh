@@ -32,6 +32,15 @@ away_detail=""
 away_kind=""
 away_model=""
 away_active_count=0
+away_dispatched_slug=""
+away_dispatched_kind=""
+away_dispatched_model=""
+away_dispatched_branch=""
+away_dispatched_worktree=""
+away_tick_error=""
+away_skip_slugs=()
+away_skip_reasons=()
+away_skip_details=()
 
 away_usage() {
   cat <<'EOF'
@@ -369,12 +378,17 @@ away_branch_exists() {
 }
 
 away_active_dispatch_count() {
-  local slug branch row seen_slug merged_status index already_seen
+  local slug branch seen_slug merged_status already_seen rows
   local -a seen
   away_active_count=0
   [[ -f "$away_ledger_file" ]] || return 0
   if ! command -v jq >/dev/null 2>&1; then
     # Ledger state cannot be interpreted safely, so fail capacity closed.
+    away_active_count=3
+    return 0
+  fi
+  if ! rows="$(jq -r 'select(.action == "dispatched" and .dispatched != null) |
+      [.dispatched.slug, .dispatched.branch] | @tsv' "$away_ledger_file" 2>/dev/null)"; then
     away_active_count=3
     return 0
   fi
@@ -393,8 +407,7 @@ away_active_dispatch_count() {
     if [[ "$merged_status" -ne 0 ]]; then
       away_active_count=$((away_active_count + 1))
     fi
-  done < <(jq -r 'select(.action == "dispatched" and .dispatched != null) |
-    [.dispatched.slug, .dispatched.branch] | @tsv' "$away_ledger_file" 2>/dev/null)
+  done <<< "$rows"
 }
 
 away_set_verdict() {
@@ -402,8 +415,76 @@ away_set_verdict() {
   away_detail="${2:-}"
 }
 
+away_add_skip() {
+  away_skip_slugs+=("$1")
+  away_skip_reasons+=("$2")
+  away_skip_details+=("${3:-}")
+}
+
+away_reset_tick_result() {
+  away_dispatched_slug=""
+  away_dispatched_kind=""
+  away_dispatched_model=""
+  away_dispatched_branch=""
+  away_dispatched_worktree=""
+  away_tick_error=""
+  away_skip_slugs=()
+  away_skip_reasons=()
+  away_skip_details=()
+}
+
+away_json_skips() {
+  local json='[]' index
+  for index in ${away_skip_slugs[@]+"${!away_skip_slugs[@]}"}; do
+    json="$(jq -cn \
+      --argjson current "$json" \
+      --arg slug "${away_skip_slugs[$index]}" \
+      --arg reason "${away_skip_reasons[$index]}" \
+      --arg detail "${away_skip_details[$index]}" \
+      '$current + [{slug: $slug, reason: $reason, detail: $detail}]')" || return 1
+  done
+  printf '%s' "$json"
+}
+
+away_append_ledger() {
+  local armed="$1" action="noop" timestamp skips_json line dispatched_json='null'
+  command -v jq >/dev/null 2>&1 || {
+    printf 'Away dispatcher requires jq to write %s\n' "$away_ledger_file" >&2
+    return 1
+  }
+  timestamp="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+  skips_json="$(away_json_skips)" || return 1
+  if [[ -n "$away_dispatched_slug" ]]; then
+    action="dispatched"
+    dispatched_json="$(jq -cn \
+      --arg slug "$away_dispatched_slug" \
+      --arg kind "$away_dispatched_kind" \
+      --arg model "$away_dispatched_model" \
+      --arg branch "$away_dispatched_branch" \
+      --arg worktree "$away_dispatched_worktree" \
+      '{slug: $slug, kind: $kind, model: $model, branch: $branch, worktree: $worktree}')" || return 1
+  fi
+  line="$(jq -cn \
+    --arg ts "$timestamp" \
+    --arg action "$action" \
+    --argjson dispatched "$dispatched_json" \
+    --argjson skips "$skips_json" \
+    --argjson armed "$armed" \
+    --arg error "$away_tick_error" \
+    '{ts: $ts, action: $action, dispatched: $dispatched, skips: $skips, armed: $armed}
+      + (if $error == "" then {} else {error: $error} end)')" || return 1
+
+  (umask 027; mkdir -p "$away_tasks_dir") || return 1
+  if [[ ! -e "$away_ledger_file" ]]; then
+    (umask 077; : > "$away_ledger_file") || return 1
+  fi
+  printf '%s\n' "$line" >> "$away_ledger_file"
+  chmod 600 "$away_ledger_file" 2>/dev/null || true
+}
+
 away_evaluate_entry() {
-  local index="$1" slug deps plan state dep old_ifs files=""
+  local index="$1" slug deps plan state dep files=""
+  local -a dependency_parts
   slug="${away_queue_slugs[$index]}"
   deps="${away_queue_dependencies[$index]}"
   away_kind=""
@@ -465,13 +546,8 @@ away_evaluate_entry() {
   fi
 
   if [[ -n "$deps" ]]; then
-    old_ifs="$IFS"
-    IFS=','
-    # Intentional splitting of the validated dependency CSV.
-    # shellcheck disable=SC2086
-    set -- $deps
-    IFS="$old_ifs"
-    for dep in "$@"; do
+    IFS=',' read -r -a dependency_parts <<< "$deps"
+    for dep in "${dependency_parts[@]}"; do
       if ! away_dependency_satisfied "$dep"; then
         away_set_verdict "dep-unmerged" "$away_detail"
         return 0
@@ -501,6 +577,90 @@ away_prepare_verdicts() {
   fi
 }
 
+away_fetch_dev() {
+  git -C "$away_dev_root" fetch --quiet origin dev
+}
+
+away_worktree_for_branch() {
+  local wanted="$1" line path=""
+  while IFS= read -r line; do
+    case "$line" in
+      "worktree "*) path="${line#worktree }" ;;
+      "branch refs/heads/$wanted") printf '%s' "$path"; return 0 ;;
+    esac
+  done < <(git -C "$away_dev_root" worktree list --porcelain 2>/dev/null)
+  return 1
+}
+
+away_dispatch_plan() {
+  local slug="$1" kind="$2" model="$3"
+  (
+    cd "$away_dev_root" || exit 1
+    zsh -c 'source "$1"; shift; wt start "$@"' _ \
+      "$away_dev_root/scripts/wt.sh" "$slug" \
+      --kind "$kind" --model "$model" --yes
+  )
+}
+
+away_double_dispatch_guard() {
+  local slug="$1" state
+  load_flight_index
+  state="$(flight_state_of "$slug")"
+  if [[ -z "$state" && "$slug" =~ ^([1-9][0-9]*)- ]]; then
+    state="$(flight_state_of "${BASH_REMATCH[1]}")"
+  fi
+  if [[ -n "$state" ]]; then
+    away_detail="$slug gained a $state before dispatch"
+    return 1
+  fi
+  if away_was_dispatched "$slug"; then
+    away_detail="$slug was dispatched by another tick"
+    return 1
+  fi
+  return 0
+}
+
+away_run_armed_tick() {
+  local index slug kind model branch worktree dispatch_status=0
+  away_prepare_verdicts
+
+  for index in ${away_queue_slugs[@]+"${!away_queue_slugs[@]}"}; do
+    away_evaluate_entry "$index"
+    slug="${away_queue_slugs[$index]}"
+    if [[ "$away_verdict" != "eligible" ]]; then
+      away_add_skip "$slug" "$away_verdict" "$away_detail"
+      continue
+    fi
+
+    kind="$away_kind"
+    model="$away_model"
+    if ! away_double_dispatch_guard "$slug"; then
+      away_add_skip "$slug" "in-flight" "$away_detail"
+      continue
+    fi
+
+    away_dispatch_plan "$slug" "$kind" "$model" || dispatch_status=$?
+    if [[ "$dispatch_status" -ne 0 ]]; then
+      away_tick_error="dispatch-failed: slug=$slug status=$dispatch_status"
+      printf 'Away dispatcher failed to start %s (status %s).\n' "$slug" "$dispatch_status" >&2
+      return 1
+    fi
+
+    branch="feature/$slug"
+    worktree="$(away_worktree_for_branch "$branch" 2>/dev/null || true)"
+    if [[ -z "$worktree" ]]; then
+      worktree="${away_dev_root%/*}/$slug"
+    fi
+    away_dispatched_slug="$slug"
+    away_dispatched_kind="$kind"
+    away_dispatched_model="$model"
+    away_dispatched_branch="$branch"
+    away_dispatched_worktree="$worktree"
+    return 0
+  done
+  return 0
+}
+
 away_arm() {
   away_require_no_args arm "$@" || return 1
   away_resolve_dev || return 1
@@ -525,6 +685,76 @@ away_disarm() {
   printf 'Away dispatcher disarmed. Running agents were not interrupted.\n'
 }
 
+away_render_active() {
+  local slug branch worktree progress_file progress merged_status already_seen seen_slug
+  local -a seen
+  local rows=0
+  printf '\nActive dispatched agents:\n'
+  if [[ ! -f "$away_ledger_file" ]] || ! command -v jq >/dev/null 2>&1; then
+    printf '  none\n'
+    return 0
+  fi
+
+  while IFS=$'\t' read -r slug branch worktree; do
+    [[ -n "$slug" && -n "$branch" ]] || continue
+    already_seen=0
+    for seen_slug in ${seen[@]+"${seen[@]}"}; do
+      [[ "$seen_slug" == "$slug" ]] && already_seen=1
+    done
+    [[ "$already_seen" -eq 0 ]] || continue
+    seen+=("$slug")
+    away_branch_exists "$branch" || continue
+    merged_status=0
+    away_pr_merged "$branch" || merged_status=$?
+    [[ "$merged_status" -ne 0 ]] || continue
+
+    progress_file="$away_tasks_dir/tasks-$slug.md"
+    if [[ -n "$worktree" && -f "$worktree/tasks/tasks-$slug.md" ]]; then
+      progress_file="$worktree/tasks/tasks-$slug.md"
+    fi
+    progress="$(task_groups_of_file "$progress_file")"
+    printf '  %-28s %-42s %s\n' "$slug" "$branch" "${progress:--}"
+    rows=$((rows + 1))
+  done < <(jq -r 'select(.action == "dispatched" and .dispatched != null) |
+    [.dispatched.slug, .dispatched.branch, .dispatched.worktree] | @tsv' \
+    "$away_ledger_file" 2>/dev/null)
+  [[ "$rows" -gt 0 ]] || printf '  none\n'
+}
+
+away_render_queue() {
+  local index slug rows=0
+  printf '\nQueue verdicts:\n'
+  for index in ${away_queue_slugs[@]+"${!away_queue_slugs[@]}"}; do
+    away_evaluate_entry "$index"
+    slug="${away_queue_slugs[$index]}"
+    printf '  %-28s %-18s %s\n' "$slug" "$away_verdict" "$away_detail"
+    rows=$((rows + 1))
+  done
+  [[ "$rows" -gt 0 ]] || printf '  (empty)\n'
+}
+
+away_render_last_tick() {
+  local last
+  printf '\nLast tick:\n'
+  if [[ ! -s "$away_ledger_file" ]] || ! command -v jq >/dev/null 2>&1; then
+    printf '  none\n'
+    return 0
+  fi
+  last="$(tail -n 1 "$away_ledger_file")"
+  if ! printf '%s\n' "$last" | jq -er '
+    if .action == "dispatched" then
+      "  \(.ts) dispatched \(.dispatched.slug) (\(.dispatched.kind), \(.dispatched.model))"
+    elif .error then
+      "  \(.ts) noop: \(.error)"
+    elif (.skips | length) > 0 then
+      "  \(.ts) noop: " + ([.skips[] | ((.slug // "") + "=" + .reason)] | join(", "))
+    else
+      "  \(.ts) noop"
+    end' 2>/dev/null; then
+    printf '  unreadable ledger tail\n'
+  fi
+}
+
 away_status() {
   away_require_no_args status "$@" || return 1
   away_resolve_dev || return 1
@@ -533,21 +763,36 @@ away_status() {
   else
     printf 'Away dispatcher: disarmed\n'
   fi
+  if ! away_fetch_dev; then
+    printf 'Warning: could not refresh origin/dev; verdicts use local refs.\n' >&2
+  fi
+  away_prepare_verdicts
+  away_render_active
+  away_render_queue
+  away_render_last_tick
 }
 
 away_tick() {
+  local tick_status=0
   away_require_no_args tick "$@" || return 1
   away_resolve_dev || return 1
-  # Authorization boundary: when disarmed, do not read the queue or fetch.
+  away_reset_tick_result
+  # Authorization boundary: when disarmed, append the audit no-op without ever
+  # reading away-queue.md or fetching remote state.
   if [[ ! -f "$away_tasks_dir/.away-armed" ]]; then
-    return 0
+    away_add_skip "" "disarmed" "new dispatches are disabled"
+    away_append_ledger false
+    return $?
   fi
-  if ! git -C "$away_dev_root" fetch --quiet origin dev; then
+  if ! away_fetch_dev; then
+    away_tick_error="fetch-failed: origin/dev"
+    away_append_ledger true || true
     printf 'Away dispatcher could not fetch origin/dev; no plan was dispatched.\n' >&2
     return 1
   fi
-  away_prepare_verdicts
-  printf 'Away dispatcher tick: eligibility checked; dispatch lands in the next implementation group.\n'
+  away_run_armed_tick || tick_status=$?
+  away_append_ledger true || return 1
+  return "$tick_status"
 }
 
 away_main() {
