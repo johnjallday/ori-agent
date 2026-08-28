@@ -37,32 +37,13 @@ run_wt() {
   zsh -c 'source "$1"; shift; wt away "$@"' _ "$repo_root/scripts/wt.sh" "$@"
 }
 
-output="$(run_wt status)"
-grep -q '^Away dispatcher: disarmed$' <<< "$output"
-grep -q '^Queue verdicts:$' <<< "$output"
-grep -q '^Last tick:$' <<< "$output"
+output="$(run_wt --help)"
+grep -q '^Usage: wt away <command>$' <<< "$output"
 
 # A disarmed tick is silent and exits before the queue authorization boundary.
 mkdir "$dev_root/tasks/away-queue.md"
 output="$(run_wt tick)"
 [[ -z "$output" ]]
-
-output="$(run_wt arm)"
-[[ "$output" == "Away dispatcher armed." ]]
-[[ -f "$dev_root/tasks/.away-armed" ]]
-[[ "$(stat -f '%Lp' "$dev_root/tasks/.away-armed")" == "600" ]]
-
-output="$(run_wt arm)"
-[[ "$output" == "Away dispatcher is already armed." ]]
-output="$(run_wt status)"
-grep -q '^Away dispatcher: armed$' <<< "$output"
-
-output="$(run_wt disarm)"
-[[ "$output" == "Away dispatcher disarmed. Running agents were not interrupted." ]]
-[[ ! -e "$dev_root/tasks/.away-armed" ]]
-
-output="$(run_wt disarm)"
-[[ "$output" == "Away dispatcher is already disarmed." ]]
 
 if run_wt > "$fixture_root/no-command.out" 2>&1; then
   printf '%s\n' "wt away without a subcommand succeeded" >&2
@@ -89,8 +70,184 @@ away_dev_root="$dev_root"
 away_tasks_dir="$dev_root/tasks"
 away_queue_file="$away_tasks_dir/away-queue.md"
 away_ledger_file="$away_tasks_dir/away-ledger.jsonl"
+away_wake_state_file="$away_tasks_dir/.away-wake.json"
 tasks_dir="$away_tasks_dir"
 rmdir "$away_queue_file"
+rm -f "$away_ledger_file"
+
+# Arm/disarm orchestration is exercised with fixed resource mocks so this suite
+# never changes the user's real launchd or pmset state.
+launch_install_calls=0
+launch_uninstall_calls=0
+wake_schedule_calls=0
+wake_cancel_calls=0
+away_require_macos() { return 0; }
+away_verify_herdr_remote() { return 0; }
+away_resolve_dev() {
+  away_dev_root="$dev_root"
+  away_tasks_dir="$dev_root/tasks"
+  away_queue_file="$away_tasks_dir/away-queue.md"
+  away_ledger_file="$away_tasks_dir/away-ledger.jsonl"
+  away_wake_state_file="$away_tasks_dir/.away-wake.json"
+  tasks_dir="$away_tasks_dir"
+}
+away_install_launch_agent() { launch_install_calls=$((launch_install_calls + 1)); }
+away_uninstall_launch_agent() { launch_uninstall_calls=$((launch_uninstall_calls + 1)); }
+away_schedule_next_wake() { wake_schedule_calls=$((wake_schedule_calls + 1)); }
+away_cancel_pending_wake() { wake_cancel_calls=$((wake_cancel_calls + 1)); }
+away_arm > "$fixture_root/arm.out"
+output="$(<"$fixture_root/arm.out")"
+[[ "$output" == "Away dispatcher armed." ]]
+[[ -f "$away_tasks_dir/.away-armed" ]]
+[[ "$(stat -f '%Lp' "$away_tasks_dir/.away-armed")" == "600" ]]
+away_arm > "$fixture_root/arm.out"
+output="$(<"$fixture_root/arm.out")"
+[[ "$output" == "Away dispatcher is already armed; schedule reconciled." ]]
+[[ "$launch_install_calls" -eq 2 && "$wake_schedule_calls" -eq 2 ]]
+away_disarm > "$fixture_root/disarm.out"
+output="$(<"$fixture_root/disarm.out")"
+[[ "$output" == "Away dispatcher disarmed. Running agents were not interrupted." ]]
+[[ ! -e "$away_tasks_dir/.away-armed" ]]
+away_disarm > "$fixture_root/disarm.out"
+output="$(<"$fixture_root/disarm.out")"
+[[ "$output" == "Away dispatcher is already disarmed; schedule is clear." ]]
+[[ "$launch_uninstall_calls" -eq 2 && "$wake_cancel_calls" -eq 2 ]]
+
+# Restore the real resource functions for the isolated launchd/pmset fixtures.
+AWAY_DISPATCH_SOURCE_ONLY=1 source "$repo_root/scripts/away-dispatch.sh"
+away_dev_root="$dev_root"
+away_tasks_dir="$dev_root/tasks"
+away_queue_file="$away_tasks_dir/away-queue.md"
+away_ledger_file="$away_tasks_dir/away-ledger.jsonl"
+away_wake_state_file="$away_tasks_dir/.away-wake.json"
+tasks_dir="$away_tasks_dir"
+
+# Installed LaunchAgent rendering uses an absolute stable entrypoint, a
+# 30-minute interval, and logs under the caller's TMPDIR.
+away_launch_agents_dir="$fixture_root/LaunchAgents"
+away_launch_plist="$away_launch_agents_dir/com.ori.wt-away-tick.plist"
+launch_loaded=0
+: > "$fixture_root/launchctl.calls"
+away_launchctl() {
+  printf '%s\n' "$*" >> "$fixture_root/launchctl.calls"
+  case "$1" in
+    print) [[ "$launch_loaded" -eq 1 ]] ;;
+    bootstrap) launch_loaded=1 ;;
+    bootout) launch_loaded=0 ;;
+  esac
+}
+away_install_launch_agent
+[[ "$launch_loaded" -eq 1 ]]
+/usr/bin/plutil -lint "$away_launch_plist" >/dev/null
+[[ "$(/usr/libexec/PlistBuddy -c 'Print :StartInterval' "$away_launch_plist")" == "1800" ]]
+[[ "$(/usr/libexec/PlistBuddy -c 'Print :ProgramArguments:1' "$away_launch_plist")" == "$repo_root/scripts/away-tick.sh" ]]
+grep -Fq "${TMPDIR:-/tmp}/ori-wt-away-tick.out.log" "$away_launch_plist"
+away_uninstall_launch_agent
+[[ "$launch_loaded" -eq 0 && ! -e "$away_launch_plist" ]]
+
+# The pmset chain tracks one exact fixed-owner wake, cancels only that event,
+# and leaves a foreign scheduled event untouched.
+fake_pmset_date=""
+fake_foreign_line=" [0]  wake at 08/29/2026 03:00:00 by 'com.example.foreign'"
+: > "$fixture_root/pmset.calls"
+away_pmset_read() {
+  local four_digit
+  printf '%s\n' "Scheduled power events:" "$fake_foreign_line"
+  if [[ -n "$fake_pmset_date" ]]; then
+    four_digit="$(away_wake_date_four_digit "$fake_pmset_date")"
+    printf " [1]  %s at %s by '%s'\n" "$away_pmset_type" "$four_digit" "$away_pmset_owner"
+  fi
+}
+away_pmset_mutate() {
+  printf '%s\n' "$*" >> "$fixture_root/pmset.calls"
+  if [[ "$1" == "schedule" && "$2" == "$away_pmset_type" ]]; then
+    fake_pmset_date="$3"
+    return 0
+  fi
+  if [[ "$1" == "schedule" && "$2" == "cancel" && "$3" == "$away_pmset_type" && "$4" == "$fake_pmset_date" ]]; then
+    fake_pmset_date=""
+    return 0
+  fi
+  return 1
+}
+away_schedule_next_wake
+first_wake="$fake_pmset_date"
+[[ -n "$first_wake" && -f "$away_wake_state_file" ]]
+jq -e --arg date "$first_wake" \
+  '.phase == "scheduled" and .pmset_date == $date and .owner == "com.ori.wt-away-tick"' \
+  "$away_wake_state_file" >/dev/null
+away_schedule_next_wake
+[[ "$(grep -c '^schedule cancel wakeorpoweron ' "$fixture_root/pmset.calls")" -eq 1 ]]
+[[ "$(grep -c '^schedule wakeorpoweron ' "$fixture_root/pmset.calls")" -eq 2 ]]
+away_cancel_pending_wake
+[[ -z "$fake_pmset_date" && ! -e "$away_wake_state_file" ]]
+[[ "$fake_foreign_line" == *"com.example.foreign"* ]]
+
+# State/output disagreement refuses cancellation rather than reaching for an
+# owner-wide or cancelall operation.
+away_write_wake_state "01/01/30 00:00:00" scheduled
+fake_pmset_date="01/01/30 00:01:00"
+before_cancel_calls="$(wc -l < "$fixture_root/pmset.calls" | tr -d ' ')"
+if away_cancel_pending_wake >/dev/null 2>&1; then
+  printf '%s\n' "mismatched wake state was cancelled" >&2
+  exit 1
+fi
+[[ "$(wc -l < "$fixture_root/pmset.calls" | tr -d ' ')" == "$before_cancel_calls" ]]
+rm -f "$away_wake_state_file"
+fake_pmset_date=""
+
+# The unprivileged LaunchDaemon client emits only the fixed protocol and
+# accepts a root-owned nonce-matching response.
+helper_dir="$fixture_root/helper-requests"
+helper_path="$fixture_root/helper-bin"
+helper_plist="$fixture_root/helper.plist"
+mkdir -p "$helper_dir"
+chmod 700 "$helper_dir"
+cp "$away_script_dir/away/pmset-helper.sh" "$helper_path"
+: > "$helper_plist"
+chmod 755 "$helper_path"
+chmod 644 "$helper_plist"
+away_pmset_request_dir="$helper_dir"
+away_pmset_helper_path="$helper_path"
+away_pmset_helper_plist="$helper_plist"
+real_owner_uid() { stat -f '%u' "$1"; }
+away_file_owner_uid() {
+  case "$1" in
+    "$helper_path"|"$helper_plist"|"$helper_dir/response") printf '0\n' ;;
+    *) real_owner_uid "$1" ;;
+  esac
+}
+(
+  while [[ ! -f "$helper_dir/request" ]]; do /bin/sleep 0.02; done
+  cp "$helper_dir/request" "$fixture_root/helper-request-captured"
+  nonce="$(awk -F= '$1 == "nonce" {print substr($0, 7)}' "$helper_dir/request")"
+  rm -f "$helper_dir/request"
+  temporary_response="$(mktemp "$helper_dir/.fixture-response.XXXXXX")"
+  printf 'version=1\nnonce=%s\nstatus=ok\n' "$nonce" > "$temporary_response"
+  chmod 644 "$temporary_response"
+  mv "$temporary_response" "$helper_dir/response"
+) &
+helper_writer_pid=$!
+away_pmset_helper_mutate schedule wakeorpoweron "01/02/30 03:04:05" com.ori.wt-away-tick
+wait "$helper_writer_pid"
+grep -q '^operation=schedule$' "$fixture_root/helper-request-captured"
+grep -q '^date=01/02/30 03:04:05$' "$fixture_root/helper-request-captured"
+[[ ! -e "$helper_dir/request" && ! -e "$helper_dir/response" ]]
+if away_pmset_helper_mutate repeat wakeorpoweron "01/02/30 03:04:05" com.ori.wt-away-tick >/dev/null 2>&1; then
+  printf '%s\n' "wake helper accepted an unsupported operation" >&2
+  exit 1
+fi
+
+# Restore real file-inspection functions and repository paths after the helper
+# protocol fixture.
+AWAY_DISPATCH_SOURCE_ONLY=1 source "$repo_root/scripts/away-dispatch.sh"
+away_dev_root="$dev_root"
+away_tasks_dir="$dev_root/tasks"
+away_queue_file="$away_tasks_dir/away-queue.md"
+away_ledger_file="$away_tasks_dir/away-ledger.jsonl"
+away_wake_state_file="$away_tasks_dir/.away-wake.json"
+away_notify_state_file="$away_tasks_dir/.away-notify-state.json"
+tasks_dir="$away_tasks_dir"
 
 cat > "$away_queue_file" <<'QUEUE'
 # Trip queue
@@ -314,6 +471,11 @@ away_resolve_dev() {
   tasks_dir="$away_tasks_dir"
 }
 away_fetch_dev() { return 0; }
+away_schedule_next_wake() { return 0; }
+away_process_notifications() { return 0; }
+away_render_schedule_status() {
+  printf 'LaunchAgent: loaded (fixture)\nScheduled wake: fixture\n'
+}
 load_flight_index() {
   flight_numbers=()
   flight_states=()
@@ -371,5 +533,160 @@ tail -n 1 "$away_ledger_file" | jq -e '
   .action == "noop" and .armed == false and
   any(.skips[]; .reason == "disarmed")
 ' >/dev/null
+
+# Daily digest delivery is once per local day. Stall alerts fire once per state
+# transition, and a relay failure records the structured digest for retry.
+AWAY_DISPATCH_SOURCE_ONLY=1 source "$REAL_REPO_ROOT/scripts/away-dispatch.sh"
+repo_root="$REAL_REPO_ROOT"
+away_dev_root="$dev_root"
+away_tasks_dir="$dev_root/tasks"
+away_queue_file="$away_tasks_dir/away-queue.md"
+away_ledger_file="$away_tasks_dir/away-ledger.jsonl"
+away_wake_state_file="$away_tasks_dir/.away-wake.json"
+away_notify_state_file="$away_tasks_dir/.away-notify-state.json"
+tasks_dir="$away_tasks_dir"
+AWAY_TODAY="2030-01-02"
+cat > "$away_ledger_file" <<'LEDGER'
+{"ts":"2030-01-02T08:00:00Z","action":"dispatched","dispatched":{"slug":"digest-plan","branch":"feature/digest-plan"},"skips":[],"armed":true}
+LEDGER
+rm -f "$away_notify_state_file"
+away_dispatched_slug=""
+away_dispatched_branch=""
+away_active_count=0
+away_queue_slugs=("blocked-plan")
+away_skip_slugs=("blocked-plan")
+away_skip_reasons=("dep-unmerged")
+away_skip_details=("dependency is not merged")
+away_notifications_json='[]'
+notify_calls=0
+: > "$fixture_root/notify-messages"
+away_send_telegram() {
+  notify_calls=$((notify_calls + 1))
+  printf '%s\n---\n' "$1" >> "$fixture_root/notify-messages"
+  return 0
+}
+gh() {
+  printf '%s\n' '[{"number":42,"headRefName":"feature/digest-plan","title":"Digest PR","url":"https://example.invalid/42","isDraft":false}]'
+}
+herdr() {
+  printf '%s\n' '{"result":{"snapshot":{"agents":[{"pane_id":"p1","agent":"pi","agent_status":"blocked","cwd":"/tmp/digest-plan"}]}}}'
+}
+away_process_notifications
+[[ "$notify_calls" -eq 2 ]]
+jq -e '.last_digest_date == "2030-01-02" and .stall_state == "all-blocked"' \
+  "$away_notify_state_file" >/dev/null
+printf '%s\n' "$away_notifications_json" | jq -e '
+  any(.[]; .kind == "daily-digest" and .status == "sent" and
+    .payload.dispatched[0].slug == "digest-plan" and
+    .payload.prs_awaiting_approval[0].number == 42 and
+    .payload.blocked_agents[0].pane_id == "p1") and
+  any(.[]; .kind == "stall-alert" and .status == "sent" and .payload.state == "all-blocked")
+' >/dev/null
+grep -q 'Away Dispatcher daily digest' "$fixture_root/notify-messages"
+grep -q 'every remaining queue entry is blocked' "$fixture_root/notify-messages"
+
+# Same-day/same-state ticks are debounced.
+away_notifications_json='[]'
+away_process_notifications
+[[ "$notify_calls" -eq 2 ]]
+[[ "$away_notifications_json" == '[]' ]]
+
+# Clearing the stall rearms the transition. A later empty queue sends exactly
+# one distinct immediate alert.
+away_active_count=1
+away_process_notifications
+jq -e '.stall_state == "none"' "$away_notify_state_file" >/dev/null
+away_active_count=0
+away_queue_slugs=()
+away_skip_slugs=()
+away_skip_reasons=()
+away_skip_details=()
+away_notifications_json='[]'
+away_process_notifications
+[[ "$notify_calls" -eq 3 ]]
+printf '%s\n' "$away_notifications_json" | jq -e '
+  length == 1 and .[0].kind == "stall-alert" and .[0].payload.state == "queue-empty"
+' >/dev/null
+away_notifications_json='[]'
+away_process_notifications
+[[ "$notify_calls" -eq 3 ]]
+
+# Failure leaves the date unsent, records the full digest on the tick, and does
+# not fail the dispatcher cycle.
+jq -cn '{last_digest_date:"2030-01-01",stall_state:"none",updated_at:"fixture"}' \
+  > "$away_notify_state_file"
+away_queue_slugs=("static-problem")
+away_skip_slugs=("static-problem")
+away_skip_reasons=("missing-plan")
+away_skip_details=("fixture")
+away_notifications_json='[]'
+away_send_telegram() {
+  away_notify_error="relay-unreachable"
+  return 1
+}
+away_process_notifications
+printf '%s\n' "$away_notifications_json" | jq -e '
+  any(.[]; .kind == "daily-digest" and .status == "deferred" and
+    .error == "relay-unreachable" and .payload.date == "2030-01-02")
+' >/dev/null
+jq -e '.last_digest_date == "2030-01-01"' "$away_notify_state_file" >/dev/null
+away_tick_error=""
+away_append_ledger true
+tail -n 1 "$away_ledger_file" | jq -e '
+  any(.notifications[]; .kind == "daily-digest" and .status == "deferred" and
+    (.payload.standing_skips | length) == 1)
+' >/dev/null
+
+# Arming's herdr prerequisite gate checks the exact pin/config/service/plugin
+# chain and rejects any non-loopback listener.
+(
+  source_dir="$fixture_root/herdr-source"
+  config_dir="$fixture_root/herdr-config"
+  mkdir -p "$source_dir/.git" "$source_dir/relay" "$config_dir"
+  cat > "$config_dir/config.env" <<CONFIG
+HERDR_RELAY_PORT=8375
+HERDR_RELAY_DIR=$source_dir/relay
+HERDR_TUNNEL_MODE=none
+HERDR_TG_ENABLED=true
+HERDR_TG_CHAT_TYPE=private
+CONFIG
+  cat > "$config_dir/secrets.env" <<'SECRETS'
+HERDR_RELAY_TOKEN=0123456789abcdef0123456789abcdef
+HERDR_TG_TOKEN=123456:fixture_token
+HERDR_TG_CHAT_ID=123456
+HERDR_RELAY=ws://127.0.0.1:8375?token=0123456789abcdef0123456789abcdef
+SECRETS
+  chmod 644 "$config_dir/config.env"
+  chmod 600 "$config_dir/secrets.env"
+  away_herdr_source_dir="$source_dir"
+  away_herdr_expected_commit="fixture-pin"
+  away_herdr_config_file="$config_dir/config.env"
+  away_herdr_secrets_file="$config_dir/secrets.env"
+  git() {
+    case "$*" in
+      *"rev-parse HEAD"*) printf '%s\n' fixture-pin ;;
+      *"status --porcelain"*) ;;
+      *) command git "$@" ;;
+    esac
+  }
+  herdr() {
+    printf '%s\n' "- herdr-remote.relay (Herdr Remote Relay) enabled [local:$source_dir/relay]"
+  }
+  away_launchctl() {
+    case "$*" in
+      "print gui/$(id -u)/com.herdr-remote.relay"|"print gui/$(id -u)/com.herdr-remote.telegram") return 0 ;;
+      "print gui/$(id -u)/com.herdr-remote.tunnel") return 1 ;;
+      "getenv HERDR_RELAY_HOST") return 0 ;;
+      *) return 1 ;;
+    esac
+  }
+  lsof() { printf '%s\n' p123 n127.0.0.1:8375; }
+  away_verify_herdr_remote
+  lsof() { printf '%s\n' p123 'n*:8375'; }
+  if away_verify_herdr_remote >/dev/null 2>&1; then
+    printf '%s\n' "public herdr listener passed the arming gate" >&2
+    exit 1
+  fi
+)
 
 printf '%s\n' "away-dispatch.test.sh: OK"
