@@ -539,6 +539,15 @@
 .cockpit-context-modal {
   --bs-modal-width: 640px;
   --bs-modal-margin: 1rem;
+  /* workspace-map.css owns the shared inline portrait geometry; define its
+     presentation tokens here too because this modal sits outside .ws-map. */
+  --ws-faction: var(--hc-signal);
+  --ws-keeper: var(--hc-amber);
+  --ws-portrait-figure: #07110d;
+  --ws-portrait-label-bg: rgb(7 12 15 / 90%);
+  --ws-portrait-label-ink: #f5f7f8;
+  --ws-portrait-edge: rgb(31 33 40 / 28%);
+  --ws-font-mono: "JetBrains Mono", ui-monospace, monospace;
 }
 
 .cockpit-context-modal .modal-dialog {
@@ -585,6 +594,10 @@
 .cockpit-context-modal .btn-close:hover,
 .cockpit-context-modal .btn-close:focus-visible {
   opacity: 1;
+}
+
+[data-bs-theme="dark"] .cockpit-context-modal {
+  --ws-portrait-edge: rgb(255 255 255 / 20%);
 }
 
 [data-bs-theme="dark"] .cockpit-context-modal .cockpit-context-modal__content {
@@ -807,6 +820,23 @@
   text-transform: uppercase;
 }
 
+.cockpit-rail-commander {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  min-width: 0;
+  padding: 3px;
+}
+
+.cockpit-rail-commander-state {
+  padding-bottom: 4px;
+  color: var(--hc-amber);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 9.5px;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+}
+
 .cockpit-rail-roster {
   display: grid;
   gap: 4px;
@@ -824,6 +854,40 @@
   border: 1px solid var(--hc-line);
   background: var(--hc-panel-deep);
   font-size: 12px;
+}
+
+.cockpit-rail-agent-portraits {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px 7px;
+}
+
+.cockpit-rail-agent-portraits .cockpit-rail-agent-portrait {
+  flex: 0 1 auto;
+  flex-wrap: nowrap;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
+  padding: 3px;
+  border: 0;
+  background: transparent;
+}
+
+.cockpit-rail-agent-meta {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  max-width: 112px;
+}
+
+.cockpit-rail-portrait-fallback {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--hc-ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .cockpit-rail-roster-name {

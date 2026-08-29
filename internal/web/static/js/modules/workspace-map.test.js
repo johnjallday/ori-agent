@@ -1639,7 +1639,7 @@ test('a hostile group name is escaped everywhere it appears (#346 FR-136)', () =
   );
 });
 
-test('overviewBodyHTML renders entry agent, roster, and tool/skill counts from enriched fields', () => {
+test('overviewBodyHTML renders generated portraits for the Commander and every roster agent', () => {
   const { overviewBodyHTML } = loadOriWorkspaceMap();
   const html = overviewBodyHTML({
     id: 'a',
@@ -1652,13 +1652,133 @@ test('overviewBodyHTML renders entry agent, roster, and tool/skill counts from e
     skill_count: 3
   });
 
-  assert.match(html, /Research Lead/);
+  const portraits = html.match(/<span class="ws-map-av(?: [^"]*)?"/g) || [];
+  assert.equal(portraits.length, 3, 'one Commander portrait plus one per supplied agent');
+  assert.equal(
+    (html.match(/<svg class="ws-map-av-figure"/g) || []).length,
+    3,
+    'every portrait contains an inline figure'
+  );
+  assert.equal((html.match(/<circle class="ws-map-av-head"/g) || []).length, 3);
+  assert.equal((html.match(/<line class="ws-map-av-body"/g) || []).length, 3);
+  assert.equal((html.match(/<line class="ws-map-av-arms"/g) || []).length, 3);
+  assert.equal((html.match(/<path class="ws-map-av-legs"/g) || []).length, 3);
+  assert.equal(
+    (html.match(/aria-hidden="true" focusable="false"/g) || []).length,
+    3,
+    'the named portrait keeps its geometric SVG decorative'
+  );
+  assert.equal(
+    (html.match(/class="ws-map-av-label"/g) || []).length,
+    3,
+    'each figure carries a visible agent-name label'
+  );
+
+  const rosterStart = html.indexOf('<div class="ws-map-ov-roster">');
+  const rosterEnd = html.indexOf('<div class="ws-map-ov-row">', rosterStart);
+  const roster = html.slice(rosterStart, rosterEnd);
+  assert.equal(
+    (roster.match(/<span class="ws-map-av(?: [^"]*)?"/g) || []).length,
+    2,
+    'the roster does not add or drop agent portraits'
+  );
+  assert.equal((html.match(/ws-map-av is-keeper/g) || []).length, 1);
   assert.match(html, /Locked · can&#39;t remove/);
   assert.match(html, /Agents · 2/);
-  assert.match(html, /ws-map-av/); // roster avatar chips rendered
+
+  const leadPortraits =
+    html.match(/<span class="ws-map-av[^"]*" style="--av:[^"]+" title="Research Lead">/g) || [];
+  assert.equal(leadPortraits.length, 2, 'the Commander also remains in the roster');
+  assert.equal(
+    leadPortraits[0].match(/style="([^"]+)"/)[1],
+    leadPortraits[1].match(/style="([^"]+)"/)[1],
+    'the name deterministically selects the same palette color'
+  );
+
   assert.match(html, /2 open</);
   assert.match(html, /ws-map-ov-k">Tools · MCP<\/span><span class="ws-map-ov-v">1</);
   assert.match(html, /ws-map-ov-k">Skills<\/span><span class="ws-map-ov-v">3</);
+});
+
+test('the shared Map API exposes the same generated portrait to its current Home host', () => {
+  const { agentPortraitHTML } = loadOriWorkspaceMap();
+  const html = agentPortraitHTML('Research Lead', true);
+
+  assert.match(html, /class="ws-map-av is-keeper"/);
+  assert.match(html, /<svg class="ws-map-av-figure"/);
+  assert.match(html, /class="ws-map-av-label" title="Research Lead">Research Lead</);
+});
+
+test('overviewBodyHTML escapes hostile agent names in portrait text and attributes', () => {
+  const { overviewBodyHTML } = loadOriWorkspaceMap();
+  const hostileName = 'Eve"><img src=x onerror="alert(1)"> & Co';
+  const safeName = 'Eve&quot;&gt;&lt;img src=x onerror=&quot;alert(1)&quot;&gt; &amp; Co';
+  const html = overviewBodyHTML({
+    id: 'hostile',
+    name: 'Security',
+    entry_agent_name: hostileName,
+    agents: [hostileName]
+  });
+
+  assert.doesNotMatch(html, /<img|onerror="alert|Eve">/);
+  assert.equal(
+    html.split(safeName).length - 1,
+    6,
+    'both portraits escape the name in their title, label title, and visible text'
+  );
+  assert.ok(html.includes('title="' + safeName + '"'));
+  assert.ok(html.includes('class="ws-map-av-label" title="' + safeName + '">' + safeName));
+});
+
+test('overviewBodyHTML keeps the full agent name available when portrait labels truncate', () => {
+  const { overviewBodyHTML } = loadOriWorkspaceMap();
+  const longName = 'Principal Interplanetary Research Coordination Specialist';
+  const html = overviewBodyHTML({
+    id: 'long-name',
+    name: 'Research',
+    agents: [longName]
+  });
+
+  assert.match(
+    html,
+    new RegExp('class="ws-map-av-label" title="' + longName + '">' + longName + '<\\/span>')
+  );
+  assert.match(html, new RegExp('class="ws-map-av"[^>]*title="' + longName + '"'));
+});
+
+test('Workspace Map CSS keeps generated portraits compact, legible, and responsive', () => {
+  function ruleFor(selector, source = mapCSS) {
+    const start = source.indexOf(selector + ' {');
+    assert.notEqual(start, -1, selector + ' rule exists');
+    return source.slice(start, source.indexOf('}', start) + 1);
+  }
+
+  const rosterRule = ruleFor('.ws-map-ov-roster');
+  assert.match(rosterRule, /flex-wrap:\s*wrap/);
+  assert.match(rosterRule, /align-items:\s*flex-start/);
+
+  const portraitRule = ruleFor('.ws-map-av');
+  assert.match(portraitRule, /position:\s*relative/);
+  assert.match(portraitRule, /max-width:\s*100%/);
+  assert.match(portraitRule, /overflow:\s*hidden/);
+  assert.match(portraitRule, /var\(--av, var\(--ws-faction\)\)/);
+
+  const figureRule = ruleFor('.ws-map-av-figure');
+  assert.match(figureRule, /stroke:\s*currentcolor/);
+  assert.match(figureRule, /stroke-linecap:\s*round/);
+
+  const labelRule = ruleFor('.ws-map-av-label');
+  assert.match(labelRule, /position:\s*absolute/);
+  assert.match(labelRule, /text-overflow:\s*ellipsis/);
+  assert.match(labelRule, /white-space:\s*nowrap/);
+  assert.match(labelRule, /--ws-portrait-label-(?:ink|bg)/);
+
+  const keeperRule = ruleFor('.ws-map-av.is-keeper');
+  assert.match(keeperRule, /--ws-keeper/);
+  assert.match(mapCSS, /\[data-bs-theme="light"\] \.ws-map \{[^}]*--ws-portrait-label-bg:/s);
+
+  const narrowRules = mapCSS.slice(mapCSS.indexOf('@media (max-width: 900px)'));
+  assert.match(narrowRules, /\.ws-map-ov-roster \.ws-map-av \{[^}]*flex-basis:\s*72px/s);
 });
 
 test('overviewBodyHTML puts the primary Open action in the hero row and drops the duplicate cog', () => {
