@@ -758,12 +758,18 @@ func TestConcurrentLifecycleChangesAreSafeDuringCatalogAssetStatusAndOperationRe
 	}
 }
 
-type agentRuntimeStatus struct{}
+type agentRuntimeStatus struct {
+	grants map[string]bool
+}
 
 func (agentRuntimeStatus) Status(context.Context, string) (runtimecapability.Status, error) {
 	return runtimecapability.Status{Requirements: []runtimecapability.RequirementStatus{{
 		Key: "demo_runtime", DurableState: runtimecapability.DurableConfigured, LiveState: runtimecapability.LiveAvailable,
 	}}}, nil
+}
+
+func (s agentRuntimeStatus) HasActiveGrant(_ context.Context, _ string, requirementKey, agentInstanceID string) (bool, error) {
+	return s.grants[requirementKey+"\x00"+agentInstanceID], nil
 }
 
 func agentErrorCode(err error) string {
@@ -779,7 +785,8 @@ func TestAgentOperationAdapterRequiresExactGrantAndUsesHostConfirmation(t *testi
 	store := fixture.handler.workspaces.(testWorkspaceStore)
 	ws := store.workspaces[fixture.workspaceID]
 	ws.AgentInstances = []workspace.AgentInstance{{ID: "agent-a", Name: "Agent A"}, {ID: "agent-b", Name: "Agent B"}}
-	fixture.handler.SetAgentRuntimeService(agentRuntimeStatus{})
+	runtimeStatus := &agentRuntimeStatus{grants: make(map[string]bool)}
+	fixture.handler.SetAgentRuntimeService(runtimeStatus)
 	request := AgentOperationRequest{
 		WorkspaceID: fixture.workspaceID, AgentInstanceID: "agent-a",
 		PluginID: "workspace-surface-demo", CapabilityID: "demo-tools",
@@ -794,6 +801,10 @@ func TestAgentOperationAdapterRequiresExactGrantAndUsesHostConfirmation(t *testi
 	if _, err := ws.GrantRuntimeCapability("demo_runtime", "agent-a", time.Now()); err != nil {
 		t.Fatal(err)
 	}
+	runtimeStatus.grants["demo_runtime\x00agent-a"] = true
+	// The catalog/database workspace projection may omit portable runtime state;
+	// authorization must come from the canonical folder-backed runtime service.
+	ws.SetRuntimeState(nil)
 	tools := fixture.handler.AgentTools(context.Background(), fixture.workspaceID, "agent-a")
 	if len(tools) != 2 {
 		t.Fatalf("agent tools = %+v", tools)

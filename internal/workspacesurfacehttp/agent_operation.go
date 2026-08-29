@@ -16,6 +16,7 @@ import (
 // code cannot implement or select it through a workspace record.
 type AgentRuntimeService interface {
 	Status(context.Context, string) (runtimecapability.Status, error)
+	HasActiveGrant(context.Context, string, string, string) (bool, error)
 }
 
 func (h *Handler) SetAgentRuntimeService(service AgentRuntimeService) {
@@ -87,8 +88,11 @@ func (h *Handler) AgentTools(ctx context.Context, workspaceID, agentInstanceID s
 			continue
 		}
 		if key := surface.Capability.RuntimeRequirementKey; key != "" {
-			state := ws.GetRuntimeState()
-			if state == nil || !state.HasActiveRuntimeGrant(key, agentInstanceID) || h.runtime == nil {
+			if h.runtime == nil {
+				continue
+			}
+			granted, grantErr := h.runtime.HasActiveGrant(ctx, workspaceID, key, agentInstanceID)
+			if grantErr != nil || !granted {
 				continue
 			}
 			status, statusErr := h.runtime.Status(ctx, workspaceID)
@@ -258,12 +262,12 @@ func (h *Handler) resolveAgentOperation(ctx context.Context, request AgentOperat
 		return resolvedAgentOperation{}, agentError("input_invalid", "The plugin operation input is invalid.")
 	}
 	if requirementKey := selected.Capability.RuntimeRequirementKey; requirementKey != "" {
-		state := ws.GetRuntimeState()
-		if state == nil || !state.HasActiveRuntimeGrant(requirementKey, strings.TrimSpace(request.AgentInstanceID)) {
-			return resolvedAgentOperation{}, agentError("runtime_grant_required", "This operation requires an authorized runtime grant for this agent.")
-		}
 		if h.runtime == nil {
 			return resolvedAgentOperation{}, agentError("provider_unavailable", runtimecapability.ProviderUnavailableMessage)
+		}
+		granted, grantErr := h.runtime.HasActiveGrant(ctx, workspaceID, requirementKey, strings.TrimSpace(request.AgentInstanceID))
+		if grantErr != nil || !granted {
+			return resolvedAgentOperation{}, agentError("runtime_grant_required", "This operation requires an authorized runtime grant for this agent.")
 		}
 		status, statusErr := h.runtime.Status(ctx, workspaceID)
 		if statusErr != nil || !runtimeRequirementHealthy(status, requirementKey) {

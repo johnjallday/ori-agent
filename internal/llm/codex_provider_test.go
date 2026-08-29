@@ -144,6 +144,66 @@ func countModel(models []string, target string) int {
 	return count
 }
 
+func TestCodexProviderCapabilitiesIncludeBrokeredTools(t *testing.T) {
+	capabilities := (&CodexProvider{}).Capabilities()
+	if !capabilities.SupportsTools || !capabilities.SupportsNativeMCP || !capabilities.SupportsStructuredOutput {
+		t.Fatalf("codex capabilities = %+v", capabilities)
+	}
+}
+
+func TestCodexBrokeredToolProtocolAndResponse(t *testing.T) {
+	tools := []Tool{{
+		Name: "plugin_reaper_tidy_survey", Description: "Run the survey.",
+		Parameters: map[string]any{"type": "object", "additionalProperties": false},
+	}}
+	prompt, err := appendCodexBrokeredToolProtocol("User:\nSurvey", tools)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"not Codex MCP servers", "plugin_reaper_tidy_survey", "arguments_json"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("tool prompt missing %q: %s", want, prompt)
+		}
+	}
+
+	toolResponse, err := decodeCodexBrokeredToolResponse(
+		`{"kind":"tool_call","content":"","tool_name":"plugin_reaper_tidy_survey","arguments_json":"{}"}`,
+		tools,
+		&ChatResponse{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if toolResponse.FinishReason != FinishReasonToolCalls || len(toolResponse.ToolCalls) != 1 ||
+		toolResponse.ToolCalls[0].Name != tools[0].Name || toolResponse.ToolCalls[0].Arguments != "{}" || toolResponse.ToolCalls[0].ID == "" {
+		t.Fatalf("tool response = %+v", toolResponse)
+	}
+
+	finalResponse, err := decodeCodexBrokeredToolResponse(
+		`{"kind":"final","content":"Survey complete.","tool_name":"","arguments_json":"{}"}`,
+		tools,
+		&ChatResponse{},
+	)
+	if err != nil || finalResponse.Content != "Survey complete." || len(finalResponse.ToolCalls) != 0 {
+		t.Fatalf("final response = %+v, %v", finalResponse, err)
+	}
+}
+
+func TestCodexBrokeredToolResponseRejectsUntrustedShape(t *testing.T) {
+	tools := []Tool{{Name: "allowed", Parameters: map[string]any{"type": "object"}}}
+	cases := []string{
+		`{"kind":"tool_call","content":"","tool_name":"other","arguments_json":"{}"}`,
+		`{"kind":"tool_call","content":"","tool_name":"allowed","arguments_json":"[]"}`,
+		`{"kind":"final","content":"done","tool_name":"allowed","arguments_json":"{}"}`,
+		`{"kind":"final","content":"done","tool_name":"","arguments_json":"{}"} {}`,
+	}
+	for _, input := range cases {
+		if _, err := decodeCodexBrokeredToolResponse(input, tools, &ChatResponse{}); err == nil {
+			t.Fatalf("expected refusal for %s", input)
+		}
+	}
+}
+
 func TestNormalizeCodexReasoningEffort(t *testing.T) {
 	tests := []struct {
 		input string

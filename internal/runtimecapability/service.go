@@ -209,6 +209,22 @@ func (s *Service) EvaluateTaskCapabilityForTask(workspaceID string, task workspa
 	return s.EvaluateTaskCapability(workspaceID, capability)
 }
 
+// HasActiveGrant reads the canonical folder-backed runtime state. Callers must
+// not inspect a catalog/database workspace projection for grants because those
+// portable fields can lag or be absent even while the canonical workspace.json
+// is current.
+func (s *Service) HasActiveGrant(_ context.Context, workspaceID, requirementKey, agentInstanceID string) (bool, error) {
+	ws, _, _, err := s.loadSelected(workspaceID)
+	if err != nil {
+		return false, err
+	}
+	state := ws.GetRuntimeState()
+	if state == nil {
+		return false, nil
+	}
+	return state.HasActiveRuntimeGrant(requirementKey, agentInstanceID), nil
+}
+
 // ResolveTaskExecutionScope returns authority only for runtime keys this task
 // actually declares, granted to this exact agent in the selected mode. It
 // revalidates adapter-owned roots immediately before invocation. Ordinary tasks,
