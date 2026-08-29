@@ -64,8 +64,11 @@
   --ws-input: #f08a4b;
   --ws-done: #93d66b;
 
-  /* generated agent portraits shared with Workspace Map */
-  --ws-portrait-figure: #07110d;
+  /* generated Pocket Resident portraits shared with Workspace Map */
+  --ws-resident-cream: #f7efdc;
+  --ws-resident-outline: #241c12;
+  --ws-portrait-field: #182126;
+  --ws-portrait-field-deep: #0b1013;
   --ws-portrait-label-bg: rgba(7, 12, 15, 0.9);
   --ws-portrait-label-ink: #f5f7f8;
   --ws-portrait-edge: rgba(255, 255, 255, 0.2);
@@ -3534,6 +3537,13 @@ button.ws-cmd-rpg-class-card:focus-visible {
   padding: 1px 2px;
   font-size: 6.5px;
 }
+.ws-cmd-character.is-roster.ws-map-av .ws-map-av-commander-mark {
+  top: 2px;
+  right: 2px;
+  width: 10px;
+  height: 10px;
+  font-size: 5px;
+}
 .ws-cmd-character.is-stage.ws-map-av {
   width: min(200px, 74%);
   height: auto;
@@ -3549,6 +3559,13 @@ button.ws-cmd-rpg-class-card:focus-visible {
   bottom: 8px;
   left: 8px;
   padding: 4px 6px;
+  font-size: 11px;
+}
+.ws-cmd-character.is-stage.ws-map-av .ws-map-av-commander-mark {
+  top: 8px;
+  right: 8px;
+  width: 24px;
+  height: 24px;
   font-size: 11px;
 }
 
@@ -5165,6 +5182,13 @@ button.ws-cmd-rpg-class-card:focus-visible {
   padding: 1px;
   font-size: 5.5px;
 }
+.ws-cmd-mrow-av.ws-map-av .ws-map-av-commander-mark {
+  top: 1px;
+  right: 1px;
+  width: 8px;
+  height: 8px;
+  font-size: 4px;
+}
 
 /* Shown when neither portrait renderer has loaded. */
 .ws-cmd-mrow-av.is-initials {
@@ -5277,7 +5301,10 @@ button.ws-cmd-rpg-class-card:focus-visible {
   --ws-working: #1f6b4e;
   --ws-alert: #b94b3f;
 
-  --ws-portrait-figure: #07110d;
+  --ws-resident-cream: #fff7e5;
+  --ws-resident-outline: #241c12;
+  --ws-portrait-field: #eef1f1;
+  --ws-portrait-field-deep: #cfd8da;
   --ws-portrait-label-bg: rgba(20, 23, 27, 0.92);
   --ws-portrait-label-ink: #f5f7f8;
   --ws-portrait-edge: rgba(31, 33, 40, 0.28);

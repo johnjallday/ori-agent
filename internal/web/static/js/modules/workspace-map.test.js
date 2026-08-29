@@ -1647,7 +1647,7 @@ test('a hostile group name is escaped everywhere it appears (#346 FR-136)', () =
   );
 });
 
-test('overviewBodyHTML renders generated portraits for the Commander and every roster agent', () => {
+test('overviewBodyHTML renders generated pocket residents for the Commander and every roster agent', () => {
   const { overviewBodyHTML } = loadOriWorkspaceMap();
   const html = overviewBodyHTML({
     id: 'a',
@@ -1668,13 +1668,17 @@ test('overviewBodyHTML renders generated portraits for the Commander and every r
     'every portrait contains an inline figure'
   );
   assert.equal((html.match(/<circle class="ws-map-av-head"/g) || []).length, 3);
-  assert.equal((html.match(/<line class="ws-map-av-body"/g) || []).length, 3);
-  assert.equal((html.match(/<line class="ws-map-av-arms"/g) || []).length, 3);
+  assert.equal((html.match(/<rect class="ws-map-av-body"/g) || []).length, 3);
+  assert.equal((html.match(/<path class="ws-map-av-arms"/g) || []).length, 3);
   assert.equal((html.match(/<path class="ws-map-av-legs"/g) || []).length, 3);
+  assert.equal((html.match(/class="ws-map-av-eye"/g) || []).length, 6);
+  assert.equal((html.match(/class="ws-map-av-smile"/g) || []).length, 3);
+  assert.equal((html.match(/class="ws-map-av-crown"/g) || []).length, 1);
+  assert.equal((html.match(/class="ws-map-av-commander-mark"/g) || []).length, 1);
   assert.equal(
     (html.match(/aria-hidden="true" focusable="false"/g) || []).length,
     3,
-    'the named portrait keeps its geometric SVG decorative'
+    'the named resident keeps its geometric SVG decorative'
   );
   assert.equal(
     (html.match(/class="ws-map-av-label"/g) || []).length,
@@ -1708,12 +1712,14 @@ test('overviewBodyHTML renders generated portraits for the Commander and every r
   assert.match(html, /ws-map-ov-k">Skills<\/span><span class="ws-map-ov-v">3</);
 });
 
-test('the shared Map API exposes the same generated portrait to every workspace host', () => {
+test('the shared Map API exposes the same cute generated resident to every workspace host', () => {
   const { agentPortraitHTML } = loadOriWorkspaceMap();
   const html = agentPortraitHTML('Research Lead', true);
 
   assert.match(html, /class="ws-map-av is-keeper"/);
   assert.match(html, /<svg class="ws-map-av-figure"/);
+  assert.match(html, /class="ws-map-av-crown"/);
+  assert.match(html, /class="ws-map-av-commander-mark"[^>]*>★</);
   assert.match(html, /class="ws-map-av-label" title="Research Lead">Research Lead</);
 });
 
@@ -1726,14 +1732,21 @@ test('the shared portrait renderer accepts only safe consumer layout classes', (
     className: 'ws-cmd-character is-stage bad" onclick=alert(1) ws-cmd-character'
   });
   const second = portrait.markup('Research Lead', { className: 'workspace-detail-agent-avatar' });
+  const repeated = portrait.markup('Research Lead');
 
   assert.match(first, /class="ws-map-av is-keeper ws-cmd-character is-stage"/);
   assert.doesNotMatch(first, /onclick|bad&quot;|bad"/);
   assert.match(second, /class="ws-map-av workspace-detail-agent-avatar"/);
+  assert.match(second, /class="ws-map-av-accessory is-(?:ears|sprout|tuft|antenna)"/);
   assert.equal(
     first.match(/style="--av:([^"]+)"/)[1],
     second.match(/style="--av:([^"]+)"/)[1],
     'consumer geometry does not change the deterministic name palette'
+  );
+  assert.equal(
+    second.match(/class="ws-map-av-accessory (is-[^"]+)"/)[1],
+    repeated.match(/class="ws-map-av-accessory (is-[^"]+)"/)[1],
+    'the name deterministically selects the same bounded resident accessory'
   );
 });
 
@@ -1790,10 +1803,17 @@ test('Workspace Map CSS keeps generated portraits compact, legible, and responsi
   assert.match(portraitRule, /max-width:\s*100%/);
   assert.match(portraitRule, /overflow:\s*hidden/);
   assert.match(portraitRule, /var\(--av, #46d39a\)/);
+  assert.match(portraitRule, /--ws-portrait-field/);
 
   const figureRule = ruleFor('.ws-map-av-figure');
-  assert.match(figureRule, /stroke:\s*currentcolor/);
-  assert.match(figureRule, /stroke-linecap:\s*round/);
+  assert.match(figureRule, /overflow:\s*visible/);
+
+  const residentRule = ruleFor('.ws-map-av-head');
+  assert.match(residentRule, /--ws-resident-cream/);
+  assert.match(residentRule, /--ws-resident-outline/);
+  assert.match(mapCSS, /\.ws-map-av-eye\s*\{[^}]*--ws-resident-outline/s);
+  assert.match(mapCSS, /\.ws-map-av-smile\s*\{[^}]*stroke-linecap:\s*round/s);
+  assert.match(mapCSS, /\.ws-map-av-commander-mark\s*\{[^}]*position:\s*absolute/s);
 
   const labelRule = ruleFor('.ws-map-av-label');
   assert.match(labelRule, /position:\s*absolute/);

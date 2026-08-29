@@ -543,7 +543,10 @@
      presentation tokens here too because this modal sits outside .ws-map. */
   --ws-faction: var(--hc-signal);
   --ws-keeper: var(--hc-amber);
-  --ws-portrait-figure: #07110d;
+  --ws-resident-cream: #fff7e5;
+  --ws-resident-outline: #241c12;
+  --ws-portrait-field: #eef1f1;
+  --ws-portrait-field-deep: #cfd8da;
   --ws-portrait-label-bg: rgb(7 12 15 / 90%);
   --ws-portrait-label-ink: #f5f7f8;
   --ws-portrait-edge: rgb(31 33 40 / 28%);
@@ -597,6 +600,9 @@
 }
 
 [data-bs-theme="dark"] .cockpit-context-modal {
+  --ws-resident-cream: #f7efdc;
+  --ws-portrait-field: #182126;
+  --ws-portrait-field-deep: #0b1013;
   --ws-portrait-edge: rgb(255 255 255 / 20%);
 }
 

@@ -63,8 +63,11 @@
   --ws-working: #46d39a;
   --ws-alert: #e2654d;
 
-  /* generated agent portraits */
-  --ws-portrait-figure: #07110d;
+  /* generated Pocket Resident portraits */
+  --ws-resident-cream: #f7efdc;
+  --ws-resident-outline: #241c12;
+  --ws-portrait-field: #182126;
+  --ws-portrait-field-deep: #0b1013;
   --ws-portrait-label-bg: rgba(7, 12, 15, 0.9);
   --ws-portrait-label-ink: #f5f7f8;
   --ws-portrait-edge: rgba(255, 255, 255, 0.2);
@@ -1857,28 +1860,108 @@
   display: grid;
   place-items: start center;
   overflow: hidden;
-  color: var(--ws-portrait-figure, #07110d);
-  background: linear-gradient(
-    150deg,
-    color-mix(in srgb, var(--av, #46d39a) 88%, #fff),
-    color-mix(in srgb, var(--av, #46d39a) 68%, #000)
-  );
+  color: var(--ws-resident-outline, #241c12);
+  background:
+    radial-gradient(
+      circle at 50% 39%,
+      color-mix(in srgb, var(--av, #46d39a) 28%, transparent),
+      transparent 48%
+    ),
+    linear-gradient(
+      150deg,
+      var(--ws-portrait-field, #182126),
+      var(--ws-portrait-field-deep, #0b1013)
+    );
   box-shadow: inset 0 0 0 1px var(--ws-portrait-edge, rgba(255, 255, 255, 0.2));
   clip-path: polygon(7px 0, 100% 0, 100% calc(100% - 7px), calc(100% - 7px) 100%, 0 100%, 0 7px);
 }
 .ws-map-av-figure {
-  width: 46px;
-  height: 56px;
+  width: 45px;
+  height: 52px;
   margin-top: 1px;
   overflow: visible;
+}
+.ws-map-av-figure > *,
+.ws-map-av-figure g > * {
+  vector-effect: non-scaling-stroke;
+}
+.ws-map-av-head {
+  fill: var(--ws-resident-cream, #f7efdc);
+  stroke: var(--ws-resident-outline, #241c12);
+  stroke-width: 2.1;
+}
+.ws-map-av-body,
+.ws-map-av-hand {
+  fill: var(--ws-resident-cream, #f7efdc);
+  stroke: var(--ws-resident-outline, #241c12);
+  stroke-width: 2.1;
+}
+.ws-map-av-arms,
+.ws-map-av-legs {
   fill: none;
-  stroke: currentcolor;
-  stroke-width: 3;
+  stroke: var(--ws-resident-outline, #241c12);
+  stroke-width: 2.2;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
-.ws-map-av-head {
-  fill: color-mix(in srgb, var(--av, var(--ws-faction)) 24%, #fff);
+.ws-map-av-scarf,
+.ws-map-av-scarf-tail {
+  fill: color-mix(in srgb, var(--av, #46d39a) 56%, var(--ws-resident-cream, #f7efdc));
+  stroke: var(--ws-resident-outline, #241c12);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}
+.ws-map-av-scarf-tail {
+  fill: var(--av, #46d39a);
+}
+.ws-map-av-eye {
+  fill: var(--ws-resident-outline, #241c12);
+}
+.ws-map-av-smile {
+  fill: none;
+  stroke: var(--ws-resident-outline, #241c12);
+  stroke-width: 1.8;
+  stroke-linecap: round;
+}
+.ws-map-av-accessory-shape,
+.ws-map-av-accessory-leaf {
+  fill: color-mix(in srgb, var(--av, #46d39a) 58%, var(--ws-resident-cream, #f7efdc));
+  stroke: var(--ws-resident-outline, #241c12);
+  stroke-width: 1.7;
+  stroke-linejoin: round;
+}
+.ws-map-av-accessory-stem {
+  fill: none;
+  stroke: var(--ws-resident-outline, #241c12);
+  stroke-width: 1.7;
+  stroke-linecap: round;
+}
+.ws-map-av-crown {
+  fill: var(--ws-keeper, #e8b54b);
+  stroke: var(--ws-resident-outline, #241c12);
+  stroke-width: 1.8;
+  stroke-linejoin: round;
+}
+.ws-map-av-keeper-badge {
+  fill: var(--ws-keeper, #e8b54b);
+  stroke: var(--ws-resident-outline, #241c12);
+  stroke-width: 1.5;
+}
+.ws-map-av-commander-mark {
+  position: absolute;
+  z-index: 2;
+  top: 4px;
+  right: 4px;
+  width: 14px;
+  height: 14px;
+  display: grid;
+  place-items: center;
+  color: var(--ws-keeper, #e8b54b);
+  background: color-mix(in srgb, var(--ws-keeper-deep, #3a2c0c) 88%, transparent);
+  border: 1px solid color-mix(in srgb, var(--ws-keeper, #e8b54b) 68%, transparent);
+  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+  font-size: 7px;
+  line-height: 1;
 }
 .ws-map-av-label {
   position: absolute;
@@ -1904,8 +1987,9 @@
   flex-basis: 92px;
   width: 92px;
   box-shadow:
-    inset 0 0 0 3px var(--ws-keeper, #e8b54b),
-    0 0 12px color-mix(in srgb, var(--ws-keeper, #e8b54b) 38%, transparent);
+    inset 3px 0 0 var(--ws-keeper, #e8b54b),
+    inset 0 0 0 1px var(--ws-portrait-edge, rgba(255, 255, 255, 0.2)),
+    0 0 12px color-mix(in srgb, var(--ws-keeper, #e8b54b) 28%, transparent);
 }
 
 .ws-map-ov-row {
@@ -2166,6 +2250,13 @@
 
 /* Light mode keeps the tactical structure but aligns surfaces and ink with the
    surrounding Ori shell instead of mixing a dark command center into a light page. */
+[data-bs-theme="light"] .ws-map-av {
+  --ws-resident-cream: #fff7e5;
+  --ws-resident-outline: #241c12;
+  --ws-portrait-field: #eef1f1;
+  --ws-portrait-field-deep: #cfd8da;
+}
+
 [data-bs-theme="light"] .ws-map {
   --ws-bg: #eef1f3;
   --ws-bg-2: #f7f8f9;
@@ -2188,6 +2279,8 @@
   --ws-working: #1f6b4e;
   --ws-alert: #b94b3f;
 
+  --ws-portrait-field: #eef1f1;
+  --ws-portrait-field-deep: #cfd8da;
   --ws-portrait-label-bg: rgba(20, 23, 27, 0.92);
   --ws-portrait-edge: rgba(31, 33, 40, 0.28);
 
