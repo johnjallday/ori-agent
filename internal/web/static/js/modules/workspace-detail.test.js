@@ -742,11 +742,10 @@ test('workspace detail derives roster status from all assigned tasks and subtask
   assert.equal(page.getAgentRosterStatus('Manager').label, 'Idle');
 });
 
-// Avatars are no longer derived from a private hue hash here: the page resolves
-// them through the SHARED identity renderer so an agent looks the same on this
-// page as on /agents (PRD FR-99). Without that renderer loaded, the page still
-// has to produce readable initials rather than an empty box.
-test('workspace detail falls back to initials when the shared renderer is absent', () => {
+// Default agents use the Workspace Map portrait; explicit appearances retain
+// the app-wide identity renderer. Without either renderer, the page still has
+// to produce readable initials rather than an empty box.
+test('workspace detail falls back to initials when both portrait renderers are absent', () => {
   const page = new WorkspaceDetailPage('workspace-1');
 
   const first = page.getAgentAvatarPresentation('Trip Planning Manager');
@@ -759,9 +758,63 @@ test('workspace detail falls back to initials when the shared renderer is absent
   assert.match(page.renderAgentAvatarHTML(first), />TM</);
 });
 
-test('workspace detail renders an agent through the shared identity renderer', () => {
+test('workspace detail renders generated agents through the Workspace Map portrait', () => {
+  const page = new WorkspaceDetailPage('workspace-1');
+  page.workspace = {
+    entry_agent_name: 'Trip Planning Manager',
+    agents: ['Trip Planning Manager']
+  };
+  page.agentIndex = new Map([
+    [
+      'trip planning manager',
+      {
+        name: 'Trip Planning Manager',
+        source: 'user',
+        role: 'orchestrator',
+        appearance: { mode: 'generated', generated: {} }
+      }
+    ]
+  ]);
+  const seen = [];
+  globalThis.window.OriWorkspaceAgentPortrait = {
+    markup(name, options) {
+      seen.push({ name, options });
+      return `<span class="ws-map-av ${options.className}" data-keeper="${options.isKeeper}"></span>`;
+    }
+  };
+  globalThis.window.AgentAvatar = {
+    markup() {
+      throw new Error('generated workspace agents must not use AgentAvatar');
+    }
+  };
+
+  try {
+    const avatar = page.getAgentAvatarPresentation('Trip Planning Manager');
+    const html = page.renderAgentAvatarHTML(avatar);
+
+    assert.equal(avatar.kind, 'workspace-generated');
+    assert.deepEqual(seen, [
+      {
+        name: 'Trip Planning Manager',
+        options: { className: 'workspace-detail-agent-avatar', isKeeper: true }
+      }
+    ]);
+    assert.match(html, /class="ws-map-av workspace-detail-agent-avatar"/);
+    assert.match(html, /data-keeper="true"/);
+  } finally {
+    delete globalThis.window.OriWorkspaceAgentPortrait;
+    delete globalThis.window.AgentAvatar;
+  }
+});
+
+test('workspace detail preserves explicit character appearances through AgentAvatar', () => {
   const page = new WorkspaceDetailPage('workspace-1');
   const seen = [];
+  globalThis.window.OriWorkspaceAgentPortrait = {
+    markup() {
+      throw new Error('an explicit character must not use the generated map portrait');
+    }
+  };
   globalThis.window.AgentAvatar = {
     markup(input, options) {
       seen.push({ input, options });
@@ -803,6 +856,7 @@ test('workspace detail renders an agent through the shared identity renderer', (
     // Geometry stays the page's own.
     assert.match(html, /workspace-detail-agent-avatar/);
   } finally {
+    delete globalThis.window.OriWorkspaceAgentPortrait;
     delete globalThis.window.AgentAvatar;
     delete globalThis.window.CharacterCatalog;
   }

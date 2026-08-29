@@ -3901,37 +3901,49 @@ export class WorkspaceDetailPage {
     };
   }
 
-  // Resolves an agent's identity through the SHARED renderer, so an agent that
-  // shows a curated character on /agents shows the same one here (PRD FR-99).
+  // Resolves an agent's identity for the Workspace Details page.
   //
-  // This page used to derive its own avatar from a private hue hash of the
-  // agent's name, which meant one agent had two different faces depending on
-  // where you looked at it — and a character a user deliberately chose was
-  // invisible on the page where they actually work with that agent.
+  // Default/generated agents use the same name-only stick figure as Workspace
+  // Map. Explicit uploaded and character appearances remain authoritative and
+  // continue through AgentAvatar unchanged, so this local default never
+  // overwrites a choice the user made in Agent Appearance.
   //
-  // Returns a `markup(className)` function rather than finished HTML: the two
-  // surfaces that show an agent here have different geometry (a 44px rounded
-  // card tile, a 34px hexagon in the Command modal), and each should keep its
-  // own. Only the identity is shared.
+  // Returns a `markup(className)` function rather than finished HTML: the
+  // details card, Command roster/stage, and modal each retain their own geometry.
   getAgentAvatarPresentation(agentName) {
     const normalizedName = String(agentName || '').trim();
     const initials = this.buildAgentInitials(normalizedName);
     const label = `${normalizedName || 'Agent'} avatar`;
+    const profile = this.getAgentProfile(normalizedName);
+    const appearanceMode = String(profile?.appearance?.mode || '')
+      .trim()
+      .toLowerCase();
+    const generated = !appearanceMode || appearanceMode === 'generated';
+    const portrait = window.OriWorkspaceAgentPortrait;
 
-    // The renderer is a deferred script; if it somehow has not loaded, callers
-    // still get initials rather than an empty box.
-    if (!window.AgentAvatar) {
-      return { markup: () => '', initials, label };
+    if (generated && portrait && typeof portrait.markup === 'function') {
+      const isKeeper = this.isWorkspaceEntryAgent(normalizedName);
+      return {
+        markup: className => portrait.markup(normalizedName, { className, isKeeper }),
+        initials,
+        label,
+        kind: 'workspace-generated'
+      };
     }
 
-    const profile = this.getAgentProfile(normalizedName);
+    // The renderers are deferred scripts; if neither usable renderer has loaded,
+    // callers still get initials rather than an empty box.
+    if (!window.AgentAvatar) {
+      return { markup: () => '', initials, label, kind: 'initials' };
+    }
+
     const characterId = profile?.characterId || '';
     const input = {
       name: normalizedName,
       source: profile?.source || 'user',
       role: profile?.role || '',
-      // The canonical object goes to the shared renderer unmodified, so a
-      // workspace row shows exactly what the Agents roster shows (FR-80/FR-89).
+      // Explicit canonical appearance goes to the shared app-wide renderer
+      // unmodified (FR-80/FR-89).
       appearance: profile?.appearance || null,
       character:
         characterId && window.CharacterCatalog ? window.CharacterCatalog.get(characterId) : null
@@ -3942,7 +3954,8 @@ export class WorkspaceDetailPage {
       // overrides --aa-size, so the box stays exactly what the layout expects.
       markup: className => window.AgentAvatar.markup(input, { size: 54, className }),
       initials,
-      label
+      label,
+      kind: 'explicit-appearance'
     };
   }
 
@@ -3952,7 +3965,10 @@ export class WorkspaceDetailPage {
   // event happened to redraw the roster.
   watchCharacterCatalog() {
     if (!window.CharacterCatalog || typeof window.CharacterCatalog.onChange !== 'function') return;
-    window.CharacterCatalog.onChange(() => this.renderAgentGroups());
+    window.CharacterCatalog.onChange(() => {
+      this.renderAgentGroups();
+      window.workspaceCommand?.refresh();
+    });
     // The module does not fetch on its own — each page asks for it, so a page
     // that shows no agents pays nothing. Without this the catalog stays empty
     // and every character silently renders as the generated fallback.
@@ -12190,13 +12206,16 @@ export class WorkspaceDetailPage {
           source:
             String(agent?.source || 'workspace')
               .trim()
-              .toLowerCase() || 'workspace'
+              .toLowerCase() || 'workspace',
+          appearance: agent?.appearance || null,
+          characterId: String(agent?.appearance?.character?.catalog_id || '').trim()
         });
       });
     } catch (_err) {
       // Profile info is advisory; failure just hides the model badge / recovery hint.
     }
     this.renderAgentGroups();
+    window.workspaceCommand?.refresh();
   }
 
   hasWorkspaceAgentSnapshot(agentName) {
@@ -12287,6 +12306,10 @@ export class WorkspaceDetailPage {
 
     this.renderWorkspaceHealth();
     this.renderAgentGroups();
+    // Command view can render before the asynchronous catalog arrives. Refresh
+    // it now so an explicit uploaded/character appearance replaces the local
+    // generated default as soon as its authoritative profile is known.
+    window.workspaceCommand?.refresh();
 
     return this.agentCatalog;
   }

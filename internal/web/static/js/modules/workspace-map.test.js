@@ -4,6 +4,10 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
 const source = readFileSync(new URL('./workspace-map.js', import.meta.url), 'utf8');
+const portraitSource = readFileSync(
+  new URL('./workspace-agent-portrait.js', import.meta.url),
+  'utf8'
+);
 const mapCSS = readFileSync(new URL('../../css/workspace-map.css', import.meta.url), 'utf8');
 const cockpitCSS = readFileSync(
   new URL('../../css/home-workspace-cockpit.css', import.meta.url),
@@ -13,14 +17,18 @@ const cockpitCSS = readFileSync(
 // Load the IIFE in a sandbox and grab the exposed pure layout function.
 function loadComputeLayout() {
   const window = {};
-  vm.runInNewContext(source, { window, document: {} }, { filename: 'workspace-map.js' });
+  const sandbox = { window, document: {} };
+  vm.runInNewContext(portraitSource, sandbox, { filename: 'workspace-agent-portrait.js' });
+  vm.runInNewContext(source, sandbox, { filename: 'workspace-map.js' });
   return window.OriWorkspaceMap.computeLayout;
 }
 
 // Load the IIFE and grab the full exposed API (used for meta-rendering tests).
 function loadOriWorkspaceMap() {
   const window = {};
-  vm.runInNewContext(source, { window, document: {} }, { filename: 'workspace-map.js' });
+  const sandbox = { window, document: {} };
+  vm.runInNewContext(portraitSource, sandbox, { filename: 'workspace-agent-portrait.js' });
+  vm.runInNewContext(source, sandbox, { filename: 'workspace-map.js' });
   return window.OriWorkspaceMap;
 }
 
@@ -1700,13 +1708,33 @@ test('overviewBodyHTML renders generated portraits for the Commander and every r
   assert.match(html, /ws-map-ov-k">Skills<\/span><span class="ws-map-ov-v">3</);
 });
 
-test('the shared Map API exposes the same generated portrait to its current Home host', () => {
+test('the shared Map API exposes the same generated portrait to every workspace host', () => {
   const { agentPortraitHTML } = loadOriWorkspaceMap();
   const html = agentPortraitHTML('Research Lead', true);
 
   assert.match(html, /class="ws-map-av is-keeper"/);
   assert.match(html, /<svg class="ws-map-av-figure"/);
   assert.match(html, /class="ws-map-av-label" title="Research Lead">Research Lead</);
+});
+
+test('the shared portrait renderer accepts only safe consumer layout classes', () => {
+  const window = {};
+  vm.runInNewContext(portraitSource, { window }, { filename: 'workspace-agent-portrait.js' });
+  const portrait = window.OriWorkspaceAgentPortrait;
+  const first = portrait.markup('Research Lead', {
+    isKeeper: true,
+    className: 'ws-cmd-character is-stage bad" onclick=alert(1) ws-cmd-character'
+  });
+  const second = portrait.markup('Research Lead', { className: 'workspace-detail-agent-avatar' });
+
+  assert.match(first, /class="ws-map-av is-keeper ws-cmd-character is-stage"/);
+  assert.doesNotMatch(first, /onclick|bad&quot;|bad"/);
+  assert.match(second, /class="ws-map-av workspace-detail-agent-avatar"/);
+  assert.equal(
+    first.match(/style="--av:([^"]+)"/)[1],
+    second.match(/style="--av:([^"]+)"/)[1],
+    'consumer geometry does not change the deterministic name palette'
+  );
 });
 
 test('overviewBodyHTML escapes hostile agent names in portrait text and attributes', () => {
@@ -1761,7 +1789,7 @@ test('Workspace Map CSS keeps generated portraits compact, legible, and responsi
   assert.match(portraitRule, /position:\s*relative/);
   assert.match(portraitRule, /max-width:\s*100%/);
   assert.match(portraitRule, /overflow:\s*hidden/);
-  assert.match(portraitRule, /var\(--av, var\(--ws-faction\)\)/);
+  assert.match(portraitRule, /var\(--av, #46d39a\)/);
 
   const figureRule = ruleFor('.ws-map-av-figure');
   assert.match(figureRule, /stroke:\s*currentcolor/);

@@ -2513,6 +2513,18 @@
   }
 
   function avatarHTML(name, extraClass) {
+    // Production pages load the small shared renderer before this Map script so
+    // Workspace Details can use the exact same portrait without loading the
+    // whole map implementation. Keep the local fallback for isolated consumers
+    // and older cached templates during a rolling update.
+    var shared = window.OriWorkspaceAgentPortrait;
+    if (shared && typeof shared.markup === 'function') {
+      return shared.markup(name, {
+        isKeeper: extraClass === 'is-keeper',
+        className: extraClass === 'is-keeper' ? '' : extraClass
+      });
+    }
+
     var pal = paletteFor(name);
     var safeName = escapeHtml(name);
     return (

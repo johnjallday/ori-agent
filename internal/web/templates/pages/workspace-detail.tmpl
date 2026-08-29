@@ -4186,10 +4186,9 @@
       outline-offset: 3px;
     }
 
-    /* The avatar box. Its contents now come from the shared Avatar Identity
-       renderer (agent-avatar.css), which brings its own colours, motif, and
-       image/portrait handling — so this rule owns geometry only, and overrides
-       --aa-size to keep the 44px box the layout was built around. */
+    /* The avatar box accepts the Workspace Map stick figure for default agents
+       and the shared Agent Appearance renderer for explicit uploaded/character
+       choices. This rule owns geometry only. */
     .workspace-detail-agent-avatar {
       --aa-size: 44px;
       width: 44px;
@@ -4198,7 +4197,28 @@
       flex-shrink: 0;
     }
 
-    /* Used when the shared renderer has not loaded, and for the Unassigned
+    .workspace-detail-agent-avatar.ws-map-av {
+      min-width: 44px;
+      max-width: 44px;
+      height: 44px;
+      flex: 0 0 44px;
+    }
+
+    .workspace-detail-agent-avatar.ws-map-av .ws-map-av-figure {
+      width: 31px;
+      height: 38px;
+      margin-top: 0;
+    }
+
+    .workspace-detail-agent-avatar.ws-map-av .ws-map-av-label {
+      right: 2px;
+      bottom: 2px;
+      left: 2px;
+      padding: 1px 2px;
+      font-size: 6px;
+    }
+
+    /* Used when neither renderer has loaded, and for the Unassigned
        bucket, which is not an agent and so has no identity to resolve. */
     .workspace-detail-agent-avatar.is-initials {
       display: inline-flex;

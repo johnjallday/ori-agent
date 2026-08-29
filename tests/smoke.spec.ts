@@ -1553,17 +1553,31 @@ test.describe('Workspace Agent Character Roster', () => {
     await expect(roster.first()).toHaveAttribute('aria-pressed', 'true');
     await expect(roster.first()).toContainText('Roster Manager');
     await expect(roster.first().locator('.ws-cmd-roster-entry')).toHaveText('CMD');
-    await expect(roster.first().locator('.ws-cmd-character')).toBeVisible();
+    const commanderPortrait = roster.first().locator('.ws-cmd-character.ws-map-av');
+    await expect(commanderPortrait).toBeVisible();
+    await expect(commanderPortrait).toHaveClass(/is-keeper/);
+    await expect(commanderPortrait.locator('.ws-map-av-figure')).toHaveAttribute(
+      'aria-hidden',
+      'true'
+    );
+    await expect(commanderPortrait.locator('.ws-map-av-label')).toHaveText('Roster Manager');
+    await expect(roster.nth(1).locator('.ws-cmd-character.ws-map-av')).toBeVisible();
     await expect(roster.nth(1)).toContainText('Working');
     await expect(roster.nth(1)).toContainText('2×');
 
     const stage = page.locator('#workspaceCommandView .ws-cmd-agent-stage');
     await expect(stage.locator('h3')).toHaveText('Roster Manager');
+    await expect(stage.locator('.ws-cmd-character.is-stage.ws-map-av.is-keeper')).toBeVisible();
+    await expect(stage.locator('.ws-map-av-label')).toHaveText('Roster Manager');
     await expect(stage).toContainText('Commander');
     await expect(stage).toContainText('Idle');
 
     await roster.nth(1).click();
     await expect(stage.locator('h3')).toHaveText('Research Analyst');
+    await expect(stage.locator('.ws-cmd-character.is-stage.ws-map-av')).not.toHaveClass(
+      /is-keeper/
+    );
+    await expect(stage.locator('.ws-map-av-label')).toHaveText('Research Analyst');
     await expect(stage).toContainText('Working');
 
     await page.getByRole('tab', { name: 'Tasks' }).click();
