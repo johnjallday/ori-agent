@@ -371,7 +371,6 @@ test('catalog polling announces only render-relevant station changes', async () 
   );
 
   const firstCatalog = host.surfaces.map(surface => ({ ...surface }));
-  const firstSurface = firstCatalog[0];
   host.fetch = async () =>
     response(200, {
       surfaces: firstCatalog.map((surface, index) =>

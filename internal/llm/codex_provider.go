@@ -422,7 +422,7 @@ func (p *CodexProvider) runCodexExec(ctx context.Context, model, prompt, reasoni
 		return "", fmt.Errorf("%s: %w", msg, err)
 	}
 
-	outBytes, err := os.ReadFile(tmpOutPath)
+	outBytes, err := os.ReadFile(tmpOutPath) // #nosec G304 -- path is returned by os.CreateTemp in this process
 	if err != nil {
 		return "", fmt.Errorf("codex read output: %w", err)
 	}
@@ -461,7 +461,7 @@ func LoadCodexCachedModels() []string {
 
 func loadCodexCachedModels() []string {
 	cachePath := filepath.Join(codexHomeDir(), "models_cache.json")
-	data, err := os.ReadFile(cachePath)
+	data, err := os.ReadFile(cachePath) // #nosec G304 -- fixed filename under the operator-selected local CODEX_HOME
 	if err != nil {
 		return nil
 	}
