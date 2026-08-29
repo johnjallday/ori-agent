@@ -9309,6 +9309,72 @@ export class WorkspaceCommandView {
     return { label: 'Reference', className: 'is-reference' };
   }
 
+  projectEntryActions() {
+    const host = typeof window === 'undefined' ? null : window.WorkspaceSurfaceHost;
+    if (!host || typeof host.projectEntryActions !== 'function') return [];
+    try {
+      return host.projectEntryActions();
+    } catch (_error) {
+      return [];
+    }
+  }
+
+  projectEntryActionsHTML() {
+    const actions = this.projectEntryActions();
+    if (!actions.length) return '';
+    return (
+      '<div class="ws-cmd-project-actions" role="group" aria-label="Project actions">' +
+      actions
+        .map(action => {
+          const key = escapeHtml(action.key);
+          const label = escapeHtml(action.label || 'Project action');
+          const reason = escapeHtml(action.disabledReason || action.description || '');
+          const badge = action.badge
+            ? '<span class="ws-cmd-project-action-badge">' + escapeHtml(action.badge) + '</span>'
+            : '';
+          const primary =
+            '<button type="button" class="ws-cmd-project-action" data-cmd-project-action="' +
+            key +
+            '" aria-label="' +
+            label +
+            '" title="' +
+            (action.enabled ? escapeHtml(action.description || action.label) : reason) +
+            '"' +
+            (action.enabled ? '' : ' disabled aria-disabled="true"') +
+            '>' +
+            label +
+            badge +
+            '</button>';
+          const review = action.badge
+            ? '<button type="button" class="ws-cmd-project-action-link" data-cmd-project-surface="' +
+              key +
+              '" aria-label="Review ' +
+              label +
+              '">Review</button>'
+            : '';
+          const setup =
+            !action.enabled && action.setupAvailable
+              ? '<button type="button" class="ws-cmd-project-action-link" data-cmd-project-setup="' +
+                key +
+                '" aria-label="Set up ' +
+                label +
+                '">Set up</button>'
+              : '';
+          return primary + review + setup;
+        })
+        .join('') +
+      '</div>'
+    );
+  }
+
+  runProjectEntryAction(kind, key, trigger) {
+    const action = this.projectEntryActions().find(item => item.key === key);
+    if (!action) return;
+    if (kind === 'run' && typeof action.run === 'function') void action.run(trigger);
+    if (kind === 'open' && typeof action.open === 'function') void action.open(trigger);
+    if (kind === 'setup' && typeof action.setup === 'function') void action.setup(trigger);
+  }
+
   folderRailItems(rows, expanded) {
     const arr = Array.isArray(rows) ? rows : [];
     const limit = expanded ? arr.length : 5;
@@ -9329,18 +9395,23 @@ export class WorkspaceCommandView {
         escapeHtml(role.label) +
         '</span></span>' +
         (path ? '<span class="ws-cmd-rail-m">' + escapeHtml(path) + '</span>' : '');
+      const projectActions = role.className === 'is-project' ? this.projectEntryActionsHTML() : '';
+      let folderRow;
       if (dir.isProjectPathOnly) {
-        return '<div class="ws-cmd-rail-item is-static">' + inner + '</div>';
+        folderRow = '<div class="ws-cmd-rail-item is-static">' + inner + '</div>';
+      } else {
+        folderRow =
+          '<button type="button" class="ws-cmd-rail-item" data-cmd-open-section="folders" data-cmd-item-id="' +
+          escapeHtml(id) +
+          '" data-cmd-item-source="' +
+          escapeHtml(source) +
+          '">' +
+          inner +
+          '</button>';
       }
-      return (
-        '<button type="button" class="ws-cmd-rail-item" data-cmd-open-section="folders" data-cmd-item-id="' +
-        escapeHtml(id) +
-        '" data-cmd-item-source="' +
-        escapeHtml(source) +
-        '">' +
-        inner +
-        '</button>'
-      );
+      return projectActions
+        ? '<div class="ws-cmd-project-entry-row">' + folderRow + projectActions + '</div>'
+        : folderRow;
     });
     if (arr.length > shown.length) {
       items.push(
@@ -10148,6 +10219,33 @@ export class WorkspaceCommandView {
       const hqStation = event.target.closest('[data-cmd-hq-station]');
       if (hqStation) {
         this.runHQStationAction(hqStation.getAttribute('data-cmd-hq-station'), hqStation);
+        return;
+      }
+      const projectAction = event.target.closest('[data-cmd-project-action]');
+      if (projectAction) {
+        this.runProjectEntryAction(
+          'run',
+          projectAction.getAttribute('data-cmd-project-action'),
+          projectAction
+        );
+        return;
+      }
+      const projectSurface = event.target.closest('[data-cmd-project-surface]');
+      if (projectSurface) {
+        this.runProjectEntryAction(
+          'open',
+          projectSurface.getAttribute('data-cmd-project-surface'),
+          projectSurface
+        );
+        return;
+      }
+      const projectSetup = event.target.closest('[data-cmd-project-setup]');
+      if (projectSetup) {
+        this.runProjectEntryAction(
+          'setup',
+          projectSetup.getAttribute('data-cmd-project-setup'),
+          projectSetup
+        );
         return;
       }
       const systemTab = event.target.closest('[data-cmd-system-tab]');

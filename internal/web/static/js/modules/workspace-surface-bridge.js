@@ -10,6 +10,7 @@ const FRAME_REQUESTS = new Set([
   'ori.surface.state.delete',
   'ori.surface.host.confirm',
   'ori.surface.host.ask_ori',
+  'ori.surface.host.create_task',
   'ori.surface.host.open_setup',
   'ori.surface.host.close',
   'ori.surface.status_changed'

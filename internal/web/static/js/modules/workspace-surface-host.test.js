@@ -115,6 +115,8 @@ function makeHost() {
   const calls = [];
   const asks = [];
   const setupCalls = [];
+  const createdTasks = [];
+  const executedTasks = [];
   const fetch = async (path, options = {}) => {
     calls.push({ path, options });
     if (path.endsWith('/surfaces')) {
@@ -141,6 +143,33 @@ function makeHost() {
               confirmation: true,
               state: true,
               ask_ori: true,
+              create_task: true,
+              open_setup: true,
+              close: true
+            }
+          },
+          {
+            key: 'plugin:workspace-surface-demo:demo-tools:project',
+            plugin: { id: 'workspace-surface-demo', version: '0.1.0', generation: '7' },
+            capability_id: 'demo-tools',
+            surface_id: 'project',
+            label: 'Project cleanup',
+            description: 'Review cosmetic cleanup.',
+            icon: { kind: 'host', value: 'folder' },
+            placement: 'project_entry',
+            modal: { width: 720, height: 560 },
+            status: {
+              state: 'ready',
+              value: '1',
+              description: 'One proposal is ready.'
+            },
+            available: true,
+            polling: { map_seconds: 5, open_seconds: 1 },
+            features: {
+              confirmation: false,
+              state: false,
+              ask_ori: false,
+              create_task: true,
               open_setup: true,
               close: true
             }
@@ -187,6 +216,20 @@ function makeHost() {
           required_capabilities: ['demo_runtime']
         });
       }
+      if (request.type === 'create_task') {
+        return response(200, {
+          intent: 'create_task',
+          workspace_id: 'workspace-1',
+          task: {
+            template_id: 'survey',
+            title: 'Run fixed survey',
+            details: 'Run the canonical survey workflow.',
+            required_capabilities: ['demo_runtime'],
+            auto_start: true,
+            assignee_strategy: 'workspace_entry_agent'
+          }
+        });
+      }
       return response(200, {
         intent: 'open_setup',
         workspace_id: 'workspace-1',
@@ -222,6 +265,16 @@ function makeHost() {
         setupCalls.push(true);
       }
     },
+    workspaceDetail: {
+      workspace: { entry_agent_name: 'Commander' },
+      async createTask(title, details, column, options) {
+        createdTasks.push({ title, details, column, options });
+        return { id: 'task-created' };
+      },
+      async executeTask(id, options) {
+        executedTasks.push({ id, options });
+      }
+    },
     setTimeout(callback) {
       timers.push(callback);
     }
@@ -236,7 +289,18 @@ function makeHost() {
     schedule: () => null,
     cancelSchedule: () => {}
   });
-  return { host, document, calls, coordinator, restored, timers, asks, setupCalls };
+  return {
+    host,
+    document,
+    calls,
+    coordinator,
+    restored,
+    timers,
+    asks,
+    setupCalls,
+    createdTasks,
+    executedTasks
+  };
 }
 
 function find(node, tag) {
@@ -263,6 +327,41 @@ test('generic catalog becomes one Map station without plugin-name branching', as
   });
 });
 
+test('project-entry actions stay out of Map stations and run through a headless host session', async () => {
+  const { host, calls, createdTasks, executedTasks, setupCalls } = makeHost();
+  await host.loadCatalog();
+  assert.equal(host.stations().length, 1);
+  const actions = host.projectEntryActions();
+  assert.equal(actions.length, 1);
+  assert.equal(actions[0].label, 'Project cleanup');
+  assert.equal(actions[0].enabled, true);
+  assert.equal(actions[0].badge, '1');
+
+  assert.equal(
+    await host.runProjectEntryTask('plugin:workspace-surface-demo:demo-tools:project'),
+    true
+  );
+  assert.equal(createdTasks.length, 1);
+  assert.deepEqual(createdTasks[0].options.requiredCapabilities, ['demo_runtime']);
+  assert.equal(executedTasks.length, 1);
+  assert.equal(
+    calls.filter(
+      call => call.path === '/api/workspace-surfaces/sessions' && call.options.method === 'DELETE'
+    ).length,
+    1
+  );
+
+  const project = host.surfaces.find(surface => surface.placement === 'project_entry');
+  project.status = {
+    state: 'disabled',
+    value: 'Live control required',
+    description: 'Set up live control.'
+  };
+  assert.equal(host.projectEntryActions()[0].enabled, false);
+  assert.equal(await host.runProjectEntryTask(project.key), false);
+  assert.equal(setupCalls.length, 1);
+});
+
 test('catalog polling announces only render-relevant station changes', async () => {
   const { host, document } = makeHost();
   await host.loadCatalog();
@@ -271,15 +370,17 @@ test('catalog polling announces only render-relevant station changes', async () 
     ['ori:workspace-surfaces-changed']
   );
 
-  const firstSurface = host.surfaces[0];
+  const firstCatalog = host.surfaces.map(surface => ({ ...surface }));
   host.fetch = async () =>
     response(200, {
-      surfaces: [
-        {
-          ...firstSurface,
-          status: { ...firstSurface.status, checked_at: '2026-08-27T14:44:48Z' }
-        }
-      ]
+      surfaces: firstCatalog.map((surface, index) =>
+        index === 0
+          ? {
+              ...surface,
+              status: { ...surface.status, checked_at: '2026-08-27T14:44:48Z' }
+            }
+          : surface
+      )
     });
   await host.loadCatalog();
   assert.equal(host.surfaces[0].status.checked_at, '2026-08-27T14:44:48Z');
@@ -291,12 +392,14 @@ test('catalog polling announces only render-relevant station changes', async () 
 
   host.fetch = async () =>
     response(200, {
-      surfaces: [
-        {
-          ...firstSurface,
-          status: { ...firstSurface.status, value: 'Updated status' }
-        }
-      ]
+      surfaces: firstCatalog.map((surface, index) =>
+        index === 0
+          ? {
+              ...surface,
+              status: { ...surface.status, value: 'Updated status' }
+            }
+          : surface
+      )
     });
   await host.loadCatalog();
   assert.equal(document.dispatchedEvents.length, 2);
@@ -396,6 +499,48 @@ test('state, Ask Ori, and Setup requests use host-owned generic intents', async 
   timers[0]();
   await Promise.resolve();
   assert.equal(setupCalls.length, 1);
+});
+
+test('direct task request uses host-resolved fixed task without Ask Ori routing', async () => {
+  const { host, calls, asks, createdTasks, executedTasks } = makeHost();
+  await host.loadCatalog();
+  await host.open('plugin:workspace-surface-demo:demo-tools:main', new NodeFake('button'));
+
+  const result = await host.active.bridge.options.onRequest({
+    type: 'ori.surface.host.create_task',
+    payload: { template_id: 'survey', variables: { proposal_id: 'proposal-1' } }
+  });
+  assert.deepEqual(result, {
+    ok: true,
+    result: { task_id: 'task-created', started: true }
+  });
+  assert.equal(asks.length, 0);
+  assert.deepEqual(createdTasks, [
+    {
+      title: 'Run fixed survey',
+      details: 'Run the canonical survey workflow.',
+      column: '',
+      options: {
+        assignee: 'Commander',
+        requiredCapabilities: ['demo_runtime'],
+        successToast: false
+      }
+    }
+  ]);
+  assert.deepEqual(executedTasks, [
+    { id: 'task-created', options: { skipConfirm: true, skipModal: true } }
+  ]);
+  const intent = calls.find(
+    call =>
+      call.path === '/api/workspace-surfaces/intents' &&
+      JSON.parse(call.options.body).type === 'create_task'
+  );
+  assert.deepEqual(JSON.parse(intent.options.body), {
+    session: 'parent-only-session',
+    type: 'create_task',
+    template_id: 'survey',
+    variables: { proposal_id: 'proposal-1' }
+  });
 });
 
 test('host-owned close tears down frame, invalidates session, and restores station focus', async () => {

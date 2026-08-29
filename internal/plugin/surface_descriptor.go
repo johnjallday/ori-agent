@@ -120,17 +120,19 @@ type ContributionDisplay struct {
 }
 
 type ContributedSurface struct {
-	ID              string                  `json:"id"`
-	Label           string                  `json:"label"`
-	Description     string                  `json:"description,omitempty"`
-	Icon            ContributionIcon        `json:"icon"`
-	Placement       string                  `json:"placement"`
-	EntryAsset      string                  `json:"entry_asset"`
-	Modal           ContributionModal       `json:"modal"`
-	StatusOperation string                  `json:"status_operation,omitempty"`
-	Operations      []string                `json:"operations,omitempty"`
-	Polling         ContributionPolling     `json:"polling"`
-	HostIntents     ContributionHostIntents `json:"host_intents"`
+	ID                  string                    `json:"id"`
+	Label               string                    `json:"label"`
+	Description         string                    `json:"description,omitempty"`
+	Icon                ContributionIcon          `json:"icon"`
+	Placement           string                    `json:"placement"`
+	EntryAsset          string                    `json:"entry_asset"`
+	Modal               ContributionModal         `json:"modal"`
+	StatusOperation     string                    `json:"status_operation,omitempty"`
+	Operations          []string                  `json:"operations,omitempty"`
+	Polling             ContributionPolling       `json:"polling"`
+	HostIntents         ContributionHostIntents   `json:"host_intents"`
+	TaskTemplates       []ContributedTaskTemplate `json:"task_templates,omitempty"`
+	DefaultTaskTemplate string                    `json:"default_task_template,omitempty"`
 }
 
 type ContributionIcon struct {
@@ -162,6 +164,17 @@ type ContributionAskOri struct {
 
 type ContributionOpenSetup struct {
 	ProviderID string `json:"provider_id,omitempty"`
+}
+
+type ContributedTaskTemplate struct {
+	ID                   string          `json:"id"`
+	Label                string          `json:"label"`
+	Description          string          `json:"description,omitempty"`
+	Title                string          `json:"title"`
+	Instructions         string          `json:"instructions"`
+	RequiredCapabilities []string        `json:"required_capabilities"`
+	AutoStart            bool            `json:"auto_start"`
+	InputSchema          json.RawMessage `json:"input_schema"`
 }
 
 type ContributedRuntimeProvider struct {
@@ -473,7 +486,11 @@ func validateCapabilityContribution(capability *ContributedCapability, services 
 			return contributionError(CodeComponentDuplicate, component, "surfaces", "surface id is duplicated", nil)
 		}
 		seenSurfaces[surface.ID] = struct{}{}
-		if err := validateSurfaceContribution(component, surface, operationSet); err != nil {
+		requirementKey := ""
+		if capability.RuntimeProvider != nil {
+			requirementKey = capability.RuntimeProvider.RequirementKey
+		}
+		if err := validateSurfaceContribution(component, surface, operationSet, requirementKey); err != nil {
 			return err
 		}
 	}
@@ -507,13 +524,13 @@ func validateCapabilityContribution(capability *ContributedCapability, services 
 	return nil
 }
 
-func validateSurfaceContribution(capability string, surface ContributedSurface, operations map[string]struct{}) error {
+func validateSurfaceContribution(capability string, surface ContributedSurface, operations map[string]struct{}, requirementKey string) error {
 	component := capability + "/surface:" + surface.ID
 	if invalidText(surface.Label, 120, false) || invalidText(surface.Description, 500, true) {
 		return contributionError(CodeContributionInvalid, component, "display", "surface text is invalid", nil)
 	}
-	if surface.Placement != "map_modal" {
-		return contributionError(CodePlacementUnsupported, component, "placement", "only map_modal is supported", nil)
+	if surface.Placement != "map_modal" && surface.Placement != "project_entry" {
+		return contributionError(CodePlacementUnsupported, component, "placement", "placement is unsupported", nil)
 	}
 	if !safeContributionPath(surface.EntryAsset) || path.Ext(surface.EntryAsset) != ".html" {
 		return contributionError(CodeAssetPathInvalid, component, "entry_asset", "entry asset must be a safe relative HTML path", nil)
@@ -550,7 +567,61 @@ func validateSurfaceContribution(capability string, surface ContributedSurface, 
 	if providerID := surface.HostIntents.OpenSetup.ProviderID; providerID != "" && !canonicalIDValue(providerID) {
 		return contributionError(CodeContributionInvalid, component, "host_intents.open_setup", "Setup provider id is invalid", nil)
 	}
+	seenTemplates := make(map[string]struct{}, len(surface.TaskTemplates))
+	for _, template := range surface.TaskTemplates {
+		if err := validateContributedTaskTemplate(component, template, requirementKey); err != nil {
+			return err
+		}
+		if _, duplicate := seenTemplates[template.ID]; duplicate {
+			return contributionError(CodeComponentDuplicate, component, "task_templates", "task template is duplicated", nil)
+		}
+		seenTemplates[template.ID] = struct{}{}
+	}
+	if surface.DefaultTaskTemplate != "" {
+		if _, exists := seenTemplates[surface.DefaultTaskTemplate]; !exists {
+			return contributionError(CodeComponentUnknown, component, "default_task_template", "default task template is unknown", nil)
+		}
+	}
+	if surface.Placement == "project_entry" && (len(surface.TaskTemplates) == 0 || surface.DefaultTaskTemplate == "") {
+		return contributionError(CodeContributionInvalid, component, "task_templates", "project_entry requires a default task template", nil)
+	}
 	return nil
+}
+
+func validateContributedTaskTemplate(component string, template ContributedTaskTemplate, requirementKey string) error {
+	if !canonicalIDValue(template.ID) || invalidText(template.Label, 120, false) || invalidText(template.Description, 500, true) ||
+		invalidTaskText(template.Title, 300) || invalidTaskText(template.Instructions, 16<<10) {
+		return contributionError(CodeContributionInvalid, component, "task_templates", "task template metadata is invalid", nil)
+	}
+	if len(template.RequiredCapabilities) == 0 || len(template.RequiredCapabilities) > 16 {
+		return contributionError(CodeContributionInvalid, component, "task_templates.required_capabilities", "task capabilities are invalid", nil)
+	}
+	seen := make(map[string]struct{}, len(template.RequiredCapabilities))
+	for _, capability := range template.RequiredCapabilities {
+		if !canonicalIDValue(capability) || capability != requirementKey {
+			return contributionError(CodeContributionInvalid, component, "task_templates.required_capabilities", "task capability is not owned by this contribution", nil)
+		}
+		if _, duplicate := seen[capability]; duplicate {
+			return contributionError(CodeComponentDuplicate, component, "task_templates.required_capabilities", "task capability is duplicated", nil)
+		}
+		seen[capability] = struct{}{}
+	}
+	if len(template.InputSchema) == 0 || len(template.InputSchema) > 16<<10 || validateOperationSchema(template.InputSchema) != nil {
+		return contributionError(CodeOperationSchemaInvalid, component, "task_templates.input_schema", "task variable schema is invalid", nil)
+	}
+	return nil
+}
+
+func invalidTaskText(value string, maximum int) bool {
+	if !utf8.ValidString(value) || strings.TrimSpace(value) != value || value == "" || len(value) > maximum {
+		return true
+	}
+	for _, r := range value {
+		if r == 0 || r == 0x7f || r < 0x20 && r != '\n' && r != '\t' {
+			return true
+		}
+	}
+	return false
 }
 
 func validateOperationContribution(operation *ContributedOperation) error {

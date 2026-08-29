@@ -98,6 +98,13 @@ export class OriWorkspaceSurfaceSDK {
     return this._request('ori.surface.host.ask_ori', { context: text });
   }
 
+  createTask(templateId, variables = {}) {
+    return this._request('ori.surface.host.create_task', {
+      template_id: String(templateId || ''),
+      variables: plainObject(variables) ? variables : {}
+    });
+  }
+
   openSetup() {
     return this._request('ori.surface.host.open_setup', {});
   }

@@ -2659,6 +2659,65 @@ button.ws-cmd-rpg-class-card:focus-visible {
 .ws-cmd-rail-role.is-reference {
   color: var(--ws-ink-dim);
 }
+.ws-cmd-project-entry-row {
+  border: 1px solid rgba(232, 181, 75, 0.18);
+  background: linear-gradient(135deg, rgba(232, 181, 75, 0.05), rgba(15, 18, 24, 0));
+}
+.ws-cmd-project-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 0 9px 9px;
+}
+.ws-cmd-project-action,
+.ws-cmd-project-action-link {
+  min-height: 28px;
+  border: 1px solid var(--ws-keeper-deep);
+  background: rgba(232, 181, 75, 0.09);
+  color: var(--ws-keeper);
+  cursor: pointer;
+  font-family: var(--ws-font-mono);
+  font-size: 9px;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+}
+.ws-cmd-project-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 9px;
+}
+.ws-cmd-project-action-link {
+  padding: 5px 7px;
+  border-color: var(--ws-line-bright);
+  background: transparent;
+  color: var(--ws-ink-dim);
+}
+.ws-cmd-project-action:hover:not(:disabled),
+.ws-cmd-project-action-link:hover {
+  border-color: var(--ws-keeper);
+  color: #fff3d2;
+}
+.ws-cmd-project-action:focus-visible,
+.ws-cmd-project-action-link:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 2px;
+}
+.ws-cmd-project-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.ws-cmd-project-action-badge {
+  min-width: 17px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: var(--ws-keeper);
+  color: #1a1408;
+  font-size: 8px;
+  font-weight: 800;
+  text-align: center;
+}
 .ws-cmd-rail-more {
   margin-top: 4px;
   padding: 7px;

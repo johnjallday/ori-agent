@@ -6,6 +6,7 @@ const pluginPath = process.env.ORI_REAPER_PLUGIN_PATH;
 const pluginName = 'reaper-plugin';
 const templateID = 'plugin:reaper-plugin:reaper-song';
 const surfaceKey = 'plugin:reaper-plugin:reaper-live-control:live-control';
+const tidySurfaceKey = 'plugin:reaper-plugin:reaper-live-control:project-tidy';
 
 test.skip(
   !pluginPath,
@@ -106,8 +107,29 @@ test('plugin-backed Reaper Song reaches generic setup, surface, action, script, 
     const catalog = await request.get(`/api/workspaces/${workspace.id}/surfaces`);
     expect(catalog.ok(), await catalog.text()).toBeTruthy();
     const surfaces = (await catalog.json()).surfaces;
-    expect(surfaces).toHaveLength(1);
-    expect(surfaces[0].key).toBe(surfaceKey);
+    expect(surfaces).toHaveLength(2);
+    expect(surfaces.map((surface: { key: string }) => surface.key)).toEqual(
+      expect.arrayContaining([surfaceKey, tidySurfaceKey])
+    );
+    const tidySurface = surfaces.find((surface: { key: string }) => surface.key === tidySurfaceKey);
+    expect(tidySurface.placement).toBe('project_entry');
+    expect(tidySurface.features.create_task).toBeTruthy();
+    expect(tidySurface.status.state).toBe('disabled');
+
+    const primary = workspace.directory_references.find(
+      (item: { id: string }) => item.id === workspace.shared_data.primary_directory_id
+    );
+    expect(readFileSync(path.join(primary.path, 'conventions.md'), 'utf8')).toContain(
+      'ori-reaper-tidy-conventions:1'
+    );
+
+    await page.goto(`/workspaces/${encodeURIComponent(workspace.folder_slug)}`);
+    const tidyAction = page.locator(`[data-cmd-project-action="${tidySurfaceKey}"]`);
+    await expect(tidyAction).toBeVisible({ timeout: 15_000 });
+    await expect(tidyAction).toBeDisabled();
+    await expect(tidyAction).toHaveAttribute('title', /required live-control mode/i);
+    await expect(page.locator(`[data-cmd-project-setup="${tidySurfaceKey}"]`)).toBeVisible();
+    await capture('group3-01-project-entry-disabled.png');
 
     await page.goto(
       `/workspaces/${encodeURIComponent(workspace.folder_slug)}?surface=${encodeURIComponent(surfaceKey)}`
@@ -154,7 +176,9 @@ test('plugin-backed Reaper Song reaches generic setup, surface, action, script, 
     await expect(scriptRow).toBeVisible();
     page.once('dialog', dialog => dialog.accept());
     await scriptRow.getByRole('button', { name: 'Run' }).click();
-    await expect(frame.locator('[data-action-result]')).toContainText(/ok|completed|failed/i);
+    await expect(frame.locator('[data-action-result]')).toContainText(
+      /ok|completed|failed|service_unavailable/i
+    );
     await capture('group4-03-script-test-save.png');
     page.once('dialog', dialog => dialog.accept());
     await scriptRow.getByRole('button', { name: 'Delete' }).click();

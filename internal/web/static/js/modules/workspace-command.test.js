@@ -551,6 +551,62 @@ test('command rail renders project_path fallback when no directories are loaded'
   assert.doesNotMatch(html, /No linked folders yet\./);
 });
 
+test('project-entry actions render only on the Project Folder row with badge and setup state', () => {
+  const originalWindow = globalThis.window;
+  const actions = [
+    {
+      key: 'plugin:demo:tidy:project',
+      label: 'Project cleanup',
+      description: 'Review cosmetic cleanup.',
+      enabled: true,
+      disabledReason: '',
+      setupAvailable: true,
+      badge: '1'
+    }
+  ];
+  globalThis.window = {
+    WorkspaceSurfaceHost: { projectEntryActions: () => actions }
+  };
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    page: {
+      getPrimaryDirectoryId: () => 'dir-project',
+      isProjectDirectory: dir => dir.id === 'dir-project'
+    }
+  });
+  try {
+    const html = commandView
+      .folderRailItems(
+        [
+          { id: 'dir-project', name: 'Project', path: '/tmp/project' },
+          { id: 'dir-ref', name: 'Reference', path: '/tmp/reference' }
+        ],
+        true
+      )
+      .join('');
+    assert.match(html, /ws-cmd-project-entry-row/);
+    assert.match(html, /data-cmd-project-action="plugin:demo:tidy:project"/);
+    assert.match(html, /ws-cmd-project-action-badge">1</);
+    assert.match(html, /data-cmd-project-surface=/);
+    assert.equal((html.match(/data-cmd-project-action=/g) || []).length, 1);
+
+    actions[0] = {
+      ...actions[0],
+      enabled: false,
+      badge: '',
+      disabledReason: 'Live setup is required.'
+    };
+    const disabled = commandView
+      .folderRailItems([{ id: 'dir-project', name: 'Project', path: '/tmp/project' }], true)
+      .join('');
+    assert.match(disabled, /data-cmd-project-action=.* disabled aria-disabled="true"/);
+    assert.match(disabled, /title="Live setup is required\."/);
+    assert.match(disabled, /data-cmd-project-setup=/);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
 test('command rail badges project and reference directory roles', () => {
   const commandView = Object.create(WorkspaceCommandView.prototype);
   Object.assign(commandView, {
@@ -574,6 +630,33 @@ test('command rail badges project and reference directory roles', () => {
   assert.match(html, /Reference/);
   assert.match(html, /data-cmd-item-id="dir-project"/);
   assert.match(html, /data-cmd-item-id="dir-ref"/);
+});
+
+test('project-entry controls dispatch run, panel, and setup without opening a generic map station', () => {
+  const rail = makeListenerRoot();
+  const calls = [];
+  const commandView = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(commandView, {
+    container: { querySelector: selector => (selector === '.ws-cmd-rail' ? rail : null) },
+    runProjectEntryAction(kind, key) {
+      calls.push([kind, key]);
+    }
+  });
+  commandView.bindRail();
+  for (const [attribute, kind] of [
+    ['data-cmd-project-action', 'run'],
+    ['data-cmd-project-surface', 'open'],
+    ['data-cmd-project-setup', 'setup']
+  ]) {
+    rail.listener({
+      target: makeAttributeClickTarget({ [attribute]: 'plugin:demo:tidy:project' })
+    });
+    assert.equal(calls.at(-1)[0], kind);
+  }
+  assert.deepEqual(
+    calls.map(call => call[1]),
+    Array(3).fill('plugin:demo:tidy:project')
+  );
 });
 
 test('command bar shows group badge and color accent for group workspaces', () => {

@@ -199,6 +199,22 @@ test('plain JavaScript SDK completes handshake and correlates operation response
     })
   });
   assert.deepEqual(await pending, { message: 'Hello, Ori.' });
+
+  const taskPending = sdk.createTask('survey', { proposal_id: 'proposal-1' });
+  const taskRequest = toParent.at(-1).message;
+  assert.equal(taskRequest.type, 'ori.surface.host.create_task');
+  assert.deepEqual(taskRequest.payload, {
+    template_id: 'survey',
+    variables: { proposal_id: 'proposal-1' }
+  });
+  frameEvents.emit('message', {
+    source: parent,
+    data: envelope('bridge-sdk', 'ori.surface.response', taskRequest.request_id, {
+      ok: true,
+      result: { task_id: 'task-1', started: true }
+    })
+  });
+  assert.deepEqual(await taskPending, { task_id: 'task-1', started: true });
   sdk.destroy();
 });
 
