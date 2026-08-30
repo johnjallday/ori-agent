@@ -871,7 +871,7 @@ func (h *Handler) persistCreateWorkspaceTemplateProvenance(wsID string, tmpl pro
 	// declares a setup wizard or runtime contract: those snapshots *are* the
 	// workspace's setup contract, so without provenance the blueprint's declared
 	// requirements would silently disappear after creation.
-	if !tmpl.Builtin && tmpl.PluginOwner == nil && !tmpl.HasSetupWizard() && !tmpl.HasRuntimeRequirements() {
+	if !tmpl.Builtin && tmpl.PluginOwner == nil && !tmpl.HasSetupWizard() && !tmpl.HasRuntimeRequirements() && !tmpl.HasAssistantProgram() {
 		return ""
 	}
 	version := tmpl.BuiltinVersion
@@ -901,6 +901,7 @@ func (h *Handler) persistCreateWorkspaceTemplateProvenance(wsID string, tmpl pro
 		PluginSources:          tmpl.Tools.PluginSources,
 		RuntimeRequirements:    tmpl.RuntimeRequirements,
 		SetupWizard:            tmpl.SetupWizard,
+		AssistantProgram:       tmpl.AssistantProgram,
 	}
 	// Provenance and the blueprint's declared capability installs are written in
 	// ONE update, so a workspace can never end up recorded as coming from the

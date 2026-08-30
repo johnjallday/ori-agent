@@ -39,7 +39,10 @@ const (
 	CodeOperationPolicyInvalid    ContributionErrorCode = "operation_policy_invalid"
 	CodeOperationLimitInvalid     ContributionErrorCode = "operation_limit_invalid"
 	CodeScopeUnknown              ContributionErrorCode = "scope_unknown"
+	CodeHostFeatureUnsupported    ContributionErrorCode = "host_feature_unsupported"
 )
+
+const HostFeatureAssistantProgramV1 = "assistant_program_v1"
 
 // ContributionError is safe to project during local plugin validation. It
 // identifies the rejected component/field without including filesystem paths,
@@ -95,13 +98,14 @@ func ValidateContributionIdentity(contribution *SurfaceContribution, identities 
 }
 
 type SurfaceContribution struct {
-	SchemaVersion int                     `json:"schema_version"`
-	Name          string                  `json:"name"`
-	Version       string                  `json:"version"`
-	Protocol      ProtocolRange           `json:"protocol"`
-	Capabilities  []ContributedCapability `json:"capabilities,omitempty"`
-	Services      []ContributedService    `json:"services,omitempty"`
-	Blueprints    []ContributedBlueprint  `json:"blueprints,omitempty"`
+	SchemaVersion        int                     `json:"schema_version"`
+	Name                 string                  `json:"name"`
+	Version              string                  `json:"version"`
+	Protocol             ProtocolRange           `json:"protocol"`
+	RequiresHostFeatures []string                `json:"requires_host_features,omitempty"`
+	Capabilities         []ContributedCapability `json:"capabilities,omitempty"`
+	Services             []ContributedService    `json:"services,omitempty"`
+	Blueprints           []ContributedBlueprint  `json:"blueprints,omitempty"`
 }
 
 type ContributedCapability struct {
@@ -305,6 +309,20 @@ func (c *SurfaceContribution) Validate() error {
 	}
 	if c.Protocol.Min > SurfaceProtocolVersion || maximum < SurfaceProtocolVersion {
 		return contributionError(CodeProtocolIncompatible, "manifest", "protocol", "protocol range does not include host v1", nil)
+	}
+	if len(c.RequiresHostFeatures) > 8 {
+		return contributionError(CodeHostFeatureUnsupported, "manifest", "requires_host_features", "too many host features are required", nil)
+	}
+	seenHostFeatures := make(map[string]struct{}, len(c.RequiresHostFeatures))
+	for _, feature := range c.RequiresHostFeatures {
+		feature = strings.TrimSpace(feature)
+		if feature != HostFeatureAssistantProgramV1 {
+			return contributionError(CodeHostFeatureUnsupported, "manifest", "requires_host_features", "a required host feature is unavailable", nil)
+		}
+		if _, duplicate := seenHostFeatures[feature]; duplicate {
+			return contributionError(CodeHostFeatureUnsupported, "manifest", "requires_host_features", "required host features must be unique", nil)
+		}
+		seenHostFeatures[feature] = struct{}{}
 	}
 	if len(c.Capabilities) == 0 && len(c.Services) == 0 && len(c.Blueprints) == 0 {
 		return contributionError(CodeContributionInvalid, "manifest", "components", "at least one contribution is required", nil)

@@ -201,6 +201,13 @@ type Workspace struct {
 	// connectivity is always evaluated afresh and is never persisted here.
 	RuntimeState *WorkspaceRuntimeState `json:"runtime_state,omitempty"`
 
+	// AssistantProgramState is present only on a dedicated generic assistant
+	// station; AssistantProjectLink is present only on projects linked to one.
+	// Both are mirrored into SQLite and workspace.json so unrelated writes cannot
+	// erase them and plugin removal cannot make the user's state unreadable.
+	AssistantProgramState *AssistantProgramState `json:"assistant_program_state,omitempty"`
+	AssistantProjectLink  *AssistantProjectLink  `json:"assistant_project_link,omitempty"`
+
 	// Mission fields — workspace-level proactive goal carried out by the entry
 	// agent (Workspace Manager) on cadence. All fields are optional; a workspace
 	// with MissionEnabled = false (the zero value) behaves exactly as before.

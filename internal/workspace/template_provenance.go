@@ -65,6 +65,9 @@ type TemplateProvenance struct {
 	// existing workspace is being asked to do, nor invalidate progress the user
 	// has already made. Nil when the blueprint declares no wizard.
 	SetupWizard *SetupWizard `json:"setup_wizard,omitempty"`
+	// AssistantProgram snapshots the normalized inert declaration. Existing
+	// workspaces keep this copy when a plugin changes or is removed.
+	AssistantProgram *AssistantProgramDeclaration `json:"assistant_program,omitempty"`
 }
 
 // cloneCapabilityRequirements returns a defensive copy, including each
@@ -109,6 +112,7 @@ func cloneTemplateProvenanceInto(dst *TemplateProvenance, src *TemplateProvenanc
 	dst.PluginSources = clonePluginSources(src.PluginSources)
 	dst.RuntimeRequirements = CloneRuntimeRequirementsContract(src.RuntimeRequirements)
 	dst.SetupWizard = CloneSetupWizard(src.SetupWizard)
+	dst.AssistantProgram = CloneAssistantProgramDeclaration(src.AssistantProgram)
 }
 
 // RuntimeRequirementsSnapshot returns a defensive copy of the runtime contract

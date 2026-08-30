@@ -319,6 +319,9 @@ func manifestDiagnostic(template projecttemplates.Template) string {
 	if template.HasInvalidSetupWizard() {
 		return template.SetupWizardError
 	}
+	if template.HasInvalidAssistantProgram() {
+		return template.AssistantProgramError
+	}
 	return ""
 }
 

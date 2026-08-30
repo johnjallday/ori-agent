@@ -459,6 +459,10 @@ type Workspace struct {
 	// A Goal the user deliberately cleared is a real, non-nil envelope with
 	// empty values, so healing can never resurrect it.
 	MissionStateJSON json.RawMessage `json:"mission_state,omitempty"`
+
+	// AssistantProgramJSON carries the generic station state or project link as
+	// one mirrored envelope so primary-store reads cannot erase portable state.
+	AssistantProgramJSON json.RawMessage `json:"assistant_program,omitempty"`
 }
 
 // Tag represents a unique tag used across sessions.
