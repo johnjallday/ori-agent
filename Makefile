@@ -363,8 +363,10 @@ check-cross-platform: ## Check builds for all platforms (Linux, Windows, macOS)
 	@./scripts/check-cross-platform.sh
 	@echo "$(GREEN)✓ All platforms build successfully$(NC)"
 
-check-wails-modes: ## Verify generated Wails bindings are tracked as regular files, not executable
+check-wails-modes: ## Verify Wails bindings stay regular files after successful and failed builds
 	@./scripts/check-wails-binding-modes.sh
+	@bash ./scripts/check-wails-binding-modes.test.sh
+	@bash ./scripts/build-folder-picker.test.sh
 
 
 ## Docker targets

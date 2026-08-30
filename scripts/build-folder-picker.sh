@@ -7,6 +7,24 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 FOLDER_PICKER_DIR="$PROJECT_ROOT/cmd/folder-picker"
+WAILS_BINDING_DIR="$FOLDER_PICKER_DIR/frontend/wailsjs"
+
+# Wails regenerates its plain-text JS/TS bindings as executable files. Normalize
+# every generated binding when this script exits, including after a failed build,
+# so worktree creation and local packaging never leave mode-only Git changes.
+normalize_wails_binding_modes() {
+    local status=$?
+    trap - EXIT
+
+    if [[ -d "$WAILS_BINDING_DIR" ]] &&
+        ! find "$WAILS_BINDING_DIR" -type f -exec chmod 0644 {} +; then
+        echo "Failed to normalize generated Wails binding modes" >&2
+        [[ "$status" -ne 0 ]] || status=1
+    fi
+
+    exit "$status"
+}
+trap normalize_wails_binding_modes EXIT
 
 # Add Go bin to PATH (where wails gets installed)
 export PATH="$HOME/go/bin:$PATH"
