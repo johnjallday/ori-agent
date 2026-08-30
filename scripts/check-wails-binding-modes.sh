@@ -22,6 +22,16 @@ while IFS=$'\t' read -r meta path; do
 	fi
 done < <(git ls-files -s -- "$binding_dir")
 
+# The index check above protects commits, but `wt done` inspects the working
+# tree. Use the same Git mode comparison here so an unstaged Wails regeneration
+# is reported before it can surprise cleanup.
+while IFS= read -r summary; do
+	if [[ "$summary" =~ ^[[:space:]]*mode[[:space:]]change ]]; then
+		printf 'Generated binding has working-tree mode drift:%s\n' "$summary" >&2
+		failed=1
+	fi
+done < <(git diff --summary -- "$binding_dir")
+
 if [[ "$failed" -ne 0 ]]; then
 	exit 1
 fi
