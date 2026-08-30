@@ -22,6 +22,15 @@ test('assistant page keeps UUID APIs separate from slug navigation', async () =>
   assert.equal(requests[0].options.headers['Content-Type'], 'application/json');
 });
 
+test('assistant route presents the declaration-named optional team home', () => {
+  const page = new AssistantProgramPage({ workspaceId: 'workspace-uuid', workspaceSlug: 'song' });
+  assert.equal(
+    page.homeName({ declaration: { station_name: 'Producer Home' }, primary_name: 'June' }),
+    'Producer Home'
+  );
+  assert.equal(page.homeName({}), 'Team Home');
+});
+
 test('assistant page surfaces server conflict messages', async () => {
   const page = new AssistantProgramPage({
     workspaceId: 'workspace-uuid',

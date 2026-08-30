@@ -1,5 +1,6 @@
 # Binaries
 bin/
+/reaper-plugin-darwin-arm64
 *.exe
 *.exe~
 *.dll

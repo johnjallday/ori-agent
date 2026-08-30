@@ -192,13 +192,20 @@ test.describe('Onboarding', () => {
     await expect(page.locator('#modelBackBtn')).toBeVisible();
   });
 
-  test('blocks progress when no usable provider is available', async ({ page }) => {
+  test('offers a deterministic onboarding path when no model is configured', async ({ page }) => {
     await installBaseOnboardingRoutes(page);
     await page.route('**/api/providers', async route => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({ providers: [] })
+      });
+    });
+    await page.route('**/api/project-templates', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ templates: [] })
       });
     });
 
@@ -208,6 +215,213 @@ test.describe('Onboarding', () => {
     await expect(page.locator('#onboardingApiKeySection')).toBeVisible();
     await expect(page.locator('#modelNextBtn')).toBeDisabled();
     await expect(page.getByRole('button', { name: 'Set Up Later' })).toBeVisible();
+    await page.getByRole('button', { name: 'Continue without a model' }).click();
+    await expect(page.locator('#onboardingStepLabel')).toHaveText('Step 3 of 3');
+    await expect(page.locator('#doneSpeech')).toContainText('What would make Ori useful today?');
+  });
+
+  test('recommends a ready blueprint from one bounded intent answer', async ({ page }) => {
+    await installBaseOnboardingRoutes(page);
+    await page.route('**/api/providers', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          providers: [{ name: 'ollama', display_name: 'Ollama', available: true }]
+        })
+      });
+    });
+    await page.route('**/api/settings/available-models?provider=ollama', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          available: true,
+          model_options: [{ id: 'local-model', label: 'Local Model', recommended: true }]
+        })
+      });
+    });
+    await page.route('**/api/settings/system-model', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ success: true })
+      });
+    });
+    await page.route('**/api/project-templates', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          templates: [
+            {
+              id: 'research-project',
+              name: 'Research Project',
+              description: 'Sources and synthesis.',
+              tags: ['research'],
+              readiness: { state: 'ready' }
+            },
+            {
+              id: 'plugin:audio:session',
+              name: 'REAPER Song',
+              description: 'A recording and production workspace.',
+              tags: ['music', 'reaper'],
+              readiness: { state: 'ready' }
+            }
+          ]
+        })
+      });
+    });
+
+    await page.goto('/');
+    await page.locator('#welcomeNextBtn').click();
+    await expect(page.locator('#modelNextBtn')).toBeEnabled();
+    await page.locator('#modelNextBtn').click();
+
+    await expect(page.locator('#onboardingStepLabel')).toHaveText('Step 3 of 3');
+    await expect(page.locator('#doneSpeech')).toContainText('What would make Ori useful today?');
+    await page.getByRole('button', { name: 'Start something new' }).click();
+    await page.locator('#onboardingIntentDescription').fill('I am producing a song in REAPER');
+    await expect(page.locator('#onboardingRecommendationTitle')).toHaveText('REAPER Song');
+    await expect(page.locator('#startBtn')).toHaveText('Use REAPER Song');
+    await expect(page.locator('#startBtn')).toBeEnabled();
+
+    await page.getByRole('button', { name: 'Bring in existing work' }).click();
+    await expect(page.locator('#onboardingRecommendationTitle')).toHaveText(
+      'Bring in existing work'
+    );
+    await expect(page.locator('#startBtn')).toHaveText('Import a folder');
+  });
+});
+
+test.describe('What Ori knows', () => {
+  test('separates global, workspace, proposed, and reviewed knowledge', async ({ page }) => {
+    let learningRequests = 0;
+    await page.route('**/api/onboarding/status', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ needs_onboarding: false, completed: true })
+      });
+    });
+    await page.route('**/api/user/profile', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          profile: {
+            id: 'local',
+            display_name: 'Jamie',
+            timezone: 'UTC',
+            preferences: { response_style: 'concise' }
+          }
+        })
+      });
+    });
+    await page.route('**/api/onboarding/user-profile', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ success: true, profile: null })
+      });
+    });
+    const assistantProgram = { link: { station_workspace_id: 'station-1' } };
+    await page.route('**/api/workspaces', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          folders: [
+            {
+              id: 'ws-a',
+              name: 'Alpha Project',
+              folder_slug: 'alpha-project',
+              assistant_program: assistantProgram
+            },
+            {
+              id: 'ws-b',
+              name: 'Beta Project',
+              folder_slug: 'beta-project',
+              assistant_program: assistantProgram
+            }
+          ]
+        })
+      });
+    });
+    await page.route('**/api/workspaces/ws-a/memory', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          entries: [
+            {
+              index: 0,
+              type: 'feedback',
+              text: '<img src=x onerror="window.knowledgeXSS=true"> Keep changes reversible.'
+            }
+          ],
+          managed_learnings: [],
+          unstructured: []
+        })
+      });
+    });
+    await page.route('**/api/workspaces/ws-b/memory', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ entries: [], managed_learnings: [], unstructured: [] })
+      });
+    });
+    await page.route('**/api/workspaces/*/assistant-program/learnings', async route => {
+      learningRequests += 1;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          candidates: [
+            {
+              id: 'candidate-1',
+              type: 'preference',
+              text: 'Review a short checklist before project changes.',
+              confidence: 'medium',
+              evidence: [{}, {}, {}]
+            }
+          ],
+          learnings: [
+            {
+              id: 'learning-1',
+              revisions: [
+                {
+                  id: 'revision-1',
+                  type: 'preference',
+                  text: 'Prefer reviewable and reversible changes.',
+                  confidence: 'high',
+                  evidence: [{}, {}, {}]
+                }
+              ]
+            }
+          ]
+        })
+      });
+    });
+
+    await page.goto('/profile');
+    await expect(page.locator('#userKnowledgeOverview')).toHaveAttribute('aria-busy', 'false');
+    await expect(page.getByRole('heading', { name: 'What Ori knows about you' })).toBeVisible();
+    await expect(page.locator('#userKnowledgeWorkspaceList')).toContainText(
+      'Keep changes reversible.'
+    );
+    await expect(page.locator('#userKnowledgeLearningList')).toContainText('Needs review');
+    await expect(page.locator('#userKnowledgeLearningList')).toContainText('Reviewed learning');
+    await expect(page.locator('#userKnowledgeLearningList')).toContainText(
+      'Prefer reviewable and reversible changes.'
+    );
+    await expect(page.locator('#userKnowledgeSummary')).toContainText('Workspace memories');
+    await expect(page.locator('#userKnowledgeWorkspaceList img')).toHaveCount(0);
+    expect(
+      await page.evaluate(() => (window as unknown as { knowledgeXSS?: boolean }).knowledgeXSS)
+    ).toBeUndefined();
+    expect(learningRequests).toBe(1);
   });
 });
 

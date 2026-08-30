@@ -29,7 +29,9 @@
   const LIFECYCLE_LABELS = {
     reuse: 'Saved agent · will be attached',
     create: 'New reusable agent · will be created and attached',
-    'customized-copy': 'Customized copy · will be created and attached'
+    'customized-copy': 'Customized copy · will be created and attached',
+    'assistant-create': 'Shared assistant role · will be created and linked',
+    'assistant-link': 'Existing shared assistant role · will be linked'
   };
 
   // Fields a staged customization may carry, mapped to their request keys. Key
@@ -77,6 +79,41 @@
     };
   }
 
+  function normalizeAssistantProgram(program) {
+    if (!program || typeof program !== 'object') return null;
+    const roles = (Array.isArray(program.roles) ? program.roles : [])
+      .map(role => ({
+        id: text(role && role.id),
+        label: text(role && role.label),
+        description: text(role && role.description),
+        primary: Boolean(role && role.primary),
+        agentName: text(role && role.agent_name)
+      }))
+      .filter(role => role.id && role.label);
+    const stages = (Array.isArray(program.stages) ? program.stages : [])
+      .map(stage => ({
+        id: text(stage && stage.id),
+        label: text(stage && stage.label),
+        description: text(stage && stage.description)
+      }))
+      .filter(stage => stage.id && stage.label);
+    const id = text(program.id);
+    if (!id || !roles.length || !roles.some(role => role.primary) || !stages.length) return null;
+    return {
+      id,
+      stationName: text(program.station_name),
+      stationDescription: text(program.station_description),
+      defaultPrimaryName: text(program.default_primary_name),
+      hireTitle: text(program.hire_title),
+      hireDescription: text(program.hire_description),
+      existingHired: Boolean(program.existing_hired),
+      existingProvider: text(program.existing_provider),
+      existingModel: text(program.existing_model),
+      roles,
+      stages
+    };
+  }
+
   // Accepts the raw /api/workspaces/template-agent-plan response and flattens it
   // to the camelCase shape the rest of this module uses. Tolerates a missing or
   // malformed agents array rather than throwing mid-render.
@@ -91,6 +128,7 @@
       systemProvider: text(data && data.system_provider),
       systemModel: text(data && data.system_model),
       systemModelConfigured: Boolean(data && data.system_model_configured),
+      assistantProgram: normalizeAssistantProgram(data && data.assistant_program),
       agents,
       warnings: (Array.isArray(data && data.warnings) ? data.warnings : [])
         .map(warning => text(warning))
@@ -98,11 +136,16 @@
     };
   }
 
+  function emptyAssistantHire() {
+    return { programKey: '', name: '', provider: '', model: '' };
+  }
+
   function createDraft() {
     return {
       plan: { status: PLAN_IDLE, blueprintKey: '', data: null, error: '' },
       includeBlueprintTeam: true,
       overrides: new Map(),
+      assistantHire: emptyAssistantHire(),
       savedSelections: [],
       savedRoster: { status: PLAN_IDLE, agents: [], error: '' },
       explicitPrimary: ''
@@ -126,6 +169,7 @@
   // only while it still names one of them.
   function discardBlueprintDerivedState(draft) {
     draft.overrides = new Map();
+    draft.assistantHire = emptyAssistantHire();
     draft.includeBlueprintTeam = true;
     if (draft.explicitPrimary && !isSelected(draft, draft.explicitPrimary)) {
       draft.explicitPrimary = '';
@@ -148,7 +192,36 @@
 
   function setPlanReady(draft, blueprintKey, data) {
     const key = applyBlueprintKey(draft, blueprintKey);
-    draft.plan = { status: PLAN_READY, blueprintKey: key, data: normalizePlan(data), error: '' };
+    const normalized = normalizePlan(data);
+    draft.plan = { status: PLAN_READY, blueprintKey: key, data: normalized, error: '' };
+    const program = normalized.assistantProgram;
+    if (program) {
+      const programKey = `${key}:${program.id}`;
+      if (!draft.assistantHire || draft.assistantHire.programKey !== programKey) {
+        const existingPrimary = program.roles.find(role => role.primary)?.agentName;
+        draft.assistantHire = {
+          programKey,
+          name: program.existingHired
+            ? existingPrimary || program.defaultPrimaryName
+            : program.defaultPrimaryName,
+          provider: program.existingHired ? program.existingProvider : '',
+          model: program.existingHired ? program.existingModel : ''
+        };
+      }
+    } else {
+      draft.assistantHire = emptyAssistantHire();
+    }
+    return draft;
+  }
+
+  function setAssistantHire(draft, fields) {
+    const program = draft && draft.plan && draft.plan.data?.assistantProgram;
+    if (!draft || !program || program.existingHired || !fields) return draft;
+    const next = { ...(draft.assistantHire || emptyAssistantHire()) };
+    for (const field of ['name', 'provider', 'model']) {
+      if (has(fields, field)) next[field] = text(fields[field]);
+    }
+    draft.assistantHire = next;
     return draft;
   }
 
@@ -437,6 +510,61 @@
     };
   }
 
+  function resolveAssistantEntries(draft, program) {
+    const hire = draft.assistantHire || emptyAssistantHire();
+    return program.roles.map(role => {
+      const name = program.existingHired
+        ? role.agentName || (role.primary ? text(hire.name) : role.label)
+        : role.primary
+          ? text(hire.name)
+          : role.label;
+      const lifecycle = program.existingHired ? 'assistant-link' : 'assistant-create';
+      return {
+        key: agentKey(name),
+        name,
+        source: 'assistant-program',
+        identity: identityFrom(name, null),
+        lifecycle,
+        lifecycleLabel: LIFECYCLE_LABELS[lifecycle],
+        modelLabel: hire.model
+          ? modelLabel(hire.model, hire.provider)
+          : hire.provider
+            ? `${hire.provider} default`
+            : 'Ori default',
+        modelSourceLabel: hire.model
+          ? 'Selected model'
+          : hire.provider
+            ? 'Provider default'
+            : 'Ori default',
+        inheritsModel: !text(hire.model),
+        role: role.label,
+        description: role.description,
+        type: '',
+        templateAgentIndex: null,
+        assistantRoleId: role.id,
+        declaredPrimary: role.primary,
+        originalName: role.label,
+        isCustomized:
+          !program.existingHired &&
+          role.primary &&
+          agentKey(name) !== agentKey(program.defaultPrimaryName),
+        customizable: false,
+        removable: false,
+        warning: ''
+      };
+    });
+  }
+
+  function assistantNameProblem(name) {
+    const normalized = text(name);
+    if (!normalized) return 'Choose a name for the primary assistant.';
+    if (normalized.length > 100) return 'Assistant name must be 100 characters or fewer.';
+    if (!/^[A-Za-z0-9 _-]+$/.test(normalized)) {
+      return 'Assistant name may use letters, numbers, spaces, underscores, and hyphens.';
+    }
+    return '';
+  }
+
   function resolvePrimaryName(draft, blueprintEntries, savedEntries) {
     const all = [...blueprintEntries, ...savedEntries];
     const explicit = agentKey(draft.explicitPrimary);
@@ -466,13 +594,14 @@
   function derive(draft) {
     const source = draft || createDraft();
     const plan = source.plan || { status: PLAN_IDLE, data: null, error: '' };
-    const includeTeam = Boolean(source.includeBlueprintTeam);
+    const assistantProgram = plan.data?.assistantProgram || null;
+    const includeTeam = assistantProgram ? true : Boolean(source.includeBlueprintTeam);
     const allPlanAgents = planAgents(source);
     const activePlanAgents = includeTeam ? allPlanAgents : [];
 
-    const blueprintEntries = activePlanAgents.map((agent, index) =>
-      resolveBlueprintEntry(source, agent, index)
-    );
+    const blueprintEntries = assistantProgram
+      ? resolveAssistantEntries(source, assistantProgram)
+      : activePlanAgents.map((agent, index) => resolveBlueprintEntry(source, agent, index));
 
     // A retained saved selection that the (possibly changed) blueprint already
     // contributes stays selected but yields its roster slot to the blueprint
@@ -480,15 +609,17 @@
     const originalKeys = new Set(activePlanAgents.map(agent => agentKey(agent.name)));
     const shadowedSelections = [];
     const savedEntries = [];
-    source.savedSelections.forEach(name => {
-      const key = agentKey(name);
-      if (originalKeys.has(key)) {
-        shadowedSelections.push({ name, ownedBy: 'blueprint' });
-        return;
-      }
-      if (savedEntries.some(entry => entry.key === key)) return;
-      savedEntries.push(resolveSavedEntry(source, name));
-    });
+    if (!assistantProgram) {
+      source.savedSelections.forEach(name => {
+        const key = agentKey(name);
+        if (originalKeys.has(key)) {
+          shadowedSelections.push({ name, ownedBy: 'blueprint' });
+          return;
+        }
+        if (savedEntries.some(entry => entry.key === key)) return;
+        savedEntries.push(resolveSavedEntry(source, name));
+      });
+    }
 
     const primaryName = resolvePrimaryName(source, blueprintEntries, savedEntries);
     const primaryKey = agentKey(primaryName);
@@ -540,9 +671,23 @@
         id: 'plan-error',
         severity: 'blocking',
         message: plan.error || 'Could not load blueprint agents.',
-        recovery: ['retry-plan', 'edit-blueprint', 'exclude-blueprint-team'],
+        recovery: assistantProgram
+          ? ['retry-plan', 'edit-blueprint']
+          : ['retry-plan', 'edit-blueprint', 'exclude-blueprint-team'],
         anchor: 'team-roster'
       });
+    }
+    if (assistantProgram) {
+      const nameProblem = assistantNameProblem(source.assistantHire?.name);
+      if (nameProblem) {
+        issues.push({
+          id: 'assistant-name',
+          severity: 'blocking',
+          message: nameProblem,
+          recovery: [],
+          anchor: 'assistantProgramCreateName'
+        });
+      }
     }
     if (collisions.length > 0) {
       issues.push({
@@ -551,9 +696,11 @@
         message: `More than one agent would be named “${collisions[0].name}”. Give the customized copy a different name.`,
         recovery: ['edit-customization'],
         anchor:
-          collisions[0].templateAgentIndex === null
-            ? 'team-roster'
-            : `team-agent-name-${collisions[0].templateAgentIndex}`,
+          collisions[0].source === 'assistant-program'
+            ? 'assistantProgramCreateName'
+            : collisions[0].templateAgentIndex === null
+              ? 'team-roster'
+              : `team-agent-name-${collisions[0].templateAgentIndex}`,
         templateAgentIndex: collisions[0].templateAgentIndex
       });
     }
@@ -566,7 +713,7 @@
         anchor: 'team-roster'
       });
     }
-    if (source.savedRoster.status === PLAN_ERROR) {
+    if (!assistantProgram && source.savedRoster.status === PLAN_ERROR) {
       // Advisory: an already-valid team can still be created (FR66, FR96).
       issues.push({
         id: 'saved-roster-error',
@@ -576,7 +723,7 @@
         anchor: 'saved-agent-picker'
       });
     }
-    if (plan.status !== PLAN_LOADING && roster.length === 0) {
+    if (!assistantProgram && plan.status !== PLAN_LOADING && roster.length === 0) {
       // Intentionally allowed (FR55) — prominent, but never blocking.
       issues.push({
         id: 'empty-team',
@@ -598,20 +745,29 @@
     });
 
     const payload = {};
-    if (allPlanAgents.length > 0) payload.create_template_agents = includeTeam;
-    if (includeTeam) {
-      const overrides = serializeOverrides(source);
-      if (overrides.length > 0) payload.template_agent_overrides = overrides;
-    }
-    // Sent only when non-empty: the server treats a nil existing_agent_names as
-    // a legacy request and keeps its original entry-agent behavior.
-    if (savedEntries.length > 0) {
-      payload.existing_agent_names = savedEntries.map(entry => entry.name);
-      const savedPrimary = savedEntries.find(entry => entry.key === primaryKey);
-      if (savedPrimary) payload.entry_agent_name = savedPrimary.name;
+    if (assistantProgram) {
+      payload.assistant_hire = {
+        name: text(source.assistantHire?.name),
+        provider: text(source.assistantHire?.provider),
+        model: text(source.assistantHire?.model)
+      };
+    } else {
+      if (allPlanAgents.length > 0) payload.create_template_agents = includeTeam;
+      if (includeTeam) {
+        const overrides = serializeOverrides(source);
+        if (overrides.length > 0) payload.template_agent_overrides = overrides;
+      }
+      // Sent only when non-empty: the server treats a nil existing_agent_names as
+      // a legacy request and keeps its original entry-agent behavior.
+      if (savedEntries.length > 0) {
+        payload.existing_agent_names = savedEntries.map(entry => entry.name);
+        const savedPrimary = savedEntries.find(entry => entry.key === primaryKey);
+        if (savedPrimary) payload.entry_agent_name = savedPrimary.name;
+      }
     }
 
     const planForSummary = plan.data;
+    const summaryEntries = assistantProgram ? blueprintEntries : allPlanAgents;
     return {
       planStatus: plan.status,
       planError: plan.error || '',
@@ -620,17 +776,23 @@
       // is currently included, because step 1 previews the blueprint itself.
       blueprintSummary: {
         status: plan.status,
-        hasAgents: Boolean(planForSummary && planForSummary.hasAgents),
-        count: allPlanAgents.length,
-        names: allPlanAgents.map(agent => agent.name),
-        declaredPrimary:
-          (planForSummary && planForSummary.declaredPrimary) ||
-          (allPlanAgents.find(agent => agent.entryPoint) || {}).name ||
-          '',
-        isEmpty: plan.status === PLAN_READY && allPlanAgents.length === 0,
+        hasAgents: Boolean(assistantProgram || (planForSummary && planForSummary.hasAgents)),
+        count: summaryEntries.length,
+        names: summaryEntries.map(agent => agent.name),
+        declaredPrimary: assistantProgram
+          ? (summaryEntries.find(agent => agent.declaredPrimary) || {}).name || ''
+          : (planForSummary && planForSummary.declaredPrimary) ||
+            (allPlanAgents.find(agent => agent.entryPoint) || {}).name ||
+            '',
+        isEmpty: plan.status === PLAN_READY && summaryEntries.length === 0,
         templateName: (planForSummary && planForSummary.templateName) || '',
         warnings: (planForSummary && planForSummary.warnings) || []
       },
+      assistantProgram,
+      assistantHire: assistantProgram
+        ? { ...(source.assistantHire || emptyAssistantHire()) }
+        : null,
+      isAssistantProgram: Boolean(assistantProgram),
       roster,
       primaryName: primary ? primary.name : '',
       primaryIsAutomatic: Boolean(primary) && !text(source.explicitPrimary),
@@ -644,16 +806,24 @@
       // Inherited/default model use is informational, never a warning or a
       // blocker (FR97) — surfacing it as an issue would flag the Blank happy
       // path, which is exactly the confusion FR92 guards against.
-      inheritedModelNote: planForSummary
-        ? planForSummary.systemModelConfigured
-          ? `Agents without their own model use ${planForSummary.systemProvider} / ${planForSummary.systemModel}.`
-          : 'Agents without their own model use the app default because no system model is configured.'
-        : '',
-      isModifiedFromBlueprint:
-        source.overrides.size > 0 ||
-        source.savedSelections.length > 0 ||
-        !includeTeam ||
-        text(source.explicitPrimary) !== '',
+      inheritedModelNote: assistantProgram
+        ? text(source.assistantHire?.provider)
+          ? `Assistant roles use the selected provider’s default model unless a model is chosen.`
+          : 'Assistant roles use Ori’s default provider and model.'
+        : planForSummary
+          ? planForSummary.systemModelConfigured
+            ? `Agents without their own model use ${planForSummary.systemProvider} / ${planForSummary.systemModel}.`
+            : 'Agents without their own model use the app default because no system model is configured.'
+          : '',
+      isModifiedFromBlueprint: assistantProgram
+        ? !assistantProgram.existingHired &&
+          (agentKey(source.assistantHire?.name) !== agentKey(assistantProgram.defaultPrimaryName) ||
+            text(source.assistantHire?.provider) !== '' ||
+            text(source.assistantHire?.model) !== '')
+        : source.overrides.size > 0 ||
+          source.savedSelections.length > 0 ||
+          !includeTeam ||
+          text(source.explicitPrimary) !== '',
       payload
     };
   }
@@ -676,6 +846,7 @@
     clearPlan,
     normalizePlan,
     setIncludeBlueprintTeam,
+    setAssistantHire,
     stageOverride,
     clearOverride,
     getOverride,

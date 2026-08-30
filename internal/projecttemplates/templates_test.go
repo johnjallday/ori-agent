@@ -198,6 +198,9 @@ func TestManifestWarnings(t *testing.T) {
 	writeFile(t, filepath.Join(dir, "legacy", ManifestFileName), `{"name":"Legacy","onboarding":{"version":"1"}}`)
 	// Roster present, no onboarding → no warnings.
 	writeFile(t, filepath.Join(dir, "clean", ManifestFileName), `{"name":"Clean","agents":[{"name":"Lead"}]}`)
+	// A valid assistant program is its own roster contract and must not be
+	// diagnosed as an agent-less template.
+	writeFile(t, filepath.Join(dir, "assistant", ManifestFileName), `{"name":"Assistant","assistant_program":`+string(validAssistantProgramJSON(t))+`}`)
 
 	legacy, err := FindLibraryTemplate(dir, "legacy")
 	if err != nil {
@@ -216,5 +219,13 @@ func TestManifestWarnings(t *testing.T) {
 	}
 	if len(clean.Warnings) != 0 {
 		t.Fatalf("expected no warnings, got %v", clean.Warnings)
+	}
+
+	assistant, err := FindLibraryTemplate(dir, "assistant")
+	if err != nil {
+		t.Fatalf("FindLibraryTemplate(assistant): %v", err)
+	}
+	if len(assistant.Warnings) != 0 {
+		t.Fatalf("assistant program should satisfy the roster contract, got %v", assistant.Warnings)
 	}
 }

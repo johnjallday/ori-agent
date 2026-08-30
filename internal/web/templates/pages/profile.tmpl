@@ -13,8 +13,9 @@
       <div class="container-fluid profile-page-shell py-4">
         <header class="profile-page-header">
           <div>
-            <div class="profile-page-kicker">Profile</div>
-            <h1 class="profile-page-title">About You</h1>
+            <div class="profile-page-kicker">Knowledge &amp; preferences</div>
+            <h1 class="profile-page-title">What Ori knows about you</h1>
+            <p class="profile-page-subtitle">Review what follows you across Ori, what stays inside a workspace, and what still needs your approval.</p>
           </div>
           <a href="/settings#user-profile" class="modern-btn modern-btn-secondary profile-page-settings-link">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -32,7 +33,7 @@
                   <path d="M12,4A4,4 0 0,1 16,8A4,4 0 0,1 12,12A4,4 0 0,1 8,8A4,4 0 0,1 12,4M12,14C16.42,14 20,15.79 20,18V20H4V18C4,15.79 7.58,14 12,14Z"/>
                 </svg>
               </span>
-              <h2 id="profileEditorTitle" class="settings-section-title">Profile Details</h2>
+              <h2 id="profileEditorTitle" class="settings-section-title">Global context</h2>
             </div>
 
             {{template "user-profile-form.tmpl" .}}
@@ -46,25 +47,67 @@
                     <path d="M9,5V9H21V5M9,19H21V15H9M9,14H21V10H9M4,9H8V5H4M4,19H8V15H4M4,14H8V10H4V14Z"/>
                   </svg>
                 </span>
-                <h2 class="settings-section-title">Context</h2>
+                <h2 class="settings-section-title">How scope works</h2>
               </div>
               <div class="profile-context-list">
                 <div class="profile-context-row">
-                  <span class="profile-context-label">Identity</span>
-                  <span class="profile-context-value">User managed</span>
+                  <span class="profile-context-label">Global context</span>
+                  <span class="profile-context-value">Included in future workspace chats and task runs</span>
                 </div>
                 <div class="profile-context-row">
-                  <span class="profile-context-label">About You</span>
-                  <span class="profile-context-value">Included in workspace context</span>
+                  <span class="profile-context-label">Workspace memory</span>
+                  <span class="profile-context-value">Stays inside its workspace</span>
+                </div>
+                <div class="profile-context-row">
+                  <span class="profile-context-label">Proposed learning</span>
+                  <span class="profile-context-value">Excluded until you approve it</span>
                 </div>
                 <div class="profile-context-row">
                   <span class="profile-context-label">Sensitive data</span>
-                  <span class="profile-context-value">Use Vaults</span>
+                  <span class="profile-context-value">Keep it in Vaults</span>
                 </div>
               </div>
             </section>
           </aside>
         </div>
+
+        <section id="userKnowledgeOverview" class="profile-knowledge" aria-labelledby="userKnowledgeTitle" aria-busy="true">
+          <header class="profile-knowledge-header">
+            <div>
+              <div class="profile-page-kicker">Remembered context</div>
+              <h2 id="userKnowledgeTitle" class="profile-knowledge-title">Reviewable by design</h2>
+              <p class="profile-knowledge-subtitle">Ori keeps sources separate so a project fact cannot silently become a global assumption. This overview is read-only; use the source links to edit or forget an item.</p>
+            </div>
+            <button type="button" id="refreshUserKnowledgeBtn" class="modern-btn modern-btn-secondary">Refresh</button>
+          </header>
+
+          <div id="userKnowledgeStatus" class="user-knowledge-status" role="status" aria-live="polite">Gathering remembered context…</div>
+          <div id="userKnowledgeSummary" class="user-knowledge-summary" aria-label="Knowledge summary"></div>
+
+          <div class="user-knowledge-grid">
+            <section class="modern-card user-knowledge-panel" aria-labelledby="workspaceKnowledgeTitle">
+              <header class="user-knowledge-panel-header">
+                <div>
+                  <span class="user-knowledge-panel-kicker">Local scope</span>
+                  <h3 id="workspaceKnowledgeTitle">Workspace memories</h3>
+                </div>
+                <span class="user-knowledge-panel-note">Never promoted automatically</span>
+              </header>
+              <div id="userKnowledgeWorkspaceList" class="user-knowledge-source-list"></div>
+            </section>
+
+            <section class="modern-card user-knowledge-panel" aria-labelledby="assistantKnowledgeTitle">
+              <header class="user-knowledge-panel-header">
+                <div>
+                  <span class="user-knowledge-panel-kicker">Evidence-backed</span>
+                  <h3 id="assistantKnowledgeTitle">Shared assistant learnings</h3>
+                </div>
+                <span class="user-knowledge-panel-note">Proposals require review</span>
+              </header>
+              <div id="userKnowledgeLearningList" class="user-knowledge-source-list"></div>
+            </section>
+          </div>
+        </section>
 
         <!-- Personalization: interests, tools, work style. Folded in from the
              retired /personalize page so all "about you" data lives here.
@@ -74,7 +117,7 @@
           <header class="profile-personalize-header">
             <div class="profile-page-kicker">Personalization</div>
             <h2 class="profile-page-title">How you work</h2>
-            <p class="profile-personalize-subtitle">Tell Ori your interests, tools, and work style so it tailors its help to you.</p>
+            <p class="profile-personalize-subtitle">Save optional interests, tools, and work-style signals that you can return to and revise.</p>
           </header>
 
           <!-- Existing Profile Summary (read-only) -->
@@ -89,14 +132,14 @@
           <!-- Interests -->
           <div class="modern-card p-4 mb-4">
             <h5 class="mb-2" style="color: var(--text-primary);">Interests</h5>
-            <p class="mb-3" style="color: var(--text-secondary); font-size: 0.9rem;">Select topics you're interested in. This helps Ori recommend relevant tools and content.</p>
+            <p class="mb-3" style="color: var(--text-secondary); font-size: 0.9rem;">Choose topics you want associated with your personalization profile.</p>
             <div id="interestsGrid" class="d-flex flex-wrap gap-2"></div>
           </div>
 
           <!-- Preferred Tools -->
           <div class="modern-card p-4 mb-4">
             <h5 class="mb-2" style="color: var(--text-primary);">Preferred Tools</h5>
-            <p class="mb-3" style="color: var(--text-secondary); font-size: 0.9rem;">Select your favorite tools and technologies.</p>
+            <p class="mb-3" style="color: var(--text-secondary); font-size: 0.9rem;">Choose tools and technologies you want associated with your profile.</p>
             <div id="toolsGrid" class="d-flex flex-wrap gap-2 mb-3"></div>
             <div class="d-flex gap-2 align-items-center">
               <input type="text" id="customToolInput" class="form-control form-control-sm" placeholder="Add custom tool..." style="max-width: 200px; background: var(--bg-secondary); border-color: var(--border-color); color: var(--text-primary);">
@@ -120,9 +163,9 @@
 
           <!-- App Detection -->
           <div class="modern-card p-4 mb-4">
-            <h5 class="mb-2" style="color: var(--text-primary);">App Detection</h5>
-            <p class="mb-3" style="color: var(--text-secondary); font-size: 0.9rem;">Scan your system for installed development tools to enhance your profile.</p>
-            <button id="detectAppsBtn" class="modern-btn modern-btn-secondary">Detect Installed Apps</button>
+            <h5 class="mb-2" style="color: var(--text-primary);">Recent app scan</h5>
+            <p class="mb-3" style="color: var(--text-secondary); font-size: 0.9rem;">Optionally show applications used in the last seven days. The detected list is displayed here and is not added to your profile automatically.</p>
+            <button id="detectAppsBtn" class="modern-btn modern-btn-secondary">Scan recent apps</button>
             <div id="detectedAppsList" class="mt-3 d-none">
               <label class="mb-2" style="color: var(--text-secondary); font-size: 0.85rem;">Detected apps:</label>
               <div id="detectedAppsContainer" class="d-flex flex-wrap gap-1"></div>
@@ -162,6 +205,7 @@
   <script defer src="/js/modules/toast.js"></script>
   {{template "theme-init.tmpl" .}}
   <script defer src="/js/modules/user-profile.js"></script>
+  <script type="module" src="/js/modules/user-knowledge.js"></script>
   <script defer src="/js/modules/personalize.js"></script>
 </body>
 </html>

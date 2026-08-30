@@ -69,6 +69,7 @@ const userProfileManager = {
       const data = await response.json();
       this.profile = data.profile || { preferences: {} };
       this.populateForm(this.profile);
+      this.emitProfileUpdated();
       if (this.loading) this.loading.classList.add('d-none');
       this.form.classList.remove('d-none');
     } catch (error) {
@@ -121,6 +122,7 @@ const userProfileManager = {
       const data = await response.json();
       this.profile = data.profile || body;
       this.populateForm(this.profile);
+      this.emitProfileUpdated();
       this.notify('Profile saved', 'success');
     } catch (error) {
       console.error('Error saving profile:', error);
@@ -232,6 +234,12 @@ const userProfileManager = {
     if (selected) {
       select.value = selected;
     }
+  },
+
+  emitProfileUpdated() {
+    document.dispatchEvent(
+      new CustomEvent('ori:user-profile-updated', { detail: { profile: this.profile } })
+    );
   },
 
   notify(message, type) {

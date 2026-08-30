@@ -1,6 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { OnboardingManager, workspaceRootSetupView } from './onboarding.js';
+import {
+  OnboardingManager,
+  onboardingStartDestination,
+  recommendOnboardingStart,
+  workspaceRootSetupView
+} from './onboarding.js';
 import { resetOnboardingGateForTests } from './onboarding-gate.js';
 
 test('workspaceRootSetupView presents the default path as an unconfirmed suggestion', () => {
@@ -40,6 +45,98 @@ test('workspaceRootSetupView treats an operator WORKSPACE_DIR as confirmed', () 
 
   assert.equal(view.path, '/srv/ori-workspaces');
   assert.equal(view.confirmed, true);
+});
+
+test('recommendOnboardingStart maps existing work to the import flow', () => {
+  const recommendation = recommendOnboardingStart({ intent: 'existing' });
+  assert.equal(recommendation.kind, 'import');
+  assert.equal(onboardingStartDestination(recommendation), '/?import=1');
+});
+
+test('recommendOnboardingStart matches a ready blueprint from live catalog metadata', () => {
+  const recommendation = recommendOnboardingStart({
+    intent: 'new',
+    description: 'I am producing a song in REAPER',
+    templates: [
+      {
+        id: 'research-project',
+        name: 'Research Project',
+        description: 'Sources and synthesis.',
+        tags: ['research'],
+        readiness: { state: 'ready' }
+      },
+      {
+        id: 'plugin:audio:session',
+        name: 'REAPER Song',
+        description: 'A recording and production workspace.',
+        tags: ['music', 'reaper'],
+        readiness: { state: 'ready' }
+      }
+    ]
+  });
+
+  assert.equal(recommendation.kind, 'template');
+  assert.equal(recommendation.templateId, 'plugin:audio:session');
+  assert.equal(
+    onboardingStartDestination(recommendation),
+    '/?create=1&blueprint=plugin%3Aaudio%3Asession'
+  );
+});
+
+test('recommendOnboardingStart maps recurring organization to a personal operations blueprint', () => {
+  const recommendation = recommendOnboardingStart({
+    intent: 'organize',
+    templates: [
+      {
+        id: 'personal-ops',
+        name: 'Personal HQ',
+        description: 'A personal command center for daily briefs and follow-ups.',
+        tags: ['personal'],
+        readiness: { state: 'ready' }
+      },
+      {
+        id: 'research-project',
+        name: 'Research Project',
+        description: 'Sources and synthesis.',
+        tags: ['research'],
+        readiness: { state: 'ready' }
+      }
+    ]
+  });
+  assert.equal(recommendation.kind, 'template');
+  assert.equal(recommendation.templateId, 'personal-ops');
+});
+
+test('recommendOnboardingStart never recommends an unavailable blueprint', () => {
+  const recommendation = recommendOnboardingStart({
+    intent: 'new',
+    description: 'I am producing a song',
+    templates: [
+      {
+        id: 'unavailable-song',
+        name: 'Song',
+        tags: ['music'],
+        readiness: { state: 'blocked' }
+      }
+    ]
+  });
+
+  assert.equal(recommendation.kind, 'blank');
+  assert.equal(onboardingStartDestination(recommendation), '/?create=1');
+});
+
+test('recommendOnboardingStart asks for context before guessing a new project', () => {
+  const recommendation = recommendOnboardingStart({
+    intent: 'new',
+    templates: [{ id: 'personal', name: 'Personal HQ', tags: ['personal'] }]
+  });
+  assert.equal(recommendation.kind, 'pending');
+});
+
+test('recommendOnboardingStart lets the user explore without creating a project', () => {
+  const recommendation = recommendOnboardingStart({ intent: 'explore' });
+  assert.equal(recommendation.kind, 'home');
+  assert.equal(onboardingStartDestination(recommendation), '/');
 });
 
 test('OnboardingManager consumes the shared memoized status gate', async () => {

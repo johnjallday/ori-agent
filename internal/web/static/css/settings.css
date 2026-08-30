@@ -549,6 +549,14 @@ body.settings-page .settings-field .input-group > :not(:first-child) {
   margin: 0.25rem 0 0;
 }
 
+.profile-page-subtitle {
+  max-width: 720px;
+  margin: 0.45rem 0 0;
+  color: var(--text-secondary);
+  font-size: 0.95rem;
+  line-height: 1.55;
+}
+
 .profile-page-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 320px;
@@ -610,6 +618,268 @@ body.settings-page .settings-field .input-group > :not(:first-child) {
   font-weight: 600;
 }
 
+.profile-knowledge {
+  margin-top: 1.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--border-color);
+}
+
+.profile-knowledge-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.profile-knowledge-title {
+  margin: 0.2rem 0 0;
+  color: var(--text-primary);
+  font-size: 1.35rem;
+  font-weight: 700;
+}
+
+.profile-knowledge-subtitle {
+  max-width: 780px;
+  margin: 0.4rem 0 0;
+  color: var(--text-secondary);
+  font-size: 0.88rem;
+  line-height: 1.55;
+}
+
+.user-knowledge-status {
+  margin-bottom: 0.9rem;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+}
+
+.user-knowledge-status[hidden] {
+  display: none;
+}
+
+.user-knowledge-status.is-warning {
+  border-color: color-mix(in srgb, var(--warning-color, #d97706) 40%, var(--border-color));
+  color: var(--text-primary);
+}
+
+.user-knowledge-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.user-knowledge-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+  padding: 0.85rem 0.95rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--primary-color) 4%, var(--bg-primary));
+}
+
+.user-knowledge-stat-value {
+  color: var(--primary-color);
+  font-size: 1.35rem;
+  font-weight: 750;
+  line-height: 1;
+}
+
+.user-knowledge-stat-label {
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+  font-weight: 650;
+}
+
+.user-knowledge-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  align-items: start;
+}
+
+.user-knowledge-panel {
+  padding: 1.15rem;
+}
+
+.user-knowledge-panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.9rem;
+  padding-bottom: 0.8rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.user-knowledge-panel-header h3 {
+  margin: 0.15rem 0 0;
+  color: var(--text-primary);
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.user-knowledge-panel-kicker,
+.user-knowledge-scope-label {
+  color: var(--primary-color);
+  font-family: "SFMono-Regular", SFMono-Regular, Consolas, monospace;
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.user-knowledge-panel-note {
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+  line-height: 1.3;
+  text-align: right;
+}
+
+.user-knowledge-source-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+
+.user-knowledge-source-card,
+.user-knowledge-learning-card,
+.user-knowledge-empty {
+  padding: 0.85rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+}
+
+.user-knowledge-learning-card {
+  position: relative;
+  overflow: hidden;
+}
+
+.user-knowledge-learning-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: var(--primary-color);
+}
+
+.user-knowledge-learning-card.is-candidate::before {
+  background: var(--warning-color, #d97706);
+}
+
+.user-knowledge-source-header,
+.user-knowledge-learning-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.user-knowledge-source-title {
+  margin: 0.15rem 0 0;
+  color: var(--text-primary);
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.user-knowledge-warning-badge,
+.user-knowledge-learning-state,
+.user-knowledge-learning-confidence,
+.user-knowledge-memory-type {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  border-radius: 999px;
+  font-size: 0.66rem;
+  font-weight: 700;
+  line-height: 1;
+  text-transform: capitalize;
+}
+
+.user-knowledge-warning-badge {
+  padding: 0.3rem 0.5rem;
+  background: color-mix(in srgb, var(--warning-color, #d97706) 14%, transparent);
+  color: var(--text-primary);
+}
+
+.user-knowledge-memory-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin: 0.75rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.user-knowledge-memory-row {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 0.5rem;
+  align-items: baseline;
+}
+
+.user-knowledge-memory-type {
+  padding: 0.26rem 0.45rem;
+  background: color-mix(in srgb, var(--primary-color) 10%, transparent);
+  color: var(--primary-color);
+}
+
+.user-knowledge-memory-text,
+.user-knowledge-learning-text {
+  color: var(--text-primary);
+  font-size: 0.82rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.user-knowledge-learning-state {
+  padding: 0.28rem 0.48rem;
+  background: color-mix(in srgb, var(--primary-color) 11%, transparent);
+  color: var(--primary-color);
+}
+
+.user-knowledge-learning-state.is-candidate {
+  background: color-mix(in srgb, var(--warning-color, #d97706) 14%, transparent);
+  color: var(--text-primary);
+}
+
+.user-knowledge-learning-confidence {
+  color: var(--text-secondary);
+}
+
+.user-knowledge-learning-text {
+  margin: 0.65rem 0 0;
+}
+
+.user-knowledge-source-meta {
+  margin: 0.55rem 0 0;
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  line-height: 1.4;
+}
+
+.user-knowledge-source-link {
+  display: inline-flex;
+  margin-top: 0.65rem;
+  color: var(--primary-color);
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-underline-offset: 3px;
+}
+
+.user-knowledge-empty {
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
 /* ============================================
    Danger Zone Styling
    ============================================ */
@@ -658,9 +928,20 @@ body.settings-page .settings-field .input-group > :not(:first-child) {
     grid-template-columns: 1fr;
   }
 
-  .profile-page-header {
+  .profile-page-header,
+  .profile-knowledge-header {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .user-knowledge-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .user-knowledge-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -686,6 +967,23 @@ body.settings-page .settings-field .input-group > :not(:first-child) {
   .settings-actions .modern-btn {
     width: 100%;
     justify-content: center;
+  }
+
+  .profile-knowledge-header .modern-btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .user-knowledge-panel-header {
+    flex-direction: column;
+  }
+
+  .user-knowledge-panel-note {
+    text-align: left;
+  }
+
+  .user-knowledge-memory-row {
+    grid-template-columns: 1fr;
   }
 
   .settings-toggle-row {

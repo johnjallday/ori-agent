@@ -37,6 +37,41 @@ function planAgent(name, overrides = {}) {
   };
 }
 
+function assistantProgramPlan() {
+  return {
+    id: 'studio-guide',
+    station_name: 'Studio Home',
+    station_description: 'One team shared across linked projects.',
+    default_primary_name: 'Producer',
+    hire_title: 'Hire your producer',
+    hire_description: 'Name the producer and review the bounded room.',
+    roles: [
+      {
+        id: 'producer',
+        label: 'Producer',
+        description: 'Coordinates the room.',
+        primary: true
+      },
+      {
+        id: 'engineer',
+        label: 'Mix Engineer',
+        description: 'Handles technical session concerns.',
+        primary: false
+      },
+      {
+        id: 'writer',
+        label: 'Songwriter',
+        description: 'Handles composition and arrangement.',
+        primary: false
+      }
+    ],
+    stages: [
+      { id: 'helper', label: 'Helper', description: 'Guides requested work.' },
+      { id: 'collaborator', label: 'Collaborator', description: 'Forms recommendations.' }
+    ]
+  };
+}
+
 function readyDraft(agents, blueprintKey = 'template:downloads-janitor') {
   const draft = Draft.createDraft();
   Draft.setPlanReady(draft, blueprintKey, planResponse(agents));
@@ -89,6 +124,94 @@ test('a ready blueprint with no agents is a confirmed empty state (FR19)', () =>
   const empty = view.issues.find(issue => issue.id === 'empty-team');
   assert.equal(empty.severity, 'advisory', 'an agent-less team is allowed (FR55)');
   assert.equal(view.canContinueFromTeam, true);
+});
+
+test('assistant programs become a named shared roster in Team instead of an empty state', () => {
+  const draft = Draft.createDraft();
+  Draft.setPlanReady(
+    draft,
+    'template:studio',
+    planResponse([], { assistant_program: assistantProgramPlan() })
+  );
+  const view = Draft.derive(draft);
+
+  assert.equal(view.isAssistantProgram, true);
+  assert.equal(view.assistantHire.name, 'Producer');
+  assert.equal(view.blueprintSummary.count, 3);
+  assert.equal(view.blueprintSummary.isEmpty, false);
+  assert.deepEqual(
+    view.roster.map(entry => [entry.name, entry.designation, entry.lifecycle]),
+    [
+      ['Producer', 'primary', 'assistant-create'],
+      ['Mix Engineer', 'specialist', 'assistant-create'],
+      ['Songwriter', 'specialist', 'assistant-create']
+    ]
+  );
+  assert.ok(!view.issues.some(issue => issue.id === 'empty-team'));
+  assert.deepEqual(view.payload.assistant_hire, { name: 'Producer', provider: '', model: '' });
+});
+
+test('an existing shared roster is linked without offering a second identity', () => {
+  const draft = Draft.createDraft();
+  const program = assistantProgramPlan();
+  program.existing_hired = true;
+  program.existing_provider = 'ollama';
+  program.existing_model = 'gemma4:e4b';
+  program.roles[0].agent_name = 'June';
+  program.roles[1].agent_name = 'Mix Engineer';
+  program.roles[2].agent_name = 'Songwriter';
+  Draft.setPlanReady(draft, 'template:studio', planResponse([], { assistant_program: program }));
+
+  Draft.setAssistantHire(draft, { name: 'Ignored rename', provider: 'other', model: 'other' });
+  const view = Draft.derive(draft);
+  assert.equal(view.assistantProgram.existingHired, true);
+  assert.equal(view.primaryName, 'June');
+  assert.ok(view.roster.every(entry => entry.lifecycle === 'assistant-link'));
+  assert.deepEqual(view.payload.assistant_hire, {
+    name: 'June',
+    provider: 'ollama',
+    model: 'gemma4:e4b'
+  });
+  assert.equal(view.isModifiedFromBlueprint, false);
+});
+
+test('assistant hire choices are staged, validated, and reset with the blueprint', () => {
+  const draft = Draft.createDraft();
+  Draft.setPlanReady(
+    draft,
+    'template:studio',
+    planResponse([], { assistant_program: assistantProgramPlan() })
+  );
+  Draft.setAssistantHire(draft, {
+    name: 'June',
+    provider: 'ollama',
+    model: 'gemma4:e4b'
+  });
+  let view = Draft.derive(draft);
+  assert.equal(view.primaryName, 'June');
+  assert.equal(view.roster[0].name, 'June');
+  assert.deepEqual(view.payload.assistant_hire, {
+    name: 'June',
+    provider: 'ollama',
+    model: 'gemma4:e4b'
+  });
+  assert.equal(view.isModifiedFromBlueprint, true);
+
+  Draft.setAssistantHire(draft, { name: 'Songwriter' });
+  view = Draft.derive(draft);
+  assert.equal(view.canContinueFromTeam, false);
+  assert.equal(
+    view.issues.find(issue => issue.id === 'duplicate-names').anchor,
+    'assistantProgramCreateName'
+  );
+
+  Draft.setAssistantHire(draft, { name: '' });
+  view = Draft.derive(draft);
+  assert.equal(view.issues.find(issue => issue.id === 'assistant-name').severity, 'blocking');
+
+  Draft.setPlanReady(draft, 'template:other', planResponse([]));
+  assert.equal(Draft.derive(draft).isAssistantProgram, false);
+  assert.equal(draft.assistantHire.name, '');
 });
 
 test('blueprint summary reports count, names, and declared primary (FR15-FR17)', () => {

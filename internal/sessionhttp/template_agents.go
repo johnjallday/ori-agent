@@ -11,6 +11,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/systemassistant"
 	"github.com/johnjallday/ori-agent/internal/types"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // createdAgent is a roster entry the seeder newly created (not reused), carried
@@ -41,15 +42,44 @@ type seedAgentsResult struct {
 }
 
 type templateAgentPlan struct {
-	HasAgents             bool                    `json:"has_agents"`
-	TemplateID            string                  `json:"template_id,omitempty"`
-	TemplateName          string                  `json:"template_name,omitempty"`
-	EntryAgentName        string                  `json:"entry_agent_name,omitempty"`
-	SystemModelConfigured bool                    `json:"system_model_configured"`
-	SystemProvider        string                  `json:"system_provider,omitempty"`
-	SystemModel           string                  `json:"system_model,omitempty"`
-	Agents                []templateAgentPlanItem `json:"agents"`
-	Warnings              []string                `json:"warnings,omitempty"`
+	HasAgents             bool                          `json:"has_agents"`
+	TemplateID            string                        `json:"template_id,omitempty"`
+	TemplateName          string                        `json:"template_name,omitempty"`
+	EntryAgentName        string                        `json:"entry_agent_name,omitempty"`
+	SystemModelConfigured bool                          `json:"system_model_configured"`
+	SystemProvider        string                        `json:"system_provider,omitempty"`
+	SystemModel           string                        `json:"system_model,omitempty"`
+	AssistantProgram      *templateAssistantProgramPlan `json:"assistant_program,omitempty"`
+	Agents                []templateAgentPlanItem       `json:"agents"`
+	Warnings              []string                      `json:"warnings,omitempty"`
+}
+
+type templateAssistantProgramPlan struct {
+	ID                 string                              `json:"id"`
+	StationName        string                              `json:"station_name"`
+	StationDescription string                              `json:"station_description"`
+	DefaultPrimaryName string                              `json:"default_primary_name"`
+	HireTitle          string                              `json:"hire_title"`
+	HireDescription    string                              `json:"hire_description"`
+	ExistingHired      bool                                `json:"existing_hired,omitempty"`
+	ExistingProvider   string                              `json:"existing_provider,omitempty"`
+	ExistingModel      string                              `json:"existing_model,omitempty"`
+	Roles              []templateAssistantProgramRolePlan  `json:"roles"`
+	Stages             []templateAssistantProgramStagePlan `json:"stages"`
+}
+
+type templateAssistantProgramRolePlan struct {
+	ID          string `json:"id"`
+	Label       string `json:"label"`
+	Description string `json:"description"`
+	Primary     bool   `json:"primary"`
+	AgentName   string `json:"agent_name,omitempty"`
+}
+
+type templateAssistantProgramStagePlan struct {
+	ID          string `json:"id"`
+	Label       string `json:"label"`
+	Description string `json:"description"`
 }
 
 type templateAgentPlanItem struct {
@@ -422,8 +452,51 @@ func (h *Handler) buildTemplateAgentPlan(tpl projecttemplates.Template) template
 		plan.SystemModelConfigured = plan.SystemProvider != "" && plan.SystemModel != ""
 	}
 	if tpl.HasAssistantProgram() {
+		declaration := tpl.AssistantProgram
+		assistantPlan := &templateAssistantProgramPlan{
+			ID:                 declaration.ID,
+			StationName:        declaration.StationName,
+			StationDescription: declaration.StationDescription,
+			DefaultPrimaryName: declaration.DefaultPrimaryName,
+			HireTitle:          declaration.HireTitle,
+			HireDescription:    declaration.HireDescription,
+			Roles:              make([]templateAssistantProgramRolePlan, 0, len(declaration.Roles)),
+			Stages:             make([]templateAssistantProgramStagePlan, 0, len(declaration.Stages)),
+		}
+		for _, role := range declaration.Roles {
+			assistantPlan.Roles = append(assistantPlan.Roles, templateAssistantProgramRolePlan{
+				ID: role.ID, Label: role.Label, Description: role.Description, Primary: role.Primary,
+			})
+		}
+		for _, stage := range declaration.Stages {
+			assistantPlan.Stages = append(assistantPlan.Stages, templateAssistantProgramStagePlan{
+				ID: stage.ID, Label: stage.Label, Description: stage.Description,
+			})
+		}
+		if h != nil && h.workspaceTaskStore != nil && tpl.PluginOwner != nil {
+			key := workspace.AssistantProgramKey{
+				OwnerUserID: "local",
+				PluginID:    tpl.PluginOwner.PluginID,
+				ProgramID:   declaration.ID,
+			}
+			if station, err := workspace.NewAssistantProgramStore(h.workspaceTaskStore).FindStation(key); err == nil {
+				state := station.GetAssistantProgramState()
+				if state != nil && state.Hired {
+					assistantPlan.ExistingHired = true
+					assistantPlan.ExistingProvider = state.Provider
+					assistantPlan.ExistingModel = state.Model
+					bindings := make(map[string]string, len(state.Roster))
+					for _, binding := range state.Roster {
+						bindings[binding.RoleID] = binding.AgentName
+					}
+					for index := range assistantPlan.Roles {
+						assistantPlan.Roles[index].AgentName = bindings[assistantPlan.Roles[index].ID]
+					}
+				}
+			}
+		}
 		plan.HasAgents = false
-		plan.Warnings = append(plan.Warnings, "This blueprint uses a shared assistant station; its roster is created only after explicit hire.")
+		plan.AssistantProgram = assistantPlan
 		return plan
 	}
 	if !tpl.HasAgents() {

@@ -46,6 +46,7 @@ The full release flow is documented in `docs/RELEASE_CHECKLIST.md`.
 
 ## Testing & diagnostics
 
+- `reaper-demo.sh` — Build and verify the coordinated local REAPER plugin, then launch an isolated Ori server with the plugin installed and enabled. Run `./scripts/reaper-demo.sh` for a manual demo, `./scripts/reaper-demo.sh test` for the coordinated browser specs, or `./scripts/reaper-demo.sh artifact` to refresh only the root binary.
 - `test-all-installers.sh` — Exercise the generated installers.
 - `docker-test-installers.sh` — Installer tests inside Docker.
 - `test-with-ollama.sh` — Run the suite against a local Ollama provider.

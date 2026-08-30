@@ -390,6 +390,19 @@ const sessionManager = {
       this.announceResolvedPrimary();
     });
 
+    document.getElementById('assistantProgramCreateName')?.addEventListener('input', event => {
+      this.updateAssistantProgramHireDraft({ name: event.currentTarget?.value || '' });
+    });
+    document.getElementById('assistantProgramCreateProvider')?.addEventListener('change', event => {
+      this.updateAssistantProgramHireDraft({
+        provider: event.currentTarget?.value || '',
+        model: ''
+      });
+    });
+    document.getElementById('assistantProgramCreateModel')?.addEventListener('change', event => {
+      this.updateAssistantProgramHireDraft({ model: event.currentTarget?.value || '' });
+    });
+
     document.getElementById('addExistingAgentBtn')?.addEventListener('click', () => {
       void this.openExistingAgentRoster();
     });
@@ -3914,12 +3927,23 @@ const sessionManager = {
   renderWorkspaceTeamRow(entry, index) {
     const isPrimary = entry.designation === 'primary';
     const isBlueprint = entry.source === 'blueprint';
-    const rowId = isBlueprint ? `team-agent-${entry.templateAgentIndex}` : `team-saved-${index}`;
+    const isAssistantRole = entry.source === 'assistant-program';
+    const rowId = isBlueprint
+      ? `team-agent-${entry.templateAgentIndex}`
+      : isAssistantRole
+        ? `team-assistant-${this.escapeHtml(entry.assistantRoleId || index)}`
+        : `team-saved-${index}`;
     // Designation and lifecycle are both plain text, never colour or icon alone.
     const badge = isPrimary
       ? '<span class="workspace-team-badge is-primary">Primary</span>'
       : '<span class="workspace-team-badge">Specialist</span>';
-    const meta = [entry.modelLabel, entry.modelSourceLabel].filter(Boolean).join(' · ');
+    const meta = (
+      isAssistantRole
+        ? [entry.name !== entry.role ? entry.role : '', entry.modelLabel]
+        : [entry.role, entry.modelLabel, entry.modelSourceLabel]
+    )
+      .filter(Boolean)
+      .join(' · ');
 
     const actions = [];
     if (entry.customizable) {
@@ -3942,12 +3966,14 @@ const sessionManager = {
       <li class="workspace-team-row${isPrimary ? ' is-primary' : ''}"
           id="${rowId}"
           data-agent-key="${this.escapeHtml(entry.key)}"
-          ${isBlueprint ? `data-template-agent-index="${entry.templateAgentIndex}"` : ''}>
+          ${isBlueprint ? `data-template-agent-index="${entry.templateAgentIndex}"` : ''}
+          ${isAssistantRole ? `data-assistant-role="${this.escapeHtml(entry.assistantRoleId || '')}"` : ''}>
         <div class="workspace-team-row-main">
           ${this.renderAgentAvatar(entry.identity, 'workspace-agent-avatar')}
           <div class="workspace-team-row-copy">
             <strong>${this.escapeHtml(entry.name)}${badge}</strong>
             <span class="workspace-team-row-lifecycle">${this.escapeHtml(entry.lifecycleLabel)}</span>
+            ${entry.description ? `<small>${this.escapeHtml(entry.description)}</small>` : ''}
             <small>${this.escapeHtml(meta)}</small>
           </div>
           <div class="workspace-team-row-actions">${actions.join('')}</div>
@@ -3990,7 +4016,7 @@ const sessionManager = {
     }
     // Advanced team options only make sense while a blueprint contributes a team.
     if (advanced) {
-      advanced.hidden = view.blueprintSummary.count === 0;
+      advanced.hidden = view.isAssistantProgram || view.blueprintSummary.count === 0;
     }
 
     list.querySelectorAll('[data-team-customize]').forEach(button => {
@@ -4603,6 +4629,142 @@ const sessionManager = {
     return draft && api ? api.derive(draft) : null;
   },
 
+  updateAssistantProgramHireDraft(fields) {
+    const api = window.CreateWorkspaceTeamDraft;
+    const draft = this.ensureWorkspaceTeamDraft();
+    if (!draft || !api) return;
+    api.setAssistantHire(draft, fields || {});
+    this.refreshWorkspaceReview();
+  },
+
+  renderAssistantProgramCreate(view) {
+    const panel = document.getElementById('workspaceAssistantProgramCreate');
+    const picker = document.getElementById('existingAgentRosterPanel');
+    const layout = document.getElementById('workspaceTeamLayout');
+    const title = document.getElementById('wizardStep3Title');
+    const description = document.getElementById('wizardStep3Description');
+    const advanced = document.getElementById('workspaceTeamAdvanced');
+    const program = view?.assistantProgram;
+    const hire = view?.assistantHire;
+    const active = Boolean(view?.isAssistantProgram && program && hire);
+
+    if (panel) panel.hidden = !active;
+    if (picker) picker.hidden = active;
+    layout?.classList.toggle('is-assistant-program', active);
+    if (advanced && active) advanced.hidden = true;
+    if (!active) {
+      if (title) title.textContent = 'Build your workspace team';
+      if (description) {
+        description.textContent =
+          'Confirm who will work in this workspace, and add saved agents if you need more.';
+      }
+      return;
+    }
+
+    if (title) {
+      title.textContent = program.existingHired
+        ? 'Connect your shared assistant team'
+        : program.hireTitle || 'Hire your assistant';
+    }
+    if (description) {
+      description.textContent = program.existingHired
+        ? `This workspace will link to the existing ${program.stationName || 'assistant'} roster.`
+        : program.hireDescription || 'Name the primary assistant and review the shared roster.';
+    }
+
+    const nameInput = document.getElementById('assistantProgramCreateName');
+    if (nameInput) {
+      if (document.activeElement !== nameInput) nameInput.value = hire.name || '';
+      nameInput.disabled = program.existingHired;
+    }
+
+    const providerSelect = document.getElementById('assistantProgramCreateProvider');
+    if (providerSelect) {
+      providerSelect.replaceChildren();
+      const defaultOption = document.createElement('option');
+      defaultOption.value = '';
+      defaultOption.textContent = 'Use Ori default';
+      providerSelect.append(defaultOption);
+      for (const provider of Array.isArray(this.editAgentProvidersData)
+        ? this.editAgentProvidersData
+        : []) {
+        const name = String(provider?.name || '').trim();
+        if (
+          !name ||
+          name === 'default' ||
+          Array.from(providerSelect.options).some(option => option.value === name)
+        ) {
+          continue;
+        }
+        const option = document.createElement('option');
+        option.value = name;
+        option.textContent = provider.display_name || name;
+        providerSelect.append(option);
+      }
+      if (
+        hire.provider &&
+        !Array.from(providerSelect.options).some(option => option.value === hire.provider)
+      ) {
+        const current = document.createElement('option');
+        current.value = hire.provider;
+        current.textContent = `${hire.provider} (current)`;
+        providerSelect.append(current);
+      }
+      providerSelect.value = hire.provider || '';
+      providerSelect.disabled = program.existingHired;
+    }
+
+    const modelSelect = document.getElementById('assistantProgramCreateModel');
+    if (modelSelect) {
+      modelSelect.replaceChildren();
+      const defaultModel = document.createElement('option');
+      defaultModel.value = '';
+      defaultModel.textContent = hire.provider ? 'Use provider default' : 'Use Ori default';
+      modelSelect.append(defaultModel);
+      const provider = (
+        Array.isArray(this.editAgentProvidersData) ? this.editAgentProvidersData : []
+      ).find(candidate => String(candidate?.name || '').trim() === hire.provider);
+      for (const model of Array.isArray(provider?.models) ? provider.models : []) {
+        const value = String(model?.value || model?.id || '').trim();
+        if (!value || Array.from(modelSelect.options).some(option => option.value === value)) {
+          continue;
+        }
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = model.label || value;
+        modelSelect.append(option);
+      }
+      if (
+        hire.model &&
+        !Array.from(modelSelect.options).some(option => option.value === hire.model)
+      ) {
+        const current = document.createElement('option');
+        current.value = hire.model;
+        current.textContent = `${hire.model} (current)`;
+        modelSelect.append(current);
+      }
+      modelSelect.value = hire.model || '';
+      modelSelect.disabled = program.existingHired || !hire.provider;
+    }
+
+    const stages = document.getElementById('assistantProgramCreateStages');
+    if (stages) {
+      stages.replaceChildren();
+      for (const stage of program.stages || []) {
+        const item = document.createElement('li');
+        item.className = 'workspace-assistant-program-stage';
+        const copy = document.createElement('div');
+        const heading = document.createElement('strong');
+        heading.textContent = stage.label;
+        const body = document.createElement('span');
+        body.textContent = stage.description;
+        copy.append(heading, body);
+        item.append(copy);
+        stages.append(item);
+      }
+    }
+  },
+
   addExistingAgent(name, options = {}) {
     const api = window.CreateWorkspaceTeamDraft;
     const draft = this.ensureWorkspaceTeamDraft();
@@ -4752,10 +4914,15 @@ const sessionManager = {
     const view = this.teamView();
     const roster = view ? view.roster : [];
 
+    this.renderAssistantProgramCreate(view);
     if (heading) {
       // "Workspace Assistant" is a retired product label (Issue #350); this
       // heading describes the roster, so it says what the roster is.
-      heading.textContent = roster.length === 1 ? 'Entry Assistant' : 'Workspace Team';
+      heading.textContent = view?.isAssistantProgram
+        ? view.assistantProgram.stationName || 'Shared assistant team'
+        : roster.length === 1
+          ? 'Entry Assistant'
+          : 'Workspace Team';
     }
     if (teamSummary) teamSummary.textContent = this.workspaceTeamSummaryText(view);
     if (summary) summary.innerHTML = this.renderWorkspaceReceipt(view, selectedTemplate, name);
@@ -4929,6 +5096,12 @@ const sessionManager = {
     // The consequence is spelled out by the advisory issue below the summary;
     // repeating it here would say the same thing twice in two shapes.
     if (roster.length === 0) return 'No agent will be attached to this workspace.';
+    if (view?.isAssistantProgram) {
+      const action = view.assistantProgram.existingHired
+        ? 'linked to this workspace'
+        : 'created and linked';
+      return `${roster.length} shared assistant role${roster.length === 1 ? '' : 's'} will be ${action}.`;
+    }
     const created = roster.filter(
       entry => entry.lifecycle === 'create' || entry.lifecycle === 'customized-copy'
     ).length;
@@ -5316,9 +5489,13 @@ const sessionManager = {
     if (recap) recap.hidden = importMode;
     if (!importMode && step === 3) {
       this.refreshWorkspaceReview();
-      // Your Agents loads on entering Team rather than behind a button, but the
-      // team already staged from the blueprint stays reviewable either way.
-      if (!this.existingAgentRosterLoaded && !this.existingAgentRosterLoading) {
+      // Assistant programs own one declaration-defined shared roster; attaching
+      // an unrelated saved agent here would violate that stable identity.
+      if (
+        !this.teamView()?.isAssistantProgram &&
+        !this.existingAgentRosterLoaded &&
+        !this.existingAgentRosterLoading
+      ) {
         void this.loadExistingAgentRoster();
       }
     }
@@ -5467,7 +5644,12 @@ const sessionManager = {
     if (!this.importModeEnabled && targetStep > 3 && this.wizardStep === 3) {
       if (this.hasBlockingTeamIssue()) {
         this.refreshWizardChrome();
-        document.querySelector('#workspaceTeamIssues .workspace-team-issue.is-blocking')?.focus();
+        const assistantNameIssue = this.teamView()?.issues.some(
+          issue => issue.id === 'assistant-name' || issue.anchor === 'assistantProgramCreateName'
+        );
+        if (assistantNameIssue) document.getElementById('assistantProgramCreateName')?.focus();
+        else
+          document.querySelector('#workspaceTeamIssues .workspace-team-issue.is-blocking')?.focus();
         return;
       }
     }
@@ -5583,6 +5765,47 @@ const sessionManager = {
     }
   },
 
+  async hireAssistantProgramAfterCreate(workspaceId, hire) {
+    const id = String(workspaceId || '').trim();
+    if (!id || !hire) return null;
+    const base = `/api/workspaces/${encodeURIComponent(id)}/assistant-program`;
+    const stateResponse = await fetch(base, { headers: { Accept: 'application/json' } });
+    let state = await stateResponse.json().catch(() => ({}));
+    if (!stateResponse.ok || state.error) {
+      throw new Error(state.error || 'The shared assistant station could not be prepared.');
+    }
+    if (!state.available && state.activation_needed) {
+      const activateResponse = await fetch(`${base}/activate`, {
+        method: 'POST',
+        headers: { Accept: 'application/json' }
+      });
+      state = await activateResponse.json().catch(() => ({}));
+      if (!activateResponse.ok || state.error) {
+        throw new Error(state.error || 'The shared assistant station could not be activated.');
+      }
+    }
+    if (!state.available) {
+      throw new Error('The shared assistant station could not be prepared.');
+    }
+    if (state.hired) return state;
+
+    const hireResponse = await fetch(`${base}/hire`, {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: String(hire.name || '').trim(),
+        provider: String(hire.provider || '').trim(),
+        model: String(hire.model || '').trim(),
+        version: Number(state.state_revision || 0)
+      })
+    });
+    const result = await hireResponse.json().catch(() => ({}));
+    if (!hireResponse.ok || result.error) {
+      throw new Error(result.error || 'The shared assistant roster could not be hired.');
+    }
+    return result;
+  },
+
   // Create folder
   async createFolder() {
     if (this.isCreatingFolder) return;
@@ -5598,6 +5821,13 @@ const sessionManager = {
     const workspaceBootstrap = this.getWorkspaceBootstrapFromModal();
 
     const importEnabled = this.importModeEnabled || Boolean(importToggle?.checked);
+    // Snapshot the confirmed Team receipt before the final readiness refresh.
+    // Re-populating the blueprint catalog can emit a same-selection loading
+    // event while its fresh plan request is in flight; that must not erase the
+    // roster the user just reviewed.
+    const confirmedTeamView = importEnabled ? null : this.teamView();
+    const confirmedTeamPayload = confirmedTeamView?.payload || {};
+    const assistantRosterAlreadyHired = Boolean(confirmedTeamView?.assistantProgram?.existingHired);
     const openProjectAfterCreate = Boolean(
       !importEnabled && window.ProjectTemplateCard?.shouldOpenAfterCreate?.()
     );
@@ -5684,6 +5914,7 @@ const sessionManager = {
         return parts.join('\n\n');
       };
       let endpoint = '/api/workspaces';
+      let assistantHireConfig = null;
       if (importEnabled) {
         endpoint = '/api/workspaces/import';
         payload.path = importPath;
@@ -5714,7 +5945,10 @@ const sessionManager = {
         // staged customizations ride the existing override field, and
         // entry_agent_name is set only when the resolved primary is genuinely one
         // of the saved selections — the server's requirement for that field.
-        const teamPayload = this.teamView()?.payload || {};
+        const teamPayload = confirmedTeamPayload;
+        if (teamPayload.assistant_hire) {
+          assistantHireConfig = { ...teamPayload.assistant_hire };
+        }
         if (typeof teamPayload.create_template_agents === 'boolean') {
           payload.create_template_agents = teamPayload.create_template_agents;
         }
@@ -5890,6 +6124,19 @@ const sessionManager = {
         }
       }
 
+      let assistantHireResult = null;
+      let assistantHireError = null;
+      if (createdWorkspaceId && assistantHireConfig) {
+        try {
+          assistantHireResult = await this.hireAssistantProgramAfterCreate(
+            createdWorkspaceId,
+            assistantHireConfig
+          );
+        } catch (error) {
+          assistantHireError = error;
+        }
+      }
+
       // Starter tasks are seeded server-side during workspace creation
       // (assigned to the entry agent); the create response reports how many.
       const seededStarterTasks = Number(result?.seeded_starter_tasks) || 0;
@@ -5906,6 +6153,12 @@ const sessionManager = {
         }
       }
 
+      if (assistantHireError && createdWorkspaceSlug) {
+        // Producer/Team Home is optional on success. It becomes the destination
+        // only when the create-time hire did not finish and recovery is needed.
+        postCreateResult.destination = `/workspaces/${encodeURIComponent(createdWorkspaceSlug)}/assistant`;
+      }
+
       if (postCreateResult.applied) {
         this.showToast('Personal HQ imported successfully', 'success');
       } else if (
@@ -5915,7 +6168,8 @@ const sessionManager = {
         bootstrapApplyResult.addedPlugins > 0 ||
         askOriSeedResult.tasksCreated > 0 ||
         askOriSeedResult.notesCreated > 0 ||
-        seededStarterTasks > 0
+        seededStarterTasks > 0 ||
+        Array.isArray(assistantHireResult?.roster)
       ) {
         const summaryParts = [];
         if (bootstrapApplyResult.invitedAgents > 0)
@@ -5942,6 +6196,14 @@ const sessionManager = {
           summaryParts.push(
             `${seededStarterTasks} starter task${seededStarterTasks === 1 ? '' : 's'} added`
           );
+        const hiredRoles = Array.isArray(assistantHireResult?.roster)
+          ? assistantHireResult.roster.length
+          : 0;
+        if (hiredRoles > 0) {
+          summaryParts.push(
+            `${hiredRoles} shared assistant role${hiredRoles === 1 ? '' : 's'} ${assistantRosterAlreadyHired ? 'linked' : 'hired'}`
+          );
+        }
         const summaryText = summaryParts.join(', ');
         if (askOriSeedResult.errors.length > 0 || bootstrapApplyResult.failures.length > 0) {
           const firstFailure = bootstrapApplyResult.failures[0];
@@ -5965,6 +6227,12 @@ const sessionManager = {
       if (postCreateError) {
         this.showToast(
           `Workspace imported, but Personal HQ setup did not finish. ${postCreateError.message || ''}`.trim(),
+          'warning'
+        );
+      }
+      if (assistantHireError) {
+        this.showToast(
+          `Workspace created, but its assistant team still needs attention. ${assistantHireError.message || ''}`.trim(),
           'warning'
         );
       }
@@ -10893,19 +11161,17 @@ document.addEventListener('DOMContentLoaded', () => {
     /* non-fatal */
   }
 
-  // ?create=1 opens the Create Workspace modal after navigation. The canonical
-  // destination is now Home (`/?create=1`); the legacy `/workspaces?create=1`
-  // still works because that route redirects to `/` preserving its query
-  // (PRD FR4, FR106). One-shot: scrubbed from history so a refresh doesn't
-  // re-open.
-  // Optional blueprint preselection: /?create=1&blueprint=email-ops (the HQ
-  // email station CTA, the Home Email Ops CTA, and the Home Calendar Ops
-  // portal's absent-workspace CTA all link here).
+  // One-shot onboarding/deep links open the existing workspace wizard. The
+  // canonical destination is Home; the legacy /workspaces route preserves the
+  // query during its redirect. Scrub launch params so refresh cannot re-open.
   try {
     const params = new URLSearchParams(window.location.search);
-    if (params.get('create') === '1') {
+    const openCreate = params.get('create') === '1';
+    const openImport = params.get('import') === '1';
+    if (openCreate || openImport) {
       const blueprint = String(params.get('blueprint') || '').trim();
       params.delete('create');
+      params.delete('import');
       params.delete('blueprint');
       const qs = params.toString();
       const cleanUrl = window.location.pathname + (qs ? `?${qs}` : '') + window.location.hash;
@@ -10913,8 +11179,13 @@ document.addEventListener('DOMContentLoaded', () => {
       // Defer a frame so init()'s show.bs.modal handler is bound first.
       requestAnimationFrame(() =>
         sessionManager.showAddWorkspaceModal({
-          entryPoint: blueprint ? `${blueprint.replace(/-/g, '_')}_cta` : 'home_first_run',
-          blueprint: blueprint || undefined
+          entryPoint: openImport
+            ? 'onboarding_import'
+            : blueprint
+              ? `${blueprint.replace(/-/g, '_')}_cta`
+              : 'home_first_run',
+          blueprint: blueprint && !openImport ? blueprint : undefined,
+          importMode: openImport
         })
       );
     }

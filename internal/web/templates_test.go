@@ -15,6 +15,29 @@ func TestLoadTemplates_Parses(t *testing.T) {
 	}
 }
 
+func TestRenderProfileIncludesReviewableKnowledgeScopes(t *testing.T) {
+	r := NewTemplateRenderer()
+	if err := r.LoadTemplates(); err != nil {
+		t.Fatalf("LoadTemplates failed: %v", err)
+	}
+	html, err := r.RenderTemplate("profile", TemplateData{Title: "What Ori knows - Ori Agent"})
+	if err != nil {
+		t.Fatalf("RenderTemplate(profile) failed: %v", err)
+	}
+	for _, want := range []string{
+		`What Ori knows about you`,
+		`id="userKnowledgeOverview"`,
+		`id="userKnowledgeWorkspaceList"`,
+		`id="userKnowledgeLearningList"`,
+		`Excluded until you approve it`,
+		`src="/js/modules/user-knowledge.js"`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("rendered profile page missing %q", want)
+		}
+	}
+}
+
 func TestRenderWorkspaceAssistantPassesUnquotedIdentityToModule(t *testing.T) {
 	r := NewTemplateRenderer()
 	if err := r.LoadTemplates(); err != nil {
