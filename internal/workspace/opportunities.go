@@ -24,6 +24,10 @@ const (
 	// the underlying finding isn't fixed, it's just been turned into tracked
 	// work — using "resolved" here would misdescribe the finding as addressed.
 	OpportunityPlanned OpportunityStatus = "planned"
+
+	// OpportunitySourceAssistantSuggestion identifies generic assistant-program
+	// recommendations without coupling Action Center to a plugin domain.
+	OpportunitySourceAssistantSuggestion = "assistant_suggestion"
 )
 
 // DismissalReason captures why the user dismissed an opportunity. Used to power
@@ -45,6 +49,10 @@ type Opportunity struct {
 	ID                string            `json:"id"`
 	WorkspaceID       string            `json:"workspace_id"`
 	SourceRunID       string            `json:"source_run_id,omitempty"`
+	SourceType        string            `json:"source_type,omitempty"`
+	SourceID          string            `json:"source_id,omitempty"`
+	SourceLabel       string            `json:"source_label,omitempty"`
+	SourceURL         string            `json:"source_url,omitempty"`
 	Title             string            `json:"title"`
 	Summary           string            `json:"summary,omitempty"`
 	Evidence          string            `json:"evidence,omitempty"`
@@ -240,6 +248,18 @@ func (s *workspaceOpportunityStore) Upsert(opp Opportunity) (Opportunity, bool, 
 			}
 			if opp.SourceRunID != "" {
 				existing.SourceRunID = opp.SourceRunID
+			}
+			if opp.SourceType != "" {
+				existing.SourceType = opp.SourceType
+			}
+			if opp.SourceID != "" {
+				existing.SourceID = opp.SourceID
+			}
+			if opp.SourceLabel != "" {
+				existing.SourceLabel = opp.SourceLabel
+			}
+			if opp.SourceURL != "" {
+				existing.SourceURL = opp.SourceURL
 			}
 			// Status handling on recurrence: a finding the user had marked
 			// resolved has come back, so re-open it for triage (and mark it

@@ -9,6 +9,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/session"
 	agentstore "github.com/johnjallday/ori-agent/internal/store"
+	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 func rosterTemplate(specs ...projecttemplates.AgentSpec) projecttemplates.Template {
@@ -127,6 +128,25 @@ func TestSeedTemplateAgents_ExplicitModelWinsOverSystemModel(t *testing.T) {
 	}
 	if created.Settings.Provider != "" {
 		t.Fatalf("provider = %q, want empty provider for explicit model-only template", created.Settings.Provider)
+	}
+}
+
+func TestBuildTemplateAgentPlan_AssistantProgramDefersRosterUntilHire(t *testing.T) {
+	handler := &Handler{}
+	plan := handler.buildTemplateAgentPlan(projecttemplates.Template{
+		ID:     "plugin:neutral:project",
+		Agents: []projecttemplates.AgentSpec{{Name: "Legacy Auto Seed"}},
+		AssistantProgram: &agentworkspace.AssistantProgramDeclaration{
+			SchemaVersion: 1, ID: "project-guide", StationName: "Guide Home", DefaultPrimaryName: "Guide",
+			Roles:  []agentworkspace.AssistantProgramRoleSpec{{ID: "guide", Label: "Guide", Primary: true, SystemPrompt: "Coordinate"}},
+			Stages: []agentworkspace.AssistantProgramStageSpec{{ID: "helper", Label: "Helper"}},
+		},
+	})
+	if plan.HasAgents || len(plan.Agents) != 0 || plan.EntryAgentName != "" {
+		t.Fatalf("assistant program leaked automatic roster plan: %+v", plan)
+	}
+	if len(plan.Warnings) != 1 || !strings.Contains(plan.Warnings[0], "explicit hire") {
+		t.Fatalf("deferred-hire warning = %v", plan.Warnings)
 	}
 }
 

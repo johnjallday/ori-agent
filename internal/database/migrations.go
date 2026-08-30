@@ -10,7 +10,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 44
+const schemaVersion = 45
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -153,6 +153,8 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 		return db.migration043WorkspaceTicketState(ctx)
 	case 44:
 		return db.migration044WorkspaceFolderSlugs(ctx)
+	case 45:
+		return db.migration045WorkspaceAssistantProgram(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
@@ -220,6 +222,7 @@ func (db *DB) migration001Baseline(ctx context.Context) error {
 			installed_capabilities_json TEXT DEFAULT '[]',
 			toolbox_state_json TEXT DEFAULT '{}',
 			mission_state_json TEXT,
+			assistant_program_json TEXT NOT NULL DEFAULT '{}',
 			order_index INTEGER DEFAULT 0,
 			FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE RESTRICT,
 			FOREIGN KEY (parent_id) REFERENCES workspaces(id) ON DELETE SET NULL
@@ -1590,6 +1593,24 @@ func (db *DB) migration044WorkspaceFolderSlugs(ctx context.Context) error {
 // Nothing here stores Task execution state, Run traces, or Run artifacts. Those
 // records stay authoritative in their own tables and are referenced by ID only
 // (FR-11, FR-12).
+// migration045WorkspaceAssistantProgram mirrors generic station/link state into
+// the primary store. The canonical workspace.json copy remains portable.
+func (db *DB) migration045WorkspaceAssistantProgram(ctx context.Context) error {
+	exists, err := db.tableExists(ctx, "workspaces")
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+	if _, err := db.ExecContext(ctx, `
+		ALTER TABLE workspaces ADD COLUMN assistant_program_json TEXT NOT NULL DEFAULT '{}'
+	`); err != nil && !isDuplicateColumnError(err) {
+		return fmt.Errorf("failed to add workspace assistant_program_json column: %w", err)
+	}
+	return nil
+}
+
 func (db *DB) migration039WorkspacePlans(ctx context.Context) error {
 	statements := []string{
 		`CREATE TABLE IF NOT EXISTS workspace_plans (

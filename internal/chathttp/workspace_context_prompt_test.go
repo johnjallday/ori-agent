@@ -152,6 +152,54 @@ func TestBuildWorkspaceSnapshotPrompt_PopulatedWorkspace(t *testing.T) {
 	}
 }
 
+func TestBuildWorkspaceSnapshotPrompt_IncludesTrustedAssistantProjectAndStage(t *testing.T) {
+	wsStore := workspace.NewInMemoryStore()
+	project := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Neon Song"})
+	project.SetTemplateProvenance(&workspace.TemplateProvenance{
+		PluginOwner: &workspace.PluginTemplateOwner{PluginID: "reaper-plugin", BlueprintID: "reaper-song", BlueprintVersion: 3},
+		AssistantProgram: &workspace.AssistantProgramDeclaration{
+			SchemaVersion: 1, ID: "music-producer-assistant", StationName: "Producer Home",
+			Roles: []workspace.AssistantProgramRoleSpec{
+				{ID: "producer", Label: "Producer", Primary: true, Description: "Coordinates the room", SystemPrompt: "Safe"},
+				{ID: "engineer", Label: "Mix Engineer", Description: "Technical questions only", SystemPrompt: "Bounded"},
+			},
+			Stages: []workspace.AssistantProgramStageSpec{{ID: "helper", Label: "Helper"}, {ID: "collaborator", Label: "Collaborator", AcceptedCompletionThreshold: 5}},
+		},
+	})
+	if err := wsStore.Save(project); err != nil {
+		t.Fatal(err)
+	}
+	station, _, err := workspace.NewAssistantProgramStore(wsStore).EnsureProjectStation(project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := wsStore.Update(station.ID, func(current *workspace.Workspace) error {
+		state := current.GetAssistantProgramState()
+		state.Hired = true
+		state.StageID = "helper"
+		state.Level = 1
+		state.AcceptedCompletions = 2
+		current.SetAssistantProgramState(state)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	prompt := buildWorkspaceSnapshotPrompt(context.Background(), normalizedChatRouteContext{Surface: "workspace_chat", WorkspaceID: project.ID}, wsStore, nil)
+	for _, want := range []string{
+		"## Assistant Program Context",
+		`Program ID: "music-producer-assistant"`,
+		`Current workspace name: "Neon Song"`,
+		`Stage: "helper" (level 1, accepted completions 2)`,
+		"Mix Engineer (engineer): Technical questions only",
+		"Project mutation from conversation is forbidden",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("assistant context missing %q:\n%s", want, prompt)
+		}
+	}
+}
+
 func TestBuildRuntimeSystemPrompt_IncludesUserProfile(t *testing.T) {
 	wsStore := workspace.NewInMemoryStore()
 	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "Alpha Workspace", Agents: []string{"Ori"}})

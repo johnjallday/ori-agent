@@ -369,6 +369,19 @@ func TestBuildTaskPrompt_IncludesTaskDetails(t *testing.T) {
 	}
 }
 
+func TestBuildTaskPrompt_ProtectsAssistantSuggestionSafetyGate(t *testing.T) {
+	handler := &LLMTaskHandler{}
+	prompt := handler.buildTaskPrompt(context.Background(), Task{
+		ID: "task-suggestion", From: "user", Description: "Apply the recommended cleanup", Priority: 1,
+		Context: map[string]any{"assistant_suggestion_id": "suggestion-1", "requires_confirmation": true},
+	})
+	for _, want := range []string{"Assistant Suggestion Safety Gate", "not authority to mutate", "ordinary host confirmation flow", "re-check every required capability"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("expected suggestion prompt to contain %q, got %q", want, prompt)
+		}
+	}
+}
+
 func TestBuildTaskPrompt_IncludesReferenceURLGuidance(t *testing.T) {
 	handler := &LLMTaskHandler{}
 

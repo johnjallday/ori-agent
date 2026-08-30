@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -87,6 +88,45 @@ func TestGetMemory_EmptyAndLazyCreate(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(folder, workspace.MemoryFileName)); err != nil {
 		t.Errorf("MEMORY.md should exist after first POST: %v", err)
+	}
+}
+
+func TestGetMemory_IncludesOnlyApprovedManagedLearnings(t *testing.T) {
+	h, fs := newTestHandler(t)
+	if err := fs.Update("ws1", func(current *workspace.Workspace) error {
+		current.SetAssistantProgramState(&workspace.AssistantProgramState{
+			SchemaVersion: 1,
+			Key:           workspace.AssistantProgramKey{OwnerUserID: "local", PluginID: "plugin", ProgramID: "program"},
+			Declaration:   &workspace.AssistantProgramDeclaration{SchemaVersion: 1, ID: "program"},
+		})
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	evidence := []workspace.AssistantEvidenceReference{
+		{SourceID: "a", ProjectID: "a", Summary: "Pattern in A", ObservedAt: now},
+		{SourceID: "b", ProjectID: "b", Summary: "Pattern in B", ObservedAt: now},
+		{SourceID: "c", ProjectID: "c", Summary: "Pattern in C", ObservedAt: now},
+	}
+	learningStore := workspace.NewAssistantLearningStore(fs)
+	document, err := learningStore.AddCandidates("ws1", 0, []workspace.AssistantLearningCandidate{{
+		Fingerprint: "pattern", Type: "preference", Text: "Keep reviews concise.", Confidence: "high", Evidence: evidence,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := learningStore.ApproveCandidate("ws1", document.Candidates[0].ID, document.Version); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := serve(h, http.MethodGet, "/api/workspaces/ws1/memory", "")
+	resp := decodeMemory(t, rec)
+	if len(resp.ManagedLearnings) != 1 || resp.ManagedLearnings[0].Text != "Keep reviews concise." {
+		t.Fatalf("managed learnings = %+v", resp.ManagedLearnings)
+	}
+	if len(resp.Entries) != 0 {
+		t.Fatalf("managed learning leaked into index-based MEMORY.md entries: %+v", resp.Entries)
 	}
 }
 

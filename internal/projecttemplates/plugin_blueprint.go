@@ -62,8 +62,8 @@ func LoadPluginBlueprint(manifestPath, skeletonRoot string, catalog RuntimeCatal
 	template.Builtin = false
 	template.BuiltinVersion = 0
 	template.HasSkeleton = files > 0
-	if template.RuntimeRequirementsError != "" || template.SetupWizardError != "" {
-		return Template{}, "", errors.New("plugin blueprint setup/runtime references are unavailable")
+	if template.RuntimeRequirementsError != "" || template.SetupWizardError != "" || template.AssistantProgramError != "" {
+		return Template{}, "", errors.New("plugin blueprint setup/runtime/assistant-program references are unavailable")
 	}
 	for _, warning := range template.Warnings {
 		if strings.Contains(warning, "declares capability") || strings.Contains(warning, "project_entry is ignored") {

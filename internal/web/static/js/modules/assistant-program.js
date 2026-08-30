@@ -1,0 +1,754 @@
+import { workspaceRootURL } from './workspace-routes.js';
+
+function text(value) {
+  return String(value == null ? '' : value);
+}
+
+function setText(id, value) {
+  const element = document.getElementById(id);
+  if (element) element.textContent = text(value);
+  return element;
+}
+
+function selectOption(label, value) {
+  const option = document.createElement('option');
+  option.value = value;
+  option.textContent = label;
+  return option;
+}
+
+async function responseJSON(response) {
+  try {
+    return await response.json();
+  } catch (_) {
+    return {};
+  }
+}
+
+export class AssistantProgramPage {
+  constructor({ workspaceId, workspaceSlug, fetchImpl = globalThis.fetch } = {}) {
+    this.workspaceId = text(workspaceId).trim();
+    this.workspaceSlug = text(workspaceSlug).trim();
+    // Keep browser fetch as a plain invocation. Calling a stored Window.fetch as
+    // an instance method gives it the wrong receiver and fails before any API
+    // request is made.
+    this.fetchImpl = (...args) => fetchImpl(...args);
+    this.program = null;
+    this.learningDocument = null;
+    this.providers = [];
+  }
+
+  workspaceURL(suffix = '') {
+    return workspaceRootURL(this.workspaceSlug) + suffix;
+  }
+
+  apiURL(suffix = '') {
+    return `/api/workspaces/${encodeURIComponent(this.workspaceId)}/assistant-program${suffix}`;
+  }
+
+  async init() {
+    const workspaceURL = this.workspaceURL();
+    for (const id of [
+      'assistantProgramWorkspaceLink',
+      'assistantProgramBack',
+      'assistantProgramHireCancel'
+    ]) {
+      const element = document.getElementById(id);
+      if (element) element.href = workspaceURL;
+    }
+    document.getElementById('assistantProgramHireForm')?.addEventListener('submit', event => {
+      event.preventDefault();
+      void this.hire();
+    });
+    document
+      .getElementById('assistantProgramHireOpen')
+      ?.addEventListener('click', () => this.openHire());
+    document
+      .getElementById('assistantProgramActivate')
+      ?.addEventListener('click', () => void this.activate());
+    document
+      .getElementById('assistantProgramPromotionAck')
+      ?.addEventListener('click', () => void this.acknowledgePromotion());
+    document
+      .getElementById('assistantProgramReflect')
+      ?.addEventListener('click', () => void this.reflect());
+    document
+      .getElementById('assistantProgramSuggest')
+      ?.addEventListener('click', () => void this.generateSuggestions());
+    document
+      .getElementById('assistantProgramLearning')
+      ?.addEventListener('click', event => void this.handleLearningAction(event));
+    document
+      .getElementById('assistantProgramSuggestions')
+      ?.addEventListener('click', event => void this.handleSuggestionAction(event));
+    document
+      .getElementById('assistantProgramHireProvider')
+      ?.addEventListener('change', () => this.renderHireModels());
+    await this.loadProviderCatalog();
+    await this.load();
+  }
+
+  async request(path = '', options = {}) {
+    if (typeof this.fetchImpl !== 'function') throw new Error('Network access is unavailable');
+    const response = await this.fetchImpl(this.apiURL(path), {
+      headers: {
+        Accept: 'application/json',
+        ...(options.body ? { 'Content-Type': 'application/json' } : {})
+      },
+      ...options
+    });
+    const payload = await responseJSON(response);
+    if (!response.ok) {
+      throw new Error(text(payload.error || `Request failed (${response.status})`));
+    }
+    return payload;
+  }
+
+  async loadProviderCatalog() {
+    if (typeof this.fetchImpl !== 'function') return;
+    try {
+      const response = await this.fetchImpl('/api/providers', {
+        headers: { Accept: 'application/json' }
+      });
+      const payload = await responseJSON(response);
+      this.providers =
+        response.ok && Array.isArray(payload.providers)
+          ? payload.providers.filter(provider => provider.available)
+          : [];
+    } catch (_) {
+      this.providers = [];
+    }
+    const select = document.getElementById('assistantProgramHireProvider');
+    if (select) {
+      select.replaceChildren(selectOption('Use Ori default', ''));
+      for (const provider of this.providers) {
+        select.append(selectOption(provider.display_name || provider.name, provider.name));
+      }
+    }
+    this.renderHireModels();
+  }
+
+  renderHireModels() {
+    const providerName = document.getElementById('assistantProgramHireProvider')?.value || '';
+    const select = document.getElementById('assistantProgramHireModel');
+    if (!select) return;
+    const provider = this.providers.find(item => item.name === providerName);
+    select.replaceChildren(
+      selectOption(providerName ? 'Use provider default' : 'Use Ori default', '')
+    );
+    const seenModels = new Set();
+    for (const model of provider?.models || []) {
+      if (!model.value || seenModels.has(model.value)) continue;
+      seenModels.add(model.value);
+      select.append(selectOption(model.label || model.value, model.value));
+    }
+    select.disabled = !providerName;
+  }
+
+  async load() {
+    try {
+      const program = await this.request();
+      if (!program.available) {
+        this.showUnavailable(program.activation_needed);
+        return;
+      }
+      this.program = program;
+      this.render();
+      if (!program.hired) this.openHire();
+    } catch (error) {
+      this.showError(error.message || 'This assistant home is unavailable.');
+    }
+  }
+
+  showUnavailable(activationNeeded) {
+    this.finishLoading();
+    setText(
+      'assistantProgramErrorText',
+      activationNeeded
+        ? 'This older project can join the assistant program. Activation is explicit and keeps the existing project intact.'
+        : 'This workspace does not declare an assistant program.'
+    );
+    const activate = document.getElementById('assistantProgramActivate');
+    if (activate) activate.hidden = !activationNeeded;
+    const error = document.getElementById('assistantProgramError');
+    if (error) error.hidden = false;
+  }
+
+  showError(message) {
+    this.finishLoading();
+    setText('assistantProgramErrorText', message);
+    const error = document.getElementById('assistantProgramError');
+    if (error) error.hidden = false;
+  }
+
+  finishLoading() {
+    const page = document.getElementById('assistantProgramPage');
+    const loading = document.getElementById('assistantProgramLoading');
+    if (page) page.setAttribute('aria-busy', 'false');
+    if (loading) loading.hidden = true;
+  }
+
+  render() {
+    const program = this.program || {};
+    const declaration = program.declaration || {};
+    this.finishLoading();
+    const error = document.getElementById('assistantProgramError');
+    const content = document.getElementById('assistantProgramContent');
+    if (error) error.hidden = true;
+    if (content) content.hidden = false;
+
+    setText(
+      'assistantProgramTitle',
+      program.primary_name || declaration.station_name || 'Assistant'
+    );
+    setText(
+      'assistantProgramDescription',
+      declaration.station_description || 'A shared assistant for linked projects.'
+    );
+    setText(
+      'assistantProgramStage',
+      program.hired
+        ? `Stage ${program.level || 1} — ${program.stage_label || 'Active'}`
+        : 'Not hired'
+    );
+    setText(
+      'assistantProgramProjectCount',
+      `${(program.projects || []).length} linked ${(program.projects || []).length === 1 ? 'project' : 'projects'}`
+    );
+    setText('assistantProgramLevel', program.hired ? program.level || 1 : '—');
+
+    const meter = document.getElementById('assistantProgramMeterValue');
+    if (meter) {
+      const stages = Array.isArray(declaration.stages) ? declaration.stages : [];
+      const current = Math.max(
+        0,
+        stages.findIndex(stage => stage.id === program.stage_id)
+      );
+      const fraction = program.hired && stages.length > 1 ? (current + 1) / stages.length : 0;
+      meter.style.strokeDashoffset = String(358.14 * (1 - fraction));
+      const progress = meter.closest?.('.assistant-program-meter');
+      if (progress) {
+        progress.setAttribute('role', 'progressbar');
+        progress.setAttribute('aria-valuemin', '1');
+        progress.setAttribute('aria-valuemax', String(Math.max(1, stages.length)));
+        progress.setAttribute('aria-valuenow', String(program.hired ? current + 1 : 1));
+        progress.setAttribute(
+          'aria-valuetext',
+          program.hired
+            ? `${program.stage_label || 'Active'}, level ${program.level || 1}`
+            : 'Assistant not hired'
+        );
+      }
+    }
+
+    const disabled = document.getElementById('assistantProgramDisabled');
+    if (disabled) disabled.hidden = program.plugin_available !== false;
+    setText(
+      'assistantProgramDisabledText',
+      declaration.disabled_message ||
+        'The contribution is unavailable. Existing assistant data remains readable.'
+    );
+
+    this.renderRoster(declaration.roles || [], program.roster || []);
+    this.renderStages(declaration.stages || []);
+    this.renderProjects(program.projects || []);
+
+    const hireOpen = document.getElementById('assistantProgramHireOpen');
+    if (hireOpen) hireOpen.hidden = Boolean(program.hired) || program.plugin_available === false;
+    const promotionAck = document.getElementById('assistantProgramPromotionAck');
+    if (promotionAck)
+      promotionAck.hidden = !program.promotion_pending || program.plugin_available === false;
+    const reflect = document.getElementById('assistantProgramReflect');
+    if (reflect) reflect.disabled = !program.hired || program.plugin_available === false;
+    const suggest = document.getElementById('assistantProgramSuggest');
+    if (suggest)
+      suggest.disabled =
+        !program.hired ||
+        program.plugin_available === false ||
+        program.level < 2 ||
+        !program.project_id;
+    if (program.hired) void this.loadLearnings();
+  }
+
+  renderRoster(roles, roster) {
+    const root = document.getElementById('assistantProgramRoster');
+    if (!root) return;
+    root.replaceChildren();
+    for (const role of roles) {
+      const binding = roster.find(item => item.role_id === role.id);
+      const card = document.createElement('article');
+      card.className = 'assistant-program-role';
+      card.dataset.primary = role.primary ? 'true' : 'false';
+      const roleID = document.createElement('span');
+      roleID.className = 'assistant-program-role-id';
+      roleID.textContent = role.primary ? 'Primary / coordinator' : `Specialist / ${role.id}`;
+      const title = document.createElement('h3');
+      title.textContent = role.label || role.id;
+      const description = document.createElement('p');
+      description.textContent = role.description || '';
+      card.append(roleID, title, description);
+      if (binding?.agent_name) {
+        const agentName = document.createElement('a');
+        agentName.className = 'assistant-program-role-agent';
+        agentName.href = `/agents/${encodeURIComponent(binding.agent_name)}`;
+        agentName.textContent = `Open ${binding.agent_name} →`;
+        card.append(agentName);
+      }
+      root.append(card);
+    }
+  }
+
+  renderStages(stages) {
+    const root = document.getElementById('assistantProgramStages');
+    if (!root) return;
+    root.replaceChildren();
+    const currentIndex = stages.findIndex(stage => stage.id === this.program.stage_id);
+    stages.forEach((stage, index) => {
+      const item = document.createElement('div');
+      item.className = 'assistant-program-stage';
+      if (index === currentIndex) item.classList.add('is-current');
+      if (index < currentIndex) item.classList.add('is-complete');
+      const marker = document.createElement('span');
+      marker.className = 'assistant-program-stage-marker';
+      marker.textContent = String(index + 1).padStart(2, '0');
+      const copy = document.createElement('div');
+      const title = document.createElement('strong');
+      title.textContent = stage.label || stage.id;
+      const description = document.createElement('span');
+      description.textContent = stage.description || '';
+      copy.append(title, description);
+      item.append(marker, copy);
+      root.append(item);
+    });
+    setText(
+      'assistantProgramRemaining',
+      this.program.next_threshold > 0
+        ? `${this.program.accepted_tasks} accepted completions · ${this.program.remaining} until ${stages[currentIndex + 1]?.label || 'the next stage'}`
+        : this.program.hired
+          ? `${this.program.accepted_tasks} accepted completions · highest stage reached`
+          : 'Progress begins after the roster is hired.'
+    );
+  }
+
+  renderProjects(projects) {
+    const root = document.getElementById('assistantProgramProjects');
+    if (!root) return;
+    root.replaceChildren();
+    if (!projects.length) {
+      const empty = document.createElement('p');
+      empty.className = 'assistant-program-project-empty';
+      empty.textContent = 'No linked projects yet.';
+      root.append(empty);
+      return;
+    }
+    for (const project of projects) {
+      const link = document.createElement('a');
+      link.className = 'assistant-program-project';
+      if (project.id === this.program.project_id) link.classList.add('is-current');
+      link.href = project.folder_slug ? workspaceRootURL(project.folder_slug) : '#';
+      link.textContent = project.name || project.id;
+      root.append(link);
+    }
+  }
+
+  openHire() {
+    const declaration = this.program?.declaration || {};
+    setText('assistantProgramHireTitle', declaration.hire_title || 'Hire your assistant');
+    setText(
+      'assistantProgramHireDescription',
+      declaration.hire_description ||
+        'Choose a name for the primary assistant and review the bounded roster.'
+    );
+    const name = document.getElementById('assistantProgramHireName');
+    if (name && !name.value) name.value = declaration.default_primary_name || '';
+    const cancel = document.getElementById('assistantProgramHireCancel');
+    if (cancel) cancel.href = this.workspaceURL();
+    const rolesRoot = document.getElementById('assistantProgramHireRoles');
+    if (rolesRoot) {
+      rolesRoot.replaceChildren();
+      for (const role of declaration.roles || []) {
+        const row = document.createElement('div');
+        row.className = 'assistant-program-hire-role';
+        const title = document.createElement('strong');
+        title.textContent = role.label || role.id;
+        const description = document.createElement('span');
+        description.textContent = role.description || '';
+        row.append(title, description);
+        rolesRoot.append(row);
+      }
+    }
+    setText('assistantProgramHireError', '');
+    const dialog = document.getElementById('assistantProgramHireDialog');
+    if (!dialog) return;
+    if (typeof dialog.showModal === 'function' && !dialog.open) dialog.showModal();
+    else dialog.setAttribute('open', '');
+    name?.focus();
+  }
+
+  async hire() {
+    const submit = document.getElementById('assistantProgramHireSubmit');
+    const request = {
+      name: text(document.getElementById('assistantProgramHireName')?.value).trim(),
+      provider: text(document.getElementById('assistantProgramHireProvider')?.value).trim(),
+      model: text(document.getElementById('assistantProgramHireModel')?.value).trim(),
+      version: Number(this.program?.state_revision || 0)
+    };
+    if (!request.name) {
+      setText('assistantProgramHireError', 'Choose a name for the primary assistant.');
+      return;
+    }
+    if (submit) submit.disabled = true;
+    setText('assistantProgramHireError', '');
+    try {
+      this.program = await this.request('/hire', { method: 'POST', body: JSON.stringify(request) });
+      const dialog = document.getElementById('assistantProgramHireDialog');
+      if (dialog?.open && typeof dialog.close === 'function') dialog.close();
+      this.render();
+    } catch (error) {
+      setText('assistantProgramHireError', error.message || 'The assistant could not be hired.');
+    } finally {
+      if (submit) submit.disabled = false;
+    }
+  }
+
+  async activate() {
+    const button = document.getElementById('assistantProgramActivate');
+    if (button) button.disabled = true;
+    try {
+      this.program = await this.request('/activate', { method: 'POST' });
+      this.render();
+      if (!this.program.hired) this.openHire();
+    } catch (error) {
+      setText('assistantProgramErrorText', error.message || 'Activation failed.');
+    } finally {
+      if (button) button.disabled = false;
+    }
+  }
+
+  async learningRequest(path = '', options = {}) {
+    if (typeof this.fetchImpl !== 'function') throw new Error('Network access is unavailable');
+    const response = await this.fetchImpl(`${this.apiURL('/learnings')}${path}`, {
+      headers: {
+        Accept: 'application/json',
+        ...(options.body ? { 'Content-Type': 'application/json' } : {})
+      },
+      ...options
+    });
+    const payload = await responseJSON(response);
+    if (!response.ok) throw new Error(text(payload.error || `Request failed (${response.status})`));
+    return payload;
+  }
+
+  async loadLearnings() {
+    try {
+      this.learningDocument = await this.learningRequest();
+      this.renderLearnings();
+      this.renderSuggestions();
+    } catch (error) {
+      const root = document.getElementById('assistantProgramLearning');
+      if (root) root.textContent = error.message || 'Learnings are unavailable.';
+    }
+  }
+
+  renderLearnings() {
+    const root = document.getElementById('assistantProgramLearning');
+    if (!root) return;
+    root.replaceChildren();
+    const documentState = this.learningDocument || {};
+    const candidates = (documentState.candidates || []).filter(
+      candidate => !candidate.rejected_at && !candidate.approved_learning_id
+    );
+    const learnings = (documentState.learnings || []).filter(
+      learning => !learning.deleted_at && (learning.revisions || []).length
+    );
+    if (!candidates.length && !learnings.length) {
+      root.className = 'assistant-program-learning-empty';
+      root.textContent = 'No pending candidates or approved learnings yet.';
+    } else {
+      root.className = 'assistant-program-learning-list';
+    }
+    for (const candidate of candidates) {
+      root.append(this.learningCard(candidate, 'candidate'));
+    }
+    for (const learning of learnings) {
+      root.append(this.learningCard(learning, 'learning'));
+    }
+    const runs = documentState.runs || [];
+    if (runs.length) {
+      const diagnostic = document.createElement('p');
+      diagnostic.className = 'assistant-program-learning-diagnostic';
+      const last = runs[runs.length - 1];
+      diagnostic.textContent = `Last reflection: ${last.status}${last.summary ? ` — ${last.summary}` : ''}`;
+      root.append(diagnostic);
+    }
+  }
+
+  renderSuggestions() {
+    const root = document.getElementById('assistantProgramSuggestions');
+    if (!root) return;
+    root.replaceChildren();
+    const suggestions = (this.learningDocument?.suggestions || []).filter(
+      item => item.project_id === this.program?.project_id && !item.dismissed_at
+    );
+    if (!suggestions.length) {
+      root.className = 'assistant-program-learning-empty';
+      root.textContent =
+        this.program?.level >= 2
+          ? 'No suggestions yet. Find suggestions from your approved learnings.'
+          : 'Suggestions unlock at Collaborator stage.';
+      return;
+    }
+    root.className = 'assistant-program-learning-list';
+    for (const suggestion of suggestions) {
+      const card = document.createElement('article');
+      card.className = 'assistant-program-learning-card';
+      const meta = document.createElement('span');
+      meta.className = 'assistant-program-role-id';
+      meta.textContent = suggestion.accepted_at
+        ? 'Accepted · in Backlog'
+        : 'Recommendation · review first';
+      const copy = document.createElement('p');
+      copy.textContent = suggestion.text;
+      const rationale = document.createElement('p');
+      rationale.className = 'assistant-program-learning-copy';
+      rationale.textContent = suggestion.rationale;
+      const targetProject = (this.program?.projects || []).find(
+        item => item.id === suggestion.project_id
+      );
+      const capabilities = this.program?.declaration?.suggestion_required_capabilities || [];
+      const impact = document.createElement('p');
+      impact.className = 'assistant-program-learning-impact';
+      impact.textContent = `Target: ${targetProject?.name || suggestion.project_id}. Required capabilities: ${capabilities.length ? capabilities.join(', ') : 'none declared'}. Adding this to Backlog does not change the project; execution still requires ordinary confirmation and readiness checks.`;
+      const actions = document.createElement('div');
+      actions.className = 'assistant-program-learning-actions';
+      if (suggestion.accepted_at && suggestion.task_id) {
+        const project = (this.program?.projects || []).find(
+          item => item.id === suggestion.project_id
+        );
+        const link = document.createElement('a');
+        link.className = 'modern-btn modern-btn-secondary modern-btn-sm';
+        link.href = project?.folder_slug
+          ? `${workspaceRootURL(project.folder_slug)}/task/${encodeURIComponent(suggestion.task_id)}`
+          : '#';
+        link.textContent = 'Review task';
+        actions.append(link);
+      } else if (this.program?.plugin_available !== false) {
+        actions.append(
+          this.learningButton('Add to Backlog', 'accept-suggestion', suggestion.id),
+          this.learningButton('Dismiss', 'dismiss-suggestion', suggestion.id)
+        );
+      }
+      card.append(meta, copy, rationale, impact, actions);
+      root.append(card);
+    }
+  }
+
+  learningCard(record, kind) {
+    const candidate = kind === 'candidate';
+    const revision = candidate ? record : record.revisions[record.revisions.length - 1];
+    const card = document.createElement('article');
+    card.className = 'assistant-program-learning-card';
+    const meta = document.createElement('span');
+    meta.className = 'assistant-program-role-id';
+    meta.textContent = candidate
+      ? `Pending · ${revision.confidence}`
+      : `Approved · ${revision.confidence}`;
+    const copy = document.createElement('p');
+    copy.textContent = revision.text || '';
+    const evidence = document.createElement('details');
+    const summary = document.createElement('summary');
+    summary.textContent = `${(revision.evidence || []).length} evidence references`;
+    evidence.append(summary);
+    const evidenceList = document.createElement('ul');
+    for (const item of revision.evidence || []) {
+      const row = document.createElement('li');
+      if (item.project_slug && item.route) {
+        const link = document.createElement('a');
+        link.href = item.route;
+        link.textContent = item.summary;
+        row.append(link);
+      } else {
+        row.textContent = item.summary;
+      }
+      evidenceList.append(row);
+    }
+    evidence.append(evidenceList);
+    const actions = document.createElement('div');
+    actions.className = 'assistant-program-learning-actions';
+    if (this.program?.plugin_available !== false) {
+      if (candidate) {
+        actions.append(
+          this.learningButton('Approve', 'approve-candidate', record.id),
+          this.learningButton('Edit', 'edit-candidate', record.id),
+          this.learningButton('Reject', 'reject-candidate', record.id),
+          this.learningButton('Delete', 'delete-candidate', record.id)
+        );
+      } else {
+        actions.append(
+          this.learningButton('Edit', 'edit-learning', record.id, record.version),
+          this.learningButton('Delete', 'delete-learning', record.id, record.version)
+        );
+      }
+    }
+    card.append(meta, copy, evidence, actions);
+    return card;
+  }
+
+  learningButton(label, action, id, version = '') {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'modern-btn modern-btn-secondary modern-btn-sm';
+    button.textContent = label;
+    button.dataset.learningAction = action;
+    button.dataset.recordId = id;
+    if (version !== '') button.dataset.recordVersion = String(version);
+    return button;
+  }
+
+  async handleLearningAction(event) {
+    const button = event.target.closest?.('[data-learning-action]');
+    if (!button || button.disabled) return;
+    const action = button.dataset.learningAction;
+    const id = button.dataset.recordId;
+    button.disabled = true;
+    try {
+      if (action === 'approve-candidate' || action === 'reject-candidate') {
+        const verb = action.startsWith('approve') ? 'approve' : 'reject';
+        await this.request(`/candidates/${encodeURIComponent(id)}/${verb}`, {
+          method: 'POST',
+          body: JSON.stringify({ version: Number(this.learningDocument?.version || 0) })
+        });
+      } else if (action === 'edit-candidate') {
+        const candidate = (this.learningDocument?.candidates || []).find(item => item.id === id);
+        const nextText = globalThis.prompt?.('Edit pending learning', candidate?.text || '');
+        if (nextText == null) return;
+        await this.request(`/candidates/${encodeURIComponent(id)}`, {
+          method: 'PATCH',
+          body: JSON.stringify({
+            version: Number(this.learningDocument?.version || 0),
+            text: nextText,
+            type: candidate.type,
+            confidence: candidate.confidence
+          })
+        });
+      } else if (action === 'delete-candidate') {
+        if (
+          globalThis.confirm &&
+          !globalThis.confirm(
+            'Delete this pending learning? Rejected evidence will not be proposed again.'
+          )
+        )
+          return;
+        await this.request(`/candidates/${encodeURIComponent(id)}`, {
+          method: 'DELETE',
+          body: JSON.stringify({ version: Number(this.learningDocument?.version || 0) })
+        });
+      } else if (action === 'edit-learning') {
+        const learning = (this.learningDocument?.learnings || []).find(item => item.id === id);
+        const revision = learning?.revisions?.[learning.revisions.length - 1];
+        const nextText = globalThis.prompt?.('Edit approved learning', revision?.text || '');
+        if (nextText == null) return;
+        await this.learningRequest(`/${encodeURIComponent(id)}`, {
+          method: 'PATCH',
+          body: JSON.stringify({
+            version: Number(button.dataset.recordVersion),
+            text: nextText,
+            type: revision.type,
+            confidence: revision.confidence
+          })
+        });
+      } else if (action === 'delete-learning') {
+        if (
+          globalThis.confirm &&
+          !globalThis.confirm('Delete this approved learning? The audit tombstone will remain.')
+        )
+          return;
+        await this.learningRequest(`/${encodeURIComponent(id)}`, {
+          method: 'DELETE',
+          body: JSON.stringify({ version: Number(button.dataset.recordVersion) })
+        });
+      }
+      await this.loadLearnings();
+    } catch (error) {
+      button.disabled = false;
+      button.textContent = error.message || 'Try again';
+    }
+  }
+
+  async generateSuggestions() {
+    const button = document.getElementById('assistantProgramSuggest');
+    if (button) button.disabled = true;
+    try {
+      this.learningDocument = await this.request('/suggestions/generate', {
+        method: 'POST',
+        body: JSON.stringify({
+          version: Number(this.learningDocument?.version || 0),
+          project_id: this.program?.project_id || ''
+        })
+      });
+      this.renderSuggestions();
+    } catch (error) {
+      const root = document.getElementById('assistantProgramSuggestions');
+      if (root) root.textContent = error.message || 'Suggestions could not be generated.';
+    } finally {
+      if (button)
+        button.disabled =
+          this.program?.plugin_available === false ||
+          this.program?.level < 2 ||
+          !this.program?.project_id;
+    }
+  }
+
+  async handleSuggestionAction(event) {
+    const button = event.target.closest?.('[data-learning-action]');
+    if (!button || button.disabled) return;
+    const action = button.dataset.learningAction;
+    if (action !== 'accept-suggestion' && action !== 'dismiss-suggestion') return;
+    button.disabled = true;
+    const verb = action.startsWith('accept') ? 'accept' : 'dismiss';
+    try {
+      await this.request(`/suggestions/${encodeURIComponent(button.dataset.recordId)}/${verb}`, {
+        method: 'POST',
+        body: JSON.stringify({ version: Number(this.learningDocument?.version || 0) })
+      });
+      await this.loadLearnings();
+    } catch (error) {
+      button.disabled = false;
+      button.textContent = error.message || 'Try again';
+    }
+  }
+
+  async reflect() {
+    const button = document.getElementById('assistantProgramReflect');
+    if (button) {
+      button.disabled = true;
+      button.textContent = 'Reflecting…';
+    }
+    try {
+      await this.request('/reflection', { method: 'POST' });
+      await this.loadLearnings();
+    } catch (error) {
+      const root = document.getElementById('assistantProgramLearning');
+      if (root) root.textContent = error.message || 'Reflection could not run.';
+    } finally {
+      if (button) {
+        button.disabled = this.program?.plugin_available === false;
+        button.textContent = 'Reflect';
+      }
+    }
+  }
+
+  async acknowledgePromotion() {
+    const button = document.getElementById('assistantProgramPromotionAck');
+    if (button) button.disabled = true;
+    try {
+      await this.request('/promotion/ack', { method: 'POST' });
+      await this.load();
+    } catch (error) {
+      if (button) {
+        button.disabled = false;
+        button.textContent = error.message || 'Try acknowledgement again';
+      }
+    }
+  }
+}

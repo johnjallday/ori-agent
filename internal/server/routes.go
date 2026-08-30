@@ -720,6 +720,24 @@ func registerSessionRoutes(mux *http.ServeMux, s *Server) {
 		})
 		mux.HandleFunc("/api/folders", s.Handlers.Session.HandleWorkspaces)
 
+		// Generic assistant-program routes are explicit so they cannot be
+		// swallowed by the legacy workspace subtree router.
+		mux.HandleFunc("GET /api/workspaces/{workspaceID}/assistant-program", s.Handlers.Session.GetAssistantProgram)
+		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/activate", s.Handlers.Session.ActivateAssistantProgram)
+		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/hire", s.Handlers.Session.HireAssistantProgram)
+		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/promotion/ack", s.Handlers.Session.AcknowledgeAssistantPromotion)
+		mux.HandleFunc("GET /api/workspaces/{workspaceID}/assistant-program/learnings", s.Handlers.Session.GetAssistantLearnings)
+		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/reflection", s.Handlers.Session.RunAssistantReflection)
+		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/suggestions/generate", s.Handlers.Session.GenerateAssistantSuggestions)
+		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/suggestions/{suggestionID}/accept", s.Handlers.Session.AcceptAssistantSuggestion)
+		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/suggestions/{suggestionID}/dismiss", s.Handlers.Session.DismissAssistantSuggestion)
+		mux.HandleFunc("PATCH /api/workspaces/{workspaceID}/assistant-program/candidates/{candidateID}", s.Handlers.Session.EditAssistantCandidate)
+		mux.HandleFunc("DELETE /api/workspaces/{workspaceID}/assistant-program/candidates/{candidateID}", s.Handlers.Session.DeleteAssistantCandidate)
+		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/candidates/{candidateID}/approve", s.Handlers.Session.ApproveAssistantCandidate)
+		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/candidates/{candidateID}/reject", s.Handlers.Session.RejectAssistantCandidate)
+		mux.HandleFunc("PATCH /api/workspaces/{workspaceID}/assistant-program/learnings/{learningID}", s.Handlers.Session.EditAssistantLearning)
+		mux.HandleFunc("DELETE /api/workspaces/{workspaceID}/assistant-program/learnings/{learningID}", s.Handlers.Session.DeleteAssistantLearning)
+
 		// Workspace routes (unified workspace API)
 		mux.HandleFunc("/api/workspaces", s.handleWorkspaceCollectionAPI)
 		mux.HandleFunc("/api/workspaces/", s.handleWorkspaceAPI)

@@ -5,6 +5,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -526,6 +527,30 @@ func (b *ServerBuilder) initializeHandlers() {
 	// and approval keep working (FR-58, FR-177).
 	b.workspacePlanService.SetGenerator(workspaceplan.NewGenerator(
 		workspaceplan.NewLLMPlanModel(b.resolvePlanningProvider)))
+	b.assistantReflectionModel = newLLMAssistantReflectionModel(b.resolvePlanningProvider, b.llmFactory)
+	if b.sessionHandler != nil {
+		b.sessionHandler.SetAssistantReflectionModel(b.assistantReflectionModel)
+		b.sessionHandler.SetAssistantModelValidator(func(providerName, modelName string) error {
+			providerName = strings.ToLower(strings.TrimSpace(providerName))
+			if providerName == "" {
+				return fmt.Errorf("provider is required")
+			}
+			provider, err := b.llmFactory.GetProvider(providerName)
+			if err != nil {
+				return err
+			}
+			modelName = strings.TrimSpace(modelName)
+			if modelName == "" {
+				return nil
+			}
+			for _, available := range provider.DefaultModels() {
+				if available == modelName {
+					return nil
+				}
+			}
+			return fmt.Errorf("model %q is not available for provider %q", modelName, providerName)
+		})
+	}
 	b.workspacePlanHandler = workspaceplan.NewHandler(b.workspacePlanService)
 	b.workspacePlanHandler.SetAvailabilityResolver(b.resolvePlanAvailability)
 	// The materializer is NOT built here: b.workspaceStore is still nil at this

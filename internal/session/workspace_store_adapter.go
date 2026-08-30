@@ -376,6 +376,15 @@ func (a *WorkspaceStoreAdapter) toSessionWorkspace(ws *workspace.Workspace) *Wor
 		sessionWS.MissionStateJSON = data
 	}
 
+	if data, err := json.Marshal(workspaceAssistantProgramEnvelope{
+		State: ws.GetAssistantProgramState(),
+		Link:  ws.GetAssistantProjectLink(),
+	}); err != nil {
+		logger.Warn("Failed to marshal assistant program state", logger.Fields{"workspace_id": ws.ID, "error": err})
+	} else {
+		sessionWS.AssistantProgramJSON = data
+	}
+
 	return sessionWS
 }
 
@@ -384,6 +393,11 @@ func (a *WorkspaceStoreAdapter) toSessionWorkspace(ws *workspace.Workspace) *Wor
 // Config and counters travel together because they are only meaningful
 // together: a cadence with no NextMissionRunAt reads as permanently due, and
 // counters without their cadence cannot be interpreted at all.
+type workspaceAssistantProgramEnvelope struct {
+	State *workspace.AssistantProgramState `json:"state,omitempty"`
+	Link  *workspace.AssistantProjectLink  `json:"link,omitempty"`
+}
+
 type workspaceMissionState struct {
 	Mission                 string                        `json:"mission,omitempty"`
 	MissionEnabled          bool                          `json:"mission_enabled,omitempty"`
@@ -589,6 +603,16 @@ func (a *WorkspaceStoreAdapter) toAgentWorkspace(ws *Workspace) *workspace.Works
 			agentWS.ToolboxMigration = state.Migration
 			agentWS.GoalBrief = state.GoalBrief
 			agentWS.GoalToolboxPolicy = state.GoalToolboxPolicy
+		}
+	}
+
+	if len(ws.AssistantProgramJSON) > 0 {
+		var envelope workspaceAssistantProgramEnvelope
+		if err := json.Unmarshal(ws.AssistantProgramJSON, &envelope); err != nil {
+			logger.Warn("Failed to unmarshal assistant program state", logger.Fields{"workspace_id": ws.ID, "error": err})
+		} else {
+			agentWS.AssistantProgramState = workspace.CloneAssistantProgramState(envelope.State)
+			agentWS.AssistantProjectLink = workspace.CloneAssistantProjectLink(envelope.Link)
 		}
 	}
 

@@ -429,11 +429,26 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 
 	// Must run after starter-task seeding above — see
 	// persistCreateWorkspaceTemplateProvenance's doc comment for why.
+	assistantStationID := ""
 	if capabilityWarning := h.persistCreateWorkspaceTemplateProvenance(ws.ID, resolvedTemplate, templateResolved); capabilityWarning != "" {
 		if prov.projectWarning == "" {
 			prov.projectWarning = capabilityWarning
 		} else {
 			prov.projectWarning += "; " + capabilityWarning
+		}
+	}
+	if templateResolved && resolvedTemplate.HasAssistantProgram() && h.workspaceTaskStore != nil {
+		station, _, err := agentworkspace.NewAssistantProgramStore(h.workspaceTaskStore).EnsureProjectStation(ws.ID)
+		if err != nil {
+			warning := "assistant home could not be linked; use Activate from the workspace after resolving storage"
+			if prov.projectWarning == "" {
+				prov.projectWarning = warning
+			} else {
+				prov.projectWarning += "; " + warning
+			}
+			logger.Warn("Failed to link assistant station", logger.Fields{"workspace_id": ws.ID, "error": err})
+		} else {
+			assistantStationID = station.ID
 		}
 	}
 
@@ -450,6 +465,9 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	response := map[string]any{
 		"success": true,
 		"folder":  ws,
+	}
+	if assistantStationID != "" {
+		response["assistant_station_id"] = assistantStationID
 	}
 	if prov.projectWarning != "" {
 		response["project_warning"] = prov.projectWarning
@@ -535,7 +553,7 @@ func (h *Handler) selectCreateWorkspaceEntryAgent(w http.ResponseWriter, ws *ses
 
 	if usesExistingAgentRoster {
 		switch {
-		case templateResolved && createTemplateAgentsEnabled(req):
+		case templateResolved && createTemplateAgentsEnabled(req) && !tmpl.HasAssistantProgram():
 			if tmpl.HasAgents() {
 				seed = h.seedTemplateAgents(ws, tmpl)
 			}
@@ -585,7 +603,7 @@ func (h *Handler) selectCreateWorkspaceEntryAgent(w http.ResponseWriter, ws *ses
 			setWorkspaceEntryAgent(ws, entryAgentName)
 			seed.EntrySet = true
 		}
-	case templateResolved && createTemplateAgentsEnabled(req):
+	case templateResolved && createTemplateAgentsEnabled(req) && !tmpl.HasAssistantProgram():
 		// The template declares an agent roster: seed it (first = entry agent,
 		// rest = specialists). Every template-created workspace must end up with
 		// an entry agent to own its seeded starter tasks, so a roster-less
@@ -871,7 +889,7 @@ func (h *Handler) persistCreateWorkspaceTemplateProvenance(wsID string, tmpl pro
 	// declares a setup wizard or runtime contract: those snapshots *are* the
 	// workspace's setup contract, so without provenance the blueprint's declared
 	// requirements would silently disappear after creation.
-	if !tmpl.Builtin && tmpl.PluginOwner == nil && !tmpl.HasSetupWizard() && !tmpl.HasRuntimeRequirements() {
+	if !tmpl.Builtin && tmpl.PluginOwner == nil && !tmpl.HasSetupWizard() && !tmpl.HasRuntimeRequirements() && !tmpl.HasAssistantProgram() {
 		return ""
 	}
 	version := tmpl.BuiltinVersion
@@ -901,6 +919,7 @@ func (h *Handler) persistCreateWorkspaceTemplateProvenance(wsID string, tmpl pro
 		PluginSources:          tmpl.Tools.PluginSources,
 		RuntimeRequirements:    tmpl.RuntimeRequirements,
 		SetupWizard:            tmpl.SetupWizard,
+		AssistantProgram:       tmpl.AssistantProgram,
 	}
 	// Provenance and the blueprint's declared capability installs are written in
 	// ONE update, so a workspace can never end up recorded as coming from the

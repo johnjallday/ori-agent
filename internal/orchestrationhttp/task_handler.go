@@ -3,6 +3,7 @@ package orchestrationhttp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -1323,7 +1324,10 @@ func (th *TaskHandler) handleCompleteTask(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Find and update task status to completed
+	// Find and update task status to completed. Only the user's explicit
+	// completion endpoint is an accepted assistant-program completion; automatic
+	// run completion remains ordinary execution state.
+	wasCompleted := task.Status == workspace.TaskStatusCompleted
 	for i := range ws.Tasks {
 		if ws.Tasks[i].ID == taskID {
 			now := time.Now()
@@ -1346,6 +1350,14 @@ func (th *TaskHandler) handleCompleteTask(w http.ResponseWriter, r *http.Request
 	}
 
 	logger.Info("Completed task manually", logger.Fields{"task_id": taskID, "workspace_id": task.WorkspaceID})
+	if !wasCompleted {
+		if _, promoted, progressionErr := workspace.NewAssistantProgramStore(th.workspaceStore).RecordAcceptedCompletion(ws.ID, "task:"+taskID); progressionErr != nil &&
+			!errors.Is(progressionErr, workspace.ErrAssistantProgramUnavailable) && !errors.Is(progressionErr, workspace.ErrAssistantStationNotFound) {
+			logger.Warn("Failed to record assistant progression", logger.Fields{"task_id": taskID, "workspace_id": ws.ID, "error": progressionErr})
+		} else if promoted {
+			logger.Info("Assistant program advanced", logger.Fields{"task_id": taskID, "workspace_id": ws.ID})
+		}
+	}
 
 	// Publish event
 	if th.eventBus != nil {
@@ -1353,8 +1365,9 @@ func (th *TaskHandler) handleCompleteTask(w http.ResponseWriter, r *http.Request
 			Type:        workspace.EventTaskCompleted,
 			WorkspaceID: task.WorkspaceID,
 			Data: map[string]any{
-				"task_id": taskID,
-				"manual":  true,
+				"task_id":  taskID,
+				"manual":   true,
+				"accepted": true,
 			},
 		})
 	}

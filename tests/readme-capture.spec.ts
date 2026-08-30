@@ -433,6 +433,10 @@ async function installFixtureRoutes(page: Page) {
       });
       return;
     }
+    if (/^\/api\/workspaces\/[^/]+\/assistant-program$/.test(url.pathname)) {
+      await json(route, { available: false });
+      return;
+    }
     if (
       url.pathname === `/api/workspaces/${README_SCENES.workspace_command.workspace_id}/files/tree`
     ) {

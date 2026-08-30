@@ -112,6 +112,8 @@ export default defineConfig([
       'internal/web/static/js/modules/agent-canvas-timeline.js',
       'internal/web/static/js/modules/agent-canvas-workflow-selector.js',
       'internal/web/static/js/modules/agent-canvas.js',
+      'internal/web/static/js/modules/assistant-program-entry.js',
+      'internal/web/static/js/modules/assistant-program.js',
       'internal/web/static/js/modules/chat-auto-scroll.js',
       'internal/web/static/js/modules/chat-state-ui.js',
       'internal/web/static/js/modules/chat-state.js',

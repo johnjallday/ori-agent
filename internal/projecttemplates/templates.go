@@ -354,6 +354,11 @@ type Template struct {
 	// workspace, because "some of the setup ran" is the one outcome a
 	// half-understood flow must never produce.
 	SetupWizardError string `json:"setup_wizard_error,omitempty"`
+	// AssistantProgram is the optional generic, inert assistant-station
+	// declaration. Invalid declarations remain nil and set AssistantProgramError
+	// so trusted plugin blueprint creation fails closed.
+	AssistantProgram      *workspace.AssistantProgramDeclaration `json:"assistant_program,omitempty"`
+	AssistantProgramError string                                 `json:"assistant_program_error,omitempty"`
 	// Capabilities are the built-in Workspace Capabilities a workspace created
 	// from this template has installed (FR-31, FR-32).
 	//
@@ -409,6 +414,16 @@ func (t Template) HasInvalidSetupWizard() bool {
 	return strings.TrimSpace(t.SetupWizardError) != ""
 }
 
+// HasAssistantProgram reports whether the template carries a usable declaration.
+func (t Template) HasAssistantProgram() bool {
+	return t.AssistantProgram != nil
+}
+
+// HasInvalidAssistantProgram reports a declared block that failed closed.
+func (t Template) HasInvalidAssistantProgram() bool {
+	return strings.TrimSpace(t.AssistantProgramError) != ""
+}
+
 // HasOnboarding reports whether the template still carries a legacy intake-era
 // onboarding block (detection only — the block is ignored at runtime and
 // stripped on the next authoring save).
@@ -454,6 +469,10 @@ type manifest struct {
 	// it typed here, one bad step would fail the whole manifest decode and the
 	// template would silently lose its name, tasks, and agents too.
 	SetupWizard json.RawMessage `json:"setup_wizard,omitempty"`
+	// AssistantProgram uses the same isolated, fail-closed decode. Unknown fields
+	// inside the versioned block are rejected even though ordinary top-level
+	// template metadata remains forward-compatible.
+	AssistantProgram json.RawMessage `json:"assistant_program,omitempty"`
 }
 
 // readManifest loads template.json from dir. A missing or malformed manifest
@@ -525,6 +544,11 @@ func newTemplateWithManifest(path string, m manifest, catalog RuntimeCatalog) Te
 	// normalized first.
 	setupWizard, setupWizardErr := normalizeSetupWizard(m.SetupWizard, templateSetupWizardScope(t.DirectoryRequirements, t.AutomationRecipes, t.CapabilityRequirements, t.Tools.Plugins, t.RuntimeRequirements))
 	t.SetupWizard = setupWizard
+	assistantProgram, assistantProgramErr := normalizeAssistantProgram(m.AssistantProgram)
+	t.AssistantProgram = assistantProgram
+	if assistantProgramErr != nil {
+		t.AssistantProgramError = assistantProgramErr.Error()
+	}
 	t.Warnings = append(manifestWarnings(m, t.Agents), capabilityWarnings...)
 	if projectEntryErr != nil {
 		t.Warnings = append(t.Warnings, fmt.Sprintf("template.json project_entry is ignored: %v", projectEntryErr))
@@ -536,6 +560,9 @@ func newTemplateWithManifest(path string, m manifest, catalog RuntimeCatalog) Te
 	if setupWizardErr != nil {
 		t.SetupWizardError = setupWizardErr.Error()
 		t.Warnings = append(t.Warnings, fmt.Sprintf("template.json setup_wizard is unusable and blocks workspace creation: %v", setupWizardErr))
+	}
+	if assistantProgramErr != nil {
+		t.Warnings = append(t.Warnings, fmt.Sprintf("template.json assistant_program is unusable and blocks workspace creation: %v", assistantProgramErr))
 	}
 	return t
 }

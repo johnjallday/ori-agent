@@ -36,6 +36,8 @@ type Handler struct {
 	projectTemplateResolver   func(templateID, templatePath string) (projecttemplates.Template, error)
 	templateCapabilityService *workspacecapability.Service
 	installedPluginLister     installedPluginLister
+	assistantReflectionModel  workspace.AssistantReflectionModel
+	assistantModelValidator   func(provider, model string) error
 	agentStore                store.Store
 	systemModelReader         SystemModelReader
 	workspaceAllowlist        *workspace.Allowlist
@@ -176,6 +178,16 @@ func (h *Handler) SetTemplatesRootResolver(fn func() string) {
 // blueprint catalog. Minimal/test handlers retain the legacy library resolver.
 func (h *Handler) SetProjectTemplateResolver(fn func(templateID, templatePath string) (projecttemplates.Template, error)) {
 	h.projectTemplateResolver = fn
+}
+
+// SetAssistantReflectionModel injects the structured, read-only model path used
+// only by explicit/scheduled assistant reflection.
+func (h *Handler) SetAssistantReflectionModel(model workspace.AssistantReflectionModel) {
+	h.assistantReflectionModel = model
+}
+
+func (h *Handler) SetAssistantModelValidator(validate func(provider, model string) error) {
+	h.assistantModelValidator = validate
 }
 
 func (h *Handler) SetTemplateCapabilityService(service *workspacecapability.Service) {

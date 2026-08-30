@@ -55,6 +55,24 @@ func TestParseSurfaceContributionRejectsUnknownExecutableField(t *testing.T) {
 	}
 }
 
+func TestSurfaceContributionHostFeaturesFailClosed(t *testing.T) {
+	var document map[string]any
+	if err := json.Unmarshal(canonicalSurfaceFixture(t), &document); err != nil {
+		t.Fatal(err)
+	}
+	document["requires_host_features"] = []string{HostFeatureAssistantProgramV1}
+	data, _ := json.Marshal(document)
+	contribution, err := ParseSurfaceContribution(data)
+	if err != nil || len(contribution.RequiresHostFeatures) != 1 {
+		t.Fatalf("supported host feature = (%+v, %v)", contribution, err)
+	}
+	document["requires_host_features"] = []string{"future_unknown_feature"}
+	data, _ = json.Marshal(document)
+	if _, err := ParseSurfaceContribution(data); !ContributionErrorIs(err, CodeHostFeatureUnsupported) {
+		t.Fatalf("unknown host feature error = %v", err)
+	}
+}
+
 func TestSurfaceContributionStableValidationCodes(t *testing.T) {
 	valid := func(t *testing.T) map[string]any {
 		t.Helper()

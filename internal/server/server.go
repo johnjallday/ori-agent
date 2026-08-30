@@ -587,6 +587,12 @@ func (s *Server) handleWorkspacesRoutes(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Assistant Program: one canonical shared-roster and learning surface.
+	if len(parts) == 2 && parts[1] == "assistant" {
+		s.serveWorkspaceAssistant(w, workspaceID, workspaceSlug)
+		return
+	}
+
 	// Workspace notes app: /workspaces/{id}/notes[/noteId].
 	if len(parts) >= 2 && parts[1] == "notes" {
 		if len(parts) == 2 {
@@ -651,6 +657,19 @@ func (s *Server) serveFocusedNotePage(w http.ResponseWriter, noteID string) {
 	data.Extra["NoteID"] = noteID
 	data.Extra["NotePageMode"] = "focused"
 	s.renderAndWritePage(w, "note-page", data)
+}
+
+// serveWorkspaceAssistant renders a generic assistant-program contribution.
+// The page loads the immutable declaration through the workspace API; no
+// plugin-specific markup or product vocabulary is compiled into the host.
+func (s *Server) serveWorkspaceAssistant(w http.ResponseWriter, workspaceID, workspaceSlug string) {
+	data := s.prepareBasePageData("workspaces")
+	data.Title = "Assistant - Ori Agent"
+	data.BrandText = "Ori Agent"
+	data.ShowSidebarToggle = true
+	data.Extra["WorkspaceID"] = workspaceID
+	data.Extra["WorkspaceSlug"] = workspaceSlug
+	s.renderAndWritePage(w, "workspace-assistant", data)
 }
 
 // serveWorkspacePlans renders the canonical Plans destination for a workspace:

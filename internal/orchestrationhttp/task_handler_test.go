@@ -679,9 +679,15 @@ func TestHandleCompleteTask_AllowsAssignedTask(t *testing.T) {
 		t.Fatalf("failed to save workspace: %v", err)
 	}
 
+	eventBus := workspace.NewEventBus(10, 10)
+	completedEvents := make(chan workspace.Event, 1)
+	eventBus.SubscribeToEventType(workspace.EventTaskCompleted, func(event workspace.Event) {
+		completedEvents <- event
+	})
 	handler := &TaskHandler{
 		workspaceStore: store,
 		communicator:   agentcomm.NewCommunicator(store),
+		eventBus:       eventBus,
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/orchestration/tasks/task-complete-assigned/complete", nil)
@@ -720,6 +726,14 @@ func TestHandleCompleteTask_AllowsAssignedTask(t *testing.T) {
 	}
 	if savedTask.Context["manual_completion"] == nil {
 		t.Fatalf("expected manual completion context to be recorded")
+	}
+	select {
+	case event := <-completedEvents:
+		if accepted, _ := event.Data["accepted"].(bool); !accepted {
+			t.Fatalf("manual acceptance event = %+v", event.Data)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("manual completion did not publish an accepted event")
 	}
 }
 

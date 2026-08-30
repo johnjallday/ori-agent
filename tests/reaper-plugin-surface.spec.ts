@@ -7,6 +7,13 @@ const pluginName = 'reaper-plugin';
 const templateID = 'plugin:reaper-plugin:reaper-song';
 const surfaceKey = 'plugin:reaper-plugin:reaper-live-control:live-control';
 const tidySurfaceKey = 'plugin:reaper-plugin:reaper-live-control:project-tidy';
+const evidenceDir = process.env.ORI_REAPER_EVIDENCE_DIR;
+
+async function captureEvidence(page: import('@playwright/test').Page, name: string) {
+  if (!evidenceDir) return;
+  mkdirSync(evidenceDir, { recursive: true });
+  await page.screenshot({ path: path.join(evidenceDir, name), fullPage: true });
+}
 
 test.skip(
   !pluginPath,
@@ -33,11 +40,7 @@ test('plugin-backed Reaper Song reaches generic setup, surface, action, script, 
   );
   const legacyProject = path.join(legacyPrimary.path, 'outline.md');
   const legacyProjectBytes = readFileSync(legacyProject);
-  const evidenceDir = process.env.ORI_REAPER_EVIDENCE_DIR;
-  if (evidenceDir) mkdirSync(evidenceDir, { recursive: true });
-  const capture = async (name: string) => {
-    if (evidenceDir) await page.screenshot({ path: path.join(evidenceDir, name), fullPage: true });
-  };
+  const capture = async (name: string) => captureEvidence(page, name);
   const legacyRequests: string[] = [];
   const frameErrors: string[] = [];
   page.on('pageerror', error => frameErrors.push(error.message));
@@ -72,8 +75,133 @@ test('plugin-backed Reaper Song reaches generic setup, surface, action, script, 
   const created = await create.json();
   const workspace = created.folder;
   expect(created.project_warning).toBeUndefined();
+  expect(workspace.agent_instances || []).toHaveLength(0);
+  const linkedAssistantWorkspaces: Array<{ id: string; folder_slug: string; name: string }> = [];
+  let assistantStationID = '';
+  const assistantAgentNames: string[] = [];
 
   try {
+    const assistantBeforeResponse = await request.get(
+      `/api/workspaces/${workspace.id}/assistant-program`
+    );
+    expect(assistantBeforeResponse.ok(), await assistantBeforeResponse.text()).toBeTruthy();
+    const assistantBefore = await assistantBeforeResponse.json();
+    expect(assistantBefore.available).toBeTruthy();
+    expect(assistantBefore.hired).toBeFalsy();
+    expect(assistantBefore.stage_label).toBe('Helper');
+    await page.goto(`/workspaces/${encodeURIComponent(workspace.folder_slug)}`);
+    await expect(page.getByRole('link', { name: 'Open shared assistant home' })).toBeVisible({
+      timeout: 15_000
+    });
+    await page.goto(`/workspaces/${encodeURIComponent(workspace.folder_slug)}/assistant`);
+    await expect(page.getByRole('heading', { name: 'Hire your music producer' })).toBeVisible({
+      timeout: 15_000
+    });
+    await capture('music-producer-01-pre-hire.png');
+
+    const producerName = `Producer ${Date.now().toString(36)}`;
+    const hire = await request.post(`/api/workspaces/${workspace.id}/assistant-program/hire`, {
+      data: { name: producerName, version: assistantBefore.state_revision }
+    });
+    expect(hire.ok(), await hire.text()).toBeTruthy();
+    const hired = await hire.json();
+    expect(hired.primary_name).toBe(producerName);
+    expect(hired.roster).toHaveLength(3);
+    assistantStationID = hired.station_id;
+    assistantAgentNames.push(
+      ...hired.roster.map((item: { agent_name: string }) => item.agent_name)
+    );
+    expect(hired.stage_id).toBe('helper');
+    expect(hired.level).toBe(1);
+
+    const secondCreate = await request.post('/api/workspaces', {
+      data: {
+        name: `Second Plugin REAPER ${Date.now().toString(36)}`,
+        description: 'Second disposable linked assistant fixture',
+        template_id: templateID,
+        create_template_agents: true
+      }
+    });
+    expect(secondCreate.ok(), await secondCreate.text()).toBeTruthy();
+    const secondCreated = await secondCreate.json();
+    const secondAssistantWorkspace = secondCreated.folder as {
+      id: string;
+      folder_slug: string;
+      name: string;
+    };
+    linkedAssistantWorkspaces.push(secondAssistantWorkspace);
+    expect(secondCreated.assistant_station_id).toBe(hired.station_id);
+    const secondProgram = await request.get(
+      `/api/workspaces/${secondAssistantWorkspace.id}/assistant-program`
+    );
+    expect(secondProgram.ok(), await secondProgram.text()).toBeTruthy();
+    const secondSummary = await secondProgram.json();
+    expect(secondSummary.station_id).toBe(hired.station_id);
+    expect(secondSummary.primary_name).toBe(producerName);
+    expect(
+      secondSummary.roster.map((item: { agent_instance_id: string }) => item.agent_instance_id)
+    ).toEqual(hired.roster.map((item: { agent_instance_id: string }) => item.agent_instance_id));
+
+    await page.reload();
+    await expect(page.getByRole('heading', { name: producerName })).toBeVisible({
+      timeout: 15_000
+    });
+    await expect(page.getByText('Stage 1 — Helper')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Producer', exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Mix Engineer' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Songwriter' })).toBeVisible();
+    await expect(page.getByRole('link', { name: secondAssistantWorkspace.name })).toBeVisible();
+    await capture('music-producer-02-helper-home.png');
+
+    const thirdCreate = await request.post('/api/workspaces', {
+      data: {
+        name: `Third Plugin REAPER ${Date.now().toString(36)}`,
+        description: 'Third disposable linked assistant fixture',
+        template_id: templateID,
+        create_template_agents: true
+      }
+    });
+    expect(thirdCreate.ok(), await thirdCreate.text()).toBeTruthy();
+    const thirdCreated = await thirdCreate.json();
+    linkedAssistantWorkspaces.push(thirdCreated.folder);
+    expect(thirdCreated.assistant_station_id).toBe(hired.station_id);
+
+    const progressionProjects = [
+      workspace,
+      secondAssistantWorkspace,
+      thirdCreated.folder,
+      workspace,
+      secondAssistantWorkspace
+    ];
+    for (let index = 1; index <= progressionProjects.length; index += 1) {
+      const createTask = await request.post('/api/orchestration/tasks', {
+        data: {
+          workspace_id: progressionProjects[index - 1].id,
+          description: `Accepted producer collaboration ${index}`
+        }
+      });
+      expect(createTask.ok(), await createTask.text()).toBeTruthy();
+      const createdTask = (await createTask.json()).task;
+      const completeTask = await request.post(
+        `/api/orchestration/tasks/${encodeURIComponent(createdTask.id)}/complete`
+      );
+      expect(completeTask.ok(), await completeTask.text()).toBeTruthy();
+    }
+    const collaboratorResponse = await request.get(
+      `/api/workspaces/${workspace.id}/assistant-program`
+    );
+    expect(collaboratorResponse.ok(), await collaboratorResponse.text()).toBeTruthy();
+    const collaborator = await collaboratorResponse.json();
+    expect(collaborator.stage_id).toBe('collaborator');
+    expect(collaborator.level).toBe(2);
+    expect(collaborator.accepted_tasks).toBe(5);
+    expect(collaborator.promotion_pending).toBeTruthy();
+    await page.reload();
+    await expect(page.getByText('Stage 2 — Collaborator')).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole('button', { name: 'Acknowledge new stage' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Find suggestions' })).toBeEnabled();
+    await capture('music-producer-03-collaborator-home.png');
+
     const legacyAfterInstall = await request.get(`/api/workspaces/${legacy.id}`);
     expect(legacyAfterInstall.ok(), await legacyAfterInstall.text()).toBeTruthy();
     expect(
@@ -364,9 +492,79 @@ test('plugin-backed Reaper Song reaches generic setup, surface, action, script, 
     expect(plugin.workspace_surfaces.capabilities[0].agent_operations).toContain('state.read');
     expect(plugin.workspace_surfaces.capabilities[0].agent_operations).toContain('draft.run');
     expect(legacyRequests).toEqual([]);
+
+    const disable = await request.post(`/api/plugins/${pluginName}/disable`);
+    expect(disable.ok(), await disable.text()).toBeTruthy();
+    await page.goto(`/workspaces/${encodeURIComponent(workspace.folder_slug)}/assistant`);
+    await expect(page.getByText('Contribution paused')).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole('button', { name: 'Reflect' })).toBeDisabled();
+    await capture('music-producer-04-plugin-disabled.png');
+    const reenable = await request.post(`/api/plugins/${pluginName}/enable`);
+    expect(reenable.ok(), await reenable.text()).toBeTruthy();
+    const restoredProgram = await request.get(`/api/workspaces/${workspace.id}/assistant-program`);
+    expect(restoredProgram.ok(), await restoredProgram.text()).toBeTruthy();
+    expect((await restoredProgram.json()).station_id).toBe(hired.station_id);
   } finally {
     await request.delete(`/api/plugins/${pluginName}`).catch(() => {});
+    for (const linkedWorkspace of linkedAssistantWorkspaces) {
+      await request.delete(`/api/workspaces/${linkedWorkspace.id}`).catch(() => {});
+    }
     await request.delete(`/api/workspaces/${workspace.id}`).catch(() => {});
+    if (assistantStationID) {
+      await request.delete(`/api/workspaces/${assistantStationID}`).catch(() => {});
+    }
+    for (const agentName of assistantAgentNames) {
+      await request.delete(`/api/agents/${encodeURIComponent(agentName)}`).catch(() => {});
+    }
     await request.delete(`/api/workspaces/${legacy.id}`).catch(() => {});
   }
+});
+
+test('Action Center renders assistant suggestion provenance safely at desktop and narrow widths', async ({
+  page
+}) => {
+  await page.route('**/api/action-center/opportunities?**', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        total: 1,
+        items: [
+          {
+            id: 'assistant-opportunity-1',
+            workspace_id: 'workspace-target',
+            workspace_slug: 'song-target',
+            workspace_name: 'Song Target',
+            source_type: 'assistant_suggestion',
+            source_id: 'suggestion-1',
+            source_label: 'June <script>alert(1)</script>',
+            source_url: '/workspaces/song-target/assistant',
+            title: 'Consider the approved preflight pattern',
+            summary: 'The same reviewed preference appeared across three linked projects.',
+            evidence:
+              'Song A — accepted checklist\nSong B — accepted checklist\nSong C — accepted checklist',
+            priority: 'medium',
+            confidence: 'high',
+            status: 'new',
+            updated_at: new Date().toISOString()
+          }
+        ]
+      })
+    });
+  });
+  await page.goto('/action-center?workspace=workspace-target');
+  await expect(page.getByText('Assistant suggestion')).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText('June <script>alert(1)</script>')).toBeVisible();
+  await expect(page.getByText('high confidence')).toBeVisible();
+  await page.getByText('Evidence', { exact: true }).click();
+  await expect(page.getByText('Song C — accepted checklist')).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Open source' })).toHaveAttribute(
+    'href',
+    '/workspaces/song-target/assistant'
+  );
+  await captureEvidence(page, 'music-producer-05-action-center-suggestion.png');
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.getByRole('button', { name: 'Add to Backlog' })).toBeVisible();
+  await captureEvidence(page, 'music-producer-06-action-center-narrow.png');
 });
