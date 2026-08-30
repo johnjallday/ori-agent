@@ -12,18 +12,18 @@
         <nav class="assistant-program-breadcrumb" aria-label="Breadcrumb">
           <a id="assistantProgramWorkspaceLink" href="#">Workspace</a>
           <span aria-hidden="true">/</span>
-          <span>Assistant</span>
+          <span id="assistantProgramBreadcrumbName">Team Home</span>
         </nav>
 
         <section id="assistantProgramLoading" class="assistant-program-loading" role="status">
           <span class="assistant-program-reel" aria-hidden="true"></span>
-          <p>Warming up the assistant room…</p>
+          <p>Warming up the team room…</p>
         </section>
 
         <section id="assistantProgramError" class="assistant-program-error" hidden role="alert">
-          <p id="assistantProgramErrorText">This assistant home is unavailable.</p>
+          <p id="assistantProgramErrorText">This team home is unavailable.</p>
           <div class="assistant-program-actions">
-            <button id="assistantProgramActivate" class="modern-btn modern-btn-primary" type="button" hidden>Activate assistant</button>
+            <button id="assistantProgramActivate" class="modern-btn modern-btn-primary" type="button" hidden>Activate team</button>
             <a id="assistantProgramBack" class="modern-btn modern-btn-secondary" href="#">Back to workspace</a>
           </div>
         </section>
@@ -36,8 +36,8 @@
 
           <header class="assistant-program-hero">
             <div class="assistant-program-hero-copy">
-              <span class="assistant-program-kicker">Shared assistant station</span>
-              <h1 id="assistantProgramTitle">Assistant</h1>
+              <span class="assistant-program-kicker">Optional shared team overview</span>
+              <h1 id="assistantProgramTitle">Team Home</h1>
               <p id="assistantProgramDescription"></p>
               <div class="assistant-program-status-row">
                 <span id="assistantProgramStage" class="assistant-program-stage-chip">Not hired</span>
@@ -63,7 +63,7 @@
                   <span class="assistant-program-panel-index">01 / ROSTER</span>
                   <h2 id="assistantProgramRosterTitle">The room</h2>
                 </div>
-                <button id="assistantProgramHireOpen" class="modern-btn modern-btn-primary" type="button" hidden>Hire assistant</button>
+                <button id="assistantProgramHireOpen" class="modern-btn modern-btn-primary" type="button" hidden>Complete team setup</button>
               </div>
               <div id="assistantProgramRoster" class="assistant-program-roster"></div>
             </section>

@@ -46,6 +46,10 @@ export class AssistantProgramPage {
     return `/api/workspaces/${encodeURIComponent(this.workspaceId)}/assistant-program${suffix}`;
   }
 
+  homeName(program = this.program) {
+    return text(program?.declaration?.station_name).trim() || 'Team Home';
+  }
+
   async init() {
     const workspaceURL = this.workspaceURL();
     for (const id of [
@@ -197,10 +201,9 @@ export class AssistantProgramPage {
     if (error) error.hidden = true;
     if (content) content.hidden = false;
 
-    setText(
-      'assistantProgramTitle',
-      program.primary_name || declaration.station_name || 'Assistant'
-    );
+    const homeName = this.homeName(program);
+    setText('assistantProgramBreadcrumbName', homeName);
+    setText('assistantProgramTitle', homeName);
     setText(
       'assistantProgramDescription',
       declaration.station_description || 'A shared assistant for linked projects.'
@@ -320,12 +323,13 @@ export class AssistantProgramPage {
       item.append(marker, copy);
       root.append(item);
     });
+    const acceptedTasks = Number(this.program.accepted_tasks) || 0;
     setText(
       'assistantProgramRemaining',
       this.program.next_threshold > 0
-        ? `${this.program.accepted_tasks} accepted completions · ${this.program.remaining} until ${stages[currentIndex + 1]?.label || 'the next stage'}`
+        ? `${acceptedTasks} accepted completions · ${this.program.remaining} until ${stages[currentIndex + 1]?.label || 'the next stage'}`
         : this.program.hired
-          ? `${this.program.accepted_tasks} accepted completions · highest stage reached`
+          ? `${acceptedTasks} accepted completions · highest stage reached`
           : 'Progress begins after the roster is hired.'
     );
   }

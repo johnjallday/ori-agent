@@ -273,7 +273,7 @@
               <div class="workspace-wizard-step-heading">
                 <span class="workspace-wizard-eyebrow">Step 3 of 4</span>
                 <h2 id="wizardStep3Title" tabindex="-1">Build your workspace team</h2>
-                <p>Confirm who will work in this workspace, and add saved agents if you need more.</p>
+                <p id="wizardStep3Description">Confirm who will work in this workspace, and add saved agents if you need more.</p>
               </div>
 
               <div id="workspaceTeamLayout" class="workspace-team-layout">
@@ -292,6 +292,33 @@
 
                   <!-- Blockers first, then advisories. Rendered from the team
                        draft's classified issues so Team and Review agree. -->
+                  <div id="workspaceAssistantProgramCreate" class="workspace-assistant-program-create" hidden>
+                    <div class="workspace-assistant-program-fields">
+                      <label class="workspace-assistant-program-field" for="assistantProgramCreateName">
+                        <span>Primary assistant name</span>
+                        <input id="assistantProgramCreateName" class="modern-input" type="text" maxlength="100" autocomplete="off">
+                      </label>
+                      <div class="workspace-assistant-program-model-grid">
+                        <label class="workspace-assistant-program-field" for="assistantProgramCreateProvider">
+                          <span>Provider <em>optional</em></span>
+                          <select id="assistantProgramCreateProvider" class="modern-input">
+                            <option value="">Use Ori default</option>
+                          </select>
+                        </label>
+                        <label class="workspace-assistant-program-field" for="assistantProgramCreateModel">
+                          <span>Model <em>optional</em></span>
+                          <select id="assistantProgramCreateModel" class="modern-input" disabled>
+                            <option value="">Use Ori default</option>
+                          </select>
+                        </label>
+                      </div>
+                    </div>
+                    <div class="workspace-assistant-program-growth">
+                      <span class="workspace-wizard-eyebrow">How the relationship grows</span>
+                      <ol id="assistantProgramCreateStages" class="workspace-assistant-program-stages"></ol>
+                    </div>
+                  </div>
+
                   <div id="workspaceTeamIssues" class="workspace-team-issues"></div>
 
                   <!-- ONE roster: blueprint agents and manually added saved

@@ -48,12 +48,18 @@ test('assistant navigation appears only for declared programs and uses slug rout
       workspaceSlug: 'neon-song',
       fetchImpl: async url => {
         assert.equal(url, '/api/workspaces/workspace-uuid/assistant-program');
-        return { ok: true, json: async () => ({ available: true }) };
+        return {
+          ok: true,
+          json: async () => ({
+            available: true,
+            declaration: { station_name: 'Producer Home' }
+          })
+        };
       }
     });
     await entry.init();
     assert.equal(inserted.length, 1);
-    assert.equal(inserted[0].textContent, 'Assistant');
+    assert.equal(inserted[0].textContent, 'Producer Home');
     assert.equal(inserted[0].href, '/workspaces/neon-song/assistant');
   });
 });
@@ -65,12 +71,34 @@ test('hired assistant navigation carries the compact stage and level summary', a
       workspaceSlug: 'neon-song',
       fetchImpl: async () => ({
         ok: true,
-        json: async () => ({ available: true, hired: true, stage_label: 'Collaborator', level: 2 })
+        json: async () => ({
+          available: true,
+          hired: true,
+          stage_label: 'Collaborator',
+          level: 2,
+          declaration: { station_name: 'Producer Home' }
+        })
       })
     });
     await entry.init();
-    assert.equal(inserted[0].textContent, 'Assistant · Collaborator L2');
+    assert.equal(inserted[0].textContent, 'Producer Home · Collaborator L2');
     assert.match(inserted[0].attributes['aria-label'], /level 2/);
+  });
+});
+
+test('an activation-only legacy program gets the generic optional-home fallback', async () => {
+  await withEntryDocument(async inserted => {
+    const entry = new AssistantProgramEntry({
+      workspaceId: 'legacy-uuid',
+      workspaceSlug: 'legacy',
+      fetchImpl: async () => ({
+        ok: true,
+        json: async () => ({ available: false, activation_needed: true })
+      })
+    });
+    await entry.init();
+    assert.equal(inserted[0].textContent, 'Team Home');
+    assert.equal(inserted[0].attributes['aria-label'], 'Open Team Home');
   });
 });
 

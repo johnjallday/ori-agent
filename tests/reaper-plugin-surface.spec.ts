@@ -20,6 +20,120 @@ test.skip(
   'set ORI_REAPER_PLUGIN_PATH to the locally built coordinated plugin checkout'
 );
 
+test('Create Workspace hires the shared assistant roster from the Team step', async ({
+  page,
+  request
+}) => {
+  await request.post('/api/onboarding/skip').catch(() => {});
+  await request.delete(`/api/plugins/${pluginName}`).catch(() => {});
+  const install = await request.post('/api/plugins/install', {
+    data: { source: pluginPath, confirm: true }
+  });
+  expect(install.ok(), await install.text()).toBeTruthy();
+  const enable = await request.post(`/api/plugins/${pluginName}/enable`);
+  expect(enable.ok(), await enable.text()).toBeTruthy();
+
+  let workspaceID = '';
+  let stationID = '';
+  const agentNames: string[] = [];
+  try {
+    await page.goto('/workspaces');
+    await page.evaluate(() => {
+      const modal = document.getElementById('addFolderModal');
+      // @ts-expect-error bootstrap is a page global
+      window.bootstrap.Modal.getOrCreateInstance(modal).show();
+    });
+    await expect(page.locator('#addFolderModal')).toBeVisible();
+    const reaperCard = page.locator('#templatePicker').getByRole('radio', {
+      name: 'Reaper Song',
+      exact: true
+    });
+    await expect(reaperCard).toBeVisible();
+    await reaperCard.click();
+    await page.locator('#wizardNextBtn').click();
+    await expect(page.locator('#wizardStep2')).toBeVisible();
+    const workspaceName = `Wizard REAPER ${Date.now().toString(36)}`;
+    const producerName = `June ${Date.now().toString(36)}`;
+    await page.locator('#folderNameInput').fill(workspaceName);
+    const openProject = page.locator('#projectTemplateOpenAfterCreateToggle');
+    if (await openProject.isChecked()) await openProject.uncheck();
+
+    await page.locator('#wizardNextBtn').click();
+    await expect(page.locator('#wizardStep3')).toBeVisible();
+    await expect(page.locator('#wizardStep3Title')).toHaveText('Hire your music producer');
+    await expect(page.locator('#workspaceAssistantProgramCreate')).toBeVisible();
+    await expect(page.locator('#existingAgentRosterPanel')).toBeHidden();
+    await expect(page.locator('#workspaceTeamRoster .workspace-team-row')).toHaveCount(3);
+    await expect(page.locator('#workspaceTeamRoster')).toContainText('Mix Engineer');
+    await expect(page.locator('#workspaceTeamRoster')).toContainText('Songwriter');
+    await page.locator('#assistantProgramCreateName').fill(producerName);
+    await expect(page.locator('#workspaceTeamRoster')).toContainText(producerName);
+    await captureEvidence(page, 'music-producer-00-create-hire.png');
+
+    await page.locator('#wizardNextBtn').click();
+    await expect(page.locator('#wizardStep4')).toBeVisible();
+    await expect(page.locator('#workspaceReviewSummary')).toContainText(
+      `${producerName} · Primary`
+    );
+    await expect(page.locator('#workspaceReviewSummary')).toContainText(
+      '3 shared assistant roles will be created and linked'
+    );
+
+    const createResponsePromise = page.waitForResponse(
+      response =>
+        response.url().endsWith('/api/workspaces') && response.request().method() === 'POST'
+    );
+    await page.locator('#createFolderBtn').click();
+    const createResponse = await createResponsePromise;
+    expect(createResponse.ok(), await createResponse.text()).toBeTruthy();
+    const created = await createResponse.json();
+    workspaceID = created.folder.id;
+    await page.waitForURL(`**/workspaces/${encodeURIComponent(created.folder.folder_slug)}`, {
+      timeout: 20_000
+    });
+
+    const programResponse = await request.get(`/api/workspaces/${workspaceID}/assistant-program`);
+    expect(programResponse.ok(), await programResponse.text()).toBeTruthy();
+    const program = await programResponse.json();
+    expect(program.hired).toBeTruthy();
+    expect(program.primary_name).toBe(producerName);
+    expect(program.roster).toHaveLength(3);
+    stationID = program.station_id;
+    agentNames.push(...program.roster.map((role: { agent_name: string }) => role.agent_name));
+
+    // A later compatible project must preview the stable roster it will link,
+    // not offer a rename that the already-hired station would ignore.
+    await page.goto('/workspaces');
+    await page.evaluate(() => {
+      const modal = document.getElementById('addFolderModal');
+      // @ts-expect-error bootstrap is a page global
+      window.bootstrap.Modal.getOrCreateInstance(modal).show();
+    });
+    await page
+      .locator('#templatePicker')
+      .getByRole('radio', { name: 'Reaper Song', exact: true })
+      .click();
+    await page.locator('#wizardNextBtn').click();
+    await page.locator('#folderNameInput').fill(`Second Wizard REAPER ${Date.now().toString(36)}`);
+    await page.locator('#wizardNextBtn').click();
+    await expect(page.locator('#wizardStep3Title')).toHaveText(
+      'Connect your shared assistant team'
+    );
+    await expect(page.locator('#assistantProgramCreateName')).toHaveValue(producerName);
+    await expect(page.locator('#assistantProgramCreateName')).toBeDisabled();
+    await expect(page.locator('#workspaceTeamRoster')).toContainText(
+      'Existing shared assistant role · will be linked'
+    );
+  } finally {
+    if (workspaceID) await request.delete(`/api/workspaces/${workspaceID}`).catch(() => {});
+    if (stationID) await request.delete(`/api/workspaces/${stationID}`).catch(() => {});
+    for (const name of agentNames) {
+      await request.delete(`/api/agents/${encodeURIComponent(name)}`).catch(() => {});
+    }
+    await request.delete(`/api/plugins/${pluginName}`).catch(() => {});
+  }
+});
+
 test('plugin-backed Reaper Song reaches generic setup, surface, action, script, and agent declarations', async ({
   page,
   request
@@ -75,6 +189,8 @@ test('plugin-backed Reaper Song reaches generic setup, surface, action, script, 
   const created = await create.json();
   const workspace = created.folder;
   expect(created.project_warning).toBeUndefined();
+  // Shared roles belong to the assistant station, never duplicated into each
+  // song workspace's local agent_instances array.
   expect(workspace.agent_instances || []).toHaveLength(0);
   const linkedAssistantWorkspaces: Array<{ id: string; folder_slug: string; name: string }> = [];
   let assistantStationID = '';
@@ -87,24 +203,28 @@ test('plugin-backed Reaper Song reaches generic setup, surface, action, script, 
     expect(assistantBeforeResponse.ok(), await assistantBeforeResponse.text()).toBeTruthy();
     const assistantBefore = await assistantBeforeResponse.json();
     expect(assistantBefore.available).toBeTruthy();
-    expect(assistantBefore.hired).toBeFalsy();
     expect(assistantBefore.stage_label).toBe('Helper');
     await page.goto(`/workspaces/${encodeURIComponent(workspace.folder_slug)}`);
-    await expect(page.getByRole('link', { name: 'Open shared assistant home' })).toBeVisible({
+    await expect(page.getByRole('link', { name: 'Open Producer Home' })).toBeVisible({
       timeout: 15_000
     });
     await page.goto(`/workspaces/${encodeURIComponent(workspace.folder_slug)}/assistant`);
-    await expect(page.getByRole('heading', { name: 'Hire your music producer' })).toBeVisible({
-      timeout: 15_000
-    });
-    await capture('music-producer-01-pre-hire.png');
 
-    const producerName = `Producer ${Date.now().toString(36)}`;
-    const hire = await request.post(`/api/workspaces/${workspace.id}/assistant-program/hire`, {
-      data: { name: producerName, version: assistantBefore.state_revision }
-    });
-    expect(hire.ok(), await hire.text()).toBeTruthy();
-    const hired = await hire.json();
+    let hired = assistantBefore;
+    let producerName = String(assistantBefore.primary_name || '');
+    if (!assistantBefore.hired) {
+      // Direct/API-created legacy workspaces still retain the recovery hire page.
+      await expect(page.getByRole('heading', { name: 'Hire your music producer' })).toBeVisible({
+        timeout: 15_000
+      });
+      await capture('music-producer-01-pre-hire.png');
+      producerName = `Producer ${Date.now().toString(36)}`;
+      const hire = await request.post(`/api/workspaces/${workspace.id}/assistant-program/hire`, {
+        data: { name: producerName, version: assistantBefore.state_revision }
+      });
+      expect(hire.ok(), await hire.text()).toBeTruthy();
+      hired = await hire.json();
+    }
     expect(hired.primary_name).toBe(producerName);
     expect(hired.roster).toHaveLength(3);
     assistantStationID = hired.station_id;
@@ -143,10 +263,11 @@ test('plugin-backed Reaper Song reaches generic setup, surface, action, script, 
     ).toEqual(hired.roster.map((item: { agent_instance_id: string }) => item.agent_instance_id));
 
     await page.reload();
-    await expect(page.getByRole('heading', { name: producerName })).toBeVisible({
+    await expect(page.getByRole('heading', { name: 'Producer Home' })).toBeVisible({
       timeout: 15_000
     });
     await expect(page.getByText('Stage 1 — Helper')).toBeVisible();
+    await expect(page.getByText('0 accepted completions · 5 until Collaborator')).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Producer', exact: true })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Mix Engineer' })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Songwriter' })).toBeVisible();

@@ -691,6 +691,94 @@
     grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
     align-items: start;
   }
+  .workspace-create-modal .workspace-team-layout.is-assistant-program {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Assistant-program blueprints turn Team into the deliberate hire moment. The
+   declaration supplies all domain copy; this host styling only gives the shared
+   roster a compact studio-console rhythm consistent with Construct. */
+.workspace-create-modal .workspace-assistant-program-create {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--wc-line-bright);
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--wc-faction) 9%, transparent), transparent 54%),
+    rgba(4, 8, 12, 0.3);
+}
+.workspace-create-modal .workspace-assistant-program-create[hidden] {
+  display: none;
+}
+.workspace-create-modal .workspace-assistant-program-fields,
+.workspace-create-modal .workspace-assistant-program-model-grid {
+  display: grid;
+  gap: 9px;
+}
+@media (min-width: 620px) {
+  .workspace-create-modal .workspace-assistant-program-model-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.workspace-create-modal .workspace-assistant-program-field {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.workspace-create-modal .workspace-assistant-program-field > span {
+  color: var(--wc-ink-heading);
+  font-family: var(--wc-font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.9px;
+  text-transform: uppercase;
+}
+.workspace-create-modal .workspace-assistant-program-field em {
+  color: var(--wc-ink-faint);
+  font-style: normal;
+  font-weight: 500;
+}
+.workspace-create-modal .workspace-assistant-program-growth {
+  padding-top: 10px;
+  border-top: 1px dashed var(--wc-line);
+}
+.workspace-create-modal .workspace-assistant-program-stages {
+  display: grid;
+  gap: 7px;
+  margin: 7px 0 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: assistant-stage;
+}
+.workspace-create-modal .workspace-assistant-program-stage {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  color: var(--wc-ink-dim);
+  font-size: 11px;
+  line-height: 1.4;
+  counter-increment: assistant-stage;
+}
+.workspace-create-modal .workspace-assistant-program-stage::before {
+  content: counter(assistant-stage, decimal-leading-zero);
+  color: var(--wc-faction);
+  font-family: var(--wc-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.5px;
+}
+.workspace-create-modal .workspace-assistant-program-stage strong {
+  display: block;
+  color: var(--wc-ink);
+  font-size: 12px;
+}
+.workspace-create-modal .workspace-team-layout.is-assistant-program .workspace-team-review {
+  max-width: 920px;
+}
+.workspace-create-modal .workspace-team-row[data-assistant-role] {
+  border-color: color-mix(in srgb, var(--wc-faction) 26%, var(--wc-line));
 }
 .workspace-create-modal .workspace-team-roster {
   display: grid;

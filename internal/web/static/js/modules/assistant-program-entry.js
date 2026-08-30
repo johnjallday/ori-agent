@@ -1,7 +1,7 @@
 import { workspacePageURL } from './workspace-routes.js';
 
 /**
- * Adds the generic Assistant destination only when the server says this
+ * Adds an optional declaration-named team home only when the server says this
  * workspace participates in an assistant program. A MutationObserver keeps the
  * link present when WorkspaceCommandView re-renders its switch.
  */
@@ -49,14 +49,15 @@ export class AssistantProgramEntry {
     link.className = 'ws-cmd-view-btn ws-cmd-view-link';
     link.dataset.assistantProgramEntry = '';
     link.href = workspacePageURL(this.workspaceSlug, ['assistant']);
+    const homeName = String(this.program?.declaration?.station_name || '').trim() || 'Team Home';
     link.textContent = this.program?.hired
-      ? `Assistant · ${this.program.stage_label || 'Active'} L${this.program.level || 1}`
-      : 'Assistant';
+      ? `${homeName} · ${this.program.stage_label || 'Active'} L${this.program.level || 1}`
+      : homeName;
     link.setAttribute(
       'aria-label',
       this.program?.hired
-        ? `Open shared assistant home, ${this.program.stage_label || 'active'}, level ${this.program.level || 1}`
-        : 'Open shared assistant home'
+        ? `Open ${homeName}, ${this.program.stage_label || 'active'}, level ${this.program.level || 1}`
+        : `Open ${homeName}`
     );
     switcher.insertBefore(link, plans || null);
   }

@@ -131,7 +131,7 @@ func TestSeedTemplateAgents_ExplicitModelWinsOverSystemModel(t *testing.T) {
 	}
 }
 
-func TestBuildTemplateAgentPlan_AssistantProgramDefersRosterUntilHire(t *testing.T) {
+func TestBuildTemplateAgentPlan_AssistantProgramExposesCreateWizardHirePlan(t *testing.T) {
 	handler := &Handler{}
 	plan := handler.buildTemplateAgentPlan(projecttemplates.Template{
 		ID:     "plugin:neutral:project",
@@ -143,10 +143,65 @@ func TestBuildTemplateAgentPlan_AssistantProgramDefersRosterUntilHire(t *testing
 		},
 	})
 	if plan.HasAgents || len(plan.Agents) != 0 || plan.EntryAgentName != "" {
-		t.Fatalf("assistant program leaked automatic roster plan: %+v", plan)
+		t.Fatalf("assistant program leaked ordinary template agents: %+v", plan)
 	}
-	if len(plan.Warnings) != 1 || !strings.Contains(plan.Warnings[0], "explicit hire") {
-		t.Fatalf("deferred-hire warning = %v", plan.Warnings)
+	if plan.AssistantProgram == nil || plan.AssistantProgram.ID != "project-guide" || len(plan.AssistantProgram.Roles) != 1 || len(plan.AssistantProgram.Stages) != 1 {
+		t.Fatalf("assistant create-wizard plan = %+v", plan.AssistantProgram)
+	}
+	if plan.AssistantProgram.Roles[0].Label != "Guide" || !plan.AssistantProgram.Roles[0].Primary {
+		t.Fatalf("assistant role plan = %+v", plan.AssistantProgram.Roles)
+	}
+	if len(plan.Warnings) != 0 {
+		t.Fatalf("assistant wizard should not be presented as a warning: %v", plan.Warnings)
+	}
+}
+
+func TestBuildTemplateAgentPlan_ExposesExistingSharedRosterWithoutOfferingRename(t *testing.T) {
+	handler, cleanup := createTestHandler(t)
+	defer cleanup()
+	handler.SetWorkspaceTaskStore(session.NewWorkspaceStoreAdapter(handler.store))
+
+	declaration := &agentworkspace.AssistantProgramDeclaration{
+		SchemaVersion: 1, ID: "project-guide", StationName: "Guide Home", DefaultPrimaryName: "Guide",
+		Roles: []agentworkspace.AssistantProgramRoleSpec{
+			{ID: "guide", Label: "Guide", Primary: true, SystemPrompt: "Coordinate"},
+			{ID: "reviewer", Label: "Reviewer", SystemPrompt: "Review"},
+		},
+		Stages: []agentworkspace.AssistantProgramStageSpec{{ID: "helper", Label: "Helper"}},
+	}
+	station := agentworkspace.NewWorkspace(agentworkspace.CreateWorkspaceParams{Name: "Guide Home"})
+	station.OwnerUserID = "local"
+	station.SetAssistantProgramState(&agentworkspace.AssistantProgramState{
+		SchemaVersion: 1,
+		StateRevision: 3,
+		Key: agentworkspace.AssistantProgramKey{
+			OwnerUserID: "local", PluginID: "neutral", ProgramID: "project-guide",
+		},
+		Declaration: declaration,
+		Hired:       true,
+		PrimaryName: "June",
+		Provider:    "ollama",
+		Model:       "gemma",
+		Roster: []agentworkspace.AssistantRoleBinding{
+			{RoleID: "guide", AgentInstanceID: "guide-1", AgentName: "June"},
+			{RoleID: "reviewer", AgentInstanceID: "reviewer-1", AgentName: "Reviewer"},
+		},
+	})
+	if err := handler.workspaceTaskStore.Save(station); err != nil {
+		t.Fatalf("save station: %v", err)
+	}
+
+	plan := handler.buildTemplateAgentPlan(projecttemplates.Template{
+		ID:               "plugin:neutral:project",
+		PluginOwner:      &agentworkspace.PluginTemplateOwner{PluginID: "neutral"},
+		AssistantProgram: declaration,
+	})
+	program := plan.AssistantProgram
+	if program == nil || !program.ExistingHired || program.ExistingProvider != "ollama" || program.ExistingModel != "gemma" {
+		t.Fatalf("existing assistant plan = %+v", program)
+	}
+	if program.Roles[0].AgentName != "June" || program.Roles[1].AgentName != "Reviewer" {
+		t.Fatalf("existing role bindings = %+v", program.Roles)
 	}
 }
 

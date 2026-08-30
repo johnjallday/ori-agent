@@ -50,6 +50,179 @@ const FALLBACK_TIMEZONES = [
   'Pacific/Honolulu'
 ];
 
+const ONBOARDING_TOKEN_STOP_WORDS = new Set([
+  'about',
+  'after',
+  'again',
+  'already',
+  'also',
+  'and',
+  'are',
+  'build',
+  'for',
+  'from',
+  'have',
+  'help',
+  'into',
+  'make',
+  'need',
+  'new',
+  'project',
+  'start',
+  'that',
+  'the',
+  'this',
+  'want',
+  'with',
+  'work'
+]);
+
+function onboardingTokenRoot(value) {
+  let token = String(value || '')
+    .trim()
+    .toLowerCase();
+  if (token.length > 5 && token.endsWith('ing')) token = token.slice(0, -3);
+  else if (token.length > 4 && token.endsWith('ed')) token = token.slice(0, -2);
+  else if (token.length > 4 && token.endsWith('es')) token = token.slice(0, -2);
+  else if (token.length > 4 && token.endsWith('s')) token = token.slice(0, -1);
+  if (token.length > 4 && token.endsWith('e')) token = token.slice(0, -1);
+  return token;
+}
+
+function onboardingTokens(value) {
+  return new Set(
+    String(value || '')
+      .toLowerCase()
+      .match(/[a-z0-9]+/g)
+      ?.filter(token => !ONBOARDING_TOKEN_STOP_WORDS.has(token))
+      .map(onboardingTokenRoot)
+      .filter(token => token.length > 2) || []
+  );
+}
+
+function onboardingTemplateReady(template) {
+  const state = String(template?.readiness?.state || '').trim();
+  return Boolean(template?.id && template?.name) && (!state || state === 'ready');
+}
+
+function onboardingTemplateScore(template, queryTokens, description) {
+  const name = String(template?.name || '').trim();
+  const normalizedDescription = String(description || '')
+    .trim()
+    .toLowerCase();
+  let score = name && normalizedDescription.includes(name.toLowerCase()) ? 50 : 0;
+  const weightedFields = [
+    [template?.tags || [], 12],
+    [name, 8],
+    [template?.description || '', 1]
+  ];
+  for (const [field, weight] of weightedFields) {
+    const values = Array.isArray(field) ? field.join(' ') : field;
+    for (const token of onboardingTokens(values)) {
+      if (queryTokens.has(token)) score += weight;
+    }
+  }
+  return score;
+}
+
+// Converts one small, explicit first-run answer into a recommendation. This is
+// deliberately deterministic: Ori does not claim to know the user, scan apps,
+// persist a profile, or create anything from this answer. Blueprint names,
+// descriptions, tags, and readiness all come from the live catalog.
+export function recommendOnboardingStart({ intent = '', description = '', templates = [] } = {}) {
+  const selectedIntent = String(intent || '').trim();
+  const answer = String(description || '')
+    .trim()
+    .slice(0, 500);
+
+  if (selectedIntent === 'existing') {
+    return {
+      kind: 'import',
+      title: 'Bring in existing work',
+      detail: 'Choose a folder you already use. Ori will review the location before importing it.',
+      actionLabel: 'Import a folder'
+    };
+  }
+  if (selectedIntent === 'explore') {
+    return {
+      kind: 'home',
+      title: 'Explore Ori first',
+      detail:
+        'Finish setup without creating a project. You can start or import a workspace at any time.',
+      actionLabel: 'Explore Ori'
+    };
+  }
+  if (selectedIntent === 'new' && !answer) {
+    return {
+      kind: 'pending',
+      title: 'What are you making?',
+      detail: 'Add one sentence so Ori can compare it with the available blueprints.',
+      actionLabel: 'Describe your project'
+    };
+  }
+
+  const query =
+    selectedIntent === 'organize' && !answer ? 'personal daily recurring organize' : answer;
+  const queryTokens = onboardingTokens(query);
+  const ranked = (Array.isArray(templates) ? templates : [])
+    .filter(onboardingTemplateReady)
+    .map(template => ({
+      template,
+      score: onboardingTemplateScore(template, queryTokens, answer)
+    }))
+    .filter(candidate => candidate.score > 0)
+    .sort(
+      (left, right) =>
+        right.score - left.score ||
+        String(left.template.name).localeCompare(String(right.template.name)) ||
+        String(left.template.id).localeCompare(String(right.template.id))
+    );
+  const match = ranked[0]?.template;
+  if (match) {
+    return {
+      kind: 'template',
+      templateId: String(match.id),
+      title: String(match.name),
+      detail:
+        String(match.description || '').trim() ||
+        'This available blueprint is the closest match to your answer.',
+      actionLabel: `Use ${String(match.name)}`
+    };
+  }
+  if (selectedIntent || answer) {
+    return {
+      kind: 'blank',
+      title: 'Start with a blank workspace',
+      detail:
+        'No available blueprint clearly matched, so Ori will leave the workspace shape up to you.',
+      actionLabel: 'Start blank'
+    };
+  }
+  return {
+    kind: 'pending',
+    title: 'Choose a starting point',
+    detail: 'Pick one option or tell Ori what you want to move forward today.',
+    actionLabel: 'Choose a starting point'
+  };
+}
+
+export function onboardingStartDestination(recommendation) {
+  switch (recommendation?.kind) {
+    case 'template': {
+      const params = new URLSearchParams({ create: '1' });
+      params.set('blueprint', String(recommendation.templateId || ''));
+      return `/?${params.toString()}`;
+    }
+    case 'blank':
+    case 'browse':
+      return '/?create=1';
+    case 'import':
+      return '/?import=1';
+    default:
+      return '/';
+  }
+}
+
 export function workspaceRootSetupView(state) {
   const source = String(state?.source || 'unconfirmed')
     .trim()
@@ -84,6 +257,9 @@ export class OnboardingManager {
     this.assistantName = 'Ori';
     this.timezone = '';
     this.workspaceRootState = null;
+    this.startTemplates = [];
+    this.startIntent = '';
+    this.startRecommendation = recommendOnboardingStart();
   }
 
   async init() {
@@ -122,17 +298,36 @@ export class OnboardingManager {
     if (modelNextBtn) {
       modelNextBtn.addEventListener('click', () => this.advanceFromModel());
     }
+    document
+      .getElementById('continueWithoutModelBtn')
+      ?.addEventListener('click', () => this.advanceFromModel({ skipModel: true }));
 
     const modelBackBtn = document.getElementById('modelBackBtn');
     if (modelBackBtn) {
       modelBackBtn.addEventListener('click', () => this.showPhase(0));
     }
 
-    // Phase 2: Done
+    // Phase 2: choose one useful next step. The answer stays in this modal;
+    // only the confirmed destination crosses the onboarding boundary.
+    document.querySelectorAll('[data-onboarding-intent]').forEach(button => {
+      button.addEventListener('click', () =>
+        this.selectStartIntent(button.dataset.onboardingIntent)
+      );
+    });
+    const intentDescription = document.getElementById('onboardingIntentDescription');
+    if (intentDescription) {
+      intentDescription.addEventListener('input', () => this.updateStartRecommendation());
+    }
     const startBtn = document.getElementById('startBtn');
     if (startBtn) {
-      startBtn.addEventListener('click', () => this.completeOnboarding());
+      startBtn.addEventListener('click', () => this.completeOnboarding(this.startRecommendation));
     }
+    document
+      .getElementById('onboardingBrowseBlueprintsBtn')
+      ?.addEventListener('click', () => this.completeOnboarding({ kind: 'browse' }));
+    document
+      .getElementById('onboardingFinishOnlyBtn')
+      ?.addEventListener('click', () => this.completeOnboarding({ kind: 'home' }));
 
     const doneBackBtn = document.getElementById('doneBackBtn');
     if (doneBackBtn) {
@@ -741,6 +936,72 @@ export class OnboardingManager {
     }
   }
 
+  async loadStartTemplates() {
+    try {
+      const response = await fetch('/api/project-templates', {
+        headers: { Accept: 'application/json' }
+      });
+      if (!response.ok) throw new Error(`Template catalog request failed (${response.status})`);
+      const payload = await response.json();
+      this.startTemplates = Array.isArray(payload?.templates) ? payload.templates : [];
+    } catch (error) {
+      console.warn('Could not load first-run blueprint recommendations:', error);
+      this.startTemplates = [];
+    }
+    this.updateStartRecommendation();
+  }
+
+  selectStartIntent(intent) {
+    this.startIntent = String(intent || '').trim();
+    document.querySelectorAll('[data-onboarding-intent]').forEach(button => {
+      button.setAttribute(
+        'aria-pressed',
+        String(button.dataset.onboardingIntent === this.startIntent)
+      );
+      button.classList.toggle('is-selected', button.dataset.onboardingIntent === this.startIntent);
+    });
+    const description = document.getElementById('onboardingIntentDescription');
+    const prompt = document.getElementById('onboardingIntentPrompt');
+    if (prompt) {
+      prompt.textContent =
+        this.startIntent === 'new'
+          ? 'What are you making?'
+          : this.startIntent === 'organize'
+            ? 'Anything specific you want to organize? (optional)'
+            : 'Or tell Ori in one sentence (optional)';
+    }
+    if (this.startIntent === 'new') description?.focus();
+    this.updateStartRecommendation();
+  }
+
+  updateStartRecommendation() {
+    const description = document.getElementById('onboardingIntentDescription')?.value || '';
+    // A written answer is itself a request to start something; users should not
+    // have to select a chip after already telling Ori what they need.
+    const effectiveIntent = this.startIntent || (description.trim() ? 'new' : '');
+    this.startRecommendation = recommendOnboardingStart({
+      intent: effectiveIntent,
+      description,
+      templates: this.startTemplates
+    });
+    this.renderStartRecommendation();
+  }
+
+  renderStartRecommendation() {
+    const recommendation = this.startRecommendation || recommendOnboardingStart();
+    const panel = document.getElementById('onboardingRecommendation');
+    const title = document.getElementById('onboardingRecommendationTitle');
+    const detail = document.getElementById('onboardingRecommendationDetail');
+    const start = document.getElementById('startBtn');
+    if (panel) panel.dataset.kind = recommendation.kind;
+    if (title) title.textContent = recommendation.title;
+    if (detail) detail.textContent = recommendation.detail;
+    if (start) {
+      start.textContent = recommendation.actionLabel;
+      start.disabled = recommendation.kind === 'pending';
+    }
+  }
+
   // --- Phase navigation ---
 
   showOnboarding() {
@@ -883,21 +1144,25 @@ export class OnboardingManager {
     }
   }
 
-  async advanceFromModel() {
-    const modelSaved = await this.saveSystemModel();
-    if (!modelSaved) {
-      return;
+  async advanceFromModel({ skipModel = false } = {}) {
+    if (!skipModel) {
+      const modelSaved = await this.saveSystemModel();
+      if (!modelSaved) {
+        return;
+      }
     }
     await this.completeStep('step-model');
 
-    // Update done speech with user's name
+    // End setup with one bounded intent question. Ori recommends from the live
+    // ready catalog; it does not infer or persist a durable user profile.
     const name = this.userName || 'friend';
     const doneSpeech = document.getElementById('doneSpeech');
     if (doneSpeech) {
-      doneSpeech.textContent = `All set, ${name}! Your first mission is ready: let’s build the Personal HQ we’ll use to run everything else.`;
+      doneSpeech.textContent = `All set, ${name}! What would make Ori useful today?`;
     }
 
     this.showPhase(2);
+    await this.loadStartTemplates();
   }
 
   async skipOnboarding() {
@@ -916,7 +1181,13 @@ export class OnboardingManager {
     }
   }
 
-  async completeOnboarding() {
+  async completeOnboarding(recommendation = this.startRecommendation) {
+    const start = document.getElementById('startBtn');
+    const finish = document.getElementById('onboardingFinishOnlyBtn');
+    const browse = document.getElementById('onboardingBrowseBlueprintsBtn');
+    for (const button of [start, finish, browse]) {
+      if (button) button.disabled = true;
+    }
     try {
       await this.completeStep('step-done');
 
@@ -928,9 +1199,12 @@ export class OnboardingManager {
       if (!response.ok) throw new Error('Failed to complete onboarding');
 
       if (this.modalInstance) this.modalInstance.hide();
-      window.location.href = '/?focus=personal-hq';
+      window.location.href = onboardingStartDestination(recommendation);
     } catch (error) {
       console.error('Error completing onboarding:', error);
+      this.renderStartRecommendation();
+      if (finish) finish.disabled = false;
+      if (browse) browse.disabled = false;
     }
   }
 

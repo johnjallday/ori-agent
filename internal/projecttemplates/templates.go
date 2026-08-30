@@ -549,7 +549,7 @@ func newTemplateWithManifest(path string, m manifest, catalog RuntimeCatalog) Te
 	if assistantProgramErr != nil {
 		t.AssistantProgramError = assistantProgramErr.Error()
 	}
-	t.Warnings = append(manifestWarnings(m, t.Agents), capabilityWarnings...)
+	t.Warnings = append(manifestWarnings(m, t.Agents, t.AssistantProgram != nil), capabilityWarnings...)
 	if projectEntryErr != nil {
 		t.Warnings = append(t.Warnings, fmt.Sprintf("template.json project_entry is ignored: %v", projectEntryErr))
 	}
@@ -569,15 +569,16 @@ func newTemplateWithManifest(path string, m manifest, catalog RuntimeCatalog) Te
 
 // manifestWarnings reports non-fatal authoring problems for a loaded template:
 // a legacy intake-era `onboarding` block (ignored at runtime, stripped on the
-// next authoring save) and a missing agent roster (every template should
-// declare one — workspace creation falls back to auto-creating a
-// "<Workspace Name> Manager" entry agent when it is absent).
-func manifestWarnings(m manifest, agents []AgentSpec) []string {
+// next authoring save) and a missing roster contract. Ordinary templates
+// declare agents; assistant-program templates declare their shared roster in
+// that program instead. Workspace creation falls back to auto-creating a
+// "<Workspace Name> Manager" entry agent only when neither contract exists.
+func manifestWarnings(m manifest, agents []AgentSpec, hasAssistantProgram bool) []string {
 	var warnings []string
 	if s := bytes.TrimSpace(m.Onboarding); len(s) > 0 && !bytes.Equal(s, []byte("null")) {
 		warnings = append(warnings, `template.json contains a legacy "onboarding" block; it is ignored and will be removed the next time the template is saved`)
 	}
-	if len(agents) == 0 {
+	if len(agents) == 0 && !hasAssistantProgram {
 		warnings = append(warnings, "template declares no agents; add a roster (the first agent is the entry agent) — until then, workspaces created from it get an auto-created manager agent")
 	}
 	return warnings
