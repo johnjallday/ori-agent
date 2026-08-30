@@ -7,6 +7,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   VIEW_MAP,
   VIEW_TREE,
@@ -70,6 +71,11 @@ import {
   captureAvailability,
   askTargetDescription
 } from './home-workspace-cockpit.js';
+
+const cockpitCSS = readFileSync(
+  new URL('../../css/home-workspace-cockpit.css', import.meta.url),
+  'utf8'
+);
 
 // ---------------------------------------------------------------------------
 // View state (FR6, FR25, FR26, FR27)
@@ -458,6 +464,61 @@ test('renderWorkspaceRailHTML explains a missing commander rather than offering 
   const html = renderWorkspaceRailHTML(workspaceRailView({ id: 'w1', name: 'A' }));
   assert.doesNotMatch(html, /data-cockpit-rail-ask/);
   assert.match(html, /no commander to ask/i);
+});
+
+test('the current Home Map context reuses generated portraits for Commander and roster', () => {
+  const hadWindow = Object.hasOwn(globalThis, 'window');
+  const previousWindow = globalThis.window;
+  const calls = [];
+  globalThis.window = {
+    OriWorkspaceMap: {
+      agentPortraitHTML(name, isKeeper) {
+        calls.push({ name, isKeeper });
+        return `<span class="generated-portrait${isKeeper ? ' is-keeper' : ''}">${escapeHtml(name)}</span>`;
+      }
+    }
+  };
+
+  try {
+    const html = renderWorkspaceRailHTML(
+      workspaceRailView({
+        id: 'w1',
+        name: 'Portrait Lab',
+        entry_agent_name: 'Research Lead',
+        agents: ['Research Lead', { name: 'Source Scout', role: 'Research', status: 'idle' }]
+      })
+    );
+
+    assert.deepEqual(calls, [
+      { name: 'Research Lead', isKeeper: true },
+      { name: 'Research Lead', isKeeper: false },
+      { name: 'Source Scout', isKeeper: false }
+    ]);
+    assert.match(html, /aria-label="Commander"/);
+    assert.match(html, /generated-portrait is-keeper/);
+    assert.match(html, /cockpit-rail-roster cockpit-rail-agent-portraits/);
+    assert.equal((html.match(/class="generated-portrait"/g) || []).length, 2);
+    assert.match(html, /cockpit-rail-roster-role">Research</);
+    assert.match(html, /cockpit-rail-roster-activity">idle</);
+  } finally {
+    if (hadWindow) globalThis.window = previousWindow;
+    else delete globalThis.window;
+  }
+});
+
+test('Home Map portrait CSS wraps safely and defines the shared renderer tokens', () => {
+  assert.match(
+    cockpitCSS,
+    /\.cockpit-context-modal\s*\{[^}]*--ws-portrait-label-bg:[^}]*--ws-font-mono:/s
+  );
+  assert.match(
+    cockpitCSS,
+    /\.cockpit-rail-agent-portraits\s*\{[^}]*display:\s*flex;[^}]*flex-wrap:\s*wrap/s
+  );
+  assert.match(
+    cockpitCSS,
+    /\.cockpit-rail-portrait-fallback\s*\{[^}]*text-overflow:\s*ellipsis;[^}]*white-space:\s*nowrap/s
+  );
 });
 
 test('renderWorkspaceRailHTML escapes hostile workspace content', () => {

@@ -836,6 +836,17 @@ function metricHTML(label, value) {
   );
 }
 
+function mapAgentPortraitHTML(name, isCommander = false) {
+  const map = typeof window !== 'undefined' ? window.OriWorkspaceMap : null;
+  if (map && typeof map.agentPortraitHTML === 'function') {
+    return map.agentPortraitHTML(name, isCommander);
+  }
+  // The classic Map script is guaranteed to load before this module in the
+  // browser. Keep a safe textual fallback for isolated module consumers and
+  // tests rather than dropping the agent if that integration is unavailable.
+  return `<span class="cockpit-rail-portrait-fallback" title="${escapeHtml(name)}">${escapeHtml(name)}</span>`;
+}
+
 function rosterHTML(state) {
   if (!state || state.state === 'unavailable') {
     return '<p class="cockpit-rail-empty">Agent data unavailable for this workspace.</p>';
@@ -858,20 +869,26 @@ function rosterHTML(state) {
     );
   }
   return (
-    '<ul class="cockpit-rail-roster">' +
+    '<ul class="cockpit-rail-roster cockpit-rail-agent-portraits">' +
     state.roster
-      .map(
-        agent =>
-          '<li class="cockpit-rail-roster-row">' +
-          `<span class="cockpit-rail-roster-name">${escapeHtml(agent.name)}</span>` +
-          (agent.role
-            ? `<span class="cockpit-rail-roster-role">${escapeHtml(agent.role)}</span>`
-            : '') +
-          (agent.activity
-            ? `<span class="cockpit-rail-roster-activity">${escapeHtml(agent.activity)}</span>`
-            : '') +
+      .map(agent => {
+        const metadata =
+          (agent.role || agent.activity) &&
+          '<span class="cockpit-rail-agent-meta">' +
+            (agent.role
+              ? `<span class="cockpit-rail-roster-role">${escapeHtml(agent.role)}</span>`
+              : '') +
+            (agent.activity
+              ? `<span class="cockpit-rail-roster-activity">${escapeHtml(agent.activity)}</span>`
+              : '') +
+            '</span>';
+        return (
+          '<li class="cockpit-rail-roster-row cockpit-rail-agent-portrait">' +
+          mapAgentPortraitHTML(agent.name) +
+          (metadata || '') +
           '</li>'
-      )
+        );
+      })
       .join('') +
     '</ul>'
   );
@@ -1124,6 +1141,14 @@ export function renderWorkspaceRailHTML(view) {
     metricHTML('Agents', view.status.agents) +
     metricHTML('Attention', view.status.attention) +
     '</div>' +
+    (view.commander
+      ? '<section class="cockpit-rail-section" aria-label="Commander">' +
+        '<h3 class="cockpit-rail-section-title">Commander</h3>' +
+        '<div class="cockpit-rail-commander">' +
+        mapAgentPortraitHTML(view.commander, true) +
+        '<span class="cockpit-rail-commander-state">Commander</span>' +
+        '</div></section>'
+      : '') +
     '<section class="cockpit-rail-section" aria-label="Agent roster">' +
     '<h3 class="cockpit-rail-section-title">Roster</h3>' +
     rosterHTML(view.rosterState) +

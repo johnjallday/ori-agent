@@ -2513,16 +2513,39 @@
   }
 
   function avatarHTML(name, extraClass) {
+    // Production pages load the small shared renderer before this Map script so
+    // Workspace Details can use the exact same portrait without loading the
+    // whole map implementation. Keep the local fallback for isolated consumers
+    // and older cached templates during a rolling update.
+    var shared = window.OriWorkspaceAgentPortrait;
+    if (shared && typeof shared.markup === 'function') {
+      return shared.markup(name, {
+        isKeeper: extraClass === 'is-keeper',
+        className: extraClass === 'is-keeper' ? '' : extraClass
+      });
+    }
+
     var pal = paletteFor(name);
+    var safeName = escapeHtml(name);
     return (
       '<span class="ws-map-av' +
       (extraClass ? ' ' + extraClass : '') +
       '" style="--av:' +
       pal.key +
       '" title="' +
-      escapeHtml(name) +
+      safeName +
       '">' +
-      escapeHtml(initials(name)) +
+      '<svg class="ws-map-av-figure" viewBox="0 0 48 56" aria-hidden="true" focusable="false">' +
+      '<circle class="ws-map-av-head" cx="24" cy="13" r="8"></circle>' +
+      '<line class="ws-map-av-body" x1="24" y1="21" x2="24" y2="39"></line>' +
+      '<line class="ws-map-av-arms" x1="11" y1="28" x2="37" y2="28"></line>' +
+      '<path class="ws-map-av-legs" d="M24 39 L13 52 M24 39 L35 52"></path>' +
+      '</svg>' +
+      '<span class="ws-map-av-label" title="' +
+      safeName +
+      '">' +
+      safeName +
+      '</span>' +
       '</span>'
     );
   }
@@ -2702,9 +2725,7 @@
     var keeper = entry
       ? '<div class="ws-map-ov-keeper">' +
         avatarHTML(entry, 'is-keeper') +
-        '<div><div class="ws-map-ov-keeper-name">' +
-        escapeHtml(entry) +
-        '</div>' +
+        '<div class="ws-map-ov-keeper-meta">' +
         '<div class="ws-map-ov-keeper-badge">★ Locked · can&#39;t remove</div></div></div>'
       : '<span class="ws-map-ov-none">No Commander</span>';
 
@@ -7463,6 +7484,11 @@
     tileHTML: tileHTML,
     districtHTML: districtHTML,
     overviewBodyHTML: overviewBodyHTML,
+    // Home's current Map context modal reuses this exact inline portrait rather
+    // than maintaining a second generated appearance for the same name.
+    agentPortraitHTML: function (name, isKeeper) {
+      return avatarHTML(name, isKeeper ? 'is-keeper' : '');
+    },
     selBarHTML: selBarHTML,
     hqSiteView: hqSiteView,
     hqSiteHTML: hqSiteHTML,

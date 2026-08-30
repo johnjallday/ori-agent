@@ -2307,9 +2307,9 @@ export class WorkspaceCommandView {
             '" title="Remove agent" aria-label="Remove ' +
             escapeHtml(name) +
             '">✕</button>';
-        // Same shared identity as the roster card behind this modal, rendered
-        // into this row's own hexagon tile. Falls back to initials when the
-        // shared renderer has not loaded.
+        // Same resolved identity as the roster card behind this modal: the Map
+        // stick figure for generated/default agents, or the explicit saved
+        // appearance. Falls back to initials when neither renderer has loaded.
         const avatarHTML =
           (avatar.markup && avatar.markup('ws-cmd-mrow-av')) ||
           '<span class="ws-cmd-mrow-av is-initials">' +
@@ -2872,18 +2872,10 @@ export class WorkspaceCommandView {
 
   // An agent's face in Command view.
   //
-  // This used to be a procedurally generated robot SVG keyed on a hash of the
-  // agent's name — a THIRD private avatar, alongside the roster card's hue tile
-  // and the Agents page's real one. The result was that a character a user
-  // deliberately chose was invisible on the page where they actually work with
-  // that agent, and the same agent had a different face on every surface.
-  //
-  // It now renders through the shared Avatar Identity resolver, so an uploaded
-  // avatar, a curated character, or the deterministic fallback all appear here
-  // exactly as they do on /agents and Home (PRD FR-99).
-  //
-  // The status tone class is still applied to the frame: operational state
-  // stays on the frame and the LED beside it, never baked into the art (FR-96).
+  // WorkspaceDetailPage resolves generated/default agents to the name-derived
+  // Workspace Map stick figure, while preserving explicit uploaded/character
+  // appearances through AgentAvatar. Command view supplies only its geometry
+  // and operational status frame (FR-96).
   agentCharacterHTML(agent, variant = 'roster') {
     if (!agent) return '';
     const page = this.page || {};

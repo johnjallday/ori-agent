@@ -64,6 +64,15 @@
   --ws-input: #f08a4b;
   --ws-done: #93d66b;
 
+  /* generated Pocket Resident portraits shared with Workspace Map */
+  --ws-resident-cream: #f7efdc;
+  --ws-resident-outline: #241c12;
+  --ws-portrait-field: #182126;
+  --ws-portrait-field-deep: #0b1013;
+  --ws-portrait-label-bg: rgba(7, 12, 15, 0.9);
+  --ws-portrait-label-ink: #f5f7f8;
+  --ws-portrait-edge: rgba(255, 255, 255, 0.2);
+
   /* geometry */
   --ws-clip: 14px;
   --ws-clip-sm: 8px;
@@ -3481,13 +3490,9 @@ button.ws-cmd-rpg-class-card:focus-visible {
   top: auto;
   bottom: 6px;
 }
-/* The agent's face. The generated robot SVG this used to frame is gone — the
-   contents now come from the shared Avatar Identity renderer (agent-avatar.css)
-   so an agent looks the same here as on /agents. What remains here is the frame:
-   size, the accent ring, and the status tone.
-
-   The .ws-cmd-character-body / -head / -visor / -shoulders / -line / -emblem
-   rules were removed with the SVG they styled. */
+/* The agent's face. Default/generated agents use the Workspace Map stick
+   figure; explicit uploaded/character appearances still come from the shared
+   Avatar Identity renderer. This frame owns size, accent ring, and status tone. */
 .ws-cmd-character {
   --character-accent: var(--ws-line-bright);
   position: relative;
@@ -3510,8 +3515,61 @@ button.ws-cmd-rpg-class-card:focus-visible {
   aspect-ratio: 1;
   border-radius: 18px;
 }
+.ws-cmd-character.ws-map-av {
+  min-width: 0;
+  max-width: none;
+  flex: 0 0 auto;
+}
+.ws-cmd-character.is-roster.ws-map-av {
+  width: 46px;
+  height: 46px;
+  flex-basis: 46px;
+}
+.ws-cmd-character.is-roster.ws-map-av .ws-map-av-figure {
+  width: 32px;
+  height: 39px;
+  margin-top: 0;
+}
+.ws-cmd-character.is-roster.ws-map-av .ws-map-av-label {
+  right: 2px;
+  bottom: 2px;
+  left: 2px;
+  padding: 1px 2px;
+  font-size: 6.5px;
+}
+.ws-cmd-character.is-roster.ws-map-av .ws-map-av-commander-mark {
+  top: 2px;
+  right: 2px;
+  width: 10px;
+  height: 10px;
+  font-size: 5px;
+}
+.ws-cmd-character.is-stage.ws-map-av {
+  width: min(200px, 74%);
+  height: auto;
+  flex-basis: auto;
+}
+.ws-cmd-character.is-stage.ws-map-av .ws-map-av-figure {
+  width: 68%;
+  height: 82%;
+  margin-top: 3%;
+}
+.ws-cmd-character.is-stage.ws-map-av .ws-map-av-label {
+  right: 8px;
+  bottom: 8px;
+  left: 8px;
+  padding: 4px 6px;
+  font-size: 11px;
+}
+.ws-cmd-character.is-stage.ws-map-av .ws-map-av-commander-mark {
+  top: 8px;
+  right: 8px;
+  width: 24px;
+  height: 24px;
+  font-size: 11px;
+}
 
-/* Shown when the shared renderer has not loaded. */
+/* Shown when neither portrait renderer has loaded. */
 .ws-cmd-character.is-initials {
   background: color-mix(in srgb, var(--character-accent) 22%, #12171c);
   color: var(--ws-line-bright);
@@ -5097,10 +5155,9 @@ button.ws-cmd-rpg-class-card:focus-visible {
   border: 1px solid var(--ws-line);
   background: rgba(0, 0, 0, 0.22);
 }
-/* The hexagon tile keeps its shape and size; what fills it now comes from the
-   shared Avatar Identity renderer, so the agent wears the same face here as on
-   its roster card and on /agents (PRD FR-99). --aa-size is overridden because
-   the renderer's own size steps start above this tile. */
+/* The compact modal tile accepts either the Workspace Map stick figure or an
+   explicit shared Agent Appearance. --aa-size is overridden because the
+   app-wide renderer's own size steps start above this tile. */
 .ws-cmd-mrow-av {
   --aa-size: 34px;
   width: 34px;
@@ -5108,8 +5165,32 @@ button.ws-cmd-rpg-class-card:focus-visible {
   flex: 0 0 auto;
   clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
 }
+.ws-cmd-mrow-av.ws-map-av {
+  min-width: 34px;
+  max-width: 34px;
+  flex-basis: 34px;
+}
+.ws-cmd-mrow-av.ws-map-av .ws-map-av-figure {
+  width: 25px;
+  height: 30px;
+  margin-top: 0;
+}
+.ws-cmd-mrow-av.ws-map-av .ws-map-av-label {
+  right: 1px;
+  bottom: 1px;
+  left: 1px;
+  padding: 1px;
+  font-size: 5.5px;
+}
+.ws-cmd-mrow-av.ws-map-av .ws-map-av-commander-mark {
+  top: 1px;
+  right: 1px;
+  width: 8px;
+  height: 8px;
+  font-size: 4px;
+}
 
-/* Shown when the shared renderer has not loaded. */
+/* Shown when neither portrait renderer has loaded. */
 .ws-cmd-mrow-av.is-initials {
   display: grid;
   place-items: center;
@@ -5219,6 +5300,14 @@ button.ws-cmd-rpg-class-card:focus-visible {
   --ws-idle: #167c99;
   --ws-working: #1f6b4e;
   --ws-alert: #b94b3f;
+
+  --ws-resident-cream: #fff7e5;
+  --ws-resident-outline: #241c12;
+  --ws-portrait-field: #eef1f1;
+  --ws-portrait-field-deep: #cfd8da;
+  --ws-portrait-label-bg: rgba(20, 23, 27, 0.92);
+  --ws-portrait-label-ink: #f5f7f8;
+  --ws-portrait-edge: rgba(31, 33, 40, 0.28);
 
   --ws-on-accent: #ffffff;
   --ws-avatar-text: #04110c;
@@ -5380,7 +5469,9 @@ button.ws-cmd-rpg-class-card:focus-visible {
 }
 @media (max-width: 900px) {
   .ws-cmd-layout {
-    grid-template-columns: 1fr;
+    /* A long generated-agent name must shrink inside the one-column command
+       deck rather than making the grid track wider than the viewport. */
+    grid-template-columns: minmax(0, 1fr);
   }
   .ws-cmd-map-world {
     padding: 28px 72px 72px 28px;

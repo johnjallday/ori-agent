@@ -2028,11 +2028,9 @@ test('persisted command-deck selection wins when the agent still exists and fall
   }
 });
 
-// The generated robot SVG this used to assert on is gone: Command view now
-// renders an agent through the SHARED identity resolver, so an agent's face is
-// the same here as on /agents (PRD FR-99). What still has to hold is that the
-// status tone stays on the frame and that a hostile agent name cannot inject
-// markup.
+// Command view receives its resolved face from WorkspaceDetailPage: generated
+// agents get the Map stick figure and explicit appearances keep AgentAvatar.
+// The status tone stays on the frame and hostile names cannot inject markup.
 test('the agent face carries the status tone and does not inject agent markup', () => {
   const commandView = Object.create(WorkspaceCommandView.prototype);
   commandView.page = {}; // no shared renderer available in this harness
@@ -2045,14 +2043,15 @@ test('the agent face carries the status tone and does not inject agent markup', 
   assert.doesNotMatch(first, /<img/);
 });
 
-test('the agent face delegates to the shared identity renderer when it is present', () => {
+test('the agent face delegates to the workspace detail identity resolver when present', () => {
   const commandView = Object.create(WorkspaceCommandView.prototype);
   const seen = [];
   commandView.page = {
     getAgentAvatarPresentation(name) {
       seen.push(name);
       return {
-        markup: className => `<span class="${className}" data-shared="1"></span>`,
+        markup: className =>
+          `<span class="ws-map-av ${className}" data-workspace-portrait="1"></span>`,
         initials: 'AT'
       };
     }
@@ -2064,9 +2063,35 @@ test('the agent face delegates to the shared identity renderer when it is presen
   );
 
   assert.deepEqual([...seen], ['Atlas']);
-  assert.match(html, /data-shared="1"/);
+  assert.match(html, /data-workspace-portrait="1"/);
   // The frame classes are still applied, so geometry and tone survive.
   assert.match(html, /ws-cmd-character is-roster idle/);
+});
+
+test('Workspace Details CSS sizes generated portraits for roster, stage, modal, and themes', () => {
+  const css = readFileSync(new URL('../../css/workspace-command.css', import.meta.url), 'utf8');
+  const template = readFileSync(
+    new URL('../../../templates/pages/workspace-detail.tmpl', import.meta.url),
+    'utf8'
+  );
+
+  assert.match(
+    css,
+    /\.ws-cmd-character\.is-roster\.ws-map-av\s*\{[^}]*width:\s*46px[^}]*height:\s*46px/s
+  );
+  assert.match(css, /\.ws-cmd-character\.is-stage\.ws-map-av\s*\{[^}]*height:\s*auto/s);
+  assert.match(
+    css,
+    /\.ws-cmd-character\.is-stage\.ws-map-av \.ws-map-av-label\s*\{[^}]*font-size:\s*11px/s
+  );
+  assert.match(css, /\.ws-cmd-mrow-av\.ws-map-av\s*\{[^}]*min-width:\s*34px/s);
+  assert.match(css, /\[data-bs-theme="light"\] \.ws-cmd\s*\{[^}]*--ws-portrait-label-bg:/s);
+  assert.match(css, /@media \(max-width:\s*640px\)/);
+  assert.match(
+    css,
+    /@media \(max-width:\s*900px\)\s*\{[\s\S]*?\.ws-cmd-layout\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\)/
+  );
+  assert.match(template, /\.workspace-detail-agent-avatar\.ws-map-av\s*\{[^}]*width:\s*44px/s);
 });
 
 test('recent activity uses attributable persisted timestamps and orders newest first', () => {

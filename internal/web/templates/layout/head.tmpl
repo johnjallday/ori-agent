@@ -11,6 +11,10 @@
        before any consumer (agents-roster.js, workspace-detail.js, sessions.js)
        runs. CharacterCatalog does not self-fetch; each surface calls load(). -->
   <script defer src="/js/modules/agent-avatar.js"></script>
+  <!-- Name-only stick figures shared by Workspace Map and Workspace Details.
+       This does not register an Agent Appearance mode or touch persisted
+       appearance; consumers opt into it only for their local generated default. -->
+  <script defer src="/js/modules/workspace-agent-portrait.js"></script>
   <script defer src="/js/modules/character-catalog.js"></script>
   <!-- The Appearance editor reads AgentAvatar for its preview, so it must load
        after it. Registering it here rather than per page is deliberate: an
