@@ -9125,6 +9125,7 @@
     import { WorkspaceDetailPage } from '/js/modules/workspace-detail.js';
     import { WorkspaceCommandView } from '/js/modules/workspace-command.js';
     import { WorkspaceSurfaceHost } from '/js/modules/workspace-surface-host.js';
+    import { AssistantProgramEntry } from '/js/modules/assistant-program-entry.js';
 
     function initializeWorkspaceDetailPage() {
       themeManager.initialize();
@@ -9148,6 +9149,11 @@
 
         // Opt-in Command view (inert until Phase 1).
         window.workspaceCommand = new WorkspaceCommandView(detailPage);
+
+        // Blueprint-declared assistant programs get one canonical destination.
+        // Ordinary workspaces never render this entry.
+        window.assistantProgramEntry = new AssistantProgramEntry({ workspaceId, workspaceSlug });
+        void window.assistantProgramEntry.init();
       } else {
         console.error('Workspace route identity was not provided');
         window.location.href = '/';

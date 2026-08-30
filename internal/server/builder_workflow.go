@@ -417,6 +417,9 @@ func (b *ServerBuilder) initializeEventSystem() {
 	verbose := os.Getenv("ORI_VERBOSE") == "true"
 
 	b.eventBus = workspace.DefaultEventBus()
+	if b.workspaceStore != nil {
+		workspace.SubscribeAssistantProgression(b.eventBus, b.workspaceStore)
+	}
 	if verbose {
 		logger.Info("Event bus initialized", logger.Fields{})
 	}
@@ -548,6 +551,14 @@ func (b *ServerBuilder) initializeTaskExecution() {
 		WakeScheduler: b.macWakeService,
 	})
 	b.taskScheduler.SetEventBus(b.eventBus)
+	if b.workspaceFileStore != nil && b.assistantReflectionModel != nil {
+		reflectionService := workspace.NewAssistantReflectionService(
+			b.workspaceStore,
+			workspace.NewAssistantLearningStore(b.workspaceFileStore),
+			b.assistantReflectionModel,
+		)
+		b.taskScheduler.SetAssistantReflectionTrigger(assistantReflectionTrigger{service: reflectionService})
+	}
 }
 
 // initializeOrchestration creates orchestrators and handlers.

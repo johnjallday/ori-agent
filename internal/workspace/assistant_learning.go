@@ -89,6 +89,23 @@ type AssistantLearningTombstone struct {
 	DeletedAt   time.Time `json:"deleted_at"`
 }
 
+type AssistantSuggestion struct {
+	ID                 string                       `json:"id"`
+	Version            int64                        `json:"version"`
+	Fingerprint        string                       `json:"fingerprint"`
+	ProjectID          string                       `json:"project_id"`
+	LearningID         string                       `json:"learning_id"`
+	LearningRevisionID string                       `json:"learning_revision_id"`
+	OpportunityID      string                       `json:"opportunity_id,omitempty"`
+	Text               string                       `json:"text"`
+	Rationale          string                       `json:"rationale"`
+	Evidence           []AssistantEvidenceReference `json:"evidence"`
+	CreatedAt          time.Time                    `json:"created_at"`
+	AcceptedAt         *time.Time                   `json:"accepted_at,omitempty"`
+	DismissedAt        *time.Time                   `json:"dismissed_at,omitempty"`
+	TaskID             string                       `json:"task_id,omitempty"`
+}
+
 type AssistantReflectionRunDiagnostic struct {
 	RunID       string    `json:"run_id"`
 	Status      string    `json:"status"`
@@ -103,6 +120,7 @@ type AssistantLearningDocument struct {
 	Candidates    []AssistantLearningCandidate       `json:"candidates,omitempty"`
 	Learnings     []AssistantManagedLearning         `json:"learnings,omitempty"`
 	Tombstones    []AssistantLearningTombstone       `json:"tombstones,omitempty"`
+	Suggestions   []AssistantSuggestion              `json:"suggestions,omitempty"`
 	Runs          []AssistantReflectionRunDiagnostic `json:"runs,omitempty"`
 }
 
@@ -127,6 +145,11 @@ func CloneAssistantLearningDocument(source AssistantLearningDocument) AssistantL
 		}
 	}
 	clone.Tombstones = append([]AssistantLearningTombstone(nil), source.Tombstones...)
+	clone.Suggestions = make([]AssistantSuggestion, len(source.Suggestions))
+	for i := range source.Suggestions {
+		clone.Suggestions[i] = source.Suggestions[i]
+		clone.Suggestions[i].Evidence = cloneEvidence(source.Suggestions[i].Evidence)
+	}
 	clone.Runs = append([]AssistantReflectionRunDiagnostic(nil), source.Runs...)
 	return clone
 }
@@ -202,6 +225,7 @@ func normalizeLearningDocument(document *AssistantLearningDocument) {
 	sort.Slice(document.Candidates, func(i, j int) bool { return document.Candidates[i].ID < document.Candidates[j].ID })
 	sort.Slice(document.Learnings, func(i, j int) bool { return document.Learnings[i].ID < document.Learnings[j].ID })
 	sort.Slice(document.Tombstones, func(i, j int) bool { return document.Tombstones[i].Fingerprint < document.Tombstones[j].Fingerprint })
+	sort.Slice(document.Suggestions, func(i, j int) bool { return document.Suggestions[i].ID < document.Suggestions[j].ID })
 	if len(document.Runs) > 100 {
 		document.Runs = append([]AssistantReflectionRunDiagnostic(nil), document.Runs[len(document.Runs)-100:]...)
 	}
@@ -317,6 +341,47 @@ func (store *AssistantLearningStore) AddCandidates(workspaceID string, expectedV
 		}
 		return nil
 	})
+}
+
+func (store *AssistantLearningStore) EditCandidate(workspaceID, candidateID, text, kind, confidence string, expectedVersion int64) (AssistantLearningCandidate, error) {
+	var edited AssistantLearningCandidate
+	_, err := store.Update(workspaceID, expectedVersion, func(document *AssistantLearningDocument) error {
+		for index := range document.Candidates {
+			candidate := &document.Candidates[index]
+			if candidate.ID != candidateID || candidate.RejectedAt != nil || candidate.ApprovedLearningID != "" {
+				continue
+			}
+			clean, normalizedKind, normalizedConfidence, validateErr := validateAssistantLearningFields(text, kind, confidence, candidate.Evidence)
+			if validateErr != nil {
+				return validateErr
+			}
+			candidate.Text = clean
+			candidate.Type = normalizedKind
+			candidate.Confidence = normalizedConfidence
+			candidate.Version++
+			edited = *candidate
+			return nil
+		}
+		return ErrAssistantCandidateNotFound
+	})
+	return edited, err
+}
+
+func (store *AssistantLearningStore) DeleteCandidate(workspaceID, candidateID string, expectedVersion int64) error {
+	_, err := store.Update(workspaceID, expectedVersion, func(document *AssistantLearningDocument) error {
+		for index := range document.Candidates {
+			candidate := document.Candidates[index]
+			if candidate.ID != candidateID || candidate.ApprovedLearningID != "" {
+				continue
+			}
+			now := time.Now().UTC()
+			document.Tombstones = append(document.Tombstones, AssistantLearningTombstone{Fingerprint: candidate.Fingerprint, DeletedAt: now})
+			document.Candidates = append(document.Candidates[:index], document.Candidates[index+1:]...)
+			return nil
+		}
+		return ErrAssistantCandidateNotFound
+	})
+	return err
 }
 
 func (store *AssistantLearningStore) ApproveCandidate(workspaceID, candidateID string, expectedVersion int64) (AssistantManagedLearning, error) {

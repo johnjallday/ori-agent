@@ -19,6 +19,7 @@ export class WorkspaceMemoryManager {
     this.host = host;
     this.loaded = false;
     this.entries = [];
+    this.managedLearnings = [];
     this.unstructured = [];
     this.editingIndex = -1;
     this.elements = {};
@@ -65,6 +66,9 @@ export class WorkspaceMemoryManager {
       if (!response.ok) throw new Error('Failed to load workspace memory');
       const payload = await response.json();
       this.entries = Array.isArray(payload?.entries) ? payload.entries : [];
+      this.managedLearnings = Array.isArray(payload?.managed_learnings)
+        ? payload.managed_learnings
+        : [];
       this.unstructured = Array.isArray(payload?.unstructured) ? payload.unstructured : [];
       this.meta = {
         rawSize: Number(payload?.raw_size) || 0,
@@ -102,7 +106,7 @@ export class WorkspaceMemoryManager {
     const list = this.elements.list;
     if (!list) return;
 
-    if (!this.entries.length && !this.unstructured.length) {
+    if (!this.entries.length && !this.managedLearnings.length && !this.unstructured.length) {
       list.innerHTML = `
         <div class="workspace-detail-memory-empty">
           <p>No memory yet. As missions and chats run in this workspace, agents record durable facts here — or add one yourself.</p>
@@ -119,6 +123,18 @@ export class WorkspaceMemoryManager {
       )
       .join('');
 
+    let managedHtml = '';
+    if (this.managedLearnings.length) {
+      const cards = this.managedLearnings
+        .map(learning => this.managedLearningHtml(learning))
+        .join('');
+      managedHtml = `
+        <section class="workspace-detail-memory-managed" aria-label="Approved assistant learnings">
+          <div class="workspace-detail-memory-unstructured-label">Approved assistant learnings</div>
+          ${cards}
+        </section>`;
+    }
+
     let unstructuredHtml = '';
     if (this.unstructured.length) {
       const items = this.unstructured
@@ -131,7 +147,31 @@ export class WorkspaceMemoryManager {
         </div>`;
     }
 
-    list.innerHTML = entriesHtml + unstructuredHtml;
+    list.innerHTML = entriesHtml + managedHtml + unstructuredHtml;
+  }
+
+  managedLearningHtml(learning) {
+    const evidence = Array.isArray(learning?.evidence) ? learning.evidence : [];
+    const evidenceItems = evidence
+      .map(item => {
+        const summary = this.esc(item?.summary || 'Evidence');
+        const route = String(item?.route || '');
+        return route.startsWith('/workspaces/')
+          ? `<li><a href="${this.esc(route)}">${summary}</a></li>`
+          : `<li>${summary}</li>`;
+      })
+      .join('');
+    return `
+      <article class="workspace-detail-memory-entry is-managed" data-learning-id="${this.esc(learning?.id || '')}">
+        <div class="workspace-detail-memory-entry-main">
+          <span class="workspace-detail-memory-badge">${this.esc(learning?.type || 'learning')}</span>
+          <span class="workspace-detail-memory-text">${this.esc(learning?.text || '')}</span>
+        </div>
+        <div class="workspace-detail-memory-entry-foot">
+          <span class="workspace-detail-memory-prov">assistant-approved · ${this.esc(learning?.confidence || '')} · ${evidence.length} evidence</span>
+          <details><summary>Evidence</summary><ul>${evidenceItems}</ul></details>
+        </div>
+      </article>`;
   }
 
   entryRowHtml(entry, index) {
@@ -259,6 +299,9 @@ export class WorkspaceMemoryManager {
       }
       const payload = await response.json();
       this.entries = Array.isArray(payload?.entries) ? payload.entries : [];
+      this.managedLearnings = Array.isArray(payload?.managed_learnings)
+        ? payload.managed_learnings
+        : [];
       this.unstructured = Array.isArray(payload?.unstructured) ? payload.unstructured : [];
       this.meta = {
         rawSize: Number(payload?.raw_size) || 0,

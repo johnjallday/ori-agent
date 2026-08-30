@@ -61,6 +61,41 @@ test('rowHTML shows Add to Backlog for a non-planned finding (FR26)', () => {
   assert.ok(!html.includes('View in Backlog'), 'not yet planned, so no linked-item shortcut');
 });
 
+test('rowHTML marks assistant suggestions with escaped provenance, confidence, evidence, and source navigation', () => {
+  const { api } = loadActionCenter();
+  const html = api.rowHTML({
+    id: 'o-assistant',
+    workspace_id: 'ws-1',
+    workspace_slug: 'song-one',
+    workspace_name: 'Song One',
+    source_type: 'assistant_suggestion',
+    source_label: '<Producer & Co>',
+    source_url: '/workspaces/song-one/assistant',
+    title: 'Review the pattern',
+    summary: 'Repeated workflow preference',
+    evidence: '<script>alert(1)</script>\nThree linked projects',
+    confidence: 'high',
+    status: 'new'
+  });
+  assert.match(html, /Assistant suggestion/);
+  assert.match(html, /&lt;Producer &amp; Co&gt;/);
+  assert.match(html, /high confidence/);
+  assert.match(html, /Three linked projects/);
+  assert.match(html, /href="\/workspaces\/song-one\/assistant"/);
+  assert.ok(!html.includes('<script>'));
+});
+
+test('assistantSourceHTML refuses client-forged external source URLs', () => {
+  const { api } = loadActionCenter();
+  const html = api.assistantSourceHTML({
+    source_type: 'assistant_suggestion',
+    source_url: 'javascript:alert(1)',
+    evidence: 'Evidence'
+  });
+  assert.ok(!html.includes('javascript:'));
+  assert.ok(!html.includes('Open source'));
+});
+
 test("rowHTML shows a View in Backlog deep link once planned, using Group 5's panel=backlog contract (FR26, 29, 59)", () => {
   const { api } = loadActionCenter();
   const html = api.rowHTML({

@@ -65,6 +65,27 @@ test('renderList renders entries and an unstructured group', () => {
   assert.match(m.elements.list.innerHTML, /hand note/);
 });
 
+test('renderList keeps approved assistant learnings read-only and evidence-linked', () => {
+  const m = makeManager();
+  m.elements = { list: { innerHTML: '' } };
+  m.entries = [];
+  m.unstructured = [];
+  m.managedLearnings = [
+    {
+      id: 'learning-1',
+      type: 'workflow',
+      text: 'Keep the preflight concise.',
+      confidence: 'high',
+      evidence: [{ summary: 'Observed in song A', route: '/workspaces/song-a/task/task-1' }]
+    }
+  ];
+  m.renderList();
+  assert.match(m.elements.list.innerHTML, /Approved assistant learnings/);
+  assert.match(m.elements.list.innerHTML, /Keep the preflight concise/);
+  assert.match(m.elements.list.innerHTML, /href="\/workspaces\/song-a\/task\/task-1"/);
+  assert.doesNotMatch(m.elements.list.innerHTML, /data-action="edit"/);
+});
+
 test('renderList switches the editing row into an edit form', () => {
   const m = makeManager();
   m.elements = { list: { innerHTML: '' } };

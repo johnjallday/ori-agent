@@ -169,6 +169,7 @@ type ServerBuilder struct {
 	taskExecutor             *workspace.TaskExecutor
 	stepExecutor             *workspace.StepExecutor
 	taskScheduler            *workspace.TaskScheduler
+	assistantReflectionModel workspace.AssistantReflectionModel
 	macWakeService           *macwake.Service
 	eventBus                 *workspace.EventBus
 	notificationService      *workspace.NotificationService

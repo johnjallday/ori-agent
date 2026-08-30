@@ -2,6 +2,8 @@ package workspace
 
 import (
 	"errors"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 )
@@ -37,6 +39,39 @@ func assistantProject(t *testing.T, store Store, name string) *Workspace {
 	return project
 }
 
+type assistantPortableMetadataStore struct {
+	Store
+	portable map[string]*Workspace
+}
+
+func (store *assistantPortableMetadataStore) GetFolderWorkspace(id string) (*Workspace, error) {
+	workspace, ok := store.portable[id]
+	if !ok {
+		return nil, fmt.Errorf("portable workspace %s not found", id)
+	}
+	return cloneWorkspaceForRebind(workspace)
+}
+
+func TestAssistantProgramStore_ReadsCanonicalDeclarationWhenPrimaryOmitsProvenance(t *testing.T) {
+	primary := NewInMemoryStore()
+	project := assistantProject(t, primary, "Portable declaration")
+	portable, err := cloneWorkspaceForRebind(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := primary.Update(project.ID, func(current *Workspace) error {
+		current.TemplateProvenance = nil
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	store := &assistantPortableMetadataStore{Store: primary, portable: map[string]*Workspace{project.ID: portable}}
+	station, created, err := NewAssistantProgramStore(store).EnsureProjectStation(project.ID)
+	if err != nil || !created || station.GetAssistantProgramState() == nil {
+		t.Fatalf("portable declaration provisioning = (%+v, %v, %v)", station, created, err)
+	}
+}
+
 func TestAssistantProgramStore_CreatesOneStationAndStableLinks(t *testing.T) {
 	store := NewInMemoryStore()
 	service := NewAssistantProgramStore(store)
@@ -65,6 +100,103 @@ func TestAssistantProgramStore_CreatesOneStationAndStableLinks(t *testing.T) {
 	storedFirst, _ := store.Get(first.ID)
 	if storedFirst.GetAssistantProjectLink().StationWorkspaceID != station.ID {
 		t.Fatal("project did not persist stable station ID")
+	}
+}
+
+func TestAssistantProgramStore_StationIdentityDoesNotDependOnDisplaySlug(t *testing.T) {
+	store := NewInMemoryStore()
+	ordinary := NewWorkspace(CreateWorkspaceParams{Name: "Project Guide Home"})
+	if err := store.Save(ordinary); err != nil {
+		t.Fatal(err)
+	}
+	project := assistantProject(t, store, "Song With Shared Title")
+	station, _, err := NewAssistantProgramStore(store).EnsureProjectStation(project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if station.FolderSlug == ordinary.FolderSlug || station.FolderSlug != assistantStationFolderSlug(station.GetAssistantProgramState().Key) {
+		t.Fatalf("station slug %q depends on display title %q", station.FolderSlug, ordinary.FolderSlug)
+	}
+}
+
+func TestAssistantProgramStore_ProjectLinkedAfterHireReceivesSharedRoster(t *testing.T) {
+	store := NewInMemoryStore()
+	service := NewAssistantProgramStore(store)
+	first := assistantProject(t, store, "First Hired Project")
+	station, _, err := service.EnsureProjectStation(first.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	roster := []AgentInstance{{ID: "producer-id", Name: "June"}, {ID: "engineer-id", Name: "Engineer"}, {ID: "writer-id", Name: "Writer"}}
+	if err := store.Update(station.ID, func(current *Workspace) error {
+		state := current.GetAssistantProgramState()
+		state.Hired = true
+		state.PrimaryName = "June"
+		state.StageID = "helper"
+		state.Level = 1
+		current.SetAssistantProgramState(state)
+		current.AgentInstances = append([]AgentInstance(nil), roster...)
+		return current.SetEntryAgentName("June")
+	}); err != nil {
+		t.Fatal(err)
+	}
+	second := assistantProject(t, store, "Later Project")
+	if _, _, err := service.EnsureProjectStation(second.ID); err != nil {
+		t.Fatal(err)
+	}
+	linked, _ := store.Get(second.ID)
+	instances := linked.GetAgentInstances()
+	if len(instances) != len(roster) || instances[0].ID != "producer-id" || linked.EntryAgentName() != "June" {
+		t.Fatalf("late-linked roster = %+v entry=%q", instances, linked.EntryAgentName())
+	}
+}
+
+func TestAssistantProgramStore_ConcurrentProjectCreationKeepsOneStation(t *testing.T) {
+	store := NewInMemoryStore()
+	service := NewAssistantProgramStore(store)
+	projects := make([]*Workspace, 12)
+	for index := range projects {
+		projects[index] = assistantProject(t, store, fmt.Sprintf("Concurrent %d Project", index+1))
+		if err := store.Update(projects[index].ID, func(current *Workspace) error {
+			current.Name = "Concurrent Song"
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stationIDs := make(chan string, len(projects))
+	errorsSeen := make(chan error, len(projects))
+	var wait sync.WaitGroup
+	for _, project := range projects {
+		wait.Add(1)
+		go func(projectID string) {
+			defer wait.Done()
+			station, _, err := service.EnsureProjectStation(projectID)
+			if err != nil {
+				errorsSeen <- err
+				return
+			}
+			stationIDs <- station.ID
+		}(project.ID)
+	}
+	wait.Wait()
+	close(stationIDs)
+	close(errorsSeen)
+	for err := range errorsSeen {
+		t.Errorf("concurrent ensure: %v", err)
+	}
+	oneID := ""
+	for stationID := range stationIDs {
+		if oneID == "" {
+			oneID = stationID
+		}
+		if stationID != oneID {
+			t.Fatalf("multiple station IDs: %q and %q", oneID, stationID)
+		}
+	}
+	station, err := store.Get(oneID)
+	if err != nil || len(station.GetAssistantProgramState().LinkedProjectIDs) != len(projects) {
+		t.Fatalf("station links = (%+v, %v)", station.GetAssistantProgramState(), err)
 	}
 }
 
@@ -125,6 +257,149 @@ func TestAssistantProgramState_RoundTripAndDefensiveCopies(t *testing.T) {
 	}
 	if decoded.GetAssistantProjectLink().StationWorkspaceID != "station" {
 		t.Fatal("project link did not round trip")
+	}
+}
+
+func TestSubscribeAssistantProgressionAwardsCanonicalCompletionOnce(t *testing.T) {
+	store := NewInMemoryStore()
+	project := assistantProject(t, store, "Event Song")
+	service := NewAssistantProgramStore(store)
+	station, _, err := service.EnsureProjectStation(project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Update(station.ID, func(current *Workspace) error {
+		state := current.GetAssistantProgramState()
+		state.Hired = true
+		state.StageID = "helper"
+		state.Level = 1
+		current.SetAssistantProgramState(state)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Update(project.ID, func(current *Workspace) error {
+		return current.AddTask(Task{ID: "done", Description: "Accepted work", Status: TaskStatusCompleted})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	bus := DefaultEventBus()
+	defer bus.Shutdown()
+	SubscribeAssistantProgression(bus, store)
+	bus.Publish(Event{Type: EventTaskCompleted, WorkspaceID: project.ID, Data: map[string]any{"task_id": "done"}})
+	time.Sleep(20 * time.Millisecond)
+	current, _ := store.Get(station.ID)
+	if current.GetAssistantProgramState().AcceptedCompletions != 0 {
+		t.Fatal("execution completion advanced progression before user acceptance")
+	}
+	event := Event{Type: EventTaskCompleted, WorkspaceID: project.ID, Data: map[string]any{"task_id": "done", "accepted": true}}
+	bus.Publish(event)
+	bus.Publish(event)
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		current, _ := store.Get(station.ID)
+		if current.GetAssistantProgramState().AcceptedCompletions == 1 {
+			time.Sleep(20 * time.Millisecond)
+			current, _ = store.Get(station.ID)
+			if current.GetAssistantProgramState().AcceptedCompletions != 1 {
+				t.Fatal("duplicate event awarded twice")
+			}
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("completion event was not awarded")
+}
+
+func TestAssistantProgramStore_RecordAcceptedCompletionIsIdempotentAndPromotes(t *testing.T) {
+	store := NewInMemoryStore()
+	project := assistantProject(t, store, "Song A")
+	service := NewAssistantProgramStore(store)
+	station, _, err := service.EnsureProjectStation(project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Update(station.ID, func(current *Workspace) error {
+		state := current.GetAssistantProgramState()
+		state.Hired = true
+		state.StageID = "helper"
+		state.Level = 1
+		state.Declaration.Stages[1].AcceptedCompletionThreshold = 2
+		current.SetAssistantProgramState(state)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Update(project.ID, func(current *Workspace) error {
+		if err := current.AddTask(Task{ID: "one", Description: "First", Status: TaskStatusCompleted}); err != nil {
+			return err
+		}
+		return current.AddTask(Task{ID: "two", Description: "Second", Status: TaskStatusCompleted})
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	state, promoted, err := service.RecordAcceptedCompletion(project.ID, "task:one")
+	if err != nil || promoted || state.AcceptedCompletions != 1 || state.StageID != "helper" {
+		t.Fatalf("first completion state=%+v promoted=%v err=%v", state, promoted, err)
+	}
+	state, promoted, err = service.RecordAcceptedCompletion(project.ID, "task:one")
+	if err != nil || promoted || state.AcceptedCompletions != 1 {
+		t.Fatalf("retry was not idempotent: state=%+v promoted=%v err=%v", state, promoted, err)
+	}
+	state, promoted, err = service.RecordAcceptedCompletion(project.ID, "task:two")
+	if err != nil || !promoted || state.AcceptedCompletions != 2 || state.StageID != "collaborator" || state.Level != 2 {
+		t.Fatalf("promotion state=%+v promoted=%v err=%v", state, promoted, err)
+	}
+	if state.PromotionReceipt == nil || state.PromotionReceipt.StageID != "collaborator" || state.PromotionReceipt.AcknowledgedAt != nil {
+		t.Fatalf("promotion receipt = %+v", state.PromotionReceipt)
+	}
+}
+
+func TestAssistantProgramStore_CompletionLedgerIsBoundedWithoutReplayAfterEviction(t *testing.T) {
+	store := NewInMemoryStore()
+	service := NewAssistantProgramStore(store)
+	project := assistantProject(t, store, "Bounded Ledger")
+	station, _, err := service.EnsureProjectStation(project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Update(station.ID, func(current *Workspace) error {
+		state := current.GetAssistantProgramState()
+		state.Hired = true
+		state.StageID = "helper"
+		state.Level = 1
+		current.SetAssistantProgramState(state)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Update(project.ID, func(current *Workspace) error {
+		for index := 0; index <= assistantCompletionReceiptLimit; index++ {
+			if err := current.AddTask(Task{ID: fmt.Sprintf("task-%03d", index), Description: "Accepted", Status: TaskStatusCompleted}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for index := 0; index <= assistantCompletionReceiptLimit; index++ {
+		if _, _, err := service.RecordAcceptedCompletion(project.ID, fmt.Sprintf("task:task-%03d", index)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	current, _ := store.Get(station.ID)
+	state := current.GetAssistantProgramState()
+	if len(state.CompletionReceipts) != assistantCompletionReceiptLimit || state.AcceptedCompletions != assistantCompletionReceiptLimit+1 {
+		t.Fatalf("bounded state = receipts %d completions %d", len(state.CompletionReceipts), state.AcceptedCompletions)
+	}
+	if _, _, err := service.RecordAcceptedCompletion(project.ID, "task:task-000"); err != nil {
+		t.Fatal(err)
+	}
+	current, _ = store.Get(station.ID)
+	if got := current.GetAssistantProgramState().AcceptedCompletions; got != assistantCompletionReceiptLimit+1 {
+		t.Fatalf("evicted receipt replay incremented completions to %d", got)
 	}
 }
 

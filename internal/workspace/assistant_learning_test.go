@@ -66,6 +66,29 @@ func TestAssistantLearningStore_ApproveEditDeleteTombstone(t *testing.T) {
 	}
 }
 
+func TestAssistantLearningStore_EditAndDeletePendingCandidate(t *testing.T) {
+	store := NewAssistantLearningStore(testFolderResolver{root: t.TempDir()})
+	document, err := store.AddCandidates("station", 0, []AssistantLearningCandidate{{
+		Fingerprint: "pending-pattern", Type: "fact", Text: "A safe repeated pattern.", Confidence: "low", Evidence: learningEvidence(),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate := document.Candidates[0]
+	edited, err := store.EditCandidate("station", candidate.ID, "A reviewed repeated preference.", "preference", "high", document.Version)
+	if err != nil || edited.Text != "A reviewed repeated preference." || edited.Version != 2 {
+		t.Fatalf("edit pending = (%+v, %v)", edited, err)
+	}
+	document, _ = store.Read("station")
+	if err := store.DeleteCandidate("station", candidate.ID, document.Version); err != nil {
+		t.Fatal(err)
+	}
+	document, _ = store.Read("station")
+	if len(document.Candidates) != 0 || len(document.Tombstones) != 1 || document.Tombstones[0].Fingerprint != "pending-pattern" {
+		t.Fatalf("deleted pending document = %+v", document)
+	}
+}
+
 func TestAssistantLearningStore_PreservesMemoryAndProjectsOnlyApproved(t *testing.T) {
 	root := t.TempDir()
 	memory := "# Hand-written memory\n\nThis prose stays byte-identical.\n"

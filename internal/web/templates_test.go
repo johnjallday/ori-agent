@@ -15,6 +15,28 @@ func TestLoadTemplates_Parses(t *testing.T) {
 	}
 }
 
+func TestRenderWorkspaceAssistantPassesUnquotedIdentityToModule(t *testing.T) {
+	r := NewTemplateRenderer()
+	if err := r.LoadTemplates(); err != nil {
+		t.Fatalf("LoadTemplates failed: %v", err)
+	}
+	html, err := r.RenderTemplate("workspace-assistant", TemplateData{
+		Title: "Assistant - Ori Agent",
+		Extra: map[string]any{"WorkspaceID": "ws-1", "WorkspaceSlug": "project-one"},
+	})
+	if err != nil {
+		t.Fatalf("RenderTemplate(workspace-assistant) failed: %v", err)
+	}
+	for _, want := range []string{`workspaceId: "ws-1"`, `workspaceSlug: "project-one"`} {
+		if !strings.Contains(html, want) {
+			t.Errorf("rendered assistant page missing %q", want)
+		}
+	}
+	if strings.Contains(html, `workspaceSlug: "\"project-one\""`) {
+		t.Fatal("rendered assistant page passed JSON quotes as part of the workspace slug")
+	}
+}
+
 // TestRenderWorkspaceDetailSharedHosts confirms the workspace-detail page (now
 // Command-only) carries the hidden shared-hosts container the Command view
 // mounts live DOM into, plus the Command mount and the Members panel the

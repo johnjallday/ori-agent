@@ -1,0 +1,168 @@
+{{define "workspace-assistant"}}
+<!DOCTYPE html>
+<html data-bs-theme="light">
+{{template "head.tmpl" .}}
+<link rel="stylesheet" href="/css/assistant-program.css">
+<body class="bg-light assistant-program-body" data-workspace-id="{{.Extra.WorkspaceID}}" data-workspace-slug="{{.Extra.WorkspaceSlug}}">
+  {{template "navbar.tmpl" .}}
+  <div class="main-content-wrapper">
+    {{template "sidebar.tmpl" .}}
+    <main class="main-content assistant-program-shell">
+      <div id="assistantProgramPage" class="assistant-program-page" aria-busy="true">
+        <nav class="assistant-program-breadcrumb" aria-label="Breadcrumb">
+          <a id="assistantProgramWorkspaceLink" href="#">Workspace</a>
+          <span aria-hidden="true">/</span>
+          <span>Assistant</span>
+        </nav>
+
+        <section id="assistantProgramLoading" class="assistant-program-loading" role="status">
+          <span class="assistant-program-reel" aria-hidden="true"></span>
+          <p>Warming up the assistant room…</p>
+        </section>
+
+        <section id="assistantProgramError" class="assistant-program-error" hidden role="alert">
+          <p id="assistantProgramErrorText">This assistant home is unavailable.</p>
+          <div class="assistant-program-actions">
+            <button id="assistantProgramActivate" class="modern-btn modern-btn-primary" type="button" hidden>Activate assistant</button>
+            <a id="assistantProgramBack" class="modern-btn modern-btn-secondary" href="#">Back to workspace</a>
+          </div>
+        </section>
+
+        <div id="assistantProgramContent" hidden>
+          <section id="assistantProgramDisabled" class="assistant-program-disabled" hidden role="status">
+            <strong>Contribution paused</strong>
+            <span id="assistantProgramDisabledText"></span>
+          </section>
+
+          <header class="assistant-program-hero">
+            <div class="assistant-program-hero-copy">
+              <span class="assistant-program-kicker">Shared assistant station</span>
+              <h1 id="assistantProgramTitle">Assistant</h1>
+              <p id="assistantProgramDescription"></p>
+              <div class="assistant-program-status-row">
+                <span id="assistantProgramStage" class="assistant-program-stage-chip">Not hired</span>
+                <span id="assistantProgramProjectCount" class="assistant-program-project-count"></span>
+              </div>
+            </div>
+            <div class="assistant-program-meter" aria-label="Assistant progression">
+              <svg viewBox="0 0 140 140" aria-hidden="true">
+                <circle class="assistant-program-meter-track" cx="70" cy="70" r="57"></circle>
+                <circle id="assistantProgramMeterValue" class="assistant-program-meter-value" cx="70" cy="70" r="57"></circle>
+              </svg>
+              <div class="assistant-program-meter-copy">
+                <span>Level</span>
+                <strong id="assistantProgramLevel">—</strong>
+              </div>
+            </div>
+          </header>
+
+          <div class="assistant-program-grid">
+            <section class="assistant-program-panel assistant-program-roster-panel" aria-labelledby="assistantProgramRosterTitle">
+              <div class="assistant-program-panel-head">
+                <div>
+                  <span class="assistant-program-panel-index">01 / ROSTER</span>
+                  <h2 id="assistantProgramRosterTitle">The room</h2>
+                </div>
+                <button id="assistantProgramHireOpen" class="modern-btn modern-btn-primary" type="button" hidden>Hire assistant</button>
+              </div>
+              <div id="assistantProgramRoster" class="assistant-program-roster"></div>
+            </section>
+
+            <section class="assistant-program-panel assistant-program-progress-panel" aria-labelledby="assistantProgramProgressTitle">
+              <div class="assistant-program-panel-head">
+                <div>
+                  <span class="assistant-program-panel-index">02 / PROGRESSION</span>
+                  <h2 id="assistantProgramProgressTitle">Working relationship</h2>
+                </div>
+              </div>
+              <div id="assistantProgramStages" class="assistant-program-stages"></div>
+              <p id="assistantProgramRemaining" class="assistant-program-remaining"></p>
+              <button id="assistantProgramPromotionAck" class="modern-btn modern-btn-primary" type="button" hidden>Acknowledge new stage</button>
+            </section>
+
+            <section class="assistant-program-panel assistant-program-projects-panel" aria-labelledby="assistantProgramProjectsTitle">
+              <div class="assistant-program-panel-head">
+                <div>
+                  <span class="assistant-program-panel-index">03 / PROJECTS</span>
+                  <h2 id="assistantProgramProjectsTitle">Linked sessions</h2>
+                </div>
+              </div>
+              <div id="assistantProgramProjects" class="assistant-program-projects"></div>
+            </section>
+
+            <section class="assistant-program-panel assistant-program-learning-panel" aria-labelledby="assistantProgramLearningTitle">
+              <div class="assistant-program-panel-head">
+                <div>
+                  <span class="assistant-program-panel-index">04 / LEARNING</span>
+                  <h2 id="assistantProgramLearningTitle">Approved learnings</h2>
+                </div>
+                <button id="assistantProgramReflect" class="modern-btn modern-btn-secondary" type="button" disabled>Reflect</button>
+              </div>
+              <p class="assistant-program-learning-copy">Only patterns you explicitly approve can shape future recommendations. Reflection never changes a project.</p>
+              <div id="assistantProgramLearning" class="assistant-program-learning-empty">No approved learnings yet.</div>
+            </section>
+
+            <section id="assistantProgramSuggestionsPanel" class="assistant-program-panel assistant-program-suggestions-panel" aria-labelledby="assistantProgramSuggestionsTitle">
+              <div class="assistant-program-panel-head">
+                <div>
+                  <span class="assistant-program-panel-index">05 / SUGGESTIONS</span>
+                  <h2 id="assistantProgramSuggestionsTitle">For this project</h2>
+                </div>
+                <button id="assistantProgramSuggest" class="modern-btn modern-btn-secondary" type="button" disabled>Find suggestions</button>
+              </div>
+              <p class="assistant-program-learning-copy">Collaborator-stage suggestions are inert until accepted. Add to Backlog creates ordinary non-running work through Action Center; it never runs the change.</p>
+              <div id="assistantProgramSuggestions" class="assistant-program-learning-empty">Suggestions unlock at Collaborator stage.</div>
+            </section>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <dialog id="assistantProgramHireDialog" class="assistant-program-hire-dialog" aria-labelledby="assistantProgramHireTitle">
+    <form id="assistantProgramHireForm" method="dialog">
+      <div class="assistant-program-dialog-head">
+        <span class="assistant-program-kicker">First session</span>
+        <h2 id="assistantProgramHireTitle">Hire your assistant</h2>
+        <p id="assistantProgramHireDescription"></p>
+      </div>
+      <div class="assistant-program-hire-layout">
+        <div class="assistant-program-hire-fields">
+          <label for="assistantProgramHireName">Assistant name</label>
+          <input id="assistantProgramHireName" class="form-control" maxlength="100" autocomplete="off" required>
+          <div class="assistant-program-model-grid">
+            <label>Provider
+              <select id="assistantProgramHireProvider" class="form-select">
+                <option value="">Use Ori default</option>
+              </select>
+            </label>
+            <label>Model
+              <select id="assistantProgramHireModel" class="form-select" disabled>
+                <option value="">Use provider default</option>
+              </select>
+            </label>
+          </div>
+          <p class="assistant-program-hire-note">You can leave provider and model blank. Ori will use your current defaults. Live app changes still require ordinary reviewed tasks.</p>
+        </div>
+        <div id="assistantProgramHireRoles" class="assistant-program-hire-roles" aria-label="Assistant roles"></div>
+      </div>
+      <p id="assistantProgramHireError" class="assistant-program-form-error" role="alert"></p>
+      <div class="assistant-program-dialog-actions">
+        <a id="assistantProgramHireCancel" class="modern-btn modern-btn-secondary" href="#">Not now</a>
+        <button id="assistantProgramHireSubmit" class="modern-btn modern-btn-primary" type="submit">Hire roster</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script type="module">
+    import { AssistantProgramPage } from '/js/modules/assistant-program.js';
+    const page = new AssistantProgramPage({
+      workspaceId: {{.Extra.WorkspaceID}},
+      workspaceSlug: {{.Extra.WorkspaceSlug}}
+    });
+    window.assistantProgramPage = page;
+    void page.init();
+  </script>
+</body>
+</html>
+{{end}}

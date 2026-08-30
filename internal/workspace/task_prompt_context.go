@@ -176,15 +176,38 @@ func (h *LLMTaskHandler) buildTaskMemorySection(task Task) string {
 	if !ok {
 		return ""
 	}
+	parts := make([]string, 0, 3)
 	doc, err := NewMemoryStore(resolver).Read(task.WorkspaceID)
 	if err != nil {
 		logger.Debug("Skipping workspace memory for task prompt", logger.Fields{
 			"workspace_id": task.WorkspaceID,
 			"error":        err,
 		})
-		return ""
+	} else if section := RenderMemoryPromptSection(doc, true); strings.TrimSpace(section) != "" {
+		parts = append(parts, section)
 	}
-	return RenderMemoryPromptSection(doc, true)
+	current, getErr := h.workspaceStore.Get(task.WorkspaceID)
+	if getErr == nil && current != nil {
+		station := current
+		if current.GetAssistantProgramState() == nil {
+			if link := current.GetAssistantProjectLink(); link != nil {
+				station, _ = h.workspaceStore.Get(link.StationWorkspaceID)
+			} else {
+				station = nil
+			}
+		}
+		if section := RenderAssistantProgramPromptSection(current, station); strings.TrimSpace(section) != "" {
+			parts = append(parts, section)
+		}
+		if station != nil {
+			if document, learningErr := NewAssistantLearningStore(resolver).Read(station.ID); learningErr == nil {
+				if section := RenderManagedLearningPromptSection(document); strings.TrimSpace(section) != "" {
+					parts = append(parts, section)
+				}
+			}
+		}
+	}
+	return strings.Join(parts, "\n\n---\n")
 }
 
 func (h *LLMTaskHandler) buildUserProfileSection(ctx context.Context, ownerUserID string) string {
@@ -830,6 +853,10 @@ func (h *LLMTaskHandler) buildTaskPromptSegments(ctx context.Context, task Task)
 	// Protected tail: authored context, required output format, time limit, and
 	// the closing instructions.
 	var tail strings.Builder
+	if suggestionID, _ := task.Context["assistant_suggestion_id"].(string); strings.TrimSpace(suggestionID) != "" {
+		tail.WriteString("## Assistant Suggestion Safety Gate\n\n")
+		tail.WriteString("This task began as an assistant recommendation, not authority to mutate the project. Before any filesystem, project, DAW, or live-control mutation, use the ordinary host confirmation flow and re-check every required capability. If confirmation or readiness is absent, stop and report the blocker; never substitute another mutation path.\n\n")
+	}
 	if len(task.Context) > 0 {
 		tail.WriteString("## Additional Context\n\n")
 		for key, value := range task.Context {

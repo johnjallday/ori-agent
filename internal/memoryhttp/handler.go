@@ -24,8 +24,9 @@ type workspaceLookup interface {
 
 // Handler serves the workspace memory endpoints.
 type Handler struct {
-	lookup workspaceLookup
-	memory *workspace.MemoryStore
+	lookup    workspaceLookup
+	memory    *workspace.MemoryStore
+	learnings *workspace.AssistantLearningStore
 }
 
 // NewHandler builds the memory handler over a folder-backed store. Both
@@ -35,6 +36,7 @@ func NewHandler(lookup workspaceLookup, resolver workspace.FolderResolver) *Hand
 	h := &Handler{lookup: lookup}
 	if resolver != nil {
 		h.memory = workspace.NewMemoryStore(resolver)
+		h.learnings = workspace.NewAssistantLearningStore(resolver)
 	}
 	return h
 }
@@ -47,13 +49,23 @@ type entryDTO struct {
 	Text       string `json:"text"`
 }
 
+type managedLearningDTO struct {
+	ID         string                                 `json:"id"`
+	Version    int64                                  `json:"version"`
+	Type       string                                 `json:"type"`
+	Text       string                                 `json:"text"`
+	Confidence string                                 `json:"confidence"`
+	Evidence   []workspace.AssistantEvidenceReference `json:"evidence"`
+}
+
 type memoryResponse struct {
-	Entries      []entryDTO `json:"entries"`
-	Unstructured []string   `json:"unstructured"`
-	RawSize      int        `json:"raw_size"`
-	CharBudget   int        `json:"char_budget"`
-	TokenBudget  int        `json:"token_budget"`
-	OverBudget   bool       `json:"over_budget"`
+	Entries          []entryDTO           `json:"entries"`
+	ManagedLearnings []managedLearningDTO `json:"managed_learnings"`
+	Unstructured     []string             `json:"unstructured"`
+	RawSize          int                  `json:"raw_size"`
+	CharBudget       int                  `json:"char_budget"`
+	TokenBudget      int                  `json:"token_budget"`
+	OverBudget       bool                 `json:"over_budget"`
 }
 
 type writeRequest struct {
@@ -210,13 +222,41 @@ func (h *Handler) writeMemoryResponse(w http.ResponseWriter, workspaceID string)
 	if unstructured == nil {
 		unstructured = []string{}
 	}
+	managed := make([]managedLearningDTO, 0)
+	if h.learnings != nil && h.lookup != nil {
+		if current, lookupErr := h.lookup.Get(workspaceID); lookupErr == nil && current != nil {
+			stationID := current.ID
+			if current.GetAssistantProgramState() == nil {
+				if link := current.GetAssistantProjectLink(); link != nil {
+					stationID = link.StationWorkspaceID
+				} else {
+					stationID = ""
+				}
+			}
+			if stationID != "" {
+				if document, learningErr := h.learnings.Read(stationID); learningErr == nil {
+					for _, learning := range workspace.CurrentAssistantLearnings(document) {
+						revision, ok := learning.Current()
+						if !ok {
+							continue
+						}
+						managed = append(managed, managedLearningDTO{
+							ID: learning.ID, Version: learning.Version, Type: revision.Type, Text: revision.Text,
+							Confidence: revision.Confidence, Evidence: revision.Evidence,
+						})
+					}
+				}
+			}
+		}
+	}
 	resp := memoryResponse{
-		Entries:      dtos,
-		Unstructured: unstructured,
-		RawSize:      len(raw),
-		CharBudget:   workspace.MemoryPromptTokenBudget * 4,
-		TokenBudget:  workspace.MemoryPromptTokenBudget,
-		OverBudget:   len(raw) > workspace.MemoryPromptTokenBudget*4,
+		Entries:          dtos,
+		ManagedLearnings: managed,
+		Unstructured:     unstructured,
+		RawSize:          len(raw),
+		CharBudget:       workspace.MemoryPromptTokenBudget * 4,
+		TokenBudget:      workspace.MemoryPromptTokenBudget,
+		OverBudget:       len(raw) > workspace.MemoryPromptTokenBudget*4,
 	}
 	if err := orihttp.RespondJSON(w, http.StatusOK, resp); err != nil {
 		logger.Debug("Failed to write memory response", logger.Fields{"workspace_id": workspaceID, "error": err})

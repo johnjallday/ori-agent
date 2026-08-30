@@ -421,6 +421,11 @@ func (h *Handler) buildTemplateAgentPlan(tpl projecttemplates.Template) template
 		plan.SystemModel = strings.TrimSpace(model)
 		plan.SystemModelConfigured = plan.SystemProvider != "" && plan.SystemModel != ""
 	}
+	if tpl.HasAssistantProgram() {
+		plan.HasAgents = false
+		plan.Warnings = append(plan.Warnings, "This blueprint uses a shared assistant station; its roster is created only after explicit hire.")
+		return plan
+	}
 	if !tpl.HasAgents() {
 		return plan
 	}

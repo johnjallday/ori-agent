@@ -67,6 +67,10 @@ func normalizeAndValidateAssistantProgram(declaration *workspace.AssistantProgra
 	if declaration.DisabledMessage, err = boundedAssistantText("disabled_message", declaration.DisabledMessage, 1000, false); err != nil {
 		return err
 	}
+	declaration.SuggestionRequiredCapabilities = normalizeAssistantSkills(declaration.SuggestionRequiredCapabilities)
+	if len(declaration.SuggestionRequiredCapabilities) > 16 {
+		return fmt.Errorf("%w: suggestion_required_capabilities declares too many values", ErrInvalidAssistantProgram)
+	}
 	if len(declaration.Roles) == 0 || len(declaration.Roles) > workspace.AssistantProgramMaxRoles {
 		return fmt.Errorf("%w: roles must contain 1-%d entries", ErrInvalidAssistantProgram, workspace.AssistantProgramMaxRoles)
 	}

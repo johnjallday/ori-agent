@@ -72,6 +72,23 @@
     return `<span style="padding: 0.15rem 0.5rem; border-radius: 999px; font-size: 0.7rem; opacity: ${muted ? 0.6 : 1}; border: 1px solid var(--border-color, #ddd);">${escapeHtml(labels[s] || s || '')}</span>`;
   }
 
+  function assistantSourceHTML(item) {
+    if (item.source_type !== 'assistant_suggestion') return '';
+    const label = item.source_label ? ` · ${escapeHtml(item.source_label)}` : '';
+    const confidence = item.confidence ? ` · ${escapeHtml(item.confidence)} confidence` : '';
+    const sourceURL = String(item.source_url || '').trim();
+    const safeSourceURL = /^\/workspaces\/[a-z0-9-]+\/assistant$/.test(sourceURL)
+      ? escapeHtml(sourceURL)
+      : '';
+    const evidence = item.evidence
+      ? `<details style="margin-top: 0.35rem;"><summary>Evidence</summary><div style="white-space: pre-line; margin-top: 0.25rem;">${escapeHtml(item.evidence)}</div></details>`
+      : '';
+    const sourceLink = safeSourceURL
+      ? `<a href="${safeSourceURL}" style="display: inline-block; margin-top: 0.35rem;">Open source</a>`
+      : '';
+    return `<div style="font-size: 0.75rem; color: var(--text-secondary, #777); margin-top: 0.35rem;"><strong>Assistant suggestion</strong>${label}${confidence}${evidence}${sourceLink}</div>`;
+  }
+
   function backlogActionHTML(item) {
     // A planned finding already has a linked Backlog item — offer a direct
     // deep link to it (Group 5's ?panel=backlog&task= contract) instead of
@@ -104,6 +121,7 @@
             <strong style="font-weight: ${unseen ? 600 : 500}; cursor: pointer;" data-action="open">${escapeHtml(item.title || 'Untitled finding')}</strong>
           </div>
           <div style="font-size: 0.85rem; color: var(--text-secondary, #555); margin-top: 0.25rem;">${escapeHtml(item.summary || '')}</div>
+          ${assistantSourceHTML(item)}
           <div style="font-size: 0.75rem; color: var(--text-secondary, #888); margin-top: 0.4rem;">
             <a href="${opened}" style="color: inherit; text-decoration: underline;">${escapeHtml(item.workspace_name || item.workspace_id)}</a>
             · ${fmtTime(item.updated_at)}
@@ -378,6 +396,7 @@
     statusChip,
     priorityChip,
     backlogActionHTML,
+    assistantSourceHTML,
     handleAddToBacklog,
     escapeHtml,
     fmtTime

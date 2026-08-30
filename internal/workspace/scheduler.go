@@ -23,13 +23,21 @@ type MissionTrigger interface {
 	TriggerMissionRun(ctx context.Context, workspaceID string, cycleOrdinal int) (runID string, err error)
 }
 
+// AssistantReflectionTrigger runs the dedicated bounded reflection path. It is
+// separate from task execution so a cadence can never acquire workspace tools
+// or mutate a project as an ordinary agent task.
+type AssistantReflectionTrigger interface {
+	TriggerAssistantReflection(ctx context.Context, stationID string) error
+}
+
 // TaskScheduler handles automatic execution of scheduled tasks
 type TaskScheduler struct {
-	workspaceStore Store
-	eventBus       *EventBus
-	pollInterval   time.Duration
-	wakeScheduler  WakeScheduler
-	missionTrigger MissionTrigger
+	workspaceStore             Store
+	eventBus                   *EventBus
+	pollInterval               time.Duration
+	wakeScheduler              WakeScheduler
+	missionTrigger             MissionTrigger
+	assistantReflectionTrigger AssistantReflectionTrigger
 
 	stopChan chan struct{}
 	wg       sync.WaitGroup
@@ -37,8 +45,10 @@ type TaskScheduler struct {
 	// missionInFlight tracks workspaces with a mission run currently executing
 	// on a background goroutine, so a later poll tick doesn't launch a second
 	// concurrent run before the first finishes and advances NextMissionRunAt.
-	missionMu       sync.Mutex
-	missionInFlight map[string]bool
+	missionMu          sync.Mutex
+	missionInFlight    map[string]bool
+	reflectionMu       sync.Mutex
+	reflectionInFlight map[string]bool
 
 	// Optional per-agent inputs for the Goal toolbox preflight that runs before
 	// a cadence-driven run (see preflightGoalToolbox). Nil is safe.
@@ -73,11 +83,12 @@ func NewTaskScheduler(store Store, config SchedulerConfig) *TaskScheduler {
 	}
 
 	return &TaskScheduler{
-		workspaceStore:  store,
-		pollInterval:    config.PollInterval,
-		wakeScheduler:   config.WakeScheduler,
-		stopChan:        make(chan struct{}),
-		missionInFlight: make(map[string]bool),
+		workspaceStore:     store,
+		pollInterval:       config.PollInterval,
+		wakeScheduler:      config.WakeScheduler,
+		stopChan:           make(chan struct{}),
+		missionInFlight:    make(map[string]bool),
+		reflectionInFlight: make(map[string]bool),
 	}
 }
 
@@ -91,6 +102,10 @@ func (ts *TaskScheduler) SetEventBus(eventBus *EventBus) {
 // MissionTrigger is wired in at server startup).
 func (ts *TaskScheduler) SetMissionTrigger(trigger MissionTrigger) {
 	ts.missionTrigger = trigger
+}
+
+func (ts *TaskScheduler) SetAssistantReflectionTrigger(trigger AssistantReflectionTrigger) {
+	ts.assistantReflectionTrigger = trigger
 }
 
 // Start begins the scheduler polling loop
@@ -226,6 +241,15 @@ func (ts *TaskScheduler) checkScheduledTasks() {
 			ts.wg.Go(func() {
 				defer ts.releaseMission(missionWS.ID)
 				ts.checkMissionCadence(missionWS, missionNow)
+			})
+		}
+		if ts.assistantReflectionDue(ws, now) && ts.claimAssistantReflection(ws.ID) {
+			stationID := ws.ID
+			ts.wg.Go(func() {
+				defer ts.releaseAssistantReflection(stationID)
+				if err := ts.assistantReflectionTrigger.TriggerAssistantReflection(context.Background(), stationID); err != nil {
+					logger.Warn("Assistant reflection schedule failed", logger.Fields{"station_id": stationID, "error": err})
+				}
 			})
 		}
 		wakeCandidates = append(wakeCandidates, collectWakeCandidates(ws, now)...)
