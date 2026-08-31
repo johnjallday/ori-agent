@@ -222,4 +222,7 @@ func (b *ServerBuilder) initializeDailyBrief() {
 	b.personalAssistantHandler = personalassistanthttp.NewHandler(b.personalAssistantService, b.userProvider)
 	b.personalAssistantHandler.SetHireService(b.personalAssistantHire)
 	b.personalAssistantHandler.SetAssignmentService(b.personalAssignment)
+	b.personalAssistantHandler.SetTodayService(personalassistant.NewTodayService(
+		b.personalAssistantService, briefService, b.workspaceStore, b.followUpService,
+	))
 }

@@ -38,11 +38,17 @@ type AssignmentPreviewService interface {
 	Apply(ctx context.Context, userID string, request personalassistant.AssignmentApplyRequest) (*personalassistant.AssignmentApplyResult, error)
 }
 
+// TodayReader builds the bounded server-owned Home projection.
+type TodayReader interface {
+	Get(ctx context.Context, userID string) (*personalassistant.TodayProjection, error)
+}
+
 // Handler serves /api/personal-assistant.
 type Handler struct {
 	service     StateReader
 	hirer       HireService
 	assignments AssignmentPreviewService
+	today       TodayReader
 	provider    userprofile.UserProvider
 }
 
@@ -68,6 +74,13 @@ func (h *Handler) SetAssignmentService(assignments AssignmentPreviewService) {
 	}
 }
 
+// SetTodayService adds the read-only Home projection after canonical stores are wired.
+func (h *Handler) SetTodayService(today TodayReader) {
+	if h != nil {
+		h.today = today
+	}
+}
+
 // GetState handles GET /api/personal-assistant.
 func (h *Handler) GetState(w http.ResponseWriter, r *http.Request) {
 	if !orihttp.RequireMethod(w, r, http.MethodGet) {
@@ -87,6 +100,27 @@ func (h *Handler) GetState(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	orihttp.Success(w, map[string]any{"personal_assistant": projection})
+}
+
+// GetToday handles GET /api/personal-assistant/today.
+func (h *Handler) GetToday(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodGet) {
+		return
+	}
+	if h == nil || h.today == nil || h.provider == nil {
+		orihttp.ServiceUnavailable(w, "personal assistant Today is unavailable")
+		return
+	}
+	userID, ok := h.currentUserID(w, r)
+	if !ok {
+		return
+	}
+	projection, err := h.today.Get(r.Context(), userID)
+	if err != nil {
+		orihttp.ServiceUnavailable(w, "personal assistant Today is temporarily unavailable")
+		return
+	}
+	orihttp.Success(w, map[string]any{"today": projection})
 }
 
 type hireRequest struct {

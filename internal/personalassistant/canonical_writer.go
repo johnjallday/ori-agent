@@ -54,7 +54,7 @@ func (w *CanonicalWriter) CreateTicket(workspaceID, assistantID, previewID strin
 	if item.RecordType != AssignmentRecordTicket || strings.TrimSpace(item.ID) == "" {
 		return CanonicalRef{}, false, fmt.Errorf("%w: preview item is not a canonical ticket", ErrValidation)
 	}
-	state := workspace.TicketStateBacklog
+	var state workspace.TicketState
 	switch item.State {
 	case string(workspace.TicketStateBacklog):
 		state = workspace.TicketStateBacklog

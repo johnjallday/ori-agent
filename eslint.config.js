@@ -136,6 +136,8 @@ export default defineConfig([
       'internal/web/static/js/modules/onboarding-gate.js',
       'internal/web/static/js/modules/onboarding.js',
       'internal/web/static/js/modules/personal-hq-onboarding.js',
+      'internal/web/static/js/modules/personal-assistant-home.js',
+      'internal/web/static/js/modules/personal-assistant-panel.js',
       'internal/web/static/js/modules/personal-hq-email-setup.js',
       'internal/web/static/js/modules/home-calendar-ops-portal.js',
       'internal/web/static/js/modules/home-daily-brief.js',

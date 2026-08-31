@@ -78,9 +78,16 @@ type HomeAssistantAskRequest struct {
 }
 
 // HomeAssistantAskResponse is the response for POST /api/home-assistant/ask.
+type HomeAssistantIdentity struct {
+	DisplayName string `json:"display_name"`
+	Role        string `json:"role"`
+	State       string `json:"state"`
+}
+
 type HomeAssistantAskResponse struct {
 	Response             string                  `json:"response"`
 	Intent               string                  `json:"intent"`
+	Identity             *HomeAssistantIdentity  `json:"identity,omitempty"`
 	SnapshotMeta         *HomeSnapshotMeta       `json:"snapshot_meta,omitempty"`
 	Actions              []HomeAction            `json:"actions,omitempty"`
 	RequiresConfirmation bool                    `json:"requires_confirmation,omitempty"`
@@ -125,12 +132,14 @@ type homeAskTraceEmitter interface {
 // engineered system prompt, read-only tool registration, model execution, and
 // response/action generation. POST /api/home-assistant/ask.
 type HomeAssistantAskHandler struct {
-	Sources     HomeSnapshotSources
-	LLMFactory  *llm.Factory
-	SystemModel homeAskSystemModelReader
-	Mutator     HomeActionMutator
-	Trace       homeAskTraceEmitter
-	now         func() time.Time
+	Sources                  HomeSnapshotSources
+	LLMFactory               *llm.Factory
+	SystemModel              homeAskSystemModelReader
+	Mutator                  HomeActionMutator
+	Trace                    homeAskTraceEmitter
+	PersonalAssistantContext PersonalAssistantContextProvider
+	UserID                   string
+	now                      func() time.Time
 }
 
 // NewHomeAssistantAskHandler builds the handler from its data sources.
@@ -147,6 +156,13 @@ func (h *HomeAssistantAskHandler) SetMutator(m HomeActionMutator) { h.Mutator = 
 
 // SetTraceEmitter wires optional telemetry.
 func (h *HomeAssistantAskHandler) SetTraceEmitter(t homeAskTraceEmitter) { h.Trace = t }
+
+// SetPersonalAssistantContextProvider enables the PAF runtime split. A nil
+// provider preserves the legacy unified Ask Ori behavior.
+func (h *HomeAssistantAskHandler) SetPersonalAssistantContextProvider(provider PersonalAssistantContextProvider, userID string) {
+	h.PersonalAssistantContext = provider
+	h.UserID = strings.TrimSpace(userID)
+}
 
 func (h *HomeAssistantAskHandler) emitTrace(ctx context.Context, trace HomeAskTrace) {
 	if h.Trace != nil {
@@ -176,13 +192,40 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 		intent = homeAssistantAppIntrospectionIntent.Key
 	}
 
-	// Confirmed mutation path: execute only known action types (FR #24).
+	workContext, contextErr := h.resolvePersonalAssistantContext(ctx)
+	if contextErr != nil {
+		return HomeAssistantAskResponse{
+			Response: "Your personal assistant state is unavailable right now. Nothing was changed; reload and try again.",
+			Intent:   intent, Actions: []HomeAction{{ID: "nav-home", Type: HomeActionNavigate, Label: "Return Home", Href: "/"}},
+		}
+	}
+	if workContext != nil && workContext.NeedsHireOrRepair() {
+		label := "Hire your personal assistant"
+		if workContext.State == "hiring" || workContext.State == "repair_needed" {
+			label = "Resume personal assistant setup"
+		}
+		return HomeAssistantAskResponse{
+			Response: "Finish personal assistant setup before sending work. Nothing has been routed or changed.", Intent: intent,
+			Actions: []HomeAction{{ID: "nav-personal-assistant-setup", Type: HomeActionNavigate, Label: label, Href: "/?hire=1"}},
+		}
+	}
+	identity := homeAssistantIdentity(workContext)
+
+	// Confirmed mutation path: execute only known action types (FR #24). The
+	// relationship is freshly resolved above so stale/replaced HQ state cannot
+	// execute a previously prepared action.
 	if req.ConfirmedAction != nil {
-		return h.executeConfirmedAction(ctx, intent, *req.ConfirmedAction)
+		resp := h.executeConfirmedAction(ctx, intent, *req.ConfirmedAction)
+		resp.Identity = identity
+		return resp
 	}
 
 	if prompt == "" {
-		return HomeAssistantAskResponse{Response: "What would you like to know about your workspaces, tasks, or activity?", Intent: intent}
+		question := "What would you like to know about your workspaces, tasks, or activity?"
+		if identity != nil {
+			question = "What would you like help with today?"
+		}
+		return HomeAssistantAskResponse{Response: question, Intent: intent, Identity: identity}
 	}
 
 	// Backlog capture (PRD workspace-backlog FR23-25) is checked as its own
@@ -194,11 +237,12 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 		return HomeAssistantAskResponse{
 			Response:             conf.Summary,
 			Intent:               intent,
+			Identity:             identity,
 			RequiresConfirmation: true,
 			Confirmation:         conf,
 		}
 	} else if decline != "" {
-		return HomeAssistantAskResponse{Response: decline, Intent: intent}
+		return HomeAssistantAskResponse{Response: decline, Intent: intent, Identity: identity}
 	}
 
 	// Explicit, supported mutation request: ask for confirmation before doing
@@ -208,17 +252,20 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 		return HomeAssistantAskResponse{
 			Response:             conf.Summary,
 			Intent:               intent,
+			Identity:             identity,
 			RequiresConfirmation: true,
 			Confirmation:         conf,
 		}
 	}
 
 	window := NormalizeHomeDateWindow(req.DateWindow, DefaultHomeDateWindowForPrompt(prompt))
-	snapshot := BuildHomeSnapshot(ctx, h.Sources, window)
+	promptSources := personalAssistantPromptSources(h.Sources, workContext)
+	snapshot := BuildHomeSnapshot(ctx, promptSources, window)
+	snapshot = sanitizePersonalAssistantSnapshot(snapshot, workContext)
 
-	answer, err := h.generateAnswer(ctx, prompt, intent, snapshot)
+	answer, err := h.generateAnswer(ctx, prompt, intent, snapshot, promptSources, workContext)
 	if err != nil {
-		return h.modelUnavailableResponse(ctx, prompt, intent, snapshot, err)
+		return h.modelUnavailableResponse(ctx, prompt, intent, snapshot, workContext, err)
 	}
 
 	actions := h.buildNextStepActions(intent, prompt, snapshot)
@@ -227,22 +274,52 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 	return HomeAssistantAskResponse{
 		Response:     strings.TrimSpace(answer),
 		Intent:       intent,
+		Identity:     identity,
 		SnapshotMeta: &meta,
 		Actions:      actions,
 	}
 }
 
-func (h *HomeAssistantAskHandler) generateAnswer(ctx context.Context, prompt, intent string, snapshot HomeSnapshot) (string, error) {
+func (h *HomeAssistantAskHandler) resolvePersonalAssistantContext(ctx context.Context) (*PersonalAssistantWorkContext, error) {
+	if h == nil || h.PersonalAssistantContext == nil {
+		return nil, nil
+	}
+	userID := strings.TrimSpace(h.UserID)
+	if userID == "" {
+		userID = "local"
+	}
+	resolved, err := h.PersonalAssistantContext.ResolvePersonalAssistantContext(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if resolved == nil || !resolved.Eligible {
+		return nil, nil
+	}
+	return resolved, nil
+}
+
+func homeAssistantIdentity(workContext *PersonalAssistantWorkContext) *HomeAssistantIdentity {
+	if workContext == nil || !workContext.ReadyForWork() {
+		return nil
+	}
+	return &HomeAssistantIdentity{
+		DisplayName: boundedContextText(workContext.DisplayName, 100),
+		Role:        "Personal Assistant",
+		State:       workContext.State,
+	}
+}
+
+func (h *HomeAssistantAskHandler) generateAnswer(ctx context.Context, prompt, intent string, snapshot HomeSnapshot, promptSources HomeSnapshotSources, workContext *PersonalAssistantWorkContext) (string, error) {
 	provider, model, err := h.resolveProvider()
 	if err != nil {
 		return "", err
 	}
-	registry := newHomeToolRegistry(h.Sources)
+	registry := newHomeToolRegistry(promptSources)
 	// First-run greeting: a user with no workspaces yet is at "first contact".
 	// The behavior naturally turns off once they create their first workspace.
 	firstRun := snapshot.Meta.WorkspaceCount == 0
-	systemPrompt := buildHomeSystemPrompt(firstRun)
-	userPrompt := buildHomeUserPrompt(prompt, intent, snapshot)
+	systemPrompt := buildHomeSystemPromptWithAssistant(firstRun, workContext)
+	userPrompt := buildHomeUserPromptWithAssistant(prompt, intent, snapshot, workContext)
 
 	conversation := []llm.Message{
 		llm.NewSystemMessage(systemPrompt),
@@ -314,11 +391,14 @@ func (h *HomeAssistantAskHandler) resolveProvider() (llm.Provider, string, error
 	return provider, model, nil
 }
 
-func (h *HomeAssistantAskHandler) modelUnavailableResponse(ctx context.Context, prompt, intent string, snapshot HomeSnapshot, err error) HomeAssistantAskResponse {
+func (h *HomeAssistantAskHandler) modelUnavailableResponse(ctx context.Context, prompt, intent string, snapshot HomeSnapshot, workContext *PersonalAssistantWorkContext, err error) HomeAssistantAskResponse {
 	meta := snapshot.Meta
 	msg := "I can't reach the system model right now, so I can't compose a written summary. "
 	if errors.Is(err, errHomeModelNotConfigured) {
 		msg = "No system model is configured yet, so I can't answer in writing. Set one up in Settings and try again. "
+		if workContext != nil && workContext.ReadyForWork() {
+			msg = fmt.Sprintf("%s's conversational answers are paused until a system model is configured. Set one up in Settings and try again. ", workContext.DisplayName)
+		}
 	}
 	msg += "Here's what I can point you to from your data: " + describeSnapshotBriefly(snapshot)
 	actions := []HomeAction{{
@@ -329,7 +409,7 @@ func (h *HomeAssistantAskHandler) modelUnavailableResponse(ctx context.Context, 
 	}}
 	actions = append(actions, h.buildNextStepActions(intent, "", snapshot)...)
 	h.emitTrace(ctx, HomeAskTrace{Prompt: prompt, Intent: intent, Window: string(meta.Window), Outcome: "model_unavailable", ActionCount: len(actions), Degraded: meta.Degraded})
-	return HomeAssistantAskResponse{Response: msg, Intent: intent, SnapshotMeta: &meta, Actions: actions}
+	return HomeAssistantAskResponse{Response: msg, Intent: intent, Identity: homeAssistantIdentity(workContext), SnapshotMeta: &meta, Actions: actions}
 }
 
 func describeSnapshotBriefly(s HomeSnapshot) string {

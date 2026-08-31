@@ -270,6 +270,13 @@ func registerAgentRoutes(mux *http.ServeMux, s *Server) {
 	}
 	homeAssistantRouteHandler.SetWorkspaceResolver(homeAssistantWorkspaceResolver)
 	homeAssistantRouteHandler.SetCalendarOpsPreference(s.Handlers.CalendarOps)
+	if s.Storage.PersonalAssistant != nil {
+		homeAssistantRouteHandler.SetPersonalAssistantContextProvider(personalAssistantContextAdapter{
+			relationship: s.Storage.PersonalAssistant,
+			profiles:     s.Storage.UserStore,
+			workspaces:   s.Storage.WorkspaceStore,
+		}, "local")
+	}
 	if s.Storage != nil && s.Integration != nil {
 		homeAssistantRouteHandler.SetRuntimeResolver(
 			workspace.NewAgentRuntimeResolver(
@@ -967,6 +974,7 @@ func registerTriggerRoutes(mux *http.ServeMux, s *Server) {
 func registerPersonalAssistantRoutes(mux *http.ServeMux, s *Server) {
 	if s != nil && s.Handlers != nil && s.Handlers.PersonalAssistant != nil {
 		mux.HandleFunc("GET /api/personal-assistant", s.Handlers.PersonalAssistant.GetState)
+		mux.HandleFunc("GET /api/personal-assistant/today", s.Handlers.PersonalAssistant.GetToday)
 		mux.HandleFunc("POST /api/personal-assistant/hire", s.Handlers.PersonalAssistant.Hire)
 		mux.HandleFunc("GET /api/personal-assistant/first-assignment", s.Handlers.PersonalAssistant.GetFirstAssignment)
 		mux.HandleFunc("POST /api/personal-assistant/first-assignment/preview", s.Handlers.PersonalAssistant.PreviewFirstAssignment)

@@ -1,5 +1,44 @@
 <!-- Ori Dashboard — Command Bridge -->
 <div class="home-command-bridge" data-first-run="{{if .Extra.IsFirstRun}}true{{else}}false{{end}}">
+  <!-- Server-authoritative PAF Home region. Hidden until the status read proves
+       eligibility, so legacy Home never flashes or inherits assistant copy. -->
+  <section id="personalAssistantToday" class="personal-assistant-today" data-state="loading"
+           aria-labelledby="personalAssistantTodayTitle" hidden>
+    <header class="personal-assistant-today__header">
+      <div>
+        <span id="personalAssistantTodayEyebrow" class="personal-assistant-today__eyebrow">Today from your assistant</span>
+        <h1 id="personalAssistantTodayTitle" class="personal-assistant-today__title">Today</h1>
+        <p id="personalAssistantTodayMeta" class="personal-assistant-today__meta"></p>
+      </div>
+      <nav class="personal-assistant-today__links" aria-label="Personal assistant details">
+        <a id="personalAssistantTodayHQ" href="/" hidden>Personal HQ</a>
+        <a id="personalAssistantTodayAgreement" href="/" hidden>Working agreement</a>
+        <a id="personalAssistantTodayMemory" href="/" hidden>Memory</a>
+        <a id="personalAssistantTodayAdvanced" href="/agents">Advanced</a>
+      </nav>
+    </header>
+    <div id="personalAssistantTodayBanner" class="personal-assistant-today__banner" role="status" aria-live="polite"></div>
+    <div id="personalAssistantTodayBriefMount"></div>
+    <div id="personalAssistantTodaySections" class="personal-assistant-today__sections">
+      <section aria-labelledby="personalAssistantTodayDecisionsTitle">
+        <h2 id="personalAssistantTodayDecisionsTitle">Decisions</h2>
+        <ul id="personalAssistantTodayDecisions"></ul>
+      </section>
+      <section aria-labelledby="personalAssistantTodayPrioritiesTitle">
+        <h2 id="personalAssistantTodayPrioritiesTitle">Priorities</h2>
+        <ul id="personalAssistantTodayPriorities"></ul>
+      </section>
+      <section aria-labelledby="personalAssistantTodayFollowUpsTitle">
+        <h2 id="personalAssistantTodayFollowUpsTitle">Follow-ups</h2>
+        <ul id="personalAssistantTodayFollowUps"></ul>
+      </section>
+      <section aria-labelledby="personalAssistantTodayResultsTitle">
+        <h2 id="personalAssistantTodayResultsTitle">Results to review</h2>
+        <ul id="personalAssistantTodayResults"></ul>
+      </section>
+    </div>
+  </section>
+
   <!--
     Home's command strip used to sit here: a second composer, labelled
     Workspace Manager, beside the global Ask Ori launcher. Issue #350 retired

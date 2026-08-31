@@ -132,6 +132,50 @@ test('unknown action types are dropped rather than rendered', () => {
   }
 });
 
+test('PAF Help-only handoff names the assistant and only prefills without submitting', () => {
+  const { guide, sandbox } = load();
+  let prefilled = '';
+  let submits = 0;
+  sandbox.window.PersonalAssistantPanel = {
+    prefill(text) {
+      prefilled = text;
+      return true;
+    },
+    close() {}
+  };
+  sandbox.window.OriAskRouting = {
+    submit() {
+      submits += 1;
+    }
+  };
+  guide.setHelpOnly({ available: true, assistantName: 'Nova' });
+
+  const action = guide._validateAction({
+    type: 'handoff',
+    label: 'Send this as work',
+    handoff_text: 'send the launch notes'
+  });
+  assert.equal(action.label, 'Send to Nova');
+  assert.equal(guide._handoff(action.handoffText), true);
+  assert.equal(prefilled, 'send the launch notes');
+  assert.equal(submits, 0);
+});
+
+test('PAF Help-only handoff refuses a missing hired assistant without routing', () => {
+  const { guide, sandbox } = load();
+  let submits = 0;
+  sandbox.window.OriAskRouting = {
+    submit() {
+      submits += 1;
+    }
+  };
+  guide.setHelpOnly({ available: false, assistantName: 'Personal assistant' });
+  const action = guide._validateAction({ type: 'handoff', handoff_text: 'do work' });
+  assert.equal(action.label, 'Hire your personal assistant');
+  assert.equal(guide._handoff(action.handoffText), false);
+  assert.equal(submits, 0);
+});
+
 test('a navigate action requires a safe same-origin path', () => {
   const { guide } = load();
   const unsafe = [

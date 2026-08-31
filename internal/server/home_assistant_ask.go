@@ -364,6 +364,13 @@ func (s *Server) newHomeAssistantAskHandler() *agenthttp.HomeAssistantAskHandler
 	}
 	handler := agenthttp.NewHomeAssistantAskHandler(sources, llmFactory, systemModel)
 	handler.SetTraceEmitter(agenthttp.NewLoggingHomeAskTraceEmitter())
+	if s.Storage != nil && s.Storage.PersonalAssistant != nil {
+		handler.SetPersonalAssistantContextProvider(personalAssistantContextAdapter{
+			relationship: s.Storage.PersonalAssistant,
+			profiles:     s.Storage.UserStore,
+			workspaces:   s.Storage.WorkspaceStore,
+		}, "local")
+	}
 
 	// Ori Guide reuses the same system model, but only to reword an answer it
 	// has already decided. Wired here because this is where the system-model

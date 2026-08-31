@@ -55,6 +55,7 @@
         decoding="async">
       <div class="ori-guide__ident">
         <h2 class="ori-guide__title" id="oriGuideTitle">Ask Ori</h2>
+        <p class="ori-guide__role" id="oriGuideRole" hidden>App Guide</p>
         <!-- Context, not a competing role name. Conveyed as text so it does not
              depend on color alone (FR64). Filled in by the controller from the
              current page, workspace, or task. -->
@@ -79,9 +80,9 @@
         type="text"
         class="ori-guide__input"
         id="oriGuideInput"
-        maxlength="2000"
+        maxlength="400"
         autocomplete="off"
-        placeholder="Ask a question or describe what you want done">
+        placeholder="Ask Ori about the app">
       <button type="submit" class="ori-guide__send" id="oriGuideSend">Send</button>
     </form>
 
@@ -97,6 +98,40 @@
          workspace conversation land here through the existing controller, in
          the same panel as the question that started them (FR39). -->
     {{template "ask-ori-activity.tmpl" .}}
+  </section>
+
+  <!-- Eligible PAF users get one separate primary work composer. The existing
+       work activity node above is moved into this host by the controller after
+       the authoritative status read, so routing/planning/confirmation logic is
+       reused rather than copied. Legacy users keep the unified panel unchanged. -->
+  <button type="button" class="personal-assistant-launcher" id="personalAssistantLauncher"
+          aria-expanded="false" aria-controls="personalAssistantPanel" hidden>
+    <span id="personalAssistantLauncherAvatar" class="personal-assistant-launcher__avatar" aria-hidden="true"></span>
+    <span class="personal-assistant-launcher__copy">
+      <span id="personalAssistantLauncherName" class="personal-assistant-launcher__name">Personal assistant</span>
+      <span class="personal-assistant-launcher__role">Personal Assistant</span>
+    </span>
+  </button>
+  <section id="personalAssistantPanel" class="personal-assistant-panel" role="dialog"
+           aria-labelledby="personalAssistantPanelTitle" hidden>
+    <header class="personal-assistant-panel__header">
+      <span id="personalAssistantPanelAvatar" class="personal-assistant-panel__avatar" aria-hidden="true"></span>
+      <div>
+        <h2 id="personalAssistantPanelTitle" class="personal-assistant-panel__title">Personal assistant</h2>
+        <p class="personal-assistant-panel__role">Personal Assistant</p>
+      </div>
+      <button type="button" id="personalAssistantClose" class="personal-assistant-panel__close"
+              aria-label="Close personal assistant">&times;</button>
+    </header>
+    <form id="personalAssistantForm" class="personal-assistant-panel__form">
+      <label class="visually-hidden" for="personalAssistantInput">Ask your personal assistant a question or describe work</label>
+      <textarea id="personalAssistantInput" class="personal-assistant-panel__input" rows="3"
+                maxlength="2000" autocomplete="off"
+                placeholder="Ask a question or describe what you want help with"></textarea>
+      <button type="submit" id="personalAssistantSend" class="personal-assistant-panel__send">Send</button>
+    </form>
+    <p id="personalAssistantPanelStatus" class="personal-assistant-panel__status" role="status" aria-live="polite"></p>
+    <div id="personalAssistantActivityMount" class="personal-assistant-panel__activity"></div>
   </section>
 </div>
 {{end}}

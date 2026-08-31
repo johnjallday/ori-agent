@@ -27,6 +27,19 @@ func (f *fakeStateReader) Get(context.Context, string) (*personalassistant.Proje
 	return f.projection, f.err
 }
 
+type fakeTodayReader struct {
+	projection *personalassistant.TodayProjection
+	err        error
+	userID     string
+	calls      int
+}
+
+func (f *fakeTodayReader) Get(_ context.Context, userID string) (*personalassistant.TodayProjection, error) {
+	f.calls++
+	f.userID = userID
+	return f.projection, f.err
+}
+
 type fakeAssignmentService struct {
 	result      *personalassistant.AssignmentPreviewResult
 	err         error
@@ -141,6 +154,30 @@ func TestHandlerGetState_DependencyFailuresAreNotHealthyEmptyStates(t *testing.T
 	if _, exists := body["personal_assistant"]; exists {
 		t.Fatal("dependency failure returned a fabricated personal-assistant state")
 	}
+}
+
+func TestHandlerGetToday_UsesCurrentUserAndDoesNotLeakReadErrors(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		reader := &fakeTodayReader{projection: &personalassistant.TodayProjection{State: "active", DisplayName: "Nova"}}
+		handler := NewHandler(&fakeStateReader{}, fakeUserProvider{userID: "user-a"})
+		handler.SetTodayService(reader)
+		recorder := httptest.NewRecorder()
+		handler.GetToday(recorder, httptest.NewRequest(http.MethodGet, "/api/personal-assistant/today", nil))
+		if recorder.Code != http.StatusOK || reader.userID != "user-a" || !strings.Contains(recorder.Body.String(), `"display_name":"Nova"`) {
+			t.Fatalf("status=%d user=%q body=%s", recorder.Code, reader.userID, recorder.Body.String())
+		}
+	})
+
+	t.Run("bounded failure", func(t *testing.T) {
+		reader := &fakeTodayReader{err: errors.New("sqlite password=do-not-leak")}
+		handler := NewHandler(&fakeStateReader{}, fakeUserProvider{userID: "user-a"})
+		handler.SetTodayService(reader)
+		recorder := httptest.NewRecorder()
+		handler.GetToday(recorder, httptest.NewRequest(http.MethodGet, "/api/personal-assistant/today", nil))
+		if recorder.Code != http.StatusServiceUnavailable || strings.Contains(recorder.Body.String(), "do-not-leak") {
+			t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+		}
+	})
 }
 
 func TestHandlerHire_ReturnsCanonicalResultAndForwardsBoundedInput(t *testing.T) {

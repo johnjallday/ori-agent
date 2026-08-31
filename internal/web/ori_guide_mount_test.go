@@ -99,47 +99,50 @@ func TestGuideMarkupHasOneOfEachControl(t *testing.T) {
 	}
 }
 
-// One composer, not one per intent. A user must never have to choose a
-// guide-versus-work surface, or a Task/Ask/Note mode, before typing (FR5/FR23).
-func TestUniversalPanelHasExactlyOneComposer(t *testing.T) {
+// Legacy users retain one unified composer at runtime. PAF adds a second,
+// hidden-by-default work panel; its controller proves eligibility and then
+// makes the two panels mutually exclusive rather than displaying peers.
+func TestPAFPanelHasDistinctHiddenComposer(t *testing.T) {
 	body := readTemplate(t, "templates/components/ori-guide.tmpl")
-	if got := strings.Count(body, "<form"); got != 1 {
-		t.Errorf("panel has %d forms, want exactly 1 composer", got)
+	if got := strings.Count(body, "<form"); got != 2 {
+		t.Errorf("template has %d forms, want one Help and one PAF work composer", got)
 	}
-	if got := strings.Count(body, `type="text"`) + strings.Count(body, "<textarea"); got != 1 {
-		t.Errorf("panel has %d text inputs, want exactly 1", got)
+	for _, marker := range []string{
+		`id="oriGuideForm"`, `id="personalAssistantForm"`,
+		`id="personalAssistantLauncher"`, `id="personalAssistantPanel"`,
+	} {
+		if got := strings.Count(body, marker); got != 1 {
+			t.Errorf("%s appears %d times, want 1", marker, got)
+		}
+	}
+	if !strings.Contains(body, `id="personalAssistantLauncher"`) ||
+		!strings.Contains(body, `aria-controls="personalAssistantPanel" hidden`) {
+		t.Error("PAF work launcher must be hidden until the authoritative status read")
 	}
 }
 
-// Issue #350: Ask Ori is the identity. The panel must not reintroduce the old
-// "this is only a guide, the real work happens elsewhere" boundary, and must not
-// name any of the retired surfaces (FR3/FR61).
-func TestUniversalPanelPresentsOneIdentityWithContext(t *testing.T) {
-	body := readTemplate(t, "templates/components/ori-guide.tmpl")
-
-	if !strings.Contains(body, `id="oriGuideTitle">Ask Ori<`) {
-		t.Error("the panel heading must be Ask Ori")
-	}
-
-	// Comments explaining the migration may name the retired surfaces; rendered
-	// copy may not. Strip the comments before checking.
-	rendered := stripHTMLComments(body)
-	for _, retired := range []string{
-		"Workspace Manager", "Workspace Assistant", "Workspaces Assistant",
-		"Task Assistant", "App Guide", "not a work agent",
+func TestPAFPanelPresentsGuideAndAssistantRolesBeforeInput(t *testing.T) {
+	body := stripHTMLComments(readTemplate(t, "templates/components/ori-guide.tmpl"))
+	for _, want := range []string{
+		`id="oriGuideTitle">Ask Ori<`, `id="oriGuideRole" hidden>App Guide<`,
+		`class="personal-assistant-panel__role">Personal Assistant<`,
 	} {
-		if strings.Contains(rendered, retired) {
+		if !strings.Contains(body, want) {
+			t.Errorf("identity boundary missing %q", want)
+		}
+	}
+	for _, retired := range []string{"Workspace Manager", "Workspace Assistant", "Workspaces Assistant", "Task Assistant"} {
+		if strings.Contains(body, retired) {
 			t.Errorf("rendered panel copy still contains the retired label %q", retired)
 		}
 	}
 }
 
-// The composer has to invite both halves of what Ask Ori now does, or users will
-// keep assuming it is navigation-only (FR65).
-func TestComposerInvitesQuestionsAndWork(t *testing.T) {
+func TestPAFComposersStateTheirSeparatePurposes(t *testing.T) {
 	body := readTemplate(t, "templates/components/ori-guide.tmpl")
-	if !strings.Contains(body, "Ask a question or describe what you want done") {
-		t.Error("composer placeholder should invite both questions and work")
+	if !strings.Contains(body, "Ask Ori about the app") ||
+		!strings.Contains(body, "Ask a question or describe what you want help with") {
+		t.Error("Help and hired-assistant composers must state separate purposes")
 	}
 }
 

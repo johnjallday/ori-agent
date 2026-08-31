@@ -15,8 +15,24 @@ const homeMaxNextStepActions = 4
 // workspace — the onboarding progression "first contact" continuation. The
 // gate is the caller's responsibility; once a workspace exists this is off.
 func buildHomeSystemPrompt(firstRun bool) string {
+	return buildHomeSystemPromptWithAssistant(firstRun, nil)
+}
+
+func buildHomeSystemPromptWithAssistant(firstRun bool, workContext *PersonalAssistantWorkContext) string {
 	var b strings.Builder
-	b.WriteString("You are Ori's home assistant. You answer questions about the user's own Ori app — their agents, workspaces, tasks, sessions, Action Center opportunities, and usage — and you help them navigate the app. ")
+	if workContext != nil && workContext.ReadyForWork() {
+		name := boundedContextText(workContext.DisplayName, 100)
+		if name == "" {
+			name = "the user's personal assistant"
+		}
+		fmt.Fprintf(&b, "You are the user's hired personal assistant, displayed as %q with the role Personal Assistant. Speak as that display identity. Never expose or mention internal assistant IDs, system assistants, agent profile keys, or implementation names. ", name)
+		if workContext.State == "paused" {
+			b.WriteString("The proactive relationship is paused: you may answer this direct user request and prepare confirm-gated actions, but must not claim a routine or autonomous run is active. ")
+		}
+	} else {
+		b.WriteString("You are Ori's home assistant. ")
+	}
+	b.WriteString("You answer questions about the user's own Ori app — their agents, workspaces, tasks, sessions, Action Center opportunities, and usage — and you help them navigate the app. ")
 	b.WriteString("You are given a \"Home Snapshot\" of the user's app-wide state and a \"Navigation Catalog\" of the app's pages. ")
 	b.WriteString("Treat the Home Snapshot as the source of truth for questions about the user's activity and data; use the exact counts and names from it. ")
 	b.WriteString("The snapshot includes the agent roster (each agent's type, role, model, and which workspaces use it), so you can answer \"what agents do I have\", \"what can agent X do\", and \"which agents aren't used anywhere\". ")
@@ -41,6 +57,10 @@ func buildHomeSystemPrompt(firstRun bool) string {
 // buildHomeUserPrompt assembles the user turn: the request plus the injected
 // snapshot and navigation catalog.
 func buildHomeUserPrompt(prompt, intent string, snapshot HomeSnapshot) string {
+	return buildHomeUserPromptWithAssistant(prompt, intent, snapshot, nil)
+}
+
+func buildHomeUserPromptWithAssistant(prompt, intent string, snapshot HomeSnapshot, workContext *PersonalAssistantWorkContext) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "User request: %s\n\n", strings.TrimSpace(prompt))
 	fmt.Fprintf(&b, "(classified intent: %s)\n\n", intent)
@@ -50,6 +70,7 @@ func buildHomeUserPrompt(prompt, intent string, snapshot HomeSnapshot) string {
 	for _, entry := range homeNavCatalog {
 		fmt.Fprintf(&b, "- %s (%s): %s\n", entry.Label, entry.Href, entry.Description)
 	}
+	b.WriteString(renderPersonalAssistantPromptContext(workContext))
 	return b.String()
 }
 
