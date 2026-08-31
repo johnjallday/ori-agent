@@ -780,6 +780,78 @@ test.describe('Home First Run', () => {
     expect(layout.briefTop).toBeGreaterThanOrEqual(layout.commandBottom);
   });
 
+  test('surfaces cached plugin updates in Updates without applying them', async ({ page }) => {
+    await page.setViewportSize({ width: 1512, height: 805 });
+    await page.route('**/api/onboarding/status', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ needs_onboarding: false, completed: true, skipped: true })
+      });
+    });
+    await page.route(/\/api\/workspaces\?tree=true$/, async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ workspaces: [], folders: [] })
+      });
+    });
+    await page.route('**/api/plugins/updates', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          checking: false,
+          last_successful_check_at: '2026-08-31T12:00:00Z',
+          updates: [
+            {
+              name: 'smoke-demo',
+              installed_version: '1.0.0',
+              available_version: '2.0.0',
+              components_changed: false,
+              available: true
+            }
+          ]
+        })
+      });
+    });
+
+    const updateMutations: string[] = [];
+    page.on('request', request => {
+      if (/\/api\/plugins\/[^/]+\/update$/.test(new URL(request.url()).pathname)) {
+        updateMutations.push(request.method());
+      }
+    });
+
+    await page.goto('/');
+    const trigger = page.locator('#cockpitRailToggle');
+    await expect(trigger.locator('[data-cockpit-rail-toggle-count]')).toHaveText('1');
+    await trigger.click();
+
+    const notice = page.locator('#homePluginUpdates');
+    await expect(notice).toBeVisible();
+    await expect(notice.locator('#homePluginUpdatesTitle')).toHaveText('1 plugin update');
+    await expect(notice.locator('.home-plugin-update-name')).toHaveText('smoke-demo');
+    await expect(notice.locator('.home-plugin-update-detail')).toHaveText(
+      'Source version 2.0.0 is available.'
+    );
+    await expect(notice.getByRole('link', { name: 'Review plugins' })).toHaveAttribute(
+      'href',
+      '/plugins'
+    );
+    expect(updateMutations).toEqual([]);
+    await captureImplementationScreenshot(page, 'home-plugin-updates-desktop.png');
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(notice).toBeVisible();
+    const widths = await page.evaluate(() => ({
+      page: document.documentElement.scrollWidth,
+      viewport: window.innerWidth
+    }));
+    expect(widths.page).toBeLessThanOrEqual(widths.viewport + 1);
+    await captureImplementationScreenshot(page, 'home-plugin-updates-narrow.png');
+  });
+
   test('Quests starts compact and opens/collapses without persisting an open state (Issue #334)', async ({
     page
   }) => {
@@ -1379,9 +1451,91 @@ test.describe('API Health', () => {
     expect(Array.isArray(data) || typeof data === 'object').toBeTruthy();
   });
 
-  test('plugins API is accessible', async ({ request }) => {
-    const response = await request.get('/api/plugins');
-    expect(response.ok()).toBeTruthy();
+  test('plugins APIs stay backward-compatible and update status is read-only', async ({
+    request
+  }) => {
+    const beforeResponse = await request.get('/api/plugins');
+    expect(beforeResponse.ok()).toBeTruthy();
+    const before = await beforeResponse.json();
+    expect(Array.isArray(before.plugins)).toBeTruthy();
+
+    const updatesResponse = await request.get('/api/plugins/updates');
+    expect(updatesResponse.ok()).toBeTruthy();
+    const updates = await updatesResponse.json();
+    expect(Array.isArray(updates.updates)).toBeTruthy();
+    expect(typeof updates.checking).toBe('boolean');
+
+    const writeAttempt = await request.post('/api/plugins/updates');
+    expect(writeAttempt.ok()).toBeFalsy();
+    const after = await (await request.get('/api/plugins')).json();
+    expect(after.plugins).toEqual(before.plugins);
+  });
+});
+
+test.describe('Plugin Update Notifications', () => {
+  test('renders cached notices without automatically applying an update', async ({ page }) => {
+    const updateRequests: Array<{ confirm?: boolean }> = [];
+    await page.route('**/api/plugins', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          plugins: [
+            {
+              name: 'smoke-demo',
+              version: '1.0.0',
+              format: 'claude',
+              enabled: false
+            }
+          ]
+        })
+      });
+    });
+    await page.route('**/api/plugins/updates', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          checking: false,
+          last_successful_check_at: '2026-08-31T12:00:00Z',
+          updates: [
+            {
+              name: 'smoke-demo',
+              installed_version: '1.0.0',
+              available_version: '2.0.0',
+              components_changed: false,
+              available: true
+            }
+          ]
+        })
+      });
+    });
+    await page.route('**/api/plugins/marketplaces', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ marketplaces: [], official: {} })
+      });
+    });
+    await page.route('**/api/plugins/smoke-demo/update', async route => {
+      updateRequests.push(route.request().postDataJSON() || {});
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ updated: false, changed: false, trust: {} })
+      });
+    });
+
+    await page.goto('/plugins');
+    await expect(page.locator('#pluginUpdateNotice')).toHaveAttribute('role', 'status');
+    await expect(page.locator('#pluginUpdateNoticeTitle')).toHaveText(
+      '1 plugin update is available'
+    );
+    await expect(page.locator('#pluginList')).toContainText('Update available · 2.0.0');
+    await expect(
+      page.locator('[data-plugin-action="update"][data-plugin-name="smoke-demo"]')
+    ).toBeVisible();
+    expect(updateRequests).toHaveLength(0);
   });
 });
 

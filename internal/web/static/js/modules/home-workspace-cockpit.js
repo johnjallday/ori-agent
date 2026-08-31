@@ -381,15 +381,18 @@ export function signalCounts(workspaces, scheduleIndex, now) {
 /**
  * The Updates badge's count and visibility (FR15-FR17).
  *
- * Aggregate workspace attention only — Progression/onboarding state is never
- * a valid input here, which is what keeps the badge from drifting back into
- * meaning "something in the old Today rail wants you" (Issue #334). Hidden
- * at zero rather than showing a "0" (mirrors the old rail-toggle count).
+ * Combines workspace attention with global plugin updates because both now
+ * render inside the existing Updates flyout. Progression/onboarding state is
+ * still never a valid input. Hidden at zero rather than showing a "0".
  */
-export function updatesBadgeView(flattened, scheduleIndex) {
+export function updatesBadgeView(flattened, scheduleIndex, pluginUpdateCount = 0) {
   const counts = signalCounts(flattened, scheduleIndex);
   const attention = counts ? counts[SIGNAL_ATTENTION] : null;
-  const count = typeof attention === 'number' ? attention : 0;
+  const workspaceCount = typeof attention === 'number' ? attention : 0;
+  const pluginCount = Number.isFinite(Number(pluginUpdateCount))
+    ? Math.max(0, Math.floor(Number(pluginUpdateCount)))
+    : 0;
+  const count = workspaceCount + pluginCount;
   return { count, visible: count > 0 };
 }
 
@@ -1499,6 +1502,9 @@ import {
     // and "we don't know" stay distinguishable (FR120, FR121).
     scheduleIndex: null,
     scheduleError: null,
+    pluginUpdateCount: Number.isFinite(Number(window.oriPluginUpdateCount))
+      ? Math.max(0, Math.floor(Number(window.oriPluginUpdateCount)))
+      : 0,
     view: parseViewFromQuery(window.location.search),
     signal: '',
     selectedId: '',
@@ -2280,7 +2286,7 @@ import {
 
   function updateUpdatesBadge() {
     if (!els.railToggleCount) return;
-    const badge = updatesBadgeView(state.flattened, state.scheduleIndex);
+    const badge = updatesBadgeView(state.flattened, state.scheduleIndex, state.pluginUpdateCount);
     els.railToggleCount.textContent = badge.visible ? String(badge.count) : '';
     els.railToggleCount.hidden = !badge.visible;
   }
@@ -2915,6 +2921,11 @@ import {
   // Personal HQ provisioning can complete while Home is open; re-read the
   // status so Quick Capture stops explaining a requirement already met.
   window.addEventListener('ori:personal-hq-changed', () => void refreshHQStatus());
+  window.addEventListener('ori:plugin-updates-changed', event => {
+    const count = Number(event.detail?.count);
+    state.pluginUpdateCount = Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0;
+    updateUpdatesBadge();
+  });
 
   wireTodaySelection();
 

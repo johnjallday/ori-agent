@@ -1319,6 +1319,36 @@ a.quest-title:focus-visible {
   gap: 8px;
 }
 
+/* Cached plugin notices reuse the Daily Brief panel vocabulary inside the
+   existing Updates flyout while remaining visually scannable as distinct
+   installed components. */
+.home-plugin-updates-list {
+  display: grid;
+  gap: 7px;
+}
+
+.home-plugin-update-item {
+  display: grid;
+  gap: 2px;
+  padding: 8px 10px;
+  border-left: 2px solid var(--hc-signal);
+  background: color-mix(in srgb, var(--hc-signal) 7%, var(--hc-panel-deep));
+}
+
+.home-plugin-update-name {
+  color: var(--hc-ink);
+  font-size: 11px;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+
+.home-plugin-update-detail {
+  color: var(--hc-ink-dim);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 9px;
+  overflow-wrap: anywhere;
+}
+
 /* Secondary Daily Brief actions behind a native <details> disclosure. Only
    Refresh keeps permanent space in a ~320px rail; Open My HQ and Brief settings
    are one click away and cost no JavaScript to reach. */

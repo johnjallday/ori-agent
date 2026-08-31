@@ -138,6 +138,24 @@
           <section id="cockpitTodayAttention" class="cockpit-today-section" aria-label="Needs attention"></section>
           <section id="cockpitTodayScheduled" class="cockpit-today-section" aria-label="Scheduled today"></section>
 
+          <!-- Global plugin updates share this existing Updates destination.
+               The section stays absent when the cached check is empty or
+               unavailable; opening it never resolves a source or applies an
+               update. Populated by home-plugin-updates.js. -->
+          <section id="homePluginUpdates" class="home-daily-brief home-plugin-updates" aria-labelledby="homePluginUpdatesTitle" hidden>
+            <header class="home-daily-brief-header">
+              <div class="home-daily-brief-heading">
+                <span class="home-daily-brief-eyebrow">Plugins</span>
+                <h2 id="homePluginUpdatesTitle" class="home-daily-brief-title">Plugin updates</h2>
+                <p id="homePluginUpdatesMeta" class="home-daily-brief-meta"></p>
+              </div>
+              <div class="home-daily-brief-actions">
+                <a id="homePluginUpdatesOpen" href="/plugins" class="modern-btn modern-btn-primary modern-btn-sm">Review plugins</a>
+              </div>
+            </header>
+            <div id="homePluginUpdatesBody" class="home-plugin-updates-list"></div>
+          </section>
+
           <!-- Daily Brief: the primary Home orientation region once a valid
                Personal HQ is designated. Hidden entirely with no HQ — no
                hidden brief store is created and no workspace is silently
