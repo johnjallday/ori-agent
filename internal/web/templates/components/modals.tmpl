@@ -1011,6 +1011,43 @@
     border-radius: 10px;
   }
 
+  .paf-assignment-card,
+  .paf-assignment-list,
+  .paf-assignment-preview-list {
+    display: grid;
+    gap: 0.85rem;
+  }
+
+  .paf-assignment-group,
+  .paf-assignment-row,
+  .paf-assignment-preview-row,
+  .paf-assignment-result {
+    padding: 0.9rem;
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--bg-secondary) 82%, transparent);
+  }
+
+  .paf-assignment-row,
+  .paf-assignment-preview-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(8rem, 0.45fr) auto;
+    gap: 0.65rem;
+    align-items: end;
+  }
+
+  .paf-assignment-state {
+    color: var(--text-secondary);
+    font-size: 0.86rem;
+  }
+
+  @media (max-width: 600px) {
+    .paf-assignment-row,
+    .paf-assignment-preview-row {
+      grid-template-columns: 1fr;
+    }
+  }
+
   @media (prefers-reduced-motion: reduce) {
     #onboardingModal .modal-dialog,
     .onboarding-phase,
@@ -1378,6 +1415,74 @@
               <div class="onboarding-actions">
                 <button type="button" class="btn btn-outline-secondary" id="pafHireBackBtn">Back</button>
                 <button type="button" class="btn btn-primary onboarding-next-btn" id="pafHireBtn" disabled>Hire Assistant</button>
+              </div>
+            </div>
+          </div>
+
+          <div id="onboardingPersonalAssistantAssignment" class="d-none">
+            <div class="d-flex align-items-start mb-3">
+              <div class="ori-avatar" aria-hidden="true">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+                  <path d="M 724 410 L 714 405 L 686 404 L 663 397 L 651 386 L 632 352 L 618 339 L 600 329 L 582 324 L 561 324 L 542 329 L 518 344 L 503 362 L 493 386 L 491 412 L 494 428 L 503 448 L 541 493 L 554 520 L 526 508 L 501 503 L 464 504 L 414 514 L 383 513 L 349 498 L 330 480 L 321 467 L 308 498 L 303 523 L 304 562 L 316 601 L 338 635 L 362 658 L 386 674 L 432 693 L 467 700 L 527 701 L 570 695 L 607 683 L 638 665 L 659 645 L 675 619 L 682 591 L 680 562 L 674 544 L 658 518 L 626 486 L 621 474 L 623 459 L 626 453 L 638 444 L 672 442 L 702 434 L 723 418 Z" fill="white"/>
+                </svg>
+              </div>
+              <div class="ori-speech"><strong>Plan my first day</strong><br>Tell me only what is useful now. Every category is optional.</div>
+            </div>
+
+            <div class="paf-assignment-card">
+              <div id="pafAssignmentForm">
+                <fieldset class="paf-assignment-group mb-3">
+                  <legend class="h6">What must happen today?</legend>
+                  <div id="pafPriorityRows" class="paf-assignment-list"></div>
+                  <button type="button" class="btn btn-sm btn-outline-secondary mt-2" data-paf-add-row="priority">Add priority</button>
+                </fieldset>
+                <fieldset class="paf-assignment-group mb-3">
+                  <legend class="h6">What do you owe—or what are you waiting on?</legend>
+                  <div id="pafCommitmentRows" class="paf-assignment-list"></div>
+                  <div class="d-flex flex-wrap gap-2 mt-2">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" data-paf-add-row="i_owe">Add item I owe</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" data-paf-add-row="waiting_on">Add item I’m waiting on</button>
+                  </div>
+                </fieldset>
+                <fieldset class="paf-assignment-group">
+                  <legend class="h6">Fixed commitments to keep visible</legend>
+                  <div id="pafFixedRows" class="paf-assignment-list"></div>
+                  <button type="button" class="btn btn-sm btn-outline-secondary mt-2" data-paf-add-row="fixed_commitment">Add fixed commitment</button>
+                  <p class="paf-hire-boundary mt-2 mb-0">This creates only Personal HQ records. It does not write to an external calendar.</p>
+                </fieldset>
+                <div id="pafAssignmentError" class="alert alert-danger d-none mt-3 mb-0" role="alert"></div>
+                <div class="onboarding-actions">
+                  <button type="button" class="btn btn-outline-secondary" id="pafAssignmentBackBtn">Back</button>
+                  <button type="button" class="btn btn-primary onboarding-next-btn" id="pafPreviewAssignmentBtn">Preview items</button>
+                </div>
+              </div>
+
+              <div id="pafAssignmentPreview" class="d-none">
+                <h3 class="h5">Review the exact records</h3>
+                <p id="pafAssignmentPreviewCount" class="paf-assignment-state"></p>
+                <div id="pafAssignmentPreviewRows" class="paf-assignment-preview-list"></div>
+                <label class="paf-hire-confirm mt-3">
+                  <input id="pafAssignmentConfirm" type="checkbox">
+                  Create these items in Personal HQ and generate my first Daily Brief.
+                </label>
+                <p class="paf-hire-boundary mt-2 mb-0">Editing a row saves a new server preview before anything can be created.</p>
+                <div id="pafAssignmentApplyError" class="alert alert-danger d-none mt-3 mb-0" role="alert"></div>
+                <p id="pafAssignmentStatus" class="paf-assignment-state mt-3 mb-0" aria-live="polite"></p>
+                <div class="onboarding-actions">
+                  <button type="button" class="btn btn-outline-secondary" id="pafEditAssignmentBtn">Edit answers</button>
+                  <button type="button" class="btn btn-outline-primary" id="pafReplacePreviewBtn">Save edited preview</button>
+                  <button type="button" class="btn btn-primary onboarding-next-btn" id="pafApplyAssignmentBtn" disabled>Create these items</button>
+                </div>
+              </div>
+
+              <div id="pafAssignmentResult" class="paf-assignment-result d-none" aria-live="polite">
+                <h3 id="pafAssignmentResultTitle" class="h5">Your first Daily Brief is ready</h3>
+                <p id="pafAssignmentResultSummary" class="mb-2"></p>
+                <ul id="pafAssignmentResultItems"></ul>
+                <p id="pafAssignmentNextCheckIn" class="paf-assignment-state"></p>
+                <div class="onboarding-actions">
+                  <button type="button" class="btn btn-primary onboarding-next-btn" id="pafOpenTodayBtn">Open Today</button>
+                </div>
               </div>
             </div>
           </div>

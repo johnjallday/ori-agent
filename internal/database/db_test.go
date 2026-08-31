@@ -825,8 +825,8 @@ func TestMigration046UpgradesPriorSchemaWithoutChangingExistingRows(t *testing.T
 		}
 	}
 	version, err := db.GetSchemaVersion(ctx)
-	if err != nil || version != 47 {
-		t.Fatalf("schema version = %d, %v; want 47", version, err)
+	if err != nil || version != 50 {
+		t.Fatalf("schema version = %d, %v; want 50", version, err)
 	}
 }
 

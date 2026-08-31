@@ -10,7 +10,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 47
+const schemaVersion = 50
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -159,6 +159,12 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 		return db.migration046PersonalAssistantFoundation(ctx)
 	case 47:
 		return db.migration047PersonalAssistantHireRecovery(ctx)
+	case 48:
+		return db.migration048PersonalAssistantPreviewSupersession(ctx)
+	case 49:
+		return db.migration049PersonalAssistantApplyRequest(ctx)
+	case 50:
+		return db.migration050PersonalAssistantFirstBrief(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
@@ -1687,6 +1693,98 @@ func (db *DB) migration047PersonalAssistantHireRecovery(ctx context.Context) err
 	} {
 		if _, err := db.ExecContext(ctx, statement.sql); err != nil && !isDuplicateColumnError(err) {
 			return fmt.Errorf("failed to add personal_assistant_state.%s column: %w", statement.label, err)
+		}
+	}
+	return nil
+}
+
+// migration048PersonalAssistantPreviewSupersession extends the assignment
+// journal's closed lifecycle with an explicit non-applicable superseded state.
+func (db *DB) migration048PersonalAssistantPreviewSupersession(ctx context.Context) error {
+	exists, err := db.tableExists(ctx, "personal_assistant_assignment")
+	if err != nil || !exists {
+		return err
+	}
+	statements := []string{
+		`CREATE TABLE personal_assistant_assignment_v48 (
+			preview_id TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL,
+			assistant_id TEXT NOT NULL,
+			assignment_version INTEGER NOT NULL DEFAULT 1 CHECK (assignment_version > 0),
+			normalized_payload_json TEXT NOT NULL,
+			normalized_payload_hash TEXT NOT NULL,
+			status TEXT NOT NULL DEFAULT 'previewed'
+				CHECK (status IN ('previewed', 'applying', 'completed', 'failed', 'superseded')),
+			created_canonical_refs_json TEXT NOT NULL DEFAULT '[]',
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL,
+			FOREIGN KEY (user_id, assistant_id)
+				REFERENCES personal_assistant_state(user_id, assistant_id) ON DELETE CASCADE
+		)`,
+		`INSERT INTO personal_assistant_assignment_v48 (
+			preview_id, user_id, assistant_id, assignment_version,
+			normalized_payload_json, normalized_payload_hash, status,
+			created_canonical_refs_json, created_at, updated_at
+		) SELECT preview_id, user_id, assistant_id, assignment_version,
+			normalized_payload_json, normalized_payload_hash, status,
+			created_canonical_refs_json, created_at, updated_at
+		FROM personal_assistant_assignment`,
+		`DROP TABLE personal_assistant_assignment`,
+		`ALTER TABLE personal_assistant_assignment_v48 RENAME TO personal_assistant_assignment`,
+		`CREATE INDEX idx_personal_assistant_assignment_owner
+			ON personal_assistant_assignment(user_id, assistant_id, created_at)`,
+		`CREATE INDEX idx_personal_assistant_assignment_hash
+			ON personal_assistant_assignment(assistant_id, normalized_payload_hash)`,
+	}
+	for _, statement := range statements {
+		if _, err := db.ExecContext(ctx, statement); err != nil {
+			return fmt.Errorf("failed to add personal assistant preview supersession: %w", err)
+		}
+	}
+	return nil
+}
+
+// migration049PersonalAssistantApplyRequest binds a client retry identity to
+// exactly one preview without storing any free-form failure detail.
+func (db *DB) migration049PersonalAssistantApplyRequest(ctx context.Context) error {
+	exists, err := db.tableExists(ctx, "personal_assistant_assignment")
+	if err != nil || !exists {
+		return err
+	}
+	if _, err := db.ExecContext(ctx, `
+		ALTER TABLE personal_assistant_assignment
+		ADD COLUMN apply_request_id TEXT NOT NULL DEFAULT ''
+	`); err != nil && !isDuplicateColumnError(err) {
+		return fmt.Errorf("failed to add personal_assistant_assignment.apply_request_id: %w", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_personal_assistant_assignment_apply_request
+		ON personal_assistant_assignment(user_id, apply_request_id)
+		WHERE apply_request_id != ''
+	`); err != nil {
+		return fmt.Errorf("failed to index personal assistant apply requests: %w", err)
+	}
+	return nil
+}
+
+// migration050PersonalAssistantFirstBrief persists only stable Daily Brief
+// lifecycle IDs/status needed to resume after records become visible.
+func (db *DB) migration050PersonalAssistantFirstBrief(ctx context.Context) error {
+	exists, err := db.tableExists(ctx, "personal_assistant_assignment")
+	if err != nil || !exists {
+		return err
+	}
+	for _, column := range []struct {
+		name string
+		sql  string
+	}{
+		{"brief_request_id", `ALTER TABLE personal_assistant_assignment ADD COLUMN brief_request_id TEXT NOT NULL DEFAULT ''`},
+		{"brief_revision_id", `ALTER TABLE personal_assistant_assignment ADD COLUMN brief_revision_id TEXT NOT NULL DEFAULT ''`},
+		{"brief_status", `ALTER TABLE personal_assistant_assignment ADD COLUMN brief_status TEXT NOT NULL DEFAULT ''`},
+		{"brief_trigger", `ALTER TABLE personal_assistant_assignment ADD COLUMN brief_trigger TEXT NOT NULL DEFAULT ''`},
+	} {
+		if _, err := db.ExecContext(ctx, column.sql); err != nil && !isDuplicateColumnError(err) {
+			return fmt.Errorf("failed to add personal_assistant_assignment.%s: %w", column.name, err)
 		}
 	}
 	return nil

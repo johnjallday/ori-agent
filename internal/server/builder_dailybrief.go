@@ -144,7 +144,8 @@ func (b *ServerBuilder) initializeDailyBrief() {
 			Sessions:      sessionSource,
 			// Read lazily off the builder: the mailbox source is wired during
 			// vault init, which runs before this resolver is ever invoked.
-			Mailbox: b.dailyBriefMailbox,
+			Mailbox:   b.dailyBriefMailbox,
+			FollowUps: b.followUpService,
 		}
 		snap := dailybrief.BuildSnapshot(ctx, sources, cfg, req.UserID, time.Now())
 		previous, err := store.GetCurrentRevision(ctx, cfg.WorkspaceID)
@@ -211,6 +212,14 @@ func (b *ServerBuilder) initializeDailyBrief() {
 		b.onboardingMgr, b.personalAssistantStore, b.sessionHandler,
 		b.personalHQService, briefService,
 	)
+	b.personalAssignment = personalassistant.NewAssignmentService(b.personalAssistantStore)
+	assignmentTickets := workspace.NewTicketService(b.workspaceStore)
+	assignmentTickets.SetEventBus(b.eventBus)
+	assignmentWriter := personalassistant.NewCanonicalWriter(assignmentTickets)
+	assignmentWriter.SetFollowUpService(b.followUpService)
+	b.personalAssignment.SetCanonicalWriter(assignmentWriter)
+	b.personalAssignment.SetBriefService(briefService)
 	b.personalAssistantHandler = personalassistanthttp.NewHandler(b.personalAssistantService, b.userProvider)
 	b.personalAssistantHandler.SetHireService(b.personalAssistantHire)
+	b.personalAssistantHandler.SetAssignmentService(b.personalAssignment)
 }

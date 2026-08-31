@@ -192,18 +192,22 @@ func (s *SQLiteStore) CreateAssignment(ctx context.Context, assignment *Assignme
 		return nil, err
 	}
 	now := s.now().UTC()
-	normalized.AssignmentVersion = 1
+	if normalized.AssignmentVersion < 1 {
+		normalized.AssignmentVersion = 1
+	}
 	normalized.CreatedAt = now
 	normalized.UpdatedAt = now
 	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO personal_assistant_assignment (
 			preview_id, user_id, assistant_id, assignment_version,
-			normalized_payload_json, normalized_payload_hash, status,
+			normalized_payload_json, normalized_payload_hash, apply_request_id,
+			brief_request_id, brief_revision_id, brief_status, brief_trigger, status,
 			created_canonical_refs_json, created_at, updated_at
-		) VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?)
-	`, normalized.PreviewID, normalized.UserID, normalized.AssistantID, payloadJSON,
-		normalized.NormalizedPayloadHash, normalized.Status, refsJSON,
-		normalized.CreatedAt, normalized.UpdatedAt)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, normalized.PreviewID, normalized.UserID, normalized.AssistantID, normalized.AssignmentVersion,
+		payloadJSON, normalized.NormalizedPayloadHash, normalized.ApplyRequestID,
+		normalized.BriefRequestID, normalized.BriefRevisionID, normalized.BriefStatus, normalized.BriefTrigger,
+		normalized.Status, refsJSON, normalized.CreatedAt, normalized.UpdatedAt)
 	if err != nil {
 		if isConstraintError(err) {
 			return nil, fmt.Errorf("%w: assignment preview already exists or has a foreign owner", ErrConflict)
@@ -225,7 +229,8 @@ func (s *SQLiteStore) GetAssignment(ctx context.Context, userID, previewID strin
 	}
 	return s.scanAssignment(ctx, `
 		SELECT preview_id, user_id, assistant_id, assignment_version,
-			normalized_payload_json, normalized_payload_hash, status,
+			normalized_payload_json, normalized_payload_hash, apply_request_id,
+			brief_request_id, brief_revision_id, brief_status, brief_trigger, status,
 			created_canonical_refs_json, created_at, updated_at
 		FROM personal_assistant_assignment
 		WHERE user_id = ? AND preview_id = ?
@@ -247,12 +252,14 @@ func (s *SQLiteStore) UpdateAssignment(ctx context.Context, assignment *Assignme
 	now := s.now().UTC()
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE personal_assistant_assignment SET
-			normalized_payload_json = ?, normalized_payload_hash = ?, status = ?,
+			normalized_payload_json = ?, normalized_payload_hash = ?, apply_request_id = ?,
+			brief_request_id = ?, brief_revision_id = ?, brief_status = ?, brief_trigger = ?, status = ?,
 			created_canonical_refs_json = ?, assignment_version = assignment_version + 1,
 			updated_at = ?
 		WHERE user_id = ? AND assistant_id = ? AND preview_id = ? AND assignment_version = ?
-	`, payloadJSON, normalized.NormalizedPayloadHash, normalized.Status, refsJSON,
-		now, normalized.UserID, normalized.AssistantID, normalized.PreviewID, expectedVersion)
+	`, payloadJSON, normalized.NormalizedPayloadHash, normalized.ApplyRequestID,
+		normalized.BriefRequestID, normalized.BriefRevisionID, normalized.BriefStatus, normalized.BriefTrigger,
+		normalized.Status, refsJSON, now, normalized.UserID, normalized.AssistantID, normalized.PreviewID, expectedVersion)
 	if err != nil {
 		return nil, fmt.Errorf("personal assistant: update assignment: %w", err)
 	}
@@ -269,12 +276,268 @@ func (s *SQLiteStore) UpdateAssignment(ctx context.Context, assignment *Assignme
 	return s.GetAssignment(ctx, normalized.UserID, normalized.PreviewID)
 }
 
+// GetLatestAssignment returns the newest preview journal row for one stable
+// assistant. Created-at breaks the intentional version tie between a
+// superseded row and the preview that replaced it.
+func (s *SQLiteStore) GetLatestAssignment(ctx context.Context, userID, assistantID string) (*Assignment, error) {
+	if s == nil || s.db == nil {
+		return nil, errors.New("personal assistant: store is not configured")
+	}
+	return s.scanAssignment(ctx, `
+		SELECT preview_id, user_id, assistant_id, assignment_version,
+			normalized_payload_json, normalized_payload_hash, apply_request_id,
+			brief_request_id, brief_revision_id, brief_status, brief_trigger, status,
+			created_canonical_refs_json, created_at, updated_at
+		FROM personal_assistant_assignment
+		WHERE user_id = ? AND assistant_id = ?
+		ORDER BY CASE WHEN status = 'superseded' THEN 1 ELSE 0 END,
+			assignment_version DESC, created_at DESC, preview_id DESC
+		LIMIT 1
+	`, strings.TrimSpace(userID), strings.TrimSpace(assistantID))
+}
+
+// SupersedeAndCreateAssignment atomically makes an unapplied preview
+// non-applicable, creates its replacement, and advances relationship state.
+func (s *SQLiteStore) SupersedeAndCreateAssignment(ctx context.Context, assignment *Assignment, prior *Assignment, expectedStateVersion int64) (*Assignment, *State, error) {
+	if s == nil || s.db == nil {
+		return nil, nil, errors.New("personal assistant: store is not configured")
+	}
+	if expectedStateVersion < 1 {
+		return nil, nil, fmt.Errorf("%w: expected relationship version must be positive", ErrConflict)
+	}
+	normalized, payloadJSON, refsJSON, err := normalizeAssignment(assignment)
+	if err != nil {
+		return nil, nil, err
+	}
+	if normalized.AssignmentVersion < 1 || normalized.Status != AssignmentPreviewed {
+		return nil, nil, errors.New("personal assistant: replacement preview must have a positive version and previewed status")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, nil, fmt.Errorf("personal assistant: begin preview transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	now := s.now().UTC()
+
+	if prior != nil {
+		if prior.UserID != normalized.UserID || prior.AssistantID != normalized.AssistantID ||
+			(prior.Status != AssignmentPreviewed && prior.Status != AssignmentFailed) {
+			return nil, nil, fmt.Errorf("%w: current preview cannot be superseded", ErrConflict)
+		}
+		result, updateErr := tx.ExecContext(ctx, `
+			UPDATE personal_assistant_assignment SET
+				status = ?, assignment_version = assignment_version + 1, updated_at = ?
+			WHERE user_id = ? AND assistant_id = ? AND preview_id = ?
+				AND assignment_version = ? AND status IN (?, ?)
+		`, AssignmentSuperseded, now, prior.UserID, prior.AssistantID, prior.PreviewID,
+			prior.AssignmentVersion, AssignmentPreviewed, AssignmentFailed)
+		if updateErr != nil {
+			return nil, nil, fmt.Errorf("personal assistant: supersede preview: %w", updateErr)
+		}
+		rows, rowsErr := result.RowsAffected()
+		if rowsErr != nil || rows != 1 {
+			return nil, nil, fmt.Errorf("%w: current preview changed", ErrConflict)
+		}
+	}
+
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO personal_assistant_assignment (
+			preview_id, user_id, assistant_id, assignment_version,
+			normalized_payload_json, normalized_payload_hash, apply_request_id,
+			brief_request_id, brief_revision_id, brief_status, brief_trigger, status,
+			created_canonical_refs_json, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, normalized.PreviewID, normalized.UserID, normalized.AssistantID,
+		normalized.AssignmentVersion, payloadJSON, normalized.NormalizedPayloadHash,
+		normalized.ApplyRequestID, normalized.BriefRequestID, normalized.BriefRevisionID,
+		normalized.BriefStatus, normalized.BriefTrigger, normalized.Status, refsJSON, now, now)
+	if err != nil {
+		if isConstraintError(err) {
+			return nil, nil, fmt.Errorf("%w: assignment preview identity already exists", ErrConflict)
+		}
+		return nil, nil, fmt.Errorf("personal assistant: create replacement preview: %w", err)
+	}
+
+	result, err := tx.ExecContext(ctx, `
+		UPDATE personal_assistant_state SET
+			first_assignment_status = ?, state_version = state_version + 1, updated_at = ?
+		WHERE user_id = ? AND assistant_id = ? AND state_version = ? AND status = ?
+			AND first_assignment_status != ?
+	`, FirstAssignmentPreviewed, now, normalized.UserID, normalized.AssistantID,
+		expectedStateVersion, StatusActive, FirstAssignmentCompleted)
+	if err != nil {
+		return nil, nil, fmt.Errorf("personal assistant: advance preview relationship: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil || rows != 1 {
+		return nil, nil, fmt.Errorf("%w: relationship changed before preview save", ErrConflict)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, nil, fmt.Errorf("personal assistant: commit preview transaction: %w", err)
+	}
+	created, err := s.GetAssignment(ctx, normalized.UserID, normalized.PreviewID)
+	if err != nil {
+		return nil, nil, err
+	}
+	state, err := s.GetState(ctx, normalized.UserID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return created, state, nil
+}
+
+// BeginAssignmentApply atomically binds a retry ID, marks the preview
+// applying, and advances the relationship. A replay with the same binding is
+// returned without another version increment.
+func (s *SQLiteStore) BeginAssignmentApply(ctx context.Context, assignment *Assignment, expectedPreviewVersion, expectedStateVersion int64, requestID string) (*Assignment, *State, error) {
+	if s == nil || s.db == nil || assignment == nil {
+		return nil, nil, errors.New("personal assistant: apply store is not configured")
+	}
+	requestID, err := validateOpaqueID("apply request id", requestID, true)
+	if err != nil {
+		return nil, nil, err
+	}
+	current, err := s.GetAssignment(ctx, assignment.UserID, assignment.PreviewID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if (current.Status == AssignmentApplying || current.Status == AssignmentCompleted) && current.ApplyRequestID == requestID {
+		state, stateErr := s.GetState(ctx, current.UserID)
+		return current, state, stateErr
+	}
+	if current.Status != AssignmentPreviewed || current.AssignmentVersion != expectedPreviewVersion ||
+		current.NormalizedPayloadHash != assignment.NormalizedPayloadHash || current.ApplyRequestID != "" {
+		return nil, nil, fmt.Errorf("%w: assignment preview changed before apply", ErrConflict)
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, nil, fmt.Errorf("personal assistant: begin apply transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	now := s.now().UTC()
+	result, err := tx.ExecContext(ctx, `
+		UPDATE personal_assistant_assignment SET
+			status = ?, apply_request_id = ?, assignment_version = assignment_version + 1, updated_at = ?
+		WHERE user_id = ? AND assistant_id = ? AND preview_id = ?
+			AND assignment_version = ? AND normalized_payload_hash = ?
+			AND status = ? AND apply_request_id = ''
+	`, AssignmentApplying, requestID, now, current.UserID, current.AssistantID,
+		current.PreviewID, expectedPreviewVersion, current.NormalizedPayloadHash, AssignmentPreviewed)
+	if err != nil {
+		if isConstraintError(err) {
+			return nil, nil, fmt.Errorf("%w: apply request ID is already bound", ErrConflict)
+		}
+		return nil, nil, fmt.Errorf("personal assistant: bind apply request: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil || rows != 1 {
+		return nil, nil, fmt.Errorf("%w: assignment changed before apply", ErrConflict)
+	}
+	result, err = tx.ExecContext(ctx, `
+		UPDATE personal_assistant_state SET
+			first_assignment_status = ?, state_version = state_version + 1, updated_at = ?
+		WHERE user_id = ? AND assistant_id = ? AND state_version = ? AND status = ?
+			AND first_assignment_status = ?
+	`, FirstAssignmentApplying, now, current.UserID, current.AssistantID,
+		expectedStateVersion, StatusActive, FirstAssignmentPreviewed)
+	if err != nil {
+		return nil, nil, fmt.Errorf("personal assistant: begin relationship apply: %w", err)
+	}
+	rows, err = result.RowsAffected()
+	if err != nil || rows != 1 {
+		return nil, nil, fmt.Errorf("%w: relationship changed before apply", ErrConflict)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, nil, fmt.Errorf("personal assistant: commit apply start: %w", err)
+	}
+	started, err := s.GetAssignment(ctx, current.UserID, current.PreviewID)
+	if err != nil {
+		return nil, nil, err
+	}
+	state, err := s.GetState(ctx, current.UserID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return started, state, nil
+}
+
+// CompleteAssignmentApply atomically closes the journal row and marks first
+// assignment complete. Replays return the already-completed pair.
+func (s *SQLiteStore) CompleteAssignmentApply(ctx context.Context, assignment *Assignment, expectedStateVersion int64) (*Assignment, *State, error) {
+	if s == nil || s.db == nil || assignment == nil {
+		return nil, nil, errors.New("personal assistant: apply store is not configured")
+	}
+	current, err := s.GetAssignment(ctx, assignment.UserID, assignment.PreviewID)
+	if err != nil {
+		return nil, nil, err
+	}
+	state, err := s.GetState(ctx, current.UserID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if current.Status == AssignmentCompleted && state.FirstAssignmentStatus == FirstAssignmentCompleted {
+		return current, state, nil
+	}
+	if current.Status != AssignmentApplying || current.ApplyRequestID == "" ||
+		current.AssignmentVersion != assignment.AssignmentVersion || state.StateVersion != expectedStateVersion {
+		return nil, nil, fmt.Errorf("%w: assignment changed before completion", ErrConflict)
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, nil, fmt.Errorf("personal assistant: begin completion transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	now := s.now().UTC()
+	result, err := tx.ExecContext(ctx, `
+		UPDATE personal_assistant_assignment SET
+			status = ?, assignment_version = assignment_version + 1, updated_at = ?
+		WHERE user_id = ? AND assistant_id = ? AND preview_id = ?
+			AND assignment_version = ? AND status = ? AND apply_request_id = ?
+	`, AssignmentCompleted, now, current.UserID, current.AssistantID, current.PreviewID,
+		current.AssignmentVersion, AssignmentApplying, current.ApplyRequestID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("personal assistant: complete assignment: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil || rows != 1 {
+		return nil, nil, fmt.Errorf("%w: assignment changed before completion", ErrConflict)
+	}
+	result, err = tx.ExecContext(ctx, `
+		UPDATE personal_assistant_state SET
+			first_assignment_status = ?, state_version = state_version + 1, updated_at = ?
+		WHERE user_id = ? AND assistant_id = ? AND state_version = ? AND status = ?
+			AND first_assignment_status = ?
+	`, FirstAssignmentCompleted, now, current.UserID, current.AssistantID,
+		expectedStateVersion, StatusActive, FirstAssignmentApplying)
+	if err != nil {
+		return nil, nil, fmt.Errorf("personal assistant: complete relationship assignment: %w", err)
+	}
+	rows, err = result.RowsAffected()
+	if err != nil || rows != 1 {
+		return nil, nil, fmt.Errorf("%w: relationship changed before completion", ErrConflict)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, nil, fmt.Errorf("personal assistant: commit assignment completion: %w", err)
+	}
+	completed, err := s.GetAssignment(ctx, current.UserID, current.PreviewID)
+	if err != nil {
+		return nil, nil, err
+	}
+	state, err = s.GetState(ctx, current.UserID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return completed, state, nil
+}
+
 func (s *SQLiteStore) scanAssignment(ctx context.Context, query string, args ...any) (*Assignment, error) {
 	var assignment Assignment
 	var payloadJSON, refsJSON, status string
 	err := s.db.QueryRowContext(ctx, query, args...).Scan(
 		&assignment.PreviewID, &assignment.UserID, &assignment.AssistantID,
 		&assignment.AssignmentVersion, &payloadJSON, &assignment.NormalizedPayloadHash,
+		&assignment.ApplyRequestID, &assignment.BriefRequestID, &assignment.BriefRevisionID,
+		&assignment.BriefStatus, &assignment.BriefTrigger,
 		&status, &refsJSON, &assignment.CreatedAt, &assignment.UpdatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -389,6 +652,20 @@ func normalizeAssignment(input *Assignment) (*Assignment, string, string, error)
 	}
 	if assignment.Status, err = NormalizeAssignmentStatus(string(assignment.Status)); err != nil {
 		return nil, "", "", err
+	}
+	if assignment.ApplyRequestID, err = validateOpaqueID("apply request id", assignment.ApplyRequestID, false); err != nil {
+		return nil, "", "", err
+	}
+	if assignment.BriefRequestID, err = validateOpaqueID("brief request id", assignment.BriefRequestID, false); err != nil {
+		return nil, "", "", err
+	}
+	if assignment.BriefRevisionID, err = validateOpaqueID("brief revision id", assignment.BriefRevisionID, false); err != nil {
+		return nil, "", "", err
+	}
+	assignment.BriefStatus = strings.TrimSpace(assignment.BriefStatus)
+	assignment.BriefTrigger = strings.TrimSpace(assignment.BriefTrigger)
+	if len(assignment.BriefStatus) > 64 || len(assignment.BriefTrigger) > 32 {
+		return nil, "", "", errors.New("personal assistant: invalid first brief state")
 	}
 	payload := []byte(assignment.NormalizedPayload)
 	if len(payload) == 0 || len(payload) > MaxAssignmentJSONBytes || !json.Valid(payload) {

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -412,6 +413,80 @@ func (s *TicketService) Create(input TicketCreateInput) (*Ticket, error) {
 	// the old capture events; keep them fed during the compatibility window.
 	s.publishLegacyTaskEvent(legacyCreateEventFor(input.State), created)
 	return &ticket, nil
+}
+
+// CreateIdempotent captures one Ticket at most once for a non-empty canonical
+// source key. The lookup and insert share the workspace's atomic update, so
+// concurrent retries return the same stable Ticket instead of racing a scan
+// against creation. created is false when the original record is replayed.
+func (s *TicketService) CreateIdempotent(input TicketCreateInput) (ticket *Ticket, created bool, err error) {
+	if strings.TrimSpace(input.SourceID) == "" {
+		return nil, false, invalidTicketField("source_id", "source_id is required for idempotent creation")
+	}
+	workspaceID := strings.TrimSpace(input.WorkspaceID)
+	if workspaceID == "" {
+		return nil, false, invalidTicketField("studio_id", "studio_id is required")
+	}
+	if !input.State.Valid() || (input.State != TicketStateBacklog && input.State != TicketStateReady) {
+		return nil, false, invalidTicketField("state", "idempotent creation requires backlog or ready")
+	}
+	task, err := buildTicketRecord(workspaceID, input.State, input)
+	if err != nil {
+		return nil, false, err
+	}
+	var persisted Task
+	err = s.store.Update(workspaceID, func(ws *Workspace) error {
+		for i := range ws.Tasks {
+			candidate := &ws.Tasks[i]
+			if candidate.SourceType == task.SourceType && candidate.SourceID == task.SourceID {
+				if !sameTicketCreationPayload(candidate, &task) {
+					return fmt.Errorf("%w: %s/%s", ErrTicketSourceConflict, task.SourceType, task.SourceID)
+				}
+				persisted = *candidate
+				return nil
+			}
+		}
+		task.TicketNumber = allocateTicketNumber(ws)
+		task.StateRank = nextTicketRank(ws, input.State)
+		if input.State == TicketStateBacklog {
+			task.BacklogRank = task.StateRank
+		}
+		if err := ws.AddTask(task); err != nil {
+			return err
+		}
+		got, err := ws.GetTask(task.ID)
+		if err != nil {
+			return err
+		}
+		persisted = *got
+		created = true
+		return nil
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	result := NewTicket(&persisted, persisted.WorkspaceID, s.WorkspaceName(persisted.WorkspaceID), s.WorkspaceSlug(persisted.WorkspaceID))
+	if created {
+		s.publishTicket(EventTicketCreated, result, nil)
+		s.publishLegacyTaskEvent(legacyCreateEventFor(input.State), persisted)
+	}
+	return &result, created, nil
+}
+
+func sameTicketCreationPayload(existing, requested *Task) bool {
+	if existing == nil || requested == nil {
+		return false
+	}
+	dueEqual := existing.DueDate == nil && requested.DueDate == nil
+	if existing.DueDate != nil && requested.DueDate != nil {
+		dueEqual = existing.DueDate.Equal(*requested.DueDate)
+	}
+	return existing.WorkspaceID == requested.WorkspaceID &&
+		existing.Description == requested.Description && existing.Details == requested.Details &&
+		slices.Equal(existing.Tags, requested.Tags) && existing.Priority == requested.Priority && dueEqual &&
+		existing.ReferenceURL == requested.ReferenceURL && existing.SourceType == requested.SourceType &&
+		existing.SourceID == requested.SourceID && slices.Equal(existing.LinkedNoteIDs, requested.LinkedNoteIDs) &&
+		existing.TicketState == requested.TicketState
 }
 
 // createRecord is the shared creation core. It returns the persisted record so

@@ -297,6 +297,7 @@ type ServerBuilder struct {
 	personalAssistantStore   *personalassistant.SQLiteStore
 	personalAssistantService *personalassistant.Service
 	personalAssistantHire    *personalassistant.HireCoordinator
+	personalAssignment       *personalassistant.AssignmentService
 	personalAssistantHandler *personalassistanthttp.Handler
 
 	// Personal HQ designation and onboarding state

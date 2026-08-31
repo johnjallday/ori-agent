@@ -31,11 +31,19 @@ type HireService interface {
 	Hire(ctx context.Context, userID string, request personalassistant.HireRequest) (*personalassistant.HireResult, error)
 }
 
+// AssignmentPreviewService persists deterministic first-assignment previews.
+type AssignmentPreviewService interface {
+	Current(ctx context.Context, userID string) (*personalassistant.AssignmentCurrentResult, error)
+	Preview(ctx context.Context, userID string, ifVersion int64, input personalassistant.AssignmentInput) (*personalassistant.AssignmentPreviewResult, error)
+	Apply(ctx context.Context, userID string, request personalassistant.AssignmentApplyRequest) (*personalassistant.AssignmentApplyResult, error)
+}
+
 // Handler serves /api/personal-assistant.
 type Handler struct {
-	service  StateReader
-	hirer    HireService
-	provider userprofile.UserProvider
+	service     StateReader
+	hirer       HireService
+	assignments AssignmentPreviewService
+	provider    userprofile.UserProvider
 }
 
 // NewHandler constructs a personal-assistant HTTP handler.
@@ -50,6 +58,13 @@ func NewHandler(service StateReader, provider userprofile.UserProvider) *Handler
 func (h *Handler) SetHireService(hirer HireService) {
 	if h != nil {
 		h.hirer = hirer
+	}
+}
+
+// SetAssignmentService adds the first-value mutation boundary.
+func (h *Handler) SetAssignmentService(assignments AssignmentPreviewService) {
+	if h != nil {
+		h.assignments = assignments
 	}
 }
 
@@ -120,7 +135,7 @@ func (h *Handler) Hire(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body hireRequest
-	if err := decodeHireRequest(w, r, &body); err != nil {
+	if err := decodeBoundedRequest(w, r, &body); err != nil {
 		writeHireError(w, http.StatusBadRequest, "invalid_hire_request", "The hire request is invalid.", false, nil)
 		return
 	}
@@ -161,6 +176,155 @@ func (h *Handler) Hire(w http.ResponseWriter, r *http.Request) {
 	orihttp.Created(w, map[string]any{"personal_assistant": response})
 }
 
+type assignmentPreviewRequest struct {
+	IfVersion int64                                  `json:"if_version"`
+	Rows      []personalassistant.AssignmentInputRow `json:"rows"`
+}
+
+type assignmentConflictResponse struct {
+	Error        string                               `json:"error"`
+	Code         string                               `json:"code"`
+	StateVersion int64                                `json:"state_version,omitempty"`
+	Preview      *personalassistant.AssignmentPreview `json:"current_preview,omitempty"`
+}
+
+// GetFirstAssignment returns restart-safe current preview/apply state.
+func (h *Handler) GetFirstAssignment(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodGet) {
+		return
+	}
+	if h == nil || h.assignments == nil || h.provider == nil {
+		orihttp.ServiceUnavailable(w, "personal assistant assignment service is unavailable")
+		return
+	}
+	userID, ok := h.currentUserID(w, r)
+	if !ok {
+		return
+	}
+	result, err := h.assignments.Current(r.Context(), userID)
+	if errors.Is(err, personalassistant.ErrNotFound) {
+		_ = orihttp.RespondJSON(w, http.StatusConflict, assignmentConflictResponse{
+			Error: "An active assistant relationship is required.", Code: "assignment_conflict",
+		})
+		return
+	}
+	if err != nil {
+		orihttp.ServiceUnavailable(w, "first-assignment state is temporarily unavailable")
+		return
+	}
+	orihttp.Success(w, map[string]any{"first_assignment": result})
+}
+
+// PreviewFirstAssignment handles
+// POST /api/personal-assistant/first-assignment/preview.
+func (h *Handler) PreviewFirstAssignment(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+	if h == nil || h.assignments == nil || h.provider == nil {
+		orihttp.ServiceUnavailable(w, "personal assistant assignment service is unavailable")
+		return
+	}
+	var body assignmentPreviewRequest
+	if err := decodeBoundedRequest(w, r, &body); err != nil {
+		_ = orihttp.RespondJSON(w, http.StatusBadRequest, assignmentConflictResponse{
+			Error: "The first-assignment preview request is invalid.", Code: "invalid_assignment",
+		})
+		return
+	}
+	userID, ok := h.currentUserID(w, r)
+	if !ok {
+		return
+	}
+	result, err := h.assignments.Preview(r.Context(), userID, body.IfVersion, personalassistant.AssignmentInput{Rows: body.Rows})
+	if err != nil {
+		if errors.Is(err, personalassistant.ErrValidation) {
+			_ = orihttp.RespondJSON(w, http.StatusBadRequest, assignmentConflictResponse{
+				Error: "Check each assignment row and try again.", Code: "invalid_assignment",
+			})
+			return
+		}
+		var conflict *personalassistant.AssignmentPreviewConflictError
+		if errors.As(err, &conflict) || errors.Is(err, personalassistant.ErrConflict) || errors.Is(err, personalassistant.ErrNotFound) {
+			response := assignmentConflictResponse{
+				Error: "The assistant relationship or preview changed. Refresh before continuing.",
+				Code:  "assignment_conflict",
+			}
+			if conflict != nil {
+				response.StateVersion = conflict.StateVersion
+				response.Preview = conflict.Preview
+			}
+			_ = orihttp.RespondJSON(w, http.StatusConflict, response)
+			return
+		}
+		orihttp.ServiceUnavailable(w, "first-assignment preview is temporarily unavailable")
+		return
+	}
+	orihttp.Success(w, map[string]any{"first_assignment": result})
+}
+
+type assignmentPartialResponse struct {
+	Error           string                                   `json:"error"`
+	Code            string                                   `json:"code"`
+	FirstAssignment *personalassistant.AssignmentApplyResult `json:"first_assignment,omitempty"`
+}
+
+// ApplyFirstAssignment handles
+// POST /api/personal-assistant/first-assignment/apply.
+func (h *Handler) ApplyFirstAssignment(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+	if h == nil || h.assignments == nil || h.provider == nil {
+		orihttp.ServiceUnavailable(w, "personal assistant assignment service is unavailable")
+		return
+	}
+	var body personalassistant.AssignmentApplyRequest
+	if err := decodeBoundedRequest(w, r, &body); err != nil {
+		_ = orihttp.RespondJSON(w, http.StatusBadRequest, assignmentPartialResponse{
+			Error: "The first-assignment apply request is invalid.", Code: "invalid_assignment_apply",
+		})
+		return
+	}
+	userID, ok := h.currentUserID(w, r)
+	if !ok {
+		return
+	}
+	result, err := h.assignments.Apply(r.Context(), userID, body)
+	if err != nil {
+		if errors.Is(err, personalassistant.ErrValidation) {
+			_ = orihttp.RespondJSON(w, http.StatusBadRequest, assignmentPartialResponse{
+				Error: "The first-assignment apply request is invalid.", Code: "invalid_assignment_apply",
+			})
+			return
+		}
+		var partial *personalassistant.PartialAssignmentError
+		if errors.As(err, &partial) {
+			_ = orihttp.RespondJSON(w, http.StatusServiceUnavailable, assignmentPartialResponse{
+				Error: "Some first-assignment records were saved. Retry to continue safely.",
+				Code:  "assignment_partial", FirstAssignment: partial.Result,
+			})
+			return
+		}
+		var conflict *personalassistant.AssignmentPreviewConflictError
+		if errors.As(err, &conflict) || errors.Is(err, personalassistant.ErrConflict) || errors.Is(err, personalassistant.ErrNotFound) {
+			response := assignmentConflictResponse{
+				Error: "The assistant relationship or preview changed. Refresh before continuing.",
+				Code:  "assignment_conflict",
+			}
+			if conflict != nil {
+				response.StateVersion = conflict.StateVersion
+				response.Preview = conflict.Preview
+			}
+			_ = orihttp.RespondJSON(w, http.StatusConflict, response)
+			return
+		}
+		orihttp.ServiceUnavailable(w, "first-assignment apply is temporarily unavailable")
+		return
+	}
+	orihttp.Success(w, map[string]any{"first_assignment": result})
+}
+
 func (h *Handler) currentUserID(w http.ResponseWriter, r *http.Request) (string, bool) {
 	userID, err := h.provider.CurrentUserID(r.Context())
 	if err != nil {
@@ -173,7 +337,7 @@ func (h *Handler) currentUserID(w http.ResponseWriter, r *http.Request) (string,
 	return userID, true
 }
 
-func decodeHireRequest(w http.ResponseWriter, r *http.Request, target *hireRequest) error {
+func decodeBoundedRequest(w http.ResponseWriter, r *http.Request, target any) error {
 	if r.Body == nil {
 		return errors.New("missing body")
 	}

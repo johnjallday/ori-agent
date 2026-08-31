@@ -27,6 +27,41 @@ func (f *fakeStateReader) Get(context.Context, string) (*personalassistant.Proje
 	return f.projection, f.err
 }
 
+type fakeAssignmentService struct {
+	result      *personalassistant.AssignmentPreviewResult
+	err         error
+	userID      string
+	ifVersion   int64
+	input       personalassistant.AssignmentInput
+	calls       int
+	applyResult *personalassistant.AssignmentApplyResult
+	applyErr    error
+	apply       personalassistant.AssignmentApplyRequest
+	current     *personalassistant.AssignmentCurrentResult
+	currentErr  error
+}
+
+func (f *fakeAssignmentService) Current(_ context.Context, userID string) (*personalassistant.AssignmentCurrentResult, error) {
+	f.calls++
+	f.userID = userID
+	return f.current, f.currentErr
+}
+
+func (f *fakeAssignmentService) Preview(_ context.Context, userID string, ifVersion int64, input personalassistant.AssignmentInput) (*personalassistant.AssignmentPreviewResult, error) {
+	f.calls++
+	f.userID = userID
+	f.ifVersion = ifVersion
+	f.input = input
+	return f.result, f.err
+}
+
+func (f *fakeAssignmentService) Apply(_ context.Context, userID string, request personalassistant.AssignmentApplyRequest) (*personalassistant.AssignmentApplyResult, error) {
+	f.calls++
+	f.userID = userID
+	f.apply = request
+	return f.applyResult, f.applyErr
+}
+
 type fakeHireService struct {
 	result  *personalassistant.HireResult
 	err     error
@@ -207,6 +242,122 @@ func TestHandlerHire_RejectsMalformedOversizedAndUnknownJSONBeforeService(t *tes
 			t.Fatalf("status=%d calls=%d body=%s", recorder.Code, hirer.calls, recorder.Body.String())
 		}
 	}
+}
+
+func TestHandlerGetFirstAssignment_ReturnsDurableResumeIdentity(t *testing.T) {
+	service := &fakeAssignmentService{current: &personalassistant.AssignmentCurrentResult{
+		StateVersion: 6, Status: personalassistant.AssignmentApplying,
+		ApplyRequestID: "apply-1",
+		Preview: &personalassistant.AssignmentPreview{
+			PreviewID: "preview-1", AssignmentVersion: 3, PayloadHash: "hash", Count: 1,
+		},
+	}}
+	handler := NewHandler(&fakeStateReader{}, fakeUserProvider{userID: "local"})
+	handler.SetAssignmentService(service)
+	recorder := httptest.NewRecorder()
+	handler.GetFirstAssignment(recorder, httptest.NewRequest(http.MethodGet, "/api/personal-assistant/first-assignment", nil))
+	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), `"apply_request_id":"apply-1"`) ||
+		!strings.Contains(recorder.Body.String(), `"state_version":6`) {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestHandlerPreviewFirstAssignment_ReturnsExactCanonicalRows(t *testing.T) {
+	service := &fakeAssignmentService{result: &personalassistant.AssignmentPreviewResult{
+		Preview: &personalassistant.AssignmentPreview{
+			PreviewID: "preview-1", AssignmentVersion: 2, PayloadHash: "hash", Count: 1,
+			Items: []personalassistant.AssignmentPreviewItem{{
+				ID: "item-1", InputType: personalassistant.AssignmentRowIOwe,
+				RecordType: personalassistant.AssignmentRecordFollowUp,
+				Category:   "i_owe", State: "active", Title: "Send the draft",
+			}},
+		},
+		StateVersion: 5, Status: personalassistant.FirstAssignmentPreviewed,
+	}}
+	handler := NewHandler(&fakeStateReader{}, fakeUserProvider{userID: "user-a"})
+	handler.SetAssignmentService(service)
+	recorder := httptest.NewRecorder()
+	body := `{"if_version":4,"rows":[{"type":"i_owe","title":"Send the draft","counterparty":"Maya"}]}`
+	handler.PreviewFirstAssignment(recorder, httptest.NewRequest(http.MethodPost, "/api/personal-assistant/first-assignment/preview", strings.NewReader(body)))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if service.calls != 1 || service.userID != "user-a" || service.ifVersion != 4 ||
+		len(service.input.Rows) != 1 || service.input.Rows[0].Counterparty != "Maya" {
+		t.Fatalf("preview call = %#v, user=%q version=%d", service.input, service.userID, service.ifVersion)
+	}
+	if !strings.Contains(recorder.Body.String(), `"record_type":"follow_up"`) ||
+		!strings.Contains(recorder.Body.String(), `"state_version":5`) {
+		t.Fatalf("body=%s", recorder.Body.String())
+	}
+}
+
+func TestHandlerPreviewFirstAssignment_MapsValidationAndStaleConflict(t *testing.T) {
+	tests := []struct {
+		name   string
+		err    error
+		status int
+		code   string
+	}{
+		{"validation", personalassistant.ErrValidation, http.StatusBadRequest, "invalid_assignment"},
+		{"stale", &personalassistant.AssignmentPreviewConflictError{
+			StateVersion: 7,
+			Preview:      &personalassistant.AssignmentPreview{PreviewID: "current", AssignmentVersion: 3},
+			Err:          personalassistant.ErrConflict,
+		}, http.StatusConflict, "assignment_conflict"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			service := &fakeAssignmentService{err: test.err}
+			handler := NewHandler(&fakeStateReader{}, fakeUserProvider{userID: "local"})
+			handler.SetAssignmentService(service)
+			recorder := httptest.NewRecorder()
+			handler.PreviewFirstAssignment(recorder, httptest.NewRequest(http.MethodPost, "/api/personal-assistant/first-assignment/preview", strings.NewReader(`{"if_version":1,"rows":[]}`)))
+			if recorder.Code != test.status || !strings.Contains(recorder.Body.String(), `"code":"`+test.code+`"`) {
+				t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+			}
+			if test.status == http.StatusConflict && (!strings.Contains(recorder.Body.String(), `"state_version":7`) || !strings.Contains(recorder.Body.String(), `"preview_id":"current"`)) {
+				t.Fatalf("conflict omitted current versions: %s", recorder.Body.String())
+			}
+		})
+	}
+}
+
+func TestHandlerApplyFirstAssignment_ReturnsCompleteAndBoundedPartialResults(t *testing.T) {
+	t.Run("complete", func(t *testing.T) {
+		service := &fakeAssignmentService{applyResult: &personalassistant.AssignmentApplyResult{
+			PreviewID: "preview-1", AssignmentVersion: 4, StateVersion: 7,
+			Status: personalassistant.AssignmentCompleted, AppliedCount: 1, TotalCount: 1,
+			CreatedCanonicalRefs: []personalassistant.CanonicalRef{{Kind: "ticket", WorkspaceID: "hq", ID: "ticket-1"}},
+		}}
+		handler := NewHandler(&fakeStateReader{}, fakeUserProvider{userID: "local"})
+		handler.SetAssignmentService(service)
+		recorder := httptest.NewRecorder()
+		body := `{"preview_id":"preview-1","preview_version":1,"payload_hash":"hash","if_version":2,"apply_request_id":"apply-1"}`
+		handler.ApplyFirstAssignment(recorder, httptest.NewRequest(http.MethodPost, "/api/personal-assistant/first-assignment/apply", strings.NewReader(body)))
+		if recorder.Code != http.StatusOK || service.apply.ApplyRequestID != "apply-1" || !strings.Contains(recorder.Body.String(), `"id":"ticket-1"`) {
+			t.Fatalf("status=%d request=%#v body=%s", recorder.Code, service.apply, recorder.Body.String())
+		}
+	})
+
+	t.Run("partial does not leak cause", func(t *testing.T) {
+		partialResult := &personalassistant.AssignmentApplyResult{
+			PreviewID: "preview-1", AssignmentVersion: 3, StateVersion: 6,
+			Status: personalassistant.AssignmentApplying, AppliedCount: 1, TotalCount: 2, Retryable: true,
+			CreatedCanonicalRefs: []personalassistant.CanonicalRef{{Kind: "ticket", ID: "ticket-1"}},
+		}
+		service := &fakeAssignmentService{applyErr: &personalassistant.PartialAssignmentError{
+			Result: partialResult, Err: errors.New("database password super-secret"),
+		}}
+		handler := NewHandler(&fakeStateReader{}, fakeUserProvider{userID: "local"})
+		handler.SetAssignmentService(service)
+		recorder := httptest.NewRecorder()
+		handler.ApplyFirstAssignment(recorder, httptest.NewRequest(http.MethodPost, "/api/personal-assistant/first-assignment/apply", strings.NewReader(`{"preview_id":"preview-1","preview_version":1,"payload_hash":"hash","if_version":2,"apply_request_id":"apply-1"}`)))
+		if recorder.Code != http.StatusServiceUnavailable || !strings.Contains(recorder.Body.String(), `"code":"assignment_partial"`) ||
+			!strings.Contains(recorder.Body.String(), `"retryable":true`) || strings.Contains(recorder.Body.String(), "super-secret") {
+			t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+		}
+	})
 }
 
 func TestHandlerGetState_UserResolutionFailureDoesNotReadState(t *testing.T) {

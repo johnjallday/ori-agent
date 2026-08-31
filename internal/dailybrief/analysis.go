@@ -39,6 +39,8 @@ func attentionRank(reason string) int {
 		return 5
 	case "timeout":
 		return 4
+	case "follow_up_stale":
+		return 4
 	case "waiting_for_choice":
 		return 3
 	// An email thread awaiting the user's reply is a peer of a task waiting for a
@@ -93,6 +95,14 @@ func ComputeNeedsAttention(snap Snapshot) []AttentionItem {
 	// Email attention (HQ-scoped, top-level). Each thread keeps its own source
 	// ref so an aggregate claim ("N threads waiting") can be traced back to every
 	// underlying thread (task 4.5) — never a title-only count.
+	for _, followUp := range snap.FollowUps {
+		if followUp.Stale {
+			items = append(items, AttentionItem{
+				Ref: followUp.Ref, Title: followUp.Title,
+				WorkspaceName: "Personal HQ", Reason: "follow_up_stale",
+			})
+		}
+	}
 	for _, e := range snap.EmailThreads {
 		switch {
 		case e.WaitingOnUser:
@@ -160,6 +170,14 @@ func ComputeTodaysPlan(snap Snapshot, now time.Time) []PlanItem {
 			}
 		}
 	}
+	for _, followUp := range snap.FollowUps {
+		if followUp.DueAt != nil && !followUp.DueAt.After(now.Add(24*time.Hour)) {
+			dueSoon = append(dueSoon, PlanItem{
+				Ref: followUp.Ref, Title: followUp.Title,
+				WorkspaceName: "Personal HQ", Reason: "follow_up_due",
+			})
+		}
+	}
 	items := append(inProgress, dueSoon...)
 	if len(items) > maxTodaysPlanItems {
 		items = items[:maxTodaysPlanItems]
@@ -199,6 +217,13 @@ func ComputeSinceLastBrief(snap Snapshot, since time.Time) []ChangeItem {
 			if s.UpdatedAt.After(since) {
 				items = append(items, ChangeItem{Ref: s.Ref, Title: s.Title, WorkspaceName: ws.Name})
 			}
+		}
+	}
+	for _, followUp := range snap.FollowUps {
+		if followUp.Ref.Timestamp.After(since) {
+			items = append(items, ChangeItem{
+				Ref: followUp.Ref, Title: followUp.Title, WorkspaceName: "Personal HQ",
+			})
 		}
 	}
 	sort.SliceStable(items, func(i, j int) bool { return items[i].Ref.Timestamp.After(items[j].Ref.Timestamp) })

@@ -66,6 +66,31 @@ func TestSynthesizer_NoChatConfiguredUsesDeterministicFallback(t *testing.T) {
 	}
 }
 
+func TestSynthesizer_NoModelShowsGroundedFollowUps(t *testing.T) {
+	now := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+	due := now.Add(time.Hour)
+	ref := SourceRef{WorkspaceID: "hq", EntityType: "follow_up", EntityID: "followup-1", Timestamp: now.Add(-8 * 24 * time.Hour)}
+	snap := Snapshot{GeneratedAt: now, FollowUps: []FollowUpSnapshot{{
+		Ref: ref, Category: "i_owe", Direction: "outbound", Title: "Send Maya the draft",
+		Status: "active", DueAt: &due, Stale: true,
+	}}}
+	s := &Synthesizer{Resolver: resolverFor(snap, nil, nil)}
+	result, err := s.Generate(context.Background(), GenerationRequest{}, Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var content BriefContent
+	if err := json.Unmarshal([]byte(result.ContentJSON), &content); err != nil {
+		t.Fatal(err)
+	}
+	if len(content.NeedsAttention) != 1 || content.NeedsAttention[0].Ref != ref || content.NeedsAttention[0].Reason != "follow_up_stale" {
+		t.Fatalf("follow-up attention = %#v", content.NeedsAttention)
+	}
+	if len(content.TodaysPlan) != 1 || content.TodaysPlan[0].Ref != ref || content.TodaysPlan[0].Reason != "follow_up_due" {
+		t.Fatalf("follow-up plan = %#v", content.TodaysPlan)
+	}
+}
+
 func TestSynthesizer_ModelUnavailableFallsBackToPartial(t *testing.T) {
 	now := time.Now()
 	snap := sampleSnapshot(now)
@@ -197,6 +222,23 @@ func TestSynthesizer_QuietDayProducesQuietOpeningSummary(t *testing.T) {
 	}
 }
 
+func TestSynthesizer_FailedFollowUpReadNeverClaimsHealthyEmpty(t *testing.T) {
+	now := time.Now()
+	snap := Snapshot{GeneratedAt: now, Gaps: []string{"Personal HQ follow-ups could not be read"}}
+	s := &Synthesizer{Resolver: resolverFor(snap, &Revision{GeneratedAt: now.Add(-time.Hour)}, nil)}
+	result, err := s.Generate(context.Background(), GenerationRequest{}, Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var content BriefContent
+	if err := json.Unmarshal([]byte(result.ContentJSON), &content); err != nil {
+		t.Fatal(err)
+	}
+	if content.OpeningSummary == "A quiet day — nothing needs your attention right now." || len(content.DataGaps) != 1 {
+		t.Fatalf("failed source rendered healthy empty: %#v", content)
+	}
+}
+
 func TestSynthesizer_FirstBriefFramingWhenNoPreviousRevision(t *testing.T) {
 	now := time.Now()
 	snap := sampleSnapshot(now)
@@ -225,6 +267,18 @@ func TestSynthesizer_NoResolverConfiguredErrors(t *testing.T) {
 	s := &Synthesizer{}
 	if _, err := s.Generate(context.Background(), GenerationRequest{}, Config{}); err == nil {
 		t.Fatal("expected an error when no resolver is configured")
+	}
+}
+
+func TestValidateAgainstAllowlist_RejectsFabricatedFollowUpRef(t *testing.T) {
+	allowedRef := SourceRef{WorkspaceID: "hq", EntityType: "follow_up", EntityID: "real"}
+	content := BriefContent{NeedsAttention: []BriefAttentionItem{
+		{Ref: allowedRef, Title: "Real"},
+		{Ref: SourceRef{WorkspaceID: "hq", EntityType: "follow_up", EntityID: "fabricated"}, Title: "Fake"},
+	}}
+	got, dropped := ValidateAgainstAllowlist(content, map[string]SourceRef{allowedRef.Key(): allowedRef})
+	if dropped != 1 || len(got.NeedsAttention) != 1 || got.NeedsAttention[0].Ref.EntityID != "real" {
+		t.Fatalf("validated=%#v dropped=%d", got, dropped)
 	}
 }
 

@@ -108,17 +108,18 @@ func NormalizeFirstAssignmentStatus(raw string) (FirstAssignmentStatus, error) {
 type AssignmentStatus string
 
 const (
-	AssignmentPreviewed AssignmentStatus = "previewed"
-	AssignmentApplying  AssignmentStatus = "applying"
-	AssignmentCompleted AssignmentStatus = "completed"
-	AssignmentFailed    AssignmentStatus = "failed"
+	AssignmentPreviewed  AssignmentStatus = "previewed"
+	AssignmentApplying   AssignmentStatus = "applying"
+	AssignmentCompleted  AssignmentStatus = "completed"
+	AssignmentFailed     AssignmentStatus = "failed"
+	AssignmentSuperseded AssignmentStatus = "superseded"
 )
 
 // NormalizeAssignmentStatus returns a canonical closed-enum value.
 func NormalizeAssignmentStatus(raw string) (AssignmentStatus, error) {
 	status := AssignmentStatus(strings.ToLower(strings.TrimSpace(raw)))
 	switch status {
-	case AssignmentPreviewed, AssignmentApplying, AssignmentCompleted, AssignmentFailed:
+	case AssignmentPreviewed, AssignmentApplying, AssignmentCompleted, AssignmentFailed, AssignmentSuperseded:
 		return status, nil
 	default:
 		return "", fmt.Errorf("personal assistant: invalid assignment status %q", raw)
@@ -262,6 +263,11 @@ type Assignment struct {
 	AssignmentVersion     int64
 	NormalizedPayload     json.RawMessage
 	NormalizedPayloadHash string
+	ApplyRequestID        string
+	BriefRequestID        string
+	BriefRevisionID       string
+	BriefStatus           string
+	BriefTrigger          string
 	Status                AssignmentStatus
 	CreatedCanonicalRefs  []CanonicalRef
 	CreatedAt             time.Time

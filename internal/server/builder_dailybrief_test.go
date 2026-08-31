@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/dailybrief"
+	"github.com/johnjallday/ori-agent/internal/followup"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -51,6 +52,59 @@ func newDailyBriefTestServer(t *testing.T) (*ServerBuilder, http.Handler) {
 		t.Fatal("expected dailyBriefService to be wired")
 	}
 	return builder, srv.Handler()
+}
+
+func TestDailyBrief_FollowUpSourceIsWiredAndGroundedWithoutModel(t *testing.T) {
+	builder, handler := newDailyBriefTestServer(t)
+	ctx := context.Background()
+	setupReq := httptest.NewRequest(http.MethodPost, "/api/personal-hq/setup", bytes.NewBufferString(`{"name":"Personal HQ"}`))
+	setupReq.Header.Set("Content-Type", "application/json")
+	setupRec := httptest.NewRecorder()
+	handler.ServeHTTP(setupRec, setupReq)
+	if setupRec.Code != http.StatusOK {
+		t.Fatalf("setup status=%d body=%s", setupRec.Code, setupRec.Body.String())
+	}
+	var setup struct {
+		Status struct {
+			WorkspaceID string `json:"workspace_id"`
+		} `json:"status"`
+	}
+	if err := json.Unmarshal(setupRec.Body.Bytes(), &setup); err != nil || setup.Status.WorkspaceID == "" {
+		t.Fatalf("setup response=%s err=%v", setupRec.Body.String(), err)
+	}
+	if _, err := builder.dailyBriefService.UpdateConfig(ctx, dailybrief.Config{
+		WorkspaceID: setup.Status.WorkspaceID, UserID: "local", Timezone: "UTC",
+		Scope: dailybrief.ScopeAll, IncludeFutureWorkspaces: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	due := time.Now().Add(-time.Hour)
+	captured, err := builder.followUpService.Capture(ctx, followup.CaptureInput{
+		UserID: "local", WorkspaceID: setup.Status.WorkspaceID,
+		Category: followup.CategoryIOwe, Direction: followup.DirectionOutbound,
+		Title: "Send the signed form", DueAt: &due, Provenance: followup.ProvenanceExplicit,
+		Source: followup.SourceRef{Type: "personal_assistant_first_assignment", ID: "item-1"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	revision, err := builder.dailyBriefService.RequestGenerationNow(ctx, setup.Status.WorkspaceID, "local", dailybrief.TriggerFirstOpen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var content dailybrief.BriefContent
+	if err := json.Unmarshal([]byte(revision.ContentJSON), &content); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, item := range content.NeedsAttention {
+		if item.Ref.EntityType == "follow_up" && item.Ref.EntityID == captured.ID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("grounded follow-up absent from brief: %#v", content)
+	}
 }
 
 // TestDailyBrief_ScheduledSuccessCreatesExactlyOneActionCenterNotification
