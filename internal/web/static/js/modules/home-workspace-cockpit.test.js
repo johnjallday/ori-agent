@@ -1537,6 +1537,15 @@ test('updatesBadgeView carries the real aggregate attention count when positive 
   assert.equal(badge.visible, true);
 });
 
+test('updatesBadgeView includes cached plugin updates with workspace attention', () => {
+  const flattened = [
+    { id: 'a', kind: 'workspace', needs_attention_count: 2 },
+    { id: 'b', kind: 'workspace', needs_attention_count: 0 }
+  ];
+  assert.deepEqual(updatesBadgeView(flattened, null, 3), { count: 4, visible: true });
+  assert.deepEqual(updatesBadgeView([], null, 1), { count: 1, visible: true });
+});
+
 test('updatesBadgeView never lets an unavailable source read as a fabricated 0', () => {
   // No workspace here reports an attention field at all, so the underlying
   // signal is unknown — the badge must still resolve to a real (hidden) 0

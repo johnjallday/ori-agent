@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
+	"sync"
 	"time"
 )
 
@@ -22,6 +24,7 @@ type contributionLifecycle interface {
 }
 
 type Manager struct {
+	operationMu  sync.Mutex
 	reg          MCPRegistrar
 	skills       SkillInstaller
 	store        *Store
@@ -29,6 +32,7 @@ type Manager struct {
 	artifacts    *ArtifactInstaller
 	surfaces     contributionLifecycle
 	cloneDir     string
+	previewDir   string
 }
 
 // NewManager builds a plugin manager backed by the managed pluginsDir (which
@@ -42,13 +46,17 @@ func NewManager(reg MCPRegistrar, skills SkillInstaller, pluginsDir, cloneDir st
 		marketplaces: NewMarketplaceStore(pluginsDir),
 		artifacts:    NewArtifactInstaller(pluginsDir),
 		cloneDir:     cloneDir,
+		previewDir:   filepath.Join(pluginsDir, "preview"),
 	}
 }
 
 func (m *Manager) SetSurfaceLifecycle(lifecycle contributionLifecycle) {
-	if m != nil {
-		m.surfaces = lifecycle
+	if m == nil {
+		return
 	}
+	m.operationMu.Lock()
+	defer m.operationMu.Unlock()
+	m.surfaces = lifecycle
 }
 
 func prepareTrustedBlueprints(descriptor *PluginDescriptor) error {
@@ -72,6 +80,12 @@ func prepareTrustedBlueprints(descriptor *PluginDescriptor) error {
 // trust prompt makes no changes. On success the plugin is recorded in the store,
 // disabled — enabling happens per workspace (task 4.x).
 func (m *Manager) Install(source string, prefer SourceFormat, confirm ConfirmFunc) (InstalledPlugin, error) {
+	m.operationMu.Lock()
+	defer m.operationMu.Unlock()
+	return m.install(source, prefer, confirm)
+}
+
+func (m *Manager) install(source string, prefer SourceFormat, confirm ConfirmFunc) (InstalledPlugin, error) {
 	d, err := Load(source, m.cloneDir, prefer)
 	if err != nil {
 		return InstalledPlugin{}, err
@@ -129,6 +143,12 @@ func (m *Manager) Install(source string, prefer SourceFormat, confirm ConfirmFun
 // Preview resolves a source and returns its trust report without installing or
 // registering anything — used to render the disclosure before confirmation.
 func (m *Manager) Preview(source string, prefer SourceFormat) (TrustReport, error) {
+	m.operationMu.Lock()
+	defer m.operationMu.Unlock()
+	return m.preview(source, prefer)
+}
+
+func (m *Manager) preview(source string, prefer SourceFormat) (TrustReport, error) {
 	d, err := Load(source, m.cloneDir, prefer)
 	if err != nil {
 		return TrustReport{}, err
@@ -142,6 +162,8 @@ func (m *Manager) Preview(source string, prefer SourceFormat) (TrustReport, erro
 // SetEnabled invalidates/stops/replaces the trusted contribution before the
 // enabled generation is committed to the store.
 func (m *Manager) SetEnabled(name string, enabled bool) error {
+	m.operationMu.Lock()
+	defer m.operationMu.Unlock()
 	existing, ok, err := m.store.Get(name)
 	if err != nil {
 		return err
@@ -171,12 +193,16 @@ func (m *Manager) SetEnabled(name string, enabled bool) error {
 
 // List returns installed plugins.
 func (m *Manager) List() ([]InstalledPlugin, error) {
+	m.operationMu.Lock()
+	defer m.operationMu.Unlock()
 	return m.store.List()
 }
 
 // Uninstall removes a plugin's registered components and its store entry,
 // reversing the install exactly via the recorded component IDs.
 func (m *Manager) Uninstall(name string) error {
+	m.operationMu.Lock()
+	defer m.operationMu.Unlock()
 	p, ok, err := m.store.Get(name)
 	if err != nil {
 		return err
@@ -217,9 +243,53 @@ func (m *Manager) Uninstall(name string) error {
 	return m.store.Delete(name)
 }
 
+type updatePreviewResolution struct {
+	sourceVersion     string
+	trustReport       TrustReport
+	componentsChanged bool
+}
+
+// UpdateAvailability is the notification-safe result of checking one installed
+// plugin against its recorded source. Available is based on source differences,
+// not semver ordering: a version or trusted-component change is enough.
+type UpdateAvailability struct {
+	Name              string `json:"name"`
+	InstalledVersion  string `json:"installed_version,omitempty"`
+	AvailableVersion  string `json:"available_version,omitempty"`
+	ComponentsChanged bool   `json:"components_changed"`
+	Available         bool   `json:"available"`
+}
+
+// CheckUpdate resolves one installed plugin's source and derives the small
+// availability result used by background notification checks.
+func (m *Manager) CheckUpdate(name string) (UpdateAvailability, error) {
+	m.operationMu.Lock()
+	defer m.operationMu.Unlock()
+	existing, ok, err := m.store.Get(name)
+	if err != nil {
+		return UpdateAvailability{}, err
+	}
+	if !ok {
+		return UpdateAvailability{}, fmt.Errorf("plugin: %q not installed", name)
+	}
+	preview, err := m.resolveUpdatePreview(existing)
+	if err != nil {
+		return UpdateAvailability{}, err
+	}
+	return UpdateAvailability{
+		Name:              existing.Name,
+		InstalledVersion:  existing.Version,
+		AvailableVersion:  preview.sourceVersion,
+		ComponentsChanged: preview.componentsChanged,
+		Available:         existing.Version != preview.sourceVersion || preview.componentsChanged,
+	}, nil
+}
+
 // UpdatePreview re-resolves an installed plugin from its source and returns the
 // trust report plus whether the set of registered components changed.
 func (m *Manager) UpdatePreview(name string) (TrustReport, bool, error) {
+	m.operationMu.Lock()
+	defer m.operationMu.Unlock()
 	existing, ok, err := m.store.Get(name)
 	if err != nil {
 		return TrustReport{}, false, err
@@ -227,19 +297,37 @@ func (m *Manager) UpdatePreview(name string) (TrustReport, bool, error) {
 	if !ok {
 		return TrustReport{}, false, fmt.Errorf("plugin: %q not installed", name)
 	}
-	d, err := m.reload(existing)
+	preview, err := m.resolveUpdatePreview(existing)
 	if err != nil {
 		return TrustReport{}, false, err
 	}
-	if err := prepareTrustedBlueprints(&d); err != nil {
-		return TrustReport{}, false, err
+	return preview.trustReport, preview.componentsChanged, nil
+}
+
+// resolveUpdatePreview performs the canonical one-pass source resolution used
+// by both the manual trust preview and proactive availability checks. Keeping
+// the resolved version beside the disclosure and footprint comparison prevents
+// callers from reloading the source to discover notification metadata.
+func (m *Manager) resolveUpdatePreview(existing InstalledPlugin) (updatePreviewResolution, error) {
+	d, err := m.previewReload(existing)
+	if err != nil {
+		return updatePreviewResolution{}, err
 	}
-	return BuildTrustReport(d), componentsChanged(existing, d), nil
+	if err := prepareTrustedBlueprints(&d); err != nil {
+		return updatePreviewResolution{}, err
+	}
+	return updatePreviewResolution{
+		sourceVersion:     d.Version,
+		trustReport:       BuildTrustReport(d),
+		componentsChanged: componentsChanged(existing, d),
+	}, nil
 }
 
 // Update reinstalls a plugin from its recorded source (re-pulling git sources),
 // re-running the trust prompt when the registered component set changed.
 func (m *Manager) Update(name string, confirm ConfirmFunc) (InstalledPlugin, error) {
+	m.operationMu.Lock()
+	defer m.operationMu.Unlock()
 	existing, ok, err := m.store.Get(name)
 	if err != nil {
 		return InstalledPlugin{}, err
@@ -331,8 +419,48 @@ func (m *Manager) Update(name string, confirm ConfirmFunc) (InstalledPlugin, err
 	return updated, nil
 }
 
-// reload re-resolves a descriptor for an installed plugin, refreshing git
-// clones.
+// previewReload re-resolves a descriptor without changing the checkout used by
+// the installed plugin. Mutable git sources are refreshed in a separate managed
+// preview checkout; immutable pins and local paths are only read.
+func (m *Manager) previewReload(existing InstalledPlugin) (PluginDescriptor, error) {
+	var root string
+	if g, ok := parseGitSubdir(existing.Source); ok {
+		var err error
+		root, err = ResolveSource(existing.Source, m.previewDir)
+		if err != nil {
+			return PluginDescriptor{}, err
+		}
+		if g.Sha == "" && g.Ref == "" {
+			if err := pullGit(root); err != nil {
+				return PluginDescriptor{}, err
+			}
+		}
+	} else if isGitURL(existing.Source) {
+		var err error
+		root, err = ResolveSource(existing.Source, m.previewDir)
+		if err != nil {
+			return PluginDescriptor{}, err
+		}
+		if err := pullGit(root); err != nil {
+			return PluginDescriptor{}, err
+		}
+	} else {
+		var err error
+		root, err = canonicalInstallRoot(existing.InstallDir, existing.Source, m.cloneDir)
+		if err != nil {
+			return PluginDescriptor{}, err
+		}
+	}
+
+	mfst, err := DetectManifest(root, existing.Format)
+	if err != nil {
+		return PluginDescriptor{}, err
+	}
+	return Normalize(mfst, existing.Source)
+}
+
+// reload re-resolves a descriptor for an installed plugin, refreshing the live
+// git checkout as part of an explicitly confirmed update.
 //
 // The install root is canonicalized first, so a record written before roots
 // were absolutized is refreshed, validated, and re-fingerprinted against the

@@ -1,12 +1,14 @@
 package pluginhttp
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/johnjallday/ori-agent/internal/mcp"
 	"github.com/johnjallday/ori-agent/internal/plugin"
@@ -143,6 +145,165 @@ func TestMarketplacesOfficialStatus(t *testing.T) {
 	}
 	if !strings.Contains(getMarketplaces(), `"added":true`) {
 		t.Errorf("expected added:true after add, got %s", getMarketplaces())
+	}
+}
+
+func cachedUpdates(t *testing.T, h *Handler) plugin.UpdateSnapshot {
+	t.Helper()
+	rr := httptest.NewRecorder()
+	h.UpdateStatusHandler(rr, httptest.NewRequest(http.MethodGet, "/api/plugins/updates", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("update status: %d %s", rr.Code, rr.Body.String())
+	}
+	var snapshot plugin.UpdateSnapshot
+	if err := json.Unmarshal(rr.Body.Bytes(), &snapshot); err != nil {
+		t.Fatalf("decode update status: %v", err)
+	}
+	return snapshot
+}
+
+func primeAvailableUpdate(t *testing.T, h *Handler, source string) {
+	t.Helper()
+	mustWrite(t, filepath.Join(source, ".claude-plugin", "plugin.json"), `{"name":"reaper","version":"0.2.0"}`)
+	h.UpdateChecker().Start(time.Hour)
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		snapshot := h.UpdateChecker().Snapshot()
+		if len(snapshot.Updates) == 1 && snapshot.Updates[0].Available {
+			h.UpdateChecker().Stop()
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	h.UpdateChecker().Stop()
+	t.Fatalf("available update was not cached: %+v", h.UpdateChecker().Snapshot())
+}
+
+func TestUpdateStatusHandlerReadsCacheOnly(t *testing.T) {
+	h := testHandler(t)
+	source := claudeBundle(t)
+	if rr := postInstall(t, h, source, true); rr.Code != http.StatusOK {
+		t.Fatalf("install: %d %s", rr.Code, rr.Body.String())
+	}
+	mustWrite(t, filepath.Join(source, ".claude-plugin", "plugin.json"), `{"name":"reaper","version":"0.2.0"}`)
+
+	// Repeated reads before the checker runs stay empty even though the source
+	// changed, proving this handler does not resolve the source itself.
+	for range 2 {
+		snapshot := cachedUpdates(t, h)
+		if snapshot.Checking || snapshot.LastSuccessfulCheckAt != nil || len(snapshot.Updates) != 0 {
+			t.Fatalf("cold cached snapshot = %+v", snapshot)
+		}
+	}
+
+	rr := httptest.NewRecorder()
+	h.UpdateStatusHandler(rr, httptest.NewRequest(http.MethodPost, "/api/plugins/updates", nil))
+	if rr.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("POST update status = %d, want 405", rr.Code)
+	}
+}
+
+func TestSuccessfulPluginMutationsInvalidateCachedUpdate(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*testing.T, *Handler, string) *httptest.ResponseRecorder
+	}{
+		{
+			name: "install",
+			mutate: func(t *testing.T, h *Handler, source string) *httptest.ResponseRecorder {
+				return postInstall(t, h, source, true)
+			},
+		},
+		{
+			name: "marketplace install",
+			mutate: func(t *testing.T, h *Handler, source string) *httptest.ResponseRecorder {
+				catalog := t.TempDir()
+				mustWrite(t, filepath.Join(catalog, "marketplace.json"), `{"name":"local","plugins":[{"name":"reaper","source":"`+source+`"}]}`)
+				add := httptest.NewRecorder()
+				h.MarketplacesHandler(add, httptest.NewRequest(http.MethodPost, "/api/plugins/marketplaces", strings.NewReader(`{"source":"`+catalog+`"}`)))
+				if add.Code != http.StatusOK {
+					t.Fatalf("add marketplace: %d %s", add.Code, add.Body.String())
+				}
+				rr := httptest.NewRecorder()
+				h.MarketplaceInstallHandler(rr, httptest.NewRequest(http.MethodPost, "/api/plugins/marketplaces/install", strings.NewReader(`{"marketplace":"local","plugin":"reaper","confirm":true}`)))
+				return rr
+			},
+		},
+		{
+			name: "update",
+			mutate: func(t *testing.T, h *Handler, _ string) *httptest.ResponseRecorder {
+				req := httptest.NewRequest(http.MethodPost, "/api/plugins/reaper/update", strings.NewReader(`{"confirm":true}`))
+				req.SetPathValue("name", "reaper")
+				rr := httptest.NewRecorder()
+				h.UpdateHandler(rr, req)
+				return rr
+			},
+		},
+		{
+			name: "uninstall",
+			mutate: func(t *testing.T, h *Handler, _ string) *httptest.ResponseRecorder {
+				req := httptest.NewRequest(http.MethodDelete, "/api/plugins/reaper", nil)
+				req.SetPathValue("name", "reaper")
+				rr := httptest.NewRecorder()
+				h.UninstallHandler(rr, req)
+				return rr
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			h := testHandler(t)
+			source := claudeBundle(t)
+			if rr := postInstall(t, h, source, true); rr.Code != http.StatusOK {
+				t.Fatalf("initial install: %d %s", rr.Code, rr.Body.String())
+			}
+			primeAvailableUpdate(t, h, source)
+			if rr := tc.mutate(t, h, source); rr.Code != http.StatusOK {
+				t.Fatalf("mutation: %d %s", rr.Code, rr.Body.String())
+			}
+			if snapshot := cachedUpdates(t, h); len(snapshot.Updates) != 0 {
+				t.Fatalf("successful mutation retained cached update: %+v", snapshot)
+			}
+		})
+	}
+}
+
+func TestDeclinedFailedAndEnableMutationsKeepCachedUpdate(t *testing.T) {
+	h := testHandler(t)
+	source := claudeBundle(t)
+	if rr := postInstall(t, h, source, true); rr.Code != http.StatusOK {
+		t.Fatalf("install: %d %s", rr.Code, rr.Body.String())
+	}
+	primeAvailableUpdate(t, h, source)
+
+	previewReq := httptest.NewRequest(http.MethodPost, "/api/plugins/reaper/update", strings.NewReader(`{"confirm":false}`))
+	previewReq.SetPathValue("name", "reaper")
+	preview := httptest.NewRecorder()
+	h.UpdateHandler(preview, previewReq)
+	if preview.Code != http.StatusOK {
+		t.Fatalf("update preview: %d %s", preview.Code, preview.Body.String())
+	}
+
+	enableReq := httptest.NewRequest(http.MethodPost, "/api/plugins/reaper/enable", nil)
+	enableReq.SetPathValue("name", "reaper")
+	enabled := httptest.NewRecorder()
+	h.SetEnabledHandler(true)(enabled, enableReq)
+	if enabled.Code != http.StatusOK {
+		t.Fatalf("enable: %d %s", enabled.Code, enabled.Body.String())
+	}
+
+	mustWrite(t, filepath.Join(source, ".claude-plugin", "plugin.json"), `{not json`)
+	failedReq := httptest.NewRequest(http.MethodPost, "/api/plugins/reaper/update", strings.NewReader(`{"confirm":true}`))
+	failedReq.SetPathValue("name", "reaper")
+	failed := httptest.NewRecorder()
+	h.UpdateHandler(failed, failedReq)
+	if failed.Code == http.StatusOK {
+		t.Fatalf("malformed update unexpectedly succeeded: %s", failed.Body.String())
+	}
+
+	if snapshot := cachedUpdates(t, h); len(snapshot.Updates) != 1 || !snapshot.Updates[0].Available {
+		t.Fatalf("non-successful mutation cleared cached update: %+v", snapshot)
 	}
 }
 

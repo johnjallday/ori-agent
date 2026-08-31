@@ -15,6 +15,38 @@ func TestLoadTemplates_Parses(t *testing.T) {
 	}
 }
 
+func TestRenderPluginsIncludesAccessibleUpdateNoticeAndHelperOrder(t *testing.T) {
+	r := NewTemplateRenderer()
+	if err := r.LoadTemplates(); err != nil {
+		t.Fatalf("LoadTemplates failed: %v", err)
+	}
+	html, err := r.RenderTemplate("plugins", TemplateData{Title: "Plugins - Ori Agent"})
+	if err != nil {
+		t.Fatalf("RenderTemplate(plugins) failed: %v", err)
+	}
+	for _, want := range []string{
+		`id="pluginUpdateNotice"`,
+		`role="status"`,
+		`aria-live="polite"`,
+		`aria-atomic="true"`,
+		`id="pluginUpdateNoticeMarker"`,
+		`id="pluginUpdateNoticeTitle"`,
+		`id="pluginUpdateNoticeDetail"`,
+		`onclick="refreshPluginsPage()"`,
+		`src="/js/modules/plugin-update-notifications.js"`,
+		`src="/js/plugins.js"`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("rendered plugins page missing %q", want)
+		}
+	}
+	helper := strings.Index(html, `src="/js/modules/plugin-update-notifications.js"`)
+	page := strings.Index(html, `src="/js/plugins.js"`)
+	if helper < 0 || page < 0 || helper > page {
+		t.Fatalf("plugin update helper must load before plugins.js: helper=%d page=%d", helper, page)
+	}
+}
+
 func TestRenderProfileIncludesReviewableKnowledgeScopes(t *testing.T) {
 	r := NewTemplateRenderer()
 	if err := r.LoadTemplates(); err != nil {
@@ -491,6 +523,10 @@ func TestRenderHomeCockpitShell(t *testing.T) {
 		`cockpit-flyout-toggle__label">Updates<`,
 		`id="cockpitUpdatesFlyout"`,
 		`id="cockpitUpdatesFlyoutBody"`,
+		`id="homePluginUpdates"`,
+		`id="homePluginUpdatesTitle"`,
+		`id="homePluginUpdatesBody"`,
+		`href="/plugins"`,
 		// Quests: Progression's always-available compact entry point, adjacent
 		// to Updates (Issue #334 FR26-FR40).
 		`id="cockpitQuestsToggle"`,
@@ -623,19 +659,35 @@ func TestHomeCockpitLoadsMapBeforeCoordinator(t *testing.T) {
 	}
 
 	const (
-		mapJS     = `/js/modules/workspace-map.js`
-		cockpitJS = `/js/modules/home-workspace-cockpit.js`
+		mapJS          = `/js/modules/workspace-map.js`
+		updateHelperJS = `/js/modules/plugin-update-notifications.js`
+		cockpitJS      = `/js/modules/home-workspace-cockpit.js`
+		homeUpdatesJS  = `/js/modules/home-plugin-updates.js`
 	)
 	mapAt := strings.Index(html, mapJS)
+	helperAt := strings.Index(html, updateHelperJS)
 	cockpitAt := strings.Index(html, cockpitJS)
+	homeUpdatesAt := strings.Index(html, homeUpdatesJS)
 	if mapAt < 0 {
 		t.Fatalf("Home page does not load %s", mapJS)
 	}
 	if cockpitAt < 0 {
 		t.Fatalf("Home page does not load %s", cockpitJS)
 	}
+	if helperAt < 0 {
+		t.Fatalf("Home page does not load %s", updateHelperJS)
+	}
+	if homeUpdatesAt < 0 {
+		t.Fatalf("Home page does not load %s", homeUpdatesJS)
+	}
 	if mapAt > cockpitAt {
 		t.Errorf("Home loads %s after %s; the map must be defined first", mapJS, cockpitJS)
+	}
+	if helperAt > homeUpdatesAt {
+		t.Errorf("Home loads %s after %s; the shared helper must be defined first", updateHelperJS, homeUpdatesJS)
+	}
+	if cockpitAt > homeUpdatesAt {
+		t.Errorf("Home loads %s after %s; badge listeners must be wired first", cockpitJS, homeUpdatesJS)
 	}
 
 	// The map script must be a classic deferred script, not a module: module

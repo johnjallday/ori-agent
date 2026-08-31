@@ -12,7 +12,8 @@ import (
 // Handler serves plugin operations and owns the plugin Manager wired to Ori's
 // live MCP config/registry and skills directory.
 type Handler struct {
-	mgr *plugin.Manager
+	mgr     *plugin.Manager
+	updates *plugin.UpdateChecker
 }
 
 // NewHandler builds the plugin manager over Ori's MCP config manager + runtime
@@ -31,7 +32,7 @@ func NewHandler(config *mcp.ConfigManager, registry *mcp.Registry, skillsDir, pl
 
 // newHandlerWithManager wraps an existing manager (used by tests).
 func newHandlerWithManager(mgr *plugin.Manager) *Handler {
-	return &Handler{mgr: mgr}
+	return &Handler{mgr: mgr, updates: plugin.NewUpdateChecker(mgr)}
 }
 
 // Manager returns the underlying plugin manager so other subsystems (template
@@ -39,6 +40,20 @@ func newHandlerWithManager(mgr *plugin.Manager) *Handler {
 // workspace bindings through the same configured store the Plugins API uses,
 // rather than a separate hard-coded plugins/ lookup.
 func (h *Handler) Manager() *plugin.Manager { return h.mgr }
+
+// UpdateChecker returns the process-local checker owned by this handler. Server
+// lifecycle code starts and stops it; direct handler construction stays idle.
+func (h *Handler) UpdateChecker() *plugin.UpdateChecker { return h.updates }
+
+// UpdateStatusHandler returns only the cached availability snapshot. It never
+// resolves plugin sources or performs Git/filesystem I/O.
+func (h *Handler) UpdateStatusHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		orihttp.MethodNotAllowed(w)
+		return
+	}
+	orihttp.WriteJSON(w, h.updates.Snapshot())
+}
 
 // ListHandler handles GET /api/plugins.
 func (h *Handler) ListHandler(w http.ResponseWriter, r *http.Request) {
@@ -91,6 +106,7 @@ func (h *Handler) InstallHandler(w http.ResponseWriter, r *http.Request) {
 		orihttp.InternalError(w, err.Error())
 		return
 	}
+	h.updates.Invalidate(installed.Name)
 	orihttp.WriteJSON(w, map[string]any{"installed": true, "plugin": installed})
 }
 
@@ -109,6 +125,7 @@ func (h *Handler) UninstallHandler(w http.ResponseWriter, r *http.Request) {
 		orihttp.InternalError(w, err.Error())
 		return
 	}
+	h.updates.Invalidate(name)
 	orihttp.WriteJSON(w, map[string]any{"uninstalled": name})
 }
 
@@ -218,6 +235,7 @@ func (h *Handler) MarketplaceInstallHandler(w http.ResponseWriter, r *http.Reque
 		orihttp.InternalError(w, err.Error())
 		return
 	}
+	h.updates.Invalidate(installed.Name)
 	orihttp.WriteJSON(w, map[string]any{"installed": true, "plugin": installed})
 }
 
@@ -253,6 +271,10 @@ func (h *Handler) UpdateHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		orihttp.InternalError(w, err.Error())
 		return
+	}
+	h.updates.Invalidate(name)
+	if updated.Name != name {
+		h.updates.Invalidate(updated.Name)
 	}
 	orihttp.WriteJSON(w, map[string]any{"updated": true, "plugin": updated})
 }
