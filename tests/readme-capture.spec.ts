@@ -758,6 +758,13 @@ async function installFixtureRoutes(page: Page) {
       await json(route, { plugins: [] });
       return;
     }
+    // Home's Updates flyout reads only the process-local plugin update cache.
+    // This screenshot scenario has no installed plugins, so an authoritative
+    // empty snapshot keeps the capture unchanged and the fixture exhaustive.
+    if (url.pathname === '/api/plugins/updates') {
+      await json(route, { updates: [], checking: false });
+      return;
+    }
     // The workspace page resolves agent identities through the shared character
     // catalog. An empty catalog is a real, handled state — every agent falls
     // back to its deterministic identity — and none of this scene's fixture
