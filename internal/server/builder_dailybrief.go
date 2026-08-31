@@ -207,5 +207,10 @@ func (b *ServerBuilder) initializeDailyBrief() {
 		store,
 		&personalAssistantModelReader{configManager: b.configManager, llmFactory: b.llmFactory},
 	)
+	b.personalAssistantHire = personalassistant.NewHireCoordinator(
+		b.onboardingMgr, b.personalAssistantStore, b.sessionHandler,
+		b.personalHQService, briefService,
+	)
 	b.personalAssistantHandler = personalassistanthttp.NewHandler(b.personalAssistantService, b.userProvider)
+	b.personalAssistantHandler.SetHireService(b.personalAssistantHire)
 }

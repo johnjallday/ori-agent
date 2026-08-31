@@ -966,6 +966,51 @@
     }
   }
 
+  .paf-hire-card {
+    display: grid;
+    gap: 1rem;
+  }
+
+  .paf-hire-summary {
+    padding: 1rem;
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--bg-secondary) 82%, transparent);
+  }
+
+  .paf-hire-role {
+    color: var(--text-secondary);
+    font-size: 0.82rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .paf-hire-abilities {
+    margin: 0.75rem 0;
+    padding-left: 1.25rem;
+  }
+
+  .paf-hire-boundary,
+  .paf-hire-model-note,
+  .paf-hire-status {
+    color: var(--text-secondary);
+    font-size: 0.84rem;
+  }
+
+  .paf-hire-focus-grid,
+  .paf-hire-days {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1rem;
+  }
+
+  .paf-hire-confirm {
+    padding: 0.85rem;
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+  }
+
   @media (prefers-reduced-motion: reduce) {
     #onboardingModal .modal-dialog,
     .onboarding-phase,
@@ -1205,6 +1250,7 @@
 
         <!-- Phase 2: one bounded intent conversation, then a concrete choice. -->
         <div class="onboarding-phase d-none" id="onboarding-phase-2">
+          <div id="onboardingLegacyFinalPhase">
           <div class="d-flex align-items-start mb-3">
             <div class="ori-avatar">
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
@@ -1257,6 +1303,83 @@
             <button type="button" class="btn btn-primary onboarding-next-btn" id="startBtn" style="padding: 8px 28px;" disabled>
               Choose a starting point
             </button>
+          </div>
+          </div>
+
+          <div id="onboardingPersonalAssistantHire" class="d-none">
+            <div class="d-flex align-items-start mb-3">
+              <div class="ori-avatar" aria-hidden="true">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+                  <path d="M 724 410 L 714 405 L 686 404 L 663 397 L 651 386 L 632 352 L 618 339 L 600 329 L 582 324 L 561 324 L 542 329 L 518 344 L 503 362 L 493 386 L 491 412 L 494 428 L 503 448 L 541 493 L 554 520 L 526 508 L 501 503 L 464 504 L 414 514 L 383 513 L 349 498 L 330 480 L 321 467 L 308 498 L 303 523 L 304 562 L 316 601 L 338 635 L 362 658 L 386 674 L 432 693 L 467 700 L 527 701 L 570 695 L 607 683 L 638 665 L 659 645 L 675 619 L 682 591 L 680 562 L 674 544 L 658 518 L 626 486 L 621 474 L 623 459 L 626 453 L 638 444 L 672 442 L 702 434 L 723 418 Z" fill="white"/>
+                </svg>
+              </div>
+              <div class="ori-speech">I’m Ori, your guide to the app. Now choose the personal assistant who will own your ongoing work.</div>
+            </div>
+
+            <div class="paf-hire-card">
+              <section class="paf-hire-summary" aria-labelledby="pafHireTitle">
+                <span class="paf-hire-role">Personal Assistant</span>
+                <h3 id="pafHireTitle" class="h5 mt-1">Hire your personal assistant</h3>
+                <div class="mb-3">
+                  <label for="pafAssistantName" class="form-label">Name</label>
+                  <input id="pafAssistantName" class="form-control" maxlength="100" value="Assistant" autocomplete="off" spellcheck="false">
+                </div>
+                <ul class="paf-hire-abilities">
+                  <li>Plan the day around your priorities.</li>
+                  <li>Track commitments and follow-ups.</li>
+                  <li>Route specialist work and report back.</li>
+                </ul>
+                <p class="paf-hire-boundary mb-0">Your assistant uses Ori’s existing tools, permissions, and confirmation gates. Hiring does not connect accounts, broaden filesystem access, or authorize sensitive actions.</p>
+              </section>
+
+              <div id="pafAssistantAppearance" aria-label="Choose assistant appearance"></div>
+
+              <fieldset>
+                <legend class="h6">What should your assistant help with?</legend>
+                <div class="paf-hire-focus-grid">
+                  <label><input type="checkbox" name="pafFocus" value="plan_my_day" checked> Plan my day</label>
+                  <label><input type="checkbox" name="pafFocus" value="track_commitments_and_follow_ups" checked> Track commitments and follow-ups</label>
+                  <label><input type="checkbox" name="pafFocus" value="prepare_for_meetings"> Prepare for meetings</label>
+                  <label><input type="checkbox" name="pafFocus" value="keep_projects_moving" checked> Keep projects moving</label>
+                  <label><input type="checkbox" name="pafFocus" value="help_with_email"> Help with email</label>
+                  <label><input type="checkbox" name="pafFocus" value="something_else"> Something else</label>
+                </div>
+              </fieldset>
+
+              <div>
+                <label for="pafAssistantMandate" class="form-label">What would make me useful this week? <span class="text-muted">(optional)</span></label>
+                <textarea id="pafAssistantMandate" class="form-control" maxlength="1000" rows="2" placeholder="For example: Keep the week realistic and surface anything I may drop."></textarea>
+              </div>
+
+              <fieldset>
+                <legend class="h6">Daily Brief rhythm</legend>
+                <div class="paf-hire-days mb-2">
+                  <label><input type="checkbox" name="pafBriefDay" value="mon" checked> Mon</label>
+                  <label><input type="checkbox" name="pafBriefDay" value="tue" checked> Tue</label>
+                  <label><input type="checkbox" name="pafBriefDay" value="wed" checked> Wed</label>
+                  <label><input type="checkbox" name="pafBriefDay" value="thu" checked> Thu</label>
+                  <label><input type="checkbox" name="pafBriefDay" value="fri" checked> Fri</label>
+                  <label><input type="checkbox" name="pafBriefDay" value="sat"> Sat</label>
+                  <label><input type="checkbox" name="pafBriefDay" value="sun"> Sun</label>
+                </div>
+                <label for="pafBriefTime" class="form-label">Local time</label>
+                <input id="pafBriefTime" type="time" class="form-control" value="08:00">
+                <label class="mt-2"><input id="pafNotifyOnReady" type="checkbox"> Send a notification when the brief is ready</label>
+                <p class="paf-hire-boundary mb-0">Notifications stay off unless you check this box.</p>
+              </fieldset>
+
+              <label class="paf-hire-confirm">
+                <input id="pafHireConfirm" type="checkbox">
+                Create one assistant, build and designate Personal HQ, and save this working agreement and Daily Brief schedule.
+              </label>
+              <p id="pafHireModelNote" class="paf-hire-model-note mb-0" aria-live="polite"></p>
+              <div id="pafHireError" class="alert alert-danger d-none mb-0" role="alert"></div>
+              <p id="pafHireStatus" class="paf-hire-status mb-0" aria-live="polite"></p>
+              <div class="onboarding-actions">
+                <button type="button" class="btn btn-outline-secondary" id="pafHireBackBtn">Back</button>
+                <button type="button" class="btn btn-primary onboarding-next-btn" id="pafHireBtn" disabled>Hire Assistant</button>
+              </div>
+            </div>
           </div>
         </div>
       </div>

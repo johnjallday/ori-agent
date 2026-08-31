@@ -15,6 +15,7 @@ import (
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/personalhq"
 	"github.com/johnjallday/ori-agent/internal/platform"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/session"
@@ -241,6 +242,10 @@ type createWorkspaceRequest struct {
 // the HTTP layer — such as the Personal HQ setup coordinator — get identical
 // behavior to a user picking the template from the library (PRD FR128).
 func (h *Handler) CreateFromTemplate(ctx context.Context, name, templateID string) (string, error) {
+	return h.createFromTemplate(ctx, name, templateID)
+}
+
+func (h *Handler) createFromTemplate(ctx context.Context, name, templateID string) (string, error) {
 	body, err := json.Marshal(createWorkspaceRequest{Name: name, TemplateID: templateID})
 	if err != nil {
 		return "", fmt.Errorf("failed to encode workspace creation request: %w", err)
@@ -317,6 +322,19 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		resolvedTemplate, templateResolveErr = h.resolveProjectTemplate(req.TemplateID, req.TemplatePath)
 		templateResolved = templateResolveErr == nil
 	}
+	if templateResolved {
+		if options, ok := personalAssistantCreationOptions(r.Context()); ok {
+			if strings.TrimSpace(req.TemplateID) != personalhq.PersonalHQTemplateID || strings.TrimSpace(req.TemplatePath) != "" {
+				_ = orihttp.RespondBadRequest(w, "personal assistant creation options require the built-in personal-ops template")
+				return
+			}
+			resolvedTemplate, err = applyPersonalAssistantTemplateOptions(resolvedTemplate, options)
+			if err != nil {
+				_ = orihttp.RespondBadRequest(w, err.Error())
+				return
+			}
+		}
+	}
 	if templateResolved && createTemplateAgentsEnabled(req) && len(req.TemplateAgentOverrides) > 0 {
 		var err error
 		resolvedTemplate, err = applyTemplateAgentOverrides(resolvedTemplate, req.TemplateAgentOverrides)
@@ -372,6 +390,9 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	seed, ok := h.selectCreateWorkspaceEntryAgent(w, ws, req, kind, resolvedTemplate, templateResolved)
 	if !ok {
 		return
+	}
+	if options, pafCreation := personalAssistantCreationOptions(r.Context()); pafCreation {
+		markPersonalAssistantPresentation(ws, options)
 	}
 
 	if err := h.store.CreateWorkspace(r.Context(), ws); err != nil {

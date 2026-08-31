@@ -2,7 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   OnboardingManager,
+  buildPersonalAssistantHirePayload,
   onboardingStartDestination,
+  personalAssistantResumeMessage,
   recommendOnboardingStart,
   workspaceRootSetupView
 } from './onboarding.js';
@@ -45,6 +47,46 @@ test('workspaceRootSetupView treats an operator WORKSPACE_DIR as confirmed', () 
 
   assert.equal(view.path, '/srv/ori-workspaces');
   assert.equal(view.confirmed, true);
+});
+
+test('personalAssistantResumeMessage names durable assistant and HQ without claiming total failure', () => {
+  assert.equal(
+    personalAssistantResumeMessage({
+      display_name: 'Atlas',
+      assistant_id: 'assistant-1',
+      hq_workspace_id: 'hq-1'
+    }),
+    'Atlas and Personal HQ are already saved. Retry to finish the remaining setup step.'
+  );
+  assert.match(personalAssistantResumeMessage({ hq_workspace_id: 'hq-1' }), /already saved/);
+});
+
+test('buildPersonalAssistantHirePayload normalizes one bounded confirmed hire', () => {
+  const payload = buildPersonalAssistantHirePayload({
+    requestId: ' request-1 ',
+    ifVersion: 3,
+    displayName: ' Assistant ',
+    appearance: { mode: 'generated', generated: { color: '#225588' } },
+    mandate: ' Keep today realistic. ',
+    focusAreas: ['plan_my_day', 'plan_my_day', 'keep_projects_moving'],
+    timezone: ' America/New_York ',
+    scheduleDays: ['MON', 'tue', 'mon'],
+    scheduleTime: '08:00',
+    notifyOnReady: false
+  });
+
+  assert.deepEqual(payload, {
+    request_id: 'request-1',
+    if_version: 3,
+    display_name: 'Assistant',
+    appearance: { mode: 'generated', generated: { color: '#225588' } },
+    mandate: 'Keep today realistic.',
+    focus_areas: ['plan_my_day', 'keep_projects_moving'],
+    timezone: 'America/New_York',
+    schedule_days: ['mon', 'tue'],
+    schedule_time: '08:00',
+    notify_on_ready: false
+  });
 });
 
 test('recommendOnboardingStart maps existing work to the import flow', () => {

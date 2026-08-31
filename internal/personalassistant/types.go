@@ -178,6 +178,28 @@ func NormalizeFocusAreas(raw []string) ([]FocusArea, error) {
 	return out, nil
 }
 
+// RepairStep is a closed, safe provisioning step code. It never contains a
+// provider/database error or user-authored text.
+type RepairStep string
+
+const (
+	RepairNone             RepairStep = ""
+	RepairDesignation      RepairStep = "designation"
+	RepairDailyBriefConfig RepairStep = "daily_brief_config"
+	RepairFinalization     RepairStep = "relationship_finalization"
+)
+
+// NormalizeRepairStep validates a persisted repair step.
+func NormalizeRepairStep(raw string) (RepairStep, error) {
+	step := RepairStep(strings.TrimSpace(raw))
+	switch step {
+	case RepairNone, RepairDesignation, RepairDailyBriefConfig, RepairFinalization:
+		return step, nil
+	default:
+		return "", fmt.Errorf("personal assistant: invalid repair step %q", raw)
+	}
+}
+
 // State is one user's durable personal-assistant relationship.
 type State struct {
 	UserID                 string
@@ -192,6 +214,9 @@ type State struct {
 	FocusAreas             []FocusArea
 	FirstAssignmentStatus  FirstAssignmentStatus
 	LastHireRequestID      string
+	HirePayloadHash        string
+	HirePayloadJSON        string
+	RepairStep             RepairStep
 	StateVersion           int64
 	HiredAt                *time.Time
 	CreatedAt              time.Time

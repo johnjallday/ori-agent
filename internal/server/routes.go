@@ -967,6 +967,7 @@ func registerTriggerRoutes(mux *http.ServeMux, s *Server) {
 func registerPersonalAssistantRoutes(mux *http.ServeMux, s *Server) {
 	if s != nil && s.Handlers != nil && s.Handlers.PersonalAssistant != nil {
 		mux.HandleFunc("GET /api/personal-assistant", s.Handlers.PersonalAssistant.GetState)
+		mux.HandleFunc("POST /api/personal-assistant/hire", s.Handlers.PersonalAssistant.Hire)
 	}
 }
 

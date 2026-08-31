@@ -189,6 +189,20 @@ test('the editor renders one labelled radio group with all three sources', () =>
   assert.match(host.innerHTML, /<legend[^>]*>Appearance<\/legend>/);
 });
 
+test('a create host may explicitly limit modes when it cannot persist uploads yet', () => {
+  const win = load();
+  const { host } = mount(win, {
+    mode: 'create',
+    allowedModes: ['generated', 'character'],
+    appearance: appearance('generated')
+  });
+
+  assert.ok(host.radio('generated'));
+  assert.ok(host.radio('character'));
+  assert.equal(host.radio('uploaded'), undefined);
+  assert.doesNotMatch(host.innerHTML, /Upload an image/);
+});
+
 test('a source with nothing saved is offered but not selectable, and says why', () => {
   const win = load();
   const { host } = mount(win, { appearance: appearance('generated') });

@@ -100,6 +100,15 @@
     var opts = options || {};
     var host = opts.host;
     if (!host) return null;
+    var allowedModes = Array.isArray(opts.allowedModes)
+      ? opts.allowedModes.filter(function (mode) {
+          return mode === MODES.GENERATED || mode === MODES.CHARACTER || mode === MODES.UPLOADED;
+        })
+      : [MODES.GENERATED, MODES.CHARACTER, MODES.UPLOADED];
+    if (!allowedModes.length) allowedModes = [MODES.GENERATED];
+    function modeAllowed(mode) {
+      return allowedModes.indexOf(mode) !== -1;
+    }
 
     var state = {
       // The last appearance the server confirmed. Every failure path restores
@@ -115,6 +124,8 @@
       message: '',
       messageKind: 'info'
     };
+    if (!modeAllowed(state.confirmed.mode)) state.confirmed.mode = MODES.GENERATED;
+    if (!modeAllowed(state.staged.mode)) state.staged.mode = MODES.GENERATED;
 
     var adapter = opts.adapter || {};
     var agent = opts.agent || {};
@@ -319,30 +330,36 @@
         // A radiogroup rather than three loose radios, so the group has one
         // programmatic label and arrow keys move within it (FR-96).
         '<div class="appearance-editor__sources" role="radiogroup" aria-label="Appearance source">' +
-        sourceCard(
-          MODES.GENERATED,
-          'Generated',
-          "Ori's generated portrait, derived from the agent's name.",
-          true,
-          '',
-          generatedControls()
-        ) +
-        sourceCard(
-          MODES.CHARACTER,
-          'Character',
-          'Curated character art. Appearance only — this does not change how the agent works.',
-          characterAvailable,
-          'Choose a character to use this source.',
-          characterControls()
-        ) +
-        sourceCard(
-          MODES.UPLOADED,
-          'Upload',
-          'An image you supply.',
-          uploadAvailable,
-          'Upload an image to use this source.',
-          uploadControls()
-        ) +
+        (modeAllowed(MODES.GENERATED)
+          ? sourceCard(
+              MODES.GENERATED,
+              'Generated',
+              "Ori's generated portrait, derived from the agent's name.",
+              true,
+              '',
+              generatedControls()
+            )
+          : '') +
+        (modeAllowed(MODES.CHARACTER)
+          ? sourceCard(
+              MODES.CHARACTER,
+              'Character',
+              'Curated character art. Appearance only — this does not change how the agent works.',
+              characterAvailable,
+              'Choose a character to use this source.',
+              characterControls()
+            )
+          : '') +
+        (modeAllowed(MODES.UPLOADED)
+          ? sourceCard(
+              MODES.UPLOADED,
+              'Upload',
+              'An image you supply.',
+              uploadAvailable,
+              'Upload an image to use this source.',
+              uploadControls()
+            )
+          : '') +
         '</div>' +
         (state.readOnly
           ? '<p class="appearance-editor__readonly">This agent is built in, so its appearance is fixed and cannot be changed here.</p>'

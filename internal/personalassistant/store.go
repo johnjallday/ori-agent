@@ -54,12 +54,14 @@ func (s *SQLiteStore) CreateState(ctx context.Context, state *State) (*State, er
 			user_id, assistant_id, status, display_name, appearance_json,
 			hq_workspace_id, hq_entry_agent_instance_id, global_agent_profile_name,
 			mandate, focus_areas_json, first_assignment_status,
-			last_hire_request_id, state_version, hired_at, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+			last_hire_request_id, hire_payload_hash, hire_payload_json, repair_step,
+			state_version, hired_at, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
 	`, normalized.UserID, normalized.AssistantID, normalized.Status, normalized.DisplayName,
 		appearanceJSON, normalized.HQWorkspaceID, normalized.HQEntryAgentInstanceID,
 		normalized.GlobalAgentProfileName, normalized.Mandate, focusJSON,
 		normalized.FirstAssignmentStatus, normalized.LastHireRequestID,
+		normalized.HirePayloadHash, normalized.HirePayloadJSON, normalized.RepairStep,
 		normalized.HiredAt, normalized.CreatedAt, normalized.UpdatedAt)
 	if err != nil {
 		if isConstraintError(err) {
@@ -83,7 +85,8 @@ func (s *SQLiteStore) GetState(ctx context.Context, userID string) (*State, erro
 		SELECT user_id, assistant_id, status, display_name, appearance_json,
 			hq_workspace_id, hq_entry_agent_instance_id, global_agent_profile_name,
 			mandate, focus_areas_json, first_assignment_status,
-			last_hire_request_id, state_version, hired_at, created_at, updated_at
+			last_hire_request_id, hire_payload_hash, hire_payload_json, repair_step,
+			state_version, hired_at, created_at, updated_at
 		FROM personal_assistant_state WHERE user_id = ?
 	`, userID)
 }
@@ -106,13 +109,14 @@ func (s *SQLiteStore) UpdateState(ctx context.Context, state *State, expectedVer
 			status = ?, display_name = ?, appearance_json = ?, hq_workspace_id = ?,
 			hq_entry_agent_instance_id = ?, global_agent_profile_name = ?, mandate = ?,
 			focus_areas_json = ?, first_assignment_status = ?, last_hire_request_id = ?,
+			hire_payload_hash = ?, hire_payload_json = ?, repair_step = ?,
 			state_version = state_version + 1, hired_at = ?, updated_at = ?
 		WHERE user_id = ? AND assistant_id = ? AND state_version = ?
 	`, normalized.Status, normalized.DisplayName, appearanceJSON, normalized.HQWorkspaceID,
 		normalized.HQEntryAgentInstanceID, normalized.GlobalAgentProfileName,
 		normalized.Mandate, focusJSON, normalized.FirstAssignmentStatus,
-		normalized.LastHireRequestID, normalized.HiredAt, now, normalized.UserID,
-		normalized.AssistantID, expectedVersion)
+		normalized.LastHireRequestID, normalized.HirePayloadHash, normalized.HirePayloadJSON, normalized.RepairStep,
+		normalized.HiredAt, now, normalized.UserID, normalized.AssistantID, expectedVersion)
 	if err != nil {
 		return nil, fmt.Errorf("personal assistant: update state: %w", err)
 	}
@@ -137,6 +141,7 @@ func (s *SQLiteStore) scanState(ctx context.Context, query string, args ...any) 
 		&state.UserID, &state.AssistantID, &status, &state.DisplayName, &appearanceJSON,
 		&state.HQWorkspaceID, &state.HQEntryAgentInstanceID, &state.GlobalAgentProfileName,
 		&state.Mandate, &focusJSON, &firstStatus, &state.LastHireRequestID,
+		&state.HirePayloadHash, &state.HirePayloadJSON, &state.RepairStep,
 		&state.StateVersion, &hiredAt, &state.CreatedAt, &state.UpdatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -329,6 +334,15 @@ func normalizeState(input *State) (*State, string, string, error) {
 		return nil, "", "", err
 	}
 	if state.LastHireRequestID, err = validateOpaqueID("last hire request id", state.LastHireRequestID, false); err != nil {
+		return nil, "", "", err
+	}
+	if state.HirePayloadHash, err = validateOpaqueID("hire payload hash", state.HirePayloadHash, false); err != nil {
+		return nil, "", "", err
+	}
+	if len(state.HirePayloadJSON) > MaxAssignmentJSONBytes || (state.HirePayloadJSON != "" && !json.Valid([]byte(state.HirePayloadJSON))) {
+		return nil, "", "", errors.New("personal assistant: invalid hire operation payload")
+	}
+	if state.RepairStep, err = NormalizeRepairStep(string(state.RepairStep)); err != nil {
 		return nil, "", "", err
 	}
 	rawFocus := make([]string, len(state.FocusAreas))

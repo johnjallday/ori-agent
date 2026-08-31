@@ -296,6 +296,7 @@ type ServerBuilder struct {
 	// Personal Assistant relationship/read projection.
 	personalAssistantStore   *personalassistant.SQLiteStore
 	personalAssistantService *personalassistant.Service
+	personalAssistantHire    *personalassistant.HireCoordinator
 	personalAssistantHandler *personalassistanthttp.Handler
 
 	// Personal HQ designation and onboarding state

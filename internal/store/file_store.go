@@ -125,6 +125,10 @@ func (s *fileStore) CreateAgent(name string, config *CreateAgentConfig) error {
 			Settings:     defaultSettings,
 			Status:       types.AgentStatusActive, // New agents start as active
 		}
+		if config != nil && config.Appearance != nil {
+			newAgent.Appearance = config.Appearance.Clone()
+			newAgent.Appearance.Normalize()
+		}
 		// Initialize statistics for the new agent
 		newAgent.InitializeStatistics()
 		// Initialize evolution defaults for the new agent

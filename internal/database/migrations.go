@@ -10,7 +10,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 46
+const schemaVersion = 47
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -157,6 +157,8 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 		return db.migration045WorkspaceAssistantProgram(ctx)
 	case 46:
 		return db.migration046PersonalAssistantFoundation(ctx)
+	case 47:
+		return db.migration047PersonalAssistantHireRecovery(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
@@ -1663,6 +1665,28 @@ func (db *DB) migration046PersonalAssistantFoundation(ctx context.Context) error
 	for _, stmt := range statements {
 		if _, err := db.ExecContext(ctx, stmt); err != nil {
 			return fmt.Errorf("failed to create personal assistant foundation schema: %w", err)
+		}
+	}
+	return nil
+}
+
+// migration047PersonalAssistantHireRecovery adds only bounded operation
+// metadata needed to prove that a replay carries the same normalized hire
+// payload and to resume a known missing provisioning step after restart.
+func (db *DB) migration047PersonalAssistantHireRecovery(ctx context.Context) error {
+	exists, err := db.tableExists(ctx, "personal_assistant_state")
+	if err != nil || !exists {
+		return err
+	}
+	for _, statement := range []struct {
+		sql, label string
+	}{
+		{`ALTER TABLE personal_assistant_state ADD COLUMN hire_payload_hash TEXT NOT NULL DEFAULT ''`, "hire_payload_hash"},
+		{`ALTER TABLE personal_assistant_state ADD COLUMN hire_payload_json TEXT NOT NULL DEFAULT ''`, "hire_payload_json"},
+		{`ALTER TABLE personal_assistant_state ADD COLUMN repair_step TEXT NOT NULL DEFAULT ''`, "repair_step"},
+	} {
+		if _, err := db.ExecContext(ctx, statement.sql); err != nil && !isDuplicateColumnError(err) {
+			return fmt.Errorf("failed to add personal_assistant_state.%s column: %w", statement.label, err)
 		}
 	}
 	return nil

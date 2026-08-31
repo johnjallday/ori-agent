@@ -206,6 +206,50 @@ export function recommendOnboardingStart({ intent = '', description = '', templa
   };
 }
 
+export function personalAssistantResumeMessage(state = {}) {
+  const name = String(state.display_name || '').trim();
+  const hasAssistant = Boolean(state.assistant_id || name);
+  const hasHQ = Boolean(state.hq_workspace_id);
+  if (hasAssistant && hasHQ) {
+    return `${name || 'Your assistant'} and Personal HQ are already saved. Retry to finish the remaining setup step.`;
+  }
+  if (hasHQ) return 'Personal HQ is already saved. Retry to finish the remaining setup step.';
+  if (hasAssistant) {
+    return `${name || 'Your assistant'} is already saved. Retry to finish the remaining setup step.`;
+  }
+  return 'This hire is already in progress. Retry to finish the remaining setup step.';
+}
+
+export function buildPersonalAssistantHirePayload({
+  requestId,
+  ifVersion = 0,
+  displayName = 'Assistant',
+  appearance = null,
+  mandate = '',
+  focusAreas = [],
+  timezone = 'UTC',
+  scheduleDays = [],
+  scheduleTime = '08:00',
+  notifyOnReady = false
+} = {}) {
+  return {
+    request_id: String(requestId || '').trim(),
+    if_version: Number(ifVersion) || 0,
+    display_name: String(displayName || '').trim(),
+    appearance: appearance || { mode: 'generated', generated: {} },
+    mandate: String(mandate || '').trim(),
+    focus_areas: Array.from(new Set((focusAreas || []).map(value => String(value).trim()))).filter(
+      Boolean
+    ),
+    timezone: String(timezone || 'UTC').trim() || 'UTC',
+    schedule_days: Array.from(
+      new Set((scheduleDays || []).map(value => String(value).trim().toLowerCase()))
+    ).filter(Boolean),
+    schedule_time: String(scheduleTime || '08:00').trim() || '08:00',
+    notify_on_ready: notifyOnReady === true
+  };
+}
+
 export function onboardingStartDestination(recommendation) {
   switch (recommendation?.kind) {
     case 'template': {
@@ -260,6 +304,11 @@ export class OnboardingManager {
     this.startTemplates = [];
     this.startIntent = '';
     this.startRecommendation = recommendOnboardingStart();
+    this.personalAssistantEligible = false;
+    this.personalAssistantState = null;
+    this.personalAssistantAppearanceEditor = null;
+    this.hireRequestId = '';
+    this.modelConfigured = null;
   }
 
   async init() {
@@ -279,6 +328,10 @@ export class OnboardingManager {
     this.userName = status.user_name || '';
     this.assistantName = status.assistant_name || 'Ori';
     this.timezone = status.timezone || this.detectTimezone();
+    this.personalAssistantEligible = status.personal_assistant_eligible === true;
+    if (this.personalAssistantEligible) {
+      await this.loadPersonalAssistantState();
+    }
     this.populateTimezoneSelect();
     if (status.needs_onboarding) {
       await this.loadWorkspaceRoot();
@@ -333,6 +386,25 @@ export class OnboardingManager {
     if (doneBackBtn) {
       doneBackBtn.addEventListener('click', () => this.showPhase(1));
     }
+
+    document.getElementById('pafHireBackBtn')?.addEventListener('click', () => this.showPhase(1));
+    document.getElementById('pafHireBtn')?.addEventListener('click', () => this.hireAssistant());
+    document
+      .getElementById('pafHireConfirm')
+      ?.addEventListener('change', () => this.updateHireButtonState());
+    document.getElementById('pafAssistantName')?.addEventListener('input', event => {
+      this.personalAssistantAppearanceEditor?.setAgentName(event.target.value);
+      this.updateHireButtonState();
+    });
+    document
+      .getElementById('pafAssistantMandate')
+      ?.addEventListener('input', () => this.updateHireButtonState());
+    document
+      .querySelectorAll('[name="pafFocus"], [name="pafBriefDay"]')
+      .forEach(input => input.addEventListener('change', () => this.updateHireButtonState()));
+    document
+      .getElementById('pafBriefTime')
+      ?.addEventListener('change', () => this.updateHireButtonState());
 
     // Skip link
     const skipLink = document.getElementById('skipOnboardingLink');
@@ -436,6 +508,25 @@ export class OnboardingManager {
 
   async checkOnboardingStatus() {
     return loadOnboardingStatus();
+  }
+
+  async loadPersonalAssistantState() {
+    try {
+      const response = await fetch('/api/personal-assistant', {
+        headers: { Accept: 'application/json' }
+      });
+      if (!response.ok) throw new Error(`Personal assistant request failed (${response.status})`);
+      const payload = await response.json();
+      this.personalAssistantState = payload?.personal_assistant || null;
+      this.hireRequestId = String(this.personalAssistantState?.hire_request_id || '').trim();
+      const modelStatus = this.personalAssistantState?.availability?.model?.status;
+      if (modelStatus) this.modelConfigured = modelStatus === 'available';
+      return this.personalAssistantState;
+    } catch (error) {
+      console.warn('Could not load personal assistant setup state:', error);
+      this.personalAssistantState = null;
+      return null;
+    }
   }
 
   async saveNames() {
@@ -1002,6 +1093,220 @@ export class OnboardingManager {
     }
   }
 
+  // --- Personal Assistant hire -------------------------------------------
+
+  showPersonalAssistantHire() {
+    document.getElementById('onboardingLegacyFinalPhase')?.classList.add('d-none');
+    document.getElementById('onboardingPersonalAssistantHire')?.classList.remove('d-none');
+    document.getElementById('welcomeAssistantReveal')?.classList.add('d-none');
+
+    const state = this.personalAssistantState || {};
+    const nameInput = document.getElementById('pafAssistantName');
+    if (nameInput && state.display_name) nameInput.value = state.display_name;
+    const mandate = document.getElementById('pafAssistantMandate');
+    if (mandate && state.mandate) mandate.value = state.mandate;
+    if (Array.isArray(state.focus_areas) && state.focus_areas.length) {
+      const selected = new Set(state.focus_areas);
+      document.querySelectorAll('[name="pafFocus"]').forEach(input => {
+        input.checked = selected.has(input.value);
+      });
+    }
+    if (state.daily_brief) {
+      const selectedDays = new Set(state.daily_brief.schedule_days || []);
+      document.querySelectorAll('[name="pafBriefDay"]').forEach(input => {
+        input.checked = selectedDays.has(input.value);
+      });
+      const timeInput = document.getElementById('pafBriefTime');
+      if (timeInput && state.daily_brief.schedule_time) {
+        timeInput.value = state.daily_brief.schedule_time;
+      }
+      const notifications = document.getElementById('pafNotifyOnReady');
+      if (notifications) notifications.checked = state.daily_brief.notify_on_ready === true;
+    }
+
+    const host = document.getElementById('pafAssistantAppearance');
+    if (host && window.AgentAppearanceEditor && !this.personalAssistantAppearanceEditor) {
+      this.personalAssistantAppearanceEditor = window.AgentAppearanceEditor.create({
+        host,
+        idPrefix: 'pafAssistantAppearance',
+        mode: 'create',
+        allowedModes: ['generated', 'character'],
+        appearance: state.appearance || { mode: 'generated', generated: {} },
+        agent: {
+          name: nameInput?.value || 'Assistant',
+          source: 'user',
+          role: 'orchestrator'
+        },
+        onChange: () => this.updateHireButtonState()
+      });
+    }
+
+    const modelNote = document.getElementById('pafHireModelNote');
+    if (modelNote) {
+      if (this.modelConfigured === false) {
+        modelNote.innerHTML =
+          'No model is configured. Hiring, Personal HQ, and structured planning still work. <a href="/settings#system-model">Choose a model in Settings</a> when you want conversational answers.';
+      } else {
+        modelNote.textContent =
+          'You can change the model later without changing this assistant relationship.';
+      }
+    }
+    const status = document.getElementById('pafHireStatus');
+    if (status) {
+      status.textContent =
+        state.state === 'repair_needed'
+          ? personalAssistantResumeMessage(state)
+          : state.state === 'hiring'
+            ? personalAssistantResumeMessage(state)
+            : state.state === 'active'
+              ? `${state.display_name || 'Your assistant'} is hired. Continue to finish onboarding.`
+              : '';
+    }
+    const button = document.getElementById('pafHireBtn');
+    if (button && ['repair_needed', 'hiring', 'active'].includes(state.state)) {
+      button.textContent = state.state === 'active' ? 'Continue' : 'Finish setup';
+      const confirmation = document.getElementById('pafHireConfirm');
+      if (confirmation) confirmation.checked = true;
+    }
+    this.updateHireButtonState();
+  }
+
+  updateHireButtonState() {
+    const button = document.getElementById('pafHireBtn');
+    if (!button) return;
+    const name = document.getElementById('pafAssistantName')?.value?.trim() || '';
+    const mandate = document.getElementById('pafAssistantMandate')?.value?.trim() || '';
+    const focusCount = document.querySelectorAll('[name="pafFocus"]:checked').length;
+    const dayCount = document.querySelectorAll('[name="pafBriefDay"]:checked').length;
+    const confirmed = document.getElementById('pafHireConfirm')?.checked === true;
+    button.disabled = !name || (!mandate && focusCount === 0) || dayCount === 0 || !confirmed;
+  }
+
+  getHireRequestId() {
+    if (this.hireRequestId) return this.hireRequestId;
+    const storageKey = 'ori.personalAssistantHireRequestId';
+    try {
+      this.hireRequestId = String(window.localStorage.getItem(storageKey) || '').trim();
+    } catch (_) {
+      this.hireRequestId = '';
+    }
+    if (!this.hireRequestId) {
+      this.hireRequestId =
+        globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function'
+          ? globalThis.crypto.randomUUID()
+          : `hire-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      try {
+        window.localStorage.setItem(storageKey, this.hireRequestId);
+      } catch (_) {
+        // The durable server operation remains authoritative when storage is unavailable.
+      }
+    }
+    return this.hireRequestId;
+  }
+
+  personalAssistantHirePayload() {
+    const focusAreas = Array.from(
+      document.querySelectorAll('[name="pafFocus"]:checked'),
+      input => input.value
+    );
+    const scheduleDays = Array.from(
+      document.querySelectorAll('[name="pafBriefDay"]:checked'),
+      input => input.value
+    );
+    return buildPersonalAssistantHirePayload({
+      requestId: this.getHireRequestId(),
+      ifVersion: this.personalAssistantState?.state_version || 0,
+      displayName: document.getElementById('pafAssistantName')?.value || 'Assistant',
+      appearance: this.personalAssistantAppearanceEditor?.createRequest(),
+      mandate: document.getElementById('pafAssistantMandate')?.value || '',
+      focusAreas,
+      timezone: this.timezone || this.detectTimezone() || 'UTC',
+      scheduleDays,
+      scheduleTime: document.getElementById('pafBriefTime')?.value || '08:00',
+      notifyOnReady: document.getElementById('pafNotifyOnReady')?.checked === true
+    });
+  }
+
+  showHireError(message) {
+    const error = document.getElementById('pafHireError');
+    if (!error) return;
+    error.textContent = message || '';
+    error.classList.toggle('d-none', !message);
+  }
+
+  async hireAssistant() {
+    const button = document.getElementById('pafHireBtn');
+    const originalLabel = button?.textContent || 'Hire Assistant';
+    if (button) {
+      button.disabled = true;
+      button.textContent = 'Creating Personal HQ…';
+      button.setAttribute('aria-busy', 'true');
+    }
+    const status = document.getElementById('pafHireStatus');
+    if (status)
+      status.textContent = 'Creating one assistant and Personal HQ. Keep this window open.';
+    this.showHireError('');
+    try {
+      const response = await fetch('/api/personal-assistant/hire', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(this.personalAssistantHirePayload())
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        if (payload.durable_result) {
+          this.personalAssistantState = {
+            ...this.personalAssistantState,
+            ...payload.durable_result,
+            state: 'repair_needed',
+            repair_step: payload.repair_step
+          };
+          const status = document.getElementById('pafHireStatus');
+          if (status)
+            status.textContent = personalAssistantResumeMessage(this.personalAssistantState);
+          if (button) button.textContent = 'Finish setup';
+        }
+        if (response.status === 409) await this.loadPersonalAssistantState();
+        throw new Error(payload.error || 'Could not finish hiring. Retry this same request.');
+      }
+
+      this.personalAssistantState = payload.personal_assistant || this.personalAssistantState;
+      if (status) {
+        if (this.modelConfigured === false) {
+          status.innerHTML =
+            '<strong>Hired — choose a model to chat.</strong> Structured planning is ready now. <a href="/settings#system-model">Choose a model in Settings</a> later.';
+          await new Promise(resolve => setTimeout(resolve, 350));
+        } else {
+          status.textContent = 'Assistant hired. Personal HQ is ready.';
+        }
+      }
+      await this.completeStep('step-done');
+      const completeResponse = await fetch('/api/onboarding/complete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      if (!completeResponse.ok)
+        throw new Error(
+          'Assistant hired, but onboarding could not be closed. Use Continue to retry.'
+        );
+      try {
+        window.localStorage.removeItem('ori.personalAssistantHireRequestId');
+      } catch (_) {
+        // Storage cleanup is not part of the durable hire transaction.
+      }
+      if (this.modalInstance) this.modalInstance.hide();
+      window.location.href = '/';
+    } catch (error) {
+      console.error('Error hiring personal assistant:', error);
+      this.showHireError(error.message || 'Could not finish hiring. Retry this same request.');
+      if (button) {
+        button.disabled = false;
+        button.removeAttribute('aria-busy');
+        if (button.textContent === 'Creating Personal HQ…') button.textContent = originalLabel;
+      }
+    }
+  }
+
   // --- Phase navigation ---
 
   showOnboarding() {
@@ -1017,6 +1322,10 @@ export class OnboardingManager {
     const assistantInput = document.getElementById('onboardingAssistantName');
     if (assistantInput && this.assistantName) {
       assistantInput.value = this.assistantName;
+    }
+    if (this.personalAssistantEligible) {
+      document.getElementById('welcomeAssistantReveal')?.classList.add('d-none');
+      if (assistantInput) assistantInput.value = 'Ori';
     }
     const timezoneInput = document.getElementById('onboardingTimezone');
     if (timezoneInput) {
@@ -1151,7 +1460,14 @@ export class OnboardingManager {
         return;
       }
     }
+    this.modelConfigured = !skipModel;
     await this.completeStep('step-model');
+
+    if (this.personalAssistantEligible) {
+      this.showPhase(2);
+      this.showPersonalAssistantHire();
+      return;
+    }
 
     // End setup with one bounded intent question. Ori recommends from the live
     // ready catalog; it does not infer or persist a durable user profile.

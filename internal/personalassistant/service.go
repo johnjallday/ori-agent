@@ -57,6 +57,7 @@ type BriefConfigProjection struct {
 	ScheduleDays    []string `json:"schedule_days"`
 	ScheduleTime    string   `json:"schedule_time"`
 	ScheduleEnabled bool     `json:"schedule_enabled"`
+	NotifyOnReady   bool     `json:"notify_on_ready"`
 	ConfigRevision  int      `json:"config_revision"`
 }
 
@@ -65,6 +66,7 @@ type Projection struct {
 	State              APIState               `json:"state"`
 	RolloutVersion     int                    `json:"rollout_version"`
 	StateVersion       int64                  `json:"state_version,omitempty"`
+	HireRequestID      string                 `json:"hire_request_id,omitempty"`
 	AssistantID        string                 `json:"assistant_id,omitempty"`
 	DisplayName        string                 `json:"display_name,omitempty"`
 	Appearance         *types.AgentAppearance `json:"appearance,omitempty"`
@@ -74,6 +76,7 @@ type Projection struct {
 	Mandate            string                 `json:"mandate,omitempty"`
 	FocusAreas         []FocusArea            `json:"focus_areas,omitempty"`
 	FirstAssignment    FirstAssignmentStatus  `json:"first_assignment_status,omitempty"`
+	RepairStep         RepairStep             `json:"repair_step,omitempty"`
 	NextAction         string                 `json:"next_action"`
 	Availability       Availability           `json:"availability"`
 	DailyBrief         *BriefConfigProjection `json:"daily_brief,omitempty"`
@@ -149,10 +152,12 @@ func (s *Service) Get(ctx context.Context, userID string) (*Projection, error) {
 	}
 
 	projection.StateVersion = state.StateVersion
+	projection.HireRequestID = state.LastHireRequestID
 	projection.AssistantID = state.AssistantID
 	projection.DisplayName = state.DisplayName
 	projection.Appearance = state.Appearance.Clone()
 	projection.FirstAssignment = state.FirstAssignmentStatus
+	projection.RepairStep = state.RepairStep
 
 	switch state.Status {
 	case StatusNotHired:
@@ -277,7 +282,7 @@ func (s *Service) loadBrief(ctx context.Context, userID, workspaceID string, pro
 	projection.DailyBrief = &BriefConfigProjection{
 		Timezone: cfg.Timezone, ScheduleDays: append([]string(nil), cfg.ScheduleDays...),
 		ScheduleTime: cfg.ScheduleTime, ScheduleEnabled: cfg.ScheduleEnabled,
-		ConfigRevision: cfg.ConfigRevision,
+		NotifyOnReady: cfg.NotifyOnReady, ConfigRevision: cfg.ConfigRevision,
 	}
 }
 
