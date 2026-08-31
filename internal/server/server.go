@@ -80,6 +80,9 @@ func (s *Server) Handler() http.Handler {
 func (s *Server) Start() {
 	s.cleanupStaleWorkspaceManagerAgents()
 
+	if s.Handlers != nil && s.Handlers.Plugin != nil {
+		s.Handlers.Plugin.UpdateChecker().Start(0)
+	}
 	if s.Workflow != nil {
 		s.Workflow.Start()
 	}
@@ -134,6 +137,12 @@ func isStaleWorkspaceManagerAgent(ag *agent.Agent) bool {
 
 // Shutdown gracefully shuts down background services
 func (s *Server) Shutdown() {
+	// Stop plugin source checks before workspace plugin services. A check may be
+	// waiting on the manager operation gate while a service mutation completes.
+	if s.Handlers != nil && s.Handlers.Plugin != nil {
+		s.Handlers.Plugin.UpdateChecker().Stop()
+	}
+
 	// Stop background services. Automatic plan execution goes first: it
 	// dispatches THROUGH the task machinery, so stopping it before that
 	// machinery means nothing is queuing new work into a service that is
