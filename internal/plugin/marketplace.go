@@ -273,6 +273,8 @@ func (s *MarketplaceStore) List() ([]marketplaceRecord, error) {
 // AddMarketplace resolves a marketplace source, parses its catalog, and records
 // it so plugins can later be installed from it by name.
 func (m *Manager) AddMarketplace(source string) (Marketplace, error) {
+	m.operationMu.Lock()
+	defer m.operationMu.Unlock()
 	dir, err := ResolveSource(source, m.cloneDir)
 	if err != nil {
 		return Marketplace{}, err
@@ -290,6 +292,8 @@ func (m *Manager) AddMarketplace(source string) (Marketplace, error) {
 
 // Marketplaces returns the added marketplaces with their current catalog entries.
 func (m *Manager) Marketplaces() ([]Marketplace, error) {
+	m.operationMu.Lock()
+	defer m.operationMu.Unlock()
 	recs, err := m.marketplaces.List()
 	if err != nil {
 		return nil, err
@@ -333,18 +337,22 @@ func (m *Manager) marketplaceEntrySource(marketplaceName, pluginName string) (st
 // PreviewFromMarketplace returns the trust report for a marketplace plugin
 // without installing anything.
 func (m *Manager) PreviewFromMarketplace(marketplaceName, pluginName string, prefer SourceFormat) (TrustReport, error) {
+	m.operationMu.Lock()
+	defer m.operationMu.Unlock()
 	src, err := m.marketplaceEntrySource(marketplaceName, pluginName)
 	if err != nil {
 		return TrustReport{}, err
 	}
-	return m.Preview(src, prefer)
+	return m.preview(src, prefer)
 }
 
 // InstallFromMarketplace installs a named plugin listed in an added marketplace.
 func (m *Manager) InstallFromMarketplace(marketplaceName, pluginName string, prefer SourceFormat, confirm ConfirmFunc) (InstalledPlugin, error) {
+	m.operationMu.Lock()
+	defer m.operationMu.Unlock()
 	src, err := m.marketplaceEntrySource(marketplaceName, pluginName)
 	if err != nil {
 		return InstalledPlugin{}, err
 	}
-	return m.Install(src, prefer, confirm)
+	return m.install(src, prefer, confirm)
 }
