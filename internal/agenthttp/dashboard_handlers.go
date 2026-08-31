@@ -14,6 +14,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
+	"github.com/johnjallday/ori-agent/internal/userprofile"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -31,6 +32,7 @@ type DashboardHandler struct {
 	// nil when disabled). Injected to keep agenthttp decoupled from the
 	// externalagents package.
 	codexSync func() any
+	support   personalAssistantSupportClassifier
 }
 
 // NewDashboardHandler creates a new dashboard handler
@@ -49,6 +51,10 @@ func (h *DashboardHandler) SetCLIAgentRegistry(r *cliagent.CLIAgentRegistry) {
 // workspaces).
 func (h *DashboardHandler) SetWorkspaceStore(s workspace.Store) {
 	h.workspaceStore = s
+}
+
+func (h *DashboardHandler) SetPersonalAssistantSupport(reader personalAssistantSupportReader, provider userprofile.UserProvider) {
+	h.support = personalAssistantSupportClassifier{reader: reader, provider: provider}
 }
 
 // SetClaudeSyncProvider wires a provider of read-only ~/.claude data, attached
@@ -83,7 +89,8 @@ type AgentListItem struct {
 	// Appearance is the complete canonical object, always present. The shared
 	// client renderer consumes it directly, so a list row and a detail page
 	// cannot disagree about what an agent looks like (FR-49/FR-80).
-	Appearance map[string]any `json:"appearance"`
+	Appearance       map[string]any `json:"appearance"`
+	PresentationRole string         `json:"presentation_role,omitempty"`
 }
 
 // AgentDetailResponse represents detailed agent information
@@ -106,7 +113,8 @@ type AgentDetailResponse struct {
 	// Appearance is the complete canonical object, always present — including
 	// for read-only CLI/system agents, which render through the same resolver
 	// but expose no mutation controls (FR-44/FR-49).
-	Appearance map[string]any `json:"appearance"`
+	Appearance       map[string]any `json:"appearance"`
+	PresentationRole string         `json:"presentation_role,omitempty"`
 	// Version is an optimistic-concurrency token over the editable definition.
 	// The Agents page echoes it back on update so the server can reject stale
 	// edits (PRD FR13). Empty for CLI agents, which are read-only.
@@ -191,6 +199,7 @@ func (h *DashboardHandler) ListAgentsWithStats(w http.ResponseWriter, r *http.Re
 		if m, ok := memberships[strings.ToLower(strings.TrimSpace(name))]; ok {
 			item.WorkspaceCount = m.Count
 			item.Workspaces = m.Workspaces
+			item.PresentationRole = h.support.classify(r.Context(), name, m.Workspaces)
 			for _, ref := range m.Workspaces {
 				if ref.EntryPoint {
 					item.WorkspaceID = ref.ID
@@ -353,6 +362,8 @@ func (h *DashboardHandler) GetAgentDetail(w http.ResponseWriter, r *http.Request
 		Version:         agentConfigVersion(ag),
 		Appearance:      appearanceForAgent(ag),
 	}
+	memberships := workspace.AgentWorkspaceMemberships(h.workspaceStore)
+	response.PresentationRole = h.support.classify(r.Context(), agentName, memberships[strings.ToLower(agentName)].Workspaces)
 
 	// Return JSON response
 	w.Header().Set("Content-Type", "application/json")

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/johnjallday/ori-agent/internal/dailybrief"
 	"github.com/johnjallday/ori-agent/internal/personalhq"
@@ -53,12 +54,24 @@ type Availability struct {
 // BriefConfigProjection is the bounded Daily Brief configuration included in
 // an active relationship read. It contains no generated brief content.
 type BriefConfigProjection struct {
-	Timezone        string   `json:"timezone"`
-	ScheduleDays    []string `json:"schedule_days"`
-	ScheduleTime    string   `json:"schedule_time"`
-	ScheduleEnabled bool     `json:"schedule_enabled"`
-	NotifyOnReady   bool     `json:"notify_on_ready"`
-	ConfigRevision  int      `json:"config_revision"`
+	Timezone                string           `json:"timezone"`
+	ScheduleDays            []string         `json:"schedule_days"`
+	ScheduleTime            string           `json:"schedule_time"`
+	ScheduleEnabled         bool             `json:"schedule_enabled"`
+	Scope                   dailybrief.Scope `json:"scope"`
+	SelectedWorkspaceIDs    []string         `json:"selected_workspace_ids"`
+	IncludeFutureWorkspaces bool             `json:"include_future_workspaces"`
+	NotifyOnReady           bool             `json:"notify_on_ready"`
+	ConfigRevision          int              `json:"config_revision"`
+	NextGenerationAt        *time.Time       `json:"next_generation_at,omitempty"`
+}
+
+// RenameProjection reports a durable in-progress rename without implying that
+// a second assistant was created.
+type RenameProjection struct {
+	FromName string     `json:"from_name"`
+	ToName   string     `json:"to_name"`
+	Step     RenameStep `json:"step"`
 }
 
 // Projection is the discriminated read model for GET /api/personal-assistant.
@@ -80,6 +93,7 @@ type Projection struct {
 	NextAction         string                 `json:"next_action"`
 	Availability       Availability           `json:"availability"`
 	DailyBrief         *BriefConfigProjection `json:"daily_brief,omitempty"`
+	Rename             *RenameProjection      `json:"rename,omitempty"`
 }
 
 // EligibilityReader is implemented by onboarding.Manager.
@@ -158,6 +172,9 @@ func (s *Service) Get(ctx context.Context, userID string) (*Projection, error) {
 	projection.Appearance = state.Appearance.Clone()
 	projection.FirstAssignment = state.FirstAssignmentStatus
 	projection.RepairStep = state.RepairStep
+	if state.RenameStep != RenameNone {
+		projection.Rename = &RenameProjection{FromName: state.RenameFromName, ToName: state.RenameToName, Step: state.RenameStep}
+	}
 
 	switch state.Status {
 	case StatusNotHired:
@@ -209,7 +226,10 @@ func (s *Service) Get(ctx context.Context, userID string) (*Projection, error) {
 	projection.GlobalAgentProfile = state.GlobalAgentProfileName
 	projection.Mandate = state.Mandate
 	projection.FocusAreas = append([]FocusArea(nil), state.FocusAreas...)
-	if state.Status == StatusPaused {
+	if state.RenameStep != RenameNone {
+		projection.State = APIStateRepairNeeded
+		projection.NextAction = "retry_rename"
+	} else if state.Status == StatusPaused {
 		projection.State = APIStatePaused
 		projection.NextAction = "resume"
 	} else {
@@ -279,11 +299,17 @@ func (s *Service) loadBrief(ctx context.Context, userID, workspaceID string, pro
 		return
 	}
 	projection.Availability.DailyBrief = availableSource()
-	projection.DailyBrief = &BriefConfigProjection{
+	brief := &BriefConfigProjection{
 		Timezone: cfg.Timezone, ScheduleDays: append([]string(nil), cfg.ScheduleDays...),
 		ScheduleTime: cfg.ScheduleTime, ScheduleEnabled: cfg.ScheduleEnabled,
-		NotifyOnReady: cfg.NotifyOnReady, ConfigRevision: cfg.ConfigRevision,
+		Scope: cfg.Scope, SelectedWorkspaceIDs: append([]string(nil), cfg.SelectedWorkspaceIDs...),
+		IncludeFutureWorkspaces: cfg.IncludeFutureWorkspaces,
+		NotifyOnReady:           cfg.NotifyOnReady, ConfigRevision: cfg.ConfigRevision,
 	}
+	if next, ok, nextErr := dailybrief.NextOccurrence(*cfg, time.Now()); nextErr == nil && ok {
+		brief.NextGenerationAt = &next
+	}
+	projection.DailyBrief = brief
 }
 
 func (s *Service) modelAvailability() SourceAvailability {

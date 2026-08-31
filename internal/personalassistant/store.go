@@ -55,13 +55,15 @@ func (s *SQLiteStore) CreateState(ctx context.Context, state *State) (*State, er
 			hq_workspace_id, hq_entry_agent_instance_id, global_agent_profile_name,
 			mandate, focus_areas_json, first_assignment_status,
 			last_hire_request_id, hire_payload_hash, hire_payload_json, repair_step,
+			rename_from_name, rename_to_name, rename_step,
 			state_version, hired_at, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
 	`, normalized.UserID, normalized.AssistantID, normalized.Status, normalized.DisplayName,
 		appearanceJSON, normalized.HQWorkspaceID, normalized.HQEntryAgentInstanceID,
 		normalized.GlobalAgentProfileName, normalized.Mandate, focusJSON,
 		normalized.FirstAssignmentStatus, normalized.LastHireRequestID,
 		normalized.HirePayloadHash, normalized.HirePayloadJSON, normalized.RepairStep,
+		normalized.RenameFromName, normalized.RenameToName, normalized.RenameStep,
 		normalized.HiredAt, normalized.CreatedAt, normalized.UpdatedAt)
 	if err != nil {
 		if isConstraintError(err) {
@@ -86,6 +88,7 @@ func (s *SQLiteStore) GetState(ctx context.Context, userID string) (*State, erro
 			hq_workspace_id, hq_entry_agent_instance_id, global_agent_profile_name,
 			mandate, focus_areas_json, first_assignment_status,
 			last_hire_request_id, hire_payload_hash, hire_payload_json, repair_step,
+			rename_from_name, rename_to_name, rename_step,
 			state_version, hired_at, created_at, updated_at
 		FROM personal_assistant_state WHERE user_id = ?
 	`, userID)
@@ -110,12 +113,14 @@ func (s *SQLiteStore) UpdateState(ctx context.Context, state *State, expectedVer
 			hq_entry_agent_instance_id = ?, global_agent_profile_name = ?, mandate = ?,
 			focus_areas_json = ?, first_assignment_status = ?, last_hire_request_id = ?,
 			hire_payload_hash = ?, hire_payload_json = ?, repair_step = ?,
+			rename_from_name = ?, rename_to_name = ?, rename_step = ?,
 			state_version = state_version + 1, hired_at = ?, updated_at = ?
 		WHERE user_id = ? AND assistant_id = ? AND state_version = ?
 	`, normalized.Status, normalized.DisplayName, appearanceJSON, normalized.HQWorkspaceID,
 		normalized.HQEntryAgentInstanceID, normalized.GlobalAgentProfileName,
 		normalized.Mandate, focusJSON, normalized.FirstAssignmentStatus,
 		normalized.LastHireRequestID, normalized.HirePayloadHash, normalized.HirePayloadJSON, normalized.RepairStep,
+		normalized.RenameFromName, normalized.RenameToName, normalized.RenameStep,
 		normalized.HiredAt, now, normalized.UserID, normalized.AssistantID, expectedVersion)
 	if err != nil {
 		return nil, fmt.Errorf("personal assistant: update state: %w", err)
@@ -135,13 +140,14 @@ func (s *SQLiteStore) UpdateState(ctx context.Context, state *State, expectedVer
 
 func (s *SQLiteStore) scanState(ctx context.Context, query string, args ...any) (*State, error) {
 	var state State
-	var status, firstStatus, appearanceJSON, focusJSON string
+	var status, firstStatus, appearanceJSON, focusJSON, renameStep string
 	var hiredAt sql.NullTime
 	err := s.db.QueryRowContext(ctx, query, args...).Scan(
 		&state.UserID, &state.AssistantID, &status, &state.DisplayName, &appearanceJSON,
 		&state.HQWorkspaceID, &state.HQEntryAgentInstanceID, &state.GlobalAgentProfileName,
 		&state.Mandate, &focusJSON, &firstStatus, &state.LastHireRequestID,
 		&state.HirePayloadHash, &state.HirePayloadJSON, &state.RepairStep,
+		&state.RenameFromName, &state.RenameToName, &renameStep,
 		&state.StateVersion, &hiredAt, &state.CreatedAt, &state.UpdatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -155,6 +161,10 @@ func (s *SQLiteStore) scanState(ctx context.Context, query string, args ...any) 
 		return nil, fmt.Errorf("personal assistant: malformed persisted state: %w", err)
 	}
 	state.FirstAssignmentStatus, err = NormalizeFirstAssignmentStatus(firstStatus)
+	if err != nil {
+		return nil, fmt.Errorf("personal assistant: malformed persisted state: %w", err)
+	}
+	state.RenameStep, err = NormalizeRenameStep(renameStep)
 	if err != nil {
 		return nil, fmt.Errorf("personal assistant: malformed persisted state: %w", err)
 	}
@@ -607,6 +617,20 @@ func normalizeState(input *State) (*State, string, string, error) {
 	}
 	if state.RepairStep, err = NormalizeRepairStep(string(state.RepairStep)); err != nil {
 		return nil, "", "", err
+	}
+	if state.RenameStep, err = NormalizeRenameStep(string(state.RenameStep)); err != nil {
+		return nil, "", "", err
+	}
+	if state.RenameFromName, err = validateText("rename source name", state.RenameFromName, MaxDisplayNameLen, false); err != nil {
+		return nil, "", "", err
+	}
+	if state.RenameToName, err = validateText("rename destination name", state.RenameToName, MaxDisplayNameLen, false); err != nil {
+		return nil, "", "", err
+	}
+	if state.RenameStep == RenameNone {
+		state.RenameFromName, state.RenameToName = "", ""
+	} else if state.RenameFromName == "" || state.RenameToName == "" {
+		return nil, "", "", errors.New("personal assistant: rename journal names are required")
 	}
 	rawFocus := make([]string, len(state.FocusAreas))
 	for i, area := range state.FocusAreas {

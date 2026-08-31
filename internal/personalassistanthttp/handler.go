@@ -43,13 +43,31 @@ type TodayReader interface {
 	Get(ctx context.Context, userID string) (*personalassistant.TodayProjection, error)
 }
 
+// ContinuityService owns working-agreement and pause/resume writes.
+type ContinuityService interface {
+	UpdateWorkingAgreement(ctx context.Context, userID string, request personalassistant.WorkingAgreementUpdate) (*personalassistant.Projection, error)
+	Pause(ctx context.Context, userID string, ifVersion int64) (*personalassistant.Projection, error)
+	Resume(ctx context.Context, userID string, ifVersion int64) (*personalassistant.Projection, error)
+}
+
+type RenameService interface {
+	Rename(ctx context.Context, userID, newName string, ifVersion int64) (*personalassistant.Projection, error)
+}
+
+type CapabilityReader interface {
+	Get(ctx context.Context, userID string) (*personalassistant.CapabilityProjection, error)
+}
+
 // Handler serves /api/personal-assistant.
 type Handler struct {
-	service     StateReader
-	hirer       HireService
-	assignments AssignmentPreviewService
-	today       TodayReader
-	provider    userprofile.UserProvider
+	service      StateReader
+	hirer        HireService
+	assignments  AssignmentPreviewService
+	today        TodayReader
+	continuity   ContinuityService
+	renamer      RenameService
+	capabilities CapabilityReader
+	provider     userprofile.UserProvider
 }
 
 // NewHandler constructs a personal-assistant HTTP handler.
@@ -78,6 +96,24 @@ func (h *Handler) SetAssignmentService(assignments AssignmentPreviewService) {
 func (h *Handler) SetTodayService(today TodayReader) {
 	if h != nil {
 		h.today = today
+	}
+}
+
+func (h *Handler) SetContinuityService(service ContinuityService) {
+	if h != nil {
+		h.continuity = service
+	}
+}
+
+func (h *Handler) SetRenameService(service RenameService) {
+	if h != nil {
+		h.renamer = service
+	}
+}
+
+func (h *Handler) SetCapabilityService(service CapabilityReader) {
+	if h != nil {
+		h.capabilities = service
 	}
 }
 
@@ -357,6 +393,172 @@ func (h *Handler) ApplyFirstAssignment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	orihttp.Success(w, map[string]any{"first_assignment": result})
+}
+
+type workingAgreementRequest struct {
+	IfVersion               int64             `json:"if_version"`
+	IfConfigRevision        int               `json:"if_config_revision,omitempty"`
+	Mandate                 *string           `json:"mandate,omitempty"`
+	FocusAreas              *[]string         `json:"focus_areas,omitempty"`
+	Timezone                *string           `json:"timezone,omitempty"`
+	ScheduleDays            *[]string         `json:"schedule_days,omitempty"`
+	ScheduleTime            *string           `json:"schedule_time,omitempty"`
+	ScheduleEnabled         *bool             `json:"schedule_enabled,omitempty"`
+	Scope                   *dailybrief.Scope `json:"scope,omitempty"`
+	SelectedWorkspaceIDs    *[]string         `json:"selected_workspace_ids,omitempty"`
+	IncludeFutureWorkspaces *bool             `json:"include_future_workspaces,omitempty"`
+	NotifyOnReady           *bool             `json:"notify_on_ready,omitempty"`
+}
+
+type versionedRequest struct {
+	IfVersion int64 `json:"if_version"`
+}
+
+type renameRequest struct {
+	IfVersion int64  `json:"if_version"`
+	Name      string `json:"name"`
+}
+
+func (h *Handler) UpdateWorkingAgreement(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodPatch) {
+		return
+	}
+	if h == nil || h.continuity == nil || h.provider == nil {
+		orihttp.ServiceUnavailable(w, "personal assistant working agreement is unavailable")
+		return
+	}
+	var body workingAgreementRequest
+	if err := decodeBoundedRequest(w, r, &body); err != nil {
+		writeContinuityError(w, http.StatusBadRequest, "invalid_working_agreement", "Check the working agreement fields and try again.", nil)
+		return
+	}
+	userID, ok := h.currentUserID(w, r)
+	if !ok {
+		return
+	}
+	projection, err := h.continuity.UpdateWorkingAgreement(r.Context(), userID, personalassistant.WorkingAgreementUpdate{
+		IfVersion: body.IfVersion, IfConfigRevision: body.IfConfigRevision,
+		Mandate: body.Mandate, FocusAreas: body.FocusAreas, Timezone: body.Timezone,
+		ScheduleDays: body.ScheduleDays, ScheduleTime: body.ScheduleTime, ScheduleEnabled: body.ScheduleEnabled,
+		Scope: body.Scope, SelectedWorkspaceIDs: body.SelectedWorkspaceIDs,
+		IncludeFutureWorkspaces: body.IncludeFutureWorkspaces, NotifyOnReady: body.NotifyOnReady,
+	})
+	if err != nil {
+		h.writeContinuityServiceError(w, r, userID, err)
+		return
+	}
+	orihttp.Success(w, map[string]any{"personal_assistant": projection})
+}
+
+func (h *Handler) Pause(w http.ResponseWriter, r *http.Request) {
+	h.setPaused(w, r, true)
+}
+
+func (h *Handler) Resume(w http.ResponseWriter, r *http.Request) {
+	h.setPaused(w, r, false)
+}
+
+func (h *Handler) setPaused(w http.ResponseWriter, r *http.Request, paused bool) {
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+	if h == nil || h.continuity == nil || h.provider == nil {
+		orihttp.ServiceUnavailable(w, "personal assistant routine control is unavailable")
+		return
+	}
+	var body versionedRequest
+	if err := decodeBoundedRequest(w, r, &body); err != nil {
+		writeContinuityError(w, http.StatusBadRequest, "invalid_state_change", "A current state version is required.", nil)
+		return
+	}
+	userID, ok := h.currentUserID(w, r)
+	if !ok {
+		return
+	}
+	var projection *personalassistant.Projection
+	var err error
+	if paused {
+		projection, err = h.continuity.Pause(r.Context(), userID, body.IfVersion)
+	} else {
+		projection, err = h.continuity.Resume(r.Context(), userID, body.IfVersion)
+	}
+	if err != nil {
+		h.writeContinuityServiceError(w, r, userID, err)
+		return
+	}
+	orihttp.Success(w, map[string]any{"personal_assistant": projection})
+}
+
+func (h *Handler) Rename(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+	if h == nil || h.renamer == nil || h.provider == nil {
+		orihttp.ServiceUnavailable(w, "personal assistant rename is unavailable")
+		return
+	}
+	var body renameRequest
+	if err := decodeBoundedRequest(w, r, &body); err != nil {
+		writeContinuityError(w, http.StatusBadRequest, "invalid_rename", "Check the assistant name and try again.", nil)
+		return
+	}
+	userID, ok := h.currentUserID(w, r)
+	if !ok {
+		return
+	}
+	projection, err := h.renamer.Rename(r.Context(), userID, body.Name, body.IfVersion)
+	if err != nil {
+		h.writeContinuityServiceError(w, r, userID, err)
+		return
+	}
+	orihttp.Success(w, map[string]any{"personal_assistant": projection})
+}
+
+func (h *Handler) GetCapabilities(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodGet) {
+		return
+	}
+	if h == nil || h.capabilities == nil || h.provider == nil {
+		orihttp.ServiceUnavailable(w, "personal assistant capabilities are unavailable")
+		return
+	}
+	userID, ok := h.currentUserID(w, r)
+	if !ok {
+		return
+	}
+	projection, err := h.capabilities.Get(r.Context(), userID)
+	if err != nil {
+		orihttp.ServiceUnavailable(w, "personal assistant capabilities are temporarily unavailable")
+		return
+	}
+	orihttp.Success(w, map[string]any{"capabilities": projection})
+}
+
+type continuityErrorResponse struct {
+	Error   string                        `json:"error"`
+	Code    string                        `json:"code"`
+	Current *personalassistant.Projection `json:"current,omitempty"`
+}
+
+func (h *Handler) writeContinuityServiceError(w http.ResponseWriter, r *http.Request, userID string, err error) {
+	switch {
+	case errors.Is(err, personalassistant.ErrValidation):
+		writeContinuityError(w, http.StatusBadRequest, "invalid_working_agreement", "Check the values and try again.", nil)
+	case errors.Is(err, personalassistant.ErrConflict):
+		var current *personalassistant.Projection
+		if h.service != nil {
+			current, _ = h.service.Get(r.Context(), userID)
+		}
+		writeContinuityError(w, http.StatusConflict, "state_conflict", "The assistant changed. Review the current values before applying your edit again.", current)
+	case errors.Is(err, personalassistant.ErrRepairNeeded), errors.Is(err, personalassistant.ErrNotFound):
+		writeContinuityError(w, http.StatusConflict, "repair_required", "The assistant relationship needs repair before this change can continue.", nil)
+	default:
+		orihttp.ServiceUnavailable(w, "personal assistant continuity change is temporarily unavailable")
+	}
+}
+
+func writeContinuityError(w http.ResponseWriter, status int, code, message string, current *personalassistant.Projection) {
+	_ = orihttp.RespondJSON(w, status, continuityErrorResponse{Error: message, Code: code, Current: current})
 }
 
 func (h *Handler) currentUserID(w http.ResponseWriter, r *http.Request) (string, bool) {

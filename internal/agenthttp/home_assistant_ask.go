@@ -5,11 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/llm"
+	"github.com/johnjallday/ori-agent/internal/personalassistant"
 )
 
 const homeMaxToolRounds = 4
@@ -29,6 +31,7 @@ const (
 	HomeActionAssignAgent       = "assign_agent"
 	HomeActionCreateAgent       = "create_agent"
 	HomeActionRemoveAgent       = "remove_agent"
+	HomeActionRemember          = "remember"
 	HomeActionAskFollowup       = "ask_followup"
 )
 
@@ -42,6 +45,7 @@ var homeMutatingActionTypes = map[string]bool{
 	HomeActionAssignAgent:       true,
 	HomeActionCreateAgent:       true,
 	HomeActionRemoveAgent:       true,
+	HomeActionRemember:          true,
 }
 
 // HomeAction is a serializable next-step action descriptor returned to the
@@ -109,6 +113,10 @@ type HomeActionMutator interface {
 	RemoveAgent(ctx context.Context, workspaceID, agentName string) (href string, err error)
 }
 
+type PersonalAssistantMemoryWriter interface {
+	Remember(ctx context.Context, userID string, request personalassistant.RememberRequest) (*personalassistant.RememberResult, error)
+}
+
 type homeAskSystemModelReader interface {
 	GetSystemModel() (provider, model string)
 }
@@ -138,6 +146,7 @@ type HomeAssistantAskHandler struct {
 	Mutator                  HomeActionMutator
 	Trace                    homeAskTraceEmitter
 	PersonalAssistantContext PersonalAssistantContextProvider
+	PersonalAssistantMemory  PersonalAssistantMemoryWriter
 	UserID                   string
 	now                      func() time.Time
 }
@@ -162,6 +171,10 @@ func (h *HomeAssistantAskHandler) SetTraceEmitter(t homeAskTraceEmitter) { h.Tra
 func (h *HomeAssistantAskHandler) SetPersonalAssistantContextProvider(provider PersonalAssistantContextProvider, userID string) {
 	h.PersonalAssistantContext = provider
 	h.UserID = strings.TrimSpace(userID)
+}
+
+func (h *HomeAssistantAskHandler) SetPersonalAssistantMemoryWriter(writer PersonalAssistantMemoryWriter) {
+	h.PersonalAssistantMemory = writer
 }
 
 func (h *HomeAssistantAskHandler) emitTrace(ctx context.Context, trace HomeAskTrace) {
@@ -226,6 +239,14 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 			question = "What would you like help with today?"
 		}
 		return HomeAssistantAskResponse{Response: question, Intent: intent, Identity: identity}
+	}
+
+	if conf := detectPersonalAssistantRememberRequest(prompt, workContext); conf != nil {
+		h.emitTrace(ctx, HomeAskTrace{Prompt: prompt, Intent: intent, Outcome: "confirmation_required", ConfirmedType: conf.ActionType})
+		return HomeAssistantAskResponse{
+			Response: conf.Summary, Intent: intent, Identity: identity,
+			RequiresConfirmation: true, Confirmation: conf,
+		}
 	}
 
 	// Backlog capture (PRD workspace-backlog FR23-25) is checked as its own
@@ -429,10 +450,31 @@ func (h *HomeAssistantAskHandler) executeConfirmedAction(ctx context.Context, in
 	if !homeMutatingActionTypes[action.Type] {
 		return HomeAssistantAskResponse{Response: "That action doesn't require confirmation.", Intent: intent}
 	}
+	args := action.Arguments
+	if action.Type == HomeActionRemember {
+		if h.PersonalAssistantMemory == nil {
+			return HomeAssistantAskResponse{Response: "Memory is unavailable in this build. Nothing was saved.", Intent: intent}
+		}
+		version, err := strconv.ParseInt(actionArgString(args, "state_version"), 10, 64)
+		if err != nil || version < 1 {
+			return HomeAssistantAskResponse{Response: "This memory proposal is stale. Nothing was saved; ask me to remember it again.", Intent: intent}
+		}
+		result, err := h.PersonalAssistantMemory.Remember(ctx, h.UserID, personalassistant.RememberRequest{
+			IfVersion: version, Destination: personalassistant.MemoryDestination(actionArgString(args, "destination")),
+			Text: actionArgString(args, "text"), Preference: actionArgString(args, "preference"), Value: actionArgString(args, "value"),
+		})
+		if err != nil {
+			return HomeAssistantAskResponse{Response: "I couldn't save that memory. Nothing was changed; refresh and try again.", Intent: intent}
+		}
+		h.recordMutation(ctx, intent, HomeActionRemember)
+		return HomeAssistantAskResponse{
+			Response: "Saved that explicit memory. You can review, edit, or delete it at its source.", Intent: intent,
+			Actions: []HomeAction{{ID: "open-saved-memory", Type: HomeActionNavigate, Label: "Review saved memory", Href: result.Href}},
+		}
+	}
 	if h.Mutator == nil {
 		return HomeAssistantAskResponse{Response: "I can't perform that change in this build yet.", Intent: intent}
 	}
-	args := action.Arguments
 	switch action.Type {
 	case HomeActionCreateWorkspace:
 		name := actionArgString(args, "name")

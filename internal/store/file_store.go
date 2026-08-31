@@ -278,16 +278,21 @@ func (s *fileStore) RenameAgent(oldName, newName string) error {
 	newFolder := filepath.Join(agentsDir, newName)
 
 	// Never merge into an existing folder — a stale directory under the target
-	// name would silently mix two agents' sidecars.
-	if _, err := os.Stat(newFolder); err == nil {
-		return fmt.Errorf("agent folder %q already exists", newFolder)
+	// name would silently mix two agents' sidecars. A case-only rename on a
+	// case-insensitive filesystem is the one exception: both paths identify the
+	// same directory, and os.Rename safely updates its presentation casing.
+	oldInfo, oldStatErr := os.Stat(oldFolder)
+	if newInfo, err := os.Stat(newFolder); err == nil {
+		if oldStatErr != nil || !os.SameFile(oldInfo, newInfo) {
+			return fmt.Errorf("agent folder %q already exists", newFolder)
+		}
 	} else if !os.IsNotExist(err) {
 		return err
 	}
 
 	// The folder is only moved when it exists; a record can legitimately live in
 	// memory before anything has forced a save.
-	if _, err := os.Stat(oldFolder); err == nil {
+	if oldStatErr == nil {
 		// 0o750, not the 0o755 the older writes in this file use: an agent folder
 		// holds the agent's prompt and its per-agent skill state, which no other
 		// user on the machine needs to read.
@@ -297,8 +302,8 @@ func (s *fileStore) RenameAgent(oldName, newName string) error {
 		if err := os.Rename(oldFolder, newFolder); err != nil {
 			return fmt.Errorf("move agent folder: %w", err)
 		}
-	} else if !os.IsNotExist(err) {
-		return err
+	} else if !os.IsNotExist(oldStatErr) {
+		return oldStatErr
 	}
 
 	s.agents[newName] = record

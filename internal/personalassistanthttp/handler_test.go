@@ -90,6 +90,27 @@ func (f *fakeHireService) Hire(_ context.Context, userID string, request persona
 	return f.result, f.err
 }
 
+type fakeContinuityService struct {
+	projection *personalassistant.Projection
+	err        error
+	update     personalassistant.WorkingAgreementUpdate
+	ifVersion  int64
+	action     string
+}
+
+func (f *fakeContinuityService) UpdateWorkingAgreement(_ context.Context, _ string, request personalassistant.WorkingAgreementUpdate) (*personalassistant.Projection, error) {
+	f.update = request
+	return f.projection, f.err
+}
+func (f *fakeContinuityService) Pause(_ context.Context, _ string, ifVersion int64) (*personalassistant.Projection, error) {
+	f.ifVersion, f.action = ifVersion, "pause"
+	return f.projection, f.err
+}
+func (f *fakeContinuityService) Resume(_ context.Context, _ string, ifVersion int64) (*personalassistant.Projection, error) {
+	f.ifVersion, f.action = ifVersion, "resume"
+	return f.projection, f.err
+}
+
 type fakeUserProvider struct {
 	userID string
 	err    error
@@ -97,6 +118,51 @@ type fakeUserProvider struct {
 
 func (f fakeUserProvider) CurrentUserID(context.Context) (string, error) {
 	return f.userID, f.err
+}
+
+func TestHandlerWorkingAgreement_PinsPatchFieldsAndConflictProjection(t *testing.T) {
+	current := &personalassistant.Projection{State: personalassistant.APIStateActive, StateVersion: 9, DisplayName: "Ada"}
+	reader := &fakeStateReader{projection: current}
+	continuity := &fakeContinuityService{projection: current}
+	handler := NewHandler(reader, fakeUserProvider{userID: "local"})
+	handler.SetContinuityService(continuity)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPatch, "/api/personal-assistant/working-agreement", strings.NewReader(`{"if_version":9,"mandate":"Keep launches visible","timezone":"UTC","schedule_enabled":false}`))
+	request.Header.Set("Content-Type", "application/json")
+	handler.UpdateWorkingAgreement(recorder, request)
+	if recorder.Code != http.StatusOK || continuity.update.IfVersion != 9 || continuity.update.Mandate == nil || *continuity.update.Mandate != "Keep launches visible" || continuity.update.ScheduleEnabled == nil || *continuity.update.ScheduleEnabled {
+		t.Fatalf("status=%d update=%+v body=%s", recorder.Code, continuity.update, recorder.Body.String())
+	}
+
+	continuity.err = personalassistant.ErrConflict
+	recorder = httptest.NewRecorder()
+	request = httptest.NewRequest(http.MethodPatch, "/api/personal-assistant/working-agreement", strings.NewReader(`{"if_version":8}`))
+	handler.UpdateWorkingAgreement(recorder, request)
+	if recorder.Code != http.StatusConflict || !strings.Contains(recorder.Body.String(), `"state_version":9`) || !strings.Contains(recorder.Body.String(), `"code":"state_conflict"`) {
+		t.Fatalf("conflict status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestHandlerPauseResumeRequireVersionAndPreserveProjection(t *testing.T) {
+	projection := &personalassistant.Projection{State: personalassistant.APIStatePaused, StateVersion: 10}
+	continuity := &fakeContinuityService{projection: projection}
+	handler := NewHandler(&fakeStateReader{projection: projection}, fakeUserProvider{userID: "local"})
+	handler.SetContinuityService(continuity)
+	for _, test := range []struct {
+		name string
+		call func(http.ResponseWriter, *http.Request)
+	}{
+		{"pause", handler.Pause}, {"resume", handler.Resume},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			test.call(recorder, httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"if_version":10}`)))
+			if recorder.Code != http.StatusOK || continuity.ifVersion != 10 || continuity.action != test.name {
+				t.Fatalf("status=%d action=%s version=%d body=%s", recorder.Code, continuity.action, continuity.ifVersion, recorder.Body.String())
+			}
+		})
+	}
 }
 
 func TestHandlerGetState_PinsMethodStatusAndProjection(t *testing.T) {

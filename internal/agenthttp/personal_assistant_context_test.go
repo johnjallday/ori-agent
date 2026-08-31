@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/llm"
+	"github.com/johnjallday/ori-agent/internal/personalassistant"
 )
 
 type stubPersonalAssistantContextProvider struct {
@@ -41,7 +42,7 @@ func (p *promptCaptureProvider) DefaultModels() []string                 { retur
 
 func activePersonalAssistantContext() *PersonalAssistantWorkContext {
 	return &PersonalAssistantWorkContext{
-		Eligible: true, State: "active", DisplayName: "Nova", Role: "Personal Assistant",
+		Eligible: true, State: "active", StateVersion: 7, DisplayName: "Nova", Role: "Personal Assistant",
 		Mandate: "Keep projects moving", FocusAreas: []string{"plan_my_day"}, HQWorkspaceID: "hq-owned",
 		UserProfile: "Name: Jo", HQMemory: "- [fact, 2026-01-02, user] Prefers concise updates",
 		Sources: map[string]PersonalAssistantContextSource{
@@ -125,6 +126,63 @@ func TestAsk_EligiblePreHireAndContextFailureCannotMutate(t *testing.T) {
 			})
 			if mutator.created != "" || resp.RequiresConfirmation {
 				t.Fatalf("unsafe pre-hire/context-failure mutation: created=%q response=%+v", mutator.created, resp)
+			}
+		})
+	}
+}
+
+type fakePersonalAssistantMemoryWriter struct {
+	requests []personalassistant.RememberRequest
+	err      error
+}
+
+func (w *fakePersonalAssistantMemoryWriter) Remember(_ context.Context, _ string, request personalassistant.RememberRequest) (*personalassistant.RememberResult, error) {
+	w.requests = append(w.requests, request)
+	if w.err != nil {
+		return nil, w.err
+	}
+	return &personalassistant.RememberResult{Destination: request.Destination, Text: request.Text, Href: "/profile", Created: true}, nil
+}
+
+func TestAsk_ActivePersonalAssistantRememberRequiresExactConfirmation(t *testing.T) {
+	h := newAskHandlerWithProvider(t, "unused")
+	h.SetPersonalAssistantContextProvider(&stubPersonalAssistantContextProvider{context: activePersonalAssistantContext()}, "user-a")
+	writer := &fakePersonalAssistantMemoryWriter{}
+	h.SetPersonalAssistantMemoryWriter(writer)
+
+	preview := h.Ask(context.Background(), HomeAssistantAskRequest{Prompt: "remember that I prefer concise responses", Intent: "general_task"})
+	if !preview.RequiresConfirmation || preview.Confirmation == nil || preview.Confirmation.ActionType != HomeActionRemember || len(writer.requests) != 0 {
+		t.Fatalf("remember bypassed confirmation: %+v writes=%+v", preview, writer.requests)
+	}
+	if preview.Confirmation.Arguments["destination"] != "profile" || preview.Confirmation.Arguments["text"] != "I prefer concise responses" {
+		t.Fatalf("memory destination/text=%+v", preview.Confirmation.Arguments)
+	}
+	result := h.Ask(context.Background(), HomeAssistantAskRequest{
+		Intent: "general_task", ConfirmedAction: &HomeAction{Type: HomeActionRemember, Arguments: preview.Confirmation.Arguments},
+	})
+	if len(writer.requests) != 1 || writer.requests[0].IfVersion != 7 || len(result.Actions) != 1 || result.Actions[0].Href != "/profile" {
+		t.Fatalf("confirmed memory result=%+v writes=%+v", result, writer.requests)
+	}
+
+	ordinary := h.Ask(context.Background(), HomeAssistantAskRequest{Prompt: "I prefer concise responses", Intent: "general_task"})
+	if ordinary.RequiresConfirmation || len(writer.requests) != 1 {
+		t.Fatalf("ordinary conversation was mined for memory: %+v writes=%+v", ordinary, writer.requests)
+	}
+}
+
+func TestAsk_RememberUnavailableForLegacyAndPreHirePaths(t *testing.T) {
+	for name, workContext := range map[string]*PersonalAssistantWorkContext{
+		"legacy":   nil,
+		"pre-hire": {Eligible: true, State: "needs_hire", StateVersion: 2},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newAskHandlerWithProvider(t, "unused")
+			h.SetPersonalAssistantContextProvider(&stubPersonalAssistantContextProvider{context: workContext}, "user-a")
+			writer := &fakePersonalAssistantMemoryWriter{}
+			h.SetPersonalAssistantMemoryWriter(writer)
+			response := h.Ask(context.Background(), HomeAssistantAskRequest{Prompt: "remember that my launch is Friday"})
+			if response.RequiresConfirmation || len(writer.requests) != 0 {
+				t.Fatalf("narrow path exposed memory: %+v", response)
 			}
 		})
 	}

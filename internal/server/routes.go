@@ -149,6 +149,7 @@ func registerAgentRoutes(mux *http.ServeMux, s *Server) {
 	agentHandler.ActivityLogger = s.Handlers.ActivityLogger
 	agentHandler.SetCLIAgentRegistry(s.Handlers.CLIAgentRegistry)
 	agentHandler.SetWorkspaceStore(s.Storage.WorkspaceStore)
+	agentHandler.SetPersonalAssistantSupport(s.Storage.PersonalAssistant, s.Storage.UserProvider)
 	if s.Storage.SessionStore != nil {
 		agentHandler.SetSessionPurger(s.Storage.SessionStore)
 	}
@@ -175,6 +176,7 @@ func registerAgentRoutes(mux *http.ServeMux, s *Server) {
 	dashboardHandler.ActivityLogger = s.Handlers.ActivityLogger
 	dashboardHandler.SetCLIAgentRegistry(s.Handlers.CLIAgentRegistry)
 	dashboardHandler.SetWorkspaceStore(s.Storage.WorkspaceStore)
+	dashboardHandler.SetPersonalAssistantSupport(s.Storage.PersonalAssistant, s.Storage.UserProvider)
 	if s.Handlers.ExternalAgents != nil {
 		dashboardHandler.SetClaudeSyncProvider(s.Handlers.ExternalAgents.ClaudeSyncData)
 		dashboardHandler.SetCodexSyncProvider(s.Handlers.ExternalAgents.CodexSyncData)
@@ -975,6 +977,11 @@ func registerPersonalAssistantRoutes(mux *http.ServeMux, s *Server) {
 	if s != nil && s.Handlers != nil && s.Handlers.PersonalAssistant != nil {
 		mux.HandleFunc("GET /api/personal-assistant", s.Handlers.PersonalAssistant.GetState)
 		mux.HandleFunc("GET /api/personal-assistant/today", s.Handlers.PersonalAssistant.GetToday)
+		mux.HandleFunc("GET /api/personal-assistant/capabilities", s.Handlers.PersonalAssistant.GetCapabilities)
+		mux.HandleFunc("PATCH /api/personal-assistant/working-agreement", s.Handlers.PersonalAssistant.UpdateWorkingAgreement)
+		mux.HandleFunc("POST /api/personal-assistant/pause", s.Handlers.PersonalAssistant.Pause)
+		mux.HandleFunc("POST /api/personal-assistant/resume", s.Handlers.PersonalAssistant.Resume)
+		mux.HandleFunc("POST /api/personal-assistant/rename", s.Handlers.PersonalAssistant.Rename)
 		mux.HandleFunc("POST /api/personal-assistant/hire", s.Handlers.PersonalAssistant.Hire)
 		mux.HandleFunc("GET /api/personal-assistant/first-assignment", s.Handlers.PersonalAssistant.GetFirstAssignment)
 		mux.HandleFunc("POST /api/personal-assistant/first-assignment/preview", s.Handlers.PersonalAssistant.PreviewFirstAssignment)

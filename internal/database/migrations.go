@@ -10,7 +10,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 50
+const schemaVersion = 51
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -165,6 +165,8 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 		return db.migration049PersonalAssistantApplyRequest(ctx)
 	case 50:
 		return db.migration050PersonalAssistantFirstBrief(ctx)
+	case 51:
+		return db.migration051PersonalAssistantRenameJournal(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
@@ -1769,6 +1771,27 @@ func (db *DB) migration049PersonalAssistantApplyRequest(ctx context.Context) err
 
 // migration050PersonalAssistantFirstBrief persists only stable Daily Brief
 // lifecycle IDs/status needed to resume after records become visible.
+func (db *DB) migration051PersonalAssistantRenameJournal(ctx context.Context) error {
+	exists, err := db.tableExists(ctx, "personal_assistant_state")
+	if err != nil || !exists {
+		return err
+	}
+	statements := []struct {
+		sql   string
+		label string
+	}{
+		{`ALTER TABLE personal_assistant_state ADD COLUMN rename_from_name TEXT NOT NULL DEFAULT ''`, "rename_from_name"},
+		{`ALTER TABLE personal_assistant_state ADD COLUMN rename_to_name TEXT NOT NULL DEFAULT ''`, "rename_to_name"},
+		{`ALTER TABLE personal_assistant_state ADD COLUMN rename_step TEXT NOT NULL DEFAULT ''`, "rename_step"},
+	}
+	for _, statement := range statements {
+		if _, execErr := db.ExecContext(ctx, statement.sql); execErr != nil && !isDuplicateColumnError(execErr) {
+			return fmt.Errorf("failed to add personal_assistant_state.%s column: %w", statement.label, execErr)
+		}
+	}
+	return nil
+}
+
 func (db *DB) migration050PersonalAssistantFirstBrief(ctx context.Context) error {
 	exists, err := db.tableExists(ctx, "personal_assistant_assignment")
 	if err != nil || !exists {

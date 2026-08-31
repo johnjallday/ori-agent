@@ -85,7 +85,8 @@ type StorageSystemFacade struct {
 	OnboardingMgr   *onboarding.Manager
 	LocationManager *location.Manager
 	// PersonalAssistant is the user-owned relationship/read service.
-	PersonalAssistant *personalassistant.Service
+	PersonalAssistant       *personalassistant.Service
+	PersonalAssistantMemory *personalassistant.MemoryService
 	// PersonalHQ is the raw domain service (not the HTTP handler), so
 	// non-HTTP callers like serveIndex's first-run classification can read
 	// onboarding status directly.
@@ -228,19 +229,21 @@ func NewStorageSystemFacade(
 	onboardingMgr *onboarding.Manager,
 	locationManager *location.Manager,
 	personalAssistant *personalassistant.Service,
+	personalAssistantMemory *personalassistant.MemoryService,
 	personalHQ *personalhq.Service,
 ) *StorageSystemFacade {
 	return &StorageSystemFacade{
-		AgentStore:        agentStore,
-		AgentStorePath:    agentStorePath,
-		WorkspaceStore:    workspaceStore,
-		SessionStore:      sessionStore,
-		UserStore:         userStore,
-		UserProvider:      userProvider,
-		OnboardingMgr:     onboardingMgr,
-		LocationManager:   locationManager,
-		PersonalAssistant: personalAssistant,
-		PersonalHQ:        personalHQ,
+		AgentStore:              agentStore,
+		AgentStorePath:          agentStorePath,
+		WorkspaceStore:          workspaceStore,
+		SessionStore:            sessionStore,
+		UserStore:               userStore,
+		UserProvider:            userProvider,
+		OnboardingMgr:           onboardingMgr,
+		LocationManager:         locationManager,
+		PersonalAssistant:       personalAssistant,
+		PersonalAssistantMemory: personalAssistantMemory,
+		PersonalHQ:              personalHQ,
 	}
 }
 

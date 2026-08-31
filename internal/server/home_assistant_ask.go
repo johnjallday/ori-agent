@@ -370,6 +370,9 @@ func (s *Server) newHomeAssistantAskHandler() *agenthttp.HomeAssistantAskHandler
 			profiles:     s.Storage.UserStore,
 			workspaces:   s.Storage.WorkspaceStore,
 		}, "local")
+		if s.Storage.PersonalAssistantMemory != nil {
+			handler.SetPersonalAssistantMemoryWriter(s.Storage.PersonalAssistantMemory)
+		}
 	}
 
 	// Ori Guide reuses the same system model, but only to reword an answer it

@@ -32,6 +32,7 @@ type PersonalAssistantContextSource struct {
 type PersonalAssistantWorkContext struct {
 	Eligible      bool
 	State         string
+	StateVersion  int64
 	DisplayName   string
 	Role          string
 	Mandate       string
@@ -131,6 +132,53 @@ func sanitizePersonalAssistantSnapshot(snapshot HomeSnapshot, c *PersonalAssista
 	}
 	snapshot.Sessions = filteredSessions
 	return snapshot
+}
+
+func detectPersonalAssistantRememberRequest(prompt string, c *PersonalAssistantWorkContext) *HomeActionConfirmation {
+	if c == nil || !c.ReadyForWork() || c.StateVersion < 1 {
+		return nil
+	}
+	trimmed := strings.TrimSpace(prompt)
+	lower := strings.ToLower(trimmed)
+	const prefix = "remember that "
+	if !strings.HasPrefix(lower, prefix) {
+		return nil
+	}
+	text := strings.Join(strings.Fields(trimmed[len(prefix):]), " ")
+	text = strings.Trim(text, " .")
+	if text == "" {
+		return nil
+	}
+	destination, preference, value := "personal_hq", "", ""
+	lowerText := strings.ToLower(text)
+	switch {
+	case strings.Contains(lowerText, "metric") && strings.Contains(lowerText, "unit"):
+		destination, preference, value = "profile", "units", "metric"
+	case strings.Contains(lowerText, "imperial") && strings.Contains(lowerText, "unit"):
+		destination, preference, value = "profile", "units", "imperial"
+	case strings.Contains(lowerText, "response") && strings.Contains(lowerText, "concise"):
+		destination, preference, value = "profile", "response_style", "concise"
+	case strings.Contains(lowerText, "response") && strings.Contains(lowerText, "detailed"):
+		destination, preference, value = "profile", "response_style", "detailed"
+	case strings.HasPrefix(lowerText, "my language is "):
+		destination, preference = "profile", "language"
+		value = strings.TrimSpace(text[len("my language is "):])
+	case strings.HasPrefix(lowerText, "respond in "):
+		destination, preference = "profile", "language"
+		value = strings.TrimSpace(text[len("respond in "):])
+	}
+	label := "Personal HQ Memory"
+	if destination == "profile" {
+		label = "your global Profile"
+	}
+	return &HomeActionConfirmation{
+		ActionID: "remember-explicit", ActionType: HomeActionRemember,
+		Summary: fmt.Sprintf("Remember %q in %s? You can edit or delete it there.", text, label),
+		Arguments: map[string]any{
+			"state_version": c.StateVersion, "destination": destination, "text": text,
+			"preference": preference, "value": value,
+		},
+	}
 }
 
 func renderPersonalAssistantPromptContext(c *PersonalAssistantWorkContext) string {

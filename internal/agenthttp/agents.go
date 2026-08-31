@@ -15,6 +15,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/skills"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
+	"github.com/johnjallday/ori-agent/internal/userprofile"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -98,6 +99,7 @@ type Handler struct {
 	// skillsManager enables a catalog entry's starter skills at catalog-create
 	// time. Nil is a safe no-op (no starter skills applied).
 	skillsManager *skills.Manager
+	support       personalAssistantSupportClassifier
 }
 
 func New(state store.Store) *Handler {
@@ -125,6 +127,10 @@ func (h *Handler) SetWorkspaceStore(s workspace.Store) {
 // keep referring to a deleted agent through restored session state.
 func (h *Handler) SetSessionPurger(p SessionPurger) {
 	h.sessionPurger = p
+}
+
+func (h *Handler) SetPersonalAssistantSupport(reader personalAssistantSupportReader, provider userprofile.UserProvider) {
+	h.support = personalAssistantSupportClassifier{reader: reader, provider: provider}
 }
 
 // SetClaudeSyncProvider wires a provider of read-only ~/.claude data, attached
@@ -190,7 +196,7 @@ func (h *Handler) handleGet(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		orihttp.WriteJSON(w, map[string]any{
+		response := map[string]any{
 			"name":              agentName,
 			"type":              agent.Type,
 			"role":              agent.Role,
@@ -208,7 +214,12 @@ func (h *Handler) handleGet(w http.ResponseWriter, r *http.Request) {
 			"evolution":         cloneAgentEvolution(agent),
 			"version":           agentConfigVersion(agent),
 			"source":            "user",
-		})
+		}
+		memberships := workspace.AgentWorkspaceMemberships(h.workspaceStore)
+		if role := h.support.classify(r.Context(), agentName, memberships[strings.ToLower(agentName)].Workspaces); role != "" {
+			response["presentation_role"] = role
+		}
+		orihttp.WriteJSON(w, response)
 		return
 	}
 
@@ -235,12 +246,14 @@ func (h *Handler) handleGet(w http.ResponseWriter, r *http.Request) {
 		// Appearance travels with the light-weight list too, so a picker or a
 		// session header can render an agent without a second round trip per
 		// row (FR-49/FR-104).
-		Appearance map[string]any `json:"appearance"`
+		Appearance       map[string]any `json:"appearance"`
+		PresentationRole string         `json:"presentation_role,omitempty"`
 	}
 	annotate := func(info AgentInfo) AgentInfo {
 		if m, ok := memberships[strings.ToLower(strings.TrimSpace(info.Name))]; ok {
 			info.WorkspaceCount = m.Count
 			info.Workspaces = m.Workspaces
+			info.PresentationRole = h.support.classify(r.Context(), info.Name, m.Workspaces)
 			for _, ref := range m.Workspaces {
 				if ref.EntryPoint {
 					info.WorkspaceID = ref.ID

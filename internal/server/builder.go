@@ -297,6 +297,7 @@ type ServerBuilder struct {
 	personalAssistantStore   *personalassistant.SQLiteStore
 	personalAssistantService *personalassistant.Service
 	personalAssistantHire    *personalassistant.HireCoordinator
+	personalAssistantMemory  *personalassistant.MemoryService
 	personalAssignment       *personalassistant.AssignmentService
 	personalAssistantHandler *personalassistanthttp.Handler
 
@@ -501,6 +502,7 @@ func (b *ServerBuilder) createDomainFacades() {
 		b.onboardingMgr,
 		b.locationManager,
 		b.personalAssistantService,
+		b.personalAssistantMemory,
 		b.personalHQService,
 	)
 

@@ -30,10 +30,11 @@ func (a personalAssistantContextAdapter) ResolvePersonalAssistantContext(ctx con
 		return nil, err
 	}
 	out := &agenthttp.PersonalAssistantWorkContext{
-		Eligible: projection.State != personalassistant.APIStateIneligible,
-		State:    string(projection.State),
-		Role:     "Personal Assistant",
-		Sources:  map[string]agenthttp.PersonalAssistantContextSource{},
+		Eligible:     projection.State != personalassistant.APIStateIneligible,
+		State:        string(projection.State),
+		StateVersion: projection.StateVersion,
+		Role:         "Personal Assistant",
+		Sources:      map[string]agenthttp.PersonalAssistantContextSource{},
 	}
 	if !out.Eligible {
 		return out, nil

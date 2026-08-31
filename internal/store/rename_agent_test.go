@@ -36,6 +36,22 @@ func TestFileStoreImplementsAgentRenamer(t *testing.T) {
 // The reason this primitive exists: the old migration did SetAgent(new) then
 // DeleteAgent(old), and DeleteAgent does os.RemoveAll on the agent folder — so
 // every sidecar that is not part of the in-memory record was destroyed.
+func TestRenameAgentSupportsCaseOnlyIdentityChange(t *testing.T) {
+	fs, _ := renameStore(t)
+	if err := fs.CreateAgent("Atlas", &CreateAgentConfig{Type: agent.TypeGeneral}); err != nil {
+		t.Fatal(err)
+	}
+	if err := fs.RenameAgent("Atlas", "ATLAS"); err != nil {
+		t.Fatalf("case-only rename: %v", err)
+	}
+	if _, oldExists := fs.GetAgent("Atlas"); oldExists {
+		t.Fatal("old profile key remained after case-only rename")
+	}
+	if _, newExists := fs.GetAgent("ATLAS"); !newExists {
+		t.Fatal("case-only destination profile is missing")
+	}
+}
+
 func TestRenameAgentPreservesSidecarFiles(t *testing.T) {
 	fs, agentsDir := renameStore(t)
 

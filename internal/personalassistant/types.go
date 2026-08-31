@@ -201,6 +201,27 @@ func NormalizeRepairStep(raw string) (RepairStep, error) {
 	}
 }
 
+// RenameStep is the durable, restart-safe rename operation boundary.
+type RenameStep string
+
+const (
+	RenameNone            RenameStep = ""
+	RenameProfilePending  RenameStep = "profile_pending"
+	RenameHQPending       RenameStep = "hq_pending"
+	RenameSessionsPending RenameStep = "sessions_pending"
+	RenameStatePending    RenameStep = "state_pending"
+)
+
+func NormalizeRenameStep(raw string) (RenameStep, error) {
+	step := RenameStep(strings.TrimSpace(raw))
+	switch step {
+	case RenameNone, RenameProfilePending, RenameHQPending, RenameSessionsPending, RenameStatePending:
+		return step, nil
+	default:
+		return "", fmt.Errorf("personal assistant: invalid rename step %q", raw)
+	}
+}
+
 // State is one user's durable personal-assistant relationship.
 type State struct {
 	UserID                 string
@@ -218,6 +239,9 @@ type State struct {
 	HirePayloadHash        string
 	HirePayloadJSON        string
 	RepairStep             RepairStep
+	RenameFromName         string
+	RenameToName           string
+	RenameStep             RenameStep
 	StateVersion           int64
 	HiredAt                *time.Time
 	CreatedAt              time.Time

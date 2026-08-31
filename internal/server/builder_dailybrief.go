@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -104,7 +105,9 @@ func (c *systemModelChatCompleter) Chat(ctx context.Context, req llm.ChatRequest
 // designation — that's the personalhq repair flow's job, not the
 // scheduler's).
 type personalHQWorkspaceLister struct {
-	service *personalhq.Service
+	service      *personalhq.Service
+	relationship personalassistant.Store
+	eligibility  personalassistant.EligibilityReader
 }
 
 func (l *personalHQWorkspaceLister) ListScheduledWorkspaces(ctx context.Context) ([]dailybrief.ScheduledWorkspace, error) {
@@ -117,6 +120,19 @@ func (l *personalHQWorkspaceLister) ListScheduledWorkspaces(ctx context.Context)
 	}
 	if !status.Valid {
 		return nil, nil
+	}
+	if l.relationship != nil && l.eligibility != nil && l.eligibility.PersonalAssistantEligibilityVersion() > 0 {
+		state, stateErr := l.relationship.GetState(ctx, userprofile.LocalUserID)
+		if stateErr == nil &&
+			(state.Status != personalassistant.StatusActive || state.RenameStep != personalassistant.RenameNone) {
+			return nil, nil
+		}
+		if errors.Is(stateErr, personalassistant.ErrNotFound) {
+			return nil, nil
+		}
+		if stateErr != nil {
+			return nil, stateErr
+		}
 	}
 	return []dailybrief.ScheduledWorkspace{{WorkspaceID: status.WorkspaceID, UserID: userprofile.LocalUserID}}, nil
 }
@@ -194,7 +210,6 @@ func (b *ServerBuilder) initializeDailyBrief() {
 
 	b.dailyBriefService = briefService
 	b.dailyBriefHandler = dailybriefhttp.NewHandler(briefService, b.personalHQService, b.userProvider)
-	b.dailyBriefScheduler = dailybrief.NewScheduler(briefService, &personalHQWorkspaceLister{service: b.personalHQService}, dailyBriefSchedulerPollInterval)
 
 	// PAF reads aggregate the relationship, HQ, Daily Brief configuration, and
 	// model capability through narrow interfaces. Construction happens here so
@@ -222,7 +237,27 @@ func (b *ServerBuilder) initializeDailyBrief() {
 	b.personalAssistantHandler = personalassistanthttp.NewHandler(b.personalAssistantService, b.userProvider)
 	b.personalAssistantHandler.SetHireService(b.personalAssistantHire)
 	b.personalAssistantHandler.SetAssignmentService(b.personalAssignment)
+	continuity := personalassistant.NewContinuityService(
+		b.personalAssistantStore, b.personalHQService, briefService, b.personalAssistantService,
+	)
+	b.personalAssistantMemory = personalassistant.NewMemoryService(
+		b.personalAssistantStore, b.personalHQService, b.userStore, workspace.NewMemoryStore(b.workspaceFileStore),
+	)
+	b.personalAssistantHandler.SetContinuityService(continuity)
+	renameCoordinator := personalassistant.NewRenameCoordinator(
+		continuity, newPersonalAssistantAgentProfiles(b.st), b.workspaceStore,
+	)
+	if sessionRenamer, ok := b.sessionStore.(personalassistant.AssistantSessionRenamer); ok {
+		renameCoordinator.SetSessionRenamer(sessionRenamer)
+	}
+	b.personalAssistantHandler.SetRenameService(renameCoordinator)
+	b.personalAssistantHandler.SetCapabilityService(personalassistant.NewCapabilityService(
+		b.personalAssistantService, b.workspaceStore, personalAssistantEmailCapability{readiness: b.emailReadiness},
+	))
 	b.personalAssistantHandler.SetTodayService(personalassistant.NewTodayService(
 		b.personalAssistantService, briefService, b.workspaceStore, b.followUpService,
 	))
+	b.dailyBriefScheduler = dailybrief.NewScheduler(briefService, &personalHQWorkspaceLister{
+		service: b.personalHQService, relationship: b.personalAssistantStore, eligibility: b.onboardingMgr,
+	}, dailyBriefSchedulerPollInterval)
 }

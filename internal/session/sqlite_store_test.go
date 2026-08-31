@@ -19,6 +19,28 @@ func setupTestDB(t *testing.T) (*database.DB, func()) {
 	return db, func() { _ = db.Close() }
 }
 
+func TestSQLiteStore_RenameSessionsByAgentPreservesSessionIdentity(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+	store := NewSQLiteStore(db)
+	ctx := context.Background()
+	session := &Session{ID: "rename-session", Title: "History", AgentName: "Ada", CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	if err := store.CreateSession(ctx, session); err != nil {
+		t.Fatal(err)
+	}
+	count, err := store.RenameSessionsByAgent(ctx, "Ada", "Atlas")
+	if err != nil || count != 1 {
+		t.Fatalf("rename count=%d err=%v", count, err)
+	}
+	renamed, err := store.GetSession(ctx, session.ID)
+	if err != nil || renamed.ID != session.ID || renamed.AgentName != "Atlas" {
+		t.Fatalf("renamed session=%+v err=%v", renamed, err)
+	}
+	if count, err = store.RenameSessionsByAgent(ctx, "Ada", "Atlas"); err != nil || count != 0 {
+		t.Fatalf("idempotent retry count=%d err=%v", count, err)
+	}
+}
+
 func TestSQLiteStore_CreateAndGetSession(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()

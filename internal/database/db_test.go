@@ -731,7 +731,8 @@ func TestMigration046CreatesPersonalAssistantFoundationSchema(t *testing.T) {
 		"global_agent_profile_name": false, "mandate": false,
 		"focus_areas_json": false, "first_assignment_status": false,
 		"last_hire_request_id": false, "hire_payload_hash": false,
-		"hire_payload_json": false, "repair_step": false, "state_version": false,
+		"hire_payload_json": false, "repair_step": false,
+		"rename_from_name": false, "rename_to_name": false, "rename_step": false, "state_version": false,
 		"hired_at": false, "created_at": false, "updated_at": false,
 	}
 	rows, err := db.QueryContext(ctx, `PRAGMA table_info(personal_assistant_state)`)
@@ -825,8 +826,8 @@ func TestMigration046UpgradesPriorSchemaWithoutChangingExistingRows(t *testing.T
 		}
 	}
 	version, err := db.GetSchemaVersion(ctx)
-	if err != nil || version != 50 {
-		t.Fatalf("schema version = %d, %v; want 50", version, err)
+	if err != nil || version != 51 {
+		t.Fatalf("schema version = %d, %v; want 51", version, err)
 	}
 }
 

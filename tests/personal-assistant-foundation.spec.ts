@@ -272,8 +272,24 @@ test.describe('Personal Assistant Foundation first value', () => {
 
   test('assistant-first Home keeps Ori Help isolated and handoff confirmable', async ({ page }) => {
     let eligible = true;
+    let assistantName = 'Atlas';
+    let relationshipState = 'active';
+    let stateVersion = 7;
+    let rememberWrites = 0;
     let routeCalls = 0;
     let askCalls = 0;
+    const briefConfig = {
+      timezone: 'UTC',
+      schedule_days: ['mon', 'tue', 'wed', 'thu', 'fri'],
+      schedule_time: '08:00',
+      schedule_enabled: true,
+      scope: 'all',
+      selected_workspace_ids: [],
+      include_future_workspaces: true,
+      notify_on_ready: false,
+      config_revision: 3,
+      next_generation_at: '2026-09-01T08:00:00Z'
+    };
 
     await page.route('**/api/onboarding/status', route =>
       route.fulfill({
@@ -296,11 +312,14 @@ test.describe('Personal Assistant Foundation first value', () => {
         body: JSON.stringify({
           personal_assistant: eligible
             ? {
-                state: 'active',
-                state_version: 7,
+                state: relationshipState,
+                state_version: stateVersion,
                 assistant_id: 'assistant-stable',
-                display_name: 'Atlas',
+                display_name: assistantName,
                 hq_workspace_id: 'hq-1',
+                mandate: 'Keep launch work visible.',
+                focus_areas: ['plan_my_day'],
+                daily_brief: briefConfig,
                 appearance: { mode: 'generated', generated: { color: '#446688' } },
                 availability: { model: { status: 'available', available: true } }
               }
@@ -308,15 +327,123 @@ test.describe('Personal Assistant Foundation first value', () => {
         })
       })
     );
+    await page.route('**/api/personal-assistant/capabilities', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          capabilities: {
+            state: relationshipState,
+            cards: [
+              {
+                key: 'email',
+                label: 'Email',
+                status: 'not_configured',
+                can_read: 'Attention signals from linked email.',
+                can_propose: 'Follow-ups and draft replies.',
+                requires_confirmation:
+                  'No external email write is mapped in Personal Assistant v1.',
+                mapped_write: false,
+                action_label: 'Set up email',
+                action_route: '/settings#google-account'
+              },
+              {
+                key: 'projects',
+                label: 'Projects and workspaces',
+                status: 'available',
+                can_read: 'Bounded task and result summaries.',
+                can_propose: 'Internal tasks and follow-ups.',
+                requires_confirmation: 'Existing work gates apply.',
+                mapped_write: true,
+                action_label: 'Open workspace Map',
+                action_route: '/'
+              }
+            ]
+          }
+        })
+      })
+    );
+    await page.route('**/api/personal-assistant/working-agreement', async route => {
+      const body = route.request().postDataJSON();
+      briefConfig.timezone = body.timezone;
+      briefConfig.schedule_days = body.schedule_days;
+      briefConfig.schedule_time = body.schedule_time;
+      briefConfig.schedule_enabled = body.schedule_enabled;
+      briefConfig.scope = body.scope;
+      briefConfig.selected_workspace_ids = body.selected_workspace_ids;
+      briefConfig.include_future_workspaces = body.include_future_workspaces;
+      briefConfig.notify_on_ready = body.notify_on_ready;
+      briefConfig.config_revision += 1;
+      stateVersion += 1;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          personal_assistant: {
+            state: relationshipState,
+            state_version: stateVersion,
+            assistant_id: 'assistant-stable',
+            display_name: assistantName,
+            hq_workspace_id: 'hq-1',
+            mandate: body.mandate,
+            focus_areas: body.focus_areas,
+            daily_brief: briefConfig,
+            availability: { model: { status: 'available', available: true } }
+          }
+        })
+      });
+    });
+    await page.route('**/api/personal-assistant/rename', async route => {
+      assistantName = String(route.request().postDataJSON()?.name || assistantName);
+      stateVersion += 3;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          personal_assistant: {
+            state: relationshipState,
+            state_version: stateVersion,
+            assistant_id: 'assistant-stable',
+            display_name: assistantName,
+            hq_workspace_id: 'hq-1',
+            mandate: 'Keep launch work visible.',
+            focus_areas: ['plan_my_day'],
+            daily_brief: briefConfig,
+            availability: { model: { status: 'available', available: true } }
+          }
+        })
+      });
+    });
+    await page.route(/\/api\/personal-assistant\/(pause|resume)$/, async route => {
+      relationshipState = route.request().url().endsWith('/pause') ? 'paused' : 'active';
+      stateVersion += 1;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          personal_assistant: {
+            state: relationshipState,
+            state_version: stateVersion,
+            assistant_id: 'assistant-stable',
+            display_name: assistantName,
+            hq_workspace_id: 'hq-1',
+            mandate: 'Keep launch work visible.',
+            focus_areas: ['plan_my_day'],
+            daily_brief: briefConfig,
+            availability: { model: { status: 'available', available: true } }
+          }
+        })
+      });
+    });
     await page.route('**/api/personal-assistant/today', route =>
       route.fulfill({
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
           today: {
-            state: 'active',
-            relationship_state: 'active',
-            display_name: 'Atlas',
+            state: relationshipState,
+            relationship_state: relationshipState,
+            display_name: assistantName,
             hq_workspace_id: 'hq-1',
             hq_workspace_slug: 'personal-hq',
             model: { status: 'available', available: true },
@@ -403,25 +530,86 @@ test.describe('Personal Assistant Foundation first value', () => {
           routing_policy: 'assistant_only',
           context_mode: 'direct',
           handoff_policy: 'assistant',
-          matched_agent: 'Atlas',
+          matched_agent: assistantName,
           requires_creation: false,
           workspace_recommended: false,
           route_mode: 'home_inline',
           target_surface: 'current',
-          assistant_name: 'Atlas',
-          personal_assistant_state: 'active'
+          assistant_name: assistantName,
+          personal_assistant_state: relationshipState
         })
       });
     });
     await page.route('**/api/home-assistant/ask', route => {
       askCalls += 1;
+      const body = route.request().postDataJSON() || {};
+      if (body.confirmed_action?.type === 'remember') {
+        rememberWrites += 1;
+        route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            response: 'Saved that explicit memory.',
+            intent: 'app_introspection',
+            identity: {
+              display_name: assistantName,
+              role: 'Personal Assistant',
+              state: relationshipState
+            },
+            actions: [
+              {
+                id: 'open-saved-memory',
+                type: 'navigate',
+                label: 'Review saved memory',
+                href: '/workspaces/personal-hq#memory'
+              }
+            ]
+          })
+        });
+        return;
+      }
+      if (
+        String(body.prompt || '')
+          .toLowerCase()
+          .startsWith('remember that ')
+      ) {
+        route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            response: 'Review this memory before saving it.',
+            intent: 'app_introspection',
+            identity: {
+              display_name: assistantName,
+              role: 'Personal Assistant',
+              state: relationshipState
+            },
+            requires_confirmation: true,
+            confirmation: {
+              action_id: 'remember-explicit',
+              action_type: 'remember',
+              summary: 'Remember “Friday launches need a Thursday review” in Personal HQ Memory?',
+              arguments: {
+                state_version: stateVersion,
+                destination: 'personal_hq',
+                text: 'Friday launches need a Thursday review'
+              }
+            }
+          })
+        });
+        return;
+      }
       route.fulfill({
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
           response: 'Your launch review is ready.',
           intent: 'app_introspection',
-          identity: { display_name: 'Atlas', role: 'Personal Assistant', state: 'active' },
+          identity: {
+            display_name: assistantName,
+            role: 'Personal Assistant',
+            state: relationshipState
+          },
           actions: []
         })
       });
@@ -486,6 +674,68 @@ test.describe('Personal Assistant Foundation first value', () => {
     await page.locator('#personalAssistantSend').click();
     await expect.poll(() => routeCalls).toBe(1);
     await expect.poll(() => askCalls).toBe(1);
+    await page.locator('#personalAssistantClose').click();
+
+    // Working agreement edits reuse canonical schedule values, rename the same
+    // stable identity, and survive reload.
+    await page.locator('#personalAssistantTodayAgreement').click();
+    await expect(page.locator('#personalAssistantContinuity')).toBeVisible();
+    await expect(page.locator('#personalAssistantCapabilities')).toContainText(
+      'No external email write is mapped in Personal Assistant v1'
+    );
+    await page.locator('#personalAssistantContinuityName').fill('Nova');
+    await page
+      .locator('#personalAssistantContinuityMandate')
+      .fill('Keep launch decisions visible.');
+    await page.locator('#personalAssistantContinuityTimezone').fill('America/New_York');
+    await page.locator('#personalAssistantContinuityTime').fill('09:15');
+    await page.locator('#personalAssistantContinuityScope').selectOption('personal_hq');
+    await page.locator('#personalAssistantContinuityFuture').uncheck();
+    await page.locator('#personalAssistantContinuitySave').click();
+    await expect(page.locator('#personalAssistantContinuityStatus')).toContainText(
+      'Working agreement saved'
+    );
+    await expect(page.locator('#personalAssistantLauncherName')).toHaveText('Nova');
+    expect(briefConfig.schedule_enabled).toBe(true);
+    expect(briefConfig.schedule_time).toBe('09:15');
+    expect(briefConfig.scope).toBe('selected');
+    expect(briefConfig.selected_workspace_ids).toEqual(['hq-1']);
+    expect(briefConfig.include_future_workspaces).toBe(false);
+
+    await page.reload();
+    await expect(page.locator('#personalAssistantLauncherName')).toHaveText('Nova');
+    await page.locator('#personalAssistantTodayAgreement').click();
+    await expect(page.locator('#personalAssistantContinuityName')).toHaveValue('Nova');
+    await page.locator('#personalAssistantContinuityPause').click();
+    await expect(page.locator('#personalAssistantContinuityStatus')).toContainText(
+      'Your schedule, history, memory, connections, and permissions were preserved'
+    );
+    expect(relationshipState).toBe('paused');
+    expect(briefConfig.schedule_enabled).toBe(true);
+    await page.locator('#personalAssistantContinuityPause').click();
+    await expect(page.locator('#personalAssistantContinuityStatus')).toContainText(
+      'Resumed with the preserved Daily Brief rhythm'
+    );
+    expect(relationshipState).toBe('active');
+    await page.locator('#personalAssistantContinuityClose').click();
+
+    // Explicit memory is confirmation-gated. Cancel once, then confirm exactly
+    // once; ordinary Help never receives or executes this action.
+    await page.locator('#personalAssistantLauncher').click();
+    await page
+      .locator('#personalAssistantInput')
+      .fill('remember that Friday launches need a Thursday review');
+    await page.locator('#personalAssistantSend').click();
+    await expect(page.getByRole('button', { name: 'Cancel', exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+    expect(rememberWrites).toBe(0);
+    await page
+      .locator('#personalAssistantInput')
+      .fill('remember that Friday launches need a Thursday review');
+    await page.locator('#personalAssistantSend').click();
+    await page.getByRole('button', { name: 'Confirm', exact: true }).click();
+    await expect.poll(() => rememberWrites).toBe(1);
+    await expect(page.getByRole('button', { name: 'Review saved memory' })).toBeVisible();
 
     await page.setViewportSize({ width: 390, height: 844 });
     expect(

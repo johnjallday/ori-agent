@@ -717,7 +717,9 @@ function renderAgentDetails() {
   if (configType) configType.textContent = formatAgentTypeLabel(currentAgent.type);
   const configRole = document.getElementById('configRole');
   if (configRole)
-    configRole.textContent = formatAgentRoleLabel(currentAgent.role, currentAgent.type);
+    configRole.textContent = currentAgent.presentation_role
+      ? currentAgent.presentation_role
+      : formatAgentRoleLabel(currentAgent.role, currentAgent.type);
 
   const systemPrompt = currentAgent.system_prompt || 'Default system prompt';
   const promptEl = document.getElementById('configPrompt');

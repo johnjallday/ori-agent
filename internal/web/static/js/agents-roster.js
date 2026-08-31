@@ -463,6 +463,7 @@
     var tags = Array.isArray(md.tags) ? md.tags.slice() : [];
     var description = String(md.description || '').trim();
     var role = (a && a.role) || '';
+    var presentationRole = String((a && a.presentation_role) || '').trim();
     var level = evo.level || 0;
     var stage = evo.stage || 'spark';
 
@@ -477,7 +478,7 @@
       statusKind: healthKind(a),
       statusText: titleCase(String((a && a.status) || 'idle')),
       role: role,
-      roleLabel: roleLabel(role),
+      roleLabel: presentationRole || roleLabel(role),
       roleEntry: window.RoleCatalog ? window.RoleCatalog.entry(role) : null,
       level: level,
       stage: stage,
@@ -1373,9 +1374,11 @@
     els.avatar.outerHTML = avatarMarkup(listItem, 'stage__avatar', 'stageAvatar', AVATAR_SIZE.hero);
     els.avatar = document.getElementById('stageAvatar');
     els.name.textContent = listItem.name;
-    els.klass.textContent = listItem.role
-      ? roleLabel(listItem.role)
-      : titleCase(listItem.type || 'agent');
+    els.klass.textContent = listItem.presentation_role
+      ? listItem.presentation_role
+      : listItem.role
+        ? roleLabel(listItem.role)
+        : titleCase(listItem.type || 'agent');
     // Purpose and favorite repeat here so they stay visible on every tab, not
     // only while Overview happens to be open (PRD FR54). Sourced from the same
     // view model the card already renders, so the two can never disagree.

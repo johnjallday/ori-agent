@@ -77,6 +77,7 @@ function moveSharedWorkActivity() {
   if (activity.parentElement !== state.els.activityMount) {
     state.els.activityMount.appendChild(activity);
   }
+  activity.hidden = false;
   activity.dataset.homeAssistantPanelScope = 'personal-assistant';
 }
 
@@ -134,6 +135,7 @@ function close() {
 function open(trigger) {
   if (!state.view.available || !state.els) return false;
   if (window.OriGuide?.close) window.OriGuide.close();
+  moveSharedWorkActivity();
   state.open = true;
   state.lastTrigger = trigger || document.activeElement;
   state.els.panel.hidden = false;
@@ -171,6 +173,7 @@ function routeContext() {
 
 function submit(event) {
   event?.preventDefault();
+  moveSharedWorkActivity();
   const text = String(state.els?.input?.value || '').trim();
   if (!canSubmitAssistantWork({ available: state.view.available, pending: state.pending, text })) {
     return false;
@@ -227,6 +230,9 @@ function init() {
   state.els.form?.addEventListener('submit', submit);
   document.addEventListener('keydown', event => {
     if (event.key === 'Escape' && state.open) close();
+  });
+  window.addEventListener('personal-assistant:status', event => {
+    if (event.detail?.personalAssistant) applyPersonalAssistant(event.detail.personalAssistant);
   });
   void refresh();
 }
