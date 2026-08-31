@@ -1,7 +1,10 @@
 package plugin
 
 import (
+	"bytes"
 	"errors"
+	"log"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -159,6 +162,28 @@ func TestUpdateCheckerListFailureKeepsSnapshot(t *testing.T) {
 	}
 	if after.LastSuccessfulCheckAt == nil || before.LastSuccessfulCheckAt == nil || !after.LastSuccessfulCheckAt.Equal(*before.LastSuccessfulCheckAt) {
 		t.Fatalf("last successful check changed after list failure: before=%+v after=%+v", before.LastSuccessfulCheckAt, after.LastSuccessfulCheckAt)
+	}
+}
+
+func TestUpdateCheckerFailureLogOmitsCredentialsAndSourcePaths(t *testing.T) {
+	source := newFakeUpdateCheckSource("demo")
+	source.errs["demo"] = errors.New("clone https://user:secret@example.test/private.git from /Users/private/plugin")
+	checker := NewUpdateChecker(source)
+
+	var output bytes.Buffer
+	original := log.Writer()
+	log.SetOutput(&output)
+	defer log.SetOutput(original)
+	checker.checkCycle()
+
+	logged := output.String()
+	if !strings.Contains(logged, "demo") {
+		t.Fatalf("failure log omitted the safe plugin identifier: %q", logged)
+	}
+	for _, secret := range []string{"user:secret", "example.test", "/Users/private"} {
+		if strings.Contains(logged, secret) {
+			t.Fatalf("failure log disclosed source detail %q: %q", secret, logged)
+		}
 	}
 }
 
