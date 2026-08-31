@@ -10,7 +10,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 45
+const schemaVersion = 46
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -155,6 +155,8 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 		return db.migration044WorkspaceFolderSlugs(ctx)
 	case 45:
 		return db.migration045WorkspaceAssistantProgram(ctx)
+	case 46:
+		return db.migration046PersonalAssistantFoundation(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
@@ -1607,6 +1609,61 @@ func (db *DB) migration045WorkspaceAssistantProgram(ctx context.Context) error {
 		ALTER TABLE workspaces ADD COLUMN assistant_program_json TEXT NOT NULL DEFAULT '{}'
 	`); err != nil && !isDuplicateColumnError(err) {
 		return fmt.Errorf("failed to add workspace assistant_program_json column: %w", err)
+	}
+	return nil
+}
+
+// migration046PersonalAssistantFoundation adds the user-owned relationship
+// record and first-assignment operation journal. Daily Brief content/schedules,
+// chat transcripts, credentials, Tickets, Follow-Ups, and Memory remain in
+// their canonical stores and are referenced here by bounded IDs only.
+func (db *DB) migration046PersonalAssistantFoundation(ctx context.Context) error {
+	statements := []string{
+		`CREATE TABLE IF NOT EXISTS personal_assistant_state (
+			user_id TEXT PRIMARY KEY,
+			assistant_id TEXT NOT NULL UNIQUE,
+			status TEXT NOT NULL DEFAULT 'not_hired'
+				CHECK (status IN ('not_hired', 'hiring', 'active', 'paused', 'repair_needed')),
+			display_name TEXT NOT NULL DEFAULT '',
+			appearance_json TEXT NOT NULL DEFAULT '{}',
+			hq_workspace_id TEXT NOT NULL DEFAULT '',
+			hq_entry_agent_instance_id TEXT NOT NULL DEFAULT '',
+			global_agent_profile_name TEXT NOT NULL DEFAULT '',
+			mandate TEXT NOT NULL DEFAULT '',
+			focus_areas_json TEXT NOT NULL DEFAULT '[]',
+			first_assignment_status TEXT NOT NULL DEFAULT 'not_started'
+				CHECK (first_assignment_status IN ('not_started', 'previewed', 'applying', 'completed', 'failed')),
+			last_hire_request_id TEXT NOT NULL DEFAULT '',
+			state_version INTEGER NOT NULL DEFAULT 1 CHECK (state_version > 0),
+			hired_at DATETIME,
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL,
+			UNIQUE (user_id, assistant_id)
+		)`,
+		`CREATE TABLE IF NOT EXISTS personal_assistant_assignment (
+			preview_id TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL,
+			assistant_id TEXT NOT NULL,
+			assignment_version INTEGER NOT NULL DEFAULT 1 CHECK (assignment_version > 0),
+			normalized_payload_json TEXT NOT NULL,
+			normalized_payload_hash TEXT NOT NULL,
+			status TEXT NOT NULL DEFAULT 'previewed'
+				CHECK (status IN ('previewed', 'applying', 'completed', 'failed')),
+			created_canonical_refs_json TEXT NOT NULL DEFAULT '[]',
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL,
+			FOREIGN KEY (user_id, assistant_id)
+				REFERENCES personal_assistant_state(user_id, assistant_id) ON DELETE CASCADE
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_personal_assistant_assignment_owner
+			ON personal_assistant_assignment(user_id, assistant_id, created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_personal_assistant_assignment_hash
+			ON personal_assistant_assignment(assistant_id, normalized_payload_hash)`,
+	}
+	for _, stmt := range statements {
+		if _, err := db.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("failed to create personal assistant foundation schema: %w", err)
+		}
 	}
 	return nil
 }

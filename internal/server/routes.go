@@ -401,6 +401,7 @@ func registerOnboardingRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("/api/user/profile", s.Handlers.User.Profile)
 	}
 
+	registerPersonalAssistantRoutes(mux, s)
 	registerPersonalHQRoutes(mux, s)
 	registerDailyBriefRoutes(mux, s)
 
@@ -959,6 +960,13 @@ func registerTriggerRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/triggers/{triggerID}/regenerate-token", s.Handlers.Triggers.RegenerateToken)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/triggers/{triggerID}/test-fire", s.Handlers.Triggers.TestFire)
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/triggers/{triggerID}/fires", s.Handlers.Triggers.Fires)
+	}
+}
+
+// registerPersonalAssistantRoutes registers the user-owned assistant API.
+func registerPersonalAssistantRoutes(mux *http.ServeMux, s *Server) {
+	if s != nil && s.Handlers != nil && s.Handlers.PersonalAssistant != nil {
+		mux.HandleFunc("GET /api/personal-assistant", s.Handlers.PersonalAssistant.GetState)
 	}
 }
 

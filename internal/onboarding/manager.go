@@ -11,6 +11,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/device"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/userprofile"
 	"github.com/johnjallday/ori-agent/internal/version"
@@ -25,17 +26,31 @@ const DefaultAssistantName = "Ori"
 
 // Manager handles onboarding state persistence and logic
 type Manager struct {
-	mu        sync.RWMutex
-	statePath string
-	state     *types.AppState
-	userStore userprofile.UserStore
+	mu                       sync.RWMutex
+	statePath                string
+	state                    *types.AppState
+	userStore                userprofile.UserStore
+	personalAssistantRollout bool
 }
 
-// NewManager creates a new onboarding manager
-// It loads existing state or creates a new one if none exists
+// NewManager creates a manager with the Personal Assistant rollout disabled.
+// This is the safe default for tests, menu-bar helpers, and callers that have
+// not explicitly opted a truly new state file into the rollout.
 func NewManager(statePath string) *Manager {
+	return NewManagerWithPersonalAssistantRollout(statePath, false)
+}
+
+// NewManagerWithPersonalAssistantRollout loads existing state or initializes a
+// new state in memory. Only a path that did not exist before this call may
+// receive the current eligibility version, and only while rolloutEnabled is
+// true. Existing/corrupt files with no marker remain permanently legacy.
+func NewManagerWithPersonalAssistantRollout(statePath string, rolloutEnabled bool) *Manager {
+	_, statErr := os.Stat(statePath)
+	stateFileExisted := statErr == nil || !errors.Is(statErr, os.ErrNotExist)
+
 	m := &Manager{
-		statePath: statePath,
+		statePath:                statePath,
+		personalAssistantRollout: rolloutEnabled,
 		state: &types.AppState{
 			Version: version.Version,
 			Onboarding: types.OnboardingState{
@@ -48,16 +63,37 @@ func NewManager(statePath string) *Manager {
 		},
 	}
 
-	// Try to load existing state (non-fatal if it fails)
+	// Try to load existing state (non-fatal if it fails). The rollout marker is
+	// deliberately absent from these constructor defaults, so unmarshalling an
+	// old file can never retain a new-install value by accident.
 	if err := m.load(); err != nil {
 		logger.Verbosef("Warning: failed to load onboarding state from %s: %v", statePath, err)
 	}
 
 	m.mu.Lock()
+	if !stateFileExisted && rolloutEnabled {
+		m.state.PersonalAssistantRolloutVersion = personalassistant.CurrentRolloutVersion
+	}
 	m.ensureStateDefaultsUnlocked()
 	m.mu.Unlock()
 
 	return m
+}
+
+// PersonalAssistantEligibilityVersion returns the durable install-local marker.
+func (m *Manager) PersonalAssistantEligibilityVersion() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.state.PersonalAssistantRolloutVersion
+}
+
+// IsPersonalAssistantEligible reports whether both the server-owned kill switch
+// and the persisted first-creation marker permit PAF on this installation.
+func (m *Manager) IsPersonalAssistantEligible() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.personalAssistantRollout &&
+		m.state.PersonalAssistantRolloutVersion == personalassistant.CurrentRolloutVersion
 }
 
 // IsOnboardingComplete returns true if onboarding has been completed or skipped

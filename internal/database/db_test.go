@@ -103,6 +103,8 @@ func TestMigrations(t *testing.T) {
 		"vaults",
 		"home_assistant_intake_traces",
 		"users",
+		"personal_assistant_state",
+		"personal_assistant_assignment",
 	}
 	for _, table := range tables {
 		var name string
@@ -701,6 +703,129 @@ func TestMigration030DoesNotTouchExistingWorkspaces(t *testing.T) {
 	}
 	if personalWorkspaceID != "" {
 		t.Errorf("expected migration to designate zero existing workspaces as HQ, got personal_workspace_id=%q", personalWorkspaceID)
+	}
+}
+
+func TestMigration046CreatesPersonalAssistantFoundationSchema(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(ctx, &Config{InMemory: true, WALMode: false})
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	for _, table := range []string{"personal_assistant_state", "personal_assistant_assignment"} {
+		exists, existsErr := db.tableExists(ctx, table)
+		if existsErr != nil {
+			t.Fatalf("tableExists(%s): %v", table, existsErr)
+		}
+		if !exists {
+			t.Fatalf("expected table %s", table)
+		}
+	}
+
+	stateColumns := map[string]bool{
+		"user_id": false, "assistant_id": false, "status": false,
+		"display_name": false, "appearance_json": false,
+		"hq_workspace_id": false, "hq_entry_agent_instance_id": false,
+		"global_agent_profile_name": false, "mandate": false,
+		"focus_areas_json": false, "first_assignment_status": false,
+		"last_hire_request_id": false, "state_version": false,
+		"hired_at": false, "created_at": false, "updated_at": false,
+	}
+	rows, err := db.QueryContext(ctx, `PRAGMA table_info(personal_assistant_state)`)
+	if err != nil {
+		t.Fatalf("inspect personal_assistant_state: %v", err)
+	}
+	for rows.Next() {
+		var cid, notNull, pk int
+		var name, colType string
+		var defaultValue sql.NullString
+		if scanErr := rows.Scan(&cid, &name, &colType, &notNull, &defaultValue, &pk); scanErr != nil {
+			_ = rows.Close()
+			t.Fatalf("scan personal_assistant_state: %v", scanErr)
+		}
+		if _, ok := stateColumns[name]; ok {
+			stateColumns[name] = true
+		}
+	}
+	if err := rows.Close(); err != nil {
+		t.Fatalf("close schema rows: %v", err)
+	}
+	for name, found := range stateColumns {
+		if !found {
+			t.Errorf("personal_assistant_state column %s does not exist", name)
+		}
+	}
+
+	now := "2026-01-01T00:00:00Z"
+	insertState := func(userID, assistantID string) error {
+		_, insertErr := db.ExecContext(ctx, `
+			INSERT INTO personal_assistant_state
+				(user_id, assistant_id, created_at, updated_at)
+			VALUES (?, ?, ?, ?)
+		`, userID, assistantID, now, now)
+		return insertErr
+	}
+	if err := insertState("user-a", "assistant-a"); err != nil {
+		t.Fatalf("insert first relationship: %v", err)
+	}
+	if err := insertState("user-a", "assistant-b"); err == nil {
+		t.Fatal("expected one-assistant-per-user constraint")
+	}
+	if err := insertState("user-b", "assistant-a"); err == nil {
+		t.Fatal("expected globally unique stable assistant ID")
+	}
+	if err := db.runMigration(ctx, 46); err != nil {
+		t.Fatalf("migration 46 should be idempotent: %v", err)
+	}
+}
+
+func TestMigration046UpgradesPriorSchemaWithoutChangingExistingRows(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "prior.db")
+	legacyDB, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open prior database: %v", err)
+	}
+	statements := []string{
+		`CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at DATETIME DEFAULT CURRENT_TIMESTAMP)`,
+		`INSERT INTO schema_migrations (version) VALUES (45)`,
+		`CREATE TABLE preserved_rows (id TEXT PRIMARY KEY, body TEXT NOT NULL)`,
+		`INSERT INTO preserved_rows (id, body) VALUES ('existing', '{"byte":"stable"}')`,
+	}
+	for _, stmt := range statements {
+		if _, err := legacyDB.ExecContext(ctx, stmt); err != nil {
+			_ = legacyDB.Close()
+			t.Fatalf("prepare prior database: %v", err)
+		}
+	}
+	if err := legacyDB.Close(); err != nil {
+		t.Fatalf("close prior database: %v", err)
+	}
+
+	db, err := Open(ctx, &Config{Path: dbPath, WALMode: false})
+	if err != nil {
+		t.Fatalf("migrate prior database: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	var body string
+	if err := db.QueryRowContext(ctx, `SELECT body FROM preserved_rows WHERE id = 'existing'`).Scan(&body); err != nil {
+		t.Fatalf("read preserved row: %v", err)
+	}
+	if body != `{"byte":"stable"}` {
+		t.Fatalf("existing row changed: %q", body)
+	}
+	for _, table := range []string{"personal_assistant_state", "personal_assistant_assignment"} {
+		exists, existsErr := db.tableExists(ctx, table)
+		if existsErr != nil || !exists {
+			t.Fatalf("migrated table %s: exists=%v err=%v", table, exists, existsErr)
+		}
+	}
+	version, err := db.GetSchemaVersion(ctx)
+	if err != nil || version != 46 {
+		t.Fatalf("schema version = %d, %v; want 46", version, err)
 	}
 }
 

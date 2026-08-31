@@ -10,6 +10,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/dailybriefhttp"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/personalassistant"
+	"github.com/johnjallday/ori-agent/internal/personalassistanthttp"
 	"github.com/johnjallday/ori-agent/internal/personalhq"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/userprofile"
@@ -48,6 +50,39 @@ const dailyBriefSchedulerPollInterval = 5 * time.Minute
 type systemModelChatCompleter struct {
 	configManager *config.Manager
 	llmFactory    *llm.Factory
+}
+
+// personalAssistantModelReader reports capability only; it never returns model
+// names, credentials, or provider errors through the PAF API.
+type personalAssistantModelReader struct {
+	configManager *config.Manager
+	llmFactory    *llm.Factory
+}
+
+func (r *personalAssistantModelReader) PersonalAssistantModelAvailability() personalassistant.SourceAvailability {
+	if r == nil || r.configManager == nil || r.llmFactory == nil {
+		return personalassistant.SourceAvailability{
+			Status: personalassistant.AvailabilityDependencyError, Reason: "service_unavailable",
+		}
+	}
+	if !r.configManager.IsSystemModelConfigured() {
+		return personalassistant.SourceAvailability{
+			Status: personalassistant.AvailabilityNotConfigured, Reason: "model_not_configured",
+		}
+	}
+	providerName, modelName := r.configManager.GetSystemModel()
+	result, err := r.llmFactory.GetSystemModelProvider(providerName, modelName)
+	if err != nil || result.Provider == nil {
+		return personalassistant.SourceAvailability{
+			Status: personalassistant.AvailabilityUnavailable, Reason: "configured_model_unavailable",
+		}
+	}
+	if checker, ok := result.Provider.(llm.ModelPresenceChecker); ok && !checker.HasModel(result.Model) {
+		return personalassistant.SourceAvailability{
+			Status: personalassistant.AvailabilityUnavailable, Reason: "configured_model_unavailable",
+		}
+	}
+	return personalassistant.SourceAvailability{Available: true, Status: personalassistant.AvailabilityAvailable}
 }
 
 func (c *systemModelChatCompleter) Chat(ctx context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
@@ -159,4 +194,18 @@ func (b *ServerBuilder) initializeDailyBrief() {
 	b.dailyBriefService = briefService
 	b.dailyBriefHandler = dailybriefhttp.NewHandler(briefService, b.personalHQService, b.userProvider)
 	b.dailyBriefScheduler = dailybrief.NewScheduler(briefService, &personalHQWorkspaceLister{service: b.personalHQService}, dailyBriefSchedulerPollInterval)
+
+	// PAF reads aggregate the relationship, HQ, Daily Brief configuration, and
+	// model capability through narrow interfaces. Construction happens here so
+	// it reuses this exact Daily Brief store rather than creating a parallel
+	// routine source.
+	b.personalAssistantStore = personalassistant.NewSQLiteStore(b.sessionStore.DB())
+	b.personalAssistantService = personalassistant.NewService(
+		b.onboardingMgr,
+		b.personalAssistantStore,
+		b.personalHQService,
+		store,
+		&personalAssistantModelReader{configManager: b.configManager, llmFactory: b.llmFactory},
+	)
+	b.personalAssistantHandler = personalassistanthttp.NewHandler(b.personalAssistantService, b.userProvider)
 }
