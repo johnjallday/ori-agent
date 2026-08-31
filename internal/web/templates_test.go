@@ -15,6 +15,38 @@ func TestLoadTemplates_Parses(t *testing.T) {
 	}
 }
 
+func TestRenderPluginsIncludesAccessibleUpdateNoticeAndHelperOrder(t *testing.T) {
+	r := NewTemplateRenderer()
+	if err := r.LoadTemplates(); err != nil {
+		t.Fatalf("LoadTemplates failed: %v", err)
+	}
+	html, err := r.RenderTemplate("plugins", TemplateData{Title: "Plugins - Ori Agent"})
+	if err != nil {
+		t.Fatalf("RenderTemplate(plugins) failed: %v", err)
+	}
+	for _, want := range []string{
+		`id="pluginUpdateNotice"`,
+		`role="status"`,
+		`aria-live="polite"`,
+		`aria-atomic="true"`,
+		`id="pluginUpdateNoticeMarker"`,
+		`id="pluginUpdateNoticeTitle"`,
+		`id="pluginUpdateNoticeDetail"`,
+		`onclick="refreshPluginsPage()"`,
+		`src="/js/modules/plugin-update-notifications.js"`,
+		`src="/js/plugins.js"`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("rendered plugins page missing %q", want)
+		}
+	}
+	helper := strings.Index(html, `src="/js/modules/plugin-update-notifications.js"`)
+	page := strings.Index(html, `src="/js/plugins.js"`)
+	if helper < 0 || page < 0 || helper > page {
+		t.Fatalf("plugin update helper must load before plugins.js: helper=%d page=%d", helper, page)
+	}
+}
+
 func TestRenderProfileIncludesReviewableKnowledgeScopes(t *testing.T) {
 	r := NewTemplateRenderer()
 	if err := r.LoadTemplates(); err != nil {

@@ -5,11 +5,10 @@
 
   const byId = id => document.getElementById(id);
 
+  const updateNotifications = window.PluginUpdateNotifications;
+
   function esc(s) {
-    return String(s == null ? '' : s).replace(
-      /[&<>"']/g,
-      c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]
-    );
+    return updateNotifications.escapeHTML(s);
   }
 
   // api keeps this page's throwing call style, but the request, the response
@@ -39,6 +38,61 @@
   // Last-loaded installed plugins, kept so actions can read prior state (e.g.
   // the version before an update) without an extra round-trip.
   let installedCache = [];
+  let installedLoaded = false;
+  let updateIndex = new Map();
+  let lastNoticeSignature = '';
+
+  function renderUpdateNotice(model) {
+    if (!model || model.signature === lastNoticeSignature) return;
+    lastNoticeSignature = model.signature;
+    const notice = byId('pluginUpdateNotice');
+    const marker = byId('pluginUpdateNoticeMarker');
+    const title = byId('pluginUpdateNoticeTitle');
+    const detail = byId('pluginUpdateNoticeDetail');
+    if (!notice || !marker || !title || !detail) return;
+
+    notice.dataset.state = model.state;
+    title.textContent = model.title;
+    detail.textContent = model.detail;
+    marker.className = 'badge mt-1';
+    if (model.state === 'available') {
+      marker.classList.add('bg-warning', 'text-dark');
+      marker.textContent = model.count === 1 ? '1 update' : model.count + ' updates';
+    } else if (model.state === 'empty') {
+      marker.classList.add('bg-success');
+      marker.textContent = 'Up to date';
+    } else {
+      marker.classList.add('bg-secondary');
+      marker.textContent = 'Checking';
+    }
+  }
+
+  function renderInstalledPlugins() {
+    const list = byId('pluginList');
+    if (!list || !installedLoaded) return;
+    list.innerHTML = installedCache.length
+      ? installedCache.map(renderPlugin).join('')
+      : '<p class="text-muted mb-0">No plugins installed yet.</p>';
+  }
+
+  const updateController = updateNotifications.createController({
+    load: async () => api('GET', '/api/plugins/updates'),
+    onSnapshot: (snapshot, model) => {
+      updateIndex = updateNotifications.indexUpdates(snapshot);
+      renderUpdateNotice(model);
+      renderInstalledPlugins();
+    }
+  });
+
+  window.loadPluginUpdateStatus = function () {
+    return updateController.refresh();
+  };
+
+  // The list and cached status are intentionally independent: one failed
+  // endpoint never prevents the other surface from refreshing.
+  window.refreshPluginsPage = async function () {
+    return Promise.allSettled([window.loadPlugins(), window.loadPluginUpdateStatus()]);
+  };
 
   // ---- shared trust disclosure (used by source-install and marketplace-install) ----
 
@@ -107,22 +161,32 @@
     const list = byId('pluginList');
     try {
       const data = await api('GET', '/api/plugins');
-      const plugins = (data && data.plugins) || [];
-      installedCache = plugins;
-      list.innerHTML = plugins.length
-        ? plugins.map(renderPlugin).join('')
-        : '<p class="text-muted mb-0">No plugins installed yet.</p>';
+      installedCache = (data && data.plugins) || [];
+      installedLoaded = true;
+      renderInstalledPlugins();
     } catch (e) {
-      list.innerHTML =
-        '<p class="text-danger mb-0">Failed to load plugins: ' + esc(e.message) + '</p>';
+      if (list) {
+        list.innerHTML =
+          '<p class="text-danger mb-0">Failed to load plugins: ' + esc(e.message) + '</p>';
+      }
     }
   };
 
   function renderPlugin(p) {
     const servers = (p.mcp_servers || []).map(esc).join(', ') || '&mdash;';
     const skills = (p.skills || []).map(esc).join(', ') || '&mdash;';
-    const badge = '<span class="badge bg-secondary">' + esc(p.format) + '</span>';
-    const name = esc(p.name);
+    const formatBadge = '<span class="badge bg-secondary">' + esc(p.format) + '</span>';
+    const rawName = String(p.name == null ? '' : p.name);
+    const name = esc(rawName);
+    const update = updateIndex.get(rawName);
+    const updateNotice = updateNotifications.pluginNotice(update);
+    const updateBadge = updateNotice
+      ? '<span class="badge bg-warning text-dark ms-2" title="' +
+        esc(updateNotice.detail) +
+        '">' +
+        esc(updateNotice.label) +
+        '</span>'
+      : '';
     return (
       // flex-wrap so the action buttons drop below the plugin's details at a
       // narrow width instead of running off the edge of the screen — a
@@ -134,7 +198,8 @@
       ' <span class="text-muted small">' +
       esc(p.version || '') +
       '</span> ' +
-      badge +
+      formatBadge +
+      updateBadge +
       '</div>' +
       (p.description ? '<div class="small text-muted">' + esc(p.description) + '</div>' : '') +
       '<div class="small mt-1">MCP: ' +
@@ -157,27 +222,51 @@
       ) +
       '</div>' +
       '</div>' +
-      '<div class="d-flex gap-2">' +
+      '<div class="d-flex flex-wrap gap-2">' +
       // Enable is the call to action while a plugin is disabled: it is the one
       // thing standing between an installed plugin and a usable one.
       '<button class="modern-btn ' +
       (p.enabled ? 'modern-btn-secondary' : 'modern-btn-primary') +
-      '" onclick="pluginToggle(\'' +
+      '" data-plugin-action="toggle" data-plugin-name="' +
       name +
-      "', " +
+      '" data-plugin-enable="' +
       (p.enabled ? 'false' : 'true') +
-      ')">' +
+      '">' +
       (p.enabled ? 'Disable' : 'Enable') +
       '</button>' +
-      '<button class="modern-btn modern-btn-secondary" onclick="pluginUpdate(\'' +
+      '<button class="modern-btn ' +
+      (updateNotice ? 'modern-btn-primary' : 'modern-btn-secondary') +
+      '" data-plugin-action="update" data-plugin-name="' +
       name +
-      '\')">Update</button>' +
-      '<button class="modern-btn modern-btn-secondary" onclick="pluginUninstall(\'' +
+      '">Update</button>' +
+      '<button class="modern-btn modern-btn-secondary" data-plugin-action="uninstall" data-plugin-name="' +
       name +
-      '\')">Uninstall</button>' +
+      '">Uninstall</button>' +
       '</div>' +
       '</div>'
     );
+  }
+
+  function wireInstalledActions() {
+    const list = byId('pluginList');
+    if (!list || list.dataset.actionsWired) return;
+    list.dataset.actionsWired = '1';
+    list.addEventListener('click', event => {
+      const button = event.target.closest('[data-plugin-action]');
+      if (!button || !list.contains(button)) return;
+      const name = button.getAttribute('data-plugin-name') || '';
+      switch (button.getAttribute('data-plugin-action')) {
+        case 'toggle':
+          window.pluginToggle(name, button.getAttribute('data-plugin-enable') === 'true');
+          break;
+        case 'update':
+          window.pluginUpdate(name);
+          break;
+        case 'uninstall':
+          window.pluginUninstall(name);
+          break;
+      }
+    });
   }
 
   // ---- install by source ----
@@ -195,7 +284,7 @@
         const res = await api('POST', '/api/plugins/install', { source, format, confirm: true });
         window.pluginCancelInstall();
         byId('pluginSource').value = '';
-        loadPlugins();
+        await window.refreshPluginsPage();
         // Installing does not switch a plugin on, and a bare "Installed" reads
         // as if it did. Say which of the two states the plugin is actually in,
         // in the same words the creation wizard uses.
@@ -219,7 +308,7 @@
         'POST',
         '/api/plugins/' + encodeURIComponent(name) + (enable ? '/enable' : '/disable')
       );
-      loadPlugins();
+      await window.loadPlugins();
       notify(name + (enable ? ' enabled' : ' disabled'), 'success');
     } catch (e) {
       notify('Failed: ' + e.message, 'error');
@@ -230,7 +319,7 @@
     if (!confirm('Uninstall ' + name + '? This removes its MCP servers and skills.')) return;
     try {
       await api('DELETE', '/api/plugins/' + encodeURIComponent(name));
-      loadPlugins();
+      await window.refreshPluginsPage();
       notify('Uninstalled ' + name, 'success');
     } catch (e) {
       notify('Uninstall failed: ' + e.message, 'error');
@@ -246,7 +335,7 @@
       const doUpdate = async () => {
         const res = await api('POST', url, { confirm: true });
         window.pluginCancelInstall();
-        loadPlugins();
+        await window.refreshPluginsPage();
         const newVersion = (res && res.plugin && res.plugin.version) || '';
         if (newVersion && oldVersion && newVersion !== oldVersion) {
           notify('Updated ' + name + ' to ' + newVersion, 'success');
@@ -593,7 +682,7 @@
         plugin: name,
         confirm: true
       });
-      loadPlugins();
+      await window.refreshPluginsPage();
       window.loadMarketplaces();
       officialState.installed = await getInstalledNames();
       renderOfficialGrid(); // card rebuilds showing "Installed"
@@ -669,7 +758,7 @@
           confirm: true
         });
         window.pluginCancelInstall();
-        loadPlugins();
+        await window.refreshPluginsPage();
         window.loadMarketplaces();
         refreshOfficialInstalled(); // reflect new install in the official modal grid
         notify('Installed ' + pluginName, 'success');
@@ -680,7 +769,9 @@
   };
 
   document.addEventListener('DOMContentLoaded', function () {
-    loadPlugins();
+    wireInstalledActions();
+    window.loadPlugins();
+    updateController.start();
     window.loadMarketplaces();
     // Load the official catalog lazily when its modal opens (auto-adds on first
     // open so the user just browses); the Refresh button re-reads it.
@@ -694,5 +785,6 @@
       refreshBtn.onclick = function () {
         ensureOfficialLoaded(true);
       };
+    window.addEventListener('beforeunload', () => updateController.stop(), { once: true });
   });
 })();
