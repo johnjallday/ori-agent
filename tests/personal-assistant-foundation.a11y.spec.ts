@@ -38,8 +38,7 @@ async function mockCompletedOnboarding(page: Page) {
         needs_onboarding: false,
         completed: true,
         current_step: 4,
-        steps_completed: ['done'],
-        personal_assistant_eligible: true
+        steps_completed: ['done']
       })
     })
   );
@@ -59,7 +58,6 @@ async function mockAssistantState(
         personal_assistant: {
           state: relationshipState,
           state_version: 7,
-          rollout_version: 1,
           assistant_id: 'assistant-stable',
           display_name: 'Atlas',
           hq_workspace_id: 'hq-1',
@@ -213,7 +211,7 @@ test.describe('Personal Assistant Foundation accessibility', () => {
     });
   }
 
-  test('eligible no-model onboarding exposes named, associated hire and preview controls', async ({
+  test('no-model onboarding exposes named, associated hire and preview controls', async ({
     page
   }) => {
     await page.route('**/api/onboarding/status', route =>
@@ -225,7 +223,6 @@ test.describe('Personal Assistant Foundation accessibility', () => {
           completed: false,
           current_step: 0,
           steps_completed: [],
-          personal_assistant_eligible: true,
           timezone: 'UTC'
         })
       })
@@ -237,7 +234,7 @@ test.describe('Personal Assistant Foundation accessibility', () => {
       route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: '{"personal_assistant":{"state":"needs_hire","state_version":1,"rollout_version":1,"availability":{"model":{"status":"not_configured","available":false}}}}'
+        body: '{"personal_assistant":{"state":"needs_hire","state_version":1,"availability":{"model":{"status":"not_configured","available":false}}}}'
       })
     );
     await page.goto('/');

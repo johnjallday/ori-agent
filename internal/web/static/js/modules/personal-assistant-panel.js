@@ -3,14 +3,14 @@ const HANDOFF_LIMIT = 400;
 
 export function personalAssistantPanelView(personalAssistant) {
   const state = String(personalAssistant?.state || 'unavailable');
-  const eligible = state !== 'ineligible' && state !== 'unavailable';
+  const known = state !== 'unavailable';
   const available = state === 'active' || state === 'paused';
   const name = String(personalAssistant?.display_name || '').trim() || 'Personal assistant';
   return {
     state,
-    eligible,
+    known,
     available,
-    helpOnly: eligible,
+    helpOnly: known,
     name,
     role: 'Personal Assistant',
     paused: state === 'paused',
@@ -114,8 +114,7 @@ async function refresh() {
     const payload = await response.json();
     return applyPersonalAssistant(payload?.personal_assistant || null);
   } catch (_) {
-    // Fail legacy-safe. Until the server proves eligibility, do not relabel or
-    // replace the existing unified Ask Ori surface.
+    // Keep the existing Help surface intact until relationship status is known.
     setStatus('Personal assistant status is unavailable. Reload to try again.');
     return state.view;
   }

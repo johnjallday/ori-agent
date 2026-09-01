@@ -10,7 +10,7 @@ import (
 
 func TestPersonalAssistantEventsUseClosedPrivacySafeSchema(t *testing.T) {
 	all := []EventType{
-		EventEligibleViewed, EventHireStarted, EventHireCompleted, EventPreviewCreated,
+		EventStateViewed, EventHireStarted, EventHireCompleted, EventPreviewCreated,
 		EventFirstResultDone, EventTodayViewed, EventPaused, EventResumed, EventRecoverableFailure,
 	}
 	for _, event := range all {

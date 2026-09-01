@@ -46,8 +46,8 @@ func (h *HomeAssistantRouteHandler) SetCalendarOpsPreference(pref CalendarOpsPre
 	h.CalendarOpsPreference = pref
 }
 
-// SetPersonalAssistantContextProvider makes eligible pre-hire requests stop at
-// setup while preserving this router unchanged for legacy users.
+// SetPersonalAssistantContextProvider makes pre-hire requests stop at setup and
+// supplies active relationship context to normal routing.
 func (h *HomeAssistantRouteHandler) SetPersonalAssistantContextProvider(provider PersonalAssistantContextProvider, userID string) {
 	h.PersonalAssistantContext = provider
 	h.UserID = strings.TrimSpace(userID)
@@ -342,7 +342,7 @@ func (h *HomeAssistantRouteHandler) RoutePrompt(ctx context.Context, prompt stri
 			HandoffPolicy: homeAssistantHandoffAssistant, RequiresCreation: false,
 			RouteMode: "personal_assistant_hire", TargetSurface: "hire",
 			SuggestedAgentName: "Personal Assistant", SuggestedAgentType: "personal_assistant",
-			Reasons: []string{"eligible relationship is not ready for work"},
+			Reasons: []string{"personal assistant relationship is not ready for work"},
 		}, nil
 	}
 
@@ -417,9 +417,6 @@ func (h *HomeAssistantRouteHandler) resolvePersonalAssistantRouteContext(ctx con
 	resolved, err := h.PersonalAssistantContext.ResolvePersonalAssistantContext(ctx, userID)
 	if err != nil {
 		return nil, err
-	}
-	if resolved == nil || !resolved.Eligible {
-		return nil, nil
 	}
 	return resolved, nil
 }

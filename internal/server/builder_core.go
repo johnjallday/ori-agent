@@ -136,25 +136,10 @@ func (b *ServerBuilder) initializeTemplateRenderer() error {
 	return nil
 }
 
-const personalAssistantRolloutEnv = "ORI_PERSONAL_ASSISTANT_ROLLOUT"
-
-// personalAssistantRolloutEnabled reads the server-owned PAF rollout kill
-// switch. Only explicit true-like values enable it; unset and malformed values
-// are safely disabled.
-func personalAssistantRolloutEnabled() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv(personalAssistantRolloutEnv))) {
-	case "1", "true", "yes", "on":
-		return true
-	default:
-		return false
-	}
-}
-
-// initializeOnboardingManager creates the onboarding manager.
+// initializeOnboardingManager creates the canonical personal-assistant
+// onboarding manager used by every installation.
 func (b *ServerBuilder) initializeOnboardingManager() {
-	b.onboardingMgr = onboarding.NewManagerWithPersonalAssistantRollout(
-		"app_state.json", personalAssistantRolloutEnabled(),
-	)
+	b.onboardingMgr = onboarding.NewManager("app_state.json")
 }
 
 // initializeCostTracker creates the cost tracker for LLM usage monitoring.

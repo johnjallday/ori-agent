@@ -814,132 +814,6 @@
     line-height: 1.45;
   }
 
-  .onboarding-intent-grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0.55rem;
-    margin-bottom: 1rem;
-  }
-
-  .onboarding-intent-choice {
-    display: grid;
-    grid-template-columns: 1.65rem minmax(0, 1fr);
-    gap: 0.55rem;
-    align-items: center;
-    min-height: 3.8rem;
-    padding: 0.65rem 0.75rem;
-    border: 1px solid var(--border-color);
-    border-radius: 10px;
-    background: var(--bg-secondary);
-    color: var(--text-primary);
-    text-align: left;
-    transition: border-color 0.16s ease, background-color 0.16s ease, transform 0.16s ease;
-  }
-
-  .onboarding-intent-choice:hover,
-  .onboarding-intent-choice:focus-visible {
-    border-color: color-mix(in srgb, var(--primary-color) 62%, var(--border-color));
-    transform: translateY(-1px);
-  }
-
-  .onboarding-intent-choice.is-selected,
-  .onboarding-intent-choice[aria-pressed="true"] {
-    border-color: var(--primary-color);
-    background: color-mix(in srgb, var(--primary-color) 9%, var(--bg-secondary));
-    box-shadow: inset 3px 0 0 var(--primary-color);
-  }
-
-  .onboarding-intent-index {
-    color: var(--primary-color);
-    font-family: "SFMono-Regular", SFMono-Regular, Consolas, monospace;
-    font-size: 0.72rem;
-    font-weight: 700;
-    letter-spacing: 0.06em;
-  }
-
-  .onboarding-intent-choice strong {
-    display: block;
-    font-size: 0.84rem;
-    line-height: 1.25;
-  }
-
-  .onboarding-intent-answer {
-    margin-bottom: 0.85rem;
-  }
-
-  .onboarding-intent-answer textarea {
-    min-height: 4.2rem;
-    resize: vertical;
-  }
-
-  .onboarding-recommendation {
-    position: relative;
-    margin-bottom: 0.75rem;
-    padding: 0.85rem 0.9rem 0.85rem 1rem;
-    border: 1px solid color-mix(in srgb, var(--primary-color) 32%, var(--border-color));
-    border-radius: 10px;
-    background:
-      linear-gradient(135deg, color-mix(in srgb, var(--primary-color) 8%, transparent), transparent 58%),
-      var(--bg-secondary);
-    overflow: hidden;
-  }
-
-  .onboarding-recommendation::before {
-    content: '';
-    position: absolute;
-    inset: 0 auto 0 0;
-    width: 3px;
-    background: var(--primary-color);
-  }
-
-  .onboarding-recommendation-label {
-    display: block;
-    margin-bottom: 0.25rem;
-    color: var(--primary-color);
-    font-family: "SFMono-Regular", SFMono-Regular, Consolas, monospace;
-    font-size: 0.67rem;
-    font-weight: 700;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-  }
-
-  .onboarding-recommendation strong {
-    display: block;
-    margin-bottom: 0.2rem;
-    font-size: 1rem;
-  }
-
-  .onboarding-recommendation p {
-    margin: 0;
-    color: var(--text-secondary);
-    font-size: 0.78rem;
-    line-height: 1.45;
-  }
-
-  .onboarding-start-secondary {
-    display: flex;
-    gap: 0.7rem;
-    align-items: center;
-    flex-wrap: wrap;
-    margin-bottom: 0.9rem;
-  }
-
-  .onboarding-start-secondary button {
-    appearance: none;
-    padding: 0;
-    border: 0;
-    background: transparent;
-    color: var(--text-secondary);
-    font-size: 0.76rem;
-    text-decoration: underline;
-    text-underline-offset: 3px;
-  }
-
-  .onboarding-start-secondary button:hover,
-  .onboarding-start-secondary button:focus-visible {
-    color: var(--text-primary);
-  }
-
   @media (max-width: 520px) {
     #onboardingModal .modal-dialog {
       margin: 0.5rem;
@@ -947,22 +821,6 @@
 
     #onboardingModal .modal-body {
       padding: 1.25rem !important;
-    }
-
-    .onboarding-intent-choice {
-      grid-template-columns: 1.25rem minmax(0, 1fr);
-      min-height: 4rem;
-      padding: 0.55rem;
-    }
-
-    .onboarding-intent-choice strong {
-      font-size: 0.78rem;
-    }
-  }
-
-  @media (max-width: 340px) {
-    .onboarding-intent-grid {
-      grid-template-columns: 1fr;
     }
   }
 
@@ -1314,64 +1172,8 @@
           </div>
         </div>
 
-        <!-- Phase 2: one bounded intent conversation, then a concrete choice. -->
+        <!-- Phase 2: hire the personal assistant and optionally plan the first day. -->
         <div class="onboarding-phase d-none" id="onboarding-phase-2">
-          <div id="onboardingLegacyFinalPhase">
-          <div class="d-flex align-items-start mb-3">
-            <div class="ori-avatar">
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
-                <path d="M 724 410 L 714 405 L 686 404 L 663 397 L 651 386 L 632 352 L 618 339 L 600 329 L 582 324 L 561 324 L 542 329 L 518 344 L 503 362 L 493 386 L 491 412 L 494 428 L 503 448 L 541 493 L 554 520 L 526 508 L 501 503 L 464 504 L 414 514 L 383 513 L 349 498 L 330 480 L 321 467 L 308 498 L 303 523 L 304 562 L 316 601 L 338 635 L 362 658 L 386 674 L 432 693 L 467 700 L 527 701 L 570 695 L 607 683 L 638 665 L 659 645 L 675 619 L 682 591 L 680 562 L 674 544 L 658 518 L 626 486 L 621 474 L 623 459 L 626 453 L 638 444 L 672 442 L 702 434 L 723 418 Z" fill="white"/>
-              </svg>
-            </div>
-            <div class="ori-speech" id="doneSpeech">
-              All set! What would make Ori useful today?
-            </div>
-          </div>
-
-          <div class="onboarding-intent-grid" role="group" aria-label="Choose what you want to do first">
-            <button type="button" class="onboarding-intent-choice" data-onboarding-intent="new" aria-pressed="false">
-              <span class="onboarding-intent-index">01</span>
-              <strong>Start something new</strong>
-            </button>
-            <button type="button" class="onboarding-intent-choice" data-onboarding-intent="existing" aria-pressed="false">
-              <span class="onboarding-intent-index">02</span>
-              <strong>Bring in existing work</strong>
-            </button>
-            <button type="button" class="onboarding-intent-choice" data-onboarding-intent="organize" aria-pressed="false">
-              <span class="onboarding-intent-index">03</span>
-              <strong>Organize recurring work</strong>
-            </button>
-            <button type="button" class="onboarding-intent-choice" data-onboarding-intent="explore" aria-pressed="false">
-              <span class="onboarding-intent-index">04</span>
-              <strong>Show me around</strong>
-            </button>
-          </div>
-
-          <div class="onboarding-intent-answer">
-            <label id="onboardingIntentPrompt" for="onboardingIntentDescription" class="form-label" style="font-size: 0.82rem; font-weight: 600;">Or tell Ori in one sentence (optional)</label>
-            <textarea id="onboardingIntentDescription" class="form-control" maxlength="500" placeholder="For example: I’m planning a launch, organizing research, or clearing my inbox."></textarea>
-          </div>
-
-          <div id="onboardingRecommendation" class="onboarding-recommendation" data-kind="pending" aria-live="polite" aria-atomic="true">
-            <span class="onboarding-recommendation-label">Ori’s suggested next step</span>
-            <strong id="onboardingRecommendationTitle">Choose a starting point</strong>
-            <p id="onboardingRecommendationDetail">Pick one option or tell Ori what you want to move forward today.</p>
-          </div>
-
-          <div class="onboarding-start-secondary">
-            <button type="button" id="onboardingBrowseBlueprintsBtn">Browse all blueprints instead</button>
-            <button type="button" id="onboardingFinishOnlyBtn">Finish without a project</button>
-          </div>
-          <p class="onboarding-footnote">This answer is used only for this recommendation. Nothing is created until you confirm it in the workspace wizard.</p>
-
-          <div class="onboarding-actions">
-            <button type="button" class="btn btn-outline-secondary" id="doneBackBtn">Back</button>
-            <button type="button" class="btn btn-primary onboarding-next-btn" id="startBtn" style="padding: 8px 28px;" disabled>
-              Choose a starting point
-            </button>
-          </div>
-          </div>
-
           <div id="onboardingPersonalAssistantHire" class="d-none">
             <div class="d-flex align-items-start mb-3">
               <div class="ori-avatar" aria-hidden="true">

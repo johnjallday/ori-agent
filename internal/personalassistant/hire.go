@@ -83,12 +83,11 @@ type HireBriefManager interface {
 
 // HireCoordinator provisions one selected assistant and its Personal HQ.
 type HireCoordinator struct {
-	eligibility EligibilityReader
-	store       Store
-	creator     personalhq.AssistantWorkspaceCreator
-	hq          HireHQManager
-	briefs      HireBriefManager
-	now         func() time.Time
+	store   Store
+	creator personalhq.AssistantWorkspaceCreator
+	hq      HireHQManager
+	briefs  HireBriefManager
+	now     func() time.Time
 
 	// A single-process lock prevents two same-user HTTP retries from entering
 	// the workspace creator concurrently. Durable request/assistant IDs and
@@ -97,10 +96,9 @@ type HireCoordinator struct {
 }
 
 // NewHireCoordinator constructs the hire operation coordinator.
-func NewHireCoordinator(eligibility EligibilityReader, store Store, creator personalhq.AssistantWorkspaceCreator, hq HireHQManager, briefs HireBriefManager) *HireCoordinator {
+func NewHireCoordinator(store Store, creator personalhq.AssistantWorkspaceCreator, hq HireHQManager, briefs HireBriefManager) *HireCoordinator {
 	return &HireCoordinator{
-		eligibility: eligibility, store: store, creator: creator, hq: hq, briefs: briefs,
-		now: time.Now,
+		store: store, creator: creator, hq: hq, briefs: briefs, now: time.Now,
 	}
 }
 
@@ -120,10 +118,7 @@ type normalizedHireRequest struct {
 // Hire validates all user-controlled input before any persistence or
 // provisioning consequence, then starts/resumes one durable operation.
 func (c *HireCoordinator) Hire(ctx context.Context, userID string, request HireRequest) (*HireResult, error) {
-	if c == nil || c.eligibility == nil || !c.eligibility.IsPersonalAssistantEligible() {
-		return nil, ErrIneligible
-	}
-	if c.store == nil || c.creator == nil || c.hq == nil || c.briefs == nil {
+	if c == nil || c.store == nil || c.creator == nil || c.hq == nil || c.briefs == nil {
 		return nil, errors.New("personal assistant: hire coordinator is not configured")
 	}
 	normalized, err := normalizeHireRequest(request)

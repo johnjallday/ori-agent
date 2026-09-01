@@ -56,7 +56,7 @@ func newContinuityFixture(t *testing.T) (*ContinuityService, *SQLiteStore, *cont
 		ScheduleTime: "08:00", ScheduleEnabled: true, Scope: dailybrief.ScopeAll,
 		IncludeFutureWorkspaces: true, ConfigRevision: 4,
 	}}
-	read := NewService(fakeEligibility{eligible: true, version: CurrentRolloutVersion}, store, hq, briefs,
+	read := NewService(store, hq, briefs,
 		fakeModelReader{availability: SourceAvailability{Available: true, Status: AvailabilityAvailable}})
 	return NewContinuityService(store, hq, briefs, read), store, briefs
 }

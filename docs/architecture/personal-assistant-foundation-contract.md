@@ -22,7 +22,7 @@ Brief generation, workspace memory, and user-profile services remain canonical.
 | Ori Guide panel | `ori-guide.js` and `agenthttp.OriGuideHandler` | Deterministic, structurally read-only help. Work-shaped requests escalate to Home routing; the guide itself cannot mutate. |
 | Protected system assistant | `systemassistant.Identity` plus agent-store lookup | Canonical internal `Ask Ori` record used by infrastructure. It is never a user hire or display-name source. |
 | Global launcher/navbar/help | navbar/dashboard templates and `app.js` | Opens the Home composer or guide panel; it does not choose or persist identity. |
-| Legacy onboarding assistant name | `onboarding.Manager` and `onboarding.js` | `app_state.json` currently defaults `assistant_name` to `Ori`; PAF must not treat this legacy presentation field as a stable assistant. |
+| Onboarding guide name | `onboarding.Manager` and `onboarding.js` | `app_state.json` defaults the app guide name to `Ori`; PAF never treats this presentation field as the hired assistant's stable identity. |
 | Personal HQ setup | `personalhq.SetupCoordinator` through `sessionhttp.Handler.CreateFromTemplate` | Creates `personal-ops`, seeds global profiles plus stable workspace agent instances, designates the HQ, and stores provisional brief input. Partial failures return the created workspace ID. |
 | Personal HQ identity | session/workspace agent-instance model | `Workspace.EntryAgent` selects the entry profile by name today; `AgentInstance.ID` is the stable workspace attachment that PAF binds. |
 | Daily Brief | `dailybrief.Service`, HTTP handler, scheduler, and Home renderer | Durable user/HQ-scoped config and revisions. First-open/scheduled claims enforce existing deduplication. |
@@ -34,8 +34,7 @@ Brief generation, workspace memory, and user-profile services remain canonical.
 
 | State | Meaning | Required copy | Allowed next actions |
 |---|---|---|---|
-| `ineligible` | Legacy install, rollout disabled at first state-file creation, or explicit version 0 | Existing Home/Ask Ori copy; no hire claim | Continue legacy Home and Help only |
-| `needs_hire` | Eligible install with no durable relationship | “Hire your assistant”; name defaults to editable **Assistant** | Preview/confirm hire |
+| `needs_hire` | No durable relationship | “Hire your assistant”; name defaults to editable **Assistant** | Preview/confirm hire |
 | `hiring` | A confirmed hire is partially provisioned | “Finishing your assistant setup” | Retry/resume the same request; inspect bounded failure |
 | `active` | Binding, HQ, and entry-agent instance resolve | Chosen name and “Your personal assistant” | Ask, assign, pause, edit agreement/profile, open HQ |
 | `paused` | Relationship exists but proactive/background behavior is paused | “Assistant paused” | Resume, inspect/edit, deterministic manual assignment |
@@ -139,10 +138,9 @@ confirmed hire then:
 5. persists the selected-hire binding and working agreement; and
 6. completes onboarding only after the binding can be read back.
 
-After completion, Home features the eligible cohort's optional **Mission 01:
-Plan my first day**. This replaces the featured Build My HQ mission only for PAF
-installs because the hire transaction already built HQ; the legacy quest graph
-and presentation remain unchanged. The quest may be deferred and resumed. Its
+After completion, Home features the optional **Mission 01: Plan my first day**.
+The hire transaction already built HQ, so the former Build My HQ onboarding
+mission is no longer part of first run. The quest may be deferred and resumed. Its
 three category screens mutate only the browser draft; review persists the
 existing bounded preview journal, and final confirmation remains the sole path
 to atomic canonical apply. A successful durable apply independently completes
@@ -153,10 +151,10 @@ creating another assistant. A partial attempt records a resumable state and the
 created workspace ID when available. Recovery may finish the missing step, but
 must not guess an agent by display name or silently bind the system assistant.
 
-Existing users without a binding enter a bounded migration path: they may adopt
-the designated Personal HQ entry agent, build a new HQ and assistant, or defer.
-No existing workspace, assistant, memory, task, follow-up, or profile field is
-deleted or rewritten without an explicit choice.
+Personal-assistant onboarding is the only supported first-run path. No cohort
+marker is read or persisted: an installation without a relationship enters
+`needs_hire`. This project made that clean break before broad adoption, so no
+parallel legacy cohort or adoption wizard is maintained.
 
 ## Surfaces and routing
 
@@ -168,7 +166,7 @@ it is not a peer assistant.
 
 Read surfaces degrade safely when the binding, workspace, or agent is missing:
 they return a bounded unavailable/repair state, never a fabricated identity.
-Legacy UI continues to function when the personal-assistant service is absent.
+The personal-assistant service is a required part of the canonical server build.
 
 ## Delegation and ownership
 
@@ -255,9 +253,8 @@ The package/API/browser suites must pin at least these cases:
 
 | Case | Expected projection / invariant |
 |---|---|
-| Fresh state file + rollout enabled | `needs_hire`, default field “Assistant” |
-| Fresh state file + rollout disabled | `ineligible`; reset remains ineligible |
-| Existing state file without PAF marker | permanently `ineligible`; reset/restart does not add eligibility |
+| Fresh state file | `needs_hire`, default field “Assistant” |
+| Existing state file without a relationship | `needs_hire`; no cohort marker or migration gate |
 | Active binding | same chosen identity on Home, Ask Ori, and HQ |
 | Active binding with no model | “Hired — choose a model to chat”; deterministic assignment/brief actions enabled |
 | Paused binding | reads/profile edits allowed; proactive runs suppressed |
@@ -269,34 +266,30 @@ The package/API/browser suites must pin at least these cases:
 | Journal presentation | hidden in hire/Home; visible under Advanced “Assistant support” only |
 | Rename/restart | stable assistant/instance/workspace IDs; new display name everywhere |
 
-## Rollout demo evidence
+## Canonical onboarding evidence
 
-The group-1 release checkpoint was exercised against two temporary data
-directories with the same locally built server binary. The reproducible command
-shape was:
+The first-run checkpoint is exercised against a temporary data directory with
+the ordinary server launch; no feature flag is required:
 
 ```bash
-ORI_DATA_DIR="$FRESH" ORI_PERSONAL_ASSISTANT_ROLLOUT=true \
-  ori-agent --port "$PORT" --no-browser
+ORI_DATA_DIR="$FRESH" go run ./cmd/server --port "$PORT" --no-browser
 curl -s "http://127.0.0.1:$PORT/api/personal-assistant"
 curl -s -X POST "http://127.0.0.1:$PORT/api/onboarding/reset"
 curl -s "http://127.0.0.1:$PORT/api/personal-assistant"
 ```
 
-The legacy run pre-created `app_state.json` with ordinary onboarding fields and
-no `personal_assistant_rollout_version`, then used the same commands. Bounded
-observations (paths and personal data omitted):
+Without `ORI_DATA_DIR`, `go run ./cmd/server` uses the ordinary `./ori-data`
+profile and produces the same onboarding state.
+
+Fresh state and an onboarding reset both resolve to the same bounded state:
 
 ```json
-{"fresh_before":{"state":"needs_hire","rollout_version":1,"next_action":"hire","model":{"status":"not_configured"}}}
-{"fresh_after_reset":{"state":"needs_hire","rollout_version":1,"next_action":"hire","model":{"status":"not_configured"}}}
-{"legacy_before":{"state":"ineligible","rollout_version":0,"next_action":"continue_legacy"}}
-{"legacy_after_reset":{"state":"ineligible","rollout_version":0,"next_action":"continue_legacy"}}
+{"before":{"state":"needs_hire","next_action":"hire","model":{"status":"not_configured"}}}
+{"after_reset":{"state":"needs_hire","next_action":"hire","model":{"status":"not_configured"}}}
 ```
 
-This proves onboarding reset does not enroll or remove eligibility and model
-absence is an independent capability flag rather than a fabricated assistant
-failure.
+Model absence remains an independent capability flag rather than a fabricated
+assistant failure.
 
 ### Settings Reset behavior
 
@@ -305,11 +298,11 @@ Its exact Personal Assistant Foundation effects are:
 
 | Selected category | PAF effect after restart |
 |---|---|
-| Settings | Removes provider/preferences configuration only. The relationship, assistant profile, Personal HQ, records, and durable eligibility marker remain; model readiness can become `not_configured`. |
+| Settings | Removes provider/preferences configuration only. The relationship, assistant profile, Personal HQ, and records remain; model readiness can become `not_configured`. |
 | Agents | Removes global agent profiles but not the relationship, Personal HQ, or its persisted entry-agent instance. The relationship read therefore keeps the same stable binding; profile-dependent management such as rename can report the missing profile and must never silently rebind by name. |
-| Sessions | Removes `sessions.db`, workspaces, and session files. This intentionally removes the PAF relationship journal and Personal HQ records. The install-local eligibility marker in `app_state.json` remains, so an eligible install returns to `needs_hire` and an ineligible legacy install remains ineligible. |
-| Onboarding | Resets only onboarding progress. It preserves the rollout marker, relationship, stable IDs, agent, Personal HQ, records, and history. |
-| All categories | Equivalent to the four effects above: local PAF records are deleted by Sessions/Agents, while the preserved rollout marker determines whether restarted onboarding may offer hire. |
+| Sessions | Removes `sessions.db`, workspaces, and session files. This intentionally removes the PAF relationship journal and Personal HQ records, so the installation returns to `needs_hire`. |
+| Onboarding | Resets only onboarding progress. It preserves the relationship, stable IDs, agent, Personal HQ, records, and history. |
+| All categories | Equivalent to the four effects above: local PAF records are deleted by Sessions/Agents and restarted onboarding offers a fresh hire. |
 
 A reset response describes filesystem work completed in the current process;
 callers must not treat in-memory projections as rehydrated until the required
@@ -318,8 +311,6 @@ deletes external-provider data.
 
 ## Compatibility
 
-Old profiles with no binding retain existing Home and Ask Ori behavior until
-migration is chosen. Existing Personal HQ, Daily Brief, Follow-Up, workspace,
-and protected system-assistant records remain valid. The feature may be disabled
-without deleting state; re-enabling resolves the exact stable binding and does
-not create a duplicate assistant.
+No legacy onboarding cohort is maintained. Existing Personal HQ, Daily Brief,
+Follow-Up, workspace, and protected system-assistant records remain valid, while
+a complete development profile reset intentionally returns to a fresh hire.

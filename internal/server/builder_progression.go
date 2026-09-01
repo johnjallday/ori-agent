@@ -20,14 +20,9 @@ func (b *ServerBuilder) initializeProgression() {
 		return
 	}
 
-	quests := progression.BuiltinQuests()
-	personalAssistantEligible := b.onboardingMgr.IsPersonalAssistantEligible()
-	if personalAssistantEligible {
-		quests = progression.PersonalAssistantQuests()
-	}
 	engine := progression.New(
 		b.onboardingMgr,
-		progression.WithQuests(quests),
+		progression.WithQuests(progression.PersonalAssistantQuests()),
 		progression.WithOnComplete(func(q progression.Quest) {
 			logger.Info("Onboarding quest completed", logger.Fields{"quest": q.ID, "tier": q.Tier})
 		}),
@@ -59,7 +54,7 @@ func (b *ServerBuilder) initializeProgression() {
 
 	// A first-assignment apply has its own atomic durability boundary. Progression
 	// observes only the successful result and remains safe to retry independently.
-	if personalAssistantEligible && b.personalAssistantHandler != nil {
+	if b.personalAssistantHandler != nil {
 		b.personalAssistantHandler.SetOnFirstAssignmentCompleted(func() {
 			engine.Complete(progression.PersonalAssistantFirstDayQuestID)
 		})
@@ -72,7 +67,7 @@ func (b *ServerBuilder) initializeProgression() {
 	// Reconcile installs whose one-time progression backfill predates this quest.
 	// Complete is idempotent, and the widget suppresses announcements on its first
 	// status load, so a restart cannot replay the first-day flow or toast old work.
-	if personalAssistantEligible && b.personalAssistantService != nil {
+	if b.personalAssistantService != nil {
 		if state, err := b.personalAssistantService.Get(context.Background(), userprofile.LocalUserID); err == nil && state.FirstAssignment == personalassistant.FirstAssignmentCompleted {
 			engine.Complete(progression.PersonalAssistantFirstDayQuestID)
 		}

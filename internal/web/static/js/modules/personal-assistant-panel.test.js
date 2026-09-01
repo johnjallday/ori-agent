@@ -7,10 +7,11 @@ import {
   personalAssistantPanelView
 } from './personal-assistant-panel.js';
 
-test('personal assistant panel covers ineligible, pre-hire, active, paused, and repair states', () => {
-  assert.deepEqual(personalAssistantPanelView({ state: 'ineligible' }).eligible, false);
+test('personal assistant panel covers unavailable, pre-hire, active, paused, and repair states', () => {
+  assert.equal(personalAssistantPanelView(null).known, false);
 
   const preHire = personalAssistantPanelView({ state: 'needs_hire' });
+  assert.equal(preHire.known, true);
   assert.equal(preHire.helpOnly, true);
   assert.equal(preHire.available, false);
   assert.equal(preHire.needsHire, true);

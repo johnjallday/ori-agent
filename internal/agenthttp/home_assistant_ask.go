@@ -166,8 +166,8 @@ func (h *HomeAssistantAskHandler) SetMutator(m HomeActionMutator) { h.Mutator = 
 // SetTraceEmitter wires optional telemetry.
 func (h *HomeAssistantAskHandler) SetTraceEmitter(t homeAskTraceEmitter) { h.Trace = t }
 
-// SetPersonalAssistantContextProvider enables the PAF runtime split. A nil
-// provider preserves the legacy unified Ask Ori behavior.
+// SetPersonalAssistantContextProvider wires the canonical relationship context.
+// A nil provider leaves the handler in its dependency-free fallback mode.
 func (h *HomeAssistantAskHandler) SetPersonalAssistantContextProvider(provider PersonalAssistantContextProvider, userID string) {
 	h.PersonalAssistantContext = provider
 	h.UserID = strings.TrimSpace(userID)
@@ -312,9 +312,6 @@ func (h *HomeAssistantAskHandler) resolvePersonalAssistantContext(ctx context.Co
 	resolved, err := h.PersonalAssistantContext.ResolvePersonalAssistantContext(ctx, userID)
 	if err != nil {
 		return nil, err
-	}
-	if resolved == nil || !resolved.Eligible {
-		return nil, nil
 	}
 	return resolved, nil
 }

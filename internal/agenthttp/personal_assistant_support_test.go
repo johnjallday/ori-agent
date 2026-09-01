@@ -34,12 +34,4 @@ func TestPersonalAssistantSupportPresentation_IsTruthfulAndPAFOnly(t *testing.T)
 	if got := classifier.classify(context.Background(), "Journal", []workspace.WorkspaceRef{{ID: "other"}}); got != "" {
 		t.Fatalf("foreign Journal was reframed=%q", got)
 	}
-
-	legacy := personalAssistantSupportClassifier{
-		reader:   supportReader{projection: &personalassistant.Projection{State: personalassistant.APIStateIneligible}},
-		provider: userprofile.LocalUserProvider{},
-	}
-	if got := legacy.classify(context.Background(), "Journal", refs); got != "" {
-		t.Fatalf("legacy Journal was reframed=%q", got)
-	}
 }

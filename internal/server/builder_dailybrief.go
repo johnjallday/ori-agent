@@ -107,7 +107,6 @@ func (c *systemModelChatCompleter) Chat(ctx context.Context, req llm.ChatRequest
 type personalHQWorkspaceLister struct {
 	service      *personalhq.Service
 	relationship personalassistant.Store
-	eligibility  personalassistant.EligibilityReader
 }
 
 func (l *personalHQWorkspaceLister) ListScheduledWorkspaces(ctx context.Context) ([]dailybrief.ScheduledWorkspace, error) {
@@ -121,7 +120,7 @@ func (l *personalHQWorkspaceLister) ListScheduledWorkspaces(ctx context.Context)
 	if !status.Valid {
 		return nil, nil
 	}
-	if l.relationship != nil && l.eligibility != nil && l.eligibility.PersonalAssistantEligibilityVersion() > 0 {
+	if l.relationship != nil {
 		state, stateErr := l.relationship.GetState(ctx, userprofile.LocalUserID)
 		if stateErr == nil &&
 			(state.Status != personalassistant.StatusActive || state.RenameStep != personalassistant.RenameNone) {
@@ -217,14 +216,13 @@ func (b *ServerBuilder) initializeDailyBrief() {
 	// routine source.
 	b.personalAssistantStore = personalassistant.NewSQLiteStore(b.sessionStore.DB())
 	b.personalAssistantService = personalassistant.NewService(
-		b.onboardingMgr,
 		b.personalAssistantStore,
 		b.personalHQService,
 		store,
 		&personalAssistantModelReader{configManager: b.configManager, llmFactory: b.llmFactory},
 	)
 	b.personalAssistantHire = personalassistant.NewHireCoordinator(
-		b.onboardingMgr, b.personalAssistantStore, b.sessionHandler,
+		b.personalAssistantStore, b.sessionHandler,
 		b.personalHQService, briefService,
 	)
 	b.personalAssignment = personalassistant.NewAssignmentService(b.personalAssistantStore)
@@ -258,6 +256,6 @@ func (b *ServerBuilder) initializeDailyBrief() {
 		b.personalAssistantService, briefService, b.workspaceStore, b.followUpService,
 	))
 	b.dailyBriefScheduler = dailybrief.NewScheduler(briefService, &personalHQWorkspaceLister{
-		service: b.personalHQService, relationship: b.personalAssistantStore, eligibility: b.onboardingMgr,
+		service: b.personalHQService, relationship: b.personalAssistantStore,
 	}, dailyBriefSchedulerPollInterval)
 }
