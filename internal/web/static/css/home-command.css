@@ -1358,6 +1358,26 @@ a.quest-title:focus-visible {
     min-height: 0;
     flex: 1;
   }
+
+  /* Assistant-first Home adds a real Today section above the Map. The legacy
+     cockpit can lock itself to one viewport because it has only the Map row;
+     keeping that lock after Today mounts clips the Map below the fold while
+     the main element's overflow:hidden prevents the page from reaching it.
+     Let this cohort use normal document scrolling and give the cockpit a full
+     working viewport once the user reaches it. */
+  body.home-command-page:has(.personal-assistant-today:not([hidden])) .main-content-wrapper,
+  body.home-command-page:has(.personal-assistant-today:not([hidden])) .home-command-main {
+    height: auto;
+    min-height: calc(100dvh - var(--navbar-offset, 76px));
+  }
+
+  body.home-command-page:has(.personal-assistant-today:not([hidden])) .home-command-main {
+    overflow: visible;
+  }
+
+  .home-command-bridge:has(.personal-assistant-today:not([hidden])) .home-cockpit {
+    min-height: max(520px, calc(100dvh - var(--navbar-offset, 76px) - 24px));
+  }
 }
 
 @media (max-width: 1199px), (max-height: 679px) {

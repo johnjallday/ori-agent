@@ -779,6 +779,17 @@ test.describe('Personal Assistant Foundation first value', () => {
     const mapBox = await page.locator('#homeCockpit').boundingBox();
     expect(todayBox && mapBox && todayBox.y + todayBox.height <= mapBox.y + 1).toBe(true);
 
+    const scrollState = await page.evaluate(() => ({
+      viewportHeight: window.innerHeight,
+      documentHeight: document.documentElement.scrollHeight,
+      mainOverflow: getComputedStyle(document.querySelector('.home-command-main')!).overflow
+    }));
+    expect(scrollState.documentHeight).toBeGreaterThan(scrollState.viewportHeight);
+    expect(scrollState.mainOverflow).not.toBe('hidden');
+    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+    await expect(page.locator('.ws-map-canvas[data-ws-map-viewport]')).toBeInViewport();
+
     await expect(page.locator('#personalAssistantLauncher')).toBeVisible();
     await expect(page.locator('#personalAssistantLauncherName')).toHaveText('Atlas');
     await expect(page.locator('#personalAssistantLauncherAvatar .agent-avatar')).toHaveCount(1);
