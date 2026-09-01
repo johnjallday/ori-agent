@@ -1231,26 +1231,14 @@
               </div>
 
               <div data-paf-hire-step="2" class="d-none" tabindex="-1">
-              <fieldset>
-                <legend class="h6">Daily Brief rhythm</legend>
-                <div class="paf-hire-days mb-2">
-                  <label><input type="checkbox" name="pafBriefDay" value="mon" checked> Mon</label>
-                  <label><input type="checkbox" name="pafBriefDay" value="tue" checked> Tue</label>
-                  <label><input type="checkbox" name="pafBriefDay" value="wed" checked> Wed</label>
-                  <label><input type="checkbox" name="pafBriefDay" value="thu" checked> Thu</label>
-                  <label><input type="checkbox" name="pafBriefDay" value="fri" checked> Fri</label>
-                  <label><input type="checkbox" name="pafBriefDay" value="sat"> Sat</label>
-                  <label><input type="checkbox" name="pafBriefDay" value="sun"> Sun</label>
-                </div>
-                <label for="pafBriefTime" class="form-label">Local time</label>
-                <input id="pafBriefTime" type="time" class="form-control" value="08:00">
-                <label class="mt-2"><input id="pafNotifyOnReady" type="checkbox"> Send a notification when the brief is ready</label>
-                <p class="paf-hire-boundary mb-0">Notifications stay off unless you check this box.</p>
-              </fieldset>
+              <section aria-labelledby="pafHireConfirmTitle">
+                <h3 id="pafHireConfirmTitle" class="h6">Confirm the hire</h3>
+                <p class="paf-hire-boundary">Hiring creates your assistant. It does not create a workspace, change any permission, or connect an account. Personal HQ — your assistant’s home base, where the Daily Brief rhythm is set — is the next step, and nothing is created there until you confirm it.</p>
+              </section>
 
               <label class="paf-hire-confirm">
                 <input id="pafHireConfirm" type="checkbox">
-                Create one assistant, build and designate Personal HQ, and save this working agreement and Daily Brief schedule.
+                Create one assistant and save this working agreement. Next, Ori will help you build Personal HQ on the Map.
               </label>
               <p id="pafHireModelNote" class="paf-hire-model-note mb-0" aria-live="polite"></p>
               </div>

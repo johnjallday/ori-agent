@@ -8,7 +8,9 @@ import {
   canSubmitFirstAssignment,
   firstAssignmentResultView,
   firstAssignmentResumeView,
+  HQ_QUEST_ROUTE,
   normalizeFirstAssignmentRows,
+  personalAssistantNeedsHQ,
   personalAssistantResumeMessage,
   workspaceRootSetupView
 } from './onboarding.js';
@@ -72,11 +74,7 @@ test('buildPersonalAssistantHirePayload normalizes one bounded confirmed hire', 
     displayName: ' Assistant ',
     appearance: { mode: 'generated', generated: { color: '#225588' } },
     mandate: ' Keep today realistic. ',
-    focusAreas: ['plan_my_day', 'plan_my_day', 'keep_projects_moving'],
-    timezone: ' America/New_York ',
-    scheduleDays: ['MON', 'tue', 'mon'],
-    scheduleTime: '08:00',
-    notifyOnReady: false
+    focusAreas: ['plan_my_day', 'plan_my_day', 'keep_projects_moving']
   });
 
   assert.deepEqual(payload, {
@@ -85,12 +83,41 @@ test('buildPersonalAssistantHirePayload normalizes one bounded confirmed hire', 
     display_name: 'Assistant',
     appearance: { mode: 'generated', generated: { color: '#225588' } },
     mandate: 'Keep today realistic.',
-    focus_areas: ['plan_my_day', 'keep_projects_moving'],
-    timezone: 'America/New_York',
-    schedule_days: ['mon', 'tue'],
-    schedule_time: '08:00',
-    notify_on_ready: false
+    focus_areas: ['plan_my_day', 'keep_projects_moving']
   });
+});
+
+test('buildPersonalAssistantHirePayload carries no Daily Brief rhythm', () => {
+  // The rhythm moved to the Map's Build My HQ form, where a real workspace ID
+  // exists to write it against. Hiring must not collect or promise it.
+  const payload = buildPersonalAssistantHirePayload({
+    requestId: 'request-1',
+    displayName: 'Atlas',
+    focusAreas: ['plan_my_day'],
+    timezone: 'America/New_York',
+    scheduleDays: ['mon'],
+    scheduleTime: '08:00',
+    notifyOnReady: true
+  });
+
+  for (const key of ['timezone', 'schedule_days', 'schedule_time', 'notify_on_ready']) {
+    assert.equal(key in payload, false, `hire payload still carries ${key}`);
+  }
+});
+
+test('personalAssistantNeedsHQ recognizes the hired-but-unbuilt stages only', () => {
+  assert.equal(personalAssistantNeedsHQ({ state: 'needs_hq' }), true);
+  assert.equal(personalAssistantNeedsHQ({ state: 'provisioning_hq' }), true);
+  for (const state of ['needs_hire', 'hiring', 'active', 'paused', 'repair_needed', '']) {
+    assert.equal(personalAssistantNeedsHQ({ state }), false, `${state} misread as pre-HQ`);
+  }
+  assert.equal(personalAssistantNeedsHQ(), false);
+});
+
+test('the guided HQ quest route lets the user select the site themselves', () => {
+  // A focus parameter would preselect the landmark. The quest highlights it and
+  // waits for a real user selection instead.
+  assert.equal(HQ_QUEST_ROUTE, '/?quest=build-hq');
 });
 
 test('first assignment row normalization keeps explicit categories and honest empty input', () => {
@@ -197,6 +224,134 @@ test('OnboardingManager opens the first quest for an active incomplete relations
     assert.equal(manager.shouldOpenFirstAssignmentQuest(), false);
   } finally {
     globalThis.window = priorWindow;
+  }
+});
+
+// stubHireDom gives the OnboardingManager just enough DOM to run the hire and
+// onboarding-completion paths without a browser.
+function stubHireDom() {
+  const elements = new Map();
+  const make = () => ({
+    textContent: '',
+    innerHTML: '',
+    disabled: false,
+    checked: false,
+    value: '',
+    classList: { toggle() {}, add() {}, remove() {} },
+    setAttribute() {},
+    removeAttribute() {},
+    focus() {}
+  });
+  for (const id of ['pafHireBtn', 'pafHireStatus', 'pafHireError']) {
+    elements.set(id, make());
+  }
+  const priorDocument = globalThis.document;
+  const priorWindow = globalThis.window;
+  const navigations = [];
+  globalThis.document = {
+    getElementById: id => elements.get(id) || null,
+    querySelectorAll: () => [],
+    querySelector: () => null
+  };
+  globalThis.window = {
+    location: {
+      search: '',
+      set href(value) {
+        navigations.push(value);
+      },
+      get href() {
+        return navigations.at(-1) || '';
+      }
+    },
+    localStorage: { getItem: () => null, setItem() {}, removeItem() {} }
+  };
+  return {
+    elements,
+    navigations,
+    restore() {
+      globalThis.document = priorDocument;
+      globalThis.window = priorWindow;
+    }
+  };
+}
+
+test('a durable needs_hq relationship closes onboarding instead of hiring again', async () => {
+  const dom = stubHireDom();
+  let hirePosts = 0;
+  let completePosts = 0;
+  const priorFetch = globalThis.fetch;
+  globalThis.fetch = async url => {
+    if (String(url).includes('/api/personal-assistant/hire')) hirePosts += 1;
+    if (String(url).includes('/api/onboarding/complete')) completePosts += 1;
+    return { ok: true, json: async () => ({}) };
+  };
+  try {
+    const manager = new OnboardingManager();
+    manager.personalAssistantState = { state: 'needs_hq', display_name: 'Atlas' };
+    manager.completeStep = async () => {};
+    await manager.hireAssistant();
+
+    assert.equal(hirePosts, 0, 'a second hire was posted for a durable relationship');
+    assert.equal(completePosts, 1);
+    assert.equal(dom.navigations.at(-1), HQ_QUEST_ROUTE);
+  } finally {
+    globalThis.fetch = priorFetch;
+    dom.restore();
+  }
+});
+
+test('onboarding completion failure after hire offers Continue to HQ quest', async () => {
+  const dom = stubHireDom();
+  let hirePosts = 0;
+  let statePolls = 0;
+  const priorFetch = globalThis.fetch;
+  globalThis.fetch = async url => {
+    const target = String(url);
+    if (target.includes('/api/personal-assistant/hire')) {
+      hirePosts += 1;
+      return {
+        ok: true,
+        json: async () => ({
+          personal_assistant: {
+            state: 'needs_hq',
+            display_name: 'Atlas',
+            assistant_id: 'assistant-1',
+            state_version: 2
+          }
+        })
+      };
+    }
+    if (target.includes('/api/onboarding/complete')) {
+      return { ok: false, json: async () => ({}) };
+    }
+    if (target.includes('/api/personal-assistant')) {
+      statePolls += 1;
+      return {
+        ok: true,
+        json: async () => ({
+          personal_assistant: { state: 'needs_hq', display_name: 'Atlas', state_version: 2 }
+        })
+      };
+    }
+    return { ok: true, json: async () => ({}) };
+  };
+  try {
+    const manager = new OnboardingManager();
+    manager.personalAssistantState = { state: 'needs_hire', state_version: 0 };
+    manager.completeStep = async () => {};
+    manager.personalAssistantHirePayload = () => ({ request_id: 'request-1' });
+    await manager.hireAssistant();
+
+    assert.equal(hirePosts, 1, 'the hire should be posted exactly once');
+    assert.ok(statePolls >= 1, 'authoritative state should be reloaded before recovery');
+    // The recovery action continues the quest; it never re-runs the hire.
+    assert.equal(dom.elements.get('pafHireBtn').textContent, 'Continue to HQ quest');
+    assert.equal(dom.elements.get('pafHireBtn').disabled, false);
+    assert.match(dom.elements.get('pafHireError').textContent, /not hire a second assistant/i);
+    assert.equal(dom.navigations.length, 0, 'a failed completion must not navigate away');
+  } finally {
+    globalThis.fetch = priorFetch;
+    dom.restore();
   }
 });
 

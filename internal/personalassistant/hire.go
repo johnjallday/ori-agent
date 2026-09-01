@@ -33,13 +33,21 @@ var (
 )
 
 // HireRequest is one confirmed, idempotent hire operation.
+//
+// The Daily Brief rhythm fields are retained only to decode a hire request
+// persisted before hiring and HQ creation were split. A fresh hire neither
+// requires nor promises a rhythm: there is no canonical workspace to write it
+// against until the user confirms Build My HQ on the guided Map quest, so the
+// schedule is collected there instead.
 type HireRequest struct {
-	RequestID     string
-	IfVersion     int64
-	DisplayName   string
-	Appearance    *types.AgentAppearance
-	Mandate       string
-	FocusAreas    []string
+	RequestID   string
+	IfVersion   int64
+	DisplayName string
+	Appearance  *types.AgentAppearance
+	Mandate     string
+	FocusAreas  []string
+
+	// Deprecated: pre-amendment replay compatibility only.
 	Timezone      string
 	ScheduleDays  []string
 	ScheduleTime  string
@@ -48,9 +56,11 @@ type HireRequest struct {
 
 // HireResult contains canonical durable identities, never inferred names.
 type HireResult struct {
-	State       *State
+	State   *State
+	Resumed bool
+	// BriefConfig is populated only when replaying a relationship that already
+	// has a Personal HQ. A fresh hire creates no Daily Brief configuration.
 	BriefConfig *dailybrief.Config
-	Resumed     bool
 }
 
 // PartialHireError reports a visible durable partial result and a safe retry
@@ -81,44 +91,63 @@ type HireBriefManager interface {
 	UpdateConfig(ctx context.Context, cfg dailybrief.Config) (*dailybrief.Config, error)
 }
 
-// HireCoordinator provisions one selected assistant and its Personal HQ.
+// hirePayloadVersionProfileOnly marks a hire operation whose consequence is the
+// assistant profile and relationship alone. Operations persisted before the
+// guided-HQ amendment carry no version field and decode as 0; they still own a
+// workspace consequence and must be finished through their original path.
+const hirePayloadVersionProfileOnly = 2
+
+// HireCoordinator creates one durable personal-assistant profile and
+// relationship. It does not create Personal HQ: that is the separate,
+// user-confirmed consequence of the guided Map quest.
+//
+// The legacy combined hire/HQ path survives only to finish operations persisted
+// before the amendment. It is selected by the stored payload version, never by
+// guessing from the current state.
 type HireCoordinator struct {
-	store   Store
-	creator personalhq.AssistantWorkspaceCreator
-	hq      HireHQManager
-	briefs  HireBriefManager
-	now     func() time.Time
+	store    Store
+	profiles personalhq.AssistantProfileCreator
+	creator  personalhq.AssistantWorkspaceCreator
+	hq       HireHQManager
+	briefs   HireBriefManager
+	now      func() time.Time
 
 	// A single-process lock prevents two same-user HTTP retries from entering
-	// the workspace creator concurrently. Durable request/assistant IDs and
-	// workspace metadata still provide restart-safe idempotency.
+	// the profile creator concurrently. Durable request/assistant IDs and profile
+	// provenance markers still provide restart-safe idempotency.
 	mu sync.Mutex
 }
 
-// NewHireCoordinator constructs the hire operation coordinator.
-func NewHireCoordinator(store Store, creator personalhq.AssistantWorkspaceCreator, hq HireHQManager, briefs HireBriefManager) *HireCoordinator {
+// NewHireCoordinator constructs the hire operation coordinator. creator, hq, and
+// briefs are needed only to resume a pre-amendment automatic-HQ operation.
+func NewHireCoordinator(store Store, profiles personalhq.AssistantProfileCreator, creator personalhq.AssistantWorkspaceCreator, hq HireHQManager, briefs HireBriefManager) *HireCoordinator {
 	return &HireCoordinator{
-		store: store, creator: creator, hq: hq, briefs: briefs, now: time.Now,
+		store: store, profiles: profiles, creator: creator, hq: hq, briefs: briefs, now: time.Now,
 	}
 }
 
 type normalizedHireRequest struct {
-	RequestID     string                 `json:"request_id"`
-	DisplayName   string                 `json:"display_name"`
-	Appearance    *types.AgentAppearance `json:"appearance"`
-	Mandate       string                 `json:"mandate"`
-	FocusAreas    []FocusArea            `json:"focus_areas"`
-	Timezone      string                 `json:"timezone"`
-	ScheduleDays  []string               `json:"schedule_days"`
-	ScheduleTime  string                 `json:"schedule_time"`
-	NotifyOnReady bool                   `json:"notify_on_ready"`
-	Hash          string                 `json:"-"`
+	// Version distinguishes a profile-only operation from a persisted
+	// pre-amendment automatic-HQ one. It is part of the hashed payload, so an
+	// old stored operation can never be mistaken for a new one.
+	Version     int                    `json:"version"`
+	RequestID   string                 `json:"request_id"`
+	DisplayName string                 `json:"display_name"`
+	Appearance  *types.AgentAppearance `json:"appearance"`
+	Mandate     string                 `json:"mandate"`
+	FocusAreas  []FocusArea            `json:"focus_areas"`
+	// Daily Brief rhythm fields are decoded from pre-amendment operations only.
+	Timezone      string   `json:"timezone,omitempty"`
+	ScheduleDays  []string `json:"schedule_days,omitempty"`
+	ScheduleTime  string   `json:"schedule_time,omitempty"`
+	NotifyOnReady bool     `json:"notify_on_ready,omitempty"`
+	Hash          string   `json:"-"`
 }
 
 // Hire validates all user-controlled input before any persistence or
 // provisioning consequence, then starts/resumes one durable operation.
 func (c *HireCoordinator) Hire(ctx context.Context, userID string, request HireRequest) (*HireResult, error) {
-	if c == nil || c.store == nil || c.creator == nil || c.hq == nil || c.briefs == nil {
+	if c == nil || c.store == nil {
 		return nil, errors.New("personal assistant: hire coordinator is not configured")
 	}
 	normalized, err := normalizeHireRequest(request)
@@ -139,14 +168,95 @@ func (c *HireCoordinator) Hire(ctx context.Context, userID string, request HireR
 	}
 	normalized = canonicalRequest
 	if state.Status == StatusActive || state.Status == StatusPaused {
-		config, _ := c.briefs.GetConfig(ctx, state.HQWorkspaceID)
+		var config *dailybrief.Config
+		if c.briefs != nil {
+			config, _ = c.briefs.GetConfig(ctx, state.HQWorkspaceID)
+		}
 		return &HireResult{State: state.Clone(), BriefConfig: cloneBriefConfig(config), Resumed: true}, nil
+	}
+	if state.Status == StatusAwaitingHQ || state.Status == StatusProvisioningHQ {
+		// The hire consequence is already durable. Replaying it must return the
+		// same identity, not start a second profile or reopen HQ creation.
+		return &HireResult{State: state.Clone(), Resumed: true}, nil
 	}
 	if state.Status == StatusRepairNeeded && state.RepairStep == RepairNone {
 		return nil, ErrRepairNeeded
 	}
 	recordEvent(EventHireStarted, EventData{AssistantID: state.AssistantID, WorkspaceID: state.HQWorkspaceID, State: string(state.Status)})
 
+	if normalized.Version >= hirePayloadVersionProfileOnly {
+		return c.hireProfile(ctx, state, normalized, resumed)
+	}
+	return c.resumeLegacyAutoHQ(ctx, userID, state, normalized, resumed)
+}
+
+// hireProfile is the current hire consequence: one durable global agent profile
+// and one relationship, and nothing else.
+func (c *HireCoordinator) hireProfile(ctx context.Context, state *State, normalized normalizedHireRequest, resumed bool) (*HireResult, error) {
+	if c.profiles == nil {
+		return nil, errors.New("personal assistant: hire coordinator is not configured")
+	}
+	created, err := c.profiles.CreatePersonalAssistantProfile(ctx, personalhq.AssistantCreationOptions{
+		AssistantID: state.AssistantID, RequestID: normalized.RequestID,
+		DisplayName: normalized.DisplayName, Appearance: normalized.Appearance.Clone(),
+		Role: types.RoleOrchestrator, SystemPromptFragment: PersonalAssistantPromptFragment,
+	})
+	if err != nil {
+		// No durable profile was claimed, so the operation stays hiring and the
+		// same request ID can retry. Provenance markers make that retry safe even
+		// if the profile became visible just before the error.
+		recordEvent(EventRecoverableFailure, EventData{
+			AssistantID: state.AssistantID, State: string(state.Status),
+			Recoverable: true, ReasonCode: string(RepairProfileCreation),
+		})
+		return nil, fmt.Errorf("personal assistant: create assistant profile: %w", err)
+	}
+	profileName := ""
+	if created != nil {
+		profileName = strings.TrimSpace(created.GlobalAgentProfileName)
+	}
+	if profileName == "" {
+		recordEvent(EventRecoverableFailure, EventData{
+			AssistantID: state.AssistantID, State: string(state.Status),
+			Recoverable: true, ReasonCode: string(RepairProfileCreation),
+		})
+		return nil, errors.New("personal assistant: profile creator returned no canonical name")
+	}
+	if existing := strings.TrimSpace(state.GlobalAgentProfileName); existing != "" && existing != profileName {
+		return nil, fmt.Errorf("%w: persisted hire points at a different assistant profile", ErrConflict)
+	}
+
+	next := state.Clone()
+	next.Status = StatusAwaitingHQ
+	next.GlobalAgentProfileName = profileName
+	next.RepairStep = RepairNone
+	// The payload is reduced to its receipt: the relationship row carries the
+	// working agreement now, so a second copy would only be a stale duplicate.
+	next.HirePayloadJSON = ""
+	if next.HiredAt == nil {
+		hiredAt := c.now().UTC()
+		next.HiredAt = &hiredAt
+	}
+	updated, updateErr := c.store.UpdateState(ctx, next, state.StateVersion)
+	if updateErr != nil {
+		// The profile exists and is provably ours. Report a bounded partial that
+		// resumes to the same profile rather than creating a replacement.
+		return nil, c.partial(ctx, state, RepairProfileCreation, updateErr)
+	}
+	recordEvent(EventHireCompleted, EventData{
+		AssistantID: updated.AssistantID, State: string(updated.Status),
+	})
+	return &HireResult{State: updated.Clone(), Resumed: resumed}, nil
+}
+
+// resumeLegacyAutoHQ finishes an operation persisted before hiring and HQ
+// creation were split. It is byte-for-behavior the pre-amendment path: the same
+// creator, designation, Daily Brief write, and activation, so an interrupted
+// upgrade never abandons or duplicates the workspace it already made.
+func (c *HireCoordinator) resumeLegacyAutoHQ(ctx context.Context, userID string, state *State, normalized normalizedHireRequest, resumed bool) (*HireResult, error) {
+	if c.creator == nil || c.hq == nil || c.briefs == nil {
+		return nil, errors.New("personal assistant: hire coordinator is not configured")
+	}
 	created, err := c.creator.CreatePersonalAssistantHQ(ctx, "My HQ", personalhq.AssistantCreationOptions{
 		AssistantID: state.AssistantID, RequestID: normalized.RequestID,
 		DisplayName: normalized.DisplayName, Appearance: normalized.Appearance.Clone(),
@@ -360,6 +470,7 @@ func (c *HireCoordinator) partial(ctx context.Context, state *State, step Repair
 
 func normalizeHireRequest(input HireRequest) (normalizedHireRequest, error) {
 	var out normalizedHireRequest
+	out.Version = hirePayloadVersionProfileOnly
 	if input.IfVersion < 0 {
 		return out, fmt.Errorf("%w: if_version cannot be negative", ErrValidation)
 	}
@@ -394,28 +505,10 @@ func normalizeHireRequest(input HireRequest) (normalizedHireRequest, error) {
 	if err != nil {
 		return out, fmt.Errorf("%w: %v", ErrValidation, err)
 	}
-	out.Timezone = strings.TrimSpace(input.Timezone)
-	if out.Timezone == "" {
-		out.Timezone = "UTC"
-	}
-	if _, err := time.LoadLocation(out.Timezone); err != nil {
-		return out, fmt.Errorf("%w: invalid IANA timezone", ErrValidation)
-	}
-	out.ScheduleDays, err = normalizeHireDays(input.ScheduleDays)
-	if err != nil {
-		return out, fmt.Errorf("%w: %v", ErrValidation, err)
-	}
-	out.ScheduleTime = strings.TrimSpace(input.ScheduleTime)
-	if out.ScheduleTime == "" {
-		out.ScheduleTime = "08:00"
-	}
-	if _, err := dailybrief.NormalizeConfig(dailybrief.Config{
-		WorkspaceID: "validation", Timezone: out.Timezone,
-		ScheduleDays: out.ScheduleDays, ScheduleTime: out.ScheduleTime,
-	}); err != nil {
-		return out, fmt.Errorf("%w: invalid Daily Brief rhythm", ErrValidation)
-	}
-	out.NotifyOnReady = input.NotifyOnReady
+	// A fresh hire collects no Daily Brief rhythm. There is no canonical
+	// workspace to write one against until Build My HQ is confirmed, so the
+	// schedule belongs to the Map's HQ form. Any rhythm fields a stale client
+	// still sends are dropped here rather than validated and discarded later.
 	payload, err := json.Marshal(out)
 	if err != nil {
 		return out, fmt.Errorf("%w: could not normalize hire request", ErrValidation)
@@ -466,26 +559,6 @@ func normalizeHireAppearance(input *types.AgentAppearance) (*types.AgentAppearan
 		return nil, errors.New("appearance is too large")
 	}
 	return appearance, nil
-}
-
-func normalizeHireDays(input []string) ([]string, error) {
-	if len(input) == 0 {
-		return []string{"mon", "tue", "wed", "thu", "fri"}, nil
-	}
-	allowed := map[string]bool{"mon": true, "tue": true, "wed": true, "thu": true, "fri": true, "sat": true, "sun": true}
-	seen := make(map[string]bool, 7)
-	out := make([]string, 0, len(input))
-	for _, raw := range input {
-		day := strings.ToLower(strings.TrimSpace(raw))
-		if !allowed[day] {
-			return nil, fmt.Errorf("invalid schedule day %q", raw)
-		}
-		if !seen[day] {
-			seen[day] = true
-			out = append(out, day)
-		}
-	}
-	return out, nil
 }
 
 func equivalentBriefConfig(left, right *dailybrief.Config) bool {

@@ -221,8 +221,11 @@ func (b *ServerBuilder) initializeDailyBrief() {
 		store,
 		&personalAssistantModelReader{configManager: b.configManager, llmFactory: b.llmFactory},
 	).WithProfileReader(personalassistant.NewAgentStoreProfileReader(b.st))
+	// The session handler implements both creation seams: the profile-only one a
+	// fresh hire uses, and the combined HQ one that only finishes operations
+	// persisted before hiring and HQ creation were split.
 	b.personalAssistantHire = personalassistant.NewHireCoordinator(
-		b.personalAssistantStore, b.sessionHandler,
+		b.personalAssistantStore, b.sessionHandler, b.sessionHandler,
 		b.personalHQService, briefService,
 	)
 	b.personalAssignment = personalassistant.NewAssignmentService(b.personalAssistantStore)

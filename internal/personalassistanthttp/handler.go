@@ -171,25 +171,35 @@ func (h *Handler) GetToday(w http.ResponseWriter, r *http.Request) {
 }
 
 type hireRequest struct {
-	RequestID     string                 `json:"request_id"`
-	IfVersion     int64                  `json:"if_version"`
-	DisplayName   string                 `json:"display_name"`
-	Appearance    *types.AgentAppearance `json:"appearance"`
-	Mandate       string                 `json:"mandate"`
-	FocusAreas    []string               `json:"focus_areas"`
-	Timezone      string                 `json:"timezone"`
-	ScheduleDays  []string               `json:"schedule_days"`
-	ScheduleTime  string                 `json:"schedule_time"`
-	NotifyOnReady bool                   `json:"notify_on_ready"`
+	RequestID   string                 `json:"request_id"`
+	IfVersion   int64                  `json:"if_version"`
+	DisplayName string                 `json:"display_name"`
+	Appearance  *types.AgentAppearance `json:"appearance"`
+	Mandate     string                 `json:"mandate"`
+	FocusAreas  []string               `json:"focus_areas"`
+
+	// Deprecated: a fresh hire collects no Daily Brief rhythm — the Map's HQ
+	// build form owns it, where it can be written against a real workspace ID.
+	// These fields are still decoded so a stale client's request is accepted and
+	// ignored rather than rejected outright; the coordinator drops them.
+	Timezone      string   `json:"timezone,omitempty"`
+	ScheduleDays  []string `json:"schedule_days,omitempty"`
+	ScheduleTime  string   `json:"schedule_time,omitempty"`
+	NotifyOnReady bool     `json:"notify_on_ready,omitempty"`
 }
 
+// hireResponse reports the durable identity a hire produced. HQ and Daily Brief
+// fields are omitted when empty: a fresh hire has neither, and claiming an empty
+// HQ would be exactly the fabrication the needs_hq state exists to avoid.
 type hireResponse struct {
 	Status                 personalassistant.RelationshipStatus    `json:"status"`
+	State                  personalassistant.APIState              `json:"state"`
+	NextAction             string                                  `json:"next_action"`
 	AssistantID            string                                  `json:"assistant_id"`
 	DisplayName            string                                  `json:"display_name"`
 	Appearance             *types.AgentAppearance                  `json:"appearance,omitempty"`
-	HQWorkspaceID          string                                  `json:"hq_workspace_id"`
-	HQEntryAgentInstanceID string                                  `json:"hq_entry_agent_instance_id"`
+	HQWorkspaceID          string                                  `json:"hq_workspace_id,omitempty"`
+	HQEntryAgentInstanceID string                                  `json:"hq_entry_agent_instance_id,omitempty"`
 	GlobalAgentProfileName string                                  `json:"global_agent_profile_name"`
 	StateVersion           int64                                   `json:"state_version"`
 	FirstAssignmentStatus  personalassistant.FirstAssignmentStatus `json:"first_assignment_status"`
@@ -234,7 +244,7 @@ func (h *Handler) Hire(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		switch {
 		case errors.Is(err, personalassistant.ErrValidation):
-			writeHireError(w, http.StatusBadRequest, "invalid_hire_request", "Check the assistant name, working agreement, appearance, and Daily Brief rhythm.", false, nil)
+			writeHireError(w, http.StatusBadRequest, "invalid_hire_request", "Check the assistant name, working agreement, and appearance.", false, nil)
 		case errors.Is(err, personalassistant.ErrConflict), errors.Is(err, personalhq.ErrAssistantNameConflict):
 			writeHireError(w, http.StatusConflict, "hire_conflict", "This hire conflicts with the current assistant relationship. Refresh and try again.", false, nil)
 		default:
@@ -607,7 +617,9 @@ func responseFromResult(result *personalassistant.HireResult) *hireResponse {
 	}
 	state := result.State
 	return &hireResponse{
-		Status: state.Status, AssistantID: state.AssistantID,
+		Status: state.Status, State: hireAPIState(state.Status),
+		NextAction:  hireNextAction(state.Status),
+		AssistantID: state.AssistantID,
 		DisplayName: state.DisplayName, Appearance: state.Appearance.Clone(),
 		HQWorkspaceID:          state.HQWorkspaceID,
 		HQEntryAgentInstanceID: state.HQEntryAgentInstanceID,
@@ -615,6 +627,47 @@ func responseFromResult(result *personalassistant.HireResult) *hireResponse {
 		StateVersion:           state.StateVersion,
 		FirstAssignmentStatus:  state.FirstAssignmentStatus,
 		HiredAt:                state.HiredAt, DailyBrief: result.BriefConfig, Resumed: result.Resumed,
+	}
+}
+
+// hireAPIState maps the durable status to the same public vocabulary
+// GET /api/personal-assistant uses, so a client never has to learn two names
+// for one stage.
+func hireAPIState(status personalassistant.RelationshipStatus) personalassistant.APIState {
+	switch status {
+	case personalassistant.StatusAwaitingHQ:
+		return personalassistant.APIStateNeedsHQ
+	case personalassistant.StatusProvisioningHQ:
+		return personalassistant.APIStateProvisioningHQ
+	case personalassistant.StatusActive:
+		return personalassistant.APIStateActive
+	case personalassistant.StatusPaused:
+		return personalassistant.APIStatePaused
+	case personalassistant.StatusRepairNeeded:
+		return personalassistant.APIStateRepairNeeded
+	case personalassistant.StatusNotHired:
+		return personalassistant.APIStateNeedsHire
+	default:
+		return personalassistant.APIStateHiring
+	}
+}
+
+func hireNextAction(status personalassistant.RelationshipStatus) string {
+	switch status {
+	case personalassistant.StatusAwaitingHQ:
+		return personalassistant.NextActionBuildHQ
+	case personalassistant.StatusProvisioningHQ:
+		return personalassistant.NextActionResumeHQ
+	case personalassistant.StatusActive:
+		return personalassistant.NextActionAsk
+	case personalassistant.StatusPaused:
+		return personalassistant.NextActionResume
+	case personalassistant.StatusRepairNeeded:
+		return personalassistant.NextActionRepair
+	case personalassistant.StatusNotHired:
+		return personalassistant.NextActionHire
+	default:
+		return personalassistant.NextActionResumeHire
 	}
 }
 

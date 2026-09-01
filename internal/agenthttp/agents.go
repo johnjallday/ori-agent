@@ -12,6 +12,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/cliagent"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/skills"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
@@ -638,6 +639,18 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// A hired assistant that has not built Personal HQ yet owns this profile
+		// but is attached to no workspace, so the attachment guard below cannot
+		// see it. Renaming it here would fork the relationship's identity.
+		if guardsApply && h.support.protectsHiredProfile(r.Context(), agentName) {
+			_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{
+				"error":       hiredProfileGuardCode,
+				"message":     hiredProfileGuardMessage,
+				"next_action": personalassistant.NextActionBuildHQ,
+			})
+			return
+		}
+
 		// Agent identity is still the bare name, so renaming an attached
 		// definition would strand every workspace that references the old name
 		// (PRD FR10). Block it; users create a new definition instead.
@@ -754,6 +767,18 @@ func (h *Handler) handleDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	if h.isCLIAgent(name) {
 		orihttp.BadRequest(w, "CLI agents are built-in and cannot be deleted")
+		return
+	}
+
+	// A hired assistant with no Personal HQ yet is attached to nothing, so the
+	// attachment guard below would let it through. Deleting it would strand the
+	// relationship with a profile that no longer exists.
+	if h.support.protectsHiredProfile(r.Context(), name) {
+		_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{
+			"error":       hiredProfileGuardCode,
+			"message":     hiredProfileGuardMessage,
+			"next_action": personalassistant.NextActionBuildHQ,
+		})
 		return
 	}
 
