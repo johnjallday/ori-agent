@@ -60,14 +60,15 @@ type CapabilityReader interface {
 
 // Handler serves /api/personal-assistant.
 type Handler struct {
-	service      StateReader
-	hirer        HireService
-	assignments  AssignmentPreviewService
-	today        TodayReader
-	continuity   ContinuityService
-	renamer      RenameService
-	capabilities CapabilityReader
-	provider     userprofile.UserProvider
+	service                    StateReader
+	hirer                      HireService
+	assignments                AssignmentPreviewService
+	today                      TodayReader
+	continuity                 ContinuityService
+	renamer                    RenameService
+	capabilities               CapabilityReader
+	provider                   userprofile.UserProvider
+	onFirstAssignmentCompleted func()
 }
 
 // NewHandler constructs a personal-assistant HTTP handler.
@@ -89,6 +90,15 @@ func (h *Handler) SetHireService(hirer HireService) {
 func (h *Handler) SetAssignmentService(assignments AssignmentPreviewService) {
 	if h != nil {
 		h.assignments = assignments
+	}
+}
+
+// SetOnFirstAssignmentCompleted connects a successful, durable apply to the
+// optional progression presentation without making progression part of the
+// assignment transaction.
+func (h *Handler) SetOnFirstAssignmentCompleted(fn func()) {
+	if h != nil {
+		h.onFirstAssignmentCompleted = fn
 	}
 }
 
@@ -392,6 +402,9 @@ func (h *Handler) ApplyFirstAssignment(w http.ResponseWriter, r *http.Request) {
 		}
 		orihttp.ServiceUnavailable(w, "first-assignment apply is temporarily unavailable")
 		return
+	}
+	if result != nil && result.Status == personalassistant.AssignmentCompleted && h.onFirstAssignmentCompleted != nil {
+		h.onFirstAssignmentCompleted()
 	}
 	orihttp.Success(w, map[string]any{"first_assignment": result})
 }

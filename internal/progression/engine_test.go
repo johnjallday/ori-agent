@@ -39,6 +39,34 @@ func completed(e *Engine, id string) bool {
 	return false
 }
 
+func TestPersonalAssistantQuests_FeatureFirstDayWithoutChangingLegacyGraph(t *testing.T) {
+	legacy := New(&fakeStore{})
+	if questView(legacy, PersonalAssistantFirstDayQuestID) != nil {
+		t.Fatal("legacy graph unexpectedly contains the personal-assistant first-day quest")
+	}
+
+	paf := New(&fakeStore{}, WithQuests(PersonalAssistantQuests()))
+	firstDay := questView(paf, PersonalAssistantFirstDayQuestID)
+	if firstDay == nil || firstDay.Tier != 1 || !firstDay.Optional || firstDay.ActionURL != "/?quest=plan-first-day" {
+		t.Fatalf("unexpected PAF first-day quest: %+v", firstDay)
+	}
+	if paf.Status().TotalCount != legacy.Status().TotalCount+1 {
+		t.Fatalf("PAF total = %d, legacy total = %d", paf.Status().TotalCount, legacy.Status().TotalCount)
+	}
+}
+
+func TestPersonalAssistantQuests_BackfillCompletedFirstAssignment(t *testing.T) {
+	e := New(&fakeStore{}, WithQuests(PersonalAssistantQuests()))
+	if err := e.Backfill(ScannerFunc(func() Snapshot {
+		return Snapshot{FirstAssignmentCompleted: true}
+	})); err != nil {
+		t.Fatal(err)
+	}
+	if !completed(e, PersonalAssistantFirstDayQuestID) {
+		t.Fatal("completed first assignment did not backfill its quest")
+	}
+}
+
 func TestHandleEvent_CompletesMatchingQuest(t *testing.T) {
 	e := New(&fakeStore{})
 

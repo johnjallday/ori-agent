@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/progression"
 	"github.com/johnjallday/ori-agent/internal/progressionhttp"
 	"github.com/johnjallday/ori-agent/internal/userprofile"
@@ -19,9 +20,18 @@ func (b *ServerBuilder) initializeProgression() {
 		return
 	}
 
-	engine := progression.New(b.onboardingMgr, progression.WithOnComplete(func(q progression.Quest) {
-		logger.Info("Onboarding quest completed", logger.Fields{"quest": q.ID, "tier": q.Tier})
-	}))
+	quests := progression.BuiltinQuests()
+	personalAssistantEligible := b.onboardingMgr.IsPersonalAssistantEligible()
+	if personalAssistantEligible {
+		quests = progression.PersonalAssistantQuests()
+	}
+	engine := progression.New(
+		b.onboardingMgr,
+		progression.WithQuests(quests),
+		progression.WithOnComplete(func(q progression.Quest) {
+			logger.Info("Onboarding quest completed", logger.Fields{"quest": q.ID, "tier": q.Tier})
+		}),
+	)
 	b.progressionEngine = engine
 
 	// Live detection: forward every event to the engine. Publish already
@@ -47,9 +57,25 @@ func (b *ServerBuilder) initializeProgression() {
 		})
 	}
 
+	// A first-assignment apply has its own atomic durability boundary. Progression
+	// observes only the successful result and remains safe to retry independently.
+	if personalAssistantEligible && b.personalAssistantHandler != nil {
+		b.personalAssistantHandler.SetOnFirstAssignmentCompleted(func() {
+			engine.Complete(progression.PersonalAssistantFirstDayQuestID)
+		})
+	}
+
 	// One-time backfill so established installs are grandfathered silently.
 	if err := engine.Backfill(progression.ScannerFunc(b.scanProgression)); err != nil {
 		logger.Warn("Onboarding progression backfill failed", logger.Fields{"error": err})
+	}
+	// Reconcile installs whose one-time progression backfill predates this quest.
+	// Complete is idempotent, and the widget suppresses announcements on its first
+	// status load, so a restart cannot replay the first-day flow or toast old work.
+	if personalAssistantEligible && b.personalAssistantService != nil {
+		if state, err := b.personalAssistantService.Get(context.Background(), userprofile.LocalUserID); err == nil && state.FirstAssignment == personalassistant.FirstAssignmentCompleted {
+			engine.Complete(progression.PersonalAssistantFirstDayQuestID)
+		}
 	}
 
 	b.progressionHandler = progressionhttp.NewHandler(engine)
@@ -81,6 +107,12 @@ func (b *ServerBuilder) scanProgression() progression.Snapshot {
 	if b.personalHQService != nil {
 		if status, err := b.personalHQService.Status(context.Background(), userprofile.LocalUserID); err == nil && status.Valid {
 			snap.HasPersonalHQ = true
+		}
+	}
+
+	if b.personalAssistantService != nil {
+		if state, err := b.personalAssistantService.Get(context.Background(), userprofile.LocalUserID); err == nil {
+			snap.FirstAssignmentCompleted = state.FirstAssignment == personalassistant.FirstAssignmentCompleted
 		}
 	}
 

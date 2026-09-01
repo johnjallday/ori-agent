@@ -435,11 +435,16 @@ func TestHandlerApplyFirstAssignment_ReturnsCompleteAndBoundedPartialResults(t *
 		}}
 		handler := NewHandler(&fakeStateReader{}, fakeUserProvider{userID: "local"})
 		handler.SetAssignmentService(service)
+		completedCalls := 0
+		handler.SetOnFirstAssignmentCompleted(func() { completedCalls++ })
 		recorder := httptest.NewRecorder()
 		body := `{"preview_id":"preview-1","preview_version":1,"payload_hash":"hash","if_version":2,"apply_request_id":"apply-1"}`
 		handler.ApplyFirstAssignment(recorder, httptest.NewRequest(http.MethodPost, "/api/personal-assistant/first-assignment/apply", strings.NewReader(body)))
 		if recorder.Code != http.StatusOK || service.apply.ApplyRequestID != "apply-1" || !strings.Contains(recorder.Body.String(), `"id":"ticket-1"`) {
 			t.Fatalf("status=%d request=%#v body=%s", recorder.Code, service.apply, recorder.Body.String())
+		}
+		if completedCalls != 1 {
+			t.Fatalf("completion callback calls = %d, want 1", completedCalls)
 		}
 	})
 
@@ -454,11 +459,16 @@ func TestHandlerApplyFirstAssignment_ReturnsCompleteAndBoundedPartialResults(t *
 		}}
 		handler := NewHandler(&fakeStateReader{}, fakeUserProvider{userID: "local"})
 		handler.SetAssignmentService(service)
+		completedCalls := 0
+		handler.SetOnFirstAssignmentCompleted(func() { completedCalls++ })
 		recorder := httptest.NewRecorder()
 		handler.ApplyFirstAssignment(recorder, httptest.NewRequest(http.MethodPost, "/api/personal-assistant/first-assignment/apply", strings.NewReader(`{"preview_id":"preview-1","preview_version":1,"payload_hash":"hash","if_version":2,"apply_request_id":"apply-1"}`)))
 		if recorder.Code != http.StatusServiceUnavailable || !strings.Contains(recorder.Body.String(), `"code":"assignment_partial"`) ||
 			!strings.Contains(recorder.Body.String(), `"retryable":true`) || strings.Contains(recorder.Body.String(), "super-secret") {
 			t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+		}
+		if completedCalls != 0 {
+			t.Fatalf("partial apply invoked completion callback %d times", completedCalls)
 		}
 	})
 }

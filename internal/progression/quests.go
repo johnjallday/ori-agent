@@ -16,6 +16,10 @@ import (
 // TotalTiers is the number of tiers in the built-in quest graph.
 const TotalTiers = 6
 
+// PersonalAssistantFirstDayQuestID is the PAF cohort's featured first mission.
+// It remains stable because progression completions are persisted by ID.
+const PersonalAssistantFirstDayQuestID = "t1-plan-first-day"
+
 // Quest is one objective in the onboarding quest graph.
 type Quest struct {
 	// ID is a stable identifier persisted in progression state. Never change
@@ -88,6 +92,22 @@ func onWorkspaceAction(action string) func(ws.Event) bool {
 	return func(ev ws.Event) bool {
 		return ev.Type == ws.EventWorkspaceUpdated && dataString(ev, "action") == action
 	}
+}
+
+// PersonalAssistantQuests returns the cohort-specific graph. Hiring already
+// builds Personal HQ, so the first useful mission is planning the user's day.
+// The legacy graph remains byte-for-byte unchanged for ineligible installs.
+func PersonalAssistantQuests() []Quest {
+	firstDay := Quest{
+		ID: PersonalAssistantFirstDayQuestID, Tier: 1,
+		Title:       "Plan my first day",
+		Why:         "Give your assistant today's priorities and commitments so it can prepare a useful Daily Brief.",
+		Satisfied:   func(s Snapshot) bool { return s.FirstAssignmentCompleted },
+		ActionURL:   "/?quest=plan-first-day",
+		ActionLabel: "Start first quest",
+		Optional:    true,
+	}
+	return append([]Quest{firstDay}, BuiltinQuests()...)
 }
 
 // BuiltinQuests returns the ordered built-in quest graph. The slice is freshly

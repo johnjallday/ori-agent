@@ -174,6 +174,7 @@ test('firstMissionView exposes the HQ quest before its tier unlocks', () => {
 
   assert.deepEqual(firstMissionView(status), {
     visible: true,
+    questID: 't2-build-hq',
     completed: false,
     skipped: false,
     title: 'Build My HQ',
@@ -181,8 +182,63 @@ test('firstMissionView exposes the HQ quest before its tier unlocks', () => {
     statusLabel: 'Ready',
     actionLabel: 'Build My HQ',
     actionURL: '/workspaces?view=map&focus=personal-hq',
-    showAction: true
+    showAction: true,
+    showSkip: false
   });
+});
+
+test('firstMissionView prefers the PAF first-day quest and makes deferral explicit', () => {
+  const status = {
+    tiers: [
+      tier({
+        tier: 1,
+        quests: [
+          quest({
+            id: 't1-plan-first-day',
+            title: 'Plan my first day',
+            status: 'available',
+            optional: true,
+            action_url: '/?quest=plan-first-day',
+            action_label: 'Start first quest'
+          })
+        ]
+      }),
+      tier({
+        tier: 2,
+        quests: [quest({ id: 't2-build-hq', title: 'Build My HQ', status: 'completed' })]
+      })
+    ]
+  };
+
+  const view = firstMissionView(status);
+  assert.equal(view.questID, 't1-plan-first-day');
+  assert.equal(view.title, 'Plan my first day');
+  assert.equal(view.actionLabel, 'Start first quest');
+  assert.equal(view.showSkip, true);
+});
+
+test('firstMissionView turns a deferred first-day quest into a resumable mission', () => {
+  const status = {
+    tiers: [
+      tier({
+        quests: [
+          quest({
+            id: 't1-plan-first-day',
+            status: 'skipped',
+            optional: true,
+            action_url: '/?quest=plan-first-day',
+            action_label: 'Start first quest'
+          })
+        ]
+      })
+    ]
+  };
+
+  const view = firstMissionView(status);
+  assert.equal(view.statusLabel, 'Saved for later');
+  assert.equal(view.actionLabel, 'Resume first quest');
+  assert.equal(view.showAction, true);
+  assert.equal(view.showSkip, false);
 });
 
 test('firstMissionView turns a skipped HQ quest into a resumable mission', () => {
@@ -226,10 +282,15 @@ test('firstMissionView hides once all progression is complete', () => {
   assert.deepEqual(firstMissionView(status), { visible: false });
 });
 
-test('tierQuestRows omits the HQ quest because Mission 01 renders it separately', () => {
+test('tierQuestRows omits both cohort-specific Mission 01 candidates', () => {
   const rows = tierQuestRows(
     tier({
-      quests: [quest({ id: 'workspace' }), quest({ id: 't2-build-hq' }), quest({ id: 'note' })]
+      quests: [
+        quest({ id: 'workspace' }),
+        quest({ id: 't1-plan-first-day' }),
+        quest({ id: 't2-build-hq' }),
+        quest({ id: 'note' })
+      ]
     })
   );
   assert.deepEqual(

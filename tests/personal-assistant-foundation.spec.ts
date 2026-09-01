@@ -9,6 +9,10 @@ test.describe('Personal Assistant Foundation first value', () => {
     let previewId = '';
     let currentPreview: any = null;
     let applyCalls = 0;
+    let onboardingComplete = false;
+    let relationshipState = 'not_hired';
+    let firstAssignmentCompleted = false;
+    let firstQuestDeferred = false;
     const externalWrites: string[] = [];
 
     page.on('request', request => {
@@ -25,9 +29,9 @@ test.describe('Personal Assistant Foundation first value', () => {
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
-          needs_onboarding: true,
-          current_step: 0,
-          completed: false,
+          needs_onboarding: !onboardingComplete,
+          current_step: onboardingComplete ? 3 : 0,
+          completed: onboardingComplete,
           skipped: false,
           steps_completed: [],
           user_name: '',
@@ -66,9 +70,14 @@ test.describe('Personal Assistant Foundation first value', () => {
     await page.route('**/api/onboarding/step', route =>
       route.fulfill({ status: 200, contentType: 'application/json', body: '{"success":true}' })
     );
-    await page.route('**/api/onboarding/complete', route =>
-      route.fulfill({ status: 200, contentType: 'application/json', body: '{"success":true}' })
-    );
+    await page.route('**/api/onboarding/complete', async route => {
+      onboardingComplete = true;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: '{"success":true}'
+      });
+    });
     await page.route('**/api/providers', route =>
       route.fulfill({ status: 200, contentType: 'application/json', body: '{"providers":[]}' })
     );
@@ -81,8 +90,12 @@ test.describe('Personal Assistant Foundation first value', () => {
         contentType: 'application/json',
         body: JSON.stringify({
           personal_assistant: {
-            state: 'not_hired',
+            state: relationshipState,
             state_version: relationshipVersion,
+            assistant_id: relationshipState === 'active' ? 'assistant-1' : undefined,
+            display_name: relationshipState === 'active' ? 'Atlas' : undefined,
+            hq_workspace_id: relationshipState === 'active' ? 'hq-1' : undefined,
+            first_assignment_status: firstAssignmentCompleted ? 'completed' : 'not_started',
             availability: {
               rollout: { status: 'available', available: true },
               model: { status: 'not_configured', available: false },
@@ -95,6 +108,7 @@ test.describe('Personal Assistant Foundation first value', () => {
     );
     await page.route('**/api/personal-assistant/hire', async route => {
       relationshipVersion += 1;
+      relationshipState = 'active';
       await route.fulfill({
         status: 201,
         contentType: 'application/json',
@@ -110,6 +124,80 @@ test.describe('Personal Assistant Foundation first value', () => {
             daily_brief: { timezone: 'UTC', schedule_days: ['mon'], schedule_time: '08:00' }
           }
         })
+      });
+    });
+    await page.route('**/api/progression', route =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          current_tier: 1,
+          total_tiers: 6,
+          total_count: 17,
+          completed_count: firstAssignmentCompleted ? 2 : 1,
+          resolved_count: firstAssignmentCompleted ? 2 : 1,
+          all_complete: false,
+          dismissed: false,
+          next_quest: firstAssignmentCompleted
+            ? { id: 't1-first-message', title: 'Send your first request', status: 'available' }
+            : {
+                id: 't1-plan-first-day',
+                title: 'Plan my first day',
+                status: 'available'
+              },
+          tiers: [
+            {
+              tier: 1,
+              name: 'First Contact',
+              complete: false,
+              quests: [
+                {
+                  id: 't1-plan-first-day',
+                  tier: 1,
+                  title: 'Plan my first day',
+                  why: 'Prepare a useful Daily Brief.',
+                  status: firstAssignmentCompleted
+                    ? 'completed'
+                    : firstQuestDeferred
+                      ? 'skipped'
+                      : 'available',
+                  action_url: '/?quest=plan-first-day',
+                  action_label: 'Start first quest',
+                  optional: true
+                },
+                {
+                  id: 't1-first-message',
+                  tier: 1,
+                  title: 'Send your first request',
+                  why: 'Ask for something.',
+                  status: 'available'
+                }
+              ]
+            },
+            {
+              tier: 2,
+              name: 'Establish a Base',
+              complete: false,
+              quests: [
+                {
+                  id: 't2-build-hq',
+                  tier: 2,
+                  title: 'Build My HQ',
+                  status: 'completed',
+                  optional: true
+                }
+              ]
+            }
+          ]
+        })
+      })
+    );
+    await page.route('**/api/progression/skip', async route => {
+      firstQuestDeferred = true;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: '{"success":true}'
       });
     });
     await page.route('**/api/personal-assistant/first-assignment', route =>
@@ -179,6 +267,7 @@ test.describe('Personal Assistant Foundation first value', () => {
       expect(body.preview_version).toBe(previewVersion);
       await new Promise(resolve => setTimeout(resolve, 350));
       relationshipVersion += 2;
+      firstAssignmentCompleted = true;
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -218,6 +307,7 @@ test.describe('Personal Assistant Foundation first value', () => {
       });
     });
 
+    await page.setViewportSize({ width: 390, height: 844 });
     await page.goto('/');
     await expect(page.locator('#onboardingModal')).toBeVisible();
     await page.locator('#onboardingUserName').fill('Jordan');
@@ -225,12 +315,60 @@ test.describe('Personal Assistant Foundation first value', () => {
     await page.locator('#continueWithoutModelBtn').click();
 
     await expect(page.locator('#onboardingPersonalAssistantHire')).toBeVisible();
+    await expect(page.locator('#pafHireStepLabel')).toBeFocused();
+    await expect(page.locator('#pafHireStepLabel')).toContainText('Hire step 1 of 3');
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth > document.documentElement.clientWidth
+      )
+    ).toBe(false);
     await page.locator('#pafAssistantName').fill('Atlas');
+    await page.locator('#pafHireNextBtn').click();
+    await expect(page.locator('#pafHireStepLabel')).toBeFocused();
+    await expect(page.locator('#pafHireStepLabel')).toContainText('Hire step 2 of 3');
+    await page.locator('#pafHireNextBtn').click();
+    await expect(page.locator('#pafHireStepLabel')).toContainText('Hire step 3 of 3');
+    await page.locator('#pafHireBackBtn').click();
+    await page.locator('#pafHireBackBtn').click();
+    await expect(page.locator('#pafAssistantName')).toHaveValue('Atlas');
+    await page.locator('#pafHireNextBtn').click();
+    await page.locator('#pafHireNextBtn').click();
     await page.locator('#pafHireConfirm').check();
     await page.locator('#pafHireBtn').click();
 
+    await expect(page).toHaveURL(/\/$/);
+    await expect(page.locator('#onboardingModal')).toBeHidden();
+    await expect(page.locator('#cockpitQuestsToggle')).toBeVisible();
+    await page.locator('#cockpitQuestsToggle').click();
+    await expect(page.locator('[data-role="first-mission-title"]')).toHaveText('Plan my first day');
+    await page.locator('[data-role="first-mission-action"]').click();
+
+    await expect(page.locator('#onboardingPersonalAssistantAssignment')).toBeVisible();
+    await expect(page.locator('[data-paf-assignment-step="0"]')).toBeFocused();
+    await expect(page.locator('#pafAssignmentStepLabel')).toContainText('Quest step 1 of 4');
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth > document.documentElement.clientWidth
+      )
+    ).toBe(false);
+    await page.locator('#pafAssignmentBackBtn').click();
+    await expect(page.locator('#onboardingModal')).toBeHidden();
+    await page.locator('#cockpitQuestsToggle').click();
+    await expect(page.locator('[data-role="first-mission-status"]')).toHaveText('Saved for later');
+    await expect(page.locator('[data-role="first-mission-action-label"]')).toHaveText(
+      'Resume first quest'
+    );
+    await page.locator('[data-role="first-mission-action"]').click();
     await expect(page.locator('#onboardingPersonalAssistantAssignment')).toBeVisible();
     await page.locator('#pafPriorityRows [data-field="title"]').first().fill('Review the launch');
+    await page.locator('#pafPreviewAssignmentBtn').click();
+    await expect(page.locator('[data-paf-assignment-step="1"]')).toBeFocused();
+    await expect(page.locator('#pafAssignmentStepLabel')).toContainText('Quest step 2 of 4');
+    await page.locator('#pafAssignmentBackBtn').click();
+    await expect(page.locator('#pafPriorityRows [data-field="title"]').first()).toHaveValue(
+      'Review the launch'
+    );
+    await page.locator('#pafPreviewAssignmentBtn').click();
     await page
       .locator('#pafCommitmentRows [data-paf-assignment-row="i_owe"] [data-field="title"]')
       .fill('Send Maya the draft');
@@ -240,6 +378,8 @@ test.describe('Personal Assistant Foundation first value', () => {
     await page
       .locator('#pafCommitmentRows [data-paf-assignment-row="waiting_on"] [data-field="title"]')
       .fill('Design approval');
+    await page.locator('#pafPreviewAssignmentBtn').click();
+    await expect(page.locator('#pafAssignmentStepLabel')).toContainText('Quest step 3 of 4');
     await page.locator('#pafFixedRows [data-field="title"]').fill('Call at 15:00');
     await page.locator('#pafFixedRows [data-field="action"]').fill('Prepare call notes');
     await page.locator('#pafPreviewAssignmentBtn').click();

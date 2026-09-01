@@ -85,37 +85,58 @@ export function compactSummaryView(status) {
 }
 
 export const FIRST_MISSION_QUEST_ID = 't2-build-hq';
+export const PERSONAL_ASSISTANT_FIRST_MISSION_QUEST_ID = 't1-plan-first-day';
 
-// Mission 01 is intentionally reachable before Tier 2 unlocks. The existing
-// HQ quest remains the source of truth for status and completion; this helper
-// only derives the featured Home presentation from that same quest record.
+const featuredMissionIDs = new Set([
+  PERSONAL_ASSISTANT_FIRST_MISSION_QUEST_ID,
+  FIRST_MISSION_QUEST_ID
+]);
+
+// Mission 01 is intentionally featured independently of the current tier. PAF
+// installs receive Plan my first day; legacy installs retain Build My HQ. Both
+// are ordinary server-owned quest records—the helper changes presentation only.
 export function firstMissionView(status) {
-  const quest = (status?.tiers || [])
-    .flatMap(tier => tier.quests || [])
-    .find(candidate => candidate.id === FIRST_MISSION_QUEST_ID);
+  const quests = (status?.tiers || []).flatMap(tier => tier.quests || []);
+  const quest =
+    quests.find(candidate => candidate.id === PERSONAL_ASSISTANT_FIRST_MISSION_QUEST_ID) ||
+    quests.find(candidate => candidate.id === FIRST_MISSION_QUEST_ID);
 
   if (!quest || status?.all_complete) return { visible: false };
 
   const completed = quest.status === 'completed';
   const skipped = quest.status === 'skipped';
+  const personalFirstDay = quest.id === PERSONAL_ASSISTANT_FIRST_MISSION_QUEST_ID;
   return {
     visible: true,
+    questID: quest.id,
     completed,
     skipped,
     title: quest.title,
     why: quest.why || '',
-    statusLabel: completed ? 'Complete' : skipped ? 'Not set up' : 'Ready',
-    actionLabel: quest.action_label || 'Build My HQ',
-    actionURL: quest.action_url || '/workspaces?view=map&focus=personal-hq',
-    showAction: !completed
+    statusLabel: completed
+      ? 'Complete'
+      : skipped
+        ? personalFirstDay
+          ? 'Saved for later'
+          : 'Not set up'
+        : 'Ready',
+    actionLabel:
+      skipped && personalFirstDay
+        ? 'Resume first quest'
+        : quest.action_label || (personalFirstDay ? 'Start first quest' : 'Build My HQ'),
+    actionURL:
+      quest.action_url ||
+      (personalFirstDay ? '/?quest=plan-first-day' : '/workspaces?view=map&focus=personal-hq'),
+    showAction: !completed,
+    showSkip: personalFirstDay && !!quest.optional && !completed && !skipped
   };
 }
 
-// The HQ quest is rendered as the featured Mission 01 card, so omit it from
-// the ordinary tier list when Tier 2 becomes current rather than showing the
-// same objective twice.
+// Featured objectives are omitted from the ordinary tier list so Mission 01
+// never appears twice. PAF's automatically built HQ remains completed and is
+// likewise unnecessary in the list.
 export function tierQuestRows(tier) {
-  return (tier?.quests || []).filter(quest => quest.id !== FIRST_MISSION_QUEST_ID);
+  return (tier?.quests || []).filter(quest => !featuredMissionIDs.has(quest.id));
 }
 
 // questRowState derives the pure per-row rendering decision for one quest:
@@ -337,6 +358,7 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete) {
     const state = el('first-mission-status');
     const action = el('first-mission-action');
     const actionLabel = el('first-mission-action-label');
+    const skip = el('first-mission-skip');
 
     if (title) title.textContent = view.title;
     if (why) why.textContent = view.why;
@@ -346,6 +368,10 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete) {
       action.href = view.actionURL;
     }
     if (actionLabel) actionLabel.textContent = view.actionLabel;
+    if (skip) {
+      skip.hidden = !view.showSkip;
+      skip.onclick = view.showSkip ? () => skipQuest(view.questID, skip) : null;
+    }
     mission.hidden = false;
   }
 
@@ -448,6 +474,7 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete) {
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') refresh();
     });
+    window.addEventListener('ori:progression-refresh', refresh);
   }
 
   if (document.readyState === 'loading') {

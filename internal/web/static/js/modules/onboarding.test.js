@@ -276,6 +276,28 @@ test('recommendOnboardingStart lets the user explore without creating a project'
   assert.equal(onboardingStartDestination(recommendation), '/');
 });
 
+test('OnboardingManager opens the first quest only for an eligible active incomplete relationship', () => {
+  const priorWindow = globalThis.window;
+  globalThis.window = { location: { search: '?quest=plan-first-day' } };
+  try {
+    const manager = new OnboardingManager();
+    manager.personalAssistantEligible = true;
+    manager.personalAssistantState = {
+      state: 'active',
+      first_assignment_status: 'not_started'
+    };
+    assert.equal(manager.shouldOpenFirstAssignmentQuest(), true);
+
+    manager.personalAssistantState.first_assignment_status = 'completed';
+    assert.equal(manager.shouldOpenFirstAssignmentQuest(), false);
+    manager.personalAssistantEligible = false;
+    manager.personalAssistantState.first_assignment_status = 'not_started';
+    assert.equal(manager.shouldOpenFirstAssignmentQuest(), false);
+  } finally {
+    globalThis.window = priorWindow;
+  }
+});
+
 test('OnboardingManager consumes the shared memoized status gate', async () => {
   let calls = 0;
   resetOnboardingGateForTests(async () => {

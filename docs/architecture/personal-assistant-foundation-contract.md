@@ -125,17 +125,28 @@ contents in PAF tables.
 
 ## Onboarding creation path
 
-Fresh onboarding collects only the assistant's name before the hiring
-consequence. The name must be non-empty, bounded, plain text, and secret-safe.
-Completion then:
+Fresh onboarding collects the assistant's name/appearance, focus/mandate, and
+Daily Brief rhythm across three focused client-side steps before the hiring
+consequence. Back/Next preserves the in-memory draft and sends no hire request.
+The name must be non-empty, bounded, plain text, and secret-safe. One final,
+confirmed hire then:
 
 1. creates a normal `personal-ops` workspace through the existing template
    creation path;
 2. designates that workspace as the user's Personal HQ;
 3. resolves the created workspace's stable entry-agent instance;
 4. renames that instance to the chosen name without changing its ID;
-5. persists the selected-hire binding; and
+5. persists the selected-hire binding and working agreement; and
 6. completes onboarding only after the binding can be read back.
+
+After completion, Home features the eligible cohort's optional **Mission 01:
+Plan my first day**. This replaces the featured Build My HQ mission only for PAF
+installs because the hire transaction already built HQ; the legacy quest graph
+and presentation remain unchanged. The quest may be deferred and resumed. Its
+three category screens mutate only the browser draft; review persists the
+existing bounded preview journal, and final confirmation remains the sole path
+to atomic canonical apply. A successful durable apply independently completes
+the quest and generates the first Daily Brief.
 
 Retries are idempotent. A persisted active binding is returned rather than
 creating another assistant. A partial attempt records a resumable state and the

@@ -37,6 +37,8 @@ type Snapshot struct {
 	// HasPersonalHQ is true when the user already has a valid Personal HQ
 	// designation, grandfathering the optional t2-build-hq quest.
 	HasPersonalHQ bool
+	// FirstAssignmentCompleted grandfathers the PAF cohort's first mission.
+	FirstAssignmentCompleted bool
 }
 
 // Scanner produces a Snapshot of existing state for the backfill scan. The
