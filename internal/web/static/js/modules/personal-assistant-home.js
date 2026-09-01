@@ -155,7 +155,7 @@ function renderToday(today) {
 function renderRelationship(personalAssistant, view) {
   const els = elements();
   if (!els) return;
-  if (!view?.eligible) {
+  if (!view?.known) {
     els.root.hidden = true;
     return;
   }

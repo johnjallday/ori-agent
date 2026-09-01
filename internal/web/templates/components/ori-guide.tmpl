@@ -100,10 +100,10 @@
     {{template "ask-ori-activity.tmpl" .}}
   </section>
 
-  <!-- Eligible PAF users get one separate primary work composer. The existing
-       work activity node above is moved into this host by the controller after
-       the authoritative status read, so routing/planning/confirmation logic is
-       reused rather than copied. Legacy users keep the unified panel unchanged. -->
+  <!-- The personal assistant gets one separate primary work composer. The
+       existing work activity node above is moved into this host after the
+       authoritative relationship read, so routing, planning, and confirmation
+       logic are reused rather than copied. -->
   <button type="button" class="personal-assistant-launcher" id="personalAssistantLauncher"
           aria-expanded="false" aria-controls="personalAssistantPanel" hidden>
     <span id="personalAssistantLauncherAvatar" class="personal-assistant-launcher__avatar" aria-hidden="true"></span>

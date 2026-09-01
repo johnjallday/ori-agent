@@ -99,9 +99,8 @@ func TestGuideMarkupHasOneOfEachControl(t *testing.T) {
 	}
 }
 
-// Legacy users retain one unified composer at runtime. PAF adds a second,
-// hidden-by-default work panel; its controller proves eligibility and then
-// makes the two panels mutually exclusive rather than displaying peers.
+// PAF adds a hidden-by-default work panel; its controller loads the canonical
+// relationship and then makes Help and work mutually exclusive.
 func TestPAFPanelHasDistinctHiddenComposer(t *testing.T) {
 	body := readTemplate(t, "templates/components/ori-guide.tmpl")
 	if got := strings.Count(body, "<form"); got != 2 {

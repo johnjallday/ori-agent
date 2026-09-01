@@ -30,7 +30,6 @@ type PersonalAssistantContextSource struct {
 // global agent profile name, credentials, or tool configuration: those values
 // are not prompt material.
 type PersonalAssistantWorkContext struct {
-	Eligible      bool
 	State         string
 	StateVersion  int64
 	DisplayName   string
@@ -44,14 +43,11 @@ type PersonalAssistantWorkContext struct {
 }
 
 func (c *PersonalAssistantWorkContext) ReadyForWork() bool {
-	if c == nil || !c.Eligible {
-		return false
-	}
-	return c.State == "active" || c.State == "paused"
+	return c != nil && (c.State == "active" || c.State == "paused")
 }
 
 func (c *PersonalAssistantWorkContext) NeedsHireOrRepair() bool {
-	return c != nil && c.Eligible && !c.ReadyForWork()
+	return c != nil && !c.ReadyForWork()
 }
 
 // PersonalAssistantContextProvider is implemented by the server over the PAF,

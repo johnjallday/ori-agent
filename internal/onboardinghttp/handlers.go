@@ -24,16 +24,15 @@ func NewHandler(onboardingMgr *onboarding.Manager) *Handler {
 
 // StatusResponse represents the onboarding status response
 type StatusResponse struct {
-	NeedsOnboarding           bool     `json:"needs_onboarding"`
-	CurrentStep               int      `json:"current_step"`
-	Completed                 bool     `json:"completed"`
-	Skipped                   bool     `json:"skipped"`
-	StepsCompleted            []string `json:"steps_completed"`
-	StepsSkipped              []string `json:"steps_skipped,omitempty"`
-	UserName                  string   `json:"user_name,omitempty"`
-	AssistantName             string   `json:"assistant_name,omitempty"`
-	Timezone                  string   `json:"timezone,omitempty"`
-	PersonalAssistantEligible bool     `json:"personal_assistant_eligible"`
+	NeedsOnboarding bool     `json:"needs_onboarding"`
+	CurrentStep     int      `json:"current_step"`
+	Completed       bool     `json:"completed"`
+	Skipped         bool     `json:"skipped"`
+	StepsCompleted  []string `json:"steps_completed"`
+	StepsSkipped    []string `json:"steps_skipped,omitempty"`
+	UserName        string   `json:"user_name,omitempty"`
+	AssistantName   string   `json:"assistant_name,omitempty"`
+	Timezone        string   `json:"timezone,omitempty"`
 }
 
 // SkipStepRequest represents a request to skip a step
@@ -70,16 +69,15 @@ func (h *Handler) GetStatus(w http.ResponseWriter, r *http.Request) {
 	timezone := h.onboardingMgr.GetTimezone()
 
 	response := StatusResponse{
-		NeedsOnboarding:           !isComplete,
-		CurrentStep:               state.CurrentStep,
-		Completed:                 state.Completed,
-		Skipped:                   !state.SkippedAt.IsZero(),
-		StepsCompleted:            state.StepsCompleted,
-		StepsSkipped:              state.StepsSkipped,
-		UserName:                  userName,
-		AssistantName:             assistantName,
-		Timezone:                  timezone,
-		PersonalAssistantEligible: h.onboardingMgr.IsPersonalAssistantEligible(),
+		NeedsOnboarding: !isComplete,
+		CurrentStep:     state.CurrentStep,
+		Completed:       state.Completed,
+		Skipped:         !state.SkippedAt.IsZero(),
+		StepsCompleted:  state.StepsCompleted,
+		StepsSkipped:    state.StepsSkipped,
+		UserName:        userName,
+		AssistantName:   assistantName,
+		Timezone:        timezone,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -119,16 +117,15 @@ func (h *Handler) CompleteStep(w http.ResponseWriter, r *http.Request) {
 	timezone := h.onboardingMgr.GetTimezone()
 
 	response := StatusResponse{
-		NeedsOnboarding:           !isComplete,
-		CurrentStep:               state.CurrentStep,
-		Completed:                 state.Completed,
-		Skipped:                   !state.SkippedAt.IsZero(),
-		StepsCompleted:            state.StepsCompleted,
-		StepsSkipped:              state.StepsSkipped,
-		UserName:                  userName,
-		AssistantName:             assistantName,
-		Timezone:                  timezone,
-		PersonalAssistantEligible: h.onboardingMgr.IsPersonalAssistantEligible(),
+		NeedsOnboarding: !isComplete,
+		CurrentStep:     state.CurrentStep,
+		Completed:       state.Completed,
+		Skipped:         !state.SkippedAt.IsZero(),
+		StepsCompleted:  state.StepsCompleted,
+		StepsSkipped:    state.StepsSkipped,
+		UserName:        userName,
+		AssistantName:   assistantName,
+		Timezone:        timezone,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -167,16 +164,15 @@ func (h *Handler) SkipStep(w http.ResponseWriter, r *http.Request) {
 	timezone := h.onboardingMgr.GetTimezone()
 
 	response := StatusResponse{
-		NeedsOnboarding:           !isComplete,
-		CurrentStep:               state.CurrentStep,
-		Completed:                 state.Completed,
-		Skipped:                   !state.SkippedAt.IsZero(),
-		StepsCompleted:            state.StepsCompleted,
-		StepsSkipped:              state.StepsSkipped,
-		UserName:                  userName,
-		AssistantName:             assistantName,
-		Timezone:                  timezone,
-		PersonalAssistantEligible: h.onboardingMgr.IsPersonalAssistantEligible(),
+		NeedsOnboarding: !isComplete,
+		CurrentStep:     state.CurrentStep,
+		Completed:       state.Completed,
+		Skipped:         !state.SkippedAt.IsZero(),
+		StepsCompleted:  state.StepsCompleted,
+		StepsSkipped:    state.StepsSkipped,
+		UserName:        userName,
+		AssistantName:   assistantName,
+		Timezone:        timezone,
 	}
 
 	w.Header().Set("Content-Type", "application/json")

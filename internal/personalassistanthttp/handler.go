@@ -145,7 +145,7 @@ func (h *Handler) GetState(w http.ResponseWriter, r *http.Request) {
 		orihttp.ServiceUnavailable(w, "personal assistant state is temporarily unavailable")
 		return
 	}
-	personalassistant.RecordEligibleViewed(projection)
+	personalassistant.RecordStateViewed(projection)
 	orihttp.Success(w, map[string]any{"personal_assistant": projection})
 }
 
@@ -235,8 +235,6 @@ func (h *Handler) Hire(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.Is(err, personalassistant.ErrValidation):
 			writeHireError(w, http.StatusBadRequest, "invalid_hire_request", "Check the assistant name, working agreement, appearance, and Daily Brief rhythm.", false, nil)
-		case errors.Is(err, personalassistant.ErrIneligible):
-			writeHireError(w, http.StatusForbidden, "personal_assistant_ineligible", "Personal assistant hiring is not available for this install.", false, nil)
 		case errors.Is(err, personalassistant.ErrConflict), errors.Is(err, personalhq.ErrAssistantNameConflict):
 			writeHireError(w, http.StatusConflict, "hire_conflict", "This hire conflicts with the current assistant relationship. Refresh and try again.", false, nil)
 		default:

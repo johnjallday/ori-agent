@@ -144,9 +144,6 @@ func (s *TodayService) Get(ctx context.Context, userID string) (*TodayProjection
 	out.Appearance = relationship.Appearance
 	out.Model = relationship.Availability.Model
 	switch relationship.State {
-	case APIStateIneligible:
-		out.State = "ineligible"
-		return out, nil
 	case APIStateNeedsHire, APIStateHiring:
 		out.State = "needs_hire"
 		return out, nil

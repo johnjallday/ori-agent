@@ -202,7 +202,6 @@ func TestDailyBrief_ScheduledSuccessCreatesExactlyOneActionCenterNotification(t 
 // "current HQ" dynamically via personalhq.Status on every call) rather than
 // only at the storage layer.
 func TestPersonalAssistantContextReadsMemoryEditsAndDeletesOnNextTurn(t *testing.T) {
-	t.Setenv("ORI_PERSONAL_ASSISTANT_ROLLOUT", "true")
 	builder, handler := newDailyBriefTestServer(t)
 	hireReq := httptest.NewRequest(http.MethodPost, "/api/personal-assistant/hire", bytes.NewBufferString(`{"request_id":"memory-hire","if_version":0,"display_name":"Atlas","mandate":"Keep commitments visible.","focus_areas":["plan_my_day"],"timezone":"UTC","schedule_days":["mon"],"schedule_time":"08:00","notify_on_ready":false}`))
 	hireReq.Header.Set("Content-Type", "application/json")
@@ -242,14 +241,7 @@ func TestPersonalAssistantContextReadsMemoryEditsAndDeletesOnNextTurn(t *testing
 	}
 }
 
-type schedulerEligibility struct{ version int }
-
-func (e *schedulerEligibility) IsPersonalAssistantEligible() bool { return e.version > 0 }
-func (e *schedulerEligibility) PersonalAssistantEligibilityVersion() int {
-	return e.version
-}
-
-func TestPersonalHQWorkspaceLister_ExcludesPausedPAFButKeepsLegacySchedule(t *testing.T) {
+func TestPersonalHQWorkspaceLister_RequiresActivePersonalAssistant(t *testing.T) {
 	builder, handler := newDailyBriefTestServer(t)
 	ctx := context.Background()
 	setupReq := httptest.NewRequest(http.MethodPost, "/api/personal-hq/setup", bytes.NewBufferString(`{"name":"Personal HQ"}`))
@@ -263,9 +255,8 @@ func TestPersonalHQWorkspaceLister_ExcludesPausedPAFButKeepsLegacySchedule(t *te
 	if err != nil || status == nil || !status.Valid {
 		t.Fatalf("HQ status=%+v err=%v", status, err)
 	}
-	eligibility := &schedulerEligibility{}
 	lister := &personalHQWorkspaceLister{
-		service: builder.personalHQService, relationship: builder.personalAssistantStore, eligibility: eligibility,
+		service: builder.personalHQService, relationship: builder.personalAssistantStore,
 	}
 	var entry *session.AgentInstance
 	for i := range status.Workspace.AgentInstances {
@@ -281,9 +272,9 @@ func TestPersonalHQWorkspaceLister_ExcludesPausedPAFButKeepsLegacySchedule(t *te
 	if _, err := builder.personalAssistantStore.CreateState(ctx, state); err != nil {
 		t.Fatal(err)
 	}
-	legacy, err := lister.ListScheduledWorkspaces(ctx)
-	if err != nil || len(legacy) != 1 {
-		t.Fatalf("legacy HQ with an ineligible state row must keep its schedule: %+v err=%v", legacy, err)
+	notHired, err := lister.ListScheduledWorkspaces(ctx)
+	if err != nil || len(notHired) != 0 {
+		t.Fatalf("HQ without an active personal assistant was scheduled: %+v err=%v", notHired, err)
 	}
 	persisted, _ := builder.personalAssistantStore.GetState(ctx, "local")
 	persisted.Status = personalassistant.StatusPaused
@@ -294,7 +285,6 @@ func TestPersonalHQWorkspaceLister_ExcludesPausedPAFButKeepsLegacySchedule(t *te
 	if _, err := builder.personalAssistantStore.UpdateState(ctx, persisted, persisted.StateVersion); err != nil {
 		t.Fatal(err)
 	}
-	eligibility.version = personalassistant.CurrentRolloutVersion
 	paused, err := lister.ListScheduledWorkspaces(ctx)
 	if err != nil || len(paused) != 0 {
 		t.Fatalf("paused PAF was scheduled: %+v err=%v", paused, err)

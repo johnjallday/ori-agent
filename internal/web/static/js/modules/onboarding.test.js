@@ -9,9 +9,7 @@ import {
   firstAssignmentResultView,
   firstAssignmentResumeView,
   normalizeFirstAssignmentRows,
-  onboardingStartDestination,
   personalAssistantResumeMessage,
-  recommendOnboardingStart,
   workspaceRootSetupView
 } from './onboarding.js';
 import { resetOnboardingGateForTests } from './onboarding-gate.js';
@@ -184,104 +182,11 @@ test('first assignment result distinguishes honest empty and partial brief state
   assert.equal(partial.retryable, true);
 });
 
-test('recommendOnboardingStart maps existing work to the import flow', () => {
-  const recommendation = recommendOnboardingStart({ intent: 'existing' });
-  assert.equal(recommendation.kind, 'import');
-  assert.equal(onboardingStartDestination(recommendation), '/?import=1');
-});
-
-test('recommendOnboardingStart matches a ready blueprint from live catalog metadata', () => {
-  const recommendation = recommendOnboardingStart({
-    intent: 'new',
-    description: 'I am producing a song in REAPER',
-    templates: [
-      {
-        id: 'research-project',
-        name: 'Research Project',
-        description: 'Sources and synthesis.',
-        tags: ['research'],
-        readiness: { state: 'ready' }
-      },
-      {
-        id: 'plugin:audio:session',
-        name: 'REAPER Song',
-        description: 'A recording and production workspace.',
-        tags: ['music', 'reaper'],
-        readiness: { state: 'ready' }
-      }
-    ]
-  });
-
-  assert.equal(recommendation.kind, 'template');
-  assert.equal(recommendation.templateId, 'plugin:audio:session');
-  assert.equal(
-    onboardingStartDestination(recommendation),
-    '/?create=1&blueprint=plugin%3Aaudio%3Asession'
-  );
-});
-
-test('recommendOnboardingStart maps recurring organization to a personal operations blueprint', () => {
-  const recommendation = recommendOnboardingStart({
-    intent: 'organize',
-    templates: [
-      {
-        id: 'personal-ops',
-        name: 'Personal HQ',
-        description: 'A personal command center for daily briefs and follow-ups.',
-        tags: ['personal'],
-        readiness: { state: 'ready' }
-      },
-      {
-        id: 'research-project',
-        name: 'Research Project',
-        description: 'Sources and synthesis.',
-        tags: ['research'],
-        readiness: { state: 'ready' }
-      }
-    ]
-  });
-  assert.equal(recommendation.kind, 'template');
-  assert.equal(recommendation.templateId, 'personal-ops');
-});
-
-test('recommendOnboardingStart never recommends an unavailable blueprint', () => {
-  const recommendation = recommendOnboardingStart({
-    intent: 'new',
-    description: 'I am producing a song',
-    templates: [
-      {
-        id: 'unavailable-song',
-        name: 'Song',
-        tags: ['music'],
-        readiness: { state: 'blocked' }
-      }
-    ]
-  });
-
-  assert.equal(recommendation.kind, 'blank');
-  assert.equal(onboardingStartDestination(recommendation), '/?create=1');
-});
-
-test('recommendOnboardingStart asks for context before guessing a new project', () => {
-  const recommendation = recommendOnboardingStart({
-    intent: 'new',
-    templates: [{ id: 'personal', name: 'Personal HQ', tags: ['personal'] }]
-  });
-  assert.equal(recommendation.kind, 'pending');
-});
-
-test('recommendOnboardingStart lets the user explore without creating a project', () => {
-  const recommendation = recommendOnboardingStart({ intent: 'explore' });
-  assert.equal(recommendation.kind, 'home');
-  assert.equal(onboardingStartDestination(recommendation), '/');
-});
-
-test('OnboardingManager opens the first quest only for an eligible active incomplete relationship', () => {
+test('OnboardingManager opens the first quest for an active incomplete relationship', () => {
   const priorWindow = globalThis.window;
   globalThis.window = { location: { search: '?quest=plan-first-day' } };
   try {
     const manager = new OnboardingManager();
-    manager.personalAssistantEligible = true;
     manager.personalAssistantState = {
       state: 'active',
       first_assignment_status: 'not_started'
@@ -289,9 +194,6 @@ test('OnboardingManager opens the first quest only for an eligible active incomp
     assert.equal(manager.shouldOpenFirstAssignmentQuest(), true);
 
     manager.personalAssistantState.first_assignment_status = 'completed';
-    assert.equal(manager.shouldOpenFirstAssignmentQuest(), false);
-    manager.personalAssistantEligible = false;
-    manager.personalAssistantState.first_assignment_status = 'not_started';
     assert.equal(manager.shouldOpenFirstAssignmentQuest(), false);
   } finally {
     globalThis.window = priorWindow;

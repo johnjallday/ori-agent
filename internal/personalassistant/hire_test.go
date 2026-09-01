@@ -121,9 +121,7 @@ func TestHireCoordinator_CreatesDurableIdentityHQBriefAndOnboardingState(t *test
 	creator := &fakeAssistantCreator{}
 	hq := &fakeHireHQ{}
 	briefs := &fakeHireBriefs{getErr: dailybrief.ErrConfigNotFound}
-	coordinator := NewHireCoordinator(
-		fakeEligibility{eligible: true, version: CurrentRolloutVersion}, store, creator, hq, briefs,
-	)
+	coordinator := NewHireCoordinator(store, creator, hq, briefs)
 
 	result, err := coordinator.Hire(ctx, "local", validHireRequest())
 	if err != nil {
@@ -159,9 +157,7 @@ func TestHireCoordinator_CustomAgreementAndAppearanceNeedNoModelDependency(t *te
 	store, _ := newTestStore(t)
 	creator := &fakeAssistantCreator{}
 	briefs := &fakeHireBriefs{getErr: dailybrief.ErrConfigNotFound}
-	coordinator := NewHireCoordinator(
-		fakeEligibility{eligible: true, version: 1}, store, creator, &fakeHireHQ{}, briefs,
-	)
+	coordinator := NewHireCoordinator(store, creator, &fakeHireHQ{}, briefs)
 	request := validHireRequest()
 	request.DisplayName = "Atlas"
 	request.Mandate = "Protect focused work and flag commitments at risk."
@@ -194,7 +190,7 @@ func TestHireCoordinator_ReplayReturnsSameActiveRecordsWithoutDuplicates(t *test
 	creator := &fakeAssistantCreator{}
 	hq := &fakeHireHQ{}
 	briefs := &fakeHireBriefs{getErr: dailybrief.ErrConfigNotFound}
-	coordinator := NewHireCoordinator(fakeEligibility{eligible: true, version: 1}, store, creator, hq, briefs)
+	coordinator := NewHireCoordinator(store, creator, hq, briefs)
 	request := validHireRequest()
 	first, err := coordinator.Hire(ctx, "local", request)
 	if err != nil {
@@ -221,7 +217,7 @@ func TestHireCoordinator_ConcurrentDoubleSubmitCreatesOneRelationship(t *testing
 	creator := &fakeAssistantCreator{}
 	hq := &fakeHireHQ{}
 	briefs := &fakeHireBriefs{getErr: dailybrief.ErrConfigNotFound}
-	coordinator := NewHireCoordinator(fakeEligibility{eligible: true, version: 1}, store, creator, hq, briefs)
+	coordinator := NewHireCoordinator(store, creator, hq, briefs)
 	request := validHireRequest()
 
 	const submits = 8
@@ -289,8 +285,7 @@ func TestHireCoordinator_ValidatesBeforePersistenceOrCreation(t *testing.T) {
 			store, _ := newTestStore(t)
 			creator := &fakeAssistantCreator{}
 			coordinator := NewHireCoordinator(
-				fakeEligibility{eligible: true, version: 1}, store, creator, &fakeHireHQ{},
-				&fakeHireBriefs{getErr: dailybrief.ErrConfigNotFound},
+				store, creator, &fakeHireHQ{}, &fakeHireBriefs{getErr: dailybrief.ErrConfigNotFound},
 			)
 			request := validHireRequest()
 			test.mutate(&request)
@@ -356,7 +351,7 @@ func TestHireCoordinator_PartialFailuresReplayToExactlyOneActiveRelationship(t *
 			hq := &fakeHireHQ{}
 			briefs := &fakeHireBriefs{getErr: dailybrief.ErrConfigNotFound}
 			test.configure(store, hq, briefs)
-			coordinator := NewHireCoordinator(fakeEligibility{eligible: true, version: 1}, store, creator, hq, briefs)
+			coordinator := NewHireCoordinator(store, creator, hq, briefs)
 
 			request := validHireRequest()
 			_, firstErr := coordinator.Hire(ctx, "local", request)
@@ -398,7 +393,7 @@ func TestHireCoordinator_RestartResumeUsesDurableOriginalRhythm(t *testing.T) {
 		getErr: dailybrief.ErrConfigNotFound, updateErr: errors.New("injected config failure"),
 	}
 	request := validHireRequest()
-	firstCoordinator := NewHireCoordinator(fakeEligibility{eligible: true, version: 1}, store, creator, hq, briefs)
+	firstCoordinator := NewHireCoordinator(store, creator, hq, briefs)
 	if _, err := firstCoordinator.Hire(ctx, "local", request); err == nil {
 		t.Fatal("expected the first config save to fail")
 	}
@@ -411,7 +406,7 @@ func TestHireCoordinator_RestartResumeUsesDurableOriginalRhythm(t *testing.T) {
 	retry.ScheduleDays = []string{"sat"}
 	retry.ScheduleTime = "19:30"
 	retry.NotifyOnReady = true
-	secondCoordinator := NewHireCoordinator(fakeEligibility{eligible: true, version: 1}, store, creator, hq, briefs)
+	secondCoordinator := NewHireCoordinator(store, creator, hq, briefs)
 	result, err := secondCoordinator.Hire(ctx, "local", retry)
 	if err != nil {
 		t.Fatalf("restart retry: %v", err)
@@ -429,8 +424,7 @@ func TestHireCoordinator_RejectsSecondAssistantAndChangedReplayPayload(t *testin
 	ctx := context.Background()
 	store, _ := newTestStore(t)
 	coordinator := NewHireCoordinator(
-		fakeEligibility{eligible: true, version: 1}, store, &fakeAssistantCreator{}, &fakeHireHQ{},
-		&fakeHireBriefs{getErr: dailybrief.ErrConfigNotFound},
+		store, &fakeAssistantCreator{}, &fakeHireHQ{}, &fakeHireBriefs{getErr: dailybrief.ErrConfigNotFound},
 	)
 	request := validHireRequest()
 	if _, err := coordinator.Hire(ctx, "local", request); err != nil {
@@ -448,9 +442,9 @@ func TestHireCoordinator_RejectsSecondAssistantAndChangedReplayPayload(t *testin
 	}
 }
 
-func TestHireCoordinator_RejectsIneligibleBeforeReadingOrWriting(t *testing.T) {
-	coordinator := NewHireCoordinator(fakeEligibility{}, nil, nil, nil, nil)
-	if _, err := coordinator.Hire(context.Background(), "local", validHireRequest()); !errors.Is(err, ErrIneligible) {
-		t.Fatalf("Hire error = %v, want ineligible", err)
+func TestHireCoordinator_RejectsMissingDependenciesBeforeReadingOrWriting(t *testing.T) {
+	coordinator := NewHireCoordinator(nil, nil, nil, nil)
+	if _, err := coordinator.Hire(context.Background(), "local", validHireRequest()); err == nil {
+		t.Fatal("Hire succeeded without configured dependencies")
 	}
 }

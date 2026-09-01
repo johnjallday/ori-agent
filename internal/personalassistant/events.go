@@ -15,7 +15,7 @@ import (
 type EventType string
 
 const (
-	EventEligibleViewed     EventType = "personal_assistant.eligible_viewed"
+	EventStateViewed        EventType = "personal_assistant.state_viewed"
 	EventHireStarted        EventType = "personal_assistant.hire_started"
 	EventHireCompleted      EventType = "personal_assistant.hire_completed"
 	EventPreviewCreated     EventType = "personal_assistant.preview_created"
@@ -40,7 +40,7 @@ const (
 var (
 	eventTokenPattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,128}$`)
 	eventTypes        = map[EventType]bool{
-		EventEligibleViewed: true, EventHireStarted: true, EventHireCompleted: true,
+		EventStateViewed: true, EventHireStarted: true, EventHireCompleted: true,
 		EventPreviewCreated: true, EventFirstResultDone: true, EventTodayViewed: true,
 		EventPaused: true, EventResumed: true, EventRecoverableFailure: true,
 	}
@@ -50,7 +50,7 @@ var (
 		eventFieldRecoverable: true, eventFieldReasonCode: true,
 	}
 	eventStates = map[string]bool{
-		"ineligible": true, "needs_hire": true, "not_hired": true, "hiring": true,
+		"needs_hire": true, "not_hired": true, "hiring": true,
 		"active": true, "paused": true, "repair_needed": true, "not_started": true,
 		"previewed": true, "applying": true, "completed": true, "failed": true,
 		"superseded": true,
@@ -77,13 +77,13 @@ var emitPersonalAssistantEvent = func(_ EventType, fields logger.Fields) {
 	logger.Info("Personal assistant event", fields)
 }
 
-// RecordEligibleViewed is called only by the user-facing state HTTP read, not
-// by internal projections that happen to reuse Service.Get.
-func RecordEligibleViewed(projection *Projection) {
-	if projection == nil || projection.State == APIStateIneligible || projection.RolloutVersion < 1 {
+// RecordStateViewed is called only by the user-facing state HTTP read, not by
+// internal projections that happen to reuse Service.Get.
+func RecordStateViewed(projection *Projection) {
+	if projection == nil {
 		return
 	}
-	recordEvent(EventEligibleViewed, EventData{
+	recordEvent(EventStateViewed, EventData{
 		AssistantID: projection.AssistantID, WorkspaceID: projection.HQWorkspaceID, State: string(projection.State),
 	})
 }

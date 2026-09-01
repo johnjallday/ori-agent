@@ -22,9 +22,6 @@ import (
 )
 
 const (
-	// CurrentRolloutVersion is persisted only for installations explicitly
-	// enrolled at first state-file creation.
-	CurrentRolloutVersion = 1
 	// MaxDisplayNameLen bounds the user-visible assistant name.
 	MaxDisplayNameLen = 100
 	// MaxMandateLen bounds the free-text working agreement.
@@ -39,24 +36,11 @@ const (
 	MaxCanonicalRefs = 64
 )
 
-// NormalizeRolloutVersion accepts only the explicit ineligible marker (zero)
-// and the rollout version understood by this build.
-func NormalizeRolloutVersion(value int) (int, error) {
-	switch value {
-	case 0, CurrentRolloutVersion:
-		return value, nil
-	default:
-		return 0, fmt.Errorf("personal assistant: unsupported rollout version %d", value)
-	}
-}
-
 var (
 	// ErrNotFound means the user-owned relationship or preview does not exist.
 	ErrNotFound = errors.New("personal assistant: not found")
 	// ErrConflict means a compare-and-swap version or uniqueness check failed.
 	ErrConflict = errors.New("personal assistant: state conflict")
-	// ErrIneligible means the installation is not enrolled in this rollout.
-	ErrIneligible = errors.New("personal assistant: installation is ineligible")
 	// ErrRepairNeeded means a durable relationship has an invalid canonical link.
 	ErrRepairNeeded    = errors.New("personal assistant: repair needed")
 	htmlLikeTagPattern = regexp.MustCompile(`<\s*/?\s*[A-Za-z][^>]*>`)

@@ -15,7 +15,6 @@ import (
 type APIState string
 
 const (
-	APIStateIneligible   APIState = "ineligible"
 	APIStateNeedsHire    APIState = "needs_hire"
 	APIStateHiring       APIState = "hiring"
 	APIStateActive       APIState = "active"
@@ -32,7 +31,6 @@ const (
 	AvailabilityNotConfigured   AvailabilityStatus = "not_configured"
 	AvailabilityUnavailable     AvailabilityStatus = "unavailable"
 	AvailabilityDependencyError AvailabilityStatus = "dependency_error"
-	AvailabilityIneligible      AvailabilityStatus = "ineligible"
 )
 
 // SourceAvailability is a bounded source-specific capability flag.
@@ -44,7 +42,6 @@ type SourceAvailability struct {
 
 // Availability reports the health of each independent canonical source.
 type Availability struct {
-	Rollout       SourceAvailability `json:"rollout"`
 	PersonalHQ    SourceAvailability `json:"personal_hq"`
 	AgentInstance SourceAvailability `json:"agent_instance"`
 	DailyBrief    SourceAvailability `json:"daily_brief"`
@@ -77,7 +74,6 @@ type RenameProjection struct {
 // Projection is the discriminated read model for GET /api/personal-assistant.
 type Projection struct {
 	State              APIState               `json:"state"`
-	RolloutVersion     int                    `json:"rollout_version"`
 	StateVersion       int64                  `json:"state_version,omitempty"`
 	HireRequestID      string                 `json:"hire_request_id,omitempty"`
 	AssistantID        string                 `json:"assistant_id,omitempty"`
@@ -94,12 +90,6 @@ type Projection struct {
 	Availability       Availability           `json:"availability"`
 	DailyBrief         *BriefConfigProjection `json:"daily_brief,omitempty"`
 	Rename             *RenameProjection      `json:"rename,omitempty"`
-}
-
-// EligibilityReader is implemented by onboarding.Manager.
-type EligibilityReader interface {
-	IsPersonalAssistantEligible() bool
-	PersonalAssistantEligibilityVersion() int
 }
 
 // PersonalHQReader is implemented by personalhq.Service.
@@ -120,36 +110,25 @@ type ModelAvailabilityReader interface {
 
 // Service combines durable PAF state with canonical read-only dependencies.
 type Service struct {
-	eligibility EligibilityReader
-	store       Store
-	personalHQ  PersonalHQReader
-	briefs      BriefConfigReader
-	models      ModelAvailabilityReader
+	store      Store
+	personalHQ PersonalHQReader
+	briefs     BriefConfigReader
+	models     ModelAvailabilityReader
 }
 
 // NewService constructs the read service. Optional sources are reported as
 // dependency_error rather than silently appearing healthy.
-func NewService(eligibility EligibilityReader, store Store, hq PersonalHQReader, briefs BriefConfigReader, models ModelAvailabilityReader) *Service {
-	return &Service{eligibility: eligibility, store: store, personalHQ: hq, briefs: briefs, models: models}
+func NewService(store Store, hq PersonalHQReader, briefs BriefConfigReader, models ModelAvailabilityReader) *Service {
+	return &Service{store: store, personalHQ: hq, briefs: briefs, models: models}
 }
 
 // Get projects the current relationship without mutating any dependency.
 func (s *Service) Get(ctx context.Context, userID string) (*Projection, error) {
-	projection := &Projection{
-		State: APIStateIneligible, NextAction: "continue_legacy",
-		Availability: unavailableSources(AvailabilityIneligible, "rollout_ineligible"),
+	projection := &Projection{State: APIStateNeedsHire, NextAction: "hire"}
+	if s != nil {
+		projection.Availability.Model = s.modelAvailability()
 	}
-	if s == nil || s.eligibility == nil || !s.eligibility.IsPersonalAssistantEligible() {
-		if s != nil && s.eligibility != nil {
-			projection.RolloutVersion = s.eligibility.PersonalAssistantEligibilityVersion()
-		}
-		return projection, nil
-	}
-	projection.RolloutVersion = s.eligibility.PersonalAssistantEligibilityVersion()
-	projection.Availability.Rollout = availableSource()
-	projection.Availability.Model = s.modelAvailability()
-
-	if s.store == nil {
+	if s == nil || s.store == nil {
 		return nil, errors.New("personal assistant: relationship store is unavailable")
 	}
 	state, err := s.store.GetState(ctx, strings.TrimSpace(userID))
@@ -321,11 +300,6 @@ func (s *Service) modelAvailability() SourceAvailability {
 		return dependencyErrorSource("invalid_response")
 	}
 	return availability
-}
-
-func unavailableSources(status AvailabilityStatus, reason string) Availability {
-	source := SourceAvailability{Available: false, Status: status, Reason: reason}
-	return Availability{Rollout: source, PersonalHQ: source, AgentInstance: source, DailyBrief: source, Model: source}
 }
 
 func availableSource() SourceAvailability {

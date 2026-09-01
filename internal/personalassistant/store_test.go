@@ -196,9 +196,6 @@ func TestValidationRejectsUnknownEnumsOversizeAndSecrets(t *testing.T) {
 	if _, err := NormalizeRelationshipStatus("retired"); err == nil {
 		t.Fatal("unknown relationship status accepted")
 	}
-	if _, err := NormalizeRolloutVersion(CurrentRolloutVersion + 1); err == nil {
-		t.Fatal("unknown rollout version accepted")
-	}
 	if _, err := NormalizeFocusAreas([]string{"plan my day", "telepathy"}); err == nil {
 		t.Fatal("unknown focus area accepted")
 	}

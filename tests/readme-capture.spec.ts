@@ -268,13 +268,11 @@ async function installFixtureRoutes(page: Page) {
       });
       return;
     }
-    // The personal-assistant panel probes eligibility on every page. README's
-    // accepted fictional scenario predates that opt-in rollout, so keep it on
-    // the truthful legacy surface instead of introducing an unmanifested
-    // assistant or allowing the fixture request to escape to the server.
+    // Keep the README fixture deterministic without inventing a hired
+    // relationship or allowing the status request to escape to the server.
     if (url.pathname === '/api/personal-assistant') {
       await json(route, {
-        personal_assistant: { state: 'ineligible', availability: {} }
+        personal_assistant: { state: 'needs_hire', next_action: 'hire', availability: {} }
       });
       return;
     }

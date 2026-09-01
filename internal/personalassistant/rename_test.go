@@ -135,7 +135,7 @@ func newRenameFixture(t *testing.T) (*RenameCoordinator, *renameStateStore, *ren
 	}
 	hq := renameHQReader{workspaces: workspaces}
 	briefs := &continuityBriefs{config: validBriefConfigForRename(ws.ID)}
-	read := NewService(fakeEligibility{eligible: true, version: CurrentRolloutVersion}, store, hq, briefs,
+	read := NewService(store, hq, briefs,
 		fakeModelReader{availability: SourceAvailability{Available: true, Status: AvailabilityAvailable}})
 	continuity := NewContinuityService(store, hq, briefs, read)
 	profiles := &renameProfiles{agents: map[string]*agent.Agent{"Ada": {}}}

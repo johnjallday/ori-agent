@@ -169,9 +169,6 @@ func TestHandlerGetState_PinsMethodStatusAndProjection(t *testing.T) {
 	reader := &fakeStateReader{projection: &personalassistant.Projection{
 		State: personalassistant.APIStateActive, StateVersion: 8,
 		AssistantID: "assistant-a", DisplayName: "Ada", NextAction: "ask",
-		Availability: personalassistant.Availability{
-			Rollout: personalassistant.SourceAvailability{Available: true, Status: personalassistant.AvailabilityAvailable},
-		},
 	}}
 	handler := NewHandler(reader, fakeUserProvider{userID: "user-a"})
 
@@ -294,7 +291,6 @@ func TestHandlerHire_MapsTypedErrorsWithoutLeakingInternalCauses(t *testing.T) {
 		retryable  bool
 	}{
 		{"validation", "invalid_hire_request", personalassistant.ErrValidation, http.StatusBadRequest, false},
-		{"ineligible", "personal_assistant_ineligible", personalassistant.ErrIneligible, http.StatusForbidden, false},
 		{"state conflict", "hire_conflict", personalassistant.ErrConflict, http.StatusConflict, false},
 		{"name conflict", "hire_conflict", personalhq.ErrAssistantNameConflict, http.StatusConflict, false},
 		{"partial", "hire_partial", &personalassistant.PartialHireError{

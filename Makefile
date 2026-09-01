@@ -1,4 +1,4 @@
-.PHONY: help build run test test-unit test-unit-verbose test-integration test-e2e test-all test-coverage test-watch test-js test-clean-test-artifacts test-prune-test-cache test-run-test-command test-list-unit-packages test-test-maintenance lint lint-fix lint-new lint-js lint-js-fix fmt fmt-js check-js check-wails-modes vet clean clean-test-artifacts prune-test-cache cache-report server menubar run-menubar deps docker-build docker-run check-env merge-dependabot readme-audit readme-capture readme-propose readme-check readme-accept herdr-devflow test-herdr-devflow test-herdr-devflow-cross
+.PHONY: help build run test test-unit test-unit-verbose test-integration test-e2e test-all test-coverage test-watch test-js test-clean-test-artifacts test-prune-test-cache test-run-test-command test-reset-dev test-list-unit-packages test-test-maintenance lint lint-fix lint-new lint-js lint-js-fix fmt fmt-js check-js check-wails-modes vet clean clean-test-artifacts prune-test-cache cache-report reset-dev server menubar run-menubar deps docker-build docker-run check-env merge-dependabot readme-audit readme-capture readme-propose readme-check readme-accept herdr-devflow test-herdr-devflow test-herdr-devflow-cross
 
 # Default target
 .DEFAULT_GOAL := help
@@ -125,6 +125,12 @@ prune-test-cache: ## Prune stale Ori artifacts and an oversized Go build cache
 cache-report: ## Preview automatic test artifact and Go cache pruning
 	@./scripts/prune-test-cache.sh --dry-run
 
+reset-dev: ## Archive, recreate, and launch a fresh development profile
+	@./scripts/reset-dev.sh $(RESET_DEV_ARGS)
+
+test-reset-dev: ## Test the guarded full development-profile reset
+	@./scripts/reset-dev.test.sh
+
 clean-state: ## Show how to reset app state (points to the canonical selective reset)
 	@echo "$(YELLOW)clean-state no longer deletes files itself.$(NC)"
 	@echo ""
@@ -136,7 +142,9 @@ clean-state: ## Show how to reset app state (points to the canonical selective r
 	@echo ""
 	@echo "To reset app state, use the canonical selective reset instead:"
 	@echo "  1. In the app: Settings -> Reset, choose what to reset, confirm."
-	@echo "  2. Scripted, with the server running on port 8765 (adjust for PORT):"
+	@echo "  2. For a completely fresh development profile and assistant onboarding:"
+	@echo "     make reset-dev"
+	@echo "  3. Scripted, with the server running on port 8765 (adjust for PORT):"
 	@echo "     curl -X POST http://localhost:8765/api/reset \\"
 	@echo "       -H 'X-Requested-With: XMLHttpRequest' -H 'Content-Type: application/json' \\"
 	@echo "       -d '{\"settings\":true,\"agents\":true,\"sessions\":true,\"onboarding\":true,\"confirmation\":\"RESET\"}'"

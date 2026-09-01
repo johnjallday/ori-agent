@@ -36,8 +36,7 @@ test.describe('Personal Assistant Foundation first value', () => {
           steps_completed: [],
           user_name: '',
           assistant_name: 'Ori',
-          timezone: 'UTC',
-          personal_assistant_eligible: true
+          timezone: 'UTC'
         })
       })
     );
@@ -97,7 +96,6 @@ test.describe('Personal Assistant Foundation first value', () => {
             hq_workspace_id: relationshipState === 'active' ? 'hq-1' : undefined,
             first_assignment_status: firstAssignmentCompleted ? 'completed' : 'not_started',
             availability: {
-              rollout: { status: 'available', available: true },
               model: { status: 'not_configured', available: false },
               calendar: { status: 'not_configured', available: false },
               email: { status: 'not_configured', available: false }
@@ -411,7 +409,6 @@ test.describe('Personal Assistant Foundation first value', () => {
   });
 
   test('assistant-first Home keeps Ori Help isolated and handoff confirmable', async ({ page }) => {
-    let eligible = true;
     let assistantName = 'Atlas';
     let relationshipState = 'active';
     let stateVersion = 7;
@@ -440,8 +437,7 @@ test.describe('Personal Assistant Foundation first value', () => {
           current_step: 4,
           completed: true,
           skipped: false,
-          steps_completed: ['step-done'],
-          personal_assistant_eligible: eligible
+          steps_completed: ['step-done']
         })
       })
     );
@@ -450,20 +446,18 @@ test.describe('Personal Assistant Foundation first value', () => {
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
-          personal_assistant: eligible
-            ? {
-                state: relationshipState,
-                state_version: stateVersion,
-                assistant_id: 'assistant-stable',
-                display_name: assistantName,
-                hq_workspace_id: 'hq-1',
-                mandate: 'Keep launch work visible.',
-                focus_areas: ['plan_my_day'],
-                daily_brief: briefConfig,
-                appearance: { mode: 'generated', generated: { color: '#446688' } },
-                availability: { model: { status: 'available', available: true } }
-              }
-            : { state: 'ineligible', availability: {} }
+          personal_assistant: {
+            state: relationshipState,
+            state_version: stateVersion,
+            assistant_id: 'assistant-stable',
+            display_name: assistantName,
+            hq_workspace_id: 'hq-1',
+            mandate: 'Keep launch work visible.',
+            focus_areas: ['plan_my_day'],
+            daily_brief: briefConfig,
+            appearance: { mode: 'generated', generated: { color: '#446688' } },
+            availability: { model: { status: 'available', available: true } }
+          }
         })
       })
     );
@@ -892,14 +886,5 @@ test.describe('Personal Assistant Foundation first value', () => {
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)
     ).toBe(true);
-
-    // The same server build preserves the legacy unified surface when the
-    // authoritative status says this installation is ineligible.
-    eligible = false;
-    await page.reload();
-    await expect(page.locator('#personalAssistantToday')).toBeHidden();
-    await expect(page.locator('#personalAssistantLauncher')).toBeHidden();
-    await expect(page.locator('#oriGuideLauncher .ori-guide__launcher-name')).toHaveText('Ask Ori');
-    await expect(page.locator('#homeCockpit')).toBeVisible();
   });
 });

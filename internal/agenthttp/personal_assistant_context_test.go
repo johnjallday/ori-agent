@@ -42,7 +42,7 @@ func (p *promptCaptureProvider) DefaultModels() []string                 { retur
 
 func activePersonalAssistantContext() *PersonalAssistantWorkContext {
 	return &PersonalAssistantWorkContext{
-		Eligible: true, State: "active", StateVersion: 7, DisplayName: "Nova", Role: "Personal Assistant",
+		State: "active", StateVersion: 7, DisplayName: "Nova", Role: "Personal Assistant",
 		Mandate: "Keep projects moving", FocusAreas: []string{"plan_my_day"}, HQWorkspaceID: "hq-owned",
 		UserProfile: "Name: Jo", HQMemory: "- [fact, 2026-01-02, user] Prefers concise updates",
 		Sources: map[string]PersonalAssistantContextSource{
@@ -108,12 +108,12 @@ func TestAsk_PersonalAssistantContextUsesCurrentUserAndPausedIdentity(t *testing
 	}
 }
 
-func TestAsk_EligiblePreHireAndContextFailureCannotMutate(t *testing.T) {
+func TestAsk_PreHireAndContextFailureCannotMutate(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
 		provider *stubPersonalAssistantContextProvider
 	}{
-		{name: "pre-hire", provider: &stubPersonalAssistantContextProvider{context: &PersonalAssistantWorkContext{Eligible: true, State: "needs_hire"}}},
+		{name: "pre-hire", provider: &stubPersonalAssistantContextProvider{context: &PersonalAssistantWorkContext{State: "needs_hire"}}},
 		{name: "context failure", provider: &stubPersonalAssistantContextProvider{err: errors.New("read failed")}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -170,10 +170,10 @@ func TestAsk_ActivePersonalAssistantRememberRequiresExactConfirmation(t *testing
 	}
 }
 
-func TestAsk_RememberUnavailableForLegacyAndPreHirePaths(t *testing.T) {
+func TestAsk_RememberUnavailableWithoutActiveRelationship(t *testing.T) {
 	for name, workContext := range map[string]*PersonalAssistantWorkContext{
-		"legacy":   nil,
-		"pre-hire": {Eligible: true, State: "needs_hire", StateVersion: 2},
+		"missing context": nil,
+		"pre-hire":        {State: "needs_hire", StateVersion: 2},
 	} {
 		t.Run(name, func(t *testing.T) {
 			h := newAskHandlerWithProvider(t, "unused")
@@ -207,21 +207,6 @@ func TestAsk_ActivePersonalAssistantPreservesConfirmationGate(t *testing.T) {
 	}
 }
 
-func TestAsk_IneligibleContextPreservesLegacyMutation(t *testing.T) {
-	h := newAskHandlerWithProvider(t, "unused")
-	mutator := &fakeMutator{}
-	h.SetMutator(mutator)
-	h.SetPersonalAssistantContextProvider(&stubPersonalAssistantContextProvider{
-		context: &PersonalAssistantWorkContext{Eligible: false, State: "ineligible"},
-	}, "legacy-user")
-	h.Ask(context.Background(), HomeAssistantAskRequest{
-		Intent: "general_task", ConfirmedAction: &HomeAction{Type: HomeActionCreateWorkspace, Arguments: map[string]any{"name": "Legacy"}},
-	})
-	if mutator.created != "Legacy" {
-		t.Fatalf("legacy Ask Ori behavior changed: %q", mutator.created)
-	}
-}
-
 func TestAsk_PersonalAssistantNoModelFallbackNamesIdentityWithoutInventingAnswer(t *testing.T) {
 	h := NewHomeAssistantAskHandler(HomeSnapshotSources{}, nil, nil)
 	h.SetPersonalAssistantContextProvider(&stubPersonalAssistantContextProvider{context: activePersonalAssistantContext()}, "user-a")
@@ -231,19 +216,13 @@ func TestAsk_PersonalAssistantNoModelFallbackNamesIdentityWithoutInventingAnswer
 	}
 }
 
-func TestRoute_EligiblePreHireStopsAtHireAndLegacyIsUnchanged(t *testing.T) {
+func TestRoute_PreHireStopsAtHire(t *testing.T) {
 	preHire := newHomeAssistantWorkspaceFixtureHandler(t)
 	preHire.SetPersonalAssistantContextProvider(&stubPersonalAssistantContextProvider{
-		context: &PersonalAssistantWorkContext{Eligible: true, State: "needs_hire"},
+		context: &PersonalAssistantWorkContext{State: "needs_hire"},
 	}, "user-a")
 	resp, err := preHire.RoutePrompt(context.Background(), "create a workspace", nil)
 	if err != nil || resp.RouteMode != "personal_assistant_hire" || resp.TargetSurface != "hire" {
 		t.Fatalf("pre-hire route=%+v err=%v", resp, err)
-	}
-
-	legacy := newHomeAssistantWorkspaceFixtureHandler(t)
-	resp, err = legacy.RoutePrompt(context.Background(), "create a workspace", nil)
-	if err != nil || resp.RouteMode == "personal_assistant_hire" || resp.Intent != "workspace_create" {
-		t.Fatalf("legacy route changed: %+v err=%v", resp, err)
 	}
 }
