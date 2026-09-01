@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -15,7 +16,7 @@ import (
 // discovery, fingerprinting, and validation all run for real.
 func newTestSource(t *testing.T, workspaceFolders map[string]string) *Source {
 	t.Helper()
-	return NewSource(workspace.NewDashboardStore(staticFolders(workspaceFolders)), NewRuntime())
+	return NewSource(workspace.NewDashboardStore(staticFolders(workspaceFolders)), NewRuntime(nil, nil, nil))
 }
 
 type staticFolders map[string]string
@@ -112,7 +113,7 @@ func TestSourceReportsNoDashboardWithoutError(t *testing.T) {
 // A dashboard that exists but cannot be served stays visible and unavailable.
 // Hiding it would leave the user with no signal that Ori saw their file at all.
 func TestSourceSurfacesABrokenDashboardAsUnavailable(t *testing.T) {
-	source := NewSource(failingFinder{}, NewRuntime())
+	source := NewSource(failingFinder{}, NewRuntime(nil, nil, nil))
 	surface, binding, ok, err := source.Resolve("ws1")
 	if !ok {
 		t.Fatal("a broken dashboard was hidden instead of reported")
@@ -165,7 +166,7 @@ func TestSourceWithoutDependenciesResolvesNothing(t *testing.T) {
 	if _, _, ok, err := nilSource.Resolve("ws1"); ok || err != nil {
 		t.Fatalf("nil source Resolve() = %v, %v", ok, err)
 	}
-	if _, _, ok, err := NewSource(nil, NewRuntime()).Resolve("ws1"); ok || err != nil {
+	if _, _, ok, err := NewSource(nil, NewRuntime(nil, nil, nil)).Resolve("ws1"); ok || err != nil {
 		t.Fatalf("finder-less Resolve() = %v, %v", ok, err)
 	}
 	if _, _, ok, err := NewSource(staticFinder{}, nil).Resolve("ws1"); ok || err != nil {
@@ -179,12 +180,37 @@ func (staticFinder) Find(string) (workspace.CustomDashboard, bool, error) {
 	return workspace.CustomDashboard{}, false, nil
 }
 
-func TestRuntimeRejectsUnknownOperations(t *testing.T) {
-	_, err := NewRuntime().Invoke(t.Context(), workspacesurface.Invocation{Operation: "vault.read"})
-	if err == nil {
-		t.Fatal("the runtime answered an undeclared operation")
+// The synthesized surface must declare exactly the v1 vocabulary, and its
+// binding must define exactly those operations. A mismatch is what
+// ValidateRegistration rejects, and it would make the dashboard unopenable.
+func TestSourceDeclaresTheFullOperationVocabulary(t *testing.T) {
+	folder := t.TempDir()
+	writeDashboard(t, folder, "<p>x</p>")
+	source := newTestSource(t, map[string]string{"ws1": folder})
+
+	surface, binding, ok, err := source.Resolve("ws1")
+	if !ok || err != nil {
+		t.Fatalf("Resolve() = %v, %v", ok, err)
 	}
-	if !strings.Contains(err.Error(), "vault.read") {
-		t.Fatalf("error = %v; it should name the rejected operation", err)
+	want := []string{
+		OpWorkspaceSummary, OpTasksList, OpNotesList,
+		OpAgentsList, OpSessionsList, OpFilesList,
+	}
+	if len(surface.Surface.OperationIDs) != len(want) {
+		t.Fatalf("surface declares %v", surface.Surface.OperationIDs)
+	}
+	for _, id := range want {
+		if !slices.Contains(surface.Surface.OperationIDs, id) {
+			t.Fatalf("surface does not declare %q", id)
+		}
+		operation, declared := binding.Operations[id]
+		if !declared {
+			t.Fatalf("binding does not define %q", id)
+		}
+		// Read-only is what keeps a dashboard out of the write and confirmation
+		// paths entirely.
+		if operation.Policy != workspacesurface.PolicyReadOnly {
+			t.Fatalf("operation %q policy = %q, want read-only", id, operation.Policy)
+		}
 	}
 }
