@@ -25,6 +25,8 @@ This directory contains detailed documentation for Ori Agent.
 - [Multi-Agent Support](./features/multi-agent-support.md) - Running multiple agents
 - [Home Assistant Task Routing](./features/home-assistant-task-routing.md) - "Ask Ori" task routing
 - [Project Templates](./features/project-templates.md) - Folder-skeleton workspace templates
+- [Custom Workspace Dashboard](./features/custom-workspace-dashboard.md) - Write your own HTML
+  dashboard for a workspace, reading live workspace data in a sandboxed frame
 - [Session File Management](./features/session-file-management.md) - Managing files in sessions
 - [Task Input Templating](./features/task-input-templating.md) - Templated task inputs
 - [Task Output Contracts](./features/task-output-contracts.md) - Structured task outputs

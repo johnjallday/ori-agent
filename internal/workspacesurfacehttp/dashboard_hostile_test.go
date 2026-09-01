@@ -27,7 +27,7 @@ func hostileFixture(t *testing.T) (*prototypeHTTPFixture, string) {
 	t.Helper()
 	fixture := newPrototypeHTTPFixture(t)
 	dashboardRoot := t.TempDir()
-	writeFile(t, dashboardRoot, "index.html", "<!doctype html><title>Hostile</title>")
+	writeDashboardEntry(t, dashboardRoot, "<!doctype html><title>Hostile</title>")
 	binding := dashboardBinding(t, dashboardRoot, fixture.runtime)
 	// One declared operation, so "undeclared" is a real distinction rather than
 	// an artifact of the surface declaring nothing at all.
@@ -76,7 +76,7 @@ func (s hostileSource) Resolve(workspaceID string) (workspacesurface.RegisteredS
 func TestHostileDashboardCannotReachTheNetwork(t *testing.T) {
 	fixture := newPrototypeHTTPFixture(t)
 	dashboardRoot := t.TempDir()
-	writeFile(t, dashboardRoot, "index.html", "<!doctype html><title>Hostile</title>")
+	writeDashboardEntry(t, dashboardRoot, "<!doctype html><title>Hostile</title>")
 	fixture.handler.SetDashboardSource(stubDashboardSource{
 		byWorkspace: map[string]workspacesurface.Binding{
 			fixture.workspaceID: dashboardBinding(t, dashboardRoot, fixture.runtime),
@@ -211,7 +211,7 @@ func TestHostileDashboardCannotUseHostIntentsOrState(t *testing.T) {
 func TestHostileDashboardCannotEscapeItsAssetRoot(t *testing.T) {
 	fixture := newPrototypeHTTPFixture(t)
 	dashboardRoot := t.TempDir()
-	writeFile(t, dashboardRoot, "index.html", "<!doctype html><title>Hostile</title>")
+	writeDashboardEntry(t, dashboardRoot, "<!doctype html><title>Hostile</title>")
 	fixture.handler.SetDashboardSource(stubDashboardSource{
 		byWorkspace: map[string]workspacesurface.Binding{
 			fixture.workspaceID: dashboardBinding(t, dashboardRoot, fixture.runtime),

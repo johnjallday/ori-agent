@@ -167,7 +167,9 @@ func (r *Runtime) dispatch(ctx context.Context, invocation workspacesurface.Invo
 	case OpSessionsList:
 		return r.sessionsList(ctx, workspaceID, input)
 	case OpFilesList:
-		return r.files(invocation.Workspace, input)
+		// files never fails: a missing or unreadable directory is an empty
+		// listing, so one absent folder cannot blank the whole dashboard.
+		return r.files(invocation.Workspace, input), nil
 	default:
 		return nil, fmt.Errorf("%w: %q", ErrOperationUnknown, invocation.Operation)
 	}
@@ -427,10 +429,10 @@ type filesResponse struct {
 
 // files lists the workspace's files directory. Names, sizes, and timestamps
 // only — no file is ever opened, so no file's contents can reach the frame.
-func (r *Runtime) files(workspaceContext workspacesurface.WorkspaceContext, input listInput) (filesResponse, error) {
+func (r *Runtime) files(workspaceContext workspacesurface.WorkspaceContext, input listInput) filesResponse {
 	root := strings.TrimSpace(workspaceContext.WorkspaceRoot)
 	if root == "" || !filepath.IsAbs(root) {
-		return filesResponse{Files: []fileEntry{}}, nil
+		return filesResponse{Files: []fileEntry{}}
 	}
 	// The path is the host-resolved workspace root joined with a package
 	// constant. No browser-supplied string contributes a path segment.
@@ -438,7 +440,7 @@ func (r *Runtime) files(workspaceContext workspacesurface.WorkspaceContext, inpu
 	if err != nil {
 		// A workspace with no files directory has no files, which is not a
 		// failure worth blanking the dashboard over.
-		return filesResponse{Files: []fileEntry{}}, nil
+		return filesResponse{Files: []fileEntry{}}
 	}
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
 
@@ -456,7 +458,7 @@ func (r *Runtime) files(workspaceContext workspacesurface.WorkspaceContext, inpu
 	return filesResponse{
 		Files: files, Total: len(entries), Limit: limit, Offset: offset,
 		HasMore: offset+len(files) < len(entries),
-	}, nil
+	}
 }
 
 // ---------------------------------------------------------------------------

@@ -74,7 +74,7 @@ func dashboardBinding(t *testing.T, assetRoot string, runtime workspacesurface.R
 func TestDashboardCatalogAndEligibilityAgree(t *testing.T) {
 	fixture := newPrototypeHTTPFixture(t)
 	dashboardRoot := t.TempDir()
-	writeFile(t, dashboardRoot, "index.html", "<!doctype html><title>Mine</title>")
+	writeDashboardEntry(t, dashboardRoot, "<!doctype html><title>Mine</title>")
 	fixture.handler.SetDashboardSource(stubDashboardSource{
 		byWorkspace: map[string]workspacesurface.Binding{
 			fixture.workspaceID: dashboardBinding(t, dashboardRoot, fixture.runtime),
@@ -120,7 +120,7 @@ func TestDashboardCatalogAndEligibilityAgree(t *testing.T) {
 func TestDashboardIsScopedToItsOwnWorkspace(t *testing.T) {
 	fixture := newPrototypeHTTPFixture(t)
 	dashboardRoot := t.TempDir()
-	writeFile(t, dashboardRoot, "index.html", "<!doctype html><title>Owned</title>")
+	writeDashboardEntry(t, dashboardRoot, "<!doctype html><title>Owned</title>")
 	fixture.handler.SetDashboardSource(stubDashboardSource{
 		byWorkspace: map[string]workspacesurface.Binding{
 			fixture.workspaceID: dashboardBinding(t, dashboardRoot, fixture.runtime),
@@ -180,7 +180,7 @@ func TestHandlerWithoutDashboardSourceIsUnchanged(t *testing.T) {
 func TestDashboardFrameAssetKeepsSandboxHeaders(t *testing.T) {
 	fixture := newPrototypeHTTPFixture(t)
 	dashboardRoot := t.TempDir()
-	writeFile(t, dashboardRoot, "index.html", "<!doctype html><title>Mine</title>")
+	writeDashboardEntry(t, dashboardRoot, "<!doctype html><title>Mine</title>")
 	fixture.handler.SetDashboardSource(stubDashboardSource{
 		byWorkspace: map[string]workspacesurface.Binding{
 			fixture.workspaceID: dashboardBinding(t, dashboardRoot, fixture.runtime),
@@ -225,9 +225,9 @@ func TestDashboardFrameAssetKeepsSandboxHeaders(t *testing.T) {
 	}
 }
 
-func writeFile(t *testing.T, dir, name, content string) {
+func writeDashboardEntry(t *testing.T, dir, content string) {
 	t.Helper()
-	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
 }
