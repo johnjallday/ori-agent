@@ -814,6 +814,12 @@ func (h *Handler) provisionCreateWorkspaceFolder(ctx context.Context, w http.Res
 	// the workspace). Apply-if-present and non-fatal.
 	out.agentToolWarnings = h.bindSeededAgentTools(ws.ID, seededAgents)
 
+	// Install the template's dashboard, if it ships one. Deliberately before
+	// the group branch and outside the project-scaffold path: a dashboard is
+	// workspace-level, so it applies to groups too, and to metadata-only
+	// templates that create no project folder at all.
+	h.installTemplateDashboard(ws.ID, folderPath, tc)
+
 	if ws.Kind == session.WorkspaceKindGroup {
 		// Groups physically nest members under sub-workspaces/, so
 		// their linked folder and MCP roots are scoped to the group's
@@ -835,6 +841,31 @@ func (h *Handler) provisionCreateWorkspaceFolder(ctx context.Context, w http.Res
 		out.projectWarning = h.applyCreateWorkspaceTemplate(ctx, req, ws, folderWS, tc)
 	}
 	return out, false
+}
+
+// installTemplateDashboard copies the template's custom dashboard into the new
+// workspace folder, so a workspace created from, say, Email Ops opens with that
+// template's dashboard already attached.
+//
+// Best-effort by design: a workspace is perfectly usable without a dashboard,
+// so a copy failure is logged and never fails creation or surfaces a warning
+// the user cannot act on. The dashboard is re-read from disk on every page
+// load, so a user who fixes or adds the files later needs no repair step.
+func (h *Handler) installTemplateDashboard(workspaceID, folderPath string, tc createTemplateContext) {
+	if h == nil || !tc.resolved || !tc.template.HasDashboard || strings.TrimSpace(folderPath) == "" {
+		return
+	}
+	installed, err := projecttemplates.InstallDashboard(tc.template.Path, folderPath)
+	switch {
+	case err != nil:
+		logger.Warn("Template dashboard was not installed", logger.Fields{
+			"id": workspaceID, "template": tc.template.ID, "error": err.Error(),
+		})
+	case installed:
+		logger.Info("Template dashboard installed", logger.Fields{
+			"id": workspaceID, "template": tc.template.ID,
+		})
+	}
 }
 
 // applyCreateWorkspaceTemplate applies the selected project template to a

@@ -9,6 +9,8 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // starterFS embeds the starter templates shipped with the app. The all:
@@ -91,6 +93,12 @@ func EnsureLibrary(dir string) error {
 				if err := refreshBuiltinManifest(name, dest); err != nil {
 					return err
 				}
+				// A dashboard shipped with a built-in would otherwise reach only
+				// fresh installs, since the manifest refresh above rewrites just
+				// template.json.
+				if err := refreshBuiltinDashboard(name, dest); err != nil {
+					return err
+				}
 			}
 			continue
 		} else if !os.IsNotExist(err) {
@@ -119,6 +127,51 @@ func refreshBuiltinManifest(name, dest string) error {
 	target := filepath.Join(dest, ManifestFileName)
 	if err := os.WriteFile(target, data, 0o640); err != nil { // #nosec G304 G306 -- target is templatesDir/<shipped starter>/template.json; 0o640 matches the package manifest-write convention
 		return fmt.Errorf("failed to refresh built-in manifest %s: %w", target, err)
+	}
+	return nil
+}
+
+// refreshBuiltinDashboard installs a built-in's shipped dashboard into an
+// existing on-disk template that does not have one yet.
+//
+// It never overwrites an existing `dashboard/` directory. Templates are editable
+// in the authoring UI, so a dashboard already on disk may be the user's own
+// work; a shipped revision must not silently replace it. The all-or-nothing
+// check is the directory's presence, not individual files, so a partially
+// customized dashboard is left entirely alone.
+func refreshBuiltinDashboard(name, dest string) error {
+	root := path.Join(starterRoot, name, DashboardDirName)
+	if _, err := fs.Stat(starterFS, path.Join(root, workspace.CustomDashboardEntryAsset)); err != nil {
+		return nil // this built-in ships no dashboard
+	}
+	target := filepath.Join(dest, DashboardDirName)
+	if _, err := os.Lstat(target); err == nil {
+		return nil // the on-disk template already has one; leave it be
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("failed to inspect %s: %w", target, err)
+	}
+
+	err := fs.WalkDir(starterFS, root, func(entryPath string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return fmt.Errorf("failed to read embedded dashboard %s: %w", entryPath, err)
+		}
+		rel := strings.TrimPrefix(strings.TrimPrefix(entryPath, root), "/")
+		// target derives from the configured templates dir plus a relative path
+		// produced by walking the embedded starterFS; no user input reaches it.
+		dashboardPath := filepath.Join(target, filepath.FromSlash(rel))
+		if d.IsDir() {
+			return os.MkdirAll(dashboardPath, 0o750)
+		}
+		data, readErr := starterFS.ReadFile(entryPath)
+		if readErr != nil {
+			return fmt.Errorf("failed to read embedded file %s: %w", entryPath, readErr)
+		}
+		return os.WriteFile(dashboardPath, data, 0o640) // #nosec G304 G306 -- templates dir + embedded starter relative path; 0o640 matches this package's convention
+	})
+	if err != nil {
+		// Leave no half-written dashboard: a partial one would render broken.
+		_ = os.RemoveAll(target)
+		return err
 	}
 	return nil
 }

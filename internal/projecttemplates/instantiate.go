@@ -189,6 +189,12 @@ func copyTemplateTree(templatePath, destRoot string, values templateTokenValues,
 		if relPath == ManifestFileName {
 			return nil
 		}
+		// The dashboard is installed into the workspace folder's .ori sidecar
+		// by InstallDashboard. Copying it here as well would put a second,
+		// unreachable copy inside the project folder.
+		if relPath == DashboardDirName && d.IsDir() {
+			return fs.SkipDir
+		}
 		// Symlinks are skipped in v1: copying the pointer would smuggle in
 		// machine-local absolute paths (breaking portability), and following
 		// it could pull arbitrary files from outside the template.

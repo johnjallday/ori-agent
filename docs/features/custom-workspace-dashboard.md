@@ -60,6 +60,51 @@ restart, no re-registration, and no "refresh dashboards" button.
 
 ---
 
+## Shipping a dashboard with a template
+
+A workspace template can carry a dashboard, so a workspace created from it opens
+with the dashboard already attached — no copying, no setup step. **Email Ops**
+ships one: create that workspace and the Dashboard tab is there immediately.
+
+Put a `dashboard/` directory in the template folder:
+
+```
+<templates dir>/email-ops/
+├── template.json
+└── dashboard/
+    ├── index.html      ← required
+    ├── dashboard.css
+    ├── dashboard.js
+    └── ori-bridge.js
+```
+
+On workspace creation the whole directory is copied to the new workspace's
+`.ori/dashboard/`. The template keeps it under a plain visible `dashboard/`
+rather than a hidden `.ori/` path, because a template folder is something people
+author and browse; the mapping happens once, in `InstallDashboard`.
+
+Rules worth knowing:
+
+- **`index.html` is required.** A `dashboard/` directory without one ships no
+  dashboard — it would produce no surface, so it is ignored rather than copied.
+- **Nothing is ever overwritten.** If the workspace folder already has
+  `.ori/dashboard/`, the template's copy is skipped. Whoever put a dashboard
+  there wins.
+- **It is not project content.** The directory is excluded from the skeleton
+  copy, so it is not duplicated into the scaffolded project folder — and a
+  template carrying only a dashboard is still metadata-only, creating no project
+  folder at all.
+- **It applies to group workspaces too**, and to templates that scaffold nothing.
+- **Symlinks are skipped**, exactly as in the skeleton copy.
+- **Failure is never fatal.** A workspace is usable without a dashboard, so a
+  copy failure is logged and creation succeeds.
+- Once copied, the dashboard is an ordinary file in that workspace. Editing it
+  changes only that workspace; the template is untouched.
+
+For a built-in template, bump `builtin_version` in `template.json` so existing
+installs pick the dashboard up — the manifest refresh alone would not carry the
+files across. An on-disk `dashboard/` a user has edited is left alone.
+
 ## Writing the HTML
 
 ### Styles and scripts must be in separate files
