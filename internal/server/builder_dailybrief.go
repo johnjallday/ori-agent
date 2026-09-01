@@ -220,7 +220,7 @@ func (b *ServerBuilder) initializeDailyBrief() {
 		b.personalHQService,
 		store,
 		&personalAssistantModelReader{configManager: b.configManager, llmFactory: b.llmFactory},
-	)
+	).WithProfileReader(personalassistant.NewAgentStoreProfileReader(b.st))
 	b.personalAssistantHire = personalassistant.NewHireCoordinator(
 		b.personalAssistantStore, b.sessionHandler,
 		b.personalHQService, briefService,
