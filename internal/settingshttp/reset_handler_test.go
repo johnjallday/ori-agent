@@ -178,9 +178,20 @@ func TestHandleReset_Sessions_RemovesDBFilesDirectoriesAndInMemoryState(t *testi
 	}
 }
 
-func TestHandleReset_Onboarding_ResetsAppState(t *testing.T) {
+func TestHandleReset_Onboarding_ResetsAppStateButPreservesPAFEligibilityAndRecords(t *testing.T) {
 	dataDir := t.TempDir()
-	h, _, _ := newTestHandler(t, dataDir)
+	mgr := onboarding.NewManagerWithPersonalAssistantRollout(filepath.Join(dataDir, "app_state.json"), true)
+	st := &fakeAgentStore{}
+	ws, err := workspace.NewFileStore(filepath.Join(dataDir, "workspaces"))
+	if err != nil {
+		t.Fatalf("workspace.NewFileStore: %v", err)
+	}
+	h := NewResetHandler(mgr, st, dataDir)
+	h.SetWorkspaceStore(ws)
+	mustWriteFile(t, filepath.Join(dataDir, "sessions.db"), "relationship-records")
+	if got := mgr.PersonalAssistantEligibilityVersion(); got != 1 {
+		t.Fatalf("eligibility before reset = %d, want 1", got)
+	}
 
 	resp := postReset(t, h, ResetRequest{Onboarding: true, Confirmation: "RESET"})
 	if !resp.Success || len(resp.Errors) != 0 {
@@ -188,6 +199,12 @@ func TestHandleReset_Onboarding_ResetsAppState(t *testing.T) {
 	}
 	if len(resp.ResetItems) != 1 || resp.ResetItems[0] != "onboarding" {
 		t.Fatalf("reset items = %v, want [onboarding]", resp.ResetItems)
+	}
+	if got := mgr.PersonalAssistantEligibilityVersion(); got != 1 {
+		t.Fatalf("eligibility after reset = %d, want preserved version 1", got)
+	}
+	if !exists(t, filepath.Join(dataDir, "sessions.db")) {
+		t.Fatal("onboarding-only reset must preserve relationship/session records")
 	}
 }
 

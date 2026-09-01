@@ -200,6 +200,10 @@ func (s *AssignmentService) Preview(ctx context.Context, userID string, ifVersio
 	if err != nil {
 		return nil, err
 	}
+	recordEvent(EventPreviewCreated, EventData{
+		AssistantID: state.AssistantID, WorkspaceID: state.HQWorkspaceID,
+		State: string(updatedState.FirstAssignmentStatus), Count: createdPreview.Count,
+	})
 	return &AssignmentPreviewResult{
 		Preview: createdPreview, StateVersion: updatedState.StateVersion,
 		Status: updatedState.FirstAssignmentStatus,
@@ -368,6 +372,10 @@ func (s *AssignmentService) Apply(ctx context.Context, userID string, request As
 	if preview.Count == 0 {
 		result.Outcome = "complete_empty"
 	}
+	recordEvent(EventFirstResultDone, EventData{
+		AssistantID: completedState.AssistantID, WorkspaceID: completedState.HQWorkspaceID,
+		State: string(completedState.FirstAssignmentStatus), Count: result.AppliedCount,
+	})
 	return result, nil
 }
 
@@ -536,6 +544,15 @@ func partialAssignmentResult(assignment *Assignment, state *State, preview *Assi
 	if preview != nil {
 		total = preview.Count
 	}
+	data := EventData{Recoverable: true, ReasonCode: "assignment_partial", Count: total}
+	if assignment != nil {
+		data.AssistantID = assignment.AssistantID
+		data.State = string(assignment.Status)
+	}
+	if state != nil {
+		data.WorkspaceID = state.HQWorkspaceID
+	}
+	recordEvent(EventRecoverableFailure, data)
 	return &PartialAssignmentError{Result: assignmentApplyResult(assignment, state, total, true), Err: err}
 }
 

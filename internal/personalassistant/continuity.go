@@ -69,7 +69,7 @@ func (s *ContinuityService) UpdateWorkingAgreement(ctx context.Context, userID s
 
 	original := state.Clone()
 	if request.Mandate != nil {
-		state.Mandate, err = validateText("mandate", *request.Mandate, MaxMandateLen, false)
+		state.Mandate, err = validateMandate(*request.Mandate)
 		if err != nil {
 			return nil, fmt.Errorf("%w: %v", ErrValidation, err)
 		}
@@ -147,9 +147,17 @@ func (s *ContinuityService) setPaused(ctx context.Context, userID string, ifVers
 	}
 	if state.Status != want {
 		state.Status = want
-		if _, err := s.store.UpdateState(ctx, state, ifVersion); err != nil {
-			return nil, err
+		updated, updateErr := s.store.UpdateState(ctx, state, ifVersion)
+		if updateErr != nil {
+			return nil, updateErr
 		}
+		event := EventResumed
+		if paused {
+			event = EventPaused
+		}
+		recordEvent(event, EventData{
+			AssistantID: updated.AssistantID, WorkspaceID: updated.HQWorkspaceID, State: string(updated.Status),
+		})
 	}
 	return s.project(ctx, state.UserID)
 }

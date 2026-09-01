@@ -50,7 +50,8 @@
        as mutually exclusive peer views). Issue #366 moved selected context to
        the on-demand modal after this grid, so the theatre always owns the full
        cockpit width. The Ask Ori command bridge stays visible in both views. -->
-  <section id="personalAssistantContinuity" class="pa-continuity" aria-labelledby="personalAssistantContinuityTitle" hidden>
+  <section id="personalAssistantContinuity" class="pa-continuity" role="dialog" aria-modal="false"
+           aria-labelledby="personalAssistantContinuityTitle" hidden>
     <header class="pa-continuity__header">
       <div>
         <p class="home-command__eyebrow">Working agreement</p>
@@ -60,7 +61,8 @@
       <button type="button" id="personalAssistantContinuityClose" class="pa-continuity__close" aria-label="Close working agreement">×</button>
     </header>
     <div id="personalAssistantContinuityStatus" class="pa-continuity__status" role="status" aria-live="polite"></div>
-    <form id="personalAssistantContinuityForm" class="pa-continuity__form">
+    <form id="personalAssistantContinuityForm" class="pa-continuity__form"
+          aria-describedby="personalAssistantContinuityStatus">
       <label>Assistant name
         <input id="personalAssistantContinuityName" type="text" maxlength="100" autocomplete="off">
       </label>

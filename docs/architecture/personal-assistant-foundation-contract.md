@@ -283,8 +283,27 @@ observations (paths and personal data omitted):
 {"legacy_after_reset":{"state":"ineligible","rollout_version":0,"next_action":"continue_legacy"}}
 ```
 
-This proves reset does not enroll or remove eligibility and model absence is an
-independent capability flag rather than a fabricated assistant failure.
+This proves onboarding reset does not enroll or remove eligibility and model
+absence is an independent capability flag rather than a fabricated assistant
+failure.
+
+### Settings Reset behavior
+
+Settings Reset remains selective and always requires an application restart.
+Its exact Personal Assistant Foundation effects are:
+
+| Selected category | PAF effect after restart |
+|---|---|
+| Settings | Removes provider/preferences configuration only. The relationship, assistant profile, Personal HQ, records, and durable eligibility marker remain; model readiness can become `not_configured`. |
+| Agents | Removes global agent profiles but not the relationship, Personal HQ, or its persisted entry-agent instance. The relationship read therefore keeps the same stable binding; profile-dependent management such as rename can report the missing profile and must never silently rebind by name. |
+| Sessions | Removes `sessions.db`, workspaces, and session files. This intentionally removes the PAF relationship journal and Personal HQ records. The install-local eligibility marker in `app_state.json` remains, so an eligible install returns to `needs_hire` and an ineligible legacy install remains ineligible. |
+| Onboarding | Resets only onboarding progress. It preserves the rollout marker, relationship, stable IDs, agent, Personal HQ, records, and history. |
+| All categories | Equivalent to the four effects above: local PAF records are deleted by Sessions/Agents, while the preserved rollout marker determines whether restarted onboarding may offer hire. |
+
+A reset response describes filesystem work completed in the current process;
+callers must not treat in-memory projections as rehydrated until the required
+restart. None of these options changes external accounts, grants new tools, or
+deletes external-provider data.
 
 ## Compatibility
 

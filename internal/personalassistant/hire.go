@@ -150,6 +150,7 @@ func (c *HireCoordinator) Hire(ctx context.Context, userID string, request HireR
 	if state.Status == StatusRepairNeeded && state.RepairStep == RepairNone {
 		return nil, ErrRepairNeeded
 	}
+	recordEvent(EventHireStarted, EventData{AssistantID: state.AssistantID, WorkspaceID: state.HQWorkspaceID, State: string(state.Status)})
 
 	created, err := c.creator.CreatePersonalAssistantHQ(ctx, "My HQ", personalhq.AssistantCreationOptions{
 		AssistantID: state.AssistantID, RequestID: normalized.RequestID,
@@ -160,11 +161,19 @@ func (c *HireCoordinator) Hire(ctx context.Context, userID string, request HireR
 		// No canonical workspace IDs were returned, so the operation remains
 		// hiring. The creator's request/assistant metadata makes a retry safe if
 		// the workspace became visible just before the error.
+		recordEvent(EventRecoverableFailure, EventData{
+			AssistantID: state.AssistantID, WorkspaceID: state.HQWorkspaceID,
+			State: string(state.Status), Recoverable: true, ReasonCode: "hq_creation",
+		})
 		return nil, fmt.Errorf("personal assistant: create personal hq: %w", err)
 	}
 	if created == nil || strings.TrimSpace(created.WorkspaceID) == "" ||
 		strings.TrimSpace(created.EntryAgentInstanceID) == "" ||
 		strings.TrimSpace(created.GlobalAgentProfileName) == "" {
+		recordEvent(EventRecoverableFailure, EventData{
+			AssistantID: state.AssistantID, WorkspaceID: state.HQWorkspaceID,
+			State: string(state.Status), Recoverable: true, ReasonCode: "hq_creation",
+		})
 		return nil, errors.New("personal assistant: creator returned incomplete canonical identity")
 	}
 
@@ -219,6 +228,7 @@ func (c *HireCoordinator) Hire(ctx context.Context, userID string, request HireR
 		return nil, c.partial(ctx, state, RepairFinalization, updateErr)
 	}
 	state = updated
+	recordEvent(EventHireCompleted, EventData{AssistantID: state.AssistantID, WorkspaceID: state.HQWorkspaceID, State: string(state.Status)})
 	return &HireResult{State: state.Clone(), BriefConfig: cloneBriefConfig(config), Resumed: resumed}, nil
 }
 
@@ -339,6 +349,10 @@ func (c *HireCoordinator) ensureBriefConfig(ctx context.Context, userID, workspa
 }
 
 func (c *HireCoordinator) partial(ctx context.Context, state *State, step RepairStep, cause error) error {
+	recordEvent(EventRecoverableFailure, EventData{
+		AssistantID: state.AssistantID, WorkspaceID: state.HQWorkspaceID,
+		State: string(StatusRepairNeeded), Recoverable: true, ReasonCode: string(step),
+	})
 	next := state.Clone()
 	next.Status = StatusRepairNeeded
 	next.RepairStep = step
@@ -371,7 +385,7 @@ func normalizeHireRequest(input HireRequest) (normalizedHireRequest, error) {
 			return out, fmt.Errorf("%w: assistant name contains unsupported characters", ErrValidation)
 		}
 	}
-	if out.Mandate, err = validateText("mandate", input.Mandate, MaxMandateLen, false); err != nil {
+	if out.Mandate, err = validateMandate(input.Mandate); err != nil {
 		return out, fmt.Errorf("%w: %v", ErrValidation, err)
 	}
 	out.FocusAreas, err = NormalizeFocusAreas(input.FocusAreas)

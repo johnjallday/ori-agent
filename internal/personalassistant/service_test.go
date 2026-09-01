@@ -186,6 +186,23 @@ func TestServiceGet_IneligibleNeverReadsRelationshipOrLeaksAgreement(t *testing.
 	}
 }
 
+func TestServiceGet_KillSwitchHidesButDoesNotBreakActiveBinding(t *testing.T) {
+	_, store, hq, briefs, _ := serviceMatrixFixture(StatusActive)
+	disabled := NewService(fakeEligibility{eligible: false, version: CurrentRolloutVersion}, store, hq, briefs, nil)
+	hidden, err := disabled.Get(context.Background(), "local")
+	if err != nil || hidden.State != APIStateIneligible || store.mutationHit {
+		t.Fatalf("disabled projection=%#v err=%v mutation=%v", hidden, err, store.mutationHit)
+	}
+	reenabled := NewService(
+		fakeEligibility{eligible: true, version: CurrentRolloutVersion}, store, hq, briefs,
+		fakeModelReader{availability: SourceAvailability{Available: true, Status: AvailabilityAvailable}},
+	)
+	restored, err := reenabled.Get(context.Background(), "local")
+	if err != nil || restored.State != APIStateActive || restored.AssistantID != "assistant-a" || restored.HQWorkspaceID != "hq-local" {
+		t.Fatalf("re-enabled projection=%#v err=%v", restored, err)
+	}
+}
+
 func TestServiceGet_InvalidLinksFailClosedWithSourceAvailability(t *testing.T) {
 	tests := []struct {
 		name   string

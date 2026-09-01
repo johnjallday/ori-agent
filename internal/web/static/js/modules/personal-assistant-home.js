@@ -121,7 +121,14 @@ function renderToday(today) {
       ? 'Proactive check-ins are paused.'
       : 'No scheduled check-in is enabled.';
 
-  if (view.paused) {
+  if (view.repair) {
+    els.banner.textContent =
+      'Your existing assistant or Personal HQ needs repair before work can continue.';
+  } else if (view.needsHire) {
+    els.banner.textContent = 'Hire your personal assistant to start Today.';
+  } else if (view.unavailable) {
+    els.banner.textContent = 'Personal assistant status is unavailable. No all-clear is implied.';
+  } else if (view.paused) {
     els.banner.textContent = `${view.displayName} is paused proactively. Your records and prior briefs are unchanged.`;
   } else if (view.partial) {
     els.banner.textContent =

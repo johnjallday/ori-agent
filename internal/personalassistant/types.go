@@ -10,8 +10,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
@@ -56,7 +58,8 @@ var (
 	// ErrIneligible means the installation is not enrolled in this rollout.
 	ErrIneligible = errors.New("personal assistant: installation is ineligible")
 	// ErrRepairNeeded means a durable relationship has an invalid canonical link.
-	ErrRepairNeeded = errors.New("personal assistant: repair needed")
+	ErrRepairNeeded    = errors.New("personal assistant: repair needed")
+	htmlLikeTagPattern = regexp.MustCompile(`<\s*/?\s*[A-Za-z][^>]*>`)
 )
 
 // RelationshipStatus is the durable hire lifecycle.
@@ -323,8 +326,24 @@ func validateText(label, value string, max int, required bool) (string, error) {
 	if utf8.RuneCountInString(value) > max {
 		return "", fmt.Errorf("personal assistant: %s is capped at %d characters", label, max)
 	}
+	for _, r := range value {
+		if unicode.IsControl(r) && r != '\n' && r != '\r' && r != '\t' {
+			return "", fmt.Errorf("personal assistant: %s contains a control character", label)
+		}
+	}
 	if err := sensitive.RejectSecretLikeText(value); err != nil {
 		return "", fmt.Errorf("personal assistant: %s: %w", label, err)
+	}
+	return value, nil
+}
+
+func validateMandate(value string) (string, error) {
+	value, err := validateText("mandate", value, MaxMandateLen, false)
+	if err != nil {
+		return "", err
+	}
+	if htmlLikeTagPattern.MatchString(value) {
+		return "", errors.New("personal assistant: mandate must be plain text")
 	}
 	return value, nil
 }

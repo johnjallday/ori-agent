@@ -594,7 +594,7 @@ func normalizeState(input *State) (*State, string, string, error) {
 	if state.DisplayName, err = validateText("display name", state.DisplayName, MaxDisplayNameLen, false); err != nil {
 		return nil, "", "", err
 	}
-	if state.Mandate, err = validateText("mandate", state.Mandate, MaxMandateLen, false); err != nil {
+	if state.Mandate, err = validateMandate(state.Mandate); err != nil {
 		return nil, "", "", err
 	}
 	if state.HQWorkspaceID, err = validateOpaqueID("hq workspace id", state.HQWorkspaceID, false); err != nil {

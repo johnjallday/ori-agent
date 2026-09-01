@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/dailybrief"
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/personalhq"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/types"
@@ -185,6 +186,10 @@ func TestHireCoordinator_CustomAgreementAndAppearanceNeedNoModelDependency(t *te
 
 func TestHireCoordinator_ReplayReturnsSameActiveRecordsWithoutDuplicates(t *testing.T) {
 	ctx := context.Background()
+	var events []EventType
+	originalEmitter := emitPersonalAssistantEvent
+	emitPersonalAssistantEvent = func(event EventType, _ logger.Fields) { events = append(events, event) }
+	t.Cleanup(func() { emitPersonalAssistantEvent = originalEmitter })
 	store, _ := newTestStore(t)
 	creator := &fakeAssistantCreator{}
 	hq := &fakeHireHQ{}
@@ -204,6 +209,9 @@ func TestHireCoordinator_ReplayReturnsSameActiveRecordsWithoutDuplicates(t *test
 	}
 	if creator.calls != 1 || hq.designateCalls != 1 || briefs.updateCalls != 1 {
 		t.Fatalf("replay caused side effects: creator=%d designate=%d brief=%d", creator.calls, hq.designateCalls, briefs.updateCalls)
+	}
+	if len(events) != 2 || events[0] != EventHireStarted || events[1] != EventHireCompleted {
+		t.Fatalf("idempotent replay emitted duplicate/misleading lifecycle events: %v", events)
 	}
 }
 

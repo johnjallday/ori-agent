@@ -135,6 +135,7 @@ func (h *Handler) GetState(w http.ResponseWriter, r *http.Request) {
 		orihttp.ServiceUnavailable(w, "personal assistant state is temporarily unavailable")
 		return
 	}
+	personalassistant.RecordEligibleViewed(projection)
 	orihttp.Success(w, map[string]any{"personal_assistant": projection})
 }
 

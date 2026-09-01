@@ -61,6 +61,10 @@ func TestPersonalAssistantRollout_LegacyMissingMarkerNeverInheritsNewDefault(t *
 	if manager.IsPersonalAssistantEligible() || manager.PersonalAssistantEligibilityVersion() != 0 {
 		t.Fatal("legacy file with absent marker was enrolled")
 	}
+	unchanged, err := os.ReadFile(path)
+	if err != nil || string(unchanged) != string(legacy) {
+		t.Fatalf("startup read mutated legacy state: got=%q err=%v", unchanged, err)
+	}
 	if err := manager.ResetOnboarding(); err != nil {
 		t.Fatalf("ResetOnboarding: %v", err)
 	}
@@ -113,5 +117,12 @@ func TestPersonalAssistantRollout_CurrentMarkerStillHonorsServerKillSwitch(t *te
 	}
 	if disabled.PersonalAssistantEligibilityVersion() != personalassistant.CurrentRolloutVersion {
 		t.Fatal("kill switch must not erase the durable eligibility marker")
+	}
+	if err := disabled.Save(); err != nil {
+		t.Fatalf("disabled Save: %v", err)
+	}
+	reenabled := NewManagerWithPersonalAssistantRollout(path, true)
+	if !reenabled.IsPersonalAssistantEligible() || reenabled.PersonalAssistantEligibilityVersion() != personalassistant.CurrentRolloutVersion {
+		t.Fatal("re-enabling the kill switch did not restore the same durable eligibility")
 	}
 }

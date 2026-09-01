@@ -77,6 +77,7 @@
     };
     let state = null;
     let busy = false;
+    let lastTrigger = null;
 
     function announce(message, tone) {
       if (!els.status) return;
@@ -303,15 +304,24 @@
       });
     }
 
-    function open() {
+    function open(trigger) {
+      lastTrigger = trigger || doc.activeElement;
       panel.hidden = false;
       load().catch(error =>
         announce(error.message || 'Working agreement is unavailable.', 'error')
       );
       if (typeof panel.scrollIntoView === 'function') panel.scrollIntoView({ block: 'start' });
+      if (els.close && typeof els.close.focus === 'function') els.close.focus();
     }
 
-    if (els.close) els.close.addEventListener('click', () => (panel.hidden = true));
+    function close() {
+      panel.hidden = true;
+      const trigger = lastTrigger;
+      lastTrigger = null;
+      if (trigger && doc.contains(trigger) && typeof trigger.focus === 'function') trigger.focus();
+    }
+
+    if (els.close) els.close.addEventListener('click', close);
     doc.addEventListener('click', event => {
       const link =
         event.target &&
@@ -319,7 +329,7 @@
         event.target.closest('a[href*="personal-assistant=working-agreement"]');
       if (!link) return;
       event.preventDefault();
-      open();
+      open(link);
     });
     try {
       if (
@@ -330,7 +340,11 @@
       // Ignore malformed test/location shims.
     }
 
-    return { open, load, renderState, renderCapabilities };
+    doc.addEventListener('keydown', event => {
+      if (event.key === 'Escape' && !panel.hidden) close();
+    });
+
+    return { open, close, load, renderState, renderCapabilities };
   }
 
   const api = { mount, splitList, conflictView, capabilityCopy };

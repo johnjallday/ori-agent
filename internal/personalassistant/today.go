@@ -154,6 +154,10 @@ func (s *TodayService) Get(ctx context.Context, userID string) (*TodayProjection
 		out.State = "repair_needed"
 		return out, nil
 	case APIStateActive, APIStatePaused:
+		recordEvent(EventTodayViewed, EventData{
+			AssistantID: relationship.AssistantID, WorkspaceID: relationship.HQWorkspaceID,
+			State: string(relationship.State),
+		})
 	default:
 		return nil, fmt.Errorf("personal assistant today: unsupported relationship state %q", relationship.State)
 	}
